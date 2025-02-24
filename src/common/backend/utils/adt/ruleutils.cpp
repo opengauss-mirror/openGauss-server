@@ -6043,10 +6043,14 @@ static void make_viewdef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc, i
 
     char relKind = get_rel_relkind(ev_class);
     if (ev_class >= FirstNormalObjectId && !GetPgObjectValid(ev_class, relKind)) {
-        if (!ValidateDependView(ev_class, relKind)) {
+        if (!ValidateDependView(ev_class, relKind, buf)) {
             ereport(WARNING,
                     (errcode(ERRCODE_UNDEFINED_OBJECT),
                         errmsg("View %s references invalid table(s), view(s) or column(s).", get_rel_name(ev_class))));
+        } else {
+            /* if view becomes valid, return buf directly, since it has been assigned. */
+            heap_close(ev_relation, AccessShareLock);
+            return;
         }
         get_query_def(query,
             buf,

@@ -108,6 +108,11 @@ typedef struct AlteredTableInfo {
     Datum newOptions;
 } AlteredTableInfo;
 
+typedef struct ViewInfoForAdd {
+    Oid ev_class;
+    char *query_string;
+} ViewInfoForAdd;
+
 #define FOREIGNTABLE_SUPPORT_AT_CMD(cmd)                                                                           \
     ((cmd) == AT_ChangeOwner || (cmd) == AT_AddNodeList || (cmd) == AT_SubCluster || (cmd) == AT_DeleteNodeList || \
         (cmd) == AT_UpdateSliceLike || (cmd) == AT_GenericOptions)
@@ -254,10 +259,11 @@ extern void CheckRelAutoIncrementIndex(Oid relid, LOCKMODE lockmode);
 extern void RebuildDependViewForProc(Oid proc_oid);
 extern void CheckPgRewriteWithDroppedColumn(Oid rel_oid, Oid rw_oid, Form_pg_attribute attForm, int2 old_attnum,
     char** attName, List **old_query_str);
-extern void UpdatePgrewriteForView(Oid rw_oid, List* evAction);
+extern void UpdatePgrewriteForView(Oid rw_oid, List* evAction, List **query_str);
 extern List* GetOriginalViewQuery(Oid rw_oid);
 extern List* GetRefreshedViewQuery(Oid view_oid, Oid rw_oid);
-extern void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction, Query* query);
+extern void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction, Query* query,
+    List **query_str);
 extern void ReplaceViewQueryFirstAfter(List *query_str);
 extern char* GetCreateViewCommand(const char *rel_name, HeapTuple tup, Form_pg_class reltup, Oid pg_rewrite_oid,
     Oid view_oid, bool keep_star = true);

@@ -21,8 +21,7 @@ create table t1 (c1 int);
 --------+---------+-----------+---------+-------------
  c1     | integer |           | plain   | 
 View definition:
- SELECT  *
-   FROM t1;
+SELECT t1.c1 FROM t1;
 
 select valid = true from pg_class join pg_object on oid = object_oid where relname = 'v1';
  ?column? 
@@ -1226,12 +1225,7 @@ create table t1 (a int);
 --------+---------+-----------+---------+-------------
  a      | integer |           | plain   | 
 View definition:
- WITH tmp AS (
-         SELECT  *
-           FROM t1
-        )
- SELECT  *
-   FROM tmp;
+WITH tmp AS (SELECT t1.a FROM t1) SELECT tmp.a FROM tmp;
 
 select * from v1;
  a 
@@ -1267,10 +1261,7 @@ create table t1 (a int);
 ----------+---------+-----------+---------+-------------
  ?column? | integer |           | plain   | 
 View definition:
-         SELECT 1 AS "?column?"
-UNION 
-         SELECT t1.a AS "?column?"
-           FROM t1;
+SELECT 1 AS "?column?" UNION SELECT t1.a AS "?column?" FROM t1;
 
 select * from v1;
  ?column? 
@@ -1328,9 +1319,7 @@ insert into t1 values (1);
 --------+---------+-----------+---------+-------------
  a      | integer |           | plain   | 
 View definition:
- SELECT  *
-   FROM ( SELECT  *
-           FROM t1) __unnamed_subquery__;
+SELECT __unnamed_subquery__.a FROM (SELECT t1.a FROM t1) __unnamed_subquery__;
 
 select * from v1;
  a 
@@ -1344,11 +1333,7 @@ select * from v1;
 --------+---------+-----------+---------+-------------
  a      | integer |           | plain   | 
 View definition:
- SELECT  *
-   FROM t1
-  WHERE (EXISTS ( SELECT  *
-           FROM t1
-      JOIN t2 ON t1.a = t2.a));
+SELECT t1.a FROM t1 WHERE (EXISTS (SELECT t1.a, t2.a FROM (t1 JOIN t2 ON ((t1.a = t2.a)))));
 
 select * from v2;
  a 
@@ -1456,8 +1441,7 @@ create table t1 (c1 text, c2 float8);
  c1     | text             |           | extended | 
  c2     | double precision |           | plain    | 
 View definition:
- SELECT  *
-   FROM t1;
+SELECT t1.c1, t1.c2 FROM t1;
 
 drop view v1;
 drop table t1;

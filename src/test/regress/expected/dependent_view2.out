@@ -41,6 +41,14 @@ select n1 + n2 into sum;
 return sum;
 end;
 /
+\d+ v1
+              View "dependent_view2.v1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ fun1   | numeric |           | main    | 
+View definition:
+SELECT fun1.fun1 FROM fun1((1)::numeric, (2)::numeric) fun1(fun1);
+
 select * from v1; -- success
  fun1 
 ------
@@ -579,8 +587,134 @@ select * from depend_v1; --success
  aaaaa
 (1 row)
 
+-- test multi-function
+CREATE TABLE employees (
+    employee_id serial PRIMARY KEY,
+    employee_name varchar(50) NOT NULL,
+    department varchar(50),
+    salary numeric(10, 2),
+    hire_date date
+);
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employee_id_seq" for serial column "employees.employee_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (employee_name, department, salary, hire_date)
+VALUES
+    ('张三', '研发部', 8000.00, '2020-01-01'),
+    ('李四', '市场部', 7500.00, '2021-03-15'),
+    ('王五', '财务部', 7000.00, '2019-11-20'),
+    ('赵六', '研发部', 8500.00, '2022-05-10');
+CREATE  FUNCTION calculate_working_years(p_hire_date date) RETURNS integer
+AS $$
+DECLARE
+    v_working_years integer;
+    v_current_date date := current_date;
+BEGIN
+    v_working_years := extract(year from age(v_current_date, p_hire_date));
+    RETURN v_working_years;
+END;
+$$ LANGUAGE plpgsql;
+CREATE FUNCTION calculate_bonus_percentage(p_working_years integer) RETURNS numeric(5, 2)
+AS $$
+DECLARE
+    v_bonus_percentage numeric(5, 2);
+BEGIN
+    IF p_working_years < 3 THEN
+        v_bonus_percentage := 0.1;
+    ELSIF p_working_years >= 3 AND p_working_years < 5 THEN
+        v_bonus_percentage := 0.15;
+    ELSE
+        v_bonus_percentage := 0.2;
+    END IF;
+    RETURN v_bonus_percentage;
+END;
+$$ LANGUAGE plpgsql;
+CREATE VIEW employee_bonus_view AS
+SELECT employee_name,
+       calculate_working_years(hire_date) AS working_years,
+       calculate_bonus_percentage(calculate_working_years(hire_date)) AS bonus_percentage
+FROM employees;
+drop FUNCTION calculate_working_years;
+CREATE OR REPLACE FUNCTION calculate_working_years(p_hire_date date) RETURNS integer
+AS $$
+DECLARE
+    v_working_years integer;
+    v_current_date date := current_date;
+BEGIN
+    v_working_years := extract(year from age(v_current_date, p_hire_date));
+    RETURN v_working_years;
+END;
+$$ LANGUAGE plpgsql;
+select pg_get_viewdef('employee_bonus_view');
+                                                                                               pg_get_viewdef                                                                                                
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SELECT employees.employee_name, calculate_working_years(employees.hire_date) AS working_years, calculate_bonus_percentage(calculate_working_years(employees.hire_date)) AS bonus_percentage FROM employees;
+(1 row)
+
+select * from employee_bonus_view;
+ employee_name | working_years | bonus_percentage 
+---------------+---------------+------------------
+ 张三          |             5 |              .20
+ 李四          |             3 |              .15
+ 王五          |             5 |              .20
+ 赵六          |             2 |              .10
+(4 rows)
+
+-- test function overloading with different nums of arg
+drop FUNCTION if exists func_ddl0022(int,int);
+NOTICE:  function func_ddl0022(pg_catalog.int4,pg_catalog.int4) does not exist, skipping
+CREATE FUNCTION func_ddl0022(a int, b int)
+RETURNS int
+AS $$
+declare
+sum int;
+BEGIN
+    select a + b into sum;
+return sum;
+END;
+$$
+LANGUAGE plpgsql;
+drop FUNCTION if exists func_ddl0022(int,int,int);
+NOTICE:  function func_ddl0022(pg_catalog.int4,pg_catalog.int4,pg_catalog.int4) does not exist, skipping
+CREATE  FUNCTION func_ddl0022(a int, b int,c int)
+RETURNS int
+AS $$
+declare
+sum int;
+BEGIN
+    select a + b + c into sum;
+return sum;
+END;
+$$
+LANGUAGE plpgsql;
+create view v_ddl0022 as select func_ddl0022(1,2,3);
+drop FUNCTION func_ddl0022(int,int,int);
+CREATE  FUNCTION func_ddl0022(a int, b int,c int)
+RETURNS int
+AS $$
+declare
+sum int;
+BEGIN
+    select a + b + c into sum;
+return sum;
+END;
+$$
+LANGUAGE plpgsql;
+select * from v_ddl0022;
+ func_ddl0022 
+--------------
+            6
+(1 row)
+
+-- delete non-depend function with same name
+drop FUNCTION func_ddl0022(int,int);
+select valid from pg_object where object_oid='v_ddl0022'::regclass;
+ valid 
+-------
+ t
+(1 row)
+
 drop schema dependent_view2 cascade;
-NOTICE:  drop cascades to 8 other objects
+NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table tab
 --?.*
 drop cascades to function dependent_view2.fun1(numeric,numeric)
@@ -589,4 +723,10 @@ drop cascades to materialized view mv1
 drop cascades to view v1
 drop cascades to function depend_p1(character varying)
 drop cascades to view depend_v1
+drop cascades to table employees
+drop cascades to function calculate_bonus_percentage(integer)
+drop cascades to function calculate_working_years(timestamp without time zone)
+drop cascades to view employee_bonus_view
+drop cascades to function func_ddl0022(integer,integer,integer)
+drop cascades to view v_ddl0022
 reset current_schema;

@@ -245,11 +245,6 @@ typedef struct OnCommitItem {
 
 static const char* ORCSupportOption[] = {"orientation", "compression", "version", "partial_cluster_rows"};
 
-typedef struct ViewInfoForAdd {
-    Oid ev_class;
-    char *query_string;
-} ViewInfoForAdd;
-
 /* Context for check whether the targetEntry of view's querytree has changed */
 typedef struct {
     Oid relid;
@@ -12870,6 +12865,8 @@ List* GetRefreshedViewQuery(Oid view_oid, Oid rw_oid)
     }
     Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tup);
     char* view_def = GetCreateViewCommand(NameStr(reltup->relname), tup, reltup, rw_oid, view_oid, false);
+    ReleaseSysCache(tup);
+
     List* raw_parsetree_list = raw_parser(view_def);
     Node* stmtNode = (Node*)linitial(raw_parsetree_list);
     Assert((IsA(stmtNode, ViewStmt) || IsA(stmtNode, CreateTableAsStmt)));
@@ -12889,14 +12886,14 @@ List* GetRefreshedViewQuery(Oid view_oid, Oid rw_oid)
         }
     }
     evAction = lappend(evAction, query);
-    ReleaseSysCache(tup);
     pfree(view_def);
     list_free(raw_parsetree_list);
     return evAction;
 }
 
-void UpdatePgrewriteForView(Oid rw_oid, List* evAction)
+void UpdatePgrewriteForView(Oid rw_oid, List* evAction, List **query_str)
 {
+    List *new_query_str = NIL;
     ScanKeyData entry;
     ScanKeyInit(&entry, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rw_oid));
     Relation rewrite_rel = heap_open(RewriteRelationId, RowExclusiveLock);
@@ -12915,17 +12912,44 @@ void UpdatePgrewriteForView(Oid rw_oid, List* evAction)
     simple_heap_update(rewrite_rel, &new_dep_tuple->t_self, new_dep_tuple);
     CatalogUpdateIndexes(rewrite_rel, new_dep_tuple);
     CommandCounterIncrement();
-    /* force relcache rebuild */
-    SetRelationRuleStatus(rewrite_form->ev_class, true, false);
 
     heap_freetuple_ext(new_dep_tuple);
     pfree_ext(actiontree);
-
+    /* get new_query_str from pg_rewrite */
+    if (query_str == NULL) {
+        systable_endscan(rewrite_scan);
+        heap_close(rewrite_rel, RowExclusiveLock);
+        return;
+    }
+    Query* query = (Query*)linitial(evAction);
+    StringInfoData buf;
+    initStringInfo(&buf);
+    Relation ev_relation = heap_open(rewrite_form->ev_class, AccessShareLock);
+    get_query_def(query,
+        &buf,
+        NIL,
+        RelationGetDescr(ev_relation),
+        0,
+        -1,
+        0,
+        false,
+        false,
+        NULL,
+        false,
+        false);
+    appendStringInfo(&buf, ";");
+    ViewInfoForAdd * info = static_cast<ViewInfoForAdd *>(palloc(sizeof(ViewInfoForAdd)));
+    info->ev_class = rewrite_form->ev_class;
+    info->query_string = pstrdup(buf.data);
+    heap_close(ev_relation, AccessShareLock);
+    FreeStringInfo(&buf);
+    new_query_str = lappend(new_query_str, info);
+    *query_str = new_query_str;
     systable_endscan(rewrite_scan);
     heap_close(rewrite_rel, RowExclusiveLock);
 }
 
-void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction, Query* query)
+void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction, Query* query, List **query_str)
 {
     List* evAction = NIL;
     evAction = lappend(evAction, query);
@@ -12934,7 +12958,7 @@ void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction,
      * so that GetRefreshedViewQuery which would scan pg_rewrite to get ev_action
      * can obtain right view_def.
      */
-    UpdatePgrewriteForView(rw_objid, evAction);
+    UpdatePgrewriteForView(rw_objid, evAction, NULL);
 
     List* newEvAction = NIL;
     PG_TRY();
@@ -12969,7 +12993,7 @@ void UpdateAttrAndRewriteForView(Oid viewid, Oid rw_objid, List* originEvAction,
     freshed_query = UpdateRangeTableOfViewParse(viewid, freshed_query);
 
     /* update pg_rewrite with final ev_action */
-    UpdatePgrewriteForView(rw_objid, list_make1(freshed_query));
+    UpdatePgrewriteForView(rw_objid, list_make1(freshed_query), query_str);
 
     list_free_deep(newEvAction);
 }
