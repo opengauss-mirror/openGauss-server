@@ -3000,6 +3000,7 @@ typedef struct knl_u_hook_context {
     void *deparseCollectedCommandHook;
     void *enableProcedureExecutementHook;
     void *plsqlCompileHook;
+    void *checkVaildUserHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

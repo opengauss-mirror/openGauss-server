@@ -119,6 +119,26 @@ CREATE VIEW [CATALOG] AS
 SELECT employee_id, name, department
 FROM employees
 WHERE department = 'Sales';
+--用户名
+create user [Abc_abc] identified by 'Test@123';
+create user [_123] identified by 'Test@123';
+create user [!@#$%^_] identified by 'Test@123';
+create user [[[] identified by 'Test@123';
+create user [  _] identified by 'Test@123';
+create user [''] identified by 'Test@123';
+create user [""] identified by 'Test@123';
+create user ['\123'] identified by 'Test@123';  --error
+ERROR:  invalid name: '\123'
+create user ['123\'] identified by 'Test@123';  --error
+ERROR:  invalid name: '123\'
+GRANT USAGE ON SCHEMA public TO [!@#$%^_];
+GRANT USAGE ON SCHEMA public TO [[[];
+GRANT USAGE ON SCHEMA public TO [  _];
+GRANT USAGE ON SCHEMA public TO [''];
+GRANT USAGE ON SCHEMA public TO [""];
+ALTER ROLE [!@#$%^_] rename to [&*()];
+SET SESSION AUTHORIZATION [  _] PASSWORD 'Test@123';
+RESET SESSION AUTHORIZATION;
 -- 存储过程
 DROP TABLE IF EXISTS Employees;
 CREATE TABLE IF NOT EXISTS Employees(
