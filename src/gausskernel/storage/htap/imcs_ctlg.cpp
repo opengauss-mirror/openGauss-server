@@ -1357,6 +1357,7 @@ void DropImcsForPartitionedRelIfNeed(Relation partitionedRel)
 /* Check whether the standby node has been rolled back to the current LSN. */
 void WaitXLogRedoToCurrentLsn(XLogRecPtr currentLsn)
 {
+    int waitTimeMs = 0;
     XLogRecPtr latestXLogLsn = InvalidXLogRecPtr;
     do {
         latestXLogLsn = pg_atomic_read_u64(&IMCU_CACHE->m_xlog_latest_lsn);
@@ -1367,5 +1368,13 @@ void WaitXLogRedoToCurrentLsn(XLogRecPtr currentLsn)
         if (currentLsn <= latestXLogLsn) {
             break;
         }
+
+        if (waitTimeMs >= WAIT_XLOG_REDO_TIMEOUT_MS) {
+            ereport(ERROR, (errmsg("Wait lsn for HTAP population time out after %fs, current lsn: %lu,"
+                "xlog redo lsn: %lu.", ((double)waitTimeMs / 1000), currentLsn, latestXLogLsn)));
+        }
+
+        pg_usleep(100000); /* sleep 100ms */
+        waitTimeMs = waitTimeMs + 100;
     } while (true);
 }
