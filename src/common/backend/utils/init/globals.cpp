@@ -226,6 +226,7 @@ const uint32 CURSOR_EXPRESSION_VERSION_NUMBER = 92935;
 const uint32 FLOAT_VERSION_NUMBER = 92938;
 
 const uint32 PAGE_BASED_VERSION_NUM = 93039;
+const uint32 SS_ARCHIVE_VERSION_NUM = 92923;
 
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;

@@ -165,6 +165,7 @@ extern const uint32 CAST_FUNC_VERSION_NUMBER;
 extern const uint32 HASH_SAOP_VERSION_NUMBER;
 extern const uint32 ASOFJOIN_VERSION_NUM;
 extern const uint32 PAGE_BASED_VERSION_NUM;
+extern const uint32 SS_ARCHIVE_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
