@@ -1,0 +1,35 @@
+create database xml_type_dump;
+\c xml_type_dump
+create schema xml_type_dump;
+set search_path to xml_type_dump;
+
+create table type_xml(t1 xml);
+
+INSERT INTO type_xml VALUES (
+    XMLPARSE(CONTENT '<?xml version="1.0" encoding="UTF-8"?>
+    <root>
+        <![CDATA[<非法标签>]]>
+        <layer1 attr="值">
+            <layer2>文本&amp;实体</layer2>
+        </layer1>
+        <!-- 注释块 -->
+        <?pi 处理指令 ?>
+    </root>')
+);
+INSERT INTO type_xml VALUES (
+    XMLPARSE(DOCUMENT '<?xml version="1.0"?>
+    <!DOCTYPE root [ <!ENTITY ext SYSTEM "file:///etc/passwd"> ]>
+    <root>&ext;</root>')
+);
+
+
+\! @abs_bindir@/gs_dump xml_type_dump -p @portstring@ -f @abs_bindir@/xml_type_dump.sql -n xml_type_dump -w >/dev/null 2>&1; echo $?
+drop schema xml_type_dump cascade;
+\! @abs_bindir@/gsql -dxml_type_dump -p @portstring@ -f "@abs_bindir@/xml_type_dump.sql";
+
+
+select * from type_xml;
+
+drop schema xml_type_dump cascade;
+\c postgres
+drop database xml_type_dump;
