@@ -539,6 +539,7 @@ static void dumpColumnEncryptionKeys(Archive* fout, const Oid nspoid, const char
 static void dumpEncoding(Archive* AH);
 static void dumpStdStrings(Archive* AH);
 static void DumpBehaviorCompat(Archive* archive);
+static void DumpDFormatBehaviorCompat(Archive* archive);
 static void DummpLengthSemantics(Archive* AH);
 static void binary_upgrade_set_type_oids_by_type_oid(
     Archive* Afout, PQExpBuffer upgrade_buffer, Oid pg_type_oid, bool error_table);
@@ -1164,6 +1165,7 @@ int main(int argc, char** argv)
 
     /* Set special option: behavior_compat_options */
     DumpBehaviorCompat(fout);
+    DumpDFormatBehaviorCompat(fout);
 
     /* Dump nls_length_semantics parameter */
     DummpLengthSemantics(fout);
@@ -4639,6 +4641,45 @@ static void DumpBehaviorCompat(Archive* archive)
         "",
         false,
         "BEHAVIORCOMPAT",
+        SECTION_PRE_DATA,
+        qry->data,
+        "",
+        NULL,
+        NULL,
+        0,
+        NULL,
+        NULL);
+
+    destroyPQExpBuffer(qry);
+}
+
+static void DumpDFormatBehaviorCompat(Archive* archive) 
+{
+    if (!hasSpecificExtension(archive, "shark")) {
+        return;
+    }
+    ddr_Assert(archive != NULL);
+    PGconn* conn = GetConnection(archive);
+    PGresult* res;
+    PQExpBuffer qry = createPQExpBuffer();
+
+    res = PQexec(conn, "show d_format_behavior_compat_options;");
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+        appendPQExpBuffer(qry, "SET d_format_behavior_compat_options = '%s';\n", PQgetvalue(res, 0, 0));
+    } else {
+        appendPQExpBuffer(qry, "SET d_format_behavior_compat_options = '';\n");
+    }
+    PQclear(res);
+
+    ArchiveEntry(archive,
+        nilCatalogId,
+        createDumpId(),
+        "D_BEHAVIORCOMPAT",
+        NULL,
+        NULL,
+        "",
+        false,
+        "D_BEHAVIORCOMPAT",
         SECTION_PRE_DATA,
         qry->data,
         "",

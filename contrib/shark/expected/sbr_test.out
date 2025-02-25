@@ -1,3 +1,4 @@
+set d_format_behavior_compat_options = 'enable_sbr_identifier';
 --表名
 CREATE TABLE [my_table] (
     user_id INT PRIMARY KEY,

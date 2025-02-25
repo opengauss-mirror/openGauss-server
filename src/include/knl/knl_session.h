@@ -571,6 +571,7 @@ typedef struct knl_u_utils_context {
     int GUCNestLevel; /* 1 when in main transaction */
 
     unsigned int b_format_behavior_compat_flags;
+    unsigned int d_format_behavior_compat_flags;
     int64 behavior_compat_flags;
     unsigned int plsql_compile_behavior_compat_flags;
 
