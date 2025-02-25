@@ -519,3 +519,4 @@ test: extra_float_digits
 
 # test disable mot
 # test: mot/disable_mot
+test: auto_parameterization

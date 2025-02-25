@@ -201,6 +201,7 @@ static bool check_disable_keyword_options(char **newval, void **extra, GucSource
 static void assign_disable_keyword_options(const char *newval, void *extra);
 static bool check_restrict_nonsystem_relation_kind(char **newval, void **extra, GucSource source);
 static void assign_restrict_nonsystem_relation_kind(const char *newval, void *extra);
+static bool init_parameterized_query_context(bool* newval, void** exttra, GucSource source);
 
 static void InitSqlConfigureNamesBool();
 static void InitSqlConfigureNamesInt();
@@ -1846,7 +1847,7 @@ static void InitSqlConfigureNamesBool()
             NULL},
             &u_sess->attr.attr_sql.enable_query_parameterization,
             false,
-            NULL,
+            init_parameterized_query_context,
             NULL,
             NULL},
 #ifndef ENABLE_MULTIPLE_NODES
@@ -4744,4 +4745,14 @@ static void assign_restrict_nonsystem_relation_kind(const char *newval, void *ex
     list_free(elemlist);
 
     u_sess->utils_cxt.restrict_nonsystem_relation_kind_flags = result;
+}
+
+static bool init_parameterized_query_context(bool* newval, void** exttra, GucSource source)
+{
+    if (*newval && u_sess->param_cxt.query_param_cxt == NULL) {
+        u_sess->param_cxt.query_param_cxt =
+        AllocSetContextCreate(u_sess->top_mem_cxt, "QueryParameterizationContext", ALLOCSET_DEFAULT_MINSIZE,
+                              ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    }
+    return true;
 }

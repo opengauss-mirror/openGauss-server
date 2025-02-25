@@ -1063,6 +1063,8 @@ typedef struct knl_u_parameterization_context {
     pthread_mutex_t param_htbl_lock;
 
     HTAB* parameterized_queries;
+
+    MemoryContext query_param_cxt;
 } knl_u_parameterization_context;
 
 typedef struct knl_u_typecache_context {
