@@ -370,7 +370,7 @@ select count(compress_func_findoid('row_compression_test_tbl1_kkk_idx'));
 select is_compress, file_count, logic_size, physic_size, compress_ratio from compress_ratio_info(compress_func_findpath('row_compression_test_tbl1_kkk_idx'));
  is_compress | file_count | logic_size | physic_size | compress_ratio 
 -------------+------------+------------+-------------+----------------
- t           |          1 |    1056768 |       16384 | 1.55%
+ t           |          1 |    1048576 |       16384 | 1.56%
 (1 row)
 
 select extent_count, dispersion_count, void_count from compress_statistic_info(compress_func_findpath('row_compression_test_tbl1_kkk_idx'), 1);
@@ -893,4 +893,23 @@ select * from compress_normal_user.hash_range order by month_code, dept_code;
 (6 rows)
 
 drop table if exists compress_normal_user.hash_range cascade;
+drop table if exists seg_compress_alter;
+NOTICE:  table "seg_compress_alter" does not exist, skipping
+create table seg_compress_alter(cid int, name varchar2) with (segment=on, compresstype=1);
+insert into seg_compress_alter select generate_series(1,100000) as cid, substr(md5(random()::text), 1, 32) as name;
+alter table seg_compress_alter set (compresstype=2,compress_level=7);
+alter table seg_compress_alter set (compress_chunk_size=2048);
+alter table seg_compress_alter set (compress_prealloc_chunks=1);
+alter table seg_compress_alter set (compress_prealloc_chunks=3);
+alter table seg_compress_alter set (compress_byte_convert,compress_diff_convert=true);
+alter table seg_compress_alter set (compress_byte_convert=true);
+alter table seg_compress_alter set (compress_diff_convert=true);
+alter table seg_compress_alter set (compresstype=2);
+select count(*) from seg_compress_alter;
+ count  
+--------
+ 100000
+(1 row)
+
+drop table if exists seg_compress_alter;
 drop schema if exists compress_normal_user cascade;

@@ -357,6 +357,11 @@ pca_page_ctrl_t *pca_buf_read_page_internal(const ExtentLocation& location, LWLo
                                             PcaBufferReadMode readMode)
 {
     errno_t rc;
+    /* Hash key here should be one-to-one mapping to the block. If not so, there will be 2 memory
+    pca pages with 1 disk pca page or 2 disk pca pages with 1 memory pca page, causing wrong pca
+    content. More specificly, for example, under segment store, relNode should always be 3 to 5,
+    it will cause 2 memory pca pages if logical relNode is passed down here. */
+    Assert(!IsSegmentLogicalRelNode(location.relFileNode));
     CfsBufferKey key = {
         {location.relFileNode.spcNode, location.relFileNode.dbNode, location.relFileNode.relNode,
          location.relFileNode.bucketNode},
