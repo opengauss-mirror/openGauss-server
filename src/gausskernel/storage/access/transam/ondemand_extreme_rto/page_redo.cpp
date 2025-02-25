@@ -2247,12 +2247,34 @@ LWLock* OndemandGetXLogPartitionLock(BufferDesc* bufHdr, ForkNumber forkNum, Blo
 }
 
 /**
+ * Try to release hashmap lock, if the lock is not held by current thread, return false.
+ * Otherwise, release the lock and return true.
+ */
+bool ReleaseHashMapLockIfAny(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum)
+{
+    ondemand_extreme_rto::RedoItemTag redoItemTag;
+
+    /* get hashmap by redoItemTag */
+    INIT_REDO_ITEM_TAG(redoItemTag, bufHdr->tag.rnode, forkNum, blockNum);
+
+    /* get partition lock by redoItemTag */
+    unsigned int partitionLockHash = XlogTrackTableHashCode(&redoItemTag);
+    LWLock *xlog_partition_lock = XlogTrackMappingPartitionLock(partitionLockHash);
+
+    if (LWLockHeldByMe(xlog_partition_lock)) {
+        LWLockRelease(xlog_partition_lock);
+        return true;
+    }
+    return false;
+}
+
+/**
  * Check the block if need to redo and try hashmap lock. 
  * There are three kinds of result as follow:
  * 1. ONDEMAND_HASHMAP_ENTRY_REDO_DONE: the recordes of this buffer redo done.
- * 2. ONDEMAND_HASHMAP_ENTRY_REDOING: the reordes of this buffer is redoing
+ * 2. ONDEMAND_HASHMAP_ENTRY_REDOING: the reordes of this buffer is redoing by other process.
  * 3. ONDEMAND_HASHMAP_ENTRY_NEED_REDO: the recordes of this buffer has not been redone,
- *    so get hashmap entry lock.
+ *    so leave with hashmap entry lock.
  */
 int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum) {
     LWLock *xlog_partition_lock = NULL;
