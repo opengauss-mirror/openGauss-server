@@ -33,9 +33,14 @@
 				}
 
 {xbrstart}		{
-					SET_YYLLOC();
-					BEGIN(xbr);
-					startlit();
+					if (ENABLE_SBR_IDENTIFIER) {
+						SET_YYLLOC();
+						BEGIN(xbr);
+						startlit();
+					} else {
+						SET_YYLLOC();
+						return yytext[0];
+					}
 				}
 
 <xbr>{xbrinside}	{

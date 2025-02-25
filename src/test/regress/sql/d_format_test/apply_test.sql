@@ -89,7 +89,7 @@ CROSS APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) 
 WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations')
 ORDER BY d.department_name, v.employee_id;
 
-CREATE TABLE tt1 AS
+CREATE TABLE tt2 AS
 SELECT d.department_name, v.employee_id, v.last_name
 FROM departments d
 OUTER APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v

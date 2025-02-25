@@ -632,28 +632,46 @@ FROM departments d
 CROSS APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v
 WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations')
 ORDER BY d.department_name, v.employee_id;
-NOTICE:  identifier "'marketing'::character varying, 'operations'::character varying, 'public relations'::character varying" will be truncated to "'marketing'::character varying, 'operations'::character varying"
-ERROR:  syntax error at or near "['Marketing'::character varying, 'Operations'::character varying, 'Public Relations'::character varying]"
-LINE 6: ORDER BY d.department_name, v.employee_id;
-                                                ^
-CREATE TABLE tt1 AS
+CREATE TABLE tt2 AS
 SELECT d.department_name, v.employee_id, v.last_name
 FROM departments d
 OUTER APPLY (SELECT * FROM employees e WHERE e.department_id = d.department_id) v
 WHERE d.department_name IN ('Marketing', 'Operations', 'Public Relations')
 ORDER BY d.department_name, v.employee_id;
-NOTICE:  identifier "'marketing'::character varying, 'operations'::character varying, 'public relations'::character varying" will be truncated to "'marketing'::character varying, 'operations'::character varying"
-ERROR:  syntax error at or near "['Marketing'::character varying, 'Operations'::character varying, 'Public Relations'::character varying]"
-LINE 6: ORDER BY d.department_name, v.employee_id;
-                                                ^
 select * from tt1;
-ERROR:  relation "tt1" does not exist on datanode1
-LINE 1: select * from tt1;
-                      ^
+ department_name  | employee_id | last_name 
+------------------+-------------+-----------
+ Marketing        |           1 | zhangsan1
+ Marketing        |           2 | zhangsan2
+ Marketing        |           3 | zhangsan3
+ Marketing        |           4 | zhangsan4
+ Operations       |           9 | wangwu1
+ Operations       |          10 | wangwu2
+ Operations       |          11 | wangwu3
+ Operations       |          12 | wangwu4
+ Public Relations |           5 | lisi1
+ Public Relations |           6 | lisi2
+ Public Relations |           7 | lisi3
+ Public Relations |           8 | lisi4
+(12 rows)
+
 select * from tt2;
-ERROR:  relation "tt2" does not exist on datanode1
-LINE 1: select * from tt2;
-                      ^
+ department_name  | employee_id | last_name 
+------------------+-------------+-----------
+ Marketing        |           1 | zhangsan1
+ Marketing        |           2 | zhangsan2
+ Marketing        |           3 | zhangsan3
+ Marketing        |           4 | zhangsan4
+ Operations       |           9 | wangwu1
+ Operations       |          10 | wangwu2
+ Operations       |          11 | wangwu3
+ Operations       |          12 | wangwu4
+ Public Relations |           5 | lisi1
+ Public Relations |           6 | lisi2
+ Public Relations |           7 | lisi3
+ Public Relations |           8 | lisi4
+(12 rows)
+
 create or replace procedure test_cursor_1 
 as 
     company_name    varchar(100);

@@ -186,6 +186,10 @@ extern bool contain_backend_version(uint32 version_number);
 #define B_FORMAT_OPT_ENABLE_MULTI_CHARSET 64
 #define B_FORMAT_OPT_MAX 7
 
+#define D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER 1
+#define D_FORMAT_OPT_MAX 1
+
+
 #define ENABLE_SET_SESSION_TRANSACTION                                                                   \
     ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION) && \
      u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
@@ -203,6 +207,9 @@ extern bool contain_backend_version(uint32 version_number);
 
 #define B_DIAGNOSTICS ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_DIAGNOSTICS) && \
         u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+
+#define ENABLE_SBR_IDENTIFIER ((u_sess->utils_cxt.d_format_behavior_compat_flags & \
+        D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER) && u_sess->attr.attr_sql.sql_compatibility == D_FORMAT)
 
 #define OPT_DISPLAY_LEADING_ZERO (1LL << 0)
 #define OPT_END_MONTH_CALCULATE  (1LL << 1)

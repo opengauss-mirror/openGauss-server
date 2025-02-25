@@ -881,11 +881,23 @@ partition p1,
 partition p2
 );
 select * from pg_get_tabledef('p_charset_1');
-ERROR:  Invalid use of identifiers.
-LINE 1: ...ashjoin(p t) */p.relname AS partname, p.boundaries[1] AS par...
-                                                             ^
-DETAIL:  Syntax error found near token "1"
---?.*
+                           pg_get_tabledef                           
+---------------------------------------------------------------------
+ SET search_path = s_charset_1;                                     +
+ CREATE TABLE p_charset_1 (                                         +
+     c1 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci,+
+     c2 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci,+
+     c3 integer                                                     +
+ )                                                                  +
+ WITH (orientation=row, compression=no, collate=1537)               +
+ PARTITION BY HASH (c1)                                             +
+ (                                                                  +
+     PARTITION p1,                                                  +
+     PARTITION p2                                                   +
+ )                                                                  +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
 alter table p_charset_1 convert to character set utf8mb4;
 alter table p_charset_1 collate utf8mb4_unicode_ci;
 insert into p_charset_1 values('a中国a');

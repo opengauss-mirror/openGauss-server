@@ -1,0 +1,49 @@
+create database dump_d_database with dbcompatibility 'D';
+create database restore_d_database with dbcompatibility 'D';
+\c dump_d_database
+create extension shark;
+set d_format_behavior_compat_options = 'enable_sbr_identifier';
+CREATE SCHEMA [mysche];
+CREATE TABLE [mysche].t1(a int);
+CREATE TABLE mysche.[t2](a int);
+CREATE TABLE [mysche].[t3](a int);
+INSERT INTO mysche.t1 (a) VALUES (1), (2), (3);
+CREATE VIEW [t4] AS SELECT * FROM mysche.t1;
+\! @abs_bindir@/gs_dump dump_d_database -p @portstring@ -f @abs_bindir@/dump_d.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d restore_d_database -p @portstring@ @abs_bindir@/dump_d.tar >/dev/null 2>&1; echo $?
+0
+\c restore_d_database
+select mysche.EAST_COMM.ADD_NUM(0);
+ERROR:  schema "east_comm" does not exist
+CONTEXT:  referenced column: add_num
+SELECT * from mysche.t1;
+ a 
+---
+ 1
+ 2
+ 3
+(3 rows)
+
+SELECT * from mysche.t2;
+ a 
+---
+(0 rows)
+
+SELECT * from mysche.t3;
+ a 
+---
+(0 rows)
+
+SELECT * from t4;
+ a 
+---
+ 1
+ 2
+ 3
+(3 rows)
+
+\c contrib_regression
+drop database dump_d_database;
+drop database restore_d_database;
+
