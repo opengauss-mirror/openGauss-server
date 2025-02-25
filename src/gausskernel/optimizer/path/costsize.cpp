@@ -1012,6 +1012,44 @@ static bool enable_parametrized_path(PlannerInfo* root, RelOptInfo* baserel, Pat
 #define HEAP_PAGES_FETCHED(isUstore, pages_fetched, allvisfrac) \
         (isUstore) ? 0.0 : ceil((pages_fetched) * (1.0 - (allvisfrac)))
 
+// Recursively extract filter conditions
+static void extract_conditions(Node* node, List** conditions)
+{
+    if (node == NULL) {
+        return;
+    }
+
+    if (IsA(node, List)) {
+        // If it's a List, traverse the linked list
+        List* list = (List*)node;
+        ListCell* lc;
+        foreach(lc, list) {
+            extract_conditions((Node*)lfirst(lc), conditions);
+        }
+    } else if (IsA(node, BoolExpr)) {
+        // Handle boolean expressions (AND/OR/NOT)
+        BoolExpr* expr = (BoolExpr*)node;
+        ListCell* lc;
+        foreach(lc, expr->args) {
+            extract_conditions((Node*)lfirst(lc), conditions);
+        }
+    } else if (IsA(node, OpExpr) || IsA(node, ScalarArrayOpExpr) || IsA(node, NullTest) || IsA(node, BooleanTest)) {
+        // Handle basic conditions (e.g., a > 100, a IS NULL, etc.)
+        *conditions = lappend(*conditions, node);
+    }
+}
+
+// Extract WHERE clause conditions
+List* extract_where_conditions(PlannerInfo* root)
+{
+    List* conditions = NIL;
+    Query* parse = root->parse;
+
+    if (parse->jointree != NULL && parse->jointree->quals != NULL) {
+        extract_conditions(parse->jointree->quals, &conditions);
+    }
+    return conditions;
+}
 /*
  * cost_index
  *	  Determines and returns the cost of scanning a relation using an index.
@@ -1052,7 +1090,45 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     bool ispartitionedindex = path->indexinfo->rel->isPartitionedTable;
     bool disable_path = false;
     int dop = SET_DOP(path->path.dop);
-    
+    bool isAnnIndex = index->isAnnIndex;
+    // Calculate selectivity
+    Selectivity total_sel = 1.0;
+    ListCell* lc;
+    // Extract LIMIT value
+    Query* parse = root->parse;
+    Node* limitNode = parse->limitCount;
+    int64 limitValue = 0;
+    Cost annIndexCost = 0;
+    List* where_conditions = extract_where_conditions(root);
+    path->annCount = 0;
+    if (isAnnIndex && index->relam ==HNSW_AM_OID) {
+        foreach(lc, where_conditions) {
+            Node* clause = (Node*)lfirst(lc);
+            Selectivity sel = clause_selectivity(root, clause, 0, JOIN_INNER, NULL);
+            total_sel *= sel;
+        }
+        if (limitNode != NULL) {
+            // Check if it's a constant
+            if (IsA(limitNode, Const)) {
+                Const* constNode = (Const*)limitNode;
+                limitValue = DatumGetInt64(constNode->constvalue);
+            } else {
+                annIndexCost = g_instance.cost_cxt.disable_cost;
+            }
+            if (total_sel > 0) {
+                annIndexCost = (limitValue / total_sel) / ANN_INDEX_COST;
+            }
+        } else {
+            annIndexCost = g_instance.cost_cxt.disable_cost;
+            limitValue = baserel->tuples;
+        }
+        if (total_sel > 0) {
+            path->annCount = limitValue / total_sel;
+        }
+        if (path->annCount > baserel->tuples) {
+            annIndexCost = g_instance.cost_cxt.disable_cost;
+        }
+    }
     if (enable_parametrized_path(root, baserel, (Path*)path) ||
         (!u_sess->attr.attr_sql.enable_indexscan && !indexonly) ||
         (!u_sess->attr.attr_sql.enable_indexonlyscan && indexonly)) {
@@ -1112,7 +1188,9 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     /* all costs for touching index itself included here */
     startup_cost += indexStartupCost;
     run_cost += indexTotalCost - indexStartupCost;
-
+    if (isAnnIndex) {
+        run_cost += annIndexCost;
+    }
     /* estimate number of main-table tuples fetched */
     tuples_fetched = clamp_row_est(indexSelectivity * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples));
 

@@ -78,9 +78,8 @@ static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node)
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
     scandesc = node->iss_ScanDesc;
-
+    scandesc->count = (int64_t)node->annCount;
     isUstore = RelationIsUstoreFormat(node->ss.ss_currentRelation);
-
     /*
      * ok, now that we have what we need, fetch the next tuple.
      */
@@ -514,7 +513,7 @@ AnnIndexScanState* ExecInitAnnIndexScan(AnnIndexScan* node, EState* estate, int 
     index_state->ss.currentSlot = 0;
     index_state->ss.partScanDirection = node->indexorderdir;
     index_state->ss.ps.ExecProcNode = ExecAnnIndexScan;
-
+    index_state->annCount = node->annCount;
     /*
      * Miscellaneous initialization
      *
