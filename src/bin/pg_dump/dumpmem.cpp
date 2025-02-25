@@ -90,11 +90,3 @@ void* pg_realloc(void* ptr, size_t size)
         exit_horribly(NULL, "out of memory\n");
     return tmp;
 }
-
-void* pg_free(void* ptr)
-{
-    if (ptr != NULL) {
-        free(ptr);
-        ptr = NULL;
-    }
-}
