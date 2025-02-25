@@ -36,6 +36,7 @@ typedef struct ParamCachedKey {
     int query_len;
     Oid* param_types;
     int num_param;
+    Oid relOid;
 } ParamCachedKey;
 
 typedef struct ParameterizationInfo {
