@@ -34095,6 +34095,9 @@ IsValidIdent(char *input)
 bool
 IsValidIdentUsername(char *input)
 {
+	if (u_sess->hook_cxt.checkVaildUserHook != NULL) {
+		return ((checkValidUsername)(u_sess->hook_cxt.checkVaildUserHook))(input);
+	}
 	char c = input[0];
 	/*The first character id numbers or dollar*/
 	if ((c >= '0' && c <= '9') || c == '$')

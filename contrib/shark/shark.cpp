@@ -25,6 +25,7 @@ void init_session_vars(void)
     }
     u_sess->hook_cxt.coreYYlexHook = (void*)pgtsql_core_yylex;
     u_sess->hook_cxt.plsqlCompileHook = (void*)pltsql_compile;
+    u_sess->hook_cxt.checkVaildUserHook = (void*)check_vaild_username;
 
     RepallocSessionVarsArrayIfNecessary();
     SharkContext *cxt = (SharkContext*) MemoryContextAlloc(u_sess->self_mem_cxt, sizeof(sharkContext));

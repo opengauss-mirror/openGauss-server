@@ -2276,4 +2276,6 @@ extern void raise_application_error_context_callback(void* arg);
 
 typedef PLpgSQL_function* (*plsql_compile)(FunctionCallInfo fcinfo, bool forValidator, bool isRecompile);
 
+typedef bool (*checkValidUsername)(const char* name);
+
 #endif /* PLPGSQL_H */

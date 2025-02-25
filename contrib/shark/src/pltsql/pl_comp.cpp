@@ -1768,3 +1768,19 @@ static void plpgsql_append_dlcell(plpgsql_HashEnt* entity)
         pfree_ext(func);
     }
 }
+
+bool check_vaild_username(const char* name)
+{
+    char c;
+	int len = strlen(name);
+	for (int i = 0; i < len; i++) {
+	c = name[i];
+	if (c == '\\') {
+			ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("invalid name: %s", name)));
+			return false;
+		}
+	}
+	return true;
+}
