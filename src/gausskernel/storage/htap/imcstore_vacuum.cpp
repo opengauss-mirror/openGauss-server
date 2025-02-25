@@ -40,10 +40,11 @@
 #include "access/htap/imcstore_delta.h"
 
 #ifdef ENABLE_HTAP
-#define TRY_ENQUEUE_TIMES 3
+#define TRY_ENQUEUE_TIMES (16)
 
+constexpr int VACUUM_PUSH_WAIT_TIME = 100;
 constexpr int VACUMM_WAIT_TIME = 1000;
-constexpr int VACUUMQUEUE_SIZE = (1 << 10);
+constexpr int VACUUMQUEUE_SIZE = (1 << 12);
 
 void IMCStoreVacuumQueueCleanup(int code, Datum arg)
 {
@@ -78,7 +79,7 @@ bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId)
             break;
         }
         SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
-        pg_usleep(VACUMM_WAIT_TIME);
+        pg_usleep(VACUUM_PUSH_WAIT_TIME);
     }
     SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
     return true;
@@ -319,14 +320,23 @@ void IMCStoreVacuum(Relation rel, IMCSDesc *imcsDesc, uint32 cuid)
 {
     TupleDesc relTupleDesc = rel->rd_att;
     unsigned char deltaMask[MAX_IMCSTORE_DEL_BITMAP_SIZE] = {0};
-    uint64 frozen = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
+    TransactionId frozen = Max(rel->rd_rel->relfrozenxid, pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid));
 
     RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(cuid);
     pthread_rwlock_rdlock(&rowgroup->m_mutex);
 
     uint32 maskMax = 0;
-    BuildCtidScanBitmap(deltaMask, rowgroup, imcsDesc, rel, cuid, maskMax);
-    UpdateBitmapByDelta(deltaMask, rowgroup, frozen, cuid, maskMax);
+    PG_TRY();
+    {
+        BuildCtidScanBitmap(deltaMask, rowgroup, imcsDesc, rel, cuid, maskMax);
+        UpdateBitmapByDelta(deltaMask, rowgroup, frozen, cuid, maskMax);
+    }
+    PG_CATCH();
+    {
+        pthread_rwlock_unlock(&rowgroup->m_mutex);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
     pthread_rwlock_unlock(&rowgroup->m_mutex);
 
     Datum *val = (Datum *)palloc(sizeof(Datum) * (relTupleDesc->natts + 1));

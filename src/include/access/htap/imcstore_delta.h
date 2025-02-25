@@ -69,7 +69,7 @@ public:
         return used >= DEFAULT_DELTAPAGE_ELEMENTS;
     }
     bool IsDeadPage();
-    bool Vacuum(TransactionId xid);
+    uint32 Vacuum(TransactionId xid, ListCell* &currPage);
 };
 
 class DeltaTable : public BaseObject {

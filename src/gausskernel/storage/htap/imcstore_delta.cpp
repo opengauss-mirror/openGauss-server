@@ -144,23 +144,37 @@ bool DeltaPage::IsDeadPage()
     return false;
 }
 
-bool DeltaPage::Vacuum(TransactionId xid)
+uint32 DeltaPage::Vacuum(TransactionId xid, ListCell* &currPage)
 {
+    if (currPage == NULL) {
+        return 0;
+    }
+    DeltaPage* page = (DeltaPage*)lfirst(currPage);
     uint32 currentUsedElements = used;
     used = 0;
     deadElement = 0;
+    uint32 restRecords = 0;
 
     for (uint32 i = 0; i < currentUsedElements; ++i) {
         if (data[i].operationType == OPERATION_DELETED) {
             continue;
         }
-        if (data[i].xid > xid) {
-            data[used] = data[i];
-            ++used;
+        if (data[i].xid <= xid) {
             continue;
         }
+        ++restRecords;
+
+        page->data[page->used] = data[i];
+        ++page->used;
+        if (page->IsFull()) {
+            currPage = lnext(currPage);
+            if (currPage == NULL) {
+                break;
+            }
+            page = (DeltaPage*)lfirst(currPage);
+        }
     }
-    return used == 0;
+    return restRecords;
 }
 
 /* will return true if delta table should vacuum */
@@ -185,20 +199,19 @@ void DeltaTable::Insert(DeltaOperationType type, ItemPointer ctid, TransactionId
 
 void DeltaTable::Vacuum(TransactionId xid)
 {
-    List* newpages = NIL;
+    ListCell* currPage = list_head(pages);
     ListCell* cell = NULL;
     rowNumber = 0;
     foreach(cell, pages) {
         DeltaPage* page = (DeltaPage*)lfirst(cell);
-        if (page->Vacuum(xid)) {
-            delete page;
-            continue;
-        }
-        rowNumber += page->used;
-        newpages = lappend(newpages, (void*)page);
+        uint32 rest = page->Vacuum(xid, currPage);
+        rowNumber += rest;
     }
-    list_free(pages);
-    pages = newpages;
+    while (currPage != NULL && lnext(currPage) != NULL) {
+        DeltaPage* page = (DeltaPage*)lfirst(lnext(currPage));
+        delete page;
+        pages = list_delete_cell(pages, lnext(currPage), currPage);
+    }
     vacuumInProcess = false;
 }
 
