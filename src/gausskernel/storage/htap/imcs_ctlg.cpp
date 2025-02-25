@@ -36,6 +36,7 @@
 #include "utils/guc_storage.h"
 #include "pgxc/execRemote.h"
 #include "libpq/libpq.h"
+#include "replication/syncrep.h"
 #include "replication/walreceiver.h"
 #include "access/htap/imcstore_insert.h"
 #include "access/htap/imcs_ctlg.h"
@@ -167,6 +168,18 @@ bool CheckIsInTrans()
         return true;
     }
     return false;
+}
+
+void AbortIfSinglePrimary()
+{
+    SyncRepStandbyData *syncStandbys;
+    int numStandbys = SyncRepGetSyncStandbys(&syncStandbys);
+    if (syncStandbys != NULL) {
+        pfree_ext(syncStandbys);
+    }
+    if (numStandbys == 0) {
+        ereport(ERROR, (errmsg("Single primary can not populate or unpopulate.")));
+    }
 }
 
 void CheckWalRcvIsRunning(uint32 nScan)
@@ -902,17 +915,17 @@ PGXCNodeHandle **GetStandbyConnections(int *connCount)
     PGconn **nodeCons = (PGconn **)palloc0(sizeof(PGconn *) * dnConnCount);
     errno_t rc;
     int replArrLength;
-    auto releaseConnect = [&](char *errMsg) {
+    auto releaseConnect = [&](char *errMsg, int connIdx) {
+        if (errMsg != NULL) {
+            connections[connIdx]->state = DN_CONNECTION_STATE_ERROR_FATAL;
+            ereport(WARNING, (errmsg("PQconnectdbParallel error: %s", errMsg)));
+            return;
+        }
         for (int i = 0; i < dnConnCount; i++) {
             pfree_ext(connectionStrs[i]);
         }
         pfree_ext(dnNode);
         pfree_ext(connectionStrs);
-        if (errMsg != NULL) {
-            pfree_ext(connections);
-            connections = NULL;
-            ereport(ERROR, (errmsg("PQconnectdbParallel error: %s", errMsg)));
-        }
         return;
     };
 
@@ -964,10 +977,10 @@ PGXCNodeHandle **GetStandbyConnections(int *connCount)
             } else {
                 ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, "unknown error");
             }
-            releaseConnect(firstError);
+            releaseConnect(firstError, i);
         }
     }
-    releaseConnect(NULL);
+    releaseConnect(NULL, 0);
     return connections;
 }
 
@@ -1166,9 +1179,14 @@ void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int im
     PGXCNodeHandle **temp_connections = NULL;
     /* use temp connections instead */
     int i = 0;
+    int connCountTemp = 0;
     temp_connections = (PGXCNodeHandle **)palloc(connCount * sizeof(PGXCNodeHandle *));
-    for (i = 0; i < connCount; i++)
-        temp_connections[i] = connections[i];
+    for (i = 0; i < connCount; i++) {
+        if (connections[i]->state != DN_CONNECTION_STATE_ERROR_FATAL) {
+            temp_connections[connCountTemp++] = connections[i];
+        }
+    }
+    connCount = connCountTemp;
 
     for (i = 0; i < connCount; i++) {
         if (temp_connections[i]->state == DN_CONNECTION_STATE_QUERY)
@@ -1213,10 +1231,14 @@ void SendUnImcstoredRequest(Oid relOid, Oid specifyPartOid, int type)
     PGXCNodeHandle **temp_connections = NULL;
     /* use temp connections instead */
     int i = 0;
-
+    int connCountTemp = 0;
     temp_connections = (PGXCNodeHandle **)palloc(connCount * sizeof(PGXCNodeHandle *));
-    for (i = 0; i < connCount; i++)
-        temp_connections[i] = connections[i];
+    for (i = 0; i < connCount; i++) {
+        if (connections[i]->state != DN_CONNECTION_STATE_ERROR_FATAL) {
+            temp_connections[connCountTemp++] = connections[i];
+        }
+    }
+    connCount = connCountTemp;
 
     for (i = 0; i < connCount; i++) {
         if (temp_connections[i]->state == DN_CONNECTION_STATE_QUERY)

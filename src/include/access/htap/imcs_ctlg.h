@@ -98,6 +98,8 @@ extern void CheckImcsSupportForRelType(Relation relation);
 
 extern bool CheckIsInTrans();
 
+extern void AbortIfSinglePrimary();
+
 extern void CheckWalRcvIsRunning(uint32 nScan);
 
 extern void CheckImcsSupportForDataTypes(Relation rel, List* colList, int2vector* &imcsAttsNum, int* imcsNatts);

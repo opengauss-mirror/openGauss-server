@@ -22436,6 +22436,7 @@ static void ATExecIMCSTORED(Relation rel, List* colList)
     CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts);
     /* standbynode populate */
     if (IMCS_IS_PRIMARY_MODE) {
+        AbortIfSinglePrimary();
         CreateImcsDescForPrimaryNode(rel, imcsAtts, imcsNatts);
         SendImcstoredRequest(relOid, InvalidOid, imcsAtts->values, imcsNatts, TYPE_IMCSTORED);
     } else {
@@ -22457,6 +22458,7 @@ static void ATExecUNIMCSTORED(Relation rel)
     }
 
     if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
+        AbortIfSinglePrimary();
         SendUnImcstoredRequest(relOid, InvalidOid, TYPE_UNIMCSTORED);
     }
     AlterTableDisableImcstore(rel);
@@ -22491,6 +22493,7 @@ static void ATExecModifyPartitionIMCSTORED(Relation rel, const char* partName, L
     {
         /* populate on standbynode */
         if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
+            AbortIfSinglePrimary();
             CreateImcsDescForPrimaryNode(partRel, imcsAtts, imcsNatts);
             SendImcstoredRequest(relOid, partOid, imcsAtts->values, imcsNatts, TYPE_PARTITION_IMCSTORED);
         } else {
@@ -22534,6 +22537,7 @@ static void ATExecModifyPartitionUNIMCSTORED(Relation rel, const char* partName)
     {
         /* unpopulate partition on standby node */
         if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
+            AbortIfSinglePrimary();
             SendUnImcstoredRequest(relOid, partOid, TYPE_PARTITION_UNIMCSTORED);
         }
         /* unpopulate partition on current node */
