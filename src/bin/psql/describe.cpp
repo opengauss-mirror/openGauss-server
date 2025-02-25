@@ -3172,14 +3172,21 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
         char* p = strstr(tableinfo.reloptions, "collate=");
         if (p != NULL) {
-            char coll_str[B_FORMAT_COLLATION_STR_LEN + 1] = {0};
-            errno_t rc = memcpy_s(coll_str, sizeof(coll_str), p + strlen("collate="), B_FORMAT_COLLATION_STR_LEN);
+            /* len of str "collate=" */
+            const int headLen = 8;
+            int len = B_FORMAT_COLLATION_STR_LEN;
+            if (strlen(p) > headLen + B_FORMAT_COLLATION_STR_LEN) {
+                len = strlen(p) - headLen;
+            }
+            char collStr[len + 1] = {0};
+            errno_t rc = memcpy_s(collStr, sizeof(collStr), p + headLen, len);
             securec_check_c(rc, "\0", "\0");
-            int collid = atoi(coll_str);
+            int collid = atoi(collStr);
             if (COLLATION_IN_B_FORMAT(collid)) {
                 PQExpBufferData charsetbuf;
                 initPQExpBuffer(&charsetbuf);
-                appendPQExpBuffer(&charsetbuf, _("select collname,collencoding from pg_collation where oid = %s;"), coll_str);
+                appendPQExpBuffer(&charsetbuf,
+                                    _("select collname,collencoding from pg_collation where oid = %d;"), collid);
                 PGresult* charset_res = PSQLexec(charsetbuf.data, false);
 
                 char* collname = PQgetvalue(charset_res, 0, 0);
