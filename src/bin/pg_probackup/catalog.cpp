@@ -943,6 +943,7 @@ void save_backupinfo_belong_timelines(InstanceConfig *instance, parray *timeline
         tlinfo->oldest_backup = get_oldest_backup(tlinfo);
         tlinfo->closest_backup = get_closest_backup(tlinfo);
     }
+    pfree(backups);
     return;
 }
 
