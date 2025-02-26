@@ -31,11 +31,12 @@ jsonb, text[]
 DROP OPERATOR IF EXISTS pg_catalog.-(jsonb, text) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 3252;
 CREATE OPERATOR pg_catalog.-(LEFTARG = jsonb, RIGHTARG = text, PROCEDURE = jsonb_delete);
-
+COMMENT ON OPERATOR pg_catalog.->(jsonb, text) IS 'delete text';
 DROP OPERATOR IF EXISTS pg_catalog.-(jsonb, int) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 3251;
 CREATE OPERATOR pg_catalog.-(LEFTARG = jsonb, RIGHTARG = int, PROCEDURE = jsonb_delete);
-
+COMMENT ON OPERATOR pg_catalog.-(jsonb, int) IS 'delete index';
 DROP OPERATOR IF EXISTS pg_catalog.-(jsonb, text[]) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_GENERAL, 3253;
 CREATE OPERATOR pg_catalog.-(LEFTARG = jsonb, RIGHTARG = text[], PROCEDURE = jsonb_delete);
+COMMENT ON OPERATOR pg_catalog.-(jsonb, text[]) IS 'delete text[]';
