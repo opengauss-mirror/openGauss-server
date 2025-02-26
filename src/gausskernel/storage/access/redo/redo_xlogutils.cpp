@@ -2121,7 +2121,8 @@ bool redo_target_seg_state(const BufferTag &new_buf_tag, XLogRecParseState *stat
             if (!RelFileNodeEquals(new_buf_tag.rnode, buf_tag->rnode) ||
                 new_buf_tag.forkNum != buf_tag->forkNum ||
                 new_buf_tag.blockNum != buf_tag->blockNum) {
-                return false;
+                redo_done = false;
+                break;
             }
             buf_info->blockinfo.pblk = state->blockparse.blockhead.pblk;
             segpage_redo_new_page_for_standby_read(
@@ -2130,7 +2131,7 @@ bool redo_target_seg_state(const BufferTag &new_buf_tag, XLogRecParseState *stat
             break;
         }
         default:
-            return redo_target_state(state, buf_info);
+            redo_done = redo_target_state(state, buf_info);
     }
     return redo_done;
 }

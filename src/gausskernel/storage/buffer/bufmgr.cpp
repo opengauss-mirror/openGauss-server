@@ -6508,6 +6508,9 @@ bool TryLockBuffer(Buffer buffer, int mode, bool must_wait)
             (errmsg("unrecognized buffer lock mode for TryLockBuffer: %d", mode))));
     }
 
+    if (BUCKET_NODE_IS_EXRTO_READ(buf->tag.rnode.bucketNode)) {
+        return ret;
+    }
     /* transfer newest page version by DMS */
     if (ENABLE_DMS && ret) {
         LWLockMode lock_mode = (mode == BUFFER_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
@@ -6553,6 +6556,10 @@ bool ConditionalLockBuffer(Buffer buffer)
     buf = GetBufferDescriptor(buffer - 1);
 
     bool ret = LWLockConditionalAcquire(buf->content_lock, LW_EXCLUSIVE);
+
+    if (BUCKET_NODE_IS_EXRTO_READ(buf->tag.rnode.bucketNode)) {
+        return ret;
+    }
 
     if (ENABLE_DMS && ret) {
         Buffer tmp_buffer;
@@ -6915,9 +6922,6 @@ void CheckIOState(volatile void *buf_desc)
 bool StartBufferIO(BufferDesc *buf, bool for_input)
 {
     uint64 buf_state;
-
-    Assert(!t_thrd.storage_cxt.InProgressBuf);
-
     /* To check the InProgressBuf must be NULL. */
     if (t_thrd.storage_cxt.InProgressBuf) {
         ereport(PANIC, (errmsg("InProgressBuf not null: id %d flags %lu, buf: id %d flags %lu",

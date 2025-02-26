@@ -316,7 +316,7 @@ Buffer standby_read_buf(
     StandbyReadLsnInfoArray *lsn_info = &t_thrd.exrto_recycle_cxt.lsn_info;
 
     BufferTag old_buf_tag = {
-        .rnode = reln->rd_smgr->smgr_rnode.node,
+        .rnode = reln->rd_node,
         .forkNum = fork_num,
         .blockNum = block_num,
     };
