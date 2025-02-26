@@ -48,6 +48,11 @@ SELECT *,gms_lob.getlength(b) FROM testclob;
 (4 rows)
 
 DROP TABLE testclob;
+select gms_lob.getlength('abcd') from dual;
+ getlength  
+-----------
+         4
+(1 row)
 --在函数中调用
 CREATE OR REPLACE FUNCTION fun_blob() RETURNS INTEGER LANGUAGE plpgsql AS $$
 DECLARE
