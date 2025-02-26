@@ -2171,9 +2171,8 @@ void SegUpdatePca(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, S
     RelFileNode fake_node = EXTENT_GROUP_RNODE(reln->seg_space, (ExtentSize)seg->extent_size,
                                                reln->smgr_rnode.node.opt);
     ExtentLocation location =
-        g_location_convert[SEG_STORAGE](reln, reln->smgr_rnode.node, fd,
-                                        loc.extent_size, forknum, loc.blocknum);
-    CfsExtendForSeg(reln->smgr_rnode.node, fd, seg->extent_size,
-                    forknum, loc.blocknum, nullptr, location);
+        g_location_convert[SEG_STORAGE](reln, fake_node, fd, loc.extent_size, forknum,
+                                        loc.blocknum);
+    CfsExtendForSeg(fake_node, fd, seg->extent_size, forknum, loc.blocknum, nullptr, location);
     return;
 }

@@ -19698,7 +19698,7 @@ bool CheckTableSupportSetCompressedOptions(Relation rel)
         return false;        
     }
 
-    if (RelationIsColStore(rel) || RelationIsTsStore(rel) || RelationIsSegmentTable(rel)) {
+    if (RelationIsColStore(rel) || RelationIsTsStore(rel)) {
         return false;
     }
     return true;

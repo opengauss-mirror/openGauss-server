@@ -560,4 +560,18 @@ checkpoint;
 select * from compress_normal_user.hash_range order by month_code, dept_code;
 drop table if exists compress_normal_user.hash_range cascade;
 
+drop table if exists seg_compress_alter;
+create table seg_compress_alter(cid int, name varchar2) with (segment=on, compresstype=1);
+insert into seg_compress_alter select generate_series(1,100000) as cid, substr(md5(random()::text), 1, 32) as name;
+alter table seg_compress_alter set (compresstype=2,compress_level=7);
+alter table seg_compress_alter set (compress_chunk_size=2048);
+alter table seg_compress_alter set (compress_prealloc_chunks=1);
+alter table seg_compress_alter set (compress_prealloc_chunks=3);
+alter table seg_compress_alter set (compress_byte_convert,compress_diff_convert=true);
+alter table seg_compress_alter set (compress_byte_convert=true);
+alter table seg_compress_alter set (compress_diff_convert=true);
+alter table seg_compress_alter set (compresstype=2);
+select count(*) from seg_compress_alter;
+drop table if exists seg_compress_alter;
+
 drop schema if exists compress_normal_user cascade;
