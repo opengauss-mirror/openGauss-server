@@ -42,15 +42,15 @@ update trs_10p set id = 1000000 where id = 1;
 select count(*) from trs_10p where ctid < '(1,0)';
 
 -- table with more than 65536 pages
-create table trs_gt_65536p as select generate_series(1, 15000000) id;
+create table trs_gt_65536p as select generate_series(1, 15000072) id;
 analyze trs_gt_65536p;
 
-explain (costs off)
+explain
 select * from trs_gt_65536p where ctid > '(65530,0)' and ctid < '(65540,0)';
 select count(*) from trs_gt_65536p where ctid > '(65530,0)' and ctid < '(65540,0)';
 
 -- table larger than 3 files (one file is approximately 131072 pages)
-create table trs_gt_3f as select generate_series(1, 100000000) id;
+create table trs_gt_3f as select generate_series(1, 100000028) id;
 analyze trs_gt_3f;
 
 explain 
