@@ -4169,8 +4169,8 @@ static char* xpath_extractvalue(xmltype* data, text* xpath_expr_text, ArrayType*
     return result;
 }
 
-static xmlChar* appendNewChildXml(xmltype* rootxml, text* xpath_expr_text,
-                                  ArrayType* namespaces, text* appendData_text)
+static char* appendNewChildXml(xmltype* rootxml, text* xpath_expr_text,
+                               ArrayType* namespaces, text* appendData_text)
 {
     PgXmlErrorContext* xmlerrcxt = NULL;
     xmlDocPtr doc = NULL;
@@ -4186,6 +4186,7 @@ static xmlChar* appendNewChildXml(xmltype* rootxml, text* xpath_expr_text,
     xmlXPathObjectPtr xpathObj = NULL;
     Datum* ns_names_uris = NULL;
     bool* ns_names_uris_nulls = NULL;
+    char* res = NULL;
     int ns_count = 0;
     int ndim;
 
@@ -4289,6 +4290,9 @@ static xmlChar* appendNewChildXml(xmltype* rootxml, text* xpath_expr_text,
         } else if (appendNode) {
             xmlFreeNodeList(appendNode);
         }
+        if (resdata) {
+            xmlFree(resdata);
+        }
         if (doc) {
             xmlFreeDoc(doc);
         }
@@ -4298,6 +4302,8 @@ static xmlChar* appendNewChildXml(xmltype* rootxml, text* xpath_expr_text,
         PG_RE_THROW();
     }
     PG_END_TRY();
+    res = pstrdup((char*)resdata);
+    xmlFree(resdata);
     xmlXPathFreeObject(xpathObj);
     xmlXPathFreeContext(xpathctx);
     if (appendDoc) {
@@ -4309,7 +4315,7 @@ static xmlChar* appendNewChildXml(xmltype* rootxml, text* xpath_expr_text,
 
     pg_xml_done(xmlerrcxt, false);
 
-    return resdata;
+    return res;
 }
 
 #endif /* USE_LIBXML */
@@ -4529,9 +4535,9 @@ Datum xmltype_appendchildxml(PG_FUNCTION_ARGS)
     if (!PG_ARGISNULL(3)) {
         namespaces = PG_GETARG_ARRAYTYPE_P(3);
     }
-    xmlChar* res = appendNewChildXml(data, xpath_expr_text, namespaces, appendData);
+    char* res = appendNewChildXml(data, xpath_expr_text, namespaces, appendData);
 
-    PG_RETURN_XML_P(cstring_to_xmltype((char*)res));
+    PG_RETURN_XML_P(cstring_to_xmltype(res));
 #else
     NO_XML_SUPPORT();
     return 0;
