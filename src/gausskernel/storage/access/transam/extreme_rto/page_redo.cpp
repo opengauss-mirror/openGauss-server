@@ -965,21 +965,16 @@ void PageManagerProcSegFullSyncState(XLogRecParseState *parseState)
 
 void PageManagerProcSegPipeLineSyncState(XLogRecParseState *parseState)
 {
-    if (SS_DISASTER_STANDBY_CLUSTER) {
-        PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
-        const uint32 WorkerNumPerMng = myRedoLine->redoThdNum;
-        uint32 work_id = WorkerNumPerMng - 1;
-        parseState->nextrecord = NULL;
-        AddPageRedoItem(myRedoLine->redoThd[work_id], parseState);
-    } else {
+    if (parseState->blockparse.blockhead.block_valid != BLOCK_DATA_SEG_EXTEND) {
         WaitCurrentPipeLineRedoWorkersQueueEmpty();
-        MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
-
-        RedoPageManagerDdlAction(parseState);
-
-        (void)MemoryContextSwitchTo(oldCtx);
-        XLogBlockParseStateRelease(parseState);
     }
+
+    MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
+
+    RedoPageManagerDdlAction(parseState);
+
+    (void)MemoryContextSwitchTo(oldCtx);
+    XLogBlockParseStateRelease(parseState);
 }
 
 static void WaitNextBarrier(XLogRecParseState *parseState)
