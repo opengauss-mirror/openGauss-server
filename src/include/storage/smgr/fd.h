@@ -96,6 +96,12 @@ extern int FileRead(File file, char* buffer, int amount, bool inter_xact = false
 extern int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastExtendSize = 0,
                      bool inter_xact = false);
 
+#ifdef USE_ASSERT_CHECKING
+/** Get file's segment number
+ @param[in]     the file number in VFD cache.
+ @return the file segment number */
+extern uint32_t FileSegNo(File file);
+#endif
 /* todo delete */
 extern void* MmapExtentAddress(File fd, int pc_memory_map_size, off_t offset);
 
