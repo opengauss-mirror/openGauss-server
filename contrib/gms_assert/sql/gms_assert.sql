@@ -227,5 +227,7 @@ DROP SCHEMA schem1 CASCADE;
 DROP PACKAGE schem2.pkg1;
 DROP SCHEMA schem2 CASCADE;
 
+DROP EXTENSION gms_assert;
+
 \c postgres
 drop database gms_assert_testdb;
