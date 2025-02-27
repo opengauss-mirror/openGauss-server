@@ -18402,7 +18402,8 @@ subprogram_body: 	{
 						parser_yyerror("subprogram body is not ended correctly");
 						break;
 					}
-					if (!in_begin && (pre_tok == ';' || pre_tok == DECLARE || pre_tok == 0 || pre_tok == COMMENTSTRING) && (tok == PROCEDURE || tok == FUNCTION)) {
+					if (!in_begin && (pre_tok == ';' || pre_tok == DECLARE || pre_tok == 0 || pre_tok == COMMENTSTRING
+						|| pre_tok == AS || pre_tok == IS) && (tok == PROCEDURE || tok == FUNCTION)) {
 						in_procedure++;
 						max_proc_level = max_proc_level > in_procedure ? max_proc_level : in_procedure;
 						procedure_count++;

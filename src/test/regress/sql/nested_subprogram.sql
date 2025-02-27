@@ -1846,7 +1846,14 @@ BEGIN
 RETURN array_to_string(A, ',');
 END;
 /
+
 select * from pg_aggregate where aggfinalfn = 'WM_CONCAT_END'::regproc;
+create or replace function func1(col1 int,col2 int,col3 int,col4 int)return int is 
+function func1_1 return int is
+function func1_1_1 return int is begin return 10; end;
+begin return 10; end;
+begin return 10; end;
+/
 
 \c regression
 drop database nested_subprogram;
