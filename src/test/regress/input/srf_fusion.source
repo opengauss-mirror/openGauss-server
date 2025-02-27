@@ -1,6 +1,6 @@
 
-create schema windows_srf;
-set search_path to windows_srf;
+create schema srf_fusion;
+set search_path to srf_fusion;
 
 set enable_expr_fusion = on;
 show enable_expr_fusion;
@@ -51,18 +51,18 @@ insert into tbl_1k select generate_series(1, 1000), (RANDOM() * 67)::int::numeri
 analyze tbl_1k;
 
 set enable_hashagg=off;
-explain (costs off, verbose) 
-select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
+explain (costs off, verbose)
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id), g1 limit 1000;
 
 create table agg_group as
-select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id), g1 limit 1000;
 
 set enable_hashagg=on;
-explain (costs off, verbose) 
-select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
+explain (costs off, verbose)
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id), g1 limit 1000;
 
 create table agg_hash as
-select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id), g1 limit 1000;
 
 -- Compare results to hash aggregation results
 (select * from agg_group except select * from agg_hash)
@@ -107,4 +107,4 @@ create table t2 as SELECT generate_series(1, max(a*b)), (a+b) % 1000 + 1 FROM ts
 
 drop table t1, t2, part_tsrf, tsrf;
 
-drop schema windows_srf cascade;
+drop schema srf_fusion cascade;

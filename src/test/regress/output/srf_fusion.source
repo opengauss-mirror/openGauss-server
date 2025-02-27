@@ -1,5 +1,5 @@
-create schema windows_srf;
-set search_path to windows_srf;
+create schema srf_fusion;
+set search_path to srf_fusion;
 set enable_expr_fusion = on;
 show enable_expr_fusion;
  enable_expr_fusion 
@@ -23,7 +23,7 @@ SELECT generate_series(1, id), depname, empno, salary, rank() OVER (PARTITION BY
          ->  Sort
                Output: depname, salary, id, empno
                Sort Key: empsalary.depname, empsalary.salary DESC
-               ->  Seq Scan on windows_srf.empsalary
+               ->  Seq Scan on srf_fusion.empsalary
                      Output: depname, salary, id, empno
 (9 rows)
 
@@ -66,7 +66,7 @@ SELECT generate_series(id, generate_series(1, 2)), depname, empno, salary, rank(
                ->  Sort
                      Output: depname, salary, id, empno
                      Sort Key: empsalary.depname, empsalary.salary DESC
-                     ->  Seq Scan on windows_srf.empsalary
+                     ->  Seq Scan on srf_fusion.empsalary
                            Output: depname, salary, id, empno
 (11 rows)
 
@@ -87,7 +87,7 @@ SELECT id, generate_series(1, id), salary, sum(salary) OVER () FROM empsalary;
    Output: id, generate_series(1, id), salary, (sum(salary) OVER ())
    ->  WindowAgg
          Output: id, salary, sum(salary) OVER ()
-         ->  Seq Scan on windows_srf.empsalary
+         ->  Seq Scan on srf_fusion.empsalary
                Output: id, salary
 (6 rows)
 
@@ -128,7 +128,7 @@ SELECT id, generate_series(1, id), salary, sum(salary) OVER (ORDER BY salary) FR
          ->  Sort
                Output: salary, id
                Sort Key: empsalary.salary
-               ->  Seq Scan on windows_srf.empsalary
+               ->  Seq Scan on srf_fusion.empsalary
                      Output: salary, id
 (9 rows)
 
@@ -171,7 +171,7 @@ SELECT generate_series(1,id), sum(salary) OVER w, avg(salary) OVER w
          ->  Sort
                Output: salary, depname, id
                Sort Key: empsalary.depname, empsalary.salary DESC
-               ->  Seq Scan on windows_srf.empsalary
+               ->  Seq Scan on srf_fusion.empsalary
                      Output: salary, depname, id
 (9 rows)
 
@@ -218,7 +218,7 @@ SELECT id, generate_series(1, id) as g, salary, sum(salary) OVER (ORDER BY salar
                ->  Sort
                      Output: salary, id
                      Sort Key: empsalary.salary
-                     ->  Seq Scan on windows_srf.empsalary
+                     ->  Seq Scan on srf_fusion.empsalary
                            Output: salary, id
 (12 rows)
 
@@ -253,54 +253,50 @@ create table tbl_1k(id bigint, v1 numeric, v2 numeric);
 insert into tbl_1k select generate_series(1, 1000), (RANDOM() * 67)::int::numeric, (RANDOM() * 77)::int::numeric;
 analyze tbl_1k;
 set enable_hashagg=off;
-explain (costs off, verbose) 
-select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
-                             QUERY PLAN                             
---------------------------------------------------------------------
+explain (costs off, verbose)
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id), g1 limit 1000;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
  Limit
    Output: (sum(id)), v1, v2, (generate_series(1::numeric, v1))
-   ->  ProjectSet
-         Output: (sum(id)), v1, v2, generate_series(1::numeric, v1)
-         ->  Result
-               Output: v1, (sum(id)), v2
-               ->  Sort
-                     Output: v1, (sum(id)), v2
-                     Sort Key: (sum(tbl_1k.id))
-                     ->  GroupAggregate
-                           Output: v1, sum(id), v2
-                           Group By Key: tbl_1k.v1, tbl_1k.v2
-                           ->  Sort
+   ->  Sort
+         Output: (sum(id)), v1, v2, (generate_series(1::numeric, v1))
+         Sort Key: (sum(tbl_1k.id)), (generate_series(1::numeric, tbl_1k.v1))
+         ->  ProjectSet
+               Output: (sum(id)), v1, v2, generate_series(1::numeric, v1)
+               ->  GroupAggregate
+                     Output: v1, sum(id), v2
+                     Group By Key: tbl_1k.v1, tbl_1k.v2
+                     ->  Sort
+                           Output: v1, v2, id
+                           Sort Key: tbl_1k.v1, tbl_1k.v2
+                           ->  Seq Scan on srf_fusion.tbl_1k
                                  Output: v1, v2, id
-                                 Sort Key: tbl_1k.v1, tbl_1k.v2
-                                 ->  Seq Scan on windows_srf.tbl_1k
-                                       Output: v1, v2, id
-(17 rows)
+(15 rows)
 
 create table agg_group as
-select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id), g1 limit 1000;
 set enable_hashagg=on;
-explain (costs off, verbose) 
-select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
-                             QUERY PLAN                             
---------------------------------------------------------------------
+explain (costs off, verbose)
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id), g1 limit 1000;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
  Limit
    Output: (sum(id)), v1, v2, (generate_series(1::numeric, v1))
-   ->  ProjectSet
-         Output: (sum(id)), v1, v2, generate_series(1::numeric, v1)
-         ->  Result
-               Output: v1, (sum(id)), v2
-               ->  Sort
-                     Output: v1, (sum(id)), v2
-                     Sort Key: (sum(tbl_1k.id))
-                     ->  HashAggregate
-                           Output: v1, sum(id), v2
-                           Group By Key: tbl_1k.v1, tbl_1k.v2
-                           ->  Seq Scan on windows_srf.tbl_1k
-                                 Output: v1, v2, id
-(14 rows)
+   ->  Sort
+         Output: (sum(id)), v1, v2, (generate_series(1::numeric, v1))
+         Sort Key: (sum(tbl_1k.id)), (generate_series(1::numeric, tbl_1k.v1))
+         ->  ProjectSet
+               Output: (sum(id)), v1, v2, generate_series(1::numeric, v1)
+               ->  HashAggregate
+                     Output: v1, sum(id), v2
+                     Group By Key: tbl_1k.v1, tbl_1k.v2
+                     ->  Seq Scan on srf_fusion.tbl_1k
+                           Output: v1, v2, id
+(12 rows)
 
 create table agg_hash as
-select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id) limit 1500;
+select sum(id), v1,v2,generate_series(1,v1) as g1 from tbl_1k group by v1,v2 order by sum(id), g1 limit 1000;
 -- Compare results to hash aggregation results
 (select * from agg_group except select * from agg_hash)
   union all
@@ -347,14 +343,14 @@ create table tsrf as select * from part_tsrf;
 --scan/join contains srf
 explain (costs off, verbose)
 SELECT a,generate_series(1,a+b) FROM part_tsrf;
-                        QUERY PLAN                         
------------------------------------------------------------
+                        QUERY PLAN                        
+----------------------------------------------------------
  ProjectSet
    Output: a, generate_series(1, (a + b))
    ->  Partition Iterator
          Output: a, b
          Iterations: 2
-         ->  Partitioned Seq Scan on windows_srf.part_tsrf
+         ->  Partitioned Seq Scan on srf_fusion.part_tsrf
                Output: a, b
                Selected Partitions:  1..2
 (8 rows)
@@ -382,7 +378,7 @@ SELECT generate_series(1, max(a*b)), (a+b) % 1000 + 1 FROM part_tsrf group by (a
          ->  Partition Iterator
                Output: ((a + b) % 1000), a, b
                Iterations: 2
-               ->  Partitioned Seq Scan on windows_srf.part_tsrf
+               ->  Partitioned Seq Scan on srf_fusion.part_tsrf
                      Output: ((a + b) % 1000), a, b
                      Selected Partitions:  1..2
 (11 rows)
@@ -397,4 +393,4 @@ create table t2 as SELECT generate_series(1, max(a*b)), (a+b) % 1000 + 1 FROM ts
 (0 rows)
 
 drop table t1, t2, part_tsrf, tsrf;
-drop schema windows_srf cascade;
+drop schema srf_fusion cascade;
