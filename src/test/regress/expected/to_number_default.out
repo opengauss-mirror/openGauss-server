@@ -286,6 +286,12 @@ CONTEXT:  referenced column: to_number
 SELECT  TO_NUMBER('1234.56' default 999 on conversion error ,'99.99');
 ERROR:  Exceeding the maximum value required by fmt
 CONTEXT:  referenced column: to_number
+SELECT  TO_NUMBER('1234.56' default 999.1 on conversion error ,'999.99');
+ to_number 
+-----------
+     999.1
+(1 row)
+
 SELECT TO_NUMBER(c2 DEFAULT 3.14 ON CONVERSION ERROR) FROM tonumber ORDER By c1;
                 to_number                
 -----------------------------------------

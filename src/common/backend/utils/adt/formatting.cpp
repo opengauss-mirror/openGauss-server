@@ -7078,17 +7078,20 @@ Datum numeric_to_text_number(PG_FUNCTION_ARGS)
                     int len = VARSIZE(fmt) - VARHDRSZ;
                     FormatNode* format = NUM_cache(len, &numDesc, fmt, &shouldFree);
                     // Integer digits
-                    unsigned int formatPrecision = Max(0, numDesc.pre);
+                    unsigned int formatPrePrecision = Max(0, numDesc.pre);
+                    // Decimal digits
+                    unsigned int formatPostPrecision = Max(0, numDesc.post);
                     if (shouldFree)
                         pfree_ext(format);
 
                     // Calculate the formatPrecision power of 10.
-                    double powerOfMax = pow(10, formatPrecision);
+                    double powerOfPreMax = pow(10, formatPrePrecision) - 1;
+                    double powerOfPostMax = (pow(10, formatPostPrecision) - 1) / pow(10, formatPostPrecision);
 
                     // into numeric_float8 func
                     double defaultValue = (double)DatumGetFloat8(DirectFunctionCall1(numeric_float8, 
                         NumericGetDatum(defaultNumVal)));
-                    if (defaultValue > (powerOfMax - 1)) {
+                    if (defaultValue > (powerOfPreMax + powerOfPostMax)) {
                         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), 
                             errmsg("Exceeding the maximum value required by fmt")));
                     }
