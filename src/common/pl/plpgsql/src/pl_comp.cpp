@@ -4499,9 +4499,7 @@ List* search_external_nest_type(char* name, Oid typeOid, int layer, List* nest_t
     if (tuple) {
         cur_ntype->typname = pstrdup(name);
         cur_ntype->layer = layer;
-        if (cur_ntype->index != -1) {
-            nest_typnames = lappend(nest_typnames, cur_ntype);
-        }
+        nest_typnames = lappend(nest_typnames, cur_ntype);
         TupleDesc tuple_desc = lookup_rowtype_tupdesc_noerror(typeOid, typmod, true);
         if (tuple_desc) {
             natts = tuple_desc->natts;

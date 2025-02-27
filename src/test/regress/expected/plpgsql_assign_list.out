@@ -372,6 +372,44 @@ END;
 /
 ERROR:  Wrong type of expression, should not use type "t_rec2"
 CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 8
+create type uuuuu as object (val1 int, val2 varchar(10));
+create or replace procedure p_PLvarray_Case0043
+as
+  TYPE sssss IS varray(10) OF uuuuu;
+  l_recxx sssss:=sssss(uuuuu(1,'one'),uuuuu(2,'two'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx(2).val2;
+  --dbms_output.put_line(l_recxx(2).val2);
+END;
+/
+call p_PLvarray_Case0043();
+INFO:  l_recxx is two
+ p_plvarray_case0043 
+---------------------
+ 
+(1 row)
+
+drop type uuuuu;
+create or replace procedure p_PLvarray_Case0043
+as
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10));
+  TYPE sssss IS varray(10) OF t_rec;
+  l_recxx sssss:=sssss(t_rec(1,'one'),t_rec(2,'two'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx(2).val1;
+  --dbms_output.put_line(l_recxx(2).val2);
+END;
+/
+call p_PLvarray_Case0043();
+INFO:  l_recxx is two
+ p_plvarray_case0043 
+---------------------
+ 
+(1 row)
+
+drop procedure p_PLvarray_Case0043;
 DECLARE
   TYPE nt_type IS TABLE OF INTEGER;
   TYPE va_type IS VARRAY(4) OF INTEGER;
