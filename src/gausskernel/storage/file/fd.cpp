@@ -4270,3 +4270,14 @@ int DirectFilePWrite(File fd, const char *buf, int amount, off_t offset, uint32 
     }
     return nbytes;
 }
+
+#ifdef USE_ASSERT_CHECKING
+/** Get file's segment number
+ @param[in]     the file number in VFD cache.
+ @return the file segment number */
+uint32_t FileSegNo(File file)
+{
+    auto vfdcache = GetVfdCache(false);
+    return vfdcache[file].fileNode.segno;
+}
+#endif

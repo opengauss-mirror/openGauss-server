@@ -157,8 +157,15 @@ void spc_writeback(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, Block
     SegLogicFile *sf = spc->extent_group[egid][forknum].segfile;
 
     if (IS_SEG_COMPRESSED_RNODE(relNode, forknum) && SegIsDataBlock(blocknum, seg->extent_size)) {
-        int fd = df_get_fd(sf, blocknum);
-        CfsWriteBack(rel, relNode, fd, seg->extent_size, forknum, blocknum, nblocks, SEG_STORAGE);
+        while (nblocks > 0) {
+            int fd = df_get_fd(sf, blocknum);
+            auto nflushed = CfsWriteBack(rel, relNode, fd, seg->extent_size, forknum, blocknum, nblocks, SEG_STORAGE);
+            if (nflushed == InvalidBlockNumber) {
+                return;
+            }
+            nblocks -= nflushed;
+            blocknum += nflushed;
+        }
     } else {
         df_flush_data(sf, blocknum, nblocks);
     }
@@ -550,11 +557,11 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
 
     char *pagedata = NULL;
     for (int i = 0; i < seg->extent_size; i++) {
-        /* 
+        /*
          * If this extent is the last one in the segment, some blocks may be not used (extended) yet.
-         * Skip them, otherwise redo XLOG_HEAP_NEWPAGE xlog will generate a buffer whose block number 
+         * Skip them, otherwise redo XLOG_HEAP_NEWPAGE xlog will generate a buffer whose block number
          * is larger than nblocks of the relation. Once redo finished, and this segment needs to extend
-         * a new page, "ReadBuffer" function will find the new extended blocks has already been in the 
+         * a new page, "ReadBuffer" function will find the new extended blocks has already been in the
          * buffer pool and the page is not "new page", which violate the assumption of ReadBuffer. See
          * more details in "ReadBuffer_common".
          */
@@ -718,7 +725,7 @@ RelFileNode get_segment_logic_rnode(SegSpace *spc, BlockNumber head_blocknum, in
     if (BufferIsValid(ipbuf)) {
         SegReleaseBuffer(ipbuf);
     }
-    
+
     return rnode;
 }
 
@@ -1051,7 +1058,7 @@ BlockNumber shrink_hwm(SegExtentGroup *seg, BlockNumber target_size)
     BlockNumber new_hwm = hwm;
     bool end = false;
     int i = map_head->group_count - 1;
-    uint16 new_count = map_head->group_count; 
+    uint16 new_count = map_head->group_count;
     for (; !end && i >= 0; i--) {
         new_count = i + 1;
         BlockNumber first_map_block = map_head->groups[i].first_map;

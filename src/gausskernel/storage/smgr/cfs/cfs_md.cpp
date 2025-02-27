@@ -234,15 +234,88 @@ inline static uint4 PageCompressChunkSize(SMgrRelation reln)
     return CHUNK_SIZE_LIST[GET_COMPRESS_CHUNK_SIZE((reln)->smgr_rnode.node.opt)];
 }
 
-void CfsWriteBack(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
-                  BlockNumber blocknum, BlockNumber nblocks, EXTEND_STORAGE_TYPE type)
+/** flush a single compress block into the compressed disk file.
+ @param[in]     reln        the SMgrRelation for the block.
+ @param[in]     forknum     the forknum of the relation.
+ @param[in]     location    the extent location of the block need to be flushed.
+ @param[in]     blocknum    the block number.
+ @return true if we succeed to flush the compressed page, otherwise return false. */
+static bool CfsFlushBlock(SMgrRelation reln, ForkNumber forknum,
+                          const ExtentLocation &location, BlockNumber blocknum)
 {
-    while (nblocks > 0) {
-        ExtentLocation location =
-            g_location_convert[type](reln, relNode, fd, extent_size, forknum, blocknum);
-        if (location.fd == -1) {
-            return;
+    pc_chunk_number_t seekPosChunk;
+    pc_chunk_number_t lastChunk;
+    bool firstEnter = true;
+    uint16_t chunkSize =  location.chunk_size;
+    off_t seekPos;
+
+    pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
+    if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
+        pca_buf_free_page(ctrl, location, false);
+        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
+            ereport(DEBUG1,
+                    (errcode(ERRCODE_DATA_CORRUPTED),
+                     errmsg("could not write back %u in file \"%s\" headerNum: %u, relation has been removed",
+                     blocknum, FilePathName(location.fd), location.headerNum)));
+            return false;
         }
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("Failed to CfsWriteBack %s, headerNum: %u.", FilePathName(location.fd),
+                               location.headerNum)));
+    }
+
+    CfsExtentAddress *cfsExtentAddress = GetExtentAddress(ctrl->pca_page, (uint16)location.extentOffset);
+    for (uint8 i = 0; i < cfsExtentAddress->nchunks; ++i) {
+        if (firstEnter) {
+            seekPosChunk = cfsExtentAddress->chunknos[i];
+            lastChunk = seekPosChunk;
+            firstEnter = false;
+        } else if (cfsExtentAddress->chunknos[i] == lastChunk + 1) {
+            lastChunk++;
+        } else {
+            seekPos = OffsetOfPageCompressChunk(chunkSize, (int)seekPosChunk);
+            pc_chunk_number_t nchunks = (lastChunk - seekPosChunk) + 1;
+            if (location.is_segment_page) {
+                pg_flush_data(location.fd, seekPos, (off_t)nchunks * chunkSize);
+            } else {
+                FileWriteback(location.fd, seekPos, (off_t) nchunks * chunkSize);
+            }
+
+            seekPosChunk = cfsExtentAddress->chunknos[i];
+            lastChunk = seekPosChunk;
+        }
+    }
+
+    /* flush the rest chunks */
+    if (!firstEnter) {
+        seekPos = (off_t) chunkSize * seekPosChunk;
+        pc_chunk_number_t nchunks = (lastChunk - seekPosChunk) + 1;
+        if (location.is_segment_page) {
+            pg_flush_data(location.fd, seekPos, (off_t)nchunks * chunkSize);
+        } else {
+            FileWriteback(location.fd, seekPos, (off_t) nchunks * chunkSize);
+        }
+    }
+
+    pca_buf_free_page(ctrl, location, false);
+    return true;
+}
+
+BlockNumber CfsWriteBack(SMgrRelation reln, const RelFileNode &relNode, int fd, int extent_size, ForkNumber forknum,
+                         BlockNumber blocknum, BlockNumber nblocks, EXTEND_STORAGE_TYPE type)
+{
+    BlockNumber firstSeg = blocknum / CFS_LOGIC_BLOCKS_PER_FILE;
+    BlockNumber lastSeg = (blocknum + nblocks - 1) / CFS_LOGIC_BLOCKS_PER_FILE;
+    BlockNumber nflush = nblocks;
+
+    if (firstSeg != lastSeg) {
+        nflush = CFS_LOGIC_BLOCKS_PER_FILE - (blocknum % CFS_LOGIC_BLOCKS_PER_FILE);
+    }
+
+    for (BlockNumber iblock = 0; iblock < nflush; ++iblock) {
+        BlockNumber blkwrite = blocknum + iblock;
+        ExtentLocation location = g_location_convert[type](reln, relNode, fd, extent_size, forknum, blkwrite);
+
         /* if it's segment page and we don't compress the page, write the original page. Cases
         that we do this are:
             - It's in 1th or 2th segment logical file that we don't compress blocks by design.
@@ -250,86 +323,28 @@ void CfsWriteBack(SMgrRelation reln, const RelFileNode &relNode, int fd, int ext
             - It's under a DSS storage.
             - The cfs extent of the block is cross two 1G physical file, punch hole is meaningless. */
         if (location.is_segment_page && (!location.is_compress_allowed)) {
-            pg_flush_data(location.fd, blocknum * BLCKSZ, BLCKSZ);
-            nblocks -= 1;
-            blocknum += 1;
+            pg_flush_data(location.fd, blkwrite * BLCKSZ, BLCKSZ);
             ereport(DEBUG2,
                     (errmodule(MOD_SEGMENT_PAGE),
                      errmsg("don't compress block due to it's a slice-acrossed"
-                            "block, logicBlockNumber:%u, fd:%d, extent_size:%d, forknum:%d, type:%d,"
-                            "RelFileNode.relNode:%d, RelFileNode.opt:%d",
-                            blocknum, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
+                            "block, logicBlockNumber: %u, fd: %d, extent_size: %d, forknum: %d, "
+                            "type: %d, RelFileNode.relNode: %d, RelFileNode.opt: %d",
+                            blkwrite, fd, extent_size, forknum, type, relNode.relNode, relNode.opt)));
             continue;
         }
-        unsigned int segnum_start = blocknum / CFS_LOGIC_BLOCKS_PER_FILE;
-        unsigned int segnum_end = (blocknum + nblocks - 1) / CFS_LOGIC_BLOCKS_PER_FILE;
-        BlockNumber nflush = nblocks;
-        if (segnum_start != segnum_end) {
-            nflush = CFS_LOGIC_BLOCKS_PER_FILE - (blocknum % CFS_LOGIC_BLOCKS_PER_FILE);
+
+#ifdef USE_ASSERT_CHECKING
+        if (!location.is_segment_page) {
+            Assert(firstSeg == FileSegNo(location.fd));
         }
-        off_t seekPos;
-        for (BlockNumber iblock = 0; iblock < nflush; ++iblock) {
-            uint32 chunkSize = PageCompressChunkSize(reln);
-            location =
-                g_location_convert[type](reln, relNode, fd, extent_size, forknum, blocknum + iblock);
-
-            pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
-            if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
-                pca_buf_free_page(ctrl, location, false);
-                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-                    ereport(DEBUG1, (errcode(ERRCODE_DATA_CORRUPTED), errmsg(
-                            "could not write back %u in file \"%s\" headerNum: %u, relation has been removed", blocknum,
-                            FilePathName(location.fd), location.headerNum)));
-                    return;
-                }
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("Failed to CfsWriteBack %s, headerNum: %u.",
-                                                                        FilePathName(location.fd),
-                                                                        location.headerNum)));
-            }
-            CfsExtentHeader *cfsExtentHeader = ctrl->pca_page;
-
-            CfsExtentAddress *cfsExtentAddress = GetExtentAddress(cfsExtentHeader, (uint16)location.extentOffset);
-
-            pc_chunk_number_t seekPosChunk;
-            pc_chunk_number_t lastChunk;
-            bool firstEnter = true;
-
-            for (uint8 i = 0; i < cfsExtentAddress->nchunks; ++i) {
-                if (firstEnter) {
-                    seekPosChunk = cfsExtentAddress->chunknos[i];
-                    lastChunk = seekPosChunk;
-                    firstEnter = false;
-                } else if (cfsExtentAddress->chunknos[i] == lastChunk + 1) {
-                    lastChunk++;
-                } else {
-                    seekPos = OffsetOfPageCompressChunk((uint16)chunkSize, (int)seekPosChunk);
-                    pc_chunk_number_t nchunks = (lastChunk - seekPosChunk) + 1;
-                    if (location.is_segment_page) {
-                        pg_flush_data(location.fd, seekPos, (off_t)nchunks * chunkSize);
-                    } else {
-                        FileWriteback(location.fd, seekPos, (off_t) nchunks * chunkSize);
-                    }
-
-                    seekPosChunk = cfsExtentAddress->chunknos[i];
-                    lastChunk = seekPosChunk;
-                }
-            }
-            /* flush the rest chunks */
-            if (!firstEnter) {
-                seekPos = (off_t) chunkSize * seekPosChunk;
-                pc_chunk_number_t nchunks = (lastChunk - seekPosChunk) + 1;
-                if (location.is_segment_page) {
-                    pg_flush_data(location.fd, seekPos, (off_t)nchunks * chunkSize);
-                } else {
-                    FileWriteback(location.fd, seekPos, (off_t) nchunks * chunkSize);
-                }
-            }
-
-            pca_buf_free_page(ctrl, location, false);
+#endif
+        /* @TODO: we'd flush entire extent instead of only flush one page. */
+        if (!CfsFlushBlock(reln, forknum, location, blkwrite)) {
+            return InvalidBlockNumber;
         }
-        nblocks -= nflush;
-        blocknum += nflush;
     }
+
+    return nflush;
 }
 
 /** find chunks adjacent to the current chunk that can be reused
@@ -889,10 +904,17 @@ BlockNumber CfsNBlock(const RelFileNode &relFileNode, int fd, BlockNumber segNo,
         return (BlockNumber)0;
     }
     BlockNumber result = (extentCount - 1) * (CFS_EXTENT_SIZE - 1);
-    ExtentLocation location = {fd, relFileNode, (extentCount - 1) + segNo * CFS_EXTENT_COUNT_PER_FILE,
-                               0, 0, extentCount * CFS_EXTENT_SIZE - 1,
-                               (uint16)CHUNK_SIZE_LIST[option.compressChunkSize],
-                               (uint8)option.compressAlgorithm};
+
+    ExtentLocation location = {
+        .fd = fd,
+        .relFileNode = relFileNode,
+        .extentNumber = (extentCount - 1) + segNo * CFS_EXTENT_COUNT_PER_FILE,
+        .extentStart = 0, /* unused */
+        .extentOffset = 0,
+        .headerNum = extentCount * CFS_EXTENT_SIZE - 1,
+        .chunk_size = (uint16)CHUNK_SIZE_LIST[option.compressChunkSize],
+        .algorithm = (uint8)option.compressAlgorithm
+    };
 
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {

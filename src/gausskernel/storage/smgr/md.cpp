@@ -884,17 +884,24 @@ void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
 void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
                  BlockNumber nblocks, RelFileNode relNode)
 {
-    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        int fd = CfsGetFd(reln, MAIN_FORKNUM, blocknum, true, WRITE_BACK_OPEN_FILE);
-        CfsWriteBack(reln, relNode, fd, CFS_LOGIC_BLOCKS_PER_EXTENT, forknum, blocknum,
-                     nblocks, COMMON_STORAGE);
-        return;
-    }
     /*
      * Issue flush requests in as few requests as possible; have to split at
      * segment boundaries though, since those are actually separate files.
      */
     while (nblocks > 0) {
+        if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
+            int fd = CfsGetFd(reln, MAIN_FORKNUM, blocknum, true, WRITE_BACK_OPEN_FILE);
+            auto nflushed = CfsWriteBack(reln, relNode, fd, CFS_LOGIC_BLOCKS_PER_EXTENT, forknum, blocknum,
+                                         nblocks, COMMON_STORAGE);
+            if (nflushed == InvalidBlockNumber) {
+                return;
+            }
+
+            nblocks -= nflushed;
+            blocknum += nflushed;
+            continue;
+        }
+
         BlockNumber nflush = nblocks;
         off_t seekpos;
         MdfdVec *v = NULL;

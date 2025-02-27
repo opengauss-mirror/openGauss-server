@@ -6,7 +6,8 @@
 
 #define MIN_FALLOCATE_SIZE (4096)
 
-/** write pages back to storage, called by mdwriteback or spc_writeback.
+/** write pages back to storage, called by mdwriteback or spc_writeback. Note: we only flush one file segment, if there
+ are some blocks are not in current segment file, the calller should revoke this function again.
  @param[in]     reln             SMgrRelation.
  @param[in]     relNode          RelFileNode.
  @param[in]     fd               file discriptor.
@@ -14,9 +15,11 @@
  @param[in]     forknum          fork number.
  @param[in]     blocknum         block number, when under segment table, physical.
  @param[in]     nblocks          block amount to write back.
- @param[in]     type             storage type, heap or segment. */
-extern void CfsWriteBack(SMgrRelation reln, const RelFileNode& relNode, int fd, int extent_size, ForkNumber forknum,
-                         BlockNumber blocknum, BlockNumber nblocks, EXTEND_STORAGE_TYPE type);
+ @param[in]     type             storage type, heap or segment.
+ @return  the number blocks has been flushed. */
+extern BlockNumber CfsWriteBack(SMgrRelation reln, const RelFileNode& relNode, int fd, int extent_size,
+                                ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks,
+                                EXTEND_STORAGE_TYPE type);
 
 /** main entry to write compress pages to storage.
  @param[in]     reln             SMgrRelation.
