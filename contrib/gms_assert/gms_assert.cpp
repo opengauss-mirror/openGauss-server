@@ -552,6 +552,16 @@ Datum sql_object_name(PG_FUNCTION_ARGS)
                         GetPgObjectTypePgClass(get_rel_relkind(objectId)));
         if (objectValid) {
             PG_RETURN_TEXT_P(rawname);
+        } else {
+            /* Suppose the object is a system catalog */
+            HeapTuple tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(objectId));
+            Form_pg_class classfrom = (Form_pg_class)GETSTRUCT(tuple);
+            
+            if (IsSystemClass(classfrom)) {
+                ReleaseSysCache(tuple);
+                PG_RETURN_TEXT_P(rawname);
+            }
+            ReleaseSysCache(tuple);
         }
     }
 
