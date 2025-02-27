@@ -766,11 +766,10 @@ LINE 1: select interval '10000000000-01' as max_interval;
                         ^
 CONTEXT:  referenced column: max_interval
 select interval '1000000000-01' as max_interval;
-       max_interval       
---------------------------
- -73741823 years -11 mons
-(1 row)
-
+ERROR:  interval field value out of range: "1000000000-01"
+LINE 1: select interval '1000000000-01' as max_interval;
+                        ^
+CONTEXT:  referenced column: max_interval
 select interval '100000000-01' as max_interval;
      max_interval      
 -----------------------
@@ -794,11 +793,10 @@ LINE 1: select interval '-10000000000-01' as max_interval;
                         ^
 CONTEXT:  referenced column: max_interval
 select interval '-1000000000-01' as max_interval;
-       max_interval       
---------------------------
- -73741823 years -11 mons
-(1 row)
-
+ERROR:  interval field value out of range: "-1000000000-01"
+LINE 1: select interval '-1000000000-01' as max_interval;
+                        ^
+CONTEXT:  referenced column: max_interval
 select interval '-100000000-01' as max_interval;
        max_interval       
 --------------------------
