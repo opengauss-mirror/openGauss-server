@@ -832,6 +832,12 @@ void process_client_read_interrupt(bool blocked)
     int save_errno = errno;
 
     if (t_thrd.postgres_cxt.DoingCommandRead) {
+        /*
+         * restore CurrentMemoryContext later, because ProcessCatchupInterrupt
+         * may change it, such as AtCommit_Memory.
+         */
+        MemoryContext save_cxt = CurrentMemoryContext;
+
         /* Check for general interrupts that arrived while reading */
         CHECK_FOR_INTERRUPTS();
 
@@ -844,6 +850,8 @@ void process_client_read_interrupt(bool blocked)
         if(notifyInterruptPending) {
             ProcessNotifyInterrupt();
         }
+
+        (void)MemoryContextSwitchTo(save_cxt);
     } else if (t_thrd.int_cxt.ProcDiePending && blocked) {
         /*
          * We're dying It's safe (and sane) to handle that now.
@@ -928,6 +936,11 @@ void logic_conn_read_check_ended(void)
 {
     if (t_thrd.postgres_cxt.DoingCommandRead) {
         int save_errno = errno;
+        /*
+         * restore CurrentMemoryContext later, because ProcessCatchupInterrupt
+         * may change it, such as AtCommit_Memory.
+         */
+        MemoryContext save_cxt = CurrentMemoryContext;
 
         /* Process sinval catchup interrupts that happened while reading */
         if (catchupInterruptPending)
@@ -938,6 +951,8 @@ void logic_conn_read_check_ended(void)
             ProcessNotifyInterrupt();
 
         t_thrd.int_cxt.ImmediateInterruptOK = false;
+
+        (void)MemoryContextSwitchTo(save_cxt);
         errno = save_errno;
     }
 }
@@ -949,6 +964,12 @@ void client_read_ended(void)
 {
     if (t_thrd.postgres_cxt.DoingCommandRead) {
         int save_errno = errno;
+        /*
+         * restore CurrentMemoryContext later, because ProcessCatchupInterrupt
+         * may change it, such as AtCommit_Memory.
+         */
+        MemoryContext save_cxt = CurrentMemoryContext;
+
         /* Should reset ImmediateInterruptOK before proccessing catchup interrupts */
         t_thrd.int_cxt.ImmediateInterruptOK = false;
 
@@ -960,6 +981,7 @@ void client_read_ended(void)
         if (notifyInterruptPending)
             ProcessNotifyInterrupt();
 
+        (void)MemoryContextSwitchTo(save_cxt);
         errno = save_errno;
     }
 }
