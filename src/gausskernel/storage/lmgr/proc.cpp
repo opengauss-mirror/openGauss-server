@@ -1948,6 +1948,8 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
     /* enlarge the deadlock-check timeout if needed. */
     int deadLockTimeout = !t_thrd.storage_cxt.EnlargeDeadlockTimeout ? u_sess->attr.attr_storage.DeadlockTimeout
                         : u_sess->attr.attr_storage.DeadlockTimeout * 3;
+    int lockWaitTimeout = Max(1, (allow_con_update ? u_sess->attr.attr_storage.LockWaitUpdateTimeout
+	    : u_sess->attr.attr_storage.LockWaitTimeout));
 
     /*
      * Set timer so we can wake up after awhile and check for a deadlock. If a
@@ -1958,7 +1960,7 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
      * By delaying the check until we've waited for a bit, we can avoid
      * running the rather expensive deadlock-check code in most cases.
      */
-    if (!enable_sig_alarm(deadLockTimeout, false))
+    if (!enable_sig_alarm(Min(deadLockTimeout, lockWaitTimeout), false))
         ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("could not set timer for process wakeup")));
 
     /*
@@ -2154,7 +2156,7 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
          * Set timer so we can wake up after awhile and check for a lock acquire
          * time out. If time out, ereport and abort current transaction.
          */
-        int needWaitTime = Max(1000, (allow_con_update ? u_sess->attr.attr_storage.LockWaitUpdateTimeout :
+        int needWaitTime = Max(1, (allow_con_update ? u_sess->attr.attr_storage.LockWaitUpdateTimeout :
                                u_sess->attr.attr_storage.LockWaitTimeout) - u_sess->attr.attr_storage.DeadlockTimeout);
         if (waitSec > 0) {
             if (t_thrd.storage_cxt.timer_continued.tv_sec != 0 || t_thrd.storage_cxt.timer_continued.tv_usec != 0) {
@@ -2166,8 +2168,7 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
             }
         }
 
-        if (myWaitStatus == STATUS_WAITING && u_sess->attr.attr_storage.LockWaitTimeout > 0 && 
-            t_thrd.storage_cxt.deadlock_timeout_active == false) {
+        if (myWaitStatus == STATUS_WAITING && !t_thrd.storage_cxt.deadlock_timeout_active) {
             if (!enable_lockwait_sig_alarm(needWaitTime)) {
                 ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not set timer for process wakeup")));
             }
