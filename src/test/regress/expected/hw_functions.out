@@ -957,4 +957,10 @@ SELECT to_char('','');
  
 (1 row)
 
+SELECT to_char('2020-08-26 14:57:33','yyyy-mon-dd hh24:mi:ss');
+ERROR:  invalid input syntax for type numeric: "2020-08-26 14:57:33"
+CONTEXT:  referenced column: to_char
+SELECT to_char('2020','yyyy-mon-dd hh24:mi:ss');
+ERROR:  multiple decimal points
+CONTEXT:  referenced column: to_char
 drop schema basefunc cascade;

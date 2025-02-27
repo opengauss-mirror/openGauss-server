@@ -373,5 +373,7 @@ SELECT to_char(c1, 873) FROM blob_table ;
 DROP TABLE blob_table;
 DROP TABLE blob_t;
 SELECT to_char('','');
+SELECT to_char('2020-08-26 14:57:33','yyyy-mon-dd hh24:mi:ss');
+SELECT to_char('2020','yyyy-mon-dd hh24:mi:ss');
 
 drop schema basefunc cascade;
