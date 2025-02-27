@@ -32,7 +32,7 @@
 #include "gram.hpp"
 #include "parser/gramparse.h"
 #include <setjmp.h>
-#include "parser/kwlist_d.h"
+#include "parser/keywords.h"
 extern void resetOperatorPlusFlag();
 extern bool check_length();
 
