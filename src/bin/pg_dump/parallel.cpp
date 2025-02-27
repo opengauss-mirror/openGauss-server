@@ -775,7 +775,7 @@ static void WaitForCommands(ArchiveHandle* AH, int pipefd[2])
         sendMessageToPipe(pipefd[PIPE_WRITE], buf);
 
         /* command was pg_malloc'd and we are responsible for free()ing it. */
-        pg_free(command);
+        free(command);
     }
 }
 
@@ -800,7 +800,6 @@ void DispatchJobForTocEntry(ParallelStateN* pstate, TocEntry* te, T_Action act)
     /* Construct and send command string */
     buildWorkerCommand(te, act, buf, sizeof(buf));
     sendMessageToPipe(pstate->parallelSlot[worker].pipeWrite, buf);
-
     pstate->parallelSlot[worker].workerStatus = WRKR_WORKING;
     pstate->te[worker] = te;
 }
@@ -885,7 +884,7 @@ static char* readMessageFromPipe(int fd)
     }
 
     /* Other end has closed the connection */
-    pg_free(msg);
+    free(msg);
     return NULL;
 }
 

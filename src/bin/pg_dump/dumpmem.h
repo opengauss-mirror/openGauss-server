@@ -19,7 +19,6 @@ extern void* pg_malloc(size_t size);
 extern void* pg_malloc_zero(size_t size);
 extern void* pg_calloc(size_t nmemb, size_t size);
 extern void* pg_realloc(void* ptr, size_t size);
-extern void* pg_free(void* pointer);
 
 #endif /* DUMPMEM_H */
 

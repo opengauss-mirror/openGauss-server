@@ -959,6 +959,22 @@ void InitArchiveFmt_Parallel(ArchiveHandle* AH)
     AH->WriteDataptr = _WriteData;
     AH->WriteDataptrP = _WriteDataP;
     AH->StartDataptr = _StartDataP;
+    
+    // Convert the formatData from lclContext to lclContextP
+    lclContext* origin = (lclContext*)AH->formatData;
+    lclContextP* ctx = (lclContextP*)pg_calloc(1, sizeof(lclContextP));
+
+    // Copy relevant data from origin to the new context
+    ctx->directory = origin->directory;
+    ctx->dataFH = origin->dataFH;
+    ctx->dataCryptoCache = origin->dataCryptoCache;
+    ctx->blobsTocFH = origin->blobsTocFH;
+
+    // Free the old context
+    free(origin);
+
+    // Assign the new context to formatData
+    AH->formatData = (void*)ctx;
 }
 
 static void
@@ -1058,7 +1074,7 @@ static void _CloseArchiveP(ArchiveHandle* AH)
         for (int i = 0; i < ntes; i++)
             DispatchJobForTocEntry(ctx->parallelState, tes[i], ACT_DUMP);
 
-        pg_free(tes);
+        free(tes);
         WaitForWorkers(ctx->parallelState, WFW_ALL_IDLE);
 
         ParallelBackupEnd(AH, ctx->parallelState);
