@@ -197,6 +197,82 @@ END;
 /
 
 DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,upper('one'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,lower('ONE'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+CREATE OR REPLACE FUNCTION funcname(str inout int) RETURNS int
+AS $$
+DECLARE
+BEGIN
+return str;
+END
+$$
+LANGUAGE plpgsql;
+
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,funcname(1));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+DROP FUNCTION funcname;
+
+CREATE OR REPLACE FUNCTION funcname(str inout VARCHAR2(10)) RETURNS VARCHAR2(10)
+AS $$
+DECLARE
+BEGIN
+return str;
+END
+$$
+LANGUAGE plpgsql;
+
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,funcname('ONE'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,funcname('ONE', 'TWO'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,uuuu1('ONE', 'TWO'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+DROP FUNCTION funcname;
+
+DECLARE
   TYPE t_rec IS RECORD (
     id   NUMBER,
     val1 VARCHAR2(10),

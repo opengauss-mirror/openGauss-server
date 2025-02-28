@@ -8790,6 +8790,9 @@ static void checkTypeName(List* nest_typnames, List* target_nest_typnames)
         char* pkgtypname = NULL;
         List* found_list = NIL;
         bool found = false;
+        List* funcname = NIL;
+        FuncCandidateList clist = NULL;
+        char *cp[3] = {0};
             
         for (i = 0; i < target_nest_typnames->length; i++) {
             if (target_ntype->layer == ntype->layer &&
@@ -8820,16 +8823,36 @@ static void checkTypeName(List* nest_typnames, List* target_nest_typnames)
                 }
             }
         }
-        if (!found) {
-            char *mes = NULL;
-            char *report_mes = "Wrong type of expression, should not use type ";
-            int length = strlen(ntype->typname) + strlen(report_mes) + 3;
-            mes = (char*)palloc0(length);
-            errno_t rc = snprintf_s(mes, length, length -1, "%s\"%s\"", report_mes, ntype->typname);
-            securec_check_ss(rc, "", "");
-            InsertErrorMessage(mes, plpgsql_yylloc);
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg(mes)));
+        if (found) {
+            continue;
         }
+
+        plpgsql_parser_funcname(ntype->typname, cp, 3);
+        for (int i = 0; i < (sizeof(cp) / sizeof(cp[0]) - 1) ; i++) {
+            if (cp[i] && cp[i][0] != '\0') {
+                if (i != 0) {
+                    funcname = list_make2(funcname, makeString(cp[i]));
+                } else {
+                    funcname = list_make1(makeString(cp[i]));
+                }
+            }
+        }
+        clist = FuncnameGetCandidates(funcname, -1, NIL, false, false, false);
+	    if (clist != NULL) {
+            found = true;
+	    }
+
+        if (found) {
+            continue;
+        }
+        char *mes = NULL;
+        char *report_mes = "Wrong type of expression, should not use type ";
+        int length = strlen(ntype->typname) + strlen(report_mes) + 3;
+        mes = (char*)palloc0(length);
+        errno_t rc = snprintf_s(mes, length, length -1, "%s\"%s\"", report_mes, ntype->typname);
+        securec_check_ss(rc, "", "");
+        InsertErrorMessage(mes, plpgsql_yylloc);
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg(mes)));
     }
 }
 
