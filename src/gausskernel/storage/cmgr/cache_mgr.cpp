@@ -591,7 +591,18 @@ void CacheMgr::EvictCacheCUIntoDisk(CacheSlotId_t slotId)
         cu->Compress(cuDesc->row_count, 0, ALIGNOF_CUSIZE);
         compressedBufSize = cu->GetCUSize();
     }
-    imcuStorage->SaveCU(cu->m_compressedBuf, cuId, compressedBufSize);
+
+    PG_TRY();
+    {
+        imcuStorage->SaveCU(cu->m_compressedBuf, cuId, compressedBufSize);
+    }
+    PG_CATCH();
+    {
+        m_CacheDesc[slotId].m_flag = CACHE_BLOCK_VALID;
+        UnPinCacheBlock(slotId);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     pg_atomic_sub_fetch_u64(&imcsDesc->cuSizeInMem, (uint64)cuDesc->cu_size);
     pg_atomic_sub_fetch_u64(&imcsDesc->cuNumsInMem, 1);
