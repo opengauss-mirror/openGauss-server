@@ -435,6 +435,9 @@ readInstanceConfigFile(const char *instance_name)
     int            parsed_options;
     int nRet = 0;
 
+    errno_t rc = memset_s(instance, sizeof(InstanceConfig), 0, sizeof(InstanceConfig));
+    securec_check(rc, "\0", "\0");
+
     ConfigOption instance_options[] =
     {
         /* Instance options */

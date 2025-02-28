@@ -663,6 +663,28 @@ static void sync_files(parray *database_map, const char *database_path, parray *
     }
 }
 
+void
+PageFree(void *pageEntry)
+{
+    page_map_entry *pageEntryTmp;
+
+    if (pageEntry == nullptr) {
+        return;
+    }
+
+    pageEntryTmp = (page_map_entry *) pageEntry;
+
+    if (pageEntryTmp->path != nullptr) {
+        free(const_cast<char *>(pageEntryTmp->path));
+    }
+
+    if (pageEntryTmp->pagemap != nullptr) {
+        free(pageEntryTmp->pagemap);
+    }
+
+    free(pageEntryTmp);
+}
+
 /*
  * Take a backup of a single openGauss instance.
  * Move files from 'pgdata' to a subdirectory in 'backup_path'.
@@ -683,6 +705,7 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
     parray  *backup_list = NULL;
     parray  *external_dirs = NULL;
     parray  *database_map = NULL;
+    parray  *filemaps = nullptr;
 
     /* for fancy reporting */
     time_t  start_time, end_time;
@@ -829,9 +852,7 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
         /*
          * Build the page map from ptrack information.
          */
-        make_pagemap_from_ptrack(backup_files_list,
-                                                            backup_conn,
-                                                            prev_backup_start_lsn);
+        filemaps = make_pagemap_from_ptrack(backup_files_list, backup_conn, prev_backup_start_lsn);
 
         time(&end_time);
         elog(INFO, "Pagemap successfully extracted, time elapsed: %.0f sec",
@@ -916,6 +937,11 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
     parray_walk(backup_files_list, pgFileFree);
     parray_free(backup_files_list);
     backup_files_list = NULL;
+
+    if (filemaps) {
+        parray_walk(filemaps, PageFree);
+        parray_free(filemaps);
+    }
 }
 
 /*

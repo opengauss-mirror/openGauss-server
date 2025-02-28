@@ -1150,7 +1150,6 @@ cleanup:
     }
 
     pg_free(errmsg);
-    pg_free(file->pagemap.bitmap);
     pg_free(headers);
 }
 

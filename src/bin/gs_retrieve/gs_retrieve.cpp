@@ -115,8 +115,8 @@ retry:
     securec_check_ss_c(rc, "", "");
 
     if (userPasswd != NULL) {
-        rc = memset_s(userPasswd, strlen(userPasswd), 0, strlen(userPasswd));
-        securec_check_c(rc, "", "");
+        free(userPasswd);
+        userPasswd = nullptr;
     }
 
     conn = PQconnectdb(repl_conninfo_str);

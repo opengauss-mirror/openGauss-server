@@ -443,7 +443,7 @@ extern void check_system_identifiers(PGconn *conn, const char *pgdata);
 extern void parse_filelist_filenames(parray *files, const char *root);
 
 /* in ptrack.c */
-extern void make_pagemap_from_ptrack(parray* files,
+extern parray * make_pagemap_from_ptrack(parray* files,
                                      PGconn* backup_conn,
                                      XLogRecPtr lsn);
 extern XLogRecPtr get_last_ptrack_lsn(PGconn *backup_conn, PGNodeInfo *nodeInfo);
