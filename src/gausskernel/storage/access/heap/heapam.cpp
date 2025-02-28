@@ -8792,7 +8792,7 @@ static void heap_xlog_cleanup_info(XLogReaderState* record)
     }
 
     if (InHotStandby && g_supportHotStandby) {
-        XLogRecPtr lsn = record->EndRecPtr;
+        XLogRecPtr lsn = record->ReadRecPtr;
         ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node, lsn);
     }
 
@@ -8835,7 +8835,7 @@ static void heap_xlog_clean(XLogReaderState* record)
      * latest_removed_xid is invalid, skip conflict processing.
      */
     if (InHotStandby && g_supportHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid)) {
-        XLogRecPtr lsn = record->EndRecPtr;
+        XLogRecPtr lsn = record->ReadRecPtr;
         ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, rnode, lsn);
     }
 
@@ -8884,7 +8884,7 @@ static void heap_xlog_freeze(XLogReaderState* record)
         RelFileNode rnode;
 
         (void)XLogRecGetBlockTag(record, HEAP_FREEZE_ORIG_BLOCK_NUM, &rnode, NULL, NULL);
-        XLogRecPtr lsn = record->EndRecPtr;
+        XLogRecPtr lsn = record->ReadRecPtr;
         ResolveRecoveryConflictWithSnapshot(cutoff_xid, rnode, lsn);
     }
 
@@ -8918,7 +8918,7 @@ static void heap_xlog_invalid(XLogReaderState* record)
         RelFileNode rnode;
 
         (void)XLogRecGetBlockTag(record, HEAP_FREEZE_ORIG_BLOCK_NUM, &rnode, NULL, NULL);
-        XLogRecPtr lsn = record->EndRecPtr;
+        XLogRecPtr lsn = record->ReadRecPtr;
         ResolveRecoveryConflictWithSnapshot(cutoff_xid, rnode, lsn);
     }
 
@@ -8965,7 +8965,7 @@ static void heap_xlog_visible(XLogReaderState* record)
      * rather than killing the transaction outright.
      */
     if (InHotStandby && g_supportHotStandby) {
-        XLogRecPtr lsn = record->EndRecPtr;
+        XLogRecPtr lsn = record->ReadRecPtr;
         ResolveRecoveryConflictWithSnapshot(xlrec->cutoff_xid, rnode, lsn);
     }
 

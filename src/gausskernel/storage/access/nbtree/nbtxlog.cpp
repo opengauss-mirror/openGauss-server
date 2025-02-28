@@ -1100,7 +1100,7 @@ static void btree_xlog_reuse_page(XLogReaderState *record)
     RelFileNodeCopy(tmp_node, xlrec->node, XLogRecGetBucketId(record));
 
     if (InHotStandby && g_supportHotStandby && !IS_EXRTO_READ) {
-        XLogRecPtr lsn = record->EndRecPtr;
+        XLogRecPtr lsn = record->ReadRecPtr;
         ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node, lsn);
     }
 }
