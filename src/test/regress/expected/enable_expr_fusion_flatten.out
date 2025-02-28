@@ -535,15 +535,15 @@ CONNECT BY PRIOR id = fatherid;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1, array_col_4
+           Start With pseudo atts: array_key_1, array_path_4, array_root_4
            ->  Recursive Union
                  ->  Seq Scan on test_area
                        Filter: (name = '中国'::text)
                  ->  Hash Join
-                       Hash Cond: (public.test_area.fatherid = tmp_reuslt."test_area@id")
-                       ->  Seq Scan on test_area
+                       Hash Cond: (tmp_reuslt."test_area@id" = public.test_area.fatherid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on test_area
 (12 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '@')
@@ -553,27 +553,27 @@ CONNECT BY PRIOR id = fatherid;
  id |  name  | fatherid | name_desc | level | connect_by_isleaf | connect_by_iscycle | connect_by_root |        sys_connect_by_path         
 ----+--------+----------+-----------+-------+-------------------+--------------------+-----------------+------------------------------------
   1 | 中国   |        0 | China     |     1 |                 0 |                  0 | China           | @China
-  2 | 湖南省 |        1 | Hunan     |     2 |                 0 |                  0 | China           | @China@Hunan
- 11 | 长沙市 |        2 | Changsha  |     3 |                 1 |                  0 | China           | @China@Hunan@Changsha
- 13 | 衡阳市 |        2 | Hengyang  |     3 |                 0 |                  0 | China           | @China@Hunan@Hengyang
- 22 | 祁北县 |       13 | Qibei     |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qibei
- 21 | 祁西县 |       13 | Qixi      |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qixi
- 14 | 耒阳市 |       13 | Leiyang   |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Leiyang
- 19 | 祁东县 |       13 | Qidong    |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qidong
- 18 | 常宁市 |       13 | Changning |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Changning
- 20 | 祁南县 |       13 | Qinan     |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qinan
+  9 | 江苏省 |        1 | Jiangsu   |     2 |                 1 |                  0 | China           | @China@Jiangsu
+  8 | 湖北省 |        1 | Hubei     |     2 |                 1 |                  0 | China           | @China@Hubei
+  7 | 山东省 |        1 | Shandong  |     2 |                 1 |                  0 | China           | @China@Shandong
+  6 | 河南省 |        1 | Henan     |     2 |                 1 |                  0 | China           | @China@Henan
+  5 | 河北省 |        1 | Hebei     |     2 |                 1 |                  0 | China           | @China@Hebei
+  4 | 海南省 |        1 | Hainan    |     2 |                 1 |                  0 | China           | @China@Hainan
   3 | 广东省 |        1 | Guangdong |     2 |                 0 |                  0 | China           | @China@Guangdong
  10 | 深圳市 |        3 | Shenzhen  |     3 |                 0 |                  0 | China           | @China@Guangdong@Shenzhen
- 12 | 南山区 |       10 | Nanshan   |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Nanshan
- 15 | 龙岗区 |       10 | Longgang  |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Longgang
- 16 | 福田区 |       10 | Futian    |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Futian
  17 | 宝安区 |       10 | Baoan     |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Baoan
-  4 | 海南省 |        1 | Hainan    |     2 |                 1 |                  0 | China           | @China@Hainan
-  5 | 河北省 |        1 | Hebei     |     2 |                 1 |                  0 | China           | @China@Hebei
-  6 | 河南省 |        1 | Henan     |     2 |                 1 |                  0 | China           | @China@Henan
-  7 | 山东省 |        1 | Shandong  |     2 |                 1 |                  0 | China           | @China@Shandong
-  8 | 湖北省 |        1 | Hubei     |     2 |                 1 |                  0 | China           | @China@Hubei
-  9 | 江苏省 |        1 | Jiangsu   |     2 |                 1 |                  0 | China           | @China@Jiangsu
+ 16 | 福田区 |       10 | Futian    |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Futian
+ 15 | 龙岗区 |       10 | Longgang  |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Longgang
+ 12 | 南山区 |       10 | Nanshan   |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Nanshan
+  2 | 湖南省 |        1 | Hunan     |     2 |                 0 |                  0 | China           | @China@Hunan
+ 13 | 衡阳市 |        2 | Hengyang  |     3 |                 0 |                  0 | China           | @China@Hunan@Hengyang
+ 20 | 祁南县 |       13 | Qinan     |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qinan
+ 18 | 常宁市 |       13 | Changning |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Changning
+ 19 | 祁东县 |       13 | Qidong    |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qidong
+ 14 | 耒阳市 |       13 | Leiyang   |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Leiyang
+ 21 | 祁西县 |       13 | Qixi      |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qixi
+ 22 | 祁北县 |       13 | Qibei     |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qibei
+ 11 | 长沙市 |        2 | Changsha  |     3 |                 1 |                  0 | China           | @China@Hunan@Changsha
 (22 rows)
 
 drop table test_area;

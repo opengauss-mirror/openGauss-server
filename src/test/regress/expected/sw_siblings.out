@@ -47,7 +47,7 @@ ORDER SIBLINGS BY id;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
+           Start With pseudo atts: array_key_1, array_path_2, array_root_4, array_siblings
            ->  Recursive Union
                  ->  Sort
                        Sort Key: swtest.test_area.id
@@ -56,10 +56,10 @@ ORDER SIBLINGS BY id;
                  ->  Sort
                        Sort Key: swtest.test_area.id
                        ->  Hash Join
-                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                             ->  Seq Scan on test_area
+                             Hash Cond: (tmp_reuslt."test_area@id" = swtest.test_area.fatherid)
+                             ->  WorkTable Scan on tmp_reuslt
                              ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   ->  Seq Scan on test_area
 (16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
@@ -107,7 +107,7 @@ ORDER SIBLINGS BY id desc;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
+           Start With pseudo atts: array_key_1, array_path_2, array_root_4, array_siblings
            ->  Recursive Union
                  ->  Sort
                        Sort Key: swtest.test_area.id DESC
@@ -116,10 +116,10 @@ ORDER SIBLINGS BY id desc;
                  ->  Sort
                        Sort Key: swtest.test_area.id DESC
                        ->  Hash Join
-                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                             ->  Seq Scan on test_area
+                             Hash Cond: (tmp_reuslt."test_area@id" = swtest.test_area.fatherid)
+                             ->  WorkTable Scan on tmp_reuslt
                              ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   ->  Seq Scan on test_area
 (16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
@@ -167,7 +167,7 @@ ORDER SIBLINGS BY id;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
+           Start With pseudo atts: array_key_1, array_path_2, array_root_4, array_siblings
            ->  Recursive Union
                  ->  Sort
                        Sort Key: swtest.test_area.id
@@ -176,10 +176,10 @@ ORDER SIBLINGS BY id;
                  ->  Sort
                        Sort Key: swtest.test_area.id
                        ->  Hash Join
-                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                             ->  Seq Scan on test_area
+                             Hash Cond: (tmp_reuslt."test_area@id" = swtest.test_area.fatherid)
+                             ->  WorkTable Scan on tmp_reuslt
                              ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   ->  Seq Scan on test_area
 (16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
@@ -218,7 +218,7 @@ ORDER SIBLINGS BY id desc;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
+           Start With pseudo atts: array_key_1, array_path_2, array_root_4, array_siblings
            ->  Recursive Union
                  ->  Sort
                        Sort Key: swtest.test_area.id DESC
@@ -227,10 +227,10 @@ ORDER SIBLINGS BY id desc;
                  ->  Sort
                        Sort Key: swtest.test_area.id DESC
                        ->  Hash Join
-                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                             ->  Seq Scan on test_area
+                             Hash Cond: (tmp_reuslt."test_area@id" = swtest.test_area.fatherid)
+                             ->  WorkTable Scan on tmp_reuslt
                              ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   ->  Seq Scan on test_area
 (16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
@@ -269,7 +269,7 @@ ORDER SIBLINGS BY id;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_3, array_col_2, array_col_4, array_siblings
+           Start With pseudo atts: array_key_3, array_path_2, array_root_4, array_siblings
            ->  Recursive Union
                  ->  Sort
                        Sort Key: swtest.test_area.id
@@ -278,10 +278,10 @@ ORDER SIBLINGS BY id;
                  ->  Sort
                        Sort Key: swtest.test_area.id
                        ->  Hash Join
-                             Hash Cond: (swtest.test_area.id = tmp_reuslt."test_area@fatherid")
-                             ->  Seq Scan on test_area
+                             Hash Cond: (tmp_reuslt."test_area@fatherid" = swtest.test_area.id)
+                             ->  WorkTable Scan on tmp_reuslt
                              ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   ->  Seq Scan on test_area
 (16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
@@ -311,7 +311,7 @@ ORDER SIBLINGS BY id desc;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_3, array_col_2, array_col_4, array_siblings
+           Start With pseudo atts: array_key_3, array_path_2, array_root_4, array_siblings
            ->  Recursive Union
                  ->  Sort
                        Sort Key: swtest.test_area.id DESC
@@ -320,10 +320,10 @@ ORDER SIBLINGS BY id desc;
                  ->  Sort
                        Sort Key: swtest.test_area.id DESC
                        ->  Hash Join
-                             Hash Cond: (swtest.test_area.id = tmp_reuslt."test_area@fatherid")
-                             ->  Seq Scan on test_area
+                             Hash Cond: (tmp_reuslt."test_area@fatherid" = swtest.test_area.id)
+                             ->  WorkTable Scan on tmp_reuslt
                              ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   ->  Seq Scan on test_area
 (16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
@@ -354,7 +354,7 @@ ORDER SIBLINGS BY 1;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
+           Start With pseudo atts: array_key_1, array_path_2, array_root_4, array_siblings
            ->  Recursive Union
                  ->  Sort
                        Sort Key: swtest.test_area.id
@@ -363,10 +363,10 @@ ORDER SIBLINGS BY 1;
                  ->  Sort
                        Sort Key: swtest.test_area.id
                        ->  Hash Join
-                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                             ->  Seq Scan on test_area
+                             Hash Cond: (tmp_reuslt."test_area@id" = swtest.test_area.fatherid)
+                             ->  WorkTable Scan on tmp_reuslt
                              ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   ->  Seq Scan on test_area
 (16 rows)
 
 SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
@@ -411,7 +411,7 @@ ORDER SIBLINGS BY id, name, name_desc;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1, array_siblings
+           Start With pseudo atts: array_key_1, array_siblings
            ->  Recursive Union
                  ->  Sort
                        Sort Key: swtest.test_area.id, swtest.test_area.name, swtest.test_area.name_desc
@@ -420,10 +420,10 @@ ORDER SIBLINGS BY id, name, name_desc;
                  ->  Sort
                        Sort Key: swtest.test_area.id, swtest.test_area.name, swtest.test_area.name_desc
                        ->  Hash Join
-                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                             ->  Seq Scan on test_area
+                             Hash Cond: (tmp_reuslt."test_area@id" = swtest.test_area.fatherid)
+                             ->  WorkTable Scan on tmp_reuslt
                              ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   ->  Seq Scan on test_area
 (16 rows)
 
 EXPLAIN (costs off)
@@ -436,7 +436,7 @@ ORDER SIBLINGS BY id desc, name desc , name_desc desc;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1, array_siblings
+           Start With pseudo atts: array_key_1, array_siblings
            ->  Recursive Union
                  ->  Sort
                        Sort Key: swtest.test_area.id DESC, swtest.test_area.name DESC, swtest.test_area.name_desc DESC
@@ -445,10 +445,10 @@ ORDER SIBLINGS BY id desc, name desc , name_desc desc;
                  ->  Sort
                        Sort Key: swtest.test_area.id DESC, swtest.test_area.name DESC, swtest.test_area.name_desc DESC
                        ->  Hash Join
-                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                             ->  Seq Scan on test_area
+                             Hash Cond: (tmp_reuslt."test_area@id" = swtest.test_area.fatherid)
+                             ->  WorkTable Scan on tmp_reuslt
                              ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   ->  Seq Scan on test_area
 (16 rows)
 
 EXPLAIN (costs off)
@@ -461,7 +461,7 @@ ORDER SIBLINGS BY id desc, name, name_desc desc;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1, array_siblings
+           Start With pseudo atts: array_key_1, array_siblings
            ->  Recursive Union
                  ->  Sort
                        Sort Key: swtest.test_area.id DESC, swtest.test_area.name, swtest.test_area.name_desc DESC
@@ -470,10 +470,10 @@ ORDER SIBLINGS BY id desc, name, name_desc desc;
                  ->  Sort
                        Sort Key: swtest.test_area.id DESC, swtest.test_area.name, swtest.test_area.name_desc DESC
                        ->  Hash Join
-                             Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
-                             ->  Seq Scan on test_area
+                             Hash Cond: (tmp_reuslt."test_area@id" = swtest.test_area.fatherid)
+                             ->  WorkTable Scan on tmp_reuslt
                              ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   ->  Seq Scan on test_area
 (16 rows)
 
 -- test siblings by + limit

@@ -115,7 +115,8 @@ static inline bool NeedMaterialJoinOuter(Plan *outer, Plan *inner)
  */
 typedef struct PullUpConnectByFuncVarContext {
     PlannerInfo *root;
-    List *pullupVars;
+    List *pullupPathVars;
+    List *pullupRootVars;
     CteScan  *cteplan;
     StartWithOp *swplan;
 } PullUpConnectByFuncVarContext;
@@ -134,13 +135,14 @@ typedef struct ReplaceFakeConstContext {
 } ReplaceFakeConstContext;
 
 static bool PullUpConnectByFuncVarsWalker(Node *node, PullUpConnectByFuncVarContext *context);
-static List *PullUpConnectByFuncVars(PlannerInfo *root, CteScan *cteScan, Node *targetEntry);
+static PullUpConnectByFuncVarContext *PullUpConnectByFuncVars(PlannerInfo *root, CteScan *cteScan, Node *targetEntry);
 static void CheckInvalidConnectByfuncArgs(CteScan *cteplan, Oid funcid, List *arg_vars);
 
 static void GenerateStartWithInternalEntries(PlannerInfo *root, CteScan *cteplan,
-                                             List **keyEntryList, List **colEntryList);
+                                             List **keyEntryList, List **pathEntryList, List **rootEntryList);
 static List* BuildStartWithPlanPseudoTargetList(Plan *plan, Index varno,
-                                                List *key_list, List *col_list, bool needSiblings);
+                                                List *key_list, List *path_list,
+                                                List *root_list, bool needSiblings, bool isStartWith);
 
 static inline bool StartWithNeedSiblingSort(PlannerInfo *root, CteScan *cteplan)
 {
@@ -288,7 +290,8 @@ bool IsPseudoInternalTargetEntry(const TargetEntry *tle)
 
     StartWithOpColumnType type = GetPseudoColumnType(tle);
 
-    return (type == SWCOL_RUITR || type == SWCOL_ARRAY_KEY || type == SWCOL_ARRAY_COL || type == SWCOL_ARRAY_SIBLINGS);
+    return (type == SWCOL_ARRAY_PATH || type == SWCOL_ARRAY_ROOT ||
+            type == SWCOL_ARRAY_KEY || type == SWCOL_ARRAY_SIBLINGS);
 }
 
 /*
@@ -759,6 +762,7 @@ static void ReplaceFakeConst(PlannerInfo *root, StartWithOp *swplan)
 {
     StartWithOptions *swoptions = swplan->swoptions;
     Node *connectByLevelExpr = swoptions->connect_by_level_quals;
+    Node *startwithExpr = swoptions->start_with_quals;
 
     /* Initialize replacement context */
     errno_t rc = 0;
@@ -786,9 +790,11 @@ static void ReplaceFakeConst(PlannerInfo *root, StartWithOp *swplan)
 
     /* Step 2. Apply fake const replacement walker to the expression */
     ReplaceFakeConstWalker(connectByLevelExpr, &context);
+    ReplaceFakeConstWalker(startwithExpr, &context);
 
     /* Step 3. Do reqular const expression process */
     swoptions->connect_by_level_quals = eval_const_expressions(root, connectByLevelExpr);
+    swoptions->start_with_quals = eval_const_expressions(root, startwithExpr);
 }
 
 /*
@@ -860,7 +866,7 @@ static void OptimizeStartWithPlan(PlannerInfo *root, StartWithOp *swplan)
  *  step(2): Process ConnectByLevel/Rownum's fake const value
  *  step(3): Add possible post-path generation plan optimization e.g. rescan-avoid for
  *           start with
- *  step(4): Create Internal target list (RUITR/array_key/array_columns)
+ *  step(4): Create Internal target list (array_key/array_path/array_root)
  *  step(5): Specially process ORDER SIBLINGS BY case
  * -------------------------------------------------------------------------------------
  */
@@ -968,6 +974,7 @@ static StartWithOp* CreateStartWithOpNode(PlannerInfo *root,
     }
     root->glob->subplans = newSubplans;
 
+    ruplan->is_under_start_with = true;
     return swplan;
 }
 
@@ -983,19 +990,20 @@ static void ProcessConnectByFakeConst(PlannerInfo *root, StartWithOp *swplan)
     ReplaceFakeConst(root, swplan);
 
     /* do preprocess for connect-by-level/rownum condition */
-    ((Plan *)swplan)->qual = (List *)preprocess_expression(root,
-            swoptions->connect_by_level_quals, EXPRKIND_QUAL);
+    swplan->connect_by_qual = (List *)preprocess_expression(root, swoptions->connect_by_level_quals, EXPRKIND_QUAL);
+    swplan->start_with_qual = (List *)preprocess_expression(root, swoptions->start_with_quals, EXPRKIND_QUAL);
 }
 
 static void BuildStartWithInternalTargetList(PlannerInfo *root,
             CteScan *cteplan, StartWithOp *swplan)
 {
     List *keyEntryList = NIL;
-    List *colEntryList = NIL;
+    List *pathEntryList = NIL;
+    List *rootEntryList = NIL;
     bool needSiblings = (swplan->swoptions->siblings_orderby_clause != NULL) ? true : false;
 
-    /* Generate internal target entry keyEntryList & colEntryList */
-    GenerateStartWithInternalEntries(root, cteplan, &keyEntryList, &colEntryList);
+    /* Generate internal target entry keyEntryList & pathEntryList & rootEntryList */
+    GenerateStartWithInternalEntries(root, cteplan, &keyEntryList, &pathEntryList, &rootEntryList);
 
     if (keyEntryList == NULL) {
         ereport(DEBUG1,
@@ -1003,27 +1011,37 @@ static void BuildStartWithInternalTargetList(PlannerInfo *root,
                 t_thrd.postgres_cxt.debug_query_string)));
     }
 
-    if (colEntryList == NULL) {
+    if (pathEntryList == NULL) {
         ereport(DEBUG1,
-                (errmodule(MOD_OPT_PLANNER), errmsg("colEntryList is NULL, query:%s",
+                (errmodule(MOD_OPT_PLANNER), errmsg("pathEntryList is NULL, query:%s",
                 t_thrd.postgres_cxt.debug_query_string)));
     }
 
-    /* Add internal key/col entry list and pseudo_list for StartWithOp node */
+    if (rootEntryList == NULL) {
+        ereport(DEBUG1,
+                (errmodule(MOD_OPT_PLANNER), errmsg("rootEntryList is NULL, query:%s",
+                t_thrd.postgres_cxt.debug_query_string)));
+    }
+
+    /* Add internal key/path/root entry list and pseudo_list for StartWithOp node */
     swplan->internalEntryList =
             BuildStartWithPlanPseudoTargetList((Plan *)swplan, cteplan->scan.scanrelid,
-                                                keyEntryList,
-                                                colEntryList,
-                                                needSiblings);
+                                               keyEntryList,
+                                               pathEntryList,
+                                               rootEntryList,
+                                               needSiblings,
+                                               true);
 
-    /* Add internal key/col entry list for CteScan node */
+    /* Add internal key/path/root entry list for CteScan node */
     cteplan->internalEntryList =
             BuildStartWithPlanPseudoTargetList((Plan *)cteplan, cteplan->scan.scanrelid,
-                                                keyEntryList,
-                                                colEntryList,
-                                                needSiblings);
+                                               keyEntryList,
+                                               pathEntryList,
+                                               rootEntryList,
+                                               needSiblings,
+                                               false);
 
-    /* construct fullEntryList (RUITR + array_key + array_col ) */
+    /* construct fullEntryList (array_key + array_path + array_root ) */
     List *fullEntryList = NIL;
     ListCell *entry = NULL;
     foreach (entry, cteplan->scan.plan.targetlist) {
@@ -1036,7 +1054,8 @@ static void BuildStartWithInternalTargetList(PlannerInfo *root,
     }
 
     swplan->keyEntryList = keyEntryList;
-    swplan->colEntryList = colEntryList;
+    swplan->path_entry_list = pathEntryList;
+    swplan->root_entry_list = rootEntryList;
     swplan->fullEntryList = fullEntryList;
 }
 
@@ -1062,9 +1081,11 @@ static void ProcessOrderSiblings(PlannerInfo *root, StartWithOp *swplan)
 
     ruplan->internalEntryList =
         BuildStartWithPlanPseudoTargetList((Plan *)ruplan, cteplan->scan.scanrelid,
-                                            swplan->keyEntryList,
-                                            swplan->colEntryList,
-                                            true);
+                                           swplan->keyEntryList,
+                                           swplan->path_entry_list,
+                                           swplan->root_entry_list,
+                                           true,
+                                           false);
 
     /* 1. Add under RU sort plan */
     ruplan->plan.lefttree = (Plan *)CreateSortPlanUnderRU(root, ruplan->plan.lefttree,
@@ -1083,11 +1104,9 @@ static void ProcessOrderSiblings(PlannerInfo *root, StartWithOp *swplan)
  * @Brief: build full pseudo entries for given pro node, with input a keylist and collist
  *
  * pseudo target list
- *  [1]. RUIRT
- *  [2]. array_key_1
- *  [3]. array_col_2
- *  [4]. array_col_3
- *  [6]....
+ *  [1]. array_key_1
+ *  [2]. array_path_2
+ *  [3]. array_root_3
  *
  * example:
  * Table:
@@ -1095,41 +1114,27 @@ static void ProcessOrderSiblings(PlannerInfo *root, StartWithOp *swplan)
  * Query:
  *      select *,
  *             level, connect_by_isleaf, connect_is_cycle,
- *             connect_by_root name_desc, sys_connect_by_path(name, '@')
+ *             connect_by_root(name_desc), sys_connect_by_path(name, '@')
  *      from t1
  *      start with name = 'shanghai'
  *      connect by id = PRIOR fatherid;
  *
  * pseudo-targetlist: array [
- *          - RUTI(type:int)
- *          - array_key_1(type:text)
- *          - array_col_2(type:text)
- *          - array_col_4(type:text)
+ *          - array_key_1  (type:text)
+ *          - array_path_2 (type:text)
+ *          - array_root_3 (type:text)
  *          ]
  */
 static List* BuildStartWithPlanPseudoTargetList(Plan *plan, Index varno,
-            List *key_list, List *col_list, bool needSiblings)
+                                                List *key_list, List *path_list, List *root_list,
+                                                bool needSiblings, bool isStartWith)
 {
     Node *expr = NULL;
     TargetEntry *te = NULL;
     TargetEntry *pte = NULL;
     List *internalEntryList = NIL;
     int rc = 0;
-
-    /* we only have to handle CteScan & RecursiveUnion node */
-    Assert (IsA(plan, CteScan) || IsA(plan, RecursiveUnion) || IsA(plan, StartWithOp));
-
-    /* 1. Add "RUITR" entry to support LEVEL */
-    expr = (Node *)makeVar(varno, list_length(plan->targetlist) + 1,
-                           INT4OID, -1, InvalidOid, 0);
-    pte = makeTargetEntry((Expr *)expr, list_length(plan->targetlist) + 1, "RUITR", false);
-    plan->targetlist = lappend(plan->targetlist, pte);
-    internalEntryList = lappend(internalEntryList, pte);
-
-    /*
-     * 2. Add "array_key" entry we have to add to support connect_by_isleaf, connect_by_iscycle,
-     *    order-siblings
-     */
+    /* 1. Add "array_key" entry we have to add to support connect_by_isleaf, connect_by_iscycle, order-siblings */
     ListCell *lc = NULL;
     foreach (lc, key_list) {
         te = (TargetEntry *)lfirst(lc);
@@ -1145,15 +1150,12 @@ static List* BuildStartWithPlanPseudoTargetList(Plan *plan, Index varno,
         plan->targetlist = lappend(plan->targetlist, pte);
         internalEntryList = lappend(internalEntryList, pte);
     }
-
-    /*
-     * 3. Add "array_col" to support , connect_by_root
-     */
-    foreach (lc, col_list) {
+    /* 2. Add "array_path" to support , sys_connect_by_path */
+    foreach (lc, path_list) {
         te = (TargetEntry *)lfirst(lc);
         char resname[NAMEDATALEN] = {0};
 
-        rc = sprintf_s(resname, NAMEDATALEN, "array_col_%d", te->resno);
+        rc = sprintf_s(resname, NAMEDATALEN, "array_path_%d", te->resno);
         securec_check_ss(rc, "\0", "\0");
 
         expr = (Node *)makeVar(varno, list_length(plan->targetlist) + 1,
@@ -1162,11 +1164,31 @@ static List* BuildStartWithPlanPseudoTargetList(Plan *plan, Index varno,
                                pstrdup(resname), false);
         plan->targetlist = lappend(plan->targetlist, pte);
         internalEntryList = lappend(internalEntryList, pte);
+        if (isStartWith) {
+            StartWithOp* swplan = (StartWithOp*)plan;
+            swplan->internal_path_entry_list = lappend(swplan->internal_path_entry_list, pte);
+        }
     }
+    /* 3. Add "array_root" to support , connect_by_root */
+    foreach (lc, root_list) {
+        te = (TargetEntry *)lfirst(lc);
+        char resname[NAMEDATALEN] = {0};
 
-    /*
-     * Add "array_siblings" pseudo columns support if need
-     */
+        rc = sprintf_s(resname, NAMEDATALEN, "array_root_%d", te->resno);
+        securec_check_ss(rc, "\0", "\0");
+
+        expr = (Node *)makeVar(varno, list_length(plan->targetlist) + 1,
+                               TEXTOID, -1, TEXT_COLLCATION, 0);
+        pte = makeTargetEntry((Expr *)expr, list_length(plan->targetlist) + 1,
+                               pstrdup(resname), false);
+        plan->targetlist = lappend(plan->targetlist, pte);
+        internalEntryList = lappend(internalEntryList, pte);
+        if (isStartWith) {
+            StartWithOp* swplan = (StartWithOp*)plan;
+            swplan->internal_root_entry_list = lappend(swplan->internal_root_entry_list, pte);
+        }
+    }
+    /* 4. Add "array_siblings" pseudo columns support if need */
     if (needSiblings) {
         expr = (Node *)makeVar(varno, list_length(plan->targetlist) + 1,
                                BYTEAOID, -1, 0, 0);
@@ -1174,7 +1196,6 @@ static List* BuildStartWithPlanPseudoTargetList(Plan *plan, Index varno,
         plan->targetlist = lappend(plan->targetlist, pte);
         internalEntryList = lappend(internalEntryList, pte);
     }
-
     return internalEntryList;
 }
 
@@ -1274,24 +1295,20 @@ List *pullUpConnectByFuncExprs(Node* node)
  * PullUpConnectByFuncVars()
  * --------------------------------------------------------------------------------------
  */
-static List *PullUpConnectByFuncVars(PlannerInfo *root, CteScan *cteScan, Node *targetEntry)
+static PullUpConnectByFuncVarContext *PullUpConnectByFuncVars(PlannerInfo *root, CteScan *cteScan, Node *targetEntry)
 {
-    errno_t rc = 0;
-    PullUpConnectByFuncVarContext context;
-    rc = memset_s(&context,
-                  sizeof(PullUpConnectByFuncVarContext),
-                  0,
-                  sizeof(PullUpConnectByFuncVarContext));
-    securec_check(rc, "\0", "\0");
+    PullUpConnectByFuncVarContext* context =
+        (PullUpConnectByFuncVarContext*)palloc0(sizeof(PullUpConnectByFuncVarContext));
 
-    context.root = root;
-    context.pullupVars = NIL;
-    context.cteplan = cteScan;
-    context.swplan = (StartWithOp *)cteScan->subplan;
+    context->root = root;
+    context->pullupPathVars = NIL;
+    context->pullupRootVars = NIL;
+    context->cteplan = cteScan;
+    context->swplan = (StartWithOp *)cteScan->subplan;
 
-    (void)PullUpConnectByFuncVarsWalker(targetEntry, &context);
+    (void)PullUpConnectByFuncVarsWalker(targetEntry, context);
 
-    return context.pullupVars;
+    return context;
 }
 
 static bool PullUpConnectByFuncVarsWalker(Node *node, PullUpConnectByFuncVarContext *context)
@@ -1314,7 +1331,11 @@ static bool PullUpConnectByFuncVarsWalker(Node *node, PullUpConnectByFuncVarCont
             List *vars = pull_var_clause((Node*)func->args,
                              PVC_RECURSE_AGGREGATES, PVC_INCLUDE_PLACEHOLDERS);
             CheckInvalidConnectByfuncArgs(context->cteplan, func->funcid, vars);
-            context->pullupVars = list_concat_unique(context->pullupVars, vars);
+            if (func->funcid == SYS_CONNECT_BY_PATH_FUNCOID) {
+                context->pullupPathVars = list_concat_unique(context->pullupPathVars, vars);
+            } else {
+                context->pullupRootVars = list_concat_unique(context->pullupRootVars, vars);
+            }
         }
     } else if (IsA(node, Var)) {
         /* check if there is target var refer to PRC and mark them not-skipable */
@@ -1326,7 +1347,7 @@ static bool PullUpConnectByFuncVarsWalker(Node *node, PullUpConnectByFuncVarCont
         }
     } else if (IsA(node, PriorExpr)) {
         Var* var = (Var*)((PriorExpr*)node)->node;
-        context->pullupVars = lappend(context->pullupVars, var);
+        context->pullupPathVars = lappend(context->pullupPathVars, var);
     }
 
     return expression_tree_walker(node,
@@ -1426,25 +1447,27 @@ static void MarkPRCNotSkip(StartWithOp *swplan, int prcType)
  * --------------------------------------------------------------------------------------
  * @Brief: Generate internal entries for given CteScan node, here the term internal
  *         entry of key-value arraies prfixed with "array_key_nn" & col-value arraies
- *         prefixed with "array_col_mm" and store them in separate output list parm
+ *         prefixed with "array_path/array_root_mm" and store them in separate output list parm
  *
  * @param:
- *      - cteplan: the target CtePlan node where we generate key/col array
+ *      - cteplan: the target CtePlan node where we generate key/path/root array
  *      - keyEntryList: A ** pointer to accept pseudo key entry
- *      - colEntryList: A ** pointer to accept pseudo col entry
+ *      - pathEntryList: A ** pointer to accept sys_connect_by_path pseudo path entry
+ *      - rootEntryList: A ** pointer to accept connect_by_root pseudo root entry
  *
- * @Return: void, return value are set in keyEntryList & colEntryList
+ * @Return: void, return value are set in keyEntryList & pathEntryList & rootEntryList
  * --------------------------------------------------------------------------------------
  */
 static void GenerateStartWithInternalEntries(PlannerInfo *root, CteScan *cteplan,
-                                             List **keyEntryList, List **colEntryList)
+                                             List **keyEntryList, List **pathEntryList, List **rootEntryList)
 {
     Assert (IsA(cteplan, CteScan) && IsA(cteplan->subplan, StartWithOp));
 
     Plan *plan = (Plan *)cteplan;
     StartWithOp *swplan = (StartWithOp *)cteplan->subplan;
     ListCell *lc = NULL;
-    List *tmp_list = NULL;
+    List *tmp_path_list = NULL;
+    List *tmp_root_list = NULL;
 
     /*
      * First, match cte targetEntry in funcs like connect_by_root(xxx) and
@@ -1452,22 +1475,27 @@ static void GenerateStartWithInternalEntries(PlannerInfo *root, CteScan *cteplan
      */
     foreach(lc, root->parse->targetList) {
         TargetEntry *tle = (TargetEntry *)lfirst(lc);
-        List *vars = PullUpConnectByFuncVars(root, cteplan, (Node *)tle);
-        tmp_list = list_concat(tmp_list, vars);
+        PullUpConnectByFuncVarContext *context = PullUpConnectByFuncVars(root, cteplan, (Node *)tle);
+        tmp_path_list = list_concat(tmp_path_list, context->pullupPathVars);
+        tmp_root_list = list_concat(tmp_root_list, context->pullupRootVars);
     }
 
     /* process those specified in where clause */
     foreach(lc, plan->qual) {
         TargetEntry *origin = (TargetEntry *)lfirst(lc);
-        List *vars = PullUpConnectByFuncVars(root, cteplan, (Node *)origin);
-        tmp_list = list_concat(tmp_list, vars);
+        PullUpConnectByFuncVarContext *context = PullUpConnectByFuncVars(root, cteplan, (Node *)origin);
+        tmp_path_list = list_concat(tmp_path_list, context->pullupPathVars);
+        tmp_root_list = list_concat(tmp_root_list, context->pullupRootVars);
     }
 
     foreach (lc, plan->targetlist) {
         TargetEntry *te = (TargetEntry *)lfirst(lc);
         Assert (IsA(te->expr, Var));
-        if (list_member(tmp_list, te->expr)) {
-            *colEntryList = lappend(*colEntryList, te);
+        if (list_member(tmp_path_list, te->expr)) {
+            *pathEntryList = lappend(*pathEntryList, te);
+        }
+        if (list_member(tmp_root_list, te->expr)) {
+            *rootEntryList = lappend(*rootEntryList, te);
         }
     }
 
@@ -1780,7 +1808,8 @@ static void FixArrayInternalEntry(List *targetlsit)
 
         if (entry->resname != NULL &&
            (strstr(entry->resname, "array_key_") ||
-            strstr(entry->resname, "array_col_"))) {
+            strstr(entry->resname, "array_path_") ||
+            strstr(entry->resname, "array_root_"))) {
             int varno = ((Var *)entry->expr)->varno;
             int attno = entry->resname[10] - '0';
             int resno = 0;
@@ -1806,8 +1835,11 @@ static void FixArrayInternalEntry(List *targetlsit)
             if (strstr(entry->resname, "array_key_")) {
                 rc = sprintf_s(newArrayName, NAMEDATALEN, "array_key_%d", resno);
                 securec_check_ss(rc, "\0", "\0");
-            } else if (strstr(entry->resname, "array_col_")) {
-                rc = sprintf_s(newArrayName, NAMEDATALEN, "array_col_%d", resno);
+            } else if (strstr(entry->resname, "array_path_")) {
+                rc = sprintf_s(newArrayName, NAMEDATALEN, "array_path_%d", resno);
+                securec_check_ss(rc, "\0", "\0");
+            } else if (strstr(entry->resname, "array_root_")) {
+                rc = sprintf_s(newArrayName, NAMEDATALEN, "array_root_%d", resno);
                 securec_check_ss(rc, "\0", "\0");
             }
 
@@ -2149,7 +2181,7 @@ static void GetWorkTableScanPlanPath(PlannerInfo *root, Plan *node,
  *   We do some special post-planing work for each StartWithOp node, normally, invokced from
  *   top planning level(root->query_level == 1)'s subplans, detail as follow:
  *      1. Block some unspported case identified at planning stage
- *      2. Add internal targetlist(ruitr, array_key, array_col) for Startwith
+ *      2. Add internal targetlist(array_key, array_path, array_root) for Startwith
  *      3. DFX to support output internal columns from a start with converted CTE
  *
  *
@@ -2162,14 +2194,14 @@ static void GetWorkTableScanPlanPath(PlannerInfo *root, Plan *node,
  *              Result        ---------------
  *                 |                |
  *                ...               |
- *                 |              case2: (ruitr/array_key/array_col)
+ *                 |              case2: (array_key/array_path/array_root)
  *              CteScan             |
  *                 |                |
  *              StartWithOp    ---------------
  *                 |                |
  *              RecursiveUnion      |
  *                 |                |
- *              HashJoin          case1: (level/isleaf/iscycle，ruitr/array_key/array_col)
+ *              HashJoin          case1: (level/isleaf/iscycle，array_key/array_path/array_root)
  *                 |                |
  *                ...               |
  *                 |                |
@@ -2192,9 +2224,9 @@ void ProcessStartWithOpMixWork(PlannerInfo *root, Plan *topplan,
     /*
      * 2. Add internalEntryList to CteScan node to support SWCB functions, by defualt
      *    we add full internal entries, only do this when there is SWCB functions exits,
-     *    where check the StartWithOp's colEntryList
+     *    where check the StartWithOp's pathEntryList & rootEntryList
      */
-    if (swplan->colEntryList != NIL) {
+    if (swplan->path_entry_list != NIL || swplan->root_entry_list != NIL) {
         CteScan *cteplan = swplan->cteplan;
         PushDownFullPseudoTargetlist(root, (Plan *)cteplan, (Plan *)cteplan,
                                      swplan->internalEntryList);
@@ -2202,7 +2234,7 @@ void ProcessStartWithOpMixWork(PlannerInfo *root, Plan *topplan,
 
     /*
      * 3. Removing the unnecessary "Internal Target Entry" created by PRC push-down,
-     *    ruitr/array_key/array_col, normally this kind of entry only visible on
+     *    array_key/array_path/array_root, normally this kind of entry only visible on
      *    CteScan node
      */
     if (!u_sess->attr.attr_sql.enable_startwith_debug) {

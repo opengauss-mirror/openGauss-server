@@ -1086,6 +1086,18 @@ static void _outStartWithOp(StringInfo str, StartWithOp *node)
     WRITE_NODE_FIELD(fullEntryList);
 
     WRITE_NODE_FIELD(swoptions);
+
+    WRITE_UINT_FIELD(swExecOptions);
+    WRITE_NODE_FIELD(prcTargetEntryList);
+
+    if (t_thrd.proc->workingVersionNum >= SWCB_OPTIMIZATION_VERSION_NUM) {
+        WRITE_NODE_FIELD(connect_by_qual);
+        WRITE_NODE_FIELD(start_with_qual);
+        WRITE_NODE_FIELD(path_entry_list);
+        WRITE_NODE_FIELD(root_entry_list);
+        WRITE_NODE_FIELD(internal_path_entry_list);
+        WRITE_NODE_FIELD(internal_root_entry_list);
+    }
 }
 
 static void _outStartWithOptions(StringInfo str, StartWithOptions* node)
@@ -1098,6 +1110,9 @@ static void _outStartWithOptions(StringInfo str, StartWithOptions* node)
     WRITE_NODE_FIELD(connect_by_level_quals);
     WRITE_NODE_FIELD(connect_by_other_quals);
     WRITE_BOOL_FIELD(nocycle);
+    if (t_thrd.proc->workingVersionNum >= SWCB_OPTIMIZATION_VERSION_NUM) {
+        WRITE_NODE_FIELD(start_with_quals);
+    }
 }
 
 static void _outRecursiveUnion(StringInfo str, RecursiveUnion* node)
@@ -1124,6 +1139,9 @@ static void _outRecursiveUnion(StringInfo str, RecursiveUnion* node)
     WRITE_BOOL_FIELD(is_correlated);
     if (t_thrd.proc->workingVersionNum >= SWCB_VERSION_NUM) {
         WRITE_NODE_FIELD(internalEntryList);
+    }
+    if (t_thrd.proc->workingVersionNum >= SWCB_OPTIMIZATION_VERSION_NUM) {
+        WRITE_BOOL_FIELD(is_under_start_with);
     }
 }
 

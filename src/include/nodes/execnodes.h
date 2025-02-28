@@ -1688,6 +1688,16 @@ typedef struct RecursiveUnionState {
     uint64 sw_tuple_idx;
 } RecursiveUnionState;
 
+typedef struct SWDfsOpState
+{
+    List**          prior_key_stack;
+    List**          tuples_stack;
+    int             stack_size;
+    int             cur_level;
+    int             cur_rownum;
+    TupleTableSlot* last_ru_slot;
+} SWDfsOpState;
+
 /* ----------------
  *	 StartWithOpState information
  * ----------------
@@ -1738,6 +1748,9 @@ typedef struct StartWithOpState
     MemoryContext       sw_context;
     List*               sw_cycle_rowmarks;
     List*               sw_leaf_rowmarks;
+    List*               connect_by_qual;
+    List*               start_with_qual;
+    SWDfsOpState*       dfs_state;
 } StartWithOpState;
 
 /* ----------------

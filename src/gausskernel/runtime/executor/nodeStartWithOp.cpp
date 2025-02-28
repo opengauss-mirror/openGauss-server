@@ -45,50 +45,14 @@ typedef enum StartWithOpExecStatus {
 #define MAX_SIBLINGS_TUPLE    1000000000
 
 char* get_typename(Oid typid);
-
-static TupleTableSlot* ExecStartWithOp(PlanState* state);
-static void ProcessPseudoReturnColumns(StartWithOpState *state);
-static AttrNumber FetchRUItrTargetEntryResno(StartWithOpState *state);
-
-/* functions to check and set pseudo column value */
-static void CheckIsCycle(StartWithOpState *state, bool *connect_by_iscycle);
-static void CheckIsLeaf(StartWithOpState *state, bool *connect_by_isleaf);
-static void UpdatePseudoReturnColumn(StartWithOpState *state,
-                                       TupleTableSlot *slot,
-                                       bool isleaf, bool iscycle);
-
-
-/* functions to get/fetch array_key content */
-static List *TupleSlotGetKeyArrayList(TupleTableSlot *slot);
-static List *GetCurrentArrayColArray(const FunctionCallInfo fcinfo,
-                const char *value, char **raw_array_str, bool *isConstArrayList = NULL);
-static AttrNumber GetInternalArrayAttnum(TupleDesc tupDesc, AttrNumber origVarAttno);
-static const char *GetPseudoArrayTargetValueString(TupleTableSlot *slot,
-                AttrNumber attnum);
 static List *CovertInternalArrayStringToList(char *raw_array_str);
-
-/* Local functions used in tuple-conversion from RecursiveUnion -> StartWith */
-static Datum ConvertRuScanArrayAttr(RecursiveUnionState *rustate,
-                                       TargetEntry *te, TupleTableSlot *srcSlot, bool inrecursing);
+static int TupleSlotGetCurrentLevel(TupleTableSlot *slot);
+static List *GetCurrentArrayColArray(const FunctionCallInfo fcinfo,
+                                     const char *value, char **raw_array_str,
+                                     bool is_path, bool *isConstArrayList = NULL);
+static AttrNumber GetInternalArrayAttnum(TupleDesc tupDesc, AttrNumber origVarAttno, bool isPath);
 static const char *GetCurrentValue(TupleTableSlot *slot, AttrNumber attnum);
-static const char *GetCurrentWorkTableScanPath(TupleTableSlot *srcSlot,
-                AttrNumber pseudo_attnum);
-static bytea *GetCurrentSiblingsArrayPath(TupleTableSlot *srcSlot,
-                AttrNumber pseudo_attnum);
-static const char *GetKeyEntryArrayStr(RecursiveUnionState *state,
-                TupleTableSlot *scanSlot);
-static bool PRCCanSkip(StartWithOpState *state, int prcType);
-
-/* PRC optimization */
-static bytea *GetSiblingsKeyEntry(RecursiveUnionState *state, bytea *path);
-static inline AttrNumber PseudoResnameGetOriginResno(const char *resname)
-{
-    /* resname is in attr_key/col_.. format */
-    AttrNumber attno = atoi((char *)resname + strlen("array_col_"));
-
-    return attno;
-}
-
+static TupleTableSlot* ExecStartWithOp(PlanState* state);
 static inline void ResetResultSlotAttValueArray(StartWithOpState *state,
             Datum *values, bool *isnull)
 {
@@ -108,8 +72,6 @@ static inline void ResetResultSlotAttValueArray(StartWithOpState *state,
     rc = memset_s(state->sw_isnull, isnullArraySize, (bool)false, isnullArraySize);
     securec_check(rc, "\0", "\0");
 }
-
-extern char* pg_strrstr(char* string, const char* subStr);
 
 /*
  * Compare function for any siblings key entry
@@ -201,7 +163,7 @@ static bool unsupported_filter_walker(Node *node, Node *context_node)
     }
 
     if (!IsA(node, SubPlan)) {
-        return expression_tree_walker(node, (bool (*)()) unsupported_filter_walker, node);
+        return expression_tree_walker(node, (bool (*)()) unsupported_filter_walker, context_node);
     }
 
     /*
@@ -238,7 +200,7 @@ StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int efl
      * Error-out unsupported cases before they
      * actually cause any harm.
      */
-    expression_tree_walker((Node*)node->plan.qual,
+    expression_tree_walker((Node*)node->connect_by_qual,
             (bool (*)())unsupported_filter_walker, NULL);
 
     /*
@@ -280,6 +242,9 @@ StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int efl
         state->ps.qual = (List*)ExecInitExprByRecursion((Expr*)node->plan.qual, (PlanState*)state);
     }
 
+    state->connect_by_qual = (List*)ExecInitExprByRecursion((Expr*)node->connect_by_qual, (PlanState*)state);
+    state->start_with_qual = (List*)ExecInitExprByRecursion((Expr*)node->start_with_qual, (PlanState*)state);
+
     /*
      * initialize child nodes
      */
@@ -315,18 +280,7 @@ StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int efl
     }
 
     /*
-     *  2. setup keyAttnum
-     *
-     *  Note: We expect keyEntryList to be non-NIL.
-     */
-    if (node->keyEntryList != NIL) {
-        TargetEntry *keyTEntry = (TargetEntry *)list_nth(node->internalEntryList, 1);
-        Assert (pg_strncasecmp(keyTEntry->resname, "array_key_", strlen("array_key_")) == 0);
-        state->sw_keyAttnum = keyTEntry->resno;
-    }
-
-    /*
-     * 3. setup tuplestore, tupleslot and status controlling variables,
+     *  2. setup tuplestore, tupleslot and status controlling variables,
      *
      * Note: tuple store of backupTable and resultTable is not setup here,
      *       instead we do their intialization in on demand
@@ -369,43 +323,60 @@ bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot)
 {
     RecursiveUnionState *rustate = NULL;
     StartWithOp *swplan = (StartWithOp *)node->ps.plan;
+    SWDfsOpState *dfs_state = node->dfs_state;
     bool nocycle = swplan->swoptions->nocycle;
-    bool   incycle = false;
+    TupleDesc tupDesc = slot->tts_tupleDescriptor;
+    List* keyEntryList = swplan->keyEntryList;
 
-    rustate = (RecursiveUnionState *)node->ps.lefttree;
-
-    Assert (IsA(rustate, RecursiveUnionState));
-
-    if ((!nocycle && IsConnectByLevelStartWithPlan(swplan)) || node->sw_keyAttnum == 0) {
-        /* for connect by level case, we do not do cycle check */
+    if (!keyEntryList) {
         return false;
     }
 
-    /*
-     * If current current iteration is greator than cycle check threshold, we are going
-     * to do real check and error out cycle cases, we do not this check at begin is for
-     * performance considerations
-     */
-    node->sw_curKeyArrayStr = GetPseudoArrayTargetValueString(slot, node->sw_keyAttnum);
-    CheckIsCycle(node, &incycle);
+    rustate = (RecursiveUnionState *)node->ps.lefttree;
+    Assert (IsA(rustate, RecursiveUnionState));
 
-    /* compatible with ORA behavior, if NOCYCLE is not set, we report error */
-    if (!nocycle && incycle) {
-        ereport(ERROR,
-                (errmodule(MOD_EXECUTOR),
-                errmsg("START WITH .. CONNECT BY statement runs into cycle exception")));
+    if (!nocycle && IsConnectByLevelStartWithPlan(swplan)) {
+        /* for connect by level/rownum case, we do not do cycle check */
+        return false;
     }
 
-    /*
-     * Free per-tuple keyArrayStr in nocycle case, normally we need use sw_curKeyArrayStr
-     * to output the cycle information at caller function and let executor stop to free it
-     * eventually
-     */
-    if (!incycle) {
-        pfree_ext(node->sw_curKeyArrayStr);
-    }
+    for (int i = 0; i < dfs_state->cur_level; i++) {
+        List* ancestorKeys = dfs_state->prior_key_stack[i];
+        Assert(list_length(ancestorKeys) == list_length(keyEntryList));
+        bool hascycle = true;
+        ListCell* lc1 = NULL;
+        ListCell* lc2 = NULL;
+        forboth(lc1, keyEntryList, lc2, ancestorKeys) {
+            bool isnull = false;
+            TargetEntry* te = (TargetEntry*)lfirst(lc1);
+            Datum newkey = heap_slot_getattr(slot, te->resno, &isnull);
+            Datum oldkey = (Datum)lfirst(lc2);
+            if (slot->tts_isnull[te->resno - 1] || isnull) {
+                hascycle = false;
+                break;
+            } else {
+                FormData_pg_attribute attr = tupDesc->attrs[te->resno - 1];
+                if (!datumIsEqual(newkey, oldkey, attr.attbyval, attr.attlen)) {
+                    hascycle = false;
+                    break;
+                }
+            }
+        }
 
-    return incycle;
+        if (!hascycle) {
+            continue;
+        }
+
+        if (nocycle) {
+            return true;
+        } else {
+            /* compatible with ORA behavior, if NOCYCLE is not set, we report error */
+            ereport(ERROR,
+                    (errmodule(MOD_EXECUTOR),
+                    errmsg("START WITH .. CONNECT BY statement runs into cycle exception")));
+        }
+    }
+    return false;
 }
 
 /*
@@ -444,7 +415,7 @@ void ResetRecursiveInner(RecursiveUnionState *node)
  *
  * Does not support order siblings by yet.
  */
-static List* peekNextLevel(TupleTableSlot* startSlot, PlanState* outerNode, int level)
+static List* peekNextLevel(TupleTableSlot* startSlot, PlanState* outerNode, int level, bool* iscycle)
 {
     List* queue = NULL;
     RecursiveUnionState* rus = (RecursiveUnionState*) outerNode;
@@ -457,45 +428,182 @@ static List* peekNextLevel(TupleTableSlot* startSlot, PlanState* outerNode, int 
 
     /* fetch the depth-first tuple's children exactly one level below */
     rus->iteration = level;
-    int begin_iteration = rus->iteration;
-    int begin_rowCount = swnode->sw_rownum;
     TupleTableSlot* srcSlot = NULL;
+    *iscycle = false;
+    markSWLevelBegin(swnode);
     for (;;) {
-        swnode->sw_rownum = begin_rowCount;
         srcSlot = ExecProcNode(outerNode);
-        if (TupIsNull(srcSlot) || (rus->iteration != begin_iteration)) break;
+        if (TupIsNull(srcSlot)) {
+            break;
+        }
+        if (CheckCycleExeception(swnode, srcSlot)) {
+            *iscycle = true;
+            continue;
+        }
         TupleTableSlot* newSlot = MakeSingleTupleTableSlot(srcSlot->tts_tupleDescriptor);
         newSlot = ExecCopySlot(newSlot, srcSlot);
         queue = lappend(queue, newSlot);
     }
-
+    markSWLevelEnd(swnode, list_length(queue));
     return queue;
 }
 
-static TupleTableSlot* updateTuplePseudoColumnValue(TupleTableSlot* slot, StartWithOpState *node,
-    StartWithOpColumnType type, Datum value)
+void DfsExpandStack(SWDfsOpState* state)
 {
-    HeapTuple tup = NULL;
-    TupleDesc tupDesc = slot->tts_tupleDescriptor;
+    int oldsize = state->stack_size;
+    int newsize = oldsize * 2;
+    errno_t rc = 0;
+    state->prior_key_stack = (List **)repalloc(state->prior_key_stack, sizeof(List *) * newsize);
+    state->tuples_stack = (List **)repalloc(state->tuples_stack, sizeof(List *) * newsize);
+    rc = memset_s((void*)(state->prior_key_stack + oldsize), oldsize * sizeof(List *), 0, oldsize * sizeof(List *));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s((void*)(state->tuples_stack + oldsize), oldsize * sizeof(List *), 0, oldsize * sizeof(List *));
+    securec_check(rc, "\0", "\0");
+    state->stack_size = newsize;
+}
 
-    ResetResultSlotAttValueArray(node, node->sw_values, node->sw_isnull);
-    Datum *values = node->sw_values;
-    bool  *isnull = node->sw_isnull;
+static void DfsPushTuples(SWDfsOpState* state, List* queue)
+{
+    if (state->cur_level >= state->stack_size) {
+        DfsExpandStack(state);
+    }
+    state->tuples_stack[state->cur_level] = queue;
+}
 
-    /* fetch physical tuple */
-    tup = ExecFetchSlotTuple(slot);
-    heap_deform_tuple(tup, tupDesc, values, isnull);
+static void DfsPushPriorKey(TupleTableSlot* slot, SWDfsOpState* state, List* keyEntryList)
+{
+    ListCell* lc = NULL;
+    List* keys = NIL;
+    foreach(lc, keyEntryList) {
+        TargetEntry* te = (TargetEntry*)lfirst(lc);
+        TupleDesc tupDesc = slot->tts_tupleDescriptor;
+        FormData_pg_attribute attr = tupDesc->attrs[te->resno - 1];
+        Datum key = (Datum)0;
+        if (slot->tts_isnull[te->resno - 1]) {
+            key = CStringGetTextDatum(pstrdup(SWCB_DEFAULT_NULLSTR));
+            keys = lappend(keys, (void*)key);
+        } else {
+            key = slot->tts_values[te->resno - 1];
+            /* check attr type */
+            keys = lappend(keys, (void*)datumCopy(key, attr.attbyval, attr.attlen));
+        }
+    }
+    int pos = state->cur_level - 1;
+    if (pos >= state->stack_size) {
+        DfsExpandStack(state);
+    }
+    state->prior_key_stack[pos] = keys;
+}
 
+static void DfsClearPriorKey(SWDfsOpState* state)
+{
+    int pos = state->cur_level - 1;
+    List* keys = state->prior_key_stack[pos];
+    list_free_ext(keys);
+    state->prior_key_stack[pos] = NULL;
+}
+
+static void DfsPopStack(SWDfsOpState* state)
+{
+    if (state->cur_level < 1) {
+        return;
+    }
+    int pos = state->cur_level - 1;
+    Assert(list_length(state->tuples_stack[pos]) == 0);
+    state->tuples_stack[pos] = NULL;
+    DfsClearPriorKey(state);
+    state->cur_level--;
+}
+
+static void DfsResetState(SWDfsOpState* state)
+{
+    if (state->last_ru_slot) {
+        ExecDropSingleTupleTableSlot(state->last_ru_slot);
+        state->last_ru_slot = NULL;
+    }
+    while (state->cur_level) {
+        int pos = state->cur_level - 1;
+        List* tuples = state->tuples_stack[pos];
+        while (list_length(tuples)) {
+            ExecDropSingleTupleTableSlot((TupleTableSlot*)linitial(tuples));
+            tuples = list_delete_first(tuples);
+        }
+        state->tuples_stack[pos] = NULL;
+        DfsClearPriorKey(state);
+        state->cur_level--;
+    }
+    state->cur_rownum = 0;
+    state->cur_level = 0;
+}
+
+TupleTableSlot* DeformRUSlot(TupleTableSlot* ru_slot, StartWithOpState *node)
+{
+    TupleDesc tupDesc = ru_slot->tts_tupleDescriptor;
+    TupleTableSlot* dst_slot = node->sw_workingSlot;
+    ExecClearTuple(dst_slot);
+    for (int i = 0; i < dst_slot->tts_tupleDescriptor->natts; i++) {
+        dst_slot->tts_isnull[i] = true;
+    }
+    for (int i = 0; i < tupDesc->natts; i++) {
+        bool isnull = true;
+        dst_slot->tts_values[i] = heap_slot_getattr(ru_slot, i + 1, &isnull);
+        dst_slot->tts_isnull[i] = isnull;
+    }
+    ExecStoreVirtualTuple(dst_slot);
+    return dst_slot;
+}
+
+static void UpdateVirtualSWCBTuple(TupleTableSlot* slot, StartWithOpState *node,
+                                   StartWithOpColumnType type, Datum value)
+{
     AttrNumber attnum = node->sw_pseudoCols[type]->resno;
-
     /* set proper value and mark isnull to false */
-    values[attnum - 1] = Int32GetDatum(value);
-    isnull[attnum - 1] = false;
+    slot->tts_values[attnum - 1] = value;
+    slot->tts_isnull[attnum - 1] = false;
+}
 
-    /* create a local copy tuple and store it to tuplestore, mark shouldFree as 'true ' */
-    tup = heap_form_tuple(tupDesc, values, isnull);
-    slot = ExecStoreTuple(tup, slot, InvalidBuffer, true);
-    return slot;
+static void UpdateCurrentSlotRootValues(TupleTableSlot* slot, List* internal_root_entry_list, List* root_entry_list)
+{
+    TupleDesc tupDesc = slot->tts_tupleDescriptor;
+    ListCell* lc1 = NULL;
+    ListCell* lc2 = NULL;
+    forboth(lc1, root_entry_list, lc2, internal_root_entry_list) {
+        TargetEntry* te1 = (TargetEntry*)lfirst(lc1);
+        const char* curStr = GetCurrentValue(slot, te1->resno);
+        Datum value = CStringGetTextDatum(curStr);
+        TargetEntry* te2 = (TargetEntry*)lfirst(lc2);
+        slot->tts_values[te2->resno - 1] = value;
+        slot->tts_isnull[te2->resno - 1] = false;
+        pfree_ext(curStr);
+    }
+}
+
+static void UpdateCurrentSlotPathValues(TupleTableSlot* slot, List* internal_path_entry_list, List* path_entry_list)
+{
+    TupleDesc tupDesc = slot->tts_tupleDescriptor;
+    ListCell* lc1 = NULL;
+    ListCell* lc2 = NULL;
+    forboth(lc1, path_entry_list, lc2, internal_path_entry_list) {
+        char* nodepath = NULL;
+        char* spliter = "/";
+        StringInfoData si;
+        initStringInfo(&si);
+        TargetEntry* te1 = (TargetEntry*)lfirst(lc1);
+        const char* curStr = GetCurrentValue(slot, te1->resno);
+        TargetEntry* te2 = (TargetEntry*)lfirst(lc2);
+        Datum value = slot->tts_values[te2->resno - 1];
+        nodepath = (slot->tts_isnull[te2->resno - 1]) ? NULL : TextDatumGetCString(value);
+        if (nodepath) {
+            appendStringInfo(&si, "%s%s%s", nodepath, spliter, curStr);
+        } else {
+            appendStringInfo(&si, "%s%s", spliter, curStr);
+        }
+        slot->tts_values[te2->resno - 1] = CStringGetTextDatum(si.data);
+        slot->tts_isnull[te2->resno - 1] = false;
+        pfree_ext(si.data);
+        pfree_ext(nodepath);
+        pfree_ext(curStr);
+    }
 }
 
 /*
@@ -503,65 +611,63 @@ static TupleTableSlot* updateTuplePseudoColumnValue(TupleTableSlot* slot, StartW
  *
  * Does not support order siblings by yet.
  */
-static bool depth_first_connect(int currentLevel, StartWithOpState *node, List* queue, int* dfsRowCount)
+static TupleTableSlot* depth_first_connect(StartWithOpState *node)
 {
-    CHECK_FOR_INTERRUPTS();
-
-    bool isCycle = false;
-    if (queue == NULL) {
-        return isCycle;
-    }
-    Tuplestorestate* outputStore = node->sw_workingTable;
-    PlanState* outerNode = outerPlanState(node);
-
-    /* loop until all siblings' DFS are done */
-    for (;;) {
-        if (queue->head == NULL) {
-            return isCycle;
-        }
-        TupleTableSlot* leader = (TupleTableSlot*) lfirst(queue->head);
-        if (leader == NULL || TupIsNull(leader)) {
-            return isCycle;
+    TupleTableSlot* result = NULL;
+    SWDfsOpState* dfs_state = node->dfs_state;
+    while (dfs_state->cur_level > 0) {
+        List* tuple_list = dfs_state->tuples_stack[dfs_state->cur_level - 1];
+        if (dfs_state->last_ru_slot != NULL) {
+            ExecDropSingleTupleTableSlot(dfs_state->last_ru_slot);
+            dfs_state->last_ru_slot = NULL;
         }
 
-        /* DFS: output the depth-first tuple to result table */
-        TupleTableSlot* dstSlot = leader;
-
-        queue->head = queue->head->next;
-
-        if (CheckCycleExeception(node, dstSlot)) {
-            // cycled slots are not kept
-            isCycle = true;
+        if (list_length(tuple_list) == 0) {
+            DfsPopStack(dfs_state);
             continue;
         }
-        if (currentLevel != 1) {
-            dstSlot = updateTuplePseudoColumnValue(dstSlot, node, SWCOL_ROWNUM, *dfsRowCount + 1);
-            RecursiveUnionState* runode = castNode(RecursiveUnionState, outerNode);
-            if (!ExecStartWithRowLevelQual(runode, dstSlot)) {
-                return isCycle;
+
+        TupleTableSlot* ru_slot = (TupleTableSlot*)linitial(tuple_list);
+        TupleTableSlot* cur_slot = DeformRUSlot(ru_slot, node);
+        dfs_state->last_ru_slot = ru_slot;
+
+        List* new_tuple_list = list_delete_first(tuple_list);
+        dfs_state->tuples_stack[dfs_state->cur_level - 1] = new_tuple_list;
+
+        UpdateVirtualSWCBTuple(cur_slot, node, SWCOL_LEVEL, dfs_state->cur_level);
+        UpdateVirtualSWCBTuple(cur_slot, node, SWCOL_ROWNUM, dfs_state->cur_rownum);
+
+        StartWithOp* swplan = (StartWithOp*)node->ps.plan;
+        RecursiveUnionState* runode = NULL;
+        runode = castNode(RecursiveUnionState, outerPlanState(node));
+        if (ExecStartWithRowLevelQual(runode, cur_slot)) {
+            DfsPushPriorKey(cur_slot, dfs_state, swplan->keyEntryList);
+            UpdateCurrentSlotPathValues(cur_slot, swplan->internal_path_entry_list, swplan->path_entry_list);
+            if (dfs_state->cur_level == 1) {
+                UpdateCurrentSlotRootValues(cur_slot, swplan->internal_root_entry_list, swplan->root_entry_list);
             }
+
+            bool iscycle = false;
+            List* queue = peekNextLevel(cur_slot, (PlanState*)runode, dfs_state->cur_level, &iscycle);
+            dfs_state->cur_rownum++;
+
+            bool isleaf = (list_length(queue) == 0);
+            UpdateVirtualSWCBTuple(cur_slot, node, SWCOL_ISCYCLE, BoolGetDatum(iscycle));
+            UpdateVirtualSWCBTuple(cur_slot, node, SWCOL_ISLEAF, BoolGetDatum(isleaf));
+
+            if (isleaf) {
+                DfsClearPriorKey(dfs_state);
+            } else {
+                DfsPushTuples(dfs_state, queue);
+                dfs_state->cur_level++;
+            }
+            result = cur_slot;
         }
-
-        tuplestore_puttupleslot(outputStore, dstSlot);
-        (*dfsRowCount)++;
-        int rowCountBefore = *dfsRowCount;
-
-        /* Go into the depth NOW: sibling tuples won't get processed
-        *  until all children are done */
-        node->sw_rownum = rowCountBefore;
-        List* children = peekNextLevel(leader, outerNode, currentLevel);
-        bool expectCycle = depth_first_connect(currentLevel + 1, node,
-                                               children,
-                                               dfsRowCount);
-        if (expectCycle) {
-            node->sw_cycle_rowmarks = lappend_int(node->sw_cycle_rowmarks, rowCountBefore);
-        }
-
-        if (!children) {
-            node->sw_leaf_rowmarks = lappend_int(node->sw_leaf_rowmarks, rowCountBefore);
+        if (result) {
+            return result;
         }
     }
-    return isCycle;
+    return NULL;
 }
 
 static List* makeStartTuples(StartWithOpState *node)
@@ -570,9 +676,8 @@ static List* makeStartTuples(StartWithOpState *node)
     List* startWithQueue = NULL;
     RecursiveUnionState* rus = (RecursiveUnionState*) outerNode;
     TupleTableSlot* dstSlot = ExecProcNode(outerNode);
-    int begin_iteration = rus->iteration;
     for (;;) {
-        if (TupIsNull(dstSlot) || rus->iteration != begin_iteration) {
+        if (TupIsNull(dstSlot)) {
             break;
         }
         TupleTableSlot* newSlot = MakeSingleTupleTableSlot(dstSlot->tts_tupleDescriptor);
@@ -614,8 +719,7 @@ void markSWLevelEnd(StartWithOpState *node, int64 rowCount)
  *
  * @Brief:
  *         Check if SWCB's conditions still hold for the recursion to
- *         continue. Level and rownum should have been made available
- *         in dstSlot by ConvertStartWithOpOutputSlot() already.
+ *         continue.
  *
  * @Input node: The current recursive union node.
  * @Input slot: The next slot to be scanned into start with operator.
@@ -626,16 +730,16 @@ bool ExecStartWithRowLevelQual(RecursiveUnionState* node, TupleTableSlot* dstSlo
 {
     StartWithOp* swplan = (StartWithOp*)node->swstate->ps.plan;
     ExprContext* expr = node->swstate->ps.ps_ExprContext;
-    if (!IsConnectByLevelStartWithPlan(swplan)) {
-        return true;
-    }
+
+    List* qual = node->swstate->dfs_state->cur_level == 1 ?
+                 node->swstate->start_with_qual : node->swstate->connect_by_qual;
 
     /*
      * Level and rownum pseudo attributes are extracted from StartWithOpPlan
      * node so we set filtering tuple as ecxt_scantuple
      */
     expr->ecxt_scantuple = dstSlot;
-    if (!ExecQual(node->swstate->ps.qual, expr, false)) {
+    if (qual && !ExecQual(qual, expr, false)) {
         return false;
     }
     return true;
@@ -647,65 +751,53 @@ static void DiscardSWLastTuple(StartWithOpState *node)
     node->sw_numtuples--;
 }
 
-TupleTableSlot* GetStartWithSlot(RecursiveUnionState* node, TupleTableSlot* slot, bool isRecursive)
+static SWDfsOpState* InitSWDfsOpState()
 {
-    TupleTableSlot* dstSlot = node->swstate->ps.ps_ResultTupleSlot;
-    dstSlot = ConvertStartWithOpOutputSlot(node->swstate, slot, dstSlot);
+    SWDfsOpState* state = (SWDfsOpState*)palloc0(sizeof(SWDfsOpState));
+    const int defaultStackSize = 32;
+    state->prior_key_stack = (List **)palloc0(sizeof(List *) * defaultStackSize);
+    state->tuples_stack = (List **)palloc0(sizeof(List *) * defaultStackSize);
+    state->stack_size = defaultStackSize;
+    state->cur_level = 0;
+    state->cur_rownum = 0;
+    state->last_ru_slot = NULL;
+    return state;
+}
 
-    if (isRecursive && !ExecStartWithRowLevelQual(node, dstSlot)) {
-        DiscardSWLastTuple(node->swstate);
-        return NULL;
-    }
-
-    return dstSlot;
+static void ClearSWDfsOpState(SWDfsOpState* state)
+{
+    pfree_ext(state->prior_key_stack);
+    pfree_ext(state->tuples_stack);
 }
 
 static TupleTableSlot* ExecStartWithOp(PlanState* state)
 {
     StartWithOpState *node = castNode(StartWithOpState, state);
     TupleTableSlot *dstSlot = node->ps.ps_ResultTupleSlot;
-    /* initialize row num count */
-    node->sw_rownum = 0;
 
-    Assert (node->sw_workingTable != NULL);
     /* start processing */
     switch (node->swop_status) {
         case SWOP_BUILD: {
-            Assert (node->sw_workingTable != NULL);
             markSWLevelBegin(node);
-            /* Kick off dfs with StartWith tuples */
-            int dfsRowCount = 0;
-            depth_first_connect(1, node, makeStartTuples(node), &dfsRowCount);
-
-            /* report we have done material step for current StartWithOp node */
-            ereport(DEBUG1,
-                    (errmodule(MOD_EXECUTOR),
-                    errmsg("[SWCB DEBUG] StartWithOp[%d] finish material-step and forward to PRC-step with level:%d rownum_total:%lu",
-                    node->ps.plan->plan_node_id,
-                    node->sw_level,
-                    node->sw_rownum)));
-
-            /* calculate pseudo output column */
-            ProcessPseudoReturnColumns(node);
-
-            /*
-             * After all tuples is stored, we rewind the tuplestore and mark current
-             * StartWithOp node status into EXECUTE
-             */
-            tuplestore_rescan(node->sw_workingTable);
-            node->swop_status = SWOP_EXECUTE;
+            List* queue = makeStartTuples(node);
+            markSWLevelEnd(node, list_length(queue));
+            if (queue == NULL) {
+                node->swop_status = SWOP_FINISH;
+                return NULL;
+            } else {
+                if (!node->dfs_state) {
+                    node->dfs_state = InitSWDfsOpState();
+                }
+                DfsPushTuples(node->dfs_state, queue);
+                node->dfs_state->cur_rownum = 1;
+                node->dfs_state->cur_level = 1;
+                node->swop_status = SWOP_EXECUTE;
+            }
         } // @suppress("No break at end of case")
 
         /* fall-thru for first time */
         case SWOP_EXECUTE: {
-            dstSlot = node->ps.ps_ResultTupleSlot;
-            (void)tuplestore_gettupleslot(node->sw_resultTable, true, false, dstSlot);
-
-            if (TupIsNull(dstSlot)) {
-                node->swop_status = SWOP_FINISH;
-            }
-
-            break;
+            return depth_first_connect(node);
         }
 
         default: {
@@ -737,6 +829,12 @@ void ExecEndStartWithOp(StartWithOpState *node)
         MemoryContextDelete(node->sw_context);
     }
 
+    if (node->dfs_state) {
+        DfsResetState(node->dfs_state);
+        ClearSWDfsOpState(node->dfs_state);
+        pfree_ext(node->dfs_state);
+    }
+
     ExecEndNode(outerPlanState(node));
 
     return;
@@ -744,6 +842,10 @@ void ExecEndStartWithOp(StartWithOpState *node)
 
 void ExecReScanStartWithOp(StartWithOpState *state)
 {
+    if (state->dfs_state) {
+        DfsResetState(state->dfs_state);
+    }
+    
     PlanState* outer_plan = outerPlanState(state);
 
     (void)ExecClearTuple(state->ps.ps_ResultTupleSlot);
@@ -787,14 +889,14 @@ StartWithOpColumnType GetPseudoColumnType(const char *resname)
         result = SWCOL_ISLEAF;
     } else if (pg_strcasecmp(resname, "connect_by_iscycle") == 0) {
         result = SWCOL_ISCYCLE;
-    } else if (pg_strcasecmp(resname, "ruitr") == 0) {
-        result = SWCOL_RUITR;
     } else if (pg_strcasecmp(resname, "array_siblings") == 0) {
         result = SWCOL_ARRAY_SIBLINGS;
     } else if (pg_strncasecmp(resname, "array_key_", strlen("array_key_")) == 0) {
         result = SWCOL_ARRAY_KEY;
-    } else if (pg_strncasecmp(resname, "array_col_", strlen("array_col_")) == 0) {
-        result = SWCOL_ARRAY_COL;
+    } else if (pg_strncasecmp(resname, "array_path_", strlen("array_path_")) == 0) {
+        result = SWCOL_ARRAY_PATH;
+    }  else if (pg_strncasecmp(resname, "array_root_", strlen("array_root_")) == 0) {
+        result = SWCOL_ARRAY_ROOT;
     } else if (pg_strcasecmp(resname, "rownum") == 0) {
         result = SWCOL_ROWNUM;
     } else {
@@ -821,99 +923,6 @@ bool IsPseudoReturnColumn(const char *colname)
              type == SWCOL_ISCYCLE || type == SWCOL_ROWNUM);
 }
 
-/*
- *  - srcSlot: the slot returned from RecursiveUnion (table column + internal TE)
- *  - dstSlot: the slot will return to CteScan (table column + pseudo return colum + internal TE)
- */
-TupleTableSlot *ConvertStartWithOpOutputSlot(StartWithOpState *node,
-                                              TupleTableSlot *srcSlot,
-                                              TupleTableSlot *dstSlot)
-{
-    /*
-     * Process start-with pseodu return columns from pseodu tagetentry
-     * CteScan: col[1......n], level, is_leaf, is_cycle, RUITR, array_name[1,2,...... m]
-     *                         | pseudo return column| | <<- pseudo internal column ->>|
-     */
-    HeapTuple tup = ExecMaterializeSlot(srcSlot);
-    HeapTuple tup_new = NULL;
-    TupleDesc srcTupDesc = srcSlot->tts_tupleDescriptor;
-    TupleDesc dstTupDesc = dstSlot->tts_tupleDescriptor;
-
-    /* Reset internal value/isnull array */
-    ResetResultSlotAttValueArray(node, node->sw_values, node->sw_isnull);
-    Datum *values = node->sw_values;
-    bool  *isnull = node->sw_isnull;
-
-    /* Reset dstslot and memorycontext */
-    (void)MemoryContextReset(node->sw_context);
-    MemoryContext oldcxt = MemoryContextSwitchTo(node->sw_context);
-
-    /*
-     * Step 1, fill StartWithOp's pseudo internal colum
-     *
-     * Note: As the conversion share the same values/isnull array, we do tail->front
-     * element-copy to avoid overlaping
-     */
-    heap_deform_tuple(tup, srcTupDesc, values, isnull);
-    StartWithOp *swplan = (StartWithOp *)node->ps.plan;
-    RecursiveUnion *ruplan = (RecursiveUnion *)swplan->ruplan;
-    int plist_len = list_length(swplan->internalEntryList);
-    TargetEntry *srcEntry = NULL;
-    TargetEntry *dstEntry = NULL;
-
-    Assert (list_length(swplan->internalEntryList) ==
-            list_length(ruplan->internalEntryList));
-
-    for (int i = 0; i < plist_len; i++) {
-        srcEntry = (TargetEntry *)list_nth(ruplan->internalEntryList, plist_len - i - 1);
-        dstEntry = (TargetEntry *)list_nth(swplan->internalEntryList, plist_len - i - 1);
-
-        values[dstEntry->resno - 1] = values[srcEntry->resno - 1];
-        isnull[dstEntry->resno - 1] = isnull[srcEntry->resno - 1];
-    }
-
-    /* Step2, fill StartWithOp's pseudo return columns */
-    ListCell *lc = NULL;
-    foreach (lc, swplan->plan.targetlist) {
-        TargetEntry *te = (TargetEntry *)lfirst(lc);
-        if (!IsPseudoReturnTargetEntry(te)) {
-            continue;
-        }
-
-        if (pg_strcasecmp(te->resname, "level") == 0) {
-            AttrNumber att = FetchRUItrTargetEntryResno(node);
-            int level = DatumGetInt32(values[att - 1]);
-
-            /* Set level/ruitr value */
-            if (node->sw_level != level) {
-                node->sw_level = level;
-                node->sw_numtuples = 0;
-            }
-            values[te->resno - 1] = values[att - 1] + 1;
-            isnull[te->resno - 1] = false;
-        } else if (pg_strcasecmp(te->resname, "connect_by_isleaf") == 0) {
-            values[te->resno - 1] = 0;
-            isnull[te->resno - 1] = true;
-        } else if (pg_strcasecmp(te->resname, "connect_by_iscycle") == 0) {
-            values[te->resno - 1] = 0;
-            isnull[te->resno - 1] = true;
-        } else if (pg_strcasecmp(te->resname, "rownum") == 0) {
-            values[te->resno - 1] = node->sw_rownum + 1;
-            isnull[te->resno - 1] = false;
-        }
-    }
-
-    tup_new = heap_form_tuple(dstTupDesc, values, isnull);
-    dstSlot = ExecStoreTuple(tup_new, dstSlot, InvalidBuffer, false);
-
-    MemoryContextSwitchTo(oldcxt);
-
-    /* update row num count before returning */
-    node->sw_rownum++;
-    node->sw_numtuples++;
-
-    return dstSlot;
-}
 
 /*
  * --------------------------------------------------------------------------------------
@@ -945,11 +954,11 @@ Datum sys_connect_by_path(PG_FUNCTION_ARGS)
 
     /*
      * step[1]:
-     *   Fetch current processed ScanTuple and its internal array_col, then convert
+     *   Fetch current processed ScanTuple and its internal array_path, then convert
      *   it into token_list and do proper calculation for sys_connect_by_path()
      */
     char *raw_array_str = NULL;
-    List *token_list = GetCurrentArrayColArray(fcinfo, value, &raw_array_str, &constArrayList);
+    List *token_list = GetCurrentArrayColArray(fcinfo, value, &raw_array_str, true, &constArrayList);
 
     ListCell *token = NULL;
     char *trimValue = TrimStr(value);
@@ -1003,30 +1012,11 @@ Datum connect_by_root(PG_FUNCTION_ARGS)
 
     /*
      * step[1]:
-     *   Fetch current processed ScanTuple and its internal array_col, then convert
+     *   Fetch current processed ScanTuple and its internal array_root_x, then convert
      *   it into token_list and do proper calculation for connect_by_root()
      */
     char *raw_array_str = NULL;
-    List *token_list = GetCurrentArrayColArray(fcinfo, value, &raw_array_str, &constArrayList);
-    ListCell *lc = NULL;
-    char *trimValue = TrimStr(value);
-    if (trimValue != NULL && !constArrayList) {
-        bool valid = false;
-        foreach (lc, token_list) {
-            char *curValue = TrimStr((const char *)lfirst(lc));
-            if (curValue == NULL) {
-                continue;
-            }
-            if (strcmp(trimValue, curValue) == 0) {
-                valid = true;
-                break;
-            }
-        }
-
-        if (!valid) {
-            elog(ERROR, "node value is not in path (value:%s path:%s)", value, raw_array_str);
-        }
-    }
+    List *token_list = GetCurrentArrayColArray(fcinfo, value, &raw_array_str, false, &constArrayList);
 
     /*
      * step[2]:
@@ -1040,37 +1030,30 @@ Datum connect_by_root(PG_FUNCTION_ARGS)
 /*
  * -brief: array_key cotent in List<tokenString> format
  */
-static List *TupleSlotGetKeyArrayList(TupleTableSlot *slot)
+static int TupleSlotGetCurrentLevel(TupleTableSlot *slot)
 {
     Assert (slot != NULL);
 
     /* 1. find key attnum */
-    AttrNumber arrayKeyAttno = InvalidAttrNumber;
-    Datum arrayKeyDatum = (Datum)0;
+    AttrNumber attno = InvalidAttrNumber;
+    Datum levelDatum = (Datum)0;
     TupleDesc tupDesc = slot->tts_tupleDescriptor;
     HeapTuple tup = ExecFetchSlotTuple(slot);
     bool isnull = true;
 
     for (int n = 0; n < tupDesc->natts; n++) {
         Form_pg_attribute attr = TupleDescAttr(tupDesc, n);
-        if (pg_strncasecmp(attr->attname.data, "array_key", strlen("arra_key")) == 0) {
-            arrayKeyAttno = n + 1;
+        if (pg_strncasecmp(attr->attname.data, "level", strlen("level")) == 0) {
+            attno = n + 1;
             break;
         }
     }
 
-    if (arrayKeyAttno == InvalidAttrNumber) {
-        elog(ERROR, "Internal array_key is not found for sys_connect_by_path()");
-    }
-
     /* 2. fetch key str */
-    arrayKeyDatum = heap_getattr(tup, arrayKeyAttno, tupDesc, &isnull);
-    Assert (!isnull && arrayKeyDatum != 0);
+    levelDatum = heap_getattr(tup, attno, tupDesc, &isnull);
+    Assert (!isnull && levelDatum != 0);
 
-    char *rawKeyArrayStr = TextDatumGetCString(arrayKeyDatum);
-    List *tokenList = CovertInternalArrayStringToList(rawKeyArrayStr);
-
-    return tokenList;;
+    return DatumGetInt32(levelDatum);
 }
 
 /*
@@ -1087,7 +1070,7 @@ static List *TupleSlotGetKeyArrayList(TupleTableSlot *slot)
  * --------------------------------------------------------------------------------------
  */
 static List *GetCurrentArrayColArray(const FunctionCallInfo fcinfo,
-            const char *value, char **raw_array_str, bool *isConstArrayList)
+                                     const char *value, char **raw_array_str, bool is_path, bool *isConstArrayList)
 {
     List *token_list = NIL;
     TupleTableSlot *slot = NULL;
@@ -1118,21 +1101,13 @@ static List *GetCurrentArrayColArray(const FunctionCallInfo fcinfo,
     /* handle case where */
     if (vars == NIL) {
         TupleTableSlot *slot = econtext->ecxt_scantuple;
-        List *keyTokenList = NIL;
+        int level = -1;
 
-        if (fcinfo->flinfo->fn_oid == CONNECT_BY_ROOT_FUNCOID && TupIsNull(slot)) {
-            /*
-             * By semantic, connect_by_root() aiming to return the root value of current
-             * recursive tree, if there is a const value set as parameter, its hierachy
-             * is considered as /{v}/{v}/{v}..., so simplely return const value itself
-             *
-             * Note: we can do so only for connect_by_root(), sys_connect_by_path is still
-             * processed as /{v}/{v}/{v}
-             */
+        if (fcinfo->flinfo->fn_oid == CONNECT_BY_ROOT_FUNCOID) {
             token_list = list_make1(pstrdup(value));
-        } else {
-            keyTokenList = TupleSlotGetKeyArrayList(slot);
-            for (int n = 0; n < list_length(keyTokenList); n++) {
+        } else if (!TupIsNull(slot)) {
+            level = TupleSlotGetCurrentLevel(slot);
+            for (int n = 0; n < level; n++) {
                 token_list = lappend(token_list, pstrdup(value));
             }
         }
@@ -1190,7 +1165,7 @@ static List *GetCurrentArrayColArray(const FunctionCallInfo fcinfo,
 
     /* step 1. find proper internal array to support */
     AttrNumber origAttnum = variable->varattno;
-    AttrNumber arrayColAttnum = GetInternalArrayAttnum(tupDesc , origAttnum);
+    AttrNumber arrayColAttnum = GetInternalArrayAttnum(tupDesc, origAttnum, is_path);
     Datum arrayColDatum = heap_getattr(tup, arrayColAttnum,
                         slot->tts_tupleDescriptor, &isnull);
     Assert (!isnull && origAttnum != InvalidAttrNumber &&
@@ -1217,7 +1192,7 @@ static List *CovertInternalArrayStringToList(char *raw_array_str)
     return token_list;
 }
 
-static AttrNumber GetInternalArrayAttnum(TupleDesc tupDesc, AttrNumber origVarAttno)
+static AttrNumber GetInternalArrayAttnum(TupleDesc tupDesc, AttrNumber origVarAttno, bool isPath)
 {
     NameData arrayAttName;
     AttrNumber  arrayAttNum = InvalidAttrNumber;
@@ -1225,11 +1200,15 @@ static AttrNumber GetInternalArrayAttnum(TupleDesc tupDesc, AttrNumber origVarAt
 
     rc = memset_s(arrayAttName.data, NAMEDATALEN, 0, NAMEDATALEN);
     securec_check(rc, "\0", "\0");
-    rc = sprintf_s(arrayAttName.data, NAMEDATALEN, "array_col_%d", origVarAttno);
+    if (isPath) {
+        rc = sprintf_s(arrayAttName.data, NAMEDATALEN, "array_path_%d", origVarAttno);
+    } else {
+        rc = sprintf_s(arrayAttName.data, NAMEDATALEN, "array_root_%d", origVarAttno);
+    }
     securec_check_ss(rc, "\0", "\0");
 
     /* find proper internal array to support */
-    for (int n = 0; n < tupDesc->natts; n++) {
+    for (int n = tupDesc->natts - 1; n >= 0; n--) {
         Form_pg_attribute attr = TupleDescAttr(tupDesc, n);
         if (pg_strcasecmp(attr->attname.data, arrayAttName.data) == 0) {
             arrayAttNum = n + 1;
@@ -1238,664 +1217,11 @@ static AttrNumber GetInternalArrayAttnum(TupleDesc tupDesc, AttrNumber origVarAt
     }
 
     if (arrayAttNum == InvalidAttrNumber) {
-        elog(ERROR, "Internal array_col for origVarAttno:%d related internal array is not found",
+        elog(ERROR, "Internal array_path/array_root for origVarAttno:%d related internal array is not found",
                 origVarAttno);
     }
 
     return arrayAttNum;
-}
-
-/*
- * fill start with return columns is_leaf, is_cycle
- */
-static const char *GetPseudoArrayTargetValueString(TupleTableSlot *slot, AttrNumber attnum)
-{
-    const char *raw_array_string = NULL;
-    HeapTuple tup = NULL;
-    TupleDesc tupDesc = slot->tts_tupleDescriptor;
-    Datum datum = 0;
-    bool  isnull = true;
-
-    /* fetch physical tuple */
-    tup = ExecFetchSlotTuple(slot);
-    datum = heap_getattr(tup, attnum, tupDesc, &isnull);
-    raw_array_string = TextDatumGetCString(datum);
-
-    Assert (!isnull && raw_array_string != NULL);
-
-    return raw_array_string;
-}
-
-/*
- * - brief: A helper function to update tupleSlot with given isleaf/iscycle value
- */
-static void UpdatePseudoReturnColumn(StartWithOpState *state,
-            TupleTableSlot *slot, bool isleaf, bool iscycle)
-{
-    HeapTuple tup = NULL;
-    TupleDesc tupDesc = slot->tts_tupleDescriptor;
-
-    ResetResultSlotAttValueArray(state, state->sw_values, state->sw_isnull);
-    Datum *values = state->sw_values;
-    bool  *isnull = state->sw_isnull;
-
-    /* fetch physical tuple */
-    tup = ExecFetchSlotTuple(slot);
-    heap_deform_tuple(tup, tupDesc, values, isnull);
-
-    /* check the unset value isleaf, iscycle is not set yet */
-    AttrNumber attnum2 = state->sw_pseudoCols[SWCOL_ISLEAF]->resno;
-    AttrNumber attnum3 = state->sw_pseudoCols[SWCOL_ISCYCLE]->resno;
-    Assert (values[attnum2 - 1] == 0 && isnull[attnum2 - 1]);
-    Assert (values[attnum3 - 1] == 0 && isnull[attnum3 - 1]);
-
-    /* set proper value and mark isnull to false */
-    values[attnum2 - 1] = BoolGetDatum(isleaf);
-    isnull[attnum2 - 1] = false;
-    values[attnum3 - 1] = BoolGetDatum(iscycle);
-    isnull[attnum3 - 1] = false;
-
-    /* create a local copy tuple and store it to tuplestore, mark shouldFree as 'true ' */
-    tup = heap_form_tuple(tupDesc, values, isnull);
-    slot = ExecStoreTuple(tup, slot, InvalidBuffer, true);
-}
-
-/*
- * - brief: check if curernt processing tupleSlot is in cycle
- *
- * - return: none, iscycle flag is returned by param "bool *connect_by_iscycle"
- */
-static void CheckIsCycle(StartWithOpState *state, bool *connect_by_iscycle)
-{
-    List     *entry_list = NIL;
-    ListCell *entry = NULL;
-    char     *keyArrayStrCopy = NULL;
-
-    Assert (state != NULL && state->sw_curKeyArrayStr != NULL &&
-            connect_by_iscycle != NULL);
-
-    /* The underlying strok_r() will modify the splited string itself so make a copy */
-    keyArrayStrCopy = pstrdup(state->sw_curKeyArrayStr);
-    entry_list = CovertInternalArrayStringToList(keyArrayStrCopy);
-    foreach (entry, entry_list) {
-        const char *node1 = (const char *)lfirst(entry);
-        ListCell *rest = lnext(entry);
-        while (rest != NULL) {
-            const char *node2 = (const char *)lfirst(rest);
-            ListCell *next = lnext(rest);
-            if (pg_strcasecmp(node1, node2) == 0) {
-                *connect_by_iscycle = true;
-                return;
-            }
-            rest = next;
-        }
-    }
-
-    /* Free the tokenized list as we pass int the copy of sw_curKeyArrayStr */
-    list_free_ext(entry_list);
-    pfree_ext(keyArrayStrCopy);
-
-    *connect_by_iscycle = false;
-}
-
-/*
- * - brief: check if curernt processing tupleSlot is leaf
- *
- * - return: none, iscycle flag is returned by param "bool *connect_by_isleaf"
- */
-static void CheckIsLeaf(StartWithOpState *state, bool *connect_by_isleaf)
-{
-    /* PRC optimization is applied */
-    if (PRCCanSkip(state, SWCOL_ISLEAF)) {
-        return;
-    }
-
-    Assert (state != NULL && connect_by_isleaf != NULL);
-
-    const char *curRow = state->sw_curKeyArrayStr;
-    int curRowLen = strlen(curRow);
-    TupleTableSlot *slot = state->sw_workingSlot;
-    const char *scanRow = NULL;
-
-    tuplestore_rescan(state->sw_backupTable);
-    for (;;) {
-        (void)tuplestore_gettupleslot(state->sw_backupTable, true, false, slot);
-        if (TupIsNull(slot)) {
-            /*
-             * Finish scan all tuples, but we are not found "curRow is not a prefix"
-             * plus "a prefix and string is longer "
-             */
-            *connect_by_isleaf = true;
-            break;
-        }
-
-        /* Free the scanRow memory allocate in last loop */
-        if (scanRow != NULL) {
-            pfree_ext(scanRow);
-        }
-
-        scanRow = GetPseudoArrayTargetValueString(slot, state->sw_keyAttnum);
-        int scanRowLen = strlen(scanRow);
-
-        if (strcmp(curRow, scanRow) == 0) {
-            /* continue if curernt row */
-            continue;
-        }
-
-        /*
-         * if curRow is the forward prefix of scanRow then set flag connect_by_isleaf false
-         * -- forward prefix
-         *    abc is forward prefix of abcde
-         * -- backward predix
-         *    cde is backward prefix of abcde
-         *
-         * Attention, we only accept forward prefix in this case.
-         * */
-        char *pos = pg_strrstr((char *)scanRow, curRow);
-        if (pos != NULL && pos == scanRow && curRowLen < scanRowLen) {
-            *connect_by_isleaf = false;
-            break;
-        }
-    }
-
-    /* Free text_to_cstring() palloc()-ed string */
-    if (scanRow != NULL) {
-        pfree_ext(scanRow);
-    }
-
-    return;
-}
-
-static void CheckIsCycleByRowmarks(StartWithOpState *state, bool* connect_by_iscycle, int row)
-{
-    if (state->sw_cycle_rowmarks == NULL) {
-        return;
-    }
-    ListCell* mark = NULL;
-    foreach (mark, state->sw_cycle_rowmarks) {
-        int markIndex = lfirst_int(mark);
-        if (row == markIndex) {
-            *connect_by_iscycle = true;
-        }
-    }
-}
-
-static void CheckIsLeafByRowmarks(StartWithOpState *state, bool* connect_by_isleaf, int row)
-{
-    if (state->sw_leaf_rowmarks == NULL) {
-        return;
-    }
-    ListCell* mark = NULL;
-    foreach (mark, state->sw_leaf_rowmarks) {
-        int markIndex = lfirst_int(mark);
-        if (row == markIndex) {
-            *connect_by_isleaf = true;
-        }
-    }
-}
-
-/*
- * - brief: process the recursive-union returned tuples with isleaf/iscycle
- *          pseudo value filled
- *
- * - return: none
- */
-static void ProcessPseudoReturnColumns(StartWithOpState *state)
-{
-    TupleTableSlot *dstSlot = state->ps.ps_ResultTupleSlot;
-    StartWithOp    *swplan = (StartWithOp *)state->ps.plan;
-
-    /* step1. put all tuples itno tmp table */
-    tuplestore_rescan(state->sw_workingTable);
-    for (;;) {
-        (void)tuplestore_gettupleslot(state->sw_workingTable, true, false, dstSlot);
-        if (TupIsNull(dstSlot)) {
-            break;
-        }
-
-        tuplestore_puttupleslot(state->sw_backupTable, dstSlot);
-    }
-
-    /* seek tuplestore offset to begining */
-    tuplestore_rescan(state->sw_workingTable);
-    tuplestore_rescan(state->sw_backupTable);
-
-    int rowCount = 0;
-    /* step2. start processing */
-    for (;;) {
-        CHECK_FOR_INTERRUPTS();
-        
-        /* fetch one tuple from workingTable */
-        (void)tuplestore_gettupleslot(state->sw_workingTable, true, false, dstSlot);
-        if (TupIsNull(dstSlot)) {
-            state->swop_status = SWOP_FINISH;
-            break;
-        }
-
-        rowCount++;
-        bool connect_by_isleaf = true;
-        bool connect_by_iscycle = true;
-
-        if (swplan->keyEntryList != NIL) {
-            /* fetch current key array string for later isleaf/iscycle determination */
-            state->sw_curKeyArrayStr =
-                    GetPseudoArrayTargetValueString(dstSlot, state->sw_keyAttnum);
-
-            /* Calculate connect_by_iscycle */
-            CheckIsCycle(state, &connect_by_iscycle);
-            /* Calculate connect_by_isleaf */
-            CheckIsLeaf(state, &connect_by_isleaf);
-            /* Free per-tuple keyArrayStr */
-            pfree_ext(state->sw_curKeyArrayStr);
-        } else {
-            /*
-             * !!Note:  It is a rare case when gets here because keyEntryList is not
-             * created for current START WITH clause, simplely it is an abnormal ConnectByExpr
-             * specified in "CONNECT BY" clause e.g. "CONNECT BY col1 = abs(x)", we set
-             * isleaf/iscycle both as FALSE value for more failure-tolerance and reasonble
-             */
-            connect_by_isleaf = false;
-            connect_by_iscycle = false;
-        }
-
-        CheckIsCycleByRowmarks(state, &connect_by_iscycle, rowCount);
-        CheckIsLeafByRowmarks(state, &connect_by_isleaf, rowCount);
-
-        /* update result, fill the result tuple */
-        UpdatePseudoReturnColumn(state, dstSlot, connect_by_isleaf, connect_by_iscycle);
-        tuplestore_puttupleslot(state->sw_resultTable, dstSlot, false);
-        ExecClearTuple(dstSlot);
-    }
-
-    /* rewind resultTable to let later EXECUTE stage can be processed */
-    tuplestore_rescan(state->sw_resultTable);
-}
-
-static AttrNumber FetchRUItrTargetEntryResno(StartWithOpState *state)
-{
-    AttrNumber attnum = InvalidAttrNumber;
-    StartWithOp *plan = (StartWithOp *)state->ps.plan;
-    List *plist = plan->internalEntryList;
-    ListCell *lc = NULL;
-
-    foreach (lc, plist) {
-        TargetEntry *te = (TargetEntry *)lfirst(lc);
-        if (pg_strcasecmp(te->resname, "RUITR") == 0) {
-            attnum = te->resno;
-            break;
-        }
-    }
-
-    Assert (attnum != InvalidAttrNumber && attnum <= list_length(plan->plan.targetlist));
-
-    return attnum;
-}
-
-/*
- * functinos to process in RuScan
- *
- * Note: these function are mainly invoked in recursive union operator, but we put them in
- * startwith.cpp as they are special logic for start-with converted RecursiveUnion
- */
-static const char *GetCurrentWorkTableScanPath(TupleTableSlot *srcSlot, AttrNumber pseudo_attnum)
-{
-    TupleDesc tupDesc = srcSlot->tts_tupleDescriptor;
-    HeapTuple tup = ExecFetchSlotTuple(srcSlot);
-    bool isnull = true;
-
-    /* if srcSlot is from non-recursive(no pseudo column), then just return */
-    if (pseudo_attnum > tupDesc->natts) {
-        return NULL;
-    }
-
-    if (tup != NULL) {
-        return TextDatumGetCString(heap_getattr(tup, pseudo_attnum, tupDesc, &isnull));
-    }
-
-    return NULL;
-}
-
-static bytea *GetCurrentSiblingsArrayPath(TupleTableSlot *srcSlot, AttrNumber pseudo_attnum)
-{
-    TupleDesc tupDesc = srcSlot->tts_tupleDescriptor;
-    HeapTuple tup = ExecFetchSlotTuple(srcSlot);
-    bool isnull = true;
-
-    /* if srcSlot is from non-recursive(no pseudo column), then just return */
-    if (pseudo_attnum > tupDesc->natts) {
-        return NULL;
-    }
-
-    if (tup != NULL) {
-        return DatumGetByteaP(heap_getattr(tup, pseudo_attnum, tupDesc, &isnull));
-    }
-
-    return NULL;
-}
-
-static Datum ConvertRuScanArrayAttr(RecursiveUnionState *rustate,
-                TargetEntry *te, TupleTableSlot *srcSlot, bool inrecursing)
-{
-    /*
-     * !!Reminding:
-     *    In the future, we need improve he array_key and array_col into native array
-     *    format rather then use bare literal type
-     */
-    Datum datum  = (Datum)0;
-    const char *spliter = "/";
-    const char *node_path = NULL;
-    const char *value = NULL;
-
-    if (!IsA(te->expr, Var)) {
-        elog(ERROR, "Invalid TargetEntry expr type %s", nodeToString(te->expr));
-    }
-
-    node_path = GetCurrentWorkTableScanPath(srcSlot, te->resno);
-    StartWithOpColumnType type = GetPseudoColumnType(te);
-    switch (type) {
-        case SWCOL_ARRAY_KEY: {
-            value = GetKeyEntryArrayStr(rustate, srcSlot);
-            break;
-        }
-        case SWCOL_ARRAY_SIBLINGS: {
-            bytea *path = GetCurrentSiblingsArrayPath(srcSlot, te->resno);
-            bytea *res = GetSiblingsKeyEntry(rustate, path);
-            return PointerGetDatum(res);
-            break;
-        }
-        case SWCOL_ARRAY_COL: {
-            TupleDesc tupDesc = srcSlot->tts_tupleDescriptor;
-            AttrNumber attno = PseudoResnameGetOriginResno(te->resname);
-            if (!inrecursing && tupDesc->natts < attno) {
-                /*
-                 * None-recursive branch
-                 *
-                 * Handle a case where we need generate arry_col for PRC, we need handle
-                 * it properly as in none-recursing stage, PRC is not attached in inner
-                 * plan tree's targetlist, thus there is no way to invoke heap_getattr(),
-                 * instead we need handle it manually,
-                 *
-                 * e.g. select sys_connect_by_path(level, 'xx')
-                 *
-                 * PRC: abbrev for "pseudo return column" level/isleaf/iscycle/rownum
-                 */
-                Datum valueDatum = rustate->swstate->sw_values[attno];
-                value = pstrdup(DatumGetCString(DirectFunctionCall1(int8out, valueDatum)));
-            } else {
-                /*
-                 * Recursive Branch
-                 *
-                 * for recursive case, PRC it attached to RecursiveUnion's inner plan
-                 * targetlist, this we can hanle normally
-                 */
-                value = GetCurrentValue(srcSlot, attno);
-            }
-            break;
-        }
-        default: {
-            /* fall-thru */
-        }
-    }
-
-
-    StringInfo si = makeStringInfo();
-
-    if (GetPseudoColumnType(te) == SWCOL_ARRAY_SIBLINGS) {
-        if (node_path == NULL) {
-            appendStringInfo(si, "%s", value);
-        } else {
-            appendStringInfo(si, "%s%s", node_path, value);
-        }
-    } else {
-        if (node_path == NULL) {
-            appendStringInfo(si, "%s%s", spliter, value);
-        } else {
-            appendStringInfo(si, "%s%s%s", node_path, spliter, value);
-        }
-    }
-
-    /* Drop memory allocation created in current function, free as early as possible */
-    datum = CStringGetTextDatum(si->data);
-    pfree_ext(si->data);
-    pfree_ext(node_path);
-    pfree_ext(value);
-
-    return datum;
-}
-
-/*
- * --------------------------------------------------------------------------------------
- * @Brief: Invoked at return point of RecursiveUnion, add the key/array information  store
- *         in worktable, so that next round of recursive iteration can append new node
- *         value to previous nodepath
- * --------------------------------------------------------------------------------------
- */
-TupleTableSlot *ConvertRuScanOutputSlot(RecursiveUnionState *rustate,
-                                           TupleTableSlot *scanSlot,
-                                           bool inrecursing)
-{
-    if (TupIsNull(scanSlot)) {
-        return scanSlot;
-    }
-
-    /* Origin RuScan output tuple  */
-    HeapTuple scanTup = ExecFetchSlotTuple(scanSlot);
-    TupleDesc scanTupDesc = scanSlot->tts_tupleDescriptor;
-
-    /*
-     * New RuScan output tuple will containd RUITR, array_key/col_nn, ....
-     *
-     * RecursiveUnion plan node's "result slot" tupDesc contains RUITR, array_key/col_nn
-     * as they were generated from RecursiveUnion's targetlist
-     */
-    HeapTuple outTup = NULL;
-    TupleDesc outTupDesc = rustate->ps.ps_ResultTupleSlot->tts_tupleDescriptor;
-    TupleTableSlot *outSlot = rustate->ps.ps_ResultTupleSlot;
-
-    StartWithOpState *swstate = rustate->swstate;
-    ResetResultSlotAttValueArray(swstate, swstate->sw_values, swstate->sw_isnull);
-    Datum *values = swstate->sw_values;
-    bool *isnull = swstate->sw_isnull;
-
-    /* Reset scanslot and memorycontext */
-    (void)MemoryContextReset(rustate->convertContext);
-    MemoryContext oldcxt = MemoryContextSwitchTo(rustate->convertContext);
-
-    /*
-     * scanTuple does not contain RUITR, array_name, deformed by old desc and use new
-     * values/isbull to accept deformed content
-     */
-    heap_deform_tuple(scanTup, scanTupDesc, values, isnull);
-
-    ListCell *lc = NULL;
-    RecursiveUnion *ruplan = (RecursiveUnion *)rustate->ps.plan;
-    foreach (lc, ruplan->internalEntryList) {
-        TargetEntry *te = (TargetEntry *)lfirst(lc);
-        AttrNumber attnum = te->resno;
-
-        if (pg_strcasecmp(te->resname, "RUITR") == 0) {
-            values[attnum - 1] = rustate->iteration;
-        }  else if (pg_strncasecmp(te->resname, "array_key_", strlen("array_key_")) == 0) {
-            values[attnum - 1] = ConvertRuScanArrayAttr(rustate, te, scanSlot, inrecursing);
-        } else {
-            values[attnum - 1] = ConvertRuScanArrayAttr(rustate, te, scanSlot, inrecursing);
-        }
-
-        /* for converted slot is always filled with valid value(none-empty) */
-        isnull[attnum - 1] = false;
-    }
-
-    /* build converted tuple */
-    outTup = heap_form_tuple(outTupDesc, values, isnull);
-    outSlot = ExecStoreTuple(outTup, outSlot, InvalidBuffer, false);
-
-    MemoryContextSwitchTo(oldcxt);
-
-    /*
-     * Start With dfx
-     *
-     *  - print key information for each iteration in RuSacn
-     **/
-    if (u_sess->attr.attr_sql.enable_startwith_debug) {
-        bool _isnull = true;
-        Datum d = heap_getattr(outTup, rustate->swstate->sw_keyAttnum, outTupDesc, &_isnull);
-        elog(LOG, "StartWithDebug: LEVEL:%d array_key_1:%s",
-                        rustate->iteration + 1, TextDatumGetCString(d));
-    }
-
-    /* sw_tuple_idx++ after one tuple finished. */
-    rustate->sw_tuple_idx++;
-
-    return outSlot;
-}
-
-static bytea* bytea_catenate(bytea* t1, bytea* t2)
-{
-    bytea* result = NULL;
-    int len1, len2, len;
-    char* ptr = NULL;
-    int rc = 0;
-
-    len1 = VARSIZE_ANY_EXHDR(t1);
-    len2 = VARSIZE_ANY_EXHDR(t2);
-
-    if (len1 < 0) {
-        len1 = 0;
-    }
-    if (len2 < 0) {
-        len2 = 0;
-    }
-
-    len = len1 + len2 + VARHDRSZ;
-    result = (bytea*)palloc(len);
-
-    /* Set size of result string... */
-    SET_VARSIZE(result, len);
-
-    /* Fill data field of result string... */
-    ptr = VARDATA(result);
-    if (len1 > 0) {
-        rc = memcpy_s(ptr, len1, VARDATA_ANY(t1), len1);
-        securec_check(rc, "\0", "\0");
-    }
-    if (len2 > 0) {
-        rc = memcpy_s(ptr + len1, len2, VARDATA_ANY(t2), len2);
-        securec_check(rc, "\0", "\0");
-    }
-    return result;
-}
-
-/*
- * --------------------------------------------------------------------------------------
- * @Brief: return order pseudo order siblings key for further order
- *      pseudo column array like this:
- *          [00001][00001][00001][00002] -->  every buckets use byea type
- *          [00001] -> tuple ordered position in current level, array index represent level
- * --------------------------------------------------------------------------------------
- */
-static bytea *GetSiblingsKeyEntry(RecursiveUnionState *rustate, bytea *old_path)
-{
-    bytea *result = NULL;
-    bytea *newKey = NULL;
-    const int bucketSize = 4;
-    const int maxEntrySize = 127;
-    const uint64 maxSize = pow(maxEntrySize, 4);
-
-    /*
-     * We use four bytea size for one bucket sibings key
-     * so we could support max 127^4 tuple to order
-     */
-    newKey = (bytea *)palloc0(bucketSize + VARHDRSZ);
-    SET_VARSIZE(newKey, bucketSize + VARHDRSZ);
-    char *keyVar = VARDATA_ANY(newKey);
-
-    if (rustate->sw_tuple_idx >= maxSize) {
-        ereport(ERROR,
-                (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-                errmsg("Exceed max numbers of siblings tuples")));
-    }
-
-    /* Fill correct order position into buckets */
-    uint64 tupleIdx = rustate->sw_tuple_idx;
-
-    const uint64 lastMod = (const uint64)pow(maxEntrySize, 3);
-    keyVar[3] = tupleIdx / lastMod;
-    tupleIdx = tupleIdx % lastMod;
-
-    const uint64 thirdMod = (const uint64)pow(maxEntrySize, 2);
-    keyVar[2] = tupleIdx / thirdMod;
-    tupleIdx = tupleIdx % thirdMod;
-
-    keyVar[1] = tupleIdx / maxEntrySize;
-    tupleIdx = tupleIdx % maxEntrySize;
-
-    keyVar[0] = tupleIdx;
-
-    /* Reach level 0 if path is NULL then return */
-    if (old_path == NULL) {
-        elog(LOG, "siblings key is %s current level is %d tuple position is %lu.",
-            DatumGetCString(DirectFunctionCall1(byteaout, PointerGetDatum(newKey))),
-            rustate->iteration + 1,
-            rustate->sw_tuple_idx);
-        return newKey;
-    }
-
-    /* Otherwise we catenate new siblings key to old key path */
-    result = bytea_catenate(old_path, newKey);
-
-    if (u_sess->attr.attr_sql.enable_startwith_debug) {
-        elog(LOG, "siblings key is %s current level is %d tuple position is %lu",
-            DatumGetCString(DirectFunctionCall1(byteaout, PointerGetDatum(result))),
-            rustate->iteration + 1,
-            rustate->sw_tuple_idx);
-    }
-
-    return result;
-}
-
-/*
- * --------------------------------------------------------------------------------------
- * @Brief: return a key/keys in string format, e.g {1,2}, {1}, the next step is
- *         to construct path like /{1,A}/{2,B}/{3,3}
- * --------------------------------------------------------------------------------------
- */
-static const char *GetKeyEntryArrayStr(RecursiveUnionState *state, TupleTableSlot *scanSlot)
-{
-    const char *result = NULL;
-
-    List *keyEntryList = ((StartWithOp *)state->swstate->ps.plan)->keyEntryList;
-
-    /* build key string {key,key,key} */
-    StringInfoData si;
-    initStringInfo(&si);
-    appendStringInfo(&si, "%s", KEY_START_TAG);
-    {
-        for (int i = 0; i < list_length(keyEntryList); i++) {
-            TargetEntry *te = (TargetEntry *)list_nth(keyEntryList, i);
-            const char *curKeyValue = GetCurrentValue(scanSlot, te->resno);
-            if (curKeyValue == NULL) {
-                /*
-                 * ArrayKeyValue could return NULL, for example, base table's column
-                 * contains NULL and startWithExpr is set condition "TRUE"
-                 */
-                elog(WARNING, "The internal key column[%d]:%s with NULL value.",
-                            te->resno,
-                            scanSlot->tts_tupleDescriptor->attrs[i].attname.data);
-            }
-
-            if (i == 0) {
-                appendStringInfo(&si, "%s", curKeyValue);
-            } else {
-                appendStringInfo(&si, ",%s", curKeyValue);
-            }
-        }
-
-    }
-    appendStringInfo(&si, "%s", KEY_CLOSE_TAG);
-    result = pstrdup(si.data);
-    pfree_ext(si.data);
-
-    return result;
 }
 
 /* 
@@ -1904,8 +1230,11 @@ static const char *GetKeyEntryArrayStr(RecursiveUnionState *state, TupleTableSlo
  *         the return string
  * --------------------------------------------------------------------------------------
  */
-static const char *GetCurrentValue(TupleTableSlot *slot, AttrNumber attnum)
+static const char *GetCurrentValue(TupleTableSlot *srcslot, AttrNumber attnum)
 {
+    TupleTableSlot* slot = MakeSingleTupleTableSlot(srcslot->tts_tupleDescriptor);
+    slot = ExecCopySlot(slot, srcslot);
+    
     TupleDesc tupDesc = slot->tts_tupleDescriptor;
     HeapTuple tup = ExecFetchSlotTuple(slot);
     bool isnull = true;
@@ -2024,35 +1353,6 @@ static const char *GetCurrentValue(TupleTableSlot *slot, AttrNumber attnum)
         }
     }
 
+    ExecDropSingleTupleTableSlot(slot);
     return pstrdup(value_str);
-}
-
-static bool PRCCanSkip(StartWithOpState *state, int prcType)
-{
-    StartWithOp *swplan = (StartWithOp *)state->ps.plan;
-    Assert (IsA(swplan, StartWithOp));
-    bool result = false;
-
-    switch (prcType) {
-        case SWCOL_ISCYCLE: {
-            result = (IsSkipIsCycle(swplan->swExecOptions) != 0);
-            break;
-        }
-        case SWCOL_ISLEAF: {
-            result = (IsSkipIsLeaf(swplan->swExecOptions) != 0);
-            break;
-        }
-        case SWCOL_LEVEL:
-        case SWCOL_ROWNUM:
-            /*
-             * fall-thru level/rownum is light weight, we do not apply PRC-skip
-             * optimization on them
-             */
-        default: {
-            /* other PRC is always not-skipable */
-            result = false;
-        }
-    }
-
-    return result;
 }

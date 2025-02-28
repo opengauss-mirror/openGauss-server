@@ -537,6 +537,7 @@ static RecursiveUnion* _copyRecursiveUnion(const RecursiveUnion* from)
 
     /* start with support */
     COPY_NODE_FIELD(internalEntryList);
+    COPY_SCALAR_FIELD(is_under_start_with);
 
     return newnode;
 }
@@ -564,6 +565,13 @@ static StartWithOp *_copyStartWithOp(const StartWithOp *from)
 
     COPY_SCALAR_FIELD(swExecOptions);
     COPY_NODE_FIELD(prcTargetEntryList);
+
+    COPY_NODE_FIELD(connect_by_qual);
+    COPY_NODE_FIELD(start_with_qual);
+    COPY_NODE_FIELD(path_entry_list);
+    COPY_NODE_FIELD(root_entry_list);
+    COPY_NODE_FIELD(internal_path_entry_list);
+    COPY_NODE_FIELD(internal_root_entry_list);
 
     return newnode;
 }
@@ -4167,6 +4175,7 @@ static StartWithOptions *_copyStartWithOptions(const StartWithOptions* from)
     COPY_NODE_FIELD(connect_by_level_quals);
     COPY_NODE_FIELD(connect_by_other_quals);
     COPY_SCALAR_FIELD(nocycle);
+    COPY_SCALAR_FIELD(start_with_quals);
 
     return newnode;
 }

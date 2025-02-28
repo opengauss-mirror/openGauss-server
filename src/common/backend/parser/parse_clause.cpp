@@ -72,7 +72,6 @@ static RangeTblEntry* transformRangeFunction(ParseState* pstate, RangeFunction* 
 static TableSampleClause* transformRangeTableSample(ParseState* pstate, RangeTableSample* rts);
 static TimeCapsuleClause* transformRangeTimeCapsule(ParseState* pstate, RangeTimeCapsule* rtc);
 
-static void setNamespaceLateralState(List *l_namespace, bool lateral_only, bool lateral_ok);
 static Node* buildMergedJoinVar(ParseState* pstate, JoinType jointype, Var* l_colvar, Var* r_colvar);
 static void checkExprIsVarFree(ParseState* pstate, Node* n, const char* constructName);
 static TargetEntry* findTargetlistEntrySQL92(ParseState* pstate, Node* node, List** tlist, int clause, ParseExprKind exprKind);
@@ -1517,17 +1516,16 @@ makeNamespaceItem(RangeTblEntry *rte, bool lateral_only, bool lateral_ok)
  * setNamespaceLateralState -
  *   Convenience subroutine to update LATERAL flags in a namespace list.
  */
-static void
-setNamespaceLateralState(List *l_namespace, bool lateral_only, bool lateral_ok)
+void setNamespaceLateralState(List *lNamespace, bool lateralOnly, bool lateralOk)
 {
    ListCell   *lc = NULL;
 
-   foreach(lc, l_namespace)
+   foreach(lc, lNamespace)
    {
        ParseNamespaceItem *nsitem = (ParseNamespaceItem *) lfirst(lc);
 
-       nsitem->p_lateral_only = lateral_only;
-       nsitem->p_lateral_ok = lateral_ok;
+       nsitem->p_lateral_only = lateralOnly;
+       nsitem->p_lateral_ok = lateralOk;
    }
 }
 

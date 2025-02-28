@@ -873,6 +873,34 @@ Path *FindMatchedPath(PlannerInfo* root, RelOptInfo* rel)
     return matched_path;
 }
 
+static double estimate_ru_total_cost(PlannerInfo* root, Path* path)
+{
+    int recursiveTimes = 100;
+    Cost startup_cost;
+    Cost total_cost;
+    cost_rescan(root, path, &startup_cost, &total_cost, NULL);
+    return path->total_cost + total_cost * recursiveTimes;
+}
+
+static Path* get_cheapest_path_for_ru(PlannerInfo* root, RelOptInfo* rel)
+{
+    Path* cheapestPath = (Path*)linitial(rel->pathlist);
+    double cheapestCost = estimate_ru_total_cost(root, cheapestPath);
+    ListCell* lc = NULL;
+    foreach (lc, rel->pathlist) {
+        Path* tmpPath = (Path*)lfirst(lc);
+        if (tmpPath == cheapestPath) {
+            continue;
+        }
+        double tmpCost = estimate_ru_total_cost(root, tmpPath);
+        if (tmpCost < cheapestCost) {
+            cheapestCost = tmpCost;
+            cheapestPath = tmpPath;
+        }
+    }
+    return cheapestPath;
+}
+
 /*
  * get_cheapest_path
  * 	choose an optimal path from optimal path, superset key path and match path of target relation
@@ -887,6 +915,9 @@ Path *FindMatchedPath(PlannerInfo* root, RelOptInfo* rel)
  */
 Path* get_cheapest_path(PlannerInfo* root, RelOptInfo* rel, const double* agg_groups, bool has_groupby)
 {
+    if (root->ru_is_under_start_with) {
+        return get_cheapest_path_for_ru(root, rel);
+    }
     Path* matched_path = NULL;
     Path* cheapest_path = (Path*)linitial(rel->cheapest_total_path);
     Path* superset_path = NULL;
@@ -1589,6 +1620,35 @@ static bool AddPathPreCheck(Path* newPath)
     return true;
 }
 
+static PathCostComparison compare_rescan_cost(PlannerInfo* root, Path* path1, Path* path2, PathCostComparison costcmp)
+{
+    if (!root->ru_is_under_start_with || costcmp == COSTS_DIFFERENT) {
+        return costcmp;
+    }
+    
+    Path* better_path = NULL;
+    Path* worse_path = NULL;
+
+    if (costcmp == COSTS_BETTER1) {
+        better_path = path1;
+        worse_path = path2;
+    } else {
+        better_path = path2;
+        worse_path = path1;
+    }
+
+    Cost startup_cost;
+    Cost total_cost1;
+    Cost total_cost2;
+    cost_rescan(root, better_path, &startup_cost, &total_cost1, NULL);
+    cost_rescan(root, worse_path, &startup_cost, &total_cost2, NULL);
+
+    if (total_cost1 > total_cost2) {
+        return COSTS_DIFFERENT;
+    }
+    return costcmp;
+}
+
 /*
  * add_path
  *	  Consider a potential implementation path for the specified parent rel,
@@ -1709,6 +1769,7 @@ void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path)
          * percentage need to be user-configurable?)
          */
         costcmp = compare_path_costs_fuzzily(new_path, old_path, FUZZY_FACTOR);
+        costcmp = compare_rescan_cost(root, new_path, old_path, costcmp);
 
         /*
          * If the two paths compare differently for startup and total cost,

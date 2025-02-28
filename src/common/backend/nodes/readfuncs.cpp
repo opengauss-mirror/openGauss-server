@@ -5304,6 +5304,9 @@ static RecursiveUnion* _readRecursiveUnion(RecursiveUnion* local_node)
     IF_EXIST(internalEntryList) {
         READ_NODE_FIELD(internalEntryList);
     }
+    IF_EXIST(internalEntryList) {
+        READ_BOOL_FIELD(is_under_start_with);
+    }
 
     READ_DONE();
 }
@@ -5324,9 +5327,28 @@ static StartWithOp* _readStartWithOp(StartWithOp* local_node)
     READ_NODE_FIELD(colEntryList);
     READ_NODE_FIELD(internalEntryList);
     READ_NODE_FIELD(fullEntryList);
-
     READ_NODE_FIELD(swoptions);
 
+    READ_UINT_FIELD(swExecOptions);
+    READ_NODE_FIELD(prcTargetEntryList);
+    IF_EXIST(connect_by_qual) {
+        READ_NODE_FIELD(connect_by_qual);
+    }
+    IF_EXIST(start_with_qual) {
+        READ_NODE_FIELD(start_with_qual);
+    }
+    IF_EXIST(path_entry_list) {
+        READ_NODE_FIELD(path_entry_list);
+    }
+    IF_EXIST(root_entry_list) {
+        READ_NODE_FIELD(root_entry_list);
+    }
+    IF_EXIST(internal_path_entry_list) {
+        READ_NODE_FIELD(internal_path_entry_list);
+    }
+    IF_EXIST(internal_root_entry_list) {
+        READ_NODE_FIELD(internal_root_entry_list);
+    }
     READ_DONE();
 }
 
@@ -5342,7 +5364,9 @@ static StartWithOptions* _readStartWithOptions(StartWithOptions* local_node)
     READ_NODE_FIELD(connect_by_level_quals);
     READ_NODE_FIELD(connect_by_other_quals);
     READ_BOOL_FIELD(nocycle);
-
+    IF_EXIST(start_with_quals) {
+        READ_NODE_FIELD(start_with_quals);
+    }
     READ_DONE();
 }
 

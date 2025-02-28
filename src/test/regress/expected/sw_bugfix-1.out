@@ -88,78 +88,77 @@ select * from test_hcb_ptbc t1 start with t1.id = 11 connect by prior t1.id = t1
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Row Adapter
                        ->  CStore Scan on test_hcb_ptbc t1
                              Filter: (id = 11)
                  ->  Hash Join
-                       Hash Cond: (t1.pid = tmp_reuslt."t1@id")
-                       ->  Materialize
+                       Hash Cond: (tmp_reuslt."t1@id" = t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Hash
                              ->  Row Adapter
                                    ->  CStore Scan on test_hcb_ptbc t1
-                       ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
-(15 rows)
+(14 rows)
 
 select * from test_hcb_ptbc t1 start with t1.id = 11 connect by prior t1.id = t1.pid;
  id  |    cha     | vch  | tex |           dat            |   tim    |           tis            |   name   | pid |    pcha    | pvch | ptex |           pdat           |   ptim   |           ptis           
 -----+------------+------+-----+--------------------------+----------+--------------------------+----------+-----+------------+------+------+--------------------------+----------+--------------------------
   11 | aa         |  aa  | aa  | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021 | 江苏省   |   1 | a          | a    | a    | Sun Dec 12 12:12:12 2021 | 12:12:12 | Sun Dec 12 12:12:12 2021
- 111 | aaa        |  aaa | aaa | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021 | 南京市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
- 121 | aba        |  aba | aba | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021 | 江宁区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
- 131 | aca        |  aca | aca | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021 | 东山街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
- 141 | ada        |  ada | ada | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021 | 江南摩卡 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
- 151 | aea        |  aea | aea | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021 | 江南一楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
- 161 | afa        |  afa | afa | Fri Jan 01 01:02:50 2021 | 01:02:50 | Fri Jan 01 01:02:50 2021 | 第一单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
- 162 | afb        |  afb | afb | Fri Jan 01 01:02:51 2021 | 01:02:51 | Fri Jan 01 01:02:51 2021 | 第二单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
- 163 | afc        |  afc | afc | Fri Jan 01 01:02:52 2021 | 01:02:52 | Fri Jan 01 01:02:52 2021 | 第三单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
- 164 | afd        |  afd | afd | Fri Jan 01 01:02:53 2021 | 01:02:53 | Fri Jan 01 01:02:53 2021 | 第四单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
- 165 | afe        |  afe | afe | Fri Jan 01 01:02:54 2021 | 01:02:54 | Fri Jan 01 01:02:54 2021 | 第五单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
- 166 | aff        |  aff | aff | Fri Jan 01 01:02:55 2021 | 01:02:55 | Fri Jan 01 01:02:55 2021 | 第六单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
- 167 | afg        |  afg | afg | Fri Jan 01 01:02:56 2021 | 01:02:56 | Fri Jan 01 01:02:56 2021 | 第七单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
- 168 | afh        |  afh | afh | Fri Jan 01 01:02:57 2021 | 01:02:57 | Fri Jan 01 01:02:57 2021 | 第八单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
- 169 | afi        |  afi | afi | Fri Jan 01 01:02:58 2021 | 01:02:58 | Fri Jan 01 01:02:58 2021 | 第九单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
- 152 | aeb        |  aeb | aeb | Fri Jan 01 01:01:51 2021 | 01:01:51 | Fri Jan 01 01:01:51 2021 | 江南二楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
- 153 | aec        |  aec | aec | Fri Jan 01 01:01:52 2021 | 01:01:52 | Fri Jan 01 01:01:52 2021 | 江南三楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
- 154 | aed        |  aed | aed | Fri Jan 01 01:01:53 2021 | 01:01:53 | Fri Jan 01 01:01:53 2021 | 江南四楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
- 155 | aee        |  aee | aee | Fri Jan 01 01:01:54 2021 | 01:01:54 | Fri Jan 01 01:01:54 2021 | 江南五楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
- 156 | aef        |  aef | aef | Fri Jan 01 01:01:55 2021 | 01:01:55 | Fri Jan 01 01:01:55 2021 | 江南六楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
- 157 | aeg        |  aeg | aeg | Fri Jan 01 01:01:56 2021 | 01:01:56 | Fri Jan 01 01:01:56 2021 | 江南七楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
- 158 | aeh        |  aeh | aeh | Fri Jan 01 01:01:57 2021 | 01:01:57 | Fri Jan 01 01:01:57 2021 | 江南八楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
- 159 | aei        |  aei | aei | Fri Jan 01 01:01:58 2021 | 01:01:58 | Fri Jan 01 01:01:58 2021 | 江南九楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
- 142 | adb        |  adb | adb | Fri Jan 01 01:01:41 2021 | 01:01:41 | Fri Jan 01 01:01:41 2021 | 四季云顶 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
- 143 | adc        |  adc | adc | Fri Jan 01 01:01:42 2021 | 01:01:42 | Fri Jan 01 01:01:42 2021 | 盛世江南 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
- 144 | add        |  add | add | Fri Jan 01 01:01:43 2021 | 01:01:43 | Fri Jan 01 01:01:43 2021 | 七里香都 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
- 145 | ade        |  ade | ade | Fri Jan 01 01:01:44 2021 | 01:01:44 | Fri Jan 01 01:01:44 2021 | 西山枫林 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
- 146 | adf        |  adf | adf | Fri Jan 01 01:01:45 2021 | 01:01:45 | Fri Jan 01 01:01:45 2021 | 醉墨小镇 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
- 147 | adg        |  adg | adg | Fri Jan 01 01:01:46 2021 | 01:01:46 | Fri Jan 01 01:01:46 2021 | 布拉格调 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
- 148 | adh        |  adh | adh | Fri Jan 01 01:01:47 2021 | 01:01:47 | Fri Jan 01 01:01:47 2021 | 清幽别院 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
- 149 | adi        |  adi | adi | Fri Jan 01 01:01:48 2021 | 01:01:48 | Fri Jan 01 01:01:48 2021 | 璀璨天城 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
- 132 | acb        |  acb | acb | Fri Jan 01 01:01:31 2021 | 01:01:31 | Fri Jan 01 01:01:31 2021 | 秣陵街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
- 133 | acc        |  acc | acc | Fri Jan 01 01:01:32 2021 | 01:01:32 | Fri Jan 01 01:01:32 2021 | 汤山街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
- 135 | ace        |  ace | ace | Fri Jan 01 01:01:34 2021 | 01:01:34 | Fri Jan 01 01:01:34 2021 | 禄口街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
- 134 | acd        |  acd | acd | Fri Jan 01 01:01:33 2021 | 01:01:33 | Fri Jan 01 01:01:33 2021 | 淳化街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
- 136 | acf        |  acf | acf | Fri Jan 01 01:01:35 2021 | 01:01:35 | Fri Jan 01 01:01:35 2021 | 江宁街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
- 137 | acg        |  acg | acg | Fri Jan 01 01:01:36 2021 | 01:01:36 | Fri Jan 01 01:01:36 2021 | 谷里街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
- 138 | ach        |  ach | ach | Fri Jan 01 01:01:37 2021 | 01:01:37 | Fri Jan 01 01:01:37 2021 | 湖熟街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
- 139 | aci        |  aci | aci | Fri Jan 01 01:01:38 2021 | 01:01:38 | Fri Jan 01 01:01:38 2021 | 横溪街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
- 122 | abb        |  abb | abb | Fri Jan 01 01:01:21 2021 | 01:01:21 | Fri Jan 01 01:01:21 2021 | 雨花台   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
- 123 | abc        |  abc | abc | Fri Jan 01 01:01:22 2021 | 01:01:22 | Fri Jan 01 01:01:22 2021 | 鼓楼区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
- 124 | abd        |  abd | abd | Fri Jan 01 01:01:23 2021 | 01:01:23 | Fri Jan 01 01:01:23 2021 | 玄武区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
- 125 | abe        |  abe | abe | Fri Jan 01 01:01:24 2021 | 01:01:24 | Fri Jan 01 01:01:24 2021 | 建邺区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
- 126 | abf        |  abf | abf | Fri Jan 01 01:01:25 2021 | 01:01:25 | Fri Jan 01 01:01:25 2021 | 秦淮区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
- 127 | abg        |  abg | abg | Fri Jan 01 01:01:26 2021 | 01:01:26 | Fri Jan 01 01:01:26 2021 | 浦口区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
- 128 | abh        |  abh | abh | Fri Jan 01 01:01:27 2021 | 01:01:27 | Fri Jan 01 01:01:27 2021 | 浦口区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
- 129 | abi        |  abi | abi | Fri Jan 01 01:01:28 2021 | 01:01:28 | Fri Jan 01 01:01:28 2021 | 六合区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
- 112 | aab        |  aab | aab | Fri Jan 01 01:01:11 2021 | 01:01:11 | Fri Jan 01 01:01:11 2021 | 宿迁市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
- 113 | aac        |  aac | aac | Fri Jan 01 01:01:12 2021 | 01:01:12 | Fri Jan 01 01:01:12 2021 | 徐州市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
- 114 | aad        |  aad | aad | Fri Jan 01 01:01:13 2021 | 01:01:13 | Fri Jan 01 01:01:13 2021 | 苏州市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
- 115 | aae        |  aae | aae | Fri Jan 01 01:01:14 2021 | 01:01:14 | Fri Jan 01 01:01:14 2021 | 盐城市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
- 117 | aag        |  aag | aag | Fri Jan 01 01:01:16 2021 | 01:01:16 | Fri Jan 01 01:01:16 2021 | 常州市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
- 116 | aaf        |  aaf | aaf | Fri Jan 01 01:01:15 2021 | 01:01:15 | Fri Jan 01 01:01:15 2021 | 无锡市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
- 118 | aah        |  aah | aah | Fri Jan 01 01:01:17 2021 | 01:01:17 | Fri Jan 01 01:01:17 2021 | 连云港   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
  119 | aai        |  aai | aai | Fri Jan 01 01:01:18 2021 | 01:01:18 | Fri Jan 01 01:01:18 2021 | 泰州市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
+ 118 | aah        |  aah | aah | Fri Jan 01 01:01:17 2021 | 01:01:17 | Fri Jan 01 01:01:17 2021 | 连云港   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
+ 116 | aaf        |  aaf | aaf | Fri Jan 01 01:01:15 2021 | 01:01:15 | Fri Jan 01 01:01:15 2021 | 无锡市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
+ 117 | aag        |  aag | aag | Fri Jan 01 01:01:16 2021 | 01:01:16 | Fri Jan 01 01:01:16 2021 | 常州市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
+ 115 | aae        |  aae | aae | Fri Jan 01 01:01:14 2021 | 01:01:14 | Fri Jan 01 01:01:14 2021 | 盐城市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
+ 114 | aad        |  aad | aad | Fri Jan 01 01:01:13 2021 | 01:01:13 | Fri Jan 01 01:01:13 2021 | 苏州市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
+ 113 | aac        |  aac | aac | Fri Jan 01 01:01:12 2021 | 01:01:12 | Fri Jan 01 01:01:12 2021 | 徐州市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
+ 112 | aab        |  aab | aab | Fri Jan 01 01:01:11 2021 | 01:01:11 | Fri Jan 01 01:01:11 2021 | 宿迁市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
+ 111 | aaa        |  aaa | aaa | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021 | 南京市   |  11 | aa         | aa   | aa   | Fri Jan 01 01:01:01 2021 | 01:01:01 | Fri Jan 01 01:01:01 2021
+ 129 | abi        |  abi | abi | Fri Jan 01 01:01:28 2021 | 01:01:28 | Fri Jan 01 01:01:28 2021 | 六合区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
+ 128 | abh        |  abh | abh | Fri Jan 01 01:01:27 2021 | 01:01:27 | Fri Jan 01 01:01:27 2021 | 浦口区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
+ 127 | abg        |  abg | abg | Fri Jan 01 01:01:26 2021 | 01:01:26 | Fri Jan 01 01:01:26 2021 | 浦口区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
+ 126 | abf        |  abf | abf | Fri Jan 01 01:01:25 2021 | 01:01:25 | Fri Jan 01 01:01:25 2021 | 秦淮区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
+ 125 | abe        |  abe | abe | Fri Jan 01 01:01:24 2021 | 01:01:24 | Fri Jan 01 01:01:24 2021 | 建邺区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
+ 124 | abd        |  abd | abd | Fri Jan 01 01:01:23 2021 | 01:01:23 | Fri Jan 01 01:01:23 2021 | 玄武区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
+ 123 | abc        |  abc | abc | Fri Jan 01 01:01:22 2021 | 01:01:22 | Fri Jan 01 01:01:22 2021 | 鼓楼区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
+ 122 | abb        |  abb | abb | Fri Jan 01 01:01:21 2021 | 01:01:21 | Fri Jan 01 01:01:21 2021 | 雨花台   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
+ 121 | aba        |  aba | aba | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021 | 江宁区   | 111 | aaa        | aaa  | aaa  | Fri Jan 01 01:01:10 2021 | 01:01:10 | Fri Jan 01 01:01:10 2021
+ 139 | aci        |  aci | aci | Fri Jan 01 01:01:38 2021 | 01:01:38 | Fri Jan 01 01:01:38 2021 | 横溪街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
+ 138 | ach        |  ach | ach | Fri Jan 01 01:01:37 2021 | 01:01:37 | Fri Jan 01 01:01:37 2021 | 湖熟街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
+ 137 | acg        |  acg | acg | Fri Jan 01 01:01:36 2021 | 01:01:36 | Fri Jan 01 01:01:36 2021 | 谷里街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
+ 136 | acf        |  acf | acf | Fri Jan 01 01:01:35 2021 | 01:01:35 | Fri Jan 01 01:01:35 2021 | 江宁街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
+ 134 | acd        |  acd | acd | Fri Jan 01 01:01:33 2021 | 01:01:33 | Fri Jan 01 01:01:33 2021 | 淳化街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
+ 135 | ace        |  ace | ace | Fri Jan 01 01:01:34 2021 | 01:01:34 | Fri Jan 01 01:01:34 2021 | 禄口街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
+ 133 | acc        |  acc | acc | Fri Jan 01 01:01:32 2021 | 01:01:32 | Fri Jan 01 01:01:32 2021 | 汤山街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
+ 132 | acb        |  acb | acb | Fri Jan 01 01:01:31 2021 | 01:01:31 | Fri Jan 01 01:01:31 2021 | 秣陵街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
+ 131 | aca        |  aca | aca | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021 | 东山街   | 121 | aba        | aba  | aba  | Fri Jan 01 01:01:20 2021 | 01:01:20 | Fri Jan 01 01:01:20 2021
+ 149 | adi        |  adi | adi | Fri Jan 01 01:01:48 2021 | 01:01:48 | Fri Jan 01 01:01:48 2021 | 璀璨天城 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
+ 148 | adh        |  adh | adh | Fri Jan 01 01:01:47 2021 | 01:01:47 | Fri Jan 01 01:01:47 2021 | 清幽别院 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
+ 147 | adg        |  adg | adg | Fri Jan 01 01:01:46 2021 | 01:01:46 | Fri Jan 01 01:01:46 2021 | 布拉格调 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
+ 146 | adf        |  adf | adf | Fri Jan 01 01:01:45 2021 | 01:01:45 | Fri Jan 01 01:01:45 2021 | 醉墨小镇 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
+ 145 | ade        |  ade | ade | Fri Jan 01 01:01:44 2021 | 01:01:44 | Fri Jan 01 01:01:44 2021 | 西山枫林 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
+ 144 | add        |  add | add | Fri Jan 01 01:01:43 2021 | 01:01:43 | Fri Jan 01 01:01:43 2021 | 七里香都 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
+ 143 | adc        |  adc | adc | Fri Jan 01 01:01:42 2021 | 01:01:42 | Fri Jan 01 01:01:42 2021 | 盛世江南 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
+ 142 | adb        |  adb | adb | Fri Jan 01 01:01:41 2021 | 01:01:41 | Fri Jan 01 01:01:41 2021 | 四季云顶 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
+ 141 | ada        |  ada | ada | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021 | 江南摩卡 | 131 | aca        | aca  | aca  | Fri Jan 01 01:01:30 2021 | 01:01:30 | Fri Jan 01 01:01:30 2021
+ 159 | aei        |  aei | aei | Fri Jan 01 01:01:58 2021 | 01:01:58 | Fri Jan 01 01:01:58 2021 | 江南九楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
+ 158 | aeh        |  aeh | aeh | Fri Jan 01 01:01:57 2021 | 01:01:57 | Fri Jan 01 01:01:57 2021 | 江南八楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
+ 157 | aeg        |  aeg | aeg | Fri Jan 01 01:01:56 2021 | 01:01:56 | Fri Jan 01 01:01:56 2021 | 江南七楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
+ 156 | aef        |  aef | aef | Fri Jan 01 01:01:55 2021 | 01:01:55 | Fri Jan 01 01:01:55 2021 | 江南六楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
+ 155 | aee        |  aee | aee | Fri Jan 01 01:01:54 2021 | 01:01:54 | Fri Jan 01 01:01:54 2021 | 江南五楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
+ 154 | aed        |  aed | aed | Fri Jan 01 01:01:53 2021 | 01:01:53 | Fri Jan 01 01:01:53 2021 | 江南四楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
+ 153 | aec        |  aec | aec | Fri Jan 01 01:01:52 2021 | 01:01:52 | Fri Jan 01 01:01:52 2021 | 江南三楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
+ 152 | aeb        |  aeb | aeb | Fri Jan 01 01:01:51 2021 | 01:01:51 | Fri Jan 01 01:01:51 2021 | 江南二楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
+ 151 | aea        |  aea | aea | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021 | 江南一楼 | 141 | ada        | ada  | ada  | Fri Jan 01 01:01:40 2021 | 01:01:40 | Fri Jan 01 01:01:40 2021
+ 169 | afi        |  afi | afi | Fri Jan 01 01:02:58 2021 | 01:02:58 | Fri Jan 01 01:02:58 2021 | 第九单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
+ 168 | afh        |  afh | afh | Fri Jan 01 01:02:57 2021 | 01:02:57 | Fri Jan 01 01:02:57 2021 | 第八单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
+ 167 | afg        |  afg | afg | Fri Jan 01 01:02:56 2021 | 01:02:56 | Fri Jan 01 01:02:56 2021 | 第七单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
+ 166 | aff        |  aff | aff | Fri Jan 01 01:02:55 2021 | 01:02:55 | Fri Jan 01 01:02:55 2021 | 第六单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
+ 165 | afe        |  afe | afe | Fri Jan 01 01:02:54 2021 | 01:02:54 | Fri Jan 01 01:02:54 2021 | 第五单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
+ 164 | afd        |  afd | afd | Fri Jan 01 01:02:53 2021 | 01:02:53 | Fri Jan 01 01:02:53 2021 | 第四单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
+ 163 | afc        |  afc | afc | Fri Jan 01 01:02:52 2021 | 01:02:52 | Fri Jan 01 01:02:52 2021 | 第三单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
+ 162 | afb        |  afb | afb | Fri Jan 01 01:02:51 2021 | 01:02:51 | Fri Jan 01 01:02:51 2021 | 第二单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
+ 161 | afa        |  afa | afa | Fri Jan 01 01:02:50 2021 | 01:02:50 | Fri Jan 01 01:02:50 2021 | 第一单元 | 151 | aea        | aea  | aea  | Fri Jan 01 01:01:50 2021 | 01:01:50 | Fri Jan 01 01:01:50 2021
 (55 rows)
 
 SELECT t1.id,t1.pid,t1.name,level FROM test_hcb_ptb t1,test_hcb_ptb t2 WHERE t1.id=t2.id START WITH t1.id=141 CONNECT BY PRIOR t1.id=t1.pid FOR UPDATE OF t2 NOWAIT;
@@ -177,240 +176,240 @@ select pid x,id,CONNECT_BY_ROOT ID from test_hcb_ptbc t1 start with id = 11 conn
   x  | id  | connect_by_rootid 
 -----+-----+-------------------
    1 |  11 | 11
-  11 | 111 | 11
- 111 | 121 | 11
- 121 | 131 | 11
- 131 | 141 | 11
- 141 | 151 | 11
- 151 | 161 | 11
- 151 | 162 | 11
- 151 | 163 | 11
- 151 | 164 | 11
- 151 | 165 | 11
- 151 | 166 | 11
- 151 | 167 | 11
- 151 | 168 | 11
- 151 | 169 | 11
- 141 | 152 | 11
- 141 | 153 | 11
- 141 | 154 | 11
- 141 | 155 | 11
- 141 | 156 | 11
- 141 | 157 | 11
- 141 | 158 | 11
- 141 | 159 | 11
- 131 | 142 | 11
- 131 | 143 | 11
- 131 | 144 | 11
- 131 | 145 | 11
- 131 | 146 | 11
- 131 | 147 | 11
- 131 | 148 | 11
- 131 | 149 | 11
- 121 | 132 | 11
- 121 | 133 | 11
- 121 | 135 | 11
- 121 | 134 | 11
- 121 | 136 | 11
- 121 | 137 | 11
- 121 | 138 | 11
- 121 | 139 | 11
- 111 | 122 | 11
- 111 | 123 | 11
- 111 | 124 | 11
- 111 | 125 | 11
- 111 | 126 | 11
- 111 | 127 | 11
- 111 | 128 | 11
- 111 | 129 | 11
-  11 | 112 | 11
-  11 | 113 | 11
-  11 | 114 | 11
-  11 | 115 | 11
-  11 | 117 | 11
-  11 | 116 | 11
-  11 | 118 | 11
   11 | 119 | 11
+  11 | 118 | 11
+  11 | 116 | 11
+  11 | 117 | 11
+  11 | 115 | 11
+  11 | 114 | 11
+  11 | 113 | 11
+  11 | 112 | 11
+  11 | 111 | 11
+ 111 | 129 | 11
+ 111 | 128 | 11
+ 111 | 127 | 11
+ 111 | 126 | 11
+ 111 | 125 | 11
+ 111 | 124 | 11
+ 111 | 123 | 11
+ 111 | 122 | 11
+ 111 | 121 | 11
+ 121 | 139 | 11
+ 121 | 138 | 11
+ 121 | 137 | 11
+ 121 | 136 | 11
+ 121 | 134 | 11
+ 121 | 135 | 11
+ 121 | 133 | 11
+ 121 | 132 | 11
+ 121 | 131 | 11
+ 131 | 149 | 11
+ 131 | 148 | 11
+ 131 | 147 | 11
+ 131 | 146 | 11
+ 131 | 145 | 11
+ 131 | 144 | 11
+ 131 | 143 | 11
+ 131 | 142 | 11
+ 131 | 141 | 11
+ 141 | 159 | 11
+ 141 | 158 | 11
+ 141 | 157 | 11
+ 141 | 156 | 11
+ 141 | 155 | 11
+ 141 | 154 | 11
+ 141 | 153 | 11
+ 141 | 152 | 11
+ 141 | 151 | 11
+ 151 | 169 | 11
+ 151 | 168 | 11
+ 151 | 167 | 11
+ 151 | 166 | 11
+ 151 | 165 | 11
+ 151 | 164 | 11
+ 151 | 163 | 11
+ 151 | 162 | 11
+ 151 | 161 | 11
 (55 rows)
 
 select pid x,id,CONNECT_BY_ROOT ID alias_id from test_hcb_ptbc t1 start with id = 11 connect by prior id = pid;
   x  | id  | alias_id 
 -----+-----+----------
    1 |  11 | 11
-  11 | 111 | 11
- 111 | 121 | 11
- 121 | 131 | 11
- 131 | 141 | 11
- 141 | 151 | 11
- 151 | 161 | 11
- 151 | 162 | 11
- 151 | 163 | 11
- 151 | 164 | 11
- 151 | 165 | 11
- 151 | 166 | 11
- 151 | 167 | 11
- 151 | 168 | 11
- 151 | 169 | 11
- 141 | 152 | 11
- 141 | 153 | 11
- 141 | 154 | 11
- 141 | 155 | 11
- 141 | 156 | 11
- 141 | 157 | 11
- 141 | 158 | 11
- 141 | 159 | 11
- 131 | 142 | 11
- 131 | 143 | 11
- 131 | 144 | 11
- 131 | 145 | 11
- 131 | 146 | 11
- 131 | 147 | 11
- 131 | 148 | 11
- 131 | 149 | 11
- 121 | 132 | 11
- 121 | 133 | 11
- 121 | 135 | 11
- 121 | 134 | 11
- 121 | 136 | 11
- 121 | 137 | 11
- 121 | 138 | 11
- 121 | 139 | 11
- 111 | 122 | 11
- 111 | 123 | 11
- 111 | 124 | 11
- 111 | 125 | 11
- 111 | 126 | 11
- 111 | 127 | 11
- 111 | 128 | 11
- 111 | 129 | 11
-  11 | 112 | 11
-  11 | 113 | 11
-  11 | 114 | 11
-  11 | 115 | 11
-  11 | 117 | 11
-  11 | 116 | 11
-  11 | 118 | 11
   11 | 119 | 11
+  11 | 118 | 11
+  11 | 116 | 11
+  11 | 117 | 11
+  11 | 115 | 11
+  11 | 114 | 11
+  11 | 113 | 11
+  11 | 112 | 11
+  11 | 111 | 11
+ 111 | 129 | 11
+ 111 | 128 | 11
+ 111 | 127 | 11
+ 111 | 126 | 11
+ 111 | 125 | 11
+ 111 | 124 | 11
+ 111 | 123 | 11
+ 111 | 122 | 11
+ 111 | 121 | 11
+ 121 | 139 | 11
+ 121 | 138 | 11
+ 121 | 137 | 11
+ 121 | 136 | 11
+ 121 | 134 | 11
+ 121 | 135 | 11
+ 121 | 133 | 11
+ 121 | 132 | 11
+ 121 | 131 | 11
+ 131 | 149 | 11
+ 131 | 148 | 11
+ 131 | 147 | 11
+ 131 | 146 | 11
+ 131 | 145 | 11
+ 131 | 144 | 11
+ 131 | 143 | 11
+ 131 | 142 | 11
+ 131 | 141 | 11
+ 141 | 159 | 11
+ 141 | 158 | 11
+ 141 | 157 | 11
+ 141 | 156 | 11
+ 141 | 155 | 11
+ 141 | 154 | 11
+ 141 | 153 | 11
+ 141 | 152 | 11
+ 141 | 151 | 11
+ 151 | 169 | 11
+ 151 | 168 | 11
+ 151 | 167 | 11
+ 151 | 166 | 11
+ 151 | 165 | 11
+ 151 | 164 | 11
+ 151 | 163 | 11
+ 151 | 162 | 11
+ 151 | 161 | 11
 (55 rows)
 
 select pid x,id,CONNECT_BY_ROOT t1.ID from test_hcb_ptbc t1 start with id = 11 connect by prior id = pid;
   x  | id  | connect_by_roott1.id 
 -----+-----+----------------------
    1 |  11 | 11
-  11 | 111 | 11
- 111 | 121 | 11
- 121 | 131 | 11
- 131 | 141 | 11
- 141 | 151 | 11
- 151 | 161 | 11
- 151 | 162 | 11
- 151 | 163 | 11
- 151 | 164 | 11
- 151 | 165 | 11
- 151 | 166 | 11
- 151 | 167 | 11
- 151 | 168 | 11
- 151 | 169 | 11
- 141 | 152 | 11
- 141 | 153 | 11
- 141 | 154 | 11
- 141 | 155 | 11
- 141 | 156 | 11
- 141 | 157 | 11
- 141 | 158 | 11
- 141 | 159 | 11
- 131 | 142 | 11
- 131 | 143 | 11
- 131 | 144 | 11
- 131 | 145 | 11
- 131 | 146 | 11
- 131 | 147 | 11
- 131 | 148 | 11
- 131 | 149 | 11
- 121 | 132 | 11
- 121 | 133 | 11
- 121 | 135 | 11
- 121 | 134 | 11
- 121 | 136 | 11
- 121 | 137 | 11
- 121 | 138 | 11
- 121 | 139 | 11
- 111 | 122 | 11
- 111 | 123 | 11
- 111 | 124 | 11
- 111 | 125 | 11
- 111 | 126 | 11
- 111 | 127 | 11
- 111 | 128 | 11
- 111 | 129 | 11
-  11 | 112 | 11
-  11 | 113 | 11
-  11 | 114 | 11
-  11 | 115 | 11
-  11 | 117 | 11
-  11 | 116 | 11
-  11 | 118 | 11
   11 | 119 | 11
+  11 | 118 | 11
+  11 | 116 | 11
+  11 | 117 | 11
+  11 | 115 | 11
+  11 | 114 | 11
+  11 | 113 | 11
+  11 | 112 | 11
+  11 | 111 | 11
+ 111 | 129 | 11
+ 111 | 128 | 11
+ 111 | 127 | 11
+ 111 | 126 | 11
+ 111 | 125 | 11
+ 111 | 124 | 11
+ 111 | 123 | 11
+ 111 | 122 | 11
+ 111 | 121 | 11
+ 121 | 139 | 11
+ 121 | 138 | 11
+ 121 | 137 | 11
+ 121 | 136 | 11
+ 121 | 134 | 11
+ 121 | 135 | 11
+ 121 | 133 | 11
+ 121 | 132 | 11
+ 121 | 131 | 11
+ 131 | 149 | 11
+ 131 | 148 | 11
+ 131 | 147 | 11
+ 131 | 146 | 11
+ 131 | 145 | 11
+ 131 | 144 | 11
+ 131 | 143 | 11
+ 131 | 142 | 11
+ 131 | 141 | 11
+ 141 | 159 | 11
+ 141 | 158 | 11
+ 141 | 157 | 11
+ 141 | 156 | 11
+ 141 | 155 | 11
+ 141 | 154 | 11
+ 141 | 153 | 11
+ 141 | 152 | 11
+ 141 | 151 | 11
+ 151 | 169 | 11
+ 151 | 168 | 11
+ 151 | 167 | 11
+ 151 | 166 | 11
+ 151 | 165 | 11
+ 151 | 164 | 11
+ 151 | 163 | 11
+ 151 | 162 | 11
+ 151 | 161 | 11
 (55 rows)
 
 select pid x,id,CONNECT_BY_ROOT t1.ID alias_id from test_hcb_ptbc t1 start with id = 11 connect by prior id = pid;
   x  | id  | alias_id 
 -----+-----+----------
    1 |  11 | 11
-  11 | 111 | 11
- 111 | 121 | 11
- 121 | 131 | 11
- 131 | 141 | 11
- 141 | 151 | 11
- 151 | 161 | 11
- 151 | 162 | 11
- 151 | 163 | 11
- 151 | 164 | 11
- 151 | 165 | 11
- 151 | 166 | 11
- 151 | 167 | 11
- 151 | 168 | 11
- 151 | 169 | 11
- 141 | 152 | 11
- 141 | 153 | 11
- 141 | 154 | 11
- 141 | 155 | 11
- 141 | 156 | 11
- 141 | 157 | 11
- 141 | 158 | 11
- 141 | 159 | 11
- 131 | 142 | 11
- 131 | 143 | 11
- 131 | 144 | 11
- 131 | 145 | 11
- 131 | 146 | 11
- 131 | 147 | 11
- 131 | 148 | 11
- 131 | 149 | 11
- 121 | 132 | 11
- 121 | 133 | 11
- 121 | 135 | 11
- 121 | 134 | 11
- 121 | 136 | 11
- 121 | 137 | 11
- 121 | 138 | 11
- 121 | 139 | 11
- 111 | 122 | 11
- 111 | 123 | 11
- 111 | 124 | 11
- 111 | 125 | 11
- 111 | 126 | 11
- 111 | 127 | 11
- 111 | 128 | 11
- 111 | 129 | 11
-  11 | 112 | 11
-  11 | 113 | 11
-  11 | 114 | 11
-  11 | 115 | 11
-  11 | 117 | 11
-  11 | 116 | 11
-  11 | 118 | 11
   11 | 119 | 11
+  11 | 118 | 11
+  11 | 116 | 11
+  11 | 117 | 11
+  11 | 115 | 11
+  11 | 114 | 11
+  11 | 113 | 11
+  11 | 112 | 11
+  11 | 111 | 11
+ 111 | 129 | 11
+ 111 | 128 | 11
+ 111 | 127 | 11
+ 111 | 126 | 11
+ 111 | 125 | 11
+ 111 | 124 | 11
+ 111 | 123 | 11
+ 111 | 122 | 11
+ 111 | 121 | 11
+ 121 | 139 | 11
+ 121 | 138 | 11
+ 121 | 137 | 11
+ 121 | 136 | 11
+ 121 | 134 | 11
+ 121 | 135 | 11
+ 121 | 133 | 11
+ 121 | 132 | 11
+ 121 | 131 | 11
+ 131 | 149 | 11
+ 131 | 148 | 11
+ 131 | 147 | 11
+ 131 | 146 | 11
+ 131 | 145 | 11
+ 131 | 144 | 11
+ 131 | 143 | 11
+ 131 | 142 | 11
+ 131 | 141 | 11
+ 141 | 159 | 11
+ 141 | 158 | 11
+ 141 | 157 | 11
+ 141 | 156 | 11
+ 141 | 155 | 11
+ 141 | 154 | 11
+ 141 | 153 | 11
+ 141 | 152 | 11
+ 141 | 151 | 11
+ 151 | 169 | 11
+ 151 | 168 | 11
+ 151 | 167 | 11
+ 151 | 166 | 11
+ 151 | 165 | 11
+ 151 | 164 | 11
+ 151 | 163 | 11
+ 151 | 162 | 11
+ 151 | 161 | 11
 (55 rows)
 
 /* connect by union */
@@ -423,15 +422,15 @@ explain(costs off) select level as le,t.* from test_hcb_ptb t start with id=141 
          ->  CTE Scan on tmp_reuslt
                CTE tmp_reuslt
                  ->  StartWith Operator
-                       Start With pseudo atts: RUITR, array_key_9
+                       Start With pseudo atts: array_key_9
                        ->  Recursive Union
                              ->  Seq Scan on test_hcb_ptb t
                                    Filter: (id = 141)
                              ->  Hash Join
-                                   Hash Cond: (t.id = tmp_reuslt."t@pid")
-                                   ->  Seq Scan on test_hcb_ptb t
+                                   Hash Cond: (tmp_reuslt."t@pid" = t.id)
+                                   ->  WorkTable Scan on tmp_reuslt
                                    ->  Hash
-                                         ->  WorkTable Scan on tmp_reuslt
+                                         ->  Seq Scan on test_hcb_ptb t
          ->  Seq Scan on test_hcb_ptb t2
 (16 rows)
 
@@ -449,12 +448,12 @@ select t1.ID,t1.VCH,pid,NAME,PTEX from TEST_HCB_FQB t1,TEST_SUBLINK t2 where t1.
 (0 rows)
 
 explain (costs off) select t1.ID,t1.VCH,pid,NAME,PTEX from TEST_HCB_FQB t1,TEST_SUBLINK t2 where t1.id=t2.id start with t1.id=1 CONNECT BY PRIOR t1.id = t1.pid;
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Nested Loop
                        ->  Seq Scan on test_hcb_fqb t1
@@ -462,12 +461,12 @@ explain (costs off) select t1.ID,t1.VCH,pid,NAME,PTEX from TEST_HCB_FQB t1,TEST_
                        ->  Seq Scan on test_sublink t2
                              Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (t2.id = t1.id)
-                       ->  Seq Scan on test_sublink t2
+                       Hash Cond: (tmp_reuslt."t1@id" = t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
                              ->  Hash Join
-                                   Hash Cond: (tmp_reuslt."t1@id" = t1.pid)
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   Hash Cond: (t2.id = t1.id)
+                                   ->  Seq Scan on test_sublink t2
                                    ->  Hash
                                          ->  Seq Scan on test_hcb_fqb t1
 (19 rows)
@@ -497,12 +496,12 @@ start with tt.id=1 CONNECT BY PRIOR tt.id = tt.pid ;
 
 explain (costs off) select tt.id,tt.name from (select t1.ID,t1.VCH,pid,NAME,PTEX from TEST_HCB_FQB t1,TEST_SUBLINK t2 where t1.id=t2.id) tt
 start with tt.id=1 CONNECT BY PRIOR tt.id = tt.pid ;
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Nested Loop
                        ->  Seq Scan on test_hcb_fqb t1
@@ -510,12 +509,12 @@ start with tt.id=1 CONNECT BY PRIOR tt.id = tt.pid ;
                        ->  Seq Scan on test_sublink t2
                              Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (t2.id = t1.id)
-                       ->  Seq Scan on test_sublink t2
+                       Hash Cond: (tmp_reuslt."tt@id" = t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
                              ->  Hash Join
-                                   Hash Cond: (tmp_reuslt."tt@id" = t1.pid)
-                                   ->  WorkTable Scan on tmp_reuslt
+                                   Hash Cond: (t2.id = t1.id)
+                                   ->  Seq Scan on test_sublink t2
                                    ->  Hash
                                          ->  Seq Scan on test_hcb_fqb t1
 (19 rows)
@@ -800,21 +799,21 @@ start with id = 141 connect by prior pid=id;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_2
+           Start With pseudo atts: array_key_2
            ->  Recursive Union
                  ->  CTE Scan on tmp_reuslt
                        Filter: ((level >= 1) AND ("t1@id" = 141))
                        CTE tmp_reuslt
                          ->  StartWith Operator
-                               Start With pseudo atts: RUITR, array_key_9
+                               Start With pseudo atts: array_key_9
                                ->  Recursive Union
                                      ->  Seq Scan on test_hcb_ptb t1
                                            Filter: (id = 141)
                                      ->  Hash Join
-                                           Hash Cond: (t1.id = tmp_reuslt."t1@pid")
-                                           ->  Seq Scan on test_hcb_ptb t1
+                                           Hash Cond: (tmp_reuslt."t1@pid" = t1.id)
+                                           ->  WorkTable Scan on tmp_reuslt
                                            ->  Hash
-                                                 ->  WorkTable Scan on tmp_reuslt
+                                                 ->  Seq Scan on test_hcb_ptb t1
                  ->  Hash Join
                        Hash Cond: (tmp_reuslt."t1@id" = tmp_reuslt."t1@pid")
                        ->  Materialize
@@ -822,15 +821,15 @@ start with id = 141 connect by prior pid=id;
                                    Filter: (level >= 1)
                                    CTE tmp_reuslt
                                      ->  StartWith Operator
-                                           Start With pseudo atts: RUITR, array_key_9
+                                           Start With pseudo atts: array_key_9
                                            ->  Recursive Union
                                                  ->  Seq Scan on test_hcb_ptb t1
                                                        Filter: (id = 141)
                                                  ->  Hash Join
-                                                       Hash Cond: (t1.id = tmp_reuslt."t1@pid")
-                                                       ->  Seq Scan on test_hcb_ptb t1
+                                                       Hash Cond: (tmp_reuslt."t1@pid" = t1.id)
+                                                       ->  WorkTable Scan on tmp_reuslt
                                                        ->  Hash
-                                                             ->  WorkTable Scan on tmp_reuslt
+                                                             ->  Seq Scan on test_hcb_ptb t1
                        ->  Hash
                              ->  WorkTable Scan on tmp_reuslt
 (36 rows)
@@ -844,21 +843,21 @@ where level>=1 start with id = 141 connect by prior pid=id;
    Filter: (level >= 1)
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_2
+           Start With pseudo atts: array_key_2
            ->  Recursive Union
                  ->  CTE Scan on tmp_reuslt
                        Filter: ((level >= 1) AND ("t2@id" = 141))
                        CTE tmp_reuslt
                          ->  StartWith Operator
-                               Start With pseudo atts: RUITR, array_key_9
+                               Start With pseudo atts: array_key_9
                                ->  Recursive Union
                                      ->  Seq Scan on test_hcb_ptb t2
                                            Filter: (id = 141)
                                      ->  Hash Join
-                                           Hash Cond: (t2.id = tmp_reuslt."t2@pid")
-                                           ->  Seq Scan on test_hcb_ptb t2
+                                           Hash Cond: (tmp_reuslt."t2@pid" = t2.id)
+                                           ->  WorkTable Scan on tmp_reuslt
                                            ->  Hash
-                                                 ->  WorkTable Scan on tmp_reuslt
+                                                 ->  Seq Scan on test_hcb_ptb t2
                  ->  Hash Join
                        Hash Cond: (tmp_reuslt."t2@id" = tmp_reuslt."t1@pid")
                        ->  Materialize
@@ -866,34 +865,34 @@ where level>=1 start with id = 141 connect by prior pid=id;
                                    Filter: (level >= 1)
                                    CTE tmp_reuslt
                                      ->  StartWith Operator
-                                           Start With pseudo atts: RUITR, array_key_9
+                                           Start With pseudo atts: array_key_9
                                            ->  Recursive Union
                                                  ->  Seq Scan on test_hcb_ptb t2
                                                        Filter: (id = 141)
                                                  ->  Hash Join
-                                                       Hash Cond: (t2.id = tmp_reuslt."t2@pid")
-                                                       ->  Seq Scan on test_hcb_ptb t2
+                                                       Hash Cond: (tmp_reuslt."t2@pid" = t2.id)
+                                                       ->  WorkTable Scan on tmp_reuslt
                                                        ->  Hash
-                                                             ->  WorkTable Scan on tmp_reuslt
+                                                             ->  Seq Scan on test_hcb_ptb t2
                        ->  Hash
                              ->  WorkTable Scan on tmp_reuslt
 (37 rows)
 
 explain select sysdate from test_hcb_ptb t1 start with id = 141 connect by prior pid=id;
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
- CTE Scan on tmp_reuslt  (cost=37.11..39.89 rows=101 width=0)
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=37.76..38.06 rows=11 width=0)
    CTE tmp_reuslt
-     ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
-           Start With pseudo atts: RUITR, array_key_9
-           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+     ->  StartWith Operator  (cost=0.00..37.76 rows=11 width=102)
+           Start With pseudo atts: array_key_9
+           ->  Recursive Union  (cost=0.00..37.76 rows=11 width=102)
                  ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.80 rows=1 width=102)
                        Filter: (id = 141)
-                 ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
-                       Hash Cond: (t1.id = tmp_reuslt."t1@pid")
-                       ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.64 rows=64 width=102)
-                       ->  Hash  (cost=0.20..0.20 rows=10 width=4)
-                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+                 ->  Hash Join  (cost=3.44..3.47 rows=1 width=102)
+                       Hash Cond: (tmp_reuslt."t1@pid" = t1.id)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.02 rows=1 width=4)
+                       ->  Hash  (cost=2.64..2.64 rows=64 width=102)
+                             ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.64 rows=64 width=102)
 (12 rows)
 
 select count(sysdate) from test_hcb_ptb t1 start with id = 141 connect by prior pid=id;
@@ -906,91 +905,91 @@ select t1.id,t1.pid,LEVEL,sys_connect_by_path(null, '->') pa, t1.name from test_
  id  | pid | level |         pa         |   name   
 -----+-----+-------+--------------------+----------
  141 | 131 |     1 | ->null             | 江南摩卡
- 151 | 141 |     2 | ->null->null       | 江南一楼
- 161 | 151 |     3 | ->null->null->null | 第一单元
- 162 | 151 |     3 | ->null->null->null | 第二单元
- 163 | 151 |     3 | ->null->null->null | 第三单元
- 164 | 151 |     3 | ->null->null->null | 第四单元
- 165 | 151 |     3 | ->null->null->null | 第五单元
- 166 | 151 |     3 | ->null->null->null | 第六单元
- 167 | 151 |     3 | ->null->null->null | 第七单元
- 168 | 151 |     3 | ->null->null->null | 第八单元
- 169 | 151 |     3 | ->null->null->null | 第九单元
- 152 | 141 |     2 | ->null->null       | 江南二楼
- 153 | 141 |     2 | ->null->null       | 江南三楼
- 154 | 141 |     2 | ->null->null       | 江南四楼
- 155 | 141 |     2 | ->null->null       | 江南五楼
- 156 | 141 |     2 | ->null->null       | 江南六楼
- 157 | 141 |     2 | ->null->null       | 江南七楼
- 158 | 141 |     2 | ->null->null       | 江南八楼
  159 | 141 |     2 | ->null->null       | 江南九楼
+ 158 | 141 |     2 | ->null->null       | 江南八楼
+ 157 | 141 |     2 | ->null->null       | 江南七楼
+ 156 | 141 |     2 | ->null->null       | 江南六楼
+ 155 | 141 |     2 | ->null->null       | 江南五楼
+ 154 | 141 |     2 | ->null->null       | 江南四楼
+ 153 | 141 |     2 | ->null->null       | 江南三楼
+ 152 | 141 |     2 | ->null->null       | 江南二楼
+ 151 | 141 |     2 | ->null->null       | 江南一楼
+ 169 | 151 |     3 | ->null->null->null | 第九单元
+ 168 | 151 |     3 | ->null->null->null | 第八单元
+ 167 | 151 |     3 | ->null->null->null | 第七单元
+ 166 | 151 |     3 | ->null->null->null | 第六单元
+ 165 | 151 |     3 | ->null->null->null | 第五单元
+ 164 | 151 |     3 | ->null->null->null | 第四单元
+ 163 | 151 |     3 | ->null->null->null | 第三单元
+ 162 | 151 |     3 | ->null->null->null | 第二单元
+ 161 | 151 |     3 | ->null->null->null | 第一单元
 (19 rows)
 
 select t1.id,t1.pid,LEVEL,sys_connect_by_path('id', '->') pa, t1.name from test_hcb_ptb t1 start with id = 141 connect by prior id = pid;
  id  | pid | level |      pa      |   name   
 -----+-----+-------+--------------+----------
  141 | 131 |     1 | ->id         | 江南摩卡
- 151 | 141 |     2 | ->id->id     | 江南一楼
- 161 | 151 |     3 | ->id->id->id | 第一单元
- 162 | 151 |     3 | ->id->id->id | 第二单元
- 163 | 151 |     3 | ->id->id->id | 第三单元
- 164 | 151 |     3 | ->id->id->id | 第四单元
- 165 | 151 |     3 | ->id->id->id | 第五单元
- 166 | 151 |     3 | ->id->id->id | 第六单元
- 167 | 151 |     3 | ->id->id->id | 第七单元
- 168 | 151 |     3 | ->id->id->id | 第八单元
- 169 | 151 |     3 | ->id->id->id | 第九单元
- 152 | 141 |     2 | ->id->id     | 江南二楼
- 153 | 141 |     2 | ->id->id     | 江南三楼
- 154 | 141 |     2 | ->id->id     | 江南四楼
- 155 | 141 |     2 | ->id->id     | 江南五楼
- 156 | 141 |     2 | ->id->id     | 江南六楼
- 157 | 141 |     2 | ->id->id     | 江南七楼
- 158 | 141 |     2 | ->id->id     | 江南八楼
  159 | 141 |     2 | ->id->id     | 江南九楼
+ 158 | 141 |     2 | ->id->id     | 江南八楼
+ 157 | 141 |     2 | ->id->id     | 江南七楼
+ 156 | 141 |     2 | ->id->id     | 江南六楼
+ 155 | 141 |     2 | ->id->id     | 江南五楼
+ 154 | 141 |     2 | ->id->id     | 江南四楼
+ 153 | 141 |     2 | ->id->id     | 江南三楼
+ 152 | 141 |     2 | ->id->id     | 江南二楼
+ 151 | 141 |     2 | ->id->id     | 江南一楼
+ 169 | 151 |     3 | ->id->id->id | 第九单元
+ 168 | 151 |     3 | ->id->id->id | 第八单元
+ 167 | 151 |     3 | ->id->id->id | 第七单元
+ 166 | 151 |     3 | ->id->id->id | 第六单元
+ 165 | 151 |     3 | ->id->id->id | 第五单元
+ 164 | 151 |     3 | ->id->id->id | 第四单元
+ 163 | 151 |     3 | ->id->id->id | 第三单元
+ 162 | 151 |     3 | ->id->id->id | 第二单元
+ 161 | 151 |     3 | ->id->id->id | 第一单元
 (19 rows)
 
 select t1.id,t1.pid,LEVEL,sys_connect_by_path(' ', '->') pa, t1.name from test_hcb_ptb t1 start with id = 141 connect by prior id = pid;
  id  | pid | level |    pa     |   name   
 -----+-----+-------+-----------+----------
  141 | 131 |     1 | ->        | 江南摩卡
- 151 | 141 |     2 | -> ->     | 江南一楼
- 161 | 151 |     3 | -> -> ->  | 第一单元
- 162 | 151 |     3 | -> -> ->  | 第二单元
- 163 | 151 |     3 | -> -> ->  | 第三单元
- 164 | 151 |     3 | -> -> ->  | 第四单元
- 165 | 151 |     3 | -> -> ->  | 第五单元
- 166 | 151 |     3 | -> -> ->  | 第六单元
- 167 | 151 |     3 | -> -> ->  | 第七单元
- 168 | 151 |     3 | -> -> ->  | 第八单元
- 169 | 151 |     3 | -> -> ->  | 第九单元
- 152 | 141 |     2 | -> ->     | 江南二楼
- 153 | 141 |     2 | -> ->     | 江南三楼
- 154 | 141 |     2 | -> ->     | 江南四楼
- 155 | 141 |     2 | -> ->     | 江南五楼
- 156 | 141 |     2 | -> ->     | 江南六楼
- 157 | 141 |     2 | -> ->     | 江南七楼
- 158 | 141 |     2 | -> ->     | 江南八楼
  159 | 141 |     2 | -> ->     | 江南九楼
+ 158 | 141 |     2 | -> ->     | 江南八楼
+ 157 | 141 |     2 | -> ->     | 江南七楼
+ 156 | 141 |     2 | -> ->     | 江南六楼
+ 155 | 141 |     2 | -> ->     | 江南五楼
+ 154 | 141 |     2 | -> ->     | 江南四楼
+ 153 | 141 |     2 | -> ->     | 江南三楼
+ 152 | 141 |     2 | -> ->     | 江南二楼
+ 151 | 141 |     2 | -> ->     | 江南一楼
+ 169 | 151 |     3 | -> -> ->  | 第九单元
+ 168 | 151 |     3 | -> -> ->  | 第八单元
+ 167 | 151 |     3 | -> -> ->  | 第七单元
+ 166 | 151 |     3 | -> -> ->  | 第六单元
+ 165 | 151 |     3 | -> -> ->  | 第五单元
+ 164 | 151 |     3 | -> -> ->  | 第四单元
+ 163 | 151 |     3 | -> -> ->  | 第三单元
+ 162 | 151 |     3 | -> -> ->  | 第二单元
+ 161 | 151 |     3 | -> -> ->  | 第一单元
 (19 rows)
 
 explain select t1.id,t1.pid,t1.name,level from test_hcb_ptb t1 start with id=141 connect by prior id=pid Order By NLSSORT ( id, ' NLS_SORT = SCHINESE_PINYIN_M ' );
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
- Sort  (cost=99.22..100.82 rows=641 width=190)
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Sort  (cost=44.55..44.75 rows=81 width=190)
    Sort Key: (nlssort((tmp_reuslt."t1@id")::text, ' NLS_SORT = SCHINESE_PINYIN_M '::text))
    CTE tmp_reuslt
-     ->  StartWith Operator  (cost=0.00..53.31 rows=641 width=102)
-           Start With pseudo atts: RUITR, array_key_1
-           ->  Recursive Union  (cost=0.00..53.31 rows=641 width=102)
+     ->  StartWith Operator  (cost=0.00..39.96 rows=81 width=102)
+           Start With pseudo atts: array_key_1
+           ->  Recursive Union  (cost=0.00..39.96 rows=81 width=102)
                  ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.80 rows=1 width=102)
                        Filter: (id = 141)
-                 ->  Hash Join  (cost=0.33..3.77 rows=64 width=102)
-                       Hash Cond: (t1.pid = tmp_reuslt."t1@id")
-                       ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.64 rows=64 width=102)
-                       ->  Hash  (cost=0.20..0.20 rows=10 width=4)
-                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
-   ->  CTE Scan on tmp_reuslt  (cost=0.00..16.02 rows=641 width=190)
+                 ->  Hash Join  (cost=3.44..3.55 rows=8 width=102)
+                       Hash Cond: (tmp_reuslt."t1@id" = t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.02 rows=1 width=4)
+                       ->  Hash  (cost=2.64..2.64 rows=64 width=102)
+                             ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.64 rows=64 width=102)
+   ->  CTE Scan on tmp_reuslt  (cost=0.00..2.03 rows=81 width=190)
 (14 rows)
 
 select t1.id,t1.pid,t1.name,level from test_hcb_ptb t1 start with id=141 connect by prior id=pid Order By NLSSORT ( id, ' NLS_SORT = SCHINESE_PINYIN_M ' );
@@ -1184,69 +1183,69 @@ select t1.id, LEVEL, connect_by_iscycle from test_hcb_ptb t1 start with id = 1 c
  id  | level | connect_by_iscycle 
 -----+-------+--------------------
    1 |     1 |                  0
-  11 |     2 |                  0
- 111 |     3 |                  0
- 121 |     4 |                  0
- 131 |     5 |                  0
- 141 |     6 |                  0
- 151 |     7 |                  0
- 161 |     8 |                  0
- 162 |     8 |                  0
- 163 |     8 |                  0
- 164 |     8 |                  0
- 165 |     8 |                  0
- 166 |     8 |                  0
- 167 |     8 |                  0
- 168 |     8 |                  0
- 169 |     8 |                  0
- 152 |     7 |                  0
- 153 |     7 |                  0
- 154 |     7 |                  0
- 155 |     7 |                  0
- 156 |     7 |                  0
- 157 |     7 |                  0
- 158 |     7 |                  0
- 159 |     7 |                  0
- 142 |     6 |                  0
- 143 |     6 |                  0
- 144 |     6 |                  0
- 145 |     6 |                  0
- 146 |     6 |                  0
- 147 |     6 |                  0
- 148 |     6 |                  0
- 149 |     6 |                  0
- 132 |     5 |                  0
- 133 |     5 |                  0
- 135 |     5 |                  0
- 134 |     5 |                  0
- 136 |     5 |                  0
- 137 |     5 |                  0
- 138 |     5 |                  0
- 139 |     5 |                  0
- 122 |     4 |                  0
- 123 |     4 |                  0
- 124 |     4 |                  0
- 125 |     4 |                  0
- 126 |     4 |                  0
- 127 |     4 |                  0
- 128 |     4 |                  0
- 129 |     4 |                  0
- 112 |     3 |                  0
- 113 |     3 |                  0
- 114 |     3 |                  0
- 115 |     3 |                  0
- 117 |     3 |                  0
- 116 |     3 |                  0
- 118 |     3 |                  0
- 119 |     3 |                  0
-  12 |     2 |                  0
-  13 |     2 |                  0
-  14 |     2 |                  0
-  15 |     2 |                  0
-  16 |     2 |                  0
-  17 |     2 |                  0
-  18 |     2 |                  0
   19 |     2 |                  0
+  18 |     2 |                  0
+  17 |     2 |                  0
+  16 |     2 |                  0
+  15 |     2 |                  0
+  14 |     2 |                  0
+  13 |     2 |                  0
+  12 |     2 |                  0
+  11 |     2 |                  0
+ 119 |     3 |                  0
+ 118 |     3 |                  0
+ 116 |     3 |                  0
+ 117 |     3 |                  0
+ 115 |     3 |                  0
+ 114 |     3 |                  0
+ 113 |     3 |                  0
+ 112 |     3 |                  0
+ 111 |     3 |                  0
+ 129 |     4 |                  0
+ 128 |     4 |                  0
+ 127 |     4 |                  0
+ 126 |     4 |                  0
+ 125 |     4 |                  0
+ 124 |     4 |                  0
+ 123 |     4 |                  0
+ 122 |     4 |                  0
+ 121 |     4 |                  0
+ 139 |     5 |                  0
+ 138 |     5 |                  0
+ 137 |     5 |                  0
+ 136 |     5 |                  0
+ 134 |     5 |                  0
+ 135 |     5 |                  0
+ 133 |     5 |                  0
+ 132 |     5 |                  0
+ 131 |     5 |                  0
+ 149 |     6 |                  0
+ 148 |     6 |                  0
+ 147 |     6 |                  0
+ 146 |     6 |                  0
+ 145 |     6 |                  0
+ 144 |     6 |                  0
+ 143 |     6 |                  0
+ 142 |     6 |                  0
+ 141 |     6 |                  0
+ 159 |     7 |                  0
+ 158 |     7 |                  0
+ 157 |     7 |                  0
+ 156 |     7 |                  0
+ 155 |     7 |                  0
+ 154 |     7 |                  0
+ 153 |     7 |                  0
+ 152 |     7 |                  0
+ 151 |     7 |                  0
+ 169 |     8 |                  0
+ 168 |     8 |                  0
+ 167 |     8 |                  0
+ 166 |     8 |                  0
+ 165 |     8 |                  0
+ 164 |     8 |                  0
+ 163 |     8 |                  0
+ 162 |     8 |                  0
+ 161 |     8 |                  0
 (64 rows)
 
 create table mag_area
@@ -1293,31 +1292,32 @@ WHERE a.AREA_CODE IN (
 AND a.archive_type = 'A'
 AND a.BUSITYPE = 'B'
 AND a.area_code = b.area_code;
-                                                               QUERY PLAN                                                                
------------------------------------------------------------------------------------------------------------------------------------------
- WindowAgg  (cost=156.54..156.56 rows=1 width=176)
-   ->  Sort  (cost=156.54..156.54 rows=1 width=176)
+                                                                  QUERY PLAN                                                                   
+-----------------------------------------------------------------------------------------------------------------------------------------------
+ WindowAgg  (cost=155.13..155.16 rows=1 width=176)
+   ->  Sort  (cost=155.13..155.14 rows=1 width=176)
          Sort Key: a.image_type, a.app_type
-         ->  Nested Loop Semi Join  (cost=127.46..156.53 rows=1 width=176)
+         ->  Nested Loop Semi Join  (cost=129.80..155.12 rows=1 width=176)
                Join Filter: ((a.area_code)::text = (tmp_reuslt."mag_area@area_code")::text)
                ->  Nested Loop  (cost=0.00..24.78 rows=1 width=252)
                      Join Filter: ((a.area_code)::text = (b.area_code)::text)
                      ->  Seq Scan on mag_image_tpl a  (cost=0.00..12.96 rows=1 width=198)
                            Filter: (((archive_type)::text = 'A'::text) AND ((busitype)::text = 'B'::text))
                      ->  Seq Scan on mag_area b  (cost=0.00..10.81 rows=81 width=54)
-               ->  CTE Scan on tmp_reuslt  (cost=127.46..129.48 rows=101 width=38)
-                     CTE tmp_reuslt
-                       ->  StartWith Operator  (cost=0.00..127.46 rows=101 width=982)
-                             Start With pseudo atts: RUITR, array_key_5
-                             ->  Recursive Union  (cost=0.00..127.46 rows=101 width=982)
-                                   ->  Seq Scan on mag_area  (cost=0.00..11.01 rows=1 width=982)
-                                         Filter: ((area_code)::text = '1'::text)
-                                   ->  Hash Join  (cost=0.33..11.44 rows=10 width=982)
-                                         Hash Cond: ((swtest.mag_area.area_code)::text = (tmp_reuslt."mag_area@belong_area_code")::text)
-                                         ->  Seq Scan on mag_area  (cost=0.00..10.81 rows=81 width=982)
-                                         ->  Hash  (cost=0.20..0.20 rows=10 width=38)
-                                               ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=38)
-(22 rows)
+               ->  Materialize  (cost=129.80..130.18 rows=11 width=38)
+                     ->  CTE Scan on tmp_reuslt  (cost=129.80..130.02 rows=11 width=38)
+                           CTE tmp_reuslt
+                             ->  StartWith Operator  (cost=0.00..129.80 rows=11 width=982)
+                                   Start With pseudo atts: array_key_5
+                                   ->  Recursive Union  (cost=0.00..129.80 rows=11 width=982)
+                                         ->  Seq Scan on mag_area  (cost=0.00..11.01 rows=1 width=982)
+                                               Filter: ((area_code)::text = '1'::text)
+                                         ->  Hash Join  (cost=11.82..11.86 rows=1 width=982)
+                                               Hash Cond: ((tmp_reuslt."mag_area@belong_area_code")::text = (swtest.mag_area.area_code)::text)
+                                               ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.02 rows=1 width=38)
+                                               ->  Hash  (cost=10.81..10.81 rows=81 width=982)
+                                                     ->  Seq Scan on mag_area  (cost=0.00..10.81 rows=81 width=982)
+(23 rows)
 
 select a.rule_id, b.mag_area_grade,
        max(b.mag_area_grade) OVER (PARTITION BY archive_type, busitype,image_type,app_type) max_level
@@ -1357,19 +1357,19 @@ SELECT table_name || NVL('test','_B$') AS table_name
                                 INSTR(txt, ',', 1, LEVEL) - 1)) AS table_name
                   FROM (SELECT ',' || REPLACE('test' , ' ', '') || ',' txt FROM sys_dummy)
                   CONNECT BY LEVEL <= LENGTH(REPLACE('test', ' ', '')) - LENGTH(REPLACE(REPLACE('test', ' ', ''), ',', '')) + 1);
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
- Subquery Scan on __unnamed_subquery__  (cost=5.24..10.79 rows=101 width=32)
-   ->  CTE Scan on tmp_reuslt  (cost=5.24..9.53 rows=101 width=36)
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Subquery Scan on __unnamed_subquery__  (cost=0.74..1.35 rows=11 width=32)
+   ->  CTE Scan on tmp_reuslt  (cost=0.74..1.21 rows=11 width=36)
          CTE tmp_reuslt
-           ->  StartWith Operator  (cost=0.00..5.24 rows=101 width=0)
-                 Start With pseudo atts: RUITR
-                 ->  Recursive Union  (cost=0.00..5.24 rows=101 width=0)
+           ->  StartWith Operator  (cost=0.00..0.74 rows=11 width=0)
+                 Start With pseudo atts: 
+                 ->  Recursive Union  (cost=0.00..0.74 rows=11 width=0)
                        ->  Subquery Scan on sys_dummy  (cost=0.00..0.02 rows=1 width=0)
                              ->  Result  (cost=0.00..0.01 rows=1 width=0)
-                       ->  Nested Loop  (cost=0.00..0.32 rows=10 width=0)
+                       ->  Nested Loop  (cost=0.00..0.05 rows=1 width=0)
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.02 rows=1 width=0)
                              ->  Result  (cost=0.00..0.01 rows=1 width=0)
-                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=0)
 (11 rows)
 
 SELECT table_name || NVL('test','_B$') AS table_name
@@ -1386,21 +1386,20 @@ SELECT table_name || NVL('test','_B$') AS table_name
 
 -- fix infinite recursive
 explain select * from t1 start with id = 1 connect by prior id != pid;
-                                        QUERY PLAN                                         
--------------------------------------------------------------------------------------------
- CTE Scan on tmp_reuslt  (cost=43.96..60.18 rows=811 width=40)
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=14.96..16.58 rows=81 width=40)
    CTE tmp_reuslt
-     ->  StartWith Operator  (cost=0.00..43.96 rows=811 width=10)
-           Start With pseudo atts: RUITR, array_key_1
-           ->  Recursive Union  (cost=0.00..43.96 rows=811 width=10)
+     ->  StartWith Operator  (cost=0.00..14.96 rows=81 width=10)
+           Start With pseudo atts: array_key_1
+           ->  Recursive Union  (cost=0.00..14.96 rows=81 width=10)
                  ->  Seq Scan on t1  (cost=0.00..1.11 rows=1 width=10)
                        Filter: (id = 1)
-                 ->  Nested Loop  (cost=0.00..2.66 rows=81 width=10)
+                 ->  Nested Loop  (cost=0.00..1.22 rows=8 width=10)
                        Join Filter: (tmp_reuslt."t1@id" <> swtest.t1.pid)
-                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
-                       ->  Materialize  (cost=0.00..1.14 rows=9 width=10)
-                             ->  Seq Scan on t1  (cost=0.00..1.09 rows=9 width=10)
-(12 rows)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.02 rows=1 width=4)
+                       ->  Seq Scan on t1  (cost=0.00..1.09 rows=9 width=10)
+(11 rows)
 
 -- test keywords
 CREATE TABLE start(connect int, prior int);
@@ -1421,55 +1420,54 @@ INSERT INTO connect VALUES(5,6);
 INSERT INTO connect VALUES(6,7);
 EXPLAIN SELECT * FROM START START /* GAUSSDB */ WITH connect = 1 CONNECT
 /*GAUSS*/BY PRIOR prior = prior;
-                                            QUERY PLAN                                            
---------------------------------------------------------------------------------------------------
- CTE Scan on tmp_reuslt  (cost=810.83..1047.45 rows=11831 width=8)
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=624.27..626.69 rows=121 width=8)
    CTE tmp_reuslt
-     ->  StartWith Operator  (cost=0.00..810.83 rows=11831 width=8)
-           Start With pseudo atts: RUITR, array_key_2
-           ->  Recursive Union  (cost=0.00..810.83 rows=11831 width=8)
+     ->  StartWith Operator  (cost=0.00..624.27 rows=121 width=8)
+           Start With pseudo atts: array_key_2
+           ->  Recursive Union  (cost=0.00..624.27 rows=121 width=8)
                  ->  Seq Scan on start  (cost=0.00..36.86 rows=11 width=8)
                        Filter: (connect = 1)
-                 ->  Hash Join  (cost=3.58..53.74 rows=1182 width=8)
-                       Hash Cond: (swtest.start.prior = tmp_reuslt."start@prior")
-                       ->  Seq Scan on start  (cost=0.00..31.49 rows=2149 width=8)
-                       ->  Hash  (cost=2.20..2.20 rows=110 width=4)
-                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..2.20 rows=110 width=4)
+                 ->  Hash Join  (cost=58.35..58.50 rows=11 width=8)
+                       Hash Cond: (tmp_reuslt."start@prior" = swtest.start.prior)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.02 rows=1 width=4)
+                       ->  Hash  (cost=31.49..31.49 rows=2149 width=8)
+                             ->  Seq Scan on start  (cost=0.00..31.49 rows=2149 width=8)
 (12 rows)
 
 EXPLAIN SELECT prior AS start, connect AS prior, prior FROM START START
 START        WITH connect = 1 CONNECT BY PRIOR /* test prior */ prior = prior;
-                                            QUERY PLAN                                            
---------------------------------------------------------------------------------------------------
- CTE Scan on tmp_reuslt  (cost=810.83..1047.45 rows=11831 width=8)
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=624.27..626.69 rows=121 width=8)
    CTE tmp_reuslt
-     ->  StartWith Operator  (cost=0.00..810.83 rows=11831 width=8)
-           Start With pseudo atts: RUITR, array_key_2
-           ->  Recursive Union  (cost=0.00..810.83 rows=11831 width=8)
+     ->  StartWith Operator  (cost=0.00..624.27 rows=121 width=8)
+           Start With pseudo atts: array_key_2
+           ->  Recursive Union  (cost=0.00..624.27 rows=121 width=8)
                  ->  Seq Scan on start  (cost=0.00..36.86 rows=11 width=8)
                        Filter: (connect = 1)
-                 ->  Hash Join  (cost=3.58..53.74 rows=1182 width=8)
-                       Hash Cond: (start.prior = tmp_reuslt."start@prior")
-                       ->  Seq Scan on start  (cost=0.00..31.49 rows=2149 width=8)
-                       ->  Hash  (cost=2.20..2.20 rows=110 width=4)
-                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..2.20 rows=110 width=4)
+                 ->  Hash Join  (cost=58.35..58.50 rows=11 width=8)
+                       Hash Cond: (tmp_reuslt."start@prior" = start.prior)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.02 rows=1 width=4)
+                       ->  Hash  (cost=31.49..31.49 rows=2149 width=8)
+                             ->  Seq Scan on start  (cost=0.00..31.49 rows=2149 width=8)
 (12 rows)
 
 EXPLAIN SELECT start AS connect, prior AS start FROM CONNECT
 CONNECT CONNECT     BY ROWNUM <5;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
- CTE Scan on tmp_reuslt  (cost=15013894.35..24250339.33 rows=461822249 width=8)
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=1034.27..1507.05 rows=23639 width=8)
    CTE tmp_reuslt
-     ->  StartWith Operator  (cost=0.00..15013894.35 rows=461822249 width=8)
-           Start With pseudo atts: RUITR
-           ->  Recursive Union  (cost=0.00..15013894.35 rows=461822249 width=8)
+     ->  StartWith Operator  (cost=0.00..1034.27 rows=23639 width=8)
+           Start With pseudo atts: 
+           ->  Recursive Union  (cost=0.00..1034.27 rows=23639 width=8)
                  ->  Seq Scan on connect  (cost=0.00..31.49 rows=2149 width=8)
-                 ->  Nested Loop  (cost=0.00..577741.79 rows=46182010 width=8)
-                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..429.80 rows=21490 width=0)
-                       ->  Materialize  (cost=0.00..42.23 rows=2149 width=8)
-                             ->  Seq Scan on connect  (cost=0.00..31.49 rows=2149 width=8)
-(10 rows)
+                 ->  Nested Loop  (cost=0.00..53.00 rows=2149 width=8)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.02 rows=1 width=0)
+                       ->  Seq Scan on connect  (cost=0.00..31.49 rows=2149 width=8)
+(9 rows)
 
 SELECT * FROM START START /*GAUSSDB*/
  WITH connect = 1 CONNECT
@@ -1478,10 +1476,10 @@ SELECT * FROM START START /*GAUSSDB*/
 ---------+-------
        1 |     2
        1 |     3
-       3 |     4
        3 |     5
        5 |     6
        6 |     7
+       3 |     4
 (6 rows)
 
 SELECT prior AS start, connect AS prior, prior FROM START START START WITH connect = 1 CONNECT BY PRIOR prior = connect;
@@ -1489,10 +1487,10 @@ SELECT prior AS start, connect AS prior, prior FROM START START START WITH conne
 -------+-------+-------
      2 |     1 |     2
      3 |     1 |     3
-     4 |     3 |     4
      5 |     3 |     5
      6 |     5 |     6
      7 |     6 |     7
+     4 |     3 |     4
 (6 rows)
 
 SELECT start AS connect, prior AS start FROM CONNECT CONNECT CONNECT BY ROWNUM <5;
@@ -1618,7 +1616,7 @@ explain(verbose on, costs off) select sys_connect_by_path(min(name || 'hahaha'),
    CTE tmp_reuslt
      ->  StartWith Operator
            Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
-           Start With pseudo atts: RUITR, array_key_1, array_col_2
+           Start With pseudo atts: array_key_1, array_path_2
            ->  Recursive Union
                  ->  Seq Scan on swtest.test3
                        Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
@@ -1636,7 +1634,7 @@ explain(verbose on, costs off) select sys_connect_by_path(min(name || 'hahaha'),
 (20 rows)
 
 select sys_connect_by_path(min(name || 'hahaha'), '/') from test3 connect by parentid = prior id;
-ERROR:  node value is not in path (value:a1hahaha path:/root)
+ERROR:  Internal array_path/array_root for origVarAttno:2 related internal array is not found
 CONTEXT:  referenced column: sys_connect_by_path
 explain(verbose on, costs off) select max(sys_connect_by_path(name, '/')) from test3 connect by parentid = prior id;
                                                    QUERY PLAN                                                    
@@ -1646,7 +1644,7 @@ explain(verbose on, costs off) select max(sys_connect_by_path(name, '/')) from t
    CTE tmp_reuslt
      ->  StartWith Operator
            Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
-           Start With pseudo atts: RUITR, array_key_1, array_col_2
+           Start With pseudo atts: array_key_1, array_path_2
            ->  Recursive Union
                  ->  Seq Scan on swtest.test3
                        Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
@@ -1664,11 +1662,7 @@ explain(verbose on, costs off) select max(sys_connect_by_path(name, '/')) from t
 (20 rows)
 
 select max(sys_connect_by_path(name, '/')) from test3 connect by parentid = prior id;
-    max     
-------------
- /root/c/c1
-(1 row)
-
+ERROR:  Internal array_path/array_root for origVarAttno:2 related internal array is not found
 explain(verbose on, costs off) select sys_connect_by_path(name, '/') from test3 connect by parentid = prior id group by 1;
                                                    QUERY PLAN                                                    
 -----------------------------------------------------------------------------------------------------------------
@@ -1678,7 +1672,7 @@ explain(verbose on, costs off) select sys_connect_by_path(name, '/') from test3 
    CTE tmp_reuslt
      ->  StartWith Operator
            Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
-           Start With pseudo atts: RUITR, array_key_1, array_col_2
+           Start With pseudo atts: array_key_1, array_path_2
            ->  Recursive Union
                  ->  Seq Scan on swtest.test3
                        Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
@@ -1730,20 +1724,20 @@ select sys_connect_by_path(name, '/') from test3 connect by parentid = prior id 
 (29 rows)
 
 explain select max(name) from test3 where sys_connect_by_path(name,'/') > 'dasdsa' connect by parentid = prior id;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
- Aggregate  (cost=13715.19..13715.20 rows=1 width=64)
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Aggregate  (cost=293.92..293.93 rows=1 width=64)
    CTE tmp_reuslt
-     ->  StartWith Operator  (cost=0.00..8274.74 rows=210598 width=96)
-           Start With pseudo atts: RUITR, array_key_1, array_col_2
-           ->  Recursive Union  (cost=0.00..8274.74 rows=210598 width=96)
+     ->  StartWith Operator  (cost=0.00..276.40 rows=678 width=96)
+           Start With pseudo atts: array_key_1, array_path_2
+           ->  Recursive Union  (cost=0.00..276.40 rows=678 width=96)
                  ->  Seq Scan on test3  (cost=0.00..16.48 rows=648 width=96)
-                 ->  Hash Join  (cost=24.58..404.63 rows=20995 width=96)
+                 ->  Hash Join  (cost=24.58..24.64 rows=3 width=96)
                        Hash Cond: (tmp_reuslt."test3@id" = swtest.test3.parentid)
-                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..129.60 rows=6480 width=32)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.02 rows=1 width=32)
                        ->  Hash  (cost=16.48..16.48 rows=648 width=96)
                              ->  Seq Scan on test3  (cost=0.00..16.48 rows=648 width=96)
-   ->  CTE Scan on tmp_reuslt  (cost=0.00..5264.95 rows=70199 width=32)
+   ->  CTE Scan on tmp_reuslt  (cost=0.00..16.95 rows=226 width=32)
          Filter: (sys_connect_by_path("test3@name", '/'::text) > 'dasdsa'::text)
 (13 rows)
 
@@ -1764,21 +1758,21 @@ LINE 1: ... parentid = prior id order by sys_connect_by_path(name,'/');
                                                              ^
 DETAIL:  Please check your start with rewrite table's column.
 explain select max(name) from test3 connect by parentid = prior id group by sys_connect_by_path(name,'/');
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
- HashAggregate  (cost=14066.18..14068.68 rows=200 width=64)
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ HashAggregate  (cost=295.05..297.55 rows=200 width=64)
    Group By Key: sys_connect_by_path(tmp_reuslt."test3@name", '/'::text)
    CTE tmp_reuslt
-     ->  StartWith Operator  (cost=0.00..8274.74 rows=210598 width=96)
-           Start With pseudo atts: RUITR, array_key_1, array_col_2
-           ->  Recursive Union  (cost=0.00..8274.74 rows=210598 width=96)
+     ->  StartWith Operator  (cost=0.00..276.40 rows=678 width=96)
+           Start With pseudo atts: array_key_1, array_path_2
+           ->  Recursive Union  (cost=0.00..276.40 rows=678 width=96)
                  ->  Seq Scan on test3  (cost=0.00..16.48 rows=648 width=96)
-                 ->  Hash Join  (cost=24.58..404.63 rows=20995 width=96)
+                 ->  Hash Join  (cost=24.58..24.64 rows=3 width=96)
                        Hash Cond: (tmp_reuslt."test3@id" = swtest.test3.parentid)
-                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..129.60 rows=6480 width=32)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.02 rows=1 width=32)
                        ->  Hash  (cost=16.48..16.48 rows=648 width=96)
                              ->  Seq Scan on test3  (cost=0.00..16.48 rows=648 width=96)
-   ->  CTE Scan on tmp_reuslt  (cost=0.00..4738.45 rows=210598 width=32)
+   ->  CTE Scan on tmp_reuslt  (cost=0.00..15.26 rows=678 width=32)
 (13 rows)
 
 select max(name) from test3 connect by parentid = prior id group by sys_connect_by_path(name,'/');

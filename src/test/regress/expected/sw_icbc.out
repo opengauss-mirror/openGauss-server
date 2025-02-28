@@ -9,27 +9,27 @@ select * from t1 start with id = 1 connect by prior id = pid;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Seq Scan on t1
                        Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                       ->  Seq Scan on t1
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on t1
 (12 rows)
 
 select * from t1 start with id = 1 connect by prior id = pid;
  id | pid | name 
 ----+-----+------
   1 |   0 | 1
-  2 |   1 | 2
-  5 |   2 | 5
   4 |   1 | 4
+  8 |   4 | 8
   7 |   4 | 7
   9 |   7 | 9
-  8 |   4 | 8
+  2 |   1 | 2
+  5 |   2 | 5
 (7 rows)
 
 explain (costs off)
@@ -39,27 +39,27 @@ select * from t1 start with t1.id = 1 connect by prior t1.id = t1.pid;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Seq Scan on t1
                        Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                       ->  Seq Scan on t1
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on t1
 (12 rows)
 
 select * from t1 start with t1.id = 1 connect by prior t1.id = t1.pid;
  id | pid | name 
 ----+-----+------
   1 |   0 | 1
-  2 |   1 | 2
-  5 |   2 | 5
   4 |   1 | 4
+  8 |   4 | 8
   7 |   4 | 7
   9 |   7 | 9
-  8 |   4 | 8
+  2 |   1 | 2
+  5 |   2 | 5
 (7 rows)
 
 explain (costs off)
@@ -69,27 +69,27 @@ select * from t1 as test start with test.id = 1 connect by prior test.id = test.
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Seq Scan on t1 test
                        Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (test.pid = tmp_reuslt."test@id")
-                       ->  Seq Scan on t1 test
+                       Hash Cond: (tmp_reuslt."test@id" = test.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on t1 test
 (12 rows)
 
 select * from t1 as test start with test.id = 1 connect by prior test.id = test.pid;
  id | pid | name 
 ----+-----+------
   1 |   0 | 1
-  2 |   1 | 2
-  5 |   2 | 5
   4 |   1 | 4
+  8 |   4 | 8
   7 |   4 | 7
   9 |   7 | 9
-  8 |   4 | 8
+  2 |   1 | 2
+  5 |   2 | 5
 (7 rows)
 
 explain (costs off)
@@ -100,15 +100,15 @@ select * from t1 start with id = 1 connect by prior id = pid order by id desc;
    Sort Key: tmp_reuslt."t1@id" DESC
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Seq Scan on t1
                        Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                       ->  Seq Scan on t1
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on t1
    ->  CTE Scan on tmp_reuslt
 (14 rows)
 
@@ -132,7 +132,7 @@ select * from t1 start with id IN (select id from t2 where id = 1) connect by pr
    Sort Key: tmp_reuslt."t1@id" DESC
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Nested Loop Semi Join
                        ->  Seq Scan on t1
@@ -140,10 +140,10 @@ select * from t1 start with id IN (select id from t2 where id = 1) connect by pr
                        ->  Seq Scan on t2
                              Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                       ->  Seq Scan on t1
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on t1
    ->  CTE Scan on tmp_reuslt
 (17 rows)
 
@@ -165,27 +165,27 @@ explain (costs off) select t1.id, t1.pid, t1.name from t1 start with id = 1 conn
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Seq Scan on t1
                        Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                       ->  Seq Scan on t1
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on t1
 (12 rows)
 
 select t1.id, t1.pid, t1.name from t1 start with id = 1 connect by prior id = pid;
  id | pid | name 
 ----+-----+------
   1 |   0 | 1
-  2 |   1 | 2
-  5 |   2 | 5
   4 |   1 | 4
+  8 |   4 | 8
   7 |   4 | 7
   9 |   7 | 9
-  8 |   4 | 8
+  2 |   1 | 2
+  5 |   2 | 5
 (7 rows)
 
 explain (costs off) select sum(name) from t1 start with id = 1 connect by prior id = pid group by id, pid;
@@ -195,15 +195,15 @@ explain (costs off) select sum(name) from t1 start with id = 1 connect by prior 
    Group By Key: tmp_reuslt."t1@id", tmp_reuslt."t1@pid"
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Seq Scan on t1
                        Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                       ->  Seq Scan on t1
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on t1
    ->  CTE Scan on tmp_reuslt
 (14 rows)
 
@@ -211,45 +211,45 @@ select sum(name) from t1 start with id = 1 connect by prior id = pid group by id
  sum 
 -----
    7
-   4
-   1
-   9
-   2
-   5
    8
+   4
+   2
+   1
+   5
+   9
 (7 rows)
 
 explain (costs off) select * from t1 start with id = 1 connect by prior id = pid and id IN (select id from t2);
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Seq Scan on t1
                        Filter: (id = 1)
-                 ->  Hash Semi Join
-                       Hash Cond: (swtest.t1.id = t2.id)
-                       ->  Hash Join
-                             Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                             ->  Seq Scan on t1
-                             ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                 ->  Hash Join
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  Seq Scan on t2
+                             ->  Hash Semi Join
+                                   Hash Cond: (swtest.t1.id = t2.id)
+                                   ->  Seq Scan on t1
+                                   ->  Hash
+                                         ->  Seq Scan on t2
 (16 rows)
 
 select * from t1 start with id = 1 connect by prior id = pid and id IN (select id from t2);
  id | pid | name 
 ----+-----+------
   1 |   0 | 1
-  2 |   1 | 2
-  5 |   2 | 5
   4 |   1 | 4
+  8 |   4 | 8
   7 |   4 | 7
   9 |   7 | 9
-  8 |   4 | 8
+  2 |   1 | 2
+  5 |   2 | 5
 (7 rows)
 
 explain (costs off) select * from t1 start with id = 1 and id is not NULL connect by prior id = pid;
@@ -258,27 +258,27 @@ explain (costs off) select * from t1 start with id = 1 and id is not NULL connec
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Seq Scan on t1
                        Filter: ((id IS NOT NULL) AND (id = 1))
                  ->  Hash Join
-                       Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                       ->  Seq Scan on t1
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on t1
 (12 rows)
 
 select * from t1 start with id = 1 and id is not NULL connect by prior id = pid;
  id | pid | name 
 ----+-----+------
   1 |   0 | 1
-  2 |   1 | 2
-  5 |   2 | 5
   4 |   1 | 4
+  8 |   4 | 8
   7 |   4 | 7
   9 |   7 | 9
-  8 |   4 | 8
+  2 |   1 | 2
+  5 |   2 | 5
 (7 rows)
 
 explain (costs off)
@@ -294,7 +294,7 @@ connect by prior test.id = test.pid;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Unique
                        ->  Sort
@@ -349,13 +349,13 @@ START WITH tt.id = 1;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  CTE Scan on tmp_reuslt
                        Filter: ("test@id" = 1)
                        CTE tmp_reuslt
                          ->  StartWith Operator
-                               Start With pseudo atts: RUITR, array_key_1
+                               Start With pseudo atts: array_key_1
                                ->  Recursive Union
                                      ->  Unique
                                            ->  Sort
@@ -375,12 +375,13 @@ START WITH tt.id = 1;
                                                              ->  Seq Scan on t1
                                                              ->  Seq Scan on t1
                  ->  Hash Join
-                       Hash Cond: (tmp_reuslt."test@pid" = tmp_reuslt."tt@id")
-                       ->  Materialize
+                       Hash Cond: (tmp_reuslt."tt@id" = tmp_reuslt."test@pid")
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Hash
                              ->  CTE Scan on tmp_reuslt
                                    CTE tmp_reuslt
                                      ->  StartWith Operator
-                                           Start With pseudo atts: RUITR, array_key_1
+                                           Start With pseudo atts: array_key_1
                                            ->  Recursive Union
                                                  ->  Unique
                                                        ->  Sort
@@ -399,9 +400,7 @@ START WITH tt.id = 1;
                                                                    ->  Append
                                                                          ->  Seq Scan on t1
                                                                          ->  Seq Scan on t1
-                       ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
-(55 rows)
+(54 rows)
 
 select *
 from
@@ -416,12 +415,12 @@ START WITH tt.id = 1;
  id | pid | name 
 ----+-----+------
   1 |   0 | 1
-  2 |   1 | 2
-  5 |   2 | 5
   4 |   1 | 4
+  8 |   4 | 8
   7 |   4 | 7
   9 |   7 | 9
-  8 |   4 | 8
+  2 |   1 | 2
+  5 |   2 | 5
 (7 rows)
 
 --test correlated sublink in targetlist
@@ -432,15 +431,15 @@ start with b.id=1 connect by prior b.id = b.pid;
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Seq Scan on t1 b
                        Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (b.pid = tmp_reuslt."b@id")
-                       ->  Seq Scan on t1 b
+                       Hash Cond: (tmp_reuslt."b@id" = b.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on t1 b
    SubPlan 2
      ->  Aggregate
            ->  Seq Scan on t1 a
@@ -456,15 +455,15 @@ start with test.id = 1 connect by prior test.id = test.pid;
    Filter: (NOT (alternatives: SubPlan 2 or hashed SubPlan 3))
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Seq Scan on t1 test
                        Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (test.pid = tmp_reuslt."test@id")
-                       ->  Seq Scan on t1 test
+                       Hash Cond: (tmp_reuslt."test@id" = test.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Seq Scan on t1 test
    SubPlan 2
      ->  Seq Scan on t1
            Filter: (tmp_reuslt."test@id" = id)
@@ -483,38 +482,38 @@ explain (costs off) select * from t1 where t1.name = 'test' and exists(select * 
            Filter: (t1.id = "t2@id")
            CTE tmp_reuslt
              ->  StartWith Operator
-                   Start With pseudo atts: RUITR, array_key_1
+                   Start With pseudo atts: array_key_1
                    ->  Recursive Union
                          ->  Seq Scan on t2
                                Filter: (name = 'test'::text)
                          ->  Hash Join
-                               Hash Cond: (swtest.t2.pid = tmp_reuslt."t2@id")
-                               ->  Seq Scan on t2
+                               Hash Cond: (tmp_reuslt."t2@id" = swtest.t2.pid)
+                               ->  WorkTable Scan on tmp_reuslt
                                ->  Hash
-                                     ->  WorkTable Scan on tmp_reuslt
+                                     ->  Seq Scan on t2
    SubPlan 4
      ->  CTE Scan on tmp_reuslt
            CTE tmp_reuslt
              ->  StartWith Operator
-                   Start With pseudo atts: RUITR, array_key_1
+                   Start With pseudo atts: array_key_1
                    ->  Recursive Union
                          ->  Seq Scan on t2
                                Filter: (name = 'test'::text)
                          ->  Hash Join
-                               Hash Cond: (swtest.t2.pid = tmp_reuslt."t2@id")
-                               ->  Seq Scan on t2
+                               Hash Cond: (tmp_reuslt."t2@id" = swtest.t2.pid)
+                               ->  WorkTable Scan on tmp_reuslt
                                ->  Hash
-                                     ->  WorkTable Scan on tmp_reuslt
+                                     ->  Seq Scan on t2
 (29 rows)
 
 --multiple tables case
 explain (costs off) select * from t1, t2 where t1.id = t2.id start with t1.id = t2.id and t1.id = 1 connect by prior t1.id = t1.pid;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Nested Loop
                        ->  Seq Scan on t1
@@ -522,23 +521,23 @@ explain (costs off) select * from t1, t2 where t1.id = t2.id start with t1.id = 
                        ->  Seq Scan on t2
                              Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (swtest.t1.id = swtest.t2.id)
-                       ->  Hash Join
-                             Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                             ->  Seq Scan on t1
-                             ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  Seq Scan on t2
+                             ->  Hash Join
+                                   Hash Cond: (swtest.t1.id = swtest.t2.id)
+                                   ->  Seq Scan on t1
+                                   ->  Hash
+                                         ->  Seq Scan on t2
 (19 rows)
 
 explain (costs off) select * from t1 join t2 on t1.id = t2.id start with t1.id = t2.id and t1.id = 1 connect by prior t1.id = t1.pid;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Nested Loop
                        ->  Seq Scan on t1
@@ -546,23 +545,23 @@ explain (costs off) select * from t1 join t2 on t1.id = t2.id start with t1.id =
                        ->  Seq Scan on t2
                              Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (swtest.t1.id = swtest.t2.id)
-                       ->  Hash Join
-                             Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                             ->  Seq Scan on t1
-                             ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  Seq Scan on t2
+                             ->  Hash Join
+                                   Hash Cond: (swtest.t1.id = swtest.t2.id)
+                                   ->  Seq Scan on t1
+                                   ->  Hash
+                                         ->  Seq Scan on t2
 (19 rows)
 
 explain (costs off) select * from t1, (select * from t2) as test where t1.id = test.id start with t1.id = test.id and t1.id = 1 connect by prior t1.id = t1.pid;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR, array_key_1
+           Start With pseudo atts: array_key_1
            ->  Recursive Union
                  ->  Nested Loop
                        ->  Seq Scan on t1
@@ -570,14 +569,14 @@ explain (costs off) select * from t1, (select * from t2) as test where t1.id = t
                        ->  Seq Scan on t2
                              Filter: (id = 1)
                  ->  Hash Join
-                       Hash Cond: (swtest.t1.id = swtest.t2.id)
-                       ->  Hash Join
-                             Hash Cond: (swtest.t1.pid = tmp_reuslt."t1@id")
-                             ->  Seq Scan on t1
-                             ->  Hash
-                                   ->  WorkTable Scan on tmp_reuslt
+                       Hash Cond: (tmp_reuslt."t1@id" = swtest.t1.pid)
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
-                             ->  Seq Scan on t2
+                             ->  Hash Join
+                                   Hash Cond: (swtest.t1.id = swtest.t2.id)
+                                   ->  Seq Scan on t1
+                                   ->  Hash
+                                         ->  Seq Scan on t2
 (19 rows)
 
 explain (costs off) select id, (select id from t2 start with t2.id = t1.id connect by t2.id = t1.id limit 1) from t1 where id = 1;
@@ -597,11 +596,11 @@ select prior id cc from t1 start with id = 1 connect by prior id = pid;
 ----
    
   1
-  2
-  1
+  4
   4
   7
-  4
+  1
+  2
 (7 rows)
 
 create INCREMENTAL MATERIALIZED view mv as select * from t1 start with id=141 connect by prior id=pid;

@@ -57,5 +57,5 @@ extern void transformStartWith(ParseState *pstate, ParseState *origin_pstate, Se
                                 SelectStmt *origin_stmt, Query *qry, bool is_first_node, bool is_creat_view);
 extern void AddStartWithCTEPseudoReturnColumns(CommonTableExpr *cte, RangeTblEntry *rte, Index rte_index);
 extern void pretransformAggWithUserSet(ParseState* pstate, List** targetList, Node* groupClause, ParseExprKind exprKind);
-
+extern void setNamespaceLateralState(List *l_namespace, bool lateral_only, bool lateral_ok);
 #endif /* PARSE_CLAUSE_H */
