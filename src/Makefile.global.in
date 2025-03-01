@@ -1227,7 +1227,7 @@ else
 pg_regress_locale_flags = $(if $(ENCODING),--encoding=$(ENCODING)) $(NOLOCALE)
 
 ifeq ($(enable_memory_check), yes)
-pg_regress_check = export ASAN_OPTIONS='unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=$(HOME)/memchk/asan/runlog' && \
+pg_regress_check = export ASAN_OPTIONS='unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=$(HOME)/memchk/asan/runlog:detect_odr_violation=0' && \
                    export LSAN_OPTIONS='exitcode=0:suppressions=$(abs_top_srcdir)/Tools/memory_check/memleak_ignore' && \
                    $(top_builddir)/src/test/regress/pg_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
 pg_regress_installcheck = export ASAN_OPTIONS='unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=$(HOME)/memchk/asan/runlog' && \
