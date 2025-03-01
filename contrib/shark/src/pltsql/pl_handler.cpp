@@ -19,7 +19,6 @@
 #include "pgstat.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_object_type.h"
-#include "catalog/pg_cast.h"
 #include "catalog/pg_proc_ext.h"
 #include "catalog/gs_package.h"
 #include "executor/executor.h"
@@ -290,10 +289,6 @@ Datum pltsql_call_handler(PG_FUNCTION_ARGS)
     int rc;
     Oid func_oid = fcinfo->flinfo->fn_oid;
     Oid* saved_Pseudo_CurrentUserId = NULL;
-    Oid old_user = InvalidOid;
-    int save_sec_context = 0;
-    Oid cast_owner = InvalidOid;
-    bool has_switch = false;
     PGSTAT_INIT_TIME_RECORD();
     bool needRecord = false;
     PLpgSQL_package* pkg = NULL;
@@ -350,14 +345,6 @@ Datum pltsql_call_handler(PG_FUNCTION_ARGS)
         nonatomic = IsA(fcinfo->context, FunctionScanState) && !castNode(FunctionScanState, fcinfo->context)->atomic;
     } else {
         nonatomic = u_sess->SPI_cxt.is_allow_commit_rollback;
-    }
-
-    /* get cast owner and make sure current user is cast owner when execute cast-func */
-    GetUserIdAndSecContext(&old_user, &save_sec_context);
-    cast_owner = u_sess->exec_cxt.cast_owner;
-    if (cast_owner != InvalidCastOwnerId && OidIsValid(cast_owner)) {
-        SetUserIdAndSecContext(cast_owner, save_sec_context | SECURITY_LOCAL_USERID_CHANGE);
-        has_switch = true;
     }
 
     bool save_need_create_depend = u_sess->plsql_cxt.need_create_depend;
@@ -759,11 +746,7 @@ Datum pltsql_call_handler(PG_FUNCTION_ARGS)
     }
 #endif
     UpdateCurrCompilePgObjStatus(save_curr_status);
-    if (has_switch) {
-        SetUserIdAndSecContext(old_user, save_sec_context);
-        u_sess->exec_cxt.cast_owner = InvalidOid;
-    }
-    
+
     u_sess->plsql_cxt.cur_func_oid = InvalidOid;
     if (!is_pkg_func && u_sess->plsql_cxt.running_func_oid == saveCallerOid) {
         if (!OidIsValid(savaCallerParentOid) && OidIsValid(firstLevelfuncOid))

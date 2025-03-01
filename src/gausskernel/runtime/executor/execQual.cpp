@@ -40,7 +40,6 @@
 #include "access/nbtree.h"
 #include "access/tupconvert.h"
 #include "access/tableam.h"
-#include "catalog/pg_cast.h"
 #include "catalog/pg_type.h"
 #include "commands/typecmds.h"
 #include "executor/exec/execdebug.h"
@@ -3562,8 +3561,6 @@ static Datum ExecEvalFunc(FuncExprState *fcache, ExprContext *econtext, bool *is
 {
     /* This is called only the first time through */
     FuncExpr* func = (FuncExpr*)fcache->xprstate.expr;
-    Oid target_type = InvalidOid;
-    Oid source_type = InvalidOid;
     bool has_refcursor = false;
     int cursor_return_number = 0;
 
@@ -3603,29 +3600,6 @@ static Datum ExecEvalFunc(FuncExprState *fcache, ExprContext *econtext, bool *is
 
     has_refcursor = func_has_refcursor_args(func->funcid, &fcache->fcinfo_data);
     cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
-
-    if (func->funcformat == COERCE_EXPLICIT_CAST || func->funcformat == COERCE_IMPLICIT_CAST) {
-
-        HeapTuple proc_tuple = SearchSysCache(PROCOID, ObjectIdGetDatum(func->funcid), 0, 0, 0);
-        if (HeapTupleIsValid(proc_tuple)) {
-            Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tuple);
-            source_type = proc_struct->proargtypes.values[0];
-            ReleaseSysCache(proc_tuple);
-            target_type = func->funcresulttype;
-            HeapTuple cast_tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(source_type),
-                                                   ObjectIdGetDatum(target_type));
-            if (HeapTupleIsValid(cast_tuple)) {
-               bool isnull = false;
-               Datum datum = SysCacheGetAttr(CASTSOURCETARGET, cast_tuple, Anum_pg_cast_castowner, &isnull);
-               if (!isnull) {
-                   u_sess->exec_cxt.cast_owner = DatumGetObjectId(datum);
-               } else {
-                   u_sess->exec_cxt.cast_owner = InvalidCastOwnerId;
-               }
-               ReleaseSysCache(cast_tuple);
-            }
-        }
-    }
 
    /*
     * We need to invoke ExecMakeFunctionResult if either the function itself
