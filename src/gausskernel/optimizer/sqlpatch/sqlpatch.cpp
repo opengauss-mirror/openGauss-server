@@ -773,7 +773,7 @@ void RevalidateGplanBySqlPatch(CachedPlanSource *plansource)
         return;
     }
 
-    Relation rel_gs_sql_patch = heap_open(GsSqlPatchRelationId, AccessShareLock);
+    Relation rel_gs_sql_patch = NULL;
     uint64 uniqueSQLId = 0;
 
     ListCell* lc = NULL;
@@ -797,6 +797,9 @@ void RevalidateGplanBySqlPatch(CachedPlanSource *plansource)
         }
 
         uniqueSQLId = query->uniqueSQLId;
+        if (rel_gs_sql_patch == NULL) {
+            rel_gs_sql_patch = heap_open(GsSqlPatchRelationId, AccessShareLock);
+        }
         HeapTuple tup = GetPatchTuple(UInt64GetDatum(query->uniqueSQLId), rel_gs_sql_patch, USE_UNIQUE_SQL_ID);
         if (HeapTupleIsValid(tup)) {
             heap_freetuple(tup);
@@ -820,7 +823,9 @@ void RevalidateGplanBySqlPatch(CachedPlanSource *plansource)
         plansource->sql_patch_sequence = pg_atomic_read_u64(&g_instance.cost_cxt.sql_patch_sequence_id);
     }
 
-    heap_close(rel_gs_sql_patch, AccessShareLock);
+    if (rel_gs_sql_patch != NULL) {
+        heap_close(rel_gs_sql_patch, AccessShareLock);
+    }
     /* plansource->sql_patch_sequence will be set to global id after parsed again */
 }
 

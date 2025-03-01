@@ -10526,7 +10526,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
     /* should not start a worker in shutdown or demotion procedure */
     if (CheckPostmasterSignal(PMSIGNAL_START_CLEAN_STATEMENT) && g_instance.status == NoShutdown &&
-        g_instance.demotion == NoDemote) {
+        g_instance.demotion == NoDemote && (!ENABLE_DMS || SS_NORMAL_PRIMARY)) {
         /* The statement flush thread wants us to start a clean statement worker process. */
         StartCleanStatement();
     }
