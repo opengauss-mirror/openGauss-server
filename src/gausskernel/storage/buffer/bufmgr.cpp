@@ -6456,7 +6456,8 @@ retry:
              * and the timeout time of the primary and standby servers is modified to open the unlocking
              * time window.
              */
-            if (!dms_standby_retry_read && SS_STANDBY_MODE) {
+            if (!dms_standby_retry_read && SS_STANDBY_MODE &&
+                !g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot) {
                 dms_standby_retry_read = true;
                 mode = BUFFER_LOCK_EXCLUSIVE;
             }
