@@ -51,6 +51,18 @@ SELECT name FROM t WHERE JSON_EXISTS(name, '$[0.1]');
 SELECT name FROM t WHERE JSON_EXISTS(name, 'NULL');
 SELECT name FROM t WHERE JSON_EXISTS(name, NULL);
 
+drop table if exists t_JsonExists_Case0009;
+CREATE TABLE t_JsonExists_Case0009( col1 VARCHAR2 (2000));
+
+INSERT INTO t_JsonExists_Case0009 VALUES (null);
+
+select col1 from t_JsonExists_Case0009 where json_exists(col1,' ');
+
+select col1 from t_JsonExists_Case0009 where json_exists(col1,' ' FALSE on ERROR);
+select col1 from t_JsonExists_Case0009 where json_exists(col1,' ' TRUE on ERROR);
+select col1 from t_JsonExists_Case0009 where json_exists(col1,' ' ERROR on ERROR);
+drop table t_JsonExists_Case0009;
+
 -- json_exists
 SELECT name FROM t WHERE JSON_EXISTS(name, '$[0].first');
 SELECT name FROM t WHERE JSON_EXISTS(name, '$[1,2].last');
