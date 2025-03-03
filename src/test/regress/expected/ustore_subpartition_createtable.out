@@ -1242,10 +1242,10 @@ ERROR:  Global and local partition index should not be on same column
  c_text3    | text                    |           | extended |              | 
  c          | integer                 | not null  | plain    |              | 
 Indexes:
-    "range_range_03_pkey" PRIMARY KEY, ubtree (c, c_int) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "range_range_03_idx1" ubtree (c_varchar1) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
-    "range_range_03_idx3" ubtree (c_varchar3) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "range_range_03_idx4" ubtree (c_varchar4) WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_range_03_pkey" PRIMARY KEY, ubtree (c, c_int) WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_range_03_idx1" ubtree (c_varchar1) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_range_03_idx3" ubtree (c_varchar3) WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_range_03_idx4" ubtree (c_varchar4) WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By RANGE(c_int) Subpartition By RANGE(c_char1)
 Number of partitions: 5 (View pg_partition to check each partition range.)
 Number of subpartitions: 10 (View pg_partition to check each subpartition range.)
@@ -1273,35 +1273,35 @@ select pg_get_tabledef('range_range_03');
  WITH (orientation=row, parallel_workers=10, storage_type=ustore, compression=no)                                              +
  PARTITION BY RANGE (c_int) SUBPARTITION BY RANGE (c_char1)                                                                    +
  (                                                                                                                             +
-     PARTITION p1 VALUES LESS THAN (50) TABLESPACE pg_default                                                                  +
+     PARTITION p1 VALUES LESS THAN (50)                                                                                        +
      (                                                                                                                         +
-         SUBPARTITION p1_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                                                       +
-         SUBPARTITION p1_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                   +
+         SUBPARTITION p1_1 VALUES LESS THAN ('c'),                                                                             +
+         SUBPARTITION p1_2 VALUES LESS THAN (MAXVALUE)                                                                         +
      ),                                                                                                                        +
-     PARTITION p2 VALUES LESS THAN (100) TABLESPACE pg_default                                                                 +
+     PARTITION p2 VALUES LESS THAN (100)                                                                                       +
      (                                                                                                                         +
-         SUBPARTITION p2_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                                                       +
-         SUBPARTITION p2_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                   +
+         SUBPARTITION p2_1 VALUES LESS THAN ('c'),                                                                             +
+         SUBPARTITION p2_2 VALUES LESS THAN (MAXVALUE)                                                                         +
      ),                                                                                                                        +
-     PARTITION p3 VALUES LESS THAN (150) TABLESPACE pg_default                                                                 +
+     PARTITION p3 VALUES LESS THAN (150)                                                                                       +
      (                                                                                                                         +
-         SUBPARTITION p3_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                                                       +
-         SUBPARTITION p3_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                   +
+         SUBPARTITION p3_1 VALUES LESS THAN ('c'),                                                                             +
+         SUBPARTITION p3_2 VALUES LESS THAN (MAXVALUE)                                                                         +
      ),                                                                                                                        +
-     PARTITION p4 VALUES LESS THAN (200) TABLESPACE pg_default                                                                 +
+     PARTITION p4 VALUES LESS THAN (200)                                                                                       +
      (                                                                                                                         +
-         SUBPARTITION p4_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                                                       +
-         SUBPARTITION p4_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                   +
+         SUBPARTITION p4_1 VALUES LESS THAN ('c'),                                                                             +
+         SUBPARTITION p4_2 VALUES LESS THAN (MAXVALUE)                                                                         +
      ),                                                                                                                        +
-     PARTITION p5 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                            +
+     PARTITION p5 VALUES LESS THAN (MAXVALUE)                                                                                  +
      (                                                                                                                         +
-         SUBPARTITION p5_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                                                       +
-         SUBPARTITION p5_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                   +
+         SUBPARTITION p5_1 VALUES LESS THAN ('c'),                                                                             +
+         SUBPARTITION p5_2 VALUES LESS THAN (MAXVALUE)                                                                         +
      )                                                                                                                         +
  )                                                                                                                             +
  ENABLE ROW MOVEMENT;                                                                                                          +
- CREATE INDEX range_range_03_idx4 ON range_range_03 USING ubtree (c_varchar4) WITH (storage_type=USTORE) TABLESPACE pg_default;+
- CREATE INDEX range_range_03_idx3 ON range_range_03 USING ubtree (c_varchar3) WITH (storage_type=USTORE) TABLESPACE pg_default;+
+ CREATE INDEX range_range_03_idx4 ON range_range_03 USING ubtree (c_varchar4) WITH (storage_type=ustore) TABLESPACE pg_default;+
+ CREATE INDEX range_range_03_idx3 ON range_range_03 USING ubtree (c_varchar3) WITH (storage_type=ustore) TABLESPACE pg_default;+
  CREATE INDEX range_range_03_idx1 ON range_range_03 USING ubtree (c_varchar1) LOCAL(                                           +
      PARTITION partition_name(                                                                                                 +
          SUBPARTITION p1_1_c_varchar1_idx,                                                                                     +
@@ -1323,8 +1323,8 @@ select pg_get_tabledef('range_range_03');
          SUBPARTITION p5_1_c_varchar1_idx,                                                                                     +
          SUBPARTITION p5_2_c_varchar1_idx                                                                                      +
      )                                                                                                                         +
- )  WITH (storage_type=USTORE) TABLESPACE pg_default;                                                                          +
- ALTER TABLE range_range_03 ADD CONSTRAINT range_range_03_pkey PRIMARY KEY (c, c_int) WITH (storage_type=USTORE);
+ )  WITH (storage_type=ustore) TABLESPACE pg_default;                                                                          +
+ ALTER TABLE range_range_03 ADD CONSTRAINT range_range_03_pkey PRIMARY KEY (c, c_int) WITH (storage_type=ustore);
 (1 row)
 
 drop table range_range_03;

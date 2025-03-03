@@ -17,6 +17,7 @@ BEGIN;
 -- insert into relfilenode r1
 INSERT INTO t1 values (1, 10);
 ALTER TABLE p1 EXCHANGE PARTITION ("p1_0") WITH TABLE t1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 -- insert into relfilnode r1 since p1 now uses r1.
 INSERT INTO p1 values (2, 20);
 ROLLBACK;
@@ -48,6 +49,7 @@ BEGIN;
 -- insert into relfilenode r1
 INSERT INTO p1 values (1, 10);
 ALTER TABLE p1 EXCHANGE PARTITION ("p1_0") WITH TABLE t1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 -- insert into relfilnode r1 since t1 now uses r1.
 INSERT INTO t1 values (2, 20);
 ROLLBACK;
@@ -79,6 +81,7 @@ partition by range (c2)
 BEGIN;
 -- swap t1 and p1_0.
 ALTER TABLE p1 EXCHANGE PARTITION ("p1_0") WITH TABLE t1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 -- insert into relfilnode r1 since p1 now uses r1.
 UPDATE p1 SET ppid = 2, c2 = 20 WHERE ppid = 1;
 ROLLBACK;

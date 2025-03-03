@@ -60,6 +60,7 @@ alter table list_list split subpartition p_201901_b values (2) into
 	subpartition p_201901_b,
 	subpartition p_201901_c
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from list_list subpartition (p_201901_a) order by 1,2,3,4;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -104,6 +105,7 @@ alter table list_list split subpartition p_201902_b values (2, 3) into
 	subpartition p_201902_b,
 	subpartition p_201902_c
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from list_list subpartition (p_201902_a) order by 1,2,3,4;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -186,6 +188,7 @@ alter table range_range split subpartition p_201901_b at (3) into
 	subpartition p_201901_c,
 	subpartition p_201901_d
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from range_range subpartition (p_201901_a) order by 1,2,3,4;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -224,6 +227,7 @@ alter table range_range split subpartition p_201902_b at (3) into
 	subpartition p_201902_c,
 	subpartition p_201902_d
 );
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 select * from range_range subpartition (p_201902_a) order by 1,2,3,4;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
@@ -449,6 +453,7 @@ subpartition by range (col_smallint)
 insert into col_com_alt_tbl_019_hash_range values(generate_series(1,100),generate_series(1,100));
 begin;
 alter table col_com_alt_tbl_019_hash_range split subpartition p1_2 at (40) into (subpartition p1_2_x, subpartition p1_2_y);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 rollback;
 drop table if exists col_com_alt_tbl_019_hash_range;
 --clean

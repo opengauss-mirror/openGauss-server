@@ -80,6 +80,7 @@ select * from table_subtran;
 savepoint s4;
 update table_subtran set c1 = 2;
 rollback;
+--?ARNING:  [Rollback skip] xid(.*), curxid(.*), start(.*), end(.*). There is no undo record in the top-level transaction. FirstUrp(.*), lastestUrp(.*), lastestXactUrp(.*).
 begin;
 select * from table_subtran;
  c1 

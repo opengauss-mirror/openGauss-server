@@ -256,6 +256,7 @@ SELECT /*+ indexonlyscan(range_list_sales1 range_list_sales1_idx4) */ COUNT(time
 
 --4. if drop partition without update global index, the gpi will be invalid, we can rebuild the index
 ALTER TABLE range_list_sales1 DROP PARTITION FOR (1600);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 EXPLAIN(costs off) SELECT /*+ indexonlyscan(range_list_sales1 range_list_sales1_idx1) */ COUNT(product_id) FROM range_list_sales1;
 WARNING:  Error hint: IndexOnlyScan(range_list_sales1 range_list_sales1_idx1), index "range_list_sales1_idx1" doesn't exist.
                       QUERY PLAN                       
@@ -344,6 +345,7 @@ SELECT /*+ indexonlyscan(range_list_sales1 range_list_sales1_idx4) */ COUNT(time
 
 --5. if drop subpartition without update global index, the gpi will be invalid, we can rebuild the index
 ALTER TABLE range_list_sales1 DROP SUBPARTITION customer5_channel3;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 EXPLAIN(costs off) SELECT /*+ indexonlyscan(range_list_sales1 range_list_sales1_idx1) */ COUNT(product_id) FROM range_list_sales1;
 WARNING:  Error hint: IndexOnlyScan(range_list_sales1 range_list_sales1_idx1), index "range_list_sales1_idx1" doesn't exist.
                       QUERY PLAN                       

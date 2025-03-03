@@ -1111,23 +1111,15 @@ select saveCSN(2);
 (1 row)
 
 vacuum full tab_x1;
-INFO:  skipping "tab_x1" --- Don't vacuum full ustore table,this feature to be released in the future.
  
 select * from tab_x1 timecapsule csn findCsn(1);  
- a | b 
----+---
-(0 rows)
-
+ERROR:  The table definition of "tab_x1" has been changed.
 select * from tab_x1 timecapsule csn findCsn(2);  
- a | b 
----+---
- 1 | 2
- 3 | 4
- 5 | 6
-(3 rows)
-
+ERROR:  The table definition of "tab_x1" has been changed.
 timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
 timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
 truncate table t_tmp;
 -- create index index_tab_x1_b on tab_x1(b);
 select saveCSN(0);

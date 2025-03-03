@@ -228,7 +228,7 @@ INSERT INTO ustore_part values(generate_series(20, 22), 'partition_a_lt_30');
 INSERT INTO ustore_part values(generate_series(30, 32), 'partition_a_lt_40');
 INSERT INTO ustore_part values(generate_series(40, 42), 'partition_a_lt_50');
 select * from ustore_part;
- a  |         b
+ a  |         b         
 ----+-------------------
   0 | partition_a_lt_10
   1 | partition_a_lt_10

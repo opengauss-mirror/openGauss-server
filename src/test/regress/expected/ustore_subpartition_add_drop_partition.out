@@ -159,8 +159,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "range_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "range_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By RANGE(customer_id) Subpartition By RANGE(time_id)
 Number of partitions: 6 (View pg_partition to check each partition range.)
 Number of subpartitions: 16 (View pg_partition to check each subpartition range.)
@@ -170,14 +170,17 @@ Options: orientation=row, storage_type=ustore, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition customer2
 ALTER TABLE range_range_sales DROP PARTITION customer2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success
 ALTER TABLE range_range_sales DROP SUBPARTITION customer1_2008;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition
 ALTER TABLE range_range_sales DROP SUBPARTITION customer4_all;
 ERROR:  Cannot drop the only subpartition of a partitioned table
 DETAIL:  N/A
 --success, drop partition customer3
 ALTER TABLE range_range_sales DROP PARTITION FOR (400);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE range_range_sales DROP PARTITION FOR (400, '2010-01-01');
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -193,6 +196,7 @@ ALTER TABLE range_range_sales DROP SUBPARTITION FOR ('2010-01-01', 1400);
 ERROR:  invalid input syntax for integer: "2010-01-01"
 --success, drop subpartition customer5_2010
 ALTER TABLE range_range_sales DROP SUBPARTITION FOR(1400, '2010-01-01');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in customer6
 ALTER TABLE range_range_sales DROP SUBPARTITION FOR(2000, '2009-01-01');
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -272,8 +276,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "range_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default UNUSABLE
-    "range_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default UNUSABLE
+    "range_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By RANGE(customer_id) Subpartition By RANGE(time_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 9 (View pg_partition to check each subpartition range.)
@@ -431,8 +435,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "range_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "range_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By RANGE(customer_id) Subpartition By LIST(channel_id)
 Number of partitions: 6 (View pg_partition to check each partition range.)
 Number of subpartitions: 14 (View pg_partition to check each subpartition range.)
@@ -442,14 +446,17 @@ Options: orientation=row, storage_type=ustore, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition customer2
 ALTER TABLE range_list_sales DROP PARTITION customer2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success
 ALTER TABLE range_list_sales DROP SUBPARTITION customer1_channel1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition
 ALTER TABLE range_list_sales DROP SUBPARTITION customer4_channel1;
 ERROR:  Cannot drop the only subpartition of a partitioned table
 DETAIL:  N/A
 --success, drop partition customer3
 ALTER TABLE range_list_sales DROP PARTITION FOR (400);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE range_list_sales DROP PARTITION FOR (400, '4');
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -465,6 +472,7 @@ ALTER TABLE range_list_sales DROP SUBPARTITION FOR ('abc', 1400);
 ERROR:  invalid input syntax for integer: "abc"
 --success, drop subpartition customer5_channel3
 ALTER TABLE range_list_sales DROP SUBPARTITION FOR(1400, '7');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in customer6
 ALTER TABLE range_list_sales DROP SUBPARTITION FOR(2000, 'X');
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -544,8 +552,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "range_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default UNUSABLE
-    "range_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default UNUSABLE
+    "range_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By RANGE(customer_id) Subpartition By LIST(channel_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 9 (View pg_partition to check each subpartition range.)
@@ -698,8 +706,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "range_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "range_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By RANGE(customer_id) Subpartition By HASH(product_id)
 Number of partitions: 6 (View pg_partition to check each partition range.)
 Number of subpartitions: 13 (View pg_partition to check each subpartition range.)
@@ -709,6 +717,7 @@ Options: orientation=row, storage_type=ustore, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition customer2
 ALTER TABLE range_hash_sales DROP PARTITION customer2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, not support drop hash
 ALTER TABLE range_hash_sales DROP SUBPARTITION customer1_product1;
 ERROR:  Un-support feature
@@ -719,6 +728,7 @@ ERROR:  Un-support feature
 DETAIL:  The syntax is unsupported for hash subpartition
 --success, drop partition customer3
 ALTER TABLE range_hash_sales DROP PARTITION FOR (400);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE range_hash_sales DROP PARTITION FOR (400, '2010-01-01');
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -802,8 +812,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "range_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default UNUSABLE
-    "range_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default UNUSABLE
+    "range_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By RANGE(customer_id) Subpartition By HASH(product_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 10 (View pg_partition to check each subpartition range.)
@@ -961,8 +971,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "list_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "list_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "list_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "list_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By LIST(channel_id) Subpartition By RANGE(customer_id)
 Number of partitions: 6 (View pg_partition to check each partition range.)
 Number of subpartitions: 14 (View pg_partition to check each subpartition range.)
@@ -972,14 +982,17 @@ Options: orientation=row, storage_type=ustore, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition channel2
 ALTER TABLE list_range_sales DROP PARTITION channel2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success
 ALTER TABLE list_range_sales DROP SUBPARTITION channel1_customer1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition
 ALTER TABLE list_range_sales DROP SUBPARTITION channel4_customer1;
 ERROR:  Cannot drop the only subpartition of a partitioned table
 DETAIL:  N/A
 --success, drop partition channel3
 ALTER TABLE list_range_sales DROP PARTITION FOR ('6');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE list_range_sales DROP PARTITION FOR('X', 700);
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -995,6 +1008,7 @@ ALTER TABLE list_range_sales DROP SUBPARTITION FOR(700, 'X');
 ERROR:  value too long for type character(1)
 --success, drop subpartition channel5_customer3
 ALTER TABLE list_range_sales DROP SUBPARTITION FOR('X', 700);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in channel6
 ALTER TABLE list_range_sales DROP SUBPARTITION FOR('K', 100);
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -1074,8 +1088,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "list_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default UNUSABLE
-    "list_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "list_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default UNUSABLE
+    "list_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By LIST(channel_id) Subpartition By RANGE(customer_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 9 (View pg_partition to check each subpartition range.)
@@ -1233,8 +1247,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "list_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "list_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "list_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "list_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By LIST(channel_id) Subpartition By LIST(type_id)
 Number of partitions: 6 (View pg_partition to check each partition range.)
 Number of subpartitions: 14 (View pg_partition to check each subpartition range.)
@@ -1244,14 +1258,17 @@ Options: orientation=row, storage_type=ustore, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition channel2
 ALTER TABLE list_list_sales DROP PARTITION channel2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success
 ALTER TABLE list_list_sales DROP SUBPARTITION channel1_type1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition
 ALTER TABLE list_list_sales DROP SUBPARTITION channel4_type1;
 ERROR:  Cannot drop the only subpartition of a partitioned table
 DETAIL:  N/A
 --success, drop partition channel3
 ALTER TABLE list_list_sales DROP PARTITION FOR ('6');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE list_list_sales DROP PARTITION FOR('X', 6);
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -1267,6 +1284,7 @@ ALTER TABLE list_list_sales DROP SUBPARTITION FOR(10, 'X');
 ERROR:  value too long for type character(1)
 --success, drop subpartition channel5_type3
 ALTER TABLE list_list_sales DROP SUBPARTITION FOR('X', 6);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in channel6
 ALTER TABLE list_list_sales DROP SUBPARTITION FOR('K', 10);
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -1346,8 +1364,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "list_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default UNUSABLE
-    "list_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "list_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default UNUSABLE
+    "list_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By LIST(channel_id) Subpartition By LIST(type_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 9 (View pg_partition to check each subpartition range.)
@@ -1500,8 +1518,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "list_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "list_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "list_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "list_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By LIST(channel_id) Subpartition By HASH(product_id)
 Number of partitions: 6 (View pg_partition to check each partition range.)
 Number of subpartitions: 13 (View pg_partition to check each subpartition range.)
@@ -1511,6 +1529,7 @@ Options: orientation=row, storage_type=ustore, compression=no
 --check for drop partition/subpartition (for)
 --success, drop partition channel2
 ALTER TABLE list_hash_sales DROP PARTITION channel2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, not support drop hash
 ALTER TABLE list_hash_sales DROP SUBPARTITION channel1_product1;
 ERROR:  Un-support feature
@@ -1521,6 +1540,7 @@ ERROR:  Un-support feature
 DETAIL:  The syntax is unsupported for hash subpartition
 --success, drop partition channel3
 ALTER TABLE list_hash_sales DROP PARTITION FOR ('6');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, number not equal to the number of partkey
 ALTER TABLE list_hash_sales DROP PARTITION FOR ('6', '2010-01-01');
 ERROR:  number of boundary items NOT EQUAL to number of partition keys
@@ -1604,8 +1624,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "list_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default UNUSABLE
-    "list_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "list_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default UNUSABLE
+    "list_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By LIST(channel_id) Subpartition By HASH(product_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 10 (View pg_partition to check each subpartition range.)
@@ -1749,8 +1769,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "hash_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "hash_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "hash_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "hash_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By HASH(product_id) Subpartition By RANGE(customer_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 10 (View pg_partition to check each subpartition range.)
@@ -1763,8 +1783,10 @@ ALTER TABLE hash_range_sales DROP PARTITION product2;
 ERROR:  Droping hash partition is unsupported.
 --success, drop subpartition product1_customer1
 ALTER TABLE hash_range_sales DROP SUBPARTITION product1_customer1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success, drop subpartition product4_customer1
 ALTER TABLE hash_range_sales DROP SUBPARTITION product4_customer1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in product4
 ALTER TABLE hash_range_sales DROP SUBPARTITION product4_customer2;
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -1784,6 +1806,7 @@ ALTER TABLE hash_range_sales DROP SUBPARTITION FOR('2010-01-01', 100);
 ERROR:  invalid input syntax for integer: "2010-01-01"
 --success, drop subpartition product1_customer2, but not suggest to do this operation
 ALTER TABLE hash_range_sales DROP SUBPARTITION FOR(0, 100);
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, no subpartition find
 ALTER TABLE hash_range_sales DROP SUBPARTITION FOR(0, 2300);
 ERROR:  The subpartition number is invalid or out-of-range
@@ -1855,8 +1878,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "hash_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default UNUSABLE
-    "hash_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "hash_range_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default UNUSABLE
+    "hash_range_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By HASH(product_id) Subpartition By RANGE(customer_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 7 (View pg_partition to check each subpartition range.)
@@ -2003,8 +2026,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "hash_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "hash_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "hash_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "hash_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By HASH(product_id) Subpartition By LIST(channel_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 10 (View pg_partition to check each subpartition range.)
@@ -2017,8 +2040,10 @@ ALTER TABLE hash_list_sales DROP PARTITION product2;
 ERROR:  Droping hash partition is unsupported.
 --success, drop subpartition product1_channel1
 ALTER TABLE hash_list_sales DROP SUBPARTITION product1_channel1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --success, drop subpartition product4_channel1
 ALTER TABLE hash_list_sales DROP SUBPARTITION product4_channel1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, the only subpartition in product4
 ALTER TABLE hash_list_sales DROP SUBPARTITION product4_channel2;
 ERROR:  Cannot drop the only subpartition of a partitioned table
@@ -2038,6 +2063,7 @@ ALTER TABLE hash_list_sales DROP SUBPARTITION FOR('2010-01-01', '4');
 ERROR:  invalid input syntax for integer: "2010-01-01"
 --success, drop subpartition product1_channel2, but not suggest to do this operation
 ALTER TABLE hash_list_sales DROP SUBPARTITION FOR(0, '4');
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 --fail, no subpartition find
 ALTER TABLE hash_list_sales DROP SUBPARTITION FOR(0, 'Z');
 ERROR:  The subpartition number is invalid or out-of-range
@@ -2109,8 +2135,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "hash_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default UNUSABLE
-    "hash_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "hash_list_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default UNUSABLE
+    "hash_list_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By HASH(product_id) Subpartition By LIST(channel_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 7 (View pg_partition to check each subpartition range.)
@@ -2245,8 +2271,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "hash_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "hash_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "hash_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "hash_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By HASH(product_id) Subpartition By HASH(customer_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 8 (View pg_partition to check each subpartition range.)
@@ -2348,8 +2374,8 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  quantity_sold | numeric(3,0)                   |           | main     |              | 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
-    "hash_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=USTORE) TABLESPACE pg_default
-    "hash_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "hash_hash_sales_pkey" PRIMARY KEY, ubtree (customer_id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "hash_hash_sales_idx" ubtree (product_id) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By HASH(product_id) Subpartition By HASH(customer_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Number of subpartitions: 8 (View pg_partition to check each subpartition range.)

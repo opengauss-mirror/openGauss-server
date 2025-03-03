@@ -36,7 +36,7 @@ alter table range_range alter column sales_amt set data type varchar;
  user_no    | character(30)         |           | extended |              | 
  sales_amt  | character varying     |           | extended |              | 
 Indexes:
-    "range_range_pkey" PRIMARY KEY, ubtree (month_code, dept_code) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_range_pkey" PRIMARY KEY, ubtree (month_code, dept_code) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
 Partition By RANGE(month_code) Subpartition By RANGE(dept_code)
 Number of partitions: 2 (View pg_partition to check each partition range.)
 Number of subpartitions: 4 (View pg_partition to check each subpartition range.)
@@ -88,11 +88,12 @@ ALTER TABLE range_range EXCHANGE PARTITION (p_201901) WITH TABLE ori;
 ERROR:  Un-support feature
 DETAIL:  For subpartition table, exchange partition is not yet supported.
 ALTER TABLE range_range EXCHANGE SUBPARTITION (p_201901) WITH TABLE ori;
-ERROR:  syntax error at or near "SUBPARTITION ("
+ERROR:  syntax error at or near "SUBPARTITION"
 LINE 1: ALTER TABLE range_range EXCHANGE SUBPARTITION (p_201901) WIT...
                                          ^
 -- drop
 alter table range_range drop partition p_201901;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 alter table range_range drop partition p_201901_a;
 ERROR:  partition "p_201901_a" does not exist
 alter table range_range drop subpartition p_201901_a;

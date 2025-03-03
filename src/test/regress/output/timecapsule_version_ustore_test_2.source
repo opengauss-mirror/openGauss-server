@@ -505,7 +505,7 @@ end;
 call pro_fb_tbl_invalid_3();
 ERROR:  The table definition of "fb_tbl_invalid_3" has been changed.
 --?CONTEXT:  SQL statement "timecapsule table fb_tbl_invalid_3 to timestamp to_timestamp.*
-PL/pgSQL function pro_fb_tbl_invalid_3() line 5 at EXECUTE statement
+PL/pgSQL function pro_fb_tbl_invalid_3() line 4 at EXECUTE statement
 drop table temp;
 drop table fb_tbl_invalid_3;
 --timecapsule normal table
