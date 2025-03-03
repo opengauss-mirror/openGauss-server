@@ -236,7 +236,7 @@ static void InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
         if (byResidual) {
             float *resVec = (float *)palloc(dim * sizeof(float));
             Buffer cbuf = ReadBuffer(index, listInfo.blkno);
-            LockBuffer(buf, BUFFER_LOCK_SHARE);
+            LockBuffer(cbuf, BUFFER_LOCK_SHARE);
             Page cpage = BufferGetPage(cbuf);
             IvfflatList list = (IvfflatList)PageGetItem(cpage, PageGetItemId(cpage, listInfo.offno));
 
@@ -245,12 +245,12 @@ static void InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
             }
             vec = resVec;
             UnlockReleaseBuffer(cbuf);
-            IvfComputeVectorPQCode(vec, &params, pqcode);
-            ((PageHeader)page)->pd_upper -= MAXALIGN(pqcodeSize);
-                errno_t rc = memcpy_s(
-                    ((char *)page) + ((PageHeader)page)->pd_upper, pqcodeSize, (char *)pqcode, pqcodeSize);
-                securec_check_c(rc, "\0", "\0");
         }
+        IvfComputeVectorPQCode(vec, &params, pqcode);
+        ((PageHeader)page)->pd_upper -= MAXALIGN(pqcodeSize);
+        errno_t rc = memcpy_s(
+            ((char *)page) + ((PageHeader)page)->pd_upper, pqcodeSize, (char *)pqcode, pqcodeSize);
+        securec_check_c(rc, "\0", "\0");
     }
 
     /* Add to next offset */
