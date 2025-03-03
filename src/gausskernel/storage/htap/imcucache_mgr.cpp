@@ -225,6 +225,7 @@ void IMCUDataCacheMgr::NewSingletonInstance(void)
 
     m_data_cache->m_xlog_latest_lsn = InvalidXLogRecPtr;
     m_data_cache->m_imcs_lock = LWLockAssign(LWTRANCHE_IMCS_HASH_LOCK);
+    m_data_cache->m_is_promote = false;
     MemoryContextSwitchTo(oldcontext);
 }
 
@@ -538,7 +539,7 @@ bool IMCUDataCacheMgr::HasInitialImcsTable()
     return false;
 }
 
-void IMCUDataCacheMgr::ResetInstance()
+void IMCUDataCacheMgr::ResetInstance(bool isPromote)
 {
     ereport(WARNING, (errmsg("IMCStore data cache manager reset.")));
     if (g_instance.attr.attr_memory.enable_borrow_memory) {
@@ -550,6 +551,7 @@ void IMCUDataCacheMgr::ResetInstance()
         m_data_cache->m_cache_mgr->FreeImcstoreCache();
     }
 
+    m_data_cache->m_is_promote = isPromote;
     CreateIMCUDirAndClearCUFiles();
     ereport(WARNING, (errmsg("IMCStore data cache manager reset successfully.")));
 }
