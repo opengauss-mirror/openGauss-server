@@ -92,6 +92,7 @@ struct IMCStoreVacuumTarget {
 
 struct knl_g_imcstore_context;
 
+extern void ClearImcstoreCacheIfNeed(Oid droppingDBOid);
 extern void InitIMCStoreVacuumQueue(knl_g_imcstore_context* context);
 extern bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId);
 extern void IMCStoreVacuumWorkerMain(void);
