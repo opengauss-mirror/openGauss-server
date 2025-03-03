@@ -449,5 +449,31 @@ select * from my_materialized_view;
 drop table my_table;
 drop MATERIALIZED VIEW my_materialized_view;
 
+CREATE TABLE students (
+    student_id SERIAL PRIMARY KEY,
+    student_name VARCHAR(50) NOT NULL,
+    age INTEGER,
+    gender VARCHAR(10),
+    city VARCHAR(50)
+);
+
+INSERT INTO students (student_name, age, gender, city) VALUES
+    ('Alice', 25, 'Female', 'New York'),
+    ('Bob', 30, 'Male', 'Los Angeles'),
+    ('Charlie', 28, 'Male', 'Chicago'),
+    ('Diana', 27, 'Female', 'Houston');
+
+CREATE VIEW view_students_city AS
+SELECT student_name, city
+FROM students;
+
+CREATE VIEW view_sorted_students_city AS
+SELECT student_name, city
+FROM view_students_city
+ORDER BY city;
+
+drop view view_students_city,view_sorted_students_city;
+drop table students;
+
 drop schema test_view_table_depend cascade;
 reset current_schema;
