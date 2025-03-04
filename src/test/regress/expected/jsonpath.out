@@ -349,9 +349,9 @@ SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family', 
 (3 rows)
 
 SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family', '25, 5');
-                                          family_doc                                           
------------------------------------------------------------------------------------------------
- {"family" : {"id":10, "ages":[40,38,12], "address" : {"street" : "10 Main Street"}}}
+                                             family_doc                                              
+-----------------------------------------------------------------------------------------------------
+ {"family" : {"id":11, "ages":[42,40,10,5], "address" : {"street" : "200 East Street", "apt" : 20}}}
  {"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}
 (2 rows)
 
@@ -425,6 +425,26 @@ EXECUTE stmt2('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "30
             , NULL, 'data');
 ERROR:  the json path expression is not of text type
 CONTEXT:  referenced column: json_textcontains
+drop table families;
+CREATE TABLE families (family_doc CLOB);
+INSERT INTO families VALUES ('{"ages":[11,40,10]}');
+INSERT INTO families VALUES ('{"ages":[12,38,10]}');
+INSERT INTO families VALUES ('{"ages":[40,38,10]}');
+INSERT INTO families VALUES ('{"ages":[40,48,10]}');
+SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.ages', '12,40');
+     family_doc      
+---------------------
+ {"ages":[11,40,10]}
+ {"ages":[12,38,10]}
+ {"ages":[40,38,10]}
+ {"ages":[40,48,10]}
+(4 rows)
+
+SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.ages', '0');
+ family_doc 
+------------
+(0 rows)
+
 SELECT JSON_TEXTCONTAINS('This is not well-formed JSON data', '$.family', 'data');
  json_textcontains 
 -------------------
