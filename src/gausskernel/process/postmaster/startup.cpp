@@ -158,7 +158,7 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
         WakeupRecovery();
 #ifdef ENABLE_HTAP
         if (!IMCU_CACHE->HasInitialImcsTable()) {
-            IMCUDataCacheMgr::ResetInstance();
+            IMCUDataCacheMgr::ResetInstance(true);
         }
 #endif
     } else if (CheckNotifySignal(NOTIFY_SWITCHOVER)) {
@@ -169,7 +169,7 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
         WakeupRecovery();
 #ifdef ENABLE_HTAP
         if (!IMCU_CACHE->HasInitialImcsTable()) {
-            IMCUDataCacheMgr::ResetInstance();
+            IMCUDataCacheMgr::ResetInstance(true);
         }
 #endif
     }

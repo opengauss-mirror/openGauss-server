@@ -22453,7 +22453,7 @@ static void ATExecUNIMCSTORED(Relation rel)
     Oid relOid = RelationGetRelid(rel);
 
     CheckImcstoreCacheReady();
-    if (!RelHasImcs(relOid)) {
+    if (!RelHasImcs(relOid) && !IMCU_CACHE->m_is_promote) {
         ereport(ERROR, (errmsg("rel not populated, no need to be unpopulate.")));
     }
 
@@ -22526,7 +22526,7 @@ static void ATExecModifyPartitionUNIMCSTORED(Relation rel, const char* partName)
 
     CheckImcstoreCacheReady();
     partOid = ImcsPartNameGetPartOid(relOid, partName);
-    if (!RelHasImcs(relOid) || !RelHasImcs(partOid)) {
+    if ((!RelHasImcs(relOid) || !RelHasImcs(partOid)) && !IMCU_CACHE->m_is_promote) {
         ereport(ERROR, (errmsg("partition %d of rel %d not populated", partOid, relOid)));
     }
 

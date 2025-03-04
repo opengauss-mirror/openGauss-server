@@ -80,7 +80,7 @@ class IMCUDataCacheMgr : public DataCacheMgr {
 public: // static
     static IMCUDataCacheMgr* GetInstance(void);
     static void NewSingletonInstance(void);
-    static void ResetInstance();
+    static void ResetInstance(bool isPromote = false);
     static void BaseCacheCU(CU* srcCU, CU* slotCU);
     static void CacheCU(CU* srcCU, CU* slotCU);
     static bool CacheBorrowMemCU(CU* srcCU, CU* slotCU, CUDesc* cuDescPtr);
@@ -109,6 +109,7 @@ public:
     LWLock *m_imcs_lock;
     MemoryContext m_imcs_context;
     XLogRecPtr m_xlog_latest_lsn;
+    bool m_is_promote;
 
 #ifndef ENABLE_UT
 private:
