@@ -2013,9 +2013,7 @@ void IMCSDesc::DropRowGroups(RelFileNode* relNode)
         if (rowGroups[i] == NULL) {
             continue;
         }
-        if (rowGroups[i]->m_actived) {
-            rowGroups[i]->DropCUDescs(relNode, imcsNatts);
-        }
+        rowGroups[i]->DropCUDescs(relNode, imcsNatts);
         delete rowGroups[i];
         rowGroups[i] = NULL;
     }
