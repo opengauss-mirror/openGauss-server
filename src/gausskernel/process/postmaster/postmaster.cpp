@@ -4403,7 +4403,8 @@ static int ServerLoop(void)
         /* If we have lost the archiver, try to start a new one */
         if (!dummyStandbyMode) {
             if (g_instance.pid_cxt.PgArchPID == 0 && pmState == PM_RUN && XLogArchivingActive() &&
-                (XLogArchiveCommandSet() || XLogArchiveDestSet())) {
+                (XLogArchiveCommandSet() || XLogArchiveDestSet()) &&
+                (!ENABLE_DSS || (pg_atomic_read_u32(&WorkingGrandVersionNum) >= SS_ARCHIVE_VERSION_NUM))) {
                 g_instance.pid_cxt.PgArchPID = pgarch_start();
             } else if (g_instance.archive_thread_info.obsArchPID != NULL &&
                 (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
