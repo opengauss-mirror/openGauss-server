@@ -113,6 +113,12 @@ SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family', 
 SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family.id', 'Oak Street');
 SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family', 'ak street');
 
+drop table if exists json_data1;
+CREATE TABLE json_data1(json_col CLOB);  
+INSERT INTO json_data1 VALUES ('{"name":"web"}');
+select * from json_data1 where json_textcontains(json_col,'$.site','nothing');
+drop table json_data1;
+
 PREPARE stmt2 AS SELECT JSON_TEXTCONTAINS($1, $2, $3);
 EXECUTE stmt2(NULL, '$.family', 'data');
 EXECUTE stmt2('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}'

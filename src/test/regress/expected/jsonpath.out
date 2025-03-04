@@ -413,6 +413,16 @@ SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family', 
 ------------
 (0 rows)
 
+drop table if exists json_data1;
+NOTICE:  table "json_data1" does not exist, skipping
+CREATE TABLE json_data1(json_col CLOB);  
+INSERT INTO json_data1 VALUES ('{"name":"web"}');
+select * from json_data1 where json_textcontains(json_col,'$.site','nothing');
+ json_col 
+----------
+(0 rows)
+
+drop table json_data1;
 PREPARE stmt2 AS SELECT JSON_TEXTCONTAINS($1, $2, $3);
 EXECUTE stmt2(NULL, '$.family', 'data');
  json_textcontains 

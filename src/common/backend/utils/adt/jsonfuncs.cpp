@@ -3740,7 +3740,7 @@ static void CollectValsFromJson(text* json, JsonStringArray* vals)
 
 static void JsonTextContainsWalker(text* json, JsonTextContainsContext* context)
 {
-    if (context->result)
+    if (context->result || json == NULL)
         return;
 
     MemoryContext tmp_cxt = AllocSetContextCreate(CurrentMemoryContext,
