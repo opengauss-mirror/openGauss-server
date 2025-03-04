@@ -1,4 +1,4 @@
-FROM openeuler-20.03-lts:latest
+FROM openeuler/openeuler:20.03-lts
 
 ARG VERSION=7.0.0-RC1
 
