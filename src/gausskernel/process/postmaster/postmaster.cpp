@@ -10995,13 +10995,13 @@ void startup_die(SIGNAL_ARGS)
      * gs_wait_poll will hold lock, so proc_exit here
      * will occur dead lock. gs_r_cancel will signal gs_wait_poll
      * without lock and then proc_exit when
-     * ProcessStartupPacketForLogicConn is false
+     * ProcessStartupPacketForLogicConn is true
      */
     if (t_thrd.postmaster_cxt.ProcessStartupPacketForLogicConn) {
         t_thrd.int_cxt.ProcDiePending = true;
         gs_r_cancel();
     } else {
-        t_thrd.int_cxt.ProcDiePending = true;
+        proc_exit(1);
     }
 }
 
