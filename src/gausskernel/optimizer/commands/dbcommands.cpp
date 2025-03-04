@@ -81,6 +81,10 @@
 #include "utils/syscache.h"
 #include "access/heapam.h"
 #include "utils/timestamp.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_delta.h"
+#endif
+
 #ifdef PGXC
 #include "pgxc/execRemote.h"
 #include "pgxc/pgxc.h"
@@ -1146,7 +1150,9 @@ void dropdb(const char* dbname, bool missing_ok)
     
 #ifdef ENABLE_HTAP
     if (!ENABLE_DSS && g_instance.pid_cxt.IMCStoreVacuumPID != 0) {
-        ereport(WARNING, (errmsg("Drop db with imcstore tables, all imcstore data will be cleared.")));
+        if (HAVE_HTAP_TABLES) {
+            ereport(WARNING, (errmsg("Drop db with imcstore tables, all imcstore data will be cleared.")));
+        }
         gs_signal_send(g_instance.pid_cxt.IMCStoreVacuumPID, SIGUSR2);
     }
 #endif
@@ -2526,7 +2532,9 @@ void xlog_db_drop(XLogRecPtr lsn, Oid dbId, Oid tbSpcId)
     UpdateMinRecoveryPoint(lsn, false);
 #ifdef ENABLE_HTAP
     if (!ENABLE_DSS && g_instance.imcstore_cxt.dboid != InvalidOid && g_instance.imcstore_cxt.dboid == dbId) {
-        ereport(WARNING, (errmsg("Drop database with imcstore tables, all imcs cache will be cleared.")));
+        if (HAVE_HTAP_TABLES) {
+            ereport(WARNING, (errmsg("Drop db with imcstore tables, all imcstore data will be cleared.")));
+        }
         if (g_instance.pid_cxt.IMCStoreVacuumPID != 0) {
             gs_signal_send(g_instance.pid_cxt.IMCStoreVacuumPID, SIGUSR2);
         }
