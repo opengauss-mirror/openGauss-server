@@ -226,13 +226,13 @@ static void NvmWaitBufferIO(BufferDesc *buf)
     bool ioDone = false;
 restart:
     for (;;) {
-        (void)LWLockAcquire(buf->io_in_progress_lock, LW_EXCLUSIVE);
+        (void)LWLockAcquire(BufferDescriptorGetIOLock(buf), LW_EXCLUSIVE);
 
         buf_state = LockBufHdr(buf);
         if (buf_state & BM_IO_IN_PROGRESS) {
             ioDone = true;
             UnlockBufHdr(buf, buf_state);
-            LWLockRelease(buf->io_in_progress_lock);
+            LWLockRelease(BufferDescriptorGetIOLock(buf));
             WaitIO(buf);
         } else {
             break;
@@ -241,12 +241,12 @@ restart:
     if (buf_state & BM_VALID) {
         /* someone else already did the I/O */
         UnlockBufHdr(buf, buf_state);
-        LWLockRelease(buf->io_in_progress_lock);
+        LWLockRelease(BufferDescriptorGetIOLock(buf));
         return;
     } else {
         if (!ioDone) {
             UnlockBufHdr(buf, buf_state);
-            LWLockRelease(buf->io_in_progress_lock);
+            LWLockRelease(BufferDescriptorGetIOLock(buf));
             goto restart;
         } else {
             ereport(PANIC, (errmsg("ioDone is true but buf_state is not valid ")));
@@ -570,9 +570,9 @@ restart:
              */
             bool needDoFlush = false;
             if (!needGetLock) {
-                needDoFlush = LWLockConditionalAcquire(buf->content_lock, LW_SHARED);
+                needDoFlush = LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf), LW_SHARED);
             } else {
-                LWLockAcquire(buf->content_lock, LW_SHARED);
+                LWLockAcquire(BufferDescriptorGetContentLock(buf), LW_SHARED);
                 needDoFlush = true;
             }
             if (needDoFlush) {
@@ -593,7 +593,7 @@ restart:
 
                     if (XLogNeedsFlush(lsn) && StrategyRejectBuffer(strategy, buf)) {
                         /* Drop lock/pin and loop around for another buffer */
-                        LWLockRelease(buf->content_lock);
+                        LWLockRelease(BufferDescriptorGetContentLock(buf));
                         UnpinBuffer(buf, true);
                         continue;
                     }
@@ -602,7 +602,7 @@ restart:
                 /* during initdb, not need flush dw file */
                 if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
                     if (!free_space_enough(buf->buf_id)) {
-                        LWLockRelease(buf->content_lock);
+                        LWLockRelease(BufferDescriptorGetContentLock(buf));
                         UnpinBuffer(buf, true);
                         continue;
                     }
@@ -615,7 +615,7 @@ restart:
                 } else {
                     FlushBuffer(buf, NULL);
                 }
-                LWLockRelease(buf->content_lock);
+                LWLockRelease(BufferDescriptorGetContentLock(buf));
 
                 ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
             } else {

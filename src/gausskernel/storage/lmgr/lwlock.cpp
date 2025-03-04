@@ -395,9 +395,6 @@ int NumLWLocks(void)
     /* Predefined LWLocks */
     numLocks = (int)NumFixedLWLocks;
 
-    /* bufmgr.c needs two for each shared buffer */
-    numLocks += 2 * TOTAL_BUFFER_NUM;
-
     if (ENABLE_DMS) {
         numLocks += TOTAL_BUFFER_NUM; // dms_buf_ctrl_t lock
     }
@@ -554,6 +551,10 @@ void CreateLWLocks(void)
     char *ptr = NULL;
 
     StaticAssertExpr(LW_VAL_EXCLUSIVE > (uint32)MAX_BACKENDS, "MAX_BACKENDS too big for lwlock.cpp");
+
+    StaticAssertExpr(sizeof(LWLock) <= LWLOCK_MINIMAL_SIZE &&
+                     sizeof(LWLock) <= LWLOCK_PADDED_SIZE,
+                     "Miscalculated LWLock padding");
     /* Allocate space */
     ptr = (char *)ShmemAlloc(spaceLocks);
 
