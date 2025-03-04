@@ -2594,9 +2594,28 @@ int CStore::FillVector(_in_ int seq, _in_ CUDesc* cuDescPtr, _out_ ScalarVector*
     // step 4: Get CU data. Add a 'this' pointer to help sourceinsight understands
     // this is a member function reference.
     int slotId = CACHE_BLOCK_INVALID_IDX;
+    CU* cuPtr = NULL;
+
+#ifdef ENABLE_HTAP
+    PG_TRY();
+    {
+        CSTORESCAN_TRACE_START(GET_CU_DATA);
+        cuPtr = this->GetCUData(cuDescPtr, colIdx, attlen, slotId);
+        CSTORESCAN_TRACE_END(GET_CU_DATA);
+    }
+    PG_CATCH();
+    {
+        if (IsValidCacheSlotID(slotId)) {
+            UnPinCUDataBlock(slotId);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+#else
     CSTORESCAN_TRACE_START(GET_CU_DATA);
-    CU* cuPtr = this->GetCUData(cuDescPtr, colIdx, attlen, slotId);
+    cuPtr = this->GetCUData(cuDescPtr, colIdx, attlen, slotId);
     CSTORESCAN_TRACE_END(GET_CU_DATA);
+#endif
 
     // step 5: CUToVector
     pos = cuPtr->ToVector<attlen, hasDeadRow>(
