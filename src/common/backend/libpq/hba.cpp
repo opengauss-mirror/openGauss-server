@@ -2153,6 +2153,7 @@ bool is_node_internal_connection(hbaPort* port)
     const SockAddr local_addr = port->laddr;
     char remote_host[NI_MAXHOST] = {0};
     char local_host[NI_MAXHOST] = {0};
+    int ret = -1;
 
     remote_host[0] = '\0';
     local_host[0] = '\0';
@@ -2186,6 +2187,15 @@ bool is_node_internal_connection(hbaPort* port)
         if (replconninfo && *replconninfo != '\0' && (strcasestr(replconninfo, remote_host) != NULL ||
             strcasestr(replconninfo, port->remote_host) != NULL)) {
             ereport(DEBUG2, (errmsg("remote host is:%s in replconninfo %s", remote_host, replconninfo)));
+            return true;
+        }
+
+        /* Parse it into a domain name for comparison. */
+        char resolvname[NI_MAXHOST] = {0};
+        struct sockaddr* raddr = (struct sockaddr*)&(port->raddr.addr);
+        ret = resolveHostIp2Name(raddr->sa_family, remote_host, resolvname);
+        if (ret == 0 && replconninfo && *replconninfo != '\0' && (strcasestr(replconninfo, resolvname) != NULL)) {
+            ereport(DEBUG2, (errmsg("remote host resolve is:%s in replconninfo %s", remote_host, replconninfo)));
             return true;
         }
     }

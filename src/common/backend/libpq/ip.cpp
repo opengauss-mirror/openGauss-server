@@ -60,6 +60,69 @@ static int getnameinfo_unix(const struct sockaddr_un* sa, int salen, char* node,
     int servicelen, unsigned int flags);
 #endif
 
+int resolveHostname2Ip(int netType, char* hostname, char* ip)
+{
+#define IP_LEN 64
+
+    struct addrinfo *gaiResult = NULL, *gai = NULL;
+    int ret = -1;
+    ret = getaddrinfo(hostname, NULL, NULL, &gaiResult);
+    if (ret != 0) {
+        return ret;
+    }
+
+    for (gai = gaiResult; gai; gai = gai->ai_next) {
+        if (gai->ai_addr->sa_family == netType) {
+            if (gai->ai_addr->sa_family == AF_INET) {
+                struct sockaddr_in *h = (struct sockaddr_in *)gai->ai_addr;
+                ret = strcpy_s(ip, IP_LEN, inet_ntoa(h->sin_addr));
+                SECUREC_CHECK(ret);
+                break;
+            }
+#ifdef HAVE_IPV6
+            else if (gai->ai_addr->sa_family == AF_INET6) {
+                void *addr;
+                struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)gai->ai_addr;
+                addr = &(ipv6->sin6_addr);
+                inet_ntop(gai->ai_family, addr, ip, IP_LEN);
+                break;
+            }  
+#endif
+        }
+    }
+    if (gaiResult != NULL) {
+        freeaddrinfo(gaiResult);
+    }
+    
+    return ret;
+}
+
+int resolveHostIp2Name(int netType, char* ip, char* hostname)
+{
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    struct sockaddr_in6 addr6;
+    addr6.sin6_family = AF_INET6;
+    int ret = -1;
+
+    if (netType == AF_INET) {
+        if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) {
+            return ret;
+        }
+        ret = getnameinfo((struct sockaddr *)&addr, sizeof(struct sockaddr_in), hostname, NI_MAXHOST, NULL, 0, NI_NAMEREQD);
+    } 
+#ifdef HAVE_IPV6
+    else {
+        if (inet_pton(AF_INET6, ip, &addr6.sin6_addr) != 1) {
+            return ret;
+        }
+        ret = getnameinfo((struct sockaddr *)&addr6, sizeof(struct sockaddr_in6), hostname, NI_MAXHOST, NULL, 0, NI_NAMEREQD);
+    }
+#endif
+
+    return ret;
+}
+
 /*
  *	pg_getaddrinfo_all - get address info for Unix, IPv4 and IPv6 sockets
  */
