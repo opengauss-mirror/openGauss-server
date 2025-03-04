@@ -2080,6 +2080,18 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     }
 }
 
+static void DisasterUpdateConfig()
+{
+    if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING || g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
+        if (SS_STANDBY_FAILOVER || SS_STANDBY_PROMOTING) {
+            g_instance.dms_cxt.SSReformInfo.needSyncConfig = true;
+        }
+        if (gs_signal_send(PostmasterPid, SIGHUP) != 0) {
+            ereport(WARNING, (errmsg("[SS Reform]send SIGHUP to PM failed while reforming")));
+        }
+    }
+}
+
 static int CBReformDoneNotify(void *db_handle)
 {
     if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
@@ -2092,6 +2104,7 @@ static int CBReformDoneNotify(void *db_handle)
 
     if (SS_DISASTER_CLUSTER) {
         SSDisasterUpdateHAmode();
+        DisasterUpdateConfig();
     }
    
     /* SSClusterState and in_reform must be set atomically */
