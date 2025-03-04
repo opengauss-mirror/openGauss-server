@@ -164,6 +164,7 @@ create incremental materialized view v2 as select c1 from mview_log_t1;
 insert into mview_log_t1 values(1,'1');
 drop materialized view log on mview_log_t1;  -- 自动创建的物化视图日志也可手动删除
 refresh incremental materialized view v1; -- 缺少物化视图日志，增量刷新报错
+refresh materialized view v1;             -- 缺少物化视图日志，全量刷新成功，不会自动创建物化视图日志。
 create materialized view log on mview_log_t1;
 create materialized view log on mview_log_t1; -- 物化视图日志重复，创建报错。
 drop materialized view log on mview_log_t1;

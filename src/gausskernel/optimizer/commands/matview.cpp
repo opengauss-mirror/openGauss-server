@@ -100,6 +100,7 @@ static void transientrel_destroy(DestReceiver *self);
 static void refresh_matview_datafill(DestReceiver *dest, Query *query,
                                     const char *queryString);
 static Oid find_mlog_table(Oid relid);
+static Oid find_mlog_table_or_create(Oid relid);
 static void update_mlog_time(Relation mlog, HeapTuple tuple, Datum curtime, CatalogIndexState indstate);
 static void check_simple_query(Query *query, List **distkeyList, List **rangeTables, Oid *groupid);
 static void check_union_all(Query *query, List **distkeyList, List **rangeTables, Oid *groupid);
@@ -1957,7 +1958,7 @@ static Oid create_mlog_table(Oid relid)
 
 static Oid find_mlog_table(Oid relid)
 {
-    Oid mlogid;
+    Oid mlogid = InvalidOid;
     HeapTuple tup;
     TableScanDesc scan;
     Relation matview_log;
@@ -1977,19 +1978,20 @@ static Oid find_mlog_table(Oid relid)
         tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
 
-    if (tup != NULL && HeapTupleIsValid(tup)) {
-        tableam_scan_end(scan);
-        heap_close(matview_log, NoLock);
-        return mlogid;
-    }
-
     tableam_scan_end(scan);
     heap_close(matview_log, NoLock);
 
-    /* if not found, create mlog-table. */
-    mlogid = create_mlog_table(relid);
+    return mlogid;
+}
 
-    checkTimeChangeForMlog(mlogid, relid);
+static Oid find_mlog_table_or_create(Oid relid)
+{
+    Oid mlogid = find_mlog_table(relid);
+    /* if not found, create mlog-table. */
+    if (!OidIsValid(mlogid)) {
+        mlogid = create_mlog_table(relid);
+        checkTimeChangeForMlog(mlogid, relid);
+    }
 
     return mlogid;
 }
@@ -2016,7 +2018,7 @@ void build_matview_dependency(Oid matviewOid, Relation matviewRelation)
     foreach (lc, relids) {
         Oid relid = (Oid)lfirst_oid(lc);
 
-        Oid mlogid = find_mlog_table(relid);
+        Oid mlogid = find_mlog_table_or_create(relid);
 
         insert_matviewdep_tuple(matviewOid, relid, mlogid);
     }
@@ -2837,7 +2839,7 @@ void create_matview_meta(Query *query, RangeVar *rel, bool incremental)
         List *relids = pull_up_rels_recursive((Node *)query);
         foreach(lc, relids) {
             Oid relid = (Oid)lfirst_oid(lc);
-            Oid mlogid = find_mlog_table(relid);
+            Oid mlogid = find_mlog_table_or_create(relid);
             insert_matviewdep_tuple(matviewid, relid, mlogid);
         }
     }
