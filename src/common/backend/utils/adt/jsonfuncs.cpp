@@ -3677,7 +3677,7 @@ static void SplitString(char* str, char delim, int strlen, JsonStringArray* resu
 
     while (*rptr != '\0' && strlen != 0) {
         if (*rptr == delim || strlen == 1) {
-            if (rptr != lptr) {
+            if (rptr != lptr || strlen == 1) {
                 ExpandJsonStringArray(results);
                 int len = (*rptr == delim) ? (rptr - lptr + 1) : (rptr - lptr + 2);
                 char* res = (char*)palloc(len * sizeof(char));
@@ -3800,7 +3800,7 @@ Datum json_textcontains(PG_FUNCTION_ARGS)
     const char* pathStr = text_to_cstring(PG_GETARG_TEXT_P(1));
     int len = strlen(pathStr);
     JsonPathItem* path = ParseJsonPath(pathStr, len);
-    char* target = PG_GETARG_CSTRING(2);
+    char* raw = PG_GETARG_CSTRING(2);
     char* tok;
 
     JsonTextContainsContext context;
@@ -3809,11 +3809,13 @@ Datum json_textcontains(PG_FUNCTION_ARGS)
     if (!IsJsonText(json))
         PG_RETURN_BOOL(context.result);
 
+    char* target = pstrdup(raw);
     tok = strtok(target, ",");
     while (!(context.result) && tok != NULL) {
         context.target = tok;
         JsonPathWalker(path, json, json, (void (*)(text*, void*))JsonTextContainsWalker, (void*)(&context));
         tok = strtok(NULL, ",");
     }
+    pfree(target);
     PG_RETURN_BOOL(context.result);
 }

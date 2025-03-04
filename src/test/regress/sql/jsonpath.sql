@@ -128,6 +128,17 @@ EXECUTE stmt2('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "30
 EXECUTE stmt2('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}'
             , NULL, 'data');
 
+drop table families;
+CREATE TABLE families (family_doc CLOB);
+INSERT INTO families VALUES ('{"ages":[11,40,10]}');
+INSERT INTO families VALUES ('{"ages":[12,38,10]}');
+INSERT INTO families VALUES ('{"ages":[40,38,10]}');
+INSERT INTO families VALUES ('{"ages":[40,48,10]}');
+
+SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.ages', '12,40');
+SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.ages', '0');
+
+
 SELECT JSON_TEXTCONTAINS('This is not well-formed JSON data', '$.family', 'data');
 SELECT JSON_TEXTCONTAINS(NULL, '$.family', 'data');
 SELECT JSON_TEXTCONTAINS('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}'
