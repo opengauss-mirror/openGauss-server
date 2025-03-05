@@ -443,6 +443,10 @@ void IMCStoreVacuumWorkerMain(void)
 #ifndef EXEC_BACKEND
     InitProcess();
 #endif
+    MemoryContext thread_context = AllocSetContextCreate(t_thrd.top_mem_cxt, "imcstore vacuum thread",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+
+    (void)MemoryContextSwitchTo(thread_context);
 
     /*
      * If an exception is encountered, processing resumes here.
@@ -461,6 +465,14 @@ void IMCStoreVacuumWorkerMain(void)
 
         /* release resource held by lsc */
         AtEOXact_SysDBCache(false);
+
+        (void)MemoryContextSwitchTo(thread_context);
+        FlushErrorState();
+
+        /* Flush any leaked data in the top-level context */
+        MemoryContextResetAndDeleteChildren(thread_context);
+
+        RESUME_INTERRUPTS();
 
         /*
          * We can now go away. Note that because we called InitProcess, a
@@ -605,6 +617,7 @@ void IMCStoreVacuumWorkerMain(void)
     if (t_thrd.imcstore_vacuum_cxt.got_SIGUSR2) {
         CleanAllCacheCU();
     }
+    MemoryContextDelete(thread_context);
 
     elog(LOG, "imcstore vacuum thread is shutting down.");
 }
