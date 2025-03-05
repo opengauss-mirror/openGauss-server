@@ -13282,6 +13282,7 @@ DefineStmt:
 				}
 		;
 type_body_subprogram: method_decl_in_type_list  ';' END_P ';'
+				| method_decl_in_type_list  ';' END_P END_OF_INPUT_COLON
 				{ $$ = $1;};
 
 Method_specList: element_spec

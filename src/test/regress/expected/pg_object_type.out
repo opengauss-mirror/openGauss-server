@@ -1,3 +1,33 @@
+--test other db
+create database obj_type_b dbcompatibility 'B';
+\c obj_type_b
+create or replace type obj_2 as object (
+id int,
+name text,
+CONSTRUCTOR FUNCTION obj_2( SELF IN OUT obj_2, id integer , name text ) RETURN SELF AS RESULT,
+ORDER MEMBER FUNCTION cmp(SELF IN OUT obj_2, a obj_2) return int
+);
+ERROR:  CREATE TYPE AS OBJECT is only support in A-format database
+CREATE OR REPLACE TYPE BODY obj_2 AS
+CONSTRUCTOR FUNCTION obj_2( SELF IN OUT obj_2, id integer , name text ) RETURN SELF AS RESULT as
+begin
+	self.id = id;
+	self.name = name;
+end;
+ORDER MEMBER FUNCTION cmp(SELF IN OUT obj_2, a obj_2) return int as
+begin
+	IF SELF.id > a.id THEN
+		RETURN 1 ;
+	ELSIF SELF.id < a.id THEN
+		RETURN -1 ;
+	ELSE
+		RETURN 0 ;
+	END IF ;
+end;
+END ;
+/
+ERROR:  CREATE TYPE AS OBJECT is only support in A-format database
+\c regression
 --1.create type as object语法测试
 show sql_compatibility; 
  sql_compatibility 
