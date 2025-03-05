@@ -124,16 +124,16 @@ RETURNS CLOB
 AS 'MODULE_PATHNAME', 'gms_lob_og_close'
 LANGUAGE C STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION gms_lob.getlength(lob_loc BLOB, lobname text DEFAULT ':')
+CREATE OR REPLACE FUNCTION gms_lob.getlength(lob_loc BLOB)
 RETURNS INTEGER
 AS 'MODULE_PATHNAME', 'gms_lob_og_bloblength'
 LANGUAGE C IMMUTABLE STRICT NOT FENCED;
-CREATE OR REPLACE FUNCTION gms_lob.getlength(lob_loc CLOB, lobname text DEFAULT ':')
+CREATE OR REPLACE FUNCTION gms_lob.getlength(lob_loc CLOB)
 RETURNS INTEGER
 AS 'MODULE_PATHNAME', 'gms_lob_og_cloblength'
 LANGUAGE C IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION gms_lob.getlength(lobname text DEFAULT ':')
+CREATE OR REPLACE FUNCTION gms_lob.getlength()
 RETURNS void
 AS 'MODULE_PATHNAME', 'gms_lob_og_null'
 LANGUAGE C IMMUTABLE STRICT NOT FENCED;
@@ -154,7 +154,7 @@ RETURNS RAW
 AS 'MODULE_PATHNAME','bfileread'
 LANGUAGE C VOLATILE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION gms_lob.getlength(bfileobj bfile, bfilename text DEFAULT ':')
+CREATE OR REPLACE FUNCTION gms_lob.getlength(bfileobj bfile)
 RETURNS integer
 AS 'MODULE_PATHNAME','getlength'
 LANGUAGE C VOLATILE NOT FENCED;

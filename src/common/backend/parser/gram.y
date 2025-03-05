@@ -16478,7 +16478,9 @@ CallFuncStmt:    CALL func_name '(' ')'
 										$4 = lappend($4, makeIntConst(10, -1));
 									}
 								}
-								$4 = lappend($4, makeStringConst(lobname, -1));
+								if (strcmp(strVal(funcname), "getlength") != 0) {
+									$4 = lappend($4, makeStringConst(lobname, -1));
+								}
 							} else if (IsA(n1, NamedArgExpr)) {
 								Node* n2 = ((Node*)((NamedArgExpr*)n1)->arg);
 								if (IsA(n2, ColumnRef)) {
@@ -16494,7 +16496,9 @@ CallFuncStmt:    CALL func_name '(' ')'
 									na->arg = (Expr *)makeStringConst(lobname, -1);
 									na->argnumber = -1;		/* until determined */
 									na->location = @1;
-									$4 = lappend($4, (Node *) na);
+									if (strcmp(strVal(funcname), "getlength") != 0) {
+										$4 = lappend($4, (Node *) na);
+									}
 								}
 							}
 						}
