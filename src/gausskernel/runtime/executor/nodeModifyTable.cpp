@@ -3400,11 +3400,12 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
         ModifyTableState* state, TupleTableSlot*, TupleTableSlot*, EState*, bool, int, List**, char*, bool) = NULL;
 
     ExecInsert = ExecInsertT<false>;
-    /* set flag to start loop */
-    node->isConflict = true;
+    node->isConflict = false;
 
     /* we assume there is conflict by default, try to delete the conflict tuple then insert new one */
-    while (node->isConflict) {
+    while (true) {
+        CHECK_FOR_INTERRUPTS();
+
         ConflictInfoData conflictInfo;
         Oid conflictPartOid = InvalidOid;
         int2 conflictBucketid = InvalidBktId;
@@ -3455,16 +3456,17 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
         }
 
         targetrel = heaprel;
-        if (!ExecCheckIndexConstraints(plan_slot, estate, targetrel,
-                                       partition, &isgpi, bucketid, &conflictInfo,
-                                       &conflictPartOid, &conflictBucketid)) {
-
+        slot = ExecInsert(node, slot, plan_slot, estate, node->canSetTag, hi_options, &partition_list, partExprKeyStr,
+                          replaceNull);
+        if (!node->isConflict) {
+            break;
+        } else if (!ExecCheckIndexConstraints(plan_slot, estate, targetrel,
+                                              partition, &isgpi, bucketid, &conflictInfo,
+                                              &conflictPartOid, &conflictBucketid)) {
             ExecDelete(&(&conflictInfo)->conflictTid, conflictPartOid,
                        conflictBucketid, NULL, plan_slot, &node->mt_epqstate,
                        node, node->canSetTag);
             InstrCountFiltered2(&node->ps, 1);
-        } else {
-            slot = ExecInsert(node, slot, plan_slot, estate, node->canSetTag, hi_options, &partition_list, partExprKeyStr, replaceNull);
         }
     }
     return slot;
