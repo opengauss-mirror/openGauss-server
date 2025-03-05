@@ -230,7 +230,7 @@ static AttrNumber get_assign_attrno(PLpgSQL_datum* target,  char* attrname);
 static void raw_parse_package_function(char* proc_str, int location, int leaderlen);
 static void checkFuncName(List* funcname);
 static void checkTypeName(List* nest_typnames, List* target_typnames);
-static List* get_current_type_nest_type(List* old_nest_typenames, char* typname, bool add_current_type);
+static List* get_current_type_nest_type(List* old_nest_typenames, char* typname, bool add_current_type, bool is_varray = false);
 static void IsInPublicNamespace(char* varname);
 static void CheckDuplicateCondition (char* name);
 static void SetErrorState();
@@ -1506,7 +1506,16 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         }
 
                         PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_varrayType($2->name, $2->lineno, $9, true);
-                        var->nest_typnames = get_current_type_nest_type(var->nest_typnames, var->refname, true);
+
+                        PLpgSQL_nest_type *first_ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));     
+                        PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));
+                        first_ntype->typname = pstrdup(var->refname);
+                        first_ntype->layer = 0;
+                        first_ntype->index = -1;
+                        var->nest_typnames = lappend(var->nest_typnames, first_ntype);   
+                        ntype->index = -1;
+                        var->nest_typnames = search_external_nest_type($9->typname, $9->typoid, 0, var->nest_typnames, ntype);
+
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, $9->typoid, TYPCATEGORY_ARRAY, $9->dependExtend);
                         } else if (enable_plpgsql_gsdependency()) {
@@ -8833,7 +8842,7 @@ static void checkTypeName(List* nest_typnames, List* target_nest_typnames)
     }
 }
 
-static List* get_current_type_nest_type(List* old_nest_typenames, char* typname, bool add_current_type)
+static List* get_current_type_nest_type(List* old_nest_typenames, char* typname, bool add_current_type, bool is_varray)
 {
     List* nest_typnames = NIL;
     ListCell* lc = NULL;
@@ -8845,7 +8854,11 @@ static List* get_current_type_nest_type(List* old_nest_typenames, char* typname,
             PLpgSQL_nest_type *new_ntype = new_ntypes + i;
             new_ntype->typname = pstrdup(old_ntype->typname);
             new_ntype->layer = old_ntype->layer + 1;
-            new_ntype->index = old_ntype->index;
+            if (old_ntype->layer == 0 && is_varray){
+                new_ntype->index = -1;
+            } else{
+                new_ntype->index = old_ntype->index;
+            }
             nest_typnames = lappend(nest_typnames, new_ntype);
             i++;
         }
