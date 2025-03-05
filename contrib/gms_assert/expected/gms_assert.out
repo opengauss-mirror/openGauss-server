@@ -693,5 +693,6 @@ DETAIL:  drop cascades to function schem2.access_func(character varying)
 drop cascades to function schem2.private_func1(integer)
 drop cascades to function schem2.public_func1(integer)
 DROP SCHEMA schem2 CASCADE;
+DROP EXTENSION gms_assert;
 \c postgres
 drop database gms_assert_testdb;
