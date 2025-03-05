@@ -1483,3 +1483,28 @@ SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE
 ERROR:  invalid value "ja" for "mm"
 DETAIL:  Value must be an integer.
 CONTEXT:  referenced column: to_timestamp
+-- null test
+SELECT TO_TIMESTAMP (null ) ;
+ to_timestamp 
+--------------
+ 
+(1 row)
+
+SELECT TO_TIMESTAMP (null DEFAULT '11-Sep-11 14:10:10.123000'on conversion error);
+ to_timestamp 
+--------------
+ 
+(1 row)
+
+SELECT TO_TIMESTAMP (null DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF') ;
+ to_timestamp 
+--------------
+ 
+(1 row)
+
+SELECT TO_TIMESTAMP (null DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF','NLS_DATE_LANGUAGE = American') ;
+ to_timestamp 
+--------------
+ 
+(1 row)
+

@@ -7734,6 +7734,9 @@ void Init_NUM_cache(void)
 // to_timestamp(string)
 Datum to_timestamp_default_format(PG_FUNCTION_ARGS)
 {
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
     text* date_txt = PG_GETARG_TEXT_P(0);
     text* fmt = cstring_to_text(u_sess->attr.attr_common.nls_timestamp_format_string);
 
@@ -7754,6 +7757,9 @@ Datum to_timestamp_default_format(PG_FUNCTION_ARGS)
 // to_timestamp(string, string, string)
 Datum to_timestamp_with_fmt_nls(PG_FUNCTION_ARGS)
 {
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
     text* date_txt = PG_GETARG_TEXT_P(0);
     text* fmt =  PG_GETARG_TEXT_P(1);
     text* nls_fmt = PG_GETARG_TEXT_P(2);
@@ -7781,6 +7787,9 @@ Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS)
     // args0 is text expr; args1 is default val; args2 is is DEFAULT gramy(bool);
     // args3 is default expr is column ref(bool); args4 is fmt constraints;
     // args5 is nls param constraints
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
     text* date_txt = PG_GETARG_TEXT_P(0);
     bool default_val_is_null = PG_ARGISNULL(1);
     bool fmtIsNull = PG_ARGISNULL(4);
