@@ -3819,3 +3819,38 @@ Datum json_textcontains(PG_FUNCTION_ARGS)
     pfree(target);
     PG_RETURN_BOOL(context.result);
 }
+
+Datum json_textcontains_text(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(1))
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("the json path expression is not of text type")));
+    
+    int argnum = 2;
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(argnum))
+        PG_RETURN_NULL();
+
+    text* json = PG_GETARG_TEXT_P(0);
+    const char* pathStr = text_to_cstring(PG_GETARG_TEXT_P(1));
+    int len = strlen(pathStr);
+    JsonPathItem* path = ParseJsonPath(pathStr, len);
+    char* raw = text_to_cstring(PG_GETARG_TEXT_P(2));
+    char* tok;
+
+    JsonTextContainsContext context;
+    context.result = false;
+
+    if (!IsJsonText(json))
+        PG_RETURN_BOOL(context.result);
+
+    char* target = pstrdup(raw);
+    tok = strtok(target, ",");
+    while (!(context.result) && tok != NULL) {
+        context.target = tok;
+        JsonPathWalker(path, json, json, (void (*)(text*, void*))JsonTextContainsWalker, (void*)(&context));
+        tok = strtok(NULL, ",");
+    }
+    pfree(target);
+    PG_RETURN_BOOL(context.result);
+}

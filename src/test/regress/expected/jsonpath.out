@@ -528,7 +528,24 @@ select json_textcontains('{"family" : {"id":12, "ages":[25,23], "address" : {"st
  t
 (1 row)
 
+create or replace procedure p_JsonTextcontains_Case0011(col1 text,col2 text,col3 text)
+as
+val1 bool;
+begin
+val1=json_textcontains(col1,col2,col3);--强转成cstring
+raise notice 'result=%',val1;
+end;
+/
+call p_JsonTextcontains_Case0011('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}',
+                                 '$.family','25,38');
+NOTICE:  result=t
+ p_jsontextcontains_case0011 
+-----------------------------
+ 
+(1 row)
+
 DROP SCHEMA test_jsonpath CASCADE;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table t
 drop cascades to table families
+drop cascades to function p_jsontextcontains_case0011(text,text,text)
