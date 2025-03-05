@@ -273,6 +273,89 @@ END;
 /
 INFO:  team.LIMIT = ONE
 DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,upper('one'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+INFO:  l_recxx is (1,ONE)
+INFO:  l_recxx is 1,ONE
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,lower('ONE'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+INFO:  l_recxx is (1,one)
+INFO:  l_recxx is 1,one
+CREATE OR REPLACE FUNCTION funcname(str inout int) RETURNS int
+AS $$
+DECLARE
+BEGIN
+return str;
+END
+$$
+LANGUAGE plpgsql;
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,funcname(1));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+INFO:  l_recxx is (1,1)
+INFO:  l_recxx is 1,1
+DROP FUNCTION funcname;
+CREATE OR REPLACE FUNCTION funcname(str inout VARCHAR2(10)) RETURNS VARCHAR2(10)
+AS $$
+DECLARE
+BEGIN
+return str;
+END
+$$
+LANGUAGE plpgsql;
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,funcname('ONE'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+INFO:  l_recxx is (1,ONE)
+INFO:  l_recxx is 1,ONE
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,funcname('ONE', 'TWO'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+ERROR:  function funcname(unknown, unknown) does not exist
+LINE 1: SELECT (1,funcname('ONE', 'TWO'))
+                  ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+QUERY:  SELECT (1,funcname('ONE', 'TWO'))
+CONTEXT:  referenced column: row
+PL/pgSQL function inline_code_block line 3 during statement block local variable initialization
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,uuuu1('ONE', 'TWO'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+ERROR:  Wrong type of expression, should not use type "uuuu1"
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+DROP FUNCTION funcname;
+DECLARE
   TYPE t_rec IS RECORD (
     id   NUMBER,
     val1 VARCHAR2(10),
