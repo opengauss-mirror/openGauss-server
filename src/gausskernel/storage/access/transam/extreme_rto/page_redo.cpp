@@ -1004,7 +1004,7 @@ void redo_page_manager_do_cleanup_action(XLogRecParseState *parse_state)
     tmp_node.relNode = parse_state->blockparse.blockhead.relNode;
     tmp_node.bucketNode = parse_state->blockparse.blockhead.bucketNode;
     tmp_node.opt = parse_state->blockparse.blockhead.opt;
-    XLogRecPtr lsn = parse_state->blockparse.blockhead.end_ptr;
+    XLogRecPtr lsn = parse_state->blockparse.blockhead.start_ptr;
     TransactionId removed_xid = parse_state->blockparse.extra_rec.clean_up_info.removed_xid;
  
     LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);

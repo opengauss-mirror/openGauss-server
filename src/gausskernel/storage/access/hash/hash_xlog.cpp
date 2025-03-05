@@ -783,9 +783,10 @@ static void hash_xlog_vacuum_one_page(XLogReaderState *record)
     if (InHotStandby) {
         TransactionId latestRemovedXid = hash_xlog_vacuum_get_latestRemovedXid(record);
         RelFileNode rnode;
+        XLogRecPtr lsn = record->ReadRecPtr;
 
         XLogRecGetBlockTag(record, 0, &rnode, NULL, NULL);
-        ResolveRecoveryConflictWithSnapshot(latestRemovedXid, rnode);
+        ResolveRecoveryConflictWithSnapshot(latestRemovedXid, rnode, lsn);
     }
 
     action = XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &buffer);
