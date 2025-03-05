@@ -2723,9 +2723,9 @@ static void selectDumpableObject(DumpableObject* dobj, Archive* fout = NULL)
  * Normally, we dump all extensions, or none of them if dump_include_everything
  * is false. However, DB4AI functions is created in gs_init, no need dump
  */
-static void selectDumpableFuncs(FuncInfo *fcinfo, Archive *fout = NULL)
+static void selectDumpableFuncs(FuncInfo *fcinfo, Archive *fout = nullptr, bool subFuncs = false)
 {
-    if (isDB4AIschema(fcinfo->dobj.nmspace)) {
+    if (subFuncs || isDB4AIschema(fcinfo->dobj.nmspace)) {
         fcinfo->dobj.dump = false;
     } else {
         selectDumpableObject(&(fcinfo->dobj), fout);
@@ -7030,6 +7030,7 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
     int i_prorettype;
     int i_proacl;
     int i_propackageid;
+    int i_proprocoid = InvalidOid;
     Oid* triggerFuncOid = NULL;
     int triggerFuncOidNum = 0;
 
@@ -7058,21 +7059,45 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
      * information about them, though they won't be dumped if they are built-in.
      */
 
+    res = ExecuteSqlQuery(fout, "select working_version_num from working_version_num();", PGRES_TUPLES_OK);
+    const char* versionStr = nullptr;
+    versionStr = PQgetvalue(res, 0, 0);
+    int versionNum = versionStr ? atooid(versionStr) : (-1);
+    PQclear(res);
     if (fout->remoteVersion >= 70300) {
-        /* enable_hashjoin in this sql */
-        appendPQExpBuffer(query,
-            "SELECT /*+ set(enable_hashjoin on) */ tableoid, oid, proname, prolang, propackageid,"
-            "pronargs, CASE WHEN pronargs <= %d THEN proargtypes else proargtypesext end as proargtypes, "
-            "prorettype, proacl, "
-            "pronamespace, "
-            "(%s proowner) AS rolname "
-            "FROM pg_proc p "
-            "WHERE NOT proisagg AND ("
-            "pronamespace != "
-            "(SELECT oid FROM pg_namespace "
-            "WHERE nspname = 'pg_catalog')",
-            FUNC_MAX_ARGS_INROW,
-            username_subquery);
+        if (versionNum >= 92941) {
+            /* enable_hashjoin in this sql */
+            appendPQExpBuffer(query,
+                "SELECT /*+ set(enable_hashjoin on) */ p.tableoid, p.oid, proname, prolang, propackageid,"
+                "pronargs, CASE WHEN pronargs <= %d THEN proargtypes else proargtypesext end as proargtypes, "
+                "prorettype, proacl, "
+                "pronamespace, "
+                "(%s proowner) AS rolname, "
+                "pro_proc_oid "
+                "FROM pg_proc p "
+                "left join pg_proc_ext e on p.oid = e.proc_oid "
+                "WHERE NOT proisagg AND ("
+                "pronamespace != "
+                "(SELECT oid FROM pg_namespace "
+                "WHERE nspname = 'pg_catalog')",
+                FUNC_MAX_ARGS_INROW,
+                username_subquery);
+        } else {
+            /* enable_hashjoin in this sql */
+            appendPQExpBuffer(query,
+                "SELECT /*+ set(enable_hashjoin on) */ tableoid, oid, proname, prolang, propackageid,"
+                "pronargs, CASE WHEN pronargs <= %d THEN proargtypes else proargtypesext end as proargtypes, "
+                "prorettype, proacl, "
+                "pronamespace, "
+                "(%s proowner) AS rolname "
+                "FROM pg_proc p "
+                "WHERE NOT proisagg AND ("
+                "pronamespace != "
+                "(SELECT oid FROM pg_namespace "
+                "WHERE nspname = 'pg_catalog')",
+                FUNC_MAX_ARGS_INROW,
+                username_subquery);
+        }
         if (fout->remoteVersion >= 90200)
             appendPQExpBuffer(query,
                 "\n  AND NOT EXISTS (SELECT 1 FROM pg_depend "
@@ -7138,6 +7163,7 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
     i_prorettype = PQfnumber(res, "prorettype");
     i_proacl = PQfnumber(res, "proacl");
     i_propackageid = PQfnumber(res, "propackageid");
+    i_proprocoid = PQfnumber(res, "pro_proc_oid");
 
     for (i = 0; i < ntups; i++) {
         finfo[i].dobj.objType = DO_FUNC;
@@ -7163,11 +7189,16 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
             parseOidArray(PQgetvalue(res, i, i_proargtypes), finfo[i].argtypes, finfo[i].nargs);
         }
 
+        Oid procOid = InvalidOid;
+        if (i_proprocoid != InvalidOid) {
+            procOid = atooid(PQgetvalue(res, i, i_proprocoid));
+        }
+
         if (triggerFuncOid != NULL && checkOidExist(triggerFuncOid, triggerFuncOidNum, finfo[i].dobj.catId.oid)) {
             finfo[i].dobj.dump = true;
         } else {
             /* Decide whether we want to dump it */
-            selectDumpableFuncs(&(finfo[i]), fout);
+            selectDumpableFuncs(&(finfo[i]), fout, OidIsValid(procOid));
         }
     }
 
@@ -14227,6 +14258,39 @@ static char* format_function_signature(Archive* fout, FuncInfo* finfo, bool hono
     return fn.data;
 }
 
+static bool funcContainsSubprogram(Archive* fout, FuncInfo* finfo)
+{
+    PGresult* res = NULL;
+    int numSubprogram = 0;
+    const char* versionStr = nullptr;
+    int versionNum = 0;
+    char* endStr = nullptr;
+
+    res = ExecuteSqlQuery(fout, "select working_version_num from working_version_num();", PGRES_TUPLES_OK);
+    versionStr = PQgetvalue(res, 0, 0);
+    versionNum = versionStr ? atooid(versionStr) : (-1);
+    PQclear(res);
+
+    if (versionNum < 70300) {
+        return false;
+    }
+
+    PQExpBuffer query = createPQExpBuffer();
+    appendPQExpBuffer(query, "SELECT count(*) AS numSubprogram "
+        "from pg_catalog.pg_proc p "
+        "left join pg_catalog.pg_proc_ext o "
+        "on p.oid = o.pro_proc_oid "
+        "where p.oid = '%u'::oid AND "
+        "pro_proc_oid != 0",
+        finfo->dobj.catId.oid);
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+    numSubprogram = (int)strtol(PQgetvalue(res, 0, PQfnumber(res, "numSubprogram")), &endStr, 10);
+    PQclear(res);
+    destroyPQExpBuffer(query);
+
+    return numSubprogram > 0;
+}
+
 /*
  * dumpFunc:
  *	  dump out one function
@@ -14519,6 +14583,11 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         funcKind = "FUNCTION";
     }
 
+    if (funcContainsSubprogram(fout, finfo)) {
+        appendPQExpBuffer(headWithoutDefault, "SET check_function_bodies = true;\n");
+        appendPQExpBuffer(headWithDefault, "SET check_function_bodies = true;\n");
+    }
+
     /*
      * DROP must be fully qualified in case same name appears in pg_catalog
      */
@@ -14699,6 +14768,10 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
 
     if (addDelimiter && IsPlainFormat()) {
         appendPQExpBuffer(q, "delimiter ;\n");
+    }
+
+    if (funcContainsSubprogram(fout, finfo)) {
+        appendPQExpBuffer(q, "SET check_function_bodies = false;\n");
     }
 
     if (isNullSelfloop) {

@@ -1,0 +1,185 @@
+create database subprogram_01;
+create database subprogram_02;
+create database subprogram_03;
+\c subprogram_01
+
+CREATE TABLE tb1_27 (
+    segment int1 NOT NULL,
+    id int2 NOT NULL,
+    quantity INT NOT NULL,
+    description int8,
+    PRIMARY KEY (id, segment)
+)with(orientation=column);
+--包内function含function定义
+create or replace function f2_27(col1 int1,col2 int2,col3 int4,col4 int8) return int1
+is
+var1 int2;
+function f2_27_1(col1 int1,col2 int2,col3 int4,col4 int8) return int2
+is
+begin
+insert into tb1_27 values(col1,col2,col3,col4);
+select count(*) from tb1_27 into var1;
+return var1+10;
+end;
+begin
+select f2_27_1(col1,col2,col3,col4) into var1;
+return var1+10;
+end;
+/
+
+--创建存储过程子程序——func1_1
+create procedure proc1_27(col1 int,col2 int,col3 int,col4 int)
+is
+procedure func1_1(col1 int,col2 int,col3 int,col4 int)
+is
+var1 int;
+begin
+var1:=10;
+raise info '%',var1;
+end;
+begin
+func1_1(col1,col2,col3,col4);
+raise info 'aaaa';
+end;
+/
+--创建自定义函数子程序——func1_1
+create function f1_27(col1 int,col2 int,col3 int,col4 int) return int
+is
+var1 int;
+function func1_1(col1 int,col2 int,col3 int,col4 int) return int
+is
+var1 int;
+begin
+var1:=10;
+return var1+10;
+end;
+begin
+select func1_1(col1,col2,col3,col4) into var1;
+return 10;
+end;
+/
+
+create table tb1_15(id int,col1 varchar(30),col2 varchar(30),col3 varchar(30));
+--嵌套子程序包含异常处理
+create or replace function func2_15(col1 int,col2 int,col3 int,col4 int)return int AS
+DECLARE
+procedure proc1_13(col1 int)
+is
+var1 int;
+function proc1_13_1(col1 int,col2 int,col3 int,col4 int) return int
+is
+begin
+if col1=1 THEN
+RAISE_APPLICATION_ERROR(-20808, 'col1=1');
+end if;
+insert into tb1_15 values(col1,col2,col3,col4);
+select count(*) from tb1_15 into var1;
+return var1+10;
+EXCEPTION WHEN OTHERS THEN
+raise info '% --- %',SQLCODE,SQLERRM;
+return SQLCODE;
+end;
+
+function proc1_13_2 return int
+is
+begin
+insert into tb1_15 values(99,99,99,99);
+select count(*) from tb1_15 into var1;
+if var1>15 THEN
+RAISE_APPLICATION_ERROR(-20810, 'count>15');
+end if;
+return var1+10;
+EXCEPTION WHEN OTHERS THEN
+raise info '% --- %',SQLCODE,SQLERRM;
+return SQLCODE;
+end;
+begin
+select proc1_13_2() into var1;
+select proc1_13_1(col1,9,9,var1) into var1;
+commit;
+raise info 'proc1_13 %',var1;
+select count(*) from tb1_15 into var1;
+if var1>10 THEN
+RAISE_APPLICATION_ERROR(-20815, 'col1>10');
+end if;
+EXCEPTION WHEN OTHERS THEN
+raise info '% --- %',SQLCODE,SQLERRM;
+end;
+
+procedure proc2_13(col1 out int)
+is
+var1 int;
+function proc2_13_1(a1 int,a2 int,a3 int,a4 int,b1 out int) return int2
+is
+begin
+insert into tb1_15 values(a1,a2,a3,a4);
+select count(*) from tb1_15 into var1;
+b1=var1;
+return var1;
+end;
+function proc2_13_1(b1 out int) return int2
+is
+begin
+insert into tb1_15 values(999,999,999,999);
+select count(*) from tb1_15 into var1;
+b1=var1;
+return var1;
+end;
+begin
+select proc2_13_1() into var1;
+select proc2_13_1(199,199,199,var1) into var1;
+col1:=var1;
+raise info 'proc2_13 %',var1;
+select count(*) from tb1_15 into var1;
+commit;
+if var1>7 THEN
+RAISE_APPLICATION_ERROR(-20825, 'count>7');
+end if;
+EXCEPTION WHEN OTHERS THEN
+raise info '% --- %',SQLCODE,SQLERRM;
+end;
+
+var1 int;
+BEGIN
+  proc1_13(col1);
+  commit;
+  select proc2_13() into var1;
+  raise info '%',var1;
+  return var1;
+END;
+/
+
+--导出
+\! @abs_bindir@/gs_dump subprogram_01 -p @portstring@ -F p -f @abs_srcdir@/dump_subprogram.sql >/dev/null
+\! @abs_bindir@/gs_dump subprogram_01 -p @portstring@ -F c -f @abs_srcdir@/dump_subprogram.dmp >/dev/null
+--导入
+\! @abs_bindir@/gsql -p @portstring@ -f @abs_srcdir@/dump_subprogram.sql -d subprogram_02 >/dev/null
+\! @abs_bindir@/gs_restore -p @portstring@ @abs_srcdir@/dump_subprogram.dmp -d subprogram_03 >/dev/null
+\c subprogram_02
+call f2_27(1,2,3,4);
+select * from tb1_27 order by 1;
+
+call proc1_27(1,2,3,4);
+call f1_27(1,2,3,4);
+
+call func2_15(1,2,3,4);
+call func2_15(2,2,3,4);
+call func2_15(3,2,3,4);
+call func2_15(4,2,3,4);
+call func2_15(5,2,3,4);
+call func2_15(6,2,3,4);
+call func2_15(7,2,3,4);
+
+\c subprogram_03
+call func2_15(1,2,3,4);
+call func2_15(2,2,3,4);
+call func2_15(3,2,3,4);
+call func2_15(4,2,3,4);
+call func2_15(5,2,3,4);
+call func2_15(6,2,3,4);
+call func2_15(7,2,3,4);
+
+\c regression
+drop database subprogram_01;
+drop database subprogram_02;
+drop database subprogram_03;

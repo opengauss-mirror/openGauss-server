@@ -156,6 +156,7 @@ test: rename_table
 
 #subprogram
 test: nested_subprogram
+test: nested_subprogram_dump
 
 # debug instrument
 test: test_debug5
