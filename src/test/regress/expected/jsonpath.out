@@ -311,6 +311,48 @@ SELECT JSON_EXISTS('This is not well-formed JSON data', '$[0].first' TRUE ON ERR
 SELECT JSON_EXISTS('This is not well-formed JSON data', '$[0].first' ERROR ON ERROR);
 ERROR:  the input is not a well-formed json data
 CONTEXT:  referenced column: json_exists
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$[0].name'); -- t
+ json_exists 
+-------------
+ t
+(1 row)
+
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$[1].name'); -- f
+ json_exists 
+-------------
+ f
+(1 row)
+
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0]'); -- t
+ json_exists 
+-------------
+ t
+(1 row)
+
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0][0,1][0 to 3][0]'); -- t
+ json_exists 
+-------------
+ t
+(1 row)
+
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0][0,1][1 to 3][0]'); -- f
+ json_exists 
+-------------
+ f
+(1 row)
+
+SELECT JSON_EXISTS('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]', '$.first'); -- t
+ json_exists 
+-------------
+ t
+(1 row)
+
+SELECT JSON_EXISTS('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]', '$.first[0][0][0][0]'); -- t
+ json_exists 
+-------------
+ t
+(1 row)
+
 PREPARE stmt1 AS SELECT JSON_EXISTS($1,$2);
 EXECUTE stmt1('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]','$[0].first');
  json_exists 

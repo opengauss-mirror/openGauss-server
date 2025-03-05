@@ -86,6 +86,14 @@ SELECT JSON_EXISTS('This is not well-formed JSON data', '$[0].first' FALSE ON ER
 SELECT JSON_EXISTS('This is not well-formed JSON data', '$[0].first' TRUE ON ERROR);
 SELECT JSON_EXISTS('This is not well-formed JSON data', '$[0].first' ERROR ON ERROR);
 
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$[0].name'); -- t
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$[1].name'); -- f
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0]'); -- t
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0][0,1][0 to 3][0]'); -- t
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0][0,1][1 to 3][0]'); -- f
+SELECT JSON_EXISTS('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]', '$.first'); -- t
+SELECT JSON_EXISTS('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]', '$.first[0][0][0][0]'); -- t
+
 PREPARE stmt1 AS SELECT JSON_EXISTS($1,$2);
 EXECUTE stmt1('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]','$[0].first');
 EXECUTE stmt1('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]','$[0].last');
