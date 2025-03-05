@@ -60,5 +60,22 @@ drop user jack;
 
 -- retry the query at the end of file without a semicolon
 \! echo "42601" > @abs_bindir@/retry_errcodes.conf
+
 \set RETRY
-create table
+create table;
+
+\! echo "42703" >> @abs_bindir@/retry_errcodes.conf
+
+create table t1(a int);
+
+CREATE OR REPLACE PROCEDURE retry_basic ( IN  x INT)
+AS
+BEGIN
+  INSERT INTO t1 (a) VALUES (x);
+  INSERT INTO t1 (b) VALUES (x+1);
+END;
+/
+
+\set RETRY
+\set RETRY
+CALL retry_basic(1);

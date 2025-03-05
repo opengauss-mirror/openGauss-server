@@ -111,12 +111,36 @@ drop user jack;
 \! echo "42601" > @abs_bindir@/retry_errcodes.conf
 \set RETRY
 Retry is on with default retry times: 5.
-create table
+create table;
 INFO: query retry 1 time(s).
 INFO: query retry 2 time(s).
 INFO: query retry 3 time(s).
 INFO: query retry 4 time(s).
 INFO: query retry 5 time(s).
-ERROR:  syntax error at end of input
-LINE 1: create table
+ERROR:  syntax error at or near ";"
+LINE 1: create table;
                     ^
+\! echo "42703" >> @abs_bindir@/retry_errcodes.conf
+create table t1(a int);
+CREATE OR REPLACE PROCEDURE retry_basic ( IN  x INT)
+AS
+BEGIN
+  INSERT INTO t1 (a) VALUES (x);
+  INSERT INTO t1 (b) VALUES (x+1);
+END;
+/
+\set RETRY
+Retry is off.
+\set RETRY
+Retry is on with default retry times: 5.
+CALL retry_basic(1);
+INFO: query retry 1 time(s).
+INFO: query retry 2 time(s).
+INFO: query retry 3 time(s).
+INFO: query retry 4 time(s).
+INFO: query retry 5 time(s).
+ERROR:  column "b" of relation "t1" does not exist
+LINE 1: INSERT INTO t1 (b) VALUES (x+1)
+                        ^
+QUERY:  INSERT INTO t1 (b) VALUES (x+1)
+CONTEXT:  PL/pgSQL function retry_basic(integer) line 3 at SQL statement
