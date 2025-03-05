@@ -4178,6 +4178,17 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
             mt_state->mt_plans[i] = ExecInitNode(sub_plan, estate, eflags);
         }
         InitMultipleModify(mt_state, mt_state->mt_plans[i], (uint32)resultRelationNum);
+
+        if (operation == CMD_INSERT && mt_state->mt_plans[i]->ps_ResultTupleSlot != NULL) {
+            /* Reset attstorage */
+            TupleDesc plan_tuple_desc = mt_state->mt_plans[i]->ps_ResultTupleSlot->tts_tupleDescriptor;
+            TupleDesc ret_tuple_desc = result_rel_info->ri_RelationDesc->rd_att;
+            for (int i = 0; i < plan_tuple_desc->natts; i++) {
+                if (likely(i < ret_tuple_desc->natts)) {
+                    plan_tuple_desc->attrs[i].attstorage = ret_tuple_desc->attrs[i].attstorage;
+                }
+            }
+        }
         estate->es_result_relation_info = result_rel_info;
         /*
          * If there are indices on the result relation, open them and save
