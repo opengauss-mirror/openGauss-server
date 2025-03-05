@@ -245,6 +245,104 @@ SELECT usename, usesuper FROM pg_user WHERE usename='testusr';
 
 ROLLBACK;
 DROP USER testusr;
+CREATE TABLE t1 (a1 int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+CREATE TABLE t2 (a2 int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t2_pkey" for table "t2"
+CREATE TABLE t3 (a3 int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t3_pkey" for table "t3"
+INSERT INTO t1 VALUES (1);
+INSERT INTO t2 VALUES (1);
+INSERT INTO t3 VALUES (1);
+CREATE VIEW v1 AS select * from t1;
+CREATE VIEW v2 AS select * from t2;
+CREATE VIEW v12 AS select * from v1 join v2 on a1 = a2;
+CREATE VIEW v123 AS select * from v12, t3 where a1=a3;
+DELETE FROM v123;
+SELECT * FROM t1;
+ a1 
+----
+(0 rows)
+
+SELECT * FROM t2;
+ a2 
+----
+  1
+(1 row)
+
+SELECT * FROM t3;
+ a3 
+----
+  1
+(1 row)
+
+DROP TABLE t1 CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to view v1
+drop cascades to view v12
+drop cascades to view v123
+DROP TABLE t2 CASCADE;
+NOTICE:  drop cascades to view v2
+DROP TABLE t3 CASCADE;
+CREATE TABLE t1 (a1 int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+CREATE TABLE t2 (a2 int);
+CREATE TABLE t3 (a3 int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t3_pkey" for table "t3"
+INSERT INTO t1 VALUES (1);
+INSERT INTO t2 VALUES (1);
+INSERT INTO t3 VALUES (1);
+CREATE VIEW v1 AS select * from t1;
+CREATE VIEW v2 AS select * from t2;
+CREATE VIEW v12 AS select * from v1 join v2 on a1 = a2;
+CREATE VIEW v123 AS select * from v12, t3 where a1=a3;
+DELETE FROM v123;
+SELECT * FROM t1;
+ a1 
+----
+  1
+(1 row)
+
+SELECT * FROM t2;
+ a2 
+----
+(0 rows)
+
+SELECT * FROM t3;
+ a3 
+----
+  1
+(1 row)
+
+DROP TABLE t1 CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to view v1
+drop cascades to view v12
+drop cascades to view v123
+DROP TABLE t2 CASCADE;
+NOTICE:  drop cascades to view v2
+DROP TABLE t3 CASCADE;
+CREATE TABLE t1 (a1 int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+CREATE TABLE t2 (a2 int);
+CREATE TABLE t3 (a3 int);
+INSERT INTO t1 VALUES (1);
+INSERT INTO t2 VALUES (1);
+INSERT INTO t3 VALUES (1);
+CREATE VIEW v1 AS select * from t1;
+CREATE VIEW v2 AS select * from t2;
+CREATE VIEW v12 AS select * from v1 join v2 on a1 = a2;
+CREATE VIEW v123 AS select * from v12, t3 where a1=a3;
+DELETE FROM v123;
+ERROR:  cannot determine an exact row for the view to update or delete
+DROP TABLE t1 CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to view v1
+drop cascades to view v12
+drop cascades to view v123
+DROP TABLE t2 CASCADE;
+NOTICE:  drop cascades to view v2
+DROP TABLE t3 CASCADE;
 -- 4. ERROR SITUATION
     -- update columns from multiple tables at the same time
 UPDATE v_empdept_update SET DNAME='ENGINEERING', ENAME='ABCD' WHERE EMPNO=7369;
