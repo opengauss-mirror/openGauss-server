@@ -86,6 +86,7 @@ extern Datum jsonb_delete_idx(PG_FUNCTION_ARGS);
 extern Datum jsonb_delete_array(PG_FUNCTION_ARGS);
 extern Datum json_path_exists(PG_FUNCTION_ARGS);
 extern Datum json_textcontains(PG_FUNCTION_ARGS);
+extern Datum json_textcontains_text(PG_FUNCTION_ARGS);
 
 extern int json_typeof_internal(text* json);
 

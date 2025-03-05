@@ -158,5 +158,16 @@ select json_textcontains('{ "zebra" : { "name" : "Marty",
                        "handler" : "Bob" }}','$.zebra.name','Marty');
 select json_textcontains('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}',
                          '$.family.address.street','300');
+create or replace procedure p_JsonTextcontains_Case0011(col1 text,col2 text,col3 text)
+as
+val1 bool;
+begin
+val1=json_textcontains(col1,col2,col3);--强转成cstring
+raise notice 'result=%',val1;
+end;
+/
+
+call p_JsonTextcontains_Case0011('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}',
+                                 '$.family','25,38');
 
 DROP SCHEMA test_jsonpath CASCADE;
