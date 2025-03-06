@@ -260,17 +260,16 @@ int dss_remove_file(const char *name)
 
 int dss_open_file(const char *name, int flags, mode_t mode, int *handle)
 {
-    struct stat st;
-    if ((flags & O_CREAT) != 0 && dss_stat_file(name, &st) != GS_SUCCESS) {
-        RETRY_ON_CONNECT_ERR_BEGIN {
-            // file not exists, create it first.
-            if (errno == ERR_DSS_FILE_NOT_EXIST && g_dss_device_op.dss_create(name, flags) != DSS_SUCCESS) {
-                dss_set_errno(NULL);
-                RETRY_ON_CONNECT_ERR;
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if ((flags & O_CREAT) != 0 && g_dss_device_op.dss_create(name, flags) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            /* file already exists, ignore this error */
+            if (errno != ERR_DSS_DIR_CREATE_DUPLICATED) {
                 return GS_ERROR;
             }
-        } RETRY_ON_CONNECT_ERR_END;
-    }
+        }
+    } RETRY_ON_CONNECT_ERR_END;
 
     RETRY_ON_CONNECT_ERR_BEGIN {
         if (g_dss_device_op.dss_open(name, flags, handle) != DSS_SUCCESS) {
