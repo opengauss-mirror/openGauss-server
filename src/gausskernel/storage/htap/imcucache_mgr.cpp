@@ -541,16 +541,15 @@ bool IMCUDataCacheMgr::HasInitialImcsTable()
 
 void IMCUDataCacheMgr::ResetInstance(bool isPromote)
 {
+    if (m_data_cache == NULL) {
+        return;
+    }
     ereport(WARNING, (errmsg("IMCStore data cache manager reset.")));
     if (g_instance.attr.attr_memory.enable_borrow_memory) {
         m_data_cache->FreeAllBorrowMemPool();
     }
-
-    if (m_data_cache != NULL) {
-        HeapMemResetHash(m_data_cache->m_imcs_hash, "IMCSDesc Lookup Table");
-        m_data_cache->m_cache_mgr->FreeImcstoreCache();
-    }
-
+    HeapMemResetHash(m_data_cache->m_imcs_hash, "IMCSDesc Lookup Table");
+    m_data_cache->m_cache_mgr->FreeImcstoreCache();
     m_data_cache->m_is_promote = isPromote;
     CreateIMCUDirAndClearCUFiles();
     ereport(WARNING, (errmsg("IMCStore data cache manager reset successfully.")));
