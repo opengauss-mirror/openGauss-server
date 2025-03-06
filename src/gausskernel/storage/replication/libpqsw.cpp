@@ -564,10 +564,21 @@ bool libpqsw_redirect()
     return libpqsw_get_redirect() || libpqsw_get_batch() || libpqsw_get_transaction();
 }
 
+bool libpqsw_command_is_prepare()
+{
+    return get_redirect_manager()->get_prepare_command();
+}
+
 /* query if enable set command*/
 bool libpqsw_get_set_command()
 {
     return get_redirect_manager()->state.set_command;
+}
+
+bool libpqsw_is_prepare_within_PBE()
+{
+    RedirectManager* redirect_manager = get_redirect_manager();
+    return (redirect_manager->get_pbe_state() && redirect_manager->get_prepare_command());
 }
 
 /* if skip readonly check in P or Q message */
@@ -807,6 +818,10 @@ static bool libpqsw_process_bind_message(StringInfo msg, CachedPlanSource* psrc)
 */
 static bool libpqsw_process_transfer_message(int qtype, StringInfo msg)
 {
+    if (libpqsw_is_prepare_within_PBE()) {
+        return true;
+    }
+
     if (qtype == 'E') {
         if (libpqsw_remote_in_transaction()) {
             libpqsw_set_transaction(true);
@@ -835,6 +850,10 @@ static bool libpqsw_process_transfer_message(int qtype, StringInfo msg)
 
 static bool libpqsw_need_localexec_withinPBE(int qtype, StringInfo msg, bool afterpush, bool remote_execute)
 {
+    if (libpqsw_is_prepare_within_PBE()) {
+        return false;
+    }
+
     bool ret = false;
     RedirectManager* redirect_manager = get_redirect_manager();
     /* For B E and Select, no push */
@@ -1023,6 +1042,10 @@ bool libpqsw_process_message(int qtype, StringInfo msg)
     trace_msg_func trace_func = get_msg_trace_func(qtype);
     trace_func(qtype, msg);
 	// the extend query start msg
+    if (qtype != 'Q') {
+        redirect_manager->set_pbe_state(true);
+    }
+
     if (qtype == 'P') {
         return false;
     }
@@ -1062,7 +1085,7 @@ bool libpqsw_process_message(int qtype, StringInfo msg)
         return false;
     }
 
-    if (!libpqsw_redirect()) {
+    if (!libpqsw_redirect() && !libpqsw_is_prepare_within_PBE()) {
         return false;
     }
 
@@ -1080,11 +1103,13 @@ bool libpqsw_process_message(int qtype, StringInfo msg)
             libpqsw_set_batch(false);
             libpqsw_set_redirect(false);
             libpqsw_set_set_command(false);
+            get_redirect_manager()->set_prepare_command(false);
         }
     }
 
     /* for begin in pbe and in trxn */
-    if (SS_STANDBY_MODE && libpqsw_need_localexec_withinPBE(qtype, msg, true, ready_to_excute)) {
+    if (SS_STANDBY_MODE && (libpqsw_need_localexec_withinPBE(qtype, msg, true, ready_to_excute) ||
+         libpqsw_is_prepare_within_PBE())) {
         return false;
     }
 
@@ -1096,6 +1121,9 @@ bool libpqsw_process_parse_message(const char* commandTag, List* query_list)
 {
     libpqsw_set_command_tag(commandTag);
     bool need_redirect = libpqsw_before_redirect(commandTag, query_list, NULL);
+    if (!need_redirect && ((strcmp(commandTag, "PREPARE") == 0) || (strcmp(commandTag, "EXECUTE") == 0))) {
+        get_redirect_manager()->set_prepare_command(true);
+    }
 
     if (IsAbortedTransactionBlockState() && !libpqsw_end_command(commandTag)) {
         need_redirect = false;
@@ -1116,11 +1144,42 @@ bool libpqsw_process_parse_message(const char* commandTag, List* query_list)
     return need_redirect;
 }
 
+static bool libpqsw_process_prepare_within_PBE(const char* commandTag, List* query_list, const char* query_string)
+{
+    libpqsw_set_command_tag(commandTag);
+    RedirectManager* redirect_manager = get_redirect_manager();
+    bool need_redirect = libpqsw_before_redirect(commandTag, query_list, query_string);
+    if (need_redirect && !libpqsw_need_localexec_forSimpleQuery(commandTag, query_list, LIBPQ_SW_PARSE)) {
+        /* clean self, need be carefull here */
+        int len = t_thrd.libpq_cxt.PqSendPointer - t_thrd.libpq_cxt.PqSendStart;
+        if (len > 0) {
+            errno_t rc = memset_s(t_thrd.libpq_cxt.PqSendBuffer + t_thrd.libpq_cxt.PqSendStart, len, 0, len);
+            securec_check(rc, "\0", "\0");
+            t_thrd.libpq_cxt.PqSendPointer = t_thrd.libpq_cxt.PqSendStart;
+        }
+        return true;
+    } else {
+        /* clean message queue */
+        RedirectMessageManager* message_manager = &(redirect_manager->messages_manager);
+        if (message_manager->message_empty()) {
+            return false;
+        }
+        message_manager->reset();
+        get_redirect_manager()->set_prepare_command(false);
+        return false;
+    }
+    return false;
+}
+
 /* process Q type msg, true if need in redirect mode*/
 bool libpqsw_process_query_message(const char* commandTag, List* query_list, const char* query_string, bool is_multistmt, bool is_last)
 {
     if (IsAbortedTransactionBlockState() && !libpqsw_remote_in_transaction()) {
         return false;
+    }
+
+    if (libpqsw_is_prepare_within_PBE()) {
+        return libpqsw_process_prepare_within_PBE(commandTag, query_list, query_string);
     }
 
     bool enableCe = false;

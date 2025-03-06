@@ -9785,7 +9785,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 statement_init_metric_context();
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
-                if (ENABLE_REMOTE_EXECUTE && (libpqsw_redirect() || libpqsw_get_set_command()) &&
+                if (ENABLE_REMOTE_EXECUTE && (libpqsw_redirect() || libpqsw_get_set_command() || libpqsw_command_is_prepare()) &&
                     !libpqsw_only_localrun()) {
                     get_redirect_manager()->push_message(firstchar,
                         &input_message,
