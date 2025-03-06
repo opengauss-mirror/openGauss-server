@@ -3918,6 +3918,8 @@ Datum json_textcontains_text(PG_FUNCTION_ARGS)
     char* tok;
 
     JsonTextContainsContext context;
+    context.cxt.topJson = json;
+    context.cxt.relax = JSON_PATH_NO_RELAX;
     context.result = false;
 
     if (!IsJsonText(json))
@@ -3927,7 +3929,7 @@ Datum json_textcontains_text(PG_FUNCTION_ARGS)
     tok = strtok(target, ",");
     while (!(context.result) && tok != NULL) {
         context.target = tok;
-        JsonPathWalker(path, json, json, (void (*)(text*, void*))JsonTextContainsWalker, (void*)(&context));
+        JsonPathWalker(path, json, (void (*)(text*, void*))JsonTextContainsWalker, (void*)(&context));
         tok = strtok(NULL, ",");
     }
     pfree(target);
