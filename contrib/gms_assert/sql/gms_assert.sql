@@ -203,6 +203,12 @@ end;
 /
 DROP PACKAGE "pac_GmsAssert_Case0006_!@#$%_中文字符";
 
+begin
+gms_output.put_line(gms_assert.sql_object_name('pg_tables'));
+gms_output.put_line(gms_assert.sql_object_name('pg_class'));
+end;
+/
+
 DROP USER IF EXISTS usr1 cascade;
 CREATE USER usr1 WITH password '1234@abcd';
 SET SESSION AUTHORIZATION usr1 password '1234@abcd';

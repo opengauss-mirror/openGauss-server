@@ -635,6 +635,13 @@ CONTEXT:  SQL statement "CALL gms_output.put_line(gms_assert.sql_object_name('"p
 PL/pgSQL function inline_code_block line 2 at PERFORM
 DROP PACKAGE "pac_GmsAssert_Case0006_!@#$%_中文字符";
 NOTICE:  drop cascades to function gms_assert_test.proc1()
+begin
+gms_output.put_line(gms_assert.sql_object_name('pg_tables'));
+gms_output.put_line(gms_assert.sql_object_name('pg_class'));
+end;
+/
+pg_tables
+pg_class
 DROP USER IF EXISTS usr1 cascade;
 NOTICE:  role "usr1" does not exist, skipping
 CREATE USER usr1 WITH password '1234@abcd';
