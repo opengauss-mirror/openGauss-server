@@ -3016,7 +3016,6 @@ Oid ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem* 
     Oid heapOid = InvalidOid;
     Oid heapPartOid = InvalidOid;
     LOCKMODE lockmode;
-    Relation irel;
 
     /* lock level used here should match index lock reindex_index() */
     if (partition_name != NULL)
@@ -3037,13 +3036,6 @@ Oid ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem* 
 
     TrForbidAccessRbObject(RelationRelationId, indOid, indexRelation->relname);
 
-    /*
-     * Obtain the current persistence of the existing index.  We already hold
-     * lock on the index.
-     */
-    irel = index_open(indOid, NoLock);
-    index_close(irel, NoLock);
-
     if (partition_name != NULL)
         indPartOid = PartitionNameGetPartitionOid(indOid,
             partition_name,
@@ -3060,12 +3052,17 @@ Oid ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem* 
     else {
         reindex_index(indOid, indPartOid, false, mem_info, false);
         Oid relId = IndexGetRelation(indOid, false);
-        if (RelationIsCUFormatByOid(relId) && irel->rd_index != NULL && irel->rd_index->indisunique) {
-            /*
-             * Unique index on CU owns a unique index on delta table, but delta index is not visble
-             * to user. We reindex delta index manually.
-             */
-            ReindexDeltaIndex(indOid, indPartOid);
+        if (RelationIsCUFormatByOid(relId)) {
+            Relation irel = index_open(indOid, NoLock);
+            bool indisunique = irel->rd_index != NULL && irel->rd_index->indisunique;
+            index_close(irel, NoLock);
+            if (indisunique) {
+                /*
+                * Unique index on CU owns a unique index on delta table, but delta index is not visble
+                * to user. We reindex delta index manually.
+                */
+                ReindexDeltaIndex(indOid, indPartOid);
+            }
         }
     }
     return indOid;
