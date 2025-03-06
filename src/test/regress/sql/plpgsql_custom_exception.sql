@@ -1354,5 +1354,85 @@ EXCEPTION
 END;
 /
 
+-- test package and package proc has same exception
+-- only declare in package proc
+CREATE OR REPLACE PACKAGE pkg_09 AS
+	PROCEDURE proc2_09(due_date DATE,today DATE);
+END pkg_09;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_09 AS
+    PROCEDURE proc2_09(due_date DATE,today DATE)
+        IS
+        e1 EXCEPTION;
+        PRAGMA EXCEPTION_INIT (e1, -20121);
+        BEGIN
+            IF due_date < today THEN
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+            END IF;
+            EXCEPTION WHEN E1 THEN
+                raise info 'catch e1';
+        END;
+    END pkg_09;
+/
+BEGIN
+  pkg_09.proc2_09 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+end;
+/
+drop package pkg_09;
+
+-- only declare in package
+CREATE OR REPLACE PACKAGE pkg_09 AS
+	e1 EXCEPTION;
+	PROCEDURE proc2_09(due_date DATE,today DATE);
+END pkg_09;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_09 AS
+    PROCEDURE proc2_09(due_date DATE,today DATE)
+        IS
+        PRAGMA EXCEPTION_INIT (e1, -20121);
+        BEGIN
+            IF due_date < today THEN
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+            END IF;
+            EXCEPTION WHEN E1 THEN
+                raise info 'catch e1';
+        END;
+    END pkg_09;
+/
+BEGIN
+  pkg_09.proc2_09 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+end;
+/
+drop package pkg_09;
+
+--declare in package an package proc
+CREATE OR REPLACE PACKAGE pkg_09 AS
+	e1 EXCEPTION;
+	PROCEDURE proc2_09(due_date DATE,today DATE);
+END pkg_09;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_09 AS
+    PROCEDURE proc2_09(due_date DATE,today DATE)
+        IS
+        e1 EXCEPTION;
+        PRAGMA EXCEPTION_INIT (e1, -20121);
+        BEGIN
+            IF due_date < today THEN
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+            END IF;
+            EXCEPTION WHEN E1 THEN
+                raise info 'catch e1';
+        END;
+    END pkg_09;
+/
+BEGIN
+  pkg_09.proc2_09 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+end;
+/
+drop package pkg_09;
+
 -- clean up --
 drop schema if exists plpgsql_custom_exception cascade;

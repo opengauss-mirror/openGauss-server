@@ -1529,6 +1529,95 @@ EXCEPTION
 END;
 /
 INFO:  CATCH EXCEPTION: Account past due 3.
+-- test package and package proc has same exception
+-- only declare in package proc
+CREATE OR REPLACE PACKAGE pkg_09 AS
+	PROCEDURE proc2_09(due_date DATE,today DATE);
+END pkg_09;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_09 AS
+    PROCEDURE proc2_09(due_date DATE,today DATE)
+        IS
+        e1 EXCEPTION;
+        PRAGMA EXCEPTION_INIT (e1, -20121);
+        BEGIN
+            IF due_date < today THEN
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+            END IF;
+            EXCEPTION WHEN E1 THEN
+                raise info 'catch e1';
+        END;
+    END pkg_09;
+/
+BEGIN
+  pkg_09.proc2_09 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+end;
+/
+INFO:  catch e1
+CONTEXT:  SQL statement "CALL pkg_09.proc2_09(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+drop package pkg_09;
+NOTICE:  drop cascades to function plpgsql_custom_exception.proc2_09(timestamp without time zone,timestamp without time zone)
+-- only declare in package
+CREATE OR REPLACE PACKAGE pkg_09 AS
+	e1 EXCEPTION;
+	PROCEDURE proc2_09(due_date DATE,today DATE);
+END pkg_09;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_09 AS
+    PROCEDURE proc2_09(due_date DATE,today DATE)
+        IS
+        PRAGMA EXCEPTION_INIT (e1, -20121);
+        BEGIN
+            IF due_date < today THEN
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+            END IF;
+            EXCEPTION WHEN E1 THEN
+                raise info 'catch e1';
+        END;
+    END pkg_09;
+/
+BEGIN
+  pkg_09.proc2_09 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+end;
+/
+INFO:  catch e1
+CONTEXT:  SQL statement "CALL pkg_09.proc2_09(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+drop package pkg_09;
+NOTICE:  drop cascades to function plpgsql_custom_exception.proc2_09(timestamp without time zone,timestamp without time zone)
+--declare in package an package proc
+CREATE OR REPLACE PACKAGE pkg_09 AS
+	e1 EXCEPTION;
+	PROCEDURE proc2_09(due_date DATE,today DATE);
+END pkg_09;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_09 AS
+    PROCEDURE proc2_09(due_date DATE,today DATE)
+        IS
+        e1 EXCEPTION;
+        PRAGMA EXCEPTION_INIT (e1, -20121);
+        BEGIN
+            IF due_date < today THEN
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+                RAISE_APPLICATION_ERROR(-20121, 'Account past due.');
+            END IF;
+            EXCEPTION WHEN E1 THEN
+                raise info 'catch e1';
+        END;
+    END pkg_09;
+/
+BEGIN
+  pkg_09.proc2_09 (TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY')); 
+end;
+/
+INFO:  catch e1
+CONTEXT:  SQL statement "CALL pkg_09.proc2_09(TO_DATE('01-JUL-2010', 'DD-MON-YYYY'),TO_DATE('09-JUL-2010', 'DD-MON-YYYY'))"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+drop package pkg_09;
+NOTICE:  drop cascades to function plpgsql_custom_exception.proc2_09(timestamp without time zone,timestamp without time zone)
 -- clean up --
 drop schema if exists plpgsql_custom_exception cascade;
 NOTICE:  drop cascades to 5 other objects
