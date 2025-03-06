@@ -1,5 +1,17 @@
 DROP FUNCTION IF EXISTS pg_catalog.pg_stat_get_wlm_session_info(OID) cascade;
 
+BEGIN
+IF working_version_num() > 92923 THEN
+UPDATE pg_class
+set reloptions = (CASE WHEN array_length(array_remove(reloptions, 'segment=on'), 1) = 0
+                     then NULL
+                     else array_remove(reloptions, 'segment=on')
+                     END
+                )
+WHERE relkind = 'v';
+END IF;
+END;
+
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5002;
 CREATE OR REPLACE FUNCTION pg_catalog.pg_stat_get_wlm_session_info
 (OID,
