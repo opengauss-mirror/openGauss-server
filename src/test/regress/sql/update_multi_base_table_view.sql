@@ -187,6 +187,60 @@ SELECT usename, usesuper FROM pg_user WHERE usename='testusr';
 ROLLBACK;
 DROP USER testusr;
 
+CREATE TABLE t1 (a1 int primary key);
+CREATE TABLE t2 (a2 int primary key);
+CREATE TABLE t3 (a3 int primary key);
+INSERT INTO t1 VALUES (1);
+INSERT INTO t2 VALUES (1);
+INSERT INTO t3 VALUES (1);
+CREATE VIEW v1 AS select * from t1;
+CREATE VIEW v2 AS select * from t2;
+CREATE VIEW v12 AS select * from v1 join v2 on a1 = a2;
+CREATE VIEW v123 AS select * from v12, t3 where a1=a3;
+
+DELETE FROM v123;
+SELECT * FROM t1;
+SELECT * FROM t2;
+SELECT * FROM t3;
+DROP TABLE t1 CASCADE;
+DROP TABLE t2 CASCADE;
+DROP TABLE t3 CASCADE;
+
+CREATE TABLE t1 (a1 int primary key);
+CREATE TABLE t2 (a2 int);
+CREATE TABLE t3 (a3 int primary key);
+INSERT INTO t1 VALUES (1);
+INSERT INTO t2 VALUES (1);
+INSERT INTO t3 VALUES (1);
+CREATE VIEW v1 AS select * from t1;
+CREATE VIEW v2 AS select * from t2;
+CREATE VIEW v12 AS select * from v1 join v2 on a1 = a2;
+CREATE VIEW v123 AS select * from v12, t3 where a1=a3;
+
+DELETE FROM v123;
+SELECT * FROM t1;
+SELECT * FROM t2;
+SELECT * FROM t3;
+DROP TABLE t1 CASCADE;
+DROP TABLE t2 CASCADE;
+DROP TABLE t3 CASCADE;
+
+CREATE TABLE t1 (a1 int primary key);
+CREATE TABLE t2 (a2 int);
+CREATE TABLE t3 (a3 int);
+INSERT INTO t1 VALUES (1);
+INSERT INTO t2 VALUES (1);
+INSERT INTO t3 VALUES (1);
+CREATE VIEW v1 AS select * from t1;
+CREATE VIEW v2 AS select * from t2;
+CREATE VIEW v12 AS select * from v1 join v2 on a1 = a2;
+CREATE VIEW v123 AS select * from v12, t3 where a1=a3;
+
+DELETE FROM v123;
+DROP TABLE t1 CASCADE;
+DROP TABLE t2 CASCADE;
+DROP TABLE t3 CASCADE;
+
 -- 4. ERROR SITUATION
 
     -- update columns from multiple tables at the same time

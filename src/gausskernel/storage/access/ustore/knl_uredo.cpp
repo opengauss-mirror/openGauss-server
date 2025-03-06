@@ -527,7 +527,7 @@ static void UHeapXlogFreezeTdSlot(XLogReaderState *record)
     WHITEBOX_TEST_STUB(UHEAP_XLOG_FREEZE_TD_SLOT_FAILED, WhiteboxDefaultErrorEmit);
     (void) XLogRecGetBlockTag(record, 0, &rnode, NULL, &blkno);
     if (InHotStandby && TransactionIdIsValid(xlrec->latestFrozenXid)) {
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestFrozenXid, rnode, lsn);
+        ResolveRecoveryConflictWithSnapshot(xlrec->latestFrozenXid, rnode, record->ReadRecPtr);
     }
 
     action = XLogReadBufferForRedo(record, 0, &buffer);
@@ -729,7 +729,6 @@ static void UHeapXlogClean(XLogReaderState *record)
     RelFileNode rnode = ((RelFileNode) {0, 0, 0, -1});
     BlockNumber blkno = InvalidBlockNumber;
     XLogRedoAction action;
-    XLogRecPtr lsn = record->EndRecPtr;
 
     WHITEBOX_TEST_STUB(UHEAP_XLOG_CLEAN_FAILED, WhiteboxDefaultErrorEmit);
 
@@ -743,8 +742,10 @@ static void UHeapXlogClean(XLogReaderState *record)
      * conflict on the records that cause MVCC failures for user queries. If
      * latestRemovedXid is invalid, skip conflict processing.
      */
-    if (InHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid))
+    if (InHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid)) {
+        XLogRecPtr lsn = record->ReadRecPtr;
         ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, rnode, lsn);
+    }
 
     /*
      * If we have a full-page image, restore it (using a cleanup lock) and
@@ -1828,7 +1829,7 @@ static void UHeapXlogFreeze(XLogReaderState *record)
      * consider the frozen xids as running.
      */
     if (InHotStandby && SUPPORT_HOT_STANDBY) {
-        ResolveRecoveryConflictWithSnapshot(cutoffXid, rnode, lsn);
+        ResolveRecoveryConflictWithSnapshot(cutoffXid, rnode, record->ReadRecPtr);
     }
 
     if (XLogReadBufferForRedo(record, HEAP_FREEZE_ORIG_BLOCK_NUM, &buffer) == BLK_NEEDS_REDO) {

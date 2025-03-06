@@ -1185,14 +1185,14 @@ SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum,
     Buffer buffer = read_head_buffer(reln, forknum, false);
     SegmentCheck(BufferIsValid(buffer));
     volatile BufferDesc *buf = GetBufferDescriptor(buffer - 1);
-    bool need_lock = !LWLockHeldByMe(BufferDescriptorGetContentLock(buf));
-    if (ENABLE_DMS && need_lock) {
+    bool locked = LWLockHeldByMe(BufferDescriptorGetContentLock(buf));
+    if (!(ENABLE_DMS && locked)) {
         LockBuffer(buffer, BUFFER_LOCK_SHARE);
     }
     SegmentHead *head = (SegmentHead *)PageGetContents(BufferGetBlock(buffer));
 
     SegPageLocation loc = seg_logic_to_physic_mapping(reln, head, forknum, blocknum);
-    if (ENABLE_DMS && need_lock) {
+    if (!(ENABLE_DMS && locked)) {
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
     }
 

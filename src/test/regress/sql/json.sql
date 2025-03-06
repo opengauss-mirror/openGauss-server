@@ -432,6 +432,8 @@ select * from json_to_record('{"a":1,"b":"foo","c":"bar"}',true)
 select * from json_to_recordset('[{"a":1,"b":"foo","d":false},{"a":2,"b":"bar","c":true}]',false)
     as x(a int, b text, c boolean);
 
+select * from json_to_recordset('[{"a":1,"x":43.2},{"a":2,"b":{"z":true},"c":"2012-01-20 10:42:53"}]',true) as x(a int) ;
+
 create schema json_agg_schema;
 set current_schema to json_agg_schema;
 

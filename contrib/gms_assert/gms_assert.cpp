@@ -56,7 +56,7 @@ static char* TrimSqlName(char* rawname);
 static bool LocalQualifiedName(char* rawname);
 static void SplitQualifiedName(char* rawname, char sep, List** namelist);
 static void QualifiedSqlNameInternal(text* textIn);
-static bool FuncObjectName(char* funcname, char* schemaname, Oid namespaceId, char* pkgname);
+static bool FuncObjectName(char* funcname, Oid namespaceId);
 
 char* QuoteString(char* str, char qMark)
 {
@@ -265,12 +265,10 @@ void QualifiedSqlNameInternal(text* txtIn)
     }
 }
 
-bool FuncObjectName(char* funcname, char* schemaname, Oid namespaceId, char* pkgname)
+bool FuncObjectName(char* funcname, Oid namespaceId)
 {
     CatCList* catlist = NULL;
     Oid funcoid = InvalidOid;
-    Oid pkg_oid = InvalidOid;
-    Oid func_pkg_id = InvalidOid;
     int i;
     bool ispackage;
 
@@ -292,20 +290,25 @@ bool FuncObjectName(char* funcname, char* schemaname, Oid namespaceId, char* pkg
         }
         funcoid = HeapTupleGetOid(proctup);
         ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
-        Datum pkg_oid_datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
+        Oid pronamespace =
+            DatumGetObjectId(SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_pronamespace, &isNull));
+        /* pkgname have already been handled, skip functions in package */
         if (!isNull && ispackage) {
-            func_pkg_id = DatumGetObjectId(pkg_oid_datum);
-            if (schemaname != NULL && pkgname == NULL) {
+            continue;
+        }
+        if (OidIsValid(namespaceId)) {
+            if (pronamespace != namespaceId) {
                 continue;
             }
-            if (!OidIsValid(func_pkg_id) && pkgname != NULL) {
-                continue;
+        } else {
+            ListCell* nsp = NULL;
+            foreach (nsp, u_sess->catalog_cxt.activeSearchPath) {
+                if (pronamespace == lfirst_oid(nsp) &&
+                    pronamespace != u_sess->catalog_cxt.myTempNamespace) {
+                    break;
+                }
             }
-            if (pkgname == NULL) {
-                continue;
-            }
-            pkg_oid = PackageNameGetOid(pkgname, namespaceId);
-            if (pkg_oid != func_pkg_id) {
+            if (nsp == NULL) {
                 continue;
             }
         }
@@ -528,9 +531,11 @@ Datum sql_object_name(PG_FUNCTION_ARGS)
     }
     PG_END_TRY();
 
+    /* pkgname is specified, just make sure the package is valid.
+       It doesn't matter whether the object of the package is valid. */
+    char* packageName = pkgname == NULL ? objname : pkgname;
     /* Suppose the object is a package */
-    objectId = PackageNameGetOid(objname, namespaceId);
-    /* Verify */
+    objectId = PackageNameGetOid(packageName, namespaceId);
     if (OidIsValid(objectId)) {
         objectValid = GetPgObjectValid(objectId, OBJECT_TYPE_PKGSPEC);
         if (objectValid) {
@@ -551,7 +556,7 @@ Datum sql_object_name(PG_FUNCTION_ARGS)
     }
 
     /* Suppose the object is a function */
-    objectValid = FuncObjectName(objname, schemaname, namespaceId, pkgname);
+    objectValid = FuncObjectName(objname, namespaceId);
     if (objectValid) {
         PG_RETURN_TEXT_P(rawname);
     }

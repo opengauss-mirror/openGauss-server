@@ -3,6 +3,8 @@ create database gms_assert_testdb;
 create schema gms_assert_test;
 set search_path=gms_assert_test;
 create extension gms_assert;
+create extension gms_output;
+select gms_output.enable();
 
 -- NOOP
 SELECT gms_assert.noop(NULL);
@@ -176,6 +178,30 @@ SELECT gms_assert.sql_object_name(CURRENT_CATALOG || '.schem2.pkg1.public_func1'
 SELECT gms_assert.sql_object_name('schem2.pkg1.private_func1');
 SELECT schem2.pkg1.access_func('private_func1'); -- ERROR
 SELECT schem2.pkg1.access_func('pkg1.private_func1'); -- pkg1.private_func1
+SELECT schem2.pkg1.access_func('pkg1.private_func'); -- pkg1.private_func
+
+create or replace package "pac_GmsAssert_Case0006_!@#$%_中文字符" 
+is
+a int;
+procedure proc1;
+end "pac_GmsAssert_Case0006_!@#$%_中文字符"; 
+/
+--期望通过
+begin
+gms_output.put_line(gms_assert.sql_object_name('"pac_GmsAssert_Case0006_!@#$%_中文字符".proc'));
+end;
+/
+--期望通过
+begin
+gms_output.put_line(gms_assert.sql_object_name('"pac_GmsAssert_Case0006_!@#$%_中文字符".proc1'));
+end;
+/
+--期望报错
+begin
+gms_output.put_line(gms_assert.sql_object_name('"pac_GmsAssert_Case0006_!@#$%_中文字符1".proc1'));
+end;
+/
+DROP PACKAGE "pac_GmsAssert_Case0006_!@#$%_中文字符";
 
 DROP USER IF EXISTS usr1 cascade;
 CREATE USER usr1 WITH password '1234@abcd';
@@ -198,7 +224,10 @@ SELECT gms_assert.sql_object_name('schem2.pkg1.public_func1');
 \c -
 DROP USER IF EXISTS usr1 CASCADE;
 DROP SCHEMA schem1 CASCADE;
+DROP PACKAGE schem2.pkg1;
 DROP SCHEMA schem2 CASCADE;
+
+DROP EXTENSION gms_assert;
 
 \c postgres
 drop database gms_assert_testdb;

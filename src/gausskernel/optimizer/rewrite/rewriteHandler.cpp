@@ -3661,6 +3661,61 @@ struct FindTargetTableContext {
     bool lIsKey;
 };
 
+static void FindKeyInRel(Relation rel, Var* var, FindTargetTableContext* context);
+static bool FindKeyInView(Relation rel, Var* var, FindTargetTableContext* context);
+
+static bool FindTargetTableWalker(Node* node, FindTargetTableContext* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+    if (context == NULL) {
+        return true;
+    }
+    
+    int rRtIndex = context->rRtIndex;
+    int lRtIndex = context->lRtIndex;
+    List* rtable = context->rtable;
+
+    if (IsA(node, Var)) {
+        Var* var = (Var*)node;
+        RangeTblEntry* rte = NULL;
+        rte = var->varno == rRtIndex? rt_fetch(rRtIndex, rtable) :
+              var->varno == lRtIndex? rt_fetch(lRtIndex, rtable) : NULL;
+        if (rte != NULL) {
+            /* A subquery can not be a key preserved relation */
+            if (rte->rtekind == RTE_SUBQUERY) {
+                return false;
+            }
+
+            Relation rel = relation_open(rte->relid, AccessShareLock);
+            /* Fast path if definitely no indexes */
+            if (rel->rd_rel->relkind == RELKIND_VIEW) {
+                bool res = FindKeyInView(rel, var, context);
+                relation_close(rel, AccessShareLock);
+                return res;
+            }
+
+            if (!RelationGetForm(rel)->relhasindex) {
+                relation_close(rel, AccessShareLock);
+                return false;
+            }
+            FindKeyInRel(rel, var, context);
+            relation_close(rel, AccessShareLock);
+            return false;
+        }
+    } else if (IsA(node, OpExpr)) {
+        OpExpr* op = (OpExpr*)node;
+        Oid opno = op->opno;
+        const int opArgNum = 2;
+
+        if (list_length(op->args) != opArgNum || !IsEqualsOperator(opno)) {
+            return true;
+        }
+    }
+    return expression_tree_walker(node, (bool (*)())FindTargetTableWalker, (void*)context);
+}
+
 static void FindKeyInRel(Relation rel, Var* var, FindTargetTableContext* context)
 {
     int rRtIndex = context->rRtIndex;
@@ -3702,47 +3757,57 @@ static void FindKeyInRel(Relation rel, Var* var, FindTargetTableContext* context
     }
 }
 
-static bool FindTargetTable_walker(Node* node, FindTargetTableContext* context)
+static bool FindKeyInView(Relation rel, Var* var, FindTargetTableContext* context)
 {
-    if (node == NULL) {
-        return false;
-    }
-    
-    int rRtIndex = context->rRtIndex;
-    int lRtIndex = context->lRtIndex;
-    List* rtable = context->rtable;
+    Query* subviewqry = (Query*)copyObject(get_view_query(rel));
+    ListCell* fcell = NULL;
+    FromExpr* f = subviewqry->jointree;
+    List* rtable = subviewqry->rtable;
+    int newRtIndex = 0;
+    bool allHaveKey = true;
 
-    if (IsA(node, Var)) {
-        Var* var = (Var*)node;
-        RangeTblEntry* rte = NULL;
-        rte = var->varno == rRtIndex? rt_fetch(rRtIndex, rtable) :
-              var->varno == lRtIndex? rt_fetch(lRtIndex, rtable) : NULL;
-        if (rte != NULL) {
-            /* A subquery can not be a key preserved relation */
-            if (rte->rtekind == RTE_SUBQUERY) {
+    if (list_length(f->fromlist) == 1) {
+        newRtIndex = GetNewResultRelation((Node*)linitial(f->fromlist), rtable);
+        FindTargetTableContext subcontext = {newRtIndex, newRtIndex, rtable, false, false};
+        if (!expression_tree_walker((Node*)(subviewqry->targetList),
+                                    (bool (*)())FindTargetTableWalker,
+                                    (void*)(&subcontext))) {
+            if (!subcontext.rIsKey) {
+                pfree(subviewqry);
                 return false;
             }
-
-            Relation rel = relation_open(rte->relid, AccessShareLock);
-            /* Fast path if definitely no indexes */
-            if (!RelationGetForm(rel)->relhasindex) {
-                relation_close(rel, AccessShareLock);
-                return false;
-            }
-            FindKeyInRel(rel, var, context);
-            relation_close(rel, AccessShareLock);
-            return false;
-        }
-    } else if (IsA(node, OpExpr)) {
-        OpExpr* op = (OpExpr*)node;
-        Oid opno = op->opno;
-        const int opArgNum = 2;
-
-        if (list_length(op->args) != opArgNum || !IsEqualsOperator(opno)) {
-            return true;
         }
     }
-    return expression_tree_walker(node, (bool (*)())FindTargetTable_walker, (void*)context);
+
+    foreach (fcell, f->fromlist) {
+        int tmp_rt_index = GetNewResultRelation((Node*)lfirst(fcell), rtable);
+        if (newRtIndex == 0) {
+            newRtIndex = tmp_rt_index;
+            continue;
+        } else if (newRtIndex == -1) {
+            break;
+        } else if (newRtIndex != tmp_rt_index) {
+            FindTargetTableContext subcontext = {tmp_rt_index, newRtIndex, rtable, false, false};
+            if (!expression_tree_walker((Node*)(f->quals),
+                                        (bool (*)())FindTargetTableWalker,
+                                        (void*)(&subcontext))) {
+                newRtIndex = subcontext.rIsKey ? newRtIndex :
+                                subcontext.lIsKey ? tmp_rt_index : -1;
+                allHaveKey = subcontext.rIsKey && subcontext.lIsKey && allHaveKey;
+            } else {
+                newRtIndex = -1;
+            }
+        }
+    }
+    if (newRtIndex == -1) {
+        return true;
+    } else if (allHaveKey) {
+        context->rIsKey = var->varno == context->rRtIndex ? true : context->rIsKey;
+        context->lIsKey = var->varno == context->lRtIndex ? true : context->lIsKey;
+    }
+    pfree(subviewqry);
+
+    return false;
 }
 
 /*
@@ -3772,7 +3837,7 @@ static int ProcessFromExprForNewRel(FromExpr* f, List* rtable)
             context.rIsKey = false;
             context.lIsKey = false;
             if (!expression_tree_walker((Node*)(f->quals),
-                                        (bool (*)())FindTargetTable_walker,
+                                        (bool (*)())FindTargetTableWalker,
                                         (void*)(&context))) {
                 newRtIndex = context.rIsKey ? newRtIndex :
                                 context.lIsKey ? tmp_rt_index : -1;
@@ -3812,7 +3877,7 @@ static int ProcessJoinExprForNewRel(JoinExpr* j, List* rtable)
             context.rIsKey = false;
             context.lIsKey = false;
             if (!expression_tree_walker((Node*)(j->quals),
-                                        (bool (*)())FindTargetTable_walker,
+                                        (bool (*)())FindTargetTableWalker,
                                         (void*)(&context))) {
                 newRtIndex = context.rIsKey ? lRtIndex :
                                 context.lIsKey ? rRtIndex : -1;

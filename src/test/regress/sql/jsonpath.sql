@@ -86,6 +86,14 @@ SELECT JSON_EXISTS('This is not well-formed JSON data', '$[0].first' FALSE ON ER
 SELECT JSON_EXISTS('This is not well-formed JSON data', '$[0].first' TRUE ON ERROR);
 SELECT JSON_EXISTS('This is not well-formed JSON data', '$[0].first' ERROR ON ERROR);
 
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$[0].name'); -- t
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$[1].name'); -- f
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0]'); -- t
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0][0,1][0 to 3][0]'); -- t
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0][0,1][1 to 3][0]'); -- f
+SELECT JSON_EXISTS('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]', '$.first'); -- t
+SELECT JSON_EXISTS('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]', '$.first[0][0][0][0]'); -- t
+
 PREPARE stmt1 AS SELECT JSON_EXISTS($1,$2);
 EXECUTE stmt1('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]','$[0].first');
 EXECUTE stmt1('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]','$[0].last');
@@ -113,6 +121,12 @@ SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family', 
 SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family.id', 'Oak Street');
 SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family', 'ak street');
 
+drop table if exists json_data1;
+CREATE TABLE json_data1(json_col CLOB);  
+INSERT INTO json_data1 VALUES ('{"name":"web"}');
+select * from json_data1 where json_textcontains(json_col,'$.site','nothing');
+drop table json_data1;
+
 PREPARE stmt2 AS SELECT JSON_TEXTCONTAINS($1, $2, $3);
 EXECUTE stmt2(NULL, '$.family', 'data');
 EXECUTE stmt2('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}'
@@ -121,6 +135,17 @@ EXECUTE stmt2('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "30
              , '$.family', 'K STREET');
 EXECUTE stmt2('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}'
             , NULL, 'data');
+
+drop table families;
+CREATE TABLE families (family_doc CLOB);
+INSERT INTO families VALUES ('{"ages":[11,40,10]}');
+INSERT INTO families VALUES ('{"ages":[12,38,10]}');
+INSERT INTO families VALUES ('{"ages":[40,38,10]}');
+INSERT INTO families VALUES ('{"ages":[40,48,10]}');
+
+SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.ages', '12,40');
+SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.ages', '0');
+
 
 SELECT JSON_TEXTCONTAINS('This is not well-formed JSON data', '$.family', 'data');
 SELECT JSON_TEXTCONTAINS(NULL, '$.family', 'data');
@@ -132,5 +157,25 @@ SELECT JSON_TEXTCONTAINS('{"family" : {"id":12, "ages":[25,23], "address" : {"st
                         , '$.family', 'K STREET');
 SELECT JSON_TEXTCONTAINS('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}'
                         , NULL, 'data');
+
+select json_textcontains('{ "zebra" : { "name" : "Marty",   
+                       "stripes" : ["Black","White"],  
+                       "handler" : "Bob" }}','$','Marty');
+select json_textcontains('{ "zebra" : { "name" : "Marty",   
+                       "stripes" : ["Black","White"],  
+                       "handler" : "Bob" }}','$.zebra.name','Marty');
+select json_textcontains('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}',
+                         '$.family.address.street','300');
+create or replace procedure p_JsonTextcontains_Case0011(col1 text,col2 text,col3 text)
+as
+val1 bool;
+begin
+val1=json_textcontains(col1,col2,col3);--强转成cstring
+raise notice 'result=%',val1;
+end;
+/
+
+call p_JsonTextcontains_Case0011('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}',
+                                 '$.family','25,38');
 
 DROP SCHEMA test_jsonpath CASCADE;

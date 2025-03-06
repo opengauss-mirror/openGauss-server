@@ -12262,7 +12262,7 @@ CreateAmStmt: CREATE ACCESS METHOD name TYPE_P INDEX HANDLER handler_name
 CreateTrigStmt:
 			CREATE opt_or_replace definer_user TRIGGER qualified_trigger_name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
-			EXECUTE PROCEDURE func_name '(' TriggerFuncArgs ')'
+			EXECUTE FUNCTION_or_PROCEDURE func_name '(' TriggerFuncArgs ')'
 				{
 					if ($2 != false)
 					{
@@ -12301,7 +12301,7 @@ CreateTrigStmt:
 			| CREATE CONSTRAINT TRIGGER qualified_trigger_name AFTER TriggerEvents ON
 			qualified_name OptConstrFromTable ConstraintAttributeSpec
 			FOR EACH ROW TriggerWhen
-			EXECUTE PROCEDURE func_name '(' TriggerFuncArgs ')'
+			EXECUTE FUNCTION_or_PROCEDURE func_name '(' TriggerFuncArgs ')'
 				{
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					n->schemaname = $4->schemaname;
@@ -12488,6 +12488,11 @@ TriggerWhen:
 			| /*EMPTY*/								{ $$ = NULL; }
 		;
 
+FUNCTION_or_PROCEDURE:
+			FUNCTION
+		|	PROCEDURE
+		;
+
 TriggerFuncArgs:
 			TriggerFuncArg							{ $$ = list_make1($1); }
 			| TriggerFuncArgs ',' TriggerFuncArg	{ $$ = lappend($1, $3); }
@@ -12605,7 +12610,7 @@ ConstraintAttr_isValidate:
 
 CreateEventTrigStmt:
 			CREATE EVENT_TRIGGER name ON ColLabel
-			EXECUTE PROCEDURE func_name '(' ')'
+			EXECUTE FUNCTION_or_PROCEDURE func_name '(' ')'
 				{
 					CreateEventTrigStmt *n = makeNode(CreateEventTrigStmt);
 					n->trigname = $3;
@@ -12616,7 +12621,7 @@ CreateEventTrigStmt:
 				}
 			| CREATE EVENT_TRIGGER name ON ColLabel
 			WHEN event_trigger_when_list
-			EXECUTE PROCEDURE func_name '(' ')'
+			EXECUTE FUNCTION_or_PROCEDURE func_name '(' ')'
 				{
 					CreateEventTrigStmt *n = makeNode(CreateEventTrigStmt);
 					n->trigname = $3;
@@ -16478,7 +16483,9 @@ CallFuncStmt:    CALL func_name '(' ')'
 										$4 = lappend($4, makeIntConst(10, -1));
 									}
 								}
-								$4 = lappend($4, makeStringConst(lobname, -1));
+								if (strcmp(strVal(funcname), "getlength") != 0) {
+									$4 = lappend($4, makeStringConst(lobname, -1));
+								}
 							} else if (IsA(n1, NamedArgExpr)) {
 								Node* n2 = ((Node*)((NamedArgExpr*)n1)->arg);
 								if (IsA(n2, ColumnRef)) {
@@ -16494,7 +16501,9 @@ CallFuncStmt:    CALL func_name '(' ')'
 									na->arg = (Expr *)makeStringConst(lobname, -1);
 									na->argnumber = -1;		/* until determined */
 									na->location = @1;
-									$4 = lappend($4, (Node *) na);
+									if (strcmp(strVal(funcname), "getlength") != 0) {
+										$4 = lappend($4, (Node *) na);
+									}
 								}
 							}
 						}

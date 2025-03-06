@@ -311,6 +311,48 @@ SELECT JSON_EXISTS('This is not well-formed JSON data', '$[0].first' TRUE ON ERR
 SELECT JSON_EXISTS('This is not well-formed JSON data', '$[0].first' ERROR ON ERROR);
 ERROR:  the input is not a well-formed json data
 CONTEXT:  referenced column: json_exists
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$[0].name'); -- t
+ json_exists 
+-------------
+ t
+(1 row)
+
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$[1].name'); -- f
+ json_exists 
+-------------
+ f
+(1 row)
+
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0]'); -- t
+ json_exists 
+-------------
+ t
+(1 row)
+
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0][0,1][0 to 3][0]'); -- t
+ json_exists 
+-------------
+ t
+(1 row)
+
+select json_exists('{"name":"胡小威" , "age":20 , "male":true}','$.name[0][0,1][1 to 3][0]'); -- f
+ json_exists 
+-------------
+ f
+(1 row)
+
+SELECT JSON_EXISTS('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]', '$.first'); -- t
+ json_exists 
+-------------
+ t
+(1 row)
+
+SELECT JSON_EXISTS('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]', '$.first[0][0][0][0]'); -- t
+ json_exists 
+-------------
+ t
+(1 row)
+
 PREPARE stmt1 AS SELECT JSON_EXISTS($1,$2);
 EXECUTE stmt1('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]','$[0].first');
  json_exists 
@@ -362,9 +404,9 @@ SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family', 
 (3 rows)
 
 SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family', '25, 5');
-                                          family_doc                                           
------------------------------------------------------------------------------------------------
- {"family" : {"id":10, "ages":[40,38,12], "address" : {"street" : "10 Main Street"}}}
+                                             family_doc                                              
+-----------------------------------------------------------------------------------------------------
+ {"family" : {"id":11, "ages":[42,40,10,5], "address" : {"street" : "200 East Street", "apt" : 20}}}
  {"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}
 (2 rows)
 
@@ -413,6 +455,16 @@ SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.family', 
 ------------
 (0 rows)
 
+drop table if exists json_data1;
+NOTICE:  table "json_data1" does not exist, skipping
+CREATE TABLE json_data1(json_col CLOB);  
+INSERT INTO json_data1 VALUES ('{"name":"web"}');
+select * from json_data1 where json_textcontains(json_col,'$.site','nothing');
+ json_col 
+----------
+(0 rows)
+
+drop table json_data1;
 PREPARE stmt2 AS SELECT JSON_TEXTCONTAINS($1, $2, $3);
 EXECUTE stmt2(NULL, '$.family', 'data');
  json_textcontains 
@@ -438,6 +490,26 @@ EXECUTE stmt2('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "30
             , NULL, 'data');
 ERROR:  the json path expression is not of text type
 CONTEXT:  referenced column: json_textcontains
+drop table families;
+CREATE TABLE families (family_doc CLOB);
+INSERT INTO families VALUES ('{"ages":[11,40,10]}');
+INSERT INTO families VALUES ('{"ages":[12,38,10]}');
+INSERT INTO families VALUES ('{"ages":[40,38,10]}');
+INSERT INTO families VALUES ('{"ages":[40,48,10]}');
+SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.ages', '12,40');
+     family_doc      
+---------------------
+ {"ages":[11,40,10]}
+ {"ages":[12,38,10]}
+ {"ages":[40,38,10]}
+ {"ages":[40,48,10]}
+(4 rows)
+
+SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.ages', '0');
+ family_doc 
+------------
+(0 rows)
+
 SELECT JSON_TEXTCONTAINS('This is not well-formed JSON data', '$.family', 'data');
  json_textcontains 
 -------------------
@@ -475,7 +547,47 @@ SELECT JSON_TEXTCONTAINS('{"family" : {"id":12, "ages":[25,23], "address" : {"st
                         , NULL, 'data');
 ERROR:  the json path expression is not of text type
 CONTEXT:  referenced column: json_textcontains
+select json_textcontains('{ "zebra" : { "name" : "Marty",   
+                       "stripes" : ["Black","White"],  
+                       "handler" : "Bob" }}','$','Marty');
+ json_textcontains 
+-------------------
+ t
+(1 row)
+
+select json_textcontains('{ "zebra" : { "name" : "Marty",   
+                       "stripes" : ["Black","White"],  
+                       "handler" : "Bob" }}','$.zebra.name','Marty');
+ json_textcontains 
+-------------------
+ t
+(1 row)
+
+select json_textcontains('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}',
+                         '$.family.address.street','300');
+ json_textcontains 
+-------------------
+ t
+(1 row)
+
+create or replace procedure p_JsonTextcontains_Case0011(col1 text,col2 text,col3 text)
+as
+val1 bool;
+begin
+val1=json_textcontains(col1,col2,col3);--强转成cstring
+raise notice 'result=%',val1;
+end;
+/
+call p_JsonTextcontains_Case0011('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}',
+                                 '$.family','25,38');
+NOTICE:  result=t
+ p_jsontextcontains_case0011 
+-----------------------------
+ 
+(1 row)
+
 DROP SCHEMA test_jsonpath CASCADE;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table t
 drop cascades to table families
+drop cascades to function p_jsontextcontains_case0011(text,text,text)

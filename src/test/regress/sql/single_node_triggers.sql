@@ -203,6 +203,49 @@ select * from tttest where price_on <= 35 and price_off > 35 and price_id = 5 or
 drop table tttest;
 drop sequence ttdummy_seq;
 
+-- test gram support execute PROCEDURE | FUNCTION
+drop table if exists audit_log;
+create table audit_log (
+  id serial primary key,
+  username varchar(50),
+  action varchar(50),
+  action_time timestamp default current_timestamp
+);
+drop table if exists users;
+create table users (username varchar(255), email varchar(255));
+drop table if exists employees;
+create table employees (username varchar(255), email varchar(255));
+
+create or replace function log_user_action()
+returns trigger as $$
+begin
+  insert into audit_log (username, action) values (new.username, 'insert');
+  return new;
+end;
+$$ language plpgsql;
+
+-- new support execute function
+create trigger after_user_insert
+after insert on users
+for each row
+execute function log_user_action();
+
+insert into users values ('User', 'User@Person.com');
+select id, username, action from audit_log order by id;
+
+-- support execute procedure
+create trigger after_employees_insert
+after insert on employees
+for each row
+execute procedure log_user_action();
+
+insert into employees values ('Employee', 'Employee@Person.com');
+select id, username, action from audit_log order by id;
+
+drop table audit_log;
+drop table users;
+drop table employees;
+
 --
 -- tests for per-statement triggers
 --

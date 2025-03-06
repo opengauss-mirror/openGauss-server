@@ -197,6 +197,82 @@ END;
 /
 
 DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,upper('one'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,lower('ONE'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+CREATE OR REPLACE FUNCTION funcname(str inout int) RETURNS int
+AS $$
+DECLARE
+BEGIN
+return str;
+END
+$$
+LANGUAGE plpgsql;
+
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,funcname(1));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+DROP FUNCTION funcname;
+
+CREATE OR REPLACE FUNCTION funcname(str inout VARCHAR2(10)) RETURNS VARCHAR2(10)
+AS $$
+DECLARE
+BEGIN
+return str;
+END
+$$
+LANGUAGE plpgsql;
+
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,funcname('ONE'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,funcname('ONE', 'TWO'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+DECLARE
+  TYPE type1 IS RECORD (val1 int, val2 VARCHAR2(10));
+  l_recxx type1:=type1(1,uuuu1('ONE', 'TWO'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx;
+  raise info 'l_recxx is %,%',l_recxx.val1,l_recxx.val2;
+END;
+/
+
+DROP FUNCTION funcname;
+
+DECLARE
   TYPE t_rec IS RECORD (
     id   NUMBER,
     val1 VARCHAR2(10),
@@ -301,6 +377,37 @@ BEGIN
   l_rec := t_rec2(1, 'ONE', 'TWO', 'THREE');
 END;
 /
+
+create type uuuuu as object (val1 int, val2 varchar(10));
+
+create or replace procedure p_PLvarray_Case0043
+as
+  TYPE sssss IS varray(10) OF uuuuu;
+  l_recxx sssss:=sssss(uuuuu(1,'one'),uuuuu(2,'two'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx(2).val2;
+  --dbms_output.put_line(l_recxx(2).val2);
+END;
+/
+
+call p_PLvarray_Case0043();
+drop type uuuuu;
+
+create or replace procedure p_PLvarray_Case0043
+as
+  TYPE t_rec IS RECORD (
+    id   NUMBER,
+    val1 VARCHAR2(10));
+  TYPE sssss IS varray(10) OF t_rec;
+  l_recxx sssss:=sssss(t_rec(1,'one'),t_rec(2,'two'));
+BEGIN
+  raise info 'l_recxx is %',l_recxx(2).val1;
+  --dbms_output.put_line(l_recxx(2).val2);
+END;
+/
+
+call p_PLvarray_Case0043();
+drop procedure p_PLvarray_Case0043;
 
 DECLARE
   TYPE nt_type IS TABLE OF INTEGER;

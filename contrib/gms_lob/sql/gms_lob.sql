@@ -31,7 +31,7 @@ test'));
 SELECT *,gms_lob.getlength(b) FROM testclob;
 
 DROP TABLE testclob;
-
+select gms_lob.getlength('abcd') from dual;
 --在函数中调用
 CREATE OR REPLACE FUNCTION fun_blob() RETURNS INTEGER LANGUAGE plpgsql AS $$
 DECLARE
