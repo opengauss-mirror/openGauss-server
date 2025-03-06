@@ -523,7 +523,7 @@ static bool AcceptResult(const PGresult* result, bool print_error)
 
     if (strlen(error)) {
         // If the query need retry, should not report error.
-        if (pset.max_retry_times > 0 && PQTRANS_IDLE == PQtransactionStatus(pset.db) &&
+        if (pset.max_retry_times > 0 &&
             IsQueryNeedRetry((const char*)pset.db->last_sqlstate) && pset.retry_times < pset.max_retry_times) {
             // Cache the sqlstate and set retry on.
             errno_t ss_rc = strcpy_s(pset.retry_sqlstate, sizeof(pset.retry_sqlstate), pset.db->last_sqlstate);
