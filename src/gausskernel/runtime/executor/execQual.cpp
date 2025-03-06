@@ -5129,18 +5129,17 @@ static bool check_val_for_nan_or_infinite(NodeTag nodeTag, float8 val)
 static Oid deparse_funcexpr_for_input_type(FuncExpr* funcexpr, NodeTag type, float8 val)
 {
     Oid inputtype = InvalidOid;
-    ExprState* exprstate = (ExprState*) lfirst(list_head(funcexpr->args));
-    if (IsA(exprstate, Param)) {
-        Param* param = (Param*) exprstate;
-        inputtype = param->paramtype;
-    } else if (IsA(exprstate, Var)) {
+    Node* arg = (Node*) lfirst(list_head(funcexpr->args));
+    if (IsA(arg, Param)) {
+        inputtype = ((Param*)arg)->paramtype;
+    } else if (IsA(arg, Var)) {
         if (check_val_for_nan_or_infinite(type, val)) {
-            Var* var = (Var*) exprstate;
-            inputtype = var->vartype;
+            inputtype = ((Var*)arg)->vartype;
         }
-    } else
-        inputtype = exprstate->resultType;
-    
+    } else if (IsA(arg, ExprState)) {
+        inputtype = ((ExprState*)arg)->resultType;
+    }
+
     return inputtype;
 }
 
