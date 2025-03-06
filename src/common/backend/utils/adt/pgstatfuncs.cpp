@@ -15032,7 +15032,6 @@ Datum get_realtime_build_log_ctrl_status(PG_FUNCTION_ARGS)
     }
     const int realtimeBuildCtrlStatColumnNum = 11;
     const int shiftSpeed = 3;
-    Datum result;
     TupleDesc tupdesc;
     ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
     MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);

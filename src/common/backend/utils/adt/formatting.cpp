@@ -4536,7 +4536,6 @@ Datum interval_to_char(PG_FUNCTION_ARGS)
         tm->tm_hour = Abs(tm->tm_hour);
         tm->tm_min = Abs(tm->tm_min);
         tm->tm_sec = Abs(tm->tm_sec);
-        FormatNode* format = NULL;
         bool incache = FALSE;
         text* fmt_a_format = NULL;
 
