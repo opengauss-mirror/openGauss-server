@@ -32,6 +32,7 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
+#include "optimizer/prep.h"
 #include "parser/analyze.h"
 #include "parser/parse_coerce.h"
 #include "parser/parsetree.h"
@@ -4067,12 +4068,19 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
      * have to treat it as read-only).
      */
     viewquery = (Query*)copyObject(get_view_query(view));
-    
     PlannerInfo* root = makeNode(PlannerInfo);
+    root->parse = viewquery;
+    foreach (rtcell, viewquery->rtable) {
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(rtcell);
+        if (rte->rtekind == RTE_JOIN && IS_OUTER_JOIN(rte->jointype)) {
+            reduce_outer_joins(root);
+            break;
+        }
+    }
     List* base_targetList = list_copy(viewquery->targetList);
     ListCell* base_cell;
     ListCell* new_cell;
-    root->parse = viewquery;
+
     viewquery->targetList = (List*)flatten_join_alias_vars(root, (Node*)(viewquery->targetList));
     viewquery->jointree = (FromExpr*)flatten_join_alias_vars(root, (Node*)(viewquery->jointree));
 

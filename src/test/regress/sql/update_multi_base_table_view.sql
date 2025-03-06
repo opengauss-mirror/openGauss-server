@@ -241,6 +241,26 @@ DROP TABLE t1 CASCADE;
 DROP TABLE t2 CASCADE;
 DROP TABLE t3 CASCADE;
 
+drop table if exists t_ViewUpdate_Case0015_1 cascade;
+drop table if exists t_ViewUpdate_Case0015_2 cascade;
+drop table if exists t_ViewUpdate_Case0015_3 cascade;
+drop view if exists v_ViewUpdate_Case0015 cascade;
+create table t_ViewUpdate_Case0015_1(col1 int ,col2 varchar(100) not null);
+insert into t_ViewUpdate_Case0015_1 values(1,'HaErBin');
+insert into t_ViewUpdate_Case0015_1 values(2,'ChangChun');
+insert into t_ViewUpdate_Case0015_1 values(3,'TieLing');
+create table t_ViewUpdate_Case0015_2(col3 int ,col4 varchar(100) not null);
+insert into t_ViewUpdate_Case0015_2 values(3,'TieLing');
+create table t_ViewUpdate_Case0015_3 as select * from t_ViewUpdate_Case0015_1;
+create or replace view v_ViewUpdate_Case0015 as 
+    select col1 as 序号,col2 as 省会 from t_ViewUpdate_Case0015_1 right join t_ViewUpdate_Case0015_2 on col1=col3;
+select * from v_ViewUpdate_Case0015;
+update v_ViewUpdate_Case0015 set 省会='ShenYang' where 序号=3;
+select * from v_ViewUpdate_Case0015;
+drop table if exists t_ViewUpdate_Case0015_1 cascade;
+drop table if exists t_ViewUpdate_Case0015_2 cascade;
+drop table if exists t_ViewUpdate_Case0015_3 cascade;
+drop view if exists v_ViewUpdate_Case0015 cascade;
 -- 4. ERROR SITUATION
 
     -- update columns from multiple tables at the same time
