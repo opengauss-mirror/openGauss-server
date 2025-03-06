@@ -573,7 +573,11 @@ gms_tcp_set_connection_rcv_timeout(GMS_TCP_CONNECTION_STATE *c_state, int32 time
     FD_ZERO(&rd);
     FD_SET(c_state->fd, &rd);
 
-    ret = select(c_state->fd + 1, &rd, NULL, NULL, &timeoutval);
+    if (timeout < 0) {
+        ret = select(c_state->fd + 1, &rd, NULL, NULL, NULL);
+    } else {
+        ret = select(c_state->fd + 1, &rd, NULL, NULL, &timeoutval);
+    }
     return ret;
 }
 
@@ -927,7 +931,7 @@ Datum
 gms_tcp_available_real(PG_FUNCTION_ARGS)
 {
     GMS_TCP_CONNECTION *c = (GMS_TCP_CONNECTION *)PG_GETARG_POINTER(0);
-    int32 available_timeout = PG_GETARG_INT32(1);
+    int32 available_timeout = PG_ARGISNULL(1) ? -1 : PG_GETARG_INT32(1);
     GMS_TCP_CONNECTION_STATE *c_state = gms_tcp_get_connection_state(c);
     GMS_TCP_CONNECTION_BUFFER *in_buffer = &c_state->in_buffer;
     GMS_TCP_CONNECTION_DATA_OPT data_opt = {0};

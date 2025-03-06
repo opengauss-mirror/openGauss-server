@@ -3,7 +3,7 @@ MODULE_big = gms_tcp
 OBJS    = gms_tcp.o
 
 EXTENSION = gms_tcp
-DATA = gms_tcp--1.0.sql
+DATA = gms_tcp--1.1.sql gms_tcp--1.0--1.1.sql gms_tcp--1.0.sql
 
 exclude_option = -fPIE
 override CPPFLAGS := -fstack-protector-strong $(filter-out $(exclude_option),$(CPPFLAGS))

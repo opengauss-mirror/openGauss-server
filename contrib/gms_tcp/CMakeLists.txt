@@ -15,6 +15,12 @@ set_target_properties(gms_tcp PROPERTIES PREFIX "")
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/gms_tcp.control
     DESTINATION share/postgresql/extension/
 )
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/gms_tcp--1.1.sql
+    DESTINATION share/postgresql/extension/
+)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/gms_tcp--1.0--1.1.sql
+    DESTINATION share/postgresql/extension/
+)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/gms_tcp--1.0.sql
     DESTINATION share/postgresql/extension/
 )
