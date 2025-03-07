@@ -2898,12 +2898,12 @@ ObjectAddress DefineObjectTypeSpec(CompositeTypeStmt* stmt)
 
     values[Anum_pg_object_type_typoid-1] = ObjectIdGetDatum(typoid);
     values[Anum_pg_object_type_supertypeoid-1] = ObjectIdGetDatum(supertypeoid);
-    values[Anum_pg_object_type_isfinal-1] = BoolGetDatum(false);
+    values[Anum_pg_object_type_isfinal-1] = BoolGetDatum(stmt->final);
     values[Anum_pg_object_type_isinstantiable-1] = BoolGetDatum(true);
     values[Anum_pg_object_type_ispersistable-1] = BoolGetDatum(true);
     values[Anum_pg_object_type_isbodydefined-1] = BoolGetDatum(false);
-    values[Anum_pg_object_type_mapmethod-1] = ObjectIdGetDatum(false);
-    values[Anum_pg_object_type_ordermethod-1] = ObjectIdGetDatum(false);
+    values[Anum_pg_object_type_mapmethod-1] = ObjectIdGetDatum(mapid);
+    values[Anum_pg_object_type_ordermethod-1] = ObjectIdGetDatum(orderid);
     values[Anum_pg_object_type_objectoptions-1] = Int32GetDatum(0);
     values[Anum_pg_object_type_typespecsrc-1] = CStringGetTextDatum(stmt->typespec);
     isnull[Anum_pg_object_type_typebodydeclsrc-1] = true;
