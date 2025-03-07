@@ -792,6 +792,18 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
             }
         }
 
+        ParallelIndexScanDescData *paralleDesc = NULL;
+        if (u_sess->stream_cxt.global_obj && indexstate->ss.ps.plan->dop > 1) {
+            if (WorkerThreadAmI()) {
+                u_sess->stream_cxt.global_obj->BuildStreamDesc(
+                    estate->es_plannedstmt->queryId, indexstate->ss.ps.plan);
+            }
+            paralleDesc = (ParallelIndexScanDescData*)u_sess->stream_cxt.global_obj->GetParalleDesc(
+                estate->es_plannedstmt->queryId, indexstate->ss.ps.plan->plan_node_id);
+            if (WorkerThreadAmI())
+                scan_handler_idx_parallelscan_initialize(currentRelation, indexstate->ioss_RelationDesc, paralleDesc);
+        }
+
         /*
          * Initialize scan descriptor.
          */
@@ -800,7 +812,8 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
             scanSnap,
             indexstate->ioss_NumScanKeys,
             indexstate->ioss_NumOrderByKeys,
-            (ScanState*)indexstate);
+            (ScanState*)indexstate,
+            paralleDesc);
     }
 
     /*

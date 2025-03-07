@@ -1931,6 +1931,12 @@ void StreamNodeGroup::BuildStreamDesc(const uint64& queryId, Plan* node)
             ((ParallelIndexScanDescData*)parallelDesc)->ps_relid = ((IndexScan*)node)->scan.scanrelid;
             ((ParallelIndexScanDescData*)parallelDesc)->psBtpscan = Btbuildparallelscan();
             break;
+        case T_IndexOnlyScan:
+            parallelDesc = palloc0(sizeof(ParallelIndexScanDescData));
+            ((ParallelIndexScanDescData*)parallelDesc)->ps_indexid = ((IndexOnlyScan*)node)->indexid;
+            ((ParallelIndexScanDescData*)parallelDesc)->ps_relid = ((IndexOnlyScan*)node)->scan.scanrelid;
+            ((ParallelIndexScanDescData*)parallelDesc)->psBtpscan = Btbuildparallelscan();
+            break;
         default:
             break;
     }
@@ -1958,6 +1964,7 @@ void StreamNodeGroup::DestroyStreamDesc(const uint64& queryId, Plan* node)
 
     switch (nodeTag(node)) {
         case T_IndexScan:
+        case T_IndexOnlyScan:
         case T_AnnIndexScan:
             element = (StreamDescElement*)hash_search(m_streamDescHashTbl, &streamKey, HASH_FIND, &found);
             if (found == true) {

@@ -289,6 +289,15 @@ analyze t_student_01 ;
 explain(costs off) select /*+set(query_dop 2)*/ count(*)
 from t_student_01 a join t_score_01 b
 on a.s_id=b.s_id;
+
+create table ios_t1 (a int, b int);
+insert into ios_t1 values (generate_series(1, 1000), generate_series(1, 1000));
+create index on ios_t1(a);
+
+explain(costs off) select /*+ set(query_dop 1002) indexonlyscan(ios_t1) */ count(*) from ios_t1;
+select /*+ set(query_dop 1002) indexonlyscan(ios_t1) */ count(*) from ios_t1;
+
+drop table ios_t1;
 --clean
 set search_path=public;
 drop schema test_smp cascade;
