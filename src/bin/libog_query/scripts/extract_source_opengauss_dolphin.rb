@@ -835,6 +835,7 @@ void init_session_vars(void)
     					OPT_SQL_MODE_PIPES_AS_CONCAT | OPT_SQL_MODE_NO_ZERO_DATE |
     					OPT_SQL_MODE_PAD_CHAR_TO_FULL_LENGTH | OPT_SQL_MODE_AUTO_RECOMPILE_FUNCTION |
     					OPT_SQL_MODE_ERROR_FOR_DIVISION_BY_ZERO;
+    cxt->enableBCmptMode = true;
 }
 ))
 
@@ -1498,6 +1499,28 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
               json_walker_context* cxt = (json_walker_context*)context;
               cxt->cur_obj = cxt->pre_obj;
             }
+        } break;
+        case T_PrepareStmt: {
+          PrepareStmt *stmt = (PrepareStmt*)node;
+
+          if (p2walker(stmt->query, context)) {
+              return true;
+          }
+          if ((void*)create_json_walker == (void*)p2walker) {
+            json_walker_context* cxt = (json_walker_context*)context;
+            cxt->cur_obj = cxt->pre_obj;
+          }
+        } break;
+        case T_CreateSeqStmt: {
+          CreateSeqStmt *stmt = (CreateSeqStmt*)node;
+
+          if (p2walker(stmt->sequence, context)) {
+              return true;
+          }
+          if ((void*)create_json_walker == (void*)p2walker) {
+            json_walker_context* cxt = (json_walker_context*)context;
+            cxt->cur_obj = cxt->pre_obj;
+          }
         } break;
         default:
             break;

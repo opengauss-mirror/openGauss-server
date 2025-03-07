@@ -1,4 +1,4 @@
-
+#coding:utf-8
 import ctypes
   
 class OgQueryParseResult(ctypes.Structure):
@@ -19,6 +19,7 @@ alter table t3 rename to t4;
 drop tables t1,t2,t3;
 TRUNCATE TABLE tpcds.reason_t1;
     """
+
     result = libpg_query.raw_parser_opengauss_dolphin(sql)
     print(sql)
     print(result.parse_tree_json)
