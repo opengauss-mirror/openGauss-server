@@ -30,6 +30,9 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_trigger.h"
+#include "catalog/indexing.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/builtins.h"
 
@@ -57,6 +60,7 @@ static bool LocalQualifiedName(char* rawname);
 static void SplitQualifiedName(char* rawname, char sep, List** namelist);
 static void QualifiedSqlNameInternal(text* textIn);
 static bool FuncObjectName(char* funcname, Oid namespaceId);
+static bool TriggerObjectName(char* trigname, Oid namespaceId);
 
 char* QuoteString(char* str, char qMark)
 {
@@ -325,6 +329,60 @@ bool FuncObjectName(char* funcname, Oid namespaceId)
     return false;
 }
 
+bool TriggerObjectName(char* trigname, Oid namespaceId)
+{
+    /* only support trigger in schema in B compatibility database */
+    if (namespaceId != InvalidOid && !DB_IS_CMPT(B_FORMAT)) {
+        return false;
+    }
+
+    Relation tgrel;
+    ScanKeyData skey;
+    SysScanDesc tgscan;
+    HeapTuple tup;
+    Oid oid;
+    Oid reloid;
+    int count = 0;
+    bool result = false;
+    Relation targetrel = NULL;
+    Oid relNamespaceId;
+
+    /*
+     * Find the trigger, verify permissions, set up object address
+     */
+    tgrel = heap_open(TriggerRelationId, AccessShareLock);
+
+    ScanKeyInit(&skey, Anum_pg_trigger_tgname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(trigname));
+
+    tgscan = systable_beginscan(tgrel, TriggerNameIndexId, true, NULL, 1, &skey);
+
+    while (HeapTupleIsValid(tup = systable_getnext(tgscan))) {
+        Form_pg_trigger pg_trigger = (Form_pg_trigger)GETSTRUCT(tup);
+        reloid = pg_trigger->tgrelid;
+        oid = HeapTupleGetOid(tup);
+        if (!OidIsValid(oid) || !OidIsValid(reloid)) {
+            systable_endscan(tgscan);
+            heap_close(tgrel, AccessShareLock);
+            return false;
+        }
+        targetrel = relation_open(reloid, NoLock);
+        if (namespaceId != InvalidOid) {
+            relNamespaceId = RelationGetNamespace(targetrel);
+            if (relNamespaceId != namespaceId) {
+                relation_close(targetrel, NoLock);
+                continue;
+            }
+        }
+        result = true;
+        relation_close(targetrel, NoLock);
+        break;
+    }
+    systable_endscan(tgscan);
+    heap_close(tgrel, AccessShareLock);
+
+    return result;
+}
+
 Datum noop(PG_FUNCTION_ARGS)
 {
     PG_RETURN_DATUM(PG_GETARG_DATUM(0));
@@ -567,6 +625,12 @@ Datum sql_object_name(PG_FUNCTION_ARGS)
 
     /* Suppose the object is a function */
     objectValid = FuncObjectName(objname, namespaceId);
+    if (objectValid) {
+        PG_RETURN_TEXT_P(rawname);
+    }
+
+    /* Suppose the object is a trigger */
+    objectValid = TriggerObjectName(objname, namespaceId);
     if (objectValid) {
         PG_RETURN_TEXT_P(rawname);
     }
