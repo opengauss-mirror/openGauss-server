@@ -855,7 +855,7 @@ static void InitStorageConfigureNamesBool()
 
         {{"enable_vacuum_extreme_xmin",
             PGC_SIGHUP,
-            NODE_SINGLENODE,
+            NODE_ALL,
             AUTOVACUUM,
             gettext_noop("Use extreme xmin to vacuum."),
             NULL,

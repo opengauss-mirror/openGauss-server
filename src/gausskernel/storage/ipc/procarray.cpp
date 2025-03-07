@@ -5680,6 +5680,13 @@ TransactionId GetVacuumExtremeOldestXmin()
         minXmin -= deferAge;
     }
 
+    TransactionId replicationSlotXmin = g_instance.proc_array_idx->replication_slot_xmin;
+    /* Check whether there's a replication slot requiring an older xmin. */
+    if (TransactionIdIsNormal(replicationSlotXmin) &&
+        TransactionIdPrecedes(replicationSlotXmin, minXmin)) {
+        minXmin = replicationSlotXmin;
+    }
+
     LWLockRelease(ProcArrayLock);
 
     return minXmin;
