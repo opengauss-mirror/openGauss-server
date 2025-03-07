@@ -233,7 +233,58 @@ DROP SCHEMA schem1 CASCADE;
 DROP PACKAGE schem2.pkg1;
 DROP SCHEMA schem2 CASCADE;
 
-DROP EXTENSION gms_assert;
+create table "t_GmsAssert_Case0006_!@#$%_中文字符"(a int);
+create or replace function "trif_GmsAssert_Case0006_!@#$%_中文字符" returns trigger as
+$$
+declare
+begin
+raise notice 'trigger';
+end
+$$ language plpgsql;
 
+create trigger "tri_GmsAssert_Case0006_!@#$%_中文字符" before insert on "t_GmsAssert_Case0006_!@#$%_中文字符" for each row execute procedure "trif_GmsAssert_Case0006_!@#$%_中文字符"();
+
+begin
+gms_output.put_line(gms_assert.sql_object_name('"tri_GmsAssert_Case0006_!@#$%_中文字符"'));
+end;
+/
+
+CREATE SCHEMA schem1;
+create table schem1.tb1(a int);
+create or replace function func1 returns trigger as
+$$
+declare
+begin
+raise notice 'trigger';
+end
+$$ language plpgsql;
+
+create trigger trg1 before insert on schem1.tb1 for each row execute procedure func1();
+
+SELECT gms_assert.sql_object_name('trg1');
+SELECT gms_assert.sql_object_name('schem1.trg1'); -- fail
+DROP SCHEMA schem1 CASCADE;
+
+create database gms_assert_testdb_bcompt dbcompatibility='B';
+\c gms_assert_testdb_bcompt
+create extension gms_assert; 
+create schema schem1;
+create table schem1.tb1(a int);
+
+create or replace function func1 returns trigger as
+$$
+declare
+begin
+raise notice 'trigger';
+end
+$$ language plpgsql;
+
+create trigger trg1 before insert on schem1.tb1 for each row execute procedure func1();
+
+SELECT gms_assert.sql_object_name('trg1');
+SELECT gms_assert.sql_object_name('schem1.trg1');
+SELECT gms_assert.sql_object_name('public.trg1');
+DROP EXTENSION gms_assert;
 \c postgres
 drop database gms_assert_testdb;
+drop database gms_assert_testdb_bcompt;
