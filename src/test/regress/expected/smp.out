@@ -1530,6 +1530,25 @@ on a.s_id=b.s_id;
                ->  Seq Scan on t_score_01 b
 (9 rows)
 
+create table ios_t1 (a int, b int);
+insert into ios_t1 values (generate_series(1, 1000), generate_series(1, 1000));
+create index on ios_t1(a);
+explain(costs off) select /*+ set(query_dop 1002) indexonlyscan(ios_t1) */ count(*) from ios_t1;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using ios_t1_a_idx on ios_t1
+(4 rows)
+
+select /*+ set(query_dop 1002) indexonlyscan(ios_t1) */ count(*) from ios_t1;
+ count 
+-------
+  1000
+(1 row)
+
+drop table ios_t1;
 --clean
 set search_path=public;
 drop schema test_smp cascade;
