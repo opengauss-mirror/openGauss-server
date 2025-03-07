@@ -7,7 +7,7 @@
 #define MatviewLogRelationId   9753
 #define MatviewLogRelationId_Rowtype_Id 9756
 
-CATALOG(gs_matview_log,9753) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
+CATALOG(gs_matview_log,9753) BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(9756) BKI_SCHEMA_MACRO
 {
     Oid         mlogid;
     Oid         relid;
