@@ -549,10 +549,14 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
     }
     PG_CATCH();
     {
+        CUDesc* cuDescPtr = rowgroup->m_cuDescs[m_ctidCol];
         pthread_rwlock_unlock(&rowgroup->m_mutex);
         m_imcstoreDesc->UnReferenceRowGroup();
         if (IsValidCacheSlotID(slotId)) {
             IMCU_CACHE->UnPinDataBlock(slotId);
+            IMCU_CACHE->DataBlockCompleteIO(slotId);
+            IMCU_CACHE->InvalidateCU((RelFileNodeOld *)&m_relation->rd_node, m_ctidCol, cuDescPtr->cu_id,
+                cuDescPtr->cu_pointer);
         }
         PG_RE_THROW();
     }

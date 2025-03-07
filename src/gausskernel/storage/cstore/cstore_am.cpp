@@ -2605,8 +2605,11 @@ int CStore::FillVector(_in_ int seq, _in_ CUDesc* cuDescPtr, _out_ ScalarVector*
     }
     PG_CATCH();
     {
-        if (IsValidCacheSlotID(slotId)) {
-            UnPinCUDataBlock(slotId);
+        if (m_isImcstore && IsValidCacheSlotID(slotId)) {
+            IMCU_CACHE->UnPinDataBlock(slotId);
+            IMCU_CACHE->DataBlockCompleteIO(slotId);
+            IMCU_CACHE->InvalidateCU((RelFileNodeOld *)&m_relation->rd_node, colIdx, cuDescPtr->cu_id,
+                cuDescPtr->cu_pointer);
         }
         PG_RE_THROW();
     }
