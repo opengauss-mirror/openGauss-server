@@ -537,13 +537,13 @@ typedef struct RecursiveUnion {
     /*
      * StartWith Support containt the pseudo target entry, also not-null indicates
      * a start-with converted recursive union
-     *  1. RUITR
-     *  2. array_key
-     *  3. array_col_nn
-     *  4. array_col_nn
+     *  1. array_key_
+     *  2. array_path_
+     *  3. array_root_
      *   ...
      */
     List *internalEntryList;
+    bool is_under_start_with; /* RU oper is under start with oper */
 } RecursiveUnion;
 
 /* ----------------
@@ -565,8 +565,8 @@ typedef struct StartWithOp
 
     List *keyEntryList;
     List *colEntryList;
-    List *internalEntryList;    /* RUITR, array_key, array_col */
-    List *fullEntryList;        /* level, isleaf, iscycle, RUITR, array_key, array_col */
+    List *internalEntryList;    /* array_key, array_path, array_root  */
+    List *fullEntryList;        /* level, isleaf, iscycle, array_key, array_path, array_root */
 
     /*
      * swoptions, normally store some static information that derived from SQL parsing
@@ -584,6 +584,12 @@ typedef struct StartWithOp
     uint16      swExecOptions;
 
     List *prcTargetEntryList;
+    List *connect_by_qual;
+    List *start_with_qual;
+    List *path_entry_list; /* stores targetEntry A in sys_connect_by_path(A,'-') */
+    List *root_entry_list; /* stores targetEntry A in connect_by_root(A) */
+    List *internal_path_entry_list; /* stores targetEntry coresponds to sys_connect_by_path() */
+    List *internal_root_entry_list; /* stores targetEntry coresponds to connect_by_root() */
 } StartWithOp;
 
 /* ----------------

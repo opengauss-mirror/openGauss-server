@@ -83,6 +83,7 @@ const uint32 GRAND_VERSION_NUM = 93040;
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 SWCB_OPTIMIZATION_VERSION_NUM = 93040;
 const uint32 DISABLE_MOT_ENGINE = 93039;
 const uint32 ANALYZE_PARTITION_VERSION_NUMBER = 93037;
 const uint32 NLS_LOWER_VERSION_NUMBER = 93036;

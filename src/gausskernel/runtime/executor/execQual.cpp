@@ -7682,7 +7682,7 @@ static Datum ExecEvalPriorExpr(ExprState* exprstate, ExprContext* econtext, bool
     return GetPriorValue(slot, exprstate, econtext, attnum, isNull);
 }
 
-static AttrNumber GetInternalArrayAttnum(TupleDesc tupDesc, AttrNumber origVarAttno)
+static AttrNumber GetInternalArrayAttnum(TupleDesc tupDesc, AttrNumber origVarAttno, bool isPath)
 {
     NameData arrayAttName;
     AttrNumber  arrayAttNum = InvalidAttrNumber;
@@ -7690,7 +7690,11 @@ static AttrNumber GetInternalArrayAttnum(TupleDesc tupDesc, AttrNumber origVarAt
 
     rc = memset_s(arrayAttName.data, NAMEDATALEN, 0, NAMEDATALEN);
     securec_check(rc, "\0", "\0");
-    rc = sprintf_s(arrayAttName.data, NAMEDATALEN, "array_col_%d", origVarAttno);
+    if (isPath) {
+        rc = sprintf_s(arrayAttName.data, NAMEDATALEN, "array_path_%d", origVarAttno);
+    } else {
+        rc = sprintf_s(arrayAttName.data, NAMEDATALEN, "array_root_%d", origVarAttno);
+    }
     securec_check_ss(rc, "\0", "\0");
 
     /* find proper internal array to support */
@@ -7721,7 +7725,7 @@ static Datum GetPriorValue(TupleTableSlot *slot, ExprState *exprstate, ExprConte
     /* context check */
     Assert (econtext != NULL && exprstate != NULL && !TupIsNull(slot));
 
-    AttrNumber arrayColAttnum = GetInternalArrayAttnum(tupDesc , origAttnum);
+    AttrNumber arrayColAttnum = GetInternalArrayAttnum(tupDesc, origAttnum, true);
     Datum arrayColDatum = heap_slot_getattr(slot, arrayColAttnum, &arrayIsNull);
     Assert (!arrayIsNull && origAttnum != InvalidAttrNumber &&
             arrayColAttnum != InvalidAttrNumber);

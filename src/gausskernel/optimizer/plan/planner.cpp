@@ -1374,6 +1374,24 @@ static inline bool contain_placeholdervar(Node *var_list)
     return result;
 }
 
+static void preprocess_ru_is_under_start_with(PlannerInfo* root)
+{
+    PlannerInfo* parent = root->parent_root;
+    if (parent && parent->ru_is_under_start_with) {
+        root->ru_is_under_start_with = true;
+    } else {
+        ListCell* lc;
+        Query* parse = root->parse;
+        foreach(lc, parse->cteList) {
+            CommonTableExpr* cte = (CommonTableExpr*)lfirst(lc);
+            if (cte->swoptions) {
+                root->ru_is_under_start_with = true;
+                break;
+            }
+        }
+    }
+}
+
 /* --------------------
  * subquery_planner
  *	  Invokes the planner on a subquery.  We recurse to here for each
@@ -1497,6 +1515,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     if (parent_root != NULL && parent_root->is_under_recursive_cte && parent_root->is_correlated) {
         root->is_correlated = true;
     }
+
+    preprocess_ru_is_under_start_with(root);
 
     DEBUG_QRW("Before rewrite");
 

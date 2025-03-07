@@ -1679,6 +1679,7 @@ typedef struct StartWithOptions {
 
     /* flag to indicate nocycle */
     bool     nocycle;
+    Node *start_with_quals;
 } StartWithOptions;
 
 /*

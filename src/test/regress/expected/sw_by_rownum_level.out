@@ -9,14 +9,13 @@ select * from test_area CONNECT BY LEVEL <= LENGTH('SOME TEXT');
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR
+           Start With pseudo atts: 
            ->  Recursive Union
                  ->  Seq Scan on test_area
                  ->  Nested Loop
                        ->  WorkTable Scan on tmp_reuslt
-                       ->  Materialize
-                             ->  Seq Scan on test_area
-(10 rows)
+                       ->  Seq Scan on test_area
+(9 rows)
 
 explain (costs off)
 select *, LEVEL from test_area CONNECT BY LEVEL <= LENGTH('SOME TEXT');
@@ -25,14 +24,13 @@ select *, LEVEL from test_area CONNECT BY LEVEL <= LENGTH('SOME TEXT');
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR
+           Start With pseudo atts: 
            ->  Recursive Union
                  ->  Seq Scan on test_area
                  ->  Nested Loop
                        ->  WorkTable Scan on tmp_reuslt
-                       ->  Materialize
-                             ->  Seq Scan on test_area
-(10 rows)
+                       ->  Seq Scan on test_area
+(9 rows)
 
 explain (costs off)
 select * from test_area CONNECT BY ROWNUM <= LENGTH('SOME TEXT');
@@ -41,14 +39,13 @@ select * from test_area CONNECT BY ROWNUM <= LENGTH('SOME TEXT');
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR
+           Start With pseudo atts: 
            ->  Recursive Union
                  ->  Seq Scan on test_area
                  ->  Nested Loop
                        ->  WorkTable Scan on tmp_reuslt
-                       ->  Materialize
-                             ->  Seq Scan on test_area
-(10 rows)
+                       ->  Seq Scan on test_area
+(9 rows)
 
 explain (costs off)
 select *, ROWNUM from test_area CONNECT BY ROWNUM <= LENGTH('SOME TEXT');
@@ -57,14 +54,13 @@ select *, ROWNUM from test_area CONNECT BY ROWNUM <= LENGTH('SOME TEXT');
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR
+           Start With pseudo atts: 
            ->  Recursive Union
                  ->  Seq Scan on test_area
                  ->  Nested Loop
                        ->  WorkTable Scan on tmp_reuslt
-                       ->  Materialize
-                             ->  Seq Scan on test_area
-(10 rows)
+                       ->  Seq Scan on test_area
+(9 rows)
 
 explain (costs off)
 select * from test_area CONNECT BY LEVEL < LENGTH('SOME TEXT');
@@ -73,14 +69,13 @@ select * from test_area CONNECT BY LEVEL < LENGTH('SOME TEXT');
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR
+           Start With pseudo atts: 
            ->  Recursive Union
                  ->  Seq Scan on test_area
                  ->  Nested Loop
                        ->  WorkTable Scan on tmp_reuslt
-                       ->  Materialize
-                             ->  Seq Scan on test_area
-(10 rows)
+                       ->  Seq Scan on test_area
+(9 rows)
 
 explain (costs off)
 select *, LEVEL from test_area CONNECT BY LEVEL < LENGTH('SOME TEXT');
@@ -89,14 +84,13 @@ select *, LEVEL from test_area CONNECT BY LEVEL < LENGTH('SOME TEXT');
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR
+           Start With pseudo atts: 
            ->  Recursive Union
                  ->  Seq Scan on test_area
                  ->  Nested Loop
                        ->  WorkTable Scan on tmp_reuslt
-                       ->  Materialize
-                             ->  Seq Scan on test_area
-(10 rows)
+                       ->  Seq Scan on test_area
+(9 rows)
 
 explain (costs off)
 select * from test_area CONNECT BY ROWNUM < LENGTH('SOME TEXT');
@@ -105,14 +99,13 @@ select * from test_area CONNECT BY ROWNUM < LENGTH('SOME TEXT');
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR
+           Start With pseudo atts: 
            ->  Recursive Union
                  ->  Seq Scan on test_area
                  ->  Nested Loop
                        ->  WorkTable Scan on tmp_reuslt
-                       ->  Materialize
-                             ->  Seq Scan on test_area
-(10 rows)
+                       ->  Seq Scan on test_area
+(9 rows)
 
 explain (costs off)
 select *, ROWNUM from test_area CONNECT BY ROWNUM < LENGTH('SOME TEXT');
@@ -121,14 +114,13 @@ select *, ROWNUM from test_area CONNECT BY ROWNUM < LENGTH('SOME TEXT');
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR
+           Start With pseudo atts: 
            ->  Recursive Union
                  ->  Seq Scan on test_area
                  ->  Nested Loop
                        ->  WorkTable Scan on tmp_reuslt
-                       ->  Materialize
-                             ->  Seq Scan on test_area
-(10 rows)
+                       ->  Seq Scan on test_area
+(9 rows)
 
 --rejected cases
 explain (costs off)
@@ -138,14 +130,13 @@ select *, LEVEL from test_area CONNECT BY LEVEL > LENGTH('SOME TEXT');
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR
+           Start With pseudo atts: 
            ->  Recursive Union
                  ->  Seq Scan on test_area
                  ->  Nested Loop
                        ->  WorkTable Scan on tmp_reuslt
-                       ->  Materialize
-                             ->  Seq Scan on test_area
-(10 rows)
+                       ->  Seq Scan on test_area
+(9 rows)
 
 explain (costs off)
 select *, LEVEL from test_area CONNECT BY LEVEL >= LENGTH('SOME TEXT');
@@ -154,14 +145,13 @@ select *, LEVEL from test_area CONNECT BY LEVEL >= LENGTH('SOME TEXT');
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
-           Start With pseudo atts: RUITR
+           Start With pseudo atts: 
            ->  Recursive Union
                  ->  Seq Scan on test_area
                  ->  Nested Loop
                        ->  WorkTable Scan on tmp_reuslt
-                       ->  Materialize
-                             ->  Seq Scan on test_area
-(10 rows)
+                       ->  Seq Scan on test_area
+(9 rows)
 
 explain (costs off)
 select * from test_area CONNECT BY APPLE > LENGTH('SOME TEXT');
@@ -190,7 +180,7 @@ select pg_get_viewdef('startwith_mv', true);
           SELECT  *                                                      +
             FROM startwith_t                                             +
          )                                                               +
-  SELECT t.id, t.connect_by_isleaf AS level, t.level AS connect_by_isleaf+
+  SELECT t.id                                                            +
     FROM t;
 (1 row)
 

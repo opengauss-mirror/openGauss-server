@@ -31,9 +31,9 @@ typedef enum StartWithOpColumnType
     SWCOL_ROWNUM,
 
     /* Pseudo internal columns, first generated in RuScan */
-    SWCOL_RUITR,
     SWCOL_ARRAY_KEY,
-    SWCOL_ARRAY_COL,
+    SWCOL_ARRAY_PATH,
+    SWCOL_ARRAY_ROOT,
 
     /* Pseudo internal columns for siblings */
     SWCOL_ARRAY_SIBLINGS,

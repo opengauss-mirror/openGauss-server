@@ -893,3 +893,25 @@ select id, rownum, level from t_test_connect_by_rownum connect by rownum < 3;
 select id, rownum, level from t_test_connect_by_rownum connect by rownum < 4;
 select id, rownum, level from t_test_connect_by_rownum connect by rownum < 5;
 drop table t_test_connect_by_rownum;
+
+-- test for swcb optimization
+drop table if exists swcb_opt_t1;
+drop table if exists swcb_opt_t2;
+create table swcb_opt_t1(a int);
+create table swcb_opt_t2(b int);
+insert into swcb_opt_t1 values(1);
+insert into swcb_opt_t1 values(2);
+insert into swcb_opt_t1 values(3);
+insert into swcb_opt_t1 values(4);
+insert into swcb_opt_t1 values(5);
+insert into swcb_opt_t2 select a+1 from swcb_opt_t1;
+insert into swcb_opt_t1 select * from swcb_opt_t1;
+insert into swcb_opt_t1 select distinct a from swcb_opt_t1;
+insert into swcb_opt_t2 select * from swcb_opt_t2;
+insert into swcb_opt_t2 select distinct b from swcb_opt_t2;
+
+explain (costs off) select a,b from swcb_opt_t1,swcb_opt_t2 where a in (select temp.a from swcb_opt_t1 temp where temp.a=1)
+start with a=1 connect by nocycle prior b=a order by 1,2;
+
+drop table swcb_opt_t1;
+drop table swcb_opt_t2;

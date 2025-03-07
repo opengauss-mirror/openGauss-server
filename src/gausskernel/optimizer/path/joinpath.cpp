@@ -674,7 +674,8 @@ static void try_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
     int max_dop = (required_outer != NULL) ? 1 : u_sess->opt_cxt.query_dop;
     initial_cost_nestloop(root, &workspace, jointype, outer_path, inner_path, extra, max_dop);
 
-    if (add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, pathkeys, required_outer) ||
+    if (root->ru_is_under_start_with ||
+        add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, pathkeys, required_outer) ||
         add_path_hintcheck(root->parse->hintState, joinrel->relids, outer_path, inner_path, HINT_KEYWORD_NESTLOOP)) {
 
 #ifdef STREAMPLAN
@@ -885,7 +886,8 @@ static void try_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
     initial_cost_mergejoin(
         root, &workspace, jointype, mergeclauses, outer_path, inner_path, outersortkeys, innersortkeys, extra);
 
-    if (add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, pathkeys, required_outer) ||
+    if (root->ru_is_under_start_with ||
+        add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, pathkeys, required_outer) ||
         add_path_hintcheck(root->parse->hintState, joinrel->relids, outer_path, inner_path, HINT_KEYWORD_MERGEJOIN)) {
 #ifdef STREAMPLAN
         /* check exec type of inner and outer path before generate join path. */
@@ -1091,7 +1093,8 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
     initial_cost_hashjoin(
         root, &workspace, jointype, hashclauses, outer_path, inner_path, extra, max_dop);
 
-    if (add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, NIL, required_outer) ||
+    if (root->ru_is_under_start_with ||
+        add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, NIL, required_outer) ||
         add_path_hintcheck(root->parse->hintState, joinrel->relids, outer_path, inner_path, HINT_KEYWORD_HASHJOIN)) {
 #ifdef STREAMPLAN
         /* check exec type of inner and outer path before generate join path. */

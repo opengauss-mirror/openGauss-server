@@ -6469,6 +6469,7 @@ void set_values_size_estimates(PlannerInfo* root, RelOptInfo* rel)
 void set_cte_size_estimates(PlannerInfo* root, RelOptInfo* rel, Plan* cteplan)
 {
     RangeTblEntry* rte = NULL;
+    const int numTen = 10;
 
     /* Should only be applied to base relations that are CTE references */
     AssertEreport(rel->relid > 0,
@@ -6480,12 +6481,21 @@ void set_cte_size_estimates(PlannerInfo* root, RelOptInfo* rel, Plan* cteplan)
         "Only common table expr can be supported"
         "when set the size estimates for a base relation that is a CTE reference.");
 
+    if (!rte->swConverted) {
+        rte->swConverted = IsRteForStartWith(root, rte);
+    }
+
     if (rte->self_reference) {
         /*
          * In a self-reference, arbitrarily assume the average worktable size
          * is about 10 times the nonrecursive term's size.
+         * In start-with case, each interation there is only one tuple.
          */
-        rel->tuples = 10 * cteplan->plan_rows;
+        if (rte->swConverted) {
+            rel->tuples = 1;
+        } else {
+            rel->tuples = numTen * cteplan->plan_rows;
+        }
     } else {
         /* Otherwise just believe the CTE plan's output estimate */
         rel->tuples = cteplan->plan_rows;

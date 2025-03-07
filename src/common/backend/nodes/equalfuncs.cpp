@@ -3322,7 +3322,7 @@ static bool _equalStartWithOptions(const StartWithOptions * a, const StartWithOp
     COMPARE_NODE_FIELD(connect_by_level_quals);
     COMPARE_NODE_FIELD(connect_by_other_quals);
     COMPARE_SCALAR_FIELD(nocycle);
-
+    COMPARE_NODE_FIELD(start_with_quals);
     return true;
 }
 

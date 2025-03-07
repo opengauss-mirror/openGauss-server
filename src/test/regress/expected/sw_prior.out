@@ -25,12 +25,12 @@ START WITH node1 LIKE 'A%'
 CONNECT BY PRIOR node2 = node1;
  node0 | node1 | node2 
 -------+-------+-------
- A1    | B1    | K5
  A1    | B1    | I2
- A1    | B2    | J1
+ A1    | B1    | K5
  A1    | B2    | K5
- A2    | B1    | K5
+ A1    | B2    | J1
  A2    | B1    | I2
+ A2    | B1    | K5
  A2    | B3    | 
  A3    | G7    | 
  A3    | H9    | L7
@@ -172,10 +172,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_int1 |  current_name  | current_int1 
 ----------------+-------------+----------------+--------------
                 |             | top_father     | 1
- top_father     | 1           | second_father1 | 2
- second_father1 | 2           | third_father1  | 4
  top_father     | 1           | second_father2 | 3
  second_father2 | 3           | third_father2  | 5
+ top_father     | 1           | second_father1 | 2
+ second_father1 | 2           | third_father1  | 4
 (5 rows)
 
 SELECT
@@ -189,10 +189,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_int2 |  current_name  | current_int2 
 ----------------+-------------+----------------+--------------
                 |             | top_father     |            1
- top_father     |           1 | second_father1 |            2
- second_father1 |           2 | third_father1  |            4
  top_father     |           1 | second_father2 |            3
  second_father2 |           3 | third_father2  |            5
+ top_father     |           1 | second_father1 |            2
+ second_father1 |           2 | third_father1  |            4
 (5 rows)
 
 SELECT
@@ -206,10 +206,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_int4 |  current_name  | current_int4 
 ----------------+-------------+----------------+--------------
                 |             | top_father     |            1
- top_father     |           1 | second_father1 |            2
- second_father1 |           2 | third_father1  |            4
  top_father     |           1 | second_father2 |            3
  second_father2 |           3 | third_father2  |            5
+ top_father     |           1 | second_father1 |            2
+ second_father1 |           2 | third_father1  |            4
 (5 rows)
 
 SELECT
@@ -223,10 +223,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_int8 |  current_name  | current_int8 
 ----------------+-------------+----------------+--------------
                 |             | top_father     |            1
- top_father     |           1 | second_father1 |            2
- second_father1 |           2 | third_father1  |            4
  top_father     |           1 | second_father2 |            3
  second_father2 |           3 | third_father2  |            5
+ top_father     |           1 | second_father1 |            2
+ second_father1 |           2 | third_father1  |            4
 (5 rows)
 
 SELECT
@@ -240,10 +240,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_float4 |  current_name  | current_float4 
 ----------------+---------------+----------------+----------------
                 |               | top_father     |            1.1
- top_father     |           1.1 | second_father1 |            1.2
- second_father1 |           1.2 | third_father1  |            1.4
  top_father     |           1.1 | second_father2 |            1.3
  second_father2 |           1.3 | third_father2  |            1.5
+ top_father     |           1.1 | second_father1 |            1.2
+ second_father1 |           1.2 | third_father1  |            1.4
 (5 rows)
 
 SELECT
@@ -257,10 +257,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_float8 |  current_name  | current_float8 
 ----------------+---------------+----------------+----------------
                 |               | top_father     |            1.1
- top_father     |           1.1 | second_father1 |            1.2
- second_father1 |           1.2 | third_father1  |            1.4
  top_father     |           1.1 | second_father2 |            1.3
  second_father2 |           1.3 | third_father2  |            1.5
+ top_father     |           1.1 | second_father1 |            1.2
+ second_father1 |           1.2 | third_father1  |            1.4
 (5 rows)
 
 SELECT
@@ -274,10 +274,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_numeric |  current_name  | current_numeric 
 ----------------+----------------+----------------+-----------------
                 |                | top_father     |        1.100000
- top_father     |       1.100000 | second_father1 |        1.200000
- second_father1 |       1.200000 | third_father1  |        1.400000
  top_father     |       1.100000 | second_father2 |        1.300000
  second_father2 |       1.300000 | third_father2  |        1.500000
+ top_father     |       1.100000 | second_father1 |        1.200000
+ second_father1 |       1.200000 | third_father1  |        1.400000
 (5 rows)
 
 SELECT
@@ -288,7 +288,7 @@ name AS current_name,
 FROM test_type_table
 START WITH id = 1
 CONNECT BY PRIOR id = pid;
-ERROR:  unspported type for attname:bit5 (typid:1560 typname:bit)
+ERROR:  unspported type for attname:test_type_table@bit5 (typid:1560 typname:bit)
 SELECT
 PRIOR name AS father_name,
 PRIOR "boolean" AS father_boolean,
@@ -300,10 +300,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_boolean |  current_name  | current_boolean 
 ----------------+----------------+----------------+-----------------
                 |                | top_father     | t
- top_father     | t              | second_father1 | f
- second_father1 | f              | third_father1  | f
  top_father     | t              | second_father2 | t
  second_father2 | t              | third_father2  | t
+ top_father     | t              | second_father1 | f
+ second_father1 | f              | third_father1  | f
 (5 rows)
 
 SELECT
@@ -317,10 +317,10 @@ CONNECT BY PRIOR id = pid;
   father_name   |       father_date        |  current_name  |       current_date       
 ----------------+--------------------------+----------------+--------------------------
                 |                          | top_father     | Mon Jan 01 00:00:00 2024
- top_father     | Mon Jan 01 00:00:00 2024 | second_father1 | Tue Jan 02 00:00:00 2024
- second_father1 | Tue Jan 02 00:00:00 2024 | third_father1  | Thu Jan 04 00:00:00 2024
  top_father     | Mon Jan 01 00:00:00 2024 | second_father2 | Wed Jan 03 00:00:00 2024
  second_father2 | Wed Jan 03 00:00:00 2024 | third_father2  | Fri Jan 05 00:00:00 2024
+ top_father     | Mon Jan 01 00:00:00 2024 | second_father1 | Tue Jan 02 00:00:00 2024
+ second_father1 | Tue Jan 02 00:00:00 2024 | third_father1  | Thu Jan 04 00:00:00 2024
 (5 rows)
 
 SELECT
@@ -334,10 +334,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_time |  current_name  | current_time 
 ----------------+-------------+----------------+--------------
                 |             | top_father     | 00:00:01
- top_father     | 00:00:01    | second_father1 | 00:00:02
- second_father1 | 00:00:02    | third_father1  | 00:00:04
  top_father     | 00:00:01    | second_father2 | 00:00:03
  second_father2 | 00:00:03    | third_father2  | 00:00:05
+ top_father     | 00:00:01    | second_father1 | 00:00:02
+ second_father1 | 00:00:02    | third_father1  | 00:00:04
 (5 rows)
 
 SELECT
@@ -351,10 +351,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_timetz |  current_name  | current_timetz 
 ----------------+---------------+----------------+----------------
                 |               | top_father     | 00:00:01+08
- top_father     | 00:00:01+08   | second_father1 | 00:00:02+08
- second_father1 | 00:00:02+08   | third_father1  | 00:00:04+08
  top_father     | 00:00:01+08   | second_father2 | 00:00:03+08
  second_father2 | 00:00:03+08   | third_father2  | 00:00:05+08
+ top_father     | 00:00:01+08   | second_father1 | 00:00:02+08
+ second_father1 | 00:00:02+08   | third_father1  | 00:00:04+08
 (5 rows)
 
 SELECT
@@ -368,10 +368,10 @@ CONNECT BY PRIOR id = pid;
   father_name   |     father_timestamp     |  current_name  |    current_timestamp     
 ----------------+--------------------------+----------------+--------------------------
                 |                          | top_father     | Mon Jan 01 00:00:01 2024
- top_father     | Mon Jan 01 00:00:01 2024 | second_father1 | Tue Jan 02 00:00:02 2024
- second_father1 | Tue Jan 02 00:00:02 2024 | third_father1  | Thu Jan 04 00:00:04 2024
  top_father     | Mon Jan 01 00:00:01 2024 | second_father2 | Wed Jan 03 00:00:03 2024
  second_father2 | Wed Jan 03 00:00:03 2024 | third_father2  | Fri Jan 05 00:00:05 2024
+ top_father     | Mon Jan 01 00:00:01 2024 | second_father1 | Tue Jan 02 00:00:02 2024
+ second_father1 | Tue Jan 02 00:00:02 2024 | third_father1  | Thu Jan 04 00:00:04 2024
 (5 rows)
 
 SELECT
@@ -385,10 +385,10 @@ CONNECT BY PRIOR id = pid;
   father_name   |      father_timestamptz      |  current_name  |     current_timestamptz      
 ----------------+------------------------------+----------------+------------------------------
                 |                              | top_father     | Mon Jan 01 00:00:01 2024 CST
- top_father     | Mon Jan 01 14:00:01 2024 CST | second_father1 | Tue Jan 02 00:00:02 2024 CST
- second_father1 | Tue Jan 02 14:00:02 2024 CST | third_father1  | Thu Jan 04 00:00:04 2024 CST
  top_father     | Mon Jan 01 14:00:01 2024 CST | second_father2 | Wed Jan 03 00:00:03 2024 CST
  second_father2 | Wed Jan 03 14:00:03 2024 CST | third_father2  | Fri Jan 05 00:00:05 2024 CST
+ top_father     | Mon Jan 01 14:00:01 2024 CST | second_father1 | Tue Jan 02 00:00:02 2024 CST
+ second_father1 | Tue Jan 02 14:00:02 2024 CST | third_father1  | Thu Jan 04 00:00:04 2024 CST
 (5 rows)
 
 SELECT
@@ -402,10 +402,10 @@ CONNECT BY PRIOR id = pid;
   father_name   |     father_char      |  current_name  |     current_char     
 ----------------+----------------------+----------------+----------------------
                 |                      | top_father     | top_father          
- top_father     | top_father           | second_father1 | second_father1      
- second_father1 | second_father1       | third_father1  | third_father1       
  top_father     | top_father           | second_father2 | second_father2      
  second_father2 | second_father2       | third_father2  | third_father2       
+ top_father     | top_father           | second_father1 | second_father1      
+ second_father1 | second_father1       | third_father1  | third_father1       
 (5 rows)
 
 SELECT
@@ -419,10 +419,10 @@ CONNECT BY PRIOR id = pid;
   father_name   | father_varchar |  current_name  | current_varchar 
 ----------------+----------------+----------------+-----------------
                 |                | top_father     | top_father
- top_father     | top_father     | second_father1 | second_father1
- second_father1 | second_father1 | third_father1  | third_father1
  top_father     | top_father     | second_father2 | second_father2
  second_father2 | second_father2 | third_father2  | third_father2
+ top_father     | top_father     | second_father1 | second_father1
+ second_father1 | second_father1 | third_father1  | third_father1
 (5 rows)
 
 SELECT
@@ -433,7 +433,7 @@ name AS current_name,
 FROM test_type_table
 START WITH id = 1
 CONNECT BY PRIOR id = pid;
-ERROR:  unspported type for attname:blob (typid:88 typname:blob)
+ERROR:  unspported type for attname:test_type_table@blob (typid:88 typname:blob)
 SELECT
 PRIOR name AS father_name,
 PRIOR "text" AS father_text,
@@ -445,10 +445,10 @@ CONNECT BY PRIOR id = pid;
   father_name   |  father_text   |  current_name  |  current_text  
 ----------------+----------------+----------------+----------------
                 |                | top_father     | top_father
- top_father     | top_father     | second_father1 | second_father1
- second_father1 | second_father1 | third_father1  | third_father1
  top_father     | top_father     | second_father2 | second_father2
  second_father2 | second_father2 | third_father2  | third_father2
+ top_father     | top_father     | second_father1 | second_father1
+ second_father1 | second_father1 | third_father1  | third_father1
 (5 rows)
 
 -- test about WHERE clause
@@ -462,8 +462,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_int1 | current_name  | current_int1 
 ----------------+-------------+---------------+--------------
- second_father1 | 2           | third_father1 | 4
  second_father2 | 3           | third_father2 | 5
+ second_father1 | 2           | third_father1 | 4
 (2 rows)
 
 SELECT
@@ -476,8 +476,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_int2 | current_name  | current_int2 
 ----------------+-------------+---------------+--------------
- second_father1 |           2 | third_father1 |            4
  second_father2 |           3 | third_father2 |            5
+ second_father1 |           2 | third_father1 |            4
 (2 rows)
 
 SELECT
@@ -490,8 +490,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_int4 | current_name  | current_int4 
 ----------------+-------------+---------------+--------------
- second_father1 |           2 | third_father1 |            4
  second_father2 |           3 | third_father2 |            5
+ second_father1 |           2 | third_father1 |            4
 (2 rows)
 
 SELECT
@@ -504,8 +504,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_int8 | current_name  | current_int8 
 ----------------+-------------+---------------+--------------
- second_father1 |           2 | third_father1 |            4
  second_father2 |           3 | third_father2 |            5
+ second_father1 |           2 | third_father1 |            4
 (2 rows)
 
 SELECT
@@ -518,10 +518,10 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_float4 |  current_name  | current_float4 
 ----------------+---------------+----------------+----------------
- top_father     |           1.1 | second_father1 |            1.2
- second_father1 |           1.2 | third_father1  |            1.4
  top_father     |           1.1 | second_father2 |            1.3
  second_father2 |           1.3 | third_father2  |            1.5
+ top_father     |           1.1 | second_father1 |            1.2
+ second_father1 |           1.2 | third_father1  |            1.4
 (4 rows)
 
 SELECT
@@ -534,8 +534,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_float8 | current_name  | current_float8 
 ----------------+---------------+---------------+----------------
- second_father1 |           1.2 | third_father1 |            1.4
  second_father2 |           1.3 | third_father2 |            1.5
+ second_father1 |           1.2 | third_father1 |            1.4
 (2 rows)
 
 SELECT
@@ -548,8 +548,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_numeric | current_name  | current_numeric 
 ----------------+----------------+---------------+-----------------
- second_father1 |       1.200000 | third_father1 |        1.400000
  second_father2 |       1.300000 | third_father2 |        1.500000
+ second_father1 |       1.200000 | third_father1 |        1.400000
 (2 rows)
 
 SELECT
@@ -560,7 +560,7 @@ name AS current_name,
 FROM test_type_table WHERE "bit5" > b'00001'
 START WITH id = 1
 CONNECT BY PRIOR id = pid;
-ERROR:  unspported type for attname:bit5 (typid:1560 typname:bit)
+ERROR:  unspported type for attname:test_type_table@bit5 (typid:1560 typname:bit)
 SELECT
 PRIOR name AS father_name,
 PRIOR "boolean" AS father_boolean,
@@ -571,9 +571,9 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_boolean |  current_name  | current_boolean 
 ----------------+----------------+----------------+-----------------
- top_father     | t              | second_father1 | f
  top_father     | t              | second_father2 | t
  second_father2 | t              | third_father2  | t
+ top_father     | t              | second_father1 | f
 (3 rows)
 
 SELECT
@@ -586,8 +586,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   |       father_date        | current_name  |       current_date       
 ----------------+--------------------------+---------------+--------------------------
- second_father1 | Tue Jan 02 00:00:00 2024 | third_father1 | Thu Jan 04 00:00:00 2024
  second_father2 | Wed Jan 03 00:00:00 2024 | third_father2 | Fri Jan 05 00:00:00 2024
+ second_father1 | Tue Jan 02 00:00:00 2024 | third_father1 | Thu Jan 04 00:00:00 2024
 (2 rows)
 
 SELECT
@@ -600,8 +600,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_time | current_name  | current_time 
 ----------------+-------------+---------------+--------------
- second_father1 | 00:00:02    | third_father1 | 00:00:04
  second_father2 | 00:00:03    | third_father2 | 00:00:05
+ second_father1 | 00:00:02    | third_father1 | 00:00:04
 (2 rows)
 
 SELECT
@@ -614,8 +614,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_timetz | current_name  | current_timetz 
 ----------------+---------------+---------------+----------------
- second_father1 | 00:00:02+08   | third_father1 | 00:00:04+08
  second_father2 | 00:00:03+08   | third_father2 | 00:00:05+08
+ second_father1 | 00:00:02+08   | third_father1 | 00:00:04+08
 (2 rows)
 
 SELECT
@@ -628,8 +628,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   |     father_timestamp     | current_name  |    current_timestamp     
 ----------------+--------------------------+---------------+--------------------------
- second_father1 | Tue Jan 02 00:00:02 2024 | third_father1 | Thu Jan 04 00:00:04 2024
  second_father2 | Wed Jan 03 00:00:03 2024 | third_father2 | Fri Jan 05 00:00:05 2024
+ second_father1 | Tue Jan 02 00:00:02 2024 | third_father1 | Thu Jan 04 00:00:04 2024
 (2 rows)
 
 SELECT
@@ -642,10 +642,10 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   |      father_timestamptz      |  current_name  |     current_timestamptz      
 ----------------+------------------------------+----------------+------------------------------
- top_father     | Mon Jan 01 14:00:01 2024 CST | second_father1 | Tue Jan 02 00:00:02 2024 CST
- second_father1 | Tue Jan 02 14:00:02 2024 CST | third_father1  | Thu Jan 04 00:00:04 2024 CST
  top_father     | Mon Jan 01 14:00:01 2024 CST | second_father2 | Wed Jan 03 00:00:03 2024 CST
  second_father2 | Wed Jan 03 14:00:03 2024 CST | third_father2  | Fri Jan 05 00:00:05 2024 CST
+ top_father     | Mon Jan 01 14:00:01 2024 CST | second_father1 | Tue Jan 02 00:00:02 2024 CST
+ second_father1 | Tue Jan 02 14:00:02 2024 CST | third_father1  | Thu Jan 04 00:00:04 2024 CST
 (4 rows)
 
 SELECT
@@ -658,8 +658,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   |     father_char      | current_name  |     current_char     
 ----------------+----------------------+---------------+----------------------
- second_father1 | second_father1       | third_father1 | third_father1       
  second_father2 | second_father2       | third_father2 | third_father2       
+ second_father1 | second_father1       | third_father1 | third_father1       
 (2 rows)
 
 SELECT
@@ -672,8 +672,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   | father_varchar | current_name  | current_varchar 
 ----------------+----------------+---------------+-----------------
- second_father1 | second_father1 | third_father1 | third_father1
  second_father2 | second_father2 | third_father2 | third_father2
+ second_father1 | second_father1 | third_father1 | third_father1
 (2 rows)
 
 SELECT
@@ -684,7 +684,7 @@ name AS current_name,
 FROM test_type_table WHERE PRIOR "blob" > '0A'
 START WITH id = 1
 CONNECT BY PRIOR id = pid;
-ERROR:  unspported type for attname:blob (typid:88 typname:blob)
+ERROR:  unspported type for attname:test_type_table@blob (typid:88 typname:blob)
 SELECT
 PRIOR name AS father_name,
 PRIOR "text" AS father_text,
@@ -695,8 +695,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid;
   father_name   |  father_text   | current_name  | current_text  
 ----------------+----------------+---------------+---------------
- second_father1 | second_father1 | third_father1 | third_father1
  second_father2 | second_father2 | third_father2 | third_father2
+ second_father1 | second_father1 | third_father1 | third_father1
 (2 rows)
 
 -- test about GROUP BY clause
@@ -708,10 +708,10 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "int1";
  int1 | count 
 ------+-------
+ 2    |     1
  1    |     2
  3    |     1
       |     1
- 2    |     1
 (4 rows)
 
 SELECT
@@ -722,10 +722,10 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "int2";
  int2 | count 
 ------+-------
+    2 |     1
     1 |     2
     3 |     1
       |     1
-    2 |     1
 (4 rows)
 
 SELECT
@@ -736,10 +736,10 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "int4";
  int4 | count 
 ------+-------
+    2 |     1
     1 |     2
     3 |     1
       |     1
-    2 |     1
 (4 rows)
 
 SELECT
@@ -750,10 +750,10 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "int8";
  int8 | count 
 ------+-------
+    2 |     1
     1 |     2
     3 |     1
       |     1
-    2 |     1
 (4 rows)
 
 SELECT
@@ -764,9 +764,9 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "float4";
  float4 | count 
 --------+-------
+    1.2 |     1
         |     1
     1.1 |     2
-    1.2 |     1
     1.3 |     1
 (4 rows)
 
@@ -779,9 +779,9 @@ CONNECT BY PRIOR id = pid GROUP BY PRIOR "float8";
  float8 | count 
 --------+-------
     1.1 |     2
-        |     1
     1.3 |     1
     1.2 |     1
+        |     1
 (4 rows)
 
 SELECT
@@ -792,10 +792,10 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "numeric";
  numeric  | count 
 ----------+-------
+ 1.300000 |     1
+ 1.100000 |     2
  1.200000 |     1
           |     1
- 1.100000 |     2
- 1.300000 |     1
 (4 rows)
 
 SELECT
@@ -804,7 +804,7 @@ COUNT(ID)
 FROM test_type_table
 START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "bit5";
-ERROR:  unspported type for attname:bit5 (typid:1560 typname:bit)
+ERROR:  unspported type for attname:test_type_table@bit5 (typid:1560 typname:bit)
 SELECT
 PRIOR "boolean",
 COUNT(ID)
@@ -813,9 +813,9 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "boolean";
  boolean | count 
 ---------+-------
+         |     1
  t       |     3
  f       |     1
-         |     1
 (3 rows)
 
 SELECT
@@ -826,10 +826,10 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "date";
            date           | count 
 --------------------------+-------
- Wed Jan 03 00:00:00 2024 |     1
-                          |     1
- Tue Jan 02 00:00:00 2024 |     1
  Mon Jan 01 00:00:00 2024 |     2
+ Wed Jan 03 00:00:00 2024 |     1
+ Tue Jan 02 00:00:00 2024 |     1
+                          |     1
 (4 rows)
 
 SELECT
@@ -842,8 +842,8 @@ CONNECT BY PRIOR id = pid GROUP BY PRIOR "time";
 ----------+-------
  00:00:03 |     1
  00:00:02 |     1
-          |     1
  00:00:01 |     2
+          |     1
 (4 rows)
 
 SELECT
@@ -855,9 +855,9 @@ CONNECT BY PRIOR id = pid GROUP BY PRIOR "timetz";
    timetz    | count 
 -------------+-------
  00:00:01+08 |     2
+ 00:00:02+08 |     1
  00:00:03+08 |     1
              |     1
- 00:00:02+08 |     1
 (4 rows)
 
 SELECT
@@ -868,10 +868,10 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "timestamp";
         timestamp         | count 
 --------------------------+-------
-                          |     1
- Tue Jan 02 00:00:02 2024 |     1
- Wed Jan 03 00:00:03 2024 |     1
  Mon Jan 01 00:00:01 2024 |     2
+ Wed Jan 03 00:00:03 2024 |     1
+ Tue Jan 02 00:00:02 2024 |     1
+                          |     1
 (4 rows)
 
 SELECT
@@ -882,10 +882,10 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "timestamptz";
          timestamptz          | count 
 ------------------------------+-------
+ Mon Jan 01 14:00:01 2024 CST |     2
+ Tue Jan 02 14:00:02 2024 CST |     1
  Wed Jan 03 14:00:03 2024 CST |     1
                               |     1
- Tue Jan 02 14:00:02 2024 CST |     1
- Mon Jan 01 14:00:01 2024 CST |     2
 (4 rows)
 
 SELECT
@@ -897,9 +897,9 @@ CONNECT BY PRIOR id = pid GROUP BY PRIOR "char";
          char         | count 
 ----------------------+-------
  second_father2       |     1
-                      |     1
  top_father           |     2
  second_father1       |     1
+                      |     1
 (4 rows)
 
 SELECT
@@ -911,9 +911,9 @@ CONNECT BY PRIOR id = pid GROUP BY PRIOR "varchar";
     varchar     | count 
 ----------------+-------
  second_father2 |     1
-                |     1
  top_father     |     2
  second_father1 |     1
+                |     1
 (4 rows)
 
 SELECT
@@ -922,7 +922,7 @@ COUNT(ID)
 FROM test_type_table
 START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "blob";
-ERROR:  unspported type for attname:blob (typid:88 typname:blob)
+ERROR:  unspported type for attname:test_type_table@blob (typid:88 typname:blob)
 SELECT
 PRIOR "text",
 COUNT(ID)
@@ -932,9 +932,9 @@ CONNECT BY PRIOR id = pid GROUP BY PRIOR "text";
       text      | count 
 ----------------+-------
  second_father2 |     1
-                |     1
  top_father     |     2
  second_father1 |     1
+                |     1
 (4 rows)
 
 -- test about HAVING clause
@@ -994,9 +994,9 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "float4" HAVING PRIOR "float4" > 1.1;
  float4 | count 
 --------+-------
-    1.2 |     1
     1.1 |     2
     1.3 |     1
+    1.2 |     1
 (3 rows)
 
 SELECT
@@ -1029,7 +1029,7 @@ COUNT(ID)
 FROM test_type_table
 START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "bit5" HAVING PRIOR "bit5" > b'00001';
-ERROR:  unspported type for attname:bit5 (typid:1560 typname:bit)
+ERROR:  unspported type for attname:test_type_table@bit5 (typid:1560 typname:bit)
 SELECT
 PRIOR "boolean",
 COUNT(ID)
@@ -1049,8 +1049,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "date" HAVING PRIOR "date" > '2024-01-01';
            date           | count 
 --------------------------+-------
- Wed Jan 03 00:00:00 2024 |     1
  Tue Jan 02 00:00:00 2024 |     1
+ Wed Jan 03 00:00:00 2024 |     1
 (2 rows)
 
 SELECT
@@ -1085,8 +1085,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "timestamp" HAVING PRIOR "timestamp" > '2024-01-01 00:00:01';
         timestamp         | count 
 --------------------------+-------
- Wed Jan 03 00:00:03 2024 |     1
  Tue Jan 02 00:00:02 2024 |     1
+ Wed Jan 03 00:00:03 2024 |     1
 (2 rows)
 
 SELECT
@@ -1097,9 +1097,9 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "timestamptz" HAVING PRIOR "timestamptz" > '2024-01-01 00:00:01';
          timestamptz          | count 
 ------------------------------+-------
+ Mon Jan 01 14:00:01 2024 CST |     2
  Wed Jan 03 14:00:03 2024 CST |     1
  Tue Jan 02 14:00:02 2024 CST |     1
- Mon Jan 01 14:00:01 2024 CST |     2
 (3 rows)
 
 SELECT
@@ -1110,8 +1110,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "char" HAVING PRIOR "char" LIKE '%second%';
          char         | count 
 ----------------------+-------
- second_father1       |     1
  second_father2       |     1
+ second_father1       |     1
 (2 rows)
 
 SELECT
@@ -1122,8 +1122,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "varchar" HAVING PRIOR "varchar" LIKE '%second%';
     varchar     | count 
 ----------------+-------
- second_father1 |     1
  second_father2 |     1
+ second_father1 |     1
 (2 rows)
 
 SELECT
@@ -1132,7 +1132,7 @@ COUNT(ID)
 FROM test_type_table
 START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "blob" HAVING PRIOR "blob" > '0A';
-ERROR:  unspported type for attname:blob (typid:88 typname:blob)
+ERROR:  unspported type for attname:test_type_table@blob (typid:88 typname:blob)
 SELECT
 PRIOR "text",
 COUNT(ID)
@@ -1141,8 +1141,8 @@ START WITH id = 1
 CONNECT BY PRIOR id = pid GROUP BY PRIOR "text" HAVING PRIOR "text" LIKE '%second%';
       text      | count 
 ----------------+-------
- second_father1 |     1
  second_father2 |     1
+ second_father1 |     1
 (2 rows)
 
 reset timezone;

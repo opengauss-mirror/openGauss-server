@@ -521,6 +521,7 @@ typedef struct PlannerInfo {
     bool hasRownumCheck;
     List *origin_tlist;
     struct PlannerTargets *planner_targets;
+    bool ru_is_under_start_with;
 } PlannerInfo;
 
 /*

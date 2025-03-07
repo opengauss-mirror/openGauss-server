@@ -39,22 +39,11 @@ typedef struct StartWithFuncEvalState
 extern StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int eflags);
 extern void ExecEndStartWithOp(StartWithOpState *node);
 extern void ExecReScanStartWithOp(StartWithOpState *node);
-
-extern TupleTableSlot *ConvertRuScanOutputSlot(RecursiveUnionState *rustate,
-                                               TupleTableSlot *scanSlot,
-                                               bool inrecursing);
-extern TupleTableSlot *ConvertStartWithOpOutputSlot(StartWithOpState *node,
-                                                   TupleTableSlot *srcSlot,
-                                                   TupleTableSlot *dstSlot);
-extern TupleTableSlot *ConvertRuScanOutputSlot(RecursiveUnionState *rustate,
-                                               TupleTableSlot *scanSlot,
-                                               bool inrecursing);
 extern bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot);
 extern int SibglingsKeyCmp(Datum x, Datum y, SortSupport ssup);
 extern int SibglingsKeyCmpFast(Datum x, Datum y, SortSupport ssup);
 
 extern void markSWLevelBegin(StartWithOpState *node);
 extern void markSWLevelEnd(StartWithOpState *node, int64 rowCount);
-extern TupleTableSlot* GetStartWithSlot(RecursiveUnionState* node, TupleTableSlot* slot, bool isRecursive);
 extern bool ExecStartWithRowLevelQual(RecursiveUnionState* node, TupleTableSlot* dstSlot);
 #endif /* NODECTESCAN_H */
