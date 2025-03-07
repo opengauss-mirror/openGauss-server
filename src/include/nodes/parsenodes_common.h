@@ -1568,6 +1568,10 @@ typedef struct ColumnRef {
     int location; /* token location, or -1 if unknown */
 } ColumnRef;
 
+typedef struct {
+    List* columnRefs;
+}PullColumnRefContext;
+
 /*
  * TimeCapsuleClause - TIMECAPSULE appearing in a transformed FROM clause
  *
