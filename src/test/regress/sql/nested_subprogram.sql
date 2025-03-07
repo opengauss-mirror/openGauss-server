@@ -1824,6 +1824,21 @@ end;
 /
 drop table test;
 
+DECLARE
+  var1 NUMBER;
+  PRAGMA AUTONOMOUS_TRANSACTION;
+  procedure square (original NUMBER)
+  AS
+  
+    original_squared NUMBER;
+  BEGIN
+    original_squared := original * original;
+  END;
+BEGIN
+ square(20);
+END;
+/
+
 CREATE OR REPLACE FUNCTION WM_CONCAT_START(A TEXT[], S TEXT)  RETURN TEXT[]  AS
 BEGIN
 RETURN A || S;

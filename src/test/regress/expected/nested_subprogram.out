@@ -2231,6 +2231,23 @@ DETAIL:  N/A
 CONTEXT:  compilation of PL/pgSQL function "p_1" near line 1
 compilation of PL/pgSQL function "p_1" near line 1
 drop table test;
+DECLARE
+  var1 NUMBER;
+  PRAGMA AUTONOMOUS_TRANSACTION;
+  procedure square (original NUMBER)
+  AS
+  
+    original_squared NUMBER;
+  BEGIN
+    original_squared := original * original;
+  END;
+BEGIN
+ square(20);
+END;
+/
+ERROR:  Subprogram autonomous transaction is not supported.
+DETAIL:  N/A
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 1
 CREATE OR REPLACE FUNCTION WM_CONCAT_START(A TEXT[], S TEXT)  RETURN TEXT[]  AS
 BEGIN
 RETURN A || S;
