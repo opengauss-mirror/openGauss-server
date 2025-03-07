@@ -13609,7 +13609,6 @@ static void dumpObjectTypeSpec(Archive* fout, TypeInfo* tyinfo)
     PQExpBuffer q = createPQExpBuffer();
     PQExpBuffer labelq = createPQExpBuffer();
     PQExpBuffer query = createPQExpBuffer();
-    PQExpBuffer resetq = createPQExpBuffer();
     /* Set proper schema serach path so type references list correctly */
     selectSourceSchema(fout, tyinfo->dobj.nmspace->dobj.name);
 
