@@ -102,6 +102,7 @@ option(HAVE_POSIX_SIGNALS "enable posix signals, this set to default" ON)
 option(HAVE_GCC_INT_ATOMICS "enable gcc buildin atomics operations, this set to default" ON)
 option(FLEXIBLE_ARRAY_MEMBER "pq_ce need" ON)
 option(ENABLE_OPENEULER_MAJOR "support openEuler 22.03 LTS, this set to default" OFF)
+option(ENABLE_READLINE "enable readline,the old is --enable-readline" OFF)
 
 # we will differ compile flags and definitions by different vars
 set(DB_COMMON_DEFINE "")
@@ -158,6 +159,10 @@ endif()
 
 if(${ENABLE_OPENEULER_MAJOR} STREQUAL "ON")
     add_definitions(-DOPENEULER_MAJOR)
+endif()
+
+if(${ENABLE_READLINE} STREQUAL "ON")
+    add_definitions(-DHAVE_READLINE_READLINE_H)
 endif()
 
 set(PROTECT_OPTIONS -fwrapv -std=c++14 -fnon-call-exceptions ${OPTIMIZE_LEVEL})

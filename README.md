@@ -724,9 +724,9 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
    ```
    # cmake编译版本选择由第二步中 DEBUG_TYPE 环境变量配置
    mkdir cmake_build && cd cmake_build
-   cmake .. -DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON
+   cmake .. -DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_READLINE=ON -DENABLE_MOT=ON
    # openEuler22.03或openEuler24.03版本
-   cmake .. -DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON -DENABLE_OPENEULER_MAJOR=ON
+   cmake .. -DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_READLINE=ON -DENABLE_MOT=ON -DENABLE_OPENEULER_MAJOR=ON
    ```
 
 > **注意**
