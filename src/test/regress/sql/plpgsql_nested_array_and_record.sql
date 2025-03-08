@@ -252,4 +252,21 @@ end;
 
 drop package pac_PLArray_Case0021;
 
+CREATE OR REPLACE PACKAGE package11 is
+TYPE age_rec IS RECORD (years INTEGER DEFAULT 35, months INTEGER DEFAULT 6);
+TYPE name_rec_src IS RECORD (first varchar DEFAULT 'John',age age_rec);
+END package11;
+/
+
+declare
+name1 package11.name_rec_src;
+begin
+    raise info 'first %', name1.first;
+    raise info 'last %', name1.age.years;
+END;
+/
+
+drop PACKAGE package11;
+
+
 DROP SCHEMA plpgsql_nested_array_and_record CASCADE;

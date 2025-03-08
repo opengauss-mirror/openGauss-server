@@ -4677,7 +4677,7 @@ PLpgSQL_row* build_row_from_class(Oid class_oid, PLpgSQL_expr** defaultvalues)
              */
             var = plpgsql_build_variable(refname, 0, plpgsql_build_datatype(attr_struct->atttypid, 
                                         attr_struct->atttypmod, attr_struct->attcollation), false);
-            if (defaultvalues != NULL)
+            if (defaultvalues != NULL && var->dtype == PLPGSQL_DTYPE_VAR)
                 ((PLpgSQL_var*)var)->default_val = defaultvalues[i];
 
             /* Add the variable to the row */
