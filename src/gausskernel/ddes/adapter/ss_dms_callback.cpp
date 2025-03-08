@@ -1053,27 +1053,6 @@ static char *CBDisplayBufferTag(char *displayBuf, unsigned int count, char *page
     return displayBuf;
 }
 
-static int CBRemoveBufLoadStatus(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dms_buf_load_status)
-{
-    switch (dms_buf_load_status) {
-        case DMS_BUF_NEED_LOAD:
-            buf_ctrl->state &= ~BUF_NEED_LOAD;
-            break;
-        case DMS_BUF_IS_LOADED:
-            buf_ctrl->state &= ~BUF_IS_LOADED;
-            break;
-        case DMS_BUF_LOAD_FAILED:
-            buf_ctrl->state &= ~BUF_LOAD_FAILED;
-            break;
-        case DMS_BUF_NEED_TRANSFER:
-            buf_ctrl->state &= ~BUF_NEED_TRANSFER;
-            break;
-        default:
-            Assert(0);
-    }
-    return DMS_SUCCESS;
-}
-
 static int CBSetBufLoadStatus(dms_buf_ctrl_t *buf_ctrl, dms_buf_load_status_t dms_buf_load_status)
 {
     switch (dms_buf_load_status) {
@@ -2590,7 +2569,6 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->page_is_dirty = CBPageDirty;
     callback->get_page = CBGetPage;
     callback->set_buf_load_status = CBSetBufLoadStatus;
-    callback->remove_buf_load_status = CBRemoveBufLoadStatus;
     callback->invalidate_page = CBInvalidatePage;
     callback->get_db_handle = CBGetHandle;
     callback->release_db_handle = CBReleaseHandle;
