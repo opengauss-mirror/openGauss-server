@@ -20,6 +20,24 @@
 #include "mb/pg_wchar.h"
 
 /*
+ * In today's multibyte encodings other than UTF8, this two-byte sequence
+ * ensures pg_encoding_mblen() == 2 && pg_encoding_verifymbstr() == 0.
+ *
+ * For historical reasons, several verifychar implementations opt to reject
+ * this pair specifically.  Byte pair range constraints, in encoding
+ * originator documentation, always excluded this pair.  No core conversion
+ * could translate it.  However, longstanding verifychar implementations
+ * accepted any non-NUL byte.  big5_to_euc_tw and big5_to_mic even translate
+ * pairs not valid per encoding originator documentation.  To avoid tightening
+ * core or non-core conversions in a security patch, we sought this one pair.
+ *
+ * PQescapeString() historically used spaces for BYTE1; many other values
+ * could suffice for BYTE1.
+ */
+#define NONUTF8_INVALID_BYTE0 (0x8d)
+#define NONUTF8_INVALID_BYTE1 (' ')
+
+/*
  * conversion to pg_wchar is done by "table driven."
  * to add an encoding support, define mb2wchar_with_len(), mblen(), dsplen()
  * for the particular encoding. Note that if the encoding is only
@@ -1423,6 +1441,10 @@ static int pg_big5_verifier(const unsigned char* s, int len)
         return -1;
     }
 
+    // when mbl is 2
+    if (l == 2 && s[0] == NONUTF8_INVALID_BYTE0 && s[1] == NONUTF8_INVALID_BYTE1) {
+        return -1;
+    }
 
     while (--l > 0) {
         if (*++s == '\0') {
@@ -1444,6 +1466,11 @@ static int pg_gbk_verifier(const unsigned char* s, int len)
     }
 
     if (!pg_gbk_islegal(s, l)) {
+        return -1;
+    }
+
+    // when mbl is 2
+    if (l == 2 && s[0] == NONUTF8_INVALID_BYTE0 && s[1] == NONUTF8_INVALID_BYTE1) {
         return -1;
     }
 
@@ -1488,6 +1515,11 @@ static int pg_uhc_verifier(const unsigned char* s, int len)
         return -1;
     }
 
+    // when mbl is 2
+    if (l == 2 && s[0] == NONUTF8_INVALID_BYTE0 && s[1] == NONUTF8_INVALID_BYTE1) {
+        return -1;
+    }
+
     while (--l > 0) {
         if (*++s == '\0') {
             return -1;
@@ -1504,6 +1536,11 @@ static int pg_gb18030_verifier(const unsigned char* s, int len)
     l = mbl = pg_gb18030_mblen(s);
 
     if (len < l) {
+        return -1;
+    }
+
+    // when mbl is 2
+    if (l == 2 && s[0] == NONUTF8_INVALID_BYTE0 && s[1] == NONUTF8_INVALID_BYTE1) {
         return -1;
     }
 
@@ -1606,6 +1643,18 @@ bool pg_utf8_islegal(const unsigned char* source, int length)
             break;
     }
     return true;
+}
+
+/*
+ * Fills the provided buffer with two bytes such that:
+ *   pg_encoding_mblen(dst) == 2 && pg_encoding_verifymbstr(dst) == 0
+ */
+void pg_encoding_set_invalid(int encoding, char *dst)
+{
+    Assert(pg_encoding_max_length(encoding) > 1);
+
+    dst[0] = (encoding == PG_UTF8) ? 0xc0 : NONUTF8_INVALID_BYTE0;
+    dst[1] = NONUTF8_INVALID_BYTE1;
 }
 
 #ifndef FRONTEND
@@ -2047,14 +2096,70 @@ int pg_encoding_verifymb(int encoding, const char* mbstr, int len)
                 : ((*pg_wchar_table[PG_SQL_ASCII].mbverify)((const unsigned char*)mbstr, len)));
 }
 
+int pg_encoding_verifymbchar(int encoding, const char* mbstr, int len)
+{
+    int ok_bytes = pg_encoding_verifymb(encoding, mbstr, len);
+    if (ok_bytes == 0) {
+        return -1;
+    }
+
+    return ok_bytes;
+}
+
+int pg_encoding_verifymbstr(int encoding, const char* mbstr, int len)
+{
+    mbverifier mbverify;
+    int ok_bytes;
+
+    Assert(PG_VALID_ENCODING(encoding));
+
+    if (pg_encoding_max_length(encoding) <= 1) {
+        const char* nullpos = (const char*)memchr(mbstr, 0, len);
+
+        if (nullpos == NULL) {
+            return len;
+        }
+
+        return nullpos - mbstr;
+    }
+
+    mbverify = pg_wchar_table[encoding].mbverify;
+    ok_bytes = 0;
+
+    while (len > 0) {
+        int l;
+
+        if (!IS_HIGHBIT_SET(*mbstr)) {
+            if (*mbstr != '\0') {
+                ok_bytes++;
+                mbstr++;
+                len--;
+                continue;
+            }
+
+            return ok_bytes;
+        }
+
+        l = (*mbverify)((const unsigned char*)mbstr, len);
+
+        if (l < 0) {
+            return ok_bytes;
+        }
+
+        mbstr += l;
+        len -= l;
+        ok_bytes += l;
+    }
+
+    return ok_bytes;
+}
+
 /*
  * fetch maximum length of a given encoding
  */
 int pg_encoding_max_length(int encoding)
 {
-    Assert(PG_VALID_ENCODING(encoding));
-
-    return pg_wchar_table[encoding].maxmblen;
+    return PG_VALID_ENCODING(encoding) ? pg_wchar_table[encoding].maxmblen : pg_wchar_table[PG_SQL_ASCII].maxmblen;
 }
 
 #ifdef WIN32
