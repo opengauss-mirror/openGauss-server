@@ -329,6 +329,7 @@ Datum mot_fdw_handler(PG_FUNCTION_ARGS)
     PG_CATCH();
     {
         elog(LOG, "Failed to init MOT transaction manager in FDW initializer");
+        PG_RE_THROW();
     }
     PG_END_TRY();
     PG_RETURN_POINTER(fdwroutine);
