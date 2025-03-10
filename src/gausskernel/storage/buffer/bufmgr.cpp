@@ -2126,6 +2126,10 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                 }
             } else {
                 rdStatus = smgrread(smgr, forkNum, blockNum, (char *)bufBlock);
+                if (rdStatus == SMGR_RD_RETRY) {
+                    *need_repair = true;
+                    return false;
+                }
             }
 
             if (u_sess->attr.attr_common.track_io_timing) {
@@ -2280,6 +2284,10 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
             blockNum, readmode, isExtend, bufBlock, NULL, &need_repair);
     }
     if (need_repair) {
+        if (SS_AM_BACKENDS_WORKERS && SS_STANDBY_IN_PRIMARY_RESTART) {
+            t_thrd.dms_cxt.page_need_retry = true;
+            return InvalidBuffer;
+        }
         LWLockRelease(buf_desc->io_in_progress_lock);
         UnpinBuffer(buf_desc, true);
         AbortBufferIO();
@@ -2805,15 +2813,25 @@ found_branch:
                     */
                     buf_ctrl->state |= BUF_NEED_LOAD;
                 }
-                break;
+                Buffer tmpBuffer = TerminateReadPage(bufHdr, mode, pblk);
+                /**
+                 * Retry until reform finish to avoid dead lock between worker
+                 * and mes proc for standby node during primary restarting.
+                 */
+                if (BufferIsInvalid(tmpBuffer) && t_thrd.dms_cxt.page_need_retry) {
+                    t_thrd.dms_cxt.page_need_retry = false;
+                    ereport(DEBUG1, (errmodule(MOD_DMS),
+                        (errmsg("[SS][%u/%u/%u/%d %d-%u] ReadBuffer_common need reload in reform, buf_id:%d",
+                                bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode,
+                                bufHdr->tag.rnode.relNode, bufHdr->tag.rnode.bucketNode,
+                                bufHdr->tag.forkNum, bufHdr->tag.blockNum, bufHdr->buf_id))));
+                    continue;
+                }
+                if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
+                    ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
+                }
+                return tmpBuffer;
             } while (true);
-
-            Buffer tmpBuffer = TerminateReadPage(bufHdr, mode, pblk);
-            if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
-                ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
-            }
-            return tmpBuffer;
-
         }
         ClearReadHint(bufHdr->buf_id);
     }
@@ -6397,6 +6415,14 @@ retry:
             }
 
             LWLockRelease(buf->content_lock);
+            /* when in failover worker thread should exit */
+            if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+                ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
+            }
+            if (SSNeedTerminateRequestPageInPrimaryRestart(GetBufferDescriptor(buffer - 1))) {
+                t_thrd.dms_cxt.page_need_retry = true;
+                return;
+            }
 
             if (AmDmsReformProcProcess() && dms_reform_failed()) {
                 t_thrd.dms_cxt.flush_copy_get_page_failed = true;
