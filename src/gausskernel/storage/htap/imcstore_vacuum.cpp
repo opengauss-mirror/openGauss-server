@@ -43,7 +43,7 @@
 #define TRY_ENQUEUE_TIMES (16)
 
 constexpr int VACUUM_PUSH_WAIT_TIME = 100;
-constexpr int VACUMM_WAIT_TIME = 1000;
+constexpr int VACUMM_WAIT_TIME = 60 * 1000;
 constexpr int VACUUMQUEUE_SIZE = (1 << 12);
 
 void ClearImcstoreCacheIfNeed(Oid droppingDBOid)
@@ -503,6 +503,8 @@ void IMCStoreVacuumWorkerMain(void)
 
     // get database name
     while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM && !t_thrd.imcstore_vacuum_cxt.got_SIGUSR2) {
+        /* Clear any already-pending wakeups */
+        ResetLatch(&g_instance.imcstore_cxt.vacuum_latch);
         bool dbnameInited;
         pthread_rwlock_rdlock(&g_instance.imcstore_cxt.context_mutex);
         dbnameInited = g_instance.imcstore_cxt.dbname != NULL;
@@ -537,6 +539,8 @@ void IMCStoreVacuumWorkerMain(void)
     IMCStoreVacuumTarget target;
     while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM && !t_thrd.imcstore_vacuum_cxt.got_SIGUSR2) {
         int rc = 0;
+        /* Clear any already-pending wakeups */
+        ResetLatch(&g_instance.imcstore_cxt.vacuum_latch);
 
         if (g_instance.imcstore_cxt.should_clean) {
             pthread_rwlock_wrlock(&g_instance.imcstore_cxt.context_mutex);
@@ -573,9 +577,6 @@ void IMCStoreVacuumWorkerMain(void)
             }
             continue;
         }
-
-        /* Clear any already-pending wakeups */
-        ResetLatch(&g_instance.imcstore_cxt.vacuum_latch);
         retry = 0;
 
         start_xact_command();
