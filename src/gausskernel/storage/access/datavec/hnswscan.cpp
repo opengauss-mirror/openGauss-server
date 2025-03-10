@@ -262,6 +262,10 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
         }
         hc = (HnswCandidate *)linitial(so->w);
         element = (HnswElement)HnswPtrAccess(base, hc->element);
+        if (element->heaptidsLength == 0) {
+            so->w = list_delete_first(so->w);
+            continue;
+        }
         heaptid = &element->heaptids[--element->heaptidsLength];
 
         MemoryContextSwitchTo(oldCtx);
