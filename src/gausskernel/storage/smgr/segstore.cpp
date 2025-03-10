@@ -1177,7 +1177,7 @@ SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum,
     SMgrRelation reln;
 
     if (check_standby && RecoveryInProgress()) {
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
+        ereport(PANIC, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
                         errhint("cannot get segment address translation during recovery")));
     }
 

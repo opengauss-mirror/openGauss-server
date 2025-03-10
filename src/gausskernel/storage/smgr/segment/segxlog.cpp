@@ -359,7 +359,7 @@ static void redo_xlog_log_alloc_seg(Buffer buffer, TransactionId xid)
     bool found = false;
     ExtentTag* extentTag = (ExtentTag *)hash_search(t_thrd.xlog_cxt.remain_segs, (void *)&remainExtentHashTag,
                                                     HASH_ENTER, &found);
-    if (found) {
+    if (found && is_exrto_standby_read_worker()) {
         ereport(WARNING, (errmsg("Segment [%u, %u, %u, %d] already existed in remain segs, Xid %lu,"
                 "remainExtentType %u.", REL_NODE_FORMAT(remainExtentHashTag.rnode), extentTag->xid,
                 extentTag->remainExtentType)));
