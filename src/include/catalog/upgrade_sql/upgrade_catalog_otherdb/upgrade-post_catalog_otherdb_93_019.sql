@@ -900,7 +900,7 @@ COMMENT ON FUNCTION pg_catalog.sparsevec_to_vector(sparsevec, int4, boolean) IS 
 
 drop aggregate if exists pg_catalog.avg(vector) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8241;
-create aggregate pg_catalog.avg(vector) (SFUNC=vector_accum, STYPE= _float8, finalfunc = vector_avg,CFUNC = vector_combine,INITCOND = '{0}');
+create aggregate pg_catalog.avg(vector) (SFUNC=vector_accum, STYPE= _float8, finalfunc = vector_avg,CFUNC = vector_combine,INITCOND = '{0}', INITCOLLECT='{0}');
 COMMENT ON aggregate pg_catalog.avg(vector) IS 'concatenate aggregate input into an array';
 
 drop aggregate if exists pg_catalog.sum(vector) CASCADE;
@@ -1219,13 +1219,13 @@ CREATE OPERATOR CLASS pg_catalog.vector_ops DEFAULT
     OPERATOR 5 pg_catalog.>(vector, vector),
     FUNCTION 1 pg_catalog.vector_cmp(vector,vector);
 
-DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ubt_ops USING ubtree CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ops USING ubtree CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8375;
-CREATE OPERATOR FAMILY pg_catalog.vector_ubt_ops USING ubtree;
+CREATE OPERATOR FAMILY pg_catalog.vector_ops USING ubtree;
 
-DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ubt_ops USING ubtree CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ops USING ubtree CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8951;
-CREATE OPERATOR CLASS pg_catalog.vector_ubt_ops DEFAULT
+CREATE OPERATOR CLASS pg_catalog.vector_ops DEFAULT
 	FOR TYPE vector USING ubtree AS
 	OPERATOR 1 pg_catalog.<(vector, vector),
 	OPERATOR 2 pg_catalog.<=(vector, vector),
@@ -1372,13 +1372,13 @@ CREATE OPERATOR CLASS pg_catalog.sparsevec_ops
 	OPERATOR 5 pg_catalog.>(sparsevec, sparsevec),
 	FUNCTION 1 pg_catalog.sparsevec_cmp(sparsevec, sparsevec);
 
-DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ubt_ops USING ubtree CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ops USING ubtree CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8376;
-CREATE OPERATOR FAMILY pg_catalog.sparsevec_ubt_ops USING ubtree;
+CREATE OPERATOR FAMILY pg_catalog.sparsevec_ops USING ubtree;
 
-DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ubt_ops USING ubtree CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ops USING ubtree CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8952;
-CREATE OPERATOR CLASS pg_catalog.sparsevec_ubt_ops DEFAULT
+CREATE OPERATOR CLASS pg_catalog.sparsevec_ops DEFAULT
 	FOR TYPE sparsevec USING ubtree AS
 	OPERATOR 1 pg_catalog.<(sparsevec, sparsevec),
 	OPERATOR 2 pg_catalog.<=(sparsevec, sparsevec),
