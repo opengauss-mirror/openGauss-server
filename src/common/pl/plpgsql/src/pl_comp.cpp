@@ -4674,8 +4674,24 @@ PLpgSQL_row* build_row_from_class(Oid class_oid, PLpgSQL_expr** defaultvalues)
              */
             var = plpgsql_build_variable(refname, 0, plpgsql_build_datatype(attr_struct->atttypid, 
                                         attr_struct->atttypmod, attr_struct->attcollation), false);
-            if (defaultvalues != NULL && var->dtype == PLPGSQL_DTYPE_VAR)
-                ((PLpgSQL_var*)var)->default_val = defaultvalues[i];
+
+            if (defaultvalues != NULL && defaultvalues[i] != NULL) {
+                switch (var->dtype) {
+                    case PLPGSQL_DTYPE_VAR:
+                        ((PLpgSQL_var*)var)->default_val = defaultvalues[i];
+                        break;
+                    case PLPGSQL_DTYPE_RECORD:
+                    case PLPGSQL_DTYPE_ROW:
+                        ((PLpgSQL_row*)var)->default_val = defaultvalues[i];
+                        break;
+                    case PLPGSQL_DTYPE_REC:
+                    case PLPGSQL_DTYPE_CURSORROW:
+                        ((PLpgSQL_rec*)var)->default_val = defaultvalues[i];
+                        break;
+                    default:
+                        break;
+                }
+            }
 
             /* Add the variable to the row */
             row->fieldnames[i] = attname;
@@ -6326,19 +6342,32 @@ void record_inline_subprogram_type(Oid typeoid)
 PLpgSQL_expr** get_default_plpgsql_expr_from_typeoid(Oid typeOid, int* attrnum)
 {
     PLpgSQL_expr** defaultvalues = NULL;
-    ScanKeyData skey;
+    ScanKeyData skey[2];
+    AttrNumber attnum = 0;
     HeapTuple htup;
     bool isnull = false;
+    int maxattr = 0;
+    int j = 0;
+    PLpgSQL_expr *exprs = NULL;
     Datum typrelid = typeidTypeRelid(typeOid);
-    if (typrelid != InvalidOid) {
-        ScanKeyInit(&skey, Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, typrelid);
+    if (typrelid == InvalidOid) {
+        return NULL;
+    }
+    maxattr = get_relnatts(typrelid);
+    if (maxattr <= 0) {
+        return NULL;
+    }
+    defaultvalues = (PLpgSQL_expr **)palloc0(sizeof(PLpgSQL_expr *) * maxattr);
+    exprs = (PLpgSQL_expr *)palloc0(sizeof(PLpgSQL_expr) * maxattr);
+    for (attnum = 0; attnum < maxattr; attnum++) {
+        ScanKeyInit(&skey[0], Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, typrelid);
+        ScanKeyInit(&skey[1], Anum_pg_attrdef_adnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(attnum + 1));
         Relation adrel = heap_open(AttrDefaultRelationId, AccessShareLock);
-        SysScanDesc adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, NULL, 1, &skey);
-        List* del_list = NIL;
-        ListCell *lc = NULL;
-        int i = 0, j = 0;
-        while (HeapTupleIsValid(htup = systable_getnext(adscan))) {
+        SysScanDesc adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, NULL, 2, skey);
+        htup = systable_getnext(adscan);
+        if (HeapTupleIsValid(htup)) {
             Form_pg_attrdef adform = (Form_pg_attrdef)GETSTRUCT(htup);
+            PLpgSQL_expr *expr = exprs + attnum;
             Datum val;
             StringInfoData ds;
             val = fastgetattr(htup, Anum_pg_attrdef_adsrc, adrel->rd_att, &isnull);
@@ -6346,30 +6375,22 @@ PLpgSQL_expr** get_default_plpgsql_expr_from_typeoid(Oid typeOid, int* attrnum)
             initStringInfo(&ds);
             appendStringInfoString(&ds, "SELECT ");
             appendStringInfoString(&ds, adsrc_str);
-            del_list = lappend(del_list, ds.data);
+            expr->dtype = PLPGSQL_DTYPE_EXPR;
+            expr->query = pstrdup(ds.data);
+            expr->plan = NULL;
+            expr->paramnos = NULL;
+            expr->isouttype = false;
+            expr->idx = UINT32_MAX;
+            expr->out_param_dno = -1;
+            expr->is_have_tableof_index_func = true;
+            defaultvalues[attnum] = expr;
             j++;
-        }
-        *attrnum = j;
-        if (j > 0) {
-            defaultvalues = (PLpgSQL_expr **)palloc0(sizeof(PLpgSQL_expr *) * j);
-            PLpgSQL_expr *exprs = (PLpgSQL_expr *)palloc0(sizeof(PLpgSQL_expr) * j);
-            foreach (lc, del_list) {
-                char *query = (char *)lfirst(lc);
-                PLpgSQL_expr *expr = exprs + i;
-                expr->dtype = PLPGSQL_DTYPE_EXPR;
-                expr->query = pstrdup(query);
-                expr->plan = NULL;
-                expr->paramnos = NULL;
-                expr->isouttype = false;
-                expr->idx = UINT32_MAX;
-                expr->out_param_dno = -1;
-                expr->is_have_tableof_index_func = true;
-                defaultvalues[i] = expr;
-                i++;
-            }
+        } else {
+            defaultvalues[attnum] = NULL;
         }
         systable_endscan(adscan);
         heap_close(adrel, AccessShareLock);
     }
+    *attrnum = attnum;
     return defaultvalues;
 }
