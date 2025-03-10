@@ -4107,16 +4107,13 @@ void plpgsql_set_variable(const char* varname, int value)
     Assert(u_sess->plsql_cxt.curr_compile_context != NULL);
     PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
 
-    int varno;
-    PLpgSQL_datum* var = NULL;
-    for (varno = 0; varno < curr_compile->plpgsql_nDatums; varno++) {
-        var = curr_compile->plpgsql_Datums[varno];
-        if (var->dtype != PLPGSQL_TTYPE_ROW) {
-            continue;
-        }
+    PLpgSQL_row* rowvar = NULL;
+    PLpgSQL_nsitem *ns = NULL;
 
-        PLpgSQL_row* rowvar = (PLpgSQL_row*)var;
-        if (rowvar->refname && pg_strcasecmp(rowvar->refname, varname) == 0) {
+    ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, varname, NULL, NULL, NULL);
+    if (ns != NULL && ns->itemtype == PLPGSQL_NSTYPE_ROW) {
+        rowvar = (PLpgSQL_row*)curr_compile->plpgsql_Datums[ns->itemno];
+        if (rowvar->rowtupdesc && 0 == strcmp(format_type_be(rowvar->rowtupdesc->tdtypeid), "exception")) {
             rowvar->customErrorCode = value;
             rowvar->hasExceptionInit = true;
             return;
