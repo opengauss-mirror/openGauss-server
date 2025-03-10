@@ -514,7 +514,8 @@ void IMCStoreVacuumWorkerMain(void)
     }
 
     // get database name
-    while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM && !t_thrd.imcstore_vacuum_cxt.got_SIGUSR2) {
+    while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM && !t_thrd.imcstore_vacuum_cxt.got_SIGUSR2 &&
+           (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
         /* Clear any already-pending wakeups */
         ResetLatch(&g_instance.imcstore_cxt.vacuum_latch);
         bool dbnameInited;
@@ -549,7 +550,8 @@ void IMCStoreVacuumWorkerMain(void)
     SetProcessingMode(NormalProcessing);
 
     IMCStoreVacuumTarget target;
-    while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM && !t_thrd.imcstore_vacuum_cxt.got_SIGUSR2) {
+    while (!t_thrd.imcstore_vacuum_cxt.got_SIGTERM && !t_thrd.imcstore_vacuum_cxt.got_SIGUSR2 &&
+           (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
         int rc = 0;
         /* Clear any already-pending wakeups */
         ResetLatch(&g_instance.imcstore_cxt.vacuum_latch);
