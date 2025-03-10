@@ -2852,7 +2852,7 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
     IndexRelationInitKeyNums(relation);
     indnkeyatts = IndexRelationGetNumberOfKeyAttributes(relation);
     amsupport = aform->amsupport;
-    if(strcmp(aform->amname.data, "btree") == 0 || strcmp(aform->amname.data, "ubtree")) {
+    if (strcmp(aform->amname.data, "btree") == 0 || strcmp(aform->amname.data, "ubtree") == 0) {
         is_btree_or_ubtree = true;
     } else {
         is_btree_or_ubtree = false;
