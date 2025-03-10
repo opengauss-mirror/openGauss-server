@@ -625,6 +625,10 @@ Buffer ReadBufferFastNormal(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum
                             SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
+                        if (SSNeedTerminateRequestPageInPrimaryRestart(bufHdr)) {
+                            SSUnPinBuffer(bufHdr);
+                            return InvalidBuffer;
+                        }
                         pg_usleep(5000L);
                         continue;
                     }

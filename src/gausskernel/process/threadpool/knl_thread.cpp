@@ -1771,6 +1771,7 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     dms_cxt->in_ondemand_redo = false;
     int max_threads = g_instance.attr.attr_storage.dms_attr.parallel_thread_num;
     t_thrd.dms_cxt.reform_check_status = (int*)palloc(max_threads * sizeof(int));
+    dms_cxt->page_need_retry = false;
     for (int i = 0; i < max_threads; i++) {
         t_thrd.dms_cxt.reform_check_status[i] = InvalidBuffer;
     }

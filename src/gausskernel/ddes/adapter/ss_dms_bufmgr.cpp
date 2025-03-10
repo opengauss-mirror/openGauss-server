@@ -305,6 +305,9 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
             ereport(PANIC, (errmsg("[SS] In flush copy, can't read from disk!")));
         }
         buffer = ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
+        if (t_thrd.dms_cxt.page_need_retry) {
+            return InvalidBuffer;
+        }
     } else {
 #ifdef USE_ASSERT_CHECKING
         if (buf_ctrl->state & BUF_IS_EXTEND) {
@@ -1091,6 +1094,35 @@ bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl)
     if ((AmPageRedoProcess() || AmStartupProcess()) && dms_reform_failed()) {
         return true;
     }
+    return false;
+}
+
+bool SSNeedTerminateRequestPageInPrimaryRestart(BufferDesc *buf_desc)
+{
+    if (!SS_AM_BACKENDS_WORKERS || !SS_STANDBY_IN_PRIMARY_RESTART ||
+        !IsSegmentPhysicalRelNode(buf_desc->tag.rnode) || !DmsCheckBufAccessible()) {
+        return false;
+    }
+
+    for (int i = 0; i < t_thrd.storage_cxt.num_held_lwlocks; i++) {
+        if (t_thrd.storage_cxt.held_lwlocks[i].lock != NULL &&
+            t_thrd.storage_cxt.held_lwlocks[i].lock->tranche == LWTRANCHE_BUFFER_IO_IN_PROGRESS &&
+            t_thrd.storage_cxt.held_lwlocks[i].lock->tag != buf_desc->buf_id &&
+            t_thrd.storage_cxt.held_lwlocks[i].mode == LW_EXCLUSIVE) {
+            BufferDesc *tmpDesc = BufferGetBufferDescriptor(t_thrd.storage_cxt.held_lwlocks[i].lock->tag + 1);
+            if (IsSegmentFileNode(tmpDesc->tag.rnode) &&
+                !IsSegmentPhysicalRelNode(tmpDesc->tag.rnode)) {
+                ereport(LOG, (errmodule(MOD_DMS),
+                    (errmsg("[SS][%u/%u/%u/%d %d-%u] Backend need to terminate request page during primary node"
+                            " restart, buf_id:%d.",
+                            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
+                            buf_desc->tag.rnode.relNode, buf_desc->tag.rnode.bucketNode,
+                            buf_desc->tag.forkNum, buf_desc->tag.blockNum, buf_desc->buf_id))));
+                return true;
+            }
+        }
+    }
+
     return false;
 }
 

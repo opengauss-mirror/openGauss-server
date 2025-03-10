@@ -118,7 +118,8 @@ typedef struct _MdfdVec {
 enum SMGR_READ_STATUS {
     SMGR_RD_OK = 0,
     SMGR_RD_NO_BLOCK = 1,
-    SMGR_RD_CRC_ERROR = 2
+    SMGR_RD_CRC_ERROR = 2,
+    SMGR_RD_RETRY = 3
 };
 
 #define INVALID_DB_OID (0)
