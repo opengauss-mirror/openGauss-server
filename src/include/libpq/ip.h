@@ -38,6 +38,9 @@ extern int pg_range_sockaddr(const struct sockaddr_storage* addr, const struct s
 
 extern int pg_sockaddr_cidr_mask(struct sockaddr_storage* mask, const char* numbits, int family);
 
+extern int resolveHostname2Ip(int netType, char* hostname, char* ip);
+extern int resolveHostIp2Name(int netType, char* ip, char* hostname);
+
 #ifdef HAVE_IPV6
 extern void pg_promote_v4_to_v6_addr(struct sockaddr_storage* addr);
 extern void pg_promote_v4_to_v6_mask(struct sockaddr_storage* addr);

@@ -12407,10 +12407,19 @@ static bool IsChannelAdapt(Port* port, ReplConnInfo* repl)
 
     if (0 == strcmp(local_ip, local_ipNoZone) && 0 == strcmp(remote_ip, remote_ipNoZone)) {
         return true;
-    } else {
-        ereport(DEBUG1, (errmsg("connect local ip %s, connect remote ip %s", local_ip, remote_ip)));
-        return false;
     }
+
+    /* Parse the node name into an IP address for comparison.  */
+    char local_resolvip[IP_LEN] = {0};
+    char remote_resolvip[IP_LEN] = {0};
+    int lret = resolveHostname2Ip(laddr->sa_family, local_ipNoZone, local_resolvip);
+    int rret = resolveHostname2Ip(raddr->sa_family, remote_ipNoZone, remote_resolvip);
+    if (0 == lret && 0 == rret && 0 == strcmp(local_ip, local_resolvip) && 0 == strcmp(remote_ip, remote_resolvip)) {
+        return true;
+    } 
+
+    ereport(DEBUG1, (errmsg("connect local ip %s, connect remote ip %s", local_ip, remote_ip)));
+    return false;
 }
 
 /*
