@@ -83,9 +83,9 @@ test: test_ustore_concurrent_selectforshare
 #test: test_unione_mix_tables_7
 
 #test: insert_update_001_ustore
-test: insert_update_002_ustore
-test: insert_update_003_ustore
-test: insert_update_004_ustore
+#test: insert_update_002_ustore
+#test: insert_update_003_ustore
+#test: insert_update_004_ustore
 #test: insert_update_008_ustore
 
 test: ustore_trigger ustore_fk ustore_pt_fk

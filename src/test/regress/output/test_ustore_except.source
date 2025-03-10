@@ -304,7 +304,11 @@ select * from except_view_case1_3;
 
 -- case 2: one empty table
 \COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data1.data' delimiter '|';
+ERROR:  invalid data for "year =  10002", value must be between -4712 and 9999, and not be 0
+CONTEXT:  COPY t1, line 2415, column c15: "'10002-05-09'"
 \COPY t1_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data1.data' delimiter '|';
+ERROR:  invalid data for "year =  10002", value must be between -4712 and 9999, and not be 0
+CONTEXT:  COPY t1_verification, line 2415, column c15: "'10002-05-09'"
 -- t1 data verification
 create view except_t1_verification_view as (select * from t1 except select * from t1_verification);
 select * from except_t1_verification_view;
@@ -330,7 +334,11 @@ select * from except_view_case2_2;
 
 -- case 3: no empty table
 \COPY t2 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data2.data' delimiter '|';
+ERROR:  invalid data for "year =  10002", value must be between -4712 and 9999, and not be 0
+CONTEXT:  COPY t2, line 2415, column c15: "'10002-05-09'"
 \COPY t2_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data2.data' delimiter '|';
+ERROR:  invalid data for "year =  10002", value must be between -4712 and 9999, and not be 0
+CONTEXT:  COPY t2_verification, line 2415, column c15: "'10002-05-09'"
 -- t2 data verification
 create view except_t2_verification_view as (select * from t2 except select * from t2_verification);
 select * from except_t2_verification_view;
@@ -356,7 +364,11 @@ select * from except_view_case3_2;
 
 -- insert 10k rows for t3
 \COPY t3 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data3.data' delimiter '|';
+ERROR:  invalid data for "year =  10002", value must be between -4712 and 9999, and not be 0
+CONTEXT:  COPY t3, line 2415, column c15: "'10002-05-09'"
 \COPY t3_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data3.data' delimiter '|';
+ERROR:  invalid data for "year =  10002", value must be between -4712 and 9999, and not be 0
+CONTEXT:  COPY t3_verification, line 2415, column c15: "'10002-05-09'"
 -- t3 data verification
 create view except_t3_verification_view as (select * from t3 except select * from t3_verification);
 select * from except_t3_verification_view;

@@ -14,7 +14,7 @@ FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
 WHERE i.indrelid = 'tbl'::regclass ORDER BY c.relname;
                                           pg_get_indexdef                                           
 ----------------------------------------------------------------------------------------------------
- CREATE INDEX tbl_idx ON tbl USING ubtree (c1, c2) WITH (storage_type=USTORE) TABLESPACE pg_default
+ CREATE INDEX tbl_idx ON tbl USING ubtree (c1, c2) WITH (storage_type=ustore) TABLESPACE pg_default
 (1 row)
 
 DROP TABLE tbl;
@@ -30,8 +30,8 @@ FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
 WHERE i.indrelid = 'tbl'::regclass ORDER BY c.relname;
                                                     pg_get_indexdef                                                    
 -----------------------------------------------------------------------------------------------------------------------
- CREATE UNIQUE INDEX tbl_c1_c2_c3_c4_key ON tbl USING ubtree (c1, c2) WITH (storage_type=USTORE) TABLESPACE pg_default
- CREATE UNIQUE INDEX tbl_idx_unique ON tbl USING ubtree (c1, c2) WITH (storage_type=USTORE) TABLESPACE pg_default
+ CREATE UNIQUE INDEX tbl_c1_c2_c3_c4_key ON tbl USING ubtree (c1, c2) WITH (storage_type=ustore) TABLESPACE pg_default
+ CREATE UNIQUE INDEX tbl_idx_unique ON tbl USING ubtree (c1, c2) WITH (storage_type=ustore) TABLESPACE pg_default
 (2 rows)
 
 DROP TABLE tbl;
@@ -56,7 +56,7 @@ FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
 WHERE i.indrelid = 'tbl'::regclass ORDER BY c.relname;
                                               pg_get_indexdef                                               
 ------------------------------------------------------------------------------------------------------------
- CREATE UNIQUE INDEX tbl_pkey ON tbl USING ubtree (c1, c2) WITH (storage_type=USTORE) TABLESPACE pg_default
+ CREATE UNIQUE INDEX tbl_pkey ON tbl USING ubtree (c1, c2) WITH (storage_type=ustore) TABLESPACE pg_default
 (1 row)
 
 DROP TABLE tbl;
@@ -69,7 +69,7 @@ FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid
 WHERE i.indrelid = 'tbl'::regclass ORDER BY c.relname;
                                                  pg_get_indexdef                                                  
 ------------------------------------------------------------------------------------------------------------------
- CREATE UNIQUE INDEX tbl_idx_unique ON tbl USING ubtree (c1, c2) WITH (storage_type=USTORE) TABLESPACE pg_default
+ CREATE UNIQUE INDEX tbl_idx_unique ON tbl USING ubtree (c1, c2) WITH (storage_type=ustore) TABLESPACE pg_default
 (1 row)
 
 DROP TABLE tbl;
@@ -181,7 +181,7 @@ CREATE UNIQUE INDEX tbl_idx ON tbl using ubtree(c1, c2, c3, c4);
 SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname;
                                                      indexdef                                                      
 -------------------------------------------------------------------------------------------------------------------
- CREATE UNIQUE INDEX tbl_idx ON tbl USING ubtree (c1, c2, c3, c4) WITH (storage_type=USTORE) TABLESPACE pg_default
+ CREATE UNIQUE INDEX tbl_idx ON tbl USING ubtree (c1, c2, c3, c4) WITH (storage_type=ustore) TABLESPACE pg_default
 (1 row)
 
 ALTER TABLE tbl DROP COLUMN c3;
@@ -201,7 +201,7 @@ CREATE UNIQUE INDEX tbl_idx ON tbl using ubtree(c1, c2) INCLUDE(c3,c4);
 SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname;
                                                  indexdef                                                  
 -----------------------------------------------------------------------------------------------------------
- CREATE UNIQUE INDEX tbl_idx ON tbl USING ubtree (c1, c2) WITH (storage_type=USTORE) TABLESPACE pg_default
+ CREATE UNIQUE INDEX tbl_idx ON tbl USING ubtree (c1, c2) WITH (storage_type=ustore) TABLESPACE pg_default
 (1 row)
 
 ALTER TABLE tbl DROP COLUMN c3;
@@ -221,7 +221,7 @@ NOTICE:  CREATE TABLE / UNIQUE will create implicit index "tbl_c1_c2_c3_c4_key" 
 SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname;
                                                        indexdef                                                        
 -----------------------------------------------------------------------------------------------------------------------
- CREATE UNIQUE INDEX tbl_c1_c2_c3_c4_key ON tbl USING ubtree (c1, c2) WITH (storage_type=USTORE) TABLESPACE pg_default
+ CREATE UNIQUE INDEX tbl_c1_c2_c3_c4_key ON tbl USING ubtree (c1, c2) WITH (storage_type=ustore) TABLESPACE pg_default
 (1 row)
 
 ALTER TABLE tbl DROP COLUMN c3;
@@ -247,8 +247,8 @@ CREATE UNIQUE INDEX on tbl (c1, c2) INCLUDE (c3, c4);
 SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname;
                                                        indexdef                                                        
 -----------------------------------------------------------------------------------------------------------------------
- CREATE UNIQUE INDEX tbl_c1_c2_c3_c4_idx ON tbl USING ubtree (c1, c2) WITH (storage_type=USTORE) TABLESPACE pg_default
- CREATE UNIQUE INDEX tbl_c1_c2_c3_c4_key ON tbl USING ubtree (c1, c2) WITH (storage_type=USTORE) TABLESPACE pg_default
+ CREATE UNIQUE INDEX tbl_c1_c2_c3_c4_idx ON tbl USING ubtree (c1, c2) WITH (storage_type=ustore) TABLESPACE pg_default
+ CREATE UNIQUE INDEX tbl_c1_c2_c3_c4_key ON tbl USING ubtree (c1, c2) WITH (storage_type=ustore) TABLESPACE pg_default
 (2 rows)
 
 DROP TABLE tbl;
@@ -260,7 +260,7 @@ NOTICE:  CREATE TABLE / UNIQUE will create implicit index "tbl_c1_c2_c3_c4_key" 
 SELECT indexdef FROM pg_indexes WHERE tablename = 'tbl' ORDER BY indexname;
                                                        indexdef                                                        
 -----------------------------------------------------------------------------------------------------------------------
- CREATE UNIQUE INDEX tbl_c1_c2_c3_c4_key ON tbl USING ubtree (c1, c2) WITH (storage_type=USTORE) TABLESPACE pg_default
+ CREATE UNIQUE INDEX tbl_c1_c2_c3_c4_key ON tbl USING ubtree (c1, c2) WITH (storage_type=ustore) TABLESPACE pg_default
 (1 row)
 
 ALTER TABLE tbl DROP COLUMN c3;
@@ -296,7 +296,7 @@ ERROR:  access method "spgist" does not support row store
 CREATE INDEX on tbl USING gin(c1, c2) INCLUDE (c3, c4);
 ERROR:  gin index is not supported for ustore
 CREATE INDEX on tbl USING hash(c1, c2) INCLUDE (c3, c4);
-ERROR:  access method "hash" does not support row store
+ERROR:  hash index is not supported for ustore
 CREATE INDEX on tbl USING rtree(c1, c2) INCLUDE (c3, c4);
 ERROR:  access method "rtree" does not support row store
 CREATE INDEX on tbl USING ubtree(c1, c2) INCLUDE (c3, c4);

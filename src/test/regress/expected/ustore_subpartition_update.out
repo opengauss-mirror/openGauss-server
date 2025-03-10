@@ -339,7 +339,9 @@ update range_list_02 set col_2=-56 where col_1=-2978;
 update range_list_02 set col_2=80 where col_2=-3;
 update range_list_02 set col_2=27 where col_2=80;
 alter table range_list_02 truncate partition p_range_1;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 alter table range_list_02 truncate SUBPARTITION p_list_2_2;
+NOTICE:  Command without UPDATE GLOBAL INDEX will disable global index
 delete from range_list_02 where col_1 >188 ;
 delete from range_list_02 where col_2 <10 and col_3>5;
 drop table range_list_02;
