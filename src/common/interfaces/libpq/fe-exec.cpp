@@ -3453,15 +3453,16 @@ static size_t PQescapeStringInternal(
 {
     const char* source = from;
     char* target = to;
-    size_t remaining = length;
+    size_t remaining = strnlen(from, length);
+    bool already_complained = false;
 
     if (error != NULL) {
         *error = 0;
     }
 
-    while (remaining > 0 && *source != '\0') {
+    while (remaining > 0) {
         char c = *source;
-        int len;
+        int charlen;
         int i;
 
         /* Fast path for plain ASCII */
@@ -3477,39 +3478,63 @@ static size_t PQescapeStringInternal(
         }
 
         /* Slow path for possible multibyte characters */
-        len = pg_encoding_mblen(encoding, source);
-
-        /* Copy the character */
-        for (i = 0; i < len; i++) {
-            if (remaining == 0 || *source == '\0') {
-                break;
-            }
-            *target++ = *source++;
-            remaining--;
-        }
-
-        /*
-         * If we hit premature end of string (ie, incomplete multibyte
-         * character), try to pad out to the correct length with spaces. We
-         * may not be able to pad completely, but we will always be able to
-         * insert at least one pad space (since we'd not have quoted a
-         * multibyte character).  This should be enough to make a string that
-         * the server will error out on.
-         */
-        if (i < len) {
-            if (error != NULL) {
+        charlen = pg_encoding_mblen(encoding, source);
+        if (remaining < size_t(charlen) || pg_encoding_verifymbchar(encoding, source, charlen) == -1) {
+            /*
+			 * Multibyte character is invalid.  It's important to verify that
+			 * as invalid multibyte characters could e.g. be used to "skip"
+			 * over quote characters, e.g. when parsing
+			 * character-by-character.
+			 *
+			 * Report an error if possible, and replace the character's first
+			 * byte with an invalid sequence. The invalid sequence ensures
+			 * that the escaped string will trigger an error on the
+			 * server-side, even if we can't directly report an error here.
+			 *
+			 * This isn't *that* crucial when we can report an error to the
+			 * caller; but if we can't or the caller ignores it, the caller
+			 * will use this string unmodified and it needs to be safe for
+			 * parsing.
+			 *
+			 * We know there's enough space for the invalid sequence because
+			 * the "to" buffer needs to be at least 2 * length + 1 long, and
+			 * at worst we're replacing a single input byte with two invalid
+			 * bytes.
+			 *
+			 * It would be a bit faster to verify the whole string the first
+			 * time we encounter a set highbit, but this way we can replace
+			 * just the invalid data, which probably makes it easier for users
+			 * to find the invalidly encoded portion of a larger string.
+			 */
+            if (error) {
                 *error = 1;
             }
-            if (conn != NULL) {
-                printfPQExpBuffer(&conn->errorMessage, libpq_gettext("incomplete multibyte character\n"));
-            }
-            for (; i < len; i++) {
-                if (((size_t)(target - to)) / 2 >= length) {
-                    break;
+            if (conn && !already_complained) {
+                if (remaining < (size_t)charlen) {
+                    printfPQExpBuffer(&conn->errorMessage, libpq_gettext("incomplete multibyte character\n"));
+                } else {
+                    printfPQExpBuffer(&conn->errorMessage, libpq_gettext("invalid multibyte character\n"));
                 }
-                *target++ = ' ';
+                /* Issue a complaint only once per string */
+                already_complained = true;
             }
-            break;
+            
+            pg_encoding_set_invalid(encoding, target);
+            target += 2;
+
+            /*
+			 * Handle the following bytes as if this byte didn't exist. That's
+			 * safer in case the subsequent bytes contain important characters
+			 * for the caller (e.g. '>' in html).
+			 */
+            source++;
+            remaining--;
+        } else {    
+            /* Copy the character */
+            for (i = 0; i < charlen; i++) {
+                *target++ = *source++;
+                remaining--;
+            }
         }
     }
 
@@ -3551,17 +3576,22 @@ static char* PQescapeInternal(PGconn* conn, const char* str, size_t len, bool as
     int num_quotes = 0; /* single or double, depending on as_ident */
     int num_backslashes = 0;
     int rcs = 0;
-    int input_len;
-    int result_size;
+    size_t input_len = strnlen(str, len);
+    size_t result_size;
     char quote_char = as_ident ? '"' : '\'';
+    bool validated_mb = false;
 
     /* We must have a connection, else fail immediately. */
     if (conn == NULL) {
         return NULL;
     }
 
-    /* Scan the string for characters that must be escaped. */
-    for (s = str; (size_t)(s - str) < len && *s != '\0'; ++s) {
+	/*
+	 * Scan the string for characters that must be escaped and for invalidly
+	 * encoded data.
+	 */
+    s = str;
+    for (size_t remaining = input_len; remaining > 0; remaining--, s++) {
         if (*s == quote_char) {
             ++num_quotes;
         } else if (*s == '\\') {
@@ -3573,13 +3603,32 @@ static char* PQescapeInternal(PGconn* conn, const char* str, size_t len, bool as
             charlen = pg_encoding_mblen(conn->client_encoding, s);
 
             /* Multibyte character overruns allowable length. */
-            if ((size_t)(s - str) + charlen > len || memchr(s, 0, charlen) != NULL) {
+            if ((size_t)charlen > remaining) {
                 printfPQExpBuffer(&conn->errorMessage, libpq_gettext("incomplete multibyte character\n"));
                 return NULL;
             }
 
+            /*
+			 * If we haven't already, check that multibyte characters are
+			 * valid. It's important to verify that as invalid multi-byte
+			 * characters could e.g. be used to "skip" over quote characters,
+			 * e.g. when parsing character-by-character.
+			 *
+			 * We check validity once, for the whole remainder of the string,
+			 * when we first encounter any multi-byte character. Some
+			 * encodings have optimized implementations for longer strings.
+			 */
+            if (!validated_mb) {
+                if ((size_t)(pg_encoding_verifymbstr(conn->client_encoding, s, remaining)) != remaining) {
+                    printfPQExpBuffer(&conn->errorMessage, libpq_gettext("invalid multibyte character\n"));
+                    return NULL;
+                }
+                validated_mb = true;
+            }
+            
             /* Adjust s, bearing in mind that for loop will increment it. */
             s += charlen - 1;
+            remaining -= charlen - 1;
         }
     }
 
@@ -3622,11 +3671,12 @@ static char* PQescapeInternal(PGconn* conn, const char* str, size_t len, bool as
      * individually.
      */
     if (num_quotes == 0 && (num_backslashes == 0 || as_ident) && (input_len > 0)) {
-        rcs = memcpy_s(rp, input_len, str, input_len);
+        rcs = memcpy_s(rp, result_size, str, input_len);
         securec_check_c(rcs, "\0", "\0");
         rp += input_len;
     } else {
-        for (s = str; s - str < input_len; ++s) {
+        s = str;
+        for (size_t remaining = input_len; remaining > 0; remaining--, s++) {
             if (*s == quote_char || (!as_ident && *s == '\\')) {
                 *rp++ = *s;
                 *rp++ = *s;
@@ -3640,6 +3690,7 @@ static char* PQescapeInternal(PGconn* conn, const char* str, size_t len, bool as
                     if (--i == 0) {
                         break;
                     }
+                    remaining--;
                     ++s; /* for loop will provide the final increment */
                 }
             }
