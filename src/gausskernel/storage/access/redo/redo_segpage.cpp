@@ -326,7 +326,8 @@ static void SegPageRedoSegmentExtend(XLogBlockHead *blockhead, XLogBlockDataPars
 {
     XLogRedoAction action = XLogCheckBlockDataRedoAction(blockdatarec, bufferinfo);
     if (action == BLK_NEEDS_REDO) {
-        if (XLogBlockDataGetBlockId(blockdatarec) == 0) {
+        if (XLogBlockDataGetBlockId(blockdatarec) ==
+            XLOG_SEG_SEGMENT_EXTEND_HEAD_BLOCK_ID) {
             Size blkdatalen;
             char *blkdata = XLogBlockDataGetBlockData(blockdatarec, &blkdatalen);
             XLogDataSegmentExtend *xlog_data = (XLogDataSegmentExtend *)blkdata;
@@ -338,7 +339,8 @@ static void SegPageRedoSegmentExtend(XLogBlockHead *blockhead, XLogBlockDataPars
             }
             seghead->nblocks = xlog_data->new_nblocks;
             PageSetLSN(bufferinfo->pageinfo.page, bufferinfo->lsn);
-        } else if (XLogBlockDataGetBlockId(blockdatarec) == 1) {
+        } else if (XLogBlockDataGetBlockId(blockdatarec) ==
+                   XLOG_SEG_SEGMENT_EXTEND_DATA_BLOCK_ID) {
             memset_s(bufferinfo->pageinfo.page, BLCKSZ, 0, BLCKSZ);
             PageSetLSN(bufferinfo->pageinfo.page, bufferinfo->lsn);
         } else {

@@ -1556,9 +1556,9 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
         MarkBufferDirty(buf);
 
         XLogBeginInsert();
-        XLogRegisterBuffer(0, seg_buffer, REGBUF_KEEP_DATA);
-        XLogRegisterBufData(0, (char *)&xlog_data, sizeof(xlog_data));
-        XLogRegisterBuffer(1, buf, REGBUF_WILL_INIT);
+        XLogRegisterBuffer(XLOG_SEG_SEGMENT_EXTEND_HEAD_BLOCK_ID, seg_buffer, REGBUF_KEEP_DATA);
+        XLogRegisterBufData(XLOG_SEG_SEGMENT_EXTEND_HEAD_BLOCK_ID, (char *)&xlog_data, sizeof(xlog_data));
+        XLogRegisterBuffer(XLOG_SEG_SEGMENT_EXTEND_DATA_BLOCK_ID, buf, REGBUF_WILL_INIT);
         XLogRecPtr xlog_rec = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_SEGMENT_EXTEND, SegmentBktId);
         END_CRIT_SECTION();
 

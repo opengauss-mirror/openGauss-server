@@ -1279,10 +1279,19 @@ static void DispatchNblocksRecord(XLogReaderState* record, List* expectedTLIs)
     XLogDataSegmentExtend *dataSegExtendInfo = (XLogDataSegmentExtend *)XLogRecGetBlockData(record, 0, NULL);
 
     RelFileNode rnode;
-    XLogRecGetBlockTag(record, 0, &rnode, NULL, NULL);
+    /* We used to get rnode from XLOG_SEG_SEGMENT_EXTEND_HEAD_BLOCK_ID block, but for compressed table, we
+    need to get real opt from XLOG_SEG_SEGMENT_EXTEND_DATA_BLOCK_ID block to make sure the extend and
+    heap insert redo operations are dispatched to the same worker, which is by hashing of rnode. The relNode
+    will be set below and other values in rnode of the head and data block are same, so it's safe to get rnode
+    from data block instead of head block here. */
+    bool getDataTagSuccess = XLogRecGetBlockTag(record, XLOG_SEG_SEGMENT_EXTEND_DATA_BLOCK_ID, &rnode,
+                                                NULL, NULL);
+    /* All segment pages are extended through buffer, to set LSN correctly and use double-write, see
+    seg_extend. */
+    SegmentCheck(getDataTagSuccess);
     rnode.relNode = dataSegExtendInfo->main_fork_head;
     rnode.bucketNode = SegmentBktId;
-    
+
     DispatchToOnePageWorker(record, rnode, expectedTLIs);
 }
 

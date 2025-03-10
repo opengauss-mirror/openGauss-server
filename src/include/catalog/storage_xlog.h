@@ -195,5 +195,8 @@ static inline uint2 GetTruncateXlogFileNodeOpt(const XLogReaderState *record)
     return compress ? ((xl_smgr_truncate_compress*)(void *)XLogRecGetData(record))->pageCompressOpts : 0;
 }
 
+#define XLOG_SEG_SEGMENT_EXTEND_HEAD_BLOCK_ID 0
+#define XLOG_SEG_SEGMENT_EXTEND_DATA_BLOCK_ID 1
+
 #endif   /* STORAGE_XLOG_H */
 

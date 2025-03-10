@@ -248,6 +248,7 @@ static bool CfsFlushBlock(SMgrRelation reln, ForkNumber forknum,
     bool firstEnter = true;
     uint16_t chunkSize =  location.chunk_size;
     off_t seekPos;
+    bool pcaNeedFlush = false;
 
     pca_page_ctrl_t *ctrl = pca_buf_read_page(location, LW_SHARED, PCA_BUF_NORMAL_READ);
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
@@ -263,6 +264,18 @@ static bool CfsFlushBlock(SMgrRelation reln, ForkNumber forknum,
                         errmsg("Failed to CfsWriteBack %s, headerNum: %u.", FilePathName(location.fd),
                                location.headerNum)));
     }
+
+    /* keep nblocks up-to-date in cfsextendextent situation */
+    CfsExtentHeader *cfsExtentHeader = ctrl->pca_page;
+    auto limit_n_blocks = location.extentOffset + 1;
+    auto autal_n_blocks = pg_atomic_read_u32(&cfsExtentHeader->nblocks);
+    while (limit_n_blocks > autal_n_blocks) {
+        if (pg_atomic_compare_exchange_u32(&cfsExtentHeader->nblocks, &autal_n_blocks, limit_n_blocks)) {
+            pcaNeedFlush = true;
+            break;
+        }
+    }
+    Assert (cfsExtentHeader->nblocks > location.extentOffset);
 
     CfsExtentAddress *cfsExtentAddress = GetExtentAddress(ctrl->pca_page, (uint16)location.extentOffset);
     for (uint8 i = 0; i < cfsExtentAddress->nchunks; ++i) {
@@ -297,7 +310,7 @@ static bool CfsFlushBlock(SMgrRelation reln, ForkNumber forknum,
         }
     }
 
-    pca_buf_free_page(ctrl, location, false);
+    pca_buf_free_page(ctrl, location, pcaNeedFlush);
     return true;
 }
 
@@ -763,13 +776,17 @@ size_t CfsWritePage(SMgrRelation reln, const RelFileNode &relNode, int fd, int e
     }
 
     /* keep nblocks up-to-date in cfsextendextent situation */
-    if (isExtend) {
-        auto limit_n_blocks = location.extentOffset + 1;
-        auto autal_n_blocks = pg_atomic_read_u32(&cfsExtentHeader->nblocks);
-        while (limit_n_blocks > autal_n_blocks &&
-               (!pg_atomic_compare_exchange_u32(&cfsExtentHeader->nblocks, &autal_n_blocks, limit_n_blocks)));
-        Assert (cfsExtentHeader->nblocks > location.extentOffset);
+    auto limit_n_blocks = location.extentOffset + 1;
+    auto autal_n_blocks = pg_atomic_read_u32(&cfsExtentHeader->nblocks);
+
+    while (limit_n_blocks > autal_n_blocks) {
+        if (pg_atomic_compare_exchange_u32(&cfsExtentHeader->nblocks, &autal_n_blocks, limit_n_blocks)) {
+            isExtend = true;
+            break;
+        }
     }
+    
+    Assert (cfsExtentHeader->nblocks > location.extentOffset);
 
     /* free compressed buffer */
     if (compressedBuffer != NULL && compressedBuffer != buffer) {
