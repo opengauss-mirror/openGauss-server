@@ -46,6 +46,21 @@ constexpr int VACUUM_PUSH_WAIT_TIME = 100;
 constexpr int VACUMM_WAIT_TIME = 1000;
 constexpr int VACUUMQUEUE_SIZE = (1 << 12);
 
+void ClearImcstoreCacheIfNeed(Oid droppingDBOid)
+{
+    if (!HAVE_HTAP_TABLES || ENABLE_DSS || g_instance.pid_cxt.IMCStoreVacuumPID == 0) {
+        return;
+    }
+    bool needClear = false;
+    pthread_rwlock_rdlock(&g_instance.imcstore_cxt.context_mutex);
+    needClear = (droppingDBOid == g_instance.imcstore_cxt.dboid);
+    pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
+    if (needClear) {
+        ereport(WARNING, (errmsg("Drop db with imcstore tables, all imcstore data will be cleared.")));
+        gs_signal_send(g_instance.pid_cxt.IMCStoreVacuumPID, SIGUSR2);
+    }
+}
+
 void IMCStoreVacuumQueueCleanup(int code, Datum arg)
 {
     if (!arg) {

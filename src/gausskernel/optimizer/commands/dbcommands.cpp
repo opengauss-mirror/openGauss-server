@@ -1149,12 +1149,7 @@ void dropdb(const char* dbname, bool missing_ok)
     }
     
 #ifdef ENABLE_HTAP
-    if (!ENABLE_DSS && g_instance.pid_cxt.IMCStoreVacuumPID != 0) {
-        if (HAVE_HTAP_TABLES) {
-            ereport(WARNING, (errmsg("Drop db with imcstore tables, all imcstore data will be cleared.")));
-        }
-        gs_signal_send(g_instance.pid_cxt.IMCStoreVacuumPID, SIGUSR2);
-    }
+    ClearImcstoreCacheIfNeed(db_id);
 #endif
 
     /* Search need delete use-defined C fun library. */
@@ -2531,14 +2526,7 @@ void xlog_db_drop(XLogRecPtr lsn, Oid dbId, Oid tbSpcId)
 {
     UpdateMinRecoveryPoint(lsn, false);
 #ifdef ENABLE_HTAP
-    if (!ENABLE_DSS && g_instance.imcstore_cxt.dboid != InvalidOid && g_instance.imcstore_cxt.dboid == dbId) {
-        if (HAVE_HTAP_TABLES) {
-            ereport(WARNING, (errmsg("Drop db with imcstore tables, all imcstore data will be cleared.")));
-        }
-        if (g_instance.pid_cxt.IMCStoreVacuumPID != 0) {
-            gs_signal_send(g_instance.pid_cxt.IMCStoreVacuumPID, SIGUSR2);
-        }
-    }
+    ClearImcstoreCacheIfNeed(dbId);
 #endif
     if (IS_EXRTO_READ) {
         update_delay_ddl_db(dbId, tbSpcId, lsn);
