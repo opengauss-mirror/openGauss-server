@@ -150,10 +150,16 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/contrib/dolphin)
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--4.0--3.0.sql
         DESTINATION share/postgresql/extension/
     )
-    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--4.0--5.0.sql
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--4.1--5.0.sql
         DESTINATION share/postgresql/extension/
     )
-    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--5.0--4.0.sql
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--5.0--4.1.sql
+        DESTINATION share/postgresql/extension/
+    )
+	install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--4.0--4.1.sql
+        DESTINATION share/postgresql/extension/
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--4.1--4.0.sql
         DESTINATION share/postgresql/extension/
     )
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin--2.0--2.0.1.sql
