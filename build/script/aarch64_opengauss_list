@@ -872,7 +872,7 @@
 ./lib/postgresql/gms_i18n.so
 ./lib/postgresql/gms_raw.so
 ./lib/postgresql/gms_match.so
-./lib/postgreql/gms_assert.so
+./lib/postgresql/gms_assert.so
 ./lib/postgresql/shark.so
 ./lib/libpljava.so
 ./lib/libpq.a

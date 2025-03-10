@@ -780,7 +780,7 @@
 ./lib/postgresql/gms_debug.so
 ./lib/postgresql/gms_raw.so
 ./lib/postgresql/gms_match.so
-./lib/postgreql/gms_assert.so
+./lib/postgresql/gms_assert.so
 ./lib/postgresql/shark.so
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
