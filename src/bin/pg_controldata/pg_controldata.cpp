@@ -274,6 +274,7 @@ static void display_last_page(ss_reformer_ctrl_t reformerCtrl, int last_page_id)
     printf(_("Primary instance ID:                  %d\n"), reformerCtrl.primaryInstId);
     printf(_("Cluster status:                       %s\n"), SSClusterState(reformerCtrl.clusterStatus));
     printf(_("Cluster run mode:                     %s\n"), SSClusterRunMode(reformerCtrl.clusterRunMode));
+    printf(_("EXRTO list stable:                    %lu\n"), reformerCtrl.exrto_list_stable);
 }
 
 static void checkDssInput(const char* file, char** socketpath)

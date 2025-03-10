@@ -75,6 +75,7 @@ typedef struct st_reformer_ctrl {
     int recoveryInstId; // abandoned in xlog merge
     SSGlobalClusterState clusterStatus;
     ClusterRunMode clusterRunMode;
+    uint64 exrto_list_stable; // exrto stable instances list for ss_disaster_cluster
     pg_crc32c crc;
 } ss_reformer_ctrl_t;
 

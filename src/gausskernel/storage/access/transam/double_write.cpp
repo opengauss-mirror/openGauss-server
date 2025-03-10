@@ -2072,29 +2072,13 @@ void dw_init()
 void dw_transfer_phybuffer_addr(const BufferDesc *buf_desc, BufferTag *buf_tag)
 {
     if (XLOG_NEED_PHYSICAL_LOCATION(buf_desc->tag.rnode)) {
-        if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
-            // buffer descriptor contains the physical location
-            Assert(buf_desc->extra->seg_fileno <= EXTENT_TYPES && buf_desc->extra->seg_fileno > EXTENT_INVALID);
-            buf_tag->rnode.relNode = buf_desc->extra->seg_fileno;
-            buf_tag->blockNum = buf_desc->extra->seg_blockno;
-            buf_tag->rnode.opt = buf_desc->tag.rnode.opt;
-        } else if (SS_BEFORE_RECOVERY) {
-            buf_tag->rnode.relNode = buf_desc->extra->seg_fileno;
-            buf_tag->blockNum = buf_desc->extra->seg_blockno;
-        } else {
-            SegPageLocation loc =
-                seg_get_physical_location(buf_desc->tag.rnode, buf_desc->tag.forkNum, buf_desc->tag.blockNum);
-            Assert(loc.blocknum != InvalidBlockNumber);
-            buf_tag->rnode.relNode = (uint8) EXTENT_SIZE_TO_TYPE(loc.extent_size);
-            buf_tag->blockNum = loc.blocknum;
-            buf_tag->rnode.opt = buf_desc->tag.rnode.opt;
-        }
-        if (buf_tag->blockNum == InvalidBlockNumber || buf_tag->rnode.relNode == EXTENT_INVALID) {
-            Assert(0);
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
-                errmsg("dw_transfer_phybuffer_addr failed !blockNum is %u, relNode is %d.\n", buf_tag->blockNum,
-                buf_tag->rnode.relNode)));
-        }
+        // buffer descriptor contains the physical location
+        SegmentCheck(buf_desc->extra->seg_fileno > EXTENT_INVALID &&
+                     buf_desc->extra->seg_fileno <= EXTENT_TYPES &&
+                     buf_desc->extra->seg_blockno != InvalidBlockNumber);
+        buf_tag->rnode.relNode = buf_desc->extra->seg_fileno;
+        buf_tag->blockNum = buf_desc->extra->seg_blockno;
+        buf_tag->rnode.opt = buf_desc->tag.rnode.opt;
     }
 }
 

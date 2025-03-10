@@ -3084,6 +3084,13 @@ int PostmasterMain(int argc, char* argv[])
         if (SS_DISASTER_CLUSTER) {
             /* fresh ss dorado cluster run mode */
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = ss_dorado_mode;
+            if (IsExtremeRedo()) {
+                g_instance.dms_cxt.SSReformerControl.exrto_list_stable |=
+                    (1 << g_instance.attr.attr_storage.dms_attr.instance_id);
+            } else {
+                g_instance.dms_cxt.SSReformerControl.exrto_list_stable &=
+                    ~(1 << g_instance.attr.attr_storage.dms_attr.instance_id);
+            }
             SSDisasterRefreshMode();
         }
         int src_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
@@ -5308,9 +5315,9 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                         (errcode(ERRCODE_CANNOT_CONNECT_NOW), errmsg("can not accept connection in standby mode.")));
             }
 #else
-            if (SS_DISASTER_STANDBY_CLUSTER_STANDBY_NODE) {
+            if (SS_DISASTER_STANDBY_CLUSTER_STANDBY_NODE && SS_DISASTER_CLUSTER_IN_EXRTO) {
                 ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
-                        errmsg("can not accept connection in ss disaster cluster standby node")));
+                        errmsg("can not accept connection in ss disaster cluster standby node in exrto")));
                 return STATUS_ERROR;
             }
 
@@ -10572,10 +10579,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
     if (ENABLE_DMS && (mode = CheckSwitchoverSignal())) {
         if (SS_NORMAL_STANDBY && pmState == PM_RUN) {
-            if (!SS_STANDBY_ONDEMAND_RECOVERY) {
-                SSDoSwitchover();
-            } else {
+            if (SS_STANDBY_ONDEMAND_RECOVERY) {
                 ereport(LOG, (errmsg("Ondemand recovery is not finished, SS switchover command ignored.")));
+            } else if (SS_DISASTER_STANDBY_CLUSTER && SS_DISASTER_CLUSTER_IN_EXRTO) {
+                ereport(LOG, (errmsg("SS disaster standby cluster ignore switchover command in extreme redo mode.")));
+            } else {
+                SSDoSwitchover();
             }
         } else {
             ereport(LOG, (errmsg("Current mode is not NORMAL STANDBY, SS switchover command ignored.")));
