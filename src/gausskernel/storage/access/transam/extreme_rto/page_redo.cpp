@@ -1720,6 +1720,9 @@ void PushToWorkerLsn(bool force)
             refCount = pg_atomic_read_u32(&g_GlobalLsnForwarder.record.refcount);
             RedoInterruptCallBack();
         } while (refCount != 0 && !ReadPageWorkerStop());
+        if (ReadPageWorkerStop()) {
+            return;
+        }
         cur_recor_count = 0;
         SendLsnForwarder();
     } else {
