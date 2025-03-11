@@ -83,6 +83,13 @@
 #define SS_PRIMARY_NORMAL_REFORM \
     (SS_REFORM_REFORMER && (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS))
 
+#define SS_STANDBY_NORMAL_REFORM \
+    (SS_REFORM_PARTNER && (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_NORMAL_OPENGAUSS))
+
+#define SS_STANDBY_IN_PRIMARY_RESTART \
+    (SS_STANDBY_NORMAL_REFORM && \
+    ((uint64)(0x1 << SS_PRIMARY_ID) & g_instance.dms_cxt.SSReformInfo.bitmap_reconnect) > 0) \
+
 #define SS_PERFORMING_SWITCHOVER \
     (ENABLE_DMS && SS_IN_REFORM && \
     (g_instance.dms_cxt.SSReformInfo.reform_type == DMS_REFORM_TYPE_FOR_SWITCHOVER_OPENGAUSS))
