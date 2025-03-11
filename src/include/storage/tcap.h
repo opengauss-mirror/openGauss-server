@@ -100,6 +100,7 @@ extern void TrPurgeRecyclebin(int64 id);
 extern void TrPurgeUser(int64 id);
 extern void TrPurgeSchema(int64 id);
 extern void TrPurgeAuto(int64 id);
+extern bool TrFetchMatchAuto(Relation rbRel, HeapTuple rbTup, Oid objId);
 
 extern void TrRestoreDrop(const TimeCapsuleStmt *stmt);
 extern void TrRestoreTruncate(const TimeCapsuleStmt *stmt);
