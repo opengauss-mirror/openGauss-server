@@ -97,6 +97,15 @@ static bool isStmtNode(Node* node, char** stmtType)
         case T_ViewStmt: {
             *stmtType = "view";
         } break;
+        case T_PrepareStmt: {
+            *stmtType = "prepare";
+        } break;
+        case T_CreateSeqStmt: {
+            *stmtType = "create sequence";
+        } break;
+        case T_CommentStmt: {
+            *stmtType = "comment";
+        } break;
         default:
             return false;
     }
@@ -184,7 +193,7 @@ extern bool create_json_walker(Node* node, void* walker_context)
         if (IsA(node, RenameStmt)) {
             RenameStmt* rnstmt = (RenameStmt*)node;
             if (rnstmt->relation && rnstmt->relation->relname) {
-                cJSON_AddStringToObject(stmt, "tablename", rnstmt->relation->relname);
+                cJSON_AddStringToObject(stmt, "relname", rnstmt->relation->relname);
             }
             if (rnstmt->newname) {
                 cJSON_AddStringToObject(stmt, "newname", rnstmt->newname);
@@ -194,6 +203,16 @@ extern bool create_json_walker(Node* node, void* walker_context)
             }
             if (rnstmt->newschema) {
                 cJSON_AddStringToObject(stmt, "newschema", rnstmt->newschema);
+            }
+            if (rnstmt->renameTargetList) {
+                ListCell* lc_obj = NULL;
+                foreach(lc_obj, rnstmt->renameTargetList) {
+                    RenameCell* renameInfo = (RenameCell*)lfirst(lc_obj);
+                    RangeVar *original_name = renameInfo->original_name;
+                    RangeVar *modify_name = renameInfo->modify_name;
+                    cJSON_AddStringToObject(stmt, "relname", ((RangeVar*)original_name)->relname);
+                    cJSON_AddStringToObject(stmt, "newname", ((RangeVar*)modify_name)->relname);
+                }
             }
             context->cur_obj = context->pre_obj;
         }
@@ -210,6 +229,42 @@ extern bool create_json_walker(Node* node, void* walker_context)
                 }
             }
             context->cur_obj = context->pre_obj;
+        }
+
+        if (IsA(node, CommentStmt)) {
+            CommentStmt* cstmt = (CommentStmt*)node;
+            if (cstmt->objname) {
+                cJSON_AddStringToObject(stmt, "objectName",  NameListToString(cstmt->objname));
+            }
+            if (cstmt->objargs) {
+                cJSON* objects = get_or_create_field(stmt, "argtypes");
+                ListCell* lc_obj = NULL;
+                foreach(lc_obj, cstmt->objargs) {
+                    cJSON* object = cJSON_CreateObject();
+                    add_typename_into_field(((TypeName*)lfirst(lc_obj)), object);
+                    cJSON_AddItemToArray(objects, object);
+                }
+            }
+            if (cstmt->comment) {
+                cJSON_AddStringToObject(stmt, "comment",  cstmt->comment);
+            }
+            context->cur_obj = context->pre_obj;
+        }
+
+        if (IsA(node, PrepareStmt)) {
+            PrepareStmt* pstmt = (PrepareStmt*)node;
+            if (pstmt->name) {
+                cJSON_AddStringToObject(stmt, "name", pstmt->name);
+            }
+            if (pstmt->argtypes) {
+                cJSON* objects = get_or_create_field(stmt, "argtypes");
+                ListCell* lc_obj = NULL;
+                foreach(lc_obj, pstmt->argtypes) {
+                    cJSON* object = cJSON_CreateObject();
+                    add_typename_into_field(((TypeName*)lfirst(lc_obj)), object);
+                    cJSON_AddItemToArray(objects, object);
+                }
+            }
         }
     }
 
@@ -271,7 +326,7 @@ extern bool create_json_walker(Node* node, void* walker_context)
             if (parent_node && IsA(parent_node, TableLikeClause)) {
                 cJSON_AddStringToObject(relation, "originRelName", ((RangeVar*)node)->relname);
             } else {
-                cJSON_AddStringToObject(relation, "relName", ((RangeVar*)node)->relname);
+                cJSON_AddStringToObject(relation, "relname", ((RangeVar*)node)->relname);
             }
             if (((RangeVar*)node)->alias) {
                 cJSON_AddStringToObject(relation, "alias", ((RangeVar*)node)->alias->aliasname);
@@ -453,6 +508,18 @@ OgQueryParseResult raw_parser_opengauss_dolphin(const char* str)
         printf("Json: %s\n\n", result.parse_tree_json);
 #endif
     return result;
+}
+
+List* pg_parse_query(const char* query_string, List** query_string_locationlist,
+                     List* (*parser_hook)(const char*, List**))
+{
+    List* parsetree_list = NULL;
+#ifdef DOLPHIN
+        parsetree_list = dolphin_raw_parser(query_string, NULL);
+#else
+        parsetree_list = raw_parser(query_string, NULL);
+#endif
+    return parsetree_list;
 }
 
 #else
@@ -2112,12 +2179,6 @@ char* GetUserNameFromId(Oid roleid)
 CmpType agg_cmp_type(CmpType a, CmpType b)
 {
     return CMP_UNKNOWN_TYPE;
-}
-
-List* pg_parse_query(const char* query_string, List** query_string_locationlist,
-                     List* (*parser_hook)(const char*, List**))
-{
-    return nullptr;
 }
 
 bool ExecCheckRTPerms(List* rangeTable, bool ereport_on_violation)
