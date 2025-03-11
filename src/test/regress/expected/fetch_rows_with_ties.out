@@ -932,6 +932,9 @@ ERROR:  Percent or with ties syntax is not supported in vectorized plan yet.
 -- NOT SUPPORTED
 SELECT * FROM customer_test3 ORDER BY num DESC FETCH FIRST 50 PERCENT ROWS WITH TIES;
 ERROR:  Percent or with ties syntax is not supported in vectorized plan yet.
+-- NOT SUPPORTED
+SELECT * FROM customer_test3 FETCH NEXT 10 ROWS WITH TIES;
+ERROR:  Percent or with ties syntax is not supported in vectorized plan yet.
 -- 用例 14：存储过程
 CREATE OR REPLACE PROCEDURE fetch_rows_with_ties_procedure
 IS

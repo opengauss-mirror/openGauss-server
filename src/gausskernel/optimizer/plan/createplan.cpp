@@ -8869,7 +8869,7 @@ Limit *make_limit_with_ties(PlannerInfo* root, Plan* lefttree, Query *parse, int
     Oid *srcEqualOprs = NULL;
     int numCols = 0;
     node->isPercent = parse->limitIsPercent;
-    node->withTies = parse->limitWithTies;
+    node->withTies = parse->limitWithTies && parse->sortClause != NIL;
     ListCell *lc = NULL;
     bool vectorized = false;
     errno_t rc;
@@ -8885,14 +8885,14 @@ Limit *make_limit_with_ties(PlannerInfo* root, Plan* lefttree, Query *parse, int
         }
     }
 
-    if (vectorized && (node->isPercent || node->withTies)) {
+    if (vectorized && (parse->limitIsPercent || parse->limitWithTies)) {
         ereport(ERROR,
             (errmodule(MOD_OPT),
                 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Percent or with ties syntax is not supported in vectorized plan yet.")));
     }
 
-    if (parse->limitWithTies) {
+    if (node->withTies) {
         if (IsA(lefttree, Sort)) {
             Sort *sort = (Sort *)lefttree;
             numCols = sort->numCols;
