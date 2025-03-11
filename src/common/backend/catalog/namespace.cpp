@@ -1739,7 +1739,7 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
         }
         /* Only member function can use object call */
         if (OidIsValid(func_oid)) {
-            if (caller_func_oid == func_oid ||
+            if (caller_func_oid == func_oid || GetProprocoidByOid(caller_func_oid) == func_oid ||
                 (!OidIsValid(u_sess->plsql_cxt.running_func_oid) && caller_func_oid == self_func_oid)) {
                 namespaceId = QualifiedNameGetCreationNamespace(names, &funcname);
             } else {

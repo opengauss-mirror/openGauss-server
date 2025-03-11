@@ -1855,5 +1855,39 @@ begin return 10; end;
 begin return 10; end;
 /
 
+create table tb1_03(id int,c1 int,c2 int, c3 int);
+DECLARE
+  var1 NUMBER;
+  var2 number;
+  FUNCTION square (original NUMBER)RETURN NUMBER
+  AS
+    original_squared NUMBER;
+    BEGIN
+    original_squared := original * original;
+    return original_squared;
+  END;
+  
+  FUNCTION func1 (original NUMBER)RETURN NUMBER
+  AS
+    original_squared NUMBER;
+  function fun1_01(col1 int,col2 int,col3 int,col4 int) return int
+    is
+    begin
+    insert into tb1_03 values(col1,col2,col3,col4);
+    return 10;
+    end;
+  BEGIN
+    select square(100) into var1;
+    select fun1_01(1,2,3,4) into var2;
+    raise info '%,%',var1,var2;
+    original_squared := original + original;
+    return original_squared;
+  END;
+BEGIN
+  select func1(100) into var1;
+  raise info '%',var1;
+END;
+/
+
 \c regression
 drop database nested_subprogram;
