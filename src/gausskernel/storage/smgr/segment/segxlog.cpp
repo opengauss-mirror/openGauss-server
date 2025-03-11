@@ -645,7 +645,7 @@ static void redo_seghead_extend(XLogReaderState *record)
 {
     RedoBufferInfo redo_buf;
     t_thrd.xlog_cxt.inRedoExtendSegment = true;
-    XLogInitBufferForRedo(record, 1, &redo_buf);
+    XLogInitBufferForRedo(record, XLOG_SEG_SEGMENT_EXTEND_DATA_BLOCK_ID, &redo_buf);
     t_thrd.xlog_cxt.inRedoExtendSegment = false;
     if (BufferIsValid(redo_buf.buf)) {
         memset_s(redo_buf.pageinfo.page, BLCKSZ, 0, BLCKSZ);
@@ -654,9 +654,9 @@ static void redo_seghead_extend(XLogReaderState *record)
         UnlockReleaseBuffer(redo_buf.buf);
     }
 
-    XLogRedoAction redo_action = XLogReadBufferForRedo(record, 0, &redo_buf);
+    XLogRedoAction redo_action = XLogReadBufferForRedo(record, XLOG_SEG_SEGMENT_EXTEND_HEAD_BLOCK_ID, &redo_buf);
     if (redo_action == BLK_NEEDS_REDO) {
-        char *data = XLogRecGetBlockData(record, 0, NULL);
+        char *data = XLogRecGetBlockData(record, XLOG_SEG_SEGMENT_EXTEND_HEAD_BLOCK_ID, NULL);
         XLogDataSegmentExtend *xlog_data = (XLogDataSegmentExtend *)data;
 
         SegmentHead *seghead = (SegmentHead *)PageGetContents(redo_buf.pageinfo.page);
