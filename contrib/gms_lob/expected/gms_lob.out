@@ -238,7 +238,7 @@ BEGIN
     gms_lob.freetemporary(v_clob);
 END;
 /
-NOTICE:  Lob(v_clob) already opened in the same transaction
+ERROR:  Lob(v_clob) already opened in the same transaction
 CONTEXT:  SQL statement "CALL gms_lob.open(v_clob,gms_lob.LOB_READWRITE)"
 PL/pgSQL function inline_code_block line 5 at SQL statement
 -- 大写名称

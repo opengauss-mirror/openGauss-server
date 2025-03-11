@@ -767,8 +767,7 @@ Datum gms_lob_og_open(PG_FUNCTION_ARGS)
 
     searchLob(argname, &found);
     if (found) {
-        ereport(NOTICE, (errmsg("Lob(%s) already opened in the same transaction", argname)));
-        PG_RETURN_DATUM(PG_GETARG_DATUM(0));
+        ereport(ERROR, (errmsg("Lob(%s) already opened in the same transaction", argname)));
     }
     openLob(argname, openmode);
 
