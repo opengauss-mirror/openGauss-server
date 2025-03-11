@@ -1150,3 +1150,8 @@ SELECT cast ('01-Sep-03 14:10:10.123000' as timestamp DEFAULT '11-Sep-11 14:10:1
 SELECT cast ('01-Oct-03 14:10:10.123000' as timestamp DEFAULT '11-Oct-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
 SELECT cast ('01-Nov-03 14:10:10.123000' as timestamp DEFAULT '11-Nov-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
 SELECT cast ('01-Dec-03 14:10:10.123000' as timestamp DEFAULT '11-Dec-11 14:10:10.123000' ON CONVERSION ERROR,'DD-Mon-RR HH24:MI:SS.FF');
+
+SELECT cast('1' as numeric default '123' on conversion error,'nls_date_language = American');
+SELECT cast('1s' as numeric default '123' on conversion error,'9999');
+SELECT cast('1ea' as numeric default '123' on conversion error);
+SELECT cast('1' as number, 'nls_date_language = American');

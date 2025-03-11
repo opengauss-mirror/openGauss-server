@@ -3534,3 +3534,25 @@ SELECT cast ('01-Dec-03 14:10:10.123000' as timestamp DEFAULT '11-Dec-11 14:10:1
  2001-12-03 14:10:10.123
 (1 row)
 
+SELECT cast('1' as numeric default '123' on conversion error,'nls_date_language = American');
+ERROR:  invalid data for match in format string
+LINE 1: SELECT cast('1' as numeric default '123' on conversion error...
+                                           ^
+CONTEXT:  referenced column: numeric
+SELECT cast('1s' as numeric default '123' on conversion error,'9999');
+ numeric 
+---------
+       1
+(1 row)
+
+SELECT cast('1ea' as numeric default '123' on conversion error);
+ numeric 
+---------
+     123
+(1 row)
+
+SELECT cast('1' as number, 'nls_date_language = American');
+ERROR:  invalid data for match in format string
+LINE 1: SELECT cast('1' as number, 'nls_date_language = American');
+                    ^
+CONTEXT:  referenced column: numeric
