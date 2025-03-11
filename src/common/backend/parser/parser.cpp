@@ -188,6 +188,35 @@ List* raw_parser(const char* str, List** query_string_locationlist)
         *llocp = cur_yylloc_1;                               \
     } while (0)
 
+#define SET_LOOKAHEAD_2_TOKEN()               \
+    do {                                                     \
+        yyextra->lookahead_token[1] = next_token_1;          \
+        yyextra->lookahead_yylval[1] = core_yystype_2;       \
+        yyextra->lookahead_yylloc[1] = cur_yylloc_2;         \
+        yyextra->lookahead_token[0] = next_token_2;          \
+        yyextra->lookahead_yylval[0] = lvalp->core_yystype;  \
+        yyextra->lookahead_yylloc[0] = *llocp;               \
+        yyextra->lookahead_num = 2;                          \
+        lvalp->core_yystype = core_yystype_1;                \
+        *llocp = cur_yylloc_1;                               \
+    } while (0)
+
+#define SET_LOOKAHEAD_3_TOKEN()               \
+    do {                                      \
+        yyextra->lookahead_token[2] = next_token_2; \
+        yyextra->lookahead_yylval[2] = core_yystype_3; \
+        yyextra->lookahead_yylloc[2] = cur_yylloc_3;  \
+        yyextra->lookahead_token[1] = next_token_1;  \
+        yyextra->lookahead_yylval[1] = core_yystype_2; \
+        yyextra->lookahead_yylloc[1] = cur_yylloc_2;  \
+        yyextra->lookahead_token[0] = next_token_3;  \
+        yyextra->lookahead_yylval[0] = lvalp->core_yystype; \
+        yyextra->lookahead_yylloc[0] = *llocp;       \
+        yyextra->lookahead_num = 3;                 \
+        lvalp->core_yystype = core_yystype_1;       \
+        *llocp = cur_yylloc_1;                      \
+    } while (0)
+
 /*
  * Intermediate filter between parser and core lexer (core_yylex in scan.l).
  *
@@ -218,7 +247,9 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
     int next_token_2 = 0;
     core_YYSTYPE core_yystype_2;
     YYLTYPE cur_yylloc_2 = 0;
-
+    int next_token_3 = 0;
+    core_YYSTYPE core_yystype_3;
+    YYLTYPE cur_yylloc_3 = 0;
 
     /* Get next token --- we might already have it */
     if (yyextra->lookahead_num != 0) {
@@ -770,6 +801,39 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("Unsupported feature: cursor expression during the upgrade")));
                 }
+            }
+            break;
+        case RAW:
+            GET_NEXT_TOKEN();
+            core_yystype_1 = cur_yylval;
+            cur_yylloc_1 = cur_yylloc;
+            next_token_1 = next_token;
+
+            if (next_token == '(') {
+                GET_NEXT_TOKEN();
+                core_yystype_2 = cur_yylval;
+                cur_yylloc_2 = cur_yylloc;
+                next_token_2 = next_token;
+
+                if (next_token == ICONST) {
+                    GET_NEXT_TOKEN();
+                    core_yystype_3 = cur_yylval;
+                    cur_yylloc_3 = cur_yylloc;
+                    next_token_3 = next_token;
+                    if (next_token == ')') {
+                        cur_token = RAW;
+                    } else {
+                        SET_LOOKAHEAD_3_TOKEN();
+                    }
+                } else {
+                    SET_LOOKAHEAD_2_TOKEN();
+                }
+            } else {
+                /* save the lookahead token for next time */
+                SET_LOOKAHEAD_TOKEN();
+                /* and back up the output info to cur_token */
+                lvalp->core_yystype = cur_yylval;
+                *llocp = cur_yylloc;
             }
             break;
         default:
