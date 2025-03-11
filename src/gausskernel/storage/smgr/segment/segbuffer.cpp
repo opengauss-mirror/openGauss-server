@@ -71,7 +71,7 @@ bool HasInProgressBuf(void)
 void AbortSegBufferIO(void)
 {
     if (InProgressBuf != NULL) {
-        LWLockAcquire(InProgressBuf->io_in_progress_lock, LW_EXCLUSIVE);
+        LWLockAcquire(BufferDescriptorGetIOLock(InProgressBuf), LW_EXCLUSIVE);
         SegTerminateBufferIO(InProgressBuf, false, BM_IO_ERROR);
     }
 }
@@ -83,10 +83,10 @@ static bool SegStartBufferIO(BufferDesc *buf, bool forInput)
     SegmentCheck(!InProgressBuf);
 
     while (true) {
-        LWLockAcquire(buf->io_in_progress_lock, LW_EXCLUSIVE);
+        LWLockAcquire(BufferDescriptorGetIOLock(buf), LW_EXCLUSIVE);
 
         if (buf->extra->aio_in_progress) {
-            LWLockRelease(buf->io_in_progress_lock);
+            LWLockRelease(BufferDescriptorGetIOLock(buf));
             pg_usleep(1000L);
             continue;
         }
@@ -98,14 +98,14 @@ static bool SegStartBufferIO(BufferDesc *buf, bool forInput)
         }
 
         UnlockBufHdr(buf, buf_state);
-        LWLockRelease(buf->io_in_progress_lock);
+        LWLockRelease(BufferDescriptorGetIOLock(buf));
         WaitIO(buf);
     }
 
     if (forInput ? (buf_state & BM_VALID) : !(buf_state & BM_DIRTY)) {
         /* IO finished */
         UnlockBufHdr(buf, buf_state);
-        LWLockRelease(buf->io_in_progress_lock);
+        LWLockRelease(BufferDescriptorGetIOLock(buf));
 
         return false;
     }
@@ -156,7 +156,7 @@ void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint64 set_flag_bit
     UnlockBufHdr(buf, buf_state);
 
     InProgressBuf = NULL;
-    LWLockRelease(buf->io_in_progress_lock);
+    LWLockRelease(BufferDescriptorGetIOLock(buf));
 }
 
 bool SegPinBuffer(BufferDesc *buf)
@@ -291,7 +291,7 @@ void SegMarkBufferDirty(Buffer buf)
 
     SegmentCheck(IsSegmentBufferID(bufHdr->buf_id));
     /* unfortunately we can't check if the lock is held exclusively */
-    SegmentCheck(LWLockHeldByMe(bufHdr->content_lock));
+    SegmentCheck(LWLockHeldByMe(BufferDescriptorGetContentLock(bufHdr)));
 
     old_buf_state = LockBufHdr(bufHdr);
 
@@ -600,7 +600,7 @@ Buffer ReadBufferFastNormal(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum
 
             do {
                 bool startio;
-                if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
+                if (LWLockHeldByMe(BufferDescriptorGetIOLock(bufHdr))) {
                     startio = true;
                 } else {
                     startio = SegStartBufferIO(bufHdr, true);
@@ -765,9 +765,9 @@ retry:
                 (void)sched_yield();
                 continue;
             }
-            if (LWLockConditionalAcquire(buf->content_lock, LW_SHARED)) {
+            if (LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf), LW_SHARED)) {
                 FlushOneSegmentBuffer(buf->buf_id + 1);
-                LWLockRelease(buf->content_lock);
+                LWLockRelease(BufferDescriptorGetContentLock(buf));
                 ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
             } else {
                 SegUnpinBuffer(buf);

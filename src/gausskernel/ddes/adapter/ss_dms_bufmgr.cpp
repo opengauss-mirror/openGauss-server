@@ -337,7 +337,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
     }
 
     if ((read_mode == RBM_ZERO_AND_LOCK || read_mode == RBM_ZERO_AND_CLEANUP_LOCK) &&
-        !LWLockHeldByMe(buf_desc->content_lock)) {
+        !LWLockHeldByMe(BufferDescriptorGetContentLock(buf_desc))) {
         LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
     }
 
@@ -354,7 +354,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
     /*
      * we need redo items to get lastest page in ondemand recovery
      */
-    if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && !LWLockHeldByMe(buf_desc->content_lock)) {
+    if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY && !LWLockHeldByMe(BufferDescriptorGetContentLock(buf_desc))) {
         buf_desc = RedoForOndemandExtremeRTOQuery(buf_desc, RELPERSISTENCE_PERMANENT, buf_desc->tag.forkNum,
             buf_desc->tag.blockNum, read_mode);
     }
@@ -372,7 +372,7 @@ static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
         Assert(!t_thrd.storage_cxt.InProgressBuf || t_thrd.storage_cxt.InProgressBuf == buf_desc);
     }
 
-    if (LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
+    if (LWLockHeldByMe(BufferDescriptorGetIOLock(buf_desc))) {
         return false;
     }
 
@@ -383,7 +383,7 @@ static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
     }
 
     for (;;) {
-        (void)LWLockAcquire(buf_desc->io_in_progress_lock, LW_EXCLUSIVE);
+        (void)LWLockAcquire(BufferDescriptorGetIOLock(buf_desc), LW_EXCLUSIVE);
 
         buf_state = LockBufHdr(buf_desc);
         if (!(buf_state & BM_IO_IN_PROGRESS)) {
@@ -391,13 +391,13 @@ static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
         }
 
         UnlockBufHdr(buf_desc, buf_state);
-        LWLockRelease(buf_desc->io_in_progress_lock);
+        LWLockRelease(BufferDescriptorGetIOLock(buf_desc));
         WaitIO(buf_desc);
     }
 
     if (LockModeCompatible(buf_ctrl, mode)) {
         UnlockBufHdr(buf_desc, buf_state);
-        LWLockRelease(buf_desc->io_in_progress_lock);
+        LWLockRelease(BufferDescriptorGetIOLock(buf_desc));
         return false;
     }
 
@@ -463,7 +463,7 @@ Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
     }
 
     if ((read_mode == RBM_ZERO_AND_LOCK || read_mode == RBM_ZERO_AND_CLEANUP_LOCK) &&
-        !LWLockHeldByMe(buf_desc->content_lock)) {
+        !LWLockHeldByMe(BufferDescriptorGetContentLock(buf_desc))) {
         LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
     }
 
@@ -910,10 +910,10 @@ bool SSTryFlushBuffer(BufferDesc *buf)
         return false;
     }
 
-    if (LWLockConditionalAcquire(buf->content_lock, LW_SHARED)) {
+    if (LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf), LW_SHARED)) {
         if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
             if (!free_space_enough(buf->buf_id)) {
-                LWLockRelease(buf->content_lock);
+                LWLockRelease(BufferDescriptorGetContentLock(buf));
                 return false;
             }
             uint32 pos = 0;
@@ -925,7 +925,7 @@ bool SSTryFlushBuffer(BufferDesc *buf)
         } else {
             FlushBuffer(buf, NULL);
         }
-        LWLockRelease(buf->content_lock);
+        LWLockRelease(BufferDescriptorGetContentLock(buf));
         ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
         return true;    
     }
@@ -939,9 +939,9 @@ bool SSTrySegFlushBuffer(BufferDesc* buf)
         return false;
     }
 
-    if (LWLockConditionalAcquire(buf->content_lock, LW_SHARED)) {
+    if (LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf), LW_SHARED)) {
         FlushOneSegmentBuffer(buf->buf_id + 1);
-        LWLockRelease(buf->content_lock);
+        LWLockRelease(BufferDescriptorGetContentLock(buf));
         ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
         return true;
     } 
@@ -1043,9 +1043,9 @@ bool SSWaitIOTimeout(BufferDesc *buf)
             ret = true;
             break;
         }
-        ret = SSLWLockAcquireTimeout(buf->io_in_progress_lock, LW_SHARED);
+        ret = SSLWLockAcquireTimeout(BufferDescriptorGetIOLock(buf), LW_SHARED);
         if (ret) {
-            LWLockRelease(buf->io_in_progress_lock);
+            LWLockRelease(BufferDescriptorGetIOLock(buf));
         } else {
             break;
         }
@@ -1056,7 +1056,7 @@ bool SSWaitIOTimeout(BufferDesc *buf)
         ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] SSWaitIOTimeout, "
             "buf_id:%d, io_in_progress_lock:%p",
             tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-            tag->forkNum, tag->blockNum, buf->buf_id, buf->io_in_progress_lock))));
+            tag->forkNum, tag->blockNum, buf->buf_id, BufferDescriptorGetIOLock(buf)))));
     }
     return ret;
 }

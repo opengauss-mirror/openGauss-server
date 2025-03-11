@@ -694,7 +694,7 @@ void InsertPreparedUndo(_in_ URecVector *urecvec, _in_ XLogRecPtr lsn)
             Buffer buffer = ubuffer->buf;
             if (BufferIsValid(buffer)) {
                 BufferDesc *buf_desc = GetBufferDescriptor(buffer - 1);
-                if (!LWLockHeldByMe(buf_desc->content_lock)) {
+                if (!LWLockHeldByMe(BufferDescriptorGetContentLock(buf_desc))) {
                     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
                 }
                 page = BufferGetPage(buffer);

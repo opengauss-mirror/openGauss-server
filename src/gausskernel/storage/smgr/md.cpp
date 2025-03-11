@@ -996,7 +996,7 @@ void mdasyncread(SMgrRelation reln, ForkNumber forkNum, AioDispatchDesc_t **dLis
          * Disown the io_in_progress_lock, we will not be
          * waiting for the i/o to complete.
          */
-        LWLockDisown(dList[i]->blockDesc.bufHdr->io_in_progress_lock);
+        LWLockDisown(BufferDescriptorGetIOLock(dList[i]->blockDesc.bufHdr));
 
         /* Pin the buffer on behalf of the ADIO Completer */
         AsyncCompltrPinBuffer((volatile void *)dList[i]->blockDesc.bufHdr);
@@ -1025,7 +1025,7 @@ int CompltrReadReq(void *aioDesc, long res)
     START_CRIT_SECTION();
     Assert(desc->blockDesc.descType == AioRead);
     /* Take ownership of the io_in_progress_lock */
-    LWLockOwn(desc->blockDesc.bufHdr->io_in_progress_lock);
+    LWLockOwn(BufferDescriptorGetIOLock(desc->blockDesc.bufHdr));
 
     if (res != desc->blockDesc.blockSize) {
         /* io error */
@@ -1125,8 +1125,8 @@ void mdasyncwrite(SMgrRelation reln, ForkNumber forkNumber, AioDispatchDesc_t **
              * Disown the io_in_progress_lock and content_lock, we will not be
              * waiting for the i/o to complete.
              */
-            LWLockDisown(dList[i]->blockDesc.bufHdr->io_in_progress_lock);
-            LWLockDisown(dList[i]->blockDesc.bufHdr->content_lock);
+            LWLockDisown(BufferDescriptorGetIOLock(dList[i]->blockDesc.bufHdr));
+            LWLockDisown(BufferDescriptorGetContentLock(dList[i]->blockDesc.bufHdr));
 
             /* Pin the buffer on behalf of the ADIO Completer */
             AsyncCompltrPinBuffer((volatile void *)dList[i]->blockDesc.bufHdr);
@@ -1161,8 +1161,8 @@ int CompltrWriteReq(void *aioDesc, long res)
     START_CRIT_SECTION();
     if (desc->blockDesc.descType == AioWrite) {
         /* Take ownership of the content_lock and io_in_progress_lock */
-        LWLockOwn(desc->blockDesc.bufHdr->content_lock);
-        LWLockOwn(desc->blockDesc.bufHdr->io_in_progress_lock);
+        LWLockOwn(BufferDescriptorGetContentLock(desc->blockDesc.bufHdr));
+        LWLockOwn(BufferDescriptorGetIOLock(desc->blockDesc.bufHdr));
 
         if (res != desc->blockDesc.blockSize) {
             ereport(PANIC, (errmsg("async write failed, write_count(%ld), require_count(%d)", res,
@@ -1175,7 +1175,7 @@ int CompltrWriteReq(void *aioDesc, long res)
         }
 
         /* Release the content lock */
-        LWLockRelease(desc->blockDesc.bufHdr->content_lock);
+        LWLockRelease(BufferDescriptorGetContentLock(desc->blockDesc.bufHdr));
 
         /* Unpin the buffer and wake waiters, on behalf of the ADIO Completer */
         AsyncCompltrUnpinBuffer((volatile void *)desc->blockDesc.bufHdr);

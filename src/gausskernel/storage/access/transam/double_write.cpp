@@ -2119,7 +2119,7 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
      * and the backends will be blocked on the page_writer to flush the buffer,
      * resulting in deadlock.
      */
-    if (!LWLockConditionalAcquire(buf_desc->content_lock, LW_SHARED)) {
+    if (!LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf_desc), LW_SHARED)) {
         UnpinBuffer(buf_desc, true);
         return page_lsn;
     }
@@ -2157,7 +2157,7 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
     rc = memcpy_s(dest_addr, BLCKSZ, block, BLCKSZ);
     securec_check(rc, "\0", "\0");
 
-    LWLockRelease(buf_desc->content_lock);
+    LWLockRelease(BufferDescriptorGetContentLock(buf_desc));
     UnpinBuffer(buf_desc, true);
 
     page_lsn = PageGetLSN(dest_addr);

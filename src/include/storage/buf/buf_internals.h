@@ -222,8 +222,7 @@ typedef struct BufferDesc {
 
     ThreadId wait_backend_pid; /* backend PID of pin-count waiter */
 
-    LWLock* io_in_progress_lock; /* to wait for I/O to complete */
-    LWLock* content_lock;        /* to lock access to buffer contents */
+    LWLock content_lock; /* to lock access to buffer contents */
 
     BufferDescExtra *extra;
 
@@ -268,7 +267,13 @@ typedef union BufferDescPadded {
         (BufferDesc *)&u_sess->storage_cxt.LocalBufferDescriptors[-(buffer)-1].bufferdesc : \
         &t_thrd.storage_cxt.BufferDescriptors[(buffer)-1].bufferdesc)
 
-#define BufferDescriptorGetContentLock(bdesc) (((bdesc)->content_lock))
+#define BufferDescriptorGetIOLock(bdesc) \
+    (&(t_thrd.storage_cxt.BufferIOLWLockArray[(bdesc)->buf_id]).lock)
+#define BufferDescriptorGetContentLock(bdesc) \
+    ((LWLock*) (&(bdesc)->content_lock))
+
+extern PGDLLIMPORT LWLockMinimallyPadded *BufferIOLWLockArray;
+
 /*
  * Functions for acquiring/releasing a shared buffer header's spinlock.  Do
  * not apply these to local buffers!

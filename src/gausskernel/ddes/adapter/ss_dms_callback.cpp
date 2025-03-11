@@ -353,7 +353,7 @@ static int CBGetCurrModeAndLockBuffer(void *db_handle, int buffer, unsigned char
 {
     Assert((buffer - 1) >= 0);
     BufferDesc *bufHdr = GetBufferDescriptor(buffer - 1);
-    *curr_mode = (unsigned char)GetHeldLWLockMode(bufHdr->content_lock); // LWLockMode
+    *curr_mode = (unsigned char)GetHeldLWLockMode(BufferDescriptorGetContentLock(bufHdr)); // LWLockMode
     Assert(*curr_mode == LW_EXCLUSIVE || *curr_mode == LW_SHARED);
     LockBuffer((Buffer)buffer, lock_mode); // BUFFER_LOCK_UNLOCK, BUFFER_LOCK_SHARE or BUFFER_LOCK_EXCLUSIVE
     ereport(LOG, (errmodule(MOD_DMS),
@@ -715,14 +715,14 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             }
 
             LWLockMode content_mode = (mode == DMS_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
-            get_lock = SSLWLockAcquireTimeout(buf_desc->content_lock, content_mode);
+            get_lock = SSLWLockAcquireTimeout(BufferDescriptorGetContentLock(buf_desc), content_mode);
             if (!get_lock) {
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
                 ret = GS_TIMEOUT;
                 ereport(WARNING, (errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] request LWLock timeout, "
                     "buf_id:%d, lwlock:%p",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                    tag->forkNum, tag->blockNum, buf_id, buf_desc->content_lock))));
+                    tag->forkNum, tag->blockNum, buf_id, BufferDescriptorGetContentLock(buf_desc)))));
                 break;
             }
             *buf_ctrl = GetDmsBufCtrl(buf_id);
@@ -730,7 +730,7 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
 
             if ((*buf_ctrl)->been_loaded == false) {
                 *buf_ctrl = NULL;
-                LWLockRelease(buf_desc->content_lock);
+                LWLockRelease(BufferDescriptorGetContentLock(buf_desc));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[SS page][%u/%u/%u/%d %d-%u] been_loaded marked false, page swapped out and failed to load",
@@ -914,18 +914,18 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                 break;
             }
 
-            get_lock = SSLWLockAcquireTimeout(buf_desc->content_lock, LW_EXCLUSIVE);
+            get_lock = SSLWLockAcquireTimeout(BufferDescriptorGetContentLock(buf_desc), LW_EXCLUSIVE);
             if (!get_lock) {
                 ereport(WARNING, (errmodule(MOD_DMS), errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] "
                     "request LWLock timeout, buf_id:%d, lwlock:%p",
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                    tag->forkNum, tag->blockNum, buf_id, buf_desc->content_lock))));
+                    tag->forkNum, tag->blockNum, buf_id, BufferDescriptorGetContentLock(buf_desc)))));
                 ret = GS_TIMEOUT;
             } else {
                 buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
                 buf_ctrl->seg_fileno = EXTENT_INVALID;
                 buf_ctrl->seg_blockno = InvalidBlockNumber;
-                LWLockRelease(buf_desc->content_lock);
+                LWLockRelease(BufferDescriptorGetContentLock(buf_desc));
             }
 
             if (IsSegmentBufferID(buf_id)) {
@@ -1521,7 +1521,7 @@ static int SSBufRebuildOneDrc(int index, unsigned char thread_index)
         uint64 buf_state = pg_atomic_read_u64(&buf_desc->state); 
         if (BUF_STATE_GET_REFCOUNT(buf_state) > 1) {
             need_rebuild = true;
-        } else if (LWLockConditionalAcquire(buf_desc->content_lock, LW_SHARED)) {
+        } else if (LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf_desc), LW_SHARED)) {
             if (!SSBufferIsDirty(buf_desc)) {
                 LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
                 buf_ctrl->lock_mode = DMS_LOCK_NULL;
@@ -1531,7 +1531,7 @@ static int SSBufRebuildOneDrc(int index, unsigned char thread_index)
                     buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
                     buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
             }
-            LWLockRelease(buf_desc->content_lock);   
+            LWLockRelease(BufferDescriptorGetContentLock(buf_desc));   
         }
     } else {
         need_rebuild = false;

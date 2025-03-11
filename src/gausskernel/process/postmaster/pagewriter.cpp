@@ -415,11 +415,11 @@ bool is_dirty_page_queue_full(BufferDesc* buf)
 {
     if ((get_dirty_page_num() >=
             g_instance.ckpt_cxt_ctl->dirty_page_queue_size * PAGE_QUEUE_SLOT_USED_MAX_PERCENTAGE) &&
-        g_instance.ckpt_cxt_ctl->backend_wait_lock != buf->content_lock) {
+        g_instance.ckpt_cxt_ctl->backend_wait_lock != BufferDescriptorGetContentLock(buf)) {
         Buffer queue_head_buffer = get_dirty_page_queue_head_buffer();
         if (!BufferIsInvalid(queue_head_buffer)) {
             BufferDesc* queue_head_buffer_desc = GetBufferDescriptor(queue_head_buffer - 1);
-            if (!LWLockHeldByMeInMode(queue_head_buffer_desc->content_lock, LW_EXCLUSIVE)) {
+            if (!LWLockHeldByMeInMode(BufferDescriptorGetContentLock(queue_head_buffer_desc), LW_EXCLUSIVE)) {
                 return true;
             }
         } else {
@@ -2240,14 +2240,14 @@ static bool check_buffer_dirty_flag(BufferDesc* buf_desc)
 
     if (check_lsn_not_match) {
         PinBuffer(buf_desc, NULL);
-        if (LWLockConditionalAcquire(buf_desc->content_lock, LW_SHARED)) {
+        if (LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf_desc), LW_SHARED)) {
             pg_memory_barrier();
             local_buf_state = pg_atomic_read_u64(&buf_desc->state);
             check_lsn_not_match = (local_buf_state & BM_VALID) && !(local_buf_state & BM_DIRTY) &&
                 XLByteLT(buf_desc->extra->lsn_on_disk, PageGetLSN(tmpBlock)) && RecoveryInProgress();
             if (check_lsn_not_match) {
                 MarkBufferDirty(BufferDescriptorGetBuffer(buf_desc));
-                LWLockRelease(buf_desc->content_lock);
+                LWLockRelease(BufferDescriptorGetContentLock(buf_desc));
                 UnpinBuffer(buf_desc, true);
                 const uint32 shiftSize = 32;
                 ereport(DEBUG1, (errmodule(MOD_INCRE_BG),
@@ -2259,7 +2259,7 @@ static bool check_buffer_dirty_flag(BufferDesc* buf_desc)
 
                 return true;
             } else {
-                LWLockRelease(buf_desc->content_lock);
+                LWLockRelease(BufferDescriptorGetContentLock(buf_desc));
                 UnpinBuffer(buf_desc, true);
                 return false;
             }
