@@ -15723,6 +15723,12 @@ static void HandleSubprogram(){
     if(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL 
        && u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->proc_list != NULL){
         if(u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+            if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->is_autonomous) {
+                ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Subprogram autonomous transaction is not supported."),
+                        errdetail("N/A"), errcause("PL/SQL uses unsupported feature."),
+                        erraction("Modify SQL statement according to the manual.")));
+            }
             Oid parentFuncOid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_oid;
             MemoryContext oldCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_cxt);
             u_sess->plsql_cxt.curr_compile_context->plpgsql_subprogram_nDatums = u_sess->plsql_cxt.curr_compile_context->plpgsql_nDatums;
