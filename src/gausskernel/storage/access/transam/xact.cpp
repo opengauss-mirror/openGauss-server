@@ -7414,8 +7414,10 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
          * Send any cache invalidations attached to the commit. We must
          * maintain the same order of invalidation then release locks as
          * occurs in CommitTransaction().
+         * example of SS_DISASTER_MAIN_STANDBY_NODE: alter table add column.The relfilenode of relation
+         * change so that syscache entry of this relation need to invalid.
          */
-        if (IS_EXRTO_READ) {
+        if (IS_EXRTO_READ && !SS_DISASTER_MAIN_STANDBY_NODE) {
             record_delay_invalid_message(inval_msgs, nmsgs, XactCompletionRelcacheInitFileInval(xinfo), dbId,
                                          tsId, lsn);
         } else {
