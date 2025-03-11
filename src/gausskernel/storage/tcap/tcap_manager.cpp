@@ -305,7 +305,8 @@ static bool TrFetchOrinameImpl(Oid nspId, const char *oriname, TrObjType type,
         if ((rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_TABLE) ||
             (rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_INDEX) ||
             (operMode == RB_OPER_RESTORE_DROP && rbForm->rcyoperation != 'd') ||
-            (operMode == RB_OPER_RESTORE_TRUNCATE && rbForm->rcyoperation != 't')) {
+            (operMode == RB_OPER_RESTORE_TRUNCATE && rbForm->rcyoperation != 't') ||
+            TrFetchMatchAuto(rbRel, tup, InvalidOid)) {
             continue;
         }
 
@@ -345,6 +346,10 @@ bool TrFetchName(const char *rcyname, TrObjType type, TrObjDesc *desc, TrOperMod
             (operMode == RB_OPER_RESTORE_TRUNCATE && rbForm->rcyoperation != 't')) {
             ereport(ERROR,
                 (errmsg("recycle object \"%s\" desired does not exist", rcyname)));
+        }
+        if (TrFetchMatchAuto(rbRel, tup, InvalidOid)) {
+            ereport(ERROR,
+                (errmsg("recycle object \"%s\" desired is expired", rcyname)));
         }
         found = true;
         TrDescRead(desc, tup);
@@ -592,7 +597,7 @@ void TrOperFetch(const RangeVar *purobj, TrObjType objtype, TrObjDesc *desc, TrO
     if (!found) {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_TABLE),
-                errmsg("recycle object \"%s\" desired does not exist", purobj->relname)));
+                errmsg("recycle object \"%s\" desired does not exist or expired", purobj->relname)));
     }
 
     TrOperMatch(desc, operMode);
@@ -1153,7 +1158,7 @@ static void TrFetchBeginAuto(SysScanDesc *sd, Oid objId)
     *sd = systable_beginscan(rbRel, RecyclebinDbidRelidIndexId, true, NULL, 1, skey);
 }
 
-static bool TrFetchMatchAuto(Relation rbRel, HeapTuple rbTup, Oid objId)
+bool TrFetchMatchAuto(Relation rbRel, HeapTuple rbTup, Oid objId)
 {
     bool isNull = false;
     Datum datumRcyTime = heap_getattr(rbTup, Anum_pg_recyclebin_rcyrecycletime, 

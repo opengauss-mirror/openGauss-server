@@ -6,7 +6,7 @@ set enable_default_ustore_table = on;
 drop table if exists t1;
 NOTICE:  table "t1" does not exist, skipping
 purge table t1;
-ERROR:  recycle object "t1" desired does not exist
+ERROR:  recycle object "t1" desired does not exist or expired
 create table t1 (id int)
 partition by range (id)
 (
@@ -311,7 +311,7 @@ partition PARTITION_TABLE_001_4
 );
 truncate table PARTITION_TABLE_001 purge;
 timecapsule table PARTITION_TABLE_001 to before truncate;
-ERROR:  recycle object "partition_table_001" desired does not exist
+ERROR:  recycle object "partition_table_001" desired does not exist or expired
 drop table PARTITION_TABLE_001;
 purge recyclebin;
 --combination test
@@ -372,7 +372,7 @@ select count(*) from gs_recyclebin where rcycanpurge = 'f';
 purge index idx_c_smallint;
 --?CONTEXT:  SQL statement "ERROR:  recycle object ".*=.*" cannot be purged
 timecapsule table PARTITION_TABLE_001 to before drop;
-ERROR:  recycle object "partition_table_001" desired does not exist
+ERROR:  recycle object "partition_table_001" desired does not exist or expired
 drop table PARTITION_TABLE_001 purge;
 purge recyclebin;
 select count(*) from gs_recyclebin;
