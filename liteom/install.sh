@@ -96,7 +96,6 @@ declare guc_file=""
 declare log_file="${root_path}/install.log"
 declare cert_path=""
 declare client_ip=""
-declare defaultip=""
 
 
 if [ -e "${log_file}" ]
@@ -114,7 +113,7 @@ fi
 
 # obtain all IP addresses of the local host.
 declare -i ipindex=0
-for localip in $(/sbin/ifconfig -a|grep inet|grep -v 127.0.0.1|grep -v ::1|awk '{print $2}'| awk -F "addr:" '{print $NF}')
+for localip in $(ip addr | awk '/^[0-9]+:/ {flag = !/docker|veth|br-|lo:/} flag && /inet(6)? [0-9a-fA-F:.]+\/[0-9]+/ {split($2, a, "/"); print a[1];}')
 do
     localips[ipindex]=${localip}
     ipindex=$[ ${ipindex} + 1 ]
@@ -123,7 +122,7 @@ if [ ${#localips[*]} -eq 0 ]
 then
     die "the ip address of the machine is not detected."
 fi
-defaultip=$(/sbin/ip -o addr show $(iface=$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}'); echo "${iface:-invalid}") 2>/dev/null | awk '/inet/ {gsub(/\/.*/, "", $4); print $4; exit}')
+
 function usage()
 {
     echo "
@@ -696,12 +695,8 @@ function config_db()
         index=0
 	    if [ ${localhostscount} -eq 0 ]
         then
-            if [ -z "$defaultip" ]
-            then
-                defaultip=${localips[0]}
-            fi
-            sed -i "/^#listen_addresses/c\listen_addresses = 'localhost,${defaultip}'"  ${data_path}/postgresql.conf
-            log "sed -i /^#listen_addresses/c\listen_addresses = 'localhost,${defaultip}'  ${data_path}/postgresql.conf"
+            sed -i "/^#listen_addresses/c\listen_addresses = 'localhost,${localips[0]}'"  ${data_path}/postgresql.conf
+            log "sed -i /^#listen_addresses/c\listen_addresses = 'localhost,${localips[0]}'  ${data_path}/postgresql.conf"
         else
             listen_addresses=""
             while [ ${index} -lt ${localhostscount} ]
@@ -728,18 +723,14 @@ function config_db()
     index=0
     if [ ${localhostscount} -eq 0 ]
     then
-        if [ -z "$defaultip" ]
-            then
-            defaultip=${localips[0]}
-        fi
-        is_valid_ipv6 defaultip
+        is_valid_ipv6 localips[0]
         if [ $? -eq 0 ]
         then
             mask_length=128
         fi
-        sed -i "/.*host\\s*all\\s*all\\s*${defaultip}\/${mask_length}\\s*trust/d" ${data_path}/pg_hba.conf
-        echo "host    all             all             ${defaultip}/${mask_length}            trust" | tee -a ${data_path}/pg_hba.conf
-        log "echo host    all             all             ${defaultip}/${mask_length}            trust | tee -a ${data_path}/pg_hba.conf"
+        sed -i "/.*host\\s*all\\s*all\\s*${localips[0]}\/${mask_length}\\s*trust/d" ${data_path}/pg_hba.conf
+        echo "host    all             all             ${localips[0]}/${mask_length}            trust" | tee -a ${data_path}/pg_hba.conf
+        log "echo host    all             all             ${localips[0]}/${mask_length}            trust | tee -a ${data_path}/pg_hba.conf"
     else
         while [ ${index} -lt ${localhostscount} ]
         do
