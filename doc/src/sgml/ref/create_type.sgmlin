@@ -16,7 +16,7 @@
 
  <refsynopsisdiv>
 <synopsis>
-CREATE [ OR REPLACE ] TYPE <replaceable class="parameter">name</replaceable> AS
+CREATE [ OR REPLACE ] TYPE <replaceable class="parameter">name</replaceable> AS [OBJECT]
     ( [ <replaceable class="parameter">attribute_name</replaceable> <replaceable class="parameter">data_type</replaceable> [ COLLATE <replaceable>collation</replaceable> ] [, ... ] ] )
 
 CREATE TYPE <replaceable class="parameter">name</replaceable> AS ENUM

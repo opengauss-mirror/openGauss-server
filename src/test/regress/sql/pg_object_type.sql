@@ -3516,5 +3516,17 @@ end;
 
 drop type TO_BALANCED_BUCKET;
 drop type TTN;
-
+--test subtype inherite
+create or replace type parenttype as object
+(
+province varchar(20),
+city varchar(30),
+street varchar(40)
+) final;
+create or replace type childrentype under parenttype
+(
+home varchar(20),
+position varchar(30)
+);
+drop type parenttype;
 drop schema object_type_schema cascade;
