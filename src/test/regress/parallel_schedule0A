@@ -517,6 +517,8 @@ test: gs_dump_2hash
 test: backup_tool_audit
 test: extra_float_digits
 
-# test disable mot
-# test: mot/disable_mot
 test: auto_parameterization
+
+# test mot when without mot in compile
+test: mot/without_mot_server
+

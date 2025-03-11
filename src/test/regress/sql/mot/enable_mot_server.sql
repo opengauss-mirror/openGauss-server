@@ -68,7 +68,7 @@ create foreign table bmsql_oorder (
 );
 create index  bmsql_oorder_index1 on bmsql_oorder(o_w_id, o_d_id, o_c_id, o_id);
 drop view test_view;
-drop foreign table test;
+drop foreign table test_mot_table;
 drop foreign table test1;
 drop foreign table test2;
 drop foreign table bmsql_oorder;
@@ -117,17 +117,18 @@ select * from pg_foreign_table;
 select * from pg_foreign_server;
 select * from pg_foreign_data_wrapper;
 -- system functions
-select * from mot_global_memory_detail();
+select * from mot_global_memory_detail() limit 1;
 select * from mot_jit_detail();
 select * from mot_jit_profile();
-select * from mot_local_memory_detail();
-select * from mot_session_memory_detail();
+select * from mot_local_memory_detail() limit 1;
+select * from mot_session_memory_detail() limit 1;
+select * from mot_fdw_handler();
 -- post-operation, clean
 drop table test_table;
 drop table test1;
 drop view test_view1;
 drop schema disable_mot_test cascade;
-\c postgres
+\c regression
 revoke USAGE ON FOREIGN SERVER mot_server from test_mot;
 drop schema test_mot cascade;
 drop database disable_mot;
