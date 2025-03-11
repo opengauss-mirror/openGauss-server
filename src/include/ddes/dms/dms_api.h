@@ -36,7 +36,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           178
+#define DMS_LOCAL_VERSION           179
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -841,7 +841,6 @@ typedef unsigned int(*dms_inc_and_get_srsn)(unsigned int sess_id);
 typedef unsigned long long(*dms_get_page_lsn)(const dms_buf_ctrl_t *dms_ctrl);
 typedef int(*dms_set_buf_load_status)(dms_buf_ctrl_t *dms_ctrl, dms_buf_load_status_t dms_buf_load_status);
 typedef void(*dms_stats_buf)(void *db_handle, dms_buf_ctrl_t *dms_ctrl, dms_buf_stats_type_e stats_type);
-typedef int(*dms_remove_buf_load_status)(dms_buf_ctrl_t *dms_ctrl, dms_buf_load_status_t dms_buf_load_status);
 typedef void(*dms_update_global_lsn)(void *db_handle, unsigned long long lamport_lsn);
 typedef void(*dms_update_global_scn)(void *db_handle, unsigned long long lamport_scn);
 typedef void(*dms_update_node_lfn)(void *db_handle, unsigned char node_id, unsigned long long node_lfn);
@@ -851,7 +850,6 @@ typedef void(*dms_update_replay_lfns)(void *db_handle, unsigned long long *node_
 typedef void(*dms_get_replay_lfns)(void *db_handle, unsigned long long *node_data, unsigned int len);
 typedef void(*dms_update_page_lfn)(dms_buf_ctrl_t *dms_ctrl, unsigned long long lastest_lfn);
 typedef unsigned long long (*dms_get_page_lfn)(dms_buf_ctrl_t *dms_ctrl);
-typedef unsigned long long (*dms_get_page_scn)(dms_buf_ctrl_t *dms_ctrl);
 typedef unsigned long long(*dms_get_global_lfn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_scn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_lsn)(void *db_handle);
@@ -923,7 +921,6 @@ typedef void (*dms_check_if_build_complete)(void *db_handle, unsigned int *build
 typedef void (*dms_check_if_restore_recover)(void *db_handle, unsigned int *rst_recover);
 typedef void (*dms_set_switchover_result)(void *db_handle, int result);
 typedef int (*dms_mount_to_recovery)(void *db_handle, unsigned int *has_offline);
-typedef int(*dms_get_open_status)(void *db_handle);
 typedef void (*dms_reform_set_dms_role)(void *db_handle, unsigned int reformer_id);
 typedef void (*dms_reset_user)(void *db_handle, unsigned long long list_in);
 typedef int (*dms_drc_xa_res_rebuild)(void *db_handle, unsigned char thread_index, unsigned char parall_num);
@@ -987,7 +984,6 @@ typedef void (*dms_set_current_point)(void *db_handle);
 
 typedef void (*dms_get_db_role)(void *db_handle, unsigned int *role);
 typedef int (*dms_sync_node_lfn)(void *db_handle, int reform_type, unsigned long long online_list);
-typedef void (*dms_check_lrpl_takeover)(void *db_handle, unsigned int *need_takeover);
 typedef void (*dms_reset_link)(void *db_handle);
 typedef void (*dms_set_online_list)(void *db_handle, unsigned long long online_list, unsigned int reformer_id);
 typedef int (*dms_standby_update_remove_node_ctrl)(void *db_handle, unsigned long long online_list);
@@ -1040,7 +1036,6 @@ typedef struct st_dms_callback {
     dms_dw_recovery dw_recovery;
     dms_df_recovery df_recovery;
     dms_space_reload space_reload;
-    dms_get_open_status get_open_status;
     dms_undo_init undo_init;
     dms_tx_area_init tx_area_init;
     dms_tx_area_load tx_area_load;
@@ -1075,7 +1070,6 @@ typedef struct st_dms_callback {
     dms_get_page_hash_val get_page_hash_val;
     dms_get_page_lsn get_page_lsn;
     dms_set_buf_load_status set_buf_load_status;
-    dms_remove_buf_load_status remove_buf_load_status;
     dms_update_global_scn update_global_scn;
     dms_update_global_lsn update_global_lsn;
     dms_update_page_lfn update_page_lfn;
@@ -1083,7 +1077,6 @@ typedef struct st_dms_callback {
     dms_get_global_lsn get_global_lsn;
     dms_get_global_lfn get_global_lfn;
     dms_get_page_lfn get_page_lfn;
-    dms_get_page_scn get_page_scn;
     dms_get_global_flushed_lfn get_global_flushed_lfn;
     dms_read_local_page4transfer read_local_page4transfer;
     dms_page_is_dirty page_is_dirty;
@@ -1199,7 +1192,6 @@ typedef struct st_dms_callback {
 
     dms_get_db_role get_db_role;
     dms_sync_node_lfn sync_node_lfn;
-    dms_check_lrpl_takeover check_lrpl_takeover;
     dms_reset_link reset_link;
     dms_set_online_list set_online_list;
     dms_standby_update_remove_node_ctrl standby_update_remove_node_ctrl;
@@ -1259,6 +1251,8 @@ typedef struct st_dms_profile {
     unsigned int page_size;
     unsigned long long recv_msg_buf_size;
     unsigned int log_level;
+    unsigned long long log_max_file_size;
+    unsigned int log_backup_file_count;
 
     dms_conn_mode_t pipe_type;    // Inter-instance communication mode. Currently, only TCP and RDMA are supported.
     unsigned int inst_cnt;        // Number of cluster instances
@@ -1437,6 +1431,7 @@ typedef struct st_mem_info_stat {
 typedef enum en_dms_param_index {
     DMS_PARAM_SS_INTERCONNECT_URL = 0,
     DMS_PARAM_SS_ELAPSED_SWITCH,
+    DMS_PARAM_SS_DRC_MEM_MAX_SIZE,
 #if defined(_DEBUG) || defined(DEBUG) || defined(DB_DEBUG_VERSION)
     DMS_PARAM_SS_FI_PACKET_LOSS_ENTRIES,
     DMS_PARAM_SS_FI_NET_LATENCY_ENTRIES,
