@@ -1,11 +1,11 @@
 DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ops USING btree CASCADE; 
 DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ops USING btree CASCADE;
-DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ubt_ops USING ubtree CASCADE;
-DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ubt_ops USING ubtree CASCADE;
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ops USING ubtree CASCADE;
+DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ops USING ubtree CASCADE;
 DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ops USING btree CASCADE; 
 DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ops USING btree CASCADE; 
-DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ubt_ops USING ubtree CASCADE; 
-DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ubt_ops USING ubtree CASCADE; 
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ops USING ubtree CASCADE; 
+DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ops USING ubtree CASCADE; 
 
 DO $$
 DECLARE
