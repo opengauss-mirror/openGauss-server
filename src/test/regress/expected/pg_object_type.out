@@ -944,8 +944,7 @@ SELECT VALUE(s) INTO solid FROM solids s WHERE s.len = 10;
 raise info 'solid:%',solid;
 END;
 /
-ERROR:  invalid input syntax for integer: "(10,101,10)"
-CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+INFO:  solid:(10,101,10)
 DECLARE
 obj emp_object_map;
 BEGIN 
@@ -953,8 +952,7 @@ SELECT VALUE(s) INTO obj FROM emp_object_map_tab s WHERE s.atri_empno = 7369;
 raise info 'obj:%',obj;
 END;
 /
-ERROR:  invalid input syntax for type numeric: "(7369,SMITH,800.00,0.00)"
-CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+INFO:  obj:(7369,SMITH,800.00,0.00)
 --没有符合记录使用value函数
 DECLARE
 obj emp_object_map;
@@ -963,8 +961,7 @@ SELECT VALUE(s) INTO obj FROM emp_object_map_tab s WHERE s.atri_empno = 7369;
 raise info 'obj:%',obj;
 END;
 /
-ERROR:  invalid input syntax for type numeric: "(7369,SMITH,800.00,0.00)"
-CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+INFO:  obj:(7369,SMITH,800.00,0.00)
 create table test_tb1 (id int,name text);
 insert into test_tb1 values(1,'vbase');
 DECLARE
