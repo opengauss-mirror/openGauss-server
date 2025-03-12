@@ -49,6 +49,7 @@
 #include "optimizer/streamplan.h"
 #endif
 #include "parser/parse_agg.h"
+#include "parser/parse_collate.h"
 
 extern void set_path_seed_factor_zero();
 
@@ -5277,6 +5278,8 @@ static Node* build_op_expr(PlannerInfo* root, int relid, List* pullUpEqualExpr, 
             param->tableOfIndexTypeList = NULL;
 
             expr = (OpExpr*)make_op(NULL, list_make1(makeString("=")), left_arg, (Node*)param, NULL, 0);
+
+            assign_expr_collations(make_parsestate(NULL), (Node*)expr);
 
             op_args = lappend(op_args, expr);
             resno++;
