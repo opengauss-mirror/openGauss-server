@@ -6,7 +6,7 @@ create schema gms_lob;
 GRANT USAGE ON SCHEMA gms_lob TO PUBLIC;
 
 -- GMS_LOB Constants - Basic 
-CREATE OR REPLACE FUNCTION gms_lob."CALL"() returns int
+CREATE OR REPLACE FUNCTION gms_lob.CALL() returns int
 as $$
     begin
         return 12;

@@ -985,6 +985,19 @@ end;
 
 call proc_1034970();
 drop procedure proc_1034970;
+DECLARE
+v_clob CLOB;
+v_char VARCHAR2(100);
+BEGIN
+v_char := 'Chinese';
+gms_lob.createtemporary(v_clob,TRUE,gms_lob.call);
+FOR i IN 1..2 LOOP
+gms_lob.append(v_clob,v_char);
+gms_output.put_line(v_clob||' 字符长度：'||gms_lob.getlength(v_clob));
+END LOOP;
+gms_lob.freetemporary(v_clob);
+END;
+/
 \c contrib_regression
 drop database if exists testlob;
 
