@@ -996,8 +996,21 @@ static PruningResult* partitionPruningFromNullTest(PartitionType partType, NullT
         return result;
     }
     if (expr->nulltesttype != IS_NULL) {
+        /* For IS_NOT_NULL, we don't try to verify that the first partition is all NULL,
+         * so do not perform pruning here.
+         */
         result->state = PRUNING_RESULT_FULL;
     } else {
+        if (DB_IS_CMPT(A_FORMAT)) {
+            /* Clause hash partition for null value always route to first partition,
+             * so for IS_NULL, we return the first partition.
+             */
+            result->isPbeSinlePartition = true;
+            result->boundary = NULL;
+            result->state = PRUNING_RESULT_SUBSET;
+            result->bm_rangeSelectedPartitions = bms_make_singleton(0);
+            return result;
+        }
         result->state = PRUNING_RESULT_EMPTY;
     }
     result->isPbeSinlePartition = false;
