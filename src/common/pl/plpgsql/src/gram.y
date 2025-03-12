@@ -8732,6 +8732,16 @@ static void checkFuncName(List* funcname)
             if (OidIsValid(namespaceId)) {
                 packageOid = PackageNameGetOid(pkgname, namespaceId);
             }
+            if (!OidIsValid(packageOid)) {
+                /* 
+                 * Might be object type here.
+                 * Make a TypeName so we can use standard type lookup machinery
+                 */
+                TypeName* typname = makeTypeNameFromNameList(
+                    list_make2(makeString(schemaname),makeString(pkgname))
+                );
+                packageOid = typenameTypeId(NULL, typname);
+            }
         }
         if (!OidIsValid(packageOid)) {
             const char* message = "function does not exist";
