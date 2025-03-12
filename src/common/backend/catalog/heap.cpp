@@ -163,7 +163,7 @@ static void addNewPartitionTupleForValuePartitionedTable(Relation pg_partition_r
 static void heapDropPartitionTable(Relation relation);
 
 static ObjectAddress AddNewRelationType(const char* typeName, Oid typeNamespace, Oid new_rel_oid, char new_rel_kind, Oid ownerid,
-    Oid new_row_type, Oid new_array_type);
+    Oid new_row_type, Oid new_array_type, Oid typbasetype = InvalidOid);
 static void RelationRemoveInheritance(Oid relid);
 static Oid StoreRelCheck(
     Relation rel, const char* ccname, Node* expr, bool is_validated, bool is_local, int inhcount, bool is_no_inherit,
@@ -2553,7 +2553,7 @@ Oid* SortRelationDistributionNodes(Oid* nodeoids, int numnodes)
  * --------------------------------
  */
 static ObjectAddress AddNewRelationType(const char* typname, Oid typeNamespace, Oid new_rel_oid, char new_rel_kind, Oid ownerid,
-    Oid new_row_type, Oid new_array_type)
+    Oid new_row_type, Oid new_array_type, Oid typbasetype)
 {
     return TypeCreate(new_row_type, /* optional predetermined OID */
         typname,                    /* type name */
@@ -2576,7 +2576,7 @@ static ObjectAddress AddNewRelationType(const char* typname, Oid typeNamespace, 
         InvalidOid,                 /* array element type - irrelevant */
         false,                      /* this is not an array type */
         new_array_type,             /* array type if any */
-        InvalidOid,                 /* domain base type - irrelevant */
+        typbasetype,                /* domain base type - irrelevant */
         NULL,                       /* default value - none */
         NULL,                       /* default binary representation */
         false,                      /* passed by reference */
@@ -2696,7 +2696,8 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
                              int oidinhcount, OnCommitAction oncommit, Datum reloptions, bool use_user_acl,
                              bool allow_system_table_mods, PartitionState *partTableState, int8 row_compress,
                              HashBucketInfo *bucketinfo, bool record_dependce, List *ceLst, StorageType storage_type,
-                             LOCKMODE partLockMode, ObjectAddress *typaddress, List* depend_extend, Oid relrewrite)
+                             LOCKMODE partLockMode, ObjectAddress *typaddress, List* depend_extend, Oid relrewrite,
+                             Oid typbasetype)
 {
     Relation pg_class_desc;
     Relation new_rel_desc;
@@ -2993,7 +2994,15 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
          * we checked for a duplicate name above. in such case we try to emit a
          * nicer error message using try...catch
          */
-        new_type_addr = AddNewRelationType(relname, relnamespace, relid, relkind, ownerid, reltypeid, new_array_oid);
+        new_type_addr = AddNewRelationType(
+            relname,
+            relnamespace,
+            relid,
+            relkind,
+            ownerid,
+            reltypeid,
+            new_array_oid,
+            typbasetype);
         new_type_oid = new_type_addr.objectId;
         if (typaddress)
             *typaddress = new_type_addr;

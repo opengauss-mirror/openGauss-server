@@ -142,7 +142,8 @@ extern Oid heap_create_with_catalog(const char *relname,
                          LOCKMODE partLockMode = AccessExclusiveLock,
                          ObjectAddress *typaddress= NULL,
                          List* depend_extend = NIL,
-                         Oid relrewrite = InvalidOid);
+                         Oid relrewrite = InvalidOid,
+                         Oid typbasetype = InvalidOid);
 
 extern void heap_create_init_fork(Relation rel);
 

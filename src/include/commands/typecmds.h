@@ -32,13 +32,13 @@ extern ObjectAddress DefineRange(CreateRangeStmt* stmt);
 extern ObjectAddress AlterEnum(AlterEnumStmt* stmt);
 extern ObjectAddress DefineSet(CreateSetStmt* stmt);
 extern ObjectAddress DefineCompositeType(RangeVar* typevar, List* coldeflist,
-    bool replace = false, ObjectAddress *reladdress = NULL, bool is_object_type = false);
+    bool replace = false, ObjectAddress *reladdress = NULL, bool is_object_type = false, Oid typbasetype = InvalidOid);
 extern ObjectAddress DefineObjectTypeSpec(CompositeTypeStmt* stmt);
 extern void DefineObjectTypeBody(CompositeTypeStmt* stmt);
 extern void RemoveTypeMethod(Oid typeoid);
 
 extern Oid AssignTypeArrayOid(void);
-extern ObjectAddress DefineTableOfType(const TableOfTypeStmt* stmt);
+extern ObjectAddress DefineTableOfType(const TableOfTypeStmt* stmt, Oid typbasetype = InvalidOid);
 extern ObjectAddress AlterDomainDefault(List* names, Node* defaultRaw);
 extern ObjectAddress AlterDomainNotNull(List* names, bool notNull);
 extern ObjectAddress AlterDomainAddConstraint(List* names, Node* constr);

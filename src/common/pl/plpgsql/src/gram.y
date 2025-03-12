@@ -248,8 +248,8 @@ static void CastTypeVariableNameToString(StringInfoData* ds, List* idents, bool 
 static Oid get_table_type(PLpgSQL_datum* datum);
 static Node* make_columnDef_from_attr(PLpgSQL_rec_attr* attr);
 static TypeName* make_typename_from_datatype(PLpgSQL_type* datatype);
-static Oid plpgsql_build_package_record_type(const char* typname, List* list, bool add2namespace);
-static void  plpgsql_build_package_array_type(const char* typname, Oid elemtypoid, char arraytype, TypeDependExtend* dependExtend = NULL);
+static Oid plpgsql_build_package_record_type(const char* typname, List* list, bool add2namespace, Oid typbasetype = InvalidOid);
+static void plpgsql_build_package_array_type(const char* typname, Oid elemtypoid, char arraytype, TypeDependExtend* dependExtend = NULL, Oid typbasetype = InvalidOid);
 static void plpgsql_build_func_array_type(const char* typname,Oid elemtypoid, char arraytype, int32 atttypmod, TypeDependExtend* dependExtend = NULL);
 static void plpgsql_build_package_refcursor_type(const char* typname);
 static Oid plpgsql_build_anonymous_subtype(char* typname, PLpgSQL_type* newp, const List* RangeList, bool isNotNull);
@@ -2222,7 +2222,7 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         PLpgSQL_rec_type* rec = NULL;
                         rec = plpgsql_build_rec_type($2->name, $2->lineno, attr_list, true);
                         if (IS_PACKAGE) {
-                            rec->typoid = plpgsql_build_package_record_type($2->name, attr_list, true);
+                            rec->typoid = plpgsql_build_package_record_type($2->name, attr_list, true, old->typoid);
                         } else if (enable_plpgsql_gsdependency()){
                             ListCell* cell =  NULL;
                             foreach(cell, attr_list) {
@@ -2243,8 +2243,15 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         PLpgSQL_var *arrarytype = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$4];
                         PLpgSQL_type *newp = arrarytype->datatype;
                         plpgsql_build_varrayType($2->name, $2->lineno, newp, true);
+                        Oid arraytypeoid = get_array_type(newp->typoid);
+                        if (arraytypeoid == InvalidOid) {
+                            ereport(errstate,
+                                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                                     errmsg("Execption when defining subtype")));
+                            u_sess->plsql_cxt.have_error = true;
+                        }
                         if (IS_PACKAGE) {
-                            plpgsql_build_package_array_type($2->name, newp->typoid, TYPCATEGORY_ARRAY, newp->dependExtend);
+                            plpgsql_build_package_array_type($2->name, newp->typoid, TYPCATEGORY_ARRAY, newp->dependExtend, arraytypeoid);
                         } else if (enable_plpgsql_gsdependency()) {
                             gsplsql_build_gs_type_in_body_dependency(newp);
                         }
@@ -2270,8 +2277,8 @@ subtype_base_type: T_REFCURSOR
                 }
                 ;
 
-subtype_base_collect_type: 
-                varray_var 
+subtype_base_collect_type:
+                varray_var
                 {
                     $$ = $1;
                 }
@@ -13589,7 +13596,7 @@ static PLpgSQL_type* build_type_from_record_var(int dno, int location, bool for_
     return newp;
 }
 
-static Oid plpgsql_build_package_record_type(const char* typname, List* list, bool add2namespace)
+static Oid plpgsql_build_package_record_type(const char* typname, List* list, bool add2namespace, Oid typbasetype)
 {
     Oid oldtypeoid = InvalidOid;
     Oid newtypeoid = InvalidOid;
@@ -13654,7 +13661,7 @@ static Oid plpgsql_build_package_record_type(const char* typname, List* list, bo
             codeflist = lappend(codeflist, make_columnDef_from_attr(attr));
         }
 
-        DefineCompositeType(r, codeflist);
+        DefineCompositeType(r, codeflist, true, NULL, TYPE_COMPOSITE_DEFAULT, typbasetype);
     
         newtypeoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(casttypename),
             ObjectIdGetDatum(getCurrentNamespace()));
@@ -13689,7 +13696,7 @@ static Oid plpgsql_build_package_record_type(const char* typname, List* list, bo
     return newtypeoid;
 }
 
-static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid, char arraytype, TypeDependExtend* dependExtend)
+static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid, char arraytype, TypeDependExtend* dependExtend, Oid typbasetype)
 {
     char typtyp;
     ObjectAddress myself, referenced;
@@ -13774,7 +13781,7 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
         elemtypoid,                 /* array element type - the rowtype */
         false,                       /* yes, this is an array type */
         InvalidOid,                 /* this has no array type */
-        InvalidOid,                 /* domain base type - irrelevant */
+        typbasetype,                /* domain base type - irrelevant */
         NULL,                       /* default value - none */
         NULL,                       /* default binary representation */
         false,                      /* passed by reference */

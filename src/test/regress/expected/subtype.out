@@ -648,5 +648,90 @@ BEGIN
 END;
 /
 INFO:  a = (200,John,8000,)
-\c regression
+-- PKG中的record subtype 作为函数参数
+CREATE OR REPLACE PACKAGE pkg_1154880 AS
+TYPE rec_type IS RECORD (
+f1 INTEGER,
+f2 VARCHAR2(4)
+);
+subtype rec_type1 IS rec_type;
+subtype rec_type2 IS rec_type;
+subtype rec_int is integer;
+PROCEDURE print_rec_type (rec pkg_1154880.rec_type2);
+PROCEDURE print_rec_int (rec integer);
+END pkg_1154880;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_1154880 AS
+PROCEDURE print_rec_type (rec rec_type2) IS
+BEGIN
+raise info 'rec1 = %', rec.f1;
+raise info 'rec2 = %', rec.f2;
+END print_rec_type;
+
+PROCEDURE print_rec_int (rec integer) IS
+BEGIN
+raise info 'rec = %', rec;
+END print_rec_int;
+END pkg_1154880;
+/
+DECLARE
+r1 pkg_1154880.rec_type;
+rint pkg_1154880.rec_int;
+BEGIN
+r1.f1 := 10; r1.f2 := 'abcd';
+rint := 10;
+pkg_1154880.print_rec_type(r1);
+pkg_1154880.print_rec_int(rint);
+END;
+/
+INFO:  rec1 = 10
+CONTEXT:  SQL statement "CALL pkg_1154880.print_rec_type(r1)"
+PL/pgSQL function inline_code_block line 6 at PERFORM
+INFO:  rec2 = abcd
+CONTEXT:  SQL statement "CALL pkg_1154880.print_rec_type(r1)"
+PL/pgSQL function inline_code_block line 6 at PERFORM
+INFO:  rec = 10
+CONTEXT:  SQL statement "CALL pkg_1154880.print_rec_int(rint)"
+PL/pgSQL function inline_code_block line 7 at PERFORM
+CREATE OR REPLACE PACKAGE pkgnest022 IS
+type wtype is record(a int, b int);
+type wtype_array is table of wtype;
+subtype sub1 is wtype_array;
+PROCEDURE ProcessData (arr in pkgnest022.sub1);
+END pkgnest022;
+/
+CREATE OR REPLACE PACKAGE BODY pkgnest022 IS
+PROCEDURE ProcessData (arr in pkgnest022.sub1) IS
+BEGIN
+FOR i IN arr.FIRST .. arr.LAST LOOP
+raise info 'Valuea:%, valb:%', arr(i).a, arr(i).b;
+END LOOP;
+END ProcessData;
+END pkgnest022;
+/
+DECLARE
+arr pkgnest022.wtype_array;
+arrs pkgnest022.sub1;
+BEGIN
+arr.EXTEND;
+arr(1).a := 1;
+arr(1).b := 2;
+raise info 'arr = %', arr;
+arrs.EXTEND;
+arrs(1).a := 1;
+arrs(1).b := 2;
+raise info 'arrs = %', arrs;
+pkgnest022.ProcessData(arr);
+pkgnest022.ProcessData(arrs);
+END;
+/
+INFO:  arr = {"(1,2)"}
+INFO:  arrs = {"(1,2)"}
+INFO:  Valuea:1, valb:2
+CONTEXT:  SQL statement "CALL pkgnest022.processdata(arr)"
+PL/pgSQL function inline_code_block line 12 at PERFORM
+INFO:  Valuea:1, valb:2
+CONTEXT:  SQL statement "CALL pkgnest022.processdata(arrs)"
+PL/pgSQL function inline_code_block line 13 at PERFORM
+\c postgres
 drop database subtype_db;
