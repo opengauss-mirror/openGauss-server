@@ -168,6 +168,10 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
     /* instr unique sql - we assume that this is no nesting calling of Fusion::execute */
     UniqueSQLStatCountReturnedRows(nprocessed);
 
+    if (u_sess->hook_cxt.rowcountHook) {
+        ((RowcountHook)(u_sess->hook_cxt.rowcountHook))(nprocessed);
+    }
+
     return success;
 }
 

@@ -493,6 +493,11 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     FreeExecutorStateForOpfusion(m_c_local.m_estate);
     u_sess->statement_cxt.current_row_count = nprocessed;
     u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+
+    if (u_sess->hook_cxt.rowcountHook) {
+        ((RowcountHook)(u_sess->hook_cxt.rowcountHook))(nprocessed);
+    }
+    
     return success;
 }
 

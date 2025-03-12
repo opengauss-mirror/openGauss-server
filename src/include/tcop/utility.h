@@ -221,4 +221,7 @@ extern bool IsSchemaInDistribution(const Oid namespaceOid);
 extern Oid GetNamespaceIdbyRelId(const Oid relid);
 extern char *flatten_reloptions(Oid relid);
 extern void get_opclass_name(Oid opclass, Oid actual_datatype, StringInfo buf);
+typedef void (*FetchStatusHook)(int fetchStatus);
+typedef void (*RowcountHook)(int64 rowcount);
+
 #endif /* UTILITY_H */

@@ -580,6 +580,9 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
                 u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
                 break;
         }
+        if (u_sess->hook_cxt.rowcountHook) {
+            ((RowcountHook)(u_sess->hook_cxt.rowcountHook))(queryDesc->estate->es_processed);
+        }
     }
 
     u_sess->pcache_cxt.cur_stmt_name = old_stmt_name;

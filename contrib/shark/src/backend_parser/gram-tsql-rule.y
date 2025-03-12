@@ -661,5 +661,18 @@ tsql_stmt :
 			| ShrinkStmt
 			| /*EMPTY*/
 				{ $$ = NULL; }
-			| DelimiterStmt
+			| DelimiterStmt 
+		;
+func_expr_common_subexpr:
+			TSQL_ATAT_IDENT
+				{
+					int len = strlen($1);
+					errno_t rc = EOK;
+ 
+					char *name	= (char *)palloc(len - 1);
+					rc = strncpy_s(name, len - 1, $1 + 2, len-2);
+					securec_check(rc, "\0", "\0");
+
+					$$ = (Node *)makeFuncCall(TsqlSystemFuncName2(name), NIL, @1);
+				}
 		;
