@@ -17,8 +17,9 @@
  <refsynopsisdiv>
 <synopsis>
 CREATE [ OR REPLACE ] TYPE <replaceable class="parameter">name</replaceable> AS [OBJECT]
-    ( [ <replaceable class="parameter">attribute_name</replaceable> <replaceable class="parameter">data_type</replaceable> [ COLLATE <replaceable>collation</replaceable> ] [, ... ] ] )
-
+    ( [ <replaceable class="parameter">attribute_name</replaceable> <replaceable class="parameter">data_type</replaceable> [ COLLATE <replaceable>collation</replaceable> ] [, ... ] ]
+      [ <replaceable class="parameter">object_type_method</replaceable> <replaceable class="parameter">data_type</replaceable>[, ... ] ] )
+    [{FINAL | NOT FINAL}]
 CREATE TYPE <replaceable class="parameter">name</replaceable> AS ENUM
     ( [ '<replaceable class="parameter">label</replaceable>' [, ... ] ] )
 
