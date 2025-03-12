@@ -404,6 +404,7 @@ Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* part
     Oid result = InvalidOid;
     int keyNums = 0;
     int hit = -1;
+    bool hasNull = false;
     
     Assert(PointerIsValid(partMap));
     Assert(PointerIsValid(partKeyValue));
@@ -417,6 +418,10 @@ Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* part
     uint32 hash_value = 0;
     while (i < keyNums) {
         if (partKeyValue[i]->constisnull) {
+            if (DB_IS_CMPT(A_FORMAT)) {
+                hasNull = true;
+                break;
+            }
             if (PointerIsValid(partSeq)) {
                 *partSeq = hit;
             }
@@ -428,16 +433,19 @@ Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* part
         i++;
     }
 
-    hit = hash_value % (uint32)(hashPartMap->hashElementsNum);
-    hit = hashPartMap->hashElementsNum - hit - 1;
+    if (hasNull && DB_IS_CMPT(A_FORMAT)) {
+        /* If null exists for hash partition, force route to first partition */
+        hit = 0;
+    } else {
+        hit = hash_value % (uint32)(hashPartMap->hashElementsNum);
+        hit = hashPartMap->hashElementsNum - hit - 1;
+    }
 
     if (PointerIsValid(partSeq)) {
         *partSeq = hit;
     }
 
-    if (hit >= 0) {
-        result = hashPartMap->hashElements[hit].partitionOid;
-    }
+    result = hashPartMap->hashElements[hit].partitionOid;
 
     decre_partmap_refcount(partMap);
     return result;
