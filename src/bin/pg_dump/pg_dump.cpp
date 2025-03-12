@@ -1248,6 +1248,11 @@ int main(int argc, char** argv)
     if (plainText)
         RestoreArchive(fout);
 
+    free_dump();
+
+    free((void*)format);
+    format = NULL;
+    CloseArchive(fout);
     /* Clear password related memory to avoid leaks when core. */
     if (((ArchiveHandle*)fout)->savedPassword != NULL) {
         rc = memset_s(((ArchiveHandle*)fout)->savedPassword,
@@ -1266,13 +1271,6 @@ int main(int argc, char** argv)
         free(pchPasswd);
         pchPasswd = NULL;
     }
-
-    free_dump();
-
-    free((void*)format);
-    format = NULL;
-    CloseArchive(fout);
-
     /* After the object is exported, the transaction is ended */
     ExecuteSqlStatement(fout, "COMMIT");
 
