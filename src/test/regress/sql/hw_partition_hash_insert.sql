@@ -13,7 +13,7 @@ insert into test_partition_for_null_hash values (1, 1, 1, 1);
 insert into test_partition_for_null_hash values (5, 5, 5, 5);
 insert into test_partition_for_null_hash select * from test_partition_for_null_hash;
 select * from test_partition_for_null_hash order by a;
--- failed: inserted partition key does not map to any table partition
+-- success
 insert into test_partition_for_null_hash values (null, null, null, null);
 -- success
 insert into test_partition_for_null_hash values (0, null, null, null);
@@ -148,4 +148,58 @@ insert  into hw_partition_select_test values(555);
 insert  into hw_partition_select_test values(888);
 insert  into hw_partition_select_test values(100);
 select count(*) from hw_partition_select_test;
+
+create table hw_hash_partition_inert_null (c1 int, c2 timestamp)
+partition by hash (c2) 
+(
+	partition hw_hash_partition_inert_null_p1,
+	partition hw_hash_partition_inert_null_p2,
+	partition hw_hash_partition_inert_null_p3,
+	partition hw_hash_partition_inert_null_p4,
+	partition hw_hash_partition_inert_null_p5
+);
+insert into hw_hash_partition_inert_null values (generate_series(1, 1000), null);
+insert into hw_hash_partition_inert_null values (1001, '2025-02-24 00:00:00'::timestamp);
+insert into hw_hash_partition_inert_null values (1002, '2024-01-01 00:00:00'::timestamp);
+insert into hw_hash_partition_inert_null values (1003, '2024-06-06 00:00:00'::timestamp);
+select p.relname, ta.row_count from (select tableoid::regclass as partition_id, count(*) as row_count from hw_hash_partition_inert_null group by partition_id) as ta left join pg_partition p on p.oid = ta.partition_id order by p.oid;
+drop table hw_hash_partition_inert_null;
+
+-- non index partition key
+drop table if exists t1_part;
+create table t1_part (c1 int, c2 int) partition by hash (c2) partitions 6;
+insert into t1_part values (generate_series(1, 1000), null);
+insert into t1_part values (1001, generate_series(1, 100));
+
+explain (costs off) select * from t1_part where c2 is null;
+explain (costs off) select * from t1_part where c2 = 20;
+
+drop table t1_part;
+
+-- local index partition key
+drop table if exists t1_partindex;
+create table t1_partindex (c1 int, c2 int) partition by hash (c2) partitions 6;
+create index t1_partindex_c2_ind on t1_partindex (c2) local;
+
+insert into t1_partindex values (generate_series(1, 1000), null);
+insert into t1_partindex values (2000, generate_series(1, 100));
+
+explain (costs off) select * from t1_partindex where c2 is null;
+explain (costs off) select * from t1_partindex where c2 = 20;
+
+drop table t1_partindex;
+
+-- global index partition key
+drop table if exists t1_partindex_global;
+create table t1_partindex_global (c1 int, c2 int) partition by hash (c2) partitions 6;
+create index t1_partindex_global_c2_ind on t1_partindex_global (c2);
+
+insert into t1_partindex_global values (generate_series(1, 1000), null);
+insert into t1_partindex_global values (2000, generate_series(1, 100));
+
+explain (costs off) select * from t1_partindex_global where c2 is null;
+explain (costs off) select * from t1_partindex_global where c2 = 20;
+
+drop table t1_partindex_global;
+
 drop schema FVT_COMPRESS_QWER cascade;

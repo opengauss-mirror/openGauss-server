@@ -22,9 +22,8 @@ select * from test_partition_for_null_hash order by a;
  5 | 5 | 5 | 5
 (6 rows)
 
--- failed: inserted partition key does not map to any table partition
+-- success
 insert into test_partition_for_null_hash values (null, null, null, null);
-ERROR:  inserted partition key does not map to any table partition
 -- success
 insert into test_partition_for_null_hash values (0, null, null, null);
 CREATE TABLE select_hash_partition_table_000_3(
@@ -180,6 +179,108 @@ select count(*) from hw_partition_select_test;
      4
 (1 row)
 
+create table hw_hash_partition_inert_null (c1 int, c2 timestamp)
+partition by hash (c2) 
+(
+	partition hw_hash_partition_inert_null_p1,
+	partition hw_hash_partition_inert_null_p2,
+	partition hw_hash_partition_inert_null_p3,
+	partition hw_hash_partition_inert_null_p4,
+	partition hw_hash_partition_inert_null_p5
+);
+insert into hw_hash_partition_inert_null values (generate_series(1, 1000), null);
+insert into hw_hash_partition_inert_null values (1001, '2025-02-24 00:00:00'::timestamp);
+insert into hw_hash_partition_inert_null values (1002, '2024-01-01 00:00:00'::timestamp);
+insert into hw_hash_partition_inert_null values (1003, '2024-06-06 00:00:00'::timestamp);
+select p.relname, ta.row_count from (select tableoid::regclass as partition_id, count(*) as row_count from hw_hash_partition_inert_null group by partition_id) as ta left join pg_partition p on p.oid = ta.partition_id order by p.oid;
+             relname             | row_count 
+---------------------------------+-----------
+ hw_hash_partition_inert_null_p1 |      1000
+ hw_hash_partition_inert_null_p2 |         1
+ hw_hash_partition_inert_null_p3 |         1
+ hw_hash_partition_inert_null_p4 |         1
+(4 rows)
+
+drop table hw_hash_partition_inert_null;
+-- non index partition key
+drop table if exists t1_part;
+NOTICE:  table "t1_part" does not exist, skipping
+create table t1_part (c1 int, c2 int) partition by hash (c2) partitions 6;
+insert into t1_part values (generate_series(1, 1000), null);
+insert into t1_part values (1001, generate_series(1, 100));
+explain (costs off) select * from t1_part where c2 is null;
+           QUERY PLAN            
+---------------------------------
+ Partitioned Seq Scan on t1_part
+   Filter: (c2 IS NULL)
+   Selected Partitions:  1
+(3 rows)
+
+explain (costs off) select * from t1_part where c2 = 20;
+           QUERY PLAN            
+---------------------------------
+ Partitioned Seq Scan on t1_part
+   Filter: (c2 = 20)
+   Selected Partitions:  5
+(3 rows)
+
+drop table t1_part;
+-- local index partition key
+drop table if exists t1_partindex;
+NOTICE:  table "t1_partindex" does not exist, skipping
+create table t1_partindex (c1 int, c2 int) partition by hash (c2) partitions 6;
+create index t1_partindex_c2_ind on t1_partindex (c2) local;
+insert into t1_partindex values (generate_series(1, 1000), null);
+insert into t1_partindex values (2000, generate_series(1, 100));
+explain (costs off) select * from t1_partindex where c2 is null;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Partitioned Bitmap Heap Scan on t1_partindex
+   Recheck Cond: (c2 IS NULL)
+   Selected Partitions:  1
+   ->  Partitioned Bitmap Index Scan on t1_partindex_c2_ind
+         Index Cond: (c2 IS NULL)
+         Selected Partitions:  1
+(6 rows)
+
+explain (costs off) select * from t1_partindex where c2 = 20;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Partitioned Bitmap Heap Scan on t1_partindex
+   Recheck Cond: (c2 = 20)
+   Selected Partitions:  5
+   ->  Partitioned Bitmap Index Scan on t1_partindex_c2_ind
+         Index Cond: (c2 = 20)
+         Selected Partitions:  5
+(6 rows)
+
+drop table t1_partindex;
+-- global index partition key
+drop table if exists t1_partindex_global;
+NOTICE:  table "t1_partindex_global" does not exist, skipping
+create table t1_partindex_global (c1 int, c2 int) partition by hash (c2) partitions 6;
+create index t1_partindex_global_c2_ind on t1_partindex_global (c2);
+insert into t1_partindex_global values (generate_series(1, 1000), null);
+insert into t1_partindex_global values (2000, generate_series(1, 100));
+explain (costs off) select * from t1_partindex_global where c2 is null;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Bitmap Heap Scan on t1_partindex_global
+   Recheck Cond: (c2 IS NULL)
+   ->  Bitmap Index Scan on t1_partindex_global_c2_ind
+         Index Cond: (c2 IS NULL)
+(4 rows)
+
+explain (costs off) select * from t1_partindex_global where c2 = 20;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Bitmap Heap Scan on t1_partindex_global
+   Recheck Cond: (c2 = 20)
+   ->  Bitmap Index Scan on t1_partindex_global_c2_ind
+         Index Cond: (c2 = 20)
+(4 rows)
+
+drop table t1_partindex_global;
 drop schema FVT_COMPRESS_QWER cascade;
 NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to table test_partition_for_null_hash

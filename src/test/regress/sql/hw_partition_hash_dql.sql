@@ -31,21 +31,21 @@ insert into test_partition_for_null_hash values (0, 0, 0, 0);
 insert into test_partition_for_null_hash values (1, 1, 1, 1);
 insert into test_partition_for_null_hash values (5, 5, 5, 5);
 
--- failed: inserted partition key does not map to any table partition
+-- success
 insert into test_partition_for_null_hash values (null, null, null, null);
 -- success
 insert into test_partition_for_null_hash values (0, null, null, null);
 
 
--- failed: The partition number is invalid or out-of-range
+-- success
 select * from test_partition_for_null_hash partition for (null) order by 1, 2, 3, 4;
 -- success
 select * from test_partition_for_null_hash partition for (0) order by 1, 2, 3, 4;
 
 
--- failed: The partition number is invalid or out-of-range
-alter table test_partition_for_null_hash rename partition for (null) to test_partition_for_null_hash_part1;
 -- success
+alter table test_partition_for_null_hash rename partition for (null) to test_partition_for_null_hash_part1;
+-- failed, same partition name test_partition_for_null_hash_part1 is already exists
 alter table test_partition_for_null_hash rename partition for (0) to test_partition_for_null_hash_part1;
 -- success
 select * from test_partition_for_null_hash partition (test_partition_for_null_hash_part1) order by 1, 2, 3, 4;
@@ -56,10 +56,10 @@ alter table test_partition_for_null_hash drop partition for (0);
 CREATE TABLE select_hash_partition_table_000_3(
  C_CHAR_1 CHAR(1),
  C_CHAR_2 CHAR(10),
- C_CHAR_3 CHAR(102400),
+ C_CHAR_3 CHAR(20),
  C_VARCHAR_1 VARCHAR(1),
  C_VARCHAR_2 VARCHAR(10),
- C_VARCHAR_3 VARCHAR(1024),
+ C_VARCHAR_3 VARCHAR(20),
  C_INT INTEGER,
  C_BIGINT BIGINT,
  C_SMALLINT SMALLINT,
