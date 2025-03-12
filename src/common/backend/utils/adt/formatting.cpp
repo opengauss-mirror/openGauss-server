@@ -7805,7 +7805,22 @@ Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS)
     int tz = 0;
 
     struct pg_tm tm;
+    struct pg_tm default_tm;
     fsec_t fsec;
+ 
+    PG_TRY();
+    {
+        if (!default_val_is_null) {
+            text* defaultVal = PG_GETARG_TEXT_P(1);
+            do_to_timestamp(defaultVal, fmt, &default_tm, &fsec, &tz);
+        }
+    }
+    PG_CATCH();
+    {
+        pfree_ext(fmt);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     PG_TRY();
     {
@@ -7820,17 +7835,11 @@ Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS)
     PG_CATCH();
     {
         FlushErrorState();
-
+        pfree_ext(fmt);
         if (default_val_is_null) {
-            pfree_ext(fmt);
             resultNull = true;
         } else {
-            text* defaultVal = PG_GETARG_TEXT_P(1);
-
-            do_to_timestamp(defaultVal, fmt, &tm, &fsec, &tz);
-            pfree_ext(fmt);
-
-            if (tm2timestamp(&tm, fsec, &tz, &result) != 0) {
+            if (tm2timestamp(&default_tm, fsec, &tz, &result) != 0) {
                 ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp defaultVal out of range")));
             }
         }

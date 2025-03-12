@@ -1354,6 +1354,10 @@ select TO_TIMESTAMP('10000-3-4 13:2:3.234015' DEFAULT NULL ON CONVERSION ERROR, 
  
 (1 row)
 
+select TO_TIMESTAMP('2002-04-05 11:02:01' DEFAULT 'dasda' ON CONVERSION ERROR,'YYYY-MM-DD HH24:MI:SS');
+ERROR:  invalid value "dasd" for "YYYY"
+DETAIL:  Value must be an integer.
+CONTEXT:  referenced column: to_timestamp
 -- USE TO_TIMESTAMP CHECKDAYS
 SELECT (TO_TIMESTAMP('12:59:04', 'hh24:mi:ss') - TO_TIMESTAMP('11:59:04', 'hh24:mi:ss.sssss')) * 24 *3600;
   ?column?   
