@@ -7197,11 +7197,15 @@ static void readRecoveryCommandFile(void)
             t_thrd.xlog_cxt.archiveCleanupCommand = pstrdup(item->value);
             ereport(DEBUG2, (errmsg_internal("archive_cleanup_command = '%s'", t_thrd.xlog_cxt.archiveCleanupCommand)));
         } else if (strcmp(item->name, "pause_at_recovery_target") == 0) {
-            if (!parse_bool(item->value, &t_thrd.xlog_cxt.recoveryPauseAtTarget)) {
-                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                                errmsg("parameter \"%s\" requires a Boolean value", "pause_at_recovery_target")));
+            if (ENABLE_DSS) {
+                ereport(WARNING, (errmsg("pause_at_recovery_target is ignored in shared storage")));
+            } else {
+                if (!parse_bool(item->value, &t_thrd.xlog_cxt.recoveryPauseAtTarget)) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("parameter \"%s\" requires a Boolean value", "pause_at_recovery_target")));
+                }
+                ereport(DEBUG2, (errmsg_internal("pause_at_recovery_target = '%s'", item->value)));
             }
-            ereport(DEBUG2, (errmsg_internal("pause_at_recovery_target = '%s'", item->value)));
         } else if (strcmp(item->name, "recovery_target_timeline") == 0) {
             rtliGiven = true;
             if (strcmp(item->value, "latest") == 0) {
@@ -10525,6 +10529,9 @@ void StartupXLOG(void)
             RecoveryXlogReader(oldXlogReader, xlogreader);
 
             if (!(IS_OBS_DISASTER_RECOVER_MODE || IS_MULTI_DISASTER_RECOVER_MODE)) {
+                if (ENABLE_DSS) {
+                    t_thrd.xlog_cxt.recoveryPauseAtTarget = false;
+                }
                 if (t_thrd.xlog_cxt.recoveryPauseAtTarget && reachedStopPoint) {
                     SetRecoveryPause(true);
                     recoveryPausesHere();
