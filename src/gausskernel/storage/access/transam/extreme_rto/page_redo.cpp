@@ -994,7 +994,7 @@ static void WaitNextBarrier(XLogRecParseState *parseState)
 
 void redo_page_manager_do_cleanup_action(XLogRecParseState *parse_state)
 {
-    if (!IS_EXRTO_READ_OPT || !pm_state_is_hot_standby()) {
+    if (IS_EXRTO_READ_OPT || !pm_state_is_hot_standby()) {
         return;
     }
  
