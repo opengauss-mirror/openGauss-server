@@ -42,6 +42,36 @@ BEGIN
 END;
 /
 
+CREATE OR REPLACE PACKAGE package13 is
+TYPE age_rec IS RECORD (years INTEGER DEFAULT 35, months INTEGER DEFAULT 6);
+TYPE name_rec_src IS RECORD (age age_rec, first varchar DEFAULT 'John');
+END package13;
+/
+
+declare
+name1 package13.name_rec_src;
+begin
+    raise info 'first %', name1.first;
+    raise info 'last %', name1.age.years;
+END;
+/
+
+CREATE OR REPLACE PACKAGE package13 is
+TYPE age_rec IS RECORD (years INTEGER DEFAULT 35, months INTEGER DEFAULT 6);
+TYPE name_rec_src IS RECORD (first varchar DEFAULT 'John',age age_rec);
+END package13;
+/
+
+
+declare
+name1 package13.name_rec_src;
+begin
+    raise info 'first %', name1.first;
+    raise info 'last %', name1.age.years;
+END;
+/
+drop PACKAGE package13;
+
 DECLARE									
 TYPE t1 IS VARRAY(10) OF INTEGER;  -- varray of integer
 va t1 := t1(2,3);
