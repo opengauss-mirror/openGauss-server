@@ -22,7 +22,7 @@ test: hw_createtbl_llt multi_delete
 #test: gsqlerr#
 test: sqlLLT
 #test: hw_sql_llt#
-
+test: split_partition
 test: upsert_prepare
 test: upsert_001 upsert_002 upsert_003 upsert_008 upsert_009 upsert_010
 test: upsert_grammer_test_01 upsert_unlog_test upsert_tmp_test

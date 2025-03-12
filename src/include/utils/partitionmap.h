@@ -68,6 +68,13 @@ typedef struct {
     bool isNull;
 } PartKeyExprResult;
 
+extern PartKeyExprResult ComputePartKeyExprTuple(
+    Relation rel,
+    EState *estate,
+    TupleTableSlot *slot,
+    Relation partRel,
+    char *partExprKeyStr);
+
 /* describe table partition type */
 typedef enum PartitionType {
     PART_TYPE_NONE = 0,

@@ -208,13 +208,22 @@ PartKeyExprResult ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTab
     Datum newval = 0;
     Node* partkeyexpr = NULL;
     Relation tmpRel = NULL;
+    ExprState* exprstate = NULL;
+    bool needFreeEstate = false;
     if (partExprKeyStr && pg_strcasecmp(partExprKeyStr, "") != 0) {
         partkeyexpr = (Node*)stringToNode_skip_extern_fields(partExprKeyStr);                      
     } else {
         ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR), errmsg("The partition expr key can't be null for table %s", NameStr(rel->rd_rel->relname))));
     }
     (void)lockNextvalWalker(partkeyexpr, NULL);
-    ExprState *exprstate = ExecPrepareExpr((Expr *)partkeyexpr, estate);
+
+    if (estate == NULL) {
+        needFreeEstate = true;
+        estate = CreateExecutorState();
+        exprstate = ExecInitExpr(expression_planner((Expr*)partkeyexpr), NULL);
+    } else {
+        exprstate = ExecPrepareExpr((Expr *)partkeyexpr, estate);
+    }
     ExprContext *econtext;
     econtext = GetPerTupleExprContext(estate);
     econtext->ecxt_scantuple = slot;
@@ -237,7 +246,10 @@ PartKeyExprResult ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTab
 
     if (!isnull)
         newval = datumCopy(newval, boundary[0]->constbyval, boundary[0]->constlen);
-
+    
+    if (needFreeEstate) {
+        FreeExecutorState(estate);
+    }
     return {newval, isnull};
 }
 
