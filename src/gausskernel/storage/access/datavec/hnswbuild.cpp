@@ -1519,6 +1519,10 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, Hnsw
 
     InitBuildState(buildstate, heap, index, indexInfo, forkNum, false);
 
+    if (buildstate->isUStore) {
+        ereport(ERROR, (errmsg("ustore table cannot support hnsw.")));
+    }
+
     if (buildstate->enablePQ) {
         BuildPQtable(buildstate);
         if (buildstate->pqMode == HNSW_PQMODE_SDC) {
