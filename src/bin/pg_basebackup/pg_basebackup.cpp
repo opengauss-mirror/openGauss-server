@@ -196,6 +196,13 @@ static void TablespaceValueCheck(TablespaceListCell* cell, const char* arg)
                 cell->new_dir);
         exit(1);
     }
+
+    /* tablespace directory does not allow specifying under database directory */
+    char* tableSpaceChar = strstr(cell->new_dir, basedir);
+    if (tableSpaceChar != nullptr) {
+        pg_log(PG_WARNING, _(" tablespace directory does not allow specifying under database directory"));
+        exit(1);
+    }
 }
 
 static void isPortNumber(const char *portarg)
