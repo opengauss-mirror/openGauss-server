@@ -1622,6 +1622,11 @@ static int SSL_set_fd_ex(Port* port, int fd)
     return 1;
 }
 
+int SSL_set_fd_ex_wrap(Port* port, int fd)
+{
+    return SSL_set_fd_ex(port, fd);
+}
+
 static char* ssl_cipher_list2string(const char* ciphers[], const int num)
 {
     int i;
