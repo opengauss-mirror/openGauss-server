@@ -200,7 +200,7 @@ static void TablespaceValueCheck(TablespaceListCell* cell, const char* arg)
     /* tablespace directory does not allow specifying under database directory */
     char* tableSpaceChar = strstr(cell->new_dir, basedir);
     if (tableSpaceChar != nullptr) {
-        pg_log(PG_WARNING, _(" tablespace directory does not allow specifying under database directory"));
+        pg_log(PG_FATAL, _(" tablespace directory does not allow specifying under database directory"));
         exit(1);
     }
 }
