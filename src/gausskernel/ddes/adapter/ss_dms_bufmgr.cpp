@@ -1113,7 +1113,7 @@ bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl)
 bool SSNeedTerminateRequestPageInPrimaryRestart(BufferDesc *buf_desc)
 {
     if (!SS_AM_BACKENDS_WORKERS || !SS_STANDBY_IN_PRIMARY_RESTART ||
-        !IsSegmentPhysicalRelNode(buf_desc->tag.rnode) || !DmsCheckBufAccessible()) {
+        !IsSegmentPhysicalRelNode(buf_desc->tag.rnode) || DmsCheckBufAccessible()) {
         return false;
     }
 
