@@ -8840,7 +8840,7 @@ static void checkTypeName(List* nest_typnames, List* target_nest_typnames)
         for (int i = 0; i < (sizeof(cp) / sizeof(cp[0]) - 1) ; i++) {
             if (cp[i] && cp[i][0] != '\0') {
                 if (i != 0) {
-                    funcname = list_make2(funcname, makeString(cp[i]));
+                    funcname = lappend(funcname, makeString(cp[i]));
                 } else {
                     funcname = list_make1(makeString(cp[i]));
                 }
