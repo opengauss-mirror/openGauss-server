@@ -943,6 +943,7 @@ static void IvfflatParallelCleanup(const BgWorkerContext *bwc)
     SharedFileSetDeleteAll(&ivfshared->sharedsort->fileset);
     pfree_ext(ivfshared->sharedsort);
 
+    pfree_ext(ivfshared->ivfcenters);
     MemoryContextDelete(ivfshared->tmpCtx);
 }
 
@@ -992,6 +993,15 @@ static IvfflatShared *IvfflatParallelInitshared(IvfflatBuildState *buildstate, i
 }
 
 /*
+ * Shut down workers, destory parallel context, and end parallel mode.
+ */
+void IvfflatEndParallel(IvfflatLeader *ivfleader)
+{
+    BgworkerListSyncQuit();
+    pfree_ext(ivfleader);
+}
+
+/*
  * Begin parallel build
  */
 static void IvfflatBeginParallel(IvfflatBuildState *buildstate, int request, int workmem)
@@ -1008,8 +1018,7 @@ static void IvfflatBeginParallel(IvfflatBuildState *buildstate, int request, int
 
     /* If no workers were successfully launched, back out (do serial build) */
     if (ivfleader->nparticipanttuplesorts == 0) {
-        pfree_ext(ivfshared);
-        pfree_ext(ivfleader);
+        IvfflatEndParallel(ivfleader);
         return;
     }
 
@@ -1042,14 +1051,6 @@ static double AssignTupleUtility(IvfflatBuildState *buildstate)
         }
     }
     return reltuples;
-}
-
-/*
- * Shut down workers, destory parallel context, and end parallel mode.
- */
-void IvfflatEndParallel()
-{
-    BgworkerListSyncQuit();
 }
 
 /*
@@ -1132,7 +1133,7 @@ static void CreateEntryPages(IvfflatBuildState *buildstate, ForkNumber forkNum)
 
     /* End parallel build */
     if (buildstate->ivfleader) {
-        IvfflatEndParallel();
+        IvfflatEndParallel(buildstate->ivfleader);
     }
 }
 

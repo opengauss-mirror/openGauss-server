@@ -196,7 +196,7 @@ static void EstimateRows(Relation onerel, double *totalrows)
         vacuum_delay_point();
         sampleblock++;
 
-        targbuffer = ReadBufferExtended(onerel, MAIN_FORKNUM, targblock, RBM_NORMAL, u_sess->analyze_cxt.vac_strategy);
+        targbuffer = ReadBufferExtended(onerel, MAIN_FORKNUM, targblock, RBM_NORMAL, NULL);
         LockBuffer(targbuffer, BUFFER_LOCK_SHARE);
         targpage = BufferGetPage(targbuffer);
 
@@ -1369,8 +1369,21 @@ void HnswParallelBuildMain(const BgWorkerContext *bwc)
 /*
  * End parallel build
  */
-static void HnswEndParallel()
+static void HnswEndParallel(HnswLeader *hnswleader)
 {
+    HnswShared *hnswshared = hnswleader->hnswshared;
+    if (hnswshared) {
+        if (hnswshared->pqTable) {
+            pfree_ext(hnswshared->pqTable);
+        }
+        if (hnswshared->pqDistanceTable) {
+            pfree_ext(hnswshared->pqDistanceTable);
+        }
+        if (hnswshared->hnswarea) {
+            pfree_ext(hnswshared->hnswarea);
+        }
+    }
+    pfree_ext(hnswleader);
     BgworkerListSyncQuit();
 }
 
@@ -1450,7 +1463,7 @@ static void HnswBeginParallel(HnswBuildState *buildstate, int request)
 
     /* If no workers were successfully launched, back out (do serial build) */
     if (hnswleader->nparticipanttuplesorts == 0) {
-        HnswEndParallel();
+        HnswEndParallel(hnswleader);
         return;
     }
 
@@ -1503,7 +1516,7 @@ static void BuildGraph(HnswBuildState *buildstate, ForkNumber forkNum)
 
     /* End parallel build */
     if (buildstate->hnswleader) {
-        HnswEndParallel();
+        HnswEndParallel(buildstate->hnswleader);
     }
 }
 
