@@ -1,5 +1,5 @@
 --upgrade TABLE
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 9815, 2989, 0, 0;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 9815, 2989, 8633, 8636;
  CREATE TABLE pg_catalog.pg_object_type (                                                      
      typoid oid NOT NULL,                                                           
      supertypeoid oid NOT NULL,                                                     
