@@ -1491,7 +1491,7 @@ bool CStoreInsert::TryEncodeNumeric(int col, bulkload_rows* batchRowPtr, CUDesc*
     int exact_size = 0;
     int rc = 0;
 
-    if (!m_isImcstore && COMPRESS_NO == heaprel_get_compression_from_modes(m_compress_modes)) {
+    if (COMPRESS_NO == heaprel_get_compression_from_modes(m_compress_modes)) {
         // nothing to do if compression level is NO.
         return false;
     }
@@ -1727,7 +1727,7 @@ bool CStoreInsert::TryFormNumberStringCU(
     bool ret = false;
     FuncSetMinMax func = *(this->m_setMinMaxFuncs + col);
 
-    if (!m_isImcstore && COMPRESS_NO == heaprel_get_compression_from_modes(this->m_compress_modes)) {
+    if (COMPRESS_NO == heaprel_get_compression_from_modes(this->m_compress_modes)) {
         return ret;
     }
 

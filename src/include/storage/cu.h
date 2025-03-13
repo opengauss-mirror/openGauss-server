@@ -208,6 +208,7 @@ struct IMCSDesc;
 class RowGroup : public BaseObject {
 public:
     pthread_rwlock_t m_mutex;
+    TransactionId rgxmin;
     uint32 m_rowGroupId;
     bool m_actived;
     CUDesc** m_cuDescs;
@@ -216,7 +217,7 @@ public:
     ~RowGroup();
     void DropCUDescs(RelFileNode* relNode, int imcsNatts);
     void Vacuum(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs, CU** newCUs, TransactionId xid);
-    void Insert(DeltaOperationType type, ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId);
+    void Insert(ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId);
 };
 struct IMCSDesc {
     Oid relOid;

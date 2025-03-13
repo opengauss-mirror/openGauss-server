@@ -402,7 +402,6 @@ bool IMCStore::LoadCUDesc(
     }
     ADIO_END();
 
-    UnlockRowGroups();
     if (loadCUDescInfoPtr->nextCUID > m_endCUID) {
         return false;
     }
@@ -429,6 +428,9 @@ bool IMCStore::LoadCUDesc(
         }
         char* valPtr = NULL;
         if (rowgroup == NULL || !rowgroup->m_actived) {
+            continue;
+        }
+        if (rowgroup->rgxmin != InvalidTransactionId) {
             continue;
         }
 
@@ -563,19 +565,54 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
     PG_END_TRY();
 }
 
+void IMCStore::FormCUDeleteMaskFullRowGroup(_in_ RowGroup* rowgroup, _in_ uint32 cuid)
+{
+    if (rowgroup->m_actived) {
+        for (int i = 0; i < rowgroup->m_cuDescs[m_ctidCol]->row_count; ++i) {
+            m_cuDelMask[i >> 3] |= (1 << (i % 8));
+        }
+        m_hasDeadRow = true;
+    }
+    BlockNumber begin = cuid * MAX_IMCS_PAGES_ONE_CU;
+    BlockNumber end = Min((cuid + 1) * MAX_IMCS_PAGES_ONE_CU, RelationGetNumberOfBlocks(m_relation));
+
+    for (BlockNumber curr = begin; curr < end; ++curr) {
+        Buffer buffer = ReadBuffer(m_relation, curr);
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+        Page page = BufferGetPage(buffer);
+        OffsetNumber lines;
+        if (RelationIsUstoreFormat(m_relation)) {
+            lines = UHeapPageGetMaxOffsetNumber(page);
+        } else {
+            lines = PageGetMaxOffsetNumber(page);
+        }
+        for (OffsetNumber lineoff = FirstOffsetNumber; lineoff <= lines; ++lineoff) {
+            BlockNumber blockoffset = curr % MAX_IMCS_PAGES_ONE_CU;
+            uint64 idx = blockoffset * MAX_POSSIBLE_ROW_PER_PAGE + lineoff;
+            m_cuDeltaMask[idx >> 3] |= (1 << (idx % 8));
+            m_deltaMaskMax = Max(idx, m_deltaMaskMax);
+        }
+        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        ReleaseBuffer(buffer);
+    }
+}
+
 void IMCStore::FormCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ uint32 cuid)
 {
     if (rowgroup == NULL || rowgroup->m_delta == NULL) {
         ereport(ERROR, (errmsg(
             "Try build delete mask for htap error, row group is invalid.")));
     }
+    if (rowgroup->rgxmin != InvalidTransactionId) {
+        FormCUDeleteMaskFullRowGroup(rowgroup, cuid);
+        return;
+    }
 
     DeltaTableIterator deltaIter = rowgroup->m_delta->ScanInit();
     ItemPointer item = NULL;
-    DeltaOperationType ctidtpye;
 
-    while ((item = deltaIter.GetNext(&ctidtpye, nullptr)) != NULL) {
-        BlockNumber blockoffset = ItemPointerGetBlockNumber(item) - cuid * MAX_IMCS_PAGES_ONE_CU;
+    while ((item = deltaIter.GetNext()) != NULL) {
+        BlockNumber blockoffset = ItemPointerGetBlockNumber(item) % MAX_IMCS_PAGES_ONE_CU;
         OffsetNumber offset = ItemPointerGetOffsetNumber(item);
         uint64 idx = blockoffset * MAX_POSSIBLE_ROW_PER_PAGE + offset;
         m_cuDeltaMask[idx >> 3] |= (1 << (idx % 8));

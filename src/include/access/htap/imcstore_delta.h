@@ -35,14 +35,7 @@
 
 #define DEFAULT_DELTAPAGE_ELEMENTS (DEFAULT_DELTAPAGE_SIZE / sizeof(DeltaElement))
 
-enum DeltaOperationType {
-    IMCSTORE_DELETE,
-    IMCSTORE_INSERT,
-    OPERATION_DELETED
-};
-
 struct DeltaElement {
-    enum DeltaOperationType operationType;
     ItemPointerData ctid;
     TransactionId xid;
 };
@@ -51,24 +44,21 @@ struct DeltaTableIterator {
     ListCell* currentPage;
     uint32 currentRow;
     DeltaTableIterator(ListCell* beginPage) : currentPage(beginPage), currentRow(0) {};
-    ItemPointer GetNext(DeltaOperationType *type, TransactionId *xid);
+    ItemPointer GetNext();
 };
 
 class DeltaPage : public BaseObject {
 public:
     DeltaElement data[DEFAULT_DELTAPAGE_ELEMENTS];
     uint32 used;
-    uint32 deadElement;
 
-    DeltaPage() : used(0), deadElement(0) {};
+    DeltaPage() : used(0) {};
     ~DeltaPage() {};
-    void Insert(DeltaOperationType type, ItemPointer ctid, TransactionId xid);
-    void Delete(uint32 offset);
+    void Insert(ItemPointer ctid, TransactionId xid);
     bool IsFull()
     {
         return used >= DEFAULT_DELTAPAGE_ELEMENTS;
     }
-    bool IsDeadPage();
     uint32 Vacuum(TransactionId xid, ListCell* &currPage);
 };
 
@@ -80,7 +70,7 @@ public:
 
     DeltaTable() : pages(NULL), rowNumber(0) {}
     ~DeltaTable() {}
-    void Insert(DeltaOperationType type, ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId);
+    void Insert(ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId);
     void Vacuum(TransactionId xid);
     DeltaTableIterator ScanInit();
 };
