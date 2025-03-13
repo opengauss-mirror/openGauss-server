@@ -8,3 +8,4 @@ CREATE OPERATOR pg_catalog.-(
   RIGHTARG = bool,
   PROCEDURE = boolum
 );
+COMMENT ON OPERATOR pg_catalog.-(none, bool) IS 'negate';
