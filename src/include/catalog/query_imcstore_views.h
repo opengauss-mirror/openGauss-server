@@ -26,7 +26,7 @@
 #define QUERY_IMCSTORE_VIEWS_H
 #include "utils/date.h"
 
-#define Natts_imcstore_views 11
+#define Natts_imcstore_views 12
 
 #define Anum_imcstore_views_reloid 1
 #define Anum_imcstore_views_relname 2
@@ -39,6 +39,7 @@
 #define Anum_imcstore_views_cu_num_in_mem 9
 #define Anum_imcstore_views_cu_size_in_disk 10
 #define Anum_imcstore_views_cu_num_in_disk 11
+#define Anum_imcstore_views_delta_in_mem 12
 
 struct IMCStoreView {
     Oid relOid;
@@ -52,6 +53,7 @@ struct IMCStoreView {
     uint64 cuNumsInMem;
     uint64 cuSizeInDisk;
     uint64 cuNumsInDisk;
+    uint64 deltaInMem;
 };
 
 extern Datum query_imcstore_views(PG_FUNCTION_ARGS);
