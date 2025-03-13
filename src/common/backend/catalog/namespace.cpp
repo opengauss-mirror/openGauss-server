@@ -157,9 +157,6 @@
  * Note: all data pointed to by these List variables is in t_thrd.top_mem_cxt.
  */
 
-/* Catalog schema that TSQL uses */
-char* SYS_NAMESPACE_NAME = "sys";
-
 /* Local functions */
 static void InitTempTableNamespace(void);
 static void RemoveTempRelations(Oid tempNamespaceId);

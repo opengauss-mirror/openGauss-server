@@ -26,6 +26,8 @@
 #include "lib/stringinfo.h"
 
 static volatile uint32 gt_tempID_seed = 0;
+/* Catalog schema that TSQL uses */
+constexpr const char* SYS_NAMESPACE_NAME = "sys";
 
 /*
  *	This structure holds a list of possible functions or operators
