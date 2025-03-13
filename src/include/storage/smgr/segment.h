@@ -219,5 +219,6 @@ extern void redo_xlog_deal_alloc_seg(uint8 opCode, Buffer buffer, const char* da
 extern StorageType PartitionGetStorageType(Partition partition, Oid parentOid);
 extern bool repair_check_physical_type(uint32 spcNode, uint32 dbNode, int32 forkNum, uint32 *relNode, uint32 *blockNum);
 extern RelFileNode get_segment_logic_rnode(SegSpace *spc, BlockNumber head_blocknum, int aim_fork);
+extern void SegUpdatePca(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, SegmentHead *seg_head);
 
 #endif
