@@ -46,8 +46,8 @@ void info_list_modify_old_tail(StandbyReadMetaInfo *meta_info, LsnInfoPosition o
     Buffer buffer = InvalidBuffer;
     uint32 offset;
 
-    page = get_lsn_info_page(batch_id, worker_id, old_tail_pos, RBM_ZERO_ON_ERROR, &buffer);
-    LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+    page = get_lsn_info_page_with_lock(
+        batch_id, worker_id, old_tail_pos, RBM_ZERO_ON_ERROR, &buffer, BUFFER_LOCK_EXCLUSIVE);
 
     offset = lsn_info_postion_to_offset(old_tail_pos);
     Assert(offset >= LSN_INFO_HEAD_SIZE);

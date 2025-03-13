@@ -818,13 +818,14 @@ void dump_lsn_info(char *str_output, const BasePageInfo base_page_info, DumpLsnI
             break;
         }
 
-        Page page = get_lsn_info_page(batch_id, worker_id, next_lsn_info_pos, RBM_NORMAL, &buffer);
+        Page page = get_lsn_info_page_with_lock(batch_id, worker_id, next_lsn_info_pos,
+                                                RBM_NORMAL, &buffer, BUFFER_LOCK_SHARE);
         if (unlikely(page == NULL || buffer == InvalidBuffer)) {
-            ereport(LOG, (errmsg(EXRTOFORMAT("get_lsn_info_page failed, batch_id: %u, redo_id: %u, pos: %lu"), batch_id,
-                                 worker_id, next_lsn_info_pos)));
+            ereport(LOG,
+                (errmsg(EXRTOFORMAT("get_lsn_info_page_with_lock failed, batch_id: %u, redo_id: %u, pos: %lu"),
+                        batch_id, worker_id, next_lsn_info_pos)));
             break;
         }
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
  
         uint32 offset = lsn_info_postion_to_offset(next_lsn_info_pos);
         lsn_info = (LsnInfo)(page + offset);
@@ -860,13 +861,14 @@ void dump_base_page_info_lsn_info(const BufferTag &buf_tag, LsnInfoPosition head
             break;
         }
         buffer = InvalidBuffer;
-        Page page = get_lsn_info_page(batch_id, worker_id, head_lsn_base_page_pos, RBM_NORMAL, &buffer);
+        Page page = get_lsn_info_page_with_lock(batch_id, worker_id, head_lsn_base_page_pos,
+                                                RBM_NORMAL, &buffer, BUFFER_LOCK_SHARE);
         if (unlikely(page == NULL || buffer == InvalidBuffer)) {
-            ereport(LOG, (errmsg(EXRTOFORMAT("get_lsn_info_page failed, batch_id: %u, redo_id: %u, pos: %lu"), batch_id,
-                                 worker_id, head_lsn_base_page_pos)));
+            ereport(LOG,
+                (errmsg(EXRTOFORMAT("get_lsn_info_page_with_lock failed, batch_id: %u, redo_id: %u, pos: %lu"),
+                        batch_id, worker_id, head_lsn_base_page_pos)));
             break;
         }
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
 
         uint32 offset = lsn_info_postion_to_offset(head_lsn_base_page_pos);
         base_page_info = (BasePageInfo)(page + offset);

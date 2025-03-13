@@ -79,8 +79,8 @@ RelFileNode make_lsn_info_relfilenode(LsnInfoPosition position)
     return rnode;
 }
 
-Page get_lsn_info_page(uint32 batch_id, uint32 worker_id, LsnInfoPosition position, ReadBufferMode mode,
-    Buffer* buffer)
+Page get_lsn_info_page_with_lock(uint32 batch_id, uint32 worker_id, LsnInfoPosition position, ReadBufferMode mode,
+    Buffer* buffer, int lock_mode)
 {
     RelFileNode rnode;
     BlockNumber block_num;
@@ -96,10 +96,11 @@ Page get_lsn_info_page(uint32 batch_id, uint32 worker_id, LsnInfoPosition positi
     if (*buffer == InvalidBuffer) {
         ereport(WARNING, (errcode_for_file_access(),
             errmsg("block is invalid %u/%u/%u %d %u, batch_id: %u, redo_worker_id: %u",
-                    rnode.spcNode, rnode.dbNode, rnode.relNode, MAIN_FORKNUM, block_num,
-                    batch_id, worker_id)));
+                   rnode.spcNode, rnode.dbNode, rnode.relNode, MAIN_FORKNUM, block_num,
+                   batch_id, worker_id)));
         return NULL;
     }
+    LockBuffer(*buffer, lock_mode);
 
 #ifdef ENABLE_UT
     page = get_page_from_buffer(*buffer);
@@ -108,7 +109,7 @@ Page get_lsn_info_page(uint32 batch_id, uint32 worker_id, LsnInfoPosition positi
 #endif
     if (!is_lsn_info_page_valid((LsnInfoPageHeader *)page)) {
         if (mode == RBM_NORMAL) {
-            ReleaseBuffer(*buffer);
+            UnlockReleaseBuffer(*buffer);
             *buffer = InvalidBuffer;
             return NULL;
         }
@@ -125,10 +126,11 @@ LsnInfoPosition create_lsn_info_node(
     Page page = NULL;
     Page pipe_old_page = NULL;
     LsnInfo lsn_info = NULL;
+    Buffer buffer = InvalidBuffer;
+
+    SpinLockAcquire(&(meta_info->mutex));
     uint32 batch_id = meta_info->batch_id;
     uint32 worker_id = meta_info->redo_id;
-    Buffer buffer = InvalidBuffer;
-    SpinLockAcquire(&(meta_info->mutex));
     LsnInfoPosition insert_pos = meta_info->lsn_table_next_position;
     bool create_in_old_page = (insert_pos / BLCKSZ) == (old_tail_pos / BLCKSZ);
 
@@ -148,14 +150,14 @@ LsnInfoPosition create_lsn_info_node(
         if (is_old_page_held_by_me) {
             pipe_old_page_header = (LsnInfoPageHeader *)old_page;
         } else {
-            pipe_old_page = get_lsn_info_page(batch_id, worker_id, pipe_old_page_position, 
-                                              RBM_ZERO_ON_ERROR, &pipe_old_buffer);
-            LockBuffer(pipe_old_buffer, BUFFER_LOCK_SHARE);
+            pipe_old_page = get_lsn_info_page_with_lock(batch_id, worker_id, pipe_old_page_position,
+                                                        RBM_ZERO_ON_ERROR, &pipe_old_buffer, BUFFER_LOCK_EXCLUSIVE);
             pipe_old_page_header = (LsnInfoPageHeader *)pipe_old_page;
         }
         Assert(is_lsn_info_page_valid(pipe_old_page_header));
         Assert(pipe_old_page_header->next_lsn_info_page == 0);
         Assert(next_lsn_info_page != 0);
+        pipe_old_page_header->next_lsn_info_page = next_lsn_info_page;
         if (!is_old_page_held_by_me) {
             standby_read_meta_page_set_lsn(pipe_old_page, next_lsn);
             MarkBufferDirty(pipe_old_buffer);
@@ -172,9 +174,8 @@ LsnInfoPosition create_lsn_info_node(
         /* in old page, buffer is already locked */
         lsn_info = (LsnInfo)(old_page + offset);
     } else {
-        page = get_lsn_info_page(batch_id, worker_id, insert_pos, RBM_ZERO_ON_ERROR, &buffer);
- 
-        LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+        page = get_lsn_info_page_with_lock(batch_id, worker_id, insert_pos,
+                                           RBM_ZERO_ON_ERROR, &buffer, BUFFER_LOCK_EXCLUSIVE);
         lsn_info = (LsnInfo)(page + offset);
     }
  
@@ -201,9 +202,9 @@ void insert_lsn_to_lsn_info(StandbyReadMetaInfo *meta_info, LsnInfoDoubleList *l
     uint32 offset;
  
     Assert(!INFO_POSITION_IS_INVALID(tail_pos));
-    page = get_lsn_info_page(meta_info->batch_id, meta_info->redo_id, tail_pos, RBM_ZERO_ON_ERROR, &buffer);
+    page = get_lsn_info_page_with_lock(meta_info->batch_id, meta_info->redo_id, tail_pos,
+                                       RBM_ZERO_ON_ERROR, &buffer, BUFFER_LOCK_EXCLUSIVE);
  
-    LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
     offset = lsn_info_postion_to_offset(tail_pos);
     lsn_info = (LsnInfo)(page + offset);
     Assert(offset >= LSN_INFO_HEAD_SIZE);
@@ -282,9 +283,8 @@ LsnInfoPosition create_base_page_info_node(StandbyReadMetaInfo *meta_info,
 
     if (need_update_old_page_header) {
         Buffer pipe_old_buffer = InvalidBuffer;
-        Page pipe_old_page = get_lsn_info_page(batch_id, worker_id, pipe_old_page_position,
-                                               RBM_ZERO_ON_ERROR, &pipe_old_buffer);
-        LockBuffer(pipe_old_buffer, BUFFER_LOCK_EXCLUSIVE);
+        Page pipe_old_page = get_lsn_info_page_with_lock(batch_id, worker_id, pipe_old_page_position,
+                                                         RBM_ZERO_ON_ERROR, &pipe_old_buffer, BUFFER_LOCK_EXCLUSIVE);
         Assert(pipe_old_page != NULL);
         LsnInfoPageHeader *old_page_header = (LsnInfoPageHeader *)pipe_old_page;
         Assert(is_lsn_info_page_valid(old_page_header));
@@ -295,8 +295,8 @@ LsnInfoPosition create_base_page_info_node(StandbyReadMetaInfo *meta_info,
         UnlockReleaseBuffer(pipe_old_buffer);
     }
  
-    page = get_lsn_info_page(batch_id, worker_id, insert_pos, RBM_ZERO_ON_ERROR, &buffer);
-    LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+    page = get_lsn_info_page_with_lock(
+        batch_id, worker_id, insert_pos, RBM_ZERO_ON_ERROR, &buffer, BUFFER_LOCK_EXCLUSIVE);
  
     base_page_info = (BasePageInfo)(page + offset);
  
@@ -387,13 +387,13 @@ void get_lsn_info_for_read(const BufferTag& buf_tag, LsnInfoPosition latest_lsn_
             break;
         }
         buffer = InvalidBuffer;
-        Page page = get_lsn_info_page(batch_id, worker_id, latest_lsn_base_page_pos, RBM_NORMAL, &buffer);
+        Page page = get_lsn_info_page_with_lock(
+            batch_id, worker_id, latest_lsn_base_page_pos, RBM_NORMAL, &buffer, BUFFER_LOCK_SHARE);
         if (unlikely(page == NULL || buffer == InvalidBuffer)) {
             ereport(ERROR,
-                     (errmsg(EXRTOFORMAT("get_lsn_info_page failed, batch_id: %u, redo_id: %u, pos: %lu"), batch_id,
-                              worker_id, latest_lsn_base_page_pos)));
+                (errmsg(EXRTOFORMAT("get_lsn_info_page_with_lock failed, batch_id: %u, redo_id: %u, pos: %lu"),
+                        batch_id, worker_id, latest_lsn_base_page_pos)));
         }
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
  
         uint32 offset = lsn_info_postion_to_offset(latest_lsn_base_page_pos);
         base_page_info = (BasePageInfo)(page + offset);
@@ -431,14 +431,14 @@ void get_lsn_info_for_read(const BufferTag& buf_tag, LsnInfoPosition latest_lsn_
             break;
         }
  
-        Page page = get_lsn_info_page(batch_id, worker_id, next_lsn_info_pos, RBM_NORMAL, &buffer);
+        Page page = get_lsn_info_page_with_lock(
+            batch_id, worker_id, next_lsn_info_pos, RBM_NORMAL, &buffer, BUFFER_LOCK_SHARE);
         if (unlikely(page == NULL || buffer == InvalidBuffer)) {
             ereport(ERROR,
-                     (errmsg(EXRTOFORMAT("get_lsn_info_page failed, batch_id: %u, redo_id: %u, pos: %lu"), batch_id,
-                              worker_id, next_lsn_info_pos)));
+                (errmsg(EXRTOFORMAT("get_lsn_info_page_with_lock failed, batch_id: %u, redo_id: %u, pos: %lu"),
+                        batch_id, worker_id, next_lsn_info_pos)));
         }
         Assert(buffer != InvalidBuffer);
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
  
         uint32 offset = lsn_info_postion_to_offset(next_lsn_info_pos);
         lsn_info = (LsnInfo)(page + offset);
@@ -530,12 +530,13 @@ void recycle_one_lsn_info_list(const StandbyReadMetaInfo *meta_info, LsnInfoPosi
 
     while (INFO_POSITION_IS_VALID(page_info_pos)) {
         Buffer buffer = InvalidBuffer;
-        Page page = get_lsn_info_page(batch_id, worker_id, page_info_pos, RBM_NORMAL, &buffer);
+        Page page = get_lsn_info_page_with_lock(
+            batch_id, worker_id, page_info_pos, RBM_NORMAL, &buffer, BUFFER_LOCK_EXCLUSIVE);
         if (unlikely(page == NULL || buffer == InvalidBuffer)) {
-            ereport(PANIC, (errmsg(EXRTOFORMAT("get_lsn_info_page failed, batch_id: %u, redo_id: %u, pos: %lu"),
-                                   batch_id, worker_id, page_info_pos)));
+            ereport(PANIC,
+                (errmsg(EXRTOFORMAT("get_lsn_info_page_with_lock failed, batch_id: %u, redo_id: %u, pos: %lu"),
+                        batch_id, worker_id, page_info_pos)));
         }
-        LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
         uint32 offset = lsn_info_postion_to_offset(page_info_pos);
         BasePageInfo base_page_info = (BasePageInfo)(page + offset);
@@ -543,17 +544,16 @@ void recycle_one_lsn_info_list(const StandbyReadMetaInfo *meta_info, LsnInfoPosi
 
         *min_page_info_pos = page_info_pos;
         *min_lsn = base_page_info->cur_page_lsn;
- 
         /* retain a page version with page lsn less than recycle lsn */
         XLogRecPtr next_base_page_lsn = base_page_info->next_base_page_lsn;
         if (IS_EXRTO_READ_OPT) {
-            XLogRecPtr next_lsn = base_page_info->lsn_info_node.lsn[0];
-            if (XLogRecPtrIsValid(next_lsn) && XLByteLE(recycle_lsn, next_lsn)) {
+            if (XLogRecPtrIsInvalid(next_base_page_lsn) || XLByteLT(recycle_lsn, next_base_page_lsn)) {
                 UnlockReleaseBuffer(buffer);
                 break;
             }
         } else {
-            if (XLogRecPtrIsInvalid(next_base_page_lsn) || XLByteLT(recycle_lsn, next_base_page_lsn)) {
+            XLogRecPtr next_lsn = base_page_info->lsn_info_node.lsn[0];
+            if (XLogRecPtrIsValid(next_lsn) && XLByteLE(recycle_lsn, next_lsn)) {
                 UnlockReleaseBuffer(buffer);
                 break;
             }
@@ -585,16 +585,23 @@ void invalid_base_page_list(StandbyReadMetaInfo *meta_info, Buffer buffer, uint3
     uint32 batch_id = meta_info->batch_id;
     uint32 worker_id = meta_info->redo_id;
     while (INFO_POSITION_IS_VALID(page_info_pos)) {
-        page = get_lsn_info_page(batch_id, worker_id, page_info_pos, RBM_NORMAL, &buffer);
+        page = get_lsn_info_page_with_lock(
+            batch_id, worker_id, page_info_pos, RBM_NORMAL, &buffer, BUFFER_LOCK_EXCLUSIVE);
         if (unlikely(page == NULL || buffer == InvalidBuffer)) {
-            ereport(PANIC, (errmsg(EXRTOFORMAT("get_lsn_info_page failed, batch_id: %u, redo_id: %u, pos: %lu"),
-                                   batch_id, worker_id, page_info_pos)));
+            ereport(PANIC,
+                (errmsg(EXRTOFORMAT("get_lsn_info_page_with_lock failed, batch_id: %u, redo_id: %u, pos: %lu"),
+                        batch_id, worker_id, page_info_pos)));
         }
         offset = lsn_info_postion_to_offset(page_info_pos);
         base_page_info = (BasePageInfo)(page + offset);
 
+        if (!is_lsn_info_node_valid(base_page_info->lsn_info_node.flags)) {
+            ereport(LOG, (errmsg(EXRTOFORMAT("invalid base_page_list flags, batch_id: %u, redo_id: %u, pos: %lu"),
+                                 batch_id, worker_id, page_info_pos)));
+            break;
+        }
+
         /* unset valid flags */
-        LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
         base_page_info->lsn_info_node.flags &= ~LSN_INFO_NODE_VALID_FLAG;
         page_info_pos = base_page_info->base_page_list.next;
         MarkBufferDirty(buffer);
@@ -631,18 +638,19 @@ bool recycle_one_lsn_info_page(StandbyReadMetaInfo *meta_info, XLogRecPtr recycl
     uint32 worker_id = meta_info->redo_id;
     Buffer buffer = InvalidBuffer;
     LsnInfoPosition recycle_pos = meta_info->lsn_table_recycle_position;
-    Page page = get_lsn_info_page(batch_id, worker_id, recycle_pos, RBM_NORMAL, &buffer);
+    Page page = get_lsn_info_page_with_lock(
+        batch_id, worker_id, recycle_pos, RBM_NORMAL, &buffer, BUFFER_LOCK_EXCLUSIVE);
     if (unlikely(page == NULL || buffer == InvalidBuffer)) {
-        ereport(PANIC, (errmsg(EXRTOFORMAT("get_lsn_info_page failed, batch_id: %u, redo_id: %u, pos: %lu"), batch_id,
-                               worker_id, recycle_pos)));
+        ereport(PANIC, (errmsg(EXRTOFORMAT("get_lsn_info_page_with_lock failed, batch_id: %u, redo_id: %u, pos: %lu"),
+                               batch_id, worker_id, recycle_pos)));
     }
 
-    bool buffer_is_locked = false;
+    bool isBufferLocked = true;
     /* skip page header */
     for (uint32 bit = 1; bit < BASE_PAGE_MAP_SIZE * BYTE_BITS; bit++) {
-        if (!buffer_is_locked) {
+        if (!isBufferLocked) {
             LockBuffer(buffer, BUFFER_LOCK_SHARE);
-            buffer_is_locked = true;
+            isBufferLocked = true;
         }
  
         if (!is_base_page_map_bit_set(page, bit)) {
@@ -666,14 +674,14 @@ bool recycle_one_lsn_info_page(StandbyReadMetaInfo *meta_info, XLogRecPtr recycl
         *base_page_position = base_page_info->base_page_position;
 
         if (IS_EXRTO_READ_OPT) {
-            XLogRecPtr next_lsn = base_page_info->lsn_info_node.lsn[0];
-            if (XLogRecPtrIsValid(next_lsn) && XLByteLE(recycle_lsn, next_lsn)) {
+            if (XLogRecPtrIsValid(next_base_page_lsn) && XLByteLT(recycle_lsn, next_base_page_lsn)) {
                 update_recycle_lsn_per_worker(meta_info, base_page_lsn, next_base_page_lsn);
                 UnlockReleaseBuffer(buffer);
                 return false;
             }
         } else {
-            if (XLogRecPtrIsValid(next_base_page_lsn) && XLByteLT(recycle_lsn, next_base_page_lsn)) {
+            XLogRecPtr next_lsn = base_page_info->lsn_info_node.lsn[0];
+            if (XLogRecPtrIsValid(next_lsn) && XLByteLE(recycle_lsn, next_lsn)) {
                 update_recycle_lsn_per_worker(meta_info, base_page_lsn, next_base_page_lsn);
                 UnlockReleaseBuffer(buffer);
                 return false;
@@ -684,7 +692,7 @@ bool recycle_one_lsn_info_page(StandbyReadMetaInfo *meta_info, XLogRecPtr recycl
         INIT_BUFFERTAG(buf_tag, base_page_info->relfilenode, base_page_info->fork_num, base_page_info->block_num);
  
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-        buffer_is_locked = false;
+        isBufferLocked = false;
 
         XLogRecPtr block_info_max_lsn = InvalidXLogRecPtr;
         StandbyReadRecyleState stat =
@@ -698,7 +706,7 @@ bool recycle_one_lsn_info_page(StandbyReadMetaInfo *meta_info, XLogRecPtr recycl
         }
     }
     
-    if (!buffer_is_locked) {
+    if (!isBufferLocked) {
         LockBuffer(buffer, BUFFER_LOCK_SHARE);
     }
     LsnInfoPageHeader *page_header = (LsnInfoPageHeader *)page;
@@ -781,12 +789,12 @@ LsnInfoPosition get_nearest_base_page_pos(
             break;
         }
         buffer = InvalidBuffer;
-        Page page = get_lsn_info_page(batch_id, worker_id, latest_lsn_base_page_pos, RBM_NORMAL, &buffer);
+        Page page = get_lsn_info_page_with_lock(
+            batch_id, worker_id, latest_lsn_base_page_pos, RBM_NORMAL, &buffer, BUFFER_LOCK_SHARE);
         if (page == NULL || buffer == InvalidBuffer) {
             ereport(ERROR, (errmsg(EXRTOFORMAT("get_nearest_base_page_pos failed, batch_id: %u, redo_id: %u, pos: %lu"),
                                    batch_id, worker_id, latest_lsn_base_page_pos)));
         }
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
 
         uint32 offset = lsn_info_postion_to_offset(latest_lsn_base_page_pos);
         BasePageInfo base_page_info = (BasePageInfo)(page + offset);
@@ -802,16 +810,17 @@ LsnInfoPosition get_nearest_base_page_pos(
                         buf_tag.blockNum, batch_id, worker_id, latest_lsn_base_page_pos)));
         }
 
-        UnlockReleaseBuffer(buffer);
         page_lsn = base_page_info->lsn_info_node.lsn[0];
         LsnInfoPosition prev_lsn_base_page_pos = base_page_info->base_page_list.prev;
+        LsnInfoPosition prev_base_page_pos = base_page_info->base_page_position;
+        UnlockReleaseBuffer(buffer);
 
         if (XLByteLT(page_lsn, read_lsn)) {
             break;
         }
 
         /* the base page's lsn >= read_lsn */
-        base_page_pos = base_page_info->base_page_position;
+        base_page_pos = prev_base_page_pos;
 
         // the last base page info
         if (XLByteEQ(lsn_info_list.next, latest_lsn_base_page_pos)) {

@@ -1854,8 +1854,8 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
         return false;
     }
 
-    if ((block_valid != BLOCK_DATA_UNDO_TYPE) && g_instance.attr.attr_storage.EnableHotStandby &&
-        IsDefaultExtremeRtoMode() && XLByteLT(PageGetLSN(bufferinfo->pageinfo.page), blockhead->end_ptr)) {
+    if ((block_valid != BLOCK_DATA_UNDO_TYPE) && IS_EXRTO_READ &&
+        XLByteLT(PageGetLSN(bufferinfo->pageinfo.page), blockhead->end_ptr)) {
         if (unlikely(bufferinfo->blockinfo.forknum >= EXRTO_FORK_NUM)) {
             ereport(PANIC, (errmsg("forknum is illegal: %d", bufferinfo->blockinfo.forknum)));
         }

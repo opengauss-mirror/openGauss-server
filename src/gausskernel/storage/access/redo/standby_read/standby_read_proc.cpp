@@ -104,7 +104,7 @@ RETRY_GET:
     }
 
     /* In exrto_standby_read_opt mode, getting a snapshot needs to wait for the cleanup-info xlog to be processed. */
-    if (IS_EXRTO_READ_OPT) {
+    if (!IS_EXRTO_READ_OPT) {
         LWLockAcquire(ProcArrayLock, LW_SHARED);
         bool condition =
             (exrto_snapshot->xmin <=
@@ -154,16 +154,15 @@ XLogRecPtr calculate_force_recycle_lsn_per_worker(StandbyReadMetaInfo *meta_info
     if (meta_info->lsn_table_recycle_position < meta_info->lsn_table_next_position) {
         lsn_info_recycle_pos =
             get_force_recycle_pos(meta_info->lsn_table_recycle_position, meta_info->lsn_table_next_position);
-        page = extreme_rto_standby_read::get_lsn_info_page(
-            meta_info->batch_id, meta_info->redo_id, lsn_info_recycle_pos, RBM_NORMAL, &buffer);
+        page = extreme_rto_standby_read::get_lsn_info_page_with_lock(
+            meta_info->batch_id, meta_info->redo_id, lsn_info_recycle_pos, RBM_NORMAL, &buffer, BUFFER_LOCK_SHARE);
         if (unlikely(page == NULL || buffer == InvalidBuffer)) {
             ereport(PANIC,
-                (errmsg(EXRTOFORMAT("get_lsn_info_page failed, batch_id: %u, redo_id: %u, pos: %lu"),
+                (errmsg(EXRTOFORMAT("get_lsn_info_page_with_lock failed, batch_id: %u, redo_id: %u, pos: %lu"),
                     meta_info->batch_id,
                     meta_info->redo_id,
                     lsn_info_recycle_pos)));
         }
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
         extreme_rto_standby_read::LsnInfo lsn_info =
             (extreme_rto_standby_read::LsnInfo)(page + extreme_rto_standby_read::LSN_INFO_HEAD_SIZE);
         lsn_info_recycle_lsn = lsn_info->lsn[0];

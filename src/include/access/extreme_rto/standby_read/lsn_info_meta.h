@@ -120,8 +120,8 @@ static inline uint32 bit_to_offset(uint32 which_bit)
     return which_bit * LSN_INFO_NODE_SIZE;
 }
 
-Page get_lsn_info_page(uint32 batch_id, uint32 worker_id, LsnInfoPosition position, ReadBufferMode mode,
-    Buffer* buffer);
+Page get_lsn_info_page_with_lock(uint32 batch_id, uint32 worker_id, LsnInfoPosition position,
+                                 ReadBufferMode mode, Buffer* buffer, int lock_mode);
 void read_lsn_info_before(uint64 start_position, XLogRecPtr *readed_array, XLogRecPtr end_lsn);
 LsnInfoDoubleList* lsn_info_position_to_node_ptr(LsnInfoPosition pos);
 

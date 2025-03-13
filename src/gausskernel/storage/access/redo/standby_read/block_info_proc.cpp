@@ -47,17 +47,11 @@ inline BlockNumber data_block_number_to_meta_page_number(BlockNumber block_num)
 {
     return block_num / BLOCK_INFO_NUM_PER_PAGE;
 }
-#ifdef ENABLE_UT
-uint32 block_info_meta_page_offset(BlockNumber block_num)
-{
-    return (block_num % BLOCK_INFO_NUM_PER_PAGE) * BLOCK_INFO_SIZE + BLOCK_INFO_HEAD_SIZE;
-}
-#else
+
 inline uint32 block_info_meta_page_offset(BlockNumber block_num)
 {
     return (block_num % BLOCK_INFO_NUM_PER_PAGE) * BLOCK_INFO_SIZE + BLOCK_INFO_HEAD_SIZE;
 }
-#endif
 
 // get page, just have pin, no lock
 BlockMetaInfo* get_block_meta_info_by_relfilenode(
@@ -74,7 +68,8 @@ BlockMetaInfo* get_block_meta_info_by_relfilenode(
     bool hit = false;
 
     BlockNumber meta_block_num = data_block_number_to_meta_page_number(buf_tag.blockNum);
-    *buffer = ReadBuffer_common(smgr, 0, buf_tag.forkNum, meta_block_num, mode, strategy, &hit, NULL);
+    *buffer = ReadBuffer_common(smgr, RELPERSISTENCE_PERMANENT, buf_tag.forkNum,
+                                meta_block_num, mode, strategy, &hit, NULL);
 
     if (*buffer == InvalidBuffer) {
         ereport(DEBUG1, (errmodule(MOD_STANDBY_READ),
