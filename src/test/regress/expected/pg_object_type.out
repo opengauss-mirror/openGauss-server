@@ -630,6 +630,39 @@ END IF ;
 end;
 /
 INFO:  var1.id large var2.id
+-- fix schema.obj.fun case
+create or replace type address_typ as object( street varchar2(30), city varchar2(20),
+  static function convert_addr(street varchar2(30), city varchar2(20)) return address_typ);
+create or replace type body address_typ as 
+  static function convert_addr(street varchar2(30), city varchar2(20)) return address_typ is
+  declare
+    v_addr address_typ;
+  begin
+    v_addr.street = street;
+    v_addr.city = city;
+    return v_addr;
+  end;
+end;
+/
+create table test_addr(col1 address_typ);
+insert into test_addr values(vastbase_object_type.address_typ.convert_addr('a', 'b'));
+insert into test_addr values(address_typ.convert_addr('a', 'b'));
+declare
+    v_addr    address_typ;
+begin
+    v_addr = vastbase_object_type.address_typ.convert_addr('a', 'b');
+    insert into test_addr values(v_addr);
+end;
+/
+declare
+    v_addr    address_typ;
+begin
+    v_addr = address_typ.convert_addr('a', 'b');
+    insert into test_addr values(v_addr);
+end;
+/
+drop table test_addr;
+drop type address_typ;
 --对象表
 --行对象表
 create table objmap_t2 of obj_map;
