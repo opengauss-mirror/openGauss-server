@@ -554,6 +554,7 @@ function prepare_sql() {
         if ! cat "$upgrade_sql_file" >> "$tempfile"; then
           die "Write $tempfile failed" ${err_upgrade_pre}
         fi
+        echo "" >> "$tempfile"
         debug "$upgrade_sql_file >> $tempfile"
         ((temp_file_num=temp_file_num+1))
       fi
@@ -574,6 +575,7 @@ function prepare_sql() {
         if ! cat "$upgrade_sql_file" >> "$tempfile"; then
           die "Write $tempfile failed" ${err_upgrade_pre}
         fi
+        echo "" >> "$tempfile"
         debug "$upgrade_sql_file >>$tempfile"
         ((temp_file_num=temp_file_num+1))
       fi
