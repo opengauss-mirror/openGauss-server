@@ -8375,6 +8375,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                 execsql->row	 = row;
                 execsql->placeholders = placeholders;
                 execsql->multi_func = multi_func;
+                execsql->object_rel_value = false;
                 if (u_sess->parser_cxt.isPerform) {
                     execsql->sqlString = func_inparas.data;
                 } else {
@@ -8452,6 +8453,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
             execsql->row	 = row;
             execsql->placeholders = placeholders;
             execsql->multi_func = multi_func;
+            execsql->object_rel_value = false;
             execsql->sqlString = plpgsql_get_curline_query();
             return (PLpgSQL_stmt *)execsql;
         }
@@ -10909,6 +10911,7 @@ make_execsql_stmt(int firsttoken, int location)
     bool is_user_var = false;
     bool insert_record = false;
     bool insert_array_record = false; 
+    bool object_rel_value = false;
     int values_end_loc = -1;
     int before_semi_loc = -1;
     const char* err_msg = "The label name can only contain letters, digits and underscores";
@@ -10923,6 +10926,8 @@ make_execsql_stmt(int firsttoken, int location)
             prev_prev_tok = prev_tok;
         }
 
+        if (prev_tok == K_SELECT && tok == T_WORD && strcmp(yylval.word.ident, "value") == 0)
+            object_rel_value = true;
         if (have_into && into_end_loc < 0)
             into_end_loc = yylloc;		/* token after the INTO part */
 
@@ -11512,6 +11517,7 @@ make_execsql_stmt(int firsttoken, int location)
     execsql->rec	 = rec;
     execsql->row	 = row;
     execsql->placeholders = placeholders;
+    execsql->object_rel_value = object_rel_value;
     execsql->sqlString = plpgsql_get_curline_query();
 
     return (PLpgSQL_stmt *) execsql;

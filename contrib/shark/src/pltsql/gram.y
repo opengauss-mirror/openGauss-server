@@ -8375,6 +8375,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                 execsql->row	 = row;
                 execsql->placeholders = placeholders;
                 execsql->multi_func = multi_func;
+                execsql->object_rel_value = false;
                 if (u_sess->parser_cxt.isPerform) {
                     execsql->sqlString = func_inparas.data;
                 } else {
@@ -8452,6 +8453,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
             execsql->row	 = row;
             execsql->placeholders = placeholders;
             execsql->multi_func = multi_func;
+            execsql->object_rel_value = false;
             execsql->sqlString = plpgsql_get_curline_query();
             return (PLpgSQL_stmt *)execsql;
         }
@@ -11494,6 +11496,7 @@ make_execsql_stmt(int firsttoken, int location)
     execsql->rec	 = rec;
     execsql->row	 = row;
     execsql->placeholders = placeholders;
+    execsql->object_rel_value = false;
     execsql->sqlString = plpgsql_get_curline_query();
 
     return (PLpgSQL_stmt *) execsql;

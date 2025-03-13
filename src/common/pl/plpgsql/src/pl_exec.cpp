@@ -6131,6 +6131,7 @@ static int exec_stmt_forc(PLpgSQL_execstate* estate, PLpgSQL_stmt_forc* stmt, bo
         set_args.lineno = stmt->lineno;
         set_args.sqlstmt = stmt->argquery;
         set_args.into = true;
+        set_args.object_rel_value = false;
         /* XXX historically this has not been STRICT */
         set_args.row = (PLpgSQL_row*)(estate->datums[curvar->cursor_explicit_argrow]);
 
@@ -8096,6 +8097,20 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
             }
             if (stmt->bulk_collect) {
                 exec_read_bulk_collect(estate, row, tuptab);
+            } else if (DB_IS_CMPT(A_FORMAT) && stmt->object_rel_value) {
+                Datum value;
+                bool isnull = false;
+                Oid value_type;
+                if (row == NULL || row->dtype != PLPGSQL_DTYPE_ROW) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmodule(MOD_PLSQL),
+                            errmsg("assign target variable type error")));
+                }
+                value = SPI_getbinval(tuptab->vals[0], tuptab->tupdesc, 1, &isnull);
+                value_type = SPI_gettypeid(tuptab->tupdesc, 1);
+                /* set the target to NULL(s) */
+                exec_assign_value(estate, (PLpgSQL_datum*)row, value, value_type, &isnull);
             } else if (expr->out_param_dno > 0 &&
                        is_function_with_plpgsql_language_and_outparam(get_func_oid_from_expr(expr))) {
                 estate->eval_tuptable = tuptab;

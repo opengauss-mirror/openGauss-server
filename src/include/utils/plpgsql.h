@@ -1135,6 +1135,7 @@ typedef struct { /* Generic SQL statement to execute */
     // A db function invoke feature
     int placeholders;
     bool multi_func;
+    bool object_rel_value; /* Contain value for object type relation? */
     char* sqlString;
 } PLpgSQL_stmt_execsql;
 
