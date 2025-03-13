@@ -654,6 +654,8 @@ static void redo_seghead_extend(XLogReaderState *record)
         UnlockReleaseBuffer(redo_buf.buf);
     }
 
+    RedoBufferTag dataBlockInfo = redo_buf.blockinfo;
+
     XLogRedoAction redo_action = XLogReadBufferForRedo(record, XLOG_SEG_SEGMENT_EXTEND_HEAD_BLOCK_ID, &redo_buf);
     if (redo_action == BLK_NEEDS_REDO) {
         char *data = XLogRecGetBlockData(record, XLOG_SEG_SEGMENT_EXTEND_HEAD_BLOCK_ID, NULL);
@@ -666,6 +668,13 @@ static void redo_seghead_extend(XLogReaderState *record)
                                    seghead->nblocks, xlog_data->old_nblocks)));
         }
         seghead->nblocks = xlog_data->new_nblocks;
+
+        /* If it's compressed main fork, we update pca for compress table extent. */
+        bool compress = dataBlockInfo.rnode.opt != 0 && dataBlockInfo.forknum == MAIN_FORKNUM;
+        if (compress) {
+            SMgrRelation reln = smgropen(dataBlockInfo.rnode, InvalidBackendId);
+            SegUpdatePca(reln, dataBlockInfo.forknum, dataBlockInfo.blkno, seghead);
+        }
 
         PageSetLSN(redo_buf.pageinfo.page, redo_buf.lsn);
         SegMarkBufferDirty(redo_buf.buf);
