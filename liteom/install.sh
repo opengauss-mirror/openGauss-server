@@ -113,7 +113,7 @@ fi
 
 # obtain all IP addresses of the local host.
 declare -i ipindex=0
-for localip in $(ip addr | awk '/^[0-9]+:/ {flag = !/docker|veth|br-|lo:/} flag && /inet(6)? [0-9a-fA-F:.]+\/[0-9]+/ {split($2, a, "/"); print a[1];}')
+for localip in $(/usr/sbin/ip addr | awk '/^[0-9]+:/ {flag = !/docker|veth|br-|lo:/} flag && /inet(6)? [0-9a-fA-F:.]+\/[0-9]+/ {split($2, a, "/"); print a[1];}')
 do
     localips[ipindex]=${localip}
     ipindex=$[ ${ipindex} + 1 ]
