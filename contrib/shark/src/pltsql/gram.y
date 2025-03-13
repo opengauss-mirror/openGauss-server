@@ -9957,7 +9957,7 @@ read_sql_construct6(int until,
                     idents = yylval.wdatum.idents;
                     int dno = yylval.wdatum.datum->dno;
                     PLpgSQL_datum *datum = (PLpgSQL_datum *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[dno];
-                    if (datum->dtype == PLPGSQL_DTYPE_RECFIELD) {
+                    if (datum && datum->dtype == PLPGSQL_DTYPE_RECFIELD) {
                         PLpgSQL_recfield *rec_field = (PLpgSQL_recfield *)datum;
                         PLpgSQL_rec *rec = (PLpgSQL_rec *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[rec_field->recparentno];
                         MemoryContext old_cxt = NULL;
