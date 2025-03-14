@@ -479,6 +479,9 @@ Datum gms_debug_off(PG_FUNCTION_ARGS)
 {
     GMSInterfaceCheck("gms_debug.debug_off",false);
     // dms_debug indicates that session debugging functionality should be enabled.
+    if ((u_sess->plsql_cxt.gms_debug_idx == -1)) {
+       PG_RETURN_VOID();
+    }
     SetDebugCommGmsUsed(u_sess->plsql_cxt.gms_debug_idx, false);
     u_sess->plsql_cxt.gms_debug_idx = -1;
 
