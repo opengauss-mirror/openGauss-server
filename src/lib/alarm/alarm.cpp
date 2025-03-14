@@ -751,18 +751,29 @@ static bool SuppressSyslogAlarmReport(Alarm* alarmItem, AlarmType type, int time
     return false;
 }
 
+static bool CheckAlarmSuppression(const struct timeval curTime, Alarm* alarmItem, int timeInterval, int maxReportCount)
+{
+    bool shouldReport = false;
+    if (maxReportCount > 0) {
+        shouldReport = (curTime.tv_sec - alarmItem->lastReportTime >= timeInterval &&
+                       alarmItem->reportCount < maxReportCount);
+    } else {
+        shouldReport = (curTime.tv_sec - alarmItem->lastReportTime >= timeInterval);
+    }
+    return shouldReport;
+}
+
 /* suppress the alarm log */
 static bool SuppressAlarmLogReport(Alarm* alarmItem, AlarmType type, int timeInterval, int maxReportCount)
 {
     struct timeval thisTime;
     gettimeofday(&thisTime, NULL);
-
+    bool shouldReport = CheckAlarmSuppression(thisTime, alarmItem, timeInterval, maxReportCount);
     /* alarm suppression */
     if (type == ALM_AT_Fault) {                   /* now the state is fault */
         if (alarmItem->stat == ALM_AS_Reported) { /* original state is fault */
             /* check whether the interval between now and last report time is more than $timeInterval secs */
-            if (thisTime.tv_sec - alarmItem->lastReportTime >= timeInterval &&
-                alarmItem->reportCount < maxReportCount) {
+            if (shouldReport) {
                 ++(alarmItem->reportCount);
                 alarmItem->lastReportTime = thisTime.tv_sec;
                 if (alarmItem->startTimeStamp == 0)
@@ -795,8 +806,7 @@ static bool SuppressAlarmLogReport(Alarm* alarmItem, AlarmType type, int timeInt
             return false;
         } else if (alarmItem->stat == ALM_AS_Normal) { /* original state is resume */
             /* check whether the interval between now and last report time is more than $timeInterval secs */
-            if (thisTime.tv_sec - alarmItem->lastReportTime >= timeInterval &&
-                alarmItem->reportCount < maxReportCount) {
+            if (shouldReport) {
                 ++(alarmItem->reportCount);
                 alarmItem->lastReportTime = thisTime.tv_sec;
                 if (alarmItem->endTimeStamp == 0)
@@ -813,7 +823,6 @@ static bool SuppressAlarmLogReport(Alarm* alarmItem, AlarmType type, int timeInt
         alarmItem->startTimeStamp = thisTime.tv_sec * 1000 + thisTime.tv_usec / 1000;
         return false;
     }
-
     return true;
 }
 

@@ -41,6 +41,7 @@
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "alarm/alarm.h"
+#include "alarm/alarm_log.h"
 #include "utils/elog.h"
 #include "pgxc/pgxc.h"
 #include "postmaster/alarmchecker.h"
@@ -59,6 +60,8 @@ bool enable_alarm = false;
 static Alarm* DataInstAlarmList = NULL;
 
 static int DataInstAlarmListSize = 0;
+
+char sys_log_path[MAXPGPATH] = {0};
 
 AlarmCheckResult DataOrRedoDirNotExistChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam);
 
@@ -95,6 +98,27 @@ void DataInstAlarmItemInitialize(void)
     // ALM_AI_AbnormalDataInstConnToGTM
     AlarmItemInitialize(
         &(DataInstAlarmList[5]), ALM_AI_AbnormalDataInstConnToGTM, ALM_AS_Normal, DataInstConnToGTMChecker);
+}
+
+void PrepareAlarmEnvironment()
+{
+    errno_t rc = 0;
+    rc = memcpy_s(g_alarmComponentPath, MAXPGPATH - 1, Alarm_component, strlen(Alarm_component));
+    securec_check(rc, "\0", "\0");
+    g_alarmReportInterval = AlarmReportInterval;
+    AlarmEnvInitialize(u_sess->attr.attr_common.log_hostname);
+    /* assign gs_log to sys_log_path, use it as alarm directory */
+    bool isAbsolute = is_absolute_path(u_sess->attr.attr_common.Log_directory);
+    if (isAbsolute) {
+        rc = strncpy_s(sys_log_path, MAXPGPATH, u_sess->attr.attr_common.Log_directory,
+            strlen(u_sess->attr.attr_common.Log_directory));
+        securec_check(rc, "\0", "\0");
+    } else {
+        rc = snprintf_s(sys_log_path, MAXPGPATH, MAXPGPATH - 1, "%s/gs_log",
+                        g_instance.attr.attr_common.data_directory);
+        securec_check_ss(rc, "\0", "\0");
+    }
+    create_system_alarm_log(sys_log_path);
 }
 
 ThreadId startAlarmChecker(void)
