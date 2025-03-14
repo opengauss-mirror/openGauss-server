@@ -600,7 +600,7 @@ bool PullColumnRefWalker(Node* node, PullColumnRefContext* context)
     }
     if (IsA(node, ColumnRef)) {
         context->columnRefs = lappend(context->columnRefs, node);
-        return true;
+        return false;
     }
     return raw_expression_tree_walker(node, (bool (*)())PullColumnRefWalker, (void*)context);
 }
