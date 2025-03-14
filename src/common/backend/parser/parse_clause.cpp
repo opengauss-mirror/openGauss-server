@@ -603,7 +603,7 @@ bool PullColumnRefWalker(Node* node, PullColumnRefContext* context)
         return true;
     }
     return raw_expression_tree_walker(node, (bool (*)())PullColumnRefWalker, (void*)context);
- }
+}
 
 List* PullColumnRefs(Node* node)
 {
@@ -613,7 +613,7 @@ List* PullColumnRefs(Node* node)
     PullColumnRefWalker(node, &context);
     
     return context.columnRefs;
- }
+}
 
 static bool ColNameInFuncParasList(char* colName, List* columnsInAggFunc)
 {
