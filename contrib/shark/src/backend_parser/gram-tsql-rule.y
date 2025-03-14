@@ -462,6 +462,45 @@ tsql_CreateProcedureStmt:
 				}
 		;
 
+rotate_clause:
+		ROTATE '(' func_application_list rotate_for_clause rotate_in_clause ')' alias_clause %prec ROTATE
+			{
+				RotateClause *n = makeNode(RotateClause);
+				n->aggregateFuncCallList = $3;
+				n->forColName = $4;
+				n->inExprList = $5;
+				base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+				char* raw_parse_query_string = yyextra->core_yy_extra.scanbuf;
+				n->inExprList = TransformToConstStrNode(n->inExprList, raw_parse_query_string);
+				n->alias = $7;
+				$$ = n;
+			}
+		;
+
+unrotate_clause:
+			NOT ROTATE include_exclude_null_clause '(' unrotate_name_list rotate_for_clause unrotate_in_clause ')' alias_clause %prec ROTATE
+				{
+					UnrotateClause *n = makeNode(UnrotateClause);
+					n->includeNull = $3;
+					n->colNameList = $5;
+					n->forColName = $6;
+					n->inExprList = $7;
+					$$ = n;
+				}
+		;
+
+VariableSetStmt:
+			SET IDENT var_value
+			    {
+					VariableSetStmt *n = makeNode(VariableSetStmt);
+					n->kind = VAR_SET_VALUE;
+					n->name = $2;
+					n->args = list_make1($3);
+					n->is_local = false;
+					$$ = (Node *) n;
+				}
+		;
+
 unreserved_keyword:
 			CHECKIDENT
 			| DBCC

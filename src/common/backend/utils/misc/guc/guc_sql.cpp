@@ -170,6 +170,8 @@
 
 static bool parse_query_dop(int* newval, void** extra, GucSource source);
 static void AssignQueryDop(int newval, void* extra);
+static void AssignAnsiNulls(bool newval, void* extra);
+static void AssignTransformNullEquals(bool newval, void* extra);
 static bool check_job_max_workers(int* newval, void** extra, GucSource source);
 static bool check_statement_max_mem(int* newval, void** extra, GucSource source);
 static bool check_statement_mem(int* newval, void** extra, GucSource source);
@@ -1134,19 +1136,31 @@ static void InitSqlConfigureNamesBool()
             &u_sess->attr.attr_sql.Transform_null_equals,
             false,
             NULL,
+            AssignTransformNullEquals,
+            NULL},
+        {{"ansi_nulls",
+            PGC_USERSET,
+            NODE_ALL,
+            COMPAT_OPTIONS_CLIENT,
+            gettext_noop("Contrary to the transform_null_equals parameter."),
+            gettext_noop("When turned on, The transform_null_equals will be set to off."
+                        "When turned off, The transform_null_equals will be set to on.")},
+            &u_sess->attr.attr_sql.ansi_nulls,
+            true,
+            NULL,
+            AssignAnsiNulls,
+            NULL},
+        {{"transform_to_numeric_operators",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("When turn on, choose numeric (op) numeric for varchar (op) int."),
+            NULL},
+            &u_sess->attr.attr_sql.transform_to_numeric_operators,
+            false,
+            NULL,
             NULL,
             NULL},
-            {{"transform_to_numeric_operators",
-              PGC_USERSET,
-              NODE_SINGLENODE,
-              QUERY_TUNING_METHOD,
-              gettext_noop("When turn on, choose numeric (op) numeric for varchar (op) int."),
-              NULL},
-             &u_sess->attr.attr_sql.transform_to_numeric_operators,
-             false,
-             NULL,
-             NULL,
-             NULL},
         {{"check_function_bodies",
             PGC_USERSET,
             NODE_ALL,
@@ -4755,4 +4769,21 @@ static bool init_parameterized_query_context(bool* newval, void** exttra, GucSou
                               ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     }
     return true;
+}
+
+/*
+ * @Description: assign new value to ansi_nulls.
+ *
+ * @param[IN] newval: new value
+ * @param[IN] extra: N/A
+ * @return: void
+ */
+static void AssignAnsiNulls(bool newval, void* extra)
+{
+    u_sess->attr.attr_sql.Transform_null_equals = !newval;
+}
+
+static void  AssignTransformNullEquals(bool newval, void* extra)
+{
+    u_sess->attr.attr_sql.ansi_nulls = !newval;
 }

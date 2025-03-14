@@ -696,6 +696,7 @@ typedef struct UnrotateClause {
     List *colNameList;
     List *forColName;
     List *inExprList;
+    Alias *alias;       /* function aliases */
 } UnrotateClause;
 
 typedef struct UnrotateInCell {
@@ -1877,6 +1878,7 @@ typedef struct RotateClause {
     List *forColName;
     List *inExprList;
     List *aggregateFuncCallList;
+    Alias *alias;       /* function aliases */
 } RotateClause;
 
 typedef struct RotateInCell {

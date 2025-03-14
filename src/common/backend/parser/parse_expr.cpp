@@ -1452,6 +1452,16 @@ static bool exprIsNullConstant(Node* arg)
     return false;
 }
 
+
+
+static inline bool is_not_null_operator(const char * operator_name)
+{
+    if (operator_name == NULL) {
+        return false;
+    }
+    return strcmp(operator_name, "!=") == 0 || strcmp(operator_name, "<>") == 0;
+}
+
 static Node* transformAExprOp(ParseState* pstate, A_Expr* a)
 {
     Node* lexpr = a->lexpr;
@@ -1471,6 +1481,16 @@ static Node* transformAExprOp(ParseState* pstate, A_Expr* a)
         NullTest* n = makeNode(NullTest);
 
         n->nulltesttype = IS_NULL;
+
+        n->arg = exprIsNullConstant(lexpr) ? (Expr *)rexpr : (Expr *)lexpr;
+
+        result = transformExprRecurse(pstate, (Node*)n);
+    } else if (DB_IS_CMPT(D_FORMAT) && u_sess->attr.attr_sql.Transform_null_equals && list_length(a->name) == 1 &&
+        is_not_null_operator(strVal(linitial(a->name))) && (exprIsNullConstant(lexpr) || exprIsNullConstant(rexpr)) &&
+        (!IsA(lexpr, CaseTestExpr) && !IsA(rexpr, CaseTestExpr))) {
+        NullTest* n = makeNode(NullTest);
+
+        n->nulltesttype = IS_NOT_NULL;
 
         n->arg = exprIsNullConstant(lexpr) ? (Expr *)rexpr : (Expr *)lexpr;
 

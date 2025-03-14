@@ -353,6 +353,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "standard_conforming_strings",
     "synchronize_seqscans",
     "transform_null_equals",
+    "ansi_nulls",
     "exit_on_error",
 #ifdef ENABLE_MULTIPLE_NODES
     "gtm_backup_barrier",

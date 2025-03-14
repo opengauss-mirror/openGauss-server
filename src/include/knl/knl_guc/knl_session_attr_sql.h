@@ -111,6 +111,7 @@ typedef struct knl_session_attr_sql {
     bool enable_autoanalyze;
     bool SQL_inheritance;
     bool Transform_null_equals;
+    bool ansi_nulls;
     bool check_function_bodies;
     bool Array_nulls;
     bool default_with_oids;

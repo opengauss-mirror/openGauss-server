@@ -822,10 +822,15 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
             (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("unexpected non-SELECT command in subquery in FROM")));
     }
 
+    Alias* subquery_alias = r->alias;
+    if (DB_IS_CMPT(D_FORMAT) && r->rotate != NULL && r->rotate->alias != NULL) {
+        subquery_alias = r->rotate->alias;
+    }
+
     /*
      * OK, build an RTE for the subquery.
      */
-    rte = addRangeTableEntryForSubquery(pstate, query, r->alias, r->lateral, true);
+    rte = addRangeTableEntryForSubquery(pstate, query, subquery_alias, r->lateral, true);
 
     return rte;
 }

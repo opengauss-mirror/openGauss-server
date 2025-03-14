@@ -310,6 +310,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 static Node* MakeNoArgFunctionCall(List* funcName, int location);
 static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 static void contain_unsupport_node(Node* node, bool* has_unsupport_default_node);
+static List* TransformToConstStrNode(List *inExprList, char* raw_str);
 
 /* Please note that the following line will be replaced with the contents of given file name even if with starting with a comment */
 /*$$include "gram-tsql-prologue.y.h"*/
@@ -26535,14 +26536,20 @@ opt_alias_clause: alias_clause		{ $$ = $1; }
 rotate_clause:
 			ROTATE '(' func_application_list rotate_for_clause rotate_in_clause ')' %prec ROTATE
 				{
-					if( u_sess->attr.attr_sql.sql_compatibility != A_FORMAT )
+					if (!DB_IS_CMPT_AD)
 						ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("rotate clause is supported only in A_FORMAT database.")));
+								errmsg("rotate clause is supported only in A or D FORMAT database.")));
 					RotateClause *n = makeNode(RotateClause);
 					n->aggregateFuncCallList = $3;
 					n->forColName = $4;
-					n->inExprList = $5;
+					base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+					char* raw_parse_query_string = yyextra->core_yy_extra.scanbuf;
+					if (DB_IS_CMPT(D_FORMAT)) {
+						n->inExprList = TransformToConstStrNode($5, raw_parse_query_string);
+					} else {
+						n->inExprList = $5;
+					}
 					$$ = n;
 				}
 		;
@@ -26564,10 +26571,10 @@ func_application_list:
 unrotate_clause:
 			NOT ROTATE include_exclude_null_clause '(' unrotate_name_list rotate_for_clause unrotate_in_clause ')' %prec ROTATE
 				{
-					if( u_sess->attr.attr_sql.sql_compatibility != A_FORMAT )
+					if (!DB_IS_CMPT_AD)
 						ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("not rotate clause is supported only in A_FORMAT database.")));
+								errmsg("not rotate clause is supported only in A or D FORMAT database.")));
 					UnrotateClause *n = makeNode(UnrotateClause);
 					n->includeNull = $3;
 					n->colNameList = $5;
@@ -34938,6 +34945,70 @@ void contain_unsupport_node(Node* node, bool* has_unsupport_default_node)
     }
     (void)raw_expression_tree_walker(node, (bool (*)())contain_unsupport_node, (void*)has_unsupport_default_node);
 }
+
+
+static List* TransformToConstStrNode(List *inExprList, char* raw_str)
+{
+	ListCell* cell = NULL;
+	ListCell *exprCell = NULL;
+	ResTarget *resTarget = NULL;
+	errno_t rc;
+
+	foreach (cell, inExprList)
+	{
+		RotateInCell *rotateinCell = (RotateInCell *)lfirst(cell);
+		foreach (exprCell, rotateinCell->rotateInExpr) {
+			resTarget = (ResTarget *)lfirst(exprCell);
+			if (NULL == rotateinCell->aliasname && IsA(resTarget->val, ColumnRef)) {
+				ColumnRef* column_ref = (ColumnRef*)resTarget->val;
+				// column_ref info has been convert to lower case, so we need to extact the not convert lower case info in raw str
+				char * lower_column_name = strVal(linitial(column_ref->fields));
+				int len = strlen(lower_column_name);
+				pfree(lower_column_name);
+				char *raw_col_name = (char *)palloc(len + 1);
+				raw_col_name[len] = '\0';
+				errno_t rc = EOK;
+				int column_offset = 0;
+				if (raw_str[column_ref->location] == '[' || raw_str[column_ref->location] == '"') {
+					column_offset++;
+				}
+				rc = strncpy_s(raw_col_name, len + 1, raw_str + column_ref->location + column_offset, len);
+				securec_check(rc, "\0", "\0");
+				Node* const_node = makeStringConst(raw_col_name, column_ref->location);
+				resTarget->val = const_node;
+			} if (NULL == rotateinCell->aliasname && IsA(resTarget->val, A_Const)) {
+				const Value *val = &((A_Const *)resTarget->val)->val;
+				char * column_to_const_str = NULL;
+				switch (val->type) {
+					case T_Integer: {
+						char* new_col_name = (char*)palloc(NAMEDATALEN);
+						rc = memset_s(new_col_name, NAMEDATALEN, 0, NAMEDATALEN);
+						securec_check_c(rc, "\0", "\0");
+						rc = snprintf_s(new_col_name, NAMEDATALEN, NAMEDATALEN - 1, "%ld", intVal(val));
+						securec_check_ss(rc, "\0", "\0");
+						column_to_const_str = new_col_name;
+						break;
+					}
+
+					case T_Float:
+					case T_String:
+					case T_BitString:
+						column_to_const_str = strVal(val);
+						break;
+					
+					default:
+						break;
+				}
+				if (column_to_const_str != NULL) {
+					Node* const_node = makeStringConst(column_to_const_str, ((A_Const *)resTarget)->location);
+					resTarget->val = const_node;
+				}
+			}
+		}
+	}
+	return inExprList;
+}
+
 
 
 /*
