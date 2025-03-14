@@ -31,6 +31,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_attrdef.h"
 #include "commands/defrem.h"
 #include "commands/sequence.h"
 #include "commands/tablecmds.h"
@@ -667,6 +668,30 @@ static int128 GetNextvalLocal(SeqTable elm, Relation seqrel)
 
     return result;
 }
+
+
+template<typename T_Int, typename T_Form, bool large>
+static T_Int GetLastAndIncrementValue(SeqTable elm, Relation seqrel, T_Int* increment_by)
+{
+    Buffer buf;
+    Page page;
+    HeapTupleData seqtuple;
+    T_Form seq;
+    GTM_UUID uuid;
+    T_Int last_value;
+
+    /* lock page' buffer and read tuple */
+    seq = read_seq_tuple<T_Form>(elm, seqrel, &buf, &seqtuple, &uuid);
+    page = BufferGetPage(buf);
+
+    AssignInt<T_Int, large>(&last_value, (int128)seq->last_value);
+    AssignInt<T_Int, large>(increment_by, (int128)seq->increment_by);
+
+    UnlockReleaseBuffer(buf);
+    
+    return last_value;
+}
+
 
 template<typename T_Int>
 static bool FetchNOverMaxBound(T_Int maxv, T_Int next, T_Int incby)
@@ -3086,4 +3111,212 @@ static char* Int8or16Out(T_Int num)
         ret = DatumGetCString(DirectFunctionCall1(int8out, num));
     }
     return ret;
+}
+
+
+template<typename T_Int, bool large>
+T_Int GetColumnMaxOrMinValue(char* column_name, char* full_table_name, bool is_min)
+{
+    T_Int current_max_value = 0;
+    char max_value_sql[FULL_TABLE_NAME_MAX_LENGTH] = {0};
+    errno_t rc = EOK;
+    const char* target_type = large ? "int16" : "int8";
+    const char* agg_func_name = is_min ? "min" : "max";
+    int ret = 0;
+    bool isnull = false;
+
+    rc = snprintf_s(max_value_sql, FULL_TABLE_NAME_MAX_LENGTH, FULL_TABLE_NAME_MAX_LENGTH - 1,
+                    "select %s(%s)::%s from %s;", agg_func_name, column_name, target_type, full_table_name);
+    securec_check_ss(rc, "", "");
+
+    ereport(DEBUG5, (errcode(MOD_SEQ), errmsg("get current max value sql is \"%s\"", max_value_sql)));
+    if (SPI_OK_CONNECT != SPI_connect()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
+                errmsg("Unable to connect to execute internal select max value.")));
+    }
+    ret = SPI_execute(max_value_sql, true, 1);
+    if (ret < 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SPI_EXECUTE_FAILURE),
+                errmsg("Call SPI_execute execute interval select max value failed.")));
+    }
+
+    if (SPI_processed != 1) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SPI_EXECUTE_FAILURE),
+                errmsg("execute select max value but result is invalid.")));
+    }
+
+    Datum res = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    if (isnull) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SPI_EXECUTE_FAILURE),
+                errmsg("execute select max value but result is null.")));
+    } else {
+        if (large) {
+            current_max_value = DatumGetInt128(res);
+        } else {
+            current_max_value = DatumGetInt64(res);
+        }
+    }
+    SPI_finish();
+    return current_max_value;
+}
+
+
+static inline void free_relation_resource(SysScanDesc adscan, Relation adrel, Relation rel)
+{
+    systable_endscan(adscan);
+    heap_close(adrel, AccessShareLock);
+    relation_close(rel, AccessShareLock);
+}
+
+
+static inline void check_relation_valid(Relation rel, char* table_name)
+{
+    if (rel->rd_rel->relkind != RELKIND_RELATION) {
+        relation_close(rel, AccessShareLock);
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation \"%s\" does not exist", table_name)));
+    }
+
+    if (rel->rd_att->constr->num_defval < 1) {
+        relation_close(rel, AccessShareLock);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("cannot not found the serial column for relation \"%s\"", table_name)));
+    }
+}
+
+static Oid adbin_to_relid(char* adbin)
+{
+    Oid seqoid = InvalidOid;
+    if (adbin == NULL || adbin[0] == '\0') {
+        return InvalidOid;
+    }
+    Node* expr = (Node*)stringToNode(adbin);
+    if (!IsA(expr, FuncExpr)) {
+        return InvalidOid ;
+    }
+    find_nextval_seqoid_walker(expr, &seqoid);
+
+    return seqoid;
+}
+
+char* get_serial_column_and_seq_table(List* range_var, char* table_name, Oid* seq_table_oid)
+{
+    Relation rel = NULL;
+    ScanKeyData skey;
+    HeapTuple htup;
+    char* serial_column_name = NULL;
+    Oid seqoid = InvalidOid;
+
+    rel = HeapOpenrvExtended(makeRangeVarFromNameList(range_var), AccessShareLock, false, true);
+    check_relation_valid(rel, table_name);
+
+    ScanKeyInit(&skey, Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(RelationGetRelid(rel)));
+    Relation adrel = heap_open(AttrDefaultRelationId, AccessShareLock);
+    SysScanDesc adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, NULL, 1, &skey);
+    
+    while (HeapTupleIsValid(htup = systable_getnext(adscan))) {
+        Datum val;
+        bool isnull = false;
+        Datum adnum;
+
+        val = fastgetattr(htup, Anum_pg_attrdef_adbin, adrel->rd_att, &isnull);
+        if (isnull) {
+            continue;
+        }
+        
+        char* adbin_str = TextDatumGetCString(val);
+        Oid seqoid_temp = adbin_to_relid(adbin_str);
+        if (OidIsValid(seqoid_temp) && OidIsValid(seqoid)) {
+            free_relation_resource(adscan, adrel, rel);
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("more than one serial in relation \"%s\"", table_name)));
+        }
+        if (!OidIsValid(seqoid_temp) && !OidIsValid(seqoid)) {
+            continue;
+        }
+        if (OidIsValid(seqoid_temp) && !OidIsValid(seqoid)) {
+            seqoid = seqoid_temp;
+            adnum = fastgetattr(htup, Anum_pg_attrdef_adnum, adrel->rd_att, &isnull);
+            int16 adnum_int16 = DatumGetInt16(adnum) - 1;
+            if (adnum_int16 < 0) {
+                free_relation_resource(adscan, adrel, rel);
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("adnum is not defined in pg_attrdef")));
+            }
+            serial_column_name =  pstrdup(NameStr(rel->rd_att->attrs[adnum_int16].attname));
+        }
+    }
+
+    if (!OidIsValid(seqoid) || serial_column_name == NULL) {
+        free_relation_resource(adscan, adrel, rel);
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE),
+                errmsg("cannot not found the serial table for relation \"%s\"", table_name)));
+    }
+
+    free_relation_resource(adscan, adrel, rel);
+    *seq_table_oid = seqoid;
+    return serial_column_name;
+}
+
+
+void get_last_value_and_max_value(text* txt, int64* last_value, int64* current_max_value)
+{
+    int64 increasement_by = 0;
+    Oid relid = 0;
+    SeqTable elm = NULL;
+    Relation seqrel;
+    char* serial_column_name = NULL;
+    char* table_name = TextDatumGetCString(txt);
+    List* range_var = textToQualifiedNameList(txt);
+
+    serial_column_name = get_serial_column_and_seq_table(range_var, table_name, &relid);
+
+    /* open and lock sequence */
+    init_sequence(relid, &elm, &seqrel);
+    *last_value = GetLastAndIncrementValue<int64, Form_pg_sequence, false>(elm, seqrel, &increasement_by);
+    relation_close(seqrel, NoLock);
+
+    /* get current max value by execute select max (xx) from xxx */
+    bool is_min = increasement_by < 0 ? true : false;
+    *current_max_value = GetColumnMaxOrMinValue<int64, false>(serial_column_name, table_name, is_min);
+
+    pfree(serial_column_name);
+    pfree(table_name);
+    list_free(range_var);
+}
+
+
+int64 get_and_reset_last_value(text* txt, int64 new_value, bool need_reseed)
+{
+    int64 last_value = 0;
+    Oid relid = 0;
+    int64 increasement_by = 0;
+    SeqTable elm = NULL;
+    Relation seqrel;
+    char* serial_column_name = NULL;
+
+    List* range_var = textToQualifiedNameList(txt);
+    char* table_name = TextDatumGetCString(txt);
+
+    serial_column_name = get_serial_column_and_seq_table(range_var, table_name, &relid);
+
+    /* open and lock sequence */
+    init_sequence(relid, &elm, &seqrel);
+    last_value = GetLastAndIncrementValue<int64, Form_pg_sequence, false>(elm, seqrel, &increasement_by);
+    relation_close(seqrel, NoLock);
+
+    // set new reseed
+    if (need_reseed) {
+        do_setval<Form_pg_sequence, int64, false>(relid, new_value, true);
+    }
+
+    pfree(serial_column_name);
+    pfree(table_name);
+    list_free(range_var);
+
+    return last_value;
 }

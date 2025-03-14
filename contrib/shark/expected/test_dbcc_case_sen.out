@@ -1,0 +1,71 @@
+create database "DbcC_test_Case_sen" with dbcompatibility 'D';
+\c "DbcC_test_Case_sen";
+create extension shark;
+create schema "DbcC_test_Case_sen_S";
+set search_path = "DbcC_test_Case_sen_S";
+set d_format_behavior_compat_options = 'enable_sbr_identifier';
+-- part1: dbcc check NORESEED
+ CREATE TABLE "Employees" (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "Employees_employeeid_seq" for serial column "Employees.employeeid"
+insert into "Employees"(Name) values ('zhangsan');
+insert into "Employees"(Name) values ('lisi');
+insert into "Employees"(Name) values ('wangwu');
+insert into "Employees"(Name) values ('heliu');
+ CREATE TABLE "employees" (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employeeid_seq" for serial column "employees.employeeid"
+insert into "employees"(Name) values ('zhangsan');
+insert into "employees"(Name) values ('lisi');
+-- Case-insensitive
+DBCC CHECKIDENT ('employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '2', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '2', current column value '2'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+NOTICE:  "Checking identity information: current identity value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                  dbcc_check_ident_reseed                   
+------------------------------------------------------------
+ Checking identity information: current identity value '2'.
+(1 row)
+
+-- Case-sensitive
+DBCC CHECKIDENT ("employees", NORESEED);
+NOTICE:  "Checking identity information: current identity value '1', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '1', current column value '2'.
+(1 row)
+
+DBCC CHECKIDENT ("Employees", NORESEED);
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ("Employees", RESEED, 1);
+NOTICE:  "Checking identity information: current identity value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                  dbcc_check_ident_reseed                   
+------------------------------------------------------------
+ Checking identity information: current identity value '4'.
+(1 row)
+
+drop schema "DbcC_test_Case_sen_S" cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table "Employees"
+drop cascades to table employees
+\c contrib_regression;
+drop database "DbcC_test_Case_sen";

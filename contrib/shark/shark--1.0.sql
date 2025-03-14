@@ -16,6 +16,10 @@ create trusted language pltsql
     inline pltsql_inline_handler
     validator pltsql_validator;
 
+
+CREATE FUNCTION dbcc_check_ident_no_reseed(varchar, boolean) RETURNS varchar as 'MODULE_PATHNAME', 'dbcc_check_ident_no_reseed' LANGUAGE C STRICT STABLE;
+CREATE FUNCTION dbcc_check_ident_reseed(varchar, bigint, boolean) RETURNS varchar as 'MODULE_PATHNAME', 'dbcc_check_ident_reseed' LANGUAGE C STABLE;
+
 grant usage on language pltsql to public;
     
 create function fetch_status()

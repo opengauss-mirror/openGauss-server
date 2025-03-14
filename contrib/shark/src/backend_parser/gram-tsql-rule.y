@@ -113,6 +113,10 @@ tsql_opt_clustered:
 			| /*EMPTY*/		{ $$ == NULL;}
 		;
 
+opt_with_no_infomsgs: WITH NO_INFOMSGS				{$$ = TRUE;}
+			| /*EMPTY*/								{$$ = FALSE;}
+		;		
+
 tsql_IndexStmt:
 				CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
 				ON qualified_name access_method_clause '(' index_params ')'
@@ -459,8 +463,76 @@ tsql_CreateProcedureStmt:
 		;
 
 unreserved_keyword:
-			TSQL_CLUSTERED
+			CHECKIDENT
+			| DBCC
+			| NO_INFOMSGS
+			| NORESEED
+			| RESEED
+			| TSQL_CLUSTERED
 			| TSQL_NONCLUSTERED ;
+
+
+DBCCCheckIdentStmt:
+		DBCC CHECKIDENT '(' ColId_or_Sconst ',' NORESEED ')' opt_with_no_infomsgs
+			{
+				SelectStmt *n = makeNode(SelectStmt);
+				n->distinctClause = NIL;
+				n->targetList = make_no_reseed_func(quote_identifier_wrapper($4, yyscanner), $8);
+				n->intoClause = NULL;
+				n->fromClause = NIL;
+				n->whereClause = NULL;
+				n->groupClause = NIL;
+				n->havingClause = NULL;
+				n->windowClause = NIL;
+				$$ = (Node*)n;
+			}
+		| DBCC CHECKIDENT '(' ColId_or_Sconst ')' opt_with_no_infomsgs
+			{
+				SelectStmt *n = makeNode(SelectStmt);
+				n->distinctClause = NIL;
+				n->targetList = make_no_reseed_func(quote_identifier_wrapper($4, yyscanner), $6);
+				n->intoClause = NULL;
+				n->fromClause = NIL;
+				n->whereClause = NULL;
+				n->groupClause = NIL;
+				n->havingClause = NULL;
+				n->windowClause = NIL;
+				$$ = (Node*)n;
+			}
+		| DBCC CHECKIDENT '(' ColId_or_Sconst ',' RESEED ',' SignedIconst ')' opt_with_no_infomsgs
+			{
+				SelectStmt *n = makeNode(SelectStmt);
+				n->distinctClause = NIL;
+				n->targetList = make_reseed_func(quote_identifier_wrapper($4, yyscanner), (Node*)makeIntConst($8, @8), $10);
+				n->intoClause = NULL;
+				n->fromClause = NIL;
+				n->whereClause = NULL;
+				n->groupClause = NIL;
+				n->havingClause = NULL;
+				n->windowClause = NIL;
+				$$ = (Node*)n;
+			}
+		| DBCC CHECKIDENT '(' ColId_or_Sconst ',' RESEED ')' opt_with_no_infomsgs
+			{
+				SelectStmt *n = makeNode(SelectStmt);
+				n->distinctClause = NIL;
+				n->targetList = make_reseed_func(quote_identifier_wrapper($4, yyscanner), makeNullAConst(@6), $8);
+				n->intoClause = NULL;
+				n->fromClause = NIL;
+				n->whereClause = NULL;
+				n->groupClause = NIL;
+				n->havingClause = NULL;
+				n->windowClause = NIL;
+				$$ = (Node*)n;
+			}
+		;
+
+DBCCStmt:  DBCCCheckIdentStmt
+			{
+				$$ = $1;
+			}
+			;
+
 
 tsql_stmt :
 			AlterAppWorkloadGroupMappingStmt
@@ -661,7 +733,8 @@ tsql_stmt :
 			| ShrinkStmt
 			| /*EMPTY*/
 				{ $$ = NULL; }
-			| DelimiterStmt 
+			| DelimiterStmt
+			| DBCCStmt
 		;
 func_expr_common_subexpr:
 			TSQL_ATAT_IDENT
