@@ -257,17 +257,8 @@ SELECT TO_NUMBER(c1 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
 (7 rows)
 
 SELECT TO_NUMBER('abd' DEFAULT c1 ON CONVERSION ERROR) FROM tonumber ORDER By c1;  -- error， Default param can't be ColumnRef
- to_number 
------------
-         1
-         2
-         3
-         4
-         5
-         6
-         7
-(7 rows)
-
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_number
 SELECT TO_NUMBER(3.14 DEFAULT c1 ON CONVERSION ERROR) FROM tonumber ORDER By c1;  -- error， Default param can't be ColumnRef
  to_number 
 -----------
@@ -854,17 +845,8 @@ SELECT TO_NUMBER(c1 DEFAULT NULL ON CONVERSION ERROR, '99D999') FROM tonumber OR
 (7 rows)
 
 SELECT TO_NUMBER('abd' DEFAULT c1 ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;  -- error， Default param can't be ColumnRef
- to_number 
------------
-         1
-         2
-         3
-         4
-         5
-         6
-         7
-(7 rows)
-
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_number
 SELECT TO_NUMBER(3.14 DEFAULT c1 ON CONVERSION ERROR, '99D999') FROM tonumber ORDER By c1;  -- error， Default param can't be ColumnRef
  to_number 
 -----------
@@ -1271,6 +1253,59 @@ SELECT TO_NUMBER(NULL DEFAULT '1.79769313486231E+310' ON CONVERSION ERROR);
           
 (1 row)
 
+--to_number default
+drop table tnb;
+ERROR:  table "tnb" does not exist
+create table tnb(num varchar2(40));
+insert into tnb values('123');
+select * from tnb;
+ num 
+-----
+ 123
+(1 row)
+
+select to_number('asd' default num on conversion error)from tnb;
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_number
+select to_number('asd' default num||'123' on conversion error)from tnb;
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_number
+select to_number('asd' default to_char(num)||'123' on conversion error)from tnb;
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_number
+select to_number('asd' default num::text||'123' on conversion error)from tnb;
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_number
+select to_number('asd' default (num::text)::text||'123' on conversion error)from tnb;
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_number
+select to_number('asd' default ('123'::text)::text||'123' on conversion error)from tnb;
+ to_number 
+-----------
+    123123
+(1 row)
+
+select to_number('asd' default '123'::text||'123' on conversion error)from tnb;
+ to_number 
+-----------
+    123123
+(1 row)
+
+drop table tnb;
+create table tnbde(shuzi float);
+insert into tnbde values(123.123);
+insert into tnbde values(12375675);
+select to_number('asdad' default shuzi on conversion error) from tnbde;
+ERROR:  default argument must be a literal or bind
+CONTEXT:  referenced column: to_number
+select * from tnbde;
+  shuzi   
+----------
+  123.123
+ 12375675
+(2 rows)
+
+drop table tnbde;
 CREATE TABLE tonumber_exec (c1 int, func_info text, res float4);
 PREPARE default_param_text2(int, text, text) AS
     INSERT INTO tonumber_exec VALUES ($1, CONCAT('TO_NUMBER(', $2, ' DEFAULT ', $3, ' ON CONVERSION ERROR)'), TO_NUMBER($2 DEFAULT $3 ON CONVERSION ERROR));

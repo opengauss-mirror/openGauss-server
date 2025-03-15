@@ -402,3 +402,23 @@ SELECT TO_TIMESTAMP (null ) ;
 SELECT TO_TIMESTAMP (null DEFAULT '11-Sep-11 14:10:10.123000'on conversion error);
 SELECT TO_TIMESTAMP (null DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF') ;
 SELECT TO_TIMESTAMP (null DEFAULT '11-09-11 14:10:10.123000' ON CONVERSION ERROR,'DD-MM-RR HH24:MI:SS.FF','NLS_DATE_LANGUAGE = American') ;
+
+drop table tspc;
+create table tspc(tx varchar2(40));
+insert into tspc values('2025-09-01');
+select * from tspc;
+select to_timestamp('asd' default tx on conversion error)from tspc;
+select to_timestamp('asd' default tx||' 13:45:22.123123' on conversion error,'yyyy-mm-dd hh24:mi:ss.ff')from tspc;
+select to_timestamp('asd' default to_char(tx)||' 13:45:22.123123' on conversion error,'yyyy-mm-dd hh24:mi:ss.ff')from tspc;
+select to_timestamp('asd' default tx::text||' 13:45:22.123123' on conversion error,'yyyy-mm-dd hh24:mi:ss.ff')from tspc;
+select to_timestamp('asd' default (tx::text)::text||' 13:45:22.123123' on conversion error,'yyyy-mm-dd hh24:mi:ss.ff')from tspc;
+select to_timestamp('asd' default '2025-09-01'::text||' 13:45:22.123123' on conversion error,'yyyy-mm-dd hh24:mi:ss.ff')from tspc;
+select to_timestamp('asd' default (select '2025-09-01')::text||' 13:45:22.123123' on conversion error,'yyyy-mm-dd hh24:mi:ss.ff')from tspc;
+drop table tspc;
+
+create table tspc(tx varchar2(20));
+insert into tspc values('2025-09-01 11:24:02');
+insert into tspc values('2024-11-05 10:27:12');
+select to_timestamp('VFDVA' default tx on conversion error, 'YYYY-MM-DD HH24:MI:SS')from tspc;
+drop table tspc;
+

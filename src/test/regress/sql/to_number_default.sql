@@ -232,6 +232,26 @@ SELECT TO_NUMBER(NULL DEFAULT '1.79769313486231E+310' ON CONVERSION ERROR);
 
 
 
+--to_number default
+drop table tnb;
+create table tnb(num varchar2(40));
+insert into tnb values('123');
+select * from tnb;
+select to_number('asd' default num on conversion error)from tnb;
+select to_number('asd' default num||'123' on conversion error)from tnb;
+select to_number('asd' default to_char(num)||'123' on conversion error)from tnb;
+select to_number('asd' default num::text||'123' on conversion error)from tnb;
+select to_number('asd' default (num::text)::text||'123' on conversion error)from tnb;
+select to_number('asd' default ('123'::text)::text||'123' on conversion error)from tnb;
+select to_number('asd' default '123'::text||'123' on conversion error)from tnb;
+drop table tnb;
+
+create table tnbde(shuzi float);
+insert into tnbde values(123.123);
+insert into tnbde values(12375675);
+select to_number('asdad' default shuzi on conversion error) from tnbde;
+select * from tnbde;
+drop table tnbde;
 
 CREATE TABLE tonumber_exec (c1 int, func_info text, res float4);
 
