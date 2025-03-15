@@ -4536,7 +4536,6 @@ Datum interval_to_char(PG_FUNCTION_ARGS)
         tm->tm_hour = Abs(tm->tm_hour);
         tm->tm_min = Abs(tm->tm_min);
         tm->tm_sec = Abs(tm->tm_sec);
-        bool incache = FALSE;
         text* fmt_a_format = NULL;
 
         const char *fmt_a_format_str = NULL;
@@ -7134,10 +7133,23 @@ Datum numeric_to_default_without_defaultval(PG_FUNCTION_ARGS)
     bool with_default = PG_GETARG_BOOL(2);
     bool fmt_contain_columnRef = PG_GETARG_BOOL(3);
     bool fmt_is_null = PG_ARGISNULL(4);
-    text* fmt;
+    text* fmt = fmt_is_null ? NULL : PG_GETARG_TEXT_P(4);
 
     Datum result;
+    Datum default_val;
     bool result_null = false;
+
+    /* to check default value validity at first. */
+    if (with_default && !defaultNumValIsNull) {
+        text* default_num_val = PG_GETARG_TEXT_P(1);
+        if (default_num_val) {
+            if (fmt_is_null) {
+                default_val = to_numeric_number_internal_without_fmt(default_num_val, PG_GET_COLLATION(), &result_null);
+            } else {
+                default_val = to_numeric_to_number_internal(default_num_val, fmt, PG_GET_COLLATION(), &result_null);
+            }
+        }
+    }
 
     PG_TRY();
     {
@@ -7145,7 +7157,6 @@ Datum numeric_to_default_without_defaultval(PG_FUNCTION_ARGS)
             result = to_numeric_number_internal_without_fmt(source_value,
                 PG_GET_COLLATION(), &result_null);
         } else {
-            fmt = PG_GETARG_TEXT_P(4);
             result = to_numeric_number_internal_with_fmt(source_value, fmt, with_default,
                 PG_GET_COLLATION(), &result_null);
         }
@@ -7161,22 +7172,9 @@ Datum numeric_to_default_without_defaultval(PG_FUNCTION_ARGS)
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("default argument must be a literal or bind")));
                 }
-       
-                /* The value of default value is processed here. Is no longer a conversion process under default,
-                 * so withDefault is set to true.
-                 */
-                with_default = false;
-                result_null = false;
-                text* default_num_val = PG_GETARG_TEXT_P(1); // 25
 
-                if (fmt_is_null) {
-                    result = to_numeric_number_internal_without_fmt(default_num_val,
-                                                                    PG_GET_COLLATION(), &result_null);
-                } else {
-                    fmt = PG_GETARG_TEXT_P(4);
-                    result = to_numeric_to_number_internal(default_num_val, fmt,
-                                                           PG_GET_COLLATION(), &result_null);
-                }
+                result_null = false;
+                result = default_val;
             }
         } else {
             char* msg = Geterrmsg();
