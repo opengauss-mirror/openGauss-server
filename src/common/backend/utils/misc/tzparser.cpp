@@ -438,10 +438,12 @@ char* pg_findformat(const char* key, const char* source)
         return NULL; /* nothing to do */
     }
 
+    auto source_dup = pstrdup(source);
     /* Parse string into list of identifiers */
-    if (!SplitIdentifierString((char*)source, '=', &elemlist, false, false) ||
+    if (!SplitIdentifierString((char*)source_dup, '=', &elemlist, false, false) ||
                                 list_length(elemlist) != LIST_LENGTH_MIN) {
         /* syntax error in list */
+        pfree(source_dup);
         list_free(elemlist);
         return NULL;
     }
@@ -449,14 +451,13 @@ char* pg_findformat(const char* key, const char* source)
     l = list_head(elemlist);
     char* tok = (char*)lfirst(l);
     if (strcmp(tok, key) == 0) {
-        char* ret = (char *)lsecond(elemlist);
+        char* ret = pstrdup((char *)lsecond(elemlist));
+        pfree(source_dup);
         list_free(elemlist);
         return ret;
-    } else {
-        list_free(elemlist);
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid format: %s", tok)));
     }
 
+    pfree(source_dup);
     list_free(elemlist);
     return NULL;
 }

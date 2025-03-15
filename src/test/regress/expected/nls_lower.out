@@ -2141,17 +2141,14 @@ SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоП
 ERROR:  collation "BUL按时打卡AN" for encoding "UTF8" does not exist
 CONTEXT:  referenced column: lower_case_string
 SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_拉克丝的 = BULGARIAN') AS lower_case_string ;
-ERROR:  invalid format: NLS_拉克丝的
+ERROR:  invalid format: NLS_拉克丝的 = BULGARIAN
 CONTEXT:  referenced column: lower_case_string
 SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS卢卡斯RT = BUL阿斯顿IAN') AS lower_case_string ;
-ERROR:  invalid format: NLS卢卡斯RT
+ERROR:  invalid format: NLS卢卡斯RT = BUL阿斯顿IAN
 CONTEXT:  referenced column: lower_case_string
 SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NL S_ SORT = BUL GA RIAN') AS lower_case_string ;
-                       lower_case_string                        
-----------------------------------------------------------------
- ааббввггддеежжззииййккллммннооппррссттууффххццччшшщщъъыыььююяя
-(1 row)
-
+ERROR:  invalid format: NL S_ SORT = BUL GA RIAN
+CONTEXT:  referenced column: lower_case_string
 SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', '    NLS_SORT = BULGARIAN  ') AS lower_case_string ;
 ERROR:  collation "BULGARIAN" for encoding "UTF8" does not exist
 CONTEXT:  referenced column: lower_case_string
@@ -2164,17 +2161,14 @@ SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоП
 ERROR:  collation "BUL按时打卡AN" for encoding "UTF8" does not exist
 CONTEXT:  referenced column: lower_case_string
 SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS_拉克丝的 = BULGARIAN') AS lower_case_string ;
-ERROR:  invalid format: NLS_拉克丝的
+ERROR:  invalid format: NLS_拉克丝的 = BULGARIAN
 CONTEXT:  referenced column: lower_case_string
 SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NLS卢卡斯RT = BUL阿斯顿IAN') AS lower_case_string ;
-ERROR:  invalid format: NLS卢卡斯RT
+ERROR:  invalid format: NLS卢卡斯RT = BUL阿斯顿IAN
 CONTEXT:  referenced column: lower_case_string
 SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', 'NL S_ SORT = BUL GA RIAN') AS lower_case_string ;
-                       lower_case_string                        
-----------------------------------------------------------------
- ааббввггддеежжззииййккллммннооппррссттууффххццччшшщщъъыыььююяя
-(1 row)
-
+ERROR:  invalid format: NL S_ SORT = BUL GA RIAN
+CONTEXT:  referenced column: lower_case_string
 SELECT NLS_LOWER('АаБбВвГгДдЕеЖжЗзИиЙйКкЛлМмНнОоПпРрСсТтУуФфХхЦцЧчШшЩщЪъЫыЬьЮюЯя', '    NLS_SORT = BULGARIAN  ') AS lower_case_string ;
 ERROR:  collation "BULGARIAN" for encoding "UTF8" does not exist
 CONTEXT:  referenced column: lower_case_string

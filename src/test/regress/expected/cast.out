@@ -193,11 +193,7 @@ SELECT CAST('1999-January-01 11:00:00 -05:23' AS TIMESTAMP WITH TIME ZONE, 'YYYY
 (1 row)
 
 SELECT CAST('1999-January-01 11:00:00 -05:23' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE = ca');
-ERROR:  invalid value "Ja" for "MM"
-LINE 1: SELECT CAST('1999-January-01 11:00:00 -05:23' AS TIMESTAMP W...
-                    ^
-DETAIL:  Value must be an integer.
-CONTEXT:  referenced column: timestamptz
+ERROR:  invalid param format: CA
 SELECT CAST('1999-12-01 11:00:00 -05:23' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', NLS_DATE_LANGUAGE = American);
       timestamptz       
 ------------------------
@@ -211,8 +207,7 @@ SELECT CAST('2014-January-02 12:11:22' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD 
 (1 row)
 
 SELECT CAST('2014-January-02 12:11:22' AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANG = American');
-ERROR:  invalid format: NLS_DATE_LANG
-CONTEXT:  referenced column: timestamptz
+ERROR:  invalid format: NLS_DATE_LANG = AMERICAN
 SELECT CAST('1999-12-01 11:00:00' AS date, 'YYYY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = American');
       timestamp      
 ---------------------
@@ -312,15 +307,10 @@ SELECT CAST(('19'||SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast)
 (1 row)
 
 SELECT CAST(('19'||SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = CANADA') FROM 3)) AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE= american');
-ERROR:  invalid value "Ja" for "MM"
-DETAIL:  Value must be an integer.
+ERROR:  invalid param format: CANADA
 CONTEXT:  referenced column: timestamptz
 SELECT CAST(('19'||SUBSTRING(CAST((SELECT SUBSTRING(col1 FROM 3) FROM test_cast) AS TIMESTAMP WITH TIME ZONE, 'YY-MM-DD HH:MI:SS', 'NLS_DATE_LANGUAGE = american') FROM 3)) AS TIMESTAMP WITH TIME ZONE, 'YYYY-MM-DD HH:MI:SS TZH:TZM', 'NLS_DATE_LANGUAGE= canada');
-      timestamptz       
-------------------------
- 1900-01-01 11:00:00+00
-(1 row)
-
+ERROR:  invalid param format: CANADA
 -- CAST ARRAY 1
 SELECT CAST(ARRAY['1999-01-01', '2023-10-23'] AS timestamp[]);
                      array                     

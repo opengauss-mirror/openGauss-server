@@ -3534,8 +3534,7 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
                 }
                 if (tc->nls_fmt_str && IsA(tc->nls_fmt_str, A_Const) &&
                     ((A_Const*)tc->nls_fmt_str)->val.type == T_String) {
-                    char* source = pg_strtoupper(((A_Const*)tc->nls_fmt_str)->val.val.str);
-                    nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", source);
+                    nlsFmtStr = pg_strtoupper(((A_Const*)tc->nls_fmt_str)->val.val.str);
                 }
                 if (can_coerce_type(1, &sourceTypeId, &ptype, COERCION_IMPLICIT)) {
                     return coerce_type(NULL, defResNode, sourceTypeId, ptype, -1,

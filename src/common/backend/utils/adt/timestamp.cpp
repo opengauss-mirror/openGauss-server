@@ -35,6 +35,7 @@
 #include "utils/builtins.h"
 #include "utils/datetime.h"
 #include "utils/formatting.h"
+#include "utils/tzparser.h"
 #include "common/int.h"
 
 #ifdef PGXC
@@ -368,6 +369,25 @@ Datum input_timestamp_in(char* str, Oid typioparam, int32 typmod, bool can_ignor
     AdjustTimestampForTypmod(&result, typmod);
     PG_RETURN_TIMESTAMP(result);
 }
+
+static void CheckNlsFormat()
+{
+    if (u_sess->parser_cxt.nls_fmt_str) {
+        char* nlsDateLang = pg_findformat("NLS_DATE_LANGUAGE", u_sess->parser_cxt.nls_fmt_str);
+        if (nlsDateLang &&
+            (pg_strcasecmp(nlsDateLang, g_nlsLanguage[0]) &&
+             pg_strcasecmp(nlsDateLang, g_nlsLanguage[1]))) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_SYNTAX_ERROR),
+                     errmsg("invalid param format: %s", nlsDateLang)));
+        } else if (!nlsDateLang) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                 errmsg("invalid format: %s", u_sess->parser_cxt.nls_fmt_str)));
+        }
+    }
+}
+
 /* timestamp_out()
  * Convert a timestamp to external form.
  */
@@ -378,6 +398,8 @@ Datum timestamp_out(PG_FUNCTION_ARGS)
     struct pg_tm tt, *tm = &tt;
     fsec_t fsec;
     char buf[MAXDATELEN + 1];
+
+    CheckNlsFormat();
 
     if (TIMESTAMP_NOT_FINITE(timestamp))
         EncodeSpecialTimestamp(timestamp, buf);
@@ -916,6 +938,8 @@ Datum timestamptz_out(PG_FUNCTION_ARGS)
     fsec_t fsec;
     const char* tzn = NULL;
     char buf[MAXDATELEN + 1];
+
+    CheckNlsFormat();
 
     if (TIMESTAMP_NOT_FINITE(dt))
         EncodeSpecialTimestamp(dt, buf);

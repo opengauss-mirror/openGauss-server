@@ -1466,17 +1466,11 @@ SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANG
 (1 row)
 
 SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = CANADA');
-    to_timestamp     
----------------------
- 2016-01-01 00:00:00
-(1 row)
-
+ERROR:  invalid param format: CANADA
 SELECT TO_TIMESTAMP('2016-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANG = ENGLISH');
-ERROR:  invalid format: NLS_DATE_LANG
-CONTEXT:  referenced column: to_timestamp
+ERROR:  invalid format: NLS_DATE_LANG = ENGLISH
 SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANG = ENGLISH');
-ERROR:  invalid format: NLS_DATE_LANG
-CONTEXT:  referenced column: to_timestamp
+ERROR:  invalid format: NLS_DATE_LANG = ENGLISH
 SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = ENGLISH');
     to_timestamp     
 ---------------------
@@ -1484,9 +1478,7 @@ SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE
 (1 row)
 
 SELECT TO_TIMESTAMP('2016-january-01 00:00:00','yyyy-mm-dd hh24:mi:ss','NLS_DATE_LANGUAGE = CANADA');
-ERROR:  invalid value "ja" for "mm"
-DETAIL:  Value must be an integer.
-CONTEXT:  referenced column: to_timestamp
+ERROR:  invalid param format: CANADA
 -- null test
 SELECT TO_TIMESTAMP (null ) ;
  to_timestamp 

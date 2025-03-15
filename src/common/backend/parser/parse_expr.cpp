@@ -3126,8 +3126,7 @@ static Node* transformTypeCast(ParseState* pstate, TypeCast* tc)
     }
     if (tc->nls_fmt_str && IsA(tc->nls_fmt_str, A_Const) &&
         ((A_Const*)tc->nls_fmt_str)->val.type == T_String) {
-        char* source = pg_strtoupper(((A_Const*)tc->nls_fmt_str)->val.val.str);
-        nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", source);
+        nlsFmtStr = pg_strtoupper(((A_Const*)tc->nls_fmt_str)->val.val.str);
     }
     PG_TRY(); {
         result = coerce_to_target_type(pstate, expr, inputType, targetType, targetTypmod, COERCION_EXPLICIT,
