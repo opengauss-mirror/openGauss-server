@@ -2203,7 +2203,7 @@ static ObjectAddress ReplaceTableOfType(Oid oldTypeOid, Oid refTypeOid)
  * create typy A as table of B, there are B and _B in pg_type
  * add oid of _B in element
  */
-ObjectAddress DefineTableOfType(const TableOfTypeStmt* stmt)
+ObjectAddress DefineTableOfType(const TableOfTypeStmt* stmt, Oid typbasetype)
 {
     char* typname = NULL;
     Oid typeNamespace;
@@ -2319,7 +2319,7 @@ ObjectAddress DefineTableOfType(const TableOfTypeStmt* stmt)
             refTypeOid,                 /* element type ID - none */
             false,                      /* this is not an array type */
             InvalidOid,                 /* array type we are about to create */
-            InvalidOid,                 /* base type ID (only for domains) */
+            typbasetype,                /* base type ID (only for domains) */
             NULL,                       /* never a default type value */
             NULL,                       /* no binary form available either */
             false,                      /* never passed by value */
@@ -2398,7 +2398,7 @@ static void MakeDefaultArrayConstructMethod(List* typname, Oid elemtypoid, Oid t
  * -------------------------------------------------------------------
  */
 ObjectAddress DefineCompositeType(RangeVar* typevar, List* coldeflist, bool replace,
-    ObjectAddress* reladdress, bool is_object_type)
+    ObjectAddress* reladdress, bool is_object_type, Oid typbasetype)
 {
     CreateStmt* createStmt = makeNode(CreateStmt);
     Oid old_type_oid;
@@ -2462,7 +2462,13 @@ ObjectAddress DefineCompositeType(RangeVar* typevar, List* coldeflist, bool repl
      * Finally create the relation.  This also creates the type.
      */
 
-    ObjectAddress relation_address = DefineRelation(createStmt, RELKIND_COMPOSITE_TYPE, InvalidOid, &address);
+    ObjectAddress relation_address = DefineRelation(
+        createStmt,
+        RELKIND_COMPOSITE_TYPE,
+        InvalidOid,
+        &address,
+        false,
+        typbasetype);
     if (reladdress)
         *reladdress = relation_address;
     return address;

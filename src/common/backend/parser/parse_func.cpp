@@ -1587,6 +1587,89 @@ FuncCandidateList sort_candidate_func_list(FuncCandidateList oldCandidates)
     return sorted_candidates;
 }
 
+/*
+ * getRecordOrRowBaseType
+ * Get base type of a record or row(tableof) type. Just like getBaseType.
+ */
+Oid getRecordOrTableOfBaseType(Oid typid)
+{
+    /* Prechecke if typid is oid of record or tableof */
+    HeapTuple tup;
+    Form_pg_type typTup;
+    Oid typtype = InvalidOid;
+    Oid lastType = InvalidOid;
+    tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+    if (!HeapTupleIsValid(tup)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
+    }
+    typTup = (Form_pg_type)GETSTRUCT(tup);
+    /* Return itself if not a subtype of record or tableof */
+    if ((typTup->typtype != TYPTYPE_COMPOSITE && typTup->typtype!= TYPTYPE_TABLEOF) ||
+        (typTup->typbasetype == InvalidOid)) {
+        ReleaseSysCache(tup);
+        return typid;
+    }
+    lastType = typid;
+    typid = typTup->typbasetype;
+    typtype = typTup->typtype;
+    ReleaseSysCache(tup);
+    /*
+     * We loop to find the bottom base type in a stack of record or tableof.
+     */
+    for (;;) {
+        tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+        if (!HeapTupleIsValid(tup)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
+        }
+        typTup = (Form_pg_type)GETSTRUCT(tup);
+        /* Subtype's typtype should be same as basetype */
+        if (typTup->typtype != typtype) {
+            ReleaseSysCache(tup);
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("typtype of subtype %u is not same as basetype %u.", lastType, typid)));
+        }
+        if (typTup->typbasetype == InvalidOid) {
+            /* Don't have basetype so it is basetype */
+            ReleaseSysCache(tup);
+            break;
+        }
+        lastType = typid;
+        typid = typTup->typbasetype;
+        ReleaseSysCache(tup);
+    }
+    return typid;
+}
+
+/*
+ * ProcessRecordOrTableOfSubtype
+ * Transform source args and target args to their basetype when they are record or tableof
+ * and have same typtype.
+ */
+void ProcessRecordOrTableOfSubtype(Oid* sourceArgtypes, Oid* targetArgtypes, int nargs)
+{
+    Oid srcBasetype = InvalidOid;
+    Oid tarBasetype = InvalidOid;
+    for (int argIndex = 0; argIndex < nargs; argIndex++) {
+        Oid srcTypeid = sourceArgtypes[argIndex];
+        Oid tarTypeid = targetArgtypes[argIndex];
+        /* If typtype of source type and target type is different, it can't transform to same basetype */
+        if (!(get_typtype(srcTypeid) == TYPTYPE_COMPOSITE && get_typtype(tarTypeid) == TYPTYPE_COMPOSITE) &&
+            !(get_typtype(srcTypeid) == TYPTYPE_TABLEOF && get_typtype(tarTypeid) == TYPTYPE_TABLEOF)) {
+                break;
+        }
+        if (srcTypeid == tarTypeid) {
+            continue;
+        }
+        srcBasetype = getRecordOrTableOfBaseType(srcTypeid);
+        tarBasetype = getRecordOrTableOfBaseType(tarTypeid);
+        if (srcBasetype != InvalidOid && srcBasetype == tarBasetype) {
+            sourceArgtypes[argIndex] = srcBasetype;
+            targetArgtypes[argIndex] = tarBasetype;
+            continue;
+        }
+    }
+}
+
 /* func_get_detail()
  *
  * Find the named function in the system catalogs.
@@ -1695,7 +1778,7 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
             }
         }
     }
-#endif	
+#endif
 
 
     /*
@@ -1703,6 +1786,7 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
      * can be only one)
      */
     for (best_candidate = raw_candidates; best_candidate != NULL; best_candidate = best_candidate->next) {
+        ProcessRecordOrTableOfSubtype(argtypes, best_candidate->args, nargs);
         if (memcmp(argtypes, best_candidate->args, nargs * sizeof(Oid)) == 0) {
             break;
         }

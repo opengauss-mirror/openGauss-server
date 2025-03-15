@@ -123,7 +123,8 @@ typedef struct ViewInfoForAdd {
         (cmd) == AT_SetStatistics || (cmd) == AT_AlterColumnType || (cmd) == AT_AlterColumnGenericOptions ||       \
         (cmd) == AT_AddIndex || (cmd) == AT_DropConstraint || (cmd) == AT_UpdateSliceLike)
 
-extern ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, ObjectAddress* typaddress, bool isCTAS = false);
+extern ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId,
+    ObjectAddress* typaddress, bool isCTAS = false, Oid typbasetype = InvalidOid);
 
 extern void RemoveRelationsonMainExecCN(DropStmt* drop, ObjectAddresses* objects);
 

@@ -2137,7 +2137,7 @@ void CheckSegmentIsInLimitTablespace(char* tableSpaceName, char* relName)
  * If successful, returns the address of the new relation.
  * ----------------------------------------------------------------
  */
-ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, ObjectAddress* typaddress, bool isCTAS)
+ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, ObjectAddress* typaddress, bool isCTAS, Oid typbasetype)
 {
     char relname[NAMEDATALEN];
     Oid namespaceId;
@@ -3090,7 +3090,9 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
         storage_type,
         AccessShareLock,
         typaddress,
-        depend_extend);
+        depend_extend,
+        InvalidOid,
+        typbasetype);
     if (bucketinfo != NULL) {
         pfree_ext(bucketinfo->bucketcol);
         pfree_ext(bucketinfo->bucketlist);
