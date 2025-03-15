@@ -173,6 +173,9 @@ Datum hnswhandler(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(hnswbuild);
 Datum hnswbuild(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "hnsw index do not support extreme rto.");
+    }
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
     IndexInfo *indexinfo = (IndexInfo *)PG_GETARG_POINTER(2);
@@ -184,6 +187,9 @@ Datum hnswbuild(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(hnswbuildempty);
 Datum hnswbuildempty(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "hnsw index do not support extreme rto.");
+    }
     Relation index = (Relation)PG_GETARG_POINTER(0);
     hnswbuildempty_internal(index);
 
@@ -193,6 +199,9 @@ Datum hnswbuildempty(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(hnswinsert);
 Datum hnswinsert(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "hnsw index do not support extreme rto.");
+    }
     Relation rel = (Relation)PG_GETARG_POINTER(0);
     Datum *values = (Datum *)PG_GETARG_POINTER(1);
     bool *isnull = reinterpret_cast<bool *>(PG_GETARG_POINTER(2));
@@ -207,6 +216,9 @@ Datum hnswinsert(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(hnswbulkdelete);
 Datum hnswbulkdelete(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "hnsw index do not support extreme rto.");
+    }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *volatile stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
@@ -219,6 +231,9 @@ Datum hnswbulkdelete(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(hnswvacuumcleanup);
 Datum hnswvacuumcleanup(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "hnsw index do not support extreme rto.");
+    }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     stats = hnswvacuumcleanup_internal(info, stats);

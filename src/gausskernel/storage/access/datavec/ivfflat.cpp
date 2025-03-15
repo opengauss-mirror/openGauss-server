@@ -204,6 +204,9 @@ Datum ivfflathandler(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflatbuild);
 Datum ivfflatbuild(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "ivfflat index do not support extreme rto.");
+    }
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
     IndexInfo *indexinfo = (IndexInfo *)PG_GETARG_POINTER(2);
@@ -215,6 +218,9 @@ Datum ivfflatbuild(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflatbuildempty);
 Datum ivfflatbuildempty(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "ivfflat index do not support extreme rto.");
+    }
     Relation index = (Relation)PG_GETARG_POINTER(0);
     ivfflatbuildempty_internal(index);
 
@@ -224,6 +230,9 @@ Datum ivfflatbuildempty(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflatinsert);
 Datum ivfflatinsert(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "ivfflat index do not support extreme rto.");
+    }
     Relation rel = (Relation)PG_GETARG_POINTER(0);
     Datum *values = (Datum *)PG_GETARG_POINTER(1);
     bool *isnull = reinterpret_cast<bool *>(PG_GETARG_POINTER(2));
@@ -238,6 +247,9 @@ Datum ivfflatinsert(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflatbulkdelete);
 Datum ivfflatbulkdelete(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "ivfflat index do not support extreme rto.");
+    }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *volatile stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
@@ -250,6 +262,9 @@ Datum ivfflatbulkdelete(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflatvacuumcleanup);
 Datum ivfflatvacuumcleanup(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "ivfflat index do not support extreme rto.");
+    }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     stats = ivfflatvacuumcleanup_internal(info, stats);

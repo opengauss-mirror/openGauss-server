@@ -532,6 +532,7 @@ void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno,
 {
     Buffer buf;
     Page page;
+    PageHeader p;
     uint32 curFlushSize;
     GenericXLogState *state;
 
@@ -545,6 +546,8 @@ void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno,
         errno_t err = memcpy_s(PageGetContents(page), curFlushSize,
                                table + i * IVF_PQTABLE_STORAGE_SIZE, curFlushSize);
         securec_check(err, "\0", "\0");
+        p = (PageHeader)page;
+        p->pd_lower += curFlushSize;
         MarkBufferDirty(buf);
         IvfflatCommitBuffer(buf, state);
     }

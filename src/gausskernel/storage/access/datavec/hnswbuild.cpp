@@ -902,8 +902,9 @@ static void UpdateNeighborsInMemory(char *base, FmgrInfo *procinfo, Oid collatio
             HnswCandidate *hc = &neighbors->items[i];
             HnswElement neighborElement = (HnswElement)HnswPtrAccess(base, hc->element);
 
-            /* Keep scan-build happy on Mac x86-64 */
-            Assert(neighborElement);
+            if (neighborElement == NULL) {
+                continue;
+            }
 
             /* Use element for lock instead of hc since hc can be replaced */
             LWLockAcquire(&neighborElement->lock, LW_EXCLUSIVE);
