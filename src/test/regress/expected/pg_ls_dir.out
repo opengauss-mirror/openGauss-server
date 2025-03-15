@@ -17,11 +17,11 @@ select count(*) >= 0 as ok from pg_ls_tmpdir((select oid from pg_tablespace wher
 (1 row)
 
 select * from gs_get_hba_conf();
- type  | database | user |   address    | method 
--------+----------+------+--------------+--------
- local | all      | all  |              | trust
- host  | all      | all  | 127.0.0.1/32 | trust
- host  | all      | all  | ::1/128      | trust
- host  | all      | all  | 127.0.0.1/32 | trust
+ type  | database | users |   address    | method 
+-------+----------+-------+--------------+--------
+ local | all      | all   |              | trust
+ host  | all      | all   | 127.0.0.1/32 | trust
+ host  | all      | all   | ::1/128      | trust
+ host  | all      | all   | 127.0.0.1/32 | trust
 (4 rows)
 
