@@ -89,7 +89,7 @@
 #include "executor/node/nodeShareInputScan.h"
 #endif
 
-extern void SetShmemCxt(void);
+extern void CalcMaxBackends(void);
 #ifdef ENABLE_MULTIPLE_NODES
 extern void InitDisasterCache();
 #endif
@@ -235,7 +235,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         InitNuma();
 
         /* Set max backends and thread pool group number before alloc share memory array. */
-        SetShmemCxt();
+        CalcMaxBackends();
 
         PGShmemHeader* seghdr = NULL;
         int numSemas;

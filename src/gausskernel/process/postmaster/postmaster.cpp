@@ -1027,7 +1027,7 @@ void signal_sysloger_flush(void)
     }
 }
 
-void SetShmemCxt(void)
+void CalcMaxBackends(void)
 {
     int thread_pool_worker_num = 0;
     int thread_pool_stream_proc_num = 0;
@@ -2271,6 +2271,68 @@ int PostmasterMain(int argc, char* argv[])
      */
     InitializePostmasterGUC();
 
+    if (g_instance.attr.attr_common.enable_thread_pool) {
+        /* No need to start thread pool for dummy standby node. */
+        if (!dummyStandbyMode) {
+            g_threadPoolControler = (ThreadPoolControler*)
+                New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) ThreadPoolControler();
+            g_threadPoolControler->SetThreadPoolInfo();
+        } else {
+            g_instance.attr.attr_common.enable_thread_pool = false;
+            g_threadPoolControler = NULL;
+            AdjustThreadAffinity();
+        }
+    }
+
+    CalcMaxBackends();
+
+    /* init thread args pool for ever sub threads except signal moniter */
+    gs_thread_args_pool_init(GLOBAL_ALL_PROCS + EXTERN_SLOTS_NUM, sizeof(BackendParameters));
+    /* Init signal manage struct */
+    gs_signal_slots_init(GLOBAL_ALL_PROCS + EXTERN_SLOTS_NUM);
+    gs_signal_startup_siginfo("PostmasterMain");
+
+    /*
+     * Set up signal handlers for the postmaster process.
+     *
+     * CAUTION: when changing this list, check for side-effects on the signal
+     * handling setup of child processes.  See tcop/postgres.cpp,
+     * bootstrap/bootstrap.cpp, postmaster/bgwriter.cpp, postmaster/walwriter.cpp,
+     * postmaster/autovacuum.cpp, postmaster/pgarch.cpp, postmaster/pgstat.cpp,
+     * postmaster/syslogger.cpp and postmaster/checkpointer.cpp.
+     */
+    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
+    gs_signal_block_sigusr2();
+
+    (void)gspqsignal(SIGHUP, SIGHUP_handler); /* reread config file and have
+                                               * children do same */
+    (void)gspqsignal(SIGINT, pmdie);          /* send SIGINT and shut down */
+    (void)gspqsignal(SIGQUIT, pmdie);         /* send SIGQUIT and shut down */
+    (void)gspqsignal(SIGTERM, pmdie);         /* wait for children and shut down */
+
+    pqsignal(SIGALRM, SIG_IGN); /* ignored */
+    pqsignal(SIGPIPE, SIG_IGN); /* ignored */
+    pqsignal(SIGFPE, FloatExceptionHandler);
+
+    (void)gspqsignal(SIGUSR1, sigusr1_handler); /* message from child process */
+    (void)gspqsignal(SIGUSR2, dummy_handler);   /* unused, reserve for children */
+    (void)gspqsignal(SIGCHLD, reaper);          /* handle child termination */
+    (void)gspqsignal(SIGTTIN, SIG_IGN);         /* ignored */
+    (void)gspqsignal(SIGTTOU, SIG_IGN);         /* ignored */
+    (void)gspqsignal(SIGURG, print_stack);
+
+    /* ignore SIGXFSZ, so that ulimit violations work like disk full */
+#ifdef SIGXFSZ
+    (void)gspqsignal(SIGXFSZ, SIG_IGN); /* ignored */
+#endif
+
+#ifdef ENABLE_BBOX
+    /* core dump injection */
+    bbox_initialize();
+#endif
+
+    gs_signal_monitor_startup();
+
     t_thrd.myLogicTid = noProcLogicTid + POSTMASTER_LID;
     if (output_config_variable != NULL) {
         /*
@@ -2301,13 +2363,7 @@ int PostmasterMain(int argc, char* argv[])
         } else {
             ExitPostmaster(1);
         }
-        /* init thread args pool for ever sub threads except signal moniter */
-        gs_thread_args_pool_init(GLOBAL_ALL_PROCS + EXTERN_SLOTS_NUM, sizeof(BackendParameters));
-        /* Init signal manage struct */
-        gs_signal_slots_init(GLOBAL_ALL_PROCS + EXTERN_SLOTS_NUM);
-        gs_signal_startup_siginfo("PostmasterMain");
 
-        gs_signal_monitor_startup();
         g_instance.attr.attr_common.Logging_collector = true;
         g_instance.global_sysdbcache.Init(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
         CreateLocalSysDBCache();
@@ -2724,19 +2780,6 @@ int PostmasterMain(int argc, char* argv[])
         */
     on_proc_exit(CloseServerPorts, 0);
 
-    if (g_instance.attr.attr_common.enable_thread_pool) {
-        /* No need to start thread pool for dummy standby node. */
-        if (!dummyStandbyMode) {
-            g_threadPoolControler = (ThreadPoolControler*)
-                New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) ThreadPoolControler();
-            g_threadPoolControler->SetThreadPoolInfo();
-        } else {
-            g_instance.attr.attr_common.enable_thread_pool = false;
-            g_threadPoolControler = NULL;
-            AdjustThreadAffinity();
-        }
-    }
-
     /* init gstrace context */
     int errcode = gstrace_init(g_instance.attr.attr_network.PostPortNumber);
     if (errcode != 0) {
@@ -2752,15 +2795,6 @@ int PostmasterMain(int argc, char* argv[])
 
     /* Alloc array for backend record. */
     BackendArrayAllocation();
-
-    /* init thread args pool for ever sub threads except signal moniter */
-    gs_thread_args_pool_init(GLOBAL_ALL_PROCS + EXTERN_SLOTS_NUM, sizeof(BackendParameters));
-    // 1.init signal manage struct
-    //
-    gs_signal_slots_init(GLOBAL_ALL_PROCS + EXTERN_SLOTS_NUM);
-    gs_signal_startup_siginfo("PostmasterMain");
-
-    gs_signal_monitor_startup();
 
     /*
         * Estimate number of openable files.  This must happen after setting up
@@ -2847,46 +2881,6 @@ int PostmasterMain(int argc, char* argv[])
                 g_instance.attr.attr_common.external_pid_file,
                 gs_strerror(errno));
     }
-
-    /*
-     * Set up signal handlers for the postmaster process.
-     *
-     * CAUTION: when changing this list, check for side-effects on the signal
-     * handling setup of child processes.  See tcop/postgres.c,
-     * bootstrap/bootstrap.c, postmaster/bgwriter.c, postmaster/walwriter.c,
-     * postmaster/autovacuum.c, postmaster/pgarch.c, postmaster/pgstat.c,
-     * postmaster/syslogger.c and postmaster/checkpointer.c.
-     */
-
-    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
-    gs_signal_block_sigusr2();
-
-    (void)gspqsignal(SIGHUP, SIGHUP_handler); /* reread config file and have
-                                               * children do same */
-    (void)gspqsignal(SIGINT, pmdie);          /* send SIGTERM and shut down */
-    (void)gspqsignal(SIGQUIT, pmdie);         /* send SIGQUIT and die */
-    (void)gspqsignal(SIGTERM, pmdie);         /* wait for children and shut down */
-
-    pqsignal(SIGALRM, SIG_IGN); /* ignored */
-    pqsignal(SIGPIPE, SIG_IGN); /* ignored */
-    pqsignal(SIGFPE, FloatExceptionHandler);
-
-    (void)gspqsignal(SIGUSR1, sigusr1_handler); /* message from child process */
-    (void)gspqsignal(SIGUSR2, dummy_handler);   /* unused, reserve for children */
-    (void)gspqsignal(SIGCHLD, reaper);          /* handle child termination */
-    (void)gspqsignal(SIGTTIN, SIG_IGN);         /* ignored */
-    (void)gspqsignal(SIGTTOU, SIG_IGN);         /* ignored */
-    (void)gspqsignal(SIGURG, print_stack);
-
-    /* ignore SIGXFSZ, so that ulimit violations work like disk full */
-#ifdef SIGXFSZ
-    (void)gspqsignal(SIGXFSZ, SIG_IGN); /* ignored */
-#endif
-
-#ifdef ENABLE_BBOX
-    /* core dump injection */
-    bbox_initialize();
-#endif
 
     /*
      * Initialize stats collection subsystem (this does NOT start the
