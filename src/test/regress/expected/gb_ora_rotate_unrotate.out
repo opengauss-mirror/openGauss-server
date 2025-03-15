@@ -31,6 +31,14 @@ select * from (select year, order_mode, order_total from original_orders) rotate
  2022 |         
 (3 rows)
 
+select * from ( select year, order_mode, order_total from original_orders) rotate (sum(order_total + 100) for order_mode in ('direct' as store, 'online' as internet)) order by year;
+ year | store | internet 
+------+-------+----------
+ 2020 |  5700 |     1100
+ 2021 |  1100 |     1100
+ 2022 |  5100 |         
+(3 rows)
+
 create table rotate_orders as (select * from (select year, order_mode, order_total from original_orders) as t rotate (sum(order_total) for order_mode in ('direct' as store, 'online' as internet)) order by year);
 -- test not rotate (column transform to row)
 select * from rotate_orders not rotate ( yearly_total for order_mode in ( store as 'direct', internet as 'online'));

@@ -14,6 +14,8 @@ select * from  tt rotate (sum(order_total) for order_mode in ('direct' as store,
 
 select * from (select year, order_mode, order_total from original_orders) rotate (sum(order_total) for order_mode in ('online' as internet )) order by year;
 
+select * from ( select year, order_mode, order_total from original_orders) rotate (sum(order_total + 100) for order_mode in ('direct' as store, 'online' as internet)) order by year;
+
 create table rotate_orders as (select * from (select year, order_mode, order_total from original_orders) as t rotate (sum(order_total) for order_mode in ('direct' as store, 'online' as internet)) order by year);
 
 -- test not rotate (column transform to row)
