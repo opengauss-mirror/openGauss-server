@@ -182,7 +182,6 @@ void SSInitReformerControlPages(void)
     g_instance.dms_cxt.SSReformerControl.version = REFORM_CTRL_VERSION;
     g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
     g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
-    g_instance.dms_cxt.SSReformerControl.exrto_list_stable = 0;
     (void)printf("[SS] Current node:%d initdb first, will become PRIMARY for first-time SS cluster startup ... ",
         SS_MY_INST_ID);
 

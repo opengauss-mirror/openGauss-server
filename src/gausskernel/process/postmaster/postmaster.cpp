@@ -3078,13 +3078,6 @@ int PostmasterMain(int argc, char* argv[])
         if (SS_DISASTER_CLUSTER) {
             /* fresh ss dorado cluster run mode */
             g_instance.dms_cxt.SSReformerControl.clusterRunMode = ss_dorado_mode;
-            if (IsExtremeRedo()) {
-                g_instance.dms_cxt.SSReformerControl.exrto_list_stable |=
-                    (1 << g_instance.attr.attr_storage.dms_attr.instance_id);
-            } else {
-                g_instance.dms_cxt.SSReformerControl.exrto_list_stable &=
-                    ~(1 << g_instance.attr.attr_storage.dms_attr.instance_id);
-            }
             SSDisasterRefreshMode();
         }
         int src_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;

@@ -214,6 +214,7 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.no_backend_left = false;
     dms_cxt->SSRecoveryInfo.failover_to_job = false;
     dms_cxt->SSRecoveryInfo.in_ondemand_recovery = false;
+    dms_cxt->SSRecoveryInfo.is_disaster_extreme_redo = false;
     dms_cxt->SSRecoveryInfo.ondemand_realtime_build_status = DISABLED;
     dms_cxt->SSRecoveryInfo.startup_need_exit_normally = false;
     dms_cxt->SSRecoveryInfo.recovery_trapped_in_page_request = false;
