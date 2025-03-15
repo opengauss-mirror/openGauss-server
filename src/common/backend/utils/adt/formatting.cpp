@@ -7039,10 +7039,11 @@ Datum numeric_to_text_number(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
-    text* sourceValue = PG_GETARG_TEXT_P(0);
-    bool defaultNumValIsNull = PG_ARGISNULL(1);
-    bool withDefault = PG_GETARG_BOOL(2); 
-    bool fmtIsNull = PG_ARGISNULL(4);
+    text* source_value = PG_GETARG_TEXT_P(0);
+    bool default_numVal_is_null = PG_ARGISNULL(1);
+    bool with_default = PG_GETARG_BOOL(2);
+    bool fmt_contain_columnRef = PG_GETARG_BOOL(3);
+    bool fmt_is_null = PG_ARGISNULL(4);
     text* fmt;
 
     Datum result;
@@ -7050,26 +7051,30 @@ Datum numeric_to_text_number(PG_FUNCTION_ARGS)
 
     PG_TRY();
     {
-        if (fmtIsNull) {
-            result = to_numeric_number_internal_without_fmt(sourceValue,
+        if (fmt_is_null) {
+            result = to_numeric_number_internal_without_fmt(source_value,
                 PG_GET_COLLATION(), &resultNull);
         } else {
             fmt = PG_GETARG_TEXT_P(4);
-            result = to_numeric_number_internal_with_fmt(sourceValue, fmt, withDefault,
+            result = to_numeric_number_internal_with_fmt(source_value, fmt, with_default,
                 PG_GET_COLLATION(), &resultNull);
         }
     }
     PG_CATCH();
     {
-        if (withDefault) {
+        if (with_default) {
             FlushErrorState();
 
-            if (defaultNumValIsNull) {
+            if (default_numVal_is_null) {
                 resultNull = true;
             } else {
+                if (fmt_contain_columnRef) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("default argument must be a literal or bind")));
+                }
                 Numeric defaultNumVal = PG_GETARG_NUMERIC(1); // 1700
 
-                if (!fmtIsNull) {
+                if (!fmt_is_null) {
                     // Number description: fmt
                     NUMDesc numDesc;
                     bool shouldFree = false;
@@ -7121,47 +7126,55 @@ Datum numeric_to_default_without_defaultval(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
-    text* sourceValue = PG_GETARG_TEXT_P(0);
+    text* source_value = PG_GETARG_TEXT_P(0);
 
     bool defaultNumValIsNull = PG_ARGISNULL(1);
 
-    bool withDefault = PG_GETARG_BOOL(2);
-    bool fmtIsNull = PG_ARGISNULL(4);
+    bool with_default = PG_GETARG_BOOL(2);
+    bool fmt_contain_columnRef = PG_GETARG_BOOL(3);
+    bool fmt_is_null = PG_ARGISNULL(4);
     text* fmt;
 
     Datum result;
-    bool resultNull = false;
+    bool result_null = false;
 
     PG_TRY();
     {
-        if (fmtIsNull) {
-            result = to_numeric_number_internal_without_fmt(sourceValue, 
-                PG_GET_COLLATION(), &resultNull);
+        if (fmt_is_null) {
+            result = to_numeric_number_internal_without_fmt(source_value,
+                PG_GET_COLLATION(), &result_null);
         } else {
             fmt = PG_GETARG_TEXT_P(4);
-            result = to_numeric_number_internal_with_fmt(sourceValue, fmt, withDefault, 
-                PG_GET_COLLATION(), &resultNull);
+            result = to_numeric_number_internal_with_fmt(source_value, fmt, with_default,
+                PG_GET_COLLATION(), &result_null);
         }
     }
     PG_CATCH();
     {
-        if (withDefault) {
+        if (with_default) {
             FlushErrorState();
             if (defaultNumValIsNull) {
-                resultNull = true;
+                result_null = true;
             } else {
-                // The value of default value is processed here. Is no longer a conversion process under default, so withDefault is set to true.
-                withDefault = false;
-                resultNull = false;
+                if (fmt_contain_columnRef) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("default argument must be a literal or bind")));
+                }
+       
+                /* The value of default value is processed here. Is no longer a conversion process under default,
+                 * so withDefault is set to true.
+                 */
+                with_default = false;
+                result_null = false;
                 text* default_num_val = PG_GETARG_TEXT_P(1); // 25
 
-                if (fmtIsNull) {
+                if (fmt_is_null) {
                     result = to_numeric_number_internal_without_fmt(default_num_val,
-						PG_GET_COLLATION(), &resultNull);
+                                                                    PG_GET_COLLATION(), &result_null);
                 } else {
                     fmt = PG_GETARG_TEXT_P(4);
                     result = to_numeric_to_number_internal(default_num_val, fmt,
-						PG_GET_COLLATION(), &resultNull);
+                                                           PG_GET_COLLATION(), &result_null);
                 }
             }
         } else {
@@ -7173,7 +7186,7 @@ Datum numeric_to_default_without_defaultval(PG_FUNCTION_ARGS)
     }
     PG_END_TRY();
 
-    if (resultNull) {
+    if (result_null) {
         PG_RETURN_NULL();
     } else {
         return result;
@@ -7791,16 +7804,18 @@ Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS)
     }
     text* date_txt = PG_GETARG_TEXT_P(0);
     bool default_val_is_null = PG_ARGISNULL(1);
-    bool fmtIsNull = PG_ARGISNULL(4);
+    bool fmt_contain_columnRef = PG_GETARG_BOOL(3);
+    bool fmt_is_null = PG_ARGISNULL(4);
     text* fmt;
-    if (fmtIsNull) {
+    if (fmt_is_null) {
         fmt = cstring_to_text(u_sess->attr.attr_common.nls_timestamp_format_string);
     }
     else {
         fmt = PG_GETARG_TEXT_P(4);
     }
 
-    bool resultNull = false;
+    bool result_null = false;
+    bool need_free_fmt = fmt_is_null;
     Timestamp result;
     int tz = 0;
 
@@ -7817,7 +7832,9 @@ Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        pfree_ext(fmt);
+        if (need_free_fmt) {
+            pfree_ext(fmt);
+        }
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -7829,15 +7846,22 @@ Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS)
         if (tm2timestamp(&tm, fsec, &tz, &result) != 0) {
             ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
         }
-
-        pfree_ext(fmt);
+        if (need_free_fmt) {
+            pfree_ext(fmt);
+        }
     }
     PG_CATCH();
     {
         FlushErrorState();
-        pfree_ext(fmt);
+        if (need_free_fmt) {
+            pfree_ext(fmt);
+        }
+        if (fmt_contain_columnRef) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("default argument must be a literal or bind")));
+        }
         if (default_val_is_null) {
-            resultNull = true;
+            result_null = true;
         } else {
             if (tm2timestamp(&default_tm, fsec, &tz, &result) != 0) {
                 ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp defaultVal out of range")));
@@ -7846,7 +7870,7 @@ Datum to_timestamp_with_default_val(PG_FUNCTION_ARGS)
     }
     PG_END_TRY();
 
-    if (resultNull) {
+    if (result_null) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TIMESTAMP(result);

@@ -309,6 +309,7 @@ static void CheckUserHostIsValid();
 static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStmt*n);
 static Node* MakeNoArgFunctionCall(List* funcName, int location);
 static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
+static void contain_unsupport_node(Node* node, bool* has_unsupport_default_node);
 
 /* Please note that the following line will be replaced with the contents of given file name even if with starting with a comment */
 /*$$include "gram-tsql-prologue.y.h"*/
@@ -29324,7 +29325,9 @@ func_application_special:	func_name '(' ')'
 					// is DEFAULT gramy
 					n->args = lappend(n->args, makeBoolAConst(TRUE, -1));
 					// default expr is column ref
-					n->args = lappend(n->args, makeBoolAConst(IsA($5, ColumnRef), -1));
+					bool is_column_ref = false; 
+					contain_unsupport_node($5, &is_column_ref);
+					n->args = lappend(n->args, makeBoolAConst(is_column_ref, -1));
 					// fmt constraints is NULL
                     n->args = lappend(n->args, makeNullAConst(-1));
 					// nls param constraints is NULL
@@ -29358,7 +29361,9 @@ func_application_special:	func_name '(' ')'
 					// is DEFAULT gramy
 					n->args = lappend(n->args, makeBoolAConst(TRUE, -1));
 					// default expr is column ref
-					n->args = lappend(n->args, makeBoolAConst(IsA($5, ColumnRef), -1));
+					bool is_column_ref = false; 
+					contain_unsupport_node($5, &is_column_ref);
+					n->args = lappend(n->args, makeBoolAConst(is_column_ref, -1));
 					// There may be fmt constraints
                     n->args = lappend(n->args, $9);
 					// nls param constraints is NULL
@@ -29386,7 +29391,9 @@ func_application_special:	func_name '(' ')'
 					// is DEFAULT gramy
 					n->args = lappend(n->args, makeBoolAConst(TRUE, -1));
 					// default expr is column ref
-					n->args = lappend(n->args, makeBoolAConst(IsA($5, ColumnRef), -1));
+					bool is_column_ref = false; 
+					contain_unsupport_node($5, &is_column_ref);
+					n->args = lappend(n->args, makeBoolAConst(is_column_ref, -1));
 					// There may be fmt constraints
                     n->args = lappend(n->args, $9);
 					// nls param constraints is NULL
@@ -34918,6 +34925,18 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner)
 		return ident;
 	}
 }
+
+
+
+void contain_unsupport_node(Node* node, bool* has_unsupport_default_node)
+{
+    if (node != NULL && IsA(node, ColumnRef)) {
+		*has_unsupport_default_node = true;
+		return;
+    }
+    (void)raw_expression_tree_walker(node, (bool (*)())contain_unsupport_node, (void*)has_unsupport_default_node);
+}
+
 
 /*
  * Must undefine this stuff before including scan.c, since it has different
