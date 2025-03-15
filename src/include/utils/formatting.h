@@ -155,4 +155,5 @@ extern Datum to_numeric_to_number(text* value, text* fmt, Oid fncollation, bool 
 extern void do_to_timestamp(text* date_txt, text* fmt, struct pg_tm* tm, fsec_t* fsec, int* tz);
 extern char* format_numeric_with_fmt(text* sourceValue, text* fmt, bool withDefault, Oid fncollation,
     unsigned int* precision, unsigned int* scale);
+extern char* g_nlsLanguage[3];
 #endif

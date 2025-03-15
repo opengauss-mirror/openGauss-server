@@ -186,8 +186,9 @@ Datum nls_lower_fmt(PG_FUNCTION_ARGS)
     if (nlsFmtStr) {
         List* colnameList = list_make1(makeString(nlsFmtStr));
         fcinfo->fncollation = LookupCollation(nullptr, colnameList, 0);
+        pfree(nlsFmtStr);
     } else {
-        fcinfo->fncollation = DEFAULT_COLLATION_OID;
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid format: %s", arg1_val)));
     }
     pfree(arg1_val);    
     return lower(fcinfo);    
@@ -216,10 +217,14 @@ Datum nls_lower_fmt_byte(PG_FUNCTION_ARGS)
 
     bytea* result = static_cast<bytea*>(palloc(len + VARHDRSZ));
     SET_VARSIZE(result, VARHDRSZ + len);
-    char* nlsFmtStr = pg_findformat("NLS_SORT", text_to_cstring(PG_GETARG_TEXT_P(1)));
+    auto arg1_val = text_to_cstring(PG_GETARG_TEXT_P(1));
+    char* nlsFmtStr = pg_findformat("NLS_SORT", arg1_val);
     if (nlsFmtStr) {
         List* colnameList = list_make1(makeString(nlsFmtStr));
         coloid = LookupCollation(nullptr, colnameList, 0);
+        pfree(nlsFmtStr);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid format: %s", arg1_val)));
     }
     char* lowercase = str_tolower(VARDATA_ANY(byte_data), len, coloid);
     auto rc = memcpy_s(VARDATA(result), len, lowercase, len);

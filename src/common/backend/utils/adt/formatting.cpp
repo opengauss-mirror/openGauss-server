@@ -755,7 +755,7 @@ static char* months_full[] = {"January",
 
 static char* days_short[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", NULL};
 
-static char* g_nlsLanguage[] = {"american", "english", nullptr};
+char* g_nlsLanguage[] = {"american", "english", nullptr};
 /* ----------
  * AD / BC
  * ----------
@@ -4036,9 +4036,7 @@ static void DCH_from_char(FormatNode* node, char* in, TmFromChar* out, bool* non
                 }
                 PG_CATCH(); {
                     FlushErrorState();
-                    if (u_sess && u_sess->parser_cxt.nls_fmt_str &&
-                        (pg_strcasecmp(u_sess->parser_cxt.nls_fmt_str, g_nlsLanguage[0]) == 0 ||
-                        pg_strcasecmp(u_sess->parser_cxt.nls_fmt_str, g_nlsLanguage[1]) == 0)) {
+                    if (u_sess && u_sess->parser_cxt.nls_fmt_str) {
                         (void)from_char_seq_search(&value, &s, months_full, ONE_UPPER, MAX_MONTH_LEN, n);
                         from_char_set_int(&out->mm, value + 1, n, out_flag->mm_flag);
                     } else {
@@ -4466,6 +4464,7 @@ Datum timestamp_to_char_nlsparam(PG_FUNCTION_ARGS)
     char* nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", nls_arg);
     if (nlsFmtStr &&
         (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0)) {
+        pfree(nlsFmtStr);
         res = (text *)DirectFunctionCall2Coll(timestamp_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
                                               PG_GETARG_DATUM(1));
     } else {
@@ -4493,6 +4492,7 @@ Datum timestamptz_to_char_nlsparam(PG_FUNCTION_ARGS)
     char* nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", nls_arg);
     if (nlsFmtStr &&
         (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0)) {
+        pfree(nlsFmtStr);
         res = (text *)DirectFunctionCall2Coll(timestamptz_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
                                               PG_GETARG_DATUM(1));
     } else {
@@ -4594,6 +4594,7 @@ Datum interval_to_char_nlsparam(PG_FUNCTION_ARGS)
     char* nlsFmtStr = pg_findformat("NLS_DATE_LANGUAGE", nls_arg);
     if (nlsFmtStr &&
         (pg_strcasecmp(nlsFmtStr, g_nlsLanguage[0]) == 0 || pg_strcasecmp(nlsFmtStr, g_nlsLanguage[1]) == 0)) {
+        pfree(nlsFmtStr);
         res = (text *)DirectFunctionCall2Coll(interval_to_char, PG_GET_COLLATION(), PG_GETARG_DATUM(0),
                                               PG_GETARG_DATUM(1));
     } else {
@@ -7779,8 +7780,7 @@ Datum to_timestamp_with_fmt_nls(PG_FUNCTION_ARGS)
     int tz = 0;
 
     if (nls_fmt) {
-        char *nlsStmtPtr = pg_strtoupper(text_to_cstring(nls_fmt));
-        u_sess->parser_cxt.nls_fmt_str = pg_findformat("NLS_DATE_LANGUAGE", nlsStmtPtr);
+        u_sess->parser_cxt.nls_fmt_str = pg_strtoupper(text_to_cstring(nls_fmt));
     }
     struct pg_tm tm;
     fsec_t fsec = 0;

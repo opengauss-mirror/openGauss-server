@@ -755,7 +755,8 @@ ERROR:  NLS parameter xxx is not supported!
 DETAIL:  Not support the given nls parameter.
 CONTEXT:  referenced column: to_char
 SELECT TO_CHAR(DATE '2024-08-05', 'DY, DD-MON-YYYY', 'yyy=ENGLISH') ;
-ERROR:  invalid format: yyy
+ERROR:  NLS parameter  is not supported!
+DETAIL:  Not support the given nls parameter.
 CONTEXT:  referenced column: to_char
 SELECT TO_CHAR(DATE '2024-08-05', 'ERROR', 'NLS_DATE_LANGUAGE = ENGLISH') ;
  to_char 
@@ -890,7 +891,8 @@ ERROR:  NLS parameter xxx is not supported!
 DETAIL:  Not support the given nls parameter.
 CONTEXT:  referenced column: to_char
 SELECT TO_CHAR(INTERVAL '123-2' YEAR(4) TO MONTH, 'YYYY-MON-DD', 'yyy=ENGLISH') ;
-ERROR:  invalid format: yyy
+ERROR:  NLS parameter  is not supported!
+DETAIL:  Not support the given nls parameter.
 CONTEXT:  referenced column: to_char
 SELECT TO_CHAR(INTERVAL '123-2' YEAR(4) TO MONTH, 'YYYY-MON-DD', 'NLS_DATE_LANGUAGE = ') ;
 ERROR:  NLS parameter  is not supported!
