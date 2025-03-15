@@ -1108,6 +1108,7 @@ CREATE TABLE public.t_resolve (c1 NUMBER, c2 VARCHAR2(100));
 CREATE UNIQUE INDEX IF NOT EXISTS public.t_resolve_c1_udx ON public.t_resolve(c1);
 CREATE TABLE public.t_log (c1 NUMBER, c2 TIMESTAMP);
 CREATE VIEW public.v_resolve AS SELECT * FROM public.t_resolve;
+CREATE MATERIALIZED VIEW public.mv_resolve AS SELECT * FROM public.t_resolve;
 
 CREATE SEQUENCE IF NOT EXISTS public.t_seq
     INCREMENT BY 1
@@ -1221,6 +1222,8 @@ call test_name_resolve('syn_view', NULL);
 call test_name_resolve('public.v_resolve', 2);
 call test_name_resolve('public.v_resolve', 7);
 call test_name_resolve('public.v_resolve', 9); -- error
+call test_name_resolve('public.mv_resolve', 0);
+call test_name_resolve('mv_resolve', 0);
 
 -- test PL/SQL
 call test_name_resolve('public.add_numbers', 1);
@@ -1328,6 +1331,7 @@ DROP FUNCTION public.add_numbers;
 DROP PROCEDURE public.insert_val;
 DROP INDEX public.t_resolve_c1_udx;
 DROP VIEW public.v_resolve;
+DROP MATERIALIZED VIEW public.mv_resolve;
 DROP TABLE public.t_log;
 DROP TABLE public.t_resolve;
 DROP SEQUENCE public.t_seq;
@@ -2020,6 +2024,55 @@ begin
     raise info 'result is: %; length is: %', list, tablen;
 end; -- 1
 /
+
+CREATE TABLE t_resolve0008 (
+    sale_id SERIAL PRIMARY KEY,
+    product_id INT,
+    sale_date DATE,
+    quantity INT,
+    price DECIMAL(10, 2)
+);
+
+CREATE MATERIALIZED VIEW t_resolve0008_materialized_full AS
+SELECT sale_date, product_id, SUM(quantity) AS total_quantity, SUM(quantity * price) AS total_t_resolve0008
+FROM t_resolve0008 GROUP BY sale_date, product_id WITH DATA;
+
+CREATE incremental MATERIALIZED VIEW t_resolve0008_materialized_incremental AS
+SELECT * FROM t_resolve0008;
+
+declare
+    name varchar2 := 'public.t_resolve0008_materialized_full ';
+    context number := 0;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'INFO:schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+
+declare
+    name varchar2 := 'public.t_resolve0008_materialized_incremental ';
+    context number := 0;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'INFO:schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+
+drop materialized view t_resolve0008_materialized_full;
+drop materialized view t_resolve0008_materialized_incremental;
+drop table t_resolve0008;
 
 reset behavior_compat_options;
 drop extension gms_output;
