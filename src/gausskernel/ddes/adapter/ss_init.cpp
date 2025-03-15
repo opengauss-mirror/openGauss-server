@@ -594,7 +594,8 @@ bool DMSWaitInitStartup()
     ereport(LOG, (errmsg("[SS reform][db sync wait] Node:%d first-round reform wait to initialize startup thread."
             "dms_status:%d", SS_MY_INST_ID, g_instance.dms_cxt.dms_status)));
 
-    long max_wait_time = 300000000L;
+    long max_wait_time = 600000000L;    // 10 min
+    long warning_interval = 60000000L;  // 1 min
     long wait_time = 0;
     while (g_instance.pid_cxt.StartupPID == 0) {
         (void)DMSReformCheckStartup();
@@ -602,9 +603,13 @@ bool DMSWaitInitStartup()
             return false;
         }
 
-        if ((wait_time % max_wait_time) == 0 && wait_time != 0) {
-            ereport(WARNING, (errmsg("[SS reform][db sync wait ] Node:%d wait startup thread "
+        if ((wait_time % warning_interval) == 0 && wait_time != 0) {
+            ereport(WARNING, (errmsg("[SS reform][db sync wait] Node:%d wait startup thread "
                     "to initialize for %ld us.", SS_MY_INST_ID, wait_time)));
+        }
+        if (wait_time >= max_wait_time) {
+            ereport(WARNING, (errmsg("[SS reform][db sync wait] DMS wait init timeout.")));
+            return false;
         }
 
         pg_usleep(REFORM_WAIT_TIME);
