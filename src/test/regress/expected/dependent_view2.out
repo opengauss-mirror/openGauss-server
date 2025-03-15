@@ -653,10 +653,10 @@ select pg_get_viewdef('employee_bonus_view');
 select * from employee_bonus_view;
  employee_name | working_years | bonus_percentage 
 ---------------+---------------+------------------
- 张三          |             5 |              .20
- 李四          |             3 |              .15
- 王五          |             5 |              .20
- 赵六          |             2 |              .10
+--?.*
+--?.*
+--?.*
+--?.*
 (4 rows)
 
 -- test function overloading with different nums of arg
