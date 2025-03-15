@@ -11,6 +11,39 @@ create function pltsql_validator(oid)
 create function pltsql_inline_handler(internal)
     returns void as 'MODULE_PATHNAME' language C;
 
+CREATE OR REPLACE FUNCTION sys.day (timestamptz) RETURNS float8 LANGUAGE SQL IMMUTABLE STRICT as 'select pg_catalog.date_part(''day'', $1)';
+CREATE OR REPLACE FUNCTION sys.day (abstime) RETURNS float8 LANGUAGE SQL IMMUTABLE STRICT as 'select pg_catalog.date_part(''day'', $1)';
+CREATE OR REPLACE FUNCTION sys.day (date) RETURNS float8 LANGUAGE SQL IMMUTABLE STRICT as 'select pg_catalog.date_part(''day'', $1)';
+CREATE OR REPLACE FUNCTION sys.day (timestamp(0) with time zone) RETURNS float8 LANGUAGE SQL IMMUTABLE STRICT as 'select pg_catalog.date_part(''day'', $1)';
+
+CREATE OR REPLACE FUNCTION sys.rand()
+returns double precision       
+as 
+$$
+begin
+   return (select random());
+end;
+$$
+language plpgsql;
+
+CREATE OR REPLACE FUNCTION sys.rand(int) returns double precision LANGUAGE C volatile as  '$libdir/shark', 'rand_seed';
+CREATE OR REPLACE FUNCTION sys.rand(smallint) returns double precision LANGUAGE SQL volatile as 'select rand($1::int)';
+CREATE OR REPLACE FUNCTION sys.rand(tinyint) returns double precision LANGUAGE SQL volatile as 'select rand($1::int)';
+
+
+-- Return the object ID given the object name. Can specify optional type.
+CREATE OR REPLACE FUNCTION sys.object_id(IN object_name VARCHAR, IN object_type VARCHAR DEFAULT '')
+RETURNS integer AS '$libdir/shark', 'object_id_internal'
+LANGUAGE C STABLE STRICT;
+
+CREATE OR REPLACE FUNCTION objectproperty(
+    id INT,
+    property VARCHAR
+    )
+RETURNS INT AS
+'$libdir/shark', 'objectproperty_internal'
+LANGUAGE C STABLE;
+
 create trusted language pltsql
     handler pltsql_call_handler
     inline pltsql_inline_handler

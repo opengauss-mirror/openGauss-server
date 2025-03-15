@@ -1,6 +1,8 @@
 # init must be first
 test: init
 test: basetest
+test: day_test rand_test
+test: objectproperty
 test: clustered_index insert_stmt sbr_test
 test: rotate-test-part2 rotate-test-part2_ci
 test: functions

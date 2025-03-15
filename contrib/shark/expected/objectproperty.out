@@ -1,0 +1,870 @@
+CREATE TABLE sys.students (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    age INT,
+    grade DECIMAL(5, 2)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "students_id_seq" for serial column "students.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "students_pkey" for table "students"
+CREATE VIEW sys.student_grades AS
+SELECT name, grade
+FROM students;
+CREATE OR REPLACE FUNCTION sys.calculate_total_grade()
+RETURNS DECIMAL(10, 2) AS $$
+DECLARE
+    total_grade DECIMAL(10, 2) := 0;
+BEGIN
+    SELECT SUM(grade) INTO total_grade FROM students;
+    RETURN total_grade;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE PROCEDURE sys.insert_student(
+    student_name VARCHAR(100),
+    student_age INT,
+    student_grade DECIMAL(5, 2)
+) AS
+BEGIN
+    INSERT INTO students (name, age, grade) VALUES (student_name, student_age, student_grade);
+END;
+/
+CREATE OR REPLACE FUNCTION sys.update_total_grade()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE NOTICE 'Total grade updated: %', calculate_total_grade();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trigger_update_total_grade
+AFTER INSERT OR UPDATE OR DELETE ON students
+FOR EACH STATEMENT EXECUTE PROCEDURE update_total_grade();
+select object_id('sys.students');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('sys.students_pkey');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('sys.student_grades');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('sys.calculate_total_grade');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('sys.insert_student');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('sys.trigger_update_total_grade');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+set search_path = 'sys';
+select object_id('students', 'U');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('students_pkey', 'PK');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('student_grades', 'V');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('calculate_total_grade', 'FN');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('insert_student', 'P');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('trigger_update_total_grade', 'TR');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('sys.students');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('contrib_regression.sys.students');
+ERROR:  Can only do lookup in current database.
+CONTEXT:  referenced column: object_id
+select objectproperty(object_id('students'), 'istable') as istable;
+ istable 
+---------
+       1
+(1 row)
+
+select objectproperty(object_id('students'), 'ownerid') as ownerid;
+ ownerid 
+---------
+--?.*
+(1 row)
+
+select objectproperty(object_id('students'), 'isdefaultcnst') as isdefaultcnst;
+ isdefaultcnst 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('students'), 'execisquotedidenton') as execisquotedidenton;
+ execisquotedidenton 
+---------------------
+                    
+(1 row)
+
+select objectproperty(object_id('students'), 'isschemabound') as isschemabound;
+ isschemabound 
+---------------
+              
+(1 row)
+
+select objectproperty(object_id('students'), 'execisansinullson') as execisansinullson;
+ execisansinullson 
+-------------------
+                  
+(1 row)
+
+select objectproperty(object_id('students'), 'tablefulltextpopulatestatus') as tablefulltextpopulatestatus;
+ tablefulltextpopulatestatus 
+-----------------------------
+                           0
+(1 row)
+
+select objectproperty(object_id('students'), 'tablehasvardecimalstorageformat') as tablehasvardecimalstorageformat;
+ tablehasvardecimalstorageformat 
+---------------------------------
+                               0
+(1 row)
+
+select objectproperty(object_id('students'), 'issysshipped') as issysshipped;
+ issysshipped 
+--------------
+            1
+(1 row)
+
+select objectproperty(object_id('students'), 'isdeterministic') as isdeterministic;
+ isdeterministic 
+-----------------
+                
+(1 row)
+
+select objectproperty(object_id('students'), 'isprocedure') asisprocedure;
+ asisprocedure 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('students'), 'isview') as isview;
+ isview 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('students'), 'isusertable') as isusertable;
+ isusertable 
+-------------
+           1
+(1 row)
+
+select objectproperty(object_id('students'), 'istablefunction') as istablefunction;
+ istablefunction 
+-----------------
+               0
+(1 row)
+
+select objectproperty(object_id('students'), 'isinlinefunction') as isinlinefunction;
+ isinlinefunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('students'), 'isscalarfunction') as isscalarfunction;
+ isscalarfunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('students'), 'isprimarykey') as isprimarykey;
+ isprimarykey 
+--------------
+            0
+(1 row)
+
+select objectproperty(object_id('students'), 'isindexed') as isindexed;
+ isindexed 
+-----------
+         1
+(1 row)
+
+select objectproperty(object_id('students'), 'isdefault') as isdefault;
+ isdefault 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('students'), 'isrule') as isrule;
+ isrule 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('students'), 'istrigger') as istrigger;
+ istrigger 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'istable') as istable;
+ istable 
+---------
+       0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'ownerid') as ownerid;
+ ownerid 
+---------
+--?.*
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isdefaultcnst') as isdefaultcnst;
+ isdefaultcnst 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'execisquotedidenton') as execisquotedidenton;
+ execisquotedidenton 
+---------------------
+                   1
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isschemabound') as isschemabound;
+ isschemabound 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'execisansinullson') as execisansinullson;
+ execisansinullson 
+-------------------
+                 1
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'tablefulltextpopulatestatus') as tablefulltextpopulatestatus;
+ tablefulltextpopulatestatus 
+-----------------------------
+                            
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'tablehasvardecimalstorageformat') as tablehasvardecimalstorageformat;
+ tablehasvardecimalstorageformat 
+---------------------------------
+                                
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'issysshipped') as issysshipped;
+ issysshipped 
+--------------
+            1
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isdeterministic') as isdeterministic;
+ isdeterministic 
+-----------------
+                
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isprocedure') asisprocedure;
+ asisprocedure 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isview') as isview;
+ isview 
+--------
+      1
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isusertable') as isusertable;
+ isusertable 
+-------------
+           0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'istablefunction') as istablefunction;
+ istablefunction 
+-----------------
+               0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isinlinefunction') as isinlinefunction;
+ isinlinefunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isscalarfunction') as isscalarfunction;
+ isscalarfunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isprimarykey') as isprimarykey;
+ isprimarykey 
+--------------
+            0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isindexed') as isindexed;
+ isindexed 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isdefault') as isdefault;
+ isdefault 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'isrule') as isrule;
+ isrule 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('student_grades'), 'istrigger') as istrigger;
+ istrigger 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'istable') as istable;
+ istable 
+---------
+       0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'ownerid') as ownerid;
+ ownerid 
+---------
+--?.*
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isdefaultcnst') as isdefaultcnst;
+ isdefaultcnst 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'execisquotedidenton') as execisquotedidenton;
+ execisquotedidenton 
+---------------------
+                   1
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isschemabound') as isschemabound;
+ isschemabound 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'execisansinullson') as execisansinullson;
+ execisansinullson 
+-------------------
+                 1
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'tablefulltextpopulatestatus') as tablefulltextpopulatestatus;
+ tablefulltextpopulatestatus 
+-----------------------------
+                            
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'tablehasvardecimalstorageformat') as tablehasvardecimalstorageformat;
+ tablehasvardecimalstorageformat 
+---------------------------------
+                                
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'issysshipped') as issysshipped;
+ issysshipped 
+--------------
+            1
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isdeterministic') as isdeterministic;
+ isdeterministic 
+-----------------
+               0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isprocedure') asisprocedure;
+ asisprocedure 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isview') as isview;
+ isview 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isusertable') as isusertable;
+ isusertable 
+-------------
+           0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'istablefunction') as istablefunction;
+ istablefunction 
+-----------------
+               0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isinlinefunction') as isinlinefunction;
+ isinlinefunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isscalarfunction') as isscalarfunction;
+ isscalarfunction 
+------------------
+                1
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isprimarykey') as isprimarykey;
+ isprimarykey 
+--------------
+            0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isindexed') as isindexed;
+ isindexed 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isdefault') as isdefault;
+ isdefault 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'isrule') as isrule;
+ isrule 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('calculate_total_grade'), 'istrigger') as istrigger;
+ istrigger 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'istable') as istable;
+ istable 
+---------
+       0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'ownerid') as ownerid;
+ ownerid 
+---------
+--?.*
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isdefaultcnst') as isdefaultcnst;
+ isdefaultcnst 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'execisquotedidenton') as execisquotedidenton;
+ execisquotedidenton 
+---------------------
+                   1
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isschemabound') as isschemabound;
+ isschemabound 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'execisansinullson') as execisansinullson;
+ execisansinullson 
+-------------------
+                 1
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'tablefulltextpopulatestatus') as tablefulltextpopulatestatus;
+ tablefulltextpopulatestatus 
+-----------------------------
+                            
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'tablehasvardecimalstorageformat') as tablehasvardecimalstorageformat;
+ tablehasvardecimalstorageformat 
+---------------------------------
+                                
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'issysshipped') as issysshipped;
+ issysshipped 
+--------------
+            1
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isdeterministic') as isdeterministic;
+ isdeterministic 
+-----------------
+                
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isprocedure') asisprocedure;
+ asisprocedure 
+---------------
+             1
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isview') as isview;
+ isview 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isusertable') as isusertable;
+ isusertable 
+-------------
+           0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'istablefunction') as istablefunction;
+ istablefunction 
+-----------------
+               0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isinlinefunction') as isinlinefunction;
+ isinlinefunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isscalarfunction') as isscalarfunction;
+ isscalarfunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isprimarykey') as isprimarykey;
+ isprimarykey 
+--------------
+            0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isindexed') as isindexed;
+ isindexed 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isdefault') as isdefault;
+ isdefault 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'isrule') as isrule;
+ isrule 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('insert_student'), 'istrigger') as istrigger;
+ istrigger 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'istable') as istable;
+ istable 
+---------
+       0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'ownerid') as ownerid;
+ ownerid 
+---------
+--?.*
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isdefaultcnst') as isdefaultcnst;
+ isdefaultcnst 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'execisquotedidenton') as execisquotedidenton;
+ execisquotedidenton 
+---------------------
+                    
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isschemabound') as isschemabound;
+ isschemabound 
+---------------
+              
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'execisansinullson') as execisansinullson;
+ execisansinullson 
+-------------------
+                  
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'tablefulltextpopulatestatus') as tablefulltextpopulatestatus;
+ tablefulltextpopulatestatus 
+-----------------------------
+                            
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'tablehasvardecimalstorageformat') as tablehasvardecimalstorageformat;
+ tablehasvardecimalstorageformat 
+---------------------------------
+                                
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'issysshipped') as issysshipped;
+ issysshipped 
+--------------
+            1
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isdeterministic') as isdeterministic;
+ isdeterministic 
+-----------------
+                
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isprocedure') asisprocedure;
+ asisprocedure 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isview') as isview;
+ isview 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isusertable') as isusertable;
+ isusertable 
+-------------
+           0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'istablefunction') as istablefunction;
+ istablefunction 
+-----------------
+               0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isinlinefunction') as isinlinefunction;
+ isinlinefunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isscalarfunction') as isscalarfunction;
+ isscalarfunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isprimarykey') as isprimarykey;
+ isprimarykey 
+--------------
+            0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isindexed') as isindexed;
+ isindexed 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isdefault') as isdefault;
+ isdefault 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'isrule') as isrule;
+ isrule 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('trigger_update_total_grade'), 'istrigger') as istrigger;
+ istrigger 
+-----------
+         1
+(1 row)
+
+--异常用例
+CREATE TEMP TABLE sys.temp_sales (
+    product_name VARCHAR(255),
+    sale_amount NUMERIC(10, 2),
+    sale_date DATE
+);
+ERROR:  temporary tables cannot specify a schema name
+select object_id('temp_sales');
+ object_id 
+-----------
+          
+(1 row)
+
+select objectproperty(object_id('temp_sales'), 'istable') as istable;
+ istable 
+---------
+        
+(1 row)
+
+select object_id();
+ERROR:  function object_id() does not exist
+LINE 1: select object_id();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: object_id
+select object_id('[]');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('student');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('', 'U');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('students', '');
+ object_id 
+-----------
+     16414
+(1 row)
+
+select object_id('students', 'FN');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('othersys.students');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('otherdb.sys.students');
+ERROR:  Can only do lookup in current database.
+CONTEXT:  referenced column: object_id
+select objectproperty('', 'istable') as istable;
+ istable 
+---------
+        
+(1 row)
+
+select objectproperty('students', 'istable') as istable;
+ERROR:  invalid input syntax for integer: "students"
+LINE 1: select objectproperty('students', 'istable') as istable;
+                              ^
+CONTEXT:  referenced column: istable
+select objectproperty(object_id('students'), '') as istable;
+ istable 
+---------
+        
+(1 row)
+
+select objectproperty('', '') as istable;
+ istable 
+---------
+        
+(1 row)
+
+select objectproperty(object_id('student'), 'istable') as istable;
+ istable 
+---------
+        
+(1 row)
+
+select objectproperty(object_id('students'), 'isview') as istable;
+ istable 
+---------
+       0
+(1 row)
+
+select objectproperty(object_id('students'), 'ssr') as istable;
+ istable 
+---------
+        
+(1 row)
+
+create user object_user identified by 'Test@123';
+SET SESSION AUTHORIZATION object_user PASSWORD 'Test@123';
+create schema object_schema;
+ERROR:  permission denied for database contrib_regression
+DETAIL:  N/A
+create table object_schema.t1 (n1 int);
+ERROR:  schema "object_schema" does not exist
+RESET SESSION AUTHORIZATION;
+select object_id('object_schema.t1');
+ object_id 
+-----------
+          
+(1 row)
+

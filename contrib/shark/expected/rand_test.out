@@ -1,0 +1,89 @@
+DO $$
+DECLARE
+    counter SMALLINT := 1;
+BEGIN
+    WHILE counter < 5 LOOP
+        RAISE NOTICE '%', RAND();
+        counter := counter + 1;
+    END LOOP;
+END $$;
+--?.*
+--?.*
+--?.*
+--?.*
+SELECT rand(1);
+       rand        
+-------------------
+ .0416303444653749
+(1 row)
+
+SELECT rand(-1);
+       rand       
+------------------
+ .300025727134198
+(1 row)
+
+SELECT rand(1::SMALLINT);
+       rand        
+-------------------
+ .0416303444653749
+(1 row)
+
+SELECT rand(-1::SMALLINT);
+       rand       
+------------------
+ .300025727134198
+(1 row)
+
+SELECT rand(1::tinyint);
+       rand        
+-------------------
+ .0416303444653749
+(1 row)
+
+SELECT rand(-1::tinyint);
+       rand       
+------------------
+ .300025727134198
+(1 row)
+
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(a1 int);
+insert into t1 values(floor((100 + RAND() * 100)));
+select * from t1;
+ a1  
+-----
+--?.*
+(1 row)
+
+select RAND(null);
+       rand       
+------------------
+ .170828036032617
+(1 row)
+
+select RAND(2147483647);
+       rand       
+------------------
+ .800025727134198
+(1 row)
+
+select RAND(2147483648);
+ERROR:  function rand(bigint) does not exist
+LINE 1: select RAND(2147483648);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: rand
+select RAND(-2147483648);
+       rand       
+------------------
+ .670828036032617
+(1 row)
+
+select RAND(-2147483649);
+ERROR:  function rand(bigint) does not exist
+LINE 1: select RAND(-2147483649);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: rand

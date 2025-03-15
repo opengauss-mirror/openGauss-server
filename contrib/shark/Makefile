@@ -5,7 +5,7 @@ PLDIR=src/pltsql
 DATA = shark--1.0.sql
 REGRESS = dummy
 
-OBJS = shark.o dbcc.o
+OBJS = shark.o dbcc.o varlena.o
 OBJS += $(BEPARSERDIR)/parser.o
 OBJS += $(BEPARSERDIR)/gram-backend.o
 OBJS += $(BEPARSERDIR)/keywords.o
