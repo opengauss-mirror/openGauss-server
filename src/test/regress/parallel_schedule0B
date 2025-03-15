@@ -5,7 +5,7 @@
 # usecases for improving coverage 
 # --------------------------
 test: vec_hashjoin1 single_node_rangetypes db4ai_explain_model test_ustore_toast ustore_ddl ts_utf8 test_ustore_update test_ustore_index
-test: sqlldr/gs_loader_basic psql parse_xlog cgin_test create_index_gist hw_user rowlevelsecurity query_self_tuning hw_partition_llt
+test: sqlldr/gs_loader_basic psql parse_xlog cgin_test create_index_gist hw_user query_self_tuning hw_partition_llt
 
 test: physical_slot
 

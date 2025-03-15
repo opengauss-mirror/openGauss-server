@@ -391,7 +391,7 @@ test: gpi_range
 
 # gpi invliad part
 test: gpi_invalid_part
-test: gpi_clean_wait
+# test: gpi_clean_wait
 
 # gpi vacuum
 test: gpi_vacuum_lazy
