@@ -75,7 +75,6 @@ typedef struct st_reformer_ctrl {
     int recoveryInstId; // abandoned in xlog merge
     SSGlobalClusterState clusterStatus;
     ClusterRunMode clusterRunMode;
-    uint64 exrto_list_stable; // exrto stable instances list for ss_disaster_cluster
     pg_crc32c crc;
 } ss_reformer_ctrl_t;
 
@@ -174,6 +173,7 @@ typedef struct ss_recovery_info {
     bool startup_need_exit_normally;        //used in alive failover
     bool recovery_trapped_in_page_request;   //used in alive failover
     bool in_ondemand_recovery;
+    bool is_disaster_extreme_redo;          // used in ss disaster cluster for is enable extreme redo
     volatile ondemand_realtime_build_status_t ondemand_realtime_build_status;
     bool dorado_sharestorage_inited;        // used in dorado mode
     bool disaster_cluster_promoting;         // standby cluster is promoting

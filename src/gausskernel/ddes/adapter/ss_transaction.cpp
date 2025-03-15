@@ -624,6 +624,31 @@ void SSRequestAllStandbyReloadReformCtrlPage()
     }
 }
 
+void SSDisasterBroadcastIsExtremeRedo()
+{
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+    int ret;
+    SSBroadcastIsExtremeRedo ssmsg;
+    ssmsg.type = BCAST_IS_EXTREME_REDO;
+    ssmsg.is_enable_extreme_redo = g_instance.attr.attr_storage.recovery_parse_workers > 1;
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)&ssmsg,
+        .len = sizeof(SSBroadcastIsExtremeRedo),
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_ONLINE_LIST,
+        .inst_map = 0,
+        .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
+        .handle_recv_msg = (unsigned char)false,
+        .check_session_kill = (unsigned char)true
+    };
+    ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
+    if (ret != DMS_SUCCESS) {
+        ereport(DEBUG1, (errmsg("SS broadcast is extreme redo failed!")));
+    }
+}
+
 void SSSendSharedInvalidMessages(const SharedInvalidationMessage *msgs, int n)
 {
     dms_context_t dms_ctx;
@@ -1335,5 +1360,15 @@ int SSUpdateLocalConfFile(char* data, uint32 len)
         ereport(WARNING, (errmsg("send SIGHUP to PM failed")));
         return DMS_ERROR;
     }
+    return DMS_SUCCESS;
+}
+
+int SSDisasterUpdateIsEnableExtremeRedo(char* data, uint32 len)
+{
+    if (unlikely(len != sizeof(SSBroadcastIsExtremeRedo))) {
+        return DMS_ERROR;
+    }
+    SSBroadcastIsExtremeRedo *ssmsg = (SSBroadcastIsExtremeRedo *)data;
+    g_instance.dms_cxt.SSRecoveryInfo.is_disaster_extreme_redo = ssmsg->is_enable_extreme_redo;
     return DMS_SUCCESS;
 }

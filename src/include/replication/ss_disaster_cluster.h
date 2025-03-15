@@ -114,7 +114,9 @@ const uint32 SS_DORADO_CTL_INFO_SIZE = 512;
         (SS_DORADO_STANDBY_CLUSTER_STANDBY_NODE || SS_STREAM_STANDBY_CLUSTER_STANDBY_NODE)
 
 #define SS_DISASTER_CLUSTER_IN_EXRTO \
-        (SS_DISASTER_CLUSTER && g_instance.dms_cxt.SSReformerControl.exrto_list_stable != 0)
+    (SS_DISASTER_CLUSTER && \
+    (g_instance.dms_cxt.SSRecoveryInfo.is_disaster_extreme_redo || \
+     g_instance.attr.attr_storage.recovery_parse_workers > 1))
 
 void SSClusterDoradoStorageInit();
 void InitSSDoradoCtlInfo(ShareStorageXLogCtl *ctlInfo, uint64 sysidentifier);

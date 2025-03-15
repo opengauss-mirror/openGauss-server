@@ -109,6 +109,11 @@ typedef struct SSBroadcastSyncGUCst {
     SSBroadcastOp type; // must be first
 } SSBroadcastSyncGUCst;
 
+typedef struct SSBroadcastIsExtremeRedo {
+    SSBroadcastOp type; // must be first
+    bool is_enable_extreme_redo;
+} SSBroadcastIsExtremeRedo;
+
 Snapshot SSGetSnapshotData(Snapshot snapshot);
 CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCommit, bool isMvcc, bool isNest,
     Snapshot snapshot, bool* sync);
@@ -127,6 +132,7 @@ void SSBCastDropRelAllBuffer(RelFileNode *rnodes, int rnode_len);
 void SSBCastDropRelRangeBuffer(RelFileNode node, ForkNumber forkNum, BlockNumber firstDelBlock);
 void SSBCastDropDBAllBuffer(Oid dbid);
 void SSBCastDropSegSpace(Oid spcNode, Oid dbNode);
+void SSDisasterBroadcastIsExtremeRedo();
 int SSProcessSharedInvalMsg(char *data, uint32 len);
 void SSUpdateSegDropTimeline(uint32 seg_drop_timeline);
 int SSProcessSegDropTimeline(char *data, uint32 len);
@@ -146,4 +152,5 @@ bool SSCanFetchLocalSnapshotTxnRelatedInfo();
 int SSUpdateRealtimeBuildLogCtrl(char* data, uint32 len);
 int SSGetStandbyRealtimeBuildPtr(char* data, uint32 len);
 int SSUpdateLocalConfFile(char* data, uint32 len);
+int SSDisasterUpdateIsEnableExtremeRedo(char* data, uint32 len);
 #endif

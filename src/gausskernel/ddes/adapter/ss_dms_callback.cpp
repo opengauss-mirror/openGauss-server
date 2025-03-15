@@ -1394,6 +1394,9 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
             case BCAST_CONFIG_SYNC:
                 ret = SSUpdateLocalConfFile(data, len);
                 break;
+            case BCAST_IS_EXTREME_REDO:
+                ret = SSDisasterUpdateIsEnableExtremeRedo(data, len);
+                break;
             default:
                 ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS] invalid broadcast operate type")));
                 ret = DMS_ERROR;
@@ -2204,6 +2207,9 @@ static int CBReformDoneNotify(void *db_handle)
     if (SS_DISASTER_CLUSTER) {
         SSDisasterUpdateHAmode();
         DisasterUpdateConfig();
+        if (SS_DISASTER_MAIN_STANDBY_NODE) {
+            SSDisasterBroadcastIsExtremeRedo();
+        }
     }
    
     /* SSClusterState and in_reform must be set atomically */
