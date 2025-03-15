@@ -29270,7 +29270,9 @@ func_application:	func_name '(' func_arg_list opt_sort_clause ')'
 									n->args = lappend(n->args, makeIntConst(10, -1));
 								};
 							}
-							n->args = lappend(n->args, makeStringConst(lobname, -1));
+							if (strcmp(strVal(funcname), "getlength") != 0) {
+								n->args = lappend(n->args, makeStringConst(lobname, -1));
+							}
 						} else if (IsA(n1, NamedArgExpr)) {
 							Node* n2 = ((Node*)((NamedArgExpr*)n1)->arg);
 							if (IsA(n2, ColumnRef)) {
