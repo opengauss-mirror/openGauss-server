@@ -488,6 +488,7 @@ void FlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, ui
 {
     Buffer buf;
     Page page;
+    PageHeader p;
     uint32 curFlushSize;
     for (uint16 i = 0; i < nblks; i++) {
         curFlushSize = (i == nblks - 1) ?
@@ -498,6 +499,8 @@ void FlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, ui
         errno_t err = memcpy_s(PageGetContents(page), curFlushSize,
                         table + i * HNSW_PQTABLE_STORAGE_SIZE, curFlushSize);
         securec_check(err, "\0", "\0");
+        p = (PageHeader)page;
+        p->pd_lower += curFlushSize;
         MarkBufferDirty(buf);
         UnlockReleaseBuffer(buf);
     }
