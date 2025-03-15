@@ -573,7 +573,9 @@ void IMCStoreVacuumWorkerMain(void)
          */
         if (t_thrd.imcstore_vacuum_cxt.got_SIGHUP) {
             t_thrd.imcstore_vacuum_cxt.got_SIGHUP = false;
+            MemoryContext backcontext = MemoryContextSwitchTo(thread_context);
             ProcessConfigFile(PGC_SIGHUP);
+            MemoryContextSwitchTo(backcontext);
         }
         CHECK_FOR_INTERRUPTS();
 
