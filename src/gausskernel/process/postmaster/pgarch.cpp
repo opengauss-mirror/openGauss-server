@@ -1196,11 +1196,9 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
     if (t_thrd.arch.sync_walsender_idx >= 0) {
         walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[t_thrd.arch.sync_walsender_idx];
         SpinLockAcquire(&walsnd->mutex);
-        volatile int *slotIdx = &walsnd->slot_idx;
-        ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[*slotIdx];
         if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) 
             && !XLogRecPtrIsInvalid(walsnd->flush) && XLByteLE(targetLsn, walsnd->flush) &&
-            walsnd->is_cross_cluster == false && slot->archive_config != NULL) {
+            walsnd->is_cross_cluster == false && !strstr((char*)walsnd->remote_application_name, "gs_probackup")) {
             SpinLockRelease(&walsnd->mutex);
             if (g_instance.roach_cxt.isXLogForceRecycled) {
                 ereport(LOG, (errmsg("pgarch choose walsender index:%d and pid is %ld, when force advance slot",
@@ -1217,10 +1215,8 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
 
         SpinLockAcquire(&walsnd->mutex);
 
-        volatile int *slotIdx = &walsnd->slot_idx;
-        ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[*slotIdx];
         if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) &&
-            walsnd->is_cross_cluster == false && slot->archive_config != NULL) {
+            walsnd->is_cross_cluster == false && !strstr((char*)walsnd->remote_application_name, "gs_probackup")) {
             if (XLByteLE(targetLsn, walsnd->flush)) {
                 SpinLockRelease(&walsnd->mutex);
                 ArchiveTaskStatus *archive_status = NULL;
