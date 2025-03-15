@@ -1447,7 +1447,7 @@ static Oid SearchRelOidByName(Oid namespaceId, char* relName, NameResolveVar* va
     }
     Form_pg_class classForm = (Form_pg_class) GETSTRUCT(relTuple);
     char relkind = classForm->relkind;
-    if (relkind != RELKIND_RELATION && relkind != RELKIND_VIEW) {
+    if (relkind != RELKIND_RELATION && relkind != RELKIND_VIEW && relkind != RELKIND_MATVIEW) {
         ReleaseSysCache(relTuple);
         return InvalidOid;
     }
@@ -1459,7 +1459,8 @@ static Oid SearchRelOidByName(Oid namespaceId, char* relName, NameResolveVar* va
     if (aclResult != ACLCHECK_OK) {
         ReportNameResolveAclErr(var);
     }
-    var->part1Type = relkind == RELKIND_RELATION ? NAME_RESOLVE_TYPE_TABLE : NAME_RESOLVE_TYPE_VIEW;
+    var->part1Type = relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW ?
+                     NAME_RESOLVE_TYPE_TABLE : NAME_RESOLVE_TYPE_VIEW;
     return relOid;
 }
 

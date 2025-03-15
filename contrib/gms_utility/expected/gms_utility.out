@@ -2506,6 +2506,7 @@ CREATE TABLE public.t_resolve (c1 NUMBER, c2 VARCHAR2(100));
 CREATE UNIQUE INDEX IF NOT EXISTS public.t_resolve_c1_udx ON public.t_resolve(c1);
 CREATE TABLE public.t_log (c1 NUMBER, c2 TIMESTAMP);
 CREATE VIEW public.v_resolve AS SELECT * FROM public.t_resolve;
+CREATE MATERIALIZED VIEW public.mv_resolve AS SELECT * FROM public.t_resolve;
 CREATE SEQUENCE IF NOT EXISTS public.t_seq
     INCREMENT BY 1
     NOMINVALUE
@@ -2740,6 +2741,20 @@ ERROR:  The Object is not exists
 CONTEXT:  PL/pgSQL function gms_utility.name_resolve(character varying,numeric) line 4 at assignment
 SQL statement "CALL gms_utility.name_resolve(input,context,schema,part1,part2,dblink,part1_type,object_number)"
 PL/pgSQL function test_name_resolve(character varying,numeric) line 8 at SQL statement
+call test_name_resolve('public.mv_resolve', 0);
+--?INFO:  schema: [PUBLIC], part1: [MV_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
+call test_name_resolve('mv_resolve', 0);
+--?INFO:  schema: [PUBLIC], part1: [MV_RESOLVE], part2: [<NULL>], dblink: [<NULL>], part1_type: 2, object_number:.*
+ test_name_resolve 
+-------------------
+ 
+(1 row)
+
 -- test PL/SQL
 call test_name_resolve('public.add_numbers', 1);
 --?INFO:  schema: [PUBLIC], part1: [<NULL>], part2: [ADD_NUMBERS], dblink: [<NULL>], part1_type: 8, object_number:.*
@@ -3220,6 +3235,7 @@ DROP FUNCTION public.add_numbers;
 DROP PROCEDURE public.insert_val;
 DROP INDEX public.t_resolve_c1_udx;
 DROP VIEW public.v_resolve;
+DROP MATERIALIZED VIEW public.mv_resolve;
 DROP TABLE public.t_log;
 DROP TABLE public.t_resolve;
 DROP SEQUENCE public.t_seq;
@@ -4482,6 +4498,53 @@ begin
 end; -- 1
 /
 INFO:  result is: hello,world; length is: 1
+CREATE TABLE t_resolve0008 (
+    sale_id SERIAL PRIMARY KEY,
+    product_id INT,
+    sale_date DATE,
+    quantity INT,
+    price DECIMAL(10, 2)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "t_resolve0008_sale_id_seq" for serial column "t_resolve0008.sale_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_resolve0008_pkey" for table "t_resolve0008"
+CREATE MATERIALIZED VIEW t_resolve0008_materialized_full AS
+SELECT sale_date, product_id, SUM(quantity) AS total_quantity, SUM(quantity * price) AS total_t_resolve0008
+FROM t_resolve0008 GROUP BY sale_date, product_id WITH DATA;
+CREATE incremental MATERIALIZED VIEW t_resolve0008_materialized_incremental AS
+SELECT * FROM t_resolve0008;
+declare
+    name varchar2 := 'public.t_resolve0008_materialized_full ';
+    context number := 0;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'INFO:schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  INFO:schema = PUBLIC, part1 = T_RESOLVE0008_MATERIALIZED_FULL, part2 = <NULL>, dblink = <NULL>, part1_type = 2, object_number = .*
+declare
+    name varchar2 := 'public.t_resolve0008_materialized_incremental ';
+    context number := 0;
+    schema  varchar2;
+    part1   varchar2;
+    part2   varchar2;
+    dblink  varchar2;
+    part1_type  number;
+    object_number   number;
+begin
+    gms_utility.NAME_RESOLVE(name, context, schema, part1, part2, dblink, part1_type, object_number);
+    raise info 'INFO:schema = %, part1 = %, part2 = %, dblink = %, part1_type = %, object_number = %', schema, part1, part2, dblink, part1_type, object_number;
+end;
+/
+--?INFO:  INFO:schema = PUBLIC, part1 = T_RESOLVE0008_MATERIALIZED_INCREMENTAL, part2 = <NULL>, dblink = <NULL>, part1_type = 2, object_number = .*
+drop materialized view t_resolve0008_materialized_full;
+drop materialized view t_resolve0008_materialized_incremental;
+drop table t_resolve0008;
 reset behavior_compat_options;
 drop extension gms_output;
 drop extension gms_utility cascade;
