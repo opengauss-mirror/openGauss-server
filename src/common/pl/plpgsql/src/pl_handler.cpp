@@ -1290,7 +1290,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     UpdateCurrCompilePgObjStatus(save_curr_status);
 
     u_sess->plsql_cxt.cur_func_oid = InvalidOid;
-    if (!is_pkg_func && u_sess->plsql_cxt.running_func_oid == saveCallerOid) {
+    if (!is_pkg_func) {
         if (!OidIsValid(savaCallerParentOid) && OidIsValid(firstLevelfuncOid))
             saveCallFromFuncOid(firstLevelfuncOid);
         else
