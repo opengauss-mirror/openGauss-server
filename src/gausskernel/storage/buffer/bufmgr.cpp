@@ -3132,11 +3132,13 @@ retry:
         }
 
         /* set Physical segment file. */
-        if (ENABLE_DMS && pblk != NULL) {
-            Assert(PhyBlockIsValid(*pblk));
+        if (pblk != NULL) {
+            SegmentCheck(PhyBlockIsValid(*pblk));
             buf->extra->seg_fileno = pblk->relNode;
             buf->extra->seg_blockno = pblk->block;
-            MarkReadPblk(buf->buf_id, pblk);
+            if (ENABLE_DMS) {
+                MarkReadPblk(buf->buf_id, pblk);
+            }
         }
 
         return buf;
