@@ -33,6 +33,8 @@
 #include "catalog/query_imcstore_views.h"
 
 #ifdef ENABLE_HTAP
+constexpr int IMCSTORE_DELTA_PAGE_SIZE = 8192;
+
 static void FillIMCStoreViewsValues(Datum* imcstoreViewsValues, bool* imcstoreViewsNulls, IMCStoreView *imcstoreView)
 {
     imcstoreViewsValues[Anum_imcstore_views_reloid - 1] = ObjectIdGetDatum(imcstoreView->relOid);
@@ -54,6 +56,8 @@ static void FillIMCStoreViewsValues(Datum* imcstoreViewsValues, bool* imcstoreVi
         &imcstoreView->cuSizeInDisk));
     imcstoreViewsValues[Anum_imcstore_views_cu_num_in_disk - 1] = Int32GetDatum(pg_atomic_read_u64(
         &imcstoreView->cuNumsInDisk));
+    imcstoreViewsValues[Anum_imcstore_views_delta_in_mem - 1] = Int32GetDatum(pg_atomic_read_u64(
+        &imcstoreView->deltaInMem));
 }
 
 IMCStoreView* SearchAllIMCStoreViews(uint32 *num)
@@ -84,6 +88,14 @@ IMCStoreView* SearchAllIMCStoreViews(uint32 *num)
         results[viewIndex].cuNumsInMem = imcsDesc->cuNumsInMem;
         results[viewIndex].cuSizeInDisk = imcsDesc->cuSizeInDisk;
         results[viewIndex].cuNumsInDisk = imcsDesc->cuNumsInDisk;
+        results[viewIndex].deltaInMem = 0;
+        for (uint32 i = 0; i < imcsDesc->curMaxRowGroupId + 1; i++) {
+            if (!imcsDesc->rowGroups[i]) {
+                continue;
+            }
+            results[viewIndex].deltaInMem += list_length(imcsDesc->rowGroups[i]->m_delta->pages) *
+                                             IMCSTORE_DELTA_PAGE_SIZE;
+        }
         viewIndex++;
         LWLockRelease(IMCU_CACHE->m_imcs_lock);
     }
@@ -120,6 +132,7 @@ Datum query_imcstore_views(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)Anum_imcstore_views_cu_num_in_mem, "cu_num_in_mem", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)Anum_imcstore_views_cu_size_in_disk, "cu_size_in_disk", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)Anum_imcstore_views_cu_num_in_disk, "cu_num_in_disk", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)Anum_imcstore_views_delta_in_mem, "delta_in_mem", INT8OID, -1, 0);
 
         funcctx->user_fctx = SearchAllIMCStoreViews(&(funcctx->max_calls));
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
