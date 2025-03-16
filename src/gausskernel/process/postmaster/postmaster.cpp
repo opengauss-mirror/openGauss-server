@@ -8041,6 +8041,7 @@ static void reaper(SIGNAL_ARGS)
             if (!EXIT_STATUS_0(exitstatus)) {
                 LogChildExit(LOG, _("CBM writer process"), pid, exitstatus);
             }
+            ereport(LOG, (errmsg("Mark CBM Writer is true.")));
             t_thrd.cbm_cxt.XlogCbmSys->needReset = true;
             continue;
         }

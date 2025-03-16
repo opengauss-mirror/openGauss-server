@@ -9901,6 +9901,7 @@ void StartupXLOG(void)
         CBMTrackInit(true, checkPoint.redo);
         t_thrd.cbm_cxt.XlogCbmSys->needReset = false;
     } else {
+        ereport(LOG, (errmsg("Mark CBM Writer reset is true.")));
         t_thrd.cbm_cxt.XlogCbmSys->needReset = true;
     }
 

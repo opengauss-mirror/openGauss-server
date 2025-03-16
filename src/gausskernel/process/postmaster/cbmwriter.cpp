@@ -192,7 +192,7 @@ void CBMWriterMain(void)
 
     pgstat_report_appname("CBM Writer");
     pgstat_report_activity(STATE_IDLE, NULL);
-
+    t_thrd.cbm_cxt.XlogCbmSys->needReset = true;
     if (!CreateCBMReaderWorkers()) {
         ereport(ERROR, (errmsg("Can not start CBM Writer when all reader worker init failed.")));
     }
@@ -406,6 +406,7 @@ void CBMReaderMain(void)
     for (;;) {
         if (t_thrd.cbm_cxt.shutdown_requested) {
             pg_atomic_write_u32(&t_thrd.cbm_cxt.CBMReaderStatus->workState, CBM_THREAD_INVALID);
+            ereport(LOG, (errmsg("CBM Writer shutdown.")));
             proc_exit(0); /* done */
         }
         /* Main work loop */

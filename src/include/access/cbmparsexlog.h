@@ -311,7 +311,7 @@ extern void cbm_rotate_file(XLogRecPtr rotateLsn);
 extern void CBMReadAndParseXLog(void);
 extern bool CheckCBMReaderWorkersStatus();
 extern bool CreateCBMReaderWorkers();
-extern void ResetCBMReaderStatus(int threadIndex, bool isReboot);
+extern void ResetCBMReaderStatus(int threadIndex);
 extern void RebootCBMReader(int threadIndex);
 extern void WaitAndCheckCBMReaderWorkReboot(uint32 expectState, bool isSpecial, bool needRestart);
 extern void ModifyCBMReaderByConfig();

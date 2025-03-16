@@ -186,8 +186,9 @@ static bool CBMQueueInsertAfter(XLogRecPtr startPtr, XLogRecPtr endPtr, TimeLine
 static bool CreateCBMReaderWorker(CBMReaderWorker* cbmReaderWorker);
 static ThreadId CreateWorker(CBMReaderWorker* cbmReaderWorker);
 static void FlushCBMPagesToDiskByCBMWriter(XlogBitmap *xlogCbmSys, CBM_RECORD* CbmRecord, uint32 pageListIndex);
-
+static void CBMWriterErrorHandle();
 static bool ParseXlogIntoTaskFluent(bool isRecEnd);
+static bool isNeedWaitInErrorProcess(uint32 readerStatus, uint32 threadId);
 
 extern void InitXlogCbmSys(void)
 {
@@ -252,7 +253,8 @@ extern bool CheckCBMReaderWorkersStatus() {
 }
 
 /* Recourse reset function, reset memory context and data construct. */
-extern void ResetCBMReaderStatus(int threadIndex, bool isReboot) {
+extern void ResetCBMReaderStatus(int threadIndex) 
+{
     int rc;
 
     MemoryContextReset(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].cbmReaderFreeContext);
@@ -278,7 +280,7 @@ extern void ResetCBMReaderStatus(int threadIndex, bool isReboot) {
 
 extern void RebootCBMReader(int threadIndex) {
     signal_child(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex].thid, SIGTERM, -1);
-    ResetCBMReaderStatus(threadIndex, true);
+    ResetCBMReaderStatus(threadIndex);
     if (CreateCBMReaderWorker(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadIndex])) {
         ereport(LOG, (errmsg("The %d CBM Reader worker thread create success.", threadIndex)));
     } else {
@@ -292,11 +294,11 @@ extern void ModifyCBMReaderByConfig() {
         for (int i = newCBMThreadsNum; i < t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i++) {
             signal_child(g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].thid, SIGTERM, -1);
             ereport(LOG, (errmsg("The %d CBM Reader worker thread recived SIGTERM.", i)));
-            ResetCBMReaderStatus(i, false);
+            ResetCBMReaderStatus(i);
         }
     } else {
         for (int i = t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i < newCBMThreadsNum; i++) {
-            ResetCBMReaderStatus(i, false);
+            ResetCBMReaderStatus(i);
             if (CreateCBMReaderWorker(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i])) {
                 ereport(LOG, (errmsg("The %d CBM Reader worker thread create success.", i)));
             } else {
@@ -386,7 +388,7 @@ extern void ResetXlogCbmSys(void)
     t_thrd.cbm_cxt.XlogCbmSys->totalPageNum = 0;
 
     for (int i = 0; i < MAX_CBM_THREAD_NUM; i++) {
-        ResetCBMReaderStatus(i, false);
+        ResetCBMReaderStatus(i);
     }
     if (t_thrd.cbm_cxt.XlogCbmSys->headQueueNode == NULL) {
         t_thrd.cbm_cxt.XlogCbmSys->headQueueNode = (CBM_QUEUE_NODE*)palloc0(sizeof(CBM_QUEUE_NODE));
@@ -810,16 +812,24 @@ extern void CBMReadAndParseXLog(void)
 {
     volatile CBM_QUEUE_NODE* queueNodePtr = NULL;
     bool needParse = true;
+    bool needSkip = false;
 
     while (!t_thrd.cbm_cxt.shutdown_requested && pg_atomic_read_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest) == CBM_ACCEPT_TASK) {
 	    needParse = true;
+        needSkip = false;
         SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
         queueNodePtr = t_thrd.cbm_cxt.XlogCbmSys->currentQueueNode;
         if (queueNodePtr == NULL || queueNodePtr == t_thrd.cbm_cxt.XlogCbmSys->headQueueNode) {
             /* Have nothing to parse. */
             needParse = false;
+        } else if (pg_atomic_read_u32(&queueNodePtr->CBMRecord.threadIndex) != INVAILD_CBM_THREAD_NUM) {
+            /* This Node has been occupied, need to skip. */
+            needSkip = true;
         } else {
+            /* We need to mdoify currentQueueNode and CBMReader work states. */
             t_thrd.cbm_cxt.XlogCbmSys->currentQueueNode = queueNodePtr->next;
+            pg_atomic_write_u32(&queueNodePtr->CBMRecord.threadIndex, t_thrd.cbm_cxt.CBMReaderIndex);
+            pg_atomic_write_u32(&t_thrd.cbm_cxt.CBMReaderStatus->workState, CBM_THREAD_WORKING);
         }
         SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
         
@@ -832,8 +842,15 @@ extern void CBMReadAndParseXLog(void)
             ereport(LOG, (errmsg("Thread %d have waken up for parse.", t_thrd.cbm_cxt.CBMReaderIndex)));
             continue;
         }
-        pg_atomic_write_u32(&queueNodePtr->CBMRecord.threadIndex, t_thrd.cbm_cxt.CBMReaderIndex);
-        pg_atomic_write_u32(&t_thrd.cbm_cxt.CBMReaderStatus->workState, CBM_THREAD_WORKING);
+        
+        if (needSkip) {
+            ereport(LOG, (errmsg("This CBM Node have been occupie by %d, skip it.",
+                            pg_atomic_read_u32(&queueNodePtr->CBMRecord.threadIndex))));
+            continue;
+        }
+
+        /* Mark thread state into Wroking state, and CBM Record is in process. */
+        pg_atomic_write_u32(&queueNodePtr->CBMRecord.parseState, CBM_READ_PROCESSING); 
 
         (void)LWLockAcquire(CBMFreeListLock, LW_EXCLUSIVE);
         /* Get page free list, to handle cbm page write. */
@@ -1130,6 +1147,33 @@ static void FlushCBMPagesToDisk(XlogBitmap *xlogCbmSys, bool isCBMWriter)
     }
 }
 
+static bool isNeedWaitInErrorProcess(uint32 readerStatus, uint32 threadId)
+{
+    /* If this CBMRecord node is not occupied, no need to wait. */
+    if (threadId == INVAILD_CBM_THREAD_NUM) {
+        return false;
+    }
+    /* If the CBM Reader is still working. */
+    if (readerStatus == CBM_THREAD_WORKING) {
+        return true;
+    }
+}
+
+/*
+ * We can consider one condition.If a CBMReader conflict with CBMWriter, we can ensure:
+ * 1. CBMWriter make currentQueueNode to NULL, CBMREADER find nothing when get lock.
+ * 2. CBMReader get this node, and modify index in CBMRecord, so CBMWriter will find 
+ *      thread index in CBMReader. 
+ */
+static void CBMWriterErrorHandle()
+{
+    pg_atomic_write_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest, CBM_REJECT_TASK);
+    SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+    /* Must set currentQueueNode, or CBM Reader will get wrong pointer. */
+    t_thrd.cbm_cxt.XlogCbmSys->currentQueueNode = NULL;
+    SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+}
+
 static bool ParseXlogIntoTaskFluent(bool isRecEnd) {
     TimeLineID timeLine = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.ThisTimeLineID;
     XLogRecPtr startPoint = t_thrd.cbm_cxt.XlogCbmSys->startLSN;
@@ -1211,23 +1255,39 @@ static bool ParseXlogIntoTaskFluent(bool isRecEnd) {
 
     volatile CBM_QUEUE_NODE* head = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next;
     volatile CBM_QUEUE_NODE* temp = NULL;
+    bool isNeedToCut = true;
     while (head != t_thrd.cbm_cxt.XlogCbmSys->headQueueNode) {
         uint32 state = pg_atomic_read_u32(&head->CBMRecord.parseState);
         if (isErrorInReadProcess || t_thrd.cbm_cxt.shutdown_requested) {
-            ereport(LOG, (errmsg("Thread %d something wrong with parsing xlog file, skip forward.", head->CBMRecord.threadIndex)));
+            if (t_thrd.cbm_cxt.shutdown_requested && isNeedToCut && !isErrorInReadProcess) {
+                /* 
+                 * We no need to enter this step in two conditions:
+                 * 1. get shutdown request, and enter this in second time.
+                 * 2. get shutdown and error in read both time.
+                 */
+                CBMWriterErrorHandle();
+                isNeedToCut = false;
+            }
+            uint32 threadId = pg_atomic_read_u32(&head->CBMRecord.threadIndex);
+            if (threadId != INVAILD_CBM_THREAD_NUM) {
+                ereport(LOG, (errmsg("[CBMWriter]: Thread %d is no need to parse xlog file, skip forward.", 
+                            threadId)));
+            } else {
+                ereport(LOG, (errmsg("[CBMWriter]: This CBMRecord node is no need to parse, skip forward.")));
+            }
             while (true) {
                 uint32 state = pg_atomic_read_u32(&head->CBMRecord.parseState);
-                uint32 threadId = pg_atomic_read_u32(&head->CBMRecord.threadIndex);
+                uint32 readerStatus = pg_atomic_read_u32(
+                    &g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadId].workState);
                 /* If this CBMRecord under  CBM_READ_UNDO or CBM_READ_PROCESSING, we must wait for it handled off. */
-                if ((state == CBM_READ_UNDO || state == CBM_READ_PROCESSING) && threadId != INVAIL_CBM_THREAD_NUM) {
+                if (isNeedWaitInErrorProcess(readerStatus, threadId)) {
                     pg_usleep(1000);
                 } else {
                     break;
                 }
             }
-            if (pg_atomic_read_u32(&head->CBMRecord.parseState) != CBM_READ_UNDO) {
-                ResetCBMReaderStatus(pg_atomic_read_u32(&head->CBMRecord.threadIndex), false);
-            }
+            /* By far, this thread must find nothing to do, just clean resource. */
+            ResetCBMReaderStatus(pg_atomic_read_u32(&head->CBMRecord.threadIndex));
             CBMQueuePopFront();
             head = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next;
             continue;
@@ -1259,24 +1319,25 @@ static bool ParseXlogIntoTaskFluent(bool isRecEnd) {
             } 
             if (state == CBM_READ_FAIL || state == CBM_READ_RECEND) {
                 isErrorInReadProcess = true;
-                ereport(LOG, (errmsg("CBM Writer: something wrong with parsing xlog file.")));
-                pg_atomic_write_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest, CBM_REJECT_TASK);
-                
-                SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
-                /* Must set currentQueueNode, or CBM Reader will get wrong pointer. */
-                t_thrd.cbm_cxt.XlogCbmSys->currentQueueNode = NULL;
-                SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
+                ereport(LOG, (errmsg("[CBMWriter]: Thread %d parse result abnormal, state is %d, "
+                    "skip forward.", pg_atomic_read_u32(&head->CBMRecord.threadIndex), state)));
+                CBMWriterErrorHandle();
 		        continue;
             }
             CBMQueuePopFront();
             head = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next;
         } else if (state == CBM_READ_PROCESSING) {
+            /* 
+             * If this CMB Record is occupie, but CBM Reader is dead.
+             * But it maybe never happen.
+             */
             int threadIndex = pg_atomic_read_u32(&head->CBMRecord.threadIndex);
             if (!CheckCBMWorkersStatus(threadIndex)) {
-                ereport(LOG, (errmsg("Thread CBM Reader check status %lu abnormal in parse waiting.", threadIndex)));
+                ereport(LOG, (errmsg("Thread CBM Reader %lu check status abnormal "
+                                        "in parse waiting.", threadIndex)));
                 head->CBMRecord.hashPtr = NULL;
                 pg_atomic_write_u32(&head->CBMRecord.parseState, CBM_READ_UNDO);
-                pg_atomic_write_u32(&head->CBMRecord.threadIndex, 0);
+                pg_atomic_write_u32(&head->CBMRecord.threadIndex, INVAILD_CBM_THREAD_NUM);
                 SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
                 t_thrd.cbm_cxt.XlogCbmSys->currentQueueNode = head;
                 SpinLockRelease(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
@@ -4378,7 +4439,7 @@ static bool CBMQueueInsertAfter(XLogRecPtr startPtr, XLogRecPtr endPtr, TimeLine
     newNode->CBMRecord.timeLine = timeLine;
     newNode->CBMRecord.isRecEnd = isRecEnd;
     newNode->CBMRecord.isNewSegFile = true;
-    pg_atomic_write_u32(&newNode->CBMRecord.threadIndex, INVAIL_CBM_THREAD_NUM);
+    pg_atomic_write_u32(&newNode->CBMRecord.threadIndex, INVAILD_CBM_THREAD_NUM);
     SpinLockAcquire(&g_instance.comm_cxt.cbm_cxt.CBMTaskListSpinLock);
     t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev->next = newNode;
     newNode->prev = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->prev;
