@@ -484,3 +484,34 @@ bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn, XLogRe
     SSUnPinBuffer(buf_desc);
     return false;
 }
+
+bool OndemandPageReplayNeedSkip(Buffer buf, RedoBufferTag *redoblock,
+                                RedoBufferInfo *redobufferinfo, XLogRecPtr xloglsn)
+{
+    if (!SS_IN_ONDEMAND_RECOVERY) {
+        return false;
+    }
+    dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(buf - 1);
+    BufferDesc* buf_desc = GetBufferDescriptor(buf - 1);
+    if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        Page page = BufferGetPage(buf);
+        if (XLByteLE(xloglsn, PageGetLSN(page))) {
+            redobufferinfo->lsn = xloglsn;
+            redobufferinfo->blockinfo = *redoblock;
+            redobufferinfo->buf = buf;
+            redobufferinfo->pageinfo.page = BufferGetPage(buf);
+            redobufferinfo->pageinfo.pagesize = BufferGetPageSize(buf);
+            ereport(DEBUG1, (errmodule(MOD_DMS),
+                (errmsg("[SS][%u/%u/%u/%d %d-%u] CheckPageNeedToSkip skip redo, buf_ctrl->status: %d"
+                        " , buf_id:%d.",
+                        buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
+                        buf_desc->tag.rnode.relNode, buf_desc->tag.rnode.bucketNode,
+                        buf_desc->tag.forkNum, buf_desc->tag.blockNum, buf_desc->buf_id, buf_ctrl->state))));
+            /* no need to release buffer here */
+            return true;
+        }
+        LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+    }
+    return false;
+}
