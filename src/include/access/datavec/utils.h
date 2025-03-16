@@ -2,6 +2,7 @@
 #define UTILS_H
 #include "postgres.h"
 #include "fmgr/fmgr_comp.h"
+#include "access/multi_redo_api.h"
 #include <vector>
 
 #define GENERIC_DEFAULT_ENABLE_PQ false
