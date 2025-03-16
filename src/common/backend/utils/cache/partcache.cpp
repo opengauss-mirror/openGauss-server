@@ -82,6 +82,7 @@
 #include "utils/knl_relcache.h"
 #include "utils/knl_partcache.h"
 #include "replication/walreceiver.h"
+#include "access/multi_redo_api.h"
 
 /*
  *part 2: static functions used only in this c source file
@@ -350,10 +351,19 @@ void PartitionInitPhysicalAddr(Partition partition)
  */
 Partition PartitionIdGetPartition(Oid partitionId, StorageType storage_type)
 {
+    Partition pd;
+    if (SS_DISASTER_MAIN_STANDBY_NODE && is_exrto_standby_read_worker() && IS_EXRTO_STANDBY_READ) {
+        pd = PartitionBuildDescExtended(partitionId, storage_type, false);
+        if (PartitionIsValid(pd)) {
+            PartitionIncrementReferenceCount(pd);
+            return pd;
+        }
+    }
+
     if (EnableLocalSysCache()) {
         return t_thrd.lsc_cxt.lsc->partdefcache.PartitionIdGetPartition(partitionId, storage_type);
     }
-    Partition pd;
+
     /*
      * first try to find reldesc in the cache
      */
