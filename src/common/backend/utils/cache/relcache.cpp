@@ -288,6 +288,7 @@ static const FormData_pg_attribute Desc_pg_collation[Natts_pg_collation] = {Sche
 static const FormData_pg_attribute Desc_pg_auth_history[Natts_pg_auth_history] = {Schema_pg_auth_history};
 static const FormData_pg_attribute Desc_pg_app_workloadgroup_mapping[Natts_pg_app_workloadgroup_mapping] = {
     Schema_pg_app_workloadgroup_mapping};
+static const FormData_pg_attribute Desc_pg_event_trigger[Natts_pg_event_trigger] = {Schema_pg_event_trigger};
 static const FormData_pg_attribute Desc_pg_enum[Natts_pg_enum] = {Schema_pg_enum};
 static const FormData_pg_attribute Desc_pg_set[Natts_pg_set] = {Schema_pg_set};
 static const FormData_pg_attribute Desc_pg_range[Natts_pg_range] = {Schema_pg_range};
@@ -765,6 +766,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         true,
         Natts_pg_app_workloadgroup_mapping,
         Desc_pg_app_workloadgroup_mapping,
+        false,
+        true},
+    {EventTriggerRelationId,
+        "pg_event_trigger",
+        EventTriggerRelation_Rowtype_Id,
+        false,
+        true,
+        Natts_pg_event_trigger,
+        Desc_pg_event_trigger,
         false,
         true},
     {ProcedureExtensionRelationId,

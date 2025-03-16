@@ -27,8 +27,8 @@
  * ----------------
  */
 #define EventTriggerRelationId 3482
-
-CATALOG(pg_event_trigger,3482)
+#define EventTriggerRelation_Rowtype_Id 11706
+CATALOG(pg_event_trigger,3482) BKI_SCHEMA_MACRO
 {
    NameData    evtname;        /* trigger's name */
    NameData    evtevent;       /* trigger's event */
