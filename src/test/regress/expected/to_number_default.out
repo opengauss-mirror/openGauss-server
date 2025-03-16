@@ -233,17 +233,8 @@ SELECT TO_NUMBER(c1 DEFAULT '3.14' ON CONVERSION ERROR) FROM tonumber ORDER By c
 (7 rows)
 
 SELECT TO_NUMBER(c1 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
- to_number 
------------
-         1
-         2
-         3
-         4
-         5
-         6
-         7
-(7 rows)
-
+ERROR:  invalid input syntax for type numeric: "3.14FDW"
+CONTEXT:  referenced column: to_number
 SELECT TO_NUMBER(c1 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
  to_number 
 -----------
@@ -308,17 +299,8 @@ SELECT TO_NUMBER(c2 DEFAULT '3.14' ON CONVERSION ERROR) FROM tonumber ORDER By c
 (7 rows)
 
 SELECT TO_NUMBER(c2 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
-                to_number                
------------------------------------------
-                                    1.23
-                                 3.14157
-                            202405000000
-                                        
-                                        
-                                     NaN
- 340282000000000000000000000000000000000
-(7 rows)
-
+ERROR:  invalid input syntax for type numeric: "3.14FDW"
+CONTEXT:  referenced column: to_number
 SELECT TO_NUMBER(c2 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
                 to_number                
 -----------------------------------------
@@ -356,17 +338,8 @@ SELECT TO_NUMBER(c3 DEFAULT '3.14' ON CONVERSION ERROR) FROM tonumber ORDER By c
 (7 rows)
 
 SELECT TO_NUMBER(c3 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber ORDER By c1;
-                                               to_number                                               
--------------------------------------------------------------------------------------------------------
-                                                                                                  1.23
-                                                                                              3.141567
-                                                                                          202405291733
-                                                                                                      
-                                                                                                      
-                                                                                                   NaN
- 17976931348623100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-(7 rows)
-
+ERROR:  invalid input syntax for type numeric: "3.14FDW"
+CONTEXT:  referenced column: to_number
 SELECT TO_NUMBER(c3 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
                                                to_number                                               
 -------------------------------------------------------------------------------------------------------
@@ -404,15 +377,8 @@ SELECT c1, TO_NUMBER(c4 DEFAULT '3.14' ON CONVERSION ERROR) FROM tonumber ORDER 
 (7 rows)
 
 SELECT c1, TO_NUMBER(c4 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber WHERE c1 NOT IN (5, 7) ORDER By c1;
- c1 |  to_number   
-----+--------------
-  1 |         1.23
-  2 |     3.141567
-  3 | 202405291733
-  4 |             
-  6 |          NaN
-(5 rows)
-
+ERROR:  invalid input syntax for type numeric: "3.14FDW"
+CONTEXT:  referenced column: to_number
 SELECT c1, TO_NUMBER(c4 DEFAULT '3.14FDW' ON CONVERSION ERROR) FROM tonumber where c1 = 7 ORDER By c1; -- erro: invalid input syntax for type numeric: "3.14FDW"
 ERROR:  invalid input syntax for type numeric: "3.14FDW"
 CONTEXT:  referenced column: to_number
@@ -510,11 +476,8 @@ SELECT TO_NUMBER(c6 DEFAULT NULL ON CONVERSION ERROR) FROM tonumber ORDER By c1;
 (7 rows)
 
 SELECT TO_NUMBER(3.145 DEFAULT 'tomorrow' ON CONVERSION ERROR);
- to_number 
------------
-     3.145
-(1 row)
-
+ERROR:  invalid input syntax for type numeric: "tomorrow"
+CONTEXT:  referenced column: to_number
 SELECT TO_NUMBER('today' DEFAULT 3.14 ON CONVERSION ERROR);
  to_number 
 -----------
@@ -1110,11 +1073,8 @@ SELECT TO_NUMBER(c6 DEFAULT NULL ON CONVERSION ERROR, '99D999') FROM tonumber OR
 (7 rows)
 
 SELECT TO_NUMBER(3.145 DEFAULT 'tomorrow' ON CONVERSION ERROR, '99D999');
- to_number 
------------
-     3.145
-(1 row)
-
+ERROR:  invalid input syntax for type numeric: " "
+CONTEXT:  referenced column: to_number
 SELECT TO_NUMBER('today' DEFAULT 3.14 ON CONVERSION ERROR, '99D999');
  to_number 
 -----------
@@ -1140,6 +1100,9 @@ SELECT TO_NUMBER('  6.66  ' DEFAULT 3.14 ON CONVERSION ERROR, '99D999');
 (1 row)
 
 SELECT TO_NUMBER('today' DEFAULT 'roll' ON CONVERSION ERROR, '99D999');  -- error： invalid input syntax for type numeric: "roll"
+ERROR:  invalid input syntax for type numeric: " "
+CONTEXT:  referenced column: to_number
+SELECT TO_NUMBER('123' DEFAULT 'asda' ON CONVERSION ERROR, '99999999999999');
 ERROR:  invalid input syntax for type numeric: " "
 CONTEXT:  referenced column: to_number
 -- test overflow and null
