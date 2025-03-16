@@ -679,6 +679,10 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
         if (pageisvalid) {
             if (readmethod != WITH_LOCAL_CACHE) {
                 if (mode != RBM_ZERO_AND_LOCK && mode != RBM_ZERO_AND_CLEANUP_LOCK) {
+                    if (SS_IN_ONDEMAND_RECOVERY &&
+                        OndemandPageReplayNeedSkip(buf, redoblock, redobufferinfo, xloglsn)) {
+                        return BLK_DONE;
+                    }
                     if (ENABLE_DMS && !SS_IN_ONDEMAND_RECOVERY)
                         LockBuffer(buf, BUFFER_LOCK_SHARE);
                     else if (get_cleanup_lock)

@@ -450,8 +450,8 @@ BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersisten
 
     Assert(mode == RBM_NORMAL || mode == RBM_ZERO_ON_ERROR);
 
-    /* lock the share buffer for replaying the xlog */
-    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    /* lock the share buffer with shard mode for checking if page need to replay */
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
 
     while (procState != NULL) {
         XLogRecParseState *redoBlockState = procState;
@@ -469,6 +469,12 @@ BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersisten
         if (XLByteLE(XLogBlockHeadGetLSN(blockHead), PageGetLSN(bufferInfo.pageinfo.page))) {
             ondemand_extreme_rto::DereferenceRecParseState(redoBlockState);
             continue;
+        }
+
+        /* lock the share buffer for replaying the xlog */
+        if (!LWLockHeldByMeInMode(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE)) {
+            LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+            LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
         }
 
         switch (blockValid) {
@@ -495,7 +501,7 @@ BufferDesc *RedoForOndemandExtremeRTOQuery(BufferDesc *bufHdr, char relpersisten
     }
 
     /* mark the latest buffer dirty */
-    if (needMarkDirty) {
+    if (needMarkDirty || (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH)) {
         MarkBufferDirty(buf);
     }
 

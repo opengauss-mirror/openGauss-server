@@ -3746,7 +3746,7 @@ void MarkBufferDirty(Buffer buffer)
 
     UnlockBufHdr(buf_desc, buf_state);
 
-    if (SS_REFORM_REFORMER) {
+    if (SS_REFORM_REFORMER || SS_PRIMARY_ONDEMAND_RECOVERY) {
         dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
         buf_ctrl->state &= ~BUF_DIRTY_NEED_FLUSH;
     }
