@@ -1568,11 +1568,6 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                  * insert index entries for tuple
                  */
                 pTSelf = tableam_tops_get_t_self(result_relation_desc, tuple);
-#ifdef ENABLE_HTAP
-                if (HAVE_HTAP_TABLES && target_rel != NULL) {
-                    IMCStoreInsertHook(RelationGetRelid(target_rel), tableam_tops_get_t_self(target_rel, tuple));
-                }
-#endif
                 if (result_rel_info->ri_NumIndices > 0 && !RelationIsColStore(result_relation_desc)) {
                     if (state->isReplace) {
                         bool specConflict = false;
@@ -1604,6 +1599,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
             }
     }
+#ifdef ENABLE_HTAP
+    if (HAVE_HTAP_TABLES && target_rel != NULL) {
+        IMCStoreInsertHook(RelationGetRelid(target_rel), tableam_tops_get_t_self(target_rel, tuple));
+    }
+#endif
     if (pTSelf == NULL) {
         pTSelf = tableam_tops_get_t_self(result_relation_desc, tuple);
     }

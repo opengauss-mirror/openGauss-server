@@ -24,6 +24,7 @@
 #include "storage/lock/lwlock.h"
 #include "storage/proc.h"
 #include "storage/smgr/smgr.h"
+#include "storage/procarray.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
@@ -151,42 +152,8 @@ static void IMCStoreVacuumSigtermHandler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
-bool CheckHeapFrozen(HeapTuple tuple, TransactionId frozen)
-{
-    TransactionId xmin = HeapTupleGetRawXmin(tuple);
-    TransactionId xmax = HeapTupleGetRawXmax(tuple);
-
-    /* any frozen tuple should be scaned */
-    if (HeapTupleHeaderXminFrozen(tuple->t_data)) {
-        return true;
-    }
-
-    /*
-     * if tuple not delete yet, should be scaned
-     * we accept not commited tuple
-     * ecause in this case we will have a record inside delta, and will check visiablity while scan
-     */
-    if (TransactionIdPrecedes(xmin, frozen) && (xmax == InvalidTransactionId || TransactionIdPrecedes(frozen, xmax))) {
-        return true;
-    }
-    return false;
-}
-
-bool CheckUHeapFrozen(UHeapTuple tuple, TransactionId frozen)
-{
-    int tdSlot = UHeapTupleHeaderGetTDSlot(tuple->disk_tuple);
-    if (tdSlot == UHEAPTUP_SLOT_FROZEN) {
-        return true;
-    }
-
-    if (TransactionIdPrecedes(tuple->xmin, frozen) &&
-        (tuple->xmax == InvalidTransactionId || TransactionIdPrecedes(frozen, tuple->xmax))) {
-        return true;
-    }
-    return false;
-}
-
-void ItempointerGetTuple(Relation rel, ItemPointerData item, Datum *val, bool *null, IMCStoreInsert &imcstoreInsert)
+void ItempointerGetTuple(Relation rel, ItemPointerData item, Datum *val, bool *null, IMCStoreInsert &imcstoreInsert,
+                         TransactionId frozen)
 {
     char tuplebuf[BLCKSZ];
     Buffer buf = InvalidBuffer;
@@ -201,158 +168,42 @@ void ItempointerGetTuple(Relation rel, ItemPointerData item, Datum *val, bool *n
         UHeapTuple tuple = (UHeapTuple)(&tuplebuf);
         tuple->disk_tuple = (UHeapDiskTuple)(tuplebuf + UHeapTupleDataSize);
         tuple->tupTableType = UHEAP_TUPLE;
-        if (UHeapFetch(rel, SnapshotAny, &item, tuple, &buf, false, false)) {
-            tableam_tops_deform_tuple(tuple, relTupleDesc, val, null);
-            imcstoreInsert.AppendOneTuple(val, null);
-            ReleaseBuffer(buf);
+        if (!UHeapFetch(rel, SnapshotAny, &item, tuple, &buf, false, false)) {
+            return;
         }
+        TransactionId xid;
+        UHTSVResult result = UHeapTupleSatisfiesOldestXmin(tuple, frozen, buf, true, NULL, &xid, NULL, rel);
+        if (result != UHEAPTUPLE_LIVE && result != UHEAPTUPLE_RECENTLY_DEAD) {
+            ReleaseBuffer(buf);
+            return;
+        }
+        tableam_tops_deform_tuple(tuple, relTupleDesc, val, null);
+        imcstoreInsert.AppendOneTuple(val, null);
+        ReleaseBuffer(buf);
     } else {
         HeapTuple tuple = (HeapTuple)(&tuplebuf);
         tuple->tupTableType = HEAP_TUPLE;
         tuple->t_self = item;
         tuple->t_data = (HeapTupleHeader)(tuplebuf + HEAPTUPLESIZE);
-        if (heap_fetch(rel, SnapshotAny, tuple, &buf, false, NULL)) {
-            tableam_tops_deform_tuple(tuple, relTupleDesc, val, null);
-            imcstoreInsert.AppendOneTuple(val, null);
+        if (!heap_fetch(rel, SnapshotAny, tuple, &buf, false, NULL)) {
+            return;
+        }
+        HTSV_Result result  = HeapTupleSatisfiesVacuum(tuple, frozen, buf);
+        if (result != HEAPTUPLE_LIVE && result != HEAPTUPLE_RECENTLY_DEAD) {
             ReleaseBuffer(buf);
-        }
-    }
-}
-
-void BuildCtidScanBitmap(unsigned char* deltaMask, RowGroup* rowgroup, IMCSDesc* imcsDesc, Relation rel, uint32 cuid,
-    uint32 &maskMax)
-{
-    int ctidCol = imcsDesc->imcsNatts;
-    CUDesc* cuDescPtr = rowgroup->m_cuDescs[ctidCol];
-    if (!rowgroup->m_actived || !cuDescPtr) return;
-
-    /* search in memory */
-    bool hasFound = true;
-    DataSlotTag slotTag = IMCU_CACHE->InitCUSlotTag((RelFileNodeOld*)&rel->rd_node, ctidCol, cuDescPtr->cu_id,
-                                                    cuDescPtr->cu_pointer);
-    CacheSlotId_t slotId = IMCU_CACHE->FindDataBlock(&slotTag, true);
-    if (!IsValidCacheSlotID(slotId)) {
-        hasFound = false;
-        slotId = IMCU_CACHE->ReserveDataBlock(&slotTag, cuDescPtr->cu_size, hasFound);
-    }
-    if (!IsValidCacheSlotID(slotId)) return;
-    CU* ctidCU = IMCU_CACHE->GetCUBuf(slotId);
-    ctidCU->m_inCUCache = true;
-    ctidCU->SetAttInfo(sizeof(ImcstoreCtid), -1, TIDOID);
-    if (!hasFound) {
-        /* load from disk */
-        CFileNode cFileNode(rel->rd_node, ctidCol, MAIN_FORKNUM);
-        IMCUStorage imcuStorage(cFileNode);
-        imcuStorage.LoadCU(ctidCU, cuDescPtr->cu_id, cuDescPtr->cu_size);
-        ctidCU->imcsDesc = imcsDesc;
-        ctidCU->SetCUSize(cuDescPtr->cu_size);
-        pg_atomic_add_fetch_u64(&imcsDesc->cuSizeInMem, (uint64)cuDescPtr->cu_size);
-        pg_atomic_add_fetch_u64(&imcsDesc->cuNumsInMem, 1);
-        pg_atomic_sub_fetch_u64(&imcsDesc->cuSizeInDisk, (uint64)cuDescPtr->cu_size);
-        pg_atomic_sub_fetch_u64(&imcsDesc->cuNumsInDisk, 1);
-        IMCU_CACHE->DataBlockCompleteIO(slotId);
-    } else {
-        if (IMCU_CACHE->DataBlockWaitIO(slotId)) {
-            IMCU_CACHE->UnPinDataBlock(slotId);
             return;
         }
+        tableam_tops_deform_tuple(tuple, relTupleDesc, val, null);
+        imcstoreInsert.AppendOneTuple(val, null);
+        ReleaseBuffer(buf);
     }
-
-    if (ctidCU->m_cache_compressed) {
-        CUUncompressedRetCode retCode = IMCU_CACHE->StartUncompressCU(cuDescPtr, slotId, -1, false, ALIGNOF_CUSIZE);
-        if (retCode != CU_OK) {
-            IMCU_CACHE->UnPinDataBlock(slotId);
-            return;
-        }
-    }
-
-    /* build current ctid map */
-    for (int i = 0; i < cuDescPtr->row_count; ++i) {
-        ScalarValue val  = ctidCU->GetValue<sizeof(ImcstoreCtid), false>(i);
-        ItemPointer curr = &(((ImcstoreCtid*)(&val))->ctid);
-        BlockNumber blockoffset = ItemPointerGetBlockNumber(curr) - cuid * MAX_IMCS_PAGES_ONE_CU;
-        OffsetNumber offset = ItemPointerGetOffsetNumber(curr);
-        uint64 idx = blockoffset * MAX_POSSIBLE_ROW_PER_PAGE + offset;
-        deltaMask[idx >> 3] |= (1 << (idx % 8));
-        maskMax = Max(idx, maskMax);
-    }
-    IMCU_CACHE->UnPinDataBlock(slotId);
-}
-
-void UpdateBitmapByDelta(
-    unsigned char* deltaMask, RowGroup* rowgroup, TransactionId frozen, uint32 cuid, uint32 &maskMax)
-{
-    DeltaTableIterator deltaIter = rowgroup->m_delta->ScanInit();
-    ItemPointer item = NULL;
-    DeltaOperationType ctidtype;
-    TransactionId xid;
-    int total = rowgroup->m_delta->rowNumber;
-    ItemPointerData *itemList = (ItemPointerData*)palloc(sizeof(ItemPointerData) * total);
-    int deleteEnd = 0;
-    int insertBegin = total;
-
-    while ((item = deltaIter.GetNext(&ctidtype, &xid)) != NULL) {
-        if (TransactionIdFollows(xid, frozen)) {
-            continue;
-        }
-
-        if (ctidtype == DeltaOperationType::IMCSTORE_DELETE) {
-            itemList[deleteEnd] = *item;
-            ++deleteEnd;
-        } else {
-            --insertBegin;
-            itemList[insertBegin] = *item;
-        }
-    }
-
-    for (int i = 0; i < deleteEnd; ++i) {
-        ItemPointer curr = &itemList[i];
-        BlockNumber blockoffset = ItemPointerGetBlockNumber(curr) - cuid * MAX_IMCS_PAGES_ONE_CU;
-        OffsetNumber offset = ItemPointerGetOffsetNumber(curr);
-        uint64 idx = blockoffset * MAX_POSSIBLE_ROW_PER_PAGE + offset;
-        if ((idx >> 3) > MAX_IMCSTORE_DEL_BITMAP_SIZE) {
-            break;
-        }
-        deltaMask[idx >> 3] &= ~(1 << (idx % 8));
-        maskMax = Max(idx, maskMax);
-    }
-
-    for (int i = insertBegin; i < total; ++i) {
-        ItemPointer curr = &itemList[i];
-        BlockNumber blockoffset = ItemPointerGetBlockNumber(curr) - cuid * MAX_IMCS_PAGES_ONE_CU;
-        OffsetNumber offset = ItemPointerGetOffsetNumber(curr);
-        uint64 idx = blockoffset * MAX_POSSIBLE_ROW_PER_PAGE + offset;
-        if ((idx >> 3) > MAX_IMCSTORE_DEL_BITMAP_SIZE) {
-            break;
-        }
-        deltaMask[idx >> 3] |= (1 << (idx % 8));
-        maskMax = Max(idx, maskMax);
-    }
-    pfree(itemList);
 }
 
 void IMCStoreVacuum(Relation rel, IMCSDesc *imcsDesc, uint32 cuid)
 {
     TupleDesc relTupleDesc = rel->rd_att;
     unsigned char deltaMask[MAX_IMCSTORE_DEL_BITMAP_SIZE] = {0};
-    TransactionId frozen = Max(rel->rd_rel->relfrozenxid, pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid));
-
-    RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(cuid);
-    pthread_rwlock_rdlock(&rowgroup->m_mutex);
-
-    uint32 maskMax = 0;
-    PG_TRY();
-    {
-        BuildCtidScanBitmap(deltaMask, rowgroup, imcsDesc, rel, cuid, maskMax);
-        UpdateBitmapByDelta(deltaMask, rowgroup, frozen, cuid, maskMax);
-    }
-    PG_CATCH();
-    {
-        pthread_rwlock_unlock(&rowgroup->m_mutex);
-        PG_RE_THROW();
-    }
-    PG_END_TRY();
-    pthread_rwlock_unlock(&rowgroup->m_mutex);
+    TransactionId frozen = GetOldestXmin(rel);
 
     Datum *val = (Datum *)palloc(sizeof(Datum) * (relTupleDesc->natts + 1));
     bool *null = (bool *)palloc(sizeof(bool) * (relTupleDesc->natts + 1));
@@ -363,34 +214,32 @@ void IMCStoreVacuum(Relation rel, IMCSDesc *imcsDesc, uint32 cuid)
     /* init imcstoreInsert */
     IMCStoreInsert imcstoreInsert(rel, imcsTupleDesc, imcsDesc->imcsAttsNum);
 
-    ItemPointerData ctid;
-    uint32 curr = 0;
-    while (curr <= maskMax) {
-        if (deltaMask[curr >> 3] == 0) {
-            /* skip this byte */
-            curr = ((curr >> 3) + 1) * 8;
-            continue;
+    BlockNumber begin = cuid * MAX_IMCS_PAGES_ONE_CU;
+    BlockNumber end = Min((cuid + 1) * MAX_IMCS_PAGES_ONE_CU, RelationGetNumberOfBlocks(rel));
+    for (BlockNumber curr = begin; curr < end; ++curr) {
+        CHECK_FOR_INTERRUPTS();
+        Buffer buffer = ReadBuffer(rel, curr);
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+        Page page = BufferGetPage(buffer);
+        OffsetNumber lines;
+        if (RelationIsUstoreFormat(rel)) {
+            lines = UHeapPageGetMaxOffsetNumber(page);
+        } else {
+            lines = PageGetMaxOffsetNumber(page);
         }
-        if ((deltaMask[curr >> 3] & (1 << (curr % 8))) == 0) {
-            ++curr;
-            continue;
+        for (OffsetNumber lineoff = FirstOffsetNumber; lineoff <= lines; ++lineoff) {
+            ImcstoreCtid imcsCtid;
+            ItemPointerSetBlockNumber(&imcsCtid.ctid, curr);
+            ItemPointerSetOffsetNumber(&imcsCtid.ctid, lineoff);
+            imcsCtid.reservedSpace = 0;
+            errno_t rc = memcpy_s(&val[relTupleDesc->natts], sizeof(Datum), &imcsCtid, sizeof(ImcstoreCtid));
+            securec_check_c(rc, "\0", "\0");
+            null[relTupleDesc->natts] = false;
+            ItempointerGetTuple(rel, imcsCtid.ctid, val, null, imcstoreInsert, frozen);
         }
-        BlockNumber blk = curr / MAX_POSSIBLE_ROW_PER_PAGE;
-        OffsetNumber offset = curr - blk * MAX_POSSIBLE_ROW_PER_PAGE;
-        blk += cuid * MAX_IMCS_PAGES_ONE_CU;
-        ItemPointerSetBlockNumber(&ctid, blk);
-        ItemPointerSetOffsetNumber(&ctid, offset);
-        ImcstoreCtid imcsCtid;
-        imcsCtid.ctid = ctid;
-        imcsCtid.reservedSpace = 0;
-        errno_t rc = memcpy_s(&val[relTupleDesc->natts], sizeof(Datum), &imcsCtid, sizeof(ImcstoreCtid));
-        securec_check_c(rc, "\0", "\0");
-        null[relTupleDesc->natts] = false;
-
-        ItempointerGetTuple(rel, ctid, val, null, imcstoreInsert);
-        ++curr;
+        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        ReleaseBuffer(buffer);
     }
-    imcsDesc->UnReferenceRowGroup();
 
     imcstoreInsert.BatchReInsertCommon(imcsDesc, cuid, frozen);
     imcstoreInsert.ResetBatchRows(true);

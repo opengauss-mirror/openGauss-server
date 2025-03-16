@@ -1018,6 +1018,11 @@ void CStore::LoadCUDescIfNeed()
         last_load_num = m_CUDescInfo[0]->curLoadNum;
     }
 
+#ifdef ENABLE_HTAP
+    if (m_isImcstore) {
+        UnlockRowGroups();
+    }
+#endif
     do {
         bool found = false;
         for (int i = 0; i < m_colNum; ++i) {

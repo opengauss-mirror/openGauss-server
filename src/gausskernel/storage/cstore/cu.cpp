@@ -2066,6 +2066,7 @@ IMCSDesc::~IMCSDesc()
 RowGroup::RowGroup(uint32 rowGroupId, int imcsNatts)
 {
     m_rowGroupId = rowGroupId;
+    rgxmin = InvalidTransactionId;
     m_actived = false;
     m_cuDescs = (CUDesc**)palloc0((imcsNatts + 1) * sizeof(CUDesc*));
     m_delta = New(CurrentMemoryContext) DeltaTable();
@@ -2104,6 +2105,7 @@ void RowGroup::Vacuum(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUD
 {
     pthread_rwlock_wrlock(&m_mutex);
     m_delta->Vacuum(xid);
+    rgxmin = xid;
 
     RelFileNodeOld* relNodeOid = (RelFileNodeOld*)&fakeRelation->rd_node;
     DropCUDescs(&fakeRelation->rd_node, fakeRelation->rd_att->natts - 1);
@@ -2124,10 +2126,10 @@ void RowGroup::Vacuum(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUD
     pthread_rwlock_unlock(&m_mutex);
 }
 
-void RowGroup::Insert(DeltaOperationType type, ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId)
+void RowGroup::Insert(ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId)
 {
     pthread_rwlock_wrlock(&m_mutex);
-    m_delta->Insert(type, ctid, xid, relid, cuId);
+    m_delta->Insert(ctid, xid, relid, cuId);
     pthread_rwlock_unlock(&m_mutex);
 }
 

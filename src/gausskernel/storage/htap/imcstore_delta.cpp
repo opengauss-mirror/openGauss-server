@@ -34,6 +34,7 @@
 #ifdef ENABLE_HTAP
 
 constexpr uint32 AUTO_VACUUM_TRIGGER_LIMIT = Min(IMCSTORE_MAX_ROW_PER_CU / 3, DEFAULT_DELTAPAGE_ELEMENTS * 10);
+constexpr int CHAR_BIT_SIZE = 8;
 
 bool IMCStoreHookPreLock(Oid relid, ItemPointer ctid)
 {
@@ -66,9 +67,9 @@ void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid, bool loc
     RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(cuId);
 
     if (!locked) {
-        rowgroup->Insert(DeltaOperationType::IMCSTORE_INSERT, ctid, xid, relid, cuId);
+        rowgroup->Insert(ctid, xid, relid, cuId);
     } else {
-        rowgroup->m_delta->Insert(DeltaOperationType::IMCSTORE_INSERT, ctid, xid, relid, cuId);
+        rowgroup->m_delta->Insert(ctid, xid, relid, cuId);
         pthread_rwlock_unlock(&rowgroup->m_mutex);
     }
     imcsDesc->UnReferenceRowGroup();
@@ -89,9 +90,9 @@ void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid, bool loc
     RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(cuId);
 
     if (!locked) {
-        rowgroup->Insert(DeltaOperationType::IMCSTORE_DELETE, ctid, xid, relid, cuId);
+        rowgroup->Insert(ctid, xid, relid, cuId);
     } else {
-        rowgroup->m_delta->Insert(DeltaOperationType::IMCSTORE_DELETE, ctid, xid, relid, cuId);
+        rowgroup->m_delta->Insert(ctid, xid, relid, cuId);
         pthread_rwlock_unlock(&rowgroup->m_mutex);
     }
     imcsDesc->UnReferenceRowGroup();
@@ -111,37 +112,22 @@ void IMCStoreUpdateHook(Oid relid, ItemPointer ctid, ItemPointer newCtid, Transa
     uint32 cuId = ItemPointerGetBlockNumber(ctid) / MAX_IMCS_PAGES_ONE_CU;
     RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(cuId);
 
-    rowgroup->Insert(DeltaOperationType::IMCSTORE_DELETE, ctid, xid, relid, cuId);
+    rowgroup->Insert(ctid, xid, relid, cuId);
     imcsDesc->UnReferenceRowGroup();
 
     cuId = ItemPointerGetBlockNumber(newCtid) / MAX_IMCS_PAGES_ONE_CU;
     rowgroup = imcsDesc->GetNewRGForCUInsert(cuId);
 
-    rowgroup->Insert(DeltaOperationType::IMCSTORE_INSERT, newCtid, xid, relid, cuId);
+    rowgroup->Insert(newCtid, xid, relid, cuId);
     imcsDesc->UnReferenceRowGroup();
     MemoryContextSwitchTo(oldcontext);
 }
 
-void DeltaPage::Insert(DeltaOperationType type, ItemPointer ctid, TransactionId xid)
+void DeltaPage::Insert(ItemPointer ctid, TransactionId xid)
 {
-    data[used].operationType = type;
     data[used].ctid = *ctid;
     data[used].xid = xid;
     ++used;
-}
-
-void DeltaPage::Delete(uint32 offset)
-{
-    data[offset].operationType = DeltaOperationType::OPERATION_DELETED;
-    ++deadElement;
-}
-
-bool DeltaPage::IsDeadPage()
-{
-    if (used >= DEFAULT_DELTAPAGE_ELEMENTS && deadElement == used) {
-        return true;
-    }
-    return false;
 }
 
 uint32 DeltaPage::Vacuum(TransactionId xid, ListCell* &currPage)
@@ -152,14 +138,10 @@ uint32 DeltaPage::Vacuum(TransactionId xid, ListCell* &currPage)
     DeltaPage* page = (DeltaPage*)lfirst(currPage);
     uint32 currentUsedElements = used;
     used = 0;
-    deadElement = 0;
     uint32 restRecords = 0;
 
     for (uint32 i = 0; i < currentUsedElements; ++i) {
-        if (data[i].operationType == OPERATION_DELETED) {
-            continue;
-        }
-        if (data[i].xid <= xid) {
+        if (data[i].xid < xid) {
             continue;
         }
         ++restRecords;
@@ -178,7 +160,7 @@ uint32 DeltaPage::Vacuum(TransactionId xid, ListCell* &currPage)
 }
 
 /* will return true if delta table should vacuum */
-void DeltaTable::Insert(DeltaOperationType type, ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId)
+void DeltaTable::Insert(ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId)
 {
     DeltaPage* page = NULL;
     if (pages == NULL) {
@@ -189,7 +171,7 @@ void DeltaTable::Insert(DeltaOperationType type, ItemPointer ctid, TransactionId
         page = New(CurrentMemoryContext) DeltaPage();
         pages = lappend(pages, page);
     }
-    page->Insert(type, ctid, xid);
+    page->Insert(ctid, xid);
     ++rowNumber;
     if (!vacuumInProcess && rowNumber > AUTO_VACUUM_TRIGGER_LIMIT && IMCStoreVacuumPushWork(relid, cuId)) {
         // change the statistic to avoid push work in a short time
@@ -220,28 +202,15 @@ DeltaTableIterator DeltaTable::ScanInit()
     return DeltaTableIterator(list_head(pages));
 }
 
-ItemPointer DeltaTableIterator::GetNext(DeltaOperationType *type, TransactionId *xid)
+ItemPointer DeltaTableIterator::GetNext()
 {
     if (currentPage == NULL) {
         return nullptr;
     }
     while (currentPage != NULL) {
         DeltaPage* page = (DeltaPage*)lfirst(currentPage);
-        // there is no valid data in this page
-        if (page->IsDeadPage()) {
-            currentRow = 0;
-            currentPage = lnext(currentPage);
-            continue;
-        }
         for (;currentRow < page->used; ++currentRow) {
-            if (page->data[currentRow].operationType == DeltaOperationType::OPERATION_DELETED) continue;
             ItemPointer item = &page->data[currentRow].ctid;
-            if (type) {
-                *type = page->data[currentRow].operationType;
-            }
-            if (xid) {
-                *xid = page->data[currentRow].xid;
-            }
             ++currentRow;
             return item;
         }
