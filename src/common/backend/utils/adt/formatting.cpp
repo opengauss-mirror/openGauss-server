@@ -2204,7 +2204,7 @@ static void parse_format(
                 // give the error report if  the format is wrong when the transfering
                 // function is do_to_timestamp
                 //
-                if ((DCH_TO_TIMESTAMP_TYPE == ver) && (NULL != suf))
+                if ((DCH_TO_TIMESTAMP_TYPE == ver) && (NULL != suf)) {
                     if ((((*str >= 'A' && *str <= 'Z') || (*str >= 'a' && *str <= 'z') ||
                              (*str >= '0' && *str <= '9')) &&
                             (NULL == suff_search(str, suf, SUFFTYPE_POSTFIX)) &&
@@ -2240,6 +2240,13 @@ static void parse_format(
                             (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
                                 errmsg("invalid data for match in format string")));
                     }
+                }
+                if (NUM_TYPE == ver && *str != ' ') {
+                    NUM_cache_remove(t_thrd.format_cxt.last_NUM_cache_entry);
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("invalid data for match in format string")));
+                }
                 /*
                  * Outside double-quoted strings, backslash is only special if
                  * it immediately precedes a double quote.

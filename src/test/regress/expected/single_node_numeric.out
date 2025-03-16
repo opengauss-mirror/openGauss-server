@@ -1211,11 +1211,8 @@ SELECT '' AS to_char_26, to_char('100'::numeric, 'FM999');
 (1 row)
 
 SELECT '' AS to_char_27, to_char('100'::numeric, 'f"ool\\"999');
- to_char_27 |  to_char  
-------------+-----------
-            | fool\ 100
-(1 row)
-
+ERROR:  invalid data for match in format string
+CONTEXT:  referenced column: to_char
 -- TO_NUMBER()
 --
 SELECT '' AS to_number_1,  to_number('-34,338,492', '99G999G999');
