@@ -259,7 +259,6 @@ PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool do_move)
      */
     for (i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
         res = &t_thrd.storage_cxt.PrivateRefCountArray[i];
-
         if (res->buffer == buffer) {
             return res;
         }
@@ -478,7 +477,7 @@ static bool ConditionalStartBufferIO(BufferDesc *buf, bool for_input)
      * me to finish the I/O.  If we cannot acquire the lock it means
      * I/O we want to do is in progress on this buffer.
      */
-    if (LWLockConditionalAcquire(BufferDescriptorGetIOLock(buf), LW_EXCLUSIVE) == true) {
+    if (LWLockConditionalAcquire(buf->io_in_progress_lock, LW_EXCLUSIVE) == true) {
         /* Got the lock */
         buf_state = LockBufHdr(buf);
         /*
@@ -488,7 +487,7 @@ static bool ConditionalStartBufferIO(BufferDesc *buf, bool for_input)
          */
         if (buf_state & BM_IO_IN_PROGRESS) {
             UnlockBufHdr(buf, buf_state);
-            LWLockRelease(BufferDescriptorGetIOLock(buf));
+            LWLockRelease(buf->io_in_progress_lock);
             return false;
         }
     } else {
@@ -508,7 +507,7 @@ static bool ConditionalStartBufferIO(BufferDesc *buf, bool for_input)
     if (for_input ? (buf_state & BM_VALID) : !(buf_state & BM_DIRTY)) {
         /* Another thread already did the I/O */
         UnlockBufHdr(buf, buf_state);
-        LWLockRelease(BufferDescriptorGetIOLock(buf));
+        LWLockRelease(buf->io_in_progress_lock);
         return false;
     }
 
@@ -1047,9 +1046,9 @@ void PageListPrefetchAbort()
         if (buf_desc != NULL) {
             TerminateBufferIO_common(buf_desc, false, BM_IO_ERROR);
             ereport(LOG, (errmsg("TerminateBufferIO_common: set bud_id(%d) IO_ERROR,", buf_desc->buf_id)));
-            if (!LWLockHeldByMe(BufferDescriptorGetIOLock(buf_desc))) {
-                LWLockOwn(BufferDescriptorGetIOLock(buf_desc));
-                LWLockRelease(BufferDescriptorGetIOLock(buf_desc));
+            if (!LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
+                LWLockOwn(buf_desc->io_in_progress_lock);
+                LWLockRelease(buf_desc->io_in_progress_lock);
                 AsyncCompltrUnpinBuffer((volatile void *)(buf_desc));
                 ereport(LOG, (errmsg("LWLockRelease: bud_id(%d) release in_progress_lock and unpin buffer,",
                                      buf_desc->buf_id)));
@@ -1319,13 +1318,13 @@ void PageListBackWrite(uint32 *buf_list, int32 nbufs, uint32 flags = 0, SMgrRela
              * timeout a lightweight lock request.
              */
             if (reorder_writes && !new_pass) {
-                if (!LWLockConditionalAcquire(BufferDescriptorGetContentLock(bufHdr), LW_SHARED)) {
+                if (!LWLockConditionalAcquire(bufHdr->content_lock, LW_SHARED)) {
                     UnpinBuffer(bufHdr, true);
                     bufs_blocked++;
                     continue;
                 }
             } else {
-                (void)LWLockAcquire(BufferDescriptorGetContentLock(bufHdr), LW_SHARED);
+                (void)LWLockAcquire(bufHdr->content_lock, LW_SHARED);
                 new_pass = false;
             }
 
@@ -1340,7 +1339,7 @@ void PageListBackWrite(uint32 *buf_list, int32 nbufs, uint32 flags = 0, SMgrRela
              * once the buffer is written.
              */
             if (ConditionalStartBufferIO(bufHdr, false) == false) {
-                LWLockRelease(BufferDescriptorGetContentLock(bufHdr));
+                LWLockRelease(bufHdr->content_lock);
                 UnpinBuffer(bufHdr, true);
                 if (reorder_writes) {
                     buf_list[i] = INVALID_SHARE_BUFFER_ID;
@@ -1545,14 +1544,14 @@ void PageListBackWriteAbort()
         if (buf_desc != NULL && dis_list[i]->blockDesc.descType == AioWrite) {
             TerminateBufferIO_common(buf_desc, false, 0);
             ereport(LOG, (errmsg("TerminateBufferIO_common: set bud_id(%d) IO_ERROR,", buf_desc->buf_id)));
-            if (!LWLockHeldByMe(BufferDescriptorGetContentLock(buf_desc))) {
-                LWLockOwn(BufferDescriptorGetContentLock(buf_desc));
-                LWLockRelease(BufferDescriptorGetContentLock(buf_desc));
+            if (!LWLockHeldByMe(buf_desc->content_lock)) {
+                LWLockOwn(buf_desc->content_lock);
+                LWLockRelease(buf_desc->content_lock);
                 ereport(LOG, (errmsg("LWLockRelease: bud_id(%d) release content_lock,", buf_desc->buf_id)));
             }
-            if (!LWLockHeldByMe(BufferDescriptorGetIOLock(buf_desc))) {
-                LWLockOwn(BufferDescriptorGetIOLock(buf_desc));
-                LWLockRelease(BufferDescriptorGetIOLock(buf_desc));
+            if (!LWLockHeldByMe(buf_desc->io_in_progress_lock)) {
+                LWLockOwn(buf_desc->io_in_progress_lock);
+                LWLockRelease(buf_desc->io_in_progress_lock);
                 AsyncCompltrUnpinBuffer((volatile void *)(buf_desc));
                 ereport(LOG, (errmsg("LWLockRelease: bud_id(%d) release in_progress_lock and unpin buffer,",
                                      buf_desc->buf_id)));
@@ -2297,7 +2296,7 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
             t_thrd.dms_cxt.page_need_retry = true;
             return InvalidBuffer;
         }
-        LWLockRelease(BufferDescriptorGetIOLock(buf_desc));
+        LWLockRelease(buf_desc->io_in_progress_lock);
         UnpinBuffer(buf_desc, true);
         AbortBufferIO();
 #ifdef USE_ASSERT_CHECKING
@@ -2681,7 +2680,7 @@ found_branch:
                         GetDmsBufCtrl(bufHdr->buf_id)->state |= BUF_READ_MODE_ZERO_LOCK;
                         LockBuffer(BufferDescriptorGetBuffer(bufHdr), BUFFER_LOCK_EXCLUSIVE);
                     } else {
-                        LWLockAcquire(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE);
+                        LWLockAcquire(bufHdr->content_lock, LW_EXCLUSIVE);
                     }
                     /*
                      * A corner case in segment-page storage:
@@ -2771,7 +2770,7 @@ found_branch:
 
             do {
                 if (!DmsCheckBufAccessible()) {
-                    if (LWLockHeldByMe(BufferDescriptorGetIOLock(bufHdr))) {
+                    if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                         TerminateBufferIO(bufHdr, false, 0);
                     }
                     /* when in failover worker thread should exit */
@@ -2785,7 +2784,7 @@ found_branch:
 
                 // standby node must notify primary node for prepare lastest page in ondemand recovery
                 if (SS_STANDBY_ONDEMAND_NOT_NORMAL && !SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
-                    if (LWLockHeldByMe(BufferDescriptorGetIOLock(bufHdr))) {
+                    if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                         TerminateBufferIO(bufHdr, false, 0);
                     }
                     /* when in failover worker thread should exit */
@@ -2797,7 +2796,7 @@ found_branch:
                 }
 
                 bool startio;
-                if (LWLockHeldByMe(BufferDescriptorGetIOLock(bufHdr))) {
+                if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                     startio = true;
                 } else {
                     startio = StartBufferIO(bufHdr, true);
@@ -2881,7 +2880,7 @@ found_branch:
     bool needputtodirty = ReadBuffer_common_ReadBlock(smgr, relpersistence, forkNum, blockNum,
                                                       mode, isExtend, bufBlock, pblk, &need_repair);
     if (need_repair) {
-        LWLockRelease(BufferDescriptorGetIOLock((BufferDesc *)bufHdr));
+        LWLockRelease(((BufferDesc *)bufHdr)->io_in_progress_lock);
         UnpinBuffer(bufHdr, true);
         AbortBufferIO();
         return InvalidBuffer;
@@ -2925,7 +2924,7 @@ found_branch:
      * because they assert that the buffer is already valid.)
      */
     if ((mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK) && !isLocalBuf) {
-        LWLockAcquire(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE);
+        LWLockAcquire(bufHdr->content_lock, LW_EXCLUSIVE);
     }
 
     if (isLocalBuf) {
@@ -3208,9 +3207,9 @@ retry:
              */
             bool needDoFlush = false;
             if (!needGetLock) {
-                needDoFlush = LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf), LW_SHARED);
+                needDoFlush = LWLockConditionalAcquire(buf->content_lock, LW_SHARED);
             } else {
-                LWLockAcquire(BufferDescriptorGetContentLock(buf), LW_SHARED);
+                LWLockAcquire(buf->content_lock, LW_SHARED);
                 needDoFlush = true;
             }
             if (needDoFlush) {
@@ -3231,7 +3230,7 @@ retry:
 
                     if (XLogNeedsFlush(lsn) && StrategyRejectBuffer(strategy, buf)) {
                         /* Drop lock/pin and loop around for another buffer */
-                        LWLockRelease(BufferDescriptorGetContentLock(buf));
+                        LWLockRelease(buf->content_lock);
                         UnpinBuffer(buf, true);
                         continue;
                     }
@@ -3244,7 +3243,7 @@ retry:
                 /* during initdb, not need flush dw file */
                 if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
                     if (!free_space_enough(buf->buf_id)) {
-                        LWLockRelease(BufferDescriptorGetContentLock(buf));
+                        LWLockRelease(buf->content_lock);
                         UnpinBuffer(buf, true);
                         continue;
                     }
@@ -3258,7 +3257,7 @@ retry:
                     FlushBuffer(buf, NULL);
                 }
 
-                LWLockRelease(BufferDescriptorGetContentLock(buf));
+                LWLockRelease(buf->content_lock);
 
                 ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
 
@@ -3716,7 +3715,7 @@ void MarkBufferDirty(Buffer buffer)
 
     Assert(BufferIsPinned(buffer));
     /* unfortunately we can't check if the lock is held exclusively */
-    Assert(LWLockHeldByMe(BufferDescriptorGetContentLock(buf_desc)));
+    Assert(LWLockHeldByMe(buf_desc->content_lock));
 
     old_buf_state = LockBufHdr(buf_desc);
 
@@ -3983,8 +3982,8 @@ void UnpinBuffer(BufferDesc *buf, bool fixOwner)
         uint64 buf_state;
 
         /* I'd better not still hold any locks on the buffer */
-        Assert(!LWLockHeldByMe(BufferDescriptorGetContentLock(buf)));
-        Assert(!LWLockHeldByMe(BufferDescriptorGetIOLock(buf)));
+        Assert(!LWLockHeldByMe(buf->content_lock));
+        Assert(!LWLockHeldByMe(buf->io_in_progress_lock));
         for(;;) {
             buf_state = __sync_add_and_fetch(&buf->state, -1);
             if(buf_state & BM_LOCKED) {
@@ -4638,7 +4637,7 @@ bool SyncFlushOneBuffer(int buf_id, bool get_condition_lock)
             retry_times = CONDITION_LOCK_RETRY_TIMES;
         }
         for (;;) {
-            if (!LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf_desc), LW_SHARED)) {
+            if (!LWLockConditionalAcquire(buf_desc->content_lock, LW_SHARED)) {
                 i++;
                 if (i >= retry_times) {
                     UnpinBuffer(buf_desc, true);
@@ -4650,11 +4649,11 @@ bool SyncFlushOneBuffer(int buf_id, bool get_condition_lock)
             break;
         }
     } else {
-        (void)LWLockAcquire(BufferDescriptorGetContentLock(buf_desc), LW_SHARED);
+        (void)LWLockAcquire(buf_desc->content_lock, LW_SHARED);
     }
 
     if (ENABLE_DMS && buf_desc->extra->aio_in_progress) {
-        LWLockRelease(BufferDescriptorGetContentLock(buf_desc));
+        LWLockRelease(buf_desc->content_lock);
         UnpinBuffer(buf_desc, true);
         return false;
     }
@@ -4670,7 +4669,7 @@ bool SyncFlushOneBuffer(int buf_id, bool get_condition_lock)
         ClearReadHint(buf_desc->buf_id);
     }
 
-    LWLockRelease(BufferDescriptorGetContentLock(buf_desc));
+    LWLockRelease(buf_desc->content_lock);
     return true;
 }
 
@@ -6031,7 +6030,7 @@ void flush_all_buffers(Relation rel, Oid db_id, HTAB *hashtbl)
         }
 
         PinBuffer_Locked(buf_desc);
-        (void)LWLockAcquire(BufferDescriptorGetContentLock(buf_desc), LW_SHARED);
+        (void)LWLockAcquire(buf_desc->content_lock, LW_SHARED);
 
         if (rel != NULL && !IsBucketFileNode(buf_desc->tag.rnode)) {
             FlushBuffer(buf_desc, rel->rd_smgr);
@@ -6042,7 +6041,7 @@ void flush_all_buffers(Relation rel, Oid db_id, HTAB *hashtbl)
             FlushBuffer(buf_desc, NULL);
         }
 
-        LWLockRelease(BufferDescriptorGetContentLock(buf_desc));
+        LWLockRelease(buf_desc->content_lock);
         UnpinBuffer(buf_desc, true);
     }
     ereport(DW_LOG_LEVEL,
@@ -6192,7 +6191,7 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
     Assert(GetPrivateRefCount(buffer) > 0);
 
     /* here, either share or exclusive lock is OK */
-    if (!LWLockHeldByMe(BufferDescriptorGetContentLock(buf_desc)))
+    if (!LWLockHeldByMe(buf_desc->content_lock))
         ereport(PANIC, (errcode(ERRCODE_INVALID_BUFFER),
                         (errmsg("current lock of buffer %d is not held by the current thread", buffer))));
 
@@ -6370,7 +6369,7 @@ void update_wait_lockid(LWLock *lock)
     Buffer queue_head_buffer = get_dirty_page_queue_head_buffer();
     if (!BufferIsInvalid(queue_head_buffer)) {
         BufferDesc *queue_head_buffer_desc = GetBufferDescriptor(queue_head_buffer - 1);
-        if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(queue_head_buffer_desc), LW_EXCLUSIVE)) {
+        if (LWLockHeldByMeInMode(queue_head_buffer_desc->content_lock, LW_EXCLUSIVE)) {
             g_instance.ckpt_cxt_ctl->backend_wait_lock = lock;
         }
     }
@@ -6399,11 +6398,11 @@ void LockBuffer(Buffer buffer, int mode)
 
 retry:
     if (mode == BUFFER_LOCK_UNLOCK) {
-        LWLockRelease(BufferDescriptorGetContentLock(buf));
+        LWLockRelease(buf->content_lock);
     } else if (mode == BUFFER_LOCK_SHARE) {
-        (void)LWLockAcquire(BufferDescriptorGetContentLock(buf), LW_SHARED, need_update_lockid);
+        (void)LWLockAcquire(buf->content_lock, LW_SHARED, need_update_lockid);
     } else if (mode == BUFFER_LOCK_EXCLUSIVE) {
-        (void)LWLockAcquire(BufferDescriptorGetContentLock(buf), LW_EXCLUSIVE, need_update_lockid);
+        (void)LWLockAcquire(buf->content_lock, LW_EXCLUSIVE, need_update_lockid);
     } else {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), (errmsg("unrecognized buffer lock mode: %d", mode))));
     }
@@ -6447,7 +6446,7 @@ retry:
                 }
             }
 
-            LWLockRelease(BufferDescriptorGetContentLock(buf));
+            LWLockRelease(buf->content_lock);
             /* when in failover worker thread should exit */
             if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
                 ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
@@ -6484,8 +6483,7 @@ retry:
              * and the timeout time of the primary and standby servers is modified to open the unlocking
              * time window.
              */
-            if (!dms_standby_retry_read && SS_STANDBY_MODE &&
-                !g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot) {
+            if (!dms_standby_retry_read && SS_STANDBY_MODE) {
                 dms_standby_retry_read = true;
                 mode = BUFFER_LOCK_EXCLUSIVE;
             }
@@ -6501,7 +6499,7 @@ retry:
             Assert(mode == BUFFER_LOCK_EXCLUSIVE && origin_mode == BUFFER_LOCK_SHARE);
             mode = origin_mode;
             dms_standby_retry_read = false;
-            LWLockDowngrade(BufferDescriptorGetContentLock(buf));
+            LWLockDowngrade(buf->content_lock);
         }
     }
 
@@ -6529,9 +6527,9 @@ bool TryLockBuffer(Buffer buffer, int mode, bool must_wait)
     volatile BufferDesc *buf = GetBufferDescriptor(buffer - 1);
     bool ret = false;
     if (mode == BUFFER_LOCK_SHARE) {
-        ret = LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf), LW_SHARED);
+        ret = LWLockConditionalAcquire(buf->content_lock, LW_SHARED);
     } else if (mode == BUFFER_LOCK_EXCLUSIVE) {
-        ret = LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf), LW_EXCLUSIVE);
+        ret = LWLockConditionalAcquire(buf->content_lock, LW_EXCLUSIVE);
     } else {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
             (errmsg("unrecognized buffer lock mode for TryLockBuffer: %d", mode))));
@@ -6560,7 +6558,7 @@ bool TryLockBuffer(Buffer buffer, int mode, bool must_wait)
                     TerminateBufferIO(buf, false, 0);
                 }
             }
-            LWLockRelease(BufferDescriptorGetContentLock(buf));
+            LWLockRelease(buf->content_lock);
             ret = false;
         }
     }
@@ -6584,7 +6582,7 @@ bool ConditionalLockBuffer(Buffer buffer)
 
     buf = GetBufferDescriptor(buffer - 1);
 
-    bool ret = LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf), LW_EXCLUSIVE);
+    bool ret = LWLockConditionalAcquire(buf->content_lock, LW_EXCLUSIVE);
 
     if (BUCKET_NODE_IS_EXRTO_READ(buf->tag.rnode.bucketNode)) {
         return ret;
@@ -6608,7 +6606,7 @@ bool ConditionalLockBuffer(Buffer buffer)
                     TerminateBufferIO(buf, false, 0);
                 }
             }
-            LWLockRelease(BufferDescriptorGetContentLock(buf));
+            LWLockRelease(buf->content_lock);
 
             return false;
         }
@@ -6845,7 +6843,7 @@ bool IsBufferCleanupOK(Buffer buffer)
     bufHdr = GetBufferDescriptor(buffer - 1);
 
     /* caller must hold exclusive lock on buffer */
-    Assert(LWLockHeldByMeInMode(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE));
+    Assert(LWLockHeldByMeInMode(bufHdr->content_lock, LW_EXCLUSIVE));
 
     buf_state = LockBufHdr(bufHdr);
 
@@ -6894,8 +6892,8 @@ void WaitIO(BufferDesc *buf)
         if (!(buf_state & BM_IO_IN_PROGRESS)) {
             break;
         }
-        (void)LWLockAcquire(BufferDescriptorGetIOLock(buf), LW_SHARED);
-        LWLockRelease(BufferDescriptorGetIOLock(buf));
+        (void)LWLockAcquire(buf->io_in_progress_lock, LW_SHARED);
+        LWLockRelease(buf->io_in_progress_lock);
     }
 }
 
@@ -6964,10 +6962,10 @@ bool StartBufferIO(BufferDesc *buf, bool for_input)
          * Grab the io_in_progress lock so that other processes can wait for
          * me to finish the I/O.
          */
-        (void)LWLockAcquire(BufferDescriptorGetIOLock(buf), LW_EXCLUSIVE);
+        (void)LWLockAcquire(buf->io_in_progress_lock, LW_EXCLUSIVE);
 
         if (buf->extra->aio_in_progress) {
-            LWLockRelease(BufferDescriptorGetIOLock(buf));
+            LWLockRelease(buf->io_in_progress_lock);
             pg_usleep(1000L);
             continue;
         }
@@ -6984,7 +6982,7 @@ bool StartBufferIO(BufferDesc *buf, bool for_input)
          * him to get unwedged.
          */
         UnlockBufHdr(buf, buf_state);
-        LWLockRelease(BufferDescriptorGetIOLock(buf));
+        LWLockRelease(buf->io_in_progress_lock);
         WaitIO(buf);
     }
 
@@ -6992,7 +6990,7 @@ bool StartBufferIO(BufferDesc *buf, bool for_input)
     if (for_input ? (buf_state & BM_VALID) : !(buf_state & BM_DIRTY)) {
         /* someone else already did the I/O */
         UnlockBufHdr(buf, buf_state);
-        LWLockRelease(BufferDescriptorGetIOLock(buf));
+        LWLockRelease(buf->io_in_progress_lock);
         return false;
     }
 
@@ -7049,7 +7047,7 @@ void TerminateBufferIO(volatile BufferDesc *buf, bool clear_dirty, uint64 set_fl
     } else {
         u_sess->storage_cxt.bulk_io_in_progress_count--;
     }
-    LWLockRelease(BufferDescriptorGetIOLock((BufferDesc *)buf));
+    LWLockRelease(((BufferDesc *)buf)->io_in_progress_lock);
 }
 
 /*
@@ -7077,7 +7075,7 @@ void AsyncTerminateBufferIO(void *buffer, bool clear_dirty, uint64 set_flag_bits
     BufferDesc *buf = (BufferDesc *)buffer;
 
     TerminateBufferIO_common(buf, clear_dirty, set_flag_bits);
-    LWLockRelease(BufferDescriptorGetIOLock(buf));
+    LWLockRelease(buf->io_in_progress_lock);
 }
 
 /*
@@ -7160,7 +7158,7 @@ bulk_read_loop:
          * we can use TerminateBufferIO. Anyone who's executing WaitIO on the
          * buffer will be in a busy spin until we succeed in doing this.
          */
-        (void)LWLockAcquire(BufferDescriptorGetIOLock(buf), LW_EXCLUSIVE);
+        (void)LWLockAcquire(buf->io_in_progress_lock, LW_EXCLUSIVE);
         AbortBufferIO_common(buf, isForInput);
         TerminateBufferIO(buf, false, BM_IO_ERROR);
     }

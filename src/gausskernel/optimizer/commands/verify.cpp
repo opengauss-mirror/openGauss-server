@@ -1866,7 +1866,7 @@ void VerifyAbortBufferIO(void)
         HOLD_INTERRUPTS();
 
         /* LWLockRelease will deal with the abnormal situation and statistical count to avoid the assert error. */
-        LWLockRelease(BufferDescriptorGetIOLock(buf));
+        LWLockRelease(buf->io_in_progress_lock);
         UnpinBuffer(buf, true);
 
         /*
@@ -1875,7 +1875,7 @@ void VerifyAbortBufferIO(void)
          * we can use TerminateBufferIO. Anyone who's executing WaitIO on the buffer will be in a
          * busy spin until we succeed in doing this.
          */
-        LWLockAcquire(BufferDescriptorGetIOLock(buf), LW_EXCLUSIVE);
+        LWLockAcquire(buf->io_in_progress_lock, LW_EXCLUSIVE);
         AbortBufferIO_common(buf, isForInput);
         TerminateBufferIO(buf, false, BM_IO_ERROR);
     }

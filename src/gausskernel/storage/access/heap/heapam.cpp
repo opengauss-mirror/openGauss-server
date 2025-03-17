@@ -10374,7 +10374,7 @@ void heapam_index_fetch_end(IndexFetchTableData *scan)
 static bool BufferExclusiveLockHeldByMe(Buffer cbuf)
 {
     volatile BufferDesc *buf = GetBufferDescriptor(cbuf - 1);
-    return LWLockHeldByMeInMode(BufferDescriptorGetContentLock(buf), LW_EXCLUSIVE);
+    return LWLockHeldByMeInMode(buf->content_lock, LW_EXCLUSIVE);
 }
 
 HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write)

@@ -410,7 +410,7 @@ bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn, XLogRe
         return false;
     }
     
-    LWLockAcquire(BufferDescriptorGetContentLock(buf_desc), LW_SHARED);
+    LWLockAcquire(buf_desc->content_lock, LW_SHARED);
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id);
     if (DMS_BUF_CTRL_IS_OWNER(buf_ctrl)) {
         Buffer buf = buf_id + 1;
@@ -442,7 +442,7 @@ bool SSPageReplayNeedSkip(RedoBufferInfo *bufferinfo, XLogRecPtr xlogLsn, XLogRe
         }
     }
 
-    LWLockRelease(BufferDescriptorGetContentLock(buf_desc));
+    LWLockRelease(buf_desc->content_lock);
     SSUnPinBuffer(buf_desc);
     return false;
 }

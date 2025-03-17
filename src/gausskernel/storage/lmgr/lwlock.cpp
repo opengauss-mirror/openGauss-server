@@ -395,6 +395,9 @@ int NumLWLocks(void)
     /* Predefined LWLocks */
     numLocks = (int)NumFixedLWLocks;
 
+    /* bufmgr.c needs two for each shared buffer */
+    numLocks += 2 * TOTAL_BUFFER_NUM;
+
     if (ENABLE_DMS) {
         numLocks += TOTAL_BUFFER_NUM; // dms_buf_ctrl_t lock
     }
@@ -551,10 +554,6 @@ void CreateLWLocks(void)
     char *ptr = NULL;
 
     StaticAssertExpr(LW_VAL_EXCLUSIVE > (uint32)MAX_BACKENDS, "MAX_BACKENDS too big for lwlock.cpp");
-
-    StaticAssertExpr(sizeof(LWLock) <= LWLOCK_MINIMAL_SIZE &&
-                     sizeof(LWLock) <= LWLOCK_PADDED_SIZE,
-                     "Miscalculated LWLock padding");
     /* Allocate space */
     ptr = (char *)ShmemAlloc(spaceLocks);
 
@@ -920,7 +919,7 @@ static bool LWLockAttemptLock(LWLock *lock, LWLockMode mode)
 
             desired_state = old_state + refoneByThread;
             
-            if ((desired_state & (LW_VAL_EXCLUSIVE)) != 0) {
+            if (unlikely((desired_state & LW_VAL_EXCLUSIVE) != 0)) {
                 return true;
             }
         } while (!pg_atomic_compare_exchange_u8((((volatile uint8*)&lock->state) + maskId), ((uint8*)&old_state) + maskId, (desired_state >> (8 * maskId))));
@@ -1316,6 +1315,19 @@ static bool LWLockConflictsWithVar(LWLock *lock, uint64 *valptr, uint64 oldval, 
 const float NEED_UPDATE_LOCKID_QUEUE_SLOT = 0.6;
 
 /*
+ * remember lwlock hold when success to acquire
+ * the lwlock.
+ */
+static inline void remember_lwlock_hold(LWLock *lock, LWLockMode mode)
+{
+    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
+    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
+    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
+        (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
+    t_thrd.storage_cxt.num_held_lwlocks++;
+}
+
+/*
  * LWLockAcquire - acquire a lightweight lock in the specified mode
  *
  * If the lock is not available, sleep until it is.
@@ -1354,7 +1366,7 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
     Assert(!(proc == NULL && IsUnderPostmaster));
 
     /* Ensure we will have room to remember the lock */
-    if (t_thrd.storage_cxt.num_held_lwlocks >= MAX_SIMUL_LWLOCKS) {
+    if (unlikely(t_thrd.storage_cxt.num_held_lwlocks >= MAX_SIMUL_LWLOCKS)) {
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("too many LWLocks taken")));
     }
 

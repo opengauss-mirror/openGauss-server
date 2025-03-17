@@ -1185,7 +1185,7 @@ SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum,
     Buffer buffer = read_head_buffer(reln, forknum, false);
     SegmentCheck(BufferIsValid(buffer));
     volatile BufferDesc *buf = GetBufferDescriptor(buffer - 1);
-    bool locked = LWLockHeldByMe(BufferDescriptorGetContentLock(buf));
+    bool locked = LWLockHeldByMe(buf->content_lock);
     if (!(ENABLE_DMS && locked)) {
         LockBuffer(buffer, BUFFER_LOCK_SHARE);
     }
@@ -1495,7 +1495,7 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
 #endif
 
     BufferDesc *buf_desc = BufferGetBufferDescriptor(buf);
-    SegmentCheck(!LWLockHeldByMe(BufferDescriptorGetContentLock(buf_desc)));
+    SegmentCheck(!LWLockHeldByMe(buf_desc->content_lock));
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
     ExtendStat ext_stat;

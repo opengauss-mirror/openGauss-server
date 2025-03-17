@@ -4595,7 +4595,7 @@ void SyncWaitXidEnd(TransactionId xid, Buffer buffer, const Snapshot snapshot)
     }
 
     BufferDesc *bufHdr = GetBufferDescriptor(buffer - 1);
-    LWLockMode mode = GetHeldLWLockMode(BufferDescriptorGetContentLock(bufHdr));
+    LWLockMode mode = GetHeldLWLockMode(bufHdr->content_lock);
 
     Assert(mode == LW_EXCLUSIVE || mode == LW_SHARED);
 

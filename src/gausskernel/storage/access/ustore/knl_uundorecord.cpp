@@ -129,7 +129,7 @@ void UndoRecord::Reset(UndoRecPtr urp)
         if (!IS_VALID_UNDO_REC_PTR(urp) || (UNDO_PTR_GET_ZONE_ID(urp) != UNDO_PTR_GET_ZONE_ID(urp_)) ||
             (UNDO_PTR_GET_BLOCK_NUM(urp) != BufferGetBlockNumber(buff_))) {
             BufferDesc *buf_desc = GetBufferDescriptor(buff_ - 1);
-            if (LWLockHeldByMe(BufferDescriptorGetContentLock(buf_desc))) {
+            if (LWLockHeldByMe(buf_desc->content_lock)) {
                 ereport(LOG, (errmodule(MOD_UNDO),
                     errmsg("Release Buffer %d when Reset UndoRecord from %lu to %lu.", buff_, urp_, urp)));
                 LockBuffer(buff_, BUFFER_LOCK_UNLOCK);

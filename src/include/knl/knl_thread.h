@@ -2640,9 +2640,6 @@ typedef struct knl_t_storage_context {
     struct VirtualTransactionId* proc_vxids;
     TransactionId* xminArray;
     union BufferDescPadded* BufferDescriptors;
-    LWLockMinimallyPadded *BufferIOLWLockArray;
-    LWLockTranche BufferIOLWLockTranche;
-    LWLockTranche BufferContentLWLockTranche;
     char* BufferBlocks;
     char* NvmBufferBlocks;
     struct WritebackContext* BackendWritebackContext;

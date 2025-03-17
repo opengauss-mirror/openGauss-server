@@ -385,26 +385,11 @@ typedef struct LWLock {
 #else
 #define LWLOCK_PADDED_SIZE (sizeof(LWLock) <= 32 ? 32 : 64)
 #endif
-#define LWLOCK_MINIMAL_SIZE (sizeof(LWLock) <= 32 ? 32 : 64)
-
-typedef struct LWLockTranche
-{
-    const char *name;
-    void *array_base;
-    Size array_stride;
-} LWLockTranche;
 
 typedef union LWLockPadded {
     LWLock lock;
     char pad[LWLOCK_PADDED_SIZE];
 } LWLockPadded;
-
-/* LWLock, minimally padded */
-typedef union LWLockMinimallyPadded
-{
-    LWLock lock;
-    char pad[LWLOCK_MINIMAL_SIZE];
-} LWLockMinimallyPadded;
 
 extern PGDLLIMPORT LWLockPadded *MainLWLockArray;
 
