@@ -60,6 +60,9 @@ OUT prevurp text, OUT payloadlen text, OUT oldxactid text, OUT partitionoid text
 RETURNS SETOF record LANGUAGE INTERNAL STABLE NOT FENCED NOT SHIPPABLE ROWS 1 as 'gs_undo_dump_record';
 
 /*------ add sys fuction gs_undo_dump_xid ------*/
+DROP FUNCTION IF EXISTS pg_catalog.gs_undo_dump_xid(int4, OUT undoptr oid, OUT xactid oid, OUT cid text,
+OUT reloid text, OUT relfilenode text, OUT utype text, OUT blkprev text, OUT blockno text, OUT uoffset text,
+OUT prevurp text, OUT payloadlen text, OUT oldxactid text, OUT partitionoid text, OUT tablespace text, OUT alreadyread_bytes text, OUT prev_undorec_len text, OUT td_id text, OUT reserved text, OUT flag text, OUT flag2 text, OUT t_hoff text) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_undo_dump_xid(xid, OUT undoptr oid, OUT xactid oid, OUT cid text,
 OUT reloid text, OUT relfilenode text, OUT utype text, OUT blkprev text, OUT blockno text, OUT uoffset text,
 OUT prevurp text, OUT payloadlen text, OUT oldxactid text, OUT partitionoid text, OUT tablespace text, OUT alreadyread_bytes text, OUT prev_undorec_len text, OUT td_id text, OUT reserved text, OUT flag text, OUT flag2 text, OUT t_hoff text) CASCADE;
