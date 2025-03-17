@@ -192,7 +192,7 @@ def process_os_directory(session, minor_version, minor_version_url, os_link, tar
 
                         images.append({
                             "os": os_info,
-                            "arch": arch_info,
+                            "arch": get_normalized_arch(arch_info),
                             "url": image_url,
                             "minor_version": minor_version.replace("openGauss", ""),
                             "file_size": file_size,
