@@ -63,21 +63,6 @@ void forget_lwlock_acquire(void)
     }
 }
 
-
-/* 
- * remember lwlock hold when success to acquire
- * the lwlock.
- */
-void remember_lwlock_hold(LWLock *lock, LWLockMode mode)
-{
-    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
-    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
-    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] = 
-        (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
-    t_thrd.storage_cxt.num_held_lwlocks++;
-}
-
-
 /*
  * find lwlock we held and return the index.
  */
@@ -93,7 +78,7 @@ int find_lwlock_hold(LWLock *lock)
         }
     }
 
-    if (i < 0) {
+    if (unlikely(i < 0)) {
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
     }
 

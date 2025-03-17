@@ -32,7 +32,6 @@
 extern void remember_lwlock_acquire(LWLock* lockid, LWLockMode mode);
 extern void forget_lwlock_acquire(void);
 
-extern void remember_lwlock_hold(LWLock *lock, LWLockMode mode);
 extern int find_lwlock_hold(LWLock *lock);
 extern LWLockMode forget_lwlock_hold(LWLock *lock);
 

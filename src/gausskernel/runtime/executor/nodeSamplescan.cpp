@@ -593,7 +593,7 @@ ScanValid RowTableSample::scanTup()
         BufferDesc* bufHdr = GetBufferDescriptor(scan->rs_cbuf - 1);
         bool isTmpLock = false;
 
-        if (!LWLockHeldByMe(BufferDescriptorGetContentLock(bufHdr))) {
+        if (!LWLockHeldByMe(bufHdr->content_lock)) {
             LockBuffer(scan->rs_cbuf, BUFFER_LOCK_SHARE);
             isTmpLock = true;
         }

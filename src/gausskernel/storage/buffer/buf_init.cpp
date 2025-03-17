@@ -76,7 +76,6 @@ void InitBufferPool(void)
 {
     bool found_bufs = false;
     bool found_descs = false;
-    bool found_iolocks = false;
     bool found_buf_ckpt = false;
     bool found_buf_extra = false;
     uint64 buffer_size;
@@ -160,29 +159,9 @@ void InitBufferPool(void)
             relfilenode_fork_hashtbl_create("unlink_rel_one_fork_hashtbl", true);
     }
 
-    /* Align lwlocks to cacheline boundary */
-    t_thrd.storage_cxt.BufferIOLWLockArray = (LWLockMinimallyPadded *)
-        CACHELINEALIGN(ShmemInitStruct("Buffer IO Locks",
-                              TOTAL_BUFFER_NUM * (Size) sizeof(LWLockMinimallyPadded)
-                                       + PG_CACHE_LINE_SIZE,
-                                       &found_iolocks));
-
-    t_thrd.storage_cxt.BufferIOLWLockTranche.name = "Buffer IO Locks";
-    t_thrd.storage_cxt.BufferIOLWLockTranche.array_base = t_thrd.storage_cxt.BufferIOLWLockArray;
-    t_thrd.storage_cxt.BufferIOLWLockTranche.array_stride = sizeof(LWLockMinimallyPadded);
-    LWLockRegisterTranche(LWTRANCHE_BUFFER_IO_IN_PROGRESS,
-                          (const char*)&t_thrd.storage_cxt.BufferIOLWLockTranche);
-
-    t_thrd.storage_cxt.BufferContentLWLockTranche.name = "Buffer Content Locks";
-    t_thrd.storage_cxt.BufferContentLWLockTranche.array_base =
-        ((char *) t_thrd.storage_cxt.BufferDescriptors) + offsetof(BufferDesc, content_lock);
-    t_thrd.storage_cxt.BufferContentLWLockTranche.array_stride = sizeof(BufferDescPadded);
-    LWLockRegisterTranche(LWTRANCHE_BUFFER_CONTENT,
-                          (const char*)&t_thrd.storage_cxt.BufferContentLWLockTranche);
-
-    if (found_descs || found_bufs || found_iolocks || found_buf_ckpt || found_buf_extra) {
+    if (found_descs || found_bufs || found_buf_ckpt || found_buf_extra) {
         /* both should be present or neither */
-        Assert(found_descs && found_bufs && found_iolocks && found_buf_ckpt && found_buf_extra);
+        Assert(found_descs && found_bufs && found_buf_ckpt && found_buf_extra);
         /* note: this path is only taken in EXEC_BACKEND case */
     } else {
         int i;
@@ -199,8 +178,8 @@ void InitBufferPool(void)
 
             buf->extra = &extra[i];
             buf->buf_id = i;
-            LWLockInitialize(BufferDescriptorGetContentLock(buf), LWTRANCHE_BUFFER_CONTENT, i);
-            LWLockInitialize(BufferDescriptorGetIOLock(buf), LWTRANCHE_BUFFER_IO_IN_PROGRESS, i);
+            buf->io_in_progress_lock = LWLockAssign(LWTRANCHE_BUFFER_IO_IN_PROGRESS, i);
+            buf->content_lock = LWLockAssign(LWTRANCHE_BUFFER_CONTENT, i);
             pg_atomic_init_u64(&buf->extra->rec_lsn, InvalidXLogRecPtr);
             buf->extra->aio_in_progress = false;
             buf->extra->dirty_queue_loc = PG_UINT64_MAX;
@@ -272,17 +251,6 @@ Size BufferShmemSize(void)
         size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(dms_buf_ctrl_t))) + ALIGNOF_BUFFER + PG_CACHE_LINE_SIZE;
     }
 
-    /*
-     * It would be nice to include the I/O locks in the BufferDesc, but that
-     * would increase the size of a BufferDesc to more than one cache line, and
-     * benchmarking has shown that keeping every BufferDesc aligned on a cache
-     * line boundary is important for performance.  So, instead, the array of
-     * I/O locks is allocated in a separate tranche.  Because those locks are
-     * not highly contentended, we lay out the array with minimal padding.
-     */
-    size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(LWLockMinimallyPadded)));
-    /* to allow aligning the above */
-    size = add_size(size, PG_CACHE_LINE_SIZE);
     return size;
 }
 

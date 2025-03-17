@@ -2048,7 +2048,7 @@ static void InitConfigureNamesBool()
             NULL
             },
             &u_sess->attr.attr_storage.enable_heap_prefetch,
-            true,
+            false,
             NULL,
             NULL,
             NULL
