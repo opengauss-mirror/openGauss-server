@@ -34749,3 +34749,38 @@ static void check_unsupported_charset_for_column(Oid collation, const char* col_
                 col_name)));
     }
 }
+
+bool IsComputedColumn(Oid adrelid, int2 asnum)
+{
+    Relation    attrdef;
+    ScanKeyData keys[2];
+    SysScanDesc scan;
+    HeapTuple   tup;
+    bool        res = false;
+
+    attrdef = relation_open(AttrDefaultRelationId, AccessShareLock);
+    ScanKeyInit(&keys[0],
+                Anum_pg_attrdef_adrelid,
+                BTEqualStrategyNumber,
+                F_OIDEQ,
+                ObjectIdGetDatum(adrelid));
+    ScanKeyInit(&keys[1],
+                Anum_pg_attrdef_adnum,
+                BTEqualStrategyNumber,
+                F_INT2EQ,
+                Int16GetDatum(asnum));
+    scan = systable_beginscan(attrdef, AttrDefaultIndexId, true, NULL, 2, keys);
+    if (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        bool isnull = false;
+        char generatedCol = '\0';
+        Datum adgencol = fastgetattr(tup, Anum_pg_attrdef_adgencol, attrdef->rd_att, &isnull);
+        if (!isnull) {
+            generatedCol = DatumGetChar(adgencol);
+        }
+        res = (generatedCol == ATTRIBUTE_GENERATED_PERSISTED);
+    }
+
+    systable_endscan(scan);
+    relation_close(attrdef, AccessShareLock);
+    return res;
+}

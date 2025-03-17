@@ -46,7 +46,6 @@ static void pltsql_TransformSelectForLimitHook(SelectStmt* stmt);
 static void pltsql_RecomputeLimitsHook(float8 val);
 static ObjectAddress GetAttrDefaultColumnAddress(Oid attrdefoid);
 static bool check_nested_computed_column(Node *node, void *context);
-static bool IsComputedColumn(Oid adrelid, int2 asnum);
 
 /* Hook to tablecmds.cpp in the engine */
 static void* prev_InvokePreDropColumnHook = NULL;
@@ -259,26 +258,7 @@ static void pltsql_PreAddConstraintsHook(Relation rel, ParseState *pstate, List 
 
         attTup->atttypid = targettype;
         attTup->atttypmod = targettypmod;
-
-        /*
-         * The target column should already be having a collation associated
-         * with it due to explicit COLLATE clause If suppose collation is not
-         * valid or there is no explicit COLLATE clause, we try to find column
-         * collation from finished expession.
-         */
-        if (!OidIsValid(attTup->attcollation)) {
-            Oid targetcollid;
-
-            /* take care of collations in the finished expression */
-            assign_expr_collations(pstate, expr);
-            targetcollid = exprCollation(expr);
-
-            if (OidIsValid(targetcollid)) {
-                attTup->attcollation = targetcollid;
-            } else {
-                attTup->attcollation = tform->typcollation;
-            }
-        }
+        attTup->attcollation = 0;
 
         attTup->attndims = tform->typndims;
         attTup->attlen = tform->typlen;
@@ -330,41 +310,6 @@ static void pltsql_RecomputeLimitsHook(float8 val)
                 errmodule(MOD_EXECUTOR),
                 errmsg("Percent values must be between 0 and 100.")));
     }
-}
-
-static bool IsComputedColumn(Oid adrelid, int2 asnum)
-{
-    Relation    attrdef;
-    ScanKeyData keys[2];
-    SysScanDesc scan;
-    HeapTuple   tup;
-    bool        res = false;
-
-    attrdef = relation_open(AttrDefaultRelationId, AccessShareLock);
-    ScanKeyInit(&keys[0],
-                Anum_pg_attrdef_adrelid,
-                BTEqualStrategyNumber,
-                F_OIDEQ,
-                ObjectIdGetDatum(adrelid));
-    ScanKeyInit(&keys[1],
-                Anum_pg_attrdef_adnum,
-                BTEqualStrategyNumber,
-                F_INT2EQ,
-                Int16GetDatum(asnum));
-    scan = systable_beginscan(attrdef, AttrDefaultIndexId, true, NULL, 2, keys);
-    if (HeapTupleIsValid(tup = systable_getnext(scan))) {
-        bool isnull = false;
-        char generatedCol = '\0';
-        Datum adgencol = fastgetattr(tup, Anum_pg_attrdef_adgencol, attrdef->rd_att, &isnull);
-        if (!isnull) {
-            generatedCol = DatumGetChar(adgencol);
-        }
-        res = (generatedCol == ATTRIBUTE_GENERATED_PERSISTED);
-    }
-
-    systable_endscan(scan);
-    relation_close(attrdef, AccessShareLock);
-    return res;
 }
 
 /*

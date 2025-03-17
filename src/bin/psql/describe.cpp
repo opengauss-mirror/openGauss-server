@@ -1967,8 +1967,10 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                     appendPQExpBufferStr(&tmpbuf, " ");
                 }
                 /* translator: default values of column definitions */
-                if (strlen(PQgetvalue(res, i, PQfnumber(res, "generated_column"))) > 0) {
-                    appendPQExpBuffer(&tmpbuf, _("generated always as (%s) stored"), default_value);
+                char* gencolType = PQgetvalue(res, i, PQfnumber(res, "generated_column"));
+                if (gencolType && strlen(gencolType) > 0) {
+                    appendPQExpBuffer(&tmpbuf, (strcmp(gencolType, "p") == 0 ? _("as (%s) persisted") :
+                                      _("generated always as (%s) stored")), default_value);
                 } else if (strcmp(default_value, "AUTO_INCREMENT") == 0) {
                     appendPQExpBuffer(&tmpbuf, _("%s"), default_value);
                 } else {

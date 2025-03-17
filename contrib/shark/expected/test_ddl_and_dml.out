@@ -20,13 +20,13 @@ select * from Products;
 (2 rows)
 
 \d+ Products
-                                                                   Table "test_ddl_and_dml.products"
-     Column     |   Type   |                                              Modifiers                                              | Storage | Stats target | Description 
-----------------+----------+-----------------------------------------------------------------------------------------------------+---------+--------------+-------------
- qtyavailable   | smallint |                                                                                                     | plain   |              | 
- unitprice      | money    |                                                                                                     | plain   |              | 
- inventoryvalue | money    | collate default generated always as ((qtyavailable * unitprice)) stored                             | plain   |              | 
- retailvalue    | money    | collate default generated always as (((qtyavailable * unitprice) * (1.5)::double precision)) stored | plain   |              | 
+                                                    Table "test_ddl_and_dml.products"
+     Column     |   Type   |                               Modifiers                               | Storage | Stats target | Description 
+----------------+----------+-----------------------------------------------------------------------+---------+--------------+-------------
+ qtyavailable   | smallint |                                                                       | plain   |              | 
+ unitprice      | money    |                                                                       | plain   |              | 
+ inventoryvalue | money    | as ((qtyavailable * unitprice)) persisted                             | plain   |              | 
+ retailvalue    | money    | as (((qtyavailable * unitprice) * (1.5)::double precision)) persisted | plain   |              | 
 Has OIDs: no
 Options: orientation=row, compression=no
 
@@ -1882,10 +1882,10 @@ SELECT 1 IP;
   1
 (1 row)
 
-SELECT 1 IS;
- is 
-----
-  1
+SELECT 1 CHECKIDENT;
+ checkident 
+------------
+          1
 (1 row)
 
 SELECT 1 ISOLATION;

@@ -1022,6 +1022,7 @@ direct_label_keyword: ABORT_P
             | CHARACTERSET
             | CHARSET
             | CHECK
+            | CHECKIDENT
             | CHECKPOINT
             | CLASS
             | CLASS_ORIGIN
@@ -1246,7 +1247,6 @@ direct_label_keyword: ABORT_P
             | INVISIBLE
             | INVOKER
             | IP
-            | IS
             | ISOLATION
             | JOIN
             | JSON_EXISTS

@@ -1710,12 +1710,26 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
     get_atttypetypmodcoll(relid, attrForm->attnum,
                           &typid, &typmod, &typcollation);
 
-    ret = new_objtree_VA("%{name}I %{coltype}T", 3,
-                         "type", ObjTypeString, "column",
-                         "name", ObjTypeString, coldef->colname,
-                         "coltype", ObjTypeObject,
-                         new_objtree_for_type(typid, typmod));
-
+    constexpr int numThree = 3;
+    constexpr int numFour = 3;
+    if (coldef->generatedCol != ATTRIBUTE_GENERATED_PERSISTED) {
+        ret = new_objtree_VA("%{name}I %{coltype}T", numThree,
+                             "type", ObjTypeString, "column",
+                             "name", ObjTypeString, coldef->colname,
+                             "coltype", ObjTypeObject,
+                             new_objtree_for_type(typid, typmod));
+    } else {
+        ObjTree* dummy = new_objtree_VA(NULL, numFour,
+                                        "schemaname", ObjTypeString, "",
+                                        "typename", ObjTypeString, "",
+                                        "typmod", ObjTypeString, "",
+                                        "typarray", ObjTypeBool, false);
+        append_not_present(dummy, NULL);
+        ret = new_objtree_VA("%{name}I", numThree,
+                             "type", ObjTypeString, "column",
+                             "name", ObjTypeString, coldef->colname,
+                             "coltype", ObjTypeObject, dummy);
+    }
     tmp_obj = new_objtree("COLLATE");
     if (OidIsValid(typcollation)) {
         append_object_object(tmp_obj, "%{name}D",
