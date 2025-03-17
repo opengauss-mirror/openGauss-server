@@ -1,0 +1,61 @@
+start transaction;
+select pg_sleep(10);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+call proc1();
+INFO:  v_lastname is wang
+INFO:  v_jobid is 1
+INFO:  ----------------------------
+INFO:  v_age is 1
+INFO:  v_depid is 1
+INFO:  ----------------------------
+ proc1 
+-------
+ 
+(1 row)
+
+select * from employees;
+ last_name | job_id 
+-----------+--------
+ wang      |      1
+ hu        |      2
+ zhou      |      3
+ wang      |     11
+ wang      |    101
+ wang      |     11
+ wang      |     11
+ wang      |     11
+(8 rows)
+
+commit;
+start transaction;
+call proc2();
+INFO:  v_lastname is wang
+INFO:  v_jobid is 1
+INFO:  ----------------------------
+INFO:  v_age is 1
+INFO:  v_depid is 1
+INFO:  ----------------------------
+ proc2 
+-------
+ 
+(1 row)
+
+select * from employees2;
+ age | dep_id 
+-----+--------
+   1 |      1
+   2 |      2
+   3 |      3
+  11 |     11
+ 101 |    101
+  11 |     11
+  11 |     11
+  11 |     11
+ 101 |    101
+(9 rows)
+
+commit;

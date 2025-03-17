@@ -557,6 +557,57 @@ cursor 'abort' for select * from abort_test order by 1;
 close 'abort';
 commit;
 
+drop table if exists employees;
+drop table if exists employees2;
+create table employees (
+   last_name varchar(20),
+   job_id int
+);
+create table employees2 (
+   age int,
+   dep_id int
+);
+
+insert into employees values ('wang',1), ('hu',2), ('zhou',3);
+insert into employees2 values (119,12), (45,21), (51,33);
+
+DECLARE
+    cv SYS_REFCURSOR;
+    v_lastname  employees.last_name%TYPE;
+    v_jobid     employees.job_id%TYPE;
+    v_age       employees2.age%TYPE;
+    v_depid     employees2.dep_id%TYPE;
+    query_2     VARCHAR2(200) := 'SELECT * FROM employees2  WHERE dep_id';
+    v_employees employees%ROWTYPE;
+BEGIN
+    OPEN cv FOR
+        SELECT last_name, job_id FROM employees;
+    raise info 'cursor count is: %',cv%rowcount;
+    raise info 'cursor is open: %',cv%isopen;
+    LOOP
+        FETCH cv INTO v_lastname, v_jobid;
+        EXIT WHEN cv%NOTFOUND;
+        raise info 'v_lastname is %',v_lastname;
+        raise info 'v_jobid is %',v_jobid;
+        raise info 'cursor count is: %',cv%rowcount;
+        raise info 'cursor is open: %',cv%isopen;
+    END LOOP;
+    raise info '----------------------------';
+    OPEN cv FOR query_2;
+    raise info '[reopen] cursor count is: %',cv%rowcount;
+    raise info '[reopen] cursor is open: %',cv%isopen;
+    LOOP
+        FETCH cv INTO v_age, v_depid;
+        EXIT WHEN cv%NOTFOUND;
+        raise info 'v_age is %',v_age;
+        raise info 'v_depid is %',v_depid;
+        raise info 'cursor count is: %',cv%rowcount;
+        raise info 'cursor is open: %',cv%isopen;
+    END LOOP;
+    raise info '----------------------------';
+END;
+/
+
 -- clean
 drop table abort_test;
 drop table test_insert;

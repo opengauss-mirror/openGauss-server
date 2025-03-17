@@ -1,0 +1,4 @@
+drop table if exists employees;
+drop table if exists employees2;
+drop PROCEDURE proc1;
+drop PROCEDURE proc2;

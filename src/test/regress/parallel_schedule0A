@@ -480,6 +480,9 @@ test: select_into subselect_part2 gs_aggregate
 #test: transactions_control random union
 #test: aggregates
 test: holdable_cursor cursor_expression cursor_expression_dump
+test: cursor_reopen_paral_pre
+test: cursor_reopen_paral_1 cursor_reopen_paral_2 cursor_reopen_paral_3
+test: cursor_reopen_paral_end
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
 test: test_float test_numeric_with_neg_scale test_float_dump db4ai_security

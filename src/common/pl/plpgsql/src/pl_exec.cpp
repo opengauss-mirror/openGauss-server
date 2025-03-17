@@ -8978,6 +8978,7 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
     char* curname = NULL;
     PLpgSQL_expr* query = NULL;
     Portal portal = NULL;
+    Portal old_portal = NULL;
     ParamListInfo paramLI = NULL;
     /* ----------
      * Get the cursor variable and if it has an assigned name, check
@@ -9020,11 +9021,14 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
         } else {
             curname = TextDatumGetCString(curvar->value);
         }
-        if (SPI_cursor_find(curname) != NULL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_DUPLICATE_CURSOR),
-                    errmodule(MOD_PLSQL),
-                    errmsg("cursor \"%s\" already in use in OPEN statement.", curname)));
+        old_portal = SPI_cursor_find(curname);
+        if (old_portal != NULL) {
+            SPI_cursor_close(old_portal);
+            exec_set_isopen(estate, false, stmt->curvar + CURSOR_ISOPEN);
+            exec_set_cursor_found(estate, PLPGSQL_NULL, stmt->curvar + CURSOR_FOUND);
+            exec_set_notfound(estate, PLPGSQL_NULL, stmt->curvar + CURSOR_NOTFOUND);
+            exec_set_rowcount(estate, -1, true, stmt->curvar + CURSOR_ROWCOUNT);
+            curvar->cursor_closed = true;
         }
     }
 #ifdef ENABLE_MULTIPLE_NODES
