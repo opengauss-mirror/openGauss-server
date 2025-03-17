@@ -14276,7 +14276,7 @@ static bool funcContainsSubprogram(Archive* fout, FuncInfo* finfo)
     }
 
     PQExpBuffer query = createPQExpBuffer();
-    appendPQExpBuffer(query, "SELECT count(*) AS numSubprogram "
+    appendPQExpBuffer(query, "SELECT count(*) AS numsubprogram "
         "from pg_catalog.pg_proc p "
         "left join pg_catalog.pg_proc_ext o "
         "on p.oid = o.pro_proc_oid "
@@ -14284,7 +14284,7 @@ static bool funcContainsSubprogram(Archive* fout, FuncInfo* finfo)
         "pro_proc_oid != 0",
         finfo->dobj.catId.oid);
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-    numSubprogram = (int)strtol(PQgetvalue(res, 0, PQfnumber(res, "numSubprogram")), &endStr, 10);
+    numSubprogram = (int)strtol(PQgetvalue(res, 0, PQfnumber(res, "numsubprogram")), &endStr, 10);
     PQclear(res);
     destroyPQExpBuffer(query);
 
