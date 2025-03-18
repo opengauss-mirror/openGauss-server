@@ -45,6 +45,7 @@ typedef struct json_walker_context {
 knl_instance_context g_instance;
 
 static List* raw_parser_opengauss(const char* str);
+static char* GetObjectTypeString(ObjectType type);
 #ifdef DOLPHIN
 extern "C" List* dolphin_raw_parser(const char* str, List** query_string_locationlist);
 #endif
@@ -219,12 +220,21 @@ extern bool create_json_walker(Node* node, void* walker_context)
 
         if (IsA(node, DropStmt)) {
             DropStmt* dstmt = (DropStmt*)node;
+            if (dstmt->removeType) {
+                cJSON_AddStringToObject(stmt, "objectType",  GetObjectTypeString(dstmt->removeType));
+            }
             if (dstmt->objects) {
                 cJSON* objects = get_or_create_field(stmt, "objects");
                 ListCell* lc_obj = NULL;
                 foreach(lc_obj, dstmt->objects) {
                     cJSON* object = cJSON_CreateObject();
-                    cJSON_AddStringToObject(object, "objectName", NameListToString((List*)lfirst(lc_obj)));
+                    List* raw_list = (List*)lfirst(lc_obj);
+                    Node* name = (Node*)linitial(raw_list);
+                    if (IsA(name, TypeName)) {
+                        cJSON_AddStringToObject(object, "objectName", NameListToString(((TypeName*)name)->names));
+                    } else {
+                        cJSON_AddStringToObject(object, "objectName", NameListToString(raw_list));
+                    }
                     cJSON_AddItemToArray(objects, object);
                 }
             }
@@ -233,6 +243,9 @@ extern bool create_json_walker(Node* node, void* walker_context)
 
         if (IsA(node, CommentStmt)) {
             CommentStmt* cstmt = (CommentStmt*)node;
+            if (cstmt->objtype) {
+                cJSON_AddStringToObject(stmt, "objectType",  GetObjectTypeString(cstmt->objtype));
+            }
             if (cstmt->objname) {
                 cJSON_AddStringToObject(stmt, "objectName",  NameListToString(cstmt->objname));
             }
@@ -360,6 +373,79 @@ extern bool create_json_walker(Node* node, void* walker_context)
 
     context->parent_node = node;
     return raw_expression_tree_walker(node, (bool (*)())create_json_walker, (void*)context);
+}
+
+static char* GetObjectTypeString(ObjectType type)
+{
+    switch (type) {
+        case OBJECT_ACCESS_METHOD: return "object_access_method";
+        case OBJECT_AGGREGATE: return "object_aggregate";
+        case OBJECT_AMOP: return "object_amop";
+        case OBJECT_AMPROC: return "object_amproc";
+        case OBJECT_ATTRIBUTE: return "object_attribute";
+        case OBJECT_CAST: return "object_cast";
+        case OBJECT_COLUMN: return "object_column";
+        case OBJECT_CONSTRAINT: return "object_constraint";
+        case OBJECT_CONTQUERY: return "object_contquery";
+        case OBJECT_COLLATION: return "object_collation";
+        case OBJECT_CONVERSION: return "object_conversion";
+        case OBJECT_DATABASE: return "object_database";
+        case OBJECT_DATA_SOURCE: return "object_data_source";
+        case OBJECT_DB4AI_MODEL: return "object_db4ai_model";
+        case OBJECT_DEFAULT: return "object_default";
+        case OBJECT_DOMAIN: return "object_domain";
+        case OBJECT_DOMCONSTRAINT: return "object_domconstraint";
+        case OBJECT_EVENT_TRIGGER: return "object_event_trigger";
+        case OBJECT_EXTENSION: return "object_extension";
+        case OBJECT_FDW: return "object_fdw";
+        case OBJECT_FOREIGN_SERVER: return "object_foreign_server";
+        case OBJECT_FOREIGN_TABLE: return "object_foreign_table";
+        case OBJECT_FUNCTION: return "object_function";
+        case OBJECT_INDEX: return "object_index";
+        case OBJECT_INDEX_PARTITION: return "object_index_partition";
+        case OBJECT_INTERNAL: return "object_internal";
+        case OBJECT_INTERNAL_PARTITION: return "object_internal_partition";
+        case OBJECT_LANGUAGE: return "object_language";
+        case OBJECT_LARGE_SEQUENCE: return "object_large_sequence";
+        case OBJECT_LARGEOBJECT: return "object_largeobject";
+        case OBJECT_MATVIEW: return "object_matview";
+        case OBJECT_OPCLASS: return "object_opclass";
+        case OBJECT_OPERATOR: return "object_operator";
+        case OBJECT_OPFAMILY: return "object_opfamily";
+        case OBJECT_PACKAGE: return "object_package";
+        case OBJECT_PACKAGE_BODY: return "object_package_body";
+        case OBJECT_PARTITION: return "object_partition";
+        case OBJECT_RLSPOLICY: return "object_rls_policy";
+        case OBJECT_PARTITION_INDEX: return "object_partition_index";
+        case OBJECT_ROLE: return "object_role";
+        case OBJECT_RULE: return "object_rule";
+        case OBJECT_SCHEMA: return "object_schema";
+        case OBJECT_SEQUENCE: return "object_sequence";
+        case OBJECT_STREAM: return "object_stream";
+        case OBJECT_SYNONYM: return "object_synonym";
+        case OBJECT_TABCONSTRAINT: return "object_tabconstraint";
+        case OBJECT_TABLE: return "object_table";
+        case OBJECT_TABLE_PARTITION: return "object_table_partition";
+        case OBJECT_TABLESPACE: return "object_tablespace";
+        case OBJECT_TRIGGER: return "object_trigger";
+        case OBJECT_TSCONFIGURATION: return "object_tsconfiguration";
+        case OBJECT_TSDICTIONARY: return "object_tsdictionary";
+        case OBJECT_TSPARSER: return "object_tsparser";
+        case OBJECT_TSTEMPLATE: return "object_tstemplate";
+        case OBJECT_TYPE: return "object_type";
+        case OBJECT_USER: return "object_user";
+        case OBJECT_VIEW: return "object_view";
+        case OBJECT_USER_MAPPING: return "object_user_mapping";
+        case OBJECT_DIRECTORY: return "object_directory";
+        case OBJECT_GLOBAL_SETTING: return "object_global_setting";
+        case OBJECT_COLUMN_SETTING: return "object_column_setting";
+        case OBJECT_PUBLICATION: return "object_publication";
+        case OBJECT_PUBLICATION_NAMESPACE: return "object_publication_namespace";
+        case OBJECT_PUBLICATION_REL: return "object_publication_rel";
+        case OBJECT_SUBSCRIPTION: return "object_subscription";
+        case OBJECT_EVENT: return "object_event";
+        default: return "unknown_object_type";
+    }
 }
 
 static bool isInTypeWhitelist(TypeName* type, std::unordered_set<std::string>* typeWhitelist)

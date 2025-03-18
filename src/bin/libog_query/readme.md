@@ -92,7 +92,7 @@ try:
     libpg_query.raw_parser_opengauss_dolphin.argtypes = [ctypes.c_char_p]
 
     sql = b"""
-    create table t3(a pg_catalog.int4 b pg_catalog.int5 default 10, c varchar2(255) not null, d date, e varchar3(3), primary key(a,b));
+    create table t3(a pg_catalog.int4, b pg_catalog.int5 default 10, c varchar2(255) not null, d date, e varchar3(3), primary key(a,b));
     alter table t3 modify id varchar(20), alter column sdate type timestamptz(3);
     """
     result = libpg_query.raw_parser_opengauss_dolphin(sql)
@@ -174,7 +174,7 @@ True
 	constraints：主键约束
 	funscs：函数名
 	exprs：表达式名
-	objects：删除语句的对象名
+	objects：删除/注释语句的对象名
 	```
 
 2. 语句类型：即StmtType的取值范围，当前支持以下dml和ddl语句类型：
@@ -187,14 +187,17 @@ True
 	merge
 	select
 	-- DDL
-	create table
+	create [table]
 	create type
 	create index
+	create sequence
 	view
 	alter table
 	rename
 	drop
 	truncate
+	prepare
+	comment
 	```
 3. 约束类型：即constraintsJSON数组对象的元素中，contype的取值范围，当前支持以下的约束类型：
 
@@ -205,4 +208,74 @@ True
 	CHECK
 	NOTNULL
 	DEFAULT
+	```
+4. 对象类型：即DROP或COMMENT语句中对象的类型，当前支持以下的对象类型：
+
+	```
+    OBJECT_ACCESS_METHOD,
+    OBJECT_AGGREGATE,
+    OBJECT_AMOP,
+    OBJECT_AMPROC,
+    OBJECT_ATTRIBUTE,
+    OBJECT_CAST,
+    OBJECT_COLUMN,
+    OBJECT_CONSTRAINT,
+    OBJECT_CONTQUERY,
+    OBJECT_COLLATION,
+    OBJECT_CONVERSION,
+    OBJECT_DATABASE,
+    OBJECT_DATA_SOURCE,
+    OBJECT_DB4AI_MODEL,
+    OBJECT_DEFAULT,
+    OBJECT_DOMAIN,
+    OBJECT_DOMCONSTRAINT,
+    OBJECT_EVENT_TRIGGER,
+    OBJECT_EXTENSION,
+    OBJECT_FDW,
+    OBJECT_FOREIGN_SERVER,
+    OBJECT_FOREIGN_TABLE,
+    OBJECT_FUNCTION,
+    OBJECT_INDEX,
+    OBJECT_INDEX_PARTITION,
+    OBJECT_INTERNAL,
+    OBJECT_INTERNAL_PARTITION,
+    OBJECT_LANGUAGE,
+    OBJECT_LARGE_SEQUENCE,
+    OBJECT_LARGEOBJECT,
+    OBJECT_MATVIEW,
+    OBJECT_OPCLASS,
+    OBJECT_OPERATOR,
+    OBJECT_OPFAMILY,
+    OBJECT_PACKAGE,
+    OBJECT_PACKAGE_BODY,
+    OBJECT_PARTITION,
+    OBJECT_RLSPOLICY,
+    OBJECT_PARTITION_INDEX,
+    OBJECT_ROLE,
+    OBJECT_RULE,
+    OBJECT_SCHEMA,
+    OBJECT_SEQUENCE,
+    OBJECT_STREAM,
+    OBJECT_SYNONYM,
+    OBJECT_TABCONSTRAINT,
+    OBJECT_TABLE,
+    OBJECT_TABLE_PARTITION,
+    OBJECT_TABLESPACE,
+    OBJECT_TRIGGER,
+    OBJECT_TSCONFIGURATION,
+    OBJECT_TSDICTIONARY,
+    OBJECT_TSPARSER,
+    OBJECT_TSTEMPLATE,
+    OBJECT_TYPE,
+    OBJECT_USER,
+    OBJECT_VIEW,
+    OBJECT_USER_MAPPING,
+    OBJECT_DIRECTORY,
+    OBJECT_GLOBAL_SETTING,
+    OBJECT_COLUMN_SETTING,
+    OBJECT_PUBLICATION,
+    OBJECT_PUBLICATION_NAMESPACE,
+    OBJECT_PUBLICATION_REL,
+    OBJECT_SUBSCRIPTION,
+    OBJECT_EVENT
 	```
