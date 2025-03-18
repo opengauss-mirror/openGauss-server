@@ -1622,7 +1622,7 @@ static bool AddPathPreCheck(Path* newPath)
 
 static PathCostComparison compare_rescan_cost(PlannerInfo* root, Path* path1, Path* path2, PathCostComparison costcmp)
 {
-    if (!root->ru_is_under_start_with || costcmp == COSTS_DIFFERENT) {
+    if (root == nullptr || !root->ru_is_under_start_with || costcmp == COSTS_DIFFERENT) {
         return costcmp;
     }
     
