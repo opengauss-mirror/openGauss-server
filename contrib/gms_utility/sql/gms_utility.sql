@@ -1715,8 +1715,8 @@ call test_comma_to_table('a.b,c.d,",d"');
 call test_comma_to_table('"a,b,c,d"');
 
 call test_comma_to_table('"123a"."123b","123c"."123d"');
-call test_comma_to_table("#123a"."#123b","#123c"."#123d");
-call test_comma_to_table("$123a"."$123b","$123c"."$123d");
+call test_comma_to_table('"#123a"."#123b","#123c"."#123d"');
+call test_comma_to_table('"$123a"."$123b","$123c"."$123d"');
 
 drop procedure test_comma_to_table;
 
