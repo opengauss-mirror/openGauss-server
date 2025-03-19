@@ -1,0 +1,82 @@
+create user lowuser identified by 'lowuser@123';
+set role lowuser password 'lowuser@123';
+select current_user;
+ current_user 
+--------------
+ lowuser
+(1 row)
+
+select rolsystemadmin from pg_roles where rolname =current_user;
+ rolsystemadmin 
+----------------
+ f
+(1 row)
+
+create table t1 (c1 int, c2 varchar(64));
+insert into t1 values(1, '111'), (2,'222'),(3,'333');
+create snapshot sn1 as select * from t1;
+ERROR:  In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.
+select db4ai.prepare_snapshot(NULL, 'sn1@1.0.0','{ DELETE }', NULL, 'my comment"'';alter user lowuser sysadmin--"');
+ERROR:  In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.
+CONTEXT:  referenced column: prepare_snapshot
+select rolsystemadmin from pg_roles where rolname ='lowuser';
+ rolsystemadmin 
+----------------
+ f
+(1 row)
+
+select db4ai.sample_snapshot('lowuser', 'sn1@1.0.0','{ xx }', '{.1}', NULL, '{"my comment\"'';alter user lowuser sysadmin--\""}');
+ERROR:  In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.
+CONTEXT:  referenced column: sample_snapshot
+select rolsystemadmin from pg_roles where rolname ='lowuser';
+ rolsystemadmin 
+----------------
+ f
+(1 row)
+
+select db4ai.create_snapshot('lowuser', 'sn2','{select c1 from lowuser.t1}', NULL, 'my comment"'';alter user lowuser sysadmin--"');
+ERROR:  In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.
+CONTEXT:  referenced column: create_snapshot
+select rolsystemadmin from pg_roles where rolname ='lowuser';
+ rolsystemadmin 
+----------------
+ f
+(1 row)
+
+purge snapshot sn1@1.0.0;
+ERROR:  In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.
+drop table t1;
+reset role;
+alter user lowuser sysadmin;
+set role lowuser password 'lowuser@123';
+select current_user;
+ current_user 
+--------------
+ lowuser
+(1 row)
+
+select rolsystemadmin from pg_roles where rolname =current_user;
+ rolsystemadmin 
+----------------
+ t
+(1 row)
+
+create table t1 (c1 int, c2 varchar(64));
+insert into t1 values(1, '111'), (2,'222'),(3,'333');
+create snapshot sn1 as select * from t1;
+ schema  |   name    
+---------+-----------
+ lowuser | sn1@1.0.0
+(1 row)
+
+select db4ai.prepare_snapshot(NULL, 'sn1@1.0.0','{ DELETE }', NULL, 'my comment"'';alter user lowuser sysadmin--"');
+ERROR:  Please use specification input: comment(snapshot description)
+CONTEXT:  referenced column: prepare_snapshot
+select db4ai.sample_snapshot('lowuser', 'sn1@1.0.0','{ xx }', '{.1}', NULL, '{"my comment\"'';alter user lowuser sysadmin--\""}');
+ERROR:  Please use specification input: comment(snapshot description)
+CONTEXT:  referenced column: sample_snapshot
+select db4ai.create_snapshot('lowuser', 'sn2','{select c1 from lowuser.t1}', NULL, 'my comment"'';alter user lowuser sysadmin--"');
+ERROR:  Please use specification input: comment(snapshot description)
+CONTEXT:  referenced column: create_snapshot
+reset role;
+drop user lowuser cascade;

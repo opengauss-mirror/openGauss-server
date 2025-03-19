@@ -59,7 +59,8 @@ static void AlterOperatorOwner_internal(Relation rel, Oid operOid, Oid newOwnerI
 
 void CheckDefineOperatorPrivilege(Oid oprNamespace, const char* oprName)
 {
-    if ((oprNamespace == PG_CATALOG_NAMESPACE || oprNamespace == PG_PUBLIC_NAMESPACE) && !initialuser()) {
+    if ((oprNamespace == PG_CATALOG_NAMESPACE || oprNamespace == PG_PUBLIC_NAMESPACE ||
+        oprNamespace == PG_DB4AI_NAMESPACE) && !initialuser()) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
             errmsg("permission denied to create operator \"%s\"", oprName),
             errhint("must be initial user to create an operator in %s schema.", get_namespace_name(oprNamespace))));
