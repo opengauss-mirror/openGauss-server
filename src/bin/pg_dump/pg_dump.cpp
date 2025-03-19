@@ -723,7 +723,6 @@ int main(int argc, char** argv)
 #endif
         {"with-module-params", required_argument, NULL, 19},
         {"gen-key", no_argument, NULL, 20},
-        {"split-huge-table", no_argument, NULL, 21},
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -2022,7 +2021,6 @@ void help(const char* pchProgname)
             "MODULE_CONFIG_FILE_PATH:GDACCARD need not,JNTAKMS exclude lib file name absolute path,SWXA need include lib file absolute path"
             "used by gs_dump, load device\n"));
     printf(_("  --gen-key                      if you have not key for using,you can set this option to generate key and encrypt dump data,store it to using again\n"));
-    printf(_("  --split-huge-table                enable same-table parallel dump\n"));
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("  --include-nodes                             include TO NODE/GROUP clause in the dumped CREATE TABLE "
              "and CREATE FOREIGN TABLE commands.\n"));
@@ -3341,62 +3339,6 @@ static void dumpTableData(Archive* fout, TableDataInfo* tdinfo)
                     tdsinfo);
             }
             
-            destroyPQExpBuffer(copyBuf);
-            return;
-        } else if (workerNum > 1 && IS_PARTITIONED_RELATION(tbinfo->parttype)) {
-            DataDumperPtr dumpFnSplit = dumpTableDataSplit_copy;
-            PQExpBuffer partitionq = createPQExpBuffer();
-            PGresult* res = NULL;
-            int ntups;
-            const char* relname = fmtId(tbinfo->dobj.name);
-
-            appendPQExpBuffer(partitionq,
-                "select pa.relname as partName from "
-                "pg_class as c "
-                "join pg_partition as pa "
-                "on c.oid = pa.parentid "
-                "where c.relname = '%s' "
-                "and pa.parttype != 'r';",
-                relname);
-            res = ExecuteSqlQuery(fout, partitionq->data, PGRES_TUPLES_OK);
-
-            int i_partname = PQfnumber(res, "partName");
-
-            ntups = PQntuples(res);
-            for (int i = 0; i < ntups; i++) {
-                char* pname = gs_strdup(PQgetvalue(res, i, i_partname));
-                TableDataSplitInfo* tdsinfo = (TableDataSplitInfo*) pg_malloc(sizeof(TableDataSplitInfo));
-                tdsinfo->tdinfo = tdinfo;
-                char* splitcond = (char *)pg_malloc(256 * sizeof(char));
-                int nRet = snprintf_s(splitcond, N_BUF_SIZE, N_BUF_SIZE - 1,
-                                          "partition(%s)", pname);
-                securec_check_ss_c(nRet, "\0", "\0");
-
-                tdsinfo->splitcond = splitcond;
-                if (i > 0) {
-                    AssignDumpId(&tdinfo->dobj);
-                }
-                ArchiveEntry(fout,
-                    tdinfo->dobj.catId,
-                    tdinfo->dobj.dumpId,
-                    tbinfo->dobj.name,
-                    tbinfo->dobj.nmspace->dobj.name,
-                    NULL,
-                    tbinfo->rolname,
-                    false,
-                    "TABLE DATA",
-                    SECTION_DATA,
-                    "",
-                    "",
-                    copyStmt,
-                    &(tbinfo->dobj.dumpId),
-                    1,
-                    dumpFnSplit,
-                    tdsinfo);
-            }
-
-            PQclear(res);
-            destroyPQExpBuffer(partitionq);
             destroyPQExpBuffer(copyBuf);
             return;
         } else {

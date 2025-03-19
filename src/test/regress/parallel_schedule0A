@@ -69,7 +69,7 @@ test: public_synonym
 test: out_param_func out_param_func_overload
 #test: sqlcode_cursor
 test: gs_dump_tableconstraint
-test: gs_dump_parallel
+#test: gs_dump_parallel
 
 # test AI4DB
 test: plpgsql_override_out test_plsql_core plpgsql/plpgsql_normal plpgsql/plpgsql_othercase plpgsql/plpgsql_unsupported plpgsql_dump plpgsql/plpgsql_table
