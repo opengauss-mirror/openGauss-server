@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION db4ai.manage_snapshot_internal(
     IN i_name NAME,     -- snapshot name
     IN publish BOOLEAN  -- publish or archive
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET client_min_messages TO ERROR
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
     s_mode VARCHAR(3);                  -- current snapshot mode
@@ -39,7 +39,6 @@ DECLARE
     none_represent INT;                 -- 0 or NULL
     res db4ai.snapshot_name;            -- composite result
 BEGIN
-
     BEGIN
         RAISE EXCEPTION 'SECURITY_STACK_CHECK';
     EXCEPTION WHEN OTHERS THEN
@@ -50,7 +49,7 @@ BEGIN
             e_stack_act := pg_catalog.replace(e_stack_act, ' publish_snapshot(', ' db4ai.publish_snapshot(');
         END IF;
 
-        IF e_stack_act NOT SIMILAR TO '%PL/pgSQL function db4ai.(archive|publish)_snapshot\(name,name\) line 11 at assignment%'
+        IF e_stack_act NOT SIMILAR TO '%PL/pgSQL function db4ai.(archive|publish)_snapshot\(name,name\) line 27 at assignment%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.manage_snapshot_internal(name,name,boolean) is not allowed'
             USING HINT = 'call public interface db4ai.(publish|archive)_snapshot instead';
@@ -59,7 +58,7 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.quote_ident(pg_catalog.current_setting('db4ai.message_level'));
         RAISE INFO 'effective client_min_messages is ''%''', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
@@ -125,12 +124,28 @@ CREATE OR REPLACE FUNCTION db4ai.archive_snapshot(
 RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
+    adminuser BOOLEAN;          -- current user privileges
     res db4ai.snapshot_name;    -- composite result
 BEGIN
 
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
     END IF;
+
+    IF i_schema LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%', '%(%', '%)%']) THEN
+        RAISE EXCEPTION 'Please use specification input: schema name';
+    END IF;
+
+    IF i_name LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%', '%(%', '%)%']) THEN
+        RAISE EXCEPTION 'Please use specification input: snapshot name';
+    END IF;
+
+    BEGIN
+        EXECUTE 'SELECT rolsystemadmin FROM pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
+        IF adminuser IS FALSE THEN
+            RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
+        END IF;
+    END;
 
     -- return archived snapshot name
     res := db4ai.manage_snapshot_internal(i_schema, i_name, FALSE);
@@ -147,12 +162,28 @@ CREATE OR REPLACE FUNCTION db4ai.publish_snapshot(
 RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
+    adminuser BOOLEAN;          -- current user privileges
     res db4ai.snapshot_name;    -- composite result
 BEGIN
 
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
     END IF;
+
+    IF i_schema LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%', '%(%', '%)%']) THEN
+        RAISE EXCEPTION 'Please use specification input: schema name';
+    END IF;
+
+    IF i_name LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%', '%(%', '%)%']) THEN
+        RAISE EXCEPTION 'Please use specification input: snapshot name';
+    END IF;
+
+    BEGIN
+        EXECUTE 'SELECT rolsystemadmin FROM pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
+        IF adminuser IS FALSE THEN
+            RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
+        END IF;
+    END;
 
     -- return published snapshot name
     res := db4ai.manage_snapshot_internal(i_schema, i_name, TRUE);

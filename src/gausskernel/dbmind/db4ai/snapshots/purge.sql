@@ -26,7 +26,7 @@ CREATE OR REPLACE FUNCTION db4ai.purge_snapshot_internal(
     IN i_schema NAME,    -- snapshot namespace
     IN i_name NAME       -- snapshot name
 )
-RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
+RETURNS VOID LANGUAGE plpgsql SECURITY INVOKER
 AS $$
 DECLARE
     s_id BIGINT;         -- snapshot id
@@ -39,7 +39,6 @@ DECLARE
     e_stack_act TEXT;    -- current stack for validation
     affected BIGINT;     -- number of affected rows;
 BEGIN
-
     BEGIN
         RAISE EXCEPTION 'SECURITY_STACK_CHECK';
     EXCEPTION WHEN OTHERS THEN
@@ -51,7 +50,7 @@ BEGIN
 
         IF e_stack_act NOT LIKE 'referenced column: purge_snapshot_internal
 SQL statement "SELECT db4ai.purge_snapshot_internal(i_schema, i_name)"
-PL/pgSQL function db4ai.purge_snapshot(name,name) line 71 at PERFORM%'
+PL/pgSQL function db4ai.purge_snapshot(name,name) line 87 at PERFORM%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.purge_snapshot_internal(name,name) is not allowed'
             USING HINT = 'call public interface db4ai.purge_snapshot instead';
@@ -124,6 +123,7 @@ CREATE OR REPLACE FUNCTION db4ai.purge_snapshot(
 RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
+    adminuser BOOLEAN;              -- current user privileges
     s_mode VARCHAR(3);              -- current snapshot mode
     s_vers_del CHAR;                -- snapshot version delimiter, default '@'
     s_vers_sep CHAR;                -- snapshot version separator, default '.'
@@ -135,10 +135,25 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.quote_ident(pg_catalog.current_setting('db4ai.message_level'));
         RAISE INFO 'effective client_min_messages is ''%''', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
+
+    BEGIN
+        EXECUTE 'SELECT rolsystemadmin FROM pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
+        IF adminuser IS FALSE THEN
+            RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
+        END IF;
+    END;
+
+    IF i_schema LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%', '%(%', '%)%']) THEN
+        RAISE EXCEPTION 'Please use specification input: schema name';
+    END IF;
+
+    IF i_name LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%', '%(%', '%)%']) THEN
+        RAISE EXCEPTION 'Please use specification input: snapshot name';
+    END IF;
 
     -- obtain active snapshot mode
     BEGIN
