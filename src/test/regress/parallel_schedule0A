@@ -466,6 +466,7 @@ test: subplan_new
 test: col_subplan_new
 #test: col_subplan_base_1
 #test: join
+test: sublink_pullup_mergejoin
 test: select_into subselect_part2 gs_aggregate
 #test: select_distinct subselect_part1 transactions btree_index select_distinct_on arrays hash_index
 #test: transactions_control random union
