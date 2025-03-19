@@ -433,7 +433,8 @@ Relation CopyRelationData(Relation newrel, Relation rel, MemoryContext rules_cxt
      * otherwise, do the copy work here
      * if the variable changed, there is no lock and no rel inval msg,
      * set it zero and reinit it when copy into local */
-    Assert(sizeof(RelationData) == 544);
+#define RD_SIZE 552
+    Assert(sizeof(RelationData) == RD_SIZE);
     /* all copied exclude pointer */
     *newrel = *rel;
     Assert(rel->rd_createSubid == InvalidSubTransactionId);
@@ -493,6 +494,7 @@ Relation CopyRelationData(Relation newrel, Relation rel, MemoryContext rules_cxt
 
     newrel->entry = NULL;
     newrel->rd_ind_partition_all_usable = rel->rd_ind_partition_all_usable;
+    newrel->rd_optionsValid = rel->rd_optionsValid;
     return newrel;
 }
 

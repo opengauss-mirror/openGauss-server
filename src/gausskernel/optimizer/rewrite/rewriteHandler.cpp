@@ -2412,6 +2412,11 @@ static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePus
             }
 
             Relation targetTable = relation_open(rte->relid, NoLock);
+
+            if (!targetTable->rd_optionsValid) {
+                RelationReloadRdOption(targetTable);
+            }
+
             /* Fetch all R.L.S security quals that must be applied to this RTE */
             GetRlsPolicies(parsetree, rte, targetTable, &securityQuals, rt_index, hasRowSecurity, hasSubLink);
             if (securityQuals != NIL) {

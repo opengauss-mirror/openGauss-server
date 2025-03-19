@@ -304,6 +304,7 @@ typedef struct RelationData {
     /* used only for datavec pq */
     char *pqTable;
     float *pqDistanceTable; 
+    bool rd_optionsValid;
 } RelationData;
 
 /*
