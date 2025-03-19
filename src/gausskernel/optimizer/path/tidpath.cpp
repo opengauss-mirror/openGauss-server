@@ -320,10 +320,14 @@ void create_tidscan_paths(PlannerInfo* root, RelOptInfo* rel)
     if (tidquals != NIL)
         add_path(root, rel, (Path*)create_tidscan_path(root, rel, tidquals));
 
-    if (!rel->isPartitionedTable)
-        tidrangequals = TidRangeQualFromBaseRestrictinfo(rel);
+    if (strcmp(u_sess->attr.attr_common.application_name, "gs_dump") == 0) {
+        if (!rel->isPartitionedTable) {
+            tidrangequals = TidRangeQualFromBaseRestrictinfo(rel);
+        }
     
-    if (tidrangequals != NIL)
-        add_path(root, rel, (Path*)create_tidrangescan_path(root, rel, tidrangequals));
+        if (tidrangequals != NIL) {
+            add_path(root, rel, (Path*)create_tidrangescan_path(root, rel, tidrangequals));
+        }
+    }
 }
 
