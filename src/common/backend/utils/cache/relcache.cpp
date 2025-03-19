@@ -3834,6 +3834,7 @@ void RelationClearRelation(Relation relation, bool rebuild)
         relation->rd_indexlist = NIL;
         relation->rd_oidindex = InvalidOid;
         relation->rd_indexvalid = 0;
+        relation->rd_optionsValid = false;
         return;
     }
 
@@ -7874,6 +7875,7 @@ static bool load_relcache_init_file(bool shared)
         rel->rd_amcache = NULL;
         rel->rd_rootcache = InvalidBuffer;
         rel->pgstat_info = NULL;
+        rel->rd_optionsValid = true;
 
         /*
          * Recompute lock and physical addressing info.  This is needed in
@@ -8960,4 +8962,21 @@ bool IsRelationReplidentKey(Relation r, int attno)
 
     RelationClose(idx_rel);
     return false;
+}
+
+void RelationReloadRdOption(Relation relation)
+{
+    HeapTuple htup = SearchSysCache1(RELOID, ObjectIdGetDatum(RelationGetRelid(relation)));
+    Assert(HeapTupleIsValid(htup));
+
+    pfree_ext(relation->rd_options);
+    RelationParseRelOptions(relation, htup);
+
+    ReleaseSysCache(htup);
+
+    if (RelationEnableRowSecurity(relation)) {
+        RelationDestroyRls(relation);
+        RelationBuildRlsPolicies(relation);
+    }
+    relation->rd_optionsValid = true;
 }
