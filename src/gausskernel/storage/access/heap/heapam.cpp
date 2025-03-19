@@ -9150,17 +9150,16 @@ static void heap_xlog_delete(XLogReaderState* record)
         heap_xlog_allvisiblecleared(record, HEAP_DELETE_ORIG_BLOCK_NUM);
     }
 #ifdef ENABLE_HTAP
-    ItemPointerData ctid;
-    Oid rel = InvalidOid;
-    bool imcsLocked = false;
     if (HAVE_HTAP_TABLES) {
+        ItemPointerData ctid;
+        Oid rel = InvalidOid;
         RelFileNode target_node;
         BlockNumber blkno;
         XLogRecGetBlockTag(record, HEAP_DELETE_ORIG_BLOCK_NUM, &target_node, NULL, &blkno);
         rel = target_node.relNode;
-        ItemPointerData ctid;
+        TransactionId recordxid = XLogRecGetXid(record);
         ItemPointerSet(&ctid, blkno, xlrec->offnum);
-        imcsLocked = IMCStoreHookPreLock(rel, &ctid);
+        IMCStoreDeleteHook(rel, &ctid, recordxid);
     }
 #endif
 
@@ -9170,11 +9169,6 @@ static void heap_xlog_delete(XLogReaderState* record)
         bool isTupleLockUpgrade = (XLogRecGetInfo(record) & XLOG_TUPLE_LOCK_UPGRADE_FLAG) != 0;
 
         HeapXlogDeleteOperatorPage(&buffer, (void *)maindata, recordxid, isTupleLockUpgrade);
-#ifdef ENABLE_HTAP
-        if (imcsLocked) {
-            IMCStoreDeleteHook(rel, &ctid, recordxid, true);
-        }
-#endif
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf)) {
@@ -9215,11 +9209,11 @@ static void heap_xlog_insert(XLogReaderState* record)
      * the page from scratch.
      */
 #ifdef ENABLE_HTAP
-    ItemPointerData ctid;
-    bool imcsLocked = false;
     if (HAVE_HTAP_TABLES) {
+        ItemPointerData ctid;
         ItemPointerSet(&ctid, blkno, xlrec->offnum);
-        imcsLocked = IMCStoreHookPreLock(target_node.relNode, &ctid);
+        TransactionId recordxid = XLogRecGetXid(record);
+        IMCStoreInsertHook(target_node.relNode, &ctid, recordxid);
     }
 #endif
     if (isinit) {
@@ -9241,11 +9235,6 @@ static void heap_xlog_insert(XLogReaderState* record)
         HeapXlogInsertOperatorPage(
             &buffer, (void*)maindata, isinit, (void*)blkdata, blkdatalen, recordxid, &freespace, tde);
 
-#ifdef ENABLE_HTAP
-    if (imcsLocked) {
-        IMCStoreInsertHook(target_node.relNode, &ctid, recordxid, true);
-    }
-#endif
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf)) {
@@ -9394,10 +9383,13 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
 
 #ifdef ENABLE_HTAP
     ItemPointerData ctid;
+    ItemPointerData newCtid;
     bool imcsLocked = false;
     if (HAVE_HTAP_TABLES) {
         ItemPointerSet(&ctid, oldblk, xlrec->old_offnum);
-        imcsLocked = IMCStoreHookPreLock(rnode.relNode, &ctid);
+        ItemPointerSet(&newCtid, newblk, xlrec->new_offnum);
+        TransactionId recordxid = XLogRecGetXid(record);
+        IMCStoreUpdateHook(rnode.relNode, &ctid, &newCtid, recordxid);
     }
 #endif
     /* Deal with old tuple version */
@@ -9411,20 +9403,7 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
         HeapXlogUpdateOperatorOldpage(&obuffer, (void *)maindata, hot_update, isinit, newblk, recordxid,
             isTupleLockUpgrade);
         MarkBufferDirty(obuffer.buf);
-#ifdef ENABLE_HTAP
-        if (imcsLocked) {
-            IMCStoreDeleteHook(rnode.relNode, &ctid, recordxid, true);
-        }
-#endif
     }
-#ifdef ENABLE_HTAP
-    ItemPointerData newCtid;
-    imcsLocked = false;
-    if (HAVE_HTAP_TABLES) {
-        ItemPointerSet(&newCtid, newblk, xlrec->new_offnum);
-        imcsLocked = IMCStoreHookPreLock(rnode.relNode, &newCtid);
-    }
-#endif
 
     /*
      * Read the page the new tuple goes into, if different from old.
@@ -9461,12 +9440,6 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
 
         HeapXlogUpdateOperatorNewpage(&nbuffer, (void *)maindata, isinit, (void *)blkdata, blkdatalen, recordxid,
                                       &freespace, isTupleLockUpgrade, tde);
-
-#ifdef ENABLE_HTAP
-        if (imcsLocked) {
-            IMCStoreInsertHook(rnode.relNode, &newCtid, recordxid, true);
-        }
-#endif
 
         MarkBufferDirty(nbuffer.buf);
     }
