@@ -795,7 +795,7 @@ select object_id('', 'U');
 select object_id('students', '');
  object_id 
 -----------
-     16414
+--?.*
 (1 row)
 
 select object_id('students', 'FN');

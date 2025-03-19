@@ -119,7 +119,7 @@ SELECT DAY('2023-10-01') AS DayPart; -- 预期结果：1
 SELECT DAY(CURRENT_DATE) AS DayPart; -- 预期结果：当前日期的天数部分
  daypart 
 ---------
-       9
+--?.*
 (1 row)
 
 SELECT DAY(CURRENT_STAMP) AS DayPart; -- 预期结果：当前日期的天数部分
