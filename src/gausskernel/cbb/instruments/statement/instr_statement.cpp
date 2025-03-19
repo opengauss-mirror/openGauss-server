@@ -913,7 +913,7 @@ static void StatementFlush()
     int count = 0;
     bool is_readonly_log_needed = false;
 
-    while (!t_thrd.statement_cxt.need_exit && ENABLE_STATEMENT_TRACK) {
+    while (!t_thrd.statement_cxt.need_exit && ENABLE_STATEMENT_TRACK && !SS_IN_FAILOVER) {
         ReloadInfo();
         if (u_sess->attr.attr_storage.DefaultXactReadOnly) {
             if (!is_readonly_log_needed) {
@@ -948,7 +948,6 @@ static void StatementFlush()
 NON_EXEC_STATIC void StatementFlushMain()
 {
     char username[NAMEDATALEN] = {'\0'};
-
     /* we are a postmaster subprocess now */
     IsUnderPostmaster = true;
     JobStatementIAm();
@@ -967,6 +966,11 @@ NON_EXEC_STATIC void StatementFlushMain()
 #ifndef EXEC_BACKEND
     InitProcess();
 #endif
+    /* when in failover worker thread should exit */
+    if (SS_IN_FAILOVER && TRACK_STMT_WORKER) {
+        g_instance.pid_cxt.StatementPID = 0;
+        ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
+    }
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser((char*)pstrdup(DEFAULT_DATABASE), InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitStatementWorker();
     SetProcessingMode(NormalProcessing);
