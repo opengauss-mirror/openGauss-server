@@ -656,7 +656,8 @@ static double scalarineqsel(
          * make an estimate based on comparing the constant to the table size.
          */
         if (vardata->var && IsA(vardata->var, Var) &&
-            ((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber) {
+            ((Var *) vardata->var)->varattno == SelfItemPointerAttributeNumber &&
+            strcmp(u_sess->attr.attr_common.application_name, "gs_dump") == 0) {
             ItemPointer itemptr;
             double		block;
             double		density;
