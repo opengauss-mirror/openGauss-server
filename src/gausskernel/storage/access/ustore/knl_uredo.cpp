@@ -275,12 +275,11 @@ void UHeapXlogInsert(XLogReaderState *record)
         (allReplay || onlyReplayUndo));
     if (allReplay || !onlyReplayUndo) {
 #ifdef ENABLE_HTAP
-        ItemPointerData ctid;
-        bool imcsLocked = false;
         if (HAVE_HTAP_TABLES) {
+            ItemPointerData ctid;
             XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
             ItemPointerSet(&ctid, blkno, xlrec->offnum);
-            imcsLocked = IMCStoreHookPreLock(targetNode.relNode, &ctid);
+            IMCStoreInsertHook(targetNode.relNode, &ctid, XLogRecGetXid(record));
         }
 #endif
         action = GetInsertRedoAction(record, &buffer, skipSize);
@@ -290,12 +289,6 @@ void UHeapXlogInsert(XLogReaderState *record)
             Page page = BufferGetPage(buffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
                 NULL, &targetNode, blkno, true);
-
-#ifdef ENABLE_HTAP
-            if (imcsLocked) {
-                IMCStoreInsertHook(targetNode.relNode, &ctid, XLogRecGetXid(record), true);
-            }
-#endif
         }
 
         if (BufferIsValid(buffer.buf)) {
@@ -485,9 +478,8 @@ static void UHeapXlogDelete(XLogReaderState *record)
 
     if (allReplay || !onlyReplayUndo) {
 #ifdef ENABLE_HTAP
-        bool imcsLocked = false;
         if (HAVE_HTAP_TABLES) {
-            imcsLocked = IMCStoreHookPreLock(targetNode.relNode, &targetTid);
+            IMCStoreDeleteHook(targetNode.relNode, &targetTid, XLogRecGetXid(record));
         }
 #endif
         action = XLogReadBufferForRedo(record, 0, &buffer);
@@ -497,12 +489,6 @@ static void UHeapXlogDelete(XLogReaderState *record)
             Page page = BufferGetPage(buffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
                 NULL, &targetNode, blkno, true);
-
-#ifdef ENABLE_HTAP
-            if (imcsLocked) {
-                IMCStoreDeleteHook(targetNode.relNode, &targetTid, XLogRecGetXid(record), true);
-            }
-#endif
         }
 
         if (BufferIsValid(buffer.buf)) {
@@ -1327,11 +1313,12 @@ static void UHeapXlogUpdate(XLogReaderState *record)
 
     if (allReplay || !onlyReplayUndo) {
 #ifdef ENABLE_HTAP
-        ItemPointerData ctid;
-        bool imcsLocked = false;
         if (HAVE_HTAP_TABLES) {
+            ItemPointerData ctid;
+            ItemPointerData newCtid;
             ItemPointerSet(&ctid, oldblk, xlrec->old_offnum);
-            imcsLocked = IMCStoreHookPreLock(rnode.relNode, &ctid);
+            ItemPointerSet(&newCtid, newblk, xlrec->new_offnum);
+            IMCStoreUpdateHook(rnode.relNode, &ctid, &newCtid);
         }
 #endif
         /* Read old page */
@@ -1343,37 +1330,18 @@ static void UHeapXlogUpdate(XLogReaderState *record)
         /* recover old tuple on data page */
         if (oldaction == BLK_NEEDS_REDO) {
             PerformUpdateOldRedoAction(record, &oldtup, &buffers, urecptr, sameBlock);
-#ifdef ENABLE_HTAP
-            if (imcsLocked) {
-                IMCStoreDeleteHook(rnode.relNode, &ctid, XLogRecGetXid(record), true);
-            }
-#endif
         }
         /*
          * recover new tuple on data page
          * First, construct new tuple from xlog record
          */
         if (newaction == BLK_NEEDS_REDO) {
-#ifdef ENABLE_HTAP
-            ItemPointerData newCtid;
-            imcsLocked = false;
-            if (HAVE_HTAP_TABLES) {
-                ItemPointerSet(&newCtid, newblk, xlrec->new_offnum);
-                imcsLocked = IMCStoreHookPreLock(rnode.relNode, &newCtid);
-            }
-#endif
             newlen = GetUHeapDiskTupleFromUpdateNewRedoData(record, &tuples, &affixLens, tbuf, sameBlock);
             freespace = PerformUpdateNewRedoAction(record, &buffers, &tuples, newlen, xlnewundohdr, urecptr, sameBlock);
             
             Page page = BufferGetPage(buffers.newbuffer.buf);
             UpageVerify((UHeapPageHeader)page, t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr, NULL,
                 NULL, &rnode, BufferGetBlockNumber(buffers.newbuffer.buf), true);
-
-#ifdef ENABLE_HTAP
-            if (imcsLocked) {
-                IMCStoreInsertHook(rnode.relNode, &newCtid, XLogRecGetXid(record), true);
-            }
-#endif
         }
 
         if (BufferIsValid(buffers.newbuffer.buf) && buffers.newbuffer.buf != buffers.oldbuffer.buf) {

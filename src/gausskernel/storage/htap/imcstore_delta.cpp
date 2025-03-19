@@ -36,24 +36,7 @@
 constexpr uint32 AUTO_VACUUM_TRIGGER_LIMIT = Min(IMCSTORE_MAX_ROW_PER_CU / 3, DEFAULT_DELTAPAGE_ELEMENTS * 10);
 constexpr int CHAR_BIT_SIZE = 8;
 
-bool IMCStoreHookPreLock(Oid relid, ItemPointer ctid)
-{
-    IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(relid);
-    if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) return false;
-
-    MemoryContext oldcontext = MemoryContextSwitchTo(imcsDesc->imcuDescContext);
-    uint32 cuId = ItemPointerGetBlockNumber(ctid) / MAX_IMCS_PAGES_ONE_CU;
-    RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(cuId);
-    if (!rowgroup) {
-        return false;
-    }
-    pthread_rwlock_wrlock(&rowgroup->m_mutex);
-    imcsDesc->UnReferenceRowGroup();
-    MemoryContextSwitchTo(oldcontext);
-    return true;
-}
-
-void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid, bool locked)
+void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid)
 {
     IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(relid);
     if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) return;
@@ -66,17 +49,12 @@ void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid, bool loc
     uint32 cuId = ItemPointerGetBlockNumber(ctid) / MAX_IMCS_PAGES_ONE_CU;
     RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(cuId);
 
-    if (!locked) {
-        rowgroup->Insert(ctid, xid, relid, cuId);
-    } else {
-        rowgroup->m_delta->Insert(ctid, xid, relid, cuId);
-        pthread_rwlock_unlock(&rowgroup->m_mutex);
-    }
+    rowgroup->Insert(ctid, xid, relid, cuId);
     imcsDesc->UnReferenceRowGroup();
     MemoryContextSwitchTo(oldcontext);
 }
 
-void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid, bool locked)
+void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid)
 {
     IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(relid);
     if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) return;
@@ -89,12 +67,7 @@ void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid, bool loc
     uint32 cuId = ItemPointerGetBlockNumber(ctid) / MAX_IMCS_PAGES_ONE_CU;
     RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(cuId);
 
-    if (!locked) {
-        rowgroup->Insert(ctid, xid, relid, cuId);
-    } else {
-        rowgroup->m_delta->Insert(ctid, xid, relid, cuId);
-        pthread_rwlock_unlock(&rowgroup->m_mutex);
-    }
+    rowgroup->Insert(ctid, xid, relid, cuId);
     imcsDesc->UnReferenceRowGroup();
     MemoryContextSwitchTo(oldcontext);
 }
