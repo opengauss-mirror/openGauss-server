@@ -347,15 +347,3 @@ comment on function PG_CATALOG.regexp_replace(text, text, text, integer, integer
 comment on function PG_CATALOG.regexp_substr(text, text, integer) is 'extract text matching regular expression';
 comment on function PG_CATALOG.regexp_substr(text, text, integer, integer) is 'extract text matching regular expression';
 comment on function PG_CATALOG.regexp_substr(text, text, integer, integer, text) is 'extract text matching regular expression';
-
-DO $upgrade$
-BEGIN
-IF working_version_num() < 92780 then
-DROP INDEX IF EXISTS pg_partition_tblspc_relfilenode_index CASCADE;
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 3480;
--- create index
-CREATE INDEX pg_partition_tblspc_relfilenode_index ON pg_catalog.pg_partition
-    USING BTREE(reltablespace oid_ops, relfilenode oid_ops);
-END IF;
-END $upgrade$;
