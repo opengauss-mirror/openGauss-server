@@ -1111,6 +1111,7 @@ static void KnlTApplyWorkerInit(knl_t_apply_worker_context* applyWorkerCxt)
     applyWorkerCxt->messageContext = NULL;
     applyWorkerCxt->logicalRepRelMapContext = NULL;
     applyWorkerCxt->applyContext = NULL;
+    applyWorkerCxt->subNewOids = NIL;
 }
 
 static void KnlTPublicationInit(knl_t_publication_context* publicationCxt)
@@ -1118,6 +1119,7 @@ static void KnlTPublicationInit(knl_t_publication_context* publicationCxt)
     publicationCxt->publications_valid = false;
     publicationCxt->RelationSyncCache = NULL;
     publicationCxt->updateConninfoNeeded = false;
+    publicationCxt->isNewPubNeeded = false;
     publicationCxt->firstTimeSendConninfo = false;
 }
 

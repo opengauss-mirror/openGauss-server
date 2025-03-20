@@ -501,6 +501,8 @@ static char *mppdb_deparse_command_type(DeparsedCommandType cmdtype)
             return "Drop Type";
         case DCT_TypeDropEnd:
             return "Drop Type End";
+        case DCT_NewPub:
+            return "NewPub";
         default:
             Assert(false);
     }

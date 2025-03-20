@@ -69,6 +69,7 @@
 #include "utils/builtins.h"
 #include "lib/stringinfo.h"
 #include "utils/jsonb.h"
+#include "utils/json.h"
 
 #define ADVANCE_PARSE_POINTER(ptr,end_ptr) \
     do { \
@@ -709,6 +710,29 @@ deparse_ddl_json_to_string(char *json_str, char** owner)
     expand_fmt_recursive(buf, VARDATA(jsonb));
 
     return buf->data;
+}
+
+/*
+ * Deparse new publication json, obtain objtype/schemaname/objname.
+ *
+ * Verbose syntax
+ * NEWPUB %{objtype}s %{identity}D
+ */
+void deparse_newpub_json_elements(char *json_str, char** objtype, char** schemaname, char** objname)
+{
+    Datum d;
+
+    Datum obj = DirectFunctionCall1(jsonb_in, PointerGetDatum(json_str));
+
+    d = DirectFunctionCall2(jsonb_object_field_text, obj, CStringGetTextDatum("objtype"));
+    *objtype = TextDatumGetCString(d);
+
+    Datum identity = DirectFunctionCall2(jsonb_object_field, obj, CStringGetTextDatum("identity"));
+    d = DirectFunctionCall2(jsonb_object_field_text, identity, CStringGetTextDatum("schemaname"));
+    *schemaname = TextDatumGetCString(d);
+
+    d = DirectFunctionCall2(jsonb_object_field_text, identity, CStringGetTextDatum("objname"));
+    *objname = TextDatumGetCString(d);
 }
 
 /*

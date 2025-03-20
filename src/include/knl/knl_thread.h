@@ -3431,6 +3431,7 @@ typedef struct knl_t_apply_worker_context {
     XLogRecPtr remoteFinalLsn;
     CommitSeqNo curRemoteCsn;
     bool isSkipTransaction;
+    List *subNewOids;
 } knl_t_apply_worker_context;
 
 typedef struct knl_t_publication_context {
@@ -3438,6 +3439,7 @@ typedef struct knl_t_publication_context {
     /* Map used to remember which relation schemas we sent. */
     HTAB* RelationSyncCache;
     bool updateConninfoNeeded;
+    bool isNewPubNeeded;
     bool firstTimeSendConninfo;
 } knl_t_publication_context;
 

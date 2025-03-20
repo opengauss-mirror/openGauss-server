@@ -199,6 +199,9 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
         if (data->protocol_version >= LOGICALREP_CONNINFO_PROTO_VERSION_NUM) {
             t_thrd.publication_cxt.updateConninfoNeeded = true;
         }
+        if (data->protocol_version >= LOGICALREP_NEWPUB_PROTO_VERSION_NUM) {
+            t_thrd.publication_cxt.isNewPubNeeded = true;
+        }
         t_thrd.publication_cxt.firstTimeSendConninfo = true;
         CacheRegisterThreadSyscacheCallback(PUBLICATIONOID, publication_invalidation_cb, (Datum)0);
 
@@ -669,6 +672,7 @@ static void pgoutput_ddl(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLo
         case DCT_SimpleCmd:
         case DCT_ObjectDrop:
         case DCT_ObjectCreate:
+        case DCT_NewPub:
             /* do nothing */
             break;
         
