@@ -13598,6 +13598,8 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
     XLogRecPtr xlogcopystartptr;
     ReplicationSlotState repl_slot_state;
     XlogKeeper *xlogkeeper = NULL;
+    /* segno = 1 show all file should be keep */
+    const XLogSegNo KEEP_ALL = 1;
 
     if(getkeeper)
         xlogkeeper = (XlogKeeper*)palloc0(WALKEEPER_MAX * sizeof(XlogKeeper));
@@ -13609,11 +13611,10 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
 
     /* avoid underflow, don't go below 1 */
     if (segno <= (uint32)(u_sess->attr.attr_storage.wal_keep_segments)) {
-        /* segno = 1 show all file should be keep */
         ereport(LOG, (errmsg("keep all the xlog segments, because current segno = %lu, "
             "less than wal_keep_segments = %d", segno,
             (int)(u_sess->attr.attr_storage.wal_keep_segments))));
-        segno = 1;
+        segno = KEEP_ALL;
     } else {
         segno = segno - (uint32)(u_sess->attr.attr_storage.wal_keep_segments);
     }
@@ -13632,8 +13633,7 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
         XLByteToSeg(keep, slotSegNo);
 
         if (slotSegNo == 0) {
-            /* segno = 1 show all file should be keep */
-            segno = 1;
+            segno = KEEP_ALL;
             ereport(LOG, (errmsg("keep all the xlog segments, because the minimal replication slot segno "
                                  "is less than or equal to zero")));
         } else if (slotSegNo < segno) {
@@ -13651,8 +13651,7 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
         XLByteToSeg(xlogcopystartptr, slotSegNo);
 
         if (slotSegNo == 0) {
-            /* segno = 1 show all file should be keep */
-            segno = 1;
+            segno = KEEP_ALL;
             ereport(LOG, (errmsg("keep all the xlog segments, because there is a full-build task in the backend, "
                                  "and start segno is less than or equal to zero")));
         } else if (slotSegNo < segno) {
@@ -13690,8 +13689,7 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
     if ((!ENABLE_DMS && t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) || SS_DISASTER_PRIMARY_NODE) {
         if (WalSndInProgress(SNDROLE_PRIMARY_BUILDSTANDBY) ||
             pg_atomic_read_u32(&g_instance.comm_cxt.current_gsrewind_count) > 0) {
-            /* segno = 1 show all file should be keep */
-            segno = 1;
+            segno = KEEP_ALL;
             fill_keeper(segno, WALKEEPER_BUILD, xlogkeeper);
             ereport(LOG, (errmsg("keep all the xlog segments, because there is a build task in the backend, "
                                  "and gs_rewind count is more than zero")));
@@ -13700,8 +13698,7 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
             XLogSegNo force_prune_segno = 0;
             if (!WalSndAllInProgress(SNDROLE_PRIMARY_STANDBY)) {
                 if (!u_sess->attr.attr_storage.enable_xlog_prune) {
-                    /* segno = 1 show all file should be keep */
-                    prune_segno = 1;
+                    prune_segno = KEEP_ALL;
                 } else {
                     prune_segno = CalcRecycleSegNo(curInsert, repl_slot_state.quorum_min_required,
                         repl_slot_state.min_tools_required);
@@ -13723,8 +13720,7 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
                     repl_slot_state.quorum_min_required, repl_slot_state.min_tools_required)));
             }
         } else if (IS_DN_DUMMY_STANDYS_MODE() && !WalSndInProgress(SNDROLE_PRIMARY_STANDBY)) {
-            /* segno = 1 show all file should be keep */
-            segno = 1;
+            segno = KEEP_ALL;
             fill_keeper(segno, WALKEEPER_DUMMYSTANDBY, xlogkeeper);
             ereport(LOG, (errmsg("keep all the xlog segments, because not all the wal senders are "
                 "in the role PRIMARY_STANDBY")));
@@ -13746,7 +13742,7 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
         if (XLByteEQ(keep, InvalidXLogRecPtr) && repl_slot_state.exist_in_use &&
             !g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
             /* there are slots and lsn is invalid, we keep it */
-            segno = 1;
+            segno = KEEP_ALL;
             fill_keeper(segno, WALKEEPER_INVALIDSLOT, xlogkeeper);
             ereport(WARNING, (errmsg("invalid replication slot recptr"),
                               errhint("Check slot configuration or setup standby/secondary")));
@@ -13790,10 +13786,11 @@ static XlogKeeper* KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr
         XLogSegNo recyle_segno;
         XLByteToSeg(recycle_recptr, recyle_segno);
         if (recyle_segno == 0) {
-            segno = 1;
+            segno = KEEP_ALL;
         } else if (recyle_segno < segno) {
             segno = recyle_segno;
         }
+        fill_keeper(segno, WALKEEPER_EXRTO_STANDBY_READ, xlogkeeper);
     }
 
     /* don't delete WAL segments newer than the calculated segment */
