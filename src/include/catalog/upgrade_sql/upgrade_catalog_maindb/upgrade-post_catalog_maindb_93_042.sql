@@ -59,7 +59,7 @@ SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5727;
 CREATE OR REPLACE FUNCTION pg_catalog.pg_event_trigger_table_rewrite_reason() RETURNS int4 LANGUAGE INTERNAL STRICT VOLATILE as 'pg_event_trigger_table_rewrite_reason';
 
 --rollback type
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 3838, 0, p;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 0, 0, p;
 CREATE TYPE pg_catalog.event_trigger (
     input=event_trigger_in,
     output=event_trigger_out,
@@ -68,7 +68,8 @@ CREATE TYPE pg_catalog.event_trigger (
     passedbyvalue,
     CATEGORY='P'
 );
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 5729, 0, p;
+
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 0, 0, p;
 CREATE TYPE pg_catalog.pg_ddl_command (
     input=pg_ddl_command_in,
     output=pg_ddl_command_out,
