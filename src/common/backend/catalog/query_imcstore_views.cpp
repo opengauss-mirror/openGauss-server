@@ -90,7 +90,7 @@ IMCStoreView* SearchAllIMCStoreViews(uint32 *num)
         results[viewIndex].cuNumsInDisk = imcsDesc->cuNumsInDisk;
         results[viewIndex].deltaInMem = 0;
         for (uint32 i = 0; i < imcsDesc->curMaxRowGroupId + 1; i++) {
-            if (!imcsDesc->rowGroups[i]) {
+            if (!imcsDesc->rowGroups || !imcsDesc->rowGroups[i] || !imcsDesc->rowGroups[i]->m_delta) {
                 continue;
             }
             results[viewIndex].deltaInMem += list_length(imcsDesc->rowGroups[i]->m_delta->pages) *
