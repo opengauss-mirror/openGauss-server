@@ -4190,6 +4190,22 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+#ifdef ENABLE_HTAP
+        {{"htap_wait_xlog_lsn_timeout",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            REPLICATION_STANDBY,
+            gettext_noop("Sets the timeout for standby to wait xlog redo to latest lsn."),
+            NULL,
+            GUC_UNIT_S},
+            &g_instance.attr.attr_storage.htap_wait_xlog_lsn_timeout,
+            60,
+            0,
+            INT_MAX / 1000,
+            NULL,
+            NULL,
+            NULL},
+#endif
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
