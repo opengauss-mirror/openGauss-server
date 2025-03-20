@@ -37,6 +37,7 @@ DECLARE
     p_id BIGINT;                    -- parent id
     m_id BIGINT;                    -- matrix id
     r_id BIGINT;                    -- root id
+    adminuser BOOLEAN;              -- current user privilieges
     s_mode VARCHAR(3);              -- current snapshot mode
     s_vers_del CHAR;                -- snapshot version delimiter, default '@'
     s_vers_sep CHAR;                -- snapshot version separator, default '.'
@@ -57,10 +58,49 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.quote_ident(pg_catalog.current_setting('db4ai.message_level'));
         RAISE INFO 'effective client_min_messages is %', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
+
+    BEGIN
+        EXECUTE 'SELECT rolsystemadmin FROM pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
+        IF adminuser IS FALSE THEN
+            RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
+        END IF;
+    END;
+
+    IF i_schema LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%', '%(%', '%)%']) THEN
+        RAISE EXCEPTION 'Please use specification input: schema name';
+    END IF;
+
+    IF i_parent LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%', '%(%', '%)%']) THEN
+        RAISE EXCEPTION 'Please use specification input: parent snapshot name';
+    END IF;
+
+    IF i_sample_infixes IS NOT NULL THEN
+        FOR idx IN 0 .. pg_catalog.array_length(i_sample_infixes, 1) LOOP
+            IF i_sample_infixes[idx] LIKE ANY(ARRAY['%;%', '%,%']) THEN
+                RAISE EXCEPTION 'Please use specification input: sample snapshot name infixes';
+            END IF;
+        END LOOP;
+    END IF;
+
+    IF i_stratify IS NOT NULL THEN
+        FOR idx IN 0 .. pg_catalog.array_length(i_stratify, 1) LOOP
+            IF i_stratify[idx] LIKE ANY(ARRAY['%;%', '%,%']) THEN
+                RAISE EXCEPTION 'Please use specification input: stratification fields';
+            END IF;
+        END LOOP;
+    END IF;
+
+    IF i_sample_comments IS NOT NULL THEN
+        FOR idx IN 0 .. pg_catalog.array_length(i_sample_comments, 1) LOOP
+            IF i_sample_comments[idx] LIKE ANY(ARRAY['%;%', '%,%']) THEN
+                RAISE EXCEPTION 'Please use specification input: comment(snapshot description)';
+            END IF;
+        END LOOP;
+    END IF;
 
     -- obtain active snapshot mode
     BEGIN
