@@ -7132,7 +7132,11 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
         }
 
         Oid procOid = InvalidOid;
-        if (i_proprocoid != InvalidOid) {
+        /**
+         * i_proprocoid = 0 when there is no subproc.
+         * i_proprocoid = -1 when i_proprocoid is not in res for upgrade from lower version less than 92941.
+         * */
+        if (i_proprocoid > (int)InvalidOid) {
             procOid = atooid(PQgetvalue(res, i, i_proprocoid));
         }
 
