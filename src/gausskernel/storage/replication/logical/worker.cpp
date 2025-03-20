@@ -477,6 +477,68 @@ static void slot_modify_data(TupleTableSlot *slot, TupleTableSlot *srcslot, Logi
 }
 
 /*
+ * process t_thrd.applyworker_cxt.subNewOids
+ *
+ * Start a new transaction without originId, and log logical ddl messages.
+ *
+ * Verbose syntax
+ * NEWPUB %{objtype}s %{identity}D
+ */
+static void process_new_sub_oids()
+{
+    if (t_thrd.applyworker_cxt.subNewOids == NIL) {
+        return;
+    }
+
+    if (IsTransactionState()) {
+        ereport(WARNING,
+            (errmsg("process new pub table with an open transaction, origin: pg_%u, commit_lsn: %X/%X",
+            t_thrd.applyworker_cxt.curWorker->subid,
+            (uint32)(t_thrd.applyworker_cxt.remoteFinalLsn >> BITS_PER_INT),
+            (uint32)t_thrd.applyworker_cxt.remoteFinalLsn)));
+    } else {
+        /* Start a new transaction */
+        StartTransactionCommand();
+        PushActiveSnapshot(GetTransactionSnapshot());
+        pgstat_report_activity(STATE_RUNNING, NULL);
+    }
+    MemoryContext oldctx = MemoryContextSwitchTo(t_thrd.applyworker_cxt.messageContext);
+
+    /* set originId to InvalidRepOriginId */
+    RepOriginId originId = u_sess->reporigin_cxt.originId;
+    u_sess->reporigin_cxt.originId = InvalidRepOriginId;
+
+    /* Process all oid of subNewOids that are being logged. */
+    ListCell *lc = NULL;
+    foreach (lc, t_thrd.applyworker_cxt.subNewOids) {
+        Oid relid = lfirst_oid(lc);
+        if (OidIsValid(relid)) {
+            char *relname = get_rel_name(relid);
+            Oid relnamespace = get_rel_namespace(relid);
+            char *command = deparse_newpub_command("table", relname, relnamespace);
+            if (command) {
+                LogLogicalDDLMessage("deparse", relid, DCT_NewPub,
+                    command, strlen(command) + 1);
+            }
+
+            pfree_ext(relname);
+            pfree_ext(command);
+        }
+    }
+
+    list_free(t_thrd.applyworker_cxt.subNewOids);
+    t_thrd.applyworker_cxt.subNewOids = NIL;
+
+    MemoryContextSwitchTo(oldctx);
+
+    PopActiveSnapshot();
+    CommitTransactionCommand();
+    pgstat_report_stat(false);
+    u_sess->reporigin_cxt.originId = originId;
+    pgstat_report_activity(STATE_IDLE, NULL);
+}
+
+/*
  * Handle BEGIN message.
  */
 static void apply_handle_begin(StringInfo s)
@@ -523,7 +585,6 @@ static void apply_handle_commit(StringInfo s)
     /* Process any tables that are being synchronized in parallel. */
     process_syncing_tables(commit_data.end_lsn);
 
-    
     if (t_thrd.applyworker_cxt.curWorker->needCheckConflict) {
         t_thrd.applyworker_cxt.curWorker->needCheckConflict = false;
         MemoryContext oldctx = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
@@ -538,6 +599,7 @@ static void apply_handle_commit(StringInfo s)
         StopSkippingChanges();
     }
 
+    process_new_sub_oids();
     pgstat_report_activity(STATE_IDLE, NULL);
 }
 
@@ -1227,6 +1289,57 @@ static void apply_handle_truncate(StringInfo s)
     CommandCounterIncrement();
 }
 
+static Oid get_object_id(char* objtype, char* schemaname, char* objname)
+{
+    Oid namespaceOid = InvalidOid;
+    Oid objectOid = InvalidOid;
+
+    if (schemaname != NULL) {
+        namespaceOid = get_namespace_oid(schemaname, true);
+        if (!OidIsValid(namespaceOid)) {
+            return InvalidOid;
+        }
+    } else {
+        namespaceOid = getCurrentNamespace();
+    }
+
+    if (namespaceOid != InvalidOid)
+        objectOid = get_relname_relid(objname, namespaceOid);
+    else
+        objectOid = RelnameGetRelid(objname);
+
+    return objectOid;
+}
+
+/*
+ * Handle NEWPUB TABLE command
+ *
+ * Call AddSubscriptionRelState for NEWPUB command to set the relstate to
+ * SUBREL_STATE_READY so DML changes on this new table can be replicated without
+ * having to manually run "ALTER SUBSCRIPTION ... REFRESH PUBLICATION"
+ */
+static void
+handle_newpub_object(char *message)
+{
+    Oid relid = InvalidOid;
+
+    char* objtype = NULL;
+    char* schemaname = NULL;
+    char* objname = NULL;
+
+    deparse_newpub_json_elements(message, &objtype, &schemaname, &objname);
+    if (objname) {
+        relid = get_object_id(objtype, schemaname, objname);
+    }
+
+    if (OidIsValid(relid)) {
+        AddSubscriptionRelState(t_thrd.applyworker_cxt.mySubscription->oid, relid,
+            SUBREL_STATE_READY);
+        ereport(DEBUG1, (errmsg_internal("Object %s \"%s\".\"%s\" added to subscription \"%s\"",
+            objtype, schemaname, objname, t_thrd.applyworker_cxt.mySubscription->name)));
+    }
+}
+
 /*
  * Handle CREATE TABLE command
  *
@@ -1277,6 +1390,10 @@ handle_create_table(Node *command)
         ereport(DEBUG1,
                 (errmsg_internal("table \"%s\" added to subscription \"%s\"",
                                  relname, t_thrd.applyworker_cxt.mySubscription->name)));
+
+        MemoryContext oldctx = MemoryContextSwitchTo(t_thrd.applyworker_cxt.applyContext);
+        t_thrd.applyworker_cxt.subNewOids = lappend_oid(t_thrd.applyworker_cxt.subNewOids, relid);
+        MemoryContextSwitchTo(oldctx);
     }
 }
 
@@ -1354,6 +1471,15 @@ apply_handle_ddl(StringInfo s)
     t_thrd.postgres_cxt.debug_query_string = ddl_command;
 
     ereport(LOG, (errmsg("apply [ddl] for %s [owner] %s", ddl_command, owner ? owner : "none")));
+
+    if (ddl_command != NULL) {
+        if (strncmp(ddl_command, "NEWPUB", 6) == 0) {
+            handle_newpub_object(message);
+            t_thrd.postgres_cxt.debug_query_string = save_debug_query_string;
+            end_replication_step();
+            return;
+        }
+    }
 
     /*
      * If requested, set the current role to the owner that executed the
@@ -2203,7 +2329,7 @@ void ApplyWorkerMain()
     options.logical = true;
     options.startpoint = origin_startpos;
     options.slotname = myslotname;
-    options.protoVersion = LOGICALREP_CONNINFO_PROTO_VERSION_NUM;
+    options.protoVersion = LOGICALREP_NEWPUB_PROTO_VERSION_NUM;
     options.publicationNames = t_thrd.applyworker_cxt.mySubscription->publications;
     options.binary = t_thrd.applyworker_cxt.mySubscription->binary;
     options.useSnapshot = AM_TABLESYNC_WORKER;

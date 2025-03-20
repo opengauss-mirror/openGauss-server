@@ -28,7 +28,8 @@ typedef enum DeparsedCommandType
     DCT_ObjectCreate,
     DCT_ObjectDrop,
     DCT_TypeDropStart,
-    DCT_TypeDropEnd
+    DCT_TypeDropEnd,
+    DCT_NewPub
 } DeparsedCommandType;
 
 /*

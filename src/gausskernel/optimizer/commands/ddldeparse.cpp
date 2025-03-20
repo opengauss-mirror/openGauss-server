@@ -3385,6 +3385,31 @@ char* deparse_drop_command(const char *objidentity, const char *objecttype,
 }
 
 /*
+ * Handle deparsing of newpub commands.
+ *
+ * Verbose syntax
+ * NEWPUB %{objtype}s %{identity}D
+ */
+char* deparse_newpub_command(const char *objecttype, const char *relname, Oid relnamespace)
+{
+    StringInfoData str;
+    char *command;
+    ObjTree *stmt;
+    Jsonb *jsonb;
+
+    initStringInfo(&str);
+
+    stmt = new_objtree_VA("NEWPUB %{objtype}s %{identity}D", 2,
+        "objtype", ObjTypeString, objecttype,
+        "identity", ObjTypeObject, new_objtree_for_qualname(relnamespace, (char *)relname));
+
+    jsonb = objtree_to_jsonb(stmt, NULL);
+    command = JsonbToCString(&str, VARDATA(jsonb), JSONB_ESTIMATED_LEN);
+
+    return command;
+}
+
+/*
  * Deparse a CreateEnumStmt (CREATE TYPE AS ENUM)
  *
  * Given a Enum type OID and the parse tree that created it, return an ObjTree

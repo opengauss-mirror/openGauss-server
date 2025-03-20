@@ -35,7 +35,9 @@ extern void table_close(Relation relation, LOCKMODE lockmode);
 extern char *deparse_utility_command(CollectedCommand *cmd,
                                      ddl_deparse_context * context);
 extern char *deparse_ddl_json_to_string(char *jsonb, char** owner);
+extern void deparse_newpub_json_elements(char *json_str, char** objtype, char** schemaname, char** objname);
 extern char *deparse_drop_command(const char *objidentity, const char *objecttype, Node *parsetree);
+extern char* deparse_newpub_command(const char *objecttype, const char *relname, Oid relnamespace);
 extern List *deparse_altertable_end(CollectedCommand *cmd);
 extern bool relation_support_ddl_replication(Oid relid, bool rewrite = false);
 
