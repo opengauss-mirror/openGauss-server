@@ -31416,10 +31416,26 @@ static void readTuplesAndInsertInternal(Relation tempTableRel, Relation partTabl
         Relation subPartRel = NULL;
         Partition subPart = NULL;
         Tuple copyTuple = NULL;
+        char* partExprKeyStr = NULL;
 
         /* tableam_tops_copy_tuple is not ready so we add UStore hack path */
         copyTuple = tableam_tops_copy_tuple(tuple);
-        targetPartOid = heapTupleGetPartitionOid(partTableRel, (void *)tuple, &partitionno, true);
+        bool partExprKeyIsNull = PartExprKeyIsNull(partTableRel, &partExprKeyStr);
+        if (partExprKeyIsNull) {
+            /* If the partition key does not contain an expression */
+            targetPartOid = heapTupleGetPartitionOid(partTableRel, (void *)tuple, &partitionno, true);
+        } else {
+            /* If the partition key contain an expression */
+            TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(tempTableRel));
+            slot->tts_tuple = tuple;
+            PartKeyExprResult partKeyExprResult = ComputePartKeyExprTuple(partTableRel, NULL, slot, NULL, partExprKeyStr);
+            targetPartOid = heapTupleGetPartitionOid(partTableRel, (void*)(&partKeyExprResult), &partitionno, false, false, false);
+            if (PointerIsValid(slot)) {
+                ExecDropSingleTupleTableSlot(slot);
+            }
+            pfree(partExprKeyStr);
+        }
+
         searchFakeReationForPartitionOid(partRelHTAB, CurrentMemoryContext, partTableRel, targetPartOid, partitionno,
             partRel, part, RowExclusiveLock);
         if (RelationIsSubPartitioned(partTableRel)) {
