@@ -530,7 +530,11 @@ bool GetPgObjectValid(Oid oid, PgObjectType objectType)
 {
     HeapTuple tuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(oid), CharGetDatum(objectType));
     if (!HeapTupleIsValid(tuple)) {
-        return false;
+        if (objectType == 'v') {
+            return true;
+        } else {
+            return false;
+        }
     }
     bool isNull;
     Datum validDatum = SysCacheGetAttr(PGOBJECTID, tuple, Anum_pg_object_valid, &isNull);
