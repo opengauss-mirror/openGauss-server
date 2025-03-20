@@ -2653,7 +2653,8 @@ Datum gs_xlog_keepers(PG_FUNCTION_ARGS)
             {WALKEEPER_ARCHIVE, "Archive Keep", "base on wal archive"},
             {WALKEEPER_RESISTARCHIVE, "Resist Archive", "resist OBS archive keeper due to max_size_for_xlog_prune"},
             {WALKEEPER_COODRECYCLE, "Other keep", "base on recycle xlog for Coordinator"},
-            {WALKEEPER_QUORUM_MIN, "QuorumMin keep", "the quorum min lsn keep all wal segments"}
+            {WALKEEPER_QUORUM_MIN, "QuorumMin keep", "the quorum min lsn keep all wal segments"},
+            {WALKEEPER_EXRTO_STANDBY_READ, "Exrto Standby Read Keep", "base on xlog for exrto standby read"}
     };
 
     if (SRF_IS_FIRSTCALL()) {
