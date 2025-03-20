@@ -293,7 +293,7 @@ select
 from pg_synonym y;
 grant select on sys.sysobjects to public;
 
-create or replace function sys.tsql_type_max_length_helper(in type text, in typelen int, in typemod int)
+create or replace function sys.tsql_type_max_length_helper(in type text, in typelen smallint, in typemod int)
 returns smallint
 as $$
 declare
@@ -303,19 +303,19 @@ begin
 	max_length := -1;
 
 	if typelen != -1 then
-    case
-      when lower(type) in ('numeric', 'decimal') then
-        precision := ((typemod - 4) >> 16) & 65535;
-        /* Each four bits (decimal bits) takes up two bytes and then adds an additional overhead of eight bytes to the entire data. */
-        max_length := (ceil((precision / 4 + 1) * 2 + 8))::smallint;
-      else max_length := typelen;
-    end case;
-		return max_length;
+		return typelen;
 	end if;
 
 	if typemod != -1 then
-		max_length = typemod;
+    if lower(type) in ('numeric', 'decimal') then
+      precision := ((typemod - 4) >> 16) & 65535;
+      /* Each four bits (decimal bits) takes up two bytes and then adds an additional overhead of eight bytes to the entire data. */
+      max_length := (ceil((precision / 4 + 1) * 2 + 8))::smallint;
+      return max_length;
+    end if;
+		max_length = typemod::smallint;
 	end if;
+
 	return max_length;
 end;
 $$ language plpgsql immutable strict;
@@ -380,23 +380,20 @@ $$ language plpgsql immutable strict;
 
 create or replace function sys.tsql_type_scale_helper(in type text, in typemod int) returns int
 as $$
-declare
-	scale int;
 begin
 	if type is null then 
-		return -1;
-	end if;
-	
-	if typemod != -1 then
-		return typemod;
+		return null;
 	end if;
 
-	case lower(type) 
-		when 'decimal' then scale = (typemod - 4) & 65535;
-		when 'numeric' then scale = (typemod - 4) & 65535;
-		else scale = null;
-	end case;
-	return scale;
+  if typemod = -1 then
+    return null;
+  end if;
+	
+  if lower(type) in ('numeric', 'decimal') then
+    return (typemod - 4) & 65535;
+  end if;
+
+  return typemod;
 end;
 $$ language plpgsql immutable strict;
 

@@ -59,6 +59,12 @@ CREATE TABLE course
     credit DOUBLE PRECISION
 );
 
+create table teacher_salary
+(
+    tec_id int,
+    tec_salary decimal(10, 2)
+);
+
 create or replace view teacher_info as
 select c.cla_name, t.tec_name, t.tec_job, t.tec_sex, t.tec_age
 from teacher t 
@@ -135,6 +141,7 @@ drop function test_sub;
 drop procedure test_sum;
 drop table t_log;
 drop view teacher_info;
+drop table teacher_salary;
 drop table course;
 drop table school_department;
 drop table class;

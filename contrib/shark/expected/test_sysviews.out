@@ -185,6 +185,11 @@ CREATE TABLE course
     credit DOUBLE PRECISION
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "course_pkey" for table "course"
+create table teacher_salary
+(
+    tec_id int,
+    tec_salary decimal(10, 2)
+);
 create or replace view teacher_info as
 select c.cla_name, t.tec_name, t.tec_job, t.tec_sex, t.tec_age
 from teacher t 
@@ -246,6 +251,7 @@ order by id;
  fk_depart_tec_id       | F     | F 
  course                 | U     | U 
  course_pkey            | PK    | K 
+ teacher_salary         | U     | U 
  teacher_info           | V     | V 
  t_log                  | U     | U 
  t_seq                  | SO    | SO
@@ -254,7 +260,7 @@ order by id;
  test_sub               | FN    | FN
  syn_tbl                | SN    | SN
  syn_tr                 | SN    | SN
-(21 rows)
+(22 rows)
 
 select col.name, col.length, col.colid, col.status, col.prec, col.scale, col.iscomputed, col.isoutparam, col.isnullable, col.collation
 from sys.syscolumns col
@@ -286,6 +292,8 @@ order by id, colid;
  cor_name       |     34 |     2 | 0      |    0 |    34 |          0 |          0 |          1 | default
  cor_type       |     24 |     3 | 8      |    0 |    24 |          0 |          0 |          0 | default
  credit         |      8 |     4 | 8      |    0 |       |          0 |          0 |          0 | 
+ tec_id         |      4 |     1 | 8      |   10 |       |          0 |          0 |          0 | 
+ tec_salary     |     15 |     2 | 8      |   10 |     2 |          0 |          0 |          0 | 
  cla_name       |     24 |     1 | 8      |    0 |    24 |          0 |          0 |          0 | default
  tec_name       |     24 |     2 | 8      |    0 |    24 |          0 |          0 |          0 | default
  tec_job        |     19 |     3 | 8      |    0 |    19 |          0 |          0 |          0 | default
@@ -294,7 +302,7 @@ order by id, colid;
  c1             |      4 |     1 | 8      |   10 |       |          0 |          0 |          0 | 
  c2             |     24 |     2 | 8      |    0 |    24 |          0 |          0 |          0 | default
  c3             |      8 |     3 | 8      |   26 |       |          0 |          0 |          0 | 
-(30 rows)
+(32 rows)
 
 select ind.name, ind.keycnt, ind."OrigFillFactor", ind.rows from sys.sysindexes ind
 left join pg_class c on c.oid = ind.indid
@@ -331,6 +339,7 @@ drop function test_sub;
 drop procedure test_sum;
 drop table t_log;
 drop view teacher_info;
+drop table teacher_salary;
 drop table course;
 drop table school_department;
 drop table class;
