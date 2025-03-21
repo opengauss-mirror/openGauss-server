@@ -167,7 +167,7 @@ CREATE OR REPLACE FUNCTION db4ai.create_snapshot(
     IN i_vers NAME DEFAULT NULL,    -- override version postfix
     IN i_comment TEXT DEFAULT NULL  -- snapshot description
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
 AS $$
 DECLARE
     s_id BIGINT;                    -- snapshot id
@@ -642,7 +642,7 @@ CREATE OR REPLACE FUNCTION db4ai.prepare_snapshot(
     IN i_vers NAME DEFAULT NULL,   -- override version postfix
     IN i_comment TEXT DEFAULT NULL -- description of this unit of data curation
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
 AS $$
 DECLARE
     s_id BIGINT;                                                -- snapshot id
@@ -1418,7 +1418,7 @@ CREATE OR REPLACE FUNCTION db4ai.manage_snapshot_internal(
     IN i_name NAME,     -- snapshot name
     IN publish BOOLEAN  -- publish or archive
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
 AS $$
 DECLARE
     s_mode VARCHAR(3);                  -- current snapshot mode
@@ -1512,7 +1512,7 @@ CREATE OR REPLACE FUNCTION db4ai.archive_snapshot(
     IN i_schema NAME,           -- snapshot namespace, default is CURRENT_USER
     IN i_name NAME              -- snapshot name
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
 AS $$
 DECLARE
     adminuser BOOLEAN;          -- current user privileges
@@ -1550,7 +1550,7 @@ CREATE OR REPLACE FUNCTION db4ai.publish_snapshot(
     IN i_schema NAME,           -- snapshot namespace, default is CURRENT_USER or PUBLIC
     IN i_name NAME              -- snapshot name
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
 AS $$
 DECLARE
     adminuser BOOLEAN;          -- current user privileges
@@ -1682,7 +1682,7 @@ CREATE OR REPLACE FUNCTION db4ai.purge_snapshot(
     IN i_schema NAME,    -- snapshot namespace, default is CURRENT_USER or PUBLIC
     IN i_name NAME       -- snapshot name
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
 AS $$
 DECLARE
     adminuser BOOLEAN;              -- current user privileges
@@ -1786,7 +1786,7 @@ CREATE OR REPLACE FUNCTION db4ai.sample_snapshot(
     IN i_stratify NAME[] DEFAULT NULL,       -- stratification fields
     IN i_sample_comments TEXT[] DEFAULT NULL -- sample snapshot descriptions
 )
-RETURNS SETOF db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
+RETURNS SETOF db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
 AS $$
 DECLARE
     s_id BIGINT;                    -- snapshot id
