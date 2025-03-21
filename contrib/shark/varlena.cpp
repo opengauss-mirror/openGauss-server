@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <cmath>
 
+#include "access/sysattr.h"
 #include "knl/knl_variable.h"
 #include "commands/extension.h"
 #include "commands/dbcommands.h"
@@ -82,8 +83,10 @@ Oid tsql_get_constraint_nsp_oid(Oid object_id, Oid user_id);
 static char* get_physical_schema_name(char *db_name, const char *schema_name);
 static bool is_shared_schema(const char *name);
 static char* get_current_physical_schema_name(char* schema_name);
+static Oid search_oid_in_class(char* obj_name, Oid schema_oid);
 static Oid search_oid_in_proc(char* obj_name, Oid schema_oid);
 static Oid search_oid_in_trigger(char* obj_name, Oid schema_oid);
+static Oid search_oid_in_cons(char* obj_name, Oid schema_oid);
 static Oid search_oid_in_schema(char* schema_name, char* obj_name, char *object_type);
 static int search_type_in_class(Oid* schema_id, Oid object_id, char* object_name);
 static int search_type_in_proc(Oid* schema_id, Oid object_id, char* object_name);
@@ -91,7 +94,6 @@ static int search_type_in_attr(Oid* schema_id, Oid object_id, char* object_name)
 static int search_type_in_cons(Oid* schema_id, Oid object_id, char* object_name);
 static int search_type_in_trigger(Oid* schema_id, Oid object_id, char* object_name);
 static int dealwith_property(int type, Oid schema_id, Oid object_id, char* property);
-static inline Oid search_oid_in_nsp(int cacheId, char* obj_name, Oid schema_oid);
 static inline int dealwith_type_ownerid(int type, Oid schema_id);
 static inline int dealwith_type_defcnst(int type);
 static inline int dealwith_type_exec_bound(int type, char* property);
@@ -159,6 +161,53 @@ static Oid search_oid_in_trigger(char* obj_name, Oid schema_oid)
 	return id;
 }
 
+static Oid search_oid_in_cons(char* obj_name, Oid schema_oid)
+{
+	Oid id = InvalidOid;
+	Relation tgrel;
+	ScanKeyData skeys[2];
+	SysScanDesc tgscan;
+	HeapTuple tuple;
+
+	ScanKeyInit(&skeys[0], Anum_pg_constraint_conname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(obj_name));
+
+    ScanKeyInit(&skeys[1],
+        Anum_pg_constraint_connamespace,
+        BTEqualStrategyNumber,
+        F_OIDEQ,
+        ObjectIdGetDatum(schema_oid));
+
+	tgrel = heap_open(ConstraintRelationId, AccessShareLock);
+	tgscan = systable_beginscan(tgrel, ConstraintNameNspIndexId, true, SnapshotNow, 2, skeys);
+	if (HeapTupleIsValid(tuple = systable_getnext(tgscan))) {
+		id = HeapTupleGetOid(tuple);
+	}
+	systable_endscan(tgscan);
+	heap_close(tgrel, AccessShareLock);
+	return id;
+}
+
+static Oid search_oid_in_class(char* obj_name, Oid schema_oid)
+{
+	Oid id = InvalidOid;
+	HeapTuple tuple;
+	Form_pg_class classform;
+
+	tuple = SearchSysCache2(RELNAMENSP, PointerGetDatum(obj_name), ObjectIdGetDatum(schema_oid));
+	if (HeapTupleIsValid(tuple))
+	{
+		classform = (Form_pg_class) GETSTRUCT(tuple);
+		if (classform->relkind == 'i' || classform->relkind == 'l') {
+			ReleaseSysCache(tuple);
+			return InvalidOid;
+		}
+		id = HeapTupleGetOid(tuple);
+		ReleaseSysCache(tuple);
+	}
+
+	return id;
+}
+
 static Oid search_oid_in_schema(char* schema_name, char* obj_name, char *object_type)
 {
 	Oid schema_oid = InvalidOid;
@@ -190,10 +239,10 @@ static Oid search_oid_in_schema(char* schema_name, char* obj_name, char *object_
 		if (strcmp(type_name, "S") == 0 || strcmp(type_name, "U") == 0 || strcmp(type_name, "V") == 0 ||
 			strcmp(type_name, "SO") == 0)
 		{
-			id = search_oid_in_nsp(RELNAMENSP, obj_name, schema_oid);
+			id = search_oid_in_class(obj_name, schema_oid);
 		} else if (strcmp(type_name, "C") == 0 || strcmp(type_name, "D") == 0 || strcmp(type_name, "F") == 0 ||
 			strcmp(type_name, "PK") == 0 || strcmp(type_name, "UQ") == 0) {
-			id = search_oid_in_nsp(CONNAMENSP, obj_name, schema_oid);
+			id = search_oid_in_cons(obj_name, schema_oid);
 		} else if (strcmp(type_name, "AF") == 0 || strcmp(type_name, "FN") == 0 ||
 			strcmp(type_name, "P") == 0 || strcmp(type_name, "PC") == 0) {
 			id = search_oid_in_proc(obj_name, schema_oid);
@@ -206,10 +255,10 @@ static Oid search_oid_in_schema(char* schema_name, char* obj_name, char *object_
 		}
 	} else {
 		if (id == InvalidOid) {
-			id = search_oid_in_nsp(RELNAMENSP, obj_name, schema_oid);
+			id = search_oid_in_class(obj_name, schema_oid);
 		}
 		if (id == InvalidOid) {
-			id = search_oid_in_nsp(CONNAMENSP, obj_name, schema_oid);
+			id = search_oid_in_cons(obj_name, schema_oid);
 		}
 		if (id == InvalidOid) {
 			id = search_oid_in_proc(obj_name, schema_oid);
@@ -375,7 +424,7 @@ static int search_type_in_attr(Oid* schema_id, Oid object_id, char* object_name)
 
 	attrdefrel = table_open(AttrDefaultRelationId, AccessShareLock);
 	ScanKeyInit(&key,
-				Anum_pg_attrdef_adrelid,
+				ObjectIdAttributeNumber,
 				BTEqualStrategyNumber, F_OIDEQ,
 				ObjectIdGetDatum(object_id));
 
@@ -488,17 +537,6 @@ static int search_type_in_trigger(Oid* schema_id, Oid object_id, char* object_na
 
 	table_close(trigDesc, AccessShareLock);
 	return type;
-}
-
-static inline Oid search_oid_in_nsp(int cache_id, char* obj_name, Oid schema_oid)
-{
-	Oid id = InvalidOid;
-	HeapTuple relTuple = SearchSysCache2(cache_id, PointerGetDatum(obj_name), ObjectIdGetDatum(schema_oid));
-	if (HeapTupleIsValid(relTuple)) {
-		id = HeapTupleGetOid(relTuple);
-		ReleaseSysCache(relTuple);
-	}
-	return id;
 }
 
 extern "C" Datum rand_seed(PG_FUNCTION_ARGS);

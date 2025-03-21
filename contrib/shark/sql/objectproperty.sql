@@ -1,7 +1,7 @@
 CREATE TABLE sys.students (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    age INT,
+    age INT DEFAULT 0,
     grade DECIMAL(5, 2)
 );
 
@@ -169,6 +169,28 @@ select objectproperty(object_id('trigger_update_total_grade'), 'isindexed') as i
 select objectproperty(object_id('trigger_update_total_grade'), 'isdefault') as isdefault;
 select objectproperty(object_id('trigger_update_total_grade'), 'isrule') as isrule;
 select objectproperty(object_id('trigger_update_total_grade'), 'istrigger') as istrigger;
+
+select objectproperty(object_id('students_pkey'), 'istable') as istable;
+select objectproperty(object_id('students_pkey'), 'ownerid') as ownerid;
+select objectproperty(object_id('students_pkey'), 'isdefaultcnst') as isdefaultcnst;
+select objectproperty(object_id('students_pkey'), 'execisquotedidenton') as execisquotedidenton;
+select objectproperty(object_id('students_pkey'), 'isschemabound') as isschemabound;
+select objectproperty(object_id('students_pkey'), 'execisansinullson') as execisansinullson;
+select objectproperty(object_id('students_pkey'), 'tablefulltextpopulatestatus') as tablefulltextpopulatestatus;
+select objectproperty(object_id('students_pkey'), 'tablehasvardecimalstorageformat') as tablehasvardecimalstorageformat;
+select objectproperty(object_id('students_pkey'), 'issysshipped') as issysshipped;
+select objectproperty(object_id('students_pkey'), 'isdeterministic') as isdeterministic;
+select objectproperty(object_id('students_pkey'), 'isprocedure') asisprocedure;
+select objectproperty(object_id('students_pkey'), 'isview') as isview;
+select objectproperty(object_id('students_pkey'), 'isusertable') as isusertable;
+select objectproperty(object_id('students_pkey'), 'istablefunction') as istablefunction;
+select objectproperty(object_id('students_pkey'), 'isinlinefunction') as isinlinefunction;
+select objectproperty(object_id('students_pkey'), 'isscalarfunction') as isscalarfunction;
+select objectproperty(object_id('students_pkey'), 'isprimarykey') as isprimarykey;
+select objectproperty(object_id('students_pkey'), 'isindexed') as isindexed;
+select objectproperty(object_id('students_pkey'), 'isdefault') as isdefault;
+select objectproperty(object_id('students_pkey'), 'isrule') as isrule;
+select objectproperty(object_id('students_pkey'), 'istrigger') as istrigger;
 
 --异常用例
 CREATE TEMP TABLE sys.temp_sales (

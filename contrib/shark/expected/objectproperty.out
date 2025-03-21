@@ -1,7 +1,7 @@
 CREATE TABLE sys.students (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    age INT,
+    age INT DEFAULT 0,
     grade DECIMAL(5, 2)
 );
 NOTICE:  CREATE TABLE will create implicit sequence "students_id_seq" for serial column "students.id"
@@ -747,6 +747,132 @@ select objectproperty(object_id('trigger_update_total_grade'), 'istrigger') as i
  istrigger 
 -----------
          1
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'istable') as istable;
+ istable 
+---------
+       0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'ownerid') as ownerid;
+ ownerid 
+---------
+--?.*
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isdefaultcnst') as isdefaultcnst;
+ isdefaultcnst 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'execisquotedidenton') as execisquotedidenton;
+ execisquotedidenton 
+---------------------
+                    
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isschemabound') as isschemabound;
+ isschemabound 
+---------------
+              
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'execisansinullson') as execisansinullson;
+ execisansinullson 
+-------------------
+                  
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'tablefulltextpopulatestatus') as tablefulltextpopulatestatus;
+ tablefulltextpopulatestatus 
+-----------------------------
+                            
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'tablehasvardecimalstorageformat') as tablehasvardecimalstorageformat;
+ tablehasvardecimalstorageformat 
+---------------------------------
+                                
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'issysshipped') as issysshipped;
+ issysshipped 
+--------------
+            1
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isdeterministic') as isdeterministic;
+ isdeterministic 
+-----------------
+                
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isprocedure') asisprocedure;
+ asisprocedure 
+---------------
+             0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isview') as isview;
+ isview 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isusertable') as isusertable;
+ isusertable 
+-------------
+           0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'istablefunction') as istablefunction;
+ istablefunction 
+-----------------
+               0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isinlinefunction') as isinlinefunction;
+ isinlinefunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isscalarfunction') as isscalarfunction;
+ isscalarfunction 
+------------------
+                0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isprimarykey') as isprimarykey;
+ isprimarykey 
+--------------
+            1
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isindexed') as isindexed;
+ isindexed 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isdefault') as isdefault;
+ isdefault 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'isrule') as isrule;
+ isrule 
+--------
+      0
+(1 row)
+
+select objectproperty(object_id('students_pkey'), 'istrigger') as istrigger;
+ istrigger 
+-----------
+         0
 (1 row)
 
 --异常用例
