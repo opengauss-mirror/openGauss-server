@@ -26,7 +26,7 @@ SUBDIRS = ../common/backend bootstrap cbb optimizer process dbmind runtime  secu
 	$(top_builddir)/src/common/timezone $(top_builddir)/src/common/interfaces/libpq \
 	$(top_builddir)/contrib/file_fdw $(top_builddir)/contrib/log_fdw \
 	$(top_builddir)/contrib/test_decoding $(top_builddir)/contrib/mppdb_decoding \
-	$(top_builddir)/contrib/postgres_fdw
+	$(top_builddir)/contrib/postgres_fdw $(top_builddir)/contrib/jieba_tokenizer
 
 ifeq ($(enable_db4ai_mock), yes)
 	SUBDIRS += $(top_builddir)/src/test/db4ai
@@ -574,6 +574,7 @@ install: all installdirs install-bin
 	$(MAKE) -C storage/bulkload install-data
 	$(MAKE) -C $(top_builddir)/contrib/file_fdw install
 	$(MAKE) -C $(top_builddir)/contrib/log_fdw install
+	$(MAKE) -C $(top_builddir)/contrib/jieba_tokenizer install
 ifeq ($(enable_multiple_nodes), yes)
 	$(MAKE) -C $(top_builddir)/../distribute/kernel/extension/gauss_connector install
 	$(MAKE) -C $(top_builddir)/../distribute/kernel/extension/roach_api install
@@ -832,6 +833,7 @@ ifeq ($(enable_mot), yes)
 	$(MAKE) -C $(top_builddir)/src/gausskernel/storage/mot/fdw_adapter uninstall
 endif
 	$(MAKE) -C $(top_builddir)/contrib/log_fdw uninstall
+	$(MAKE) -C $(top_builddir)/contrib/jieba_tokenizer uninstall
 	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade_support clean
 	$(MAKE) -C $(top_builddir)/contrib/test_decoding uninstall
 	$(MAKE) -C $(top_builddir)/contrib/mppdb_decoding uninstall
