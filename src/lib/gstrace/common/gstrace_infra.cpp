@@ -59,7 +59,7 @@
 
 #define FUNCTION_IDX(traceId) (((traceId)&GS_TRC_FUNC_MASK) >> GS_TRC_FUNC_SHIFT)
 
-#define isTraceEnbled(pTrcCxt) ((pTrcCxt)->pTrcCfg != NULL && (pTrcCxt)->pTrcCfg->bEnabled)
+#define isTraceEnabled(pTrcCxt) ((pTrcCxt)->pTrcCfg != NULL && (pTrcCxt)->pTrcCfg->bEnabled)
 
 #define FILL_TRACE_HADER(slotAddress, seq, numSlot)              \
     do {                                                         \
@@ -873,7 +873,7 @@ static void gstrace_internal(const trace_type type, const uint32_t probe, const 
      * (2) trace is not initialized or activated.
      * (3) traceId is not in whitelist.
      */
-    if (unlikely(isTraceEnbled(pTrcCxt)) && isTraceIdRequired(rec_id)) {
+    if (unlikely(isTraceEnabled(pTrcCxt)) && isTraceIdRequired(rec_id)) {
         if (likely(pTrcCxt->pTrcCfg->status == TRACE_STATUS_RECORDING)) {
             __sync_fetch_and_add(&pTrcCxt->pTrcCfg->status_counter, 1);
             /*
@@ -907,6 +907,14 @@ static void gstrace_internal(const trace_type type, const uint32_t probe, const 
             }
         } else {
             /* do nothing during unmap process since trace is disable */
+        }
+    } else {
+        if (isTraceEnabled(pTrcCxt) && pTrcCxt->pTrcCfg->status == TRACE_STATUS_PREPARE_STOP) {
+            if (__sync_bool_compare_and_swap(
+                        &pTrcCxt->pTrcCfg->status, TRACE_STATUS_PREPARE_STOP, TRACE_STATUS_BEGIN_STOP)) {
+                    detachTraceBufferIfDisabled();
+                }
+            printf("traceId is not in whitelist.\n");
         }
     }
 }
