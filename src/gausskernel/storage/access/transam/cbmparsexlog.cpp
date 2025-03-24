@@ -1157,6 +1157,8 @@ static bool isNeedWaitInErrorProcess(uint32 readerStatus, uint32 threadId)
     if (readerStatus == CBM_THREAD_WORKING) {
         return true;
     }
+    /* In other conditions, we just quit now. */
+    return false;
 }
 
 /*
