@@ -733,3 +733,14 @@ insert into hier values('China','天津');
 select child, level, lpad(' ', level*3, ' ')||child c1 from hier start with parent is null connect by prior child = parent ORDER SIBLINGS BY c1;
 select child, level, lpad(' ', level*3, ' ')||child c1, level c2 from hier start with parent is null connect by prior child = parent ORDER SIBLINGS BY c2;
 drop table hier;
+
+-- test create view for issue #IBBUB6
+drop view if exists vtest;
+drop table if exists t_test_for_view_1, t_test_for_view_2;
+create table t_test_for_view_1(id int);
+create table t_test_for_view_2(id int);
+--- expect no error
+create view vtest as (select t1.id as id1,t2.id as id2 from t1,t2 where t1.id+1=t2.id start with t1.id=1
+connect by prior t2.id=t1.id);
+drop view vtest;
+drop table t_test_for_view_1, t_test_for_view_2;
