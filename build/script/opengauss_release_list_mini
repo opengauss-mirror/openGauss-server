@@ -745,6 +745,7 @@
 ./share/sslcert/grpc/openssl.cnf
 ./share/sslcert/om/openssl.cnf
 ./lib/libsimsearch/
+./lib/jieba_dict/
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
 ./lib/postgresql/euc_kr_and_mic.so

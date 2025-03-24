@@ -729,6 +729,7 @@
 ./share/postgresql/timezonesets/Etc.txt
 ./share/postgresql/postgres.bki
 ./share/sslcert/gsql/openssl.cnf
+./lib/jieba_dict/
 ./lib/libpq.so
 ./lib/libpq.so.5
 ./lib/libpq.so.5.5

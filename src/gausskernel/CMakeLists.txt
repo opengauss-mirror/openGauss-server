@@ -222,6 +222,7 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:common_timezone>
     $<TARGET_OBJECTS:contrib_file_fdw>
     $<TARGET_OBJECTS:contrib_log_fdw>
+    $<TARGET_OBJECTS:contrib_jiebatokenizer>
 )
 
 if("${ENABLE_MOT}" STREQUAL "ON")
