@@ -1406,6 +1406,9 @@ void AddStartWithCTEPseudoReturnColumns(CommonTableExpr *cte,
     bool pseudoExist = false;
     ListCell *lc = NULL;
 
+    /* add rte into the rtables of ctequery. */
+    ctequery->rtable = lappend(ctequery->rtable, rte);
+
     foreach(lc, ctequery->targetList) {
         TargetEntry *entry = (TargetEntry *)lfirst(lc);
  
