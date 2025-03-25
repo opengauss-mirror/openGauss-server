@@ -418,8 +418,13 @@ IMCSDesc* IMCUDataCacheMgr::GetImcsDesc(Oid relOid)
 
 void IMCUDataCacheMgr::UpdateImcsStatus(Oid relOid, int imcsStatus)
 {
+    bool found = false;
     LWLockAcquire(m_imcs_lock, LW_EXCLUSIVE);
-    IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_FIND, NULL);
+    IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_FIND, &found);
+    if (!found) {
+        LWLockRelease(m_imcs_lock);
+        return;
+    }
     imcsDesc->imcsStatus = imcsStatus;
     LWLockRelease(m_imcs_lock);
 }
