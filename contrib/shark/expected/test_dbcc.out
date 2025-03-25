@@ -1,0 +1,472 @@
+create schema shark_test_dbcc;
+set search_path = 'shark_test_dbcc';
+set d_format_behavior_compat_options = 'enable_sbr_identifier';
+-- part1: dbcc check NORESEED
+ CREATE TABLE Employees (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employeeid_seq" for serial column "employees.employeeid"
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+insert into Employees(Name) values ('wangwu');
+insert into Employees(Name) values ('heliu');
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees'); 
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', NORESEED) WITH NO_INFOMSGS;
+ dbcc_check_ident_no_reseed 
+----------------------------
+ 
+(1 row)
+
+insert into Employees(Name) values ('heqi');
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '5', current column value '5'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '5', current column value '5'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees'); 
+NOTICE:  "Checking identity information: current identity value '5', current column value '5'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '5', current column value '5'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', NORESEED) WITH NO_INFOMSGS;
+ dbcc_check_ident_no_reseed 
+----------------------------
+ 
+(1 row)
+
+delete from Employees where EmployeeID > 2;
+DBCC CHECKIDENT ('Employees', NORESEED); 
+NOTICE:  "Checking identity information: current identity value '5', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '5', current column value '2'.
+(1 row)
+
+update Employees set employeeid = 100 where employeeid = 1;
+DBCC CHECKIDENT ('Employees', NORESEED); 
+NOTICE:  "Checking identity information: current identity value '5', current column value '100'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                               dbcc_check_ident_no_reseed                               
+----------------------------------------------------------------------------------------
+ Checking identity information: current identity value '5', current column value '100'.
+(1 row)
+
+ 
+-- increment by is negative
+ CREATE TABLE Employees_ne (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "employees_ne_employeeid_seq" for serial column "employees_ne.employeeid"
+ALTER SEQUENCE employees_ne_employeeid_seq MINVALUE  -1000;
+ALTER SEQUENCE employees_ne_employeeid_seq INCREMENT BY -2;
+insert into Employees_ne(Name) values ('zhangsan');
+insert into Employees_ne(Name) values ('lisi');
+insert into Employees_ne(Name) values ('wangwu');
+insert into Employees_ne(Name) values ('heliu');
+DBCC CHECKIDENT ('Employees_ne', NORESEED);
+NOTICE:  "Checking identity information: current identity value '-5', current column value '-5'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                               dbcc_check_ident_no_reseed                               
+----------------------------------------------------------------------------------------
+ Checking identity information: current identity value '-5', current column value '-5'.
+(1 row)
+
+delete from Employees where EmployeeID < -4;
+DBCC CHECKIDENT ('Employees_ne', NORESEED);
+NOTICE:  "Checking identity information: current identity value '-5', current column value '-5'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                               dbcc_check_ident_no_reseed                               
+----------------------------------------------------------------------------------------
+ Checking identity information: current identity value '-5', current column value '-5'.
+(1 row)
+
+-- error case expect
+DBCC CHECKIDENT ('Employees1', NORESEED); 
+ERROR:  relation "employees1" does not exist
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+DBCC CHECKIDENT ('employees_employeeid_seq', NORESEED); 
+ERROR:  relation "employees_employeeid_seq" does not exist
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+-- plsql
+create or replace procedure test_procedure_test1(int)
+as
+begin
+      DBCC CHECKIDENT ('Employees', NORESEED);
+end;
+/
+call test_procedure_test1(1);
+NOTICE:  "Checking identity information: current identity value '5', current column value '100'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+SQL statement "DBCC CHECKIDENT ('Employees', NORESEED)"
+PL/pgSQL function test_procedure_test1(integer) line 2 at PERFORM
+ test_procedure_test1 
+----------------------
+ 
+(1 row)
+
+drop table Employees;
+drop table Employees_ne;
+drop procedure test_procedure_test1(int);
+-- part1: dbcc check RESEED
+CREATE TABLE Employees (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employeeid_seq" for serial column "employees.employeeid"
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+insert into Employees(Name) values ('wangwu');
+insert into Employees(Name) values ('heliu');
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, 20);
+NOTICE:  "Checking identity information: current identity value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                  dbcc_check_ident_reseed                   
+------------------------------------------------------------
+ Checking identity information: current identity value '4'.
+(1 row)
+
+insert into Employees(Name) values ('heqi');
+insert into Employees(Name) values ('heba');
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '22', current column value '22'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                               dbcc_check_ident_no_reseed                               
+----------------------------------------------------------------------------------------
+ Checking identity information: current identity value '22', current column value '22'.
+(1 row)
+
+select * from Employees order by 1, 2;
+ employeeid |   name   
+------------+----------
+          1 | zhangsan
+          2 | lisi
+          3 | wangwu
+          4 | heliu
+         21 | heqi
+         22 | heba
+(6 rows)
+
+DBCC CHECKIDENT ('Employees', RESEED, 30) WITH NO_INFOMSGS;
+ dbcc_check_ident_reseed 
+-------------------------
+ 
+(1 row)
+
+insert into Employees(Name) values ('zhangqi');
+insert into Employees(Name) values ('zhangba');
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '32', current column value '32'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                               dbcc_check_ident_no_reseed                               
+----------------------------------------------------------------------------------------
+ Checking identity information: current identity value '32', current column value '32'.
+(1 row)
+
+select * from Employees order by 1, 2;
+ employeeid |   name   
+------------+----------
+          1 | zhangsan
+          2 | lisi
+          3 | wangwu
+          4 | heliu
+         21 | heqi
+         22 | heba
+         31 | zhangqi
+         32 | zhangba
+(8 rows)
+
+delete from Employees where EmployeeID > 2;
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+NOTICE:  "Checking identity information: current identity value '32'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                   dbcc_check_ident_reseed                   
+-------------------------------------------------------------
+ Checking identity information: current identity value '32'.
+(1 row)
+
+insert into Employees(Name) values ('heqi');
+insert into Employees(Name) values ('heba');
+select * from Employees order by 1, 2;
+ employeeid |   name   
+------------+----------
+          1 | zhangsan
+          2 | heqi
+          2 | lisi
+          3 | heba
+(4 rows)
+
+ALTER SEQUENCE employees_employeeid_seq MINVALUE -100;
+DBCC CHECKIDENT ('Employees', RESEED);
+NOTICE:  "Checking identity information: current identity value '3'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                  dbcc_check_ident_reseed                   
+------------------------------------------------------------
+ Checking identity information: current identity value '3'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, -2);
+NOTICE:  "Checking identity information: current identity value '3'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                  dbcc_check_ident_reseed                   
+------------------------------------------------------------
+ Checking identity information: current identity value '3'.
+(1 row)
+
+insert into Employees(Name) values ('liqi');
+insert into Employees(Name) values ('liba');
+select * from Employees order by 1, 2;
+ employeeid |   name   
+------------+----------
+         -1 | liqi
+          0 | liba
+          1 | zhangsan
+          2 | heqi
+          2 | lisi
+          3 | heba
+(6 rows)
+
+-- plsql
+create or replace procedure test_procedure_test(int)
+as
+begin
+      DBCC CHECKIDENT ('Employees', RESEED, 1);
+end;
+/
+call test_procedure_test(1);
+NOTICE:  "Checking identity information: current identity value '0'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+SQL statement "DBCC CHECKIDENT ('Employees', RESEED, 1)"
+PL/pgSQL function test_procedure_test(integer) line 2 at PERFORM
+ test_procedure_test 
+---------------------
+ 
+(1 row)
+
+drop table Employees;
+drop procedure test_procedure_test(int);
+-- some error case
+-- no serial col
+CREATE TABLE Employees_no (
+     EmployeeID int ,
+     Name VARCHAR(100) NOT NULL
+ );
+insert into Employees_no(EmployeeID, Name) values (1, 'zhangsan');
+insert into Employees_no(EmployeeID, Name) values (2, 'lisi');
+insert into Employees_no(EmployeeID, Name) values (3, 'wangwu');
+insert into Employees_no(EmployeeID, Name) values (4, 'heliu');
+DBCC CHECKIDENT ('Employees_no', NORESEED);
+ERROR:  cannot not found the serial column for relation "Employees_no"
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+DBCC CHECKIDENT ('Employees_no', RESEED, 20);
+ERROR:  cannot not found the serial column for relation "Employees_no"
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+-- mul serial col
+CREATE TABLE Employees_mu (
+     EmployeeID serial ,
+	 EmployeeID1 serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "employees_mu_employeeid_seq" for serial column "employees_mu.employeeid"
+NOTICE:  CREATE TABLE will create implicit sequence "employees_mu_employeeid1_seq" for serial column "employees_mu.employeeid1"
+insert into Employees_mu(Name) values ('zhangsan');
+insert into Employees_mu(Name) values ('lisi');
+insert into Employees_mu(Name) values ('wangwu');
+insert into Employees_mu(Name) values ('heliu');
+DBCC CHECKIDENT ('Employees_mu', NORESEED);
+ERROR:  more than one serial in relation "Employees_mu"
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+DBCC CHECKIDENT ('Employees_mu', RESEED, 20);
+ERROR:  more than one serial in relation "Employees_mu"
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+-- serial at middle
+CREATE TABLE Employees_mi (
+     EmployeeID int ,
+	 EmployeeID1 serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "employees_mi_employeeid1_seq" for serial column "employees_mi.employeeid1"
+insert into Employees_mi(EmployeeID, Name) values (1, 'zhangsan');
+insert into Employees_mi(EmployeeID, Name) values (2, 'lisi');
+insert into Employees_mi(EmployeeID, Name) values (3, 'wangwu');
+insert into Employees_mi(EmployeeID, Name) values (4, 'heliu');
+DBCC CHECKIDENT ('Employees_mi', NORESEED);
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees_mi', RESEED, 20);
+NOTICE:  "Checking identity information: current identity value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                  dbcc_check_ident_reseed                   
+------------------------------------------------------------
+ Checking identity information: current identity value '4'.
+(1 row)
+
+drop table Employees_no;
+drop table Employees_mu;
+drop table Employees_mi;
+-- permission
+ CREATE TABLE Employees (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employeeid_seq" for serial column "employees.employeeid"
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+insert into Employees(Name) values ('wangwu');
+insert into Employees(Name) values ('heliu');
+create user normalrole_user_001 password 'Gauss@123';
+create user normalrole_user_002 password 'Gauss@123';
+create user normalrole_user_003 password 'Gauss@123';
+GRANT USAGE ON SCHEMA shark_test_dbcc TO normalrole_user_001;
+GRANT USAGE ON SCHEMA shark_test_dbcc TO normalrole_user_002;
+GRANT USAGE ON SCHEMA shark_test_dbcc TO normalrole_user_003;
+GRANT SELECT ON Employees to normalrole_user_002;
+GRANT SELECT,UPDATE  ON Employees to normalrole_user_003;
+SET SESSION AUTHORIZATION normalrole_user_001 PASSWORD 'Gauss@123';
+DBCC CHECKIDENT ('Employees', NORESEED);
+ERROR:  permission denied for sequence employees
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+ERROR:  permission denied for sequence employees
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+RESET SESSION AUTHORIZATION;
+SET SESSION AUTHORIZATION normalrole_user_002 PASSWORD 'Gauss@123';
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+ERROR:  permission denied for sequence employees
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+RESET SESSION AUTHORIZATION;
+SET SESSION AUTHORIZATION normalrole_user_003 PASSWORD 'Gauss@123';
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+NOTICE:  "Checking identity information: current identity value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                  dbcc_check_ident_reseed                   
+------------------------------------------------------------
+ Checking identity information: current identity value '4'.
+(1 row)
+
+RESET SESSION AUTHORIZATION;
+drop user normalrole_user_001 cascade;
+drop user normalrole_user_002 cascade;
+drop user normalrole_user_003 cascade;
+drop table Employees;
+-- create table as
+create table t2(id int, name int);
+insert into t2 values (1, 1);
+insert into t2 values (2, 2);
+insert into t2 values (3, 3);
+CREATE or replace PROCEDURE InsertIntoTempTable
+AS
+BEGIN
+  WITH dd AS (
+  SELECT * FROM t2
+  )
+  SELECT * INTO new_table from dd;
+END;
+/
+call InsertIntoTempTable();
+ insertintotemptable 
+---------------------
+ 
+(1 row)
+
+select * from new_table;
+ id | name 
+----+------
+  1 |    1
+  2 |    2
+  3 |    3
+(3 rows)
+
+CREATE or replace PROCEDURE InsertIntoTempTable2
+AS
+BEGIN
+  WITH dd AS (
+  SELECT * FROM t2
+  )
+  SELECT 1 INTO new_table2;
+END;
+/
+call InsertIntoTempTable2();
+ insertintotemptable2 
+----------------------
+ 
+(1 row)
+
+-- expect error
+CREATE or replace PROCEDURE InsertIntoTempTable3
+AS
+BEGIN
+  WITH dd AS (
+  SELECT * FROM t2
+  )
+  SELECT * INTO new_table;
+END;
+/
+call InsertIntoTempTable3();
+ERROR:  SELECT * with no tables specified is not valid
+LINE 4:   SELECT * INTO new_table
+                 ^
+QUERY:  WITH dd AS (
+  SELECT * FROM t2
+  )
+  SELECT * INTO new_table
+CONTEXT:  PL/pgSQL function insertintotemptable3() line 2 at SQL statement
+drop PROCEDURE insertintotemptable;
+drop PROCEDURE InsertIntoTempTable2;
+drop PROCEDURE InsertIntoTempTable3;
+drop table new_table;
+drop table new_table2;
+drop table t2;
+drop schema shark_test_dbcc cascade;

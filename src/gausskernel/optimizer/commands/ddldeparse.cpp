@@ -1623,12 +1623,20 @@ static ObjTree* deparse_ColumnDef_constraints(ObjTree *ret, Relation relation,
                          saw_notnull ? "NOT NULL" : saw_autoincrement ? "NULL" : "");
 
     /* GENERATED COLUMN EXPRESSION */
-    tmp_obj = new_objtree("GENERATED ALWAYS AS");
+    if (coldef->generatedCol != ATTRIBUTE_GENERATED_PERSISTED) {
+        tmp_obj = new_objtree("GENERATED ALWAYS AS");
+    }
     if (coldef->generatedCol == ATTRIBUTE_GENERATED_STORED) {
         char       *defstr;
 
         defstr = RelationGetColumnDefault(relation, attrForm->attnum, dpcontext, exprs);
         append_string_object(tmp_obj, "(%{generation_expr}s) STORED", "generation_expr", defstr);
+    } else if (coldef->generatedCol == ATTRIBUTE_GENERATED_PERSISTED) {
+        tmp_obj = new_objtree("AS");
+        char       *defstr;
+
+        defstr = RelationGetColumnDefault(relation, attrForm->attnum, dpcontext, exprs);
+        append_string_object(tmp_obj, "(%{generation_expr}s) PERSISTED", "generation_expr", defstr);
     } else {
         append_not_present(tmp_obj, "(%{generation_expr}s) STORED");
     }
@@ -1639,6 +1647,7 @@ static ObjTree* deparse_ColumnDef_constraints(ObjTree *ret, Relation relation,
 
     if (attrForm->atthasdef &&
         coldef->generatedCol != ATTRIBUTE_GENERATED_STORED &&
+        coldef->generatedCol != ATTRIBUTE_GENERATED_PERSISTED &&
         !saw_autoincrement &&
         !onupdate) {
         char       *defstr;
@@ -1701,12 +1710,26 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
     get_atttypetypmodcoll(relid, attrForm->attnum,
                           &typid, &typmod, &typcollation);
 
-    ret = new_objtree_VA("%{name}I %{coltype}T", 3,
-                         "type", ObjTypeString, "column",
-                         "name", ObjTypeString, coldef->colname,
-                         "coltype", ObjTypeObject,
-                         new_objtree_for_type(typid, typmod));
-
+    constexpr int numThree = 3;
+    constexpr int numFour = 3;
+    if (coldef->generatedCol != ATTRIBUTE_GENERATED_PERSISTED) {
+        ret = new_objtree_VA("%{name}I %{coltype}T", numThree,
+                             "type", ObjTypeString, "column",
+                             "name", ObjTypeString, coldef->colname,
+                             "coltype", ObjTypeObject,
+                             new_objtree_for_type(typid, typmod));
+    } else {
+        ObjTree* dummy = new_objtree_VA(NULL, numFour,
+                                        "schemaname", ObjTypeString, "",
+                                        "typename", ObjTypeString, "",
+                                        "typmod", ObjTypeString, "",
+                                        "typarray", ObjTypeBool, false);
+        append_not_present(dummy, NULL);
+        ret = new_objtree_VA("%{name}I", numThree,
+                             "type", ObjTypeString, "column",
+                             "name", ObjTypeString, coldef->colname,
+                             "coltype", ObjTypeObject, dummy);
+    }
     tmp_obj = new_objtree("COLLATE");
     if (OidIsValid(typcollation)) {
         append_object_object(tmp_obj, "%{name}D",
@@ -1766,6 +1789,7 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
 
         if (attrForm->atthasdef &&
             coldef->generatedCol != ATTRIBUTE_GENERATED_STORED &&
+            coldef->generatedCol != ATTRIBUTE_GENERATED_PERSISTED &&
             !saw_autoincrement) {
             char       *defstr = NULL;
 
@@ -1812,13 +1836,23 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
             append_string_object(ret, "%{not_null}s", "not_null", saw_notnull ? "NOT NULL" : "");
 
         /* GENERATED COLUMN EXPRESSION */
-        tmp_obj = new_objtree("GENERATED ALWAYS AS");
+        if (coldef->generatedCol != ATTRIBUTE_GENERATED_PERSISTED) {
+            tmp_obj = new_objtree("GENERATED ALWAYS AS");
+        }
         if (coldef->generatedCol == ATTRIBUTE_GENERATED_STORED) {
             char       *defstr;
 
             defstr = RelationGetColumnDefault(relation, attrForm->attnum,
                                               dpcontext, exprs);
             append_string_object(tmp_obj, "(%{generation_expr}s) STORED",
+                                 "generation_expr", defstr);
+        } else if (coldef->generatedCol == ATTRIBUTE_GENERATED_PERSISTED) {
+            tmp_obj = new_objtree("AS");
+            char       *defstr;
+
+            defstr = RelationGetColumnDefault(relation, attrForm->attnum,
+                                              dpcontext, exprs);
+            append_string_object(tmp_obj, "(%{generation_expr}s) PERSISTED",
                                  "generation_expr", defstr);
         } else {
             append_not_present(tmp_obj, "(%{generation_expr}s) STORED");
@@ -3111,7 +3145,8 @@ static List* deparse_AlterRelation_add_column_default(CollectedCommand *cmd)
                     Oid          typcollation;
 
                     /* do nothing */
-                    if (coldef->generatedCol == ATTRIBUTE_GENERATED_STORED) {
+                    if (coldef->generatedCol == ATTRIBUTE_GENERATED_STORED ||
+                        coldef->generatedCol == ATTRIBUTE_GENERATED_PERSISTED) {
                         break;
                     }
 

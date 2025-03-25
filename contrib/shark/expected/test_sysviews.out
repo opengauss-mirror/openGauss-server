@@ -1,0 +1,352 @@
+create schema sys_view_test;
+set search_path to sys_view_test;
+-- show views struct
+\d sys.sysobjects
+                     View "sys.sysobjects"
+      Column      |              Type              | Modifiers 
+------------------+--------------------------------+-----------
+ name             | name                           | 
+ id               | oid                            | 
+ xtype            | character(2)                   | 
+ uid              | oid                            | 
+ info             | smallint                       | 
+ status           | integer                        | 
+ base_schema_ver  | integer                        | 
+ replinfo         | integer                        | 
+ parent_obj       | oid                            | 
+ crdate           | timestamp(3) without time zone | 
+ ftcatid          | smallint                       | 
+ schema_ver       | integer                        | 
+ stats_schema_ver | integer                        | 
+ type             | character(2)                   | 
+ userstat         | smallint                       | 
+ sysstat          | smallint                       | 
+ indexdel         | smallint                       | 
+ refdate          | timestamp(3) without time zone | 
+ version          | integer                        | 
+ deltrig          | integer                        | 
+ instrig          | integer                        | 
+ updtrig          | integer                        | 
+ seltrig          | integer                        | 
+ category         | integer                        | 
+ cache            | smallint                       | 
+
+\d sys.syscolumns
+              View "sys.syscolumns"
+   Column    |          Type          | Modifiers 
+-------------+------------------------+-----------
+ name        | name                   | 
+ id          | oid                    | 
+ xtype       | oid                    | 
+ typestat    | tinyint                | 
+ xusertype   | oid                    | 
+ length      | smallint               | 
+ xprec       | tinyint                | 
+ xscale      | tinyint                | 
+ colid       | smallint               | 
+ xoffset     | smallint               | 
+ bitpos      | tinyint                | 
+ reserved    | tinyint                | 
+ colstat     | smallint               | 
+ cdefault    | integer                | 
+ domain      | integer                | 
+ number      | smallint               | 
+ colorder    | smallint               | 
+ autoval     | bytea                  | 
+ offset      | smallint               | 
+ collationid | oid                    | 
+ status      | tinyint                | 
+ type        | oid                    | 
+ usertype    | oid                    | 
+ printfmt    | character varying(255) | 
+ prec        | smallint               | 
+ scale       | integer                | 
+ iscomputed  | integer                | 
+ isoutparam  | integer                | 
+ isnullable  | integer                | 
+ collation   | name                   | 
+
+\d sys.sysindexes
+         View "sys.sysindexes"
+     Column     |   Type   | Modifiers 
+----------------+----------+-----------
+ id             | oid      | 
+ status         | integer  | 
+ first          | bytea    | 
+ indid          | oid      | 
+ root           | bytea    | 
+ minlen         | smallint | 
+ keycnt         | smallint | 
+ groupid        | smallint | 
+ dpages         | integer  | 
+ reserved       | integer  | 
+ used           | integer  | 
+ rowcnt         | bigint   | 
+ rowmodctr      | integer  | 
+ reserved3      | integer  | 
+ reserved4      | integer  | 
+ xmaxlen        | integer  | 
+ maxirow        | integer  | 
+ OrigFillFactor | integer  | 
+ StatVersion    | tinyint  | 
+ reserved2      | integer  | 
+ FirstIAM       | bytea    | 
+ impid          | smallint | 
+ lockflags      | smallint | 
+ pgmodctr       | integer  | 
+ keys           | bytea    | 
+ name           | name     | 
+ statblob       | bytea    | 
+ maxlen         | integer  | 
+ rows           | integer  | 
+
+\d sys.sysindexkeys
+    View "sys.sysindexkeys"
+ Column |   Type   | Modifiers 
+--------+----------+-----------
+ id     | oid      | 
+ indid  | oid      | 
+ colid  | smallint | 
+ keyno  | smallint | 
+
+-- test select
+select * from sys.sysobjects order by id limit 1;
+   name   | id | xtype | uid | info | status | base_schema_ver | replinfo | parent_obj | crdate | ftcatid | schema_ver | stats_schema_ver | type | userstat | sysstat | indexdel | refdate | version | deltrig | instrig | updtrig | seltrig | category | cache 
+----------+----+-------+-----+------+--------+-----------------+----------+------------+--------+---------+------------+------------------+------+----------+---------+----------+---------+---------+---------+---------+---------+---------+----------+-------
+ byteaout | 31 | FN    |  11 |    0 |      0 |               0 |        0 |          0 |        |       0 |          0 |                0 | FN   |        0 |       0 |        0 |         |       0 |       0 |       0 |       0 |       0 |        0 |     0
+(1 row)
+
+select * from sys.syscolumns order by id limit 1;
+   name   | id | xtype | typestat | xusertype | length | xprec | xscale | colid | xoffset | bitpos | reserved | colstat | cdefault | domain | number | colorder | autoval | offset | collationid | status | type | usertype | printfmt | prec | scale | iscomputed | isoutparam | isnullable | collation 
+----------+----+-------+----------+-----------+--------+-------+--------+-------+---------+--------+----------+---------+----------+--------+--------+----------+---------+--------+-------------+--------+------+----------+----------+------+-------+------------+------------+------------+-----------
+ byteaout | 31 |    17 | 0        |        17 |      0 | 0     | 0      |     1 |       0 | 0      | 0        |       0 |          |        |      0 |        0 |         |      0 |             | 0      |   17 |       17 |          |      |       |          0 |          0 |          1 | 
+(1 row)
+
+select * from sys.sysindexes order by id, indid limit 1;
+ id  | status | first | indid | root | minlen | keycnt | groupid | dpages | reserved | used | rowcnt | rowmodctr | reserved3 | reserved4 | xmaxlen | maxirow | OrigFillFactor | StatVersion | reserved2 | FirstIAM | impid | lockflags | pgmodctr | keys |               name                | statblob | maxlen | rows 
+-----+--------+-------+-------+------+--------+--------+---------+--------+----------+------+--------+-----------+-----------+-----------+---------+---------+----------------+-------------+-----------+----------+-------+-----------+----------+------+-----------------------------------+----------+--------+------
+ 826 |      0 |       |   827 |      |      0 |      0 |       0 |      0 |        0 |    0 |      0 |         0 |         0 |         0 |       0 |       0 |              0 | 0           |         0 |          |     0 |         0 |        0 |      | pg_default_acl_role_nsp_obj_index |          |      0 |    0
+(1 row)
+
+select * from sys.sysindexkeys order by id, indid limit 1;
+ id  | indid | colid | keyno 
+-----+-------+-------+-------
+ 826 |   827 |     1 |     1
+(1 row)
+
+select "OrigFillFactor", "StatVersion", "FirstIAM" from sys.sysindexes order by id, indid limit 1;
+ OrigFillFactor | StatVersion | FirstIAM 
+----------------+-------------+----------
+              0 | 0           | 
+(1 row)
+
+-- prepare data
+CREATE TABLE student
+(
+    std_id INT PRIMARY KEY,
+    std_name VARCHAR(20) NOT NULL,
+    std_sex VARCHAR(6),
+    std_birth DATE,
+    std_in DATE NOT NULL,
+    std_address VARCHAR(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "student_pkey" for table "student"
+CREATE TABLE teacher
+(
+    tec_id INT PRIMARY KEY,
+    tec_name VARCHAR(20) NOT NULL,
+    tec_job VARCHAR(15),
+    tec_sex VARCHAR(6),
+    tec_age INT default 20,
+    tec_in DATE NOT NULL
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "teacher_pkey" for table "teacher"
+CREATE TABLE class
+(
+    cla_id INT PRIMARY KEY,
+    cla_name VARCHAR(20) NOT NULL,
+    cla_teacher INT NOT NULL
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "class_pkey" for table "class"
+ALTER TABLE class ADD CONSTRAINT fk_tec_id FOREIGN KEY (cla_teacher) REFERENCES teacher(tec_id) ON DELETE CASCADE;
+CREATE TABLE school_department
+(
+    depart_id INT PRIMARY KEY,
+    depart_name VARCHAR(30) NOT NULL,
+    depart_teacher INT NOT NULL
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "school_department_pkey" for table "school_department"
+ALTER TABLE school_department ADD CONSTRAINT fk_depart_tec_id FOREIGN KEY (depart_teacher) REFERENCES teacher(tec_id) ON DELETE CASCADE;
+CREATE TABLE course
+(
+    cor_id INT PRIMARY KEY,
+    cor_name VARCHAR(30) NOT NULL,
+    cor_type VARCHAR(20),
+    credit DOUBLE PRECISION
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "course_pkey" for table "course"
+create table teacher_salary
+(
+    tec_id int,
+    tec_salary decimal(10, 2)
+);
+create or replace view teacher_info as
+select c.cla_name, t.tec_name, t.tec_job, t.tec_sex, t.tec_age
+from teacher t 
+left join class c on c.cla_teacher = t.tec_id;
+create table t_log (c1 int, c2 varchar(20), c3 timestamp);
+create sequence if not exists t_seq
+    increment by 1
+    nominvalue
+    nomaxvalue
+    start with 1
+    nocycle;
+select t_seq.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+create or replace function tg_log() returns trigger as
+$$
+begin
+    insert into t_log values (new.std_id, new.std_name, SYSDATE);
+    return new;
+end;
+$$ language plpgsql;
+create trigger log_student_after_insert
+after insert on student 
+for each row 
+execute procedure tg_log();
+create or replace procedure test_sum(in a int, in b int, out c int)
+as
+begin
+    c = a + b;
+end;
+/
+create or replace function test_sub(num1 int, num2 int)
+returns int as $$
+begin
+    return num1 - num2;
+end;
+$$ language plpgsql;
+CREATE OR REPLACE SYNONYM syn_tbl FOR student;
+CREATE OR REPLACE SYNONYM syn_tr FOR log_student_after_insert;
+select obj.name, obj.xtype, obj.type from sys.sysobjects obj 
+left join pg_namespace s on s.oid = obj.uid
+where s.nspname = 'sys_view_test'
+order by id;
+          name          | xtype | type 
+------------------------+-------+------
+ student                | U     | U 
+ student_pkey           | PK    | K 
+ teacher                | U     | U 
+                        | D     | D 
+ teacher_pkey           | PK    | K 
+ class                  | U     | U 
+ class_pkey             | PK    | K 
+ fk_tec_id              | F     | F 
+ school_department      | U     | U 
+ school_department_pkey | PK    | K 
+ fk_depart_tec_id       | F     | F 
+ course                 | U     | U 
+ course_pkey            | PK    | K 
+ teacher_salary         | U     | U 
+ teacher_info           | V     | V 
+ t_log                  | U     | U 
+ t_seq                  | SO    | SO
+ tg_log                 | FN    | FN
+ test_sum               | P     | P 
+ test_sub               | FN    | FN
+ syn_tbl                | SN    | SN
+ syn_tr                 | SN    | SN
+(22 rows)
+
+select col.name, col.length, col.colid, col.status, col.prec, col.scale, col.iscomputed, col.isoutparam, col.isnullable, col.collation
+from sys.syscolumns col
+left join pg_class c on col.id = c.oid
+left join pg_namespace s on s.oid = c.relnamespace
+where s.nspname = 'sys_view_test'
+order by id, colid;
+      name      | length | colid | status | prec | scale | iscomputed | isoutparam | isnullable | collation 
+----------------+--------+-------+--------+------+-------+------------+------------+------------+-----------
+ std_id         |      4 |     1 | 0      |   10 |       |          0 |          0 |          1 | 
+ std_name       |     24 |     2 | 0      |    0 |    24 |          0 |          0 |          1 | default
+ std_sex        |     10 |     3 | 8      |    0 |    10 |          0 |          0 |          0 | default
+ std_birth      |      4 |     4 | 8      |   10 |       |          0 |          0 |          0 | 
+ std_in         |      4 |     5 | 0      |   10 |       |          0 |          0 |          1 | 
+ std_address    |    104 |     6 | 8      |    0 |   104 |          0 |          0 |          0 | default
+ tec_id         |      4 |     1 | 0      |   10 |       |          0 |          0 |          1 | 
+ tec_name       |     24 |     2 | 0      |    0 |    24 |          0 |          0 |          1 | default
+ tec_job        |     19 |     3 | 8      |    0 |    19 |          0 |          0 |          0 | default
+ tec_sex        |     10 |     4 | 8      |    0 |    10 |          0 |          0 |          0 | default
+ tec_age        |      4 |     5 | 8      |   10 |       |          0 |          0 |          0 | 
+ tec_in         |      4 |     6 | 0      |   10 |       |          0 |          0 |          1 | 
+ cla_id         |      4 |     1 | 0      |   10 |       |          0 |          0 |          1 | 
+ cla_name       |     24 |     2 | 0      |    0 |    24 |          0 |          0 |          1 | default
+ cla_teacher    |      4 |     3 | 0      |   10 |       |          0 |          0 |          1 | 
+ depart_id      |      4 |     1 | 0      |   10 |       |          0 |          0 |          1 | 
+ depart_name    |     34 |     2 | 0      |    0 |    34 |          0 |          0 |          1 | default
+ depart_teacher |      4 |     3 | 0      |   10 |       |          0 |          0 |          1 | 
+ cor_id         |      4 |     1 | 0      |   10 |       |          0 |          0 |          1 | 
+ cor_name       |     34 |     2 | 0      |    0 |    34 |          0 |          0 |          1 | default
+ cor_type       |     24 |     3 | 8      |    0 |    24 |          0 |          0 |          0 | default
+ credit         |      8 |     4 | 8      |    0 |       |          0 |          0 |          0 | 
+ tec_id         |      4 |     1 | 8      |   10 |       |          0 |          0 |          0 | 
+ tec_salary     |     15 |     2 | 8      |   10 |     2 |          0 |          0 |          0 | 
+ cla_name       |     24 |     1 | 8      |    0 |    24 |          0 |          0 |          0 | default
+ tec_name       |     24 |     2 | 8      |    0 |    24 |          0 |          0 |          0 | default
+ tec_job        |     19 |     3 | 8      |    0 |    19 |          0 |          0 |          0 | default
+ tec_sex        |     10 |     4 | 8      |    0 |    10 |          0 |          0 |          0 | default
+ tec_age        |      4 |     5 | 8      |   10 |       |          0 |          0 |          0 | 
+ c1             |      4 |     1 | 8      |   10 |       |          0 |          0 |          0 | 
+ c2             |     24 |     2 | 8      |    0 |    24 |          0 |          0 |          0 | default
+ c3             |      8 |     3 | 8      |   26 |       |          0 |          0 |          0 | 
+(32 rows)
+
+select ind.name, ind.keycnt, ind."OrigFillFactor", ind.rows from sys.sysindexes ind
+left join pg_class c on c.oid = ind.indid
+left join pg_namespace s on c.relnamespace = s.oid
+where s.nspname = 'sys_view_test'
+order by id, indid;
+          name          | keycnt | OrigFillFactor | rows 
+------------------------+--------+----------------+------
+ student_pkey           |      0 |              0 |    0
+ teacher_pkey           |      0 |              0 |    0
+ class_pkey             |      0 |              0 |    0
+ school_department_pkey |      0 |              0 |    0
+ course_pkey            |      0 |              0 |    0
+(5 rows)
+
+select c_tab.relname as tabname, c_ind.relname as indname, ind.colid, ind.keyno from sys.sysindexkeys ind
+left join pg_class c_ind on c_ind.oid = ind.indid
+left join pg_class c_tab on c_tab.oid = ind.id
+left join pg_namespace s on c_ind.relnamespace = s.oid
+where s.nspname = 'sys_view_test'
+order by id, indid;
+      tabname      |        indname         | colid | keyno 
+-------------------+------------------------+-------+-------
+ student           | student_pkey           |     1 |     1
+ teacher           | teacher_pkey           |     1 |     1
+ class             | class_pkey             |     1 |     1
+ school_department | school_department_pkey |     1 |     1
+ course            | course_pkey            |     1 |     1
+(5 rows)
+
+drop synonym syn_tr;
+drop synonym syn_tbl;
+drop function test_sub;
+drop procedure test_sum;
+drop table t_log;
+drop view teacher_info;
+drop table teacher_salary;
+drop table course;
+drop table school_department;
+drop table class;
+drop table teacher;
+drop table student;
+reset search_path;
+drop schema sys_view_test cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to sequence sys_view_test.t_seq
+drop cascades to function sys_view_test.tg_log()

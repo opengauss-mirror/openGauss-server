@@ -1,0 +1,186 @@
+-- 测试不同日期格式
+SELECT DAY('2023-10-01') AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+SELECT DAY('2023-12-31') AS DayPart; -- 预期结果：31
+ daypart 
+---------
+      31
+(1 row)
+
+SELECT DAY('2023-02-28') AS DayPart; -- 预期结果：28
+ daypart 
+---------
+      28
+(1 row)
+
+SELECT DAY('2024-02-29') AS DayPart; -- 预期结果：29 (闰年)
+ daypart 
+---------
+      29
+(1 row)
+
+-- 测试边界值
+SELECT DAY('1753-01-01') AS DayPart; -- 预期结果：1 (SQL Server 的最小日期)
+ daypart 
+---------
+       1
+(1 row)
+
+SELECT DAY('9999-12-31') AS DayPart; -- 预期结果：31 (SQL Server 的最大日期)
+ daypart 
+---------
+      31
+(1 row)
+
+-- 测试 NULL 值
+SELECT DAY(NULL) AS DayPart; -- 预期结果：NULL
+ daypart 
+---------
+        
+(1 row)
+
+-- 测试非日期类型
+SELECT DAY('2023-10-01'::date) AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+SELECT DAY('2023-10-01'::smalldatetime) AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+SELECT DAY('2023-10-01'::timestamp) AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+SELECT DAY('2023-10-01'::timestamptz) AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+SELECT DAY('2023-10-01'::abstime) AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+SELECT DAY('2023-10-01'::timestamp(0) with time zone) AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+-- 测试时间部分
+SELECT DAY('2023-10-01 12:34:56') AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+SELECT DAY('2023-10-01 23:59:59.997') AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+-- 测试不同的区域设置
+SET DateStyle to MDY;
+SELECT DAY('10/01/2023') AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+SET DateStyle to DMY;
+SELECT DAY('01/10/2023') AS DayPart; -- 预期结果：10
+ daypart 
+---------
+       1
+(1 row)
+
+SET DateStyle to YMD;
+SELECT DAY('2023-10-01') AS DayPart; -- 预期结果：1
+ daypart 
+---------
+       1
+(1 row)
+
+-- 测试动态日期
+SELECT DAY(CURRENT_DATE) AS DayPart; -- 预期结果：当前日期的天数部分
+ daypart 
+---------
+--?.*
+(1 row)
+
+SELECT DAY(CURRENT_STAMP) AS DayPart; -- 预期结果：当前日期的天数部分
+ERROR:  column "current_stamp" does not exist
+LINE 1: SELECT DAY(CURRENT_STAMP) AS DayPart;
+                   ^
+CONTEXT:  referenced column: daypart
+-- 异常测试
+SELECT DAY(CURRENT_TIME) AS DayPart;
+ERROR:  function day(time with time zone) does not exist
+LINE 1: SELECT DAY(CURRENT_TIME) AS DayPart;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: daypart
+SELECT DAY('20:12:12') AS DayPart;
+ERROR:  invalid input syntax for type timestamp with time zone: "20:12:12"
+LINE 1: SELECT DAY('20:12:12') AS DayPart;
+                   ^
+CONTEXT:  referenced column: daypart
+SELECT DAY(NULL) AS DayPart;
+ daypart 
+---------
+        
+(1 row)
+
+SELECT DAY(12345) AS DayPart;
+ERROR:  function day(integer) does not exist
+LINE 1: SELECT DAY(12345) AS DayPart;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: daypart
+SELECT DAY('abc') AS DayPart;
+ERROR:  invalid input syntax for type timestamp with time zone: "abc"
+LINE 1: SELECT DAY('abc') AS DayPart;
+                   ^
+CONTEXT:  referenced column: daypart
+SELECT DAY('2023-13-01') AS DayPart; 
+ERROR:  date/time field value out of range: "2023-13-01"
+LINE 1: SELECT DAY('2023-13-01') AS DayPart;
+                   ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: daypart
+SELECT DAY('2023-02-30') AS DayPart; 
+ERROR:  date/time field value out of range: "2023-02-30"
+LINE 1: SELECT DAY('2023-02-30') AS DayPart;
+                   ^
+CONTEXT:  referenced column: daypart
+SELECT DAY('2023-04-31') AS DayPart; 
+ERROR:  date/time field value out of range: "2023-04-31"
+LINE 1: SELECT DAY('2023-04-31') AS DayPart;
+                   ^
+CONTEXT:  referenced column: daypart
+SELECT DAY('2023-00-01') AS DayPart; 
+ERROR:  date/time field value out of range: "2023-00-01"
+LINE 1: SELECT DAY('2023-00-01') AS DayPart;
+                   ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: daypart
+SELECT DAY('2023-01-00') AS DayPart; 
+ERROR:  date/time field value out of range: "2023-01-00"
+LINE 1: SELECT DAY('2023-01-00') AS DayPart;
+                   ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: daypart

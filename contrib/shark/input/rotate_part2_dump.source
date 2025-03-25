@@ -1,0 +1,60 @@
+create database shark_rotate_part2_dump dbcompatibility 'D';;
+\c shark_rotate_part2_dump
+create extension shark;
+create schema shark_rotate_part2_dump;
+set search_path to shark_rotate_part2_dump;
+
+set enable_ignore_case_in_dquotes on;
+
+CREATE TABLE sales (year INT,  product VARCHAR(50) collate utf8_general_ci,  amount DECIMAL(10, 2));  
+
+INSERT INTO sales (year, product, amount) VALUES  
+(2020, 'A', 100),  
+(2020, 'B', 200),  
+(2021, 'A', 150),  
+(2021, 'B', 250);
+
+
+CREATE TABLE sales2 (  
+    year INT,  
+    product VARCHAR(50) collate utf8_general_ci,  
+    amount DECIMAL(10, 2),
+	sale1 int,
+	sale2 int,
+	sale3 int,
+	sale4 int,
+	sale5 int
+);  
+
+INSERT INTO sales2 (year, product, amount, sale1, sale2, sale3, sale4, sale5) VALUES  
+(2020, 'A', 100, 1, 1, 1, 1, 1),  
+(2020, 'B', 200, 2, 2, 2, 2, 2),  
+(2021, 'A', 150, 3, 3, 3, 3, 3),  
+(2021, 'B', 250, 4, 4, 4, 4, 4),
+(2022, 'C', 250, 5, 5, 5, 5, 5);
+
+-- view
+create view v1 as SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(*) FOR product IN (A, B)
+) as pivot_table where pivot_table.year > 1; 
+
+
+create view v2 as 
+select * from sales2 as source1
+rotate(sum(amount) for product in ('A', 'B')) as source2
+not rotate(sale_all for sale in (sale1, sale2, sale3, sale4)) as unpivot_table order by 1,2,3;
+
+
+\! @abs_bindir@/gs_dump shark_rotate_part2_dump -p @portstring@ -f @abs_bindir@/shark_rotate_part2_dump.sql -n shark_rotate_part2_dump -w >/dev/null 2>&1; echo $?
+drop schema shark_rotate_part2_dump cascade;
+\! @abs_bindir@/gsql -dshark_rotate_part2_dump -p @portstring@ -f "@abs_bindir@/shark_rotate_part2_dump.sql";
+
+-- rotate check
+
+select * from v1;
+select *from v2;
+
+drop schema shark_rotate_part2_dump cascade;
+\c postgres
+drop database shark_rotate_part2_dump;

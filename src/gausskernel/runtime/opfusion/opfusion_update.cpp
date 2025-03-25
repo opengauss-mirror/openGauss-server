@@ -599,6 +599,10 @@ lreplace:
         bucketCloseRelation(bucket_rel);
     }
 
+    if (u_sess->hook_cxt.rowcountHook) {
+        ((RowcountHook)(u_sess->hook_cxt.rowcountHook))(nprocessed);
+    }
+
     return nprocessed;
 }
 

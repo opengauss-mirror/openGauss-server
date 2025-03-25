@@ -96,3 +96,21 @@ pgtsql_core_yyfree(void *ptr, core_yyscan_t yyscanner)
 }
 
 #define core_yyset_extra pgtsql_core_yyset_extra
+
+/* Determine whether a variable name is a predefined T-SQL global variable */
+bool IsTsqlAtatGlobalVar(const char* varname)
+{
+    size_t varname_len = strlen(varname);
+
+    const size_t MIN_VARNAME_LEN = 6;
+    const size_t MAX_VARNAME_LEN = 14;
+
+    if ((varname_len < MIN_VARNAME_LEN) || (varname_len > MAX_VARNAME_LEN)) {
+        return false;
+    }
+
+    // List of all T-SQL global "@@" variables:
+    return ((pg_strcasecmp("@@FETCH_STATUS", varname) == 0) ||
+            (pg_strcasecmp("@@ROWCOUNT", varname) == 0) ||
+            (pg_strcasecmp("@@SPID", varname) == 0));
+}

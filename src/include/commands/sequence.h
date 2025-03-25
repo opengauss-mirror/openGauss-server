@@ -228,6 +228,12 @@ typedef enum {
     NDE_BIGINT /* expected bigint nextval */
 } nextval_default_expr_type_enum;
 
+
+#define FULL_TABLE_NAME_MAX_LENGTH 256
+extern void get_last_value_and_max_value(text* txt, int64* last_value, int64* current_max_value);
+extern int64 get_and_reset_last_value(text* txt, int64 new_value, bool need_reseed);
+
+
 extern void delete_global_seq(Oid relid, Relation seqrel);
 /* Sequence callbacks on GTM */
 extern void register_sequence_rename_cb(const char* oldseqname, const char* newseqname);

@@ -1,0 +1,857 @@
+create schema shark_rotate_test_part2;
+set search_path = 'shark_rotate_test_part2';
+set d_format_behavior_compat_options = 'enable_sbr_identifier';
+-- part1: pivot
+CREATE TABLE sales (year INT,  product VARCHAR(50),  amount DECIMAL(10, 2));  
+INSERT INTO sales (year, product, amount) VALUES  
+(2020, 'A', 100),  
+(2020, 'B', 200),  
+(2021, 'A', 150),  
+(2021, 'B', 250);
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(amount) FOR product IN (A, B, a)
+) as pivot;
+ year | A | B | a 
+------+---+---+---
+ 2021 | 1 | 1 | 0
+ 2020 | 1 | 1 | 0
+(2 rows)
+
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(amount) FOR product IN ([A], [B], "A", "B", C)
+) as pivot;
+ year | A | B | A | B | C 
+------+---+---+---+---+---
+ 2021 | 1 | 1 | 1 | 1 | 0
+ 2020 | 1 | 1 | 1 | 1 | 0
+(2 rows)
+
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales) AS source_table 
+rotate ( count(amount) FOR product IN (A, B) );
+ year | A | B 
+------+---+---
+ 2021 | 1 | 1
+ 2020 | 1 | 1
+(2 rows)
+
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales) AS source_table 
+rotate ( count(amount) FOR product IN (A, B) ) pivot_table;
+ year | A | B 
+------+---+---
+ 2021 | 1 | 1
+ 2020 | 1 | 1
+(2 rows)
+
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(amount) FOR product IN (A, B, 'A', 'SSS', 1, 2, 2.3, 1011)
+) as pivot_table;
+ year | A | B | A | SSS | 1 | 2 | 2.3 | 1011 
+------+---+---+---+-----+---+---+-----+------
+ 2021 | 1 | 1 | 1 |   0 | 0 | 0 |   0 |    0
+ 2020 | 1 | 1 | 1 |   0 | 0 | 0 |   0 |    0
+(2 rows)
+
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(*) FOR product IN (A, B)
+) as pivot; 
+ year | amount | A | B 
+------+--------+---+---
+ 2021 | 250.00 | 0 | 1
+ 2021 | 150.00 | 1 | 0
+ 2020 | 200.00 | 0 | 1
+ 2020 | 100.00 | 1 | 0
+(4 rows)
+
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(amount) FOR product IN (A, B)
+) as pivot order by year;
+ year | A | B 
+------+---+---
+ 2020 | 1 | 1
+ 2021 | 1 | 1
+(2 rows)
+
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(*) FOR product IN (A, B)
+) as pivot_table where pivot_table.year > 1; 
+ year | amount | A | B 
+------+--------+---+---
+ 2021 | 250.00 | 0 | 1
+ 2021 | 150.00 | 1 | 0
+ 2020 | 200.00 | 0 | 1
+ 2020 | 100.00 | 1 | 0
+(4 rows)
+
+-- expect error
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(*) FOR product IN (A, B)
+) as pivot_table where source_table.year > 1;  
+ERROR:  missing FROM-clause entry for table "source_table"
+LINE 4: ) as pivot_table where source_table.year > 1;
+                               ^
+CREATE PROCEDURE proc1(param1 CHAR(200))
+AS
+DECLARE
+    cur refcursor;
+    row record;
+BEGIN 
+    open cur for SELECT * FROM (SELECT year, product, amount  FROM sales) AS source_table rotate (SUM(amount) FOR product IN ('A', 'B')) ;
+    LOOP
+        FETCH NEXT FROM cur INTO row;
+        EXIT WHEN NOT FOUND;
+        RAISE NOTICE '%', row;
+    END LOOP;
+END;
+/
+CALL proc1(param1:='123');
+NOTICE:  (2021,150.00,250.00)
+NOTICE:  (2020,100.00,200.00)
+ proc1 
+-------
+ 
+(1 row)
+
+declare
+con1 varchar;
+con2 varchar;
+sql1 varchar;
+begin
+    con1 = 'A';
+	con2 = 'B';
+	sql1 = 'SELECT * FROM (SELECT year, product, amount  FROM sales) AS source_table rotate (SUM(amount) FOR product IN (''' || con1 || ''',''' || con2 || '''))';
+	EXECUTE IMMEDIATE sql1;
+end;
+/
+ create  table CategoryTable2 (
+      MergeDocID bigint,
+      CategoryFieldName nvarchar(100),
+      CategoryFieldValue nvarchar(255)
+  ); 
+  
+  select * 
+  from CategoryTable2 rotate  (max(CategoryFieldValue )
+  for CategoryFieldName
+  in (ItemAssetCategory_Code, ItemCostCategory_Code, ItemCreditCategory_Code, ItemMRPCategory_Code, ItemPriceCategory_Code, ItemProductionCategory_Code, ItemPurchaseCategory_Code, ItemSaleCategory_Code, ItemStockCategory_Code, ItemAssetCategory_Name, ItemCostCategory_Name, ItemCreditCategory_Name, ItemMRPCategory_Name, ItemPriceCategory_Name, ItemProductionCategory_Name, ItemPurchaseCategory_Name, ItemSaleCategory_Name, ItemStockCategory_Name));  
+ mergedocid | ItemAssetCategory_Code | ItemCostCategory_Code | ItemCreditCategory_Code | ItemMRPCategory_Code | ItemPriceCategory_Code | ItemProductionCategory_Code | ItemPurchaseCategory_Code | ItemSaleCategory_Code | ItemStockCategory_Code | ItemAssetCategory_Name | ItemCostCategory_Name | ItemCreditCategory_Name | ItemMRPCategory_Name | ItemPriceCategory_Name | ItemProductionCategory_Name | ItemPurchaseCategory_Name | ItemSaleCategory_Name | ItemStockCategory_Name 
+------------+------------------------+-----------------------+-------------------------+----------------------+------------------------+-----------------------------+---------------------------+-----------------------+------------------------+------------------------+-----------------------+-------------------------+----------------------+------------------------+-----------------------------+---------------------------+-----------------------+------------------------
+(0 rows)
+
+create view v1 as SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(*) FOR product IN (A, B)
+) as pivot_table where pivot_table.year > 1; 
+select * from v1;
+ year | amount | A | B 
+------+--------+---+---
+ 2021 | 250.00 | 0 | 1
+ 2021 | 150.00 | 1 | 0
+ 2020 | 200.00 | 0 | 1
+ 2020 | 100.00 | 1 | 0
+(4 rows)
+
+-- part2: unpivot
+CREATE TABLE sales2 (  
+    year INT,  
+    product VARCHAR(50),  
+    amount DECIMAL(10, 2),
+	sale1 int,
+	sale2 int,
+	sale3 int,
+	sale4 int,
+	sale5 int
+);  
+INSERT INTO sales2 (year, product, amount, sale1, sale2, sale3, sale4, sale5) VALUES  
+(2020, 'A', 100, 1, 1, 1, 1, 1),  
+(2020, 'B', 200, 2, 2, 2, 2, 2),  
+(2021, 'A', 150, 3, 3, 3, 3, 3),  
+(2021, 'B', 250, 4, 4, 4, 4, 4),
+(2022, 'C', 250, 5, 5, 5, 5, 5);
+SELECT *
+FROM sales2
+not rotate(
+   sale_all For sale IN (sale1, sale2, sale3, sale4)
+) as unpivot;
+ year | product | amount | sale5 | sale  | sale_all 
+------+---------+--------+-------+-------+----------
+ 2020 | A       | 100.00 |     1 | sale1 |        1
+ 2020 | B       | 200.00 |     2 | sale1 |        2
+ 2021 | A       | 150.00 |     3 | sale1 |        3
+ 2021 | B       | 250.00 |     4 | sale1 |        4
+ 2022 | C       | 250.00 |     5 | sale1 |        5
+ 2020 | A       | 100.00 |     1 | sale2 |        1
+ 2020 | B       | 200.00 |     2 | sale2 |        2
+ 2021 | A       | 150.00 |     3 | sale2 |        3
+ 2021 | B       | 250.00 |     4 | sale2 |        4
+ 2022 | C       | 250.00 |     5 | sale2 |        5
+ 2020 | A       | 100.00 |     1 | sale3 |        1
+ 2020 | B       | 200.00 |     2 | sale3 |        2
+ 2021 | A       | 150.00 |     3 | sale3 |        3
+ 2021 | B       | 250.00 |     4 | sale3 |        4
+ 2022 | C       | 250.00 |     5 | sale3 |        5
+ 2020 | A       | 100.00 |     1 | sale4 |        1
+ 2020 | B       | 200.00 |     2 | sale4 |        2
+ 2021 | A       | 150.00 |     3 | sale4 |        3
+ 2021 | B       | 250.00 |     4 | sale4 |        4
+ 2022 | C       | 250.00 |     5 | sale4 |        5
+(20 rows)
+
+SELECT *
+FROM sales2
+not rotate(
+   sale_all For sale IN (sale1, sale2, [sale3], [sale4])
+) unpivot;
+ year | product | amount | sale5 | sale  | sale_all 
+------+---------+--------+-------+-------+----------
+ 2020 | A       | 100.00 |     1 | sale1 |        1
+ 2020 | B       | 200.00 |     2 | sale1 |        2
+ 2021 | A       | 150.00 |     3 | sale1 |        3
+ 2021 | B       | 250.00 |     4 | sale1 |        4
+ 2022 | C       | 250.00 |     5 | sale1 |        5
+ 2020 | A       | 100.00 |     1 | sale2 |        1
+ 2020 | B       | 200.00 |     2 | sale2 |        2
+ 2021 | A       | 150.00 |     3 | sale2 |        3
+ 2021 | B       | 250.00 |     4 | sale2 |        4
+ 2022 | C       | 250.00 |     5 | sale2 |        5
+ 2020 | A       | 100.00 |     1 | sale3 |        1
+ 2020 | B       | 200.00 |     2 | sale3 |        2
+ 2021 | A       | 150.00 |     3 | sale3 |        3
+ 2021 | B       | 250.00 |     4 | sale3 |        4
+ 2022 | C       | 250.00 |     5 | sale3 |        5
+ 2020 | A       | 100.00 |     1 | sale4 |        1
+ 2020 | B       | 200.00 |     2 | sale4 |        2
+ 2021 | A       | 150.00 |     3 | sale4 |        3
+ 2021 | B       | 250.00 |     4 | sale4 |        4
+ 2022 | C       | 250.00 |     5 | sale4 |        5
+(20 rows)
+
+SELECT *
+FROM sales2
+not rotate(
+   sale_all For sale IN (sale1, sale2, sale3, sale4)
+);
+ year | product | amount | sale5 | sale  | sale_all 
+------+---------+--------+-------+-------+----------
+ 2020 | A       | 100.00 |     1 | sale1 |        1
+ 2020 | B       | 200.00 |     2 | sale1 |        2
+ 2021 | A       | 150.00 |     3 | sale1 |        3
+ 2021 | B       | 250.00 |     4 | sale1 |        4
+ 2022 | C       | 250.00 |     5 | sale1 |        5
+ 2020 | A       | 100.00 |     1 | sale2 |        1
+ 2020 | B       | 200.00 |     2 | sale2 |        2
+ 2021 | A       | 150.00 |     3 | sale2 |        3
+ 2021 | B       | 250.00 |     4 | sale2 |        4
+ 2022 | C       | 250.00 |     5 | sale2 |        5
+ 2020 | A       | 100.00 |     1 | sale3 |        1
+ 2020 | B       | 200.00 |     2 | sale3 |        2
+ 2021 | A       | 150.00 |     3 | sale3 |        3
+ 2021 | B       | 250.00 |     4 | sale3 |        4
+ 2022 | C       | 250.00 |     5 | sale3 |        5
+ 2020 | A       | 100.00 |     1 | sale4 |        1
+ 2020 | B       | 200.00 |     2 | sale4 |        2
+ 2021 | A       | 150.00 |     3 | sale4 |        3
+ 2021 | B       | 250.00 |     4 | sale4 |        4
+ 2022 | C       | 250.00 |     5 | sale4 |        5
+(20 rows)
+
+SELECT *
+FROM sales2
+not rotate(
+   sale_all For sale IN (sale1, sale2, sale3, sale4)
+) unpivot;
+ year | product | amount | sale5 | sale  | sale_all 
+------+---------+--------+-------+-------+----------
+ 2020 | A       | 100.00 |     1 | sale1 |        1
+ 2020 | B       | 200.00 |     2 | sale1 |        2
+ 2021 | A       | 150.00 |     3 | sale1 |        3
+ 2021 | B       | 250.00 |     4 | sale1 |        4
+ 2022 | C       | 250.00 |     5 | sale1 |        5
+ 2020 | A       | 100.00 |     1 | sale2 |        1
+ 2020 | B       | 200.00 |     2 | sale2 |        2
+ 2021 | A       | 150.00 |     3 | sale2 |        3
+ 2021 | B       | 250.00 |     4 | sale2 |        4
+ 2022 | C       | 250.00 |     5 | sale2 |        5
+ 2020 | A       | 100.00 |     1 | sale3 |        1
+ 2020 | B       | 200.00 |     2 | sale3 |        2
+ 2021 | A       | 150.00 |     3 | sale3 |        3
+ 2021 | B       | 250.00 |     4 | sale3 |        4
+ 2022 | C       | 250.00 |     5 | sale3 |        5
+ 2020 | A       | 100.00 |     1 | sale4 |        1
+ 2020 | B       | 200.00 |     2 | sale4 |        2
+ 2021 | A       | 150.00 |     3 | sale4 |        3
+ 2021 | B       | 250.00 |     4 | sale4 |        4
+ 2022 | C       | 250.00 |     5 | sale4 |        5
+(20 rows)
+
+INSERT INTO sales2 (year, product, amount, sale1, sale2, sale3, sale4, sale5) VALUES (2021, 'A', 150, NULL, NULL, NULL, NULL, NULL), (2021, 'B', 250, NULL, NULL, NULL, NULL, NULL), (2022, 'C', 250, NULL, NULL, NULL, NULL, NULL);
+SELECT * FROM sales2  not rotate( sale_all For sale IN (sale1, sale2, sale3, sale4)) as unpvt;
+ year | product | amount | sale5 | sale  | sale_all 
+------+---------+--------+-------+-------+----------
+ 2020 | A       | 100.00 |     1 | sale1 |        1
+ 2020 | B       | 200.00 |     2 | sale1 |        2
+ 2021 | A       | 150.00 |     3 | sale1 |        3
+ 2021 | B       | 250.00 |     4 | sale1 |        4
+ 2022 | C       | 250.00 |     5 | sale1 |        5
+ 2020 | A       | 100.00 |     1 | sale2 |        1
+ 2020 | B       | 200.00 |     2 | sale2 |        2
+ 2021 | A       | 150.00 |     3 | sale2 |        3
+ 2021 | B       | 250.00 |     4 | sale2 |        4
+ 2022 | C       | 250.00 |     5 | sale2 |        5
+ 2020 | A       | 100.00 |     1 | sale3 |        1
+ 2020 | B       | 200.00 |     2 | sale3 |        2
+ 2021 | A       | 150.00 |     3 | sale3 |        3
+ 2021 | B       | 250.00 |     4 | sale3 |        4
+ 2022 | C       | 250.00 |     5 | sale3 |        5
+ 2020 | A       | 100.00 |     1 | sale4 |        1
+ 2020 | B       | 200.00 |     2 | sale4 |        2
+ 2021 | A       | 150.00 |     3 | sale4 |        3
+ 2021 | B       | 250.00 |     4 | sale4 |        4
+ 2022 | C       | 250.00 |     5 | sale4 |        5
+(20 rows)
+
+create table aaa as SELECT *
+FROM sales2 not rotate(sale_all For sale IN (sale1, sale2, sale3, sale4)) unpvt;
+CREATE PROCEDURE proc2(param1 CHAR(200))
+AS
+DECLARE
+    cur refcursor;
+    row record;
+BEGIN 
+    open cur for SELECT * FROM sales2 not rotate(sale_all For sale IN (sale1, sale2, sale3, sale4)) unpvt;
+    LOOP
+        FETCH NEXT FROM cur INTO row;
+        EXIT WHEN NOT FOUND;
+        RAISE NOTICE '%', row;
+    END LOOP;
+END;
+/
+CALL proc2(param1:='123');
+NOTICE:  (2020,A,100.00,1,sale1,1)
+NOTICE:  (2020,B,200.00,2,sale1,2)
+NOTICE:  (2021,A,150.00,3,sale1,3)
+NOTICE:  (2021,B,250.00,4,sale1,4)
+NOTICE:  (2022,C,250.00,5,sale1,5)
+NOTICE:  (2020,A,100.00,1,sale2,1)
+NOTICE:  (2020,B,200.00,2,sale2,2)
+NOTICE:  (2021,A,150.00,3,sale2,3)
+NOTICE:  (2021,B,250.00,4,sale2,4)
+NOTICE:  (2022,C,250.00,5,sale2,5)
+NOTICE:  (2020,A,100.00,1,sale3,1)
+NOTICE:  (2020,B,200.00,2,sale3,2)
+NOTICE:  (2021,A,150.00,3,sale3,3)
+NOTICE:  (2021,B,250.00,4,sale3,4)
+NOTICE:  (2022,C,250.00,5,sale3,5)
+NOTICE:  (2020,A,100.00,1,sale4,1)
+NOTICE:  (2020,B,200.00,2,sale4,2)
+NOTICE:  (2021,A,150.00,3,sale4,3)
+NOTICE:  (2021,B,250.00,4,sale4,4)
+NOTICE:  (2022,C,250.00,5,sale4,5)
+ proc2 
+-------
+ 
+(1 row)
+
+declare
+con1 varchar;
+con2 varchar;
+sql1 varchar;
+begin
+    con1 = 'sale1';
+	con2 = 'sale2';
+	sql1 = 'SELECT * FROM sales2 not rotate(sale_all For sale IN (' || con1 || ',' || con2 || ')) unpvt';
+	EXECUTE IMMEDIATE sql1;
+end;
+/
+SELECT *
+FROM sales2
+not rotate(
+   sale_all For sale IN (sale1, sale2, sale3, sale4)
+) order by 1,2,3;
+ year | product | amount | sale5 | sale  | sale_all 
+------+---------+--------+-------+-------+----------
+ 2020 | A       | 100.00 |     1 | sale1 |        1
+ 2020 | A       | 100.00 |     1 | sale2 |        1
+ 2020 | A       | 100.00 |     1 | sale3 |        1
+ 2020 | A       | 100.00 |     1 | sale4 |        1
+ 2020 | B       | 200.00 |     2 | sale1 |        2
+ 2020 | B       | 200.00 |     2 | sale4 |        2
+ 2020 | B       | 200.00 |     2 | sale2 |        2
+ 2020 | B       | 200.00 |     2 | sale3 |        2
+ 2021 | A       | 150.00 |     3 | sale4 |        3
+ 2021 | A       | 150.00 |     3 | sale2 |        3
+ 2021 | A       | 150.00 |     3 | sale3 |        3
+ 2021 | A       | 150.00 |     3 | sale1 |        3
+ 2021 | B       | 250.00 |     4 | sale1 |        4
+ 2021 | B       | 250.00 |     4 | sale2 |        4
+ 2021 | B       | 250.00 |     4 | sale4 |        4
+ 2021 | B       | 250.00 |     4 | sale3 |        4
+ 2022 | C       | 250.00 |     5 | sale4 |        5
+ 2022 | C       | 250.00 |     5 | sale3 |        5
+ 2022 | C       | 250.00 |     5 | sale2 |        5
+ 2022 | C       | 250.00 |     5 | sale1 |        5
+(20 rows)
+
+create view v2 as SELECT * FROM sales2 not rotate( sale_all For sale IN (sale1, sale2, sale3, sale4)) order by 1,2,3;
+select * from v2;
+ year | product | amount | sale5 | sale  | sale_all 
+------+---------+--------+-------+-------+----------
+ 2020 | A       | 100.00 |     1 | sale1 |        1
+ 2020 | A       | 100.00 |     1 | sale2 |        1
+ 2020 | A       | 100.00 |     1 | sale3 |        1
+ 2020 | A       | 100.00 |     1 | sale4 |        1
+ 2020 | B       | 200.00 |     2 | sale1 |        2
+ 2020 | B       | 200.00 |     2 | sale4 |        2
+ 2020 | B       | 200.00 |     2 | sale2 |        2
+ 2020 | B       | 200.00 |     2 | sale3 |        2
+ 2021 | A       | 150.00 |     3 | sale4 |        3
+ 2021 | A       | 150.00 |     3 | sale2 |        3
+ 2021 | A       | 150.00 |     3 | sale3 |        3
+ 2021 | A       | 150.00 |     3 | sale1 |        3
+ 2021 | B       | 250.00 |     4 | sale1 |        4
+ 2021 | B       | 250.00 |     4 | sale2 |        4
+ 2021 | B       | 250.00 |     4 | sale4 |        4
+ 2021 | B       | 250.00 |     4 | sale3 |        4
+ 2022 | C       | 250.00 |     5 | sale4 |        5
+ 2022 | C       | 250.00 |     5 | sale3 |        5
+ 2022 | C       | 250.00 |     5 | sale2 |        5
+ 2022 | C       | 250.00 |     5 | sale1 |        5
+(20 rows)
+
+set enable_ignore_case_in_dquotes on;
+WARNING:  Please avoid turn on this param when already created
+uppercase named objects or using double quotes in PL.
+select * from sales2 as source1
+rotate(sum(amount) for product in ('A', 'B')) as source2
+not rotate(sale_all for sale in (sale1, sale2, sale3, sale4)) as unpivot_table order by 1,2,3;
+ year | sale5 |   a    |   b    | sale  | sale_all 
+------+-------+--------+--------+-------+----------
+ 2020 |     1 | 100.00 |        | sale4 |        1
+ 2020 |     1 | 100.00 |        | sale1 |        1
+ 2020 |     1 | 100.00 |        | sale2 |        1
+ 2020 |     1 | 100.00 |        | sale3 |        1
+ 2020 |     2 |        | 200.00 | sale3 |        2
+ 2020 |     2 |        | 200.00 | sale4 |        2
+ 2020 |     2 |        | 200.00 | sale1 |        2
+ 2020 |     2 |        | 200.00 | sale2 |        2
+ 2021 |     3 | 150.00 |        | sale1 |        3
+ 2021 |     3 | 150.00 |        | sale2 |        3
+ 2021 |     3 | 150.00 |        | sale3 |        3
+ 2021 |     3 | 150.00 |        | sale4 |        3
+ 2021 |     4 |        | 250.00 | sale2 |        4
+ 2021 |     4 |        | 250.00 | sale3 |        4
+ 2021 |     4 |        | 250.00 | sale4 |        4
+ 2021 |     4 |        | 250.00 | sale1 |        4
+ 2022 |     5 |        |        | sale3 |        5
+ 2022 |     5 |        |        | sale2 |        5
+ 2022 |     5 |        |        | sale4 |        5
+ 2022 |     5 |        |        | sale1 |        5
+(20 rows)
+
+set enable_ignore_case_in_dquotes off;
+-- part3: ANSI_NULLS
+set ANSI_NULLS on;
+select NULL = NULL;
+ ?column? 
+----------
+ 
+(1 row)
+
+select 1 = NULL;
+ ?column? 
+----------
+ 
+(1 row)
+
+select NULL <> NULL;
+ ?column? 
+----------
+ 
+(1 row)
+
+select 1 <> NULL;
+ ?column? 
+----------
+ 
+(1 row)
+
+select NULL > NULL;
+ ?column? 
+----------
+ 
+(1 row)
+
+select 1 > NULL;
+ ?column? 
+----------
+ 
+(1 row)
+
+select NULL IS NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 1 IS NULL;
+ ?column? 
+----------
+ f
+(1 row)
+
+select NULL IS NOT NULL;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 1 IS NOT NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 1 != NULL;
+ ?column? 
+----------
+ 
+(1 row)
+
+select NULL != NULL;
+ ?column? 
+----------
+ 
+(1 row)
+
+set ANSI_NULLS off;
+select NULL = NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 1 = NULL;
+ ?column? 
+----------
+ f
+(1 row)
+
+select NULL <> NULL;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 1 <> NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+select NULL > NULL;
+ ?column? 
+----------
+ 
+(1 row)
+
+select 1 > NULL;
+ ?column? 
+----------
+ 
+(1 row)
+
+select NULL IS NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 1 IS NULL;
+ ?column? 
+----------
+ f
+(1 row)
+
+select NULL IS NOT NULL;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 1 IS NOT NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 1 != NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+select NULL != NULL;
+ ?column? 
+----------
+ f
+(1 row)
+
+CREATE TABLE test1 (a INT NULL);  
+INSERT INTO test1 values (NULL),(0),(1);
+set ANSI_NULLS on;
+select * from test1 where NULL = NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where 1 = NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where NULL <> NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where 1 <> NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where NULL > NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where 1 > NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where NULL IS NULL;
+ a 
+---
+  
+ 0
+ 1
+(3 rows)
+
+select * from test1 where 1 IS NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where NULL IS NOT NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where 1 IS NOT NULL;
+ a 
+---
+  
+ 0
+ 1
+(3 rows)
+
+select * from test1 where 1 != NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where NULL != NULL;
+ a 
+---
+(0 rows)
+
+set ANSI_NULLS off;
+select * from test1 where NULL = NULL;
+ a 
+---
+  
+ 0
+ 1
+(3 rows)
+
+select * from test1 where 1 = NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where NULL <> NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where 1 <> NULL;
+ a 
+---
+  
+ 0
+ 1
+(3 rows)
+
+select * from test1 where NULL > NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where 1 > NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where NULL IS NULL;
+ a 
+---
+  
+ 0
+ 1
+(3 rows)
+
+select * from test1 where 1 IS NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where NULL IS NOT NULL;
+ a 
+---
+(0 rows)
+
+select * from test1 where 1 IS NOT NULL;
+ a 
+---
+  
+ 0
+ 1
+(3 rows)
+
+select * from test1 where 1 != NULL;
+ a 
+---
+  
+ 0
+ 1
+(3 rows)
+
+select * from test1 where NULL != NULL;
+ a 
+---
+(0 rows)
+
+set d_format_behavior_compat_options 'enable_sbr_identifier';
+set vacuum_cost_page_dirty 20;
+set cpu_tuple_cost 0.02;
+set effective_cache_size '128MB';
+reset vacuum_cost_page_dirty;
+reset cpu_tuple_cost;
+reset effective_cache_size;
+set ansi_nulls on;
+show ansi_nulls;
+ ansi_nulls 
+------------
+ on
+(1 row)
+
+show transform_null_equals;
+ transform_null_equals 
+-----------------------
+ off
+(1 row)
+
+set transform_null_equals on;
+show transform_null_equals;
+ transform_null_equals 
+-----------------------
+ on
+(1 row)
+
+show ansi_nulls;
+ ansi_nulls 
+------------
+ off
+(1 row)
+
+set ansi_nulls = off;
+show ansi_nulls;
+ ansi_nulls 
+------------
+ off
+(1 row)
+
+show transform_null_equals;
+ transform_null_equals 
+-----------------------
+ on
+(1 row)
+
+set transform_null_equals = off;
+show transform_null_equals;
+ transform_null_equals 
+-----------------------
+ off
+(1 row)
+
+show ansi_nulls;
+ ansi_nulls 
+------------
+ on
+(1 row)
+
+-- part3 : body and rownum
+create table body(body varchar);
+insert into body values ('body');
+select body from body;
+ body 
+------
+ body
+(1 row)
+
+create table rownum(rownum varchar);
+insert into rownum values ('rownum');
+select rownum from rownum;
+ rownum 
+--------
+ rownum
+(1 row)
+
+create table pivot(pivot varchar);
+insert into pivot values ('pivot');
+select pivot from pivot;
+ pivot 
+-------
+ pivot
+(1 row)
+
+create table unpivot(unpivot varchar);
+insert into unpivot values ('unpivot');
+select unpivot from unpivot;
+ unpivot 
+---------
+ unpivot
+(1 row)
+
+drop table sales;
+drop table categorytable2;
+drop view v1;
+drop table sales2;
+drop table aaa;
+drop view v2;
+drop table test1;
+drop table body;
+drop table rownum;
+drop table pivot;
+drop table unpivot;
+drop schema shark_rotate_test_part2 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function proc1(character)
+drop cascades to function proc2(character)

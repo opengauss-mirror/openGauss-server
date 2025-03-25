@@ -1157,6 +1157,21 @@ HeapTuple SearchSysCacheAttName(Oid relid, const char* attname)
     return tuple;
 }
 
+HeapTuple SearchSysCacheAttNum(Oid relid, int16 attnum)
+{
+    HeapTuple tuple;
+
+    tuple = SearchSysCache2(ATTNUM, ObjectIdGetDatum(relid), Int16GetDatum(attnum));
+    if (!HeapTupleIsValid(tuple)) {
+        return NULL;
+    }
+    if (((Form_pg_attribute)GETSTRUCT(tuple))->attisdropped) {
+        ReleaseSysCache(tuple);
+        return NULL;
+    }
+    return tuple;
+}
+
 /*
  * SearchSysCacheCopyAttName
  *
@@ -1169,6 +1184,25 @@ HeapTuple SearchSysCacheCopyAttName(Oid relid, const char* attname)
     tuple = SearchSysCacheAttName(relid, attname);
     if (!HeapTupleIsValid(tuple)) {
         return tuple;
+    }
+    newtuple = heap_copytuple(tuple);
+    ReleaseSysCache(tuple);
+    return newtuple;
+}
+
+/*
+ * SearchSysCacheCopyAttNum
+ *
+ * As above, an attisdropped-aware version of SearchSysCacheCopy.
+ */
+HeapTuple SearchSysCacheCopyAttNum(Oid relid, int16 attnum)
+{
+    HeapTuple tuple = NULL;
+    HeapTuple newtuple = NULL;
+
+    tuple = SearchSysCacheAttNum(relid, attnum);
+    if (!HeapTupleIsValid(tuple)) {
+        return NULL;
     }
     newtuple = heap_copytuple(tuple);
     ReleaseSysCache(tuple);

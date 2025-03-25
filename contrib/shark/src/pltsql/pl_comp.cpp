@@ -632,7 +632,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     else
         func->fn_is_trigger = PLPGSQL_NOT_TRIGGER;
 
-    if (proc_struct->pronamespace == PG_CATALOG_NAMESPACE || proc_struct->pronamespace == PG_DB4AI_NAMESPACE) {
+    if (proc_struct->pronamespace == PG_CATALOG_NAMESPACE || proc_struct->pronamespace == PG_DB4AI_NAMESPACE ||
+        proc_struct->pronamespace == get_namespace_oid(SYS_NAMESPACE_NAME, true)) {
         current_searchpath = fetch_search_path(false);
         if (current_searchpath == NIL) {
             ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_SCHEMA),

@@ -157,9 +157,6 @@
  * Note: all data pointed to by these List variables is in t_thrd.top_mem_cxt.
  */
 
-/* Catalog schema that TSQL uses */
-char* SYS_NAMESPACE_NAME = "sys";
-
 /* Local functions */
 static void InitTempTableNamespace(void);
 static void RemoveTempRelations(Oid tempNamespaceId);
@@ -4127,8 +4124,15 @@ void PushOverrideSearchPath(OverrideSearchPath* newpath, bool inProcedure)
      * the front, not the back; also notice that we do not check USAGE
      * permissions for these.
      */
-    if (newpath->addCatalog)
+    if (newpath->addCatalog) {
         oidlist = lcons_oid(PG_CATALOG_NAMESPACE, oidlist);
+        if (DB_IS_CMPT(D_FORMAT)) {
+            Oid sys_oid = get_namespace_oid(SYS_NAMESPACE_NAME, true);
+            if (OidIsValid(sys_oid) && !list_member_oid(oidlist, sys_oid)) {
+                oidlist = lcons_oid(sys_oid, oidlist);
+            }
+        }
+    }
 
     if (newpath->addTemp && OidIsValid(u_sess->catalog_cxt.myTempNamespace))
         oidlist = lcons_oid(u_sess->catalog_cxt.myTempNamespace, oidlist);

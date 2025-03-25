@@ -158,6 +158,23 @@ void PerformCursorOpen(PlannedStmt* stmt, ParamListInfo params, const char* quer
      */
 }
 
+/**
+ * nprocessed = -1 if fetch error
+ */
+void cursorFetchEndHook(FetchStmt* stmt, int nprocessed)
+{
+    if (stmt->ismove) {
+        return;
+    }
+
+    if (u_sess->hook_cxt.fetchStatusHook) {
+        ((FetchStatusHook)(u_sess->hook_cxt.fetchStatusHook))(nprocessed > 0 ? 0 : -1);
+    }
+    if (u_sess->hook_cxt.rowcountHook) {
+        ((RowcountHook)(u_sess->hook_cxt.rowcountHook))(nprocessed > 0 ? nprocessed : 0);
+    }
+}
+
 /*
  * PerformPortalFetch
  *		Execute SQL FETCH or MOVE command.
@@ -178,12 +195,15 @@ void PerformPortalFetch(FetchStmt* stmt, DestReceiver* dest, char* completionTag
      * Disallow empty-string cursor name (conflicts with protocol-level
      * unnamed portal).
      */
-    if (!stmt->portalname || stmt->portalname[0] == '\0')
+    if (!stmt->portalname || stmt->portalname[0] == '\0') {
+        cursorFetchEndHook(stmt, -1);
         ereport(ERROR, (errcode(ERRCODE_INVALID_CURSOR_NAME), errmsg("invalid cursor name: must not be empty")));
+    }
 
     /* get the portal from the portal name */
     portal = GetPortalByName(stmt->portalname);
     if (!PortalIsValid(portal)) {
+        cursorFetchEndHook(stmt, -1);
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_CURSOR), errmsg("cursor \"%s\" does not exist", stmt->portalname)));
         return; /* keep compiler happy */
     }
@@ -196,7 +216,16 @@ void PerformPortalFetch(FetchStmt* stmt, DestReceiver* dest, char* completionTag
     bool needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedIsAllowCommitRollback, STP_XACT_OPEN_FOR);
 
     /* Do it */
-    nprocessed = PortalRunFetch(portal, stmt->direction, stmt->howMany, dest);
+    PG_TRY();
+    {
+        nprocessed = PortalRunFetch(portal, stmt->direction, stmt->howMany, dest);
+    }
+    PG_CATCH();
+    {
+        cursorFetchEndHook(stmt, -1);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     stp_reset_xact_state_and_err_msg(savedIsAllowCommitRollback, needResetErrMsg);
 
@@ -210,6 +239,7 @@ void PerformPortalFetch(FetchStmt* stmt, DestReceiver* dest, char* completionTag
             nprocessed);
         securec_check_ss(rc, "", "");
     }
+    cursorFetchEndHook(stmt, nprocessed);
 }
 
 /*

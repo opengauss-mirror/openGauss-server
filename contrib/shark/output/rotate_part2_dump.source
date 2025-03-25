@@ -1,0 +1,116 @@
+create database shark_rotate_part2_dump dbcompatibility 'D';;
+\c shark_rotate_part2_dump
+create extension shark;
+create schema shark_rotate_part2_dump;
+set search_path to shark_rotate_part2_dump;
+set enable_ignore_case_in_dquotes on;
+WARNING:  Please avoid turn on this param when already created
+uppercase named objects or using double quotes in PL.
+CREATE TABLE sales (year INT,  product VARCHAR(50) collate utf8_general_ci,  amount DECIMAL(10, 2));  
+INSERT INTO sales (year, product, amount) VALUES  
+(2020, 'A', 100),  
+(2020, 'B', 200),  
+(2021, 'A', 150),  
+(2021, 'B', 250);
+CREATE TABLE sales2 (  
+    year INT,  
+    product VARCHAR(50) collate utf8_general_ci,  
+    amount DECIMAL(10, 2),
+	sale1 int,
+	sale2 int,
+	sale3 int,
+	sale4 int,
+	sale5 int
+);  
+INSERT INTO sales2 (year, product, amount, sale1, sale2, sale3, sale4, sale5) VALUES  
+(2020, 'A', 100, 1, 1, 1, 1, 1),  
+(2020, 'B', 200, 2, 2, 2, 2, 2),  
+(2021, 'A', 150, 3, 3, 3, 3, 3),  
+(2021, 'B', 250, 4, 4, 4, 4, 4),
+(2022, 'C', 250, 5, 5, 5, 5, 5);
+-- view
+create view v1 as SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(*) FOR product IN (A, B)
+) as pivot_table where pivot_table.year > 1; 
+create view v2 as 
+select * from sales2 as source1
+rotate(sum(amount) for product in ('A', 'B')) as source2
+not rotate(sale_all for sale in (sale1, sale2, sale3, sale4)) as unpivot_table order by 1,2,3;
+--?.*
+0
+drop schema shark_rotate_part2_dump cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table sales
+drop cascades to table sales2
+drop cascades to view v1
+drop cascades to view v2
+--?.*
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+CREATE SCHEMA
+ALTER SCHEMA
+SET
+SET
+SET
+CREATE TABLE
+ALTER TABLE
+CREATE TABLE
+ALTER TABLE
+CREATE VIEW
+ALTER VIEW
+CREATE VIEW
+ALTER VIEW
+--?.*
+-- rotate check
+select * from v1;
+ year | amount | A | B 
+------+--------+---+---
+ 2021 | 250.00 | 0 | 1
+ 2021 | 150.00 | 1 | 0
+ 2020 | 200.00 | 0 | 1
+ 2020 | 100.00 | 1 | 0
+(4 rows)
+
+select *from v2;
+ year | sale5 |   a    |   b    | sale  | sale_all 
+------+-------+--------+--------+-------+----------
+ 2020 |     1 | 100.00 |        | sale4 |        1
+ 2020 |     1 | 100.00 |        | sale1 |        1
+ 2020 |     1 | 100.00 |        | sale2 |        1
+ 2020 |     1 | 100.00 |        | sale3 |        1
+ 2020 |     2 |        | 200.00 | sale3 |        2
+ 2020 |     2 |        | 200.00 | sale4 |        2
+ 2020 |     2 |        | 200.00 | sale1 |        2
+ 2020 |     2 |        | 200.00 | sale2 |        2
+ 2021 |     3 | 150.00 |        | sale1 |        3
+ 2021 |     3 | 150.00 |        | sale2 |        3
+ 2021 |     3 | 150.00 |        | sale3 |        3
+ 2021 |     3 | 150.00 |        | sale4 |        3
+ 2021 |     4 |        | 250.00 | sale2 |        4
+ 2021 |     4 |        | 250.00 | sale3 |        4
+ 2021 |     4 |        | 250.00 | sale4 |        4
+ 2021 |     4 |        | 250.00 | sale1 |        4
+ 2022 |     5 |        |        | sale3 |        5
+ 2022 |     5 |        |        | sale2 |        5
+ 2022 |     5 |        |        | sale4 |        5
+ 2022 |     5 |        |        | sale1 |        5
+(20 rows)
+
+drop schema shark_rotate_part2_dump cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table sales
+drop cascades to table sales2
+drop cascades to view v1
+drop cascades to view v2
+\c postgres
+drop database shark_rotate_part2_dump;

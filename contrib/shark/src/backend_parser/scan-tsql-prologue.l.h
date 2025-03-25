@@ -5,7 +5,7 @@
  * callers need to pass it to scanner_init, if they are using the
  * standard keyword list ScanKeywords.
  */
-#define PG_KEYWORD(kwname, value, category) value,
+#define PG_KEYWORD(kwname, value, category, collabel) value,
 
 const uint16 pgtsql_ScanKeywordTokens[] = {
 #include "src/backend_parser/kwlist.h"
@@ -37,3 +37,5 @@ const uint16 pgtsql_ScanKeywordTokens[] = {
 #undef YY_DECL
 #define YY_DECL int pgtsql_core_yylex \
                (YYSTYPE * yylval_param, YYLTYPE * yylloc_param , yyscan_t yyscanner)
+
+extern bool IsTsqlAtatGlobalVar(const char *varname);

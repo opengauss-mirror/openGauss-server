@@ -176,6 +176,7 @@ static	PLpgSQL_expr	*read_sql_expression2(int until, int until2,
 static	PLpgSQL_expr	*read_sql_stmt(const char *sqlstart);
 static	PLpgSQL_type	*read_datatype(int tok);
 static  PLpgSQL_stmt	*parse_lob_open_close(int location);
+static  PLpgSQL_stmt    *transfrom_dbcc_into_perform_mode(int location);
 static	PLpgSQL_stmt	*make_execsql_stmt(int firsttoken, int location);
 static	PLpgSQL_stmt_fetch *read_fetch_direction(void);
 static	void			 complete_direction(PLpgSQL_stmt_fetch *fetch,
@@ -5462,6 +5463,8 @@ stmt_execsql			: K_ALTER
                 && (pltsql_is_token_match2('.', K_OPEN)
                 || pltsql_is_token_match2('.', K_CLOSE)))
                     $$ = parse_lob_open_close(@1);
+                else if (0 == strcasecmp($1.ident, "DBCC"))
+                    $$ = transfrom_dbcc_into_perform_mode(@1);
                 else
                 {
                     tok = yylex();
@@ -12413,6 +12416,9 @@ read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, int firstto
         *strict = true;
 #endif
     tok = yylex();
+    if (tok == T_WORD) {
+        return true;
+    }
     if (tok == '@' || tok == SET_USER_IDENT) {
         return true;
     }
@@ -15173,6 +15179,58 @@ parse_lob_open_close(int location)
 	yyerror("syntax error");
 	return NULL;
 }
+
+/*
+ * Brief		: transform dbcc into perfrom mode exec to void query has no destination for result data 
+ * Description	: dbcc is a select sql, if not transform into perform mode, will meet error is plpgsql
+ * Notes		: 
+ */ 
+static PLpgSQL_stmt * transfrom_dbcc_into_perform_mode(int location)
+{
+	StringInfoData func;
+	int tok = yylex();
+	char *mode = NULL;
+	bool is_open = false;
+	PLpgSQL_expr *expr = NULL;
+	PLpgSQL_stmt_perform *perform = NULL;
+    int dbcc_sql_start_loc = location;
+    int dbcc_sql_end_loc = -1;
+	initStringInfo(&func);
+
+    for (;;) {
+        tok = yylex();
+
+        if (tok == 0)
+            yyerror("unexpected end of function definition");
+        
+        if (tok == ';') {
+            dbcc_sql_end_loc = yylloc;
+            break;
+        }
+    }
+
+    plpgsql_append_source_text(&func, dbcc_sql_start_loc, dbcc_sql_end_loc);
+
+	expr = (PLpgSQL_expr *)palloc0(sizeof(PLpgSQL_expr));
+	expr->dtype = PLPGSQL_DTYPE_EXPR;
+	expr->query = pstrdup(func.data);
+	expr->plan = NULL;
+	expr->paramnos = NULL;
+	expr->ns = plpgsql_ns_top();
+    expr->idx = (uint32)-1;
+    expr->out_param_dno = -1;
+
+	perform = (PLpgSQL_stmt_perform*)palloc0(sizeof(PLpgSQL_stmt_perform));
+	perform->cmd_type = PLPGSQL_STMT_PERFORM;
+	perform->lineno = plpgsql_location_to_lineno(location);
+	perform->expr = expr;
+    perform->sqlString = plpgsql_get_curline_query();
+
+    pfree_ext(func.data);
+
+	return (PLpgSQL_stmt *)perform;
+}
+
 
 static void raw_parse_package_function_callback(void *arg)
 {

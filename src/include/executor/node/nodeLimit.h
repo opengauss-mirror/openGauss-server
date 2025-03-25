@@ -20,5 +20,5 @@ extern LimitState* ExecInitLimit(Limit* node, EState* estate, int eflags);
 extern void ExecEndLimit(LimitState* node);
 extern void ExecReScanLimit(LimitState* node);
 extern void recompute_limits(LimitState* node);
-
+typedef void (*RecomputeLimitsHookType) (float8 val);
 #endif /* NODELIMIT_H */

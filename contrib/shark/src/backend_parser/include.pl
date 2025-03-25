@@ -20,6 +20,7 @@ my $in_prologue = 0;
 my $in_comment = 0;
 my $brace_indent = 0;
 my $brace_started = 0; # did prev line start a new brace?
+my $prior_can_be_added = 0;
 
 while ($line = <STDIN>) {
 	$line =~ s/\r//g;
@@ -59,6 +60,10 @@ while ($line = <STDIN>) {
 		next;
 	}
 
+    if ($line =~ /col_name_keyword_nonambiguous:/) {
+        $prior_can_be_added = 1;
+    }
+
 	# in higher version of bison, duplicate name-prefix is ignored. replace the name-prefix to pgtsql here. This can be refactored later.
 	if ($line =~ "%name-prefix \"$pg_yy_name_prefix\"")
 	{
@@ -67,7 +72,35 @@ while ($line = <STDIN>) {
 	elsif ($line =~ "#include \"parser/gramparse.h\"") {
 		print "#include \"gramparse.h\"\n"
 	}
-	else
+	elsif ($line =~ /\| a_expr IDENT\n/) {
+		print "| a_expr DirectColLabel\n"
+	}
+    elsif ($line =~ /\| PRECISION\n/ && $prior_can_be_added == 1) {
+        $prior_can_be_added = 0;
+        print "| PRECISION\n| PRIOR\n"
+    }
+    # remove postfix expression syntax in D compatibility database
+    elsif ($line =~ /\| PRIOR\n/ ||
+           $line =~ /%left\s+POSTFIXOP/ ||
+           $line =~ /\| b_expr qual_Op\s+%prec POSTFIXOP/ ||
+           $line =~ /\| a_expr qual_Op\s+%prec POSTFIXOP/ ||
+           $line =~ m{
+        \{ \s* 
+        \$\$ \s* = \s* 
+        \( \s* Node \s* \* \s* \) \s* 
+        makeA_Expr \s* 
+        \( \s* 
+            AEXPR_OP \s* , \s* 
+            \$2 \s* , \s* 
+            \$1 \s* , \s* 
+            NULL \s* , \s* 
+            \@2 
+        \s* \) \s* ; \s* 
+        \}
+    }x) {
+        next;
+    } 
+    else
 	{
 		simple_parse($line, $in_comment, $in_prologue, $brace_indent, $brace_started);
 		#print "in_comment: $in_comment, in_prologue: $in_prologue, brace_indent: $brace_indent, brace_started: $brace_started || ";

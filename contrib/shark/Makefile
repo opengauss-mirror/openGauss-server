@@ -1,16 +1,18 @@
 EXTENSION = shark
 MODULE_big = shark
+BASECODEDIR=src
 BEPARSERDIR=src/backend_parser
 PLDIR=src/pltsql
 DATA = shark--1.0.sql
 REGRESS = dummy
 
-OBJS = shark.o
+OBJS = shark.o dbcc.o varlena.o
 OBJS += $(BEPARSERDIR)/parser.o
 OBJS += $(BEPARSERDIR)/gram-backend.o
 OBJS += $(BEPARSERDIR)/keywords.o
 OBJS += $(PLDIR)/pl_gram.o $(PLDIR)/pl_handler.o $(PLDIR)/pl_comp.o
 OBJS += $(PLDIR)/pl_scanner.o
+OBJS += $(BASECODEDIR)/tablecmds.o
 
 subdir = contrib/shark
 top_builddir = ../..
@@ -103,3 +105,8 @@ $(PLDIR)/pl_reserved_kwlist_d.h: $(PLDIR)/pl_reserved_kwlist.h $(GEN_KEYWORDLIST
 
 $(PLDIR)/pl_unreserved_kwlist_d.h: $(PLDIR)/pl_unreserved_kwlist.h $(GEN_KEYWORDLIST_DEPS)
 	$(GEN_KEYWORDLIST) --varname UnreservedPLKeywords $<
+
+
+
+all:
+	chmod +x ./smartmatch.pl 

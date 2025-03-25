@@ -1751,8 +1751,13 @@ static int get_table_attribute(
             appendStringInfo(buf, "\n    ");
             actual_atts++;
 
+            bool iscomputedcol = IsComputedColumn(tableoid, i + 1);
             /* Attribute name */
-            appendStringInfo(buf, "%s %s", quote_identifier(NameStr(att_tup->attname)), result);
+            if (iscomputedcol) {
+                appendStringInfo(buf, "%s", quote_identifier(NameStr(att_tup->attname)));
+            } else {
+                appendStringInfo(buf, "%s %s", quote_identifier(NameStr(att_tup->attname)), result);
+            }
             if (att_tup->attkvtype == ATT_KV_TAG)
                 appendStringInfo(buf, " TSTag");
             else if (att_tup->attkvtype == ATT_KV_FIELD)
@@ -1838,6 +1843,8 @@ static int get_table_attribute(
                         const char* adsrc = TextDatumGetCString(txt);
                         if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
                             appendStringInfo(buf, " GENERATED ALWAYS AS (%s) STORED", adsrc);
+                        } else if (generatedCol == ATTRIBUTE_GENERATED_PERSISTED) {
+                            appendStringInfo(buf, " AS (%s) PERSISTED", adsrc);
                         } else if (strcmp(adsrc, "AUTO_INCREMENT") == 0) {
                             Node *adexpr = (Node*)stringToNode_skip_extern_fields(TextDatumGetCString(val));
                             find_nextval_seqoid_walker(adexpr, &tableinfo->autoinc_seqoid);

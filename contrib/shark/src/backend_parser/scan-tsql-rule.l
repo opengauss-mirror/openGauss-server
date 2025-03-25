@@ -6,6 +6,7 @@
 					/* National character.
 					 * We will pass this along as a normal character string,
 					 * but preceded with an internally-generated "NCHAR".
+					 * but preceded with an internally-generated "NCHAR".
 					 */
 					int kwnum;
 
@@ -61,4 +62,20 @@
 						yyextra->is_hint_str = false;
 
 						return IDENT;
+					}
+
+{set_identifier}	{
+							SET_YYLLOC();
+							char *set_ident =
+								downcase_truncate_identifier(yytext, yyleng, yyextra->warnOnTruncateIdent);
+							if (IsTsqlAtatGlobalVar(set_ident)) {
+								yylval->str = set_ident;
+								yyextra->ident_quoted = false;
+								return TSQL_ATAT_IDENT;
+							} else {
+								yyless(2);
+								yylval->str = pstrdup(yytext);
+								yyextra->is_hint_str = false;
+								return Op;
+							}
 					}

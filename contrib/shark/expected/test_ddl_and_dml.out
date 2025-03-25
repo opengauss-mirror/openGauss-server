@@ -1,0 +1,4118 @@
+drop schema if exists test_ddl_and_dml cascade;
+NOTICE:  schema "test_ddl_and_dml" does not exist, skipping
+create schema test_ddl_and_dml;
+set current_schema = test_ddl_and_dml;
+-- case 1: computed column
+DROP TABLE IF EXISTS Products;
+NOTICE:  table "products" does not exist, skipping
+CREATE TABLE Products(
+    QtyAvailable smallint,
+    UnitPrice money,
+    InventoryValue AS (QtyAvailable * UnitPrice)
+);
+ALTER TABLE Products ADD RetailValue AS (QtyAvailable * UnitPrice * 1.5) PERSISTED;
+INSERT INTO Products (QtyAvailable, UnitPrice) VALUES (25, 2.00), (10, 1.5);
+select * from Products;
+ qtyavailable | unitprice | inventoryvalue | retailvalue 
+--------------+-----------+----------------+-------------
+           25 |     $2.00 |         $50.00 |      $75.00
+           10 |     $1.50 |         $15.00 |      $22.50
+(2 rows)
+
+\d+ Products
+                                                    Table "test_ddl_and_dml.products"
+     Column     |   Type   |                               Modifiers                               | Storage | Stats target | Description 
+----------------+----------+-----------------------------------------------------------------------+---------+--------------+-------------
+ qtyavailable   | smallint |                                                                       | plain   |              | 
+ unitprice      | money    |                                                                       | plain   |              | 
+ inventoryvalue | money    | as ((qtyavailable * unitprice)) persisted                             | plain   |              | 
+ retailvalue    | money    | as (((qtyavailable * unitprice) * (1.5)::double precision)) persisted | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+-- 删除生成列
+ALTER TABLE Products DROP COLUMN RetailValue;
+select * from Products;
+ qtyavailable | unitprice | inventoryvalue 
+--------------+-----------+----------------
+           25 |     $2.00 |         $50.00
+           10 |     $1.50 |         $15.00
+(2 rows)
+
+-- 嵌套生成列：报错
+ALTER TABLE Products ADD RetailValue2 AS (QtyAvailable * RetailValue * 1.5) PERSISTED;
+ERROR:  column "retailvalue" does not exist
+-- 删除依赖列:报错
+ALTER TABLE Products DROP COLUMN UnitPrice;
+ERROR:  cannot drop a column used by a generated column
+DETAIL:  Column "unitprice" is used by generated column "inventoryvalue".
+DROP TABLE IF EXISTS Products;
+-- case2: top clause
+DROP TABLE IF EXISTS Products;
+NOTICE:  table "products" does not exist, skipping
+CREATE TABLE Products(QtyAvailable smallint, UnitPrice money, InventoryValue AS (QtyAvailable * UnitPrice));
+INSERT INTO Products(QtyAvailable, UnitPrice) VALUES (25, 2.00), (10, 1.5), (25, 2.00), (10, 1.5), (10, 1.5);
+-- top N
+select DISTINCT TOP 1 * from Products;
+ qtyavailable | unitprice | inventoryvalue 
+--------------+-----------+----------------
+           10 |     $1.50 |         $15.00
+(1 row)
+
+-- WITH TIES
+select TOP 2 PERCENT WITH TIES * from Products ORDER BY InventoryValue;
+ qtyavailable | unitprice | inventoryvalue 
+--------------+-----------+----------------
+           10 |     $1.50 |         $15.00
+           10 |     $1.50 |         $15.00
+           10 |     $1.50 |         $15.00
+(3 rows)
+
+-- 百分比
+select TOP 2 PERCENT * from Products;
+ qtyavailable | unitprice | inventoryvalue 
+--------------+-----------+----------------
+           25 |     $2.00 |         $50.00
+(1 row)
+
+-- 报错：和limit子句同时使用
+select TOP 1 * from Products limit 10;
+ERROR:  multiple LIMIT clauses not allowed
+LINE 1: select TOP 1 * from Products limit 10;
+                                           ^
+--报错：Percent values must be between 0 and 100.
+select TOP 200 PERCENT * from Products;
+ERROR:  Percent values must be between 0 and 100.
+--报错：WITH TIES必须和order by子句同时使用
+select TOP (select 10) WITH TIES * from Products;
+ERROR:  The WITH TIES clause is not allowed without a corresponding ORDER BY clause.
+DROP TABLE IF EXISTS Products;
+-- case 3: remove postfix operator
+-- 报错：移除后缀运算符
+select 5!;
+ERROR:  syntax error at or near ";"
+LINE 1: select 5!;
+                 ^
+-- case 4: support direct column lable: 670 keywords
+SELECT 1 ABORT;
+ abort 
+-------
+     1
+(1 row)
+
+SELECT 1 ABSOLUTE;
+ absolute 
+----------
+        1
+(1 row)
+
+SELECT 1 ACCESS;
+ access 
+--------
+      1
+(1 row)
+
+SELECT 1 ACCOUNT;
+ account 
+---------
+       1
+(1 row)
+
+SELECT 1 ACTION;
+ action 
+--------
+      1
+(1 row)
+
+SELECT 1 ADD;
+ add 
+-----
+   1
+(1 row)
+
+SELECT 1 ADMIN;
+ admin 
+-------
+     1
+(1 row)
+
+SELECT 1 AFTER;
+ after 
+-------
+     1
+(1 row)
+
+SELECT 1 AGGREGATE;
+ aggregate 
+-----------
+         1
+(1 row)
+
+SELECT 1 ALGORITHM;
+ algorithm 
+-----------
+         1
+(1 row)
+
+SELECT 1 ALL;
+ all 
+-----
+   1
+(1 row)
+
+SELECT 1 ALSO;
+ also 
+------
+    1
+(1 row)
+
+SELECT 1 ALTER;
+ alter 
+-------
+     1
+(1 row)
+
+SELECT 1 ALWAYS;
+ always 
+--------
+      1
+(1 row)
+
+SELECT 1 ANALYSE;
+ analyse 
+---------
+       1
+(1 row)
+
+SELECT 1 ANALYZE;
+ analyze 
+---------
+       1
+(1 row)
+
+SELECT 1 AND;
+ and 
+-----
+   1
+(1 row)
+
+SELECT 1 ANY;
+ any 
+-----
+   1
+(1 row)
+
+SELECT 1 APP;
+ app 
+-----
+   1
+(1 row)
+
+SELECT 1 APPEND;
+ append 
+--------
+      1
+(1 row)
+
+SELECT 1 APPLY;
+ apply 
+-------
+     1
+(1 row)
+
+SELECT 1 ARCHIVE;
+ archive 
+---------
+       1
+(1 row)
+
+SELECT 1 ASC;
+ asc 
+-----
+   1
+(1 row)
+
+SELECT 1 ASOF;
+ asof 
+------
+    1
+(1 row)
+
+SELECT 1 ASSERTION;
+ assertion 
+-----------
+         1
+(1 row)
+
+SELECT 1 ASSIGNMENT;
+ assignment 
+------------
+          1
+(1 row)
+
+SELECT 1 ASYMMETRIC;
+ asymmetric 
+------------
+          1
+(1 row)
+
+SELECT 1 AT;
+ at 
+----
+  1
+(1 row)
+
+SELECT 1 ATTRIBUTE;
+ attribute 
+-----------
+         1
+(1 row)
+
+SELECT 1 AUDIT;
+ audit 
+-------
+     1
+(1 row)
+
+SELECT 1 AUTHID;
+ authid 
+--------
+      1
+(1 row)
+
+SELECT 1 AUTHORIZATION;
+ authorization 
+---------------
+             1
+(1 row)
+
+SELECT 1 AUTO_INCREMENT;
+ auto_increment 
+----------------
+              1
+(1 row)
+
+SELECT 1 AUTOEXTEND;
+ autoextend 
+------------
+          1
+(1 row)
+
+SELECT 1 AUTOMAPPED;
+ automapped 
+------------
+          1
+(1 row)
+
+SELECT 1 BACKWARD;
+ backward 
+----------
+        1
+(1 row)
+
+SELECT 1 BARRIER;
+ barrier 
+---------
+       1
+(1 row)
+
+SELECT 1 BEFORE;
+ before 
+--------
+      1
+(1 row)
+
+SELECT 1 BEGIN;
+ begin 
+-------
+     1
+(1 row)
+
+SELECT 1 BEGIN_NON_ANOYBLOCK;
+ begin_non_anoyblock 
+---------------------
+                   1
+(1 row)
+
+SELECT 1 BIGINT;
+ bigint 
+--------
+      1
+(1 row)
+
+SELECT 1 BINARY;
+ binary 
+--------
+      1
+(1 row)
+
+SELECT 1 BINARY_DOUBLE;
+ binary_double 
+---------------
+             1
+(1 row)
+
+SELECT 1 BINARY_DOUBLE_INF;
+ binary_double_inf 
+-------------------
+                 1
+(1 row)
+
+SELECT 1 BINARY_DOUBLE_NAN;
+ binary_double_nan 
+-------------------
+                 1
+(1 row)
+
+SELECT 1 BINARY_INTEGER;
+ binary_integer 
+----------------
+              1
+(1 row)
+
+SELECT 1 BIT;
+ bit 
+-----
+   1
+(1 row)
+
+SELECT 1 BLANKS;
+ blanks 
+--------
+      1
+(1 row)
+
+SELECT 1 BLOB;
+ blob 
+------
+    1
+(1 row)
+
+SELECT 1 BLOCKCHAIN;
+ blockchain 
+------------
+          1
+(1 row)
+
+SELECT 1 BODY;
+ body 
+------
+    1
+(1 row)
+
+SELECT 1 BOOLEAN;
+ boolean 
+---------
+       1
+(1 row)
+
+SELECT 1 BOTH;
+ both 
+------
+    1
+(1 row)
+
+SELECT 1 BUCKETCNT;
+ bucketcnt 
+-----------
+         1
+(1 row)
+
+SELECT 1 BUCKETS;
+ buckets 
+---------
+       1
+(1 row)
+
+SELECT 1 BUILD;
+ build 
+-------
+     1
+(1 row)
+
+SELECT 1 BYTE;
+ byte 
+------
+    1
+(1 row)
+
+SELECT 1 BYTEAWITHOUTORDER;
+ byteawithoutorder 
+-------------------
+                 1
+(1 row)
+
+SELECT 1 BYTEAWITHOUTORDERWITHEQUAL;
+ byteawithoutorderwithequal 
+----------------------------
+                          1
+(1 row)
+
+SELECT 1 CACHE;
+ cache 
+-------
+     1
+(1 row)
+
+SELECT 1 CALL;
+ call 
+------
+    1
+(1 row)
+
+SELECT 1 CALLED;
+ called 
+--------
+      1
+(1 row)
+
+SELECT 1 CANCELABLE;
+ cancelable 
+------------
+          1
+(1 row)
+
+SELECT 1 CASCADE;
+ cascade 
+---------
+       1
+(1 row)
+
+SELECT 1 CASCADED;
+ cascaded 
+----------
+        1
+(1 row)
+
+SELECT 1 CASE;
+ case 
+------
+    1
+(1 row)
+
+SELECT 1 CAST;
+ cast 
+------
+    1
+(1 row)
+
+SELECT 1 CATALOG;
+ catalog 
+---------
+       1
+(1 row)
+
+SELECT 1 CATALOG_NAME;
+ catalog_name 
+--------------
+            1
+(1 row)
+
+SELECT 1 CHAIN;
+ chain 
+-------
+     1
+(1 row)
+
+SELECT 1 CHANGE;
+ change 
+--------
+      1
+(1 row)
+
+SELECT 1 CHARACTERISTICS;
+ characteristics 
+-----------------
+               1
+(1 row)
+
+SELECT 1 CHARACTERSET;
+ characterset 
+--------------
+            1
+(1 row)
+
+SELECT 1 CHARSET;
+ charset 
+---------
+       1
+(1 row)
+
+SELECT 1 CHECK;
+ check 
+-------
+     1
+(1 row)
+
+SELECT 1 CHECKPOINT;
+ checkpoint 
+------------
+          1
+(1 row)
+
+SELECT 1 CLASS;
+ class 
+-------
+     1
+(1 row)
+
+SELECT 1 CLASS_ORIGIN;
+ class_origin 
+--------------
+            1
+(1 row)
+
+SELECT 1 CLEAN;
+ clean 
+-------
+     1
+(1 row)
+
+SELECT 1 CLIENT;
+ client 
+--------
+      1
+(1 row)
+
+SELECT 1 CLIENT_MASTER_KEY;
+ client_master_key 
+-------------------
+                 1
+(1 row)
+
+SELECT 1 CLIENT_MASTER_KEYS;
+ client_master_keys 
+--------------------
+                  1
+(1 row)
+
+SELECT 1 CLOB;
+ clob 
+------
+    1
+(1 row)
+
+SELECT 1 CLOSE;
+ close 
+-------
+     1
+(1 row)
+
+SELECT 1 CLUSTER;
+ cluster 
+---------
+       1
+(1 row)
+
+SELECT 1 TSQL_CLUSTERED;
+ tsql_clustered 
+----------------
+              1
+(1 row)
+
+SELECT 1 COALESCE;
+ coalesce 
+----------
+        1
+(1 row)
+
+SELECT 1 COLLATE;
+ collate 
+---------
+       1
+(1 row)
+
+SELECT 1 COLLATION;
+ collation 
+-----------
+         1
+(1 row)
+
+SELECT 1 COLUMN;
+ column 
+--------
+      1
+(1 row)
+
+SELECT 1 COLUMN_ENCRYPTION_KEY;
+ column_encryption_key 
+-----------------------
+                     1
+(1 row)
+
+SELECT 1 COLUMN_ENCRYPTION_KEYS;
+ column_encryption_keys 
+------------------------
+                      1
+(1 row)
+
+SELECT 1 COLUMN_NAME;
+ column_name 
+-------------
+           1
+(1 row)
+
+SELECT 1 COLUMNS;
+ columns 
+---------
+       1
+(1 row)
+
+SELECT 1 TSQL_COLUMNSTORE;
+ tsql_columnstore 
+------------------
+                1
+(1 row)
+
+SELECT 1 COMMENT;
+ comment 
+---------
+       1
+(1 row)
+
+SELECT 1 COMMENTS;
+ comments 
+----------
+        1
+(1 row)
+
+SELECT 1 COMMIT;
+ commit 
+--------
+      1
+(1 row)
+
+SELECT 1 COMMITTED;
+ committed 
+-----------
+         1
+(1 row)
+
+SELECT 1 COMPACT;
+ compact 
+---------
+       1
+(1 row)
+
+SELECT 1 COMPATIBLE_ILLEGAL_CHARS;
+ compatible_illegal_chars 
+--------------------------
+                        1
+(1 row)
+
+SELECT 1 COMPILE;
+ compile 
+---------
+       1
+(1 row)
+
+SELECT 1 COMPLETE;
+ complete 
+----------
+        1
+(1 row)
+
+SELECT 1 COMPLETION;
+ completion 
+------------
+          1
+(1 row)
+
+SELECT 1 COMPRESS;
+ compress 
+----------
+        1
+(1 row)
+
+SELECT 1 CONCURRENTLY;
+ concurrently 
+--------------
+            1
+(1 row)
+
+SELECT 1 CONDITION;
+ condition 
+-----------
+         1
+(1 row)
+
+SELECT 1 CONFIGURATION;
+ configuration 
+---------------
+             1
+(1 row)
+
+SELECT 1 CONNECT;
+ connect 
+---------
+       1
+(1 row)
+
+SELECT 1 CONNECTION;
+ connection 
+------------
+          1
+(1 row)
+
+SELECT 1 CONSISTENT;
+ consistent 
+------------
+          1
+(1 row)
+
+SELECT 1 CONSTANT;
+ constant 
+----------
+        1
+(1 row)
+
+SELECT 1 CONSTRAINT;
+ constraint 
+------------
+          1
+(1 row)
+
+SELECT 1 CONSTRAINT_CATALOG;
+ constraint_catalog 
+--------------------
+                  1
+(1 row)
+
+SELECT 1 CONSTRAINT_NAME;
+ constraint_name 
+-----------------
+               1
+(1 row)
+
+SELECT 1 CONSTRAINT_SCHEMA;
+ constraint_schema 
+-------------------
+                 1
+(1 row)
+
+SELECT 1 CONSTRAINTS;
+ constraints 
+-------------
+           1
+(1 row)
+
+SELECT 1 CONSTRUCTOR;
+ constructor 
+-------------
+           1
+(1 row)
+
+SELECT 1 CONTENT;
+ content 
+---------
+       1
+(1 row)
+
+SELECT 1 CONTINUE;
+ continue 
+----------
+        1
+(1 row)
+
+SELECT 1 CONTVIEW;
+ contview 
+----------
+        1
+(1 row)
+
+SELECT 1 CONVERSION;
+ conversion 
+------------
+          1
+(1 row)
+
+SELECT 1 CONVERT;
+ convert 
+---------
+       1
+(1 row)
+
+SELECT 1 COORDINATOR;
+ coordinator 
+-------------
+           1
+(1 row)
+
+SELECT 1 COORDINATORS;
+ coordinators 
+--------------
+            1
+(1 row)
+
+SELECT 1 COPY;
+ copy 
+------
+    1
+(1 row)
+
+SELECT 1 COST;
+ cost 
+------
+    1
+(1 row)
+
+SELECT 1 CROSS;
+ cross 
+-------
+     1
+(1 row)
+
+SELECT 1 CSN;
+ csn 
+-----
+   1
+(1 row)
+
+SELECT 1 CSV;
+ csv 
+-----
+   1
+(1 row)
+
+SELECT 1 CUBE;
+ cube 
+------
+    1
+(1 row)
+
+SELECT 1 CURRENT;
+ current 
+---------
+       1
+(1 row)
+
+SELECT 1 CURRENT_CATALOG;
+ current_catalog 
+-----------------
+               1
+(1 row)
+
+SELECT 1 CURRENT_DATE;
+ current_date 
+--------------
+            1
+(1 row)
+
+SELECT 1 CURRENT_ROLE;
+ current_role 
+--------------
+            1
+(1 row)
+
+SELECT 1 CURRENT_SCHEMA;
+ current_schema 
+----------------
+              1
+(1 row)
+
+SELECT 1 CURRENT_TIME;
+ current_time 
+--------------
+            1
+(1 row)
+
+SELECT 1 CURRENT_TIMESTAMP;
+ current_timestamp 
+-------------------
+                 1
+(1 row)
+
+SELECT 1 CURRENT_USER;
+ current_user 
+--------------
+            1
+(1 row)
+
+SELECT 1 CURSOR;
+ cursor 
+--------
+      1
+(1 row)
+
+SELECT 1 CURSOR_NAME;
+ cursor_name 
+-------------
+           1
+(1 row)
+
+SELECT 1 CYCLE;
+ cycle 
+-------
+     1
+(1 row)
+
+SELECT 1 DATA;
+ data 
+------
+    1
+(1 row)
+
+SELECT 1 DATABASE;
+ database 
+----------
+        1
+(1 row)
+
+SELECT 1 DATAFILE;
+ datafile 
+----------
+        1
+(1 row)
+
+SELECT 1 DATANODE;
+ datanode 
+----------
+        1
+(1 row)
+
+SELECT 1 DATANODES;
+ datanodes 
+-----------
+         1
+(1 row)
+
+SELECT 1 DATATYPE_CL;
+ datatype_cl 
+-------------
+           1
+(1 row)
+
+SELECT 1 DATE;
+ date 
+------
+    1
+(1 row)
+
+SELECT 1 DATE_FORMAT;
+ date_format 
+-------------
+           1
+(1 row)
+
+SELECT 1 DAY_HOUR;
+ day_hour 
+----------
+        1
+(1 row)
+
+SELECT 1 DAY_MINUTE;
+ day_minute 
+------------
+          1
+(1 row)
+
+SELECT 1 DAY_SECOND;
+ day_second 
+------------
+          1
+(1 row)
+
+SELECT 1 DBCOMPATIBILITY;
+ dbcompatibility 
+-----------------
+               1
+(1 row)
+
+SELECT 1 DEALLOCATE;
+ deallocate 
+------------
+          1
+(1 row)
+
+SELECT 1 DEC;
+ dec 
+-----
+   1
+(1 row)
+
+SELECT 1 DECIMAL;
+ decimal 
+---------
+       1
+(1 row)
+
+SELECT 1 DECLARE;
+ declare 
+---------
+       1
+(1 row)
+
+SELECT 1 DECODE;
+ decode 
+--------
+      1
+(1 row)
+
+SELECT 1 DEFAULT;
+ default 
+---------
+       1
+(1 row)
+
+SELECT 1 DEFAULTS;
+ defaults 
+----------
+        1
+(1 row)
+
+SELECT 1 DEFERRABLE;
+ deferrable 
+------------
+          1
+(1 row)
+
+SELECT 1 DEFERRED;
+ deferred 
+----------
+        1
+(1 row)
+
+SELECT 1 DEFINER;
+ definer 
+---------
+       1
+(1 row)
+
+SELECT 1 DELETE;
+ delete 
+--------
+      1
+(1 row)
+
+SELECT 1 DELIMITER;
+ delimiter 
+-----------
+         1
+(1 row)
+
+SELECT 1 DELIMITERS;
+ delimiters 
+------------
+          1
+(1 row)
+
+SELECT 1 DELTA;
+ delta 
+-------
+     1
+(1 row)
+
+SELECT 1 DELTAMERGE;
+ deltamerge 
+------------
+          1
+(1 row)
+
+SELECT 1 DENSE_RANK;
+ dense_rank 
+------------
+          1
+(1 row)
+
+SELECT 1 DESC;
+ desc 
+------
+    1
+(1 row)
+
+SELECT 1 DETERMINISTIC;
+ deterministic 
+---------------
+             1
+(1 row)
+
+SELECT 1 DIAGNOSTICS;
+ diagnostics 
+-------------
+           1
+(1 row)
+
+SELECT 1 DICTIONARY;
+ dictionary 
+------------
+          1
+(1 row)
+
+SELECT 1 DIRECT;
+ direct 
+--------
+      1
+(1 row)
+
+SELECT 1 DIRECTORY;
+ directory 
+-----------
+         1
+(1 row)
+
+SELECT 1 DISABLE;
+ disable 
+---------
+       1
+(1 row)
+
+SELECT 1 DISCARD;
+ discard 
+---------
+       1
+(1 row)
+
+SELECT 1 DISCONNECT;
+ disconnect 
+------------
+          1
+(1 row)
+
+SELECT 1 DISTINCT;
+ distinct 
+----------
+        1
+(1 row)
+
+SELECT 1 DISTRIBUTE;
+ distribute 
+------------
+          1
+(1 row)
+
+SELECT 1 DISTRIBUTION;
+ distribution 
+--------------
+            1
+(1 row)
+
+SELECT 1 DO;
+ do 
+----
+  1
+(1 row)
+
+SELECT 1 DOCUMENT;
+ document 
+----------
+        1
+(1 row)
+
+SELECT 1 DOMAIN;
+ domain 
+--------
+      1
+(1 row)
+
+SELECT 1 DOUBLE;
+ double 
+--------
+      1
+(1 row)
+
+SELECT 1 DROP;
+ drop 
+------
+    1
+(1 row)
+
+SELECT 1 DUMPFILE;
+ dumpfile 
+----------
+        1
+(1 row)
+
+SELECT 1 DUPLICATE;
+ duplicate 
+-----------
+         1
+(1 row)
+
+SELECT 1 EACH;
+ each 
+------
+    1
+(1 row)
+
+SELECT 1 ELASTIC;
+ elastic 
+---------
+       1
+(1 row)
+
+SELECT 1 ELSE;
+ else 
+------
+    1
+(1 row)
+
+SELECT 1 ENABLE;
+ enable 
+--------
+      1
+(1 row)
+
+SELECT 1 ENCLOSED;
+ enclosed 
+----------
+        1
+(1 row)
+
+SELECT 1 ENCODING;
+ encoding 
+----------
+        1
+(1 row)
+
+SELECT 1 ENCRYPTED;
+ encrypted 
+-----------
+         1
+(1 row)
+
+SELECT 1 ENCRYPTED_VALUE;
+ encrypted_value 
+-----------------
+               1
+(1 row)
+
+SELECT 1 ENCRYPTION;
+ encryption 
+------------
+          1
+(1 row)
+
+SELECT 1 ENCRYPTION_TYPE;
+ encryption_type 
+-----------------
+               1
+(1 row)
+
+SELECT 1 END;
+ end 
+-----
+   1
+(1 row)
+
+SELECT 1 ENDS;
+ ends 
+------
+    1
+(1 row)
+
+SELECT 1 ENFORCED;
+ enforced 
+----------
+        1
+(1 row)
+
+SELECT 1 ENUM;
+ enum 
+------
+    1
+(1 row)
+
+SELECT 1 EOL;
+ eol 
+-----
+   1
+(1 row)
+
+SELECT 1 ERROR;
+ error 
+-------
+     1
+(1 row)
+
+SELECT 1 ERRORS;
+ errors 
+--------
+      1
+(1 row)
+
+SELECT 1 ESCAPE;
+ escape 
+--------
+      1
+(1 row)
+
+SELECT 1 ESCAPED;
+ escaped 
+---------
+       1
+(1 row)
+
+SELECT 1 ESCAPING;
+ escaping 
+----------
+        1
+(1 row)
+
+SELECT 1 EVENT;
+ event 
+-------
+     1
+(1 row)
+
+SELECT 1 EVENTS;
+ events 
+--------
+      1
+(1 row)
+
+SELECT 1 EVERY;
+ every 
+-------
+     1
+(1 row)
+
+SELECT 1 EXCHANGE;
+ exchange 
+----------
+        1
+(1 row)
+
+SELECT 1 EXCLUDE;
+ exclude 
+---------
+       1
+(1 row)
+
+SELECT 1 EXCLUDED;
+ excluded 
+----------
+        1
+(1 row)
+
+SELECT 1 EXCLUDING;
+ excluding 
+-----------
+         1
+(1 row)
+
+SELECT 1 EXCLUSIVE;
+ exclusive 
+-----------
+         1
+(1 row)
+
+SELECT 1 EXECUTE;
+ execute 
+---------
+       1
+(1 row)
+
+SELECT 1 EXISTS;
+ exists 
+--------
+      1
+(1 row)
+
+SELECT 1 EXPIRED;
+ expired 
+---------
+       1
+(1 row)
+
+SELECT 1 EXPLAIN;
+ explain 
+---------
+       1
+(1 row)
+
+SELECT 1 EXTENSION;
+ extension 
+-----------
+         1
+(1 row)
+
+SELECT 1 EXTERNAL;
+ external 
+----------
+        1
+(1 row)
+
+SELECT 1 EXTRACT;
+ extract 
+---------
+       1
+(1 row)
+
+SELECT 1 FALSE;
+ false 
+-------
+     1
+(1 row)
+
+SELECT 1 FAMILY;
+ family 
+--------
+      1
+(1 row)
+
+SELECT 1 FAST;
+ fast 
+------
+    1
+(1 row)
+
+SELECT 1 FEATURES;
+ features 
+----------
+        1
+(1 row)
+
+SELECT 1 FENCED;
+ fenced 
+--------
+      1
+(1 row)
+
+SELECT 1 FIELDS;
+ fields 
+--------
+      1
+(1 row)
+
+SELECT 1 FILEHEADER;
+ fileheader 
+------------
+          1
+(1 row)
+
+SELECT 1 FILL_MISSING_FIELDS;
+ fill_missing_fields 
+---------------------
+                   1
+(1 row)
+
+SELECT 1 FILLER;
+ filler 
+--------
+      1
+(1 row)
+
+SELECT 1 FINAL;
+ final 
+-------
+     1
+(1 row)
+
+SELECT 1 FIRST;
+ first 
+-------
+     1
+(1 row)
+
+SELECT 1 FIXED;
+ fixed 
+-------
+     1
+(1 row)
+
+SELECT 1 FLOAT;
+ float 
+-------
+     1
+(1 row)
+
+SELECT 1 FOLLOWING;
+ following 
+-----------
+         1
+(1 row)
+
+SELECT 1 FOLLOWS;
+ follows 
+---------
+       1
+(1 row)
+
+SELECT 1 FORCE;
+ force 
+-------
+     1
+(1 row)
+
+SELECT 1 FOREIGN;
+ foreign 
+---------
+       1
+(1 row)
+
+SELECT 1 FORMATTER;
+ formatter 
+-----------
+         1
+(1 row)
+
+SELECT 1 FORWARD;
+ forward 
+---------
+       1
+(1 row)
+
+SELECT 1 FREEZE;
+ freeze 
+--------
+      1
+(1 row)
+
+SELECT 1 FULL;
+ full 
+------
+    1
+(1 row)
+
+SELECT 1 FUNCTION;
+ function 
+----------
+        1
+(1 row)
+
+SELECT 1 FUNCTIONS;
+ functions 
+-----------
+         1
+(1 row)
+
+SELECT 1 GENERATED;
+ generated 
+-----------
+         1
+(1 row)
+
+SELECT 1 GET;
+ get 
+-----
+   1
+(1 row)
+
+SELECT 1 GLOBAL;
+ global 
+--------
+      1
+(1 row)
+
+SELECT 1 GRANTED;
+ granted 
+---------
+       1
+(1 row)
+
+SELECT 1 GREATEST;
+ greatest 
+----------
+        1
+(1 row)
+
+SELECT 1 GROUPING;
+ grouping 
+----------
+        1
+(1 row)
+
+SELECT 1 GROUPPARENT;
+ groupparent 
+-------------
+           1
+(1 row)
+
+SELECT 1 HANDLER;
+ handler 
+---------
+       1
+(1 row)
+
+SELECT 1 HDFSDIRECTORY;
+ hdfsdirectory 
+---------------
+             1
+(1 row)
+
+SELECT 1 HEADER;
+ header 
+--------
+      1
+(1 row)
+
+SELECT 1 HOLD;
+ hold 
+------
+    1
+(1 row)
+
+SELECT 1 HOUR_MINUTE;
+ hour_minute 
+-------------
+           1
+(1 row)
+
+SELECT 1 HOUR_SECOND;
+ hour_second 
+-------------
+           1
+(1 row)
+
+SELECT 1 IDENTIFIED;
+ identified 
+------------
+          1
+(1 row)
+
+SELECT 1 IDENTITY;
+ identity 
+----------
+        1
+(1 row)
+
+SELECT 1 IF;
+ if 
+----
+  1
+(1 row)
+
+SELECT 1 IGNORE;
+ ignore 
+--------
+      1
+(1 row)
+
+SELECT 1 IGNORE_EXTRA_DATA;
+ ignore_extra_data 
+-------------------
+                 1
+(1 row)
+
+SELECT 1 ILIKE;
+ ilike 
+-------
+     1
+(1 row)
+
+SELECT 1 IMCSTORED;
+ imcstored 
+-----------
+         1
+(1 row)
+
+SELECT 1 IMMEDIATE;
+ immediate 
+-----------
+         1
+(1 row)
+
+SELECT 1 IMMUTABLE;
+ immutable 
+-----------
+         1
+(1 row)
+
+SELECT 1 IMPLICIT;
+ implicit 
+----------
+        1
+(1 row)
+
+SELECT 1 IN;
+ in 
+----
+  1
+(1 row)
+
+SELECT 1 INCLUDE;
+ include 
+---------
+       1
+(1 row)
+
+SELECT 1 INCLUDING;
+ including 
+-----------
+         1
+(1 row)
+
+SELECT 1 INCREMENT;
+ increment 
+-----------
+         1
+(1 row)
+
+SELECT 1 INCREMENTAL;
+ incremental 
+-------------
+           1
+(1 row)
+
+SELECT 1 INDEX;
+ index 
+-------
+     1
+(1 row)
+
+SELECT 1 INDEXES;
+ indexes 
+---------
+       1
+(1 row)
+
+SELECT 1 INFILE;
+ infile 
+--------
+      1
+(1 row)
+
+SELECT 1 INFINITE;
+ infinite 
+----------
+        1
+(1 row)
+
+SELECT 1 INHERIT;
+ inherit 
+---------
+       1
+(1 row)
+
+SELECT 1 INHERITS;
+ inherits 
+----------
+        1
+(1 row)
+
+SELECT 1 INITIAL;
+ initial 
+---------
+       1
+(1 row)
+
+SELECT 1 INITIALLY;
+ initially 
+-----------
+         1
+(1 row)
+
+SELECT 1 INITRANS;
+ initrans 
+----------
+        1
+(1 row)
+
+SELECT 1 INLINE;
+ inline 
+--------
+      1
+(1 row)
+
+SELECT 1 INNER;
+ inner 
+-------
+     1
+(1 row)
+
+SELECT 1 INOUT;
+ inout 
+-------
+     1
+(1 row)
+
+SELECT 1 INPUT;
+ input 
+-------
+     1
+(1 row)
+
+SELECT 1 INSENSITIVE;
+ insensitive 
+-------------
+           1
+(1 row)
+
+SELECT 1 INSERT;
+ insert 
+--------
+      1
+(1 row)
+
+SELECT 1 INSTEAD;
+ instead 
+---------
+       1
+(1 row)
+
+SELECT 1 INT;
+ int 
+-----
+   1
+(1 row)
+
+SELECT 1 INTEGER;
+ integer 
+---------
+       1
+(1 row)
+
+SELECT 1 INTERNAL;
+ internal 
+----------
+        1
+(1 row)
+
+SELECT 1 INTERVAL;
+ interval 
+----------
+        1
+(1 row)
+
+SELECT 1 INVISIBLE;
+ invisible 
+-----------
+         1
+(1 row)
+
+SELECT 1 INVOKER;
+ invoker 
+---------
+       1
+(1 row)
+
+SELECT 1 IP;
+ ip 
+----
+  1
+(1 row)
+
+SELECT 1 CHECKIDENT;
+ checkident 
+------------
+          1
+(1 row)
+
+SELECT 1 ISOLATION;
+ isolation 
+-----------
+         1
+(1 row)
+
+SELECT 1 JOIN;
+ join 
+------
+    1
+(1 row)
+
+SELECT 1 JSON_EXISTS;
+ json_exists 
+-------------
+           1
+(1 row)
+
+SELECT 1 KEY;
+ key 
+-----
+   1
+(1 row)
+
+SELECT 1 KEYATH;
+ keyath 
+--------
+      1
+(1 row)
+
+SELECT 1 KEY_STORE;
+ key_store 
+-----------
+         1
+(1 row)
+
+SELECT 1 KILL;
+ kill 
+------
+    1
+(1 row)
+
+SELECT 1 LABEL;
+ label 
+-------
+     1
+(1 row)
+
+SELECT 1 LANGUAGE;
+ language 
+----------
+        1
+(1 row)
+
+SELECT 1 LARGE;
+ large 
+-------
+     1
+(1 row)
+
+SELECT 1 LAST;
+ last 
+------
+    1
+(1 row)
+
+SELECT 1 LATERAL;
+ lateral 
+---------
+       1
+(1 row)
+
+SELECT 1 LC_COLLATE;
+ lc_collate 
+------------
+          1
+(1 row)
+
+SELECT 1 LC_CTYPE;
+ lc_ctype 
+----------
+        1
+(1 row)
+
+SELECT 1 LEADING;
+ leading 
+---------
+       1
+(1 row)
+
+SELECT 1 LEAKPROOF;
+ leakproof 
+-----------
+         1
+(1 row)
+
+SELECT 1 LEAST;
+ least 
+-------
+     1
+(1 row)
+
+SELECT 1 LEFT;
+ left 
+------
+    1
+(1 row)
+
+SELECT 1 LESS;
+ less 
+------
+    1
+(1 row)
+
+SELECT 1 LEVEL;
+ level 
+-------
+     1
+(1 row)
+
+SELECT 1 LIKE;
+ like 
+------
+    1
+(1 row)
+
+SELECT 1 LINES;
+ lines 
+-------
+     1
+(1 row)
+
+SELECT 1 LIST;
+ list 
+------
+    1
+(1 row)
+
+SELECT 1 LISTEN;
+ listen 
+--------
+      1
+(1 row)
+
+SELECT 1 LOAD;
+ load 
+------
+    1
+(1 row)
+
+SELECT 1 LOCAL;
+ local 
+-------
+     1
+(1 row)
+
+SELECT 1 LOCALTIME;
+ localtime 
+-----------
+         1
+(1 row)
+
+SELECT 1 LOCALTIMESTAMP;
+ localtimestamp 
+----------------
+              1
+(1 row)
+
+SELECT 1 LOCATION;
+ location 
+----------
+        1
+(1 row)
+
+SELECT 1 LOCK;
+ lock 
+------
+    1
+(1 row)
+
+SELECT 1 LOCKED;
+ locked 
+--------
+      1
+(1 row)
+
+SELECT 1 LOG;
+ log 
+-----
+   1
+(1 row)
+
+SELECT 1 LOGGING;
+ logging 
+---------
+       1
+(1 row)
+
+SELECT 1 LOGIN_ANY;
+ login_any 
+-----------
+         1
+(1 row)
+
+SELECT 1 LOGIN_FAILURE;
+ login_failure 
+---------------
+             1
+(1 row)
+
+SELECT 1 LOGIN_SUCCESS;
+ login_success 
+---------------
+             1
+(1 row)
+
+SELECT 1 LOGOUT;
+ logout 
+--------
+      1
+(1 row)
+
+SELECT 1 LOOP;
+ loop 
+------
+    1
+(1 row)
+
+SELECT 1 MAP;
+ map 
+-----
+   1
+(1 row)
+
+SELECT 1 MAPPING;
+ mapping 
+---------
+       1
+(1 row)
+
+SELECT 1 MASKING;
+ masking 
+---------
+       1
+(1 row)
+
+SELECT 1 MASTER;
+ master 
+--------
+      1
+(1 row)
+
+SELECT 1 MATCH;
+ match 
+-------
+     1
+(1 row)
+
+SELECT 1 MATCHED;
+ matched 
+---------
+       1
+(1 row)
+
+SELECT 1 MATERIALIZED;
+ materialized 
+--------------
+            1
+(1 row)
+
+SELECT 1 MAXEXTENTS;
+ maxextents 
+------------
+          1
+(1 row)
+
+SELECT 1 MAXSIZE;
+ maxsize 
+---------
+       1
+(1 row)
+
+SELECT 1 MAXTRANS;
+ maxtrans 
+----------
+        1
+(1 row)
+
+SELECT 1 MAXVALUE;
+ maxvalue 
+----------
+        1
+(1 row)
+
+SELECT 1 MEMBER;
+ member 
+--------
+      1
+(1 row)
+
+SELECT 1 MERGE;
+ merge 
+-------
+     1
+(1 row)
+
+SELECT 1 MESSAGE_TEXT;
+ message_text 
+--------------
+            1
+(1 row)
+
+SELECT 1 METHOD;
+ method 
+--------
+      1
+(1 row)
+
+SELECT 1 MINEXTENTS;
+ minextents 
+------------
+          1
+(1 row)
+
+SELECT 1 MINUTE_SECOND;
+ minute_second 
+---------------
+             1
+(1 row)
+
+SELECT 1 MINVALUE;
+ minvalue 
+----------
+        1
+(1 row)
+
+SELECT 1 MODE;
+ mode 
+------
+    1
+(1 row)
+
+SELECT 1 MODEL;
+ model 
+-------
+     1
+(1 row)
+
+SELECT 1 MODIFY;
+ modify 
+--------
+      1
+(1 row)
+
+SELECT 1 MOVE;
+ move 
+------
+    1
+(1 row)
+
+SELECT 1 MOVEMENT;
+ movement 
+----------
+        1
+(1 row)
+
+SELECT 1 MYSQL_ERRNO;
+ mysql_errno 
+-------------
+           1
+(1 row)
+
+SELECT 1 NAMES;
+ names 
+-------
+     1
+(1 row)
+
+SELECT 1 NAN;
+ nan 
+-----
+   1
+(1 row)
+
+SELECT 1 NATIONAL;
+ national 
+----------
+        1
+(1 row)
+
+SELECT 1 NATURAL;
+ natural 
+---------
+       1
+(1 row)
+
+SELECT 1 NCHAR;
+ nchar 
+-------
+     1
+(1 row)
+
+SELECT 1 NEXT;
+ next 
+------
+    1
+(1 row)
+
+SELECT 1 NO;
+ no 
+----
+  1
+(1 row)
+
+SELECT 1 NOCOMPRESS;
+ nocompress 
+------------
+          1
+(1 row)
+
+SELECT 1 NOCYCLE;
+ nocycle 
+---------
+       1
+(1 row)
+
+SELECT 1 NODE;
+ node 
+------
+    1
+(1 row)
+
+SELECT 1 NOLOGGING;
+ nologging 
+-----------
+         1
+(1 row)
+
+SELECT 1 NOMAXVALUE;
+ nomaxvalue 
+------------
+          1
+(1 row)
+
+SELECT 1 NOMINVALUE;
+ nominvalue 
+------------
+          1
+(1 row)
+
+SELECT 1 TSQL_NONCLUSTERED;
+ tsql_nonclustered 
+-------------------
+                 1
+(1 row)
+
+SELECT 1 NONE;
+ none 
+------
+    1
+(1 row)
+
+SELECT 1 NOTHING;
+ nothing 
+---------
+       1
+(1 row)
+
+SELECT 1 NOTIFY;
+ notify 
+--------
+      1
+(1 row)
+
+SELECT 1 NOVALIDATE;
+ novalidate 
+------------
+          1
+(1 row)
+
+SELECT 1 NOWAIT;
+ nowait 
+--------
+      1
+(1 row)
+
+SELECT 1 NTH_VALUE;
+ nth_value 
+-----------
+         1
+(1 row)
+
+SELECT 1 NULL;
+ null 
+------
+    1
+(1 row)
+
+SELECT 1 NULLCOLS;
+ nullcols 
+----------
+        1
+(1 row)
+
+SELECT 1 NULLIF;
+ nullif 
+--------
+      1
+(1 row)
+
+SELECT 1 NULLS;
+ nulls 
+-------
+     1
+(1 row)
+
+SELECT 1 NUMBER;
+ number 
+--------
+      1
+(1 row)
+
+SELECT 1 NUMERIC;
+ numeric 
+---------
+       1
+(1 row)
+
+SELECT 1 NUMSTR;
+ numstr 
+--------
+      1
+(1 row)
+
+SELECT 1 NVARCHAR;
+ nvarchar 
+----------
+        1
+(1 row)
+
+SELECT 1 NVARCHAR2;
+ nvarchar2 
+-----------
+         1
+(1 row)
+
+SELECT 1 NVL;
+ nvl 
+-----
+   1
+(1 row)
+
+SELECT 1 OBJECT;
+ object 
+--------
+      1
+(1 row)
+
+SELECT 1 OF;
+ of 
+----
+  1
+(1 row)
+
+SELECT 1 OFF;
+ off 
+-----
+   1
+(1 row)
+
+SELECT 1 OIDS;
+ oids 
+------
+    1
+(1 row)
+
+SELECT 1 ONLY;
+ only 
+------
+    1
+(1 row)
+
+SELECT 1 OPERATOR;
+ operator 
+----------
+        1
+(1 row)
+
+SELECT 1 OPTIMIZATION;
+ optimization 
+--------------
+            1
+(1 row)
+
+SELECT 1 OPTION;
+ option 
+--------
+      1
+(1 row)
+
+SELECT 1 OPTIONALLY;
+ optionally 
+------------
+          1
+(1 row)
+
+SELECT 1 OPTIONS;
+ options 
+---------
+       1
+(1 row)
+
+SELECT 1 OR;
+ or 
+----
+  1
+(1 row)
+
+SELECT 1 OUT;
+ out 
+-----
+   1
+(1 row)
+
+SELECT 1 OUTER;
+ outer 
+-------
+     1
+(1 row)
+
+SELECT 1 OUTFILE;
+ outfile 
+---------
+       1
+(1 row)
+
+SELECT 1 OVERLAY;
+ overlay 
+---------
+       1
+(1 row)
+
+SELECT 1 OWNED;
+ owned 
+-------
+     1
+(1 row)
+
+SELECT 1 OWNER;
+ owner 
+-------
+     1
+(1 row)
+
+SELECT 1 PACKAGE;
+ package 
+---------
+       1
+(1 row)
+
+SELECT 1 PACKAGES;
+ packages 
+----------
+        1
+(1 row)
+
+SELECT 1 PARALLEL_ENABLE;
+ parallel_enable 
+-----------------
+               1
+(1 row)
+
+SELECT 1 PARSER;
+ parser 
+--------
+      1
+(1 row)
+
+SELECT 1 PARTIAL;
+ partial 
+---------
+       1
+(1 row)
+
+SELECT 1 PARTITION;
+ partition 
+-----------
+         1
+(1 row)
+
+SELECT 1 PARTITIONS;
+ partitions 
+------------
+          1
+(1 row)
+
+SELECT 1 PASSING;
+ passing 
+---------
+       1
+(1 row)
+
+SELECT 1 PASSWORD;
+ password 
+----------
+        1
+(1 row)
+
+SELECT 1 PCTFREE;
+ pctfree 
+---------
+       1
+(1 row)
+
+SELECT 1 PER;
+ per 
+-----
+   1
+(1 row)
+
+SELECT 1 TSQLERCENT;
+ tsqlercent 
+------------
+          1
+(1 row)
+
+SELECT 1 PERFORMANCE;
+ performance 
+-------------
+           1
+(1 row)
+
+SELECT 1 PERM;
+ perm 
+------
+    1
+(1 row)
+
+SELECT 1 TSQLERSISTED;
+ tsqlersisted 
+--------------
+            1
+(1 row)
+
+SELECT 1 PIPELINED;
+ pipelined 
+-----------
+         1
+(1 row)
+
+SELECT 1 PLACING;
+ placing 
+---------
+       1
+(1 row)
+
+SELECT 1 PLAN;
+ plan 
+------
+    1
+(1 row)
+
+SELECT 1 PLANS;
+ plans 
+-------
+     1
+(1 row)
+
+SELECT 1 POLICY;
+ policy 
+--------
+      1
+(1 row)
+
+SELECT 1 POOL;
+ pool 
+------
+    1
+(1 row)
+
+SELECT 1 POSITION;
+ position 
+----------
+        1
+(1 row)
+
+SELECT 1 PRECEDES;
+ precedes 
+----------
+        1
+(1 row)
+
+SELECT 1 PRECEDING;
+ preceding 
+-----------
+         1
+(1 row)
+
+SELECT 1 PREDICT;
+ predict 
+---------
+       1
+(1 row)
+
+SELECT 1 PREFERRED;
+ preferred 
+-----------
+         1
+(1 row)
+
+SELECT 1 PREFIX;
+ prefix 
+--------
+      1
+(1 row)
+
+SELECT 1 PREPARE;
+ prepare 
+---------
+       1
+(1 row)
+
+SELECT 1 PREPARED;
+ prepared 
+----------
+        1
+(1 row)
+
+SELECT 1 PRESERVE;
+ preserve 
+----------
+        1
+(1 row)
+
+SELECT 1 PRIMARY;
+ primary 
+---------
+       1
+(1 row)
+
+SELECT 1 PRIOR;
+ prior 
+-------
+     1
+(1 row)
+
+SELECT 1 PRIORER;
+ priorer 
+---------
+       1
+(1 row)
+
+SELECT 1 PRIVATE;
+ private 
+---------
+       1
+(1 row)
+
+SELECT 1 PRIVILEGE;
+ privilege 
+-----------
+         1
+(1 row)
+
+SELECT 1 PRIVILEGES;
+ privileges 
+------------
+          1
+(1 row)
+
+SELECT 1 PROCEDURAL;
+ procedural 
+------------
+          1
+(1 row)
+
+SELECT 1 PROCEDURE;
+ procedure 
+-----------
+         1
+(1 row)
+
+SELECT 1 PROFILE;
+ profile 
+---------
+       1
+(1 row)
+
+SELECT 1 PUBLICATION;
+ publication 
+-------------
+           1
+(1 row)
+
+SELECT 1 PUBLISH;
+ publish 
+---------
+       1
+(1 row)
+
+SELECT 1 PURGE;
+ purge 
+-------
+     1
+(1 row)
+
+SELECT 1 QUERY;
+ query 
+-------
+     1
+(1 row)
+
+SELECT 1 QUOTE;
+ quote 
+-------
+     1
+(1 row)
+
+SELECT 1 RANDOMIZED;
+ randomized 
+------------
+          1
+(1 row)
+
+SELECT 1 RANGE;
+ range 
+-------
+     1
+(1 row)
+
+SELECT 1 RATIO;
+ ratio 
+-------
+     1
+(1 row)
+
+SELECT 1 RAW;
+ raw 
+-----
+   1
+(1 row)
+
+SELECT 1 READ;
+ read 
+------
+    1
+(1 row)
+
+SELECT 1 REAL;
+ real 
+------
+    1
+(1 row)
+
+SELECT 1 REASSIGN;
+ reassign 
+----------
+        1
+(1 row)
+
+SELECT 1 REBUILD;
+ rebuild 
+---------
+       1
+(1 row)
+
+SELECT 1 RECHECK;
+ recheck 
+---------
+       1
+(1 row)
+
+SELECT 1 RECURSIVE;
+ recursive 
+-----------
+         1
+(1 row)
+
+SELECT 1 RECYCLEBIN;
+ recyclebin 
+------------
+          1
+(1 row)
+
+SELECT 1 REDISANYVALUE;
+ redisanyvalue 
+---------------
+             1
+(1 row)
+
+SELECT 1 REF;
+ ref 
+-----
+   1
+(1 row)
+
+SELECT 1 REFERENCES;
+ references 
+------------
+          1
+(1 row)
+
+SELECT 1 REFRESH;
+ refresh 
+---------
+       1
+(1 row)
+
+SELECT 1 REINDEX;
+ reindex 
+---------
+       1
+(1 row)
+
+SELECT 1 REJECT;
+ reject 
+--------
+      1
+(1 row)
+
+SELECT 1 RELATIVE;
+ relative 
+----------
+        1
+(1 row)
+
+SELECT 1 RELEASE;
+ release 
+---------
+       1
+(1 row)
+
+SELECT 1 RELOPTIONS;
+ reloptions 
+------------
+          1
+(1 row)
+
+SELECT 1 REMOTE;
+ remote 
+--------
+      1
+(1 row)
+
+SELECT 1 REMOVE;
+ remove 
+--------
+      1
+(1 row)
+
+SELECT 1 RENAME;
+ rename 
+--------
+      1
+(1 row)
+
+SELECT 1 REPEAT;
+ repeat 
+--------
+      1
+(1 row)
+
+SELECT 1 REPEATABLE;
+ repeatable 
+------------
+          1
+(1 row)
+
+SELECT 1 REPLACE;
+ replace 
+---------
+       1
+(1 row)
+
+SELECT 1 REPLICA;
+ replica 
+---------
+       1
+(1 row)
+
+SELECT 1 RESET;
+ reset 
+-------
+     1
+(1 row)
+
+SELECT 1 RESIZE;
+ resize 
+--------
+      1
+(1 row)
+
+SELECT 1 RESOURCE;
+ resource 
+----------
+        1
+(1 row)
+
+SELECT 1 RESPECT;
+ respect 
+---------
+       1
+(1 row)
+
+SELECT 1 RESTART;
+ restart 
+---------
+       1
+(1 row)
+
+SELECT 1 RESTRICT;
+ restrict 
+----------
+        1
+(1 row)
+
+SELECT 1 RESULT;
+ result 
+--------
+      1
+(1 row)
+
+SELECT 1 RETURN;
+ return 
+--------
+      1
+(1 row)
+
+SELECT 1 RETURNED_SQLSTATE;
+ returned_sqlstate 
+-------------------
+                 1
+(1 row)
+
+SELECT 1 RETURNS;
+ returns 
+---------
+       1
+(1 row)
+
+SELECT 1 REUSE;
+ reuse 
+-------
+     1
+(1 row)
+
+SELECT 1 REVOKE;
+ revoke 
+--------
+      1
+(1 row)
+
+SELECT 1 RIGHT;
+ right 
+-------
+     1
+(1 row)
+
+SELECT 1 ROLE;
+ role 
+------
+    1
+(1 row)
+
+SELECT 1 ROLES;
+ roles 
+-------
+     1
+(1 row)
+
+SELECT 1 ROLLBACK;
+ rollback 
+----------
+        1
+(1 row)
+
+SELECT 1 ROLLUP;
+ rollup 
+--------
+      1
+(1 row)
+
+SELECT 1 ROTATE;
+ rotate 
+--------
+      1
+(1 row)
+
+SELECT 1 ROTATION;
+ rotation 
+----------
+        1
+(1 row)
+
+SELECT 1 ROW;
+ row 
+-----
+   1
+(1 row)
+
+SELECT 1 ROW_COUNT;
+ row_count 
+-----------
+         1
+(1 row)
+
+SELECT 1 ROWNUM;
+ rownum 
+--------
+      1
+(1 row)
+
+SELECT 1 ROWS;
+ rows 
+------
+    1
+(1 row)
+
+SELECT 1 ROWTYPE;
+ rowtype 
+---------
+       1
+(1 row)
+
+SELECT 1 RULE;
+ rule 
+------
+    1
+(1 row)
+
+SELECT 1 SAMPLE;
+ sample 
+--------
+      1
+(1 row)
+
+SELECT 1 SAVEPOINT;
+ savepoint 
+-----------
+         1
+(1 row)
+
+SELECT 1 SCHEDULE;
+ schedule 
+----------
+        1
+(1 row)
+
+SELECT 1 SCHEMA;
+ schema 
+--------
+      1
+(1 row)
+
+SELECT 1 SCHEMA_NAME;
+ schema_name 
+-------------
+           1
+(1 row)
+
+SELECT 1 SCROLL;
+ scroll 
+--------
+      1
+(1 row)
+
+SELECT 1 SEARCH;
+ search 
+--------
+      1
+(1 row)
+
+SELECT 1 SECURITY;
+ security 
+----------
+        1
+(1 row)
+
+SELECT 1 SELF;
+ self 
+------
+    1
+(1 row)
+
+SELECT 1 SEPARATOR;
+ separator 
+-----------
+         1
+(1 row)
+
+SELECT 1 SEQUENCE;
+ sequence 
+----------
+        1
+(1 row)
+
+SELECT 1 SEQUENCES;
+ sequences 
+-----------
+         1
+(1 row)
+
+SELECT 1 SERIALIZABLE;
+ serializable 
+--------------
+            1
+(1 row)
+
+SELECT 1 SERVER;
+ server 
+--------
+      1
+(1 row)
+
+SELECT 1 SESSION;
+ session 
+---------
+       1
+(1 row)
+
+SELECT 1 SESSION_USER;
+ session_user 
+--------------
+            1
+(1 row)
+
+SELECT 1 SET;
+ set 
+-----
+   1
+(1 row)
+
+SELECT 1 SETOF;
+ setof 
+-------
+     1
+(1 row)
+
+SELECT 1 SETS;
+ sets 
+------
+    1
+(1 row)
+
+SELECT 1 SHARE;
+ share 
+-------
+     1
+(1 row)
+
+SELECT 1 SHIPPABLE;
+ shippable 
+-----------
+         1
+(1 row)
+
+SELECT 1 SHOW;
+ show 
+------
+    1
+(1 row)
+
+SELECT 1 SHRINK;
+ shrink 
+--------
+      1
+(1 row)
+
+SELECT 1 SHUTDOWN;
+ shutdown 
+----------
+        1
+(1 row)
+
+SELECT 1 SIBLINGS;
+ siblings 
+----------
+        1
+(1 row)
+
+SELECT 1 SIMILAR;
+ similar 
+---------
+       1
+(1 row)
+
+SELECT 1 SIMPLE;
+ simple 
+--------
+      1
+(1 row)
+
+SELECT 1 SIZE;
+ size 
+------
+    1
+(1 row)
+
+SELECT 1 SKIP;
+ skip 
+------
+    1
+(1 row)
+
+SELECT 1 SLAVE;
+ slave 
+-------
+     1
+(1 row)
+
+SELECT 1 SLICE;
+ slice 
+-------
+     1
+(1 row)
+
+SELECT 1 SMALLDATETIME;
+ smalldatetime 
+---------------
+             1
+(1 row)
+
+SELECT 1 SMALLDATETIME_FORMAT;
+ smalldatetime_format 
+----------------------
+                    1
+(1 row)
+
+SELECT 1 SMALLINT;
+ smallint 
+----------
+        1
+(1 row)
+
+SELECT 1 SNAPSHOT;
+ snapshot 
+----------
+        1
+(1 row)
+
+SELECT 1 SOME;
+ some 
+------
+    1
+(1 row)
+
+SELECT 1 SOURCE;
+ source 
+--------
+      1
+(1 row)
+
+SELECT 1 SPACE;
+ space 
+-------
+     1
+(1 row)
+
+SELECT 1 SPECIFICATION;
+ specification 
+---------------
+             1
+(1 row)
+
+SELECT 1 SPILL;
+ spill 
+-------
+     1
+(1 row)
+
+SELECT 1 SPLIT;
+ split 
+-------
+     1
+(1 row)
+
+SELECT 1 SQL;
+ sql 
+-----
+   1
+(1 row)
+
+SELECT 1 STABLE;
+ stable 
+--------
+      1
+(1 row)
+
+SELECT 1 STACKED;
+ stacked 
+---------
+       1
+(1 row)
+
+SELECT 1 STANDALONE;
+ standalone 
+------------
+          1
+(1 row)
+
+SELECT 1 START;
+ start 
+-------
+     1
+(1 row)
+
+SELECT 1 STARTING;
+ starting 
+----------
+        1
+(1 row)
+
+SELECT 1 STARTS;
+ starts 
+--------
+      1
+(1 row)
+
+SELECT 1 STATEMENT;
+ statement 
+-----------
+         1
+(1 row)
+
+SELECT 1 STATEMENT_ID;
+ statement_id 
+--------------
+            1
+(1 row)
+
+SELECT 1 STATIC;
+ static 
+--------
+      1
+(1 row)
+
+SELECT 1 STATISTICS;
+ statistics 
+------------
+          1
+(1 row)
+
+SELECT 1 STDIN;
+ stdin 
+-------
+     1
+(1 row)
+
+SELECT 1 STDOUT;
+ stdout 
+--------
+      1
+(1 row)
+
+SELECT 1 STORAGE;
+ storage 
+---------
+       1
+(1 row)
+
+SELECT 1 STORE;
+ store 
+-------
+     1
+(1 row)
+
+SELECT 1 STORED;
+ stored 
+--------
+      1
+(1 row)
+
+SELECT 1 STRATIFY;
+ stratify 
+----------
+        1
+(1 row)
+
+SELECT 1 STREAM;
+ stream 
+--------
+      1
+(1 row)
+
+SELECT 1 STRICT;
+ strict 
+--------
+      1
+(1 row)
+
+SELECT 1 STRIP;
+ strip 
+-------
+     1
+(1 row)
+
+SELECT 1 SUBCLASS_ORIGIN;
+ subclass_origin 
+-----------------
+               1
+(1 row)
+
+SELECT 1 SUBPARTITION;
+ subpartition 
+--------------
+            1
+(1 row)
+
+SELECT 1 SUBPARTITIONS;
+ subpartitions 
+---------------
+             1
+(1 row)
+
+SELECT 1 SUBSCRIPTION;
+ subscription 
+--------------
+            1
+(1 row)
+
+SELECT 1 SUBSTRING;
+ substring 
+-----------
+         1
+(1 row)
+
+SELECT 1 SYMMETRIC;
+ symmetric 
+-----------
+         1
+(1 row)
+
+SELECT 1 SYNONYM;
+ synonym 
+---------
+       1
+(1 row)
+
+SELECT 1 SYS_REFCURSOR;
+ sys_refcursor 
+---------------
+             1
+(1 row)
+
+SELECT 1 SYSDATE;
+ sysdate 
+---------
+       1
+(1 row)
+
+SELECT 1 SYSID;
+ sysid 
+-------
+     1
+(1 row)
+
+SELECT 1 SYSTEM;
+ system 
+--------
+      1
+(1 row)
+
+SELECT 1 TABLE;
+ table 
+-------
+     1
+(1 row)
+
+SELECT 1 TABLE_NAME;
+ table_name 
+------------
+          1
+(1 row)
+
+SELECT 1 TABLES;
+ tables 
+--------
+      1
+(1 row)
+
+SELECT 1 TABLESAMPLE;
+ tablesample 
+-------------
+           1
+(1 row)
+
+SELECT 1 TABLESPACE;
+ tablespace 
+------------
+          1
+(1 row)
+
+SELECT 1 TEMP;
+ temp 
+------
+    1
+(1 row)
+
+SELECT 1 TEMPLATE;
+ template 
+----------
+        1
+(1 row)
+
+SELECT 1 TEMPORARY;
+ temporary 
+-----------
+         1
+(1 row)
+
+SELECT 1 TERMINATED;
+ terminated 
+------------
+          1
+(1 row)
+
+SELECT 1 TEXT;
+ text 
+------
+    1
+(1 row)
+
+SELECT 1 THAN;
+ than 
+------
+    1
+(1 row)
+
+SELECT 1 THEN;
+ then 
+------
+    1
+(1 row)
+
+SELECT 1 TIES;
+ ties 
+------
+    1
+(1 row)
+
+SELECT 1 TIME;
+ time 
+------
+    1
+(1 row)
+
+SELECT 1 TIME_FORMAT;
+ time_format 
+-------------
+           1
+(1 row)
+
+SELECT 1 TIMECAPSULE;
+ timecapsule 
+-------------
+           1
+(1 row)
+
+SELECT 1 TIMESTAMP;
+ timestamp 
+-----------
+         1
+(1 row)
+
+SELECT 1 TIMESTAMP_FORMAT;
+ timestamp_format 
+------------------
+                1
+(1 row)
+
+SELECT 1 TIMESTAMPDIFF;
+ timestampdiff 
+---------------
+             1
+(1 row)
+
+SELECT 1 TIMEZONE_HOUR;
+ timezone_hour 
+---------------
+             1
+(1 row)
+
+SELECT 1 TIMEZONE_MINUTE;
+ timezone_minute 
+-----------------
+               1
+(1 row)
+
+SELECT 1 TINYINT;
+ tinyint 
+---------
+       1
+(1 row)
+
+SELECT 1 TSQL_TOP;
+ tsql_top 
+----------
+        1
+(1 row)
+
+SELECT 1 TRAILING;
+ trailing 
+----------
+        1
+(1 row)
+
+SELECT 1 TRANSACTION;
+ transaction 
+-------------
+           1
+(1 row)
+
+SELECT 1 TRANSFORM;
+ transform 
+-----------
+         1
+(1 row)
+
+SELECT 1 TREAT;
+ treat 
+-------
+     1
+(1 row)
+
+SELECT 1 TRIGGER;
+ trigger 
+---------
+       1
+(1 row)
+
+SELECT 1 TRIM;
+ trim 
+------
+    1
+(1 row)
+
+SELECT 1 TRUE;
+ true 
+------
+    1
+(1 row)
+
+SELECT 1 TRUNCATE;
+ truncate 
+----------
+        1
+(1 row)
+
+SELECT 1 TRUSTED;
+ trusted 
+---------
+       1
+(1 row)
+
+SELECT 1 TSFIELD;
+ tsfield 
+---------
+       1
+(1 row)
+
+SELECT 1 TSTAG;
+ tstag 
+-------
+     1
+(1 row)
+
+SELECT 1 TSTIME;
+ tstime 
+--------
+      1
+(1 row)
+
+SELECT 1 TYPES;
+ types 
+-------
+     1
+(1 row)
+
+SELECT 1 UNBOUNDED;
+ unbounded 
+-----------
+         1
+(1 row)
+
+SELECT 1 UNCOMMITTED;
+ uncommitted 
+-------------
+           1
+(1 row)
+
+SELECT 1 UNDER;
+ under 
+-------
+     1
+(1 row)
+
+SELECT 1 UNENCRYPTED;
+ unencrypted 
+-------------
+           1
+(1 row)
+
+SELECT 1 UNIMCSTORED;
+ unimcstored 
+-------------
+           1
+(1 row)
+
+SELECT 1 UNIQUE;
+ unique 
+--------
+      1
+(1 row)
+
+SELECT 1 UNKNOWN;
+ unknown 
+---------
+       1
+(1 row)
+
+SELECT 1 UNLIMITED;
+ unlimited 
+-----------
+         1
+(1 row)
+
+SELECT 1 UNLISTEN;
+ unlisten 
+----------
+        1
+(1 row)
+
+SELECT 1 UNLOCK;
+ unlock 
+--------
+      1
+(1 row)
+
+SELECT 1 UNLOGGED;
+ unlogged 
+----------
+        1
+(1 row)
+
+SELECT 1 UNTIL;
+ until 
+-------
+     1
+(1 row)
+
+SELECT 1 UNUSABLE;
+ unusable 
+----------
+        1
+(1 row)
+
+SELECT 1 UPDATE;
+ update 
+--------
+      1
+(1 row)
+
+SELECT 1 USE;
+ use 
+-----
+   1
+(1 row)
+
+SELECT 1 USEEOF;
+ useeof 
+--------
+      1
+(1 row)
+
+SELECT 1 USER;
+ user 
+------
+    1
+(1 row)
+
+SELECT 1 USING;
+ using 
+-------
+     1
+(1 row)
+
+SELECT 1 VACUUM;
+ vacuum 
+--------
+      1
+(1 row)
+
+SELECT 1 VALID;
+ valid 
+-------
+     1
+(1 row)
+
+SELECT 1 VALIDATE;
+ validate 
+----------
+        1
+(1 row)
+
+SELECT 1 VALIDATION;
+ validation 
+------------
+          1
+(1 row)
+
+SELECT 1 VALIDATOR;
+ validator 
+-----------
+         1
+(1 row)
+
+SELECT 1 VALUES;
+ values 
+--------
+      1
+(1 row)
+
+SELECT 1 VARCHAR;
+ varchar 
+---------
+       1
+(1 row)
+
+SELECT 1 VARCHAR2;
+ varchar2 
+----------
+        1
+(1 row)
+
+SELECT 1 VARIABLES;
+ variables 
+-----------
+         1
+(1 row)
+
+SELECT 1 VARIADIC;
+ variadic 
+----------
+        1
+(1 row)
+
+SELECT 1 VARRAY;
+ varray 
+--------
+      1
+(1 row)
+
+SELECT 1 VCGROUP;
+ vcgroup 
+---------
+       1
+(1 row)
+
+SELECT 1 VERBOSE;
+ verbose 
+---------
+       1
+(1 row)
+
+SELECT 1 VERIFY;
+ verify 
+--------
+      1
+(1 row)
+
+SELECT 1 VERSION;
+ version 
+---------
+       1
+(1 row)
+
+SELECT 1 VIEW;
+ view 
+------
+    1
+(1 row)
+
+SELECT 1 VISIBLE;
+ visible 
+---------
+       1
+(1 row)
+
+SELECT 1 VOLATILE;
+ volatile 
+----------
+        1
+(1 row)
+
+SELECT 1 WAIT;
+ wait 
+------
+    1
+(1 row)
+
+SELECT 1 WARNINGS;
+ warnings 
+----------
+        1
+(1 row)
+
+SELECT 1 WEAK;
+ weak 
+------
+    1
+(1 row)
+
+SELECT 1 WHEN;
+ when 
+------
+    1
+(1 row)
+
+SELECT 1 WHILE;
+ while 
+-------
+     1
+(1 row)
+
+SELECT 1 WHITESPACE;
+ whitespace 
+------------
+          1
+(1 row)
+
+SELECT 1 WORK;
+ work 
+------
+    1
+(1 row)
+
+SELECT 1 WORKLOAD;
+ workload 
+----------
+        1
+(1 row)
+
+SELECT 1 WRAPPER;
+ wrapper 
+---------
+       1
+(1 row)
+
+SELECT 1 WRITE;
+ write 
+-------
+     1
+(1 row)
+
+SELECT 1 XMLATTRIBUTES;
+ xmlattributes 
+---------------
+             1
+(1 row)
+
+SELECT 1 XMLCONCAT;
+ xmlconcat 
+-----------
+         1
+(1 row)
+
+SELECT 1 XMLELEMENT;
+ xmlelement 
+------------
+          1
+(1 row)
+
+SELECT 1 XMLEXISTS;
+ xmlexists 
+-----------
+         1
+(1 row)
+
+SELECT 1 XMLFOREST;
+ xmlforest 
+-----------
+         1
+(1 row)
+
+SELECT 1 XMLPARSE;
+ xmlparse 
+----------
+        1
+(1 row)
+
+SELECT 1 XMLPI;
+ xmlpi 
+-------
+     1
+(1 row)
+
+SELECT 1 XMLROOT;
+ xmlroot 
+---------
+       1
+(1 row)
+
+SELECT 1 XMLSERIALIZE;
+ xmlserialize 
+--------------
+            1
+(1 row)
+
+SELECT 1 YEAR_MONTH;
+ year_month 
+------------
+          1
+(1 row)
+
+SELECT 1 YES;
+ yes 
+-----
+   1
+(1 row)
+
+SELECT 1 ZONE;
+ zone 
+------
+    1
+(1 row)
+
+reset current_schema;
+drop schema if exists test_ddl_and_dml cascade;

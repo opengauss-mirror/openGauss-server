@@ -3004,6 +3004,12 @@ typedef struct knl_u_hook_context {
     void *enableProcedureExecutementHook;
     void *plsqlCompileHook;
     void *checkVaildUserHook;
+    void *fetchStatusHook;
+    void *rowcountHook;
+    void *invokePreDropColumnHook;
+    void *invokePreAddConstraintsHook;
+    void *invokeTransformSelectForLimitHook;
+    void *recomputeLimitsHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

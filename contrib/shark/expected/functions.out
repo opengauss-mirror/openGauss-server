@@ -1,0 +1,466 @@
+create schema functions_test;
+set search_path = 'functions_test';
+-- test @@rowcount
+create table t1 (c1 int);
+select @@rowcount;
+ rowcount 
+----------
+        0
+(1 row)
+
+insert into t1 values(generate_series(1,10));
+select @@rowcount;
+ rowcount 
+----------
+       10
+(1 row)
+
+delete t1 where c1 in (1,3,5,7);
+select @@rowcount;
+ rowcount 
+----------
+        4
+(1 row)
+
+update t1 set c1 = 12 where c1 in (2,4);
+select @@rowcount;
+ rowcount 
+----------
+        2
+(1 row)
+
+select * from t1; 
+ c1 
+----
+  6
+  8
+  9
+ 10
+ 12
+ 12
+(6 rows)
+
+select @@rowcount;
+ rowcount 
+----------
+        6
+(1 row)
+
+select count(*) from t1;
+ count 
+-------
+     6
+(1 row)
+
+select @@rowcount;
+ rowcount 
+----------
+        1
+(1 row)
+
+do $$
+begin
+execute 'select * from t1';
+RAISE NOTICE '@@rowcount: %', @@rowcount;
+end $$;
+NOTICE:  @@rowcount: 6
+set enable_set_variable_b_format to on;
+select @@rowcount;
+ rowcount 
+----------
+        0
+(1 row)
+
+reset enable_set_variable_b_format;
+select @@rowcount;
+ rowcount 
+----------
+        0
+(1 row)
+
+begin;
+declare c1 cursor for select * from t1;
+select @@rowcount;
+ rowcount 
+----------
+        0
+(1 row)
+
+fetch next from c1;
+ c1 
+----
+  6
+(1 row)
+
+select @@rowcount;
+ rowcount 
+----------
+        1
+(1 row)
+
+end;
+select abcd from t1; -- expect error 
+ERROR:  column "abcd" does not exist
+LINE 1: select abcd from t1;
+               ^
+CONTEXT:  referenced column: abcd
+select @@rowcount;
+ rowcount 
+----------
+        0
+(1 row)
+
+-- rowcount_big()
+drop table t1;
+select rowcount_big();
+ rowcount_big 
+--------------
+            0
+(1 row)
+
+create table t1 (c1 int);
+select rowcount_big();
+ rowcount_big 
+--------------
+            0
+(1 row)
+
+insert into t1 values(generate_series(1,10));
+select rowcount_big();
+ rowcount_big 
+--------------
+           10
+(1 row)
+
+delete t1 where c1 in (1,3,5,7);
+select rowcount_big();
+ rowcount_big 
+--------------
+            4
+(1 row)
+
+update t1 set c1 = 12 where c1 in (2,4);
+select rowcount_big();
+ rowcount_big 
+--------------
+            2
+(1 row)
+
+select * from t1; 
+ c1 
+----
+  6
+  8
+  9
+ 10
+ 12
+ 12
+(6 rows)
+
+select rowcount_big();
+ rowcount_big 
+--------------
+            6
+(1 row)
+
+select count(*) from t1;
+ count 
+-------
+     6
+(1 row)
+
+select rowcount_big();
+ rowcount_big 
+--------------
+            1
+(1 row)
+
+set enable_set_variable_b_format to on;
+select rowcount_big();
+ rowcount_big 
+--------------
+            0
+(1 row)
+
+reset enable_set_variable_b_format;
+select rowcount_big();
+ rowcount_big 
+--------------
+            0
+(1 row)
+
+begin;
+declare c1 cursor for select * from t1;
+select rowcount_big();
+ rowcount_big 
+--------------
+            0
+(1 row)
+
+fetch next from c1;
+ c1 
+----
+  6
+(1 row)
+
+select rowcount_big();
+ rowcount_big 
+--------------
+            1
+(1 row)
+
+end;
+select abcd from t1; -- expect error 
+ERROR:  column "abcd" does not exist
+LINE 1: select abcd from t1;
+               ^
+CONTEXT:  referenced column: abcd
+select rowcount_big();
+ rowcount_big 
+--------------
+            0
+(1 row)
+
+-- bypass usecases
+set enable_seqscan to off;
+set enable_bitmapscan to off;
+create index i1 on t1(c1);
+explain (costs off) select * from t1;
+           QUERY PLAN           
+--------------------------------
+ [Bypass]
+ Index Only Scan using i1 on t1
+(2 rows)
+
+select @@rowcount;
+ rowcount 
+----------
+        0
+(1 row)
+
+select * from t1;
+ c1 
+----
+  6
+  8
+  9
+ 10
+ 12
+ 12
+(6 rows)
+
+select @@rowcount;
+ rowcount 
+----------
+        6
+(1 row)
+
+explain (costs off) insert into t1 values(20);
+  QUERY PLAN  
+--------------
+ [Bypass]
+ Insert on t1
+   ->  Result
+(3 rows)
+
+insert into t1 values(generate_series(20,26));
+select @@rowcount;
+ rowcount 
+----------
+        7
+(1 row)
+
+explain (costs off) delete from t1 where c1 < 10;
+           QUERY PLAN            
+---------------------------------
+ [Bypass]
+ Delete on t1
+   ->  Index Scan using i1 on t1
+         Index Cond: (c1 < 10)
+(4 rows)
+
+delete from t1 where c1 < 10;
+select @@rowcount;
+ rowcount 
+----------
+        3
+(1 row)
+
+explain (costs off) update t1 set c1 = 30 where c1 > 21;
+           QUERY PLAN            
+---------------------------------
+ [Bypass]
+ Update on t1
+   ->  Index Scan using i1 on t1
+         Index Cond: (c1 > 21)
+(4 rows)
+
+update t1 set c1 = 30 where c1 > 21;
+select @@rowcount;
+ rowcount 
+----------
+        5
+(1 row)
+
+reset enable_seqscan;
+reset enable_bitmapscan;
+-- @@spid
+select @@spid;
+--?.* 
+--?.*
+--?.*
+(1 row)
+
+-- @@fetch_status
+-- single cursor
+begin;
+cursor c1 for select * from t1;
+fetch next from c1;
+ c1 
+----
+ 10
+(1 row)
+
+select @@fetch_status;
+ fetch_status 
+--------------
+            0
+(1 row)
+
+fetch next from c1;
+ c1 
+----
+ 12
+(1 row)
+
+select @@fetch_status;
+ fetch_status 
+--------------
+            0
+(1 row)
+
+fetch last from c1;
+ c1 
+----
+ 30
+(1 row)
+
+select @@fetch_status;
+ fetch_status 
+--------------
+            0
+(1 row)
+
+fetch next from c2;	-- expect error
+ERROR:  cursor "c2" does not exist
+select @@fetch_status;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+end;
+-- multi cursors
+begin;
+cursor c1 for select * from t1;
+cursor c2 for select * from t1;
+fetch next from c1;
+ c1 
+----
+ 10
+(1 row)
+
+select @@fetch_status;
+ fetch_status 
+--------------
+            0
+(1 row)
+
+fetch next from c2;
+ c1 
+----
+ 10
+(1 row)
+
+select @@fetch_status;
+ fetch_status 
+--------------
+            0
+(1 row)
+
+fetch last from c1;
+ c1 
+----
+ 30
+(1 row)
+
+select @@fetch_status;
+ fetch_status 
+--------------
+            0
+(1 row)
+
+fetch next from c2;
+ c1 
+----
+ 12
+(1 row)
+
+select @@fetch_status;
+ fetch_status 
+--------------
+            0
+(1 row)
+
+end;
+-- pl/pgsql usecases
+declare
+rowcount int;
+rowcount_big bigint;
+spid bigint;
+begin
+spid := @@spid;
+RAISE NOTICE '@@spid: %', spid;
+execute 'select * from t1';
+rowcount := @@rowcount;
+RAISE NOTICE '@@rowcount: %', rowcount;
+execute 'select * from t1';
+rowcount_big := rowcount_big();
+RAISE NOTICE '@@rowcount_big: %', rowcount_big;
+end;
+/
+--?.*
+NOTICE:  @@rowcount: 10
+NOTICE:  @@rowcount_big: 10
+-- pl/tsql usecases
+CREATE OR REPLACE FUNCTION test_pltsql RETURNS INT AS
+$$
+declare
+rowcount int;
+rowcount_big bigint;
+spid bigint;
+begin
+spid := @@spid;
+RAISE NOTICE '@@spid: %', spid;
+execute 'select * from t1';
+rowcount := @@rowcount;
+RAISE NOTICE '@@rowcount: %', rowcount;
+execute 'select * from t1';
+rowcount_big := rowcount_big();
+RAISE NOTICE '@@rowcount_big: %', rowcount_big;
+return 0;
+end;
+$$
+LANGUAGE 'pltsql';
+select test_pltsql();
+--?.*
+CONTEXT:  referenced column: test_pltsql
+NOTICE:  @@rowcount: 10
+CONTEXT:  referenced column: test_pltsql
+NOTICE:  @@rowcount_big: 10
+CONTEXT:  referenced column: test_pltsql
+ test_pltsql 
+-------------
+           0
+(1 row)
+
+drop schema functions_test cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table t1
+drop cascades to function test_pltsql()
