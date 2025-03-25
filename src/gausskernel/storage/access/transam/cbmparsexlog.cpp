@@ -1289,7 +1289,10 @@ static bool ParseXlogIntoTaskFluent(bool isRecEnd) {
                 }
             }
             /* By far, this thread must find nothing to do, just clean resource. */
-            ResetCBMReaderStatus(pg_atomic_read_u32(&head->CBMRecord.threadIndex));
+            if (pg_atomic_read_u32(&head->CBMRecord.threadIndex) != INVAILD_CBM_THREAD_NUM) {
+                /* We can only reset the correct thread status record. */
+                ResetCBMReaderStatus(pg_atomic_read_u32(&head->CBMRecord.threadIndex)); 
+            }
             CBMQueuePopFront();
             head = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next;
             continue;
