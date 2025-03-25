@@ -186,6 +186,50 @@ drop table Employees_no;
 drop table Employees_mu;
 drop table Employees_mi;
 
+
+-- permission
+ CREATE TABLE Employees (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+insert into Employees(Name) values ('wangwu');
+insert into Employees(Name) values ('heliu');
+
+
+
+create user normalrole_user_001 password 'Gauss@123';
+create user normalrole_user_002 password 'Gauss@123';
+create user normalrole_user_003 password 'Gauss@123';
+GRANT USAGE ON SCHEMA shark_test_dbcc TO normalrole_user_001;
+GRANT USAGE ON SCHEMA shark_test_dbcc TO normalrole_user_002;
+GRANT USAGE ON SCHEMA shark_test_dbcc TO normalrole_user_003;
+GRANT SELECT ON Employees to normalrole_user_002;
+GRANT SELECT,UPDATE  ON Employees to normalrole_user_003;
+
+SET SESSION AUTHORIZATION normalrole_user_001 PASSWORD 'Gauss@123';
+DBCC CHECKIDENT ('Employees', NORESEED);
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+RESET SESSION AUTHORIZATION;
+
+
+SET SESSION AUTHORIZATION normalrole_user_002 PASSWORD 'Gauss@123';
+DBCC CHECKIDENT ('Employees', NORESEED);
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+RESET SESSION AUTHORIZATION;
+
+SET SESSION AUTHORIZATION normalrole_user_003 PASSWORD 'Gauss@123';
+DBCC CHECKIDENT ('Employees', NORESEED);
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+RESET SESSION AUTHORIZATION;
+
+drop user normalrole_user_001 cascade;
+drop user normalrole_user_002 cascade;
+drop user normalrole_user_003 cascade;
+drop table Employees;
+
 -- create table as
 create table t2(id int, name int);
 insert into t2 values (1, 1);

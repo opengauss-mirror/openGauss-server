@@ -83,7 +83,7 @@ static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* ne
     bool* need_seq_rewrite);
 #endif
 template<typename T_Form, typename T_Int, bool large>
-static void do_setval(Oid relid, int128 next, bool iscalled);
+static void do_setval(Oid relid, int128 next, bool iscalled, bool skip_perm_check = false);
 static void process_owned_by(const Relation seqrel, List* owned_by);
 template<typename T_Form>
 static GTM_UUID get_uuid_from_tuple(const void* seq_p, const Relation rel, const HeapTuple seqtuple);
@@ -1748,7 +1748,7 @@ int128 autoinc_get_nextval(Oid relid)
  * sequence.
  */
 template<typename T_Form, typename T_Int, bool large>
-static void do_setval(Oid relid, int128 next, bool iscalled)
+static void do_setval(Oid relid, int128 next, bool iscalled, bool skip_perm_check)
 {
     SeqTable elm = NULL;
     Relation seqrel;
@@ -1768,7 +1768,7 @@ static void do_setval(Oid relid, int128 next, bool iscalled)
 
     TrForbidAccessRbObject(RelationRelationId, relid, RelationGetRelationName(seqrel));
 
-    if (pg_class_aclcheck(elm->relid, GetUserId(), ACL_UPDATE) != ACLCHECK_OK)
+    if (!skip_perm_check && pg_class_aclcheck(elm->relid, GetUserId(), ACL_UPDATE) != ACLCHECK_OK)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));
@@ -3202,7 +3202,7 @@ static Oid adbin_to_relid(char* adbin)
     return seqoid;
 }
 
-char* get_serial_column_and_seq_table(List* range_var, char* table_name, Oid* seq_table_oid)
+char* get_serial_column_and_seq_table(List* range_var, char* table_name, Oid* seq_table_oid, AclMode perm_required)
 {
     Relation rel = NULL;
     ScanKeyData skey;
@@ -3212,6 +3212,13 @@ char* get_serial_column_and_seq_table(List* range_var, char* table_name, Oid* se
 
     rel = HeapOpenrvExtended(makeRangeVarFromNameList(range_var), AccessShareLock, false, true);
     check_relation_valid(rel, table_name);
+
+    if (pg_class_aclcheck(rel->rd_id, GetUserId(), perm_required, false) != ACLCHECK_OK) {
+        relation_close(rel, AccessShareLock);
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied for sequence %s", RelationGetRelationName(rel))));
+    }
 
     ScanKeyInit(&skey, Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ,
                 ObjectIdGetDatum(RelationGetRelid(rel)));
@@ -3273,7 +3280,7 @@ void get_last_value_and_max_value(text* txt, int64* last_value, int64* current_m
     char* table_name = TextDatumGetCString(txt);
     List* range_var = textToQualifiedNameList(txt);
 
-    serial_column_name = get_serial_column_and_seq_table(range_var, table_name, &relid);
+    serial_column_name = get_serial_column_and_seq_table(range_var, table_name, &relid, ACL_SELECT);
 
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
@@ -3302,7 +3309,7 @@ int64 get_and_reset_last_value(text* txt, int64 new_value, bool need_reseed)
     List* range_var = textToQualifiedNameList(txt);
     char* table_name = TextDatumGetCString(txt);
 
-    serial_column_name = get_serial_column_and_seq_table(range_var, table_name, &relid);
+    serial_column_name = get_serial_column_and_seq_table(range_var, table_name, &relid, ACL_UPDATE);
 
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
@@ -3311,7 +3318,7 @@ int64 get_and_reset_last_value(text* txt, int64 new_value, bool need_reseed)
 
     // set new reseed
     if (need_reseed) {
-        do_setval<Form_pg_sequence, int64, false>(relid, new_value, true);
+        do_setval<Form_pg_sequence, int64, false>(relid, new_value, true, true);
     }
 
     pfree(serial_column_name);
