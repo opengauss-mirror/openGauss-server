@@ -170,4 +170,5 @@ extern HeapTuple ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_hi
  */
 extern Relation tuple_get_rel(HeapTuple pg_class_tuple, LOCKMODE lockmode, TupleDesc tuple_desc, HeapTuple pg_indextuple = NULL);
 extern THR_LOCAL bool needNewLocalCacheFile;
+extern void RelationReloadRdOption(Relation relation);
 #endif /* RELCACHE_H */
