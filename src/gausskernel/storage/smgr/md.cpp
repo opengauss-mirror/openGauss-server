@@ -891,6 +891,10 @@ void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
     while (nblocks > 0) {
         if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
             int fd = CfsGetFd(reln, MAIN_FORKNUM, blocknum, true, WRITE_BACK_OPEN_FILE);
+            /* The relation has been removed, nothing to do here. */
+            if (fd < 0) {
+                return;
+            }
             auto nflushed = CfsWriteBack(reln, relNode, fd, CFS_LOGIC_BLOCKS_PER_EXTENT, forknum, blocknum,
                                          nblocks, COMMON_STORAGE);
             if (nflushed == InvalidBlockNumber) {
@@ -1468,6 +1472,10 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
     bool compressed = IS_COMPRESSED_MAINFORK(reln, forknum);
     if (compressed) {
         int fd = CfsGetFd(reln, forknum, blocknum, skipFsync, EXTENT_OPEN_FILE);
+        /* The relation has been removed, nothing to do here. */
+        if (fd < 0) {
+            return;
+        }
         nbytes = (int)CfsWritePage(reln, reln->smgr_rnode.node, fd, CFS_LOGIC_BLOCKS_PER_EXTENT,
                                    forknum, blocknum, buffer, false, COMMON_STORAGE);
     } else {
