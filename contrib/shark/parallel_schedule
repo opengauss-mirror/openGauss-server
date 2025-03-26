@@ -9,3 +9,5 @@ test: rotate-test-part2 rotate-test-part2_ci
 test: functions
 test: test_dbcc test_dbcc_case_sen
 test: test_sysviews
+test: gs_dump_d_format rotate_part2_dump
+
