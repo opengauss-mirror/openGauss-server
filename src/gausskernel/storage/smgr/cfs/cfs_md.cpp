@@ -1070,6 +1070,10 @@ void CfsHeaderPageCheckAndRepair(SMgrRelation reln, BlockNumber logicBlockNumber
 {
     errno_t rc = 0;
     int fd = CfsGetFd(reln, MAIN_FORKNUM, logicBlockNumber, true, EXTENT_OPEN_FILE);
+    /* The relation has been removed, nothing to do here. */
+    if (fd < 0) {
+        return;
+    }
     ExtentLocation location =
         g_location_convert[COMMON_STORAGE](reln, reln->smgr_rnode.node, fd, CFS_EXTENT_SIZE,
                                            MAIN_FORKNUM, logicBlockNumber);
@@ -1430,6 +1434,10 @@ void MdRecoveryPcaPage(SMgrRelation reln, ForkNumber forknum, BlockNumber blockn
     CfsExtentAddress *extAddr = NULL;
 
     int fd = CfsGetFd(reln, forknum, blocknum, skipFsync, WRITE_BACK_OPEN_FILE);
+    /* The relation has been removed, nothing to do here. */
+    if (fd < 0) {
+        return;
+    }
     /* buffer init is ahead of dw, buffer can be used for reading pca */
     ExtentLocation location =
         StorageConvert(reln, reln->smgr_rnode.node, fd, CFS_EXTENT_SIZE, forknum, blocknum);
@@ -1475,6 +1483,12 @@ void MdAssistFileProcess(SMgrRelation relation, const char *assistInfo, int assi
 
     int fd = CfsGetFd(relation, extInfo->forknum,
         extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT, false, WRITE_BACK_OPEN_FILE);
+
+    /* The relation has been removed, nothing to do here. */
+    if (fd < 0) {
+        return;
+    }
+
     ExtentLocation location =
         StorageConvert(relation, relation->smgr_rnode.node, fd, CFS_EXTENT_SIZE, extInfo->forknum,
                        extInfo->extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT);
