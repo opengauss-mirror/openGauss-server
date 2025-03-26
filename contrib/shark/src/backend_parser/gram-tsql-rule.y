@@ -828,6 +828,13 @@ columnDef:
 TSQL_computed_column:
 				AS b_expr
 				{
+					if (t_thrd.proc->workingVersionNum < COMPUTED_COLUMNS_VERSION_NUMBER) {
+						ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("Working Version Num less than %u does not support computed columns.",
+									   COMPUTED_COLUMNS_VERSION_NUMBER)));
+					}
+					
 					Constraint *n = makeNode(Constraint);
 
 					n->contype = CONSTR_GENERATED;
@@ -840,6 +847,12 @@ TSQL_computed_column:
 				}
 				| AS b_expr TSQL_PERSISTED
 				{
+					if (t_thrd.proc->workingVersionNum < COMPUTED_COLUMNS_VERSION_NUMBER) {
+						ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("Working Version Num less than %u does not support computed columns.",
+									   COMPUTED_COLUMNS_VERSION_NUMBER)));
+					}
 					Constraint *n = makeNode(Constraint);
 
 					n->contype = CONSTR_GENERATED;

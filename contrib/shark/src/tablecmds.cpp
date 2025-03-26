@@ -201,7 +201,6 @@ static void pltsql_PreAddConstraintsHook(Relation rel, ParseState *pstate, List 
 
     foreach(cell, newColDefaults) {
         RawColumnDefault *colDef = (RawColumnDefault *) lfirst(cell);
-        Form_pg_attribute atp = TupleDescAttr(rel->rd_att, colDef->attnum - 1);
         Node       *expr;
         Oid            targettype;
         int32        targettypmod;
@@ -265,15 +264,6 @@ static void pltsql_PreAddConstraintsHook(Relation rel, ParseState *pstate, List 
         attTup->attbyval = tform->typbyval;
         attTup->attalign = tform->typalign;
         attTup->attstorage = tform->typstorage;
-
-        /*
-         * Instead of invalidating and refetching the relcache entry, just
-         * update the entry that we've fetched previously.  This works because
-         * no one else can see our in-progress changes.  Also note that we
-         * only updated the fixed part of Form_pg_attribute.
-         */
-        errno_t rc = memcpy_s(atp, ATTRIBUTE_FIXED_PART_SIZE, attTup, ATTRIBUTE_FIXED_PART_SIZE);
-        securec_check(rc, "\0", "\0");
 
         CatalogTupleUpdate(attrelation, &heapTup->t_self, heapTup);
         ReleaseSysCache((HeapTuple) targetType);
