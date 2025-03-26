@@ -3078,8 +3078,8 @@ static void MlogClearLogByTime(Oid mlogID, Timestamp ts)
 
     ScanKeyInit(&entry[0],
                 MlogAttributeTime,
-                BTLessStrategyNumber,
-                F_TIMESTAMP_LT,
+                BTLessEqualStrategyNumber,
+                F_TIMESTAMP_LE,
                 TimestampGetDatum(ts));
 
     Relation rel = heap_open(mlogID, RowExclusiveLock); //TODO: high lock
