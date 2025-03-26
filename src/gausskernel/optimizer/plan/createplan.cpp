@@ -2699,6 +2699,11 @@ static Scan* create_indexscan_plan(
         qpqual = lappend(qpqual, rinfo);
     }
 
+    if (u_sess->opt_cxt.is_under_append_plan && tlist == NIL) {
+        Const *c = makeConst(INT4OID, -1, InvalidOid, -2, (Datum)0, true, false);
+        tlist = lappend(tlist, makeTargetEntry((Expr*)c, 1, NULL, true));
+    }
+
     /* Sort clauses into best execution order */
     qpqual = order_qual_clauses(root, qpqual);
 
