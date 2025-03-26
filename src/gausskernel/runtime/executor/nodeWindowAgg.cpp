@@ -79,6 +79,18 @@ static Datum get_agg_init_val(Datum text_init_val, Oid transtype);
 static bool are_peers(WindowAggState* winstate, TupleTableSlot* slot1, TupleTableSlot* slot2);
 static bool window_gettupleslot(WindowObject winobj, int64 pos, TupleTableSlot* slot);
 
+
+int64 truncate_int64_overflow(int128 arg)
+{
+    if (arg > (int128)INT64_MAX) {
+        return INT64_MAX;
+    }
+    if (arg < (int128)INT64_MIN) {
+        return INT64_MIN;
+    }
+    return (int64)arg;
+}
+
 /*
  * initialize_windowaggregate
  * parallel to initialize_aggregates in nodeAgg.c
@@ -952,7 +964,7 @@ static void update_frameheadpos(WindowObject winobj, TupleTableSlot* slot)
             if (frame_options & FRAMEOPTION_START_VALUE_PRECEDING)
                 offset = -offset;
 
-            winstate->frameheadpos = winstate->currentpos + offset;
+            winstate->frameheadpos = truncate_int64_overflow((int128)winstate->currentpos + (int128)offset);
             /* frame head can't go before first row */
             if (winstate->frameheadpos < 0)
                 winstate->frameheadpos = 0;
@@ -1041,7 +1053,7 @@ static void update_frametailpos(WindowObject winobj, TupleTableSlot* slot)
             if (frame_options & FRAMEOPTION_END_VALUE_PRECEDING)
                 offset = -offset;
 
-            winstate->frametailpos = winstate->currentpos + offset;
+            winstate->frametailpos = truncate_int64_overflow((int128)winstate->currentpos + (int128)offset);
             /* smallest allowable value of frametailpos is -1 */
             if (winstate->frametailpos < 0)
                 winstate->frametailpos = -1;
