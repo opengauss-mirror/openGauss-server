@@ -10,8 +10,8 @@ CREATE TABLE [mysche].[t3](a int);
 INSERT INTO mysche.t1 (a) VALUES (1), (2), (3);
 CREATE VIEW [t4] AS SELECT * FROM mysche.t1;
 
-\! @abs_bindir@/gs_dump dump_d_database -p @portstring@ -f @abs_bindir@/dump_packagefunc.tar -F t >/dev/null 2>&1; echo $?
-\! @abs_bindir@/gs_restore -d restore_d_database -p @portstring@ @abs_bindir@/dump_packagefunc.tar >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_dump dump_d_database -p @portstring@ -f @abs_bindir@/dump_d.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d restore_d_database -p @portstring@ @abs_bindir@/dump_d.tar >/dev/null 2>&1; echo $?
 \c restore_d_database
 select mysche.EAST_COMM.ADD_NUM(0);
 

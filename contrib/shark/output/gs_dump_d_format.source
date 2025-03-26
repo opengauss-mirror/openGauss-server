@@ -46,4 +46,3 @@ SELECT * from t4;
 \c contrib_regression
 drop database dump_d_database;
 drop database restore_d_database;
-
