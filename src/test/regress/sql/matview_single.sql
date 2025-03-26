@@ -228,7 +228,7 @@ create materialized view log on cov_t2;
 create materialized view log on cov_t2;
 drop table cov_t1,cov_t2 cascade;
 
--- 只有mlog没有incre matview，不维护mlog
+-- 只有mlog没有incre matview，也维护mlog
 create table only_mlog_t1(c1 int);
 create materialized view log on only_mlog_t1;
 insert into only_mlog_t1 values (1);

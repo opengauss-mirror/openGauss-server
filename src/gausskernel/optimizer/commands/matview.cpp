@@ -2268,28 +2268,6 @@ Oid find_matview_mlog_table(Oid relid)
     return mlogid;
 }
 
-bool is_table_in_incre_matview(Oid relid)
-{
-    Relation rel = NULL;
-    TableScanDesc scan;
-    ScanKeyData scanKey;
-    bool result = false;
-
-    ScanKeyInit(&scanKey,
-        Anum_gs_matview_dep_relid,
-        BTEqualStrategyNumber,
-        F_OIDEQ,
-        ObjectIdGetDatum(relid));
-    rel = heap_open(MatviewDependencyId, AccessShareLock);
-    scan = tableam_scan_begin(rel, SnapshotNow, 1, &scanKey);
-    if (tableam_scan_getnexttuple(scan, ForwardScanDirection) != NULL) {
-        result = true;
-    }
-    tableam_scan_end(scan);
-    heap_close(rel, NoLock);
-    return result;
-}
-
 void insert_into_mlog_table(Relation rel, Oid mlogid, HeapTuple tuple, ItemPointer tid, TransactionId xid, char action)
 {
     int i;

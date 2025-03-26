@@ -391,7 +391,7 @@ create materialized view log on cov_t2;
 create materialized view log on cov_t2;
 ERROR:  materialized view log for table "cov_t2" already exists.
 drop table cov_t1,cov_t2 cascade;
--- 只有mlog没有incre matview，不维护mlog
+-- 只有mlog没有incre matview，也维护mlog
 create table only_mlog_t1(c1 int);
 create materialized view log on only_mlog_t1;
 insert into only_mlog_t1 values (1);
@@ -408,7 +408,7 @@ END;
 select * from only_mlog_record;
  c1 
 ----
-  0
+  1
 (1 row)
 
 drop table only_mlog_t1, only_mlog_record;
