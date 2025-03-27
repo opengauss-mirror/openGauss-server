@@ -1582,7 +1582,7 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         /* nested table type */
                         var->nest_table = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$9];
                         List *old_nest_typenames = var->nest_table && var->nest_table->nest_typnames ? var->nest_table->nest_typnames : NULL;
-                        var->nest_typnames = get_current_type_nest_type(old_nest_typenames, var->refname, true);
+                        var->nest_typnames = get_current_type_nest_type(old_nest_typenames, var->refname, true, true);
                         var->nest_layers = depth;
                         var->isIndexByTblOf = false;
                         pfree_ext($2->name);
@@ -1697,7 +1697,14 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                             u_sess->plsql_cxt.have_error = true;
                         }
                         PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_tableType($2->name, $2->lineno, $6, true);
-                        var->nest_typnames = get_current_type_nest_type(var->nest_typnames, var->refname, true);
+						PLpgSQL_nest_type *first_ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));     
+                        PLpgSQL_nest_type* ntype = (PLpgSQL_nest_type *)palloc(sizeof(PLpgSQL_nest_type));
+                        first_ntype->typname = pstrdup(var->refname);
+                        first_ntype->layer = 0;
+                        first_ntype->index = -1;
+                        var->nest_typnames = lappend(var->nest_typnames, first_ntype);   
+                        ntype->index = -1;
+                        var->nest_typnames = search_external_nest_type($6->typname, $6->typoid, 0, var->nest_typnames, ntype);
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, $6->typoid, TYPCATEGORY_TABLEOF, $6->dependExtend);
                         } else if (enable_plpgsql_gsdependency()) {
@@ -1721,7 +1728,7 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         /* nested table type */
                         var->nest_table = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
                         List *old_nest_typenames = var->nest_table && var->nest_table->nest_typnames ? var->nest_table->nest_typnames : NULL;
-                        var->nest_typnames = get_current_type_nest_type(old_nest_typenames, var->refname, true);
+                        var->nest_typnames = get_current_type_nest_type(old_nest_typenames, var->refname, true, true);
                         var->nest_layers = depth;
                         var->isIndexByTblOf = false;
                         pfree_ext($2->name);
@@ -1767,7 +1774,7 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         newp->tableOfIndexType = InvalidOid;
                         PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_tableType($2->name, $2->lineno, newp, true);
                         PLpgSQL_rec_type* rec_var = (PLpgSQL_rec_type*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
-                        var->nest_typnames = get_current_type_nest_type(rec_var->nest_typnames, var->refname, true);
+                        var->nest_typnames = get_current_type_nest_type(rec_var->nest_typnames, var->refname, true, true);
                         if (IS_PACKAGE) {
                             plpgsql_build_package_array_type($2->name, newp->typoid, TYPCATEGORY_TABLEOF);
                         } else if (enable_plpgsql_gsdependency()) {

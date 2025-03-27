@@ -378,12 +378,12 @@ BEGIN
 END;
 /
 
-create type uuuuu as object (val1 int, val2 varchar(10));
+create type my_type as object (val1 int, val2 varchar(10));
 
 create or replace procedure p_PLvarray_Case0043
 as
-  TYPE sssss IS varray(10) OF uuuuu;
-  l_recxx sssss:=sssss(uuuuu(1,'one'),uuuuu(2,'two'));
+  TYPE my_array IS varray(10) OF my_type;
+  l_recxx my_array:=my_array(my_type(1,'one'),my_type(2,'two'));
 BEGIN
   raise info 'l_recxx is %',l_recxx(2).val2;
   --dbms_output.put_line(l_recxx(2).val2);
@@ -391,15 +391,15 @@ END;
 /
 
 call p_PLvarray_Case0043();
-drop type uuuuu;
+drop type my_type;
 
 create or replace procedure p_PLvarray_Case0043
 as
   TYPE t_rec IS RECORD (
     id   NUMBER,
     val1 VARCHAR2(10));
-  TYPE sssss IS varray(10) OF t_rec;
-  l_recxx sssss:=sssss(t_rec(1,'one'),t_rec(2,'two'));
+  TYPE my_array IS varray(10) OF t_rec;
+  l_recxx my_array:=my_array(t_rec(1,'one'),t_rec(2,'two'));
 BEGIN
   raise info 'l_recxx is %',l_recxx(2).val1;
   --dbms_output.put_line(l_recxx(2).val2);
@@ -408,6 +408,118 @@ END;
 
 call p_PLvarray_Case0043();
 drop procedure p_PLvarray_Case0043;
+
+-- K_TYPE decl_varname as_is K_VARRAY '(' ICONST ')'  K_OF record_var ';'
+create or replace procedure pp1 as
+  TYPE my_array IS RECORD (val1 int, val2 int);
+  TYPE nest_array IS varray(2) of my_array;
+  l_recxx nest_array:= nest_array(my_array(1,10), my_array(2,20));
+BEGIN
+  raise info 'l_recxx is %', l_recxx;
+  raise info 'l_recxx is %,%', l_recxx(1).val2, l_recxx(2).val2;
+end;
+/
+call pp1();
+
+-- K_TYPE decl_varname as_is K_VARRAY '(' ICONST ')'  K_OF varray_var ';'
+create or replace procedure pp1 as
+  TYPE my_array IS varray(2) of int;
+  TYPE nest_array IS varray(2) of my_array;
+  l_recxx nest_array:= nest_array(my_array(1,10), my_array(2,20));
+BEGIN
+  raise info 'l_recxx is %', l_recxx;
+  raise info 'l_recxx is %,%', l_recxx(1)(1), l_recxx(2)(2);
+end;
+/
+call pp1();
+
+create type to1 as (val1 int, val2 int);
+create or replace procedure pp1 as
+  TYPE my_array IS varray(2) of to1;
+  l_recxx my_array:= my_array(to1(1,10), to1(2,2));
+BEGIN
+  raise info 'l_recxx is %', l_recxx;
+  raise info 'l_recxx is %,%', l_recxx(1), l_recxx(2);
+end;
+/
+call pp1();
+
+drop type if exists to1;
+create type to1 as (val1 int, val2 int);
+create or replace procedure pp1 as
+  TYPE my_array IS varray(2) of to1;
+  l_recxx my_array:= my_array(to2(1,10), to1(2,2));
+BEGIN
+  raise info 'l_recxx is %', l_recxx;
+  raise info 'l_recxx is %,%', l_recxx(1), l_recxx(2);
+end;
+/
+
+create or replace procedure pp1 as
+  TYPE my_array IS varray(2) of to1;
+  TYPE nest_array IS varray(2) of my_array;
+  l_recxx nest_array:= nest_array(my_array(to1(1,10), to2(2,2)), my_array(to1(2,20), to1(2,3)));
+BEGIN
+  raise info 'l_recxx is %', l_recxx;
+  raise info 'l_recxx is %,%', l_recxx(1), l_recxx(2);
+end;
+/
+
+-- K_TYPE decl_varname as_is K_TABLE K_OF decl_datatype decl_notnull ';'
+create or replace procedure pp1 as
+  TYPE my_array IS table of to1;
+  l_recxx my_array:= my_array(to1(1,10), to1(2,2));
+BEGIN
+  raise info 'l_recxx is %', l_recxx;
+  raise info 'l_recxx is %,%', l_recxx(1), l_recxx(2);
+end;
+/
+call pp1();
+
+create or replace procedure pp1 as
+  TYPE my_array IS table of to1;
+  l_recxx my_array:= my_array(to1(1,10), to2(2,2));
+BEGIN
+  raise info 'l_recxx is %', l_recxx;
+  raise info 'l_recxx is %,%', l_recxx(1), l_recxx(2);
+end;
+/
+
+create or replace procedure pp1 as
+  TYPE my_array IS table of to1;
+  TYPE nest_array IS table of my_array;
+  l_recxx nest_array:= nest_array(my_array(to1(1,10), to2(2,2)), my_array(to1(2,20), to1(2,3)));
+BEGIN
+  raise info 'l_recxx is %', l_recxx;
+  raise info 'l_recxx is %,%', l_recxx(1), l_recxx(2);
+end;
+/
+
+-- K_TYPE decl_varname as_is K_TABLE K_OF table_var decl_notnull ';'
+create or replace procedure pp1 as
+  TYPE my_array IS table of int;
+  TYPE nest_array IS table of my_array;
+  l_recxx nest_array:= nest_array(my_array(1,10), my_array(2,20));
+BEGIN
+  raise info 'l_recxx is %', l_recxx;
+  raise info 'l_recxx is %,%', l_recxx(1)(2), l_recxx(2)(2);
+end;
+/
+call pp1();
+
+-- K_TYPE decl_varname as_is K_TABLE K_OF record_var decl_notnull ';'
+create or replace procedure pp1 as
+  TYPE my_array IS RECORD (val1 int, val2 int);
+  TYPE nest_array IS table of my_array;
+  l_recxx nest_array:= nest_array(my_array(1,10), my_array(2,20));
+BEGIN
+  raise info 'l_recxx is %', l_recxx;
+  raise info 'l_recxx is %,%', l_recxx(1), l_recxx(2);
+end;
+/
+call pp1();
+drop procedure pp1();
+drop type if exists to1;
 
 DECLARE
   TYPE nt_type IS TABLE OF INTEGER;
