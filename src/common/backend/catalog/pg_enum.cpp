@@ -114,7 +114,13 @@ void EnumValuesCreate(Oid enumTypeOid, List* vals, Oid collation)
         checkEnumLableValue(lab);
         values[Anum_pg_enum_enumtypid - 1] = ObjectIdGetDatum(enumTypeOid);
         values[Anum_pg_enum_enumsortorder - 1] = Float4GetDatum(elemno + 1);
-        (void)namestrcpy(&enumlabel, lab);
+        if (DB_IS_CMPT(B_FORMAT)) {
+            /* trim the right space for set label */
+            Datum trimtxt = DirectFunctionCall1(rtrim1, CStringGetTextDatum(lab));
+            (void)namestrcpy(&enumlabel, TextDatumGetCString(trimtxt));
+        } else {
+            (void)namestrcpy(&enumlabel, lab);
+        }
         values[Anum_pg_enum_enumlabel - 1] = NameGetDatum(&enumlabel);
 
         tup = heap_form_tuple(RelationGetDescr(pg_enum), values, nulls);

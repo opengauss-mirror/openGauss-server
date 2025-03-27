@@ -2714,7 +2714,8 @@ void DefineObjectTypeMethodSpec(CompositeTypeStmt* stmt, Oid typoid, char** mapO
             /* IF TYPE HAVE SCHEMA, constructor function SHOULD ALSO HAVE IT */
             if ((list_length(submethod->funcname) != 1) || strcmp(funcname, stmt->typevar->relname) != 0)
                 ereport(ERROR, (errmodule(MOD_COMMAND), errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
-                            errmsg("Constructor function Name %s Fault, construct function name must be same with type", funcname)));
+                                errmsg("Constructor function Name %s Fault, "
+                                       "construct function name must be same with type", funcname)));
             submethod->returnType = makeTypeNameFromOid(typoid, -1);
 
             if (firstparam == NULL || ((firstparam != NULL)
@@ -3556,7 +3557,7 @@ static bool isSameTypeMethodArgList(List* argList1, List* argList2, List* funcna
         }
     }
 
-    for (int i = 0, j = 0; i < length1 || j< length2; i++, j++) {
+    for (int i = 0, j = 0; i < length1 || j < length2; i++, j++) {
         if (!enableOutparamOverride) {
             fp1 = arr1[inLoc1];
             fp2 = arr2[inLoc2];
@@ -3609,7 +3610,7 @@ static bool isSameTypeMethodArgList(List* argList1, List* argList2, List* funcna
         }
 
         /* If table of type should check its base type */
-        if (isTableOf1 == isTableOf2 && isTableOf1 == true) {
+        if (isTableOf1 == isTableOf2 && isTableOf1) {
             if (baseOid1 != baseOid2 || fp1->mode != fp2->mode) {
                 pfree_ext(arr1);
                 pfree_ext(arr2);
@@ -4924,9 +4925,9 @@ ObjectAddress AlterTypeOwner(List* names, Oid newOwnerId, ObjectType objecttype,
          * up the pg_class entry properly.	That will call back to
          * AlterTypeOwnerInternal to take care of the pg_type entry(s).
          */
-        if ((typTup->typtype == TYPTYPE_COMPOSITE) || (typTup->typtype == TYPTYPE_ABSTRACT_OBJECT))
+        if ((typTup->typtype == TYPTYPE_COMPOSITE) || (typTup->typtype == TYPTYPE_ABSTRACT_OBJECT)) {
             ATExecChangeOwner(typTup->typrelid, newOwnerId, true, AccessExclusiveLock);
-        else {
+        } else {
             /*
              * We can just apply the modification directly.
              *
@@ -5282,7 +5283,8 @@ Oid AlterTypeNamespaceInternal(
      * Update dependency on schema, if any --- a table rowtype has not got
      * one, and neither does an implicit array.
      */
-    if ((isCompositeType || (typform->typtype != TYPTYPE_COMPOSITE) || (typform->typtype == TYPTYPE_ABSTRACT_OBJECT)) && !isImplicitArray)
+    if ((isCompositeType || (typform->typtype != TYPTYPE_COMPOSITE) || (typform->typtype == TYPTYPE_ABSTRACT_OBJECT))
+        && !isImplicitArray)
         if (changeDependencyFor(TypeRelationId, typeOid, NamespaceRelationId, oldNspOid, nspOid) != 1)
             ereport(ERROR,
                 (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),

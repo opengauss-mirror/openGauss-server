@@ -96,7 +96,6 @@ static void tuplesort_state_init(OrderedSetAggState* osastate,
     MemoryContextSwitchTo(oldcontext);
 }
 
-
 /*
  * Set up working state for an ordered-set aggregate
  */
