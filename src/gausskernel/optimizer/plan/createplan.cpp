@@ -677,6 +677,11 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
         tlist = build_path_tlist(root, best_path);
     }
 
+    if (u_sess->opt_cxt.is_under_append_plan && tlist == NIL) {
+        Const *c = makeConst(INT4OID, -1, InvalidOid, -2, (Datum)0, true, false);
+        tlist = lappend(tlist, makeTargetEntry((Expr*)c, 1, NULL, true));
+    }
+
     /*
      * Extract the relevant restriction clauses from the parent relation. The
      * executor must apply all these restrictions during the scan, except for
