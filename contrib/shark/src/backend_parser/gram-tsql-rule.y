@@ -834,6 +834,10 @@ TSQL_computed_column:
 								errmsg("Working Version Num less than %u does not support computed columns.",
 									   COMPUTED_COLUMNS_VERSION_NUMBER)));
 					}
+
+					ereport(NOTICE,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("The virtual computed columns (non-persisted) are currently ignored and behave the same as persisted columns.")));
 					
 					Constraint *n = makeNode(Constraint);
 
