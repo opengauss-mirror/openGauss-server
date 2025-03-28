@@ -2475,10 +2475,7 @@ int PostmasterMain(int argc, char* argv[])
         ereport(DEBUG3, (errmsg_internal("-----------------------------------------")));
     }
 
-    rc = memcpy_s(g_alarmComponentPath, MAXPGPATH - 1, Alarm_component, strlen(Alarm_component));
-    securec_check_c(rc, "\0", "\0");
-    g_alarmReportInterval = AlarmReportInterval;
-    AlarmEnvInitialize(u_sess->attr.attr_common.log_hostname);
+    PrepareAlarmEnvironment();
 
     /*
         * Create lockfile for data directory.

@@ -36,4 +36,6 @@ extern bool isDirExist(const char* dir);
 extern ThreadId startAlarmChecker(void);
 extern NON_EXEC_STATIC void AlarmCheckerMain();
 
+void PrepareAlarmEnvironment();
+
 #endif
