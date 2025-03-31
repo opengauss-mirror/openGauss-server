@@ -3,7 +3,7 @@ src/common/timezone/README
 Timezone
 ========
 
-This is a PostgreSQL adapted version of the timezone library from
+This is a openGauss adapted version of the timezone library from
 http://www.iana.org/time-zones
 
 The source code can be found at:
@@ -19,7 +19,7 @@ The data files under data/ are an exact copy of the latest data set from:
 	ftp://ftp.iana.org/tz/releases/tzdata*.tar.gz
 
 Since time zone rules change frequently in some parts of the world,
-we should endeavor to update the data files before each PostgreSQL
+we should endeavor to update the data files before each openGauss
 release.
 
 At each update, we should check if time zone offsets have changed.

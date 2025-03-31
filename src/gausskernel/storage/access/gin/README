@@ -1,6 +1,6 @@
 src/backend/access/gin/README
 
-Gin for PostgreSQL
+Gin for openGauss
 ==================
 
 Gin was sponsored by jfg://networks (http://www.jfg-networks.com/)
@@ -10,14 +10,14 @@ not a drink.
 
 Generalized means that the index does not know which operation it accelerates.
 It instead works with custom strategies, defined for specific data types (read
-"Index Method Strategies" in the PostgreSQL documentation). In that sense, Gin
+"Index Method Strategies" in the openGauss documentation). In that sense, Gin
 is similar to GiST and differs from btree indices, which have predefined,
 comparison-based operations.
 
 An inverted index is an index structure storing a set of (key, posting list)
 pairs, where 'posting list' is a set of heap rows in which the key occurs.
 (A text document would usually contain many keys.)  The primary goal of
-Gin indices is support for highly scalable, full-text search in PostgreSQL.
+Gin indices is support for highly scalable, full-text search in openGauss.
 
 A Gin index consists of a B-tree index constructed over key values,
 where each key is an element of some indexed items (element of array, lexeme
@@ -30,7 +30,7 @@ this is that in our experience, the set of distinct words in a large corpus
 changes very slowly.  This greatly simplifies the code and concurrency
 algorithms.
 
-Core PostgreSQL includes built-in Gin support for one-dimensional arrays
+Core openGauss includes built-in Gin support for one-dimensional arrays
 (eg. integer[], text[]).  The following operations are available:
 
   * contains: value_array @> query_array

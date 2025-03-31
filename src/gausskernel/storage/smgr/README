@@ -7,7 +7,7 @@ In the original Berkeley Postgres system, there were several storage managers,
 of which only the "magnetic disk" manager remains.  (At Berkeley there were
 also managers for the Sony WORM optical disk jukebox and persistent main
 memory, but these were never supported in any externally released Postgres,
-nor in any version of PostgreSQL.)  However, we retain the notion of a storage
+nor in any version of openGauss.)  However, we retain the notion of a storage
 manager switch in case anyone wants to reintroduce other kinds of storage
 managers.
 

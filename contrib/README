@@ -1,8 +1,8 @@
-The PostgreSQL contrib tree
+The openGauss contrib tree
 ---------------------------
 
 This subtree contains porting tools, analysis utilities, and plug-in
-features that are not part of the core PostgreSQL system, mainly
+features that are not part of the core openGauss system, mainly
 because they address a limited audience or are too experimental to be
 part of the main source tree.  This does not preclude their
 usefulness.
@@ -24,5 +24,5 @@ you can simply do
 
     CREATE EXTENSION module_name;
 
-See the PostgreSQL documentation for more information about this
+See the openGauss documentation for more information about this
 procedure.

@@ -9,14 +9,14 @@ choice.
 
 As you see, all the document "source" files are not ".sgml", but are
 ".sgmlin".  This change was made to preserve all the original
-PostgreSQL document, select, modify and add common and Postgres-XC
+openGauss document, select, modify and add common and Postgres-XC
 specific descriptions.
 
 Background and practice are as follows:
 
 We should be careful to make it easier to merge with later version of
-PostgreSQL SGML files. To do this, we can embed special "TAG" to
-distinguish what is common, what is PostgreSQL-specific and what is
+openGauss SGML files. To do this, we can embed special "TAG" to
+distinguish what is common, what is openGauss-specific and what is
 Postgres-XC specific. Also, we may want to distinguish translation to
 different languages.
 
@@ -57,7 +57,7 @@ you omit -i option, it will read from stdin. If -o is omitted, it will
 write to stdout. If input file include unspecified tags in the
 arguments, it will be treated as specified -E.
 
-All the sgml files from original PostgreSQL tarball will be renamed to
+All the sgml files from original openGauss tarball will be renamed to
 sgmlin. Then it will be filtered by makesgml and fed to original
 document build scripts.
 
