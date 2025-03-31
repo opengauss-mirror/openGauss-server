@@ -62,7 +62,11 @@ static size_t quote_literal_internal(char* dst, const char* src, size_t len)
         if (SQL_STR_DOUBLE(*src, true))
             *dst++ = *src;
         charlen = pg_mblen(src);
-
+        if (DB_IS_CMPT(B_FORMAT) && (size_t)charlen > len) {
+            ereport(ERROR,
+                (errmsg("Cannot convert string 0x%02x to %s",
+                        (unsigned char)*src, GetDatabaseEncodingName())));
+        }
         for (int i = 0; i < charlen; i++)
             *dst++ = *src++;
 
