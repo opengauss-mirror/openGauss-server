@@ -10,6 +10,7 @@ CREATE TABLE Products(
     UnitPrice money,
     InventoryValue AS (QtyAvailable * UnitPrice)
 );
+NOTICE:  The virtual computed columns (non-persisted) are currently ignored and behave the same as persisted columns.
 ALTER TABLE Products ADD RetailValue AS (QtyAvailable * UnitPrice * 1.5) PERSISTED;
 INSERT INTO Products (QtyAvailable, UnitPrice) VALUES (25, 2.00), (10, 1.5);
 select * from Products;
@@ -51,6 +52,7 @@ DROP TABLE IF EXISTS Products;
 DROP TABLE IF EXISTS Products;
 NOTICE:  table "products" does not exist, skipping
 CREATE TABLE Products(QtyAvailable smallint, UnitPrice money, InventoryValue AS (QtyAvailable * UnitPrice));
+NOTICE:  The virtual computed columns (non-persisted) are currently ignored and behave the same as persisted columns.
 INSERT INTO Products(QtyAvailable, UnitPrice) VALUES (25, 2.00), (10, 1.5), (25, 2.00), (10, 1.5), (10, 1.5);
 -- top N
 select DISTINCT TOP 1 * from Products;
