@@ -3751,24 +3751,49 @@ static void ExpandJsonStringArray(JsonStringArray* array)
     }
 }
 
+static inline bool ValidJsonChar(char c)
+{
+    return (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') ||
+            ('0' <= c && c <= '9') || ('\200' <= c && c <= '\377'));
+}
+
+static void TrimString(char** lptr, char** rptr)
+{
+    while (!ValidJsonChar(**lptr)) {
+        (*lptr)++;
+    }
+    while (!ValidJsonChar(**rptr)) {
+        (*rptr)--;
+    }
+}
+
 static void SplitString(char* str, char delim, int strlen, JsonStringArray* results)
 {
     char* lptr = str;
     char* rptr = str;
 
     while (*rptr != '\0' && strlen != 0) {
-        if (*rptr == delim || strlen == 1) {
-            if (rptr != lptr || strlen == 1) {
-                ExpandJsonStringArray(results);
-                int len = (*rptr == delim) ? (rptr - lptr + 1) : (rptr - lptr + 2);
-                char* res = (char*)palloc(len * sizeof(char));
-                int rc = memcpy_s(res, len, lptr, len);
-                securec_check(rc, "\0", "\0");
-                res[len - 1] = '\0';
-                results->data[results->len++] = res;
-            }
-            lptr = rptr + 1;
+        if (*rptr != delim && strlen != 1) {
+            strlen--;
+            rptr++;
+            continue;
         }
+        if (rptr != lptr || strlen == 1) {
+            char* tlptr = lptr;
+            char* trptr = rptr;
+            TrimString(&tlptr, &trptr);
+            if (trptr < tlptr) {
+                return;
+            }
+            ExpandJsonStringArray(results);
+            int len = trptr - tlptr + 2;
+            char* res = (char*)palloc(len * sizeof(char));
+            int rc = memcpy_s(res, len, tlptr, len);
+            securec_check(rc, "\0", "\0");
+            res[len - 1] = '\0';
+            results->data[results->len++] = res;
+        }
+        lptr = rptr + 1;
         strlen--;
         rptr++;
     }

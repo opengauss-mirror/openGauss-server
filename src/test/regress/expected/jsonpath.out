@@ -510,6 +510,30 @@ SELECT family_doc FROM families WHERE JSON_TEXTCONTAINS(family_doc, '$.ages', '0
 ------------
 (0 rows)
 
+SELECT JSON_TEXTCONTAINS('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}', '$.family', 'Oak Street## 10');
+ json_textcontains 
+-------------------
+ t
+(1 row)
+
+SELECT JSON_TEXTCONTAINS('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "!@$%300 Oak Street", "apt" : 10}}}', '$.family', '300%@ Oak Street## 10');
+ json_textcontains 
+-------------------
+ t
+(1 row)
+
+SELECT JSON_TEXTCONTAINS('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "!@$%300 Oak Street", "apt" : 10}}}', '$.family', '300%@00 Oak Street## 10');
+ json_textcontains 
+-------------------
+ f
+(1 row)
+
+SELECT JSON_TEXTCONTAINS('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "!@$%300 Oak Street", "apt" : 10}}}', '$.family', '     Oak    ');
+ json_textcontains 
+-------------------
+ t
+(1 row)
+
 SELECT JSON_TEXTCONTAINS('This is not well-formed JSON data', '$.family', 'data');
  json_textcontains 
 -------------------
