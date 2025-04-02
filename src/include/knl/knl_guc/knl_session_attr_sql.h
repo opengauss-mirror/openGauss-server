@@ -233,6 +233,7 @@ typedef struct knl_session_attr_sql {
     /* Table skewness warning threshold, range from 0 to 1, 0 indicates feature disabled*/
     double table_skewness_warning_threshold;
     bool enable_opfusion;
+    bool enableParseFusion;
     bool enable_beta_opfusion;
     bool enable_partition_opfusion;
     int opfusion_debug_mode;
