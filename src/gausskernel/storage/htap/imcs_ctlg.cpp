@@ -1054,6 +1054,9 @@ static int HandleImcsResponse(PGXCNodeHandle *conn, RemoteQueryState *combiner)
                 return RESPONSE_PLANID_OK;
             case 'E': /* Populate error */
                 return RESPONSE_EOF;
+            case 'n': /* Wait LSN timeout */
+                elog(WARNING, "Standby wait xlog redo lsn timeout, please set a larger timeout, current "
+                    "htap_wait_xlog_lsn_timeout = %ds", g_instance.attr.attr_storage.htap_wait_xlog_lsn_timeout);
             case 'I': /* EmptyQuery */
             default:
                 /* sync lost? */
@@ -1369,9 +1372,11 @@ void WaitXLogRedoToCurrentLsn(XLogRecPtr currentLsn)
             break;
         }
 
-        if (waitTimeMs >= WAIT_XLOG_REDO_TIMEOUT_MS) {
+        if ((waitTimeMs / MSECS_PER_SEC) >= g_instance.attr.attr_storage.htap_wait_xlog_lsn_timeout) {
+            pq_putemptymessage('n');
+            pq_flush();
             ereport(ERROR, (errmsg("Wait lsn for HTAP population time out after %fs, current lsn: %lu,"
-                "xlog redo lsn: %lu.", ((double)waitTimeMs / 1000), currentLsn, latestXLogLsn)));
+                "xlog redo lsn: %lu.", ((double)waitTimeMs / MSECS_PER_SEC), currentLsn, latestXLogLsn)));
         }
 
         pg_usleep(100000); /* sleep 100ms */
