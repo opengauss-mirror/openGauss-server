@@ -902,3 +902,4 @@ dolphin.nulls_minimal_policy = on # the inverse of the default configuration val
 #application_name = 'dn_master'
 #enable_nls = off
 #wal_file_preinit_threshold = 100 # Threshold for pre-initializing xlogs, in percentages.
+#enable_parse_fusion = off # Enable parse fusion feature.

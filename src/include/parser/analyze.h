@@ -75,6 +75,24 @@ typedef struct OperatorPlusProcessContext {
     bool contain_joinExpr;
 } OperatorPlusProcessContext;
 
+typedef struct ColumnTypeForm {
+    Oid originTypOid;
+    Oid baseTypOid;
+    int32 typmod;
+    Oid collid;
+    int typlen;
+    bool typbyval;
+    regproc typinput;
+    Oid ioParam;
+} ColumnTypeForm;
+
+typedef struct ParseColumnCallbackState {
+    ParseState* pstate;
+    int location;
+    ListCell* attrCell;
+    ErrorContextCallback errcontext;
+} ParseColumnCallbackState;
+
 typedef Query* (*transformSelectStmtHook)(ParseState* pstate, SelectStmt* stmt, bool isFirstNode, bool isCreateView);
 
 typedef struct AnalyzerRoutine {

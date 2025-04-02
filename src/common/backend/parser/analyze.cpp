@@ -36,6 +36,7 @@
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "commands/typecmds.h"
+#include "utils/date.h"
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 #endif
@@ -148,6 +149,17 @@ static void set_ancestor_ps_contain_foreigntbl(ParseState* subParseState);
 static bool include_groupingset(Node* groupClause);
 static void transformGroupConstToColumn(ParseState* pstate, Node* groupClause, List* targetList);
 static bool checkAllowedTableCombination(ParseState* pstate);
+
+static bool IsValuesCanTransformDirectly(ParseState* pstate, InsertStmt* stmt);
+static List* GetTargetColumnAttrs(ParseState* pstate, List* cols, int exprCnt);
+static void GenerateTargetList(Query* query, RangeTblEntry* rte, int rtindex, List* targetColsAttrs);
+static void CheckInsertTargetRelation(ParseState* pstate, InsertStmt* stmt, Relation targetrel, bool isRelationNullOk);
+static void CheckColumnExprsConsistency(ParseState* pstate, List* cols, List* firstRowList, int finalTargetCnt);
+static void GetColumnTypeAttrs(List* targetColsAttrs, ColumnTypeForm* typeItems);
+static Node* TransformAconstToTarget(A_Const* con, ColumnTypeForm& typeItem, bool hasIgnore);
+static List* TransformAllValuesDirectly(ParseState* pstate, SelectStmt* selectStmt, List* targetColsAttrs);
+static Query* TryTransformInsertDirectly(ParseState* pstate, InsertStmt* stmt);
+
 #ifdef ENABLE_MULTIPLE_NODES
 static bool ContainSubLinkWalker(Node* node, void* context);
 static bool ContainSubLink(Node* clause);
@@ -596,10 +608,14 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
             /*
              * Optimizable statements
              */
-        case T_InsertStmt:
-            result = transformInsertStmt(pstate, (InsertStmt*)parseTree);
+        case T_InsertStmt: {
+            InsertStmt* insertStmt = (InsertStmt*)parseTree;
+            result = TryTransformInsertDirectly(pstate, insertStmt);
+            if (!result) {
+                result = transformInsertStmt(pstate, insertStmt);
+            }
             break;
-
+        }
         case T_DeleteStmt:
             result = transformDeleteStmt(pstate, (DeleteStmt*)parseTree);
             break;
@@ -1921,14 +1937,8 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     qry->resultRelations = setTargetTables(pstate, list_make1(stmt->relation), false, false, targetPerms);
     targetrel = (Relation)linitial(pstate->p_target_relation);
-    /*
-     * Insert into relation pg_auth_history is not allowed.
-     * We update it only when some user's password has been changed.
-     */
-    if (targetrel != NULL && RelationGetRelid(targetrel) == AuthHistoryRelationId) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OPERATION), errmsg("Not allowed to insert into relation pg_auth_history.")));
-    }
+
+    CheckInsertTargetRelation(pstate, stmt, targetrel, true);
 
     if (qry->is_dist_insertselect) {
         Oid relid = RelationGetRelid(targetrel);
@@ -1940,75 +1950,6 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
             qry->is_dist_insertselect = false;
         }
         ReleaseSysCache(classtup);
-    }
-
-
-    if (targetrel != NULL &&
-        ((unsigned int)RelationGetInternalMask(targetrel) & INTERNAL_MASK_DINSERT)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Un-support feature"),
-                errdetail("internal relation doesn't allow INSERT")));
-    }
-#ifdef ENABLE_MULTIPLE_NODES
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-#endif
-        if (targetrel != NULL
-                && RelationIsMatview(targetrel) && !stmt->isRewritten) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("Unsupported feature"),
-                            errdetail("Materialized view doesn't allow INSERT")));
-        }
-#ifdef ENABLE_MULTIPLE_NODES
-    }
-#endif
-
-    if (targetrel != NULL && stmt->upsertClause != NULL) {
-        /* non-supported upsert cases */
-        if (!u_sess->attr.attr_sql.enable_upsert_to_merge && RelationIsColumnFormat(targetrel)) {
-            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                             errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on column orientated table."))));
-        }
-
-        if (RelationIsForeignTable(targetrel) || RelationIsStream(targetrel)) {
-            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                             errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on foreign table."))));
-        }
-
-        if (RelationIsView(targetrel)) {
-            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on VIEW."))));
-        }
-
-        if (RelationIsContquery(targetrel)) {
-            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on CONTQUERY."))));
-        }
-    }
-
-    /* non-supported IGNORE cases */
-    if (pstate->p_has_ignore && targetrel != NULL) {
-        if (RelationIsColumnFormat(targetrel)) {
-            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                             errmsg("IGNORE is not supported on INSERT column orientated table."))));
-        }
-    }
-
-    /* data redistribution for DFS table.
-     * check if the target relation is being redistributed(insert mode).
-     * For example, when table A is redistributing in session 1, operating table
-     * A with insert command in session 2, the table A can not be inserted data in session 2.
-     *
-     * We don't allow insert during online expansion when expansion is set as read only.
-     * We reply on gs_redis to ganurantee DFS table to be read only during online expansion
-     * so we don't need to double check if target table is DFS table here anymore.
-     */
-    if (!u_sess->attr.attr_sql.enable_cluster_resize && targetrel != NULL &&
-        RelationInClusterResizingWriteErrorMode(targetrel)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
-                errmsg("%s is redistributing, please retry later.", targetrel->rd_rel->relname.data)));
     }
 
     /* Validate stmt->cols list, or build default list if no list given */
@@ -6264,4 +6205,519 @@ static bool checkAllowedTableCombination(ParseState* pstate)
     Assert(has_ustore || has_else);
 
     return !(has_ustore && has_else);
+}
+
+static bool IsValuesCanTransformDirectly(ParseState* pstate, InsertStmt* stmt)
+{
+    if (!u_sess->attr.attr_sql.enableParseFusion ||
+        stmt->is_dist_insertselect) {
+        return false;
+    }
+
+    if (stmt->returningList || stmt->withClause
+        || stmt->upsertClause || stmt->targetList) {
+        return false;
+    }
+    
+    SelectStmt* selectStmt = (SelectStmt*)stmt->selectStmt;
+    if (selectStmt == nullptr || selectStmt->valuesLists == NIL) {
+        return false;
+    }
+
+    foreach_cell(cell, stmt->cols) {
+        ResTarget* col = (ResTarget*)lfirst(cell);
+        if (col->indirection) {
+            return false;
+        }
+    }
+
+    const int firstCnt = list_length((List*)linitial(selectStmt->valuesLists));
+    foreach_cell (rowCell, selectStmt->valuesLists) {
+        List* row = (List*)lfirst(rowCell);
+        int curCnt = list_length(row);
+        if (unlikely(curCnt != firstCnt)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("VALUES lists must all be the same length"),
+                    parser_errposition(pstate, exprLocation((Node*)row))));
+        }
+
+        foreach_cell (conCell, row) {
+            Node* con = (Node*)lfirst(conCell);
+            if (!IsA(con, A_Const)) {
+                return false;
+            }
+            Value* val = &((A_Const*)con)->val;
+            switch (nodeTag(val)) {
+                case T_Integer:
+                case T_Float:
+                case T_String:
+                case T_Null:
+                    break;
+                default:
+                    return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+static void CheckColumnExprsConsistency(ParseState* pstate, List* cols, List* firstRowList, int finalTargetCnt)
+{
+    const int firstRowCnt = list_length(firstRowList);
+    if (unlikely(firstRowCnt > finalTargetCnt)) {
+        Node* posNode = (Node*)list_nth(firstRowList, finalTargetCnt);
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("INSERT has more expressions than target columns"),
+                parser_errposition(pstate, exprLocation(posNode))));
+    } else if (unlikely(cols && firstRowCnt < finalTargetCnt)) {
+        Node* posNode = (Node*)list_nth(cols, firstRowCnt);
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("INSERT has more target columns than expressions"),
+                parser_errposition(pstate, exprLocation(posNode))));
+    }
+}
+
+static List* GetTargetColumnAttrs(ParseState* pstate, List* cols, int exprCnt)
+{
+    List* targetColsAttrs = NIL;
+    Relation targetrel = (Relation)linitial(pstate->p_target_relation);
+    FormData_pg_attribute* attrArr = targetrel->rd_att->attrs;
+
+    if (cols == NIL) {
+        const int numcol = RelationGetNumberOfAttributes(targetrel);
+        bool isBlockchainRel = targetrel->rd_isblockchain;
+
+        for (int i = 0; i < numcol && i < exprCnt; i++) {
+            if (attrArr[i].attisdropped) {
+                continue;
+            }
+            /* If the hidden column in timeseries relation, skip it */
+            if (TsRelWithImplDistColumn(attrArr, i) &&
+                RelationIsTsStore(targetrel)) {
+                continue;
+            }
+
+            if (isBlockchainRel &&
+                strcmp(NameStr(attrArr[i].attname), "hash") == 0) {
+                continue;
+            }
+            targetColsAttrs = lappend(targetColsAttrs, &attrArr[i]);
+        }
+    } else {
+        /* obtains columns attributes */
+        Bitmapset* wholecols = NULL;
+        foreach_cell(cell, cols) {
+            ResTarget* col = (ResTarget*)lfirst(cell);
+            char* name = col->name;
+            int attrno = attnameAttNum(targetrel, name, false);
+            if (attrno == InvalidAttrNumber) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_COLUMN),
+                        errmsg("column \"%s\" of relation \"%s\" does not exist",
+                            name, RelationGetRelationName(targetrel)),
+                        parser_errposition(pstate, col->location)));
+            }
+
+            if (bms_is_member(attrno, wholecols)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DUPLICATE_COLUMN),
+                        errmsg("column \"%s\" specified more than once", name),
+                        parser_errposition(pstate, col->location)));
+            }
+
+            wholecols = bms_add_member(wholecols, attrno);
+            targetColsAttrs = lappend(targetColsAttrs, &attrArr[attrno - 1]);
+        }
+    }
+
+    return targetColsAttrs;
+}
+
+static void GenerateTargetList(Query* query, RangeTblEntry* rte, int rtindex, List* targetColsAttrs)
+{
+    int varattno = 0;
+
+    query->targetList = NIL;
+    foreach_cell(colCell, targetColsAttrs) {
+        FormData_pg_attribute* col = (FormData_pg_attribute*)lfirst(colCell);
+        varattno++;
+
+        Var* expr = makeVar(rtindex,
+                            varattno,
+                            col->atttypid,  /* type oid */
+                            col->atttypmod, /* type mode */
+                            InvalidOid,     /* colcollation */
+                            0);             /* sublevels_up */
+
+        expr->location = -1;
+        
+        char* name = pstrdup(NameStr(col->attname));
+        TargetEntry* entry = makeTargetEntry((Expr*)expr, col->attnum, name, false);
+        query->targetList = lappend(query->targetList, entry);
+
+        rte->insertedCols = bms_add_member(rte->insertedCols, col->attnum - FirstLowInvalidHeapAttributeNumber);
+    }
+}
+
+static void GetColumnTypeAttrs(List* targetColsAttrs, ColumnTypeForm* typeItems)
+{
+    HeapTuple tup = nullptr;
+    Form_pg_type typeStruct = nullptr;
+    int colIdx = 0;
+
+    foreach_cell(attrCell, targetColsAttrs) {
+        FormData_pg_attribute* attr = (FormData_pg_attribute*)lfirst(attrCell);
+        ColumnTypeForm& typeItem = typeItems[colIdx];
+        typeItem.originTypOid = attr->atttypid;
+        typeItem.baseTypOid = attr->atttypid;
+
+        /*
+        * We loop to find the bottom base type in a stack of domains.
+        */
+        for (;;) {
+            tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeItem.baseTypOid));
+            if (unlikely(!HeapTupleIsValid(tup))) {
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                                errmsg("cache lookup failed for type %u", typeItem.baseTypOid)));
+            }
+
+            typeStruct = (Form_pg_type)GETSTRUCT(tup);
+            if (unlikely(typeStruct->typtype == TYPTYPE_DOMAIN)) {
+                typeItem.baseTypOid = typeStruct->typbasetype;
+                ReleaseSysCache(tup);
+            } else {
+                typeItem.typmod = attr->atttypmod;
+                typeItem.collid = typeStruct->typcollation;
+                typeItem.typlen = typeStruct->typlen;
+                typeItem.typbyval = typeStruct->typbyval;
+                typeItem.typinput = typeStruct->typinput;
+                typeItem.ioParam = getTypeIOParam(tup);
+                ReleaseSysCache(tup);
+                break;
+            }
+        }
+
+        ++colIdx;
+    }
+}
+
+Datum TransformCstringToTarget(ColumnTypeForm& typeItem, char* string, bool hasIgnore)
+{
+    switch (typeItem.typinput) {
+        case F_DATE_IN:
+            return input_date_in(string, hasIgnore);
+        case F_BPCHARIN:
+            return input_bpcharin(string, typeItem.ioParam, typeItem.typmod);
+        case F_VARCHARIN:
+            return input_varcharin(string, typeItem.ioParam, typeItem.typmod);
+        case F_TIMESTAMP_IN:
+            return input_timestamp_in(string, typeItem.ioParam, typeItem.typmod, hasIgnore);
+        default:
+            return OidInputFunctionCall(typeItem.typinput,
+                                        string,
+                                        typeItem.ioParam,
+                                        typeItem.typmod,
+                                        hasIgnore);
+    }
+}
+
+static Datum ConvertIntValue(ColumnTypeForm& typeItem, int32 value, bool hasIgnore)
+{
+    switch (typeItem.baseTypOid) {
+        case INT4OID:
+            return Int32GetDatum(value);
+        case INT8OID:
+            return Int64GetDatum((int64)value);
+        case INT1OID:
+            if (unlikely(value < 0 || value > UCHAR_MAX)) {
+                if (hasIgnore) {
+                    ereport(WARNING, (errmsg("tinyint out of range")));
+                    return UInt8GetDatum((uint8)(value < 0 ? 0 : UCHAR_MAX));
+                }
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
+            }
+            return UInt8GetDatum((uint8)value);
+        case INT2OID:
+            if (unlikely(value < PG_INT16_MIN || value > PG_INT16_MAX)) {
+                if (hasIgnore) {
+                    ereport(WARNING, (errmsg("smallint out of range")));
+                    return Int16GetDatum((int16)(value < PG_INT16_MIN ? PG_INT16_MIN : PG_INT16_MAX));
+                }
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("smallint out of range")));
+            }
+            return Int16GetDatum((int16)value);
+        default: {
+            char* inputStr = (char*)palloc(MAX_INT32_LEN + 1);
+            pg_ltoa(value, inputStr);
+            return OidInputFunctionCall(typeItem.typinput,
+                                        inputStr,
+                                        typeItem.ioParam,
+                                        typeItem.typmod,
+                                        hasIgnore);
+        }
+    }
+}
+
+static Node* TransformAconstToTarget(A_Const* con, ColumnTypeForm& typeItem, bool hasIgnore)
+{
+    Value* value = &con->val;
+    Const* newcon = makeNode(Const);
+
+    newcon->consttype = typeItem.baseTypOid;
+    newcon->consttypmod = typeItem.typmod;
+    newcon->constcollid = typeItem.collid;
+    newcon->constlen = typeItem.typlen;
+    newcon->constbyval = typeItem.typbyval;
+    newcon->cursor_data.cur_dno = -1;
+    newcon->location = con->location;
+
+    switch (nodeTag(value)) {
+        case T_Integer: {
+            int32 val = intVal(value);
+            newcon->constisnull = false;
+            newcon->constvalue = ConvertIntValue(typeItem, val, hasIgnore);
+            break;
+        }
+        case T_Float:
+        case T_String: {
+            char* inputStr = strVal(value);
+            newcon->constisnull = false;
+            newcon->constvalue = TransformCstringToTarget(typeItem, inputStr, hasIgnore);
+            break;
+        }
+        default: {
+            /* only T_Null tag can come here */
+            Assert(IsA(value, Null));
+            newcon->constisnull = true;
+            newcon->constvalue = 0;
+            break;
+        }
+    }
+
+    /* If target is not a domain, return directly,
+     * else apply constraints.
+     */
+    if (likely(typeItem.baseTypOid == typeItem.originTypOid)) {
+        return (Node*)newcon;
+    } else {
+        /*
+         * Now build the domain coercion node. This represents run-time checking
+         * of any constraints currently attached to the domain.  This also ensures
+         * that the expression is properly labeled as to result type.
+         */
+        CoerceToDomain* domain = makeNode(CoerceToDomain);
+        domain->arg = (Expr*)newcon;
+        domain->resulttype = typeItem.originTypOid;
+        domain->resulttypmod = -1;
+        domain->coercionformat = COERCE_IMPLICIT_CAST;
+        domain->location = con->location;
+        return (Node*)domain;
+    }
+}
+
+static void CheckInsertTargetRelation(ParseState* pstate, InsertStmt* stmt, Relation targetrel, bool isRelationNullOk)
+{
+    if (unlikely(targetrel == NULL)) {
+        if (isRelationNullOk) {
+            return;
+        }
+        ereport(ERROR, (errmodule(MOD_OPT),
+                       errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                       errmsg("targetrel is NULL unexpectedly")));
+    }
+
+    /*
+     * Insert into relation pg_auth_history is not allowed.
+     * We update it only when some user's password has been changed.
+     */
+    if (unlikely(RelationGetRelid(targetrel) == AuthHistoryRelationId)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPERATION),
+             errmsg("Not allowed to insert into relation pg_auth_history.")));
+    }
+    if (((unsigned int)RelationGetInternalMask(targetrel) & INTERNAL_MASK_DINSERT)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-support feature"),
+                errdetail("internal relation doesn't allow INSERT")));
+    }
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+#endif
+        if (unlikely(RelationIsMatview(targetrel) && !stmt->isRewritten)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Unsupported feature"),
+                            errdetail("Materialized view doesn't allow INSERT")));
+        }
+#ifdef ENABLE_MULTIPLE_NODES
+    }
+#endif
+
+    if (stmt->upsertClause != NULL) {
+        /* non-supported upsert cases */
+        if (unlikely(!u_sess->attr.attr_sql.enable_upsert_to_merge && RelationIsColumnFormat(targetrel))) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                             errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on column orientated table."))));
+        }
+
+        if (unlikely(RelationIsForeignTable(targetrel) || RelationIsStream(targetrel))) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                             errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on foreign table."))));
+        }
+
+        if (unlikely(RelationIsView(targetrel))) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on VIEW."))));
+        }
+
+        if (unlikely(RelationIsContquery(targetrel))) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on CONTQUERY."))));
+        }
+    }
+
+    /* non-supported IGNORE cases */
+    if (unlikely(pstate->p_has_ignore && RelationIsColumnFormat(targetrel))) {
+        ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                         errmsg("IGNORE is not supported on INSERT column orientated table."))));
+    }
+
+    if (unlikely(!u_sess->attr.attr_sql.enable_cluster_resize &&
+        RelationInClusterResizingWriteErrorMode(targetrel))) {
+        ereport(ERROR, (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
+                errmsg("%s is redistributing, please retry later.", targetrel->rd_rel->relname.data)));
+    }
+}
+
+static void ParseColumnErrorCallback(void* arg)
+{
+    ParseColumnCallbackState* pcbstate = (ParseColumnCallbackState*)arg;
+    if (geterrcode() != ERRCODE_QUERY_CANCELED) {
+        (void)parser_errposition(pcbstate->pstate, pcbstate->location);
+    }
+
+    FormData_pg_attribute* attr = (FormData_pg_attribute*)lfirst(pcbstate->attrCell);
+    char* colname = pstrdup_ext(NameStr(attr->attname));
+    if (colname != NULL && strcmp(colname, "?column?")) {
+        errcontext("referenced column: %s", colname);
+    }
+}
+
+static List* TransformAllValuesDirectly(ParseState* pstate, SelectStmt* selectStmt, List* targetColsAttrs)
+{
+    List* allValuesList = nullptr;
+    bool hasIgnore = pstate->p_has_ignore;
+    const int colCnt = list_length(targetColsAttrs);
+
+    ColumnTypeForm colTypeItems[colCnt];
+    GetColumnTypeAttrs(targetColsAttrs, colTypeItems);
+
+   /* init ParseColumnCallbackState */
+    ParseColumnCallbackState pcbstate;
+    pcbstate.pstate = pstate;
+    pcbstate.location = 0;
+    pcbstate.attrCell = nullptr;
+    pcbstate.errcontext.callback = ParseColumnErrorCallback;
+    pcbstate.errcontext.arg = (void*)&pcbstate;
+
+    foreach_cell (recordCell, selectStmt->valuesLists) {
+        List* record = (List*)lfirst(recordCell);
+        List* oneValues = nullptr;
+        ListCell* valCell = nullptr;
+        ListCell* attrCell = nullptr;
+        int colIdx = 0;
+        forboth(valCell, record, attrCell, targetColsAttrs) {
+            A_Const* acon = (A_Const*)lfirst(valCell);
+
+            /*
+             * set up to point at the constant's text and the column name
+             * if the input routine throws an error.
+             */
+            pcbstate.location = acon->location;
+            pcbstate.attrCell= attrCell;
+            pcbstate.errcontext.previous = t_thrd.log_cxt.error_context_stack;
+            t_thrd.log_cxt.error_context_stack = &pcbstate.errcontext;
+
+            /* transform const value to target column type value */
+            Node* result = TransformAconstToTarget(acon, colTypeItems[colIdx], hasIgnore);
+            oneValues = lappend(oneValues, result);
+            ++colIdx;
+
+            /* Pop the error context stack */
+            t_thrd.log_cxt.error_context_stack = pcbstate.errcontext.previous;
+        }
+
+        allValuesList = lappend(allValuesList, oneValues);
+    }
+
+    return allValuesList;
+}
+
+static Query* TryTransformInsertDirectly(ParseState* pstate, InsertStmt* stmt)
+{
+    if (!IsValuesCanTransformDirectly(pstate, stmt)) {
+        return nullptr;
+    }
+
+    pstate->p_is_insert = true;
+    pstate->p_has_ignore = stmt->hasIgnore;
+
+    AclMode targetPerms = ACL_INSERT;
+    if (stmt->isReplace) {
+        targetPerms |= ACL_DELETE;
+    }
+    Query* query = makeNode(Query);
+    query->commandType = CMD_INSERT;
+    query->isReplace = stmt->isReplace;
+    query->is_dist_insertselect = false;
+    query->resultRelations = setTargetTables(pstate, list_make1(stmt->relation), false, false, targetPerms);
+
+    Relation targetrel = (Relation)linitial(pstate->p_target_relation);
+    CheckInsertTargetRelation(pstate, stmt, targetrel, false);
+
+    SelectStmt* selectStmt = (SelectStmt*)stmt->selectStmt;
+    const int exprCnt = list_length((List*)linitial(selectStmt->valuesLists));
+    List* targetColsAttrs = GetTargetColumnAttrs(pstate, stmt->cols, exprCnt);
+    const int colCnt = list_length(targetColsAttrs);
+    CheckColumnExprsConsistency(pstate, stmt->cols, (List*)linitial(selectStmt->valuesLists), colCnt);
+
+    List* allValuesList = NULL;
+    const Oid conCollaOId = GetCollationConnection();
+    const int conEncoding = get_valid_charset_by_collation(conCollaOId);
+    const int dbEncoding = GetDatabaseEncoding();
+    if (likely(conEncoding == dbEncoding)) {
+        allValuesList = TransformAllValuesDirectly(pstate, selectStmt, targetColsAttrs);
+    } else {
+        DB_ENCODING_SWITCH_TO(conEncoding);
+        allValuesList = TransformAllValuesDirectly(pstate, selectStmt, targetColsAttrs);
+        DB_ENCODING_SWITCH_BACK(dbEncoding);
+    }
+
+    List* collations = NIL;
+    for (int i = 0; i < colCnt; i++) {
+        collations = lappend_oid(collations, InvalidOid);
+    }
+
+    RangeTblEntry* rte = addRangeTableEntryForValues(pstate, allValuesList, collations, NULL, true);
+    const int ridx = list_length(pstate->p_rtable);
+    GenerateTargetList(query, rte, ridx, targetColsAttrs);
+
+    query->rtable = pstate->p_rtable;
+    RangeTblRef* tblRef = makeNode(RangeTblRef);
+    tblRef->rtindex = ridx;
+    pstate->p_joinlist = lappend(pstate->p_joinlist, tblRef);
+    query->jointree = makeFromExpr(pstate->p_joinlist, NULL);
+    query->tdTruncCastStatus = pstate->tdTruncCastStatus;
+    query->hasIgnore = stmt->hasIgnore;
+    query->hintState = stmt->hintState;
+    query->hasSubLinks = false;
+    query->hasTargetSRFs = false;
+
+    return query;
 }
