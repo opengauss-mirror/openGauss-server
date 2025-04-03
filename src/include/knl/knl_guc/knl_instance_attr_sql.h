@@ -47,6 +47,7 @@ typedef struct knl_instance_attr_sql {
     bool enable_orc_cache;
     bool enable_default_cfunc_libpath;
     bool enableRemoteExcute;
+    bool plan_cache_type_validation;
     int udf_memory_limit;
     int UDFWorkerMemHardLimit;
     int job_queue_processes;

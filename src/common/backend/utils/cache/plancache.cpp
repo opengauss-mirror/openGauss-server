@@ -1056,8 +1056,15 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
     } else if (resultDesc == NULL || plansource->resultDesc == NULL ||
                !equalTupleDescs(resultDesc, plansource->resultDesc)) {
         /* can we give a better error message? */
-        if (plansource->fixed_result)
-            ereport(ERROR, (errcode(ERRCODE_INVALID_CACHE_PLAN), errmsg("cached plan must not change result type")));
+        if (plansource->fixed_result) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_CACHE_PLAN),
+                            errmsg("cached plan must not change result type")));
+        } else if (!FORCE_VALIDATE_PLANCACHE_RESULT) {
+            /* If result type validation is turned off, better notice the caller */
+            ereport(NOTICE, (errmsg("cached plan's result type has changed"),
+                             errdetail("plan cache result type validation is turned off")));
+        }
+
         oldcxt = MemoryContextSwitchTo(plansource->context);
         if (resultDesc)
             resultDesc = CreateTupleDescCopy(resultDesc);

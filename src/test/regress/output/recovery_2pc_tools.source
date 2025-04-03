@@ -531,6 +531,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  perf_directory                                   | string  |      |           | 
  pgxc_node_name                                   | string  |      |           | 
  plan_cache_mode                                  | enum    |      |           | 
+ plan_cache_type_validation                       | bool    |      |           | 
  plan_mode_seed                                   | integer |      | -1        | 2147483647
  pldebugger_timeout                               | integer | s    | 1         | 86400
  pljava_vmoptions                                 | string  |      |           | 

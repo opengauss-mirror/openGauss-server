@@ -1156,6 +1156,18 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL},
 
+        {{"plan_cache_type_validation",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            XC_HOUSEKEEPING_OPTIONS,
+            gettext_noop("Turns off pbe result type check: allow user to change the plan cache result on the fly."),
+            NULL},
+            &g_instance.attr.attr_sql.plan_cache_type_validation,
+            true,
+            NULL,
+            NULL,
+            NULL},
+
         {{"lo_compat_privileges",
             PGC_SUSET,
             NODE_ALL,
