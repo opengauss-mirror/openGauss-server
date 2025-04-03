@@ -20,6 +20,7 @@
 #include "streamutil.h"
 
 #include <sys/stat.h>
+#include <sys/vfs.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -432,9 +433,10 @@ static void get_prev_backup_info(parray **backup_list, pgBackup **prev_back, par
     *prev_back = prev_backup;
 }
 
-static void calc_data_bytes()
+static int64 calc_data_bytes()
 {    
     int i;
+    int64 backup_data = 0;
     char    pretty_dssdata_bytes[20];
     char    pretty_pgdata_bytes[20];
 
@@ -459,12 +461,45 @@ static void calc_data_bytes()
         }
     }
 
+    backup_data = current.pgdata_bytes + current.dssdata_bytes;
     pretty_size(current.pgdata_bytes, pretty_pgdata_bytes, lengthof(pretty_pgdata_bytes));
     elog(INFO, "PGDATA size: %s", pretty_pgdata_bytes);
     if (IsDssMode()) {
         pretty_size(current.dssdata_bytes, pretty_dssdata_bytes, lengthof(pretty_dssdata_bytes));
         elog(INFO, "DSSDATA size: %s", pretty_dssdata_bytes);
     }
+
+    return backup_data;
+}
+
+static bool backup_space_check()
+{
+    int64 disk_available_bytes = 0;
+    int64 backup_bytes = 0;
+    char pretty_available_bytes[BYTES_PATH_LEN];
+    char pretty_backup_bytes[BYTES_PATH_LEN];
+    char data_path[MAX_PATH_LEN] = {0};
+    struct statfs diskInfo = {0};
+
+    int ret = statfs(instance_config.pgdata, &diskInfo);
+    if (ret < 0) {
+        elog(ERROR, "Get disk free space failed!");
+        return false;
+    }
+
+    /* Get the available size of the disk */
+    disk_available_bytes = (int64)diskInfo.f_bfree * diskInfo.f_frsize;
+    pretty_size(disk_available_bytes, pretty_available_bytes, lengthof(pretty_available_bytes));
+    /* Calculate the total amount required for backup */
+    backup_bytes = calc_data_bytes();
+    pretty_size(backup_bytes, pretty_backup_bytes, lengthof(pretty_backup_bytes));
+    elog(INFO, "The remaining disk space is: %s; The required space for backup is: %s;",
+        pretty_available_bytes, pretty_backup_bytes);
+    if (disk_available_bytes <= backup_bytes) {
+        return false;
+    }
+
+    return true;
 }
 
 static void add_xlog_files_into_backup_list(const char *database_path, const char *dssdata_path, bool enable_dss)
@@ -813,8 +848,13 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
                 "gs_probackup do not possess sufficient permissions to list PGDATA content");
     }
 
-    /* Calculate pgdata_bytes and dssdata_bytes */
-    calc_data_bytes();
+    /* Check if the memory space is sufficient for backup */
+    if (!backup_space_check()) {
+        current.status = BACKUP_STATUS_ERROR;
+        write_backup(&current, true);
+        elog(ERROR, "There is not enough remaining disk space for backup, please clean it up and try again");
+    }
+
     /*
      * Sort pathname ascending. It is necessary to create intermediate
      * directories sequentially.

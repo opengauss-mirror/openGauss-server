@@ -16,7 +16,7 @@
 #include "file.h"
 
 #include <sys/stat.h>
-
+#include <sys/vfs.h>
 #include "tool_common.h"
 #include "configuration.h"
 #include "thread.h"
