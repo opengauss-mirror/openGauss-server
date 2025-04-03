@@ -240,7 +240,7 @@ test: single_node_random transactions_test autocommit_test
 test: prefixkey_index invisible_index
 test: hash_index_001
 test: hash_index_002
-test: single_node_update 
+test: single_node_update parse_fusion
 #test single_node_namespace
 #test: single_node_prepared_xacts 
 #test: single_node_delete
