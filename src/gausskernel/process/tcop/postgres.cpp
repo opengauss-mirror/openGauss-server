@@ -2975,6 +2975,28 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         if (!u_sess->attr.attr_storage.phony_autocommit) {
             BeginTxnForAutoCommitOff();
         }
+
+        if (nodeTag(parsetree) == T_ExecuteStmt &&
+            !IsA(FetchPreparedStatement(((ExecuteStmt*)parsetree)->name, true, true)->plansource->raw_parse_tree,
+                 SelectStmt) && u_sess->attr.attr_sql.sql_compatibility != C_FORMAT ) {
+            PushActiveSnapshot(GetTransactionSnapshot());
+            MemoryContext tmpcontext = AllocSetContextCreate(u_sess->top_portal_cxt,
+                            "PBEBypassMemory",
+                            ALLOCSET_SMALL_MINSIZE,
+                            ALLOCSET_SMALL_INITSIZE,
+                            ALLOCSET_SMALL_MAXSIZE);
+            (void) MemoryContextSwitchTo(tmpcontext);
+            DestReceiver* destRec = CreateDestReceiver(dest);
+            ExecuteQuery((ExecuteStmt *)parsetree, NULL, query_string, NULL, destRec, completionTag, true);
+            PopActiveSnapshot();
+            finish_xact_command();
+            EndCommand(completionTag, dest);
+            (*destRec->rDestroy)(destRec);
+            MemoryContextDelete(tmpcontext);
+            MemoryContextReset(OptimizerContext);
+            continue;
+        }
+
         /* SQL bypass */
         if (runOpfusionCheck && !IsRightRefState(plantree_list)) {
             (void)MemoryContextSwitchTo(oldcontext);

@@ -363,7 +363,7 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
  * source is that of the original PREPARE.
  */
 void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* queryString, ParamListInfo params,
-    DestReceiver* dest, char* completionTag)
+    DestReceiver* dest, char* completionTag, bool isFromPbeOpt)
 {
     PreparedStatement *entry = NULL;
     CachedPlan* cplan = NULL;
@@ -451,6 +451,10 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     portal = CreateNewPortal();
     /* Don't display the portal in pg_cursors, it is for internal use only */
     portal->visible = false;
+
+    if (isFromPbeOpt && DestRemote == dest->mydest) {
+        SetRemoteDestReceiverParams(dest, portal);
+    }
 
     /* Copy the plan's saved query string into the portal's memory */
     query_string = MemoryContextStrdup(PortalGetHeapMemory(portal), entry->plansource->query_string);
