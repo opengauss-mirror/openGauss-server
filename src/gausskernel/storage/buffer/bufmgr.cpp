@@ -4802,7 +4802,7 @@ void InitBufferPoolAccess(void)
 {
     HASHCTL hash_ctl;
     errno_t rc = EOK;
-
+    
     rc = memset_s(t_thrd.storage_cxt.PrivateRefCountArray, REFCOUNT_ARRAY_ENTRIES * sizeof(PrivateRefCountEntry), 0,
                   REFCOUNT_ARRAY_ENTRIES * sizeof(PrivateRefCountEntry));
     securec_check(rc, "\0", "\0");

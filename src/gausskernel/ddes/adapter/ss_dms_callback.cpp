@@ -1039,6 +1039,7 @@ static int CBXLogFlush(void *db_handle, unsigned long long *lsn)
 {
     (void)LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
     (void)XLogBackgroundFlush();
+    (void)XLogBackgroundFlush(true);
     *lsn = GetFlushRecPtr();
     LWLockRelease(WALWriteLock);
     return GS_SUCCESS;

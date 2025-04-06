@@ -284,24 +284,30 @@ void WalWriterMain(void)
             proc_exit(0); /* done */
         }
 
-        LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
+        if (!t_thrd.walwriter_cxt.lockhold) {
+            LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
+            t_thrd.walwriter_cxt.lockhold = true;
+        }
+        
         wrote_something = XLogBackgroundFlush();
-        LWLockRelease(WALWriteLock);
 
         if (!wrote_something && ++times_wrote_nothing > g_instance.attr.attr_storage.walwriter_sleep_threshold) {
+            XLogBackgroundFlush(true);
+            LWLockRelease(WALWriteLock);
+            t_thrd.walwriter_cxt.lockhold = false;
             /*
              * Wait for the first entry after last flushed entry to be updated
              */
             int lastFlushedEntry = g_instance.wal_cxt.lastWalStatusEntryFlushed;
             int nextStatusEntry =
-                GET_NEXT_STATUS_ENTRY(g_instance.attr.attr_storage.wal_insert_status_entries_power, lastFlushedEntry);
+                GET_NEXT_STATUS_ENTRY(lastFlushedEntry);
             volatile WalInsertStatusEntry *pCriticalEntry =
                 &g_instance.wal_cxt.walInsertStatusTable[nextStatusEntry];
-            if (g_instance.wal_cxt.isWalWriterUp && pCriticalEntry->status == WAL_NOT_COPIED) {
+            if (g_instance.wal_cxt.isWalWriterUp && pCriticalEntry->endLSN == 0) {
                 sleep_times_counter++;
                 (void)pthread_mutex_lock(&g_instance.wal_cxt.criticalEntryMutex);
                 g_instance.wal_cxt.isWalWriterSleeping = true;
-                while (pCriticalEntry->status == WAL_NOT_COPIED && !t_thrd.walwriter_cxt.shutdown_requested) {
+                while (pCriticalEntry->endLSN == 0 && !t_thrd.walwriter_cxt.shutdown_requested) {
                     (void)clock_gettime(CLOCK_MONOTONIC, &time_to_wait);
                     time_to_wait.tv_nsec += g_sleep_timeout_ms * NANOSECONDS_PER_MILLISECOND;
                     if (time_to_wait.tv_nsec >= NANOSECONDS_PER_SECOND) {

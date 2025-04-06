@@ -81,7 +81,9 @@ typedef enum {
 
 #define REP_CONN_ARRAY 2  // support 2 relp  connection
 
-const static XLogRecPtr MAX_XLOG_REC_PTR = (XLogRecPtr)0xFFFFFFFFFFFFFFFF;
+#define WAL_COMMIT_BIT (UINT64CONST(1) << 63)
+
+const static XLogRecPtr MAX_XLOG_REC_PTR = (XLogRecPtr)0x7FFFFFFFFFFFFFFF;
 extern volatile uint64 sync_system_identifier;
 
 /*
@@ -151,7 +153,6 @@ extern const int DemoteModeNum;
 
 #define DemoteModeDesc(mode) (((mode) > 0 && (mode) < DemoteModeNum) ? DemoteModeDescs[(mode)] : DemoteModeDescs[0])
 
-extern bool XLogBackgroundFlush(void);
 
 typedef struct {
     LWLock* lock;
@@ -200,12 +201,12 @@ typedef struct {
  * header of the xlog and the size of the xlog is 32 bytes). Therefore, 
  * the size of walInsertStatusTable is calculated as 64 KB.
  */
+
 #define MIN_WAL_INSERT_STATUS_ENTRY_POW (16)
 
-#define GET_WAL_INSERT_STATUS_ENTRY_CNT(num) \
-    ((num <= 0) ? (1 << MIN_WAL_INSERT_STATUS_ENTRY_POW) : (1 << num))
+#define GET_WAL_INSERT_STATUS_ENTRY_CNT() (1 << MIN_WAL_INSERT_STATUS_ENTRY_POW)
 /* (ientry + 1) % WAL_INSERT_STATUS_ENTRIES */
-#define GET_NEXT_STATUS_ENTRY(num, ientry) ((ientry + 1) & (GET_WAL_INSERT_STATUS_ENTRY_CNT(num) - 1))
+#define GET_NEXT_STATUS_ENTRY(ientry) ((ientry + 1) & (GET_WAL_INSERT_STATUS_ENTRY_CNT() - 1))
 
 #define GET_STATUS_ENTRY_INDEX(ientry) ientry
 
@@ -217,7 +218,6 @@ struct WalInsertStatusEntry {
     int32  LRC;
 
     /* WAL copy status: "0" - not copied; "1" - copied */
-    uint32 status;
 };
 
 struct WALFlushWaitLockPadded {
@@ -719,11 +719,11 @@ extern XLogSegNo GetNewestXLOGSegNo(const char* workingPath);
 #define XLOG_CONTAIN_CSN 0x80000000
 #define XLOG_MASK_TERM 0x7FFFFFFF
 
-extern XLogRecPtr XLogInsertRecord(struct XLogRecData* rdata, XLogRecPtr fpw_lsn);
+extern XLogRecPtr XLogInsertRecord(struct XLogRecData* rdata, XLogRecPtr fpw_lsn, bool need_flush);
 extern void XLogWaitFlush(XLogRecPtr recptr);
 extern void XLogWaitBufferInit(XLogRecPtr recptr);
 extern void UpdateMinRecoveryPoint(XLogRecPtr lsn, bool force);
-extern bool XLogBackgroundFlush(void);
+extern bool XLogBackgroundFlush(bool fsync = false);
 extern bool XLogNeedsFlush(XLogRecPtr RecPtr);
 extern int XLogFileInit(XLogSegNo segno, bool* use_existent, bool use_lock);
 extern int XLogFileOpen(XLogSegNo segno);

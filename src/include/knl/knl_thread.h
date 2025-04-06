@@ -2092,6 +2092,7 @@ typedef struct knl_t_lwlockmoniter_context {
 typedef struct knl_t_walwriter_context {
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
+    bool lockhold;
 } knl_t_walwriter_context;
 
 typedef struct knl_t_walwriterauxiliary_context {

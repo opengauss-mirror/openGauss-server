@@ -56,7 +56,8 @@ typedef enum XLOG_FPI_FOR_HINT_TYPE {
 
 /* prototypes for public functions in xloginsert.c: */
 extern void XLogBeginInsert(void);
-extern XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id = InvalidBktId, bool istoast = false, TransactionId xid = 0);
+extern XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id = InvalidBktId, bool istoast = false,
+                             TransactionId xid = 0, bool need_flush = false);
 extern void XLogEnsureRecordSpace(int nbuffers, int ndatas);
 extern void XLogRegisterData(char* data, int len);
 extern void XLogRegisterBuffer(uint8 block_id, Buffer buffer, uint8 flags, TdeInfo* tdeinfo = NULL);
