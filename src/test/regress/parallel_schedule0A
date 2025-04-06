@@ -519,6 +519,7 @@ test: backup_tool_audit
 test: extra_float_digits
 
 test: auto_parameterization
+test: auto_parameterization_views
 
 # test mot when without mot in compile
 test: mot/without_mot_server

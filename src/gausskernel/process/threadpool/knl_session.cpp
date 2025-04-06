@@ -555,6 +555,7 @@ static void knl_u_parameterization_init(knl_u_parameterization_context* param_cx
     param_cxt->param_cached_plan_count = 0;
     param_cxt->parameterized_queries = NULL;
     param_cxt->query_param_cxt = NULL;
+    param_cxt->use_parame = false;
 }
 
 static void knl_u_typecache_init(knl_u_typecache_context* tycache_cxt)

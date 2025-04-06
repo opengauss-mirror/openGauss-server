@@ -1,0 +1,65 @@
+set enable_query_parameterization=on;
+CREATE TABLE test(c1 INT, c2 INT);
+INSERT INTO test(C1, C2) VALUES(1, 1);
+-- count should be 1
+SELECT COUNT(*) FROM query_parameterization_views();
+ count 
+-------
+     1
+(1 row)
+
+DROP TABLE test;
+CREATE TABLE test(c1 INT, c2 INT);
+-- count should be 0
+SELECT COUNT(*) FROM query_parameterization_views();
+ count 
+-------
+     0
+(1 row)
+
+INSERT INTO test(C1, C2) VALUES(2, 3);
+INSERT INTO test(C1, C2) VALUES(3, 4);
+-- only 1 insert record
+SELECT query_type, is_bypass, param_types, param_nums, parameterized_query FROM query_parameterization_views();
+ query_type | is_bypass | param_types | param_nums |          parameterized_query           
+------------+-----------+-------------+------------+----------------------------------------
+ INSERT     | t         | 23 23       |          2 | INSERT INTO test(C1, C2) VALUES(?, ?);
+(1 row)
+
+set enable_query_parameterization=off;
+-- count should be 1
+SELECT COUNT(*) FROM query_parameterization_views();
+ count 
+-------
+     1
+(1 row)
+
+set enable_query_parameterization=on;
+UPDATE test SET C1 = 100 WHERE C1 = 3;
+SET max_parameterized_query_stored=1;
+-- 2 records, insert & update
+SELECT query_type, is_bypass, param_types, param_nums, parameterized_query FROM query_parameterization_views();
+ query_type | is_bypass | param_types | param_nums |          parameterized_query           
+------------+-----------+-------------+------------+----------------------------------------
+ UPDATE     | f         | 23 23       |          2 | UPDATE test SET C1 = ? WHERE C1 = ?;
+ INSERT     | t         | 23 23       |          2 | INSERT INTO test(C1, C2) VALUES(?, ?);
+(2 rows)
+
+DELETE FROM test where C1 = 3;
+-- only 1 delete record
+SELECT query_type, is_bypass, param_types, param_nums, parameterized_query FROM query_parameterization_views();
+ query_type | is_bypass | param_types | param_nums |      parameterized_query       
+------------+-----------+-------------+------------+--------------------------------
+ DELETE     | f         | 23          |          1 | DELETE FROM test where C1 = ?;
+(1 row)
+
+SET max_parameterized_query_stored=1;
+ALTER TABLE test DROP COLUMN C2;
+-- no record left 
+SELECT query_type, is_bypass, param_types, param_nums, parameterized_query FROM query_parameterization_views();
+ query_type | is_bypass | param_types | param_nums | parameterized_query 
+------------+-----------+-------------+------------+---------------------
+(0 rows)
+
+DROP TABLE test;
+set enable_query_parameterization=off;

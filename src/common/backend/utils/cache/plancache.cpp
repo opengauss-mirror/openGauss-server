@@ -3119,7 +3119,6 @@ CheckInvalItemDependency(CachedPlanSource *plansource, int cacheid, uint32 hashv
 void PlanCacheRelCallback(Datum arg, Oid relid)
 {
     CachedPlanSource* plansource = NULL;
-
     for (plansource = u_sess->pcache_cxt.first_saved_plan; plansource; plansource = plansource->next_saved) {
         Assert(plansource->magic == CACHEDPLANSOURCE_MAGIC);
 
@@ -3150,6 +3149,21 @@ void PlanCacheRelCallback(Datum arg, Oid relid)
 
             CheckRelDependency(plansource, relid);
         }
+    }
+
+    for (plansource = u_sess->param_cxt.first_saved_plan; plansource; plansource = plansource->next_saved) {
+        Assert(plansource->magic == CACHEDPLANSOURCE_MAGIC);
+
+        /* No work if it's already invalidated */
+        if (!plansource->is_valid)
+            continue;
+
+        /* Never invalidate transaction control commands */
+        if (IsTransactionStmtPlan(plansource)) {
+            continue;
+        }
+
+        CheckRelDependency(plansource, relid);
     }
 }
 
