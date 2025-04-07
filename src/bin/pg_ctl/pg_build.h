@@ -68,4 +68,22 @@ extern bool libpqRotateCbmFile(PGconn* connObj, XLogRecPtr lsn);
 extern int fsync_fname(const char *fname, bool isdir);
 extern void fsync_pgdata(const char *pg_data);
 
+typedef enum {
+    DEFAULT_REASON = 0,
+    CONN_PRIMARY_FAIL,
+    VERIFY_COMMIT_LSN_FAIL
+} BuildFailReason;
+
+extern BuildFailReason g_inc_fail_reason;
+
+
+typedef enum {
+    VERIFY_COMMIT_DISABLE = 0,
+    VERIFY_COMMIT_WORKING,
+    VERIFY_COMMIT_SUCCESS,
+    VERIFY_COMMIT_FAILED
+} VerifyCommitStatus;
+
+extern VerifyCommitStatus verifyCommitStatus;
+
 #endif /* PG_BUILD_H */
