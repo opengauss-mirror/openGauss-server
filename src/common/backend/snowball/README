@@ -13,10 +13,10 @@ distribution, with only some minor adjustments of file inclusions.  Note
 that most of these files are in fact derived files, not master source.
 The master sources are in the Snowball language, and are available along
 with the Snowball-to-C compiler from the Snowball project.  We choose to
-include the derived files in the PostgreSQL distribution because most
+include the derived files in the openGauss distribution because most
 installations will not have the Snowball compiler available.
 
-To update the PostgreSQL sources from a new Snowball libstemmer_c
+To update the openGauss sources from a new Snowball libstemmer_c
 distribution:
 
 1. Copy the *.c files in libstemmer_c/src_c/ to src/backend/snowball/libstemmer

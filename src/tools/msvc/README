@@ -3,7 +3,7 @@ src/tools/msvc/README
 MSVC build
 ==========
 
-This directory contains the tools required to build PostgreSQL using
+This directory contains the tools required to build openGauss using
 Microsoft Visual Studio 2005 - 2011. This builds the whole backend, not just
 the libpq frontend library. For more information, see the documentation
 chapter "Installation on Windows" and the description below.
@@ -11,7 +11,7 @@ chapter "Installation on Windows" and the description below.
 
 Notes about Visual Studio Express
 ---------------------------------
-To build PostgreSQL using Visual Studio Express, the Microsoft Windows SDK
+To build openGauss using Visual Studio Express, the Microsoft Windows SDK
 has to be installed. Since this is not included in the product
 originally, extra steps are needed to make it work.
 
@@ -29,12 +29,12 @@ may be necessary.
 
 If you are using a recent version of the Microsoft Windows SDK that includes
 the compilers and build tools you probably don't even need Visual Studio
-Express to build PostgreSQL.
+Express to build openGauss.
 
 
 Structure of the build tools
 ----------------------------
-The tools for building PostgreSQL using Microsoft Visual Studio currently
+The tools for building openGauss using Microsoft Visual Studio currently
 consist of the following files:
 
 - Configuration files -

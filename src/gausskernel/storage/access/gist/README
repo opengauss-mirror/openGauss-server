@@ -12,7 +12,7 @@ Jeffrey F. Naughton, Avi Pfeffer:
     http://www.sai.msu.su/~megera/postgres/gist/papers/gist.ps
 
 and implemented by J. Hellerstein and P. Aoki in an early version of
-PostgreSQL (more details are available from The GiST Indexing Project
+openGauss (more details are available from The GiST Indexing Project
 at Berkeley at http://gist.cs.berkeley.edu/). As a "university"
 project it had a limited number of features and was in rare use.
 
@@ -26,7 +26,7 @@ The current implementation of GiST supports:
   * Recovery support via WAL logging
   * Buffering build algorithm
 
-The support for concurrency implemented in PostgreSQL was developed based on
+The support for concurrency implemented in openGauss was developed based on
 the paper "Access Methods for Next-Generation Database Systems" by
 Marcel Kornaker:
 
@@ -40,8 +40,8 @@ and Jeffrey Scott Vitter.
 
 The original algorithms were modified in several ways:
 
-* They had to be adapted to PostgreSQL conventions. For example, the SEARCH
-  algorithm was considerably changed, because in PostgreSQL the search function
+* They had to be adapted to openGauss conventions. For example, the SEARCH
+  algorithm was considerably changed, because in openGauss the search function
   should return one tuple (next), not all tuples at once. Also, it should
   release page locks between calls.
 * Since we added support for variable length keys, it's not possible to
@@ -55,7 +55,7 @@ The original algorithms were modified in several ways:
   had to find out ourself how to solve some specific problems.
 
 Because of the above reasons, we have revised the interaction of GiST
-core and PostgreSQL WAL system. Moreover, we encountered (and solved)
+core and openGauss WAL system. Moreover, we encountered (and solved)
 a problem of uncompleted insertions when recovering after crash, which
 was not touched in the paper.
 

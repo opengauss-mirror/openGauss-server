@@ -26,7 +26,7 @@ Windows Systems
 Windows systems do not vary in their thread-safeness in the same way that
 other systems might, nor do they generally have pthreads installed, hence
 on Windows this test is skipped by the configure program (pthreads is
-required by the test program, but not PostgreSQL itself). If you do wish
+required by the test program, but not openGauss itself). If you do wish
 to test your system however, you can do so as follows:
 
 1) Install pthreads in you Mingw/Msys environment. You can download pthreads

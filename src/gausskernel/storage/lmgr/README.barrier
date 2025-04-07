@@ -79,7 +79,7 @@ generally entirely adequate.
 However, in some cases, it is desirable to avoid the overhead of acquiring
 and releasing locks.  In this case, memory barriers may be used to ensure
 that the apparent order of execution is as the programmer desires.   In
-PostgreSQL backend code, the pg_memory_barrier() macro may be used to achieve
+openGauss backend code, the pg_memory_barrier() macro may be used to achieve
 this result.  In the example above, we can prevent the reader from seeing a
 garbage value by having the writer do this:
 

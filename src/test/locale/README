@@ -16,7 +16,7 @@ for example
 Currently, there are only tests for a few locales available.  The script
 'runall' calls test-ctype to test libc and locale data, test-sort.pl
 (uncomment test-sort.py, if you have a Python interpreter installed), and
-does tests on PostgreSQL with the provided SQL script files.
+does tests on openGauss with the provided SQL script files.
 
 To add locale tests one needs to create a directory $locale and create
 a Makefile (and other files) similar to koi8-r/*.  Actually, the simplest
