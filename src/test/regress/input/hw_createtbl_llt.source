@@ -19,6 +19,9 @@ reset current_schema;
 
 show current_schema;
 
+--test for core issue #IBXF6U
+set query_dop = 1002;
+
 --test create table tablesapce as select
 create table ts_t1(id int,info text) tablespace hw_createtbl_llt_tablespace;
 insert into ts_t1 values(generate_series(1,1000),'sadadsa');
@@ -26,6 +29,7 @@ create table ts_t2 tablespace hw_createtbl_llt_tablespace as select * from ts_t1
 select relname,reltablespace from pg_class where relname in('ts_t1','ts_t2') order by 1;
 select relname,relfilenode,reltablespace from pg_class where relname='ts_t2';
 
+reset query_dop;
 drop table ts_t1;
 drop table ts_t2;
 

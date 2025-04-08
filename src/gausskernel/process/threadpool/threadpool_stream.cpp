@@ -137,6 +137,8 @@ void ThreadPoolStream::InitStream()
     InitializeGUCOptions();
     /* Read in remaining GUC variables */
     read_nondefault_variables();
+    /* Init share memory for this session. */
+    init_session_share_memory();
 
     /* Do local initialization of file, storage and buffer managers */
     InitFileAccess();
