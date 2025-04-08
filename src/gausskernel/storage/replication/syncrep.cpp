@@ -324,6 +324,23 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         }
 
         /*
+         * If switchover request happened, a logical walsender may wait for synchronous
+         * replication as the walsender of synchronous standby quit in advance. We need
+         * to break the waiting to finish switchover.
+         */
+        if ((NULL != t_thrd.walsender_cxt.MyWalSnd) && u_sess->attr.attr_sql.enable_slot_log &&
+            t_thrd.walsender_cxt.MyWalSnd->node_state == NODESTATE_STANDBY_REDIRECT &&
+            !t_thrd.walsender_cxt.MyWalSnd->replSender) {
+            ereport(WARNING,
+                    (errmsg("canceling wait for synchronous replication due to switchover "
+                            "request for logical replication.")));
+            if (SyncRepCancelWait()) {
+                waitStopRes = STOP_WAIT;
+                break;
+            }
+        }
+
+        /*
          * If a wait for synchronous replication is pending, we can neither
          * acknowledge the commit nor raise ERROR or FATAL.  The latter would
          * lead the client to believe that the transaction aborted, which
