@@ -25,6 +25,8 @@ show current_schema;
  "$user",public
 (1 row)
 
+--test for core issue #IBXF6U
+set query_dop = 1002;
 --test create table tablesapce as select
 create table ts_t1(id int,info text) tablespace hw_createtbl_llt_tablespace;
 insert into ts_t1 values(generate_series(1,1000),'sadadsa');
@@ -42,6 +44,7 @@ select relname,relfilenode,reltablespace from pg_class where relname='ts_t2';
 --? ts_t2   |.*                   
 (1 row)
 
+reset query_dop;
 drop table ts_t1;
 drop table ts_t2;
 -- clean enviroment
