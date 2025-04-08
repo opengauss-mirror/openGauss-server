@@ -1060,11 +1060,11 @@ typedef struct knl_u_parameterization_context {
 
     int param_cached_plan_count;
 
-    pthread_mutex_t param_htbl_lock;
-
     HTAB* parameterized_queries;
 
     MemoryContext query_param_cxt;
+
+    bool use_parame;
 } knl_u_parameterization_context;
 
 typedef struct knl_u_typecache_context {

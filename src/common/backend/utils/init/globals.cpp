@@ -77,12 +77,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93043;
+const uint32 GRAND_VERSION_NUM = 93044;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 AUTO_PARAMETERIZATION_VERSION_NUMBER = 93044;
 const uint32 COMPUTED_COLUMNS_VERSION_NUMBER = 93043;
 const uint32 SWCB_OPTIMIZATION_VERSION_NUM = 93040;
 const uint32 DISABLE_MOT_ENGINE = 93039;

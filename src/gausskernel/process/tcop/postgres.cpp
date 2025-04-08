@@ -2836,16 +2836,21 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_COMPL_SQL);
         }
 
-        if(u_sess->attr.attr_sql.enable_query_parameterization && isQualifiedIuds(parsetree)) {
-            bool res = execQueryParameterization(parsetree, query_string, dest, completionTag);
-            if(res){
-                CommandCounterIncrement();
-                if (snapshot_set != false)
-                    PopActiveSnapshot();
-                finish_xact_command();
-                EndCommand(completionTag, dest);
-                MemoryContextReset(OptimizerContext);
-                break;
+        if(u_sess->attr.attr_sql.enable_query_parameterization && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT && g_instance.attr.attr_common.enable_mot_server != true) {
+            Oid parameterOid = InvalidOid;
+            if (isQualifiedIuds(parsetree, query_string, &parameterOid)) {
+                bool res = execQueryParameterization(parsetree, query_string, dest, completionTag, parameterOid);
+                u_sess->param_cxt.use_parame = false;
+                if(res){
+                    CommandCounterIncrement();
+                    if (snapshot_set)
+                        PopActiveSnapshot();
+                    finish_xact_command();
+                    EndCommand(completionTag, dest);
+                    (void)MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
+                    MemoryContextReset(OptimizerContext);
+                    break;
+                }
             }
         }
         /*

@@ -25,7 +25,8 @@ OBJS = catalog.o dependency.o heap.o index.o indexing.o namespace.o aclchk.o \
        pg_hashbucket.o cstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
        gs_matview.o pgxc_slice.o pg_job_proc.o gs_job_argument.o gs_job_attribute.o pg_uid.o gs_global_config.o\
        gs_db_privilege.o pg_publication.o pg_subscription.o gs_utf8_collation.o gs_collation.o gs_gbk_collation.o\
-       gs_gb18030_collation.o pg_proc_ext.o query_imcstore_views.o pg_statistic_history.o pg_statistic_lock.o
+       gs_gb18030_collation.o pg_proc_ext.o query_imcstore_views.o pg_statistic_history.o pg_statistic_lock.o\
+	   query_parameterization_views.o
 
 BKIFILES = postgres.bki postgres.description postgres.shdescription
 

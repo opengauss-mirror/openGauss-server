@@ -88,6 +88,8 @@ public:
 
     int16* m_attrno; /* target attribute number, length is m_tupDesc->natts */
 
+    int m_maxAttrno;
+
 };
 
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_INDEX_H_ */
