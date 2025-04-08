@@ -47,6 +47,7 @@
 #include "postmaster/postmaster.h"
 #include "utils/acl.h"
 #include "gs_policy/policy_common.h"
+#include "alarm/alarm.h"
 
 #include "cipher.h"
 #include "openssl/rand.h"
@@ -227,6 +228,28 @@ static int pg_SSPI_recvauth(Port* port);
  */
 THR_LOCAL ClientAuthentication_hook_type ClientAuthentication_hook = NULL;
 
+void ReportAlarmLoginFailed(const char* userName)
+{
+    if (get_role_oid(userName, true) == INITIAL_USER_ID) {
+        return;
+    }
+    Alarm alarmItem[1];
+    AlarmAdditionalParam tempAdditionalParam;
+
+    // Initialize the alarm item
+    AlarmItemInitialize(alarmItem, ALM_AI_DbUserLoginFailed, ALM_AS_Normal, NULL);
+    // fill the alarm message
+    WriteAlarmAdditionalInfo(&tempAdditionalParam,
+                             g_instance.attr.attr_common.PGXCNodeName,
+                             "",
+                             userName,
+                             alarmItem,
+                             ALM_AT_Event,
+                             userName);
+    // report the alarm
+    AlarmReporter(alarmItem, ALM_AT_Event, &tempAdditionalParam);
+}
+
 /*
  * Tell the user the authentication failed, but not (much about) why.
  *
@@ -262,6 +285,7 @@ static
     if (status == STATUS_EOF)
         proc_exit(0);
 
+    ReportAlarmLoginFailed(port->user_name);
     if (status == STATUS_EXPIRED) {
         errstr = gettext_noop("The account is not within the period of validity.");
     } else {
@@ -736,6 +760,7 @@ void ClientAuthentication(Port* port)
                     pgaudit_user_login(FALSE, port->database_name, details);
 
                     /* Show locked errror messages when the account has been locked. */
+                    ReportAlarmLoginFailed(port->user_name);
                     ereport(FATAL,
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION), errmsg("The account has been locked.")));
                 }
@@ -770,9 +795,9 @@ void ClientAuthentication(Port* port)
     if (ClientAuthentication_hook)
         (*ClientAuthentication_hook)(port, status);
 
-    if (status == STATUS_OK)
+    if (status == STATUS_OK) {
         sendAuthRequest(port, AUTH_REQ_OK);
-    else {
+    } else {
         auth_failed(port, status);
     }
     /* Done with authentication, so we should turn off immediate interrupts */

@@ -19,6 +19,8 @@
 #include "access/heapam.h"
 #include "access/tableam.h"
 #include "access/xact.h"
+#include "alarm/alarm.h"
+#include "alarm/alarm_log.h"
 #include "catalog/catalog.h"
 #include "commands/defrem.h"
 #include "catalog/dependency.h"
@@ -46,6 +48,7 @@
 #include "nodes/pg_list.h"
 #include "nodes/value.h"
 #include "postmaster/rbcleaner.h"
+#include "postmaster/alarmchecker.h"
 #include "storage/lmgr.h"
 #include "storage/predicate_internals.h"
 #include "utils/acl.h"
@@ -122,6 +125,9 @@ static void check_weak_password(char *Password);
 void TryLockAccount(Oid roleID, int extrafails, bool superlock);
 bool TryUnlockAccount(Oid roleID, bool superunlock, bool isreset);
 void TryUnlockAllAccounts(void);
+static void ReportAlarmLockAccount(char* rolename, bool superlock);
+static void ReportResumeAlarmLockAccount(bool superunlock);
+static bool AddInt32Overflow(int32 a, int b);
 USER_STATUS GetAccountLockedStatus(Oid roleID);
 void SetAccountPasswordExpired(Oid roleID, bool expired);
 void DropUserStatus(Oid roleID);
@@ -4911,16 +4917,18 @@ void UpdateFailCountToHashTable(Oid roleid, int4 extrafails, bool superlock)
     }
 
     account_entry = (AccountLockHashEntry *)hash_search(g_instance.policy_cxt.account_table, &roleid, HASH_ENTER, &found);
-    if (found == false) {
+    if (!found) {
         SpinLockInit(&account_entry->mutex);
     }
 
     SpinLockAcquire(&account_entry->mutex);
-    if (found == false) {
+    if (!found) {
         account_entry->failcount = extrafails;
         account_entry->rolstatus = UNLOCK_STATUS;
     } else {
-        account_entry->failcount += extrafails;
+        if (!AddInt32Overflow(account_entry->failcount, extrafails)) {
+            account_entry->failcount += extrafails;
+        }
         if (u_sess->attr.attr_security.Failed_login_attempts > 0 && 
             account_entry->failcount >= u_sess->attr.attr_security.Failed_login_attempts) {
             lockflag = true;
@@ -4928,11 +4936,12 @@ void UpdateFailCountToHashTable(Oid roleid, int4 extrafails, bool superlock)
     }
 
     /* super lock account or exceed failed limit */
-    if (extrafails == 0 || lockflag == true) {
+    if (extrafails == 0 || lockflag) {
         account_entry->rolstatus = superlock ? SUPERLOCK_STATUS : LOCK_STATUS;
         account_entry->locktime = GetCurrentTimestamp();
         lockflag = true;
         ereport(DEBUG2, (errmsg("%s locktime %s", rolename, timestamptz_to_str(account_entry->locktime))));
+        ReportAlarmLockAccount(rolename, superlock);
     }
     ereport(DEBUG2, (errmsg("%s failcount %d, rolstatus %d", rolename, account_entry->failcount, account_entry->rolstatus)));
     SpinLockRelease(&account_entry->mutex);
@@ -5089,6 +5098,7 @@ bool UnlockAccountToHashTable(Oid roleid, bool superlock, bool isreset)
             account_entry->failcount = 0;
             SpinLockRelease(&account_entry->mutex);
             ereport(DEBUG2, (errmsg("super unlock account %u", roleid)));
+            ReportResumeAlarmLockAccount(true);
             return true;
         } else {
             if (status == SUPERLOCK_STATUS) {
@@ -5100,12 +5110,14 @@ bool UnlockAccountToHashTable(Oid roleid, bool superlock, bool isreset)
                     account_entry->failcount = 0;
                 }
                 SpinLockRelease(&account_entry->mutex);
+                ReportResumeAlarmLockAccount(false);
                 return true;
             }
             if (CanUnlockAccount(account_entry->locktime)) {
                 account_entry->failcount = 0;
                 account_entry->rolstatus = UNLOCK_STATUS;
                 SpinLockRelease(&account_entry->mutex);
+                ReportResumeAlarmLockAccount(false);
                 return true;
             }
             SpinLockRelease(&account_entry->mutex);
@@ -5168,7 +5180,7 @@ void TryLockAccount(Oid roleID, int extrafails, bool superlock)
     int16 status = 0;
     Datum userStatusDatum;
     bool userStatusIsNull = false;
-    Datum user_status_record[Natts_pg_user_status];
+    Datum user_status_record[Natts_pg_user_status] = {0};
     bool user_status_record_nulls[Natts_pg_user_status] = {false};
     bool user_status_record_repl[Natts_pg_user_status] = {false};
 
@@ -5196,17 +5208,6 @@ void TryLockAccount(Oid roleID, int extrafails, bool superlock)
         pgstat_initstats(pg_user_status_rel);
         pg_user_status_dsc = RelationGetDescr(pg_user_status_rel);
         tuple = SearchSysCache1(USERSTATUSROLEID, PointerGetDatum(roleID));
-
-        /* insert/update a new login failed record into the pg_user_status */
-        errno_t errorno = memset_s(user_status_record, sizeof(user_status_record), 0, sizeof(user_status_record));
-        securec_check(errorno, "\0", "\0");
-        errorno = memset_s(
-            user_status_record_nulls, sizeof(user_status_record_nulls), false, sizeof(user_status_record_nulls));
-        securec_check(errorno, "\0", "\0");
-        errorno =
-            memset_s(user_status_record_repl, sizeof(user_status_record_repl), false, sizeof(user_status_record_repl));
-        securec_check(errorno, "\0", "\0");
-
         /* if there is no record of the role, then add one record in the pg_user_status */
         if (HeapTupleIsValid(tuple)) {
             userStatusDatum = heap_getattr(tuple, Anum_pg_user_status_failcount, pg_user_status_dsc, &userStatusIsNull);
@@ -5215,7 +5216,9 @@ void TryLockAccount(Oid roleID, int extrafails, bool superlock)
             } else {
                 failedcount = 0;
             }
-            failedcount += extrafails;
+            if (!AddInt32Overflow(failedcount, extrafails)) {
+                failedcount += extrafails;
+            }
             userStatusDatum = heap_getattr(tuple, Anum_pg_user_status_rolstatus, pg_user_status_dsc, &userStatusIsNull);
             if (!(userStatusIsNull || (void*)userStatusDatum == NULL)) {
                 status = DatumGetInt16(userStatusDatum);
@@ -5235,6 +5238,7 @@ void TryLockAccount(Oid roleID, int extrafails, bool superlock)
                 user_status_record[Anum_pg_user_status_failcount - 1] = Int32GetDatum(failedcount);
                 user_status_record_repl[Anum_pg_user_status_failcount - 1] = true;
                 lockflag = 1;
+                ReportAlarmLockAccount(rolename, true);
             } else {
                 /* Update the failedcount, only when the account is not locked */
                 if (status == UNLOCK_STATUS) {
@@ -5243,8 +5247,9 @@ void TryLockAccount(Oid roleID, int extrafails, bool superlock)
                 }
                 /* if account is not locked and the failedcount is larger than
                    u_sess->attr.attr_security.Failed_login_attempts, update the lock time and status */
-                if (u_sess->attr.attr_security.Failed_login_attempts > 0 &&
-                    failedcount >= u_sess->attr.attr_security.Failed_login_attempts && status == UNLOCK_STATUS) {
+                bool needAutoLock = u_sess->attr.attr_security.Failed_login_attempts > 0 &&
+                    failedcount >= u_sess->attr.attr_security.Failed_login_attempts && status == UNLOCK_STATUS;
+                if (needAutoLock) {
                     nowTime = GetCurrentTimestamp();
                     currentTime = timestamptz_to_str(nowTime);
                     user_status_record[Anum_pg_user_status_locktime - 1] = DirectFunctionCall3(
@@ -5253,6 +5258,7 @@ void TryLockAccount(Oid roleID, int extrafails, bool superlock)
                     user_status_record_repl[Anum_pg_user_status_locktime - 1] = true;
                     user_status_record_repl[Anum_pg_user_status_rolstatus - 1] = true;
                     lockflag = 1;
+                    ReportAlarmLockAccount(rolename, superlock);
                 }
             }
             new_tuple = (HeapTuple) tableam_tops_modify_tuple(
@@ -5372,6 +5378,7 @@ bool TryUnlockAccount(Oid roleID, bool superunlock, bool isreset)
             if (superunlock) {
                 if (status != UNLOCK_STATUS) {
                     UpdateUnlockAccountTuples(tuple, pg_user_status_rel, pg_user_status_dsc);
+                    ReportResumeAlarmLockAccount(true);
                     result = true;
                     unlockflag = 1;
                 }
@@ -5402,6 +5409,7 @@ bool TryUnlockAccount(Oid roleID, bool superunlock, bool isreset)
                         nowTime, &fromTime, userStatusDatum, tuple, pg_user_status_dsc, &userStatusIsNull);
                     if (lockTime < fromTime) {
                         UpdateUnlockAccountTuples(tuple, pg_user_status_rel, pg_user_status_dsc);
+                        ReportResumeAlarmLockAccount(false);
                         result = true;
                         unlockflag = 1;
                     } else {
@@ -5489,6 +5497,7 @@ void TryUnlockAllAccounts(void)
                 if (lockTime < fromTime) {
                     UpdateUnlockAccountTuples(tuple, pg_user_status_rel, pg_user_status_dsc);
                     pgaudit_lock_or_unlock_user(false, rolename);
+                    ReportResumeAlarmLockAccount(false);
                 }
             }
         }
@@ -5506,16 +5515,9 @@ void TryUnlockAllAccounts(void)
 static void UpdateUnlockAccountTuples(HeapTuple tuple, Relation rel, TupleDesc tupledesc)
 {
     HeapTuple new_tuple = NULL;
-    Datum user_status_record[Natts_pg_user_status];
+    Datum user_status_record[Natts_pg_user_status] = {0};
     bool user_status_record_nulls[Natts_pg_user_status] = {false};
     bool user_status_record_repl[Natts_pg_user_status] = {false};
-    
-    errno_t rc = memset_s(user_status_record, sizeof(user_status_record), 0, sizeof(user_status_record));
-    securec_check(rc, "\0", "\0");
-    rc = memset_s(user_status_record_nulls, sizeof(user_status_record_nulls), 0, sizeof(user_status_record_nulls));
-    securec_check(rc, "\0", "\0");
-    rc = memset_s(user_status_record_repl, sizeof(user_status_record_repl), 0, sizeof(user_status_record_repl));
-    securec_check(rc, "\0", "\0");
 
     user_status_record[Anum_pg_user_status_failcount - 1] = Int32GetDatum(0);
     user_status_record_repl[Anum_pg_user_status_failcount - 1] = true;
@@ -6244,4 +6246,57 @@ static void check_weak_password(char *Password)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PASSWORD), errmsg("Password should not be weak password.")));        
     }
+}
+
+static void ReportAlarmLockAccount(char* rolename, bool superlock)
+{
+    AlarmAdditionalParam alarmAdditionalParam;
+    Alarm alarmItem[1];
+    if (superlock) {
+        // Initialize the alarm item ALM_AI_SecurityAccountLock
+        AlarmItemInitialize(alarmItem, ALM_AI_SecurityAccountLock, ALM_AS_Normal, NULL);
+    } else {
+        // Initialize the alarm item ALM_AI_SecurityAccountFailedAttempt
+        AlarmItemInitialize(alarmItem, ALM_AI_SecurityAccountFailedAttempt, ALM_AS_Normal, NULL);
+    }
+    // fill the alarm message
+    WriteAlarmAdditionalInfo(&alarmAdditionalParam,
+                             g_instance.attr.attr_common.PGXCNodeName,
+                             "",
+                             "",
+                             alarmItem,
+                             ALM_AT_Fault,
+                             rolename);
+    // report the alarm
+    AlarmReporter(alarmItem, ALM_AT_Fault, &alarmAdditionalParam);
+}
+
+static void ReportResumeAlarmLockAccount(bool superunlock)
+{
+    AlarmAdditionalParam alarmAdditionalParam;
+    Alarm alarmItem[1];
+    if (superunlock) {
+        // Initialize the alarm item ALM_AI_SecurityAccountLock
+        AlarmItemInitialize(alarmItem, ALM_AI_SecurityAccountLock, ALM_AS_Reported, NULL);
+    } else {
+        // Initialize the alarm item ALM_AI_SecurityAccountFailedAttempt
+        AlarmItemInitialize(alarmItem, ALM_AI_SecurityAccountFailedAttempt, ALM_AS_Reported, NULL);
+    }
+    // fill the alarm message
+    WriteAlarmAdditionalInfo(&alarmAdditionalParam,
+                             g_instance.attr.attr_common.PGXCNodeName,
+                             "",
+                             "",
+                             alarmItem,
+                             ALM_AT_Resume);
+    // report the alarm
+    AlarmReporter(alarmItem, ALM_AT_Resume, &alarmAdditionalParam);
+}
+
+static bool AddInt32Overflow(int32 a, int b)
+{
+    if (a > 0 && b > 0 && a > INT32_MAX - b) {
+        return true;
+    }
+    return false;
 }

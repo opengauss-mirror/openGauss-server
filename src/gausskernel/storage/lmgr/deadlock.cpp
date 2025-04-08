@@ -27,6 +27,7 @@
 #include "pg_trace.h"
 #include "pgstat.h"
 #include "postmaster/autovacuum.h"
+#include "alarm/alarm.h"
 #include "storage/lmgr.h"
 #include "storage/lock/lock.h"
 #include "storage/proc.h"
@@ -1091,6 +1092,24 @@ static void PrintLockQueue(LOCK *lock, const char *info)
 }
 #endif
 
+void ReportDeadLockAlarm(StringInfoData* alarmbuf)
+{
+    Alarm deadLockAlarm[1];
+    AlarmAdditionalParam tempAdditionalParam;
+    // Initialize the alarm item
+    AlarmItemInitialize(deadLockAlarm, ALM_AI_DeadLock, ALM_AS_Normal, NULL);
+    /* fill the alarm message */
+    WriteAlarmAdditionalInfo(&tempAdditionalParam,
+                             "",
+                             "",
+                             "",
+                             deadLockAlarm,
+                             ALM_AT_Event,
+                             alarmbuf->data);
+    /* report the alarm */
+    AlarmReporter(deadLockAlarm, ALM_AT_Event, &tempAdditionalParam);
+}
+
 /*
  * Report a detected deadlock, with available details.
  */
@@ -1099,11 +1118,13 @@ void DeadLockReport(void)
     StringInfoData clientbuf; /* errdetail for client */
     StringInfoData logbuf;    /* errdetail for server log */
     StringInfoData locktagbuf;
+    StringInfoData alarmbuf;
     int i;
 
     initStringInfo(&clientbuf);
     initStringInfo(&logbuf);
     initStringInfo(&locktagbuf);
+    initStringInfo(&alarmbuf);
 
     /* Generate the "waits for" lines sent to the client */
     for (i = 0; i < t_thrd.storage_cxt.nDeadlockDetails; i++) {
@@ -1126,6 +1147,11 @@ void DeadLockReport(void)
 
         appendStringInfo(&clientbuf, _("Process %lu waits for %s on %s; blocked by process %lu."), info->pid,
                          GetLockmodeName(info->locktag.locktag_lockmethodid, info->lockmode), locktagbuf.data, nextpid);
+        if (i == (t_thrd.storage_cxt.nDeadlockDetails - 1)) {
+            appendStringInfo(&alarmbuf, _("Process %lu waits for %s on %s; blocked by process %lu. "
+                "Please see server log for query details"), info->pid,
+                GetLockmodeName(info->locktag.locktag_lockmethodid, info->lockmode), locktagbuf.data, nextpid);
+        }
     }
 
     /* Duplicate all the above for the server ... */
@@ -1142,6 +1168,8 @@ void DeadLockReport(void)
     }
 
     pgstat_report_deadlock();
+
+    ReportDeadLockAlarm(&alarmbuf);
 
     ereport(ERROR, (errcode(ERRCODE_T_R_DEADLOCK_DETECTED), errmsg("deadlock detected"),
                     errdetail_internal("%s", clientbuf.data), errdetail_log("%s", logbuf.data),

@@ -59,11 +59,12 @@ bool enable_alarm = false;
 
 static Alarm* DataInstAlarmList = NULL;
 
-static int DataInstAlarmListSize = 0;
+static int g_dataInstAlarmListSize = 7;
 
 char sys_log_path[MAXPGPATH] = {0};
 
 AlarmCheckResult DataOrRedoDirNotExistChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam);
+AlarmCheckResult XlogOverloadChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam);
 
 static void DataInstAlarmItemInitialize(void);
 
@@ -76,28 +77,32 @@ extern AlarmCheckResult DataInstConnToGTMChecker(Alarm* alarm, AlarmAdditionalPa
 
 void DataInstAlarmItemInitialize(void)
 {
-    DataInstAlarmListSize = 6;
-    DataInstAlarmList = (Alarm*)AlarmAlloc(sizeof(Alarm) * DataInstAlarmListSize);
+    DataInstAlarmList = (Alarm*)AlarmAlloc(sizeof(Alarm) * g_dataInstAlarmListSize);
     if (NULL == DataInstAlarmList) {
         AlarmLog(ALM_LOG, "Out of memory: DataInstAlarmItemInitialize failed.");
         exit(1);
     }
+    int i = 0;
     // ALM_AI_MissingDataInstDataOrRedoDir
     AlarmItemInitialize(
-        &(DataInstAlarmList[0]), ALM_AI_MissingDataInstDataOrRedoDir, ALM_AS_Normal, DataOrRedoDirNotExistChecker);
+        &(DataInstAlarmList[i++]), ALM_AI_MissingDataInstDataOrRedoDir, ALM_AS_Normal, DataOrRedoDirNotExistChecker);
     // ALM_AI_MissingDataInstWalSegmt
     AlarmItemInitialize(
-        &(DataInstAlarmList[1]), ALM_AI_MissingDataInstWalSegmt, ALM_AS_Normal, WalSegmentsRemovedChecker);
+        &(DataInstAlarmList[i++]), ALM_AI_MissingDataInstWalSegmt, ALM_AS_Normal, WalSegmentsRemovedChecker);
     // ALM_AI_TooManyDataInstConn
-    AlarmItemInitialize(&(DataInstAlarmList[2]), ALM_AI_TooManyDataInstConn, ALM_AS_Normal, ConnectionOverloadChecker);
+    AlarmItemInitialize(
+        &(DataInstAlarmList[i++]), ALM_AI_TooManyDataInstConn, ALM_AS_Normal, ConnectionOverloadChecker);
     // ALM_AI_AbnormalDataInstArch
-    AlarmItemInitialize(&(DataInstAlarmList[3]), ALM_AI_AbnormalDataInstArch, ALM_AS_Normal, DataInstArchChecker);
+    AlarmItemInitialize(&(DataInstAlarmList[i++]), ALM_AI_AbnormalDataInstArch, ALM_AS_Normal, DataInstArchChecker);
     // ALM_AI_AbnormalDataInstConnAuthMethod
     AlarmItemInitialize(
-        &(DataInstAlarmList[4]), ALM_AI_AbnormalDataInstConnAuthMethod, ALM_AS_Normal, ConnAuthMethodChecker);
+        &(DataInstAlarmList[i++]), ALM_AI_AbnormalDataInstConnAuthMethod, ALM_AS_Normal, ConnAuthMethodChecker);
     // ALM_AI_AbnormalDataInstConnToGTM
     AlarmItemInitialize(
-        &(DataInstAlarmList[5]), ALM_AI_AbnormalDataInstConnToGTM, ALM_AS_Normal, DataInstConnToGTMChecker);
+        &(DataInstAlarmList[i++]), ALM_AI_AbnormalDataInstConnToGTM, ALM_AS_Normal, DataInstConnToGTMChecker);
+    // ALM_AI_XlogAccumulate
+    AlarmItemInitialize(
+        &(DataInstAlarmList[i++]), ALM_AI_XlogAccumulate, ALM_AS_Normal, XlogOverloadChecker);
 }
 
 void PrepareAlarmEnvironment()
@@ -206,7 +211,7 @@ NON_EXEC_STATIC void AlarmCheckerMain()
             ProcessConfigFile(PGC_SIGHUP);
         }
 
-        AlarmCheckerLoop(DataInstAlarmList, DataInstAlarmListSize);
+        AlarmCheckerLoop(DataInstAlarmList, g_dataInstAlarmListSize);
 
         /*
          * Sleep until there's something to do
@@ -277,6 +282,58 @@ bool isDirExist(const char* dir)
 #endif
 
     return true;
+}
+
+AlarmCheckResult XlogOverloadChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
+{
+    DIR* dir;
+    int ret;
+    struct dirent* entry;
+    struct stat statbuf;
+    int total = 0;
+    if ((dir = opendir(g_instance.datadir_cxt.xlogDir)) == NULL) {
+        // not overload
+        return ALM_ACR_Normal;
+    }
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        char full_path[MAX_PATH_LEN] = {0};
+        ret = snprintf_s(full_path, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s",
+                         g_instance.datadir_cxt.xlogDir, entry->d_name);
+        securec_check_ss_c(ret, "\0", "\0");
+        if (lstat(full_path, &statbuf) == -1) {
+            continue;
+        }
+        if (S_ISREG(statbuf.st_mode)) {
+            total++;
+        }
+    }
+    closedir(dir);
+    int xlogOverloadThreshold
+        = 2 * (u_sess->attr.attr_storage.wal_keep_segments + 2 * u_sess->attr.attr_storage.CheckPointSegments + 1);
+    if (total > xlogOverloadThreshold) {
+        // fill the alarm message
+        WriteAlarmAdditionalInfo(additionalParam,
+                                 g_instance.attr.attr_common.PGXCNodeName,
+                                 "",
+                                 "",
+                                 alarm,
+                                 ALM_AT_Fault,
+                                 g_instance.attr.attr_common.PGXCNodeName);
+        return ALM_ACR_Abnormal;
+    } else {
+        // fill the alarm message
+        WriteAlarmAdditionalInfo(additionalParam,
+                                 g_instance.attr.attr_common.PGXCNodeName,
+                                 "",
+                                 "",
+                                 alarm,
+                                 ALM_AT_Resume,
+                                 g_instance.attr.attr_common.PGXCNodeName);
+        return ALM_ACR_Normal;
+    }
 }
 
 AlarmCheckResult DataOrRedoDirNotExistChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)

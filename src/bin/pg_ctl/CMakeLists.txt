@@ -15,8 +15,8 @@ endif()
 set(TGT_gsctl_INC 
     ${PROJECT_SRC_DIR}/common/port
     ${PROJECT_SRC_DIR}/common/interfaces/libpq
-    ${PROJECT_SRC_DIR}/include/libpq 
-    ${CMAKE_CURRENT_SOURCE_DIR} 
+    ${PROJECT_SRC_DIR}/include/libpq
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SRC_DIR}/bin/pg_rewind 
     ${PROJECT_SRC_DIR}/lib/gstrace
     ${PROJECT_TRUNK_DIR}/distribute/include

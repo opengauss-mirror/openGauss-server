@@ -65,7 +65,7 @@ static int  AF_INET6_MAX_BITS = 128;  /* ip mask bit */
 #define FUSIONINSIGHTTYPE "1"
 #define ICBCTYPE "2"
 #define CBGTYPE "5"
-#define ALARMITEMNUMBER 64
+#define ALARMITEMNUMBER 128
 #define ALARM_LOGEXIT(ErrMsg, fp)        \
     do {                                 \
         AlarmLog(ALM_LOG, "%s", ErrMsg); \
