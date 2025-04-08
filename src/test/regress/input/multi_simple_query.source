@@ -1,0 +1,15 @@
+DROP USER IF EXISTS multi_simple_query CASCADE;
+CREATE USER multi_simple_query WITH PASSWORD "tom@1234";
+SET ROLE multi_simple_query PASSWORD 'tom@1234';
+create table multi_simple_query1(a int);
+create table msq2(a int);
+insert into msq2 values(1);
+insert into msq2 values(2);
+\! chmod -R 700 @abs_bindir@/../jre
+\! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/jdbc_test/gsjdbc400.jar:@abs_builddir@/jdbc_test/multi_simple_query/. MultiSimpleQuery @portstring@ 2>&1
+select * from multi_simple_query1 order by 1;
+select * from msq2 order by 1;
+DROP TABLE multi_simple_query1;
+DROP TABLE msq2;
+RESET ROLE;
+DROP USER IF EXISTS multi_simple_query CASCADE;

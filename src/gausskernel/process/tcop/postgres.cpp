@@ -2620,11 +2620,12 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         was_logged = true;
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
     /* Light proxy is only enabled for single query from 'Q' message */
     bool runLightProxyCheck = (msg != NULL) && IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
         u_sess->attr.attr_sql.enable_light_proxy &&
         (list_length(parsetree_list) == 1) && (query_string_len < SECUREC_MEM_MAX_LEN);
-
+#endif
     bool runOpfusionCheck = (msg != NULL) && IS_PGXC_DATANODE && u_sess->attr.attr_sql.enable_opfusion &&
         (list_length(parsetree_list) == 1) && (query_string_len < SECUREC_MEM_MAX_LEN);
 
@@ -2849,7 +2850,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
                     EndCommand(completionTag, dest);
                     (void)MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
                     MemoryContextReset(OptimizerContext);
-                    break;
+                    continue;
                 }
             }
         }
@@ -2870,7 +2871,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             finish_xact_command();
             EndCommand(completionTag, dest);
             MemoryContextReset(OptimizerContext);
-            break;
+            continue;
         }
 #ifdef ENABLE_MOT
         /* check cross engine queries and transactions violation for MOT */
@@ -2892,7 +2893,8 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
                     errmsg("Explicit prepare transaction is not supported for memory table")));
         }
 #endif
-        
+
+#ifdef ENABLE_MULTIPLE_NODES
         /* Try using light proxy to execute query */
         if (runLightProxyCheck &&
             exec_query_through_light_proxy(querytree_list, parsetree, snapshot_set, msg, OptimizerContext)) {
@@ -2902,7 +2904,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             collectSimpleQuery(query_string, isCollect);
             break;
         }
-
+#endif
         // Mixed statement judgments
         if (ENABLE_REMOTE_EXECUTE && libpqsw_process_query_message(commandTag, querytree_list, querystringForLibpqsw,
             is_multistmt, lnext(parsetree_item) == NULL)) {
