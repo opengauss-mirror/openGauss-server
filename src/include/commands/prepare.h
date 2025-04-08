@@ -30,7 +30,7 @@ typedef struct DatanodeStatement {
 /* Utility statements PREPARE, EXECUTE, DEALLOCATE, EXPLAIN EXECUTE */
 extern void PrepareQuery(PrepareStmt* stmt, const char* queryString);
 extern void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* queryString, ParamListInfo params,
-    DestReceiver* dest, char* completionTag);
+    DestReceiver* dest, char* completionTag, bool isFromPbeOpt = false);
 extern void DeallocateQuery(DeallocateStmt* stmt);
 extern void ExplainExecuteQuery(
     ExecuteStmt* execstmt, IntoClause* into, ExplainState* es, const char* queryString, ParamListInfo params);
