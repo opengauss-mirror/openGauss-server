@@ -69,6 +69,7 @@ SUBDIRS = \
 		gms_raw       \
 		gms_match     \
 		gms_assert   \
+		gms_compress	\
 		shark
 
 ifeq ($(with_openssl),yes)
