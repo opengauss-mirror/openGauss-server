@@ -1333,6 +1333,7 @@ bool IsLightProxyOn(void)
     return (u_sess->exec_cxt.cur_light_proxy_obj != NULL);
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
 bool exec_query_through_light_proxy(List* querytree_list, Node* parsetree, bool snapshot_set, StringInfo msg, 
                                     MemoryContext OptimizerContext)
 {
@@ -1383,6 +1384,7 @@ bool exec_query_through_light_proxy(List* querytree_list, Node* parsetree, bool 
     }
     return false;
 }
+#endif
 void GPCDropLPIfNecessary(const char *stmt_name, bool need_drop_dnstmt, bool need_del, CachedPlanSource *reset_plan) {
     if (stmt_name == NULL || stmt_name[0] == '\0' || !IS_PGXC_COORDINATOR)
         return;

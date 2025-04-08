@@ -202,8 +202,9 @@ private:
 
     lightProxyMsgCtl *m_msgctl;
 };
-
+#ifdef ENABLE_MULTIPLE_NODES
 extern bool exec_query_through_light_proxy(List* querytree_list, Node* parsetree, bool snapshot_set, StringInfo msg,
                                            MemoryContext OptimizerContext);
+#endif
 
 #endif /* SRC_INCLUDE_EXECUTOR_LIGHTPROXY_H_ */

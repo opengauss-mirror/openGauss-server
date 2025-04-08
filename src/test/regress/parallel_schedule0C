@@ -29,7 +29,7 @@ test: explain_pbe
 test: pg_object_type dump_object_type pg_anydata_type
 
 #test jdbc pbe for bypass
-test: bypass_pbe
+test: bypass_pbe multi_simple_query
 #test: partition for hash list
 test: pbe_hash_list_partition 
 test: hw_partition_list_insert
