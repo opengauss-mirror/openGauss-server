@@ -649,6 +649,15 @@ INSERT INTO  demo  VALUES ('5', 'E', '4');
 INSERT INTO  demo  VALUES ('6', 'F', '1');
 INSERT INTO  demo  VALUES ('7', 'G', '1');
 
+set query_dop = 1002;
+SELECT @r ,
+(SELECT @r:= parent_id FROM demo WHERE id = @r) AS parent_id,
+@l:= @l+ 1 AS lvl
+FROM
+(SELECT @r:= 5, @l:= 0) vars,
+demo h
+WHERE @r<> 0;
+set query_dop = 1;
 SELECT @r ,
 (SELECT @r:= parent_id FROM demo WHERE id = @r) AS parent_id,
 @l:= @l+ 1 AS lvl
