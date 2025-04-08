@@ -519,10 +519,10 @@ select
   cast(case
 		    when sys.tsql_relation_reloptions_helper(c.reloptions, 'fillfactor') is null then '0'
 		    else sys.tsql_relation_reloptions_helper(c.reloptions, 'fillfactor')
-		    end as int) as "OrigFillFactor",
-  cast(0 as tinyint) as "StatVersion",
+		    end as int) as OrigFillFactor,
+  cast(0 as tinyint) as StatVersion,
   cast(0 as int) as reserved2,
-  cast(null as bytea) as "FirstIAM",
+  cast(null as bytea) as FirstIAM,
   cast(0 as smallint) as impid,
   cast(0 as smallint) as lockflags,
   cast(0 as int) as pgmodctr,

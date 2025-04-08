@@ -87,10 +87,10 @@ set search_path to sys_view_test;
  reserved4      | integer  | 
  xmaxlen        | integer  | 
  maxirow        | integer  | 
- OrigFillFactor | integer  | 
- StatVersion    | tinyint  | 
+ origfillfactor | integer  | 
+ statversion    | tinyint  | 
  reserved2      | integer  | 
- FirstIAM       | bytea    | 
+ firstiam       | bytea    | 
  impid          | smallint | 
  lockflags      | smallint | 
  pgmodctr       | integer  | 
@@ -123,7 +123,7 @@ select * from sys.syscolumns order by id limit 1;
 (1 row)
 
 select * from sys.sysindexes order by id, indid limit 1;
- id  | status | first | indid | root | minlen | keycnt | groupid | dpages | reserved | used | rowcnt | rowmodctr | reserved3 | reserved4 | xmaxlen | maxirow | OrigFillFactor | StatVersion | reserved2 | FirstIAM | impid | lockflags | pgmodctr | keys |               name                | statblob | maxlen | rows 
+ id  | status | first | indid | root | minlen | keycnt | groupid | dpages | reserved | used | rowcnt | rowmodctr | reserved3 | reserved4 | xmaxlen | maxirow | origfillfactor | statversion | reserved2 | firstiam | impid | lockflags | pgmodctr | keys |               name                | statblob | maxlen | rows 
 -----+--------+-------+-------+------+--------+--------+---------+--------+----------+------+--------+-----------+-----------+-----------+---------+---------+----------------+-------------+-----------+----------+-------+-----------+----------+------+-----------------------------------+----------+--------+------
  826 |      0 |       |   827 |      |      0 |      0 |       0 |      0 |        0 |    0 |      0 |         0 |         0 |         0 |       0 |       0 |              0 | 0           |         0 |          |     0 |         0 |        0 |      | pg_default_acl_role_nsp_obj_index |          |      0 |    0
 (1 row)
@@ -134,8 +134,14 @@ select * from sys.sysindexkeys order by id, indid limit 1;
  826 |   827 |     1 |     1
 (1 row)
 
-select "OrigFillFactor", "StatVersion", "FirstIAM" from sys.sysindexes order by id, indid limit 1;
- OrigFillFactor | StatVersion | FirstIAM 
+select OrigFillFactor, StatVersion, FirstIAM from sys.sysindexes order by id, indid limit 1;
+ origfillfactor | statversion | firstiam 
+----------------+-------------+----------
+              0 | 0           | 
+(1 row)
+
+select origfillfactor, statversion, firstiam from sys.sysindexes order by id, indid limit 1;
+ origfillfactor | statversion | firstiam 
 ----------------+-------------+----------
               0 | 0           | 
 (1 row)
@@ -304,12 +310,12 @@ order by id, colid;
  c3             |      8 |     3 | 8      |   26 |       |          0 |          0 |          0 | 
 (32 rows)
 
-select ind.name, ind.keycnt, ind."OrigFillFactor", ind.rows from sys.sysindexes ind
+select ind.name, ind.keycnt, ind.origfillfactor, ind.rows from sys.sysindexes ind
 left join pg_class c on c.oid = ind.indid
 left join pg_namespace s on c.relnamespace = s.oid
 where s.nspname = 'sys_view_test'
 order by id, indid;
-          name          | keycnt | OrigFillFactor | rows 
+          name          | keycnt | origfillfactor | rows 
 ------------------------+--------+----------------+------
  student_pkey           |      0 |              0 |    0
  teacher_pkey           |      0 |              0 |    0
