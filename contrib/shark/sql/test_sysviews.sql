@@ -12,7 +12,8 @@ select * from sys.sysobjects order by id limit 1;
 select * from sys.syscolumns order by id limit 1;
 select * from sys.sysindexes order by id, indid limit 1;
 select * from sys.sysindexkeys order by id, indid limit 1;
-select "OrigFillFactor", "StatVersion", "FirstIAM" from sys.sysindexes order by id, indid limit 1;
+select OrigFillFactor, StatVersion, FirstIAM from sys.sysindexes order by id, indid limit 1;
+select origfillfactor, statversion, firstiam from sys.sysindexes order by id, indid limit 1;
 
 -- prepare data
 CREATE TABLE student
@@ -122,7 +123,7 @@ left join pg_namespace s on s.oid = c.relnamespace
 where s.nspname = 'sys_view_test'
 order by id, colid;
 
-select ind.name, ind.keycnt, ind."OrigFillFactor", ind.rows from sys.sysindexes ind
+select ind.name, ind.keycnt, ind.origfillfactor, ind.rows from sys.sysindexes ind
 left join pg_class c on c.oid = ind.indid
 left join pg_namespace s on c.relnamespace = s.oid
 where s.nspname = 'sys_view_test'
