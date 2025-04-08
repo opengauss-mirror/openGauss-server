@@ -1036,6 +1036,7 @@ static void knl_t_walwriter_init(knl_t_walwriter_context* walwriter_cxt)
 {
     walwriter_cxt->got_SIGHUP = false;
     walwriter_cxt->shutdown_requested = false;
+    walwriter_cxt->lockhold = false;
 }
 
 static void knl_t_walwriterauxiliary_init(knl_t_walwriterauxiliary_context *const walwriterauxiliary_cxt)

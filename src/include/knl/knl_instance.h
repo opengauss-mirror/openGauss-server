@@ -1124,6 +1124,7 @@ typedef struct knl_g_wal_context {
     volatile XLogSegNo globalEndPosSegNo; /* Global variable for init xlog segment files. */
     int lastWalStatusEntryFlushed;
     volatile int lastLRCScanned;
+    volatile int lastLRCWrited;
     volatile int lastLRCFlushed;
     int num_locks_in_group;
     DemoteMode upgradeSwitchMode;

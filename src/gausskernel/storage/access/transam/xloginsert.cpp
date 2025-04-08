@@ -509,7 +509,7 @@ void XlogInsertSleep(void)
  * though not on the data they reference.  This is OK since the XLogRecData
  * structs are always just temporaries in the calling code.
  */
-XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id, bool istoast, TransactionId xid)
+XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id, bool istoast, TransactionId xid, bool need_flush)
 {
     XLogRecPtr EndPos;
     bool isSwitchoverBarrier = ((rmid == RM_BARRIER_ID) && (info == XLOG_BARRIER_SWITCHOVER));
@@ -557,7 +557,7 @@ XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id, bool istoast, Tran
 
         rdt = XLogRecordAssemble(rmid, info, fpw_info, &fpw_lsn, bucket_id, istoast, xid);
 
-        EndPos = XLogInsertRecord(rdt, fpw_lsn);
+        EndPos = XLogInsertRecord(rdt, fpw_lsn, need_flush);
     } while (XLByteEQ(EndPos, InvalidXLogRecPtr));
 
     /*

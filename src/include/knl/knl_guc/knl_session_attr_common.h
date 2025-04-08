@@ -216,6 +216,7 @@ typedef struct knl_session_attr_common {
     bool enable_wdr_snapshot;
     bool enable_set_variable_b_format;
     bool enable_asp;
+    bool lc_xlog_flush_opt;
     bool show_fdw_remote_plan;
     int wdr_snapshot_interval;
     int wdr_snapshot_retention_days;

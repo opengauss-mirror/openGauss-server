@@ -143,6 +143,7 @@ static void knl_g_wal_init(knl_g_wal_context *const wal_cxt)
     wal_cxt->lastWalStatusEntryFlushed = -1;
     wal_cxt->lastLRCScanned = WAL_SCANNED_LRC_INIT;
     wal_cxt->lastLRCFlushed = WAL_SCANNED_LRC_INIT;
+    wal_cxt->lastLRCWrited = WAL_SCANNED_LRC_INIT;
     wal_cxt->num_locks_in_group = 0;
     wal_cxt->upgradeSwitchMode = NoDemote;
     wal_cxt->totalXlogIterBytes = 0;

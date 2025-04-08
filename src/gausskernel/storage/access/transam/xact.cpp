@@ -1699,7 +1699,7 @@ static TransactionId RecordTransactionCommit(void)
             if (t_thrd.proc->workingVersionNum >= PAGE_COMPRESSION_VERSION) {
                 info |= XLR_REL_COMPRESS;
             }
-            commitRecLSN = XLogInsert(RM_XACT_ID, (uint8)info);
+            commitRecLSN = XLogInsert(RM_XACT_ID, (uint8)info, true);
 
             if (nrels > 0) {
                 globalDelayDDLLSN = GetDDLDelayStartPtr();
@@ -1739,7 +1739,7 @@ static TransactionId RecordTransactionCommit(void)
             if (t_thrd.proc->workingVersionNum >= PAGE_COMPRESSION_VERSION) {
                 info |= XLR_REL_COMPRESS;
             }
-            (void)XLogInsert(RM_XACT_ID, (uint8)info);
+            commitRecLSN = XLogInsert(RM_XACT_ID, (uint8)info, true);
         }
     }
 
@@ -1782,9 +1782,9 @@ static TransactionId RecordTransactionCommit(void)
          */
         /* Wait for local flush only when we don't wait for the remote server */
         if (!IsInitdb && g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
-            SyncPaxosWaitForLSN(t_thrd.xlog_cxt.XactLastRecEnd);
+            SyncPaxosWaitForLSN(commitRecLSN);
         } else {
-            XLogWaitFlush(t_thrd.xlog_cxt.XactLastRecEnd);
+            XLogWaitFlush(commitRecLSN);
             /*
              * Wait for quorum synchronous replication, if required.
              *
@@ -1797,7 +1797,7 @@ static TransactionId RecordTransactionCommit(void)
                     t_thrd.proc->syncSetConfirmedLSN = t_thrd.xlog_cxt.ProcLastRecPtr;
                 }
 #endif
-                SyncRepWaitForLSN(t_thrd.xlog_cxt.XactLastRecEnd, !markXidCommitted);
+                SyncRepWaitForLSN(commitRecLSN, !markXidCommitted);
                 g_instance.comm_cxt.localinfo_cxt.set_term = true;
             }
         }
@@ -1826,7 +1826,7 @@ static TransactionId RecordTransactionCommit(void)
          */
         if (markXidCommitted) {
             t_thrd.pgxact->needToSyncXid |= SNAPSHOT_UPDATE_NEED_SYNC;
-            TransactionIdAsyncCommitTree(xid, nchildren, children, t_thrd.xlog_cxt.XactLastRecEnd, GetCommitCsn());
+            TransactionIdAsyncCommitTree(xid, nchildren, children, commitRecLSN, GetCommitCsn());
         }
     }
 
@@ -1843,7 +1843,7 @@ static TransactionId RecordTransactionCommit(void)
     latestXid = TransactionIdLatest(xid, nchildren, children);
 
     /* remember end of last commit record */
-    t_thrd.xlog_cxt.XactLastCommitEnd = t_thrd.xlog_cxt.XactLastRecEnd;
+    t_thrd.xlog_cxt.XactLastCommitEnd = commitRecLSN;
 
     /* Reset XactLastRecEnd until the next transaction writes something */
     t_thrd.xlog_cxt.XactLastRecEnd = 0;

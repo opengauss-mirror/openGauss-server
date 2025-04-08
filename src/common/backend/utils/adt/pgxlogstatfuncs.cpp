@@ -97,7 +97,7 @@ static void ReadAllWalInsertStatusTable(int64 walInsertStatusEntryCount, TupleDe
         values[ARR_0] = UInt64GetDatum(idx);
         values[ARR_1] = UInt64GetDatum(entry_ptr->endLSN);
         values[ARR_2] = Int32GetDatum(entry_ptr->LRC);
-        values[ARR_3] = UInt32GetDatum(entry_ptr->status);
+        values[ARR_3] = 0;
         tuplestore_putvalues(tupstore, *tupleDesc, values, nulls);
     }
 
@@ -116,7 +116,7 @@ static void ReadWalInsertStatusTableByTldx(int64 idx, TupleDesc *tupleDesc, Tupl
     values[ARR_0] = UInt64GetDatum(idx);
     values[ARR_1] = UInt64GetDatum(entry_ptr->endLSN);
     values[ARR_2] = Int32GetDatum(entry_ptr->LRC);
-    values[ARR_3] = UInt32GetDatum(entry_ptr->status);
+    values[ARR_3] = 0;
     tuplestore_putvalues(tupstore, *tupleDesc, values, nulls);
 
     tuplestore_donestoring(tupstore);
@@ -127,7 +127,7 @@ Datum gs_stat_wal_entrytable(PG_FUNCTION_ARGS)
     int64 idx = PG_GETARG_INT64(0); // -1: all walInsertStatus; n:walInsertStatusTable[n]
 
     int64 walInsertStatusEntryCount =
-        GET_WAL_INSERT_STATUS_ENTRY_CNT(g_instance.attr.attr_storage.wal_insert_status_entries_power);
+        GET_WAL_INSERT_STATUS_ENTRY_CNT();
     ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
     TupleDesc tupDesc;
     Tuplestorestate *tupstore = NULL;
