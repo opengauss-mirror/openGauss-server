@@ -228,10 +228,6 @@ HashState* ExecInitHash(Hash* node, EState* estate, int eflags)
     /*
      * create state structure
      */
-    if (node->plan.operatorMemKB[0] == 0) {
-        node->plan.operatorMemKB[0] = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
-    }
-    node->plan.operatorMemKB[0] += GetAvailRackMemory(node->plan.dop);
     hashstate = makeNode(HashState);
     hashstate->ps.plan = (Plan*)node;
     hashstate->ps.state = estate;
@@ -319,6 +315,7 @@ HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNull
     int nkeys;
     int i;
     int64 local_work_mem = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
+    local_work_mem += GetAvailRackMemory(node->plan.dop);
     int64 max_mem = (node->plan.operatorMaxMem > 0) ? SET_NODEMEM(node->plan.operatorMaxMem, node->plan.dop) : 0;
     ListCell* ho = NULL;
     ListCell* hc = NULL;

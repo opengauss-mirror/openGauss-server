@@ -74,6 +74,7 @@ static TupleTableSlot* ExecSort(PlanState* state)
         PlanState* plan_state = NULL;
         TupleDesc tup_desc = NULL;
         int64 sort_mem = SET_NODEMEM(plan_node->plan.operatorMemKB[0], plan_node->plan.dop);
+        sort_mem += GetAvailRackMemory(plan_node->plan.dop);
         int64 max_mem =
             (plan_node->plan.operatorMaxMem > 0) ? SET_NODEMEM(plan_node->plan.operatorMaxMem, plan_node->plan.dop) : 0;
         /* init unique sort state at the first time */
@@ -227,10 +228,6 @@ SortState* ExecInitSort(Sort* node, EState* estate, int eflags)
     /*
      * create state structure
     */
-    if (node->plan.operatorMemKB[0] == 0) {
-        node->plan.operatorMemKB[0] = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
-    }
-    node->plan.operatorMemKB[0] += GetAvailRackMemory(node->plan.dop);
     SortState* sortstate = makeNode(SortState);
     sortstate->ss.ps.plan = (Plan*)node;
     sortstate->ss.ps.state = estate;
