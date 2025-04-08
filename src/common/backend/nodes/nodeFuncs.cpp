@@ -3644,6 +3644,8 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_UserVar:
             /* @var do not need recursion */
             break;
+        case T_UserSetElem:
+            return p2walker(((UserSetElem*)node)->val, context);
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
