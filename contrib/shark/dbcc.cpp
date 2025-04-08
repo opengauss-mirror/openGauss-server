@@ -22,12 +22,21 @@ Datum dbcc_check_ident_no_reseed(PG_FUNCTION_ARGS)
     char result[DBCC_RESULT_MAX_LENGTH] = {0};
     errno_t rc = EOK;
     bool withmsg = true;
+    bool reseed_to_max = false;
 
     if (!fcinfo->argnull[1]) {
         withmsg = !PG_GETARG_BOOL(1);
     }
 
+    if (!fcinfo->argnull[2]) {
+        reseed_to_max = PG_GETARG_BOOL(2);
+    }
+
     get_last_value_and_max_value(txt, &last_value, &current_max_value);
+
+    if (reseed_to_max && last_value < current_max_value) {
+        get_and_reset_last_value(txt, current_max_value, true);
+    }
 
     if (!withmsg) {
         PG_RETURN_NULL();

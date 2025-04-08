@@ -78,6 +78,51 @@ drop table Employees_ne;
 drop procedure test_procedure_test1(int);
 
 
+CREATE TABLE Employees (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+insert into Employees(Name) values ('wangwu');
+insert into Employees(Name) values ('heliu');
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+DBCC CHECKIDENT ('Employees');
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+drop table Employees;
+
+
+CREATE TABLE Employees (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+insert into Employees(Name) values ('wangwu');
+insert into Employees(Name) values ('heliu');
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+DBCC CHECKIDENT ('Employees', RESEED);
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+drop table Employees;
+
 -- part1: dbcc check RESEED
 CREATE TABLE Employees (
      EmployeeID serial ,
