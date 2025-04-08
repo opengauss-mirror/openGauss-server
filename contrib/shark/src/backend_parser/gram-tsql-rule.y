@@ -517,7 +517,7 @@ DBCCCheckIdentStmt:
 			{
 				SelectStmt *n = makeNode(SelectStmt);
 				n->distinctClause = NIL;
-				n->targetList = make_no_reseed_func(quote_identifier_wrapper($4, yyscanner), $8);
+				n->targetList = make_no_reseed_func(quote_identifier_wrapper($4, yyscanner), $8, false);
 				n->intoClause = NULL;
 				n->fromClause = NIL;
 				n->whereClause = NULL;
@@ -530,7 +530,7 @@ DBCCCheckIdentStmt:
 			{
 				SelectStmt *n = makeNode(SelectStmt);
 				n->distinctClause = NIL;
-				n->targetList = make_no_reseed_func(quote_identifier_wrapper($4, yyscanner), $6);
+				n->targetList = make_no_reseed_func(quote_identifier_wrapper($4, yyscanner), $6, true);
 				n->intoClause = NULL;
 				n->fromClause = NIL;
 				n->whereClause = NULL;
@@ -556,7 +556,7 @@ DBCCCheckIdentStmt:
 			{
 				SelectStmt *n = makeNode(SelectStmt);
 				n->distinctClause = NIL;
-				n->targetList = make_reseed_func(quote_identifier_wrapper($4, yyscanner), makeNullAConst(@6), $8);
+				n->targetList = make_no_reseed_func(quote_identifier_wrapper($4, yyscanner), $8, true);
 				n->intoClause = NULL;
 				n->fromClause = NIL;
 				n->whereClause = NULL;

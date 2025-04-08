@@ -41,10 +41,10 @@ static List* make_func_call_func(List* funcname,  List* args)
 	return (list_make1(restarget));
 }
 
-static List* make_no_reseed_func(char* table_name, bool with_no_msgs)
+static List* make_no_reseed_func(char* table_name, bool with_no_msgs, bool reseed_to_max)
 {
     List* funcname = list_make1(makeString("dbcc_check_ident_no_reseed"));
-	List* args = list_make2(makeStringConst(table_name, -1), makeBoolConst(with_no_msgs, false));
+	List* args = list_make3(makeStringConst(table_name, -1), makeBoolConst(with_no_msgs, false), makeBoolConst(reseed_to_max, false));
 	return make_func_call_func(funcname, args);
 }
 

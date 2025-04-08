@@ -131,6 +131,106 @@ PL/pgSQL function test_procedure_test1(integer) line 2 at PERFORM
 drop table Employees;
 drop table Employees_ne;
 drop procedure test_procedure_test1(int);
+CREATE TABLE Employees (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employeeid_seq" for serial column "employees.employeeid"
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+insert into Employees(Name) values ('wangwu');
+insert into Employees(Name) values ('heliu');
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+NOTICE:  "Checking identity information: current identity value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                  dbcc_check_ident_reseed                   
+------------------------------------------------------------
+ Checking identity information: current identity value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '1', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '1', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees');
+NOTICE:  "Checking identity information: current identity value '1', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '1', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+drop table Employees;
+CREATE TABLE Employees (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employeeid_seq" for serial column "employees.employeeid"
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+insert into Employees(Name) values ('wangwu');
+insert into Employees(Name) values ('heliu');
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, 1);
+NOTICE:  "Checking identity information: current identity value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                  dbcc_check_ident_reseed                   
+------------------------------------------------------------
+ Checking identity information: current identity value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '1', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '1', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED);
+NOTICE:  "Checking identity information: current identity value '1', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '1', current column value '4'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '4', current column value '4'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '4', current column value '4'.
+(1 row)
+
+drop table Employees;
 -- part1: dbcc check RESEED
 CREATE TABLE Employees (
      EmployeeID serial ,
@@ -229,11 +329,11 @@ select * from Employees order by 1, 2;
 
 ALTER SEQUENCE employees_employeeid_seq MINVALUE -100;
 DBCC CHECKIDENT ('Employees', RESEED);
-NOTICE:  "Checking identity information: current identity value '3'."
-CONTEXT:  referenced column: dbcc_check_ident_reseed
-                  dbcc_check_ident_reseed                   
-------------------------------------------------------------
- Checking identity information: current identity value '3'.
+NOTICE:  "Checking identity information: current identity value '3', current column value '3'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                              dbcc_check_ident_no_reseed                              
+--------------------------------------------------------------------------------------
+ Checking identity information: current identity value '3', current column value '3'.
 (1 row)
 
 DBCC CHECKIDENT ('Employees', RESEED, -2);
