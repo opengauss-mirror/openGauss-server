@@ -1,10 +1,10 @@
 FROM openeuler/openeuler:20.03-lts
 
-ARG VERSION=7.0.0-RC1
+ARG VERSION=7.0.0-RC2
 
-COPY openGauss-Server-${VERSION}-openEuler20.03-aarch64.tar.bz2 .
-COPY gosu-arm64 /usr/local/bin/gosu
-COPY openEuler_aarch64.repo /etc/yum.repos.d/openEuler_aarch64.repo
+COPY openGauss-Lite-${VERSION}-openEuler20.03-x86_64.tar.gz .
+COPY gosu-amd64 /usr/local/bin/gosu
+COPY openEuler_aarch64.repo /etc/yum.repos.d/openEuler_x86_64.repo
 # remove all lines containing scws if do no want to chparser#
 COPY scws.tar.gz .
 
@@ -20,10 +20,12 @@ RUN set -eux; \
     mkdir -p /usr/local/opengauss && \
     mkdir -p /var/run/opengauss  && \
     mkdir /docker-entrypoint-initdb.d && \
-    tar -jxf openGauss-Server-${VERSION}-openEuler20.03-aarch64.tar.bz2 -C /usr/local/opengauss && \
+    tar -xf openGauss-Lite-${VERSION}-openEuler20.03-x86_64.tar.gz -C /usr/local/opengauss && \
+    tar -xf /usr/local/opengauss/openGauss-Lite-${VERSION}-openEuler20.03-x86_64.bin -C /usr/local/opengauss && \
     chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
     chmod 2777 /var/run/opengauss && \
-    rm -rf openGauss-Server-${VERSION}-openEuler20.03-aarch64.tar.bz2 && \
+    rm -rf openGauss-Lite-${VERSION}-openEuler20.03-x86_64.tar.gz && \
+    rm -rf openGauss-Lite-${VERSION}-openEuler20.03-x86_64.bin && \
     tar -xzvf scws.tar.gz; chown -R omm:omm /scws; rm -rf scws.tar.gz && \
     chmod 1777 /tmp && \
     yum clean all
