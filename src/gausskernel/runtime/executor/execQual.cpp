@@ -1119,7 +1119,7 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
                 con = (Const *)node;
             }
         } else {
-            con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
+            con = (Const*)((UserVar *)exprstate->expr)->value;
         }
         if (u_sess->parser_cxt.in_userset) {
             u_sess->parser_cxt.has_set_uservar = true;
@@ -6724,6 +6724,7 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
             state = (ExprState*)usestate;
             state->evalfunc = (ExprStateEvalFunc)ExecEvalUserSetElm;
             usestate->instate = ExecInitExpr((Expr *)useexpr->val, parent);
+            u_sess->parser_cxt.has_equal_uservar = true;
         } break;
        case T_PriorExpr:
             state = (ExprState*)makeNode(ExprState);

@@ -53,8 +53,10 @@ create table cstore_index_tbl(
  ,interval1 interval
  ,interval2 tinterval)with(orientation=column) ;
 
+set query_dop = 1002;
 insert into cstore_index_tbl select * from row_index_tbl;
 select ctid from cstore_index_tbl order by 1;
+set query_dop = 1;
 
 create index idx_int1 on cstore_index_tbl(id1);
 create index idx_int2 on cstore_index_tbl(id2);

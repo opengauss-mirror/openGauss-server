@@ -1241,7 +1241,8 @@ static void StartupStreamThread(StreamState* node)
 
     StreamTxnContext transactionCxt;
 
-    if (IS_SPQ_RUNNING || nodeTag(node->ss.ps.plan->lefttree) != T_ModifyTable) {
+    if (IS_SPQ_RUNNING || (nodeTag(node->ss.ps.plan->lefttree) != T_ModifyTable &&
+        nodeTag(node->ss.ps.plan->lefttree) != T_VecModifyTable)) {
         transactionCxt.txnId = GetCurrentTransactionIdIfAny();
     } else {
         transactionCxt.txnId = GetCurrentTransactionId();
