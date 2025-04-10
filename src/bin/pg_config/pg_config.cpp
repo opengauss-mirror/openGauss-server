@@ -297,7 +297,7 @@ static void show_version(int alls)
     if (alls) {
 	printf("OPENGAUSS_VERSION = ");
     }
-    printf("openGauss 7.0.0-RC1\n");
+    printf("openGauss 7.0.0-RC2\n");
 #endif
 }
 
