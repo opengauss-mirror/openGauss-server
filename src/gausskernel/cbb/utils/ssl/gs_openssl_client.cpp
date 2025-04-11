@@ -34,6 +34,7 @@
 
 #include "openssl/ssl.h"
 #include "openssl/err.h"
+#include "ssl/gs_openssl_client.h"
 #include "openssl/ossl_typ.h"
 #include "openssl/x509.h"
 #include "openssl/asn1.h"

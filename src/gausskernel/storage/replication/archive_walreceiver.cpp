@@ -37,6 +37,7 @@
 #include "pgxc/pgxc.h"
 
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
 #define CUR_OBS_FILE_VERSION 1
 #define TIMEOUT_FOR_ARCHIVE_RECEIVER 600
 
@@ -1848,6 +1849,7 @@ char* DeleteStopBarrierRecordsOnMedia(long stopBarrierTimestamp, long endBarrier
     }
     return currOldestRecord;
 }
+#endif
 #else
 bool archive_connect(char* conninfo, XLogRecPtr* startpoint, char* slotname, int channel_identifier)
 {

@@ -897,7 +897,7 @@ int main(int argc, char** argv)
                 GS_UCHAR init_rand[RANDOM_LEN + 1] = {0};
 
                 /* get a random values as salt for encrypt */
-                retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
+                retval = RAND_bytes(init_rand, RANDOM_LEN);
                 if (retval != 1) {
                     exit_horribly(NULL, "Generate random key failed\n");
                 }

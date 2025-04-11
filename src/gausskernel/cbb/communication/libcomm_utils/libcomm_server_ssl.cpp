@@ -69,7 +69,10 @@
 #include "openssl/ssl.h"
 #include "openssl/rand.h"
 #include "openssl/ossl_typ.h"
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
 #include "openssl/sslerr.h"
+#endif
+#include "ssl/gs_openssl_client.h"
 #include "openssl/obj_mac.h"
 #include "openssl/dh.h"
 #include "openssl/bn.h"
@@ -352,6 +355,7 @@ static BIO_METHOD* comm_ssl_get_BIO_socket(void)
 {
     static BIO_METHOD* my_bio_methods = NULL;
     if (my_bio_methods == NULL) {
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
         int my_bio_index;
 
         my_bio_index = BIO_get_new_index();
@@ -375,6 +379,23 @@ static BIO_METHOD* comm_ssl_get_BIO_socket(void)
             my_bio_methods = NULL;
             return NULL;
         }
+#else
+        BIO_METHOD *biom = (BIO_METHOD *)BIO_s_socket();
+        if (biom == NULL) {
+            return NULL;
+        }
+        my_bio_methods = static_cast<BIO_METHOD*>(malloc(sizeof(BIO_METHOD)));
+        if (!my_bio_methods) {
+            return NULL;
+        }
+        errno_t copy_result = memcpy_s(my_bio_methods, sizeof(BIO_METHOD), biom, sizeof(BIO_METHOD));
+        if (copy_result != 0) {
+            free(my_bio_methods);
+            return NULL;
+        }
+        my_bio_methods->bread = my_sock_read;
+        my_bio_methods->bwrite = my_sock_write;
+#endif
     }
     return my_bio_methods;
 }
@@ -548,73 +569,81 @@ aloop:
  */
 static DH* comm_ssl_genDHKeyPair(COMM_SSL_DHKeyLength dhType)
 {
-    int ret = 0;
     DH* dh = NULL;
-    BIGNUM* bn_prime = NULL;
-    unsigned char GENERATOR_2[] = {DH_GENERATOR_2};
-    BIGNUM* bn_genenrator_2 = BN_bin2bn(GENERATOR_2, sizeof(GENERATOR_2), NULL);
-    if (bn_genenrator_2 == NULL) {
+    BIGNUM *bn_prime = NULL;
+    BIGNUM *bn_generator_2 = NULL;
+    int ret;
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    typedef BIGNUM* (*BN_PrimeFunc)(BIGNUM*);
+    static const BN_PrimeFunc BN_FUNC[] = {
+        get_rfc2409_prime_768,
+        get_rfc2409_prime_1024,
+        get_rfc3526_prime_1536,
+        get_rfc3526_prime_2048,
+        get_rfc3526_prime_3072,
+        get_rfc3526_prime_4096,
+        get_rfc3526_prime_6144,
+        get_rfc3526_prime_8192
+    };
+#else
+    typedef BIGNUM* (*BN_PrimeFunc)(BIGNUM*);
+    static const BN_PrimeFunc BN_FUNC[] = {
+        BN_get_rfc2409_prime_768,
+        BN_get_rfc2409_prime_1024,
+        BN_get_rfc3526_prime_1536,
+        BN_get_rfc3526_prime_2048,
+        BN_get_rfc3526_prime_3072,
+        BN_get_rfc3526_prime_4096,
+        BN_get_rfc3526_prime_6144,
+        BN_get_rfc3526_prime_8192
+    };
+#endif
+
+    const int dhTypeMax = sizeof(BN_FUNC) / sizeof(BN_FUNC[0]) - 1;
+    if (dhType < 0 || dhType > dhTypeMax) {
         return NULL;
     }
 
-    switch (dhType) {
-        case DHKey768:
-            bn_prime = BN_get_rfc2409_prime_768(NULL);
-            break;
-        case DHKey1024:
-            bn_prime = BN_get_rfc2409_prime_1024(NULL);
-            break;
-        case DHKey1536:
-            bn_prime = BN_get_rfc3526_prime_1536(NULL);
-            break;
-        case DHKey2048:
-            bn_prime = BN_get_rfc3526_prime_2048(NULL);
-            break;
-        case DHKey3072:
-            bn_prime = BN_get_rfc3526_prime_3072(NULL);
-            break;
-        case DHKey4096:
-            bn_prime = BN_get_rfc3526_prime_4096(NULL);
-            break;
-        case DHKey6144:
-            bn_prime = BN_get_rfc3526_prime_6144(NULL);
-            break;
-        case DHKey8192:
-            bn_prime = BN_get_rfc3526_prime_8192(NULL);
-            break;
-        default:
-            break;
+    unsigned char generator_bin[] = {DH_GENERATOR_2};
+    bn_generator_2 = BN_bin2bn(generator_bin, sizeof(generator_bin), NULL);
+    if (!bn_generator_2) {
+        return NULL;
     }
 
-    if (bn_prime == NULL) {
-        BN_free(bn_genenrator_2);
+    bn_prime = BN_FUNC[dhType](NULL);
+    if (!bn_prime) {
+        BN_free(bn_generator_2);
         return NULL;
     }
 
     dh = DH_new();
     if (dh == NULL) {
         BN_free(bn_prime);
-        BN_free(bn_genenrator_2);
+        BN_free(bn_generator_2);
         return NULL;
     }
 
-    ret = DH_set0_pqg(dh, bn_prime, NULL, bn_genenrator_2);
-    if (!ret) {
-        BN_free(bn_prime);
-        BN_free(bn_genenrator_2);
-        DH_free(dh);
-        return NULL;
+    if (!DH_set0_pqg(dh, bn_prime, NULL, bn_generator_2)) {
+        goto error_cleanup;
     }
+    bn_prime = NULL;
+    bn_generator_2 = NULL;
 
-    ret = DH_generate_key(dh);
-    if (!ret) {
+    if (!DH_generate_key(dh)) {
         BN_free(bn_prime);
-        BN_free(bn_genenrator_2);
+        BN_free(bn_generator_2);
         DH_free(dh);
         return NULL;
     }
 
     return dh;
+
+error_cleanup:
+    BN_free(bn_prime);
+    BN_free(bn_generator_2);
+    DH_free(dh);
+    return NULL;
 }
 
 /*
@@ -821,7 +850,7 @@ void comm_initialize_SSL()
         }
         SSL_load_error_strings();
 
-        g_instance.attr.attr_network.SSL_server_context = SSL_CTX_new(TLS_method());
+        g_instance.attr.attr_network.SSL_server_context = SSL_CTX_new(SSLv23_method());
         if (!g_instance.attr.attr_network.SSL_server_context) {
             LIBCOMM_ELOG(WARNING, "In comm_initialize_SSL, could not create SSL context");
             Assert(0);

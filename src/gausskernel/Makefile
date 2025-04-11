@@ -122,7 +122,10 @@ endif
 ###############################################################################
 LIBS += -L$(LIBCURL_LIB_PATH) -L$(LIBOPENSSL_LIB_PATH) 
 ifeq ($(enable_lite_mode), no)
-LIBS += -leSDKOBS -leSDKLogAPI -lssl -lcrypto -lpcre -liconv -lnghttp2 -llog4cpp -l$(SECURE_C_CHECK)  -lcurl
+ifeq ($(with_obs), yes)
+LIBS += -leSDKOBS -leSDKLogAPI -lpcre -liconv -lnghttp2 -llog4cpp
+endif
+LIBS +=  -lssl -lcrypto -l$(SECURE_C_CHECK)  -lcurl
 else
 LIBS +=  -lssl -l$(SECURE_C_CHECK)  -lcurl
 endif
@@ -271,9 +274,12 @@ LDFLAGS += -L$(BOOST_LIB_PATH) -L$(LIBTINFO_LIB_PATH) \
     -L$(LIBCGROUP_LIB_PATH) \
     -L$(LIBOPENSSL_LIB_PATH)
 
+ifeq ($(with_obs), yes)
+LDFLAGS += -L$(LIBOBS_LIB_PATH)
+endif
+
 ifeq ($(enable_lite_mode), no)
-LDFLAGS += -L$(LIBOBS_LIB_PATH) \
-    -L$(LIBLLVM_LIB_PATH) -L$(LIBXML_LIB_PATH) \
+LDFLAGS += -L$(LIBLLVM_LIB_PATH) -L$(LIBXML_LIB_PATH) \
     -L$(KERBEROS_LIB_PATH) -L$(LIBSTD_LIB_PATH)
 endif
  
@@ -285,7 +291,9 @@ endif
   LDFLAGS += -L$(CJSON_LIB_PATH)
   CXXFLAGS+= -I$(CJSON_INCLUDE_PATH)
 
-  CXXFLAGS+= -I$(LIBOBS_INCLUDE_PATH) 
+ifeq ($(with_obs), yes)
+  CXXFLAGS+= -I$(LIBOBS_INCLUDE_PATH)
+endif
 
 ifeq ($(enable_multiple_nodes), yes)
   LDFLAGS += -L$(top_builddir)/../distribute/gtm/libpg
@@ -603,6 +611,7 @@ endif
 ifeq ($(enable_lite_mode), no)
 	cd $(KERBEROS_LIB_PATH) && tar -cpf - ./* | ( cd $(DESTDIR)$(libdir); tar -xpf -  )
 	mkdir -p '$(DESTDIR)$(libdir)/../temp/'
+ifeq ($(with_obs), yes)
 	rm -f $(DESTDIR)$(libdir)/libpcre*
 	cp $(LIBOBS_LIB_PATH)/libpcre* '$(DESTDIR)$(libdir)/../temp/'
 	mv $(DESTDIR)$(libdir)/../temp/* '$(DESTDIR)$(libdir)/'
@@ -613,6 +622,7 @@ ifeq ($(enable_lite_mode), no)
 	cp $(LIBOBS_LIB_PATH)/libiconv* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/OBS* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libnghttp* '$(DESTDIR)$(libdir)/'
+endif
 endif
 	cp -d $(ZLIB_LIB_PATH)/libz* '$(DESTDIR)$(libdir)/'
 	cp -d $(XGBOOST_LIB_PATH)/libxgboost* '$(DESTDIR)$(libdir)/'

@@ -927,7 +927,7 @@ int px_get_random_bytes(uint8* dst, unsigned count)
     if (!openssl_random_init)
         init_openssl_rand();
 
-    res = RAND_priv_bytes(dst, count);
+    res = RAND_bytes(dst, count);
     if (res == 1)
         return count;
 

@@ -1310,7 +1310,7 @@ Oid CreateRole(CreateRoleStmt* stmt)
     }
 
     if (password != NULL) {
-        retval = RAND_priv_bytes((unsigned char*)salt_bytes, (GS_UINT32)SALT_LENGTH);
+        retval = RAND_bytes((unsigned char*)salt_bytes, (GS_UINT32)SALT_LENGTH);
         if (retval != 1) {
             str_reset(password);
             ereport(ERROR,
@@ -2864,7 +2864,7 @@ Oid AlterRole(AlterRoleStmt* stmt)
                 errcause("Password contain invalid characters."),
                 erraction("Use valid characters in password.")));
         }
-        retval = RAND_priv_bytes((unsigned char*)salt_bytes, (GS_UINT32)SALT_LENGTH);
+        retval = RAND_bytes((unsigned char*)salt_bytes, (GS_UINT32)SALT_LENGTH);
         if (retval != 1) {
             str_reset(password);
             str_reset(replPasswd);

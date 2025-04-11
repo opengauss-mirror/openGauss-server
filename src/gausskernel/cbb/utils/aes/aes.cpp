@@ -52,7 +52,7 @@ bool init_aes_vector_random(GS_UCHAR* aes_vector, size_t vector_len)
     int retval = 0;
     GS_UCHAR random_vector[RANDOM_LEN] = {0};
 
-    retval = RAND_priv_bytes(random_vector, RANDOM_LEN);
+    retval = RAND_bytes(random_vector, RANDOM_LEN);
     if (retval != 1) {
         errorno = memset_s(random_vector, RANDOM_LEN, '\0', RANDOM_LEN);
         securec_check_c(errorno, "", "");

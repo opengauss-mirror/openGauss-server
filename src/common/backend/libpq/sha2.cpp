@@ -861,9 +861,10 @@ bool GsSm3Encrypt(
         sha_bytes_to_hex64((uint8*)client_key, client_key_buf);
     }
 
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
     hash_ret = EVP_Digest(
         (GS_UCHAR*)client_key, HMAC_LENGTH, (GS_UCHAR*)stored_key, (GS_UINT32*)&stored_key_length, EVP_sm3(), NULL);
-
+#endif
     if (!hash_ret) {
         rc = memset_s(k, K_LENGTH + 1, 0, K_LENGTH + 1);
         SECUREC_CHECK(rc);

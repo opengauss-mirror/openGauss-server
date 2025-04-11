@@ -15,7 +15,9 @@
 #include "getopt.h"
 #endif
 
+#ifdef ENABLE_OBS
 #include "eSDKOBS.h"
+#endif
 #include "securec.h"
 
 /* Some Windows stuff */
@@ -829,6 +831,7 @@ int main(int argc, char** argv)
 
     if (NULL != pCAInfo) {
         free(pCAInfo);
+        pCAInfo = NULL;
     }
 
     return 0;

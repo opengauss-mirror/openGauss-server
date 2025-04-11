@@ -848,7 +848,7 @@ static void generateRandArray()
 
     while (k++ < RAND_COUNT) {
         is_rand_ok = true;
-        retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
+        retval = RAND_bytes(init_rand, RANDOM_LEN);
         if (retval != 1) {
             exit_horribly(NULL, "Generate random key failed\n");
         }

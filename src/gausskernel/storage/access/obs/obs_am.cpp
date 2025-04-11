@@ -21,7 +21,7 @@
 #define strpos(p, s) (strstr((p), (s)) != NULL ? strstr((p), (s)) - (p) : -1)
 
 #include "access/obs/obs_am.h"
-#ifndef ENABLE_LITE_MODE
+#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
 #include "eSDKOBS.h"
 #endif
 
@@ -235,7 +235,7 @@ FETCH_URL_ERROR2:
                     errmsg("OBS URL's %s is not valid '%s'", invalid_element, folderName)));
 }
 
-#ifndef ENABLE_LITE_MODE
+#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
 // Some Windows stuff
 #ifndef FOPEN_EXTRA_FLAGS
 #define FOPEN_EXTRA_FLAGS ""
@@ -625,7 +625,7 @@ static obs_status listServiceCallback(const char *ownerId, const char *bucketNam
                                       const char *ownerDisplayName, void *callbackData)
 {
     /* Do nothing. */
-    list_service_data *data = (list_service_data *)callbackData;
+    ListServiceData *data = (ListServiceData *)callbackData;
     statusG = data->ret_status;
 
     return OBS_STATUS_OK;
@@ -1619,8 +1619,8 @@ void checkOBSServerValidity(char *hostName, char *ak, char *sk, bool encrypt)
     obs_options option;
     init_obs_options(&option);
 
-    list_service_data data;
-    (void)memset_s(&data, sizeof(list_service_data), 0, sizeof(list_service_data));
+    ListServiceData data;
+    (void)memset_s(&data, sizeof(ListServiceData), 0, sizeof(ListServiceData));
     data.allDetails = 1;
 
     if (0 == strncmp(sk, ENCRYPT_STR_PREFIX, strlen(ENCRYPT_STR_PREFIX))) {

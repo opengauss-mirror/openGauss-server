@@ -63,7 +63,10 @@
 #include "openssl/ossl_typ.h"
 #include "openssl/x509.h"
 #include "openssl/crypto.h"
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
 #include "openssl/sslerr.h"
+#endif
+#include "ssl/gs_openssl_client.h"
 #include "openssl/err.h"
 #include "utils/elog.h"
 
@@ -446,6 +449,9 @@ ssize_t pqsecure_read(PGconn* conn, void* ptr, size_t len)
                     libpq_gettext("SSL error: %s, remote datanode %s, error: %s\n"),
                     errm, conn->remote_nodename, strerror(errno));
                 SSLerrfree(errm);
+#ifdef ENABLE_OPENSSL3
+                REMEMBER_EPIPE(spinfo, errno == EPIPE);
+#endif
                 /* assume the connection is broken */
                 result_errno = ECONNRESET;
                 n = -1;
@@ -596,6 +602,9 @@ ssize_t pqsecure_write(PGconn* conn, const void* ptr, size_t len)
                     libpq_gettext("SSL error: %s, remote datanode %s, error: %s\n"), errm,
                     conn->remote_nodename, strerror(errno));
                 SSLerrfree(errm);
+#ifdef ENABLE_OPENSSL3
+                REMEMBER_EPIPE(spinfo, errno == EPIPE);
+#endif
                 /* assume the connection is broken */
                 result_errno = ECONNRESET;
                 n = -1;
@@ -1126,6 +1135,11 @@ static GS_UINT32 pq_threadidcallback(void)
     return (GS_UINT32)pthread_self();
 }
 
+static unsigned long gs_threadidcallback(void)
+{
+    return (unsigned long)pthread_self();
+}
+
 #endif /* ENABLE_THREAD_SAFETY */
 
 /*
@@ -1212,9 +1226,12 @@ static int init_ssl_system(PGconn* conn)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-value"
         if (ssl_open_connections++ == 0 && !is_gc_fdw_client) {
-
             /* These are only required for threaded libcrypto applications */
+#if OPENSSL_VERSION_NUMBER < 0x10100000L  // OpenSSL 1.0.x
+            CRYPTO_set_id_callback(gs_threadidcallback);
+#else  // OpenSSL 1.1.0+
             CRYPTO_THREADID_set_callback(pq_threadidcallback);
+#endif
         }
 #pragma GCC diagnostic pop
     }
