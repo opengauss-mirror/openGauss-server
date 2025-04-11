@@ -1352,6 +1352,9 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
             }
             if (g_instance.attr.attr_storage.enable_ustore && u_sess->attr.attr_sql.enable_default_ustore_table &&
                 relkind != RELKIND_MATVIEW && !IsSystemNamespace(relnamespace) && !assignedStorageType) {
+                if (hasOids) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("OIDS option is not supported for ustore table")));
+                }
                 DefElem *def2 = makeDefElem("storage_type", (Node *)makeString(TABLE_ACCESS_METHOD_USTORE_LOWER));
                 res = lappend(options, def2);
             }
