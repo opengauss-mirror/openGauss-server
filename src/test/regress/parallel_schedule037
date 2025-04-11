@@ -106,3 +106,6 @@ test: ustore_hw_partition_list_insert
 test: component_view_enhancements
 test: ustore_upsert
 
+test: test_ustore_pcr_index
+test: test_ustore_pcr_index1
+test: ustore_pcr_crpool
