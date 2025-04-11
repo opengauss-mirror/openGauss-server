@@ -41,6 +41,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_assert
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_compress
     ${CMAKE_CURRENT_SOURCE_DIR}/shark
+    ${CMAKE_CURRENT_SOURCE_DIR}/age
 )
 
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
@@ -93,6 +94,9 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/datavec)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/chparser)
     add_subdirectory(chparser)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/age)
+    add_subdirectory(age)
 endif()
 add_subdirectory(gms_profiler)
 add_subdirectory(gms_lob)

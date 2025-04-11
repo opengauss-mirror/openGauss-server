@@ -29,6 +29,8 @@
 ./share/postgresql/pg_ident.conf.sample
 ./share/postgresql/postgres.description
 ./share/postgresql/postgresql.conf.sample
+./share/postgresql/extension/age--1.0.0.sql
+./share/postgresql/extension/age.control
 ./share/postgresql/extension/plpgsql--1.0.sql
 ./share/postgresql/extension/hstore.control
 ./share/postgresql/extension/security_plugin.control
@@ -747,6 +749,7 @@
 ./lib/libaws-cpp-sdk-s3.so
 ./lib/libxgboost.so
 ./lib/libpagecompression.so*
+./lib/postgresql/age.so
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
 ./lib/postgresql/euc_kr_and_mic.so
