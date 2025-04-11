@@ -2468,7 +2468,7 @@ void LWLockExplainTag(LWLock* lock, char* buffer, int buflen)
         case LWTRANCHE_DMS_BUF_CTRL:
             rc = snprintf_s(buffer, buflen, buflen - 1, "buffer:%d", lock->tag + 1);
             break;
-        defalut:
+        default:
             rc = snprintf_s(buffer, buflen, buflen - 1, "id:%d", lock->tag);
             break;
     }
