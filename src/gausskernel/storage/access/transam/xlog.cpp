@@ -3809,7 +3809,7 @@ bool XLogBackgroundFlush(bool fsync)
     } while (entry_idx != curr_entry_idx);
 
     pg_write_barrier();
-    InitializeRqstPtr = g_instance.wal_cxt.flushResult - g_instance.wal_cxt.flushResult % XLOG_BLCKSZ;
+    InitializeRqstPtr = WriteRqstPtr - WriteRqstPtr % XLOG_BLCKSZ;
 
     if (InitializeRqstPtr != InvalidXLogRecPtr && XLByteLT(g_instance.wal_cxt.sentResult, InitializeRqstPtr)) {
         AdvanceXLInsertBuffer<false>(InitializeRqstPtr, false);
