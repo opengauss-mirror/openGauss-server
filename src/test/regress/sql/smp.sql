@@ -10,11 +10,14 @@ insert into t3 values(generate_series(1, 50), generate_series(1, 100), generate_
 create table t4(id int, val text);
 insert into t4 values(generate_series(1,1000), random());
 create index on t4(id);
+create table t5(id int unique, val text);
+insert into t5 values(generate_series(1,1000), random());
 
 analyze t1;
 analyze t2;
 analyze t3;
 analyze t4;
+analyze t5;
 
 set query_dop=1002;
 explain (costs off) select * from t2 order by 1,2;
@@ -77,6 +80,9 @@ select (select max(id) from t4);
 
 explain (costs off) select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
 select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
+
+explain (costs off) insert into t5 select id, val from t4 on duplicate key update val = 0;
+insert into t5 select * from t4 on duplicate key update val = 0;
 
 create table col_table_001 (id int, name char[] ) with (orientation=column);
 create table col_table_002 (id int, aid int,name char[] ,apple char[]) with (orientation=column);

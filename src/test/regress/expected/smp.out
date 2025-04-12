@@ -9,10 +9,14 @@ insert into t3 values(generate_series(1, 50), generate_series(1, 100), generate_
 create table t4(id int, val text);
 insert into t4 values(generate_series(1,1000), random());
 create index on t4(id);
+create table t5(id int unique, val text);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t5_id_key" for table "t5"
+insert into t5 values(generate_series(1,1000), random());
 analyze t1;
 analyze t2;
 analyze t3;
 analyze t4;
+analyze t5;
 set query_dop=1002;
 explain (costs off) select * from t2 order by 1,2;
                   QUERY PLAN                  
@@ -1198,6 +1202,17 @@ select * from (select a, rownum as row from (select a from t3) where rownum <= 1
  10 |  10
 (6 rows)
 
+explain (costs off) insert into t5 select id, val from t4 on duplicate key update val = 0;
+                  QUERY PLAN                  
+----------------------------------------------
+ Insert on t5
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: t5_id_key
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Seq Scan on t4
+(5 rows)
+
+insert into t5 select * from t4 on duplicate key update val = 0;
 create table col_table_001 (id int, name char[] ) with (orientation=column);
 create table col_table_002 (id int, aid int,name char[] ,apple char[]) with (orientation=column);
 insert into col_table_001 values(1, '{a,b,c}' );
@@ -1552,11 +1567,12 @@ drop table ios_t1;
 --clean
 set search_path=public;
 drop schema test_smp cascade;
-NOTICE:  drop cascades to 13 other objects
+NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table test_smp.t1
 drop cascades to table test_smp.t2
 drop cascades to table test_smp.t3
 drop cascades to table test_smp.t4
+drop cascades to table test_smp.t5
 drop cascades to table test_smp.col_table_001
 drop cascades to table test_smp.col_table_002
 drop cascades to table test_smp.bmsql_item
