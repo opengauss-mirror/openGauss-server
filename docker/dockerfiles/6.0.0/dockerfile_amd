@@ -1,24 +1,24 @@
-FROM openeuler-20.03-lts:latest
+FROM centos:7.6.1810
 
-COPY openGauss-5.0.0-openEuler-64bit.tar.bz2 .
-COPY gosu-arm64 /usr/local/bin/gosu
-COPY openEuler_aarch64.repo /etc/yum.repos.d/openEuler_aarch64.repo
+COPY openGauss-Server-6.0.1-CentOS7-x86_64.tar.bz2 .
+COPY gosu-amd64 /usr/local/bin/gosu
+
 ENV LANG en_US.utf8
 
 #RUN yum install -y epel-release
 
 RUN set -eux; \
-    yum install -y bzip2 curl libaio shadow tar&& \
-    groupadd -g 70 omm; \
-    useradd -u 70 -g omm -d /home/omm omm; \
+    yum install -y bzip2 bzip2-devel curl libaio&& \
+    groupadd -g 70 omm;  \
+    useradd -u 70 -g omm -d /home/omm omm;  \
     mkdir -p /var/lib/opengauss && \
     mkdir -p /usr/local/opengauss && \
     mkdir -p /var/run/opengauss  && \
     mkdir /docker-entrypoint-initdb.d && \
-    tar -jxf openGauss-5.0.0-openEuler-64bit.tar.bz2 -C /usr/local/opengauss && \
+    tar -jxf openGauss-Server-6.0.1-CentOS7-x86_64.tar.bz2 -C /usr/local/opengauss && \
     chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
     chmod 2777 /var/run/opengauss && \
-    rm -rf openGauss-5.0.0-openEuler-64bit.tar.bz2 && yum clean all
+    rm -rf openGauss-Server-6.0.1-CentOS7-x86_64.tar.bz2 && yum clean all
 
 RUN set -eux; \
     echo "export GAUSSHOME=/usr/local/opengauss"  >> /home/omm/.bashrc && \
