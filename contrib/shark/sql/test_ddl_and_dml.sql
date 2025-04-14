@@ -31,6 +31,17 @@ ALTER TABLE Products DROP COLUMN UnitPrice;
 
 DROP TABLE IF EXISTS Products;
 
+-- test for issue #IC13WR
+drop table if exists ttb16;
+create table ttb16(str1 varchar(20),str2 varchar(20),str3 as (str1 || str2));
+insert into ttb16 values('hello ','world');
+insert into ttb16 values('runoob');
+select * from ttb16;
+--- expect success
+alter table ttb16 add column str4 as (str1 || str2);
+select * from ttb16;
+drop table ttb16;
+
 -- case2: top clause
 DROP TABLE IF EXISTS Products;
 CREATE TABLE Products(QtyAvailable smallint, UnitPrice money, InventoryValue AS (QtyAvailable * UnitPrice));

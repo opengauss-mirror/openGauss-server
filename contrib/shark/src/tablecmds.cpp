@@ -257,7 +257,25 @@ static void pltsql_PreAddConstraintsHook(Relation rel, ParseState *pstate, List 
 
         attTup->atttypid = targettype;
         attTup->atttypmod = targettypmod;
-        attTup->attcollation = 0;
+        /*
+         * The target column should already be having a collation associated
+         * with it due to explicit COLLATE clause If suppose collation is not
+         * valid or there is no explicit COLLATE clause, we try to find column
+         * collation from finished expession.
+         */
+        if (!OidIsValid(attTup->attcollation)) {
+            Oid targetcollid;
+
+            /* take care of collations in the finished expression */
+            assign_expr_collations(pstate, expr);
+            targetcollid = exprCollation(expr);
+
+            if (OidIsValid(targetcollid)) {
+                attTup->attcollation = targetcollid;
+            } else {
+                attTup->attcollation = tform->typcollation;
+            }
+        }        
 
         attTup->attndims = tform->typndims;
         attTup->attlen = tform->typlen;

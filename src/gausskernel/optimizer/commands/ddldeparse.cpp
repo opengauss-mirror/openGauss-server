@@ -1718,6 +1718,16 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
                              "name", ObjTypeString, coldef->colname,
                              "coltype", ObjTypeObject,
                              new_objtree_for_type(typid, typmod));
+
+        tmp_obj = new_objtree("COLLATE");
+        if (OidIsValid(typcollation)) {
+            append_object_object(tmp_obj, "%{name}D",
+                                 new_objtree_for_qualname_id(CollationRelationId,
+                                                             typcollation));
+        } else {
+            append_not_present(tmp_obj, "%{name}D");
+        }
+        append_object_object(ret, "%{collation}s", tmp_obj);
     } else {
         ObjTree* dummy = new_objtree_VA(NULL, numFour,
                                         "schemaname", ObjTypeString, "",
@@ -1730,15 +1740,6 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
                              "name", ObjTypeString, coldef->colname,
                              "coltype", ObjTypeObject, dummy);
     }
-    tmp_obj = new_objtree("COLLATE");
-    if (OidIsValid(typcollation)) {
-        append_object_object(tmp_obj, "%{name}D",
-                             new_objtree_for_qualname_id(CollationRelationId,
-                                                         typcollation));
-    } else {
-        append_not_present(tmp_obj, "%{name}D");
-    }
-    append_object_object(ret, "%{collation}s", tmp_obj);
 
     if (!composite) {
         /*
@@ -1858,6 +1859,19 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
             append_not_present(tmp_obj, "(%{generation_expr}s) STORED");
         }
         append_object_object(ret, "%{generated_column}s", tmp_obj);
+
+        if (coldef->generatedCol == ATTRIBUTE_GENERATED_PERSISTED) {
+            /* A generated column of the PERSISTED type requires adding COLLATE after the expression. */
+            tmp_obj = new_objtree("COLLATE");
+            if (OidIsValid(typcollation)) {
+                append_object_object(tmp_obj, "%{name}D",
+                                     new_objtree_for_qualname_id(CollationRelationId,
+                                                                 typcollation));
+            } else {
+                append_not_present(tmp_obj, "%{name}D");
+            }
+            append_object_object(ret, "%{collation}s", tmp_obj);
+        }
     }
 
     ReleaseSysCache(attrTup);
