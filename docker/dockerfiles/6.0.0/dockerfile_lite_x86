@@ -1,0 +1,52 @@
+FROM openeuler/openeuler:20.03-lts
+
+ARG VERSION=6.0.1
+
+COPY openGauss-Lite-${VERSION}-openEuler20.03-x86_64.tar.gz .
+COPY gosu-amd64 /usr/local/bin/gosu
+COPY openEuler_aarch64.repo /etc/yum.repos.d/openEuler_x86_64.repo
+# remove all lines containing scws if do no want to chparser#
+COPY scws.tar.gz .
+
+ENV LANG en_US.utf8
+
+#RUN yum install -y epel-release
+
+RUN set -eux; \
+    yum install -y bzip2 curl libaio shadow tar&& \
+    groupadd -g 70 omm; \
+    useradd -u 70 -g omm -d /home/omm omm; \
+    mkdir -p /var/lib/opengauss && \
+    mkdir -p /usr/local/opengauss && \
+    mkdir -p /var/run/opengauss  && \
+    mkdir /docker-entrypoint-initdb.d && \
+    tar -xf openGauss-Lite-${VERSION}-openEuler20.03-x86_64.tar.gz -C /usr/local/opengauss && \
+    tar -xf /usr/local/opengauss/openGauss-Lite-${VERSION}-openEuler20.03-x86_64.bin -C /usr/local/opengauss && \
+    chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
+    chmod 2777 /var/run/opengauss && \
+    rm -rf openGauss-Lite-${VERSION}-openEuler20.03-x86_64.tar.gz && \
+    rm -rf openGauss-Lite-${VERSION}-openEuler20.03-x86_64.bin && \
+    tar -xzvf scws.tar.gz; chown -R omm:omm /scws; rm -rf scws.tar.gz && \
+    chmod 1777 /tmp && \
+    yum clean all
+
+RUN set -eux; \
+    echo "export GAUSSHOME=/usr/local/opengauss"  >> /home/omm/.bashrc && \
+    echo "export PATH=\$GAUSSHOME/bin:\$PATH " >> /home/omm/.bashrc && \
+    echo "export LD_LIBRARY_PATH=\$GAUSSHOME/lib:\$LD_LIBRARY_PATH" >> /home/omm/.bashrc
+
+RUN set -eux; echo "export TMOUT=0 >> /etc/bashrc"
+
+ENV GOSU_VERSION 1.12
+RUN set -eux; \
+     chmod +x /usr/local/bin/gosu
+
+ENV PGDATA /var/lib/opengauss/data
+
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod 755 /usr/local/bin/entrypoint.sh;ln -s /usr/local/bin/entrypoint.sh / # backwards compat
+
+ENTRYPOINT ["entrypoint.sh"]
+
+EXPOSE 5432
+CMD ["gaussdb"]
