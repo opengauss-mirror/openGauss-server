@@ -9645,8 +9645,9 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
         isUstore = result_rte->is_ustore;
     }
 
-    bool supportIUDParallel = (operation == CMD_DELETE || operation == CMD_UPDATE || operation == CMD_INSERT) &&
-                        returningLists == NIL && !isUstore && list_length(subplans) == 1;
+    bool supportIUDParallel =
+        (operation == CMD_DELETE || operation == CMD_UPDATE || (operation == CMD_INSERT && !upsertClause)) &&
+        returningLists == NIL && !isUstore && list_length(subplans) == 1;
 
     Assert(list_length(resultRelations) == list_length(subplans));
     Assert(withCheckOptionLists == NIL || list_length(resultRelations) == list_length(withCheckOptionLists));
