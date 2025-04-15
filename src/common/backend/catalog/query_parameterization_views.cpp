@@ -69,6 +69,7 @@ ParamView* GetAllParamQueries(uint32* num)
     bool found = false;
     CachedPlanSource* psrc = NULL;
     ParamCachedPlan* entry = NULL;
+
     ParamView* results = (ParamView*)palloc(sizeof(ParamView) * MAX_PARAMETERIZED_QUERY_STORED);
     int2vector* vec = NULL;
     hash_seq_init(&seq, u_sess->param_cxt.parameterized_queries);
@@ -107,6 +108,11 @@ Datum query_parameterization_views(PG_FUNCTION_ARGS)
         TupleDesc tupDesc = NULL;
         MemoryContext oldContext = NULL;
         funcCtx = SRF_FIRSTCALL_INIT();
+
+        if (u_sess->param_cxt.parameterized_queries == NULL) {
+            SRF_RETURN_DONE(funcCtx);
+        }
+        
         oldContext = MemoryContextSwitchTo(funcCtx->multi_call_memory_ctx);
         tupDesc = CreateTemplateTupleDesc(Natts_parameterization_views, false, TableAmHeap);
 
