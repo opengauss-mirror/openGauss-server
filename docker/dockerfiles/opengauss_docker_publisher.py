@@ -9,6 +9,7 @@ import logging
 import os
 import subprocess
 import sys
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -215,7 +216,8 @@ def download_and_checksum(spec_info, save_path):
     minor_version = spec_info["minor_version"]
     arch = spec_info["arch"]
     os_version = spec_info["os"]
-    file_name = f"{minor_version}-{arch}-{os_version}.tar"
+    version = spec_info["version"]
+    file_name = f"{minor_version}-{version}-{arch}-{os_version}.tar"
     file_path = os.path.join(save_path, file_name)
     file_size = spec_info["file_size"]
 
@@ -432,129 +434,98 @@ def push_docker_image(tag_name):
         return False
 
 
-def make_manifest(successful_images, namespace='opengauss/opengauss', dry_run=False):
+def make_manifest(successful_images, namespace='opengauss/opengauss', dry_run=False, latest=False):
     """
-    Create and push Docker manifests for all successful load images.
-    Groups images by minor version and OS to create multi-architecture manifests.
+    Create and push Docker manifests with multi-arch support.
+    Generates three types of manifests:
+    1. OS-specific manifests (e.g.: 7.0.0-RC2.B001-openEuler20.03)
+    2. Version manifest (e.g.: 7.0.0-RC2.B001)
+    3. Latest manifest (when requested and single OS exists)
     """
-    if docker_client is None:
-        logger.error("Docker client not available")
-        return False
 
+    def create_and_push_manifest(manifest_name, tags, context=""):
+        """Helper to create/push a manifest with proper error handling"""
+        full_context = f"{context} " if context else ""
+
+        try:
+            logger.info(f"{full_context}Creating manifest {manifest_name} with tags: {', '.join(tags)}")
+
+            if not dry_run:
+                # Cleanup existing manifest
+                rm_success, _, _ = run_command(
+                    f"docker manifest rm {manifest_name} 2>/dev/null || true",
+                    f"{full_context}Cleaning existing manifest"
+                )
+                if not rm_success:
+                    logger.warning(f"{full_context}Failed to clean manifest - proceeding anyway")
+
+                # Create manifest
+                create_cmd = f"docker manifest create {manifest_name} {' '.join(tags)}"
+                create_success, stdout, stderr = run_command(
+                    create_cmd,
+                    f"{full_context}Creating manifest"
+                )
+                if not create_success:
+                    logger.error(f"{full_context}Create failed: {stderr}")
+                    return False
+
+                # Push manifest
+                logger.info(f"{full_context}Pushing manifest...")
+                push_success, _, stderr = run_command(
+                    f"docker manifest push {manifest_name}",
+                    f"{full_context}Pushing manifest"
+                )
+                if not push_success:
+                    logger.error(f"{full_context}Push failed: {stderr}")
+                    return False
+
+            logger.info(f"{full_context}Manifest processed successfully" +
+                        (" (dry run)" if dry_run else ""))
+            return True
+
+        except Exception as e:
+            logger.error(f"{full_context}Unexpected error: {str(e)}")
+            return False
+
+    # Validate docker login early
     if not dry_run and not check_docker_login():
         return False
 
-    # Group images by minor_version and os
-    image_groups = {}
+    # Organize images and track OS types
+    image_groups = defaultdict(list)
+    os_types = set()
     for spec in successful_images:
-        minor_version = spec['minor_version']
-        os_info = spec['os']
-        arch = get_normalized_arch(spec['arch'])
-        tag_name = f"{namespace}:{minor_version}-{arch}-{os_info}"
+        os_types.add(spec['os'])
+        key = (spec['minor_version'], spec['os'])
+        image_groups[key].append(
+            f"{namespace}:{spec['minor_version']}-{get_normalized_arch(spec['arch'])}-{spec['os']}"
+        )
 
-        key = (minor_version, os_info)
-        if key not in image_groups:
-            image_groups[key] = []
-        image_groups[key].append(tag_name)
+    success = True
+    # 1. Process OS-specific manifests
+    for (version, os_name), tags in image_groups.items():
+        manifest_name = f"{namespace}:{version}-{os_name}"
+        if not create_and_push_manifest(manifest_name, tags, f"[OS: {os_name}]"):
+            success = False
 
-    # Create manifests for each group
-    success_count = 0
-    for (minor_version, os_info), tags in image_groups.items():
-        # Create OS-specific manifest
-        manifest_name = f"{namespace}:{minor_version}-{os_info}"
-
-        try:
-            logger.info(f"Creating manifest {manifest_name} with tags: {', '.join(tags)}")
-
-            if not dry_run:
-                # First remove any existing manifest to avoid conflicts
-                run_command(f"docker manifest rm {manifest_name} 2>/dev/null || true",
-                            f"Cleaning up any existing manifest {manifest_name}")
-
-                # Build the create manifest command with all tags
-                create_cmd = f"docker manifest create {manifest_name}"
-                for tag in tags:
-                    create_cmd += f" {tag}"
-
-                success, stdout, stderr = run_command(create_cmd, f"Creating manifest {manifest_name}")
-
-                if not success:
-                    logger.error(f"Failed to create manifest {manifest_name}: {stderr}")
-                    continue
-
-                # Push the manifest
-                logger.info(f"Pushing manifest {manifest_name}...")
-                success, stdout, stderr = run_command(
-                    f"docker manifest push {manifest_name}",
-                    f"Pushing manifest {manifest_name}"
-                )
-
-                if not success:
-                    logger.error(f"Failed to push manifest {manifest_name}: {stderr}")
-                    continue
-
-            success_count += 1
-            if dry_run:
-                logger.info(f"Dry run: would create and push manifest {manifest_name}")
-            else:
-                logger.info(f"Successfully created and pushed manifest {manifest_name}")
-
-        except Exception as e:
-            logger.error(f"Unexpected error for manifest {manifest_name}: {e}")
-            continue
-
-    # Create minor version manifest if there is only one OS type
-    os_types = set(os_info for (minor_version, os_info) in image_groups.keys())
+    # 2. Create unified manifests only when single OS exists
     if len(os_types) == 1:
-        # Get all tags for this minor version
-        all_tags = []
-        for tags_list in image_groups.values():
-            all_tags.extend(tags_list)
+        all_tags = [tag for tags in image_groups.values() for tag in tags]
+        os_name = os_types.pop()
+        minor_version = next(iter(image_groups))[0]
 
-        # Get the minor version from the first group
-        minor_version = list(image_groups.keys())[0][0]
-
-        # Create minor version manifest
+        # Version manifest
         version_manifest = f"{namespace}:{minor_version}"
+        if not create_and_push_manifest(version_manifest, all_tags, "[Version]"):
+            success = False
 
-        try:
-            logger.info(f"Creating version manifest {version_manifest} with all tags")
+        # Latest manifest (if requested)
+        if latest:
+            latest_manifest = f"{namespace}:latest"
+            if not create_and_push_manifest(latest_manifest, all_tags, "[Latest]"):
+                success = False
 
-            if not dry_run:
-                # First remove any existing manifest to avoid conflicts
-                run_command(f"docker manifest rm {version_manifest} 2>/dev/null || true",
-                            f"Cleaning up any existing manifest {version_manifest}")
-
-                # Build the create manifest command with all tags
-                create_cmd = f"docker manifest create {version_manifest}"
-                for tag in all_tags:
-                    create_cmd += f" {tag}"
-
-                success, stdout, stderr = run_command(create_cmd, f"Creating version manifest {version_manifest}")
-
-                if not success:
-                    logger.error(f"Failed to create version manifest {version_manifest}: {stderr}")
-                else:
-                    # Push the manifest
-                    logger.info(f"Pushing version manifest {version_manifest}...")
-                    success, stdout, stderr = run_command(
-                        f"docker manifest push {version_manifest}",
-                        f"Pushing version manifest {version_manifest}"
-                    )
-
-                    if not success:
-                        logger.error(f"Failed to push version manifest {version_manifest}: {stderr}")
-
-            success_count += 1
-            if dry_run:
-                logger.info(f"Dry run: would create and push version manifest {version_manifest}")
-            else:
-                logger.info(f"Successfully created and pushed version manifest {version_manifest}")
-
-        except Exception as e:
-            logger.error(f"Unexpected error for version manifest {version_manifest}: {e}")
-
-    return success_count > 0
+    return success
 
 
 def run_command(cmd, desc=None):
@@ -624,8 +595,8 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='测试模式，不将镜像推送到 Docker Hub')
     parser.add_argument('--save-dir', type=str, default=os.getcwd(), help='下载目录 (默认: 当前目录)')
     parser.add_argument('--skip-choice', action='store_true', help='跳过交互式提示，使用最新版本')
-    parser.add_argument('--namespace', type=str, default='opengauss/opengauss',
-                        help='Docker标签命名空间 (默认: opengauss/opengauss)')
+    parser.add_argument('--namespace', type=str, help='Docker标签命名空间，不传入时，lite 对应 opengauss/opengauss, 极简版对应 opengauss/opengauss-server')
+    parser.add_argument('--latest', action='store_true', help='是否标记 latest 标签，仅在每个正式发版时使用')
 
     args = parser.parse_args()
 
@@ -670,7 +641,7 @@ def main():
     logger.info(f"Found {len(docker_list)} Docker images")
 
     # Process each image
-    successful_images = []
+    successful_namespace = defaultdict(list)
     for spec in docker_list:
         logger.info(f"Processing image: {spec['minor_version']}-{spec['arch']}-{spec['os']}")
 
@@ -679,13 +650,19 @@ def main():
         if not file_path:
             logger.error(f"Failed to download image: {spec['minor_version']}-{spec['arch']}-{spec['os']}")
             continue
+        namespace = args.namespace
+        if not args.namespace:
+            if spec['version'] == 'server':
+                namespace = 'opengauss/opengauss-server'
+            else:
+                namespace = 'opengauss/opengauss'
 
         # Load image using Docker SDK
-        if not load_docker_image(spec, file_path, args.namespace):
+        if not load_docker_image(spec, file_path, namespace):
             logger.error(f"Failed to load image: {spec['minor_version']}-{spec['arch']}-{spec['os']}")
             continue
 
-        tag_name = f"{args.namespace}:{spec['minor_version']}-{spec['arch']}-{spec['os']}"
+        tag_name = f"{namespace}:{spec['minor_version']}-{spec['arch']}-{spec['os']}"
 
         # Push image if not in dry-run mode
         if not args.dry_run:
@@ -696,7 +673,7 @@ def main():
 
             if args.skip_choice or input("Push this image? (y/n): ").lower() == 'y':
                 if push_docker_image(tag_name):
-                    successful_images.append(spec)
+                    successful_namespace[namespace].append(spec)
                     logger.info(f"Successfully pushed {tag_name}")
                 else:
                     logger.error(f"Failed to push {tag_name}")
@@ -704,15 +681,11 @@ def main():
                 logger.info(f"Skipping push for {tag_name}")
         else:
             logger.info(f"Dry run: would push {tag_name}")
-            successful_images.append(spec)
+            successful_namespace[namespace].append(spec)
 
-    # Create manifests
-    if successful_images:
-        logger.info("Creating Docker manifests...")
-        if make_manifest(successful_images, args.namespace, args.dry_run):
-            logger.info("Successfully created manifests")
-        else:
-            logger.error("Failed to create manifests")
+    for namespace in successful_namespace:
+        logger.info(f"Creating Docker manifests for {namespace}...")
+        make_manifest(successful_namespace[namespace], namespace, args.dry_run, args.latest)
 
     logger.info("Script execution completed")
     if not args.skip_choice:
