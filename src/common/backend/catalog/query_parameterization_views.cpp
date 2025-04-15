@@ -58,7 +58,8 @@ static void FillParamViewValues(Datum* paramViewsValues, bool* paramViewsNulls, 
         paramViewsNulls[Anum_parameterization_views_types - 1] = true;
     }
     paramViewsValues[Anum_parameterization_views_param_nums - 1] = Int16GetDatum(paramView->paramNums);
-    paramViewsValues[Anum_parameterization_views_parameterized_query - 1] = NameGetDatum(paramView->parameterizedQuery);
+    paramViewsValues[Anum_parameterization_views_parameterized_query - 1] =
+        CStringGetTextDatum(paramView->parameterizedQuery);
     return;
 }
 
@@ -116,7 +117,7 @@ Datum query_parameterization_views(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupDesc, (AttrNumber)Anum_parameterization_views_types, "param_types", INT2VECTOROID, -1, 0);
         TupleDescInitEntry(tupDesc, (AttrNumber)Anum_parameterization_views_param_nums, "param_nums", INT2OID, -1, 0);
         TupleDescInitEntry(tupDesc, (AttrNumber)Anum_parameterization_views_parameterized_query, "parameterized_query",
-                           NAMEOID, -1, 0);
+                           TEXTOID, -1, 0);
 
         funcCtx->user_fctx = GetAllParamQueries(&(funcCtx->max_calls));
         funcCtx->tuple_desc = BlessTupleDesc(tupDesc);

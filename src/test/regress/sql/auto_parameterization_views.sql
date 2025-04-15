@@ -36,4 +36,10 @@ ALTER TABLE test DROP COLUMN C2;
 SELECT query_type, is_bypass, param_types, param_nums, parameterized_query FROM query_parameterization_views();
 
 DROP TABLE test;
+
+CREATE TABLE test1(id int, column1 int, column2 int, column3 int, column4 int, column5 int, column6 int, column7 int, column8 int, column9 int, column10 int);
+INSERT INTO test1(id, column1, column2, column3, column4, column5, column6, column7, column8, column9, column10) VALUES(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+SELECT query_type, is_bypass, param_types, param_nums, parameterized_query FROM query_parameterization_views();
+DROP TABLE test1;
+
 set enable_query_parameterization=off;
