@@ -440,11 +440,18 @@ int _bt_sort_array_elements(IndexScanDesc scan, const ScanKey skey, bool reverse
      * non-cross-type support functions for any datatype that it supports at
      * all.
      */
-    cmp_proc = get_opfamily_proc(rel->rd_opfamily[skey->sk_attno - 1], elemtype, elemtype, BTORDER_PROC);
+    Oid opclass = GetDefaultOpClass(elemtype, BTREE_AM_OID);
+    if (InvalidOid == opclass) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("Invalid opclass for type %d.", elemtype)));
+    }
+
+    Oid opfamily = get_opclass_family(opclass);
+    cmp_proc = get_opfamily_proc(opfamily, elemtype, elemtype, BTORDER_PROC);
     if (!RegProcedureIsValid(cmp_proc)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                         errmsg("missing support function %d(%u,%u) in opfamily %u", BTORDER_PROC, elemtype, elemtype,
-                               rel->rd_opfamily[skey->sk_attno - 1])));
+                               opfamily)));
     }
 
     /* Sort the array elements */
