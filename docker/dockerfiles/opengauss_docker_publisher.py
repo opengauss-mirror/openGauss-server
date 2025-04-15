@@ -119,7 +119,7 @@ def select_spec_by_date(url, skip_choice=False):
         return "", ""
 
 
-def find_docker_images(minor_version, minor_version_url, target_os=None, target_arch=None, get_all=False):
+def find_docker_images(minor_version, minor_version_url, target_os=None, target_arch=None, get_all=False, image_version='both'):
     """Find Docker images with sequential OS directory processing."""
     images = []
     session = create_session()
@@ -136,7 +136,7 @@ def find_docker_images(minor_version, minor_version_url, target_os=None, target_
         for os_link in os_links:
             try:
                 os_images = process_os_directory(session, minor_version, minor_version_url, os_link, target_os,
-                                                 target_arch, get_all)
+                                                 target_arch, get_all, image_version)
                 images.extend(os_images)
             except Exception as e:
                 logger.error(f"Error processing OS directory {os_link}: {e}")
@@ -148,7 +148,7 @@ def find_docker_images(minor_version, minor_version_url, target_os=None, target_
         return []
 
 
-def process_os_directory(session, minor_version, minor_version_url, os_link, target_os, target_arch, get_all):
+def process_os_directory(session, minor_version, minor_version_url, os_link, target_os, target_arch, get_all, image_version):
     """Process a single OS directory to find Docker images."""
     images = []
     os_url = f"{minor_version_url}{os_link}"
@@ -180,7 +180,7 @@ def process_os_directory(session, minor_version, minor_version_url, os_link, tar
 
                 for link in arch_soup.find_all('a'):
                     href = link.get('href')
-                    if href and href.endswith('.tar') and 'openGauss-Docker' in href:
+                    if href and href.endswith('.tar') and 'Docker' in href:
                         image_url = f"{arch_url}{href}"
 
                         # Get file size
@@ -196,7 +196,8 @@ def process_os_directory(session, minor_version, minor_version_url, os_link, tar
                             "url": image_url,
                             "minor_version": minor_version.replace("openGauss", ""),
                             "file_size": file_size,
-                            "filename": href
+                            "filename": href,
+                            "version": "lite" if 'openGauss-Lite-Docker' in href else "server"
                         })
 
             except requests.exceptions.RequestException as e:
@@ -277,7 +278,7 @@ def get_normalized_arch(arch):
         return arch  # return as-is if not recognized
 
 
-def load_docker_image(spec_info, file_path, namespace='opengauss/opengauss'):
+def load_docker_image(spec_info, file_path, namespace=None):
     """Load Docker image using the Docker Python SDK with normalized architecture names."""
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
@@ -290,6 +291,11 @@ def load_docker_image(spec_info, file_path, namespace='opengauss/opengauss'):
     minor_version = spec_info["minor_version"]
     arch = get_normalized_arch(spec_info["arch"])
     os_name = spec_info["os"]
+    if namespace is None:
+        if spec_info.get("image_type") == "regular":
+            namespace = 'opengauss/opengauss-server'
+        else:  # lite or default
+            namespace = 'opengauss/opengauss'
     tag = f"{namespace}:{minor_version}-{arch}-{os_name}"
 
     try:
@@ -341,15 +347,12 @@ def check_docker_login():
         # Try to get authentication information
         auth_info = docker_client.info()
 
-        # Check if we're logged in by attempting a simple registry operation
         docker_client.ping()
 
-        # If we have registry config data, we're likely logged in
         if 'RegistryConfig' in auth_info and auth_info['RegistryConfig'].get('IndexConfigs'):
             logger.info("Already logged in to Docker Hub")
             return True
 
-        # If we get here, we need to log in
         logger.warning("Not logged in to Docker Hub. Please login.")
         print("Docker Hub credentials required:")
         username = input("Username: ")
@@ -360,7 +363,6 @@ def check_docker_login():
         return True
 
     except docker.errors.APIError as e:
-        # If we get a 401 Unauthorized, we need to log in
         if '401' in str(e):
             logger.warning("Docker Hub authentication required")
             try:
@@ -615,13 +617,15 @@ def main():
         epilog="注意:\n如果未提供 MAJOR_VERSION 和 MINOR_VERSION，脚本将以交互式方式让你选择。"
     )
     parser.add_argument('-M', '--major-version', type=str, help='大版本号 (e.g., 7.0.0-RC1)，若未提供，可通过命令行选择')
-    parser.add_argument('-m', '--minor-version', type=str, help='完整版本号 (e.g., openGauss7.0.0-RC1.B020)，若未提供，可通过命令行选择')
+    parser.add_argument('-m', '--minor-version', type=str,
+                        help='完整版本号 (e.g., openGauss7.0.0-RC1.B020)，若未提供，可通过命令行选择')
     parser.add_argument('-o', '--os', type=str, help='目标操作系统。若未提供，默认选择所有操作系统。')
     parser.add_argument('-a', '--arch', type=str, help='目标架构。若未提供，默认选择所有架构。')
     parser.add_argument('--dry-run', action='store_true', help='测试模式，不将镜像推送到 Docker Hub')
     parser.add_argument('--save-dir', type=str, default=os.getcwd(), help='下载目录 (默认: 当前目录)')
     parser.add_argument('--skip-choice', action='store_true', help='跳过交互式提示，使用最新版本')
-    parser.add_argument('--namespace', type=str, default='opengauss/opengauss', help='Docker标签命名空间 (默认: opengauss/opengauss)')
+    parser.add_argument('--namespace', type=str, default='opengauss/opengauss',
+                        help='Docker标签命名空间 (默认: opengauss/opengauss)')
 
     args = parser.parse_args()
 
