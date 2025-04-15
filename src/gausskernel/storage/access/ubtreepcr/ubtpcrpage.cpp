@@ -380,8 +380,8 @@ void UBTreePCRDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bool i
     thisTrans->undoRecPtr = urecPtr;
     thisTrans->combine.csn = InvalidCommitSeqNo;
     thisTrans->tdStatus &= ~(TD_COMMITED | TD_FROZEN | TD_CSN);
-    thisTrans->tdStatus |= TD_ACTIVE;
-    thisTrans->tdStatus |= TD_DELETE;
+    UBTreePCRTDSetStatus(thisTrans, TD_ACTIVE);
+    UBTreePCRTDSetStatus(thisTrans, TD_DELETE);
 
     /*
      * Update the UndoRecord now that we know where the tuple is located on the Page.
@@ -413,66 +413,45 @@ void UBTreePCRDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bool i
 
     /* XLOG stuff */
     if (RelationNeedsWAL(rel)) {
-        xl_ubtree3_insert_or_delete xlrec;
-        XLogRecPtr recptr;
-        XlUndoHeader xlundohdr;
-        uint8 xlUndoHeaderFlag = 0;
-        TransactionId currentXid = InvalidTransactionId;
-        UBTreeUndoInfo undoInfo = (UBTreeUndoInfo)(urec->rawdata_.data);
-
-        Oid relOid = RelationIsPartition(rel) ? GetBaseRelOidOfParition(rel) : RelationGetRelid(rel);
-
-        if (urec->Blkprev() != INVALID_UNDO_REC_PTR) {
-            xlUndoHeaderFlag |= UBTREE_XLOG_HAS_BLK_PREV;
+        UBTree3WalInfo *walInfo = (UBTree3WalInfo*)palloc(sizeof(UBTree3WalInfo));
+        uint8 flag = 0;
+        UndoRecord *cur_urec = t_thrd.ustore_cxt.undo_records[0];
+        UBTreeUndoInfo undoInfo = (UBTreeUndoInfo)(cur_urec->Rawdata()->data);
+        IndexTuple tuple = (IndexTuple)((char*)(cur_urec->Rawdata()->data + SizeOfUBTreeUndoInfoData));
+        if (cur_urec->Blkprev() != INVALID_UNDO_REC_PTR) {
+            flag |= UBTREE_XLOG_HAS_BLK_PREV;
         }
-        if (urec->Prevurp2() != INVALID_UNDO_REC_PTR) {
-            xlUndoHeaderFlag |= UBTREE_XLOG_HAS_XACT_PREV;
+        if (cur_urec->Prevurp2() != INVALID_UNDO_REC_PTR) {
+            flag |= UBTREE_XLOG_HAS_XACT_PREV;
         }
         if (RelationIsPartition(rel)) {
-            xlUndoHeaderFlag |= UBTREE_XLOG_HAS_PARTITION_OID;
+            flag |= UBTREE_XLOG_HAS_PARTITION_OID;
+            walInfo->relOid = rel->parentId;
+            walInfo->partitionOid = RelationGetRelid(rel);
+        } else {
+            walInfo->relOid = RelationGetRelid(rel);
+            walInfo->partitionOid = InvalidOid;
         }
 
-        xlrec.curXid = fxid;
-        xlrec.prevXidOfTuple = t_thrd.ustore_cxt.undo_records[0]->OldXactId();
-        xlrec.offNum = offset;
-        xlrec.tdId = tdslot;
-        // undo xlog stuff
-        xlundohdr.relOid = relOid;
-        xlundohdr.urecptr = urecPtr;
-        xlundohdr.flag = xlUndoHeaderFlag;
-        UndoRecPtr blkprev = urec->Blkprev();
-        UndoRecPtr prevurp2 = urec->Prevurp2();
-        IndexTuple xlogIndexTuple = (IndexTuple)((char*)(urec->rawdata_.data) + SizeOfUBTreeUndoInfoData);
+        walInfo->tdId = tdslot;
+        walInfo->urecptr = urecPtr;
+        walInfo->undoInfo = undoInfo;
+        walInfo->blkprev = cur_urec->Blkprev();
+        walInfo->prevurp = cur_urec->Prevurp2();
+        walInfo->xid = GetTopTransactionId();
+        walInfo->oldXid = cur_urec->OldXactId();
+        walInfo->cid = GetCurrentCommandId(true);
+        walInfo->xlum = xlumPtr;
+        walInfo->itup = tuple;
+        walInfo->flag = flag;
+        walInfo->buffer = buf;
+        walInfo->offnum = offset;
 
-        XLogBeginInsert();
-        XLogRegisterData((char*)&xlrec, SizeOfUbtree3InsertOrDelete);
-        XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
-        XLogRegisterData((char*)xlogIndexTuple, IndexTupleSize(xlogIndexTuple));
-        CommitSeqNo curCSN = InvalidCommitSeqNo;
-        LogCSN(&curCSN);
+        LogInsertOrDelete(walInfo, XLOG_UBTREE3_DELETE_PCR);
 
-        XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
-        XLogRegisterData((char*)undoInfo, SizeOfUBTreeUndoInfoData);
-        if ((xlUndoHeaderFlag & UBTREE_XLOG_HAS_BLK_PREV) != 0) {
-            Assert(blkprev != INVALID_UNDO_REC_PTR);
-            XLogRegisterData((char *)&(blkprev), sizeof(UndoRecPtr));
+        if (walInfo != NULL) {
+            pfree(walInfo);
         }
-        if ((xlUndoHeaderFlag & UBTREE_XLOG_HAS_XACT_PREV) != 0) {
-            XLogRegisterData((char *)&(prevurp2), sizeof(UndoRecPtr));
-        }
-        if ((xlUndoHeaderFlag & UBTREE_XLOG_HAS_PARTITION_OID) != 0) {
-            XLogRegisterData((char *)&(RelationGetRelid(rel)), sizeof(Oid));
-        }
-
-        undo::LogUndoMeta(xlumPtr);
-
-        /* filtering by origin on a row level is much more efficient */
-        XLogIncludeOrigin();
-
-        recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_DELETE_PCR);
-        PageSetLSN(page, recptr);
-        SetUndoPageLSN(t_thrd.ustore_cxt.urecvec, recptr);
-        undo::SetUndoMetaLSN(recptr);
     }
     undo::FinishUndoMeta(persistence);
     END_CRIT_SECTION();

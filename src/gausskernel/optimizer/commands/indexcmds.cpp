@@ -1316,6 +1316,28 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
             if (!optionsHasStorage)
                 stmt->options = lappend(stmt->options, def);
         }
+        if (StdRdOptionsHasStringData(rel->rd_options, index_type)) {
+            DefElem* def = NULL;
+            if (RelationIndexIsPCR(rel->rd_options)) {
+                def = makeDefElem("index_type", (Node*)makeString(UBTREE_INDEX_TYPE_PCR));
+            }  else {
+                def = makeDefElem("index_type", (Node*)makeString(UBTREE_INDEX_TYPE_RCR));
+            }
+            ListCell* cell = NULL;
+            bool optionsHasIndexType = false;
+
+            foreach (cell, stmt->options) {
+                DefElem* defElem = (DefElem*)lfirst(cell);
+                if (pg_strcasecmp(defElem->defname, "index_type") == 0) {
+                    optionsHasIndexType = true;
+                    break;
+                }
+            }
+
+            if (!optionsHasIndexType) {
+                stmt->options = lappend(stmt->options, def);
+            }
+        }
     }
 
     /*

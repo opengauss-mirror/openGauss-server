@@ -570,10 +570,14 @@ void UBTreeXlogNewrootOperatorPage(RedoBufferInfo *buffer, void *record, void *b
     PageSetLSN(page, buffer->lsn);
 }
 
+template void UBTreeXlogClearIncompleteSplit<UBTPageOpaqueInternal>(RedoBufferInfo *buffer);
+template void UBTreeXlogClearIncompleteSplit<UBTPCRPageOpaque>(RedoBufferInfo *buffer);
+
+template<typename UBTreepageOpaque>
 void UBTreeXlogClearIncompleteSplit(RedoBufferInfo *buffer)
 {
     Page page = buffer->pageinfo.page;
-    UBTPageOpaqueInternal pageop = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    UBTreepageOpaque pageop = (UBTreepageOpaque)PageGetSpecialPointer(page);
 
     Assert(P_INCOMPLETE_SPLIT(pageop));
     pageop->btpo_flags &= ~BTP_INCOMPLETE_SPLIT;
@@ -1052,7 +1056,7 @@ static void UBTreeXlogInsertBlock(XLogBlockHead *blockhead, XLogBlockDataParse *
         XLogRedoAction action;
         action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
         if (action == BLK_NEEDS_REDO) {
-            UBTreeXlogClearIncompleteSplit(bufferinfo);
+            UBTreeXlogClearIncompleteSplit<UBTPageOpaqueInternal>(bufferinfo);
             MakeRedoBufferDirty(bufferinfo);
         }
     } else {
@@ -1104,7 +1108,7 @@ static void UBTreeXlogSplitBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
                 UBTreeXlogSplitOperatorNextpage(bufferinfo, rightsib);
             } else {
                 /* child */
-                UBTreeXlogClearIncompleteSplit(bufferinfo);
+                UBTreeXlogClearIncompleteSplit<UBTPageOpaqueInternal>(bufferinfo);
             }
             MakeRedoBufferDirty(bufferinfo);
         }
@@ -1217,7 +1221,7 @@ static void UBTreeXlogNewrootBlock(XLogBlockHead *blockhead, XLogBlockDataParse 
         XLogRedoAction action;
         action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
         if (action == BLK_NEEDS_REDO) {
-            UBTreeXlogClearIncompleteSplit(bufferinfo);
+            UBTreeXlogClearIncompleteSplit<UBTPageOpaqueInternal>(bufferinfo);
         }
     } else {
         UBTreeRestoreMetaOperatorPage(bufferinfo, (void *)blkdata, blkdatalen);
@@ -1608,13 +1612,13 @@ void UBTree3XlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, Und
         opaque->last_delete_xid = xlrec->curXid;
     }
 
-    UBTreeTD thisTrans = UBTreePCRGetTD(page, xlrec->curXid);
+    UBTreeTD thisTrans = UBTreePCRGetTD(page, xlrec->tdId);
     thisTrans->xactid = xlrec->curXid;
     thisTrans->undoRecPtr = urecptr;
     thisTrans->combine.csn = InvalidCommitSeqNo;
     thisTrans->tdStatus &= ~(TD_COMMITED | TD_FROZEN | TD_CSN);
-    thisTrans->tdStatus |= TD_ACTIVE;
-    thisTrans->tdStatus |= TD_DELETE;
+    UBTreePCRTDSetStatus(thisTrans, TD_ACTIVE);
+    UBTreePCRTDSetStatus(thisTrans, TD_DELETE);
 
     PageSetLSN(page, buffer->lsn);
 }

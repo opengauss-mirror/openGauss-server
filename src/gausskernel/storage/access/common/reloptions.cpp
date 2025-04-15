@@ -87,6 +87,7 @@ static void ValidateStrOptEncryptAlgo(const char *val);
 static void ValidateStrOptDekCipher(const char *val);
 static void ValidateStrOptCmkId(const char *val);
 static void validateIndexTypeOption(const char* val);
+static void ValidateStrOptIndexType(const char *val);
 
 
 #ifdef USE_SPQ
@@ -367,6 +368,13 @@ static relopt_string stringRelOpts[] = {
         false,
         ValidateStrOptIndexsplit,
         INDEXSPLIT_OPT_INSERTPT,
+    },
+    {
+        {"index_type", "pcr, rcr", RELOPT_KIND_HEAP},
+        3,
+        false,
+        ValidateStrOptIndexType,
+        UBTREE_INDEX_TYPE_RCR,
     },
     {
         { "ttl", "time to live for timeseries data management", RELOPT_KIND_HEAP },
@@ -2268,6 +2276,23 @@ static void ValidateStrOptIndexsplit(const char *val)
             errdetail("Valid string are \"default\", \"insertpt\".")));
     }
 }
+
+/*
+ * Brief        : Check the index typle.
+ * Input        : val, index typle value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptIndexType(const char *val)
+{
+    if (pg_strcasecmp(val, UBTREE_INDEX_TYPE_PCR) != 0 &&
+        pg_strcasecmp(val, UBTREE_INDEX_TYPE_RCR) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid string for  \"index_typle\" option"),
+            errdetail("Valid string are \"pcr\", \"rcr\".")));
+    }
+}
+
 
 /*
  * Brief        : Check the TTL option Validity.

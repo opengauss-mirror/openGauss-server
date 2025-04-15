@@ -954,12 +954,6 @@ bool UBTreePCRTryRecycleEmptyPageInternal(Relation rel)
     return true;
 }
 
-IndexTuple UBTreeFetchTupleFromUndoRecord(UndoRecord* urec)
-{
-    Assert(urec->Rawdata()->data != NULL);
-    return (IndexTuple)((char*)(urec->Rawdata()->data));
-}
-
 bool UBTreeFetchLatestChangeFromUndo(IndexTuple itup, UndoRecord* urec,
     UBTreeLatestChangeInfo* uInfo, UndoPersistence upersistence)
 {
@@ -969,7 +963,7 @@ bool UBTreeFetchLatestChangeFromUndo(IndexTuple itup, UndoRecord* urec,
         if (state != UNDO_TRAVERSAL_COMPLETE) {
             return false;
         }
-        if (UBTreeItupEquals(itup, UBTreeFetchTupleFromUndoRecord(urec))) {
+        if (UBTreeItupEquals(itup, FetchTupleFromUndoRecord(urec))) {
             break;
         }
         urec->Reset2Blkprev();

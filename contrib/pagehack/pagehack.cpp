@@ -2708,7 +2708,7 @@ static void parse_ubtree_pcr_index_item(const Item item)
     fprintf(stdout,
         "%s td_id:%d Tid: block %u/%u, offset %u\n",
         indents[indentLevel],
-        trx->tdSlot,
+        trx->tdSlot + 1,
         itup->t_tid.ip_blkid.bi_hi,
         itup->t_tid.ip_blkid.bi_lo,
         itup->t_tid.ip_posid);
@@ -3097,8 +3097,25 @@ static void parse_ubtree_pcr_tdslot(const char *page)
     fprintf(stdout, "\n\n\tUBtree PCR Page TD information, nTDSlots = %hu\n", tdCount);
     for (int i = 0; i < tdCount; i++) {
         UBTreeTD thisTrans = UBTreePCRGetTD(page, i + 1);
-        fprintf(stdout, "\n\t\t TD Slot #%d, xid:%ld, urp:%ld, tdStatus:%u\n",
-                i + 1, thisTrans->xactid, thisTrans->undoRecPtr, thisTrans->tdStatus);
+        fprintf(stdout, "\n\t\t TD Slot #%d, xid:%ld, urp:%ld, ",
+                i + 1, thisTrans->xactid, thisTrans->undoRecPtr);
+        fprintf(stdout, "tdStatus: ");
+        if (UBTreePCRTDIsFrozen(thisTrans)) {
+            fprintf(stdout, "TD_FROZEN ");
+        }
+        if (UBTreePCRTDIsActive(thisTrans)) {
+            fprintf(stdout, "TD_ACTIVE ");
+        }
+        if (UBTreePCRTDIsDelete(thisTrans)) {
+            fprintf(stdout, "TD_DELETE ");
+        }
+        if (UBTreePCRTDIsCommited(thisTrans)) {
+            fprintf(stdout, "TD_COMMITED ");
+        }
+        if (UBTreePCRTDHasCsn(thisTrans)) {
+            fprintf(stdout, "TD_CSN ");
+        }
+        fprintf(stdout, "\n");
     }
 }
 

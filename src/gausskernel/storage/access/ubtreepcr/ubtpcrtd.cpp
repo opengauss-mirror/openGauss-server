@@ -79,6 +79,7 @@ void UBTreeFreezeOrInvalidIndexTuples(Buffer buf, int nSlots, const uint8 *slots
          * one, so we need to subtract one here before comparing it with
          * frozen slots.  See PageReserveTransactionSlot.
          */
+        tdSlot -= 1;
         if (map[tdSlot] == 1) {
             /*
              * Set transaction slots of tuple as frozen to indicate tuple
@@ -86,7 +87,7 @@ void UBTreeFreezeOrInvalidIndexTuples(Buffer buf, int nSlots, const uint8 *slots
              */
             if (isFrozen) {
                 if (IsUBTreePCRItemDeleted(trx)) {
-                    ItemIdSetDead(itemId);
+                    ItemIdMarkDead(itemId);
                 } else {
                     IndexItemIdSetFrozen(itemId);
                     UBTreePCRSetIndexTupleTrxSlot(trx, UBTreeFrozenTDSlotId);
@@ -128,7 +129,7 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
      * For temp relations, we can freeze the first slot since no other backend
      * can access the same relation.
      */
-    uint8 frozenSlots[UBTREE_MAX_TD_COUNT] = { 0 };
+    uint8 frozenSlots[UBTREE_MAX_TD_COUNT + 1] = { 0 };
     uint8 nFrozenSlots = 0;
     if (RELATION_IS_LOCAL(relation)) {
         frozenSlots[nFrozenSlots++] = 0;
@@ -180,7 +181,21 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
          * no standby query conflicts with the frozen xids.
          */
         if (RelationNeedsWAL(relation)) {
-            // TODO: Realize xlog for freeze TD 
+            xl_ubtree3_freeze_td_slot xlrec = {0};
+            XLogRecPtr recptr;
+
+            XLogBeginInsert();
+            xlrec.nFrozen = nFrozenSlots;
+            XLogRegisterData((char*)&xlrec, SizeOfUbtree3FreezeTDSlot);
+            /*
+            * We need the frozen slots information when WAL needs to
+            * be applied on the page..
+            */
+            XLogRegisterData((char *)frozenSlots, nFrozenSlots * sizeof(int));
+            XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+
+            recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_FREEZE_TD_SLOT);
+            PageSetLSN(page, recptr);
         }
 
         END_CRIT_SECTION();
@@ -252,7 +267,15 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
          * Xlog Stuff
          */
         if (RelationNeedsWAL(relation)) {
-            // TODO: Realize xlog for freeze TD
+            XLogBeginInsert();
+
+            XLogRegisterData((char *)&nCompletedXactSlots, sizeof(uint16));
+            XLogRegisterData((char *)completedXactSlots, nCompletedXactSlots * sizeof(int));
+
+            XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+
+            XLogRecPtr recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_FREEZE_TD_SLOT);
+            PageSetLSN(page, recptr);
         }
 
         END_CRIT_SECTION();
@@ -345,6 +368,7 @@ uint8 UBTreeExtendTDSlots(Relation relation, Buffer buf)
         UBTreeTD thisTrans = UBTreePCRGetTD(page, i + 1);
         thisTrans->xactid = InvalidTransactionId;
         thisTrans->undoRecPtr = INVALID_UNDO_REC_PTR;
+        UBTreePCRTDSetStatus(thisTrans, TD_FROZEN);
     }
 
     /*
@@ -357,8 +381,20 @@ uint8 UBTreeExtendTDSlots(Relation relation, Buffer buf)
     MarkBufferDirty(buf);
 
     if (RelationNeedsWAL(relation)) {
-        // TODO: 补充xlog
-        //LogUPageExtendTDSlots(buf, currTDSlots, numExtended);
+        page = BufferGetPage(buf);
+        xl_ubtree3_extend_td_slots xlrec = {0};
+        XLogRecPtr recptr;
+
+        XLogBeginInsert();
+
+        xlrec.nExtended = numExtended;
+        xlrec.nPrevSlots = currTDSlots;
+
+        XLogRegisterData((char *) &xlrec, SizeOfUbtree3ExtendTDSlot);
+        XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+
+        recptr = XLogInsert(RM_UHEAP2_ID, XLOG_UBTREE3_EXTEND_TD_SLOTS);
+        PageSetLSN(page, recptr);
     }
 
     END_CRIT_SECTION();

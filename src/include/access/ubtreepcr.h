@@ -158,6 +158,26 @@ typedef UBTreeUndoInfoData* UBTreeUndoInfo;
 
 #define SizeOfUBTreeUndoInfoData (sizeof(uint8))
 
+typedef struct UBTree3WalInfo {
+    Oid relOid;
+    Oid partitionOid;
+    Oid relfilenode;
+    TransactionId xid;     /* if rel is logically logged, and operation is under a subxact, xid is the xid of subxact,
+                              otherwise, it's InvalidTransactionId */
+    TransactionId oldXid;  /* xid in old td, i.e. xid of last operation on this tuple */
+    CommandId cid;
+    Buffer buffer;
+    UndoRecPtr urecptr;    /* urecptr where the current operation's undo is located */
+    UndoRecPtr blkprev;    /* byte offset of previous undo for block */
+    UndoRecPtr prevurp;    /* urecptr where the previous undo of the current transaction */
+    uint8 tdId;         /* old TD and locker TD */
+    UBTreeUndoInfo undoInfo;
+    IndexTuple itup;
+    undo::XlogUndoMeta *xlum;        /* infomation about undometa, needed in every operation */
+    uint8 flag;                /* flags for partitionOid, hashSubXact, blkprev, prevurp */
+    OffsetNumber offnum;
+} UBTree3WalInfo;
+
 /*
  * UBTPCRPruneState
  *
@@ -359,6 +379,10 @@ extern bool UBTreeCPRFirst(IndexScanDesc scan, ScanDirection dir);
 extern bool UBTreePCRNext(IndexScanDesc scan, ScanDirection dir);
 extern Buffer UBTreePCRGetEndPoint(Relation rel, uint32 level, bool rightmost);
 extern bool UBTreePCRGetTupleInternal(IndexScanDesc scan, ScanDirection dir);
+extern void ReportSnapshotTooOld(IndexScanDesc scan, Page page, OffsetNumber offnum,
+    UndoRecPtr urecptr, const char* when);
+void LogInsertOrDelete(UBTree3WalInfo *walInfo, uint8 opt);
+
 
 /*
  * prototypes for functions in ubtpcrinsert.cpp
@@ -376,7 +400,9 @@ extern bool UBTreePCRIsEqual(Relation idxrel, Page page, OffsetNumber offnum, in
 extern void VerifyPCRIndexHikeyAndOpaque(Relation rel, Page page, BlockNumber blkno);
 extern void UBTreePCRVerify(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum, bool fromInsert);
 extern void UBTreeFreezeOrInvalidIndexTuples(Buffer buf, int nSlots, const uint8 *slots, bool isFrozen);
-extern OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size, OffsetNumber offsetNumber, bool overwrite);
+extern void UBTreePCRCopyTDSlot(Page origin, Page target);
+extern bool UBTreePCRPageAddTuple(Page page, Size itemsize, ItemId iid, IndexTuple itup, OffsetNumber itup_off, 
+    bool copyflags, uint8 tdslot, bool isNew = true);
 
 /*
  * prototypes for functions in ubtpcrsplitloc.cpp

@@ -1058,10 +1058,8 @@ bool UBTreePCRFirst(IndexScanDesc scan, ScanDirection dir)
             return false;
     }
 
-    if (so->scanMode != PCR_SCAN_MODE) {
-        /* Drop the lock, but not pin, on the current page */
-        LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-    }
+    /* Drop the lock, but not pin, on the current page */
+    LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 
     /* OK, itemIndex says what to return */
     currItem = &so->currPos.items[so->currPos.itemIndex];
@@ -1104,32 +1102,23 @@ bool UBTreePCRNext(IndexScanDesc scan, ScanDirection dir)
      */
     if (ScanDirectionIsForward(dir)) {
         if (++so->currPos.itemIndex > so->currPos.lastItem) {
-            if (so->scanMode != PCR_SCAN_MODE) {
-                /* We must acquire lock before applying _bt_steppage */
-                Assert(BufferIsValid(so->currPos.buf));
-                LockBuffer(so->currPos.buf, BT_READ);
-            }
-            if (!UBTreePCRStepPage(scan, dir)) {
+            /* We must acquire lock before applying _bt_steppage */
+            Assert(BufferIsValid(so->currPos.buf));
+            LockBuffer(so->currPos.buf, BT_READ);
+            if (!UBTreePCRStepPage(scan, dir))
                 return false;
-            }
-            if (so->scanMode != PCR_SCAN_MODE) {
-                /* Drop the lock, but not pin, on the new page */
-                LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-            }
+            /* Drop the lock, but not pin, on the new page */
+            LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
         }
     } else {
         if (--so->currPos.itemIndex < so->currPos.firstItem) {
-            if (so->scanMode != PCR_SCAN_MODE) {
-                /* We must acquire lock before applying _bt_steppage */
-                Assert(BufferIsValid(so->currPos.buf));
-                LockBuffer(so->currPos.buf, BT_READ);
-            }
+            /* We must acquire lock before applying _bt_steppage */
+            Assert(BufferIsValid(so->currPos.buf));
+            LockBuffer(so->currPos.buf, BT_READ);
             if (!UBTreePCRStepPage(scan, dir))
                 return false;
-            if (so->scanMode != PCR_SCAN_MODE) {
-                /* Drop the lock, but not pin, on the new page */
-                LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-            }
+            /* Drop the lock, but not pin, on the new page */
+            LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
         }
     }
 
@@ -1706,39 +1695,47 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
     Page crPage = NULL;
     CRBufferDesc* desc = NULL;
 
-    bool pcrScanModeSupported = IsPCRScanModeSupported(snapshot);
-    /*
-     * In an MVCC snapshot, if a delete operation occurs after the current snapshot is taken,
-     * the page being searched may have already been pruned. In this scenario, we cannot
-     * retrieve the index tuple through the undo chain because the index tuple might have
-     * been pruned as well, we must switch to PCR scan mode.
+    bool canUsePCRScanMode = IsPCRScanModeSupported(snapshot);
+    /* 
+     * In two cases, must use PCR_SCAN_MODE
+     * a) snapshot type is SNAPSHOT_NOW
+     * b) In an MVCC snapshot and delete operation occurs after the current snapshot is taken
      */
-    bool usePbrcrScanMode = !pcrScanModeSupported || 
+    bool mustUsePCRScanMode = (snapshot->satisfies == SNAPSHOT_NOW) ||
         ((snapshot->satisfies == SNAPSHOT_MVCC || snapshot->satisfies == SNAPSHOT_VERSION_MVCC)
-            && TransactionIdPrecedes(opaque->last_delete_xid, snapshot->xmin));
+        && TransactionIdFollowsOrEquals(opaque->last_delete_xid, snapshot->xmin));
 
     uint32 checkNum = 0;
     OffsetNumber checkVisibleOffs[MaxIndexTuplesPerPage] = {0};
     OffsetNumber originOffnum = offnum;
 
-switch_scan_mode:
-    if (usePbrcrScanMode) {
-        so->scanMode = PBRCR_SCAN_MODE;
-    } else {
-        so->scanMode = PCR_SCAN_MODE;
+choose_scan_mode:
+    if (canUsePCRScanMode) {
+        /*
+         * If snapshot supports PCR_SCAN_MODE, first try to find cr page from the cr pool
+         * a) If found, use PCR_SCAN_MODE directly
+         * b) If not find but mustUsePCRScanMode is true, build a new cr page
+         * c) If neither condition above is met, fallback to use PBRCR_SCAN_MODE
+         */
         desc = ReadCRBuffer(scan->indexRelation, BufferGetBlockNumber(so->currPos.buf),
             snapshot->snapshotcsn, snapshot->curcid);
-        if (desc == NULL) {
+        if (desc != NULL) {
+            crPage = CRBufferGetPage(desc->buf_id);
+        } else if (mustUsePCRScanMode) {
             desc = AllocCRBuffer(scan->indexRelation, MAIN_FORKNUM, BufferGetBlockNumber(so->currPos.buf),
                 snapshot->snapshotcsn, snapshot->curcid);
             crPage = CRBufferGetPage(desc->buf_id);
             BuildCRPage(scan, crPage, so->currPos.buf);
         } else {
-            crPage = CRBufferGetPage(desc->buf_id);
-            LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
+            so->scanMode = PBRCR_SCAN_MODE;
         }
-        page = crPage;
-        maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
+        if (desc != NULL) {
+            so->scanMode = PCR_SCAN_MODE;
+            page = crPage;
+            maxoff = UBTreePCRPageGetMaxOffsetNumber(page);  
+        }
+    } else {
+        so->scanMode = PBRCR_SCAN_MODE;
     }
     ereport(DEBUG5, (errmsg("pcr readpage relfilenode:%u, blkno:%u, snapshot:%u, scanMode:%d (0:PCR 1:PBRCR) ",
             scan->indexRelation->rd_node.relNode, BufferGetBlockNumber(so->currPos.buf),
@@ -1765,13 +1762,13 @@ switch_scan_mode:
                     itemIndex++;
                 } else {
                     checkVisibleOffs[checkNum++] = offnum;
-                    if (checkNum >= SCAN_MODE_SWITCH_THRESHOLD && pcrScanModeSupported) {
-                        usePbrcrScanMode = false;
+                    if (checkNum >= SCAN_MODE_SWITCH_THRESHOLD && canUsePCRScanMode) {
+                        mustUsePCRScanMode = true;
                         offnum = originOffnum;
                         ereport(DEBUG5, (errmsg("pcr readpage switch scan mode, relfilenode:%u, blkno:%u, snapshot:%u",
                             scan->indexRelation->rd_node.relNode, BufferGetBlockNumber(so->currPos.buf),
                             snapshot->satisfies)));
-                        goto switch_scan_mode;
+                        goto choose_scan_mode;
                     }
                 }
             }
@@ -1806,13 +1803,13 @@ switch_scan_mode:
                     UBTreePCRSaveItem(scan, itemIndex, page, offnum, itup, partOid);
                 } else {
                     checkVisibleOffs[checkNum++] = offnum;
-                    if (checkNum >= SCAN_MODE_SWITCH_THRESHOLD && pcrScanModeSupported) {
-                        usePbrcrScanMode = false;
+                    if (checkNum >= SCAN_MODE_SWITCH_THRESHOLD && canUsePCRScanMode) {
+                        mustUsePCRScanMode = true;
                         offnum = originOffnum;
                         ereport(DEBUG5, (errmsg("pcr readpage switch scan mode, relfilenode:%u, blkno:%u, snapshot:%u",
                             scan->indexRelation->rd_node.relNode, BufferGetBlockNumber(so->currPos.buf),
                             snapshot->satisfies)));
-                        goto switch_scan_mode;
+                        goto choose_scan_mode;
                     }
                 }
             }
@@ -2057,13 +2054,8 @@ static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir)
         so->currPos.moreLeft = true;
 
         for (;;) {
-            /* had unlock buf when construct cr page */
-            if (so->scanMode == PCR_SCAN_MODE) {
-                ReleaseBuffer(so->currPos.buf);
-            } else {
-                /* release the previous buffer */
-                _bt_relbuf(rel, so->currPos.buf);
-            }
+            /* release the previous buffer */
+            _bt_relbuf(rel, so->currPos.buf);
             so->currPos.buf = InvalidBuffer;
             /* if we're at end of scan, give up */
             if (blkno == P_NONE || !so->currPos.moreRight)
@@ -2081,10 +2073,6 @@ static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir)
                 /* note that this will clear moreRight if we can stop */
                 if (UBTreePCRReadPage(scan, dir, P_FIRSTDATAKEY(opaque)))
                     break;
-            } else {
-                if (so->scanMode == PCR_SCAN_MODE) {
-                    LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-                }
             }
             /* nope, keep going */
             blkno = opaque->btpo_next;
@@ -2103,12 +2091,7 @@ static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir)
         for (;;) {
             /* Done if we know there are no matching keys to the left */
             if (!so->currPos.moreLeft) {
-                if (so->scanMode == PCR_SCAN_MODE) {
-                    ReleaseBuffer(so->currPos.buf);
-                } else {
-                    /* release the previous buffer */
-                    _bt_relbuf(rel, so->currPos.buf);
-                }
+                _bt_relbuf(rel, so->currPos.buf);
                 so->currPos.buf = InvalidBuffer;
                 return false;
             }
@@ -2134,10 +2117,6 @@ static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir)
                 /* note that this will clear moreLeft if we can stop */
                 if (UBTreePCRReadPage(scan, dir, UBTreePCRPageGetMaxOffsetNumber(page)))
                     break;
-            } else {
-                if (so->scanMode == PCR_SCAN_MODE) {
-                    LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-                }
             }
         }
     }
@@ -2299,10 +2278,8 @@ static bool UBTreePCREndPoint(IndexScanDesc scan, ScanDirection dir)
             return false;
     }
 
-    if (so->scanMode != PCR_SCAN_MODE) {
-        /* Drop the lock, but not pin, on the current page */
-        LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
-    }
+    /* Drop the lock, but not pin, on the current page */
+    LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
 
     /* OK, itemIndex says what to return */
     currItem = &so->currPos.items[so->currPos.itemIndex];
@@ -2416,8 +2393,6 @@ static void BuildCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer)
     securec_check(rc, "\0", "\0");
 
     BlockNumber blkno = BufferGetBlockNumber(baseBuffer);
-    /* unlock base page but still pin */
-    LockBuffer(baseBuffer, BUFFER_LOCK_UNLOCK);
 
     Relation rel = scan->indexRelation;
     Snapshot snapshot = scan->xs_snapshot;
@@ -2504,7 +2479,6 @@ loop:
     UBTreeTD cr_td;
     /* fill csn on base page */
     if (fillCsnOnBasePage) {
-        LockBuffer(baseBuffer, BT_WRITE);
         basePage = BufferGetPage(baseBuffer);
         for (uint8 tdid = 1; tdid <= tdCount; tdid++) {
             td = UBTreePCRGetTD(basePage, tdid);
@@ -2515,7 +2489,6 @@ loop:
             td->combine.csn = cr_td->combine.csn;
             UBTreePCRTDSetStatus(td, TD_CSN);
         }
-        LockBuffer(baseBuffer, BUFFER_LOCK_UNLOCK);
     }
 
     if (!needMaxHeap) {

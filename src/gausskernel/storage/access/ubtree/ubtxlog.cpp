@@ -211,7 +211,7 @@ static void UBTreeClearIncompleteSplit(XLogReaderState *record, uint8 block_id)
     RedoBufferInfo buffer;
 
     if (XLogReadBufferForRedo(record, block_id, &buffer) == BLK_NEEDS_REDO) {
-        UBTreeXlogClearIncompleteSplit(&buffer);
+        UBTreeXlogClearIncompleteSplit<UBTPageOpaqueInternal>(&buffer);
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf)) {
@@ -873,7 +873,7 @@ static void UBTreeXlogNewRootUpdate(XLogReaderState *record)
 
     lbuffer.buf = InvalidBuffer;
     if (xlrec->level > 0 && XLogReadBufferForRedo(record, BTREE_NEWROOT_LEFT_BLOCK_NUM, &lbuffer) == BLK_NEEDS_REDO) {
-        UBTreeXlogClearIncompleteSplit(&lbuffer);
+        UBTreeXlogClearIncompleteSplit<UBTPageOpaqueInternal>(&lbuffer);
         MarkBufferDirty(lbuffer.buf);
     }
 
@@ -938,38 +938,30 @@ static void UBTreeXlogNewRoot(XLogReaderState *record, bool issplitupgrade)
     UBTreeRestoreMeta(record, 1);
 }
 
-static UndoRecPtr PrepareAndInsertUndoRecordForPCRDeleteRedo(XLogReaderState *record,
+static UndoRecPtr PrepareUndoRecordForRedo(XLogReaderState *record,
     xl_ubtree3_insert_or_delete *xlrec, IndexTuple itup, char *recordPtr, const bool tryPrepare, bool isInsert)
 {
     XLogRecPtr lsn = record->EndRecPtr;
-    UndoRecPtr *blkprev;
-    UndoRecPtr *prevurp;
-    UndoRecPtr invalidUrp = INVALID_UNDO_REC_PTR;
-    Oid *partitionOid;
+    UndoRecPtr blkprev = INVALID_UNDO_REC_PTR;
+    UndoRecPtr prevurp = INVALID_UNDO_REC_PTR;
+    Oid partitionOid = InvalidOid;
     undo::XlogUndoMeta undometa;
-    Oid invalidPartitionOid = 0;
     XlUndoHeader *xlundohdr = (XlUndoHeader *)recordPtr;
     recordPtr += SizeOfXLUndoHeader;
     UBTreeUndoInfo uinfo = (UBTreeUndoInfo)recordPtr;
     recordPtr += SizeOfUBTreeUndoInfoData;
 
     if ((xlundohdr->flag & UBTREE_XLOG_HAS_BLK_PREV) != 0) {
-        blkprev = (UndoRecPtr *) ((char *)recordPtr);
+        blkprev = *((UndoRecPtr *)recordPtr);
         recordPtr += sizeof(UndoRecPtr);
-    } else {
-        blkprev = &invalidUrp;
     }
     if ((xlundohdr->flag & UBTREE_XLOG_HAS_XACT_PREV) != 0) {
-        prevurp = (UndoRecPtr *) ((char *)recordPtr);
+        prevurp = *((UndoRecPtr *)recordPtr);
         recordPtr += sizeof(UndoRecPtr);
-    } else {
-        prevurp = &invalidUrp;
     }
     if ((xlundohdr->flag & UBTREE_XLOG_HAS_PARTITION_OID) != 0) {
-        partitionOid = (Oid *) ((char *)recordPtr);
+        partitionOid = *((Oid *)recordPtr);
         recordPtr += sizeof(Oid);
-    } else {
-        partitionOid = &invalidPartitionOid;
     }
 
     undo::XlogUndoMeta *xlundometa = (undo::XlogUndoMeta *)((char *)recordPtr);
@@ -988,7 +980,7 @@ static UndoRecPtr PrepareAndInsertUndoRecordForPCRDeleteRedo(XLogReaderState *re
         /* recover undo record */
         UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
         undorec->SetUrp(urecptr);
-        undorec->SetBlkprev(*prevurp);
+        undorec->SetBlkprev(prevurp);
         undorec->SetOldXactId(xlrec->prevXidOfTuple);
 
         /* We need to pass in tablespace and relfilenode in PrepareUndo but we never explicitly
@@ -1001,9 +993,14 @@ static UndoRecPtr PrepareAndInsertUndoRecordForPCRDeleteRedo(XLogReaderState *re
 
         if (isInsert) {
             // TODO
+            urecptr = UBTreePCRPrepareUndoInsert(xlundohdr->relOid, partitionOid, targetNode.relNode,
+                        targetNode.spcNode, UNDO_PERMANENT, xlrec->curXid, FirstCommandId,
+                        blkprev, prevurp, blkno, xlundohdr, &undometa, InvalidOffsetNumber, InvalidBuffer,
+                        false, uinfo, itup);
+
         } else {
-            urecptr = UBTreePCRPrepareUndoDelete(xlundohdr->relOid, *partitionOid, targetNode.relNode,
-                        targetNode.spcNode, UNDO_PERMANENT, InvalidBuffer, xlrec->curXid, 0, *prevurp,
+            urecptr = UBTreePCRPrepareUndoDelete(xlundohdr->relOid, partitionOid, targetNode.relNode,
+                        targetNode.spcNode, UNDO_PERMANENT, InvalidBuffer, xlrec->curXid, 0, prevurp,
                         itup, blkno, xlundohdr, &undometa, uinfo);
         }
 
@@ -1270,16 +1267,135 @@ static void UBTree3RestoreMeta(XLogReaderState *record, uint8 block_id)
 
 static void UBTree3XlogInsertPcrInternal(XLogReaderState* record, bool hasMeta)
 {
+    RedoBufferInfo lbuf;
+    RedoBufferInfo cbuf;
+
+    if (XLogReadBufferForRedo(record, UBTREE3_INSERT_PCR_INTERNAL_BLOCK_NUM, &lbuf) == BLK_NEEDS_REDO) {
+        Size dataLen;
+        char *dataPos = XLogRecGetBlockData(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &dataLen);
+        xl_btree_insert *xlrec = (xl_btree_insert *)dataPos;
+        Page page = lbuf.pageinfo.page;
+
+        if (UBTPCRPageAddItem(page, (Item)dataPos, dataLen, xlrec->offnum, false) == InvalidOffsetNumber) {
+            ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("faild to add left P_HIKEY wihle redo.")));
+        }
+        PageSetLSN(page, lbuf.lsn);
+    }
+    if (BufferIsValid(lbuf.buf)) {
+        MarkBufferDirty(lbuf.buf);
+        UnlockReleaseBuffer(lbuf.buf);
+    }
+
+    if (XLogReadBufferForRedo(record, UBTREE3_INSERT_PCR_LEAF_BLOCK_NUM, &cbuf) == BLK_NEEDS_REDO) {
+        UBTreeXlogClearIncompleteSplit<UBTPCRPageOpaque>(&cbuf);
+    }
+    if (BufferIsValid(cbuf.buf)) {
+        MarkBufferDirty(cbuf.buf);
+        UnlockReleaseBuffer(cbuf.buf);
+    }
+
+    if (hasMeta) {
+        UBTree3RestoreMeta(record, UBTREE3_INSERT_PCR_META_BLOCK_NUM);
+    }
+
     return;
 }
 
 static void UBTree3XlogInsert(XLogReaderState* record, bool isDup)
 {
+    RedoBufferInfo buffer;
+    xl_ubtree3_insert_or_delete *xlrec = (xl_ubtree3_insert_or_delete *)XLogRecGetData(record);
+    char *recordptr = (char *)xlrec;
+    recordptr += SizeOfUbtree3InsertOrDelete;
+    IndexTuple itup = (IndexTuple)recordptr;
+    recordptr += IndexTupleSize(itup);
+    bool replayAll = !AmPageRedoWorker() || !SUPPORT_USTORE_UNDO_WORKER;
+    bool replayRedoOnly = replayAll ? false : parallel_recovery::DoPageRedoWorkerReplayUndo();
+    UndoRecPtr urec =  PrepareUndoRecordForRedo(record, xlrec, itup, recordptr, (replayAll | replayRedoOnly), true);
+    if (replayAll | !replayRedoOnly) {
+        if (XLogReadBufferForRedo(record, BTREE_INSERT_ORIG_BLOCK_NUM, &buffer) == BLK_NEEDS_REDO) {
+            Page page = buffer.pageinfo.page;
+            if (!isDup) {
+                Size size = MAXALIGN(IndexTupleSize(itup));
+                if (!UBTreePCRPageAddTuple(page, size, NULL, itup, xlrec->offNum, false, xlrec->tdId)) {
+                    ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add new item to block")));
+                }
+            }
+            ItemId iid = UBTreePCRGetRowPtr(page, xlrec->offNum);
+            IndexTuple tup = UBTreePCRGetIndexTupleByItemId(page, iid);
+            IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(tup);
+            UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+            UBTreeTD td = UBTreePCRGetTD(page, xlrec->tdId);
+            opaque->activeTupleCount ++;
+            td->setInfo(xlrec->curXid, urec);
+            if (isDup) {
+                iid->lp_flags = LP_NORMAL;
+                UBTreePCRSetIndexTupleTrxSlot(trx, xlrec->tdId);
+                UBTreePCRClearIndexTupleTrxInvalid(trx);
+                UBTreePCRClearIndexTupleDeleted(trx);
+            }
+            PageSetLSN(page, buffer.lsn);
+        }
+        if (BufferIsValid(buffer.buf)) {
+            MarkBufferDirty(buffer.buf);
+            UnlockReleaseBuffer(buffer.buf);
+        }
+    }
+
     return;
 }
 
 static void UBTree3XlogNewRoot(XLogReaderState* record)
 {
+    RedoBufferInfo buffer;
+    xl_btree_newroot *xlrec = (xl_btree_newroot *)XLogRecGetData(record);
+    XLogInitBufferForRedo(record, 0, &buffer);
+
+    Size dataLen;
+    char *dataPos = XLogRecGetBlockData(record, 0, &dataLen);
+    Page page = buffer.pageinfo.page;
+    UBTreePCRPageInit(page, buffer.pageinfo.pagesize);
+    UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    opaque->btpo_cycleid = 0;
+    opaque->btpo.level = xlrec->level;
+    opaque->btpo_flags = BTP_ROOT;
+    if (xlrec->level == 0) {
+        opaque->btpo_flags |= BTP_LEAF;
+        UBTreePCRInitTD(page);
+    } else {
+        opaque->td_count = 0;
+        Item lItem = (Item)dataPos;
+        Size lItemSz = IndexTupleSize(lItem);
+        Item rItem = (Item)(dataPos + lItemSz);
+        Size rItemSz = IndexTupleSize(rItem);
+
+        if (UBTPCRPageAddItem(page, lItem, lItemSz, P_HIKEY, false) == InvalidOffsetNumber) {
+            ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("faild to add left P_HIKEY wihle redo.")));
+        }
+        if (UBTPCRPageAddItem(page, rItem, rItemSz, P_FIRSTKEY, false) == InvalidOffsetNumber) {
+            ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("faild to add left P_FIRSTKEY wihle redo.")));
+        }
+        PageSetLSN(page, buffer.lsn);
+    }
+
+    if (BufferIsValid(buffer.buf)) {
+        MarkBufferDirty(buffer.buf);
+        UnlockReleaseBuffer(buffer.buf);
+    }
+
+    RedoBufferInfo lbuffer;
+    lbuffer.buf = InvalidBuffer;
+    if (xlrec->level > 0 && XLogReadBufferForRedo(record, 1, &lbuffer) == BLK_NEEDS_REDO) {
+        UBTreeXlogClearIncompleteSplit<UBTPCRPageOpaque>(&lbuffer);
+    }
+    if (BufferIsValid(lbuffer.buf)) {
+        MarkBufferDirty(lbuffer.buf);
+        UnlockReleaseBuffer(lbuffer.buf);
+    }
+
     return;
 }
 
@@ -1329,7 +1445,7 @@ static void UBTree3XlogDelete(XLogReaderState* record)
 
     XLogRecGetBlockTag(record, 0, &targetNode, NULL, &blkno);
 
-    UndoRecPtr urecptr = PrepareAndInsertUndoRecordForPCRDeleteRedo(record, xlrec, itup, recordPtr,
+    UndoRecPtr urecptr = PrepareUndoRecordForRedo(record, xlrec, itup, recordPtr,
         (allReplay || onlyReplayUndo), false);
 
     if (allReplay || !onlyReplayUndo) {
@@ -1349,6 +1465,28 @@ static void UBTree3XlogDelete(XLogReaderState* record)
 
 static void UBTree3XlogFreezeTdSlot(XLogReaderState* record)
 {
+    xl_ubtree3_freeze_td_slot *xlrec = (xl_ubtree3_freeze_td_slot *)XLogRecGetData(record);
+    RelFileNode rnode;
+    RedoBufferInfo buffer;
+    if (!XLogRecGetBlockTag(record, 0, &rnode, NULL, NULL)) {
+        /* Caller specified a bogus block_id */
+        ereport(PANIC, (errmsg("failed to locate backup block with ID %d", 0)));
+    }
+
+    if (InHotStandby && TransactionIdIsValid(xlrec->latestFrozenXid) && g_supportHotStandby) {
+        ResolveRecoveryConflictWithSnapshot(xlrec->latestFrozenXid, rnode);
+    }
+
+    if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
+        UBTree3XlogPrunePageOperatorPage(&buffer, XLogRecGetData(record), rnode.relNode);
+        if (BufferIsValid(buffer.buf)) {
+            MarkBufferDirty(buffer.buf);
+        }
+    }
+
+    if (BufferIsValid(buffer.buf)) {
+        UnlockReleaseBuffer(buffer.buf);
+    }
     return;
 }
 
@@ -1365,10 +1503,22 @@ static void UBTree3XlogReuseTdSlot(XLogReaderState* record)
     if (BufferIsValid(buffer.buf)) {
         UnlockReleaseBuffer(buffer.buf);
     }
+    return;
 }
 
 static void UBTree3XlogExtendTdSlots(XLogReaderState* record)
 {
+    RedoBufferInfo buffer;
+    if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
+        UBTree3XlogReuseTdOperatorPage(&buffer, (void *)XLogRecGetData(record));
+        if (BufferIsValid(buffer.buf)) {
+            MarkBufferDirty(buffer.buf);
+        }
+    }
+
+    if (BufferIsValid(buffer.buf)) {
+        UnlockReleaseBuffer(buffer.buf);
+    }
     return;
 }
 
@@ -1387,8 +1537,152 @@ static void UBTree3XlogRollBackTxn(XLogReaderState* record)
     }
 }
 
+void BTree3XlogSplitLeftPage(RedoBufferInfo *bufferinfo, void *recorddata, bool onleft, void *blkdata, Size datalen)
+{
+    xl_ubtree3_split *xlrec = (xl_ubtree3_split *)recorddata;
+    Page lpage = bufferinfo->pageinfo.page;
+    UBTPCRPageOpaque lopaque = (UBTPCRPageOpaque)PageGetSpecialPointer(lpage);
+    char *dataPos = (char *)blkdata;
+    IndexTuple item;
+    Size size;
+    if (onleft) {
+        item = (IndexTuple)dataPos;
+        size = MAXALIGN(IndexTupleSize(item));
+        dataPos += size;
+        datalen -= size;
+    }
+    Item leftHightKey = (Item)dataPos;
+    Size leftHightKeySz = MAXALIGN(IndexTupleSize(leftHightKey));
+    dataPos += leftHightKeySz;
+    dataPos -= leftHightKeySz;
+
+    START_CRIT_SECTION();
+    Page lNewPage = PageGetTempPageCopySpecial(lpage);
+    if (P_ISLEAF(lopaque)) {
+        UBTreePCRCopyTDSlot(lpage, lNewPage);
+    }
+    END_CRIT_SECTION();
+    OffsetNumber leftOff = P_HIKEY;
+    if (UBTPCRPageAddItem(lNewPage, leftHightKey, leftHightKeySz, P_HIKEY, false) == InvalidOffsetNumber) {
+        ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
+                errmsg("faild to add left P_HIKEY wihle redo.")));
+    }
+    leftOff = OffsetNumberNext(leftOff);
+    OffsetNumber off;
+    for (off = P_FIRSTDATAKEY(lopaque); off < xlrec->firstRight; off ++) {
+        if (onleft && off == xlrec->newItemOff) {
+            if (!UBTreePCRPageAddTuple(lNewPage, size,  NULL, item, leftOff, false, xlrec->slotNo)) {
+                ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add new item to block")));
+            }
+            leftOff = OffsetNumberNext(leftOff);
+        }
+
+        ItemId iid = UBTreePCRGetRowPtr(lpage, off);
+        IndexTuple itup = UBTreePCRGetIndexTuple(lpage, off);
+        Size itupSize = IndexTupleSize(itup);
+        if (!UBTreePCRPageAddTuple(lNewPage, itupSize,  iid, itup, leftOff, true, UBTreeInvalidTDSlotId)) {
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add new item to block")));
+        }
+        leftOff = OffsetNumberNext(leftOff);
+    }
+    if (onleft && off == xlrec->newItemOff) {
+        if (!UBTreePCRPageAddTuple(lNewPage, size,  NULL, item, leftOff, false, xlrec->slotNo)) {
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add new item to block")));
+        }
+        leftOff = OffsetNumberNext(leftOff);
+    }
+    if (onleft && xlrec->slotNo != UBTreeInvalidTDSlotId) {
+        UBTreeTD td = UBTreePCRGetTD(lNewPage, xlrec->slotNo);
+        td->setInfo(xlrec->fxid, xlrec->urp);
+    }
+    PageRestoreTempPage(lNewPage, lpage);
+    UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(lpage);
+    *opaque = xlrec->letfPcrOpq;
+    PageSetLSN(lpage, bufferinfo->lsn);
+}
+
 static void UBTree3XlogSplit(XLogReaderState* record, bool onLeft, bool isRoot)
 {
+    RelFileNode rnode;
+    BlockNumber leftSib;
+    BlockNumber rightSib;
+    BlockNumber rnext;
+    (void) XLogRecGetBlockTag(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &rnode, NULL, &leftSib);
+    (void) XLogRecGetBlockTag(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, NULL, NULL, &rightSib);
+    if (!XLogRecGetBlockTag(record, BTREE_SPLIT_RIGHTNEXT_BLOCK_NUM, NULL, NULL, &rnext)) {
+        rnext = P_NONE;
+    }
+    bool replayAll = !AmPageRedoWorker() || !SUPPORT_USTORE_UNDO_WORKER;
+    bool replayRedoOnly = replayAll ? false : parallel_recovery::DoPageRedoWorkerReplayUndo();
+
+    char *rec = (char *)XLogRecGetData(record);
+    xl_ubtree3_split *xlrec = (xl_ubtree3_split *)rec;
+    rec += SizeOfUbtree3Split;
+    if (xlrec->slotNo != UBTreeInvalidTDSlotId) {
+        xl_ubtree3_insert_or_delete *xlrecInsert = (xl_ubtree3_insert_or_delete* )rec;
+        rec += SizeOfUbtree3InsertOrDelete;
+        IndexTuple itup = (IndexTuple)rec;
+        rec += IndexTupleSize(itup);
+        xlrec->urp = PrepareUndoRecordForRedo(record, xlrecInsert, itup, rec, (replayAll | replayRedoOnly), true);
+    }
+
+    if (replayRedoOnly) {
+        return;
+    }
+
+    if (xlrec->level > 0) {
+        RedoBufferInfo cbuf;
+        if (XLogReadBufferForRedo(record, BTREE_SPLIT_CHILD_BLOCK_NUM, &cbuf) == BLK_NEEDS_REDO) {
+            UBTreeXlogClearIncompleteSplit<UBTPCRPageOpaque>(&cbuf);
+        }
+        if (BufferIsInvalid(cbuf.buf)) {
+            MarkBufferDirty(cbuf.buf);
+            UnlockReleaseBuffer(cbuf.buf);
+        }
+    }
+
+    RedoBufferInfo rbuf;
+    Size dataLen;
+    XLogInitBufferForRedo(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, &rbuf);
+    char *dataPos = XLogRecGetBlockData(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, &dataLen);
+    Page rpage = rbuf.pageinfo.page;
+    UBTreePCRPageInit(rpage, rbuf.pageinfo.pagesize);
+    errno_t rc = memcpy_s(rpage, xlrec->rightLower, dataPos, xlrec->rightLower);
+    securec_check(rc, "\0", "\0");
+    dataPos += xlrec->rightLower;
+    Size upper = dataLen - xlrec->rightLower;
+    rc = memcpy_s(rpage + BLCKSZ - upper, upper, dataPos, upper);
+    securec_check(rc, "\0", "\0");
+    PageSetLSN(rpage, rbuf.lsn);
+    if (BufferIsValid(rbuf.buf)) {
+        MarkBufferDirty(rbuf.buf);
+        UnlockReleaseBuffer(rbuf.buf);
+    }
+
+    RedoBufferInfo lbuf;
+    if (XLogReadBufferForRedo(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &lbuf) == BLK_NEEDS_REDO) {
+        dataPos = XLogRecGetBlockData(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &dataLen);
+        BTree3XlogSplitLeftPage(&lbuf, (void *)xlrec, onLeft, (void *)dataPos, dataLen);
+    }
+    if (BufferIsValid(lbuf.buf)) {
+        MarkBufferDirty(lbuf.buf);
+        UnlockReleaseBuffer(lbuf.buf);
+    }
+
+    RedoBufferInfo sbuf;
+    if (rnext != P_NONE) {
+        if (XLogReadBufferForRedo(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &sbuf) == BLK_NEEDS_REDO) {
+            Page page = sbuf.pageinfo.page;
+            UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+            opaque->btpo_prev = rightSib;
+            PageSetLSN(page, sbuf.lsn);
+        }
+    }
+    if (BufferIsValid(sbuf.buf)) {
+        MarkBufferDirty(sbuf.buf);
+        UnlockReleaseBuffer(sbuf.buf);
+    }
+
     return;
 }
 
@@ -1517,7 +1811,7 @@ void UBTree3Redo(XLogReaderState* record)
             UBTree3XlogInsertPcrInternal(record, false);
             break;
         case XLOG_UBTREE3_INSERT_PCR_META:
-            UBTree3XlogInsertPcrInternal(record, false);
+            UBTree3XlogInsertPcrInternal(record, true);
             break;
         case XLOG_UBTREE3_DUP_INSERT:
             UBTree3XlogInsert(record, true);

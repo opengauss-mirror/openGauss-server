@@ -209,6 +209,9 @@ typedef struct RelationMetaData {
 #define INTERNAL_MASK_DSELECT 0x08    // disable select
 #define INTERNAL_MASK_DUPDATE 0x0100  // disable update
 
+#define StdRdOptionsHasStringData(_basePtr, _memberName)    \
+    ((_basePtr) && (((StdRdOptions*)(_basePtr))->_memberName))
+
 #define StdRdOptionsGetStringData(_basePtr, _memberName, _defaultVal)                    \
     (((_basePtr) && (((StdRdOptions*)(_basePtr))->_memberName))                          \
             ? (((char*)(_basePtr) + *(int*)&(((StdRdOptions*)(_basePtr))->_memberName))) \

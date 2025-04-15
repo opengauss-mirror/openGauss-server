@@ -376,6 +376,21 @@ typedef struct xl_ubtree3_split {
 
 #define SizeOfUbtree3Split (sizeof(xl_ubtree3_split))
 
+typedef struct xl_ubtree3_freeze_td_slot {
+    TransactionId latestFrozenXid; /* latest frozen xid */
+    uint16 nFrozen;                /* number of transaction slots to freeze */
+    char padding[6];
+} xl_ubtree3_freeze_td_slot;
+
+#define SizeOfUbtree3FreezeTDSlot (offsetof(xl_ubtree3_freeze_td_slot, padding)) 
+
+typedef struct xl_ubtree3_extend_td_slots {
+    uint8   nPrevSlots; /* Previous number of TD slots */
+    uint8   nExtended; /* Number of slots after extension */
+} xl_ubtree3_extend_td_slots;
+
+#define SizeOfUbtree3ExtendTDSlot (offsetof(xl_ubtree3_extend_td_slots, nExtended) + sizeof(uint8))
+
 #define UBTREE_XLOG_HAS_BLK_PREV (1)
 #define UBTREE_XLOG_HAS_XACT_PREV (1 << 1)
 #define UBTREE_XLOG_HAS_PARTITION_OID (1 << 2)

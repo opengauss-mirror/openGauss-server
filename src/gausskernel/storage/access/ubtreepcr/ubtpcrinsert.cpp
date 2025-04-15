@@ -39,8 +39,6 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
     Size newitemsz, IndexTuple newitem, bool newitemonleft, BTScanInsert itup_key,uint8 tdslot, UndoRecPtr urec,
     undo::XlogUndoMeta *meta, bool noinsert);
 static void UBTreePCRSplitForTD(Relation rel, Buffer buf, BTScanInsert itup_key, BTStack stack);
-static bool UBTreePCRPageAddTuple(Page page, Size itemsize, ItemId iid, IndexTuple itup, OffsetNumber itup_off, 
-    bool copyflags, uint8 tdslot, bool isNew = true);
 void UBTreePCROrWaitForTDSlot(TransactionId xWait, bool isInsert);
 static Buffer UBTreePCRNewRoot(Relation rel, Buffer lbuf, Buffer rbuf);
 static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumber firstlegaloff, BTScanInsert itup_key,
@@ -53,7 +51,8 @@ static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer bu
 static void UBTreePCRDupInsertOnPage(Relation rel, Buffer buf, OffsetNumber offnum, int tdSlot,
     UndoRecPtr urecptr, undo::XlogUndoMeta *xlum);
 uint8 PreparePCRDelete(Relation rel, Buffer buf, OffsetNumber offnum, UBTreeUndoInfo undoInfo, TransactionId* minXid, bool* needRetry);
-
+void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumber firstrightoff, bool isroot,
+    OffsetNumber originOff, OffsetNumber leftOff, uint8 tdSlot, UBTree3WalInfo *walInfo, bool newItemOnLeft);
 
 /*
  *	UBTreePCRDoInsert() -- Handle insertion of a single index tuple in the tree.
@@ -457,6 +456,45 @@ DELETE_RETRY:
     return found;
 }
 
+void LogInsertOrDelete(UBTree3WalInfo *walInfo, uint8 opt)
+{
+    xl_ubtree3_insert_or_delete xlrecInsert;
+    XLogRecPtr recptr;
+    XlUndoHeader xlundohdr;
+    Page page = BufferGetPage(walInfo->buffer);
+
+    xlrecInsert.offNum = walInfo->offnum;
+    xlrecInsert.tdId = walInfo->tdId;
+    xlrecInsert.prevXidOfTuple = walInfo->oldXid;
+    xlrecInsert.curXid = walInfo->xid;
+    xlundohdr.relOid = walInfo->relOid;
+    xlundohdr.urecptr = walInfo->urecptr;
+    xlundohdr.flag = walInfo->flag;
+
+    XLogBeginInsert();
+    XLogRegisterData((char *)&xlrecInsert, SizeOfUbtree3InsertOrDelete);
+    XLogRegisterBuffer(0, walInfo->buffer, REGBUF_STANDARD);
+    XLogRegisterData((char *)walInfo->itup, IndexTupleSize(walInfo->itup));
+    XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
+    XLogRegisterData((char *)walInfo->undoInfo, SizeOfUBTreeUndoInfoData);
+    if (walInfo->flag & UBTREE_XLOG_HAS_BLK_PREV != 0) {
+        XLogRegisterData((char *)&(walInfo->blkprev), sizeof(UndoRecPtr));
+    }
+    if (walInfo->flag & UBTREE_XLOG_HAS_XACT_PREV != 0) {
+        XLogRegisterData((char *)&(walInfo->prevurp), sizeof(UndoRecPtr));
+    }
+    if (walInfo->flag & UBTREE_XLOG_HAS_PARTITION_OID != 0) {
+        XLogRegisterData((char *)&(walInfo->partitionOid), sizeof(Oid));
+    }
+    undo::LogUndoMeta(walInfo->xlum);
+
+    XLogIncludeOrigin();
+    recptr = XLogInsert(RM_UBTREE3_ID, opt);
+    PageSetLSN(page, recptr);
+    SetUndoPageLSN(t_thrd.ustore_cxt.urecvec, recptr);
+    undo::SetUndoMetaLSN(recptr);
+}
+
 /*
  * UBTreePCRInsertOnPage() -- Insert a tuple on a particular page in the index.
  *
@@ -643,74 +681,105 @@ static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer bu
 
     /* XLOG stuff */
     if (RelationNeedsWAL(rel)) {
-//         xl_btree_insert xlrec;
-//         xl_btree_metadata_old xlmeta;
-//         uint8 xlinfo;
-//         XLogRecPtr recptr;
-//         IndexTupleData trunctuple;
+        if (UBTreePageGetTDSlotCount(page) == 0) {
+            xl_btree_insert xlrec;
+            xl_btree_metadata xlmeta;
+            uint8 xlinfo;
+            XLogRecPtr recptr;
+            IndexTupleData trunctuple;
 
-//         xlrec.offnum = itup_off;
+            xlrec.offnum = itup_off;
 
-//         XLogBeginInsert();
-//         XLogRegisterData((char *)&xlrec, SizeOfBtreeInsert);
+            XLogBeginInsert();
+            XLogRegisterData((char *)&xlrec, SizeOfBtreeInsert);
 
-//         if (P_ISLEAF(lpageop)) {
-//             xlinfo = XLOG_UBTREE_INSERT_LEAF;
+            /*
+            * Register the left child whose INCOMPLETE_SPLIT flag was
+            * cleared.
+            */
+            XLogRegisterBuffer(1, cbuf, REGBUF_STANDARD);
+            xlinfo = XLOG_UBTREE3_INSERT_PCR_INTERNAL;
 
-//             /*
-//              * Cache the block information if we just inserted into the
-//              * rightmost leaf page of the index.
-//             */
-//             if (P_RIGHTMOST(lpageop)) {
-//                 RelationSetTargetBlock(rel, BufferGetBlockNumber(buf));
-//             }
-//         } else {
-//             /*
-//              * Register the left child whose INCOMPLETE_SPLIT flag was
-//              * cleared.
-//              */
-//             XLogRegisterBuffer(1, cbuf, REGBUF_STANDARD);
-//             xlinfo = XLOG_UBTREE_INSERT_UPPER;
-//         }
+            if (BufferIsValid(metabuf)) {
+                xlmeta.root = metad->btm_root;
+                xlmeta.level = metad->btm_level;
+                xlmeta.fastroot = metad->btm_fastroot;
+                xlmeta.fastlevel = metad->btm_fastlevel;
+                xlmeta.version = metad->btm_version;
 
-//         if (BufferIsValid(metabuf)) {
-//             xlmeta.root = metad->btm_root;
-//             xlmeta.level = metad->btm_level;
-//             xlmeta.fastroot = metad->btm_fastroot;
-//             xlmeta.fastlevel = metad->btm_fastlevel;
+                XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
+                XLogRegisterBufData(2, (char *)&xlmeta, sizeof(xl_btree_metadata));
+                xlinfo = XLOG_UBTREE3_INSERT_PCR_META;
+            }
 
-//             XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
-//             XLogRegisterBufData(2, (char *)&xlmeta, sizeof(xl_btree_metadata_old));
-//             xlinfo = XLOG_UBTREE_INSERT_META;
-//         }
+            /* Read comments in _bt_pgaddtup */
+            XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+            if (!P_ISLEAF(lpageop) && newitemoff == P_FIRSTDATAKEY(lpageop)) {
+                trunctuple = *itup;
+                trunctuple.t_info = sizeof(IndexTupleData);
+                XLogRegisterBufData(0, (char*)&trunctuple, sizeof(IndexTupleData));
+            } else {
+                ItemId iid = PageGetItemId(page, itup_off);
+                XLogRegisterBufData(0, (char*)PageGetItem(page, iid), itemsz);
+            }
 
-//         /* Read comments in _bt_pgaddtup */
-//         XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
-//         if (!P_ISLEAF(lpageop) && newitemoff == P_FIRSTDATAKEY(lpageop)) {
-//             trunctuple = *itup;
-//             trunctuple.t_info = sizeof(IndexTupleData);
-//             XLogRegisterBufData(0, (char*)&trunctuple, sizeof(IndexTupleData));
-//         } else {
-//             ItemId iid = PageGetItemId(page, itup_off);
-//             XLogRegisterBufData(0, (char*)PageGetItem(page, iid), itemsz);
-//         }
+            recptr = XLogInsert(RM_UBTREE3_ID, xlinfo);
 
-//         recptr = XLogInsert(RM_UBTREE_ID, xlinfo);
+            if (BufferIsValid(metabuf)) {
+                PageSetLSN(metapg, recptr);
+            }
+            if (BufferIsValid(cbuf)) {
+                PageSetLSN(BufferGetPage(cbuf), recptr);
+            }
+            PageSetLSN(page, recptr);
+        } else {
+            UBTree3WalInfo *walInfo = (UBTree3WalInfo*)palloc(sizeof(UBTree3WalInfo));
+            UndoRecord *cur_urec = t_thrd.ustore_cxt.undo_records[0];
+            UBTreeUndoInfo undoInfo = (UBTreeUndoInfo)(cur_urec->Rawdata()->data);
+            IndexTuple tuple = (IndexTuple)((char*)(cur_urec->Rawdata()->data + SizeOfUBTreeUndoInfoData));
+            uint8 flag = 0;
+            if (cur_urec->Blkprev() != INVALID_UNDO_REC_PTR) {
+                flag |= UBTREE_XLOG_HAS_BLK_PREV;
+            }
+            if (cur_urec->Prevurp2() != INVALID_UNDO_REC_PTR) {
+                flag |= UBTREE_XLOG_HAS_XACT_PREV;
+            }
+            if (RelationIsPartition(rel)) {
+                flag |= UBTREE_XLOG_HAS_PARTITION_OID;
+                walInfo->relOid = rel->parentId;
+                walInfo->partitionOid = RelationGetRelid(rel);
+            } else {
+                walInfo->relOid = RelationGetRelid(rel);
+                walInfo->partitionOid = InvalidOid;
+            }
 
-//         if (BufferIsValid(metabuf)) {
-//             PageSetLSN(metapg, recptr);
-//         }
-//         if (BufferIsValid(cbuf)) {
-//             PageSetLSN(BufferGetPage(cbuf), recptr);
-//         }
-//         PageSetLSN(page, recptr);
+            walInfo->tdId = tdslot;
+            walInfo->urecptr = urecptr;
+            walInfo->undoInfo = undoInfo;
+            walInfo->blkprev = cur_urec->Blkprev();
+            walInfo->prevurp = cur_urec->Prevurp2();
+            walInfo->xid = GetTopTransactionId();
+            walInfo->oldXid = cur_urec->OldXactId();
+            walInfo->cid = GetCurrentCommandId(true);
+            walInfo->xlum = xlum;
+            walInfo->itup = tuple;
+            walInfo->flag = flag;
+            walInfo->buffer = buf;
+            walInfo->offnum = newitemoff;
+            
+            LogInsertOrDelete(walInfo, XLOG_UBTREE3_INSERT_PCR);
+
+            if (walInfo != NULL) {
+                pfree(walInfo);
+            }
+        }
     }
 
     if (P_ISLEAF(lpageop)) {
         undo::FinishUndoMeta(UndoPersistenceForRelation(rel));
     }
     END_CRIT_SECTION();
-//     UBTreeVerify(rel, page, BufferGetBlockNumber(buf), itup_off, true);
+    // TODO：Add verify
 
     /* release buffers */
     if (BufferIsValid(metabuf)) {
@@ -724,6 +793,46 @@ static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer bu
     return false;
 }
 
+void LogDupInsert(UBTree3WalInfo *walInfo)
+{
+    xl_ubtree3_insert_or_delete xlrecInsert;
+    XLogRecPtr recptr;
+    XlUndoHeader xlundohdr;
+    Page page = BufferGetPage(walInfo->buffer);
+
+    xlrecInsert.offNum = walInfo->offnum;
+    xlrecInsert.tdId = walInfo->tdId;
+    xlrecInsert.prevXidOfTuple = walInfo->oldXid;
+    xlrecInsert.curXid = walInfo->xid;
+    xlundohdr.relOid = walInfo->relOid;
+    xlundohdr.urecptr = walInfo->urecptr;
+    xlundohdr.flag = walInfo->flag;
+
+    XLogBeginInsert();
+    XLogRegisterData((char *)&xlrecInsert, SizeOfUbtree3InsertOrDelete);
+    XLogRegisterBuffer(0, walInfo->buffer, REGBUF_STANDARD);
+
+    XLogRegisterData((char *)walInfo->itup, IndexTupleSize(walInfo->itup));
+    XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
+    XLogRegisterData((char *)walInfo->undoInfo, SizeOfUBTreeUndoInfoData);
+
+    if (walInfo->flag & UBTREE_XLOG_HAS_BLK_PREV != 0) {
+        XLogRegisterData((char *)&(walInfo->blkprev), sizeof(UndoRecPtr));
+    }
+    if (walInfo->flag & UBTREE_XLOG_HAS_XACT_PREV != 0) {
+        XLogRegisterData((char *)&(walInfo->prevurp), sizeof(UndoRecPtr));
+    }
+    if (walInfo->flag & UBTREE_XLOG_HAS_PARTITION_OID != 0) {
+        XLogRegisterData((char *)&(walInfo->partitionOid), sizeof(Oid));
+    }
+    undo::LogUndoMeta(walInfo->xlum);
+
+    XLogIncludeOrigin();
+    recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_DUP_INSERT);
+    PageSetLSN(page, recptr);
+    SetUndoPageLSN(t_thrd.ustore_cxt.urecvec, recptr);
+    undo::SetUndoMetaLSN(recptr);
+}
 
 static void UBTreePCRDupInsertOnPage(Relation rel, Buffer buf, OffsetNumber offnum, int tdSlot,
     UndoRecPtr urecptr, undo::XlogUndoMeta *xlum)
@@ -763,71 +872,48 @@ static void UBTreePCRDupInsertOnPage(Relation rel, Buffer buf, OffsetNumber offn
     MarkBufferDirty(buf);
     /* XLOG stuff */
     if (RelationNeedsWAL(rel)) {
-// //         xl_btree_insert xlrec;
-// //         xl_btree_metadata_old xlmeta;
-// //         uint8 xlinfo;
-// //         XLogRecPtr recptr;
-// //         IndexTupleData trunctuple;
+        UBTree3WalInfo *walInfo = (UBTree3WalInfo*)palloc(sizeof(UBTree3WalInfo));
+        UndoRecord *urecur_urec = t_thrd.ustore_cxt.undo_records[0];
+        UBTreeUndoInfo undoInfo = (UBTreeUndoInfo)(urecur_urec->Rawdata()->data);
+        uint8 flag = 0;
+        if (urecur_urec->Blkprev() != INVALID_UNDO_REC_PTR) {
+            flag |= UBTREE_XLOG_HAS_BLK_PREV;
+        }
+        if (urecur_urec->Prevurp2() != INVALID_UNDO_REC_PTR) {
+            flag |= UBTREE_XLOG_HAS_XACT_PREV;
+        }
+        if (RelationIsPartition(rel)) {
+            flag |= UBTREE_XLOG_HAS_PARTITION_OID;
+            walInfo->relOid = rel->parentId;
+            walInfo->partitionOid = RelationGetRelid(rel);
+        } else {
+            walInfo->relOid = RelationGetRelid(rel);
+            walInfo->partitionOid = InvalidOid;
+        }
 
-// //         xlrec.offnum = itup_off;
+        walInfo->xid = GetTopTransactionId();
+        walInfo->oldXid = urecur_urec->OldXactId();
+        walInfo->cid = GetCurrentCommandId(true);
+        walInfo->tdId = tdSlot;
+        walInfo->urecptr = urecptr;
+        walInfo->undoInfo = undoInfo;
+        walInfo->blkprev = urecur_urec->Blkprev();
+        walInfo->prevurp = urecur_urec->Prevurp2();
+        walInfo->xlum = xlum;
+        walInfo->itup = (IndexTuple)((char*)(urecur_urec->Rawdata()->data + SizeOfUBTreeUndoInfoData));
+        walInfo->flag = flag;
+        walInfo->buffer = buf;
+        walInfo->offnum = offnum;
+        
+        LogDupInsert(walInfo);
 
-// //         XLogBeginInsert();
-// //         XLogRegisterData((char *)&xlrec, SizeOfBtreeInsert);
-
-// //         if (P_ISLEAF(lpageop)) {
-// //             xlinfo = XLOG_UBTREE_INSERT_LEAF;
-
-// //             /*
-// //              * Cache the block information if we just inserted into the
-// //              * rightmost leaf page of the index.
-// //             */
-// //             if (P_RIGHTMOST(lpageop)) {
-// //                 RelationSetTargetBlock(rel, BufferGetBlockNumber(buf));
-// //             }
-// //         } else {
-// //             /*
-// //              * Register the left child whose INCOMPLETE_SPLIT flag was
-// //              * cleared.
-// //              */
-// //             XLogRegisterBuffer(1, cbuf, REGBUF_STANDARD);
-// //             xlinfo = XLOG_UBTREE_INSERT_UPPER;
-// //         }
-
-// //         if (BufferIsValid(metabuf)) {
-// //             xlmeta.root = metad->btm_root;
-// //             xlmeta.level = metad->btm_level;
-// //             xlmeta.fastroot = metad->btm_fastroot;
-// //             xlmeta.fastlevel = metad->btm_fastlevel;
-
-// //             XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
-// //             XLogRegisterBufData(2, (char *)&xlmeta, sizeof(xl_btree_metadata_old));
-// //             xlinfo = XLOG_UBTREE_INSERT_META;
-// //         }
-
-// //         /* Read comments in _bt_pgaddtup */
-// //         XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
-// //         if (!P_ISLEAF(lpageop) && newitemoff == P_FIRSTDATAKEY(lpageop)) {
-// //             trunctuple = *itup;
-// //             trunctuple.t_info = sizeof(IndexTupleData);
-// //             XLogRegisterBufData(0, (char*)&trunctuple, sizeof(IndexTupleData));
-// //         } else {
-// //             ItemId iid = PageGetItemId(page, itup_off);
-// //             XLogRegisterBufData(0, (char*)PageGetItem(page, iid), itemsz);
-// //         }
-
-// //         recptr = XLogInsert(RM_UBTREE_ID, xlinfo);
-
-// //         if (BufferIsValid(metabuf)) {
-// //             PageSetLSN(metapg, recptr);
-// //         }
-// //         if (BufferIsValid(cbuf)) {
-// //             PageSetLSN(BufferGetPage(cbuf), recptr);
-// //         }
-// //         PageSetLSN(page, recptr);
+        if (walInfo != NULL) {
+            pfree(walInfo);
+        }
     }
     undo::FinishUndoMeta(UndoPersistenceForRelation(rel));
     END_CRIT_SECTION();
-// //     UBTreeVerify(rel, page, BufferGetBlockNumber(buf), itup_off, true);
+    // TODO: add verify
 
     _bt_relbuf(rel, buf);
 }
@@ -1318,16 +1404,25 @@ loop:
     OffsetNumber maxOff = UBTreePCRPageGetMaxOffsetNumber(page);
     OffsetNumber endOff = maxOff;
     Size size = IndexTupleSize(itup) - MAXALIGN(sizeof(IndexTupleTrxData));
+    
     if (isIncluding) {
         itupKey->nextkey = true;
         endOff = UBTreePCRBinarySearch(rel, itupKey, page) - 1;
         itupKey->nextkey = false;
+        IndexTuple tmp_tup = CopyIndexTuple(itup);
+        IndexTupleSetSize(tmp_tup, size);
         while (offnum <= endOff) {
             IndexTuple curItup = UBTreePCRGetIndexTuple(page, offnum);
-            if (size == IndexTupleSize(curItup) && memcmp(curItup, itup, size)) {
+            if (size == IndexTupleSize(curItup) && memcmp(curItup, tmp_tup, size) == 0) {
+                if (tmp_tup != NULL) {
+                    pfree(tmp_tup);
+                }
                 return false;
             }
             offnum ++;
+        }
+        if (tmp_tup != NULL) {
+            pfree(tmp_tup);
         }
     } else {
         while (offnum <= endOff) {
@@ -1486,7 +1581,6 @@ static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relatio
                     found = true;
                 } else {
                     for (;;) {
-                        ItemId iid = curitemid;
                         IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(curitup);
                         /* here we guarantee the same semantics as UNIQUE_CHECK_PARTIAL */
                         if (checkUnique == UNIQUE_CHECK_PARTIAL) {
@@ -2012,7 +2106,6 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
     }
 
     if (isleaf) {
-        // TODO：add undo
         Page page = newitemonleft ? leftpage : rightpage;
         OffsetNumber offset = newitemonleft ? leftoff : rightoff;
         BlockNumber blkno = newitemonleft ? BufferGetBlockNumber(buf) : BufferGetBlockNumber(rbuf);
@@ -2120,16 +2213,51 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
 
     /* XLOG stuff */
     if (RelationNeedsWAL(rel)) {
-        // TODO: 补充xlog
-        // ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-        //         errmsg("TODO: 补充xlog")));
+        UBTree3WalInfo *walInfo = NULL;
+        if (UBTreePageGetTDSlotCount(origpage) > 0) {
+            walInfo = (UBTree3WalInfo*)palloc(sizeof(UBTree3WalInfo));
+            uint8 flag = 0;
+            // TODO: debug 看一下这里的urec和入参urec是否相同
+            UndoRecord *cur_urec = t_thrd.ustore_cxt.undo_records[0];
+            UBTreeUndoInfo undoInfo = (UBTreeUndoInfo)(cur_urec->Rawdata()->data);
+            if (cur_urec->Blkprev() != INVALID_UNDO_REC_PTR) {
+                flag |= UBTREE_XLOG_HAS_BLK_PREV;
+            }
+            if (cur_urec->Prevurp2() != INVALID_UNDO_REC_PTR) {
+                flag |= UBTREE_XLOG_HAS_XACT_PREV;
+            }
+            if (RelationIsPartition(rel)) {
+                flag |= UBTREE_XLOG_HAS_PARTITION_OID;
+                walInfo->relOid = rel->parentId;
+                walInfo->partitionOid = RelationGetRelid(rel);
+            } else {
+                walInfo->relOid = RelationGetRelid(rel);
+                walInfo->partitionOid = InvalidOid;
+            }
+
+            walInfo->xid = GetTopTransactionId();
+            walInfo->oldXid = cur_urec->OldXactId();
+            walInfo->cid = GetCurrentCommandId(true);
+            walInfo->urecptr = urec;
+            walInfo->tdId = tdslot;
+            walInfo->undoInfo = undoInfo;
+            walInfo->blkprev = cur_urec->Blkprev();
+            walInfo->prevurp = cur_urec->Prevurp2();
+            walInfo->xlum = meta;
+            walInfo->itup = (IndexTuple)((char*)(cur_urec->Rawdata()->data + SizeOfUBTreeUndoInfoData));
+            walInfo->flag = flag;
+        }
+        LogSplit(buf, rbuf, sbuf, cbuf, firstrightoff, newitemoff, newitemleftoff, 
+            leftoff, tdslot, walInfo, newitemonleft);
+
+        if (walInfo != NULL) {
+            pfree(walInfo);
+        }
     }
     if (isleaf) {
         undo::FinishUndoMeta(UndoPersistenceForRelation(rel));
     }
     END_CRIT_SECTION();
-    // Page page = BufferGetPage(actualInsertBuf);
-    // UBTreeVerify(rel, page, BufferGetBlockNumber(actualInsertBuf), actualInsertOff, true);
 
     /* discard this page from the Recycle Queue */
     UBTreeRecordUsedPage(rel, addr);
@@ -2162,7 +2290,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
  *		we insert the tuples in order, so that the given itup_off does
  *		represent the final position of the tuple!
  */
-static bool UBTreePCRPageAddTuple(Page page, Size itemsize, ItemId iid, IndexTuple itup, OffsetNumber itup_off, 
+bool UBTreePCRPageAddTuple(Page page, Size itemsize, ItemId iid, IndexTuple itup, OffsetNumber itup_off, 
     bool copyflags, uint8 tdslot, bool isnew)
 {
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
@@ -2687,47 +2815,42 @@ static Buffer UBTreePCRNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
     MarkBufferDirty(rootbuf);
     MarkBufferDirty(metabuf);
 
-    // /* XLOG stuff */
-    // if (RelationNeedsWAL(rel)) {
-    //     xl_btree_newroot xlrec;
-    //     XLogRecPtr recptr;
-    //     xl_btree_metadata_old md;
+    /* XLOG stuff */
+    if (RelationNeedsWAL(rel)) {
+        xl_btree_newroot xlrec;
+        XLogRecPtr recptr;
+        xl_btree_metadata md;
 
-    //     xlrec.rootblk = rootblknum;
-    //     xlrec.level = metad->btm_level;
+        xlrec.rootblk = rootblknum;
+        xlrec.level = metad->btm_level;
 
-    //     Assert(xlrec.level > 0);
+        Assert(xlrec.level > 0);
 
-    //     XLogBeginInsert();
-    //     XLogRegisterData((char *)&xlrec, SizeOfBtreeNewroot);
+        XLogBeginInsert();
+        XLogRegisterData((char *)&xlrec, SizeOfBtreeNewroot);
 
-    //     XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
-    //     XLogRegisterBuffer(1, lbuf, REGBUF_STANDARD);
-    //     XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
+        XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
+        XLogRegisterBuffer(1, lbuf, REGBUF_STANDARD);
+        XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT | REGBUF_STANDARD);
 
-    //     md.root = rootblknum;
-    //     md.level = metad->btm_level;
-    //     md.fastroot = rootblknum;
-    //     md.fastlevel = metad->btm_level;
+        md.root = rootblknum;
+        md.level = metad->btm_level;
+        md.fastroot = rootblknum;
+        md.fastlevel = metad->btm_level;
+        md.version = metad->btm_version;
 
-    //     XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata_old));
+        XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata));
+        XLogRegisterBufData(0, (char *)left_item, left_item_sz);
+        XLogRegisterBufData(0, (char *)right_item, right_item_sz);
 
-    //     /*
-    //      * Direct access to page is not good but faster - we should implement
-    //      * some new func in page API.
-    //      */
-    //     XLogRegisterBufData(0, (char *)rootpage + ((PageHeader)rootpage)->pd_upper,
-    //                         ((PageHeader)rootpage)->pd_special - ((PageHeader)rootpage)->pd_upper);
+        recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_NEW_ROOT);
 
-    //     recptr = XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_NEWROOT);
-
-    //     PageSetLSN(lpage, recptr);
-    //     PageSetLSN(rootpage, recptr);
-    //     PageSetLSN(metapg, recptr);
-    // }
+        PageSetLSN(lpage, recptr);
+        PageSetLSN(rootpage, recptr);
+        PageSetLSN(metapg, recptr);
+    }
 
     END_CRIT_SECTION();
-    // UBTreeVerify(rel, rootpage, rootblknum);
 
     /* done with metapage */
     _bt_relbuf(rel, metabuf);
@@ -2739,4 +2862,105 @@ static Buffer UBTreePCRNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
     pfree(right_item);
 
     return rootbuf;
+}
+
+void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumber firstrightoff, bool isroot,
+    OffsetNumber originOff, OffsetNumber leftOff, uint8 tdSlot, UBTree3WalInfo *walInfo, bool newItemOnLeft)
+{
+    xl_ubtree3_insert_or_delete xlrecInsert;
+    XLogRecPtr recptr;
+    XlUndoHeader xlundohdr;
+    xl_ubtree3_split xlrecSplit;
+    uint8 xlflag;
+
+    Page leftpage = BufferGetPage(buf);
+    Page rightpage = BufferGetPage(rbuf);
+    UBTPCRPageOpaque lopaque = (UBTPCRPageOpaque)PageGetSpecialPointer(leftpage);
+    UBTPCRPageOpaque ropaque = (UBTPCRPageOpaque)PageGetSpecialPointer(rightpage);
+
+    xlrecSplit.level = ropaque->btpo.level;
+    xlrecSplit.firstRight = firstrightoff;
+    xlrecSplit.newItemOff = originOff;
+    xlrecSplit.rightLower = ((PageHeader)rightpage)->pd_lower;
+    xlrecSplit.letfPcrOpq = *lopaque;
+    xlrecSplit.slotNo = tdSlot;
+
+    if (newItemOnLeft) {
+        ItemId idd = UBTreePCRGetRowPtr(leftpage, leftOff);
+        UBTreeTD td = UBTreePCRGetTD(leftpage, tdSlot);
+        xlrecSplit.fxid = td->xactid;
+        xlrecSplit.urp = td->undoRecPtr;
+    }
+
+    XLogBeginInsert();
+    XLogRegisterData((char *)&xlrecSplit, SizeOfUbtree3Split);
+
+    if (walInfo != NULL) {
+        xlrecInsert.offNum = originOff;
+        xlrecInsert.tdId = walInfo->tdId;
+        xlrecInsert.prevXidOfTuple = walInfo->oldXid;
+        xlrecInsert.curXid = walInfo->xid;
+        xlundohdr.relOid = walInfo->relOid;
+        xlundohdr.urecptr = walInfo->urecptr;
+        xlundohdr.flag = walInfo->flag;
+
+        XLogRegisterData((char *)&xlrecInsert, SizeOfUbtree3InsertOrDelete);
+        XLogRegisterData((char *)walInfo->itup, IndexTupleSize(walInfo->itup));
+        XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
+        XLogRegisterData((char *)walInfo->undoInfo, SizeOfUBTreeUndoInfoData);
+
+        if (walInfo->flag & UBTREE_XLOG_HAS_BLK_PREV != 0) {
+            XLogRegisterData((char *)&(walInfo->blkprev), sizeof(UndoRecPtr));
+        }
+        if (walInfo->flag & UBTREE_XLOG_HAS_XACT_PREV != 0) {
+            XLogRegisterData((char *)&(walInfo->prevurp), sizeof(UndoRecPtr));
+        }
+        if (walInfo->flag & UBTREE_XLOG_HAS_PARTITION_OID != 0) {
+            XLogRegisterData((char *)&(walInfo->partitionOid), sizeof(Oid));
+        }
+        undo::LogUndoMeta(walInfo->xlum);
+    }
+
+    XLogRegisterBuffer(BTREE_SPLIT_LEFT_BLOCK_NUM, buf, REGBUF_STANDARD);
+    XLogRegisterBuffer(BTREE_SPLIT_RIGHT_BLOCK_NUM, rbuf, REGBUF_WILL_INIT);
+
+    if (!P_RIGHTMOST(ropaque)) {
+        XLogRegisterBuffer(BTREE_SPLIT_RIGHTNEXT_BLOCK_NUM, sbuf, REGBUF_STANDARD);
+    }
+    if (BufferIsValid(leftCbuf)) {
+        XLogRegisterBuffer(BTREE_SPLIT_CHILD_BLOCK_NUM, leftCbuf, REGBUF_STANDARD);
+    }
+
+    if (newItemOnLeft) {
+        IndexTuple itup = UBTreePCRGetIndexTuple(leftpage, leftOff);
+        XLogRegisterBufData(0, (char *)itup, IndexTupleSize(itup));
+    }
+
+    IndexTuple leftHightKey = UBTreePCRGetIndexTuple(leftpage, P_HIKEY);
+    XLogRegisterBufData(0, (char *)leftHightKey, MAXALIGN(IndexTupleSize(leftHightKey)));
+
+    XLogRegisterBufData(1, (char *)rightpage, xlrecSplit.rightLower);
+    XLogRegisterBufData(1, (char *)rightpage + ((PageHeader)(rightpage))->pd_upper,
+        BLCKSZ - ((PageHeader)(rightpage))->pd_upper);
+    
+    if (isroot) {
+        xlflag = newItemOnLeft ? XLOG_UBTREE3_SPLIT_L_ROOT : XLOG_UBTREE3_SPLIT_R_ROOT;
+    } else {
+        xlflag = newItemOnLeft ? XLOG_UBTREE3_SPLIT_L : XLOG_UBTREE_SPLIT_R;
+    }
+
+    recptr = XLogInsert(RM_UBTREE3_ID, xlflag);
+    PageSetLSN(leftpage, recptr);
+    PageSetLSN(rightpage, recptr);
+    if (!P_RIGHTMOST(ropaque)) {
+        PageSetLSN(BufferGetPage(sbuf), recptr);
+    }
+    if (BufferIsValid(leftCbuf)) {
+        PageSetLSN(BufferGetPage(leftCbuf), recptr);
+    }
+
+    if (walInfo != NULL) {
+        SetUndoPageLSN(t_thrd.ustore_cxt.urecvec, recptr);
+        undo::SetUndoMetaLSN(recptr);
+    }
 }

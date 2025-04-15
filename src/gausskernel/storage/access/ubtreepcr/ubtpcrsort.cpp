@@ -314,7 +314,7 @@ OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size, OffsetNumber off
  * rightmost.  Offset P_FIRSTKEY is always the first data key.
  */
 static void UBTreePCRSortAddTuple(Page page, Size itemsize, IndexTuple itup,
-    OffsetNumber itup_off, bool isnew, bool hasTrx)
+    OffsetNumber itup_off, bool isnew)
 {
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
     IndexTupleData trunctuple;
@@ -337,47 +337,19 @@ static void UBTreePCRSortAddTuple(Page page, Size itemsize, IndexTuple itup,
         Size newsize = storageSize - MAXALIGN(sizeof(IndexTupleTrxData));
         IndexTupleSetSize(itup, newsize);
 
-        if (hasTrx) {
-            /*
-            * This is different from _bt_pgaddtup(), the last 16B of itup are xmin/xmax (8B each TransactionId).
-            * But the actual space occupied by this part in page is 8B (4B each ShortTransactionId) with xid-base
-            * optimization.
-            *
-            * If we assume the actual IndexTuple's length is X, there are 3 lengths:
-            *      1. IndexTuple passed to _bt_buildadd() with length X + 16.
-            *      2. IndexTuple on disk with length X + 8, this is the same as the length in LP.
-            *      3. IndexTuple saw its length as X.
-            *
-            * At the beginning of _bt_buildadd(), we reset the size into X + 8 (actual storage size) to
-            * test whether there is enough space.
-            *
-            * The actual memory size of itup here is X + 16, so we just need to:
-            *      1. set IndexTuple's size into X (from X + 8).
-            *      2. extract xid, and put the xid where it should be with xid-base optimization.
-            *      3. call PageAddItem() with length X + 8
-            */
-
-            IndexTupleTrx tupleTrx = (IndexTupleTrx)(((char*)itup) + newsize);
-
-            if (UBTPCRPageAddItem(page, (Item)itup, storageSize, itup_off, false) == InvalidOffsetNumber) {
-                ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("Index tuple cant fit in the page when creating index.")));
-            }
-        } else {
-            /* reserve space for IndexTupleTrxData and set into Frozen and Invalid */
-            ((PageHeader)page)->pd_upper -= MAXALIGN(sizeof(IndexTupleTrxData));
-            IndexTupleTrx trx = (IndexTupleTrx)(((char*)page) + ((PageHeader)page)->pd_upper);
-            UBTreePCRSetIndexTupleTrxSlot(trx, UBTreeFrozenTDSlotId);
-            UBTreePCRSetIndexTupleTrxValid(trx);
-            UBTreePCRClearIndexTupleDeleted(trx);
-            if (UBTPCRPageAddItem(page, (Item)itup, newsize, itup_off, false) == InvalidOffsetNumber) {
-                ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("Index tuple cant fit in the page when creating index.")));
-            }
-
-            ItemId iid = UBTreePCRGetRowPtr(page, itup_off);
-            iid->lp_len = storageSize;
+        /* reserve space for IndexTupleTrxData */
+        ((PageHeader)page)->pd_upper -= MAXALIGN(sizeof(IndexTupleTrxData));
+        IndexTupleTrx trx = (IndexTupleTrx)(((char*)page) + ((PageHeader)page)->pd_upper);
+        if (UBTPCRPageAddItem(page, (Item)itup, newsize, itup_off, false) == InvalidOffsetNumber) {
+            ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("Index tuple cant fit in the page when creating index.")));
         }
+        /* set trx frozen and invalid */
+        UBTreePCRSetIndexTupleTrxSlot(trx, UBTreeFrozenTDSlotId);
+        UBTreePCRSetIndexTupleTrxValid(trx);
+        UBTreePCRClearIndexTupleDeleted(trx);
+        ItemId iid = UBTreePCRGetRowPtr(page, itup_off);
+        iid->lp_len = storageSize;
         
         opaque->activeTupleCount ++;
     }
@@ -387,7 +359,7 @@ static void UBTreePCRSortAddTuple(Page page, Size itemsize, IndexTuple itup,
  * Add an item to a disk page from the sort output.
  * Same as UBTreeBuildAdd().
  */
-void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup, bool hasTrx)
+void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup, bool hasXid)
 {
     /*
      * This is a handy place to check for cancel interrupts during the btree
@@ -401,17 +373,20 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
     /* Leaf case has slightly different rules due to suffix truncation */
     bool isleaf = (state->btps_level == 0);
     bool isPivot = UBTreeTupleIsPivot(itup);
-    Size itupsz = IndexTupleSize(itup);
-
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(npage);
 
-    if (!isPivot & !hasTrx) {
+    if (!isPivot) {
         /* Normal index tuple, need reserve space for IndexTupleTrx */
+        Size itupsz = IndexTupleSize(itup);
         itupsz += MAXALIGN(sizeof(IndexTupleTrxData));
+        if (hasXid) {
+            itupsz -= sizeof(TransactionId) * 2;
+        }
         IndexTupleSetSize(itup, itupsz);
     }
 
     Size pgspc = PageGetFreeSpace(npage);
+    Size itupsz = IndexTupleSize(itup);
     itupsz = MAXALIGN(itupsz);
     /*
      * Check whether the item can fit on a btree page at all.
@@ -463,7 +438,7 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
         Assert(last_off > P_FIRSTKEY);
         ii = UBTreePCRGetRowPtr(opage, last_off);
         oitup = (IndexTuple)UBTreePCRGetIndexTuple(opage, last_off);
-        UBTreePCRSortAddTuple(npage, ItemIdGetLength(ii), oitup, P_FIRSTKEY, false, false);
+        UBTreePCRSortAddTuple(npage, ItemIdGetLength(ii), oitup, P_FIRSTKEY, false);
 
         /*
          * Move 'last' into the high key position on opage
@@ -511,7 +486,7 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
             truncated = UBTreeTruncate(wstate->index, lastleft, oitup, wstate->inskey, false);
             /* delete "wrong" high key, insert truncated as P_HIKEY. */
             UBTreePCRPageIndexTupleDelete(opage, P_HIKEY);
-            UBTreePCRSortAddTuple(opage, IndexTupleSize(truncated), truncated, P_HIKEY, false, false);
+            UBTreePCRSortAddTuple(opage, IndexTupleSize(truncated), truncated, P_HIKEY, false);
             pfree(truncated);
 
             /* oitup should continue to point to the page's high key */
@@ -570,7 +545,6 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
          * Write out the old page.	We never need to touch it again, so we can
          * free the opage workspace too.
          */
-        // TODO: 看下这个函数是否不用复制，用原有的就好了，没有是配点
         UBTreePCRBlWritePage((BTWriteState*)wstate, opage, oblkno);  
 
         /*
@@ -583,7 +557,7 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
      * Add the new item into the current page.
      */
     last_off = OffsetNumberNext(last_off);
-    UBTreePCRSortAddTuple(npage, itupsz, itup, last_off, true, hasTrx);
+    UBTreePCRSortAddTuple(npage, itupsz, itup, last_off, true);
 
     /*
      * If the new item is the first for its page, stash a copy for later. Note
@@ -723,8 +697,9 @@ static void UBTreePCRLoad(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspo
         /* merge is unnecessary */
         while ((itup = tuplesort_getindextuple(btspool->sortstate, true)) != NULL) {
             /* When we see first tuple, create first index page */
-            if (state == NULL)
+            if (state == NULL) {
                 state = UBTreePCRPageState(wstate, 0);
+            }
 
             UBTreePCRBuildAdd(wstate, state, itup, false);
         }

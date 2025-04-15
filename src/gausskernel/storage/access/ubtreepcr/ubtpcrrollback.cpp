@@ -175,7 +175,7 @@ static bool IndexTupleBelongToRightPage(Relation rel, Page page, IndexTuple itup
     }
 
     int cmpResult = CompareIndexTuple(rel, itup, UBTreePCRGetIndexTuple(page, P_HIKEY));
-    if ( cmpResult != 0) {
+    if (cmpResult != 0) {
         return cmpResult > 0;
     }
 
@@ -607,38 +607,29 @@ int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, Transaction
         Assert(partOid != InvalidOid);
     }
 
-    bool needRollback = false;
-    bool hasRollbackTuple = false;
-    while (true) {
-        bool needMoveRight = false;
-        uint8 tdid = UBTreeInvalidTDSlotId;
-        UBTreeRedoRollbackAction redoRollbackAction;
-        START_CRIT_SECTION();
-        UndoRecPtr urecPtr = INVALID_UNDO_REC_PTR;
-        if (tdid == UBTreeInvalidTDSlotId) {
-            tdid = UBTreePageGetTDId(page, xid, &urecPtr);
-            if (tdid != UBTreeInvalidTDSlotId && undorec->Urp() != urecPtr) {
-                tdid = (undorec->Urp() > urecPtr ? UBTreeInvalidTDSlotId : tdid); 
-            }
-        }
+    UBTreeRedoRollbackAction redoRollbackAction;
 
-        if (IndexTupleBelongToRightPage(rel, page, itup, itupKey, partOid)) {
-            needMoveRight = true;
-        } else if (tdid != UBTreeInvalidTDSlotId && !hasRollbackTuple) {
-            OffsetNumber offnum = SearchTupleOffnum(rel, page, itup, itupKey, tdid);
-            if (offnum != InvalidOffsetNumber) {
-                ExecuteRollback(rel, curBlkno, page, offnum, undorec, false);
-                redoRollbackAction.rollback_items.append(page, offnum);
-                hasRollbackTuple = true;
-            } else {
-                ereport(DEBUG5, (errmsg("pcr rollback skip tuple, tuple not on the page, rnode[%u,%u,%u], blkno:%u, "
-                    "xid:%lu, urp:%lu, undotype:%u", rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode,
-                    blkno, xid, undorec->Urp(), undorec->Utype())));
-            }
-        }
+    while (IndexTupleBelongToRightPage(rel, page, itup, itupKey, partOid)) {
+        do {
+            curBlkno = opaque->btpo_next;
+            buffer = _bt_relandgetbuf(rel, buffer, opaque->btpo_next, BT_WRITE);
+            page = BufferGetPage(buffer);
+            opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+        } while (P_IGNORE(opaque));
+    }
 
-        if (tdid != UBTreeInvalidTDSlotId) {
-            needRollback = true;
+    UndoRecPtr urecPtr = INVALID_UNDO_REC_PTR;
+    uint8 tdid = UBTreePageGetTDId(page, xid, &urecPtr);
+    if (tdid != UBTreeInvalidTDSlotId && undorec->Urp() > urecPtr) {
+        tdid = UBTreeInvalidTDSlotId; 
+    }
+
+    if (tdid != UBTreeInvalidTDSlotId) {
+        OffsetNumber offnum = SearchTupleOffnum(rel, page, itup, itupKey, tdid);
+        if (offnum != InvalidOffsetNumber) {
+            START_CRIT_SECTION();
+            ExecuteRollback(rel, curBlkno, page, offnum, undorec, false);
+            redoRollbackAction.rollback_items.append(page, offnum);
             TransactionId xidInTD = xid;
             UndoRecPtr urecptrInTD = undorec->Blkprev();
             if (!IS_VALID_UNDO_REC_PTR(urecptrInTD)) {
@@ -678,37 +669,20 @@ int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, Transaction
                     XLogRegisterData((char *)&redoRollbackAction.rollback_items.items,
                         sizeof(UBTreeRedoRollbackItemData) * xlrec.n_rollback);
                 }
-
                 XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
-
                 recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_ROLLBACK_TXN);
                 PageSetLSN(page, recptr);
+                
             }
-        } else if (!hasRollbackTuple) {
-            ereport(DEBUG5, (errmsg("pcr rollback skip td and tuple, rnode[%u,%u,%u], blkno:%u, "
+            END_CRIT_SECTION();
+            redoRollbackAction.rollback_items.release();
+            if (opaque->activeTupleCount == 0 && curBlkno != InvalidBlockNumber) {
+                UBTreeRecordEmptyPage(rel, curBlkno, opaque->last_delete_xid);
+            }
+        } else {
+            ereport(DEBUG5, (errmsg("pcr rollback skip tuple, tuple not on the page, rnode[%u,%u,%u], blkno:%u, "
                 "xid:%lu, urp:%lu, undotype:%u", rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode,
                 blkno, xid, undorec->Urp(), undorec->Utype())));
-        }
-        END_CRIT_SECTION();
-        redoRollbackAction.rollback_items.release();
-        if (opaque->activeTupleCount == 0 && curBlkno != InvalidBlockNumber) {
-            UBTreeRecordEmptyPage(rel, curBlkno, opaque->last_delete_xid);
-        }
-
-        if (!needMoveRight && (tdid == UBTreeInvalidTDSlotId || P_RIGHTMOST(opaque))) {
-            break;
-        } else {
-            do {
-                if (P_RIGHTMOST(opaque)) {
-                    ereport(ERROR, (errmsg("no live right page found in index when rollback, rnode[%u,%u,%u], blkno:%u, "
-                        "xid:%lu, urp:%lu, undotype:%u", rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode,
-                        blkno, xid, undorec->Urp(), undorec->Utype())));
-                }
-                curBlkno = opaque->btpo_next;
-                buffer = _bt_relandgetbuf(rel, buffer, opaque->btpo_next, BT_WRITE);
-                page = BufferGetPage(buffer);
-                opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
-            } while (P_IGNORE(opaque));
         }
     }
 
@@ -717,7 +691,7 @@ int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, Transaction
     /* Close the relation. */
     UHeapUndoActionsCloseRelation(&relationData);
 
-    return needRollback ? ROLLBACK_OK : ROLLBACK_ERR;
+    return ROLLBACK_OK;
 }
 
 /*
