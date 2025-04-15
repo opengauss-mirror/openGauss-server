@@ -1595,12 +1595,10 @@ void UBTree3XlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, Und
                         erraction("Please try to reindex to fix it")));
     }
 
-    ItemId iid = (ItemId)UBTreePCRGetRowPtr(page, xlrec->offNum);
-    IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTuple(page, xlrec->offNum);
-    IndexTupleTrx trx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
-    UBTreePCRSetIndexTupleDeleted(trx);
-    UBTreePCRSetIndexTupleTrxValid(trx);
-    trx->tdSlot = xlrec->tdId;
+    UBTreeItemId iid = (UBTreeItemId)UBTreePCRGetRowPtr(page, xlrec->offNum);
+    UBTreePCRSetIndexTupleDeleted(iid);
+    UBTreePCRClearIndexTupleTDInvalid(iid);
+    UBTreePCRSetIndexTupleTDSlot(iid, xlrec->tdId);
     if (uinfo->prev_td_id == UBTreeFrozenTDSlotId) {
         IndexItemIdSetFrozen(iid);
     }
@@ -1652,17 +1650,15 @@ void UBTree3XlogRollbackTxnOperatorPage(RedoBufferInfo* buffer, void* recorddata
     UBTreeRedoRollbackItem items =
         (UBTreeRedoRollbackItem)((char*)xlrec + sizeOfUbtree3RollbackTxn + sizeof(UBTreeTDData));
     for (uint32 i = 0; i < xlrec->n_rollback; i++) {
-        ItemId iid = UBTreePCRGetRowPtr(page, items[i].offnum);
+        UBTreeItemId iid = UBTreePCRGetRowPtr(page, items[i].offnum);
         iid->lp_flags = items[i].iid.lp_flags;
-        iid->lp_len = items[i].iid.lp_len;
-        IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(UBTreePCRGetIndexTuple(page, items[i].offnum));
-        trx->tdSlot = items[i].trx.tdSlot;
-        trx->slotIsInvalid = items[i].trx.slotIsInvalid;
-        trx->isDeleted = items[i].trx.isDeleted;
-        if (ItemIdIsDead(iid) || IsUBTreePCRItemDeleted(trx)) {
+        iid->lp_td_id = items[i].iid.lp_td_id;
+        iid->lp_td_invalid = items[i].iid.lp_td_invalid;
+        iid->lp_deleted = items[i].iid.lp_deleted;
+        if (ItemIdIsDead(iid) || IsUBTreePCRItemDeleted(iid)) {
             opaque->activeTupleCount--;
         }
-        if (!IsUBTreePCRItemDeleted(trx)) {
+        if (!IsUBTreePCRItemDeleted(iid)) {
             opaque->activeTupleCount++;
         }
     }
@@ -1741,7 +1737,7 @@ void UBTree4XlogHalfdeadPageOperatorParentpage(RedoBufferInfo *pbuf, void *recor
 {
     xl_btree_mark_page_halfdead *xlrec = (xl_btree_mark_page_halfdead *)recorddata;
     OffsetNumber poffset;
-    ItemId itemid;
+    UBTreeItemId itemid;
     IndexTuple itup;
     OffsetNumber nextoffset;
     BlockNumber rightsib;

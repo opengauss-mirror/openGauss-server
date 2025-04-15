@@ -1972,8 +1972,8 @@ ALTER TABLE kid_2020 ALTER COLUMN num SET DEFAULT 1;
  num     | integer               | default 2
  salary  | real                  | 
 Indexes:
-    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2025,8 +2025,8 @@ ALTER TABLE kid_2020 ALTER id DROP not null;
  num     | integer               | default 2
  salary  | real                  | 
 Indexes:
-    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2059,8 +2059,8 @@ ALTER TABLE father DROP COLUMN IF EXISTS num;-- father without num, child have n
  wai_id  | integer               | 
  salary  | real                  | 
 Indexes:
-    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2092,8 +2092,8 @@ ALTER TABLE kid_2023 no inherit father;
  wai_id  | integer               | 
  salary  | real                  | 
 Indexes:
-    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2123,8 +2123,8 @@ ALTER TABLE kid_2022 RENAME CONSTRAINT father_salary_check to new_salary_check
  wai_id  | integer               | 
  salary  | real                  | 
 Indexes:
-    "new_index_name" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "new_index_name" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2170,8 +2170,8 @@ LINE 2: ALTER TABLE father ALTER COLUMN id TYPE int;
  wai_id  | integer               | 
  salary  | real                  | 
 Indexes:
-    "new_index_name" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "new_index_name" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2372,8 +2372,8 @@ ALTER TABLE kid_2020 ALTER COLUMN num SET DEFAULT 1;
  num     | integer               | default 2
  salary  | real                  | 
 Indexes:
-    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2425,8 +2425,8 @@ ALTER TABLE kid_2020 ALTER id DROP not null;
  num     | integer               | default 2
  salary  | real                  | 
 Indexes:
-    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2459,8 +2459,8 @@ ALTER TABLE father DROP COLUMN IF EXISTS num;-- father without num, child withou
  wai_id  | integer               | 
  salary  | real                  | 
 Indexes:
-    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2492,8 +2492,8 @@ ALTER TABLE kid_2023 no inherit father;
  wai_id  | integer               | 
  salary  | real                  | 
 Indexes:
-    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_father" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2522,8 +2522,8 @@ ALTER TABLE kid_2022 RENAME CONSTRAINT father_salary_check to new_salary_check
  wai_id  | integer               | 
  salary  | real                  | 
 Indexes:
-    "new_index_name" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "new_index_name" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:
@@ -2578,8 +2578,8 @@ LINE 2: ALTER TABLE father ALTER COLUMN id TYPE int;
  wai_id  | integer               | 
  salary  | real                  | 
 Indexes:
-    "new_index_name" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE example1
-    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore) TABLESPACE pg_default
+    "new_index_name" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE example1
+    "father_md_attr_key" UNIQUE CONSTRAINT, ubtree (md_attr) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "father_salary_check" CHECK (salary > 0::double precision)
 Foreign-key constraints:

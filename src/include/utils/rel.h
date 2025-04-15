@@ -201,7 +201,7 @@ typedef struct RelationData {
 
     int rd_indnkeyatts;     /* index relation's indexkey nums */
     int1 rd_indexsplit;  /* determines the page split method to use */
-    int1 rd_ubtreeindextype; /* type of ubtree index*/
+    int1 rd_ubtreeindextype; /* type of ubtree index */
 
     /*
      * index access support info (used only for an index relation)

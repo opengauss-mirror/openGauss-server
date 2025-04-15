@@ -31,43 +31,33 @@
 #include "storage/predicate.h"
 #include "postmaster/autovacuum.h"
 
-void PruneFirstDataKey(Page page, ItemId itemid, OffsetNumber offNum, IndexTupleTrx itrx,
+void PruneFirstDataKey(Page page, UBTreeItemId itemid, OffsetNumber offNum,
     bool*frozenTDMap, UBTPCRPruneState* prstate, UndoPersistence upersistence)
 {
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
-    Assert(IsUBTreePCRItemDeleted(itrx));
+    Assert(IsUBTreePCRItemDeleted(itemid));
     Assert(offNum == P_FIRSTDATAKEY(opaque));
     TransactionId globalRecycleXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
-    TransactionId xmax = GetXidFromTrx(page, itrx, frozenTDMap);
+    TransactionId xid = IsUBTreePCRTDReused(itemid) ? opaque->last_commit_xid :
+                         GetXidFromTD(page, itemid, frozenTDMap);
 
-    if (IsUBTreePCRTDReused(itrx)) {
-        xmax = opaque->last_commit_xid;
-    }
-
-    if (TransactionIdPrecedes(xmax, globalRecycleXid)) {
-        RecordDeadTuple(prstate, offNum, xmax);
+    if (TransactionIdPrecedes(xid, globalRecycleXid)) {
+        RecordDeadTuple(prstate, offNum, xid);
         return;
-    } else {
-        uint8 curTdId = UBTreePCRGetIndexTupleTrxSlot(itrx);
-        UBTreeTD curTd = (UBTreeTD)UBTreePCRGetTD(page, curTdId);
-        IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTuple(page, offNum);
-        /* not match situation above, msut fetch the accurate xmax from undo */
-        UBTreeLatestChangeInfo uInfo;
-        UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
-        urec->SetUrp(curTd->undoRecPtr);
-        urec->SetMemoryContext(CurrentMemoryContext);
-        // to do:UBTreeFetchLatestChangeFromUndo
-        if (UBTreeFetchLatestChangeFromUndo(itup, urec, &uInfo, upersistence)) {
-            xmax = uInfo.xid;
-        } else {
-            xmax = FrozenTransactionId;
-        }
-
-        DELETE_EX(urec);
-        if (TransactionIdPrecedes(xmax, globalRecycleXid)) {
-            RecordDeadTuple(prstate, offNum, xmax);
-            return;
-        }
+    }
+    uint8 curTdId = itemid->lp_td_id;
+    UBTreeTD curTd = (UBTreeTD)UBTreePCRGetTD(page, curTdId);
+    IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTuple(page, offNum);
+    /* not match situation above, msut fetch the accurate xid from undo */
+    UBTreeLatestChangeInfo uInfo;
+    UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
+    urec->SetUrp(curTd->undoRecPtr);
+    urec->SetMemoryContext(CurrentMemoryContext);
+    xid = UBTreeFetchLatestChangeFromUndo(itup, urec, &uInfo, upersistence) ?
+          uInfo.xid : FrozenTransactionId;
+    DELETE_EX(urec);
+    if (TransactionIdPrecedes(xid, globalRecycleXid)) {
+        RecordDeadTuple(prstate, offNum, xid);
     }
 }
 
@@ -115,8 +105,6 @@ bool UBTreePCRPrunePageOpt(Relation rel, Buffer buf, bool tryDelete, BTStack del
         return false;
     }
 
-    TransactionId globalFrozenXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
-
     /*
      * Should not prune page when use local snapshot, InitPostgres e.g.
      * If use local snapshot RecentXmin might not consider xid cn send later,
@@ -125,6 +113,7 @@ bool UBTreePCRPrunePageOpt(Relation rel, Buffer buf, bool tryDelete, BTStack del
      * So if useLocalSnapshot is ture in postmaster env, we don't prune page.
      * Keep prune page can be done in single mode (standlone --single), so just in PostmasterEnvironment.
      */
+    TransactionId globalFrozenXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
     if ((t_thrd.xact_cxt.useLocalSnapshot && IsPostmasterEnvironment) ||
         g_instance.attr.attr_storage.IsRoachStandbyCluster || u_sess->attr.attr_common.upgrade_mode == 1) {
         if (tryDelete)
@@ -133,9 +122,9 @@ bool UBTreePCRPrunePageOpt(Relation rel, Buffer buf, bool tryDelete, BTStack del
     }
 
     /*
-     * PCR prune condition   
+     * PCR prune condition
      */
-    if (!P_ISHALFDEAD(opaque) && !UBTreePCRSatisfyPruneCondition(rel, buf, globalFrozenXid, pruneDelete)) {
+    if (!P_ISHALFDEAD(opaque) && !UBTreePCRCanPrune(rel, buf, globalFrozenXid, pruneDelete)) {
         if (tryDelete)
             _bt_relbuf(rel, buf);
         return false;
@@ -161,75 +150,83 @@ bool UBTreePCRPrunePageOpt(Relation rel, Buffer buf, bool tryDelete, BTStack del
 
 /*
  * UBTreePCRPruneItem()  --  Check a item's status.
- *
- * Return true if item is not dead and not deleted. 
+ * Return true if item is not dead and not deleted.
  */
-bool UBTreePCRPruneItem(Page page, OffsetNumber offNum, ItemId itemid, TransactionId globalFrozenXid,
+bool UBTreePCRPruneItem(Page page, OffsetNumber offNum, UBTreeItemId itemid, TransactionId globalFrozenXid,
     bool* frozenTDMap, bool pruneDelete, UBTPCRPruneState* prstate, UndoPersistence upersistence)
 {
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
     IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTuple(page, offNum);
-    IndexTupleTrx itrx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
-    uint8 curTdId = UBTreePCRGetIndexTupleTrxSlot(itrx);
+    uint8 curTdId = itemid->lp_td_id;
     UBTreeTD curTd = (UBTreeTD)UBTreePCRGetTD(page, curTdId);
-    if (IsUBTreePCRItemDeleted(itrx)) {
-        if (offNum == P_FIRSTDATAKEY(opaque)) {
-            PruneFirstDataKey(page, itemid, offNum, itrx, frozenTDMap, prstate, upersistence);
+    if (!IsUBTreePCRItemDeleted(itemid)) {
+        return true;
+    }
+
+    /* deal with item deleted situation */
+    if (offNum == P_FIRSTDATAKEY(opaque)) {
+        PruneFirstDataKey(page, itemid, offNum, frozenTDMap, prstate, upersistence);
+        return false;
+    }
+
+    TransactionId xid = GetXidFromTD(page, itemid, frozenTDMap);
+    if (TransactionIdPrecedes(xid, globalFrozenXid)) {
+        RecordDeadTuple(prstate, offNum, xid);
+        return false;
+    }
+
+    if (pruneDelete) {
+        if (IsUBTreePCRTDReused(itemid)) {
+            RecordDeadTuple(prstate, offNum, xid);
             return false;
         }
 
-        TransactionId xmax = GetXidFromTrx(page, itrx, frozenTDMap);
-        if (TransactionIdPrecedes(xmax, globalFrozenXid)) {
-            RecordDeadTuple(prstate, offNum, xmax);
+        if (!UBTreePCRTDIsActive(curTd)) {
+            /* xid is committed, we have done rollback action before
+            to deal with aborted xid. */
+            RecordDeadTuple(prstate, offNum, xid);
             return false;
-        } else if (pruneDelete) {
-            if (IsUBTreePCRTDReused(itrx)) {
-                RecordDeadTuple(prstate, offNum, xmax);
-                return false;
-            }
-            if (!UBTreePCRTDIsActive(curTd)) {
-                /* xid is committed, we have done rollback action before
-                to deal with aborted xid. */
-                RecordDeadTuple(prstate, offNum, xmax);
-                return false;
-            }
-        } else if (IsUBTreePCRTDReused(itrx)) {
-            // 如果不进行强制清理，进行reused td清理（td复用了 上一个xid 必然可见，last_commit_xid也必然可见，不需要查找准确的xid）
-            /* TD is reused by others and the latest xid on this TD is not Frozen, try use last_commit_xid */
-            xmax = opaque->last_commit_xid;
-            if (TransactionIdPrecedes(xmax, globalFrozenXid)) {
-                RecordDeadTuple(prstate, offNum, xmax);
-                return false;
-            } else {
-                /* not match situation above, msut fetch the accurate xmax from undo */
-                UBTreeLatestChangeInfo uInfo;
-                UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
-                urec->SetUrp(curTd->undoRecPtr);
-                urec->SetMemoryContext(CurrentMemoryContext);
-                // to do:UBTreeFetchLatestChangeFromUndo
-                if (UBTreeFetchLatestChangeFromUndo(itup, urec, &uInfo, upersistence)) {
-                    xmax = uInfo.xid;
-                } else {
-                    xmax = FrozenTransactionId;
-                }
-
-                DELETE_EX(urec);
-                if (TransactionIdPrecedes(xmax, globalFrozenXid)) {
-                    RecordDeadTuple(prstate, offNum, xmax);
-                    return false;
-                }
-            }
         }
-    } 
-    return !IsUBTreePCRItemDeleted(itrx);
+    }
+
+    if (IsUBTreePCRTDReused(itemid)) {
+        /* TD is reused by others and the latest xid on this TD is not Frozen, try use last_commit_xid */
+        /* TD is reused, therefore, lastest xid on TD is visible, last_commit_xid is also vivible,
+            * we do not need to find accurate xid.
+            */
+        xid = opaque->last_commit_xid;
+        if (TransactionIdPrecedes(xid, globalFrozenXid)) {
+            RecordDeadTuple(prstate, offNum, xid);
+            return false;
+        }
+        /* not match situation above, msut fetch the accurate xmax from undo */
+        UBTreeLatestChangeInfo uInfo;
+        UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
+        urec->SetUrp(curTd->undoRecPtr);
+        urec->SetMemoryContext(CurrentMemoryContext);
+        xid = UBTreeFetchLatestChangeFromUndo(itup, urec, &uInfo, upersistence) ?
+                uInfo.xid : FrozenTransactionId;
+
+        DELETE_EX(urec);
+        if (TransactionIdPrecedes(xid, globalFrozenXid)) {
+            RecordDeadTuple(prstate, offNum, xid);
+            return false;
+        }
+    }
+
+    return false;
 }
 
 /*
- *  UBTreePCRPagePrune() -- Apply page pruning and reorder the PCR page.
- *  
- * 
+ * UBTreePCRPagePrune() -- Apply page pruning to the pcr page.
+ *
+ * If passed tryDelete parameter is false, delete all dead tuples in the page, then repair the fragmentation.
+ * If passed tryDelete is true, only delete the whole page when all tuples are dead.
+ *
+ * Note: we won't delete the high key (if any).
  */
-bool UBTreePCRPagePrune(Relation rel, Buffer buf, TransactionId globalFrozenXid, OidRBTree *invisibleParts, bool pruneDelete) 
+bool UBTreePCRPagePrune(Relation rel, Buffer buf, TransactionId globalFrozenXid, OidRBTree *invisibleParts,
+    bool pruneDelete)
 {
     if (pruneDelete) {
         pruneDelete = !UBTreeIsToastIndex(rel);
@@ -241,54 +238,50 @@ bool UBTreePCRPagePrune(Relation rel, Buffer buf, TransactionId globalFrozenXid,
     TransactionId latestFrozenXid = InvalidTransactionId;
     UndoPersistence upersistence = UndoPersistenceForRelation(rel);
 
-    /* step 1: rollback abort transactions and record frozen TD */
+    /* rollback abort transactions and record frozen TDs */
     int tdCount = UBTreePageGetTDSlotCount(page);
     bool frozenTDMap[UBTREE_MAX_TD_COUNT] = {false};
     for (int slot = 0; slot < tdCount; slot++) {
         UBTreeTD curTd = (UBTreeTD)UBTreePCRGetTD(page, slot + 1);
         if (UBTreePCRTDIsFrozen(curTd)) {
-            /* clean up unsed ir frozen xid */
+            /* clean up unused and frozen xid */
             frozenTDMap[slot] = true;
             UBTreePCRTDClearStatus(curTd, TD_DELETE);
-            continue; 
-        }
-        
-        if (UBTreePCRTDIsActive(curTd)) {
-            /* xid is in-progress */
             continue;
-        /* not active: committed or (aborted)rollback */
-        } else if (!UBTreePCRTDIsCommited(curTd)) {
-            /* xid is aborted */
-            ExecuteUndoActionsForUBTreePage(rel, buf, slot + 1);
-            Assert(!UBTreePCRTDIsActive(curTd));
-            Assert(UBTreePCRTDIsCommited(curTd) == IS_VALID_UNDO_REC_PTR(curTd->undoRecPtr));
         }
 
-        /* xid is commited */
-        if (TransactionIdIsValid(curTd->xactid) && TransactionIdPrecedes(curTd->xactid, recycleXid)) {
-            frozenTDMap[slot] = true;
-            UBTreePCRTDClearStatus(curTd, TD_DELETE);
-            if (TransactionIdFollows(curTd->xactid, latestFrozenXid)) {
-                latestFrozenXid = curTd->xactid;
+         /* not active: committed or (aborted)rollback */
+        if (!UBTreePCRTDIsActive(curTd)) {
+            if (!UBTreePCRTDIsCommited(curTd)) {
+                 /* xid is aborted */
+                ExecuteUndoActionsForUBTreePage(rel, buf, slot + 1);
+                Assert(!UBTreePCRTDIsActive(curTd));
+                Assert(UBTreePCRTDIsCommited(curTd) == IS_VALID_UNDO_REC_PTR(curTd->undoRecPtr));
             }
-        } else {
-            if (pruneDelete) {
+            /* xid is commited */
+            if (TransactionIdIsValid(curTd->xactid) && TransactionIdPrecedes(curTd->xactid, recycleXid)) {
+                frozenTDMap[slot] = true;
+                UBTreePCRTDClearStatus(curTd, TD_DELETE);
+                if (TransactionIdFollows(curTd->xactid, latestFrozenXid)) {
+                    latestFrozenXid = curTd->xactid;
+                }
+            } else if (pruneDelete) {
                 UBTreePCRTDClearStatus(curTd, TD_DELETE);
             }
         }
     }
 
-    /* step 2: count the number of frozen and commited td, which are used for td compact */
+    /* count frozen td number */
     int canCompactCount = ComputeCompactTDCount(tdCount, frozenTDMap);
 
-    /* step 3: scan page, travse all tuples */
+    /* Scan the page */
     int activeTupleCount = 0;
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
     OffsetNumber maxOff = UBTPCRPageGetMaxOffsetNumber(page);
     for (OffsetNumber offNum = P_FIRSTDATAKEY(opaque); offNum <= maxOff;
         offNum = OffsetNumberNext(offNum)) {
-        ItemId itemid = UBTreePCRGetRowPtr(page, offNum);
-        /* nothing to do if slot is alraeady dead, just count previousDeadlen */
+        UBTreeItemId itemid = UBTreePCRGetRowPtr(page, offNum);
+        /* Nothing to do if slot is already dead, just count npreviousDead */
         if (ItemIdIsDead(itemid)) {
             prstate.previousDead[prstate.previousDeadlen++] = offNum;
             continue;
@@ -317,9 +310,10 @@ bool UBTreePCRPagePrune(Relation rel, Buffer buf, TransactionId globalFrozenXid,
         }
     }
 
+    /* Any error while applying the changes is critical */
     START_CRIT_SECTION();
 
-    /* step 4: mark dead tuple, compact td, reorder and clean up fragmentatioin */
+    /* prune prunbale items and compact tds */
     bool hasPruned = false;
     bool needCompactTd = (tdCount > UBTREE_DEFAULT_TD_COUNT && canCompactCount > 0);
     if (prstate.previousDeadlen > 0 || prstate.nowDeadLen > 0) {
@@ -327,13 +321,13 @@ bool UBTreePCRPagePrune(Relation rel, Buffer buf, TransactionId globalFrozenXid,
         WaitState oldStatus = pgstat_report_waitstatus(STATE_PRUNE_INDEX);
         UBTreePCRPrunePageExecute(page, prstate.previousDead, prstate.previousDeadlen);
         UBTreePCRPrunePageExecute(page, prstate.nowDead, prstate.nowDeadLen);
+
         if (needCompactTd) {
             CompactTd(page, tdCount, canCompactCount, frozenTDMap);
         } else {
             canCompactCount = 0;
             FreezeTd(page, frozenTDMap, tdCount);
         }
-
         UBTreePCRPageRepairFragmentation(rel, blkno, page);
 
         hasPruned = true;
@@ -341,7 +335,7 @@ bool UBTreePCRPagePrune(Relation rel, Buffer buf, TransactionId globalFrozenXid,
         
         MarkBufferDirty(buf);
         
-        /*xlog stuff*/
+        /*  xlog stuff */
         if (RelationNeedsWAL(rel)) {
             XLogRecPtr recptr;
             xl_ubtree3_prune_page xlrec;
@@ -364,15 +358,12 @@ bool UBTreePCRPagePrune(Relation rel, Buffer buf, TransactionId globalFrozenXid,
             PageSetLSN(page, recptr);
         }
         pgstat_report_waitstatus(oldStatus);
-    } else {
-        if (opaque->activeTupleCount != activeTupleCount) {
-            opaque->activeTupleCount = activeTupleCount;
-            MarkBufferDirtyHint(buf, true);
-        }
+    } else if (opaque->activeTupleCount != activeTupleCount) {
+        opaque->activeTupleCount = activeTupleCount;
+        MarkBufferDirtyHint(buf, true);
     }
 
     END_CRIT_SECTION();
-    // to do: verify stuff 待处理
     return hasPruned;
 }
 
@@ -399,25 +390,17 @@ bool UBTreeIsToastIndex(Relation rel)
 int ComputeCompactTDCount(int tdCount, bool* frozenTDMap)
 {
     int canCompactCount = 0;
-    for (int slot = tdCount - 1; slot >= 0; slot--) {
-        if (!frozenTDMap[slot]) {
-            break;
-        }
+    for (int slot = tdCount - 1; slot >= 0 && frozenTDMap[slot]; slot--) {
         canCompactCount++;
     }
     return canCompactCount;
 }
 
-TransactionId GetXidFromTrx(Page page, IndexTupleTrx itrx, bool* frozenTDMap)
+TransactionId GetXidFromTD(Page page, UBTreeItemId itemid, bool* frozenTDMap)
 {
-    uint8 tdId = UBTreePCRGetIndexTupleTrxSlot(itrx);
-    TransactionId xid = InvalidTransactionId;
-    if (tdId == UBTreeFrozenTDSlotId || frozenTDMap[tdId - 1]) {
-        xid = FrozenTransactionId;
-    } else {
-        xid = ((UBTreeTD)UBTreePCRGetTD(page, tdId))->xactid;
-    }
-    return xid;
+    uint8 tdId = itemid->lp_td_id;
+    return (tdId == UBTreeFrozenTDSlotId || frozenTDMap[tdId - 1]) ? FrozenTransactionId :
+            ((UBTreeTD)UBTreePCRGetTD(page, tdId))->xactid;
 }
 
 void RecordDeadTuple(UBTPCRPruneState* prstate, OffsetNumber offNum, TransactionId xid)
@@ -430,9 +413,8 @@ void RecordDeadTuple(UBTPCRPruneState* prstate, OffsetNumber offNum, Transaction
 
 void UBTreePCRPrunePageExecute(Page page, OffsetNumber* deadOff, int deadLen)
 {
-    /* travse all tuples */
     for (int i = 0; i < deadLen; i++) {
-        ItemId itemid = UBTreePCRGetRowPtr(page, deadOff[i]);
+        UBTreeItemId itemid = UBTreePCRGetRowPtr(page, deadOff[i]);
         ItemIdMarkDead(itemid);
     }
 }
@@ -443,12 +425,10 @@ void CompactTd(Page page, int tdCount, int canCompactCount, bool* frozenTDMap)
     OffsetNumber maxOff = UBTPCRPageGetMaxOffsetNumber(page);
     for (OffsetNumber offNum = P_FIRSTDATAKEY(opaque); offNum <= maxOff;
         offNum = OffsetNumberNext(offNum)) {
-        ItemId itemid = UBTreePCRGetRowPtr(page, offNum);
-        IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTupleByItemId(page, itemid);
-        IndexTupleTrx itrx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
-        uint8 tdId = UBTreePCRGetIndexTupleTrxSlot(itrx);
+        UBTreeItemId itemid = UBTreePCRGetRowPtr(page, offNum);
+        uint8 tdId = itemid->lp_td_id;
         if (tdId != UBTreeFrozenTDSlotId && frozenTDMap[tdId - 1]) {
-            UBTreePCRSetIndexTupleTrxSlot(itrx, UBTreeFrozenTDSlotId);
+            UBTreePCRSetIndexTupleTDSlot(itemid, UBTreeFrozenTDSlotId);
         }
     }
 
@@ -492,12 +472,10 @@ void FreezeTd(Page page, bool* frozenTDMap, int tdCount)
     OffsetNumber maxOff = UBTPCRPageGetMaxOffsetNumber(page);
     for (OffsetNumber offNum = P_FIRSTDATAKEY(opaque); offNum <= maxOff;
         offNum = OffsetNumberNext(offNum)) {
-        ItemId itemid = UBTreePCRGetRowPtr(page, offNum);
-        IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTupleByItemId(page, itemid);
-        IndexTupleTrx itrx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
-        uint8 tdId = UBTreePCRGetIndexTupleTrxSlot(itrx);
+        UBTreeItemId itemid = UBTreePCRGetRowPtr(page, offNum);
+        uint8 tdId = itemid->lp_td_id;
         if (tdId < tdCount && tdId != UBTreeFrozenTDSlotId && frozenTDMap[tdId - 1]) {
-            UBTreePCRSetIndexTupleTrxSlot(itrx, UBTreeFrozenTDSlotId);
+            UBTreePCRSetIndexTupleTDSlot(itemid, UBTreeFrozenTDSlotId);
         }
     }
 }
@@ -519,12 +497,11 @@ void UBTreePCRPageRepairFragmentation(Relation rel, BlockNumber blkno, Page page
     int maxOff = UBTPCRPageGetMaxOffsetNumber(page);
     int nstorage = 0;
     Size totallen = 0;
-    itemIdSortData itemidbase[MaxIndexTuplesPerPage];
-    itemIdSort itemidptr = itemidbase;
+    UBTreeItemIdSortData itemidbase[MaxIndexTuplesPerPage];
+    UBTreeItemIdSort itemidptr = itemidbase;
     for (int i = FirstOffsetNumber; i <= maxOff; i++) {
-        ItemId lp = UBTreePCRGetRowPtr(page, i);
+        UBTreeItemId lp = UBTreePCRGetRowPtr(page, i);
         /* Include active and frozen tuples */
-        // ItemIdHasStorage
         if (!ItemIdIsDead(lp)) {
             nstorage++;
             itemidptr->offsetindex = nstorage;
@@ -534,7 +511,7 @@ void UBTreePCRPageRepairFragmentation(Relation rel, BlockNumber blkno, Page page
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
                         errmsg("corrupted item pointer: %d. rel \"%s\", blkno %u",
                                itemidptr->itemoff, relName, blkno)));
-            itemidptr->alignedlen = MAXALIGN(ItemIdGetLength(lp));
+            itemidptr->alignedlen = MAXALIGN(IndexTupleSize(UBTreePCRGetIndexTuple(page, i)));
             totallen += itemidptr->alignedlen;
             itemidptr++;
         }
@@ -544,20 +521,20 @@ void UBTreePCRPageRepairFragmentation(Relation rel, BlockNumber blkno, Page page
                 errmsg("corrupted item lengths: total %u, available space %d. rel \"%s\", blkno %u",
                        (unsigned int)totallen, pdSpecial - pdLower, relName, blkno)));
 
-    /* sort itemIdSortData array into decreasing itemoff order */
-    qsort((char*)itemidbase, nstorage, sizeof(itemIdSortData), UBTreePCRItemOffCompare);
+    /* sort UBTreeItemIdSortData array into decreasing itemoff order */
+    qsort((char*)itemidbase, nstorage, sizeof(UBTreeItemIdSortData), UBTreePCRItemOffCompare);
 
     /* compactify page and install new itemids */
     Offset upper = pdSpecial;
     itemidptr = itemidbase;
     for (int i = 0; i < nstorage; i++, itemidptr++) {
-        ItemId lp = UBTreePCRGetRowPtr(page, itemidptr->offsetindex);
+        UBTreeItemId lp = UBTreePCRGetRowPtr(page, itemidptr->offsetindex);
         upper -= itemidptr->alignedlen;
         *lp = itemidptr->olditemid;
         lp->lp_off = upper;
         if (upper != itemidptr->itemoff) {
             errno_t rc = memmove_s((char *)page + upper, itemidptr->alignedlen, (char *)page + itemidptr->itemoff,
-                                itemidptr->alignedlen);
+                itemidptr->alignedlen);
             securec_check(rc, "\0", "\0");
         }
     }
@@ -566,14 +543,14 @@ void UBTreePCRPageRepairFragmentation(Relation rel, BlockNumber blkno, Page page
     opaque->btpo_flags &= ~BTP_HAS_GARBAGE;
 
     ((PageHeader)page)->pd_lower = GetPageHeaderSize(page) + UBTreePCRTdSlotSize(UBTreePageGetTDSlotCount(page)) +
-        nstorage * sizeof(ItemIdData);
+        nstorage * sizeof(UBTreeItemIdData);
     ((PageHeader)page)->pd_upper = upper;
 }
 
 int UBTreePCRItemOffCompare(const void* itemIdp1, const void* itemIdp2)
 {
     /* Sort in decreasing itemoff order */
-    return ((itemIdSort)itemIdp2)->itemoff - ((itemIdSort)itemIdp1)->itemoff;
+    return ((UBTreeItemIdSort)itemIdp2)->itemoff - ((UBTreeItemIdSort)itemIdp1)->itemoff;
 }
 
 /*
@@ -600,7 +577,7 @@ int UBTreePCRPageDel(Relation rel, Buffer buf, BTStack del_blknos)
 {
     int ndeleted = 0;
     BlockNumber rightsib;
-    bool rightsib_empty = false;
+    bool rightsibEmpty = false;
     Page page;
     UBTPCRPageOpaque opaque;
 
@@ -688,7 +665,7 @@ int UBTreePCRPageDel(Relation rel, Buffer buf, BTStack del_blknos)
              */
             if (!stack) {
                 BTScanInsert itup_key;
-                ItemId itemid;
+                UBTreeItemId itemid;
                 IndexTuple targetkey;
                 Buffer lbuf;
                 BlockNumber leftsib;
@@ -758,10 +735,10 @@ int UBTreePCRPageDel(Relation rel, Buffer buf, BTStack del_blknos)
          * _bt_unlink_halfdead_page unlinks the topmost page from the branch,
          * making it shallower.  Iterate until the leaf page is gone.
          */
-        rightsib_empty = false;
+        rightsibEmpty = false;
         while (P_ISHALFDEAD(opaque)) {
             /* will check for interrupts, once lock is released */
-            if (!UBTreePCRUnlinkHalfDeadPage(rel, buf, &rightsib_empty, del_blknos)) {
+            if (!UBTreePCRUnlinkHalfDeadPage(rel, buf, &rightsibEmpty, del_blknos)) {
                 /* _bt_unlink_halfdead_page already released buffer */
                 return ndeleted;
             }
@@ -780,9 +757,7 @@ int UBTreePCRPageDel(Relation rel, Buffer buf, BTStack del_blknos)
          * interrupts from being processed.
          */
         CHECK_FOR_INTERRUPTS();
-
-        // to do or not:gauss包含vacuum flag清楚逻辑，我们不需要
-
+        
         /*
          * The page has now been deleted. If its right sibling is completely
          * empty, it's possible that the reason we haven't deleted it earlier
@@ -792,7 +767,7 @@ int UBTreePCRPageDel(Relation rel, Buffer buf, BTStack del_blknos)
          * picked up by the next vacuum anyway, but might as well try to
          * remove it now, so loop back to process the right sibling.
          */
-        if (!rightsib_empty) {
+        if (!rightsibEmpty) {
             break;
         }
 
@@ -803,20 +778,18 @@ int UBTreePCRPageDel(Relation rel, Buffer buf, BTStack del_blknos)
 }
 
 /*
- *  UBTreePCRSatisfyPruneCondition()
- *  -- Traverse all tds to judge whether the page need to be pruned and reflesh all symbols.
+ * UBTreePCRCanPrune()
+ * Traverse all tds to judge whether the page need to be pruned and reflesh all symbols.
  */
- bool UBTreePCRSatisfyPruneCondition(Relation rel, Buffer buf, TransactionId globalFrozenXid,
-    bool pruneDelete)
+bool UBTreePCRCanPrune(Relation rel, Buffer buf, TransactionId globalFrozenXid, bool pruneDelete)
 {
     bool needPrune = false;
     Page page = BufferGetPage(buf);
     int frozenTdCount = 0;
     int tdCount = UBTreePageGetTDSlotCount(page);
     uint8 ncompletedXactSlots = 0;
-    uint8 *completedXactSlots = NULL;
+    uint8 *completedXactSlots = (uint8 *)palloc0(tdCount *sizeof(uint8));
     TransactionId globalRecycleXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
-    completedXactSlots = (uint8 *)palloc0(tdCount *sizeof(uint8));
     for (int slot = 0; slot < tdCount; slot++) {
         UBTreeTD curTd = (UBTreeTD)UBTreePCRGetTD(page, slot + 1);
         /* td is unused or frozen */
@@ -824,7 +797,6 @@ int UBTreePCRPageDel(Relation rel, Buffer buf, BTStack del_blknos)
             if (UBTreePCRTDIsDelete(curTd)) {
                 needPrune = true;
             }
-            /* mark td frozen symbol */
             UBTreePCRTDSetStatus(curTd, TD_FROZEN);
             frozenTdCount++;
             continue;
@@ -833,11 +805,6 @@ int UBTreePCRPageDel(Relation rel, Buffer buf, BTStack del_blknos)
         frozenTdCount = 0;
         Assert(TransactionIdIsValid(curTd->xactid));
 
-        /*
-         * if committed, set is_ative = 0, is_commited = 1,
-         * if aborted, set is_ative = 0, is_commited = 0, page need to be pruned
-         * if in progress, assert is_active == 1, is_commited == 0;
-         */
         if (UBTreePCRTDIsCommited(curTd)) {
             Assert(!UBTreePCRTDIsActive(curTd));
         } else if (TransactionIdPrecedes(curTd->xactid, globalFrozenXid)) {
@@ -898,9 +865,7 @@ int UBTreePCRPageDel(Relation rel, Buffer buf, BTStack del_blknos)
             XLogRegisterData((char*)completedXactSlots, ncompletedXactSlots * sizeof(uint8));
             XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
             recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_REUSE_TD_SLOT);
-
             PageSetLSN(page, recptr);
-
         }
         END_CRIT_SECTION();
     }
@@ -908,7 +873,7 @@ int UBTreePCRPageDel(Relation rel, Buffer buf, BTStack del_blknos)
     if (completedXactSlots != NULL) {
         pfree(completedXactSlots);
     }
-    if(tdCount > UBTREE_DEFAULT_TD_COUNT && frozenTdCount > 0) {
+    if (tdCount > UBTREE_DEFAULT_TD_COUNT && frozenTdCount > 0) {
         needPrune = true;
     }
     return needPrune;
@@ -942,7 +907,7 @@ bool UBTreePCRTryRecycleEmptyPageInternal(Relation rel)
     BTStack dummy_del_blknos = (BTStack) palloc0(sizeof(BTStackData));
     if (UBTreePCRPrunePageOpt(rel, buf, true, dummy_del_blknos, true)) {
         BTStack cur_del_blkno = dummy_del_blknos->bts_parent;
-        while (cur_del_blkno){
+        while (cur_del_blkno) {
             /* successfully deleted, move to freed page queue */
             UBTreeRecycleQueueAddPage(rel, RECYCLE_FREED_FORK, cur_del_blkno->bts_blkno, ReadNewTransactionId());
             cur_del_blkno = cur_del_blkno->bts_parent;
@@ -957,9 +922,9 @@ bool UBTreePCRTryRecycleEmptyPageInternal(Relation rel)
 bool UBTreeFetchLatestChangeFromUndo(IndexTuple itup, UndoRecord* urec,
     UBTreeLatestChangeInfo* uInfo, UndoPersistence upersistence)
 {
-    for(;;) {
+    for (;;) {
         UndoTraversalState state = FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber,
-                    InvalidTransactionId, false, NULL);
+            InvalidTransactionId, false, NULL);
         if (state != UNDO_TRAVERSAL_COMPLETE) {
             return false;
         }
@@ -1177,7 +1142,7 @@ bool UBTreePCRMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack)
     BlockNumber leafrightsib;
     BlockNumber target;
     BlockNumber rightsib;
-    ItemId itemid;
+    UBTreeItemId itemid;
     Page page;
     UBTPCRPageOpaque opaque;
     Buffer topparent;
@@ -1425,8 +1390,6 @@ bool UBTreePCRReserveForDeletion(Relation rel, Buffer buf)
     return false;
 }
 
-
-
 /*
  * Unlink a page in a branch of half-dead pages from its siblings.
  *
@@ -1436,7 +1399,7 @@ bool UBTreePCRReserveForDeletion(Relation rel, Buffer buf)
  * leaf page is deleted.
  *
  * Returns 'false' if the page could not be unlinked (shouldn't happen).
- * If the (new) right sibling of the page is empty, *rightsib_empty is set
+ * If the (new) right sibling of the page is empty, *rightsibEmpty is set
  * to true.
  *
  * Must hold pin and lock on leafbuf at entry (read or write doesn't matter).
@@ -1444,7 +1407,7 @@ bool UBTreePCRReserveForDeletion(Relation rel, Buffer buf)
  * we'll release both pin and lock before returning (we define it that way
  * to avoid having to reacquire a lock we already released).
  */
-bool UBTreePCRUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_empty, BTStack del_blknos)
+bool UBTreePCRUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsibEmpty, BTStack del_blknos)
 {
     BlockNumber leafblkno = BufferGetBlockNumber(leafbuf);
     BlockNumber leafleftsib;
@@ -1458,7 +1421,7 @@ bool UBTreePCRUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_em
     Buffer metabuf = InvalidBuffer;
     Page metapg = NULL;
     BTMetaPageData *metad = NULL;
-    ItemId itemid;
+    UBTreeItemId itemid;
     Page page;
     UBTPCRPageOpaque opaque;
     bool rightsib_is_rightmost = false;
@@ -1620,7 +1583,8 @@ bool UBTreePCRUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_em
     }
 
     if (target == leafblkno) {
-        if (P_FIRSTDATAKEY(opaque) <= UBTPCRPageGetMaxOffsetNumber(page) || !P_ISLEAF(opaque) || !P_ISHALFDEAD(opaque)) {
+        if (P_FIRSTDATAKEY(opaque) <= UBTPCRPageGetMaxOffsetNumber(page) ||
+            !P_ISLEAF(opaque) || !P_ISHALFDEAD(opaque)) {
             if (BufferIsValid(lbuf)) {
                 _bt_relbuf(rel, lbuf);
             }
@@ -1639,7 +1603,7 @@ bool UBTreePCRUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_em
 
         /* remember the next non-leaf child down in the branch. */
         itemid = UBTreePCRGetRowPtr(page, P_FIRSTDATAKEY(opaque));
-        nextchild = UBTreeTupleGetDownLink((IndexTuple) PageGetItem(page, itemid));
+        nextchild = UBTreeTupleGetDownLink((IndexTuple) UBTreePCRGetIndexTupleByItemId(page, itemid));
         if (nextchild == leafblkno) {
             nextchild = InvalidBlockNumber;
         }
@@ -1659,7 +1623,7 @@ bool UBTreePCRUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsib_em
              rightsib, opaque->btpo_prev, target, RelationGetRelationName(rel));
     }
     rightsib_is_rightmost = P_RIGHTMOST(opaque);
-    *rightsib_empty = (P_FIRSTDATAKEY(opaque) > UBTPCRPageGetMaxOffsetNumber(page));
+    *rightsibEmpty = (P_FIRSTDATAKEY(opaque) > UBTPCRPageGetMaxOffsetNumber(page));
 
     /*
      * If we are deleting the next-to-last page on the target's level, then

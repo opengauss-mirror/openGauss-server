@@ -206,11 +206,9 @@ IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const boo
 
     /*
      * Here we make sure that the size will fit in the field reserved for it
-     * in t_info. Ubtree page reserved xmin/xmax, ubtree pcr page reserved
-     * IndexTupleTrxData.
+     * in t_info. Ubtree page reserved xmin/xmax.
      */
-    Size check_size = size + 
-        (is_ubtree ? (is_ubtree_pcr ? MAXALIGN(sizeof(IndexTupleTrxData)) : sizeof(ShortTransactionId) * 2) : 0);
+    Size check_size = size + (is_ubtree && !is_ubtree_pcr ? sizeof(ShortTransactionId) * 2 : 0);
     if ((check_size & INDEX_SIZE_MASK) != check_size)
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),

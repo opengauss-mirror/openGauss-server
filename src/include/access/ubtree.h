@@ -222,45 +222,45 @@ enum {
     UBTREE2_FREEZE_BLOCK_NUM,
 };
 
-enum{
+enum {
     UBTREE3_INSERT_PCR_INTERNAL_BLOCK_NUM = 0,
     UBTREE3_INSERT_PCR_LEAF_BLOCK_NUM,
     UBTREE3_INSERT_PCR_META_BLOCK_NUM,
 };
 
-enum{
+enum {
     UBTREE3_PRUNE_PAGE_PCR_BLOCK_NUM,
 };
 
-enum{
+enum {
     UBTREE3_DELETE_PCR_BLOCK_NUM,
 };
 
-enum{
+enum {
     UBTREE3_INSERT_PCR_BLOCK_NUM,
 };
 
-enum{
+enum {
     UBTREE3_UNDO_ORIG_BLOCK_NUM,
 };
 
-enum{
+enum {
     UBTREE3_DUP_INSERT_BLOCK_NUM,
 };
 
-enum{
+enum {
     UBTREE3_ROLLBACK_TXN_BLOCK_NUM,
 };
 
-enum{
+enum {
     UBTREE3_FREEZE_TD_SLOT_BLOCK_NUM,
 };
 
-enum{
+enum {
     UBTREE3_REUSE_TD_SLOT_BLOCK_NUM,
 };
 
-enum{
+enum {
     UBTREE3_EXTEND_TD_SLOTS_BLOCK_NUM,
 };
 
@@ -382,7 +382,7 @@ typedef struct xl_ubtree3_freeze_td_slot {
     char padding[6];
 } xl_ubtree3_freeze_td_slot;
 
-#define SizeOfUbtree3FreezeTDSlot (offsetof(xl_ubtree3_freeze_td_slot, padding)) 
+#define SizeOfUbtree3FreezeTDSlot (offsetof(xl_ubtree3_freeze_td_slot, padding))
 
 typedef struct xl_ubtree3_extend_td_slots {
     uint8   nPrevSlots; /* Previous number of TD slots */
@@ -685,7 +685,7 @@ extern bool UBTreeItupGetXminXmax(Page page, OffsetNumber offnum, TransactionId 
 extern TransactionIdStatus UBTreeCheckXid(TransactionId xid);
 extern bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2);
 template<typename Opaque> bool UBTreeIsEqual(Relation idxrel, Page page, OffsetNumber offnum, int keysz,
-     ScanKey scankey);
+    ScanKey scankey);
 
 /*
  * prototypes for functions in ubtpage.cpp

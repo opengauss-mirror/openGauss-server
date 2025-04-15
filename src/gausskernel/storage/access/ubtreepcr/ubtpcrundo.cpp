@@ -66,9 +66,7 @@ UndoRecPtr UBTreePCRPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid relfilen
     initStringInfo(urec->Rawdata());
     MemoryContextSwitchTo(old_cxt);
     appendBinaryStringInfo(urec->Rawdata(), (char*)undoinfo, sizeof(UBTreeUndoInfoData));
-    IndexTupleSetSize(itup, IndexTupleSize(itup) - MAXALIGN(sizeof(IndexTupleTrxData)));
     appendBinaryStringInfo(urec->Rawdata(), (char*)itup, IndexTupleSize(itup));
-    IndexTupleSetSize(itup, IndexTupleSize(itup) + MAXALIGN(sizeof(IndexTupleTrxData)));
     int status = PrepareUndoRecord(t_thrd.ustore_cxt.urecvec, persistence, xlundohdr, xlundometa);
     /* Do not continue if there was a failure during Undo preparation */
     if (status != UNDO_RET_SUCC) {

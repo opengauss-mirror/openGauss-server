@@ -213,7 +213,9 @@ void InitBufferPool(void)
         InitDmsBufCtrl();
     }
 
-    InitCRBufPool();
+    if (!ENABLE_DMS) {
+        InitCRBufPool();
+    }
 }
 
 /*
@@ -254,8 +256,10 @@ Size BufferShmemSize(void)
         size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(dms_buf_ctrl_t))) + ALIGNOF_BUFFER + PG_CACHE_LINE_SIZE;
     }
 
-    size = add_size(size, mul_size(CR_BUFFER_NUM, sizeof(CRBufferDescPadded))) + PG_CACHE_LINE_SIZE;
-    size = add_size(size, mul_size(CR_BUFFER_NUM, BLCKSZ)), + PG_CACHE_LINE_SIZE;
+    if (!ENABLE_DMS) {
+        size = add_size(size, mul_size(CR_BUFFER_NUM, sizeof(CRBufferDescPadded))) + PG_CACHE_LINE_SIZE;
+        size = add_size(size, mul_size(CR_BUFFER_NUM, BLCKSZ)), + PG_CACHE_LINE_SIZE;
+    }
 
     return size;
 }

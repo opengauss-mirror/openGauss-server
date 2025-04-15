@@ -1315,7 +1315,7 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "t1_f9_key" for tab
  f5     | integer |           | plain   |              | 
  f3     | integer | not null  | plain   |              | 
 Indexes:
-    "t_pri_pkey" PRIMARY KEY, ubtree (f2, f3) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t_pri_pkey" PRIMARY KEY, ubtree (f2, f3) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Referenced by:
     TABLE "t1" CONSTRAINT "t1_f1_fkey" FOREIGN KEY (f1, f2) REFERENCES t_pri(f2, f3)
 Has OIDs: no
@@ -1342,10 +1342,10 @@ select conname, contype, conkey, confkey, conbin, consrc, conincluding from pg_c
  f6     | integer               |           | plain    |              | 
  f7     | integer               |           | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f8) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_f3_f4_key" UNIQUE CONSTRAINT, ubtree (f3, f4) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_f9_key" UNIQUE CONSTRAINT, ubtree (f9) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f8) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f3_f4_key" UNIQUE CONSTRAINT, ubtree (f3, f4) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f9_key" UNIQUE CONSTRAINT, ubtree (f9) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "t1_f5_check" CHECK (f5 = 10)
 Foreign-key constraints:
@@ -3138,7 +3138,7 @@ alter table t1 add f8 int, add f9 text first, add f10 float after f3;
  f5     | boolean                     |           | plain    |              | 
  f8     | integer                     |           | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no, toast.storage_type=USTORE
 
@@ -3201,7 +3201,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "t1_pkey" for 
  f5     | boolean                     |           | plain    |              | 
  f6     | text                        |           | extended |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f7) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f7) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no, toast.storage_type=USTORE
 
@@ -3240,7 +3240,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "t1_pkey" for 
  f5     | boolean                     |                    | plain    |              | 
  f6     | text                        |                    | extended |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f7) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f7) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no, toast.storage_type=USTORE
 
@@ -3281,7 +3281,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "t1_pkey" for 
  f5     | boolean                     |                         | plain    |              | 
  f6     | text                        |                         | extended |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f7) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f7) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no, toast.storage_type=USTORE
 
@@ -3318,7 +3318,7 @@ alter table t1 add f6 int first, add f7 float after f3;
  f4     | bit(8)                      |           | extended |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -3354,9 +3354,9 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "t1_f7_key" for tab
  f4     | bit(8)                      |           | extended |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_f6_key" UNIQUE CONSTRAINT, ubtree (f6) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_f7_key" UNIQUE CONSTRAINT, ubtree (f7) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f6_key" UNIQUE CONSTRAINT, ubtree (f6) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f7_key" UNIQUE CONSTRAINT, ubtree (f7) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -3393,8 +3393,8 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "t1_f7_key" for tab
  f4     | bit(8)                      |           | extended |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_f6_key" UNIQUE CONSTRAINT, ubtree (f6) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_f7_key" UNIQUE CONSTRAINT, ubtree (f7) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_f6_key" UNIQUE CONSTRAINT, ubtree (f6) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f7_key" UNIQUE CONSTRAINT, ubtree (f7) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -3432,8 +3432,8 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "t1_f7_key" for tab
  f4     | bit(8)                      |           | extended |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_f6_key" UNIQUE CONSTRAINT, ubtree (f6) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_f7_key" UNIQUE CONSTRAINT, ubtree (f7) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_f6_key" UNIQUE CONSTRAINT, ubtree (f6) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f7_key" UNIQUE CONSTRAINT, ubtree (f7) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -3625,7 +3625,7 @@ alter table t1 add f6 text first, add f7 float after f3;
  f4     | bit(8)                      |                         | extended |              | 
  f5     | boolean                     |                         | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no, toast.storage_type=USTORE
 
@@ -3666,7 +3666,7 @@ ERROR:  Incorrect column definition, there can be only one auto_increment column
  f4     | bit(8)                      |                         | extended |              | 
  f5     | boolean                     |                         | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -3709,7 +3709,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "t1_pkey" for 
  f4     | bit(8)                      |                         | extended |              | 
  f5     | boolean                     |                         | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f6) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f6) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -4318,7 +4318,7 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "t1_f9_key" for tab
  f5     | integer |           | plain   |              | 
  f3     | integer | not null  | plain   |              | 
 Indexes:
-    "t_pri_pkey" PRIMARY KEY, ubtree (f2, f3) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t_pri_pkey" PRIMARY KEY, ubtree (f2, f3) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Referenced by:
     TABLE "t1" CONSTRAINT "t1_f1_fkey" FOREIGN KEY (f1, f2) REFERENCES t_pri(f2, f3)
 Has OIDs: no
@@ -4345,10 +4345,10 @@ select conname, contype, conkey, confkey, conbin, consrc, conincluding from pg_c
  f6     | integer               |           | plain    |              | 
  f7     | integer               |           | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f8) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_f9_key" UNIQUE CONSTRAINT, ubtree (f9) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_lower_abs_key" UNIQUE CONSTRAINT, ubtree (lower(f3::text), abs(f4)) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f8) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_f9_key" UNIQUE CONSTRAINT, ubtree (f9) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_lower_abs_key" UNIQUE CONSTRAINT, ubtree (lower(f3::text), abs(f4)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "t1_f5_check" CHECK (f5 = 10)
 Foreign-key constraints:
@@ -6168,7 +6168,7 @@ alter table t1 modify f3 timestamp first, modify f1 int after f4;
  f1     | integer                     | not null  | plain    |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -6190,7 +6190,7 @@ alter table t1 modify f1 int after f3;
  f4     | bit(8)                      |           | extended |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -6235,7 +6235,7 @@ alter table t1 modify f3 timestamp first, modify f1 int after f4;
  f1     | integer                     |           | plain    |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -6250,7 +6250,7 @@ alter table t1 modify f1 int after f3;
  f4     | bit(8)                      |           | extended |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -6281,7 +6281,7 @@ alter table t1 modify f3 timestamp first, modify f1 int after f4;
  f1     | integer                     |           | plain    |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -6303,7 +6303,7 @@ alter table t1 modify f1 int after f3;
  f4     | bit(8)                      |           | extended |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_f1_key" UNIQUE CONSTRAINT, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -6516,7 +6516,7 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for tab
  f4     | bit(8)                      |                         | extended |              | 
  f5     | boolean                     |                         | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -6531,7 +6531,7 @@ alter table t1 modify f3 timestamp first, modify f1 int after f4;
  f1     | integer                     | not null  | plain    |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -6550,7 +6550,7 @@ insert into t1(f2, f3, f4, f5) values('a', '2022-11-08 19:56:10.158564', x'41', 
  f4     | bit(8)                      |                         | extended |              | 
  f5     | boolean                     |                         | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -6572,7 +6572,7 @@ alter table t1 modify f3 timestamp first, modify f1 int after f4;
  f1     | integer                     | not null  | plain    |              | 
  f5     | boolean                     |           | plain    |              | 
 Indexes:
-    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_pkey" PRIMARY KEY, ubtree (f1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -7214,7 +7214,7 @@ NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t1_f4_f5_f6_f7_key" f
  f2     | integer | not null  | plain   |              | 
  f3     | integer | not null  | plain   |              | 
 Indexes:
-    "t_pri_pkey" PRIMARY KEY, ubtree (f2, f3) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t_pri_pkey" PRIMARY KEY, ubtree (f2, f3) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Referenced by:
     TABLE "t1" CONSTRAINT "t1_f1_fkey" FOREIGN KEY (f1, f2) REFERENCES t_pri(f2, f3)
 Has OIDs: no
@@ -7232,8 +7232,8 @@ Options: orientation=row, compression=no, storage_type=ustore
  f6     | integer               |           | plain    |              | 
  f7     | integer               |           | plain    |              | 
 Indexes:
-    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_lower_abs_key" UNIQUE CONSTRAINT, ubtree (lower(f3::text), abs(f4)) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_lower_abs_key" UNIQUE CONSTRAINT, ubtree (lower(f3::text), abs(f4)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "t1_f5_check" CHECK (f5 = 10)
 Foreign-key constraints:
@@ -7268,7 +7268,7 @@ alter table t1 modify f2 int first, modify f4 int after f1, modify f5 int after 
  f1     | integer |           | plain   |              | 
  f2     | integer | not null  | plain   |              | 
 Indexes:
-    "t_pri_pkey" PRIMARY KEY, ubtree (f2, f3) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t_pri_pkey" PRIMARY KEY, ubtree (f2, f3) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Referenced by:
     TABLE "t1" CONSTRAINT "t1_f1_fkey" FOREIGN KEY (f1, f2) REFERENCES t_pri(f2, f3)
 Has OIDs: no
@@ -7286,8 +7286,8 @@ Options: orientation=row, compression=no, storage_type=ustore
  f7     | integer               |           | plain    |              | 
  f5     | integer               |           | plain    |              | 
 Indexes:
-    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore) TABLESPACE pg_default
-    "t1_lower_abs_key" UNIQUE CONSTRAINT, ubtree (lower(f3::text), abs(f4)) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t1_f4_f5_f6_f7_key" UNIQUE CONSTRAINT, ubtree (f4, f5) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "t1_lower_abs_key" UNIQUE CONSTRAINT, ubtree (lower(f3::text), abs(f4)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "t1_f5_check" CHECK (f5 = 10)
 Foreign-key constraints:

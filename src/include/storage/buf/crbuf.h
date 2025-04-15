@@ -23,7 +23,7 @@
 #define CRBUF_FLAG_MASK 0xFFC0000000000000LU
 
 /* Get refcount from buffer state */
-#define CRBUF_STATE_GET_REFCOUNT(state) (((state)&0xFFFFFFFF))
+#define CRBUF_STATE_GET_REFCOUNT(state) (((state) & 0xFFFFFFFF))
 
 /*
  * Flags for cr buffer descriptors
@@ -58,7 +58,7 @@
 #define CRBufMappingPartitionLock(hashcode) \
     (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstCRBufMappingLock + CRBufTableHashPartition(hashcode)].lock)
 #define CRBufMappingPartitionLockByIndex(i) \
-    （&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstCRBufMappingLock + (i)].lock）
+    (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstCRBufMappingLock + (i)].lock)
 
 typedef struct {
     BufferTag key;
@@ -70,9 +70,9 @@ typedef struct CRBufferDesc {
     int buf_id;
     CommitSeqNo csn;
     CommandId cid;
-    int rsid;
+    uint64 rsid;
     bool usable;
-	pg_atomic_uint64 state;
+    pg_atomic_uint64 state;
     int cr_buf_next;
     int cr_buf_prev;
     int lru_next;
@@ -84,14 +84,21 @@ typedef union CRBufferDescPadded {
     char pad[BUFFERDESC_PAD_TO_SIZE];
 } CRBufferDescPadded;
 
+inline void UnlockCRBufHdr(CRBufferDesc *desc, uint64 s)
+{
+    TsAnnotateHappensBefore(&desc->state);
+    pg_write_barrier();
+    pg_atomic_write_u32((((volatile uint32 *)&(desc)->state) + 1), (((s) & (~CRBM_LOCKED)) >> 32));
+}
+
 void InitCRBufPool(void);
 void InitCRBufPoolAccess(void);
 
 CRBufferDesc *ReadCRBuffer(Relation reln, BlockNumber block_num, CommitSeqNo csn, CommandId cid);
 CRBufferDesc *AllocCRBuffer(Relation reln, ForkNumber forkNum, BlockNumber blockNum, CommitSeqNo csn, CommandId cid);
-//CRBufferDesc *CRBufferAlloc(const RelFileNode &rel_file_node, ForkNumber forkNum, BlockNumber blockNum, CommitSeqNo csn, bool *foundPtr);
 CRBufferDesc *CRReadOrAllocBuffer(Relation reln, BlockNumber block_num, CommitSeqNo csn, CommandId cid);
 void ReleaseCRBuffer(Buffer buffer);
 void CRPoolScan();
 void CRBufferUnused(Buffer base_buffer);
+void ParseCRPage(const char *crpage, int blkno);
 #endif

@@ -16,8 +16,6 @@
 #include <time.h>
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "access/nbtree.h"
-#include "access/ubtree.h"
 #include "access/ubtreepcr.h"
 #include "access/reloptions.h"
 #include "access/relscan.h"
@@ -986,8 +984,6 @@ bool UBTreeCheckNatts(const Relation index, bool heapkeyspace, Page page, Offset
      */
     return tupnatts > 0 && tupnatts <= nkeyatts;
 }
-
-
 
 /*
  *  BtCheckThirdPage() -- check whether tuple fits on a btree page at all.

@@ -184,7 +184,8 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
             }
 
             /* Apply the remaining ones */
-            preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(uheapUrecvec, startIndex, i - 1, fullXid, currReloid, currPartitionoid,
+            preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(
+                uheapUrecvec, startIndex, i - 1, fullXid, currReloid, currPartitionoid,
                 currBlkno, containsFullChain, preRetCode, &preReloid, &prePartitionoid);
         }
 

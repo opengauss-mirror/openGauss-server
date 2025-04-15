@@ -4213,8 +4213,7 @@ static void UstoreVacuumMainPartitionGPIs(Relation onerel, const VacuumStmt* vac
     Oid parentOid = RelationGetRelid(onerel);
     bool lockInterval = false;
 
-    /* do not prune pcr index during autovacuum */
-    if (IsAutoVacuumWorkerProcess() && UBTreeIndexIsPCRType(onerel)) {
+    if (IsAutoVacuumWorkerProcess()) {
         DestroyOidRBTree(&invisibleParts);
         return;
     }

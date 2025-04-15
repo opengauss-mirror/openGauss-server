@@ -753,9 +753,10 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                  * in real comparison, but only for ordering/finding items on
                  * pages. - vadim 03/24/97
                  */
-                if (!UBTreeIsEqual<UBTPageOpaqueInternal>(rel, page, offset, itup_key->keysz, itup_key->scankeys))
+                if (!UBTreeIsEqual<UBTPageOpaqueInternal>(rel, page, offset, itup_key->keysz, itup_key->scankeys)) {
                     break; /* we're past all the equal tuples */
-
+                }
+                
                 /* okay, we gotta fetch the heap tuple ... */
                 curitup = (IndexTuple) PageGetItem(page, curitemid);
                 htid = curitup->t_tid;

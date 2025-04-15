@@ -86,7 +86,7 @@ static void ValidateStrOptStringOptimize(const char *val);
 static void ValidateStrOptEncryptAlgo(const char *val);
 static void ValidateStrOptDekCipher(const char *val);
 static void ValidateStrOptCmkId(const char *val);
-static void validateIndexTypeOption(const char* val);
+static void ValidateIndexTypeOption(const char* val);
 static void ValidateStrOptIndexType(const char *val);
 
 
@@ -575,7 +575,7 @@ static relopt_string stringRelOpts[] = {
         {"index_type", "rcr, pcr", RELOPT_KIND_BTREE},
         strlen(UBTREE_INDEX_TYPE_RCR),
         false,
-        validateIndexTypeOption,
+        ValidateIndexTypeOption,
         UBTREE_INDEX_TYPE_RCR,
     },
     /* list terminator */
@@ -3271,7 +3271,7 @@ void CheckSpqBTBuildOption(const char *val)
  * Return Value : None.
  * Notes        : None.
  */
-static void validateIndexTypeOption(const char* val)
+static void ValidateIndexTypeOption(const char* val)
 {
     if (pg_strcasecmp(val, UBTREE_INDEX_TYPE_PCR) != 0 && pg_strcasecmp(val, UBTREE_INDEX_TYPE_RCR) != 0) {
         ereport(ERROR,
@@ -3279,5 +3279,4 @@ static void validateIndexTypeOption(const char* val)
                 errmsg("Invalid string for \"UBTREE_INDEX_TYPE\" option."),
                 errdetail("Valid strings are \"rcr\", \"pcr\"")));
     }
-        
 }

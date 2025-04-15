@@ -39,6 +39,7 @@
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "commands/tablespace.h"
+#include "miscadmin.h"
 
 /* Working state needed by btvacuumpage */
 typedef struct {
@@ -93,7 +94,6 @@ Datum ubtbuild(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                 errmsg("index \"%s\" already contains data", RelationGetRelationName(index))));
     }
-
     reltuples = _bt_spools_heapscan(heap, index, &buildstate, indexInfo, &allPartTuples);
 
     /*
@@ -104,13 +104,16 @@ Datum ubtbuild(PG_FUNCTION_ARGS)
     if (!UBTreeIndexIsPCRType(index)) {
         UBTreeLeafBuild(buildstate.spool, buildstate.spool2);
     } else {
+        if (t_thrd.proc->workingVersionNum < UBTREE_PCR_VERSION_NUM) {
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("Ubtree PCR index is not supported in current version!")));
+        }
         UBTreePCRLeafBuild(buildstate.spool, buildstate.spool2);
     }
     _bt_spooldestroy(buildstate.spool);
     if (buildstate.spool2) {
         _bt_spooldestroy(buildstate.spool2);
     }
-
     if (buildstate.btleader) {
         _bt_end_parallel();
     }
@@ -179,6 +182,10 @@ Datum ubtbuildempty(PG_FUNCTION_ARGS)
     if (!UBTreeIndexIsPCRType(index)) {
         UBTreeInitMetaPage(metapage, P_NONE, 0);
     } else {
+        if (t_thrd.proc->workingVersionNum < UBTREE_PCR_VERSION_NUM) {
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("Ubtree PCR index is not supported in current version!")));
+        }
         UBTreePCRInitMetaPage(metapage, P_NONE, 0);
     }
 
@@ -275,9 +282,6 @@ Datum ubtinsert(PG_FUNCTION_ARGS)
         IndexTupleSetSize(itup, newsize);
         result = UBTreeDoInsert(rel, itup, checkUnique, heapRel);
     } else {
-        /* reserve space for xmin/xmax */
-        Size newsize = IndexTupleSize(itup) + MAXALIGN(sizeof(IndexTupleTrxData));
-        IndexTupleSetSize(itup, newsize);
         result = UBTreePCRDoInsert(rel, itup, checkUnique, heapRel);
     }
 
@@ -299,7 +303,7 @@ Datum ubtgettuple(PG_FUNCTION_ARGS)
     }
 
     bool res;
-    if(UBTreeIndexIsPCRType(scan->indexRelation)) {
+    if (UBTreeIndexIsPCRType(scan->indexRelation)) {
         res = UBTreePCRGetTupleInternal(scan, dir);
     } else {
         res = UBTreeGetTupleInternal(scan, dir);
@@ -354,7 +358,7 @@ Datum ubtgetbitmap(PG_FUNCTION_ARGS)
                  */
                 if (++so->currPos.itemIndex > so->currPos.lastItem) {
                     /* let _bt_next do the heavy lifting */
-                    if(UBTreeIndexIsPCRType(scan->indexRelation)) {
+                    if (UBTreeIndexIsPCRType(scan->indexRelation)) {
                         if (!UBTreePCRNext(scan, ForwardScanDirection)) {
                             break;
                         }
@@ -1065,10 +1069,9 @@ restart:
         LockBuffer(buf, BUFFER_LOCK_UNLOCK);
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
-
         /* prune and freeze this index page */
         TransactionId globalFrozenXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
-        UBTreePCRSatisfyPruneCondition(rel, buf, globalFrozenXid, true);
+        UBTreePCRCanPrune(rel, buf, globalFrozenXid, true);
         UBTreePCRPagePrune(rel, buf, globalFrozenXid, invisibleParts, true);
 
         if (!P_RIGHTMOST(opaque) && UBTPCRPageGetMaxOffsetNumber(page) == 1) {
@@ -1109,7 +1112,7 @@ restart:
                 UBTreeRecordFreePage(rel, cur_del_blkno->bts_blkno, ReadNewTransactionId());
                 /* count only this page, else may double-count parent */
                 stats->pages_deleted++;
-                cur_del_blkno = cur_del_blkno->bts_parent;    
+                cur_del_blkno = cur_del_blkno->bts_parent;
             }
         }
 
@@ -1288,7 +1291,7 @@ Datum ubtoptions(PG_FUNCTION_ARGS)
 static IndexTuple UBTreeGetIndexTuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset)
 {
     bool found;
-    if(UBTreeIndexIsPCRType(scan->indexRelation)) {
+    if (UBTreeIndexIsPCRType(scan->indexRelation)) {
         found = UBTreePCRGetTupleInternal(scan, dir);
     } else {
         found = UBTreeGetTupleInternal(scan, dir);
@@ -1570,7 +1573,6 @@ bool IndexPagePrepareForXid(Relation rel, Page page, TransactionId xid, bool nee
 
 bool UBTreeIndexIsPCRType(Relation rel)
 {
-    // TODO: 判断逻辑还不完善
     if (RelationIndexIsPCR(rel->rd_options)) {
         return true;
     }

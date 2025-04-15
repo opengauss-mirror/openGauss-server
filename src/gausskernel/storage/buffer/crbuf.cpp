@@ -23,26 +23,23 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/storage_gstrace.h"
 
-#include "storage/buf/crbuf.h"
-#include "knl/knl_instance.h"
-#include "utils/memutils.h"
-#include "utils/elog.h"
 #include "access/hash.h"
+#include "access/nbtree.h"
+#include "access/ubtreepcr.h"
+#include "knl/knl_instance.h"
+#include "storage/buf/crbuf.h"
+#include "storage/checksum.h"
 #include "storage/smgr/relfilenode_hash.h"
 #include "tsan_annotation.h"
+#include "utils/elog.h"
+#include "utils/memutils.h"
 
 #define CR_BUFFER_NUM 12800
 #define INVALID_BUFF 0
 #define PCRP_RESERVED_PAGE_COUNT 6
+#define CRPageIsNew(page) (((PageHeader)(page))->pd_upper == 0)
 
 extern uint32 hashquickany(uint32 seed, register const unsigned char *data, register int len);
-
-#define UnlockCRBufHdr(desc, s)                                                 \
-    do {                                                                        \
-        TsAnnotateHappensBefore(&desc->state);                                  \
-        pg_write_barrier();                                                     \ 
-        pg_atomic_write_u32((((volatile uint32 *)&(desc)->state) + 1), (((s) & (~CRBM_LOCKED)) >> 32)); \
-    } while (0)
 
 /*
 * Lock buffer header - set CRBM_LOCKED in buffer state.
@@ -58,8 +55,9 @@ uint64 LockCRBufHdr(CRBufferDesc *desc)
         /* set CRBM_LOCKED flag */
         old_buf_state = pg_atomic_fetch_or_u64(&desc->state, CRBM_LOCKED);
         /* if it wasn't set before we're OK */
-        if (!(old_buf_state & CRBM_LOCKED))
+        if (!(old_buf_state & CRBM_LOCKED)) {
             break;
+        }
 #ifndef ENABLE_THREAD_CHECK
         perform_spin_delay(&delayStatus);
 #endif
@@ -133,7 +131,7 @@ void ReleaseCRBuffer(Buffer buffer)
 {
     UnpinCRBuffer(GetCRBufferDescriptor(buffer));
 #ifdef CRDEBUG
-	CRPoolScan();
+    CRPoolScan();
 #endif
 }
 
@@ -162,8 +160,8 @@ void CRBufListInsert(CRBufferDesc *buf_desc_head, CRBufferDesc *new_buf_desc)
     new_buf_desc->cr_buf_next = InvalidBuffer;
 }
 
-void CRBufListRemove(CRBufferDesc *buf_desc_head, CommitSeqNo csn, CommandId cid, CRBufferDesc **removed_buf_desc,
-                    bool *remove_head, Buffer *new_head_buff_id)
+void CRBufListRemove(CRBufferDesc *buf_desc_head, Buffer removing_buff_id, CRBufferDesc **removed_buf_desc,
+                     bool *remove_head, Buffer *new_head_buff_id)
 {
     CRBufferDesc *buf_desc_ptr = buf_desc_head;
     CRBufferDesc *buf_prev = NULL;
@@ -171,7 +169,7 @@ void CRBufListRemove(CRBufferDesc *buf_desc_head, CommitSeqNo csn, CommandId cid
 
     *remove_head = false;
     for (;;) {
-        if (buf_desc_ptr->csn == csn && buf_desc_ptr->cid == cid) {
+        if (buf_desc_ptr->buf_id == removing_buff_id) {
             if (buf_desc_ptr->cr_buf_prev != InvalidBuffer) {
                 buf_prev = GetCRBufferDescriptor(buf_desc_ptr->cr_buf_prev);
                 buf_prev->cr_buf_next = buf_desc_ptr->cr_buf_next;
@@ -205,21 +203,24 @@ void CRBufListRemove(CRBufferDesc *buf_desc_head, CommitSeqNo csn, CommandId cid
     *removed_buf_desc = buf_desc_ptr;
 }
 
-CRBufferDesc *CRBufListFetch(int buf_id, CommitSeqNo query_csn, CommandId query_cid, int rsid)
+CRBufferDesc *CRBufListFetch(int buf_id, CommitSeqNo query_csn, CommandId query_cid, uint64 rsid)
 {
     CRBufferDesc *buf_desc_ptr = NULL;
 
     while (buf_id != InvalidBuffer) {
         buf_desc_ptr = GetCRBufferDescriptor(buf_id);
-
-        if (buf_desc_ptr->usable && query_csn == buf_desc_ptr->csn && query_cid == buf_desc_ptr->cid && rsid == buf_desc_ptr->rsid) {
-            ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("CRBufListFetch: fetch from cr buffer list found! buf_id %d, csn %ld, cid %d\n",
-                    buf_id, query_csn, query_cid))));
+        if (buf_desc_ptr->usable && query_csn == buf_desc_ptr->csn && query_cid == buf_desc_ptr->cid
+            && rsid == buf_desc_ptr->rsid) {
+            ereport(DEBUG3, (errmodule(MOD_PCR),
+                    (errmsg("CRBufListFetch: fetch from cr buffer list found! buf_id %d, csn %ld, cid %d, rsid %ld",
+                            buf_id, query_csn, query_cid, rsid))));
             return buf_desc_ptr;
         }
         buf_id = buf_desc_ptr->cr_buf_next;
     }
-    ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("CRBufListFetch: fetch from cr buffer list notfound! buf_id: %d, csn: %ld\n", buf_id, query_csn))));
+    ereport(DEBUG3, (errmodule(MOD_PCR),
+            (errmsg("CRBufListFetch: fetch from cr buffer list notfound! buf_id: %d, csn: %ld, rsid: %ld",
+                    buf_id, query_csn, rsid))));
     return NULL;
 }
 
@@ -260,12 +261,12 @@ int CRBufTableLookup(BufferTag *tag, uint32 hashcode)
  * Returns -1 on successful insertion. If a conflicting entry exists
  * already, returns the buffer ID in that entry.
  */
-int CRBufTableInsert(BufferTag *tag, uint32 hashcode, int buf_id)
+int CRBufTableInsert(BufferTag *tag, uint32 hashcode, int bufId)
 {
     CRBufEntry *result = NULL;
     bool found = false;
 
-    Assert(buf_id >= 0);            /* -1 is reserved for not-in-table */
+    Assert(bufId >= 0);            /* -1 is reserved for not-in-table */
 
     result = (CRBufEntry *)buf_hash_operate<HASH_ENTER>(t_thrd.storage_cxt.CRSharedBufHash, tag, hashcode, &found);
 
@@ -273,7 +274,7 @@ int CRBufTableInsert(BufferTag *tag, uint32 hashcode, int buf_id)
         return result->id;
     }
 
-    result->id = buf_id;
+    result->id = bufId;
     return -1;
 }
 
@@ -290,7 +291,8 @@ void CRBufTableRemove(BufferTag *tag, uint32 hashcode)
     result = (CRBufEntry *)buf_hash_operate<HASH_REMOVE>(t_thrd.storage_cxt.CRSharedBufHash, tag, hashcode, NULL);
 
     if (result == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmodule(MOD_PCR), (errmsg("shared buffer hash table corrupted."))));
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmodule(MOD_PCR), (errmsg("shared buffer hash table corrupted."))));
     }
 }
 
@@ -312,9 +314,8 @@ void CRBufTableInsertBuffDesc(BufferTag *tag, uint32 hashcode, CRBufferDesc *buf
     result->id = buff_desc->buf_id;
 }
 
-void CRBufTableRemoveWithCsn(BufferTag *tag, uint32 hashcode, CommitSeqNo csn, CommandId cid, CRBufferDesc **removed_buff_desc)
+void CRBufTableAndListRemove(BufferTag *tag, uint32 hashcode, Buffer removing_buff_id, CRBufferDesc **removed_buff_desc)
 {
-    CRBufEntry *result = NULL;
     Buffer buff_id;
     Buffer new_head_buff_id = InvalidBuffer;
     CRBufferDesc *buff_desc_head = NULL;
@@ -322,15 +323,16 @@ void CRBufTableRemoveWithCsn(BufferTag *tag, uint32 hashcode, CommitSeqNo csn, C
 
     buff_id = CRBufTableLookup(tag, hashcode);
     if (buff_id < 0) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmodule(MOD_PCR), (errmsg("shared buffer hash table corrupted."))));
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmodule(MOD_PCR), (errmsg("shared buffer hash table corrupted."))));
         return;
     }
 
     buff_desc_head = GetCRBufferDescriptor(buff_id);
 
-    CRBufListRemove(buff_desc_head, csn, cid, removed_buff_desc, &remove_head, &new_head_buff_id);
+    CRBufListRemove(buff_desc_head, removing_buff_id, removed_buff_desc, &remove_head, &new_head_buff_id);
 
-    if (remove_head == true) {
+    if (remove_head) {
         CRBufTableRemove(tag, hashcode);
         if (new_head_buff_id != InvalidBuffer)
             CRBufTableInsert(tag, hashcode, new_head_buff_id);
@@ -353,7 +355,7 @@ void InitCRBufPool(void)
     uint64 buffer_size;
 
     t_thrd.storage_cxt.CRBufferDescriptors = (CRBufferDescPadded *)CACHELINEALIGN(
-        ShmemInitStruct("CR Buffer Descriptors",CR_BUFFER_NUM * sizeof(CRBufferDescPadded) + PG_CACHE_LINE_SIZE,
+        ShmemInitStruct("CR Buffer Descriptors", CR_BUFFER_NUM * sizeof(CRBufferDescPadded) + PG_CACHE_LINE_SIZE,
         &found_cr_descs));
 
 #ifdef __aarch64__
@@ -377,7 +379,7 @@ void InitCRBufPool(void)
             buf->csn = InvalidCommitSeqNo;
             buf->cid = InvalidCommandId;
             buf->usable = false;
-			pg_atomic_init_u64(&buf->state, 0);
+            pg_atomic_init_u64(&buf->state, 0);
             buf->cr_buf_next = INVALID_BUFF;
             buf->cr_buf_prev = INVALID_BUFF;
             buf->lru_next = INVALID_BUFF;
@@ -421,7 +423,7 @@ CRBufferDesc *AllocCRBufferFromBucket(CRBufferDesc *buf_desc_head)
     CRBufferDesc *oldestCRBuf = buf_desc_head;
     CommitSeqNo minCsn = buf_desc_head->csn;
     CommandId minCid = buf_desc_head->cid;
-    int page_count = 1;
+    int pageCount = 1;
 
     while (buf_desc_ptr->cr_buf_next != InvalidBuffer) {
         buf_desc_ptr = GetCRBufferDescriptor(buf_desc_ptr->cr_buf_next);
@@ -432,9 +434,9 @@ CRBufferDesc *AllocCRBufferFromBucket(CRBufferDesc *buf_desc_head)
             minCid = buf_desc_ptr->cid;
             oldestCRBuf = buf_desc_ptr;
         }
-        page_count++;
+        pageCount++;
     }
-    if ((page_count >= PCRP_RESERVED_PAGE_COUNT) && (CRBUF_STATE_GET_REFCOUNT(oldestCRBuf->state) ==0)) {
+    if ((pageCount >= PCRP_RESERVED_PAGE_COUNT) && (CRBUF_STATE_GET_REFCOUNT(oldestCRBuf->state) == 0)) {
         return oldestCRBuf;
     }
     return NULL;
@@ -446,30 +448,27 @@ CRBufferDesc *ReadCRBuffer(Relation reln, BlockNumber block_num, CommitSeqNo csn
     CRBufferDesc *buf_desc = NULL;
     CRBufferDesc *buf_desc_res = NULL;
     int buf_id;
-    uint64 buf_state;
     LWLock *hashbucket_lock = NULL;
     uint32 hashcode;
     bool valid = false;
 
     RelationOpenSmgr(reln);
     UndoPersistence persistence = UndoPersistenceForRelation(reln);
-    int rsid = t_thrd.undo_cxt.zids[persistence];
-
+    uint64 rsid = t_thrd.proc->sessMemorySessionid;
     INIT_BUFFERTAG(new_tag, reln->rd_smgr->smgr_rnode.node, MAIN_FORKNUM, block_num);
-
     Assert(t_thrd.storage_cxt.CRSharedBufHash != NULL);
-
     hashcode = CRBufTableHashCode(&new_tag);
     hashbucket_lock = CRBufMappingPartitionLock(hashcode);
-
+    
     LWLockAcquire(hashbucket_lock, LW_SHARED);
-
     buf_id = CRBufTableLookup(&new_tag, hashcode);
-
     if (buf_id >= 0) {
         buf_desc = GetCRBufferDescriptor(buf_id);
-        ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("ReadCRBuffer: get from cr buffer hashtable found! (%u, %d) buf_id %d, csn %ld, cid %d\n",
-                    reln->rd_smgr->smgr_rnode.node.relNode, block_num, buf_id, buf_desc->csn, buf_desc->cid))));
+        ereport(DEBUG3, (errmodule(MOD_PCR),
+                (errmsg("ReadCRBuffer: get from cr buffer hashtable found! (%u, %d)"
+                         "buf_id %d, csn %ld, cid %d, rsid: %ld",
+                        reln->rd_smgr->smgr_rnode.node.relNode, block_num, buf_id, buf_desc->csn,
+                        buf_desc->cid, rsid))));
         buf_desc_res = CRBufListFetch(buf_id, csn, cid, rsid);
         if (buf_desc_res != NULL) {
             valid = PinCRBuffer(buf_desc_res);
@@ -483,20 +482,21 @@ CRBufferDesc *ReadCRBuffer(Relation reln, BlockNumber block_num, CommitSeqNo csn
     return NULL;
 }
 
-void InitCRBufDesc(CRBufferDesc *buf_desc, BufferTag new_tag, CommitSeqNo csn, CommandId cid, int rsid)
+void InitCRBufDesc(CRBufferDesc *buf_desc, BufferTag new_tag, CommitSeqNo csn, CommandId cid,
+                   uint64 rsid, bool reset_chain)
 {
-    uint64 buf_state;
-
     buf_desc->tag = new_tag;
     buf_desc->csn = csn;
     buf_desc->cid = cid;
     buf_desc->rsid = rsid;
     buf_desc->usable = true;
-	buf_state = pg_atomic_read_u64(&buf_desc->state);
-    buf_state &= ~(CRBM_VALID);
-    Assert(!(buf_state & CRBM_LOCKED));
-    buf_state &= ~(CRBM_LOCKED);
-    buf_state |= CRBM_TAG_VALID;
+    pg_atomic_init_u64(&buf_desc->state, 0);
+    if (reset_chain) {
+        buf_desc->cr_buf_next = INVALID_BUFF;
+        buf_desc->cr_buf_prev = INVALID_BUFF;
+        buf_desc->lru_next = INVALID_BUFF;
+        buf_desc->lru_prev = INVALID_BUFF;
+    }
 }
 
 void CRBufLruAddHead(CRBufferDesc *buff_desc)
@@ -542,11 +542,11 @@ void CRBufLruRemove(CRBufferDesc *buff_desc)
     lru_prev_buf_desc = GetCRBufferDescriptor(buff_desc->lru_prev);
     lru_next_buf_desc = GetCRBufferDescriptor(buff_desc->lru_next);
 
-    if (buff_desc->lru_prev != NULL) {
+    if (buff_desc->lru_prev) {
         lru_prev_buf_desc->lru_next = buff_desc->lru_next;
     }
 
-    if (buff_desc->lru_next != NULL) {
+    if (buff_desc->lru_next) {
         lru_next_buf_desc->lru_prev = buff_desc->lru_prev;
     }
 
@@ -570,45 +570,38 @@ void CRBufLruRefresh(CRBufferDesc *buff_desc)
 
 CRBufferDesc *CRBufferRecycle()
 {
-    Buffer lru_last = g_instance.crbuf_cxt.cr_lru_last;
+    Buffer lru_last = InvalidBuffer;
     CRBufferDesc *buff_desc = NULL;
-    uint64 buff_state;
     CRBufferDesc *removed_buff_desc = NULL;
 
     LWLockAcquire(g_instance.crbuf_cxt.cr_buf_lru_lock, LW_EXCLUSIVE);
+    lru_last = g_instance.crbuf_cxt.cr_lru_last;
     while (lru_last != InvalidBuffer) {
         buff_desc = GetCRBufferDescriptor(lru_last);
-        if (CRBUF_STATE_GET_REFCOUNT(buff_desc->state) == 0) {
-            if (CRBUF_STATE_GET_REFCOUNT(buff_desc->state) > 0) {
-                lru_last = buff_desc->lru_prev;
-                CRBufLruRefresh(buff_desc);
-                continue;
-            }
-
-            uint32 hashcode = CRBufTableHashCode(&buff_desc->tag);
-            LWLock *hashbucket_lock = CRBufMappingPartitionLock(hashcode);
-            LWLockAcquire(hashbucket_lock, LW_EXCLUSIVE);
-
-            if (CRBUF_STATE_GET_REFCOUNT(buff_desc->state) > 0) {
-                LWLockRelease(hashbucket_lock);
-                lru_last = buff_desc->lru_prev;
-                continue;
-            }
-
-            /* remove buff_desc from BufTable & LRU */
-            CRBufTableRemoveWithCsn(&buff_desc->tag, hashcode, buff_desc->csn, buff_desc->cid, &removed_buff_desc);
-            CRBufLruRemove(removed_buff_desc);
-            LWLockRelease(hashbucket_lock);
-
-            CLEAR_BUFFERTAG(removed_buff_desc->tag);
-            removed_buff_desc->csn = InvalidCommitSeqNo;
-            removed_buff_desc->usable = false;
-			pg_atomic_init_u64(&removed_buff_desc->state, 0);
-            removed_buff_desc->cr_buf_next = InvalidBuffer;
-            removed_buff_desc->cr_buf_prev = InvalidBuffer;
-            break;
+        if (CRBUF_STATE_GET_REFCOUNT(buff_desc->state) > 0) {
+            lru_last = buff_desc->lru_prev;
+            CRBufLruRefresh(buff_desc);
+            continue;
         }
-        lru_last = buff_desc->lru_prev;
+
+        uint32 hashcode = CRBufTableHashCode(&buff_desc->tag);
+        LWLock *hashbucket_lock = CRBufMappingPartitionLock(hashcode);
+        LWLockAcquire(hashbucket_lock, LW_EXCLUSIVE);
+
+        if (CRBUF_STATE_GET_REFCOUNT(buff_desc->state) > 0) {
+            LWLockRelease(hashbucket_lock);
+            lru_last = buff_desc->lru_prev;
+            continue;
+        }
+
+        ereport(DEBUG3, (errmodule(MOD_PCR),
+                (errmsg("CRBufTableAndListRemove: (%u, %d) buf_id %d, buf_csn %ld, buf_cid %d, buf_rsid %ld",
+                        (buff_desc->tag).rnode.relNode, (buff_desc->tag).blockNum, buff_desc->buf_id, buff_desc->csn,
+                        buff_desc->cid, buff_desc->rsid))));
+        /* remove buff_desc from BufTable */
+        CRBufTableAndListRemove(&buff_desc->tag, hashcode, buff_desc->buf_id, &removed_buff_desc);
+        LWLockRelease(hashbucket_lock);
+        break;
     }
 
     if (lru_last == InvalidBuffer) {
@@ -616,6 +609,7 @@ CRBufferDesc *CRBufferRecycle()
         return NULL;
     }
 
+    CRBufLruRemove(removed_buff_desc);
     LWLockRelease(g_instance.crbuf_cxt.cr_buf_lru_lock);
     return removed_buff_desc;
 }
@@ -624,7 +618,7 @@ CRBufferDesc *CRBufferAllocOrRecycle(void)
 {
     CRBufferDesc *buff_desc = NULL;
 
-    for(;;) {
+    for (;;) {
         buff_desc = CRBufferAllocHwm();
         if (buff_desc != NULL) {
             break;
@@ -645,13 +639,13 @@ CRBufferDesc *AllocCRBuffer(Relation reln, ForkNumber forkNum, BlockNumber block
     CRBufferDesc *buf_desc_head = NULL;
     CRBufferDesc *buf_desc = NULL;
     int buf_id;
-    bool found = false;
     LWLock *hashbucket_lock = NULL;
     uint32 hashcode;
     bool valid;
     RelFileNode rel_file_node = reln->rd_node;
     UndoPersistence persistence = UndoPersistenceForRelation(reln);
-    int rsid = t_thrd.undo_cxt.zids[persistence];
+    uint64 rsid = t_thrd.proc->sessMemorySessionid;
+    uint64 buf_state;
 
     INIT_BUFFERTAG(new_tag, rel_file_node, forkNum, blockNum);
 
@@ -668,29 +662,42 @@ CRBufferDesc *AllocCRBuffer(Relation reln, ForkNumber forkNum, BlockNumber block
         buf_desc = AllocCRBufferFromBucket(buf_desc_head);
         if (buf_desc != NULL) {
             Assert(CRBUF_STATE_GET_REFCOUNT(buf_desc->state) ==0);
-            ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("AllocCRBuffer: alloc from bucket! (%u,%d,%d) buf_id %d, csn %ld, cid %d\n",
-                    rel_file_node.relNode, forkNum, blockNum, buf_id, buf_desc->csn, buf_desc->cid))));
-            InitCRBufDesc(buf_desc, new_tag, csn, cid, rsid);
+            ereport(DEBUG3, (errmodule(MOD_PCR),
+                    (errmsg("AllocCRBuffer: alloc from bucket! (%u,%d,%d) buf_id %d, csn %ld, cid %d, rsid %ld",
+                            rel_file_node.relNode, forkNum, blockNum, buf_desc->buf_id,
+                            buf_desc->csn, buf_desc->cid, rsid))));
+            InitCRBufDesc(buf_desc, new_tag, csn, cid, rsid, false);
+            ereport(DEBUG3, (errmodule(MOD_PCR),
+                    (errmsg("InitBufDesc: (%u, %d) buf_id %d, csn %ld, cid %d, rsid %ld",
+                            rel_file_node.relNode, blockNum, buf_desc->buf_id, buf_desc->csn,
+                            buf_desc->cid, buf_desc->rsid))));
+            Assert(CRBUF_STATE_GET_REFCOUNT(buf_desc->state) == 0);
             valid = PinCRBuffer(buf_desc);
+            buf_state = LockCRBufHdr(buf_desc);
 
+            LWLockRelease(hashbucket_lock);
             LWLockAcquire(g_instance.crbuf_cxt.cr_buf_lru_lock, LW_EXCLUSIVE);
             CRBufLruRefresh(buf_desc);
             LWLockRelease(g_instance.crbuf_cxt.cr_buf_lru_lock);
 
-            LWLockRelease(hashbucket_lock);
             return buf_desc;
         }
     }
     LWLockRelease(hashbucket_lock);
     /* Alloc CR buffer from SHM or recycle */
     CRBufferDesc *new_buf_desc = CRBufferAllocOrRecycle();
-    Assert(new_buf_desc);
+    Assert(new_buf_desc != NULL);
+    Assert(CRBUF_STATE_GET_REFCOUNT(new_buf_desc->state) == 0);
 
-    ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("AllocCRBuffer: alloc from shm or recycle! (%u,%d,%d) buf_id %d, csn %ld, cid %d\n",
-            rel_file_node.relNode, forkNum, blockNum, new_buf_desc->buf_id, new_buf_desc->csn, new_buf_desc->cid))));
+    ereport(DEBUG3, (errmodule(MOD_PCR),
+            (errmsg("AllocCRBuffer: alloc from shm or recycle! (%u, %d) buf_id %d, csn %ld, cid %d, rsid %ld",
+            (new_buf_desc->tag).rnode.relNode, (new_buf_desc->tag).blockNum,
+            new_buf_desc->buf_id, new_buf_desc->csn,
+            new_buf_desc->cid, rsid))));
 
-    InitCRBufDesc(new_buf_desc, new_tag, csn, cid, rsid);
+    InitCRBufDesc(new_buf_desc, new_tag, csn, cid, rsid, true);
     valid = PinCRBuffer(new_buf_desc);
+    buf_state = LockCRBufHdr(new_buf_desc);
 
     LWLockAcquire(hashbucket_lock, LW_EXCLUSIVE);
     CRBufTableInsertBuffDesc(&new_tag, hashcode, new_buf_desc);
@@ -706,9 +713,7 @@ CRBufferDesc *AllocCRBuffer(Relation reln, ForkNumber forkNum, BlockNumber block
 CRBufferDesc *CRReadOrAllocBuffer(Relation reln, BlockNumber block_num, CommitSeqNo csn, CommandId cid)
 {
     CRBufferDesc *buf_desc = NULL;
-    bool foundPtr = FALSE;
     buf_desc = ReadCRBuffer(reln, block_num, csn, cid);
-
     if (buf_desc == NULL) {
         buf_desc = AllocCRBuffer(reln, MAIN_FORKNUM, block_num, csn, cid);
     }
@@ -717,53 +722,53 @@ CRBufferDesc *CRReadOrAllocBuffer(Relation reln, BlockNumber block_num, CommitSe
 
 void CRBufferUnused(Buffer base_buffer)
 {
-	BufferTag buftag;
-	BufferDesc *base_buf_desc = NULL;
-	int buf_id;
-	uint64 buf_state;
-	uint64 old_buf_state;
-	LWLock *hashbucket_lock = NULL;
-	uint32 hashcode;
-	bool valid = false;
+    BufferTag buftag;
+    BufferDesc *base_buf_desc = NULL;
+    int buf_id;
+    uint64 buf_state;
+    LWLock *hashbucket_lock = NULL;
+    uint32 hashcode;
 
-	Assert(t_thrd.storage_cxt.CRSharedBufHash != NULL);
+    Assert(t_thrd.storage_cxt.CRSharedBufHash != NULL);
 
-	base_buf_desc = GetBufferDescriptor(base_buffer -1);
-	buftag = base_buf_desc->tag;
+    base_buf_desc = GetBufferDescriptor(base_buffer -1);
+    buftag = base_buf_desc->tag;
 
-	hashcode = CRBufTableHashCode(&buftag);
-	hashbucket_lock = CRBufMappingPartitionLock(hashcode);
+    hashcode = CRBufTableHashCode(&buftag);
+    hashbucket_lock = CRBufMappingPartitionLock(hashcode);
+    LWLockAcquire(hashbucket_lock, LW_SHARED);
+    buf_id = CRBufTableLookup(&buftag, hashcode);
+    if (buf_id >= 0) {
+        CRBufferDesc *buf_desc = NULL;
+        while (buf_id != InvalidBuffer) {
+            buf_desc = GetCRBufferDescriptor(buf_id);
 
-	LWLockAcquire(hashbucket_lock, LW_SHARED);
+            buf_state = LockCRBufHdr(buf_desc);
+            ereport(DEBUG3, (errmodule(MOD_PCR),
+                    (errmsg("CRBufferUnused: buf_id %d, page (%u,%d), csn %ld, cid %d, rsid %ld",
+                            buf_desc->buf_id, (buf_desc->tag).rnode.relNode, (buf_desc->tag).blockNum,
+                            buf_desc->csn, buf_desc->cid, buf_desc->rsid))));
+            if (buf_desc->usable == true) {
+                buf_desc->usable = false;
+            }
+            UnlockCRBufHdr(buf_desc, buf_state);
+            buf_id = buf_desc->cr_buf_next;
+        }
+    }
 
-	buf_id = CRBufTableLookup(&buftag, hashcode);
-
-	if (buf_id >= 0) {
-		CRBufferDesc *buf_desc = NULL;
-		while (buf_id != InvalidBuffer) {
-			buf_desc = GetCRBufferDescriptor(buf_id);
-
-			buf_state = LockCRBufHdr(buf_desc);
-            ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("CRBufferUnused: buf_id %d, page (%u,%d), csn %ld, cid %d\n",
-                buf_desc->buf_id, (buf_desc->tag).rnode.relNode, (buf_desc->tag).blockNum, buf_desc->csn, buf_desc->cid))));
-
-			if (buf_desc->usable == true) {
-				buf_desc->usable = false;
-			}
-			UnlockCRBufHdr(buf_desc, buf_state);
-			buf_id = buf_desc->cr_buf_next;
-		}
-	}
-
-	LWLockRelease(hashbucket_lock);
+    LWLockRelease(hashbucket_lock);
 }
 
 void PrintCRDesc(CRBufferDesc *buf)
 {
     if (buf->csn != InvalidCommitSeqNo) {
-		fprintf(stderr, "buf_id %d, page (%u,%d), csn %ld, cid %d, cr_buf_next %d\n",
-    	        buf->buf_id, (buf->tag).rnode.relNode, (buf->tag).blockNum, buf->csn, buf->cid, buf->cr_buf_next);
-	}
+        ereport(DEBUG5, (errmodule(MOD_PCR),
+                (errmsg("page (%u, %d), buf_id %d, page (%u,%d), csn %ld, cid %d, usable: %d, "
+                        "rsid %ld, cr_buf_next %d, cr_buf_prev %d, lru_next %d, lru_prev %d",
+                        (buf->tag).rnode.relNode, (buf->tag).blockNum, buf->buf_id, buf->csn,
+                        buf->cid, buf->usable, buf->rsid, buf->cr_buf_next, buf->cr_buf_prev,
+                        buf->lru_next, buf->lru_prev))));
+    }
 }
 
 void CRPoolScan()
@@ -771,7 +776,7 @@ void CRPoolScan()
     CRBufferDesc *buf = NULL;
     int i;
 
-    fprintf(stderr, "HashTable Info:\n");
+    ereport(DEBUG5, (errmodule(MOD_PCR), (errmsg("HashTable Info:"))));
     for (i = 1; i < CR_BUFFER_NUM; i++) {
         buf = GetCRBufferDescriptor(i);
         if (buf->cr_buf_prev != InvalidBuffer) {
@@ -784,12 +789,168 @@ void CRPoolScan()
         }
     }
 
-    fprintf(stderr, "LRU Info:\n");
-    Buffer lru_cursor = g_instance.crbuf_cxt.cr_lru_first;
+    ereport(DEBUG5, (errmodule(MOD_PCR), (errmsg("LRU Info:"))));
+    Buffer lru_cursor = g_instance.crbuf_cxt.cr_lru_last;
     while (lru_cursor != InvalidBuffer) {
         buf = GetCRBufferDescriptor(lru_cursor);
-		fprintf(stderr, "%d ", lru_cursor);
-        lru_cursor = buf->lru_next;
+        ereport(DEBUG5, (errmodule(MOD_PCR),
+                (errmsg("page (%u, %d), buf_id %d, csn %ld, cid %d, usable %d,"
+                        "rsid %ld, cr_buf_next %d, cr_buf_prev %d, lru_next %d, lru_prev %d",
+                        (buf->tag).rnode.relNode, (buf->tag).blockNum, buf->buf_id, buf->csn, buf->cid, buf->usable,
+                        buf->rsid, buf->cr_buf_next, buf->cr_buf_prev, buf->lru_next, buf->lru_prev))));
+        lru_cursor = buf->lru_prev;
     }
-	fprintf(stderr, "\n\n");
+}
+
+static void ParseUBtreeCRPageHeader(const PageHeader page, int blkno)
+{
+    bool checkSumMatched = false;
+    uint64 freeSpace = 0;
+    if (CheckPageZeroCases(page)) {
+        uint16 checksum = pg_checksum_page((char*)page, (BlockNumber)blkno);
+        checkSumMatched = (checksum == page->pd_checksum);
+    }
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("page information of block %d, pd_lsn: %X/%X,  pd_checksum: 0x%X, verify %s",
+                    blkno, (uint32)(PageGetLSN(page) >> 32), (uint32)PageGetLSN(page), page->pd_checksum,
+                    checkSumMatched ? "success" : "fail"))));
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("pd_flags: PD_HAS_FREE_LINES %d, PD_PAGE_FULL %d, PD_ALL_VISIBLE %d, "
+                    "PD_COMPRESSED_PAGE %d, PD_LOGICAL_PAGE %d, PD_ENCRYPT_PAGE %d",
+                    PageHasFreeLinePointers(page), PageIsFull(page), PageIsAllVisible(page),
+                    PageIsCompressed(page), PageIsLogical(page), PageIsEncrypt(page)))));
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("pd_lower: %u, %s", page->pd_lower, PageIsEmpty(page) ? "empty" : "non-empty"))));
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("pd_upper: %u, %s", page->pd_upper, PageIsNew(page) ? "new" : "old"))));
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("pd_special: %u, size %u", page->pd_special, PageGetSpecialSize(page)))));
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("Page size & version: %u, %u",
+            (uint16)PageGetPageSize(page), (uint16)PageGetPageLayoutVersion(page)))));
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("pd_xid_base: %lu, pd_multi_base: %lu",
+                    ((HeapPageHeader)(page))->pd_xid_base, ((HeapPageHeader)(page))->pd_multi_base))));
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("pd_prune_xid: %lu",
+            ((HeapPageHeader)(page))->pd_prune_xid + ((HeapPageHeader)(page))->pd_xid_base))));
+}
+
+static void ParseUbtreeCRTdslot(const char *page)
+{
+    unsigned short tdCount;
+    PageHeaderData *ubtreePCRPage = (PageHeaderData *)page;
+    tdCount = UBTreePageGetTDSlotCount(ubtreePCRPage);
+    ereport(DEBUG5, (errmodule(MOD_PCR), (errmsg("UBtree CR Page TD information, nTDSlots = %hu", tdCount))));
+    for (int i = 0; i < tdCount; i++) {
+        UBTreeTD thisTrans = UBTreePCRGetTD(page, i + 1);
+        ereport(DEBUG5, (errmodule(MOD_PCR),
+                (errmsg("TD Slot #%d, xid:%ld, urp:%ld, TD_FROZEN:%d, TD_ACTIVE:%d, "
+                "TD_DELETE:%d, TD_COMMITED:%d, TD_CSN:%d",
+                i + 1, thisTrans->xactid, thisTrans->undoRecPtr, UBTreePCRTDIsFrozen(thisTrans),
+                UBTreePCRTDIsActive(thisTrans), UBTreePCRTDIsDelete(thisTrans), UBTreePCRTDIsCommited(thisTrans),
+                UBTreePCRTDHasCsn(thisTrans)))));
+    }
+}
+
+void ParsePageHeader(const PageHeader page, int blkno)
+{
+    ParseUBtreeCRPageHeader(page, blkno);
+}
+
+static void ParseSpecialData(const char* buffer)
+{
+    PageHeader page = (PageHeader)buffer;
+
+    UBTPCRPageOpaque uPCRopaque;
+    
+    uPCRopaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("ubtree PCR index special information:\nleft sibling: %u\n right sibling: %u\n",
+                    uPCRopaque->btpo_prev, uPCRopaque->btpo_next))));
+    if (!P_ISDELETED(uPCRopaque)) {
+        ereport(DEBUG5, (errmodule(MOD_PCR),
+                (errmsg("ubtree tree level: %u", uPCRopaque->btpo.level))));
+    } else {
+        ereport(DEBUG5, (errmodule(MOD_PCR),
+                (errmsg("next txid (deleted): %u", ((UBTPCRPageOpaque)uPCRopaque)->btpo.xact_old))));
+    }
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("ubtree crpage flag, BTP_LEAF: %u, BTP_INTERNAL: %u, BTP_ROOT: %u, BTP_META: %u, BTP_DELETED: %u, "
+                    "BTP_HALF_DEAD: %u, BTP_HAS_GARBAGE: %u",
+                    P_ISLEAF(uPCRopaque), !P_ISLEAF(uPCRopaque), P_ISROOT(uPCRopaque), P_ISMETA(uPCRopaque),
+                    P_ISDELETED(uPCRopaque), P_ISHALFDEAD(uPCRopaque), P_HAS_GARBAGE(uPCRopaque)))));
+    ereport(DEBUG5, (errmodule(MOD_PCR),
+            (errmsg("cycle ID: %u, last delete xid: %lu, last commit xid: %lu, td_count: %u, active tuples: %u",
+                    uPCRopaque->btpo_cycleid, uPCRopaque->last_delete_xid, uPCRopaque->last_commit_xid,
+                    uPCRopaque->td_count, uPCRopaque->activeTupleCount))));
+}
+
+
+static void ParseUBTreeDataPage(const char* buffer, int blkno)
+{
+    const PageHeader page = (const PageHeader)buffer;
+    int i;
+    int nline;
+    UBTreeItemId lp;
+    Item item;
+    RowPtr *rowptr;
+
+    if (blkno == 0) {
+        BTMetaPageData* metad = BTPageGetMeta(page);
+        ereport(DEBUG5, (errmodule(MOD_PCR),
+                (errmsg("Meta information, magic number: %u, PCR version: %u, Block Number of root page: %u, "
+                        "Level of root page: %u, Blknum of fast root page: %u, Level of fast root page: %u",
+                        metad->btm_magic, metad->btm_version, metad->btm_root, metad->btm_level,
+                        metad->btm_fastroot, metad->btm_fastlevel))));
+        return;
+    }
+
+    nline = UBTPCRPageGetMaxOffsetNumber((Page)page); 
+    for (i = FirstOffsetNumber; i <= nline; i++) {
+        lp = UBTreePCRGetRowPtr(page, i);
+        if (ItemIdIsUsed(lp)) {
+            ereport(DEBUG5, (errmodule(MOD_PCR),
+                    (errmsg("Tuple #%d is used, IsNormal: %u, IsFrozen: %u, IsDead: %u, IsRedirect: %u",
+                            i, ItemIdIsNormal(lp), IndexItemIdIsFrozen(lp),
+                            ItemIdIsDead(lp), ItemIdIsRedirected(lp)))));
+        } else {
+            ereport(DEBUG5, (errmodule(MOD_PCR), (errmsg("Tuple #%d is unused", i))));
+        }
+    }
+
+    /* compress meta data or index special data */
+    ParseSpecialData(buffer);
+
+    return;
+}
+
+void ParseCRPage(const char* crpage, int blkno)
+{
+    const PageHeader page = (const PageHeader)crpage;
+    uint16 headersize;
+    if (CRPageIsNew(page)) {
+        ereport(DEBUG5, (errmodule(MOD_PCR),
+                (errmsg("CR page is new page, blkno(%d)", blkno))));
+        ParsePageHeader(page, blkno);
+        return;
+    }
+
+    headersize = GetPageHeaderSize(page);
+    if (page->pd_lower < headersize || page->pd_lower > page->pd_upper || page->pd_upper > page->pd_special ||
+        page->pd_special > BLCKSZ || page->pd_special != MAXALIGN(page->pd_special)) {
+        ereport(DEBUG5, (errmodule(MOD_PCR),
+                (errmsg("The page data is corrupted, corrupted page pointers: lower = %u, upper = %u, special = %u",
+                        page->pd_lower, page->pd_upper, page->pd_special))));
+        return;
+    }
+
+    ParsePageHeader(page, blkno);
+
+    ParseUbtreeCRTdslot(crpage);
+
+    ParseUBTreeDataPage(crpage, blkno);
+
+    return;
 }

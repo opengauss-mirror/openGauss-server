@@ -37,7 +37,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_modif
  a      | integer |                         | plain   |              | 
  b      | integer | not null AUTO_INCREMENT | plain   |              | 
 Indexes:
-    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -50,8 +50,8 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_modify_b_k
  a      | integer              |           | plain    |              | 
  b      | character varying(8) | not null  | extended |              | 
 Indexes:
-    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
-    "test_at_modify_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "test_at_modify_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -63,8 +63,8 @@ ALTER TABLE test_at_modify MODIFY b varchar(8) CHECK (b < 'a');
  a      | integer              |           | plain    |              | 
  b      | character varying(8) | not null  | extended |              | 
 Indexes:
-    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
-    "test_at_modify_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "test_at_modify_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "test_at_modify_b_check" CHECK (b::text < 'a'::text)
 Has OIDs: no
@@ -78,8 +78,8 @@ ALTER TABLE test_at_modify MODIFY b varchar(8) COLLATE "POSIX";
  a      | integer              |                        | plain    |              | 
  b      | character varying(8) | collate POSIX not null | extended |              | 
 Indexes:
-    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
-    "test_at_modify_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "test_at_modify_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "test_at_modify_b_check" CHECK (b::text < 'a'::text)
 Has OIDs: no
@@ -93,8 +93,8 @@ ALTER TABLE test_at_modify MODIFY b varchar(8) GENERATED ALWAYS AS (a+1) STORED;
  a      | integer              |                                               | plain    |              | 
  b      | character varying(8) | not null generated always as ((a + 1)) stored | extended |              | 
 Indexes:
-    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
-    "test_at_modify_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "test_at_modify_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "test_at_modify_b_check" CHECK (b::text < 'a'::text)
 Has OIDs: no
@@ -108,25 +108,25 @@ ALTER TABLE test_at_modify MODIFY b int NOT NULL;
  a      | integer |           | plain   |              | 
  b      | integer | not null  | plain   |              | 
 Indexes:
-    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
-    "test_at_modify_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_modify_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "test_at_modify_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "test_at_modify_b_check" CHECK (b::text < 'a'::text)
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
 select pg_get_tabledef('test_at_modify'::regclass);
-                                                     pg_get_tabledef                                                     
--------------------------------------------------------------------------------------------------------------------------
- SET search_path = atbdb_ustore_schema;                                                                                 +
- CREATE TABLE test_at_modify (                                                                                          +
-     a integer,                                                                                                         +
-     b integer NOT NULL,                                                                                                +
-     CONSTRAINT test_at_modify_b_check CHECK (((b)::text < 'a'::text))                                                  +
- )                                                                                                                      +
- WITH (orientation=row, storage_type=ustore, compression=no);                                                           +
- ALTER TABLE test_at_modify ADD CONSTRAINT test_at_modify_b_key UNIQUE USING ubtree (b) WITH (storage_type=ustore);     +
- ALTER TABLE test_at_modify ADD CONSTRAINT test_at_modify_pkey PRIMARY KEY USING ubtree  (b) WITH (storage_type=ustore);
+                                                             pg_get_tabledef                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = atbdb_ustore_schema;                                                                                                 +
+ CREATE TABLE test_at_modify (                                                                                                          +
+     a integer,                                                                                                                         +
+     b integer NOT NULL,                                                                                                                +
+     CONSTRAINT test_at_modify_b_check CHECK (((b)::text < 'a'::text))                                                                  +
+ )                                                                                                                                      +
+ WITH (orientation=row, storage_type=ustore, compression=no);                                                                           +
+ ALTER TABLE test_at_modify ADD CONSTRAINT test_at_modify_b_key UNIQUE USING ubtree (b) WITH (storage_type=ustore, index_type=rcr);     +
+ ALTER TABLE test_at_modify ADD CONSTRAINT test_at_modify_pkey PRIMARY KEY USING ubtree  (b) WITH (storage_type=ustore, index_type=rcr);
 (1 row)
 
 INSERT INTO test_at_modify VALUES(1,1);
@@ -311,18 +311,18 @@ SELECT b FROM test_at_modify_constr ORDER BY 1;
 (5 rows)
 
 select pg_get_tabledef('test_at_modify_constr'::regclass);
-                                                            pg_get_tabledef                                                            
----------------------------------------------------------------------------------------------------------------------------------------
- SET search_path = atbdb_ustore_schema;                                                                                               +
- CREATE TABLE test_at_modify_constr (                                                                                                 +
-     a integer,                                                                                                                       +
-     b integer NOT NULL,                                                                                                              +
-     CONSTRAINT t_at_m_check_1 CHECK (((b)::bigint = a)),                                                                             +
-     CONSTRAINT t_at_m_check CHECK (((b)::bigint < 5))                                                                                +
- )                                                                                                                                    +
- WITH (orientation=row, storage_type=ustore, compression=no);                                                                         +
- ALTER TABLE test_at_modify_constr ADD CONSTRAINT test_at_modify_constr_b_key UNIQUE USING ubtree (b) WITH (storage_type=ustore);     +
- ALTER TABLE test_at_modify_constr ADD CONSTRAINT test_at_modify_constr_pkey PRIMARY KEY USING ubtree  (b) WITH (storage_type=ustore);
+                                                                    pg_get_tabledef                                                                    
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = atbdb_ustore_schema;                                                                                                               +
+ CREATE TABLE test_at_modify_constr (                                                                                                                 +
+     a integer,                                                                                                                                       +
+     b integer NOT NULL,                                                                                                                              +
+     CONSTRAINT t_at_m_check_1 CHECK (((b)::bigint = a)),                                                                                             +
+     CONSTRAINT t_at_m_check CHECK (((b)::bigint < 5))                                                                                                +
+ )                                                                                                                                                    +
+ WITH (orientation=row, storage_type=ustore, compression=no);                                                                                         +
+ ALTER TABLE test_at_modify_constr ADD CONSTRAINT test_at_modify_constr_b_key UNIQUE USING ubtree (b) WITH (storage_type=ustore, index_type=rcr);     +
+ ALTER TABLE test_at_modify_constr ADD CONSTRAINT test_at_modify_constr_pkey PRIMARY KEY USING ubtree  (b) WITH (storage_type=ustore, index_type=rcr);
 (1 row)
 
 ALTER TABLE test_at_modify_constr MODIFY b int NOT NULL REFERENCES test_at_ref (a); -- ERROR
@@ -1077,7 +1077,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_at_chang
  a      | integer |                         | plain   |              | 
  b1     | integer | not null AUTO_INCREMENT | plain   |              | 
 Indexes:
-    "test_at_change_pkey" PRIMARY KEY, ubtree (b1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_change_pkey" PRIMARY KEY, ubtree (b1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -1090,8 +1090,8 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_at_change_b_k
  a      | integer              |           | plain    |              | 
  b      | character varying(8) | not null  | extended |              | 
 Indexes:
-    "test_at_change_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
-    "test_at_change_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_change_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "test_at_change_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
@@ -1103,8 +1103,8 @@ ALTER TABLE test_at_change CHANGE b b1 varchar(8) CHECK (b1 < 'a');
  a      | integer              |           | plain    |              | 
  b1     | character varying(8) | not null  | extended |              | 
 Indexes:
-    "test_at_change_pkey" PRIMARY KEY, ubtree (b1) WITH (storage_type=ustore) TABLESPACE pg_default
-    "test_at_change_b_key" UNIQUE CONSTRAINT, ubtree (b1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_change_pkey" PRIMARY KEY, ubtree (b1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "test_at_change_b_key" UNIQUE CONSTRAINT, ubtree (b1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "test_at_change_b1_check" CHECK (b1::text < 'a'::text)
 Has OIDs: no
@@ -1118,8 +1118,8 @@ ALTER TABLE test_at_change CHANGE b1 b varchar(8) COLLATE "POSIX";
  a      | integer              |                        | plain    |              | 
  b      | character varying(8) | collate POSIX not null | extended |              | 
 Indexes:
-    "test_at_change_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
-    "test_at_change_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_change_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "test_at_change_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "test_at_change_b1_check" CHECK (b::text < 'a'::text)
 Has OIDs: no
@@ -1133,8 +1133,8 @@ ALTER TABLE test_at_change CHANGE b b1 varchar(8) GENERATED ALWAYS AS (a+1) STOR
  a      | integer              |                                               | plain    |              | 
  b1     | character varying(8) | not null generated always as ((a + 1)) stored | extended |              | 
 Indexes:
-    "test_at_change_pkey" PRIMARY KEY, ubtree (b1) WITH (storage_type=ustore) TABLESPACE pg_default
-    "test_at_change_b_key" UNIQUE CONSTRAINT, ubtree (b1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_change_pkey" PRIMARY KEY, ubtree (b1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "test_at_change_b_key" UNIQUE CONSTRAINT, ubtree (b1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "test_at_change_b1_check" CHECK (b1::text < 'a'::text)
 Has OIDs: no
@@ -1148,23 +1148,23 @@ ALTER TABLE test_at_change CHANGE b1 b int NOT NULL;
  a      | integer |           | plain   |              | 
  b      | integer | not null  | plain   |              | 
 Indexes:
-    "test_at_change_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
-    "test_at_change_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "test_at_change_pkey" PRIMARY KEY, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "test_at_change_b_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "test_at_change_b1_check" CHECK (b::text < 'a'::text)
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
 select pg_get_tabledef('test_at_change'::regclass);
-                                                     pg_get_tabledef                                                     
--------------------------------------------------------------------------------------------------------------------------
- SET search_path = atbdb_ustore_schema;                                                                                 +
- CREATE TABLE test_at_change (                                                                                          +
-     a integer,                                                                                                         +
-     b integer NOT NULL,                                                                                                +
-     CONSTRAINT test_at_change_b1_check CHECK (((b)::text < 'a'::text))                                                 +
- )                                                                                                                      +
- WITH (orientation=row, storage_type=ustore, compression=no);                                                           +
+                                                             pg_get_tabledef                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = atbdb_ustore_schema;                                                                                                 +
+ CREATE TABLE test_at_change (                                                                                                          +
+     a integer,                                                                                                                         +
+     b integer NOT NULL,                                                                                                                +
+     CONSTRAINT test_at_change_b1_check CHECK (((b)::text < 'a'::text))                                                                 +
+ )                                                                                                                                      +
+ WITH (orientation=row, storage_type=ustore, compression=no);                                                                           +
 --?.*
 --?.*
 (1 row)
@@ -2041,7 +2041,7 @@ DETAIL:  cannot modify or change a partition key column as a generated column
  a      | integer | not null default 0 | plain   |              | 
  b      | integer | not null           | plain   |              | 
 Indexes:
-    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(a)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -2055,7 +2055,7 @@ ALTER TABLE pt_at_modify MODIFY b int8 NULL;
  a      | integer | not null default 0 | plain   |              | 
  b      | bigint  | not null           | plain   |              | 
 Indexes:
-    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(a)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -2069,7 +2069,7 @@ ALTER TABLE pt_at_modify MODIFY b int8 DEFAULT 0;
  a      | integer | not null default 0 | plain   |              | 
  b      | bigint  | not null default 0 | plain   |              | 
 Indexes:
-    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(a)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -2084,7 +2084,7 @@ NOTICE:  ALTER TABLE will create implicit sequence "pt_at_modify_b_seq" for seri
  a      | integer | not null default 0      | plain   |              | 
  b      | integer | not null AUTO_INCREMENT | plain   |              | 
 Indexes:
-    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(a)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -2099,8 +2099,8 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "pt_at_modify_b_tab
  a      | integer  | not null default 0 | plain   |              | 
  b      | smallint | not null           | plain   |              | 
 Indexes:
-    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
-    "pt_at_modify_b_tableoid_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "pt_at_modify_b_tableoid_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(a)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -2114,8 +2114,8 @@ ALTER TABLE pt_at_modify MODIFY b int CHECK (b < 10000);
  a      | integer | not null default 0 | plain   |              | 
  b      | integer | not null           | plain   |              | 
 Indexes:
-    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
-    "pt_at_modify_b_tableoid_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "pt_at_modify_b_tableoid_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "pt_at_modify_b_check" CHECK (b < 10000)
 Partition By RANGE(a)
@@ -2131,8 +2131,8 @@ ALTER TABLE pt_at_modify MODIFY b varchar(8) COLLATE "POSIX";
  a      | integer              | not null default 0     | plain    |              | 
  b      | character varying(8) | collate POSIX not null | extended |              | 
 Indexes:
-    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
-    "pt_at_modify_b_tableoid_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "pt_at_modify_b_tableoid_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "pt_at_modify_b_check" CHECK (b::bigint < 10000)
 Partition By RANGE(a)
@@ -2148,8 +2148,8 @@ ALTER TABLE pt_at_modify MODIFY b int8 GENERATED ALWAYS AS (a+1) STORED;
  a      | integer | not null default 0                            | plain   |              | 
  b      | bigint  | not null generated always as ((a + 1)) stored | plain   |              | 
 Indexes:
-    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
-    "pt_at_modify_b_tableoid_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "pt_at_modify_b_tableoid_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "pt_at_modify_b_check" CHECK (b < 10000)
 Partition By RANGE(a)
@@ -2165,8 +2165,8 @@ ALTER TABLE pt_at_modify MODIFY b varchar(8) NOT NULL;
  a      | integer              | not null default 0 | plain    |              | 
  b      | character varying(8) | not null           | extended |              | 
 Indexes:
-    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
-    "pt_at_modify_b_tableoid_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pt_at_modify_pkey" PRIMARY KEY, ubtree (b, a) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "pt_at_modify_b_tableoid_key" UNIQUE CONSTRAINT, ubtree (b) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Check constraints:
     "pt_at_modify_b_check" CHECK (b::bigint < 10000)
 Partition By RANGE(a)
@@ -2175,24 +2175,24 @@ Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
 select pg_get_tabledef('pt_at_modify'::regclass);
-                                                              pg_get_tabledef                                                               
---------------------------------------------------------------------------------------------------------------------------------------------
- SET search_path = atbdb_ustore_schema;                                                                                                    +
- CREATE TABLE pt_at_modify (                                                                                                               +
-     a integer DEFAULT 0 NOT NULL,                                                                                                         +
-     b character varying(8) NOT NULL,                                                                                                      +
-     CONSTRAINT pt_at_modify_b_check CHECK (((b)::bigint < 10000))                                                                         +
- )                                                                                                                                         +
- WITH (orientation=row, storage_type=ustore, compression=no)                                                                               +
- PARTITION BY RANGE (a)                                                                                                                    +
- (                                                                                                                                         +
-     PARTITION p1 VALUES LESS THAN (100),                                                                                                  +
-     PARTITION p2 VALUES LESS THAN (1000),                                                                                                 +
-     PARTITION p3 VALUES LESS THAN (MAXVALUE)                                                                                              +
- )                                                                                                                                         +
- ENABLE ROW MOVEMENT;                                                                                                                      +
- ALTER TABLE pt_at_modify ADD CONSTRAINT pt_at_modify_b_tableoid_key UNIQUE USING ubtree (b) INCLUDE (tableoid) WITH (storage_type=ustore);+
- ALTER TABLE pt_at_modify ADD CONSTRAINT pt_at_modify_pkey PRIMARY KEY USING ubtree  (b, a) WITH (storage_type=ustore);
+                                                                      pg_get_tabledef                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = atbdb_ustore_schema;                                                                                                                    +
+ CREATE TABLE pt_at_modify (                                                                                                                               +
+     a integer DEFAULT 0 NOT NULL,                                                                                                                         +
+     b character varying(8) NOT NULL,                                                                                                                      +
+     CONSTRAINT pt_at_modify_b_check CHECK (((b)::bigint < 10000))                                                                                         +
+ )                                                                                                                                                         +
+ WITH (orientation=row, storage_type=ustore, compression=no)                                                                                               +
+ PARTITION BY RANGE (a)                                                                                                                                    +
+ (                                                                                                                                                         +
+     PARTITION p1 VALUES LESS THAN (100),                                                                                                                  +
+     PARTITION p2 VALUES LESS THAN (1000),                                                                                                                 +
+     PARTITION p3 VALUES LESS THAN (MAXVALUE)                                                                                                              +
+ )                                                                                                                                                         +
+ ENABLE ROW MOVEMENT;                                                                                                                                      +
+ ALTER TABLE pt_at_modify ADD CONSTRAINT pt_at_modify_b_tableoid_key UNIQUE USING ubtree (b) INCLUDE (tableoid) WITH (storage_type=ustore, index_type=rcr);+
+ ALTER TABLE pt_at_modify ADD CONSTRAINT pt_at_modify_pkey PRIMARY KEY USING ubtree  (b, a) WITH (storage_type=ustore, index_type=rcr);
 (1 row)
 
 INSERT INTO pt_at_modify VALUES(1,1);
@@ -2396,7 +2396,7 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test11_f11" f
  f12    | character varying(20) | 
  f13    | boolean               | 
 Indexes:
-    "pk_test11_f11" PRIMARY KEY, ubtree (f11) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_test11_f11" PRIMARY KEY, ubtree (f11) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 
 ALTER TABLE test11 MODIFY COLUMN f11 int;
 \d test11
@@ -2407,7 +2407,7 @@ ALTER TABLE test11 MODIFY COLUMN f11 int;
  f12    | character varying(20) | 
  f13    | boolean               | 
 Indexes:
-    "pk_test11_f11" PRIMARY KEY, ubtree (f11) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_test11_f11" PRIMARY KEY, ubtree (f11) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 
 ALTER TABLE test11 MODIFY COLUMN f11 int AFTER f13;
 \d test11
@@ -2418,7 +2418,7 @@ ALTER TABLE test11 MODIFY COLUMN f11 int AFTER f13;
  f13    | boolean               | 
  f11    | integer               | not null
 Indexes:
-    "pk_test11_f11" PRIMARY KEY, ubtree (f11) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_test11_f11" PRIMARY KEY, ubtree (f11) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 
 ALTER TABLE test11 DROP CONSTRAINT pk_test11_f11, MODIFY COLUMN f11 int NULL;
 \d test11
@@ -2439,7 +2439,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "pk_test11_f11
  f13    | boolean               | 
  f11    | integer               | not null
 Indexes:
-    "pk_test11_f11" PRIMARY KEY, ubtree (f11) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_test11_f11" PRIMARY KEY, ubtree (f11) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 
 insert into test11(f11,f12,f13) values(NULL,'1',true); --ERROR
 ERROR:  null value in column "f11" violates not-null constraint
@@ -2456,7 +2456,7 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test11_f11" f
  f12    | character varying(20) | not null
  f13    | boolean               | 
 Indexes:
-    "pk_test11_f11" PRIMARY KEY, ubtree (f11, f12) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_test11_f11" PRIMARY KEY, ubtree (f11, f12) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 
 ALTER TABLE test11 MODIFY COLUMN f11 int;
 \d test11
@@ -2467,7 +2467,7 @@ ALTER TABLE test11 MODIFY COLUMN f11 int;
  f12    | character varying(20) | not null
  f13    | boolean               | 
 Indexes:
-    "pk_test11_f11" PRIMARY KEY, ubtree (f11, f12) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_test11_f11" PRIMARY KEY, ubtree (f11, f12) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 
 ALTER TABLE test11 MODIFY f11 int AFTER f13;
 \d test11
@@ -2478,7 +2478,7 @@ ALTER TABLE test11 MODIFY f11 int AFTER f13;
  f13    | boolean               | 
  f11    | integer               | not null
 Indexes:
-    "pk_test11_f11" PRIMARY KEY, ubtree (f11, f12) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_test11_f11" PRIMARY KEY, ubtree (f11, f12) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 
 ALTER TABLE test11 DROP CONSTRAINT pk_test11_f11, MODIFY COLUMN f11 int NULL;
 \d test11
@@ -2499,7 +2499,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "pk_test11_f11
  f13    | boolean               | 
  f11    | integer               | not null
 Indexes:
-    "pk_test11_f11" PRIMARY KEY, ubtree (f11) WITH (storage_type=ustore) TABLESPACE pg_default
+    "pk_test11_f11" PRIMARY KEY, ubtree (f11) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 
 insert into test11(f11,f12,f13) values(NULL,'1',true); --ERROR
 ERROR:  null value in column "f11" violates not-null constraint
@@ -2535,7 +2535,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "range_range_p
  gender   | character varying | not null  | extended |              | 
  birthday | date              | not null  | plain    |              | 
 Indexes:
-    "range_range_pkey" PRIMARY KEY, ubtree (id, birthday) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_range_pkey" PRIMARY KEY, ubtree (id, birthday) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(id) Subpartition By RANGE(birthday)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
@@ -2551,7 +2551,7 @@ ALTER TABLE range_range MODIFY COLUMN id int AFTER birthday;
  birthday | date              | not null  | plain    |              | 
  id       | integer           | not null  | plain    |              | 
 Indexes:
-    "range_range_pkey" PRIMARY KEY, ubtree (id, birthday) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_range_pkey" PRIMARY KEY, ubtree (id, birthday) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(id) Subpartition By RANGE(birthday)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
@@ -2589,7 +2589,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "range_range_p
  gender   | character varying | not null  | extended |              | 
  birthday | date              | not null  | plain    |              | 
 Indexes:
-    "range_range_pkey" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_range_pkey" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(id) Subpartition By RANGE(birthday)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
@@ -2605,7 +2605,7 @@ ALTER TABLE range_range MODIFY COLUMN id int AFTER birthday;
  birthday | date              | not null  | plain    |              | 
  id       | integer           | not null  | plain    |              | 
 Indexes:
-    "range_range_pkey" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_range_pkey" PRIMARY KEY, ubtree (id) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(id) Subpartition By RANGE(birthday)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
@@ -2643,7 +2643,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "range_range_p
  gender   | character varying | not null  | extended |              | 
  birthday | date              | not null  | plain    |              | 
 Indexes:
-    "range_range_pkey" PRIMARY KEY, ubtree (gender) WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_range_pkey" PRIMARY KEY, ubtree (gender) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(id) Subpartition By RANGE(birthday)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
@@ -2659,7 +2659,7 @@ ALTER TABLE range_range MODIFY COLUMN gender varchar AFTER birthday;
  birthday | date              | not null  | plain    |              | 
  gender   | character varying | not null  | extended |              | 
 Indexes:
-    "range_range_pkey" PRIMARY KEY, ubtree (gender) WITH (storage_type=ustore) TABLESPACE pg_default
+    "range_range_pkey" PRIMARY KEY, ubtree (gender) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(id) Subpartition By RANGE(birthday)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
@@ -2686,7 +2686,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "multi_keys_ra
  f3     | integer |           | plain   |              | 
  f1     | integer | not null  | plain   |              | 
 Indexes:
-    "multi_keys_range_pkey" PRIMARY KEY, ubtree (f1, f2) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "multi_keys_range_pkey" PRIMARY KEY, ubtree (f1, f2) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(f1, f2)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -2701,7 +2701,7 @@ alter table multi_keys_range modify f2 int after f3;
  f2     | integer | not null  | plain   |              | 
  f1     | integer | not null  | plain   |              | 
 Indexes:
-    "multi_keys_range_pkey" PRIMARY KEY, ubtree (f1, f2) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "multi_keys_range_pkey" PRIMARY KEY, ubtree (f1, f2) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By RANGE(f1, f2)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -2727,7 +2727,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "multi_keys_li
  f3     | integer |           | plain   |              | 
  f1     | integer | not null  | plain   |              | 
 Indexes:
-    "multi_keys_list_pkey" PRIMARY KEY, ubtree (f1, f2) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "multi_keys_list_pkey" PRIMARY KEY, ubtree (f1, f2) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By LIST(f1, f2)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -2742,7 +2742,7 @@ alter table multi_keys_list modify f2 int after f3;
  f2     | integer | not null  | plain   |              | 
  f1     | integer | not null  | plain   |              | 
 Indexes:
-    "multi_keys_list_pkey" PRIMARY KEY, ubtree (f1, f2) LOCAL WITH (storage_type=ustore) TABLESPACE pg_default
+    "multi_keys_list_pkey" PRIMARY KEY, ubtree (f1, f2) LOCAL WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Partition By LIST(f1, f2)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no

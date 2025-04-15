@@ -3576,8 +3576,6 @@ void index_build(Relation heapRelation, Partition heapPartition, Relation indexR
         indexPartRel = partitionGetRelation(indexRelation, indexPartition);
         targetHeapRelation = heapPartRel;
         targetIndexRelation = indexPartRel;
-
-        // if (indexIs)
     }
 
     ereport(DEBUG1,

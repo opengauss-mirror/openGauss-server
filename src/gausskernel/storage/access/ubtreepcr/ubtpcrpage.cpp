@@ -50,7 +50,7 @@ void UBTreePCRInitTD(Page page)
 void UBTreePCRPageInit(Page page, Size size)
 {
     PageInit(page, size, sizeof(UBTPCRPageOpaqueData));
-    ((UBTPCRPageOpaque)PageGetSpecialPointer(page))->last_delete_xid = 0;
+    ((UBTPCRPageOpaque)PageGetSpecialPointer(page))->last_delete_xid = InvalidTransactionId;
 }
 
 /*
@@ -243,31 +243,24 @@ Buffer UBTreePCRGetRoot(Relation rel, int access)
         MarkBufferDirty(metabuf);
 
         /* XLOG stuff */
-        // TODO
         if (RelationNeedsWAL(rel)) {
-            // xl_btree_newroot xlrec;
-            // xl_btree_metadata_old md;
-            // XLogRecPtr recptr;
-
-            // XLogBeginInsert();
-            // XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
-            // XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT);
-
-            // md.root = rootblkno;
-            // md.level = 0;
-            // md.fastroot = rootblkno;
-            // md.fastlevel = 0;
-
-            // XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata_old));
-
-            // xlrec.rootblk = rootblkno;
-            // xlrec.level = 0;
-            // XLogRegisterData((char *)&xlrec, SizeOfBtreeNewroot);
-
-            // recptr = XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_NEWROOT);
-
-            // PageSetLSN(rootpage, recptr);
-            // PageSetLSN(metapg, recptr);
+            xl_btree_newroot xlrec;
+            xl_btree_metadata_old md;
+            XLogRecPtr recptr;
+            XLogBeginInsert();
+            XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
+            XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT);
+            md.root = rootblkno;
+            md.level = 0;
+            md.fastroot = rootblkno;
+            md.fastlevel = 0;
+            XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata_old));
+            xlrec.rootblk = rootblkno;
+            xlrec.level = 0;
+            XLogRegisterData((char *)&xlrec, SizeOfBtreeNewroot);
+            recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_NEW_ROOT);
+            PageSetLSN(rootpage, recptr);
+            PageSetLSN(metapg, recptr);
         }
 
         END_CRIT_SECTION();
@@ -359,8 +352,7 @@ void UBTreePCRDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bool i
 {
     Page page = BufferGetPage(buf);
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
-    IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTuple(page, offset);
-    IndexTupleTrx trx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
+    UBTreeItemId itemid = (UBTreeItemId)UBTreePCRGetRowPtr(page, offset);
     TransactionId fxid = GetTopTransactionId();
     TransactionId xid = GetCurrentTransactionId();
 
@@ -371,9 +363,9 @@ void UBTreePCRDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bool i
     Assert(urecPtr != INVALID_UNDO_REC_PTR);
     Assert(xlumPtr != NULL);
 
-    UBTreePCRSetIndexTupleDeleted(trx);
-    UBTreePCRSetIndexTupleTrxValid(trx);
-    trx->tdSlot = tdslot;
+    UBTreePCRSetIndexTupleDeleted(itemid);
+    UBTreePCRClearIndexTupleTDInvalid(itemid);
+    itemid->lp_td_id = tdslot;
 
     UBTreeTD thisTrans = UBTreePCRGetTD(page, tdslot);
     thisTrans->xactid = fxid;
@@ -397,7 +389,6 @@ void UBTreePCRDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bool i
      */
     UndoPersistence persistence = UndoPersistenceForRelation(rel);
     InsertPreparedUndo(t_thrd.ustore_cxt.urecvec);
-    UndoRecPtr oldPrevUrp = GetCurrentTransactionUndoRecPtr(persistence);
     SetCurrentTransactionUndoRecPtr(urecPtr, persistence);
 
     undo::PrepareUndoMeta(xlumPtr, persistence, t_thrd.ustore_cxt.urecvec->LastRecord(),
@@ -413,7 +404,7 @@ void UBTreePCRDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bool i
 
     /* XLOG stuff */
     if (RelationNeedsWAL(rel)) {
-        UBTree3WalInfo *walInfo = (UBTree3WalInfo*)palloc(sizeof(UBTree3WalInfo));
+        UBTree3WalInfo walInfo;
         uint8 flag = 0;
         UndoRecord *cur_urec = t_thrd.ustore_cxt.undo_records[0];
         UBTreeUndoInfo undoInfo = (UBTreeUndoInfo)(cur_urec->Rawdata()->data);
@@ -426,36 +417,31 @@ void UBTreePCRDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bool i
         }
         if (RelationIsPartition(rel)) {
             flag |= UBTREE_XLOG_HAS_PARTITION_OID;
-            walInfo->relOid = rel->parentId;
-            walInfo->partitionOid = RelationGetRelid(rel);
+            walInfo.relOid = rel->parentId;
+            walInfo.partitionOid = RelationGetRelid(rel);
         } else {
-            walInfo->relOid = RelationGetRelid(rel);
-            walInfo->partitionOid = InvalidOid;
+            walInfo.relOid = RelationGetRelid(rel);
+            walInfo.partitionOid = InvalidOid;
         }
 
-        walInfo->tdId = tdslot;
-        walInfo->urecptr = urecPtr;
-        walInfo->undoInfo = undoInfo;
-        walInfo->blkprev = cur_urec->Blkprev();
-        walInfo->prevurp = cur_urec->Prevurp2();
-        walInfo->xid = GetTopTransactionId();
-        walInfo->oldXid = cur_urec->OldXactId();
-        walInfo->cid = GetCurrentCommandId(true);
-        walInfo->xlum = xlumPtr;
-        walInfo->itup = tuple;
-        walInfo->flag = flag;
-        walInfo->buffer = buf;
-        walInfo->offnum = offset;
+        walInfo.tdId = tdslot;
+        walInfo.urecptr = urecPtr;
+        walInfo.undoInfo = undoInfo;
+        walInfo.blkprev = cur_urec->Blkprev();
+        walInfo.prevurp = cur_urec->Prevurp2();
+        walInfo.xid = GetTopTransactionId();
+        walInfo.oldXid = cur_urec->OldXactId();
+        walInfo.cid = GetCurrentCommandId(true);
+        walInfo.xlum = xlumPtr;
+        walInfo.itup = tuple;
+        walInfo.flag = flag;
+        walInfo.buffer = buf;
+        walInfo.offnum = offset;
 
-        LogInsertOrDelete(walInfo, XLOG_UBTREE3_DELETE_PCR);
-
-        if (walInfo != NULL) {
-            pfree(walInfo);
-        }
+        LogInsertOrDelete(&walInfo, XLOG_UBTREE3_DELETE_PCR);
     }
     undo::FinishUndoMeta(persistence);
     END_CRIT_SECTION();
-    //UBTreePCRVerify(rel, page, BufferGetBlockNumber(buf), offset);         // TODO
 
     bool needRecordEmpty = (opaque->activeTupleCount == 0);
     if (needRecordEmpty) {
@@ -485,7 +471,7 @@ void UBTreePCRPageIndexTupleDelete(Page page, OffsetNumber offnum)
 {
     PageHeader phdr = (PageHeader)page;
     char *addr = NULL;
-    ItemId tup;
+    UBTreeItemId iid;
     Size size;
     unsigned offset;
     int nbytes;
@@ -497,8 +483,8 @@ void UBTreePCRPageIndexTupleDelete(Page page, OffsetNumber offnum)
      * As with PageRepairFragmentation, paranoia seems justified.
      */
     Assert(!PageIsCompressed(page));
-    if (phdr->pd_lower < SizeOfPageHeaderData + SizeOfUBTreeTDData(page)|| phdr->pd_lower > phdr->pd_upper || phdr->pd_upper > phdr->pd_special ||
-        phdr->pd_special > BLCKSZ)
+    if (phdr->pd_lower < SizeOfPageHeaderData + SizeOfUBTreeTDData(page)|| phdr->pd_lower > phdr->pd_upper
+        || phdr->pd_upper > phdr->pd_special || phdr->pd_special > BLCKSZ)
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
                         errmsg("corrupted page pointers: lower = %u, upper = %u, special = %u", phdr->pd_lower,
                                phdr->pd_upper, phdr->pd_special)));
@@ -511,14 +497,14 @@ void UBTreePCRPageIndexTupleDelete(Page page, OffsetNumber offnum)
     /* change offset number to offset index */
     offidx = offnum - 1;
 
-    tup = UBTreePCRGetRowPtr(page, offnum);
-    Assert(ItemIdHasStorage(tup));
-    size = ItemIdGetLength(tup);
-    offset = ItemIdGetOffset(tup);
+    iid = UBTreePCRGetRowPtr(page, offnum);
+    Assert(UBTreeItemIdHasStorage(iid));
+    size = IndexTupleSize(UBTreePCRGetIndexTupleByItemId(page, iid));
+    offset = ItemIdGetOffset(iid);
     if (offset < phdr->pd_upper || (offset + size) > phdr->pd_special || offset != (unsigned int)(MAXALIGN(offset)) ||
         size != (unsigned int)(MAXALIGN(size)))
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                        errmsg("corrupted item pointer: offset = %u, size = %u", offset, (unsigned int)size)));
+            errmsg("corrupted item pointer: offset = %u, size = %u", offset, (unsigned int)size)));
 
     /*
      * First, we want to get rid of the pd_linp entry for the index tuple. We
@@ -526,12 +512,12 @@ void UBTreePCRPageIndexTupleDelete(Page page, OffsetNumber offnum)
      * PageGetItemId, because we are manipulating the _array_, not individual
      * linp's.
      */
-    nbytes = phdr->pd_lower - ((char *)&phdr->pd_linp[0] - (char *)phdr + (offidx + 1) * sizeof(ItemIdData) +
+    nbytes = phdr->pd_lower - ((char *)&phdr->pd_linp[0] - (char *)phdr + (offidx + 1) * sizeof(UBTreeItemIdData) +
         SizeOfUBTreeTDData(page));
 
     if (nbytes > 0) {
-        rc = memmove_s((char *)&(phdr->pd_linp[0]) + offidx * sizeof(ItemIdData) + SizeOfUBTreeTDData(page),
-            nbytes, (char *)&(phdr->pd_linp[0])+ (offidx + 1 ) * sizeof(ItemIdData) +
+        rc = memmove_s((char *)&(phdr->pd_linp[0]) + offidx * sizeof(UBTreeItemIdData) + SizeOfUBTreeTDData(page),
+            nbytes, (char *)&(phdr->pd_linp[0]) + (offidx + 1) * sizeof(UBTreeItemIdData) +
             SizeOfUBTreeTDData(page), nbytes);
         securec_check(rc, "", "");
     }
@@ -553,7 +539,7 @@ void UBTreePCRPageIndexTupleDelete(Page page, OffsetNumber offnum)
 
     /* adjust free space boundary pointers */
     phdr->pd_upper += size;
-    phdr->pd_lower -= sizeof(ItemIdData);
+    phdr->pd_lower -= sizeof(UBTreeItemIdData);
 
     /*
      * Finally, we need to adjust the linp entries that remain.
@@ -566,9 +552,9 @@ void UBTreePCRPageIndexTupleDelete(Page page, OffsetNumber offnum)
 
         nline--; /* there's one less than when we started */
         for (i = 1; i <= nline; i++) {
-            ItemId ii = UBTreePCRGetRowPtr(phdr, i);
+            UBTreeItemId ii = UBTreePCRGetRowPtr(phdr, i);
 
-            Assert(ItemIdHasStorage(ii));
+            Assert(UBTreeItemIdHasStorage(ii));
             if (ItemIdGetOffset(ii) <= offset)
                 ii->lp_off += size;
         }
@@ -685,7 +671,6 @@ void VerifyUBTreePCRTD(Relation rel, Page page, BlockNumber blkno)
 {
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
 
-    uint16 tdCount = UBTreePageGetTDSlotCount(page);
     if (P_ISLEAF(opaque) ? (opaque->btpo.level != 0) : (opaque->btpo.level == 0)) {
         ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
             errmsg("UBTREEVERIFY corrupted rel %s, level %u, flag %u, rnode[%u,%u,%u], block %u.",
@@ -753,25 +738,25 @@ static void UBTreePCRLogReusePage(Relation rel, BlockNumber blkno, TransactionId
 {
     xl_btree_reuse_page xlrec;
 
-    // if (!RelationNeedsWAL(rel))
-    //     return;
+    if (!RelationNeedsWAL(rel))
+        return;
 
-    // /*
-    //  * Note that we don't register the buffer with the record, because this
-    //  * operation doesn't modify the page. This record only exists to provide a
-    //  * conflict point for Hot Standby.
-    //  *
-    //  * XLOG stuff
-    //  */
-    // RelFileNodeRelCopy(xlrec.node, rel->rd_node);
+    /*
+     * Note that we don't register the buffer with the record, because this
+     * operation doesn't modify the page. This record only exists to provide a
+     * conflict point for Hot Standby.
+     *
+     * XLOG stuff
+     */
+    RelFileNodeRelCopy(xlrec.node, rel->rd_node);
 
-    // xlrec.block = blkno;
-    // xlrec.latestRemovedXid = latestRemovedXid;
+    xlrec.block = blkno;
+    xlrec.latestRemovedXid = latestRemovedXid;
 
-    // XLogBeginInsert();
-    // XLogRegisterData((char *)&xlrec, SizeOfBtreeReusePage);
+    XLogBeginInsert();
+    XLogRegisterData((char *)&xlrec, SizeOfBtreeReusePage);
 
-    // (void)XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_REUSE_PAGE, rel->rd_node.bucketNode);
+    (void)XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_REUSE_PAGE, rel->rd_node.bucketNode);
 }
 
 static void UBTreePCRLogAndFreeNewPageStats(UBTreeGetNewPageStats* stats)

@@ -2692,11 +2692,10 @@ static void parse_ubtree_index_item(const Item item, unsigned len)
     }
 }
 
-static void parse_ubtree_pcr_index_item(const Item item)
+static void parse_ubtree_pcr_index_item(const Item item, const UBTreeItemId iid)
 {
     IndexTuple itup = (IndexTuple)item;
-    IndexTupleTrx trx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
-    uint8 slotNo = trx->tdSlot;
+    uint8 slotNo = iid->lp_td_id;
     bool hasnull = (itup->t_info & INDEX_NULL_MASK);
     unsigned int tuplen = (itup->t_info & INDEX_SIZE_MASK);
     unsigned int offset = 0;
@@ -2704,11 +2703,10 @@ static void parse_ubtree_pcr_index_item(const Item item)
 
     indentLevel = 3;
 
-    /* there are trx information */
     fprintf(stdout,
         "%s td_id:%d Tid: block %u/%u, offset %u\n",
         indents[indentLevel],
-        trx->tdSlot + 1,
+        slotNo,
         itup->t_tid.ip_blkid.bi_hi,
         itup->t_tid.ip_blkid.bi_lo,
         itup->t_tid.ip_posid);
@@ -2732,7 +2730,7 @@ static void parse_ubtree_pcr_index_item(const Item item)
     }
 }
 
-static void parse_one_item(const Item item, unsigned len, int blkno, int lineno, SegmentType type)
+static void parse_one_item(const Item item, unsigned len, int blkno, int lineno, SegmentType type, UBTreeItemId iid)
 {
     switch (type) {
         case SEG_HEAP:
@@ -2752,7 +2750,7 @@ static void parse_one_item(const Item item, unsigned len, int blkno, int lineno,
             break;
 
         case SEG_INDEX_UBTREE_PCR:
-            parse_ubtree_pcr_index_item(item);
+            parse_ubtree_pcr_index_item(item, iid);
         default:
             break;
     }
@@ -3154,7 +3152,7 @@ static void parse_heap_or_index_page(const char* buffer, int blkno, SegmentType 
 
                     item = UPageGetRowData(page, rowptr);
                     HeapTupleCopyBaseFromPage(&dummyTuple, page);
-                    parse_one_item(item, RowPtrGetLen(rowptr), blkno, i, type);
+                    parse_one_item(item, RowPtrGetLen(rowptr), blkno, i, type, NULL);
                 } else if (RowPtrIsDead(rowptr)) {
                     fprintf(stdout, "\n\t\tTuple #%d is dead: length %u, offset %u", i, RowPtrGetLen(rowptr),
                         RowPtrGetOffset(rowptr));
@@ -3232,11 +3230,19 @@ static void parse_heap_or_index_page(const char* buffer, int blkno, SegmentType 
         for (i = FirstOffsetNumber; i <= nline; i++) {
             lp = PageGetItemId(page, i);
             if (type == SEG_INDEX_UBTREE_PCR) {
-                lp = UBTreePCRGetRowPtr(page, i);
+                UBTreeItemId itemid = UBTreePCRGetRowPtr(page, i);
+                lp = (ItemId)itemid;
             }
             if (ItemIdIsUsed(lp)) {
-                if (ItemIdHasStorage(lp))
-                    nstorage++;
+                if (type == SEG_INDEX_UBTREE_PCR) {
+                    if (UBTreeItemIdHasStorage(lp)) {
+                        nstorage++;
+                    }
+                } else {
+                    if (ItemIdHasStorage(lp)) {
+                        nstorage++;
+                    }
+                }
 
                 if (ItemIdIsNormal(lp) || ((type == SEG_INDEX_BTREE || type == SEG_INDEX_UBTREE || type == SEG_INDEX_UBTREE_PCR) && blkno != 0 && IndexItemIdIsFrozen(lp))) {
                     if (ItemIdIsNormal(lp)) {
@@ -3250,10 +3256,15 @@ static void parse_heap_or_index_page(const char* buffer, int blkno, SegmentType 
                             ItemIdGetOffset(lp));
                     }
                     nnormal++;
-
-                    item = PageGetItem(page, lp);
+                    if (type != SEG_INDEX_UBTREE_PCR){
+                        item = PageGetItem(page, lp);
+                    } else {
+                        IndexTuple tuple = UBTreePCRGetIndexTuple(page, i);
+                        item = (Item)tuple;
+                    }
                     HeapTupleCopyBaseFromPage(&dummyTuple, page);
-                    parse_one_item(item, ItemIdGetLength(lp), blkno, i, type);
+                    parse_one_item(item, ItemIdGetLength(lp), blkno, i, type,
+                        type == SEG_INDEX_UBTREE_PCR ? UBTreePCRGetRowPtr(page, i) : NULL);
                     
                 } else if (ItemIdIsDead(lp)) {
                     fprintf(stdout,

@@ -28,7 +28,7 @@
 #include "access/ustore/knl_undorequest.h"
 #include "storage/buf/crbuf.h"
 
-/**
+/*
  * compare two indextuple, itup1 can't be pivot.
  */
 static int CompareIndexTuple(Relation rel, IndexTuple itup1, IndexTuple itup2)
@@ -119,12 +119,12 @@ static OffsetNumber SearchTupleOffnum(Relation rel, Page page, IndexTuple itup, 
     itupKey->nextkey = true;
     OffsetNumber end = UBTreePCRBinarySearch(rel, itupKey, page);
     IndexTuple curItup;
-    IndexTupleTrx trx;
+    UBTreeItemId itemid;
     Size size = IndexTupleSize(itup);
     for (OffsetNumber i = start; i < end; i++) {
         curItup = UBTreePCRGetIndexTuple(page, i);
-        trx = UBTreePCRGetIndexTupleTrx(curItup); 
-        if (trx->tdSlot == tdid && size == IndexTupleSize(curItup)&& UBTreeItupEquals(itup, curItup)) {
+        itemid = UBTreePCRGetRowPtr(page, i);
+        if (itemid->lp_td_id == tdid && size == IndexTupleSize(curItup)&& UBTreeItupEquals(itup, curItup)) {
             return i;
         }
     }
@@ -232,55 +232,53 @@ static void ExecuteRollback(Relation rel, BlockNumber blkno, Page page, OffsetNu
     bool isCRPage)
 {
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
-    ItemId iid = UBTreePCRGetRowPtr(page, offnum);
-    IndexTuple itup = UBTreePCRGetIndexTuple(page, offnum);
-    IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(itup);
+    UBTreeItemId itemid = UBTreePCRGetRowPtr(page, offnum);
     UBTreeUndoInfo undoinfo = FetchUndoInfoFromUndoRecord(urec);
     uint8 prevTDid = (undoinfo->prev_td_id >= opaque->td_count) ? UBTreeFrozenTDSlotId : undoinfo->prev_td_id;
-    UBTreeTD curTD = UBTreePCRGetTD(page, trx->tdSlot);
+    UBTreeTD curTD = UBTreePCRGetTD(page, itemid->lp_td_id);
     if (urec->Utype() == UNDO_UBT_INSERT) {
         /* mark tuple deleted */
-        UBTreePCRSetIndexTupleDeleted(trx);
+        UBTreePCRSetIndexTupleDeleted(itemid);
         UBTreePCRTDSetStatus(curTD, TD_DELETE);
         if (prevTDid == UBTreeFrozenTDSlotId) {
-            ItemIdMarkDead(iid);
+            ItemIdMarkDead(itemid);
         } else {
             Assert(prevTDid != UBTreeInvalidTDSlotId);
             UBTreeTD td = UBTreePCRGetTD(page, prevTDid);
             if (UBTreePCRTDIsCommited(td)) {
-                UBTreePCRSetIndexTupleTrxInvalid(trx);
+                UBTreePCRSetIndexTupleTDInvalid(itemid);
             } else if (UBTreePCRTDIsFrozen(td)) {
-                ItemIdMarkDead(iid);
+                ItemIdMarkDead(itemid);
             } else {
                 TransactionId prevXid = urec->OldXactId();
                 if (!TransactionIdIsNormal(prevXid) || prevXid != td->xactid) {
-                    UBTreePCRSetIndexTupleTrxInvalid(trx);
+                    UBTreePCRSetIndexTupleTDInvalid(itemid);
                 }
             }
         }
-        UBTreePCRSetIndexTupleTrxSlot(trx, prevTDid);
+        UBTreePCRSetIndexTupleTDSlot(itemid, prevTDid);
         opaque->activeTupleCount--;
-    } else if(urec->Utype() == UNDO_UBT_DELETE) {
+    } else if (urec->Utype() == UNDO_UBT_DELETE) {
         /* clear deleted flag */
-        UBTreePCRClearIndexTupleDeleted(trx);
+        UBTreePCRClearIndexTupleDeleted(itemid);
         if (prevTDid == UBTreeFrozenTDSlotId) {
-            IndexItemIdSetFrozen(iid);
+            IndexItemIdSetFrozen(itemid);
         } else {
             Assert(prevTDid != UBTreeInvalidTDSlotId);
             UBTreeTD td = UBTreePCRGetTD(page, prevTDid);
             if (UBTreePCRTDIsCommited(td)) {
-                UBTreePCRSetIndexTupleTrxInvalid(trx);
+                UBTreePCRSetIndexTupleTDInvalid(itemid);
             } else if (UBTreePCRTDIsFrozen(td)) {
-                IndexItemIdSetFrozen(iid);
+                IndexItemIdSetFrozen(itemid);
             } else {
                 TransactionId prevXid = urec->OldXactId();
                 if (!TransactionIdIsNormal(prevXid) || prevXid != td->xactid) {
-                    UBTreePCRSetIndexTupleTrxInvalid(trx);
+                    UBTreePCRSetIndexTupleTDInvalid(itemid);
                 }
             }
         }
-        UBTreePCRSetIndexTupleTrxSlot(trx, prevTDid);
-        ItemIdSetNormal(iid, iid->lp_off, iid->lp_len);
+        UBTreePCRSetIndexTupleTDSlot(itemid, prevTDid);
+        UBTreeItemIdSetNormal(itemid, itemid->lp_off);
         opaque->activeTupleCount++;
     } else {
         ereport(PANIC, (errmsg("unknown undo type, rnode[%u,%u,%u], blkno:%u, "
@@ -298,19 +296,18 @@ static void PruneCRPage(Relation rel, Page page)
     if ((unsigned int)(pdLower) < SizeOfPageHeaderData || pdLower > pdUpper || pdUpper > pdSpecial ||
         pdSpecial > BLCKSZ || (unsigned int)(pdSpecial) != MAXALIGN(pdSpecial))
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("corrupted page pointers: lower = %d, upper = %d, special = %d",
-                        pdLower, pdUpper, pdSpecial)));
+            errmsg("corrupted page pointers: lower = %d, upper = %d, special = %d",
+            pdLower, pdUpper, pdSpecial)));
 
-    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     int maxOff = UBTreePCRPageGetMaxOffsetNumber(page);
     int num = 0;
     Size totallen = 0;
 
-    itemIdSortData itemidbase[MaxIndexTuplesPerPage];
-    itemIdSort itemidptr = itemidbase;
+    UBTreeItemIdSortData itemidbase[MaxIndexTuplesPerPage];
+    UBTreeItemIdSort itemidptr = itemidbase;
 
     for (int i = FirstOffsetNumber; i <= maxOff; i++) {
-        ItemId lp = UBTreePCRGetRowPtr(page, i);
+        UBTreeItemId lp = UBTreePCRGetRowPtr(page, i);
         if (!ItemIdIsDead(lp)) {
             num++;
             itemidptr->offsetindex = num;
@@ -318,49 +315,49 @@ static void PruneCRPage(Relation rel, Page page)
             itemidptr->olditemid = *lp;
             if (itemidptr->itemoff < (int)pdUpper || itemidptr->itemoff >= (int)pdSpecial)
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                        errmsg("corrupted item pointer: %d.", itemidptr->itemoff)));
-            itemidptr->alignedlen = MAXALIGN(ItemIdGetLength(lp));
+                    errmsg("corrupted item pointer: %d.", itemidptr->itemoff)));
+            itemidptr->alignedlen = MAXALIGN(IndexTupleSize(UBTreePCRGetIndexTuple(page, i)));
             totallen += itemidptr->alignedlen;
             itemidptr++;
         }
     }
 
     if (num == maxOff) {
-       ereport(ERROR, (errmsg("fail to prune cr page, no dead index tuple on page.")));
+        ereport(ERROR, (errmsg("fail to prune cr page, no dead index tuple on page.")));
     }
 
     if (totallen > (Size)(pdSpecial - pdLower))
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("corrupted item lengths: total %u, available space %d.",
-                        (unsigned int)totallen, pdSpecial - pdLower)));
+            errmsg("corrupted item lengths: total %u, available space %d.",
+            (unsigned int)totallen, pdSpecial - pdLower)));
 
-    /* sort itemIdSortData array into decreasing itemoff order */
-    qsort((char*)itemidbase, num, sizeof(itemIdSortData), UBTreePCRItemOffCompare);
+    /* sort UBTreeItemIdSortData array into decreasing itemoff order */
+    qsort((char*)itemidbase, num, sizeof(UBTreeItemIdSortData), UBTreePCRItemOffCompare);
 
     /* compactify page and install new itemids */
     Offset upper = pdSpecial;
     itemidptr = itemidbase;
     for (int i = 0; i < num; i++) {
-        ItemId lp = UBTreePCRGetRowPtr(page, itemidptr->offsetindex);
+        UBTreeItemId lp = UBTreePCRGetRowPtr(page, itemidptr->offsetindex);
         upper -= itemidptr->alignedlen;
         *lp = itemidptr->olditemid;
         lp->lp_off = upper;
         if (upper != itemidptr->itemoff) {
             errno_t rc = memmove_s((char *)page + upper, itemidptr->alignedlen, (char *)page + itemidptr->itemoff,
-                                itemidptr->alignedlen);
+                itemidptr->alignedlen);
             securec_check(rc, "\0", "\0");
         }
         itemidptr++;
     }
 
     ((PageHeader)page)->pd_lower = GetPageHeaderSize(page) + UBTreePCRTdSlotSize(UBTreePageGetTDSlotCount(page)) +
-        num * sizeof(ItemIdData);
+        num * sizeof(UBTreeItemIdData);
     ((PageHeader)page)->pd_upper = upper;
 }
 
 static OffsetNumber RestorePrunedTuple(Relation rel, Page page, IndexTuple itup, uint8 tdid)
 {
-    Size itemsz = IndexTupleSize(itup) + MAXALIGN(sizeof(IndexTupleTrxData));
+    Size itemsz = IndexTupleSize(itup);
     if (PageGetFreeSpace(page) < itemsz) {
         PruneCRPage(rel, page);
         if (unlikely(PageGetFreeSpace(page) < itemsz)) {
@@ -370,10 +367,10 @@ static OffsetNumber RestorePrunedTuple(Relation rel, Page page, IndexTuple itup,
     BTScanInsert itupKey = UBTreeMakeScanKey(rel, itup);
     OffsetNumber offnum = UBTreePCRBinarySearch(rel, itupKey, page);
     offnum = UBTPCRPageAddItem(page, (Item)itup, itemsz, offnum, false);
-    IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(UBTreePCRGetIndexTuple(page, offnum));
-    UBTreePCRSetIndexTupleTrxSlot(trx, tdid);
-    UBTreePCRClearIndexTupleTrxInvalid(trx);
-    UBTreePCRClearIndexTupleDeleted(trx);
+    UBTreeItemId itemid = UBTreePCRGetRowPtr(page, offnum);
+    UBTreePCRSetIndexTupleTDSlot(itemid, tdid);
+    UBTreePCRClearIndexTupleTDInvalid(itemid);
+    UBTreePCRClearIndexTupleDeleted(itemid);
     pfree(itupKey);
     return offnum;
 }
@@ -382,7 +379,7 @@ static OffsetNumber RollbackOneUndoRecord(Relation rel, BlockNumber blkno, Page 
     uint8 tdid, IndexTuple firstTuple)
 {
     IndexTuple itup = FetchTupleFromUndoRecord(urec);
-    if (!CheckTupleBelongToThisPage(rel, page, itup, firstTuple)){
+    if (!CheckTupleBelongToThisPage(rel, page, itup, firstTuple)) {
         ereport(DEBUG5, (errmsg("pcr rollback skip tuple, tuple not belong to this page, rnode[%u,%u,%u], blkno:%u, "
             "urp:%lu", rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, blkno, urec->Urp())));
         return InvalidOffsetNumber;
@@ -404,8 +401,9 @@ static OffsetNumber RollbackOneUndoRecord(Relation rel, BlockNumber blkno, Page 
     if (offnum == InvalidOffsetNumber) {
         if (isCRPage) {
             if (urec->Utype() == UNDO_UBT_INSERT) {
-                ereport(DEBUG5, (errmsg("pcr rollback cr page skip rollback, inserted tuple not found, rnode[%u,%u,%u], blkno:%u, "
-                    "urp:%lu", rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, blkno, urec->Urp())));
+                ereport(DEBUG5, (errmsg("pcr rollback cr page skip rollback, inserted tuple not found, "
+                    "rnode[%u,%u,%u], blkno:%u, urp:%lu", rel->rd_node.spcNode, rel->rd_node.dbNode,
+                    rel->rd_node.relNode, blkno, urec->Urp())));
                 return offnum;
             } else {
                 return RestorePrunedTuple(rel, page, itup, tdid);
@@ -420,7 +418,7 @@ static OffsetNumber RollbackOneUndoRecord(Relation rel, BlockNumber blkno, Page 
     return offnum;
 }
 
-void RollbackCRPage(IndexScanDesc scan, Page page, uint8 tdid, CommandId cid, IndexTuple itup)
+void RollbackCRPage(IndexScanDesc scan, Page page, uint8 tdid, CommandId *page_cid, CommandId cid, IndexTuple itup)
 {
     Relation rel = scan->indexRelation;
     Snapshot snapshot = scan->xs_snapshot;
@@ -430,6 +428,9 @@ void RollbackCRPage(IndexScanDesc scan, Page page, uint8 tdid, CommandId cid, In
     UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
     urec->SetMemoryContext(CurrentMemoryContext);
     urec->SetUrp(td->undoRecPtr);
+    if (page_cid != NULL) {
+        *page_cid = InvalidCommandId;
+    }
     
     int rollbackCount = 0;
     while (true) {
@@ -468,6 +469,9 @@ void RollbackCRPage(IndexScanDesc scan, Page page, uint8 tdid, CommandId cid, In
         }
 
         if (cid != InvalidCommandId && urec->Cid() < cid) {
+            if (page_cid != NULL) {
+                *page_cid = urec->Cid();
+            }
             break;
         }
         RollbackOneUndoRecord(rel, InvalidBlockNumber, page, urec, true, tdid, itup);
@@ -543,7 +547,7 @@ int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, Transaction
         return ROLLBACK_OK_NOEXIST;
     }
 
-    /* 
+    /*
      * When a transaction does a DDL, it is possible that either relid/partitionoid maps to the 
      * old relfilenode during rollback and hence it does not match the 
      * relfilenode in the undorecord anymore. But we know we need to do the rollback
@@ -597,9 +601,9 @@ int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, Transaction
     Oid partOid = InvalidOid;
 
 	if (!RecoveryInProgress())
-		CRBufferUnused(buffer);
+        CRBufferUnused(buffer);
 
-	if (RelationIsGlobalIndex(rel)) {
+    if (RelationIsGlobalIndex(rel)) {
         bool isnull = false;
         partOid = DatumGetUInt32(index_getattr(itup, IndexRelationGetNumberOfAttributes(rel),
             RelationGetDescr(rel), &isnull));
@@ -621,7 +625,7 @@ int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, Transaction
     UndoRecPtr urecPtr = INVALID_UNDO_REC_PTR;
     uint8 tdid = UBTreePageGetTDId(page, xid, &urecPtr);
     if (tdid != UBTreeInvalidTDSlotId && undorec->Urp() > urecPtr) {
-        tdid = UBTreeInvalidTDSlotId; 
+        tdid = UBTreeInvalidTDSlotId;
     }
 
     if (tdid != UBTreeInvalidTDSlotId) {
@@ -672,7 +676,6 @@ int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, Transaction
                 XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
                 recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_ROLLBACK_TXN);
                 PageSetLSN(page, recptr);
-                
             }
             END_CRIT_SECTION();
             redoRollbackAction.rollback_items.release();

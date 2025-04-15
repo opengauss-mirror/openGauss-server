@@ -1320,7 +1320,8 @@ void segpage_redo_new_page_for_standby_read(XLogBlockSegNewPage *block_data_rec,
 void redo_target_page(const BufferTag &old_buf_tag, const BufferTag &new_buf_tag,
                       StandbyReadLsnInfoArray *lsn_info, Buffer base_page_buf);
 void MarkSegPageRedoChildPageDirty(RedoBufferInfo *bufferinfo);
-extern void BTree3XlogSplitLeftPage(RedoBufferInfo *bufferinfo, void *recorddata, bool onleft, void *blkdata, Size datalen);
+extern void BTree3XlogSplitLeftPage(RedoBufferInfo *bufferinfo, void *recorddata, bool onleft,
+                                    void *blkdata, Size datalen);
 
 // shared-storage
 XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, RedoBufferInfo *redo_buf);

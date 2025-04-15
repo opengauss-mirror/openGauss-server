@@ -43,13 +43,14 @@
 #include "access/ubtreepcr.h"
 #include "lib/binaryheap.h"
 #include "storage/buf/crbuf.h"
+#include "storage/checksum_impl.h"
 
 static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum);
 static void UBTreePCRSaveItem(IndexScanDesc scan, int itemIndex, Page page, OffsetNumber offnum,
     const IndexTuple itup, Oid partOid);
 static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir);
 static bool UBTreePCREndPoint(IndexScanDesc scan, ScanDirection dir);
-static void BuildCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer);
+static void BuildCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer, CommandId *page_cid);
 
 const uint16 INVALID_TUPLE_OFFSET = (uint16)0xa5a5;
 
@@ -1145,7 +1146,7 @@ bool UBTreePCRNext(IndexScanDesc scan, ScanDirection dir)
 IndexTuple UBTreePCRCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum, ScanDirection dir,
     bool *continuescan)
 {
-    ItemId iid = UBTreePCRGetRowPtr(page, offnum);
+    UBTreeItemId iid = UBTreePCRGetRowPtr(page, offnum);
     bool tupleAlive = false;
     bool tupleVisible = true;
     IndexTuple tuple;
@@ -1168,7 +1169,7 @@ IndexTuple UBTreePCRCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum
      * index keys to prevent uselessly advancing to the next page.
      */
     if (scan->ignore_killed_tuples && ItemIdIsDead(iid) &&
-        (!showAnyTupleMode || ItemIdHasStorage(iid))) {
+        (!showAnyTupleMode || UBTreeItemIdHasStorage(iid))) {
         /* return immediately if there are more tuples on the page */
         if (ScanDirectionIsForward(dir)) {
             if (offnum < UBTreePCRPageGetMaxOffsetNumber(page)) {
@@ -1191,18 +1192,17 @@ IndexTuple UBTreePCRCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum
     }
 
     so = (BTScanOpaque)scan->opaque;
-    IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(UBTreePCRGetIndexTuple(page, offnum));
-    
+
     if (ItemIdIsDead(iid)) {
         tupleAlive = false;
-    } else if (IsUBTreePCRItemDeleted(trx)) {
+    } else if (IsUBTreePCRItemDeleted(iid)) {
         if (so->scanMode == PCR_SCAN_MODE) {
             tupleVisible = showAnyTupleMode;
         } else {
-            if (IsUBTreePCRTDReused(trx)) {
+            if (IsUBTreePCRTDReused(iid)) {
                 tupleVisible = showAnyTupleMode;
             } else {
-                UBTreeTD td = UBTreePCRGetTD(page, trx->tdSlot);
+                UBTreeTD td = UBTreePCRGetTD(page, iid->lp_td_id);
                 if (UBTreePCRTDIsCommited(td) || UBTreePCRTDIsFrozen(td)) {
                     tupleVisible = showAnyTupleMode;
                 }
@@ -1379,12 +1379,11 @@ static bool IsXminXmaxEqual(IndexScanDesc scan, Page page, OffsetNumber offnum,
 static bool IndexTupleSatisfiesMvcc(IndexScanDesc scan, Page page, OffsetNumber offnum)
 {
     Snapshot snapshot = scan->xs_snapshot;
-    ItemId iid = UBTreePCRGetRowPtr(page, offnum);
+    UBTreeItemId iid = UBTreePCRGetRowPtr(page, offnum);
     Assert(!ItemIdIsDead(iid));
     IndexTuple itup = UBTreePCRGetIndexTuple(page, offnum);
-    IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(itup);
-    uint8 tdid = trx->tdSlot;
-    bool tupleDeleted = IsUBTreePCRItemDeleted(trx);
+    uint8 tdid = iid->lp_td_id;
+    bool tupleDeleted = IsUBTreePCRItemDeleted(iid);
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
     IndexTuple undoItup;
 
@@ -1402,7 +1401,7 @@ check_frozen:
     }
 
     /* current xid, check cid */
-    if (TransactionIdIsCurrentTransactionId(xid) && !IsUBTreePCRTDReused(trx)) {
+    if (TransactionIdIsCurrentTransactionId(xid) && !IsUBTreePCRTDReused(iid)) {
         bool cidVisible = false;
         UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
         urec->SetMemoryContext(CurrentMemoryContext);
@@ -1441,7 +1440,7 @@ check_frozen:
     TransactionId globalFrozenXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
     if (TransactionIdPrecedes(xid, globalRecycleXid) ||
         (TransactionIdPrecedes(xid, globalFrozenXid) && TransactionIdPrecedes(xid, snapshot->xmin)) ||
-        (IsUBTreePCRTDReused(trx) && TransactionIdPrecedes(opaque->last_commit_xid, snapshot->xmin))) {
+        (IsUBTreePCRTDReused(iid) && TransactionIdPrecedes(opaque->last_commit_xid, snapshot->xmin))) {
         return !tupleDeleted;
     }
 
@@ -1502,7 +1501,7 @@ loop:
                 PtrGetVal(snapshot, satisfies), PtrGetVal(snapshot, xmin))));
         } else if (state != UNDO_TRAVERSAL_COMPLETE) {
             xidVisible = true;
-            break; 
+            break;
         }
         if (urec->Xid() != td->xactid) {
             changeXid = true;
@@ -1512,7 +1511,7 @@ loop:
                 xidVisible = true;
                 break;
             }
-            csn = TransactionIdGetCommitSeqNo(xid, true, true, false, scan->xs_snapshot);
+            csn = TransactionIdGetCommitSeqNo(urec->Xid(), true, true, false, scan->xs_snapshot);
             Assert(COMMITSEQNO_IS_COMMITTED(csn));
             if (csn < snapshot->snapshotcsn) {
                 xidVisible = true;
@@ -1542,15 +1541,14 @@ loop:
 
 static bool IndexTupleSatisfiesDirty(IndexScanDesc scan, Page page, OffsetNumber offnum)
 {
-    ItemId iid = UBTreePCRGetRowPtr(page, offnum);
+    UBTreeItemId iid = UBTreePCRGetRowPtr(page, offnum);
     Assert(!ItemIdIsDead(iid));
     IndexTuple itup = UBTreePCRGetIndexTuple(page, offnum);
-    IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(itup);
-    uint8 tdid = trx->tdSlot;
-    bool tupleDeleted = IsUBTreePCRItemDeleted(trx);
+    uint8 tdid = iid->lp_td_id;
+    bool tupleDeleted = IsUBTreePCRItemDeleted(iid);
 
     /* items td id is frozen or reused */
-    if (tdid == UBTreeFrozenTDSlotId || IsUBTreePCRTDReused(trx)) {
+    if (tdid == UBTreeFrozenTDSlotId || IsUBTreePCRTDReused(iid)) {
         return !tupleDeleted;
     }
 
@@ -1589,22 +1587,18 @@ static bool IndexTupleSatisfiesDirty(IndexScanDesc scan, Page page, OffsetNumber
 
 static bool IndexTupleSatisfiesAnyAndToast(IndexScanDesc scan, Page page, OffsetNumber offnum)
 {
-    IndexTuple itup = UBTreePCRGetIndexTuple(page, offnum);
-    IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(itup);
-    uint8 tdid = trx->tdSlot;
-    bool tupleDeleted = IsUBTreePCRItemDeleted(trx);
-
+    UBTreeItemId iid = UBTreePCRGetRowPtr(page, offnum);
+    uint8 tdid = iid->lp_td_id;
+    bool tupleDeleted = IsUBTreePCRItemDeleted(iid);
     /* items td id is frozen */
     if (tdid == UBTreeFrozenTDSlotId) {
         return !tupleDeleted;
     }
     UBTreeTD td = UBTreePCRGetTD(page, tdid);
-    
     /* td is frozen */
     if (UBTreePCRTDIsFrozen(td)) {
         return !tupleDeleted;
     }
-
     /* for inprogress and committed xid, tuple is always visible */
     return true;
 }
@@ -1696,7 +1690,7 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
     CRBufferDesc* desc = NULL;
 
     bool canUsePCRScanMode = IsPCRScanModeSupported(snapshot);
-    /* 
+    /*
      * In two cases, must use PCR_SCAN_MODE
      * a) snapshot type is SNAPSHOT_NOW
      * b) In an MVCC snapshot and delete operation occurs after the current snapshot is taken
@@ -1705,9 +1699,12 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
         ((snapshot->satisfies == SNAPSHOT_MVCC || snapshot->satisfies == SNAPSHOT_VERSION_MVCC)
         && TransactionIdFollowsOrEquals(opaque->last_delete_xid, snapshot->xmin));
 
+    Page localPage = (Page)palloc(BLCKSZ);
+    bool useLocalPage = false;
     uint32 checkNum = 0;
     OffsetNumber checkVisibleOffs[MaxIndexTuplesPerPage] = {0};
     OffsetNumber originOffnum = offnum;
+    BlockNumber blockNum = BufferGetBlockNumber(so->currPos.buf);
 
 choose_scan_mode:
     if (canUsePCRScanMode) {
@@ -1717,29 +1714,56 @@ choose_scan_mode:
          * b) If not find but mustUsePCRScanMode is true, build a new cr page
          * c) If neither condition above is met, fallback to use PBRCR_SCAN_MODE
          */
+        ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("ReadCRBuffer begin (%u, %d), "
+            "querycsn %ld, querycid %d", scan->indexRelation->rd_node.relNode,
+            blockNum, snapshot->snapshotcsn, snapshot->curcid))));
         desc = ReadCRBuffer(scan->indexRelation, BufferGetBlockNumber(so->currPos.buf),
             snapshot->snapshotcsn, snapshot->curcid);
         if (desc != NULL) {
+            ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("ReadCRBuffer found (%u, %d) buf_id %d, "
+                "csn %ld, cid %d, rsid %ld", scan->indexRelation->rd_node.relNode,
+                blockNum, desc->buf_id, desc->csn, desc->cid, desc->rsid))));
             crPage = CRBufferGetPage(desc->buf_id);
         } else if (mustUsePCRScanMode) {
-            desc = AllocCRBuffer(scan->indexRelation, MAIN_FORKNUM, BufferGetBlockNumber(so->currPos.buf),
-                snapshot->snapshotcsn, snapshot->curcid);
-            crPage = CRBufferGetPage(desc->buf_id);
-            BuildCRPage(scan, crPage, so->currPos.buf);
+            ereport(DEBUG5, (errmodule(MOD_PCR), (errmsg("PCR read page from cr pool notfound"))));
+            errno_t rc = memcpy_sp(localPage, BLCKSZ, (Page)BufferGetPage(so->currPos.buf), BLCKSZ);
+            CommandId page_cid;
+            BuildCRPage(scan, localPage, so->currPos.buf, &page_cid);
+            page_cid = page_cid == InvalidCommandId ? snapshot->curcid : page_cid;
+            UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+
+            if (!((opaque->btpo_flags & BTP_DELETED) || (opaque->btpo_flags & BTP_HALF_DEAD) ||
+                (opaque->btpo_flags & BTP_VACUUM_DELETING) || (opaque->btpo_flags & BTP_INCOMPLETE_SPLIT) ||
+                (opaque->btpo_flags & BTP_SPLIT_END))) {
+                ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("AllocCRBuffer (%u, %d) page_csn %ld, page_cid %d",
+                                                             scan->indexRelation->rd_node.relNode, blockNum,
+                                                             snapshot->snapshotcsn, page_cid))));
+                desc = AllocCRBuffer(scan->indexRelation, MAIN_FORKNUM, BufferGetBlockNumber(so->currPos.buf),
+                                     snapshot->snapshotcsn, page_cid);
+                crPage = CRBufferGetPage(desc->buf_id);
+                rc = memcpy_sp(crPage, BLCKSZ, (Page)localPage, BLCKSZ);
+                uint64 buf_state = pg_atomic_read_u64(&desc->state);
+                UnlockCRBufHdr(desc, buf_state);
+            } else {
+                crPage = localPage;
+            }
+            so->scanMode = PCR_SCAN_MODE;
+            page = crPage;
+            maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
         } else {
             so->scanMode = PBRCR_SCAN_MODE;
         }
         if (desc != NULL) {
             so->scanMode = PCR_SCAN_MODE;
             page = crPage;
-            maxoff = UBTreePCRPageGetMaxOffsetNumber(page);  
+            maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
         }
     } else {
         so->scanMode = PBRCR_SCAN_MODE;
     }
     ereport(DEBUG5, (errmsg("pcr readpage relfilenode:%u, blkno:%u, snapshot:%u, scanMode:%d (0:PCR 1:PBRCR) ",
-            scan->indexRelation->rd_node.relNode, BufferGetBlockNumber(so->currPos.buf),
-            snapshot->satisfies, so->scanMode)));
+        scan->indexRelation->rd_node.relNode, BufferGetBlockNumber(so->currPos.buf),
+        snapshot->satisfies, so->scanMode)));
     
     if (ScanDirectionIsForward(dir)) {
         /* load items[] in ascending order */
@@ -1868,7 +1892,11 @@ choose_scan_mode:
     }
     if (desc != NULL) {
         ReleaseCRBuffer(desc->buf_id);
+        ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("release cr buffer (%u, %d), buf_id %d, csn %ld, cid %d, "
+            "rsid %ld", scan->indexRelation->rd_node.relNode, BufferGetBlockNumber(so->currPos.buf),
+            desc->buf_id, desc->csn, desc->cid, desc->rsid))));
     }
+    pfree(localPage);
     return (so->currPos.firstItem <= so->currPos.lastItem);
 }
 
@@ -1907,13 +1935,12 @@ static void GetItupTransInfo(IndexScanDesc scan, Page page, IndexTuple itup, Off
     IndexTransInfo *transInfo)
 {
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
-    ItemId iid = UBTreePCRGetRowPtr(page, offnum);
-    IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(UBTreePCRGetIndexTuple(page, offnum));
+    UBTreeItemId iid = UBTreePCRGetRowPtr(page, offnum);
     Assert(!ItemIdIsDead(iid));
 
-    uint8 tdid = trx->tdSlot;
+    uint8 tdid = iid->lp_td_id;
     Assert(tdid != UBTreeInvalidTDSlotId);
-    bool deleted = IsUBTreePCRItemDeleted(trx);
+    bool deleted = IsUBTreePCRItemDeleted(iid);
 
     if (tdid == UBTreeFrozenTDSlotId) {
         transInfo->xmin = FrozenTransactionId;
@@ -1922,7 +1949,7 @@ static void GetItupTransInfo(IndexScanDesc scan, Page page, IndexTuple itup, Off
     }
     
     UBTreeTD td = UBTreePCRGetTD(page, tdid);
-    if (UBTreePCRTDIsFrozen(td) || (IsUBTreePCRTDReused(trx) &&
+    if (UBTreePCRTDIsFrozen(td) || (IsUBTreePCRTDReused(iid) &&
         TransactionIdPrecedes(opaque->last_commit_xid, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid)))) {
         transInfo->xmin = FrozenTransactionId;
         transInfo->xmax = (deleted ? FrozenTransactionId : InvalidTransactionId);
@@ -1933,7 +1960,7 @@ static void GetItupTransInfo(IndexScanDesc scan, Page page, IndexTuple itup, Off
     uint8 prevTdid;
     UndoRecPtr blkprev = GetItupXidFromUndo(itup, td->undoRecPtr, &tdXid, &prevTdid, &deleted);
     if (!TransactionIdIsValid(tdXid)) {
-        tdXid = IsUBTreePCRTDReused(trx) ? tdXid : td->xactid;
+        tdXid = IsUBTreePCRTDReused(iid) ? tdXid : td->xactid;
         if (deleted) {
             transInfo->xmin = FrozenTransactionId;
             transInfo->xmax = tdXid;
@@ -1998,6 +2025,115 @@ static void UBTreePCRSaveItem(IndexScanDesc scan, int itemIndex, Page page, Offs
 }
 
 /*
+ * UBTreePCRKillItems - set LP_DEAD state for items an indexscan caller has
+ * told us were killed
+ *
+ * scan->so contains information about the current page and killed tuples
+ * thereon (generally, this should only be called if so->numKilled > 0).
+ *
+ * The caller must have pin on so->currPos.buf, but may or may not have
+ * read-lock, as indicated by haveLock.  Note that we assume read-lock
+ * is sufficient for setting LP_DEAD status (which is only a hint).
+ *
+ * We match items by heap TID before assuming they are the right ones to
+ * delete.	We cope with cases where items have moved right due to insertions.
+ * If an item has moved off the current page due to a split, we'll fail to
+ * find it and do nothing (this is not an error case --- we assume the item
+ * will eventually get marked in a future indexscan).  Note that because we
+ * hold pin on the target page continuously from initially reading the items
+ * until applying this function, VACUUM cannot have deleted any items from
+ * the page, and so there is no need to search left from the recorded offset.
+ * (This observation also guarantees that the item is still the right one
+ * to delete, which might otherwise be questionable since heap TIDs can get
+ * recycled.)
+ */
+static void UBTreePCRKillItems(IndexScanDesc scan)
+{
+    BTScanOpaque so = (BTScanOpaque)scan->opaque;
+    Page page;
+    UBTPCRPageOpaque opaque;
+    OffsetNumber minoff;
+    OffsetNumber maxoff;
+    int i;
+    bool killedsomething = false;
+    Oid heapOid = IndexScanGetPartHeapOid(scan);
+
+    Assert(BufferIsValid(so->currPos.buf));
+
+    page = BufferGetPage(so->currPos.buf);
+    opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    minoff = P_FIRSTDATAKEY(opaque);
+    maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
+
+    for (i = 0; i < so->numKilled; i++) {
+        int itemIndex = so->killedItems[i];
+        BTScanPosItem *kitem = &so->currPos.items[itemIndex];
+        OffsetNumber offnum = kitem->indexOffset;
+        Oid partOid = kitem->partitionOid;
+        int2 bucketid = kitem->bucketid;
+
+        Assert(itemIndex >= so->currPos.firstItem && itemIndex <= so->currPos.lastItem);
+        if (offnum < minoff) {
+            continue; /* pure paranoia */
+        }
+        while (offnum <= maxoff) {
+            UBTreeItemId iid = UBTreePCRGetRowPtr(page, offnum);
+            IndexTuple ituple = UBTreePCRGetIndexTuple(page, offnum);
+            bool killtuple = false;
+
+            if (btree_tuple_is_posting(ituple)) {
+                int posting_idx = i + 1;
+                int nposting = btree_tuple_get_nposting(ituple);
+                int j;
+                for (j = 0; j < nposting; j++) {
+                    ItemPointer item = btree_tuple_get_posting_n(ituple, j);
+                    if (!ItemPointerEquals(item, &kitem->heapTid))
+                        break;
+                    if (posting_idx < so->numKilled)
+                        kitem = &so->currPos.items[so->killedItems[posting_idx++]];
+                }
+                if (j == nposting)
+                    killtuple = true;
+            } else if (ItemPointerEquals(&ituple->t_tid, &kitem->heapTid)) {
+                Oid currPartOid = scan->xs_want_ext_oid ? index_getattr_tableoid(scan->indexRelation, ituple) : heapOid;
+                int2 currbktid =
+                    scan->xs_want_bucketid ? index_getattr_bucketid(scan->indexRelation, ituple) : bucketid;
+                if (currPartOid == partOid && currbktid == bucketid) {
+                    killtuple = true;
+                }
+            }
+
+            if (killtuple && !ItemIdIsDead(iid)) {
+                /* found the item */
+                ItemIdMarkDead(iid);
+                killedsomething = true;
+                break; /* out of inner search loop */
+            }
+            offnum = OffsetNumberNext(offnum);
+        }
+    }
+
+    /*
+     * Since this can be redone later if needed, it's treated the same as a
+     * commit-hint-bit status update for heap tuples: we mark the buffer dirty
+     * but don't make a WAL log entry.
+     *
+     * Whenever we mark anything LP_DEAD, we also set the page's
+     * BTP_HAS_GARBAGE flag, which is likewise just a hint.
+     */
+    if (killedsomething) {
+        opaque->btpo_flags |= BTP_HAS_GARBAGE;
+        MarkBufferDirtyHint(so->currPos.buf, true);
+    }
+
+    /*
+     * Always reset the scan state, so we don't look for same items on other
+     * pages.
+     */
+    so->numKilled = 0;
+}
+
+/*
  *	UBTreePCRStepPage() -- Step to next page containing valid data for scan
  *
  * On entry, so->currPos.buf must be pinned and read-locked.  We'll drop
@@ -2020,9 +2156,9 @@ static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir)
     Assert(BufferIsValid(so->currPos.buf));
 
     /* Before leaving current page, deal with any killed items */
-    if (so->numKilled > 0)
-        _bt_killitems(scan, true);
-
+    if (so->numKilled > 0) {
+        UBTreePCRKillItems(scan);
+    }
     /*
      * Before we modify currPos, make a copy of the page data if there was a
      * mark position that needs it.
@@ -2186,8 +2322,7 @@ Buffer UBTreePCRGetEndPoint(Relation rel, uint32 level, bool rightmost)
         /* Descend to leftmost or rightmost child page */
         if (rightmost) {
             offnum = UBTreePCRPageGetMaxOffsetNumber(page);
-        }
-        else {
+        } else {
             offnum = P_FIRSTDATAKEY(opaque);
         }
         itup = UBTreePCRGetIndexTuple(page, offnum);
@@ -2385,7 +2520,7 @@ int TDCompare(Datum a, Datum b, void *arg)
     }
 }
 
-static void BuildCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer)
+static void BuildCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer, CommandId *page_cid)
 {
     /* copy base page to cr page and unlock base page */
     Page basePage = BufferGetPage(baseBuffer);
@@ -2396,10 +2531,11 @@ static void BuildCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer)
 
     Relation rel = scan->indexRelation;
     Snapshot snapshot = scan->xs_snapshot;
+    *page_cid = InvalidCommandId;
 
     if (!IsPCRScanModeSupported(snapshot)) {
         ereport(ERROR, (errmsg("Unsupported snapshot type %u when contruct cr page rnode[%u,%u,%u], blkno:%u",
-            rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, blkno)));
+            snapshot, rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, blkno)));
     }
 
     ereport(DEBUG5, (errmsg("build cr page rnode[%u,%u,%u], blkno:%u, snapshot:%u",
@@ -2426,7 +2562,7 @@ loop:
             Assert(!IS_VALID_UNDO_REC_PTR(td->undoRecPtr));
             continue;
         }
-        if (TransactionIdPrecedes(xid, globalRecycleXid) || 
+        if (TransactionIdPrecedes(xid, globalRecycleXid) ||
             (TransactionIdPrecedes(xid, globalFrozenXid) && TransactionIdPrecedes(xid, snapshot->xmin))) {
             continue;
         }
@@ -2452,7 +2588,7 @@ loop:
             /* prevCommitting is true indicate xid is aborted */
             if (prevCommitting || (latestCsn >= snapshot->snapshotcsn && snapshot->satisfies != SNAPSHOT_NOW)) {
                 /* xid is invisible, rollback it */
-                RollbackCRPage(scan, crPage, tdid);
+                RollbackCRPage(scan, crPage, tdid, NULL);
                 if (!TransactionIdIsValid(xid)) {
                     continue;
                 }
@@ -2466,9 +2602,11 @@ loop:
             Assert(!prevInprogress);
             bool isCurrentXid = TransactionIdIsCurrentTransactionId(td->xactid);
             CommandId cid = isCurrentXid ? snapshot->curcid : InvalidCommandId;
-            RollbackCRPage(scan, crPage, tdid, cid);
+            CommandId cur_page_cid;
+            RollbackCRPage(scan, crPage, tdid, &cur_page_cid, cid);
             if (xid == td->xactid) {
                 Assert(cid > 0);
+                *page_cid = cur_page_cid;
                 continue;
             }
             prevInprogress = true;
@@ -2519,7 +2657,7 @@ loop:
         if (csn < snapshot->snapshotcsn) {
             break;
         }
-        RollbackCRPage(scan, crPage, tdid, InvalidCommandId, firstTupleCopy);
+        RollbackCRPage(scan, crPage, tdid, NULL, InvalidCommandId, firstTupleCopy);
         Assert(!UBTreePCRTDHasCsn(td));
         rollbackCount++;
         if (rollbackCount % CR_ROLLBACL_COUNT_THRESHOLD == 0) {

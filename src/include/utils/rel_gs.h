@@ -12,11 +12,11 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * rel_gs.h
  *        openGauss relation descriptor (a/k/a relcache entry) definitions.
- * 
- * 
+ *
+ *
  * IDENTIFICATION
  *        src/include/utils/rel_gs.h
  *
@@ -695,7 +695,7 @@ extern void PartitionDecrementReferenceCount(Partition part);
 #define RELATION_SUPPORT_AUTONOMOUS_EXTEND_PARTITION \
     g_instance.attr.attr_storage.max_concurrent_autonomous_transactions > 0
 
-/*  
+/*
  *   type  bucketOid     bucketKey     meaning
  *    N      INV           INV         relation has no bucket
  *    B       1            KEY         relation has bucket but without bucket storage
@@ -704,7 +704,7 @@ extern void PartitionDecrementReferenceCount(Partition part);
  */
 #define REALTION_BUCKETKEY_INITED(relation) \
         ((relation)->rd_bucketkey != (RelationBucketKey *)&((relation)->rd_bucketkey))
-    
+
 #define REALTION_BUCKETKEY_VALID(relation) \
         (REALTION_BUCKETKEY_INITED(relation) && PointerIsValid((relation)->rd_bucketkey))
 
@@ -783,7 +783,7 @@ static inline bool IsCompressedByCmprsInPgclass(const RelCompressType cmprInPgcl
 
 #define RelationIsRedistributeDest(relation)		\
     (REDIS_REL_DESTINATION == (RelationGetAppendMode(relation)) ? true : false)
-#else 
+#else
 #define RelationInRedistribute(relation) (false)
 
 #define RelationInRedistributeReadOnly(relation) (false)

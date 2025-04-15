@@ -641,8 +641,8 @@ void BaseInit(void)
     InitSync();
     smgrinit();
     InitBufferPoolAccess();
-    InitCRBufPoolAccess();
     if (!ENABLE_DSS) {
+        InitCRBufPoolAccess();
         undo::UndoLogInit();
     }
 }

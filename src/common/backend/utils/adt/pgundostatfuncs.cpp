@@ -2456,14 +2456,15 @@ Datum gs_index_recycle_queue(PG_FUNCTION_ARGS)
                     erraction("Check the blkno parameter.")));
             PG_RETURN_VOID();
         }
-        Buffer buf = _bt_getbuf(relation, blkno, BT_READ);
+        Buffer buf = ReadRecycleQueueBuffer(relation, blkno);
+        LockBuffer(buf, BT_READ);
         if (BufferIsInvalid(buf)) {
             relation_close(relation, AccessShareLock);
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Block number %u is invalid", blkno)));
             PG_RETURN_VOID();
         }
         (void) UBTreeRecycleQueuePageDump(relation, buf, true, &tupDesc, tupstore, UBTREE_RECYCLE_OUTPUT_PARAM_CNT);
-        _bt_relbuf(relation, buf);
+        UnlockReleaseBuffer(buf);
     } else {
         UBTreeDumpRecycleQueueFork(relation, (UBTRecycleForkNumber)type, &tupDesc, tupstore,
             UBTREE_RECYCLE_OUTPUT_PARAM_CNT);

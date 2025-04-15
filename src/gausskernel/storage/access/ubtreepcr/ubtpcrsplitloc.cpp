@@ -158,7 +158,7 @@ static void UBTreePCRRecsplitloc(FindSplitData *state, OffsetNumber firstoldonri
      */
     if (!state->is_leaf) {
         int indexTupleDataSize = (MAXALIGN(sizeof(IndexTupleData)));
-        rightfree += (int16)firstrightitemsz - (int16)(indexTupleDataSize + sizeof(ItemIdData));
+        rightfree += (int16)firstrightitemsz - (int16)(indexTupleDataSize + sizeof(UBTreeItemIdData));
     }
 
     /* Record split if legal */
@@ -232,7 +232,7 @@ static bool UBTreePCRAdjacenthtid(ItemPointer lowhtid, ItemPointer highhtid)
 static bool UBTreePCRAfternewitemoff(FindSplitData *state, OffsetNumber maxoff, int leaffillfactor, bool *usemult)
 {
     int16 nkeyatts;
-    ItemId itemid;
+    UBTreeItemId itemid;
     IndexTuple tup;
     int keepnatts;
 
@@ -274,7 +274,7 @@ static bool UBTreePCRAfternewitemoff(FindSplitData *state, OffsetNumber maxoff, 
      * consisting of two non-NULL int8/int64 attributes (or four non-NULL
      * int4/int32 attributes)
      */
-    if (state->newitemsz > MAXALIGN(sizeof(IndexTupleData)) + MAXALIGN(sizeof(IndexTupleTrxData)) + sizeof(ItemIdData)) {
+    if (state->newitemsz > MAXALIGN(sizeof(IndexTupleData)) + sizeof(UBTreeItemIdData)) {
         return false;
     }
 
@@ -448,7 +448,7 @@ static void UBTreePCRIntervalEdges(const FindSplitData *state, SplitPoint **left
  */
 static inline IndexTuple UBTreePCRSplitLastleft(FindSplitData *state, SplitPoint *split)
 {
-    ItemId itemid;
+    UBTreeItemId itemid;
 
     if (split->newitemonleft && split->firstoldonright == state->newitemoff)
         return state->newitem;
@@ -462,7 +462,7 @@ static inline IndexTuple UBTreePCRSplitLastleft(FindSplitData *state, SplitPoint
  */
 static inline IndexTuple UBTreePCRSplitFirstright(FindSplitData *state, SplitPoint *split)
 {
-    ItemId itemid;
+    UBTreeItemId itemid;
 
     if (!split->newitemonleft && split->firstoldonright == state->newitemoff)
         return state->newitem;
@@ -482,7 +482,8 @@ static inline IndexTuple UBTreePCRSplitFirstright(FindSplitData *state, SplitPoi
  * willing to go to avoid appending a heap TID when using the many duplicates
  * strategy (it also saves UBTreeBestsplitloc() useless cycles).
  */
-static int UBTreePCRStrategy(FindSplitData *state, SplitPoint *leftpage, SplitPoint *rightpage, FindSplitStrat *strategy)
+static int UBTreePCRStrategy(FindSplitData *state, SplitPoint *leftpage, SplitPoint *rightpage,
+    FindSplitStrat *strategy)
 {
     IndexTuple leftmost, rightmost;
     SplitPoint *leftinterval = NULL;
@@ -567,7 +568,7 @@ static int UBTreePCRStrategy(FindSplitData *state, SplitPoint *leftpage, SplitPo
     } else if (state->is_rightmost) {
         *strategy = SPLIT_SINGLE_VALUE;
     } else {
-        ItemId itemid;
+        UBTreeItemId itemid;
         IndexTuple hikey;
 
         itemid = UBTreePCRGetRowPtr(state->page, P_HIKEY);
@@ -605,14 +606,15 @@ static int UBTreePCRSplitPenalty(FindSplitData *state, SplitPoint *split)
     IndexTuple firstrighttuple;
 
     if (!state->is_leaf) {
-        ItemId itemid;
+        UBTreeItemId itemid;
 
         if (!split->newitemonleft && split->firstoldonright == state->newitemoff)
             return state->newitemsz;
 
         itemid = UBTreePCRGetRowPtr(state->page, split->firstoldonright);
 
-        return MAXALIGN(ItemIdGetLength(itemid)) + sizeof(ItemIdData);
+        return MAXALIGN(IndexTupleSize(UBTreePCRGetIndexTupleByItemId(state->page, itemid)))
+            + sizeof(UBTreeItemIdData);
     }
 
     lastleftuple = UBTreePCRSplitLastleft(state, split);
@@ -729,7 +731,7 @@ OffsetNumber UBTreePCRFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetNumbe
     int leftspace, rightspace, olddataitemstotal, olddataitemstoleft, perfectpenalty, leaffillfactor;
     FindSplitData state;
     FindSplitStrat strategy;
-    ItemId itemid;
+    UBTreeItemId itemid;
     OffsetNumber offnum, maxoff, foundfirstright;
     double fillfactormult;
     bool usemult = false;
@@ -740,16 +742,17 @@ OffsetNumber UBTreePCRFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetNumbe
     maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
 
     /* Passed-in newitemsz is MAXALIGNED but does not include line pointer */
-    newitemsz += sizeof(ItemIdData);
+    newitemsz += sizeof(UBTreeItemIdData);
 
     /* Total free space available on a btree page, after fixed overhead */
-    leftspace = rightspace = PageGetPageSize(page) - SizeOfPageHeaderData - 
+    leftspace = rightspace = PageGetPageSize(page) - SizeOfPageHeaderData -
         SizeOfUBTreeTDData(page) - MAXALIGN(sizeof(UBTPCRPageOpaqueData));
 
     /* The right page will have the same high key as the old page */
     if (!P_RIGHTMOST(opaque)) {
         itemid = UBTreePCRGetRowPtr(page, P_HIKEY);
-        rightspace -= (int)(MAXALIGN(ItemIdGetLength(itemid)) + sizeof(ItemIdData));
+        rightspace -= (int)(MAXALIGN(IndexTupleSize(UBTreePCRGetIndexTupleByItemId(page, itemid)))
+            + sizeof(UBTreeItemIdData));
     }
 
     /* Count up total space in data items without actually scanning 'em */
@@ -799,7 +802,7 @@ OffsetNumber UBTreePCRFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetNumbe
         Size itemsz;
 
         itemid = UBTreePCRGetRowPtr(page, offnum);
-        itemsz = MAXALIGN(ItemIdGetLength(itemid)) + sizeof(ItemIdData);
+        itemsz = MAXALIGN(IndexTupleSize(UBTreePCRGetIndexTupleByItemId(page, itemid))) + sizeof(UBTreeItemIdData);
 
         /*
          * Will the new item go to left or right of split?
@@ -838,7 +841,7 @@ OffsetNumber UBTreePCRFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetNumbe
      * I believe it is not possible to fail to find a feasible split, but just
      * in case ...
      */
-    if (state.nsplits == 0) { // TODO: 这里的值不对，小了1，重新调试一下
+    if (state.nsplits == 0) {
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                 errmsg("could not find a feasible split point for index \"%s\" at blkno %u. "
                        "newitemoff %u, newitemsize %lu",
@@ -1056,10 +1059,8 @@ static void UBTreePCRChecksplitloc(FindSplitDataForLocation* state, OffsetNumber
      * data from the first item that winds up on the right page.
      */
     if (!state->is_leaf) {
-        // TODO: 调试的时候check一下这里的 '- TXNINFOSIZE'
-        // int indexTupleDataSize = (MAXALIGN(sizeof(IndexTupleData)) - TXNINFOSIZE);
         int indexTupleDataSize = (MAXALIGN(sizeof(IndexTupleData)));
-        rightfree += (int)firstrightitemsz - (int)(indexTupleDataSize + sizeof(ItemIdData));
+        rightfree += (int)firstrightitemsz - (int)(indexTupleDataSize + sizeof(UBTreeItemIdData));
     }
 
     /*
@@ -1117,12 +1118,13 @@ static void UBTreePCRChecksplitloc(FindSplitDataForLocation* state, OffsetNumber
  * where firstright == newitemoff.
  *
  */
-OffsetNumber UBTreePCRFindsplitloc(Relation rel, Buffer buf, OffsetNumber newitemoff, Size newitemsz, bool* newitemonleft)
+OffsetNumber UBTreePCRFindsplitloc(Relation rel, Buffer buf, OffsetNumber newitemoff, Size newitemsz,
+    bool* newitemonleft)
 {
     UBTPCRPageOpaque opaque;
     OffsetNumber offnum;
     OffsetNumber maxoff;
-    ItemId itemid;
+    UBTreeItemId itemid;
     FindSplitDataForLocation state;
     int leftspace, rightspace, goodenough, olddataitemstotal, olddataitemstoleft;
     bool goodenoughfound = false;
@@ -1131,16 +1133,17 @@ OffsetNumber UBTreePCRFindsplitloc(Relation rel, Buffer buf, OffsetNumber newite
     opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
 
     /* Passed-in newitemsz is MAXALIGNED but does not include line pointer */
-    newitemsz += sizeof(ItemIdData);
+    newitemsz += sizeof(UBTreeItemIdData);
 
     /* Total free space available on a btree page, after fixed overhead */
-    leftspace = rightspace = PageGetPageSize(page) - SizeOfPageHeaderData - 
+    leftspace = rightspace = PageGetPageSize(page) - SizeOfPageHeaderData -
         SizeOfUBTreeTDData(page) - MAXALIGN(sizeof(UBTPCRPageOpaqueData));
 
     /* The right page will have the same high key as the old page */
     if (!P_RIGHTMOST(opaque)) {
         itemid = UBTreePCRGetRowPtr(page, P_HIKEY);
-        rightspace -= (int)(MAXALIGN(ItemIdGetLength(itemid)) + sizeof(ItemIdData));
+        rightspace -= (int)(MAXALIGN(IndexTupleSize(UBTreePCRGetIndexTupleByItemId(page, itemid)))
+            + sizeof(UBTreeItemIdData));
     }
 
     /* Count up total space in data items without actually scanning 'em */
@@ -1186,7 +1189,7 @@ OffsetNumber UBTreePCRFindsplitloc(Relation rel, Buffer buf, OffsetNumber newite
         Size itemsz;
 
         itemid = UBTreePCRGetRowPtr(page, offnum);
-        itemsz = MAXALIGN(ItemIdGetLength(itemid)) + sizeof(ItemIdData);
+        itemsz = MAXALIGN(IndexTupleSize(UBTreePCRGetIndexTupleByItemId(page, itemid))) + sizeof(UBTreeItemIdData);
 
         /*
          * Will the new item go to left or right of split?

@@ -28,6 +28,8 @@
 #include "commands/tablespace.h"
 #include "utils/aiomem.h"
 
+static const int PCR_TXN_INFO_SIZE_DIFF = sizeof(TransactionId) * 2;
+
 BTPageState* UBTreePCRPageState(BTWriteState* wstate, uint32 level);
 static Page UBTreePCRBlNewPage(Relation rel, uint32 level);
 
@@ -40,27 +42,28 @@ static void UBTreePCRSlideLeft(Page page)
 {
     OffsetNumber off;
     OffsetNumber maxoff;
-    ItemId previi;
-    ItemId thisii;
+    UBTreeItemId previi;
+    UBTreeItemId thisii;
 
     if (!PageIsEmpty(page)) {
         maxoff = UBTPCRPageGetMaxOffsetNumber(page);
-        previi = (ItemId)UBTreePCRGetRowPtr(page, P_HIKEY);
+        previi = (UBTreeItemId)UBTreePCRGetRowPtr(page, P_HIKEY);
         for (off = P_FIRSTKEY; off <= maxoff; off = OffsetNumberNext(off)) {
-            thisii = (ItemId)UBTreePCRGetRowPtr(page, off);
+            thisii = (UBTreeItemId)UBTreePCRGetRowPtr(page, off);
             *previi = *thisii;
             previi = thisii;
         }
-        ((PageHeader)page)->pd_lower -= sizeof(ItemIdData);
+        ((PageHeader)page)->pd_lower -= sizeof(UBTreeItemIdData);
     }
 }
 
 /*
  * emit a completed btree page, and release the working storage.
  */
-static void UBTreePCRBlWritePage(BTWriteState *wstate, Page page, BlockNumber blkno)
+static void UBTreePCRBlWritePage(BTWriteState *wstate, Page page,
+                                 BlockNumber blkno)
 {
-    bool need_free = false;
+    bool needFree = false;
     errno_t errorno = EOK;
 
     if (blkno >= wstate->btws_pages_written) {
@@ -97,7 +100,7 @@ static void UBTreePCRBlWritePage(BTWriteState *wstate, Page page, BlockNumber bl
                 wstate->btws_zeropage = (Page)palloc0(BLCKSZ);
             }
             ADIO_END();
-            need_free = true;
+            needFree = true;
         }
 
         /* don't set checksum for all-zero page */
@@ -141,7 +144,7 @@ static void UBTreePCRBlWritePage(BTWriteState *wstate, Page page, BlockNumber bl
 
     ADIO_RUN()
     {
-        if (need_free) {
+        if (needFree) {
             adio_align_free(wstate->btws_zeropage);
             wstate->btws_zeropage = NULL;
         }
@@ -149,7 +152,7 @@ static void UBTreePCRBlWritePage(BTWriteState *wstate, Page page, BlockNumber bl
     }
     ADIO_ELSE()
     {
-        if (need_free) {
+        if (needFree) {
             pfree(wstate->btws_zeropage);
             wstate->btws_zeropage = NULL;
         }
@@ -180,13 +183,14 @@ static void UBTreePCRBlWritePage(BTWriteState *wstate, Page page, BlockNumber bl
  *
  *	!!! EREPORT(ERROR) IS DISALLOWED HERE !!!
  */
-OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size, OffsetNumber offsetNumber, bool overwrite)
+OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size,
+                               OffsetNumber offsetNumber, bool overwrite)
 {
     PageHeader phdr = (PageHeader)page;
     Size alignedSize;
     int lower;
     int upper;
-    ItemId itemId;
+    UBTreeItemId itemId;
     OffsetNumber limit;
     bool needshuffle = false;
     uint16 headersize;
@@ -197,11 +201,10 @@ OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size, OffsetNumber off
      */
     headersize = SizeOfPageHeaderData;
     if (phdr->pd_lower < headersize || phdr->pd_lower > phdr->pd_upper || phdr->pd_upper > phdr->pd_special ||
-        phdr->pd_special > BLCKSZ){
+        phdr->pd_special > BLCKSZ) {
         ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("corrupted page pointers: lower = %u, upper = %u, special = %u", phdr->pd_lower,
-                    phdr->pd_upper, phdr->pd_special)));
-
+                errmsg("corrupted page pointers: lower = %u, upper = %u, special = %u", phdr->pd_lower,
+                phdr->pd_upper, phdr->pd_special)));
     }
 
     /*
@@ -215,14 +218,15 @@ OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size, OffsetNumber off
         if (overwrite) {
             if (offsetNumber < limit) {
                 itemId = UBTreePCRGetRowPtr(phdr, offsetNumber);
-                if (ItemIdIsUsed(itemId) || ItemIdHasStorage(itemId)) {
+                if (ItemIdIsUsed(itemId) || UBTreeItemIdHasStorage(itemId)) {
                     ereport(WARNING, (errmsg("will not overwrite a used ItemId")));
                     return InvalidOffsetNumber;
                 }
             }
         } else {
-            if (offsetNumber < limit)
+            if (offsetNumber < limit) {
                 needshuffle = true; /* need to move existing linp's */
+            }
         }
     } else {
         /* offsetNumber was not passed in, so find a free slot */
@@ -235,7 +239,7 @@ OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size, OffsetNumber off
              */
             for (offsetNumber = 1; offsetNumber < limit; offsetNumber++) {
                 itemId = UBTreePCRGetRowPtr(phdr, offsetNumber);
-                if (!ItemIdIsUsed(itemId) && !ItemIdHasStorage(itemId))
+                if (!ItemIdIsUsed(itemId) && !UBTreeItemIdHasStorage(itemId))
                     break;
             }
             if (offsetNumber >= limit) {
@@ -260,7 +264,7 @@ OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size, OffsetNumber off
      * alignedSize > pd_upper.
      */
     if (offsetNumber == limit || needshuffle) {
-         lower = phdr->pd_lower + sizeof(ItemIdData);
+        lower = phdr->pd_lower + sizeof(UBTreeItemIdData);
     } else {
         lower = phdr->pd_lower;
     }
@@ -279,13 +283,13 @@ OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size, OffsetNumber off
     itemId = UBTreePCRGetRowPtr(phdr, offsetNumber);
 
     if (needshuffle) {
-        rc = memmove_s(itemId + 1, (limit - offsetNumber) * sizeof(ItemIdData), itemId,
-                       (limit - offsetNumber) * sizeof(ItemIdData));
+        rc = memmove_s(itemId + 1, (limit - offsetNumber) * sizeof(UBTreeItemIdData), itemId,
+                       (limit - offsetNumber) * sizeof(UBTreeItemIdData));
         securec_check(rc, "", "");
     }
 
     /* set the item pointer */
-    ItemIdSetNormal(itemId, upper, size);
+    UBTreeItemIdSetNormal(itemId, upper);
 
     /* copy the item's data onto the page */
     rc = memcpy_s((char *)page + upper, alignedSize, item, size);
@@ -297,8 +301,6 @@ OffsetNumber UBTPCRPageAddItem(Page page, Item item, Size size, OffsetNumber off
 
     return offsetNumber;
 }
-
-
 
 /*
  * Add an item to a page being built.
@@ -328,29 +330,20 @@ static void UBTreePCRSortAddTuple(Page page, Size itemsize, IndexTuple itup,
     }
 
     if (!(isnew && P_ISLEAF(opaque))) {
-        /* not new(copied tuple) or internal page. Don't need to handle trx, normal insert */
+        /* not new(copied tuple) or internal page. */
         if (UBTPCRPageAddItem(page, (Item)itup, itemsize, itup_off, false) == InvalidOffsetNumber)
             ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
                     errmsg("Index tuple cant fit in the page when creating index.")));
     } else {
-        Size storageSize = IndexTupleSize(itup);
-        Size newsize = storageSize - MAXALIGN(sizeof(IndexTupleTrxData));
-        IndexTupleSetSize(itup, newsize);
-
-        /* reserve space for IndexTupleTrxData */
-        ((PageHeader)page)->pd_upper -= MAXALIGN(sizeof(IndexTupleTrxData));
-        IndexTupleTrx trx = (IndexTupleTrx)(((char*)page) + ((PageHeader)page)->pd_upper);
-        if (UBTPCRPageAddItem(page, (Item)itup, newsize, itup_off, false) == InvalidOffsetNumber) {
+        OffsetNumber offnum = UBTPCRPageAddItem(page, (Item)itup, IndexTupleSize(itup), itup_off, false);
+        if (offnum == InvalidOffsetNumber) {
             ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
                     errmsg("Index tuple cant fit in the page when creating index.")));
         }
-        /* set trx frozen and invalid */
-        UBTreePCRSetIndexTupleTrxSlot(trx, UBTreeFrozenTDSlotId);
-        UBTreePCRSetIndexTupleTrxValid(trx);
-        UBTreePCRClearIndexTupleDeleted(trx);
-        ItemId iid = UBTreePCRGetRowPtr(page, itup_off);
-        iid->lp_len = storageSize;
-        
+        UBTreeItemId iid = UBTreePCRGetRowPtr(page, offnum);
+        UBTreePCRSetIndexTupleTDSlot(iid, UBTreeFrozenTDSlotId);
+        UBTreePCRClearIndexTupleTDInvalid(iid);
+        UBTreePCRClearIndexTupleDeleted(iid);
         opaque->activeTupleCount ++;
     }
 }
@@ -359,7 +352,8 @@ static void UBTreePCRSortAddTuple(Page page, Size itemsize, IndexTuple itup,
  * Add an item to a disk page from the sort output.
  * Same as UBTreeBuildAdd().
  */
-void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup, bool hasXid)
+void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state,
+                       IndexTuple itup, bool hasXid)
 {
     /*
      * This is a handy place to check for cancel interrupts during the btree
@@ -376,11 +370,9 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(npage);
 
     if (!isPivot) {
-        /* Normal index tuple, need reserve space for IndexTupleTrx */
         Size itupsz = IndexTupleSize(itup);
-        itupsz += MAXALIGN(sizeof(IndexTupleTrxData));
         if (hasXid) {
-            itupsz -= sizeof(TransactionId) * 2;
+            itupsz -= PCR_TXN_INFO_SIZE_DIFF;
         }
         IndexTupleSetSize(itup, itupsz);
     }
@@ -418,8 +410,8 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
          */
         Page opage = npage;
         BlockNumber oblkno = nblkno;
-        ItemId ii;
-        ItemId hii;
+        UBTreeItemId ii;
+        UBTreeItemId hii;
         IndexTuple oitup;
 
         /* Create new page of same level */
@@ -438,18 +430,20 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
         Assert(last_off > P_FIRSTKEY);
         ii = UBTreePCRGetRowPtr(opage, last_off);
         oitup = (IndexTuple)UBTreePCRGetIndexTuple(opage, last_off);
-        UBTreePCRSortAddTuple(npage, ItemIdGetLength(ii), oitup, P_FIRSTKEY, false);
+        UBTreePCRSortAddTuple(npage, IndexTupleSize(oitup), oitup, P_FIRSTKEY, false);
 
         /*
          * Move 'last' into the high key position on opage
          */
         hii = UBTreePCRGetRowPtr(opage, P_HIKEY);
         *hii = *ii;
-        ItemIdSetUnused(ii); /* redundant */
-        ((PageHeader)opage)->pd_lower -= sizeof(ItemIdData);
+        ii->lp_flags = LP_UNUSED;
+        ii->lp_off = 0;
+        ((PageHeader)opage)->pd_lower -= sizeof(UBTreeItemIdData);
 
         if (isleaf) {
-            IndexTuple lastleft, truncated;
+            IndexTuple lastleft;
+            IndexTuple truncated;
             /*
              * Truncate away any unneeded attributes from high key on leaf
              * level.  This is only done at the leaf level because downlinks
@@ -545,7 +539,7 @@ void UBTreePCRBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup
          * Write out the old page.	We never need to touch it again, so we can
          * free the opage workspace too.
          */
-        UBTreePCRBlWritePage((BTWriteState*)wstate, opage, oblkno);  
+        UBTreePCRBlWritePage((BTWriteState*)wstate, opage, oblkno);
 
         /*
          * Reset last_off to point to new page
@@ -611,9 +605,9 @@ static Page UBTreePCRBlNewPage(Relation rel, uint32 level)
     opaque->btpo_cycleid = 0;
     if (level == 0) {
         UBTreePCRInitTD(page);
-    } 
+    }
     /* Make the P_HIKEY line pointer appear allocated */
-    ((PageHeader)page)->pd_lower += sizeof(ItemIdData);
+    ((PageHeader)page)->pd_lower += sizeof(UBTreeItemIdData);
 
     return page;
 }
@@ -868,5 +862,4 @@ BTPageState* UBTreePCRPageState(BTWriteState* wstate, uint32 level)
     state->btps_next = NULL;
 
     return state;
-
 }

@@ -989,10 +989,9 @@ static UndoRecPtr PrepareUndoRecordForRedo(XLogReaderState *record,
         RelFileNode targetNode = { 0 };
         BlockNumber blkno = InvalidBlockNumber;
         bool res PG_USED_FOR_ASSERTS_ONLY = XLogRecGetBlockTag(record, 0, &targetNode, NULL, &blkno);
-        Assert(res == true);
+        Assert(res);
 
         if (isInsert) {
-            // TODO
             urecptr = UBTreePCRPrepareUndoInsert(xlundohdr->relOid, partitionOid, targetNode.relNode,
                         targetNode.spcNode, UNDO_PERMANENT, xlrec->curXid, FirstCommandId,
                         blkprev, prevurp, blkno, xlundohdr, &undometa, InvalidOffsetNumber, InvalidBuffer,
@@ -1322,18 +1321,16 @@ static void UBTree3XlogInsert(XLogReaderState* record, bool isDup)
                     ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add new item to block")));
                 }
             }
-            ItemId iid = UBTreePCRGetRowPtr(page, xlrec->offNum);
-            IndexTuple tup = UBTreePCRGetIndexTupleByItemId(page, iid);
-            IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(tup);
+            UBTreeItemId iid = UBTreePCRGetRowPtr(page, xlrec->offNum);
             UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
             UBTreeTD td = UBTreePCRGetTD(page, xlrec->tdId);
             opaque->activeTupleCount ++;
             td->setInfo(xlrec->curXid, urec);
             if (isDup) {
                 iid->lp_flags = LP_NORMAL;
-                UBTreePCRSetIndexTupleTrxSlot(trx, xlrec->tdId);
-                UBTreePCRClearIndexTupleTrxInvalid(trx);
-                UBTreePCRClearIndexTupleDeleted(trx);
+                UBTreePCRSetIndexTupleTDSlot(iid, xlrec->tdId);
+                UBTreePCRClearIndexTupleTDInvalid(iid);
+                UBTreePCRClearIndexTupleDeleted(iid);
             }
             PageSetLSN(page, buffer.lsn);
         }
@@ -1410,13 +1407,10 @@ static void UBTree3XlogPrunePage(XLogReaderState* record)
         /* Caller specified a bogus block_id */
         ereport(PANIC, (errmsg("failed to locate backup block with ID %d", 0)));
     }
-
     TransactionId latestConflictXid = TransactionIdFollows(xlrec->latestFrozenXid,
         xlrec->latestRemovedXid) ? xlrec->latestFrozenXid : xlrec->latestRemovedXid;
-
     if (InHotStandby && TransactionIdIsValid(latestConflictXid) && g_supportHotStandby)
         ResolveRecoveryConflictWithSnapshot(latestConflictXid, rnode);
-
     if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
         UBTree3XlogPrunePageOperatorPage(&buffer, XLogRecGetData(record), rnode.relNode);
         if (BufferIsValid(buffer.buf)) {
@@ -1571,13 +1565,13 @@ void BTree3XlogSplitLeftPage(RedoBufferInfo *bufferinfo, void *recorddata, bool 
     OffsetNumber off;
     for (off = P_FIRSTDATAKEY(lopaque); off < xlrec->firstRight; off ++) {
         if (onleft && off == xlrec->newItemOff) {
-            if (!UBTreePCRPageAddTuple(lNewPage, size,  NULL, item, leftOff, false, xlrec->slotNo)) {
+            if (!UBTreePCRPageAddTuple(lNewPage, size, NULL, item, leftOff, false, xlrec->slotNo)) {
                 ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add new item to block")));
             }
             leftOff = OffsetNumberNext(leftOff);
         }
 
-        ItemId iid = UBTreePCRGetRowPtr(lpage, off);
+        UBTreeItemId iid = UBTreePCRGetRowPtr(lpage, off);
         IndexTuple itup = UBTreePCRGetIndexTuple(lpage, off);
         Size itupSize = IndexTupleSize(itup);
         if (!UBTreePCRPageAddTuple(lNewPage, itupSize,  iid, itup, leftOff, true, UBTreeInvalidTDSlotId)) {

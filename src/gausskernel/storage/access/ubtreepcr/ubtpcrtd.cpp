@@ -29,16 +29,17 @@
 #include "storage/lmgr.h"
 
 
-static bool UBTreeFreezeOrInvalidIndexTuplesSetTd(const ItemId itemId, const IndexTupleTrx trx, uint8 *tdSlot)
+static bool UBTreeFreezeOrInvalidIndexTuplesSetTd(const UBTreeItemId iid, uint8 *tdSlot)
 {
-    if (ItemIdIsDead(itemId))
+    if (ItemIdIsDead(iid)) {
         return true;
+    }
 
-    if (!ItemIdIsUsed(itemId)) {
+    if (!ItemIdIsUsed(iid)) {
         return true;
-    } 
+    }
     
-    *tdSlot = trx->tdSlot;
+    *tdSlot = iid->lp_td_id;
     Assert((*tdSlot <= UBTREE_MAX_TD_COUNT) && (*tdSlot >= 0));
 
     return false;
@@ -46,10 +47,8 @@ static bool UBTreeFreezeOrInvalidIndexTuplesSetTd(const ItemId itemId, const Ind
 
 
 /*
- * UBTreeFreezeOrInvalidIndexTuples  
- * 
+ * UBTreeFreezeOrInvalidIndexTuples
  * Clear the slot information or set invalid_xact flags.
- * 
  */
 void UBTreeFreezeOrInvalidIndexTuples(Buffer buf, int nSlots, const uint8 *slots, bool isFrozen)
 {
@@ -59,25 +58,23 @@ void UBTreeFreezeOrInvalidIndexTuples(Buffer buf, int nSlots, const uint8 *slots
     OffsetNumber maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
     uint8 map[UBTREE_MAX_TD_COUNT + 1] = { 0 };
 
-    for (int i = 0;i < nSlots;i ++) {
+    for (int i = 0; i < nSlots; i++) {
         map[slots[i]] = 1;
     }
 
     OffsetNumber offnum = P_FIRSTDATAKEY((UBTPCRPageOpaque)PageGetSpecialPointer(page));
     for (; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
-        ItemId itemId = (ItemId)UBTreePCRGetRowPtr(page, offnum);
-        IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTuple(page, offnum);
-        IndexTupleTrx trx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
+        UBTreeItemId itemId = (UBTreeItemId)UBTreePCRGetRowPtr(page, offnum);
         uint8 tdSlot = UBTreeInvalidTDSlotId;
 
-        if (UBTreeFreezeOrInvalidIndexTuplesSetTd(itemId, trx, &tdSlot)) {
+        if (UBTreeFreezeOrInvalidIndexTuplesSetTd(itemId, &tdSlot)) {
             continue;
         }
 
         /*
          * The slot number on tuple is always array location of slot plus
          * one, so we need to subtract one here before comparing it with
-         * frozen slots.  See PageReserveTransactionSlot.
+         * frozen slots. See PageReserveTransactionSlot.
          */
         tdSlot -= 1;
         if (map[tdSlot] == 1) {
@@ -86,34 +83,33 @@ void UBTreeFreezeOrInvalidIndexTuples(Buffer buf, int nSlots, const uint8 *slots
              * is all visible and mark the deleted itemids as dead.
              */
             if (isFrozen) {
-                if (IsUBTreePCRItemDeleted(trx)) {
+                if (IsUBTreePCRItemDeleted(itemId)) {
                     ItemIdMarkDead(itemId);
                 } else {
                     IndexItemIdSetFrozen(itemId);
-                    UBTreePCRSetIndexTupleTrxSlot(trx, UBTreeFrozenTDSlotId);
-                    UBTreePCRClearIndexTupleTrxInvalid(trx);
+                    UBTreePCRSetIndexTupleTDSlot(itemId, UBTreeFrozenTDSlotId);
+                    UBTreePCRClearIndexTupleTDInvalid(itemId);
                 }
             } else {
                 /*
-                 * We just set the invalid slot flag in the
-                 * IndexTupleTrxData to indicate that for this 
-                 * index tuple we need to fetch the transaction 
+                 * We just set the invalid slot flag to indicate that for this
+                 * index tuple we need to fetch the transaction
                  * information from undo record.
                  */
-                UBTreePCRSetIndexTupleTrxInvalid(trx);
+                UBTreePCRSetIndexTupleTDInvalid(itemId);
             }
         }
     }
 }
 
 /*
- * UBTreePageFreezeTransationSlots 
- * 
+ * UBTreePageFreezeTDSlots
+ *
  * Make the transaction slots available for reuse.
- * 
+ *
  * Return reused tdSlot
  */
-uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, TransactionId* minXid)
+uint8 UBTreePageFreezeTDSlots(Relation relation, Buffer buf, TransactionId* minXid)
 {
     uint8 reuseSlot = UBTreeInvalidTDSlotId;
     Page page = BufferGetPage(buf);
@@ -159,12 +155,10 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
         /* Initialize the frozen slots. */
         for (uint8 i = 0; i < nFrozenSlots; i++) {
             UBTreeTD thisTrans;
-
             slotNo = frozenSlots[i];
             thisTrans = UBTreePCRGetTD(page, slotNo + 1);
-
             /* Remember the latest xid. */
-            if (TransactionIdFollows(thisTrans->xactid, latestfxid)){
+            if (TransactionIdFollows(thisTrans->xactid, latestfxid)) {
                 latestfxid = thisTrans->xactid;
             }
             thisTrans->setFrozen();
@@ -232,7 +226,7 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
 
     if (nAbortedXactSlots > 0) {
         for (uint8 i = 0; i < nAbortedXactSlots; i ++) {
-            ExecuteUndoActionsForUBTreePage(relation, buf, abortedXactSlots[nAbortedXactSlots]);
+            ExecuteUndoActionsForUBTreePage(relation, buf, abortedXactSlots[i] + 1);
         }
         reuseSlot = abortedXactSlots[nAbortedXactSlots - 1];
     }
@@ -274,7 +268,7 @@ uint8 UBTreePageFreezeTransationSlots(Relation relation, Buffer buf, Transaction
 
             XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
 
-            XLogRecPtr recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_FREEZE_TD_SLOT);
+            XLogRecPtr recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_REUSE_TD_SLOT);
             PageSetLSN(page, recptr);
         }
 
@@ -402,9 +396,9 @@ uint8 UBTreeExtendTDSlots(Relation relation, Buffer buf)
     return numExtended;
 }
 
-void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, IndexTupleTrx trx, bool *needRetry)
+void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, UBTreeItemId itemid, bool *needRetry)
 {
-    if (UBTreeTDSlotIsNormal(*slotNo) && !IsUBTreePCRTDReused(trx)) {
+    if (UBTreeTDSlotIsNormal(*slotNo) && !IsUBTreePCRTDReused(itemid)) {
         Page page = BufferGetPage(buf);
         UBTreeTD td = UBTreePCRGetTD(page, *slotNo);
         TransactionId xid = td->xactid;
@@ -422,7 +416,7 @@ void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, IndexTup
             if (!TransactionIdDidCommit(xid)) {
                 ExecuteUndoActionsForUBTreePage(rel, buf, *slotNo);
             }
-            *slotNo = trx->tdSlot;
+            *slotNo = itemid->lp_td_id;
         }
     }
 }
@@ -442,10 +436,10 @@ void UBTreePCRHandlePreviousTD(Relation rel, Buffer buf, uint8 *slotNo, IndexTup
  *
  * If we've reserved a transaction slot of a committed but not all-visible
  * transaction, we set slotReused as true, false otherwise.
- * 
+ *
  */
-uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId fxid, 
-    UBTreeTD oldTd, TransactionId *minXid)
+uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId fxid,
+                                       UBTreeTD oldTd, TransactionId *minXid)
 {
     Page page = BufferGetPage(buf);
     uint8 latestFreeTDSlot = UBTreeInvalidTDSlotId;
@@ -454,8 +448,6 @@ uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, Transactio
     uint8 tdCount = UBTreePageGetTDSlotCount(page);
 
     TransactionId currMinXid = MaxTransactionId;
-
-    // TODO: uheap有pgstat report，后面考虑下我们要不要加
 
     /*
      * For temp relations, we don't have to check all the slots since no other
@@ -478,7 +470,7 @@ uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, Transactio
         if (TransactionIdEquals(thisTrans->xactid, fxid)) {
             *oldTd = *thisTrans;
             return (slotNo + 1);
-        } else if (!TransactionIdIsValid(thisTrans->xactid)){
+        } else if (!TransactionIdIsValid(thisTrans->xactid)) {
             latestFreeTDSlot = slotNo;
         }
     } else {
@@ -517,8 +509,10 @@ uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, Transactio
     *minXid = currMinXid;
 
     /* no transaction slot available, try to reuse some existing slot */
-    uint8 reuseSlot = UBTreePageFreezeTransationSlots(relation, buf, minXid);
+    uint8 reuseSlot = UBTreePageFreezeTDSlots(relation, buf, minXid);
     if (reuseSlot != UBTreeInvalidTDSlotId) {
+        UBTreeTD thisTrans = UBTreePCRGetTD(page, reuseSlot + 1);
+        *oldTd = *thisTrans;
         return reuseSlot + 1;
     }
 
@@ -530,6 +524,8 @@ uint8 UBTreePageReserveTransactionSlot(Relation relation, Buffer buf, Transactio
          */
         ereport(DEBUG5, (errmsg("TD array extended by %d slots for Rel: %s, blkno: %d",
             nExtended, RelationGetRelationName(relation), BufferGetBlockNumber(buf))));
+        UBTreeTD thisTrans = UBTreePCRGetTD(page, tdCount + 1);
+        *oldTd = *thisTrans;
         return (tdCount + 1);
     }
     ereport(DEBUG5, (errmsg("Could not extend TD array for Rel: %s, blkno: %d",

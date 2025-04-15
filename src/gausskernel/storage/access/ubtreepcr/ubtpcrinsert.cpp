@@ -32,25 +32,26 @@
 #include "catalog/pg_partition_fn.h"
 
 void UBTreeResetWaitTimeForTDSlot();
-static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf, OffsetNumber offset,
-    BTScanInsert itup_key, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan);
+static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf,
+    OffsetNumber offset, BTScanInsert itup_key, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan);
 void UBTreePCRFinishSplit(Relation rel, Buffer lbuf, BTStack stack);
-static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstrightoff, OffsetNumber newitemoff,
-    Size newitemsz, IndexTuple newitem, bool newitemonleft, BTScanInsert itup_key,uint8 tdslot, UndoRecPtr urec,
-    undo::XlogUndoMeta *meta, bool noinsert);
+static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstrightoff,
+    OffsetNumber newitemoff, Size newitemsz, IndexTuple newitem, bool newitemonleft, BTScanInsert itup_key,
+    uint8 tdslot, UndoRecPtr urec, undo::XlogUndoMeta *meta, bool noinsert);
 static void UBTreePCRSplitForTD(Relation rel, Buffer buf, BTScanInsert itup_key, BTStack stack);
 void UBTreePCROrWaitForTDSlot(TransactionId xWait, bool isInsert);
 static Buffer UBTreePCRNewRoot(Relation rel, Buffer lbuf, Buffer rbuf);
-static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumber firstlegaloff, BTScanInsert itup_key,
-    IndexTuple newtup, bool checkingunique, BTStack stack, Relation heapRel);
+static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumber firstlegaloff,
+    BTScanInsert itup_key, IndexTuple newtup, bool checkingunique, BTStack stack, Relation heapRel);
 bool UBTPCRIsNormalInsert(Relation rel, Buffer& pbuf, OffsetNumber& offnum, IndexTuple itup,
     BTScanInsert itupKey, BTStack stack);
 static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, Buffer cbuf, BTStack stack,
-    IndexTuple itup, OffsetNumber newitemoff, bool split_only_page, int tdslot, UndoRecPtr urecptr, 
+    IndexTuple itup, OffsetNumber newitemoff, bool splitonlypage, int tdslot, UndoRecPtr urecptr,
     undo::XlogUndoMeta *xlum);
 static void UBTreePCRDupInsertOnPage(Relation rel, Buffer buf, OffsetNumber offnum, int tdSlot,
     UndoRecPtr urecptr, undo::XlogUndoMeta *xlum);
-uint8 PreparePCRDelete(Relation rel, Buffer buf, OffsetNumber offnum, UBTreeUndoInfo undoInfo, TransactionId* minXid, bool* needRetry);
+uint8 PreparePCRDelete(Relation rel, Buffer buf, OffsetNumber offnum, UBTreeUndoInfo undoInfo, TransactionId* minXid,
+    bool* needRetry);
 void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumber firstrightoff, bool isroot,
     OffsetNumber originOff, OffsetNumber leftOff, uint8 tdSlot, UBTree3WalInfo *walInfo, bool newItemOnLeft);
 
@@ -74,7 +75,7 @@ void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumbe
  */
 bool UBTreePCRDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel)
 {
-    bool is_unique = false;
+    bool isUnique = false;
     BTScanInsert itupKey;
     BTStack stack = NULL;
     Buffer buf;
@@ -129,7 +130,7 @@ bool UBTreePCRDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUniq
             checkingunique = false;
             /* Tuple is unique in the sense that core code cares about */
             Assert(checkUnique != UNIQUE_CHECK_EXISTING);
-            is_unique = true;
+            isUnique = true;
         }
     }
     UBTreeResetWaitTimeForTDSlot();
@@ -166,7 +167,6 @@ top:
         buf = ReadBuffer(rel, RelationGetTargetBlock(rel));
         if (ConditionalLockBuffer(buf)) {
             _bt_checkpage(rel, buf);
-
             Page page = BufferGetPage(buf);
             UBTPCRPageOpaque lpageop = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
             Size itemsz = MAXALIGN(IndexTupleSize(itup));
@@ -235,7 +235,7 @@ top:
         TransactionId xwait;
 
         offset = UBTreePCRBinarySearch(rel, itupKey, BufferGetPage(buf));
-        xwait = UBTreePCRCheckUnique(rel, itup, heapRel, buf, offset, itupKey, checkUnique, &is_unique, gpiScan);
+        xwait = UBTreePCRCheckUnique(rel, itup, heapRel, buf, offset, itupKey, checkUnique, &isUnique, gpiScan);
         if (unlikely(TransactionIdIsValid(xwait))) {
             /* Have to wait for the other guy ... */
             _bt_relbuf(rel, buf);
@@ -302,12 +302,10 @@ top:
             
             prevSlot = UBTreeFrozenTDSlotId;
             if (off != InvalidOffsetNumber) {
-                ItemId iid = UBTreePCRGetRowPtr(page, off);
-                IndexTuple itup = UBTreePCRGetIndexTuple(page, off);
-                IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(itup);
+                UBTreeItemId iid = UBTreePCRGetRowPtr(page, off);
                 if (!ItemIdIsDead(iid)) {
-                    prevSlot = trx->tdSlot;
-                    UBTreePCRHandlePreviousTD(rel, buf, &prevSlot, trx, &needRetry);
+                    prevSlot = iid->lp_td_id;
+                    UBTreePCRHandlePreviousTD(rel, buf, &prevSlot, iid, &needRetry);
                     if (needRetry) {
                         buf = InvalidBuffer;
                         if (checkUnique && itupKey->heapkeyspace) {
@@ -316,17 +314,18 @@ top:
                         _bt_freestack(stack);
                         goto top;
                     }
-                    if (!IsUBTreePCRItemDeleted(trx)) {
+                    if (!IsUBTreePCRItemDeleted(iid)) {
                         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                             errmsg("UBTree pcr same tuple exists, relfilenode[%u], block[%d], offset[%u], prevSlot[%d],"
-                                "reserved slot[%d]", rel->rd_node.relNode, BufferGetBlockNumber(buf), off, prevSlot, tdSlot)));
+                                   "reserved slot[%d]", rel->rd_node.relNode, BufferGetBlockNumber(buf),
+                                   off, prevSlot, tdSlot)));
                     }
                 }
             }
             break;
         }
 
-        /*prepare undo record*/
+        /* prepare undo record */
         undo::XlogUndoMeta xlum;
         UBTreeUndoInfoData undoinfo;
         UndoPersistence persistence = UndoPersistenceForRelation(rel);
@@ -334,9 +333,9 @@ top:
         Oid partitionOid = RelationIsPartition(rel) ? RelationGetRelid(rel) : InvalidOid;
         bool selfInsert = prevTd.xactid == fxid;
         undoinfo.prev_td_id = prevSlot;
-        UndoRecPtr urecPtr;
-        urecPtr = UBTreePCRPrepareUndoInsert(relOid, partitionOid, RelationGetRelFileNode(rel), 
-            RelationGetRnodeSpace(rel), persistence, GetTopTransactionId(), GetCurrentCommandId(true), 
+        UndoRecPtr urecPtr = INVALID_UNDO_REC_PTR;
+        urecPtr = UBTreePCRPrepareUndoInsert(relOid, partitionOid, RelationGetRelFileNode(rel),
+            RelationGetRnodeSpace(rel), persistence, GetTopTransactionId(), GetCurrentCommandId(true),
             prevTd.undoRecPtr, INVALID_UNDO_REC_PTR, InvalidBlockNumber, NULL, &xlum, offset, InvalidBuffer,
             selfInsert, &undoinfo, itup);
         
@@ -373,7 +372,7 @@ top:
 
     WHITEBOX_TEST_STUB("UBTreePCRDoInsert-end", WhiteboxDefaultErrorEmit);
 
-    return is_unique;
+    return isUnique;
 }
 
 bool UBTreePCRDoDelete(Relation rel, IndexTuple itup, bool isRollbackIndex)
@@ -384,7 +383,6 @@ bool UBTreePCRDoDelete(Relation rel, IndexTuple itup, bool isRollbackIndex)
     volatile Page page = NULL;
     OffsetNumber offset;
     BTStack stack = NULL;
-    TransactionId fxid = GetTopTransactionId();
 
     /* Create an insertion scan key to search itup. */
     itupKey = UBTreeMakeScanKey(rel, itup);
@@ -398,10 +396,10 @@ DELETE_RETRY:
 
     /*
      * STEP 2: Look for the exact tuple that needs to be deleted.
-     * 
+     *
      * Note: 1. The index keys, heap tid, and part oid of the found tuple must exactly match those of itup.
      *       2. Retry this step if page has been pruned.
-     */ 
+     */
     uint8 tdslot = UBTreeInvalidTDSlotId;
     UBTreeUndoInfoData undoInfo;
     while (true) {
@@ -434,7 +432,6 @@ DELETE_RETRY:
         buf = InvalidBuffer;
         goto DELETE_RETRY;
     }
-    // TODO
     undo::XlogUndoMeta xlum;
     UndoRecPtr urecPtr = INVALID_UNDO_REC_PTR;
 
@@ -444,8 +441,8 @@ DELETE_RETRY:
     Oid partitionOid = RelationIsPartition(rel) ? RelationGetRelid(rel) : InvalidOid;
 
     urecPtr = UBTreePCRPrepareUndoDelete(relOid, partitionOid, RelationGetRelFileNode(rel),
-        RelationGetRnodeSpace(rel), persistence, InvalidBuffer, GetTopTransactionId(), GetCurrentCommandId(false), INVALID_UNDO_REC_PTR, 
-        itup, InvalidBlockNumber, NULL, &xlum, &undoInfo);
+        RelationGetRnodeSpace(rel), persistence, InvalidBuffer, GetTopTransactionId(), GetCurrentCommandId(false),
+        INVALID_UNDO_REC_PTR, itup, InvalidBlockNumber, NULL, &xlum, &undoInfo);
 
     /* STEP3: mark xmax for the target tuple */
     UBTreePCRDeleteOnPage(rel, buf, offset, isRollbackIndex, tdslot, urecPtr, &xlum);
@@ -477,13 +474,13 @@ void LogInsertOrDelete(UBTree3WalInfo *walInfo, uint8 opt)
     XLogRegisterData((char *)walInfo->itup, IndexTupleSize(walInfo->itup));
     XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
     XLogRegisterData((char *)walInfo->undoInfo, SizeOfUBTreeUndoInfoData);
-    if (walInfo->flag & UBTREE_XLOG_HAS_BLK_PREV != 0) {
+    if ((walInfo->flag & UBTREE_XLOG_HAS_BLK_PREV) != 0) {
         XLogRegisterData((char *)&(walInfo->blkprev), sizeof(UndoRecPtr));
     }
-    if (walInfo->flag & UBTREE_XLOG_HAS_XACT_PREV != 0) {
+    if ((walInfo->flag & UBTREE_XLOG_HAS_XACT_PREV) != 0) {
         XLogRegisterData((char *)&(walInfo->prevurp), sizeof(UndoRecPtr));
     }
-    if (walInfo->flag & UBTREE_XLOG_HAS_PARTITION_OID != 0) {
+    if ((walInfo->flag & UBTREE_XLOG_HAS_PARTITION_OID) != 0) {
         XLogRegisterData((char *)&(walInfo->partitionOid), sizeof(Oid));
     }
     undo::LogUndoMeta(walInfo->xlum);
@@ -518,7 +515,7 @@ void LogInsertOrDelete(UBTree3WalInfo *walInfo, uint8 opt)
  *      insertion on internal pages.
  */
 static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, Buffer cbuf, BTStack stack,
-    IndexTuple itup, OffsetNumber newitemoff, bool split_only_page, int tdslot, UndoRecPtr urecptr, 
+    IndexTuple itup, OffsetNumber newitemoff, bool splitonlypage, int tdslot, UndoRecPtr urecptr,
     undo::XlogUndoMeta *xlum)
 {
     Page page;
@@ -559,13 +556,13 @@ static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer bu
     /*
      * Do we need to split the page to fit the item on it?
      *
-     * Note: PageGetFreeSpace() subtracts sizeof(ItemIdData) from its result,
+     * Note: PageGetFreeSpace() subtracts sizeof(UBTreeItemIdData) from its result,
      * so this comparison is correct even though we appear to be accounting
      * only for the item and not for its line pointer.
      */
     if (PageGetFreeSpace(page) < itemsz) {
-        bool is_root = P_ISROOT(lpageop) > 0 ? true : false;
-        bool is_only = P_LEFTMOST(lpageop) && P_RIGHTMOST(lpageop);
+        bool isRoot = P_ISROOT(lpageop) > 0 ? true : false;
+        bool isOnly = P_LEFTMOST(lpageop) && P_RIGHTMOST(lpageop);
         bool newitemonleft = false;
         Buffer rbuf;
         /* Choose the split point */
@@ -577,7 +574,7 @@ static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer bu
         }
 
         /* split the buffer into left and right halves */
-        rbuf = UBTreePCRSplit(rel, buf, cbuf, firstright, newitemoff, itemsz, itup, newitemonleft, 
+        rbuf = UBTreePCRSplit(rel, buf, cbuf, firstright, newitemoff, itemsz, itup, newitemonleft,
             itup_key, tdslot, urecptr, xlum, false);
         PredicateLockPageSplit(rel, BufferGetBlockNumber(buf), BufferGetBlockNumber(rbuf));
 
@@ -597,7 +594,7 @@ static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer bu
          * for the reasoning).
          * ----------
          */
-        UBTreePCRInsertParent(rel, buf, rbuf, stack, is_root, is_only);
+        UBTreePCRInsertParent(rel, buf, rbuf, stack, isRoot, isOnly);
 
         /* ubtree will try to recycle one page after allocate one page */
         UBTreePCRTryRecycleEmptyPage(rel);
@@ -619,7 +616,7 @@ static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer bu
         * at or above the current page.  We can safely acquire a lock on the
         * metapage here --- see comments for _bt_newroot().
         */
-    if (split_only_page) {
+    if (splitonlypage) {
         Assert(!P_ISLEAF(lpageop));
         metabuf = _bt_getbuf(rel, BTREE_METAPAGE, BT_WRITE);
         metapg = BufferGetPage(metabuf);
@@ -719,8 +716,8 @@ static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer bu
                 trunctuple.t_info = sizeof(IndexTupleData);
                 XLogRegisterBufData(0, (char*)&trunctuple, sizeof(IndexTupleData));
             } else {
-                ItemId iid = PageGetItemId(page, itup_off);
-                XLogRegisterBufData(0, (char*)PageGetItem(page, iid), itemsz);
+                UBTreeItemId iid = UBTreePCRGetRowPtr(page, itup_off);
+                XLogRegisterBufData(0, (char*)UBTreePCRGetIndexTupleByItemId(page, iid), itemsz);
             }
 
             recptr = XLogInsert(RM_UBTREE3_ID, xlinfo);
@@ -779,7 +776,6 @@ static bool UBTreePCRInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer bu
         undo::FinishUndoMeta(UndoPersistenceForRelation(rel));
     }
     END_CRIT_SECTION();
-    // TODO：Add verify
 
     /* release buffers */
     if (BufferIsValid(metabuf)) {
@@ -816,13 +812,13 @@ void LogDupInsert(UBTree3WalInfo *walInfo)
     XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
     XLogRegisterData((char *)walInfo->undoInfo, SizeOfUBTreeUndoInfoData);
 
-    if (walInfo->flag & UBTREE_XLOG_HAS_BLK_PREV != 0) {
+    if ((walInfo->flag & UBTREE_XLOG_HAS_BLK_PREV) != 0) {
         XLogRegisterData((char *)&(walInfo->blkprev), sizeof(UndoRecPtr));
     }
-    if (walInfo->flag & UBTREE_XLOG_HAS_XACT_PREV != 0) {
+    if ((walInfo->flag & UBTREE_XLOG_HAS_XACT_PREV) != 0) {
         XLogRegisterData((char *)&(walInfo->prevurp), sizeof(UndoRecPtr));
     }
-    if (walInfo->flag & UBTREE_XLOG_HAS_PARTITION_OID != 0) {
+    if ((walInfo->flag & UBTREE_XLOG_HAS_PARTITION_OID) != 0) {
         XLogRegisterData((char *)&(walInfo->partitionOid), sizeof(Oid));
     }
     undo::LogUndoMeta(walInfo->xlum);
@@ -837,17 +833,15 @@ void LogDupInsert(UBTree3WalInfo *walInfo)
 static void UBTreePCRDupInsertOnPage(Relation rel, Buffer buf, OffsetNumber offnum, int tdSlot,
     UndoRecPtr urecptr, undo::XlogUndoMeta *xlum)
 {
-    Page page = BufferGetPage(buf);;
-    ItemId iid = UBTreePCRGetRowPtr(page, offnum);
-    IndexTuple itup = UBTreePCRGetIndexTupleByItemId(page, iid);
-    IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(itup);
+    Page page = BufferGetPage(buf);
+    UBTreeItemId iid = UBTreePCRGetRowPtr(page, offnum);
     UBTPCRPageOpaque lpageop = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
 
     START_CRIT_SECTION();
 
-    UBTreePCRSetIndexTupleTrxSlot(trx, tdSlot);
-    UBTreePCRClearIndexTupleTrxInvalid(trx);
-    UBTreePCRClearIndexTupleDeleted(trx);
+    UBTreePCRSetIndexTupleTDSlot(iid, tdSlot);
+    UBTreePCRClearIndexTupleTDInvalid(iid);
+    UBTreePCRClearIndexTupleDeleted(iid);
 
     iid->lp_flags = LP_NORMAL;
 
@@ -913,11 +907,9 @@ static void UBTreePCRDupInsertOnPage(Relation rel, Buffer buf, OffsetNumber offn
     }
     undo::FinishUndoMeta(UndoPersistenceForRelation(rel));
     END_CRIT_SECTION();
-    // TODO: add verify
 
     _bt_relbuf(rel, buf);
 }
-
 
 /*
  *	UBTreePCRGetStackBuf() -- Walk back up the tree one step, and find the item
@@ -954,8 +946,10 @@ Buffer UBTreePCRGetStackBuf(Relation rel, BTStack stack)
         }
 
         if (!P_IGNORE(opaque)) {
-            OffsetNumber offnum, minoff, maxoff;
-            ItemId itemid;
+            OffsetNumber offnum;
+            OffsetNumber minoff;
+            OffsetNumber maxoff;
+            UBTreeItemId itemid;
             IndexTuple item;
 
             minoff = P_FIRSTDATAKEY(opaque);
@@ -1043,10 +1037,10 @@ void UBTreeResetWaitTimeForTDSlot()
  *
  * stack - stack showing how we got here.  May be NULL in cases that don't
  *         have to be efficient (concurrent ROOT split, WAL recovery)
- * is_root - we split the true root
- * is_only - we split a page alone on its level (might have been fast root)
+ * isRoot - we split the true root
+ * isOnly - we split a page alone on its level (might have been fast root)
  */
-void UBTreePCRInsertParent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only)
+void UBTreePCRInsertParent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool isRoot, bool isOnly)
 {
     /*
      * Here we have to do something Lehman and Yao don't talk about: deal with
@@ -1062,11 +1056,11 @@ void UBTreePCRInsertParent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack,
      * to matter.  (This path is also taken when called from WAL recovery ---
      * we have no stack in that case.)
      */
-    if (is_root) {
+    if (isRoot) {
         Buffer rootbuf;
 
         Assert(stack == NULL);
-        Assert(is_only);
+        Assert(isOnly);
         /* create a new root node and update the metapage */
         rootbuf = UBTreePCRNewRoot(rel, buf, rbuf);
         /* release the split buffers */
@@ -1133,7 +1127,7 @@ void UBTreePCRInsertParent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack,
                            RelationGetRelationName(rel), bknum, rbknum)));
         }
         /* Recursively update the parent */
-        UBTreePCRInsertOnPage(rel, NULL, pbuf, buf, stack->bts_parent, new_item, stack->bts_offset + 1, is_only,
+        UBTreePCRInsertOnPage(rel, NULL, pbuf, buf, stack->bts_parent, new_item, stack->bts_offset + 1, isOnly,
             UBTreeInvalidTDSlotId, INVALID_UNDO_REC_PTR, NULL);
 
         /* be tidy */
@@ -1240,8 +1234,8 @@ void UBTreePCRFinishSplit(Relation rel, Buffer lbuf, BTStack stack)
  *		newtup is the new tuple we're inserting, and scankey is an insertion
  *		type scan key for it.
  */
-static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumber firstlegaloff, BTScanInsert itup_key,
-    IndexTuple newtup, bool checkingunique, BTStack stack, Relation heapRel)
+static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumber firstlegaloff,
+    BTScanInsert itupKey, IndexTuple newtup, bool checkingunique, BTStack stack, Relation heapRel)
 {
     Buffer buf = *bufptr;
     Page page = BufferGetPage(buf);
@@ -1256,15 +1250,15 @@ static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetN
                                 * need to be consistent */
     /* Check 1/3 of a page restriction */
     if (unlikely(itemsz > UBTreePCRMaxItemSize(page))) {
-        UBTreeCheckThirdPage<UBTPCRPageOpaque>(rel, heapRel, itup_key->heapkeyspace, page, newtup);
+        UBTreeCheckThirdPage<UBTPCRPageOpaque>(rel, heapRel, itupKey->heapkeyspace, page, newtup);
     }
 
     Assert(P_ISLEAF(lpageop) && !P_INCOMPLETE_SPLIT(lpageop));
-    Assert(!itup_key->heapkeyspace || itup_key->scantid != NULL);
-    Assert(itup_key->heapkeyspace || itup_key->scantid == NULL);
+    Assert(!itupKey->heapkeyspace || itupKey->scantid != NULL);
+    Assert(itupKey->heapkeyspace || itupKey->scantid == NULL);
 
     /* heapkeyspace always set in ubtree */
-    Assert(itup_key->heapkeyspace);
+    Assert(itupKey->heapkeyspace);
     /*
      * If we're inserting into a unique index, we may have to walk right
      * through leaf pages to find the one leaf page that we must insert on
@@ -1280,7 +1274,7 @@ static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetN
      * very rare in practice.
      */
     if (checkingunique) {
-        while (!P_RIGHTMOST(lpageop) && UBTreePCRCompare(rel, itup_key, page, P_HIKEY) > 0) {
+        while (!P_RIGHTMOST(lpageop) && UBTreePCRCompare(rel, itupKey, page, P_HIKEY) > 0) {
             /* The new tuple belongs on the next page, try to step right */
             Buffer rbuf = InvalidBuffer;
             BlockNumber rblkno = lpageop->btpo_next;
@@ -1300,12 +1294,14 @@ static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetN
                     rbuf = InvalidBuffer;
                     continue;
                 }
-                if (!P_IGNORE(lpageop))
+                if (!P_IGNORE(lpageop)) {
                     break;
-                if (P_RIGHTMOST(lpageop))
+                }
+                if (P_RIGHTMOST(lpageop)) {
                     ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                             errmsg("fell off the end of index \"%s\" at blkno %u",
                                    RelationGetRelationName(rel), rblkno)));
+                }
 
                 rblkno = lpageop->btpo_next;
             }
@@ -1340,7 +1336,7 @@ static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetN
      * After we take TID as tie-breaker, tuples with the same key value need
      * to be sorted by TID. Since firstlegaloff does not consider TID, this
      * hint may not be accurate. We need to examine with _bt_compare() again,
-     * because TID is already included in itup_key now (after checking unique).
+     * because TID is already included in itupKey now (after checking unique).
      */
 
     *bufptr = buf;
@@ -1348,19 +1344,19 @@ static OffsetNumber UBTreePCRFindInsertLoc(Relation rel, Buffer *bufptr, OffsetN
     if (movedright) {
         /*
          * moving right means we may insert in the front of the page, but still
-         * need to check carefully when itup_key->heapkeyspace.
+         * need to check carefully when itupKey->heapkeyspace.
          */
         firstlegaloff = P_FIRSTDATAKEY(lpageop);
     }
 
     OffsetNumber maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
     if (firstlegaloff != InvalidOffsetNumber && !pruned &&
-        (firstlegaloff > maxoff || UBTreePCRCompare(rel, itup_key, page, firstlegaloff) <= 0)) {
+        (firstlegaloff > maxoff || UBTreePCRCompare(rel, itupKey, page, firstlegaloff) <= 0)) {
         return firstlegaloff;
     }
 
     /* otherwise, we need to call _bt_binsrch() again with TID to find the insertion location */
-    return UBTreePCRBinarySearch(rel, itup_key, BufferGetPage(buf));
+    return UBTreePCRBinarySearch(rel, itupKey, BufferGetPage(buf));
 }
 
 Buffer UBTPCRGetNextPage(Relation rel, Buffer buf, BTStack stack)
@@ -1403,7 +1399,7 @@ loop:
     Page page = BufferGetPage(buf);
     OffsetNumber maxOff = UBTreePCRPageGetMaxOffsetNumber(page);
     OffsetNumber endOff = maxOff;
-    Size size = IndexTupleSize(itup) - MAXALIGN(sizeof(IndexTupleTrxData));
+    Size size = IndexTupleSize(itup);
     
     if (isIncluding) {
         itupKey->nextkey = true;
@@ -1431,7 +1427,7 @@ loop:
                 break;
             }
             if (RelationIsGlobalIndex(rel)) {
-                if (DatumGetInt32(index_getattr(curItup, attr, desc, &isNull)) == partOid) {
+                if ((Oid)DatumGetInt32(index_getattr(curItup, attr, desc, &isNull)) == partOid) {
                     return false;
                 }
             } else {
@@ -1441,8 +1437,7 @@ loop:
         }
     }
     
-    if ((!isIncluding && RelationIsGlobalIndex(rel) && offnum > maxOff) || 
-        (isIncluding && offnum > maxOff)) {
+    if ((!isIncluding && RelationIsGlobalIndex(rel) && offnum > maxOff) || (isIncluding && offnum > maxOff)) {
         UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
         if (P_RIGHTMOST(opaque) || UBTreePCRCompare(rel, itupKey, page, P_HIKEY) != 0) {
             return true;
@@ -1472,8 +1467,8 @@ loop:
  * set *is_unique to false if there is a potential conflict, and the
  * core code must redo the uniqueness check later.
  */
-static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf, OffsetNumber offset,
-    BTScanInsert itup_key, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan)
+static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf,
+    OffsetNumber offset, BTScanInsert itup_key, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan)
 {
     SnapshotData SnapshotDirty;
     OffsetNumber maxoff;
@@ -1500,7 +1495,7 @@ static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relatio
     Assert(!itup_key->anynullkeys);
     Assert(itup_key->scantid == NULL);
     for (;;) {
-        ItemId curitemid;
+        UBTreeItemId curitemid;
         IndexTuple curitup;
         BlockNumber nblkno;
 
@@ -1547,7 +1542,7 @@ static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relatio
                     datum = index_getattr(curitup, IndexRelationGetNumberOfAttributes(rel),
                                           RelationGetDescr(rel), &isNull);
                     curPartOid = DatumGetUInt32(datum);
-                    Assert(isNull == false);
+                    Assert(!isNull);
                     if (curPartOid != gpiScan->currPartOid) {
                         GPISetCurrPartOid(gpiScan, curPartOid);
                         if (!GPIGetNextPartRelation(gpiScan, CurrentMemoryContext, AccessShareLock)) {
@@ -1581,10 +1576,9 @@ static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relatio
                     found = true;
                 } else {
                     for (;;) {
-                        IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(curitup);
                         /* here we guarantee the same semantics as UNIQUE_CHECK_PARTIAL */
                         if (checkUnique == UNIQUE_CHECK_PARTIAL) {
-                            if (!IsUBTreePCRItemDeleted(trx)) {
+                            if (!IsUBTreePCRItemDeleted(curitemid)) {
                                 if (nbuf != InvalidBuffer) {
                                     _bt_relbuf(rel, nbuf);
                                 }
@@ -1592,45 +1586,47 @@ static TransactionId UBTreePCRCheckUnique(Relation rel, IndexTuple itup, Relatio
                                 return InvalidTransactionId;
                             }
                         }
-                        if (UBTreeTDSlotIsNormal(trx->tdSlot)) {
-                            UBTreeTD td = UBTreePCRGetTD(page, trx->tdSlot);
+                        uint8 td_id = curitemid->lp_td_id;
+                        if (UBTreeTDSlotIsNormal(td_id)) {
+                            UBTreeTD td = UBTreePCRGetTD(page, td_id);
                             TransactionId xid = td->xactid;
                             /* xid on tuple is not current and valid, return and wait */
                             if (!TransactionIdIsCurrentTransactionId(xid)) {
-                                if (!IsUBTreePCRTDReused(trx) && TransactionIdIsInProgress(xid)) {
+                                if (!IsUBTreePCRTDReused(curitemid) && TransactionIdIsInProgress(xid)) {
                                     if (nbuf != InvalidBuffer) {
                                         _bt_relbuf(rel, nbuf);
                                     }
                                     return xid;
                                 }
-                                if (!IsUBTreePCRTDReused(trx) && TransactionIdIsValid(xid) && 
+                                if (!IsUBTreePCRTDReused(curitemid) && TransactionIdIsValid(xid) &&
                                     !(UBTreePCRTDIsCommited(td) || UHeapTransactionIdDidCommit(xid))) {
                                     if (nbuf != InvalidBuffer) {
                                         LockBuffer(nbuf, BUFFER_LOCK_UNLOCK);
                                         LockBuffer(nbuf, BT_WRITE);
-                                        ExecuteUndoActionsForUBTreePage(rel, nbuf, trx->tdSlot);
+                                        ExecuteUndoActionsForUBTreePage(rel, nbuf, td_id);
                                         LockBuffer(nbuf, BUFFER_LOCK_UNLOCK);
                                         LockBuffer(nbuf, BT_READ);
                                     } else {
-                                        ExecuteUndoActionsForUBTreePage(rel, buf, trx->tdSlot);
+                                        ExecuteUndoActionsForUBTreePage(rel, buf, td_id);
                                     }
+                                    continue;
                                 }
                             }
                         }
 
-                        if (!IsUBTreePCRItemDeleted(trx)) {
+                        if (!IsUBTreePCRItemDeleted(curitemid)) {
                             Datum values[INDEX_MAX_KEYS];
                             bool isnull[INDEX_MAX_KEYS];
-                            char *key_desc = NULL;
+                            char *keydesc = NULL;
 
                             index_deform_tuple(itup, RelationGetDescr(rel), values, isnull);
 
-                            key_desc = BuildIndexValueDescription(rel, values, isnull);
+                            keydesc = BuildIndexValueDescription(rel, values, isnull);
 
                             ereport(ERROR, (errcode(ERRCODE_UNIQUE_VIOLATION),
                                         errmsg("duplicate key value violates unique constraint \"%s\"",
                                                RelationGetRelationName(rel)),
-                                        key_desc ? errdetail("Key %s already exists.", key_desc) : 0));
+                                        keydesc ? errdetail("Key %s already exists.", keydesc) : 0));
                         }
                         break;
                     }
@@ -1695,7 +1691,7 @@ next:
 *       copy td slot for split page.
 */
 void UBTreePCRCopyTDSlot(Page origin, Page target)
-{  
+{
     UBTPCRPageOpaque oOpaque = (UBTPCRPageOpaque)PageGetSpecialPointer(origin);
     UBTPCRPageOpaque tOpaque = (UBTPCRPageOpaque)PageGetSpecialPointer(target);
 
@@ -1724,19 +1720,23 @@ void UBTreePCRCopyTDSlot(Page origin, Page target)
  *		The pin and lock on buf are maintained.
  */
 static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstrightoff, OffsetNumber newitemoff,
-    Size newitemsz, IndexTuple newitem, bool newitemonleft, BTScanInsert itup_key,uint8 tdslot, UndoRecPtr urec,
+    Size newitemsz, IndexTuple newitem, bool newitemonleft, BTScanInsert itup_key, uint8 tdslot, UndoRecPtr urec,
     undo::XlogUndoMeta *meta, bool noinsert)
 {
     Buffer rbuf;
     Page origpage;
-    Page leftpage, rightpage;
-    BlockNumber origpagenumber, rightpagenumber;
-    UBTPCRPageOpaque ropaque, lopaque, oopaque;
+    Page leftpage;
+    Page rightpage;
+    BlockNumber origpagenumber;
+    BlockNumber rightpagenumber;
+    UBTPCRPageOpaque ropaque;
+    UBTPCRPageOpaque lopaque;
+    UBTPCRPageOpaque oopaque;
     Buffer sbuf = InvalidBuffer;
     Page spage = NULL;
     UBTPCRPageOpaque sopaque = NULL;
     Size itemsz;
-    ItemId itemid;
+    UBTreeItemId itemid;
     IndexTuple item;
     OffsetNumber leftoff = InvalidOffsetNumber;
     OffsetNumber rightoff = InvalidOffsetNumber;
@@ -1746,7 +1746,8 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
     bool isroot = false;
     bool isleaf = false;
     errno_t rc;
-    IndexTuple firstright, lefthighkey;
+    IndexTuple firstright;
+    IndexTuple lefthighkey;
     Buffer actualInsertBuf = InvalidBuffer;
     OffsetNumber actualInsertOff = InvalidOffsetNumber;
 
@@ -1839,8 +1840,8 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
 
     if (!P_RIGHTMOST(oopaque)) {
         itemid = UBTreePCRGetRowPtr(origpage, P_HIKEY);
-        itemsz = ItemIdGetLength(itemid);
         item = (IndexTuple)UBTreePCRGetIndexTupleByItemId(origpage, itemid);
+        itemsz = IndexTupleSize(item);
         Assert(UBTreeTupleGetNAtts(item, rel) > 0);
         Assert(UBTreeTupleGetNAtts(item, rel) <= IndexRelationGetNumberOfKeyAttributes(rel));
         if (UBTPCRPageAddItem(rightpage, (Item)item, itemsz, rightoff, false) == InvalidOffsetNumber) {
@@ -1881,7 +1882,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
      */
     IndexTuple lastleft;
     if (!noinsert) {
-        bool itup_extended = false;
+        bool itupExtended = false;
         if (!newitemonleft && newitemoff == firstrightoff) {
             /* incoming tuple will become first on right page */
             itemsz = newitemsz;
@@ -1894,7 +1895,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
             * if we choose newitem as firstright here, it may be copied as HIKEY. So we need
             * to remind the 8B for this case.
             */
-            // itup_extended = isleaf; /* expanded only in multi-version index */
+            // itupExtended = isleaf; /* expanded only in multi-version index */
         } else {
             /* existing item at firstright will become first on right page */
             itemid = UBTreePCRGetRowPtr(origpage, firstrightoff);
@@ -1934,7 +1935,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("itup_key for truncate is NULL")));
                 return InvalidBuffer;
             }
-            lefthighkey = UBTreeTruncate(rel, lastleft, firstright, itup_key, itup_extended);
+            lefthighkey = UBTreeTruncate(rel, lastleft, firstright, itup_key, itupExtended);
             itemsz = IndexTupleSize(lefthighkey);
             itemsz = MAXALIGN(itemsz);
         } else {
@@ -1986,7 +1987,6 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
     Assert(UBTreeTupleGetNAtts(lefthighkey, rel) <= IndexRelationGetNumberOfKeyAttributes(rel));
     Assert(itemsz == MAXALIGN(IndexTupleSize(lefthighkey)));
 
-
     if (UBTPCRPageAddItem(leftpage, (Item)lefthighkey, itemsz, leftoff, false) == InvalidOffsetNumber) {
         rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
         securec_check(rc, "", "");
@@ -2012,9 +2012,8 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
 
     for (i = P_FIRSTDATAKEY(oopaque); i <= maxoff; i = OffsetNumberNext(i)) {
         itemid = UBTreePCRGetRowPtr(origpage, i);
-        itemsz = ItemIdGetLength(itemid);
         item = (IndexTuple)UBTreePCRGetIndexTupleByItemId(origpage, itemid);
-
+        itemsz = IndexTupleSize(item);
         if (!noinsert) {
             /* does new item belong before this one? */
             if (i == newitemoff) {
@@ -2026,8 +2025,8 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
                         rc = memset_s(leftpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
                         securec_check(rc, "", "");
                         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                            errmsg("failed to add new item to the left sibling while splitting block %u of index \"%s\"",
-                                origpagenumber, RelationGetRelationName(rel))));
+                            errmsg("failed to add new item to the left sibling while splitting block %u"
+                                   " of index \"%s\"", origpagenumber, RelationGetRelationName(rel))));
                     }
                     actualInsertBuf = buf;
                     actualInsertOff = leftoff;
@@ -2039,8 +2038,8 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
                         rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
                         securec_check(rc, "", "");
                         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                            errmsg("failed to add new item to the right sibling while splitting block %u of index \"%s\"",
-                                origpagenumber, RelationGetRelationName(rel))));
+                            errmsg("failed to add new item to the right sibling while splitting block %u"
+                                   " of index \"%s\"", origpagenumber, RelationGetRelationName(rel))));
                     }
                     actualInsertBuf = rbuf;
                     actualInsertOff = rightoff;
@@ -2053,7 +2052,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
 
         /* decide which page to put it on */
         if (i < firstrightoff) {
-            if (!UBTreePCRPageAddTuple(leftpage, itemsz, itemid, item, leftoff, true, tdslot, false)) {
+            if (!UBTreePCRPageAddTuple(leftpage, itemsz, itemid, item, leftoff, true, tdslot)) {
                 rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
                 securec_check(rc, "", "");
                 ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
@@ -2061,11 +2060,11 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
                                origpagenumber, RelationGetRelationName(rel))));
             }
             leftoff = OffsetNumberNext(leftoff);
-            if (isleaf && !IsUBTreePCRItemDeleted(UBTreePCRGetIndexTupleTrx(item))) {
+            if (isleaf && !IsUBTreePCRItemDeleted(itemid)) {
                 lopaque->activeTupleCount++; /* not deleted, count as active */
             }
         } else {
-            if (!UBTreePCRPageAddTuple(rightpage, itemsz, itemid, item, rightoff, true, tdslot, false)) {
+            if (!UBTreePCRPageAddTuple(rightpage, itemsz, itemid, item, rightoff, true, tdslot)) {
                 rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
                 securec_check(rc, "", "");
                 ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
@@ -2073,7 +2072,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
                                origpagenumber, RelationGetRelationName(rel))));
             }
             rightoff = OffsetNumberNext(rightoff);
-            if (isleaf && !IsUBTreePCRItemDeleted(UBTreePCRGetIndexTupleTrx(item))) {
+            if (isleaf && !IsUBTreePCRItemDeleted(itemid)) {
                 ropaque->activeTupleCount++; /* not deleted, count as active */
             }
         }
@@ -2210,14 +2209,12 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
         MarkBufferDirty(cbuf);
     }
 
-
     /* XLOG stuff */
     if (RelationNeedsWAL(rel)) {
         UBTree3WalInfo *walInfo = NULL;
         if (UBTreePageGetTDSlotCount(origpage) > 0) {
             walInfo = (UBTree3WalInfo*)palloc(sizeof(UBTree3WalInfo));
             uint8 flag = 0;
-            // TODO: debug 看一下这里的urec和入参urec是否相同
             UndoRecord *cur_urec = t_thrd.ustore_cxt.undo_records[0];
             UBTreeUndoInfo undoInfo = (UBTreeUndoInfo)(cur_urec->Rawdata()->data);
             if (cur_urec->Blkprev() != INVALID_UNDO_REC_PTR) {
@@ -2247,7 +2244,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
             walInfo->itup = (IndexTuple)((char*)(cur_urec->Rawdata()->data + SizeOfUBTreeUndoInfoData));
             walInfo->flag = flag;
         }
-        LogSplit(buf, rbuf, sbuf, cbuf, firstrightoff, newitemoff, newitemleftoff, 
+        LogSplit(buf, rbuf, sbuf, cbuf, firstrightoff, newitemoff, newitemleftoff,
             leftoff, tdslot, walInfo, newitemonleft);
 
         if (walInfo != NULL) {
@@ -2290,8 +2287,8 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
  *		we insert the tuples in order, so that the given itup_off does
  *		represent the final position of the tuple!
  */
-bool UBTreePCRPageAddTuple(Page page, Size itemsize, ItemId iid, IndexTuple itup, OffsetNumber itup_off, 
-    bool copyflags, uint8 tdslot, bool isnew)
+bool UBTreePCRPageAddTuple(Page page, Size itemsize, UBTreeItemId iid, IndexTuple itup, OffsetNumber itup_off,
+    bool copyflags, uint8 tdslot)
 {
     UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
     IndexTupleData trunctuple;
@@ -2304,7 +2301,7 @@ bool UBTreePCRPageAddTuple(Page page, Size itemsize, ItemId iid, IndexTuple itup
         itemsize = sizeof(IndexTupleData);
     }
 
-    if (! isnew || !(P_ISLEAF(opaque))) {
+    if (!P_ISLEAF(opaque)) {
         /* if isnew and !P_HAS_XMIN_XMAX, it must inserting downlink to parent and itup is normal, no special handle
          * needed */
         if (UBTPCRPageAddItem(page, (Item)itup, itemsize, itup_off, false) == InvalidOffsetNumber) {
@@ -2312,45 +2309,30 @@ bool UBTreePCRPageAddTuple(Page page, Size itemsize, ItemId iid, IndexTuple itup
         }
         return true;
     }
-    
-    if (isnew) {
-        itemsize -= MAXALIGN(sizeof(IndexTupleTrxData));
-        IndexTupleSetSize(itup, itemsize);
-    }
-    
-    /*
-    * New inserted tuple need mark xmin, except HIKEY.
-    * We assume itemsize included the reserved space for xmin/xmax.
-    */
-    ((PageHeader)page)->pd_upper -= MAXALIGN(sizeof(IndexTupleTrxData));
+
     itup_off = UBTPCRPageAddItem(page, (Item)itup, itemsize, itup_off, false);
     if (itup_off == InvalidOffsetNumber) {
-        /* restore page->upper before we return false */
-        ((PageHeader)page)->pd_upper += MAXALIGN(sizeof(IndexTupleTrxData));
         return false;
     }
 
-    ItemId curiid = UBTreePCRGetRowPtr(page, itup_off);
-    IndexTuple curtup = UBTreePCRGetIndexTupleByItemId(page, curiid);
-    IndexTupleTrx curtrx = UBTreePCRGetIndexTupleTrx(curtup);
+    UBTreeItemId curiid = UBTreePCRGetRowPtr(page, itup_off);
     
     if (copyflags) {
-        IndexTupleTrx trx = UBTreePCRGetIndexTupleTrx(itup);
-        curtrx->tdSlot = trx->tdSlot;
-        curtrx->slotIsInvalid = trx->slotIsInvalid;
-        curtrx->isDeleted = trx->isDeleted;
+        curiid->lp_td_id = iid->lp_td_id;
+        curiid->lp_td_invalid = iid->lp_td_invalid;
+        curiid->lp_deleted = iid->lp_deleted;
         curiid->lp_flags = iid->lp_flags;
     } else {
-        curtrx->tdSlot = tdslot;
-        curtrx->slotIsInvalid = 0;
-        curtrx->isDeleted = 0;
+        curiid->lp_td_id = tdslot;
+        curiid->lp_td_invalid = 0;
+        curiid->lp_deleted = 0;
     }
-    curiid->lp_len += MAXALIGN(sizeof(IndexTupleTrxData));
 
     return true;
 }
 
-OffsetNumber UBTreePCRFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber offset, BTScanInsert itup_key, IndexTuple itup)
+OffsetNumber UBTreePCRFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber offset,
+    BTScanInsert itup_key, IndexTuple itup)
 {
     OffsetNumber maxoff;
     Page page;
@@ -2373,32 +2355,32 @@ OffsetNumber UBTreePCRFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber off
 
     /* Scan over all equal tuples, looking for itup */
     for (;;) {
-        ItemId curitemid;
+        UBTreeItemId curitemid;
         IndexTuple curitup;
         BlockNumber nblkno;
 
         if (offset <= maxoff) {
             curitemid = UBTreePCRGetRowPtr(page, offset);
             if (!ItemIdIsDead(curitemid)) {
-                /* 
-                 * _bt_compare returns 0 for (1,NULL) and (1, NULL) - this's 
+                /*
+                 * _bt_compare returns 0 for (1,NULL) and (1, NULL) - this's
                  * how we handling NULLs - and so we must not use _bt_compare
                  * in real comparison, but only for ording/finding items on
                  * pages.
                  */
                 if (!UBTreePCRIsEqual(rel, page, offset, itup_key->keysz, itup_key->scankeys)) {
-                    /* 
+                    /*
                      * we've traversed all the equal tuples, but we haven't found itup
                      */
                     return InvalidOffsetNumber;
                 }
                 curitup = (IndexTuple)UBTreePCRGetIndexTuple(page, offset);
-                if (UBTreeHasIncluding(rel)) {          // diff
+                if (UBTreeHasIncluding(rel)) {
                     Size itupSize = IndexTupleSize(itup);
                     if (itupSize == IndexTupleSize(curitup) && memcmp(curitup, itup, itupSize) == 0) {
                         return offset;
                     }
-                } else if (UBTreePCRIndexTupleMatches(rel, page, offset, itup, NULL, partOid)) {        
+                } else if (UBTreePCRIndexTupleMatches(rel, page, offset, itup, NULL, partOid)) {
                     return offset;
                 }
             }
@@ -2412,7 +2394,7 @@ OffsetNumber UBTreePCRFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber off
         } else {
             int highkeycmp;
 
-            /* 
+            /*
              * if scankey == highkey we gotta check the next page too
              */
             if (P_RIGHTMOST(opaque)) {
@@ -2423,7 +2405,7 @@ OffsetNumber UBTreePCRFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber off
             if (highkeycmp != 0) {
                 break;
             }
-            /* 
+            /*
              * Check the next non-dead page if scankey equals to the current page's highkey
              */
             for (;;) {
@@ -2437,7 +2419,7 @@ OffsetNumber UBTreePCRFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber off
                 if (P_RIGHTMOST(opaque)) {
                     ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                             errmsg("fell off the end of index \"%s\" at blkno %u",
-                                    RelationGetRelationName(rel), nblkno)));
+                                   RelationGetRelationName(rel), nblkno)));
                 }
             }
             maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
@@ -2450,9 +2432,10 @@ OffsetNumber UBTreePCRFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber off
     return InvalidOffsetNumber;
 }
 
-// UBTreePCRIndexTupleMatches(rel, page, offset, itup, NULL, partOid)
-/* return true if the curItup is exactly what we want (keys, tid, partOid, etc.)*/
-bool UBTreePCRIndexTupleMatches(Relation rel, Page page, OffsetNumber offnum, IndexTuple target_itup, BTScanInsert itup_key, Oid target_part_oid) {
+/* return true if the curItup is exactly what we want (keys, tid, partOid, etc.) */
+bool UBTreePCRIndexTupleMatches(Relation rel, Page page, OffsetNumber offnum, IndexTuple target_itup,
+    BTScanInsert itup_key, Oid target_part_oid)
+{
     IndexTuple curItup = (IndexTuple)UBTreePCRGetIndexTuple(page, offnum);
     if (itup_key && !UBTreePCRIsEqual(rel, page, offnum, itup_key->keysz, itup_key->scankeys)) {
         return false;
@@ -2472,43 +2455,42 @@ bool UBTreePCRIndexTupleMatches(Relation rel, Page page, OffsetNumber offnum, In
     return true;
 }
 
-uint8 PreparePCRDelete(Relation rel, Buffer buf, OffsetNumber offnum, UBTreeUndoInfo undoInfo, TransactionId* minXid, bool* needRetry)
+uint8 PreparePCRDelete(Relation rel, Buffer buf, OffsetNumber offnum, UBTreeUndoInfo undoInfo, TransactionId* minXid,
+    bool* needRetry)
 {
     /* Get TD slot */
     UBTreeTDData oldTDData;
 
-    TransactionId fxid = GetTopTransactionId();       
-    uint8 tdslot;
-    tdslot = UBTreePageReserveTransactionSlot(rel, buf, fxid, &oldTDData, minXid);
+    TransactionId fxid = GetTopTransactionId();
+    uint8 tdslot = UBTreePageReserveTransactionSlot(rel, buf, fxid, &oldTDData, minXid);
     if (tdslot == UBTreeInvalidTDSlotId) {
         return UBTreeInvalidTDSlotId;
     }
 
     /* Get tuple's previouse operation's xact info */
     Page page = BufferGetPage(buf);
-    ItemId iid = (ItemId)UBTreePCRGetRowPtr(page, offnum);
-    IndexTuple itup = (IndexTuple)UBTreePCRGetIndexTuple(page, offnum);
-    IndexTupleTrx trx = (IndexTupleTrx)UBTreePCRGetIndexTupleTrx(itup);
-    uint8 slotNo = trx->tdSlot;
-    UBTreePCRHandlePreviousTD(rel, buf, &slotNo, trx, needRetry);       // TODO : 并发事物处理 
+    UBTreeItemId iid = (UBTreeItemId)UBTreePCRGetRowPtr(page, offnum);
+    uint8 slotNo = iid->lp_td_id;
+    UBTreePCRHandlePreviousTD(rel, buf, &slotNo, iid, needRetry);
     if (*needRetry) {
         return tdslot;
     }
 
     UBTreeTD thisTrans = UBTreePCRGetTD(page, slotNo);
     
-    if (UBTreePCRTDIdIsNormal(slotNo)) {    
+    if (UBTreePCRTDIdIsNormal(slotNo)) {
         TransactionId xid = thisTrans->xactid;
         TransactionId oldestXmin = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
         if (TransactionIdIsValid(xid) && TransactionIdPrecedes(xid, oldestXmin)) {
-            UBTreePCRSetIndexTupleTrxSlot(trx, UBTreeFrozenTDSlotId);
+            UBTreePCRSetIndexTupleTDSlot(iid, UBTreeFrozenTDSlotId);
             slotNo = UBTreeFrozenTDSlotId;
         }
     }
 
-    if (IsUBTreePCRItemDeleted(trx)) {      
-        ereport(PANIC,(errmodule(MOD_UBTREE),
-                errmsg("failed to delete index tuple, index \"%s\", blkno %u", RelationGetRelationName(rel), BufferGetBlockNumber(buf)),
+    if (IsUBTreePCRItemDeleted(iid)) {
+        ereport(PANIC, (errmodule(MOD_UBTREE),
+                errmsg("failed to delete index tuple, index \"%s\", blkno %u",
+                       RelationGetRelationName(rel), BufferGetBlockNumber(buf)),
                 errcause("UBTree PCR page is corrupted"),
                 erraction("Please try to reindex to fix it")));
     }
@@ -2521,7 +2503,7 @@ uint8 PreparePCRDelete(Relation rel, Buffer buf, OffsetNumber offnum, UBTreeUndo
             prevXid = fxid;
         } else if (thisTrans->xactid != InvalidTransactionId) {
             /* must be current xid or committed txn */
-            prevXid = thisTrans->xactid;  
+            prevXid = thisTrans->xactid;
         }
     }
 
@@ -2537,8 +2519,9 @@ uint8 PreparePCRDelete(Relation rel, Buffer buf, OffsetNumber offnum, UBTreeUndo
 }
 
 UndoRecPtr UBTreePCRPrepareUndoDelete(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
-    UndoPersistence persistence, Buffer buffer, TransactionId xid, CommandId cid, UndoRecPtr prevurpInOneXact, 
-    IndexTuple oldtuple, BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa, UBTreeUndoInfo undoInfo)
+    UndoPersistence persistence, Buffer buffer, TransactionId xid, CommandId cid, UndoRecPtr prevurpInOneXact,
+    IndexTuple oldtuple, BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa,
+    UBTreeUndoInfo undoInfo)
 {
     URecVector *urecvec = t_thrd.ustore_cxt.urecvec;
     UndoRecord *urec = (*urecvec)[0];
@@ -2561,7 +2544,6 @@ UndoRecPtr UBTreePCRPrepareUndoDelete(Oid relOid, Oid partitionOid, Oid relfilen
             urec->SetBlkno(InvalidBlockNumber);
         }
     }
-
     urec->SetPrevurp(t_thrd.xlog_cxt.InRecovery ? prevurpInOneXact : GetCurrentTransactionUndoRecPtr(persistence));
     urec->SetNeedInsert(true);
 
@@ -2573,7 +2555,6 @@ UndoRecPtr UBTreePCRPrepareUndoDelete(Oid relOid, Oid partitionOid, Oid relfilen
     appendBinaryStringInfo(urec->Rawdata(), (char *)oldtuple, IndexTupleSize(oldtuple));
 
     int status = PrepareUndoRecord(urecvec, persistence, xlundohdr, xlundometa);
-
     /* Do not continue if there was a failure during Undo preparation */
     if (status != UNDO_RET_SUCC) {
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("Failed to generate UndoRecord")));
@@ -2615,10 +2596,12 @@ bool UBTreePCRIsEqual(Relation idxrel, Page page, OffsetNumber offnum, int keysz
         bool skeyIsNull = ((scankey->sk_flags & SK_ISNULL) ? true : false);
         Datum datum = index_getattr(itup, attno, itupdesc, &datumIsNull);
 
-        if (datumIsNull && skeyIsNull)
+        if (datumIsNull && skeyIsNull) {
             continue; /* NULL equal NULL */
-        if (datumIsNull != skeyIsNull)
+        }
+        if (datumIsNull != skeyIsNull) {
             return false; /* NOT_NULL not equal NULL */
+        }
 
         if (DatumGetInt32(FunctionCall2Coll(&scankey->sk_func,
                                             scankey->sk_collation, datum, scankey->sk_argument)) != 0) {
@@ -2637,13 +2620,13 @@ static void UBTreePCRSplitForTD(Relation rel, Buffer buf, BTScanInsert itup_key,
 
     OffsetNumber splitOffset = UBTreePCRFindsplitloc(rel, buf, P_FIRSTDATAKEY(opaque), 0, NULL);
 
-    Buffer right = UBTreePCRSplit(rel, buf, InvalidBuffer, splitOffset, InvalidOffsetNumber, 
-                                0,  NULL, false, itup_key, UBTreeInvalidTDSlotId, INVALID_UNDO_REC_PTR, NULL, true);
-    bool is_root = P_ISROOT(opaque) > 0 ? true : false;
-    bool is_only = P_LEFTMOST(opaque) && P_RIGHTMOST(opaque);
+    Buffer right = UBTreePCRSplit(rel, buf, InvalidBuffer, splitOffset, InvalidOffsetNumber,
+                                  0,  NULL, false, itup_key, UBTreeInvalidTDSlotId, INVALID_UNDO_REC_PTR, NULL, true);
+    bool isRoot = P_ISROOT(opaque) > 0 ? true : false;
+    bool isOnly = P_LEFTMOST(opaque) && P_RIGHTMOST(opaque);
     PredicateLockPageSplit(rel, BufferGetBlockNumber(buf), BufferGetBlockNumber(right));
 
-    UBTreePCRInsertParent(rel, buf, right, stack, is_root, is_only);
+    UBTreePCRInsertParent(rel, buf, right, stack, isRoot, isOnly);
 
     /* ubtree will try to recycle one page after allocate one page */
     UBTreePCRTryRecycleEmptyPage(rel);
@@ -2690,12 +2673,14 @@ void UBTreePCROrWaitForTDSlot(TransactionId xWait, bool isInsert)
 static Buffer UBTreePCRNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
 {
     Buffer rootbuf;
-    Page lpage, rootpage;
-    BlockNumber lbkno, rbkno;
+    Page lpage;
+    Page rootpage;
+    BlockNumber lbkno;
+    BlockNumber rbkno;
     BlockNumber rootblknum;
     UBTPCRPageOpaque rootopaque;
     UBTPCRPageOpaque lopaque;
-    ItemId itemid;
+    UBTreeItemId itemid;
     IndexTuple item;
     IndexTuple left_item;
     Size left_item_sz;
@@ -2795,7 +2780,6 @@ static Buffer UBTreePCRNewRoot(Relation rel, Buffer lbuf, Buffer rbuf)
         ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
                 errmsg("failed to add leftkey to new root page while splitting block %u of index \"%s\"",
                        BufferGetBlockNumber(lbuf), RelationGetRelationName(rel))));
-
     }
 
     /*
@@ -2886,7 +2870,6 @@ void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumbe
     xlrecSplit.slotNo = tdSlot;
 
     if (newItemOnLeft) {
-        ItemId idd = UBTreePCRGetRowPtr(leftpage, leftOff);
         UBTreeTD td = UBTreePCRGetTD(leftpage, tdSlot);
         xlrecSplit.fxid = td->xactid;
         xlrecSplit.urp = td->undoRecPtr;
@@ -2909,13 +2892,13 @@ void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumbe
         XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
         XLogRegisterData((char *)walInfo->undoInfo, SizeOfUBTreeUndoInfoData);
 
-        if (walInfo->flag & UBTREE_XLOG_HAS_BLK_PREV != 0) {
+        if ((walInfo->flag & UBTREE_XLOG_HAS_BLK_PREV) != 0) {
             XLogRegisterData((char *)&(walInfo->blkprev), sizeof(UndoRecPtr));
         }
-        if (walInfo->flag & UBTREE_XLOG_HAS_XACT_PREV != 0) {
+        if ((walInfo->flag & UBTREE_XLOG_HAS_XACT_PREV) != 0) {
             XLogRegisterData((char *)&(walInfo->prevurp), sizeof(UndoRecPtr));
         }
-        if (walInfo->flag & UBTREE_XLOG_HAS_PARTITION_OID != 0) {
+        if ((walInfo->flag & UBTREE_XLOG_HAS_PARTITION_OID) != 0) {
             XLogRegisterData((char *)&(walInfo->partitionOid), sizeof(Oid));
         }
         undo::LogUndoMeta(walInfo->xlum);
