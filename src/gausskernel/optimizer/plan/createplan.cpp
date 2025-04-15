@@ -9645,9 +9645,10 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
         isUstore = result_rte->is_ustore;
     }
 
+    int nest_level = GetCurrentTransactionNestLevel();  // not support the smp in nest transaction.
     bool supportIUDParallel =
         (operation == CMD_DELETE || operation == CMD_UPDATE || (operation == CMD_INSERT && !upsertClause)) &&
-        returningLists == NIL && !isUstore && list_length(subplans) == 1 &&
+        returningLists == NIL && !isUstore && list_length(subplans) == 1 && nest_level <= 1 &&
         (linitial_node(RangeTblEntry, root->parse->rtable)->orientation == REL_ROW_ORIENTED);
 
     Assert(list_length(resultRelations) == list_length(subplans));
