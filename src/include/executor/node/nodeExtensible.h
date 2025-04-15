@@ -36,9 +36,12 @@ extern void ExecEndExtensiblePlan(ExtensiblePlanState* node);
 extern void ExecReScanExtensiblePlan(ExtensiblePlanState* node);
 extern ExtensiblePlanMethods* GetExtensiblePlanMethods(const char* ExtensibleName, bool missing_ok);
 
-#ifdef ENABLE_MULTIPLE_NODES
 extern void InitExtensiblePlanMethodsHashTable();
-#endif
+extern void InitExtensibleNodeMethodsHashTable();
+extern void RegisterExtensibleNodeMethods(ExtensibleNodeMethods *methods);
+extern void RegisterExtensiblePlanMethods(ExtensiblePlanMethods *methods);
+
+extern const ExtensibleNodeMethods* GetExtensibleNodeMethods(const char *extnodename, bool missing_ok);
 
 /*
  * Flags for extensible paths, indicating what capabilities the resulting scan

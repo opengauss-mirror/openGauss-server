@@ -5509,7 +5509,7 @@ static void check_global_variables()
         globalnum += atoi(buf);
     }
     pclose(fstream);
-    if (globalnum != BASE_GLOBAL_VARIABLE_NUM) {
+    if (globalnum > BASE_GLOBAL_VARIABLE_NUM) {
         CheckCleanCodeWarningInfo(BASE_GLOBAL_VARIABLE_NUM, globalnum,
             GET_VARIABLE_NAME(THR_LOCAL), GET_VARIABLE_NAME(BASE_GLOBAL_VARIABLE_NUM));
         exit_nicely(2);

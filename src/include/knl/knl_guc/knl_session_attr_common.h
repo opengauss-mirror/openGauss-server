@@ -252,6 +252,7 @@ typedef struct knl_session_attr_common {
     bool foreign_key_checks;
     bool unique_checks;
     bool enable_dump_trigger_definer;
+    bool connection_from_coordinator;
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

@@ -2647,7 +2647,7 @@ static void CommitTransaction(bool STP_commit)
      * Note that parent thread will do commit transaction.
      * Stream thread should read only, no change to xlog files.
      */
-    if (StreamThreadAmI() || IsBgWorkerProcess()) {
+    if (StreamThreadAmI() || BgWorkerNeedResetXact()) {
         ResetTransactionInfo();
     }
 
@@ -2770,6 +2770,7 @@ static void CommitTransaction(bool STP_commit)
             break;
     }
 
+    CallXactCallbacks(XACT_EVENT_PRE_COMMIT);
     /*
      * The remaining actions cannot call any user-defined code, so it's safe
      * to start shutting down within-transaction services.	But note that most
@@ -3373,6 +3374,7 @@ static void PrepareTransaction(bool STP_commit)
             break;
     }
 
+    CallXactCallbacks(XACT_EVENT_PRE_PREPARE);
     /*
      * The remaining actions cannot call any user-defined code, so it's safe
      * to start shutting down within-transaction services.	But note that most
@@ -3743,7 +3745,7 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
      * Note that parent thread will do abort transaction.
      * Stream thread should read only, no change to xlog files.
      */
-    if (StreamThreadAmI() || IsBgWorkerProcess()) {
+    if (StreamThreadAmI() || BgWorkerNeedResetXact()) {
         ResetTransactionInfo();
     }
     /*

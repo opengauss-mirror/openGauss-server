@@ -51,6 +51,7 @@
 ./bin/pg_archivecleanup
 ./bin/gs_assessment
 ./bin/gs_retrieve
+./bin/spq*
 ./etc/kerberos/kadm5.acl  
 ./etc/kerberos/kdc.conf  
 ./etc/kerberos/krb5.conf  
@@ -127,6 +128,7 @@
 ./share/postgresql/extension/gms_stats.control
 ./share/postgresql/extension/gms_profiler--1.0.sql
 ./share/postgresql/extension/gms_profiler.control
+./share/postgresql/extension/spq*
 ./share/postgresql/timezone/GB-Eire
 ./share/postgresql/timezone/Turkey
 ./share/postgresql/timezone/Kwajalein
@@ -918,6 +920,7 @@
 ./lib/libodbc.so*
 ./lib/libasan.so*
 ./lib/libubsan.so*
+./lib/postgresql/spq.so*
 
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
