@@ -9647,7 +9647,8 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
 
     bool supportIUDParallel =
         (operation == CMD_DELETE || operation == CMD_UPDATE || (operation == CMD_INSERT && !upsertClause)) &&
-        returningLists == NIL && !isUstore && list_length(subplans) == 1;
+        returningLists == NIL && !isUstore && list_length(subplans) == 1 &&
+        (linitial_node(RangeTblEntry, root->parse->rtable)->orientation == REL_ROW_ORIENTED);
 
     Assert(list_length(resultRelations) == list_length(subplans));
     Assert(withCheckOptionLists == NIL || list_length(resultRelations) == list_length(withCheckOptionLists));

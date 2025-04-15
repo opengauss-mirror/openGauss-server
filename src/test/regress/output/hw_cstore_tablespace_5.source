@@ -237,4 +237,31 @@ SELECT
 (1 row)
 
 DROP TABLE test_psort_tblspc CASCADE;
+-- test column table with dop
+set query_dop=1002;
+create table test_psort_tblspc
+(
+    id int,
+    info text
+) with(orientation=column) partition by range(id)
+(
+    partition p1 values less  than(3000),
+    partition p2 values less than(6000),
+    partition p3 values less than(maxvalue)
+);
+insert into test_psort_tblspc values( 1, 'zhaaaang'), (2,'cahabo'), (3,'wcedi');
+insert into test_psort_tblspc select * from test_psort_tblspc;
+select * from test_psort_tblspc;
+ id |   info   
+----+----------
+  1 | zhaaaang
+  2 | cahabo
+  3 | wcedi
+  1 | zhaaaang
+  2 | cahabo
+  3 | wcedi
+(6 rows)
+
+drop table if exists test_psort_tblspc cascade;
+reset query_dop;
 drop tablespace hw_cstore_tablespace_5;
