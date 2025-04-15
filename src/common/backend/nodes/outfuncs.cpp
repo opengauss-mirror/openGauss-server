@@ -24,6 +24,7 @@
 #include "miscadmin.h"
 #include "bulkload/dist_fdw.h"
 #include "foreign/fdwapi.h"
+#include "nodes/extensible.h"
 #include "nodes/primnodes.h"
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
@@ -306,6 +307,7 @@ static void _outNode(StringInfo str, const void* obj);
 static void out_mem_info(StringInfo str, OpMemInfo* node);
 static void _outCursorData(StringInfo str, Cursor_Data* node);
 static void getNameById(Oid objId, const char* context, char** objNamespace, char** objName);
+
 /*
  * _outToken
  * Convert an ordinary string (eg, an identifier) into a form that
@@ -650,6 +652,20 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     WRITE_BOOL_FIELD(is_spq_optmized);
     WRITE_INT_FIELD(write_node_index);
 #endif
+}
+
+static void _outExtensibleNode(StringInfo str, const ExtensibleNode *node)
+{
+	const ExtensibleNodeMethods *methods;
+
+	methods = GetExtensibleNodeMethods(node->extnodename, false);
+
+	WRITE_NODE_TYPE("EXTENSIBLENODE");
+
+	WRITE_STRING_FIELD(extnodename);
+
+	/* serialize the private fields */
+	methods->nodeOut(str, node);
 }
 
 /*
@@ -1747,6 +1763,34 @@ static void _outExtensiblePlan(StringInfo str, ExtensiblePlan* node)
     /* ExtensibleName is a key to lookup ExtensiblePlanMethods */
     appendStringInfoString(str, " :methods ");
     _outToken(str, node->methods->ExtensibleName);
+}
+
+static void _outCustomScan(StringInfo str, const CustomScan *node)
+{
+    WRITE_NODE_TYPE("CUSTOMSCAN");
+    WRITE_FLOAT_FIELD(scan.plan.startup_cost, "%.2f");
+    WRITE_FLOAT_FIELD(scan.plan.total_cost, "%.2f");
+    WRITE_FLOAT_FIELD(scan.plan.plan_rows, "%.2f");
+    WRITE_INT_FIELD(scan.plan.plan_width);
+    WRITE_INT_FIELD(scan.plan.plan_node_id);
+    WRITE_NODE_FIELD(scan.plan.targetlist);
+    WRITE_NODE_FIELD(scan.plan.qual);
+    WRITE_NODE_FIELD(scan.plan.lefttree);
+    WRITE_NODE_FIELD(scan.plan.righttree);
+    WRITE_NODE_FIELD(scan.plan.initPlan);
+    WRITE_BITMAPSET_FIELD(scan.plan.extParam);
+    WRITE_BITMAPSET_FIELD(scan.plan.allParam);
+    WRITE_UINT_FIELD(scan.scanrelid);
+    WRITE_UINT_FIELD(flags);
+    WRITE_NODE_FIELD(custom_plans);
+    WRITE_NODE_FIELD(custom_exprs);
+    WRITE_NODE_FIELD(custom_private);
+    WRITE_NODE_FIELD(custom_scan_tlist);
+    WRITE_BITMAPSET_FIELD(custom_relids);
+
+    /* CustomName is a key to lookup CustomScanMethods */
+    appendStringInfoString(str, " :methods ");
+    _outToken(str, node->methods->CustomName);
 }
 
 static void _outJoin(StringInfo str, Join* node)
@@ -3666,6 +3710,38 @@ static void _outAsofPath(StringInfo str, AsofPath* node)
 
     WRITE_NODE_FIELD(path_hashclauses);
     WRITE_NODE_FIELD(path_mergeclauses);
+}
+
+static void _outCustomPath(StringInfo str, const CustomPath *node)
+{
+    WRITE_NODE_TYPE("CUSTOMPATH");
+    WRITE_ENUM_FIELD(path.pathtype, NodeTag);
+    appendStringInfoString(str, " :parent_relids ");
+    _outBitmapset(str, node->path.parent->relids);
+    if (node->path.pathtarget != node->path.parent->reltarget) {
+        WRITE_NODE_FIELD(path.pathtarget);
+    }
+    
+    appendStringInfoString(str, " :required_outer ");
+    
+    if (node->path.param_info) {
+        _outBitmapset(str, node->path.param_info->ppi_req_outer);
+    } else {
+        _outBitmapset(str, NULL);
+    }
+
+    WRITE_FLOAT_FIELD(path.rows, "%.2f");
+    WRITE_FLOAT_FIELD(path.startup_cost, "%.2f");
+    WRITE_FLOAT_FIELD(path.total_cost, "%.2f");
+    WRITE_NODE_FIELD(path.pathkeys);
+    WRITE_UINT_FIELD(flags);
+    WRITE_NODE_FIELD(custom_paths);
+    WRITE_NODE_FIELD(custom_restrictinfo);
+    WRITE_NODE_FIELD(custom_private);
+
+    /* CustomName is a key to lookup CustomScanMethods */
+    appendStringInfoString(str, " :methods ");
+    _outToken(str, node->methods->CustomName);
 }
 
 static void _outPlannerGlobal(StringInfo str, PlannerGlobal* node)
@@ -6816,6 +6892,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_ForeignScan:
                 _outForeignScan(str, (ForeignScan*)obj);
                 break;
+            case T_CustomScan:
+                _outCustomScan(str, (CustomScan *)obj);
+                break;
             case T_ForeignPartState:
                 _outForeignPartState(str, (ForeignPartState*)obj);
                 break;
@@ -7103,6 +7182,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_AsofPath:
                 _outAsofPath(str, (AsofPath*)obj);
+                break;
+            case T_CustomPath:
+                _outCustomPath(str, (CustomPath *)obj);
                 break;
             case T_PlannerGlobal:
                 _outPlannerGlobal(str, (PlannerGlobal*)obj);
@@ -7667,6 +7749,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_IndexHintRelationData:
                 _outIndexHintRelationData(str, (IndexHintRelationData*)obj);
+                break;
+            case T_ExtensibleNode:
+                _outExtensibleNode(str, (ExtensibleNode *)obj);
                 break;
             default:
 

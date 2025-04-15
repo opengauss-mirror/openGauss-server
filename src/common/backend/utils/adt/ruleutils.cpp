@@ -5574,6 +5574,8 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
         dpns->index_tlist = ((ForeignScan *)ps->plan)->fdw_scan_tlist;
     else if (IsA(ps->plan, ExtensiblePlan))
         dpns->index_tlist = ((ExtensiblePlan*)ps->plan)->extensible_plan_tlist;
+    else if (IsA(ps->plan, CustomScan))
+        dpns->index_tlist = ((CustomScan *)ps->plan)->custom_scan_tlist;
     else
         dpns->index_tlist = NIL;
 }

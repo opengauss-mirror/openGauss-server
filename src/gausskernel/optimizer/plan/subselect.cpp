@@ -3201,6 +3201,24 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
             context.paramids = bms_add_members(context.paramids, scan_params);
             break;
 
+        case T_CustomScan:
+            {
+                CustomScan *cscan = (CustomScan *) plan;
+                ListCell   *lc;
+
+                finalize_primnode((Node *) cscan->custom_exprs, &context);
+                /* We assume custom_scan_tlist cannot contain Params */
+                context.paramids = bms_add_members(context.paramids, scan_params);
+
+                /* child nodes if any */
+                foreach(lc, cscan->custom_plans) {
+                    context.paramids =
+                        bms_add_members(context.paramids,
+                                        finalize_plan(root, (Plan *) lfirst(lc), valid_params, scan_params));
+                }
+            }
+            break;
+
         case T_ExtensiblePlan: {
             ExtensiblePlan* cscan = (ExtensiblePlan*)plan;
 

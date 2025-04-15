@@ -150,6 +150,7 @@ static void pgxc_set_agg_references(PlannerInfo* root, Agg* aggplan);
 static List* set_remote_returning_refs(PlannerInfo* root, List* rlist, Plan* topplan, Index relid, int rtoffset);
 #endif
 
+static void set_customscan_references(PlannerInfo *root, CustomScan *cscan, int rtoffset);
 /*****************************************************************************
  *
  *		SUBPLAN REFERENCES
@@ -549,6 +550,11 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
         case T_VecForeignScan: {
             set_foreignscan_references(root, (ForeignScan*) plan, rtoffset);
         } break;
+
+        case T_CustomScan:
+            set_customscan_references(root, (CustomScan *) plan, rtoffset);
+            break;
+
         case T_NestLoop:
         case T_VecNestLoop:
         case T_MergeJoin:
@@ -2859,3 +2865,63 @@ void spq_extract_plan_dependencies(PlannerInfo *root, Plan *plan)
     (void)spq_extract_plan_dependencies_walker((Node *)plan, &context);
 }
 #endif
+
+/*
+ * set_customscan_references
+ *	   Do set_plan_references processing on a CustomScan
+ */
+static void
+set_customscan_references(PlannerInfo *root,
+						  CustomScan *cscan,
+						  int rtoffset)
+{
+    ListCell   *lc;
+
+    /* Adjust scanrelid if it's valid */
+    if (cscan->scan.scanrelid > 0) {
+        cscan->scan.scanrelid += rtoffset;
+    }
+
+    if (cscan->custom_scan_tlist != NIL || cscan->scan.scanrelid == 0) {
+        /* Adjust tlist, qual, custom_exprs to reference custom scan tuple */
+        indexed_tlist *itlist = build_tlist_index(cscan->custom_scan_tlist);
+
+        cscan->scan.plan.targetlist = (List *)
+            fix_upper_expr(root,
+                           (Node *) cscan->scan.plan.targetlist,
+                           itlist,
+                           INDEX_VAR,
+                           rtoffset);
+
+		cscan->scan.plan.qual = (List *)
+            fix_upper_expr(root,
+                           (Node *) cscan->scan.plan.qual,
+                           itlist,
+                           INDEX_VAR,
+                           rtoffset);
+
+        cscan->custom_exprs = (List *)
+            fix_upper_expr(root,
+                           (Node *) cscan->custom_exprs,
+                           itlist,
+                           INDEX_VAR,
+                           rtoffset);
+
+        pfree(itlist);
+        /* custom_scan_tlist itself just needs fix_scan_list() adjustments */
+        cscan->custom_scan_tlist = fix_scan_list(root, cscan->custom_scan_tlist, rtoffset);
+	} else {
+        /* Adjust tlist, qual, custom_exprs in the standard way */
+        cscan->scan.plan.targetlist = fix_scan_list(root, cscan->scan.plan.targetlist, rtoffset);
+        cscan->scan.plan.qual = fix_scan_list(root, cscan->scan.plan.qual, rtoffset);
+		cscan->custom_exprs = fix_scan_list(root, cscan->custom_exprs, rtoffset);
+	}
+
+    /* Adjust child plan-nodes recursively, if needed */
+    foreach(lc, cscan->custom_plans)
+    {
+        lfirst(lc) = set_plan_refs(root, (Plan *) lfirst(lc), rtoffset);
+    }
+
+    cscan->custom_relids = offset_relid_set(cscan->custom_relids, rtoffset);
+}

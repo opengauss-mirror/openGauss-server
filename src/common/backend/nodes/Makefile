@@ -21,6 +21,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
 endif
 OBJS = nodeFuncs.o nodes.o list.o bitmapset.o tidbitmap.o \
        copyfuncs.o equalfuncs.o makefuncs.o \
-       outfuncs.o readfuncs.o print.o read.o params.o value.o
+       outfuncs.o readfuncs.o print.o read.o params.o value.o extensible.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

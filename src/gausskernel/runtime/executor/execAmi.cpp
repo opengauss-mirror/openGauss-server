@@ -25,6 +25,7 @@
 #include "executor/node/nodeBitmapIndexscan.h"
 #include "executor/node/nodeBitmapOr.h"
 #include "executor/node/nodeCtescan.h"
+#include "executor/node/nodeCustom.h"
 #include "executor/node/nodeExtensible.h"
 #include "executor/node/nodeForeignscan.h"
 #include "executor/node/nodeFunctionscan.h"
@@ -58,6 +59,7 @@
 #include "executor/node/nodeProjectSet.h"
 #include "executor/node/nodeSortGroup.h"
 #include "nodes/nodeFuncs.h"
+#include "nodes/extensible.h"
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vecnodevectorow.h"
 #include "utils/rel.h"
@@ -222,6 +224,10 @@ void ExecReScanByType(PlanState* node)
 
         case T_ForeignScanState:
             ExecReScanForeignScan((ForeignScanState*)node);
+            break;
+
+        case T_CustomScanState:
+            ExecReScanCustomScan((CustomScanState *) node);
             break;
 
         case T_ExtensiblePlanState:
@@ -448,6 +454,10 @@ void ExecMarkPos(PlanState* node)
             ExecResultMarkPos((ResultState*)node);
             break;
 
+        case T_CustomScanState:
+            ExecCustomMarkPos((CustomScanState *) node);
+            break;
+
         default:
             /* don't make hard error unless caller asks to restore... */
             elog(DEBUG2, "unrecognized node type: %d", (int)nodeTag(node));
@@ -513,6 +523,10 @@ void ExecRestrPos(PlanState* node)
             ExecResultRestrPos((ResultState*)node);
             break;
 
+        case T_CustomScanState:
+            ExecCustomRestrPos((CustomScanState *) node);
+            break;
+
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -567,6 +581,12 @@ bool ExecSupportsMarkRestore(Path *pathnode)
 
         case T_ExtensiblePlan:
             return castNode(ExtensiblePath, pathnode)->flags & EXTENSIBLEPATH_SUPPORT_MARK_RESTORE;
+
+        case T_CustomScan:
+            if (castNode(CustomPath, pathnode)->flags & CUSTOMPATH_SUPPORT_MARK_RESTORE) {
+                return true;
+            }
+            return false;
 
         default:
             break;
@@ -654,6 +674,12 @@ bool ExecSupportsBackwardScan(Plan* node)
         case T_Limit:
             /* these don't evaluate tlist */
             return ExecSupportsBackwardScan(outerPlan(node));
+
+        case T_CustomScan:
+            if (((CustomScan *) node)->flags & CUSTOMPATH_SUPPORT_BACKWARD_SCAN) {
+                return true;
+            }
+            return false;
 
         default:
             return false;

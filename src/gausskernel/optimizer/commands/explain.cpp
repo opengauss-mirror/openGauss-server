@@ -38,6 +38,7 @@
 #include "foreign/dummyserver.h"
 #include "foreign/fdwapi.h"
 #include "instruments/generate_report.h"
+#include "nodes/extensible.h"
 #include "nodes/print.h"
 #include "opfusion/opfusion_util.h"
 #include "opfusion/opfusion.h"
@@ -1425,6 +1426,20 @@ static void ExplainExtensibleChildren(ExtensiblePlanState* planState, List* ance
 }
 
 /*
+ * Explain a list of children of a CustomScan.
+ */
+static void ExplainCustomChildren(CustomScanState *css, List *ancestors, ExplainState *es)
+{
+	ListCell   *cell;
+	const char *label =
+		(list_length(css->custom_ps) != 1 ? "children" : "child");
+
+	foreach(cell, css->custom_ps) {
+        ExplainNode<false>((PlanState *) lfirst(cell), ancestors, label, NULL, es);
+    }
+}
+
+/*
  * ExplainOneQueryForStatistic -
  *	  print out the execution plan for one Query for wlm statistics
  * in - queryDesc: query plan description.
@@ -2190,6 +2205,7 @@ static void ExplainNode(
         case T_WorkTableScan:
         case T_ForeignScan:
         case T_VecForeignScan:
+        case T_CustomScan:
             if (((Scan *) plan)->scanrelid > 0) {
                 ExplainScanTarget((Scan*)plan, es);
             }
@@ -2822,6 +2838,21 @@ static void ExplainNode(
             }
             show_llvm_info(planstate, es);
             break;
+
+        case T_CustomScan:
+            {
+                CustomScanState *css = (CustomScanState *) planstate;
+                show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
+                if (plan->qual) {
+                    show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
+                }
+
+                if (css->methods->ExplainCustomScan) {
+                    css->methods->ExplainCustomScan(css, ancestors, es);
+                }
+			}
+			break;
+
         case T_StartWithOp:
             show_startwith_pseudo_entries(planstate, ancestors, es);
             show_startwith_dfx((StartWithOpState*)planstate, es);
@@ -3243,6 +3274,7 @@ static void ExplainNode(
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
+        case T_CustomScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
 #endif
@@ -3316,6 +3348,7 @@ runnext:
                   IsA(plan, MergeAppend) || IsA(plan, VecMergeAppend) || IsA(plan, BitmapAnd) || IsA(plan, BitmapOr) ||
                   IsA(plan, SubqueryScan) || IsA(plan, VecSubqueryScan) ||
                   (IsA(planstate, ExtensiblePlanState) && ((ExtensiblePlanState*)planstate)->extensible_ps != NIL) ||
+                  (IsA(planstate, CustomScanState) && ((CustomScanState *) planstate)->custom_ps != NIL) ||
                   planstate->subPlan;
     if (haschildren) {
         ExplainOpenGroup("Plans", "Plans", false, es);
@@ -3397,6 +3430,10 @@ runnext:
             ExplainMemberNodes(((Sequence*)plan)->subplans, ((SequenceState*)planstate)->subplans, ancestors, es);
             break;
 #endif
+        case T_CustomScan:
+            ExplainCustomChildren((CustomScanState *) planstate, ancestors, es);
+            break;
+    
         default:
             break;
     }
@@ -8539,6 +8576,7 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es, bool multi
         case T_TidRangeScan:
         case T_ForeignScan:
         case T_ExtensiblePlan:
+        case T_CustomScan:
         case T_VecForeignScan: {
             /* Assert it's on a real relation */
             Assert(rte != NULL);
