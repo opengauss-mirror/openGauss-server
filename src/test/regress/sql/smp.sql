@@ -304,6 +304,22 @@ explain(costs off) select /*+ set(query_dop 1002) indexonlyscan(ios_t1) */ count
 select /*+ set(query_dop 1002) indexonlyscan(ios_t1) */ count(*) from ios_t1;
 
 drop table ios_t1;
+
+
+create table pktable2(f1 int primary key);
+create table fktable2(f1 int references pktable2 deferrable initially deferred);
+insert into pktable2 values(1);
+
+begin;
+insert into fktable2 values(1);
+savepoint x;
+delete from fktable2;
+rollback to x;
+commit;
+
+drop table fktable2;
+drop table pktable2;
+
 --clean
 set search_path=public;
 drop schema test_smp cascade;
