@@ -2192,6 +2192,20 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"unique_checks",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING,
+            gettext_noop("Enable unique check,"
+            "only applicable to b-format db."
+            ),
+            NULL},
+            &u_sess->attr.attr_common.unique_checks,
+            true,
+            NULL,
+            NULL,
+            NULL
+        },
         {{"enable_dump_trigger_definer",
             PGC_USERSET,
             NODE_ALL,
