@@ -58,9 +58,9 @@ select * from t1;
 (1 row)
 
 select RAND(null);
-       rand       
-------------------
- .170828036032617
+ rand 
+------
+     
 (1 row)
 
 select RAND(2147483647);

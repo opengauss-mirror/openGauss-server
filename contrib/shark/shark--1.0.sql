@@ -26,9 +26,9 @@ end;
 $$
 language plpgsql;
 
-CREATE OR REPLACE FUNCTION sys.rand(int) returns double precision LANGUAGE C volatile as  '$libdir/shark', 'rand_seed';
-CREATE OR REPLACE FUNCTION sys.rand(smallint) returns double precision LANGUAGE SQL volatile as 'select rand($1::int)';
-CREATE OR REPLACE FUNCTION sys.rand(tinyint) returns double precision LANGUAGE SQL volatile as 'select rand($1::int)';
+CREATE OR REPLACE FUNCTION sys.rand(int) returns double precision LANGUAGE C volatile STRICT as  '$libdir/shark', 'rand_seed';
+CREATE OR REPLACE FUNCTION sys.rand(smallint) returns double precision LANGUAGE SQL volatile STRICT as 'select rand($1::int)';
+CREATE OR REPLACE FUNCTION sys.rand(tinyint) returns double precision LANGUAGE SQL volatile STRICT as 'select rand($1::int)';
 
 
 -- Return the object ID given the object name. Can specify optional type.
