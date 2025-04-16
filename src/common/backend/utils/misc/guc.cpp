@@ -6897,6 +6897,8 @@ void BeginReportingGUCOptions(void)
 
     u_sess->utils_cxt.reporting_enabled = true;
 
+    /* start transaction to allow calling SearchSysCache such as show_collation_connection */
+    start_xact_command();
     /* Transmit initial values of interesting variables */
     for (i = 0; i < u_sess->num_guc_variables; i++) {
         struct config_generic* conf = u_sess->guc_variables[i];
@@ -6904,7 +6906,7 @@ void BeginReportingGUCOptions(void)
         if (conf->flags & GUC_REPORT)
             ReportGUCOption(conf);
     }
-
+    finish_xact_command();
 }
 
 /*
