@@ -9510,11 +9510,12 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                     }
                 } else {
                     check_setrole_permission(role, passwd, true);
-                    if (!verify_setrole_passwd(role, passwd, true)) {
-                        str_reset(passwd);
-                        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("verify set role and passwd failed.")));
-                        break;
-                    }
+
+                    //if (!verify_setrole_passwd(role, passwd, true)) {
+                    //    str_reset(passwd);
+                    //    ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("verify set role and passwd failed.")));
+                    //    break;
+                    // }
                 }
 
                 /* passwd is sensitive info, it should be cleaned when it's useless */

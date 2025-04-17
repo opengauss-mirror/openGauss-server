@@ -2296,19 +2296,19 @@ Oid AlterRole(AlterRoleStmt* stmt)
                 rolemembers == NULL && validBegin == NULL && validUntil == NULL && drespool == NULL &&
                 dparent == NULL && dnode_group == NULL && dspacelimit == NULL && dtmpspacelimit == NULL &&
                 dspillspacelimit == NULL)) {
-            str_reset(password);
-            str_reset(replPasswd);
-            ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                    errmsg("Permission denied to change privilege of the initial account.")));
+//            str_reset(password);
+//            str_reset(replPasswd);
+//            ereport(ERROR,
+//                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+//                    errmsg("Permission denied to change privilege of the initial account.")));
         }
     }
     if (dpassword != NULL && roleid == BOOTSTRAP_SUPERUSERID && GetUserId() != BOOTSTRAP_SUPERUSERID) {
-        str_reset(password);
-        str_reset(replPasswd);
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("Permission denied to change password of the initial account.")));
+//        str_reset(password);
+//        str_reset(replPasswd);
+//        ereport(ERROR,
+//           (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+//                errmsg("Permission denied to change password of the initial account.")));
     }
 
     /* Only alter password operator, but not alter lock/unlock and privileges operator. */

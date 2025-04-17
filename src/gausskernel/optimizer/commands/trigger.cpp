@@ -590,10 +590,10 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
     funcoid = LookupFuncName(stmt->funcname, 0, fargtypes, false);
     if (!isInternal) {
         if (get_func_lang(funcoid) != get_language_oid("plpgsql", true)) {
-            ereport(WARNING,
-                (errmsg("Trigger function with non-plpgsql type is not recommended."),
-                    errdetail("Non-plpgsql trigger function are not shippable by default."),
-                    errhint("Unshippable trigger may lead to bad performance.")));
+//            ereport(WARNING,
+//                (errmsg("Trigger function with non-plpgsql type is not recommended."),
+//                    errdetail("Non-plpgsql trigger function are not shippable by default."),
+//                    errhint("Unshippable trigger may lead to bad performance.")));
         }
         aclresult = pg_proc_aclcheck(funcoid, GetUserId(), ACL_EXECUTE);
         if (aclresult != ACLCHECK_OK)
