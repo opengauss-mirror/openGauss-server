@@ -750,6 +750,10 @@ bool PgwrForwardSyncRequest(const FileTag *ftag, SyncRequestType type)
     if (incre_ckpt_sync_shmem->pagewritermain_pid == 0 || (incre_ckpt_sync_shmem->num_requests >=
         incre_ckpt_sync_shmem->max_requests && !CompactPageWriterRequestQueue())) {
         LWLockRelease(sync_queue_lwlock);
+        if (incre_ckpt_sync_shmem->pagewritermain_pid !=0 && incre_ckpt_sync_shmem->num_requests >=
+            incre_ckpt_sync_shmem->max_requests) {
+            SetLatch(g_instance.proc_base->pgwrMainThreadLatch);
+        }
         return false;
     }
 

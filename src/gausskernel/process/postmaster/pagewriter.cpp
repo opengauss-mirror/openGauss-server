@@ -48,6 +48,7 @@
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
 #define MAX(A, B) ((B) > (A) ? (B) : (A))
 #define FULL_CKPT g_instance.ckpt_cxt_ctl->flush_all_dirty_page
+#define MAX_SYNC_REQUEST_HALF (g_instance.ckpt_cxt_ctl->incre_ckpt_sync_shmem->max_requests / 2)
 
 const float ONE_HALF = 0.5;
 const int TEN_MILLISECOND = 10;
@@ -1273,6 +1274,7 @@ static void ckpt_pagewriter_main_thread_loop(void)
 
     candidate_num = get_curr_candidate_nums(false) + get_curr_candidate_nums(true);
     while (get_dirty_page_num() == 0 && candidate_num == (uint32)TOTAL_BUFFER_NUM &&
+        g_instance.ckpt_cxt_ctl->incre_ckpt_sync_shmem->num_requests < MAX_SYNC_REQUEST_HALF &&
         !t_thrd.pagewriter_cxt.shutdown_requested) {
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_POSTMASTER_DEATH, (long)TEN_MILLISECOND);
         if (rc & WL_POSTMASTER_DEATH) {
