@@ -250,7 +250,7 @@ typedef struct knl_session_attr_storage {
     bool enable_ustore_async_rollback;
     bool enable_ustore_page_rollback;
     bool enable_log_tuple;
-
+    char* index_type;
     /*
      * xlog keep for all standbys even through they are not connect and donnot created replslot.
      */

@@ -51,7 +51,7 @@ struct OldToNewChunkIdMappingData {
 
 typedef OldToNewChunkIdMappingData* OldToNewChunkIdMapping;
 
-static int GetUndoApplySize()
+int GetUndoApplySize()
 {
     uint64 undoApplySize = (uint64)u_sess->attr.attr_memory.maintenance_work_mem * 1024L;
     uint64 applySize = MAX_UNDO_APPLY_SIZE > undoApplySize ? undoApplySize : MAX_UNDO_APPLY_SIZE;
@@ -124,7 +124,6 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
             break;
         }
             
-
         /*
          * Fetch multiple undo record in bulk.
          * This will return a URecVector which contains an array of UndoRecords.
@@ -136,39 +135,85 @@ bool VerifyAndDoUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoR
                     fullXid, toUrecptr, fromUrecptr)));
             break;
         }
-           
 
         if (isTopTxn && !IS_VALID_UNDO_REC_PTR(urecPtr)) {
             containsFullChain = true;
         } else {
             containsFullChain = false;
         }
-        /*
-         * Sort the URecVector by block number so can apply multiple undo
-         * action per block.
-         */
-        urecvec->SortByBlkNo();
-        int i = 0;
-        for (i = 0; i < urecvec->Size(); i++) {
+
+        URecVector *uheapUrecvec = New(CurrentMemoryContext) URecVector();
+        uheapUrecvec->SetMemoryContext(CurrentMemoryContext);
+        uheapUrecvec->Initialize(urecvec->Size(), false);
+
+        URecVector *ubtreeUrecvec = New(CurrentMemoryContext) URecVector();
+        ubtreeUrecvec->SetMemoryContext(CurrentMemoryContext);
+        ubtreeUrecvec->Initialize(urecvec->Size(), false);
+
+        for (int i = 0; i < urecvec->Size(); i++) {
             UndoRecord *uur = (*urecvec)[i];
-            if (currRelfilenode != InvalidOid && (currTablespace != uur->Tablespace() ||
-                currRelfilenode != uur->Relfilenode() || currBlkno != uur->Blkno())) {
-                preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, startIndex, i - 1, fullXid,
-                    currReloid, currPartitionoid, currBlkno, containsFullChain,
-                    preRetCode, &preReloid, &prePartitionoid);
-                startIndex = i;
+            if (uur->Utype() == UNDO_UBT_INSERT || uur->Utype() == UNDO_UBT_DELETE) {
+                ubtreeUrecvec->PushBack(uur);
+            } else {
+                uheapUrecvec->PushBack(uur);
             }
-            currReloid = uur->Reloid();
-            currPartitionoid = uur->Partitionoid();
-            currBlkno = uur->Blkno();
-            currRelfilenode = uur->Relfilenode();
-            currTablespace = uur->Tablespace();
         }
 
-        /* Apply the remaining ones */
-        preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, startIndex, i - 1, fullXid, currReloid, currPartitionoid,
-            currBlkno, containsFullChain, preRetCode, &preReloid, &prePartitionoid);
+        /* rollback uheap */
+        if (uheapUrecvec->Size() > 0) {
+            /*
+            * Sort the URecVector by block number so can apply multiple undo
+            * action per block.
+            */
+            uheapUrecvec->SortByBlkNo();
+            int i = 0;
+            for (i = 0; i < uheapUrecvec->Size(); i++) {
+                UndoRecord *uur = (*uheapUrecvec)[i];
+                if (currRelfilenode != InvalidOid && (currTablespace != uur->Tablespace() ||
+                    currRelfilenode != uur->Relfilenode() || currBlkno != uur->Blkno())) {
+                    preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(uheapUrecvec, startIndex, i - 1, fullXid,
+                        currReloid, currPartitionoid, currBlkno, containsFullChain,
+                        preRetCode, &preReloid, &prePartitionoid);
+                    startIndex = i;
+                }
+                currReloid = uur->Reloid();
+                currPartitionoid = uur->Partitionoid();
+                currBlkno = uur->Blkno();
+                currRelfilenode = uur->Relfilenode();
+                currTablespace = uur->Tablespace();
+            }
 
+            /* Apply the remaining ones */
+            preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(
+                uheapUrecvec, startIndex, i - 1, fullXid, currReloid, currPartitionoid,
+                currBlkno, containsFullChain, preRetCode, &preReloid, &prePartitionoid);
+        }
+
+        preReloid = InvalidOid;
+        prePartitionoid = InvalidOid;
+
+        /* rollback ubtree */
+        if (ubtreeUrecvec->Size() > 0) {
+            for (int i = 0; i < ubtreeUrecvec->Size(); i++) {
+                UndoRecord *uur = (*ubtreeUrecvec)[i];
+                currReloid = uur->Reloid();
+                currPartitionoid = uur->Partitionoid();
+                currBlkno = uur->Blkno();
+                currRelfilenode = uur->Relfilenode();
+                currTablespace = uur->Tablespace();
+                preRetCode = RmgrTable[RM_UBTREE3_ID].rm_undo(ubtreeUrecvec, i, i, fullXid,
+                    currReloid, currPartitionoid, currBlkno, containsFullChain,
+                    preRetCode, &preReloid, &prePartitionoid);
+            }
+        }
+
+        preReloid = InvalidOid;
+        prePartitionoid = InvalidOid;
+
+        uheapUrecvec->clear();
+        DELETE_EX(uheapUrecvec);
+        ubtreeUrecvec->clear();
+        DELETE_EX(ubtreeUrecvec);
         DELETE_EX(urecvec);
     } while (true);
     

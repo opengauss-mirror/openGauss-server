@@ -767,15 +767,15 @@ CREATE TABLE test_us
 )with (storage_type=USTORE);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "u1" for table "test_us"
 select pg_get_tabledef('test_us');
-                                          pg_get_tabledef                                          
----------------------------------------------------------------------------------------------------
- SET search_path = public;                                                                        +
- CREATE TABLE test_us (                                                                           +
-     us1 integer,                                                                                 +
-     us2 character varying(20) NOT NULL                                                           +
- )                                                                                                +
- WITH (orientation=row, storage_type=ustore, compression=no);                                     +
- ALTER TABLE test_us ADD CONSTRAINT u1 PRIMARY KEY USING ubtree  (us2) WITH (storage_type=ustore);
+                                                  pg_get_tabledef                                                  
+-------------------------------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                                        +
+ CREATE TABLE test_us (                                                                                           +
+     us1 integer,                                                                                                 +
+     us2 character varying(20) NOT NULL                                                                           +
+ )                                                                                                                +
+ WITH (orientation=row, storage_type=ustore, compression=no);                                                     +
+ ALTER TABLE test_us ADD CONSTRAINT u1 PRIMARY KEY USING ubtree  (us2) WITH (storage_type=ustore, index_type=rcr);
 (1 row)
 
  

@@ -32,7 +32,7 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_ustore_pkey" f
  c4     | character varying(20) | collate C | extended |              | 
  c5     | bigint                |           | plain    |              | 
 Indexes:
-    "t_ustore_pkey" PRIMARY KEY, ubtree (c1) WITH (storage_type=ustore) TABLESPACE pg_default
+    "t_ustore_pkey" PRIMARY KEY, ubtree (c1) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 

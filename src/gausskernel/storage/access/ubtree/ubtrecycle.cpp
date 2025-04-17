@@ -31,31 +31,7 @@
 #include "utils/builtins.h"
 #include "datatype/timestamp.h"
 
-static uint32 BlockGetMaxItems(BlockNumber blkno);
-static void UBTreeInitRecycleQueuePage(Relation rel, Page page, Size size, BlockNumber blkno);
-static void UBTreeRecycleQueueDiscardPage(Relation rel, UBTRecycleQueueAddress addr);
-static void UBTreeRecycleQueueAddPage(Relation rel, UBTRecycleForkNumber forkNumber,
-    BlockNumber blkno, TransactionId xid);
-static Buffer StepNextPage(Relation rel, Buffer buf);
-static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumber, Buffer buf,
-    TransactionId waterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan, UBTreeGetNewPageStats* stats = NULL);
-static Buffer MoveToEndpointPage(Relation rel, Buffer buf, bool needHead, int access);
-static uint16 PageAllocateItem(Buffer buf);
-static void RecycleQueueLinkNewPage(Relation rel, Buffer leftBuf, Buffer newBuf);
-static bool QueuePageIsEmpty(Buffer buf);
-static Buffer AcquireNextAvailableQueuePage(Relation rel, Buffer buf, UBTRecycleForkNumber forkNumber);
-static void InsertOnRecycleQueuePage(Relation rel, Buffer buf, uint16 offset, BlockNumber blkno, TransactionId xid);
-static void RemoveOneItemFromPage(Relation rel, Buffer buf, uint16 offset);
-
-const BlockNumber FirstBlockNumber = 0;
-const BlockNumber FirstNormalBlockNumber = 2;      /* 0 and 1 are pages which include meta data */
-const uint16 FirstNormalOffset = 0;
-const uint16 OtherBlockOffset = ((uint16)0) - 2;   /* indicate that previous or next item is in other block */
-
-#define IsMetaPage(blkno) (blkno < FirstNormalBlockNumber)
-#define IsNormalOffset(offset) (offset < OtherBlockOffset)
-
-static uint32 BlockGetMaxItems(BlockNumber blkno)
+uint32 BlockGetMaxItems(BlockNumber blkno)
 {
     uint32 freeSpace = BLCKSZ - sizeof(PageHeaderData) - offsetof(UBTRecycleQueueHeaderData, items);
     if (IsMetaPage(blkno)) {
@@ -72,7 +48,7 @@ UBTRecycleQueueHeader GetRecycleQueueHeader(Page page, BlockNumber blkno)
     return (UBTRecycleQueueHeader)(((char*)PageGetContents(page)) + sizeof(UBTRecycleMetaData));
 }
 
-static UBTRecycleQueueItem HeaderGetItem(UBTRecycleQueueHeader header, uint16 offset)
+UBTRecycleQueueItem HeaderGetItem(UBTRecycleQueueHeader header, uint16 offset)
 {
     if (offset >= 0 && offset <= UBTRecycleMaxItems) {
         return &header->items[offset];
@@ -83,7 +59,7 @@ static UBTRecycleQueueItem HeaderGetItem(UBTRecycleQueueHeader header, uint16 of
     pg_unreachable(); /* won't reach here */
 }
 
-static void UBTreeInitRecycleQueuePage(Relation rel, Page page, Size size, BlockNumber blkno)
+void UBTreeInitRecycleQueuePage(Relation rel, Page page, Size size, BlockNumber blkno)
 {
     PageInit(page, size, 0);
 
@@ -117,7 +93,7 @@ static void UBTreeInitRecycleQueuePage(Relation rel, Page page, Size size, Block
     }
 }
 
-static bool RecycleQueueInitialized(Relation rel)
+bool RecycleQueueInitialized(Relation rel)
 {
     /* open smgr, might have to re-open if a cache flush happened */
     RelationOpenSmgr(rel);
@@ -156,7 +132,7 @@ void UBtreeRecycleQueueChangeChain(Buffer buf, BlockNumber newBlkno, bool setNex
     }
 }
 
-static void LogInitRecycleQueuePage(Relation rel, Buffer buf, Buffer leftBuf, Buffer rightBuf)
+void LogInitRecycleQueuePage(Relation rel, Buffer buf, Buffer leftBuf, Buffer rightBuf)
 {
     xl_ubtree2_recycle_queue_init_page xlrec;
     Page page = BufferGetPage(buf);
@@ -195,7 +171,7 @@ static void LogInitRecycleQueuePage(Relation rel, Buffer buf, Buffer leftBuf, Bu
 }
 
 /* generate prev and next blkno for this page, and init it */
-static void InitRecycleQueueInitialPage(Relation rel, Buffer buf)
+void InitRecycleQueueInitialPage(Relation rel, Buffer buf)
 {
     BlockNumber blkno = BufferGetBlockNumber(buf);
     Page page = BufferGetPage(buf);
@@ -282,7 +258,7 @@ void UBTreeInitializeRecycleQueue(Relation rel)
     UnlockRelationForExtension(rel, ExclusiveLock);
 }
 
-static bool UBTreeTryRecycleEmptyPageInternal(Relation rel)
+bool UBTreeTryRecycleEmptyPageInternal(Relation rel)
 {
     UBTRecycleQueueAddress addr;
     Buffer buf = UBTreeGetAvailablePage(rel, RECYCLE_EMPTY_FORK, &addr, NULL);
@@ -341,7 +317,7 @@ void UBTreeRecordUsedPage(Relation rel, UBTRecycleQueueAddress addr)
     }
 }
 
-static Buffer StepNextPage(Relation rel, Buffer buf)
+Buffer StepNextPage(Relation rel, Buffer buf)
 {
     Page page = BufferGetPage(buf);
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
@@ -355,7 +331,7 @@ static Buffer StepNextPage(Relation rel, Buffer buf)
     return nextBuf;
 }
 
-static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumber, Buffer buf,
+Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumber, Buffer buf,
     TransactionId WaterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan, UBTreeGetNewPageStats* stats)
 {
     Page page = BufferGetPage(buf);
@@ -533,7 +509,7 @@ void UBTreeRecycleQueuePageChangeEndpointRightPage(Relation rel, Buffer buf, boo
     header->flags |= endpointFlag;
 }
 
-static void RecycleQueueChangeEndpoint(Relation rel, Buffer buf, Buffer nextBuf, bool isHead)
+void RecycleQueueChangeEndpoint(Relation rel, Buffer buf, Buffer nextBuf, bool isHead)
 {
     Page page = BufferGetPage(buf);
     Page nextPage = BufferGetPage(nextBuf);
@@ -570,7 +546,7 @@ static void RecycleQueueChangeEndpoint(Relation rel, Buffer buf, Buffer nextBuf,
     END_CRIT_SECTION();
 }
 
-static Buffer MoveToEndpointPage(Relation rel, Buffer buf, bool needHead, int access)
+Buffer MoveToEndpointPage(Relation rel, Buffer buf, bool needHead, int access)
 {
 restart:
     Page page = BufferGetPage(buf);
@@ -622,7 +598,7 @@ restart:
     return buf;
 }
 
-static uint16 PageAllocateItem(Buffer buf)
+uint16 PageAllocateItem(Buffer buf)
 {
     Page page = BufferGetPage(buf);
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
@@ -637,7 +613,7 @@ static uint16 PageAllocateItem(Buffer buf)
     return InvalidOffset;
 }
 
-static Buffer RecycleQueueExtend(Relation rel)
+Buffer RecycleQueueExtend(Relation rel)
 {
     LockRelationForExtension(rel, ExclusiveLock);
     Buffer buf = ReadRecycleQueueBuffer(rel, P_NEW);
@@ -646,7 +622,7 @@ static Buffer RecycleQueueExtend(Relation rel)
     return buf;
 }
 
-static void RecycleQueueLinkNewPage(Relation rel, Buffer leftBuf, Buffer newBuf)
+void RecycleQueueLinkNewPage(Relation rel, Buffer leftBuf, Buffer newBuf)
 {
     /* new page already allocated, link it into the list */
     BlockNumber leftBlkno = BufferGetBlockNumber(leftBuf);
@@ -695,7 +671,7 @@ static void RecycleQueueLinkNewPage(Relation rel, Buffer leftBuf, Buffer newBuf)
     UnlockReleaseBuffer(rightBuf);
 }
 
-static bool QueuePageIsEmpty(Buffer buf)
+bool QueuePageIsEmpty(Buffer buf)
 {
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(BufferGetPage(buf), BufferGetBlockNumber(buf));
     return (header->flags & URQ_HEAD_PAGE) == 0 &&
@@ -704,7 +680,7 @@ static bool QueuePageIsEmpty(Buffer buf)
 }
 
 /* Acquire a page to be the new tail block */
-static Buffer AcquireNextAvailableQueuePage(Relation rel, Buffer buf, UBTRecycleForkNumber forkNumber)
+Buffer AcquireNextAvailableQueuePage(Relation rel, Buffer buf, UBTRecycleForkNumber forkNumber)
 {
     Page page = BufferGetPage(buf);
     BlockNumber blkno = BufferGetBlockNumber(buf);
@@ -740,7 +716,7 @@ static Buffer AcquireNextAvailableQueuePage(Relation rel, Buffer buf, UBTRecycle
     return newBuf;
 }
 
-static void TryFixMetaData(Buffer metaBuf, int32 oldval, int32 newval, bool isHead, Relation rel)
+void TryFixMetaData(Buffer metaBuf, int32 oldval, int32 newval, bool isHead, Relation rel)
 {
     UBTRecycleMeta metaData = (UBTRecycleMeta)PageGetContents(BufferGetPage(metaBuf));
     int32 *addr = (isHead ? (int32 *)&(metaData->headBlkno) : (int32 *)&(metaData->tailBlkno));
@@ -781,7 +757,7 @@ Buffer RecycleQueueGetEndpointPage(Relation rel, UBTRecycleForkNumber forkNumber
 }
 
 /* we insert into the tail page, ensure that the items in the page are arranged by XID incrementally */
-static void UBTreeRecycleQueueAddPage(Relation rel, UBTRecycleForkNumber forkNumber,
+void UBTreeRecycleQueueAddPage(Relation rel, UBTRecycleForkNumber forkNumber,
     BlockNumber blkno, TransactionId xid)
 {
     /* get the tail page */
@@ -798,7 +774,7 @@ static void UBTreeRecycleQueueAddPage(Relation rel, UBTRecycleForkNumber forkNum
     InsertOnRecycleQueuePage(rel, buf, offset, blkno, xid);
 }
 
-static void LogModifyPage(Buffer buf, bool isInsert, uint16 offset, UBTRecycleQueueItem item,
+void LogModifyPage(Buffer buf, bool isInsert, uint16 offset, UBTRecycleQueueItem item,
     UBTRecycleQueueHeader header, uint16 freeListOffset)
 {
     Page page = BufferGetPage(buf);
@@ -819,7 +795,7 @@ static void LogModifyPage(Buffer buf, bool isInsert, uint16 offset, UBTRecycleQu
     PageSetLSN(page, recptr);
 }
 
-static void InsertOnRecycleQueuePage(Relation rel, Buffer buf, uint16 offset, BlockNumber blkno, TransactionId xid)
+void InsertOnRecycleQueuePage(Relation rel, Buffer buf, uint16 offset, BlockNumber blkno, TransactionId xid)
 {
     Page page = BufferGetPage(buf);
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
@@ -927,7 +903,7 @@ void UBTreeXlogRecycleQueueModifyPage(Buffer buf, xl_ubtree2_recycle_queue_modif
     }
 }
 
-static void RemoveOneItemFromPage(Relation rel, Buffer buf, uint16 offset)
+void RemoveOneItemFromPage(Relation rel, Buffer buf, uint16 offset)
 {
     Page page = BufferGetPage(buf);
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
@@ -983,7 +959,7 @@ static void RemoveOneItemFromPage(Relation rel, Buffer buf, uint16 offset)
     }
 }
 
-static void UBTreeRecycleQueueDiscardPage(Relation rel, UBTRecycleQueueAddress addr)
+void UBTreeRecycleQueueDiscardPage(Relation rel, UBTRecycleQueueAddress addr)
 {
     Buffer buf = addr.queueBuf;
     LockBuffer(buf, BT_WRITE);
@@ -1038,7 +1014,7 @@ static void UBTreeRecycleQueueDiscardPage(Relation rel, UBTRecycleQueueAddress a
     UnlockReleaseBuffer(buf);
 }
 
-static void UBTRecyleQueueRecordOutput(BlockNumber blkno, uint16 offset, UBTRecycleQueueItem item,
+void UBTRecyleQueueRecordOutput(BlockNumber blkno, uint16 offset, UBTRecycleQueueItem item,
     TupleDesc *tupleDesc, Tuplestorestate *tupstore, uint32 cols)
 {
     if (item == NULL) {

@@ -450,7 +450,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
 #ifndef ENABLE_MULTIPLE_NODES
     "plsql_show_all_error",
     "uppercase_attribute_name",
-#endif 
+#endif
     "track_stmt_session_slot",
     "track_stmt_stat_level",
     "track_stmt_details_size",
@@ -458,7 +458,8 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "max_error_count",
     "enable_expr_fusion",
     "heap_bulk_read_size",
-    "restrict_nonsystem_relation_kind"
+    "restrict_nonsystem_relation_kind",
+    "index_type"
     };
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);
@@ -1871,11 +1872,11 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-        {{"enable_tsdb", 
-            PGC_POSTMASTER, 
+        {{"enable_tsdb",
+            PGC_POSTMASTER,
             NODE_DISTRIBUTE,
-            TSDB, 
-            gettext_noop("Enables control tsdb feature."), 
+            TSDB,
+            gettext_noop("Enables control tsdb feature."),
             NULL},
             &g_instance.attr.attr_common.enable_tsdb,
             false,
@@ -1883,11 +1884,11 @@ static void InitConfigureNamesBool()
             NULL,
             NULL},
 
-        {{"enable_ts_compaction", 
-            PGC_SIGHUP, 
+        {{"enable_ts_compaction",
+            PGC_SIGHUP,
             NODE_DISTRIBUTE,
-            TSDB, 
-            gettext_noop("Enables timeseries compaction feature."), 
+            TSDB,
+            gettext_noop("Enables timeseries compaction feature."),
             NULL},
             &u_sess->attr.attr_common.enable_ts_compaction,
             false,
@@ -1972,10 +1973,10 @@ static void InitConfigureNamesBool()
             false
         },
         {{"ts_adaptive_threads",
-            PGC_SIGHUP, 
+            PGC_SIGHUP,
             NODE_DISTRIBUTE,
-            TSDB, 
-            gettext_noop("Enables compaction give a adaptive number of consumers."), 
+            TSDB,
+            gettext_noop("Enables compaction give a adaptive number of consumers."),
             NULL},
             &u_sess->attr.attr_common.ts_adaptive_threads,
             false,
@@ -2017,6 +2018,18 @@ static void InitConfigureNamesBool()
             gettext_noop("Creates all user-defined tables with orientation inplace"),
             NULL},
             &u_sess->attr.attr_sql.enable_default_ustore_table,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
+        {{"enable_default_pcr_index",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Creates all user-defined indexs with pcr mode"),
+            NULL},
+            &u_sess->attr.attr_sql.enable_default_pcr_index,
             false,
             NULL,
             NULL,
@@ -2239,7 +2252,7 @@ static void InitConfigureNamesBool()
             false,
             NULL,
             NULL,
-            NULL}, 
+            NULL},
 #ifdef ENABLE_HTAP
         {{"enable_parallel_populate",
           PGC_USERSET,
@@ -3245,11 +3258,11 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-        {{"ts_consumer_workers", 
-            PGC_SIGHUP, 
+        {{"ts_consumer_workers",
+            PGC_SIGHUP,
             NODE_DISTRIBUTE,
-            TSDB, 
-            gettext_noop("Enables compaction consumers feature."), 
+            TSDB,
+            gettext_noop("Enables compaction consumers feature."),
             NULL},
             &u_sess->attr.attr_common.ts_consumer_workers,
             3,
@@ -3271,7 +3284,7 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-        {{"ts_cudesc_threshold", 
+        {{"ts_cudesc_threshold",
             PGC_SIGHUP,
             NODE_DISTRIBUTE,
             TSDB,
@@ -3639,7 +3652,7 @@ static void InitConfigureNamesString()
             NULL,
             NULL,
             NULL},
-            
+
         {{"thread_pool_stream_attr",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -4260,7 +4273,7 @@ static void InitConfigureNamesString()
 #else
             NULL,
             NULL,
-            NULL},        
+            NULL},
 #endif /* ENABLE_BBOX */
 
         {{"track_stmt_stat_level",
@@ -4412,7 +4425,7 @@ static void InitConfigureNamesString()
             NULL,
             GUC_LIST_INPUT | GUC_LIST_QUOTE},
             &u_sess->attr.attr_common.ts_compaction_strategy,
-            "3,6,6,12,0", 
+            "3,6,6,12,0",
             check_compaciton_strategy,
             NULL},
 #endif
@@ -5184,7 +5197,7 @@ void build_guc_get_variables_num(enum guc_attr_strategy stragety,
         conf->gen.vartype = PGC_STRING;
         count_variables_num(conf->gen.nodetype, num_single_vars_out, num_both_vars_out, num_distribute_vars_out);
     }
-    
+
     for (i = 0; u_sess->utils_cxt.ConfigureNamesInt64[stragety][i].gen.name; i++) {
         struct config_int64* conf = &u_sess->utils_cxt.ConfigureNamesInt64[stragety][i];
 
@@ -6267,7 +6280,7 @@ bool check_options_need_reset(struct config_generic* gconf)
     /* Don't reset if special exclusion from RESET ALL */
     if (gconf->flags & GUC_NO_RESET_ALL)
         return false;
-    
+
     /* No need to reset if wasn't SET */
     if (gconf->source <= PGC_S_OVERRIDE)
         return false;
@@ -6858,7 +6871,7 @@ void BeginReportingGUCOptions(void)
         if (conf->flags & GUC_REPORT)
             ReportGUCOption(conf);
     }
-    
+
 }
 
 /*
@@ -7588,12 +7601,12 @@ static bool validate_conf_int64(struct config_generic *record, const char *name,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("parameter \"%s\" requires a numeric value", name)));
         return false;
-    } 
+    }
 
     if (*newval < conf->min || *newval > conf->max) {
         ereport(elevel,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("%ld is outside the valid range for parameter \"%s\" (%ld .. %ld)", 
+                 errmsg("%ld is outside the valid range for parameter \"%s\" (%ld .. %ld)",
                         *newval, name, conf->min, conf->max)));
         return false;
     }
@@ -9259,12 +9272,12 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
             if (strcmp(stmt->name, "set_names") == 0) {
                 process_set_names_collate(stmt, action);
                 break;
-            } 
+            }
             if (strcasecmp(stmt->name, "identity") == 0 ||
                 strcasecmp(stmt->name, "last_insert_id") == 0) {
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("identity and last_insert_id is not supported for setting")));
-            } 
+            }
             (void)set_config_option(stmt->name,
                 ExtractSetVariableArgs(stmt),
                 ((superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
@@ -15042,26 +15055,26 @@ static bool check_compaciton_strategy(char** newval, void** extra, GucSource sou
     }
 
     /* filter max_parts */
-    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));    
+    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
     if (!ts_compaction_guc_filter(ptoken, TsProducer::MAX_PART_MIN, TsProducer::MAX_PART_MAX)) {
         GUC_check_errdetail("max part over range.");
         return false;
     }
 
     /* filter level middle */
-    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));    
+    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
     if (!ts_compaction_guc_filter(ptoken, TsProducer::LEVEL_MID_MIN, TsProducer::LEVEL_MID_MAX)) {
         GUC_check_errdetail("level middle over range.");
         return false;
     }
 
     /* filter level max */
-    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));    
+    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
     if (!ts_compaction_guc_filter(ptoken, TsProducer::LEVEL_MAX_MIN, TsProducer::LEVEL_MAX_MAX)) {
         GUC_check_errdetail("level max over range.");
         return false;
     }
-    
+
     /* we only accept is_fuzzy to be 0 or 1 */
     ptoken = TrimStr(psave);
     Assert(ptoken != NULL);

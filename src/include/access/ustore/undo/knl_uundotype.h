@@ -252,6 +252,8 @@ typedef struct MiniSlot {
 #define UNDO_DELETE 0x03
 #define UNDO_INPLACE_UPDATE 0x04
 #define UNDO_UPDATE 0x05
+#define UNDO_UBT_INSERT 0x06
+#define UNDO_UBT_DELETE 0x07
 #define UNDO_ITEMID_UNUSED 0x09
 
 #define UNDO_UREC_INFO_UNKNOWN 0x00

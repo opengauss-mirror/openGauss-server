@@ -107,6 +107,29 @@ typedef struct UBTPageOpaqueData {
 } UBTPageOpaqueData;
 
 typedef UBTPageOpaqueData* UBTPageOpaque;
+
+/*
+ * UBTPCRPageOpaqueData
+ */
+typedef struct {
+    BlockNumber btpo_prev; /* left sibling, or P_NONE if leftmost */
+    BlockNumber btpo_next; /* right sibling, or P_NONE if rightmost */
+    union {
+        uint32 level;                /* tree level --- zero for leaf pages */
+        ShortTransactionId xact_old; /* next transaction ID, if deleted */
+    } btpo;
+    uint16 btpo_flags;      /* flag bits, see below */
+    BTCycleId btpo_cycleid; /* vacuum cycle ID of latest split */
+
+    TransactionId xact; /* next transaction id, if deleted */
+    TransactionId last_delete_xid;
+    TransactionId last_commit_xid;
+    uint8 td_count;
+    uint16 activeTupleCount;
+    uint32 flags;
+} UBTPCRPageOpaqueData;
+typedef UBTPCRPageOpaqueData* UBTPCRPageOpaque;
+
 #define BTPageGetOpaqueInternal(page) ((BTPageOpaqueInternal) PageGetSpecialPointer(page))
 
 typedef struct BTDedupIntervalData {
@@ -186,6 +209,7 @@ typedef struct BTMetaPageData {
     BlockNumber btm_fastroot; /* current "fast" root location */
     uint32 btm_fastlevel;     /* tree level of the "fast" root page */
     bool btm_allequalimage;
+    uint32 btm_reltoastrelid; /* uheap toast oid used for pcr ubtree */
 } BTMetaPageData;
 
 #define BTPageGetMeta(p) ((BTMetaPageData*)PageGetContents(p))
@@ -195,7 +219,8 @@ typedef struct BTMetaPageData {
 #define BTREE_VERSION 3      /* current version number */
 #define BTREE_MIN_VERSION 2
 #define BTREE_OLD_VERSION 2  /* old btree version with all meta fields set */
-#define UBTREE_VERSION 2     /* current ubtree version number */
+#define UBTREE_VERSION     2 /* current ubtree rcr version number */
+#define UBTREE_PCR_VERSION 4 /* current ubtree pcr version number */
 
 /* Upgrade support for btree split/delete optimization. */
 #define BTREE_SPLIT_DELETE_UPGRADE_VERSION 92136
@@ -376,6 +401,11 @@ enum {
 
 enum {
     BTREE_REUSE_PAGE_BLOCK_NUM = 0,
+};
+
+enum ScanMode {
+    PCR_SCAN_MODE,
+    PBRCR_SCAN_MODE
 };
 
 typedef struct xl_btree_metadata_old {
@@ -958,6 +988,7 @@ typedef struct BTScanOpaqueData {
     bool xs_want_xid; /* indicate that the index scan want xid. Put it here for alignment */
     int numberOfKeys; /* number of preprocessed scan keys */
     ScanKey keyData;  /* array of preprocessed scan keys */
+    ScanMode scanMode;  /* pcr or pbrcr */
 
     /* workspace for SK_SEARCHARRAY support */
     ScanKey arrayKeyData;       /* modified copy of scan->keyData */

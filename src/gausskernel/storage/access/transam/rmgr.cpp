@@ -36,6 +36,7 @@
 #include "access/multixact.h"
 #include "access/nbtree.h"
 #include "access/ubtree.h"
+#include "access/ubtreepcr.h"
 #include "access/spgist.h"
 #include "access/xact.h"
 #include "access/ustore/undo/knl_uundoxlog.h"

@@ -16,8 +16,7 @@
 #include <time.h>
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "access/nbtree.h"
-#include "access/ubtree.h"
+#include "access/ubtreepcr.h"
 #include "access/reloptions.h"
 #include "access/relscan.h"
 #include "access/transam.h"
@@ -39,7 +38,6 @@ static bool UBTreeVisibilityCheckXid(TransactionId xmin, TransactionId xmax, boo
 static bool UBTreeXidSatisfiesMVCC(TransactionId xid, bool committed, Snapshot snapshot, Buffer buffer);
 static int UBTreeKeepNatts(Relation rel, IndexTuple lastleft, IndexTuple firstright, BTScanInsert itupKey);
 static bool UBTreeVisibilityCheckCid(IndexScanDesc scan, IndexTuple itup, bool *needRecheck);
-static bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2);
 
 #define MAX(A, B) (((B) > (A)) ? (B) : (A))
 #define MIN(A, B) (((B) < (A)) ? (B) : (A))
@@ -703,7 +701,7 @@ IndexTuple UBTreeTruncate(Relation rel, IndexTuple lastleft, IndexTuple firstrig
     return tidpivot;
 }
 
-static bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2)
+bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2)
 {
     if (itup1 == NULL || itup2 == NULL) {
         return false;
@@ -998,10 +996,16 @@ bool UBTreeCheckNatts(const Relation index, bool heapkeyspace, Page page, Offset
  * Using out of line storage would break assumptions made by suffix truncation
  * and by contrib/amcheck, though.
  */
+template void UBTreeCheckThirdPage<UBTPageOpaqueInternal>(Relation rel, Relation heap, 
+    bool needheaptidspace, Page page, IndexTuple newtup);
+template void UBTreeCheckThirdPage<UBTPCRPageOpaque>(Relation rel, Relation heap, 
+    bool needheaptidspace, Page page, IndexTuple newtup);
+
+template<typename Opaque>
 void UBTreeCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Page page, IndexTuple newtup)
 {
     Size itemsz;
-    UBTPageOpaqueInternal opaque;
+    Opaque opaque;
 
     itemsz = MAXALIGN(IndexTupleSize(newtup));
     /* Double check item size against limit */
@@ -1013,7 +1017,7 @@ void UBTreeCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Pa
      * Internal page insertions cannot fail here, because that would mean that
      * an earlier leaf level insertion that should have failed didn't
      */
-    opaque = (UBTPageOpaqueInternal) PageGetSpecialPointer(page);
+    opaque = (Opaque) PageGetSpecialPointer(page);
     if (!P_ISLEAF(opaque))
         elog(ERROR, "cannot insert oversized tuple of size %zu on internal page of index \"%s\"",
              itemsz, RelationGetRelationName(rel));
@@ -1029,4 +1033,55 @@ void UBTreeCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Pa
             errhint("Values larger than 1/3 of a buffer page cannot be indexed.\n"
                     "Consider a function index of an MD5 hash of the value, "
                     "or use full text indexing.")));
+}
+
+/*
+ * UBTreeIsEqual() -- used in _bt_doinsert in check for duplicates.
+ *
+ * This is very similar to _bt_compare, except for NULL and negative infinity
+ * handling. Rule is simple: NOT_NULL not equal NULL, NULL equal NULL.
+ */
+template bool UBTreeIsEqual<UBTPageOpaqueInternal>(Relation idxrel, Page page, 
+    OffsetNumber offnum, int keysz, ScanKey scankey);
+template bool UBTreeIsEqual<UBTPCRPageOpaque>(Relation idxrel, Page page, 
+    OffsetNumber offnum, int keysz, ScanKey scankey);
+
+template<typename Opaque>
+bool UBTreeIsEqual(Relation idxrel, Page page, OffsetNumber offnum, int keysz, ScanKey scankey)
+{
+    TupleDesc itupdesc = RelationGetDescr(idxrel);
+    IndexTuple itup;
+    int i;
+
+    /* Better be comparing to a leaf item */
+    Assert(P_ISLEAF((Opaque)PageGetSpecialPointer(page)));
+    Assert(offnum >= P_FIRSTDATAKEY((Opaque) PageGetSpecialPointer(page)));
+
+    itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
+    /*
+     * Index tuple shouldn't be truncated.	Despite we technically could
+     * compare truncated tuple as well, this function should be only called
+     * for regular non-truncated leaf tuples and P_HIKEY tuple on
+     * rightmost leaf page.
+     */
+    for (i = 1; i <= keysz; i++, scankey++) {
+        AttrNumber attno = scankey->sk_attno;
+        Assert(attno == i);
+        bool datumIsNull = false;
+        bool skeyIsNull = ((scankey->sk_flags & SK_ISNULL) ? true : false);
+        Datum datum = index_getattr(itup, attno, itupdesc, &datumIsNull);
+
+        if (datumIsNull && skeyIsNull)
+            continue; /* NULL equal NULL */
+        if (datumIsNull != skeyIsNull)
+            return false; /* NOT_NULL not equal NULL */
+
+        if (DatumGetInt32(FunctionCall2Coll(&scankey->sk_func,
+                                            scankey->sk_collation, datum, scankey->sk_argument)) != 0) {
+            return false;
+        }
+    }
+
+    /* if we get here, the keys are equal */
+    return true;
 }

@@ -21,6 +21,7 @@
 #include "knl/knl_variable.h"
 #include "access/nbtree.h"
 #include "access/ubtree.h"
+#include "access/ubtreepcr.h"
 #include "access/reloptions.h"
 #include "access/relscan.h"
 #include "access/tableam.h"
@@ -38,6 +39,7 @@
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "commands/tablespace.h"
+#include "miscadmin.h"
 
 /* Working state needed by btvacuumpage */
 typedef struct {
@@ -54,8 +56,11 @@ typedef struct {
 
 static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, BTCycleId cycleid);
 static void UBTreeVacuumPage(BTVacState *vstate, OidRBTree* invisibleParts, BlockNumber blkno, BlockNumber origBlkno);
+static void UBTreePCRVacuumPage(BTVacState *vstate, OidRBTree* invisibleParts, BlockNumber blkno, BlockNumber origBlkno);
 
 static IndexTuple UBTreeGetIndexTuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset);
+bool UBTreeIndexIsPCRType(Relation rel);
+
 /*
  *	btbuild() -- build a new btree index.
  */
@@ -89,7 +94,6 @@ Datum ubtbuild(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                 errmsg("index \"%s\" already contains data", RelationGetRelationName(index))));
     }
-
     reltuples = _bt_spools_heapscan(heap, index, &buildstate, indexInfo, &allPartTuples);
 
     /*
@@ -97,12 +101,19 @@ Datum ubtbuild(PG_FUNCTION_ARGS)
      * inserting the sorted tuples into btree pages and (3) building the upper
      * levels.
      */
-    UBTreeLeafBuild(buildstate.spool, buildstate.spool2);
+    if (!UBTreeIndexIsPCRType(index)) {
+        UBTreeLeafBuild(buildstate.spool, buildstate.spool2);
+    } else {
+        if (t_thrd.proc->workingVersionNum < UBTREE_PCR_VERSION_NUM) {
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("Ubtree PCR index is not supported in current version!")));
+        }
+        UBTreePCRLeafBuild(buildstate.spool, buildstate.spool2);
+    }
     _bt_spooldestroy(buildstate.spool);
     if (buildstate.spool2) {
         _bt_spooldestroy(buildstate.spool2);
     }
-
     if (buildstate.btleader) {
         _bt_end_parallel();
     }
@@ -168,7 +179,15 @@ Datum ubtbuildempty(PG_FUNCTION_ARGS)
     /* Ensure rd_smgr is open (could have been closed by relcache flush!) */
     RelationOpenSmgr(index);
 
-    UBTreeInitMetaPage(metapage, P_NONE, 0);
+    if (!UBTreeIndexIsPCRType(index)) {
+        UBTreeInitMetaPage(metapage, P_NONE, 0);
+    } else {
+        if (t_thrd.proc->workingVersionNum < UBTREE_PCR_VERSION_NUM) {
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("Ubtree PCR index is not supported in current version!")));
+        }
+        UBTreePCRInitMetaPage(metapage, P_NONE, 0);
+    }
 
     /*
      * Write the page and log it.  It might seem that an immediate sync
@@ -211,9 +230,13 @@ bool UBTreeDelete(Relation rel, Datum* values, const bool* isnull, ItemPointer h
 
     WHITEBOX_TEST_STUB("UBTreeDelete", WhiteboxDefaultErrorEmit);
 
-    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel));
+    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCRType(rel));
     itup->t_tid = *heapTCtid;
-    ret = UBTreeDoDelete(rel, itup, isRollbackIndex);
+    if (UBTreeIndexIsPCRType(rel)) {
+        ret = UBTreePCRDoDelete(rel, itup, isRollbackIndex);
+    } else {
+        ret = UBTreeDoDelete(rel, itup, isRollbackIndex);
+    }
     pfree(itup);
 
     return ret;
@@ -250,14 +273,17 @@ Datum ubtinsert(PG_FUNCTION_ARGS)
     }
 
     /* generate an index tuple */
-    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel));
+    itup = index_form_tuple(RelationGetDescr(rel), values, isnull, RelationIsUBTree(rel), UBTreeIndexIsPCRType(rel));
     itup->t_tid = *htCtid;
 
-    /* reserve space for xmin/xmax */
-    Size newsize = IndexTupleSize(itup) + sizeof(ShortTransactionId) * 2;
-    IndexTupleSetSize(itup, newsize);
-
-    result = UBTreeDoInsert(rel, itup, checkUnique, heapRel);
+    if (!UBTreeIndexIsPCRType(rel)) { 
+        /* reserve space for xmin/xmax */
+        Size newsize = IndexTupleSize(itup) + sizeof(ShortTransactionId) * 2;
+        IndexTupleSetSize(itup, newsize);
+        result = UBTreeDoInsert(rel, itup, checkUnique, heapRel);
+    } else {
+        result = UBTreePCRDoInsert(rel, itup, checkUnique, heapRel);
+    }
 
     pfree(itup);
 
@@ -276,7 +302,12 @@ Datum ubtgettuple(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function btgettuple")));
     }
 
-    bool res = UBTreeGetTupleInternal(scan, dir);
+    bool res;
+    if (UBTreeIndexIsPCRType(scan->indexRelation)) {
+        res = UBTreePCRGetTupleInternal(scan, dir);
+    } else {
+        res = UBTreeGetTupleInternal(scan, dir);
+    }
 
     PG_RETURN_BOOL(res);
 }
@@ -310,8 +341,10 @@ Datum ubtgetbitmap(PG_FUNCTION_ARGS)
 
     /* This loop handles advancing to the next array elements, if any */
     do {
+        bool found = UBTreeIndexIsPCRType(scan->indexRelation) ?
+            UBTreePCRFirst(scan, ForwardScanDirection) : UBTreeFirst(scan, ForwardScanDirection);
         /* Fetch the first page & tuple */
-        if (UBTreeFirst(scan, ForwardScanDirection)) {
+        if (found) {
             /* Save tuple ID, and continue scanning */
             heapTid = &scan->xs_ctup.t_self;
             currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
@@ -325,8 +358,14 @@ Datum ubtgetbitmap(PG_FUNCTION_ARGS)
                  */
                 if (++so->currPos.itemIndex > so->currPos.lastItem) {
                     /* let _bt_next do the heavy lifting */
-                    if (!UBTreeNext(scan, ForwardScanDirection)) {
-                        break;
+                    if (UBTreeIndexIsPCRType(scan->indexRelation)) {
+                        if (!UBTreePCRNext(scan, ForwardScanDirection)) {
+                            break;
+                        }
+                    } else {
+                        if (!UBTreeNext(scan, ForwardScanDirection)) {
+                            break;
+                        }
                     }
                 }
 
@@ -419,7 +458,9 @@ Datum ubtrescan(PG_FUNCTION_ARGS)
     if (BTScanPosIsValid(so->currPos)) {
         /* Before leaving current page, deal with any killed items */
         if (so->numKilled > 0) {
-            _bt_killitems(scan, false);
+            if (!UBTreeIndexIsPCRType(scan->indexRelation)) {
+                _bt_killitems(scan, false);
+            }
         }
         ReleaseBuffer(so->currPos.buf);
         so->currPos.buf = InvalidBuffer;
@@ -492,7 +533,9 @@ Datum ubtendscan(PG_FUNCTION_ARGS)
     if (BTScanPosIsValid(so->currPos)) {
         /* Before leaving current page, deal with any killed items */
         if (so->numKilled > 0) {
-            _bt_killitems(scan, false);
+            if (!UBTreeIndexIsPCRType(scan->indexRelation)) {
+                _bt_killitems(scan, false);
+            }
         }
         ReleaseBuffer(so->currPos.buf);
         so->currPos.buf = InvalidBuffer;
@@ -583,7 +626,9 @@ Datum ubtrestrpos(PG_FUNCTION_ARGS)
         if (BTScanPosIsValid(so->currPos)) {
             /* Before leaving current page, deal with any killed items */
             if (so->numKilled > 0 && so->currPos.buf != so->markPos.buf) {
-                _bt_killitems(scan, false);
+                if (!UBTreeIndexIsPCRType(scan->indexRelation)) {
+                    _bt_killitems(scan, false);
+                }
             }
             ReleaseBuffer(so->currPos.buf);
             so->currPos.buf = InvalidBuffer;
@@ -767,7 +812,11 @@ static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats
         }
         /* Iterate over pages, then loop back to recheck length */
         for (; blkno < numPages; blkno++) {
-            UBTreeVacuumPage(&vstate, info->invisibleParts, blkno, blkno);
+            if (UBTreeIndexIsPCRType(rel)) {
+                UBTreePCRVacuumPage(&vstate, info->invisibleParts, blkno, blkno);
+            } else {
+                UBTreeVacuumPage(&vstate, info->invisibleParts, blkno, blkno);
+            }
         }
     }
 
@@ -927,7 +976,143 @@ restart:
                 UBTreeRecordFreePage(rel, cur_del_blkno->bts_blkno, ReadNewTransactionId());
                 /* count only this page, else may double-count parent */
                 stats->pages_deleted++;
-                cur_del_blkno = cur_del_blkno->bts_parent;    
+                cur_del_blkno = cur_del_blkno->bts_parent;
+            }
+        }
+
+        _bt_freestack(dummy_del_blknos);
+        MemoryContextSwitchTo(oldcontext);
+        /* pagedel released buffer, so we shouldn't */
+    } else {
+        _bt_relbuf(rel, buf);
+    }
+
+    /*
+     * This is really tail recursion, but if the compiler is too stupid to
+     * optimize it as such, we'd eat an uncomfortably large amount of stack
+     * space per recursion level (due to the deletable[] array). A failure is
+     * improbable since the number of levels isn't likely to be large ... but
+     * just in case, let's hand-optimize into a loop.
+     */
+    if (recurseTo != P_NONE) {
+        blkno = recurseTo;
+        goto restart;
+    }
+}
+
+static void UBTreePCRVacuumPage(BTVacState *vstate, OidRBTree* invisibleParts, BlockNumber blkno, BlockNumber origBlkno)
+{
+    IndexVacuumInfo *info = vstate->info;
+    IndexBulkDeleteResult *stats = vstate->stats;
+    Relation rel = info->index;
+    bool deleteNow = false;
+    BlockNumber recurseTo;
+    Buffer buf;
+    Page page;
+    UBTPCRPageOpaque opaque;
+
+restart:
+    deleteNow = false;
+    recurseTo = P_NONE;
+
+    /* call vacuum_delay_point while not holding any buffer lock */
+    vacuum_delay_point();
+
+    /*
+     * We can't use _bt_getbuf() here because it always applies
+     * _bt_checkpage(), which will barf on an all-zero page. We want to
+     * recycle all-zero pages, not fail.  Also, we want to use a nondefault
+     * buffer access strategy.
+     */
+    buf = ReadBufferExtended(rel, MAIN_FORKNUM, blkno, RBM_NORMAL, info->strategy);
+    _bt_checkbuffer_valid(rel, buf);
+    LockBuffer(buf, BT_READ);
+    page = BufferGetPage(buf);
+    opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    if (!PageIsNew(page)) {
+        _bt_checkpage(rel, buf);
+    }
+
+    /*
+     * If we are recursing, the only case we want to do anything with is a
+     * live leaf page having the current vacuum cycle ID.  Any other state
+     * implies we already saw the page (eg, deleted it as being empty).
+     */
+    if (blkno != origBlkno) {
+        if (UBTreePCRPageRecyclable(page) || P_IGNORE(opaque) || !P_ISLEAF(opaque) ||
+            opaque->btpo_cycleid != vstate->cycleid) {
+            _bt_relbuf(rel, buf);
+            return;
+        }
+    }
+
+    /* Page is valid, see what to do with it */
+    if (UBTreePCRPageRecyclable(page)) {
+        /* Okay to recycle this page */
+        vstate->totFreePages++;
+        stats->pages_deleted++;
+    } else if (P_ISDELETED(opaque)) {
+        /* Already deleted, but can't recycle yet */
+        stats->pages_deleted++;
+    } else if (P_ISHALFDEAD(opaque)) {
+        /* Half-dead, try to delete */
+        deleteNow = true;
+    } else if (P_ISLEAF(opaque)) {
+        /*
+         * vacuum logic for multi-version index. We use UBTreePagePruneOpt() instead
+         * of original vacuum.
+         *
+         * Note: we only prune leaf pages and never delete right most page.
+         */
+
+        /* acquire the write lock for clean up */
+        LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+
+        /* prune and freeze this index page */
+        TransactionId globalFrozenXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
+        UBTreePCRCanPrune(rel, buf, globalFrozenXid, true);
+        UBTreePCRPagePrune(rel, buf, globalFrozenXid, invisibleParts, true);
+
+        if (!P_RIGHTMOST(opaque) && UBTPCRPageGetMaxOffsetNumber(page) == 1) {
+            /* already empty (only HIKEY left), ok to delete */
+            deleteNow = true;
+        }
+
+        OffsetNumber minoff = P_FIRSTDATAKEY(opaque);
+        OffsetNumber maxoff = UBTPCRPageGetMaxOffsetNumber(page);
+        /*
+         * If it's now empty, try to delete; else count the live tuples. We
+         * don't delete when recursing, though, to avoid putting entries into
+         * freePages out-of-order (doesn't seem worth any extra code to handle
+         * the case).
+         */
+        if (minoff <= maxoff) {
+            stats->num_index_tuples += maxoff - minoff + 1;
+        }
+
+        if (vstate->cycleid != 0 && opaque->btpo_cycleid == vstate->cycleid
+            && !(opaque->btpo_flags & BTP_SPLIT_END)
+            && !P_RIGHTMOST(opaque) && opaque->btpo_next < origBlkno) {
+            recurseTo = opaque->btpo_next;
+        }
+    }
+
+    if (deleteNow) {
+        /* Run pagedel in a temp context to avoid memory leakage */
+        MemoryContextReset(vstate->pagedelcontext);
+        MemoryContext oldcontext = MemoryContextSwitchTo(vstate->pagedelcontext);
+        BTStack dummy_del_blknos = (BTStack)palloc0(sizeof(BTStackData));
+
+        int ndel = UBTreePCRPageDel(rel, buf, dummy_del_blknos);
+        if (ndel) {
+            BTStack cur_del_blkno = dummy_del_blknos->bts_parent;
+            while (cur_del_blkno) {
+                /* successfully deleted, move to freed page queue */
+                UBTreeRecordFreePage(rel, cur_del_blkno->bts_blkno, ReadNewTransactionId());
+                /* count only this page, else may double-count parent */
+                stats->pages_deleted++;
+                cur_del_blkno = cur_del_blkno->bts_parent;
             }
         }
 
@@ -1033,16 +1218,24 @@ Datum ubtmerge(PG_FUNCTION_ARGS)
 
             /* When we see first tuple, create first index page */
             if (state == NULL) {
-                state = UBTreePageState(&wstate, 0);
+                if (!UBTreeIndexIsPCRType(dstIdxRel)) {
+                    state = UBTreePageState(&wstate, 0);
+                } else {
+                    state = UBTreePCRPageState(&wstate, 0);
+                }
             }
 
             // add index tuple loadItup, remove it from orderedTupleList
-            UBTreeBuildAdd(&wstate, state, loadItup, srcIdxRelScan->xs_want_xid);
+            if (!UBTreeIndexIsPCRType(dstIdxRel)) {
+                UBTreeBuildAdd(&wstate, state, loadItup, srcIdxRelScan->xs_want_xid);
+            } else {
+                UBTreePCRBuildAdd(&wstate, state, loadItup, srcIdxRelScan->xs_want_xid);
+            }
             indextuples += 1;
             orderedTupleList = list_delete_first(orderedTupleList);
             pfree(ele);
 
-            // load next index tuple
+            // load next index tuple, same function with pcr index.
             loadItup = UBTreeGetIndexTuple(srcIdxRelScan, dir, offsetItup);
             // insert load index tuple into orderedTupleList
             orderedTupleList = insert_ordered_index(orderedTupleList, tupdes, itupKey->scankeys, keysz,
@@ -1054,7 +1247,11 @@ Datum ubtmerge(PG_FUNCTION_ARGS)
     pfree(itupKey);
 
     /* Close down final pages and write the metapage */
-    UBTreeUpperShutDown(&wstate, state);
+    if (!UBTreeIndexIsPCRType(dstIdxRel)) {
+        UBTreeUpperShutDown(&wstate, state);
+    } else {
+        UBTreePCRUpperShutDown(&wstate, state);
+    }
 
     /*
      * If the index is WAL-logged, we must fsync it down to disk before it's
@@ -1093,7 +1290,12 @@ Datum ubtoptions(PG_FUNCTION_ARGS)
 
 static IndexTuple UBTreeGetIndexTuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset)
 {
-    bool found = UBTreeGetTupleInternal(scan, dir);
+    bool found;
+    if (UBTreeIndexIsPCRType(scan->indexRelation)) {
+        found = UBTreePCRGetTupleInternal(scan, dir);
+    } else {
+        found = UBTreeGetTupleInternal(scan, dir);
+    }
     /* Reset kill flag immediately for safety */
     scan->kill_prior_tuple = false;
 
@@ -1367,4 +1569,12 @@ bool IndexPagePrepareForXid(Relation rel, Page page, TransactionId xid, bool nee
     }
     
     return hasPruned;
+}
+
+bool UBTreeIndexIsPCRType(Relation rel)
+{
+    if (RelationIndexIsPCR(rel->rd_options)) {
+        return true;
+    }
+    return false;
 }

@@ -41,6 +41,7 @@
 #include "access/ustore/knl_whitebox_test.h"
 #include "access/gtm.h"
 #include "access/csnlog.h"
+#include "access/ubtreepcr.h"
 #include "catalog/storage.h"
 #include "commands/dbcommands.h"
 #include "commands/vacuum.h"
@@ -714,7 +715,8 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
     if (IsAutoVacuumWorkerProcess()) {
         /* In the autovacuum process, build fsm tree for common tables, toast tables, or partitions. */
         FreeSpaceMapVacuum(onerel);
-        if (vacstmt->needFreeze) {
+        /* do not prune pcr index during autovacuum */
+        if (vacstmt->needFreeze && !UBTreeIndexIsPCRType(onerel)) {
             /* Force vacuum for recycle clog. */
             ForceVacuumUHeapRelBypass(onerel, vacstmt, bstrategy);
         }

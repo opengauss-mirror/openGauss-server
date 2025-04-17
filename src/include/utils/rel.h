@@ -201,6 +201,7 @@ typedef struct RelationData {
 
     int rd_indnkeyatts;     /* index relation's indexkey nums */
     int1 rd_indexsplit;  /* determines the page split method to use */
+    int1 rd_ubtreeindextype; /* type of ubtree index */
 
     /*
      * index access support info (used only for an index relation)
@@ -398,7 +399,8 @@ typedef struct StdRdOptions {
     char* compression; /* compress or not compress */
     char* storage_type; /*table access method kind */
     char* orientation; /* row-store or column-store */
-    char        *indexsplit; /* page split method */
+    char* indexsplit; /* page split method */
+    char* index_type; /* index type of ubtree */
     char* ttl; /* time to live for tsdb data management */
     char* period; /* partition range for tsdb data management */
     char* partition_interval; /* partition interval for streaming contquery table */
@@ -413,7 +415,7 @@ typedef struct StdRdOptions {
     char* append_mode;
     char* start_ctid_internal;
     char* end_ctid_internal;
-    char        *merge_list;
+    char* merge_list;
     char* dek_cipher;
     char* cmk_id;
     char* encrypt_algo;
@@ -613,6 +615,13 @@ typedef struct StdRdOptions {
 #define IndexRelationGetNumberOfKeyAttributes(relation) \
     (AssertMacro((relation)->rd_indnkeyatts != 0), ((relation)->rd_indnkeyatts))
 
+/*
+ * Use to judge if a ubtree relation is a including index
+ *         Returns the tag of the include index
+ */
+#define UBTreeHasIncluding(rel) (RelationIsGlobalIndex(rel) ?   \
+    (IndexRelationGetNumberOfAttributes(rel) > IndexRelationGetNumberOfKeyAttributes(rel) + 1) :    \
+    (IndexRelationGetNumberOfAttributes(rel) > IndexRelationGetNumberOfKeyAttributes(rel)))
 
 /*
  * RelationGetDescr

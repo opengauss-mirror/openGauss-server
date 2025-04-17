@@ -187,6 +187,8 @@ bool IsRecordProcess(XLogReaderState *record)
         case RM_UNDOACTION_ID:
         case RM_UBTREE_ID:
         case RM_UBTREE2_ID:
+        case RM_UBTREE3_ID:
+        case RM_UBTREE4_ID:
         case RM_SEGPAGE_ID:
         case RM_REPLORIGIN_ID:
 #ifdef ENABLE_MOT

@@ -495,7 +495,7 @@ void UBTreeBuildAdd(BTWriteState *wstate, BTPageState *state, IndexTuple itup, b
      * the resered space.  This should never fail on internal pages.
      */
     if (unlikely(itupsz > UBTMaxItemSize(npage))) {
-        UBTreeCheckThirdPage(wstate->index, wstate->heap, state->btps_level == 0, npage, itup);
+        UBTreeCheckThirdPage<UBTPageOpaqueInternal>(wstate->index, wstate->heap, state->btps_level == 0, npage, itup);
     }
 
     /*

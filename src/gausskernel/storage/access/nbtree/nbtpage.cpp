@@ -548,6 +548,9 @@ void _bt_checkpage(Relation rel, Buffer buf, BlockNumber par_blkno)
     Size _bt_specialsize = MAXALIGN(sizeof(BTPageOpaqueData));
     if (RelationIsUstoreIndex(rel)) {
         _bt_specialsize = MAXALIGN(sizeof(UBTPageOpaqueData));
+        if (RelationIndexIsPCR(rel->rd_options)) {
+            _bt_specialsize = MAXALIGN(sizeof(UBTPCRPageOpaqueData));
+        }
     }
     if (PageGetSpecialSize(page) != _bt_specialsize)
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),

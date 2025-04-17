@@ -12,11 +12,11 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * rel_gs.h
  *        openGauss relation descriptor (a/k/a relcache entry) definitions.
- * 
- * 
+ *
+ *
  * IDENTIFICATION
  *        src/include/utils/rel_gs.h
  *
@@ -179,6 +179,9 @@ typedef struct RelationMetaData {
 #define COMPRESSION_SNAPPY "snappy"
 #define COMPRESSION_LZ4 "lz4"
 
+#define UBTREE_INDEX_TYPE_PCR "pcr"
+#define UBTREE_INDEX_TYPE_RCR "rcr"
+
 /*
  * values for different table access method types.
  */
@@ -205,6 +208,9 @@ typedef struct RelationMetaData {
 #define INTERNAL_MASK_DALTER 0x04     // disable alter
 #define INTERNAL_MASK_DSELECT 0x08    // disable select
 #define INTERNAL_MASK_DUPDATE 0x0100  // disable update
+
+#define StdRdOptionsHasStringData(_basePtr, _memberName)    \
+    ((_basePtr) && (((StdRdOptions*)(_basePtr))->_memberName))
 
 #define StdRdOptionsGetStringData(_basePtr, _memberName, _defaultVal)                    \
     (((_basePtr) && (((StdRdOptions*)(_basePtr))->_memberName))                          \
@@ -265,6 +271,12 @@ static inline TableAmType get_tableam_from_reloptions(bytea* reloptions, char re
 
 #define RelationIsIndexsplitMethodInsertpt(_reloptions) \
     pg_strcasecmp(RelationGetIndexsplitMethod(_reloptions), INDEXSPLIT_OPT_INSERTPT) == 0
+
+#define RelationGetIndexType(_reloptions) \
+    StdRdOptionsGetStringData(_reloptions, index_type, UBTREE_INDEX_TYPE_RCR)
+
+#define RelationIndexIsPCR(_reloptions) \
+    pg_strcasecmp(RelationGetIndexType(_reloptions), UBTREE_INDEX_TYPE_PCR) == 0
 
 /*
  * @Description: get indexsplit type from Relation's reloptions data.
@@ -683,7 +695,7 @@ extern void PartitionDecrementReferenceCount(Partition part);
 #define RELATION_SUPPORT_AUTONOMOUS_EXTEND_PARTITION \
     g_instance.attr.attr_storage.max_concurrent_autonomous_transactions > 0
 
-/*  
+/*
  *   type  bucketOid     bucketKey     meaning
  *    N      INV           INV         relation has no bucket
  *    B       1            KEY         relation has bucket but without bucket storage
@@ -692,7 +704,7 @@ extern void PartitionDecrementReferenceCount(Partition part);
  */
 #define REALTION_BUCKETKEY_INITED(relation) \
         ((relation)->rd_bucketkey != (RelationBucketKey *)&((relation)->rd_bucketkey))
-    
+
 #define REALTION_BUCKETKEY_VALID(relation) \
         (REALTION_BUCKETKEY_INITED(relation) && PointerIsValid((relation)->rd_bucketkey))
 
@@ -771,7 +783,7 @@ static inline bool IsCompressedByCmprsInPgclass(const RelCompressType cmprInPgcl
 
 #define RelationIsRedistributeDest(relation)		\
     (REDIS_REL_DESTINATION == (RelationGetAppendMode(relation)) ? true : false)
-#else 
+#else
 #define RelationInRedistribute(relation) (false)
 
 #define RelationInRedistributeReadOnly(relation) (false)

@@ -22,6 +22,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/table
     ${CMAKE_CURRENT_SOURCE_DIR}/transam 
     ${CMAKE_CURRENT_SOURCE_DIR}/ubtree 
+    ${CMAKE_CURRENT_SOURCE_DIR}/ubtreepcr 
     ${CMAKE_CURRENT_SOURCE_DIR}/ustore
     ${CMAKE_CURRENT_SOURCE_DIR}/datavec
 )
@@ -50,5 +51,6 @@ add_subdirectory(spgist)
 add_subdirectory(table)
 add_subdirectory(transam)
 add_subdirectory(ubtree)
+add_subdirectory(ubtreepcr)
 add_subdirectory(ustore)
 add_subdirectory(datavec)

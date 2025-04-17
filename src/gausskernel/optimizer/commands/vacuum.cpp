@@ -34,6 +34,7 @@
 #include "access/tableam.h"
 #include "access/multixact.h"
 #include "access/ustore/knl_uheap.h"
+#include "access/ubtreepcr.h"
 #include "catalog/namespace.h"
 #include "catalog/gs_matview.h"
 #include "catalog/pg_database.h"
@@ -4211,6 +4212,11 @@ static void UstoreVacuumMainPartitionGPIs(Relation onerel, const VacuumStmt* vac
     OidRBTree* invisibleParts = CreateOidRBTree();
     Oid parentOid = RelationGetRelid(onerel);
     bool lockInterval = false;
+
+    if (IsAutoVacuumWorkerProcess()) {
+        DestroyOidRBTree(&invisibleParts);
+        return;
+    }
 
     if (vacstmt->options & VACOPT_VERBOSE) {
         elevel = VERBOSEMESSAGE;

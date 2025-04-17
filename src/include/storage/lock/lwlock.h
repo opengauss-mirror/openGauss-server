@@ -209,8 +209,9 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* xlog track hashmap */
 #define FirstScanningXLOGTrackLock (FirstSSSnapshotXminCacheLock + NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS)
 
+#define FirstCRBufMappingLock (FirstScanningXLOGTrackLock + NUM_SCANNING_XLOG_TRACK_PARTITIONS)
 /* must be last: */
-#define NumFixedLWLocks (FirstScanningXLOGTrackLock + NUM_SCANNING_XLOG_TRACK_PARTITIONS)
+#define NumFixedLWLocks (FirstCRBufMappingLock + NUM_BUFFER_PARTITIONS)
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
  *
@@ -306,6 +307,9 @@ enum BuiltinTrancheIds
     LWTRANCHE_CSNLOG_SLRU,
     LWTRANCHE_MULTIXACTMEMBER_SLRU,
     LWTRANCHE_MULTIXACTOFFSET_SLRU,
+    LWTRANCHE_CR_BUF_ASSIGN,
+    LWTRANCHE_CR_BUF_MAPPING,
+    LWTRANCHE_CR_BUF_LRU,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

@@ -74,6 +74,10 @@ PG_RMGR(RM_UNDOACTION_ID, "UndoAction", undo::UndoXlogRollbackFinishRedo, undo::
 PG_RMGR(RM_UBTREE_ID, "UBtree", UBTreeRedo, UBTreeDesc, UBTreeXlogStartup, UBTreeXlogCleanup, UBTreeSafeRestartPoint,
 NULL, NULL, ubtree_type_name)
 PG_RMGR(RM_UBTREE2_ID, "UBtree2", UBTree2Redo, UBTree2Desc, NULL, NULL, NULL, NULL, NULL, ubtree2_type_name)
+PG_RMGR(RM_UBTREE3_ID, "UBtree3", UBTree3Redo, UBTree3Desc, NULL, NULL, NULL, UBTreePCRRollback,
+        NULL, ubtree3_type_name)
+PG_RMGR(RM_UBTREE4_ID, "UBtree4", UBTree4Redo, UBTree4Desc, NULL, NULL, NULL, NULL,
+        NULL, ubtree4_type_name)
 PG_RMGR(RM_SEGPAGE_ID, "SegpageStorage", segpage_smgr_redo, segpage_smgr_desc, NULL, NULL, NULL, NULL, NULL, \
     segpage_smgr_type_name)
 PG_RMGR(RM_REPLORIGIN_ID, "ReplicationOrigin", replorigin_redo, replorigin_desc, NULL, NULL, NULL, NULL, NULL, \

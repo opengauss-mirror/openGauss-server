@@ -153,6 +153,12 @@ void URecVector::Reset(bool needUnlockBuffer)
     ubuffersIdx_ = 0;
 }
 
+void URecVector::clear()
+{
+    SetUrecsZero(0, size_);
+    size_ = 0;
+}
+
 void ReleaseUndoBuffers()
 {
     for (int i = 0; i < t_thrd.ustore_cxt.undo_buffer_idx; i++) {

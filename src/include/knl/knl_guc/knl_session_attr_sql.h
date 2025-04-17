@@ -13,7 +13,7 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * knl_session_attr_sql.h
  *   Data struct to store knl_session_attr_sql variables.
  *
@@ -28,7 +28,7 @@
  *
  *   @group@: sql, storage, security, network, memory, resource, common
  *   select the group according to the type of guc variable.
- * 
+ *
  * IDENTIFICATION
  *        src/include/knl/knl_guc/knl_session_attr_sql.h
  *
@@ -249,6 +249,8 @@ typedef struct knl_session_attr_sql {
 
     bool mot_allow_index_on_nullable_column;
     bool enable_default_ustore_table;
+    bool enable_default_pcr_index;
+    char* index_type;
     char* ustore_attr;
 #ifdef ENABLE_UT
     char* ustore_unit_test;

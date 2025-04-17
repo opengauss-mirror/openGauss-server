@@ -608,7 +608,7 @@ SELECT * FROM gtest25 ORDER BY a;
  c      | integer | default 42
  x      | integer | generated always as ((c * 4)) stored
 Indexes:
-    "gtest25_pkey" PRIMARY KEY, ubtree (a) WITH (storage_type=ustore) TABLESPACE pg_default
+    "gtest25_pkey" PRIMARY KEY, ubtree (a) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 
 DROP TABLE gtest25;
 -- ALTER TABLE ... ALTER COLUMN

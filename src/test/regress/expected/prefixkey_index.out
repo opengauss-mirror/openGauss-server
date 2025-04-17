@@ -2666,34 +2666,34 @@ CREATE UNIQUE INDEX prefix_index_fraw ON test_prefix_ustore (fraw(9));
  fraw   | raw                   |           | extended |              | 
  fbytea | bytea                 |           | extended |              | 
 Indexes:
-    "prefix_index_fraw" UNIQUE, ubtree (fraw(9)) WITH (storage_type=ustore) TABLESPACE pg_default
-    "prefix_index_fblob" ubtree (fblob(5)) WITH (storage_type=ustore) TABLESPACE pg_default
-    "prefix_index_fchar_fbytea" ubtree (fchar(5), fbytea(5)) WITH (storage_type=ustore) TABLESPACE pg_default
-    "prefix_index_ftext" ubtree (ftext(5)) WITH (storage_type=ustore) TABLESPACE pg_default
-    "prefix_index_fvchar" ubtree (fvchar(5)) WITH (storage_type=ustore) TABLESPACE pg_default
+    "prefix_index_fraw" UNIQUE, ubtree (fraw(9)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "prefix_index_fblob" ubtree (fblob(5)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "prefix_index_fchar_fbytea" ubtree (fchar(5), fbytea(5)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "prefix_index_ftext" ubtree (ftext(5)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
+    "prefix_index_fvchar" ubtree (fvchar(5)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no, toast.storage_type=ustore
 
 select pg_get_tabledef('test_prefix_ustore'::regclass);
-                                                                  pg_get_tabledef                                                                  
----------------------------------------------------------------------------------------------------------------------------------------------------
- SET search_path = public;                                                                                                                        +
- CREATE TABLE test_prefix_ustore (                                                                                                                +
-     id integer,                                                                                                                                  +
-     fchar character(64),                                                                                                                         +
-     fvchar character varying(64),                                                                                                                +
-     ftext text,                                                                                                                                  +
-     fclob clob,                                                                                                                                  +
-     fblob blob,                                                                                                                                  +
-     fraw raw,                                                                                                                                    +
-     fbytea bytea                                                                                                                                 +
- )                                                                                                                                                +
- WITH (orientation=row, storage_type=ustore, compression=no);                                                                                     +
- CREATE UNIQUE INDEX prefix_index_fraw ON test_prefix_ustore USING ubtree (fraw(9)) WITH (storage_type=ustore) TABLESPACE pg_default;             +
- CREATE INDEX prefix_index_fblob ON test_prefix_ustore USING ubtree (fblob(5)) WITH (storage_type=ustore) TABLESPACE pg_default;                  +
- CREATE INDEX prefix_index_ftext ON test_prefix_ustore USING ubtree (ftext(5)) WITH (storage_type=ustore) TABLESPACE pg_default;                  +
- CREATE INDEX prefix_index_fvchar ON test_prefix_ustore USING ubtree (fvchar(5)) WITH (storage_type=ustore) TABLESPACE pg_default;                +
- CREATE INDEX prefix_index_fchar_fbytea ON test_prefix_ustore USING ubtree (fchar(5), fbytea(5)) WITH (storage_type=ustore) TABLESPACE pg_default;
+                                                                          pg_get_tabledef                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                                                                                        +
+ CREATE TABLE test_prefix_ustore (                                                                                                                                +
+     id integer,                                                                                                                                                  +
+     fchar character(64),                                                                                                                                         +
+     fvchar character varying(64),                                                                                                                                +
+     ftext text,                                                                                                                                                  +
+     fclob clob,                                                                                                                                                  +
+     fblob blob,                                                                                                                                                  +
+     fraw raw,                                                                                                                                                    +
+     fbytea bytea                                                                                                                                                 +
+ )                                                                                                                                                                +
+ WITH (orientation=row, storage_type=ustore, compression=no);                                                                                                     +
+ CREATE UNIQUE INDEX prefix_index_fraw ON test_prefix_ustore USING ubtree (fraw(9)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default;             +
+ CREATE INDEX prefix_index_fblob ON test_prefix_ustore USING ubtree (fblob(5)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default;                  +
+ CREATE INDEX prefix_index_ftext ON test_prefix_ustore USING ubtree (ftext(5)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default;                  +
+ CREATE INDEX prefix_index_fvchar ON test_prefix_ustore USING ubtree (fvchar(5)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default;                +
+ CREATE INDEX prefix_index_fchar_fbytea ON test_prefix_ustore USING ubtree (fchar(5), fbytea(5)) WITH (storage_type=ustore, index_type=rcr) TABLESPACE pg_default;
 (1 row)
 
 set enable_seqscan=false;
