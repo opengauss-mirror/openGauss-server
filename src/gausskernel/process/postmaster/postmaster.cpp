@@ -6620,6 +6620,9 @@ static void PrepareDemoteResponse(void)
         /* A standby instance will be demote to a cascade standby */
         SpinLockAcquire(&hashmdata->mutex);
         hashmdata->current_mode = STANDBY_MODE;
+        if (hashmdata->is_hadr_main_standby) {
+            hashmdata->is_hadr_main_standby = false;
+        }
         hashmdata->is_cascade_standby = true;
         SpinLockRelease(&hashmdata->mutex);
 
