@@ -1,3 +1,4 @@
+SELECT * FROM query_parameterization_views();
 set enable_query_parameterization=on;
 
 CREATE TABLE test(c1 INT, c2 INT);
