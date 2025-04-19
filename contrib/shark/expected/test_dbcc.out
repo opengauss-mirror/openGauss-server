@@ -106,7 +106,10 @@ CONTEXT:  referenced column: dbcc_check_ident_no_reseed
 
 -- error case expect
 DBCC CHECKIDENT ('Employees1', NORESEED); 
-ERROR:  relation "employees1" does not exist
+ERROR:  relation "employees1" does not exist on datanode1
+LINE 1: select 1 from Employees1 limit 1;
+                      ^
+QUERY:  select 1 from Employees1 limit 1;
 CONTEXT:  referenced column: dbcc_check_ident_no_reseed
 DBCC CHECKIDENT ('employees_employeeid_seq', NORESEED); 
 ERROR:  relation "employees_employeeid_seq" does not exist
@@ -460,11 +463,15 @@ GRANT SELECT ON Employees to normalrole_user_002;
 GRANT SELECT,UPDATE  ON Employees to normalrole_user_003;
 SET SESSION AUTHORIZATION normalrole_user_001 PASSWORD 'Gauss@123';
 DBCC CHECKIDENT ('Employees', NORESEED);
-ERROR:  permission denied for sequence employees
-CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+ERROR:  permission denied for relation employees
+DETAIL:  N/A
+CONTEXT:  SQL statement "select 1 from Employees limit 1;"
+referenced column: dbcc_check_ident_no_reseed
 DBCC CHECKIDENT ('Employees', RESEED, 1);
-ERROR:  permission denied for sequence employees
-CONTEXT:  referenced column: dbcc_check_ident_reseed
+ERROR:  permission denied for relation employees
+DETAIL:  N/A
+CONTEXT:  SQL statement "select 1 from Employees limit 1;"
+referenced column: dbcc_check_ident_reseed
 RESET SESSION AUTHORIZATION;
 SET SESSION AUTHORIZATION normalrole_user_002 PASSWORD 'Gauss@123';
 DBCC CHECKIDENT ('Employees', NORESEED);
@@ -501,6 +508,53 @@ drop user normalrole_user_001 cascade;
 drop user normalrole_user_002 cascade;
 drop user normalrole_user_003 cascade;
 drop table Employees;
+-- empty table
+ CREATE TABLE Employees1 (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+NOTICE:  CREATE TABLE will create implicit sequence "employees1_employeeid_seq" for serial column "employees1.employeeid"
+DBCC CHECKIDENT ('Employees1', NORESEED);
+NOTICE:  "Checking identity information: current identity value 'NULL', current column value 'NULL'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                                 dbcc_check_ident_no_reseed                                 
+--------------------------------------------------------------------------------------------
+ Checking identity information: current identity value 'NULL', current column value 'NULL'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees1', RESEED, 1);
+NOTICE:  "Checking identity information: current identity value 'NULL'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                    dbcc_check_ident_reseed                    
+---------------------------------------------------------------
+ Checking identity information: current identity value 'NULL'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees1', NORESEED);
+NOTICE:  "Checking identity information: current identity value 'NULL', current column value 'NULL'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                                 dbcc_check_ident_no_reseed                                 
+--------------------------------------------------------------------------------------------
+ Checking identity information: current identity value 'NULL', current column value 'NULL'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees1', RESEED, 1);
+NOTICE:  "Checking identity information: current identity value 'NULL'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                    dbcc_check_ident_reseed                    
+---------------------------------------------------------------
+ Checking identity information: current identity value 'NULL'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees1', NORESEED);
+NOTICE:  "Checking identity information: current identity value 'NULL', current column value 'NULL'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                                 dbcc_check_ident_no_reseed                                 
+--------------------------------------------------------------------------------------------
+ Checking identity information: current identity value 'NULL', current column value 'NULL'.
+(1 row)
+
+drop table Employees1;
 -- create table as
 create table t2(id int, name int);
 insert into t2 values (1, 1);

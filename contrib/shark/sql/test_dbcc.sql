@@ -275,6 +275,20 @@ drop user normalrole_user_002 cascade;
 drop user normalrole_user_003 cascade;
 drop table Employees;
 
+-- empty table
+ CREATE TABLE Employees1 (
+     EmployeeID serial ,
+     Name VARCHAR(100) NOT NULL
+ );
+
+DBCC CHECKIDENT ('Employees1', NORESEED);
+DBCC CHECKIDENT ('Employees1', RESEED, 1);
+DBCC CHECKIDENT ('Employees1', NORESEED);
+DBCC CHECKIDENT ('Employees1', RESEED, 1);
+DBCC CHECKIDENT ('Employees1', NORESEED);
+
+drop table Employees1;
+
 -- create table as
 create table t2(id int, name int);
 insert into t2 values (1, 1);
