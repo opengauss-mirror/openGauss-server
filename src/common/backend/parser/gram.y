@@ -32927,6 +32927,14 @@ insertSelectOptions(SelectStmt *stmt,
 						parser_errposition(exprLocation(limitOffset))));
 			}
 			stmt->limitOffset = limitOffset;
+			if (DB_IS_CMPT(D_FORMAT) && stmt->limitCount) {
+				const char* message = "A TOP clause cannot be used together with an OFFSET clause in D-format database";
+				InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+				ereport(errstate,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("A TOP clause cannot be used together with an OFFSET clause in D-format database"),
+						parser_errposition(exprLocation(limitOffset))));
+			}
 		}
 		if (limitClause->limitCount)
 		{

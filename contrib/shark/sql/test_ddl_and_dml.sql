@@ -64,6 +64,20 @@ select TOP 200 PERCENT * from Products;
 --报错：WITH TIES必须和order by子句同时使用
 select TOP (select 10) WITH TIES * from Products;
 
+-- test for issue #IC1VD6
+select * from Products ORDER BY qtyavailable;
+select TOP 1 * from Products ORDER BY qtyavailable;
+---  expect success
+select * from Products ORDER BY qtyavailable offset 2 rows;
+select * from Products ORDER BY qtyavailable fetch first 1 rows only;
+select * from Products ORDER BY qtyavailable offset 3 rows fetch first 1 rows only;
+select * from Products ORDER BY qtyavailable fetch first 1 rows only offset 3 rows;
+---  expect failed
+select TOP 1 * from Products ORDER BY qtyavailable offset 2 rows;
+select TOP 1 * from Products ORDER BY qtyavailable fetch first 1 rows only;
+select TOP 1 * from Products ORDER BY qtyavailable offset 3 rows fetch first 1 rows only;
+select TOP 1 * from Products ORDER BY qtyavailable fetch first 1 rows only offset 3 rows;
+
 DROP TABLE IF EXISTS Products;
 
 -- case 3: remove postfix operator

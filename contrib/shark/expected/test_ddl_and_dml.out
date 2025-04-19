@@ -113,6 +113,67 @@ ERROR:  Percent values must be between 0 and 100.
 --报错：WITH TIES必须和order by子句同时使用
 select TOP (select 10) WITH TIES * from Products;
 ERROR:  The WITH TIES clause is not allowed without a corresponding ORDER BY clause.
+-- test for issue #IC1VD6
+select * from Products ORDER BY qtyavailable;
+ qtyavailable | unitprice | inventoryvalue 
+--------------+-----------+----------------
+           10 |     $1.50 |         $15.00
+           10 |     $1.50 |         $15.00
+           10 |     $1.50 |         $15.00
+           25 |     $2.00 |         $50.00
+           25 |     $2.00 |         $50.00
+(5 rows)
+
+select TOP 1 * from Products ORDER BY qtyavailable;
+ qtyavailable | unitprice | inventoryvalue 
+--------------+-----------+----------------
+           10 |     $1.50 |         $15.00
+(1 row)
+
+---  expect success
+select * from Products ORDER BY qtyavailable offset 2 rows;
+ qtyavailable | unitprice | inventoryvalue 
+--------------+-----------+----------------
+           10 |     $1.50 |         $15.00
+           25 |     $2.00 |         $50.00
+           25 |     $2.00 |         $50.00
+(3 rows)
+
+select * from Products ORDER BY qtyavailable fetch first 1 rows only;
+ qtyavailable | unitprice | inventoryvalue 
+--------------+-----------+----------------
+           10 |     $1.50 |         $15.00
+(1 row)
+
+select * from Products ORDER BY qtyavailable offset 3 rows fetch first 1 rows only;
+ qtyavailable | unitprice | inventoryvalue 
+--------------+-----------+----------------
+           25 |     $2.00 |         $50.00
+(1 row)
+
+select * from Products ORDER BY qtyavailable fetch first 1 rows only offset 3 rows;
+ qtyavailable | unitprice | inventoryvalue 
+--------------+-----------+----------------
+           25 |     $2.00 |         $50.00
+(1 row)
+
+---  expect failed
+select TOP 1 * from Products ORDER BY qtyavailable offset 2 rows;
+ERROR:  A TOP clause cannot be used together with an OFFSET clause in D-format database
+LINE 1: ...t TOP 1 * from Products ORDER BY qtyavailable offset 2 rows;
+                                                                ^
+select TOP 1 * from Products ORDER BY qtyavailable fetch first 1 rows only;
+ERROR:  multiple LIMIT clauses not allowed
+LINE 1: ...* from Products ORDER BY qtyavailable fetch first 1 rows onl...
+                                                             ^
+select TOP 1 * from Products ORDER BY qtyavailable offset 3 rows fetch first 1 rows only;
+ERROR:  A TOP clause cannot be used together with an OFFSET clause in D-format database
+LINE 1: ...OP 1 * from Products ORDER BY qtyavailable offset 3 rows fet...
+                                                             ^
+select TOP 1 * from Products ORDER BY qtyavailable fetch first 1 rows only offset 3 rows;
+ERROR:  A TOP clause cannot be used together with an OFFSET clause in D-format database
+LINE 1: ...ORDER BY qtyavailable fetch first 1 rows only offset 3 rows;
+                                                                ^
 DROP TABLE IF EXISTS Products;
 -- case 3: remove postfix operator
 -- 报错：移除后缀运算符
