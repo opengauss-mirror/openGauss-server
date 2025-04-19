@@ -131,6 +131,8 @@
 ./share/postgresql/extension/gms_sql.control
 ./share/postgresql/extension/gms_tcp--1.0.sql
 ./share/postgresql/extension/gms_tcp.control
+./share/postgresql/extension/gms_tcp--1.0--1.1.sql
+./share/postgresql/extension/gms_tcp--1.1.sql
 ./share/postgresql/extension/gms_xmlgen--1.0.sql
 ./share/postgresql/extension/gms_xmlgen.control
 ./share/postgresql/extension/gms_i18n--1.0.sql
