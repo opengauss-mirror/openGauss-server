@@ -316,6 +316,21 @@ opengauss_setup_mot_conf() {
          echo "enable_numa = false" >> "$PGDATA/mot.conf"
 }
 
+opengauss_setup_lite_conf() {
+        lite_conf=/usr/local/opengauss/opengauss_lite.conf
+        is_lite="false"
+        version=$(gaussdb -V)
+
+        if echo "$version" | grep -q "lite"; then
+            is_lite="true"
+        fi
+        if [ "$is_lite" = "true" ] && [ -e "$lite_conf" ]; then
+            while IFS= read -r line; do
+                echo "$line" >> "$PGDATA/postgresql.conf"
+            done < "$lite_conf"
+        fi
+}
+
 # start socket-only postgresql server for setting up or running scripts
 # all arguments will be passed along as arguments to `postgres` (via pg_ctl)
 docker_temp_server_start() {
@@ -400,6 +415,7 @@ _main() {
                         opengauss_setup_hba_conf
                         opengauss_setup_postgresql_conf
                         opengauss_setup_mot_conf
+                        opengauss_setup_lite_conf
 
                         # PGPASSWORD is required for gsql when authentication is required for 'local' connections via pg_hba.conf and is otherwise harmless
                         # e.g. when '--auth=md5' or '--auth-local=md5' is used in POSTGRES_INITDB_ARGS
