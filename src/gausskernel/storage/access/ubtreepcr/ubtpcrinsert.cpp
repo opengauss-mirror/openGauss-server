@@ -1816,6 +1816,8 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
     /* copy other fields */
     lopaque->last_delete_xid = oopaque->last_delete_xid;
     ropaque->last_delete_xid = oopaque->last_delete_xid;
+    lopaque->last_prune_xid = oopaque->last_prune_xid;
+    ropaque->last_prune_xid = oopaque->last_prune_xid;
     /* reset the active hint, update later */
     lopaque->activeTupleCount = 0;
     ropaque->activeTupleCount = 0;

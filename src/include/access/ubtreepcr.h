@@ -74,7 +74,8 @@ typedef struct UBTreeItemIdData {
         lp_td_id : 8,
         lp_td_invalid : 1,
         lp_deleted : 1,
-        lp_aligned : 5;
+        lp_xmin_frozen : 1,
+        lp_aligned : 4;
 } UBTreeItemIdData;
 
 typedef UBTreeItemIdData* UBTreeItemId;
