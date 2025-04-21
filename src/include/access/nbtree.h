@@ -124,6 +124,7 @@ typedef struct {
     TransactionId xact; /* next transaction id, if deleted */
     TransactionId last_delete_xid;
     TransactionId last_commit_xid;
+    TransactionId last_prune_xid;
     uint8 td_count;
     uint16 activeTupleCount;
     uint32 flags;
