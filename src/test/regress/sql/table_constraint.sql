@@ -492,3 +492,10 @@ insert into test1 values(14, 'ddd');
 update test1 set id = 21  where name = 'aaa';
 delete from test1 where id = 12;
 drop table test1;
+
+create table condisable_t1 (c1 int unique);
+ALTER TABLE condisable_t1 ADD CONSTRAINT c1_check CHECK (c1 > 0);
+-- simulate upgrade situation from low versions
+update pg_constraint set condisable=NULL where conrelid = (select oid from pg_class where relname = 'condisable_t1');
+select * from condisable_t1;
+drop table condisable_t1 cascade;
