@@ -6,9 +6,10 @@
 
 
 #define DBCC_RESULT_MAX_LENGTH 256
+#define MAX_INT16_LEN 45
 
-extern void get_last_value_and_max_value(text* txt, int64* last_value, int64* current_max_value);
-extern int64 get_and_reset_last_value(text* txt, int64 new_value, bool need_reseed);
+extern void get_last_value_and_max_value(text* txt, int128* last_value, int128* current_max_value);
+extern int128 get_and_reset_last_value(text* txt, int128 new_value, bool need_reseed);
 
 extern "C" Datum dbcc_check_ident_no_reseed(PG_FUNCTION_ARGS);
 extern "C" Datum dbcc_check_ident_reseed(PG_FUNCTION_ARGS);
@@ -52,8 +53,8 @@ bool is_relation_empty(text* txt)
 
 Datum dbcc_check_ident_no_reseed(PG_FUNCTION_ARGS)
 {
-    int64 last_value = 0;
-    int64 current_max_value = 0;
+    int128 last_value = 0;
+    int128 current_max_value = 0;
     text* txt = PG_GETARG_TEXT_P(0);
     char result[DBCC_RESULT_MAX_LENGTH] = {0};
     errno_t rc = EOK;
@@ -85,9 +86,13 @@ Datum dbcc_check_ident_no_reseed(PG_FUNCTION_ARGS)
         rc = snprintf_s(result, DBCC_RESULT_MAX_LENGTH, DBCC_RESULT_MAX_LENGTH - 1,
                         "Checking identity information: current identity value 'NULL', current column value 'NULL'.");
     } else {
+        char buf_last_value[MAX_INT16_LEN + 1];
+        char buf_current_max_value[MAX_INT16_LEN + 1];
+        pg_i128toa(last_value, buf_last_value, MAX_INT16_LEN + 1);
+        pg_i128toa(current_max_value, buf_current_max_value, MAX_INT16_LEN + 1);
         rc = snprintf_s(result, DBCC_RESULT_MAX_LENGTH, DBCC_RESULT_MAX_LENGTH - 1,
-                        "Checking identity information: current identity value '%lld', current column value '%lld'.",
-                        last_value, current_max_value);
+                        "Checking identity information: current identity value '%s', current column value '%s'.",
+                        buf_last_value, buf_current_max_value);
     }
     securec_check_ss(rc, "\0", "\0");
 
@@ -100,8 +105,8 @@ Datum dbcc_check_ident_no_reseed(PG_FUNCTION_ARGS)
 
 Datum dbcc_check_ident_reseed(PG_FUNCTION_ARGS)
 {
-    int64 last_value = 0;
-    int64 new_seed = 0;
+    int128 last_value = 0;
+    int128 new_seed = 0;
     errno_t rc = EOK;
     char result[DBCC_RESULT_MAX_LENGTH];
     bool withmsg = true;
@@ -113,7 +118,7 @@ Datum dbcc_check_ident_reseed(PG_FUNCTION_ARGS)
     text* txt = PG_GETARG_TEXT_P(0);
     bool need_reseed = !fcinfo->argnull[1];
     if (need_reseed) {
-        new_seed = PG_GETARG_INT64(1);
+        new_seed = PG_GETARG_INT128(1);
     }
 
     if(!fcinfo->argnull[2]) {
@@ -134,8 +139,10 @@ Datum dbcc_check_ident_reseed(PG_FUNCTION_ARGS)
         rc = snprintf_s(result, DBCC_RESULT_MAX_LENGTH, DBCC_RESULT_MAX_LENGTH - 1,
                         "Checking identity information: current identity value 'NULL'.");
     } else {
+        char buf_last_value[MAX_INT16_LEN + 1];
+        pg_i128toa(last_value, buf_last_value, MAX_INT16_LEN + 1);
         rc = snprintf_s(result, DBCC_RESULT_MAX_LENGTH, DBCC_RESULT_MAX_LENGTH - 1,
-                        "Checking identity information: current identity value '%lld'.", last_value);
+                        "Checking identity information: current identity value '%s'.", buf_last_value);
     }
     securec_check_ss(rc, "\0", "\0");
 

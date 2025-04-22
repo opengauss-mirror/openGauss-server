@@ -230,8 +230,8 @@ typedef enum {
 
 
 #define FULL_TABLE_NAME_MAX_LENGTH 256
-extern void get_last_value_and_max_value(text* txt, int64* last_value, int64* current_max_value);
-extern int64 get_and_reset_last_value(text* txt, int64 new_value, bool need_reseed);
+extern void get_last_value_and_max_value(text* txt, int128* last_value, int128* current_max_value);
+extern int128 get_and_reset_last_value(text* txt, int128 new_value, bool need_reseed);
 
 
 extern void delete_global_seq(Oid relid, Relation seqrel);
