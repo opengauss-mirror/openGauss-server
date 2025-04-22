@@ -327,6 +327,60 @@ drop TABLE Employees;
 drop FUNCTION func_20_2();
 drop FUNCTION func_20_1();
 
+
+-- param
+drop table if exists Employees;
+drop procedure if exists procedure_18;
+CREATE TABLE Employees (EmployeeID serial ,Name VARCHAR(100) NOT NULL);
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+create or replace procedure procedure_18(param1 int=0)
+is
+begin
+    insert into Employees values (param1,'wangwu');
+    DBCC CHECKIDENT ('Employees', NORESEED);
+end;
+/
+call procedure_18(6);
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+create or replace procedure procedure_18(param1 int=0)
+is
+begin
+    DBCC CHECKIDENT ('Employees', RESEED, param1);
+end;
+/
+call procedure_18(8);
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+
+declare
+    id int := 5;
+begin
+    DBCC CHECKIDENT ('Employees', RESEED, id);
+end;
+/
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+CREATE FUNCTION func_20_3(num integer) RETURN integer
+AS
+BEGIN
+    DBCC CHECKIDENT ('Employees', RESEED, num);
+    RETURN 0;
+END;
+/
+
+select func_20_3(20);
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+drop FUNCTION func_20_3(integer);
+drop table if exists Employees;
+drop procedure if exists procedure_18;
+
 -- create table as
 create table t2(id int, name int);
 insert into t2 values (1, 1);
