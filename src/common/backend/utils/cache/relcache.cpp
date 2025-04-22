@@ -6123,12 +6123,12 @@ static void CheckConstraintFetch(Relation relation)
         check[found].ccnoinherit = conform->connoinherit;
         check[found].cctype =  conform->contype;
         val = heap_getattr(htup, Anum_pg_constraint_condisable, RelationGetDescr(conrel), &isnull);
-        if (isnull)
-            ereport(ERROR,
-                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-                    errmsg("null disable for rel %s", RelationGetRelationName(relation))));
-        bool condisable = DatumGetBool(val);
-        check[found].ccdisable = condisable;
+        if (isnull) {
+            check[found].ccdisable = false;
+        } else {
+            bool condisable = DatumGetBool(val);
+            check[found].ccdisable = condisable;
+        }
         check[found].ccname = MemoryContextStrdup(LocalMyDBCacheMemCxt(), NameStr(conform->conname));
 
         /* Grab and test conbin is actually set */
