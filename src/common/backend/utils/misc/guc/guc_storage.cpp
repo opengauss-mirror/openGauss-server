@@ -627,7 +627,7 @@ static void InitStorageConfigureNamesBool()
             gettext_noop("Whether to defer a read-only serializable transaction until it can be executed with no "
                         "possible serialization failures."),
             NULL,
-            GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            GUC_NO_RESET | GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
             &u_sess->attr.attr_storage.XactDeferrable,
             false,
             check_transaction_deferrable,
@@ -4580,7 +4580,7 @@ static void InitStorageConfigureNamesString()
             CLIENT_CONN_STATEMENT,
             gettext_noop("Sets the current transaction's isolation level."),
             NULL,
-            GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            GUC_NO_RESET | GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
             &u_sess->attr.attr_storage.XactIsoLevel_string,
             "default",
             check_XactIsoLevel,
