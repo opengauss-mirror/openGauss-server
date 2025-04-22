@@ -1772,7 +1772,7 @@ static int get_table_attribute(
                 /* always schema-qualify, don't try to be smart */
                 char* collname = get_collation_name(att_tup->attcollation);
                 int charset = get_charset_by_collation(att_tup->attcollation);
-                if (DB_IS_CMPT(B_FORMAT) && charset != PG_INVALID_ENCODING) {
+                if (DB_IS_CMPT_BD && charset != PG_INVALID_ENCODING) {
                     appendStringInfo(
                         buf, " CHARACTER SET %s", quote_identifier(pg_encoding_to_char(charset)));
                     appendStringInfo(

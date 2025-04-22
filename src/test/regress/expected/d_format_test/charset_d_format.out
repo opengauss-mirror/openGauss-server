@@ -281,12 +281,12 @@ LINE 1: alter table t_charset_1 change c1 c2 varchar(30) charset utf...
                                 ^
 DETAIL:  ALTER TABLE CHANGE syntax is supported only in B compatibility
 select pg_get_tabledef('t_charset_1');
-                          pg_get_tabledef                           
---------------------------------------------------------------------
- SET search_path = public;                                         +
- CREATE TABLE t_charset_1 (                                        +
-     c1 character varying(20) COLLATE pg_catalog.utf8mb4_unicode_ci+
- )                                                                 +
+                               pg_get_tabledef                                
+------------------------------------------------------------------------------
+ SET search_path = public;                                                   +
+ CREATE TABLE t_charset_1 (                                                  +
+     c1 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci+
+ )                                                                           +
  WITH (orientation=row, compression=no, collate=1538);
 (1 row)
 
@@ -297,6 +297,18 @@ a2 varchar(20) charset utf8mb4 collate utf8mb4_unicode_ci,
 a3 varchar(20) charset utf8mb4 collate utf8mb4_bin
 )
 charset utf8mb4 collate utf8mb4_general_ci;
+select pg_get_tabledef('a_charset_1');
+                                pg_get_tabledef                                
+-------------------------------------------------------------------------------
+ SET search_path = public;                                                    +
+ CREATE TABLE a_charset_1 (                                                   +
+     a1 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     a2 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
+     a3 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_bin        +
+ )                                                                            +
+ WITH (orientation=row, compression=no, collate=1537);
+(1 row)
+
 insert into a_charset_1 values('中国','中国','中国');
 insert into a_charset_1 select a2,a1 from a_charset_1;
 select *,rawtohex(a1),rawtohex(a2),length(a1),length(a2),length(a3),lengthb(a1),lengthb(a2),lengthb(a3) from a_charset_1;
@@ -334,6 +346,24 @@ a7 nvarchar2(20) charset utf8mb4 collate utf8mb4_general_ci,
 a8 text,
 a9 blob
 ) charset binary;
+select pg_get_tabledef('a_charset_2');
+                                pg_get_tabledef                                
+-------------------------------------------------------------------------------
+ SET search_path = public;                                                    +
+ CREATE TABLE a_charset_2 (                                                   +
+     a1 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,        +
+     a2 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,        +
+     a3 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,        +
+     a4 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,        +
+     a8 blob,                                                                 +
+     a9 blob                                                                  +
+ )                                                                            +
+ WITH (orientation=row, compression=no, collate=1026);
+(1 row)
+
 alter table a_charset_2 add a8 varchar(20) charset utf8mb4;
 ERROR:  column "a8" of relation "a_charset_2" already exists
 alter table a_charset_2 add a9 varchar(20) character set utf8mb4;
@@ -363,27 +393,27 @@ ERROR:  type bytea not support set charset
 alter table a_charset_2 add a24 varchar(20) collate "zh_CN.gbk"; -- error;
 ERROR:  difference between the charset and the database encoding has not supported
 select pg_get_tabledef('a_charset_2');
-                           pg_get_tabledef                            
-----------------------------------------------------------------------
- SET search_path = public;                                           +
- CREATE TABLE a_charset_2 (                                          +
-     a1 character(20) COLLATE pg_catalog.utf8mb4_general_ci,         +
-     a2 character(20) COLLATE pg_catalog.utf8mb4_general_ci,         +
-     a3 character(20) COLLATE pg_catalog.utf8mb4_general_ci,         +
-     a4 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci, +
-     a5 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci, +
-     a6 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci, +
-     a7 nvarchar2(20) COLLATE pg_catalog.utf8mb4_general_ci,         +
-     a8 blob,                                                        +
-     a9 blob,                                                        +
-     a10 character varying(20) COLLATE pg_catalog.utf8mb4_unicode_ci,+
-     a11 character varying(20) COLLATE pg_catalog.utf8mb4_bin,       +
-     a13 integer,                                                    +
-     a14 character varying(20) COLLATE pg_catalog."aa_DJ.utf8",      +
-     a15 character varying(20) COLLATE pg_catalog."aa_DJ.utf8",      +
-     a16 character varying(20) COLLATE pg_catalog."aa_DJ",           +
-     a17 text COLLATE pg_catalog.utf8mb4_general_ci                  +
- )                                                                   +
+                                pg_get_tabledef                                 
+--------------------------------------------------------------------------------
+ SET search_path = public;                                                     +
+ CREATE TABLE a_charset_2 (                                                    +
+     a1 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a2 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a3 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a4 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a8 blob,                                                                  +
+     a9 blob,                                                                  +
+     a10 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
+     a11 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_bin,       +
+     a13 integer,                                                              +
+     a14 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
+     a15 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
+     a16 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ",           +
+     a17 text CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci                  +
+ )                                                                             +
  WITH (orientation=row, compression=no, collate=1026);
 (1 row)
 
@@ -405,27 +435,27 @@ DETAIL:  this modify syntax is supported only in B compatibility
 alter table a_charset_2 modify a12 varchar(20) charset utf8mb4;
 ERROR:  column "a12" of relation "a_charset_2" does not exist
 select pg_get_tabledef('a_charset_2');
-                           pg_get_tabledef                            
-----------------------------------------------------------------------
- SET search_path = public;                                           +
- CREATE TABLE a_charset_2 (                                          +
-     a1 integer,                                                     +
-     a2 character(20) COLLATE pg_catalog.utf8mb4_general_ci,         +
-     a3 character(20) COLLATE pg_catalog.utf8mb4_general_ci,         +
-     a4 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci, +
-     a5 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci, +
-     a6 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci, +
-     a7 nvarchar2(20) COLLATE pg_catalog.utf8mb4_general_ci,         +
-     a8 blob,                                                        +
-     a9 blob,                                                        +
-     a10 character varying(20) COLLATE pg_catalog.utf8mb4_unicode_ci,+
-     a11 character varying(20) COLLATE pg_catalog.utf8mb4_bin,       +
-     a13 integer,                                                    +
-     a14 character varying(20) COLLATE pg_catalog."aa_DJ.utf8",      +
-     a15 character varying(20) COLLATE pg_catalog."aa_DJ.utf8",      +
-     a16 character varying(20) COLLATE pg_catalog."aa_DJ",           +
-     a17 text COLLATE pg_catalog.utf8mb4_general_ci                  +
- )                                                                   +
+                                pg_get_tabledef                                 
+--------------------------------------------------------------------------------
+ SET search_path = public;                                                     +
+ CREATE TABLE a_charset_2 (                                                    +
+     a1 integer,                                                               +
+     a2 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a3 character(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a4 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
+     a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
+     a8 blob,                                                                  +
+     a9 blob,                                                                  +
+     a10 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
+     a11 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_bin,       +
+     a13 integer,                                                              +
+     a14 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
+     a15 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
+     a16 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ",           +
+     a17 text CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci                  +
+ )                                                                             +
  WITH (orientation=row, compression=no, collate=1026);
 (1 row)
 
@@ -797,34 +827,34 @@ NOTICE: '[ VISIBLE | INVISIBLE ]' is only avaliable in CENTRALIZED mode and B-fo
 alter session set current_schema = s_charset_1;
 create table s_t_charset_1(s1 varchar(20));
 select pg_get_tabledef('s_t_charset_1');
-                          pg_get_tabledef                           
---------------------------------------------------------------------
- SET search_path = s_charset_1;                                    +
- CREATE TABLE s_t_charset_1 (                                      +
-     s1 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci+
- )                                                                 +
+                               pg_get_tabledef                                
+------------------------------------------------------------------------------
+ SET search_path = s_charset_1;                                              +
+ CREATE TABLE s_t_charset_1 (                                                +
+     s1 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci+
+ )                                                                           +
  WITH (orientation=row, compression=no, collate=1537);
 (1 row)
 
 create table s_t_charset_2(s1 varchar(20));
 select pg_get_tabledef('s_t_charset_2');
-                          pg_get_tabledef                           
---------------------------------------------------------------------
- SET search_path = s_charset_1;                                    +
- CREATE TABLE s_t_charset_2 (                                      +
-     s1 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci+
- )                                                                 +
+                               pg_get_tabledef                                
+------------------------------------------------------------------------------
+ SET search_path = s_charset_1;                                              +
+ CREATE TABLE s_t_charset_2 (                                                +
+     s1 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci+
+ )                                                                           +
  WITH (orientation=row, compression=no, collate=1537);
 (1 row)
 
 create table s_t_charset_3 (like s_t_charset_1);
 select pg_get_tabledef('s_t_charset_3');
-                          pg_get_tabledef                           
---------------------------------------------------------------------
- SET search_path = s_charset_1;                                    +
- CREATE TABLE s_t_charset_3 (                                      +
-     s1 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci+
- )                                                                 +
+                               pg_get_tabledef                                
+------------------------------------------------------------------------------
+ SET search_path = s_charset_1;                                              +
+ CREATE TABLE s_t_charset_3 (                                                +
+     s1 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci+
+ )                                                                           +
  WITH (orientation=row, compression=no, collate=1537);
 (1 row)
 
@@ -881,20 +911,20 @@ partition p1,
 partition p2
 );
 select * from pg_get_tabledef('p_charset_1');
-                           pg_get_tabledef                           
----------------------------------------------------------------------
- SET search_path = s_charset_1;                                     +
- CREATE TABLE p_charset_1 (                                         +
-     c1 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci,+
-     c2 character varying(20) COLLATE pg_catalog.utf8mb4_general_ci,+
-     c3 integer                                                     +
- )                                                                  +
- WITH (orientation=row, compression=no, collate=1537)               +
- PARTITION BY HASH (c1)                                             +
- (                                                                  +
-     PARTITION p1,                                                  +
-     PARTITION p2                                                   +
- )                                                                  +
+                                pg_get_tabledef                                
+-------------------------------------------------------------------------------
+ SET search_path = s_charset_1;                                               +
+ CREATE TABLE p_charset_1 (                                                   +
+     c1 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     c2 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
+     c3 integer                                                               +
+ )                                                                            +
+ WITH (orientation=row, compression=no, collate=1537)                         +
+ PARTITION BY HASH (c1)                                                       +
+ (                                                                            +
+     PARTITION p1,                                                            +
+     PARTITION p2                                                             +
+ )                                                                            +
  ENABLE ROW MOVEMENT;
 (1 row)
 

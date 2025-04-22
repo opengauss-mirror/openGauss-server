@@ -118,6 +118,7 @@ a2 varchar(20) charset utf8mb4 collate utf8mb4_unicode_ci,
 a3 varchar(20) charset utf8mb4 collate utf8mb4_bin
 )
 charset utf8mb4 collate utf8mb4_general_ci;
+select pg_get_tabledef('a_charset_1');
 insert into a_charset_1 values('中国','中国','中国');
 insert into a_charset_1 select a2,a1 from a_charset_1;
 select *,rawtohex(a1),rawtohex(a2),length(a1),length(a2),length(a3),lengthb(a1),lengthb(a2),lengthb(a3) from a_charset_1;
@@ -137,6 +138,7 @@ a7 nvarchar2(20) charset utf8mb4 collate utf8mb4_general_ci,
 a8 text,
 a9 blob
 ) charset binary;
+select pg_get_tabledef('a_charset_2');
 alter table a_charset_2 add a8 varchar(20) charset utf8mb4;
 alter table a_charset_2 add a9 varchar(20) character set utf8mb4;
 alter table a_charset_2 add a10 varchar(20) character set utf8mb4 collate utf8mb4_unicode_ci;
