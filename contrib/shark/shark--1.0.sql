@@ -52,7 +52,7 @@ RETURNS INT AS
 LANGUAGE C STABLE;
 
 CREATE FUNCTION dbcc_check_ident_no_reseed(varchar, boolean, boolean) RETURNS varchar as 'MODULE_PATHNAME', 'dbcc_check_ident_no_reseed' LANGUAGE C STRICT STABLE;
-CREATE FUNCTION dbcc_check_ident_reseed(varchar, bigint, boolean) RETURNS varchar as 'MODULE_PATHNAME', 'dbcc_check_ident_reseed' LANGUAGE C STABLE;
+CREATE FUNCTION dbcc_check_ident_reseed(varchar, int16, boolean) RETURNS varchar as 'MODULE_PATHNAME', 'dbcc_check_ident_reseed' LANGUAGE C STABLE;
     
 create function fetch_status()
     returns int as 'MODULE_PATHNAME' language C;

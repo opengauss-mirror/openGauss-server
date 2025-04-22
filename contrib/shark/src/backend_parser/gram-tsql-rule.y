@@ -539,11 +539,11 @@ DBCCCheckIdentStmt:
 				n->windowClause = NIL;
 				$$ = (Node*)n;
 			}
-		| DBCC CHECKIDENT '(' ColId_or_Sconst ',' RESEED ',' SignedIconst ')' opt_with_no_infomsgs
+		| DBCC CHECKIDENT '(' ColId_or_Sconst ',' RESEED ',' NumericOnly ')' opt_with_no_infomsgs
 			{
 				SelectStmt *n = makeNode(SelectStmt);
 				n->distinctClause = NIL;
-				n->targetList = make_reseed_func(quote_identifier_wrapper($4, yyscanner), (Node*)makeIntConst($8, @8), $10);
+				n->targetList = make_reseed_func(quote_identifier_wrapper($4, yyscanner), makeAConst($8, @8), $10);
 				n->intoClause = NULL;
 				n->fromClause = NIL;
 				n->whereClause = NULL;

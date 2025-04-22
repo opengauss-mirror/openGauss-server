@@ -52,7 +52,7 @@ static List* make_no_reseed_func(char* table_name, bool with_no_msgs, bool resee
 static List* make_reseed_func(char* table_name, Node* new_seed, bool with_no_msgs)
 {
     List* funcname = list_make1(makeString("dbcc_check_ident_reseed"));
-	Node* cast_node = makeTypeCast(new_seed, SystemTypeName("int8"), NULL, NULL, NULL, ((A_Const*)new_seed)->location);
+	Node* cast_node = makeTypeCast(new_seed, SystemTypeName("int16"), NULL, NULL, NULL, ((A_Const*)new_seed)->location);
 	List* args = list_make3(makeStringConst(table_name, -1), cast_node, makeBoolConst(with_no_msgs, false));
 	return make_func_call_func(funcname, args);
 }

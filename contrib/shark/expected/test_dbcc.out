@@ -379,6 +379,101 @@ PL/pgSQL function test_procedure_test(integer) line 2 at PERFORM
 
 drop table Employees;
 drop procedure test_procedure_test(int);
+-- newreseed value range
+drop table if exists Employees;
+NOTICE:  table "employees" does not exist, skipping
+CREATE TABLE Employees (EmployeeID serial ,Name VARCHAR(100) NOT NULL);
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employeeid_seq" for serial column "employees.employeeid"
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+ALTER SEQUENCE employees_employeeid_seq MINVALUE -9223372036854775808;
+DBCC CHECKIDENT ('Employees', RESEED, 9223372036854775806);
+NOTICE:  "Checking identity information: current identity value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                  dbcc_check_ident_reseed                   
+------------------------------------------------------------
+ Checking identity information: current identity value '2'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '9223372036854775806', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                                       dbcc_check_ident_no_reseed                                       
+--------------------------------------------------------------------------------------------------------
+ Checking identity information: current identity value '9223372036854775806', current column value '2'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, 9223372036854775807);
+NOTICE:  "Checking identity information: current identity value '9223372036854775806'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                           dbcc_check_ident_reseed                            
+------------------------------------------------------------------------------
+ Checking identity information: current identity value '9223372036854775806'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '9223372036854775807', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                                       dbcc_check_ident_no_reseed                                       
+--------------------------------------------------------------------------------------------------------
+ Checking identity information: current identity value '9223372036854775807', current column value '2'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, 9223372036854775808);
+ERROR:  setval: value 9223372036854775808 is out of bounds for sequence "employees_employeeid_seq" (-9223372036854775808..9223372036854775807)
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '9223372036854775807', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                                       dbcc_check_ident_no_reseed                                       
+--------------------------------------------------------------------------------------------------------
+ Checking identity information: current identity value '9223372036854775807', current column value '2'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, -9223372036854775807);
+NOTICE:  "Checking identity information: current identity value '9223372036854775807'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                           dbcc_check_ident_reseed                            
+------------------------------------------------------------------------------
+ Checking identity information: current identity value '9223372036854775807'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '-9223372036854775807', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                                       dbcc_check_ident_no_reseed                                        
+---------------------------------------------------------------------------------------------------------
+ Checking identity information: current identity value '-9223372036854775807', current column value '2'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, -9223372036854775808);
+NOTICE:  "Checking identity information: current identity value '-9223372036854775807'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+                            dbcc_check_ident_reseed                            
+-------------------------------------------------------------------------------
+ Checking identity information: current identity value '-9223372036854775807'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '-9223372036854775808', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                                       dbcc_check_ident_no_reseed                                        
+---------------------------------------------------------------------------------------------------------
+ Checking identity information: current identity value '-9223372036854775808', current column value '2'.
+(1 row)
+
+DBCC CHECKIDENT ('Employees', RESEED, -9223372036854775809);
+ERROR:  setval: value -9223372036854775809 is out of bounds for sequence "employees_employeeid_seq" (-9223372036854775808..9223372036854775807)
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+DBCC CHECKIDENT ('Employees', NORESEED);
+NOTICE:  "Checking identity information: current identity value '-9223372036854775808', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+                                       dbcc_check_ident_no_reseed                                        
+---------------------------------------------------------------------------------------------------------
+ Checking identity information: current identity value '-9223372036854775808', current column value '2'.
+(1 row)
+
+drop table if exists Employees;
 -- some error case
 -- no serial col
 CREATE TABLE Employees_no (

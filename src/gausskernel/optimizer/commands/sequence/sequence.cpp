@@ -3113,7 +3113,6 @@ static char* Int8or16Out(T_Int num)
     return ret;
 }
 
-
 template<typename T_Int, bool large>
 T_Int GetColumnMaxOrMinValue(char* column_name, char* full_table_name, bool is_min)
 {
@@ -3270,13 +3269,14 @@ char* get_serial_column_and_seq_table(List* range_var, char* table_name, Oid* se
 }
 
 
-void get_last_value_and_max_value(text* txt, int64* last_value, int64* current_max_value)
+void get_last_value_and_max_value(text* txt, int128* last_value, int128* current_max_value)
 {
-    int64 increasement_by = 0;
+    int128 increasement_by = 0;
     Oid relid = 0;
     SeqTable elm = NULL;
     Relation seqrel;
     char* serial_column_name = NULL;
+    char relkind;
     char* table_name = TextDatumGetCString(txt);
     List* range_var = textToQualifiedNameList(txt);
 
@@ -3284,12 +3284,17 @@ void get_last_value_and_max_value(text* txt, int64* last_value, int64* current_m
 
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
-    *last_value = GetLastAndIncrementValue<int64, Form_pg_sequence, false>(elm, seqrel, &increasement_by);
+    relkind = RelationGetRelkind(seqrel);
+    if (relkind == RELKIND_SEQUENCE) {
+        *last_value = GetLastAndIncrementValue<int128, Form_pg_sequence, true>(elm, seqrel, &increasement_by);
+    } else {
+        *last_value = GetLastAndIncrementValue<int128, Form_pg_large_sequence, true>(elm, seqrel, &increasement_by);
+    }
     relation_close(seqrel, NoLock);
 
     /* get current max value by execute select max (xx) from xxx */
     bool is_min = increasement_by < 0 ? true : false;
-    *current_max_value = GetColumnMaxOrMinValue<int64, false>(serial_column_name, table_name, is_min);
+    *current_max_value = GetColumnMaxOrMinValue<int128, true>(serial_column_name, table_name, is_min);
 
     pfree(serial_column_name);
     pfree(table_name);
@@ -3297,14 +3302,15 @@ void get_last_value_and_max_value(text* txt, int64* last_value, int64* current_m
 }
 
 
-int64 get_and_reset_last_value(text* txt, int64 new_value, bool need_reseed)
+int128 get_and_reset_last_value(text* txt, int128 new_value, bool need_reseed)
 {
-    int64 last_value = 0;
+    int128 last_value = 0;
     Oid relid = 0;
-    int64 increasement_by = 0;
+    int128 increasement_by = 0;
     SeqTable elm = NULL;
     Relation seqrel;
     char* serial_column_name = NULL;
+    char relkind;
 
     List* range_var = textToQualifiedNameList(txt);
     char* table_name = TextDatumGetCString(txt);
@@ -3313,12 +3319,21 @@ int64 get_and_reset_last_value(text* txt, int64 new_value, bool need_reseed)
 
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
-    last_value = GetLastAndIncrementValue<int64, Form_pg_sequence, false>(elm, seqrel, &increasement_by);
+    relkind = RelationGetRelkind(seqrel);
+    if (relkind == RELKIND_SEQUENCE) {
+        last_value = GetLastAndIncrementValue<int128, Form_pg_sequence, true>(elm, seqrel, &increasement_by);
+    } else {
+        last_value = GetLastAndIncrementValue<int128, Form_pg_large_sequence, true>(elm, seqrel, &increasement_by);
+    }
     relation_close(seqrel, NoLock);
 
     // set new reseed
     if (need_reseed) {
-        do_setval<Form_pg_sequence, int64, false>(relid, new_value, true, true);
+        if (relkind == RELKIND_SEQUENCE) {
+            do_setval<Form_pg_sequence, int64, false>(relid, new_value, true, true);
+        } else {
+            do_setval<Form_pg_large_sequence, int128, true>(relid, new_value, true, true);
+        }
     }
 
     pfree(serial_column_name);

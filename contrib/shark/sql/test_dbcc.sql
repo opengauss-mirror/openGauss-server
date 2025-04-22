@@ -179,6 +179,34 @@ call test_procedure_test(1);
 drop table Employees;
 drop procedure test_procedure_test(int);
 
+
+-- newreseed value range
+drop table if exists Employees;
+CREATE TABLE Employees (EmployeeID serial ,Name VARCHAR(100) NOT NULL);
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+ALTER SEQUENCE employees_employeeid_seq MINVALUE -9223372036854775808;
+
+DBCC CHECKIDENT ('Employees', RESEED, 9223372036854775806);
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+DBCC CHECKIDENT ('Employees', RESEED, 9223372036854775807);
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+DBCC CHECKIDENT ('Employees', RESEED, 9223372036854775808);
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+DBCC CHECKIDENT ('Employees', RESEED, -9223372036854775807);
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+DBCC CHECKIDENT ('Employees', RESEED, -9223372036854775808);
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+DBCC CHECKIDENT ('Employees', RESEED, -9223372036854775809);
+DBCC CHECKIDENT ('Employees', NORESEED);
+
+drop table if exists Employees;
+
 -- some error case
 -- no serial col
 
