@@ -11,6 +11,13 @@ create function pltsql_validator(oid)
 create function pltsql_inline_handler(internal)
     returns void as 'MODULE_PATHNAME' language C;
 
+create trusted language pltsql
+    handler pltsql_call_handler
+    inline pltsql_inline_handler
+    validator pltsql_validator;
+
+grant usage on language pltsql to public;
+
 CREATE OR REPLACE FUNCTION sys.day (timestamptz) RETURNS float8 LANGUAGE SQL IMMUTABLE STRICT as 'select pg_catalog.date_part(''day'', $1)';
 CREATE OR REPLACE FUNCTION sys.day (abstime) RETURNS float8 LANGUAGE SQL IMMUTABLE STRICT as 'select pg_catalog.date_part(''day'', $1)';
 CREATE OR REPLACE FUNCTION sys.day (date) RETURNS float8 LANGUAGE SQL IMMUTABLE STRICT as 'select pg_catalog.date_part(''day'', $1)';
@@ -44,16 +51,8 @@ RETURNS INT AS
 '$libdir/shark', 'objectproperty_internal'
 LANGUAGE C STABLE;
 
-create trusted language pltsql
-    handler pltsql_call_handler
-    inline pltsql_inline_handler
-    validator pltsql_validator;
-
-
 CREATE FUNCTION dbcc_check_ident_no_reseed(varchar, boolean, boolean) RETURNS varchar as 'MODULE_PATHNAME', 'dbcc_check_ident_no_reseed' LANGUAGE C STRICT STABLE;
 CREATE FUNCTION dbcc_check_ident_reseed(varchar, bigint, boolean) RETURNS varchar as 'MODULE_PATHNAME', 'dbcc_check_ident_reseed' LANGUAGE C STABLE;
-
-grant usage on language pltsql to public;
     
 create function fetch_status()
     returns int as 'MODULE_PATHNAME' language C;

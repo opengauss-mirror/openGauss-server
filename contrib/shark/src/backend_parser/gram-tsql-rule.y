@@ -573,6 +573,127 @@ DBCCStmt:  DBCCCheckIdentStmt
 			}
 			;
 
+TSQL_AnonyBlockStmt:
+		DECLARE { u_sess->parser_cxt.eaten_declare = true; u_sess->parser_cxt.eaten_begin = false; } subprogram_body
+			{
+				$$ = (Node *)TsqlMakeAnonyBlockFuncStmt(DECLARE, ((FunctionSources*)$3)->bodySrc);
+			}
+		| BEGIN_P { u_sess->parser_cxt.eaten_declare = true; u_sess->parser_cxt.eaten_begin = true; } subprogram_body
+			{
+				$$ = (Node *)TsqlMakeAnonyBlockFuncStmt(BEGIN_P, ((FunctionSources*)$3)->bodySrc);
+			}
+		;
+
+
+TSQL_CreateFunctionStmt:
+			CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
+			RETURNS func_return createfunc_opt_list opt_definition
+				{
+					set_function_style_pg();
+					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
+					n->isOraStyle = false;
+					n->isPrivate = false;
+					n->replace = $2;
+					n->definer = $3;
+					if (n->replace && NULL != n->definer) {
+						parser_yyerror("not support DEFINER function");
+					}			
+					n->funcname = $5;
+					n->parameters = $6;
+					n->returnType = $8;
+					n->options = $9;
+					n->withClause = $10;
+					n->isProcedure = false;
+					$$ = (Node *)n;
+				}
+			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
+			  RETURNS TABLE '(' table_func_column_list ')' createfunc_opt_list opt_definition
+				{
+					set_function_style_pg();
+					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
+					n->isOraStyle = false;
+					n->isPrivate = false;
+					n->replace = $2;
+					n->definer = $3;
+					if (n->replace && NULL != n->definer) {
+						parser_yyerror("not support DEFINER function");
+					}
+					n->funcname = $5;
+					n->parameters = mergeTableFuncParameters($6, $10);
+					n->returnType = TableFuncTypeName($10);
+					n->returnType->location = @8;
+					n->options = $12;
+					n->withClause = $13;
+					n->isProcedure = false;
+					$$ = (Node *)n;
+				}
+			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
+			  createfunc_opt_list opt_definition
+				{
+					set_function_style_pg();
+					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
+					n->isOraStyle = false;
+					n->isPrivate = false;
+					n->replace = $2;
+					n->definer = $3;
+					if (n->replace && NULL != n->definer) {
+						parser_yyerror("not support DEFINER function");
+					}
+					n->funcname = $5;
+					n->parameters = $6;
+					n->returnType = NULL;
+					n->options = $7;
+					n->withClause = $8;
+					n->isProcedure = false;
+					$$ = (Node *)n;
+				}
+			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
+			  RETURN func_return opt_createproc_opt_list as_is {
+				  u_sess->parser_cxt.eaten_declare = false;
+				  u_sess->parser_cxt.eaten_begin = false;
+				  pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+				  u_sess->parser_cxt.isCreateFuncOrProc = true;
+				  if (set_is_create_plsql_type()) {
+					set_create_plsql_type_start();
+					set_function_style_a();
+				  }
+			  } subprogram_body
+				{
+					int rc = 0;
+					rc = CompileWhich();
+					if (rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) {
+						u_sess->plsql_cxt.procedure_first_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @10);
+					}
+					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
+					FunctionSources *funcSource = (FunctionSources *)$12;
+					n->isOraStyle = true;
+					n->isPrivate = false;
+					n->replace = $2;
+					n->definer = $3;
+					if (n->replace && NULL != n->definer) {
+						parser_yyerror("not support DEFINER function");
+					}
+					n->funcname = $5;
+					n->parameters = $6;
+					n->inputHeaderSrc = FormatFuncArgType(yyscanner, funcSource->headerSrc, n->parameters);
+					if (enable_plpgsql_gsdependency_guc()) {
+						n->funcHeadSrc = ParseFuncHeadSrc(yyscanner);
+					}
+					n->returnType = $8;
+					n->options = $9;
+					n->options = lappend(n->options, makeDefElem("as",
+										(Node *)list_make1(makeString(funcSource->bodySrc))));
+					n->options = lappend(n->options, makeDefElem("language",
+										(Node *)makeString("pltsql")));
+
+					n->withClause = NIL;
+					n->withClause = NIL;
+					n->isProcedure = false;
+					u_sess->parser_cxt.isCreateFuncOrProc = false;
+					$$ = (Node *)n;
+				}
+		;
+
 
 tsql_stmt :
 			AlterAppWorkloadGroupMappingStmt
@@ -617,7 +738,7 @@ tsql_stmt :
 			| AlterUserStmt
 			| AlterWorkloadGroupStmt
 			| AnalyzeStmt
-			| AnonyBlockStmt
+			| TSQL_AnonyBlockStmt
 			| BarrierStmt
 			| CreateAppWorkloadGroupMappingStmt
 			| CallFuncStmt
@@ -644,7 +765,7 @@ tsql_stmt :
 			| CreateForeignServerStmt
 			| CreateForeignTableStmt
 			| CreateDataSourceStmt
-			| CreateFunctionStmt
+			| TSQL_CreateFunctionStmt
 			| CreateEventStmt
 			| AlterEventStmt
 			| DropEventStmt

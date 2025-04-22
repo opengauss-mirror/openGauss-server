@@ -289,6 +289,44 @@ DBCC CHECKIDENT ('Employees1', NORESEED);
 
 drop table Employees1;
 
+
+-- ANONYMOUS BLOCK
+CREATE TABLE Employees (EmployeeID serial ,Name VARCHAR(100) NOT NULL);
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+
+begin
+    DBCC CHECKIDENT ('Employees', NORESEED);
+end;
+/
+
+begin
+    DBCC CHECKIDENT ('Employees', RESEED, 5);
+end;
+/
+
+CREATE FUNCTION func_20_1() RETURN integer
+AS
+BEGIN
+    DBCC CHECKIDENT ('Employees', NORESEED);
+    RETURN 0;
+END;
+/
+select func_20_1();
+
+CREATE FUNCTION func_20_2() RETURN integer
+AS
+BEGIN
+    DBCC CHECKIDENT ('Employees', RESEED, 5);
+    RETURN 0;
+END;
+/
+select func_20_2();
+
+drop TABLE Employees;
+drop FUNCTION func_20_2();
+drop FUNCTION func_20_1();
+
 -- create table as
 create table t2(id int, name int);
 insert into t2 values (1, 1);

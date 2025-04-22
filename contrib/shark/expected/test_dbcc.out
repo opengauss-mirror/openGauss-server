@@ -555,6 +555,66 @@ CONTEXT:  referenced column: dbcc_check_ident_no_reseed
 (1 row)
 
 drop table Employees1;
+-- ANONYMOUS BLOCK
+CREATE TABLE Employees (EmployeeID serial ,Name VARCHAR(100) NOT NULL);
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employeeid_seq" for serial column "employees.employeeid"
+insert into Employees(Name) values ('zhangsan');
+insert into Employees(Name) values ('lisi');
+begin
+    DBCC CHECKIDENT ('Employees', NORESEED);
+end;
+/
+NOTICE:  "Checking identity information: current identity value '2', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+SQL statement "DBCC CHECKIDENT ('Employees', NORESEED)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+begin
+    DBCC CHECKIDENT ('Employees', RESEED, 5);
+end;
+/
+NOTICE:  "Checking identity information: current identity value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+SQL statement "DBCC CHECKIDENT ('Employees', RESEED, 5)"
+PL/pgSQL function inline_code_block line 2 at PERFORM
+CREATE FUNCTION func_20_1() RETURN integer
+AS
+BEGIN
+    DBCC CHECKIDENT ('Employees', NORESEED);
+    RETURN 0;
+END;
+/
+select func_20_1();
+NOTICE:  "Checking identity information: current identity value '5', current column value '2'."
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+SQL statement "DBCC CHECKIDENT ('Employees', NORESEED)"
+PL/pgSQL function func_20_1() line 2 at PERFORM
+referenced column: func_20_1
+ func_20_1 
+-----------
+         0
+(1 row)
+
+CREATE FUNCTION func_20_2() RETURN integer
+AS
+BEGIN
+    DBCC CHECKIDENT ('Employees', RESEED, 5);
+    RETURN 0;
+END;
+/
+select func_20_2();
+NOTICE:  "Checking identity information: current identity value '5'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+SQL statement "DBCC CHECKIDENT ('Employees', RESEED, 5)"
+PL/pgSQL function func_20_2() line 2 at PERFORM
+referenced column: func_20_2
+ func_20_2 
+-----------
+         0
+(1 row)
+
+drop TABLE Employees;
+drop FUNCTION func_20_2();
+drop FUNCTION func_20_1();
 -- create table as
 create table t2(id int, name int);
 insert into t2 values (1, 1);

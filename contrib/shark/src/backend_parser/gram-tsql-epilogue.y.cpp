@@ -67,5 +67,47 @@ static char* quote_identifier_wrapper(char* ident, core_yyscan_t yyscanner)
 	}
 }
 
+// To make a node for anonymous block
+static Node *
+TsqlMakeAnonyBlockFuncStmt(int flag, const char *str)
+{
+	DoStmt *n = makeNode(DoStmt);
+	char *str_body	= NULL;
+	DefElem * body	= NULL;
+	errno_t		rc = EOK;
+
+	if (BEGIN_P == flag)
+	{
+		int len1 = strlen("DECLARE \nBEGIN ");
+		int len2 = strlen(str);
+		str_body = (char *)palloc(len1 + len2 + 1);
+		rc = strncpy_s(str_body, len1 + len2 + 1, "DECLARE \nBEGIN ",len1);
+		securec_check(rc, "\0", "\0");
+		rc = strcpy_s(str_body + len1, len2 + 1, str);
+		securec_check(rc, "\0", "\0");
+	}
+	else
+	{
+		int len1 = strlen("DECLARE ");
+		int len2 = strlen(str);
+		str_body = (char *)palloc(len1 + len2 + 1);
+		rc = strncpy_s(str_body, len1 + len2 + 1, "DECLARE ", len1);
+		securec_check(rc, "\0", "\0");
+		rc = strcpy_s(str_body + len1, len2 + 1, str);
+		securec_check(rc, "\0", "\0");
+	}
+
+	body = makeDefElem("as", (Node*)makeString(str_body));
+	if (get_language_oid("pltsql", true) != InvalidOid) {
+		n->args = list_make1(makeDefElem("language", (Node *)makeString("pltsql")));
+	} else {
+		n->args = list_make1(makeDefElem("language", (Node *)makeString("plpgsql")));
+	}
+
+	n->args = lappend( n->args, body);
+
+	return (Node*)n;
+}
+
 #include "scan-backend.inc"
 #undef SCANINC
