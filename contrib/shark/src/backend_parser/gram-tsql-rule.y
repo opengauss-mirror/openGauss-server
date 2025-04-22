@@ -552,6 +552,19 @@ DBCCCheckIdentStmt:
 				n->windowClause = NIL;
 				$$ = (Node*)n;
 			}
+		| DBCC CHECKIDENT '(' ColId_or_Sconst ',' RESEED ',' columnref ')' opt_with_no_infomsgs
+			{
+				SelectStmt *n = makeNode(SelectStmt);
+				n->distinctClause = NIL;
+				n->targetList = make_reseed_func(quote_identifier_wrapper($4, yyscanner), $8, $10);
+				n->intoClause = NULL;
+				n->fromClause = NIL;
+				n->whereClause = NULL;
+				n->groupClause = NIL;
+				n->havingClause = NULL;
+				n->windowClause = NIL;
+				$$ = (Node*)n;
+			}
 		| DBCC CHECKIDENT '(' ColId_or_Sconst ',' RESEED ')' opt_with_no_infomsgs
 			{
 				SelectStmt *n = makeNode(SelectStmt);
