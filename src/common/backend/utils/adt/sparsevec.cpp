@@ -209,7 +209,7 @@ Datum sparsevec_in(PG_FUNCTION_ARGS)
     if (*pt != '{')
         ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                         errmsg("invalid input syntax for type sparsevec: \"%s\"", lit),
-                        errdetail("Vector contents must start with \"{\".")));
+                        errdetail("Sparsevec contents must start with \"{\".")));
 
     pt++;
 
