@@ -649,15 +649,6 @@ INSERT INTO  demo  VALUES ('5', 'E', '4');
 INSERT INTO  demo  VALUES ('6', 'F', '1');
 INSERT INTO  demo  VALUES ('7', 'G', '1');
 
-set query_dop = 1002;
-SELECT @r ,
-(SELECT @r:= parent_id FROM demo WHERE id = @r) AS parent_id,
-@l:= @l+ 1 AS lvl
-FROM
-(SELECT @r:= 5, @l:= 0) vars,
-demo h
-WHERE @r<> 0;
-set query_dop = 1;
 SELECT @r ,
 (SELECT @r:= parent_id FROM demo WHERE id = @r) AS parent_id,
 @l:= @l+ 1 AS lvl
@@ -791,10 +782,11 @@ set enable_seqscan = false;
 set enable_bitmapscan = false;
 create table account_instance_stats(id int primary key, stat_id int);
 insert into account_instance_stats values(1,1),(2,1),(3,1),(4,1);
+set query_dop = 1002;
+explain (costs off) SELECT stat_id, @pids := id FROM account_instance_stats where id >= @pids;
 set @pids = 1;
-
 SELECT stat_id, @pids := id FROM account_instance_stats where id >= @pids;
-
+set query_dop = 1;
 drop table account_instance_stats;
 set enable_seqscan = default;
 set enable_bitmapscan = default;
