@@ -232,10 +232,6 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
     { DispatchUBTreeRecord, RmgrRecordInfoValid, RM_UBTREE_ID, XLOG_UBTREE_INSERT_LEAF, XLOG_UBTREE_PRUNE_PAGE},
     { DispatchUBTree2Record, RmgrRecordInfoValid, RM_UBTREE2_ID, XLOG_UBTREE2_SHIFT_BASE,
         XLOG_UBTREE2_FREEZE },
-    { DispatchUBTree3Record, RmgrRecordInfoValid, RM_UBTREE3_ID, XLOG_UBTREE3_INSERT_PCR_INTERNAL,
-        XLOG_UBTREE3_INSERT_PCR_META },
-    { DispatchUBTree4Record, RmgrRecordInfoValid, RM_UBTREE4_ID, XLOG_UBTREE4_UNLINK_PAGE,
-        XLOG_UBTREE4_MARK_PAGE_HALFDEAD },
     { DispatchSegpageSmgrRecord, RmgrRecordInfoValid, RM_SEGPAGE_ID, XLOG_SEG_ATOMIC_OPERATION, 
         XLOG_SEG_NEW_PAGE },
     { DispatchRepOriginRecord, RmgrRecordInfoValid, RM_REPLORIGIN_ID, XLOG_REPLORIGIN_SET, XLOG_REPLORIGIN_DROP },
@@ -244,6 +240,10 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
     { DispatchLogicalDDLMsgRecord, RmgrRecordInfoValid, RM_LOGICALDDLMSG_ID, XLOG_LOGICAL_DDL_MESSAGE,
         XLOG_LOGICAL_DDL_MESSAGE },
     { DispatchGenericRecord, RmgrRecordInfoValid, RM_GENERIC_ID, XLOG_GENERIC_LOG, XLOG_GENERIC_LOG },
+    { DispatchUBTree3Record, RmgrRecordInfoValid, RM_UBTREE3_ID, XLOG_UBTREE3_INSERT_PCR_INTERNAL,
+        XLOG_UBTREE3_INSERT_PCR_META },
+    { DispatchUBTree4Record, RmgrRecordInfoValid, RM_UBTREE4_ID, XLOG_UBTREE4_UNLINK_PAGE,
+        XLOG_UBTREE4_MARK_PAGE_HALFDEAD },
 };
 
 /* Run from the dispatcher and txn worker thread. */
