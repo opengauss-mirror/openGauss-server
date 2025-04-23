@@ -31,6 +31,7 @@
 #include "port.h" /* for random() */
 #include "access/datavec/vector.h"
 #include "access/datavec/vecindex.h"
+#include "access/datavec/utils.h"
 
 #define HNSW_MAX_DIM 2000
 #define HNSW_MAX_NNZ 1000
@@ -39,6 +40,7 @@
 #define HNSW_DISTANCE_PROC 1
 #define HNSW_NORM_PROC 2
 #define HNSW_TYPE_INFO_PROC 3
+#define HNSW_KMEANS_NORMAL_PROC 4
 
 #define HNSW_VERSION 1
 #define HNSW_MAGIC_NUMBER 0xA953A953
@@ -59,6 +61,7 @@
 #define HNSW_SCAN_LOCK 1
 
 /* HNSW parameters */
+#define HNSW_FUNC_NUM 4
 #define HNSW_DEFAULT_M 16
 #define HNSW_MIN_M 2
 #define HNSW_MAX_M 100
@@ -67,14 +70,17 @@
 #define HNSW_MAX_EF_CONSTRUCTION 1000
 #define HNSW_DEFAULT_EF_SEARCH 40
 #define HNSW_MIN_EF_SEARCH 1
-#define HNSW_MAX_EF_SEARCH 1000
-#define HNSW_DEFAULT_ENABLE_PQ false
-#define HNSW_DEFAULT_PQ_M 1
-#define HNSW_MIN_PQ_M 1
-#define HNSW_MAX_PQ_M 65535
-#define HNSW_DEFAULT_PQ_KSUB 1
-#define HNSW_MIN_PQ_KSUB 1
-#define HNSW_MAX_PQ_KSUB 65535
+#define HNSW_DEFAULT_THRESHOLD INT32_MAX
+#define HNSW_MIN_THRESHOLD 160
+#define HNSW_MAX_THRESHOLD INT32_MAX
+#define HNSW_MAX_EF_SEARCH 1000000
+
+#define HNSW_PQMODE_ADC 1
+#define HNSW_PQMODE_SDC 2
+#define HNSW_PQMODE_DEFAULT HNSW_PQMODE_ADC
+#define HNSW_PQ_DIS_L2 1
+#define HNSW_PQ_DIS_IP 2
+#define HNSW_PQ_DIS_COSINE 3
 
 /* Tuple types */
 #define HNSW_ELEMENT_TUPLE_TYPE 1
@@ -95,6 +101,19 @@
 /* Build phases */
 /* PROGRESS_CREATEIDX_SUBPHASE_INITIALIZE is 1 */
 #define PROGRESS_HNSW_PHASE_LOAD 2
+
+#define PQ_SUCCESS 0
+#define PQ_ERROR (-1)
+
+#define HNSWPQ_MAX_PATH_LEN 4096
+#ifndef MAX_PATH_LEN
+#define MAX_PATH_LEN UWAL_MAX_PATH_LEN
+#endif
+
+#define HNSWPQ_DEFAULT_TARGET_ROWS 300
+
+#define PQ_ENV_PATH "DATAVEC_PQ_LIB_PATH"
+#define PQ_SO_NAME "libkvecturbo.so"
 
 #define HNSW_MAX_SIZE \
     (BLCKSZ - MAXALIGN(SizeOfPageHeaderData) - MAXALIGN(sizeof(HnswPageOpaqueData)) - sizeof(ItemIdData))
@@ -266,7 +285,7 @@ struct HnswElementData {
     OffsetNumber neighborOffno;
     BlockNumber neighborPage;
     HnswDatumPtr value;
-    uint8 *pqcodes;
+    HnswDatumPtr pqcodes;
     LWLock lock;
 };
 
@@ -326,6 +345,8 @@ typedef struct HnswShared {
     /* Immutable state */
     Oid heaprelid;
     Oid indexrelid;
+    char *pqTable;
+    float *pqDistanceTable;
 
     /* Mutex for mutable state */
     slock_t mutex;
@@ -351,6 +372,8 @@ typedef struct HnswAllocator {
 
 typedef struct HnswTypeInfo {
     int maxDimensions;
+    bool supportPQ;
+    Size (*itemSize) (int dimensions);
     Datum (*normalize)(PG_FUNCTION_ARGS);
     void (*checkValue)(Pointer v);
 } HnswTypeInfo;
@@ -375,6 +398,7 @@ typedef struct HnswBuildState {
     /* Support functions */
     FmgrInfo *procinfo;
     FmgrInfo *normprocinfo;
+    FmgrInfo *kmeansnormprocinfo;
     Oid collation;
 
     /* Variables */
@@ -397,9 +421,17 @@ typedef struct HnswBuildState {
     bool enablePQ;
     int pqM;
     int pqKsub;
-    float *pqTable;
-    float *centerTable;
+    char *pqTable;
+    Size pqTableSize;
+    float *pqDistanceTable;
     uint16 pqcodeSize;
+    PQParams *params;
+    int pqMode;
+
+    VectorArray samples;
+    BlockSamplerData bs;
+    double rstate;
+    int rowstoskip;
 
     /* storage page info */
     bool isUStore; /* false means astore */
@@ -415,6 +447,16 @@ typedef struct HnswMetaPageData {
     OffsetNumber entryOffno;
     int16 entryLevel;
     BlockNumber insertPage;
+
+    /* PQ info */
+    bool enablePQ;
+    uint16 pqM;
+    uint16 pqKsub;
+    uint16 pqcodeSize;
+    uint32 pqTableSize;
+    uint16 pqTableNblk;
+    uint32 pqDisTableSize; /* SDC */
+    uint16 pqDisTableNblk;
 } HnswMetaPageData;
 
 typedef HnswMetaPageData *HnswMetaPage;
@@ -434,9 +476,10 @@ typedef struct HnswAppendMetaPageData {
     uint16 pqM;             /* number of subquantizer */
     uint16 pqKsub;          /* number of centroids for each subquantizer */
     uint16 pqcodeSize;      /* number of bits per quantization index */
-    uint32 centerTableSize; /* dim * sizeof(float) */
     uint32 pqTableSize;     /* dim * pqKsub * sizeof(float) */
     uint16 pqTableNblk;     /* total number of blks pqtable */
+    uint32 pqDisTableSize;  /* SDC */
+    uint16 pqDisTableNblk;
 
     /* slot info */
     int npages; /* number of pages per slot */
@@ -478,6 +521,25 @@ typedef struct HnswNeighborTupleData {
 
 typedef HnswNeighborTupleData *HnswNeighborTuple;
 
+typedef struct HnswBuildParams {
+    /* build params */
+    char *base;
+    FmgrInfo *procinfo;
+    Oid collation;
+    int m;
+    int ef;
+    bool existing;
+
+    /* PQ params */
+    bool enablePQ;
+    int pqM;
+    int pqKsub;
+    char *pqTable;
+    Size pqTableSize;
+    float *pqDistanceTable;
+    HnswAllocator *allocator;
+} HnswBuildParams;
+
 typedef struct HnswScanOpaqueData {
     const HnswTypeInfo *typeInfo;
     bool first;
@@ -489,8 +551,15 @@ typedef struct HnswScanOpaqueData {
     FmgrInfo *normprocinfo;
     Oid collation;
 
+    bool enablePQ;
+    PQParams params;
+    int pqMode;
+
     /* used in ustore only */
     VectorScanData vs;
+    int length;
+    int currentLoc;
+    Datum value;
 } HnswScanOpaqueData;
 
 typedef HnswScanOpaqueData *HnswScanOpaque;
@@ -501,6 +570,7 @@ typedef struct HnswVacuumState {
     IndexBulkDeleteResult *stats;
     IndexBulkDeleteCallback callback;
     void *callbackState;
+    BlockNumber hnswHeadBlkno;
 
     /* Settings */
     int m;
@@ -520,6 +590,21 @@ typedef struct HnswVacuumState {
     MemoryContext tmpCtx;
 } HnswVacuumState;
 
+typedef struct PQSearchInfo {
+    PQParams params;
+    int lc;
+    int pqMode;
+    uint8 *qPQCode;
+    float *pqDistanceTable;
+} PQSearchInfo;
+
+typedef struct Candidate {
+    float *vector;
+    float distance;
+    void *heaptids;
+    uint8 heaptidsLength;
+} Candidate;
+
 /* Methods */
 int HnswGetM(Relation index);
 int HnswGetEfConstruction(Relation index);
@@ -531,18 +616,20 @@ Datum HnswNormValue(const HnswTypeInfo *typeInfo, Oid collation, Datum value);
 bool HnswCheckNorm(FmgrInfo *procinfo, Oid collation, Datum value);
 Buffer HnswNewBuffer(Relation index, ForkNumber forkNum);
 void HnswInitPage(Buffer buf, Page page);
-void HnswInit(void);
 List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation index, FmgrInfo *procinfo, Oid collation,
-                      int m, bool inserting, HnswElement skipElement, IndexScanDesc scan = NULL);
+                      int m, bool inserting, HnswElement skipElement, IndexScanDesc scan = NULL, bool enablePQ = false,
+                      PQSearchInfo *pqinfo = NULL);
 HnswElement HnswGetEntryPoint(Relation index);
 void HnswGetMetaPageInfo(Relation index, int *m, HnswElement *entryPoint);
 void *HnswAlloc(HnswAllocator *allocator, Size size);
 HnswElement HnswInitElement(char *base, ItemPointer tid, int m, double ml, int maxLevel, HnswAllocator *alloc);
 HnswElement HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno);
 void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entryPoint, Relation index,
-                              FmgrInfo *procinfo, Oid collation, int m, int efConstruction, bool existing);
+                              FmgrInfo *procinfo, Oid collation, int m, int efConstruction, bool existing,
+                              bool enablePQ, PQParams *params);
 HnswCandidate *HnswEntryCandidate(char *base, HnswElement em, Datum q, Relation rel, FmgrInfo *procinfo, Oid collation,
-                                  bool loadVec, IndexScanDesc scan = NULL);
+                                  bool loadVec, IndexScanDesc scan = NULL, bool enablePQ = false,
+                                  PQSearchInfo *pqinfo = NULL);
 void HnswUpdateMetaPage(Relation index, int updateEntry, HnswElement entryPoint, BlockNumber insertPage,
                         ForkNumber forkNum, bool building);
 void HnswSetNeighborTuple(char *base, HnswNeighborTuple ntup, HnswElement e, int m);
@@ -554,13 +641,29 @@ void HnswUpdateNeighborsOnDisk(Relation index, FmgrInfo *procinfo, Oid collation
                                bool checkExisting, bool building);
 void HnswLoadElementFromTuple(HnswElement element, HnswElementTuple etup, bool loadHeaptids, bool loadVec);
 bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
-                     bool loadVec, float *maxDistance, IndexScanDesc scan = NULL);
+                     bool loadVec, float *maxDistance, IndexScanDesc scan = NULL, bool enablePQ = false,
+                     PQSearchInfo *pqinfo = NULL);
 void HnswSetElementTuple(char *base, HnswElementTuple etup, HnswElement element);
 void HnswUpdateConnection(char *base, HnswElement element, HnswCandidate *hc, int lm, int lc, int *updateIdx,
                           Relation index, FmgrInfo *procinfo, Oid collation);
 void HnswLoadNeighbors(HnswElement element, Relation index, int m);
 const HnswTypeInfo *HnswGetTypeInfo(Relation index);
 bool HnswDelete(Relation index, Datum *values, const bool *isnull, ItemPointer heapTCtid, bool isRollbackIndex);
+
+void HnswUpdateAppendMetaPage(Relation index, int updateEntry, HnswElement entryPoint, BlockNumber eleInsertPage,
+                              BlockNumber neiInsertPage, ForkNumber forkNum, bool building);
+void FlushPQInfo(HnswBuildState *buildstate);
+void HnswGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
+                               uint16 *pqDisTableNblk, uint32 *pqDisTableSize);
+
+int ComputePQTable(VectorArray samples, PQParams *params);
+int ComputeVectorPQCode(float *vector, const PQParams *params, uint8 *pqCode);
+int GetPQDistanceTableSdc(const PQParams *params, float *pqDistanceTable);
+int GetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDistanceTable);
+int GetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
+                  const float *pqDistanceTable, float *pqDistance);
+int getPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
+void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ);
 
 Datum hnswhandler(PG_FUNCTION_ARGS);
 Datum hnswbuild(PG_FUNCTION_ARGS);

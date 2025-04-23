@@ -34,24 +34,6 @@
 #include "utils/selfuncs.h"
 
 int hnsw_lock_tranche_id;
-static relopt_kind hnsw_relopt_kind;
-static THR_LOCAL bool HnswNeedInitialization = true;
-
-/*
- * Initialize index options and variables
- */
-void HnswInit(void)
-{
-    hnsw_relopt_kind = RELOPT_KIND_DATAVEC;
-    add_int_reloption(hnsw_relopt_kind, "m", "Max number of connections", HNSW_DEFAULT_M, HNSW_MIN_M, HNSW_MAX_M);
-    add_int_reloption(hnsw_relopt_kind, "ef_construction", "Size of the dynamic candidate list for construction",
-                      HNSW_DEFAULT_EF_CONSTRUCTION, HNSW_MIN_EF_CONSTRUCTION, HNSW_MAX_EF_CONSTRUCTION);
-    add_int_reloption(hnsw_relopt_kind, "pq_m", "Number of PQ subquantizer", HNSW_DEFAULT_PQ_M, HNSW_MIN_PQ_M,
-                      HNSW_MAX_PQ_M);
-    add_int_reloption(hnsw_relopt_kind, "pq_ksub", "Number of centroids for each PQ subquantizer", HNSW_DEFAULT_PQ_KSUB,
-                      HNSW_MIN_PQ_KSUB, HNSW_MAX_PQ_KSUB);
-    add_bool_reloption(hnsw_relopt_kind, "enable_pq", "Whether to enable PQ", HNSW_DEFAULT_ENABLE_PQ);
-}
 
 /*
  * Estimate the cost of an index scan
@@ -114,11 +96,7 @@ static bytea *hnswoptions_internal(Datum reloptions, bool validate)
     int numoptions;
     HnswOptions *rdopts;
 
-    if (HnswNeedInitialization) {
-        HnswInit();
-        HnswNeedInitialization = false;
-    }
-    options = parseRelOptions(reloptions, validate, hnsw_relopt_kind, &numoptions);
+    options = parseRelOptions(reloptions, validate, RELOPT_KIND_HNSW, &numoptions);
     rdopts = (HnswOptions *)allocateReloptStruct(sizeof(HnswOptions), options, numoptions);
     fillRelOptions((void *)rdopts, sizeof(HnswOptions), options, numoptions, validate, tab, lengthof(tab));
 
@@ -144,7 +122,7 @@ Datum hnswhandler(PG_FUNCTION_ARGS)
     IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
 
     amroutine->amstrategies = 0;
-    amroutine->amsupport = 3;
+    amroutine->amsupport = HNSW_FUNC_NUM;
     amroutine->amcanorder = false;
     amroutine->amcanorderbyop = true;
     amroutine->amcanbackward = false; /* can change direction mid-scan */
@@ -195,6 +173,9 @@ Datum hnswhandler(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(hnswbuild);
 Datum hnswbuild(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "hnsw index do not support extreme rto.");
+    }
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
     IndexInfo *indexinfo = (IndexInfo *)PG_GETARG_POINTER(2);
@@ -206,6 +187,9 @@ Datum hnswbuild(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(hnswbuildempty);
 Datum hnswbuildempty(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "hnsw index do not support extreme rto.");
+    }
     Relation index = (Relation)PG_GETARG_POINTER(0);
     hnswbuildempty_internal(index);
 
@@ -215,6 +199,9 @@ Datum hnswbuildempty(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(hnswinsert);
 Datum hnswinsert(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "hnsw index do not support extreme rto.");
+    }
     Relation rel = (Relation)PG_GETARG_POINTER(0);
     Datum *values = (Datum *)PG_GETARG_POINTER(1);
     bool *isnull = reinterpret_cast<bool *>(PG_GETARG_POINTER(2));
@@ -229,6 +216,9 @@ Datum hnswinsert(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(hnswbulkdelete);
 Datum hnswbulkdelete(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "hnsw index do not support extreme rto.");
+    }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *volatile stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
@@ -241,6 +231,9 @@ Datum hnswbulkdelete(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(hnswvacuumcleanup);
 Datum hnswvacuumcleanup(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "hnsw index do not support extreme rto.");
+    }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     stats = hnswvacuumcleanup_internal(info, stats);

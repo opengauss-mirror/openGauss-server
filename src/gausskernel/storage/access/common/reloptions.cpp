@@ -17,6 +17,8 @@
 #include "miscadmin.h"
 #include "knl/knl_variable.h"
 
+#include "access/datavec/hnsw.h"
+#include "access/datavec/ivfflat.h"
 #include "access/gist_private.h"
 #include "access/hash.h"
 #include "access/nbtree.h"
@@ -123,6 +125,8 @@ static relopt_bool boolRelOpts[] = {
     {{"compress_diff_convert", "Whether do diiffer convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
      false},
     {{"deduplication", "Enables \"deduplication\" feature for btree index", RELOPT_KIND_BTREE}, false},
+    {{"enable_pq", "Whether to enable PQ", RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT }, GENERIC_DEFAULT_ENABLE_PQ },
+    {{"by_residual", "Whether to use residual during IVFPQ", RELOPT_KIND_IVFFLAT}, IVFPQ_DEFAULT_RESIDUAL},
     /* list terminator */
     {{NULL}}};
 
@@ -254,6 +258,23 @@ static relopt_int intRelOpts[] = {
      7},
     {{ "collate", "set relation default collation", RELOPT_KIND_HEAP }, 0, 0, 2000000000 },
     {{ "relrewrite", "set relation relrewrite", RELOPT_KIND_HEAP | RELOPT_KIND_TOAST }, 0, 0, 2000000000 },
+    {{ "m", "Max number of connections", RELOPT_KIND_HNSW }, HNSW_DEFAULT_M, HNSW_MIN_M, HNSW_MAX_M },
+    {{ "ef_construction", "Size of the dynamic candidate list for construction", RELOPT_KIND_HNSW },
+     HNSW_DEFAULT_EF_CONSTRUCTION,
+     HNSW_MIN_EF_CONSTRUCTION,
+     HNSW_MAX_EF_CONSTRUCTION },
+    {{ "pq_m", "Number of PQ subquantizer", RELOPT_KIND_HNSW |RELOPT_KIND_IVFFLAT},
+     GENERIC_DEFAULT_PQ_M,
+     GENERIC_MIN_PQ_M,
+     GENERIC_MAX_PQ_M },
+    {{ "pq_ksub", "Number of centroids for each PQ subquantizer", RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT },
+     GENERIC_DEFAULT_PQ_KSUB,
+     GENERIC_MIN_PQ_KSUB,
+     GENERIC_MAX_PQ_KSUB },
+    {{ "lists", "Number of inverted lists", RELOPT_KIND_IVFFLAT },
+     IVFFLAT_DEFAULT_LISTS,
+     IVFFLAT_MIN_LISTS,
+     IVFFLAT_MAX_LISTS },
     /* list terminator */
     {{NULL}}
 };
@@ -469,7 +490,7 @@ static relopt_string stringRelOpts[] = {
     },
     {
         {"storage_type", "Specifies the Table accessor routines",
-         RELOPT_KIND_HEAP | RELOPT_KIND_BTREE | RELOPT_KIND_TOAST | RELOPT_KIND_DATAVEC},
+         RELOPT_KIND_HEAP | RELOPT_KIND_BTREE | RELOPT_KIND_TOAST | RELOPT_KIND_HNSW},
         strlen(TABLE_ACCESS_METHOD_ASTORE),
         false,
         ValidateStrOptTableAccessMethod,

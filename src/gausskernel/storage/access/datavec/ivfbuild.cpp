@@ -48,6 +48,168 @@
 #define PARALLEL_KEY_QUERY_TEXT UINT64CONST(0xA000000000000004)
 
 /*
+ * Create PQ-related pages
+ */
+static void CreatePQPages(IvfflatBuildState *buildstate, ForkNumber fNum)
+{
+    uint16 nblks;
+    Relation index = buildstate->index;
+    ForkNumber forkNum = fNum;
+    Buffer buf;
+    Page page;
+    uint16 pqTableNblk;
+    uint32 pqPreComputeTableNblk;
+    GenericXLogState *state;
+
+    IvfGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqPreComputeTableNblk, NULL);
+
+    /* create pq table page */
+    for (uint16 i = 0; i < pqTableNblk; i++) {
+        buf = IvfflatNewBuffer(index, forkNum);
+        IvfflatInitRegisterPage(index, &buf, &page, &state);
+        MarkBufferDirty(buf);
+        IvfflatCommitBuffer(buf, state);
+    }
+
+    /* create pq distance table page */
+    for (uint32 i = 0; i < pqPreComputeTableNblk; i++) {
+        buf = IvfflatNewBuffer(index, forkNum);
+        IvfflatInitRegisterPage(index, &buf, &page, &state);
+        MarkBufferDirty(buf);
+        IvfflatCommitBuffer(buf, state);
+    }
+}
+
+/*
+ * Caculate Residual
+ */
+static void ComputeResidual(IvfflatBuildState *buildstate, Vector* sample, int list)
+{
+    Vector *vec = (Vector *)lfirst(buildstate->rlist->tail);
+    Vector *center = (Vector *)VectorArrayGet(buildstate->centers, list);
+
+    if (buildstate->byResidual) {
+        for (int i = 0; i < buildstate->dimensions; i++) {
+            vec->x[i] = sample->x[i] -center->x[i];
+        }
+    } else {
+        for (int i = 0; i < buildstate->dimensions; i++) {
+            vec->x[i] = sample->x[i];
+        }
+    }
+}
+
+/*
+ * Caculate square of L2 normalform
+ */
+static float ComputeNormL2sqr(float *x, int dsub)
+{
+    float res = 0.0f;
+    for (int i = 0; i < dsub; i++) {
+        res += x[i] * x[i];
+    }
+    return res;
+}
+
+static void ComputeInnerProdAndSum(IvfflatBuildState *buildstate, float * l2Norm, float *center, float * tab, int dsub)
+{
+    Size itemSize = MAXALIGN(buildstate->typeInfo->itemSize(dsub));
+    const float MULTIPLIER = 2.0;
+
+    for (int i = 0; i < buildstate->pqM; i++) {
+        for (int j = 0; j < buildstate->pqKsub; j++) {
+            float *x = DatumGetVector(buildstate->pqTable + ((i * buildstate->pqKsub + j) * itemSize))->x;
+            tab[i * buildstate->pqKsub + j] = VectorInnerProduct(dsub, x, center + i * dsub);
+            float *pretable = &tab[i * buildstate->pqKsub + j];
+            VectorMadd(1, l2Norm + (i * buildstate->pqKsub + j), MULTIPLIER, pretable, pretable);
+        }
+    }
+}
+
+/*
+ * Compute precalculated table
+ */
+static void ComputePreTable(IvfflatBuildState *buildstate)
+{
+    Size size = buildstate->pqKsub * buildstate->pqM * sizeof(float);
+    float *l2Norm = (float *)palloc0(size);
+
+    int dsub =  buildstate->dimensions / buildstate->pqM;
+    Size itemSize = MAXALIGN(buildstate->typeInfo->itemSize(dsub));
+
+    for (int m = 0; m < buildstate->pqM; m++) {
+        for (int j = 0; j < buildstate->pqKsub; j++) {
+            float *x = DatumGetVector(buildstate->pqTable + (m * buildstate->pqKsub + j) * itemSize)->x;
+            l2Norm[m * buildstate->pqKsub + j] = ComputeNormL2sqr(x, dsub);
+        }
+    }
+
+    for (int n = 0; n < buildstate->lists; n++) {
+        float *tab = buildstate->preComputeTable + n * buildstate->pqM * buildstate->pqKsub;
+        Vector *center = (Vector *)VectorArrayGet(buildstate->centers, n);
+        ComputeInnerProdAndSum(buildstate, l2Norm, center->x, tab, dsub);
+    }
+
+    pfree(l2Norm);
+}
+
+/*
+ * Compute PQTable
+ */
+static void ComputeIvfPQ(IvfflatBuildState *buildstate)
+{
+    MemoryContext pqCtx = AllocSetContextCreate(CurrentMemoryContext,
+                                                "Ivfflat PQ temporary context",
+                                                ALLOCSET_DEFAULT_SIZES);
+    MemoryContext oldCtx = MemoryContextSwitchTo(pqCtx);
+
+    IvfComputePQTable(buildstate->residuals, buildstate->params);
+    MemoryContextSwitchTo(oldCtx);
+    MemoryContextDelete(pqCtx);
+}
+
+/*
+ *  Get all sample vector or residual vector to vector array
+ */
+static void CopyResidaulFromList(IvfflatBuildState *buildstate)
+{
+    if (buildstate->rlist == NIL) {
+        ereport(ERROR, (errmsg("when enable_pq = on, at least one vector needs to be include")));
+    }
+
+    ListCell *lc;
+    buildstate->residuals = VectorArrayInit(
+        buildstate->rlist->length,
+        buildstate->dimensions,
+        buildstate->typeInfo->itemSize(buildstate->dimensions)
+    );
+
+    foreach (lc, buildstate->rlist) {
+        Vector *vec = (Vector *)lfirst(lc);
+        Datum value = PointerGetDatum(vec);
+        value = PointerGetDatum(PG_DETOAST_DATUM(value));
+        VectorArraySet(buildstate->residuals, buildstate->residuals->length, DatumGetPointer(value));
+        buildstate->residuals->length++;
+    }
+    list_free_deep(buildstate->rlist);
+}
+
+/*
+ * Init PQParam
+ */
+PQParams *InitIVFPQParamsInMemory(IvfflatBuildState *buildstate)
+{
+    PQParams *params = (PQParams*)palloc(sizeof(PQParams));
+    params->pqM = buildstate->pqM;
+    params->pqKsub = buildstate->pqKsub;
+    params->funcType = getIVFPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
+    params->dim = buildstate->dimensions;
+    params->subItemSize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
+    params->pqTable = buildstate->pqTable;
+    return params;
+}
+
+/*
  * Add sample
  */
 static void AddSample(Datum *values, IvfflatBuildState *buildstate)
@@ -167,6 +329,14 @@ static void AddTupleToSort(Relation index, ItemPointer tid, Datum *values, Ivffl
         }
     }
 
+    Vector* residual = NULL;
+    if (buildstate->enablePQ) {
+        ComputeResidual(buildstate, DatumGetVector(value), closestCenter);
+        if (buildstate->byResidual) {
+            residual = (Vector *)lfirst(buildstate->rlist->tail);
+        }
+    }
+
 #ifdef IVFFLAT_KMEANS_DEBUG
     buildstate->inertia += minDistance;
     buildstate->listSums[closestCenter] += minDistance;
@@ -175,12 +345,14 @@ static void AddTupleToSort(Relation index, ItemPointer tid, Datum *values, Ivffl
 
     /* Create a virtual tuple */
     ExecClearTuple(slot);
-    slot->tts_values[0] = Int32GetDatum(closestCenter);
-    slot->tts_isnull[0] = false;
-    slot->tts_values[1] = PointerGetDatum(tid);
-    slot->tts_isnull[1] = false;
-    slot->tts_values[2] = value;
-    slot->tts_isnull[2] = false;
+    slot->tts_values[IVF_LISTID - 1] = Int32GetDatum(closestCenter);
+    slot->tts_isnull[IVF_LISTID - 1] = false;
+    slot->tts_values[IVF_TID - 1] = PointerGetDatum(tid);
+    slot->tts_isnull[IVF_TID - 1] = false;
+    slot->tts_values[IVF_VECTOR - 1] = value;
+    slot->tts_isnull[IVF_VECTOR - 1] = false;
+    slot->tts_values[IVF_RESIDUAL - 1] = residual == NULL ? NULL : PointerGetDatum(residual);
+    slot->tts_isnull[IVF_RESIDUAL - 1] = residual == NULL ? true : false;
     ExecStoreVirtualTuple(slot);
 
     /*
@@ -209,6 +381,9 @@ static void BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values, 
     if (isnull[0]) {
         return;
     }
+
+    Vector *vec = InitVector(buildstate->dimensions);
+    buildstate->rlist = lappend(buildstate->rlist, vec);
 
     /* Use memory context since detoast can allocate */
     oldCtx = MemoryContextSwitchTo(buildstate->tmpCtx);
@@ -253,8 +428,19 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
 
     TupleTableSlot *slot = MakeSingleTupleTableSlot(buildstate->tupdesc);
     TupleDesc tupdesc = RelationGetDescr(index);
+    Size pqcodesSize = buildstate->pqcodeSize;
 
     GetNextTuple(buildstate->sortstate, tupdesc, slot, &itup, &list);
+
+    /* Check vector and pqcode can be on the same page */
+    if (list != -1) {
+        Size itemsize = MAXALIGN(IndexTupleSize(itup));
+        Size emptyFreeSize = BLCKSZ - sizeof(IvfflatPageOpaqueData) - SizeOfPageHeaderData - sizeof(ItemIdData);
+        if (emptyFreeSize < itemsize + MAXALIGN(pqcodesSize)) {
+            int maxPQcodeSize = ((emptyFreeSize - itemsize) / 8) * 8;
+            ereport(ERROR, (errmsg("vector and pqcode must be on the same page, max pq_m is %d", maxPQcodeSize)));
+        }
+    }
 
     for (int i = 0; i < buildstate->centers->length; i++) {
         Buffer buf;
@@ -276,8 +462,21 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
         while (list == i) {
             /* Check for free space */
             Size itemsz = MAXALIGN(IndexTupleSize(itup));
-            if (PageGetFreeSpace(page) < itemsz)
+            if (PageGetFreeSpace(page) < itemsz + MAXALIGN(pqcodesSize))
                 IvfflatAppendPage(index, &buf, &page, &state, forkNum);
+
+            if (buildstate->enablePQ) {
+                bool isnull;
+                Size codesize = buildstate->params->pqM * sizeof(uint8);
+                uint8 *pqcode = (uint8 *)palloc(codesize);
+                Datum datum = buildstate->byResidual ? heap_slot_getattr(slot, 4, &isnull) : index_getattr(itup, 1, tupdesc, &isnull);
+
+                IvfComputeVectorPQCode(DatumGetVector(datum)->x, buildstate->params, pqcode);
+                ((PageHeader)page)->pd_upper -= MAXALIGN(pqcodesSize);
+                errno_t rc = memcpy_s(
+                    ((char *)page) + ((PageHeader)page)->pd_upper, pqcodesSize, (char *)pqcode, pqcodesSize);
+                securec_check_c(rc, "\0", "\0");
+            }
 
             /* Add the item */
             if (PageAddItem(page, (Item)itup, itemsz, InvalidOffsetNumber, false, false) == InvalidOffsetNumber)
@@ -338,10 +537,11 @@ static void InitBuildState(IvfflatBuildState *buildstate, Relation heap, Relatio
         elog(ERROR, "dimensions must be greater than one for this opclass");
 
     /* Create tuple description for sorting */
-    buildstate->tupdesc = CreateTemplateTupleDesc(3, false);
-    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)1, "list", INT4OID, -1, 0);
-    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)2, "tid", TIDOID, -1, 0);
-    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)3, "vector", RelationGetDescr(index)->attrs[0].atttypid, -1, 0);
+    buildstate->tupdesc = CreateTemplateTupleDesc(IVF_NUM_COLUMNS, false);
+    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)IVF_LISTID, "list", INT4OID, -1, 0);
+    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)IVF_TID, "tid", TIDOID, -1, 0);
+    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)IVF_VECTOR, "vector", RelationGetDescr(index)->attrs[0].atttypid, -1, 0);
+    TupleDescInitEntry(buildstate->tupdesc, (AttrNumber)IVF_RESIDUAL, "residual", VECTOROID, -1, 0);
 
     buildstate->slot = MakeSingleTupleTableSlot(buildstate->tupdesc);
 
@@ -358,6 +558,49 @@ static void InitBuildState(IvfflatBuildState *buildstate, Relation heap, Relatio
     buildstate->listCounts = palloc0(sizeof(int) * buildstate->lists);
 #endif
     buildstate->ivfleader = NULL;
+
+    buildstate->enablePQ = IvfGetEnablePQ(index);
+    if (buildstate->enablePQ && !buildstate->typeInfo->supportPQ) {
+        ereport(ERROR, (errmsg("this data type cannot support ivfpq.")));
+    }
+    if (buildstate->enablePQ && !g_instance.pq_inited) {
+        ereport(ERROR, (errmsg("this instance has not currently loaded the pq dynamic library.")));
+    }
+
+    buildstate->pqM = IvfGetPqM(index);
+    buildstate->pqKsub = IvfGetPqKsub(index);
+    buildstate->byResidual = IvfGetByResidual(index);
+    buildstate->rlist = NIL;
+    buildstate->residuals = NULL;
+
+    if (buildstate->enablePQ) {
+        if (buildstate->dimensions % buildstate->pqM != 0) {
+            ereport(ERROR, (errmsg("dimensions must be divisible by pq_m, please reset pq_m.")));
+        }
+        Size subItemsize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
+        subItemsize = MAXALIGN(subItemsize);
+        buildstate->pqTableSize = buildstate->pqM * buildstate->pqKsub * subItemsize;
+        buildstate->pqTable = (char*)palloc0(buildstate->pqTableSize);
+        buildstate->pqcodeSize = buildstate->pqM * sizeof(uint8);
+        buildstate->params = InitIVFPQParamsInMemory(buildstate);
+
+        if (buildstate->byResidual &&
+            (buildstate->params->funcType == IVF_PQ_DIS_L2 || buildstate->params->funcType == IVF_PQ_DIS_COSINE)) {
+            buildstate->preComputeTableSize = buildstate->lists * buildstate->pqM * buildstate->pqKsub;
+            buildstate->preComputeTable = (float*)palloc0(buildstate->preComputeTableSize * sizeof(float));
+        } else {
+            buildstate->preComputeTableSize = 0;
+            buildstate->preComputeTable = NULL;
+        }
+    } else {
+        buildstate->pqTable = NULL;
+        buildstate->pqTableSize = 0;
+        buildstate->pqcodeSize = 0;
+        buildstate->params = NULL;
+        buildstate->preComputeTableSize = 0;
+        buildstate->preComputeTable = NULL;
+    }
+    buildstate->pqDistanceTable = NULL;
 }
 
 /*
@@ -366,6 +609,9 @@ static void InitBuildState(IvfflatBuildState *buildstate, Relation heap, Relatio
 static void FreeBuildState(IvfflatBuildState *buildstate)
 {
     VectorArrayFree(buildstate->centers);
+    if (buildstate->residuals) {
+        VectorArrayFree(buildstate->residuals);
+    }
     pfree(buildstate->listInfo);
 
 #ifdef IVFFLAT_KMEANS_DEBUG
@@ -417,7 +663,7 @@ static void ComputeCenters(IvfflatBuildState *buildstate)
 /*
  * Create the metapage
  */
-static void CreateMetaPage(Relation index, int dimensions, int lists, ForkNumber forkNum)
+static void CreateMetaPage(Relation index, IvfflatBuildState *buildstate, ForkNumber forkNum)
 {
     Buffer buf;
     Page page;
@@ -431,8 +677,34 @@ static void CreateMetaPage(Relation index, int dimensions, int lists, ForkNumber
     metap = IvfflatPageGetMeta(page);
     metap->magicNumber = IVFFLAT_MAGIC_NUMBER;
     metap->version = IVFFLAT_VERSION;
-    metap->dimensions = dimensions;
-    metap->lists = lists;
+    metap->dimensions = buildstate->dimensions;
+    metap->lists = buildstate->lists;
+
+     /* set PQ info */
+    metap->enablePQ = buildstate->enablePQ;
+    metap->pqM = buildstate->pqM;
+    metap->byResidual = buildstate->byResidual;
+    metap->pqKsub = buildstate->pqKsub;
+    metap->pqcodeSize = buildstate->pqcodeSize;
+    metap->pqPreComputeTableSize = 0;
+    metap->pqPreComputeTableNblk = 0;
+
+    if (buildstate->enablePQ) {
+        metap->pqTableSize = (uint32)buildstate->pqTableSize;
+        metap->pqTableNblk = (uint16)(
+            (metap->pqTableSize + IVF_PQTABLE_STORAGE_SIZE - 1) / IVF_PQTABLE_STORAGE_SIZE);
+        if (buildstate->byResidual &&
+            (buildstate->params->funcType == IVF_PQ_DIS_L2 || buildstate->params->funcType == IVF_PQ_DIS_COSINE)) {
+            uint64 TableLen = buildstate->lists * buildstate->pqM * buildstate->pqKsub;
+            metap->pqPreComputeTableSize = (uint64)TableLen * sizeof(float);
+            metap->pqPreComputeTableNblk = (uint32)(
+                (metap->pqPreComputeTableSize + IVF_PQTABLE_STORAGE_SIZE - 1) / IVF_PQTABLE_STORAGE_SIZE);
+        }
+    } else {
+        metap->pqTableSize = 0;
+        metap->pqTableNblk = 0;
+    }
+
     ((PageHeader)page)->pd_lower = ((char *)metap + sizeof(IvfflatMetaPageData)) - (char *)page;
 
     IvfflatCommitBuffer(buf, state);
@@ -548,6 +820,8 @@ static double ParallelHeapScan(IvfflatBuildState *buildstate)
 
     buildstate->indtuples = ivfshared->indtuples;
     reltuples = ivfshared->reltuples;
+    buildstate->rlist =list_copy(ivfshared->rlist);
+    list_free(ivfshared->rlist);
 #ifdef IVFFLAT_KMEANS_DEBUG
     buildstate->inertia = ivfshared->inertia;
 #endif
@@ -585,7 +859,8 @@ static void IvfflatParallelScanAndSort(IvfflatSpool *ivfspool, IvfflatShared *iv
     indexInfo = BuildIndexInfo(ivfspool->index);
     indexInfo->ii_Concurrent = false;
     InitBuildState(&buildstate, ivfspool->heap, ivfspool->index, indexInfo);
-    rc = memcpy_s(buildstate.centers->items, VECTOR_SIZE(buildstate.centers->dim) * buildstate.centers->maxlen, ivfcenters, VECTOR_SIZE(buildstate.centers->dim) * buildstate.centers->maxlen);
+    Size centersSize = buildstate.centers->itemsize * buildstate.centers->maxlen;
+    rc = memcpy_s(buildstate.centers->items, centersSize, ivfcenters, centersSize);
     securec_check(rc, "\0", "\0");
     buildstate.centers->length = buildstate.centers->maxlen;
     ivfspool->sortstate = tuplesort_begin_heap(buildstate.tupdesc, 1, attNums, sortOperators, sortCollations,
@@ -601,6 +876,19 @@ static void IvfflatParallelScanAndSort(IvfflatSpool *ivfspool, IvfflatShared *iv
 
     /* Record statistics */
     SpinLockAcquire(&ivfshared->mutex);
+
+    MemoryContext oldCtx = MemoryContextSwitchTo(ivfshared->tmpCtx);
+    ListCell *lc;
+    foreach (lc, buildstate.rlist) {
+        Vector *vec = InitVector(buildstate.dimensions);
+        int size = VECTOR_SIZE(buildstate.dimensions);
+        error_t rc = memcpy_s(vec, size, lc->data.ptr_value, size);
+        securec_check_c(rc, "\0", "\0");
+        ivfshared->rlist = lappend(ivfshared->rlist, vec);
+    }
+    MemoryContextSwitchTo(oldCtx);
+    list_free_deep(buildstate.rlist);
+
     ivfshared->nparticipantsdone++;
     ivfshared->reltuples += reltuples;
     ivfshared->indtuples += buildstate.indtuples;
@@ -654,6 +942,9 @@ static void IvfflatParallelCleanup(const BgWorkerContext *bwc)
     Assert(ivfshared->sharedsort);
     SharedFileSetDeleteAll(&ivfshared->sharedsort->fileset);
     pfree_ext(ivfshared->sharedsort);
+
+    pfree_ext(ivfshared->ivfcenters);
+    MemoryContextDelete(ivfshared->tmpCtx);
 }
 
 static IvfflatShared *IvfflatParallelInitshared(IvfflatBuildState *buildstate, int workmem, int scantuplesortstates)
@@ -690,13 +981,24 @@ static IvfflatShared *IvfflatParallelInitshared(IvfflatBuildState *buildstate, i
     tuplesort_initialize_shared(sharedsort, scantuplesortstates);
     ivfshared->sharedsort = sharedsort;
 
-    estcenters = VECTOR_SIZE(buildstate->dimensions) * buildstate->lists;
+    estcenters = buildstate->centers->itemsize * buildstate->lists;
     ivfcenters = (char *)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), estcenters);
     errno_t rc = memcpy_s(ivfcenters, estcenters, buildstate->centers->items, estcenters);
     securec_check(rc, "\0", "\0");
     ivfshared->ivfcenters = (Vector *)ivfcenters;
 
+    ivfshared->tmpCtx =
+        AllocSetContextCreate(CurrentMemoryContext, "Ivfflat build temporary context", ALLOCSET_DEFAULT_SIZES);
     return ivfshared;
+}
+
+/*
+ * Shut down workers, destory parallel context, and end parallel mode.
+ */
+void IvfflatEndParallel(IvfflatLeader *ivfleader)
+{
+    BgworkerListSyncQuit();
+    pfree_ext(ivfleader);
 }
 
 /*
@@ -716,8 +1018,7 @@ static void IvfflatBeginParallel(IvfflatBuildState *buildstate, int request, int
 
     /* If no workers were successfully launched, back out (do serial build) */
     if (ivfleader->nparticipanttuplesorts == 0) {
-        pfree_ext(ivfshared);
-        pfree_ext(ivfleader);
+        IvfflatEndParallel(ivfleader);
         return;
     }
 
@@ -750,14 +1051,6 @@ static double AssignTupleUtility(IvfflatBuildState *buildstate)
         }
     }
     return reltuples;
-}
-
-/*
- * Shut down workers, destory parallel context, and end parallel mode.
- */
-void IvfflatEndParallel()
-{
-    BgworkerListSyncQuit();
 }
 
 /*
@@ -823,6 +1116,14 @@ static void CreateEntryPages(IvfflatBuildState *buildstate, ForkNumber forkNum)
 
     /* Sort */
     IvfflatBench("sort tuples", tuplesort_performsort(buildstate->sortstate));
+    /* Build PQTable by residusal */
+    if (buildstate->enablePQ) {
+        CopyResidaulFromList(buildstate);
+        ComputeIvfPQ(buildstate);
+        if (buildstate->byResidual &&
+            (buildstate->params->funcType == IVF_PQ_DIS_L2 || buildstate->params->funcType == IVF_PQ_DIS_COSINE))
+            ComputePreTable(buildstate);
+    }
 
     /* Load */
     IvfflatBench("load tuples", InsertTuples(buildstate->index, buildstate, forkNum));
@@ -832,7 +1133,7 @@ static void CreateEntryPages(IvfflatBuildState *buildstate, ForkNumber forkNum)
 
     /* End parallel build */
     if (buildstate->ivfleader) {
-        IvfflatEndParallel();
+        IvfflatEndParallel(buildstate->ivfleader);
     }
 }
 
@@ -847,10 +1148,19 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, Ivff
     ComputeCenters(buildstate);
 
     /* Create pages */
-    CreateMetaPage(index, buildstate->dimensions, buildstate->lists, forkNum);
+    CreateMetaPage(index, buildstate, forkNum);
+
+    if (buildstate->enablePQ) {
+        CreatePQPages(buildstate, forkNum);
+    }
+
     CreateListPages(index, buildstate->centers, buildstate->dimensions, buildstate->lists, forkNum,
                     &buildstate->listInfo);
     CreateEntryPages(buildstate, forkNum);
+
+    if (buildstate->enablePQ) {
+        IvfFlushPQInfo(buildstate);
+    }
 
     /* Write WAL for initialization fork since GenericXLog functions do not */
     if (forkNum == INIT_FORKNUM)

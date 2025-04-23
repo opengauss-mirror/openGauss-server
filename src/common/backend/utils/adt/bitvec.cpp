@@ -28,7 +28,6 @@
 
 uint64 (*BitHammingDistance)(uint32 bytes, unsigned char *ax, unsigned char *bx, uint64 distance);
 double (*BitJaccardDistance)(uint32 bytes, unsigned char *ax, unsigned char *bx, uint64 ab, uint64 aa, uint64 bb);
-static THR_LOCAL bool BitvecNeedInitialization = true;
 
 /*
  * Allocate and initialize a new bit vector
@@ -65,11 +64,6 @@ Datum hamming_distance(PG_FUNCTION_ARGS)
     VarBit *a = PG_GETARG_VARBIT_P(0);
     VarBit *b = PG_GETARG_VARBIT_P(1);
 
-    if (BitvecNeedInitialization) {
-        BitvecInit();
-        BitvecNeedInitialization = false;
-    }
-
     CheckDims(a, b);
 
     PG_RETURN_FLOAT8((double)BitHammingDistance(VARBITBYTES(a), VARBITS(a), VARBITS(b), 0));
@@ -83,11 +77,6 @@ Datum jaccard_distance(PG_FUNCTION_ARGS)
 {
     VarBit *a = PG_GETARG_VARBIT_P(0);
     VarBit *b = PG_GETARG_VARBIT_P(1);
-
-    if (BitvecNeedInitialization) {
-        BitvecInit();
-        BitvecNeedInitialization = false;
-    }
 
     CheckDims(a, b);
 

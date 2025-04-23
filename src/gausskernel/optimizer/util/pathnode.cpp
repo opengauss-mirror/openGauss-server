@@ -1180,7 +1180,8 @@ static void set_scan_hint(Path* new_path, HintState* hstate)
             scanHint = find_scan_hint(hstate, new_path->parent->relids, HINT_KEYWORD_TABLESCAN);
             break;
         }
-        case T_IndexScan: {
+        case T_IndexScan:
+        case T_AnnIndexScan: {
             scanHint = find_scan_hint(hstate, new_path->parent->relids, HINT_KEYWORD_INDEXSCAN);
             break;
         }
@@ -1402,7 +1403,8 @@ void set_index_hint_value(Path* new_path, List* indexhintList)
             break;
         }
         case T_IndexScan:
-        case T_IndexOnlyScan: {
+        case T_IndexOnlyScan:
+        case T_AnnIndexScan: {
             isIndexScan = true;
             matchIndex = find_index_hint_value(indexhintList, index_path->indexinfo->indexoid, &hintMask);
             break;
@@ -2296,6 +2298,7 @@ bool is_partitionIndex_Subpath(Path* subpath)
     switch (subpath->pathtype) {
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
             is_index_path = true;
             break;
         default:
@@ -2330,6 +2333,7 @@ bool is_pwj_path(Path* pwjpath)
     return ret;
 }
 
+
 /*
  * create_index_path
  *	  Creates a path node for an index scan.
@@ -2359,13 +2363,15 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
     Relids required_outer, Bitmapset *upper_params, double loop_count)
 {
     IndexPath* pathnode = makeNode(IndexPath);
+    bool isAnnIndex = index->isAnnIndex;
     RelOptInfo* rel = index->rel;
     List* indexquals = NIL;
     List* indexqualcols = NIL;
 
     pathnode->is_ustore = rel->is_ustore;
+    pathnode->isAnnIndex = isAnnIndex;
 
-    pathnode->path.pathtype = indexonly ? T_IndexOnlyScan : T_IndexScan;
+    pathnode->path.pathtype = isAnnIndex ? T_AnnIndexScan : (indexonly ? T_IndexOnlyScan : T_IndexScan);
     pathnode->path.parent = rel;
     pathnode->path.pathtarget = rel->reltarget;
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer, upper_params);
@@ -4651,7 +4657,8 @@ Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, 
         case T_SeqScan:
             return create_seqscan_path(root, rel, required_outer);
         case T_IndexScan:
-        case T_IndexOnlyScan: {
+        case T_IndexOnlyScan:
+        case T_AnnIndexScan: {
             IndexPath* ipath = (IndexPath*)path;
             IndexPath* newpath = makeNode(IndexPath);
 

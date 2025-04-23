@@ -286,8 +286,8 @@ WHERE p2.opfmethod = p1.oid AND p3.amprocfamily = p2.oid AND
            p4.amprocrighttype = p3.amprocrighttype)
     NOT BETWEEN
       (CASE WHEN p1.amname IN ('gist', 'gin') THEN p1.amsupport - 1
-            WHEN p1.amname IN ('btree', 'ubtree', 'hnsw') THEN p1.amsupport - 2
-            WHEN p1.amname = 'ivfflat' THEN p1.amsupport - 3
+            WHEN p1.amname IN ('btree', 'ubtree') THEN p1.amsupport - 2
+            WHEN p1.amname IN ('ivfflat', 'hnsw') THEN p1.amsupport - 3
             ELSE p1.amsupport END)
       AND p1.amsupport;
 

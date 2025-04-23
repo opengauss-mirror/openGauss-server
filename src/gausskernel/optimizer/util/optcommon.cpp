@@ -279,6 +279,14 @@ void GetPlanNodePlainText(
             *pt_operation = "BITMAP";
             *pname = *sname = *pt_options = "CStore Index Or";
             break;
+        case T_AnnIndexScan:
+            *pt_operation = "INDEX";
+            if (((AnnIndexScan*)plan)->scan.isPartTbl) {
+                *pname = *sname = *pt_options = "Partitioned Ann Index Scan";
+            } else {
+                *pname = *sname = *pt_options = "Ann Index Scan";
+            }
+            break;
         case T_TidScan:
             *pt_operation = "TABLE ACCESS";
             if (((Scan*)plan)->isPartTbl)

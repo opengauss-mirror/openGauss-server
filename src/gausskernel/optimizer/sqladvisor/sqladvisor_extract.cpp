@@ -233,6 +233,19 @@ static List* extractNodeIndexOnlyScan(Plan* plan, List* ancestors, List* rtable,
     return resSubplan;
 }
 
+static List* extractNodeAnnIndexScan(Plan* plan, List* ancestors, List* rtable, List* subplans)
+{
+    List* resSubplan = NIL;
+    AnnIndexScan* annindexScan = (AnnIndexScan*)plan;
+
+    extractQual(annindexScan->indexqualorig, plan, ancestors, rtable, subplans);
+    extractQual(plan->qual, plan, ancestors, rtable, subplans);
+    resSubplan = extractSubplan((Expr*)annindexScan->scan.plan.targetlist, resSubplan, subplans);
+    resSubplan = extractSubplan((Expr*)annindexScan->scan.plan.qual, resSubplan, subplans);
+    resSubplan = extractSubplan((Expr*)annindexScan->indexqualorig, resSubplan, subplans);
+    return resSubplan;
+}
+
 static List* extractNodeCStoreIndexScan(Plan* plan, List* ancestors, List* rtable, List* subplans)
 {
     List* resSubplan = NIL;
@@ -477,6 +490,9 @@ void extractNode(Plan* plan, List* ancestors, List* rtable, List* subplans)
         } break;
         case T_IndexOnlyScan: {
             resSubplan = extractNodeIndexOnlyScan(plan, ancestors, rtable, subplans);
+        } break;
+        case T_AnnIndexScan: {
+            resSubplan = extractNodeAnnIndexScan(plan, ancestors, rtable, subplans);
         } break;
         case T_BitmapIndexScan: {
             BitmapIndexScan* bitmapIndexScan = (BitmapIndexScan*)plan;

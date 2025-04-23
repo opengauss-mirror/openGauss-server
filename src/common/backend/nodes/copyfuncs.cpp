@@ -897,6 +897,34 @@ static CStoreIndexHeapScan* _copyCStoreIndexHeapScan(const CStoreIndexHeapScan* 
 }
 
 /*
+ * _copyAnnIndexScan
+ */
+static AnnIndexScan* _copyAnnIndexScan(const AnnIndexScan* from)
+{
+    AnnIndexScan* newnode = makeNode(AnnIndexScan);
+
+    /*
+     * copy node superclass fields
+     */
+    CopyScanFields((const Scan*)from, (Scan*)newnode);
+
+    /*
+     * copy remainder of node
+     */
+    COPY_SCALAR_FIELD(indexid);
+    COPY_NODE_FIELD(indexqual);
+    COPY_NODE_FIELD(indexqualorig);
+    COPY_NODE_FIELD(indexorderby);
+    COPY_NODE_FIELD(indexorderbyorig);
+    COPY_SCALAR_FIELD(indexorderdir);
+    COPY_SCALAR_FIELD(is_ustore);
+    COPY_SCALAR_FIELD(selectivity);
+    COPY_SCALAR_FIELD(is_partial);
+
+    return newnode;
+}
+
+/*
  * _copyTidScan
  */
 static TidScan* _copyTidScan(const TidScan* from)
@@ -7459,6 +7487,7 @@ static IndexOptInfo *_copyPartialIndexOptInfo(const IndexOptInfo *from)
     COPY_NODE_FIELD(indextlist);
 
     COPY_SCALAR_FIELD(isGlobal);
+    COPY_SCALAR_FIELD(isAnnIndex);
     COPY_SCALAR_FIELD(crossbucket);
     COPY_SCALAR_FIELD(predOK);
     COPY_SCALAR_FIELD(unique);
@@ -8004,6 +8033,9 @@ void* copyObject(const void* from)
             break;
         case T_BitmapHeapScan:
             retval = _copyBitmapHeapScan((BitmapHeapScan*)from);
+            break;
+        case T_AnnIndexScan:
+            retval = _copyAnnIndexScan((AnnIndexScan*)from);
             break;
         case T_TidScan:
             retval = _copyTidScan((TidScan*)from);

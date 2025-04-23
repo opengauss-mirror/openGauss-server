@@ -1,6 +1,10 @@
 FROM openeuler/openeuler:20.03-lts
 
+<<<<<<<< HEAD:docker/dockerfiles/6.0.0/dockerfile_arm
 ARG VERSION=6.0.1
+========
+ARG VERSION=7.0.0-RC1
+>>>>>>>> 31d2bf421 (openGauss docker更新7.0.0-rc1):docker/dockerfiles/7.0.0-rc1/dockerfile_arm
 
 COPY openGauss-Server-${VERSION}-openEuler20.03-aarch64.tar.bz2 .
 COPY gosu-arm64 /usr/local/bin/gosu

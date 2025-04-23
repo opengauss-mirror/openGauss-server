@@ -152,13 +152,24 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
     char *base = NULL;
     bool isUStore;
     IndexTransInfo *idxXid;
+    bool enablePQ;
+    Size pqcodesSize;
+
+    /* Get enablePQ and pqcodeSize info from metapage */
+    Buffer metaBuf = ReadBuffer(index, HNSW_METAPAGE_BLKNO);
+    LockBuffer(metaBuf, BUFFER_LOCK_SHARE);
+    HnswMetaPage metap = HnswPageGetMeta(BufferGetPage(metaBuf));
+    enablePQ = metap->enablePQ;
+    pqcodesSize = metap->pqcodeSize;
+    UnlockReleaseBuffer(metaBuf);
 
     /* Calculate sizes */
     etupSize = HNSW_ELEMENT_TUPLE_SIZE(VARSIZE_ANY(HnswPtrAccess(base, e->value)));
     ntupSize = HNSW_NEIGHBOR_TUPLE_SIZE(e->level, m);
-    combinedSize = etupSize + ntupSize + sizeof(ItemIdData);
+    combinedSize = etupSize + MAXALIGN(pqcodesSize) + ntupSize + sizeof(ItemIdData);
     maxSize = HNSW_MAX_SIZE;
-    minCombinedSize = etupSize + HNSW_NEIGHBOR_TUPLE_SIZE(0, m) + sizeof(ItemIdData);
+    minCombinedSize = etupSize + MAXALIGN(pqcodesSize) +
+                      HNSW_NEIGHBOR_TUPLE_SIZE(0, m) + sizeof(ItemIdData);
 
     /* Prepare element tuple */
     etup = (HnswElementTuple)palloc0(etupSize);
@@ -212,7 +223,7 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
 
         /* Finally, try space for element only if last page */
         /* Skip if both tuples can fit on the same page */
-        if (combinedSize > maxSize && PageGetFreeSpace(page) >= etupSize &&
+        if (combinedSize > maxSize && PageGetFreeSpace(page) >= etupSize + MAXALIGN(pqcodesSize) &&
             !BlockNumberIsValid(HnswPageGetOpaque(page)->nextblkno)) {
             HnswInsertAppendPage(index, &nbuf, &npage, state, page, building);
             if (isUStore) {
@@ -295,13 +306,21 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
 
     /* Add element and neighbors */
     if (OffsetNumberIsValid(freeOffno)) {
-        if (isUStore) {
+        if (enablePQ || isUStore) {
             ItemId item_id = PageGetItemId(page, e->offno);
             Size aligned_size = MAXALIGN(ItemIdGetLength(item_id));
             unsigned offset = ItemIdGetOffset(item_id);
-            idxXid = (IndexTransInfo *)((char *)page + offset + aligned_size);
-            idxXid->xmin = GetCurrentTransactionId();
-            idxXid->xmax = InvalidTransactionId;
+            char *itemtail = (char *)page + offset + aligned_size;
+            if (enablePQ) {
+                Pointer codePtr = (Pointer)HnswPtrAccess(base, e->pqcodes);
+                errno_t rc = memcpy_s(itemtail, pqcodesSize, codePtr, pqcodesSize);
+                securec_check_c(rc, "\0", "\0");
+            }
+            if (isUStore) {
+                idxXid = (IndexTransInfo *)(itemtail + MAXALIGN(pqcodesSize));
+                idxXid->xmin = GetCurrentTransactionId();
+                idxXid->xmax = InvalidTransactionId;
+            }
         }
         if (!page_index_tuple_overwrite(page, e->offno, (Item)etup, etupSize)) {
             elog(ERROR, "failed to add index item to \"%s\"", RelationGetRelationName(index));
@@ -311,6 +330,13 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
             elog(ERROR, "failed to add index item to \"%s\"", RelationGetRelationName(index));
         }
     } else {
+        if (enablePQ) {
+            ((PageHeader)page)->pd_upper -= MAXALIGN(pqcodesSize);
+            Pointer codePtr = (Pointer)HnswPtrAccess(base, e->pqcodes);
+            errno_t rc = memcpy_s(((char *)page) + ((PageHeader)page)->pd_upper,
+                                  pqcodesSize, codePtr, pqcodesSize);
+            securec_check_c(rc, "\0", "\0");
+        }
         if (isUStore) {
             ((PageHeader)page)->pd_upper -= sizeof(IndexTransInfo);
             idxXid = (IndexTransInfo *)(((char *)page) + ((PageHeader)page)->pd_upper);
@@ -574,6 +600,9 @@ bool HnswInsertTupleOnDisk(Relation index, Datum value, Datum *values, const boo
     Oid collation = index->rd_indcollation[0];
     LOCKMODE lockmode = ShareLock;
     char *base = NULL;
+    PQParams params;
+    bool enablePQ;
+    int dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
 
     /*
      * Get a shared lock. This allows vacuum to ensure no in-flight inserts
@@ -602,8 +631,18 @@ bool HnswInsertTupleOnDisk(Relation index, Datum value, Datum *values, const boo
         entryPoint = HnswGetEntryPoint(index);
     }
 
+    InitPQParamsOnDisk(&params, index, procinfo, dim, &enablePQ);
+
+    Pointer codePtr = NULL;
+    if (enablePQ) {
+        Size codesize = params.pqM * sizeof(uint8);
+        codePtr = (Pointer)HnswAlloc(NULL, codesize);
+    }
+    HnswPtrStore(base, element->pqcodes, codePtr);
+
     /* Find neighbors for element */
-    HnswFindElementNeighbors(base, element, entryPoint, index, procinfo, collation, m, efConstruction, false);
+    HnswFindElementNeighbors(base, element, entryPoint, index, procinfo, collation, m,
+                             efConstruction, false, enablePQ, &params);
 
     /* Update graph on disk */
     UpdateGraphOnDisk(index, procinfo, collation, element, m, efConstruction, entryPoint, building);

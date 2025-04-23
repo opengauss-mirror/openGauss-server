@@ -32,19 +32,6 @@
 #include "utils/selfuncs.h"
 #include "utils/spccache.h"
 
-static relopt_kind ivfflat_relopt_kind;
-static THR_LOCAL bool IvfflatNeedInitialization = true;
-
-/*
- * Initialize index options and variables
- */
-void IvfflatInit(void)
-{
-    ivfflat_relopt_kind = add_reloption_kind();
-    add_int_reloption(ivfflat_relopt_kind, "lists", "Number of inverted lists", IVFFLAT_DEFAULT_LISTS,
-                      IVFFLAT_MIN_LISTS, IVFFLAT_MAX_LISTS);
-}
-
 /*
  * Estimate the cost of an index scan
  */
@@ -125,18 +112,17 @@ static bytea *ivfflatoptions_internal(Datum reloptions, bool validate)
 {
     static const relopt_parse_elt tab[] = {
         {"lists", RELOPT_TYPE_INT, offsetof(IvfflatOptions, lists)},
+        {"enable_pq", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, enablePQ)},
+        {"pq_m", RELOPT_TYPE_INT, offsetof(IvfflatOptions, pqM)},
+        {"pq_ksub", RELOPT_TYPE_INT, offsetof(IvfflatOptions, pqKsub)},
+        {"by_residual", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, byResidual)},
         {"parallel_workers", RELOPT_TYPE_INT, offsetof(StdRdOptions, parallel_workers)}};
 
     relopt_value *options;
     int numoptions;
     IvfflatOptions *rdopts;
 
-    if (IvfflatNeedInitialization) {
-        IvfflatInit();
-        IvfflatNeedInitialization = false;
-    }
-
-    options = parseRelOptions(reloptions, validate, ivfflat_relopt_kind, &numoptions);
+    options = parseRelOptions(reloptions, validate, RELOPT_KIND_IVFFLAT, &numoptions);
     rdopts = (IvfflatOptions *)allocateReloptStruct(sizeof(IvfflatOptions), options, numoptions);
     fillRelOptions((void *)rdopts, sizeof(IvfflatOptions), options, numoptions, validate, tab, lengthof(tab));
 
@@ -218,6 +204,9 @@ Datum ivfflathandler(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflatbuild);
 Datum ivfflatbuild(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "ivfflat index do not support extreme rto.");
+    }
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
     IndexInfo *indexinfo = (IndexInfo *)PG_GETARG_POINTER(2);
@@ -229,6 +218,9 @@ Datum ivfflatbuild(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflatbuildempty);
 Datum ivfflatbuildempty(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "ivfflat index do not support extreme rto.");
+    }
     Relation index = (Relation)PG_GETARG_POINTER(0);
     ivfflatbuildempty_internal(index);
 
@@ -238,6 +230,9 @@ Datum ivfflatbuildempty(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflatinsert);
 Datum ivfflatinsert(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "ivfflat index do not support extreme rto.");
+    }
     Relation rel = (Relation)PG_GETARG_POINTER(0);
     Datum *values = (Datum *)PG_GETARG_POINTER(1);
     bool *isnull = reinterpret_cast<bool *>(PG_GETARG_POINTER(2));
@@ -252,6 +247,9 @@ Datum ivfflatinsert(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflatbulkdelete);
 Datum ivfflatbulkdelete(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "ivfflat index do not support extreme rto.");
+    }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *volatile stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
@@ -264,6 +262,9 @@ Datum ivfflatbulkdelete(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflatvacuumcleanup);
 Datum ivfflatvacuumcleanup(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "ivfflat index do not support extreme rto.");
+    }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     stats = ivfflatvacuumcleanup_internal(info, stats);

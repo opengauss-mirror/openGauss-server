@@ -43,22 +43,54 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
     int m;
     HnswElement entryPoint;
     char *base = NULL;
-
+    PQParams *params = &so->params;
+    bool enablePQ = so->enablePQ;
+    int hnswEfSearch = so->length;
+    int pqMode = so->pqMode;
     /* Get m and entry point */
     HnswGetMetaPageInfo(index, &m, &entryPoint);
 
     if (entryPoint == NULL)
         return NIL;
 
-    ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false, scan));
+    if (enablePQ) {
+        uint8* qPQCode;
+        PQSearchInfo pqinfo;
+        float *query = DatumGetVector(q)->x;
 
-    for (int lc = entryPoint->level; lc >= 1; lc--) {
-        w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, scan);
-        ep = w;
+        pqinfo.params = *params;
+        if (pqMode == HNSW_PQMODE_SDC) {
+            qPQCode = (uint8 *)palloc(params->pqM * sizeof(uint8));
+            ComputeVectorPQCode(query, params, qPQCode);
+            pqinfo.qPQCode = qPQCode;
+            pqinfo.pqDistanceTable = index->pqDistanceTable;
+        } else {
+            pqinfo.qPQCode = NULL;
+            pqinfo.pqDistanceTable = (float*) palloc(params->pqM * params->pqKsub * sizeof(float));
+            GetPQDistanceTableAdc(query, params, pqinfo.pqDistanceTable);
+        }
+
+        pqinfo.pqMode = pqMode;
+        pqinfo.lc = entryPoint->level;
+        ep = list_make1(HnswEntryCandidate(
+                        base, entryPoint, q, index, procinfo, collation, false, NULL, enablePQ, &pqinfo));
+        for (int lc = entryPoint->level; lc >= 1; lc--) {
+            pqinfo.lc = lc;
+            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, NULL, enablePQ, &pqinfo);
+            ep = w;
+        }
+        pqinfo.lc = 0;
+        w = HnswSearchLayer(base, q, ep, hnswEfSearch, 0, index, procinfo, collation, m,
+                            false, NULL, NULL, enablePQ, &pqinfo);
+    } else {
+        ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false));
+        for (int lc = entryPoint->level; lc >= 1; lc--) {
+            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL);
+            ep = w;
+        }
+        w = HnswSearchLayer(base, q, ep, hnswEfSearch, 0, index, procinfo, collation, m, false, NULL);
     }
-
-    int hnsw_ef_search = u_sess->datavec_ctx.hnsw_ef_search;
-    return HnswSearchLayer(base, q, ep, hnsw_ef_search, 0, index, procinfo, collation, m, false, NULL, scan);
+    return w;
 }
 
 /*
@@ -94,6 +126,8 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
 {
     IndexScanDesc scan;
     HnswScanOpaque so;
+    PQParams params;
+    int dim;
 
     scan = RelationGetIndexScan(index, nkeys, norderbys);
 
@@ -110,6 +144,11 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
     so->procinfo = index_getprocinfo(index, 1, HNSW_DISTANCE_PROC);
     so->normprocinfo = HnswOptionalProcInfo(index, HNSW_NORM_PROC);
     so->collation = index->rd_indcollation[0];
+
+    dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
+    so->pqMode = HNSW_PQMODE_DEFAULT;
+    InitPQParamsOnDisk(&params, index, so->procinfo, dim, &so->enablePQ);
+    so->params = params;
 
     scan->opaque = so;
 
@@ -142,6 +181,20 @@ void hnswrescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey or
     }
 }
 
+void check_length(HnswScanOpaque so, IndexScanDesc scan)
+{
+    if (list_length(so->w) == 0) {
+        LockPage(scan->indexRelation, HNSW_SCAN_LOCK, ShareLock);
+        so->length = so->length * 2;
+        so->w = GetScanItems(scan, so->value);
+
+        /* Release shared lock */
+        UnlockPage(scan->indexRelation, HNSW_SCAN_LOCK, ShareLock);
+        for (int i = 0; i < so->currentLoc; i++) {
+            so->w = list_delete_first(so->w);
+        }
+    }
+}
 /*
  * Fetch the next tuple in the given scan
  */
@@ -158,7 +211,8 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
 
     if (so->first) {
         Datum value;
-
+        so->length = scan->count + u_sess->datavec_ctx.hnsw_ef_search;
+        so->currentLoc = 0;
         /* Count index scan for stats */
         pgstat_count_index_scan(scan->indexRelation);
 
@@ -173,7 +227,7 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
 
         /* Get scan value */
         value = GetScanValue(scan);
-
+        so->value = value;
         /*
          * Get a shared lock. This allows vacuum to ensure no in-flight scans
          * before marking tuples as deleted.
@@ -188,7 +242,7 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
         so->first = false;
 
     }
-
+    check_length(so, scan);
     while (list_length(so->w) > 0) {
         char *base = NULL;
         HnswCandidate *hc = (HnswCandidate *)linitial(so->w);
@@ -198,15 +252,27 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
         /* Move to next element if no valid heap TIDs */
         if (element->heaptidsLength == 0) {
             so->w = list_delete_first(so->w);
+            if (list_length(so->w) !=0) {
+                continue;
+            }
+        }
+        check_length(so, scan);
+        if (list_length(so->w) == 0) {
             continue;
         }
-
+        hc = (HnswCandidate *)linitial(so->w);
+        element = (HnswElement)HnswPtrAccess(base, hc->element);
+        if (element->heaptidsLength == 0) {
+            so->w = list_delete_first(so->w);
+            continue;
+        }
         heaptid = &element->heaptids[--element->heaptidsLength];
 
         MemoryContextSwitchTo(oldCtx);
 
         scan->xs_ctup.t_self = *heaptid;
         scan->xs_recheck = false;
+        so->currentLoc = so->currentLoc + 1;
         return true;
     }
 

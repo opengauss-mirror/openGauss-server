@@ -56,51 +56,7 @@
 #define STATE_DIMS(x) (ARR_DIMS(x)[0] - 1)
 #define CreateStateDatums(dim) palloc(sizeof(Datum) * ((dim) + 1))
 
-#if defined(USE_TARGET_CLONES) && !defined(__FMA__)
-#define VECTOR_TARGET_CLONES __attribute__((target_clones("default", "fma")))
-#else
-#define VECTOR_TARGET_CLONES
-#endif
-
 #define MarkGUCPrefixReserved(x) EmitWarningsOnPlaceholders(x)
-
-uint32 datavec_index;
-
-void set_extension_index(uint32 index)
-{
-    datavec_index = index;
-}
-
-datavec_session_context *get_session_context()
-{
-    if (u_sess->attr.attr_common.extension_session_vars_array[datavec_index] == NULL) {
-        init_session_vars();
-    }
-    return (datavec_session_context *)u_sess->attr.attr_common.extension_session_vars_array[datavec_index];
-}
-
-void init_session_vars(void)
-{
-    RepallocSessionVarsArrayIfNecessary();
-    datavec_session_context *ctx =
-        (datavec_session_context *)MemoryContextAllocZero(u_sess->self_mem_cxt, sizeof(datavec_session_context));
-    u_sess->attr.attr_common.extension_session_vars_array[datavec_index] = ctx;
-
-    ctx->hnsw_ef_search = 0;
-    ctx->ivfflat_probes = 0;
-
-    DefineCustomIntVariable("hnsw.ef_search", "Sets the size of the dynamic candidate list for search",
-                            "Valid range is 1..1000.", &(get_session_context()->hnsw_ef_search), HNSW_DEFAULT_EF_SEARCH,
-                            HNSW_MIN_EF_SEARCH, HNSW_MAX_EF_SEARCH, PGC_USERSET, 0, NULL, NULL, NULL);
-
-    MarkGUCPrefixReserved("hnsw");
-
-    DefineCustomIntVariable("ivfflat.probes", "Sets the number of probes", "Valid range is 1..lists.",
-                            &(get_session_context()->ivfflat_probes), IVFFLAT_DEFAULT_PROBES, IVFFLAT_MIN_LISTS,
-                            IVFFLAT_MAX_LISTS, PGC_USERSET, 0, NULL, NULL, NULL);
-
-    MarkGUCPrefixReserved("ivfflat");
-}
 
 /*
  * Ensure same dimensions
@@ -533,6 +489,135 @@ Datum vector_to_float4(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Convert vector to int4[]
+ */
+PGDLLEXPORT PG_FUNCTION_INFO_V1(vector_to_int4);
+Datum vector_to_int4(PG_FUNCTION_ARGS)
+{
+    Vector *vec = PG_GETARG_VECTOR_P(0);
+    Datum *datums;
+    ArrayType *result;
+
+    datums = (Datum *)palloc(sizeof(Datum) * vec->dim);
+
+    for (int i = 0; i < vec->dim; i++) {
+        datums[i] = DirectFunctionCall1(ftoi4, Float4GetDatum(vec->x[i]));
+    }
+
+    /* Use TYPALIGN_INT for int4 */
+    result = construct_array(datums, vec->dim, INT4OID, sizeof(int4), true, TYPALIGN_INT);
+
+    pfree(datums);
+
+    PG_RETURN_POINTER(result);
+}
+
+/*
+ * Convert vector to float8[]
+ */
+PGDLLEXPORT PG_FUNCTION_INFO_V1(vector_to_float8);
+Datum vector_to_float8(PG_FUNCTION_ARGS)
+{
+    Vector *vec = PG_GETARG_VECTOR_P(0);
+    Datum *datums;
+    ArrayType *result;
+
+    datums = (Datum *)palloc(sizeof(Datum) * vec->dim);
+
+    for (int i = 0; i < vec->dim; i++) {
+        datums[i] = Float8GetDatum(vec->x[i]);
+    }
+
+    /* Use TYPALIGN_DOUBLE for float8 */
+    result = construct_array(datums, vec->dim, FLOAT8OID, sizeof(float8), FLOAT8PASSBYVAL, TYPALIGN_DOUBLE);
+
+    pfree(datums);
+
+    PG_RETURN_POINTER(result);
+}
+
+/*
+ * Convert vector to numeric[]
+ */
+PGDLLEXPORT PG_FUNCTION_INFO_V1(vector_to_numeric);
+Datum vector_to_numeric(PG_FUNCTION_ARGS)
+{
+    Vector *vec = PG_GETARG_VECTOR_P(0);
+    Datum *datums;
+    ArrayType *result;
+
+    datums = (Datum *)palloc(sizeof(Datum) * vec->dim);
+
+    for (int i = 0; i < vec->dim; i++) {
+        Datum numericVal;
+        Numeric typmod_numericVal;
+        numericVal = DirectFunctionCall1(float4_numeric, Float4GetDatum(vec->x[i]));
+        datums[i] = NumericGetDatum(numericVal);
+    }
+
+    /* Use TYPALIGN_INT for numeric */
+    result = construct_array(datums, vec->dim, NUMERICOID, -1, false, TYPALIGN_INT);
+
+    pfree(datums);
+
+    PG_RETURN_POINTER(result);
+}
+
+/*
+ * Convert vector to text[]
+ */
+PGDLLEXPORT PG_FUNCTION_INFO_V1(vector_to_text);
+Datum vector_to_text(PG_FUNCTION_ARGS)
+{
+    Vector *vec = PG_GETARG_VECTOR_P(0);
+    Datum *datums;
+    ArrayType *result;
+    char* tmp = nullptr;
+
+    datums = (Datum *)palloc(sizeof(Datum) * vec->dim);
+
+    for (int i = 0; i < vec->dim; i++) {
+        tmp = DatumGetCString(DirectFunctionCall1(float4out, Float4GetDatum(vec->x[i])));
+        datums[i] = DirectFunctionCall1(textin, CStringGetDatum(tmp));
+        pfree_ext(tmp);
+    }
+
+    /* Use TYPALIGN_INT for text */
+    result = construct_array(datums, vec->dim, TEXTOID, -1, false, TYPALIGN_INT);
+
+    pfree(datums);
+
+    PG_RETURN_POINTER(result);
+}
+
+/*
+ * Convert vector to varchar[]
+ */
+PGDLLEXPORT PG_FUNCTION_INFO_V1(vector_to_varchar);
+Datum vector_to_varchar(PG_FUNCTION_ARGS)
+{
+    Vector *vec = PG_GETARG_VECTOR_P(0);
+    Datum *datums;
+    ArrayType *result;
+    char* tmp = nullptr;
+
+    datums = (Datum *)palloc(sizeof(Datum) * vec->dim);
+
+    for (int i = 0; i < vec->dim; i++) {
+        tmp = DatumGetCString(DirectFunctionCall1(float4out, Float4GetDatum(vec->x[i])));
+        datums[i] = DirectFunctionCall3(varcharin, CStringGetDatum(tmp), ObjectIdGetDatum(0), Int32GetDatum(-1));
+        pfree_ext(tmp);
+    }
+
+    /* Use TYPALIGN_INT for varchar */
+    result = construct_array(datums, vec->dim, VARCHAROID, -1, false, TYPALIGN_INT);
+
+    pfree(datums);
+
+    PG_RETURN_POINTER(result);
+}
+
+/*
  * Convert half vector to vector
  */
 PGDLLEXPORT PG_FUNCTION_INFO_V1(halfvec_to_vector);
@@ -566,40 +651,63 @@ inline void prefetch_L1(const void *address)
 }
 
 #ifdef __aarch64__
-VECTOR_TARGET_CLONES static float
-VectorL2SquaredDistance(int size, float *a, float *b)
+static float L2SquaredDistanceRef(int dim, float *ax, float *bx)
 {
-    float32x4_t sum = vdupq_n_f32(0.0f);
-    int prefetch_len = 8;
-    int batch_num = 4;
-    int i;
-    for (i = 0; i < size - (size % batch_num); i += batch_num) {
-        prefetch_L1(a + i + prefetch_len);
-        prefetch_L1(b + i + prefetch_len);
-        float32x4_t va = vld1q_f32(a + i);
-        float32x4_t vb = vld1q_f32(b + i);
-        float32x4_t diff = vsubq_f32(va, vb);
-        sum = vfmaq_f32(sum, diff, diff);
+    float distance = 0.0f;
+
+    for (int i = 0; i < dim; i++) {
+        float diff = ax[i] - bx[i];
+        distance += diff * diff;
     }
 
-    float scalar_sum = 0.0f;
-    if (size % batch_num > 0) {
-        int remaining_size = size % batch_num;
-        for (int j = 0; j < remaining_size; ++j) {
-            prefetch_L1(a + i + j);
-            prefetch_L1(b + i + j);
-            float value_a = a[i + j];
-            float value_b = b[i + j];
-            float diff = value_a - value_b;
-            float sq_diff = diff * diff;
-            scalar_sum += sq_diff;
-        }
+    return distance;
+}
+
+VECTOR_TARGET_CLONES float
+VectorL2SquaredDistance(int dim, float *ax, float *bx)
+{
+    // 128 bit register = float 32*4
+    float32x4_t r1 = vdupq_n_f32(0.0);
+    float32x4_t r2 = vdupq_n_f32(0.0);
+    float32x4_t r3 = vdupq_n_f32(0.0);
+    float32x4_t r4 = vdupq_n_f32(0.0);
+    int i = 0;
+    float* pta = ax;
+    float* ptb = bx;
+    int batch1 = 16;
+    int batch2 = 4;
+    int rest = batch2 - 1;
+    for (; i + batch1 <= dim; i += batch1, pta += batch1, ptb += batch1) {
+        float32x4x4_t packdata_a = vld1q_f32_x4(pta);
+        float32x4x4_t packdata_b = vld1q_f32_x4(ptb);
+
+        float32x4_t diff0 = vsubq_f32(packdata_a.val[0], packdata_b.val[0]);
+        float32x4_t diff1 = vsubq_f32(packdata_a.val[1], packdata_b.val[1]);
+        float32x4_t diff2 = vsubq_f32(packdata_a.val[2], packdata_b.val[2]);
+        float32x4_t diff3 = vsubq_f32(packdata_a.val[3], packdata_b.val[3]);
+
+        r1 = vfmaq_f32(r1, diff0, diff0);
+        r2 = vfmaq_f32(r2, diff1, diff1);
+        r3 = vfmaq_f32(r3, diff2, diff2);
+        r4 = vfmaq_f32(r4, diff3, diff3);
     }
 
-    sum = vpaddq_f32(sum, sum);
-    sum = vpaddq_f32(sum, sum);
-    float res = vgetq_lane_f32(sum, 0);
-    return res + scalar_sum;
+    for (; i + batch2 <= dim; i += batch2, pta += batch2, ptb += batch2) {
+        float32x4_t data_a = vld1q_f32(pta);
+        float32x4_t data_b = vld1q_f32(ptb);
+        float32x4_t diff = vsubq_f32(data_a, data_b);
+        r1 = vfmaq_f32(r1, diff, diff);
+    }
+
+    r1 = vpaddq_f32(r1, r2);
+    r2 = vpaddq_f32(r3, r4);
+    r1 = vpaddq_f32(r1, r2);
+
+    float distance = vaddvq_f32(r1);
+    if (dim & rest) {
+        distance += L2SquaredDistanceRef(dim - i, ax + i, bx + i);
+    }
+    return distance;
 }
 #elif defined(__x86_64__)
 static inline __m128 masked_read(int d, const float *x)
@@ -620,7 +728,7 @@ static inline __m128 masked_read(int d, const float *x)
     }
     return _mm_load_ps(buf);
 }
-VECTOR_TARGET_CLONES static float
+VECTOR_TARGET_CLONES float
 VectorL2SquaredDistance(int dim, float *ax, float *bx)
 {
     float* x = (float*)ax;
@@ -667,7 +775,7 @@ VectorL2SquaredDistance(int dim, float *ax, float *bx)
 }
 #else
 
-VECTOR_TARGET_CLONES static float VectorL2SquaredDistance(int dim, float *ax, float *bx)
+VECTOR_TARGET_CLONES float VectorL2SquaredDistance(int dim, float *ax, float *bx)
 {
     float distance = 0.0;
 
@@ -713,7 +821,7 @@ Datum vector_l2_squared_distance(PG_FUNCTION_ARGS)
 }
 
 #ifdef __aarch64__
-VECTOR_TARGET_CLONES static float
+VECTOR_TARGET_CLONES float
 VectorInnerProduct(int dim, float *ax, float *bx)
 {
     float dis = 0.0f;
@@ -742,7 +850,7 @@ VectorInnerProduct(int dim, float *ax, float *bx)
 }
 #else
 
-VECTOR_TARGET_CLONES static float VectorInnerProduct(int dim, float *ax, float *bx)
+VECTOR_TARGET_CLONES float VectorInnerProduct(int dim, float *ax, float *bx)
 {
     float distance = 0.0;
 
@@ -1114,6 +1222,14 @@ Datum subvector(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("vector must have at least 1 dimension")));
     }
 
+    /* Indexing starts at 1, like substring */
+    if (start < 1) {
+        ereport(WARNING, (errmsg("when the start position is less than 1, it will begin with the first dimension")));
+        start = 1;
+    } else if (start > a->dim) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("vector must have at least 1 dimension")));
+    }
+
     /*
      * Check if (start + count > a->dim), avoiding integer overflow. a->dim
      * and count are both positive, so a->dim - count won't overflow.
@@ -1122,13 +1238,6 @@ Datum subvector(PG_FUNCTION_ARGS)
         end = a->dim + 1;
     } else {
         end = start + count;
-    }
-
-    /* Indexing starts at 1, like substring */
-    if (start < 1) {
-        start = 1;
-    } else if (start > a->dim) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("vector must have at least 1 dimension")));
     }
 
     dim = end - start;
@@ -1430,6 +1539,176 @@ Datum sparsevec_to_vector(PG_FUNCTION_ARGS)
     PG_RETURN_POINTER(result);
 }
 
+#ifdef __aarch64__
+void VectorMadd(size_t n, const float *ax, float bf, const float *bx, float *cx)
+{
+    const size_t nSimd = n - (n & 3);
+    const float32x4_t bfv = vdupq_n_f32(bf);
+    size_t i;
+
+    for (i = 0; i < nSimd; i += 4) {
+        const float32x4_t ai = vld1q_f32(ax + i);
+        const float32x4_t bi = vld1q_f32(bx + i);
+        const float32x4_t ci = vfmaq_f32(ai, bfv, bi);
+        vst1q_f32(cx + i, ci);
+    }
+    for (; i < n; ++i) {
+        cx[i] = ax[i] + bf * bx[i];
+    }
+}
+#else
+void VectorMadd(size_t n, const float *ax, float bf, const float *bx, float *cx)
+{
+    for (size_t i = 0; i < n; i++) {
+        cx[i] = ax[i] + bf * bx[i];
+    }
+}
+#endif
+
+#ifdef __aarch64__
+struct ElementOpL2 {
+    static float32x4_t op(float32x4_t x, float32x4_t y) {
+        float32x4_t tmp = vsubq_f32(x, y);
+        return vmulq_f32(tmp, tmp);
+    }
+};
+
+struct ElementOpIP {
+    static float32x4_t op(float32x4_t x, float32x4_t y) {
+        return vmulq_f32(x, y);
+    }
+};
+
+template <class ElementOp>
+void VectorOpNYD4(size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    float32x4_t x0 = vld1q_f32(x);
+    float *y;
+    __builtin_prefetch(pqTable, 0, 3);
+
+    size_t i;
+    for (i = 0; i < ny; i++) {
+        y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
+        float32x4_t accu = ElementOp::op(x0, vld1q_f32(y));
+        dis[i] = vaddvq_f32(accu);
+    }
+}
+
+template <class ElementOp>
+void VectorOpNYD8(size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    /* neon support 128 bit, float is 32 bit, 4 float one batch */
+    int batch = 4;
+    float32x4_t x0 = vld1q_f32(x);
+    float32x4_t x1 = vld1q_f32(x + batch);
+    float *y;
+    __builtin_prefetch(pqTable, 0, 3);
+
+    size_t i;
+    for (i = 0; i < ny; i++) {
+        y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
+        float32x4_t accu = ElementOp::op(x0, vld1q_f32(y));
+        y += batch;
+        accu = vaddq_f32(accu, ElementOp::op(x1, vld1q_f32(y)));
+        dis[i] = vaddvq_f32(accu);
+    }
+}
+
+template <class ElementOp>
+void VectorOpNYD16(size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    /* neon support 128 bit, float is 32 bit, 4 float one batch */
+    int batch = 4;
+    float32x4_t x0 = vld1q_f32(x);
+    float32x4_t x1 = vld1q_f32(x + batch);
+    float32x4_t x2 = vld1q_f32(x + batch * 2);
+    float32x4_t x3 = vld1q_f32(x + batch * 3);
+    float *y;
+    __builtin_prefetch(pqTable, 0, 3);
+
+    size_t i;
+    for (i = 0; i < ny; i++) {
+        y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
+        float32x4_t accu = ElementOp::op(x0, vld1q_f32(y));
+        y += batch;
+        accu = vaddq_f32(accu, ElementOp::op(x1, vld1q_f32(y)));
+        y += batch;
+        accu = vaddq_f32(accu, ElementOp::op(x2, vld1q_f32(y)));
+        y += batch;
+        accu = vaddq_f32(accu, ElementOp::op(x3, vld1q_f32(y)));
+        dis[i] = vaddvq_f32(accu);
+    }
+}
+#endif
+
+void VectorL2SquaredDistanceNYRef(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    float *y;
+    for (size_t i = 0; i < ny; i++) {
+        y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
+        dis[i] = VectorL2SquaredDistance(d, x, y);
+    }
+}
+
+#ifdef __aarch64__
+void VectorL2SquaredDistanceNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+#define DISPATCH(dval) \
+    case dval: \
+        VectorOpNYD##dval<ElementOpL2>(ny, x, pqTable, subSize, offset, dis); \
+        return;
+
+    switch (d) {
+        DISPATCH(4)
+        DISPATCH(8)
+        DISPATCH(16)
+        default:
+            VectorL2SquaredDistanceNYRef(d, ny, x, pqTable, subSize, offset, dis);
+            return;
+    }
+#undef DISPATCH
+}
+#else
+void VectorL2SquaredDistanceNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    VectorL2SquaredDistanceNYRef(d, ny, x, pqTable, subSize, offset, dis);
+}
+#endif
+
+void VectorInnerProductNYRef(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    float *y;
+    for (size_t i = 0; i < ny; i++) {
+        y = DatumGetVector(pqTable + (offset + i) * subSize)->x;
+        dis[i] = VectorInnerProduct(d, x, y);
+    }
+}
+
+#ifdef __aarch64__
+void VectorInnerProductNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+#define DISPATCH(dval) \
+    case dval: \
+        VectorOpNYD##dval<ElementOpIP>(ny, x, pqTable, subSize, offset, dis); \
+        return;
+
+    switch (d) {
+        DISPATCH(4)
+        DISPATCH(8)
+        DISPATCH(16)
+        default:
+            VectorInnerProductNYRef(d, ny, x, pqTable, subSize, offset, dis);
+            return;
+    }
+#undef DISPATCH
+}
+#else
+void VectorInnerProductNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis)
+{
+    VectorInnerProductNYRef(d, ny, x, pqTable, subSize, offset, dis);
+}
+#endif
+
 /*
  * WAL-log a range of blocks in a relation.
  *
@@ -1507,7 +1786,7 @@ void LogNewpageRange(Relation rel, ForkNumber forknum, BlockNumber startblk, Blo
             XLogRegisterBuffer(i, bufpack[i], flags);
         }
 
-        recptr = XLogInsert(RM_XLOG_ID, XLOG_FPI);
+        recptr = XLogInsert(RM_XLOG_ID, XLOG_FPI | XLOG_MERGE_RECORD);
 
         for (i = 0; i < nbufs; i++) {
             PageSetLSN(BufferGetPage(bufpack[i]), recptr);

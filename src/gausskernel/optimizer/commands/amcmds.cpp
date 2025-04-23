@@ -188,7 +188,7 @@ void RemoveAccessMethodById(Oid amOid)
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
             errmsg("must be superuser to drop an access method.")));
 
-    if (IsSystemObjOid(amOid) && amOid != HNSW_AM_OID)
+    if (IsSystemObjOid(amOid) && !u_sess->attr.attr_common.IsInplaceUpgrade)
         ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
             errmsg("amOid %u is a builtin access method, it can not be droped", amOid)));
 

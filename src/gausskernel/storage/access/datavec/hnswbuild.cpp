@@ -32,9 +32,11 @@
 #include "access/datavec/hnsw.h"
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/procarray.h"
 #include "tcop/tcopprot.h"
 #include "utils/datum.h"
 #include "utils/memutils.h"
+#include "commands/vacuum.h"
 
 #include "pgstat.h"
 
@@ -46,6 +48,396 @@
 #define PROGRESS_CREATEIDX_TUPLES_DONE 0
 
 #define GENERATIONCHUNK_RAWSIZE (SIZEOF_SIZE_T + SIZEOF_VOID_P * 2)
+
+/*
+ * Add sample
+ */
+static void AddSample(Datum *values, HnswBuildState *buildstate)
+{
+    VectorArray samples = buildstate->samples;
+    int targsamples = samples->maxlen;
+
+    /* Detoast once for all calls */
+    Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
+
+    if (buildstate->kmeansnormprocinfo != NULL) {
+        if (!HnswCheckNorm(buildstate->kmeansnormprocinfo, buildstate->collation, value)) {
+            return;
+        }
+
+        value = HnswNormValue(buildstate->typeInfo, buildstate->collation, value);
+    }
+
+    if (samples->length < targsamples) {
+        VectorArraySet(samples, samples->length, DatumGetPointer(value));
+        samples->length++;
+    } else {
+        if (buildstate->rowstoskip < 0) {
+            buildstate->rowstoskip = anl_get_next_S(samples->length, targsamples, &buildstate->rstate);
+        }
+
+        if (buildstate->rowstoskip <= 0) {
+            int k = (int) (targsamples * anl_random_fract());
+            Assert(k >= 0 && k < targsamples);
+            VectorArraySet(samples, k, DatumGetPointer(value));
+        }
+
+        buildstate->rowstoskip -= 1;
+    }
+}
+
+/*
+ * Callback for sampling
+ */
+static void SampleCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values,
+                           const bool *isnull, bool tupleIsAlive, void *state)
+{
+    HnswBuildState *buildstate = (HnswBuildState *) state;
+    MemoryContext oldCtx;
+
+    /* Skip nulls */
+    if (isnull[0]) {
+        return;
+    }
+
+    /* Use memory context since detoast can allocate */
+    oldCtx = MemoryContextSwitchTo(buildstate->tmpCtx);
+
+    /* Add sample */
+    AddSample(values, buildstate);
+
+    /* Reset memory context */
+    MemoryContextSwitchTo(oldCtx);
+    MemoryContextReset(buildstate->tmpCtx);
+}
+
+/*
+ * Sample rows with same logic as ANALYZE
+ */
+static void SampleRows(HnswBuildState *buildstate)
+{
+    int targsamples = buildstate->samples->maxlen;
+    BlockNumber totalblocks = RelationGetNumberOfBlocks(buildstate->heap);
+
+    buildstate->rowstoskip = -1;
+
+    BlockSampler_Init(&buildstate->bs, totalblocks, targsamples);
+
+    buildstate->rstate = anl_init_selection_state(targsamples);
+    while (BlockSampler_HasMore(&buildstate->bs)) {
+        BlockNumber targblock = BlockSampler_Next(&buildstate->bs);
+
+        tableam_index_build_scan(buildstate->heap, buildstate->index, buildstate->indexInfo,
+                                 false, SampleCallback, (void *) buildstate, NULL, targblock, 1);
+    }
+}
+
+PQParams *InitPQParamsInMemory(HnswBuildState *buildstate)
+{
+    PQParams *params = (PQParams*)palloc(sizeof(PQParams));
+    params->pqM = buildstate->pqM;
+    params->pqKsub = buildstate->pqKsub;
+    params->funcType = getPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
+    params->dim = buildstate->dimensions;
+    params->subItemSize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
+    params->pqTable = buildstate->pqTable;
+    return params;
+}
+
+static void ComputeHnswPQ(HnswBuildState *buildstate)
+{
+    MemoryContext pqCtx = AllocSetContextCreate(CurrentMemoryContext,
+                                                "Hnsw PQ temporary context",
+                                                ALLOCSET_DEFAULT_SIZES);
+    MemoryContext oldCtx = MemoryContextSwitchTo(pqCtx);
+
+    ComputePQTable(buildstate->samples, buildstate->params);
+    MemoryContextSwitchTo(oldCtx);
+    MemoryContextDelete(pqCtx);
+}
+
+BlockNumber BlockSamplerGetBlock(BlockSampler bs)
+{
+    if (BlockSampler_HasMore(bs)) {
+        return BlockSampler_Next(bs);
+    }
+    return InvalidBlockNumber;
+}
+
+static void EstimateRows(Relation onerel, double *totalrows)
+{
+    int64 targrows = HNSWPQ_DEFAULT_TARGET_ROWS * abs(default_statistics_target);
+    int64 numrows = 0;      /* # rows now in reservoir */
+    double samplerows = 0;  /* total # rows collected */
+    double liverows = 0;    /* # live rows seen */
+    double deadrows = 0;    /* # dead rows seen */
+    double rowstoskip = -1; /* -1 means not set yet */
+    BlockNumber totalblocks;
+    TransactionId OldestXmin;
+    BlockSamplerData bs;
+    double rstate;
+    BlockNumber targblock = 0;
+    BlockNumber sampleblock = 0;
+    bool estimateTableRownum = false;
+    bool isAnalyzing = true;
+
+    totalblocks = RelationGetNumberOfBlocks(onerel);
+    OldestXmin = GetOldestXmin(onerel);
+    /* Prepare for sampling block numbers */
+    BlockSampler_Init(&bs, totalblocks, targrows);
+    /* Prepare for sampling rows */
+    rstate = anl_init_selection_state(targrows);
+
+    while (InvalidBlockNumber != (targblock = BlockSamplerGetBlock(&bs))) {
+        Buffer targbuffer;
+        Page targpage;
+        OffsetNumber targoffset, maxoffset;
+
+        vacuum_delay_point();
+        sampleblock++;
+
+        targbuffer = ReadBufferExtended(onerel, MAIN_FORKNUM, targblock, RBM_NORMAL, NULL);
+        LockBuffer(targbuffer, BUFFER_LOCK_SHARE);
+        targpage = BufferGetPage(targbuffer);
+
+        if (RelationIsUstoreFormat(onerel)) {
+            for (int i = 0; i < onerel->rd_att->natts; i++) {
+                if (onerel->rd_att->attrs[i].attcacheoff >= 0) {
+                    onerel->rd_att->attrs[i].attcacheoff = -1;
+                }
+            }
+
+            TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(onerel), false, onerel->rd_tam_ops);
+            maxoffset = UHeapPageGetMaxOffsetNumber(targpage);
+
+            /* Inner loop over all tuples on the selected page */
+            for (targoffset = FirstOffsetNumber; targoffset <= maxoffset; targoffset++) {
+                RowPtr *lp = UPageGetRowPtr(targpage, targoffset);
+                bool sampleIt = false;
+                TransactionId xid;
+                UHeapTuple targTuple;
+                if (RowPtrIsDeleted(lp)) {
+                    deadrows += 1;
+                    continue;
+                }
+                if (!RowPtrIsNormal(lp)) {
+                    if (RowPtrIsDeleted(lp)) {
+                        deadrows += 1;
+                    }
+                    continue;
+                }
+
+                if (!RowPtrHasStorage(lp)) {
+                    continue;
+                }
+
+                /* Allocate memory for target tuple. */
+                targTuple = UHeapGetTuple(onerel, targbuffer, targoffset);
+
+                switch (UHeapTupleSatisfiesOldestXmin(targTuple, OldestXmin,
+                    targbuffer, true, &targTuple, &xid, NULL, onerel)) {
+                    case UHEAPTUPLE_LIVE:
+                        sampleIt = true;
+                        liverows += 1;
+                        break;
+
+                    case UHEAPTUPLE_DEAD:
+                    case UHEAPTUPLE_RECENTLY_DEAD:
+                        /* Count dead and recently-dead rows */
+                        deadrows += 1;
+                        break;
+
+                    case UHEAPTUPLE_INSERT_IN_PROGRESS:
+                        if (TransactionIdIsCurrentTransactionId(xid)) {
+                            sampleIt = true;
+                            liverows += 1;
+                        }
+                        break;
+
+                    case UHEAPTUPLE_DELETE_IN_PROGRESS:
+                        if (TransactionIdIsCurrentTransactionId(xid)) {
+                            deadrows += 1;
+                        } else {
+                            liverows += 1;
+                        }
+                        break;
+
+                    default:
+                        elog(ERROR, "unexpected UHeapTupleSatisfiesOldestXmin result");
+                        break;
+                }
+
+                if (sampleIt) {
+                    ExecStoreTuple(targTuple, slot, InvalidBuffer, false);
+
+                    if (numrows >= targrows) {
+                        if (rowstoskip < 0) {
+                            rowstoskip = anl_get_next_S(samplerows, targrows, &rstate);
+                        }
+                        if (rowstoskip <= 0) {
+                            int64 k = (int64)(targrows * anl_random_fract());
+
+                            AssertEreport(k >= 0 && k < targrows, MOD_OPT,
+                                "Index number out of range when replacing tuples.");
+                        }
+                        rowstoskip -= 1;
+                    }
+                    samplerows += 1;
+                }
+
+                /* Free memory for target tuple. */
+                if (targTuple) {
+                    UHeapFreeTuple(targTuple);
+                }
+            }
+
+            /* Now release the lock and pin on the page */
+            ExecDropSingleTupleTableSlot(slot);
+
+            for (int i = 0; i < onerel->rd_att->natts; i++) {
+                if (onerel->rd_att->attrs[i].attcacheoff >= 0) {
+                    onerel->rd_att->attrs[i].attcacheoff = -1;
+                }
+            }
+
+            goto uheap_end;
+        }
+
+        maxoffset = PageGetMaxOffsetNumber(targpage);
+        /* Inner loop over all tuples on the selected page */
+        for (targoffset = FirstOffsetNumber; targoffset <= maxoffset; targoffset++) {
+            ItemId itemid;
+            HeapTupleData targtuple;
+            bool sample_it = false;
+
+            /* IO collector and IO scheduler for analyze statement */
+            if (ENABLE_WORKLOAD_CONTROL)
+                IOSchedulerAndUpdate(IO_TYPE_READ, 10, IO_TYPE_ROW);
+
+            targtuple.t_tableOid = InvalidOid;
+            targtuple.t_bucketId = InvalidBktId;
+            HeapTupleCopyBaseFromPage(&targtuple, targpage);
+            itemid = PageGetItemId(targpage, targoffset);
+
+            if (!ItemIdIsNormal(itemid)) {
+                if (ItemIdIsDead(itemid))
+                    deadrows += 1;
+                continue;
+            }
+
+            ItemPointerSet(&targtuple.t_self, targblock, targoffset);
+
+            targtuple.t_tableOid = RelationGetRelid(onerel);
+            targtuple.t_bucketId = RelationGetBktid(onerel);
+            targtuple.t_data = (HeapTupleHeader)PageGetItem(targpage, itemid);
+            targtuple.t_len = ItemIdGetLength(itemid);
+
+            switch (HeapTupleSatisfiesVacuum(&targtuple, OldestXmin, targbuffer, isAnalyzing)) {
+                case HEAPTUPLE_LIVE:
+                    sample_it = true;
+                    liverows += 1;
+                    break;
+
+                case HEAPTUPLE_DEAD:
+                case HEAPTUPLE_RECENTLY_DEAD:
+                    /* Count dead and recently-dead rows */
+                    deadrows += 1;
+                    break;
+
+                case HEAPTUPLE_INSERT_IN_PROGRESS:
+                    if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(targpage, targtuple.t_data))) {
+                        sample_it = true;
+                        liverows += 1;
+                    }
+                    break;
+
+                case HEAPTUPLE_DELETE_IN_PROGRESS:
+                    if (TransactionIdIsCurrentTransactionId(HeapTupleGetUpdateXid(&targtuple)))
+                        deadrows += 1;
+                    else {
+                        sample_it = true;
+                        liverows += 1;
+                    }
+                    break;
+
+                default:
+                    ereport(
+                        ERROR, (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("unexpected HeapTupleSatisfiesVacuum result")));
+                    break;
+            }
+
+            if (sample_it) {
+                if (numrows < targrows) {
+                    if (estimateTableRownum) {
+                        numrows++;
+                    }
+                } else {
+                    if (rowstoskip < 0) {
+                        rowstoskip = anl_get_next_S(samplerows, targrows, &rstate);
+                    }
+
+                    if (rowstoskip <= 0) {
+                        int64 k = (int64)(targrows * anl_random_fract());
+                        AssertEreport(
+                            k >= 0 && k < targrows, MOD_OPT, "Index number out of range when replacing tuples.");
+                    }
+                    rowstoskip -= 1;
+                }
+                samplerows += 1;
+            }
+        }
+
+uheap_end:
+        UnlockReleaseBuffer(targbuffer);
+    }
+    if (bs.m > 0) {
+        *totalrows = floor((liverows / bs.m) * totalblocks + 0.5);
+    } else {
+        *totalrows = 0.0;
+    }
+}
+
+/*
+ * Build PQ table
+ */
+static void BuildPQtable(HnswBuildState *buildstate)
+{
+    int numSamples;
+    Relation index = buildstate->index;
+
+    /* Skip samples for unlogged table */
+    if (buildstate->heap == NULL) {
+        numSamples = 1;
+    } else {
+        double num;
+        EstimateRows(buildstate->heap, &num);
+        numSamples = (int)num;
+    }
+    PG_TRY();
+    {
+        /* Sample rows */
+        buildstate->samples = VectorArrayInit(numSamples, buildstate->dimensions,
+                                              buildstate->typeInfo->itemSize(buildstate->dimensions));
+    }
+    PG_CATCH();
+    {
+        ereport(ERROR, (errmsg("memory alloc failed during PQtable sampling, suggest using hnsw without PQ.")));
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    if (buildstate->heap != NULL) {
+        SampleRows(buildstate);
+        if (buildstate->samples->length < buildstate->pqKsub) {
+            ereport(NOTICE,
+                    (errmsg("hnsw PQ table created with little data"),
+                            errdetail("This will cause low recall."),
+                            errhint("Drop the index until the table has more data.")));
+        }
+    }
+    ComputeHnswPQ(buildstate);
+    VectorArrayFree(buildstate->samples);
+}
+
 
 /*
  * Create the metapage
@@ -77,6 +469,29 @@ static void CreateMetaPage(HnswBuildState *buildstate)
     metap->entryOffno = InvalidOffsetNumber;
     metap->entryLevel = -1;
     metap->insertPage = InvalidBlockNumber;
+
+    /* set PQ info */
+    metap->enablePQ = buildstate->enablePQ;
+    metap->pqM = buildstate->pqM;
+    metap->pqKsub = buildstate->pqKsub;
+    metap->pqcodeSize = buildstate->pqcodeSize;
+    metap->pqDisTableSize = 0;
+    metap->pqDisTableNblk = 0;
+    if (buildstate->enablePQ) {
+        metap->pqTableSize = (uint32)buildstate->pqTableSize;
+        metap->pqTableNblk = (uint16)(
+            (metap->pqTableSize + HNSW_PQTABLE_STORAGE_SIZE - 1) / HNSW_PQTABLE_STORAGE_SIZE);
+        if (buildstate->pqMode == HNSW_PQMODE_SDC) {
+            uint32 disTableLen = buildstate->pqM * buildstate->pqKsub * buildstate->pqKsub;
+            metap->pqDisTableSize = (uint32)disTableLen * sizeof(float);
+            metap->pqDisTableNblk = (uint16)(
+                (metap->pqDisTableSize + HNSW_PQTABLE_STORAGE_SIZE - 1) / HNSW_PQTABLE_STORAGE_SIZE);
+        }
+    } else {
+        metap->pqTableSize = 0;
+        metap->pqTableNblk = 0;
+    }
+
     ((PageHeader)page)->pd_lower = ((char *)metap + sizeof(HnswMetaPageData)) - (char *)page;
 
     MarkBufferDirty(buf);
@@ -115,13 +530,19 @@ static void CreateAppendMetaPage(HnswBuildState *buildstate)
     appMetap->pqM = buildstate->pqM;
     appMetap->pqKsub = buildstate->pqKsub;
     appMetap->pqcodeSize = buildstate->pqcodeSize;
+    appMetap->pqDisTableSize = 0;
+    appMetap->pqDisTableNblk = 0;
     if (buildstate->enablePQ) {
-        appMetap->centerTableSize = (uint32)buildstate->dimensions * sizeof(float);
-        appMetap->pqTableSize = (uint32)buildstate->dimensions * buildstate->pqKsub * sizeof(float);
-        appMetap->pqTableNblk =
-            (uint16)((appMetap->pqTableSize + HNSW_PQTABLE_STORAGE_SIZE - 1) / HNSW_PQTABLE_STORAGE_SIZE);
+        appMetap->pqTableSize = (uint32)buildstate->pqTableSize;
+        appMetap->pqTableNblk = (uint16)(
+            (appMetap->pqTableSize + HNSW_PQTABLE_STORAGE_SIZE - 1) / HNSW_PQTABLE_STORAGE_SIZE);
+        if (buildstate->pqMode == HNSW_PQMODE_SDC) {
+            uint32 disTableLen = buildstate->pqM * buildstate->pqKsub * buildstate->pqKsub;
+            appMetap->pqDisTableSize = (uint32)disTableLen * sizeof(float);
+            appMetap->pqDisTableNblk = (uint16)(
+                (appMetap->pqDisTableSize + HNSW_PQTABLE_STORAGE_SIZE - 1) / HNSW_PQTABLE_STORAGE_SIZE);
+        }
     } else {
-        appMetap->centerTableSize = 0;
         appMetap->pqTableSize = 0;
         appMetap->pqTableNblk = 0;
     }
@@ -131,7 +552,7 @@ static void CreateAppendMetaPage(HnswBuildState *buildstate)
         (HNSW_DEFAULT_NPAGES_PER_SLOT * slotTypeNum) < (g_instance.attr.attr_storage.NBuffers / HNSW_BUFFER_THRESHOLD)
             ? HNSW_DEFAULT_NPAGES_PER_SLOT
             : (g_instance.attr.attr_storage.NBuffers / (slotTypeNum * HNSW_BUFFER_THRESHOLD));
-    appMetap->slotStartBlkno = HNSW_PQTABLE_START_BLKNO + appMetap->pqTableNblk;
+    appMetap->slotStartBlkno = HNSW_PQTABLE_START_BLKNO + appMetap->pqTableNblk + appMetap->pqDisTableNblk;
     appMetap->elementInsertSlot = InvalidBlockNumber;
     appMetap->neighborInsertSlot = InvalidBlockNumber;
 
@@ -139,6 +560,40 @@ static void CreateAppendMetaPage(HnswBuildState *buildstate)
 
     MarkBufferDirty(buf);
     UnlockReleaseBuffer(buf);
+}
+
+/*
+ * Create PQ-related pages
+ */
+static void CreatePQPages(HnswBuildState *buildstate)
+{
+    uint16 nblks;
+    Relation index = buildstate->index;
+    ForkNumber forkNum = buildstate->forkNum;
+    Buffer buf;
+    Page page;
+    uint16 pqTableNblk;
+    uint16 pqDisTableNblk;
+
+    HnswGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
+
+    /* create pq table page */
+    for (uint16 i = 0; i < pqTableNblk; i++) {
+        buf = HnswNewBuffer(index, forkNum);
+        page = BufferGetPage(buf);
+        HnswInitPage(buf, page);
+        MarkBufferDirty(buf);
+        UnlockReleaseBuffer(buf);
+    }
+
+    /* create pq distance table page */
+    for (uint16 i = 0; i < pqDisTableNblk; i++) {
+        buf = HnswNewBuffer(index, forkNum);
+        page = BufferGetPage(buf);
+        HnswInitPage(buf, page);
+        MarkBufferDirty(buf);
+        UnlockReleaseBuffer(buf);
+    }
 }
 
 /*
@@ -185,6 +640,7 @@ static void CreateGraphPages(HnswBuildState *buildstate)
     HnswElementPtr iter = buildstate->graph->head;
     char *base = buildstate->hnswarea;
     IndexTransInfo *idxXid;
+    Size pqcodesSize = buildstate->pqcodeSize;
 
     /* Calculate sizes */
     maxSize = HNSW_MAX_SIZE;
@@ -197,6 +653,16 @@ static void CreateGraphPages(HnswBuildState *buildstate)
     buf = HnswNewBuffer(index, forkNum);
     page = BufferGetPage(buf);
     HnswInitPage(buf, page);
+
+    /* Check vector and pqcode can be on the same page */
+    if (!HnswPtrIsNull(base, buildstate->graph->head)) {
+        HnswElement head = (HnswElement)HnswPtrAccess(base, buildstate->graph->head);
+        Size elementSize = HNSW_ELEMENT_TUPLE_SIZE(VARSIZE_ANY((Pointer)HnswPtrAccess(base, head->value)));
+        if (PageGetFreeSpace(page) < elementSize + MAXALIGN(pqcodesSize)) {
+            int maxPQcodeSize = ((PageGetFreeSpace(page) - elementSize) / 8) * 8;
+            ereport(ERROR, (errmsg("vector and pqcode must be on the same page, max pq_m is %d", maxPQcodeSize)));
+        }
+    }
 
     if (buildstate->isUStore) {
         HnswPageGetOpaque(page)->pageType = HNSW_USTORE_PAGE_TYPE;
@@ -218,7 +684,7 @@ static void CreateGraphPages(HnswBuildState *buildstate)
         /* Calculate sizes */
         etupSize = HNSW_ELEMENT_TUPLE_SIZE(VARSIZE_ANY(valuePtr));
         ntupSize = HNSW_NEIGHBOR_TUPLE_SIZE(element->level, buildstate->m);
-        combinedSize = etupSize + ntupSize + sizeof(ItemIdData);
+        combinedSize = etupSize + MAXALIGN(pqcodesSize) + ntupSize + sizeof(ItemIdData);
 
         if (buildstate->isUStore) {
             combinedSize += sizeof(IndexTransInfo);
@@ -232,7 +698,8 @@ static void CreateGraphPages(HnswBuildState *buildstate)
         HnswSetElementTuple(base, etup, element);
 
         /* Keep element and neighbors on the same page if possible */
-        if (PageGetFreeSpace(page) < etupSize || (combinedSize <= maxSize && PageGetFreeSpace(page) < combinedSize)) {
+        if (PageGetFreeSpace(page) < etupSize + MAXALIGN(pqcodesSize) ||
+            (combinedSize <= maxSize && PageGetFreeSpace(page) < combinedSize)) {
             HnswBuildAppendPage(index, &buf, &page, forkNum);
             if (buildstate->isUStore) {
                 HnswPageGetOpaque(page)->pageType = HNSW_USTORE_PAGE_TYPE;
@@ -251,6 +718,14 @@ static void CreateGraphPages(HnswBuildState *buildstate)
         }
 
         ItemPointerSet(&etup->neighbortid, element->neighborPage, element->neighborOffno);
+
+        if (buildstate->enablePQ) {
+            ((PageHeader)page)->pd_upper -= MAXALIGN(pqcodesSize);
+            Pointer codePtr = (Pointer) HnswPtrAccess(base, element->pqcodes);
+            errno_t rc = memcpy_s(
+                ((char*)page) + ((PageHeader)page)->pd_upper, pqcodesSize, codePtr, pqcodesSize);
+            securec_check_c(rc, "\0", "\0");
+        }
 
         if (buildstate->isUStore) {
             ((PageHeader)page)->pd_upper -= sizeof(IndexTransInfo);
@@ -348,6 +823,11 @@ static void FlushPages(HnswBuildState *buildstate)
 #endif
 
     CreateMetaPage(buildstate);
+    if (buildstate->enablePQ) {
+        CreatePQPages(buildstate);
+        /* Save PQ table and distance table */
+        FlushPQInfo(buildstate);
+    }
     CreateGraphPages(buildstate);
     WriteNeighborTuples(buildstate);
 
@@ -422,8 +902,9 @@ static void UpdateNeighborsInMemory(char *base, FmgrInfo *procinfo, Oid collatio
             HnswCandidate *hc = &neighbors->items[i];
             HnswElement neighborElement = (HnswElement)HnswPtrAccess(base, hc->element);
 
-            /* Keep scan-build happy on Mac x86-64 */
-            Assert(neighborElement);
+            if (neighborElement == NULL) {
+                continue;
+            }
 
             /* Use element for lock instead of hc since hc can be replaced */
             LWLockAcquire(&neighborElement->lock, LW_EXCLUSIVE);
@@ -496,7 +977,8 @@ static void InsertTupleInMemory(HnswBuildState *buildstate, HnswElement element)
     }
 
     /* Find neighbors for element */
-    HnswFindElementNeighbors(base, element, entryPoint, NULL, procinfo, collation, m, efConstruction, false);
+    HnswFindElementNeighbors(base, element, entryPoint, NULL, procinfo, collation, m, efConstruction,
+                             false, buildstate->enablePQ, buildstate->params);
 
     /* Update graph in memory */
     UpdateGraphInMemory(procinfo, collation, element, m, efConstruction, entryPoint, buildstate);
@@ -517,6 +999,7 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     HnswAllocator *allocator = &buildstate->allocator;
     Size valueSize;
     Pointer valuePtr;
+    Pointer codePtr = NULL;
     LWLock *flushLock = &graph->flushLock;
     char *base = buildstate->hnswarea;
 
@@ -583,6 +1066,10 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     /* Ok, we can proceed to allocate the element */
     element = HnswInitElement(base, heaptid, buildstate->m, buildstate->ml, buildstate->maxLevel, allocator);
     valuePtr = (Pointer)HnswAlloc(allocator, valueSize);
+    if (buildstate->enablePQ) {
+        Size codesize = buildstate->pqM * sizeof(uint8);
+        codePtr = (Pointer)HnswAlloc(allocator, codesize);
+    }
 
     /*
      * We have now allocated the space needed for the element, so we don't
@@ -595,6 +1082,7 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     errno_t rc = memcpy_s(valuePtr, valueSize, DatumGetPointer(value), valueSize);
     securec_check(rc, "\0", "\0");
     HnswPtrStore(base, element->value, valuePtr);
+    HnswPtrStore(base, element->pqcodes, codePtr);
 
     /* Create a lock for the element */
     LWLockInitialize(&element->lock, hnsw_lock_tranche_id);
@@ -697,7 +1185,7 @@ static void *HnswSharedMemoryAlloc(Size size, void *state)
  * Initialize the build state
  */
 static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation index, IndexInfo *indexInfo,
-                           ForkNumber forkNum)
+                           ForkNumber forkNum, bool parallel)
 {
     buildstate->heap = heap;
     buildstate->index = index;
@@ -733,6 +1221,7 @@ static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation i
     /* Get support functions */
     buildstate->procinfo = index_getprocinfo(index, 1, HNSW_DISTANCE_PROC);
     buildstate->normprocinfo = HnswOptionalProcInfo(index, HNSW_NORM_PROC);
+    buildstate->kmeansnormprocinfo = HnswOptionalProcInfo(index, HNSW_KMEANS_NORMAL_PROC);
     buildstate->collation = index->rd_indcollation[0];
 
     InitGraph(&buildstate->graphData, NULL, u_sess->attr.attr_memory.maintenance_work_mem * 1024L);
@@ -752,11 +1241,36 @@ static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation i
     buildstate->hnswarea = NULL;
 
     buildstate->enablePQ = HnswGetEnablePQ(index);
+    if (buildstate->enablePQ && !buildstate->typeInfo->supportPQ) {
+        ereport(ERROR, (errmsg("this data type cannot support hnswpq.")));
+    }
+    if (buildstate->enablePQ && !g_instance.pq_inited) {
+        ereport(ERROR, (errmsg("this instance has not currently loaded the pq dynamic library.")));
+    }
+
     buildstate->pqM = HnswGetPqM(index);
     buildstate->pqKsub = HnswGetPqKsub(index);
-    buildstate->pqTable = NULL;
-    buildstate->centerTable = NULL;
-    buildstate->pqcodeSize = 0;
+    if (buildstate->enablePQ) {
+        if (buildstate->kmeansnormprocinfo != NULL && buildstate->dimensions == 1) {
+            ereport(ERROR, (errmsg("dimensions must be greater than one for this opclass.")));
+        }
+        if (buildstate->dimensions % buildstate->pqM != 0) {
+            ereport(ERROR, (errmsg("dimensions must be divisible by pq_M, please reset pq_M.")));
+        }
+        Size subItemsize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
+        subItemsize = MAXALIGN(subItemsize);
+        buildstate->pqTableSize = buildstate->pqM * buildstate->pqKsub * subItemsize;
+        buildstate->pqTable = parallel ? NULL : (char*)palloc0(buildstate->pqTableSize);
+        buildstate->pqcodeSize = buildstate->pqM * sizeof(uint8);
+        buildstate->params = InitPQParamsInMemory(buildstate);
+    } else {
+        buildstate->pqTable = NULL;
+        buildstate->pqTableSize = 0;
+        buildstate->pqcodeSize = 0;
+        buildstate->params = NULL;
+    }
+    buildstate->pqMode = HNSW_PQMODE_DEFAULT;
+    buildstate->pqDistanceTable = NULL;
 
     buildstate->isUStore = buildstate->heap ? RelationIsUstoreFormat(buildstate->heap) : false;
 }
@@ -764,10 +1278,17 @@ static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation i
 /*
  * Free resources
  */
-static void FreeBuildState(HnswBuildState *buildstate)
+static void FreeBuildState(HnswBuildState *buildstate, bool parallel)
 {
     MemoryContextDelete(buildstate->graphCtx);
     MemoryContextDelete(buildstate->tmpCtx);
+    if (buildstate->enablePQ && !parallel) {
+        pfree(buildstate->pqTable);
+        if (buildstate->pqMode == HNSW_PQMODE_SDC) {
+            pfree(buildstate->pqDistanceTable);
+        }
+        pfree(buildstate->params);
+    }
 }
 
 static double ParallelHeapScan(HnswBuildState *buildstate, int *nparticipanttuplesorts)
@@ -798,9 +1319,14 @@ static void HnswParallelScanAndInsert(Relation heapRel, Relation indexRel, HnswS
 
     /* Join parallel scan */
     indexInfo = BuildIndexInfo(indexRel);
-    InitBuildState(&buildstate, heapRel, indexRel, indexInfo, MAIN_FORKNUM);
+    InitBuildState(&buildstate, heapRel, indexRel, indexInfo, MAIN_FORKNUM, true);
     buildstate.graph = &hnswshared->graphData;
     buildstate.hnswarea = hnswarea;
+    buildstate.pqTable = hnswshared->pqTable;
+    if (buildstate.enablePQ) {
+        buildstate.params->pqTable = hnswshared->pqTable;
+    }
+    buildstate.pqDistanceTable = hnswshared->pqDistanceTable;
     InitAllocator(&buildstate.allocator, &HnswSharedMemoryAlloc, &buildstate);
     scan = tableam_scan_begin_parallel(heapRel, &hnswshared->heapdesc);
     reltuples = tableam_index_build_scan(heapRel, indexRel, indexInfo, true, BuildCallback, (void *)&buildstate, scan);
@@ -811,7 +1337,7 @@ static void HnswParallelScanAndInsert(Relation heapRel, Relation indexRel, HnswS
     hnswshared->reltuples += reltuples;
     SpinLockRelease(&hnswshared->mutex);
 
-    FreeBuildState(&buildstate);
+    FreeBuildState(&buildstate, true);
 }
 
 /*
@@ -844,8 +1370,21 @@ void HnswParallelBuildMain(const BgWorkerContext *bwc)
 /*
  * End parallel build
  */
-static void HnswEndParallel()
+static void HnswEndParallel(HnswLeader *hnswleader)
 {
+    HnswShared *hnswshared = hnswleader->hnswshared;
+    if (hnswshared) {
+        if (hnswshared->pqTable) {
+            pfree_ext(hnswshared->pqTable);
+        }
+        if (hnswshared->pqDistanceTable) {
+            pfree_ext(hnswshared->pqDistanceTable);
+        }
+        if (hnswshared->hnswarea) {
+            pfree_ext(hnswshared->hnswarea);
+        }
+    }
+    pfree_ext(hnswleader);
     BgworkerListSyncQuit();
 }
 
@@ -855,6 +1394,10 @@ static HnswShared *HnswParallelInitshared(HnswBuildState *buildstate)
     char *hnswarea;
     Size esthnswarea;
     Size estother;
+    char *pqTable;
+    float *pqDistanceTable;
+    errno_t rc;
+    uint32 pqDistanceTableSize = buildstate->pqM * buildstate->pqKsub * buildstate->pqKsub * sizeof(float);
 
     /* Store shared build state, for which we reserved space */
     hnswshared =
@@ -863,6 +1406,23 @@ static HnswShared *HnswParallelInitshared(HnswBuildState *buildstate)
     /* Initialize immutable state */
     hnswshared->heaprelid = RelationGetRelid(buildstate->heap);
     hnswshared->indexrelid = RelationGetRelid(buildstate->index);
+    hnswshared->pqDistanceTable = NULL;
+    if (buildstate->enablePQ) {
+        pqTable = (char *) MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
+                                                  buildstate->pqTableSize);
+        rc = memcpy_s(pqTable, buildstate->pqTableSize, buildstate->pqTable, buildstate->pqTableSize);
+        securec_check_c(rc, "\0", "\0");
+        hnswshared->pqTable = pqTable;
+        if (buildstate->pqMode == HNSW_PQMODE_SDC) {
+            pqDistanceTable = (float *) MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
+                                                               pqDistanceTableSize);
+            rc = memcpy_s(pqDistanceTable, pqDistanceTableSize, buildstate->pqDistanceTable, pqDistanceTableSize);
+            securec_check_c(rc, "\0", "\0");
+            hnswshared->pqDistanceTable = pqDistanceTable;
+        }
+    } else {
+        hnswshared->pqTable = NULL;
+    }
     SpinLockInit(&hnswshared->mutex);
     /* Initialize mutable state */
     hnswshared->nparticipantsdone = 0;
@@ -881,10 +1441,6 @@ static HnswShared *HnswParallelInitshared(HnswBuildState *buildstate)
     /* Report less than allocated so never fails */
     InitGraph(&hnswshared->graphData, hnswarea, esthnswarea - 1024 * 1024);
 
-    /*
-     * Avoid base address for relptr for Postgres < 14.5
-     * https://github.com/postgres/postgres/commit/7201cd18627afc64850537806da7f22150d1a83b
-     */
     hnswshared->graphData.memoryUsed += MAXALIGN(1);
 
     hnswshared->hnswarea = hnswarea;
@@ -908,7 +1464,7 @@ static void HnswBeginParallel(HnswBuildState *buildstate, int request)
 
     /* If no workers were successfully launched, back out (do serial build) */
     if (hnswleader->nparticipanttuplesorts == 0) {
-        HnswEndParallel();
+        HnswEndParallel(hnswleader);
         return;
     }
 
@@ -961,7 +1517,7 @@ static void BuildGraph(HnswBuildState *buildstate, ForkNumber forkNum)
 
     /* End parallel build */
     if (buildstate->hnswleader) {
-        HnswEndParallel();
+        HnswEndParallel(buildstate->hnswleader);
     }
 }
 
@@ -975,14 +1531,28 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, Hnsw
     SeedRandom(42);
 #endif
 
-    InitBuildState(buildstate, heap, index, indexInfo, forkNum);
+    InitBuildState(buildstate, heap, index, indexInfo, forkNum, false);
+
+    if (buildstate->isUStore) {
+        ereport(ERROR, (errmsg("ustore table cannot support hnsw.")));
+    }
+
+    if (buildstate->enablePQ) {
+        BuildPQtable(buildstate);
+        if (buildstate->pqMode == HNSW_PQMODE_SDC) {
+            int pqM = buildstate->pqM;
+            int pqKsub = buildstate->pqKsub;
+            buildstate->pqDistanceTable = (float *)palloc(pqM * pqKsub * pqKsub * sizeof(float));
+            GetPQDistanceTableSdc(buildstate->params, buildstate->pqDistanceTable);
+        }
+    }
 
     BuildGraph(buildstate, forkNum);
 
     if (RelationNeedsWAL(index) || forkNum == INIT_FORKNUM)
         LogNewpageRange(index, forkNum, 0, RelationGetNumberOfBlocksInFork(index, forkNum), true);
 
-    FreeBuildState(buildstate);
+    FreeBuildState(buildstate, false);
 }
 
 /*
