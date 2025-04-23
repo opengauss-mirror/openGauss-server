@@ -1537,7 +1537,7 @@ static void InitConfigureNamesBool()
             CLIENT_CONN_STATEMENT,
             gettext_noop("Sets the current transaction's read-only status."),
             NULL,
-            GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            GUC_NO_RESET | GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
             &u_sess->attr.attr_common.XactReadOnly,
             false,
             check_transaction_read_only,
@@ -8034,6 +8034,21 @@ int set_config_option(const char* name, const char* value, GucContext context, G
         }
     }
 
+    if (record->flags & GUC_NO_RESET) {
+        if (value == NULL) {
+            ereport(elevel,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cannot reset parameter \"%s\"", name)));
+            return 0;
+        }
+
+        if (action == GUC_ACTION_SAVE) {
+            ereport(elevel,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cannot set parameter \"%s\" locally within functions", name)));
+            return 0;
+        }
+    }
     /*
      * Should we set reset/stacked values?	(If so, the behavior is not
      * transactional.)	This is done either when we get a default value from

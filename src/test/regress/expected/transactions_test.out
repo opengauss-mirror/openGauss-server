@@ -1,3 +1,37 @@
+CREATE TABLE no_reset_test(a int);
+insert into no_reset_test values(1);
+-- Test transaction variable cannot be reset.
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+select count(*) from no_reset_test;
+ count 
+-------
+     1
+(1 row)
+
+reset transaction_isolation; --error
+ERROR:  cannot reset parameter "transaction_isolation"
+END;
+BEGIN TRANSACTION READ ONLY;
+select count(*) from no_reset_test;
+ count 
+-------
+     1
+(1 row)
+
+reset transaction_read_only; --error
+ERROR:  cannot reset parameter "transaction_read_only"
+END;
+BEGIN TRANSACTION DEFERRABLE;
+select count(*) from no_reset_test;
+ count 
+-------
+     1
+(1 row)
+
+reset transaction_deferrable; --error
+ERROR:  cannot reset parameter "transaction_deferrable"
+END;
+DROP TABLE no_reset_test;
 SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;
 START TRANSACTION READ WRITE;
 CREATE TABLE transaction_test_table(a int);
