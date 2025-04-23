@@ -261,8 +261,6 @@ void ExecReScanAnnIndexScan(AnnIndexScanState* node)
     scan_handler_idx_rescan(
         node->iss_ScanDesc, node->iss_ScanKeys, node->iss_NumScanKeys, node->iss_OrderByKeys, node->iss_NumOrderByKeys);
 
-    scan_handler_idx_rescan_parallel(node->iss_ScanDesc);
-
     ExecScanReScan(&node->ss);
 }
 
@@ -301,13 +299,8 @@ void ExecEndAnnIndexScan(AnnIndexScanState* node)
     /*
      * close the index relation (no-op if we didn't open it)
      */
-    if (index_scan_desc) {
+    if (index_scan_desc)
         scan_handler_idx_endscan(index_scan_desc);
-        if (WorkerThreadAmI() && node->ss.ps.plan->dop > 1) {
-            u_sess->stream_cxt.global_obj->DestroyStreamDesc(
-                node->ss.ps.state->es_plannedstmt->queryId, node->ss.ps.plan);
-        }
-    }
 
     /*
      * close the index relation (no-op if we didn't open it)
@@ -470,18 +463,6 @@ void ExecInitAnnIndexRelation(AnnIndexScanState* node, EState* estate, int eflag
             }
         }
 
-        ParallelIndexScanDescData *paralleDesc = NULL;
-        if (u_sess->stream_cxt.global_obj && node->ss.ps.plan->dop > 1) {
-            if (WorkerThreadAmI()) {
-                u_sess->stream_cxt.global_obj->BuildStreamDesc(
-                    estate->es_plannedstmt->queryId, index_state->ss.ps.plan);
-            }
-            paralleDesc = (ParallelIndexScanDescData*)u_sess->stream_cxt.global_obj->GetParalleDesc(
-                estate->es_plannedstmt->queryId, index_state->ss.ps.plan->plan_node_id);
-            if (WorkerThreadAmI())
-                scan_handler_idx_parallelscan_initialize(current_relation, index_state->iss_RelationDesc, paralleDesc);
-        }
-
         /*
          * Initialize scan descriptor.
          */
@@ -490,8 +471,7 @@ void ExecInitAnnIndexRelation(AnnIndexScanState* node, EState* estate, int eflag
             scanSnap,
             index_state->iss_NumScanKeys,
             index_state->iss_NumOrderByKeys,
-            (ScanState*)index_state,
-            paralleDesc);
+            (ScanState*)index_state);
     }
 
     return;
