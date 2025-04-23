@@ -6706,7 +6706,6 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
             state = (ExprState*)usestate;
             state->evalfunc = (ExprStateEvalFunc)ExecEvalUserSetElm;
             usestate->instate = ExecInitExpr((Expr *)useexpr->val, parent);
-            u_sess->parser_cxt.has_equal_uservar = true;
         } break;
        case T_PriorExpr:
             state = (ExprState*)makeNode(ExprState);
