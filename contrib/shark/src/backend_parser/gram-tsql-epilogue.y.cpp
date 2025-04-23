@@ -66,6 +66,15 @@ static char* quote_identifier_wrapper(char* ident, core_yyscan_t yyscanner)
 		return ident;
 	}
 }
+static Node *
+makeTSQLHexStringConst(char *str, int location)
+{
+    A_Const    *n = makeNode(A_Const);
+    n->val.type = T_TSQL_HexString;
+    n->val.val.str = str;
+    n->location = location;
+    return (Node *) n;
+}
 
 // To make a node for anonymous block
 static Node *

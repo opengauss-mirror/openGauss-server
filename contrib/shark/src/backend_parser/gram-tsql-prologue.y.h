@@ -6,3 +6,4 @@ static List* make_func_call_func(List* funcname,  List* args);
 static char* quote_identifier_wrapper(char* ident, core_yyscan_t yyscanner);
 static Node* TsqlMakeAnonyBlockFuncStmt(int flag, const char *str);
 extern Oid get_language_oid(const char* langname, bool missing_ok);
+static Node *makeTSQLHexStringConst(char *str, int location);

@@ -11,3 +11,4 @@ test: test_dbcc test_dbcc_case_sen
 test: test_sysviews
 test: gs_dump_d_format rotate_part2_dump
 
+test: varbinary

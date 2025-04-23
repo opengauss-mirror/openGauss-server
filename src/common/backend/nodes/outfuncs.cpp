@@ -5691,6 +5691,10 @@ static void _outValue(StringInfo str, Value* value)
             /* internal representation already has leading 'b' */
             appendStringInfoString(str, value->val.str);
             break;
+        case T_TSQL_HexString:
+            /* internal representation already has leading '0x' */
+            appendStringInfoString(str, value->val.str);
+            break;
         case T_Null:
             /* this is seen only within A_Const, not in transformed trees */
             appendStringInfoString(str, "NULL");

@@ -164,7 +164,6 @@ extern void EnableDoingCommandRead();
 extern void DisableDoingCommandRead();
 extern void getOBSOptions(ObsCopyOptions* obs_copy_options, List* options);
 extern int32 get_relation_data_width(Oid relid, Oid partitionid, int32* attr_widths, bool vectorized = false);
-
 /* DestReceiver for COPY (SELECT) TO */
 typedef struct {
     DestReceiver pub; /* publicly-known function pointers */
@@ -5799,7 +5798,7 @@ static void CopyInitCstateVar(CopyState cstate)
  *
  * Returns a CopyState, to be passed to NextCopyFrom and related functions.
  */
-CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, 
+CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
                         List* options, void* mem_info, const char* queryString,
                         CopyGetDataFunc func)
 {
@@ -6520,6 +6519,10 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
             cstate->cur_attname = NameStr(attr[m].attname);
             cstate->cur_attval = string;
             atttypmod = (asTypemods != NULL && asTypemods[m].assign) ? asTypemods[m].typemod : attr[m].atttypmod;
+            if ((u_sess->hook_cxt.checkIsMssqlHexHook != NULL) &&
+                ((CheckIsMssqlHexHookType)(u_sess->hook_cxt.checkIsMssqlHexHook))(string)) {
+                    atttypmod = TSQL_HEX_CONST_TYPMOD;
+            }
             values[m] = InputFunctionCallForBulkload(cstate, &in_functions[m], string, typioparams[m], atttypmod,
                 cstate->attr_encodings[m], &cstate->in_convert_funcs[m]);
             if (string != NULL)

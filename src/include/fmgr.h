@@ -603,6 +603,8 @@ extern bool get_call_expr_arg_stable(fmNodePtr expr, int argnum);
 extern bool get_fn_expr_variadic(FmgrInfo* flinfo);
 extern bool CheckFunctionValidatorAccess(Oid validatorOid, Oid functionOid);
 
+extern PGFunction lookup_C_func_by_oid(Oid fn_oid, char* probin, char* prosrc);
+
 extern void check_external_function(const char* filepath, const char* filename, const char* funcname);
 extern CFunInfo load_external_function(const char* filename, char* funcname, bool signalNotFound, bool isValidate);
 extern char* expand_dynamic_library_name(const char* name);

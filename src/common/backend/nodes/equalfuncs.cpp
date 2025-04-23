@@ -3508,6 +3508,7 @@ static bool _equalValue(const Value* a, const Value* b)
         case T_Float:
         case T_String:
         case T_BitString:
+        case T_TSQL_HexString:
             COMPARE_STRING_FIELD(val.str);
             break;
         case T_Null:
@@ -4042,6 +4043,7 @@ bool equal(const void* a, const void* b)
         case T_Float:
         case T_String:
         case T_BitString:
+        case T_TSQL_HexString:
         case T_Null:
             retval = _equalValue((Value*)a, (Value*)b);
             break;

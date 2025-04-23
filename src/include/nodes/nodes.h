@@ -425,6 +425,7 @@ typedef enum NodeTag {
     T_Float,
     T_String,
     T_BitString,
+    T_TSQL_HexString,
     T_Null,
     T_Nan,
 

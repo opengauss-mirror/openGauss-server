@@ -2,6 +2,7 @@
 #include "src/pltsql/pltsql.h"
 #include "src/backend_parser/scanner.h"
 #include "commands/extension.h"
+#include "parser/parser.h"
 #include "shark.h"
 
 PG_MODULE_MAGIC;
@@ -11,9 +12,57 @@ static uint32 shark_index;
 
 extern List* tsql_raw_parser(const char* str, List** query_string_locationlist);
 extern void assign_tablecmds_hook(void);
+static List* RewriteTypmodExpr(List *expr_list);
+static bool CheckIsMssqlHex(char *str);
+static Node *make_int_const(int val, int location);
 
 void _PG_init(void)
 {}
+
+static bool CheckIsMssqlHex(char *str)
+{
+    if (str == NULL || strlen(str) <= 2) {
+        return false;
+    }
+    if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+        return true;
+    }
+    return false;
+}
+
+static List *RewriteTypmodExpr(List *expr_list)
+{
+    /*
+     * Look for ( max ) if we are in tsql dialect, MAX can be used in
+     * sys.varchar, sys.nvarchar, sys.binary and sys.varbinary. map it to
+     * TSQL_MAX_TYPMOD
+     */
+    Node       *expr;
+
+    expr = (Node*)linitial(expr_list);
+    if (list_length(expr_list) == 1 && IsA(expr, ColumnRef)) {
+        ColumnRef  *columnref = (ColumnRef *) expr;
+
+        if (list_length(columnref->fields) == 1) {
+            char *str = ((Value*)linitial(columnref->fields))->val.str;
+            if (strcmp(str, "max") == 0)
+                return list_make1(make_int_const(TSQL_MAX_TYPMOD, -1));
+        }
+    }
+
+    return expr_list;            /* nothing to do */
+}
+
+static Node *make_int_const(int val, int location)
+{
+    A_Const *n = makeNode(A_Const);
+
+    n->val.type = T_Integer;
+    n->val.val.ival = val;
+    n->location = location;
+
+    return (Node *)n;
+}
 
 void init_session_vars(void)
 {
@@ -29,6 +78,8 @@ void init_session_vars(void)
     u_sess->hook_cxt.checkVaildUserHook = (void*)check_vaild_username;
     u_sess->hook_cxt.fetchStatusHook = (void*)fetch_cursor_end_hook;
     u_sess->hook_cxt.rowcountHook = (void*)rowcount_hook;
+    u_sess->hook_cxt.checkIsMssqlHexHook = (void*)CheckIsMssqlHex;
+    u_sess->hook_cxt.rewriteTypmodExprHook = (void*)RewriteTypmodExpr;
 
     RepallocSessionVarsArrayIfNecessary();
     SharkContext *cxt = (SharkContext*) MemoryContextAlloc(u_sess->self_mem_cxt, sizeof(sharkContext));

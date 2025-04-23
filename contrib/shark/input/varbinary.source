@@ -1,0 +1,170 @@
+CREATE DATABASE test_varbinary DBCOMPATIBILITY 'D';
+\c test_varbinary
+CREATE EXTENSION shark;
+
+CREATE TABLE t1 (id int, a VARBINARY(1));
+CREATE TABLE t2 (id int, a VARBINARY(16));
+CREATE TABLE t3 (id int, a VARBINARY(MAX));
+CREATE TABLE t4 (id int, a VARBINARY(1.1));
+CREATE TABLE t5 (id int, a VARBINARY(-1));
+CREATE TABLE t6 (id int, a VARBINARY(0));
+CREATE INDEX idx1 ON t1(a);
+CREATE INDEX idx2 ON t2(a);
+CREATE INDEX idx3 ON t3(a);
+
+-- test longlimt
+INSERT INTO t1 VALUES (1, 'a'::varbinary);
+INSERT INTO t1 VALUES (2, 'aa'::varbinary); -- error
+INSERT INTO t2 VALUES (2, 'aa'::varbinary);
+INSERT INTO t2 VALUES (3, '1234567890123456'::varbinary);
+INSERT INTO t2 VALUES (3, '12345678901234567'::varbinary); -- error
+INSERT INTO t3 VALUES (4, '12345678901234567890'::varbinary);
+-- test hex
+INSERT INTO t1 VALUES (10, 0xff);
+INSERT INTO t1 VALUES (10, 0xff1); -- error
+select id, a from t1 where id = 10;
+INSERT INTO t2 VALUES (10, 0xffffffffffffffffffffffffffffffff);
+INSERT INTO t2 VALUES (10, 0xffffffffffffffffffffffffffffffff1); --error
+select id, a from t2 where id = 10;
+select id, a from t2 where a = 0xffffffffffffffffffffffffffffffff;
+-- test typecast bytea
+INSERT INTO t3 VALUES (5, 'aa'::bytea); -- assignment cast allow
+select id, a::bytea from t3 where a = 'aa'::varbinary;
+select 'aa'::bytea;
+CREATE TABLE t_bytea(id int, a bytea);
+INSERT INTO t_bytea VALUES (5, 'aa'::varbinary); -- assignment cast allow
+SELECT id, a from t_bytea;
+SELECT id, a::varbinary::varchar from t_bytea;
+
+-- test typecast bpchar
+INSERT INTO t3 VALUES (6, 'aa'::bpchar); -- assignment cast not allow but use udf errmsg
+INSERT INTO t3 VALUES (6, 'aa'::bpchar::varbinary); -- explict cast
+SELECT id, a::bpchar FROM t3 WHERE id = 6;
+SELECT id, a::bpchar FROM t3 WHERE a = 'aa'::bpchar::varbinary;
+CREATE TABLE t_bpchar (id int, a bpchar);
+INSERT INTO t_bpchar VALUES (1, 'aa'::varbinary); -- assignment cast allow
+SELECT id, a from t_bpchar;
+-- test typecast varchar
+INSERT INTO t3 VALUES (7, 'aa'::varchar); -- assignment cast not allow but use udf errmsg
+INSERT INTO t3 VALUES (7, 'aa'::varchar::varbinary); -- explict cast
+SELECT id, a::varchar FROM t3 WHERE id = 7;
+SELECT id, a::varchar FROM t3 WHERE a = 'aa'::varchar::varbinary;
+CREATE TABLE t_varchar (id int, a varchar);
+INSERT INTO t_varchar VALUES (1, 'aa'::varbinary); -- assignment cast allow
+SELECT id, a FROM t_varchar;
+-- test typecast int
+INSERT INTO t1 VALUES (8, 255);
+INSERT INTO t1 VALUES (9, 256);
+
+SELECT id, a FROM t1 WHERE id = 8 or id = 9;
+SELECT id, a::int FROM t1 WHERE id = 8 or id =9;
+INSERT INTO t2 VALUES (8, 2147483647::int4); -- max int4 in pg
+INSERT INTO t2 VALUES (9, 9223372036854775807::int8); -- max int8 in pg
+INSERT INTO t2 VALUES (100, 32767::int2); -- max int2 in pg
+
+SELECT id, a FROM t2 WHERE id = 8 or id = 9 or id = 100;
+SELECT id, a::int2 FROM t2 WHERE id = 100;
+SELECT id, a::int4 FROM t2 WHERE id = 8;
+SELECT id, a::int8 FROM t2 WHERE id = 9;
+select 32767::int2::varbinary::int2;
+select 2147483647::int4::varbinary::int4;
+select 9223372036854775807::int8::varbinary::int8;
+select id, a, 2147483647::int8::varbinary from t2 where a < 2147483647::int8::varbinary;
+select id, a, 2147483647::int8::varbinary from t2 where a <= 2147483647::int8::varbinary;
+select id, a, 2147483647::int8::varbinary from t2 where a > 2147483647::int8::varbinary;
+select id, a, 2147483647::int8::varbinary from t2 where a >= 2147483647::int8::varbinary;
+select id, a, 2147483647::int8::varbinary from t2 where a = 2147483647::int8::varbinary;
+
+-- test typecast float
+select 9223372036854775807.123456::float8;
+INSERT INTO t1 VALUES (11, 256.111::float4);
+SELECT id, a FROM t1 WHERE id = 11;
+SELECT id, a::float4 FROM t1 WHERE id = 11; -- sqlserve not suport cast float to varbinary
+INSERT INTO t2 VALUES (11, 2147483647.111::float8);
+SELECT id, a FROM t2 WHERE id = 11;
+SELECT id, a::float8 FROM t2 WHERE id = 11; -- sqlserve not suport cast float to varbinary
+
+-- test typecast numeric
+select 256::numeric::varbinary; --error
+select 256::varbinary::numeric; --error
+
+-- test typecast date
+SELECT '2023-10-01'::date::varbinary; -- error
+SELECT '2023-10-01'::smalldatetime::varbinary; -- error
+SELECT '2023-10-01'::timestamp::varbinary; -- error
+SELECT '2023-10-01'::timestamptz::varbinary; -- error
+SELECT '2023-10-01'::abstime::varbinary; -- error
+SELECT '2023-10-01'::timestamp(0) with time zone::varbinary; -- error
+
+-- test cast grammar
+INSERT INTO t3 VALUES (12, CAST('123456789012345678922220' AS varbinary));
+SELECT id, a FROM t3 WHERE id = 12;
+SELECT id, CAST(a as varchar) FROM t3 WHERE id = 12;
+
+-- test sort
+select * from t1;
+select * from t1 ORDER BY a;
+select * from t2;
+select * from t2 ORDER BY a;
+
+--test index
+create index t_var_idx on t3(a);
+CREATE INDEX t_var_idx_char ON t3(cast(a as varchar));
+
+explain select /*+ IndexScan(t3 t_var_idx) */ id, a from t3 where a = '12345678901234567890'::varbinary;
+explain select /*+ IndexScan(t3 t_var_idx_char) */ id, a from t3 where a::varchar = 'aa';
+
+-- test partition, error varbinary cannot be partition key in sqlserver
+CREATE TABLE t_part (id int, a VARBINARY(16)) PARTITION BY RANGE(a)
+(
+    PARTITION t_part_p1 VALUES LESS THAN (0x10000),
+    PARTITION t_part_p2 VALUES LESS THAN (0x99999),
+    PARTITION t_part_p3 VALUES LESS THAN (0x9999999999)
+);
+
+-- test varbinasry as join condition
+CREATE TABLE t_join1 (id1 int, dataVal VARBINARY(16));
+CREATE TABLE t_join2 (id2 int, dataVal VARBINARY(16));
+INSERT INTO t_join1 VALUES (1, 0x1234);
+INSERT INTO t_join1 VALUES (2, 0x5678);
+INSERT INTO t_join1 VALUES (3, 0x90AB);
+
+INSERT INTO t_join2 VALUES (21, 0x1234);
+INSERT INTO t_join2 VALUES (22, 0x5678);
+INSERT INTO t_join2 VALUES (23, 0xCDEF);
+
+-- inner join
+explain SELECT t1.id1 as t1_id, t1.dataVal as t1_data,
+       t2.id2 as t2_id, t2.dataVal as t2_data
+FROM t_join1 t1
+INNER JOIN t_join2 t2 ON t1.dataVal = t2.dataVal;
+
+-- left join
+explain SELECT t1.id1 as t1_id, t1.dataVal as t1_data,
+       t2.id2 as t2_id, t2.dataVal as t2_data
+FROM t_join1 t1
+LEFT JOIN t_join2 t2 ON t1.dataVal = t2.dataVal;
+
+-- test escape
+set bytea_output = escape;
+select * from test_varbinary.public.t3 order by id;
+reset bytea_output;
+
+-- test dump
+create DATABASE restore_varbinary DBCOMPATIBILITY 'D';
+\c restore_varbinary
+CREATE EXTENSION shark;
+
+\! @abs_bindir@/gs_dump test_varbinary -p @portstring@ -f @abs_bindir@/dump_varbinary.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d restore_varbinary -p @portstring@ @abs_bindir@/dump_varbinary.tar >/dev/null 2>&1; echo $?
+
+\c test_varbinary
+\d test_varbinary.public.t3
+select * from test_varbinary.public.t3;
+\c restore_varbinary
+\d restore_varbinary.public.t3
+select * from restore_varbinary.public.t3;
+
+\c postgres
+DROP DATABASE test_varbinary;
+DROP DATABASE restore_varbinary;

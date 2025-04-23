@@ -46,5 +46,14 @@ extern void fixResTargetNameWithAlias(List* clause_list, const char* aliasname);
 extern char* EscapeQuotes(const char* src);
 extern Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr, bool noPkg);
 
+/* Hooks for sharks */
+typedef List* (*RewriteTypmodExprHookType) (List *exprList);
+typedef bool (*CheckIsMssqlHexHookType) (char *str);
+
+
+/* define for varbinary */
+#define TSQL_MAX_TYPMOD (-8000)
+#define TSQL_MAX_NUM_PRECISION 38
+#define TSQL_HEX_CONST_TYPMOD (-16)
 
 #endif /* PARSER_H */
