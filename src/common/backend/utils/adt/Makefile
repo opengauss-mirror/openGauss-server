@@ -40,7 +40,7 @@ OBJS = acl.o arrayfuncs.o array_selfuncs.o array_typanalyze.o \
 	tsvector.o tsvector_op.o tsvector_parser.o \
 	txid.o uuid.o windowfuncs.o xml.o extended_statistics.o clientlogic_bytea.o clientlogicsettings.o \
 	median_aggs.o expr_distinct.o nlssort.o memory_func.o first_last_agg.o encrypt_decrypt.o expandeddatum.o \
-	subtype.o bitvec.o f2s.o halfutils.o halfvec.o sparsevec.o vector.o
+	bitvec.o f2s.o halfutils.o halfvec.o sparsevec.o vector.o
 
 VECTOR_OPT = -march=native
 
