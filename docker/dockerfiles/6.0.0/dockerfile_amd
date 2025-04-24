@@ -1,10 +1,6 @@
 FROM centos:7.6.1810
 
-<<<<<<<< HEAD:docker/dockerfiles/6.0.0/dockerfile_amd
 COPY openGauss-Server-6.0.1-CentOS7-x86_64.tar.bz2 .
-========
-COPY openGauss-Server-7.0.0-RC1-CentOS7-x86_64.tar.bz2 .
->>>>>>>> 31d2bf421 (openGauss docker更新7.0.0-rc1):docker/dockerfiles/7.0.0-rc1/dockerfile_amd
 COPY gosu-amd64 /usr/local/bin/gosu
 
 ENV LANG en_US.utf8
@@ -19,17 +15,10 @@ RUN set -eux; \
     mkdir -p /usr/local/opengauss && \
     mkdir -p /var/run/opengauss  && \
     mkdir /docker-entrypoint-initdb.d && \
-<<<<<<<< HEAD:docker/dockerfiles/6.0.0/dockerfile_amd
     tar -jxf openGauss-Server-6.0.1-CentOS7-x86_64.tar.bz2 -C /usr/local/opengauss && \
     chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
     chmod 2777 /var/run/opengauss && \
     rm -rf openGauss-Server-6.0.1-CentOS7-x86_64.tar.bz2 && yum clean all
-========
-    tar -jxf openGauss-Server-7.0.0-RC1-CentOS7-x86_64.tar.bz2 -C /usr/local/opengauss && \
-    chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
-    chmod 2777 /var/run/opengauss && \
-    rm -rf openGauss-Server-7.0.0-RC1-CentOS7-x86_64.tar.bz2 && yum clean all
->>>>>>>> 31d2bf421 (openGauss docker更新7.0.0-rc1):docker/dockerfiles/7.0.0-rc1/dockerfile_amd
 
 RUN set -eux; \
     echo "export GAUSSHOME=/usr/local/opengauss"  >> /home/omm/.bashrc && \
