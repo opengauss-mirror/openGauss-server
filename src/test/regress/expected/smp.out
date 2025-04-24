@@ -1489,6 +1489,42 @@ union all
 drop table store_sales;
 drop table item;
 drop table catalog_sales;
+create table tb_1262216(
+bill_no number(15,0) ,
+product_id number(15,0) ,
+accumulate_value number(12,0) ,
+item_code number(9,0) ,
+primal_fee number(12,0) ,
+discount_fee number(12,0) ,
+accu_measure_id number(9,0) ,
+measure_id number(9,0) ,
+billing_type number(4,0) ,
+tax_include number(4,0) ,
+tax_fee number(15,0) ,
+tax_rate number(4,0) ,
+tax_measure_id number(9,0) ,
+product_offering_id number(9,0) ,
+sp_code varchar(20) ,
+oper_code varchar(32));
+explain (costs off) select concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(bill_no
+,'-'),product_id),'-'),accumulate_value),
+'-'),item_code
+),'-'),primal_fee
+),'-'),discount_fee
+),'-'),accu_measure_id
+),'-'),measure_id
+),'-'),billing_type
+),'-'),tax_include
+),'-'),tax_fee
+),'-'),tax_rate
+),'-'),tax_measure_id
+),'-'),product_offering_id) from tb_1262216;
+       QUERY PLAN       
+------------------------
+ Seq Scan on tb_1262216
+(1 row)
+
+drop table tb_1262216;
 --clean
 set search_path=public;
 drop schema test_smp cascade;
