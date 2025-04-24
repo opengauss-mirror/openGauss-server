@@ -55,6 +55,7 @@ typedef struct {
     bool  query_shippable;    /* backward compatible */
     bool  current_shippable;  /* current query can push */
     bool  global_shippable;   /* the whole query can push */
+    int check_count;
 } shipping_context;
 
 typedef struct {
