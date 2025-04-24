@@ -1,0 +1,57 @@
+name: "任务"
+description: "提交新任务或需求"
+labels: ["enhancement", "task"]
+title: "[任务]: "
+type: "任务"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您为项目贡献新任务！请按照以下提示提供详细信息，以便我们更好地理解并跟进。
+
+  - type: input
+    id: task_title
+    attributes:
+      label: "任务标题"
+      description: "请为任务提供一个简洁明确的标题。"
+      placeholder: "例如：优化数据库查询速度"
+    validations:
+      required: true
+
+  - type: textarea
+    id: task_description
+    attributes:
+      label: "任务描述"
+      description: "请详细描述任务的内容、目标和预期成果。"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: "优先级"
+      description: "请选择任务的优先级。"
+      options:
+        - 高
+        - 中
+        - 低
+    validations:
+      required: true
+
+  - type: textarea
+    id: related_resources
+    attributes:
+      label: "相关资源或参考"
+      description: "请列出与任务相关的链接、文档或其他资源（如适用）。"
+      placeholder: "例如：[性能优化最佳实践](https://example.com)"
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional_notes
+    attributes:
+      label: "补充说明"
+      description: "请添加任何其他可能有助于理解任务的信息。"
+      placeholder: "例如：此任务需与 X 团队协调。"
+    validations:
+      required: false
