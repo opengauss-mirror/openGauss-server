@@ -2608,7 +2608,10 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
     } else if (RecoveryInProgress() && !t_thrd.xlog_cxt.InRecovery &&
         !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
         BlockNumber totalBlkNum = smgrnblocks_cached(smgr, forkNum);
-
+        /* when in failover worker thread should exit */
+        if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+            ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
+        }
         /* Update cached blocks */
         if (totalBlkNum == InvalidBlockNumber || blockNum >= totalBlkNum) {
             totalBlkNum = smgrnblocks(smgr, forkNum);
