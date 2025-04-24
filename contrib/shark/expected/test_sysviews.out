@@ -351,6 +351,552 @@ drop table school_department;
 drop table class;
 drop table teacher;
 drop table student;
+-- test sys views
+\d sys.all_objects
+                    View "sys.all_objects"
+       Column        |            Type             | Modifiers 
+---------------------+-----------------------------+-----------
+ name                | name                        | 
+ object_id           | oid                         | 
+ principal_id        | oid                         | 
+ schema_id           | oid                         | 
+ parent_object_id    | oid                         | 
+ type                | bpchar                      | 
+ type_desc           | nvarchar2                   | 
+ create_date         | timestamp without time zone | 
+ modify_date         | timestamp without time zone | 
+ is_ms_shipped       | "bit"                       | 
+ is_published        | "bit"                       | 
+ is_schema_published | "bit"                       | 
+
+\d sys.objects
+                      View "sys.objects"
+       Column        |            Type             | Modifiers 
+---------------------+-----------------------------+-----------
+ name                | name                        | 
+ object_id           | oid                         | 
+ principal_id        | oid                         | 
+ schema_id           | oid                         | 
+ parent_object_id    | oid                         | 
+ type                | bpchar                      | 
+ type_desc           | nvarchar2                   | 
+ create_date         | timestamp without time zone | 
+ modify_date         | timestamp without time zone | 
+ is_ms_shipped       | "bit"                       | 
+ is_published        | "bit"                       | 
+ is_schema_published | "bit"                       | 
+
+\d sys.tables
+                              View "sys.tables"
+               Column               |            Type             | Modifiers 
+------------------------------------+-----------------------------+-----------
+ name                               | name                        | 
+ object_id                          | oid                         | 
+ principal_id                       | oid                         | 
+ schema_id                          | oid                         | 
+ parent_object_id                   | oid                         | 
+ type                               | bpchar                      | 
+ type_desc                          | nvarchar2                   | 
+ create_date                        | timestamp without time zone | 
+ modify_date                        | timestamp without time zone | 
+ is_ms_shipped                      | "bit"                       | 
+ is_published                       | "bit"                       | 
+ is_schema_published                | "bit"                       | 
+ lob_data_space_id                  | oid                         | 
+ filestream_data_space_id           | integer                     | 
+ max_column_id_used                 | integer                     | 
+ lock_on_bulk_load                  | bit(1)                      | 
+ uses_ansi_nulls                    | bit(1)                      | 
+ is_replicated                      | bit(1)                      | 
+ has_replication_filter             | bit(1)                      | 
+ is_merge_published                 | bit(1)                      | 
+ is_sync_tran_subscribed            | bit(1)                      | 
+ has_unchecked_assembly_data        | bit(1)                      | 
+ text_in_row_limit                  | integer                     | 
+ large_value_types_out_of_row       | bit(1)                      | 
+ is_tracked_by_cdc                  | tinyint                     | 
+ lock_escalation                    | tinyint                     | 
+ lock_escalation_desc               | nvarchar2(60)               | 
+ is_filetable                       | bit(1)                      | 
+ is_memory_optimized                | "bit"                       | 
+ durability                         | tinyint                     | 
+ durability_desc                    | nvarchar2(60)               | 
+ temporal_type                      | tinyint                     | 
+ temporal_type_desc                 | nvarchar2(60)               | 
+ history_table_id                   | integer                     | 
+ is_remote_data_archive_enabled     | bit(1)                      | 
+ is_external                        | bit(1)                      | 
+ history_retention_period           | integer                     | 
+ history_retention_period_unit      | integer                     | 
+ history_retention_period_unit_desc | nvarchar2(10)               | 
+ is_node                            | bit(1)                      | 
+ is_edge                            | bit(1)                      | 
+
+\d sys.views
+                           View "sys.views"
+           Column            |            Type             | Modifiers 
+-----------------------------+-----------------------------+-----------
+ name                        | name                        | 
+ object_id                   | oid                         | 
+ principal_id                | oid                         | 
+ schema_id                   | oid                         | 
+ parent_object_id            | oid                         | 
+ type                        | character(2)                | 
+ type_desc                   | nvarchar2(60)               | 
+ create_date                 | timestamp without time zone | 
+ modify_date                 | timestamp without time zone | 
+ is_ms_shipped               | bit(1)                      | 
+ is_published                | bit(1)                      | 
+ is_schema_published         | bit(1)                      | 
+ is_replicated               | bit(1)                      | 
+ has_replication_filter      | bit(1)                      | 
+ has_opaque_metadata         | bit(1)                      | 
+ has_unchecked_assembly_data | bit(1)                      | 
+ with_check_option           | bit(1)                      | 
+ is_date_correlation_view    | bit(1)                      | 
+
+\d sys.all_columns
+                 View "sys.all_columns"
+           Column           |     Type      | Modifiers 
+----------------------------+---------------+-----------
+ object_id                  | oid           | 
+ name                       | name          | 
+ column_id                  | integer       | 
+ system_type_id             | oid           | 
+ user_type_id               | oid           | 
+ max_length                 | smallint      | 
+ precision                  | smallint      | 
+ scale                      | smallint      | 
+ collation_name             | name          | 
+ is_nullable                | bit(1)        | 
+ is_ansi_padded             | bit(1)        | 
+ is_rowguidcol              | bit(1)        | 
+ is_identity                | bit(1)        | 
+ is_computed                | bit(1)        | 
+ is_filestream              | bit(1)        | 
+ is_replicated              | "bit"         | 
+ is_non_sql_subscribed      | bit(1)        | 
+ is_merge_published         | bit(1)        | 
+ is_dts_replicated          | bit(1)        | 
+ is_xml_document            | bit(1)        | 
+ xml_collection_id          | oid           | 
+ default_object_id          | oid           | 
+ rule_object_id             | integer       | 
+ is_sparse                  | bit(1)        | 
+ is_column_set              | bit(1)        | 
+ generated_always_type      | tinyint       | 
+ generated_always_type_desc | nvarchar2(60) | 
+
+\d sys.columns
+                       View "sys.columns"
+               Column                |     Type      | Modifiers 
+-------------------------------------+---------------+-----------
+ object_id                           | oid           | 
+ name                                | name          | 
+ column_id                           | integer       | 
+ system_type_id                      | oid           | 
+ user_type_id                        | oid           | 
+ max_length                          | smallint      | 
+ precision                           | smallint      | 
+ scale                               | smallint      | 
+ collation_name                      | name          | 
+ is_nullable                         | bit(1)        | 
+ is_ansi_padded                      | bit(1)        | 
+ is_rowguidcol                       | bit(1)        | 
+ is_identity                         | bit(1)        | 
+ is_computed                         | bit(1)        | 
+ is_filestream                       | bit(1)        | 
+ is_replicated                       | "bit"         | 
+ is_non_sql_subscribed               | bit(1)        | 
+ is_merge_published                  | bit(1)        | 
+ is_dts_replicated                   | bit(1)        | 
+ is_xml_document                     | bit(1)        | 
+ xml_collection_id                   | oid           | 
+ default_object_id                   | oid           | 
+ rule_object_id                      | integer       | 
+ is_sparse                           | bit(1)        | 
+ is_column_set                       | bit(1)        | 
+ generated_always_type               | tinyint       | 
+ generated_always_type_desc          | nvarchar2(60) | 
+ encryption_type                     | integer       | 
+ encryption_type_desc                | nvarchar2(64) | 
+ encryption_algorithm_name           | name          | 
+ column_encryption_key_id            | oid           | 
+ column_encryption_key_database_name | name          | 
+ is_hidden                           | bit(1)        | 
+ is_masked                           | bit(1)        | 
+ graph_type                          | integer       | 
+ graph_type_desc                     | nvarchar2(60) | 
+
+\d sys.indexes
+                    View "sys.indexes"
+          Column           |       Type        | Modifiers 
+---------------------------+-------------------+-----------
+ object_id                 | oid               | 
+ name                      | name              | 
+ index_id                  | oid               | 
+ type                      | tinyint           | 
+ type_desc                 | nvarchar2(60)     | 
+ is_unique                 | bit(1)            | 
+ data_space_id             | oid               | 
+ ignore_dup_key            | bit(1)            | 
+ is_primary_key            | bit(1)            | 
+ is_unique_constraint      | bit(1)            | 
+ fill_factor               | tinyint           | 
+ is_padded                 | bit(1)            | 
+ is_disabled               | bit(1)            | 
+ is_hypothetical           | bit(1)            | 
+ allow_row_locks           | bit(1)            | 
+ allow_page_locks          | bit(1)            | 
+ has_filter                | bit(1)            | 
+ filter_definition         | character varying | 
+ compression_delay         | integer           | 
+ suppress_dup_key_messages | bit(1)            | 
+
+\d sys.procedures
+                        View "sys.procedures"
+          Column           |            Type             | Modifiers 
+---------------------------+-----------------------------+-----------
+ name                      | name                        | 
+ object_id                 | oid                         | 
+ principal_id              | oid                         | 
+ schema_id                 | oid                         | 
+ parent_object_id          | oid                         | 
+ type                      | bpchar                      | 
+ type_desc                 | nvarchar2                   | 
+ create_date               | timestamp without time zone | 
+ modify_date               | timestamp without time zone | 
+ is_ms_shipped             | "bit"                       | 
+ is_published              | "bit"                       | 
+ is_schema_published       | "bit"                       | 
+ is_auto_executed          | bit(1)                      | 
+ is_execution_replicated   | bit(1)                      | 
+ is_repl_serializable_only | bit(1)                      | 
+ skips_repl_constraints    | bit(1)                      | 
+
+drop table if exists t_index;
+NOTICE:  table "t_index" does not exist, skipping
+create table t_index (id int primary key, c2 int not null, c3 char(1), c4 text, c5 numeric(10, 2));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_index_pkey" for table "t_index"
+create unique index t_index_c2_uind on t_index(c2);
+create index t_index_c3_c2_ind on t_index(c3, c2);
+create index t_index_func_c4_ind on t_index(lower(c4));
+create index t_index_hash_c3_ind on t_index using hash(c3);
+create index t_index_filter_c5_ind on t_index (c5) where c5 > 100.00;
+drop table if exists t_foreign1;
+NOTICE:  table "t_foreign1" does not exist, skipping
+create table t_foreign1 (f_id int primary key, f_name text not null, f_age int default 18);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_foreign1_pkey" for table "t_foreign1"
+-- foreign key, check constraint
+drop table if exists t_foreign2;
+NOTICE:  table "t_foreign2" does not exist, skipping
+create table t_foreign2 (f_id int primary key not null, f_c2 int references t_foreign1(f_id), f_salary real check(f_salary > 0));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_foreign2_pkey" for table "t_foreign2"
+-- columns table
+create table t_column (c1 int, c2 text, c3 char(1), constraint t_stats_col_pk primary key (c1)) with (orientation = column);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_stats_col_pk" for table "t_column"
+-- temporal table
+create temp table t_temp_table as select * from t_index;
+-- view
+drop view if exists v_normal;
+NOTICE:  view "v_normal" does not exist, skipping
+create view v_normal as select * from t_index;
+-- view with check option
+drop view if exists v_check;
+NOTICE:  view "v_check" does not exist, skipping
+create view v_check as select * from t_index where id > 10 with check option;
+-- materialized view
+drop materialized view if exists mv_normal;
+NOTICE:  materialized view "mv_normal" does not exist, skipping
+create materialized view mv_normal as select * from t_foreign1;
+-- sequence
+create sequence if not exists seq_order
+    increment by 1
+    start with 1
+    nocycle;
+select seq_order.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+create table t_orders (order_id int primary key default nextval('seq_order'), order_date date);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_orders_pkey" for table "t_orders"
+-- synonym
+create synonym syn_tbl for t_orders;
+-- trigger
+create table t_tg_src (c1 int, c2 int, c3 int);
+create table t_tg_des (c1 int, c2 int, c3 int);
+create or replace function tri_insert_func() returns trigger as
+$$
+begin
+	insert into t_tg_des values (NEW.c1, NEW.c2, NEW.c3);
+	return NEW;
+end
+$$ language plpgsql;
+create trigger insert_trigger
+before insert on t_tg_src
+for each row
+execute procedure tri_insert_func();
+-- function
+create or replace function test_sub(a int, b int) returns int as $$
+begin
+	return a - b;
+end;
+$$ language plpgsql;
+-- procedure
+create or replace procedure test_sum(in a int, in b int, out c int) as
+begin 
+	c = a + b;
+end;
+/
+select name, s.nspname, po.relname, type, type_desc, is_ms_shipped, is_published, is_schema_published
+from sys.all_objects o
+inner join pg_namespace s on o.schema_id = s.oid
+left join pg_class po on po.oid = parent_object_id
+where s.nspname = 'sys_view_test'
+order by object_id;
+           name            |    nspname    |  relname   | type |       type_desc        | is_ms_shipped | is_published | is_schema_published 
+---------------------------+---------------+------------+------+------------------------+---------------+--------------+---------------------
+ t_seq                     | sys_view_test |            | SO   | SEQUENCE_OBJECT        | 0             | 0            | 0
+ tg_log                    | sys_view_test |            | FN   | SQL_SCALAR_FUNCTION    | 0             | 0            | 0
+ t_index                   | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+ t_index_pkey              | sys_view_test | t_index    | PK   | PRIMARY_KEY_CONSTRAINT | 0             | 0            | 0
+ t_foreign1                | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+                           | sys_view_test | t_foreign1 | D    | DE                     | 0             | 0            | 0
+ t_foreign1_pkey           | sys_view_test | t_foreign1 | PK   | PRIMARY_KEY_CONSTRAINT | 0             | 0            | 0
+ t_foreign2                | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+ t_foreign2_f_salary_check | sys_view_test | t_foreign2 | C    | CHECK_CONSTRAINT       | 0             | 0            | 0
+ t_foreign2_pkey           | sys_view_test | t_foreign2 | PK   | PRIMARY_KEY_CONSTRAINT | 0             | 0            | 0
+ t_foreign2_f_c2_fkey      | sys_view_test | t_foreign2 | F    | FOREIGN_KEY_CONSTRAINT | 0             | 0            | 0
+ t_column                  | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+ t_stats_col_pk            | sys_view_test | t_column   | PK   | PRIMARY_KEY_CONSTRAINT | 0             | 0            | 0
+ v_normal                  | sys_view_test |            | V    | VIEW                   | 0             | 0            | 0
+ v_check                   | sys_view_test |            | V    | VIEW                   | 0             | 0            | 0
+ mv_normal                 | sys_view_test |            | V    | VIEW                   | 0             | 0            | 0
+ seq_order                 | sys_view_test |            | SO   | SEQUENCE_OBJECT        | 0             | 0            | 0
+ t_orders                  | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+                           | sys_view_test | t_orders   | D    | DE                     | 0             | 0            | 0
+ t_orders_pkey             | sys_view_test | t_orders   | PK   | PRIMARY_KEY_CONSTRAINT | 0             | 0            | 0
+ syn_tbl                   | sys_view_test |            | SN   | SYNONYM                | 0             | 0            | 0
+ t_tg_src                  | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+ t_tg_des                  | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+ tri_insert_func           | sys_view_test |            | FN   | SQL_SCALAR_FUNCTION    | 0             | 0            | 0
+ test_sub                  | sys_view_test |            | FN   | SQL_SCALAR_FUNCTION    | 0             | 0            | 0
+ test_sum                  | sys_view_test |            | P    | SQL_STORED_PROCEDURE   | 0             | 0            | 0
+(26 rows)
+
+select name, s.nspname, po.relname, type, type_desc, is_ms_shipped, is_published, is_schema_published
+from sys.objects o
+inner join pg_namespace s on o.schema_id = s.oid
+left join pg_class po on po.oid = parent_object_id
+where s.nspname = 'sys_view_test'
+order by object_id;
+           name            |    nspname    |  relname   | type |       type_desc        | is_ms_shipped | is_published | is_schema_published 
+---------------------------+---------------+------------+------+------------------------+---------------+--------------+---------------------
+ t_seq                     | sys_view_test |            | SO   | SEQUENCE_OBJECT        | 0             | 0            | 0
+ t_index                   | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+ t_index_pkey              | sys_view_test | t_index    | PK   | PRIMARY_KEY_CONSTRAINT | 0             | 0            | 0
+ t_foreign1                | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+                           | sys_view_test | t_foreign1 | D    | DE                     | 0             | 0            | 0
+ t_foreign1_pkey           | sys_view_test | t_foreign1 | PK   | PRIMARY_KEY_CONSTRAINT | 0             | 0            | 0
+ t_foreign2                | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+ t_foreign2_f_salary_check | sys_view_test | t_foreign2 | C    | CHECK_CONSTRAINT       | 0             | 0            | 0
+ t_foreign2_pkey           | sys_view_test | t_foreign2 | PK   | PRIMARY_KEY_CONSTRAINT | 0             | 0            | 0
+ t_foreign2_f_c2_fkey      | sys_view_test | t_foreign2 | F    | FOREIGN_KEY_CONSTRAINT | 0             | 0            | 0
+ t_column                  | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+ t_stats_col_pk            | sys_view_test | t_column   | PK   | PRIMARY_KEY_CONSTRAINT | 0             | 0            | 0
+ v_normal                  | sys_view_test |            | V    | VIEW                   | 0             | 0            | 0
+ v_check                   | sys_view_test |            | V    | VIEW                   | 0             | 0            | 0
+ mv_normal                 | sys_view_test |            | V    | VIEW                   | 0             | 0            | 0
+ seq_order                 | sys_view_test |            | SO   | SEQUENCE_OBJECT        | 0             | 0            | 0
+ t_orders                  | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+                           | sys_view_test | t_orders   | D    | DE                     | 0             | 0            | 0
+ t_orders_pkey             | sys_view_test | t_orders   | PK   | PRIMARY_KEY_CONSTRAINT | 0             | 0            | 0
+ syn_tbl                   | sys_view_test |            | SN   | Synonym                | 0             | 0            | 0
+ t_tg_src                  | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+ t_tg_des                  | sys_view_test |            | U    | USER_TABLE             | 0             | 0            | 0
+ test_sum                  | sys_view_test |            | P    | SQL_STORED_PROCEDURE   | 0             | 0            | 0
+(23 rows)
+
+select 
+    name, s.nspname, type, type_desc, is_ms_shipped, is_published, is_schema_published,
+    max_column_id_used, uses_ansi_nulls, is_replicated, is_memory_optimized, durability, durability_desc, temporal_type, temporal_type_desc
+from sys.tables t
+inner join pg_namespace s on t.schema_id = s.oid
+where s.nspname = 'sys_view_test'
+order by object_id;
+    name    |    nspname    | type | type_desc  | is_ms_shipped | is_published | is_schema_published | max_column_id_used | uses_ansi_nulls | is_replicated | is_memory_optimized | durability | durability_desc | temporal_type | temporal_type_desc 
+------------+---------------+------+------------+---------------+--------------+---------------------+--------------------+-----------------+---------------+---------------------+------------+-----------------+---------------+--------------------
+ t_index    | sys_view_test | U    | USER_TABLE | 0             | 0            | 0                   |                  5 | 1               | 1             | 0                   | 0          | SCHEMA_AND_DATA | 0             | NON_TEMPORAL_TABLE
+ t_foreign1 | sys_view_test | U    | USER_TABLE | 0             | 0            | 0                   |                  3 | 1               | 1             | 0                   | 0          | SCHEMA_AND_DATA | 0             | NON_TEMPORAL_TABLE
+ t_foreign2 | sys_view_test | U    | USER_TABLE | 0             | 0            | 0                   |                  3 | 1               | 1             | 0                   | 0          | SCHEMA_AND_DATA | 0             | NON_TEMPORAL_TABLE
+ t_column   | sys_view_test | U    | USER_TABLE | 0             | 0            | 0                   |                  3 | 1               | 1             | 0                   | 0          | SCHEMA_AND_DATA | 0             | NON_TEMPORAL_TABLE
+ t_orders   | sys_view_test | U    | USER_TABLE | 0             | 0            | 0                   |                  2 | 1               | 1             | 0                   | 0          | SCHEMA_AND_DATA | 0             | NON_TEMPORAL_TABLE
+ t_tg_src   | sys_view_test | U    | USER_TABLE | 0             | 0            | 0                   |                  3 | 1               | 1             | 0                   | 0          | SCHEMA_AND_DATA | 0             | NON_TEMPORAL_TABLE
+ t_tg_des   | sys_view_test | U    | USER_TABLE | 0             | 0            | 0                   |                  3 | 1               | 1             | 0                   | 0          | SCHEMA_AND_DATA | 0             | NON_TEMPORAL_TABLE
+(7 rows)
+
+select name, s.nspname, type, type_desc, is_ms_shipped, is_published, is_schema_published, with_check_option
+from sys.views v
+inner join pg_namespace s on v.schema_id = s.oid
+where s.nspname = 'sys_view_test'
+order by object_id;
+   name    |    nspname    | type | type_desc | is_ms_shipped | is_published | is_schema_published | with_check_option 
+-----------+---------------+------+-----------+---------------+--------------+---------------------+-------------------
+ v_normal  | sys_view_test | V    | VIEW      | 0             | 0            | 0                   | 0
+ v_check   | sys_view_test | V    | VIEW      | 0             | 0            | 0                   | 1
+ mv_normal | sys_view_test | V    | VIEW      | 0             | 0            | 0                   | 0
+(3 rows)
+
+select t.relname, c.name, column_id, max_length, precision, scale, is_nullable, is_computed, is_replicated, generated_always_type, generated_always_type_desc
+from sys.all_columns c
+inner join pg_class t on c.object_id = t.oid
+inner join pg_namespace s on t.relnamespace = s.oid
+where s.nspname = 'sys_view_test'
+order by object_id, column_id;
+  relname   |    name    | column_id | max_length | precision | scale | is_nullable | is_computed | is_replicated | generated_always_type | generated_always_type_desc 
+------------+------------+-----------+------------+-----------+-------+-------------+-------------+---------------+-----------------------+----------------------------
+ t_index    | id         |         1 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_index    | c2         |         2 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_index    | c3         |         3 |          5 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_index    | c4         |         4 |         -1 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_index    | c5         |         5 |         15 |        10 |     2 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign1 | f_id       |         1 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign1 | f_name     |         2 |         -1 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign1 | f_age      |         3 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign2 | f_id       |         1 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign2 | f_c2       |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign2 | f_salary   |         3 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_column   | c1         |         1 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_column   | c2         |         2 |         -1 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_column   | c3         |         3 |          5 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_normal   | id         |         1 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_normal   | c2         |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_normal   | c3         |         3 |          5 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_normal   | c4         |         4 |         -1 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_normal   | c5         |         5 |         15 |        10 |     2 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_check    | id         |         1 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_check    | c2         |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_check    | c3         |         3 |          5 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_check    | c4         |         4 |         -1 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_check    | c5         |         5 |         15 |        10 |     2 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ mv_normal  | f_id       |         1 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ mv_normal  | f_name     |         2 |         -1 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ mv_normal  | f_age      |         3 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_orders   | order_id   |         1 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_orders   | order_date |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_src   | c1         |         1 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_src   | c2         |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_src   | c3         |         3 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_des   | c1         |         1 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_des   | c2         |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_des   | c3         |         3 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+(35 rows)
+
+select t.relname, c.name, column_id, max_length, precision, scale, is_nullable, is_computed, is_replicated, generated_always_type, generated_always_type_desc
+from sys.columns c
+inner join pg_class t on c.object_id = t.oid
+inner join pg_namespace s on t.relnamespace = s.oid
+where s.nspname = 'sys_view_test'
+order by object_id, column_id;
+  relname   |    name    | column_id | max_length | precision | scale | is_nullable | is_computed | is_replicated | generated_always_type | generated_always_type_desc 
+------------+------------+-----------+------------+-----------+-------+-------------+-------------+---------------+-----------------------+----------------------------
+ t_index    | id         |         1 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_index    | c2         |         2 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_index    | c3         |         3 |          5 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_index    | c4         |         4 |         -1 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_index    | c5         |         5 |         15 |        10 |     2 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign1 | f_id       |         1 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign1 | f_name     |         2 |         -1 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign1 | f_age      |         3 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign2 | f_id       |         1 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign2 | f_c2       |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_foreign2 | f_salary   |         3 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_column   | c1         |         1 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_column   | c2         |         2 |         -1 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_column   | c3         |         3 |          5 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_normal   | id         |         1 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_normal   | c2         |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_normal   | c3         |         3 |          5 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_normal   | c4         |         4 |         -1 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_normal   | c5         |         5 |         15 |        10 |     2 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_check    | id         |         1 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_check    | c2         |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_check    | c3         |         3 |          5 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_check    | c4         |         4 |         -1 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ v_check    | c5         |         5 |         15 |        10 |     2 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ mv_normal  | f_id       |         1 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ mv_normal  | f_name     |         2 |         -1 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ mv_normal  | f_age      |         3 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_orders   | order_id   |         1 |          4 |         0 |     0 | 0           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_orders   | order_date |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_src   | c1         |         1 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_src   | c2         |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_src   | c3         |         3 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_des   | c1         |         1 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_des   | c2         |         2 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+ t_tg_des   | c3         |         3 |          4 |         0 |     0 | 1           | 0           | 0             | 0                     | NOT_APPLICABLE
+(35 rows)
+
+select t.relname, name, i.type, type_desc, i.is_unique, is_primary_key, is_unique_constraint, fill_factor, is_disabled, has_filter, filter_definition
+from sys.indexes i
+inner join pg_class t on i.object_id = t.oid
+inner join pg_namespace s on t.relnamespace = s.oid
+where s.nspname = 'sys_view_test'
+order by index_id;
+  relname   |         name          | type |        type_desc         | is_unique | is_primary_key | is_unique_constraint | fill_factor | is_disabled | has_filter |                                                                                                                                                                                                                                                                    filter_definition                                                                                                                                                                                                                                                                    
+------------+-----------------------+------+--------------------------+-----------+----------------+----------------------+-------------+-------------+------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ t_index    | t_index_pkey          | 2    | NONCLUSTERED             | 1         | 1              | 0                    | 0           | 0           | 0          | 
+ t_index    | t_index_c2_uind       | 2    | NONCLUSTERED             | 1         | 0              | 0                    | 0           | 0           | 0          | 
+ t_index    | t_index_c3_c2_ind     | 2    | NONCLUSTERED             | 0         | 0              | 0                    | 0           | 0           | 0          | 
+ t_index    | t_index_func_c4_ind   | 2    | NONCLUSTERED             | 0         | 0              | 0                    | 0           | 0           | 0          | 
+ t_index    | t_index_hash_c3_ind   | 7    | NONCLUSTERED HASH        | 0         | 0              | 0                    | 0           | 0           | 0          | 
+ t_index    | t_index_filter_c5_ind | 2    | NONCLUSTERED             | 0         | 0              | 0                    | 0           | 0           | 1          | {OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 5 :vartype 1700 :vartypmod 655366 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 57} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :ismaxvalue false :location 62 :constvalue 8 [ 32 0 0 0 0 -127 100 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 60}
+ t_foreign1 | t_foreign1_pkey       | 2    | NONCLUSTERED             | 1         | 1              | 0                    | 0           | 0           | 0          | 
+ t_foreign2 | t_foreign2_pkey       | 2    | NONCLUSTERED             | 1         | 1              | 0                    | 0           | 0           | 0          | 
+ t_column   | t_stats_col_pk        | 6    | NONCLUSTERED COLUMNSTORE | 1         | 1              | 0                    | 0           | 0           | 0          | 
+ t_orders   | t_orders_pkey         | 2    | NONCLUSTERED             | 1         | 1              | 0                    | 0           | 0           | 0          | 
+(10 rows)
+
+select name, s.nspname, type, type_desc, is_ms_shipped, is_published
+from sys.procedures p
+inner join pg_namespace s on p.schema_id = s.oid
+where s.nspname = 'sys_view_test'
+order by object_id;
+   name   |    nspname    | type |      type_desc       | is_ms_shipped | is_published 
+----------+---------------+------+----------------------+---------------+--------------
+ test_sum | sys_view_test | P    | SQL_STORED_PROCEDURE | 0             | 0
+(1 row)
+
+-- disable index
+alter index t_index_func_c4_ind disable;
+select t.relname, name, i.type, type_desc, is_disabled
+from sys.indexes i
+inner join pg_class t on i.object_id = t.oid
+inner join pg_namespace s on t.relnamespace = s.oid
+where s.nspname = 'sys_view_test' and name = 't_index_func_c4_ind';
+ relname |        name         | type |  type_desc   | is_disabled 
+---------+---------------------+------+--------------+-------------
+ t_index | t_index_func_c4_ind | 2    | NONCLUSTERED | 1
+(1 row)
+
+drop procedure test_sum;
+drop function test_sub;
+drop table t_tg_des;
+drop table t_tg_src;
+drop function tri_insert_func;
+drop synonym syn_tbl;
+drop table t_orders;
+drop sequence seq_order;
+drop materialized view mv_normal;
+drop view v_check;
+drop view v_normal;
+drop table t_temp_table;
+drop table t_column;
+drop table t_foreign2;
+drop table t_foreign1;
+drop table t_index;
 reset search_path;
 drop schema sys_view_test cascade;
 NOTICE:  drop cascades to 2 other objects
