@@ -37,8 +37,8 @@ extern void AddStartWithTargetRelInfo(ParseState* pstate, Node* relNode,
 extern void AdaptSWSelectStmt(ParseState *pstate, SelectStmt *stmt);
 extern bool IsQuerySWCBRewrite(Query *query);
 extern bool IsSWCBRewriteRTE(RangeTblEntry *rte);
-extern Datum GetTypeZeroValue(Form_pg_attribute att_tup);
-typedef Datum (*getTypeZeroValueFunc)(Form_pg_attribute att_tup);
+extern Datum GetTypeZeroValue(Form_pg_attribute att_tup, bool can_ignore = false);
+typedef Datum (*getTypeZeroValueFunc)(Form_pg_attribute att_tup, bool can_ignore);
 extern PlannedStmt* getCursorStreamFromFuncArg(Node* node, CursorExpression** ce = NULL);
 
 #endif /* PARSE_EXPR_H */

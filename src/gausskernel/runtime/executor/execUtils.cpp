@@ -2805,10 +2805,10 @@ void PthreadRwLockInit(pthread_rwlock_t* rwlock, pthread_rwlockattr_t *attr)
 /*
  * Get defaulted value of specific type
  */
-Datum GetTypeZeroValue(Form_pg_attribute att_tup)
+Datum GetTypeZeroValue(Form_pg_attribute att_tup, bool can_ignore)
 {
     if (u_sess->hook_cxt.getTypeZeroValueHook != NULL) {
-        return ((getTypeZeroValueFunc)(u_sess->hook_cxt.getTypeZeroValueHook))(att_tup);
+        return ((getTypeZeroValueFunc)(u_sess->hook_cxt.getTypeZeroValueHook))(att_tup, can_ignore);
     }
     Datum result;
     switch (att_tup->atttypid) {
@@ -2970,7 +2970,7 @@ Datum GetTypeZeroValue(Form_pg_attribute att_tup)
  * Replace tuple from the slot with a new one. The new tuple will replace null column with defaulted values according to
  * its type.
  */
-Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot)
+Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot, bool canIgnore)
 {
     /* find out all null column first */
     int natts = tupleDesc->natts;
@@ -2989,7 +2989,7 @@ Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot)
     int attrChk;
     for (attrChk = 1; attrChk <= natts; attrChk++) {
         if (tupleDesc->attrs[attrChk - 1].attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
-            values[attrChk - 1] = GetTypeZeroValue(&tupleDesc->attrs[attrChk - 1]);
+            values[attrChk - 1] = GetTypeZeroValue(&tupleDesc->attrs[attrChk - 1], canIgnore);
             replaces[attrChk - 1] = true;
         }
     }

@@ -733,8 +733,7 @@ extern void ExecSimpleRelationDelete(EState *estate, EPQState *epqstate, TupleTa
     FakeRelationPartition *relAndPart);
 extern void CheckCmdReplicaIdentity(Relation rel, CmdType cmd);
 extern void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeRelationPartition *relAndPart);
-extern Datum GetTypeZeroValue(Form_pg_attribute att_tup);
-extern Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot* slot);
+extern Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot* slot, bool canIgnore = false);
 
 extern Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 extern int ResourceOwnerForgetIfExistPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex, bool trace);
