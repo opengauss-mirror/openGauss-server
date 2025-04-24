@@ -158,6 +158,8 @@ static bool DispatchRepOriginRecord(XLogReaderState *record, List *expectedTLIs,
 
 static bool DispatchUBTreeRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchUBTree2Record(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
+static bool DispatchUBTree3Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchUBTree4Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool RmgrRecordInfoValid(XLogReaderState *record, uint8 minInfo, uint8 maxInfo);
 static bool RmgrGistRecordInfoValid(XLogReaderState *record, uint8 minInfo, uint8 maxInfo);
 
@@ -227,6 +229,10 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
     { DispatchLogicalDDLMsgRecord, RmgrRecordInfoValid, RM_LOGICALDDLMSG_ID, XLOG_LOGICAL_DDL_MESSAGE,
         XLOG_LOGICAL_DDL_MESSAGE },
     { DispatchGenericRecord, RmgrRecordInfoValid, RM_GENERIC_ID, XLOG_GENERIC_LOG, XLOG_GENERIC_LOG },
+    { DispatchUBTree3Record, RmgrRecordInfoValid, RM_UBTREE3_ID, XLOG_UBTREE3_INSERT_PCR_INTERNAL,
+        XLOG_UBTREE3_INSERT_PCR_META },
+    { DispatchUBTree4Record, RmgrRecordInfoValid, RM_UBTREE4_ID, XLOG_UBTREE4_UNLINK_PAGE,
+        XLOG_UBTREE4_MARK_PAGE_HALFDEAD },
 };
 
 const int REDO_WAIT_SLEEP_TIME = 5000; /* 5ms */
@@ -1392,6 +1398,18 @@ static bool DispatchUBTreeRecord(XLogReaderState *record, List *expectedTLIs, Ti
 static bool DispatchUBTree2Record(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
 {
     DispatchRecordWithPages(record, expectedTLIs);
+    return false;
+}
+
+static bool DispatchUBTree3Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
+{
+   /* pcr not currently support extreme rto */
+    return false;
+}
+
+static bool DispatchUBTree4Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
+{
+    /* pcr not currently support extreme rto */
     return false;
 }
 
