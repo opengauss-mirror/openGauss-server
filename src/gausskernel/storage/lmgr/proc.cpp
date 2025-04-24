@@ -1902,6 +1902,10 @@ static int ProcCheckMyWaitStatus(LOCALLOCK* locallock, int waitSec, bool *allowA
                                         t_thrd.proc_cxt.MyProcPid, modename, buf.data, msecs, usecs)));
             }
         }
+        
+        t_thrd.int_cxt.InterruptHoldoffCount++;
+        LockErrorCleanup();
+        t_thrd.int_cxt.InterruptHoldoffCount--;
 
         /* ereport when we reach lock wait timeout to avoid distributed deadlock. */
         if (t_thrd.storage_cxt.deadlock_state == DS_LOCK_TIMEOUT) {
