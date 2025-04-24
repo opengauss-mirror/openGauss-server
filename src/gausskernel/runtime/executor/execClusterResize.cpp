@@ -927,7 +927,7 @@ void BlockUnsupportedDDL(const Node* parsetree)
  */
 bool redis_func_shippable(Oid funcid)
 {
-    const char* func_name = get_func_name(funcid);
+    char* func_name = get_func_name(funcid);
     Oid* argstype = NULL;
     int nargs;
     Oid rettype = InvalidOid;
@@ -956,6 +956,7 @@ bool redis_func_shippable(Oid funcid)
         pfree_ext(argstype);
         argstype = NULL;
     }
+    pfree(func_name);
 
     return result;
 }
