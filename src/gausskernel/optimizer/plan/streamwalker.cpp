@@ -450,6 +450,14 @@ static void stream_walker_query(Query* query, shipping_context *cxt)
         cxt->current_shippable = false;
     }
 
+    if (u_sess->parser_cxt.has_equal_uservar) {
+        /*
+         * turn off dop for query with set uservar, as the uservar value is
+         * affected by the execution order, impacting the result set.
+         */
+        u_sess->opt_cxt.query_dop = 1;
+    }
+
     /* Mark query's can_push and global_shippable flag. */
     query->can_push = cxt->current_shippable;
     cxt->global_shippable = cxt->global_shippable && cxt->current_shippable;
