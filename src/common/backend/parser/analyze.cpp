@@ -3102,6 +3102,29 @@ static List* removeTargetListByNameList(List* targetList, List* nameList)
     return targetList;
 }
 
+
+char* AConstToString(A_Const *con)
+{
+    StringInfoData buf;
+    initStringInfo(&buf);
+    Value *v = &con->val;
+    switch (v->type) {
+        case T_Integer:
+            appendStringInfo(&buf, "%ld", intVal(v));
+            break;
+        case T_Float:
+        case T_String:
+        case T_BitString:
+            appendStringInfo(&buf, "%s", strVal(v));
+            break;
+        case T_Null:
+        default:
+            /* nothing to do */
+            break;
+    }
+    return buf.data;
+}
+
 static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
 {
     List *parsetree_list;
@@ -3151,14 +3174,16 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
 
     foreach(targetCell, stmt_targetList) {
         ResTarget *resTarget1 = (ResTarget *)lfirst(targetCell);
-        ColumnRef *cref = (ColumnRef *)resTarget1->val;
-        Node *field = (Node *)linitial(cref->fields);
-        if (IsA(field, A_Star)) {
-            if (!targetList) {
-                aStarList = list_make1(lfirst(targetCell));
-                targetList = transformTargetList(pstate1, aStarList, EXPR_KIND_SELECT_TARGET);
-                free_parsestate(pstate1);
-                break;
+        if (IsA(resTarget1->val, ColumnRef)) {
+            ColumnRef *cref = (ColumnRef *)resTarget1->val;
+            Node *field = (Node *)linitial(cref->fields);
+            if (IsA(field, A_Star)) {
+                if (!targetList) {
+                    aStarList = list_make1(lfirst(targetCell));
+                    targetList = transformTargetList(pstate1, aStarList, EXPR_KIND_SELECT_TARGET);
+                    free_parsestate(pstate1);
+                    break;
+                }
             }
         }
     }
@@ -3181,15 +3206,23 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
                 }
                 for (targetCell = list_head(stmt_targetList); targetCell; targetCell = next) {
                     ResTarget *rt = (ResTarget *)lfirst(targetCell);
-                    Node *field = (Node *)linitial(((ColumnRef *)rt->val)->fields);
-                    if (IsA(field, A_Star))
-                        continue;
-                    const char *colName1 = strVal((Value *)field);
+                    char* colName1 = NULL;
+                    if (IsA(rt->val, A_Const)) {
+                        A_Const* a_const = (A_Const*)rt->val;
+                        colName1 = AConstToString(a_const);
+                    } else {
+                        Node *field = (Node *)linitial(((ColumnRef *)rt->val)->fields);
+                        if (IsA(field, A_Star))
+                            continue;
+                        colName1 = pstrdup(strVal((Value *)field));
+                    }
                     next = lnext(targetCell);
                     if (strcmp(colName1, colName) == 0)
                         stmt_targetList = list_delete_cell(stmt_targetList, targetCell, prev);
                     else
                         prev = targetCell;
+
+                    pfree_ext(colName1);
                 }
             } else {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("NOT ROTATE in clause error"),
@@ -3214,15 +3247,22 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
 
         foreach (targetCell, stmt_targetList) {
             ResTarget *resTarget1 = (ResTarget *)lfirst(targetCell);
-            ColumnRef *cref = (ColumnRef *)resTarget1->val;
-            Node *field = (Node *)linitial(cref->fields);
-            if (IsA(field, A_Star)) {
-                foreach (cell1, targetList) {
-                    TargetEntry *te = (TargetEntry *)lfirst(cell1);
-                    appendStringInfo(&union_all_sql, "%s, ", te->resname);
-                }
-            } else
-                appendStringInfo(&union_all_sql, "%s, ", strVal((Value *)field));
+            if (IsA(resTarget1->val, A_Const)) {
+                A_Const* a_const = (A_Const*)resTarget1->val;
+                char* res_name = AConstToString(a_const);
+                appendStringInfo(&union_all_sql, "'%s', ", res_name);
+                pfree(res_name);
+            } else {
+                ColumnRef *cref = (ColumnRef *)resTarget1->val;
+                Node *field = (Node *)linitial(cref->fields);
+                if (IsA(field, A_Star)) {
+                    foreach (cell1, targetList) {
+                        TargetEntry *te = (TargetEntry *)lfirst(cell1);
+                        appendStringInfo(&union_all_sql, "%s, ", te->resname);
+                    }
+                } else
+                    appendStringInfo(&union_all_sql, "%s, ", strVal((Value *)field));
+            }
         }
 
         if (!unrotateinCell->aliaList) {
