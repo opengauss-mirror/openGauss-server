@@ -1203,7 +1203,8 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                 TupleTableSlot *tmp_slot = state->mt_insert_constr_slot == NULL ? slot : state->mt_insert_constr_slot;
                 if (!ExecConstraints(result_rel_info, tmp_slot, estate, false, replaceNull)) {
                     if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
-                        tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
+                        bool can_ignore = estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore;
+                        tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot, can_ignore);
                         /* Double check constraints in case that new val in column with not null constraints
                          * violated check constraints */
                         ExecConstraints(result_rel_info, tmp_slot, estate);
@@ -1248,7 +1249,8 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
             TupleTableSlot *tmp_slot = state->mt_insert_constr_slot == NULL ? slot : state->mt_insert_constr_slot;
             if (!ExecConstraints(result_rel_info, tmp_slot, estate, true, replaceNull)) {
                 if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
-                    tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
+                    bool canIgnore = estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore;
+                    tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot, canIgnore);
                     /* Double check constraints in case that new val in column with not null constraints
                      * violated check constraints */
                     ExecConstraints(result_rel_info, tmp_slot, estate, true);
@@ -2250,7 +2252,8 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                 TupleTableSlot *tmp_slot = node->mt_insert_constr_slot == NULL ? slot : node->mt_insert_constr_slot;
                 if (!ExecConstraints(result_rel_info, tmp_slot, estate, false, CheckPluginReplaceNull())) {
                     if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
-                        tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
+                        bool can_ignore = estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore;
+                        tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot, can_ignore);
                         /* Double check constraints in case that new val in column with not null constraints
                          * violated check constraints */
                         ExecConstraints(result_rel_info, tmp_slot, estate);
@@ -2311,7 +2314,8 @@ lreplace:
             TupleTableSlot *tmp_slot = node->mt_update_constr_slot == NULL ? slot : node->mt_update_constr_slot;
             if (!ExecConstraints(result_rel_info, tmp_slot, estate, false, CheckPluginReplaceNull())) {
                 if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
-                    tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
+                    bool canIgnore = estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore;
+                    tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot, canIgnore);
                     /* Double check constraints in case that new val in column with not null constraints
                      * violated check constraints */
                     ExecConstraints(result_rel_info, tmp_slot, estate);

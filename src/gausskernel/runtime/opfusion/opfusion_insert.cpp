@@ -333,7 +333,9 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
                                     partRel);
                 return 0;
             }
-            tuple = ReplaceTupleNullCol(RelationGetDescr(result_rel_info->ri_RelationDesc), m_local.m_reslot);
+            bool can_ignore = m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore;
+            tuple =
+                ReplaceTupleNullCol(RelationGetDescr(result_rel_info->ri_RelationDesc), m_local.m_reslot, can_ignore);
             /* Double check constraints in case that new val in column with not null constraints
              * violated check constraints */
             ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate, true);
@@ -832,7 +834,8 @@ TupleTableSlot* insert_real(ModifyTableState* state, TupleTableSlot* slot, EStat
             /* do nothing */
         } else if (!ExecConstraints(result_rel_info, tmp_slot, estate, true)) {
             if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
-                tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
+                bool canIgnore = estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore;
+                tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot, canIgnore);
                 /*
                  * Double check constraints in case that new val in column with not null constraints
                  * violated check constraints

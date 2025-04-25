@@ -404,7 +404,9 @@ lreplace:
                 if (u_sess->utils_cxt.sql_ignore_strategy_val != SQL_OVERWRITE_NULL) {
                     break;
                 }
-                tup = ReplaceTupleNullCol(RelationGetDescr(result_rel_info->ri_RelationDesc), m_local.m_reslot);
+                bool can_ignore = m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore;
+                tup = ReplaceTupleNullCol(RelationGetDescr(result_rel_info->ri_RelationDesc), m_local.m_reslot,
+                                          can_ignore);
                 /* Double check constraints in case that new val in column with not null constraints
                  * violated check constraints */
                 ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
