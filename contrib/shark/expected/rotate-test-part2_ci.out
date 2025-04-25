@@ -15,7 +15,7 @@ SELECT *
 FROM ( SELECT year, product, amount  FROM sales ) AS source_table
 rotate (count(amount) FOR product IN (A, B, a)
 ) as pivot;
- year | A | B | a 
+ year | a | b | a 
 ------+---+---+---
  2021 | 1 | 1 | 1
  2020 | 1 | 1 | 1
@@ -25,7 +25,7 @@ SELECT *
 FROM ( SELECT year, product, amount  FROM sales ) AS source_table
 rotate (count(amount) FOR product IN ([A], [B], "A", "B", C)
 ) as pivot;
- year | A | B | A | B | C 
+ year | a | b | a | b | c 
 ------+---+---+---+---+---
  2021 | 1 | 1 | 1 | 1 | 0
  2020 | 1 | 1 | 1 | 1 | 0
@@ -34,7 +34,7 @@ rotate (count(amount) FOR product IN ([A], [B], "A", "B", C)
 SELECT *
 FROM ( SELECT year, product, amount  FROM sales) AS source_table 
 rotate ( count(amount) FOR product IN (A, B) );
- year | A | B 
+ year | a | b 
 ------+---+---
  2021 | 1 | 1
  2020 | 1 | 1
@@ -43,7 +43,7 @@ rotate ( count(amount) FOR product IN (A, B) );
 SELECT *
 FROM ( SELECT year, product, amount  FROM sales) AS source_table 
 rotate ( count(amount) FOR product IN (A, B) ) pivot_table;
- year | A | B 
+ year | a | b 
 ------+---+---
  2021 | 1 | 1
  2020 | 1 | 1
@@ -53,7 +53,7 @@ SELECT *
 FROM ( SELECT year, product, amount  FROM sales ) AS source_table
 rotate (count(amount) FOR product IN (A, B, 'A', 'SSS', 1, 2, 2.3, 1011)
 ) as pivot_table;
- year | A | B | A | SSS | 1 | 2 | 2.3 | 1011 
+ year | a | b | a | sss | 1 | 2 | 2.3 | 1011 
 ------+---+---+---+-----+---+---+-----+------
  2021 | 1 | 1 | 1 |   0 | 0 | 0 |   0 |    0
  2020 | 1 | 1 | 1 |   0 | 0 | 0 |   0 |    0
@@ -63,7 +63,7 @@ SELECT *
 FROM ( SELECT year, product, amount  FROM sales ) AS source_table
 rotate (count(*) FOR product IN (A, B)
 ) as pivot; 
- year | amount | A | B 
+ year | amount | a | b 
 ------+--------+---+---
  2021 | 250.00 | 0 | 1
  2021 | 150.00 | 1 | 0
@@ -75,7 +75,7 @@ SELECT *
 FROM ( SELECT year, product, amount  FROM sales ) AS source_table
 rotate (count(amount) FOR product IN (A, B)
 ) as pivot order by year;
- year | A | B 
+ year | a | b 
 ------+---+---
  2020 | 1 | 1
  2021 | 1 | 1
@@ -85,7 +85,7 @@ SELECT *
 FROM ( SELECT year, product, amount  FROM sales ) AS source_table
 rotate (count(*) FOR product IN (A, B)
 ) as pivot_table where pivot_table.year > 1; 
- year | amount | A | B 
+ year | amount | a | b 
 ------+--------+---+---
  2021 | 250.00 | 0 | 1
  2021 | 150.00 | 1 | 0
@@ -144,7 +144,7 @@ end;
   from CategoryTable2 rotate  (max(CategoryFieldValue )
   for CategoryFieldName
   in (ItemAssetCategory_Code, ItemCostCategory_Code, ItemCreditCategory_Code, ItemMRPCategory_Code, ItemPriceCategory_Code, ItemProductionCategory_Code, ItemPurchaseCategory_Code, ItemSaleCategory_Code, ItemStockCategory_Code, ItemAssetCategory_Name, ItemCostCategory_Name, ItemCreditCategory_Name, ItemMRPCategory_Name, ItemPriceCategory_Name, ItemProductionCategory_Name, ItemPurchaseCategory_Name, ItemSaleCategory_Name, ItemStockCategory_Name));  
- mergedocid | ItemAssetCategory_Code | ItemCostCategory_Code | ItemCreditCategory_Code | ItemMRPCategory_Code | ItemPriceCategory_Code | ItemProductionCategory_Code | ItemPurchaseCategory_Code | ItemSaleCategory_Code | ItemStockCategory_Code | ItemAssetCategory_Name | ItemCostCategory_Name | ItemCreditCategory_Name | ItemMRPCategory_Name | ItemPriceCategory_Name | ItemProductionCategory_Name | ItemPurchaseCategory_Name | ItemSaleCategory_Name | ItemStockCategory_Name 
+ mergedocid | itemassetcategory_code | itemcostcategory_code | itemcreditcategory_code | itemmrpcategory_code | itempricecategory_code | itemproductioncategory_code | itempurchasecategory_code | itemsalecategory_code | itemstockcategory_code | itemassetcategory_name | itemcostcategory_name | itemcreditcategory_name | itemmrpcategory_name | itempricecategory_name | itemproductioncategory_name | itempurchasecategory_name | itemsalecategory_name | itemstockcategory_name 
 ------------+------------------------+-----------------------+-------------------------+----------------------+------------------------+-----------------------------+---------------------------+-----------------------+------------------------+------------------------+-----------------------+-------------------------+----------------------+------------------------+-----------------------------+---------------------------+-----------------------+------------------------
 (0 rows)
 
@@ -153,7 +153,7 @@ FROM ( SELECT year, product, amount  FROM sales ) AS source_table
 rotate (count(*) FOR product IN (A, B)
 ) as pivot_table where pivot_table.year > 1; 
 select * from v1;
- year | amount | A | B 
+ year | amount | a | b 
 ------+--------+---+---
  2021 | 250.00 | 0 | 1
  2021 | 150.00 | 1 | 0

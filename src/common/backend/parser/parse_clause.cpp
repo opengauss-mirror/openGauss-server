@@ -759,8 +759,10 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
                         } else if (IsA(resTarget->val, A_Const)) {
                             Value *val = &((A_Const *)resTarget->val)->val;
                             if (val->type == T_String){
-                                rc = strncat_s(new_col_name, NAMEDATALEN, strVal(val), strlen(strVal(val)));
+                                char* val_dup_temp = pg_strtolower(pstrdup(strVal(val)));
+                                rc = strncat_s(new_col_name, NAMEDATALEN, val_dup_temp, strlen(strVal(val)));
                                 securec_check_c(rc, "\0", "\0");
+                                pfree(val_dup_temp);
                             } else if (val->type == T_Float) {
                                 rc = snprintf_s(new_col_name + strlen(new_col_name), NAMEDATALEN - strlen(new_col_name),
                                                NAMEDATALEN - strlen(new_col_name) - 1, "%f", floatVal(val));

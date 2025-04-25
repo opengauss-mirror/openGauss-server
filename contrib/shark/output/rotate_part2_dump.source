@@ -73,7 +73,7 @@ ALTER VIEW
 --?.*
 -- rotate check
 select * from v1;
- year | amount | A | B 
+ year | amount | a | b 
 ------+--------+---+---
  2021 | 250.00 | 0 | 1
  2021 | 150.00 | 1 | 0

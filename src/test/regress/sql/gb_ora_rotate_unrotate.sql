@@ -295,3 +295,50 @@ SELECT * FROM sales2 not rotate (sale_all For sale IN ("sale5", "SALE5")) order 
 drop table sales2;
 
 
+CREATE TABLE t_pivot0001 (
+    Product   VARCHAR(50),
+    Quarter   CHAR(2),
+    sales     DECIMAL(10,2)
+);
+
+INSERT INTO t_pivot0001 VALUES
+    ('Laptop', 'Q1', 1000.00),
+    ('Laptop', 'Q2', 1500.00),
+    ('Phone',  'Q1', 800.00),
+    ('Phone',  'Q3', 2000.00),
+    ('Tablet', 'Q4', 500.00);
+select * from t_pivot0001;
+
+SELECT Product, Q1, Q2, Q3, Q4
+FROM (
+    SELECT Product, Quarter, sales
+    FROM t_pivot0001
+) AS SourceTable
+rotate (
+    SUM(sales)
+    FOR Quarter IN ('Q1', 'Q2', 'Q3', 'Q4')
+);
+
+SELECT Product, Q1, Q2, Q3, Q4
+FROM (
+    SELECT Product, Quarter, sales
+    FROM t_pivot0001
+) AS SourceTable
+rotate (
+    SUM(sales)
+    FOR Quarter IN ('Q1' as "Q1", 'Q2', 'Q3', 'Q4')
+);
+
+
+SELECT Product, "Q1", Q2, Q3, Q4
+FROM (
+    SELECT Product, Quarter, sales
+    FROM t_pivot0001
+) AS SourceTable
+rotate (
+    SUM(sales)
+    FOR Quarter IN ('Q1' as "Q1", 'Q2', 'Q3', 'Q4')
+);
+
+drop table t_pivot0001;
+
