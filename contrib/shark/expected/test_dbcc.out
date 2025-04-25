@@ -114,6 +114,15 @@ CONTEXT:  referenced column: dbcc_check_ident_no_reseed
 DBCC CHECKIDENT ('employees_employeeid_seq', NORESEED); 
 ERROR:  relation "employees_employeeid_seq" does not exist
 CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+drop table if exists Employees2;
+NOTICE:  table "employees2" does not exist, skipping
+create table Employees2(id int, name VARCHAR(100));
+insert into Employees2 values (1, 'zhangsan');
+insert into Employees2 values (2, 'lisi');
+DBCC CHECKIDENT ('Employees2', NORESEED);
+ERROR:  cannot not found the serial column for relation "Employees2"
+CONTEXT:  referenced column: dbcc_check_ident_no_reseed
+drop table if exists Employees2;
 -- plsql
 create or replace procedure test_procedure_test1(int)
 as
