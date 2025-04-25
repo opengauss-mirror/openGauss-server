@@ -1407,8 +1407,9 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
                 level = DEFAULT_ZSTD_COMPRESSION_LEVEL;
             }
 #ifndef FRONTEND
-            bool zstd_with_ctx = t_thrd.page_compression_cxt.zstd_cctx != NULL;
-            if (!zstd_with_ctx) {
+            bool zstd_advanced = t_thrd.page_compression_cxt.zstd_cctx != NULL &&
+                level == DEFAULT_ZSTD_COMPRESSION_LEVEL;
+            if (!zstd_advanced) {
                 compressed_size =
                     ZSTD_compress(data, compressd_buffer_size, compress_src + sizeOfHeaderData,
                                   BLCKSZ - sizeOfHeaderData, level);
