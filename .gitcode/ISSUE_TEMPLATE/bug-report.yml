@@ -1,0 +1,125 @@
+name: 缺陷
+description: 当您发现了一个缺陷，需要向社区反馈时，请使用此模板。
+title: "[Bug]: "
+labels: ["bug"]
+type: "缺陷"
+body:
+  - type: markdown
+    attributes:
+      value: |
+      # 请认真填写以下信息，否则可能由于无法定位，导致issue无法解决而被取消
+  
+  - type: dropdown
+    id: test_type
+    attributes:
+      label: "测试类型"
+      multiple: true
+      options:
+        - SQL功能
+        - 存储功能
+        - 接口功能
+        - 工具功能
+        - 性能
+        - 并发
+        - 压力长稳
+        - 故障注入
+        - 安全
+        - 资料
+        - 编码规范
+    validations:
+      required: true
+  
+  - type: input
+    attributes:
+      label: 测试版本
+      placeholder: "x.x.x"
+    validations:
+      required: true
+  
+  - type: textarea
+    attributes:
+      label: 问题描述
+      placeholder: "描述你遇到的问题"
+    validations:
+      required: false
+  
+  - type: textarea
+    attributes:
+      label: 操作系统和硬件信息
+      description: 
+      placeholder: "查询命令: cat /etc/system-release, uname -a"
+    validations:
+      required: true
+  
+  - type: input
+    attributes:
+      label: 测试环境
+      placeholder: "单机/1主x备x级联备"
+    validations:
+      required: false    
+  
+  - type: textarea
+    attributes:
+      label: 被测功能
+    validations:
+      required: false
+  
+  - type: textarea
+    attributes:
+      label: 测试类型
+    validations:
+      required: false
+  
+  - type: input
+    attributes:
+      label: 数据库版本
+      placeholder: "查询命令: gaussdb -V"
+    validations:
+      required: false
+  
+  - type: textarea
+    attributes:
+      label: 预置条件
+    validations:
+      required: false
+  
+  - type: textarea
+    attributes:
+      label: 操作步骤
+      description: 请填写详细的操作步骤
+      placeholder: "\n1. xxx\n2. xxx\n\n"
+    validations:
+      required: false
+  
+  - type: textarea
+    attributes:
+      label: 预期输出
+    validations:
+      required: false
+  
+  - type: textarea
+    attributes:
+      label: 实际输出
+    validations:
+      required: false
+  
+  - type: textarea
+    attributes:
+      label: 原因分析
+      placeholder: "\n1. 这个问题的根因\n2. 问题推断过程\n3. 还有哪些原因可能造成类似现象\n4. 该问题是否有临时规避措施\n5. 问题解决方案\n6. 预计修复问题时间\n\n"
+    validations:
+      required: false      
+  
+  - type: textarea
+    attributes:
+      label: 日志信息
+      description: 请附上日志文件、截图、coredump信息
+      placeholder: "日志文件、截图或coredump信息"
+    validations:
+      required: false 
+  
+  - type: textarea
+    attributes:
+      label: 测试代码
+    validations:
+      required: false
