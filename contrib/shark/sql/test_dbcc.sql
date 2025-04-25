@@ -63,6 +63,13 @@ DBCC CHECKIDENT ('Employees1', NORESEED);
 DBCC CHECKIDENT ('employees_employeeid_seq', NORESEED); 
 
 
+drop table if exists Employees2;
+create table Employees2(id int, name VARCHAR(100));
+insert into Employees2 values (1, 'zhangsan');
+insert into Employees2 values (2, 'lisi');
+DBCC CHECKIDENT ('Employees2', NORESEED);
+drop table if exists Employees2;
+
 -- plsql
 create or replace procedure test_procedure_test1(int)
 as

@@ -3179,7 +3179,7 @@ static inline void check_relation_valid(Relation rel, char* table_name)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation \"%s\" does not exist", table_name)));
     }
 
-    if (rel->rd_att->constr->num_defval < 1) {
+    if (rel->rd_att->constr == NULL || rel->rd_att->constr->num_defval < 1) {
         relation_close(rel, AccessShareLock);
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("cannot not found the serial column for relation \"%s\"", table_name)));
