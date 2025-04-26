@@ -47,7 +47,7 @@ openGauss突破了多核CPU的瓶颈，实现两路鲲鹏128核150万tpmC，内�
 
 **NUMA化内核数据结构**
 
-关键数据结构NUMA化分配，减少跨CPU访问。比如全局PGPROC数组按照NUMA Node的数目分为多份，分别在对应NUMA Node上申请内存。解决ProcArrayLock锁瓶颈。
+关键数据结构NUMA化分配，减少跨CPU访问。比如全局 PGPROC数组按照NUMA Node的数目分为多份，分别在对应NUMA Node上申请内存。解决ProcArrayLock锁瓶颈。
 
 **绑核优化**
 
