@@ -153,6 +153,9 @@ else
     declare BUILD_DIR="${ROOT_DIR}/mppdb_temp_install"
     declare CMAKE_BUILD_DIR=${ROOT_DIR}/tmp_build
     os_version=$(cat /etc/os-release | grep 'VERSION_ID=' | cut -d'=' -f2 | tr -d '"')
+    if [[ "$os_version" == "24.03" ]]; then
+        enable_openssl3="-DENABLE_OPENSSL3=OFF"
+    fi
     if [ "$product_mode"x == "lite"x ]; then
         declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_READLINE=ON -DENABLE_LITE_MODE=ON ${extra_cmake_opt}"
     elif [ "$product_mode"x == "finance"x ]; then
@@ -160,7 +163,7 @@ else
         declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_READLINE=ON -DENABLE_FINANCE_MODE=ON ${extra_cmake_opt}"
     else
         if [[ "$os_version" == "22.03" || "$os_version" == "24.03" ]]; then
-            declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON -DENABLE_READLINE=ON -DENABLE_OPENEULER_MAJOR=ON ${extra_cmake_opt}"
+            declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON -DENABLE_READLINE=ON -DENABLE_OPENEULER_MAJOR=ON ${enable_openssl3} ${extra_cmake_opt}"
         else
             declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_READLINE=ON -DENABLE_MOT=ON ${extra_cmake_opt}"
         fi

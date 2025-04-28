@@ -68,7 +68,7 @@ extern const char* ossl_error_message(void);
 #endif /* ENABLE_UT */
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
-static int OPENSSL_init_ssl(int unused1, const SSL_CTX* unused2)
+static int __attribute__((unused)) OPENSSL_init_ssl(int unused1, const SSL_CTX* unused2)
 {
     SSL_library_init();
     SSL_load_error_strings();
