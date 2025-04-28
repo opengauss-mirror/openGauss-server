@@ -66,6 +66,8 @@ option(ENABLE_MYSQL_FDW "enable export or import data with mysql,the old is --en
 option(ENABLE_ORACLE_FDW "enable export or import data with oracle,the old is --enable-oracle-fdw" OFF)
 option(ENABLE_BBOX "enable bbox,the old is --enable-bbox " ON)
 option(ENABLE_JEMALLOC "enable jemalloc,the old is --enable-jemalloc " ON)
+option(ENABLE_OBS "enable obs, the old is --enable-obs " ON)
+option(ENABLE_OPENSSL3 "enable openssl, the old is --enable-openssl " OFF)
 option(BUILD_BY_CMAKE "the BUILD_BY_CMAKE is new,used in distribute pg_regress.cpp" ON)
 option(DEBUG_UHEAP "collect USTORE statistics" OFF)
 option(MAX_ALLOC_SEGNUM "max alloc xlog seg num in extreme_rto" 4)
@@ -163,6 +165,14 @@ endif()
 
 if(${ENABLE_READLINE} STREQUAL "ON")
     add_definitions(-DHAVE_READLINE_READLINE_H)
+endif()
+
+if(ENABLE_OBS)
+    add_definitions(-DENABLE_OBS)
+endif()
+
+if(ENABLE_OPENSSL3)
+    add_definitions(-DENABLE_OPENSSL3)
 endif()
 
 set(PROTECT_OPTIONS -fwrapv -std=c++14 -fnon-call-exceptions ${OPTIMIZE_LEVEL})

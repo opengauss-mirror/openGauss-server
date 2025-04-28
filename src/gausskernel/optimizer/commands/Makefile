@@ -32,7 +32,9 @@ OBJS = aggregatecmds.o alter.o amcmds.o analyze.o async.o cluster.o comment.o  \
 	eventcmds.o ddldeparse.o ddljson.o auto_parameterization.o
 
 ifeq ($(enable_lite_mode), no)
-OBJS += obs_stream.o
+ifeq ($(with_obs), yes)
+    OBJS += obs_stream.o
+endif
 endif
 
 include $(top_srcdir)/src/gausskernel/common.mk

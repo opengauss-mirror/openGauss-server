@@ -30,7 +30,7 @@
 #include "nodes/pg_list.h"
 #include "storage/buf/buffile.h"
 #include "replication/slot.h"
-#ifndef ENABLE_LITE_MODE
+#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
 #include "eSDKOBS.h"
 #endif
 
@@ -132,7 +132,7 @@ typedef struct OBSReadWriteHandler {
     bool in_computing;
     /* size_t	m_offset;	=>get_cond.start_byte */
     /* obs_bucket_context m_bucketCtx; =>m_option.bucket_options */
-#ifndef ENABLE_LITE_MODE
+#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
     obs_options m_option;
     obs_object_info m_object_info;
 
@@ -149,13 +149,13 @@ typedef struct OBSReadWriteHandler {
 #endif
 } OBSReadWriteHandler;
 
-typedef struct list_service_data {
+typedef struct ListServiceData {
     int headerPrinted;
     int allDetails;
-#ifndef ENABLE_LITE_MODE
+#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
     obs_status ret_status;
 #endif
-} list_service_data;
+} ListServiceData;
 
 extern void SetObsMemoryContext(MemoryContext mctx);
 extern MemoryContext GetObsMemoryContext(void);

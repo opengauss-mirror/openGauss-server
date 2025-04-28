@@ -711,6 +711,8 @@ krb_srvtab
 with_python
 with_openeuler_os
 with_openeuler_major
+with_obs
+with_openssl3
 enable_thread_safety
 INCLUDES
 TAS
@@ -839,6 +841,8 @@ with_pgport
 with_gs_version
 with_openeuler_os
 with_openeuler_major
+with_obs
+with_openssl3
 enable_shared
 enable_rpath
 enable_jemalloc
@@ -3465,8 +3469,10 @@ if [[ "$(cat /etc/system-release)" =~ ^"openEuler release 22.03".* ]]; then
     with_openeuler_major=yes
 fi
 
+with_obs=yes
 if [[ "$(cat /etc/system-release)" =~ ^"openEuler release 24.03".* ]]; then
     with_openeuler_major=yes
+    with_openssl3=no
 fi
 
 if [[ "$(cat /etc/system-release)" =~ ^"CSIOS release 1.0".* ]]; then

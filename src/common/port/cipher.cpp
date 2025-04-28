@@ -86,7 +86,7 @@ bool init_vector_random(GS_UCHAR* init_vector, size_t vector_len)
     int retval = 0;
     GS_UCHAR random_vector[RANDOM_LEN] = {0};
 
-    retval = RAND_priv_bytes(random_vector, RANDOM_LEN);
+    retval = RAND_bytes(random_vector, RANDOM_LEN);
     if (retval != 1) {
         errorno = memset_s(random_vector, RANDOM_LEN, '\0', RANDOM_LEN);
         securec_check_c(errorno, "", "");
@@ -544,7 +544,7 @@ static bool gen_cipher_file(KeyMode mode, /* SERVER_MODE or CLIENT_MODE or OBS_M
     }
 
     /* generate init rand key */
-    retval = RAND_priv_bytes(encrypt_rand, RANDOM_LEN);
+    retval = RAND_bytes(encrypt_rand, RANDOM_LEN);
     if (retval != 1) {
 #ifndef ENABLE_LLT
         (void)fprintf(stderr, _("generate random key failed,errcode:%d\n"), retval);
@@ -766,7 +766,7 @@ void gen_cipher_rand_files(
     GS_UCHAR server_vector[RANDOM_LEN] = {'\0'};
     GS_UCHAR client_vector[RANDOM_LEN] = {'\0'};
 
-    retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
+    retval = RAND_bytes(init_rand, RANDOM_LEN);
     if (retval != 1) {
         (void)fprintf(stderr, _("generate random key failed,errcode:%d\n"), retval);
         return;
@@ -945,7 +945,7 @@ bool check_certificate_signature_algrithm(const SSL_CTX* SSL_context)
         /* Get the publickey length, return is bytes length. */
         int pub_length;
         EVP_PKEY *pub_key = NULL;
-        pub_key = X509_get0_pubkey(pCert);
+        pub_key = X509_get_pubkey(pCert);
         pub_length = EVP_PKEY_size(pub_key);
         /* Get the signature algorithm CID from the certificate. */
         switch (nid) {
@@ -998,7 +998,7 @@ long check_certificate_time(const SSL_CTX* SSL_context, const int alarm_days)
         const ASN1_TIME* notafter = NULL;
 
         /* Get the notafter time form this certificate.*/
-        notafter = X509_get0_notAfter(pstCertificate);
+        notafter = X509_get_notAfter(pstCertificate);
         if (notafter == NULL) {
             return 0;
         }

@@ -633,7 +633,7 @@ void ClientAuthentication(Port* port)
             securec_check(rc, "\0", "\0");
             /* Functions which alloc memory need hold interrupts for safe. */
             HOLD_INTERRUPTS();
-            retval = RAND_priv_bytes((GS_UCHAR*)token, (GS_UINT32)TOKEN_LENGTH);
+            retval = RAND_bytes((GS_UCHAR*)token, (GS_UINT32)TOKEN_LENGTH);
             RESUME_INTERRUPTS();
             CHECK_FOR_INTERRUPTS();
             if (retval != 1) {
@@ -834,14 +834,14 @@ static
     char fake_storedkey[STORED_KEY_LENGTH * ENCRY_LENGTH_DOUBLE + 1] = {0};
     
     GenerateFakeSaltBytes(port->user_name, fake_salt_bytes, SALT_LENGTH);
-    retval = RAND_priv_bytes((GS_UCHAR*)fake_serverkey_bytes, (GS_UINT32)(HMAC_LENGTH));
+    retval = RAND_bytes((GS_UCHAR*)fake_serverkey_bytes, (GS_UINT32)(HMAC_LENGTH));
     if (retval != 1) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                 errmsg("Failed to Generate the random storedkey,errcode:%d", retval)));
     }
 
-    retval = RAND_priv_bytes((GS_UCHAR*)fake_storedkey_bytes, (GS_UINT32)(STORED_KEY_LENGTH));
+    retval = RAND_bytes((GS_UCHAR*)fake_storedkey_bytes, (GS_UINT32)(STORED_KEY_LENGTH));
     if (retval != 1) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),

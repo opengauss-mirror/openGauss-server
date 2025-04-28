@@ -225,7 +225,7 @@ CmkemErrCode encrypt_and_write_key(const char *key_file_path, CmkemUStr *key_pla
     errno_t rc = 0;
     CmkemErrCode ret = CMKEM_SUCCEED;
 
-    if (RAND_priv_bytes(iv, sizeof(iv)) != 1 || RAND_priv_bytes(salt, sizeof(salt)) != 1) {
+    if (RAND_bytes(iv, sizeof(iv)) != 1 || RAND_bytes(salt, sizeof(salt)) != 1) {
         return CMKEM_DERIVED_KEY_ERR;
     }
 

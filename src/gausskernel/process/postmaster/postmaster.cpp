@@ -231,7 +231,7 @@
 
 #include "distributelayer/streamMain.h"
 #include "distributelayer/streamProducer.h"
-#ifndef ENABLE_LITE_MODE
+#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
 #include "eSDKOBS.h"
 #endif
 #include "cjson/cJSON.h"
@@ -1880,7 +1880,7 @@ int PostmasterMain(int argc, char* argv[])
      */
     initialize_feature_flags();
 
-#ifndef ENABLE_LITE_MODE
+#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
     /*
      * @OBS
      * Create a global OBS CA object shared among threads
@@ -3010,8 +3010,10 @@ int PostmasterMain(int argc, char* argv[])
     }
 
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     if (g_instance.attr.attr_storage.enable_adio_function)
         AioResourceInitialize();
+#endif
 #endif
 
     /* start alarm checker thread. */
@@ -5650,10 +5652,10 @@ static Port* ConnCreate(int serverFd, int idx)
      * need 'em or not, but we must do the random() calls before we fork, not
      * after.  Else the postmaster's random sequence won't get advanced, and
      * all backends would end up using the same salt...
-     * Use openssl RAND_priv_bytes interface to generate random salt, cast char to
+     * Use openssl RAND_bytes interface to generate random salt, cast char to
      * unsigned char here.
      */
-    int retval = RAND_priv_bytes((unsigned char*)port->md5Salt, sizeof(port->md5Salt));
+    int retval = RAND_bytes((unsigned char*)port->md5Salt, sizeof(port->md5Salt));
     if (retval != 1) {
         ereport(ERROR, (errmsg("Failed to Generate the random number,errcode:%d", retval)));
     }
@@ -6410,6 +6412,7 @@ static void pmdie(SIGNAL_ARGS)
             }
 
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
             if (g_instance.pid_cxt.BarrierCreatorPID != 0) {
                 barrier_creator_thread_shutdown();
                 signal_child(g_instance.pid_cxt.BarrierCreatorPID, SIGTERM);
@@ -6422,6 +6425,7 @@ static void pmdie(SIGNAL_ARGS)
                     }
                 }
             }
+#endif
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -6858,10 +6862,12 @@ static void ProcessDemoteRequest(void)
             }
 
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
             if (g_instance.pid_cxt.BarrierCreatorPID != 0) {
                 barrier_creator_thread_shutdown();
                 signal_child(g_instance.pid_cxt.BarrierCreatorPID, SIGTERM);
             }
+#endif
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -8623,10 +8629,12 @@ static void PostmasterStateMachineReadOnly(void)
                 signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
 
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
             if (g_instance.pid_cxt.BarrierCreatorPID != 0) {
                 barrier_creator_thread_shutdown();
                 signal_child(g_instance.pid_cxt.BarrierCreatorPID, SIGTERM);
             }
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
             if (g_instance.pid_cxt.CsnminSyncPID != 0) {
@@ -9811,7 +9819,7 @@ void ExitPostmaster(int status)
 
     CloseGaussPidDir();
 
-#ifndef ENABLE_LITE_MODE
+#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
     obs_deinitialize();
 #endif
 
@@ -14908,6 +14916,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         } break;
 
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
         case BARRIER_CREATOR: {
             if (START_BARRIER_CREATOR) {
                 t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
@@ -14932,6 +14941,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
                 proc_exit(0);
             }
        } break;
+#endif
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES

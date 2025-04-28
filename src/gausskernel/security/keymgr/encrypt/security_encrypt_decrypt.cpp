@@ -26,6 +26,7 @@
 
 #include "openssl/rand.h"
 #include "openssl/err.h"
+#include "ssl/gs_openssl_client.h"
 #include <securec.h>
 #include <securec_check.h>
 #include "keymgr/encrypt/security_encrypt_decrypt.h"
@@ -218,11 +219,13 @@ static bool sm3(const unsigned char *data, int datalen, unsigned char *result)
         printf("ERROR(CLIENT): Fail to create the context in sm3 algorithm.\n");
         return false;
     }
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
     if (!EVP_DigestInit_ex(md_ctx, EVP_sm3(), NULL)) {
         printf("ERROR(CLIENT): Fail to initialise the context in sm3 algorithm.\n");
         EVP_MD_CTX_free(md_ctx);
         return false;
     }
+#endif
     if (!EVP_DigestUpdate(md_ctx, data, (size_t)datalen)) {
         printf("ERROR(CLIENT): Fail to compute digest in sm3 algorithm.\n");
         EVP_MD_CTX_free(md_ctx);
@@ -350,7 +353,7 @@ int encrypt_data(unsigned char *plain_text, int plain_text_length, AeadAesHamcEn
             return 0;
         }
 
-        if (RAND_priv_bytes(iv_truncated, g_block_size) != 1) {
+        if (RAND_bytes(iv_truncated, g_block_size) != 1) {
             return 0;
         }
     }

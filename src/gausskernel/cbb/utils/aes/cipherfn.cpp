@@ -374,7 +374,7 @@ bool gs_encrypt_aes_128(
     if ((NULL == g_prefix && NULL == g_key && NULL == g_vector) ||
         (NULL != g_prefix && is_prefix_in_key_mode((const char*)g_prefix))) {
         /* get a random values as salt for encrypt */
-        retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
+        retval = RAND_bytes(init_rand, RANDOM_LEN);
         if (retval != 1) {
             (void)fprintf(stderr, _("generate random key failed, errcode:%u\n"), retval);
             return false;
@@ -710,7 +710,7 @@ bool gs_encrypt_aes_speed(GS_UCHAR* plaintext, GS_UCHAR* key, GS_UCHAR* cipherte
 
     if (random_salt_tag == false || random_salt_count > random_salt_count_max) {
         /* get a random values as salt for encrypt */
-        retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
+        retval = RAND_bytes(init_rand, RANDOM_LEN);
         if (retval != 1) {
             (void)fprintf(stderr, _("generate random key failed,errcode:%u\n"), retval);
             return false;
@@ -2001,7 +2001,7 @@ static bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     securec_check(errorno, "\0", "\0");
     pfree_ext(key);
 
-    ret = RAND_priv_bytes(userIv, SM4_IV_LENGTH);
+    ret = RAND_bytes(userIv, SM4_IV_LENGTH);
     if (ret != 1) {
         errorno = memset_s(userIv, SM4_IV_LENGTH, '\0', SM4_IV_LENGTH);
         securec_check(errorno, "", "");

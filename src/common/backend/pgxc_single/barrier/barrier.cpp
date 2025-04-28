@@ -401,9 +401,11 @@ void DisasterRecoveryRequestBarrier(const char* id, bool isSwitchoverBarrier)
     recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, InvalidBktId);
     XLogWaitFlush(recptr);
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     if (t_thrd.role == BARRIER_CREATOR) {
         UpdateGlobalBarrierListOnMedia(id, g_instance.attr.attr_common.PGXCNodeName);
     }
+#endif
 #endif
     SpinLockAcquire(&g_instance.archive_obs_cxt.barrier_lock);
     pg_atomic_init_u64(&g_instance.archive_obs_cxt.barrierLsn, recptr);

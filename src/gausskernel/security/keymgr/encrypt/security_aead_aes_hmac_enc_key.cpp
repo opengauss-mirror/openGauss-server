@@ -47,6 +47,16 @@ const unsigned char *AeadAesHamcEncKey::g_iv_key_salt_format =
 
 const int RAND_COUNT = 100;
 
+#ifdef ENABLE_OPENSSL3
+void HmacCtxGroup::free_hmac_ctx(HMAC_CTX** ctx_tmp) const
+{
+    if (*ctx_tmp != NULL) {
+        HMAC_CTX_free(*ctx_tmp);
+        *ctx_tmp = NULL;
+    }
+}
+#endif
+
 /* Derives all the required keys from the given root key */
 AeadAesHamcEncKey::AeadAesHamcEncKey(unsigned char *root_key, size_t root_key_size)
 {
@@ -90,7 +100,7 @@ bool AeadAesHamcEncKey::generate_root_key(unsigned char *key, size_t &keySize)
 
     while (r_count++ < RAND_COUNT) {
         is_ok = true;
-        if (RAND_priv_bytes(key, MAX_SIZE) != 1) {
+        if (RAND_bytes(key, MAX_SIZE) != 1) {
             keySize = 0;
             printf("ERROR(CLIENT):Generate random key failed.\n");
             return false;

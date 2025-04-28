@@ -11,7 +11,11 @@ ${CJSON_LIB_PATH} ${DCF_LIB_PATH} ${XGBOOST_LIB_PATH}  ${ZSTD_LIB_PATH}
 ${LIBOBS_LIB_PATH} ${LZ4_LIB_PATH})
 
 # -l
-set(UNIT_TEST_BASE_LIB_LIST pthread gtest_main gtest mockcpp cjson dcf xgboost zstd nghttp2 iconv eSDKOBS eSDKLogAPI log4cpp lz4 db)
+if("${ENABLE_OBS}" STREQUAL "ON")
+    set(UNIT_TEST_BASE_LIB_LIST pthread gtest_main gtest mockcpp cjson dcf xgboost zstd nghttp2 iconv eSDKOBS eSDKLogAPI log4cpp lz4 db)
+else()
+    set(UNIT_TEST_BASE_LIB_LIST pthread gtest_main gtest mockcpp cjson dcf xgboost zstd lz4 db)
+endif()
 
 add_subdirectory(demo)
 add_subdirectory(db4ai)

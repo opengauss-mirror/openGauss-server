@@ -15,7 +15,10 @@ static int g_nodeCount = 0;
 #include "openssl/ossl_typ.h"
 #include "openssl/x509.h"
 #include "openssl/crypto.h"
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
 #include "openssl/sslerr.h"
+#endif
+#include "ssl/gs_openssl_client.h"
 #include "openssl/err.h"
 #include "cipher.h"
 

@@ -267,12 +267,17 @@ endif()
 
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     list(APPEND gaussdb_objects
-        $<TARGET_OBJECTS:gausskernel_storage_access_archive>
         $<TARGET_OBJECTS:gausskernel_runtime_codegen_executor>
         $<TARGET_OBJECTS:gausskernel_runtime_codegen_vecexecutor>
         $<TARGET_OBJECTS:gausskernel_runtime_codegen_codegenutil>
         $<TARGET_OBJECTS:gausskernel_runtime_codegen>
     )
+endif()
+
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON" AND "${ENABLE_OBS}" STREQUAL "ON")
+   list(APPEND gaussdb_objects
+       $<TARGET_OBJECTS:gausskernel_storage_access_archive>
+   )
 endif()
 
 set(gaussdb_objects ${gaussdb_objects} ${gaussdb_server_objects})
@@ -308,8 +313,12 @@ if(${USE_LIBXML})
     list(APPEND gaussdb_LINK_DIRS ${LIBXML_LIB_PATH})
 endif()
 
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON" AND "${ENABLE_OBS}" STREQUAL "ON")
+    list(APPEND gaussdb_LINK_LIBS -leSDKOBS -leSDKLogAPI -lpcre -liconv -lnghttp2 -llog4cpp)
+endif()
+
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
-    list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -leSDKOBS -leSDKLogAPI -lpcre -liconv -lnghttp2 -llog4cpp -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lzstd -lcom_err_gauss -lgssapi_krb5_gauss -lkrb5_gauss -lgssrpc_gauss -lk5crypto_gauss -lkadm5clnt_mit -lkadm5srv_mit -lkdb5 -lkrb5support_gauss -lstdc++ -lboost_thread -lboost_chrono -lboost_system -lboost_atomic -lxml2 -laio -lncurses -ltinfo -latomic)
+    list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lzstd -lcom_err_gauss -lgssapi_krb5_gauss -lkrb5_gauss -lgssrpc_gauss -lk5crypto_gauss -lkadm5clnt_mit -lkadm5srv_mit -lkdb5 -lkrb5support_gauss -lstdc++ -lboost_thread -lboost_chrono -lboost_system -lboost_atomic -lxml2 -laio -lncurses -ltinfo -latomic)
 else()
     list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lzstd -lncurses -ltinfo -lboost_thread -lboost_chrono -lboost_system -lboost_atomic)
 endif()

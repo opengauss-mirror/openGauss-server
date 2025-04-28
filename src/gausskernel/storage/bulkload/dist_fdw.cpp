@@ -225,8 +225,10 @@ extern void VerifyEncoding(int encoding);
 extern void GetDistImportOptions(Oid relOid, DistImportPlanState *planstate, ForeignOptions *fOptions = NULL);
 
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
 static void assignOBSTaskToDataNode(List *urllist, List **totalTask, List *dnNames, DistImportPlanState *planstate,
                                     int64 *fileNum = NULL);
+#endif
 #endif
 static void assignTaskToDataNodeInSharedMode(List *urllist, List **totalTask, List *dnNames);
 static void assignTaskToDataNodeInNormalMode(List *urllist, List **totalTask, List *dnNames, int dop);
@@ -236,6 +238,7 @@ extern void decryptOBSForeignTableOption(List **options);
 List *getOBSFileList(List *urllist, bool encrypt, const char *access_key, const char *secret_access_key,
                      bool isAnalyze);
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
 /*
  * In OBS parallel data loading case, we may have # of datanodes not
  * equal to # of objects, as one object can only be assign to one
@@ -243,6 +246,7 @@ List *getOBSFileList(List *urllist, bool encrypt, const char *access_key, const 
  * handlers basing on num_processed
  */
 static void assignOBSFileToDataNode(List *urllist, List **totalTask, List *dnNames);
+#endif
 #endif
 
 /*
@@ -432,6 +436,7 @@ static bool distAnalyzeForeignTable(Relation relation, AcquireSampleRowsFunc *fu
 }
 
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
 /**
  * @Description: Scheduler file for dist obs foreign table.
  * @in foreignTableId, the given foreign table Oid.
@@ -482,6 +487,7 @@ List *CNSchedulingForDistOBSFt(Oid foreignTableId)
     }
     return totalTask;
 }
+#endif
 #endif
 
 /**
@@ -1064,6 +1070,7 @@ List *assignFileSegmentList(List *segmentlist, List *dnNames)
 }
 
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
 /*
  * @Description: get all matched files in obs for each url
  * @IN urllist: obs url list
@@ -1194,6 +1201,7 @@ static void assignOBSTaskToDataNode(List *urllist, List **totalTask, List *dnNam
     pfree(obs_file_list);
 }
 #endif
+#endif
 
 /*
  * @Description: assign task to each data node in shared mode
@@ -1312,11 +1320,13 @@ List *assignTaskToDataNode(List *urllist, ImportMode mode, List *nodeList, int d
     const char *first_url = strVal(lfirst(list_head(urllist)));
     if (is_obs_protocol(first_url)) {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
         assignOBSTaskToDataNode(urllist, &totalTask, dnNames, planstate, fileNum);
         list_free(dnNames);
         return totalTask;
 #else
         FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
 #endif
     }
 

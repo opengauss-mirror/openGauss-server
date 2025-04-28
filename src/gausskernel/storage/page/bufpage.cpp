@@ -331,7 +331,7 @@ char* PageDataEncryptIfNeed(Page page, TdeInfo* tde_info, bool need_copy, bool i
     Assert(!PageIsEncrypt(page));
 
     plainLength = ((PageHeader)page)->pd_special - ((PageHeader)page)->pd_upper;
-    retval = RAND_priv_bytes(tde_info->iv, RANDOM_IV_LEN);
+    retval = RAND_bytes(tde_info->iv, RANDOM_IV_LEN);
     if (retval != 1) {
         ereport(WARNING, (errmodule(MOD_SEC_TDE), errmsg("generate random iv for tde failed, errcode:%d", retval)));
         return (char*)page;

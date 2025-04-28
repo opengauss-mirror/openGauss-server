@@ -628,13 +628,14 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
                 return STATUS_ERROR;
             }
 
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
             CRYPT_digest_ret = EVP_Digest((GS_UCHAR*)xor_result_sm3,
                 HMAC_LENGTH,
                 (GS_UCHAR*)hash_result_sm3,
                 (GS_UINT32*)&hmac_length_sm3,
                 EVP_sm3(),
                 NULL);
-
+#endif
             if (!CRYPT_digest_ret) {
                 pfree_ext(pass_info.shadow_pass);
                 return STATUS_ERROR;

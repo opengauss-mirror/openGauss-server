@@ -219,6 +219,8 @@ PTHREAD_CFLAGS		= @PTHREAD_CFLAGS@
 PTHREAD_LIBS		= @PTHREAD_LIBS@
 with_openeuler_os = @with_openeuler_os@
 with_openeuler_major = @with_openeuler_major@
+with_obs = @with_obs@
+with_openssl3 = @with_openssl3@
 
 
 #############################################################################
@@ -778,6 +780,10 @@ endif
 
 ifeq ($(with_openeuler_major), yes)
   override CPPFLAGS := $(CPPFLAGS) -DOPENEULER_MAJOR
+endif
+
+ifeq ($(with_obs), yes)
+  override CPPFLAGS := $(CPPFLAGS) -DENABLE_OBS
 endif
 
 CC = @CC@

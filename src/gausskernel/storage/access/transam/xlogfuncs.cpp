@@ -1202,6 +1202,7 @@ Datum pg_get_flush_lsn(PG_FUNCTION_ARGS)
 Datum gs_set_obs_delete_location_with_slotname(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     char* lsnLocation = PG_GETARG_CSTRING(0);
     char* currentSlotName = PG_GETARG_CSTRING(1);
 
@@ -1241,6 +1242,7 @@ Datum gs_set_obs_delete_location_with_slotname(PG_FUNCTION_ARGS)
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
     PG_RETURN_TEXT_P(NULL);
 #endif
+#endif
 }
 
 /*
@@ -1251,6 +1253,7 @@ Datum gs_set_obs_delete_location_with_slotname(PG_FUNCTION_ARGS)
 Datum gs_set_obs_delete_location(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     text *location = PG_GETARG_TEXT_P(0);
     char *locationstr = NULL;
     uint32 hi = 0;
@@ -1292,11 +1295,13 @@ Datum gs_set_obs_delete_location(PG_FUNCTION_ARGS)
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
     PG_RETURN_TEXT_P(NULL);
 #endif
+#endif
 }
 
 Datum gs_get_global_barrier_status(PG_FUNCTION_ARGS) 
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
 #define PG_GET_GLOBAL_BARRIER_STATUS_COLS 2
     char globalBarrierId[MAX_BARRIER_ID_LENGTH] = {0};
     char globalAchiveBarrierId[MAX_BARRIER_ID_LENGTH] = {0};
@@ -1392,11 +1397,13 @@ Datum gs_get_global_barrier_status(PG_FUNCTION_ARGS)
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
     PG_RETURN_DATUM(0);
 #endif
+#endif
 }    
 
 Datum gs_get_global_barriers_status(PG_FUNCTION_ARGS) 
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
 #define PG_GET_GLOBAL_BARRIERS_STATUS_COLS 3
     char globalBarrierId[MAX_BARRIER_ID_LENGTH] = {0};
     char globalAchiveBarrierId[MAX_BARRIER_ID_LENGTH] = {0};
@@ -1520,6 +1527,7 @@ Datum gs_get_global_barriers_status(PG_FUNCTION_ARGS)
 #else
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
 #endif
+#endif
     PG_RETURN_DATUM(0);
 }    
 
@@ -1607,6 +1615,7 @@ Datum gs_get_local_barrier_status(PG_FUNCTION_ARGS)
 Datum gs_hadr_do_switchover(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
 #define TIME_GET_MILLISEC(t) (((long)(t).tv_sec * 1000) + ((long)(t).tv_usec) / 1000)
     uint64_t barrier_index = 0;
     int ret;
@@ -1697,6 +1706,7 @@ Datum gs_hadr_do_switchover(PG_FUNCTION_ARGS)
 #else
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
 #endif
+#endif
     PG_RETURN_BOOL(true);
 }
 
@@ -1743,6 +1753,7 @@ Datum gs_hadr_in_recovery(PG_FUNCTION_ARGS)
 Datum gs_upload_obs_file(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     char* slotname = PG_GETARG_CSTRING(0);
     char* src = PG_GETARG_CSTRING(1);
     char* dest = PG_GETARG_CSTRING(2);
@@ -1781,6 +1792,7 @@ Datum gs_upload_obs_file(PG_FUNCTION_ARGS)
 #else
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
 #endif
+#endif
 
     PG_RETURN_VOID();
 }
@@ -1788,6 +1800,7 @@ Datum gs_upload_obs_file(PG_FUNCTION_ARGS)
 Datum gs_download_obs_file(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     char* slotname = PG_GETARG_CSTRING(0);
     char* src = PG_GETARG_CSTRING(1);
     char* dest = PG_GETARG_CSTRING(2);
@@ -1831,6 +1844,7 @@ Datum gs_download_obs_file(PG_FUNCTION_ARGS)
 #else
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
 #endif
+#endif
 
     PG_RETURN_VOID();
 }
@@ -1838,6 +1852,7 @@ Datum gs_download_obs_file(PG_FUNCTION_ARGS)
 Datum gs_get_obs_file_context(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     char fileContext[MAXPGPATH] = {0};
     size_t readLen = 0;
     char* setFileName = PG_GETARG_CSTRING(0);
@@ -1882,11 +1897,13 @@ Datum gs_get_obs_file_context(PG_FUNCTION_ARGS)
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
     PG_RETURN_TEXT_P(NULL);
 #endif
+#endif
 }
 
 Datum gs_set_obs_file_context(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     int ret = 0;
     char* setFileName = PG_GETARG_CSTRING(0);
     char* setFileContext = PG_GETARG_CSTRING(1);
@@ -1922,11 +1939,13 @@ Datum gs_set_obs_file_context(PG_FUNCTION_ARGS)
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
     PG_RETURN_TEXT_P(NULL);
 #endif
+#endif
 }
 
 Datum gs_get_hadr_key_cn(PG_FUNCTION_ARGS) 
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
 #define GS_GET_HADR_KEY_CN_COLS 4
     bool needLocalKeyCn = false;
     char localKeyCn[MAXFNAMELEN] = {0};
@@ -2027,6 +2046,7 @@ Datum gs_get_hadr_key_cn(PG_FUNCTION_ARGS)
     tuplestore_donestoring(tupstore);
 #else
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
 #endif
     PG_RETURN_DATUM(0);
 }
@@ -2177,6 +2197,7 @@ Datum gs_pitr_get_warning_for_xlog_force_recycle(PG_FUNCTION_ARGS)
 Datum gs_get_active_archiving_standby(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     int i;
     int rc;
     errno_t errorno = EOK;
@@ -2269,6 +2290,7 @@ Datum gs_get_active_archiving_standby(PG_FUNCTION_ARGS)
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
     PG_RETURN_DATUM(0);
 #endif
+#endif
 }
 
 #ifndef ENABLE_LITE_MODE
@@ -2287,6 +2309,7 @@ static bool checkIsDigit(const char* arg)
 Datum gs_pitr_clean_history_global_barriers(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("Must be system admin or operator admin in operation mode to "
@@ -2316,11 +2339,13 @@ Datum gs_pitr_clean_history_global_barriers(PG_FUNCTION_ARGS)
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
     PG_RETURN_TEXT_P(NULL);
 #endif
+#endif
 }
 
 Datum gs_pitr_archive_slot_force_advance(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
+#ifdef ENABLE_OBS
     XLogSegNo currArchslotSegNo;
     XLogRecPtr archiveSlotLocNow = InvalidXLogRecPtr;
     char location[MAXFNAMELEN];
@@ -2444,6 +2469,7 @@ Datum gs_pitr_archive_slot_force_advance(PG_FUNCTION_ARGS)
 #else
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
     PG_RETURN_TEXT_P(NULL);
+#endif
 #endif
 }
 

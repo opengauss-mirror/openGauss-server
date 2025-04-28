@@ -2388,8 +2388,8 @@ void doGenerateOperation(const char* datadir, const char* loginfo)
         char* encodetext = NULL;
 
         /* Generate a random value by OpenSSL function. */
-        retval = RAND_priv_bytes((unsigned char*)init_rand, RANDOM_LEN);
-        if (retval != 1) /* the return value of RAND_priv_bytes:1--success */
+        retval = RAND_bytes((unsigned char*)init_rand, RANDOM_LEN);
+        if (retval != 1) /* the return value of RAND_bytes:1--success */
         {
             (void)write_stderr(_("%s: generate random key failed, errcode:%d.\n"), progname, retval);
             GS_FREE(g_cipherkey);

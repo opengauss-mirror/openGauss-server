@@ -49,13 +49,22 @@ public:
     HMAC_CTX* ctx_worker;
     HMAC_CTX* ctx_template;
 private:
+#ifdef ENABLE_OPENSSL3
+    void free_hmac_ctx(HMAC_CTX** ctx_tmp) const;
+#else
     void free_hmac_ctx(HMAC_CTX** ctx_tmp)
     {
         if (*ctx_tmp != NULL) {
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+            HMAC_CTX_cleanup(*ctx_tmp);
+            OPENSSL_free(*ctx_tmp);
+#else
             HMAC_CTX_free(*ctx_tmp);
+#endif
             *ctx_tmp = NULL;
         }
     }
+#endif
 };
 
 /*

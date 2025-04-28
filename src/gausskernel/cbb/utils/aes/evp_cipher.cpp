@@ -26,9 +26,14 @@
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/engine.h>
+
 #include "postgres.h"
+
 #include "knl/knl_variable.h"
+
 #include "utils/evp_cipher.h"
+
+#include "ssl/gs_openssl_client.h"
 
 #define SM4_ENGINE_ID "kae";
 THR_LOCAL ENGINE* g_engine = NULL;
@@ -43,10 +48,21 @@ ENGINE* init_cipher_engine()
 
     const char* id = SM4_ENGINE_ID;
     /* OPENSSL_init_crypto return 1 on success or 0 on error */
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+        OPENSSL_config(NULL);
+        SSL_library_init();
+        SSL_load_error_strings();
+        OpenSSL_add_all_algorithms();
+        if (ERR_peek_error() != 0) {
+            ereport(LOG, (errmsg("OpenSSL config failed for %s hardware driver", id)));
+            return NULL;
+        }
+#else
     if (OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CONFIG, NULL) == 0) {
         ereport(LOG, (errmsg("OpenSSL init crypto failed for %s hardware driver", id)));
         return NULL;
     }
+#endif
     g_engine = ENGINE_by_id(id);
     g_init_engine = true;
     return g_engine;
