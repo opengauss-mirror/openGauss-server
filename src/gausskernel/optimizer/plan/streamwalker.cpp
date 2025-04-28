@@ -492,7 +492,7 @@ static void stream_walker_func_expr(FuncExpr* func, shipping_context *cxt)
     
     if (pgxc_is_shippable_func_contain_any(func->funcid)) {
         /* the args type of concat() and concat_ws() contains ANY, that may cause unshippable */
-        if (contain_unsupport_expression((Node*)func->args, (void *)cxt), false) {
+        if (contain_unsupport_expression((Node*)func->args, (void *)cxt, false)) {
             cxt->current_shippable = false;
         }
     }
