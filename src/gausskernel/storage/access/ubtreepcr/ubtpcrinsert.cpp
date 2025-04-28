@@ -331,13 +331,12 @@ top:
         UndoPersistence persistence = UndoPersistenceForRelation(rel);
         Oid relOid = RelationIsPartition(rel) ? GetBaseRelOidOfParition(rel) : RelationGetRelid(rel);
         Oid partitionOid = RelationIsPartition(rel) ? RelationGetRelid(rel) : InvalidOid;
-        bool selfInsert = prevTd.xactid == fxid;
         undoinfo.prev_td_id = prevSlot;
         UndoRecPtr urecPtr = INVALID_UNDO_REC_PTR;
         urecPtr = UBTreePCRPrepareUndoInsert(relOid, partitionOid, RelationGetRelFileNode(rel),
-            RelationGetRnodeSpace(rel), persistence, GetTopTransactionId(), GetCurrentCommandId(true),
+            RelationGetRnodeSpace(rel), persistence, fxid, GetCurrentCommandId(true),
             prevTd.undoRecPtr, INVALID_UNDO_REC_PTR, InvalidBlockNumber, NULL, &xlum, offset, InvalidBuffer,
-            selfInsert, &undoinfo, itup);
+            (prevTd.xactid == fxid ? fxid : FrozenTransactionId), &undoinfo, itup);
         
         if (isNormalInsert) {
             split = UBTreePCRInsertOnPage(rel, itupKey, buf, InvalidBuffer, stack, itup,
@@ -2244,8 +2243,8 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
             walInfo->itup = (IndexTuple)((char*)(cur_urec->Rawdata()->data + SizeOfUBTreeUndoInfoData));
             walInfo->flag = flag;
         }
-        LogSplit(buf, rbuf, sbuf, cbuf, firstrightoff, newitemoff, newitemleftoff,
-            leftoff, tdslot, walInfo, newitemonleft);
+        LogSplit(buf, rbuf, sbuf, cbuf, firstrightoff, isroot, newitemoff, newitemleftoff,
+            tdslot, walInfo, newitemonleft);
 
         if (walInfo != NULL) {
             pfree(walInfo);
@@ -2467,7 +2466,7 @@ uint8 PreparePCRDelete(Relation rel, Buffer buf, OffsetNumber offnum, UBTreeUndo
         return UBTreeInvalidTDSlotId;
     }
 
-    /* Get tuple's previouse operation's xact info */
+    /* Get tuple's previous operation's xact info */
     Page page = BufferGetPage(buf);
     UBTreeItemId iid = (UBTreeItemId)UBTreePCRGetRowPtr(page, offnum);
     uint8 slotNo = iid->lp_td_id;
@@ -2857,6 +2856,16 @@ void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumbe
     xl_ubtree3_split xlrecSplit;
     uint8 xlflag;
 
+    if (walInfo != NULL) {
+        xlrecInsert.offNum = originOff;
+        xlrecInsert.tdId = walInfo->tdId;
+        xlrecInsert.prevXidOfTuple = walInfo->oldXid;
+        xlrecInsert.curXid = walInfo->xid;
+        xlundohdr.relOid = walInfo->relOid;
+        xlundohdr.urecptr = walInfo->urecptr;
+        xlundohdr.flag = walInfo->flag;
+    }
+
     Page leftpage = BufferGetPage(buf);
     Page rightpage = BufferGetPage(rbuf);
     UBTPCRPageOpaque lopaque = (UBTPCRPageOpaque)PageGetSpecialPointer(leftpage);
@@ -2870,7 +2879,8 @@ void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumbe
     xlrecSplit.slotNo = tdSlot;
 
     if (newItemOnLeft) {
-        UBTreeTD td = UBTreePCRGetTD(leftpage, tdSlot);
+        UBTreeItemId iid = UBTreePCRGetRowPtr(leftpage, leftOff);
+        UBTreeTD td = UBTreePCRGetTD(leftpage, iid->lp_td_id);
         xlrecSplit.fxid = td->xactid;
         xlrecSplit.urp = td->undoRecPtr;
     }
@@ -2879,14 +2889,6 @@ void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumbe
     XLogRegisterData((char *)&xlrecSplit, SizeOfUbtree3Split);
 
     if (walInfo != NULL) {
-        xlrecInsert.offNum = originOff;
-        xlrecInsert.tdId = walInfo->tdId;
-        xlrecInsert.prevXidOfTuple = walInfo->oldXid;
-        xlrecInsert.curXid = walInfo->xid;
-        xlundohdr.relOid = walInfo->relOid;
-        xlundohdr.urecptr = walInfo->urecptr;
-        xlundohdr.flag = walInfo->flag;
-
         XLogRegisterData((char *)&xlrecInsert, SizeOfUbtree3InsertOrDelete);
         XLogRegisterData((char *)walInfo->itup, IndexTupleSize(walInfo->itup));
         XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
@@ -2916,7 +2918,7 @@ void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumbe
 
     if (newItemOnLeft) {
         IndexTuple itup = UBTreePCRGetIndexTuple(leftpage, leftOff);
-        XLogRegisterBufData(0, (char *)itup, IndexTupleSize(itup));
+        XLogRegisterBufData(0, (char *)itup, MAXALIGN(IndexTupleSize(itup)));
     }
 
     IndexTuple leftHightKey = UBTreePCRGetIndexTuple(leftpage, P_HIKEY);
@@ -2929,7 +2931,7 @@ void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumbe
     if (isroot) {
         xlflag = newItemOnLeft ? XLOG_UBTREE3_SPLIT_L_ROOT : XLOG_UBTREE3_SPLIT_R_ROOT;
     } else {
-        xlflag = newItemOnLeft ? XLOG_UBTREE3_SPLIT_L : XLOG_UBTREE_SPLIT_R;
+        xlflag = newItemOnLeft ? XLOG_UBTREE3_SPLIT_L : XLOG_UBTREE3_SPLIT_R;
     }
 
     recptr = XLogInsert(RM_UBTREE3_ID, xlflag);

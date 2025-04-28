@@ -1621,6 +1621,21 @@ void UBTree3XlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, Und
     PageSetLSN(page, buffer->lsn);
 }
 
+void UBTree3XlogFreezeTdOperatorPage(RedoBufferInfo* buffer, void* recorddata)
+{
+    xl_ubtree3_freeze_td_slot *xlrec = (xl_ubtree3_freeze_td_slot *)recorddata;
+    uint8 *frozenSlots = (uint8 *)(((char*)recorddata) + SizeOfUbtree3FreezeTDSlot);
+    Buffer buf = buffer->buf;
+    Page page = BufferGetPage(buf);
+    UBTreeFreezeOrInvalidIndexTuples(buf, xlrec->nFrozen, frozenSlots, true);
+    UBTPCRPageOpaque pageop = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    for (uint16 i = 0; i < xlrec->nFrozen; i++) {
+        UBTreeTD curTd = (UBTreeTD)UBTreePCRGetTD(page, frozenSlots[i] + 1);
+        curTd->setFrozen();
+    }
+    PageSetLSN(page, buffer->lsn);
+}
+
 void UBTree3XlogReuseTdOperatorPage(RedoBufferInfo* buffer, void* recorddata)
 {
     uint8 *ncompletedXactSlots = (uint8 *)recorddata;
@@ -1639,6 +1654,33 @@ void UBTree3XlogReuseTdOperatorPage(RedoBufferInfo* buffer, void* recorddata)
         UBTreePCRTDSetStatus(curTd, TD_COMMITED);
         Assert(TransactionIdIsValid(curTd->xactid));
     }
+    PageSetLSN(page, buffer->lsn);
+}
+
+void UBTree3XlogExtendTdOperatorPage(RedoBufferInfo* buffer, void* recorddata)
+{
+    xl_ubtree3_extend_td_slots *xlrec = (xl_ubtree3_extend_td_slots *)recorddata;
+    Page page = buffer->pageinfo.page;
+    PageHeader phdr = (PageHeader)page;
+    UBTPCRPageOpaque op = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
+    uint8 curTdSlots = op->td_count;
+    Assert(curTdSlots == xlrec->nPrevSlots);
+
+    char *start = ((char *)page) + UBTreePCRGetRowPtrOffset(page);
+    char *end = page + phdr->pd_lower;
+    size_t lpSize = end - start;
+    errno_t rc = memmove_s((char *)start + (xlrec->nExtended * sizeof(UBTreeTDData)), lpSize, start, lpSize);
+    securec_check(rc, "", "");
+    
+    for (int i = curTdSlots; i < curTdSlots + xlrec->nExtended; i++) {
+        UBTreeTD curTd = (UBTreeTD)UBTreePCRGetTD(page, i + 1);
+        rc = memset_s(curTd, sizeof(UBTreeTDData), 0, sizeof(UBTreeTDData));
+        securec_check(rc, "", "");
+    }
+
+    op->td_count += xlrec->nExtended;
+    phdr->pd_lower += xlrec->nExtended * sizeof(UBTreeTDData);
+    PageSetLSN(page, buffer->lsn);
 }
 
 void UBTree3XlogRollbackTxnOperatorPage(RedoBufferInfo* buffer, void* recorddata)

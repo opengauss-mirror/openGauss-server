@@ -556,7 +556,7 @@ static bool CheckLastRecordSize(UndoRecordSize lastRecordSize, undo::XlogUndoMet
 
     if (t_thrd.xlog_cxt.InRecovery && (lastRecordSize != xlundometa->lastRecordSize)) {
         ereport(PANIC, (errmsg(UNDOFORMAT("last record size %u != xlog last record size %u,"
-            "xlog info %d, slotPtr %lu,dbid %u."), 
+            "xlog info %d, slotPtr %lu,dbid %u."),
             lastRecordSize, xlundometa->lastRecordSize, xlundometa->info, xlundometa->slotPtr,
             xlundometa->dbid)));
         return false;
