@@ -8083,6 +8083,7 @@ void StreamTxnContextSaveXact(StreamTxnContext *stc)
     STCSaveElem(stc->subTransactionId, CurrentTransactionState->subTransactionId);
     STCSaveElem(stc->currentSubTransactionId, t_thrd.xact_cxt.currentSubTransactionId);
     STCSaveElem(stc->currentCommandId, t_thrd.xact_cxt.currentCommandId);
+    STCSaveElem(stc->currentCommandIdUsed, t_thrd.xact_cxt.currentCommandIdUsed);
     STCSaveElem(stc->xactStartTimestamp, t_thrd.xact_cxt.xactStartTimestamp);
     STCSaveElem(stc->stmtStartTimestamp, t_thrd.xact_cxt.stmtStartTimestamp);
     STCSaveElem(stc->xactStopTimestamp, t_thrd.xact_cxt.xactStopTimestamp);
@@ -8095,6 +8096,7 @@ void StreamTxnContextRestoreXact(StreamTxnContext *stc)
     STCRestoreElem(stc->subTransactionId, CurrentTransactionState->subTransactionId);
     STCRestoreElem(stc->currentSubTransactionId, t_thrd.xact_cxt.currentSubTransactionId);
     STCRestoreElem(stc->currentCommandId, t_thrd.xact_cxt.currentCommandId);
+    STCRestoreElem(stc->currentCommandIdUsed, t_thrd.xact_cxt.currentCommandIdUsed);
     STCRestoreElem(stc->xactStartTimestamp, t_thrd.xact_cxt.xactStartTimestamp);
     STCRestoreElem(stc->stmtStartTimestamp, t_thrd.xact_cxt.stmtStartTimestamp);
     STCRestoreElem(stc->xactStopTimestamp, t_thrd.xact_cxt.xactStopTimestamp);
