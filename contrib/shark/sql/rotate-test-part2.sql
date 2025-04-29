@@ -161,6 +161,71 @@ SELECT * FROM sales2  not rotate( sale_all For sale IN (sale1, sale2, sale3, sal
 create table aaa as SELECT *
 FROM sales2 not rotate(sale_all For sale IN (sale1, sale2, sale3, sale4)) unpvt;
 
+CREATE TABLE t_not_rotate0001_01 (
+    Product     VARCHAR(50),
+    Q1_Sales    DECIMAL(10,2),
+    Q2_Sales    DECIMAL(10,2),
+    Q3_Sales    DECIMAL(10,2),
+    Q4_Sales    DECIMAL(10,2)
+);
+
+INSERT INTO t_not_rotate0001_01 VALUES
+    ('Laptop', 1000.00, 1500.00, 1200.00, 1800.00),
+    ('Phone',  800.00,  900.00,  950.00,  1100.00),
+    ('Tablet', NULL,    500.00,  NULL,     700.00);
+
+
+SELECT Product, 123Quarter, sales
+FROM (
+SELECT Product, Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales
+FROM t_not_rotate0001_01
+) AS SourceTable
+not rotate (
+sales FOR Quarter IN (Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales)
+) AS UnpivotTable;
+
+
+SELECT Product, 123Quarter, sales
+FROM (
+SELECT Product, Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales
+FROM t_not_rotate0001_01
+) AS SourceTable
+not rotate (
+sales FOR Quarter IN (Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales)
+) AS UnpivotTable;
+
+
+SELECT Product, Quarter, 123sales
+FROM (
+SELECT Product, Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales
+FROM t_not_rotate0001_01
+) AS SourceTable
+not rotate (
+sales FOR Quarter IN (Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales)
+) AS UnpivotTable;
+
+
+SELECT 'Product', Quarter, Sales
+FROM (
+SELECT Product, Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales
+FROM t_not_rotate0001_01
+) AS SourceTable
+not rotate (
+Sales FOR Quarter IN (Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales)
+) AS UnpivotTable;
+
+
+SELECT Product, Quarter, 'Sales'
+FROM (
+SELECT Product, Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales
+FROM t_not_rotate0001_01
+) AS SourceTable
+not rotate (
+Sales FOR Quarter IN (Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales)
+) AS UnpivotTable;
+
+
+drop table t_not_rotate0001_01;
 
 CREATE PROCEDURE proc2(param1 CHAR(200))
 AS
