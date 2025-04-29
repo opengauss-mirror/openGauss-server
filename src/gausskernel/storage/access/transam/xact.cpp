@@ -2653,7 +2653,7 @@ static void CommitTransaction(bool STP_commit)
      * Note that parent thread will do commit transaction.
      * Stream thread should read only, no change to xlog files.
      */
-    if (StreamThreadAmI() || IsBgWorkerProcess()) {
+    if (StreamThreadAmI() || BgWorkerNeedResetXact()) {
         ResetTransactionInfo();
     }
 
@@ -3751,7 +3751,7 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
      * Note that parent thread will do abort transaction.
      * Stream thread should read only, no change to xlog files.
      */
-    if (StreamThreadAmI() || IsBgWorkerProcess()) {
+    if (StreamThreadAmI() || BgWorkerNeedResetXact()) {
         ResetTransactionInfo();
     }
     /*

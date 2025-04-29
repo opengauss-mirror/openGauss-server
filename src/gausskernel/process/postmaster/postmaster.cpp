@@ -1,4 +1,4 @@
-﻿/* -------------------------------------------------------------------------
+/* -------------------------------------------------------------------------
  *
  * postmaster.cpp
  *	  This program acts as a clearing house for requests to the
@@ -6512,6 +6512,8 @@ static void pmdie(SIGNAL_ARGS)
                 }
                 /* shut down all backends and autovac workers */
                 (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+                ShutdownAllBgWorker();
 
                 /* and the autovac launcher too */
                 if (g_instance.pid_cxt.AutoVacPID != 0)

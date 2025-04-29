@@ -41,6 +41,15 @@ bool IsBgWorkerProcess(void)
     return t_thrd.role == BGWORKER;
 }
 
+bool BgWorkerNeedResetXact()
+{
+    if (!IsBgWorkerProcess()) {
+        return false;
+    }
+    BackgroundWorker *bgw = (BackgroundWorker *)t_thrd.bgworker_cxt.bgworker;
+    return !(bgw->flag & BGWORKER_FLAG_INDIVIDUAL_THREAD);
+}
+
 bool IsDMSWorkerProcess(void)
 {
     return t_thrd.role == DMS_WORKER;
@@ -163,7 +172,7 @@ static void BgworkerQuitAndClean(int code, Datum arg)
     }
 }
 
-static void BackgroundWorkerInit(void)
+static void BackgroundWorkerInit(BackgroundWorker *bgw)
 {
     /* we are a postmaster subprocess now */
     IsUnderPostmaster = true;
@@ -186,7 +195,11 @@ static void BackgroundWorkerInit(void)
     /*
      * SIGINT is used to signal canceling the current action
      */
-    (void)gspqsignal(SIGINT, StatementCancelHandler);
+    if (!(bgw->flag & BGWORKER_FLAG_INDIVIDUAL_THREAD)) {
+        (void)gspqsignal(SIGINT, StatementCancelHandler);
+    } else {
+        (void)gspqsignal(SIGINT, SIG_IGN);
+    }
     (void)gspqsignal(SIGTERM, die);
     (void)gspqsignal(SIGALRM, handle_sig_alarm);
     (void)gspqsignal(SIGQUIT, SIG_IGN);
@@ -226,6 +239,7 @@ void BackgroundWorkerMain(void)
     sigjmp_buf local_sigjmp_buf;
     int *oldTryCounter = NULL;
     int curTryCounter;
+    bool individualThread = bgw->flag & BGWORKER_FLAG_INDIVIDUAL_THREAD;
 
     pthread_mutex_lock(&g_instance.bgw_base_lock);
     if (bgwId != bgw->bgw_id || pg_atomic_fetch_add_u32(&bgw->disable_count, 1) > 0) {
@@ -238,7 +252,7 @@ void BackgroundWorkerMain(void)
     }
     pthread_mutex_unlock(&g_instance.bgw_base_lock);
 
-    BackgroundWorkerInit();
+    BackgroundWorkerInit(bgw);
     workerContext = AllocSetContextCreate(t_thrd.top_mem_cxt, "BgWorker", ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
@@ -265,6 +279,9 @@ void BackgroundWorkerMain(void)
 
         /* Report the error to the parallel leader and the server log */
         EmitErrorReport();
+
+        /* Abort the current transaction in order to recover */
+        AbortCurrentTransaction();
 
         /* release resource held by lsc */
         AtEOXact_SysDBCache(false);
@@ -314,7 +331,8 @@ void BackgroundWorkerMain(void)
     u_sess->proc_cxt.MyProcPort->user_name = pstrdup(bwc->userName);
     (void)MemoryContextSwitchTo(oldcontext);
 
-    t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(bwc->databaseName, InvalidOid, bwc->userName);
+    t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(u_sess->proc_cxt.MyProcPort->database_name,
+        InvalidOid, u_sess->proc_cxt.MyProcPort->user_name);
     t_thrd.proc_cxt.PostInit->InitBgWorker();
     pgstat_report_appname("Bgworker");
     pgstat_report_queryid(bwc->parent_query_id);
@@ -324,19 +342,21 @@ void BackgroundWorkerMain(void)
     u_sess->catalog_cxt.myTempToastNamespace = bwc->myTempToastNamespace;
     ereport(LOG, (errmsg("bgworker threadId is %lu.", t_thrd.proc_cxt.MyProcPid)));
 
-    StartTransactionCommand();
-    SetUpBgWorkerTxnEnvironment();
+    if (!individualThread) {
+        StartTransactionCommand();
+        SetUpBgWorkerTxnEnvironment();
 
-    /*
-     * Join locking group.  We must do this before anything that could try to
-     * acquire a heavyweight lock, because any heavyweight locks acquired to
-     * this point could block either directly against the parallel group
-     * leader or against some process which in turn waits for a lock that
-     * conflicts with the parallel group leader, causing an undetected
-     * deadlock.  (If we can't join the lock group, the leader has gone away,
-     * so just exit quietly.)
-     */
-    BecomeLockGroupMember(bwc->leader);
+        /*
+         * Join locking group.  We must do this before anything that could try to
+         * acquire a heavyweight lock, because any heavyweight locks acquired to
+         * this point could block either directly against the parallel group
+         * leader or against some process which in turn waits for a lock that
+         * conflicts with the parallel group leader, causing an undetected
+         * deadlock.  (If we can't join the lock group, the leader has gone away,
+         * so just exit quietly.)
+         */
+        BecomeLockGroupMember(bwc->leader);
+    }
 
     u_sess->attr.attr_sql.enable_cluster_resize = bwc->enable_cluster_resize;
 
@@ -344,8 +364,10 @@ void BackgroundWorkerMain(void)
      * Now invoke the user-defined worker code
      */
     bwc->main_entry(bwc);
-    EndParallelWorkerTransaction();
-    ResetTransactionInfo();
+    if (!individualThread) {
+        EndParallelWorkerTransaction();
+        ResetTransactionInfo();
+    }
     /* ... and if it returns, we're done */
     bgw->bgw_status = BGW_STOPPED;
 
@@ -359,7 +381,7 @@ out:
  * This can only be called in the _PG_init function of a module library
  * that's loaded by shared_preload_libraries; otherwise it has no effect.
  */
-bool RegisterBackgroundWorker(BgWorkerContext *bwc)
+bool RegisterBackgroundWorker(BgWorkerContext *bwc, int flag)
 {
     BGW_HDR* bgworker_base = (BGW_HDR *)g_instance.bgw_base;
     BackgroundWorker *bgw = NULL;
@@ -382,6 +404,7 @@ bool RegisterBackgroundWorker(BgWorkerContext *bwc)
     bgw->bgw_status = BGW_NOT_YET_STARTED;
     bgw->bgw_status_dur = 0;
     bgw->disable_count = 0;
+    bgw->flag = flag;
 
     bwa->bgwcontext = bwc;
     bwa->bgworker = bgw;
@@ -412,12 +435,18 @@ static void BgworkerCleanupSharedContext()
     /* clean up backgroud shared context */
     if (t_thrd.bgworker_cxt.bgwcontext) {
         BgWorkerContext *bwc = (BgWorkerContext*)t_thrd.bgworker_cxt.bgwcontext;
+        if (!(bwc->flag & BGWORKER_FLAG_INDIVIDUAL_THREAD)) {
+            if (bwc->exit_entry) {
+                bwc->exit_entry(bwc);
+            }
+            pfree_ext(bwc->bgshared);
 
-        if (bwc->exit_entry) {
-            bwc->exit_entry(bwc);
+            /*
+             * TODO: maybe we can free bgwcontext for individual thread?
+             * now we don't free bgwcontext, maybe have mem leak.
+             */
+            pfree_ext(t_thrd.bgworker_cxt.bgwcontext);
         }
-        pfree_ext(bwc->bgshared);
-        pfree_ext(t_thrd.bgworker_cxt.bgwcontext);
     }
     slist_init(&t_thrd.bgworker_cxt.bgwlist);
 }
@@ -447,6 +476,9 @@ loop:
                 (pg_atomic_fetch_add_u32(&bgw->disable_count, 1) == 0)) {
                 bgw->bgw_status = BGW_FAILED;
             }
+        } else if (bgw->flag & BGWORKER_FLAG_INDIVIDUAL_THREAD) {
+            /* ignore individual bgworker, it will exit when PM exit, check ShutdownAllBgWorker */
+            continue;
         } else {
             if (!sigsent && gs_signal_send(bgw->bgw_notify_pid, SIGINT) != 0) {
                 ereport(WARNING, (errmsg("BgworkerListSyncQuit kill(pid %lu, stat %d) failed: %m",
@@ -529,18 +561,26 @@ void BgworkerListWaitFinish(int *nparticipants)
     pgstat_report_waitstatus(oldStatus);
 }
 
-int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, bgworker_exit bgexit)
+int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, bgworker_exit bgexit, int flag)
 {
     int actualWorkers = 0;
     MemoryContext oldcontext;
     BgWorkerContext *bwc;
 
     Assert(nworkers > 0);
-    /* We need to be a lock group leader. */
-    BecomeLockGroupLeader();
-
-    /* We might be running in a short-lived memory context. */
-    oldcontext = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+    bool individualThread = flag & BGWORKER_FLAG_INDIVIDUAL_THREAD;
+    MemoryContext mcxt = NULL;
+    if (!individualThread) {
+        /* We need to be a lock group leader. */
+        BecomeLockGroupLeader();
+        /* We might be running in a short-lived memory context. live with backend who launch me */
+        mcxt = u_sess->top_transaction_mem_cxt;
+    } else {
+        /* individual thread, live with PM */
+        mcxt = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
+        Assert(bgshared != NULL);
+    }
+    oldcontext = MemoryContextSwitchTo(mcxt);
 
     /*
      * Start workers.
@@ -553,10 +593,11 @@ int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, 
     bwc = (BgWorkerContext*)MemoryContextAllocZero(
         INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(BgWorkerContext));
     bwc->transactionCxt.txnId = GetCurrentTransactionIdIfAny();
-    bwc->transactionCxt.snapshot = GetActiveSnapshot();
+    bwc->transactionCxt.snapshot = u_sess->utils_cxt.ActiveSnapshot != NULL ? GetActiveSnapshot() : NULL;
     bwc->bgshared = bgshared;
     bwc->databaseName = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    bwc->userName = u_sess->proc_cxt.MyProcPort->user_name;
+    bwc->userName = individualThread ?
+        pstrdup(u_sess->proc_cxt.MyProcPort->user_name) : u_sess->proc_cxt.MyProcPort->user_name;
     /* pass enable_cluster_resize to bgwokers to optimize parallel index building performance during redistribution */
     bwc->enable_cluster_resize = u_sess->attr.attr_sql.enable_cluster_resize;
     bwc->leader = t_thrd.proc;
@@ -566,13 +607,16 @@ int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, 
     bwc->myTempToastNamespace = u_sess->catalog_cxt.myTempToastNamespace;
     bwc->main_entry = bgmain;
     bwc->exit_entry = bgexit;
+    bwc->flag = flag;
 
     t_thrd.bgworker_cxt.bgwcontext = bwc;
 
-    StreamSaveTxnContext(&bwc->transactionCxt);
+    if (!individualThread) {
+        StreamSaveTxnContext(&bwc->transactionCxt);
+    }
 
     for (int i = 0; i < nworkers; ++i) {
-        if (RegisterBackgroundWorker(bwc)) {
+        if (RegisterBackgroundWorker(bwc, flag)) {
             actualWorkers++;
         }
     }
@@ -580,4 +624,18 @@ int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, 
     /* Restore previous memory context. */
     MemoryContextSwitchTo(oldcontext);
     return actualWorkers;
+}
+
+void ShutdownAllBgWorker()
+{
+    pthread_mutex_lock(&g_instance.bgw_base_lock);
+    BackgroundWorker* bgws = ((BGW_HDR *)g_instance.bgw_base)->bgws;
+    for (int i = 0; i < g_max_worker_processes; i++) {
+        if ((bgws[i].flag & BGWORKER_FLAG_INDIVIDUAL_THREAD) && gs_signal_send(bgws[i].bgw_notify_pid, SIGTERM) != 0) {
+            /* TODO: maybe need to retry send SIGTERM again to those failed thread */
+            ereport(WARNING, (errmsg("ShutdownAllBgWorker kill(pid %lu, stat %d) failed: %m",
+                                     bgws[i].bgw_notify_pid, bgws[i].bgw_status)));
+        }
+    }
+    pthread_mutex_unlock(&g_instance.bgw_base_lock);
 }
