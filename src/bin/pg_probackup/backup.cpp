@@ -474,7 +474,7 @@ static int64 calc_data_bytes()
     return backup_data;
 }
 
-static bool backup_space_check()
+static bool backup_space_check(const char* backup_path)
 {
     int64 disk_available_bytes = 0;
     int64 backup_bytes = 0;
