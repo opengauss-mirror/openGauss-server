@@ -91,6 +91,15 @@ class Vector {
         this->mySize++;
     }
 
+    void resize(size_t newSize) {
+        while (this->mySize > newSize) {
+            pop_back();
+        }
+        while (this->mySize < newSize) {
+            push_back(T());
+        }
+    }
+
     void pop_back() {
         if (this->mySize > 1) {
             this->mySize--;

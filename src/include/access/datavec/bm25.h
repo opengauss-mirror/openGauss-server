@@ -228,6 +228,44 @@ typedef struct BM25BuildState {
     BM25Leader *bm25leader;
 } BM25BuildState;
 
+struct BM25ScanCursor {
+public:
+	BM25ScanCursor() {}
+    BM25ScanCursor(Relation indexRel, const BlockNumber postingBlock, float tokenMaxScore, float idfVal,
+        unsigned char* docIdMask)
+        : tokenPostingBlock(postingBlock),
+          qTokenMaxScore(tokenMaxScore),
+          qTokenIDFVal(idfVal),
+          curBlkno(postingBlock),
+          curOffset(InvalidOffsetNumber),
+          curDocId(BM25_INVALID_DOC_ID),
+          tokenFreqInDoc(0.0f),
+          curDocLength(0.0f),
+          index(indexRel),
+          docIdfilter(docIdMask)
+    {
+        Next(true);
+    }
+
+    void Next(bool isInit = false);
+    void Seek(uint32 docId);
+    void Close();
+
+    BlockNumber tokenPostingBlock; /* first block number of inverted list */
+    float qTokenMaxScore;
+    float qTokenIDFVal;
+
+    /* update when iterator */
+    BlockNumber curBlkno;
+    OffsetNumber curOffset;
+    uint32 curDocId;
+    float tokenFreqInDoc; /* number of the token in cur doc */
+    float curDocLength; /* number of the token in cur doc */
+    Relation index;
+    unsigned char* docIdfilter;
+    Buffer buf;
+    Page page;
+};  // struct BM25ScanCursor
 
 struct BM25Scorer : public BaseObject {
 public:
