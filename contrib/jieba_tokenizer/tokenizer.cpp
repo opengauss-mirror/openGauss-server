@@ -30,7 +30,7 @@
 #include "tokenizer.h"
 
 const size_t MAX_LENGTH_CRC = 100;
-const size_t MAX_KEYWORD_NUM = 100;
+const size_t MAX_KEYWORD_NUM = 100000;
 const size_t MAX_PATH_LEN = 1024;
 
 const char* const DICT_PATH = "lib/jieba_dict/jieba.dict.utf8";
@@ -66,22 +66,31 @@ inline static uint32_t HashString2Uint32(const std::string& srcStr)
     return crc;
 }
 
-inline static void ConvertEmbeddingMap(std::unordered_map<uint32_t, float> tempMap, EmbeddingMap *embeddingMap)
+inline static void ConvertEmbeddingMap(std::unordered_map<std::string, std::pair<uint32_t, float>> tokensMap,
+    EmbeddingMap *embeddingMap)
 {
-    embeddingMap->size = tempMap.size();
+    embeddingMap->size = tokensMap.size();
     if  (embeddingMap->size == 0) {
         return;
     }
-    embeddingMap->pairs = (EmbeddingPair *)malloc(embeddingMap->size * sizeof(EmbeddingPair));
-    if (embeddingMap->pairs == nullptr) {
+    embeddingMap->tokens = (EmbeddingTokenInfo *)malloc(embeddingMap->size * sizeof(EmbeddingTokenInfo));
+    if (embeddingMap->tokens == nullptr) {
+        embeddingMap->size = 0;
         return;
     }
 
-    size_t index = 0;
-    for (const auto& pair : tempMap) {
-        embeddingMap->pairs[index].key = pair.first;
-        embeddingMap->pairs[index].value = pair.second;
-        index++;
+    size_t idx = 0;
+    for (const auto& token : tokensMap) {
+        embeddingMap->tokens[idx].key = token.second.first;
+        embeddingMap->tokens[idx].value = token.second.second;
+        errno_t rc = strncpy_s(embeddingMap->tokens[idx].token, MAX_TOKEN_LEN, token.first.c_str(), MAX_TOKEN_LEN - 1);
+        if (rc != EOK) {
+            free(embeddingMap->tokens);
+            embeddingMap->tokens = nullptr;
+            embeddingMap->size = 0;
+            return;
+        }
+        idx++;
     }
 }
 
@@ -148,31 +157,36 @@ bool ConvertString2Embedding(const char* srcStr, EmbeddingMap *embeddingMap, boo
     if (jiebaTokenizer == nullptr || srcStr == nullptr || embeddingMap == nullptr) {
         return false;
     }
-    std::string srcStrInput(srcStr);
-    std::unordered_map<uint32_t, float> tempMap;
+    std::string sentence(srcStr);
+    std::unordered_map<std::string, std::pair<uint32_t, float>> tokensMap;
     if (isKeywordExtractor) {
         std::vector<cppjieba::KeywordExtractor::Word> keywords;
-        jiebaTokenizer->extractor.Extract(srcStrInput, keywords, MAX_KEYWORD_NUM);
+        jiebaTokenizer->extractor.Extract(sentence, keywords, MAX_KEYWORD_NUM);
         for (const auto& keyword : keywords) {
             uint32_t hashValue = HashString2Uint32(Convert2LowerCase(keyword.word));
-            tempMap[hashValue] += keyword.weight;
+            tokensMap[keyword.word] = std::make_pair(hashValue, keyword.weight);
         }
-        if (!tempMap.empty()) {
-            ConvertEmbeddingMap(tempMap, embeddingMap);
+        if (!tokensMap.empty()) {
+            ConvertEmbeddingMap(tokensMap, embeddingMap);
             return true;
         }
     }
 
+    // if the keywords extracted by 'Extract' are empty, then use 'Cut' for tokenization.
     std::vector<std::string> tokens;
-    jiebaTokenizer->Cut(srcStrInput, tokens, true);
+    jiebaTokenizer->Cut(sentence, tokens, true);
     for (const auto& token : tokens) {
         if (IsWhitespace(token)) {
             continue;
         }
         uint32_t hashValue = HashString2Uint32(Convert2LowerCase(token));
-        tempMap[hashValue] += 1.0f;
+        if (tokensMap.find(token) == tokensMap.end()) {
+            tokensMap[token] = std::make_pair(hashValue, 1.0f);
+        } else {
+            tokensMap[token].second += 1.0f;
+        }
     }
-    ConvertEmbeddingMap(tempMap, embeddingMap);
+    ConvertEmbeddingMap(tokensMap, embeddingMap);
     return true;
 }
 
