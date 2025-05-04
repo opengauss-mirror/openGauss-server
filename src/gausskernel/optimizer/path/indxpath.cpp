@@ -2599,7 +2599,11 @@ static void match_pathkeys_to_index(
          * There is no value in matching just some of the pathkeys.
          */
         /* Pathkey must request default sort order for the target opfamily */
-        if (pathkey->pk_strategy != BTLessStrategyNumber || pathkey->pk_nulls_first)
+        if (index->relam == BM25_AM_OID) {
+            if (pathkey->pk_strategy != BTGreaterStrategyNumber) {
+                return;
+            }
+        } else if (pathkey->pk_strategy != BTLessStrategyNumber || pathkey->pk_nulls_first)
             return;
 
         /* If eclass is volatile, no hope of using an indexscan */

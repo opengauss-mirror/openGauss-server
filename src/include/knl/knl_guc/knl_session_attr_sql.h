@@ -13,7 +13,7 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * knl_session_attr_sql.h
  *   Data struct to store knl_session_attr_sql variables.
  *
@@ -28,7 +28,7 @@
  *
  *   @group@: sql, storage, security, network, memory, resource, common
  *   select the group according to the type of guc variable.
- * 
+ *
  * IDENTIFICATION
  *        src/include/knl/knl_guc/knl_session_attr_sql.h
  *
@@ -64,6 +64,7 @@ typedef struct knl_session_attr_sql {
     bool enable_bitmapscan;
     bool force_bitmapand;
     bool enable_union_all_subquery_orderby;
+    bool enable_bm25_taat;
     bool transform_to_numeric_operators;
     bool enable_parallel_ddl;
     bool enable_tidscan;
@@ -177,6 +178,7 @@ typedef struct knl_session_attr_sql {
     int acce_min_datasize_per_thread;
     int max_cn_temp_file_size;
     int default_statistics_target;
+    int bm25_topk;
     /* Memory Limit user could set in session */
     int FencedUDFMemoryLimit;
     int64 g_default_expthresh;
@@ -192,6 +194,8 @@ typedef struct knl_session_attr_sql {
     double Geqo_selection_bias;
     double Geqo_seed;
     double phony_random_seed;
+    double bm25_k1;
+    double bm25_b;
     char* expected_computing_nodegroup;
     char* default_storage_nodegroup;
     char* inlist2join_optmode;
