@@ -27,17 +27,20 @@
 
 #include <stdint.h>
 
+#define MAX_TOKEN_LEN 100
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct EmbeddingPair {
+typedef struct EmbeddingTokenInfo {
     uint32_t key;
     float value;
-} EmbeddingPair;
+    char token[MAX_TOKEN_LEN];
+} EmbeddingTokenInfo;
 
 typedef struct {
-    EmbeddingPair *pairs;
+    EmbeddingTokenInfo *tokens;
     size_t size;
 } EmbeddingMap;
 

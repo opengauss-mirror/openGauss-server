@@ -32,7 +32,6 @@
 #include "access/generic_xlog.h"
 #include "catalog/pg_operator.h"
 #include "port.h" /* for random() */
-#include "db4ai/bayesnet.h"
 #include "access/datavec/vecindex.h"
 
 #define BM25_VERSION 1
@@ -52,12 +51,27 @@
 #define BM25_DOCUMENT_MAX_COUNT_IN_PAGE (BM25_PAGE_DATASIZE / BM25_DOCUMENT_ITEM_SIZE)
 #define BM25_DOCUMENT_FORWARD_ITEM_SIZE (MAXALIGN(sizeof(BM25DocForwardItem)))
 #define BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE (BM25_PAGE_DATASIZE / BM25_DOCUMENT_FORWARD_ITEM_SIZE)
+#define BM25_MAX_TOKEN_LEN 100
+#define BM25_BUCKET_MAX_NUM 1000
 
 typedef struct BM25ScanData {
     uint32 docId;
     float score;
     ItemPointerData heapCtid;
 } BM25ScanData;
+
+typedef struct BM25TokenData {
+    uint32 hashValue;
+    uint32 tokenId;
+    uint32 tokenFreq;
+    char tokenValue[BM25_MAX_TOKEN_LEN];
+} BM25TokenData;
+
+typedef struct BM25TokenizedDocData {
+    BM25TokenData* tokenDatas;
+    uint32 tokenCount;
+    uint32 docLength;
+} BM25TokenizedDocData;
 
 typedef struct BM25ScanOpaqueData {
     uint32 cursor;
@@ -74,6 +88,8 @@ typedef BM25ScanOpaqueData *BM25ScanOpaque;
 typedef struct BM25EntryPages {
     BlockNumber documentMetaPage;
     BlockNumber docForwardPage;
+    BlockNumber hashBucketsPage;
+    uint32 hashBucketCount;
 } BM25EntryPages;
 
 typedef struct BM25MetaPageData {
@@ -129,11 +145,72 @@ typedef struct BM25DocumentItem {
     uint64 tokenEndIdx;
 } BM25DocumentItem;
 
+typedef struct BM25HashBucketItem {
+    uint32 bucketId;
+    BlockNumber bucketBlkno;
+} BM25HashBucketItem;
+
+typedef BM25HashBucketItem *BM25HashBucketPage;
+
+typedef struct BM25TokenMetaItem {
+    uint32 tokenId;
+    uint32 docCount;
+    BlockNumber postingBlkno;
+    float maxScore;
+    char token[BM25_MAX_TOKEN_LEN];
+} BM25TokenMetaItem;
+
+typedef BM25TokenMetaItem *BM25TokenMetaPage;
+
+typedef struct BM25TokenPostingItem {
+    uint32 docId;
+    uint16 docLength;
+    uint16 freq;
+} BM25TokenPostingItem;
+
+typedef BM25TokenPostingItem *BM25TokenPostingPage;
+
+typedef struct BM25PageLocationInfo {
+    BlockNumber blkno;
+    OffsetNumber offno;
+} BM25PageLocationInfo;
+
+typedef struct BM25Shared {
+    /* Immutable state */
+    Oid heaprelid;
+    Oid indexrelid;
+
+    /* Mutex for mutable state */
+    slock_t mutex;
+
+    /* Mutable state */
+    int nparticipantsdone;
+    double reltuples;
+
+    BM25EntryPages bm25EntryPages;
+
+    ParallelHeapScanDescData heapdesc;
+} BM25Shared;
+
+typedef struct BM25Leader {
+    int nparticipanttuplesorts;
+    BM25Shared *bm25shared;
+} BM25Leader;
+
+typedef struct BM25ReorderShared {
+    BM25PageLocationInfo *startPageLocation;
+    uint32 batchCount;
+    uint32 curThreadId;
+    Oid heaprelid;
+    Oid indexrelid;
+} BM25ReorderShared;
+
 typedef struct BM25BuildState {
     /* Info */
     Relation heap;
     Relation index;
     IndexInfo *indexInfo;
+    ForkNumber forkNum;
 
     BM25EntryPages bm25EntryPages;
 
@@ -147,13 +224,40 @@ typedef struct BM25BuildState {
 
     /* Memory */
     MemoryContext tmpCtx;
+
+    BM25Leader *bm25leader;
 } BM25BuildState;
 
+
+struct BM25Scorer : public BaseObject {
+public:
+    float m_k1;
+    float m_b;
+    float m_avgdl;
+
+    float GetDocBM25Score(float tf, float docLen) {
+        return tf * (m_k1 + 1) / (tf + m_k1 * (1 - m_b + m_b * (docLen / m_avgdl)));
+    }
+
+    BM25Scorer(float k1, float b, float avgdl)
+        : m_k1(k1), m_b(b), m_avgdl(avgdl) {
+    }
+};  // struct BM25Scorer
+
+/* Methods */
+Buffer BM25NewBuffer(Relation index, ForkNumber forkNum);
+void BM25InitPage(Buffer buf, Page page);
+void BM25InitRegisterPage(Relation index, Buffer *buf, Page *page, GenericXLogState **state);
+void BM25CommitBuffer(Buffer buf, GenericXLogState *state);
+void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, bool unlockOldBuf = true);
 void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap);
 uint32 BM25AllocateDocId(Relation index);
 uint32 BM25AllocateTokenId(Relation index);
 void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgdl);
 BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber startBlkno, BlockNumber step);
+bool FindHashBucket(uint32 bucketId, BM25PageLocationInfo &bucketLocation, Buffer buf, Page page);
+bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLocation, Buffer buf, Page page);
+BM25TokenizedDocData BM25DocumentTokenize(const char* doc);
 
 Datum bm25build(PG_FUNCTION_ARGS);
 Datum bm25buildempty(PG_FUNCTION_ARGS);
