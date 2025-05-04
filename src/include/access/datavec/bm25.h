@@ -149,6 +149,12 @@ typedef struct BM25BuildState {
     MemoryContext tmpCtx;
 } BM25BuildState;
 
+void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap);
+uint32 BM25AllocateDocId(Relation index);
+uint32 BM25AllocateTokenId(Relation index);
+void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgdl);
+BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber startBlkno, BlockNumber step);
+
 Datum bm25build(PG_FUNCTION_ARGS);
 Datum bm25buildempty(PG_FUNCTION_ARGS);
 Datum bm25insert(PG_FUNCTION_ARGS);
