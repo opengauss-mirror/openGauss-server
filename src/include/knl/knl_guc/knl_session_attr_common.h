@@ -213,7 +213,7 @@ typedef struct knl_session_attr_common {
     // using for standby
     char* track_stmt_standby_chain_size;
 
-    bool enalbe_evil_detect;
+    bool enable_evil_detect;
 
     bool enable_wdr_snapshot;
     bool enable_set_variable_b_format;
