@@ -72,10 +72,13 @@ BM25TokenizedDocData BM25DocumentTokenize(const char* doc)
  */
 Buffer BM25NewBuffer(Relation index, ForkNumber forkNum)
 {
-    SpinLockAcquire(&newBufferMutex);
+    Buffer lockBuf = ReadBuffer(index, BM25_LOCK_BLKNO);
+    LockBuffer(lockBuf, BUFFER_LOCK_EXCLUSIVE);
+
     Buffer buf = ReadBufferExtended(index, forkNum, P_NEW, RBM_NORMAL, NULL);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-    SpinLockRelease(&newBufferMutex);
+
+    UnlockReleaseBuffer(lockBuf);
     return buf;
 }
 
@@ -99,13 +102,29 @@ void BM25InitRegisterPage(Relation index, Buffer *buf, Page *page, GenericXLogSt
     BM25InitPage(*buf, *page);
 }
 
-/*
- * Commit buffer
- */
-void BM25CommitBuffer(Buffer buf, GenericXLogState *state)
+void BM25GetPage(Relation index, Page *page, Buffer buf, GenericXLogState **state, bool building)
 {
-    GenericXLogFinish(state);
-    UnlockReleaseBuffer(buf);
+    if (building) {
+        *state = nullptr;
+        *page = BufferGetPage(buf);
+    } else {
+        *state = GenericXLogStart(index);
+        *page = GenericXLogRegisterBuffer(*state, buf, GENERIC_XLOG_FULL_IMAGE);
+    }
+    return;
+}
+
+void BM25CommitBuf(Buffer buf, GenericXLogState **state, bool building, bool releaseBuf)
+{
+    if (building) {
+        MarkBufferDirty(buf);
+    } else {
+        GenericXLogFinish(*state);
+    }
+    if (releaseBuf) {
+        UnlockReleaseBuffer(buf);
+    }
+    return;
 }
 
 /*
@@ -113,26 +132,27 @@ void BM25CommitBuffer(Buffer buf, GenericXLogState *state)
  *
  * The order is very important!!
  */
-void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, bool unlockOldBuf)
+void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, bool unlockOldBuf,
+    GenericXLogState **state, bool building)
 {
     /* Get new buffer */
     Buffer newbuf = BM25NewBuffer(index, forkNum);
-    Page newpage = BufferGetPage(newbuf);
+    Page newpage;
 
     /* Update the previous buffer */
     BM25PageGetOpaque(*page)->nextblkno = BufferGetBlockNumber(newbuf);
-
-    /* Init new page */
-    BM25InitPage(newbuf, newpage);
-
-    MarkBufferDirty(*buf);
     if (unlockOldBuf) {
-        /* Unlock */
-        UnlockReleaseBuffer(*buf);
+        BM25CommitBuf(*buf, state, building);
     }
 
-    *page = BufferGetPage(newbuf);
+    /* Init new page */
+    BM25GetPage(index, &newpage, newbuf, state, building);
+    BM25InitPage(newbuf, newpage);
+    BM25CommitBuf(newbuf, state, building, false);
+
+    BM25GetPage(index, page, newbuf, state, building);
     *buf = newbuf;
+    return;
 }
 
 /*
@@ -155,16 +175,17 @@ void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap)
     UnlockReleaseBuffer(buf);
 }
 
-uint32 BM25AllocateDocId(Relation index)
+uint32 BM25AllocateDocId(Relation index, bool building)
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state = nullptr;
     BM25MetaPage metapBuf;
     uint32 docId;
 
     buf = ReadBuffer(index, BM25_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-    page = BufferGetPage(buf);
+    BM25GetPage(index, &page, buf, &state, building);
     metapBuf = BM25PageGetMeta(page);
     if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER))
         elog(ERROR, "bm25 index is not valid");
@@ -174,8 +195,7 @@ uint32 BM25AllocateDocId(Relation index)
     }
 
     metapBuf->nextDocId++;
-    MarkBufferDirty(buf);
-    UnlockReleaseBuffer(buf);
+    BM25CommitBuf(buf, &state, building);
     return docId;
 }
 
@@ -199,23 +219,23 @@ uint32 BM25AllocateTokenId(Relation index)
     return tokenId;
 }
 
-void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgdl)
+void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgdl, bool building)
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state = nullptr;
     BM25MetaPage metapBuf;
 
     buf = ReadBuffer(index, BM25_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-    page = BufferGetPage(buf);
+    BM25GetPage(index, &page, buf, &state, building);
     metapBuf = BM25PageGetMeta(page);
     if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER))
         elog(ERROR, "bm25 index is not valid");
     metapBuf->documentCount++;
     metapBuf->tokenCount += tokenCount;
     avgdl = metapBuf->tokenCount / metapBuf->documentCount;
-    MarkBufferDirty(buf);
-    UnlockReleaseBuffer(buf);
+    BM25CommitBuf(buf, &state, building);
 }
 
 BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber startBlkno, BlockNumber step)

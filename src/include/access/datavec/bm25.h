@@ -45,6 +45,7 @@
 
 /* Preserved page numbers */
 #define BM25_METAPAGE_BLKNO 0
+#define BM25_LOCK_BLKNO 1
 #define BM25_INVALID_DOC_ID 0xFFFFFFFF
 #define BM25_PAGE_DATASIZE 8000
 #define BM25_DOCUMENT_ITEM_SIZE (MAXALIGN(sizeof(BM25DocumentItem)))
@@ -86,6 +87,7 @@ typedef struct BM25ScanOpaqueData {
 typedef BM25ScanOpaqueData *BM25ScanOpaque;
 
 typedef struct BM25EntryPages {
+    BlockNumber lockPage;
     BlockNumber documentMetaPage;
     BlockNumber docForwardPage;
     BlockNumber hashBucketsPage;
@@ -156,6 +158,7 @@ typedef struct BM25TokenMetaItem {
     uint32 tokenId;
     uint32 docCount;
     BlockNumber postingBlkno;
+    BlockNumber lastInsertBlkno;
     float maxScore;
     char token[BM25_MAX_TOKEN_LEN];
 } BM25TokenMetaItem;
@@ -286,12 +289,15 @@ public:
 Buffer BM25NewBuffer(Relation index, ForkNumber forkNum);
 void BM25InitPage(Buffer buf, Page page);
 void BM25InitRegisterPage(Relation index, Buffer *buf, Page *page, GenericXLogState **state);
-void BM25CommitBuffer(Buffer buf, GenericXLogState *state);
-void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, bool unlockOldBuf = true);
+void BM25GetPage(Relation index, Page *page, Buffer buf, GenericXLogState **state, bool building);
+void BM25CommitBuf(Buffer buf, GenericXLogState **state, bool building, bool releaseBuf = true);
 void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap);
-uint32 BM25AllocateDocId(Relation index);
+void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, bool unlockOldBuf,
+    GenericXLogState **state, bool building);
+void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap);
+uint32 BM25AllocateDocId(Relation index, bool building);
 uint32 BM25AllocateTokenId(Relation index);
-void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgdl);
+void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgdl, bool building);
 BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber startBlkno, BlockNumber step);
 bool FindHashBucket(uint32 bucketId, BM25PageLocationInfo &bucketLocation, Buffer buf, Page page);
 bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLocation, Buffer buf, Page page);
