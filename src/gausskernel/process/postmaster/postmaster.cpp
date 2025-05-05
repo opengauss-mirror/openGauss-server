@@ -583,6 +583,10 @@ extern int SocketBackend(StringInfo inBuf);
 extern DestReceiver* printtup_create_DR(CommandDest dest);
 extern void InitDolpinProtoIfNeeded();
 
+extern void InitDBSDFunc();
+extern void InitDBSD();
+
+
 ProtocolExtensionConfig* ListenConfig[MAXLISTEN];
 
 ProtocolExtensionConfig default_protocol_config = {
@@ -2973,6 +2977,12 @@ int PostmasterMain(int argc, char* argv[])
     g_instance.comm_cxt.pLogCtl = (LogControlData*)MemoryContextAlloc(
         INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT), sizeof(LogControlData));
     g_instance.pid_cxt.SysLoggerPID = SysLogger_Start();
+
+    /* DBSD init, this is enable when get DBSO.so */
+    if (g_instance.attr.attr_storage.enable_dbsd) {
+        InitDBSDFunc();
+        InitDBSD();
+    }
 
     /* Database Security: Support database audit */
     /*  start auditor process */

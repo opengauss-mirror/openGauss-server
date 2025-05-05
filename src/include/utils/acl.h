@@ -398,6 +398,7 @@ extern Oid get_nodegroup_member_of(Oid roleid);
 extern Oid get_nodegroup_privs_of(Oid roleid);
 extern bool is_role_independent(Oid roleid);
 extern bool is_role_iamauth(Oid roleid);
+extern char* GetAuthIdFromSysCache(Oid roleId);
 extern bool independent_priv_aclcheck(AclMode mask, char relkind);
 extern bool is_trust_language(Oid lang_oid);
 extern Acl* allocacl(int n);

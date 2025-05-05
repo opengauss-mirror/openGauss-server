@@ -1065,6 +1065,19 @@ static void InitStorageConfigureNamesBool()
             check_enable_gtm_free,
             NULL,
             NULL},
+
+        {{"enable_dbsd_plugin",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("enable DBSD plugin."),
+            NULL},
+            &g_instance.attr.attr_storage.enable_dbsd,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
         /* logic connection between cn & dn */
         {{"comm_cn_dn_logic_conn",
             PGC_POSTMASTER,

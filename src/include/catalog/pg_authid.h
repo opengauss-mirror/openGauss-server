@@ -124,6 +124,34 @@ typedef FormData_pg_authid *Form_pg_authid;
 #define Anum_pg_authid_rolpolicyadmin	26
 #define Anum_pg_authid_rolpasswordext	27
 
+static int Authid_Name_Data[] = {
+	Anum_pg_authid_rolname, Anum_pg_authid_rolrespool, Natts_pg_authid
+};
+static int Authid_Bool[] = {
+	Anum_pg_authid_rolsuper, Anum_pg_authid_rolinherit, Anum_pg_authid_rolcreaterole,
+	Anum_pg_authid_rolcreatedb, Anum_pg_authid_rolcatupdate, Anum_pg_authid_rolcanlogin,
+	Anum_pg_authid_rolreplication, Anum_pg_authid_rolauditadmin, Anum_pg_authid_rolsystemadmin,
+	Anum_pg_authid_roluseft, Anum_pg_authid_rolmonitoradmin, Anum_pg_authid_roloperatoradmin,
+	Anum_pg_authid_rolpolicyadmin, Natts_pg_authid
+};
+static int Authid_Text[] = {
+	Anum_pg_authid_rolpassword, Anum_pg_authid_roltempspace, Anum_pg_authid_rolspillspace,
+	Anum_pg_authid_rolspillspace, Anum_pg_authid_roltabspace, Natts_pg_authid
+};
+static int Authid_Oid[] = {
+	Anum_pg_authid_rolparentid, Anum_pg_authid_rolnodegroup, Natts_pg_authid
+};
+static int Authid_Int4[] = {
+	Anum_pg_authid_rolconnlimit, Natts_pg_authid
+};
+static int Authid_TimeStamptz[] = {
+	Anum_pg_authid_rolvalidbegin, Anum_pg_authid_rolvaliduntil, Natts_pg_authid
+};
+static int Authid_Char[] = {
+	Anum_pg_authid_rolkind, Natts_pg_authid
+};
+
+
 /* ----------------
  *		initial contents of pg_authid
  *
