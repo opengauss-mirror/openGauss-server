@@ -22,6 +22,7 @@
  */
 
 #include "postgres.h"
+#include "access/multi_redo_api.h"
 #include "access/datavec/bm25.h"
 
 /*
@@ -47,6 +48,9 @@ static void bm25costestimate_internal(PlannerInfo *root, IndexPath *path, double
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25build);
 Datum bm25build(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "bm25 index do not support extreme rto.");
+    }
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
     IndexInfo *indexinfo = (IndexInfo *)PG_GETARG_POINTER(2);
@@ -58,8 +62,11 @@ Datum bm25build(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25buildempty);
 Datum bm25buildempty(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "bm25 index do not support extreme rto.");
+    }
     Relation index = (Relation)PG_GETARG_POINTER(0);
-    //bm25buildempty_internal(index);
+    bm25buildempty_internal(index);
 
     PG_RETURN_VOID();
 }
@@ -130,6 +137,9 @@ Datum bm25costestimate(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25insert);
 Datum bm25insert(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "bm25 index do not support extreme rto.");
+    }
     Relation rel = (Relation)PG_GETARG_POINTER(0);
     Datum *values = (Datum *)PG_GETARG_POINTER(1);
     bool *isnull = reinterpret_cast<bool *>(PG_GETARG_POINTER(2));
@@ -160,6 +170,9 @@ Datum bm25delete(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25bulkdelete);
 Datum bm25bulkdelete(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "bm25 index do not support extreme rto.");
+    }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *volatile stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     PG_RETURN_POINTER(stats);
@@ -168,6 +181,9 @@ Datum bm25bulkdelete(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25vacuumcleanup);
 Datum bm25vacuumcleanup(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "bm25 index do not support extreme rto.");
+    }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     PG_RETURN_POINTER(stats);

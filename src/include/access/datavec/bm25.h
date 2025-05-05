@@ -132,8 +132,8 @@ typedef struct BM25DocForwardMetaPageData {
 typedef BM25DocForwardMetaPageData *BM25DocForwardMetaPage;
 
 typedef struct BM25DocForwardItem {
-    bool tokenId;
-    bool tokenHash;
+    uint32 tokenId;
+    uint32 tokenHash;
 } BM25DocForwardItem;
 
 typedef struct BM25DocumentItem {

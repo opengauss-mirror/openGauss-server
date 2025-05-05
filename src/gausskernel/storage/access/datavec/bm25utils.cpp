@@ -169,6 +169,10 @@ uint32 BM25AllocateDocId(Relation index)
     if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER))
         elog(ERROR, "bm25 index is not valid");
     docId = metapBuf->nextDocId;
+    if (unlikely(docId == BM25_INVALID_DOC_ID)) {
+        elog(ERROR, "bm25 doc id exhausted, please rebuild index.");
+    }
+
     metapBuf->nextDocId++;
     MarkBufferDirty(buf);
     UnlockReleaseBuffer(buf);
@@ -220,7 +224,7 @@ BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber startBlk
     Page page;
     BlockNumber docBlkno = startBlkno;
     for (int i = 0; i < step; ++i) {
-        if (unlikely(BlockNumberIsValid(docBlkno))) {
+        if (unlikely(!BlockNumberIsValid(docBlkno))) {
             elog(ERROR, "SeekBlocknoForDoc: Invalid Block Number.");
         }
         buf = ReadBuffer(index, docBlkno);

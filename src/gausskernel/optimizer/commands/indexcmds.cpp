@@ -797,6 +797,9 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
      */
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
+    if (RelationIsPartitioned(rel) && strcmp(stmt->accessMethod, "bm25") != 0) {
+        elog(ERROR, "%s index is not supported for partition table.", (stmt->accessMethod));
+    }
 
     bool segment = get_rel_segment(rel);
     TableCreateSupport indexCreateSupport{(int)COMPRESS_TYPE_NONE, false, false, false, false, false, true, false};

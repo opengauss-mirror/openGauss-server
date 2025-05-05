@@ -2765,7 +2765,7 @@ static void InitSqlConfigureNamesReal()
             gettext_noop("k1 factor for bm25 metrix."),
             NULL},
             &u_sess->attr.attr_sql.bm25_k1,
-            1.5,
+            1.2,
             0.0,
             3.0,
             NULL,

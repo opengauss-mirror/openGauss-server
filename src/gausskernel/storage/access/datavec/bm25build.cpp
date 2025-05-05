@@ -418,6 +418,7 @@ static void InsertDocForwardItem(Relation index, uint32 docId, BM25TokenizedDocD
     AllocateForwardIdxForToken(index, tokenizedDoc.tokenCount, forwardStart, forwardEnd, metaForwardPage, forkNum);
     forwardStartBlkno = metaForwardPage->startPage;
     MarkBufferDirty(metabuf);
+    UnlockReleaseBuffer(metabuf);
 
     uint64 tokenIdx = *forwardStart;
     BlockNumber curStep = tokenIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
@@ -1053,11 +1054,24 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, BM25
     FreeBuildState(buildstate);
 }
 
+static void BuildIndexCheck(Relation index)
+{
+    TupleDesc tupleDesc = RelationGetDescr(index);
+    FormData_pg_attribute* attrs = tupleDesc->attrs;
+    for (int i = 0; i < tupleDesc->natts; ++i) {
+        if (attrs[i].atttypid == TEXTARRAYOID) {
+            elog(ERROR, "bm25 index is not supported currently for datatype: text array.");
+        }
+    }
+    return;
+}
+
 IndexBuildResult* bm25build_internal(Relation heap, Relation index, IndexInfo *indexInfo)
 {
     IndexBuildResult *result;
     BM25BuildState buildstate;
 
+    BuildIndexCheck(index);
     BuildIndex(heap, index, indexInfo, &buildstate, MAIN_FORKNUM);
 
     result = (IndexBuildResult *)palloc(sizeof(IndexBuildResult));
@@ -1071,6 +1085,7 @@ void bm25buildempty_internal(Relation index)
     IndexBuildResult *result;
     BM25BuildState buildstate;
 
+    BuildIndexCheck(index);
     BuildIndex(NULL, index, NULL, &buildstate, MAIN_FORKNUM);
 }
 
