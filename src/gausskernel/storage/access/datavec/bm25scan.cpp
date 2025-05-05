@@ -36,6 +36,8 @@
 #include "access/datavec/bm25heap.h"
 #include "access/datavec/bm25.h"
 
+#define BM25_HEAP_DEFAULT_CAPACITY 100
+
 typedef struct BM25QueryToken {
     BlockNumber tokenPostingBlock;
     float qTokenMaxScore;
@@ -534,7 +536,7 @@ static void DocIdsGetHeapCtids(Relation index, BM25EntryPages &entryPages, BM25S
         }
         BM25DocumentItem *docItem = (BM25DocumentItem*)((char *)page + sizeof(PageHeaderData) +
             offset * BM25_DOCUMENT_ITEM_SIZE);
-        if (docItem->isActived) {
+        if (!docItem->isActived) {
             UnlockReleaseBuffer(buf);
             elog(ERROR, "Read invalid doc.");
         }
@@ -550,7 +552,9 @@ static void BM25IndexScan(Relation index, BM25QueryTokensInfo &queryTokenInfo, u
         return;
     }
     BM25Scorer scorer = BM25Scorer(u_sess->attr.attr_sql.bm25_k1, u_sess->attr.attr_sql.bm25_b, avgdl);
-    MaxMinHeap<float> heap(so->expectedCandNums);
+
+    size_t capacity = so->expectedCandNums == 0 ? BM25_HEAP_DEFAULT_CAPACITY : so->expectedCandNums;
+    MaxMinHeap<float> heap(capacity);
     if (so->expectedCandNums == 0) {
         SearchTaat(index, queryTokenInfo, heap, docNums, scorer, so->docIdMask);
     } else {
@@ -558,9 +562,9 @@ static void BM25IndexScan(Relation index, BM25QueryTokensInfo &queryTokenInfo, u
     }
 
     uint32 docId;
-    int size = heap.size();
+    int64 size = heap.size();
     so->candDocs = (BM25ScanData*)palloc0(sizeof(BM25ScanData) * size);
-    for (auto i = size - 1; i >= 0; --i) {
+    for (int64 i = size - 1; i >= 0; --i) {
         docId = heap.top().id;
         so->candDocs[i].docId = docId;
         so->candDocs[i].score = heap.top().val;
