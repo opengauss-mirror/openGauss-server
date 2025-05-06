@@ -95,6 +95,7 @@ typedef struct CheckPointUndo
 #define XLOG_FPI                        0xB0    /* not use in mppdb*/
 #define XLOG_DELAY_XLOG_RECYCLE         0xC0
 
+#define XLOG_MERGE_RECORD               0x01
 
 /*
  * System status indicator.  Note this is stored in pg_control; if you change

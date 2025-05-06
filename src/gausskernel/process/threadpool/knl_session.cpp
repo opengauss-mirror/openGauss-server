@@ -59,6 +59,7 @@
 #include "workload/workload.h"
 #include "parser/scanner.h"
 #include "pgstat.h"
+#include "access/datavec/bitvec.h"
 
 THR_LOCAL knl_session_context* u_sess;
 
@@ -1472,6 +1473,15 @@ static void knl_u_libsw_init(knl_u_libsw_context* libsw_cxt)
     libsw_cxt->redirect_manager = New(CurrentMemoryContext) RedirectManager();
  }
 
+static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
+{
+    BitvecInit();
+    datavec_cxt->hnsw_ef_search = 0;
+    datavec_cxt->hnsw_earlystop_threshold = 0;
+    datavec_cxt->ivfflat_probes = 0;
+    datavec_cxt->ivfpq_kreorder = 0;
+}
+
 void knl_session_init(knl_session_context* sess_cxt)
 {
     Assert (0 != strncmp(CurrentMemoryContext->name, "ErrorContext", sizeof("ErrorContext")));
@@ -1573,6 +1583,8 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_clientConnTime_init(&sess_cxt->clientConnTime_cxt);
 
     knl_u_opfusion_reuse_init(&sess_cxt->opfusion_reuse_ctx);
+   
+    knl_u_datavec_init(&sess_cxt->datavec_ctx);
 
     MemoryContextSeal(sess_cxt->top_mem_cxt);
 }

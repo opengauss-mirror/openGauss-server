@@ -375,5 +375,29 @@ DATA(insert ( 405  settext_ops  PGNSP PGUID 1995  3272 f 0 ));
 DATA(insert ( 4439 setasint_ops PGNSP PGUID 6976  3272 t 0 ));
 DATA(insert ( 405  set_ops      PGNSP PGUID 8646  3272 t 0 ));
 
+DATA(insert OID = 8900 (8300  vector_l2_ops PGNSP PGUID 8371 8305 f 0));
+DATA(insert OID = 8999 (8300  vector_ip_ops PGNSP PGUID 8372 8305 f 0));
+DATA(insert OID = 8902 (8300  vector_cosine_ops PGNSP PGUID 8373 8305 f 0));
+DATA(insert OID = 8903 (8300  vector_l1_ops PGNSP PGUID 8374 8305 f 0));
+
+DATA(insert OID = 8908 (8300  bit_jaccard_ops PGNSP PGUID 8379 1560 f 0));
+DATA(insert OID = 8909 (8300  bit_hamming_ops PGNSP PGUID 8380 1560 f 0));
+
+DATA(insert OID = 8910 (8300  sparsevec_l2_ops PGNSP PGUID 8381 8307 f 0));
+DATA(insert OID = 8911 (8300  sparsevec_ip_ops PGNSP PGUID 8382 8307 f 0));
+DATA(insert OID = 8912 (8300  sparsevec_cosine_ops PGNSP PGUID 8383 8307 f 0));
+DATA(insert OID = 8913 (8300  sparsevec_l1_ops PGNSP PGUID 8384 8307 f 0));
+
+DATA(insert OID = 8914 (8301  vector_l2_ops PGNSP PGUID 8385 8305 t 0));
+DATA(insert OID = 8915 (8301  vector_ip_ops PGNSP PGUID 8386 8305 f 0));
+DATA(insert OID = 8916 (8301  vector_cosine_ops PGNSP PGUID 8387 8305 f 0));
+
+DATA(insert OID = 8923 (8301  bit_hamming_ops PGNSP PGUID 8394 1560 f 0));
+
+DATA(insert OID = 8977 (403  vector_ops PGNSP PGUID 8392 8305 t 0));
+DATA(insert OID = 8979 (403  sparsevec_ops PGNSP PGUID 8397 8307 t 0));
+
+DATA(insert OID = 8951 (4439  vector_ops PGNSP PGUID 8375 8305 t 0));
+DATA(insert OID = 8952 (4439  sparsevec_ops PGNSP PGUID 8376 8307 t 0));
 #endif   /* PG_OPCLASS_H */
 

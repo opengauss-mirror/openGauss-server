@@ -91,6 +91,17 @@ MIN_DOCKER_VERSION_MAJOR="17"
 MIN_DOCKER_VERSION_MINOR="09"
 arch=$(case $(uname -m) in i386)   echo "386" ;; i686)   echo "386" ;; x86_64) echo "amd64";; aarch64)echo "arm64";; esac)
 file_arch=""
+if [ "${arch}" = "amd64" ]; then
+    file_arch="x86_64"
+    if [ -f "/etc/openEuler-release" ];then
+      DOCKERFILE="dockerfile_x86"
+    else
+      DOCKERFILE="dockerfile_amd"
+    fi
+else
+    file_arch="aarch64"
+    DOCKERFILE="dockerfile_arm"
+fi
 
 if [ "$#" -eq 0 ]; then
   usage;

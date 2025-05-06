@@ -18,6 +18,7 @@
 
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeAgg.h"
+#include "executor/node/nodeAnnIndexscan.h"
 #include "executor/node/nodeAppend.h"
 #include "executor/node/nodeBitmapAnd.h"
 #include "executor/node/nodeBitmapHeapscan.h"
@@ -176,6 +177,10 @@ void ExecReScanByType(PlanState* node)
 
         case T_IndexOnlyScanState:
             ExecReScanIndexOnlyScan((IndexOnlyScanState*)node);
+            break;
+
+        case T_AnnIndexScanState:
+            ExecReScanAnnIndexScan((AnnIndexScanState*)node);
             break;
 
         case T_BitmapIndexScanState:
@@ -413,6 +418,10 @@ void ExecMarkPos(PlanState* node)
         case T_IndexOnlyScanState:
             ExecIndexOnlyMarkPos((IndexOnlyScanState*)node);
             break;
+    
+        case T_AnnIndexScanState:
+            ExecAnnIndexMarkPos((AnnIndexScanState*)node);
+            break;
 
         case T_TidScanState:
             ExecTidMarkPos((TidScanState*)node);
@@ -475,6 +484,10 @@ void ExecRestrPos(PlanState* node)
             ExecIndexOnlyRestrPos((IndexOnlyScanState*)node);
             break;
 
+        case T_AnnIndexScanState:
+            ExecAnnIndexRestrPos((AnnIndexScanState*)node);
+            break;
+
         case T_TidScanState:
             ExecTidRestrPos((TidScanState*)node);
             break;
@@ -521,6 +534,7 @@ bool ExecSupportsMarkRestore(Path *pathnode)
         case T_SeqScan:
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_TidScan:
         case T_ValuesScan:
         case T_Material:
@@ -607,6 +621,10 @@ bool ExecSupportsBackwardScan(Plan* node)
 
         case T_IndexOnlyScan:
             return index_supports_backward_scan(((IndexOnlyScan*)node)->indexid) &&
+                   target_list_supports_backward_scan(node->targetlist);
+
+        case T_AnnIndexScan:
+            return index_supports_backward_scan(((AnnIndexScan*)node)->indexid) &&
                    target_list_supports_backward_scan(node->targetlist);
 
         case T_SubqueryScan:

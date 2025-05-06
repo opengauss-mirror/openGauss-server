@@ -271,9 +271,6 @@ WITH RECURSIVE rq AS
     )
     INSERT INTO t03 SELECT * FROM rq ON DUPLICATE KEY UPDATE col1 = rq.col1;
 ERROR:  WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.
---- error: test returning clause
-INSERT INTO t01 VALUES (1) ON DUPLICATE KEY UPDATE col1 = 1 RETURNING NOT(1::bool);
-ERROR:  RETURNING clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.
 --- error: distribute key are not allowed to UPDATE
 CREATE TABLE t04 (col1 INT, col2 INT)  ;
 INSERT INTO t04 VALUES (1) ON DUPLICATE KEY UPDATE col1 = 5;

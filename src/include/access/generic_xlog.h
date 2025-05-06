@@ -11,6 +11,7 @@
 #define GENERIC_XLOG_H
 
 #include "access/xlog.h"
+#include "access/xlogproc.h"
 #include "access/xlog_internal.h"
 #include "access/xloginsert.h"
 #include "storage/buf/bufpage.h"
@@ -18,6 +19,8 @@
 
 #define MAX_GENERIC_XLOG_PAGES	XLR_NORMAL_MAX_BLOCK_ID
 #define GENERIC_XLOG_FULL_IMAGE 0x0001 /* write full-page image */
+
+#define XLOG_GENERIC_LOG        0x00
 
 /* state of generic xlog record construction */
 struct GenericXLogState;
@@ -30,6 +33,10 @@ extern Page GenericXLogRegisterBuffer(GenericXLogState *state, Buffer buffer,
 extern void GenericXLogUnregister(GenericXLogState *state, Buffer buffer);
 extern XLogRecPtr GenericXLogFinish(GenericXLogState *state);
 extern void GenericXLogAbort(GenericXLogState *state);
+
+extern void GenericRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+								 RedoBufferInfo *bufferinfo);
+extern XLogRecParseState *GenericRedoParseToBlock(XLogReaderState *record, uint32 *blocknum);
 
 /* functions defined for rmgr */
 extern void generic_redo(XLogReaderState *record);

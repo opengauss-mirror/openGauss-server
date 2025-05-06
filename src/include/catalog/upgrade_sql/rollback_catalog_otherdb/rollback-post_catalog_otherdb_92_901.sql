@@ -19,7 +19,7 @@ RETURNS void AS $$
 DECLARE
 query_str text;
 BEGIN
-query_str := 'update pg_catalog.pg_am set amsupport = 2, amhandler = 0 where amname = ''btree'' or amname = ''ubtree''';
+query_str := 'update pg_catalog.pg_am set amsupport = 2, amhandler = 0, amdelete = 0 where amname = ''btree'' or amname = ''ubtree''';
 EXECUTE(query_str);
 return;
 END; $$ LANGUAGE 'plpgsql';

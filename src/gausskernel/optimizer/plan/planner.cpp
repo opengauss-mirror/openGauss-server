@@ -9915,6 +9915,7 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
         }
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_BitmapHeapScan:
         case T_TidScan:
         case T_FunctionScan: {
@@ -10363,6 +10364,7 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery, bool forceVecto
         }
         case T_IndexScan:
         case T_IndexOnlyScan:
+        case T_AnnIndexScan:
         case T_BitmapHeapScan:
         case T_TidScan:
         case T_FunctionScan: {

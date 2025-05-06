@@ -48,7 +48,8 @@ static int g_support_hashfilter_types[] = {
     T_SubqueryScan,
     T_BitmapHeapScan,
     T_CStoreIndexHeapScan,
-    T_CteScan
+    T_CteScan,
+    T_AnnIndexScan
 };
 
 /*

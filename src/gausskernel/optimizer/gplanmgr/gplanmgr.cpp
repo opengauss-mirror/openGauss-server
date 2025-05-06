@@ -1591,6 +1591,20 @@ ExtractPlanIndexesUsages(Node *plan, void *context)
         return false;
     }
 
+    if (IsA(plan, AnnIndexScan)) {
+        AnnIndexScan *idxScan = (AnnIndexScan *)plan;
+
+        PlanIndexUasge *index = MakePlanIndexUasge(idxScan->scan.scanrelid,
+                                                   idxScan->indexid,
+                                                   idxScan->indexqualorig,
+                                                   idxScan->is_partial,
+                                                   idxScan->selectivity);
+
+        idxCxt->usage_list = lappend(idxCxt->usage_list, index);
+
+        return false;
+    }
+
     if (IsA(plan, NestLoop)) {
         NestLoop *nl = (NestLoop *)plan;
         List *tmpList = (List *)copyObject(nl->nestParams);

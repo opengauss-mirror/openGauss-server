@@ -80,6 +80,7 @@ static void DropExtensionInListIsSupported(List* objname)
         "packages",
         "ndpplugin",
         "datavec",
+        "chparser",
 #ifndef ENABLE_MULTIPLE_NODES
         "mysql_fdw",
         "oracle_fdw",

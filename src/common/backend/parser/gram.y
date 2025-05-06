@@ -22967,14 +22967,6 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
             }
 			| opt_with_clause INSERT hint_string INTO insert_target insert_rest upsert_clause returning_clause
 				{
-					if ($8 != NIL) {
-						const char* message = "RETURNING clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.";
-    					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-						ereport(errstate,
-							(errmodule(MOD_PARSER),
-							  errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							  errmsg("RETURNING clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.")));
-					}
 					if ($1 != NULL) {
 						const char* message = "WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.";
     					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);

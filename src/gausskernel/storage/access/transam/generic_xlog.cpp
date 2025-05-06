@@ -428,3 +428,39 @@ generic_redo(XLogReaderState *record)
             UnlockReleaseBuffer(buffers[block_id].buf);
     }
 }
+
+void
+GenericRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+{
+    XLogRedoAction action = XLogCheckBlockDataRedoAction(blockdatarec, bufferinfo);
+    XLogRecPtr lsn = bufferinfo->lsn;
+
+    if (action == BLK_NEEDS_REDO) {
+        Pointer blockData;
+        Page page;
+
+        Size blkdatalen = 0;
+        page = bufferinfo->pageinfo.page;
+        blockData = XLogBlockDataGetBlockData(blockdatarec, &blkdatalen);
+
+        applyPageRedo(page, blockData, blkdatalen);
+        PageSetLSN(page, lsn);
+        MarkBufferDirty(bufferinfo->buf);
+    }
+}
+
+XLogRecParseState *
+GenericRedoParseToBlock(XLogReaderState *record, uint32 *blocknum)
+{
+    XLogRecParseState *recordstatehead = NULL;
+
+    (*blocknum)++;
+    XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
+
+    XLogRecSetBlockDataState(record, 0, recordstatehead);
+    return recordstatehead;
+}

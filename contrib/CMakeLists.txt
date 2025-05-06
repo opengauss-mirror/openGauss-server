@@ -26,6 +26,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/ndpplugin
     ${CMAKE_CURRENT_SOURCE_DIR}/spq_plugin
     ${CMAKE_CURRENT_SOURCE_DIR}/datavec
+    ${CMAKE_CURRENT_SOURCE_DIR}/chparser
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_stats
     ${CMAKE_CURRENT_SOURCE_DIR}/gms_profiler
 )
@@ -56,5 +57,8 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/spq_plugin)
 endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/datavec)
     add_subdirectory(datavec)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/chparser)
+    add_subdirectory(chparser)
 endif()
 add_subdirectory(gms_profiler)

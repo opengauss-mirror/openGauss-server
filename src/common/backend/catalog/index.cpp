@@ -416,7 +416,7 @@ static TupleDesc ConstructTupleDescriptor(Relation heapRelation, IndexInfo* inde
             to->attalign = typeTup->typalign;
             to->attstattarget = -1;
             to->attcacheoff = -1;
-            to->atttypmod = -1;
+            to->atttypmod = exprTypmod(indexkey);
             to->attislocal = true;
             to->attcollation = (i < numkeyatts) ? collationObjectId[i] : InvalidOid;
 
@@ -3816,7 +3816,7 @@ static TransactionId GetCatalogOldestXmin(Relation heapRelation)
  * chain tip.
  */
 double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo, bool allow_sync,
-    IndexBuildCallback callback, void* callbackState, TableScanDesc scan)
+    IndexBuildCallback callback, void* callbackState, TableScanDesc scan, BlockNumber startBlkno, BlockNumber numblocks)
 {
     bool is_system_catalog = false;
     bool checking_uniqueness = false;
@@ -3904,6 +3904,22 @@ double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexIn
         snapshot = SnapshotAny;
         OldestXmin = GetOldestXmin(heapRelation);
     }
+
+    /* set our scan endpoints */
+    if (!allow_sync && BlockNumberIsValid(numblocks)) {
+        Assert(!scan->rs_inited);
+        Assert(!(scan->rs_flags & SO_ALLOW_SYNC));
+        Assert(startBlkno == 0 || startBlkno < scan->rs_nblocks);
+
+        scan->rs_rangeScanInRedis.isRangeScanInRedis = true;
+        scan->rs_startblock = startBlkno;
+        scan->rs_nblocks = numblocks;
+    } else {
+        /* synscan can only be requested on whole relation */
+        Assert(startBlkno == 0);
+        Assert(numblocks == InvalidBlockNumber);
+    }
+
     reltuples = 0;
 
     /*
