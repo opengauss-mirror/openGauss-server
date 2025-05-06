@@ -164,7 +164,7 @@ DATA(insert OID = 8301 (  ivfflat		0 5 f t f f f t f f f f f 0 ivfflatinsert ivf
 DESCR("ivfflat index access method");
 #define IVFFLAT_AM_OID 8301
 
-DATA(insert OID = 8302 (  bm25		0 5 f t f f f t f f f f f 0 bm25insert bm25beginscan bm25gettuple - bm25rescan bm25endscan - - - bm25build bm25buildempty bm25bulkdelete bm25vacuumcleanup - bm25costestimate bm25options - bm25delete));
+DATA(insert OID = 8302 (  bm25		0 2 f t f f f t f f f f f 0 bm25insert bm25beginscan bm25gettuple - bm25rescan bm25endscan - - - bm25build bm25buildempty bm25bulkdelete bm25vacuumcleanup - bm25costestimate bm25options - -));
 DESCR("bm25 index access method");
 #define BM25_AM_OID 8302
 

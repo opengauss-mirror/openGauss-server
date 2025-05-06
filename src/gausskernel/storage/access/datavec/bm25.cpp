@@ -158,14 +158,10 @@ Datum bm25insert(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25options);
 Datum bm25options(PG_FUNCTION_ARGS)
 {
+    /* No options for bm25 currently. */
     PG_RETURN_NULL();
 }
 
-PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25delete);
-Datum bm25delete(PG_FUNCTION_ARGS)
-{
-    PG_RETURN_BOOL(false);
-}
 
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25bulkdelete);
 Datum bm25bulkdelete(PG_FUNCTION_ARGS)
@@ -175,7 +171,8 @@ Datum bm25bulkdelete(PG_FUNCTION_ARGS)
     }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *volatile stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
-    PG_RETURN_POINTER(stats);
+    elog(WARNING, "Bulk delete is not supported for bm25 index.");
+    PG_RETURN_NULL();
 }
 
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25vacuumcleanup);
@@ -186,5 +183,6 @@ Datum bm25vacuumcleanup(PG_FUNCTION_ARGS)
     }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
-    PG_RETURN_POINTER(stats);
+    elog(WARNING, "Vaccum is not supported for bm25 index.");
+    PG_RETURN_NULL();
 }

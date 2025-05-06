@@ -541,6 +541,7 @@ static void InsertDocumentItem(Relation index, uint32 docId, BM25TokenizedDocDat
 
 static bool BM25InsertDocument(Relation index, Datum *values, ItemPointerData &ctid, BM25EntryPages &bm25EntryPages, ForkNumber forkNum)
 {
+    CHECK_FOR_INTERRUPTS();
     MemoryContext tempCtx = AllocSetContextCreate(CurrentMemoryContext,
                                                          "temp bm25 index context",
                                                          ALLOCSET_DEFAULT_MINSIZE,

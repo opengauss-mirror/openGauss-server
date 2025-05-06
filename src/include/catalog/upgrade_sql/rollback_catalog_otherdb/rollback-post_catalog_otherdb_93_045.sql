@@ -40,5 +40,4 @@ DROP FUNCTION IF EXISTS pg_catalog.bm25bulkdelete(internal, internal, internal, 
 DROP FUNCTION IF EXISTS pg_catalog.bm25vacuumcleanup(internal, internal) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.bm25costestimate(internal, internal, internal, internal, internal, internal, internal) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.bm25options(internal, internal) CASCADE;
-DROP FUNCTION IF EXISTS pg_catalog.bm25delete(internal, internal, internal, internal, internal) CASCADE;
 END $$ ;
