@@ -850,7 +850,7 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
                                             g_instance.attr.attr_storage.parallel_recovery_batch : 1;
         if (isNeedFullSync)
             ProcessPendingRecords(true);
-        else if (++g_dispatcher->pendingCount >= dispatch_batch || timeoutForDispatch())
+        else if (++g_dispatcher->pendingCount >= dispatch_batch || timeoutForDispatch()) {
             ProcessPendingRecords();
             if (IS_DISPATCH_ALGORITHM_ALL_DIRECTION_ON) {
                 ReAutoAssignWorker();
