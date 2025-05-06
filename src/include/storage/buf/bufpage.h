@@ -209,7 +209,7 @@ typedef HeapPageHeaderData* HeapPageHeader;
 #define PD_EXRTO_PAGE 0x0400        /* is a rto file page */
 #define PD_TDE_PAGE 0x0100        /* there is TdePageInfo at the end of a page */
 
-#define PD_VALID_FLAG_BITS 0x07FF /* OR of all valid pd_flags bits */
+#define PD_VALID_FLAG_BITS 0x01FF /* OR of all valid pd_flags bits */
 
 /*
  * Page layout version number 0 is for pre-7.3 Postgres releases.

@@ -1919,7 +1919,7 @@ static void InitSqlConfigureNamesInt()
             PGC_USERSET,
             NODE_ALL,
             QUERY_TUNING_OTHER,
-            gettext_noop("Excepted topk of candicates for bm25 index scan."),
+            gettext_noop("Topk of candicates for bm25 index scan."),
             NULL},
             &u_sess->attr.attr_sql.bm25_topk,
             5,

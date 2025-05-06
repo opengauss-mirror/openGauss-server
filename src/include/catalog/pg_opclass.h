@@ -400,37 +400,6 @@ DATA(insert OID = 8979 (403  sparsevec_ops PGNSP PGUID 8397 8307 t 0));
 DATA(insert OID = 8951 (4439  vector_ops PGNSP PGUID 8375 8305 t 0));
 DATA(insert OID = 8952 (4439  sparsevec_ops PGNSP PGUID 8376 8307 t 0));
 
-DATA(insert ( 8302    _int4_ops              PGNSP PGUID 8311  1007 t 23 ));
-DATA(insert ( 8302    _text_ops              PGNSP PGUID 8311  1009 t 25 ));
-DATA(insert ( 8302    _abstime_ops           PGNSP PGUID 8311  1023 t 702 ));
-DATA(insert ( 8302    _bit_ops               PGNSP PGUID 8311  1561 t 1560 ));
-DATA(insert ( 8302    _bool_ops              PGNSP PGUID 8311  1000 t 16 ));
-DATA(insert ( 8302    _bpchar_ops            PGNSP PGUID 8311  1014 t 1042 ));
-DATA(insert ( 8302    _bytea_ops             PGNSP PGUID 8311  1001 t 17 ));
-DATA(insert ( 8302    _char_ops              PGNSP PGUID 8311  1002 t 18 ));
-DATA(insert ( 8302    _cidr_ops              PGNSP PGUID 8311  651 t 650 ));
-DATA(insert ( 8302    _date_ops              PGNSP PGUID 8311  1182 t 1082 ));
-DATA(insert ( 8302    _float4_ops            PGNSP PGUID 8311  1021 t 700 ));
-DATA(insert ( 8302    _float8_ops            PGNSP PGUID 8311  1022 t 701 ));
-DATA(insert ( 8302    _inet_ops              PGNSP PGUID 8311  1041 t 869 ));
-DATA(insert ( 8302    _int2_ops              PGNSP PGUID 8311  1005 t 21 ));
-DATA(insert ( 8302    _int8_ops              PGNSP PGUID 8311  1016 t 20 ));
-DATA(insert ( 8302    _interval_ops          PGNSP PGUID 8311  1187 t 1186 ));
-DATA(insert ( 8302    _macaddr_ops           PGNSP PGUID 8311  1040 t 829 ));
-DATA(insert ( 8302    _name_ops              PGNSP PGUID 8311  1003 t 19 ));
-DATA(insert ( 8302    _numeric_ops           PGNSP PGUID 8311  1231 t 1700 ));
-DATA(insert ( 8302    _oid_ops               PGNSP PGUID 8311  1028 t 26 ));
-DATA(insert ( 8302    _oidvector_ops         PGNSP PGUID 8311  1013 t 30 ));
-DATA(insert ( 8302    _time_ops              PGNSP PGUID 8311  1183 t 1083 ));
-DATA(insert ( 8302    _timestamptz_ops       PGNSP PGUID 8311  1185 t 1184 ));
-DATA(insert ( 8302    _timetz_ops            PGNSP PGUID 8311  1270 t 1266 ));
-DATA(insert ( 8302    _varbit_ops            PGNSP PGUID 8311  1563 t 1562 ));
-DATA(insert ( 8302    _varchar_ops           PGNSP PGUID 8311  1015 t 1043 ));
-DATA(insert ( 8302    _timestamp_ops         PGNSP PGUID 8311  1115 t 1114 ));
-DATA(insert ( 8302    _money_ops             PGNSP PGUID 8311  791 t 790 ));
-DATA(insert ( 8302    _reltime_ops           PGNSP PGUID 8311  1024 t 703 ));
-DATA(insert ( 8302    _tinterval_ops         PGNSP PGUID 8311  1025 t 704 ));
-
 /* bm25 index */
 DATA(insert OID = 9737 (8302  bm25_textarr_ops PGNSP PGUID 6509 1009 t 0));
 DATA(insert OID = 9738 (8302  bm25_text_ops PGNSP PGUID 6510 25 t 0));

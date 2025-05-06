@@ -797,7 +797,7 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
      */
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
-    if (RelationIsPartitioned(rel) && strcmp(stmt->accessMethod, "bm25") != 0) {
+    if (RelationIsPartitioned(rel) && strcmp(stmt->accessMethod, "bm25") == 0) {
         elog(ERROR, "%s index is not supported for partition table.", (stmt->accessMethod));
     }
 
@@ -839,7 +839,7 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         if (strcmp(stmt->accessMethod, "ubtree") != 0 && strcmp(stmt->accessMethod, "hnsw") != 0) {
             elog(ERROR, "%s index is not supported for ustore", (stmt->accessMethod));
         }
-        if (strcmp(stmt->accessMethod, "bm25") != 0) {
+        if (strcmp(stmt->accessMethod, "bm25") == 0) {
             elog(ERROR, "%s index is not supported for ustore", (stmt->accessMethod));
         }
         if (has_dedup_opt) {

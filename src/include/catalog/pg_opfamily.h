@@ -314,8 +314,8 @@ DATA(insert OID = 8806 (4439       raw_ops         PGNSP PGUID));
 #define INT1_UBTREE_FAM_OID 9535
 DATA(insert OID = 9535 (4439       int1_ops         PGNSP PGUID));
 DATA(insert OID = 9570 (4439       smalldatetime_ops         PGNSP PGUID));
+DATA(insert OID = 8646 (405        set_ops        PGNSP PGUID));
 
-DATA(insert OID = 8311 (8302       array_ops         PGNSP PGUID));
 DATA(insert OID = 6509 (8302       bm25_textarr_ops         PGNSP PGUID));
 DATA(insert OID = 6510 (8302       bm25_text_ops        PGNSP PGUID));
 

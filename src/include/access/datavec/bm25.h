@@ -308,7 +308,6 @@ Datum bm25bulkdelete(PG_FUNCTION_ARGS);
 Datum bm25vacuumcleanup(PG_FUNCTION_ARGS);
 Datum bm25costestimate(PG_FUNCTION_ARGS);
 Datum bm25options(PG_FUNCTION_ARGS);
-Datum bm25delete(PG_FUNCTION_ARGS);
 Datum bm25_scores_textarr(PG_FUNCTION_ARGS);
 Datum bm25_scores_text(PG_FUNCTION_ARGS);
 
