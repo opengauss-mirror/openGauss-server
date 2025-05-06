@@ -1609,7 +1609,8 @@ void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, in
     if (*enablePQ) {
         params->funcType = getPQfunctionType(procinfo, HnswOptionalProcInfo(index, HNSW_NORM_PROC));
         params->dim = dim;
-        params->subItemSize = typeInfo->itemSize(dim / params->pqM);
+        Size subItemsize = typeInfo->itemSize(dim / params->pqM);
+        params->subItemSize = MAXALIGN(subItemsize);
         /* Now save pqTable and pqDistanceTable in the relcache entry. */
         if (index->pqTable == NULL) {
             MemoryContext oldcxt = MemoryContextSwitchTo(index->rd_indexcxt);
