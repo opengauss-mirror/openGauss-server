@@ -23,6 +23,8 @@
 #include <algorithm>
 #include <cctype>
 #include <stdlib.h>
+#include <thread>
+#include <mutex>
 #include <errno.h>
 #include <securec.h>
 #include "zlib.h"
@@ -39,7 +41,9 @@ const char* const USER_DICT_PATH = "lib/jieba_dict/user.dict.utf8";
 const char* const IDF_PATH = "lib/jieba_dict/idf.utf8";
 const char* const STOP_WORD_PATH = "lib/jieba_dict/stop_words.utf8";
 
-cppjieba::Jieba *jiebaTokenizer = nullptr;
+std::unique_ptr<cppjieba::Jieba> jiebaTokenizer = nullptr;
+std::once_flag initFlag;
+
 inline static bool IsWhitespace(const std::string& str)
 {
     return std::all_of(str.begin(), str.end(), ::isspace);
@@ -138,8 +142,8 @@ bool CreateTokenizer()
     if (ret < 0) {
         return false;
     }
-    jiebaTokenizer = new(std::nothrow) cppjieba::Jieba(std::string(dictPath), std::string(hmmPath),
-        std::string(userDictPath), std::string(idfPath), std::string(stopWordPath));
+    jiebaTokenizer.reset(new cppjieba::Jieba(std::string(dictPath), std::string(hmmPath),
+        std::string(userDictPath), std::string(idfPath), std::string(stopWordPath)));
     return (jiebaTokenizer == nullptr) ? false : true;
 }
 
@@ -148,12 +152,13 @@ void DestroyTokenizer()
     if (jiebaTokenizer == nullptr) {
         return;
     }
-    delete jiebaTokenizer;
-    jiebaTokenizer = nullptr;
+    jiebaTokenizer.reset();
+    return;
 }
 
 bool ConvertString2Embedding(const char* srcStr, EmbeddingMap *embeddingMap, bool isKeywordExtractor)
 {
+    std::call_once(initFlag, CreateTokenizer);
     if (jiebaTokenizer == nullptr || srcStr == nullptr || embeddingMap == nullptr) {
         return false;
     }
