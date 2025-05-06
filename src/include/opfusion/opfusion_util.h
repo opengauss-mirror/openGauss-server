@@ -271,4 +271,6 @@ void InitPartitionRelationInFusion(Oid partOid, Relation parentRel, Partition *p
 void ExeceDoneInIndexFusionConstruct(bool isPartTbl, Relation *parentRel, Partition *part, Relation *index,
     Relation *rel);
 
+#define RI_CONSTRAINT_TRIGGER_NAME_LEN 20   // foreign key trigger name must begin with RI_ConstraintTrigger
+
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_UTIL_H_ */
