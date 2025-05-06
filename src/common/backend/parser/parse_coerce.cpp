@@ -398,6 +398,17 @@ static Datum stringTypeDatum_with_collation(Type tp, char* string, char*fmtstr, 
     return result;
 }
 
+bool targetissqlvariant(Oid targetOid)
+{
+    if (!DB_IS_CMPT(D_FORMAT)) {
+        return false;
+    }
+
+    Oid SvOid = get_typeoid(get_namespace_oid(SYS_NAMESPACE_NAME, true), "sql_variant");
+
+    return OidIsValid(SvOid) && targetOid == SvOid;
+}
+
 /*
  * coerce_type()
  *		Convert an expression to a different type.
@@ -1224,23 +1235,29 @@ static Node* build_coercion_expression(Node* node, CoercionPathType pathtype, Oi
 
         args = list_make1(node);
 
-        if (nargs >= 2) {
-            if (type_is_set(targetTypeId)) {
-                /* Pass actual set id as Oid type */
-                cons = makeConst(OIDOID, -1, InvalidOid, sizeof(Oid), ObjectIdGetDatum(targetTypeId), false, true);
-            } else {
-                /* Pass target typmod as an int4 constant */
-                cons = makeConst(INT4OID, -1, InvalidOid, sizeof(int32), Int32GetDatum(targetTypMod), false, true);
+        if (targetissqlvariant(targetTypeId)) {
+            /* convert to sql_variant */
+            cons = makeConst(INT4OID, -1, InvalidOid, sizeof(int32), Int32GetDatum(exprTypmod(node)), false, true);
+            args = lappend(args, cons);
+        } else {
+            if (nargs >= 2) {
+                if (type_is_set(targetTypeId)) {
+                    /* Pass actual set id as Oid type */
+                    cons = makeConst(OIDOID, -1, InvalidOid, sizeof(Oid), ObjectIdGetDatum(targetTypeId), false, true);
+                } else {
+                    /* Pass target typmod as an int4 constant */
+                    cons = makeConst(INT4OID, -1, InvalidOid, sizeof(int32), Int32GetDatum(targetTypMod), false, true);
+                }
+
+                args = lappend(args, cons);
             }
 
-            args = lappend(args, cons);
-        }
+            if (nargs == 3) {
+                /* Pass it a boolean isExplicit parameter, too */
+                cons = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(isExplicit), false, true);
 
-        if (nargs == 3) {
-            /* Pass it a boolean isExplicit parameter, too */
-            cons = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(isExplicit), false, true);
-
-            args = lappend(args, cons);
+                args = lappend(args, cons);
+            }
         }
 
         fexpr = makeFuncExpr(funcId, targetTypeId, args, InvalidOid, InvalidOid, cformat);

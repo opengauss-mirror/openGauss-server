@@ -84,6 +84,7 @@ extern Node* coerce_to_target_charset(Node* expr, int target_charset, Oid target
 extern Node *transferConstToAconst(Node *node);
 
 extern Const* setValueToConstExpr(SetVariableExpr* set);
+extern bool targetissqlvariant(Oid targetOid);
 #ifdef USE_SPQ
 extern bool get_cast_func(Oid oidSrc, Oid oidDest, bool *is_binary_coercible, Oid *oidCastFunc, CoercionPathType *pathtype);
 #endif

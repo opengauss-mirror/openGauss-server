@@ -1,0 +1,1235 @@
+drop database if exists db_mssql_sqlvariant;
+NOTICE:  database "db_mssql_sqlvariant" does not exist, skipping
+create database db_mssql_sqlvariant dbcompatibility 'd';
+\c db_mssql_sqlvariant
+create extension shark;
+-- 表存储
+create table t (a sql_variant);
+create index idx1 on t(a);
+select pg_get_tabledef('t');
+                        pg_get_tabledef                        
+---------------------------------------------------------------
+ SET search_path = public;                                    +
+ CREATE TABLE t (                                             +
+     a sql_variant                                            +
+ )                                                            +
+ WITH (orientation=row, compression=no);                      +
+ CREATE INDEX idx1 ON t USING btree (a) TABLESPACE pg_default;
+(1 row)
+
+-- 这里都是隐式转换
+insert into t values(1::int);
+insert into t values(1::int8);
+insert into t values(2::numeric);
+insert into t values('3'::varchar);
+insert into t values(1::varchar);
+insert into t values(1::varchar);
+insert into t values(1::varchar);
+insert into t values('1234567890'::varchar(10));
+insert into t values('1234567890'::nchar(10));
+insert into t values(NULL::numeric);
+insert into t values(4);
+insert into t values(4.1);
+insert into t values('5');
+insert into t values(true);
+ERROR:  column "a" is of type sql_variant but expression is of type boolean
+LINE 1: insert into t values(true);
+                             ^
+HINT:  You will need to rewrite or cast the expression.
+CONTEXT:  referenced column: a
+insert into t values(null);
+insert into t values(2::money);
+ERROR:  operator does not exist: integer < money
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+select * from t order by a;
+     a      
+------------
+ 1
+ 1
+ 1
+ 1234567890
+ 1234567890
+ 3
+ 5
+ 1
+ 1
+ 2
+ 4
+ 4.1
+ 
+ 
+(14 rows)
+
+explain select * from t order by a;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ [Bypass]
+ Index Only Scan using idx1 on t  (cost=0.00..68.00 rows=1317 width=32)
+(2 rows)
+
+select * from t where a=1;
+ a 
+---
+ 1
+ 1
+(2 rows)
+
+select * from t where a=1::varchar;
+ a 
+---
+ 1
+ 1
+ 1
+(3 rows)
+
+create table tt (a sql_variant, b text);
+insert into tt values(1::int,1);
+insert into tt values(2::numeric,2);
+insert into tt values('3'::varchar,3);
+insert into tt values('1234567890'::varchar(10),'1234567890');
+insert into tt values('1234567890'::nchar(10),'1234567890');
+insert into tt values(NULL::numeric,null::numeric);
+insert into tt values(4,4);
+insert into tt values(4.1,4.1);
+insert into tt values('5','5');
+insert into tt values(true,true);
+ERROR:  column "a" is of type sql_variant but expression is of type boolean
+LINE 1: insert into tt values(true,true);
+                              ^
+HINT:  You will need to rewrite or cast the expression.
+CONTEXT:  referenced column: a
+insert into tt values(null,null);
+select * from tt join t on t.a=tt.a;
+     a      |     b      |     a      
+------------+------------+------------
+ 1234567890 | 1234567890 | 1234567890
+ 1234567890 | 1234567890 | 1234567890
+ 1234567890 | 1234567890 | 1234567890
+ 1234567890 | 1234567890 | 1234567890
+ 3          | 3          | 3
+ 5          | 5          | 5
+ 1          | 1          | 1
+ 1          | 1          | 1
+ 2          | 2          | 2
+ 4          | 4          | 4
+ 4.1        | 4.1        | 4.1
+(11 rows)
+
+-- 视图
+CREATE VIEW t_v AS SELECT * FROM t AS t_a;
+select * from t_v;
+     a      
+------------
+ 1
+ 1
+ 2
+ 3
+ 1
+ 1
+ 1
+ 1234567890
+ 1234567890
+ 
+ 4
+ 4.1
+ 5
+ 
+(14 rows)
+
+-- 函数
+CREATE OR REPLACE FUNCTION test_sql_variant(sql_variant, sql_variant)
+RETURNS BOOL
+AS $$ select $1 > $2  $$
+LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
+select test_sql_variant(1::numeric, 2::numeric);
+ test_sql_variant 
+------------------
+ f
+(1 row)
+
+-- 比较运算符
+-- 有比较运算符
+select 1::int::sql_variant > 3::int::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 1::int::sql_variant >= 3::int::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 1::int::sql_variant < 3::int::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 1::int::sql_variant <= 3::int::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 1::int::sql_variant = 3::int::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 1::int::sql_variant <> 3::int::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+-- 有比较运算符， 不同类型
+select 1::int::sql_variant > 1::int8::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 1::int::sql_variant >= 1::int8::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 1::int::sql_variant < 1::int8::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 1::int::sql_variant <= 1::int8::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 1::int::sql_variant = 1::int8::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 1::int::sql_variant <> 1::int8::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+-- 没有比较运算符， 不同类型， 不同catalogy
+select '1'::int::sql_variant = '1'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1'::int::sql_variant <> '1'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1'::int::sql_variant > '1'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1'::int::sql_variant >= '1'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1'::int::sql_variant < '1'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1'::int::sql_variant <= '1'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+-- 没有比较运算符， 不同类型， 相同catalogy
+select '1'::char::sql_variant = '1'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1'::char::sql_variant <> '1'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1'::char::sql_variant > '1'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1'::char::sql_variant >= '1'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1'::char::sql_variant < '1'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1'::char::sql_variant <= '1'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+-- 没有比较运算符，且类型相同
+select '1'::varchar::sql_variant = '1'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1'::varchar::sql_variant <> '1'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1'::varchar::sql_variant > '1'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1'::varchar::sql_variant >= '1'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1'::varchar::sql_variant < '1'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1'::varchar::sql_variant <= '1'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+-- 字符串类型有特殊规则
+select '111' = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111' = '111'::char(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111' = '111'::nvarchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111' = '111'::nchar(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1111' = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1111' = '111'::char(3)::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1111' = '111'::nvarchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1111' = '111'::nchar(3)::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1111' > '111'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1111' > '111'::char(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1111' > '111'::nvarchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1111' > '111'::nchar(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '1111' < '111'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1111' < '111'::char(3)::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1111' < '111'::nvarchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '1111' < '111'::nchar(3)::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '111'::varchar::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::varchar::sql_variant = '111'::char(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::varchar::sql_variant = '111'::nvarchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::varchar::sql_variant = '111'::nchar(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::char(3)::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::char(3)::sql_variant = '111'::char(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::char(3)::sql_variant = '111'::nvarchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::char(3)::sql_variant = '111'::nchar(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::char(4)::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::char(4)::sql_variant = '111'::char(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::char(4)::sql_variant = '111'::nvarchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::char(4)::sql_variant = '111'::nchar(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nvarchar::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nvarchar::sql_variant = '111'::char(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nvarchar::sql_variant = '111'::nvarchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nvarchar::sql_variant = '111'::nchar(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nchar(3)::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nchar(3)::sql_variant = '111'::char(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nchar(3)::sql_variant = '111'::nvarchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nchar(3)::sql_variant = '111'::nchar(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nchar(8)::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nchar(8)::sql_variant = '111'::char(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nchar(8)::sql_variant = '111'::nvarchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111'::nchar(8)::sql_variant = '111'::nchar(3)::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111  '::varchar::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '111  '::char(6)::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111  '::nvarchar::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+select '111  '::nchar(6)::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select '111  '::sql_variant = '111'::varchar::sql_variant;
+ ?column? 
+----------
+ f
+(1 row)
+
+-- 类型转换
+-- 测试几种，理论上大部分都要支持的
+select 1::int::sql_variant;
+ sql_variant 
+-------------
+ 1
+(1 row)
+
+select 1::numeric::sql_variant;
+ sql_variant 
+-------------
+ 1
+(1 row)
+
+select 1::varchar::sql_variant;
+ sql_variant 
+-------------
+ 1
+(1 row)
+
+select '111111'::varchar::sql_variant;
+ sql_variant 
+-------------
+ 111111
+(1 row)
+
+select NULL::int::sql_variant;
+ sql_variant 
+-------------
+ 
+(1 row)
+
+-- 转换原类型
+select 1::int::sql_variant::int;
+ int4 
+------
+    1
+(1 row)
+
+select 1::numeric::sql_variant::numeric;
+ numeric 
+---------
+       1
+(1 row)
+
+select 1::varchar::sql_variant::varchar;
+ varchar 
+---------
+ 1
+(1 row)
+
+select '111111'::varchar::sql_variant::varchar;
+ varchar 
+---------
+ 111111
+(1 row)
+
+select NULL::int::sql_variant::int;
+ int4 
+------
+     
+(1 row)
+
+select '2020-01-01 10:10:10'::smalldatetime::sql_variant::smalldatetime;
+      smalldatetime       
+--------------------------
+ Wed Jan 01 10:10:00 2020
+(1 row)
+
+select '2020-01-01'::date::sql_variant::date;
+    date    
+------------
+ 01-01-2020
+(1 row)
+
+select '10:10:10'::time::sql_variant::time;
+   time   
+----------
+ 10:10:10
+(1 row)
+
+select 1.23::float::sql_variant::float;
+ float8 
+--------
+   1.23
+(1 row)
+
+select 1.23::float4::sql_variant::float4;
+ float4 
+--------
+   1.23
+(1 row)
+
+select 1.23::money::sql_variant::money;
+ money 
+-------
+ $1.23
+(1 row)
+
+select 1::bigint::sql_variant::bigint;
+ int8 
+------
+    1
+(1 row)
+
+select 1::smallint::sql_variant::smallint;
+ int2 
+------
+    1
+(1 row)
+
+select 1::tinyint::sql_variant::tinyint;
+ int1 
+------
+ 1
+(1 row)
+
+select '1'::bit::sql_variant::bit;
+ bit 
+-----
+ 1
+(1 row)
+
+select 'a'::char::sql_variant::char;
+ bpchar 
+--------
+ a
+(1 row)
+
+select 1::nvarchar::sql_variant::nvarchar;
+ nvarchar2 
+-----------
+ 1
+(1 row)
+
+-- 转到其他类型
+select 1::int::numeric;
+ numeric 
+---------
+       1
+(1 row)
+
+select 1::int::sql_variant::numeric;
+ numeric 
+---------
+       1
+(1 row)
+
+select 1::int::varchar;
+ varchar 
+---------
+ 1
+(1 row)
+
+select 1::int::sql_variant::varchar;
+ varchar 
+---------
+ 1
+(1 row)
+
+select NULL::int::sql_variant::numeric;
+ numeric 
+---------
+        
+(1 row)
+
+select '2020-01-01 10:10:10'::datetime::sql_variant::date;
+ERROR:  type "datetime" does not exist
+LINE 1: select '2020-01-01 10:10:10'::datetime::sql_variant::date;
+                                      ^
+CONTEXT:  referenced column: date
+select '2020-01-01'::date::sql_variant::datetime;
+ERROR:  type "datetime" does not exist
+LINE 1: select '2020-01-01'::date::sql_variant::datetime;
+                                                ^
+CONTEXT:  referenced column: datetime
+select '10:10:10'::time::sql_variant::datetime;
+ERROR:  type "datetime" does not exist
+LINE 1: select '10:10:10'::time::sql_variant::datetime;
+                                              ^
+CONTEXT:  referenced column: datetime
+select 1.23::float::sql_variant::numeric;
+ numeric 
+---------
+    1.23
+(1 row)
+
+select 1.23::float4::sql_variant::numeric;
+ numeric 
+---------
+    1.23
+(1 row)
+
+select 1.23::money::sql_variant::varchar;
+ varchar 
+---------
+ $1.23
+(1 row)
+
+select 1::bigint::sql_variant::numeric;
+ numeric 
+---------
+       1
+(1 row)
+
+select 1::smallint::sql_variant::int;
+ int4 
+------
+    1
+(1 row)
+
+select 1::tinyint::sql_variant::int;
+ int4 
+------
+    1
+(1 row)
+
+select '1'::bit::sql_variant::varchar;
+ varchar 
+---------
+ 1
+(1 row)
+
+select 'a'::char::sql_variant::varchar;
+ varchar 
+---------
+ a
+(1 row)
+
+select 1::nvarchar::sql_variant::varchar;
+ varchar 
+---------
+ 1
+(1 row)
+
+-- falied
+select 1::int::time;
+ERROR:  cannot cast type integer to time without time zone
+LINE 1: select 1::int::time;
+                     ^
+CONTEXT:  referenced column: time
+select 1::int::sql_variant::time;
+ERROR:  cannot cast type integer to time without time zone
+CONTEXT:  referenced column: time
+select '10:10:10'::time::int;
+ERROR:  cannot cast type time without time zone to integer
+LINE 1: select '10:10:10'::time::int;
+                               ^
+CONTEXT:  referenced column: int4
+select '10:10:10'::time::sql_variant::int;
+ERROR:  cannot cast type time without time zone to integer
+CONTEXT:  referenced column: int4
+select '0x123456'::text::sql_variant;
+ sql_variant 
+-------------
+ 0x123456
+(1 row)
+
+select ''::xml::sql_variant;
+ERROR:  invalid XML content
+LINE 1: select ''::xml::sql_variant;
+               ^
+CONTEXT:  referenced column: sql_variant
+select 1::numeric::sql_variant::sql_variant;
+ sql_variant 
+-------------
+ 1
+(1 row)
+
+select null::text::sql_variant;
+ sql_variant 
+-------------
+ 
+(1 row)
+
+select null::xml::sql_variant;
+ERROR:  cannot cast type xml to sql_variant
+LINE 1: select null::xml::sql_variant;
+                        ^
+CONTEXT:  referenced column: sql_variant
+select ''::text::sql_variant;
+ sql_variant 
+-------------
+ 
+(1 row)
+
+select ''::xml::sql_variant;
+ERROR:  invalid XML content
+LINE 1: select ''::xml::sql_variant;
+               ^
+CONTEXT:  referenced column: sql_variant
+select 1::sql_variant::bytea;
+ERROR:  cannot cast type sql_variant to bytea
+LINE 1: select 1::sql_variant::bytea;
+                             ^
+CONTEXT:  referenced column: bytea
+select '{"a": 1}'::jsonb::sql_variant::json;
+ERROR:  cannot cast type jsonb to sql_variant
+LINE 1: select '{"a": 1}'::jsonb::sql_variant::json;
+                                ^
+CONTEXT:  referenced column: json
+select '{"a": 1}'::jsonb::sql_variant::json;
+ERROR:  cannot cast type jsonb to sql_variant
+LINE 1: select '{"a": 1}'::jsonb::sql_variant::json;
+                                ^
+CONTEXT:  referenced column: json
+-- 长度限制
+select '111112333'::char(8001)::sql_variant;
+ERROR:  value of basic type must be a binary length <= 8000 byte
+CONTEXT:  referenced column: sql_variant
+select '111112333'::char(8000)::sql_variant;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           sql_variant                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 111112333                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+(1 row)
+
+select '111112333'::char(10)::sql_variant;
+ sql_variant 
+-------------
+ 111112333 
+(1 row)
+
+-- 类似sql_variant直接输入
+select true::sql_variant;
+ERROR:  cannot cast type boolean to sql_variant
+LINE 1: select true::sql_variant;
+                   ^
+CONTEXT:  referenced column: sql_variant
+select false::sql_variant;
+ERROR:  cannot cast type boolean to sql_variant
+LINE 1: select false::sql_variant;
+                    ^
+CONTEXT:  referenced column: sql_variant
+select true::sql_variant::boolean;
+ERROR:  cannot cast type boolean to sql_variant
+LINE 1: select true::sql_variant::boolean;
+                   ^
+CONTEXT:  referenced column: bool
+select false::sql_variant::boolean;
+ERROR:  cannot cast type boolean to sql_variant
+LINE 1: select false::sql_variant::boolean;
+                    ^
+CONTEXT:  referenced column: bool
+select 1::sql_variant;
+ sql_variant 
+-------------
+ 1
+(1 row)
+
+select 1::sql_variant::int;
+ int4 
+------
+    1
+(1 row)
+
+select 1::sql_variant::numeric;
+ numeric 
+---------
+       1
+(1 row)
+
+select 1.111::sql_variant;
+ sql_variant 
+-------------
+ 1.111
+(1 row)
+
+select 1.111::sql_variant::numeric;
+ numeric 
+---------
+   1.111
+(1 row)
+
+select 1.111::sql_variant::int;
+ int4 
+------
+    1
+(1 row)
+
+select 'hello'::sql_variant;
+ sql_variant 
+-------------
+ hello
+(1 row)
+
+select 'sss'::sql_variant;
+ sql_variant 
+-------------
+ sss
+(1 row)
+
+select null::sql_variant;
+ sql_variant 
+-------------
+ 
+(1 row)
+
+select null::sql_variant is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select null::int::sql_variant is null;
+ ?column? 
+----------
+ t
+(1 row)
+
+select ''::sql_variant;
+ sql_variant 
+-------------
+ 
+(1 row)
+
+create table t1 (a char(8));
+insert into t1 values('sss'::char(8)::sql_variant);
+ERROR:  column "a" is of type character but expression is of type sql_variant
+LINE 1: insert into t1 values('sss'::char(8)::sql_variant);
+                              ^
+HINT:  You will need to rewrite or cast the expression.
+CONTEXT:  referenced column: a
+create table t2 (a sql_variant not null);
+insert into t2 values(null);
+ERROR:  null value in column "a" violates not-null constraint
+DETAIL:  Failing row contains (null).
+insert into t2 values(null::int);
+ERROR:  null value in column "a" violates not-null constraint
+DETAIL:  Failing row contains (null).
+declare
+    res sql_variant;
+    res1 int;
+    res2 varchar;
+begin
+    res := '1.2333'::float;
+    res1 := res::int;
+    res2 := res;
+    raise notice '%', res;
+    raise notice '%', res::float;
+    raise notice '%', res1;
+    raise notice '%', res2;
+end;
+/
+NOTICE:  1.2333
+NOTICE:  1.2333
+NOTICE:  1
+NOTICE:  1.2333
+create domain tp1 as sql_variant;
+create domain tp2 as int;
+select 1::int::tp1;
+ tp1 
+-----
+ 1
+(1 row)
+
+select 1::sql_variant::tp2;
+ tp2 
+-----
+   1
+(1 row)
+
+select 1::tp2::sql_variant;
+ sql_variant 
+-------------
+ 1
+(1 row)
+
+select 1::tp2::tp1::tp2;
+ tp2 
+-----
+   1
+(1 row)
+
+select 1::tp1::tp1;
+ tp1 
+-----
+ 1
+(1 row)
+
+select 1::tp1::sql_variant;
+ sql_variant 
+-------------
+ 1
+(1 row)
+
+select 'ssss'::sql_variant = 'ssss';
+ ?column? 
+----------
+ t
+(1 row)
+
+drop domain tp1;
+drop domain tp2;
+select ''::sql_variant = ''::sql_variant;
+ ?column? 
+----------
+ t
+(1 row)
+
+select ''::sql_variant = '';
+ ?column? 
+----------
+ t
+(1 row)
+
+DECLARE
+    p varchar;
+BEGIN
+    raise notice '%', 1::sql_variant;
+    p := 1::sql_variant;
+    raise notice '%', p;
+END;
+/
+NOTICE:  1
+NOTICE:  1
+drop type if exists tp1;
+NOTICE:  type "tp1" does not exist, skipping
+create type tp1 as (a1 int, a2 sql_variant);
+create table t_tp (c tp1);
+insert into t_tp values((1, 'sddd'));
+select * from t_tp;
+    c     
+----------
+ (1,sddd)
+(1 row)
+
+drop table t_tp;
+drop type if exists tp1;
+--建外表
+create table tt_1130316(a1 sql_variant PRIMARY KEY);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tt_1130316_pkey" for table "tt_1130316"
+insert into tt_1130316 values(2::int),('ff'::char(4)),('!'::varchar(3)),('li'::char(6)),('good'::varchar2(8));
+create table tab_1130316(
+a1 int not null,
+a2 sql_variant unique,
+a3 sql_variant PRIMARY KEY,
+a4 sql_variant default 'good'::char(8),
+a5 sql_variant check(a5 is not null),
+a6 sql_variant REFERENCES tt_1130316(a1))
+partition by range(a1)
+(
+PARTITION P1 VALUES LESS THAN(100),
+PARTITION P2 VALUES LESS THAN(200),
+PARTITION P3 VALUES LESS THAN(MAXVALUE)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tab_1130316_pkey" for table "tab_1130316"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "tab_1130316_a2_tableoid_key" for table "tab_1130316"
+insert into tab_1130316 values(1,'bb'::char(4),'cc'::varchar(3),'dd'::varchar2(8),'ee'::varchar,'ff'::char(8));--成功
+insert into tab_1130316 values(null,'hi'::char(4),'how'::char(4),'are'::char(4),'you'::char(4),'!'::char(4));--触发约束，报错
+ERROR:  null value in column "a1" violates not-null constraint
+DETAIL:  Failing row contains (null, hi  , how , are , you , !   ).
+insert into tab_1130316 values(2,'bb'::char(4),'how'::char(4),'are'::char(4),'you'::char(4),'!'::char(4));--触发约束，报错
+ERROR:  duplicate key value violates unique constraint "tab_1130316_a2_tableoid_key"
+DETAIL:  Key (a2)=(bb  ) already exists.
+insert into tab_1130316 values(3,'name'::char(8),'cc'::varchar(4),'is'::char(4),'li'::char(4),'li'::char(4));--触发约束，报错
+ERROR:  duplicate key value violates unique constraint "tab_1130316_pkey"
+DETAIL:  Key (a3)=(cc) already exists.
+insert into tab_1130316(a1,a2,a3,a5,a6) values(4,'english'::char(16),'is'::char(4),'very'::char(4),'good'::varchar(4));--触发约束，成功
+insert into tab_1130316 values(5,'is'::char(4),'null'::char(4),'?'::char(4),null,'yes'::char(4));--触发约束，报错
+ERROR:  new row for relation "tab_1130316" violates check constraint "tab_1130316_a5_check"
+DETAIL:  N/A
+insert into tab_1130316 values(6,'外键'::char(8),'约束'::char(8),'是'::char(4),'1'::char(4),'2'::char(4));--触发约束，报错
+ERROR:  insert or update on table "tab_1130316" violates foreign key constraint "tab_1130316_a6_fkey"
+DETAIL:  Key (a6)=(2   ) is not present in table "tt_1130316".
+MERGE INTO tab_1130316 p
+USING tt_1130316 np
+ON (p.a6=np.a1)
+WHEN MATCHED THEN
+UPDATE SET p.a4 = 'bad'::char(4) where p.a2='wzr'::char(4)
+WHEN NOT MATCHED THEN
+INSERT VALUES (8, np.a1,np.a1,np.a1,np.a1,np.a1);
+\c contrib_regression
+drop database db_mssql_sqlvariant;
+-- dump
+create database dump_database with dbcompatibility 'D';
+create database restore_database with dbcompatibility 'D';
+\c dump_database
+create extension shark;
+create table t (a sql_variant);
+insert into t values(1::int);
+insert into t values(2::numeric);
+insert into t values('3'::varchar);
+insert into t values('1234567890'::varchar(10));
+insert into t values('1234567890'::nchar(10));
+insert into t values(NULL::numeric);
+insert into t values(4);
+insert into t values(4.1);
+insert into t values('5');
+insert into t values(null);
+select * from t order by a;
+     a      
+------------
+ 1234567890
+ 1234567890
+ 3
+ 5
+ 1
+ 2
+ 4
+ 4.1
+ 
+ 
+(10 rows)
+
+\c restore_database
+create extension shark;
+\! @abs_bindir@/gs_dump dump_database -p @portstring@ -f @abs_bindir@/dump_sqlvariant.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d restore_database -p @portstring@ @abs_bindir@/dump_sqlvariant.tar >/dev/null 2>&1; echo $?
+0
+\c restore_database
+select * from t order by a;
+     a      
+------------
+ 1
+ 1234567890
+ 1234567890
+ 2
+ 3
+ 4
+ 4.1
+ 5
+ 
+ 
+(10 rows)
+
+\c contrib_regression
+drop database dump_database;
+drop database restore_database;

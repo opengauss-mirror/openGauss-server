@@ -1933,3 +1933,398 @@ DEFAULT FOR TYPE sys.varbinary USING btree AS
     FUNCTION    1   sys.varbinary_cmp(sys.varbinary, sys.varbinary);
 
 -- varbinary.sql end
+
+-- sql_variant
+set search_path = 'sys';
+create type sys.sql_variant;
+CREATE OR REPLACE FUNCTION sys.sql_variantin(cstring)
+ RETURNS sys.sql_variant
+ LANGUAGE C
+ IMMUTABLE STRICT NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_variantin';
+
+CREATE OR REPLACE FUNCTION sys.sql_variantout(sys.sql_variant)
+ RETURNS cstring
+ LANGUAGE C
+ IMMUTABLE STRICT NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_variantout';
+
+CREATE OR REPLACE FUNCTION sys.sql_variantsend(sys.sql_variant)
+ RETURNS bytea
+ LANGUAGE C
+ IMMUTABLE STRICT NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_variantsend';
+
+CREATE OR REPLACE FUNCTION sys.sql_variantrecv(internal)
+ RETURNS sys.sql_variant
+ LANGUAGE C
+ IMMUTABLE STRICT NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_variantrecv';
+
+CREATE TYPE sys.SQL_VARIANT (
+    INPUT          = sys.sql_variantin,
+    OUTPUT         = sys.sql_variantout,
+    RECEIVE        = sys.sql_variantrecv,
+    SEND           = sys.sql_variantsend,
+    INTERNALLENGTH = VARIABLE,
+    ALIGNMENT      = 'int4',
+    STORAGE        = 'extended',
+    CATEGORY       = 'U',
+    PREFERRED      = false,
+    COLLATABLE     = true
+);
+
+CREATE OR REPLACE FUNCTION sys.sql_variantcmp(sys.sql_variant, sys.sql_variant)
+ RETURNS integer
+ LANGUAGE C
+ IMMUTABLE STRICT NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_variantcmp';
+
+CREATE OR REPLACE FUNCTION sys.sql_varianteq(sys.sql_variant, sys.sql_variant)
+ RETURNS boolean
+ LANGUAGE C
+ IMMUTABLE STRICT LEAKPROOF NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_varianteq';
+
+CREATE OR REPLACE FUNCTION sys.sql_variantge(sys.sql_variant, sys.sql_variant)
+ RETURNS boolean
+ LANGUAGE C
+ IMMUTABLE STRICT LEAKPROOF NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_variantge';
+
+CREATE OR REPLACE FUNCTION sys.sql_variantgt(sys.sql_variant, sys.sql_variant)
+ RETURNS boolean
+ LANGUAGE C
+ IMMUTABLE STRICT LEAKPROOF NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_variantgt';
+
+CREATE OR REPLACE FUNCTION sys.sql_variantle(sys.sql_variant, sys.sql_variant)
+ RETURNS boolean
+ LANGUAGE C
+ IMMUTABLE STRICT LEAKPROOF NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_variantle';
+
+CREATE OR REPLACE FUNCTION sys.sql_variantlt(sys.sql_variant, sys.sql_variant)
+ RETURNS boolean
+ LANGUAGE C
+ IMMUTABLE STRICT LEAKPROOF NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_variantlt';
+
+CREATE OR REPLACE FUNCTION sys.sql_variantne(sys.sql_variant, sys.sql_variant)
+ RETURNS boolean
+ LANGUAGE C
+ IMMUTABLE STRICT LEAKPROOF NOT FENCED NOT SHIPPABLE
+as '$libdir/shark', 'sql_variantne';
+
+CREATE OPERATOR sys.= (
+    LEFTARG    = sys.SQL_VARIANT,
+    RIGHTARG   = sys.SQL_VARIANT,
+    COMMUTATOR = =,
+    NEGATOR    = <>,
+    PROCEDURE  = sys.sql_varianteq,
+    RESTRICT   = eqsel,
+    JOIN       = eqjoinsel,
+    MERGES
+);
+
+CREATE OPERATOR sys.<> (
+    LEFTARG    = sys.SQL_VARIANT,
+    RIGHTARG   = sys.SQL_VARIANT,
+    NEGATOR    = =,
+    COMMUTATOR = <>,
+    PROCEDURE  = sys.sql_variantne,
+    RESTRICT   = neqsel,
+    JOIN       = neqjoinsel
+);
+
+CREATE OPERATOR sys.< (
+    LEFTARG    = sys.SQL_VARIANT,
+    RIGHTARG   = sys.SQL_VARIANT,
+    NEGATOR    = >=,
+    COMMUTATOR = >,
+    PROCEDURE  = sys.sql_variantlt,
+    RESTRICT   = scalarltsel,
+    JOIN       = scalarltjoinsel
+);
+
+CREATE OPERATOR sys.<= (
+    LEFTARG    = sys.SQL_VARIANT,
+    RIGHTARG   = sys.SQL_VARIANT,
+    NEGATOR    = >,
+    COMMUTATOR = >=,
+    PROCEDURE  = sys.sql_variantle,
+    RESTRICT   = scalarltsel,
+    JOIN       = scalarltjoinsel
+);
+
+CREATE OPERATOR sys.> (
+    LEFTARG    = sys.SQL_VARIANT,
+    RIGHTARG   = sys.SQL_VARIANT,
+    NEGATOR    = <=,
+    COMMUTATOR = <,
+    PROCEDURE  = sys.sql_variantgt,
+    RESTRICT   = scalargtsel,
+    JOIN       = scalargtjoinsel
+);
+
+CREATE OPERATOR sys.>= (
+    LEFTARG    = sys.SQL_VARIANT,
+    RIGHTARG   = sys.SQL_VARIANT,
+    NEGATOR    = <,
+    COMMUTATOR = <=,
+    PROCEDURE  = sys.sql_variantge,
+    RESTRICT   = scalargtsel,
+    JOIN       = scalargtjoinsel
+);
+
+CREATE OPERATOR CLASS sys.sqlvariant_ops
+DEFAULT FOR TYPE sys.SQL_VARIANT USING btree AS
+    OPERATOR    1   <  (sys.SQL_VARIANT, sys.SQL_VARIANT),
+    OPERATOR    2   <= (sys.SQL_VARIANT, sys.SQL_VARIANT),
+    OPERATOR    3   =  (sys.SQL_VARIANT, sys.SQL_VARIANT),
+    OPERATOR    4   >= (sys.SQL_VARIANT, sys.SQL_VARIANT),
+    OPERATOR    5   >  (sys.SQL_VARIANT, sys.SQL_VARIANT),
+    FUNCTION    1   sql_variantcmp(sys.SQL_VARIANT, sys.SQL_VARIANT);
+
+-- CAST FUNCTIONS to SQL_VARIANT
+CREATE OR REPLACE FUNCTION sys.smalldatetime_sqlvariant(SMALLDATETIME, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'smalldatetime2sqlvariant'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (SMALLDATETIME AS sys.SQL_VARIANT)
+WITH FUNCTION sys.smalldatetime_sqlvariant (SMALLDATETIME, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.date_sqlvariant(DATE, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'date2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (DATE AS sys.SQL_VARIANT)
+WITH FUNCTION sys.date_sqlvariant (DATE, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.time_sqlvariant(TIME, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'time2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (TIME AS sys.SQL_VARIANT)
+WITH FUNCTION sys.time_sqlvariant (TIME, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.float_sqlvariant(FLOAT, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'float2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (FLOAT AS sys.SQL_VARIANT)
+WITH FUNCTION sys.float_sqlvariant (FLOAT, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.real_sqlvariant(REAL, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'real2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (REAL AS sys.SQL_VARIANT)
+WITH FUNCTION sys.real_sqlvariant (REAL, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.numeric_sqlvariant(NUMERIC, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'numeric2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (NUMERIC AS sys.SQL_VARIANT)
+WITH FUNCTION sys.numeric_sqlvariant (NUMERIC, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.money_sqlvariant(money, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'money2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (money AS sys.SQL_VARIANT)
+WITH FUNCTION sys.money_sqlvariant (money, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.bigint_sqlvariant(BIGINT, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'bigint2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (BIGINT AS sys.SQL_VARIANT)
+WITH FUNCTION sys.bigint_sqlvariant (BIGINT, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.int_sqlvariant(INT, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'int2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (INT AS sys.SQL_VARIANT)
+WITH FUNCTION sys.int_sqlvariant (INT, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.smallint_sqlvariant(smallint, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'smallint2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (smallint AS sys.SQL_VARIANT)
+WITH FUNCTION sys.smallint_sqlvariant (smallint, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.tinyint_sqlvariant(tinyint, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'tinyint2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (tinyint AS sys.SQL_VARIANT)
+WITH FUNCTION sys.tinyint_sqlvariant (tinyint, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.bit_sqlvariant(BIT, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'bit2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (BIT AS sys.SQL_VARIANT)
+WITH FUNCTION sys.bit_sqlvariant (BIT, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.varchar_sqlvariant(varchar, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'varchar2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (VARCHAR AS sys.SQL_VARIANT)
+WITH FUNCTION sys.varchar_sqlvariant (VARCHAR, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.nvarchar_sqlvariant(nvarchar, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'nvarchar2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (NVARCHAR AS sys.SQL_VARIANT)
+WITH FUNCTION sys.nvarchar_sqlvariant (NVARCHAR, int) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sys.char_sqlvariant(CHAR, int)
+RETURNS sys.SQL_VARIANT
+AS '$libdir/shark', 'char2sqlvariant'
+LANGUAGE C IMMUTABLE STRICT ;
+
+CREATE CAST (CHAR AS sys.SQL_VARIANT)
+WITH FUNCTION sys.char_sqlvariant (CHAR, int) AS IMPLICIT;
+
+-- CAST functions from SQL_VARIANT
+CREATE OR REPLACE FUNCTION sys.sqlvariant_smalldatetime(sys.SQL_VARIANT)
+RETURNS SMALLDATETIME
+AS '$libdir/shark', 'sqlvariant2smalldatetime'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS SMALLDATETIME)
+WITH FUNCTION sys.sqlvariant_smalldatetime (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_date(sys.SQL_VARIANT)
+RETURNS DATE
+AS '$libdir/shark', 'sqlvariant2date'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS DATE)
+WITH FUNCTION sys.sqlvariant_date (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_time(sys.SQL_VARIANT)
+RETURNS TIME
+AS '$libdir/shark', 'sqlvariant2time'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS TIME)
+WITH FUNCTION sys.sqlvariant_time (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_float(sys.SQL_VARIANT)
+RETURNS FLOAT
+AS '$libdir/shark', 'sqlvariant2float'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS FLOAT)
+WITH FUNCTION sys.sqlvariant_float (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_real(sys.SQL_VARIANT)
+RETURNS REAL
+AS '$libdir/shark', 'sqlvariant2real'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS REAL)
+WITH FUNCTION sys.sqlvariant_real (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_numeric(sys.SQL_VARIANT)
+RETURNS NUMERIC
+AS '$libdir/shark', 'sqlvariant2numeric'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS NUMERIC)
+WITH FUNCTION sys.sqlvariant_numeric (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_money(sys.SQL_VARIANT)
+RETURNS MONEY
+AS '$libdir/shark', 'sqlvariant2money'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS MONEY)
+WITH FUNCTION sys.sqlvariant_money (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_bigint(sys.SQL_VARIANT)
+RETURNS BIGINT
+AS '$libdir/shark', 'sqlvariant2bigint'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS BIGINT)
+WITH FUNCTION sys.sqlvariant_bigint (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_int(sys.SQL_VARIANT)
+RETURNS INT
+AS '$libdir/shark', 'sqlvariant2int'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS INT)
+WITH FUNCTION sys.sqlvariant_int (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_smallint(sys.SQL_VARIANT)
+RETURNS SMALLINT
+AS '$libdir/shark', 'sqlvariant2smallint'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS SMALLINT)
+WITH FUNCTION sys.sqlvariant_smallint (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_tinyint(sys.SQL_VARIANT)
+RETURNS TINYINT
+AS '$libdir/shark', 'sqlvariant2smallint'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS TINYINT)
+WITH FUNCTION sys.sqlvariant_tinyint (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_bit(sys.SQL_VARIANT)
+RETURNS BIT
+AS '$libdir/shark', 'sqlvariant2bit'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS BIT)
+WITH FUNCTION sys.sqlvariant_bit (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_sysvarchar(sys.SQL_VARIANT)
+RETURNS VARCHAR
+AS '$libdir/shark', 'sqlvariant2varchar'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS VARCHAR)
+WITH FUNCTION sys.sqlvariant_sysvarchar (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_nvarchar(sys.SQL_VARIANT)
+RETURNS NVARCHAR
+AS '$libdir/shark', 'sqlvariant2varchar'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS NVARCHAR)
+WITH FUNCTION sys.sqlvariant_sysvarchar (sys.SQL_VARIANT);
+
+CREATE OR REPLACE FUNCTION sys.sqlvariant_char(sys.SQL_VARIANT)
+RETURNS CHAR
+AS '$libdir/shark', 'sqlvariant2char'
+LANGUAGE C VOLATILE STRICT ;
+
+CREATE CAST (sys.SQL_VARIANT AS CHAR)
+WITH FUNCTION sys.sqlvariant_char (sys.SQL_VARIANT);
+reset search_path;

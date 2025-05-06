@@ -103,6 +103,7 @@ set(TGT_shark_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/shark.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dbcc.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/varlena.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/sqlvariant.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BEPARSERDIR}/gram-backend.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BEPARSERDIR}/keywords.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BEPARSERDIR}/parser.cpp
