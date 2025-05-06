@@ -1,0 +1,32 @@
+create schema parse_const_as_param_type;
+set current_schema to 'parse_const_as_param_type';
+
+
+create table test1(c1 tinyint);
+prepare s1 as insert into test1 values ($1);
+execute s1 (88);
+execute s1 (288);
+
+create table test2(c1 smallint);
+prepare s2 as insert into test2 values ($1);
+execute s2 (88);
+execute s2 (65525);
+
+create table test3(c1 int4);
+prepare s3 as insert into test3 values ($1);
+execute s3 (88);
+execute s3 (6552555555);
+
+create table test4(c1 int8);
+prepare s4 as insert into test4 values ($1);
+execute s4 (88);
+execute s4 (655255555555);
+
+
+
+drop table test1;
+drop table test2;
+drop table test3;
+drop table test4;
+drop schema parse_const_as_param_type cascade;
+reset current_schema;
