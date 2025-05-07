@@ -36,7 +36,7 @@
 #define CRBM_TAG_VALID (1LU << 24 << 32)        /* tag is assigned */
 #define CRBM_PIN_COUNT_WAITER (1LU << 25 << 32) /* have waiter for sole pin */
 
-#define CR_BUFFER_NUM 128000
+#define CR_BUFFER_NUM 12800
 
 #define GetCRBufferDescriptor(id) (&t_thrd.storage_cxt.CRBufferDescriptors[(id)].crbuffdesc)
 

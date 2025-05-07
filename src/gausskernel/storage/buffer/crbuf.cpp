@@ -34,7 +34,6 @@
 #include "utils/elog.h"
 #include "utils/memutils.h"
 
-#define CR_BUFFER_NUM 12800
 #define INVALID_BUFF 0
 #define PCRP_RESERVED_PAGE_COUNT 6
 #define CRPageIsNew(page) (((PageHeader)(page))->pd_upper == 0)
