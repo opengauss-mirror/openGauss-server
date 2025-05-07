@@ -335,7 +335,9 @@ void OpFusion::executeInit()
     if (m_local.m_isFirst == true) {
         checkPermission();
     }
-    CheckWriteCommandWithDisableIndex(m_global->m_planstmt);
+    if (!IGNORE_UNUSED_INDEX_CHECK_ON_DML) {
+        CheckWriteCommandWithDisableIndex(m_global->m_planstmt);
+    }
     if (m_local.m_resOwner == NULL) {
         m_local.m_resOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     }

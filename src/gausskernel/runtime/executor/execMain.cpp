@@ -625,7 +625,9 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
     }
 #endif
 
-    CheckWriteCommandWithDisableIndex(queryDesc->plannedstmt);
+    if (!IGNORE_UNUSED_INDEX_CHECK_ON_DML) {
+        CheckWriteCommandWithDisableIndex(queryDesc->plannedstmt);
+    }
 
     /* Allow instrumentation of Executor overall runtime */
     if (queryDesc->totaltime) {

@@ -251,7 +251,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_FLOAT_AS_NUMERIC (1LL << 33)
 #define OPT_DISABLE_RECORD_TYPE_IN_DML (1LL << 34)
 #define OPT_ACCEPT_FLOAT_STR_AS_INT (1LL << 35)
-#define OPT_MAX 36
+#define OPT_IGNORE_UNUSED_INDEX_CHECK_ON_DML (1LL << 36)
+#define OPT_MAX 37
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -311,6 +312,9 @@ static const struct behavior_compat_entry restrict_nonsystem_relation_kind[OPT_R
 #define FLOAT_AS_NUMERIC (u_sess->utils_cxt.behavior_compat_flags & OPT_FLOAT_AS_NUMERIC)
 #define DISABLE_RECORD_TYPE_IN_DML (u_sess->utils_cxt.behavior_compat_flags & OPT_DISABLE_RECORD_TYPE_IN_DML)
 #define ACCEPT_FLOAT_STR_AS_INT (u_sess->utils_cxt.behavior_compat_flags & OPT_ACCEPT_FLOAT_STR_AS_INT)
+#define IGNORE_UNUSED_INDEX_CHECK_ON_DML (u_sess->utils_cxt.behavior_compat_flags \
+    & OPT_IGNORE_UNUSED_INDEX_CHECK_ON_DML)
+
 #define RESTRICT_NONSYSTEM_RELATION_KIND_VIEW \
     (bool(u_sess->utils_cxt.restrict_nonsystem_relation_kind_flags \
     & OPT_RESTRCIT_NONSYSTEM_RELATION_KIND_VIEW))
