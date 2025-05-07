@@ -1,4 +1,5 @@
 set(BEPARSERDIR "src/backend_parser")
+set(BASECODEDIR "src")
 set(PLDIR "src/pltsql")
 
 execute_process(
@@ -100,6 +101,8 @@ add_cmd_gen_when_configure(flex_target shark_parser_cmd_src)
 
 set(TGT_shark_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/shark.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dbcc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/varlena.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BEPARSERDIR}/gram-backend.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BEPARSERDIR}/keywords.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BEPARSERDIR}/parser.cpp
@@ -107,6 +110,7 @@ set(TGT_shark_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/${PLDIR}/pl_handler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${PLDIR}/pl_comp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${PLDIR}/pl_scanner.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/${BASECODEDIR}/tablecmds.cpp
 )
 set(TGT_shark_INC 
     ${PROJECT_OPENGS_DIR}/contrib/shark
