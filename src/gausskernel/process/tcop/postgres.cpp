@@ -2868,9 +2868,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             if (opFusionObj != NULL) {
                 ((OpFusion*)opFusionObj)->setCurrentOpFusionObj((OpFusion*)opFusionObj);
                 if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, isTopLevel, NULL)) {
-                    if (!u_sess->attr.attr_sql.enable_opfusion_reuse) {
-                        OpFusion::tearDown((OpFusion*)opFusionObj);
-                    }
+                    OpFusion::tearDown((OpFusion*)opFusionObj);
                     CommandCounterIncrement();
                     finish_xact_command();
                     EndCommand(completionTag, dest);
