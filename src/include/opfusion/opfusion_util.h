@@ -153,6 +153,7 @@ const Oid function_id[] = {
     409,  /* convert char(n) to name */
     668,  /* adjust char() to typmod length */
     669,  /* adjust varchar() to typmod length */
+    714,  /* convert int8 to int2 */
     944,  /* convert text to char */
     946,  /* convert char to text */
     1200, /* adjust interval precision */
