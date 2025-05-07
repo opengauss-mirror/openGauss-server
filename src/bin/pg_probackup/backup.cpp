@@ -472,7 +472,7 @@ static int64 calc_data_bytes()
     return backup_data;
 }
 
-static bool backup_space_check()
+static bool backup_space_check(const char* backup_path)
 {
     int64 disk_available_bytes = 0;
     int64 backup_bytes = 0;
@@ -480,8 +480,10 @@ static bool backup_space_check()
     char pretty_backup_bytes[BYTES_PATH_LEN];
     char data_path[MAX_PATH_LEN] = {0};
     struct statfs diskInfo = {0};
-
-    int ret = statfs(instance_config.pgdata, &diskInfo);
+    elog(INFO, "The instance_config.pgdata is: %s", backup_path);
+    int ret = statfs(backup_path, &diskInfo);
+    elog(INFO, "bsize:%ld, blocks:%ld, bfree:%ld, bavail:%ld, bfiles:%ld, bffree:%ld,", 
+        diskInfo.f_bsize, diskInfo.f_blocks, diskInfo.f_bfree, diskInfo.f_bavail, diskInfo.f_files, diskInfo.f_ffree);
     if (ret < 0) {
         elog(ERROR, "Get disk free space failed!");
         return false;
@@ -849,7 +851,7 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
     }
 
     /* Check if the memory space is sufficient for backup */
-    if (!backup_space_check()) {
+    if (!backup_space_check(current.root_dir)) {
         current.status = BACKUP_STATUS_ERROR;
         write_backup(&current, true);
         elog(ERROR, "There is not enough remaining disk space for backup, please clean it up and try again");
