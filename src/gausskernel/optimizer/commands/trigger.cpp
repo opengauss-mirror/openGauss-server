@@ -75,6 +75,8 @@
 #endif
 #include "utils/knl_relcache.h"
 
+extern THR_LOCAL bool creating_extension;
+
 /*
  * Note that similar macros also exist in executor/execMain.c.  There does not
  * appear to be any good header to put them into, given the structures that

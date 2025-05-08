@@ -5407,6 +5407,14 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
         u_sess->attr.attr_common.remoteConnType = REMOTE_CONN_APP;
     }
 
+    /* Set connection_from_coordinator. If it's true, we skip redundant verifications. Currently, it's only
+    used to skip password verifications of set role and alter role launched by coordinator to data nodes. */
+    if (port->cmdline_options != NULL && strstr(port->cmdline_options, "remotetype=coordinator") != NULL) {
+        u_sess->attr.attr_common.connection_from_coordinator = true;
+    } else {
+        u_sess->attr.attr_common.connection_from_coordinator = false;
+    }
+
     /* We need to restore the socket settings to prevent unexpected errors. */
     if (isTvSeted && (comm_setsockopt(port->sock, SOL_SOCKET, SO_RCVTIMEO, &oldTv, oldTvLen) < 0)) {
         ereport(LOG, (errmsg("setsockopt(SO_RCVTIMEO) failed: %m")));

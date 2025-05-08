@@ -1626,7 +1626,8 @@ static bool checkTargetTableReplicated(RangeTblEntry* rte)
 
 static void checkTargetTableSystemCatalog(Relation targetRel)
 {
-    if (IsUnderPostmaster && !g_instance.attr.attr_common.allowSystemTableMods && IsSystemRelation(targetRel)) {
+    if (IsUnderPostmaster && IsSystemRelation(targetRel) &&
+        !g_instance.attr.attr_common.allowSystemTableMods) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied: \"%s\" is a system catalog", RelationGetRelationName(targetRel))));

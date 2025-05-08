@@ -856,8 +856,10 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
      */
     creating_extension = true;
     u_sess->cmd_cxt.CurrentExtensionObject = extensionOid;
+    bool prevAllowSystemTableMods = g_instance.attr.attr_common.allowSystemTableMods;
     PG_TRY();
     {
+        g_instance.attr.attr_common.allowSystemTableMods = true;
         char* c_sql = read_extension_script_file(control, filename);
         Datum t_sql;
 
@@ -910,12 +912,14 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
     {
         creating_extension = false;
         u_sess->cmd_cxt.CurrentExtensionObject = InvalidOid;
+        g_instance.attr.attr_common.allowSystemTableMods = prevAllowSystemTableMods;
         PG_RE_THROW();
     }
     PG_END_TRY();
 
     creating_extension = false;
     u_sess->cmd_cxt.CurrentExtensionObject = InvalidOid;
+    g_instance.attr.attr_common.allowSystemTableMods = prevAllowSystemTableMods;
 
     /*
      * Restore the GUC variables we set above.

@@ -9501,7 +9501,8 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                 }
                 if (pg_strcasecmp(stmt->name, "session_authorization") == 0) {
                     check_setrole_permission(role, passwd, false);
-                    if (!verify_setrole_passwd(role, passwd, false)) {
+                    if (!u_sess->attr.attr_common.connection_from_coordinator &&
+                        !verify_setrole_passwd(role, passwd, false)) {
                         str_reset(passwd);
                         ereport(ERROR,
                             (errcode(ERRCODE_SYSTEM_ERROR),
@@ -9511,11 +9512,12 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                 } else {
                     check_setrole_permission(role, passwd, true);
 
-                    //if (!verify_setrole_passwd(role, passwd, true)) {
-                    //    str_reset(passwd);
-                    //    ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("verify set role and passwd failed.")));
-                    //    break;
-                    // }
+                    if (!u_sess->attr.attr_common.connection_from_coordinator &&
+                        !verify_setrole_passwd(role, passwd, true)) {
+                       str_reset(passwd);
+                       ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("verify set role and passwd failed.")));
+                       break;
+                    }
                 }
 
                 /* passwd is sensitive info, it should be cleaned when it's useless */
