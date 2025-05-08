@@ -368,7 +368,7 @@ extern void RollbackCRPage(IndexScanDesc scan, Page crPage, uint8 tdid,
 extern UndoRecPtr UBTreePCRPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
     UndoPersistence persistence, TransactionId xid, CommandId cid, UndoRecPtr prevurpInOneBlk,
     UndoRecPtr prevurpInOneXact, BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa,
-    OffsetNumber offset, Buffer buf, bool selfInsert, UBTreeUndoInfo undoinfo, IndexTuple itup);
+    OffsetNumber offset, Buffer buf, TransactionId oldXid, UBTreeUndoInfo undoinfo, IndexTuple itup);
 extern int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, TransactionId xid, Oid reloid,
     Oid partitionoid, BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid);
 /*

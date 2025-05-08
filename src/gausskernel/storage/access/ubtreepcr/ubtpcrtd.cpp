@@ -180,12 +180,13 @@ uint8 UBTreePageFreezeTDSlots(Relation relation, Buffer buf, TransactionId* minX
 
             XLogBeginInsert();
             xlrec.nFrozen = nFrozenSlots;
+            xlrec.latestFrozenXid = latestfxid;
             XLogRegisterData((char*)&xlrec, SizeOfUbtree3FreezeTDSlot);
             /*
             * We need the frozen slots information when WAL needs to
             * be applied on the page..
             */
-            XLogRegisterData((char *)frozenSlots, nFrozenSlots * sizeof(int));
+            XLogRegisterData((char *)frozenSlots, nFrozenSlots * sizeof(uint8));
             XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
 
             recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_FREEZE_TD_SLOT);
@@ -263,8 +264,8 @@ uint8 UBTreePageFreezeTDSlots(Relation relation, Buffer buf, TransactionId* minX
         if (RelationNeedsWAL(relation)) {
             XLogBeginInsert();
 
-            XLogRegisterData((char *)&nCompletedXactSlots, sizeof(uint16));
-            XLogRegisterData((char *)completedXactSlots, nCompletedXactSlots * sizeof(int));
+            XLogRegisterData((char *)&nCompletedXactSlots, sizeof(uint8));
+            XLogRegisterData((char *)completedXactSlots, nCompletedXactSlots * sizeof(uint8));
 
             XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
 
@@ -387,7 +388,7 @@ uint8 UBTreeExtendTDSlots(Relation relation, Buffer buf)
         XLogRegisterData((char *) &xlrec, SizeOfUbtree3ExtendTDSlot);
         XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
 
-        recptr = XLogInsert(RM_UHEAP2_ID, XLOG_UBTREE3_EXTEND_TD_SLOTS);
+        recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_EXTEND_TD_SLOTS);
         PageSetLSN(page, recptr);
     }
 

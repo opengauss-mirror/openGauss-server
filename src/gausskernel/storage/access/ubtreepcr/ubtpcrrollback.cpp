@@ -670,7 +670,7 @@ int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, Transaction
                 XLogRegisterData((char *)&xlrec, sizeOfUbtree3RollbackTxn);
                 XLogRegisterData((char *)&redoRollbackAction.td, sizeof(UBTreeTDData));
                 if (xlrec.n_rollback > 0) {
-                    XLogRegisterData((char *)&redoRollbackAction.rollback_items.items,
+                    XLogRegisterData((char *)redoRollbackAction.rollback_items.items,
                         sizeof(UBTreeRedoRollbackItemData) * xlrec.n_rollback);
                 }
                 XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
@@ -758,7 +758,7 @@ void ExecuteUndoActionsForUBTreePage(Relation rel, Buffer buffer, uint8 tdid)
             XLogRegisterData((char *)&xlrec, sizeOfUbtree3RollbackTxn);
             XLogRegisterData((char *)&redoRollbackAction.td, sizeof(UBTreeTDData));
             if (xlrec.n_rollback > 0) {
-                XLogRegisterData((char *)&redoRollbackAction.rollback_items.items,
+                XLogRegisterData((char *)redoRollbackAction.rollback_items.items,
                     sizeof(UBTreeRedoRollbackItemData) * xlrec.n_rollback);
             }
 

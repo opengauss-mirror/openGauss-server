@@ -244,21 +244,23 @@ Buffer UBTreePCRGetRoot(Relation rel, int access)
 
         /* XLOG stuff */
         if (RelationNeedsWAL(rel)) {
-            xl_btree_newroot xlrec;
-            xl_btree_metadata_old md;
-            XLogRecPtr recptr;
             XLogBeginInsert();
             XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
             XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT);
+            xl_btree_metadata md;
             md.root = rootblkno;
             md.level = 0;
             md.fastroot = rootblkno;
             md.fastlevel = 0;
-            XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata_old));
+            md.version = metad->btm_version;
+            XLogRegisterBufData(2, (char *)&md, sizeof(xl_btree_metadata));
+
+            xl_btree_newroot xlrec;
             xlrec.rootblk = rootblkno;
             xlrec.level = 0;
             XLogRegisterData((char *)&xlrec, SizeOfBtreeNewroot);
-            recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_NEW_ROOT);
+
+            XLogRecPtr recptr = XLogInsert(RM_UBTREE3_ID, XLOG_UBTREE3_NEW_ROOT);
             PageSetLSN(rootpage, recptr);
             PageSetLSN(metapg, recptr);
         }

@@ -29,7 +29,7 @@
 UndoRecPtr UBTreePCRPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
     UndoPersistence persistence, TransactionId xid, CommandId cid, UndoRecPtr prevurpInOneBlk,
     UndoRecPtr prevurpInOneXact, BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa,
-    OffsetNumber offset, Buffer buf, bool selfInsert, UBTreeUndoInfo undoinfo, IndexTuple itup)
+    OffsetNumber offset, Buffer buf, TransactionId oldXid, UBTreeUndoInfo undoinfo, IndexTuple itup)
 {
     UndoRecord *urec = (*t_thrd.ustore_cxt.urecvec)[0];
     Assert(tablespace != InvalidOid);
@@ -56,12 +56,8 @@ UndoRecPtr UBTreePCRPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid relfilen
         }
     }
     /* Tell Undo chain traversal this record does not have any older version */
-    if (selfInsert) {
-        urec->SetOldXactId(xid);
-    } else {
-        urec->SetOldXactId(FrozenTransactionId);
-    }
-
+    urec->SetOldXactId(oldXid);
+    
     MemoryContext old_cxt = MemoryContextSwitchTo(urec->mem_context());
     initStringInfo(urec->Rawdata());
     MemoryContextSwitchTo(old_cxt);

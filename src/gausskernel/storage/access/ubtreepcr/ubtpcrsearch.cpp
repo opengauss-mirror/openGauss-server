@@ -1699,8 +1699,7 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
         ((snapshot->satisfies == SNAPSHOT_MVCC || snapshot->satisfies == SNAPSHOT_VERSION_MVCC)
         && TransactionIdFollowsOrEquals(opaque->last_delete_xid, snapshot->xmin));
 
-    Page localPage = (Page)palloc(BLCKSZ);
-    bool useLocalPage = false;
+    Page localPage = NULL;
     uint32 checkNum = 0;
     OffsetNumber checkVisibleOffs[MaxIndexTuplesPerPage] = {0};
     OffsetNumber originOffnum = offnum;
@@ -1719,20 +1718,14 @@ choose_scan_mode:
             blockNum, snapshot->snapshotcsn, snapshot->curcid))));
         desc = ReadCRBuffer(scan->indexRelation, BufferGetBlockNumber(so->currPos.buf),
             snapshot->snapshotcsn, snapshot->curcid);
-        if (desc != NULL) {
-            ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("ReadCRBuffer found (%u, %d) buf_id %d, "
-                "csn %ld, cid %d, rsid %ld", scan->indexRelation->rd_node.relNode,
-                blockNum, desc->buf_id, desc->csn, desc->cid, desc->rsid))));
-            crPage = CRBufferGetPage(desc->buf_id);
-        } else if (mustUsePCRScanMode) {
+        if (mustUsePCRScanMode) {
+            localPage = (Page)palloc(BLCKSZ);
             ereport(DEBUG5, (errmodule(MOD_PCR), (errmsg("PCR read page from cr pool notfound"))));
-            errno_t rc = memcpy_sp(localPage, BLCKSZ, (Page)BufferGetPage(so->currPos.buf), BLCKSZ);
             CommandId page_cid;
             BuildCRPage(scan, localPage, so->currPos.buf, &page_cid);
             page_cid = page_cid == InvalidCommandId ? snapshot->curcid : page_cid;
             UBTPCRPageOpaque opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
-
-            if (!((opaque->btpo_flags & BTP_DELETED) || (opaque->btpo_flags & BTP_HALF_DEAD) ||
+            if (desc == NULL && !((opaque->btpo_flags & BTP_DELETED) || (opaque->btpo_flags & BTP_HALF_DEAD) ||
                 (opaque->btpo_flags & BTP_VACUUM_DELETING) || (opaque->btpo_flags & BTP_INCOMPLETE_SPLIT) ||
                 (opaque->btpo_flags & BTP_SPLIT_END))) {
                 ereport(DEBUG3, (errmodule(MOD_PCR), (errmsg("AllocCRBuffer (%u, %d) page_csn %ld, page_cid %d",
@@ -1741,21 +1734,19 @@ choose_scan_mode:
                 desc = AllocCRBuffer(scan->indexRelation, MAIN_FORKNUM, BufferGetBlockNumber(so->currPos.buf),
                                      snapshot->snapshotcsn, page_cid);
                 crPage = CRBufferGetPage(desc->buf_id);
-                rc = memcpy_sp(crPage, BLCKSZ, (Page)localPage, BLCKSZ);
+                errno_t rc = memcpy_sp(crPage, BLCKSZ, (Page)localPage, BLCKSZ);
                 uint64 buf_state = pg_atomic_read_u64(&desc->state);
                 UnlockCRBufHdr(desc, buf_state);
-            } else {
-                crPage = localPage;
             }
             so->scanMode = PCR_SCAN_MODE;
-            page = crPage;
+            page = localPage;
             maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
         } else {
             so->scanMode = PBRCR_SCAN_MODE;
         }
-        if (desc != NULL) {
+        if (localPage != NULL) {
             so->scanMode = PCR_SCAN_MODE;
-            page = crPage;
+            page = localPage;
             maxoff = UBTreePCRPageGetMaxOffsetNumber(page);
         }
     } else {
@@ -1896,7 +1887,9 @@ choose_scan_mode:
             "rsid %ld", scan->indexRelation->rd_node.relNode, BufferGetBlockNumber(so->currPos.buf),
             desc->buf_id, desc->csn, desc->cid, desc->rsid))));
     }
-    pfree(localPage);
+    if (localPage != NULL) {
+        pfree(localPage);
+    }
     return (so->currPos.firstItem <= so->currPos.lastItem);
 }
 
