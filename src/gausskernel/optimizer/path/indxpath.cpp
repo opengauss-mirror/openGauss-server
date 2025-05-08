@@ -910,7 +910,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
     bool index_only_scan = false;
     int indexcol;
     bool can_parallel = IS_STREAM_PLAN && (u_sess->opt_cxt.query_dop > 1) && (ST_BITMAPSCAN != scantype) &&
-                        (!rel->isPartitionedTable);
+                        (!rel->isPartitionedTable) && !index->rel->is_ustore;
 
     if (index->isAnnIndex && IsExtremeRedo()) {
         if (ST_BITMAPSCAN != scantype) {
