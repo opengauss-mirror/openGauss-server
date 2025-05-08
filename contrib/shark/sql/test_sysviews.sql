@@ -149,5 +149,166 @@ drop table class;
 drop table teacher;
 drop table student;
 
+-- test sys views
+\d sys.all_objects
+\d sys.objects
+\d sys.tables
+\d sys.views
+\d sys.all_columns
+\d sys.columns
+\d sys.indexes
+\d sys.procedures
+
+drop table if exists t_index;
+create table t_index (id int primary key, c2 int not null, c3 char(1), c4 text, c5 numeric(10, 2));
+create unique index t_index_c2_uind on t_index(c2);
+create index t_index_c3_c2_ind on t_index(c3, c2);
+create index t_index_func_c4_ind on t_index(lower(c4));
+create index t_index_hash_c3_ind on t_index using hash(c3);
+create index t_index_filter_c5_ind on t_index (c5) where c5 > 100.00;
+
+drop table if exists t_foreign1;
+create table t_foreign1 (f_id int primary key, f_name text not null, f_age int default 18);
+-- foreign key, check constraint
+drop table if exists t_foreign2;
+create table t_foreign2 (f_id int primary key not null, f_c2 int references t_foreign1(f_id), f_salary real check(f_salary > 0));
+
+-- columns table
+create table t_column (c1 int, c2 text, c3 char(1), constraint t_stats_col_pk primary key (c1)) with (orientation = column);
+
+-- temporal table
+create temp table t_temp_table as select * from t_index;
+
+-- view
+drop view if exists v_normal;
+create view v_normal as select * from t_index;
+-- view with check option
+drop view if exists v_check;
+create view v_check as select * from t_index where id > 10 with check option;
+-- materialized view
+drop materialized view if exists mv_normal;
+create materialized view mv_normal as select * from t_foreign1;
+
+-- sequence
+create sequence if not exists seq_order
+    increment by 1
+    start with 1
+    nocycle;
+select seq_order.nextval;
+create table t_orders (order_id int primary key default nextval('seq_order'), order_date date);
+
+-- synonym
+create synonym syn_tbl for t_orders;
+
+-- trigger
+create table t_tg_src (c1 int, c2 int, c3 int);
+create table t_tg_des (c1 int, c2 int, c3 int);
+create or replace function tri_insert_func() returns trigger as
+$$
+begin
+	insert into t_tg_des values (NEW.c1, NEW.c2, NEW.c3);
+	return NEW;
+end
+$$ language plpgsql;
+create trigger insert_trigger
+before insert on t_tg_src
+for each row
+execute procedure tri_insert_func();
+
+-- function
+create or replace function test_sub(a int, b int) returns int as $$
+begin
+	return a - b;
+end;
+$$ language plpgsql;
+
+-- procedure
+create or replace procedure test_sum(in a int, in b int, out c int) as
+begin 
+	c = a + b;
+end;
+/
+
+select name, s.nspname, po.relname, type, type_desc, is_ms_shipped, is_published, is_schema_published
+from sys.all_objects o
+inner join pg_namespace s on o.schema_id = s.oid
+left join pg_class po on po.oid = parent_object_id
+where s.nspname = 'sys_view_test'
+order by object_id;
+
+select name, s.nspname, po.relname, type, type_desc, is_ms_shipped, is_published, is_schema_published
+from sys.objects o
+inner join pg_namespace s on o.schema_id = s.oid
+left join pg_class po on po.oid = parent_object_id
+where s.nspname = 'sys_view_test'
+order by object_id;
+
+select 
+    name, s.nspname, type, type_desc, is_ms_shipped, is_published, is_schema_published,
+    max_column_id_used, uses_ansi_nulls, is_replicated, is_memory_optimized, durability, durability_desc, temporal_type, temporal_type_desc
+from sys.tables t
+inner join pg_namespace s on t.schema_id = s.oid
+where s.nspname = 'sys_view_test'
+order by object_id;
+
+select name, s.nspname, type, type_desc, is_ms_shipped, is_published, is_schema_published, with_check_option
+from sys.views v
+inner join pg_namespace s on v.schema_id = s.oid
+where s.nspname = 'sys_view_test'
+order by object_id;
+
+select t.relname, c.name, column_id, max_length, precision, scale, is_nullable, is_computed, is_replicated, generated_always_type, generated_always_type_desc
+from sys.all_columns c
+inner join pg_class t on c.object_id = t.oid
+inner join pg_namespace s on t.relnamespace = s.oid
+where s.nspname = 'sys_view_test'
+order by object_id, column_id;
+
+select t.relname, c.name, column_id, max_length, precision, scale, is_nullable, is_computed, is_replicated, generated_always_type, generated_always_type_desc
+from sys.columns c
+inner join pg_class t on c.object_id = t.oid
+inner join pg_namespace s on t.relnamespace = s.oid
+where s.nspname = 'sys_view_test'
+order by object_id, column_id;
+
+select t.relname, name, i.type, type_desc, i.is_unique, is_primary_key, is_unique_constraint, fill_factor, is_disabled, has_filter, filter_definition
+from sys.indexes i
+inner join pg_class t on i.object_id = t.oid
+inner join pg_namespace s on t.relnamespace = s.oid
+where s.nspname = 'sys_view_test'
+order by index_id;
+
+select name, s.nspname, type, type_desc, is_ms_shipped, is_published
+from sys.procedures p
+inner join pg_namespace s on p.schema_id = s.oid
+where s.nspname = 'sys_view_test'
+order by object_id;
+
+-- disable index
+alter index t_index_func_c4_ind disable;
+
+select t.relname, name, i.type, type_desc, is_disabled
+from sys.indexes i
+inner join pg_class t on i.object_id = t.oid
+inner join pg_namespace s on t.relnamespace = s.oid
+where s.nspname = 'sys_view_test' and name = 't_index_func_c4_ind';
+
+drop procedure test_sum;
+drop function test_sub;
+drop table t_tg_des;
+drop table t_tg_src;
+drop function tri_insert_func;
+drop synonym syn_tbl;
+drop table t_orders;
+drop sequence seq_order;
+drop materialized view mv_normal;
+drop view v_check;
+drop view v_normal;
+drop table t_temp_table;
+drop table t_column;
+drop table t_foreign2;
+drop table t_foreign1;
+drop table t_index;
+
 reset search_path;
 drop schema sys_view_test cascade;
