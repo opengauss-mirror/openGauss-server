@@ -3634,7 +3634,7 @@ static void InitConfigureNamesString()
             RESOURCES_KERNEL,
             gettext_noop("Lists shared libraries to preload into server."),
             NULL,
-            GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
+            GUC_LIST_INPUT | GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_common.shared_preload_libraries_string,
             "security_plugin",
             NULL,
