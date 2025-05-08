@@ -6999,8 +6999,11 @@ fi
 #
 # JDK
 #
-with_jdk=''
-if [[ ! -z "${with_3rdpartydir}" ]] && [[ "$with_openeuler_os" != yes ]]; then
+# Check whether --with-jdk was given.
+if test "${with_jdk+set}" != set; then
+  with_jdk=''
+fi
+if [[ -z "$with_jdk" ]] && [[ ! -z "${with_3rdpartydir}" ]] && [[ "$with_openeuler_os" != yes ]]; then
     cpuarch=$(uname -m)
     for d in "openjdk8" "huaweijdk8"; do
         $as_echo "$as_me:$LINENO: checking for jdk in ${with_3rdpartydir}/kernel/platform/${d}/${cpuarch}" >&5
