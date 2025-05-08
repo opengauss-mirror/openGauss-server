@@ -81,6 +81,14 @@
 #include "access/htap/imcstore_delta.h"
 #endif
 
+#ifdef KRB5
+#include <krb5.h>
+/* Some old versions of Kerberos do not include <com_err.h> in <krb5.h> */
+#if !defined(__COM_ERR_H) && !defined(__COM_ERR_H__)
+#include <com_err.h>
+#endif
+#endif /* KRB5 */
+
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
 const int HOTKEY_ABANDON_LENGTH = 100;
