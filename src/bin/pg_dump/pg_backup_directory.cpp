@@ -1092,7 +1092,7 @@ static size_t _WriteDataP(ArchiveHandle* AH, const void* data, size_t dLen)
     if (ctx->dataCryptoCache) {
         fillWriteCryptoCache(AH, ctx->dataCryptoCache, ctx->dataFH, data, dLen);
     } else {
-        return (size_t)cfwriteWithLock(data, (int)dLen, ctx->dataFH);;
+        return (size_t)cfwrite(data, (int)dLen, ctx->dataFH);;
     }
 
     return dLen;
