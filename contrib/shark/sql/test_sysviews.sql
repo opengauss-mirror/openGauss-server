@@ -312,3 +312,73 @@ drop table t_index;
 
 reset search_path;
 drop schema sys_view_test cascade;
+
+create schema sys_view_test_02;
+set search_path to sys_view_test_02;
+-- show views struct
+\d information_schema_tsql.check_constraints
+\d information_schema_tsql.columns
+\d information_schema_tsql.tables
+\d information_schema_tsql.views
+\d sys.sysdatabases
+\d sys.schemas
+\d sys.sysusers
+\d sys.databases
+
+-- prepare data
+CREATE TABLE employees (
+    name VARCHAR(50) NOT NULL,
+    age INT,
+    salary DECIMAL(10, 2),
+    -- CHECK 约束：年龄必须 >= 18
+    CONSTRAINT chk_age CHECK (age >= 18)
+);
+
+CREATE VIEW high_salary_employees AS
+SELECT name, age, salary
+FROM employees
+WHERE age >= 18 AND salary > 5000;
+
+INSERT INTO employees (name, age, salary) VALUES ('张三', 25, 8000.00); 
+INSERT INTO employees (name, age, salary) VALUES ('李四', 26, 4000.00); 
+
+-- test select
+select constraint_schema, constraint_name, check_clause
+from information_schema_tsql.check_constraints c
+inner join pg_namespace s on c.constraint_schema = s.nspname
+where s.nspname = 'sys_view_test_02';
+
+select table_schema, table_name, column_name, ordinal_position, column_default, is_nullable, data_type, character_maximum_length,
+character_octet_length, numeric_precision, numeric_precision_radix, numeric_scale, datetime_precision, character_set_name, collation_catalog,
+collation_schema, collation_name, domain_catalog, domain_schema, domain_name
+from information_schema_tsql.columns c
+inner join pg_namespace s on c.table_schema = s.nspname
+where s.nspname = 'sys_view_test_02';
+
+select table_schema, table_name, table_type
+from information_schema_tsql.tables t
+inner join pg_namespace s on t.table_schema = s.nspname
+where s.nspname = 'sys_view_test_02';
+
+select table_schema, table_name, view_definition, check_option, is_updatable
+from information_schema_tsql.views v
+inner join pg_namespace s on v.table_schema = s.nspname
+where s.nspname = 'sys_view_test_02';
+
+select sid, mode, status, status2, crdate, reserved, category, cmplevel, filename, version
+from sys.sysdatabases;
+
+select name, schema_id, principal_id
+from sys.schemas where schema_id < 16384;
+
+select *
+from sys.sysusers where uid >1000 and uid < 16384;
+
+select *
+from sys.databases where database_id = 1;
+
+drop table employees;
+drop view high_salary_employees;
+
+reset search_path;
+drop schema sys_view_test_02 cascade;

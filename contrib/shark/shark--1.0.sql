@@ -1263,4 +1263,430 @@ from pg_synonym syn
 inner join pg_namespace s on s.oid = syn.synnamespace
 where s.nspname not in ('information_schema', 'pg_catalog');
 
+CREATE SCHEMA information_schema_tsql;
+GRANT USAGE ON SCHEMA information_schema_tsql TO PUBLIC;
+SET search_path TO information_schema_tsql;
+
+CREATE OR REPLACE VIEW check_constraints AS
+SELECT 
+	  cast(current_database() as nvarchar(128)) AS constraint_catalog,
+    cast(n.nspname as nvarchar(128)) AS constraint_schema,  
+    cast(c.conname as name) AS constraint_name,
+    cast(pg_get_constraintdef(c.oid) as nvarchar(4000)) AS check_clause
+FROM 
+    pg_constraint c
+    JOIN pg_class t ON c.conrelid = t.oid
+    JOIN pg_namespace n ON t.relnamespace = n.oid
+WHERE 
+    c.contype = 'c';  -- 筛选 CHECK 约束
+
+CREATE FUNCTION information_schema_tsql._pg_char_max_length(type text, typmod int4) RETURNS integer
+    LANGUAGE sql
+	IMMUTABLE
+	RETURNS NULL ON NULL INPUT
+	AS
+$$SELECT
+	CASE WHEN type IN ('char', 'nchar', 'varchar', 'nvarchar')
+		THEN CASE WHEN typmod = -1
+			THEN -1
+			ELSE typmod - 4
+			END
+		WHEN type IN ('text')
+		THEN 2147483647
+		WHEN type = 'name'
+		THEN 64
+		WHEN type IN ('xml', 'vector', 'sparsevec')
+		THEN -1
+		ELSE null
+	END$$;
+
+CREATE FUNCTION information_schema_tsql._pg_char_octet_length(type text, typmod int4) RETURNS integer
+	LANGUAGE sql
+	IMMUTABLE
+	RETURNS NULL ON NULL INPUT
+	AS
+$$SELECT
+	CASE WHEN type IN ('char', 'varchar')
+		THEN CASE WHEN typmod = -1 /* default typmod */
+			THEN -1
+			ELSE typmod - 4
+			END
+		WHEN type IN ('nchar', 'nvarchar')
+		THEN CASE WHEN typmod = -1 /* default typmod */
+			THEN -1
+			ELSE (typmod - 4) * 2
+			END
+		WHEN type IN ('text')
+		THEN 2147483647 /* 2^30 + 1 */
+		WHEN type = 'name'
+		THEN 128
+		WHEN type IN ('xml', 'vector', 'sparsevec')
+		THEN -1
+	   ELSE null
+  END$$;
+
+CREATE OR REPLACE FUNCTION information_schema_tsql._pgtsql_numeric_precision(type text, typid oid, typmod int4) RETURNS integer
+	LANGUAGE sql
+	IMMUTABLE
+	RETURNS NULL ON NULL INPUT
+	AS
+$$
+	SELECT
+	CASE typid
+		WHEN 21 /*int2*/ THEN 5
+		WHEN 23 /*int4*/ THEN 10
+		WHEN 20 /*int8*/ THEN 19
+		WHEN 1700 /*numeric*/ THEN
+			CASE WHEN typmod = -1 THEN null
+				ELSE ((typmod - 4) >> 16) & 65535
+			END
+		WHEN 700 /*float4*/ THEN 24
+		WHEN 701 /*float8*/ THEN 53
+		ELSE
+			CASE WHEN type = 'tinyint' THEN 3
+				WHEN type = 'money' THEN 19
+				WHEN type = 'decimal'	THEN
+					CASE WHEN typmod = -1 THEN null
+						ELSE ((typmod - 4) >> 16) & 65535
+					END
+				ELSE null
+			END
+	END
+$$;
+
+CREATE OR REPLACE FUNCTION information_schema_tsql._pgtsql_numeric_precision_radix(type text, typid oid, typmod int4) RETURNS integer
+	LANGUAGE sql
+	IMMUTABLE
+	RETURNS NULL ON NULL INPUT
+	AS
+$$SELECT
+	CASE WHEN typid IN (700, 701) THEN 2
+		WHEN typid IN (20, 21, 23, 1700) THEN 10
+		WHEN type IN ('tinyint', 'money') THEN 10
+		ELSE null
+	END$$;
+
+CREATE OR REPLACE FUNCTION information_schema_tsql._pgtsql_numeric_scale(type text, typid oid, typmod int4) RETURNS integer
+	LANGUAGE sql
+	IMMUTABLE
+	RETURNS NULL ON NULL INPUT
+	AS
+$$
+	SELECT
+	CASE WHEN typid IN (21, 23, 20) THEN 0
+		WHEN typid IN (1700) THEN
+			CASE WHEN typmod = -1 THEN null
+				ELSE (typmod - 4) & 65535
+			END
+		WHEN type = 'tinyint' THEN 0
+		WHEN type IN ('money') THEN 4
+		WHEN type = 'decimal' THEN
+			CASE WHEN typmod = -1 THEN NULL
+				ELSE (typmod - 4) & 65535
+			END
+		ELSE null
+	END
+$$;
+
+CREATE OR REPLACE FUNCTION information_schema_tsql._pgtsql_datetime_precision(type text, typmod int4) RETURNS integer
+	LANGUAGE sql
+	IMMUTABLE
+	RETURNS NULL ON NULL INPUT
+	AS
+$$SELECT
+  CASE WHEN type = 'date'
+		   THEN 0
+	  WHEN type IN ('time', 'smalldatetime')
+			THEN CASE WHEN typmod < 0 THEN 6 ELSE typmod END
+	  ELSE null
+  END
+$$;
+
+CREATE OR REPLACE FUNCTION information_schema_tsql.is_d_format_schema(nspoid oid, nspname name) RETURNS boolean
+  LANGUAGE sql
+  IMMUTABLE
+  RETURNS NULL ON NULL INPUT
+	AS
+$$SELECT
+  CASE WHEN nspname <> 'pg_catalog' AND nspname <> 'sys' AND nspname <> 'dbe_pldeveloper' AND nspname <> 'coverage' 
+    AND nspname <> 'dbe_perf' AND nspname <> 'information_schema' AND nspname <> 'db4ai' AND nspname <> 'public' AND nspname <> 'information_schema_tsql'
+	  AND (NOT pg_catalog.pg_is_other_temp_schema(nspoid))
+    THEN true
+    ELSE false
+  END
+$$;
+
+CREATE OR REPLACE VIEW information_schema_tsql.columns AS
+SELECT 
+    CAST(current_database() AS nvarchar(128)) AS table_catalog,
+    CAST(nc.nspname AS nvarchar(128)) AS table_schema,
+    CAST(c.relname AS nvarchar(128)) AS table_name,
+    CAST(a.attname AS nvarchar(128)) AS column_name,
+	CAST(
+        CASE WHEN t.typtype = 'd' THEN t.typbasetype ELSE a.atttypid END 
+        AS int
+    ) AS ordinal_position,
+	CAST(pg_get_expr(ad.adbin, ad.adrelid) AS nvarchar(4000)) AS column_default,
+	CAST(
+        CASE 
+            WHEN a.attnotnull THEN 'NO'
+            ELSE 'YES' 
+        END AS information_schema.yes_or_no
+    ) AS is_nullable,
+      CAST(pg_catalog.format_type(a.atttypid, a.atttypmod) AS varchar(128)) AS data_type,
+	CAST(
+		 information_schema_tsql._pg_char_max_length(t.typname, a.atttypmod)
+		 AS int)
+		 AS character_maximum_length,
+	CAST(
+		 information_schema_tsql._pg_char_octet_length(t.typname, a.atttypmod)
+		 AS int)
+		 AS character_octet_length,
+	CAST(information_schema_tsql._pgtsql_numeric_precision(t.typname, a.atttypid, a.atttypmod) AS tinyint) AS numeric_precision,
+	CAST(information_schema_tsql._pgtsql_numeric_precision_radix(t.typname, a.atttypid, a.atttypmod) AS smallint) AS numeric_precision_radix,
+	CAST(information_schema_tsql._pgtsql_numeric_scale(t.typname, a.atttypid, a.atttypmod) AS int) AS numeric_scale,
+	CAST(information_schema_tsql._pgtsql_datetime_precision(t.typname, a.atttypmod) AS smallint) AS datetime_precision,
+	CAST(pg_encoding_to_char(co.collencoding) AS nvarchar(128)) AS character_set_name,
+	CAST(null as nvarchar(128)) as collation_catalog,
+	CAST(null as nvarchar(128)) as collation_schema,
+	CAST(co.collname AS nvarchar(128)) AS collation_name,
+	CAST(CASE WHEN t.typtype = 'd' AND nc.nspname <> 'pg_catalog' AND nc.nspname <> 'sys' THEN pg_catalog.current_database() ELSE null END
+		AS nvarchar(128)) AS domain_catalog,
+	CAST(CASE WHEN t.typtype = 'd' AND nc.nspname <> 'pg_catalog' AND nc.nspname <> 'sys' THEN nc.nspname ELSE null END
+		AS nvarchar(128)) AS domain_schema,
+	CAST(CASE WHEN t.typtype = 'd' AND nc.nspname <> 'pg_catalog' AND nc.nspname <> 'sys' THEN t.typname ELSE null END
+		AS nvarchar(128)) AS domain_name
+FROM 
+    pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace nc ON c.relnamespace = nc.oid
+    JOIN pg_catalog.pg_attribute a ON c.oid = a.attrelid
+    LEFT JOIN pg_catalog.pg_attrdef ad ON (a.attrelid, a.attnum) = (ad.adrelid, ad.adnum)
+    LEFT JOIN pg_catalog.pg_type t ON a.atttypid = t.oid
+    LEFT JOIN pg_catalog.pg_collation co ON t.typcollation = co.oid
+WHERE information_schema_tsql.is_d_format_schema(nc.oid, nc.nspname)
+    AND c.relkind IN ('r', 'v', 'm', 'f')  -- 表/视图/物化视图/外表
+    AND a.attnum > 0 
+    AND NOT a.attisdropped
+    AND (pg_has_role(c.relowner, 'USAGE')
+			OR has_column_privilege(c.oid, a.attnum,
+			'SELECT, INSERT, UPDATE, REFERENCES'));
+
+CREATE OR REPLACE VIEW information_schema_tsql.tables AS
+SELECT CAST(pg_catalog.current_database() AS nvarchar(128)) AS table_catalog,
+           CAST(nc.nspname AS nvarchar(128)) AS table_schema,
+           CAST(c.relname AS name) AS table_name,
+
+           CAST(
+             CASE WHEN nc.oid = pg_catalog.pg_my_temp_schema() THEN 'LOCAL TEMPORARY'
+                  WHEN c.relkind = 'r' THEN 'BASE TABLE'
+                  WHEN c.relkind = 'v' THEN 'VIEW'
+                  ELSE null END
+             AS varchar(10)) AS table_type
+FROM pg_namespace nc JOIN pg_class c ON (nc.oid = c.relnamespace)
+	   LEFT JOIN (pg_type t JOIN pg_namespace nt ON (t.typnamespace = nt.oid)) ON (c.reloftype = t.oid)
+WHERE c.relkind IN ('r', 'm', 'v', 'f')
+    AND information_schema_tsql.is_d_format_schema(nc.oid, nc.nspname)
+	  AND (pg_catalog.pg_has_role(c.relowner, 'USAGE')
+		   OR pg_catalog.has_table_privilege(c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+		   OR pg_catalog.has_any_column_privilege(c.oid, 'SELECT, INSERT, UPDATE, REFERENCES') );
+
+CREATE OR REPLACE VIEW information_schema_tsql.views AS
+SELECT CAST(pg_catalog.current_database() AS nvarchar(128)) AS table_catalog,
+           CAST(nc.nspname AS nvarchar(128)) AS table_schema,
+           CAST(c.relname AS nvarchar(128)) AS table_name,
+
+           CAST(
+             CASE WHEN pg_catalog.pg_has_role(c.relowner, 'USAGE')
+                  THEN pg_catalog.pg_get_viewdef(c.oid)
+                  ELSE null END
+             AS nvarchar(4000)) AS view_definition,
+
+           CAST(
+             CASE WHEN 'check_option=cascaded' = ANY (c.reloptions)
+                  THEN 'CASCADED'
+                  ELSE 'NONE' END
+             AS varchar(7)) AS check_option,
+           CAST(CASE WHEN pg_relation_is_updatable(c.oid, false) & 4 = 4
+                  THEN 'YES' ELSE 'NO' END
+                AS varchar(3)) AS is_updatable
+    FROM pg_namespace nc, pg_class c
+    WHERE c.relnamespace = nc.oid
+          AND c.relkind = 'v'
+          AND information_schema_tsql.is_d_format_schema(nc.oid, nc.nspname)
+          AND (pg_catalog.pg_has_role(c.relowner, 'USAGE')
+               OR pg_catalog.has_table_privilege(c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+               OR pg_catalog.has_any_column_privilege(c.oid, 'SELECT, INSERT, UPDATE, REFERENCES') );
+
+set search_path = 'sys';
+CREATE OR REPLACE VIEW sys.sysdatabases AS
+SELECT
+    CAST(d.datname as name) AS name,         -- 数据库名称
+    CAST(d.oid as oid) AS dbid,             -- 数据库唯一标识符（OID）
+    CAST(d.datdba as oid) AS sid,           -- 数据库所有者用户 OID
+    CAST(0 as smallint) as mode,
+	  CAST(0 as integer) as status,
+	  CAST(0 as integer) as status2,
+	  CAST('1900-01-01 00:00:00.000' as timestamp) as crdate,
+	  CAST('1900-01-01 00:00:00.000' as timestamp) as reserved,
+    CAST(
+		  CASE 
+		  WHEN EXISTS (SELECT 1 FROM pg_subscription WHERE subdbid = d.oid) 
+		  THEN 2 ELSE 0 
+	    END as integer)
+      AS category,
+	  CAST(0 as tinyint) as cmplevel,
+	  CAST(NULL as nvarchar(260)) as filename,
+	  CAST(NULL as smallint) as version
+FROM pg_database d;
+
+CREATE OR REPLACE VIEW sys.schemas AS
+SELECT 
+	CAST(n.nspname as name) AS name,
+	CAST(n.oid as integer) AS schema_id,
+	CAST(n.nspowner AS integer) AS principal_id
+    FROM pg_namespace n
+    WHERE pg_catalog.pg_has_role(n.nspowner, 'USAGE');
+
+-- 模拟 SQL Server 的 sys.sysusers
+CREATE OR REPLACE VIEW sys.sysusers AS
+SELECT 
+	CAST(r.oid AS integer) AS uid,           -- 用户/角色唯一标识符
+	CAST(0 AS smallint) AS status,
+	CAST(r.rolname AS name) AS name,         -- 用户/角色名称
+	CAST(NULL AS bytea) AS sid,
+	CAST(NULL AS bytea) AS roles,
+	CAST(NULL AS date) AS createdate,
+	CAST(NULL AS date) AS updatedate,
+	CAST(0 AS smallint) AS altuid,
+	CAST(NULL AS bytea) AS password,
+	CAST(0 AS smallint) AS gid,
+	CAST(NULL AS varchar(255)) AS environ,
+	CAST(
+		CASE WHEN has_database_privilege(name, current_database(), 'CONNECT')
+		THEN 1
+		ELSE 0
+		END AS integer)
+	AS hasdbaccess,
+	CAST(r.rolcanlogin AS integer) AS islogin,
+	CAST(0 AS integer) AS isntname,
+	CAST(0 AS integer) AS isntgroup,
+	CAST(0 AS integer) AS isntuser,
+	CAST(r.rolcanlogin AS integer) AS issqluser,
+	CAST(0 AS integer) AS isaliased,
+	CAST(NOT r.rolcanlogin AS integer) AS issqlrole,
+	CAST(0 AS integer) AS isapprole
+FROM pg_roles r
+WHERE pg_has_role(r.rolname, 'USAGE'); -- 仅显示当前用户有权查看的角色
+
+-- 模拟 SQL Server 的 sys.databases
+CREATE OR REPLACE VIEW sys.databases AS
+SELECT 
+	CAST(d.datname AS VARCHAR(128)) AS name,
+	CAST(d.oid AS OID) AS database_id,
+	CAST(NULL AS INTEGER) AS source_database_id,
+	CAST(
+	CASE WHEN d.datdba > 0 THEN d.datdba ELSE NULL END
+	AS OID) AS owner_sid,
+	CAST(NULL AS TIMESTAMP) AS create_date,
+	CAST(NULL AS TINYINT) AS compatibility_level,
+	CAST(pg_catalog.getdatabaseencoding() AS NAME) AS collation_name,
+	CAST(
+	CASE WHEN datallowconn THEN 0 -- MULTI_USER
+	ELSE 1 -- SINGLE_USER (仅当数据库禁止连接时)
+	END AS TINYINT) AS user_access,
+	CAST(
+	CASE WHEN datallowconn THEN 'MULTI_USER' 
+	ELSE 'SINGLE_USER' 
+	END AS NVARCHAR(60)) AS user_access_desc,
+	CAST(0 AS BIT) AS is_read_onliy,
+	CAST(0 AS BIT) AS is_auto_close_on,
+	CAST(0 AS BIT) AS is_auto_shrink_on,
+	CAST(0 AS TINYINT) AS state,
+	CAST('ONLINE' AS NVARCHAR(60)) AS state_desc,
+	CAST(
+	CASE WHEN pg_is_in_recovery() THEN 1
+	ELSE 0 END
+	AS BIT) AS is_in_standby,
+	CAST(0 AS BIT) AS is_cleanly_shutdown,
+	CAST(0 AS BIT) AS is_supplemental_logging_enabled,
+	CAST(1 AS TINYINT) AS snapshot_isolation_state,
+	CAST('ON' AS NVARCHAR(60)) AS snapshot_isolation_state_desc,
+	CAST(
+	CASE WHEN current_setting('default_transaction_isolation') = 'read committed'
+	THEN 1
+	ELSE 0
+	END AS BIT) AS is_read_committed_snapshot_on,
+	CAST(1 AS TINYINT) AS recovery_model,
+	CAST('FULL' AS NVARCHAR(60)) AS recovery_model_desc,
+	CAST(0 AS TINYINT) AS page_verify_option,
+	CAST(NULL AS NVARCHAR(60)) AS page_verify_option_desc,
+	CAST(1 AS BIT) AS is_auto_create_stats_on,
+	CAST(0 AS BIT) AS is_auto_create_stats_incremental_on,
+	CAST(0 AS BIT) AS is_auto_update_stats_on,
+	CAST(0 AS BIT) AS is_auto_update_stats_async_on,
+	CAST(1 AS BIT) AS is_ansi_null_default_on,
+	CAST(1 AS BIT) AS is_ansi_nulls_on,
+	CAST(0 AS BIT) AS is_ansi_padding_on,
+	CAST(0 AS BIT) AS is_ansi_warnings_on,
+	CAST(1 AS BIT) AS is_concat_null_yields_null_on,
+	CAST(0 AS BIT) AS is_numeric_roundabort_on,
+	CAST(1 AS BIT) AS is_quoted_identifier_on,
+	CAST(0 AS BIT) AS is_recursive_triggers_on,
+	CAST(0 AS BIT) AS is_cursor_close_on_commit_on,
+	CAST(0 AS BIT) AS is_local_cursor_default,
+	CAST(0 AS BIT) AS is_fulltext_enabled,
+	CAST(0 AS BIT) AS is_trustworthy_on,
+	CAST(0 AS BIT) AS is_db_chaining_on,
+	CAST(0 AS BIT) AS is_parameterization_forced,
+	CAST(0 AS BIT) AS is_master_key_encrypted_by_server,
+	CAST(0 AS BIT) AS is_query_store_on,
+	CAST(0 AS BIT) AS is_published,
+	CAST(0 AS BIT) AS is_subscribed,
+	CAST(0 AS BIT) AS is_merge_published,
+	CAST(0 AS BIT) AS is_distributor,
+	CAST(0 AS BIT) AS is_sync_with_backup,
+	CAST(NULL AS OID) AS service_broker_guid,
+	CAST(0 AS BIT) AS is_broker_enabled,
+	CAST(0 AS TINYINT) AS log_reuse_wait,
+	CAST('NOTHING' AS NVARCHAR(60)) as log_reuse_wait_desc,
+	CAST(0 AS BIT) AS is_date_correlation_on,
+	CAST(0 AS BIT) AS is_cdc_enabled,
+	CAST(0 AS BIT) AS is_encrypted,
+	CAST(0 AS BIT) AS is_honor_broker_priority_on,
+	CAST(NULL AS OID) AS replica_id,
+	CAST(NULL AS OID) AS group_database_id,
+	CAST(NULL AS INTEGER) AS resource_pool_id,
+	CAST(NULL AS SMALLINT) AS default_language_lcid,
+	CAST(NULL AS VARCHAR(128)) AS default_language_name,
+	CAST(NULL AS INTEGER) AS default_fulltext_language_lcid,
+	CAST(NULL AS VARCHAR(128)) AS default_fulltext_language_name,
+	CAST(NULL AS BIT) AS is_nested_triggers_on,
+	CAST(NULL AS BIT) AS is_transform_noise_words_on,
+	CAST(NULL AS SMALLINT) AS two_digit_year_cutoff,
+	CAST(0 AS TINYINT) AS containment,
+	CAST('NONE' AS VARCHAR(60)) AS containment_desc,
+	CAST(0 AS INTEGER) AS target_recovery_time_in_seconds,
+	CAST(0 AS INTEGER) AS delayed_durability,
+	CAST(NULL AS VARCHAR(60)) AS delayed_durability_desc,
+	CAST(0 AS BIT) AS is_memory_optimized_elevate_to_snapshot_on,
+	CAST(0 AS BIT) AS is_federation_member,
+	CAST(0 AS BIT) AS is_remote_data_archive_enabled,
+	CAST(0 AS BIT) AS is_mixed_page_allocation_on,
+	CAST(0 AS BIT) AS is_temporal_history_retention_enabled,
+	CAST(0 AS BIT) AS catalog_collation_type,
+	CAST('Not Applicable' AS NVARCHAR(60)) as catalog_collation_type_desc,
+	CAST(NULL AS NVARCHAR(128)) as physical_database_name,
+	CAST(0 AS BIT) as is_result_set_caching_on,
+	CAST(0 AS BIT) as is_accelerated_database_recovery_on,
+	CAST(0 AS BIT) as is_tempdb_spill_to_remote_store,
+	CAST(0 AS BIT) as is_stale_page_detection_on,
+	CAST(0 AS BIT) as is_memory_optimized_enabled,
+	CAST(0 AS BIT) as is_ledger_on,
+	CAST(0 AS BIT) as is_change_feed_enabled,
+	CAST(0 AS BIT) as is_vorder_enable
+FROM pg_database d, pg_settings s
+WHERE
+  s.name = 'wal_level';
+
+
 reset search_path;
