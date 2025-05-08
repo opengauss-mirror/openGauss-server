@@ -346,7 +346,9 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
             tuple = m_local.m_reslot->tts_tuple;
         }
     }
-    CheckIndexDisableValid(result_rel_info, m_c_local.m_estate);
+    if (!IGNORE_UNUSED_INDEX_CHECK_ON_DML) {
+        CheckIndexDisableValid(result_rel_info, m_c_local.m_estate);
+    }
     Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
     Relation target_rel = (bucket_rel == NULL) ? destRel : bucket_rel;
     if (rel_isblockchain && (!RelationIsUstoreFormat(rel))) {

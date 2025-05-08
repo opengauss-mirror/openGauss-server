@@ -411,7 +411,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"update_global_index_on_partition_change", OPT_UPDATE_GLOBAL_INDEX_ON_PARTITION_CHANGE},
     {"float_as_numeric", OPT_FLOAT_AS_NUMERIC},
     {"disable_record_type_in_dml", OPT_DISABLE_RECORD_TYPE_IN_DML},
-    {"accept_float_str_as_int", OPT_ACCEPT_FLOAT_STR_AS_INT}
+    {"accept_float_str_as_int", OPT_ACCEPT_FLOAT_STR_AS_INT},
+    {"ignore_unused_index_check_on_dml", OPT_IGNORE_UNUSED_INDEX_CHECK_ON_DML}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
