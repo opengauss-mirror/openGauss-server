@@ -204,7 +204,8 @@ PQParams *InitIVFPQParamsInMemory(IvfflatBuildState *buildstate)
     params->pqKsub = buildstate->pqKsub;
     params->funcType = getIVFPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
     params->dim = buildstate->dimensions;
-    params->subItemSize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
+    Size subItemsize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
+    params->subItemSize = MAXALIGN(subItemsize);
     params->pqTable = buildstate->pqTable;
     return params;
 }

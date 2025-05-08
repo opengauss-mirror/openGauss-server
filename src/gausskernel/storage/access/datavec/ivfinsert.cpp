@@ -111,7 +111,8 @@ static void InitPQParamsOnDisk(Relation index, PQParams *params, int dim, bool *
         FmgrInfo *normprocinfo = IvfflatOptionalProcInfo(index, IVFFLAT_NORM_PROC);
         params->funcType = getIVFPQfunctionType(procinfo, normprocinfo);
         params->dim = dim;
-        params->subItemSize = typeInfo->itemSize(dim / params->pqM);
+        Size subItemsize = typeInfo->itemSize(dim / params->pqM);
+        params->subItemSize = MAXALIGN(subItemsize);
 
         /* Now save pqTable in the relcache entry. */
         if (index->pqTable == NULL) {
