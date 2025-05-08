@@ -38,5 +38,8 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker* worker, bool forceAll);
 void MoveTxnItemToApplyQueue(TxnRedoWorker* worker);
 void DumpTxnWorker(TxnRedoWorker* txnWorker);
 bool IsTxnWorkerIdle(TxnRedoWorker* worker);
+XLogRecPtr getTransedTxnLsn(TxnRedoWorker *worker);
+XLogRecPtr getTryingTxnLsn(TxnRedoWorker *worker);
+uint32 getPendingCount(TxnRedoWorker *worker);
 }
 #endif

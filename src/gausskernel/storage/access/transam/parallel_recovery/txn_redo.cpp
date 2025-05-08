@@ -61,7 +61,26 @@ struct TxnRedoWorker {
     RedoItem *pendingTail; /* The tail of the RedoItem list. */
     RedoItem *procHead;
     RedoItem *procTail;
+    XLogRecPtr dispatched_txn_lsn; /* Max lsn dispatched to txn worker*/
+    XLogRecPtr transed_txn_lsn; /* Max lsn transfer to txn worker list*/
+    XLogRecPtr txn_trying_lsn; /* EndPtr of trying record on txn worker*/
+    uint32 pendingCount;
 };
+
+XLogRecPtr getTransedTxnLsn(TxnRedoWorker *worker)
+{
+    return (XLogRecPtr)pg_atomic_read_u64((volatile uint64*)&worker->transed_txn_lsn);
+}
+
+XLogRecPtr getTryingTxnLsn(TxnRedoWorker *worker)
+{
+    return (XLogRecPtr)pg_atomic_read_u64((volatile uint64*)&worker->txn_trying_lsn);
+}
+
+uint32 getPendingCount(TxnRedoWorker *worker)
+{
+    return worker->pendingCount;
+}
 
 TxnRedoWorker *StartTxnRedoWorker()
 {
@@ -71,6 +90,9 @@ TxnRedoWorker *StartTxnRedoWorker()
 
     worker->procHead = NULL;
     worker->procTail = NULL;
+    worker->dispatched_txn_lsn = 0;
+    worker->transed_txn_lsn = 0;
+    worker->pendingCount = 0;
     return worker;
 }
 
@@ -90,6 +112,7 @@ void AddTxnRedoItem(TxnRedoWorker *worker, RedoItem *item)
      * TxnRedoItems are never shared with other workers.
      * Simply use the next pointer for worker 0.
      */
+    worker->dispatched_txn_lsn = item->record.EndRecPtr;
     if (worker->pendingHead == NULL) {
         worker->pendingHead = item;
     } else {
@@ -97,6 +120,7 @@ void AddTxnRedoItem(TxnRedoWorker *worker, RedoItem *item)
     }
     item->nextByWorker[0] = NULL;
     worker->pendingTail = item;
+    worker->pendingCount++;
 }
 
 void ApplyReadyTxnShareLogRecords(RedoItem *item)
@@ -210,6 +234,7 @@ void MoveTxnItemToApplyQueue(TxnRedoWorker *worker)
     worker->procTail = worker->pendingTail;
     worker->pendingHead = NULL;
     worker->pendingTail = NULL;
+    pg_atomic_write_u64(&worker->transed_txn_lsn, worker->dispatched_txn_lsn);
 }
 
 static RedoItem *ProcTxnItem(RedoItem *item)
@@ -257,6 +282,7 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
         XLogRecPtr lrEnd;
         XLogRecPtr curRead;
 
+        pg_atomic_write_u64(&worker->txn_trying_lsn, record->EndRecPtr);
         if (forceAll) {
             GetRedoStartTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_6]);
             XLogRecPtr lrRead; /* lastReplayedReadPtr */
@@ -285,6 +311,7 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
          */
         if (XLByteLE(record->EndRecPtr, curRead)) {
             item = ProcTxnItem(item);
+            worker->pendingCount--;
         } else {
             break;
         }

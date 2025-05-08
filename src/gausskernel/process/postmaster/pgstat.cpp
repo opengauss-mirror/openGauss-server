@@ -3169,8 +3169,10 @@ void pgstat_bestart(void)
         beentry->lw_count++;
     } while (CHANGECOUNT_IS_EVEN(beentry->lw_count));
     beentry->lw_want_lock = NULL;
+    beentry->lw_want_start_time = (TimestampTz)0;
     beentry->lw_held_num = get_held_lwlocks_num();
     beentry->lw_held_locks = get_held_lwlocks();
+    beentry->lw_held_times = get_lwlock_held_times();
     beentry->st_lw_access_flag = false;
     beentry->st_lw_is_cleanning_flag = false;
 
@@ -3294,6 +3296,7 @@ void pgstat_couple_decouple_session(bool is_couple)
     beentry->st_tid = is_couple ? gettid() : 0;
     beentry->lw_held_num = is_couple ? get_held_lwlocks_num() : NULL;
     beentry->lw_held_locks = is_couple ? get_held_lwlocks() : NULL;
+    beentry->lw_held_times = is_couple ? get_lwlock_held_times() : NULL;
     /* make this count be odd */
     do {
         beentry->lw_count++;
@@ -7163,10 +7166,12 @@ static void pgstat_recv_vacuum(PgStat_MsgVacuum* msg, int len)
     tabentry = pgstat_get_tab_entry(dbentry, msg->m_tableoid, true, msg->m_statFlag);
 
     /* Resetting dead_tuples ... use negtive number to verify Cstore */
-    if (msg->m_tuples < 0)
+    if (msg->m_tuples < 0) {
         tabentry->n_dead_tuples = 0;
-    else
+    } else {
         tabentry->n_dead_tuples = Max(0, tabentry->n_dead_tuples - msg->m_tuples);
+        tabentry->changes_since_analyze += msg->m_tuples;
+    }
 
     if (msg->m_autovacuum) {
         tabentry->autovac_vacuum_timestamp = msg->m_vacuumtime;

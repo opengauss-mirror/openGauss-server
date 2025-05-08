@@ -136,6 +136,7 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_GPI, "GPI"},
     {MOD_PARTITION, "PARTITION"},
     {MOD_SRF, "SRF"},
+	{MOD_LWLOCK, "LWLOCK"},
 
     /* add your module name above */
     {MOD_MAX, "BACKEND"}};

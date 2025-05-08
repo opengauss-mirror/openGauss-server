@@ -605,6 +605,21 @@ alter table test_convert_to convert to charset default;
 select pg_get_tabledef('test_convert_to');
 select * from test_convert_to;
 
+CREATE TABLE test_p_primary
+(
+    f1  varchar(32) collate utf8mb4_general_ci,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN('2450815'),
+        PARTITION P2 VALUES LESS THAN('2451179'),
+        PARTITION P3 VALUES LESS THAN('2451544')
+);
+insert into test_p_primary values (1,2,3);
+insert into test_p_primary values (2450825,2,3);
+explain (costs off) select * from test_p_primary where f1 in ('1','2450825' COLLATE "en_US");
 
 create database b_ascii encoding = 0;
 \c b_ascii
@@ -617,4 +632,21 @@ select substr('中文中文', 2);
 clean connection to all force for database test_collate_A;
 clean connection to all force for database test_collate_B;
 DROP DATABASE IF EXISTS test_collate_A;
+DROP DATABASE IF EXISTS test_collate_B;
+
+create database test_collate_B dbcompatibility 'B' encoding 'SQL_ASCII' LC_COLLATE='C' LC_CTYPE='C';
+\c test_collate_B
+set b_format_behavior_compat_options = 'enable_multi_charset';
+CREATE TABLE db_proc_invoke_log (
+    id character varying(36) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci NOT NULL,
+    trace_id character varying(36) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci DEFAULT ''::character varying NOT NULL,
+    log_content text CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,
+    create_time timestamp(0) with time zone DEFAULT (pg_systimestamp())::timestamp(0) with time zone NOT NULL
+)
+CHARACTER SET = "UTF8" COLLATE = "utf8mb4_general_ci"
+WITH (orientation=row, compression=no);
+
+insert into db_proc_invoke_log ("id","log_content") values ('dsadassdadas00000sadasda', 'dsadwqedwqedsada');
+\c regression
+clean connection to all force for database test_collate_B;
 DROP DATABASE IF EXISTS test_collate_B;

@@ -1480,6 +1480,7 @@ extern Datum pg_try_advisory_xact_lock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_all(PG_FUNCTION_ARGS);
+extern Datum gs_lwlock_status(PG_FUNCTION_ARGS);
 
 /* pgstatfuncs.cpp */
 extern Datum gs_stack(PG_FUNCTION_ARGS);

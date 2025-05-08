@@ -83,6 +83,20 @@
 extern THR_LOCAL bool redo_oldversion_xlog;
 
 namespace parallel_recovery {
+
+#define DISPATCH_ALGORITHM_HASH 1
+#define DISPATCH_ALGORITHM_ALL_DIRECTION 2
+#define IS_DISPATCH_ALGORITHM_ALL_DIRECTION_ON (g_instance.attr.attr_storage.enable_batch_dispatch && (g_instance.attr.attr_storage.parallel_recovery_dispatch_algorithm == DISPATCH_ALGORITHM_ALL_DIRECTION))
+
+#define WAL_SAMPLE_PERIOD 20
+#define MAX_RNODE_SAMPLE_LIST_SIZE 512
+#define REASSIGN_SCORE_THRESHOLD 3.0
+
+#define TEMP_VAR_LEN 32
+
+static const XLogRecPtr FIRST_INIT_REASSGINED_WORKER_PERIOD = (XLogRecPtr) 1024 * 1024 * 200;
+static const XLogRecPtr REASSGINED_WORKER_PERIOD = (XLogRecPtr)1024 * 1024 * 1024 * 1;
+
 typedef struct RmgrDispatchData {
     bool (*rm_dispatch)(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
     bool (*rm_loginfovalid)(XLogReaderState *record, uint8 minInfo, uint8 maxInfo);
@@ -96,7 +110,6 @@ LogDispatcher *g_dispatcher = NULL;
 static const int XLOG_INFO_SHIFT_SIZE = 4; /* xlog info flag shift size */
 
 static const int32 MAX_PENDING = 1;
-static const int32 MAX_PENDING_STANDBY = 1;
 static const int32 ITEM_QUQUE_SIZE_RATIO = 5;
 
 static const uint32 EXIT_WAIT_DELAY = 100; /* 100 us */
@@ -167,6 +180,7 @@ static bool DispatchUndoActionRecord(XLogReaderState *record, List *expectedTLIs
 static bool DispatchRollbackFinishRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static uint32 GetUndoSpaceWorkerId(int zid);
 static void HandleStartupProcInterruptsForParallelRedo(void);
+static bool timeoutForDispatch(void);
 
 RedoWaitInfo redo_get_io_event(int32 event_id);
 
@@ -384,16 +398,43 @@ static LogDispatcher *CreateDispatcher()
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
     g_instance.comm_cxt.predo_cxt.state = REDO_STARTING_BEGIN;
     SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
-    if (OnHotStandBy())
-        newDispatcher->pendingMax = MAX_PENDING_STANDBY;
-    else
-        newDispatcher->pendingMax = MAX_PENDING; /* one batch, one recorder */
+
     newDispatcher->totalCostTime = 0;
     newDispatcher->txnCostTime = 0;
     newDispatcher->pprCostTime = 0;
     newDispatcher->dispatchReadRecPtr = 0;
     newDispatcher->dispatchEndRecPtr = 0;
     newDispatcher->startupTimeCost = t_thrd.xlog_cxt.timeCost;
+    newDispatcher->full_sync_dispatch = !g_instance.attr.attr_storage.enable_batch_dispatch;
+
+    if (IS_DISPATCH_ALGORITHM_ALL_DIRECTION_ON) {
+        newDispatcher->rbVar.begin_worker_idx = 0;
+        newDispatcher->rbVar.first_init_reassigned_worker = true;
+        newDispatcher->rbVar.last_lsn = 0;
+        newDispatcher->rbVar.re_assigned_times_step1 = 0;
+        newDispatcher->rbVar.re_assigned_times_step2 = 0;
+        newDispatcher->rbVar.wal_sample_loop = 0;
+        SpinLockInit(&newDispatcher->rbVar.dispatch_dyhash_lock);
+
+        HASHCTL *wal_recovery_sample_hashctl = (HASHCTL *)MemoryContextAllocZero(ctx, sizeof(HASHCTL));
+        wal_recovery_sample_hashctl->keysize = sizeof(RelFileNode);
+        wal_recovery_sample_hashctl->entrysize = sizeof(WalSampleStats);
+        wal_recovery_sample_hashctl->hash = tag_hash;
+        wal_recovery_sample_hashctl->hcxt = ctx;
+        newDispatcher->rbVar.wal_recovery_sample_hashtbl = hash_create("wal recovery sample hash", 512,
+            wal_recovery_sample_hashctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+
+        HASHCTL *wal_recovery_dispatch_hashctl = (HASHCTL *)MemoryContextAllocZero(ctx, sizeof(HASHCTL));
+        wal_recovery_dispatch_hashctl->keysize = sizeof(RelFileNode);
+        wal_recovery_dispatch_hashctl->entrysize = sizeof(Rnode2WorkerEntry);
+        wal_recovery_dispatch_hashctl->hash = tag_hash;
+        wal_recovery_dispatch_hashctl->hcxt = ctx;
+        newDispatcher->rbVar.wal_recovery_dispatch_hashtbl = hash_create("wal recovery dispatch hash", 512,
+            wal_recovery_dispatch_hashctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+
+        newDispatcher->rbVar.rnode_sample_list = (RnodeInfo *)MemoryContextAllocZero(ctx, sizeof(RnodeInfo) * MAX_RNODE_SAMPLE_LIST_SIZE);
+    }
+
     return newDispatcher;
 }
 
@@ -515,6 +556,20 @@ static void DestroyRecoveryWorkers()
             pfree(g_dispatcher->chosedWorkerIds);
             g_dispatcher->chosedWorkerIds = NULL;
         }
+        if (IS_DISPATCH_ALGORITHM_ALL_DIRECTION_ON) {
+            if (g_dispatcher->rbVar.rnode_sample_list != NULL) {
+                pfree(g_dispatcher->rbVar.rnode_sample_list);
+                g_dispatcher->rbVar.rnode_sample_list = NULL;
+            }
+            if (g_dispatcher->rbVar.wal_recovery_sample_hashtbl != NULL) {
+                hash_destroy(g_dispatcher->rbVar.wal_recovery_sample_hashtbl);
+                g_dispatcher->rbVar.wal_recovery_sample_hashtbl = NULL;
+            }
+            if (g_dispatcher->rbVar.wal_recovery_dispatch_hashtbl != NULL) {
+                hash_destroy(g_dispatcher->rbVar.wal_recovery_dispatch_hashtbl);
+                g_dispatcher->rbVar.wal_recovery_dispatch_hashtbl = NULL;
+            }
+        }
         if (get_real_recovery_parallelism() > 1) {
             MemoryContextSwitchTo(g_dispatcher->oldCtx);
             MemoryContextDelete(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
@@ -560,6 +615,22 @@ static bool RmgrGistRecordInfoValid(XLogReaderState *record, uint8 minInfo, uint
     return false;
 }
 
+static bool timeoutForDispatch(void)
+{
+    int         parallel_recovery_timeout = 0;
+    TimestampTz current_time = 0;
+    TimestampTz dispatch_limit_time = 0;
+
+    current_time = GetCurrentTimestamp();
+    
+    parallel_recovery_timeout = g_instance.attr.attr_storage.parallel_recovery_timeout;
+    dispatch_limit_time = TimestampTzPlusMilliseconds(g_dispatcher->lastDispatchTime,
+                                                            parallel_recovery_timeout);
+    if(current_time >= dispatch_limit_time)
+        return true;
+    return false;
+}
+
 void CheckDispatchCount(XLogRecPtr lastCheckLsn)
 {
     uint64 maxCount = 0;
@@ -592,6 +663,150 @@ void CheckDispatchCount(XLogRecPtr lastCheckLsn)
     }
 }
 
+inline int rnode_compare(const void *a, const void *b) {
+  return (((RnodeInfo*)b)->inc - ((RnodeInfo*)a)->inc);
+}
+
+uint32 get_most_idle_worker(uint32 arr[], uint32 n) {
+    uint32 min = UINT32_MAX;
+    uint32 workerId = 0;
+
+    for (uint32 i=0; i<n; ++i) {
+        if (arr[i] == 0) {
+            return i;
+        }
+        if (arr[i] < min) {
+            min = arr[i];
+            workerId = i;
+        }
+    }
+
+    return workerId;
+}
+
+float cal_standard_deviation(uint32 arr[], uint32 n) {
+    float sum = 0.0, mean, variance = 0.0;
+
+    for (uint32 i = 0; i < n; i++) {
+        sum += arr[i];
+    }
+    mean = sum / n;
+    for (uint32 i = 0; i < n; i++) {
+        variance += pow(arr[i] - mean, 2);
+    }
+
+    variance /= n;
+    return sqrt(variance);
+}
+
+void reAssignAllWorker(bool force)
+{
+    uint32 workerNum = GetPageWorkerCount() - get_recovery_undozidworkers_num();
+    if (workerNum == 1) {
+        return;
+    }
+
+    uint32 rnodeNum = 0;
+    RnodeInfo *sortedList = g_dispatcher->rbVar.rnode_sample_list;
+    uint32 workloads[MOST_FAST_RECOVERY_LIMIT] = {0};
+
+    HASH_SEQ_STATUS status;
+    WalSampleStats* sampleStats = NULL;
+    Rnode2WorkerEntry* rnode2Worker = NULL;
+    errno_t rc;
+
+    float keepStdDeviation = 0.0;
+    float bestStdDeviation = 0.0;
+    float score = 1.0;
+
+    // 1. sort sampling data in reverse order
+    hash_seq_init(&status, g_dispatcher->rbVar.wal_recovery_sample_hashtbl);
+    while ((sampleStats = (WalSampleStats *)hash_seq_search(&status)) != NULL) {
+        uint32 inc = sampleStats->walSampleVal.totalCnt - sampleStats->walSampleVal.lastTotalCnt;
+        if (inc == 0) {
+            continue;
+        }
+        sampleStats->walSampleVal.lastTotalCnt = sampleStats->walSampleVal.totalCnt;
+        sortedList[rnodeNum] = {sampleStats->rnode, inc, false, 0};
+        rnodeNum++;
+        if (rnodeNum == MAX_RNODE_SAMPLE_LIST_SIZE) {
+            hash_seq_term(&status);
+            break;
+        }
+    }
+
+    qsort(sortedList, rnodeNum, sizeof(RnodeInfo), rnode_compare);
+    g_dispatcher->rbVar.re_assigned_times_step1++;
+    hash_seq_init(&status, g_dispatcher->rbVar.wal_recovery_sample_hashtbl);
+    while ((sampleStats = (WalSampleStats *)hash_seq_search(&status)) != NULL) {
+        hash_search(g_dispatcher->rbVar.wal_recovery_sample_hashtbl, &sampleStats->rnode, HASH_REMOVE, NULL);
+    }
+
+    // 2. calculate current and best load balancing degree
+    rc = memset_s(workloads, sizeof(workloads), 0, sizeof(workloads));
+    securec_check(rc, "", "");
+    for (uint32 i=0; i<rnodeNum; ++i) {
+        Rnode2WorkerEntry *entry = (Rnode2WorkerEntry*)hash_search(g_dispatcher->rbVar.wal_recovery_dispatch_hashtbl, &sortedList[i].rnode, HASH_FIND, NULL);
+        if (entry == NULL) {
+            elog(WARNING, "entry is null, rnode=%u/%u/%u", sortedList[i].rnode.spcNode, sortedList[i].rnode.dbNode, sortedList[i].rnode.relNode);
+            continue;
+        }
+        uint32 workerId = entry->workerId;
+        workloads[workerId] += sortedList[i].inc;
+    }
+    keepStdDeviation = cal_standard_deviation(workloads, workerNum);
+
+    rc = memset_s(workloads, sizeof(workloads), 0, sizeof(workloads));
+    securec_check(rc, "", "");
+    for (uint32 i=0; i<rnodeNum; ++i) {
+        uint32 workerId = get_most_idle_worker(workloads, workerNum);
+        sortedList[i].preWorkerId = workerId;
+        workloads[workerId] += sortedList[i].inc;
+    }
+    bestStdDeviation = cal_standard_deviation(workloads, workerNum);
+
+    // 3. if score > threshold, then remap
+    score = keepStdDeviation / bestStdDeviation;
+    if (!(force || score > REASSIGN_SCORE_THRESHOLD)) {
+        return;
+    }
+
+    // 4. remap
+    g_dispatcher->rbVar.re_assigned_times_step2++;
+    elog(LOG, "reassign details: step1=%u, step2=%u", g_dispatcher->rbVar.re_assigned_times_step1, g_dispatcher->rbVar.re_assigned_times_step2);
+    SpinLockAcquire(&g_dispatcher->rbVar.dispatch_dyhash_lock);
+    hash_seq_init(&status, g_dispatcher->rbVar.wal_recovery_dispatch_hashtbl);
+    while ((rnode2Worker = (Rnode2WorkerEntry *)hash_seq_search(&status)) != NULL) {
+        elog(LOG, "before: rnode: %u, worker_id: %u", rnode2Worker->rnode.relNode, rnode2Worker->workerId);
+        hash_search(g_dispatcher->rbVar.wal_recovery_dispatch_hashtbl, &rnode2Worker->rnode, HASH_REMOVE, NULL);
+    }
+
+    for (uint32 i=0; i<rnodeNum; ++i) {
+        rnode2Worker = (Rnode2WorkerEntry*)hash_search(g_dispatcher->rbVar.wal_recovery_dispatch_hashtbl, &sortedList[i].rnode, HASH_ENTER, NULL);
+        rnode2Worker->workerId = sortedList[i].preWorkerId;
+        elog(LOG, "now: rnode: %u, worker_id: %u", rnode2Worker->rnode.relNode, rnode2Worker->workerId);
+    }
+    SpinLockRelease(&g_dispatcher->rbVar.dispatch_dyhash_lock);
+
+    // 5. wait all worker consuming assigned xlogrecord
+    ApplyReadyTxnLogRecords(g_dispatcher->txnWorker, true);
+}
+
+void ReAutoAssignWorker() {
+    XLogRecPtr period = g_dispatcher->dispatchEndRecPtr - g_dispatcher->rbVar.last_lsn;
+    if (g_dispatcher->rbVar.first_init_reassigned_worker && (period > FIRST_INIT_REASSGINED_WORKER_PERIOD)) {
+        g_dispatcher->rbVar.first_init_reassigned_worker = false;
+        g_dispatcher->rbVar.last_lsn = g_dispatcher->dispatchEndRecPtr;
+        reAssignAllWorker(true);
+        return;
+    }
+
+    if (period > REASSGINED_WORKER_PERIOD) {
+        g_dispatcher->rbVar.last_lsn = g_dispatcher->dispatchEndRecPtr;
+        reAssignAllWorker(false);
+    }
+}
+
 /* Run from the dispatcher thread. */
 void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
@@ -600,6 +815,8 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
     uint32 indexid = (uint32)-1;
     uint32 rmid = XLogRecGetRmid(record);
     uint32 term = XLogRecGetTerm(record);
+    int dispatch_batch = 0;
+
     if (term > g_instance.comm_cxt.localinfo_cxt.term_from_xlog) {
         g_instance.comm_cxt.localinfo_cxt.term_from_xlog = term;
     }
@@ -629,10 +846,18 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
         g_dispatcher->dispatchReadRecPtr = record->ReadRecPtr;
         g_dispatcher->dispatchEndRecPtr = record->EndRecPtr;
 
+        dispatch_batch = g_instance.attr.attr_storage.enable_batch_dispatch ?
+                                            g_instance.attr.attr_storage.parallel_recovery_batch : 1;
         if (isNeedFullSync)
             ProcessPendingRecords(true);
-        else if (++g_dispatcher->pendingCount >= g_dispatcher->pendingMax)
+        else if (++g_dispatcher->pendingCount >= dispatch_batch || timeoutForDispatch()) {
             ProcessPendingRecords();
+            if (IS_DISPATCH_ALGORITHM_ALL_DIRECTION_ON) {
+                ReAutoAssignWorker();
+            } else if ((g_dispatcher->dispatchEndRecPtr - g_dispatcher->dispatchFix.lastCheckLsn) > DISPATCH_FIX_SIZE) {
+                CheckDispatchCount(g_dispatcher->dispatchEndRecPtr);
+            }
+        }
 
         if (fatalerror == true) {
             /* output panic error info */
@@ -707,6 +932,12 @@ static void DispatchToOnePageWorker(XLogReaderState *record, const RelFileNode &
 */
 static void DispatchTxnRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime, bool imcheckpoint)
 {
+    if (g_instance.attr.attr_storage.enable_batch_dispatch) {
+        for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
+            RedoItem *item = CreateLSNMarker(record, expectedTLIs, false);
+            AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
+        }
+    }
     RedoItem *trxnItem = CreateRedoItem(record, 1, ANY_WORKER, expectedTLIs, recordXTime, true);
     trxnItem->imcheckpoint = imcheckpoint; /* immdiate checkpoint set imcheckpoint  */
     AddTxnRedoItem(g_dispatcher->txnWorker, trxnItem);
@@ -1413,7 +1644,7 @@ static void GetWorkerIds(XLogReaderState *record, uint32 designatedWorker, bool 
 /* *
  * count worker id  by hash
  */
-uint32 GetWorkerId(const RelFileNode &node, BlockNumber block, ForkNumber forkNum)
+uint32 GetWorkerIdByHash(const RelFileNode &node, BlockNumber block, ForkNumber forkNum)
 {
     uint32 workerCount = GetPageWorkerCount();
     uint32 undoZidWorkersNum = get_recovery_undozidworkers_num();
@@ -1427,6 +1658,84 @@ uint32 GetWorkerId(const RelFileNode &node, BlockNumber block, ForkNumber forkNu
     INIT_BUFFERTAG(tag, node, forkNum, block);
     tag.rnode.bucketNode = g_dispatcher->dispatchFix.dispatchRandom;
     return tag_hash(&tag, sizeof(tag)) % workerCount;
+}
+
+uint32 get_most_idle_worker() {
+    uint32 workerId = 0;
+    uint32 min = UINT32_MAX;
+    uint32 workerNum = g_dispatcher->pageWorkerCount-1;
+    g_dispatcher->rbVar.begin_worker_idx++;
+    g_dispatcher->rbVar.begin_worker_idx %= workerNum;
+
+    for (uint32 i=g_dispatcher->rbVar.begin_worker_idx;;) {
+        uint32 count = SPSCGetQueueCount(g_dispatcher->pageWorkers[i]->queue);
+        if (count < min) {
+            min = count;
+            workerId = i;
+        }
+
+        i = (i + 1) % workerNum;
+        if (i == g_dispatcher->rbVar.begin_worker_idx) {
+            break;
+        }
+    }
+
+    return workerId;
+}
+
+uint32 GetWorkerIdByAllAssigned(const RelFileNode &node, BlockNumber block, ForkNumber forkNum)
+{
+    uint32 workerCount = GetPageWorkerCount();
+    uint32 undoZidWorkersNum = get_recovery_undozidworkers_num();
+    WalSampleStats* rnode_redo_stats = NULL;
+    bool found = false;
+
+    if (SUPPORT_USTORE_UNDO_WORKER)
+        workerCount = workerCount - undoZidWorkersNum;
+
+    if (workerCount == 0)
+        return ANY_WORKER;
+
+    if (workerCount == 1) {
+        return workerCount - 1;
+    }
+
+    // 1.sample
+    g_dispatcher->rbVar.wal_sample_loop++;
+    g_dispatcher->rbVar.wal_sample_loop %= WAL_SAMPLE_PERIOD;
+    if (g_dispatcher->rbVar.wal_sample_loop == 0) {
+        rnode_redo_stats = (WalSampleStats*)hash_search(g_dispatcher->rbVar.wal_recovery_sample_hashtbl, &node, HASH_ENTER, &found);
+        if (found) {
+            rnode_redo_stats->walSampleVal.totalCnt++;
+        } else {
+            rnode_redo_stats->walSampleVal.totalCnt = 1;
+            rnode_redo_stats->walSampleVal.lastTotalCnt = 0;
+        }
+    }
+
+    // 2.directional select
+    found = false;
+    SpinLockAcquire(&g_dispatcher->rbVar.dispatch_dyhash_lock);
+    Rnode2WorkerEntry *entry = (Rnode2WorkerEntry*)hash_search(g_dispatcher->rbVar.wal_recovery_dispatch_hashtbl, &node, HASH_ENTER, &found);
+    if (found) {
+        entry->count++;
+        SpinLockRelease(&g_dispatcher->rbVar.dispatch_dyhash_lock);
+        return entry->workerId;
+    }
+
+    // 3.select the most idle worker
+    entry->workerId = get_most_idle_worker();
+    entry->count = 1;
+    SpinLockRelease(&g_dispatcher->rbVar.dispatch_dyhash_lock);
+    return entry->workerId;
+}
+
+uint32 GetWorkerId(const RelFileNode &node, BlockNumber block, ForkNumber forkNum)
+{
+    if (IS_DISPATCH_ALGORITHM_ALL_DIRECTION_ON) {
+        return GetWorkerIdByAllAssigned(node, block, forkNum);
+    }
+    return GetWorkerIdByHash(node, block, forkNum);
 }
 
 static void AddWorkerToSet(uint32 id)
@@ -1491,6 +1800,9 @@ static bool StandbyWillChangeStandbyState(XLogReaderState *record)
 /*        : false not wait for other workers  */
 void ProcessPendingRecords(bool fullSync)
 {
+    if(fullSync)
+        g_dispatcher->full_sync_dispatch = true;
+    g_dispatcher->lastDispatchTime = GetCurrentTimestamp();
     if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
             uint64 blockcnt = 0;
@@ -1516,6 +1828,8 @@ void ProcessPendingRecords(bool fullSync)
         ApplyReadyTxnLogRecords(g_dispatcher->txnWorker, fullSync);
         g_dispatcher->pendingCount = 0;
     }
+    if(fullSync)
+        g_dispatcher->full_sync_dispatch = false;
 }
 
 /* Run from the dispatcher thread. */
@@ -1524,7 +1838,10 @@ void ProcessPendingRecords(bool fullSync)
 void ProcessTrxnRecords(bool fullSync)
 {
     if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
-        ApplyReadyTxnLogRecords(g_dispatcher->txnWorker, fullSync);
+        if (g_instance.attr.attr_storage.enable_batch_dispatch)
+            ProcessPendingRecords(fullSync);
+        else
+            ApplyReadyTxnLogRecords(g_dispatcher->txnWorker, fullSync);
 
         if (fullSync && (IsTxnWorkerIdle(g_dispatcher->txnWorker))) {
             /* notify pageworker sleep long time */
@@ -1980,7 +2297,7 @@ void redo_get_worker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, 
     knl_parallel_redo_state state = g_instance.comm_cxt.predo_cxt.state;
     SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
 
-    if (state != REDO_IN_PROGRESS) {
+    if (state != REDO_IN_PROGRESS || !g_instance.attr.attr_storage.enable_time_report) {
         *realNum = 0;
         return;
     }
@@ -2501,4 +2818,117 @@ static void HandleStartupProcInterruptsForParallelRedo(void)
     if (IsUnderPostmaster && !PostmasterIsAlive())
         gs_thread_exit(1);
 }
+
+bool in_full_sync_dispatch(void)
+{
+    if (!g_dispatcher || !g_instance.attr.attr_storage.enable_batch_dispatch)
+        return true;
+    return g_dispatcher->full_sync_dispatch;
+}
+
+void get_dispatch_stat_detail(DispatchStat **dispatch_stat, uint32 *realNum)
+{
+    if (!IS_DISPATCH_ALGORITHM_ALL_DIRECTION_ON) {
+        return;
+    }
+
+    uint32 workerNum = g_dispatcher->pageWorkerCount;
+    *realNum =  workerNum + 1;
+    HASH_SEQ_STATUS status;
+    Rnode2WorkerEntry* entry = NULL;
+    uint32 rnodeNum = 0;
+    uint32 totalNum = 0;
+    RnodeInfo *sortedList = NULL;
+    uint32 *workloads = (uint32*)palloc0(workerNum * sizeof(uint32));
+    char **details = (char**)palloc0(workerNum * sizeof(char*));
+    size_t *capacity = (size_t*)palloc0(workerNum * sizeof(size_t));
+    size_t *usedCapacity = (size_t*)palloc0(workerNum * sizeof(size_t));
+    errno_t rc;
+    for (uint32 i=0; i<workerNum; ++i) {
+        workloads[i] = 0;
+        capacity[i] = 1024;
+        usedCapacity[i] = 0;
+        details[i] = (char*)palloc0(capacity[i] * sizeof(char));
+        rc = memset_s(details[i], capacity[i], 0, capacity[i]);
+        securec_check(rc, "\0", "\0");
+    }
+
+    SpinLockAcquire(&g_dispatcher->rbVar.dispatch_dyhash_lock);
+    long num = hash_get_num_entries(g_dispatcher->rbVar.wal_recovery_dispatch_hashtbl);
+    sortedList = (RnodeInfo*)palloc0(num * sizeof(RnodeInfo));
+    hash_seq_init(&status, g_dispatcher->rbVar.wal_recovery_dispatch_hashtbl);
+    while ((entry = (Rnode2WorkerEntry *)hash_seq_search(&status)) != NULL) {
+        totalNum += entry->count;
+        workloads[entry->workerId] += entry->count;
+        sortedList[rnodeNum] = {entry->rnode, entry->count, false, entry->workerId};
+        rnodeNum++;
+    }
+    SpinLockRelease(&g_dispatcher->rbVar.dispatch_dyhash_lock);
+    qsort(sortedList, rnodeNum, sizeof(RnodeInfo), rnode_compare);
+    char temp[TEMP_VAR_LEN] = {0};
+
+    for (uint32 i=0; i<rnodeNum; ++i) {
+        uint32 workerId = sortedList[i].preWorkerId;
+        rc = memset_s(temp, TEMP_VAR_LEN,  0, TEMP_VAR_LEN);
+        securec_check(rc, "\0", "\0");
+        sprintf(temp, "%u:%u:%.4f,", sortedList[i].rnode.relNode, sortedList[i].inc, (float4)(sortedList[i].inc)/(float4)totalNum);
+        if (capacity[workerId] <= usedCapacity[workerId] + strlen(temp)) {
+            char* t = (char*)palloc0(capacity[workerId] * sizeof(char) * 2);
+            rc = memset_s(t, capacity[workerId] * sizeof(char) * 2, 0, capacity[workerId] * sizeof(char) * 2);
+            securec_check(rc, "\0", "\0");
+            rc = memcpy_s(t, usedCapacity[workerId], details[workerId], usedCapacity[workerId]);
+            securec_check(rc, "\0", "\0");
+            pfree(details[workerId]);
+            details[workerId] = t;
+            capacity[workerId] *= 2;
+        }
+        rc = strcat_s(details[workerId], capacity[workerId], temp);
+        securec_check(rc, "\0", "\0");
+        usedCapacity[workerId] += strlen(temp);
+    }
+
+    DispatchStat *stat = (DispatchStat*)palloc0((*realNum) * sizeof(DispatchStat));
+    const uint32 workerNumSize = 2;
+    const char *workName = "pagewoker";
+    const char *startupName = "startup";
+    uint32 startup_idx = workerNum;
+
+    for (uint32 i = 0; i < workerNum; ++i) {
+        stat[i].worker_name = (char*)palloc(strlen(workName) + workerNumSize + 1);
+        rc = sprintf_s(stat[i].worker_name, strlen(workName) + workerNumSize + 1, "%s%u", workName, i);
+        securec_check_ss(rc, "\0", "\0");
+        stat[i].pid = g_dispatcher->pageWorkers[i]->tid.thid;
+        stat[i].entry_num = SPSCGetQueueCount(g_dispatcher->pageWorkers[i]->queue);
+        stat[i].percent = (float4)(workloads[i]) / (float4)(totalNum);
+        stat[i].detail = (char*)palloc(strlen(details[i]) + 1);
+        rc = sprintf_s(stat[i].detail, strlen(details[i]) + 1, "%s", details[i]);
+        securec_check_ss(rc, "\0", "\0");
+    }
+
+    stat[startup_idx].worker_name = (char*)palloc(strlen(startupName) + 1);
+    rc = sprintf_s(stat[startup_idx].worker_name, strlen(startupName) + 1, "%s", startupName);
+    securec_check_ss(rc, "\0", "\0");
+    stat[startup_idx].pid = g_instance.pid_cxt.StartupPID;
+    stat[startup_idx].entry_num = getPendingCount(g_dispatcher->txnWorker);
+    stat[startup_idx].percent = 1.0;
+
+    stat[startup_idx].detail = (char*)palloc(TEMP_VAR_LEN);
+    rc = memset_s(stat[startup_idx].detail, TEMP_VAR_LEN, 0, TEMP_VAR_LEN);
+    securec_check_ss(rc, "\0", "\0");
+    rc = sprintf_s(stat[startup_idx].detail, TEMP_VAR_LEN, "%u/%u", g_dispatcher->rbVar.re_assigned_times_step1,
+        g_dispatcher->rbVar.re_assigned_times_step2);
+    securec_check_ss(rc, "\0", "\0");
+
+    pfree(workloads);
+    pfree(capacity);
+    pfree(usedCapacity);
+    pfree(sortedList);
+    for (uint32 i=0; i<workerNum; ++i) {
+        pfree(details[i]);
+    }
+    pfree(details);
+
+    *dispatch_stat = stat;
+}
+
 }

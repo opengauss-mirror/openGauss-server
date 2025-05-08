@@ -292,7 +292,7 @@ typedef struct pg_enc2name {
 #endif
 } pg_enc2name;
 
-extern pg_enc2name pg_enc2name_tbl[];
+extern PGDLLIMPORT pg_enc2name pg_enc2name_tbl[];
 
 /*
  * Encoding names for gettext
@@ -441,9 +441,12 @@ extern int pg_char_and_wchar_strncmp(const char* s1, const pg_wchar* s2, size_t 
 extern size_t pg_wchar_strlen(const pg_wchar* wstr);
 extern int pg_mblen(const char* mbstr);
 extern int pg_dsplen(const char* mbstr);
+extern void pg_encoding_set_invalid(int encoding, char* dst);
 extern int pg_encoding_mblen(int encoding, const char* mbstr);
 extern int pg_encoding_dsplen(int encoding, const char* mbstr);
 extern int pg_encoding_verifymb(int encoding, const char* mbstr, int len);
+extern int pg_encoding_verifymbstr(int encoding, const char* mbstr, int len);
+extern int pg_encoding_verifymbchar(int encoding, const char* mbstr, int len);
 extern int pg_mule_mblen(const unsigned char* mbstr);
 extern int pg_mic_mblen(const unsigned char* mbstr);
 extern int pg_mbstrlen(const char* mbstr);

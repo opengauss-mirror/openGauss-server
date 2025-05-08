@@ -2101,7 +2101,8 @@ RETRY_GET:
         } else if (LWLockConditionalAcquire(ProcArrayLock, LW_EXCLUSIVE)) {
             if ((t_thrd.xact_cxt.ShmemVariableCache->standbyXmin <=
                 t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXmin) &&
-                (t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXminLsn > redoEndLsn)) {
+                (t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXminLsn > redoEndLsn) &&
+                parallel_recovery::in_full_sync_dispatch()) {
                 LWLockRelease(ProcArrayLock);
                 retry_get = true;
                 goto RETRY_GET;
