@@ -49,6 +49,9 @@ select object_id('sys.insert_student');
 select object_id('sys.trigger_update_total_grade');
 
 set search_path = 'sys';
+select object_id('contrib_regression.students');
+select object_id('contrib_regression..students');
+select object_id('contrib_regression...students');
 
 select object_id('students', 'U');
 select object_id('students_pkey', 'PK');

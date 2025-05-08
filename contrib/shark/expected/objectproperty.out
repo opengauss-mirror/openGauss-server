@@ -74,6 +74,24 @@ select object_id('sys.trigger_update_total_grade');
 (1 row)
 
 set search_path = 'sys';
+select object_id('contrib_regression.students');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('contrib_regression..students');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('contrib_regression...students');
+ object_id 
+-----------
+          
+(1 row)
+
 select object_id('students', 'U');
  object_id 
 -----------
@@ -117,8 +135,11 @@ select object_id('sys.students');
 (1 row)
 
 select object_id('contrib_regression.sys.students');
-ERROR:  Can only do lookup in current database.
-CONTEXT:  referenced column: object_id
+ object_id 
+-----------
+--?.*
+(1 row)
+
 select objectproperty(object_id('students'), 'istable') as istable;
  istable 
 ---------
@@ -937,8 +958,11 @@ select object_id('othersys.students');
 (1 row)
 
 select object_id('otherdb.sys.students');
-ERROR:  Can only do lookup in current database.
-CONTEXT:  referenced column: object_id
+ object_id 
+-----------
+          
+(1 row)
+
 select objectproperty('', 'istable') as istable;
  istable 
 ---------
