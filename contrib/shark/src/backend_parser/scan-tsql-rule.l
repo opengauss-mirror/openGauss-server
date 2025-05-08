@@ -65,17 +65,97 @@
 					}
 
 {set_identifier}	{
-							SET_YYLLOC();
-							char *set_ident =
-								downcase_truncate_identifier(yytext, yyleng, yyextra->warnOnTruncateIdent);
-							if (IsTsqlAtatGlobalVar(set_ident)) {
-								yylval->str = set_ident;
-								yyextra->ident_quoted = false;
-								return TSQL_ATAT_IDENT;
-							} else {
-								yyless(2);
-								yylval->str = pstrdup(yytext);
-								yyextra->is_hint_str = false;
-								return Op;
-							}
+						SET_YYLLOC();
+						char *set_ident =
+							downcase_truncate_identifier(yytext, yyleng, yyextra->warnOnTruncateIdent);
+						if (IsTsqlAtatGlobalVar(set_ident)) {
+							yylval->str = set_ident;
+							yyextra->ident_quoted = false;
+							return TSQL_ATAT_IDENT;
+						} else {
+							yyless(2);
+							yylval->str = pstrdup(yytext);
+							yyextra->is_hint_str = false;
+							return Op;
+						}
 					}
+
+{identifier}	{
+					int kwnum;
+                    char *ident;
+
+					SET_YYLLOC();
+
+					/* Is it a keyword? */
+					kwnum = ScanKeywordLookup(yytext, yyextra->keywordlist);
+
+					yyextra->is_hint_str = false;
+					bool isPlpgsqlKeyword = yyextra->isPlpgsqlKeyWord;
+					bool need_ignore = (!isPlpgsqlKeyword && kwnum >= 0) ?
+						semtc_is_token_in_ignore_keyword_list(yyextra->keyword_tokens[kwnum], false) : false;
+					if (kwnum >= 0 && !need_ignore)
+					{
+						yylval->keyword = GetScanKeyword(kwnum, yyextra->keywordlist);
+                        uint16 token = yyextra->keyword_tokens[kwnum];
+
+						/* Find the CREATE PROCEDURE syntax and set dolqstart. */
+						if (token == CREATE)
+						{
+							yyextra->is_createstmt = true;
+						}
+						else if (token == TRIGGER && yyextra->is_createstmt)
+						{
+							/* Create trigger don't need set dolqstart */
+							yyextra->is_createstmt = false;
+						}
+						else if ((token == (isPlpgsqlKeyword? yyextra->plKeywordValue->procedure : PROCEDURE) ||
+                           token == (isPlpgsqlKeyword? yyextra->plKeywordValue->function : FUNCTION))
+							&& (yyextra->is_createstmt))
+						{
+							/* Make yyextra->dolqstart not NULL means its in a proc with $$. */
+							yyextra->dolqstart = "";
+						}
+						else if (token == (isPlpgsqlKeyword? yyextra->plKeywordValue->begin : BEGIN_P))
+						{
+                            if (!(u_sess->parser_cxt.isCreateFuncOrProc || u_sess->plsql_cxt.curr_compile_context != NULL)) {
+                                /* cases that have to be a trans stmt and fall quickly */
+                                if (yyg->yy_hold_char == ';' || /* found ';' after 'begin' */
+                                    yyg->yy_hold_char == '\0')  /* found '\0' after 'begin' */
+                                    return BEGIN_NON_ANOYBLOCK;
+                                /* look for other transaction stmt */
+                                if (IsTsqlTranStmt(yyextra->scanbuf, yyextra->scanbuflen))
+                                    return BEGIN_NON_ANOYBLOCK;
+                            }
+						}
+                        else if (token == (isPlpgsqlKeyword? yyextra->plKeywordValue->select : SELECT) ||
+                                 token == (isPlpgsqlKeyword? yyextra->plKeywordValue->update : UPDATE) ||
+                                 token == (isPlpgsqlKeyword? yyextra->plKeywordValue->insert : INSERT) ||
+                                 token == (isPlpgsqlKeyword? yyextra->plKeywordValue->Delete : DELETE_P) ||
+                                 token == MERGE)
+						{
+							yyextra->is_hint_str = true;
+						}
+
+                        set_is_delimiter_name(yytext,yyscanner);
+						return token;
+					}
+
+					/*
+					 * No.  Convert the identifier to lower case, and truncate
+					 * if necessary.
+					 */
+					ident = downcase_truncate_identifier(yytext, yyleng, yyextra->warnOnTruncateIdent);
+					/* Is it _charset? */
+					if (ident[0] == '_' &&
+						ENABLE_MULTI_CHARSET &&
+						pg_valid_server_encoding(ident + 1) >= 0) {
+						yylval->str = pstrdup(ident + 1);
+						yyextra->is_hint_str = false;
+						yyextra->ident_quoted = false;
+						return UNDERSCORE_CHARSET;
+					}
+					yylval->str = ident;
+					yyextra->ident_quoted = false;
+					set_is_delimiter_name(yytext,yyscanner);
+					return IDENT;
+				}

@@ -39,3 +39,4 @@ const uint16 pgtsql_ScanKeywordTokens[] = {
                (YYSTYPE * yylval_param, YYLTYPE * yylloc_param , yyscan_t yyscanner)
 
 extern bool IsTsqlAtatGlobalVar(const char *varname);
+static bool IsTsqlTranStmt(const char *haystack, int haystackLen);

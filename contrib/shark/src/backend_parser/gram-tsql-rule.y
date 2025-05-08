@@ -767,8 +767,8 @@ tsql_stmt :
 			| CreateAsStmt
 			| CreateAssertStmt
 			| CreateCastStmt
-                        | CreateContQueryStmt
-                        | CreateStreamStmt
+			| CreateContQueryStmt
+			| CreateStreamStmt
 			| CreateConversionStmt
 			| CreateDomainStmt
 			| CreateDirectoryStmt
@@ -893,7 +893,7 @@ tsql_stmt :
 			| ShutdownStmt
 			| TimeCapsuleStmt
 			| SnapshotStmt
-			| TransactionStmt
+			| tsql_TransactionStmt
 			| TruncateStmt
 			| UnlistenStmt
 			| UpdateStmt
@@ -1607,6 +1607,7 @@ direct_label_keyword: ABORT_P
             | ROWTYPE_P
             | RULE
             | SAMPLE
+			| SAVE
             | SAVEPOINT
             | SCHEDULE
             | SCHEMA
@@ -1702,6 +1703,7 @@ direct_label_keyword: ABORT_P
             | TINYINT
             | TSQL_TOP
             | TRAILING
+			| TRAN
             | TRANSACTION
             | TRANSFORM
             | TREAT
@@ -1772,4 +1774,78 @@ direct_label_keyword: ABORT_P
             | YEAR_MONTH_P
             | YES_P
             | ZONE
-        ;
+		;
+
+tsql_opt_transaction_name:
+			ColId
+			| /*EMPTY*/								{ $$ = NULL; }
+		;
+
+tsql_transaction_keywords:
+			TRAN
+			| TRANSACTION
+		;
+
+tsql_opt_work_keywords:
+			WORK
+			| /*EMPTY*/								{ $$ = NULL; }
+		;
+
+tsql_TransactionStmt:
+			START TRANSACTION transaction_mode_list_or_empty	/*kernel forward compatible*/
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_START;
+					n->options = $3;
+					$$ = (Node *)n;
+				}
+			| BEGIN_NON_ANOYBLOCK tsql_transaction_keywords tsql_opt_transaction_name
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_BEGIN;
+					n->options = NIL;
+					$$ = (Node *)n;
+				}
+			| COMMIT tsql_opt_work_keywords
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_COMMIT;
+					n->options = NIL;
+					$$ = (Node *)n;
+				}
+			| COMMIT tsql_transaction_keywords tsql_opt_transaction_name
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_COMMIT;
+					n->options = NIL;
+					$$ = (Node *)n;
+				}
+			| ROLLBACK tsql_opt_work_keywords
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_ROLLBACK;
+					n->options = NIL;
+					$$ = (Node *)n;
+				}
+			| ROLLBACK tsql_transaction_keywords tsql_opt_transaction_name
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					if ($3 == NULL) {
+						n->kind = TRANS_STMT_ROLLBACK;
+						n->options = NIL;
+					} else {
+						n->kind = TRANS_STMT_ROLLBACK_TO;
+						n->options = list_make1(makeDefElem("savepoint_name",
+															(Node *)makeString($3)));
+					}
+					$$ = (Node *)n;
+				}
+			| SAVE tsql_transaction_keywords ColId
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_SAVEPOINT;
+					n->options = list_make1(makeDefElem("savepoint_name",
+														(Node *)makeString($3)));
+					$$ = (Node *)n;
+				}
+		;

@@ -26,12 +26,12 @@ select @@rowcount;
 reset enable_set_variable_b_format;
 select @@rowcount;
 
-begin;
+begin transaction;
 declare c1 cursor for select * from t1;
 select @@rowcount;
 fetch next from c1;
 select @@rowcount;
-end;
+rollback transaction;
 
 select abcd from t1; -- expect error 
 select @@rowcount;
@@ -57,12 +57,12 @@ select rowcount_big();
 reset enable_set_variable_b_format;
 select rowcount_big();
 
-begin;
+begin transaction;
 declare c1 cursor for select * from t1;
 select rowcount_big();
 fetch next from c1;
 select rowcount_big();
-end;
+rollback transaction;
 
 select abcd from t1; -- expect error 
 select rowcount_big();
@@ -97,7 +97,7 @@ select @@spid;
 
 -- @@fetch_status
 -- single cursor
-begin;
+begin transaction;
 cursor c1 for select * from t1;
 
 fetch next from c1;
@@ -109,10 +109,10 @@ select @@fetch_status;
 
 fetch next from c2;	-- expect error
 select @@fetch_status;
-end;
+rollback transaction;
 
 -- multi cursors
-begin;
+begin transaction;
 cursor c1 for select * from t1;
 cursor c2 for select * from t1;
 
@@ -124,7 +124,7 @@ fetch last from c1;
 select @@fetch_status;
 fetch next from c2;
 select @@fetch_status;
-end;
+rollback transaction;
 
 -- pl/pgsql usecases
 declare

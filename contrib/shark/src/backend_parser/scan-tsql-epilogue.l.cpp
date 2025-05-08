@@ -114,3 +114,62 @@ bool IsTsqlAtatGlobalVar(const char* varname)
             (pg_strcasecmp("@@ROWCOUNT", varname) == 0) ||
             (pg_strcasecmp("@@SPID", varname) == 0));
 }
+
+static bool IsTsqlTranStmt(const char *haystack, int haystackLen)
+{
+    char *tempstr = static_cast<char *>(palloc0(haystackLen + 1));
+    char *temp = tempstr;
+    int line = 1; /* lineno of haystack which split by \0 */
+    const int twoLines = 2;
+    bool foundNonBlankChar = false; /* mark if we find a non blank char after begin */
+    errno_t rc = EOK;
+
+    /* we have to make a copy, since haystack is const char* */
+    rc = memcpy_s(tempstr, haystackLen + 1, haystack, haystackLen);
+    securec_check_ss(rc, "\0", "\0");
+
+    /* find if the 2nd line is prefixed by a valid transaction token */
+    while (temp < tempstr + haystackLen) {
+        /* there may be '\0' in the string, and should be skipped */
+        if (*temp == '\0') {
+            temp++;
+            line++;
+            /* we only search the 2nd line */
+            if (line > twoLines) {
+                break;
+            }
+        } else if (isspace(*temp)) {
+        /* skip the blank char */
+            temp++;
+        } else {
+            /* we found a non blank char after begin, do further checking */
+            if (line == twoLines) {
+                foundNonBlankChar = true;
+            }
+            /* For a transaction statement, all possible tokens after BEGIN are here */
+            if (line == twoLines && (pg_strncasecmp(temp, "transaction", strlen("transaction")) == 0 ||
+                pg_strncasecmp(temp, "tran", strlen("tran")) == 0 ||
+                pg_strncasecmp(temp, "work", strlen("work")) == 0 ||
+                pg_strncasecmp(temp, "isolation", strlen("isolation")) == 0 ||
+                pg_strncasecmp(temp, "read", strlen("read")) == 0 ||
+                pg_strncasecmp(temp, "deferrable", strlen("deferrable")) == 0 ||
+                pg_strncasecmp(temp, "not", strlen("not")) == 0 ||
+                pg_strncasecmp(temp, ";", strlen(";")) == 0)) {
+                FREE_POINTER(tempstr);
+                return true;
+            }
+
+            temp += strlen(temp);
+        }
+    }
+
+    FREE_POINTER (tempstr);
+
+    /*
+     * if all the char after begin are blank
+     *    it is a trans stmt
+     * else
+     *    it is a anaynomous block stmt
+     */
+    return foundNonBlankChar ? false : true;
+}
