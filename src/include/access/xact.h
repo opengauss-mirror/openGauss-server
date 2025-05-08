@@ -252,6 +252,7 @@ typedef struct {
     SubTransactionId subTransactionId;
     SubTransactionId currentSubTransactionId;
     CommandId currentCommandId;
+    bool currentCommandIdUsed;
     TimestampTz xactStartTimestamp;
     TimestampTz stmtStartTimestamp;
     TimestampTz xactStopTimestamp;
