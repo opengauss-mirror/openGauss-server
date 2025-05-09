@@ -275,7 +275,7 @@ restart:
             }
             fsm_rebuild_page(page);
             if (IsSegmentFileNode(rnode)) {
-                PageSetLSN(page, GetXLogInsertRecPtr());
+                PageSetLSN(page, GetXLogInsertEndRecPtr());
                 MarkBufferDirty(buf);
             } else {
                 MarkBufferDirtyHint(buf, false);
