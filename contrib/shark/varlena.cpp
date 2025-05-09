@@ -567,42 +567,67 @@ object_id_internal(PG_FUNCTION_ARGS)
 	if (strlen(object_name) < 1) {
 		PG_RETURN_NULL();
 	}
-
-    List* nameList = stringToQualifiedNameList(object_name);
-
+    
 	char* db_name = NULL;
 	char* schema_name = NULL;
 	char* obj_name = NULL;
-	switch (list_length(nameList))
-	{
-	case 1:
-		obj_name = strVal(linitial(nameList));
-        break;
-	case 2:
-		obj_name = strVal(lsecond(nameList));
-        schema_name = get_current_physical_schema_name(strVal(linitial(nameList)));
-		break;
-	case 3:
-		obj_name = strVal(lthird(nameList));
-		schema_name = get_current_physical_schema_name(strVal(lsecond(nameList)));
-        db_name = strVal(linitial(nameList));
-		break;
-	default:
-		ereport(ERROR,
-			(errcode(ERRCODE_SYNTAX_ERROR),
-				errmsg("improper qualified name (too many dotted names): %s", NameListToString(nameList))));
-		break;
+
+    char *tok = object_name;
+    while (*tok) {
+        // Detected two consecutive points
+        if (*tok == '.' && *(tok + 1) == '.') {
+            *tok = '\0';
+            db_name = object_name;
+            tok += 2;
+            break;
+        } else {
+            tok++;
+        }
+    }
+    if (db_name != NULL) {
+        obj_name = tok;
+    } else {
+        List* nameList;
+        PG_TRY();
+        {
+            nameList = stringToQualifiedNameList(object_name);
+        }
+        PG_CATCH();
+        {
+            FlushErrorState();
+            PG_RETURN_NULL();
+        }
+        PG_END_TRY();
+        switch (list_length(nameList)) {
+            case 1:
+                obj_name = strVal(linitial(nameList));
+                break;
+            case 2:
+                obj_name = strVal(lsecond(nameList));
+                schema_name = get_current_physical_schema_name(strVal(linitial(nameList)));
+                break;
+            case 3:
+                obj_name = strVal(lthird(nameList));
+                schema_name = get_current_physical_schema_name(strVal(lsecond(nameList)));
+                db_name = strVal(linitial(nameList));
+                break;
+            default:
+                PG_RETURN_NULL();
+                break;
+        }
 	}
 
 	if (obj_name == NULL || strlen(obj_name) < 1) {
 		PG_RETURN_NULL();
 	}
 
-	if (db_name != NULL && db_name != get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true)) {
-		ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_DATABASE),
-                 errmsg("Can only do lookup in current database.")));
+    char* current_db = get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, false);
+    if (db_name != NULL && strcmp(db_name, current_db) != 0) {
+        pfree_ext(current_db);
+        PG_RETURN_NULL();
 	}
+    pfree_ext(current_db);
+
 	Oid id = search_oid_in_schema(schema_name, obj_name, object_type);
 	if (id == InvalidOid) {
 		PG_RETURN_NULL();
