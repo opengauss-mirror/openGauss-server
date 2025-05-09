@@ -276,13 +276,14 @@ public:
     float m_b;
     float m_avgdl;
 
-    float GetDocBM25Score(float tf, float docLen) {
+    float GetDocBM25Score(float tf, float docLen)
+    {
         return tf * (m_k1 + 1) / (tf + m_k1 * (1 - m_b + m_b * (docLen / m_avgdl)));
     }
 
     BM25Scorer(float k1, float b, float avgdl)
-        : m_k1(k1), m_b(b), m_avgdl(avgdl) {
-    }
+        : m_k1(k1), m_b(b), m_avgdl(avgdl)
+    {}
 };  // struct BM25Scorer
 
 /* Methods */
@@ -301,7 +302,7 @@ void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgd
 BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber startBlkno, BlockNumber step);
 bool FindHashBucket(uint32 bucketId, BM25PageLocationInfo &bucketLocation, Buffer buf, Page page);
 bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLocation, Buffer buf, Page page);
-BM25TokenizedDocData BM25DocumentTokenize(const char* doc);
+BM25TokenizedDocData BM25DocumentTokenize(const char* doc, bool cutForSearch = false);
 
 Datum bm25build(PG_FUNCTION_ARGS);
 Datum bm25buildempty(PG_FUNCTION_ARGS);
@@ -325,4 +326,4 @@ extern IndexScanDesc bm25beginscan_internal(Relation rel, int nkeys, int norderb
 extern bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir);
 extern void bm25endscan_internal(IndexScanDesc scan);
 
-#endif //BM25_H
+#endif // BM25_H

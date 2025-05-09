@@ -654,8 +654,6 @@ DATA(insert (	9570   9003 9003 1 5586 ));
 DATA(insert (	8901   3831 3831 1 3870 ));
 DATA(insert (	8626   3614 3614 1 3622 ));
 DATA(insert (	8683   3615 3615 1 3668 ));
-DATA(insert (	6509   1009 1009 1 8487 ));
-DATA(insert (	6510   25 25 1 8489 ));
 
 DATA(insert (8371   8305 8305 1 8431));
 DATA(insert (8372   8305 8305 1 8434));
@@ -704,4 +702,6 @@ DATA(insert (8397   8307 8307 1 8464));
 
 DATA(insert (8375   8305 8305 1 8450));
 DATA(insert (8376   8307 8307 1 8464));
+DATA(insert (6509   1009 1009 1 8487));
+DATA(insert (6510   25 25 1 8489));
 #endif   /* PG_AMPROC_H */

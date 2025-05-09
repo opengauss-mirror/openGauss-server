@@ -91,7 +91,8 @@ class Vector {
         this->mySize++;
     }
 
-    void resize(size_t newSize) {
+    void resize(size_t newSize)
+    {
         while (this->mySize > newSize) {
             pop_back();
         }

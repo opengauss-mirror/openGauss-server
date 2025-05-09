@@ -33,13 +33,11 @@
 #include "storage/buf/bufmgr.h"
 #include "tokenizer.h"
 
-slock_t newBufferMutex;
-
-BM25TokenizedDocData BM25DocumentTokenize(const char* doc)
+BM25TokenizedDocData BM25DocumentTokenize(const char* doc, bool cutForSearch)
 {
     uint32 docLength = 0;
     EmbeddingMap embeddingMap{0};
-    ConvertString2Embedding(doc, &embeddingMap, true);
+    ConvertString2Embedding(doc, &embeddingMap, true, cutForSearch);
     BM25TokenizedDocData tokenizedData = {};
     BM25TokenData* tokenDatas = (BM25TokenData*)palloc0(sizeof(BM25TokenData) * embeddingMap.size);
     for (size_t idx = 0; idx < embeddingMap.size; idx++) {
@@ -49,6 +47,10 @@ BM25TokenizedDocData BM25DocumentTokenize(const char* doc)
             BM25_MAX_TOKEN_LEN - 1);
         if (rc != EOK) {
             pfree(tokenDatas);
+            if (embeddingMap.tokens != nullptr) {
+                free(embeddingMap.tokens);
+                embeddingMap.tokens = nullptr;
+            }
             tokenDatas = nullptr;
             docLength = 0;
             embeddingMap.size = 0;

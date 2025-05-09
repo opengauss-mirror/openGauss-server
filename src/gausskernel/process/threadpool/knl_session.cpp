@@ -1485,7 +1485,6 @@ static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
 static void knl_u_bm25_init(knl_u_bm25_context* bm25_context)
 {
     bm25_context->scoreHashTable = nullptr;
-    bm25_context->context = nullptr;
 }
 
 void knl_session_init(knl_session_context* sess_cxt)

@@ -36,12 +36,11 @@
 
 #define CALLBACK_ITEM_POINTER HeapTuple hup
 
-extern slock_t newBufferMutex;
-
 /*
  * Initialize the build state
  */
-static void InitBM25BuildState(BM25BuildState *buildstate, Relation heap, Relation index, IndexInfo *indexInfo, ForkNumber forkNum)
+static void InitBM25BuildState(BM25BuildState *buildstate, Relation heap, Relation index, IndexInfo *indexInfo,
+    ForkNumber forkNum)
 {
     buildstate->heap = heap;
     buildstate->index = index;
@@ -83,7 +82,7 @@ static void InsertItemToHashBucket(Relation index, BM25EntryPages &bm25EntryPage
     BlockNumber nextblkno = firstBucketBlkno;
     BlockNumber curblkno = firstBucketBlkno;
 
-    /*lock hashBuckets*/
+    /* lock hashBuckets */
     Buffer firstBuf;
     Page firstPage;
     GenericXLogState *firstState = nullptr;
@@ -177,7 +176,8 @@ static void InsertItemToTokenMetaList(Relation index, BM25PageLocationInfo &buck
     LockBuffer(cbufBucket, BUFFER_LOCK_EXCLUSIVE);
     cpageBucket = BufferGetPage(cbufBucket);
     BM25GetPage(index, &cpageBucket, cbufBucket, &bucketState, building);
-    BM25HashBucketPage hashBucket = (BM25HashBucketPage)PageGetItem(cpageBucket, PageGetItemId(cpageBucket, bucketLocation.offno));
+    BM25HashBucketPage hashBucket = (BM25HashBucketPage)PageGetItem(cpageBucket,
+        PageGetItemId(cpageBucket, bucketLocation.offno));
     if (hashBucket->bucketBlkno == InvalidBlockNumber)
         hashBucket->bucketBlkno = CreateBM25CommonPage(index, forkNum, building);
     BlockNumber firstTokenMetasBlkno = hashBucket->bucketBlkno;
@@ -234,7 +234,8 @@ static void InsertItemToTokenMetaList(Relation index, BM25PageLocationInfo &buck
     }
     /* Ensure free space */
     if (PageGetFreeSpace(cpage) < itemSize) {
-        BM25AppendPage(index, &cbuf, &cpage, forkNum, (curblkno == firstTokenMetasBlkno) ? false : true, &state, building);
+        BM25AppendPage(index, &cbuf, &cpage, forkNum, (curblkno == firstTokenMetasBlkno) ? false : true,
+            &state, building);
         curblkno = BufferGetBlockNumber(cbuf);
     }
 
@@ -333,7 +334,8 @@ static void InsertItemToPostingList(Relation index, BM25PageLocationInfo &tokenM
     Buffer cbufTokenMeta = ReadBuffer(index, tokenMetaLocation.blkno);
     LockBuffer(cbufTokenMeta, BUFFER_LOCK_EXCLUSIVE);
     BM25GetPage(index, &cpageTokenMeta, cbufTokenMeta, &metaState, building);
-    BM25TokenMetaPage tokenMeta = (BM25TokenMetaPage)PageGetItem(cpageTokenMeta, PageGetItemId(cpageTokenMeta, tokenMetaLocation.offno));
+    BM25TokenMetaPage tokenMeta = (BM25TokenMetaPage)PageGetItem(cpageTokenMeta,
+        PageGetItemId(cpageTokenMeta, tokenMetaLocation.offno));
     if (tokenMeta->postingBlkno == InvalidBlockNumber) {
         tokenMeta->postingBlkno = CreateBM25CommonPage(index, forkNum, building);
         tokenMeta->lastInsertBlkno = tokenMeta->postingBlkno;
@@ -380,7 +382,8 @@ static void InsertItemToPostingList(Relation index, BM25PageLocationInfo &tokenM
     postingItem->docId = docId;
     postingItem->docLength = (uint16)(docLength > PG_UINT16_MAX ? PG_UINT16_MAX : docLength);
     postingItem->freq = (uint16)(tokenData.tokenFreq > PG_UINT16_MAX ? PG_UINT16_MAX : tokenData.tokenFreq);
-    OffsetNumber offno = PageAddItem(cpage, (Item)postingItem, MAXALIGN(sizeof(BM25TokenPostingItem)), InvalidOffsetNumber, false, false);
+    OffsetNumber offno = PageAddItem(cpage, (Item)postingItem, MAXALIGN(sizeof(BM25TokenPostingItem)),
+        InvalidOffsetNumber, false, false);
     if (offno == InvalidOffsetNumber) {
         pfree(postingItem);
         if (!building)
@@ -410,7 +413,8 @@ static void InsertToIvertedList(Relation index, uint32 docId, BM25TokenizedDocDa
         BM25PageLocationInfo bucketLocation{0};
         BM25PageLocationInfo tokenMetaLocation{0};
         InsertItemToHashBucket(index, bm25EntryPages, bucketId, bucketLocation, forkNum, building);
-        InsertItemToTokenMetaList(index, bucketLocation, tokenizedDoc.tokenDatas[tokenIdx], tokenMetaLocation, forkNum, building);
+        InsertItemToTokenMetaList(index, bucketLocation, tokenizedDoc.tokenDatas[tokenIdx],
+            tokenMetaLocation, forkNum, building);
         InsertItemToPostingList(index, tokenMetaLocation, tokenizedDoc.tokenDatas[tokenIdx], tokenizedDoc.docLength,
             docId, score, forkNum, building);
     }
@@ -422,8 +426,8 @@ static void FreeBuildState(BM25BuildState *buildstate)
     MemoryContextDelete(buildstate->tmpCtx);
 }
 
-static void AllocateForwardIdxForToken(Relation index, uint32 tokenCount, uint64 *start, uint64 *end, BlockNumber *startPage,
-    BM25DocForwardMetaPage metaPage, ForkNumber forkNum, bool building)
+static void AllocateForwardIdxForToken(Relation index, uint32 tokenCount, uint64 *start, uint64 *end,
+    BlockNumber *startPage, BM25DocForwardMetaPage metaPage, ForkNumber forkNum, bool building)
 {
     Buffer buf;
     Page page;
@@ -480,8 +484,8 @@ static BlockNumber SeekForwardBlknoForToken(Relation index, BlockNumber startBlk
     return curBlkno;
 }
 
-static void InsertDocForwardItem(Relation index, uint32 docId, BM25TokenizedDocData &tokenizedDoc, BM25EntryPages &bm25EntryPages,
-    uint64 *forwardStart, uint64 *forwardEnd, ForkNumber forkNum, bool building)
+static void InsertDocForwardItem(Relation index, uint32 docId, BM25TokenizedDocData &tokenizedDoc,
+    BM25EntryPages &bm25EntryPages, uint64 *forwardStart, uint64 *forwardEnd, ForkNumber forkNum, bool building)
 {
     Buffer buf;
     Page page;
@@ -497,7 +501,8 @@ static void InsertDocForwardItem(Relation index, uint32 docId, BM25TokenizedDocD
     LockBuffer(metabuf, BUFFER_LOCK_EXCLUSIVE);
     BM25GetPage(index, &metapage, metabuf, &metaState, building);
     metaForwardPage = BM25PageGetDocForwardMeta(metapage);
-    AllocateForwardIdxForToken(index, tokenizedDoc.tokenCount, forwardStart, forwardEnd, &forwardStartBlkno, metaForwardPage, forkNum, building);
+    AllocateForwardIdxForToken(index, tokenizedDoc.tokenCount, forwardStart, forwardEnd,
+        &forwardStartBlkno, metaForwardPage, forkNum, building);
     MarkBufferDirty(metabuf);
     UnlockReleaseBuffer(metabuf);
 
@@ -827,7 +832,8 @@ static void BM25ParallelScanAndInsert(Relation heapRel, Relation indexRel, BM25S
     buildstate.bm25EntryPages = bm25shared->bm25EntryPages;
 
     scan = tableam_scan_begin_parallel(heapRel, &bm25shared->heapdesc);
-    reltuples = tableam_index_build_scan(heapRel, indexRel, indexInfo, true, BM25BuildCallback, (void *)&buildstate, scan);
+    reltuples = tableam_index_build_scan(heapRel, indexRel, indexInfo, true, BM25BuildCallback,
+        (void *)&buildstate, scan);
 
     /* Record statistics */
     SpinLockAcquire(&bm25shared->mutex);
@@ -875,8 +881,6 @@ static void BM25BeginParallel(BM25BuildState *buildstate, int request)
     BM25Leader *bm25leader = (BM25Leader *)palloc0(sizeof(BM25Leader));
 
     Assert(request > 0);
-
-    SpinLockInit(&newBufferMutex);
 
     bm25shared = BM25ParallelInitshared(buildstate);
     /* Launch workers, saving status for leader/caller */
@@ -962,7 +966,8 @@ void ParallelReorderMain(const BgWorkerContext *bwc)
         LockBuffer(cbuf, BUFFER_LOCK_SHARE);
         cpage = BufferGetPage(cbuf);
         maxoffno = PageGetMaxOffsetNumber(cpage);
-        for (OffsetNumber offno = (isStartPage ? startoffno : FirstOffsetNumber); offno <= maxoffno; offno = OffsetNumberNext(offno)) {
+        for (OffsetNumber offno = (isStartPage ? startoffno : FirstOffsetNumber); offno <= maxoffno;
+            offno = OffsetNumberNext(offno)) {
             scanBucketCount++;
             BM25HashBucketItem *item = (BM25HashBucketItem *)PageGetItem(cpage, PageGetItemId(cpage, offno));
             ReorderBucket(indexRel, item->bucketBlkno);
@@ -984,10 +989,11 @@ void ParallelReorderMain(const BgWorkerContext *bwc)
     heap_close(heapRel, NoLock);
 }
 
-static void BM25InitReorderShared(BM25ReorderShared *reorderShared, BM25BuildState *buildstate, BlockNumber hashBucketsPage, uint32 reorderParallelNum, uint32 batchHashBucketCount)
+static void BM25InitReorderShared(BM25ReorderShared *reorderShared, BM25BuildState *buildstate,
+    BlockNumber hashBucketsPage, uint32 reorderParallelNum, uint32 batchHashBucketCount)
 {
-
-    reorderShared->startPageLocation = (BM25PageLocationInfo*)palloc0(sizeof(BM25PageLocationInfo) * reorderParallelNum);
+    reorderShared->startPageLocation =
+        (BM25PageLocationInfo*)palloc0(sizeof(BM25PageLocationInfo) * reorderParallelNum);
     reorderShared->batchCount = batchHashBucketCount;
     reorderShared->heaprelid = RelationGetRelid(buildstate->heap);
     reorderShared->indexrelid = RelationGetRelid(buildstate->index);
@@ -1025,23 +1031,23 @@ static void BM25InitReorderShared(BM25ReorderShared *reorderShared, BM25BuildSta
 
 static void BuildBM25Index(BM25BuildState *buildstate, ForkNumber forkNum)
 {
-    int parallel_workers = 0;
+    int parallelWorkers = 0;
 
     /* Calculate parallel workers */
     if (buildstate->heap != NULL) {
-        parallel_workers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
+        parallelWorkers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
     }
 
     /* Attempt to launch parallel worker scan when required */
-    if (parallel_workers > 0) {
-        BM25BeginParallel(buildstate, parallel_workers);
+    if (parallelWorkers > 0) {
+        BM25BeginParallel(buildstate, parallelWorkers);
     }
 
     if (buildstate->heap != NULL) {
         if (!buildstate->bm25leader) {
         serial_build:
-        buildstate->reltuples = tableam_index_build_scan(buildstate->heap, buildstate->index, buildstate->indexInfo, false,
-            BM25BuildCallback, (void *)buildstate, NULL);
+        buildstate->reltuples = tableam_index_build_scan(buildstate->heap, buildstate->index, buildstate->indexInfo,
+            false, BM25BuildCallback, (void *)buildstate, NULL);
         } else {
             int nruns;
             buildstate->reltuples = ParallelHeapScan(buildstate, &nruns);
@@ -1057,14 +1063,15 @@ static void BuildBM25Index(BM25BuildState *buildstate, ForkNumber forkNum)
         BlockNumber hashBucketsPage = buildstate->bm25leader->bm25shared->bm25EntryPages.hashBucketsPage;
         BM25EndParallel(buildstate->bm25leader);
 
-        /* reorder posting list*/
-        uint32 reorderParallelNum = hashBucketCount < parallel_workers ? hashBucketCount : parallel_workers;
+        /* reorder posting list */
+        uint32 reorderParallelNum = hashBucketCount < parallelWorkers ? hashBucketCount : parallelWorkers;
         if (reorderParallelNum == 0) {
             return;
         }
         uint32 batchHashBucketCount = (hashBucketCount / reorderParallelNum) + 1;
         BM25ReorderShared *reorderShared =
-            (BM25ReorderShared *)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(BM25ReorderShared));
+            (BM25ReorderShared *)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
+                sizeof(BM25ReorderShared));
         BM25InitReorderShared(reorderShared, buildstate, hashBucketsPage, reorderParallelNum, batchHashBucketCount);
 
         int successWorkers = LaunchBackgroundWorkers(reorderParallelNum, reorderShared, ParallelReorderMain, NULL);

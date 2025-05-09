@@ -36,7 +36,8 @@
 #include "access/datavec/bm25heap.h"
 #include "access/datavec/bm25.h"
 
-#define BM25_HEAP_DEFAULT_CAPACITY 100
+const uint32 DEFAULT_EXPAND_TIME = 8;
+const float BM25_DEFAULT_OFFSET = 0.5f;
 
 typedef struct BM25QueryToken {
     BlockNumber tokenPostingBlock;
@@ -49,7 +50,8 @@ typedef struct BM25QueryTokensInfo {
     uint32 size;
 } BM25QueryTokensInfo;
 
-static void FindBucketsLocation(Page page, BM25TokenizedDocData &tokenizedQuery, BlockNumber *bucketsLocation, uint32 &bucketFoundCount)
+static void FindBucketsLocation(Page page, BM25TokenizedDocData &tokenizedQuery, BlockNumber *bucketsLocation,
+    uint32 &bucketFoundCount)
 {
     OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
     for (OffsetNumber offnoBucket = FirstOffsetNumber; offnoBucket <= maxoffno; offnoBucket++) {
@@ -77,7 +79,8 @@ static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocDat
             queryTokens[tokenIdx].qTokenMaxScore = tokenMeta->maxScore;
             queryTokens[tokenIdx].tokenPostingBlock = tokenMeta->postingBlkno;
             queryTokens[tokenIdx].qTokenIDFVal = tokenizedQuery.tokenDatas[tokenIdx].tokenFreq *
-                std::log((1 + ((float)meta.documentCount - (float)tokenMeta->docCount + 0.5) / ((float)tokenMeta->docCount + 0.5)));
+                std::log((1 + ((float)meta.documentCount - (float)tokenMeta->docCount + BM25_DEFAULT_OFFSET) /
+                ((float)tokenMeta->docCount + BM25_DEFAULT_OFFSET)));
             tokenFoundCount++;
             if (tokenFoundCount >= tokenizedQuery.tokenCount)
                 return;
@@ -86,15 +89,16 @@ static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocDat
     return;
 }
 
-static BM25QueryTokensInfo GetQueryTokens(Relation index, const char* sentence)
+static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentence, uint32 &tokenCount,
+    uint32 &tokenFoundCount, bool cutForSearch = false)
 {
-    BM25TokenizedDocData tokenizedQuery = BM25DocumentTokenize(sentence);
+    BM25TokenizedDocData tokenizedQuery = BM25DocumentTokenize(sentence, cutForSearch);
     if (tokenizedQuery.tokenCount == 0) {
-        BM25QueryTokensInfo emptyTokensInfo{0};
-        emptyTokensInfo.queryTokens = nullptr;
-        emptyTokensInfo.size = 0;
-        return emptyTokensInfo;
+        tokenCount = 0;
+        tokenFoundCount = 0;
+        return nullptr;
     }
+    tokenCount = tokenizedQuery.tokenCount;
     BM25QueryToken *queryTokens = (BM25QueryToken*)palloc0(sizeof(BM25QueryToken) * tokenizedQuery.tokenCount);
     BlockNumber *bucketsLocation = (BlockNumber*)palloc0(sizeof(BlockNumber) * tokenizedQuery.tokenCount);
     for (size_t tokenIdx = 0; tokenIdx < tokenizedQuery.tokenCount; tokenIdx++) {
@@ -121,7 +125,7 @@ static BM25QueryTokensInfo GetQueryTokens(Relation index, const char* sentence)
         UnlockReleaseBuffer(cHashBucketsbuf);
     }
 
-    uint32 tokenFoundCount = 0;
+    tokenFoundCount = 0;
     for (size_t tokenIdx = 0; tokenIdx < tokenizedQuery.tokenCount; tokenIdx++) {
         if (!BlockNumberIsValid(bucketsLocation[tokenIdx])) {
             continue;
@@ -139,9 +143,36 @@ static BM25QueryTokensInfo GetQueryTokens(Relation index, const char* sentence)
             UnlockReleaseBuffer(cTokenMetasbuf);
         }
     }
+    pfree(bucketsLocation);
+    if (tokenizedQuery.tokenDatas != nullptr) {
+        pfree(tokenizedQuery.tokenDatas);
+    }
+    if (tokenFoundCount == 0) {
+        pfree(queryTokens);
+        return nullptr;
+    }
+    return queryTokens;
+}
+
+static BM25QueryTokensInfo GetQueryTokens(Relation index, const char* sentence)
+{
+    uint32 tokenCount = 0;
+    uint32 tokenFoundCount = 0;
+    BM25QueryToken *queryTokens = ScanIndexForTokenInfo(index, sentence, tokenCount, tokenFoundCount);
+    if (queryTokens == nullptr) {
+        /* no token found, try to use cutForSearch to get tokens */
+        queryTokens = ScanIndexForTokenInfo(index, sentence, tokenCount, tokenFoundCount, true);
+    }
+    if (queryTokens == nullptr) {
+        BM25QueryTokensInfo tokensInfo{0};
+        tokensInfo.queryTokens = nullptr;
+        tokensInfo.size = 0;
+        return tokensInfo;
+    }
+
     BM25QueryToken *resQueryTokens = (BM25QueryToken*)palloc0(sizeof(BM25QueryToken) * tokenFoundCount);
     uint32 tokenFillIdx = 0;
-    for (size_t tokenIdx = 0; tokenIdx < tokenizedQuery.tokenCount; tokenIdx++) {
+    for (size_t tokenIdx = 0; tokenIdx < tokenCount; tokenIdx++) {
         if (!BlockNumberIsValid(queryTokens[tokenIdx].tokenPostingBlock)) {
             continue;
         }
@@ -152,7 +183,6 @@ static BM25QueryTokensInfo GetQueryTokens(Relation index, const char* sentence)
         }
     }
     pfree(queryTokens);
-    pfree(bucketsLocation);
     BM25QueryTokensInfo tokensInfo{0};
     tokensInfo.queryTokens = resQueryTokens;
     tokensInfo.size = tokenFoundCount;
@@ -188,8 +218,8 @@ public:
             shift++;
         }
         capacity <<= 1;
-        m_scoreArray = (BM25ScanScoreHashEntry*)palloc0(sizeof(BM25ScanScoreHashEntry) * capacity);
-        m_capacity = capacity;
+        scoreArray = (BM25ScanScoreHashEntry*)palloc0(sizeof(BM25ScanScoreHashEntry) * capacity);
+        scoreHashCapacity = capacity;
     }
 
     uint32 GetDocHash(const char* doc)
@@ -201,20 +231,20 @@ public:
 
     uint32 GetHashBucketIdxByHash(uint32 hash)
     {
-        return (uint32)(hash % m_capacity);
+        return (uint32)(hash % scoreHashCapacity);
     }
 
     void AddScore(float score, char *doc)
     {
         uint32 hash = GetDocHash(doc);
         uint32 bucketIdx = GetHashBucketIdxByHash(hash);
-        while (bucketIdx < m_capacity) {
-            BM25ScanScoreHashEntry* entry = &m_scoreArray[bucketIdx];
+        while (bucketIdx < scoreHashCapacity) {
+            BM25ScanScoreHashEntry* entry = &scoreArray[bucketIdx];
             if (!entry->isOccupied) {
                 entry->SetValues(hash, doc, score);
                 break;
             }
-            bucketIdx = (bucketIdx + 1) % m_capacity;
+            bucketIdx = (bucketIdx + 1) % scoreHashCapacity;
         }
     }
 
@@ -223,8 +253,8 @@ public:
         uint32 hash = GetDocHash(doc);
         uint32 bucketIdx = GetHashBucketIdxByHash(hash);
 
-        while (bucketIdx < m_capacity) {
-            BM25ScanScoreHashEntry* entry = &m_scoreArray[bucketIdx];
+        while (bucketIdx < scoreHashCapacity) {
+            BM25ScanScoreHashEntry* entry = &scoreArray[bucketIdx];
             if (entry->isOccupied) {
                 if (entry->hash == hash && strcmp(entry->scoreKey, doc) == 0) {
                     *findDoc = true;
@@ -234,18 +264,19 @@ public:
                 *findDoc = false;
                 return 0.0;
             }
-            bucketIdx = (bucketIdx + 1) % m_capacity;
+            bucketIdx = (bucketIdx + 1) % scoreHashCapacity;
         }
         return 0.0;
     }
 
-    void Destroy() {
-        pfree_ext(m_scoreArray);
+    void Destroy()
+    {
+        pfree_ext(scoreArray);
     }
 
 private:
-    BM25ScanScoreHashEntry* m_scoreArray;
-    size_t m_capacity;
+    BM25ScanScoreHashEntry* scoreArray;
+    size_t scoreHashCapacity;
 };
 
 void BM25ScanCursor::Next(bool isInit)
@@ -318,7 +349,7 @@ void BM25ScanCursor::Seek(uint32 docId)
                 tokenFreqInDoc = postingItem->freq;
                 curDocLength = postingItem->docLength;
                 curOffset = offno;
-				return;
+                return;
             }
         }
         curBlkno = BM25PageGetOpaque(page)->nextblkno;
@@ -330,7 +361,6 @@ void BM25ScanCursor::Seek(uint32 docId)
             page = BufferGetPage(buf);
             curOffset = FirstOffsetNumber;
         }
-
     }
     if (!BlockNumberIsValid(curBlkno)) {
         curDocId = BM25_INVALID_DOC_ID;
@@ -345,13 +375,14 @@ void BM25ScanCursor::Close()
     docIdfilter = nullptr;
 }
 
-static Vector<BM25ScanCursor> MakeBM25ScanCursors(Relation index, BM25QueryToken* queryTokens, uint32 querySize, unsigned char* docIdMask)
+static Vector<BM25ScanCursor> MakeBM25ScanCursors(Relation index, BM25QueryToken* queryTokens, uint32 querySize,
+    unsigned char* docIdMask)
 {
     Vector<BM25ScanCursor> cursors;
     for (int i = 0; i < querySize; ++i) {
         BM25ScanCursor cursor(index, queryTokens[i].tokenPostingBlock,
-                              queryTokens[i].qTokenMaxScore * queryTokens[i].qTokenIDFVal * u_sess->attr.attr_sql.max_score_ratio,
-                              queryTokens[i].qTokenIDFVal, docIdMask);
+            queryTokens[i].qTokenMaxScore * queryTokens[i].qTokenIDFVal * u_sess->attr.attr_sql.max_score_ratio,
+            queryTokens[i].qTokenIDFVal, docIdMask);
         cursors.push_back(cursor);
     }
     return cursors;
@@ -365,10 +396,9 @@ static void CloseCursors(Vector<BM25ScanCursor> &cursors)
     cursors.clear();
 }
 
-static void SearchTaat(Relation index, BM25QueryTokensInfo &queryTokenInfo, MaxMinHeap<float>& heap,
+static void SearchTaat(Relation index, BM25QueryTokensInfo &queryTokenInfo, MaxMinHeap& heap,
     uint32 maxDocId, BM25Scorer& scorer, unsigned char* docIdMask)
 {
-
     BM25QueryToken *queryTokens = queryTokenInfo.queryTokens;
     uint32 querySize = queryTokenInfo.size;
     Vector<BM25ScanCursor> cursors = MakeBM25ScanCursors(index, queryTokens, querySize, docIdMask);
@@ -376,7 +406,8 @@ static void SearchTaat(Relation index, BM25QueryTokensInfo &queryTokenInfo, MaxM
     for (size_t i = 0; i < querySize; ++i) {
         BM25ScanCursor* cursor = &cursors[i];
         while (cursor->curDocId < maxDocId) {
-            scores[cursor->curDocId] += cursor->qTokenIDFVal * scorer.GetDocBM25Score(cursor->tokenFreqInDoc, cursor->curDocLength);
+            scores[cursor->curDocId] += cursor->qTokenIDFVal *
+                scorer.GetDocBM25Score(cursor->tokenFreqInDoc, cursor->curDocLength);
             cursor->Next();
         }
         cursor->Close();
@@ -396,11 +427,11 @@ static FORCE_INLINE int CompareQueryTokenFunc(const void *left, const void *righ
     return rightToken->qTokenIDFVal * rightToken->qTokenMaxScore - leftToken->qTokenIDFVal * leftToken->qTokenMaxScore;
 }
 
-static void SearchDaatMaxscore(Relation index, BM25QueryTokensInfo &queryTokenInfo, MaxMinHeap<float>& heap,
+static void SearchDaatMaxscore(Relation index, BM25QueryTokensInfo &queryTokenInfo, MaxMinHeap& heap,
     uint32 maxDocId, BM25Scorer& scorer, unsigned char* docIdMask)
 {
-	BM25QueryToken *queryTokens = queryTokenInfo.queryTokens;
-	uint32 querySize = queryTokenInfo.size;
+    BM25QueryToken *queryTokens = queryTokenInfo.queryTokens;
+    uint32 querySize = queryTokenInfo.size;
     qsort(queryTokens, (size_t)querySize, sizeof(BM25QueryToken), CompareQueryTokenFunc);
 
     Vector<BM25ScanCursor> cursors = MakeBM25ScanCursors(index, queryTokens, querySize, docIdMask);
@@ -408,10 +439,10 @@ static void SearchDaatMaxscore(Relation index, BM25QueryTokensInfo &queryTokenIn
     float threshold = heap.full() ? heap.top().val : 0;
 
     Vector<float> upperBounds(cursors.size());
-    float bound_sum = 0.0;
+    float boundSum = 0.0;
     for (size_t i = cursors.size() - 1; i + 1 > 0; --i) {
-        bound_sum += cursors[i].qTokenMaxScore;
-        upperBounds[i] = bound_sum;
+        boundSum += cursors[i].qTokenMaxScore;
+        upperBounds[i] = boundSum;
     }
 
     uint32 nextCandDodId = maxDocId;
@@ -434,7 +465,7 @@ static void SearchDaatMaxscore(Relation index, BM25QueryTokensInfo &queryTokenIn
 
     while (currCandDocId < maxDocId) {
         bool foundCand = false;
-        while (foundCand == false) {
+        while (!foundCand) {
             // start find from next_vec_id
             if (nextCandDodId >= maxDocId) {
                 CloseCursors(cursors);
@@ -448,7 +479,8 @@ static void SearchDaatMaxscore(Relation index, BM25QueryTokensInfo &queryTokenIn
 
             for (size_t i = 0; i < firstNeIdx; ++i) {
                 if (cursors[i].curDocId == currCandDocId) {
-                    currCandScore += cursors[i].qTokenIDFVal * scorer.GetDocBM25Score(cursors[i].tokenFreqInDoc, cursors[i].curDocLength);
+                    currCandScore += cursors[i].qTokenIDFVal *
+                        scorer.GetDocBM25Score(cursors[i].tokenFreqInDoc, cursors[i].curDocLength);
                     cursors[i].Next();
                 }
                 if (cursors[i].curDocId < nextCandDodId) {
@@ -464,7 +496,8 @@ static void SearchDaatMaxscore(Relation index, BM25QueryTokensInfo &queryTokenIn
                 }
                 cursors[i].Seek(currCandDocId);
                 if (cursors[i].curDocId == currCandDocId) {
-                    currCandScore += cursors[i].qTokenIDFVal * scorer.GetDocBM25Score(cursors[i].tokenFreqInDoc, cursors[i].curDocLength);
+                    currCandScore += cursors[i].qTokenIDFVal *
+                        scorer.GetDocBM25Score(cursors[i].tokenFreqInDoc, cursors[i].curDocLength);
                 }
             }
         }
@@ -518,8 +551,7 @@ static void DocIdsGetHeapCtids(Relation index, BM25EntryPages &entryPages, BM25S
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
     curDocCapacity += BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
-    for (int i = 0; i < so->candNums; ++i)
-    {
+    for (int i = 0; i < so->candNums; ++i) {
         curdDocId = so->candDocs[i].docId;
         if (curdDocId == BM25_INVALID_DOC_ID) {
             continue;
@@ -546,15 +578,17 @@ static void DocIdsGetHeapCtids(Relation index, BM25EntryPages &entryPages, BM25S
     qsort(so->candDocs, (size_t)so->candNums, sizeof(BM25ScanData), CompareBM25ScanDataByScore);
 }
 
-static void BM25IndexScan(Relation index, BM25QueryTokensInfo &queryTokenInfo, uint32 docNums, float avgdl, BM25ScanOpaque so)
+static void BM25IndexScan(Relation index, BM25QueryTokensInfo &queryTokenInfo, uint32 docNums,
+    float avgdl, BM25ScanOpaque so)
 {
     if (queryTokenInfo.size == 0) {
         return;
     }
     BM25Scorer scorer = BM25Scorer(u_sess->attr.attr_sql.bm25_k1, u_sess->attr.attr_sql.bm25_b, avgdl);
 
-    size_t capacity = so->expectedCandNums == 0 ? BM25_HEAP_DEFAULT_CAPACITY : so->expectedCandNums;
-    MaxMinHeap<float> heap(capacity);
+    size_t capacity = so->expectedCandNums == 0 ? docNums : so->expectedCandNums;
+    MaxMinHeap heap;
+    heap.InitHeap(capacity);
     if (so->expectedCandNums == 0) {
         SearchTaat(index, queryTokenInfo, heap, docNums, scorer, so->docIdMask);
     } else {
@@ -593,7 +627,7 @@ static void ContructScanScoreKeys(Relation index, BM25ScanOpaque so)
     scan->xs_heapfetch = tableam_scan_index_fetch_begin(heapRel);
     indexInfo = BuildIndexInfo(index);
 
-    char* scoreKey = NULL;
+    char* scoreKey = nullptr;
 
     MemoryContext oldCtx;
 
@@ -626,8 +660,6 @@ static void ContructScanScoreKeys(Relation index, BM25ScanOpaque so)
     IndexScanEnd(scan);
 }
 
-
-
 IndexScanDesc bm25beginscan_internal(Relation index, int nkeys, int norderbys)
 {
     IndexScanDesc scan;
@@ -655,12 +687,14 @@ void bm25rescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey or
     so->cursor = 0;
 
     if (keys && scan->numberOfKeys > 0) {
-        errno_t rc = memmove_s(scan->keyData, scan->numberOfKeys * sizeof(ScanKeyData), keys, scan->numberOfKeys * sizeof(ScanKeyData));
+        errno_t rc = memmove_s(scan->keyData, scan->numberOfKeys * sizeof(ScanKeyData),
+            keys, scan->numberOfKeys * sizeof(ScanKeyData));
         securec_check(rc, "\0", "\0");
     }
 
     if (orderbys && scan->numberOfOrderBys > 0) {
-        errno_t rc = memmove_s(scan->orderByData, scan->numberOfOrderBys * sizeof(ScanKeyData), orderbys, scan->numberOfOrderBys * sizeof(ScanKeyData));
+        errno_t rc = memmove_s(scan->orderByData, scan->numberOfOrderBys * sizeof(ScanKeyData),
+            orderbys, scan->numberOfOrderBys * sizeof(ScanKeyData));
         securec_check(rc, "\0", "\0");
     }
 }
@@ -682,7 +716,7 @@ static bool CheckIfNeedExpandSearch(BM25ScanOpaque so)
         return false;
     }
 
-    if (so->cursor == so->candNums && so->expandedTimes < 8) {
+    if (so->cursor == so->candNums && so->expandedTimes < DEFAULT_EXPAND_TIME) {
         so->cursor = 0;
         so->expectedCandNums *= 2;
         so->candNums = 0;
@@ -692,7 +726,7 @@ static bool CheckIfNeedExpandSearch(BM25ScanOpaque so)
         return true;
     }
 
-    if (so->cursor == so->candNums && so->expandedTimes >= 8) {
+    if (so->cursor == so->candNums && so->expandedTimes >= DEFAULT_EXPAND_TIME) {
         so->cursor = 0;
         so->expectedCandNums = 0;
         so->candNums = 0;
@@ -724,13 +758,16 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
         } else if (scan->keyData != NULL) {
             arr = DatumGetArrayTypeP(scan->keyData[0].sk_argument);
         }
-        BM25QueryTokensInfo queryTokenInfo = GetQueryTokens(scan->indexRelation, TextDatumGetCString(PointerGetDatum(arr)));
-        BM25QueryToken* queryTokens;
-        uint32 querySize;
+        BM25QueryTokensInfo queryTokenInfo = GetQueryTokens(scan->indexRelation, TextDatumGetCString(
+            PointerGetDatum(arr)));
         float avgdl = meta.tokenCount / meta.documentCount;
         BM25IndexScan(scan->indexRelation, queryTokenInfo, meta.documentCount, avgdl, so);
         DocIdsGetHeapCtids(scan->indexRelation, meta.entryPageList, so);
         ContructScanScoreKeys(scan->indexRelation, so);
+        if (queryTokenInfo.queryTokens != nullptr) {
+            pfree(queryTokenInfo.queryTokens);
+            queryTokenInfo.queryTokens = nullptr;
+        }
     }
 
     bool found = false;
