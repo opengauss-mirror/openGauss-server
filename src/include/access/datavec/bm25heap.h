@@ -25,98 +25,143 @@
 #define BM25HEAP_H
 
 #include "postgres.h"
-#include <algorithm>
-#include <unordered_map>
-#include <vector>
+#include "utils/palloc.h"
 
-template <typename I, typename T>
 struct IdVal {
-    I id;
-    T val;
+    uint32 id;
+    float val;
 
-    IdVal() = default;
-    IdVal(I id, T val) : id(id), val(val) {
-    }
+    IdVal() : id(0), val(0.0f) {}
+    IdVal(uint32 id, float val) : id(id), val(val) {}
 
-    inline friend bool
-    operator<(const IdVal<I, T>& lhs, const IdVal<I, T>& rhs) {
+    friend bool operator<(const IdVal& lhs, const IdVal& rhs)
+    {
         return lhs.val < rhs.val || (lhs.val == rhs.val && lhs.id < rhs.id);
     }
 
-    inline friend bool
-    operator>(const IdVal<I, T>& lhs, const IdVal<I, T>& rhs) {
-        return !(lhs < rhs) && !(lhs == rhs);
+    friend bool operator>(const IdVal& lhs, const IdVal& rhs)
+    {
+        return rhs < lhs;
     }
 
-    inline friend bool
-    operator==(const IdVal<I, T>& lhs, const IdVal<I, T>& rhs) {
+    friend bool operator==(const IdVal& lhs, const IdVal& rhs)
+    {
         return lhs.id == rhs.id && lhs.val == rhs.val;
     }
 };
 
-template <typename T>
-using SparseIdVal = IdVal<uint32, T>;
-
-template <typename T>
 class MaxMinHeap {
 public:
-    explicit MaxMinHeap(int capacity) : capacity_(capacity), pool_(capacity) {
+    explicit MaxMinHeap()
+        : capacity_(0), size_(0), pool_(nullptr)
+        { }
+
+    void InitHeap(size_t capacity)
+    {
+        capacity_ = capacity;
+        pool_ = (IdVal *)palloc0(capacity_ * sizeof(IdVal));
     }
-    void
-    push(uint32 id, T val) {
+    ~MaxMinHeap()
+    {
+        pfree_ext(pool_);
+    }
+
+    MaxMinHeap(const MaxMinHeap&) = delete;
+    MaxMinHeap& operator=(const MaxMinHeap&) = delete;
+
+    void push(uint32 id, float val)
+    {
         if (size_ < capacity_) {
-            pool_[size_] = {id, val};
-            size_ += 1;
-            std::push_heap(pool_.begin(), pool_.begin() + size_, std::greater<SparseIdVal<T>>());
+            pool_[size_] = IdVal(id, val);
+            shiftUp(size_);
+            size_++;
         } else if (val > pool_[0].val) {
-            sift_down(id, val);
+            siftDown(id, val);
         }
     }
-    uint32
-    pop() {
-        std::pop_heap(pool_.begin(), pool_.begin() + size_, std::greater<SparseIdVal<T>>());
-        size_ -= 1;
-        return pool_[size_].id;
+
+    uint32 pop()
+    {
+        uint32 ret = pool_[0].id;
+        pool_[0] = pool_[--size_];
+        shiftDown(0);
+        return ret;
     }
-    size_t size() const {
-        return size_;
-    }
-    bool empty() const {
-        return size() == 0;
-    }
-    SparseIdVal<T>
-    top() const {
-        return pool_[0];
-    }
-    bool
-    full() const {
-        return size_ == capacity_;
-    }
+
+    size_t size() const { return size_; }
+    bool empty() const { return size_ == 0; }
+    const IdVal& top() const { return pool_[0]; }
+    bool full() const { return size_ == capacity_; }
 
 private:
-    void
-    sift_down(uint32 id, T val) {
-        size_t i = 0;
-        for (; 2 * i + 1 < size_;) {
-            size_t j = i;
-            size_t l = 2 * i + 1, r = 2 * i + 2;
-            if (pool_[l].val < val) {
-                j = l;
-            }
-            if (r < size_ && pool_[r].val < std::min(pool_[l].val, val)) {
-                j = r;
-            }
-            if (i == j) {
+    void shiftUp(size_t index)
+    {
+        while (index > 0) {
+            size_t parent = (index - 1) / 2;
+            if (pool_[index] < pool_[parent]) {
+                swap(index, parent);
+                index = parent;
+            } else {
                 break;
             }
-            pool_[i] = pool_[j];
-            i = j;
         }
-        pool_[i] = {id, val};
     }
 
-    size_t size_ = 0, capacity_;
-    std::vector<SparseIdVal<T>> pool_;
-};  // class MaxMinHeap
+    void shiftDown(size_t index)
+    {
+        size_t smallest;
+        while (true) {
+            smallest = index;
+            size_t left = 2 * index + 1;
+            size_t right = 2 * index + 2;
 
-#endif //BM25HEAP_H
+            if (left < size_ && pool_[left] < pool_[smallest]) {
+                smallest = left;
+            }
+            if (right < size_ && pool_[right] < pool_[smallest]) {
+                smallest = right;
+            }
+            if (smallest != index) {
+                swap(index, smallest);
+                index = smallest;
+            } else {
+                break;
+            }
+        }
+    }
+
+    void siftDown(uint32 id, float val)
+    {
+        size_t i = 0;
+        while (2 * i + 1 < size_) {
+            size_t left = 2 * i + 1;
+            size_t right = 2 * i + 2;
+            size_t smallest = left;
+
+            if (right < size_ && pool_[right] < pool_[left]) {
+                smallest = right;
+            }
+
+            if (IdVal(id, val) < pool_[smallest]) {
+                break;
+            }
+
+            pool_[i] = pool_[smallest];
+            i = smallest;
+        }
+        pool_[i] = IdVal(id, val);
+    }
+
+    void swap(size_t a, size_t b)
+    {
+        IdVal temp = pool_[a];
+        pool_[a] = pool_[b];
+        pool_[b] = temp;
+    }
+
+    size_t capacity_;
+    size_t size_;
+    IdVal* pool_;
+}; // class MaxMinHeap
+
+#endif // BM25HEAP_H

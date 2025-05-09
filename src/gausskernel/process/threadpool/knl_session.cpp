@@ -1515,7 +1515,6 @@ static void knl_u_imcstore_init(knl_u_imcstore_context* imcstore_context)
 static void knl_u_bm25_init(knl_u_bm25_context* bm25_context)
 {
     bm25_context->scoreHashTable = nullptr;
-    bm25_context->context = nullptr;
 }
 
 void knl_session_init(knl_session_context* sess_cxt)

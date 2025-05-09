@@ -1,17 +1,7 @@
 /*
- * Copyright (c) 2024 Huawei Technologies Co.,Ltd.
+ * Copyright (c) 2025 Huawei Technologies Co.,Ltd.
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
+ * Note: Provides interface for openGauss as tokenizer by using cppjieba api.
  *
  * tokenizer.cpp
  *
@@ -22,18 +12,21 @@
  */
 #include <algorithm>
 #include <cctype>
-#include <stdlib.h>
+#include <cstdlib>
 #include <thread>
 #include <mutex>
-#include <errno.h>
+#include <cerrno>
 #include <securec.h>
 #include "zlib.h"
 #include "cppjieba/Jieba.hpp"
 #include "tokenizer.h"
 
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
 const size_t MAX_LENGTH_CRC = 100;
 const size_t MAX_KEYWORD_NUM = 100000;
-const size_t MAX_PATH_LEN = 1024;
 
 const char* const DICT_PATH = "lib/jieba_dict/jieba.dict.utf8";
 const char* const HMM_PATH = "lib/jieba_dict/hmm_model.utf8";
@@ -42,7 +35,7 @@ const char* const IDF_PATH = "lib/jieba_dict/idf.utf8";
 const char* const STOP_WORD_PATH = "lib/jieba_dict/stop_words.utf8";
 
 std::unique_ptr<cppjieba::Jieba> jiebaTokenizer = nullptr;
-std::once_flag initFlag;
+std::once_flag g_initFlag;
 
 inline static bool IsWhitespace(const std::string& str)
 {
@@ -70,7 +63,7 @@ inline static uint32_t HashString2Uint32(const std::string& srcStr)
     return crc;
 }
 
-inline static void ConvertEmbeddingMap(std::unordered_map<std::string, std::pair<uint32_t, float>> tokensMap,
+static void ConvertEmbeddingMap(std::unordered_map<std::string, std::pair<uint32_t, float>> tokensMap,
     EmbeddingMap *embeddingMap)
 {
     embeddingMap->size = tokensMap.size();
@@ -111,34 +104,34 @@ bool CreateTokenizer()
     if (installPath == nullptr) {
         return false;
     }
-    char path[MAX_PATH_LEN] = {0};
+    char path[PATH_MAX] = {0};
     if (!realpath(installPath, path)) {
         if (errno != ENOENT && errno != EACCES) {
             return false;
         }
     }
-    char dictPath[MAX_PATH_LEN] = {0};
-    char hmmPath[MAX_PATH_LEN] = {0};
-    char userDictPath[MAX_PATH_LEN] = {0};
-    char idfPath[MAX_PATH_LEN] = {0};
-    char stopWordPath[MAX_PATH_LEN] = {0};
-    int ret = snprintf_s(dictPath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", path, DICT_PATH);
+    char dictPath[PATH_MAX] = {0};
+    char hmmPath[PATH_MAX] = {0};
+    char userDictPath[PATH_MAX] = {0};
+    char idfPath[PATH_MAX] = {0};
+    char stopWordPath[PATH_MAX] = {0};
+    int ret = snprintf_s(dictPath, PATH_MAX, PATH_MAX - 1, "%s/%s", path, DICT_PATH);
     if (ret < 0) {
         return false;
     }
-    ret = snprintf_s(hmmPath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", path, HMM_PATH);
+    ret = snprintf_s(hmmPath, PATH_MAX, PATH_MAX - 1, "%s/%s", path, HMM_PATH);
     if (ret < 0) {
         return false;
     }
-    ret = snprintf_s(userDictPath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", path, USER_DICT_PATH);
+    ret = snprintf_s(userDictPath, PATH_MAX, PATH_MAX - 1, "%s/%s", path, USER_DICT_PATH);
     if (ret < 0) {
         return false;
     }
-    ret = snprintf_s(idfPath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", path, IDF_PATH);
+    ret = snprintf_s(idfPath, PATH_MAX, PATH_MAX - 1, "%s/%s", path, IDF_PATH);
     if (ret < 0) {
         return false;
     }
-    ret = snprintf_s(stopWordPath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", path, STOP_WORD_PATH);
+    ret = snprintf_s(stopWordPath, PATH_MAX, PATH_MAX - 1, "%s/%s", path, STOP_WORD_PATH);
     if (ret < 0) {
         return false;
     }
@@ -156,20 +149,22 @@ void DestroyTokenizer()
     return;
 }
 
-bool ConvertString2Embedding(const char* srcStr, EmbeddingMap *embeddingMap, bool isKeywordExtractor)
+bool ConvertString2Embedding(const char* srcStr, EmbeddingMap *embeddingMap, bool isKeywordExtractor, bool cutForSearch)
 {
-    std::call_once(initFlag, CreateTokenizer);
+    std::call_once(g_initFlag, CreateTokenizer);
     if (jiebaTokenizer == nullptr || srcStr == nullptr || embeddingMap == nullptr) {
         return false;
     }
+
     std::string sentence(srcStr);
     std::unordered_map<std::string, std::pair<uint32_t, float>> tokensMap;
-    if (isKeywordExtractor) {
+    if (isKeywordExtractor && !cutForSearch) {
         std::vector<cppjieba::KeywordExtractor::Word> keywords;
         jiebaTokenizer->extractor.Extract(sentence, keywords, MAX_KEYWORD_NUM);
         for (const auto& keyword : keywords) {
-            uint32_t hashValue = HashString2Uint32(Convert2LowerCase(keyword.word));
-            tokensMap[keyword.word] = std::make_pair(hashValue, keyword.weight);
+            std::string lowerCaseKeyword = Convert2LowerCase(keyword.word);
+            uint32_t hashValue = HashString2Uint32(lowerCaseKeyword);
+            tokensMap[lowerCaseKeyword] = std::make_pair(hashValue, keyword.weight);
         }
         if (!tokensMap.empty()) {
             ConvertEmbeddingMap(tokensMap, embeddingMap);
@@ -179,16 +174,22 @@ bool ConvertString2Embedding(const char* srcStr, EmbeddingMap *embeddingMap, boo
 
     // if the keywords extracted by 'Extract' are empty, then use 'Cut' for tokenization.
     std::vector<std::string> tokens;
-    jiebaTokenizer->Cut(sentence, tokens, true);
+    if (cutForSearch) {
+        jiebaTokenizer->CutForSearch(sentence, tokens, true);
+    } else {
+        jiebaTokenizer->Cut(sentence, tokens, true);
+    }
+
     for (const auto& token : tokens) {
         if (IsWhitespace(token)) {
             continue;
         }
-        uint32_t hashValue = HashString2Uint32(Convert2LowerCase(token));
-        if (tokensMap.find(token) == tokensMap.end()) {
-            tokensMap[token] = std::make_pair(hashValue, 1.0f);
+        std::string lowerCaseToken = Convert2LowerCase(token);
+        uint32_t hashValue = HashString2Uint32(lowerCaseToken);
+        if (tokensMap.find(lowerCaseToken) == tokensMap.end()) {
+            tokensMap[lowerCaseToken] = std::make_pair(hashValue, 1.0f);
         } else {
-            tokensMap[token].second += 1.0f;
+            tokensMap[lowerCaseToken].second += 1.0f;
         }
     }
     ConvertEmbeddingMap(tokensMap, embeddingMap);

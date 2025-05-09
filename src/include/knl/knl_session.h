@@ -3072,7 +3072,6 @@ typedef struct knl_u_imcstore_context {
 struct BM25ScanDocScoreHashTable;
 typedef struct knl_u_bm25_context {
     BM25ScanDocScoreHashTable *scoreHashTable;
-    MemoryContext context;
 } knl_u_bm25_context;
 typedef struct knl_session_context {
     volatile knl_session_status status;
