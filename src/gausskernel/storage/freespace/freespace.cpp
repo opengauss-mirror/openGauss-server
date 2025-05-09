@@ -714,7 +714,7 @@ static int fsm_set_and_search(Relation rel, const FSMAddress &addr, uint16 slot,
     page = BufferGetPage(buf);
     if (fsm_set_avail(page, slot, newValue)) {
         if (IsSegmentFileNode(rel->rd_node)) {
-            PageSetLSN(page, GetXLogInsertRecPtr());
+            PageSetLSN(page, GetXLogInsertEndRecPtr());
             MarkBufferDirty(buf);
         } else {
             MarkBufferDirtyHint(buf, false);
@@ -860,7 +860,7 @@ static uint8 fsm_vacuum_page(Relation rel, const FSMAddress& addr, bool* eof_p)
                 LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
                 if (fsm_set_avail(page, slot, (uint8)child_avail)) {
                     if (IsSegmentFileNode(rel->rd_node)) {
-                        PageSetLSN(page, GetXLogInsertRecPtr());
+                        PageSetLSN(page, GetXLogInsertEndRecPtr());
                         MarkBufferDirty(buf);
                     } else {
                         MarkBufferDirtyHint(buf, false);
