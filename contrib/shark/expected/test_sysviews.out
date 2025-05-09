@@ -902,3 +902,321 @@ drop schema sys_view_test cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to sequence sys_view_test.t_seq
 drop cascades to function sys_view_test.tg_log()
+create schema sys_view_test_02;
+set search_path to sys_view_test_02;
+-- show views struct
+\d information_schema_tsql.check_constraints
+ View "information_schema_tsql.check_constraints"
+       Column       |      Type       | Modifiers 
+--------------------+-----------------+-----------
+ constraint_catalog | nvarchar2(128)  | 
+ constraint_schema  | nvarchar2(128)  | 
+ constraint_name    | name            | 
+ check_clause       | nvarchar2(4000) | 
+
+\d information_schema_tsql.columns
+               View "information_schema_tsql.columns"
+          Column          |             Type             | Modifiers 
+--------------------------+------------------------------+-----------
+ table_catalog            | nvarchar2(128)               | 
+ table_schema             | nvarchar2(128)               | 
+ table_name               | nvarchar2(128)               | 
+ column_name              | nvarchar2(128)               | 
+ ordinal_position         | integer                      | 
+ column_default           | nvarchar2(4000)              | 
+ is_nullable              | information_schema.yes_or_no | 
+ data_type                | character varying(128)       | 
+ character_maximum_length | integer                      | 
+ character_octet_length   | integer                      | 
+ numeric_precision        | tinyint                      | 
+ numeric_precision_radix  | smallint                     | 
+ numeric_scale            | integer                      | 
+ datetime_precision       | smallint                     | 
+ character_set_name       | nvarchar2(128)               | 
+ collation_catalog        | nvarchar2(128)               | 
+ collation_schema         | nvarchar2(128)               | 
+ collation_name           | nvarchar2(128)               | 
+ domain_catalog           | nvarchar2(128)               | 
+ domain_schema            | nvarchar2(128)               | 
+ domain_name              | nvarchar2(128)               | 
+
+\d information_schema_tsql.tables
+       View "information_schema_tsql.tables"
+    Column     |         Type          | Modifiers 
+---------------+-----------------------+-----------
+ table_catalog | nvarchar2(128)        | 
+ table_schema  | nvarchar2(128)        | 
+ table_name    | name                  | 
+ table_type    | character varying(10) | 
+
+\d information_schema_tsql.views
+        View "information_schema_tsql.views"
+     Column      |         Type         | Modifiers 
+-----------------+----------------------+-----------
+ table_catalog   | nvarchar2(128)       | 
+ table_schema    | nvarchar2(128)       | 
+ table_name      | nvarchar2(128)       | 
+ view_definition | nvarchar2(4000)      | 
+ check_option    | character varying(7) | 
+ is_updatable    | character varying(3) | 
+
+\d sys.sysdatabases
+              View "sys.sysdatabases"
+  Column  |            Type             | Modifiers 
+----------+-----------------------------+-----------
+ name     | name                        | 
+ dbid     | oid                         | 
+ sid      | oid                         | 
+ mode     | smallint                    | 
+ status   | integer                     | 
+ status2  | integer                     | 
+ crdate   | timestamp without time zone | 
+ reserved | timestamp without time zone | 
+ category | integer                     | 
+ cmplevel | tinyint                     | 
+ filename | nvarchar2(260)              | 
+ version  | smallint                    | 
+
+\d sys.schemas
+         View "sys.schemas"
+    Column    |  Type   | Modifiers 
+--------------+---------+-----------
+ name         | name    | 
+ schema_id    | integer | 
+ principal_id | integer | 
+
+\d sys.sysusers
+               View "sys.sysusers"
+   Column    |          Type          | Modifiers 
+-------------+------------------------+-----------
+ uid         | integer                | 
+ status      | smallint               | 
+ name        | name                   | 
+ sid         | bytea                  | 
+ roles       | bytea                  | 
+ createdate  | date                   | 
+ updatedate  | date                   | 
+ altuid      | smallint               | 
+ password    | bytea                  | 
+ gid         | smallint               | 
+ environ     | character varying(255) | 
+ hasdbaccess | integer                | 
+ islogin     | integer                | 
+ isntname    | integer                | 
+ isntgroup   | integer                | 
+ isntuser    | integer                | 
+ issqluser   | integer                | 
+ isaliased   | integer                | 
+ issqlrole   | integer                | 
+ isapprole   | integer                | 
+
+\d sys.databases
+                                 View "sys.databases"
+                   Column                   |            Type             | Modifiers 
+--------------------------------------------+-----------------------------+-----------
+ name                                       | character varying(128)      | 
+ database_id                                | oid                         | 
+ source_database_id                         | integer                     | 
+ owner_sid                                  | oid                         | 
+ create_date                                | timestamp without time zone | 
+ compatibility_level                        | tinyint                     | 
+ collation_name                             | name                        | 
+ user_access                                | tinyint                     | 
+ user_access_desc                           | nvarchar2(60)               | 
+ is_read_onliy                              | bit(1)                      | 
+ is_auto_close_on                           | bit(1)                      | 
+ is_auto_shrink_on                          | bit(1)                      | 
+ state                                      | tinyint                     | 
+ state_desc                                 | nvarchar2(60)               | 
+ is_in_standby                              | bit(1)                      | 
+ is_cleanly_shutdown                        | bit(1)                      | 
+ is_supplemental_logging_enabled            | bit(1)                      | 
+ snapshot_isolation_state                   | tinyint                     | 
+ snapshot_isolation_state_desc              | nvarchar2(60)               | 
+ is_read_committed_snapshot_on              | bit(1)                      | 
+ recovery_model                             | tinyint                     | 
+ recovery_model_desc                        | nvarchar2(60)               | 
+ page_verify_option                         | tinyint                     | 
+ page_verify_option_desc                    | nvarchar2(60)               | 
+ is_auto_create_stats_on                    | bit(1)                      | 
+ is_auto_create_stats_incremental_on        | bit(1)                      | 
+ is_auto_update_stats_on                    | bit(1)                      | 
+ is_auto_update_stats_async_on              | bit(1)                      | 
+ is_ansi_null_default_on                    | bit(1)                      | 
+ is_ansi_nulls_on                           | bit(1)                      | 
+ is_ansi_padding_on                         | bit(1)                      | 
+ is_ansi_warnings_on                        | bit(1)                      | 
+ is_concat_null_yields_null_on              | bit(1)                      | 
+ is_numeric_roundabort_on                   | bit(1)                      | 
+ is_quoted_identifier_on                    | bit(1)                      | 
+ is_recursive_triggers_on                   | bit(1)                      | 
+ is_cursor_close_on_commit_on               | bit(1)                      | 
+ is_local_cursor_default                    | bit(1)                      | 
+ is_fulltext_enabled                        | bit(1)                      | 
+ is_trustworthy_on                          | bit(1)                      | 
+ is_db_chaining_on                          | bit(1)                      | 
+ is_parameterization_forced                 | bit(1)                      | 
+ is_master_key_encrypted_by_server          | bit(1)                      | 
+ is_query_store_on                          | bit(1)                      | 
+ is_published                               | bit(1)                      | 
+ is_subscribed                              | bit(1)                      | 
+ is_merge_published                         | bit(1)                      | 
+ is_distributor                             | bit(1)                      | 
+ is_sync_with_backup                        | bit(1)                      | 
+ service_broker_guid                        | oid                         | 
+ is_broker_enabled                          | bit(1)                      | 
+ log_reuse_wait                             | tinyint                     | 
+ log_reuse_wait_desc                        | nvarchar2(60)               | 
+ is_date_correlation_on                     | bit(1)                      | 
+ is_cdc_enabled                             | bit(1)                      | 
+ is_encrypted                               | bit(1)                      | 
+ is_honor_broker_priority_on                | bit(1)                      | 
+ replica_id                                 | oid                         | 
+ group_database_id                          | oid                         | 
+ resource_pool_id                           | integer                     | 
+ default_language_lcid                      | smallint                    | 
+ default_language_name                      | character varying(128)      | 
+ default_fulltext_language_lcid             | integer                     | 
+ default_fulltext_language_name             | character varying(128)      | 
+ is_nested_triggers_on                      | bit(1)                      | 
+ is_transform_noise_words_on                | bit(1)                      | 
+ two_digit_year_cutoff                      | smallint                    | 
+ containment                                | tinyint                     | 
+ containment_desc                           | character varying(60)       | 
+ target_recovery_time_in_seconds            | integer                     | 
+ delayed_durability                         | integer                     | 
+ delayed_durability_desc                    | character varying(60)       | 
+ is_memory_optimized_elevate_to_snapshot_on | bit(1)                      | 
+ is_federation_member                       | bit(1)                      | 
+ is_remote_data_archive_enabled             | bit(1)                      | 
+ is_mixed_page_allocation_on                | bit(1)                      | 
+ is_temporal_history_retention_enabled      | bit(1)                      | 
+ catalog_collation_type                     | bit(1)                      | 
+ catalog_collation_type_desc                | nvarchar2(60)               | 
+ physical_database_name                     | nvarchar2(128)              | 
+ is_result_set_caching_on                   | bit(1)                      | 
+ is_accelerated_database_recovery_on        | bit(1)                      | 
+ is_tempdb_spill_to_remote_store            | bit(1)                      | 
+ is_stale_page_detection_on                 | bit(1)                      | 
+ is_memory_optimized_enabled                | bit(1)                      | 
+ is_ledger_on                               | bit(1)                      | 
+ is_change_feed_enabled                     | bit(1)                      | 
+ is_vorder_enable                           | bit(1)                      | 
+
+-- prepare data
+CREATE TABLE employees (
+    name VARCHAR(50) NOT NULL,
+    age INT,
+    salary DECIMAL(10, 2),
+    -- CHECK 约束：年龄必须 >= 18
+    CONSTRAINT chk_age CHECK (age >= 18)
+);
+CREATE VIEW high_salary_employees AS
+SELECT name, age, salary
+FROM employees
+WHERE age >= 18 AND salary > 5000;
+INSERT INTO employees (name, age, salary) VALUES ('张三', 25, 8000.00); 
+INSERT INTO employees (name, age, salary) VALUES ('李四', 26, 4000.00); 
+-- test select
+select constraint_schema, constraint_name, check_clause
+from information_schema_tsql.check_constraints c
+inner join pg_namespace s on c.constraint_schema = s.nspname
+where s.nspname = 'sys_view_test_02';
+ constraint_schema | constraint_name |    check_clause     
+-------------------+-----------------+---------------------
+ sys_view_test_02  | chk_age         | CHECK ((age >= 18))
+(1 row)
+
+select table_schema, table_name, column_name, ordinal_position, column_default, is_nullable, data_type, character_maximum_length,
+character_octet_length, numeric_precision, numeric_precision_radix, numeric_scale, datetime_precision, character_set_name, collation_catalog,
+collation_schema, collation_name, domain_catalog, domain_schema, domain_name
+from information_schema_tsql.columns c
+inner join pg_namespace s on c.table_schema = s.nspname
+where s.nspname = 'sys_view_test_02';
+   table_schema   |      table_name       | column_name | ordinal_position | column_default | is_nullable |       data_type       | character_maximum_length | character_octet_length | numeric_precision | numeric_precision_radix | numeric_scale | datetime_precision | character_set_name | collation_catalog | collation_schema | collation_name | domain_catalog | domain_schema | domain_name 
+------------------+-----------------------+-------------+------------------+----------------+-------------+-----------------------+--------------------------+------------------------+-------------------+-------------------------+---------------+--------------------+--------------------+-------------------+------------------+----------------+----------------+---------------+-------------
+ sys_view_test_02 | high_salary_employees | name        |             1043 |                | YES         | character varying(50) |                       50 |                     50 |                   |                         |               |                    |                    |                   |                  | default        |                |               | 
+ sys_view_test_02 | employees             | name        |             1043 |                | NO          | character varying(50) |                       50 |                     50 |                   |                         |               |                    |                    |                   |                  | default        |                |               | 
+ sys_view_test_02 | high_salary_employees | salary      |             1700 |                | YES         | numeric(10,2)         |                          |                        | 10                |                      10 |             2 |                    |                    |                   |                  |                |                |               | 
+ sys_view_test_02 | high_salary_employees | age         |               23 |                | YES         | integer               |                          |                        | 10                |                      10 |             0 |                    |                    |                   |                  |                |                |               | 
+ sys_view_test_02 | employees             | salary      |             1700 |                | YES         | numeric(10,2)         |                          |                        | 10                |                      10 |             2 |                    |                    |                   |                  |                |                |               | 
+ sys_view_test_02 | employees             | age         |               23 |                | YES         | integer               |                          |                        | 10                |                      10 |             0 |                    |                    |                   |                  |                |                |               | 
+(6 rows)
+
+select table_schema, table_name, table_type
+from information_schema_tsql.tables t
+inner join pg_namespace s on t.table_schema = s.nspname
+where s.nspname = 'sys_view_test_02';
+   table_schema   |      table_name       | table_type 
+------------------+-----------------------+------------
+ sys_view_test_02 | employees             | BASE TABLE
+ sys_view_test_02 | high_salary_employees | VIEW
+(2 rows)
+
+select table_schema, table_name, view_definition, check_option, is_updatable
+from information_schema_tsql.views v
+inner join pg_namespace s on v.table_schema = s.nspname
+where s.nspname = 'sys_view_test_02';
+   table_schema   |      table_name       |                                                                view_definition                                                                | check_option | is_updatable 
+------------------+-----------------------+-----------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------
+ sys_view_test_02 | high_salary_employees | SELECT employees.name, employees.age, employees.salary FROM employees WHERE ((employees.age >= 18) AND (employees.salary > (5000)::numeric)); | NONE         | YES
+(1 row)
+
+select sid, mode, status, status2, crdate, reserved, category, cmplevel, filename, version
+from sys.sysdatabases;
+ sid | mode | status | status2 |          crdate          |         reserved         | category | cmplevel | filename | version 
+-----+------+--------+---------+--------------------------+--------------------------+----------+----------+----------+---------
+  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
+  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
+  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
+  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
+  10 |    0 |      0 |       0 | Mon Jan 01 00:00:00 1900 | Mon Jan 01 00:00:00 1900 |        0 | 0        |          |        
+(5 rows)
+
+select name, schema_id, principal_id
+from sys.schemas where schema_id < 16384;
+        name        | schema_id | principal_id 
+--------------------+-----------+--------------
+ pg_toast           |        99 |           10
+ cstore             |       100 |           10
+ pkg_service        |      3988 |           10
+ dbe_perf           |      4988 |           10
+ snapshot           |      4989 |           10
+ blockchain         |      4990 |           10
+ coverage           |      4994 |           10
+ xmltype            |     12872 |           10
+ pg_catalog         |        11 |           10
+ sqladvisor         |      7813 |           10
+ dbe_pldebugger     |      4992 |           10
+ dbe_pldeveloper    |      4993 |           10
+ dbe_sql_util       |      9049 |           10
+ information_schema |     14975 |           10
+ db4ai              |      4991 |           10
+ public             |      2200 |           10
+(16 rows)
+
+select *
+from sys.sysusers where uid >1000 and uid < 16384;
+ uid  | status |           name           | sid | roles | createdate | updatedate | altuid | password | gid | environ | hasdbaccess | islogin | isntname | isntgroup | isntuser | issqluser | isaliased | issqlrole | isapprole 
+------+--------+--------------------------+-----+-------+------------+------------+--------+----------+-----+---------+-------------+---------+----------+-----------+----------+-----------+-----------+-----------+-----------
+ 1044 |      0 | gs_role_copy_files       |     |       |            |            |      0 |          |   0 |         |           1 |       0 |        0 |         0 |        0 |         0 |         0 |         1 |         0
+ 1045 |      0 | gs_role_signal_backend   |     |       |            |            |      0 |          |   0 |         |           1 |       0 |        0 |         0 |        0 |         0 |         0 |         1 |         0
+ 1046 |      0 | gs_role_tablespace       |     |       |            |            |      0 |          |   0 |         |           1 |       0 |        0 |         0 |        0 |         0 |         0 |         1 |         0
+ 1047 |      0 | gs_role_replication      |     |       |            |            |      0 |          |   0 |         |           1 |       0 |        0 |         0 |        0 |         0 |         0 |         1 |         0
+ 1048 |      0 | gs_role_account_lock     |     |       |            |            |      0 |          |   0 |         |           1 |       0 |        0 |         0 |        0 |         0 |         0 |         1 |         0
+ 1055 |      0 | gs_role_pldebugger       |     |       |            |            |      0 |          |   0 |         |           1 |       0 |        0 |         0 |        0 |         0 |         0 |         1 |         0
+ 1056 |      0 | gs_role_directory_create |     |       |            |            |      0 |          |   0 |         |           1 |       0 |        0 |         0 |        0 |         0 |         0 |         1 |         0
+ 1059 |      0 | gs_role_directory_drop   |     |       |            |            |      0 |          |   0 |         |           1 |       0 |        0 |         0 |        0 |         0 |         0 |         1 |         0
+(8 rows)
+
+select *
+from sys.databases where database_id = 1;
+   name    | database_id | source_database_id | owner_sid | create_date | compatibility_level | collation_name | user_access | user_access_desc | is_read_onliy | is_auto_close_on | is_auto_shrink_on | state | state_desc | is_in_standby | is_cleanly_shutdown | is_supplemental_logging_enabled | snapshot_isolation_state | snapshot_isolation_state_desc | is_read_committed_snapshot_on | recovery_model | recovery_model_desc | page_verify_option | page_verify_option_desc | is_auto_create_stats_on | is_auto_create_stats_incremental_on | is_auto_update_stats_on | is_auto_update_stats_async_on | is_ansi_null_default_on | is_ansi_nulls_on | is_ansi_padding_on | is_ansi_warnings_on | is_concat_null_yields_null_on | is_numeric_roundabort_on | is_quoted_identifier_on | is_recursive_triggers_on | is_cursor_close_on_commit_on | is_local_cursor_default | is_fulltext_enabled | is_trustworthy_on | is_db_chaining_on | is_parameterization_forced | is_master_key_encrypted_by_server | is_query_store_on | is_published | is_subscribed | is_merge_published | is_distributor | is_sync_with_backup | service_broker_guid | is_broker_enabled | log_reuse_wait | log_reuse_wait_desc | is_date_correlation_on | is_cdc_enabled | is_encrypted | is_honor_broker_priority_on | replica_id | group_database_id | resource_pool_id | default_language_lcid | default_language_name | default_fulltext_language_lcid | default_fulltext_language_name | is_nested_triggers_on | is_transform_noise_words_on | two_digit_year_cutoff | containment | containment_desc | target_recovery_time_in_seconds | delayed_durability | delayed_durability_desc | is_memory_optimized_elevate_to_snapshot_on | is_federation_member | is_remote_data_archive_enabled | is_mixed_page_allocation_on | is_temporal_history_retention_enabled | catalog_collation_type | catalog_collation_type_desc | physical_database_name | is_result_set_caching_on | is_accelerated_database_recovery_on | is_tempdb_spill_to_remote_store | is_stale_page_detection_on | is_memory_optimized_enabled | is_ledger_on | is_change_feed_enabled | is_vorder_enable 
+-----------+-------------+--------------------+-----------+-------------+---------------------+----------------+-------------+------------------+---------------+------------------+-------------------+-------+------------+---------------+---------------------+---------------------------------+--------------------------+-------------------------------+-------------------------------+----------------+---------------------+--------------------+-------------------------+-------------------------+-------------------------------------+-------------------------+-------------------------------+-------------------------+------------------+--------------------+---------------------+-------------------------------+--------------------------+-------------------------+--------------------------+------------------------------+-------------------------+---------------------+-------------------+-------------------+----------------------------+-----------------------------------+-------------------+--------------+---------------+--------------------+----------------+---------------------+---------------------+-------------------+----------------+---------------------+------------------------+----------------+--------------+-----------------------------+------------+-------------------+------------------+-----------------------+-----------------------+--------------------------------+--------------------------------+-----------------------+-----------------------------+-----------------------+-------------+------------------+---------------------------------+--------------------+-------------------------+--------------------------------------------+----------------------+--------------------------------+-----------------------------+---------------------------------------+------------------------+-----------------------------+------------------------+--------------------------+-------------------------------------+---------------------------------+----------------------------+-----------------------------+--------------+------------------------+------------------
+ template1 |           1 |                    |        10 |             |                     | UTF8           | 0           | MULTI_USER       | 0             | 0                | 0                 | 0     | ONLINE     | 0             | 0                   | 0                               | 1                        | ON                            | 1                             | 1              | FULL                | 0                  |                         | 1                       | 0                                   | 0                       | 0                             | 1                       | 1                | 0                  | 0                   | 1                             | 0                        | 1                       | 0                        | 0                            | 0                       | 0                   | 0                 | 0                 | 0                          | 0                                 | 0                 | 0            | 0             | 0                  | 0              | 0                   |                     | 0                 | 0              | NOTHING             | 0                      | 0              | 0            | 0                           |            |                   |                  |                       |                       |                                |                                |                       |                             |                       | 0           | NONE             |                               0 |                  0 |                         | 0                                          | 0                    | 0                              | 0                           | 0                                     | 0                      | Not Applicable              |                        | 0                        | 0                                   | 0                               | 0                          | 0                           | 0            | 0                      | 0
+(1 row)
+
+drop table employees;
+drop view high_salary_employees;
+reset search_path;
+drop schema sys_view_test_02 cascade;
