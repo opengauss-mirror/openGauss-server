@@ -2171,7 +2171,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
          * possible non-uniqueness, and we add the index OID to the result
          * list if further checking is needed.
          */
-        if (!indexRelation->rd_index->indisunique) {
+        if (!u_sess->attr.attr_common.unique_checks || !indexRelation->rd_index->indisunique) {
             checkUnique = UNIQUE_CHECK_NO;
         } else if (conflict != NULL) {
             checkUnique = UNIQUE_CHECK_PARTIAL;

@@ -26,7 +26,7 @@ test: explain_pbe
 # autonomous transaction Test
 
 # test object type
-test: pg_object_type dump_object_type pg_anydata_type parse_const_as_param_type
+test: pg_object_type dump_object_type pg_anydata_type parse_const_as_param_type unique_check
 
 #test jdbc pbe for bypass
 test: bypass_pbe multi_simple_query
