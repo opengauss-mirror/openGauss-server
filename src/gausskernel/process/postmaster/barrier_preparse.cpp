@@ -321,6 +321,10 @@ void BarrierPreParseMain(void)
 
     ereport(LOG, (errmsg("[BarrierPreParse] barrier preparse thread started")));
 
+    /* Init preparse information */
+    g_instance.csn_barrier_cxt.preparseStartLocation = InvalidXLogRecPtr;
+    g_instance.csn_barrier_cxt.preparseEndLocation = InvalidXLogRecPtr;
+    
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -361,6 +365,8 @@ void BarrierPreParseMain(void)
     g_instance.proc_base->BarrierPreParseLatch = &t_thrd.proc->procLatch;
 
     startLSN = get_preparse_start_lsn();
+    g_instance.csn_barrier_cxt.preparseStartLocation = startLSN;
+
     if (IS_MULTI_DISASTER_RECOVER_MODE && g_instance.csn_barrier_cxt.barrier_hash_table == NULL) {
         InitBarrierHash();
     }
@@ -448,6 +454,7 @@ void BarrierPreParseMain(void)
         if (XLogRecPtrIsInvalid(xlogreader->ReadRecPtr) && errormsg) {
             ereport(LOG, (errmsg("[BarrierPreParse] preparse thread get an error info %s", errormsg)));
         }
+        g_instance.csn_barrier_cxt.preparseEndLocation = startLSN;
 
         try_time++;
         check_exit_preparse_conditions(xlogreader, &start_time, &startLSN, try_time);

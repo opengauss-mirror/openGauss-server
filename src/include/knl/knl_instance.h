@@ -771,6 +771,9 @@ typedef struct knl_g_csn_barrier_context {
     int max_run_time;
     MemoryContext barrier_context;
 
+    bool startBarrierPreParse;
+    XLogRecPtr preparseStartLocation;
+    XLogRecPtr preparseEndLocation;
     XLogRecPtr latest_valid_record;
     pg_crc32 latest_record_crc;
     uint32 latest_record_len;
