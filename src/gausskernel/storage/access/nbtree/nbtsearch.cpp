@@ -478,8 +478,16 @@ int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum
 
         if (likely((!(scankey->sk_flags & SK_ISNULL)) && !isNull)) {
             int8 multiplier = (scankey->sk_flags & SK_BT_DESC) ? 1 : -1;
-            /* btint4cmp */
-            if (scankey->sk_func.fn_oid == F_BTINT4CMP) {
+            /* btint1cmp ~ btint8cmp */
+            if (scankey->sk_func.fn_oid == F_INT1CMP) {
+                result = (int1)datum == (int1)scankey->sk_argument
+                             ? 0
+                             : ((int1)datum > (int1)scankey->sk_argument ? 1 : -1);
+            } else if (scankey->sk_func.fn_oid == F_BTINT2CMP) {
+                result = (int2)datum == (int2)scankey->sk_argument
+                             ? 0
+                             : ((int2)datum > (int2)scankey->sk_argument ? 1 : -1);
+            } else if (scankey->sk_func.fn_oid == F_BTINT4CMP) {
                 result = (int32)datum == (int32)scankey->sk_argument
                              ? 0
                              : ((int32)datum > (int32)scankey->sk_argument ? 1 : -1);
