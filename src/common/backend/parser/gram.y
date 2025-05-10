@@ -34970,6 +34970,9 @@ static List* TransformToConstStrNode(List *inExprList, char* raw_str)
 			resTarget = (ResTarget *)lfirst(exprCell);
 			if (NULL == rotateinCell->aliasname && IsA(resTarget->val, ColumnRef)) {
 				ColumnRef* column_ref = (ColumnRef*)resTarget->val;
+				if (list_length(column_ref->fields) != 1) {
+					ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("ROTATE in clause error")));
+				}
 				// column_ref info has been convert to lower case, so we need to extact the not convert lower case info in raw str
 				char * lower_column_name = strVal(linitial(column_ref->fields));
 				int len = strlen(lower_column_name);
