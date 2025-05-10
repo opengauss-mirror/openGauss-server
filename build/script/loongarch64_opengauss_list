@@ -106,7 +106,9 @@
 ./share/postgresql/extension/gms_match.control
 ./share/postgresql/extension/gms_assert--1.0.sql
 ./share/postgresql/extension/gms_assert.control
-./share/postgresql/extension/shark--1.0.sql
+./share/postgresql/extension/shark--2.0.sql
+./share/postgresql/extension/shark--1.0--2.0.sql
+./share/postgresql/extension/shark--2.0--1.0.sql
 ./share/postgresql/extension/shark.control
 ./share/postgresql/extension/dblink--1.0.sql
 ./share/postgresql/extension/dblink--unpackaged--1.0.sql

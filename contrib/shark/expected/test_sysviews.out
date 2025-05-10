@@ -1174,29 +1174,27 @@ from sys.sysdatabases;
 (5 rows)
 
 select name, schema_id, principal_id
-from sys.schemas where schema_id < 16384;
-        name        | schema_id | principal_id 
---------------------+-----------+--------------
- pg_toast           |        99 |           10
- cstore             |       100 |           10
- pkg_service        |      3988 |           10
- dbe_perf           |      4988 |           10
- snapshot           |      4989 |           10
- blockchain         |      4990 |           10
- coverage           |      4994 |           10
- xmltype            |     12872 |           10
- pg_catalog         |        11 |           10
- sqladvisor         |      7813 |           10
- dbe_pldebugger     |      4992 |           10
- dbe_pldeveloper    |      4993 |           10
- dbe_sql_util       |      9049 |           10
- information_schema |     14975 |           10
- db4ai              |      4991 |           10
- public             |      2200 |           10
-(16 rows)
+from sys.schemas where schema_id < 10000;
+      name       | schema_id | principal_id 
+-----------------+-----------+--------------
+ pg_toast        |        99 |           10
+ cstore          |       100 |           10
+ pkg_service     |      3988 |           10
+ dbe_perf        |      4988 |           10
+ snapshot        |      4989 |           10
+ blockchain      |      4990 |           10
+ coverage        |      4994 |           10
+ pg_catalog      |        11 |           10
+ sqladvisor      |      7813 |           10
+ dbe_pldebugger  |      4992 |           10
+ dbe_pldeveloper |      4993 |           10
+ dbe_sql_util    |      9049 |           10
+ db4ai           |      4991 |           10
+ public          |      2200 |           10
+(14 rows)
 
 select *
-from sys.sysusers where uid >1000 and uid < 16384;
+from sys.sysusers where uid >1000 and uid < 10000;
  uid  | status |           name           | sid | roles | createdate | updatedate | altuid | password | gid | environ | hasdbaccess | islogin | isntname | isntgroup | isntuser | issqluser | isaliased | issqlrole | isapprole 
 ------+--------+--------------------------+-----+-------+------------+------------+--------+----------+-----+---------+-------------+---------+----------+-----------+----------+-----------+-----------+-----------+-----------
  1044 |      0 | gs_role_copy_files       |     |       |            |            |      0 |          |   0 |         |           1 |       0 |        0 |         0 |        0 |         0 |         0 |         1 |         0

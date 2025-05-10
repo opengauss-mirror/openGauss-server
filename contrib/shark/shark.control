@@ -1,4 +1,4 @@
-comment = 'extension compatible with SQL Server'
-default_version = '1.0'
+comment = 'extension for D compatibility'
+default_version = '2.0'
 module_pathname = '$libdir/shark'
 relocatable = false
