@@ -882,7 +882,9 @@ static void knl_g_csn_barrier_init(knl_g_csn_barrier_context* csn_barrier_cxt)
     errno_t rc = memset_s(csn_barrier_cxt->stopBarrierId, MAX_BARRIER_ID_LENGTH, 0,
                           sizeof(csn_barrier_cxt->stopBarrierId));
     securec_check(rc, "\0", "\0");
-
+    csn_barrier_cxt->startBarrierPreParse = false;
+    csn_barrier_cxt->preparseStartLocation = InvalidXLogRecPtr;
+    csn_barrier_cxt->preparseEndLocation = InvalidXLogRecPtr;
     csn_barrier_cxt->latest_valid_record = 0;
     csn_barrier_cxt->latest_record_crc = 0;
     csn_barrier_cxt->latest_record_len = 0;

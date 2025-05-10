@@ -4172,11 +4172,6 @@ static int ServerLoop(void)
         if (IS_PGXC_COORDINATOR && g_instance.attr.attr_sql.max_resource_package &&
             (g_instance.pid_cxt.CPMonitorPID == 0) && (pmState == PM_RUN) && !dummyStandbyMode)
             g_instance.pid_cxt.CPMonitorPID = initialize_util_thread(WLM_CPMONITOR);
-        
-        if (g_instance.pid_cxt.BarrierPreParsePID == 0 &&
-            u_sess->attr.attr_storage.recovery_min_apply_delay > 0) {
-            g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
-        }
 
 #ifndef ENABLE_LITE_MODE
         /* If we have lost the twophase cleaner, try to start a new one */
@@ -13178,10 +13173,10 @@ static void SetAuxType()
         case SHARE_STORAGE_XLOG_COPYER:
             t_thrd.bootstrap_cxt.MyAuxProcType = XlogCopyBackendProcess;
             break;
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
             t_thrd.bootstrap_cxt.MyAuxProcType = BarrierPreParseBackendProcess;
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
             t_thrd.bootstrap_cxt.MyAuxProcType = TsCompactionProcess;
             break;
@@ -13471,11 +13466,11 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             SharedStorageXlogCopyBackendMain();
             proc_exit(1);
             break;
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
             BarrierPreParseMain();
             proc_exit(1);
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
             CompactionProcess::compaction_main();
             proc_exit(1);
@@ -13726,8 +13721,8 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case PAGEREPAIR_THREAD:
         case HEARTBEAT:
         case SHARE_STORAGE_XLOG_COPYER:
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
         case TS_COMPACTION_CONSUMER:
         case TS_COMPACTION_AUXILIAY:
@@ -14279,10 +14274,10 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<APPLY_WORKER>, APPLY_WORKER, "applyworker", "apply worker" },
     { GaussDbThreadMain<STACK_PERF_WORKER>, STACK_PERF_WORKER, "stack_perf", "stack perf worker" },
     { GaussDbThreadMain<DMS_AUXILIARY_THREAD>, DMS_AUXILIARY_THREAD, "dms_auxiliary", "maintenance xmin in dms" },
+    { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
 
     /* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES
-    { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
     { GaussDbThreadMain<TS_COMPACTION>, TS_COMPACTION, "TScompaction",
       "timeseries compaction" },
     { GaussDbThreadMain<TS_COMPACTION_CONSUMER>, TS_COMPACTION_CONSUMER, "TScompconsumer",
