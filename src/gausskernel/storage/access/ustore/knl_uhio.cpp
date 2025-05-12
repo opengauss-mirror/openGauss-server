@@ -624,6 +624,7 @@ BlockNumber RelationPruneBlockAndReturn(Relation relation, BlockNumber start_blo
 
         /* Done with the easy cases, we try to prune it now */
         delta = UHeapGetFreespaceDelta((UHeapPageHeader)page);
+        pruned = false;
         if (FSMUpdateHeuristic(delta)) {
             pruned = UHeapPagePruneOpt(relation, buffer, InvalidOffsetNumber, 0);
         }

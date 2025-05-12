@@ -3339,7 +3339,7 @@ check_tup_satisfies_update:
         UndoRecordVerify(newundorec);
     }
     UHeapUpdateFSM(relation, buffer, true);
-    if (!useInplaceUpdate) {
+    if (buffer != newbuf) {
         UHeapUpdateFSM(relation, newbuf, true);
     }
     UHeapFinalizeDML<UHEAP_UPDATE>(relation, buffer, &newbuf, newtup, uheaptup, &(oldtup.ctid),
@@ -3669,6 +3669,7 @@ reacquire_buffer:
                     (USTORE_VERIFY_UPAGE_TUPLE | USTORE_VERIFY_UPAGE_ROW),  verifyOffnum[k]);
             }
         }
+        UHeapUpdateFSM(relation, buffer, true);
 
         pfree(ufreeOffsetRanges);
         UnlockReleaseBuffer(buffer);

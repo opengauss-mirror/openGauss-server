@@ -260,7 +260,7 @@ int UHeapPagePrune(Relation relation, const RelationBuffer *relbuf, TransactionI
                     ndeleted ++;
                     continue;
                 }
-                TD* td = (TD*)PageGetTDPointerBySlot(page, tdSlot);
+                TD* td = (TD*)PageGetTDPointerBySlot(page, tdSlot - 1);
                 TransactionId xid = td->xactid;
                 if (TransactionIdIsNormal(xid) && TransactionIdPrecedes(xid, oldestXmin)) {
                     UHeapPruneRecordDead(&prstate, offnum, relation);
@@ -574,7 +574,7 @@ int UHeapPagePruneGuts(Relation relation, const RelationBuffer *relbuf, Transact
                 ndeleted ++;
                 continue;
             }
-            TD* td = (TD*)PageGetTDPointerBySlot(page, tdSlot);
+            TD* td = (TD*)PageGetTDPointerBySlot(page, tdSlot - 1);
             TransactionId xid = td->xactid;
             if (TransactionIdIsNormal(xid) && TransactionIdPrecedes(xid, oldestXmin)) {
                 UHeapPruneRecordDead(&prstate, offnum, relation);
