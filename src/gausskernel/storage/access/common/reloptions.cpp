@@ -2825,7 +2825,7 @@ void ForbidOutUsersToSetInnerOptions(List *userOptions)
 void ForbidUserToSetDefinedIndexOptions(Relation rel, List *options)
 {
     /* the following option must be in tab[] of default_reloptions(). */
-    static const char *unchangedOpt[] = {"crossbucket", "storage_type"};
+    static const char *unchangedOpt[] = {"crossbucket", "storage_type", "index_type"};
 
     int firstInvalidOpt = -1;
     if (FindInvalidOption(options, unchangedOpt, lengthof(unchangedOpt), &firstInvalidOpt)) {
