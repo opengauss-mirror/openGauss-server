@@ -102,11 +102,19 @@ install:
 	@if test -d contrib/spq_plugin; then $(MAKE) -C contrib/spq_plugin $@; fi
 	@if test -d contrib/dolphin; then $(MAKE) -C contrib/dolphin $@; fi
 	@if test -d contrib/age; then $(MAKE) -C contrib/age $@; fi
+	@if test -d contrib/datavec; then $(MAKE) -C contrib/datavec clean; fi
 	@if test -d contrib/datavec; then $(MAKE) -C contrib/datavec $@; fi
 	@if test -d contrib/gms_stats; then $(MAKE) -C contrib/gms_stats $@; fi
 	@if test -d contrib/gms_profiler; then $(MAKE) -C contrib/gms_profiler $@; fi
 	@if test -d contrib/gms_output; then $(MAKE) -C contrib/gms_output $@; fi
 	@if test -d contrib/timescaledb; then (./contrib/timescaledb/run_to_build.sh && $(MAKE) -C contrib/timescaledb/build $@); fi
+	@if test -d contrib/chparser; then \
+		if command -v scws &> /dev/null; then \
+			$(MAKE) -C contrib/chparser $@; \
+		else \
+			echo "SCWS is not installed, skipping chparser build."; \
+		fi \
+	fi
 	+@echo "openGauss installation complete."
 endif
 endif

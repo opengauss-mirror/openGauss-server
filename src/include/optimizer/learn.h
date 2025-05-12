@@ -110,6 +110,7 @@
 #define TEXT_STRATEGY_SCAN_SEQ                  "SEQ"
 #define TEXT_STRATEGY_SCAN_INDEX                "INDEX"
 #define TEXT_STRATEGY_SCAN_INDEX_ONLY           "INDEX_ONLY"
+#define TEXT_STRATEGY_SCAN_ANN_INDEX            "ANN_INDEX"
 #define TEXT_STRATEGY_SCAN_BITMAP_INDEX         "BITMAP_INDEX"
 #define TEXT_STRATEGY_SCAN_BITMAP_HEAP          "BITMAP_HEAP"
 #define TEXT_STRATEGY_SCAN_TID                  "TID"

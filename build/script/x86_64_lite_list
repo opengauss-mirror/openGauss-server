@@ -29,10 +29,14 @@
 ./share/postgresql/pg_ident.conf.sample
 ./share/postgresql/postgres.description
 ./share/postgresql/postgresql.conf.sample
+./share/postgresql/extension/age--1.0.0.sql
+./share/postgresql/extension/age.control
 ./share/postgresql/extension/plpgsql--1.0.sql
 ./share/postgresql/extension/hstore.control
 ./share/postgresql/extension/security_plugin.control
 ./share/postgresql/extension/security_plugin--1.0.sql
+./share/postgresql/extension/chparser.control
+./share/postgresql/extension/chparser--1.0.sql
 ./share/postgresql/extension/dolphin.control
 ./share/postgresql/extension/dolphin--4.1.sql
 ./share/postgresql/extension/dolphin--1.0--1.1.sql
@@ -708,6 +712,7 @@
 ./lib/libaws-cpp-sdk-s3.so
 ./lib/libxgboost.so
 ./lib/libpagecompression.so*
+./lib/postgresql/age.so
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
 ./lib/postgresql/euc_kr_and_mic.so
@@ -743,6 +748,7 @@
 ./lib/postgresql/pg_plugin
 ./lib/postgresql/proc_srclib
 ./lib/postgresql/security_plugin.so
+./lib/postgresql/chparser.so
 ./lib/postgresql/dolphin.so
 ./lib/postgresql/pg_upgrade_support.so
 ./lib/postgresql/latin2_and_win1250.so

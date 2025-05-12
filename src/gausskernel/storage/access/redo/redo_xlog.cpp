@@ -51,6 +51,7 @@ typedef enum {
 XLogRecParseState *xlog_fpi_parse_to_block(XLogReaderState *record, uint32 *blocknum)
 {
     XLogRecParseState *recordstatehead = NULL;
+    XLogRecParseState *recordblockstat = NULL;
 
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
@@ -59,6 +60,19 @@ XLogRecParseState *xlog_fpi_parse_to_block(XLogReaderState *record, uint32 *bloc
     }
 
     XLogRecSetBlockDataState(record, XLOG_FULL_PAGE_ORIG_BLOCK_NUM, recordstatehead);
+
+    if ((XLogRecGetInfo(record) & XLR_INFO_MASK) == XLOG_MERGE_RECORD) {
+        for (int blockid = 1; blockid <= record->max_block_id; blockid++) {
+            (*blocknum)++;
+            XLogParseBufferAllocListFunc(record, &recordblockstat, recordstatehead);
+            if (recordblockstat == NULL) {
+                return NULL;
+            }
+
+            XLogRecSetBlockDataState(record, blockid, recordblockstat);
+        }
+    }
+
     return recordstatehead;
 }
 

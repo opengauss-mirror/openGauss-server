@@ -929,6 +929,7 @@ typedef struct IndexOptInfo {
     List* indextlist; /* targetlist representing index columns */
 
     bool isGlobal;       /* true if index is global partition index */
+    bool isAnnIndex;     /* true if index is vector index */
     bool crossbucket;    /* true if index is crossbucket */
     bool predOK;         /* true if predicate matches query */
     bool unique;         /* true if a unique index */
@@ -1226,6 +1227,13 @@ typedef struct IndexPath {
     ScanDirection indexscandir;
     Cost indextotalcost;
     Selectivity indexselectivity;
+    bool isAnnIndex;
+    List* annQuals;
+    List* annQualCols;
+    Cost annQualTotalCost;
+    Selectivity annQualSelectivity;
+    double annCount; // restore limitValue/sel
+    Cost allcost; // index cost + qual cost
     bool is_ustore;
 } IndexPath;
 

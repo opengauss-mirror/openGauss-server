@@ -42,6 +42,7 @@
 #include "access/xlogutils.h"
 #include "access/gin.h"
 #include "access/ustore/knl_uredo.h"
+#include "access/generic_xlog.h"
 
 #include "catalog/storage_xlog.h"
 #include "storage/buf/buf_internals.h"
@@ -160,6 +161,7 @@ static bool DispatchRepSlotRecord(XLogReaderState *record, List *expectedTLIs, T
 static bool DispatchHeap3Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchDefaultRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchBarrierRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchGenericRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 
 static bool DispatchBtreeRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 
@@ -232,6 +234,7 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
         XLOG_CFS_SHRINK_OPERATION },
     { DispatchLogicalDDLMsgRecord, RmgrRecordInfoValid, RM_LOGICALDDLMSG_ID, XLOG_LOGICAL_DDL_MESSAGE,
         XLOG_LOGICAL_DDL_MESSAGE },
+    { DispatchGenericRecord, RmgrRecordInfoValid, RM_GENERIC_ID, XLOG_GENERIC_LOG, XLOG_GENERIC_LOG },
 };
 
 /* Run from the dispatcher and txn worker thread. */
@@ -1431,6 +1434,12 @@ static bool DispatchUBTreeRecord(XLogReaderState *record, List *expectedTLIs, Ti
 }
 
 static bool DispatchUBTree2Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
+{
+    DispatchRecordWithPages(record, expectedTLIs, true);
+    return false;
+}
+
+static bool DispatchGenericRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     DispatchRecordWithPages(record, expectedTLIs, true);
     return false;

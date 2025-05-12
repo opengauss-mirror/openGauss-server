@@ -1918,6 +1918,63 @@ DESCR("greater than or equal");
 DATA(insert OID = 6565 ("-"       PGNSP PGUID l f f     0    16    16     0     0 boolum - -));
 DESCR("negate");
 
+DATA(insert OID = 8311 ("<->"     PGNSP PGUID b f f 8305 8305 701 8311 0 8433 - -));
+DESCR("l2_distance");
+DATA(insert OID = 8312 ("<#>"     PGNSP PGUID b f f 8305 8305 701 8312 0 vector_negative_inner_product - -));
+DESCR("vector_negative_inner_product");
+DATA(insert OID = 8313 ("<=>"     PGNSP PGUID b f f 8305 8305 701 8313 0 8435 - -));
+DESCR("cosine_distance");
+DATA(insert OID = 8314 ("<+>"     PGNSP PGUID b f f  8305  8305    701  8314  0 8436 - -));
+DESCR("l1_distance");
+DATA(insert OID = 8339 ("||"      PGNSP PGUID b f f  8305  8305    8305  0  0 vector_concat - -));
+DESCR("vector_concat");
+
+DATA(insert OID = 8319 ("<->"     PGNSP PGUID b f f 8307 8307 701 8319 0 8465 - -));
+DESCR("sparsevec_l2_distance");
+DATA(insert OID = 8320 ("<#>"     PGNSP PGUID b f f 8307 8307 701 8320 0 sparsevec_negative_inner_product - -));
+DESCR("sparsevec_negative_inner_product");
+DATA(insert OID = 8321 ("<=>"     PGNSP PGUID b f f 8307 8307 701 8321 0 8466 - -));
+DESCR("sparsevec_cosine_distance");
+DATA(insert OID = 8322 ("<+>"     PGNSP PGUID b f f  8307  8307    701  8322  0 8467 - -));
+DESCR("sparsevec_l1_distance");
+
+DATA(insert OID = 8323 ("<~>"     PGNSP PGUID b f f 1560 1560 701 8323 0 hamming_distance - -));
+DESCR("hamming_distance");
+DATA(insert OID = 8324 ("<%>"     PGNSP PGUID b f f 1560 1560 701 8324 0 jaccard_distance - -));
+DESCR("jaccard_distance");
+
+DATA(insert OID = 8325 ("+"       PGNSP PGUID b f f 8305 8305 8305 8325 0 vector_add 0 0));
+DESCR("vector_add");
+DATA(insert OID = 8326 ("-"       PGNSP PGUID b f f 8305 8305 8305 8326 0 vector_sub 0 0));
+DESCR("vector_sub");
+DATA(insert OID = 8349 ("*"       PGNSP PGUID b f f 8305 8305 8305 8349 0 8203 0 0));
+DESCR("vector_mul");
+DATA(insert OID = 8327 ("<"       PGNSP PGUID b f f 8305 8305 16  8329 8330 vector_lt scalarltsel scalarltjoinsel));
+DESCR("vector less than");
+DATA(insert OID = 8328 ("<="      PGNSP PGUID b f f 8305 8305 16  8330 8329 vector_le scalarltsel scalarltjoinsel));
+DESCR("vector less than or equal");
+DATA(insert OID = 8329 (">"       PGNSP PGUID b f f 8305 8305 16  8327 8328 vector_gt scalargtsel scalargtjoinsel));
+DESCR("vector greater than");
+DATA(insert OID = 8330 (">="      PGNSP PGUID b f f 8305 8305 16  8328 8327 vector_ge scalargtsel scalargtjoinsel));
+DESCR("vector greater than or equal");
+DATA(insert OID = 8331 ("="       PGNSP PGUID b f t 8305 8305 16 8331 8332 vector_eq eqsel eqjoinsel));
+DESCR("vector equal");
+DATA(insert OID = 8332 ("<>"      PGNSP PGUID b f f 8305 8305 16 8332 8331 vector_ne neqsel neqjoinsel));
+DESCR("vector unequal");
+
+DATA(insert OID = 8333 ("<"       PGNSP PGUID b f f 8307 8307 16  8335 8336 sparsevec_lt scalarltsel scalarltjoinsel));
+DESCR("sparsevec less than");
+DATA(insert OID = 8334 ("<="      PGNSP PGUID b f f 8307 8307 16  8336 8335 sparsevec_le scalarltsel scalarltjoinsel));
+DESCR("sparsevec less than or equal");
+DATA(insert OID = 8335 (">"       PGNSP PGUID b f f 8307 8307 16  8333 8334 sparsevec_gt scalargtsel scalargtjoinsel));
+DESCR("sparsevec greater than");
+DATA(insert OID = 8336 (">="      PGNSP PGUID b f f 8307 8307 16  8334 8333 sparsevec_ge scalargtsel scalargtjoinsel));
+DESCR("sparsevec greater than or equal");
+DATA(insert OID = 8337 ("="       PGNSP PGUID b f t 8307 8307 16 8337 8338 sparsevec_eq eqsel eqjoinsel));
+DESCR("sparsevec equal");
+DATA(insert OID = 8338 ("<>"      PGNSP PGUID b f f 8307 8307 16 8338 8337 sparsevec_ne neqsel neqjoinsel));
+DESCR("sparsevec unequal");
+
 /*
  * function prototypes
  */

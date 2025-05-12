@@ -299,6 +299,10 @@ typedef struct RelationData {
     bool come_from_partrel;
     /* used only for gsc, keep it preserved if you modify the rel, otherwise set it null */
     struct LocalRelationEntry *entry;
+
+    /* used only for datavec pq */
+    char *pqTable;
+    float *pqDistanceTable; 
 } RelationData;
 
 /*

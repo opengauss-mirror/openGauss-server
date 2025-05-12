@@ -21,6 +21,7 @@
 
 #include "access/skey.h"
 #include "access/sysattr.h"
+#include "access/multi_redo_api.h"
 #include "catalog/index.h"
 #include "catalog/pg_am.h"
 #include "catalog/pg_collation.h"
@@ -914,6 +915,17 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
     bool index_is_ordered = false;
     bool index_only_scan = false;
     int indexcol;
+
+    bool can_parallel = IS_STREAM_PLAN && (u_sess->opt_cxt.query_dop > 1) && (ST_BITMAPSCAN != scantype) &&
+                        (!rel->isPartitionedTable);
+
+    if (index->isAnnIndex && IsExtremeRedo()) {
+        if (ST_BITMAPSCAN != scantype) {
+            ereport(NOTICE, (errmsg("Ann Index does not support extreme RTO"),
+                             errhint("This will show as Seq Scan")));
+        }
+        return NIL;
+    }
 
     /*
      * Check that index supports the desired scan type(s)

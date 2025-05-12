@@ -461,7 +461,8 @@ static void get_pathkeys_for_partiteratorpath(RelOptInfo *final_rel, Expr* mminf
         }
         PartIteratorPath *itrpath = (PartIteratorPath *)path;
         if (itrpath->path.pathkeys == NULL &&
-            (itrpath->subPath->pathtype == T_IndexOnlyScan || itrpath->subPath->pathtype == T_IndexScan)) {
+            (itrpath->subPath->pathtype == T_IndexOnlyScan || itrpath->subPath->pathtype == T_IndexScan ||
+             itrpath->subPath->pathtype == T_AnnIndexScan)) {
             IndexPath *indexPath = (IndexPath *)itrpath->subPath;
             // only supprot btree index.
             if (!OID_IS_BTREE(indexPath->indexinfo->relam)) {

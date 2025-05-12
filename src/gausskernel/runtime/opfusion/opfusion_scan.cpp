@@ -58,6 +58,9 @@ ScanFusion* ScanFusion::getScanFusion(Node* node, PlannedStmt* planstmt, ParamLi
             scan = New(CurrentMemoryContext) IndexOnlyScanFusion((IndexOnlyScan*)node, planstmt, params);
             break;
 
+        case T_AnnIndexScan:
+            scan = New(CurrentMemoryContext) IndexScanFusion((IndexScan*)node, planstmt, params);
+            break;
         default:
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),

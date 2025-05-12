@@ -3006,6 +3006,13 @@ typedef struct knl_u_ndp_context {
     char *crl_path;
 } knl_u_ndp_context;
 
+typedef struct knl_u_datavec_context {
+    int hnsw_ef_search;
+    int hnsw_earlystop_threshold;
+    int ivfflat_probes;
+    int ivfpq_kreorder;
+} knl_u_datavec_context;
+
 typedef struct knl_session_context {
     volatile knl_session_status status;
     /* used for threadworker, elem in m_readySessionList */
@@ -3159,6 +3166,8 @@ typedef struct knl_session_context {
 
     /* standby write. */
     knl_u_libsw_context libsw_cxt;
+
+    knl_u_datavec_context datavec_ctx;
 
 } knl_session_context;
 

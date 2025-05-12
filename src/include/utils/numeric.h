@@ -157,6 +157,7 @@ typedef struct NumericData* Numeric;
 #define NUMERIC_MAX_SCALE 1000
 #define NUMERIC_MIN_SCALE -84
 #define IS_FLOAT_AS_NUMERIC(scale) ((scale) == INT16_MIN)
+#define NUMERIC_TYPEMOD_MASK 0xffff
 
 /*
  * Internal limits on the scales chosen for calculation results
