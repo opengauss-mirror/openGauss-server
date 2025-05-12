@@ -78,7 +78,7 @@ select @@rowcount;
         0
 (1 row)
 
-begin;
+begin transaction;
 declare c1 cursor for select * from t1;
 select @@rowcount;
  rowcount 
@@ -98,7 +98,7 @@ select @@rowcount;
         1
 (1 row)
 
-end;
+rollback transaction;
 select abcd from t1; -- expect error 
 ERROR:  column "abcd" does not exist
 LINE 1: select abcd from t1;
@@ -189,7 +189,7 @@ select rowcount_big();
             0
 (1 row)
 
-begin;
+begin transaction;
 declare c1 cursor for select * from t1;
 select rowcount_big();
  rowcount_big 
@@ -209,7 +209,7 @@ select rowcount_big();
             1
 (1 row)
 
-end;
+rollback transaction;
 select abcd from t1; -- expect error 
 ERROR:  column "abcd" does not exist
 LINE 1: select abcd from t1;
@@ -313,7 +313,7 @@ select @@spid;
 
 -- @@fetch_status
 -- single cursor
-begin;
+begin transaction;
 cursor c1 for select * from t1;
 fetch next from c1;
  c1 
@@ -355,9 +355,9 @@ fetch next from c2;	-- expect error
 ERROR:  cursor "c2" does not exist
 select @@fetch_status;
 ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
-end;
+rollback transaction;
 -- multi cursors
-begin;
+begin transaction;
 cursor c1 for select * from t1;
 cursor c2 for select * from t1;
 fetch next from c1;
@@ -408,7 +408,7 @@ select @@fetch_status;
             0
 (1 row)
 
-end;
+rollback transaction;
 -- pl/pgsql usecases
 declare
 rowcount int;

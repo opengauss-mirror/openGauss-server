@@ -648,8 +648,10 @@ other			.
 					ECHO;
 					if (lex_param->begin_state == BEGIN_UNDEFINED)
 					{
+						DBFormatType dbType = GetDatabaseType();
 						/* For a transaction statement, all possible tokens after BEGIN are here */
 						if (IsTranscationTokens(yytext, "transaction") ||
+							(dbType == D_FORMAT && IsTranscationTokens(yytext, "tran")) ||
 							IsTranscationTokens(yytext, "work") ||
                             IsTranscationTokens(yytext, "isolation") ||
                             IsTranscationTokens(yytext, "read") ||

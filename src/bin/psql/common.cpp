@@ -2750,6 +2750,8 @@ DBFormatType GetDatabaseType()
             dbType = B_FORMAT;
         } else if (strcmp(compatibilityStr, "C") == 0) {
             dbType = C_FORMAT;
+        } else if (strcmp(compatibilityStr, "D") == 0) {
+            dbType = D_FORMAT;
         } else if (strcmp(compatibilityStr, "PG") == 0) {
             dbType = PG_FORMAT;
         }

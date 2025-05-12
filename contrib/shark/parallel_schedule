@@ -6,7 +6,7 @@ test: objectproperty
 test: clustered_index insert_stmt sbr_test
 test: test_ddl_and_dml
 test: rotate-test-part2 rotate-test-part2_ci
-test: functions
+test: functions transaction
 test: test_dbcc test_dbcc_case_sen
 test: test_sysviews
 test: gs_dump_d_format rotate_part2_dump
