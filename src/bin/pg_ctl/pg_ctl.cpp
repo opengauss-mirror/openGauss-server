@@ -2772,6 +2772,7 @@ static void do_switchover(uint32 term)
                        switchover_timeout_file, strerror(errno));
                 exit(1);
             }
+            pg_log(PG_WARNING, _("create switchover_timeout_file to (PID: %ld)\n"), pid);
             if (fclose(sofile)) {
                 pg_log(PG_WARNING, _(" could not write switchover timeout signal file \"%s\": %s\n"), switchover_timeout_file,
                        strerror(errno));
@@ -2785,6 +2786,7 @@ static void do_switchover(uint32 term)
                     pg_log(PG_WARNING, _(" could not send switchover timeout signal (PID: %ld): %s\n"), pid, strerror(errno));
                 exit(1);
             }
+            pg_log(PG_WARNING, _("send SIGUSR1 signal to (PID: %ld)\n"), pid);
         } else {
             pg_log(PG_PROGRESS, _("done\n"));
             pg_log(PG_PROGRESS, _("switchover completed (%s)\n"), pg_data);

@@ -69183,7 +69183,7 @@ msgstr "checkpointer启动, CheckPointTimeout为%d"
 
 #: process/postmaster/checkpointer.cpp:419
 #, c-format
-msgid "database first startup and recovery finish,so do checkpointer"
+msgid "database first startup and recovery finish, so do checkpointer"
 msgstr "数据库第一次启动和恢复完成, 所以运行checkpointer"
 
 #: process/postmaster/checkpointer.cpp:508

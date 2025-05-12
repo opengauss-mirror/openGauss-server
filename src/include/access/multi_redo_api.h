@@ -42,7 +42,7 @@
 #define ENABLE_ONDEMAND_REALTIME_BUILD false
 #else
 #define ENABLE_ONDEMAND_RECOVERY (ENABLE_DMS && IsExtremeRedo() \
-    && g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery)
+    && g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery && !SS_DISASTER_CLUSTER)
 #define ENABLE_ONDEMAND_REALTIME_BUILD (ENABLE_ONDEMAND_RECOVERY \
     && g_instance.attr.attr_storage.dms_attr.enable_ondemand_realtime_build)
 #endif

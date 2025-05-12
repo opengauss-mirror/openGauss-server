@@ -341,6 +341,7 @@ volatile uint64 sync_system_identifier = 0;
 bool FencedUDFMasterMode = false;
 bool PythonFencedMasterModel = false;
 static pid_t fencedMasterPID = 0;
+static ClusterRunMode ss_disaster_mode = RUN_MODE_PRIMARY;
 
 extern char* optarg;
 extern int optind, opterr;
@@ -1840,7 +1841,6 @@ int PostmasterMain(int argc, char* argv[])
     char* userDoption = NULL;
     int use_pooler_port = -1;
     int i;
-    ClusterRunMode ss_dorado_mode = RUN_MODE_PRIMARY;
     OptParseContext optCtxt;
     errno_t rc = 0;
     Port port;
@@ -2127,14 +2127,14 @@ int PostmasterMain(int argc, char* argv[])
             case 'z':
                 if (0 == strncmp(optCtxt.optarg, "cluster_primary", strlen("cluster_primary")) &&
                     '\0' == optCtxt.optarg[strlen("cluster_primary")]) {
-                    ss_dorado_mode = RUN_MODE_PRIMARY;
+                    ss_disaster_mode = RUN_MODE_PRIMARY;
                 } else if (0 == strncmp(optCtxt.optarg, "cluster_standby", strlen("cluster_standby")) &&
                            '\0' == optCtxt.optarg[strlen("cluster_standby")]) {
-                    ss_dorado_mode = RUN_MODE_STANDBY;
+                    ss_disaster_mode = RUN_MODE_STANDBY;
                 } else {
                     ereport(FATAL, (errmsg("the options of -z is not recognized")));
                 }
-                ereport(LOG, (errmsg("Set dorado cluster run mode %d", ss_dorado_mode)));
+                ereport(LOG, (errmsg("[SS] Set disaster cluster run mode %d in enable dms", ss_disaster_mode)));
                 break;
             case 'c':
             case '-': {
@@ -3079,7 +3079,7 @@ int PostmasterMain(int argc, char* argv[])
         SSReadReformerCtrl();
         if (SS_DISASTER_CLUSTER) {
             /* fresh ss dorado cluster run mode */
-            g_instance.dms_cxt.SSReformerControl.clusterRunMode = ss_dorado_mode;
+            g_instance.dms_cxt.SSReformerControl.clusterRunMode = ss_disaster_mode;
             SSDisasterRefreshMode();
         }
         int src_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
@@ -3495,12 +3495,14 @@ static void CheckExtremeRtoGUCConflicts(void)
                     errhint("Either turn on ss_enable_dms, or turn off ss_enable_ondemand_recovery.")));
         }
 
-        if (SS_DISASTER_CLUSTER) {
-            ereport(ERROR,
+        /* In shared storage double cluster, only primary cluster support ondemand extreme. */
+        if (g_instance.attr.attr_storage.recovery_parse_workers > 1 && ss_disaster_mode == RUN_MODE_STANDBY) {
+            ereport(WARNING,
                 (errcode(ERRCODE_SYSTEM_ERROR),
-                    errmsg("ondemand extreme rto not support in shared storage double cluster mode."),
-                    errhint("Either turn ss_disaster_mode to single, or turn off ss_enable_ondemand_recovery.")));
-        }
+                errmsg("ondemand extreme not support in standby cluster for shared storage double cluster."
+                        "ondemand extreme will not take effect in standby cluster if ondemand extreme is on."),
+                errhint("Either turn ss_disaster_mode to single, or turn off ss_enable_ondemand_recovery.")));
+         }
 
         if (g_instance.attr.attr_storage.recovery_parse_workers <= 1) {
             ereport(ERROR,
@@ -13258,7 +13260,7 @@ const char* wal_get_db_state_string(DbState db_state)
 static ServerMode get_cur_mode(void)
 {
     if (SS_DISASTER_MAIN_STANDBY_NODE) {
-        return STANDBY_MODE;
+        return MAIN_STANDBY_MODE;
     } else if (ENABLE_DMS) {
         return SS_OFFICIAL_PRIMARY ? PRIMARY_MODE : STANDBY_MODE;
     }

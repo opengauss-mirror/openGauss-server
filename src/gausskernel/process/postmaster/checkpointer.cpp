@@ -416,7 +416,7 @@ void CheckpointerMain(void)
             t_thrd.checkpoint_cxt.checkpoint_requested = true;
             flags = CHECKPOINT_IMMEDIATE;
             bgwriter_first_startup = false;
-            ereport(LOG, (errmsg("database first startup and recovery finish,so do checkpointer")));
+            ereport(LOG, (errmsg("database first startup and recovery finish, so do checkpointer.")));
         }
 
         if (t_thrd.checkpoint_cxt.checkpoint_requested) {

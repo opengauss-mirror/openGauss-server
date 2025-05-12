@@ -4652,8 +4652,9 @@ static int XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli, int source, 
     }
 
     if (!FILE_POSSIBLY_DELETED(errno) || !notfoundOk) { /* unexpected failure? */
-        ereport(PANIC, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %s", path,
-            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("XLogFileRead: could not open file \"%s\" "
+                        "(log segment %s): %s", path, XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno),
+                        TRANSLATE_ERRNO)));
     }
     return -1;
 }
@@ -4707,10 +4708,11 @@ int XLogFileReadAnyTLI(XLogSegNo segno, int emode, uint32 sources)
                          (uint32)((segno) % XLogSegmentsPerXLogId));
     securec_check_ss(errorno, "", "");
 
-    errno = ENOENT;
+ 
     if (!SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
-        ereport(emode, (errcode_for_file_access(), errmsg("could not open file \"%s\" (log segment %s): %s", path,
-            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), TRANSLATE_ERRNO)));
+        ereport(emode, (errcode_for_file_access(), errmsg("XLogFileReadAnyTLI: could not open file \"%s\" "
+                "(log segment: %s, fd: %d, sources: %u): %s", path,
+                XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, segno), fd, sources, TRANSLATE_ERRNO)));
     }
 
     return -1;
@@ -9721,6 +9723,7 @@ void StartupXLOG(void)
              !XLByteEQ(t_thrd.shemem_ptr_cxt.ControlFile->backupEndPoint, InvalidXLogRecPtr) ||
              t_thrd.shemem_ptr_cxt.ControlFile->state == DB_SHUTDOWNED)) {
             t_thrd.xlog_cxt.InArchiveRecovery = true;
+            ereport(LOG, (errmsg_internal("StartupXLOG: archive recovery set true")));
             if (t_thrd.xlog_cxt.StandbyModeRequested) {
                 t_thrd.xlog_cxt.StandbyMode = true;
             }
@@ -11065,7 +11068,7 @@ void StartupXLOG(void)
             SSRecheckBufferPool();
             ereport(LOG, (errmodule(MOD_DMS),
                 errmsg("[SS reform][SS failover][SS switchover] finished full checkpoint"
-                    "and update control file")));
+                    " and update control file")));
         }
     }
 
@@ -20130,9 +20133,19 @@ retry:
                             havedata = false;
                         }
                     }
+
                     if (havedata) {
                         t_thrd.xlog_cxt.readSource = XLOG_FROM_STREAM;
                         t_thrd.xlog_cxt.XLogReceiptSource = XLOG_FROM_STREAM;
+                        if (t_thrd.xlog_cxt.readFile < 0) {
+                            t_thrd.xlog_cxt.readFile = XLogFileRead(t_thrd.xlog_cxt.readSegNo, PANIC,
+                                                                    t_thrd.xlog_cxt.recoveryTargetTLI, XLOG_FROM_STREAM,
+                                                                    false);
+                            Assert(t_thrd.xlog_cxt.readFile >=0);
+                        } else {
+                            t_thrd.xlog_cxt.readSource = XLOG_FROM_STREAM;
+                            t_thrd.xlog_cxt.XLogReceiptSource = XLOG_FROM_STREAM;
+                        }
                         break;
                     }
 
@@ -20174,7 +20187,7 @@ retry:
                         close(t_thrd.xlog_cxt.readFile);
                         t_thrd.xlog_cxt.readFile = -1;
                     }
-                    t_thrd.xlog_cxt.failedSources = 0;
+
                     /* Reset curFileTLI if random fetch. */
                     if (randAccess) {
                         t_thrd.xlog_cxt.curFileTLI = 0;
@@ -20182,16 +20195,15 @@ retry:
                     if (SS_DORADO_MAIN_STANDBY_NODE && CheckForFailoverTrigger()) {
                         goto triggered;
                     }
+                    if (t_thrd.startup_cxt.shutdown_requested) {
+                            ereport(LOG, (errmsg("startup shutdown")));
+                            proc_exit(0);
+                    }
                     /*
                      * Try to restore the file from archive, or read an
                      * existing file from pg_xlog.
                      */
                     sources = XLOG_FROM_ARCHIVE | XLOG_FROM_PG_XLOG;
-
-                    if (t_thrd.startup_cxt.shutdown_requested) {
-                        ereport(LOG, (errmsg("startup shutdown")));
-                        proc_exit(0);
-                    }
 
                     /*
                     * Before we sleep, re-scan for possible new timelines
@@ -20204,27 +20216,27 @@ retry:
                         }
                     }
 
+                    /* In dorado cluster, set IsRecoveryDone true, no waiting read xlog fail from pg_xlog. */
                     if (!xlogctl->IsRecoveryDone) {
                         g_instance.comm_cxt.predo_cxt.redoPf.redo_done_time = GetCurrentTimestamp();
                         g_instance.comm_cxt.predo_cxt.redoPf.recovery_done_ptr = t_thrd.xlog_cxt.ReadRecPtr;
                         ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                                    errmsg("XLogPageRead IsRecoveryDone is set true, "
-                                            "ReadRecPtr:%X/%X, EndRecPtr:%X/%X, "
-                                            "receivedUpto:%X/%X, CtlInfo_insertHead:%X/%X.",
-                                            (uint32)(t_thrd.xlog_cxt.ReadRecPtr >> 32),
-                                            (uint32)(t_thrd.xlog_cxt.ReadRecPtr),
-                                            (uint32)(t_thrd.xlog_cxt.EndRecPtr >> 32),
-                                            (uint32)(t_thrd.xlog_cxt.EndRecPtr),
-                                            (uint32)(t_thrd.xlog_cxt.receivedUpto >> 32),
-                                            (uint32)(t_thrd.xlog_cxt.receivedUpto),
-                                            (uint32)(g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead >> 32),
-                                            (uint32)(g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead))));
+                                errmsg("XLogPageRead IsRecoveryDone is set true, "
+                                        "ReadRecPtr:%X/%X, EndRecPtr:%X/%X, "
+                                        "receivedUpto:%X/%X, CtlInfo_insertHead:%X/%X.",
+                                        (uint32)(t_thrd.xlog_cxt.ReadRecPtr >> 32),
+                                        (uint32)(t_thrd.xlog_cxt.ReadRecPtr),
+                                        (uint32)(t_thrd.xlog_cxt.EndRecPtr >> 32),
+                                        (uint32)(t_thrd.xlog_cxt.EndRecPtr),
+                                        (uint32)(t_thrd.xlog_cxt.receivedUpto >> 32),
+                                        (uint32)(t_thrd.xlog_cxt.receivedUpto),
+                                        (uint32)(g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead >> 32),
+                                        (uint32)(g_instance.xlog_cxt.ssReplicationXLogCtl->insertHead))));
                         parallel_recovery::redo_dump_all_stats();
                     }
 
                     /*
-                    * signal postmaster to update local redo end
-                    * point to gaussdb state file.
+                    * signal postmaster to update local redo end point to gaussdb state file.
                     */
                     ProcTxnWorkLoad(true);
                     if (!xlogctl->IsRecoveryDone) {
@@ -20237,6 +20249,17 @@ retry:
                     SpinLockAcquire(&xlogctl->info_lck);
                     xlogctl->IsRecoveryDone = true;
                     SpinLockRelease(&xlogctl->info_lck);
+
+                    /* condition enter, only t_thrd.xlog_cxt.failedSource = 0x011(XLOG_FROM_ARCHIVE | XLOG_FROM_PG_XLOG) 
+                     * or 0x111(XLOG_FROM_STREAM | XLOG_FROM_ARCHIVE | XLOG_FROM_PG_XLOG) can enter.
+                     * no xlog: due to read xlog is null > 10 times, set t_thrd.xlog_cxt.failedSource = readsource = 0x011
+                     * if enter, it indicate that pg_xlog or arichive fail so switch to stream.
+                     */
+                    if ((!(sources & ~t_thrd.xlog_cxt.failedSources))) {
+                        ereport(LOG, (errmsg("current source=%u, last read with failedSource=%u", sources,
+                            t_thrd.xlog_cxt.failedSources)));
+                        t_thrd.xlog_cxt.failedSources = 0;
+                    }
                     /*
                     * If primary_conninfo is set, launch walreceiver to
                     * try to stream the missing WAL, before retrying to
@@ -20265,8 +20288,26 @@ retry:
                         SpinLockRelease(&walrcv->mutex);
 
                         RequestXLogStreaming(&targetRecPtr, 0, REPCONNTARGET_SHARED_STORAGE, 0);
+                        continue;
                     }
-                    break;
+
+                    /*
+                     * In startup phase enter, failedSource = 0, sources = 011
+                     */
+                    sources &= ~t_thrd.xlog_cxt.failedSources;
+                    t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources);
+                    if (t_thrd.xlog_cxt.readFile >=0) {
+                        break;
+                    }
+
+                    ereport(LOG, (errmsg("do not find any more files. source=%u failedSource=%u", sources,
+                            t_thrd.xlog_cxt.failedSources)));
+
+                    /*
+                     * Nope, not found in archive and/or pg_xlog. set t_thrd.xlog_cxt.failedSources = 0x111,
+                     * which indicate that XLOG_FROM_STREAM | XLOG_FROM_ARCHIVE | XLOG_FROM_ARCHIVE.
+                     */
+                    t_thrd.xlog_cxt.failedSources |= sources;
                 }
 
                 /*
@@ -20276,26 +20317,38 @@ retry:
                 RedoInterruptCallBack();
             }
         } else {
-            if (randAccess) {
-                t_thrd.xlog_cxt.curFileTLI = 0;
-            }
+            /* In archive or crash recovery. */
+            if (t_thrd.xlog_cxt.readFile < 0) {
+                uint32 sources;
+                if (randAccess) {
+                    t_thrd.xlog_cxt.curFileTLI = 0;
+                }
 
-            sources = XLOG_FROM_PG_XLOG;
-            if (t_thrd.xlog_cxt.InArchiveRecovery) {
-                sources |= XLOG_FROM_ARCHIVE;
+                sources = XLOG_FROM_PG_XLOG;
+                if (t_thrd.xlog_cxt.InArchiveRecovery) {
+                    sources |= XLOG_FROM_ARCHIVE;
+                }
+
+                t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources);
+                if (t_thrd.xlog_cxt.readFile < 0) {
+                    return -1;
+                }
             }
         }
     }
 
-needread:
-    if (t_thrd.xlog_cxt.readFile < 0) {
-        t_thrd.xlog_cxt.readFile = XLogFileReadAnyTLI(t_thrd.xlog_cxt.readSegNo, emode, sources);
-        if (t_thrd.xlog_cxt.readFile < 0) {
-            ereport(LOG, (errmsg("%s open failed, change xlog file.", SS_XLOGDIR)));
-            goto next_record_is_invalid;
-        }
-    }
-    
+    /*
+     * At this point, we have the right segment open and if we're streaming we
+     * know the requested record is in it.
+     */
+    Assert(t_thrd.xlog_cxt.readFile != -1);
+
+    /* read size for XLOG_FROM_PG_XLOG */
+    t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
+
+    /* Read the requested page */
+    t_thrd.xlog_cxt.readOff = targetPageOff;
+
     if (xlogreader->preReadBuf == NULL) {
         actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readOff);
     } else {
@@ -20328,9 +20381,6 @@ next_record_is_invalid:
     return -1;
 
 triggered:
-    if (t_thrd.xlog_cxt.ssXlogReadFailedTimes < XLOG_STREAM_READREC_MAXTRY) {
-        goto needread;
-    }
     if (t_thrd.xlog_cxt.readFile >= 0) {
         close(t_thrd.xlog_cxt.readFile);
     }
@@ -20622,7 +20672,7 @@ retry:
                         break;
                     }
 
-                    ereport(DEBUG5, (errmsg("do not find any more files.sources=%u failedSources=%u", sources,
+                    ereport(LOG, (errmsg("do not find any more files.sources=%u failedSources=%u", sources,
                                             t_thrd.xlog_cxt.failedSources)));
                     /*
                      * Nope, not found in archive and/or pg_xlog.
