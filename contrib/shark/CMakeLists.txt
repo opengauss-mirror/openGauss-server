@@ -131,10 +131,21 @@ include_directories(
 )
 set_target_properties(shark PROPERTIES PREFIX "")
 
+execute_process(
+    COMMAND bash cmake.sh
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/shark.control
     DESTINATION share/postgresql/extension/
 ) 
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/shark--1.0.sql
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/shark--2.0.sql
+    DESTINATION share/postgresql/extension/
+)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/upgrade_script/shark--1.0--2.0.sql
+    DESTINATION share/postgresql/extension/
+)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/rollback_script/shark--2.0--1.0.sql
     DESTINATION share/postgresql/extension/
 )
 install(TARGETS shark DESTINATION lib/postgresql)

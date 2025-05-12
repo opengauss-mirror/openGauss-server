@@ -369,10 +369,10 @@ select sid, mode, status, status2, crdate, reserved, category, cmplevel, filenam
 from sys.sysdatabases;
 
 select name, schema_id, principal_id
-from sys.schemas where schema_id < 16384;
+from sys.schemas where schema_id < 10000;
 
 select *
-from sys.sysusers where uid >1000 and uid < 16384;
+from sys.sysusers where uid >1000 and uid < 10000;
 
 select *
 from sys.databases where database_id = 1;
