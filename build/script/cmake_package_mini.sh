@@ -467,7 +467,7 @@ function install_gaussdb()
     fi
 
     if [[ -e "/etc/openEuler-release" && "$(cat /etc/openEuler-release | awk '{print $3}')" == "24.03" ]]; then
-        CMAKE_OPT="$CMAKE_OPT -DENABLE_OPENEULER_MAJOR=ON"
+        CMAKE_OPT="$CMAKE_OPT -DENABLE_OPENEULER_MAJOR=ON -DENABLE_OPENESSL3=OFF"
     fi
 
     if [ "${PLATFORM_ARCH}"x == "loongarch64"x ]; then
