@@ -60,6 +60,7 @@
 #include "miscadmin.h"
 #include "gssignal/gs_signal.h"
 #include "pgxc/pgxc.h"
+#include "../lib_hcom4db/libhcom.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -611,6 +612,16 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     errno_t ss_rc;
     uint32 cpylen;
     int to_ctrl_tcp_port = libcomm_addrinfo->ctrl_port;
+    int node_shift = gs_get_nodeshift(libcomm_addrinfo->nodename);
+    char namebuf[NAMEDATALEN];
+    rc = memcpy_s(namebuf, NAMEDATALEN, libcomm_addrinfo->nodename, NAMEDATALEN);
+    securec_check(rc, "\0", "\0");
+    rc = sprintf_s(libcomm_addrinfo->nodename, NAMEDATALEN, "%d_%s", node_shift, namebuf);
+    securec_check(rc, "\0", "\0");
+    rc = sprintf_s(libcomm_addrinfo->selfnodename, NAMEDATALEN, "%d_%s",
+                   node_shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
+    securec_check(rc, "\0", "\0");
+    libcomm_addrinfo->shift = node_shift;
 
     uint64 time_enter = COMM_STAT_TIME();
     uint64 time_now = time_enter;
@@ -709,6 +720,7 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     pmailbox->local_thread_id = 0;
     pmailbox->peer_thread_id = 0;
     pmailbox->close_reason = 0;
+    pmailbox->shift = node_shift;
     if (g_instance.comm_cxt.commutil_cxt.g_stat_mode && (pmailbox->statistic == NULL)) {
         LIBCOMM_MALLOC(pmailbox->statistic, sizeof(struct pmailbox_statistic), pmailbox_statistic);
         if (NULL == pmailbox->statistic) {
@@ -748,10 +760,10 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     fcmsgs.version = version;
     fcmsgs.stream_key = libcomm_addrinfo->streamKey;
     fcmsgs.query_id = IS_SPQ_COORDINATOR ? libcomm_addrinfo->streamKey.queryId : DEBUG_QUERY_ID;
-    cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
+    cpylen = comm_get_cpylen(libcomm_addrinfo->selfnodename, NAMEDATALEN);
     ss_rc = memset_s(fcmsgs.nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
     securec_check(ss_rc, "\0", "\0");
-    ss_rc = strncpy_s(fcmsgs.nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
+    ss_rc = strncpy_s(fcmsgs.nodename, NAMEDATALEN, libcomm_addrinfo->selfnodename, cpylen + 1);
     securec_check(ss_rc, "\0", "\0");
     fcmsgs.nodename[cpylen] = '\0';
 
@@ -915,6 +927,7 @@ bool gs_s_check_connection(libcommaddrinfo* libcomm_addrinfo, int node_idx, bool
     ss_rc = strncpy_s(addr.ip, HOST_LEN_OF_HTAB, libcomm_addrinfo->host, cpylen + 1);
     securec_check(ss_rc, "\0", "\0");
     addr.ip[cpylen] = '\0';
+    addr.shift = libcomm_addrinfo->shift;
 
     if (type == CTRL_CHANNEL) {
         addr.port = libcomm_addrinfo->ctrl_port;
@@ -928,7 +941,7 @@ retry:
 
     if (likely(rc == CONNSTATESUCCEED)) {
         /* data channel need to check socket even if the connection state in htap is succeed */
-        if (type == DATA_CHANNEL) {
+        if (type == DATA_CHANNEL && !get_dll_status()) {
             LIBCOMM_PTHREAD_RWLOCK_WRLOCK(&g_instance.comm_cxt.g_senders->sender_conn[node_idx].rwlock);
             if (IsValidLibcommAddr(node_idx,
                 g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]->socket, &addr) == false ||
@@ -1327,6 +1340,7 @@ int gs_send(gsocket* gs_sock, char* message, int m_len, int time_out, bool block
     int res = 0;
     int sent_size = 0;
     bool send_msg = false;
+    errno_t ss_rc;
 
     TimeProfile wait_quota = {0};
     TimeProfile send_proile = {0};
@@ -1437,10 +1451,14 @@ int gs_send(gsocket* gs_sock, char* message, int m_len, int time_out, bool block
         REMOTE_NAME(g_instance.comm_cxt.g_s_node_sock, node_idx));
 
     node_name = g_instance.comm_cxt.g_s_node_sock[node_idx].remote_nodename;
-    if (0 == strcmp(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, node_name)) {
+    char remote_nodename[NAMEDATALEN];
+    int shift;
+    ss_rc = sscanf_s(node_name, "%d_%s", &shift, &remote_nodename, (unsigned)NAMEDATALEN);
+    securec_check_for_sscanf_s(ss_rc, 2, "\0", "\0");
+    if (0 == strcmp(remote_nodename, node_name)) {
         LIBCOMM_PTHREAD_RWLOCK_RDLOCK(&g_instance.comm_cxt.g_senders->sender_conn[node_idx].rwlock);
         // remote_version is the cmailbox version, consumer use it to check.
-        ret = gs_push_local_buffer(streamid, message, need_send_len, remote_version);
+        ret = gs_push_local_buffer(streamid, message, need_send_len, remote_version, node_name);
         LIBCOMM_PTHREAD_RWLOCK_UNLOCK(&g_instance.comm_cxt.g_senders->sender_conn[node_idx].rwlock);
         if (ret < 0) {
             LIBCOMM_PTHREAD_MUTEX_LOCK(&pmailbox->sinfo_lock);

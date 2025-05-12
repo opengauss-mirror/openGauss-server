@@ -62,6 +62,7 @@
 #include "gssignal/gs_signal.h"
 #include "pgxc/pgxc.h"
 #include "communication/commproxy_interface.h"
+#include "../lib_hcom4db/libhcom.h"
 #ifdef ENABLE_UT
 #define static
 #endif
@@ -88,9 +89,31 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
 
 static int libcomm_tcp_listen()
 {
+    if (g_instance.attr.attr_network.comm_sctp_type != 0) {
+        const char* type = g_instance.attr.attr_network.comm_sctp_type == 1 ? "TCP" : "HCCS";
+        if (hcom_init_dll(g_instance.attr.attr_network.hcom_link_path)) {
+            g_libcomm_adapt.connect = hcom_build_connection;
+            g_libcomm_adapt.send_data = hcom_client_sendbuf;
+            g_libcomm_adapt.recv_data = NULL;
+            return hcom_server_listener_init(g_instance.comm_cxt.localinfo_cxt.g_local_host,
+                g_instance.comm_cxt.g_receivers->server_listen_conn.port, type);
+        }
+    }
     return mc_tcp_listen(g_instance.comm_cxt.localinfo_cxt.g_local_host,
         g_instance.comm_cxt.g_receivers->server_listen_conn.port,
         NULL);
+}
+
+int libcomm_malloc_iov_item_for_hcom(struct mc_lqueue_item** iov_item)
+{
+    struct mc_lqueue_item* item = NULL;
+    struct iovec* iov = NULL;
+    *iov_item = gs_memory_pool_queue_pop((char*)iov);
+    if (*iov_item != NULL) {
+        return 0;
+    }
+    // hcom thread can not do LIBCOMM_MALLOC
+    return -1;
 }
 
 /*
@@ -1000,7 +1023,7 @@ static int libcomm_build_tcp_connection(libcommaddrinfo* libcomm_addrinfo, int n
     struct libcomm_connect_package connect_package;
     connect_package.type = LIBCOMM_PKG_TYPE_CONNECT;
     connect_package.magic_num = MSG_HEAD_MAGIC_NUM2;
-    ss_rc = strcpy_s(connect_package.node_name, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
+    ss_rc = strcpy_s(connect_package.node_name, NAMEDATALEN, libcomm_addrinfo->selfnodename);
     securec_check(ss_rc, "\0", "\0");
     ss_rc = strcpy_s(connect_package.host, HOST_ADDRSTRLEN, g_instance.comm_cxt.localinfo_cxt.g_local_host);
     securec_check(ss_rc, "\0", "\0");
@@ -1123,6 +1146,7 @@ retry_read:
     addr.ip[cpylen] = '\0';
 
     addr.port = libcomm_addrinfo->listen_port;
+    addr.shift = libcomm_addrinfo->shift;
     /* update connection state to succeed when connect succeed */
     gs_update_connection_state(addr, CONNSTATESUCCEED, true, node_idx);
 
@@ -1227,10 +1251,10 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
     fcmsgs.streamid = 1;
     fcmsgs.extra_info = 0xEA;
 
-    cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
+    cpylen = comm_get_cpylen(libcomm_addrinfo->selfnodename, NAMEDATALEN);
     ss_rc = memset_s(fcmsgs.nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
     securec_check(ss_rc, "\0", "\0");
-    ss_rc = strncpy_s(fcmsgs.nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
+    ss_rc = strncpy_s(fcmsgs.nodename, NAMEDATALEN, libcomm_addrinfo->selfnodename, cpylen + 1);
     securec_check(ss_rc, "\0", "\0");
     fcmsgs.nodename[cpylen] = '\0';
 
@@ -1357,6 +1381,8 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
     securec_check(ss_rc, "\0", "\0");
     g_instance.comm_cxt.g_s_node_sock[node_idx].remote_nodename[cpylen] = '\0';
 
+    g_instance.comm_cxt.g_s_node_sock[node_idx].shift = libcomm_addrinfo->shift;
+
     g_instance.comm_cxt.g_s_node_sock[node_idx].set_nl(remote_tcp_port, CTRL_TCP_PORT);
     g_instance.comm_cxt.g_s_node_sock[node_idx].ip_changed = false;
     /* add the socket to the epoll list for monitoring network events */
@@ -1381,6 +1407,7 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
     addr.ip[cpylen] = '\0';
 
     addr.port = libcomm_addrinfo->ctrl_port;
+    addr.shift = libcomm_addrinfo->shift;
     /* update connection state to succeed when connect succeed */
     gs_update_connection_state(addr, CONNSTATESUCCEED, true, node_idx);
 

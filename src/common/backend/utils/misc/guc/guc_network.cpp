@@ -194,6 +194,13 @@ static void InitNetworkConfigureNamesReal();
 static void InitNetworkConfigureNamesString();
 static void InitNetworkConfigureNamesEnum();
 
+static const struct config_enum_entry comm_sctp_type_options[] = {
+    {"ORIGIN", 0, false},
+    {"TCP", 1, false},
+    {"HCCS", 2, false},
+    {NULL, 0, false}
+};
+
 /*
  * Contents of GUC tables
  *
@@ -552,6 +559,20 @@ static void InitNetworkConfigureNamesInt()
             7001,
             0,
             65535,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"comm_link_num",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CONN_AUTH_SETTINGS,
+            gettext_noop("Sets connection number of instance channels."),
+            NULL},
+            &g_instance.attr.attr_network.comm_link_num,
+            1,
+            1,
+            32,
             NULL,
             NULL,
             NULL},
@@ -1120,6 +1141,19 @@ static void InitNetworkConfigureNamesString()
             NULL,
             NULL},
 
+        {{"hcom_link_path",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CONN_AUTH_SETTINGS,
+            gettext_noop("Sets the dir/path for libhcom4db.so."),
+            NULL,
+            GUC_LIST_INPUT},
+            &g_instance.attr.attr_network.hcom_link_path,
+            "",
+            NULL,
+            NULL,
+            NULL},
+
         {{NULL,
             (GucContext)0,
             (GucNodeType)0,
@@ -1144,6 +1178,19 @@ static void InitNetworkConfigureNamesString()
 static void InitNetworkConfigureNamesEnum()
 {
     struct config_enum localConfigureNamesEnum[] = {
+
+        {{"comm_sctp_type",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CONN_AUTH_SETTINGS,
+            gettext_noop("Sets the STCP network type."),
+            NULL},
+            &g_instance.attr.attr_network.comm_sctp_type,
+            0,
+            comm_sctp_type_options,
+            NULL,
+            NULL,
+            NULL},
 
         /* End-of-list marker */
         {{NULL,

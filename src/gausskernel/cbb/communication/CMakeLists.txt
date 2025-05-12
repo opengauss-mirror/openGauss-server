@@ -24,8 +24,10 @@ set(CMAKE_MODULE_PATH
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/communication/libcomm_core
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/communication/libcomm_utils
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/communication/comm_proxy
+    ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/communication/lib_hccom4db
 )
 
 add_subdirectory(libcomm_core)
 add_subdirectory(libcomm_utils)
 add_subdirectory(comm_proxy)
+add_subdirectory(lib_hcom4db)

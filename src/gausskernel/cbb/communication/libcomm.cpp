@@ -94,6 +94,10 @@ pthread_mutex_t g_htab_tid_poll_lock;
 static HTAB* g_htab_socket_version = NULL;
 pthread_mutex_t g_htab_socket_version_lock;
 
+/* at receiver and sender: hash table to keep: socket -> socket version number, for socket management */
+static HTAB* g_htab_node_shift_map = NULL;
+pthread_mutex_t g_htab_node_shift_map_lock;
+
 static ArrayLockFreeQueue<char> g_memory_pool_queue;
 
 unsigned long IOV_DATA_SIZE = 1024 * 8;
@@ -153,7 +157,7 @@ void comm_fill_hash_ctl(HASHCTL* ctl, Size k_size, Size e_size)
 void gs_init_hash_table()
 {
     AutoContextSwitch commContext(g_instance.comm_cxt.comm_global_mem_cxt);
-    HASHCTL tid_ctl, sock_ver_ctl, sock_id_ctl, nodename_ctl, ipstat_ctl;
+    HASHCTL tid_ctl, sock_ver_ctl, sock_id_ctl, nodename_ctl, ipstat_ctl, shift_ctl;
     int flags, rc;
 
     /* init g_htab_tid_poll */
@@ -200,6 +204,38 @@ void gs_init_hash_table()
     flags = HASH_FUNCTION | HASH_ELEM | HASH_SHRCTX;
     g_htab_ip_state = hash_create("libcomm ip & status lookup hash", 65535, &ipstat_ctl, flags);
     LIBCOMM_PTHREAD_MUTEX_INIT(&g_htab_ip_state_lock, 0);
+
+    /* init g_htab_node_shift_map */
+    rc = memset_s(&shift_ctl, sizeof(shift_ctl), 0, sizeof(HASHCTL));
+    securec_check(rc, "\0", "\0");
+
+    comm_fill_hash_ctl(&shift_ctl, sizeof(char_key), sizeof(nodename_entry));
+    flags = HASH_FUNCTION | HASH_ELEM | HASH_SHRCTX;
+    g_htab_node_shift_map = hash_create("libcomm nodename shift map", 65535, &shift_ctl, flags);
+    LIBCOMM_PTHREAD_MUTEX_INIT(&g_htab_node_shift_map_lock, 0);
+}
+
+int gs_get_nodeshift(char* node_name)
+{
+    struct char_key ckey;
+    bool found = false;
+    int ret = -1;
+    errno_t ss_rc;
+    LIBCOMM_PTHREAD_MUTEX_LOCK(&g_htab_node_shift_map_lock);
+    uint32 cpylen = comm_get_cpylen(node_name, NAMEDATALEN);
+    ss_rc = memset_s(ckey.name, NAMEDATALEN, 0x0, NAMEDATALEN);
+    securec_check(ss_rc, "\0", "\0");
+    ss_rc = strncpy_s(ckey.name, NAMEDATALEN, node_name, cpylen + 1);
+    securec_check(ss_rc, "\0", "\0");
+    ckey.name[cpylen] = '\0';
+    nodename_entry* entry_name = (nodename_entry*)hash_search(g_htab_node_shift_map, &ckey, HASH_ENTER, &found);
+    if (!found) {
+        entry_name->entry.val = 0;
+    }
+    ret = entry_name->entry.val;
+    entry_name->entry.val = (entry_name->entry.val + 1) % g_instance.attr.attr_network.comm_link_num;
+    LIBCOMM_PTHREAD_MUTEX_UNLOCK(&g_htab_node_shift_map_lock);
+    return ret;
 }
 
 void gs_set_hs_shm_data(HaShmemData* ha_shm_data)
@@ -594,7 +630,7 @@ void gs_broadcast_poll()
  * return value       : -1:failed
  *                      >0:node id
  */
-int gs_get_node_idx(char* node_name)
+int gs_get_node_idx(char* node_name, bool fromhcom)
 {
 #ifdef LIBCOMM_FAULT_INJECTION_ENABLE
     if (is_comm_fault_injection(LIBCOMM_FI_NO_NODEIDX)) {
@@ -638,7 +674,9 @@ int gs_get_node_idx(char* node_name)
     entry_name->entry.val = node_idx;
     ret = entry_name->entry.val;
     LIBCOMM_PTHREAD_MUTEX_UNLOCK(&g_htab_nodename_node_idx_lock);
-    LIBCOMM_ELOG(LOG, "(s|get idx)\tGenerate node idx [%d] for node:%s.", ret, node_name);
+    if (!fromhcom) {
+        LIBCOMM_ELOG(LOG, "(s|get idx)\tGenerate node idx [%d] for node:%s.", ret, node_name);
+    }
 
     return ret;
 }
@@ -945,6 +983,7 @@ void gs_s_close_bad_ctrl_tcp_sock(struct sock_id* fd_id, int close_reason, bool 
     int fd = fd_id->fd;
     int id = fd_id->id;
     ip_key addr;
+    addr.shift = g_instance.comm_cxt.g_s_node_sock[node_idx].shift;
     bool is_addr = false;
     errno_t ss_rc;
     uint32 cpylen;
@@ -1150,9 +1189,9 @@ bool gs_r_quota_notify(c_mailbox* cmailbox, FCMSG_T* msg)
         cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
         ss_rc = memset_s(msg->nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
         securec_check(ss_rc, "\0", "\0");
-        ss_rc = strncpy_s(msg->nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
+        ss_rc = sprintf_s(msg->nodename, NAMEDATALEN, "%d_%s",
+                          cmailbox->shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
         securec_check(ss_rc, "\0", "\0");
-        msg->nodename[cpylen] = '\0';
 
         return true;
     }
@@ -1293,6 +1332,7 @@ void gs_s_close_bad_data_socket(struct sock_id* fd_id, int close_reason, int nod
     int fd = fd_id->fd;
     int id = fd_id->id;
     ip_key addr;
+    addr.shift = g_instance.comm_cxt.g_s_node_sock[node_idx].shift;
     bool is_addr = false;
     bool found = false;
 
@@ -1400,7 +1440,7 @@ void gs_s_close_bad_data_socket(struct sock_id* fd_id, int close_reason, int nod
  *                    0:     push data succsessed.
  * @See also:
  */
-int gs_push_cmailbox_buffer(c_mailbox* cmailbox, struct mc_lqueue_item* q_item, int version)
+int gs_push_cmailbox_buffer(c_mailbox* cmailbox, struct mc_lqueue_item* q_item, int version, bool fromhcom)
 {
     struct iovec* iov = q_item->element.data;
     COMM_TIMER_INIT();
@@ -1415,28 +1455,51 @@ int gs_push_cmailbox_buffer(c_mailbox* cmailbox, struct mc_lqueue_item* q_item, 
 
     // if the stream is closed or ready to close, the data should be dropped.
     if (false == gs_check_mailbox(cmailbox->local_version, version)) {
-        COMM_DEBUG_LOG("(r|inner recv)\tStream[%d] is closed for node[%d]:%s, drop reveived message[%d].",
-            sid,
-            idx,
-            g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
-            (int)iov->iov_len);
+        if (fromhcom) {
+            fprintf(stderr, "(r|inner recv)\tStream[%d] is closed for node[%d]:%s, drop reveived message[%d].\n",
+                sid,
+                idx,
+                g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
+                (int)iov->iov_len);
+        } else {
+            COMM_DEBUG_LOG("(r|inner recv)\tStream[%d] is closed for node[%d]:%s, drop reveived message[%d].",
+                sid,
+                idx,
+                g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
+                (int)iov->iov_len);
+        }
         LIBCOMM_PTHREAD_MUTEX_UNLOCK(&cmailbox->sinfo_lock);
         errno = cmailbox->close_reason;
         return -1;
     }
 
-    DEBUG_QUERY_ID = cmailbox->query_id;
+    if (!fromhcom) {
+        DEBUG_QUERY_ID = cmailbox->query_id;
+    }
 
     // there is buffer/quota to process the received data
     if (cmailbox->bufCAP >= (unsigned long)(iov->iov_len)) {
-        COMM_DEBUG_LOG("(r|inner recv)\tNode[%d]:%s stream[%d] recv %zu msg:%c, bufCAP[%lu] and buff_q->u_size[%lu].",
-            idx,
-            g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
-            sid,
-            iov->iov_len,
-            ((char*)iov->iov_base)[0],
-            cmailbox->bufCAP,
-            cmailbox->buff_q->u_size);
+        if (fromhcom) {
+            fprintf(stderr, "(r|inner recv)\tNode[%d]:%s stream[%d] recv %zu msg:%c,"
+                            "bufCAP[%lu] and buff_q->u_size[%lu].\n",
+                idx,
+                g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
+                sid,
+                iov->iov_len,
+                ((char*)iov->iov_base)[0],
+                cmailbox->bufCAP,
+                cmailbox->buff_q->u_size);
+        } else {
+            COMM_DEBUG_LOG("(r|inner recv)\tNode[%d]:%s stream[%d] recv %zu msg:%c,"
+                           "bufCAP[%lu] and buff_q->u_size[%lu].",
+                idx,
+                g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
+                sid,
+                iov->iov_len,
+                ((char*)iov->iov_base)[0],
+                cmailbox->bufCAP,
+                cmailbox->buff_q->u_size);
+        }
 
         // put the message to the buffer in the c_mailbox
         (void)mc_lqueue_add(cmailbox->buff_q, q_item);
@@ -1449,18 +1512,34 @@ int gs_push_cmailbox_buffer(c_mailbox* cmailbox, struct mc_lqueue_item* q_item, 
         // wake up the Consumer thread of executor, to notify Consumer of arriving new message
         gs_poll_signal(cmailbox->semaphore);
 
-        COMM_TIMER_LOG("(r|inner recv)\tCache data from node[%d]:%s stream[%d].",
-            idx,
-            g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
-            sid);
+        if (fromhcom) {
+            fprintf(stderr, "(r|inner recv)\tCache data from node[%d]:%s stream[%d].\n",
+                idx,
+                g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
+                sid);
+        } else {
+            COMM_TIMER_LOG("(r|inner recv)\tCache data from node[%d]:%s stream[%d].",
+                idx,
+                g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
+                sid);
+        }
     } else {  // there is no buffer/quota to process the received data, it should not happen
-        LIBCOMM_ELOG(WARNING,
-            "(r|inner recv)\tNode[%d] stream[%d], node name[%s] has bufCAP[%lu] and got[%d].",
-            idx,
-            sid,
-            g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
-            cmailbox->bufCAP,
-            (int)iov->iov_len);
+        if (fromhcom) {
+            fprintf(stderr, "(r|inner recv)\tNode[%d] stream[%d], node name[%s] has bufCAP[%lu] and got[%d].\n",
+                idx,
+                sid,
+                g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
+                cmailbox->bufCAP,
+                (int)iov->iov_len);
+        } else {
+            LIBCOMM_ELOG(WARNING,
+                "(r|inner recv)\tNode[%d] stream[%d], node name[%s] has bufCAP[%lu] and got[%d].",
+                idx,
+                sid,
+                g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
+                cmailbox->bufCAP,
+                (int)iov->iov_len);
+        }
         LIBCOMM_ASSERT(false, idx, sid, ROLE_CONSUMER);
     }
 
@@ -1555,12 +1634,11 @@ void gs_s_close_logic_connection(struct p_mailbox* pmailbox, int close_reason, F
         msg->version = pmailbox->remote_version;
         msg->query_id = pmailbox->query_id;
 
-        cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
         ss_rc = memset_s(msg->nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
         securec_check(ss_rc, "\0", "\0");
-        ss_rc = strncpy_s(msg->nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
+        ss_rc = sprintf_s(msg->nodename, NAMEDATALEN, "%d_%s",
+                          pmailbox->shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
         securec_check(ss_rc, "\0", "\0");
-        msg->nodename[cpylen] = '\0';
     }
 
     // wake up the producer who is waiting
@@ -1861,7 +1939,7 @@ bool gs_s_form_start_ctrl_msg(p_mailbox* pmailbox, FCMSG_T* msg)
  * @See also:        local producer can use memcpy to push data package,
  *                    no need push to data stack
  */
-int gs_push_local_buffer(int streamid, const char* message, int m_len, int cmailbox_version)
+int gs_push_local_buffer(int streamid, const char* message, int m_len, int cmailbox_version, char* nodename)
 {
     int cmailbox_idx = -1;
     struct char_key ckey;
@@ -1872,10 +1950,10 @@ int gs_push_local_buffer(int streamid, const char* message, int m_len, int cmail
 
     t_thrd.comm_cxt.g_receiver_loop_poll_up = COMM_STAT_TIME();
 
-    cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
+    cpylen = comm_get_cpylen(nodename, NAMEDATALEN);
     ss_rc = memset_s(ckey.name, NAMEDATALEN, 0x0, NAMEDATALEN);
     securec_check(ss_rc, "\0", "\0");
-    ss_rc = strncpy_s(ckey.name, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
+    ss_rc = strncpy_s(ckey.name, NAMEDATALEN, nodename, cpylen + 1);
     securec_check(ss_rc, "\0", "\0");
     ckey.name[cpylen] = '\0';
 
@@ -1967,12 +2045,11 @@ static bool gs_r_form_start_ctrl_msg(c_mailbox* cmailbox, FCMSG_T* msg)
         msg->extra_info = cmailbox->local_thread_id;
         msg->query_id = cmailbox->query_id;
 
-        cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
         ss_rc = memset_s(msg->nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
         securec_check(ss_rc, "\0", "\0");
-        ss_rc = strncpy_s(msg->nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
+        ss_rc = sprintf_s(msg->nodename, NAMEDATALEN, "%d_%s",
+                          cmailbox->shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
         securec_check(ss_rc, "\0", "\0");
-        msg->nodename[cpylen] = '\0';
 
         return true;
     }

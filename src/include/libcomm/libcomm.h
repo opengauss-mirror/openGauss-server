@@ -291,6 +291,8 @@ typedef struct libcommaddrinfo {
     int addr_list_size;               // how many node in addr info list, only the head node set it
     libcommaddrinfo* addr_list_next;  // point to next addr info node, libcomm use it to build addr info list
     gsocket gs_sock;                  // libcomm logic addr
+    char selfnodename[NAMEDATALEN];
+    int shift;
 } libcomm_addrinfo;
 
 /* cn and dn send and recv message log */
@@ -554,7 +556,7 @@ extern void gs_broadcast_poll();
 extern void gs_set_kerberos_keyfile();
 extern void gs_receivers_struct_init(int ctrl_port, int data_port);
 extern void gs_set_comm_session();
-extern int gs_get_node_idx(char* node_name);
+extern int gs_get_node_idx(char* node_name, bool fromhcom = false);
 extern int gs_memory_pool_queue_initial_success(uint32 index);
 extern struct mc_lqueue_item* gs_memory_pool_queue_pop(char* iov);
 extern bool gs_memory_pool_queue_push(char* item);
@@ -577,6 +579,7 @@ extern int CommEpollWait(int epfd, struct epoll_event *event, int maxevents, int
 extern int CommEpollClose(int epfd);
 extern void InitCommLogicResource();
 extern void ProcessCommLogicTearDown();
+extern int gs_get_nodeshift(char* node_name);
 
 class CommEpollFd;
 struct HTAB;

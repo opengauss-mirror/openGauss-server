@@ -33,7 +33,7 @@ else
   override CPPFLAGS :=  -I$(top_srcdir)/src/include/libcomm -I../ -I./ $(CPPFLAGS)
 endif
 
-SUBDIRS = libcomm_core libcomm_utils comm_proxy
+SUBDIRS = libcomm_core libcomm_utils comm_proxy lib_hcom4db
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
