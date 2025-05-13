@@ -407,7 +407,7 @@ openGauss支持以下操作系统：
 | readline-devel| 7.0-13          |
 | jemalloc-devel| 3.6-5.0         |
 | libcgroup-devel| 0.41-3.1         |
-| llibcurl-devel| 7.29-8.4         |
+| libcurl-devel| 7.29-8.4         |
 | libedit-devel| 3.0-3.1        |
 | libxml2-devel| 2.9.1-2.11.5       |
 | lz4-devel| 1.8.3-1.9.4      |
@@ -418,7 +418,11 @@ openGauss支持以下操作系统：
 | openssl-devel| 1.1.1m     |
 
 ```shell
-yum install libaio-devel flex bison ncurses-devel glibc-devel patch redhat-lsb-core readline-devel jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd zstd-devel java-1.8.0-openjdk-devel openssl-devel
+yum install libaio-devel flex bison ncurses-devel glibc-devel patch readline-devel jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd zstd-devel java-1.8.0-openjdk-devel openssl-devel
+### centos中安装lsb_release
+yum install redhat-lsb-core
+### openEuler安装lsb_release
+yum install dkms
 ```
 
 ### 下载openGauss
