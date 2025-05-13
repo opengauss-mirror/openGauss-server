@@ -98,6 +98,11 @@ rotate (count(*) FOR product IN (A, B)
 ERROR:  missing FROM-clause entry for table "source_table"
 LINE 4: ) as pivot_table where source_table.year > 1;
                                ^
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(amount) FOR product IN (A.b)
+) as pivot;
+ERROR:  ROTATE in clause error
 CREATE PROCEDURE proc1(param1 CHAR(200))
 AS
 DECLARE

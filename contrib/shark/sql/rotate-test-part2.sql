@@ -61,6 +61,12 @@ rotate (count(*) FOR product IN (A, B)
 ) as pivot_table where source_table.year > 1;  
 
 
+SELECT *
+FROM ( SELECT year, product, amount  FROM sales ) AS source_table
+rotate (count(amount) FOR product IN (A.b)
+) as pivot;
+
+
 CREATE PROCEDURE proc1(param1 CHAR(200))
 AS
 DECLARE
