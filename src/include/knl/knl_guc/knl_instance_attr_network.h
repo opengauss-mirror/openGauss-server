@@ -82,6 +82,9 @@ typedef struct knl_instance_attr_network {
     int dolphin_server_port;
     bool dolphin_hot_standby;
     bool enable_gazelle_performance_mode;
+    int comm_sctp_type;
+    int comm_link_num;
+    char* hcom_link_path;
 } knl_instance_attr_network;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_NETWORK_H_ */

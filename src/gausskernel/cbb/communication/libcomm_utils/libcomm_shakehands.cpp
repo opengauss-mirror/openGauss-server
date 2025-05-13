@@ -325,12 +325,11 @@ void gs_r_close_logic_connection(struct c_mailbox* cmailbox, int close_reason, F
         msg->version = cmailbox->remote_version;
         msg->query_id = cmailbox->query_id;
 
-        cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
         ss_rc = memset_s(msg->nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
         securec_check(ss_rc, "\0", "\0");
-        ss_rc = strncpy_s(msg->nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
+        ss_rc = sprintf_s(msg->nodename, NAMEDATALEN, "%d_%s",
+                          cmailbox->shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
         securec_check(ss_rc, "\0", "\0");
-        msg->nodename[cpylen] = '\0';
     }
 
     // wake up the consumer who is waiting for the data at gs_wait_poll,
@@ -416,6 +415,13 @@ void gs_receivers_flow_handle_ready_request(FCMSG_T* fcmsgr)
         local_version = 0;
     }
 
+    char nodename[NAMEDATALEN];
+    int shift;
+    ss_rc = sscanf_s(fcmsgr->nodename, "%d_%s", &shift, &nodename, (unsigned)NAMEDATALEN);
+    securec_check_for_sscanf_s(ss_rc, 2, "\0", "\0");
+    ss_rc = sprintf_s(nodename, NAMEDATALEN, "%d_%s", shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
+    securec_check_c(ss_rc, "\0", "\0");
+
     cmailbox->local_version = local_version;
     // producer send pmailbox version as fcmsgr->version,
     // now save it to cmailbox->remote_version.
@@ -428,6 +434,7 @@ void gs_receivers_flow_handle_ready_request(FCMSG_T* fcmsgr)
     cmailbox->local_thread_id = 0;
     cmailbox->peer_thread_id = 0;
     cmailbox->close_reason = 0;
+    cmailbox->shift = shift;
     if (g_instance.comm_cxt.commutil_cxt.g_stat_mode && (cmailbox->statistic == NULL)) {
         LIBCOMM_MALLOC(cmailbox->statistic, sizeof(struct cmailbox_statistic), cmailbox_statistic);
         if (cmailbox->statistic == NULL) {
@@ -516,10 +523,10 @@ void gs_receivers_flow_handle_ready_request(FCMSG_T* fcmsgr)
     fcmsgs.query_id = fcmsgr->query_id;
     fcmsgs.extra_info = local_version;
 
-    cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
+    cpylen = comm_get_cpylen(nodename, NAMEDATALEN);
     ss_rc = memset_s(fcmsgs.nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
     securec_check(ss_rc, "\0", "\0");
-    ss_rc = strncpy_s(fcmsgs.nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
+    ss_rc = strncpy_s(fcmsgs.nodename, NAMEDATALEN, nodename, cpylen + 1);
     securec_check(ss_rc, "\0", "\0");
     fcmsgs.nodename[cpylen] = '\0';
 
@@ -612,12 +619,10 @@ accept_failed:
     fcmsgs.version = remote_verion;
     fcmsgs.query_id = fcmsgr->query_id;
 
-    cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
     ss_rc = memset_s(fcmsgs.nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
     securec_check(ss_rc, "\0", "\0");
-    ss_rc = strncpy_s(fcmsgs.nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
+    ss_rc = sprintf_s(fcmsgs.nodename, NAMEDATALEN, "%d_%s", shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
     securec_check(ss_rc, "\0", "\0");
-    fcmsgs.nodename[cpylen] = '\0';
 
     rc = gs_send_ctrl_msg(&g_instance.comm_cxt.g_r_node_sock[node_idx], &fcmsgs, ROLE_CONSUMER);
     if (rc <= 0) {

@@ -383,6 +383,7 @@ struct nodename_entry {
 struct ip_key {
     char ip[HOST_LEN_OF_HTAB];
     int port;
+    int shift;
 };
 
 struct node_state {
@@ -444,6 +445,7 @@ enum { CTRL_TCP_SOCK, CTRL_TCP_PORT, CTRL_TCP_SOCK_ID };
 struct node_sock {
     char remote_host[HOST_ADDRSTRLEN];
     char remote_nodename[NAMEDATALEN];
+    int shift;
     struct sockaddr_storage to_ss;
     // following variable is used to concurrent control when call mc_tcp_write
     //
@@ -536,6 +538,7 @@ struct mailbox {
                             // whether closed by other thread or not
     uint16 remote_version;  // version of remote mailbox, send data or control message with it,
                             // remote need check if this and the newest version of remote mailbox are equal
+    int shift;
 
     int ctrl_tcp_sock;           // control tcp socket
     pthread_mutex_t sinfo_lock;  // lock for read and write the structure variable
@@ -630,6 +633,7 @@ extern void gs_libcomm_handle_assert(bool condition, int nidx, int sidx, int nod
 extern void gs_r_release_comm_memory();
 extern void libcomm_free_iov_item(struct mc_lqueue_item** iov_item, int size);
 extern int libcomm_malloc_iov_item(struct mc_lqueue_item** iov_item, int size);
+extern int libcomm_malloc_iov_item_for_hcom(struct mc_lqueue_item** iov_item);
 extern int gs_send_msg_by_unix_domain(const void* msg, int msg_len);
 extern int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_idx, bool is_reply);
 extern int gs_send_ctrl_msg_by_socket(LibCommConn *conn, FCMSG_T* msg, int node_idx);
@@ -658,11 +662,12 @@ extern void gs_check_all_producers_mailbox(const gsocket* gs_sock_array, int npr
 extern bool gs_s_form_start_ctrl_msg(p_mailbox* pmailbox, FCMSG_T* msg);
 extern int gs_check_all_mailbox(libcommaddrinfo** libcomm_addrinfo, int addr_num, int re,
                                 bool TempImmediateInterruptOK, int timeout);
-extern int gs_push_local_buffer(int streamid, const char* message, int m_len, int cmailbox_version);
+extern int gs_push_local_buffer(int streamid, const char* message, int m_len, int cmailbox_version, char* nodename);
 extern bool gs_r_quota_notify(c_mailbox* cmailbox, FCMSG_T* msg);
 extern int gs_get_stream_id(int node_idx);
 extern int gs_handle_data_delay_message(int idx, struct mc_lqueue_item* q_item, uint16 msg_type);
-extern int gs_push_cmailbox_buffer(c_mailbox* cmailbox, struct mc_lqueue_item* q_item, int version);
+extern int gs_push_cmailbox_buffer(c_mailbox* cmailbox, struct mc_lqueue_item* q_item, int version,
+                                   bool fromhcom = false);
 extern bool gs_s_check_connection(libcommaddrinfo* libcomm_addrinfo, int node_idx, bool is_reply, int type);
 extern int gs_s_get_connection_state(ip_key addr, int node_idx, int type);
 extern void gs_r_close_logic_connection(struct c_mailbox* cmailbox, int close_reason, FCMSG_T* msg);

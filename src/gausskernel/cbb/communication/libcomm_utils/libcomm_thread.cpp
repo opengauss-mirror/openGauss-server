@@ -62,6 +62,7 @@
 #include "pgxc/pgxc.h"
 #include "libcomm/libcomm.h"
 #include "libcomm_common.h"
+#include "../lib_hcom4db/libhcom.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -964,6 +965,9 @@ int gs_set_basic_info(const char* local_host,  // ip of local host
 
     g_instance.pid_cxt.CommSenderFlowPID = startCommSenderFlow();
     g_instance.pid_cxt.CommReceiverFlowPID = startCommReceiverFlow();
+    if (get_dll_status()) {
+        return 0;
+    }
     g_instance.pid_cxt.CommAuxiliaryPID = startCommAuxiliary();
     g_instance.pid_cxt.CommReceiverPIDS =
         (ThreadId*)palloc0(g_instance.attr.attr_network.comm_max_receiver * sizeof(ThreadId));
