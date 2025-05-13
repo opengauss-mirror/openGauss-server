@@ -71,6 +71,7 @@ SUBDIRS = \
 		gms_assert   \
 		gms_compress	\
 		gms_tcp         \
+		jieba_tokenizer   \
 		shark
 
 ifeq ($(with_openssl),yes)

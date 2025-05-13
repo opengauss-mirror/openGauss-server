@@ -66,6 +66,7 @@ typedef struct knl_session_attr_sql {
     #ifdef ENABLE_HTAP
     bool enable_imcsscan;
     #endif
+    bool enable_bm25_taat;
     bool enable_union_all_subquery_orderby;
     bool transform_to_numeric_operators;
     bool enable_parallel_ddl;
@@ -183,6 +184,7 @@ typedef struct knl_session_attr_sql {
     int acce_min_datasize_per_thread;
     int max_cn_temp_file_size;
     int default_statistics_target;
+    int bm25_topk;
     /* Memory Limit user could set in session */
     int FencedUDFMemoryLimit;
     int64 g_default_expthresh;
@@ -198,6 +200,9 @@ typedef struct knl_session_attr_sql {
     double Geqo_selection_bias;
     double Geqo_seed;
     double phony_random_seed;
+    double bm25_k1;
+    double bm25_b;
+    double max_score_ratio;
     char* expected_computing_nodegroup;
     char* default_storage_nodegroup;
     char* inlist2join_optmode;

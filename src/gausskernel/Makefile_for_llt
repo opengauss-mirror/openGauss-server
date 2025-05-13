@@ -27,13 +27,13 @@ SUBDIRS = access bootstrap catalog parser commands gs_policy executor distribute
 	pgxc main nodes optimizer port postmaster iprange regex replication rewrite extension datasource \
 	service storage tcop tsearch keymanagement utils $(top_builddir)/src/timezone $(top_builddir)/src/interfaces/libpq \
 	bulkload $(top_builddir)/contrib/file_fdw workload $(top_builddir)/contrib/gc_fdw codegen \
-	$(top_builddir)/contrib/roach_api $(top_builddir)/contrib/bbox $(top_builddir)/contrib/log_fdw $(top_builddir)/contrib/dimsearch/main
+	$(top_builddir)/contrib/roach_api $(top_builddir)/contrib/bbox $(top_builddir)/contrib/log_fdw $(top_builddir)/contrib/jieba_tokenizer $(top_builddir)/contrib/dimsearch/main
 else
 SUBDIRS = access bootstrap catalog parser commands gs_policy executor distributelayer vectorsonic vecexecutor foreign job lib libpq libcomm\
 	pgxc main nodes optimizer port postmaster iprange regex replication rewrite extension datasource \
 	service storage tcop tsearch keymanagement utils $(top_builddir)/src/timezone $(top_builddir)/src/interfaces/libpq \
 	bulkload $(top_builddir)/contrib/file_fdw workload $(top_builddir)/contrib/gc_fdw codegen \
-	$(top_builddir)/contrib/roach_api $(top_builddir)/contrib/bbox $(top_builddir)/contrib/log_fdw $(top_builddir)/contrib/dimsearch/main
+	$(top_builddir)/contrib/roach_api $(top_builddir)/contrib/bbox $(top_builddir)/contrib/log_fdw $(top_builddir)/contrib/jieba_tokenizer $(top_builddir)/contrib/dimsearch/main
 endif
 
 ifeq ($(enable_qunit), yes)
@@ -412,6 +412,7 @@ endif
 	$(MAKE) -C bulkload install-data
 	$(MAKE) -C $(top_builddir)/contrib/file_fdw install
 	$(MAKE) -C $(top_builddir)/contrib/log_fdw install
+	$(MAKE) -C $(top_builddir)/contrib/jieba_tokenizer install
 	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade_support install
 	$(MAKE) -C $(top_builddir)/contrib/roach_api install
 	$(MAKE) -C $(top_builddir)/contrib/dimsearch install
@@ -521,6 +522,7 @@ endif
 	$(MAKE) -C bulkload uninstall-data
 	$(MAKE) -C $(top_builddir)/contrib/file_fdw uninstall
 	$(MAKE) -C $(top_builddir)/contrib/log_fdw uninstall
+	$(MAKE) -C $(top_builddir)/contrib/jieba_tokenizer uninstall
 	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade_support clean
 	$(MAKE) -C $(top_builddir)/contrib/roach_api uninstall
 	$(MAKE) -C $(top_builddir)/contrib/dimsearch uninstall

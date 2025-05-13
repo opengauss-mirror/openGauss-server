@@ -1512,6 +1512,11 @@ static void knl_u_imcstore_init(knl_u_imcstore_context* imcstore_context)
 }
 #endif
 
+static void knl_u_bm25_init(knl_u_bm25_context* bm25_context)
+{
+    bm25_context->scoreHashTable = nullptr;
+}
+
 void knl_session_init(knl_session_context* sess_cxt)
 {
     Assert (0 != strncmp(CurrentMemoryContext->name, "ErrorContext", sizeof("ErrorContext")));

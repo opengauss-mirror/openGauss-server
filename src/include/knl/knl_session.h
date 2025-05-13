@@ -3069,6 +3069,10 @@ typedef struct knl_u_imcstore_context {
 } knl_u_imcstore_context;
 #endif
 
+struct BM25ScanDocScoreHashTable;
+typedef struct knl_u_bm25_context {
+    BM25ScanDocScoreHashTable *scoreHashTable;
+} knl_u_bm25_context;
 typedef struct knl_session_context {
     volatile knl_session_status status;
     /* used for threadworker, elem in m_readySessionList */
@@ -3232,6 +3236,7 @@ typedef struct knl_session_context {
 #ifdef ENABLE_HTAP
     knl_u_imcstore_context imcstore_ctx;
 #endif
+    knl_u_bm25_context bm25_ctx;
     bool local_memory_exhaust;
 } knl_session_context;
 

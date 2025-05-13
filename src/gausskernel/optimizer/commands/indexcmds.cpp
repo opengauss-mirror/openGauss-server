@@ -802,6 +802,9 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
      */
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
+    if (RelationIsPartitioned(rel) && strcmp(stmt->accessMethod, "bm25") == 0) {
+        elog(ERROR, "%s index is not supported for partition table.", (stmt->accessMethod));
+    }
 
     bool segment = get_rel_segment(rel);
     TableCreateSupport indexCreateSupport{(int)COMPRESS_TYPE_NONE, false, false, false, false, false, true, false};
@@ -839,6 +842,9 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
             elog(ERROR, "btree index is not supported for ustore, please use ubtree instead");
         }
         if (strcmp(stmt->accessMethod, "ubtree") != 0 && strcmp(stmt->accessMethod, "hnsw") != 0) {
+            elog(ERROR, "%s index is not supported for ustore", (stmt->accessMethod));
+        }
+        if (strcmp(stmt->accessMethod, "bm25") == 0) {
             elog(ERROR, "%s index is not supported for ustore", (stmt->accessMethod));
         }
         if (has_dedup_opt) {

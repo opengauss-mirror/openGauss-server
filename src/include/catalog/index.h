@@ -30,6 +30,7 @@
 #define DEFAULT_USTORE_INDEX_TYPE "ubtree"
 #define DEFAULT_IVFFLAT_INDEX_TYPE "ivfflat"
 #define DEFAULT_HNSW_INDEX_TYPE "hnsw"
+#define DEFAULT_BM25_INDEX_TYPE "bm25"
 
 /* Typedef for callback function for IndexBuildHeapScan */
 typedef void (*IndexBuildCallback)(Relation index, HeapTuple htup, Datum *values, const bool *isnull,
