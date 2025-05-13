@@ -758,3 +758,12 @@ SELECT 1 ZONE;
 
 reset current_schema;
 drop schema if exists test_ddl_and_dml cascade;
+
+-- test for issue #6942
+create schema if not exists abc;
+CREATE TABLE if not exists abc.Students ( StudentID char(10) NOT NULL , StudentName nvarchar(50) NOT NULL , Gender char(1) , IDCardNumber char(18) NOT NULL , Email nvarchar(100) , PhoneNumber varchar(20) , Address nvarchar(200) , AdmissionDate date NOT NULL , ClassID integer NOT NULL , MajorID integer NOT NULL ) ;
+select nspcollation from pg_namespace where nspname='abc';
+drop schema abc cascade;
+create schema if not exists sch_ddl_001 character set = utf8 collate utf8_unicode_ci;
+select nspcollation from pg_namespace where nspname='sch_ddl_001';
+drop schema sch_ddl_001;

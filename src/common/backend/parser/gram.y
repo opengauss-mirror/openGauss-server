@@ -2221,6 +2221,7 @@ CreateSchemaStmt:
 					n->authid = NULL;
 					n->hasBlockChain = $7;
 					n->schemaElts = $8;
+					n->charset = PG_INVALID_ENCODING;
 					$$ = (Node *)n;
 				}
 			| CREATE SCHEMA IF_P NOT EXISTS OptSchemaName AUTHORIZATION RoleId OptBlockchainWith OptSchemaEltList
@@ -2235,6 +2236,7 @@ CreateSchemaStmt:
 					n->authid = $8;
 					n->hasBlockChain = $9;
 					n->schemaElts = $10;
+					n->charset = PG_INVALID_ENCODING;
 					$$ = (Node *)n;
 				}
 			| CREATE SCHEMA ColId CharsetCollate
@@ -2246,6 +2248,17 @@ CreateSchemaStmt:
 					n->schemaElts = NULL;
 					n->charset = $4->charset;
 					n->collate = $4->collate;
+					$$ = (Node *)n;
+				}
+			| CREATE SCHEMA IF_P NOT EXISTS ColId CharsetCollate
+				{
+					CreateSchemaStmt *n = makeNode(CreateSchemaStmt);
+					n->schemaname = $6;
+					n->authid = NULL;
+					n->hasBlockChain = false;
+					n->schemaElts = NULL;
+					n->charset = $7->charset;
+					n->collate = $7->collate;
 					$$ = (Node *)n;
 				}
 		;
