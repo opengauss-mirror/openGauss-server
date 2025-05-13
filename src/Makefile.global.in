@@ -276,12 +276,18 @@ ifeq ($(with_3rd), NONE)
   INSTALL_TOOLS_PATH = binarylibs/install_tools
   COMPONENTPATH = binarylibs/component
 
+  JEMALLOC_HOME = $(top_builddir)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
+  MEMCHECK_HOME = $(top_builddir)/$(BINARYPATH)/memcheck/$(MEMCHECK_BUILD_TYPE)
   LIBOBS_HOME = $(top_builddir)/$(BINARYPATH)/libobs/$(LIB_NOT_SUPPORT_LLT)
+  LIBODBC_HOME = $(top_builddir)/$(BINARYPATH)/unixodbc
+  LIBXML_HOME = $(top_builddir)/$(BINARYPATH)/libxml2/$(LIB_SUPPORT_LLT)
   LIBHOTPATCH_HOME = $(top_builddir)/$(PLATFORMPATH)/hotpatch
+  LIBCGROUP_HOME = $(top_builddir)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
   LIBLLVM_HOME = $(top_builddir)/$(BINARYPATH)/llvm/comm
   XGBOOST_HOME = $(top_builddir)/$(BINARYPATH)/xgboost/comm
   EVENT_HOME = $(top_builddir)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)
   ZLIB_HOME = $(top_builddir)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
+  LZ4_HOME  = $(top_builddir)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
   CJSON_HOME = $(top_builddir)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
   KERBEROS_HOME = $(top_builddir)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
   BOOST_HOME = $(top_builddir)/$(BINARYPATH)/boost/$(LIB_SUPPORT_LLT)
@@ -296,8 +302,12 @@ ifeq ($(with_3rd), NONE)
   LIBSTD_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/libstd/gcc$(CC_VERSION)/$(LIB_NOT_SUPPORT_LLT)
   GTEST_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/gtest/$(LIB_NOT_SUPPORT_LLT)
   MOCKCPP_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/mockcpp/$(LIB_NOT_SUPPORT_LLT)
+  NUMA_HOME = $(top_builddir)/$(BINARYPATH)/numactl/$(LIB_SUPPORT_LLT)
+  LIBCURL_HOME = $(top_builddir)/$(BINARYPATH)/libcurl/$(LIB_SUPPORT_LLT)
   AWSSDK_HOME = $(top_builddir)/$(BINARYPATH)/aws-sdk-cpp/$(LIB_SUPPORT_LLT)
   ZSTD_HOME = $(top_builddir)/$(BINARYPATH)/zstd
+  LIBNANOMSG_HOME = $(top_builddir)/$(BINARYPATH)/nng/comm
+  PLJAVA_HOME = $(top_builddir)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
   MASSTREE_HOME = $(top_builddir)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME    = $(top_builddir)/dependency/mysql_fdw
   ORCFDW_HOME   = $(top_builddir)/dependency/oracle_fdw
@@ -310,13 +320,19 @@ else
   PLATFORMPATH = kernel/platform
   BUILD_TOOLS_PATH = buildtools
 
+  JEMALLOC_HOME = $(with_3rd)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
+  MEMCHECK_HOME = $(with_3rd)/$(BINARYPATH)/memcheck/$(MEMCHECK_BUILD_TYPE)
   LIBOBS_HOME = $(with_3rd)/$(BINARYPATH)/libobs/$(LIB_NOT_SUPPORT_LLT)
+  LIBODBC_HOME = $(with_3rd)/$(BINARYPATH)/unixodbc
 
+  LIBXML_HOME = $(with_3rd)/$(BINARYPATH)/libxml2/$(LIB_SUPPORT_LLT)
+  LIBCGROUP_HOME = $(with_3rd)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
   LIBHOTPATCH_HOME = $(with_3rd)/$(PLATFORMPATH)/hotpatch
   LIBLLVM_HOME = $(with_3rd)/$(BINARYPATH)/llvm/comm
   XGBOOST_HOME = $(with_3rd)/$(BINARYPATH)/xgboost/$(LIB_SUPPORT_LLT)
   EVENT_HOME = $(with_3rd)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)
   ZLIB_HOME = $(with_3rd)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
+  LZ4_HOME  = $(with_3rd)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
   CJSON_HOME = $(with_3rd)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
   KERBEROS_HOME = $(with_3rd)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
   BOOST_HOME = $(with_3rd)/$(BINARYPATH)/boost/$(LIB_SUPPORT_LLT)
@@ -337,11 +353,15 @@ endif
   LIBSTD_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/libstd/gcc$(CC_VERSION)/$(LIB_NOT_SUPPORT_LLT)
   GTEST_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/gtest/$(LIB_NOT_SUPPORT_LLT)
   MOCKCPP_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/mockcpp/$(LIB_NOT_SUPPORT_LLT)
+  NUMA_HOME = $(with_3rd)/$(BINARYPATH)/numactl/$(LIB_SUPPORT_LLT)
+  LIBCURL_HOME = $(with_3rd)/$(BINARYPATH)/libcurl/$(LIB_SUPPORT_LLT)
   AWSSDK_HOME = $(with_3rd)/$(BINARYPATH)/aws-sdk-cpp/$(LIB_SUPPORT_LLT)
   ZSTD_HOME = $(with_3rd)/$(BINARYPATH)/zstd
+  LIBNANOMSG_HOME = $(with_3rd)/$(BINARYPATH)/nng/comm
+  PLJAVA_HOME = $(with_3rd)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
   using_openjdk = $(shell if [ -d "$(with_3rd)/$(PLATFORMPATH)/openjdk8" ]; then echo "yes"; else echo "no"; fi;)
   ifeq ($(using_openjdk), yes)
-    JAVA_HOME = /usr/lib/jvm/java/
+    JAVA_HOME = $(with_3rd)/${PLATFORMPATH}/openjdk8/$(shell uname -p)/jdk
   else
     JAVA_HOME = $(with_3rd)/${PLATFORMPATH}/huaweijdk8/$(shell uname -p)/jdk
   endif
@@ -562,8 +582,8 @@ BOOST_LIB_PATH = $(BOOST_HOME)/lib
 #############################################################################
 # libxml component
 #############################################################################
-LIBXML_INCLUDE_PATH = /usr/include
-LIBXML_LIB_PATH = /usr/lib64
+LIBXML_INCLUDE_PATH = $(LIBXML_HOME)/include
+LIBXML_LIB_PATH = $(LIBXML_HOME)/lib
 
 #############################################################################
 # openssl component
