@@ -1003,8 +1003,12 @@ extern void CBMWriteAndFollowXlog(void)
                              "LSN %08X/%08X. Skip CBM track this time",
                              (uint32)(originStartLSN >> 32),
                              (uint32)originStartLSN)));
-
-        t_thrd.cbm_cxt.XlogCbmSys->needReset = false;
+        
+        if (pg_atomic_read_u64(&t_thrd.cbm_cxt.XlogCbmSys->lastXlogParseResult) == CBM_PARSE_FAILED) {
+            t_thrd.cbm_cxt.XlogCbmSys->needReset = true;
+        } else {
+            t_thrd.cbm_cxt.XlogCbmSys->needReset = false; 
+        }
         pg_atomic_write_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest, CBM_ACCEPT_TASK);
         LWLockRelease(CBMParseXlogLock);
         return;
