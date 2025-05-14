@@ -1,0 +1,39 @@
+\set ECHO NONE
+NOTICE:  table "employees" does not exist, skipping
+create table employees
+(
+	id serial,
+	last_name varchar(20),
+	email varchar(20),
+	salary int,
+	job_id int,
+	department_id int
+);
+NOTICE:  CREATE TABLE will create implicit sequence "employees_id_seq" for serial column "employees.id"
+Logging Risky query schema change (DDL) OK
+
+COPY employees TO STDOUT;
+Logging Risky query file operation OK
+
+COPY employees TO STDOUT DELIMITER ',' CSV HEADER;
+id,last_name,email,salary,job_id,department_id
+Logging Risky query file operation OK
+
+COPY employees TO STDOUT DELIMITER '|' CSV HEADER;
+id|last_name|email|salary|job_id|department_id
+Logging Risky query file operation OK
+
+COPY (SELECT last_name, email FROM employees) TO STDOUT DELIMITER ',' CSV HEADER;
+last_name,email
+Logging Risky query file operation OK
+
+COPY employees TO STDOUT DELIMITER ' ' NULL AS 'NULL';
+Logging Risky query file operation OK
+
+COPY (SELECT * FROM employees WHERE salary > 50000) TO STDOUT DELIMITER ',' CSV HEADER;
+id,last_name,email,salary,job_id,department_id
+Logging Risky query file operation OK
+
+delete from employees;
+Logging Risky query delete with no 'where clause' OK
+

@@ -1,0 +1,52 @@
+\set ECHO NONE
+set enable_risky_query_detection=on;
+--clean
+drop table if exists employees cascade;
+
+\set ECHO queries
+--craete objects
+create table employees
+(
+	id serial,
+	last_name varchar(20),
+	email varchar(20),
+	salary int,
+	job_id int,
+	department_id int
+);
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "create table employees" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+COPY employees TO STDOUT;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query file operation" "COPY employees TO STDOUT;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+COPY employees TO STDOUT DELIMITER ',' CSV HEADER;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query file operation" "COPY employees TO STDOUT DELIMITER ',' CSV HEADER;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+COPY employees TO STDOUT DELIMITER '|' CSV HEADER;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query file operation" "COPY employees TO STDOUT DELIMITER '|' CSV HEADER;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+COPY (SELECT last_name, email FROM employees) TO STDOUT DELIMITER ',' CSV HEADER;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query file operation" "COPY (SELECT last_name, email FROM employees) TO STDOUT DELIMITER ',' CSV HEADER;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+COPY employees TO STDOUT DELIMITER ' ' NULL AS 'NULL';
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query file operation" "COPY employees TO STDOUT DELIMITER ' ' NULL AS 'NULL';" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+COPY (SELECT * FROM employees WHERE salary > 50000) TO STDOUT DELIMITER ',' CSV HEADER;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query file operation" "COPY (SELECT * FROM employees WHERE salary > 50000) TO STDOUT DELIMITER ',' CSV HEADER;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+
+delete from employees;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query delete with no 'where clause'" "delete from employees;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+-- clean
+\set ECHO NONE
+drop table if exists employees cascade;
+set enable_risky_query_detection=off;

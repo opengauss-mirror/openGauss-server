@@ -1,0 +1,68 @@
+\set ECHO queries
+set enable_risky_query_detection=on;
+drop schema public cascade;
+Logging Risky query schema change (DDL) OK
+
+create schema public;
+Logging Risky query schema change (DDL) OK
+
+create table employees
+(
+	id serial,
+	last_name varchar(20),
+	email varchar(20),
+	salary int,
+	job_id int,
+	department_id int
+);
+NOTICE:  CREATE TABLE will create implicit sequence "employees_id_seq" for serial column "employees.id"
+Logging Risky query schema change (DDL) OK
+
+create table salary_range
+(
+	id serial,
+	job_name varchar(20),
+	min_sal int,
+	max_sal int
+);
+NOTICE:  CREATE TABLE will create implicit sequence "salary_range_id_seq" for serial column "salary_range.id"
+Logging Risky query schema change (DDL) OK
+
+CREATE INDEX IF NOT EXISTS ON employees(department_id);
+Logging Risky query schema change (DDL) OK
+
+CREATE INDEX IF NOT EXISTS ON employees USING HASH (last_name);
+Logging Risky query schema change (DDL) OK
+
+ALTER TABLE employees ADD COLUMN hire_date DATE;
+Logging Risky query schema change (DDL) OK
+
+ALTER TABLE employees RENAME COLUMN last_name TO surname;
+Logging Risky query schema change (DDL) OK
+
+ALTER TABLE employees ALTER COLUMN salary TYPE NUMERIC;
+Logging Risky query schema change (DDL) OK
+
+ALTER TABLE employees DROP COLUMN job_id;
+Logging Risky query schema change (DDL) OK
+
+ALTER TABLE employees ADD CONSTRAINT unique_email UNIQUE (email);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "unique_email" for table "employees"
+Logging Risky query schema change (DDL) OK
+
+TRUNCATE TABLE employees;
+Logging Risky query truncate operation OK
+
+ALTER TABLE employees RENAME TO company_employees;
+Logging Risky query schema change (DDL) OK
+
+DROP TABLE company_employees;
+Logging Risky query schema change (DDL) OK
+
+drop schema public cascade;
+NOTICE:  drop cascades to table salary_range
+Logging Risky query schema change (DDL) OK
+
+create schema public;
+Logging Risky query schema change (DDL) OK
+set enable_risky_query_detection=off;

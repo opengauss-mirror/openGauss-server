@@ -493,6 +493,9 @@ case $DO_CMD in
     --fastcheck_single|fastcheck_single)
         args_val="-d 1 -c 0 -p $p -r 1 "
         real_regresscheck_single parallel_schedule0$part make_fastcheck_postgresql.conf "${args_val}" ;;
+    --fastcheck_anomaly_single|fastcheck_anomaly_single)
+        args_val="-d 1 -c 0 -p $p -r 1 "
+        real_regresscheck_single query_anomaly_sched make_fastcheck_anomaly_postgresql.conf "${args_val}" ;;
     --plugin_check|plugin_check)
         args_val="-d 1 -c 0 -p $p -r 1 "
         real_regresscheck_plugin parallel_schedule_dolphin$part make_check_postgresql.conf "${args_val}" ;;

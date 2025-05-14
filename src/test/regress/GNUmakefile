@@ -276,6 +276,12 @@ fastcheck_single: all tablespace-setup
 	$(call hotpatch_setup_func) && \
 	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule0$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
 
+fastcheck_anomaly_single: all tablespace-setup
+	$(call hotpatch_check_func)
+	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
+	$(call hotpatch_setup_func) && \
+	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/query_anomaly_sched -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_anomaly_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
+
 fastcheck_lite: all tablespace-setup
 	$(call hotpatch_check_func)
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \

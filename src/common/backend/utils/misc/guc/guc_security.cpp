@@ -397,6 +397,18 @@ static void InitSecurityConfigureNamesBool()
             NULL,
             NULL},
 
+        {{"enable_risky_query_detection",
+            PGC_USERSET,
+            NODE_ALL,
+            CONN_AUTH_SECURITY,
+            gettext_noop("Enable risky query detection."),
+            NULL},
+            &u_sess->attr.attr_security.enable_risky_query_detection,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

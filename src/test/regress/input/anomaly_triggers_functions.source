@@ -1,0 +1,93 @@
+\set ECHO NONE
+set enable_risky_query_detection=on;
+--clean
+drop table if exists employees cascade;
+drop table if exists salary_range cascade;
+drop function if exists update_salary_range;
+drop function if exists reset_salary;
+
+\set ECHO queries
+create table employees
+(
+	id serial,
+	last_name varchar(20),
+	email varchar(20),
+	salary int,
+	job_id int,
+	department_id int
+);
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "create table employees" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+INSERT INTO employees (id, last_name, email, salary, job_id, department_id) VALUES (1, 'b', 'a.b.@c.com', 1,1,1);
+
+create table salary_range
+(
+	id serial,
+	job_name varchar(20),
+	min_sal int,
+	max_sal int
+);
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "create table salary_range" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+INSERT INTO salary_range (id, job_name, min_sal, max_sal) VALUES (1, 'a', 100, 1000);
+
+CREATE OR REPLACE FUNCTION update_salary_range()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE salary_range
+    SET min_sal = NEW.salary;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "CREATE OR REPLACE FUNCTION update_salary_range()" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+CREATE TRIGGER employees_salary_update_trigger
+AFTER UPDATE OF salary ON employees
+FOR EACH ROW
+EXECUTE FUNCTION update_salary_range();
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "CREATE TRIGGER employees_salary_update_trigger" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+
+CREATE OR REPLACE FUNCTION reset_salary()
+RETURNS void AS $$
+BEGIN
+    UPDATE employees
+    SET salary = 0;
+END;
+$$ LANGUAGE plpgsql;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "CREATE OR REPLACE FUNCTION reset_salary()" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+update employees set salary = 101 where id = 1;
+select * from salary_range;
+
+call reset_salary();
+select * from salary_range;
+
+UPDATE employees SET salary = 102;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query update with no 'where clause'" "UPDATE employees SET salary = 102;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+select * from salary_range;
+
+drop table salary_range cascade;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "drop table salary_range cascade;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+drop table employees cascade;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "drop table employees cascade;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+--clean
+\set ECHO NONE
+drop table if exists employees cascade;
+drop table if exists salary_range cascade;
+drop function if exists update_salary_range;
+drop function if exists reset_salary;
+
+set enable_risky_query_detection=off;
