@@ -70,4 +70,10 @@ END;
 CREATE INDEX ON ON;
 
 SET CURRENT_SCHEMA TO DEFAULT;
+drop function keywords.test_table(character varying);
+drop function keywords.test_index(character varying);
+drop function keywords.test_type(character varying);
+drop function keywords.test_func(character varying);
+drop function keywords.test_stmt(character varying);
+drop function keywords."current_schema"();
 DROP SCHEMA keywords CASCADE;

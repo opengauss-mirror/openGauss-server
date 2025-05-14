@@ -26,6 +26,7 @@
 
 #include "access/tableam.h"
 #include "catalog/pg_aggregate.h"
+#include "common/int.h"
 
 AggFusion::AggFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
@@ -57,21 +58,28 @@ void AggFusion::InitGlobals()
 
     switch (aggref->aggfnoid) {
         case INT2SUMFUNCOID:
-            m_c_global->m_aggSumFunc = &AggFusion::agg_int2_sum;
+            m_c_global->m_aggFunc = &AggFusion::agg_int2_sum;
             break;
         case INT4SUMFUNCOID:
-            m_c_global->m_aggSumFunc = &AggFusion::agg_int4_sum;
+            m_c_global->m_aggFunc = &AggFusion::agg_int4_sum;
             break;
         case INT8SUMFUNCOID:
-            m_c_global->m_aggSumFunc = &AggFusion::agg_int8_sum;
+            m_c_global->m_aggFunc = &AggFusion::agg_int8_sum;
             break;
         case NUMERICSUMFUNCOID:
-            m_c_global->m_aggSumFunc = &AggFusion::agg_numeric_sum;
+            m_c_global->m_aggFunc = &AggFusion::agg_numeric_sum;
+            break;
+        case ANYCOUNTOID:
+            m_c_global->m_aggFunc = &AggFusion::agg_any_count;
+            break;
+        case COUNTOID:
+            m_c_global->m_aggFunc = &AggFusion::agg_star_count;
             break;
         default:
             elog(ERROR, "unsupported aggfnoid %u for bypass.", aggref->aggfnoid);
             break;
     }
+    m_c_global->m_aggFnOid = aggref->aggfnoid;
 
     HeapTuple aggTuple = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(aggref->aggfnoid));
     if (!HeapTupleIsValid(aggTuple)) {
@@ -82,12 +90,34 @@ void AggFusion::InitGlobals()
 
     m_global->m_tupDesc = ExecTypeFromTL(targetList, false);
     m_global->m_attrno = (int16 *) palloc(m_global->m_tupDesc->natts * sizeof(int16));
+    m_c_global->m_aggProcessFunc = &AggFusion::agg_process_common;
 
     /* m_global->m_tupDesc->natts always be 1 currently. */
-    TargetEntry *res = NULL;
-    res = (TargetEntry *)linitial(aggref->args);
-    Var *var = (Var *)res->expr;
-    m_global->m_attrno[0] = var->varattno;
+    if (aggref->args == NULL) {
+        /* currently only count(*) */
+        Assert(aggref->aggstar && aggref->aggfnoid == COUNTOID);
+        /* count(*), don't care about the value return by table, just do increment directly */
+        m_c_global->m_aggProcessFunc = &AggFusion::agg_process_special_count;
+        return;
+    }
+
+    TargetEntry *res = (TargetEntry *)linitial(aggref->args);
+    if (IsA(res->expr, Var)) {
+        Var *var = (Var *)res->expr;
+        m_global->m_attrno[0] = var->varattno;
+        return;
+    }
+
+    /* currently only count(const) */
+    Assert(IsA(res->expr, Const) && aggref->aggfnoid == ANYCOUNTOID);
+    Const *con = (Const*)res->expr;
+    if (likely(!con->constisnull)) {
+        /* count(val), don't care about the value return by table, just do increment directly */
+        m_c_global->m_aggProcessFunc = &AggFusion::agg_process_special_count;
+    } else {
+        /* count(NULL), we can return 0 directly, not usually happen */
+        m_c_global->m_aggCountNull = true;
+    }
 }
 
 void AggFusion::InitLocals(ParamListInfo params)
@@ -106,10 +136,58 @@ void AggFusion::InitLocals(ParamListInfo params)
     m_local.m_isnull = (bool*)palloc0(m_global->m_tupDesc->natts * sizeof(bool));
 }
 
+long AggFusion::agg_process_special_count(long max_rows, Datum* values, bool* isnull)
+{
+    long nprocessed = 0;
+    TupleTableSlot *slot = NULL;
+    while ((slot = m_local.m_scan->getTupleSlot()) != NULL) {
+        CHECK_FOR_INTERRUPTS();
+        nprocessed++;
+        {
+            AutoContextSwitch memSwitch(m_local.m_tmpContext);
+            for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
+                /* inVal is not used, so we can just pass NULL, and set inIsNull as false */
+                (this->*(m_c_global->m_aggFunc))(&values[i], isnull[i], NULL, false);
+                isnull[i] = false;
+            }
+        }
+
+        if (nprocessed >= max_rows) {
+            break;
+        }
+    }
+    return nprocessed;
+}
+
+long AggFusion::agg_process_common(long max_rows, Datum* values, bool* isnull)
+{
+    TupleTableSlot *reslot = m_local.m_reslot;
+    long nprocessed = 0;
+    TupleTableSlot *slot = NULL;
+    while ((slot = m_local.m_scan->getTupleSlot()) != NULL) {
+        CHECK_FOR_INTERRUPTS();
+        nprocessed++;
+        {
+            AutoContextSwitch memSwitch(m_local.m_tmpContext);
+            for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
+                reslot->tts_values[i] = slot->tts_values[m_global->m_attrno[i] - 1];
+                reslot->tts_isnull[i] = slot->tts_isnull[m_global->m_attrno[i] - 1];
+                (this->*(m_c_global->m_aggFunc))(&values[i], isnull[i],
+                        &reslot->tts_values[i], reslot->tts_isnull[i]);
+                isnull[i] = false;
+            }
+        }
+
+        if (nprocessed >= max_rows) {
+            break;
+        }
+    }
+    return nprocessed;
+}
+
 bool AggFusion::execute(long max_rows, char *completionTag)
 {
     max_rows = FETCH_ALL;
-    bool success = false;
 
     TupleTableSlot *reslot = m_local.m_reslot;
     Datum* values = m_local.m_values;
@@ -126,24 +204,18 @@ bool AggFusion::execute(long max_rows, char *completionTag)
     setReceiver();
 
     long nprocessed = 0;
-    TupleTableSlot *slot = NULL;
-    while ((slot = m_local.m_scan->getTupleSlot()) != NULL) {
-        CHECK_FOR_INTERRUPTS();
-        nprocessed++;
-        {
-            AutoContextSwitch memSwitch(m_local.m_tmpContext);
-            for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
-                reslot->tts_values[i] = slot->tts_values[m_global->m_attrno[i] - 1];
-                reslot->tts_isnull[i] = slot->tts_isnull[m_global->m_attrno[i] - 1];
-                (this->*(m_c_global->m_aggSumFunc))(&values[i], isnull[i],
-                        &reslot->tts_values[i], reslot->tts_isnull[i]);
-                isnull[i] = false;
-            }
-        }
-
-        if (nprocessed >= max_rows) {
-            break;
-        }
+    /* for m_aggCountNull, we can return 0 directly */
+    if (likely(!m_c_global->m_aggCountNull)) {
+        nprocessed = (this->*(m_c_global->m_aggProcessFunc))(max_rows, values, isnull);
+    }
+    /*
+     * zero tuple processed, for sum agg, it should return null, so no need to handle.
+     * for count agg, we should return 0, so change values/isnull here.
+     */
+    if (nprocessed == 0 &&
+        (m_c_global->m_aggFnOid == COUNTOID || m_c_global->m_aggFnOid == ANYCOUNTOID)) {
+        values[0] = Int64GetDatum(0);
+        isnull[0] = false;
     }
 
     HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, values, isnull);
@@ -154,8 +226,6 @@ bool AggFusion::execute(long max_rows, char *completionTag)
     (*m_local.m_receiver->receiveSlot)(reslot, m_local.m_receiver);
 
     tpslot_free_heaptuple(m_local.m_reslot);
-
-    success = true;
 
     /* step 3: done */
     if (m_local.m_isInsideRec == true) {
@@ -169,7 +239,7 @@ bool AggFusion::execute(long max_rows, char *completionTag)
             "SELECT %lu", nprocessed);
     securec_check_ss(errorno, "\0", "\0");
 
-    return success;
+    return true;
 }
 
 void
@@ -308,6 +378,32 @@ void AggFusion::agg_numeric_sum(Datum *transVal, bool transIsNull, Datum *inVal,
     }
 
     *transVal = newVal;
+
+    return;
+}
+
+/* differ for agg_star_count, agg_any_count will not count null value */
+void AggFusion::agg_any_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+{
+    if (unlikely(inIsNull)) {
+        return;
+    }
+
+    return AggFusion::agg_star_count(transVal, transIsNull, inVal, inIsNull);
+}
+
+void AggFusion::agg_star_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+{
+    if (unlikely(transIsNull)) {
+        *transVal = Int64GetDatum(1);
+        return;
+    }
+
+    int64 result = 0;
+    if (unlikely(pg_add_s64_overflow(*transVal, 1, &result))) {
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("bigint out of range")));
+    }
+    *transVal = Int64GetDatum(result);
 
     return;
 }

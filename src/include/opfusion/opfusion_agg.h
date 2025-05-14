@@ -42,7 +42,9 @@ public:
 
 protected:
 
-    typedef void (AggFusion::*aggSumFun)(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    typedef void (AggFusion::*aggFun)(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+
+    typedef long (AggFusion::*aggProcessFunc)(long max_rows, Datum* values, bool* isnull);
 
     /* agg sum function */
     void agg_int2_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
@@ -52,6 +54,14 @@ protected:
     void agg_int8_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
 
     void agg_numeric_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+
+    void agg_any_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+
+    void agg_star_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+
+    long agg_process_special_count(long max_rows, Datum* values, bool* isnull);
+
+    long agg_process_common(long max_rows, Datum* values, bool* isnull);
 
     inline void init_var_from_num(Numeric num, NumericVar *dest)
     {
@@ -65,7 +75,10 @@ protected:
     }
 
     struct AggFusionGlobalVariable {
-        aggSumFun m_aggSumFunc;
+        aggFun m_aggFunc;
+        aggProcessFunc m_aggProcessFunc;
+        Oid m_aggFnOid;
+        bool m_aggCountNull;
     };
     AggFusionGlobalVariable* m_c_global;
 };
