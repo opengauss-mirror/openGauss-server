@@ -38,6 +38,7 @@
 #include "utils/lsyscache.h"
 #include "gs_mask_policy.h"
 #include "gs_policy_plugin.h"
+#include "query_anomaly/query_anomaly_labels.h"
 
 static THR_LOCAL loaded_labels *all_labels = NULL;
 
@@ -175,7 +176,7 @@ bool load_policy_labels(bool reload)
     }
     all_labels = new loaded_labels;
     scan_policy_labels(all_labels);
-
+    load_query_anomaly_labels(true);
     return true;
 }
 

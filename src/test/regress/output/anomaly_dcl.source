@@ -1,0 +1,67 @@
+\set ECHO NONE
+NOTICE:  table "employees" does not exist, skipping
+create table employees
+(
+	id serial,
+	last_name varchar(20),
+	email varchar(20),
+	salary int,
+	job_id int,
+	department_id int
+);
+NOTICE:  CREATE TABLE will create implicit sequence "employees_id_seq" for serial column "employees.id"
+Logging Risky query schema change (DDL) OK
+DROP ROLE user1;
+ERROR:  role "user1" does not exist
+Logging Risky query permission change OK
+
+DROP ROLE user2;
+ERROR:  role "user2" does not exist
+Logging Risky query permission change OK
+
+CREATE ROLE user1 WITH LOGIN PASSWORD '1q*W3e4r';
+NO PASSWORD IN LOG FILE: OK
+Logging Risky query permission change OK
+
+CREATE ROLE user2 WITH LOGIN PASSWORD '1q*W3e4r';
+NO PASSWORD IN LOG FILE: OK
+Logging Risky query permission change OK
+
+CREATE ROLE user3 WITH LOGIN PASSWORD '1q*W3e4raaaa';
+NO PASSWORD IN LOG FILE: OK
+Logging Risky query permission change OK
+
+GRANT SELECT ON employees TO user1;
+Logging Risky query permission change OK
+
+GRANT ALL PRIVILEGES ON employees TO user1;
+Logging Risky query permission change OK
+
+GRANT USAGE, CREATE ON SCHEMA public TO user1;
+Logging Risky query permission change OK
+
+GRANT INSERT, UPDATE ON employees TO user1, user2;
+Logging Risky query permission change OK
+
+REVOKE SELECT ON employees FROM user1;
+Logging Risky query permission change OK
+
+REVOKE ALL PRIVILEGES ON employees FROM user1;
+Logging Risky query permission change OK
+
+REVOKE USAGE, CREATE ON SCHEMA public FROM user1;
+Logging Risky query permission change OK
+
+DROP TABLE employees;
+Logging Risky query schema change (DDL) OK
+
+DROP ROLE user1;
+Logging Risky query permission change OK
+
+DROP ROLE user2;
+Logging Risky query permission change OK
+
+DROP ROLE user3;
+Logging Risky query permission change OK
+
+set enable_risky_query_detection=off;

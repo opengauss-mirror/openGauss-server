@@ -280,6 +280,7 @@
 #include "storage/gs_uwal/gs_uwal.h"
 #include "ddes/dms/ss_sync_auxiliary.h"
 #include "access/datavec/utils.h"
+#include "query_anomaly/query_anomaly.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -2929,6 +2930,8 @@ int PostmasterMain(int argc, char* argv[])
     /* init unique sql */
     InitUniqueSQL();
     InitGsStack();
+    /* Init risky query rules */
+    init_anomaly_detection_check_rules();
     /* init hypo index */
     InitHypopg();
     InitAsp();
@@ -9866,7 +9869,7 @@ void ExitPostmaster(int status)
     fflush(stdout);
 
     LogCtlLastFlushBeforePMExit();
-
+    anomaly_detection_close();
     proc_exit(status);
 }
 
@@ -14440,6 +14443,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
 
             /* unique sql hooks */
             instr_unique_sql_register_hook();
+
+            /* query anomaly hook */
+            install_query_anomaly_hook();
 
             /* hypopg index hooks */
             hypopg_register_hook();

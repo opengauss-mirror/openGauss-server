@@ -132,6 +132,7 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_runtime_vecexecutor_vectorsonic>
     $<TARGET_OBJECTS:gausskernel_runtime_vecexecutor>
     $<TARGET_OBJECTS:gausskernel_security_iprange>
+    $<TARGET_OBJECTS:gausskernel_security_query_anomaly>
     $<TARGET_OBJECTS:gausskernel_security_gs_policy>
     $<TARGET_OBJECTS:gausskernel_storage_access_cbtree>
     $<TARGET_OBJECTS:gausskernel_storage_access_common>
@@ -356,6 +357,7 @@ include_directories(
     ${PROJECT_SRC_DIR}/gausskernel/cbb/communication/comm_proxy
     ${PROJECT_SRC_DIR}/gausskernel/cbb/communication/libcomm_utils
     ${PROJECT_SRC_DIR}/include/iprange
+    ${PROJECT_SRC_DIR}/include/query_anomaly
     ${PROJECT_SRC_DIR}/gausskernel/storage/replication
 )
 

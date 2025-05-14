@@ -66,6 +66,7 @@ add_func_target_withargs_fastcheck(hacheck_single_standby_read hacheck_single_st
 add_func_target_withargs_fastcheck(decodecheck_single decodecheck_single)
 add_func_target_withargs_fastcheck(upgradecheck_single upgradecheck_single)
 add_func_target_withargs_fastcheck(hacheck_ss_all hacheck_ss_all)
+add_func_target_withargs_fastcheck(fastcheck_anomaly_single fastcheck_anomaly_single)
 
 function(add_func_target_withargs_gocheck _name _cmdargs)
     separate_arguments(cmd_args UNIX_COMMAND "${_cmdargs}")

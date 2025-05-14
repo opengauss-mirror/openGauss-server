@@ -1,0 +1,86 @@
+\set ECHO NONE
+set enable_risky_query_detection=on;
+drop table if exists employees cascade;
+
+\set ECHO queries
+--clean
+
+--create objects
+create table employees
+(
+	id serial,
+	last_name varchar(20),
+	email varchar(20),
+	salary int,
+	job_id int,
+	department_id int
+);
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "create table employees" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+
+DROP ROLE user1;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "DROP ROLE user1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+DROP ROLE user2;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "DROP ROLE user2;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+CREATE ROLE user1 WITH LOGIN PASSWORD '1q*W3e4r';
+\! @abs_srcdir@/script/check_unmasked_password.sh "1q*W3e4r" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "CREATE ROLE user1 WITH LOGIN PASSWORD '********';" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+CREATE ROLE user2 WITH LOGIN PASSWORD '1q*W3e4r';
+\! @abs_srcdir@/script/check_unmasked_password.sh "1q*W3e4r" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "CREATE ROLE user2 WITH LOGIN PASSWORD '********';" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+CREATE ROLE user3 WITH LOGIN PASSWORD '1q*W3e4raaaa';
+\! @abs_srcdir@/script/check_unmasked_password.sh "1q*W3e4raaaa" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "CREATE ROLE user3 WITH LOGIN PASSWORD '********';" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+GRANT SELECT ON employees TO user1;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "GRANT SELECT ON employees TO user1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+GRANT ALL PRIVILEGES ON employees TO user1;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "GRANT ALL PRIVILEGES ON employees TO user1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+GRANT USAGE, CREATE ON SCHEMA public TO user1;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "GRANT USAGE, CREATE ON SCHEMA public TO user1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+GRANT INSERT, UPDATE ON employees TO user1, user2;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "GRANT INSERT, UPDATE ON employees TO user1, user2;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+REVOKE SELECT ON employees FROM user1;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "REVOKE SELECT ON employees FROM user1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+REVOKE ALL PRIVILEGES ON employees FROM user1;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "REVOKE ALL PRIVILEGES ON employees FROM user1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+REVOKE USAGE, CREATE ON SCHEMA public FROM user1;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "REVOKE USAGE, CREATE ON SCHEMA public FROM user1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+DROP TABLE employees;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "DROP TABLE employees;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+DROP ROLE user1;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "DROP ROLE user1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+DROP ROLE user2;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "DROP ROLE user2;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+DROP ROLE user3;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query permission change" "DROP ROLE user3;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+set enable_risky_query_detection=off;

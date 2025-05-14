@@ -1,0 +1,5 @@
+test: anomaly_dcl
+test: anomaly_ddl
+test: anomaly_dml
+test: anomaly_file_operation
+test: anomaly_triggers_functions

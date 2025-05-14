@@ -1,0 +1,91 @@
+\set ECHO NONE
+NOTICE:  table "employees" does not exist, skipping
+NOTICE:  table "salary_range" does not exist, skipping
+NOTICE:  function update_salary_range() does not exist, skipping
+NOTICE:  function reset_salary() does not exist, skipping
+create table employees
+(
+	id serial,
+	last_name varchar(20),
+	email varchar(20),
+	salary int,
+	job_id int,
+	department_id int
+);
+NOTICE:  CREATE TABLE will create implicit sequence "employees_id_seq" for serial column "employees.id"
+Logging Risky query schema change (DDL) OK
+
+INSERT INTO employees (id, last_name, email, salary, job_id, department_id) VALUES (1, 'b', 'a.b.@c.com', 1,1,1);
+create table salary_range
+(
+	id serial,
+	job_name varchar(20),
+	min_sal int,
+	max_sal int
+);
+NOTICE:  CREATE TABLE will create implicit sequence "salary_range_id_seq" for serial column "salary_range.id"
+Logging Risky query schema change (DDL) OK
+
+INSERT INTO salary_range (id, job_name, min_sal, max_sal) VALUES (1, 'a', 100, 1000);
+CREATE OR REPLACE FUNCTION update_salary_range()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE salary_range
+    SET min_sal = NEW.salary;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+Logging Risky query schema change (DDL) OK
+
+CREATE TRIGGER employees_salary_update_trigger
+AFTER UPDATE OF salary ON employees
+FOR EACH ROW
+EXECUTE FUNCTION update_salary_range();
+Logging Risky query schema change (DDL) OK
+
+CREATE OR REPLACE FUNCTION reset_salary()
+RETURNS void AS $$
+BEGIN
+    UPDATE employees
+    SET salary = 0;
+END;
+$$ LANGUAGE plpgsql;
+Logging Risky query schema change (DDL) OK
+
+update employees set salary = 101 where id = 1;
+select * from salary_range;
+ id | job_name | min_sal | max_sal 
+----+----------+---------+---------
+  1 | a        |     101 |    1000
+(1 row)
+
+call reset_salary();
+ reset_salary 
+--------------
+ 
+(1 row)
+
+select * from salary_range;
+ id | job_name | min_sal | max_sal 
+----+----------+---------+---------
+  1 | a        |       0 |    1000
+(1 row)
+
+UPDATE employees SET salary = 102;
+Logging Risky query update with no 'where clause' OK
+
+select * from salary_range;
+ id | job_name | min_sal | max_sal 
+----+----------+---------+---------
+  1 | a        |     102 |    1000
+(1 row)
+
+drop table salary_range cascade;
+Logging Risky query schema change (DDL) OK
+
+drop table employees cascade;
+Logging Risky query schema change (DDL) OK
+
+NOTICE:  table "employees" does not exist, skipping
+NOTICE:  table "salary_range" does not exist, skipping

@@ -10,6 +10,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_ledger
     ${CMAKE_CURRENT_SOURCE_DIR}/tde_key_management
     ${CMAKE_CURRENT_SOURCE_DIR}/keymgr
+    ${CMAKE_CURRENT_SOURCE_DIR}/query_anomaly
 )
 
 add_subdirectory(gs_policy)
@@ -17,4 +18,5 @@ add_subdirectory(iprange)
 add_subdirectory(gs_ledger)
 add_subdirectory(keymgr)
 add_subdirectory(tde_key_management)
+add_subdirectory(query_anomaly)
 

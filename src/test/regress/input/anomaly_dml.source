@@ -1,0 +1,113 @@
+\set ECHO NONE
+set enable_risky_query_detection=on;
+--clean
+drop RESOURCE LABEL if exists test_resource_label;
+drop table if exists employees cascade;
+drop table if exists countries cascade;
+drop table if exists salary_range cascade;
+
+
+\set ECHO queries
+--craete objects
+create table employees
+(
+	id serial,
+	last_name varchar(20),
+	email varchar(20),
+	salary int,
+	job_id int,
+	department_id int
+);
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "create table employees" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+create table countries
+(
+	id serial,
+	contry_name varchar(20),
+	country_code int
+);
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "create table countries" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+create table salary_range
+(
+	id serial,
+	job_name varchar(20),
+	min_sal int,
+	max_sal int
+);
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "create table salary_range" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+CREATE INDEX IF NOT EXISTS ON employees(department_id);
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "CREATE INDEX IF NOT EXISTS ON employees(department_id);" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+CREATE INDEX IF NOT EXISTS ON employees USING HASH (last_name);
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query schema change (DDL)" "CREATE INDEX IF NOT EXISTS ON employees USING HASH (last_name);" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+\copy employees(last_name,email,salary,job_id,department_id) FROM '@abs_srcdir@/data/anomaly_employees.data' DELIMITER ',' CSV HEADER;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query file operation" "COPY  employees ( last_name,email,salary,job_id,department_id ) FROM STDIN  DELIMITER ',' CSV HEADER;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+
+\copy countries(contry_name,country_code) FROM '@abs_srcdir@/data/anomaly_countries.data' DELIMITER ',' CSV HEADER;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query file operation" "COPY  countries ( contry_name,country_code ) FROM STDIN  DELIMITER ',' CSV HEADER;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+
+\copy salary_range(job_name,min_sal,max_sal) FROM '@abs_srcdir@/data/anomaly_salary_range.data' DELIMITER ',' CSV HEADER;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query file operation" "COPY  salary_range ( job_name,min_sal,max_sal ) FROM STDIN  DELIMITER ',' CSV HEADER;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+
+\set ECHO queries
+
+select count(*) from employees;
+select count(*) from employees;
+select count(*) from countries;
+select count(*) from salary_range;
+select * from employees order by id limit 10;
+select * from countries order by id limit 10;
+select * from salary_range order by id limit 10;
+
+--create labels
+CREATE RESOURCE LABEL test_resource_label add TABLE(salary_range), TABLE(employees);
+
+-- the actual test
+update salary_range set min_sal = min_sal - 1;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query access resource label" "update salary_range set min_sal = min_sal - 1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query update with no 'where clause'" "update salary_range set min_sal = min_sal - 1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+delete from salary_range where min_sal < 0;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query access resource label" "delete from salary_range where min_sal < 0;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+delete from salary_range;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query access resource label" "delete from salary_range;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query delete with no 'where clause'" "delete from salary_range;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+select * from employees order by id limit 1001;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query access resource label" "select * from employees order by id limit 1001;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query large select" "select * from employees order by id limit 1001;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+update employees set salary = salary +1;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query access resource label" "update employees set salary = salary +1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query update with no 'where clause'" "update employees set salary = salary +1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query large update" "update employees set salary = salary +1;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+delete from employees;
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query access resource label" "delete from employees;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query delete with no 'where clause'" "delete from employees;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\! @abs_srcdir@/script/find_risky_query_event.sh "Risky query large delete" "delete from employees;" "@abs_srcdir@/tmp_check/@datanode1@/pg_log"
+\echo
+
+
+
+-- clean
+\set ECHO NONE
+drop RESOURCE LABEL if exists test_resource_label;
+drop table if exists employees cascade;
+drop table if exists countries cascade;
+drop table if exists salary_range cascade;
+set enable_risky_query_detection=off;

@@ -548,6 +548,7 @@ use_workload_manager = on		# Enables workload manager in the system.
 # SECURITY POLICY
 #------------------------------------------------------------------------------
 #enable_security_policy = off
+#enable_risky_query_detection = off
 #use_elastic_search = off
 #elastic_search_ip_addr = 'https://127.0.0.1' # what elastic search ip is, change https to http when elastic search is non-ssl mode
 
