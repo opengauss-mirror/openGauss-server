@@ -49,6 +49,32 @@ select sum(c2) from t1 where c3=3;
 select sum(c3) from t1 where c2=3;
 select sum(c2) from t1 where c2=3;
 
+-- count fusion
+create table t_agg_count(a int);
+insert into t_agg_count values(generate_series(1,10000));
+insert into t_agg_count select null from generate_series(1,100);
+create index i_t_agg_count on t_agg_count(a);
+analyze t_agg_count;
+
+explain (verbose on, costs off) select count(a) from t_agg_count  where a is null;
+explain (verbose on, costs off) select count(a) from t_agg_count  where a=1;
+explain (verbose on, costs off) select count(*) from t_agg_count  where a=1;
+explain (verbose on, costs off) select count(*) from t_agg_count  where a is null;
+explain (verbose on, costs off) select count(1) from t_agg_count  where a=1;
+explain (verbose on, costs off) select count(1) from t_agg_count  where a is null;
+explain (verbose on, costs off) select count(null) from t_agg_count  where a is null;
+explain (verbose on, costs off) select count(null) from t_agg_count  where a=1;
+
+select count(a) from t_agg_count  where a is null;
+select count(a) from t_agg_count  where a=1;
+select count(*) from t_agg_count  where a=1;
+select count(*) from t_agg_count  where a is null;
+select count(1) from t_agg_count  where a=1;
+select count(1) from t_agg_count  where a is null;
+select count(null) from t_agg_count  where a is null;
+select count(null) from t_agg_count  where a=1;
+drop table t_agg_count;
+
 -- sort fusion
 explain (verbose on, costs off) select c3 from t1 where c3 < 10 order by c2;
 select c3 from t1 where c3 < 10 order by c2;
