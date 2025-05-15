@@ -51,7 +51,7 @@ bool hcom_init_dll(const char* dir)
     }
     char hcompath[256] = {0};
     errno_t rc = snprintf_s(hcompath, sizeof(hcompath), sizeof(hcompath) - 1, "%s/%s", dir, "libhcom4db.so");
-    securec_check(rc, "\0", "\0");
+    securec_check_ss_c(rc, "\0", "\0");
     g_hcom_dll = dlopen(hcompath, RTLD_LAZY);
     if (g_hcom_dll == nullptr) {
         LIBCOMM_ELOG(WARNING, "hcom_init_dll dlopen[%s] error.", hcompath);
@@ -190,7 +190,12 @@ static void hcom_handle_recv(OckRpcServerContext ctx, OckRpcMessage msg)
     while (0 != libcomm_malloc_iov_item_for_hcom(&iov_item)) {
         pg_usleep(HCOM_RETRY_USLEEP);
     }
-    memcpy_s(iov_item->element.data->iov_base, IOV_DATA_SIZE, sendbuf->msg, sendbuf->head.msg_len);
+    errno_t rc = memcpy_s(iov_item->element.data->iov_base, IOV_DATA_SIZE, sendbuf->msg, sendbuf->head.msg_len);
+    securec_check(rc, "\0", "\0");
+    if (rc != EOK) {
+        g_hcom_adapt.hcom_server_clean(ctx);
+        return;
+    }
     iov_item->element.data->iov_len = sendbuf->head.msg_len;
     struct c_mailbox* cmailbox = &C_MAILBOX(idx, streamid);
     while (gs_push_cmailbox_buffer(cmailbox, iov_item, version, true) < 0) {
@@ -366,7 +371,7 @@ int hcom_build_connection(libcommaddrinfo* libcomm_addrinfo, int node_idx)
     fd_id.fd = sock;
     fd_id.id = 0;
     struct hcom_connect_package connect_package;
-    ss_rc = strcpy_s(connect_package.nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
+    ss_rc = strcpy_s(connect_package.nodename, NAMEDATALEN, libcomm_addrinfo->selfnodename);
     securec_check_c(ss_rc, "\0", "\0");
     ss_rc = strcpy_s(connect_package.host, HOST_ADDRSTRLEN, g_instance.comm_cxt.localinfo_cxt.g_local_host);
     securec_check_c(ss_rc, "\0", "\0");
@@ -410,6 +415,7 @@ int hcom_build_connection(libcommaddrinfo* libcomm_addrinfo, int node_idx)
     ss_rc = strncpy_s(addr.ip, HOST_LEN_OF_HTAB, libcomm_addrinfo->host, cpylen + 1);
     securec_check_c(ss_rc, "\0", "\0");
     addr.ip[cpylen] = '\0';
+    addr.shift = libcomm_addrinfo->shift;
 
     addr.port = libcomm_addrinfo->listen_port;
     /* update connection state to succeed when connect succeed */

@@ -1186,12 +1186,11 @@ bool gs_r_quota_notify(c_mailbox* cmailbox, FCMSG_T* msg)
         msg->version = cmailbox->remote_version;
         msg->query_id = cmailbox->query_id;
 
-        cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
         ss_rc = memset_s(msg->nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
         securec_check(ss_rc, "\0", "\0");
         ss_rc = sprintf_s(msg->nodename, NAMEDATALEN, "%d_%s",
                           cmailbox->shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
-        securec_check(ss_rc, "\0", "\0");
+        securec_check_ss_c(ss_rc, "\0", "\0");
 
         return true;
     }
@@ -1638,7 +1637,7 @@ void gs_s_close_logic_connection(struct p_mailbox* pmailbox, int close_reason, F
         securec_check(ss_rc, "\0", "\0");
         ss_rc = sprintf_s(msg->nodename, NAMEDATALEN, "%d_%s",
                           pmailbox->shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
-        securec_check(ss_rc, "\0", "\0");
+        securec_check_ss_c(ss_rc, "\0", "\0");
     }
 
     // wake up the producer who is waiting
@@ -2049,7 +2048,7 @@ static bool gs_r_form_start_ctrl_msg(c_mailbox* cmailbox, FCMSG_T* msg)
         securec_check(ss_rc, "\0", "\0");
         ss_rc = sprintf_s(msg->nodename, NAMEDATALEN, "%d_%s",
                           cmailbox->shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
-        securec_check(ss_rc, "\0", "\0");
+        securec_check_ss_c(ss_rc, "\0", "\0");
 
         return true;
     }
