@@ -696,8 +696,8 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
             ResTarget *resTarget = (ResTarget *)lfirst(targetCell);
             next = lnext(targetCell);
             if (IsA(resTarget->val, ColumnRef)) {
-                char *colName = strVal(lfirst(list_head(((ColumnRef *)resTarget->val)->fields)));
-                if (list_member(r->rotate->forColName, lfirst(list_head(((ColumnRef *)resTarget->val)->fields))) ||
+                char *colName = strVal(lfirst(list_tail(((ColumnRef *)resTarget->val)->fields)));
+                if (list_member(r->rotate->forColName, lfirst(list_tail(((ColumnRef *)resTarget->val)->fields))) ||
                     ColNameInFuncParasList(colName, columnsInAggFunc))
                     subQueryStmt->targetList = list_delete_cell(subQueryStmt->targetList, targetCell, prev);
                 else

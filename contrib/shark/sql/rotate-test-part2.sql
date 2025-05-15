@@ -282,6 +282,42 @@ not rotate(sale_all for sale in (sale1, sale2, sale3, sale4)) as unpivot_table o
 
 set enable_ignore_case_in_dquotes off;
 
+
+drop table if exists t_rotate0005;
+CREATE TABLE t_rotate0005 (
+    ID          INT PRIMARY KEY,
+    ProductName VARCHAR(50)
+) collate utf8_general_ci;
+INSERT INTO t_rotate0005 (ID, ProductName) VALUES
+    (1, 'Laptop'),
+    (2, 'Phone'),
+    (3, 'Tablet');
+drop table if exists t_rotate0005_01;
+CREATE TABLE t_rotate0005_01 (
+    ProductID   INT,
+    Quarter     CHAR(2),
+    Amount      DECIMAL(10,2),
+    FOREIGN KEY (ProductID) REFERENCES t_rotate0005(ID)
+) collate utf8_general_ci;
+INSERT INTO t_rotate0005_01 (ProductID, Quarter, Amount) VALUES
+    (1, 'Q1', 1000.00),
+    (1, 'Q2', 1500.00),
+    (2, 'Q1', 800.00),
+    (2, 'Q3', 2000.00),
+    (3, 'Q4', 500.00);
+
+SELECT *
+FROM (
+SELECT p.ProductName, s.Quarter, s.Amount
+    FROM t_rotate0005_01 s
+    JOIN t_rotate0005 p ON s.ProductID = p.ID
+) AS SourceTable
+rotate (SUM(Amount) FOR Quarter IN (Q1, Q2, q3, q4)) AS rotateTable;
+
+
+drop table t_rotate0005_01;
+drop table t_rotate0005;
+
 -- part3: ANSI_NULLS
 set ANSI_NULLS on;
 select NULL = NULL;
