@@ -159,3 +159,9 @@
 					set_is_delimiter_name(yytext,yyscanner);
 					return IDENT;
 				}
+
+<tsql>{tsql_hex}	{
+						SET_YYLLOC();
+						yylval->str = pstrdup(yytext);
+						return TSQL_XCONST;
+					}

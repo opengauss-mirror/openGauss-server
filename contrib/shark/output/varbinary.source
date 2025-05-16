@@ -1,0 +1,515 @@
+CREATE DATABASE test_varbinary DBCOMPATIBILITY 'D';
+\c test_varbinary
+CREATE EXTENSION shark;
+CREATE TABLE t1 (id int, a VARBINARY(1));
+CREATE TABLE t2 (id int, a VARBINARY(16));
+CREATE TABLE t3 (id int, a VARBINARY(MAX));
+CREATE TABLE t4 (id int, a VARBINARY(1.1));
+ERROR:  invalid input syntax for integer: "1.1"
+LINE 1: CREATE TABLE t4 (id int, a VARBINARY(1.1));
+                                   ^
+CREATE TABLE t5 (id int, a VARBINARY(-1));
+ERROR:  length for type varbinary must be at least 1
+LINE 1: CREATE TABLE t5 (id int, a VARBINARY(-1));
+                                   ^
+CREATE TABLE t6 (id int, a VARBINARY(0));
+ERROR:  length for type varbinary must be at least 1
+LINE 1: CREATE TABLE t6 (id int, a VARBINARY(0));
+                                   ^
+CREATE INDEX idx1 ON t1(a);
+CREATE INDEX idx2 ON t2(a);
+CREATE INDEX idx3 ON t3(a);
+-- test longlimt
+INSERT INTO t1 VALUES (1, 'a'::varbinary);
+INSERT INTO t1 VALUES (2, 'aa'::varbinary); -- error
+ERROR:  String or binary data would be truncated.
+The statement has been terminated.
+CONTEXT:  referenced column: a
+INSERT INTO t2 VALUES (2, 'aa'::varbinary);
+INSERT INTO t2 VALUES (3, '1234567890123456'::varbinary);
+INSERT INTO t2 VALUES (3, '12345678901234567'::varbinary); -- error
+ERROR:  String or binary data would be truncated.
+The statement has been terminated.
+CONTEXT:  referenced column: a
+INSERT INTO t3 VALUES (4, '12345678901234567890'::varbinary);
+-- test hex
+INSERT INTO t1 VALUES (10, 0xff);
+INSERT INTO t1 VALUES (10, 0xff1); -- error
+ERROR:  String or binary data would be truncated.
+The statement has been terminated.
+CONTEXT:  referenced column: a
+select id, a from t1 where id = 10;
+ id |  a   
+----+------
+ 10 | 0xff
+(1 row)
+
+INSERT INTO t2 VALUES (10, 0xffffffffffffffffffffffffffffffff);
+INSERT INTO t2 VALUES (10, 0xffffffffffffffffffffffffffffffff1); --error
+ERROR:  String or binary data would be truncated.
+The statement has been terminated.
+CONTEXT:  referenced column: a
+select id, a from t2 where id = 10;
+ id |                 a                  
+----+------------------------------------
+ 10 | 0xffffffffffffffffffffffffffffffff
+(1 row)
+
+select id, a from t2 where a = 0xffffffffffffffffffffffffffffffff;
+ id |                 a                  
+----+------------------------------------
+ 10 | 0xffffffffffffffffffffffffffffffff
+(1 row)
+
+-- test typecast bytea
+INSERT INTO t3 VALUES (5, 'aa'::bytea); -- assignment cast allow
+select id, a::bytea from t3 where a = 'aa'::varbinary;
+ id |   a    
+----+--------
+  5 | \x6161
+(1 row)
+
+select 'aa'::bytea;
+ bytea  
+--------
+ \x6161
+(1 row)
+
+CREATE TABLE t_bytea(id int, a bytea);
+INSERT INTO t_bytea VALUES (5, 'aa'::varbinary); -- assignment cast allow
+SELECT id, a from t_bytea;
+ id |   a    
+----+--------
+  5 | \x6161
+(1 row)
+
+SELECT id, a::varbinary::varchar from t_bytea;
+ id | a  
+----+----
+  5 | aa
+(1 row)
+
+-- test typecast bpchar
+INSERT INTO t3 VALUES (6, 'aa'::bpchar); -- assignment cast not allow but use udf errmsg
+ERROR:  column "a" is of type varbinary but expression is of type character
+LINE 1: INSERT INTO t3 VALUES (6, 'aa'::bpchar);
+                                  ^
+HINT:  You will need to rewrite or cast the expression.
+CONTEXT:  referenced column: a
+INSERT INTO t3 VALUES (6, 'aa'::bpchar::varbinary); -- explict cast
+SELECT id, a::bpchar FROM t3 WHERE id = 6;
+ id | a  
+----+----
+  6 | aa
+(1 row)
+
+SELECT id, a::bpchar FROM t3 WHERE a = 'aa'::bpchar::varbinary;
+ id | a  
+----+----
+  5 | aa
+  6 | aa
+(2 rows)
+
+CREATE TABLE t_bpchar (id int, a bpchar);
+INSERT INTO t_bpchar VALUES (1, 'aa'::varbinary); -- assignment cast allow
+SELECT id, a from t_bpchar;
+ id | a  
+----+----
+  1 | aa
+(1 row)
+
+-- test typecast varchar
+INSERT INTO t3 VALUES (7, 'aa'::varchar); -- assignment cast not allow but use udf errmsg
+ERROR:  column "a" is of type varbinary but expression is of type character varying
+LINE 1: INSERT INTO t3 VALUES (7, 'aa'::varchar);
+                                  ^
+HINT:  You will need to rewrite or cast the expression.
+CONTEXT:  referenced column: a
+INSERT INTO t3 VALUES (7, 'aa'::varchar::varbinary); -- explict cast
+SELECT id, a::varchar FROM t3 WHERE id = 7;
+ id | a  
+----+----
+  7 | aa
+(1 row)
+
+SELECT id, a::varchar FROM t3 WHERE a = 'aa'::varchar::varbinary;
+ id | a  
+----+----
+  5 | aa
+  6 | aa
+  7 | aa
+(3 rows)
+
+CREATE TABLE t_varchar (id int, a varchar);
+INSERT INTO t_varchar VALUES (1, 'aa'::varbinary); -- assignment cast allow
+SELECT id, a FROM t_varchar;
+ id | a  
+----+----
+  1 | aa
+(1 row)
+
+-- test typecast int
+INSERT INTO t1 VALUES (8, 255);
+INSERT INTO t1 VALUES (9, 256);
+SELECT id, a FROM t1 WHERE id = 8 or id = 9;
+ id |  a   
+----+------
+  8 | 0xff
+  9 | 0x00
+(2 rows)
+
+SELECT id, a::int FROM t1 WHERE id = 8 or id =9;
+ id |  a  
+----+-----
+  8 | 255
+  9 |   0
+(2 rows)
+
+INSERT INTO t2 VALUES (8, 2147483647::int4); -- max int4 in pg
+INSERT INTO t2 VALUES (9, 9223372036854775807::int8); -- max int8 in pg
+INSERT INTO t2 VALUES (100, 32767::int2); -- max int2 in pg
+SELECT id, a FROM t2 WHERE id = 8 or id = 9 or id = 100;
+ id  |         a          
+-----+--------------------
+   8 | 0x7fffffff
+   9 | 0x7fffffffffffffff
+ 100 | 0x7fff
+(3 rows)
+
+SELECT id, a::int2 FROM t2 WHERE id = 100;
+ id  |   a   
+-----+-------
+ 100 | 32767
+(1 row)
+
+SELECT id, a::int4 FROM t2 WHERE id = 8;
+ id |     a      
+----+------------
+  8 | 2147483647
+(1 row)
+
+SELECT id, a::int8 FROM t2 WHERE id = 9;
+ id |          a          
+----+---------------------
+  9 | 9223372036854775807
+(1 row)
+
+select 32767::int2::varbinary::int2;
+ int2  
+-------
+ 32767
+(1 row)
+
+select 2147483647::int4::varbinary::int4;
+    int4    
+------------
+ 2147483647
+(1 row)
+
+select 9223372036854775807::int8::varbinary::int8;
+        int8         
+---------------------
+ 9223372036854775807
+(1 row)
+
+select id, a, 2147483647::int8::varbinary from t2 where a < 2147483647::int8::varbinary;
+ id | a | varbinary 
+----+---+-----------
+(0 rows)
+
+select id, a, 2147483647::int8::varbinary from t2 where a <= 2147483647::int8::varbinary;
+ id | a | varbinary 
+----+---+-----------
+(0 rows)
+
+select id, a, 2147483647::int8::varbinary from t2 where a > 2147483647::int8::varbinary;
+ id  |                 a                  |     varbinary      
+-----+------------------------------------+--------------------
+   2 | 0x6161                             | 0x000000007fffffff
+   3 | 0x31323334353637383930313233343536 | 0x000000007fffffff
+  10 | 0xffffffffffffffffffffffffffffffff | 0x000000007fffffff
+   8 | 0x7fffffff                         | 0x000000007fffffff
+   9 | 0x7fffffffffffffff                 | 0x000000007fffffff
+ 100 | 0x7fff                             | 0x000000007fffffff
+(6 rows)
+
+select id, a, 2147483647::int8::varbinary from t2 where a >= 2147483647::int8::varbinary;
+ id  |                 a                  |     varbinary      
+-----+------------------------------------+--------------------
+   2 | 0x6161                             | 0x000000007fffffff
+   3 | 0x31323334353637383930313233343536 | 0x000000007fffffff
+  10 | 0xffffffffffffffffffffffffffffffff | 0x000000007fffffff
+   8 | 0x7fffffff                         | 0x000000007fffffff
+   9 | 0x7fffffffffffffff                 | 0x000000007fffffff
+ 100 | 0x7fff                             | 0x000000007fffffff
+(6 rows)
+
+select id, a, 2147483647::int8::varbinary from t2 where a = 2147483647::int8::varbinary;
+ id | a | varbinary 
+----+---+-----------
+(0 rows)
+
+-- test typecast float
+select 9223372036854775807.123456::float8;
+        float8        
+----------------------
+ 9.22337203685478e+18
+(1 row)
+
+INSERT INTO t1 VALUES (11, 256.111::float4);
+SELECT id, a FROM t1 WHERE id = 11;
+ id |  a   
+----+------
+ 11 | 0x35
+(1 row)
+
+SELECT id, a::float4 FROM t1 WHERE id = 11; -- sqlserve not suport cast float to varbinary
+ERROR:  cannot cast type varbinary to real
+LINE 1: SELECT id, a::float4 FROM t1 WHERE id = 11;
+                    ^
+CONTEXT:  referenced column: a
+INSERT INTO t2 VALUES (11, 2147483647.111::float8);
+SELECT id, a FROM t2 WHERE id = 11;
+ id |         a          
+----+--------------------
+ 11 | 0x41dfffffffc71aa0
+(1 row)
+
+SELECT id, a::float8 FROM t2 WHERE id = 11; -- sqlserve not suport cast float to varbinary
+ERROR:  cannot cast type varbinary to double precision
+LINE 1: SELECT id, a::float8 FROM t2 WHERE id = 11;
+                    ^
+CONTEXT:  referenced column: a
+-- test typecast numeric
+select 256::numeric::varbinary; --error
+ERROR:  cannot cast type numeric to varbinary
+LINE 1: select 256::numeric::varbinary;
+                           ^
+CONTEXT:  referenced column: varbinary
+select 256::varbinary::numeric; --error
+ERROR:  cannot cast type varbinary to numeric
+LINE 1: select 256::varbinary::numeric;
+                             ^
+CONTEXT:  referenced column: numeric
+-- test typecast date
+SELECT '2023-10-01'::date::varbinary; -- error
+ERROR:  cannot cast type date to varbinary
+LINE 1: SELECT '2023-10-01'::date::varbinary;
+                                 ^
+CONTEXT:  referenced column: varbinary
+SELECT '2023-10-01'::smalldatetime::varbinary; -- error
+ERROR:  cannot cast type smalldatetime to varbinary
+LINE 1: SELECT '2023-10-01'::smalldatetime::varbinary;
+                                          ^
+CONTEXT:  referenced column: varbinary
+SELECT '2023-10-01'::timestamp::varbinary; -- error
+ERROR:  cannot cast type timestamp without time zone to varbinary
+LINE 1: SELECT '2023-10-01'::timestamp::varbinary;
+                                      ^
+CONTEXT:  referenced column: varbinary
+SELECT '2023-10-01'::timestamptz::varbinary; -- error
+ERROR:  cannot cast type timestamp with time zone to varbinary
+LINE 1: SELECT '2023-10-01'::timestamptz::varbinary;
+                                        ^
+CONTEXT:  referenced column: varbinary
+SELECT '2023-10-01'::abstime::varbinary; -- error
+ERROR:  cannot cast type abstime to varbinary
+LINE 1: SELECT '2023-10-01'::abstime::varbinary;
+                                    ^
+CONTEXT:  referenced column: varbinary
+SELECT '2023-10-01'::timestamp(0) with time zone::varbinary; -- error
+ERROR:  cannot cast type timestamp with time zone to varbinary
+LINE 1: SELECT '2023-10-01'::timestamp(0) with time zone::varbinary;
+                                                        ^
+CONTEXT:  referenced column: varbinary
+-- test cast grammar
+INSERT INTO t3 VALUES (12, CAST('123456789012345678922220' AS varbinary));
+SELECT id, a FROM t3 WHERE id = 12;
+ id |                         a                          
+----+----------------------------------------------------
+ 12 | 0x313233343536373839303132333435363738393232323230
+(1 row)
+
+SELECT id, CAST(a as varchar) FROM t3 WHERE id = 12;
+ id |            a             
+----+--------------------------
+ 12 | 123456789012345678922220
+(1 row)
+
+-- test sort
+select * from t1;
+ id |  a   
+----+------
+  1 | 0x61
+ 10 | 0xff
+  8 | 0xff
+  9 | 0x00
+ 11 | 0x35
+(5 rows)
+
+select * from t1 ORDER BY a;
+ id |  a   
+----+------
+  9 | 0x00
+ 11 | 0x35
+  1 | 0x61
+ 10 | 0xff
+  8 | 0xff
+(5 rows)
+
+select * from t2;
+ id  |                 a                  
+-----+------------------------------------
+   2 | 0x6161
+   3 | 0x31323334353637383930313233343536
+  10 | 0xffffffffffffffffffffffffffffffff
+   8 | 0x7fffffff
+   9 | 0x7fffffffffffffff
+ 100 | 0x7fff
+  11 | 0x41dfffffffc71aa0
+(7 rows)
+
+select * from t2 ORDER BY a;
+ id  |                 a                  
+-----+------------------------------------
+   3 | 0x31323334353637383930313233343536
+  11 | 0x41dfffffffc71aa0
+   2 | 0x6161
+ 100 | 0x7fff
+   8 | 0x7fffffff
+   9 | 0x7fffffffffffffff
+  10 | 0xffffffffffffffffffffffffffffffff
+(7 rows)
+
+--test index
+create index t_var_idx on t3(a);
+CREATE INDEX t_var_idx_char ON t3(cast(a as varchar));
+explain select /*+ IndexScan(t3 t_var_idx) */ id, a from t3 where a = '12345678901234567890'::varbinary;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ [Bypass]
+ Index Scan using t_var_idx on t3  (cost=0.00..8.27 rows=1 width=36)
+   Index Cond: (a = '0x3132333435363738393031323334353637383930'::varbinary)
+(3 rows)
+
+explain select /*+ IndexScan(t3 t_var_idx_char) */ id, a from t3 where a::varchar = 'aa';
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ [Bypass]
+ Index Scan using t_var_idx_char on t3  (cost=0.00..8.27 rows=1 width=36)
+   Index Cond: (((a)::character varying)::text = 'aa'::text)
+(3 rows)
+
+-- test partition, error varbinary cannot be partition key in sqlserver
+CREATE TABLE t_part (id int, a VARBINARY(16)) PARTITION BY RANGE(a)
+(
+    PARTITION t_part_p1 VALUES LESS THAN (0x10000),
+    PARTITION t_part_p2 VALUES LESS THAN (0x99999),
+    PARTITION t_part_p3 VALUES LESS THAN (0x9999999999)
+);
+ERROR:  column a cannot serve as a range partitioning column because of its datatype
+-- test varbinasry as join condition
+CREATE TABLE t_join1 (id1 int, dataVal VARBINARY(16));
+CREATE TABLE t_join2 (id2 int, dataVal VARBINARY(16));
+INSERT INTO t_join1 VALUES (1, 0x1234);
+INSERT INTO t_join1 VALUES (2, 0x5678);
+INSERT INTO t_join1 VALUES (3, 0x90AB);
+INSERT INTO t_join2 VALUES (21, 0x1234);
+INSERT INTO t_join2 VALUES (22, 0x5678);
+INSERT INTO t_join2 VALUES (23, 0xCDEF);
+-- inner join
+explain SELECT t1.id1 as t1_id, t1.dataVal as t1_data,
+       t2.id2 as t2_id, t2.dataVal as t2_data
+FROM t_join1 t1
+INNER JOIN t_join2 t2 ON t1.dataVal = t2.dataVal;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Nested Loop  (cost=0.00..23037.51 rows=766322 width=72)
+   Join Filter: (t1.dataval = t2.dataval)
+   ->  Seq Scan on t_join1 t1  (cost=0.00..22.38 rows=1238 width=36)
+   ->  Materialize  (cost=0.00..28.57 rows=1238 width=36)
+         ->  Seq Scan on t_join2 t2  (cost=0.00..22.38 rows=1238 width=36)
+(5 rows)
+
+-- left join
+explain SELECT t1.id1 as t1_id, t1.dataVal as t1_data,
+       t2.id2 as t2_id, t2.dataVal as t2_data
+FROM t_join1 t1
+LEFT JOIN t_join2 t2 ON t1.dataVal = t2.dataVal;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Nested Loop Left Join  (cost=0.00..23037.51 rows=766322 width=72)
+   Join Filter: (t1.dataval = t2.dataval)
+   ->  Seq Scan on t_join1 t1  (cost=0.00..22.38 rows=1238 width=36)
+   ->  Materialize  (cost=0.00..28.57 rows=1238 width=36)
+         ->  Seq Scan on t_join2 t2  (cost=0.00..22.38 rows=1238 width=36)
+(5 rows)
+
+-- test escape
+set bytea_output = escape;
+select * from test_varbinary.public.t3 order by id;
+ id |            a             
+----+--------------------------
+  4 | 12345678901234567890
+  5 | aa
+  6 | aa
+  7 | aa
+ 12 | 123456789012345678922220
+(5 rows)
+
+reset bytea_output;
+-- test dump
+create DATABASE restore_varbinary DBCOMPATIBILITY 'D';
+\c restore_varbinary
+CREATE EXTENSION shark;
+\! @abs_bindir@/gs_dump test_varbinary -p @portstring@ -f @abs_bindir@/dump_varbinary.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d restore_varbinary -p @portstring@ @abs_bindir@/dump_varbinary.tar >/dev/null 2>&1; echo $?
+0
+\c test_varbinary
+\d test_varbinary.public.t3
+       Table "public.t3"
+ Column |   Type    | Modifiers 
+--------+-----------+-----------
+ id     | integer   | 
+ a      | varbinary | 
+Indexes:
+    "idx3" btree (a) TABLESPACE pg_default
+    "t_var_idx" btree (a) TABLESPACE pg_default
+    "t_var_idx_char" btree ((a::character varying)) TABLESPACE pg_default
+
+select * from test_varbinary.public.t3;
+ id |                         a                          
+----+----------------------------------------------------
+  4 | 0x3132333435363738393031323334353637383930
+  5 | 0x6161
+  6 | 0x6161
+  7 | 0x6161
+ 12 | 0x313233343536373839303132333435363738393232323230
+(5 rows)
+
+\c restore_varbinary
+\d restore_varbinary.public.t3
+       Table "public.t3"
+ Column |   Type    | Modifiers 
+--------+-----------+-----------
+ id     | integer   | 
+ a      | varbinary | 
+Indexes:
+    "idx3" btree (a) TABLESPACE pg_default
+    "t_var_idx" btree (a) TABLESPACE pg_default
+    "t_var_idx_char" btree ((a::character varying)) TABLESPACE pg_default
+
+select * from restore_varbinary.public.t3;
+ id |                         a                          
+----+----------------------------------------------------
+  4 | 0x3132333435363738393031323334353637383930
+  5 | 0x6161
+  6 | 0x6161
+  7 | 0x6161
+ 12 | 0x313233343536373839303132333435363738393232323230
+(5 rows)
+
+\c postgres
+DROP DATABASE test_varbinary;
+DROP DATABASE restore_varbinary;

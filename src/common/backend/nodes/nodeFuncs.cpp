@@ -1776,6 +1776,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_Float:
         case T_String:
         case T_BitString:
+        case T_TSQL_HexString:
         case T_Null:
         case T_PgFdwRemoteInfo:
         case T_Rownum:
@@ -3139,6 +3140,7 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_Float:
         case T_String:
         case T_BitString:
+        case T_TSQL_HexString:
         case T_Null:
         case T_ParamRef:
         case T_A_Const:

@@ -1664,3 +1664,272 @@ SELECT
 FROM pg_database d, pg_settings s
 WHERE
   s.name = 'wal_level';
+
+-- varbinary.sql
+-- VARBINARY
+CREATE TYPE sys.VARBINARY;
+
+CREATE FUNCTION sys.varbinaryin(cstring, oid, integer)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'varbinaryin'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION sys.varbinaryout(sys.VARBINARY)
+RETURNS cstring
+AS '$libdir/shark', 'varbinaryout'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION sys.varbinaryrecv(internal, oid, integer)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'varbinaryrecv'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION sys.varbinarysend(sys.VARBINARY)
+RETURNS bytea
+AS '$libdir/shark', 'varbinarysend'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION sys.varbinarytypmodin(cstring[])
+RETURNS integer
+AS '$libdir/shark', 'varbinarytypmodin'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION sys.varbinarytypmodout(integer)
+RETURNS cstring
+AS '$libdir/shark', 'varbinarytypmodout'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE sys.VARBINARY (
+    INPUT          = sys.varbinaryin,
+    OUTPUT         = sys.varbinaryout,
+    RECEIVE        = sys.varbinaryrecv,
+    SEND           = sys.varbinarysend,
+    TYPMOD_IN      = sys.varbinarytypmodin,
+    TYPMOD_OUT     = sys.varbinarytypmodout,
+    INTERNALLENGTH = VARIABLE,
+    ALIGNMENT      = 'int4',
+    STORAGE        = 'extended',
+    CATEGORY       = 'U',
+    PREFERRED      = false,
+    COLLATABLE     = false
+);
+
+CREATE OR REPLACE FUNCTION sys.varbinary(sys.VARBINARY, integer, boolean)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'varbinary'
+LANGUAGE C IMMUTABLE STRICT;
+
+-- typmod cast for sys.VARBINARY
+CREATE CAST (sys.VARBINARY AS sys.VARBINARY)
+WITH FUNCTION sys.varbinary(sys.VARBINARY, integer, BOOLEAN) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.byteavarbinary(pg_catalog.BYTEA, integer, boolean)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'byteavarbinary'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (pg_catalog.BYTEA AS sys.VARBINARY)
+WITH FUNCTION sys.byteavarbinary(pg_catalog.BYTEA, integer, boolean) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.varbinarybytea(sys.VARBINARY, integer, boolean)
+RETURNS pg_catalog.BYTEA
+AS '$libdir/shark', 'byteavarbinary'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (sys.VARBINARY AS pg_catalog.BYTEA)
+WITH FUNCTION sys.varbinarybytea(sys.VARBINARY, integer, boolean) AS ASSIGNMENT;
+
+
+CREATE OR REPLACE FUNCTION sys.varcharvarbinary(pg_catalog.VARCHAR, integer, boolean)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'varcharvarbinary'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (pg_catalog.VARCHAR AS sys.VARBINARY)
+WITH FUNCTION sys.varcharvarbinary (pg_catalog.VARCHAR, integer, boolean);
+
+CREATE OR REPLACE FUNCTION sys.bpcharvarbinary(pg_catalog.BPCHAR, integer, boolean)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'bpcharvarbinary'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (pg_catalog.BPCHAR AS sys.VARBINARY)
+WITH FUNCTION sys.bpcharvarbinary (pg_catalog.BPCHAR, integer, boolean);
+
+CREATE OR REPLACE FUNCTION sys.varbinarybpchar(sys.VARBINARY, integer, boolean)
+RETURNS pg_catalog.BPCHAR
+AS '$libdir/shark', 'varbinarybpchar'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (sys.VARBINARY AS pg_catalog.BPCHAR)
+WITH FUNCTION sys.varbinarybpchar (sys.VARBINARY, integer, boolean) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.varbinaryvarchar(sys.VARBINARY, integer, boolean)
+RETURNS pg_catalog.VARCHAR
+AS '$libdir/shark', 'varbinaryvarchar'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (sys.VARBINARY AS pg_catalog.VARCHAR)
+WITH FUNCTION sys.varbinaryvarchar (sys.VARBINARY, integer, boolean) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.int2varbinary(INT2, integer, boolean)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'int2varbinary'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (INT2 AS sys.VARBINARY)
+WITH FUNCTION sys.int2varbinary (INT2, integer, boolean) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.int4varbinary(INT4, integer, boolean)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'int4varbinary'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (INT4 AS sys.VARBINARY)
+WITH FUNCTION sys.int4varbinary (INT4, integer, boolean) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.int8varbinary(INT8, integer, boolean)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'int8varbinary'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (INT8 AS sys.VARBINARY)
+WITH FUNCTION sys.int8varbinary (INT8, integer, boolean) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.float4varbinary(REAL, integer, boolean)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'float4varbinary'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (REAL AS sys.VARBINARY)
+WITH FUNCTION sys.float4varbinary (REAL, integer, boolean) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.float8varbinary(DOUBLE PRECISION, integer, boolean)
+RETURNS sys.VARBINARY
+AS '$libdir/shark', 'float8varbinary'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (DOUBLE PRECISION AS sys.VARBINARY)
+WITH FUNCTION sys.float8varbinary (DOUBLE PRECISION, integer, boolean) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.varbinaryint2(sys.VARBINARY)
+RETURNS INT2
+AS '$libdir/shark', 'varbinaryint2'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (sys.VARBINARY as INT2)
+WITH FUNCTION sys.varbinaryint2 (sys.VARBINARY) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.varbinaryint4(sys.VARBINARY)
+RETURNS INT4
+AS '$libdir/shark', 'varbinaryint4'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (sys.VARBINARY as INT4)
+WITH FUNCTION sys.varbinaryint4 (sys.VARBINARY) AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION sys.varbinaryint8(sys.VARBINARY)
+RETURNS INT8
+AS '$libdir/shark', 'varbinaryint8'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE CAST (sys.VARBINARY as INT8)
+WITH FUNCTION sys.varbinaryint8 (sys.VARBINARY) AS ASSIGNMENT;
+
+-- Add support for varbinary and binary with operators
+-- Support equals
+CREATE FUNCTION sys.varbinary_eq(leftarg sys.varbinary, rightarg sys.varbinary)
+RETURNS boolean
+AS '$libdir/shark', 'varbinary_eq'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OPERATOR sys.= (
+    LEFTARG = sys.varbinary,
+    RIGHTARG = sys.varbinary,
+    PROCEDURE = sys.varbinary_eq,
+    COMMUTATOR = =,
+    RESTRICT = eqsel
+);
+
+-- Support not equals
+CREATE FUNCTION sys.varbinary_neq(leftarg sys.varbinary, rightarg sys.varbinary)
+RETURNS boolean
+AS '$libdir/shark', 'varbinary_neq'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OPERATOR sys.<> (
+    LEFTARG = sys.varbinary,
+    RIGHTARG = sys.varbinary,
+    PROCEDURE = sys.varbinary_neq,
+    COMMUTATOR = <>
+);
+
+-- Support greater than
+CREATE FUNCTION sys.varbinary_gt(leftarg sys.varbinary, rightarg sys.varbinary)
+RETURNS boolean
+AS '$libdir/shark', 'varbinary_gt'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OPERATOR sys.> (
+    LEFTARG = sys.varbinary,
+    RIGHTARG = sys.varbinary,
+    PROCEDURE = sys.varbinary_gt,
+    COMMUTATOR = <
+);
+
+-- Support greater than equals
+CREATE FUNCTION sys.varbinary_geq(leftarg sys.varbinary, rightarg sys.varbinary)
+RETURNS boolean
+AS '$libdir/shark', 'varbinary_geq'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OPERATOR sys.>= (
+    LEFTARG = sys.varbinary,
+    RIGHTARG = sys.varbinary,
+    PROCEDURE = sys.varbinary_geq,
+    COMMUTATOR = <=
+);
+
+-- Support less than
+CREATE FUNCTION sys.varbinary_lt(leftarg sys.varbinary, rightarg sys.varbinary)
+RETURNS boolean
+AS '$libdir/shark', 'varbinary_lt'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OPERATOR sys.< (
+    LEFTARG = sys.varbinary,
+    RIGHTARG = sys.varbinary,
+    PROCEDURE = sys.varbinary_lt,
+    COMMUTATOR = >
+);
+
+-- Support less than equals
+CREATE FUNCTION sys.varbinary_leq(leftarg sys.varbinary, rightarg sys.varbinary)
+RETURNS boolean
+AS '$libdir/shark', 'varbinary_leq'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OPERATOR sys.<= (
+    LEFTARG = sys.varbinary,
+    RIGHTARG = sys.varbinary,
+    PROCEDURE = sys.varbinary_leq,
+    COMMUTATOR = >=
+);
+
+
+CREATE FUNCTION sys.varbinary_cmp(sys.varbinary, sys.varbinary)
+RETURNS int
+AS '$libdir/shark', 'varbinary_cmp'
+LANGUAGE C IMMUTABLE STRICT;
+
+
+CREATE OPERATOR CLASS sys.varbinary_ops
+DEFAULT FOR TYPE sys.varbinary USING btree AS
+    OPERATOR    1   <  (sys.varbinary, sys.varbinary),
+    OPERATOR    2   <= (sys.varbinary, sys.varbinary),
+    OPERATOR    3   =  (sys.varbinary, sys.varbinary),
+    OPERATOR    4   >= (sys.varbinary, sys.varbinary),
+    OPERATOR    5   >  (sys.varbinary, sys.varbinary),
+    FUNCTION    1   sys.varbinary_cmp(sys.varbinary, sys.varbinary);
+
+-- varbinary.sql end

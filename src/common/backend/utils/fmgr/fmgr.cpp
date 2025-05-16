@@ -745,6 +745,39 @@ static CFuncHashTabEntry* lookup_C_func(HeapTuple procedureTuple)
     return NULL; /* entry is out of date */
 }
 
+
+PGFunction lookup_C_func_by_oid(Oid fn_oid, char* probinstring, char* prosrcstring)
+{
+    PGFunction user_fn = NULL;
+    CFunInfo c_fn;
+
+    /* Lookup hash table CFuncHash If Functions are already cached */
+    if (CFuncHash != NULL) {
+        CFuncHashTabEntry *entry;
+
+        entry = (CFuncHashTabEntry *)
+            hash_search(CFuncHash,
+                        &fn_oid,
+                        HASH_FIND,
+                        NULL);
+        if (entry == NULL) {
+            user_fn = NULL;            /* no such entry */
+        } else {
+            user_fn = entry->user_fn;            /* OK */
+        }
+    }
+    /*
+     * If haven't found using CFuncHash hash table,
+     * load the dynamically linked library to get the function
+     */
+    if (user_fn == NULL) {
+        c_fn = load_external_function(probinstring, prosrcstring, true, NULL);
+        user_fn = c_fn.user_fn;
+    }
+
+    return user_fn;
+}
+
 /*
  * record_C_func: enter (or update) info about a C function in the hash table
  */

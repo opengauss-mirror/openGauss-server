@@ -15,6 +15,7 @@ OBJS = shark.o dbcc.o varlena.o
 OBJS += $(BEPARSERDIR)/parser.o
 OBJS += $(BEPARSERDIR)/gram-backend.o
 OBJS += $(BEPARSERDIR)/keywords.o
+OBJS += $(BEPARSERDIR)/varbinary.o
 OBJS += $(PLDIR)/pl_gram.o $(PLDIR)/pl_handler.o $(PLDIR)/pl_comp.o
 OBJS += $(PLDIR)/pl_scanner.o
 OBJS += $(BASECODEDIR)/tablecmds.o
@@ -69,7 +70,7 @@ $(BEPARSERDIR)/scan-backend.l: $(top_srcdir)/src/common/backend/parser/scan.l $(
 	$(PERL) $(BEPARSERDIR)/include.pl $(BEPARSERDIR) scan.l < $< > $@
 
 # Force these dependencies to be known even without dependency info built:
-$(BEPARSERDIR)/gram-backend.o $(BEPARSERDIR)/keywords.o $(BEPARSERDIR)/parser.o: $(BEPARSERDIR)/gram-backend.hpp $(BEPARSERDIR)/kwlist_d.h
+$(BEPARSERDIR)/gram-backend.o $(BEPARSERDIR)/keywords.o $(BEPARSERDIR)/varbinary.o $(BEPARSERDIR)/parser.o: $(BEPARSERDIR)/gram-backend.hpp $(BEPARSERDIR)/kwlist_d.h
 
 # where to find gen_keywordlist.pl and subsidiary files
 TOOLSDIR = $(top_srcdir)/src/tools

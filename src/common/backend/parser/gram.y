@@ -920,6 +920,7 @@ static List* TransformToConstStrNode(List *inExprList, char* raw_str);
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS SET_IDENT_SESSION SET_IDENT_GLOBAL
 
 %token          DIALECT_TSQL
+%token <str>	TSQL_XCONST
 
 /*
  * If you want to make any keyword changes, update the keyword table in
@@ -27297,7 +27298,13 @@ GenericType:
 				}
 		;
 
-opt_type_modifiers: '(' expr_list ')'				{ $$ = $2; }
+opt_type_modifiers: '(' expr_list ')'
+					{
+						$$ = $2;
+						if(u_sess->hook_cxt.rewriteTypmodExprHook != NULL) {
+							$$ = ((RewriteTypmodExprHookType)(u_sess->hook_cxt.rewriteTypmodExprHook))($2);
+						}
+					}
                     | '(' Iconst BYTE_P ')'         { $$ = list_make1(makeIntConst($2, @2)); }
                     | '(' Iconst CHAR_P ')'
                         {

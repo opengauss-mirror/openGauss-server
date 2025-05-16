@@ -7,6 +7,13 @@ stmtblock:	DIALECT_TSQL tsql_stmtmulti
 			}
 		;
 
+AexprConst:
+			TSQL_XCONST
+				{
+					$$ = makeTSQLHexStringConst($1, @1);
+				}
+			;
+
 /* the thrashing around here is to discard "empty" statements... */
 tsql_stmtmulti:	tsql_stmtmulti ';' tsql_stmt
 				{

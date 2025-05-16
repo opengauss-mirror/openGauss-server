@@ -180,7 +180,7 @@ char* debackslash(const char* token, int length)
  * nodeTokenType -
  *	  returns the type of the node token contained in token.
  *	  It returns one of the following valid NodeTags:
- *		T_Integer, T_Float, T_String, T_BitString
+ *		T_Integer, T_Float, T_String, T_BitString, T_TSQL_HexString,
  *	  and some of its own:
  *		RIGHT_PAREN, LEFT_PAREN, LEFT_BRACE, OTHER_TOKEN
  *
@@ -239,6 +239,8 @@ static NodeTag nodeTokenType(char* token, int length)
         retval = (NodeTag)T_String;
     else if (*token == 'b')
         retval = (NodeTag)T_BitString;
+    else if (*token == '0' && (token[1] == 'x' || token[1] == 'X'))
+        retval = (NodeTag)T_TSQL_HexString;
     else
         retval = (NodeTag)OTHER_TOKEN;
     return retval;
@@ -402,6 +404,15 @@ void* nodeRead(char* token, int tok_len)
             securec_check(rc, "", "");
             val[tok_len - 1] = '\0';
             result = (Node*)makeBitString(val);
+            break;
+        }
+        case T_TSQL_HexString: {
+            char       *val = (char*)palloc(tok_len + 1);
+            /* No need to skip, 0x is also read in Sql parse */
+            rc = memcpy_s(val, tok_len+1, token, tok_len);
+            securec_check(rc, "", "");
+            val[tok_len] = '\0';
+            result = (Node *) makeTSQLHexString(val);
             break;
         }
         default:
