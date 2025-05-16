@@ -37,6 +37,16 @@ analyze dimens3_scan_l2_100;
 SELECT * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
 SELECT * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT 20;
 SELECT * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]';
+explain (verbose on, costs off) SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+explain (verbose on, costs off) SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]';
+SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]';
+prepare p_select as SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> $1 LIMIT $2;
+execute p_select('[3,1,2]', 5);
+prepare p_select1 as SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT $1;
+execute p_select1(5);
+prepare p_select2 as SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> $1 LIMIT 5;
+execute p_select2('[3,1,2]');
 
 CREATE TABLE items (id int, embedding vector(3));
 INSERT INTO items VALUES (1, '[1,2,3]'), (2, '[4,5,6]'), (3, '[7,8,9]'), (4, '[10,11,12]'), (5, '[13,14,15]');

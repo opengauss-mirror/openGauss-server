@@ -1567,8 +1567,11 @@ static void meta_rel_init_index_amroutine(Relation relation)
 {
     IndexAmRoutine *tmp, *cached;
 
-    tmp = get_index_amroutine_for_nbtree();
-
+    if (relation->rd_rel->relam == HNSW_AM_OID) {
+        tmp = get_index_amroutine_for_hnsw();
+    } else {
+        tmp = get_index_amroutine_for_nbtree();
+    }
     cached = (IndexAmRoutine*)MemoryContextAlloc(relation->rd_indexcxt, sizeof(IndexAmRoutine));
 
     errno_t rc = memcpy_s(cached, sizeof(IndexAmRoutine), tmp, sizeof(IndexAmRoutine));

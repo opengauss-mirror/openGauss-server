@@ -3681,3 +3681,45 @@ void HeapTupleSetUid(HeapTuple tup, uint64 uid, int nattrs)
     HeapTupleHeaderSetDatumLength(tup->t_data, hoff + data_len);
     HeapTupleHeaderSetUid(tup->t_data, uid, uidLen);
 }
+void heap_deform_tuple_natts(TupleTableSlot* slot, HeapTuple tuple, TupleDesc tuple_desc, Datum* values, bool* isnull, int attno)
+{
+    bool slow = false;
+    HeapTupleHeader tup = tuple->t_data;
+    FormData_pg_attribute *att = tuple_desc->attrs;
+    char *tp = NULL;
+    bool hasnulls = HeapTupleHasNulls(tuple);
+    long off = 0;
+    uint32 attnum = 0;
+    bits8 *bp = tup->t_bits;
+
+    slot->tts_nvalid = 0;
+    tp = (char *)tup + tup->t_hoff;
+
+    for (; attnum < attno; attnum++) {
+        Form_pg_attribute thisatt = &att[attnum];
+
+        if (hasnulls && att_isnull(attnum, bp)) {
+            values[attnum] = (Datum)0;
+            isnull[attnum] = true;
+            slow = true; /* can't use attcacheoff anymore */
+            continue;
+        }
+        isnull[attnum] = false;
+
+        deform_next_attribute(slow, off, thisatt, tp);
+
+        values[attnum] = fetchatt(thisatt, tp + off);
+
+        off = att_addlength_pointer(off, thisatt->attlen, tp + off);
+
+        if (thisatt->attlen <= 0) {
+            slow = true; /* can't use attcacheoff anymore */
+        }
+    }
+    slot->tts_nvalid = attnum;
+    slot->tts_off = off;
+    if (slow)
+        slot->tts_flags |= TTS_FLAG_SLOW;
+    else
+        slot->tts_flags &= ~TTS_FLAG_SLOW;
+}

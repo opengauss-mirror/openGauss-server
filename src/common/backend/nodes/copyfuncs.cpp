@@ -928,6 +928,7 @@ static AnnIndexScan* _copyAnnIndexScan(const AnnIndexScan* from)
     COPY_SCALAR_FIELD(is_ustore);
     COPY_SCALAR_FIELD(selectivity);
     COPY_SCALAR_FIELD(is_partial);
+    COPY_SCALAR_FIELD(annCount);
 
     return newnode;
 }
