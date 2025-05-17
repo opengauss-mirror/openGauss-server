@@ -2083,6 +2083,7 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
     bool *need_repair)
 {
     bool needputtodirty = false;
+    bool isRepaired = false;
 
     if (isExtend) {
         /* new buffers are zero-filled */
@@ -2170,6 +2171,7 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                         WriteZeroPageToDisk(smgr, forkNum, blockNum, bufBlock, pblk);
                     }
 #endif
+                // Muyulinzhong 主机修复页面逻辑；
                 } else if (mode != RBM_FOR_REMOTE && relpersistence == RELPERSISTENCE_PERMANENT &&
                            CanRemoteRead() && !IsSegmentFileNode(smgr->smgr_rnode.node)) {
                     /* not alread in remote read and not temp/unlogged table, try to remote read */
@@ -2188,10 +2190,15 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                                         errmsg("invalid page in block %u of relation %s, remote read data corrupted",
                                                blockNum, relpath(smgr->smgr_rnode, forkNum))));
                 } else {
-                    /* record bad page, wait the pagerepair thread repair the page */
+                    /* Muyulinzhong 开始备机修复；
+                     * Try to repair the CRC-Error block by these ways:
+                     * 1. Try to repair by remote read;
+                     * 2. Try to repair by delay reapir;
+                     */
+                    // Muyulinzhong startup模式、pageredoworker形式、主集群备节点，确认模式；
                     *need_repair = CheckVerionSupportRepair() &&
                         (AmStartupProcess() || AmPageRedoWorker()) && IsPrimaryClusterStandbyDN() &&
-                        g_instance.repair_cxt.support_repair;
+                        ENABLE_REPAIR;
                     if (*need_repair) {
                         RepairBlockKey key;
                         XLogPhyBlock pblk_bak = {0};
@@ -2201,17 +2208,21 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                         if (pblk != NULL) {
                             pblk_bak = *pblk;
                         }
-                        RedoPageRepairCallBack(key, pblk_bak);
-                        log_invalid_page(smgr->smgr_rnode.node, forkNum, blockNum, CRC_CHECK_ERROR, pblk);
-                        ereport(WARNING, (errcode(ERRCODE_DATA_CORRUPTED),
+
+                        isRepaired = MainEntryForPageRepair(key, CRC_CHECK_ERROR, (char *)bufBlock);
+                        if (isRepaired) {
+                            needputtodirty = true;
+                        } else {
+                            log_invalid_page(smgr->smgr_rnode.node, forkNum, blockNum, CRC_CHECK_ERROR, pblk);
+                            return false;
+                        }
+                    } else {
+                        /* No need to repair, just report error. */
+                        int elevel = ENABLE_DMS ? PANIC : ERROR;
+                        ereport(elevel, (errcode(ERRCODE_DATA_CORRUPTED),
                             errmsg("invalid page in block %u of relation %s",
                                 blockNum, relpath(smgr->smgr_rnode, forkNum))));
-                        return false;
                     }
-                    int elevel = ENABLE_DMS ? PANIC : ERROR;
-                    ereport(elevel, (errcode(ERRCODE_DATA_CORRUPTED),
-                        errmsg("invalid page in block %u of relation %s",
-                            blockNum, relpath(smgr->smgr_rnode, forkNum))));
                 }
             }
 
@@ -2882,12 +2893,13 @@ found_branch:
 
     bool needputtodirty = ReadBuffer_common_ReadBlock(smgr, relpersistence, forkNum, blockNum,
                                                       mode, isExtend, bufBlock, pblk, &need_repair);
-    if (need_repair) {
-        LWLockRelease(((BufferDesc *)bufHdr)->io_in_progress_lock);
-        UnpinBuffer(bufHdr, true);
-        AbortBufferIO();
-        return InvalidBuffer;
-    }
+    // if (need_repair) {
+    //     LWLockRelease(((BufferDesc *)bufHdr)->io_in_progress_lock);
+    //     UnpinBuffer(bufHdr, true);
+    //     AbortBufferIO();
+    //     return InvalidBuffer;
+    // }
+
     if (needputtodirty) {
         /* set  BM_DIRTY to overwrite later */
         uint64 old_buf_state = LockBufHdr(bufHdr);

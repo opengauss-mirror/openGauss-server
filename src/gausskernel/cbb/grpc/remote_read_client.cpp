@@ -259,6 +259,76 @@ static PGconn* RemoteGetConnection(char* remoteAddress)
     return conGet;
 }
 
+/* This FUcntion has only one use, test connection of Pramary and standby. */
+extern int IsConnectSuccess(char* remoteAddress, int timeout)
+{
+    PGconn* conGet = NULL;
+    PGresult* res = NULL;
+    int errCode = REMOTE_READ_OK;
+    int len = 0;
+    char remoteReadConnInfo[MAXPGPATH];
+    char sqlCommands[MAX_PATH_LEN] = {0};
+    int tnRet = 0;
+
+    errCode = GetRemoteConnInfo(remoteAddress, remoteReadConnInfo, MAXPGPATH);
+    if (errCode != REMOTE_READ_OK) {
+        return errCode;
+    }
+    conGet = RemoteReadGetConn(remoteReadConnInfo);
+    if (conGet == NULL) {
+        errCode = REMOTE_READ_RPC_ERROR;
+        return errCode;
+    }
+
+    /* Simple SQL to Primary*/
+    tnRet = snprintf_s(sqlCommands, MAX_PATH_LEN, MAX_PATH_LEN - 1, "SELECT 1;");
+
+    securec_check_ss(tnRet, "", "");
+
+    res = PQexecParams(conGet, (const char*)sqlCommands, 0, NULL, NULL, NULL, NULL, 1);
+
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        ereport(WARNING, (errmodule(MOD_REMOTE),
+            errmsg("[Connection Test] Could not get remote request: %s", PQresultErrorMessage(res))));
+        errCode = REMOTE_READ_RPC_ERROR;
+        PQclear(res);
+        res = NULL;
+        PQfinish(conGet);
+        conGet = NULL;
+        return errCode;
+    }
+
+    if (PQgetisnull(res, 0, 0)) {
+        ereport(WARNING, (errmodule(MOD_REMOTE),
+            errmsg("[Connection Test] Get remote get page, the executed res is null: %s", PQresultErrorMessage(res))));
+        errCode = REMOTE_READ_RPC_ERROR;
+        PQclear(res);
+        res = NULL;
+        PQfinish(conGet);
+        conGet = NULL;
+        return errCode;
+    }
+
+    len = PQgetlength(res, 0, 0);
+    if (len < 0) {
+        ereport(WARNING, (errmodule(MOD_REMOTE),
+                            errmsg("[Connection Test] Remote test request get incorrect length: %s", PQresultErrorMessage(res))));
+        errCode = REMOTE_READ_SIZE_ERROR;
+        PQclear(res);
+        res = NULL;
+        PQfinish(conGet);
+        conGet = NULL;
+        return errCode;
+    }
+
+    PQclear(res);
+    res = NULL;
+    PQfinish(conGet);
+    conGet = NULL;
+
+    return errCode;
+}
+
 uint64 RemoteGetXlogReplayPtr(char* remoteAddress)
 {
     PGconn* conGet = RemoteGetConnection(remoteAddress);

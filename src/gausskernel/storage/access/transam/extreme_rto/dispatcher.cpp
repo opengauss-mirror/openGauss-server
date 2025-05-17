@@ -435,9 +435,6 @@ void StartupInterruptsForExtremeRto()
             g_dispatcher->smartShutdown = true;
         }
     }
-    if (t_thrd.startup_cxt.check_repair) {
-        t_thrd.startup_cxt.check_repair = false;
-    }
 }
 
 /* Run from the dispatcher thread. */
@@ -1693,7 +1690,9 @@ void ItemBlocksOfItemIsReplayed(RedoItem *item)
 {
     for (uint32 i = 0; i <= XLR_MAX_BLOCK_ID; ++i) {
         if (item->record.blocks[i].in_use) {
-            if (item->record.blocks[i].forknum == MAIN_FORKNUM) {
+            bool needRepair = ENABLE_REPAIR &&
+                !g_instance.attr.attr_storage.isRepairCanInToNomralState;
+            if (item->record.blocks[i].forknum == MAIN_FORKNUM && !needRepair) {
                 Assert((item->record.blocks[i].replayed == 1));
             }
         } else {

@@ -161,6 +161,8 @@ typedef struct knl_instance_attr_storage {
     bool auto_csn_barrier;
     bool enable_availablezone;
     bool enable_wal_shipping_compression;
+    bool isRepairCanInToNomralState;
+    bool isSwitchToStream;
     int WalReceiverBufSize;
     int DataQueueBufSize;
     int NBuffers;
@@ -266,7 +268,6 @@ typedef struct knl_instance_attr_storage {
 
     int parallel_recovery_dispatch_algorithm;
     bool enable_tpc_fragment_chunks;
-
 #ifdef ENABLE_HTAP
     int htap_wait_xlog_lsn_timeout;
 #endif

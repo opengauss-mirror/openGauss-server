@@ -462,8 +462,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 
     LsnXlogFlushChkShmInit();
 
-    PageRepairHashTblInit();
-    FileRepairHashTblInit();
+    ThreadPageRepairedHashTableInit();
     initRepairBadBlockStat();
 
     if (g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery) {

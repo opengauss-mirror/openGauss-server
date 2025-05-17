@@ -2443,7 +2443,7 @@ void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
      */
     if (!copyRes) {
         RelFileNode tmp = {srcTbSpcId, srcDbId, 0, InvalidBktId, 0};
-
+        ereport(LOG, (errmsg("[REPARE] Log an invalid page form db create process.")));
         /* forknum and blockno has no meaning */
         log_invalid_page(tmp, MAIN_FORKNUM, 0, NOT_PRESENT, NULL);
     }

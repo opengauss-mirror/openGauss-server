@@ -44,6 +44,5 @@ extern int RemoteGetFile(char* remoteAddress, RemoteReadFileKey *key, uint64 lsn
     XLogRecPtr *remote_lsn, uint32 *remote_size, int timeout);
 extern int RemoteGetFileSize(char* remoteAddress, RemoteReadFileKey *key, uint64 lsn, int64 *size, int timeout);
 extern uint64 RemoteGetXlogReplayPtr(char* remoteAddress);
-
-
+extern int IsConnectSuccess(char* remoteAddress, int timeout);
 #endif /* REMOTE_READ_CLIENT_H */

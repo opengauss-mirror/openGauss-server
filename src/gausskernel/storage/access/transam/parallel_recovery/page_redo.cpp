@@ -266,10 +266,6 @@ void HandlePageRedoInterrupts()
         t_thrd.page_redo_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
     }
-    if (t_thrd.page_redo_cxt.check_repair && g_instance.pid_cxt.PageRepairPID != 0) {
-        SeqCheckRemoteReadAndRepairPage();
-        t_thrd.page_redo_cxt.check_repair = false;
-    }
 
     if (t_thrd.page_redo_cxt.shutdown_requested) {
         ereport(LOG,
@@ -287,16 +283,6 @@ void HandlePageRedoInterrupts()
 static void LastMarkReachedBeforePageRedoExit(int code, Datum arg)
 {
     LastMarkReached();
-}
-
-/* HandleRedoPageRepair
- *           if the page crc verify failed, call the function record the bad block.
- */
-void HandleRedoPageRepair(RepairBlockKey key, XLogPhyBlock pblk)
-{
-    XLogReaderState *record = g_redoWorker->current_item;
-    RecordBadBlockAndPushToRemote(record, key, CRC_CHECK_FAIL, InvalidXLogRecPtr, pblk);
-    return;
 }
 
 /* Run from the worker thread. */
@@ -321,9 +307,6 @@ void PageRedoWorkerMain()
     SetupSignalHandlers();
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
     on_shmem_exit(LastMarkReachedBeforePageRedoExit, 0);
-    if (g_instance.pid_cxt.PageRepairPID != 0) {
-        (void)RegisterRedoPageRepairCallBack(HandleRedoPageRepair);
-    }
 
     InitGlobals();
     ResourceManagerStartup();
@@ -346,10 +329,6 @@ static void PageRedoShutdownHandler(SIGNAL_ARGS)
     t_thrd.page_redo_cxt.shutdown_requested = true;
 }
 
-static void PageRedoSigUser1Handler(SIGNAL_ARGS)
-{
-    t_thrd.page_redo_cxt.check_repair = true;
-}
 static void PageRedoQuickDie(SIGNAL_ARGS)
 {
     int status = 2;
@@ -371,7 +350,6 @@ static void SetupSignalHandlers()
     (void)gspqsignal(SIGTERM, PageRedoShutdownHandler);
     (void)gspqsignal(SIGQUIT, PageRedoQuickDie);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
-    (void)gspqsignal(SIGUSR1, PageRedoSigUser1Handler);
     (void)gspqsignal(SIGUSR2, PageRedoUser2Handler);
     (void)gspqsignal(SIGCHLD, SIG_IGN);
     (void)gspqsignal(SIGTTIN, SIG_IGN);
@@ -409,6 +387,7 @@ static void InitGlobals()
     t_thrd.proc_cxt.DataDir = g_redoWorker->DataDir;
     u_sess->utils_cxt.RecentXmin = g_redoWorker->RecentXmin;
     g_redoWorker->proc = t_thrd.proc;
+    g_redoWorker->xlogInvalidPagesLoc = &t_thrd.xlog_cxt.invalid_page_tab;
 }
 
 void ApplyProcHead(RedoItem *head)
@@ -989,7 +968,6 @@ bool SendPageRedoCleanInvalidPageMark(PageRedoWorker *worker, RepairFileKey key)
     return SPSCBlockingQueuePut(worker->queue, &g_cleanInvalidPageMark);
 }
 
-
 bool SendPageRedoWorkerTerminateMark(PageRedoWorker *worker)
 {
     return SPSCBlockingQueuePut(worker->queue, &g_terminateMark);
@@ -1241,7 +1219,7 @@ void RecordBadBlockAndPushToRemote(XLogReaderState *record, RepairBlockKey key,
         bad_hash = g_instance.startup_cxt.badPageHashTbl;
     }
 
-    found = PushBadPageToRemoteHashTbl(key, error_type, old_lsn, pblk, tid.thid);
+    found = false;
 
     if (found) {
          /* store the record for recovery */

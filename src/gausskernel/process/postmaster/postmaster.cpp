@@ -5994,10 +5994,6 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.StartupPID != 0)
             signal_child(g_instance.pid_cxt.StartupPID, SIGHUP);
 
-        if (g_instance.pid_cxt.PageRepairPID != 0) {
-            signal_child(g_instance.pid_cxt.PageRepairPID, SIGHUP);
-        }
-
 #ifdef PGXC /* PGXC_COORD */
         if (
 #ifdef ENABLE_MULTIPLE_NODES
@@ -6337,10 +6333,6 @@ static void pmdie(SIGNAL_ARGS)
 
             if (g_instance.pid_cxt.BarrierPreParsePID != 0) {
                 signal_child(g_instance.pid_cxt.BarrierPreParsePID, SIGTERM);
-            }
-
-            if (g_instance.pid_cxt.PageRepairPID != 0) {
-                signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
             }
 
             if (g_instance.pid_cxt.BgWriterPID != 0) {
@@ -6834,10 +6826,6 @@ static void ProcessDemoteRequest(void)
             if (g_instance.pid_cxt.StartupPID != 0)
                 signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
 
-            if (g_instance.pid_cxt.PageRepairPID != 0) {
-                signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
-            }
-
             if (g_instance.pid_cxt.BgWriterPID != 0) {
                 Assert(!dummyStandbyMode);
                 signal_child(g_instance.pid_cxt.BgWriterPID, SIGTERM);
@@ -7258,11 +7246,6 @@ static void reaper(SIGNAL_ARGS)
                 continue;
             }
 
-            /* startup process exit, standby pagerepair thread can exit */
-            if (g_instance.pid_cxt.PageRepairPID != 0) {
-                signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
-            }
-
             /*
              * Startup succeeded, commence normal operations
              */
@@ -7548,15 +7531,6 @@ static void reaper(SIGNAL_ARGS)
             g_threadPoolControler->GetScheduler()->HasShutDown() == true) {
             g_threadPoolControler->GetScheduler()->StartUp();
             g_threadPoolControler->GetScheduler()->SetShutDown(false);
-            continue;
-        }
-
-        if (pid == g_instance.pid_cxt.PageRepairPID) {
-            g_instance.pid_cxt.PageRepairPID = 0;
-
-            if (!EXIT_STATUS_0(exitstatus))
-                HandleChildCrash(pid, exitstatus, _("page reapir process"));
-
             continue;
         }
 
@@ -8681,10 +8655,6 @@ static void PostmasterStateMachineReadOnly(void)
             if (g_instance.pid_cxt.StartupPID != 0)
                 signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
 
-            if (g_instance.pid_cxt.PageRepairPID != 0) {
-                signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
-            }
-
             if (g_instance.pid_cxt.WalReceiverPID != 0)
                 signal_child(g_instance.pid_cxt.WalReceiverPID, SIGTERM);
 
@@ -8788,7 +8758,6 @@ static void AsssertAllChildThreadExit()
     Assert(g_instance.pid_cxt.TwoPhaseCleanerPID == 0);
     Assert(g_instance.pid_cxt.FaultMonitorPID == 0);
     Assert(g_instance.pid_cxt.StartupPID == 0);
-    Assert(g_instance.pid_cxt.PageRepairPID == 0);
     Assert(g_instance.pid_cxt.WalReceiverPID == 0);
     Assert(g_instance.pid_cxt.WalRcvWriterPID == 0);
     Assert(g_instance.pid_cxt.DataReceiverPID == 0);
@@ -8885,7 +8854,7 @@ static void PostmasterStateMachine(void)
             g_instance.pid_cxt.AshPID == 0 && g_instance.pid_cxt.CsnminSyncPID == 0 &&
             g_instance.pid_cxt.StackPerfPID == 0 &&
             g_instance.pid_cxt.CfsShrinkerPID == 0 &&
-            g_instance.pid_cxt.BarrierCreatorPID == 0 &&  g_instance.pid_cxt.PageRepairPID == 0 &&
+            g_instance.pid_cxt.BarrierCreatorPID == 0 &&
             g_instance.pid_cxt.BarrierPreParsePID == 0 && g_instance.pid_cxt.SqlLimitPID == 0 &&
 #ifdef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.CommPoolerCleanPID == 0 && streaming_backend_manager(STREAMING_BACKEND_SHUTDOWN) &&
@@ -14276,11 +14245,6 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
 
         case PAGEWRITER_THREAD:
             ckpt_pagewriter_main();
-            proc_exit(1);
-            break;
-
-        case PAGEREPAIR_THREAD:
-            PageRepairMain();
             proc_exit(1);
             break;
 

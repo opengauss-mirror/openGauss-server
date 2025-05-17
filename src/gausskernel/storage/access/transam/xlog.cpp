@@ -135,11 +135,12 @@
 #include "gssignal/gs_signal.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
-#include "postmaster/pagerepair.h"
 #include <sched.h>
 #include <utmpx.h>
 #include <time.h>
 #include "access/slru.h"
+#include "commands/verify.h"
+#include "service/remote_read_client.h"
 
 #ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
@@ -5633,6 +5634,7 @@ static XLogRecord *ReadRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, in
             if (SS_DORADO_CLUSTER) {
                 t_thrd.xlog_cxt.ssXlogReadFailedTimes = 0;
             }
+            RepairPageToAllRightState(fetching_ckpt);
             /* Great, got a record */
             return record;
         } else {
@@ -9466,11 +9468,6 @@ void StartupXLOG(void)
 
     // Check for recovery control file, and if so set up state for offline recovery
     readRecoveryCommandFile();
-    if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_UNSET && g_instance.pid_cxt.PageRepairPID != 0) {
-        g_instance.repair_cxt.support_repair = true;
-    } else {
-        g_instance.repair_cxt.support_repair = false;
-    }
 
     if (t_thrd.xlog_cxt.ArchiveRestoreRequested) {
         t_thrd.xlog_cxt.ArchiveRecoveryRequested = true;
@@ -10549,14 +10546,6 @@ void StartupXLOG(void)
                     newXlogReader->readOff = INVALID_READ_OFF;
                 }
 
-                if (xlogctl->recoverySusPend) {
-                    if (IsExtremeRedo()) {
-                        ExtremeRedoWaitRecoverySusPendFinish(xlogreader->EndRecPtr);
-                    } else {
-                        handleRecoverySusPend(xlogreader->EndRecPtr);
-                    }
-                }
-
                 GetRedoStartTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_1]);
                 if (xlogreader->isPRProcess && IsExtremeRedo()) {
                     record = ExtremeReadNextXLogRecord(&xlogreader, LOG);
@@ -11505,8 +11494,6 @@ void CheckRecoveryConsistency(void)
         redo_unlink_stats_file();
     }
 
-    CheckIsStopRecovery();
-
     /*
      * Have we got a valid starting snapshot that will allow queries to be
      * run? If so, we can tell postmaster that the database is consistent now,
@@ -11584,6 +11571,77 @@ bool HotStandbyActive(void)
     SpinLockRelease(&xlogctl->info_lck);
 
     return t_thrd.xlog_cxt.LocalHotStandbyActive;
+}
+
+void RepairPageToAllRightState(bool IsCheckPoint)
+{
+    if (IsCheckPoint || !ENABLE_REPAIR ||
+        g_instance.attr.attr_storage.isRepairCanInToNomralState) {
+        return;
+    }
+    if (t_thrd.xlog_cxt.server_mode == STANDBY_MODE) {
+        if (!g_instance.attr.attr_storage.isSwitchToStream) {
+            return;
+        }
+        char remote_address[MAXPGPATH] = {0};
+        GetPrimaryServiceAddress(remote_address, MAXPGPATH);
+        if ((remote_address[0] != '\0' || remote_address[0] == ':') && IsConnectSuccess(remote_address, 60) != REMOTE_READ_OK) {
+            return;
+        }
+        g_instance.attr.attr_storage.isRepairCanInToNomralState = true;
+        RepairAllInvalidBlock();
+        ereport(LOG, (errmsg("[REPAIR] XLog stream switch done, and connect to primairy success, clean all bad page,"
+                             "current_redo_xlog_lsn:%X/%X, EndRecPtr:%X/%X.",
+                             (uint32)(t_thrd.xlog_cxt.current_redo_xlog_lsn>>32), (uint32)t_thrd.xlog_cxt.current_redo_xlog_lsn,
+                             (uint32)(t_thrd.xlog_cxt.EndRecPtr>>32), (uint32)t_thrd.xlog_cxt.EndRecPtr)));
+    }
+}
+
+// muyulinzhong 对坏块进行修复，期间会判断是否在内存中，如果在直接写入，不在的话要置零写入；
+bool RepairPageForSpecificPage(xl_invalid_page* entry, HTAB* invalidHashTable)
+{
+    Page page;
+    BufferDesc* buf_desc = NULL;
+    SMgrRelation smgr = smgropen(entry->key.node, InvalidBackendId, GetColumnNum(entry->key.forkno));
+    Buffer buf = PageIsInMemory(smgr, entry->key.forkno, entry->key.blkno);
+    bool pageIsInMemory = !BufferIsInvalid(buf);
+    if (BufferIsInvalid(buf)) {
+        page = (Page)palloc0(BLCKSZ);
+    } else {
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        buf_desc = GetBufferDescriptor(buf - 1);
+        page = BufferGetPage(buf);
+    }
+    RepairBlockKey key = {
+        .relfilenode = entry->key.node,
+        .forknum = entry->key.forkno,
+        .blocknum = entry->key.blkno
+    };
+    bool isRepaired = MainEntryForPageRepair(key, entry->type, (char*)page, entry->last_lsn, invalidHashTable);
+
+    if (isRepaired) {
+        /* repair success */
+        if (!pageIsInMemory) {
+            smgrwrite(smgr, key.forknum, key.blocknum, page, true);
+            pfree(page);
+        } else {
+            MarkBufferDirty(buf);
+            LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+            UnpinBuffer(buf_desc, true);
+        }
+    } else {
+        /* repair false */
+        if (!pageIsInMemory) {
+            pfree(page);
+        } else {
+            LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+            UnpinBuffer(buf_desc, true);
+        }
+    }
+    ereport(LOG, (errmsg("[REPAIR] ErrorType: %s, relation %u/%u/%u, blocknum:%u, repair result: %d.",
+                                GetInvalidPageTypeNameByNumber(entry->type), key.relfilenode.spcNode, key.relfilenode.dbNode,
+                                key.relfilenode.relNode, key.blocknum, isRepaired)));
+    return isRepaired;
 }
 
 /*
@@ -12004,7 +12062,6 @@ void ShutdownXLOG(int code, Datum arg)
     if (!ENABLE_DMS || g_instance.dms_cxt.SSClusterState == NODESTATE_NORMAL) {
         ClearPageRepairTheadMem();
         g_instance.repair_cxt.page_repair_hashtbl_lock = NULL;
-        g_instance.repair_cxt.file_repair_hashtbl_lock = NULL;
     }
 
     if (IsInitdb) {
@@ -17518,6 +17575,9 @@ retry:
                         } else {
                             /* just make sure source info is correct... */
                             t_thrd.xlog_cxt.readSource = XLOG_FROM_STREAM;
+                            if (ENABLE_REPAIR && !g_instance.attr.attr_storage.isSwitchToStream) {
+                                g_instance.attr.attr_storage.isSwitchToStream = true;
+                            }
                             t_thrd.xlog_cxt.XLogReceiptSource = XLOG_FROM_STREAM;
                         }
 

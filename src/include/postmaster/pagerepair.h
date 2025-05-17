@@ -38,6 +38,7 @@ typedef uint64 XLogRecPtr;
 const int SEGLEN = 20;
 const int MAX_REPAIR_PAGE_NUM = 1000;
 
+
 typedef enum {
     CRC_CHECK_FAIL = 0,
     LSN_CHECK_FAIL
@@ -71,11 +72,20 @@ typedef struct RepairBlockKey {
     BlockNumber blocknum;
 } RepairBlockKey;
 
+typedef enum {
+    NOT_PRESENT,
+    NOT_INITIALIZED,
+    LSN_CHECK_ERROR,
+    CRC_CHECK_ERROR,
+    SEGPAGE_LSN_CHECK_ERROR,
+    INVALID_PAGE_ERROR = 99
+} InvalidPageType;
+
+extern const char* InvalidPageTypeName[INVALID_PAGE_ERROR];
+
 typedef struct RepairBlockEntry {
     RepairBlockKey key;
-    ThreadId recovery_tid;  /* recovery thread id, when the page can recovery, need tell the recovery thread */
-    PageErrorType error_type;    /* crc error or lsn check error */
-    RepairPageState page_state;  /* page current state */
+    InvalidPageType error_type;    /* crc error or lsn check error */
     XLogRecPtr page_old_lsn;     /* lsn check error, current page lsn */
     XLogRecPtr page_new_lsn;     /* page lsn of new page */
     XLogPhyBlock pblk;            /* physical location for segment-page storage */
@@ -101,7 +111,6 @@ typedef struct RepairFileEntry {
     XLogRecPtr primary_file_lsn;   /* LSN of from the primary DN read file finish */
 } RepairFileEntry;
 
-extern void PageRepairMain(void);
 extern void PageRepairHashTblInit(void);
 extern void FileRepairHashTblInit(void);
 extern void ClearPageRepairTheadMem(void);
@@ -121,12 +130,12 @@ extern void CheckNeedRenameFile();
 extern void CheckIsStopRecovery(void);
 extern int CreateRepairFile(char *path);
 extern int WriteRepairFile(int fd, char* path, char *buf, uint32 offset, uint32 size);
-extern void CheckNeedRecordBadFile(RepairFileKey key, uint32 nblock, uint32 blocknum,
-    const XLogPhyBlock *pblk);
 extern bool CheckFileRepairHashTbl(RelFileNode rnode, ForkNumber forknum, uint32 segno);
 extern void df_clear_and_close_all_file(RepairFileKey key, int32 max_sliceno);
 extern void df_open_all_file(RepairFileKey key, int32 max_sliceno);
-
+extern bool MainEntryForPageRepair(RepairBlockKey key, InvalidPageType invalidPageType, char* bufBlock,
+    XLogRecPtr lastLsn = InvalidXLogRecPtr, HTAB* invalidHashTable = NULL);
+extern void ThreadPageRepairedHashTableInit(void);
 inline bool IsPrimaryClusterStandbyDN()
 {
     load_server_mode();
@@ -140,7 +149,10 @@ inline bool IsPrimaryClusterStandbyDN()
 
     return false;
 }
-
+extern const char* GetInvalidPageTypeNameByNumber(InvalidPageType invalidPageType);
+extern void RepairAllInvalidBlock();
 #define CheckVerionSupportRepair() (t_thrd.proc->workingVersionNum >= SUPPORT_DATA_REPAIR)
-
+#define ENABLE_REPAIR (u_sess->attr.attr_storage.enable_page_repair_function &&     \
+        t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_UNSET && CheckVerionSupportRepair() &&    \
+        !ENABLE_DMS)
 #endif /* _PAGEREPAIR_H */

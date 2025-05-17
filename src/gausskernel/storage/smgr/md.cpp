@@ -318,15 +318,7 @@ void mdcreate(SMgrRelation reln, ForkNumber forkNum, bool isRedo)
         openFilePath = dst;
     }
 
-    if (isRedo && (AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess()) &&
-        CheckFileRepairHashTbl(reln->smgr_rnode.node, forkNum, 0)) {
-        fd = openrepairfile(openFilePath, filenode);
-        if (fd >= 0) {
-            ereport(LOG, (errmsg("[file repair] open repair file %s.repair", openFilePath)));
-        }
-    } else {
-        fd = DataFileIdOpenFile(openFilePath, filenode, flags, 0600);
-    }
+    fd = DataFileIdOpenFile(openFilePath, filenode, flags, 0600);
 
     if (fd < 0) {
         int save_errno = errno;
@@ -742,17 +734,8 @@ static File mdopenagain(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior
             ereport(DEBUG1, (errmsg("\"%s\": %m, this relation has been removed", path)));
             return fd;
         }
-        if ((AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess()) &&
-            CheckFileRepairHashTbl(reln->smgr_rnode.node, forknum, 0)) {
-            fd = openrepairfile(path, filenode);
-            if (fd < 0) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file %s.repair: %s", path, TRANSLATE_ERRNO)));
-            } else {
-                ereport(LOG, (errmsg("[file repair] open repair file %s.repair", path)));
-            }
-        } else {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
-        }
+    
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
     }
 
     return fd;
@@ -1892,19 +1875,7 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
         openFilePath = dst;
     }
 
-    /* open the file */
-    if (RecoveryInProgress() && CheckFileRepairHashTbl(reln->smgr_rnode.node, forknum, segno) &&
-        (AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess())) {
-        fd = openrepairfile(openFilePath, filenode);
-        if (fd < 0) {
-            pfree(fullpath);
-            return NULL;
-        } else {
-            ereport(LOG, (errmsg("[file repair] open repair file %s.repair", openFilePath)));
-        }
-    } else {
-        fd = DataFileIdOpenFile(openFilePath, filenode, O_RDWR | PG_BINARY | oflags, 0600);
-    }
+    fd = DataFileIdOpenFile(openFilePath, filenode, O_RDWR | PG_BINARY | oflags, 0600);
 
     pfree(fullpath);
 
@@ -2093,20 +2064,7 @@ int SyncMdFile(const FileTag *ftag, char *path)
             ftag->forknum, ftag->segno);
         uint32 flags = O_RDWR | PG_BINARY;
         file = DataFileIdOpenFile(openFilePath, filenode, (int)flags, S_IRUSR | S_IWUSR);
-        if (file < 0 &&
-            (AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess()) &&
-            CheckFileRepairHashTbl(reln->smgr_rnode.node, ftag->forknum, ftag->segno)) {
-            const int TEMPLEN = 8;
-            char *temppath = (char *)palloc(strlen(openFilePath) + TEMPLEN);
-            errno_t rc = sprintf_s(temppath, strlen(openFilePath) + TEMPLEN, "%s.repair", path);
-            securec_check_ss(rc, "", "");
-            file = DataFileIdOpenFile(temppath, filenode, (int)flags, S_IRUSR | S_IWUSR);
-            if (file < 0) {
-                pfree(temppath);
-                return -1;
-            }
-            pfree(temppath);
-        } else if (file < 0) {
+        if (file < 0) {
             return -1;
         }
         needClose = true;

@@ -32,6 +32,8 @@
 #include "storage/remote_read.h"
 #include "service/remote_read_client.h"
 #include <arpa/inet.h>
+#include "libpq/libpq-fe.h"
+#include "libpq/libpq-int.h"
 
 /*
  * @Description: get remote error message
@@ -102,6 +104,7 @@ void GetPrimaryServiceAddress(char *address, size_t address_len)
     securec_check_ss(rc, "\0", "\0");
     SpinLockRelease(&walrcv->mutex);
 }
+
 
 
 static void FormatAddressByReplConn(replconninfo* replconninfo, char* remoteAddress, int addressLen)

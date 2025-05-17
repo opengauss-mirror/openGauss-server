@@ -158,7 +158,7 @@ struct PageRedoWorker {
      */
     /* XLog invalid pages. */
     void *xlogInvalidPages;
-
+    HTAB** xlogInvalidPagesLoc;
     void *committingCsnList;
 
     /* ---------------------------------------------
@@ -184,7 +184,7 @@ struct PageRedoWorker {
     RedoParseManager parseManager;
     RedoBufferManager bufferManager;
     RedoTimeCost timeCostList[TIME_COST_NUM];
-    uint32 remoteReadPageNum;
+    pg_atomic_uint32 remoteReadPageNum;
     HTAB *badPageHashTbl;
     char page[BLCKSZ];
     XLogBlockDataParse *curRedoBlockState;

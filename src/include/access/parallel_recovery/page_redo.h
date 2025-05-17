@@ -168,6 +168,7 @@ struct PageRedoWorker {
     void* btreeIncompleteActions;
     /* XLog invalid pages. */
     void* xlogInvalidPages;
+    HTAB** xlogInvalidPagesLoc;
 
     /* ---------------------------------------------
      * Phase barrier.
@@ -185,7 +186,7 @@ struct PageRedoWorker {
     pg_atomic_uint32 readyStatus;
     MemoryContext oldCtx;
     RedoTimeCost timeCostList[TIME_COST_NUM];
-    uint32 remoteReadPageNum;
+    pg_atomic_uint32 remoteReadPageNum;
     HTAB *badPageHashTbl;
     char page[BLCKSZ];
     XLogReaderState *current_item;
@@ -254,7 +255,5 @@ void ClearRecoveryThreadHashTbl(const RelFileNode &node, ForkNumber forknum, Blo
     bool segment_shrink);
 void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode);
 void ClearSpecificsPageEntryAndMem(BadBlockRecEnt *entry);
-
-
 }
 #endif

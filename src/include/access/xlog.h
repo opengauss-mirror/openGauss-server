@@ -919,6 +919,9 @@ void rename_recovery_conf_for_roach();
 bool CheckForFailoverTrigger(void);
 bool CheckForSwitchoverTrigger(void);
 void HandleCascadeStandbyPromote(XLogRecPtr *recptr);
+
+void RepairPageToAllRightState(bool IsCheckPoint);
+
 void update_dirty_page_queue_rec_lsn(XLogRecPtr current_insert_lsn, bool need_immediately_update = false);
 XLogRecord *ReadCheckpointRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, int whichChkpt);
 int emode_for_corrupt_record(int emode, XLogRecPtr RecPtr);
