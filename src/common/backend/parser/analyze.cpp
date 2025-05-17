@@ -3356,7 +3356,12 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
 
     /* rewrite unrotate clause as a subquery */
     RangeSubselect *subselect = makeNode(RangeSubselect);
-    Alias *sub_alias = makeAlias("unrotate_rewrite", NIL);
+    Alias *sub_alias;
+    if (stmt->unrotateInfo->alias == NULL) {
+        sub_alias = makeAlias("unrotate_rewrite", NIL);
+    } else {
+        sub_alias = (Alias *)copyObject(stmt->unrotateInfo->alias);
+    }
     subselect->subquery = (Node *)linitial(parsetree_list);
     subselect->alias = sub_alias;
 
