@@ -77,17 +77,20 @@ void performRestoreOrValidate(pgBackup *dest_backup, bool isValidate)
     int filenum = 0;
     while(true) {
         buff = tryGetNextFreeReadBuffer(bufferCxt);
-        char* buffEnd = buffLoc(buff, bufferCxt) + buff->usedLen;
+        markBufferFlag(buff, BUFF_FLAG_FILE_USED);
+        uint32 usedLen = buffUsedLen(buff);
+        char* buffEnd = buffLoc(buff, bufferCxt) + usedLen;
         if (remainBuffLen == 0) {
             buffOffset = buffLoc(buff, bufferCxt);
         }
         if (unlikely(prevBuff != NULL)) {
-            remainBuffLen = remainBuffLen + buff->usedLen;
+            remainBuffLen = remainBuffLen + usedLen;
         } else {
             remainBuffLen = buffEnd - buffOffset;
         }
         while (segHdrLen <= remainBuffLen) {
-            memcpy_s(predesc, sizeof(FileAppenderSegDescriptor), desc, sizeof(FileAppenderSegDescriptor));
+            int ret = memcpy_s(predesc, sizeof(FileAppenderSegDescriptor), desc, sizeof(FileAppenderSegDescriptor));
+            securec_check(ret, "\0", "\0");
             getSegDescriptor(desc, &buffOffset, &remainBuffLen, bufferCxt);
             if (prevBuff != NULL) {
                 clearBuff(prevBuff);
@@ -97,14 +100,14 @@ void performRestoreOrValidate(pgBackup *dest_backup, bool isValidate)
             if (desc->header.size > 0 && desc->header.size > remainBuffLen) {
                 nextBuff = tryGetNextFreeReadBuffer(bufferCxt);
                 while (nextBuff->bufId == buff->bufId) {
-                    pg_usleep(WAIT_FOR_BUFF_SLEEP_TIME);
                     nextBuff = tryGetNextFreeReadBuffer(bufferCxt);
                 }
+                markBufferFlag(nextBuff, BUFF_FLAG_FILE_USED);
                 // rewind
                 if (nextBuff->bufId == 0 && remainBuffLen > 0) {
                     desc->payload_offset = remainBuffLen;
                 }
-                remainBuffLen = remainBuffLen + nextBuff->usedLen;
+                remainBuffLen = remainBuffLen + buffUsedLen(nextBuff);
             }
             parseSegDescriptor(desc, &buffOffset, &remainBuffLen, tempBuffer, bufferCxt, dest_backup, isValidate, &arg);
             if (isValidate && arg.corrupted) {
@@ -119,10 +122,10 @@ void performRestoreOrValidate(pgBackup *dest_backup, bool isValidate)
                 }
                 nextBuff = tryGetNextFreeReadBuffer(bufferCxt);
                 while (nextBuff->bufId == buff->bufId) {
-                    pg_usleep(WAIT_FOR_BUFF_SLEEP_TIME);
                     nextBuff = tryGetNextFreeReadBuffer(bufferCxt);
                 }
-                remainBuffLen = nextBuff->usedLen;
+                markBufferFlag(nextBuff, BUFF_FLAG_FILE_USED);
+                remainBuffLen = buffUsedLen(nextBuff);
                 buffOffset = buffLoc(nextBuff, bufferCxt);
             }
             if (nextBuff != NULL) {
@@ -147,7 +150,7 @@ void performRestoreOrValidate(pgBackup *dest_backup, bool isValidate)
         }
     }
 
-    args.bufferCxt->earlyExit = true;
+    args.bufferCxt->earlyExit.store(true);
     pthread_join(restoreReaderThread, nullptr);
     destorySegDescriptor(&desc);
     destroyBufferCxt(bufferCxt);

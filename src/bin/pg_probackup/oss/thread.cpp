@@ -62,10 +62,6 @@ void destoryBackupReaderContexts()
     ReaderCxt* readerCxt = NULL;
     for (uint i = 0; i < current.readerThreadCount; i++) {
         readerCxt = &current.readerCxt[i];
-        pthread_spin_lock(&readerCxt->lock);
-        readerCxt->state = READER_THREAD_STATE_STOP;
-        pthread_spin_unlock(&readerCxt->lock);
-        pthread_join(readerCxt->readerThreadId, NULL);
         pthread_spin_destroy(&readerCxt->lock);
         pfree_ext(readerCxt->file);
         pfree_ext(readerCxt->prefile);
@@ -118,10 +114,12 @@ void* backupSenderThreadMain(void* arg)
         }
         buff = tryGetNextFreeReadBuffer(bufferCxt);
         // write the buffer to OSS
-        if (buff->usedLen != 0) {
-            if (buff->fileId != -1) {
+        uint32 usedLen = buffUsedLen(buff);
+        if (usedLen != 0) {
+            int32 fileId = buffFileId(buff);
+            if (fileId != -1) {
                 pthread_spin_lock(&senderCxt->lock);
-                fileinfo = (SendFileInfo*)parray_get(current.filesinfo, buff->fileId);
+                fileinfo = (SendFileInfo*)parray_get(current.filesinfo, fileId);
                 pthread_spin_unlock(&senderCxt->lock);
             }
             if (fileinfo != NULL && object_name == NULL) {
@@ -137,12 +135,12 @@ void* backupSenderThreadMain(void* arg)
             } else if (fileinfo == NULL) {
                 elog(ERROR, "get file info failed.");
             }
-            if (buff->usedLen < partLeftSize) {
-                rc = memcpy_s(bufferEndPtr - partLeftSize, buff->usedLen, buffLoc(buff, bufferCxt), buff->usedLen);
+            if (usedLen < partLeftSize) {
+                rc = memcpy_s(bufferEndPtr - partLeftSize, usedLen, buffLoc(buff, bufferCxt), usedLen);
                 securec_check(rc, "\0", "\0");
-                partLeftSize = partLeftSize - buff->usedLen;
+                partLeftSize = partLeftSize - usedLen;
             } else {
-                uint32 buff_off = buff->usedLen - partLeftSize;
+                uint32 buff_off = usedLen - partLeftSize;
                 rc = memcpy_s(bufferEndPtr - partLeftSize, partLeftSize, buffLoc(buff, bufferCxt), partLeftSize);
                 securec_check(rc, "\0", "\0");
                 oss->MultipartUpload(bucket_name, object_name, buffer, partSize);
@@ -460,12 +458,12 @@ void* restoreReaderThreadMain(void* arg)
         }
     }
     for (size_t i = 0; i < pbkObjectsNum; ++i) {
-        if (args->bufferCxt->earlyExit) {
+        if (args->bufferCxt->earlyExit.load()) {
             break;
         }
         object_name = (char*)parray_get(pbkObjects, i);
         elog(INFO, "download object: %s from s3", object_name);
-        args->bufferCxt->fileEnd = false;
+        args->bufferCxt->fileEnd.store(false);
         oss->GetObject(bucket_name, object_name, (void*)args->bufferCxt);
     }
     parray_free(objects);

@@ -20,7 +20,7 @@
 
 #define BUFSIZE 2097152 /* 2 * 1024 * 1024, 2MB */
 #define WAIT_FOR_BUFF_SLEEP_TIME 100000 /* 100 ms*/
-#define BUFF_FLAG_FILE_OPENED 0x1
+constexpr int BUFF_FLAG_FILE_USED = 0x1;
 #define BUFF_FLAG_FILE_CLOSED 0x2
 #define BUFF_FLAG_FILE_FINISHED 0x4
 
@@ -53,9 +53,12 @@ typedef struct BufferCxt
     BufferDesc* bufHeader;
     char* bufData;
     uint32 bufNum;
-    bool fileEnd;
     int fileNum; /* for restore */
-    volatile bool earlyExit;
+    std::atomic<bool> fileEnd = {false};
+    std::atomic<bool> earlyExit = {false};
+    std::atomic<int> fileId = {-1};
+    std::atomic<int> producerCount = {0};
+    std::atomic<int> consumerCount = {0};
     alignas(CacheLineSize) std::atomic<size_t> producerIdx = {0};
     alignas(CacheLineSize) size_t producerIdxCache = 0;
     alignas(CacheLineSize) std::atomic<size_t> consumerIdx = {0};
@@ -89,7 +92,29 @@ extern bool hasNextBufferForRead(BufferCxt* cxt, const size_t buffIdx);
 /* inline function */
 inline uint32 buffFreeLen(BufferDesc* buff)
 {
-    return BUFSIZE - buff->usedLen;
+    uint32 freelen = 0;
+    pthread_spin_lock(&buff->lock);
+    freelen = BUFSIZE - buff->usedLen;
+    pthread_spin_unlock(&buff->lock);
+    return freelen;
+}
+
+inline uint32 buffUsedLen(BufferDesc* buff)
+{
+    uint32 usedLen = 0;
+    pthread_spin_lock(&buff->lock);
+    usedLen = buff->usedLen;
+    pthread_spin_unlock(&buff->lock);
+    return usedLen;
+}
+
+inline uint32 buffFileId(BufferDesc* buff)
+{
+    uint32 fileId = -1;
+    pthread_spin_lock(&buff->lock);
+    fileId = buff->fileId;
+    pthread_spin_unlock(&buff->lock);
+    return fileId;
 }
 
 inline uint32 buffNum(BufferCxt* cxt)
@@ -99,12 +124,20 @@ inline uint32 buffNum(BufferCxt* cxt)
 
 inline char* buffLoc(BufferDesc* buff, BufferCxt* cxt)
 {
-    return cxt->bufData + buff->bufId * BUFSIZE;
+    char* loc = nullptr;
+    pthread_spin_lock(&buff->lock);
+    loc = cxt->bufData + buff->bufId * BUFSIZE;
+    pthread_spin_unlock(&buff->lock);
+    return loc;
 }
 
 inline char* buffFreeLoc(BufferDesc* buff, BufferCxt* cxt)
 {
-    return buffLoc(buff, cxt) + buff->usedLen;
+    char* freeloc = nullptr;
+    pthread_spin_lock(&buff->lock);
+    freeloc = cxt->bufData + buff->bufId * BUFSIZE + buff->usedLen;
+    pthread_spin_unlock(&buff->lock);
+    return freeloc;
 }
 
 inline void addBuffLen(BufferDesc* buff, uint32 len)
@@ -116,12 +149,25 @@ inline void addBuffLen(BufferDesc* buff, uint32 len)
 
 inline void markBufferFlag(BufferDesc* buff, uint32 flag)
 {     
+    pthread_spin_lock(&buff->lock);
     (*((volatile uint32*)&(buff->flags))) |= flag;
+    pthread_spin_unlock(&buff->lock);
+}
+
+inline void setBufferFileId(BufferDesc* buff, int32 fileId)
+{
+    pthread_spin_lock(&buff->lock);
+    buff->fileId = fileId;
+    pthread_spin_unlock(&buff->lock);
 }
 
 inline bool testBufferFlag(BufferDesc* buff, uint32 flag)
 {     
-    return ((*((volatile uint32*)&(buff->flags))) & flag);
+    bool testres = false;
+    pthread_spin_lock(&buff->lock);
+    testres = ((*((volatile uint32*)&(buff->flags))) & flag);
+    pthread_spin_unlock(&buff->lock);
+    return testres;
 }
 
 inline void clearBuff(BufferDesc* buff)
