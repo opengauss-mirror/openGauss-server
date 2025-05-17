@@ -11,7 +11,7 @@ DATA_built = shark--2.0.sql
 DATA = shark--2.0.sql upgrade_script/shark--1.0--2.0.sql rollback_script/shark--2.0--1.0.sql
 REGRESS = dummy
 
-OBJS = shark.o dbcc.o varlena.o
+OBJS = shark.o dbcc.o varlena.o sqlvariant.o
 OBJS += $(BEPARSERDIR)/parser.o
 OBJS += $(BEPARSERDIR)/gram-backend.o
 OBJS += $(BEPARSERDIR)/keywords.o

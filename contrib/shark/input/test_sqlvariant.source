@@ -1,0 +1,351 @@
+drop database if exists db_mssql_sqlvariant;
+create database db_mssql_sqlvariant dbcompatibility 'd';
+\c db_mssql_sqlvariant
+create extension shark;
+-- 表存储
+create table t (a sql_variant);
+create index idx1 on t(a);
+select pg_get_tabledef('t');
+
+-- 这里都是隐式转换
+insert into t values(1::int);
+insert into t values(1::int8);
+insert into t values(2::numeric);
+insert into t values('3'::varchar);
+insert into t values(1::varchar);
+insert into t values(1::varchar);
+insert into t values(1::varchar);
+insert into t values('1234567890'::varchar(10));
+insert into t values('1234567890'::nchar(10));
+insert into t values(NULL::numeric);
+insert into t values(4);
+insert into t values(4.1);
+insert into t values('5');
+insert into t values(true);
+insert into t values(null);
+insert into t values(2::money);
+
+select * from t order by a;
+explain select * from t order by a;
+select * from t where a=1;
+select * from t where a=1::varchar;
+
+create table tt (a sql_variant, b text);
+insert into tt values(1::int,1);
+insert into tt values(2::numeric,2);
+insert into tt values('3'::varchar,3);
+insert into tt values('1234567890'::varchar(10),'1234567890');
+insert into tt values('1234567890'::nchar(10),'1234567890');
+insert into tt values(NULL::numeric,null::numeric);
+insert into tt values(4,4);
+insert into tt values(4.1,4.1);
+insert into tt values('5','5');
+insert into tt values(true,true);
+insert into tt values(null,null);
+select * from tt join t on t.a=tt.a;
+
+-- 视图
+CREATE VIEW t_v AS SELECT * FROM t AS t_a;
+select * from t_v;
+
+-- 函数
+CREATE OR REPLACE FUNCTION test_sql_variant(sql_variant, sql_variant)
+RETURNS BOOL
+AS $$ select $1 > $2  $$
+LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
+select test_sql_variant(1::numeric, 2::numeric);
+
+-- 比较运算符
+-- 有比较运算符
+select 1::int::sql_variant > 3::int::sql_variant;
+select 1::int::sql_variant >= 3::int::sql_variant;
+select 1::int::sql_variant < 3::int::sql_variant;
+select 1::int::sql_variant <= 3::int::sql_variant;
+select 1::int::sql_variant = 3::int::sql_variant;
+select 1::int::sql_variant <> 3::int::sql_variant;
+
+-- 有比较运算符， 不同类型
+select 1::int::sql_variant > 1::int8::sql_variant;
+select 1::int::sql_variant >= 1::int8::sql_variant;
+select 1::int::sql_variant < 1::int8::sql_variant;
+select 1::int::sql_variant <= 1::int8::sql_variant;
+select 1::int::sql_variant = 1::int8::sql_variant;
+select 1::int::sql_variant <> 1::int8::sql_variant;
+
+-- 没有比较运算符， 不同类型， 不同catalogy
+select '1'::int::sql_variant = '1'::varchar::sql_variant;
+select '1'::int::sql_variant <> '1'::varchar::sql_variant;
+select '1'::int::sql_variant > '1'::varchar::sql_variant;
+select '1'::int::sql_variant >= '1'::varchar::sql_variant;
+select '1'::int::sql_variant < '1'::varchar::sql_variant;
+select '1'::int::sql_variant <= '1'::varchar::sql_variant;
+
+-- 没有比较运算符， 不同类型， 相同catalogy
+select '1'::char::sql_variant = '1'::varchar::sql_variant;
+select '1'::char::sql_variant <> '1'::varchar::sql_variant;
+select '1'::char::sql_variant > '1'::varchar::sql_variant;
+select '1'::char::sql_variant >= '1'::varchar::sql_variant;
+select '1'::char::sql_variant < '1'::varchar::sql_variant;
+select '1'::char::sql_variant <= '1'::varchar::sql_variant;
+
+-- 没有比较运算符，且类型相同
+select '1'::varchar::sql_variant = '1'::varchar::sql_variant;
+select '1'::varchar::sql_variant <> '1'::varchar::sql_variant;
+select '1'::varchar::sql_variant > '1'::varchar::sql_variant;
+select '1'::varchar::sql_variant >= '1'::varchar::sql_variant;
+select '1'::varchar::sql_variant < '1'::varchar::sql_variant;
+select '1'::varchar::sql_variant <= '1'::varchar::sql_variant;
+
+-- 字符串类型有特殊规则
+select '111' = '111'::varchar::sql_variant;
+select '111' = '111'::char(3)::sql_variant;
+select '111' = '111'::nvarchar::sql_variant;
+select '111' = '111'::nchar(3)::sql_variant;
+select '1111' = '111'::varchar::sql_variant;
+select '1111' = '111'::char(3)::sql_variant;
+select '1111' = '111'::nvarchar::sql_variant;
+select '1111' = '111'::nchar(3)::sql_variant;
+select '1111' > '111'::varchar::sql_variant;
+select '1111' > '111'::char(3)::sql_variant;
+select '1111' > '111'::nvarchar::sql_variant;
+select '1111' > '111'::nchar(3)::sql_variant;
+select '1111' < '111'::varchar::sql_variant;
+select '1111' < '111'::char(3)::sql_variant;
+select '1111' < '111'::nvarchar::sql_variant;
+select '1111' < '111'::nchar(3)::sql_variant;
+select '111'::varchar::sql_variant = '111'::varchar::sql_variant;
+select '111'::varchar::sql_variant = '111'::char(3)::sql_variant;
+select '111'::varchar::sql_variant = '111'::nvarchar::sql_variant;
+select '111'::varchar::sql_variant = '111'::nchar(3)::sql_variant;
+select '111'::char(3)::sql_variant = '111'::varchar::sql_variant;
+select '111'::char(3)::sql_variant = '111'::char(3)::sql_variant;
+select '111'::char(3)::sql_variant = '111'::nvarchar::sql_variant;
+select '111'::char(3)::sql_variant = '111'::nchar(3)::sql_variant;
+select '111'::char(4)::sql_variant = '111'::varchar::sql_variant;
+select '111'::char(4)::sql_variant = '111'::char(3)::sql_variant;
+select '111'::char(4)::sql_variant = '111'::nvarchar::sql_variant;
+select '111'::char(4)::sql_variant = '111'::nchar(3)::sql_variant;
+select '111'::nvarchar::sql_variant = '111'::varchar::sql_variant;
+select '111'::nvarchar::sql_variant = '111'::char(3)::sql_variant;
+select '111'::nvarchar::sql_variant = '111'::nvarchar::sql_variant;
+select '111'::nvarchar::sql_variant = '111'::nchar(3)::sql_variant;
+select '111'::nchar(3)::sql_variant = '111'::varchar::sql_variant;
+select '111'::nchar(3)::sql_variant = '111'::char(3)::sql_variant;
+select '111'::nchar(3)::sql_variant = '111'::nvarchar::sql_variant;
+select '111'::nchar(3)::sql_variant = '111'::nchar(3)::sql_variant;
+select '111'::nchar(8)::sql_variant = '111'::varchar::sql_variant;
+select '111'::nchar(8)::sql_variant = '111'::char(3)::sql_variant;
+select '111'::nchar(8)::sql_variant = '111'::nvarchar::sql_variant;
+select '111'::nchar(8)::sql_variant = '111'::nchar(3)::sql_variant;
+
+select '111  '::varchar::sql_variant = '111'::varchar::sql_variant;
+select '111  '::char(6)::sql_variant = '111'::varchar::sql_variant;
+select '111  '::nvarchar::sql_variant = '111'::varchar::sql_variant;
+select '111  '::nchar(6)::sql_variant = '111'::varchar::sql_variant;
+select '111  '::sql_variant = '111'::varchar::sql_variant;
+
+-- 类型转换
+-- 测试几种，理论上大部分都要支持的
+select 1::int::sql_variant;
+select 1::numeric::sql_variant;
+select 1::varchar::sql_variant;
+select '111111'::varchar::sql_variant;
+select NULL::int::sql_variant;
+
+-- 转换原类型
+select 1::int::sql_variant::int;
+select 1::numeric::sql_variant::numeric;
+select 1::varchar::sql_variant::varchar;
+select '111111'::varchar::sql_variant::varchar;
+select NULL::int::sql_variant::int;
+select '2020-01-01 10:10:10'::smalldatetime::sql_variant::smalldatetime;
+select '2020-01-01'::date::sql_variant::date;
+select '10:10:10'::time::sql_variant::time;
+select 1.23::float::sql_variant::float;
+select 1.23::float4::sql_variant::float4;
+select 1.23::money::sql_variant::money;
+select 1::bigint::sql_variant::bigint;
+select 1::smallint::sql_variant::smallint;
+select 1::tinyint::sql_variant::tinyint;
+select '1'::bit::sql_variant::bit;
+select 'a'::char::sql_variant::char;
+select 1::nvarchar::sql_variant::nvarchar;
+
+-- 转到其他类型
+select 1::int::numeric;
+select 1::int::sql_variant::numeric;
+select 1::int::varchar;
+select 1::int::sql_variant::varchar;
+select NULL::int::sql_variant::numeric;
+select '2020-01-01 10:10:10'::datetime::sql_variant::date;
+select '2020-01-01'::date::sql_variant::datetime;
+select '10:10:10'::time::sql_variant::datetime;
+select 1.23::float::sql_variant::numeric;
+select 1.23::float4::sql_variant::numeric;
+select 1.23::money::sql_variant::varchar;
+select 1::bigint::sql_variant::numeric;
+select 1::smallint::sql_variant::int;
+select 1::tinyint::sql_variant::int;
+select '1'::bit::sql_variant::varchar;
+select 'a'::char::sql_variant::varchar;
+select 1::nvarchar::sql_variant::varchar;
+
+-- falied
+select 1::int::time;
+select 1::int::sql_variant::time;
+select '10:10:10'::time::int;
+select '10:10:10'::time::sql_variant::int;
+
+select '0x123456'::text::sql_variant;
+select ''::xml::sql_variant;
+select 1::numeric::sql_variant::sql_variant;
+
+select null::text::sql_variant;
+select null::xml::sql_variant;
+select ''::text::sql_variant;
+select ''::xml::sql_variant;
+select 1::sql_variant::bytea;
+select '{"a": 1}'::jsonb::sql_variant::json;
+select '{"a": 1}'::jsonb::sql_variant::json;
+
+-- 长度限制
+select '111112333'::char(8001)::sql_variant;
+select '111112333'::char(8000)::sql_variant;
+select '111112333'::char(10)::sql_variant;
+
+-- 类似sql_variant直接输入
+select true::sql_variant;
+select false::sql_variant;
+select true::sql_variant::boolean;
+select false::sql_variant::boolean;
+select 1::sql_variant;
+select 1::sql_variant::int;
+select 1::sql_variant::numeric;
+select 1.111::sql_variant;
+select 1.111::sql_variant::numeric;
+select 1.111::sql_variant::int;
+select 'hello'::sql_variant;
+select 'sss'::sql_variant;
+select null::sql_variant;
+select null::sql_variant is null;
+select null::int::sql_variant is null;
+select ''::sql_variant;
+
+create table t1 (a char(8));
+insert into t1 values('sss'::char(8)::sql_variant);
+create table t2 (a sql_variant not null);
+insert into t2 values(null);
+insert into t2 values(null::int);
+
+declare
+    res sql_variant;
+    res1 int;
+    res2 varchar;
+begin
+    res := '1.2333'::float;
+    res1 := res::int;
+    res2 := res;
+    raise notice '%', res;
+    raise notice '%', res::float;
+    raise notice '%', res1;
+    raise notice '%', res2;
+end;
+/
+create domain tp1 as sql_variant;
+create domain tp2 as int;
+select 1::int::tp1;
+select 1::sql_variant::tp2;
+select 1::tp2::sql_variant;
+select 1::tp2::tp1::tp2;
+select 1::tp1::tp1;
+select 1::tp1::sql_variant;
+select 'ssss'::sql_variant = 'ssss';
+drop domain tp1;
+drop domain tp2;
+
+select ''::sql_variant = ''::sql_variant;
+select ''::sql_variant = '';
+
+DECLARE
+    p varchar;
+BEGIN
+    raise notice '%', 1::sql_variant;
+    p := 1::sql_variant;
+    raise notice '%', p;
+END;
+/
+
+drop type if exists tp1;
+create type tp1 as (a1 int, a2 sql_variant);
+create table t_tp (c tp1);
+insert into t_tp values((1, 'sddd'));
+select * from t_tp;
+drop table t_tp;
+drop type if exists tp1;
+
+--建外表
+create table tt_1130316(a1 sql_variant PRIMARY KEY);
+insert into tt_1130316 values(2::int),('ff'::char(4)),('!'::varchar(3)),('li'::char(6)),('good'::varchar2(8));
+
+create table tab_1130316(
+a1 int not null,
+a2 sql_variant unique,
+a3 sql_variant PRIMARY KEY,
+a4 sql_variant default 'good'::char(8),
+a5 sql_variant check(a5 is not null),
+a6 sql_variant REFERENCES tt_1130316(a1))
+partition by range(a1)
+(
+PARTITION P1 VALUES LESS THAN(100),
+PARTITION P2 VALUES LESS THAN(200),
+PARTITION P3 VALUES LESS THAN(MAXVALUE)
+);
+
+insert into tab_1130316 values(1,'bb'::char(4),'cc'::varchar(3),'dd'::varchar2(8),'ee'::varchar,'ff'::char(8));--成功
+insert into tab_1130316 values(null,'hi'::char(4),'how'::char(4),'are'::char(4),'you'::char(4),'!'::char(4));--触发约束，报错
+insert into tab_1130316 values(2,'bb'::char(4),'how'::char(4),'are'::char(4),'you'::char(4),'!'::char(4));--触发约束，报错
+insert into tab_1130316 values(3,'name'::char(8),'cc'::varchar(4),'is'::char(4),'li'::char(4),'li'::char(4));--触发约束，报错
+insert into tab_1130316(a1,a2,a3,a5,a6) values(4,'english'::char(16),'is'::char(4),'very'::char(4),'good'::varchar(4));--触发约束，成功
+insert into tab_1130316 values(5,'is'::char(4),'null'::char(4),'?'::char(4),null,'yes'::char(4));--触发约束，报错
+insert into tab_1130316 values(6,'外键'::char(8),'约束'::char(8),'是'::char(4),'1'::char(4),'2'::char(4));--触发约束，报错
+
+MERGE INTO tab_1130316 p
+USING tt_1130316 np
+ON (p.a6=np.a1)
+WHEN MATCHED THEN
+UPDATE SET p.a4 = 'bad'::char(4) where p.a2='wzr'::char(4)
+WHEN NOT MATCHED THEN
+INSERT VALUES (8, np.a1,np.a1,np.a1,np.a1,np.a1);
+
+\c contrib_regression
+drop database db_mssql_sqlvariant;
+
+-- dump
+create database dump_database with dbcompatibility 'D';
+create database restore_database with dbcompatibility 'D';
+\c dump_database
+create extension shark;
+create table t (a sql_variant);
+insert into t values(1::int);
+insert into t values(2::numeric);
+insert into t values('3'::varchar);
+insert into t values('1234567890'::varchar(10));
+insert into t values('1234567890'::nchar(10));
+insert into t values(NULL::numeric);
+insert into t values(4);
+insert into t values(4.1);
+insert into t values('5');
+insert into t values(null);
+select * from t order by a;
+
+\c restore_database
+create extension shark;
+
+\! @abs_bindir@/gs_dump dump_database -p @portstring@ -f @abs_bindir@/dump_sqlvariant.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d restore_database -p @portstring@ @abs_bindir@/dump_sqlvariant.tar >/dev/null 2>&1; echo $?
+\c restore_database
+select * from t order by a;
+
+\c contrib_regression
+drop database dump_database;
+drop database restore_database;
