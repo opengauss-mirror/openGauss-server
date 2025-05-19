@@ -624,6 +624,24 @@ rotate (SUM(Amount) FOR Quarter IN (Q1, Q2, q3, q4)) AS rotateTable;
 
 drop table t_rotate0005_01;
 drop table t_rotate0005;
+CREATE TABLE t_not_rotate0001_01 ( Product VARCHAR(50), Q1_Sales DECIMAL(10,2), Q2_Sales DECIMAL(10,2), Q3_Sales DECIMAL(10,2), Q4_Sales DECIMAL(10,2) );
+INSERT INTO t_not_rotate0001_01 VALUES ('Laptop', 1000.00, 1500.00, 1200.00, 1800.00), ('Phone', 800.00, 900.00, 950.00, 1100.00), ('Tablet', NULL, 500.00, NULL, 700.00);
+SELECT Product, Quarter, Sales FROM ( SELECT Product, Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales FROM t_not_rotate0001_01 ) as "table" not rotate ( Sales FOR Quarter IN (Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales) ) AS UnpivotTable;
+ product | quarter  |  sales  
+---------+----------+---------
+ Laptop  | q1_sales | 1000.00
+ Phone   | q1_sales |  800.00
+ Laptop  | q2_sales | 1500.00
+ Phone   | q2_sales |  900.00
+ Tablet  | q2_sales |  500.00
+ Laptop  | q3_sales | 1200.00
+ Phone   | q3_sales |  950.00
+ Laptop  | q4_sales | 1800.00
+ Phone   | q4_sales | 1100.00
+ Tablet  | q4_sales |  700.00
+(10 rows)
+
+drop table t_not_rotate0001_01;
 -- part3: ANSI_NULLS
 set ANSI_NULLS on;
 select NULL = NULL;

@@ -3165,7 +3165,7 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("NOT ROTATE in from clause error")));
     }
     if (rte->alias)
-        appendStringInfo(&from_clause_sql, "AS %s ", rte->alias->aliasname);
+        appendStringInfo(&from_clause_sql, "AS %s ", quote_identifier(rte->alias->aliasname));
     List *stmt_targetList = list_copy(stmt->targetList);
     /* remove target in colNameList */
     stmt_targetList = removeTargetListByNameList(stmt_targetList, stmt->unrotateInfo->colNameList);
