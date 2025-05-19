@@ -70,6 +70,7 @@
 #include "access/relscan.h"
 #include "access/transam.h"
 #include "access/tableam.h"
+#include "access/datavec/hnsw.h"
 #include "access/xlog.h"
 #include "catalog/index.h"
 #include "catalog/catalog.h"
@@ -357,7 +358,8 @@ static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys
     /*
      * Tell the AM to open a scan.
      */
-    if (u_sess->attr.attr_common.enable_indexscan_optimization && index_relation->rd_rel->relam == BTREE_AM_OID) {
+    if (u_sess->attr.attr_common.enable_indexscan_optimization &&
+        (index_relation->rd_rel->relam == BTREE_AM_OID || index_relation->rd_rel->relam == HNSW_AM_OID)) {
         scan = index_relation->rd_amroutine->ambeginscan(index_relation, nkeys, norderbys);
     } else {
         scan = (IndexScanDesc)DatumGetPointer(
@@ -583,7 +585,8 @@ rescan:
      * scan->xs_recheck and possibly scan->xs_itup, though we pay no attention
      * to those fields here.
      */
-    if (u_sess->attr.attr_common.enable_indexscan_optimization && scan->indexRelation->rd_rel->relam == BTREE_AM_OID) {
+    if (u_sess->attr.attr_common.enable_indexscan_optimization &&
+        (scan->indexRelation->rd_rel->relam == BTREE_AM_OID || scan->indexRelation->rd_rel->relam == HNSW_AM_OID)) {
         found = scan->indexRelation->rd_amroutine->amgettuple(scan, direction);
     } else {
         found = DatumGetBool(FunctionCall2(procedure, PointerGetDatum(scan), Int32GetDatum(direction)));

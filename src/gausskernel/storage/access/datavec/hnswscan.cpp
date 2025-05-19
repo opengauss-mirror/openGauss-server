@@ -22,6 +22,7 @@
  */
 #include "postgres.h"
 
+#include "access/amapi.h"
 #include "access/relscan.h"
 #include "access/datavec/hnsw.h"
 #include "pgstat.h"
@@ -293,4 +294,24 @@ void hnswendscan_internal(IndexScanDesc scan)
 
     pfree(so);
     scan->opaque = NULL;
+}
+
+IndexAmRoutine *get_index_amroutine_for_hnsw()
+{
+    IndexAmRoutine *amroutine = makeNode(IndexAmRoutine);
+    amroutine->ambuild = hnswbuild_internal;
+    amroutine->ambuildempty = hnswbuildempty_internal;
+    amroutine->aminsert = nullptr;
+    amroutine->ambulkdelete = nullptr;
+    amroutine->amvacuumcleanup = hnswvacuumcleanup_internal;
+    amroutine->amcanreturn = nullptr;
+    amroutine->ambeginscan = hnswbeginscan_internal;
+    amroutine->amrescan = nullptr;
+    amroutine->amgettuple = hnswgettuple_internal;
+    amroutine->amgetbitmap= nullptr;
+    amroutine->amendscan = hnswendscan_internal;
+    amroutine->ammarkpos = nullptr;
+    amroutine->amrestrpos = nullptr;
+    amroutine->ammerge = nullptr;
+    return amroutine;
 }

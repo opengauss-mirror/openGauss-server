@@ -1146,4 +1146,6 @@ extern Tuple heapam_modify_tuple(Tuple tuple, TupleDesc tuple_desc, Datum *repl_
 extern bool heapam_attisnull(Tuple tup, int attnum, TupleDesc tuple_desc);
 extern Tuple heapam_copytuple(Tuple tuple);
 
+extern void heap_deform_tuple_natts(TupleTableSlot* slot, HeapTuple tuple, TupleDesc tuple_desc, Datum* values, bool* isnull, int attno);
+
 #endif /* TABLEAM_H */

@@ -267,7 +267,6 @@ Datum vector_out(PG_FUNCTION_ARGS)
     Vector *vector = PG_GETARG_VECTOR_P(0);
     int dim = vector->dim;
     char *buf;
-    char *ptr;
 
     /*
      * Need:
@@ -280,7 +279,18 @@ Datum vector_out(PG_FUNCTION_ARGS)
      * 3 bytes for [, ], and \0
      */
     buf = (char *)palloc(FLOAT_SHORTEST_DECIMAL_LEN * dim + 2);
-    ptr = buf;
+    PrintOutVector(buf, PointerGetDatum(vector));
+
+    PG_FREE_IF_COPY(vector, 0);
+    PG_RETURN_CSTRING(buf);
+}
+void PrintOutVector(char *msg, Datum arg)
+{
+    Vector *vector = DatumGetVector(arg);
+    int dim = vector->dim;
+    char *ptr;
+
+    ptr = msg;
 
     AppendChar(ptr, '[');
 
@@ -294,9 +304,6 @@ Datum vector_out(PG_FUNCTION_ARGS)
 
     AppendChar(ptr, ']');
     *ptr = '\0';
-
-    PG_FREE_IF_COPY(vector, 0);
-    PG_RETURN_CSTRING(buf);
 }
 
 /*

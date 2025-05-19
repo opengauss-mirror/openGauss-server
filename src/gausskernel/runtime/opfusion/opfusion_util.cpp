@@ -120,6 +120,14 @@ const char* getBypassReason(FusionType result)
             return "Bypass not executed because query used indexscan with qual";
         }
 
+        case NOBYPASS_ANNINDEXSCAN_WITH_QUAL: {
+            return "Bypass not executed because query used annindexscan with qual";
+        }
+
+        case NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT: {
+            return "Bypass not executed because query used limit-ann grammar with a non-constant or param value";
+        }
+
         case NOBYPASS_INDEXSCAN_CONDITION_INVALID: {
             return "Bypass not executed because query used unsupported indexscan condition";
         }
@@ -755,6 +763,96 @@ bool CheckIsRIConstraintTrigger(const TriggerDesc* trigdesc)
     return true;
 }
 
+static FusionType checkFuncType(Expr* node, ParamListInfo params)
+{
+    FusionType ret = NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT;
+    switch (nodeTag(node)) {
+        case T_FuncExpr: {
+            FuncExpr* funcexpr = (FuncExpr*)node;
+            if (funcexpr->funcid == F_INT48 || funcexpr->funcid == F_I2TOI4) {
+                return checkFuncType((Expr*)funcexpr->args, params);
+            }
+        } break;
+        case T_List: {
+            List* list = (List*)node;
+            if (list_length(list) == 1) {
+                return checkFuncType((Expr*)linitial(list), params);
+            }
+        } break;
+        case T_Param: {
+            Param* param = (Param*)node;
+            if (param->paramkind == PARAM_EXTERN || param->paramkind == PARAM_EXEC) {
+                if (param->paramid <= params->numParams) {
+                    ret = SELECT_FOR_ANN_FUSION;
+                }
+            }
+        } break;
+        default:
+            break;
+    }
+    return ret;
+}
+
+static FusionType checkFuncExpr(FuncExpr* funcexpr, ParamListInfo params)
+{
+    if (funcexpr->funcid == F_INT48 || funcexpr->funcid == F_I2TOI4) {
+        return checkFuncType((Expr*)funcexpr->args, params);
+    }
+    return NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT;
+}
+/* only support Limit + Ann index scan、 only Ann Index Scan*/
+FusionType getSelectAnnIndexType(Plan *top_plan, ParamListInfo params)
+{
+    Limit* limit = NULL;
+    Plan* annIndex = top_plan;
+    if (IsA(top_plan, Limit)) {
+        limit = (Limit*) top_plan;
+        annIndex = top_plan->lefttree;
+    }
+    if (annIndex->lefttree != NULL) {
+        return NOBYPASS_NO_INDEXSCAN;
+    }
+    if (annIndex->qual != NULL) {
+        return NOBYPASS_ANNINDEXSCAN_WITH_QUAL;
+    }
+    FusionType ret = SELECT_FOR_ANN_FUSION;
+    if (limit != NULL) {
+        // check for offset
+        if (limit->limitOffset != NULL) {
+            if (IsA(limit->limitOffset, Const)) {
+                Assert(((Const *)limit->limitOffset)->consttype == 20);
+                if (DatumGetInt64(((Const *)limit->limitOffset)->constvalue) < 0) {
+                    return NOBYPASS_LIMITOFFSET_CONST_LESS_THAN_ZERO;
+                }
+            } else if (IsA(limit->limitOffset, Param)) {
+                Assert(((Param *)limit->limitOffset)->paramtype == INT8OID);
+                ret = SELECT_FOR_ANN_FUSION;
+            } else {
+                return NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT;
+            }
+        }
+        if (limit->limitCount != NULL) {
+            if (IsA(limit->limitCount, Const) && !limit->isPercent && !limit->withTies) {
+                Assert(((Const *)limit->limitCount)->consttype == INT8OID
+                || ((Const *)limit->limitCount)->consttype == FLOAT8OID);
+                if ((!limit->isPercent && DatumGetInt64(((Const *)limit->limitCount)->constvalue) < 0) || 
+                    limit->isPercent && DatumGetFloat8(((Const *)limit->limitCount)->constvalue) < 0) {
+                    return NOBYPASS_LIMITCOUNT_CONST_LESS_THAN_ZERO;
+                }
+            } else if (IsA(limit->limitCount, Param) && !limit->isPercent && !limit->withTies &&
+                (((Param *)limit->limitCount)->paramtype == INT8OID || ((Param *)limit->limitCount)->paramtype == FLOAT8OID)) {
+                ret = SELECT_FOR_ANN_FUSION;
+            } else if (IsA(limit->limitCount, FuncExpr) && !limit->isPercent && !limit->withTies) {
+                return checkFuncExpr((FuncExpr*)(limit->limitCount), params);
+            } else {
+                return NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT;
+            }
+        }
+    }
+    return ret;
+}
+
+
 bool checkDMLRelation(const Relation rel, const PlannedStmt *plannedstmt, bool isInsert, bool isPartTbl)
 {
     bool result = false;
@@ -790,6 +888,11 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
     /* check whether is only one index scan */
     PlannedStmt *plannedstmt = (PlannedStmt *)linitial(stmt_list);
     Plan *top_plan = plannedstmt->planTree;
+    /* check for ANN*/
+    if ((IsA(top_plan, Limit) && IsA(top_plan->lefttree, AnnIndexScan))
+        || IsA(top_plan, AnnIndexScan)) {
+        return getSelectAnnIndexType(top_plan, params);
+    }
 
     /* check for limit */
     if (IsA(top_plan, Limit)) {

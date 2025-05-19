@@ -40,6 +40,7 @@
 #include "executor/exec/execStream.h"
 #include "access/heapam.h"
 #include "catalog/pg_proc.h"
+#include "access/datavec/vector.h"
 
 static void printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo);
 static void printtup_20(TupleTableSlot *slot, DestReceiver *self);
@@ -1315,6 +1316,10 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                             outputstr = output_date_out(DatumGetDateADT(attr));
                         }
                         break;
+                    case F_VECTOR_OUT:
+                        outputstr = u_sess->utils_cxt.vectoroutput_buffer;
+                        PrintOutVector(outputstr, attr);
+                        break; 
                     default:
                         outputstr = OutputFunctionCall(&thisState->finfo, attr);
                         need_free = true;
