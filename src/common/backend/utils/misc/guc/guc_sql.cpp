@@ -1269,7 +1269,7 @@ static void InitSqlConfigureNamesBool()
             gettext_noop("Turns on pbe optimization: force to reuse generic plan."),
             NULL},
             &u_sess->attr.attr_sql.enable_pbe_optimization,
-            true,
+            false,
             NULL,
             NULL,
             NULL},
