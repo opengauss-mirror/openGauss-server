@@ -120,6 +120,9 @@ typedef struct BM25DocumentMetaPageData {
     BlockNumber startDocPage;
     BlockNumber lastDocPage;
     uint32 docCapacity;
+
+    BlockNumber docBlknoTable;
+    BlockNumber docBlknoInsertPage;
 } BM25DocumentMetaPageData;
 
 typedef BM25DocumentMetaPageData *BM25DocMetaPage;
@@ -287,6 +290,8 @@ public:
 };  // struct BM25Scorer
 
 /* Methods */
+extern void LogNewpageRange(Relation rel, ForkNumber forknum, BlockNumber startblk, BlockNumber endblk, bool page_std);
+extern int PlanCreateIndexWorkers(Relation heapRelation, IndexInfo *indexInfo);
 Buffer BM25NewBuffer(Relation index, ForkNumber forkNum);
 void BM25InitPage(Buffer buf, Page page);
 void BM25InitRegisterPage(Relation index, Buffer *buf, Page *page, GenericXLogState **state);
@@ -299,7 +304,9 @@ void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap);
 uint32 BM25AllocateDocId(Relation index, bool building);
 uint32 BM25AllocateTokenId(Relation index);
 void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgdl, bool building);
-BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber startBlkno, BlockNumber step);
+void RecordDocBlkno2DocBlknoTable(Relation index, BM25DocMetaPage docMetaPage,
+    BlockNumber newDocBlkno, bool building, ForkNumber forkNum);
+BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber docBlknoTable);
 bool FindHashBucket(uint32 bucketId, BM25PageLocationInfo &bucketLocation, Buffer buf, Page page);
 bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLocation, Buffer buf, Page page);
 BM25TokenizedDocData BM25DocumentTokenize(const char* doc, bool cutForSearch = false);

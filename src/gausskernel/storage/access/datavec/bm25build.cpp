@@ -31,7 +31,6 @@
 #include "access/heapam.h"
 #include "access/tableam.h"
 #include "utils/builtins.h"
-#include "access/datavec/vector.h"
 #include "access/datavec/bm25.h"
 
 #define CALLBACK_ITEM_POINTER HeapTuple hup
@@ -536,13 +535,12 @@ static void InsertDocForwardItem(Relation index, uint32 docId, BM25TokenizedDocD
     BM25CommitBuf(buf, &state, building);
 }
 
-static bool ExpandDocumentListCapacityIfNeed(Relation index, BM25DocMetaPage docMetaPage, uint32 docId,
+static void ExpandDocumentListCapacityIfNeed(Relation index, BM25DocMetaPage docMetaPage, uint32 docId,
     ForkNumber forkNum, bool building)
 {
     Buffer buf;
     Page page;
     GenericXLogState *state = nullptr;
-    bool expanded = false;
     /* start doc page */
     if (docMetaPage->docCapacity == 0) {
         buf = BM25NewBuffer(index, forkNum);
@@ -552,8 +550,10 @@ static bool ExpandDocumentListCapacityIfNeed(Relation index, BM25DocMetaPage doc
         docMetaPage->startDocPage = newblk;
         docMetaPage->lastDocPage = newblk;
         docMetaPage->docCapacity = BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
+        docMetaPage->docBlknoTable = InvalidBlockNumber;
+        docMetaPage->docBlknoInsertPage = InvalidBlockNumber;
+        RecordDocBlkno2DocBlknoTable(index, docMetaPage, newblk, building, forkNum);
         BM25CommitBuf(buf, &state, building);
-        expanded = true;
     }
     /* need expand new page */
     if (docMetaPage->docCapacity <= docId) {
@@ -566,11 +566,10 @@ static bool ExpandDocumentListCapacityIfNeed(Relation index, BM25DocMetaPage doc
             BlockNumber newblk = BufferGetBlockNumber(buf);
             docMetaPage->lastDocPage = newblk;
             docMetaPage->docCapacity += BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
-            expanded = true;
+            RecordDocBlkno2DocBlknoTable(index, docMetaPage, newblk, building, forkNum);
         }
         BM25CommitBuf(buf, &state, building);
     }
-    return expanded;
 }
 
 static void InsertDocumentItem(Relation index, uint32 docId, BM25TokenizedDocData &tokenizedDoc, ItemPointerData &ctid,
@@ -579,10 +578,9 @@ static void InsertDocumentItem(Relation index, uint32 docId, BM25TokenizedDocDat
     Buffer buf;
     Page page;
     GenericXLogState *state = nullptr;
-    BlockNumber step;
-    BlockNumber docRealBlkno;
-    BlockNumber startDocPage;
-    uint16 offset;
+    BlockNumber docBlkno;
+    BlockNumber docBlknoTable;
+    uint16 docOffset;
     Buffer metabuf;
     Page metapage;
     GenericXLogState *metaState = nullptr;
@@ -596,20 +594,20 @@ static void InsertDocumentItem(Relation index, uint32 docId, BM25TokenizedDocDat
     BM25GetPage(index, &metapage, metabuf, &metaState, building);
     docMetaPage = BM25PageGetDocMeta(metapage);
     ExpandDocumentListCapacityIfNeed(index, docMetaPage, docId, forkNum, building);
-    startDocPage = docMetaPage->startDocPage;
+    docBlknoTable = docMetaPage->docBlknoTable;
     BM25CommitBuf(metabuf, &metaState, building);
 
     InsertDocForwardItem(index, docId, tokenizedDoc, bm25EntryPages, &forwardStart, &forwardEnd, forkNum, building);
 
     /* write doc info into target blk */
-    step = docId / BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
-    offset = docId % BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
-    docRealBlkno = SeekBlocknoForDoc(index, docId, startDocPage, step);
-    buf = ReadBuffer(index, docRealBlkno);
+    docBlkno = SeekBlocknoForDoc(index, docId, docBlknoTable);
+    docOffset = docId % BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
+
+    buf = ReadBuffer(index, docBlkno);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
     BM25GetPage(index, &page, buf, &state, building);
     BM25DocumentItem *docItem =
-        (BM25DocumentItem*)((char *)page + sizeof(PageHeaderData) + offset * BM25_DOCUMENT_ITEM_SIZE);
+        (BM25DocumentItem*)((char *)page + sizeof(PageHeaderData) + docOffset * BM25_DOCUMENT_ITEM_SIZE);
     unsigned short infomask = 0 | BM25_DOCUMENT_ITEM_SIZE;
     docItem->ctid.t_tid = ctid;
     docItem->ctid.t_info = infomask;
