@@ -1794,17 +1794,134 @@ tsql_transaction_keywords:
 			| TRANSACTION
 		;
 
-tsql_opt_work_keywords:
-			WORK
-			| /*EMPTY*/								{ $$ = NULL; }
-		;
-
 tsql_TransactionStmt:
-			START TRANSACTION transaction_mode_list_or_empty	/*kernel forward compatible*/
+			ABORT_P opt_transaction
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_ROLLBACK;
+					n->options = NIL;
+					$$ = (Node *)n;
+				}
+			| START TRANSACTION transaction_mode_list_or_empty
 				{
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_START;
 					n->options = $3;
+					$$ = (Node *)n;
+				}
+			| START TRANSACTION WITH CONSISTENT SNAPSHOT
+				{
+					if (!DB_IS_CMPT(B_FORMAT)) {
+						const char* message = "WITH CONSISTENT SNAPSHOT is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("WITH CONSISTENT SNAPSHOT is supported only in B-format database."),
+								parser_errposition(@3)));
+					}
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_START;
+					n->options = NIL;
+					n->with_snapshot = true;
+					$$ = (Node *)n;
+				}
+			| BEGIN_NON_ANOYBLOCK transaction_mode_list_or_empty
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_BEGIN;
+					n->options = $2;
+					$$ = (Node *)n;
+				}
+			| COMMIT opt_transaction
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_COMMIT;
+					n->options = NIL;
+					$$ = (Node *)n;
+				}
+			| END_P opt_transaction
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_COMMIT;
+					n->options = NIL;
+					$$ = (Node *)n;
+				}
+			| ROLLBACK opt_transaction
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_ROLLBACK;
+					n->options = NIL;
+					$$ = (Node *)n;
+				}
+			| SAVEPOINT ColId
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_SAVEPOINT;
+					n->options = list_make1(makeDefElem("savepoint_name",
+														(Node *)makeString($2)));
+					$$ = (Node *)n;
+				}
+			| RELEASE SAVEPOINT ColId
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_RELEASE;
+					n->options = list_make1(makeDefElem("savepoint_name",
+														(Node *)makeString($3)));
+					$$ = (Node *)n;
+				}
+			| RELEASE ColId
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_RELEASE;
+					n->options = list_make1(makeDefElem("savepoint_name",
+														(Node *)makeString($2)));
+					$$ = (Node *)n;
+				}
+			| ROLLBACK opt_transaction TO SAVEPOINT ColId
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_ROLLBACK_TO;
+					n->options = list_make1(makeDefElem("savepoint_name",
+														(Node *)makeString($5)));
+					$$ = (Node *)n;
+				}
+			| ROLLBACK opt_transaction TO ColId
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_ROLLBACK_TO;
+					n->options = list_make1(makeDefElem("savepoint_name",
+														(Node *)makeString($4)));
+					$$ = (Node *)n;
+				}
+			| PREPARE TRANSACTION Sconst
+				{   
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_PREPARE;
+					n->gid = $3;
+					$$ = (Node *)n;
+				}
+			| COMMIT PREPARED Sconst
+				{   
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_COMMIT_PREPARED;
+					n->gid = $3;
+					n->csn = InvalidCommitSeqNo;
+					$$ = (Node *)n;
+				}
+			| COMMIT PREPARED Sconst WITH Sconst
+				{   
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_COMMIT_PREPARED;
+					n->gid = $3;
+					n->csn = strtoull($5, NULL, 10);;
+					$$ = (Node *)n;
+				}
+			| ROLLBACK PREPARED Sconst
+				{   
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_ROLLBACK_PREPARED;
+					n->gid = $3;
 					$$ = (Node *)n;
 				}
 			| BEGIN_NON_ANOYBLOCK tsql_transaction_keywords tsql_opt_transaction_name
@@ -1814,28 +1931,21 @@ tsql_TransactionStmt:
 					n->options = NIL;
 					$$ = (Node *)n;
 				}
-			| COMMIT tsql_opt_work_keywords
+			| COMMIT tsql_transaction_keywords ColId
 				{
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_COMMIT;
 					n->options = NIL;
 					$$ = (Node *)n;
 				}
-			| COMMIT tsql_transaction_keywords tsql_opt_transaction_name
+			| COMMIT TRAN
 				{
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_COMMIT;
 					n->options = NIL;
 					$$ = (Node *)n;
 				}
-			| ROLLBACK tsql_opt_work_keywords
-				{
-					TransactionStmt *n = makeNode(TransactionStmt);
-					n->kind = TRANS_STMT_ROLLBACK;
-					n->options = NIL;
-					$$ = (Node *)n;
-				}
-			| ROLLBACK tsql_transaction_keywords tsql_opt_transaction_name
+			| ROLLBACK tsql_transaction_keywords ColId
 				{
 					TransactionStmt *n = makeNode(TransactionStmt);
 					if ($3 == NULL) {
@@ -1846,6 +1956,13 @@ tsql_TransactionStmt:
 						n->options = list_make1(makeDefElem("savepoint_name",
 															(Node *)makeString($3)));
 					}
+					$$ = (Node *)n;
+				}
+			| ROLLBACK TRAN
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_ROLLBACK;
+					n->options = NIL;
 					$$ = (Node *)n;
 				}
 			| SAVE tsql_transaction_keywords ColId
