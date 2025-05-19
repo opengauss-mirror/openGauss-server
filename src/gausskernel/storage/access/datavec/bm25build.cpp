@@ -830,6 +830,7 @@ static void BM25ParallelScanAndInsert(Relation heapRel, Relation indexRel, BM25S
     indexInfo = BuildIndexInfo(indexRel);
     InitBM25BuildState(&buildstate, heapRel, indexRel, indexInfo, MAIN_FORKNUM);
     buildstate.bm25EntryPages = bm25shared->bm25EntryPages;
+    buildstate.bm25EntryPages.hashBucketCount = 0;
 
     scan = tableam_scan_begin_parallel(heapRel, &bm25shared->heapdesc);
     reltuples = tableam_index_build_scan(heapRel, indexRel, indexInfo, true, BM25BuildCallback,
@@ -990,10 +991,14 @@ void ParallelReorderMain(const BgWorkerContext *bwc)
 }
 
 static void BM25InitReorderShared(BM25ReorderShared *reorderShared, BM25BuildState *buildstate,
-    BlockNumber hashBucketsPage, uint32 reorderParallelNum, uint32 batchHashBucketCount)
+    BlockNumber hashBucketsPage, uint32 &reorderParallelNum, uint32 batchHashBucketCount)
 {
     reorderShared->startPageLocation =
         (BM25PageLocationInfo*)palloc0(sizeof(BM25PageLocationInfo) * reorderParallelNum);
+    for (uint32 idx = 0; idx < reorderParallelNum; ++idx) {
+        reorderShared->startPageLocation[idx].blkno = InvalidBlockNumber;
+        reorderShared->startPageLocation[idx].offno = InvalidOffsetNumber;
+    }
     reorderShared->batchCount = batchHashBucketCount;
     reorderShared->heaprelid = RelationGetRelid(buildstate->heap);
     reorderShared->indexrelid = RelationGetRelid(buildstate->index);
@@ -1026,6 +1031,7 @@ static void BM25InitReorderShared(BM25ReorderShared *reorderShared, BM25BuildSta
         nextblkno = BM25PageGetOpaque(cpage)->nextblkno;
         UnlockReleaseBuffer(cbuf);
     }
+    reorderParallelNum = curBatchIdx;
     return;
 }
 
