@@ -9,4 +9,4 @@
 %type <node> tsql_top_clause tsql_select_top_value
 %type <boolean> tsql_opt_ties tsql_opt_percent
 %type <str> DirectColLabel tsql_opt_transaction_name
-%type <keyword> direct_label_keyword tsql_transaction_keywords tsql_opt_work_keywords
+%type <keyword> direct_label_keyword tsql_transaction_keywords
