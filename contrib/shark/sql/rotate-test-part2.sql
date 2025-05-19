@@ -282,6 +282,22 @@ not rotate(sale_all for sale in (sale1, sale2, sale3, sale4)) as unpivot_table o
 
 set enable_ignore_case_in_dquotes off;
 
+CREATE TABLE t_not_rotate0018 (
+ProductID INT PRIMARY KEY,
+ProductName VARCHAR(50),
+Q1_Sales DECIMAL(10,2),
+Q2_Sales DECIMAL(10,2),
+Q3_Sales DECIMAL(10,2),
+Q4_Sales DECIMAL(10,2)
+);
+
+INSERT INTO t_not_rotate0018 VALUES
+(1, 'Laptop', 1500.00, 2000.00, 1800.00, 2200.00),
+(2, 'Phone', 800.00, 1200.00, 900.00, 1500.00);
+
+SELECT ProductID, ProductName, Quarter, Sales FROM t_not_rotate0018 not rotate ( Sales FOR Quarter IN (Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales) ) AS UnpivotSales WHERE UnpivotSales.ProductID = 1 ORDER BY Sales DESC;
+
+drop table t_not_rotate0018;
 
 drop table if exists t_rotate0005;
 CREATE TABLE t_rotate0005 (

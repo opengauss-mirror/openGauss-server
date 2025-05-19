@@ -492,6 +492,7 @@ unrotate_clause:
 					n->colNameList = $5;
 					n->forColName = $6;
 					n->inExprList = $7;
+					n->alias = $9;
 					$$ = n;
 				}
 		;

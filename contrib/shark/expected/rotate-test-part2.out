@@ -583,6 +583,28 @@ not rotate(sale_all for sale in (sale1, sale2, sale3, sale4)) as unpivot_table o
 (20 rows)
 
 set enable_ignore_case_in_dquotes off;
+CREATE TABLE t_not_rotate0018 (
+ProductID INT PRIMARY KEY,
+ProductName VARCHAR(50),
+Q1_Sales DECIMAL(10,2),
+Q2_Sales DECIMAL(10,2),
+Q3_Sales DECIMAL(10,2),
+Q4_Sales DECIMAL(10,2)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_not_rotate0018_pkey" for table "t_not_rotate0018"
+INSERT INTO t_not_rotate0018 VALUES
+(1, 'Laptop', 1500.00, 2000.00, 1800.00, 2200.00),
+(2, 'Phone', 800.00, 1200.00, 900.00, 1500.00);
+SELECT ProductID, ProductName, Quarter, Sales FROM t_not_rotate0018 not rotate ( Sales FOR Quarter IN (Q1_Sales, Q2_Sales, Q3_Sales, Q4_Sales) ) AS UnpivotSales WHERE UnpivotSales.ProductID = 1 ORDER BY Sales DESC;
+ productid | productname | quarter  |  sales  
+-----------+-------------+----------+---------
+         1 | Laptop      | q4_sales | 2200.00
+         1 | Laptop      | q2_sales | 2000.00
+         1 | Laptop      | q3_sales | 1800.00
+         1 | Laptop      | q1_sales | 1500.00
+(4 rows)
+
+drop table t_not_rotate0018;
 drop table if exists t_rotate0005;
 NOTICE:  table "t_rotate0005" does not exist, skipping
 CREATE TABLE t_rotate0005 (
