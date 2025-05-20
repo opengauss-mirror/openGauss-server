@@ -33,7 +33,8 @@
 #include "logger.h"
 #include "oss/include/backup.h"
 #include "oss/include/restore.h"
-
+#include <sys/types.h>
+#include <dirent.h>
 
 /* list of dirs which will not to be backuped
    it will be backuped up in external dirs  */
@@ -55,7 +56,8 @@ static uint32 stream_stop_timeout = 0;
 static time_t stream_stop_begin = 0;
 
 static const uint32 archive_timeout_deno = 5;
-
+const char *xlog_path = instance_config.dss.vglog;
+struct dirent *entry;
 /* Progress Counter */
 static int g_doneFiles = 0;
 static int g_totalFiles = 0;
@@ -491,11 +493,24 @@ static bool backup_space_check(const char* backup_path)
         return false;
     }
 
+    DIR *dir = opendir(xlog_path);
+    if (dir == NULL) {
+        elog(ERROR, "failed to open directory: %s", xlog_path);
+        return false;
+    }
+    int file_num = 0;
+    while ((entry = readdir(dir)) != NULL) {
+        if(entry->d_type == DT_REG) {
+            file_num++;
+        }
+    }
+    (void)closedir(dir);
+
     /* Get the available size of the disk */
-    disk_available_bytes = (int64)diskInfo.f_bfree * diskInfo.f_frsize;
+    disk_available_bytes = (int64)diskInfo.f_bavail * diskInfo.f_bsize;
     pretty_size(disk_available_bytes, pretty_available_bytes, lengthof(pretty_available_bytes));
     /* Calculate the total amount required for backup */
-    backup_bytes = calc_data_bytes();
+    backup_bytes = calc_data_bytes() + (file_num * 1024);
     pretty_size(backup_bytes, pretty_backup_bytes, lengthof(pretty_backup_bytes));
     elog(INFO, "The remaining disk space is: %s; The required space for backup is: %s;",
         pretty_available_bytes, pretty_backup_bytes);
