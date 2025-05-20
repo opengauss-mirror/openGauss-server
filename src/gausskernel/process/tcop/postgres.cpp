@@ -278,6 +278,7 @@ static XLogRecPtr xlogCopyStart = InvalidXLogRecPtr;
  *		decls for routines only used in this file
  * ----------------------------------------------------------------
  */
+static void exec_get_bind_message(StringInfo input_message, PqBindMessage *pqBindMessage, PreparedStatement **pstmt, CachedPlanSource** psrc);
 static int InteractiveBackend(StringInfo inBuf);
 static int interactive_getc(void);
 static int ReadCommand(StringInfo inBuf);
@@ -300,7 +301,10 @@ static void ForceModifyExpiredPwd(const char* queryString, const List* parsetree
 static void InitGlobalNodeDefinition(PlannedStmt* planstmt);
 extern void SetRemoteDestTupleReceiverParams(DestReceiver *self);
 #endif
+
+#if defined(ENABLE_MULTIPLE_NODES)
 static int getSingleNodeIdx_internal(ExecNodes* exec_nodes, ParamListInfo params);
+#endif
 extern void CancelAutoAnalyze();
 
 void EnableDoingCommandRead()
@@ -3016,7 +3020,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
                 OpFusion::getFusionType(NULL, NULL, plantree_list), oldcontext, NULL, plantree_list, NULL);
             if (opFusionObj != NULL) {
                 ((OpFusion*)opFusionObj)->setCurrentOpFusionObj((OpFusion*)opFusionObj);
-                if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, isTopLevel, NULL)) {
+                if (OpFusion::process(FUSION_EXECUTE, NULL, 0, completionTag, isTopLevel, NULL)) {
                     if (!u_sess->attr.attr_sql.enable_opfusion_reuse) {
                         OpFusion::tearDown((OpFusion*)opFusionObj);
                     }
@@ -3620,12 +3624,13 @@ static void GetParamOidFromName(char** paramTypeNames, Oid* paramTypes, int numP
  * If paramTypeNames is specified, paraTypes is filled with corresponding OIDs.
  * The caller is expected to allocate space for the paramTypes.
  */
-static void exec_parse_message(const char* query_string, /* string to execute */
+void exec_parse_message(const char* query_string, /* string to execute */
     const char* stmt_name,                               /* name for prepared stmt */
     Oid* paramTypes,                                     /* parameter types */
     char** paramTypeNames,                               /* parameter type names */
     const char* paramModes,
-    int numParams)                                       /* number of parameters */
+    int numParams,                                       /* number of parameters */
+    bool send_end_msg)                                   /* send complete msg or not */
 {
     MemoryContext unnamed_stmt_context = NULL;
     MemoryContext oldcontext;
@@ -3707,7 +3712,6 @@ static void exec_parse_message(const char* query_string, /* string to execute */
 
     if (ENABLE_DN_GPC)
         CleanSessGPCPtr(u_sess);
-
 
     is_named = (stmt_name[0] != '\0');
     if (ENABLE_GPC) {
@@ -4078,7 +4082,7 @@ pass_parsing:
                       psrc->commandTag == NULL ? "" : psrc->commandTag,
                       psrc->query_string);
     }
-    if ((!need_redirect || libpqsw_is_begin()) && t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
+    if (send_end_msg && (!need_redirect || libpqsw_is_begin()) && t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
         pq_putemptymessage('1');
     }
 
@@ -4111,6 +4115,7 @@ pass_parsing:
     gstrace_exit(GS_TRC_ID_exec_parse_message);
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
 static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, const char* stmt_name)
 {
     ParamListInfo params = NULL;
@@ -4423,7 +4428,6 @@ static int getSingleNodeIdx_internal(ExecNodes* exec_nodes, ParamListInfo params
     return idx;
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 /*
  * exec_get_ddl_params
  *     just get params info from CN
@@ -4622,21 +4626,205 @@ void exec_get_ddl_params(StringInfo input_message)
 }
 #endif
 
+void get_param_list_info(PqBindMessage* pqBindMessage, CachedPlanSource* psrc, ParamListInfo* params)
+{
+    int numParams = pqBindMessage->numParams;
+    /*
+     * Fetch parameters, if any, and store in the portal's memory context.
+     */
+    if (numParams <= 0) {
+        return;
+    }
+    int paramno;
+    Oid param_collation = GetCollationConnection();
+    int param_charset = GetCharsetConnection();
+    int numPFormats = pqBindMessage->numPFormats;
+    int16* pformats = pqBindMessage->pformats;
+
+    if (*params == NULL) {
+        *params = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + numParams * sizeof(ParamExternData));
+        /* we have static list of params, so no hooks needed */
+        (*params)->paramFetch = NULL;
+        (*params)->paramFetchArg = NULL;
+        (*params)->parserSetup = NULL;
+        (*params)->parserSetupArg = NULL;
+        (*params)->params_need_process = false;
+        (*params)->uParamInfo = DEFUALT_INFO;
+        (*params)->numParams = numParams;
+        (*params)->params_lazy_bind = false;
+    }
+
+    for (paramno = 0; paramno < numParams; paramno++) {
+        Oid ptype = psrc->param_types[paramno];
+#ifndef ENABLE_MULTIPLE_NODES			
+        char* pmode = NULL;
+        if (psrc->param_modes != NULL) {
+            pmode = &(psrc->param_modes[paramno]);
+        }
+#endif
+
+        int32 plength;
+        Datum pval;
+        bool isNull = false;
+        StringInfoData pbuf;
+        char csave;
+        int16 pformat;
+
+        plength = pqBindMessage->plength[paramno];
+        isNull = (plength == -1);
+        /* add null value process for date type */
+        if (0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+            ((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype ||
+                TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype)) {
+            isNull = true;
+        }
+
+        /*
+         * Insert into bind values support illegal characters import,
+         * and this just wroks for char type attribute.
+         */
+        u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = IsCharType(ptype);
+
+        if (!isNull) {
+            const char* pvalue = pqBindMessage->pvalue[paramno];
+
+            /*
+             * Rather than copying data around, we just set up a phony
+             * StringInfo pointing to the correct portion of the message
+             * buffer.	We assume we can scribble on the message buffer so
+             * as to maintain the convention that StringInfos have a
+             * trailing null.  This is grotty but is a big win when
+             * dealing with very large parameter strings.
+             */
+            pbuf.data = (char*)pvalue;
+            pbuf.maxlen = plength + 1;
+            pbuf.len = plength;
+            pbuf.cursor = 0;
+
+            csave = pbuf.data[plength];
+            pbuf.data[plength] = '\0';
+        } else {
+            pbuf.data = NULL; /* keep compiler quiet */
+            csave = 0;
+        }
+
+        if (numPFormats > 1) {
+            Assert(NULL != pformats);
+            pformat = pformats[paramno];
+        } else if (numPFormats > 0) {
+            Assert(NULL != pformats);
+            pformat = pformats[0];
+        } else {
+            pformat = 0; /* default = text */
+        }
+
+        if (pformat == 0) {
+            /* text mode */
+            Oid typinput;
+            Oid typioparam;
+            char* pstring = NULL;
+
+            getTypeInputInfo(ptype, &typinput, &typioparam);
+
+            /*
+             * We have to do encoding conversion before calling the
+             * typinput routine.
+             */
+            if (isNull) {
+                pstring = NULL;
+            } else if (OidIsValid(param_collation) && IsSupportCharsetType(ptype)) {
+                pstring = pg_client_to_any(pbuf.data, plength, param_charset);
+            } else {
+                pstring = pg_client_to_server(pbuf.data, plength);
+            }
+
+#ifndef ENABLE_MULTIPLE_NODES
+            if (pmode == NULL || *pmode != PROARGMODE_OUT || !enable_out_param_override()) {
+                pval = OidInputFunctionCall(typinput, pstring, typioparam, -1);
+            } else {
+                pval = (Datum)0;
+            }
+#else
+            pval = OidInputFunctionCall(typinput, pstring, typioparam, -1);
+#endif
+            /* Free result of encoding conversion, if any */
+            if (pstring != NULL && pstring != pbuf.data) {
+                pfree(pstring);
+            }
+        } else if (pformat == 1) {
+            /* binary mode */
+            Oid typreceive;
+            Oid typioparam;
+            StringInfo bufptr;
+
+            /*
+             * Call the parameter type's binary input converter
+             */
+            getTypeBinaryInputInfo(ptype, &typreceive, &typioparam);
+
+            if (isNull)
+                bufptr = NULL;
+            else
+                bufptr = &pbuf;
+
+
+#ifndef ENABLE_MULTIPLE_NODES
+            if (pmode == NULL || *pmode != PROARGMODE_OUT || !enable_out_param_override()) {
+                pval = OidReceiveFunctionCall(typreceive, bufptr, typioparam, -1);
+            } else {
+                pval = (Datum)0;
+            }
+#else
+            pval = OidReceiveFunctionCall(typreceive, bufptr, typioparam, -1);
+#endif               
+
+            /* Trouble if it didn't eat the whole buffer */
+            if (!isNull && pbuf.cursor != pbuf.len)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_BINARY_REPRESENTATION),
+                        errmsg("incorrect binary data format in bind parameter %d", paramno + 1)));
+        } else {
+            ereport(
+                ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unsupported format code: %d", pformat)));
+            pval = 0; /* keep compiler quiet */
+        }
+
+        /* Restore message buffer contents */
+        if (!isNull) {
+            pbuf.data[plength] = csave;
+        }
+
+        (*params)->params[paramno].value = pval;
+#ifndef ENABLE_MULTIPLE_NODES
+        isNull = isNull || (enable_out_param_override() && pmode != NULL && *pmode == PROARGMODE_OUT);
+#endif
+        (*params)->params[paramno].isnull = isNull;
+
+        /*
+         * We mark the params as CONST.  This ensures that any custom plan
+         * makes full use of the parameter values.
+         */
+        (*params)->params[paramno].pflags = PARAM_FLAG_CONST;
+        (*params)->params[paramno].ptype = ptype;
+        (*params)->params[paramno].tabInfo = NULL;
+
+        /* Reset the compatible illegal chars import flag */
+        u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = false;
+    }
+}
+
 /*
  * exec_bind_message
  *
  * Process a "Bind" message to create a portal from a prepared statement
  */
-static void exec_bind_message(StringInfo input_message)
+void exec_bind_message(PqBindMessage* pqBindMessage, PreparedStatement *pstmt, CachedPlanSource* psrc, bool send_end_msg, get_param_list_info_func get_param_func)
 {
-    const char* portal_name = NULL;
-    const char* stmt_name = NULL;
-    int numPFormats;
-    int16* pformats = NULL;
-    int numParams;
-    int numRFormats;
-    int16* rformats = NULL;
-    CachedPlanSource* psrc = NULL;
+    const char* portal_name = pqBindMessage->portalName;
+    const char* stmt_name = pqBindMessage->stmtName;
+    int numParams = pqBindMessage->numParams;
+    int numRFormats = pqBindMessage->numRFormats;
+    int16* rformats  = pqBindMessage->rformats;
     CachedPlan* cplan = NULL;
     Portal portal;
     char* query_string = NULL;
@@ -4655,9 +4843,6 @@ static void exec_bind_message(StringInfo input_message)
     if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && is_unique_sql_enabled())
         u_sess->unique_sql_cxt.unique_sql_start_time = GetCurrentTimestamp();
 
-    /* Get the fixed part of the message */
-    portal_name = pq_getmsgstring(input_message);
-    stmt_name = pq_getmsgstring(input_message);
     /* Check not NULL */
     if (portal_name == NULL || stmt_name == NULL) {
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("portal_name or stmt_name is null.")));
@@ -4679,26 +4864,9 @@ static void exec_bind_message(StringInfo input_message)
     }
 
     /* Find prepared statement */
-    PreparedStatement *pstmt = NULL;
-    if (stmt_name[0] != '\0') {
-        if (ENABLE_DN_GPC) {
-            psrc = u_sess->pcache_cxt.cur_stmt_psrc;
-            if (SECUREC_UNLIKELY(psrc == NULL))
-                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
-                        errmsg("dn gpc's prepared statement %s does not exist", stmt_name)));
-        } else {
-            pstmt = FetchPreparedStatement(stmt_name, true, true);
-            psrc = pstmt->plansource;
-        }
-    } else {
-        /* special-case the unnamed statement */
-        psrc = u_sess->pcache_cxt.unnamed_stmt_psrc;
-        if (SECUREC_UNLIKELY(psrc == NULL))
-            ereport(
-                ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT), errmsg("unnamed prepared statement does not exist")));
+    if (psrc == NULL) {
+        get_prepared_statement(stmt_name, &pstmt, &psrc);
     }
-
-    Assert(NULL != psrc);
 
     /*
      * Report query to various monitoring facilities.
@@ -4772,7 +4940,7 @@ static void exec_bind_message(StringInfo input_message)
                 Assert(opFusionObj != NULL);
             }
             opFusionObj->clean();
-            opFusionObj->updatePreAllocParamter(input_message);
+            opFusionObj->updatePreAllocParamter(pqBindMessage, psrc, get_param_func);
             opFusionObj->setCurrentOpFusionObj(opFusionObj);
             opFusionObj->storeFusion(portal_name);
 
@@ -4780,8 +4948,12 @@ static void exec_bind_message(StringInfo input_message)
             if (cps != NULL && cps->gplan) {
                 setCachedPlanBucketId(cps->gplan, opFusionObj->m_local.m_params);
             }
-            if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
+            /*
+             * Send BindComplete.
+             */
+            if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote && send_end_msg) {
                 pq_putemptymessage('2');
+            }
             gstrace_exit(GS_TRC_ID_exec_bind_message);
             return;
         }
@@ -4804,6 +4976,7 @@ static void exec_bind_message(StringInfo input_message)
     /* Switch back to message context */
     MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
 
+#ifdef ENABLE_MULTIPLE_NODES
     /* light proxy and not set fetch size */
     if (psrc->single_exec_node && (unsigned int)input_message->len <= SECUREC_MEM_MAX_LEN) {
         /* save the cursor in case of error */
@@ -4851,7 +5024,6 @@ static void exec_bind_message(StringInfo input_message)
             }
             lightProxy::setCurrentProxy(scn);
             lightProxy::processMsg(BIND_MESSAGE, input_message);
-
             LPROXY_DEBUG(ereport(DEBUG2,
                 (errmsg("[LIGHT PROXY] Got Bind slim: name %s, query %s", psrc->stmt_name, psrc->query_string))));
             gstrace_exit(GS_TRC_ID_exec_bind_message);
@@ -4885,26 +5057,9 @@ static void exec_bind_message(StringInfo input_message)
             }
         }
     } else
+#endif
         /* it may be not NULL if last time report error */
         lightProxy::setCurrentProxy(NULL);
-
-    /* Get the parameter format codes */
-    numPFormats = pq_getmsgint(input_message, 2);
-    if (numPFormats > 0) {
-        int i;
-
-        pformats = (int16*)palloc(numPFormats * sizeof(int16));
-        for (i = 0; i < numPFormats; i++)
-            pformats[i] = pq_getmsgint(input_message, 2);
-    }
-
-    /* Get the parameter value count */
-    numParams = pq_getmsgint(input_message, 2);
-
-    if (numPFormats > 1 && numPFormats != numParams)
-        ereport(ERROR,
-            (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                errmsg("bind message has %d parameter formats but %d parameters", numPFormats, numParams)));
 
     if (numParams != psrc->num_params)
         ereport(ERROR,
@@ -4946,13 +5101,13 @@ static void exec_bind_message(StringInfo input_message)
      * PortalDefineQuery; that would result in leaking our plancache refcount.
      */
     oldContext = MemoryContextSwitchTo(PortalGetHeapMemory(portal));
-
+#ifdef ENABLE_MULTIPLE_NODES
     /* Version control for DDL PBE */
     if (t_thrd.proc->workingVersionNum >= DDL_PBE_VERSION_NUM) {
         u_sess->parser_cxt.param_message = makeStringInfo();
         copyStringInfo(u_sess->parser_cxt.param_message, input_message);
     }
-
+#endif
     /* Copy the plan's query string into the portal */
     query_string = pstrdup(psrc->query_string);
 
@@ -4974,183 +5129,7 @@ static void exec_bind_message(StringInfo input_message)
         snapshot_set = true;
     }
 
-    /*
-     * Fetch parameters, if any, and store in the portal's memory context.
-     */
-    if (numParams > 0) {
-        int paramno;
-        Oid param_collation = GetCollationConnection();
-        int param_charset = GetCharsetConnection();
-
-        params = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + numParams * sizeof(ParamExternData));
-        /* we have static list of params, so no hooks needed */
-        params->paramFetch = NULL;
-        params->paramFetchArg = NULL;
-        params->parserSetup = NULL;
-        params->parserSetupArg = NULL;
-        params->params_need_process = false;
-        params->numParams = numParams;
-        params->uParamInfo = DEFUALT_INFO;
-        params->params_lazy_bind = false;
-
-        for (paramno = 0; paramno < numParams; paramno++) {
-            Oid ptype = psrc->param_types[paramno];
-#ifndef ENABLE_MULTIPLE_NODES
-            char* pmode = NULL;
-            if (psrc->param_modes != NULL) {
-                pmode = &(psrc->param_modes[paramno]);
-            }
-#endif
-
-            int32 plength;
-            Datum pval;
-            bool isNull = false;
-            StringInfoData pbuf;
-            char csave;
-            int16 pformat;
-
-            plength = pq_getmsgint(input_message, 4);
-            isNull = (plength == -1);
-            /* add null value process for date type */
-            if (((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype ||
-                    TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
-                0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
-                isNull = true;
-
-            /*
-             * Insert into bind values support illegal characters import,
-             * and this just wroks for char type attribute.
-             */
-            u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = IsCharType(ptype);
-
-            if (!isNull) {
-                const char* pvalue = pq_getmsgbytes(input_message, plength);
-
-                /*
-                 * Rather than copying data around, we just set up a phony
-                 * StringInfo pointing to the correct portion of the message
-                 * buffer.	We assume we can scribble on the message buffer so
-                 * as to maintain the convention that StringInfos have a
-                 * trailing null.  This is grotty but is a big win when
-                 * dealing with very large parameter strings.
-                 */
-                pbuf.data = (char*)pvalue;
-                pbuf.maxlen = plength + 1;
-                pbuf.len = plength;
-                pbuf.cursor = 0;
-
-                csave = pbuf.data[plength];
-                pbuf.data[plength] = '\0';
-            } else {
-                pbuf.data = NULL; /* keep compiler quiet */
-                csave = 0;
-            }
-
-            if (numPFormats > 1) {
-                Assert(NULL != pformats);
-                pformat = pformats[paramno];
-            } else if (numPFormats > 0) {
-                Assert(NULL != pformats);
-                pformat = pformats[0];
-            } else {
-                pformat = 0; /* default = text */
-            }
-
-            if (pformat == 0) {
-                /* text mode */
-                Oid typinput;
-                Oid typioparam;
-                char* pstring = NULL;
-
-                getTypeInputInfo(ptype, &typinput, &typioparam);
-
-                /*
-                 * We have to do encoding conversion before calling the
-                 * typinput routine.
-                 */
-                if (isNull) {
-                    pstring = NULL;
-                } else if (OidIsValid(param_collation) && IsSupportCharsetType(ptype)) {
-                    pstring = pg_client_to_any(pbuf.data, plength, param_charset);
-                } else {
-                    pstring = pg_client_to_server(pbuf.data, plength);
-                }
-
-#ifndef ENABLE_MULTIPLE_NODES
-                if (pmode == NULL || *pmode != PROARGMODE_OUT || !enable_out_param_override()) {
-                    pval = OidInputFunctionCall(typinput, pstring, typioparam, -1);
-                } else {
-                    pval = (Datum)0;
-                }
-#else
-                pval = OidInputFunctionCall(typinput, pstring, typioparam, -1);
-#endif
-                /* Free result of encoding conversion, if any */
-                if (pstring != NULL && pstring != pbuf.data)
-                    pfree(pstring);
-            } else if (pformat == 1) {
-                /* binary mode */
-                Oid typreceive;
-                Oid typioparam;
-                StringInfo bufptr;
-
-                /*
-                 * Call the parameter type's binary input converter
-                 */
-                getTypeBinaryInputInfo(ptype, &typreceive, &typioparam);
-
-                if (isNull)
-                    bufptr = NULL;
-                else
-                    bufptr = &pbuf;
-
-
-#ifndef ENABLE_MULTIPLE_NODES
-                if (pmode == NULL || *pmode != PROARGMODE_OUT || !enable_out_param_override()) {
-                    pval = OidReceiveFunctionCall(typreceive, bufptr, typioparam, -1);
-                } else {
-                    pval = (Datum)0;
-                }
-#else
-                pval = OidReceiveFunctionCall(typreceive, bufptr, typioparam, -1);
-#endif
-
-                /* Trouble if it didn't eat the whole buffer */
-                if (!isNull && pbuf.cursor != pbuf.len)
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_BINARY_REPRESENTATION),
-                            errmsg("incorrect binary data format in bind parameter %d", paramno + 1)));
-            } else {
-                ereport(
-                    ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unsupported format code: %d", pformat)));
-                pval = 0; /* keep compiler quiet */
-            }
-
-            /* Restore message buffer contents */
-            if (!isNull) {
-                pbuf.data[plength] = csave;
-            }
-
-            params->params[paramno].value = pval;
-#ifndef ENABLE_MULTIPLE_NODES
-            isNull = isNull || (enable_out_param_override() && pmode != NULL && *pmode == PROARGMODE_OUT);
-#endif
-            params->params[paramno].isnull = isNull;
-
-            /*
-             * We mark the params as CONST.  This ensures that any custom plan
-             * makes full use of the parameter values.
-             */
-            params->params[paramno].pflags = PARAM_FLAG_CONST;
-            params->params[paramno].ptype = ptype;
-            params->params[paramno].tabInfo = NULL;
-
-            /* Reset the compatible illegal chars import flag */
-            u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = false;
-        }
-    } else {
-        params = NULL;
-    }
+    get_param_func(pqBindMessage, psrc, &params);
     /* u_sess->parser_cxt.param_info is for ddl pbe. If the logic is not ddl pbe, It will not be used*/
     if (t_thrd.proc->workingVersionNum >= DDL_PBE_VERSION_NUM) {
         u_sess->parser_cxt.param_info = (void*)params;
@@ -5158,18 +5137,6 @@ static void exec_bind_message(StringInfo input_message)
 
     /* Done storing stuff in portal's context */
     MemoryContextSwitchTo(oldContext);
-
-    /* Get the result format codes */
-    numRFormats = pq_getmsgint(input_message, 2);
-    if (numRFormats > 0) {
-        int i;
-
-        rformats = (int16*)palloc(numRFormats * sizeof(int16));
-        for (i = 0; i < numRFormats; i++)
-            rformats[i] = pq_getmsgint(input_message, 2);
-    }
-
-    pq_getmsgend(input_message);
 
     psrc->cursor_options |= CURSOR_OPT_SPQ_OK;
     /*
@@ -5213,8 +5180,6 @@ static void exec_bind_message(StringInfo input_message)
             if (snapshot_set)
                 PopActiveSnapshot();
 
-            if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
-                pq_putemptymessage('2');
             gstrace_exit(GS_TRC_ID_exec_bind_message);
             return;
         }
@@ -5247,8 +5212,9 @@ static void exec_bind_message(StringInfo input_message)
     /*
      * Send BindComplete.
      */
-    if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote && !libpqsw_is_end())
+    if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote && !libpqsw_is_end() && send_end_msg) {
         pq_putemptymessage('2');
+    }
 
     /*
      * Emit duration logging if appropriate.
@@ -5292,7 +5258,7 @@ static void exec_bind_message(StringInfo input_message)
  *
  * Process an "Execute" message for a portal
  */
-static void exec_execute_message(const char* portal_name, long max_rows)
+void exec_execute_message(const char* portal_name, long max_rows, bool send_end_msg)
 {
     CommandDest dest;
     DestReceiver* receiver = NULL;
@@ -5307,6 +5273,38 @@ static void exec_execute_message(const char* portal_name, long max_rows)
     bool execute_is_fetch = false;
     bool was_logged = false;
     char msec_str[PRINTF_DST_MAX];
+
+    bool isQueryCompleted = false;
+    if (!u_sess->attr.attr_storage.phony_autocommit) {
+        BeginTxnForAutoCommitOff();
+    }
+
+    if (OpFusion::process(FUSION_EXECUTE, portal_name, max_rows, completionTag, true, &isQueryCompleted)) {
+        if(isQueryCompleted) {
+            CommandCounterIncrement();
+            EndCommand(completionTag, (CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
+        } else {
+            if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote && send_end_msg) {
+                pq_putemptymessage('s');
+            }
+        }
+        t_thrd.postgres_cxt.debug_query_string = NULL;
+        t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
+        t_thrd.storage_cxt.timer_continued = {0, 0};
+        if (MEMORY_TRACKING_QUERY_PEAK)
+            ereport(LOG, (errmsg("execute opfusion,  peak memory %ld(kb)",
+                                 (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024))));
+        return;
+    }
+
+    /* Set statement_timestamp() */
+    SetCurrentStatementStartTimestamp();
+
+    pgstatCountSQL4SessionLevel();
+#ifdef USE_RETRY_STUB
+    if (IsStmtRetryEnabled())
+        u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
+#endif
 
     gstrace_entry(GS_TRC_ID_exec_execute_message);
     /* Adjust destination to tell printtup.c what to do */
@@ -5519,8 +5517,9 @@ static void exec_execute_message(const char* portal_name, long max_rows)
         u_sess->xact_cxt.pbe_execute_complete = true;
     } else {
         /* Portal run not complete, so send PortalSuspended */
-        if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
+        if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote && send_end_msg) {
             pq_putemptymessage('s');
+        }
 
         u_sess->xact_cxt.pbe_execute_complete = false;
         /* when only set maxrows, we don't need to set pbe_execute_complete flag. */
@@ -9827,7 +9826,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_getmsgend(&input_message);
                 statement_init_metric_context();
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
-                exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
+                exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams, true);
                 if (ENABLE_REMOTE_EXECUTE && (libpqsw_redirect() || libpqsw_get_set_command() || libpqsw_command_is_prepare()) &&
                     !libpqsw_only_localrun()) {
                     get_redirect_manager()->push_message(firstchar,
@@ -9865,7 +9864,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  * the field extraction out-of-line
                  */
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
-                exec_bind_message(&input_message);
+
+                PqBindMessage pqBindMessage;
+                PreparedStatement* pstmt = NULL;
+                CachedPlanSource* psrc = NULL;
+                exec_get_bind_message(&input_message, &pqBindMessage, &pstmt, &psrc);
+                exec_bind_message(&pqBindMessage, pstmt, psrc, true, get_param_list_info);
             }  break;
 
             case 'E': /* execute */
@@ -9884,48 +9888,16 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     break;
                 }
 
-                char* completionTag = (char*)palloc0(COMPLETION_TAG_BUFSIZE * sizeof(char));
                 if (u_sess->exec_cxt.CurrentOpFusionObj != NULL && IS_SINGLE_NODE) {
                     if (IS_UNIQUE_SQL_TRACK_TOP) {
                         SetIsTopUniqueSQL(true);
                     }
                 }
-                bool isQueryCompleted = false;
-                if (!u_sess->attr.attr_storage.phony_autocommit) {
-                    BeginTxnForAutoCommitOff();
-                }
-                if (OpFusion::process(FUSION_EXECUTE, &input_message, completionTag, true, &isQueryCompleted)) {
-                    if(isQueryCompleted) {
-                        CommandCounterIncrement();
-                        EndCommand(completionTag, (CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
-                    } else {
-                        if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
-                            pq_putemptymessage('s');
-                    }
-                    pfree_ext(completionTag);
-                    t_thrd.postgres_cxt.debug_query_string = NULL;
-                    t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
-                    t_thrd.storage_cxt.timer_continued = {0, 0};
-                    if (MEMORY_TRACKING_QUERY_PEAK)
-                        ereport(LOG, (errmsg("execute opfusion,  peak memory %ld(kb)",
-                                             (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024))));
-                    break;
-                }
-                pfree_ext(completionTag);
-
-                /* Set statement_timestamp() */
-                SetCurrentStatementStartTimestamp();
-
                 portal_name = pq_getmsgstring(&input_message);
                 max_rows = pq_getmsgint(&input_message, 4);
                 pq_getmsgend(&input_message);
-
-                pgstatCountSQL4SessionLevel();
-#ifdef USE_RETRY_STUB
-                if (IsStmtRetryEnabled())
-                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
-#endif
-                exec_execute_message(portal_name, max_rows);
+                
+                exec_execute_message(portal_name, max_rows, true);
             } break;
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -10091,7 +10063,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     break;
                 }
 
-                if (OpFusion::process(FUSION_DESCRIB, &input_message, NULL, false, NULL)) {
+                if (OpFusion::process(FUSION_DESCRIB, NULL, 0, NULL, false, NULL)) {
                     break;
                 }
 
@@ -11318,7 +11290,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
                 setCachedPlanBucketId(cps->gplan, params);
             }
 
-            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, true, NULL)) {
+            if (OpFusion::process(FUSION_EXECUTE, NULL, 0, completionTag, true, NULL)) {
                 CommandCounterIncrement();
                 return;
             }
@@ -11396,7 +11368,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
             ((OpFusion*)psrc->opFusionObj)->CopyFormats(rformats, numRFormats);
             ((OpFusion*)psrc->opFusionObj)->storeFusion("");
 
-            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, true, NULL)) {
+            if (OpFusion::process(FUSION_EXECUTE, NULL, 0, completionTag, true, NULL)) {
                 CommandCounterIncrement();
                 return;
             }
@@ -12663,4 +12635,105 @@ void ResetInterruptCxt()
 
     t_thrd.int_cxt.CritSectionCount = 0;
 
+}
+
+void get_prepared_statement(const char *stmt_name, PreparedStatement **pstmt, CachedPlanSource** psrc)
+{
+    *psrc = NULL;
+    *pstmt = NULL;
+    if (stmt_name[0] != '\0') {
+        if (ENABLE_DN_GPC) {
+            *psrc = u_sess->pcache_cxt.cur_stmt_psrc;
+            if (SECUREC_UNLIKELY(*psrc == NULL))
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+                        errmsg("dn gpc's prepared statement %s does not exist", stmt_name)));
+        } else {
+            *pstmt = FetchPreparedStatement(stmt_name, true, true);
+            *psrc = (*pstmt)->plansource;
+        }
+    } else {
+        /* special-case the unnamed statement */
+        *psrc = u_sess->pcache_cxt.unnamed_stmt_psrc;
+        if (SECUREC_UNLIKELY(*psrc == NULL))
+            ereport(
+                ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT), errmsg("unnamed prepared statement does not exist")));
+    }
+    Assert(NULL != *psrc);
+}
+
+void exec_get_bind_message(StringInfo input_message, PqBindMessage *pqBindMessage, PreparedStatement **pstmt, CachedPlanSource** psrc)
+{
+    const char *portalName = pq_getmsgstring(input_message);
+    const char *stmtName = pq_getmsgstring(input_message);
+    int numPFormats = pq_getmsgint(input_message, 2);
+    int16 *pformats = NULL;
+    int numParams = 0;
+    int *plength = NULL;
+    const char **pvalue = NULL;
+    int numRFormats = 0;
+    int16 *rformats = NULL;
+
+    if (numPFormats > 0) {
+        pformats = (int16*)palloc(numPFormats * sizeof(int16));
+        for (int i = 0; i < numPFormats; i++) {
+            pformats[i] = pq_getmsgint(input_message, 2);
+        }
+    }
+    MemoryContext oldCxt = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
+    /* Get the parameter value count */
+    numParams = pq_getmsgint(input_message, 2);
+
+    if (unlikely(numPFormats > 1 && numPFormats != numParams)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                errmsg("bind message has %d parameter formats but %d parameters", numPFormats, numParams)));
+    }
+
+    if (DB_IS_CMPT(A_FORMAT)) {
+        get_prepared_statement(stmtName, pstmt, psrc);
+    }
+
+    if (numParams > 0) {
+        plength = (int*)palloc(sizeof(int) * numParams);
+        pvalue = (const char**)palloc(sizeof(char*) * numParams);
+        bool isNull;
+        for (int paramno = 0; paramno < numParams; paramno++) {
+            plength[paramno] = pq_getmsgint(input_message, 4);
+            isNull = (plength[paramno] == -1);
+            if (DB_IS_CMPT(A_FORMAT)) {
+                Oid ptype = (*psrc)->param_types[paramno];
+                /* add null value process for date type */
+                if (0 == plength[paramno] && ((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype ||
+                        TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype)) {
+                    isNull = true;
+                }
+            }
+            if (!isNull) {
+                pvalue[paramno] = pq_getmsgbytes(input_message, plength[paramno]);
+            } else {
+                pvalue[paramno] = NULL;
+            }
+        }
+    }
+
+    numRFormats = pq_getmsgint(input_message, 2);
+    if (numRFormats > 0) {
+        rformats = (int16*)palloc(numRFormats * sizeof(int16));
+        for (int i = 0; i < numRFormats; i++) {
+            rformats[i] = pq_getmsgint(input_message, 2);
+        }
+    }
+    pq_getmsgend(input_message);
+
+    MemoryContextSwitchTo(oldCxt);
+
+    pqBindMessage->portalName = portalName;
+    pqBindMessage->stmtName = stmtName;
+    pqBindMessage->numPFormats = numPFormats;
+    pqBindMessage->pformats = pformats;
+    pqBindMessage->numParams = numParams;
+    pqBindMessage->plength = plength;
+    pqBindMessage->pvalue = pvalue;
+    pqBindMessage->numRFormats = numRFormats;
+    pqBindMessage->rformats = rformats;
 }

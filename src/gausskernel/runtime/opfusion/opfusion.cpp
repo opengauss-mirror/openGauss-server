@@ -452,21 +452,22 @@ bool OpFusion::executeEnd(const char *portal_name, bool *isQueryCompleted, long 
     return has_completed;
 }
 
-void OpFusion::fusionExecute(StringInfo msg, char *completionTag, bool isTopLevel, bool *isQueryCompleted)
+void OpFusion::fusionExecute(const char* portalName, long maxRows, char *completionTag, bool isTopLevel,
+    bool *isQueryCompleted)
 {
     long max_rows = FETCH_ALL;
     bool completed = false;
     const char *portal_name = NULL;
 
-    /* msg is null means 'U' message, need fetch all. */
-    if (msg != NULL) {
+    /* portalName is null means 'U' message, need fetch all. */
+    if (portalName != NULL) {
         /* 'U' message and simple query has already assign value to debug_query_string. */
         if (u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_psrc != NULL) {
             t_thrd.postgres_cxt.debug_query_string =
                 u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_psrc->query_string;
         }
-        portal_name = pq_getmsgstring(msg);
-        max_rows = (long)pq_getmsgint(msg, 4);
+        portal_name = portalName;
+        max_rows = maxRows;
         if (max_rows <= 0)
             max_rows = FETCH_ALL;
         /* log_statement only support for PBE msg */
@@ -530,10 +531,11 @@ void OpFusion::fusionExecute(StringInfo msg, char *completionTag, bool isTopLeve
     UpdateSingleNodeByPassUniqueSQLStat(isTopLevel);
 }
 
-bool OpFusion::process(int op, StringInfo msg, char *completionTag, bool isTopLevel, bool *isQueryCompleted)
+bool OpFusion::process(int op, const char* portalName, long maxRows, char* completionTag, bool isTopLevel,
+    bool* isQueryCompleted)
 {
-    if (op == FUSION_EXECUTE && msg != NULL)
-        refreshCurFusion(msg);
+    if (op == FUSION_EXECUTE && portalName != NULL)
+        refreshCurFusion(portalName);
 
     bool res = false;
     if (u_sess->exec_cxt.CurrentOpFusionObj == NULL) {
@@ -542,12 +544,13 @@ bool OpFusion::process(int op, StringInfo msg, char *completionTag, bool isTopLe
 
     switch (op) {
         case FUSION_EXECUTE: {
-            u_sess->exec_cxt.CurrentOpFusionObj->fusionExecute(msg, completionTag, isTopLevel, isQueryCompleted);
+            u_sess->exec_cxt.CurrentOpFusionObj->fusionExecute(portalName, maxRows, completionTag, isTopLevel,
+                isQueryCompleted);
             break;
         }
 
         case FUSION_DESCRIB: {
-            u_sess->exec_cxt.CurrentOpFusionObj->describe(msg);
+            u_sess->exec_cxt.CurrentOpFusionObj->describe();
             break;
         }
 
@@ -781,188 +784,19 @@ void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPla
     return opfusionObj;
 }
 
-void OpFusion::updatePreAllocParamter(StringInfo input_message)
+void OpFusion::updatePreAllocParamter(PqBindMessage* pqBindMessage, CachedPlanSource* psrc,
+    get_param_list_info_func get_param_func)
 {
     /* Switch back to message context */
     MemoryContext old_context = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
-    int num_pformats;
-    int16 *pformats = NULL;
-    int num_params;
-    int num_rformats;
-    int paramno;
-    ParamListInfo params = m_local.m_params;
-    /* Get the parameter format codes */
-    num_pformats = pq_getmsgint(input_message, 2);
-    if (num_pformats > 0) {
-        int i;
-
-        pformats = (int16 *)palloc(num_pformats * sizeof(int16));
-        for (i = 0; i < num_pformats; i++) {
-            pformats[i] = pq_getmsgint(input_message, 2);
-        }
-    }
-
-    /* Get the parameter value count */
-    num_params = pq_getmsgint(input_message, 2);
-    if (unlikely(num_params != m_global->m_paramNum)) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT), errmsg("unmatched parameter number")));
-    }
+    get_param_func(pqBindMessage, psrc, &m_local.m_params);
     (void)MemoryContextSwitchTo(m_local.m_tmpContext);
-    if (num_params > 0) {
-        Oid param_collation = GetCollationConnection();
-        int param_charset = GetCharsetConnection();
-        for (paramno = 0; paramno < num_params; paramno++) {
-            Oid ptype = m_global->m_psrc->param_types[paramno];
-            int32 plength;
-            Datum pval;
-            bool isNull = false;
-            StringInfoData pbuf;
-            char csave;
-            int16 pformat;
-            plength = pq_getmsgint(input_message, 4);
-            isNull = (plength == -1);
-            /* add null value process for date type */
-            if (((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype ||
-                TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
-                plength == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
-                isNull = true;
-            }
-
-            /*
-             * Insert into bind values support illegal characters import,
-             * and this just wroks for char type attribute.
-             */
-            u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = IsCharType(ptype);
-
-            if (!isNull) {
-                const char *pvalue = pq_getmsgbytes(input_message, plength);
-
-                /*
-                 * Rather than copying data around, we just set up a phony
-                 * StringInfo pointing to the correct portion of the message
-                 * buffer.    We assume we can scribble on the message buffer so
-                 * as to maintain the convention that StringInfos have a
-                 * trailing null.  This is grotty but is a big win when
-                 * dealing with very large parameter strings.
-                 */
-                pbuf.data = (char *)pvalue;
-                pbuf.maxlen = plength + 1;
-                pbuf.len = plength;
-                pbuf.cursor = 0;
-
-                csave = pbuf.data[plength];
-                pbuf.data[plength] = '\0';
-            } else {
-                pbuf.data = NULL; /* keep compiler quiet */
-                csave = 0;
-            }
-
-            if (num_pformats > 1) {
-                Assert(pformats != NULL);
-                pformat = pformats[paramno];
-            } else if (pformats != NULL) {
-                Assert(pformats != NULL);
-                pformat = pformats[0];
-            } else {
-                pformat = 0; /* default = text */
-            }
-
-            if (pformat == 0) {
-                /* text mode */
-                Oid typinput;
-                Oid typioparam;
-                char *pstring = NULL;
-
-                getTypeInputInfo(ptype, &typinput, &typioparam);
-
-                /*
-                 * We have to do encoding conversion before calling the
-                 * typinput routine.
-                 */
-                if (isNull) {
-                    pstring = NULL;
-                } else if (OidIsValid(param_collation) && IsSupportCharsetType(ptype)) {
-                    pstring = pg_client_to_any(pbuf.data, plength, param_charset);
-                } else {
-                    pstring = pg_client_to_server(pbuf.data, plength);
-                }
-
-                pval = OidInputFunctionCall(typinput, pstring, typioparam, -1);
-
-                /* Free result of encoding conversion, if any */
-                if (pstring != NULL && pstring != pbuf.data) {
-                    pfree(pstring);
-                }
-            } else if (pformat == 1) {
-                /* binary mode */
-                Oid typreceive;
-                Oid typioparam;
-                StringInfo bufptr;
-
-                /*
-                 * Call the parameter type's binary input converter
-                 */
-                getTypeBinaryInputInfo(ptype, &typreceive, &typioparam);
-
-                if (isNull) {
-                    bufptr = NULL;
-                } else {
-                    bufptr = &pbuf;
-                }
-
-                pval = OidReceiveFunctionCall(typreceive, bufptr, typioparam, -1);
-
-                /* Trouble if it didn't eat the whole buffer */
-                if (!isNull && pbuf.cursor != pbuf.len) {
-                    ereport(ERROR, (errcode(ERRCODE_INVALID_BINARY_REPRESENTATION),
-                        errmsg("incorrect binary data format in bind parameter %d", paramno + 1)));
-                }
-            } else {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unsupported format code: %d", pformat)));
-                pval = 0; /* keep compiler quiet */
-            }
-
-            /* Restore message buffer contents */
-            if (!isNull) {
-                pbuf.data[plength] = csave;
-            }
-
-            params->params[paramno].value = pval;
-            params->params[paramno].isnull = isNull;
-
-            /*
-             * We mark the params as CONST.  This ensures that any custom plan
-             * makes full use of the parameter values.
-             */
-            params->params[paramno].pflags = PARAM_FLAG_CONST;
-            params->params[paramno].ptype = ptype;
-            params->params[paramno].tabInfo = NULL;
-
-            /* Reset the compatible illegal chars import flag */
-            u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = false;
-        }
-    }
-
-    int16 *rformats = NULL;
-    MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
-    /* Get the result format codes */
-    num_rformats = pq_getmsgint(input_message, 2);
-    if (num_rformats > 0) {
-        int i;
-        rformats = (int16 *)palloc(num_rformats * sizeof(int16));
-        for (i = 0; i < num_rformats; i++) {
-            rformats[i] = pq_getmsgint(input_message, 2);
-        }
-    }
-    CopyFormats(rformats, num_rformats);
-    pq_getmsgend(input_message);
-    pfree_ext(rformats);
+    CopyFormats(pqBindMessage->rformats, pqBindMessage->numRFormats);
     m_local.m_has_init_param = true;
     MemoryContextSwitchTo(old_context);
 }
 
-void OpFusion::describe(StringInfo msg)
+void OpFusion::describe()
 {
     if (m_global->m_psrc->resultDesc != NULL) {
         StringInfoData buf;
@@ -1143,8 +977,13 @@ void OpFusion::setReceiver()
     if (!m_global->m_is_pbe_query || u_sess->param_cxt.use_parame) {
         StringInfoData buf = ((DR_printtup *)m_local.m_receiver)->buf;
         initStringInfo(&buf);
-        SendRowDescriptionMessage(&buf, m_global->m_tupDesc, m_global->m_planstmt->planTree->targetlist,
-            m_local.m_rformats);
+        if (m_local.m_receiver->sendRowDesc != NULL) {
+            (*m_local.m_receiver->sendRowDesc)(&buf, m_global->m_tupDesc, m_global->m_planstmt->planTree->targetlist,
+                m_local.m_rformats);
+        } else {
+            SendRowDescriptionMessage(&buf, m_global->m_tupDesc, m_global->m_planstmt->planTree->targetlist,
+                m_local.m_rformats);
+        }
     }
 }
 
@@ -1344,16 +1183,13 @@ void OpFusion::removeFusionFromHtab(const char *portalname)
     }
 }
 
-void OpFusion::refreshCurFusion(StringInfo msg)
+void OpFusion::refreshCurFusion(const char *portalName)
 {
     OpFusion *opfusion = NULL;
-    int oldCursor = msg->cursor;
-    const char *portal_name = pq_getmsgstring(msg);
-    if (portal_name[0] != '\0') {
-        opfusion = OpFusion::locateFusion(portal_name);
+    if (portalName[0] != '\0') {
+        opfusion = OpFusion::locateFusion(portalName);
         OpFusion::setCurrentOpFusionObj(opfusion);
     }
-    msg->cursor = oldCursor;
 }
 
 static void ResetOpfusionExecutorState(EState* estate)
