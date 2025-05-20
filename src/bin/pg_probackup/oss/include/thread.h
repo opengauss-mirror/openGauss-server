@@ -18,7 +18,7 @@
 
 /* Constants Definition */
 
-#define SENDER_BUFFER_SIZE 268435456 /* 256 * 1024 * 1024 Bytes, 256MB*/
+constexpr int SENDER_BUFFER_SIZE = 536870912; /* 512 * 1024 * 1024 Bytes, 512MB */
 #define READER_THREAD_FILE_COUNT 8
 #define FILE_BUFFER_SIZE 8388608 /* 8 * 1024 * 1024, 8MB */
 #define WAIT_FOR_STATE_CHANGE_TIME 100000 /* 100 ms*/

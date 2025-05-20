@@ -134,7 +134,7 @@ void closeFileAppender(FileAppender* appender)
     header.crc = 0;
     header.external_dir_num = 0;
     header.file_type = DEV_TYPE_INVALID;
-    ((BufferCxt *)appender->filePtr)->fileEnd = true;
+    ((BufferCxt *)appender->filePtr)->fileEnd.store(true);
     writeHeader(&header, appender);
 }
 

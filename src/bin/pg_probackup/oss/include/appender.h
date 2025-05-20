@@ -44,7 +44,7 @@ typedef struct FileAppenderSegDescriptor
 #define READ_BUFFER_BLOCK_COUNT 2
 #define APPEND_FILENAME_END_SIZE 10
 #define APPEND_FILENAME_END_DIGIT 6
-#define APPEND_FILE_MAX_SIZE 536870912 // 536870912, 512MB; 1073741824, 1GB
+constexpr int APPEND_FILE_MAX_SIZE = 1073741824; // 1073741824, 1GB
 #define APPEND_FILE_HEADER_SIZE (sizeof(FileAppenderSegHeader))
 
 /* API Function */

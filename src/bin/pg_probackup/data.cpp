@@ -2836,14 +2836,12 @@ get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, b
     if (current.media_type == MEDIA_TYPE_OSS) {
         pthread_lock(&(hdr_map->mutex));
         restoreConfigFile(hdr_map->path);
-        pthread_mutex_unlock(&(hdr_map->mutex));
     }
-
     in = fopen(hdr_map->path, PG_BINARY_R);
-
     if (!in)
     {
         elog(strict ? ERROR : WARNING, "Cannot open header file1 \"%s\": %s", hdr_map->path, strerror(errno));
+        pthread_mutex_unlock(&(hdr_map->mutex));
         return NULL;
     }
     /* disable buffering for header file */
@@ -2923,6 +2921,7 @@ get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, b
 
     if (current.media_type == MEDIA_TYPE_OSS) {
         remove(hdr_map->path);
+        pthread_mutex_unlock(&(hdr_map->mutex));
     }
 
     return headers;

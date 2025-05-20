@@ -88,12 +88,12 @@ void Oss::GetObject(const char* from_bucket, const char* object_key, void* fileP
     while (!ss.eof()) {
         size_t readlen = ss.read(buffer, BUFSIZE).gcount();
         if (readlen < BUFSIZE) {
-            file->fileEnd = true;
+            file->fileEnd.store(true);
         }
         if (writeToBuffer(buffer, readlen, file) != readlen) {
             elog(ERROR, "GetObject: write to buffer failed.");
         }
-        if (file->earlyExit) {
+        if (file->earlyExit.load()) {
             break;
         }
     }

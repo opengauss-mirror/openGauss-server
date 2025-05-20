@@ -18,13 +18,15 @@ void initBufferCxt(BufferCxt* cxt, size_t bufferSize)
     cxt->bufNum = bufnum;
     cxt->bufHeader = (BufferDesc*)palloc(sizeof(BufferDesc) * bufnum);
     cxt->bufData = (char*)palloc(BUFSIZE * bufnum);
-    cxt->fileEnd = false;
     cxt->fileNum = -1;
     cxt->producerIdx = 0;
     cxt->producerIdxCache = 0;
     cxt->consumerIdx = 0;
     cxt->consumerIdxCache = 0;
-    cxt->earlyExit = false;
+    cxt->fileEnd.store(false);
+    cxt->earlyExit.store(false);
+    cxt->producerCount.store(0);
+    cxt->consumerCount.store(0);
     if (cxt->bufHeader == NULL || cxt->bufData == NULL) {
         pfree_ext(cxt->bufHeader);
         pfree_ext(cxt->bufData);
@@ -61,10 +63,16 @@ BufferDesc* getNextFreeWriteBuffer(BufferCxt* cxt)
         }
     }
     buff = &(cxt->bufHeader[producerIdx]);
-    if (testBufferFlag(buff, BUFF_FLAG_FILE_FINISHED | BUFF_FLAG_FILE_CLOSED)) {
-        cxt->producerIdx.store(nextIdx, std::memory_order_release);
+    if (cxt->producerCount.load() > cxt->consumerCount.load() && testBufferFlag(buff, BUFF_FLAG_FILE_USED)) {
+        pg_usleep(WAIT_FOR_BUFF_SLEEP_TIME);
         return NULL;
     }
+    if (testBufferFlag(buff, BUFF_FLAG_FILE_FINISHED | BUFF_FLAG_FILE_CLOSED)) {
+        cxt->producerIdx.store(nextIdx, std::memory_order_release);
+        cxt->producerCount.fetch_add(1);
+        return NULL;
+    }
+    setBufferFileId(buff, cxt->fileId.load());
     return buff;
 }
 
@@ -72,7 +80,6 @@ BufferDesc* tryGetNextFreeWriteBuffer(BufferCxt* cxt)
 {
     BufferDesc* buff = NULL;
     while (!(buff = getNextFreeWriteBuffer(cxt))) {
-        pg_usleep(WAIT_FOR_BUFF_SLEEP_TIME);
         continue;
     }
     if (buffFreeLen(buff) != 0) {
@@ -101,6 +108,7 @@ BufferDesc* getNextFreeReadBuffer(BufferCxt* cxt)
     }
     const size_t next = (consumerIdx + 1) % buffNum(cxt);
     cxt->consumerIdx.store(next, std::memory_order_release);
+    cxt->consumerCount.fetch_add(1);
     return buff;
 }
 
@@ -108,10 +116,10 @@ BufferDesc* tryGetNextFreeReadBuffer(BufferCxt* cxt)
 {
     BufferDesc* buff = NULL;
     while (!(buff = getNextFreeReadBuffer(cxt))) {
-        pg_usleep(WAIT_FOR_BUFF_SLEEP_TIME);
+        continue;
     }
     /* the buffer is ready */
-    if (buff->usedLen != 0) {
+    if (buffUsedLen(buff) != 0) {
         return buff;
     }
     return tryGetNextFreeReadBuffer(cxt);
@@ -140,7 +148,7 @@ size_t writeToBuffer(const char* data, size_t len, void* fp)
         if (buffFreeLen(buff) == 0) {
             markBufferFlag(buff, BUFF_FLAG_FILE_FINISHED);
         }
-        if ((remainingLen == 0 && cxt->fileEnd)) {
+        if ((remainingLen == 0 && cxt->fileEnd.load())) {
             markBufferFlag(buff, BUFF_FLAG_FILE_CLOSED);
         }
     }
@@ -159,18 +167,17 @@ void* openWriteBufferFile(const char* filename, const char* mode)
     BufferCxt* buffCxt = current.sender_cxt->bufferCxt;
     BufferDesc* buff = NULL;
     SendFileInfo* fileInfo = NULL;
+    int32 fileId = -1;
     fileInfo = (SendFileInfo*)palloc(sizeof(SendFileInfo));
     if (fileInfo == NULL) {
         elog(ERROR, "file info allocate failed: out of memory");
     }
     fileInfo->filename = pgut_strdup(filename);
+    pthread_spin_lock(&current.sender_cxt->lock);
     parray_append(current.filesinfo, fileInfo);
-    buffCxt->fileEnd = false;
-    buff = tryGetNextFreeWriteBuffer(buffCxt);
-    if (buff == NULL) {
-        elog(ERROR, "Failed to open buff file: %s", fileInfo->filename);
-    }
-    markBufferFlag(buff, BUFF_FLAG_FILE_OPENED);
-    buff->fileId = parray_num(current.filesinfo) - 1;
+    fileId = parray_num(current.filesinfo) - 1;
+    pthread_spin_unlock(&current.sender_cxt->lock);
+    buffCxt->fileId.store(fileId);
+    buffCxt->fileEnd.store(false);
     return buffCxt;
 }
