@@ -543,29 +543,22 @@ static void DocIdsGetHeapCtids(Relation index, BM25EntryPages &entryPages, BM25S
     buf = ReadBuffer(index, entryPages.documentMetaPage);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     BM25DocMetaPage docMetaPage = BM25PageGetDocMeta(BufferGetPage(buf));
-    curBlkno = docMetaPage->startDocPage;
+    curBlkno = docMetaPage->docBlknoTable;
     UnlockReleaseBuffer(buf);
 
-    uint32 curDocCapacity = 0;
-    buf = ReadBuffer(index, curBlkno);
-    LockBuffer(buf, BUFFER_LOCK_SHARE);
-    page = BufferGetPage(buf);
-    curDocCapacity += BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
     for (int i = 0; i < so->candNums; ++i) {
         curdDocId = so->candDocs[i].docId;
         if (curdDocId == BM25_INVALID_DOC_ID) {
             continue;
         }
+
+        BlockNumber docBlkno = SeekBlocknoForDoc(index, curdDocId, curBlkno);
         uint16 offset = curdDocId % BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
-        while (curDocCapacity <= curdDocId) {
-            curBlkno = BM25PageGetOpaque(page)->nextblkno;
-            UnlockReleaseBuffer(buf);
-            Assert(BlockNumberIsValid(curBlkno));
-            buf = ReadBuffer(index, curBlkno);
-            LockBuffer(buf, BUFFER_LOCK_SHARE);
-            page = BufferGetPage(buf);
-            curDocCapacity += BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
-        }
+        Assert(BlockNumberIsValid(docBlkno));
+        buf = ReadBuffer(index, docBlkno);
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        page = BufferGetPage(buf);
+
         BM25DocumentItem *docItem = (BM25DocumentItem*)((char *)page + sizeof(PageHeaderData) +
             offset * BM25_DOCUMENT_ITEM_SIZE);
         if (!docItem->isActived) {
@@ -573,8 +566,8 @@ static void DocIdsGetHeapCtids(Relation index, BM25EntryPages &entryPages, BM25S
             elog(ERROR, "Read invalid doc.");
         }
         so->candDocs[i].heapCtid = docItem->ctid.t_tid;
+        UnlockReleaseBuffer(buf);
     }
-    UnlockReleaseBuffer(buf);
     qsort(so->candDocs, (size_t)so->candNums, sizeof(BM25ScanData), CompareBM25ScanDataByScore);
 }
 
@@ -749,6 +742,9 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
     BM25MetaPageData meta;
     BM25GetMetaPageInfo(scan->indexRelation, &meta);
     BM25ScanOpaque so = (BM25ScanOpaque)scan->opaque;
+    if (meta.documentCount == 0) {
+        return false;
+    }
 
     bool needSearch = CheckIfNeedExpandSearch(so);
     if (needSearch) {
