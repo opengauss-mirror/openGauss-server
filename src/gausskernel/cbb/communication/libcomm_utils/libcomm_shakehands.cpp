@@ -329,7 +329,7 @@ void gs_r_close_logic_connection(struct c_mailbox* cmailbox, int close_reason, F
         securec_check(ss_rc, "\0", "\0");
         ss_rc = sprintf_s(msg->nodename, NAMEDATALEN, "%d_%s",
                           cmailbox->shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
-        securec_check(ss_rc, "\0", "\0");
+        securec_check_ss_c(ss_rc, "\0", "\0");
     }
 
     // wake up the consumer who is waiting for the data at gs_wait_poll,
@@ -420,7 +420,7 @@ void gs_receivers_flow_handle_ready_request(FCMSG_T* fcmsgr)
     ss_rc = sscanf_s(fcmsgr->nodename, "%d_%s", &shift, &nodename, (unsigned)NAMEDATALEN);
     securec_check_for_sscanf_s(ss_rc, 2, "\0", "\0");
     ss_rc = sprintf_s(nodename, NAMEDATALEN, "%d_%s", shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
-    securec_check_c(ss_rc, "\0", "\0");
+    securec_check_ss_c(ss_rc, "\0", "\0");
 
     cmailbox->local_version = local_version;
     // producer send pmailbox version as fcmsgr->version,
@@ -622,7 +622,7 @@ accept_failed:
     ss_rc = memset_s(fcmsgs.nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
     securec_check(ss_rc, "\0", "\0");
     ss_rc = sprintf_s(fcmsgs.nodename, NAMEDATALEN, "%d_%s", shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
-    securec_check(ss_rc, "\0", "\0");
+    securec_check_ss_c(ss_rc, "\0", "\0");
 
     rc = gs_send_ctrl_msg(&g_instance.comm_cxt.g_r_node_sock[node_idx], &fcmsgs, ROLE_CONSUMER);
     if (rc <= 0) {

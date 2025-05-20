@@ -617,10 +617,10 @@ static int gs_internal_connect(libcommaddrinfo* libcomm_addrinfo)
     rc = memcpy_s(namebuf, NAMEDATALEN, libcomm_addrinfo->nodename, NAMEDATALEN);
     securec_check(rc, "\0", "\0");
     rc = sprintf_s(libcomm_addrinfo->nodename, NAMEDATALEN, "%d_%s", node_shift, namebuf);
-    securec_check(rc, "\0", "\0");
+    securec_check_ss_c(rc, "\0", "\0");
     rc = sprintf_s(libcomm_addrinfo->selfnodename, NAMEDATALEN, "%d_%s",
                    node_shift, g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
-    securec_check(rc, "\0", "\0");
+    securec_check_ss_c(rc, "\0", "\0");
     libcomm_addrinfo->shift = node_shift;
 
     uint64 time_enter = COMM_STAT_TIME();
