@@ -3843,6 +3843,7 @@ static void XLogSelfFlush(void)
      * We only try self-flush when nobody else is already doing it
      */
     if (LWLockAcquireOrWait(WALWriteLock, LW_EXCLUSIVE)) {
+        *t_thrd.xlog_cxt.LogwrtResult = t_thrd.shemem_ptr_cxt.XLogCtl->LogwrtResult;
         XLogBackgroundFlush();
         XLogBackgroundFlush(true);
         LWLockRelease(WALWriteLock);
