@@ -469,6 +469,27 @@ tsql_CreateProcedureStmt:
 				}
 		;
 
+ColConstraintElem:     IDENTITY_P identity_seed_increment
+                            {
+                                Constraint *n = makeNode(Constraint);
+                                n->contype = CONSTR_IDENTITY;
+                                n->generated_when = ATTRIBUTE_IDENTITY_ALWAYS;
+                                n->options = $2;
+                                n->location = @1;
+                                $$ = (Node *)n;
+                            }
+                        ;
+
+identity_seed_increment:
+                       '(' NumericOnly ',' NumericOnly ')'
+                       {
+                           $$ = list_make2(makeDefElem("start", (Node *)$2), makeDefElem("increment",(Node *)$4));
+                       }
+                       | /* EMPTY */
+                       {
+                           $$ = list_make2(makeDefElem("start", (Node *)makeInteger(1)), makeDefElem("increment", (Node *)makeInteger(1)));
+                       }
+                       ;
 rotate_clause:
 		ROTATE '(' func_application_list rotate_for_clause rotate_in_clause ')' alias_clause %prec ROTATE
 			{

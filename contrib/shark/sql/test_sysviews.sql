@@ -353,7 +353,7 @@ character_octet_length, numeric_precision, numeric_precision_radix, numeric_scal
 collation_schema, collation_name, domain_catalog, domain_schema, domain_name
 from information_schema_tsql.columns c
 inner join pg_namespace s on c.table_schema = s.nspname
-where s.nspname = 'sys_view_test_02';
+where s.nspname = 'sys_view_test_02' order by table_name,column_name;
 
 select table_schema, table_name, table_type
 from information_schema_tsql.tables t

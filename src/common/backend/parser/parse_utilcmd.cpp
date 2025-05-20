@@ -156,6 +156,8 @@ static void transformColumnType(CreateStmtContext* cxt, ColumnDef* column);
 static void setSchemaName(char* context_schema, char** stmt_schema_name);
 static void TransformTempAutoIncrement(ColumnDef* column, CreateStmt* stmt);
 static int128 TransformAutoIncStart(CreateStmt* stmt);
+static void identity_type_dmod(ColumnDef* column);
+static int identity_only(ColumnDef* column);
 
 /*
  * @hdfs
@@ -589,6 +591,7 @@ Oid *namespaceid, bool isFirstNode)
      * Run through each primary element in the table creation clause. Separate
      * column defs from constraints, and do preliminary analysis.
      */
+    int count = 0;
     foreach (elements, stmt->tableElts) {
         TableLikeClause* tbl_like_clause = NULL;
         TransformTableType transformType = TRANSFORM_INVALID;
@@ -604,6 +607,14 @@ Oid *namespaceid, bool isFirstNode)
                         (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                             errmsg("\"hash\" column is reserved for system in ledger schema.")));
                 }
+
+                count += identity_only((ColumnDef*)element);
+                if (count > 1) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                            errmsg("table can only have one identity column")));
+                }
+
                 transformColumnDefinition(&cxt, (ColumnDef*)element, !isFirstNode && preCheck);
 
                 if (((ColumnDef *)element)->clientLogicColumnRef != NULL) {
@@ -1006,12 +1017,64 @@ static bool DropSetOwnedByTable(CreateStmtContext* cxt, char *colname)
     return false;
 }
 
+static void checkSeqInAlterStmt(CreateStmtContext* cxt)
+{
+    Relation attRelation;
+    Relation rel;
+    SysScanDesc scan;
+    ScanKeyData key[1];
+    HeapTuple tuple;
+    Form_pg_attribute attrForm;
+    char* columnName;
+    FunctionCallInfoData funcinfo;
+    char* sequenceName;
+    Datum re_seq;
+    Datum DaRel;
+    bool isdropped = false;
+
+    InitFunctionCallInfoData(funcinfo, NULL, 2, InvalidOid, NULL, NULL);
+    attRelation = heap_open(AttributeRelationId, AccessShareLock);
+
+    rel = heap_openrv(cxt->relation, AccessShareLock);
+
+    DaRel = ObjectIdGetDatum(RelationGetRelid(rel));
+    ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, DaRel);
+
+    scan = systable_beginscan(attRelation, AttributeRelidNumIndexId, true, NULL, 1, key);
+    while ((tuple = systable_getnext(scan)) != NULL) {
+        attrForm = (Form_pg_attribute) GETSTRUCT(tuple);
+        columnName = NameStr(attrForm->attname);
+        isdropped = attrForm->attisdropped;
+        if (isdropped) {
+            continue;
+        }
+        funcinfo.arg[0] = CStringGetTextDatum(cxt->relation->relname);
+        funcinfo.arg[1] = CStringGetTextDatum(columnName);
+        re_seq = pg_get_serial_sequence(&funcinfo);
+        if (re_seq != NULL) {
+            sequenceName = TextDatumGetCString(re_seq);
+        } else {
+            continue;
+        }
+
+        if (sequenceName != NULL && StrEndWith(sequenceName, "_seq_identity"))
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                   errmsg("multiple identity specifications for column \"%s\" of table \"%s\"",
+                                   columnName, cxt->relation->relname),
+                                   parser_errposition(cxt->pstate, -1)));
+    }
+    systable_endscan(scan);
+    heap_close(rel, AccessShareLock);
+    heap_close(attRelation, AccessShareLock);
+}
+
 /*
  * createSeqOwnedByTable -
  *		create a sequence owned by table, need to add record to pg_depend.
  *		used in CREATE TABLE and CREATE TABLE ... LIKE
  */
-static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, bool preCheck, bool large, bool is_autoinc)
+static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, bool preCheck, bool large,
+    bool isAutoinc, bool forIdentity = false, List *seqOptions = nullptr)
 {
     Oid snamespaceid;
     char* snamespace = NULL;
@@ -1025,6 +1088,32 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
     AlterSeqStmt* altseqstmt = NULL;
     List* attnamelist = NIL;
     Constraint* constraint = NULL;
+    Oid typeOid = InvalidOid;
+
+    if (column->typname) {
+        typeOid = typenameTypeId(NULL, column->typname);
+    }
+
+    if (forIdentity && nodeTag(cxt->node) == T_AlterTableStmt) {
+        AlterTableStmt *atstmt = (AlterTableStmt *)cxt->node;
+        ListCell *lcmd = NULL;
+        foreach(lcmd, atstmt->cmds) {
+            AlterTableCmd* cmd = (AlterTableCmd*)lfirst(lcmd);
+
+            switch (cmd->subtype) {
+                case AT_DropPartition:
+                case AT_DropSubPartition:
+                case AT_TruncatePartition:
+                case AT_ExchangePartition:
+                case AT_TruncateSubPartition:
+                case AT_DropColumn:
+                    break;
+                default:
+                    checkSeqInAlterStmt(cxt);
+                    break;
+            }
+        }
+    }
 
     /*
      * Determine namespace and name to use for the sequence.
@@ -1044,7 +1133,16 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
         RangeVarAdjustRelationPersistence(cxt->relation, snamespaceid);
     }
     snamespace = get_namespace_name(snamespaceid);
-    sname = ChooseRelationName(cxt->relation->relname, column->colname, "seq", strlen("seq"), snamespaceid);
+
+    if (forIdentity) {
+        sname = ChooseRelationName(cxt->relation->relname,
+                                   column->colname,
+                                   "seq_identity",
+                                   strlen("seq_identity"),
+                                   snamespaceid);
+    } else {
+        sname = ChooseRelationName(cxt->relation->relname, column->colname, "seq", strlen("seq"), snamespaceid);
+    }
 
     if (!preCheck || IS_SINGLE_NODE)
         ereport(NOTICE,
@@ -1061,12 +1159,26 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
      */
     seqstmt = makeNode(CreateSeqStmt);
     seqstmt->sequence = makeRangeVar(snamespace, sname, -1);
-    seqstmt->options = is_autoinc ? GetAutoIncSeqOptions(cxt) : NULL;
-    seqstmt->is_autoinc = is_autoinc;
+    seqstmt->options = seqOptions;
+    seqstmt->is_autoinc = isAutoinc;
 #ifdef PGXC
     seqstmt->is_serial = true;
 #endif
     seqstmt->is_large = large;
+
+    if (forIdentity) {
+        int typmod = 0;
+        if (column->typname->typmods != NULL) {
+            typmod = intVal(&((A_Const*)lfirst(list_head(column->typname->typmods)))->val);
+            seqstmt->options = lcons(makeDefElem("as", (Node *)makeTypeNameFromOid(typeOid, typmod)), seqstmt->options);
+        } else {
+            seqstmt->options = lcons(makeDefElem("as", (Node *)makeTypeNameFromOid(typeOid, -1)), seqstmt->options);
+        }
+    } else if (!large) {
+        seqstmt->options = list_make1(makeDefElem("as", (Node *)makeTypeNameFromOid(typeOid, -1)));
+    } else {
+        seqstmt->options = isAutoinc? GetAutoIncSeqOptions(cxt) : NULL;
+    }
 
     /* Assign UUID for create sequence */
     seqstmt->uuid = INVALIDSEQUUID;
@@ -1112,7 +1224,7 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
     attnamelist = list_make3(makeString(snamespace), makeString(cxt->relation->relname), makeString(column->colname));
     altseqstmt->options = list_make1(makeDefElem("owned_by", (Node*)attnamelist));
     altseqstmt->is_large = large;
-    altseqstmt->is_autoinc = is_autoinc;
+    altseqstmt->is_autoinc = isAutoinc;
 
     cxt->alist = lappend(cxt->alist, altseqstmt);
 
@@ -1149,7 +1261,7 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
     constraint = makeNode(Constraint);
     constraint->contype = CONSTR_DEFAULT;
     constraint->location = -1;
-    if (is_autoinc) {
+    if (isAutoinc) {
         autoincnode = makeNode(AutoIncrement);
         autoincnode->expr = (Node*)funccallnode;
         constraint->raw_expr = (Node*)autoincnode;
@@ -1160,7 +1272,7 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
     column->constraints = lappend(column->constraints, constraint);
     column->raw_default = constraint->raw_expr;
 
-    if (!is_autoinc) {
+    if (!isAutoinc) {
         constraint = makeNode(Constraint);
         constraint->contype = CONSTR_NOTNULL;
         constraint->location = -1;
@@ -1395,6 +1507,7 @@ static void TransformColumnDefinitionConstraints(CreateStmtContext* cxt, ColumnD
     bool saw_generated = false;
     Constraint* constraint = NULL;
     ListCell* clist = NULL;
+    bool sawIdentity = false;
 
     foreach (clist, column->constraints) {
         constraint = (Constraint*)lfirst(clist);
@@ -1441,6 +1554,34 @@ static void TransformColumnDefinitionConstraints(CreateStmtContext* cxt, ColumnD
                 AssertEreport(constraint->cooked_expr == NULL, MOD_OPT, "");
                 saw_default = true;
                 break;
+
+            case CONSTR_IDENTITY:
+                {
+                    bool large = typenameTypeId(NULL, column->typname) == NUMERICOID;
+
+                    if (cxt->ofType) {
+                        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                           errmsg("identity columns are not supported on typed tables")));
+                    }
+                    if (sawIdentity) {
+                        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                       errmsg("multiple identity specifications for column \"%s\" of table \"%s\"",
+                                       column->colname, cxt->relation->relname),
+                                       parser_errposition(cxt->pstate, constraint->location)));
+                    }
+                    if (saw_default)
+                        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                                       errmsg("Defaults cannot be created on columns with an IDENTITY attribute."
+                                       "Table '%s', column '%s'",
+                                       cxt->relation->relname, column->colname),
+                                       parser_errposition(cxt->pstate, constraint->location)));
+
+                    identity_type_dmod(column);
+                    createSeqOwnedByTable(cxt, column, preCheck, large, false, true, constraint->options);
+                    sawIdentity = true;
+                    column->is_not_null = true;
+                    break;
+                }
 
             case CONSTR_GENERATED:
                 if (cxt->ofType) {
@@ -8581,4 +8722,46 @@ static void TransformModifyColumndef(CreateStmtContext* cxt, AlterTableCmd* cmd)
         rename->is_modifycolumn = true;
         cxt->blist = lappend(cxt->blist, rename);
     }
+}
+
+static int identity_only(ColumnDef* column)
+{
+    ListCell* clist = NULL;
+    Constraint* constraint = NULL;
+    int result = 0;
+    foreach (clist, column->constraints) {
+        constraint = (Constraint*)lfirst(clist);
+
+        if (constraint->contype == CONSTR_IDENTITY) {
+            result += 1;
+        }
+    }
+    return result;
+}
+
+/*
+ * Get the column type which is constrained by identity in D mode.
+ * Check the type is expected or not, and report error for invalid type.
+ */
+static void identity_type_dmod(ColumnDef* column)
+{
+    int s = 0;
+    Oid newtypid = typenameTypeId(NULL, column->typname);
+    if (newtypid == NUMERICOID &&
+        column->typname->typmods != NULL &&
+        list_length(column->typname->typmods) == 2) {
+            s = intVal(&((A_Const*)lfirst(list_tail(column->typname->typmods)))->val);
+    }
+
+    /* invalid type check */
+    if (newtypid != INT2OID &&
+        newtypid != INT4OID &&
+        newtypid != INT8OID &&
+        newtypid != INT1OID &&
+        newtypid != INT16OID &&
+        (newtypid != NUMERICOID || (newtypid == NUMERICOID && s != 0)))
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("Identity column '%s' data type invalid.",
+                     column->colname)));
 }

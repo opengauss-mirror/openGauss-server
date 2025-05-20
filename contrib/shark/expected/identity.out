@@ -1,0 +1,283 @@
+CREATE TABLE book(bookId int IDENTITY, bookname NVARCHAR(50), author NVARCHAR(50));
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+INSERT INTO book VALUES('book1','author1'),('book2','author2');
+INSERT INTO book(bookname,author) VALUES('book3','author3'),('book4','author4');
+INSERT INTO book VALUES(3,'book5','author5');
+ERROR:  INSERT has more expressions than target columns
+LINE 1: INSERT INTO book VALUES(3,'book5','author5');
+                                          ^
+select * from book;
+ bookid | bookname | author  
+--------+----------+---------
+      1 | book1    | author1
+      2 | book2    | author2
+      3 | book3    | author3
+      4 | book4    | author4
+(4 rows)
+
+ALTER table book add column id int identity;
+ERROR:  multiple identity specifications for column "bookid" of table "book"
+drop table if exists book;
+CREATE TABLE book(id int identity, bookId int IDENTITY, bookname NVARCHAR(50), author NVARCHAR(50));
+NOTICE:  CREATE TABLE will create implicit sequence "book_id_seq_identity" for serial column "book.id"
+ERROR:  table can only have one identity column
+CREATE TABLE book
+(
+    bookId int NOT NULL PRIMARY KEY IDENTITY, 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "book_pkey" for table "book"
+INSERT INTO book VALUES('book1','author1'),('book2','author2');
+select * from book;
+ bookid | bookname | author  
+--------+----------+---------
+      1 | book1    | author1
+      2 | book2    | author2
+(2 rows)
+
+drop table if exists book;
+CREATE TABLE book
+(
+    bookId int NOT NULL PRIMARY KEY IDENTITY(3,5), 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "book_pkey" for table "book"
+INSERT INTO book VALUES('book1','author1'),('book2','author2');
+select * from book;
+ bookid | bookname | author  
+--------+----------+---------
+      3 | book1    | author1
+      8 | book2    | author2
+(2 rows)
+
+delete book where bookId=8;
+select * from book;
+ bookid | bookname | author  
+--------+----------+---------
+      3 | book1    | author1
+(1 row)
+
+INSERT INTO book(bookname,author) VALUES('book3','author3'),('book4','author4');
+select * from book;
+ bookid | bookname | author  
+--------+----------+---------
+      3 | book1    | author1
+     13 | book3    | author3
+     18 | book4    | author4
+(3 rows)
+
+drop table if exists book;
+CREATE TABLE book
+(
+    bookId tinyint NOT NULL PRIMARY KEY IDENTITY(3,5), 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "book_pkey" for table "book"
+drop table if exists book;
+CREATE TABLE book
+(
+    bookId smallint NOT NULL PRIMARY KEY IDENTITY(3,5), 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "book_pkey" for table "book"
+drop table if exists book;
+CREATE TABLE book
+(
+    bookId bigint NOT NULL PRIMARY KEY IDENTITY(3,5), 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "book_pkey" for table "book"
+drop table if exists book;
+CREATE TABLE book
+(
+    bookId numeric NOT NULL PRIMARY KEY IDENTITY(3,5), 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "book_pkey" for table "book"
+drop table if exists book;
+CREATE TABLE book
+(
+    bookId decimal NOT NULL PRIMARY KEY IDENTITY(3,5), 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "book_pkey" for table "book"
+drop table if exists book;
+CREATE TABLE book
+(
+    bookname NVARCHAR(50),
+    author NVARCHAR(50)
+);
+ALTER TABLE book add bookId int not null primary key identity;
+NOTICE:  ALTER TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "book_pkey" for table "book"
+INSERT INTO book VALUES('book1','author1'),('book2','author2');
+select * from book;
+ bookname | author  | bookid 
+----------+---------+--------
+ book1    | author1 |      1
+ book2    | author2 |      2
+(2 rows)
+
+delete book where bookId=8;
+select * from book;
+ bookname | author  | bookid 
+----------+---------+--------
+ book1    | author1 |      1
+ book2    | author2 |      2
+(2 rows)
+
+INSERT INTO book(bookname,author) VALUES('book3','author3'),('book4','author4');
+select * from book;
+ bookname | author  | bookid 
+----------+---------+--------
+ book1    | author1 |      1
+ book2    | author2 |      2
+ book3    | author3 |      3
+ book4    | author4 |      4
+(4 rows)
+
+drop table if exists book;
+CREATE TABLE book
+(
+    bookId int NOT NULL PRIMARY KEY IDENTITY(100,100),
+    bookname NVARCHAR(50),
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "book_pkey" for table "book"
+INSERT INTO book VALUES('book1','author1'),('book2','author2');
+INSERT INTO book(bookname,author) VALUES('book3','author3'),('book4','author4');
+select * from book;
+ bookid | bookname | author  
+--------+----------+---------
+    100 | book1    | author1
+    200 | book2    | author2
+    300 | book3    | author3
+    400 | book4    | author4
+(4 rows)
+
+drop table if exists book;
+CREATE TABLE book
+(
+    bookId tinyint NOT NULL PRIMARY KEY IDENTITY(-1,1), 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+ERROR:  Identity column contains invalid SEED.
+drop table if exists book;
+NOTICE:  table "book" does not exist, skipping
+CREATE TABLE book
+(
+    bookId tinyint NOT NULL PRIMARY KEY IDENTITY(0,-1), 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+ERROR:  Identity column contains invalid INCREMENT.
+drop table if exists book;
+NOTICE:  table "book" does not exist, skipping
+CREATE TABLE book
+(
+    bookId tinyint NOT NULL PRIMARY KEY IDENTITY(255,256), 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+ERROR:  Identity column contains invalid INCREMENT.
+drop table if exists book;
+NOTICE:  table "book" does not exist, skipping
+CREATE TABLE book
+(
+    bookId smallint NOT NULL PRIMARY KEY IDENTITY(32767,32768), 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+ERROR:  Identity column contains invalid INCREMENT.
+drop table if exists book;
+NOTICE:  table "book" does not exist, skipping
+CREATE TABLE book
+(
+    bookId text NOT NULL PRIMARY KEY IDENTITY, 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+ERROR:  Identity column 'bookid' data type invalid.
+drop table if exists book;
+NOTICE:  table "book" does not exist, skipping
+CREATE TABLE book
+(
+    bookId numeric(4,2) NOT NULL PRIMARY KEY IDENTITY, 
+    bookname NVARCHAR(50), 
+    author NVARCHAR(50)
+);
+ERROR:  Identity column 'bookid' data type invalid.
+CREATE TABLE book(id serial, bookId int identity default 5, bookname char(20));
+NOTICE:  CREATE TABLE will create implicit sequence "book_id_seq" for serial column "book.id"
+NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
+ERROR:  multiple default values specified for column "bookid" of table "book"
+CREATE TABLE t_identity(id serial, col int identity(5,10), col2 text)
+partition by range(col)(
+partition p1 VALUES LESS THAN (10),
+partition p2 VALUES LESS THAN (20),
+partition p3 VALUES LESS THAN (30),
+partition p4 VALUES LESS THAN (MAXVALUE)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_id_seq" for serial column "t_identity.id"
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_col_seq_identity" for serial column "t_identity.col"
+insert into t_identity(col2) values('abc');
+insert into t_identity(col2) values('def');
+insert into t_identity(col2) values('ghi');
+insert into t_identity(col2) values('jkl');
+select * from t_identity partition(p1);
+ id | col | col2 
+----+-----+------
+  1 |   5 | abc
+(1 row)
+
+select * from t_identity partition(p2);
+ id | col | col2 
+----+-----+------
+  2 |  15 | def
+(1 row)
+
+select * from t_identity partition(p3);
+ id | col | col2 
+----+-----+------
+  3 |  25 | ghi
+(1 row)
+
+select * from t_identity partition(p4);
+ id | col | col2 
+----+-----+------
+  4 |  35 | jkl
+(1 row)
+
+drop table t_identity;
+CREATE TABLE t_identity(id decimal(12) not null identity(1,1), col text);
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_id_seq_identity" for serial column "t_identity.id"
+insert into t_identity values('aaa');
+select * from t_identity;
+ id | col 
+----+-----
+  1 | aaa
+(1 row)
+
+drop table if exists t_identity;
+CREATE TABLE t_identity(id decimal(12,2) not null identity(1,1), col text);
+ERROR:  Identity column 'id' data type invalid.

@@ -13599,7 +13599,8 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
                 if (colDef->is_not_null) {
                     ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, true, is_addloc);
                 }
-            } else if (contain_specified_function((Node*)defval, NEXTVALFUNCOID)) {
+            } else if (contain_specified_function((Node*)defval, NEXTVALFUNCOID)
+                    && u_sess->attr.attr_sql.sql_compatibility != D_FORMAT) {
                 /* We don't support alter table add column which default with nextval expression. */
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
