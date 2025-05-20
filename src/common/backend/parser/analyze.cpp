@@ -88,6 +88,7 @@
 #include "utils/typcache.h"
 #include "commands/explain.h"
 #include "commands/sec_rls_cmds.h"
+#include "commands/sequence.h"
 #include "streaming/streaming_catalog.h"
 #include "instruments/instr_unique_sql.h"
 #include "streaming/init.h"

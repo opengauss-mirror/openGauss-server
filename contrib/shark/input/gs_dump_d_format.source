@@ -9,6 +9,8 @@ CREATE TABLE mysche.[t2](a int);
 CREATE TABLE [mysche].[t3](a int);
 INSERT INTO mysche.t1 (a) VALUES (1), (2), (3);
 CREATE VIEW [t4] AS SELECT * FROM mysche.t1;
+CREATE TABLE table_ident(id int identity, name char(20));
+INSERT INTO table_ident values('aaa'),('bbb'),('ccc');
 
 \! @abs_bindir@/gs_dump dump_d_database -p @portstring@ -f @abs_bindir@/dump_d.tar -F t >/dev/null 2>&1; echo $?
 \! @abs_bindir@/gs_restore -d restore_d_database -p @portstring@ @abs_bindir@/dump_d.tar >/dev/null 2>&1; echo $?
@@ -19,6 +21,7 @@ SELECT * from mysche.t1;
 SELECT * from mysche.t2;
 SELECT * from mysche.t3;
 SELECT * from t4;
+SELECT * from table_ident;
 
 \c contrib_regression
 drop database dump_d_database;

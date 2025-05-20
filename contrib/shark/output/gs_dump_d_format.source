@@ -9,6 +9,9 @@ CREATE TABLE mysche.[t2](a int);
 CREATE TABLE [mysche].[t3](a int);
 INSERT INTO mysche.t1 (a) VALUES (1), (2), (3);
 CREATE VIEW [t4] AS SELECT * FROM mysche.t1;
+CREATE TABLE table_ident(id int identity, name char(20));
+NOTICE:  CREATE TABLE will create implicit sequence "table_ident_id_seq_identity" for serial column "table_ident.id"
+INSERT INTO table_ident values('aaa'),('bbb'),('ccc');
 \! @abs_bindir@/gs_dump dump_d_database -p @portstring@ -f @abs_bindir@/dump_d.tar -F t >/dev/null 2>&1; echo $?
 0
 \! @abs_bindir@/gs_restore -d restore_d_database -p @portstring@ @abs_bindir@/dump_d.tar >/dev/null 2>&1; echo $?
@@ -41,6 +44,14 @@ SELECT * from t4;
  1
  2
  3
+(3 rows)
+
+SELECT * from table_ident;
+ id |         name         
+----+----------------------
+  1 | aaa                 
+  2 | bbb                 
+  3 | ccc                 
 (3 rows)
 
 \c contrib_regression

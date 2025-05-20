@@ -89,6 +89,9 @@ typedef FormData_pg_large_sequence* Form_pg_large_sequence;
 
 #define GS_NUM_OF_BUCKETS 1024
 
+#define DMODE_MAX_PRECISION 38
+#define DMODE_DEFAULT_PRECISION 18
+
 /*
  * The "special area" of a old version sequence's buffer page looks like this.
  */
@@ -262,5 +265,7 @@ extern SeqTable GetSessSeqElm(Oid relid);
 extern char* GetGlobalSeqNameForUpdate(Relation seqrel, char** dbname, char** schemaname);
 extern uint32 RelidGetHash(Oid seq_relid);
 extern SeqTable GetGlobalSeqElm(Oid relid, GlobalSeqInfoHashBucket* bucket);
+extern Oid pg_get_serial_sequence_oid(text* tablename, text* columnname);
+bool StrEndWith(const char *str, const char *suffix);
 
 #endif /* SEQUENCE_H */

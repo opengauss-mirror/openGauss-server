@@ -39,6 +39,7 @@
 #include "gs_ledger/ledger_utils.h"
 #include "mb/pg_wchar.h"
 #include "parser/parse_utilcmd.h"
+#include "commands/sequence.h"
 
 static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var, int levelsup);
 static Node* transformAssignmentIndirection(ParseState* pstate, Node* basenode, const char* targetName,
@@ -922,6 +923,27 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
             if (is_blockchain_rel && strcmp(col->name, "hash") == 0) {
                 continue;
             }
+            /* skip the identity default value in D format */
+            if (u_sess->attr.attr_sql.sql_compatibility == D_FORMAT) {
+                FunctionCallInfoData funcinfo;
+                Datum re_seq;
+                char* sequenceName = NULL;
+                int nargs = 2;
+
+                InitFunctionCallInfoData(funcinfo, NULL, nargs, InvalidOid, NULL, NULL);
+
+                funcinfo.arg[0] = CStringGetTextDatum(RelationGetRelationName(targetrel));
+                funcinfo.arg[1] = CStringGetTextDatum(col->name);
+
+                re_seq = pg_get_serial_sequence(&funcinfo);
+                if (re_seq != NULL) {
+                    sequenceName = TextDatumGetCString(re_seq);
+                    if (sequenceName != NULL && StrEndWith(sequenceName, "_seq_identity")) {
+                        continue;
+                    }
+                }
+            }
+
             col->indirection = NIL;
             col->val = NULL;
             col->location = -1;
