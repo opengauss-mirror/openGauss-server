@@ -186,11 +186,6 @@ GenericXLogStart(Relation relation)
     int i;
     GenericXLogState *state;
 
-    if (t_thrd.proc->workingVersionNum < GENERICXLOG_VERSION_NUM) {
-        elog(ERROR, "workingVersionNum is lowwer than GENERICXLOG_VERSION_NUM, not supported!");
-        return NULL;
-    }
-
     state = (GenericXLogState *) palloc(sizeof(GenericXLogState));
 
     state->isLogged = RelationNeedsWAL(relation);
