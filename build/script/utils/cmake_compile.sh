@@ -164,6 +164,33 @@ function install_gaussdb()
     get_version_mode
 }
 
+function spq_build() {
+    if [ -z "${SPQ_ROOT}" ]; then
+        SPQ_ROOT="${ROOT_DIR}/../spq"
+        echo "INFO: Auto set SPQ_ROOT to ${SPQ_ROOT}"
+    fi
+
+    if [ ! -d "${SPQ_ROOT}" ]; then
+        echo "ERROR: Invalid SPQ_ROOT path '${SPQ_ROOT}'"
+        return
+    fi
+
+    echo "Building in ${SPQ_ROOT}..."
+    (
+        cd "${SPQ_ROOT}" && \
+        rm -rf build && \
+        mkdir build && \
+        cd build
+        ../configure && \
+        make -sj && \
+        make install
+    ) || {
+        echo "WARNING: Build spq failed, continuing other building steps..."
+    }
+
+    cd -
+}
+
 #######################################################################
 ##install gaussdb database and others
 ##select to install something according to variables package_type need
