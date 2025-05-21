@@ -634,7 +634,6 @@ static bool BM25InsertDocument(Relation index, Datum *values, ItemPointerData &c
     if (tokenizedDoc.tokenCount == 0) {
         MemoryContextSwitchTo(oldCtx);
         MemoryContextDelete(tempCtx);
-        ereport(ERROR, (errmsg("No tokens in document for index: %u, please check.", RelationGetRelationName(index))));
         return false;
     }
     uint32 docId = BM25AllocateDocId(index, building);
