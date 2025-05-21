@@ -1240,6 +1240,19 @@ static void preprocess_set_value(char *value, Oid settypoid, VarBit **result, Oi
     }
 }
 
+VarBit* make_default_varbit_for_set(Oid settypoid)
+{
+    int typmod = sizeof(Oid) * BITS_PER_BYTE;
+    int len = VARBITTOTALLEN(typmod);
+    VarBit* result = (VarBit*)palloc(len);
+
+    SET_VARSIZE(result, len);
+    VARBITLEN(result) = typmod;
+    *(Oid *)VARBITS(result) = settypoid;
+
+    return result;
+}
+
 static VarBit* get_set_in_result(Oid settypoid, char *setlabels, Oid collation)
 {
     VarBit *result = NULL;
@@ -1255,12 +1268,7 @@ static VarBit* get_set_in_result(Oid settypoid, char *setlabels, Oid collation)
     }
 
     if (result == NULL) {
-        int typmod = sizeof(Oid) * BITS_PER_BYTE;
-        int len = VARBITTOTALLEN(typmod);
-        result = (VarBit*)palloc(len);
-        SET_VARSIZE(result, len);
-        VARBITLEN(result) = typmod;
-        *(Oid *)VARBITS(result) = settypoid;
+        result = make_default_varbit_for_set(settypoid);
     }
 
     pfree_ext(labels);
