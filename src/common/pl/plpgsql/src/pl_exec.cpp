@@ -13977,9 +13977,19 @@ static Datum exec_cast_value(PLpgSQL_execstate* estate, Datum value, Oid valtype
             /* get the implicit cast function from valtype to reqtype */
             result = find_coercion_pathway(reqtype, valtype, COERCION_ASSIGNMENT, &funcid);
             if (funcid != InvalidOid && !(result == COERCION_PATH_COERCEVIAIO || result == COERCION_PATH_ARRAYCOERCE)) {
-                value = (reqtype == INTERVALOID) ?
-                            OidFunctionCall2(funcid, value, reqtypmod) : OidFunctionCall1(funcid, value);
-                value = pl_coerce_type_typmod(value, reqtype, reqtypmod);
+                if (reqinput != NULL && F_SUBTYPE_IN == reqinput->fn_oid) {
+                    /* SUBTYPE XXX IS NUMBER(8,2);
+                     * When use sql shown above we should use subtype_in
+                     * instead of original process.
+                     */
+                    extval = convert_value_to_string(estate, value, valtype);
+                    value = InputFunctionCall(reqinput, extval, reqtypioparam, reqtypmod);
+                    pfree_ext(extval);
+                } else {
+                    value = (reqtype == INTERVALOID) ?
+                                OidFunctionCall2(funcid, value, reqtypmod) : OidFunctionCall1(funcid, value);
+                    value = pl_coerce_type_typmod(value, reqtype, reqtypmod);
+                }
             } else {
                 extval = convert_value_to_string(estate, value, valtype);
                 value = InputFunctionCall(reqinput, extval, reqtypioparam, reqtypmod);
