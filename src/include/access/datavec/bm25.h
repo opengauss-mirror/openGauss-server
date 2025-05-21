@@ -53,7 +53,7 @@
 #define BM25_DOCUMENT_FORWARD_ITEM_SIZE (MAXALIGN(sizeof(BM25DocForwardItem)))
 #define BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE (BM25_PAGE_DATASIZE / BM25_DOCUMENT_FORWARD_ITEM_SIZE)
 #define BM25_MAX_TOKEN_LEN 100
-#define BM25_BUCKET_MAX_NUM 1000
+#define BM25_BUCKET_PAGE_ITEM_SIZE 2
 
 typedef struct BM25ScanData {
     uint32 docId;
@@ -91,7 +91,7 @@ typedef struct BM25EntryPages {
     BlockNumber documentMetaPage;
     BlockNumber docForwardPage;
     BlockNumber hashBucketsPage;
-    uint32 hashBucketCount;
+    uint32 maxHashBucketCount;
 } BM25EntryPages;
 
 typedef struct BM25MetaPageData {
@@ -150,9 +150,9 @@ typedef struct BM25DocumentItem {
     uint64 tokenEndIdx;
 } BM25DocumentItem;
 
+/* 2 BlockNumber in each BM25HashBucketItem (8-byte alignment) */
 typedef struct BM25HashBucketItem {
-    uint32 bucketId;
-    BlockNumber bucketBlkno;
+    BlockNumber bucketBlkno[BM25_BUCKET_PAGE_ITEM_SIZE];
 } BM25HashBucketItem;
 
 typedef BM25HashBucketItem *BM25HashBucketPage;
@@ -299,8 +299,8 @@ void BM25InitRegisterPage(Relation index, Buffer *buf, Page *page, GenericXLogSt
 void BM25GetPage(Relation index, Page *page, Buffer buf, GenericXLogState **state, bool building);
 void BM25CommitBuf(Buffer buf, GenericXLogState **state, bool building, bool releaseBuf = true);
 void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap);
-void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, bool unlockOldBuf,
-    GenericXLogState **state, bool building);
+void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, GenericXLogState **state,
+    bool building);
 void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap);
 uint32 BM25AllocateDocId(Relation index, bool building);
 uint32 BM25AllocateTokenId(Relation index);
@@ -308,7 +308,6 @@ void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgd
 void RecordDocBlkno2DocBlknoTable(Relation index, BM25DocMetaPage docMetaPage,
     BlockNumber newDocBlkno, bool building, ForkNumber forkNum);
 BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber docBlknoTable);
-bool FindHashBucket(uint32 bucketId, BM25PageLocationInfo &bucketLocation, Buffer buf, Page page);
 bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLocation, Buffer buf, Page page);
 BM25TokenizedDocData BM25DocumentTokenize(const char* doc, bool cutForSearch = false);
 
