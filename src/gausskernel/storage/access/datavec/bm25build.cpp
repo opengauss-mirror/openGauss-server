@@ -74,131 +74,39 @@ static BlockNumber CreateBM25CommonPage(Relation index, ForkNumber forkNum, bool
     return blkno;
 }
 
-static void InsertItemToHashBucket(Relation index, BM25EntryPages &bm25EntryPages, uint32 bucketId,
-    BM25PageLocationInfo &bucketLocation, ForkNumber forkNum, bool building)
-{
-    BlockNumber firstBucketBlkno = bm25EntryPages.hashBucketsPage;
-    BlockNumber nextblkno = firstBucketBlkno;
-    BlockNumber curblkno = firstBucketBlkno;
-
-    /* lock hashBuckets */
-    Buffer firstBuf;
-    Page firstPage;
-    GenericXLogState *firstState = nullptr;
-    firstBuf = ReadBuffer(index, firstBucketBlkno);
-    LockBuffer(firstBuf, BUFFER_LOCK_EXCLUSIVE);
-    BM25GetPage(index, &firstPage, firstBuf, &firstState, building);
-    if (FindHashBucket(bucketId, bucketLocation, firstBuf, firstPage)) {
-        if (!building)
-            GenericXLogAbort(firstState);
-        UnlockReleaseBuffer(firstBuf);
-        return;
-    }
-    nextblkno = BM25PageGetOpaque(firstPage)->nextblkno;
-
-    Buffer cbuf;
-    Page cpage;
-    GenericXLogState *state = nullptr;
-    while (BlockNumberIsValid(nextblkno)) {
-        OffsetNumber maxoffno;
-        cbuf = ReadBuffer(index, nextblkno);
-        LockBuffer(cbuf, BUFFER_LOCK_EXCLUSIVE);
-        BM25GetPage(index, &cpage, cbuf, &state, building);
-
-        if (FindHashBucket(bucketId, bucketLocation, cbuf, cpage)) {
-            if (!building) {
-                GenericXLogAbort(firstState);
-                GenericXLogAbort(state);
-            }
-            UnlockReleaseBuffer(cbuf);
-            UnlockReleaseBuffer(firstBuf);
-            return;
-        }
-
-        curblkno = nextblkno;
-        nextblkno = BM25PageGetOpaque(cpage)->nextblkno;
-        if (!building) {
-            GenericXLogAbort(state);
-        }
-        UnlockReleaseBuffer(cbuf);
-    }
-
-    /* hashBucket is not found, add new one */
-    uint32 itemSize = MAXALIGN(sizeof(BM25HashBucketItem));
-    if (curblkno == firstBucketBlkno) {
-        cbuf = firstBuf;
-        cpage = firstPage;
-    } else {
-        cbuf = ReadBuffer(index, curblkno);
-        LockBuffer(cbuf, BUFFER_LOCK_EXCLUSIVE);
-        BM25GetPage(index, &cpage, cbuf, &state, building);
-    }
-
-    /* Ensure free space */
-    if (PageGetFreeSpace(cpage) < itemSize) {
-        BM25AppendPage(index, &cbuf, &cpage, forkNum, (curblkno == firstBucketBlkno) ? false : true, &state, building);
-        curblkno = BufferGetBlockNumber(cbuf);
-    }
-
-    BM25HashBucketPage hashBucket = (BM25HashBucketPage)palloc0(itemSize);
-    hashBucket->bucketId = bucketId;
-    hashBucket->bucketBlkno = InvalidBlockNumber;
-    OffsetNumber offno = PageAddItem(cpage, (Item)hashBucket, itemSize, InvalidOffsetNumber, false, false);
-    if (offno == InvalidOffsetNumber) {
-        pfree(hashBucket);
-        if (curblkno != firstBucketBlkno)
-            if (!building)
-                GenericXLogAbort(state);
-            UnlockReleaseBuffer(cbuf);
-        if (!building)
-            GenericXLogAbort(firstState);
-        UnlockReleaseBuffer(firstBuf);
-        elog(ERROR, "failed to add index item [BM25HashBucket] to \"%s\"", RelationGetRelationName(index));
-    }
-    bm25EntryPages.hashBucketCount++;
-    bucketLocation.blkno = BufferGetBlockNumber(cbuf);
-    bucketLocation.offno = offno;
-    
-    if (curblkno != firstBucketBlkno)
-        BM25CommitBuf(cbuf, &state, building);
-    BM25CommitBuf(firstBuf, &firstState, building);
-    pfree(hashBucket);
-    return;
-}
-
-static void InsertItemToTokenMetaList(Relation index, BM25PageLocationInfo &bucketLocation,
+static void InsertItemToTokenMetaList(Relation index, BM25EntryPages &bm25EntryPages, uint32 bucketIdx,
     BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLocation, ForkNumber forkNum, bool building)
 {
+    BlockNumber firstTokenMetasBlkno = InvalidBlockNumber;
     Page cpageBucket;
     GenericXLogState *bucketState = nullptr;
-    Buffer cbufBucket = ReadBuffer(index, bucketLocation.blkno);
-    LockBuffer(cbufBucket, BUFFER_LOCK_EXCLUSIVE);
+    OffsetNumber bucketOffno = (bucketIdx / BM25_BUCKET_PAGE_ITEM_SIZE) + 1;
+    uint32 bucketIdxInItem = bucketIdx % BM25_BUCKET_PAGE_ITEM_SIZE;
+    Buffer cbufBucket = ReadBuffer(index, bm25EntryPages.hashBucketsPage);
+    LockBuffer(cbufBucket, BUFFER_LOCK_SHARE);
     cpageBucket = BufferGetPage(cbufBucket);
-    BM25GetPage(index, &cpageBucket, cbufBucket, &bucketState, building);
-    BM25HashBucketPage hashBucket = (BM25HashBucketPage)PageGetItem(cpageBucket,
-        PageGetItemId(cpageBucket, bucketLocation.offno));
-    if (hashBucket->bucketBlkno == InvalidBlockNumber)
-        hashBucket->bucketBlkno = CreateBM25CommonPage(index, forkNum, building);
-    BlockNumber firstTokenMetasBlkno = hashBucket->bucketBlkno;
-    BM25CommitBuf(cbufBucket, &bucketState, building);
+    BM25HashBucketPage bucketInfo = (BM25HashBucketPage)PageGetItem(cpageBucket,
+        PageGetItemId(cpageBucket, bucketOffno));
+    /* add new page, change to BUFFER_LOCK_EXCLUSIVE */
+    if (bucketInfo->bucketBlkno[bucketIdxInItem] == InvalidBlockNumber) {
+        LockBuffer(cbufBucket, BUFFER_LOCK_UNLOCK);
+        LockBuffer(cbufBucket, BUFFER_LOCK_EXCLUSIVE);
+        BM25GetPage(index, &cpageBucket, cbufBucket, &bucketState, building);
+        BM25HashBucketPage bucketInfoTmp = (BM25HashBucketPage)PageGetItem(cpageBucket,
+            PageGetItemId(cpageBucket, bucketOffno));
+        if (bucketInfoTmp->bucketBlkno[bucketIdxInItem] == InvalidBlockNumber) {
+            bucketInfoTmp->bucketBlkno[bucketIdxInItem] = CreateBM25CommonPage(index, forkNum, building);
+        }
+        firstTokenMetasBlkno = bucketInfoTmp->bucketBlkno[bucketIdxInItem];
+        BM25CommitBuf(cbufBucket, &bucketState, building);
+    } else {
+        firstTokenMetasBlkno = bucketInfo->bucketBlkno[bucketIdxInItem];
+        UnlockReleaseBuffer(cbufBucket);
+    }
 
-    /* lock tokenMeta list */
+    /* find tokenMeta */
     BlockNumber nextblkno = firstTokenMetasBlkno;
     BlockNumber curblkno = firstTokenMetasBlkno;
-    Buffer firstBuf;
-    Page firstPage;
-    GenericXLogState *firstState = nullptr;
-    firstBuf = ReadBuffer(index, firstTokenMetasBlkno);
-    LockBuffer(firstBuf, BUFFER_LOCK_EXCLUSIVE);
-    BM25GetPage(index, &firstPage, firstBuf, &firstState, building);
-    if (FindTokenMeta(tokenData, tokenMetaLocation, firstBuf, firstPage)) {
-        if (!building)
-            GenericXLogAbort(firstState);
-        UnlockReleaseBuffer(firstBuf);
-        return;
-    }
-    nextblkno = BM25PageGetOpaque(firstPage)->nextblkno;
-
     Buffer cbuf;
     Page cpage;
     GenericXLogState *state = nullptr;
@@ -209,32 +117,24 @@ static void InsertItemToTokenMetaList(Relation index, BM25PageLocationInfo &buck
         BM25GetPage(index, &cpage, cbuf, &state, building);
         if (FindTokenMeta(tokenData, tokenMetaLocation, cbuf, cpage)) {
             if (!building) {
-                GenericXLogAbort(firstState);
                 GenericXLogAbort(state);
             }
             UnlockReleaseBuffer(cbuf);
-            UnlockReleaseBuffer(firstBuf);
             return;
         }
         curblkno = nextblkno;
         nextblkno = BM25PageGetOpaque(cpage)->nextblkno;
+        if (!BlockNumberIsValid(nextblkno)) {
+            break;
+        }
         UnlockReleaseBuffer(cbuf);
     }
 
     /* tokenMetaItem is not found, add new one */
     uint32 itemSize = MAXALIGN(sizeof(BM25TokenMetaItem));
-    if (curblkno == firstTokenMetasBlkno) {
-        cbuf = firstBuf;
-        cpage = firstPage;
-    } else {
-        cbuf = ReadBuffer(index, curblkno);
-        LockBuffer(cbuf, BUFFER_LOCK_EXCLUSIVE);
-        cpage = BufferGetPage(cbuf);
-    }
     /* Ensure free space */
     if (PageGetFreeSpace(cpage) < itemSize) {
-        BM25AppendPage(index, &cbuf, &cpage, forkNum, (curblkno == firstTokenMetasBlkno) ? false : true,
-            &state, building);
+        BM25AppendPage(index, &cbuf, &cpage, forkNum, &state, building);
         curblkno = BufferGetBlockNumber(cbuf);
     }
 
@@ -242,7 +142,6 @@ static void InsertItemToTokenMetaList(Relation index, BM25PageLocationInfo &buck
     errno_t rc = strncpy_s(tokenMeta->token, BM25_MAX_TOKEN_LEN, tokenData.tokenValue, BM25_MAX_TOKEN_LEN - 1);
     securec_check_c(rc, "\0", "\0");
     tokenMeta->tokenId = BM25AllocateTokenId(index);
-    tokenData.tokenId = tokenMeta->tokenId;
     tokenMeta->hashValue = tokenData.hashValue;
     tokenMeta->maxScore = 0;
     tokenMeta->postingBlkno = InvalidBlockNumber;
@@ -250,20 +149,14 @@ static void InsertItemToTokenMetaList(Relation index, BM25PageLocationInfo &buck
     OffsetNumber offno = PageAddItem(cpage, (Item)tokenMeta, itemSize, InvalidOffsetNumber, false, false);
     if (offno == InvalidOffsetNumber) {
         pfree(tokenMeta);
-        if (curblkno != firstTokenMetasBlkno)
-            if (!building)
-                GenericXLogAbort(state);
-            UnlockReleaseBuffer(cbuf);
         if (!building)
-            GenericXLogAbort(firstState);
-        UnlockReleaseBuffer(firstBuf);
+            GenericXLogAbort(state);
+        UnlockReleaseBuffer(cbuf);
         elog(ERROR, "failed to add index item [BM25TokenMeta] to \"%s\"", RelationGetRelationName(index));
     }
     tokenMetaLocation.blkno = BufferGetBlockNumber(cbuf);
     tokenMetaLocation.offno = offno;
-    if (curblkno != firstTokenMetasBlkno)
-        BM25CommitBuf(cbuf, &state, building);
-    BM25CommitBuf(firstBuf, &firstState, building);
+    BM25CommitBuf(cbuf, &state, building);
     pfree(tokenMeta);
     return;
 }
@@ -409,11 +302,10 @@ static void InsertToIvertedList(Relation index, uint32 docId, BM25TokenizedDocDa
         float freqVal = tokenizedDoc.tokenDatas[tokenIdx].tokenFreq;
         docLen += freqVal;
         float score = scorer.GetDocBM25Score(freqVal, docLen);
-        uint32 bucketId = tokenizedDoc.tokenDatas[tokenIdx].hashValue % BM25_BUCKET_MAX_NUM;
-        BM25PageLocationInfo bucketLocation{0};
+        uint32 bucketIdx = tokenizedDoc.tokenDatas[tokenIdx].hashValue %
+            (bm25EntryPages.maxHashBucketCount * BM25_BUCKET_PAGE_ITEM_SIZE);
         BM25PageLocationInfo tokenMetaLocation{0};
-        InsertItemToHashBucket(index, bm25EntryPages, bucketId, bucketLocation, forkNum, building);
-        InsertItemToTokenMetaList(index, bucketLocation, tokenizedDoc.tokenDatas[tokenIdx],
+        InsertItemToTokenMetaList(index, bm25EntryPages, bucketIdx, tokenizedDoc.tokenDatas[tokenIdx],
             tokenMetaLocation, forkNum, building);
         InsertItemToPostingList(index, tokenMetaLocation, tokenizedDoc.tokenDatas[tokenIdx], tokenizedDoc.docLength,
             docId, score, forkNum, building);
@@ -453,7 +345,7 @@ static void AllocateForwardIdxForToken(Relation index, uint32 tokenCount, uint64
         BM25GetPage(index, &page, buf, &state, building);
         /* start append */
         while (metaPage->capacity - metaPage->size < tokenCount) {
-            BM25AppendPage(index, &buf, &page, MAIN_FORKNUM, true, &state, building);
+            BM25AppendPage(index, &buf, &page, MAIN_FORKNUM, &state, building);
             BlockNumber newblk = BufferGetBlockNumber(buf);
             if (isFull) {
                 *startPage = newblk;
@@ -563,7 +455,7 @@ static void ExpandDocumentListCapacityIfNeed(Relation index, BM25DocMetaPage doc
         BM25GetPage(index, &page, buf, &state, building);
         /* start append */
         while (docMetaPage->docCapacity <= docId) {
-            BM25AppendPage(index, &buf, &page, MAIN_FORKNUM, true, &state, building);
+            BM25AppendPage(index, &buf, &page, MAIN_FORKNUM, &state, building);
             BlockNumber newblk = BufferGetBlockNumber(buf);
             docMetaPage->lastDocPage = newblk;
             docMetaPage->docCapacity += BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
@@ -752,6 +644,40 @@ static BlockNumber CreateLockPage(Relation index, ForkNumber forkNum)
     return lockBlkno;
 }
 
+/* pre_initialize hashbuckets page for performance */
+static uint32 InitHashBucketsPage(Relation index, BlockNumber hashBucketsBlkno)
+{
+    Buffer buf;
+    Page page;
+    GenericXLogState *state = nullptr;
+    buf = ReadBuffer(index, hashBucketsBlkno);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    state = GenericXLogStart(index);
+    page = GenericXLogRegisterBuffer(state, buf, GENERIC_XLOG_FULL_IMAGE);
+    uint32 itemSize = sizeof(BM25HashBucketItem);
+    BM25HashBucketPage item = (BM25HashBucketPage)palloc0(sizeof(BM25HashBucketItem));
+    uint32 bucketId = 0;
+    while (PageGetFreeSpace(page) >= itemSize) {
+        /* 2 BlockNumber in each BM25HashBucketItem (8-byte alignment) */
+        item->bucketBlkno[0] = InvalidBlockNumber;
+        item->bucketBlkno[1] = InvalidBlockNumber;
+        OffsetNumber offno = PageAddItem(page, (Item)item, itemSize, InvalidOffsetNumber, false, false);
+        if (offno == InvalidOffsetNumber) {
+            pfree(item);
+            GenericXLogAbort(state);
+            UnlockReleaseBuffer(buf);
+            elog(ERROR, "failed to add index item [BM25HashBucketBlkno] to \"%s\"", RelationGetRelationName(index));
+        }
+        bucketId++;
+    }
+    BM25PageGetOpaque(page)->nextblkno = InvalidBlockNumber;
+    GenericXLogFinish(state);
+    UnlockReleaseBuffer(buf);
+    pfree(item);
+    elog(LOG, "Init [BM25HashBucket] maxBucketCount %u.", bucketId);
+    return bucketId;
+}
+
 static BM25EntryPages CreateEntryPages(Relation index, ForkNumber forkNum)
 {
     BM25EntryPages entryPages;
@@ -759,7 +685,7 @@ static BM25EntryPages CreateEntryPages(Relation index, ForkNumber forkNum)
     entryPages.documentMetaPage = CreateDocMetaPage(index, forkNum);
     entryPages.docForwardPage = CreateDocForwardMetaPage(index, forkNum);
     entryPages.hashBucketsPage = CreateBM25CommonPage(index, forkNum, true);
-    entryPages.hashBucketCount = 0;
+    entryPages.maxHashBucketCount = InitHashBucketsPage(index, entryPages.hashBucketsPage);
     return entryPages;
 }
 
@@ -784,11 +710,12 @@ static void CreateMetaPage(Relation index, BM25BuildState *buildstate, ForkNumbe
     metap->magicNumber = BM25_MAGIC_NUMBER;
     metap->version = BM25_VERSION;
     metap->entryPageList = CreateEntryPages(index, forkNum);
-    buildstate->bm25EntryPages = metap->entryPageList;
     metap->documentCount = 0;
     metap->tokenCount = 0;
     metap->nextDocId = 0;
     metap->nextTokenId = 0;
+
+    buildstate->bm25EntryPages = metap->entryPageList;
 
     ((PageHeader)page)->pd_lower = ((char *)metap + sizeof(BM25MetaPageData)) - (char *)page;
 
@@ -828,7 +755,6 @@ static void BM25ParallelScanAndInsert(Relation heapRel, Relation indexRel, BM25S
     indexInfo = BuildIndexInfo(indexRel);
     InitBM25BuildState(&buildstate, heapRel, indexRel, indexInfo, MAIN_FORKNUM);
     buildstate.bm25EntryPages = bm25shared->bm25EntryPages;
-    buildstate.bm25EntryPages.hashBucketCount = 0;
 
     scan = tableam_scan_begin_parallel(heapRel, &bm25shared->heapdesc);
     reltuples = tableam_index_build_scan(heapRel, indexRel, indexInfo, true, BM25BuildCallback,
@@ -838,7 +764,6 @@ static void BM25ParallelScanAndInsert(Relation heapRel, Relation indexRel, BM25S
     SpinLockAcquire(&bm25shared->mutex);
     bm25shared->nparticipantsdone++;
     bm25shared->reltuples += reltuples;
-    bm25shared->bm25EntryPages.hashBucketCount += buildstate.bm25EntryPages.hashBucketCount;
     SpinLockRelease(&bm25shared->mutex);
 
     FreeBuildState(&buildstate);
@@ -952,35 +877,29 @@ void ParallelReorderMain(const BgWorkerContext *bwc)
     ereport(LOG, (errmsg("launch reorder background threadId: %d.", reorderShared->curThreadId)));
 
     // loop buckets
-    BlockNumber nextblkno = startLocation.blkno;
+    BlockNumber hashBucketsBlkno = startLocation.blkno;
     OffsetNumber startoffno = startLocation.offno;
     bool isStartPage = true;
     bool isEnd = false;
     uint32 scanBucketCount = 0;
     Buffer cbuf;
     Page cpage;
-    while (BlockNumberIsValid(nextblkno)) {
+    if (BlockNumberIsValid(hashBucketsBlkno)) {
         OffsetNumber maxoffno;
-        cbuf = ReadBuffer(indexRel, nextblkno);
+        cbuf = ReadBuffer(indexRel, hashBucketsBlkno);
         LockBuffer(cbuf, BUFFER_LOCK_SHARE);
         cpage = BufferGetPage(cbuf);
         maxoffno = PageGetMaxOffsetNumber(cpage);
-        for (OffsetNumber offno = (isStartPage ? startoffno : FirstOffsetNumber); offno <= maxoffno;
-            offno = OffsetNumberNext(offno)) {
+        for (OffsetNumber offno = startoffno; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
+            BM25HashBucketPage bucketInfo = (BM25HashBucketPage)PageGetItem(cpage, PageGetItemId(cpage, offno));
             scanBucketCount++;
-            BM25HashBucketItem *item = (BM25HashBucketItem *)PageGetItem(cpage, PageGetItemId(cpage, offno));
-            ReorderBucket(indexRel, item->bucketBlkno);
+            ReorderBucket(indexRel, bucketInfo->bucketBlkno[0]);
+            ReorderBucket(indexRel, bucketInfo->bucketBlkno[1]);
             if (scanBucketCount >= reorderShared->batchCount) {
-                isEnd = true;
                 break;
             }
         }
-        isStartPage = false;
-        nextblkno = BM25PageGetOpaque(cpage)->nextblkno;
         UnlockReleaseBuffer(cbuf);
-        if (isEnd) {
-            break;
-        }
     }
 
     /* Close relations within worker */
@@ -1002,21 +921,19 @@ static void BM25InitReorderShared(BM25ReorderShared *reorderShared, BM25BuildSta
     reorderShared->indexrelid = RelationGetRelid(buildstate->index);
     pg_atomic_init_u32(&reorderShared->curThreadId, 0);
 
-    BlockNumber nextblkno = hashBucketsPage;
-    BlockNumber curblkno = nextblkno;
     Buffer cbuf;
     Page cpage;
     uint32 curHashBucketCount = 0;
     uint32 curBatchIdx = 0;
-    while (BlockNumberIsValid(nextblkno)) {
+    if (BlockNumberIsValid(hashBucketsPage)) {
         OffsetNumber maxoffno;
-        cbuf = ReadBuffer(buildstate->index, nextblkno);
+        cbuf = ReadBuffer(buildstate->index, hashBucketsPage);
         LockBuffer(cbuf, BUFFER_LOCK_SHARE);
         cpage = BufferGetPage(cbuf);
         maxoffno = PageGetMaxOffsetNumber(cpage);
         for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
             if (curHashBucketCount == 0 && curBatchIdx < reorderParallelNum) {
-                reorderShared->startPageLocation[curBatchIdx].blkno = nextblkno;
+                reorderShared->startPageLocation[curBatchIdx].blkno = hashBucketsPage;
                 reorderShared->startPageLocation[curBatchIdx].offno = offno;
                 curBatchIdx++;
             }
@@ -1025,8 +942,6 @@ static void BM25InitReorderShared(BM25ReorderShared *reorderShared, BM25BuildSta
                 curHashBucketCount = 0;
             }
         }
-        curblkno = nextblkno;
-        nextblkno = BM25PageGetOpaque(cpage)->nextblkno;
         UnlockReleaseBuffer(cbuf);
     }
     reorderParallelNum = curBatchIdx;
@@ -1063,7 +978,7 @@ static void BuildBM25Index(BM25BuildState *buildstate, ForkNumber forkNum)
     }
 
     if (buildstate->bm25leader) {
-        uint32 hashBucketCount = buildstate->bm25leader->bm25shared->bm25EntryPages.hashBucketCount;
+        uint32 hashBucketCount = buildstate->bm25leader->bm25shared->bm25EntryPages.maxHashBucketCount;
         BlockNumber hashBucketsPage = buildstate->bm25leader->bm25shared->bm25EntryPages.hashBucketsPage;
         BM25EndParallel(buildstate->bm25leader);
 
