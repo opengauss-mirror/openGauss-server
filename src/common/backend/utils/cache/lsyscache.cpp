@@ -2519,6 +2519,35 @@ Oid getBaseType(Oid typid)
     return getBaseTypeAndTypmod(typid, &typmod);
 }
 
+Oid getBaseTypeAndOtherAttr(Oid typid, int32* typmod, char* typtype)
+{
+    /*
+     * We loop to find the bottom base type in a stack of domains.
+     */
+    for (;;) {
+        HeapTuple tup;
+        Form_pg_type typTup;
+        tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+        if (!HeapTupleIsValid(tup)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
+        }
+        typTup = (Form_pg_type)GETSTRUCT(tup);
+        if (typtype != NULL) {
+            *typtype = typTup->typtype;
+        }
+        if (typTup->typtype != TYPTYPE_DOMAIN) {
+            /* Not a domain, so done */
+            ReleaseSysCache(tup);
+            break;
+        }
+        Assert(typTup->typinput==F_SUBTYPE_IN || *typmod == -1);
+        typid = typTup->typbasetype;
+        *typmod = typTup->typtypmod;
+        ReleaseSysCache(tup);
+    }
+    return typid;
+}
+
 /*
  * getBaseTypeAndTypmod
  *		If the given type is a domain, return its base type and typmod;
@@ -2533,28 +2562,8 @@ Oid getBaseTypeAndTypmod(Oid typid, int32* typmod)
     if (typid == DATEOID || typid == TIMESTAMPOID || typid == BPCHAROID || typid == VARCHAROID) {
         return typid;
     }
-    /*
-     * We loop to find the bottom base type in a stack of domains.
-     */
-    for (;;) {
-        HeapTuple tup;
-        Form_pg_type typTup;
-        tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
-        if (!HeapTupleIsValid(tup)) {
-            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
-        }
-        typTup = (Form_pg_type)GETSTRUCT(tup);
-        if (typTup->typtype != TYPTYPE_DOMAIN) {
-            /* Not a domain, so done */
-            ReleaseSysCache(tup);
-            break;
-        }
-        Assert(typTup->typinput==F_SUBTYPE_IN || *typmod == -1);
-        typid = typTup->typbasetype;
-        *typmod = typTup->typtypmod;
-        ReleaseSysCache(tup);
-    }
-    return typid;
+    
+    return getBaseTypeAndOtherAttr(typid, typmod);
 }
 
 #ifdef PGXC
