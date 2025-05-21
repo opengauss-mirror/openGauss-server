@@ -1114,8 +1114,8 @@ static void BuildIndexCheck(Relation index)
     TupleDesc tupleDesc = RelationGetDescr(index);
     FormData_pg_attribute* attrs = tupleDesc->attrs;
     for (int i = 0; i < tupleDesc->natts; ++i) {
-        if (attrs[i].atttypid == TEXTARRAYOID) {
-            elog(ERROR, "bm25 index is not supported currently for datatype: text array.");
+        if (attrs[i].atttypid != TEXTOID) {
+            elog(ERROR, "bm25 index is only supported for datatype: text.");
         }
     }
     return;
