@@ -243,6 +243,7 @@ static void InsertItemToTokenMetaList(Relation index, BM25PageLocationInfo &buck
     securec_check_c(rc, "\0", "\0");
     tokenMeta->tokenId = BM25AllocateTokenId(index);
     tokenData.tokenId = tokenMeta->tokenId;
+    tokenMeta->hashValue = tokenData.hashValue;
     tokenMeta->maxScore = 0;
     tokenMeta->postingBlkno = InvalidBlockNumber;
     tokenMeta->lastInsertBlkno = InvalidBlockNumber;

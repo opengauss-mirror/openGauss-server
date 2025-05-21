@@ -159,6 +159,7 @@ typedef BM25HashBucketItem *BM25HashBucketPage;
 
 typedef struct BM25TokenMetaItem {
     uint32 tokenId;
+    uint32 hashValue;
     uint32 docCount;
     BlockNumber postingBlkno;
     BlockNumber lastInsertBlkno;
