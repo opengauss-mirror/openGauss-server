@@ -706,5 +706,17 @@ select pro('Hello', 'World', 'from', 'OpenGauss');
 
 drop procedure pro;
 
+-- test spi subtransaction error
+SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'mppdb_decoding');
+CREATE OR REPLACE FUNCTION logical_replication_slot_lsn_delta(slot text) RETURNS text AS
+$$
+ BEGIN
+     return location from pg_logical_slot_peek_changes(slot,null,1) limit 1;
+ END
+$$ language plpgsql;
+select logical_replication_slot_lsn_delta('regression_slot');
+drop function logical_replication_slot_lsn_delta;
+select pg_drop_replication_slot('regression_slot');
+
 \c regression;
 drop database IF EXISTS pl_test_pkg_define;

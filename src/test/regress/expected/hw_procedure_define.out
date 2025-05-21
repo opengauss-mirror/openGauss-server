@@ -951,5 +951,30 @@ CONTEXT:  referenced column: pro
 (1 row)
 
 drop procedure pro;
+-- test spi subtransaction error
+SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'mppdb_decoding');
+    slotname     | xlog_position 
+-----------------+---------------
+--? regression_slot |.*
+(1 row)
+
+CREATE OR REPLACE FUNCTION logical_replication_slot_lsn_delta(slot text) RETURNS text AS
+$$
+ BEGIN
+     return location from pg_logical_slot_peek_changes(slot,null,1) limit 1;
+ END
+$$ language plpgsql;
+select logical_replication_slot_lsn_delta('regression_slot');
+ERROR:  tuple is NULL when store to SPI tupletable.
+CONTEXT:  SQL statement "SELECT location from pg_logical_slot_peek_changes(slot,null,1)limit 1"
+PL/pgSQL function logical_replication_slot_lsn_delta(text) line 3 at RETURN
+referenced column: logical_replication_slot_lsn_delta
+drop function logical_replication_slot_lsn_delta;
+select pg_drop_replication_slot('regression_slot');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
 \c regression;
 drop database IF EXISTS pl_test_pkg_define;

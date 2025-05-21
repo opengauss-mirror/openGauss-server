@@ -156,6 +156,7 @@ int SPI_connect_ext(CommandDest dest, void (*spiCallbackfn)(void *), void *clien
     u_sess->SPI_cxt._current->processed = 0;
     u_sess->SPI_cxt._current->lastoid = InvalidOid;
     u_sess->SPI_cxt._current->tuptable = NULL;
+    u_sess->SPI_cxt._current->execSubid = InvalidSubTransactionId;
     u_sess->SPI_cxt._current->procCxt = NULL; /* in case we fail to create 'em */
     u_sess->SPI_cxt._current->execCxt = NULL;
     u_sess->SPI_cxt._current->connectSubid = GetCurrentSubTransactionId();
@@ -207,7 +208,7 @@ int SPI_connect_ext(CommandDest dest, void (*spiCallbackfn)(void *), void *clien
 int SPI_finish(void)
 {
     SPI_STACK_LOG("begin", NULL, NULL);
-    int res = _SPI_begin_call(false); /* live in procedure memory */
+    int res = _SPI_begin_call(false); /* just check we're connected */
     if (res < 0) {
         return res;
     }
@@ -695,8 +696,15 @@ void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid, bool STP_rollback,
      * surrounding the subxact, clean up to prevent memory leakage.
      */
     if (u_sess->SPI_cxt._current && !isCommit) {
-        /* free Executor memory the same as _SPI_end_call would do */
-        MemoryContextResetAndDeleteChildren(u_sess->SPI_cxt._current->execCxt);
+        /*
+         * Throw away executor state if current executor operation was started
+         * within current subxact (essentially, force a _SPI_end_call(true)).
+         */
+        if (u_sess->SPI_cxt._current->execSubid >= mySubid) {
+            u_sess->SPI_cxt._current->execSubid = InvalidSubTransactionId;
+            MemoryContextResetAndDeleteChildren(u_sess->SPI_cxt._current->execCxt);
+        }
+
         /* throw away any partially created tuple-table */
         SPI_freetuptable(u_sess->SPI_cxt._current->tuptable);
         u_sess->SPI_cxt._current->tuptable = NULL;
@@ -3496,8 +3504,12 @@ static MemoryContext _SPI_procmem(void)
 
 /*
  * _SPI_begin_call: begin a SPI operation within a connected procedure
+ *
+ * use_exec is true if we intend to make use of the procedure's execCxt
+ * during this SPI operation.  We'll switch into that context, and arrange
+ * for it to be cleaned up at _SPI_end_call or if an error occurs.
  */
-int _SPI_begin_call(bool execmem)
+int _SPI_begin_call(bool use_exec)
 {
     if (u_sess->SPI_cxt._curid + 1 != u_sess->SPI_cxt._connected)
         return SPI_ERROR_UNCONNECTED;
@@ -3506,7 +3518,10 @@ int _SPI_begin_call(bool execmem)
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("SPI stack corrupted when begin SPI operation.")));
     }
 
-    if (execmem) { /* switch to the Executor memory context */
+    if (use_exec) {
+        /* remember when the Executor operation started */
+        u_sess->SPI_cxt._current->execSubid = GetCurrentSubTransactionId();
+        /* switch to the Executor memory context */
         _SPI_execmem();
     }
 
@@ -3516,9 +3531,11 @@ int _SPI_begin_call(bool execmem)
 /*
  * _SPI_end_call: end a SPI operation within a connected procedure
  *
+ * use_exec must be the same as in the previous _SPI_begin_call
+ *
  * Note: this currently has no failure return cases, so callers don't check
  */
-int _SPI_end_call(bool procmem)
+int _SPI_end_call(bool use_exec)
 {
     /*
      * We're returning to procedure where u_sess->SPI_cxt._curid == u_sess->SPI_cxt._connected - 1
@@ -3526,9 +3543,11 @@ int _SPI_end_call(bool procmem)
     u_sess->SPI_cxt._curid--;
 
     /* must put last after smp thread has reach the sync point, then we can release the memory. */
-    if (procmem) {
+    if (use_exec) {
         /* switch to the procedure memory context */
         _SPI_procmem();
+        /* mark Executor context no longer in use */
+        u_sess->SPI_cxt._current->execSubid = InvalidSubTransactionId;
         /* and free Executor memory */
         MemoryContextResetAndDeleteChildren(u_sess->SPI_cxt._current->execCxt);
     }
