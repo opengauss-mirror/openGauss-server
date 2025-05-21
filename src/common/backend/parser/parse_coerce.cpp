@@ -3059,13 +3059,16 @@ CoercionPathType find_coercion_pathway(Oid targetTypeId, Oid sourceTypeId, Coerc
     HeapTuple tuple;
 
     *funcid = InvalidOid;
+    int32 typmode = -1;
+    char sourceTypeType = TYPTYPE_INVALID;
+    char targetTypeType = TYPTYPE_INVALID;
 
     /* Perhaps the types are domains; if so, look at their base types */
     if (OidIsValid(sourceTypeId)) {
-        sourceTypeId = getBaseType(sourceTypeId);
+        sourceTypeId = getBaseTypeAndOtherAttr(sourceTypeId, &typmode, &sourceTypeType);
     }
     if (OidIsValid(targetTypeId)) {
-        targetTypeId = getBaseType(targetTypeId);
+        targetTypeId = getBaseTypeAndOtherAttr(targetTypeId, &typmode, &targetTypeType);
     }
 
     /* Domains are always coercible to and from their base type */
@@ -3074,11 +3077,11 @@ CoercionPathType find_coercion_pathway(Oid targetTypeId, Oid sourceTypeId, Coerc
     }
 
     /* target is an actual set type, change it to anyset to find the path */
-    if (targetTypeId != ANYSETOID && type_is_set(targetTypeId)) {
+    if (targetTypeId != ANYSETOID && targetTypeType == TYPTYPE_SET) {
         targetTypeId = ANYSETOID;
     }
 
-    if (sourceTypeId != ANYSETOID && type_is_set(sourceTypeId)) {
+    if (sourceTypeId != ANYSETOID && sourceTypeType == TYPTYPE_SET) {
         sourceTypeId = ANYSETOID;
     }
 

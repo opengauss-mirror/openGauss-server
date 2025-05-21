@@ -134,6 +134,7 @@ extern Oid get_typcollation(Oid typid);
 extern bool type_is_collatable(Oid typid);
 extern Oid getBaseType(Oid typid);
 extern Oid getBaseTypeAndTypmod(Oid typid, int32* typmod);
+extern Oid getBaseTypeAndOtherAttr(Oid typid, int32* typmod, char* typtype = NULL);
 #ifdef PGXC
 extern char* get_cfgname(Oid cfgid);
 extern char* get_typename(Oid typid);
