@@ -184,8 +184,8 @@ extern List* _SPI_get_querylist(SPIPlanPtr plan);
 #ifdef PGXC
 extern int SPI_execute_direct(const char* src, char* nodename, parse_query_func parser = GetRawParser());
 #endif
-extern int _SPI_begin_call(bool execmem);
-extern int _SPI_end_call(bool procmem);
+extern int _SPI_begin_call(bool use_exec);
+extern int _SPI_end_call(bool use_exec);
 extern void _SPI_hold_cursor(bool is_rollback = false);
 extern void _SPI_prepare_oneshot_plan_for_validator(const char* src, SPIPlanPtr plan, parse_query_func parser = GetRawParser());
 extern void InitSPIPlanCxt();

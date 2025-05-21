@@ -24,6 +24,9 @@ typedef struct _SPI_connection {
     Oid lastoid;
     SPITupleTable* tuptable;
 
+    /* subtransaction in which current Executor call was started */
+    SubTransactionId execSubid;
+
     MemoryContext procCxt;         /* procedure context */
     MemoryContext execCxt;         /* executor context */
     MemoryContext savedcxt;        /* context of SPI_connect's caller */
