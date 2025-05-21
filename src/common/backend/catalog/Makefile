@@ -63,7 +63,7 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	gs_matview_dependency.h gs_matview_log.h pgxc_slice.h gs_opt_model.h gs_dependencies.h gs_dependencies_obj.h gs_package.h gs_model.h\
 	pg_recyclebin.h pg_snapshot.h gs_job_argument.h gs_job_attribute.h pg_uid.h gs_db_privilege.h\
 	pg_replication_origin.h pg_publication.h pg_publication_rel.h pg_subscription.h gs_sql_patch.h\
-	pg_subscription_rel.h pg_proc_ext.h pg_object_type.h pg_statistic_history.h pg_statistic_lock.h\
+	pg_subscription_rel.h pg_proc_ext.h pg_object_type.h gs_sql_limit.h pg_statistic_history.h pg_statistic_lock.h\
     )
 
 # location of Catalog.pm
@@ -105,7 +105,7 @@ install-data: $(BKIFILES) installdirs
 	$(INSTALL_DATA) $(call vpathsearch,postgres.bki) '$(DESTDIR)$(datadir)/postgres.bki'
 	$(INSTALL_DATA) $(call vpathsearch,postgres.description) '$(DESTDIR)$(datadir)/postgres.description'
 	$(INSTALL_DATA) $(call vpathsearch,postgres.shdescription) '$(DESTDIR)$(datadir)/postgres.shdescription'
-	$(INSTALL_DATA) $(srcdir)/../../../../../privategauss/kernel/catalog/private_system_views.sql '$(DESTDIR)$(datadir)/private_system_views.sql'	
+	$(INSTALL_DATA) $(srcdir)/../../../../../privategauss/kernel/catalog/private_system_views.sql '$(DESTDIR)$(datadir)/private_system_views.sql'
 	$(INSTALL_DATA) $(srcdir)/system_views.sql '$(DESTDIR)$(datadir)/system_views.sql'
 	$(INSTALL_DATA) $(srcdir)/performance_views.sql '$(DESTDIR)$(datadir)/performance_views.sql'
 	$(INSTALL_DATA) $(srcdir)/information_schema.sql '$(DESTDIR)$(datadir)/information_schema.sql'

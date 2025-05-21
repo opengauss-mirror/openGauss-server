@@ -69,6 +69,7 @@ uint32 uint32_hash(const void *key, Size keysize)
 uint32 oid_hash(const void* key, Size keysize)
 {
     Assert(keysize == sizeof(Oid));
+
     return DatumGetUInt32(hash_uint32((uint32) * ((const Oid*)key)));
 }
 

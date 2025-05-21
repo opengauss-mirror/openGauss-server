@@ -2,9 +2,9 @@
 # Database security
 # ----------
 # --------------------------
-# usecases for improving coverage 
+# usecases for improving coverage
 # --------------------------
-test: heap_copytuple partition_cost_model fulljoin_rewrite_row_2 auto_analyze_test vec_sonic_hashjoin_string_spill vec_sonic_hashjoin_date_spill vec_sonic_hashjoin_string_nospill vec_sonic_hashjoin_date_nospill 
+test: heap_copytuple partition_cost_model fulljoin_rewrite_row_2 auto_analyze_test vec_sonic_hashjoin_string_spill vec_sonic_hashjoin_date_spill vec_sonic_hashjoin_string_nospill vec_sonic_hashjoin_date_nospill
 
 test: hw_pwd_reuse
 #test: hw_auditadmin
@@ -31,7 +31,7 @@ test: pg_object_type dump_object_type pg_anydata_type parse_const_as_param_type 
 #test jdbc pbe for bypass
 test: bypass_pbe multi_simple_query
 #test: partition for hash list
-test: pbe_hash_list_partition 
+test: pbe_hash_list_partition
 test: hw_partition_list_insert
 test: hw_partition_list_ddl
 test: hw_partition_hash_insert
@@ -109,7 +109,7 @@ test: toomanyparams
 
 test: test_astore_multixact
 
-test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test 
+test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test
 # test: row_compression/pg_tablespace_size
 test: row_compression/twophase
 test: row_compression/row_compress_feature pldebugger_shutdown
@@ -214,3 +214,5 @@ test: dump_alter_index_disable
 test: dump_alter_index_invisible nls_lower
 
 test: record_slow_sql_in_proc_commit
+
+test: sql_limit

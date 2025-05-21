@@ -68,6 +68,7 @@
 #include "catalog/pg_resource_pool.h"
 #include "catalog/pg_workload_group.h"
 #include "catalog/pg_app_workloadgroup_mapping.h"
+#include "catalog/gs_sql_limit.h"
 #include "miscadmin.h"
 #include "storage/smgr/fd.h"
 #include "storage/smgr/segment.h"
@@ -513,12 +514,12 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
  * Normal Table File Path:
  *  dbNode/relNode
  *  dbNode/relNode.1 (segno = 1)
- *  dbNode/relNode_forkName 
+ *  dbNode/relNode_forkName
  * Tmp Table Path:
  *  dbNode/tbackendId_relNode
  *  dbNode/tbackendId_relNode_forkName
  */
-static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode) 
+static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode)
 {
     char* parsepath = NULL;
     char* token = NULL;
@@ -527,14 +528,14 @@ static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode)
     if (path == NULL || *path == '\0') {
         return;
     }
-    
+
     parsepath = path;
-    
+
     token = strtok_r(parsepath, "/", &tmptoken);
     Assert(token != NULL);
     filenode.rnode.node.dbNode = atooid(token);
     if (tmptoken == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("invalid relation file path %s for relpath_parse_rnode", path)));
     }
     if ('t' != *tmptoken) {
@@ -546,14 +547,14 @@ static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode)
             filenode.forknumber = MAIN_FORKNUM;
             token = strtok_r(token, ".", &tmptoken);
             if (token == NULL) {
-                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("invalid relation file path %s for relpath_parse_rnode", path)));
             }
             filenode.rnode.node.relNode = atooid(token);
             filenode.segno = ('\0' == *tmptoken) ? 0 : (BlockNumber)atooid(tmptoken);
         } else {
-            /* 
-             *   dbNode/relNode_forkName 
+            /*
+             *   dbNode/relNode_forkName
              */
             filenode.rnode.node.relNode = atooid(token); /* relNode */
             filenode.rnode.node.bucketNode = InvalidBktId;
@@ -561,7 +562,7 @@ static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode)
         }
     } else {
         tmptoken = tmptoken + 1; /* skip 't' */
-    
+
         token = strtok_r(NULL, "_", &tmptoken);
         Assert(token != NULL);
         filenode.rnode.backend = atoi(token);
@@ -643,7 +644,7 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
        /*
         *   Normal Table Path:
         *      base/dbNode/relNode
-        *      base/dbNode/relNode_forkName 
+        *      base/dbNode/relNode_forkName
         *   Tmp Table Path:
         *      base/dbNode/tbackendId_relNode
         *      base/dbNode/tbackendId_relNode_forkName
@@ -691,7 +692,7 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
             pfree(parsepath);
             return filenode;
         }
-        
+
         relpath_parse_rnode(tmptoken, filenode);
     } else {
         pfree(parsepath);
@@ -1014,8 +1015,10 @@ bool IsSharedRelation(Oid relationId)
 #endif
         relationId == DbRoleSettingRelationId || relationId == PgJobRelationId || relationId == PgJobProcRelationId ||
         relationId == DataSourceRelationId || relationId == GSObsScanInfoRelationId ||
-        relationId == SubscriptionRelationId || relationId == ReplicationOriginRelationId)
+        relationId == SubscriptionRelationId || relationId == ReplicationOriginRelationId ||
+        relationId == GsSqlLimitRelationId) {
         return true;
+    }
     /* These are their indexes (see indexing.h) */
     if (relationId == AuthIdRolnameIndexId || relationId == AuthIdOidIndexId || relationId == AuthMemRoleMemIndexId ||
         relationId == AuthMemMemRoleIndexId || relationId == DatabaseNameIndexId || relationId == DatabaseOidIndexId ||
@@ -1041,8 +1044,9 @@ bool IsSharedRelation(Oid relationId)
         relationId == PgJobProcIdIndexId || relationId == DataSourceOidIndexId ||
         relationId == DataSourceNameIndexId || relationId == SubscriptionObjectIndexId ||
         relationId == SubscriptionNameIndexId || relationId == ReplicationOriginIdentIndex ||
-        relationId == ReplicationOriginNameIndex)
+        relationId == ReplicationOriginNameIndex || relationId == GsSqlLimitIdIndex) {
         return true;
+    }
     /* These are their toast tables and toast indexes (see toasting.h) */
     if (relationId == PgShdescriptionToastTable || relationId == PgShdescriptionToastIndex ||
         relationId == PgDbRoleSettingToastTable || relationId == PgDbRoleSettingToastIndex)
@@ -1201,7 +1205,7 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
         default:
             elog(ERROR, "invalid relpersistence: %c", relpersistence);
             return InvalidOid;    /* placate compiler */
-    }  
+    }
 
 
     /* This logic should match RelationInitPhysicalAddr */
@@ -1311,7 +1315,7 @@ bool IsAformatStyleFunctionOid(Oid relnamespace, Oid funcid)
 
     return !isObjectTypeClassFunction(funcid);
 }
- 
+
 /*
  * Description: Get records in pg_attribte for system catalogs
  * Returns: Datum

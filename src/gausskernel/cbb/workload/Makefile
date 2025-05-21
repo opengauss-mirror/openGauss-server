@@ -30,6 +30,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = workload.o parctl.o statctl.o gscgroup.o gsutil.o gsconfig.o memctl.o spmgr.o ioschdl.o dywlm_client.o dywlm_server.o commgr.o cpwlm.o
+OBJS = workload.o parctl.o statctl.o gscgroup.o gsutil.o gsconfig.o memctl.o spmgr.o ioschdl.o dywlm_client.o dywlm_server.o commgr.o cpwlm.o sql_limit_mgr.o sql_limit_base.o sql_limit_process.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

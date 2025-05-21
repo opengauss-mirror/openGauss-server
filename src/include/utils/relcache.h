@@ -165,6 +165,8 @@ extern CatalogRelationBuildParam GetCatalogParam(Oid id);
 
 extern HeapTuple ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic);
 
+extern bool IsRelationExists(Oid reloid);
+
 /*
  * this function is used for timeseries database, do not call this function directly!!!
  */

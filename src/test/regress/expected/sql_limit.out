@@ -1,0 +1,715 @@
+\c postgres;
+ALTER SYSTEM SET enable_sql_limit = 'on';
+SELECT pg_reload_conf();
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+
+create table test_table(i int);
+select count(*) from test_table where i > 10 and i < 1000;
+ count 
+-------
+     0
+(1 row)
+
+insert into test_table select generate_series(1,100000);
+create user test_table_user with password 'Gauss@123';
+grant select,insert,update,delete on test_table to test_table_user;
+select gs_create_sql_limit('rule_1','sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],null,null);
+ gs_create_sql_limit 
+---------------------
+                   1
+(1 row)
+
+select gs_create_sql_limit('rule_2','select',0,0,'now()','','{select,from,test_table,where}',null,null);
+ gs_create_sql_limit 
+---------------------
+                   2
+(1 row)
+
+select gs_create_sql_limit('rule_3','insert',0,0,'now()','','{insert,into,test_table,values}',null,null);
+ gs_create_sql_limit 
+---------------------
+                   3
+(1 row)
+
+select gs_create_sql_limit('rule_4','update',0,0,'now()','','{update,test_table,set,where}',null,null);
+ gs_create_sql_limit 
+---------------------
+                   4
+(1 row)
+
+select gs_create_sql_limit('rule_5','delete',0,0,'now()','','{delete,from,test_table,where}',null,null);
+ gs_create_sql_limit 
+---------------------
+                   5
+(1 row)
+
+set role test_table_user password 'Gauss@123';
+-- expect sqlid rule hit
+select count(*) from test_table where i > 1 and i < 100000;
+ERROR:  The request is over max concurrency of sql limit, the request will be rejected. limitId: 1
+DETAIL:  current concurrency: 1, max concurrency: 0
+-- expect select rule hit
+select count(*) from test_table where i > 1;
+ERROR:  The request is over max concurrency of sql limit, the request will be rejected. limitId: 2
+DETAIL:  current concurrency: 1, max concurrency: 0
+-- expect insert rule hit
+insert into test_table values (100001);
+ERROR:  The request is over max concurrency of sql limit, the request will be rejected. limitId: 3
+DETAIL:  current concurrency: 1, max concurrency: 0
+-- expect update rule hit
+update test_table set i = 100002 where i = 100001;
+ERROR:  The request is over max concurrency of sql limit, the request will be rejected. limitId: 4
+DETAIL:  current concurrency: 1, max concurrency: 0
+-- expect delete rule hit
+delete from test_table where i = 100002;
+ERROR:  The request is over max concurrency of sql limit, the request will be rejected. limitId: 5
+DETAIL:  current concurrency: 1, max concurrency: 0
+reset role;
+select * from gs_select_sql_limit(1);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               0 |         1 |            1
+(1 row)
+
+select * from gs_select_sql_limit(2);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        2 | t        | 0         |               0 |         1 |            1
+(1 row)
+
+select * from gs_select_sql_limit(3);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        3 | t        | 0         |               0 |         1 |            1
+(1 row)
+
+select * from gs_select_sql_limit(4);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        4 | t        | 0         |               0 |         1 |            1
+(1 row)
+
+select * from gs_select_sql_limit(5);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        5 | t        | 0         |               0 |         1 |            1
+(1 row)
+
+select * from gs_select_sql_limit();
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               0 |         1 |            1
+        2 | t        | 0         |               0 |         1 |            1
+        3 | t        | 0         |               0 |         1 |            1
+        4 | t        | 0         |               0 |         1 |            1
+        5 | t        | 0         |               0 |         1 |            1
+(5 rows)
+
+-- update rule
+reset role;
+select gs_update_sql_limit(1,'sqlid',0,1,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],null,null);
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(2,'select',0,1,'now()','','{select,from,test_table,where}',null,null);
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(3,'insert',0,1,'now()','','{insert,into,test_table,values}',null,null);
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(4,'update',0,1,'now()','','{update,test_table,set,where}',null,null);
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(5,'delete',0,1,'now()','','{delete,from,test_table,where}',null,null);
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+set role test_table_user password 'Gauss@123';
+-- expect sqlid rule hit, but not limit
+select count(*) from test_table where i > 1 and i < 100000;
+ count 
+-------
+ 99998
+(1 row)
+
+-- expect select rule hit, but not limit
+select count(*) from test_table where i > 1;
+ count 
+-------
+ 99999
+(1 row)
+
+-- expect insert rule hit, but not limit
+insert into test_table values (100001);
+-- expect update rule hit, but not limit
+update test_table set i = 100002 where i = 100001;
+-- expect delete rule hit, but not limit
+delete from test_table where i = 100002;
+reset role;
+select * from gs_select_sql_limit(1);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               1 |         1 |            0
+(1 row)
+
+select * from gs_select_sql_limit(2);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        2 | t        | 0         |               1 |         2 |            0
+(1 row)
+
+select * from gs_select_sql_limit(3);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        3 | t        | 0         |               1 |         1 |            0
+(1 row)
+
+select * from gs_select_sql_limit(4);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        4 | t        | 0         |               1 |         1 |            0
+(1 row)
+
+select * from gs_select_sql_limit(5);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        5 | t        | 0         |               1 |         1 |            0
+(1 row)
+
+select * from gs_select_sql_limit();
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               1 |         1 |            0
+        2 | t        | 0         |               1 |         2 |            0
+        3 | t        | 0         |               1 |         1 |            0
+        4 | t        | 0         |               1 |         1 |            0
+        5 | t        | 0         |               1 |         1 |            0
+(5 rows)
+
+-- update rule to invalid
+reset role;
+select gs_update_sql_limit(1,'sqlid',0,-1,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],null,null);
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(2,'select',0,-1,'now()','','{select,from,test_table,where}',null,null);
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(3,'insert',0,-1,'now()','','{insert,into,test_table,values}',null,null);
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(4,'update',0,-1,'now()','','{update,test_table,set,where}',null,null);
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(5,'delete',0,-1,'now()','','{delete,from,test_table,where}',null,null);
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+set role test_table_user password 'Gauss@123';
+-- expect sqlid rule not hit
+select count(*) from test_table where i > 1 and i < 100000;
+ count 
+-------
+ 99998
+(1 row)
+
+-- expect select rule not hit
+select count(*) from test_table where i > 1;
+ count 
+-------
+ 99999
+(1 row)
+
+-- expect insert rule not hit
+insert into test_table values (100001);
+-- expect update rule not hit
+update test_table set i = 100002 where i = 100001;
+-- expect delete rule not hit
+delete from test_table where i = 100002;
+reset role;
+select * from gs_select_sql_limit(1);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | f        | 0         |              -1 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(2);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        2 | f        | 0         |              -1 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(3);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        3 | f        | 0         |              -1 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(4);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        4 | f        | 0         |              -1 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(5);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        5 | f        | 0         |              -1 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit();
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | f        | 0         |              -1 |         0 |            0
+        2 | f        | 0         |              -1 |         0 |            0
+        3 | f        | 0         |              -1 |         0 |            0
+        4 | f        | 0         |              -1 |         0 |            0
+        5 | f        | 0         |              -1 |         0 |            0
+(5 rows)
+
+-- update rule to sepecific user
+reset role;
+select gs_update_sql_limit(1,'sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],null,'{test_table_user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(2,'select',0,0,'now()','','{select,from,test_table,where}',null,'{test_table_user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(3,'insert',0,0,'now()','','{insert,into,test_table,values}',null,'{test_table_user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(4,'update',0,0,'now()','','{update,test_table,set,where}',null,'{test_table_user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(5,'delete',0,0,'now()','','{delete,from,test_table,where}',null,'{test_table_user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+set role test_table_user password 'Gauss@123';
+-- expect sqlid rule hit
+select count(*) from test_table where i > 1 and i < 100000;
+ERROR:  The request is over max concurrency of sql limit, the request will be rejected. limitId: 1
+DETAIL:  current concurrency: 1, max concurrency: 0
+-- expect select rule hit
+select count(*) from test_table where i > 1;
+ERROR:  The request is over max concurrency of sql limit, the request will be rejected. limitId: 2
+DETAIL:  current concurrency: 1, max concurrency: 0
+-- expect insert rule hit
+insert into test_table values (100001);
+ERROR:  The request is over max concurrency of sql limit, the request will be rejected. limitId: 3
+DETAIL:  current concurrency: 1, max concurrency: 0
+-- expect update rule hit
+update test_table set i = 100002 where i = 100001;
+ERROR:  The request is over max concurrency of sql limit, the request will be rejected. limitId: 4
+DETAIL:  current concurrency: 1, max concurrency: 0
+-- expect delete rule hit
+delete from test_table where i = 100002;
+ERROR:  The request is over max concurrency of sql limit, the request will be rejected. limitId: 5
+DETAIL:  current concurrency: 1, max concurrency: 0
+reset role;
+select * from gs_select_sql_limit(1);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               0 |         1 |            1
+(1 row)
+
+select * from gs_select_sql_limit(2);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        2 | t        | 0         |               0 |         1 |            1
+(1 row)
+
+select * from gs_select_sql_limit(3);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        3 | t        | 0         |               0 |         1 |            1
+(1 row)
+
+select * from gs_select_sql_limit(4);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        4 | t        | 0         |               0 |         1 |            1
+(1 row)
+
+select * from gs_select_sql_limit(5);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        5 | t        | 0         |               0 |         1 |            1
+(1 row)
+
+select * from gs_select_sql_limit();
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               0 |         1 |            1
+        2 | t        | 0         |               0 |         1 |            1
+        3 | t        | 0         |               0 |         1 |            1
+        4 | t        | 0         |               0 |         1 |            1
+        5 | t        | 0         |               0 |         1 |            1
+(5 rows)
+
+-- update rule to sepecific user
+reset role;
+select gs_update_sql_limit(1,'sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],null,'{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(2,'select',0,0,'now()','','{select,from,test_table,where}',null,'{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(3,'insert',0,0,'now()','','{insert,into,test_table,values}',null,'{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(4,'update',0,0,'now()','','{update,test_table,set,where}',null,'{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(5,'delete',0,0,'now()','','{delete,from,test_table,where}',null,'{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+set role test_table_user password 'Gauss@123';
+-- expect sqlid rule not hit
+select count(*) from test_table where i > 1 and i < 100000;
+ count 
+-------
+ 99998
+(1 row)
+
+-- expect select rule not hit
+select count(*) from test_table where i > 1;
+ count 
+-------
+ 99999
+(1 row)
+
+-- expect insert rule not hit
+insert into test_table values (100001);
+-- expect update rule not hit
+update test_table set i = 100002 where i = 100001;
+-- expect delete rule not hit
+delete from test_table where i = 100002;
+reset role;
+select * from gs_select_sql_limit(1);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(2);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        2 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(3);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        3 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(4);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        4 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(5);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        5 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit();
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               0 |         0 |            0
+        2 | t        | 0         |               0 |         0 |            0
+        3 | t        | 0         |               0 |         0 |            0
+        4 | t        | 0         |               0 |         0 |            0
+        5 | t        | 0         |               0 |         0 |            0
+(5 rows)
+
+-- update rule to sepecific database
+reset role;
+select gs_update_sql_limit(1,'sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],'{db}','{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(2,'select',0,0,'now()','','{select,from,test_table,where}','{db}','{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(3,'insert',0,0,'now()','','{insert,into,test_table,values}','{db}','{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(4,'update',0,0,'now()','','{update,test_table,set,where}','{db}','{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(5,'delete',0,0,'now()','','{delete,from,test_table,where}','{db}','{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+set role test_table_user password 'Gauss@123';
+-- expect sqlid rule not hit
+select count(*) from test_table where i > 1 and i < 100000;
+ count 
+-------
+ 99998
+(1 row)
+
+-- expect select rule not hit
+select count(*) from test_table where i > 1;
+ count 
+-------
+ 99999
+(1 row)
+
+-- expect insert rule not hit
+insert into test_table values (100001);
+-- expect update rule not hit
+update test_table set i = 100002 where i = 100001;
+-- expect delete rule not hit
+delete from test_table where i = 100002;
+reset role;
+select * from gs_select_sql_limit(1);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(2);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        2 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(3);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        3 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(4);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        4 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(5);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        5 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit();
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               0 |         0 |            0
+        2 | t        | 0         |               0 |         0 |            0
+        3 | t        | 0         |               0 |         0 |            0
+        4 | t        | 0         |               0 |         0 |            0
+        5 | t        | 0         |               0 |         0 |            0
+(5 rows)
+
+-- update rule to sepecific database
+reset role;
+select gs_update_sql_limit(1,'sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],'{postgres}','{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(2,'select',0,0,'now()','','{select,from,test_table,where}','{postgres}','{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(3,'insert',0,0,'now()','','{insert,into,test_table,values}','{postgres}','{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(4,'update',0,0,'now()','','{update,test_table,set,where}','{postgres}','{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_update_sql_limit(5,'delete',0,0,'now()','','{delete,from,test_table,where}','{postgres}','{user}');
+ gs_update_sql_limit 
+---------------------
+ t
+(1 row)
+
+set role test_table_user password 'Gauss@123';
+-- expect sqlid rule not hit
+select count(*) from test_table where i > 1 and i < 100000;
+ count 
+-------
+ 99998
+(1 row)
+
+-- expect select rule not hit
+select count(*) from test_table where i > 1;
+ count 
+-------
+ 99999
+(1 row)
+
+-- expect insert rule not hit
+insert into test_table values (100001);
+-- expect update rule not hit
+update test_table set i = 100002 where i = 100001;
+-- expect delete rule not hit
+delete from test_table where i = 100002;
+reset role;
+select * from gs_select_sql_limit(1);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(2);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        2 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(3);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        3 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(4);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        4 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit(5);
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        5 | t        | 0         |               0 |         0 |            0
+(1 row)
+
+select * from gs_select_sql_limit();
+ limit_id | is_valid | work_node | max_concurrency | hit_count | reject_count 
+----------+----------+-----------+-----------------+-----------+--------------
+        1 | t        | 0         |               0 |         0 |            0
+        2 | t        | 0         |               0 |         0 |            0
+        3 | t        | 0         |               0 |         0 |            0
+        4 | t        | 0         |               0 |         0 |            0
+        5 | t        | 0         |               0 |         0 |            0
+(5 rows)
+
+-- delete rule
+reset role;
+select gs_delete_sql_limit(1);
+ gs_delete_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_delete_sql_limit(2);
+ gs_delete_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_delete_sql_limit(3);
+ gs_delete_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_delete_sql_limit(4);
+ gs_delete_sql_limit 
+---------------------
+ t
+(1 row)
+
+select gs_delete_sql_limit(5);
+ gs_delete_sql_limit 
+---------------------
+ t
+(1 row)
+
+ALTER SYSTEM SET enable_sql_limit = 'off';
+SELECT pg_reload_conf();
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+
+drop table test_table;
+drop user test_table_user;

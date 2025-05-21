@@ -895,7 +895,7 @@ extern Datum pg_get_constraintdef_ext(PG_FUNCTION_ARGS);
 extern char* pg_get_constraintdef_string(Oid constraintId);
 extern char* pg_get_constraintdef_part_string(Oid constraintId);
 extern char *pg_get_partkeydef_string(Relation relation);
-extern void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, bool showTblSpc, 
+extern void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, bool showTblSpc,
                         StringInfoData *buf, bool dumpSchemaOnly, bool showPartitionLocal, bool showSubPartitionLocal);
 extern Datum pg_get_expr(PG_FUNCTION_ARGS);
 extern Datum pg_get_expr_ext(PG_FUNCTION_ARGS);
@@ -1899,6 +1899,12 @@ extern Datum generate_procoverage_report(PG_FUNCTION_ARGS);
 
 /* lwlock.cpp */
 extern Datum gs_lwlock_status(PG_FUNCTION_ARGS);
+/* sql_limit_mgr.cpp */
+extern Datum gs_create_sql_limit(PG_FUNCTION_ARGS);
+extern Datum gs_update_sql_limit(PG_FUNCTION_ARGS);
+extern Datum gs_delete_sql_limit(PG_FUNCTION_ARGS);
+extern Datum gs_select_sql_limit(PG_FUNCTION_ARGS);
+extern Datum gs_select_sql_limit_all(PG_FUNCTION_ARGS);
 
 #else
 #endif

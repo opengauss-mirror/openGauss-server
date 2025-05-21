@@ -52,6 +52,8 @@ CATALOG(gs_sql_patch,9050) BKI_ROWTYPE_OID(9051) BKI_SCHEMA_MACRO BKI_WITHOUT_OI
 #endif
 } FormData_gs_sql_patch;
 
+#undef int8
+
 #define STATUS_DEFAULT 'd'
 
 typedef FormData_gs_sql_patch *Form_gs_sql_patch;

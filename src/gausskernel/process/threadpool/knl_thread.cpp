@@ -1749,6 +1749,12 @@ static void knl_t_sql_patch_init(knl_t_sql_patch_context* sql_patch_cxt)
     sql_patch_cxt->sql_patch_prev_post_parse_analyze_hook = NULL;
 }
 
+static void knl_t_sql_limit_init(knl_t_sql_limit_context* sql_limit_cxt)
+{
+    sql_limit_cxt->got_SIGHUP = false;
+    sql_limit_cxt->shutdown_requested = false;
+}
+
 static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
 {
     dms_cxt->msgContext = NULL;
@@ -2020,6 +2026,7 @@ void knl_thread_init(knl_thread_role role)
     knlTSPQCxtInit(&t_thrd.spq_ctx);
 #endif
     knl_t_inval_msg_init(&t_thrd.inval_msg_cxt);
+    knl_t_sql_limit_init(&t_thrd.sql_limit_cxt);
 }
 
 __attribute__ ((__used__)) knl_thrd_context *GetCurrentThread()
