@@ -1306,12 +1306,16 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
     if (RelationIsUstoreFormat(rel)) {
         DefElem* def = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE_LOWER));
         if (stmt->options == NULL) {
+#ifndef ENABLE_LITE_MODE
             if (u_sess->attr.attr_sql.enable_default_pcr_index) {
                 DefElem* def2 = makeDefElem("index_type", (Node*)makeString(UBTREE_INDEX_TYPE_PCR));
                 stmt->options = list_make2(def, def2);
             } else {
                 stmt->options = list_make1(def);
             }
+#else
+            stmt->options = list_make1(def);
+#endif
         } else {
             ListCell* cell = NULL;
             bool optionsHasStorage = false;
@@ -1327,6 +1331,7 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
             if (!optionsHasStorage)
                 stmt->options = lappend(stmt->options, def);
         }
+#ifndef ENABLE_LITE_MODE
         if (StdRdOptionsHasStringData(rel->rd_options, index_type)) {
             DefElem* def = NULL;
             if (RelationIndexIsPCR(rel->rd_options)) {
@@ -1347,6 +1352,15 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
 
             if (!optionsHasIndexType) {
                 stmt->options = lappend(stmt->options, def);
+            }
+        }
+#endif
+    } else {
+        foreach (cell, stmt->options) {
+            DefElem* defElem = (DefElem*)lfirst(cell);
+            if (pg_strcasecmp(defElem->defname, "index_type") == 0) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-support feature"),
+                    errdetail("Forbid to set option \"index_type\" for relations except for ustore relation.")));
             }
         }
     }

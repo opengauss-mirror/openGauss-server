@@ -713,11 +713,11 @@ static void InitializeLWLocks(int numLocks)
     for (id = 0; id < NUM_SCANNING_XLOG_TRACK_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_SCANNING_XLOG_TRACK);
     }
-
+#ifndef ENABLE_LITE_MODE
     for (id = 0; id < NUM_BUFFER_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_CR_BUF_MAPPING, id);
     }
-
+#endif
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NumFixedLWLocks);
 
     for (id = NumFixedLWLocks; id < numLocks; id++, lock++) {
