@@ -18,7 +18,7 @@ test: hw_audit_system_func
 
 test: performance_enhance
 test: explain_fqs
-test: explain_pbe
+test: explain_pbe smp_2
 
 # gs_basebackup
 # test: gs_basebackup

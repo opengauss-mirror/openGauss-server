@@ -535,6 +535,8 @@ private:
     StreamObjStatus m_quitStatus;
 #endif
     static HTAB* m_streamDescHashTbl;
+
+    int m_spiLevel;
 };
 
 extern bool IsThreadProcessStreamRecursive();

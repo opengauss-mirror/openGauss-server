@@ -1,0 +1,123 @@
+create schema test_smp2;
+set search_path=test_smp2;
+create table t1(a int, b int);
+--test smp is work good
+explain (costs off) select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming(type: LOCAL GATHER dop: 1/4)
+   ->  HashAggregate
+         Group By Key: a
+         ->  Streaming(type: LOCAL REDISTRIBUTE dop: 4/4)
+               ->  HashAggregate
+                     Group By Key: a
+                     ->  Seq Scan on t1
+(7 rows)
+
+create or replace procedure test_pro() as
+begin
+create table test_smp2.pro_t1 as select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a; 
+create table test_smp2.pro_t2 as select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a; 
+end;
+/
+--let procedure print plan
+set enable_auto_explain=on;
+set auto_explain_level=notice;
+select test_pro();
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: select test_pro();
+Name: datanode1
+--?.*
+  Output: test_pro()
+
+
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: create table test_smp2.pro_t1 as select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a
+Name: datanode1
+--?.*
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?.*
+--?.*
+              Output: t1.a, pg_catalog.sum((sum(t1.b)))
+              Group By Key: t1.a
+--?.*
+                    Output: t1.a, (sum(t1.b))
+                    Distribute Key: t1.a
+                    Spawn on: All datanodes
+                    Consumer Nodes: All datanodes
+--?.*
+                          Output: t1.a, sum(t1.b)
+                          Group By Key: t1.a
+--?.*
+                                Output: t1.a, t1.b
+
+
+CONTEXT:  SQL statement "create table test_smp2.pro_t1 as select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a"
+PL/pgSQL function test_pro() line 2 at SQL statement
+referenced column: test_pro
+NOTICE:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "create table test_smp2.pro_t1 as select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a"
+PL/pgSQL function test_pro() line 2 at SQL statement
+referenced column: test_pro
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: create table test_smp2.pro_t2 as select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a
+Name: datanode1
+--?.*
+  Spawn on: All datanodes
+  Consumer Nodes: All datanodes
+--?.*
+--?.*
+              Output: t1.a, pg_catalog.sum((sum(t1.b)))
+              Group By Key: t1.a
+--?.*
+                    Output: t1.a, (sum(t1.b))
+                    Distribute Key: t1.a
+                    Spawn on: All datanodes
+                    Consumer Nodes: All datanodes
+--?.*
+                          Output: t1.a, sum(t1.b)
+                          Group By Key: t1.a
+--?.*
+                                Output: t1.a, t1.b
+
+
+CONTEXT:  SQL statement "create table test_smp2.pro_t2 as select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a"
+PL/pgSQL function test_pro() line 3 at SQL statement
+referenced column: test_pro
+NOTICE:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "create table test_smp2.pro_t2 as select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a"
+PL/pgSQL function test_pro() line 3 at SQL statement
+referenced column: test_pro
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+ test_pro 
+----------
+ 
+(1 row)
+
+--clean up
+reset enable_auto_explain;
+reset auto_explain_level;
+drop table pro_t1;
+drop table pro_t2;
+drop table t1;
+drop procedure test_pro;
+drop schema test_smp2 cascade;

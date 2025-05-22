@@ -1,0 +1,28 @@
+create schema test_smp2;
+set search_path=test_smp2;
+
+create table t1(a int, b int);
+--test smp is work good
+explain (costs off) select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a;
+
+create or replace procedure test_pro() as
+begin
+create table test_smp2.pro_t1 as select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a; 
+create table test_smp2.pro_t2 as select /*+ set(query_dop 1004) */ a,sum(b) from t1 group by a; 
+end;
+/
+
+--let procedure print plan
+set enable_auto_explain=on;
+set auto_explain_level=notice;
+
+select test_pro();
+
+--clean up
+reset enable_auto_explain;
+reset auto_explain_level;
+drop table pro_t1;
+drop table pro_t2;
+drop table t1;
+drop procedure test_pro;
+drop schema test_smp2 cascade;

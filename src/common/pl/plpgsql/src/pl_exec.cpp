@@ -3920,6 +3920,9 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
                 
                 exec_exception_cleanup(estate, &excptContext);
     #ifndef ENABLE_MULTIPLE_NODES
+                if (!StreamThreadAmI()) {
+                    StreamNodeGroup::ReleaseStreamGroup(false);
+                }
                 AutoDopControl dopControl;
                 dopControl.CloseSmp();
     #endif
