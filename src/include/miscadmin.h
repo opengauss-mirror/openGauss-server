@@ -669,6 +669,7 @@ typedef enum {
     CsnMinSyncProcess,
     ParallelDecodeProcess,
     LogicalReadRecord,
+    SqlLimitProcess,
 
     NUM_AUXPROCTYPES /* Must be last! */
 } AuxProcType;

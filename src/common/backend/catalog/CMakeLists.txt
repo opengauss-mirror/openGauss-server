@@ -1,5 +1,5 @@
 #This is the main CMAKE for build all components.
-set(POSTGRES_BKI_SRCS_S 
+set(POSTGRES_BKI_SRCS_S
 "@pg_proc.h @pg_type.h @pg_attribute.h @pg_class.h @pg_partition.h @pg_attrdef.h @pg_constraint.h
 @pg_inherits.h @pg_index.h @pg_operator.data @pg_opfamily.h @pg_opclass.h @pg_am.h @pg_amop.data @pg_amproc.h
 @pg_language.h @pg_largeobject_metadata.h @pg_largeobject.h @pg_aggregate.h @pg_statistic.h @pg_rewrite.h
@@ -15,7 +15,7 @@ set(POSTGRES_BKI_SRCS_S
 @pg_object.h @pg_synonym.h @toasting.h @indexing.h @gs_obsscaninfo.h @pg_directory.h @pg_hashbucket.h @gs_global_chain.h @gs_global_config.h
 @pg_streaming_stream.h @pg_streaming_cont_query.h @pg_streaming_reaper_status.h @gs_matview.h @gs_matview_dependency.h @gs_matview_log.h @pgxc_slice.h
 @gs_opt_model.h @pg_recyclebin.h @pg_snapshot.h @gs_model.h @gs_dependencies.h @gs_dependencies_obj.h @gs_package.h @gs_job_argument.h @gs_job_attribute.h @pg_uid.h @gs_db_privilege.h
-@pg_replication_origin.h @pg_publication.h @pg_publication_rel.h @pg_subscription.h @gs_sql_patch.h @pg_subscription_rel.h @pg_object_type.h @pg_proc_ext.h @pg_statistic_history.h @pg_statistic_lock.h"
+@pg_replication_origin.h @pg_publication.h @pg_publication_rel.h @pg_subscription.h @gs_sql_patch.h @pg_subscription_rel.h @pg_object_type.h @pg_proc_ext.h @gs_sql_limit.h @pg_statistic_history.h @pg_statistic_lock.h"
 
 )
 
@@ -31,7 +31,7 @@ execute_process(
 )
 
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_catalog_SRC)
-set(TGT_catalog_INC 
+set(TGT_catalog_INC
     ${PROJECT_OPENGS_DIR}/contrib/log_fdw
     ${PROJECT_TRUNK_DIR}/distribute/bin/gds
     ${PROJECT_SRC_DIR}/include/libcomm
@@ -50,7 +50,7 @@ add_static_objtarget(common_backend_catalog TGT_catalog_SRC TGT_catalog_INC "${c
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/postgres.bki
     DESTINATION share/postgresql/
-) 
+)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/postgres.description
     DESTINATION share/postgresql/
 )

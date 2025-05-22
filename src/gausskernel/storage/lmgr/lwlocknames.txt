@@ -147,3 +147,4 @@ ShareInputScanLock 138
 ParallelIndexScanLock 139
 
 CBMFreeListLock 140
+SqlLimitLock 141

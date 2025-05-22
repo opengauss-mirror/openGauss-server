@@ -119,6 +119,7 @@
 #include "instruments/generate_report.h"
 #include "catalog/gs_encrypted_columns.h"
 #include "catalog/gs_dependencies_fn.h"
+#include "catalog/gs_sql_limit.h"
 #include "utils/plpgsql.h"
 #include "tcop/autonomoustransaction.h"
 
@@ -149,7 +150,7 @@ static oidvector* BuildIntervalTablespace(const IntervalPartitionDefState* inter
 static void deletePartitionTuple(Oid part_id);
 static void addNewPartitionTuplesForPartition(Relation pg_partition_rel,
     Oid relid, Oid reltablespace,
-    Oid bucketOid, PartitionState* partTableState, Oid ownerid, 
+    Oid bucketOid, PartitionState* partTableState, Oid ownerid,
     Datum reloptions, const TupleDesc tupledesc, char strategy, StorageType storage_type, LOCKMODE partLockMode,
     PartitionExprKeyInfo *partExprKeyInfo = NULL);
 static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* relname, const Oid reloid,
@@ -566,8 +567,8 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
     /*
      * sanity checks
      */
-    if (!allow_system_table_mods && 
-        (IsSystemNamespace(relnamespace) || IsToastNamespace(relnamespace) || IsCStoreNamespace(relnamespace) || 
+    if (!allow_system_table_mods &&
+        (IsSystemNamespace(relnamespace) || IsToastNamespace(relnamespace) || IsCStoreNamespace(relnamespace) ||
         IsPackageSchemaOid(relnamespace) || IsPldeveloper(relnamespace)) && IsNormalProcessingMode()) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
@@ -646,7 +647,7 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
                 isbucket = BUCKET_OID_IS_VALID(bucketOid) && !newcbi;
                 Oid database_id = (ConvertToRelfilenodeTblspcOid(reltablespace) == GLOBALTABLESPACE_OID) ?
                     InvalidOid : u_sess->proc_cxt.MyDatabaseId;
-                relfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(reltablespace), 
+                relfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(reltablespace),
                                                 database_id, isbucket, relfilenode);
             }
         } else {
@@ -657,7 +658,7 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
         isbucket = BUCKET_OID_IS_VALID(bucketOid) && !newcbi;
         Oid database_id = (ConvertToRelfilenodeTblspcOid(reltablespace) == GLOBALTABLESPACE_OID) ?
             InvalidOid : u_sess->proc_cxt.MyDatabaseId;
-        relfilenode = (Oid)seg_alloc_segment(ConvertToRelfilenodeTblspcOid(reltablespace), 
+        relfilenode = (Oid)seg_alloc_segment(ConvertToRelfilenodeTblspcOid(reltablespace),
                                              database_id, isbucket, InvalidBlockNumber);
         ereport(LOG, (errmsg("Segment Relation %s(%u) set relfilenode %u xid %lu", relname, relid, relfilenode,
             GetCurrentTransactionIdIfAny())));
@@ -691,7 +692,7 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
     rel->rd_rel->relrowmovement = rowMovement;
 
     /*
-     * Save newcbi as a context indicator to 
+     * Save newcbi as a context indicator to
      * avoid missing information in later index building process.
      */
     rel->newcbi = newcbi;
@@ -1111,7 +1112,7 @@ static void AddNewAttributeTuples(Oid new_rel_oid, TupleDesc tupdesc, char relki
             referenced.classId = TypeRelationId;
             referenced.objectId = attr->atttypid;
             referenced.objectSubId = 0;
-            
+
             if (need_build_depend) {
                 if (NULL != depend_extend_cell) {
                     gs_depend_param_body.dependExtend = (TypeDependExtend*)lfirst(depend_extend_cell);
@@ -1307,7 +1308,7 @@ void InsertPgClassTuple(
         values[Anum_pg_class_relminmxid - 1] = InvalidMultiXactId;
     }
 #endif
-    
+
     if (bucketcol != NULL)
         values[Anum_pg_class_relbucketkey - 1] = PointerGetDatum(bucketcol);
     else
@@ -1373,7 +1374,7 @@ static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, O
             new_rel_reltup->relallvisible = 0;
             break;
     }
-    
+
     /* Initialize relfrozenxid */
     if (RELKIND_IN_RTM) {
         /*
@@ -1429,7 +1430,7 @@ static void CheckDistColsUnique(DistributeBy *distribBy, int distribKeyNum, int2
     if (distribBy == NULL) {
         return;
     }
-    
+
     /* Check whether include identical column in distribute key */
     for (int i = 0; i < distribKeyNum - 1; i++) {
         for (int j = i + 1; j < distribKeyNum; j++) {
@@ -1474,7 +1475,7 @@ static void CheckListDistEntry(List* entry, int distkeynum, bool isDefault)
     if (boundaryLength != distkeynum && !isDefault) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg("Distribution boundary length (%d) does not equal to the number of distribute keys (%d).", 
+                errmsg("Distribution boundary length (%d) does not equal to the number of distribute keys (%d).",
                 boundaryLength, distkeynum)));
     }
 }
@@ -1548,13 +1549,13 @@ static int ConstCmp(const void* a, const void* b)
     return partitonKeyCompare((Const**)rea->sliceBoundaryValue, (Const**)reb->sliceBoundaryValue, rea->sliceNum);
 }
 
-static void IsDuplicateBoundariesExist(SliceConstInfo* sliceConstInfo, int totalBoundariesNum, int distkeynum) 
+static void IsDuplicateBoundariesExist(SliceConstInfo* sliceConstInfo, int totalBoundariesNum, int distkeynum)
 {
     /* sort all the boundaries values */
     qsort(sliceConstInfo, totalBoundariesNum, sizeof(SliceConstInfo), ConstCmp);
     /* if duplicate boundaries exist,report and exit */
     for (int i = 0; i < totalBoundariesNum - 1; i++) {
-        int cmp = partitonKeyCompare(sliceConstInfo[i].sliceBoundaryValue, 
+        int cmp = partitonKeyCompare(sliceConstInfo[i].sliceBoundaryValue,
             sliceConstInfo[i + 1].sliceBoundaryValue, distkeynum);
         if (cmp == 0) {
             if (strcmp(sliceConstInfo[i].sliceName, sliceConstInfo[i + 1].sliceName) == 0) {
@@ -1575,7 +1576,7 @@ static void IsDuplicateBoundariesExist(SliceConstInfo* sliceConstInfo, int total
     }
 }
 
-static int GetTotalBoundariesNum(List* sliceList) 
+static int GetTotalBoundariesNum(List* sliceList)
 {
     int result = 0;
     ListSliceDefState* slicedef = NULL;
@@ -1739,7 +1740,7 @@ static void CheckDistBoundaries(DistributeBy *distributeby, TupleDesc desc)
 
     posList = GetDistColsPos(distributeby, desc);
     if (distributeby->disttype == DISTTYPE_RANGE) {
-        /* 
+        /*
          * 1. check length of every slice boundaries
          * 2. check whether range slice boundaries ascending
          */
@@ -1799,7 +1800,7 @@ static void CheckDistDatanodeValidity(DistributeBy* distributeby, Oid* nodeoids,
     if (distributeby == NULL || distributeby->distState == NULL) {
         return;
     }
-    
+
     /*
      * Checks: 1. specified dn exists; 2. specified dn is contained in specifed node group.
      */
@@ -1833,7 +1834,7 @@ static void CheckDistDatanodeValidity(DistributeBy* distributeby, Oid* nodeoids,
     return;
 }
 
-static void CheckSliceRefNodeGroup(DistributeBy *distributeby, char* groupName) 
+static void CheckSliceRefNodeGroup(DistributeBy *distributeby, char* groupName)
 {
     Oid groupOid, baseGroupOid;
 
@@ -1850,7 +1851,7 @@ static void CheckSliceRefNodeGroup(DistributeBy *distributeby, char* groupName)
         char *baseGroupName = get_pgxc_groupname(baseGroupOid);
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_ATTRIBUTE),
-                    errmsg("table's node group (%s) is not the same with referenced table's node group(%s)", 
+                    errmsg("table's node group (%s) is not the same with referenced table's node group(%s)",
                         groupName, baseGroupName)));
     }
 
@@ -1883,7 +1884,7 @@ static void CheckSliceReferenceValidity(Oid relid, DistributeBy *distributeby, T
 
     baseType = baseLocInfo->locatorType;
     reftype = distributeby->disttype;
-    if (!((baseType == LOCATOR_TYPE_RANGE && reftype == DISTTYPE_RANGE) || 
+    if (!((baseType == LOCATOR_TYPE_RANGE && reftype == DISTTYPE_RANGE) ||
         (baseType == LOCATOR_TYPE_LIST && reftype == DISTTYPE_LIST))) {
         FreeRelationLocInfo(baseLocInfo);
         ereport(ERROR,
@@ -2022,7 +2023,7 @@ void AddRelationDistribution(const char *relname, Oid relid, DistributeBy* distr
     (void)BucketMapCacheGetBucketmap(group_name, &bucketCnt);
     if (bucketmaplen != 0 && bucketmaplen != bucketCnt) {
         bucketCnt = bucketmaplen;
-        if (!is_pgxc_group_bucketcnt_exists(get_pgxc_groupoid(group_name, false), bucketmaplen, &group_name, 
+        if (!is_pgxc_group_bucketcnt_exists(get_pgxc_groupoid(group_name, false), bucketmaplen, &group_name,
             &group_oid)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OPERATION),
@@ -2052,7 +2053,7 @@ void AddRelationDistribution(const char *relname, Oid relid, DistributeBy* distr
          * implement it later using ((uint32)random()) % ((uint32)numnodes),
          * and route the startpos to other CNs.
          */
-        
+
         /* write slice information to pgxc_slice, keep startpos to 0 at present. */
         PgxcSliceCreate(relname, relid, distributeby, descriptor, nodeoids, (uint32)numnodes, 0);
     }
@@ -2139,7 +2140,7 @@ static void CheckDistributeKeyAndType(Oid relid, DistributeBy *distributeby,
                             GetDistributeTypeName(distributeby->disttype))));
             }
         }
-        
+
         attnum[i++] = localAttrNum;
     }
 }
@@ -2250,8 +2251,8 @@ void GetRelationDistributionItems(Oid relid, DistributeBy* distributeby, TupleDe
         *locatortype = local_locatortype;
 }
 
-HashBucketInfo* GetRelationBucketInfo(DistributeBy* distributeby, 
-                                      TupleDesc tupledsc, 
+HashBucketInfo* GetRelationBucketInfo(DistributeBy* distributeby,
+                                      TupleDesc tupledsc,
                                       bool* createbucket,
                                       bool hashbucket)
 {
@@ -2738,7 +2739,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
 
     CheckAttributeNamesTypes(tupdesc, relkind, allow_system_table_mods);
 
-    /* 
+    /*
      * Check relation name to ensure that it doesn't conflict with existing synonym.
      */
     if (!IsInitdb && GetSynonymOid(relname, relnamespace, true) != InvalidOid) {
@@ -2911,7 +2912,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
     if (partTableState) {
         partExprKeyInfo.partkeyexprIsNull = CheckPartitionExprKey(partTableState->partitionKey, partTableState->partitionStrategy, &(partExprKeyInfo.partkeyIsFunc));
         if (partTableState->subPartitionState)
-            subpartkeyexprIsNull = CheckPartitionExprKey(partTableState->subPartitionState->partitionKey, 
+            subpartkeyexprIsNull = CheckPartitionExprKey(partTableState->subPartitionState->partitionKey,
                                                          partTableState->subPartitionState->partitionStrategy, &subpartkeyIsFunc);
     }
     /*
@@ -2968,7 +2969,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
      */
     if ((IsUnderPostmaster && !u_sess->attr.attr_common.IsInplaceUpgrade &&
         (relkind == RELKIND_RELATION || relkind == RELKIND_VIEW || relkind == RELKIND_FOREIGN_TABLE ||
-        relkind == RELKIND_COMPOSITE_TYPE || relkind == RELKIND_MATVIEW || relkind == RELKIND_STREAM || 
+        relkind == RELKIND_COMPOSITE_TYPE || relkind == RELKIND_MATVIEW || relkind == RELKIND_STREAM ||
         relkind == RELKIND_CONTQUERY)) ||
         (strcmp(relname, "bulk_exception") == 0) || (strcmp(relname, "desc_rec") == 0))
         new_array_oid = AssignTypeArrayOid();
@@ -3006,7 +3007,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
         new_type_oid = new_type_addr.objectId;
         if (typaddress)
             *typaddress = new_type_addr;
-        
+
     }
     PG_CATCH();
     {
@@ -3478,7 +3479,7 @@ void RemoveAttributeById(Oid relid, AttrNumber attnum)
 
         /* We don't want to keep stats for it anymore */
         values[Anum_pg_attribute_attstattarget - 1] = Int32GetDatum(0);
-        
+
         values[Anum_pg_attribute_attdroppedname - 1] = NameGetDatum(&(attStruct->attname));
 
         /*
@@ -3814,7 +3815,7 @@ void heap_drop_with_catalog(Oid relid)
      * Schedule unlinking of the relation's physical files at commit.
      */
     if (rel->rd_rel->relkind != RELKIND_VIEW && rel->rd_rel->relkind != RELKIND_COMPOSITE_TYPE &&
-        rel->rd_rel->relkind != RELKIND_FOREIGN_TABLE && rel->rd_rel->relkind != RELKIND_STREAM && 
+        rel->rd_rel->relkind != RELKIND_FOREIGN_TABLE && rel->rd_rel->relkind != RELKIND_STREAM &&
         rel->rd_rel->relkind != RELKIND_CONTQUERY) {
         RelationDropStorage(rel);
     }
@@ -4309,7 +4310,7 @@ List* AddRelationNewConstraints(
     foreach (cell, newColDefaults) {
         RawColumnDefault* colDef = (RawColumnDefault*)lfirst(cell);
         Form_pg_attribute atp = &rel->rd_att->attrs[colDef->attnum - 1];
-        
+
         if (colDef->raw_default != NULL) {
             if (IsA(colDef->raw_default, AutoIncrement)) {
                 autoinc_attnum = colDef->attnum;
@@ -4467,7 +4468,7 @@ List* AddRelationNewConstraints(
         /*
          * OK, store it.
          */
-        constrOid = StoreRelCheck(rel, ccname, expr, !cdef->skip_validation, 
+        constrOid = StoreRelCheck(rel, ccname, expr, !cdef->skip_validation,
                                     is_local, is_local ? 0 : 1, cdef->is_no_inherit,
                                     cdef->deferrable, cdef->initdeferred, cdef->isdisable);
         ListCell *cell = NULL;
@@ -4771,7 +4772,7 @@ Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 att
     /*
      * Make sure default expr does not refer to rownum.
      */
-#ifndef ENABLE_MULTIPLE_NODES	 
+#ifndef ENABLE_MULTIPLE_NODES
     ExcludeRownumExpr(pstate, expr);
 #endif
     /*
@@ -4879,7 +4880,7 @@ static Node* cookConstraint(ParseState* pstate, Node* raw_constraint, char* reln
 
 /*
  * CopyStatistics --- copy entries in pg_statistic from one rel to another
- * 
+ *
  * This function was enhanced by multi-column statistics.
  */
 void CopyStatistics(Oid fromrelid, Oid torelid, char starelkind)
@@ -4934,7 +4935,7 @@ void CopyStatistics(Oid fromrelid, Oid torelid, char starelkind)
     heap_close(pgstatistic, RowExclusiveLock);
 
     /*
-     * NOTE: scan key is reused. Since the two keys have the same attrnum 
+     * NOTE: scan key is reused. Since the two keys have the same attrnum
      * in pg_statistic and pg_statistic_ext, we don't need to change it
      */
     pgstatistic = heap_open(StatisticExtRelationId, RowExclusiveLock);
@@ -5082,7 +5083,7 @@ static void RelationTruncateIndexes(Relation heapRelation, LOCKMODE lockmode)
          * Now truncate the actual file (and discard buffers).
          */
         RelationTruncate(currentIndex, 0);
-        
+
         /* truncate psort relation */
         if (unlikely(currentIndex->rd_rel->relam == PSORT_AM_OID)) {
             Relation psort_rel = heap_open(currentIndex->rd_rel->relcudescrelid, lockmode);
@@ -5800,7 +5801,7 @@ Partition heapCreatePartition(const char* part_name, bool for_partitioned_table,
                     partFileNode, GetCurrentTransactionIdIfAny())));
             } else {
                 partFileNode = part_id;
-            } 
+            }
         }
         if (u_sess->proc_cxt.IsBinaryUpgrade) {
             createStorage = true;
@@ -5825,7 +5826,7 @@ Partition heapCreatePartition(const char* part_name, bool for_partitioned_table,
         reloptions);
 
     /*
-     * Save newcbi as a context indicator to 
+     * Save newcbi as a context indicator to
      * avoid missing information in later index building process.
      */
     new_part_desc->newcbi = newcbi;
@@ -5855,7 +5856,7 @@ Partition heapCreatePartition(const char* part_name, bool for_partitioned_table,
     }
 
     return new_part_desc;
-    
+
 }
 
 /*
@@ -6804,7 +6805,7 @@ static Node *GetIntervalBoundaryByTuple(Relation rel, Tuple tuple)
 
     bool isNull = false;
     Datum constValue = tableam_tops_tuple_fast_getattr(tuple, partKeyColumn->values[0], rel->rd_att, &isNull);
-    
+
     Datum destValue;
     if (lastPartBoundary->consttype == DATEOID || lastPartBoundary->consttype == TIMESTAMPOID
         || lastPartBoundary->consttype == TIMESTAMPTZOID) {
@@ -8047,7 +8048,7 @@ void SetRelHasClusterKey(Relation rel, bool has)
 
 /*
  * Add cluster key constraint for relation.
- * return address List of constraint   
+ * return address List of constraint
  */
 List* AddRelClusterConstraints(Relation rel, List* clusterKeys)
 {

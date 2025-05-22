@@ -186,6 +186,21 @@ static void knl_g_startup_init(knl_g_startup_context *starup_cxt)
     starup_cxt->current_record = NULL;
 }
 
+static void knl_g_sqlLimit_init(knl_g_sqlLimit_context *sqlLimit_cxt)
+{
+    Assert(sqlLimit_cxt != NULL);
+    sqlLimit_cxt->cacheInited = false;
+    sqlLimit_cxt->gSqlLimitCxt = NULL;
+    sqlLimit_cxt->uniqueSqlIdLimits = NULL;
+    sqlLimit_cxt->limitRegistry = NULL;
+    sqlLimit_cxt->entryIdSequence = 0;
+    sqlLimit_cxt->entryCount = 0;
+    sqlLimit_cxt->processedXmin = 0;
+    for (int i = 0; i < MAX_SQL_LIMIT_TYPE; i++) {
+        dlist_init(&sqlLimit_cxt->keywordsLimits[i]);
+    }
+}
+
 static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
 {
     Assert(dms_cxt != NULL);
@@ -414,7 +429,7 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
     predo_cxt->last_replayed_conflict_csn = 0;
     predo_cxt->hotStdby = 0;
     predo_cxt->newestCheckpointLoc = InvalidXLogRecPtr;
-    errno_t rc = memset_s(const_cast<CheckPoint *>(&predo_cxt->newestCheckpoint), sizeof(CheckPoint), 0, 
+    errno_t rc = memset_s(const_cast<CheckPoint *>(&predo_cxt->newestCheckpoint), sizeof(CheckPoint), 0,
         sizeof(CheckPoint));
     securec_check(rc, "\0", "\0");
     predo_cxt->unali_buf = (char*)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
@@ -473,7 +488,7 @@ void knl_g_cachemem_create()
                                                                   DEFAULT_MEMORY_CONTEXT_MAX_SIZE,
                                                                   false);
 
-    for (int i = 0; i < MAX_GLOBAL_CACHEMEM_NUM; ++i) {  
+    for (int i = 0; i < MAX_GLOBAL_CACHEMEM_NUM; ++i) {
         g_instance.cache_cxt.global_plancache_mem[i] = AllocSetContextCreate(g_instance.instance_context,
                                                                              "GlobalPlanCacheMemory",
                                                                              ALLOCSET_DEFAULT_MINSIZE,
@@ -578,7 +593,7 @@ static void knl_g_xlog_init(knl_g_xlog_context *xlog_cxt)
 #endif
     xlog_cxt->shareStorageXLogCtl = NULL;
     xlog_cxt->shareStorageXLogCtlOrigin = NULL;
-    errno_t rc = memset_s(&xlog_cxt->shareStorageopCtl, sizeof(ShareStorageOperateCtl), 0, 
+    errno_t rc = memset_s(&xlog_cxt->shareStorageopCtl, sizeof(ShareStorageOperateCtl), 0,
         sizeof(ShareStorageOperateCtl));
     securec_check(rc, "\0", "\0");
     pthread_mutex_init(&xlog_cxt->remain_segs_lock, NULL);
@@ -594,8 +609,8 @@ static void KnlGUndoInit(knl_g_undo_context *undoCxt)
     g_instance.undo_cxt.undoContext = AllocSetContextCreate(g_instance.instance_context,
         "Undo", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_UNDO_MAXSIZE, SHARED_CONTEXT);
     oldContext = MemoryContextSwitchTo(g_instance.undo_cxt.undoContext);
-    /* 
-     * Create three bitmaps for undozone with three kinds of tables(permanent, unlogged and temp). 
+    /*
+     * Create three bitmaps for undozone with three kinds of tables(permanent, unlogged and temp).
      * Use -1 to initialize each bit of the bitmap as 1.
      */
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
@@ -705,7 +720,7 @@ static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
     /* set write-first lock for rwlock to avoid hunger of wrlock */
     (void)pthread_rwlockattr_setkind_np(&attr, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
     (void)pthread_rwlock_init(&(stat_cxt->track_memory_lock), &attr);
-    
+
     InitHotkeyResources(stat_cxt);
     InitStbyStmtHist(stat_cxt);
 }
@@ -788,7 +803,7 @@ static void knl_g_dw_init(knl_g_dw_context *dw_cxt)
     errno_t rc = memset_s(dw_cxt, sizeof(knl_g_dw_context), 0, sizeof(knl_g_dw_context));
     securec_check(rc, "\0", "\0");
     dw_cxt->closed = 1;
-	
+
     dw_cxt->old_batch_version = false;
     dw_cxt->recovery_dw_file_num = 0;
     dw_cxt->recovery_dw_file_size = 0;
@@ -818,9 +833,9 @@ static void knl_g_archive_obs_init(knl_g_archive_context *archive_cxt)
     SpinLockInit(&archive_cxt->barrier_lock);
 }
 
-static void knl_g_archive_thread_info_init(knl_g_archive_thread_info *archive_thread_info) 
+static void knl_g_archive_thread_info_init(knl_g_archive_thread_info *archive_thread_info)
 {
-    errno_t rc = memset_s(archive_thread_info, sizeof(knl_g_archive_thread_info), 0, 
+    errno_t rc = memset_s(archive_thread_info, sizeof(knl_g_archive_thread_info), 0,
         sizeof(knl_g_archive_thread_info));
     securec_check(rc, "\0", "\0");
     Assert(archive_thread_info != NULL);
@@ -890,13 +905,13 @@ static void knl_g_dwsubdir_init(knl_g_dwsubdatadir_context* dw_subdir_cxt)
     securec_check(rc, "\0", "\0");
 
     errno_t errorno = EOK;
-    
+
     errorno = strcpy_s(dw_subdir_cxt->dwOldPath, MAXPGPATH, "global/pg_dw");
     securec_check_c(errorno, "\0", "\0");
 
     errorno = strcpy_s(dw_subdir_cxt->dwPathPrefix, MAXPGPATH, "global/pg_dw_");
     securec_check_c(errorno, "\0", "\0");
-    
+
     errorno = strcpy_s(dw_subdir_cxt->dwSinglePath, MAXPGPATH, "global/pg_dw_single");
     securec_check_c(errorno, "\0", "\0");
 
@@ -924,13 +939,13 @@ static void knl_g_dwsubdir_init(knl_g_dwsubdatadir_context* dw_subdir_cxt)
 static void knl_g_datadir_init(knl_g_datadir_context* datadir_init)
 {
     errno_t errorno = EOK;
-    
+
     errorno = strcpy_s(datadir_init->baseDir, MAXPGPATH, "base");
     securec_check_c(errorno, "\0", "\0");
 
     errorno = strcpy_s(datadir_init->globalDir, MAXPGPATH, "global");
     securec_check_c(errorno, "\0", "\0");
-    
+
     errorno = strcpy_s(datadir_init->clogDir, MAXPGPATH, "pg_clog");
     securec_check_c(errorno, "\0", "\0");
 
@@ -1120,6 +1135,7 @@ void knl_instance_init()
     knl_g_startup_init(&g_instance.startup_cxt);
     knl_g_dms_init(&g_instance.dms_cxt);
     knl_g_shmem_init(&g_instance.shmem_cxt);
+    knl_g_sqlLimit_init(&g_instance.sqlLimit_cxt);
 
 #ifdef ENABLE_HTAP
     knl_g_imcstore_init(&g_instance.imcstore_cxt);
@@ -1161,7 +1177,7 @@ void knl_instance_init()
     knl_g_csn_barrier_init(&g_instance.csn_barrier_cxt);
     knl_g_audit_init(&g_instance.audit_cxt);
     knl_plugin_vec_func_init(&g_instance.plugin_vec_func_cxt);
-    
+
 #ifndef ENABLE_MULTIPLE_NODES
     for (int i = 0; i < DB_CMPT_MAX; i++) {
         pthread_mutex_init(&g_instance.loadPluginLock[i], NULL);

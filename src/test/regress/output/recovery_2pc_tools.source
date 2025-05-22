@@ -340,7 +340,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_sonic_hashjoin                            | bool    |      |           | 
  enable_sonic_optspill                            | bool    |      |           | 
  enable_sort                                      | bool    |      |           | 
- enable_sortgroup_agg                             | bool    |      |           | 
+ enable_sortgroup_agg                             | bool    |      |           |
+ enable_sql_limit                                 | bool    |      |           | 
  enable_startwith_debug                           | bool    |      |           | 
  enable_stmt_track                                | bool    |      |           | 
  enable_stream_replication                        | bool    |      |           | 

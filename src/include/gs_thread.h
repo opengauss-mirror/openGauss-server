@@ -111,7 +111,7 @@ typedef enum knl_thread_role {
     COMM_POOLER_CLEAN,
     LOGICAL_READ_RECORD,
     PARALLEL_DECODE,
-
+    SQL_LIMIT_THREAD,
 #ifdef ENABLE_HTAP
     IMCSTORE_VACUUM,
 #endif
@@ -160,7 +160,7 @@ typedef enum knl_thread_role {
     TOP_CONSUMER,
     DCF_WORKER,
     DMS_WORKER,
-    SW_SENDER
+    SW_SENDER,
 } knl_thread_role;
 
 #ifdef USE_SPQ

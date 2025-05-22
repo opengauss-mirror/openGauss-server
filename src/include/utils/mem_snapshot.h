@@ -91,6 +91,7 @@ void AssignThreadpoolResetPercent(const char* newval, void* extra);
 bool CheckThreadpoolResetPercent(char** newval, void** extra, GucSource source);
 void AssignMemoryResetPercent(const char* newval, void* extra);
 bool CheckMemoryResetPercent(char** newval, void** extra, GucSource source);
+bool CheckStrIsIntNumber(const char* str);
 
 
 #endif /* MEM_SNAPSHOT_H */

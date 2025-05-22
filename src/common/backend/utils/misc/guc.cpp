@@ -1481,6 +1481,18 @@ static void InitConfigureNamesBool()
             NULL,
             NULL},
 
+        {{"enable_sql_limit",
+            PGC_SIGHUP,
+            NODE_ALL,
+            RESOURCES_WORKLOAD,
+            gettext_noop("Enable the sql limit."),
+            NULL},
+            &u_sess->attr.attr_common.enable_sql_limit,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
         {{"update_process_title",
             PGC_INTERNAL,
             NODE_ALL,

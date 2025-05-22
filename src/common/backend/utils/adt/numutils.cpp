@@ -420,7 +420,7 @@ static inline int pg_ultoa_n(uint32 value, char* a)
     int olength = decimalLength32(value);
 
     /*
-     * Compute the result string. Use memcpy instead of memcpy_s/memcpy_sp for 
+     * Compute the result string. Use memcpy instead of memcpy_s/memcpy_sp for
      * better performance.
      */
     while (value >= 10000) {
@@ -517,7 +517,7 @@ static inline int pg_ulltoa_n(uint64 value, char* a)
     int olength = decimalLength64(value);
 
     /*
-     * Compute the result string. Use memcpy instead of memcpy_s/memcpy_sp for 
+     * Compute the result string. Use memcpy instead of memcpy_s/memcpy_sp for
      * better performance.
      */
     while (value >= 100000000) {

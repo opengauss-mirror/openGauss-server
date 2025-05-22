@@ -15,13 +15,13 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * knl_session.h
  *        Data stucture for session level global variables.
  *
  * several guidelines for put variables in knl_session.h
  *
- * variables which related to session only and can be decoupled with thread status 
+ * variables which related to session only and can be decoupled with thread status
  * should put int knl_session.h
  *
  * pay attention to memory allocation
@@ -33,7 +33,7 @@
  *
  * all context define below should follow naming rules:
  * knl_u_sess->on_xxxx
- * 
+ *
  * IDENTIFICATION
  *        src/include/knl/knl_session.h
  *
@@ -194,7 +194,7 @@ typedef struct knl_u_executor_context {
     /* add event trigger cache and memconext */
     HTAB *EventTriggerCache;
     MemoryContext EventTriggerCacheContext;
-    void *EventTriggerState; 
+    void *EventTriggerState;
 
     bool isFlashBack;
     List **portal_data_list;
@@ -260,7 +260,7 @@ typedef struct knl_u_SPI_context {
     /* Recording the nested exception counts for commit/rollback statement after. */
     int portal_stp_exception_counter;
 
-    /* 
+    /*
      * Recording the current execute procedure or function is with a exception declare
      * or not, if it called by a procedure or function with exception,it's value still
      * be true
@@ -459,7 +459,7 @@ typedef struct knl_u_parser_context {
 
     bool isTimeCapsule;
     bool hasPartitionComment;
-    
+
     bool isForbidTruncate;
     bool isPerform;
     void* stmt;
@@ -712,7 +712,7 @@ typedef struct knl_u_utils_context {
     syscalllock deleMemContextMutex;
 
     unsigned int sql_ignore_strategy_val;
-	
+
     HTAB* set_user_params_htab;
     DestReceiver* spi_printtupDR;
 
@@ -768,19 +768,19 @@ typedef enum AdviseCostMode {
      * filter sqls that cost are too large or too small,
      * use partial sql to recommand distribution key.
      */
-    ACM_MEDCOSTLOW,        
+    ACM_MEDCOSTLOW,
     ACM_NONE
 } AdviseCostMode;
 
 /* Only use it for AM_COST model, different mdoels have different search spaces sizes. */
 typedef enum AdviseCompressLevel {
     /*
-     * Based on the join actual cost, the combination with the highest weight 
+     * Based on the join actual cost, the combination with the highest weight
      * is selected by using greedy algorithm.
      */
     ACL_HIGH,
     /*
-     * Also using greedy algorithm, but save all combinations regardless 
+     * Also using greedy algorithm, but save all combinations regardless
      * of whether they have the highest weight. Then for each combination,
      * recalculate queries cost using the columns under that combination.
      * Finally find lowest cost of all queries.
@@ -902,7 +902,7 @@ typedef struct knl_u_contrib_context {
     int32 slotid;           /* next slot id */
     int max_linesize;
     char* cur_directory;
-	
+
 } knl_u_contrib_context;
 
 #define LC_ENV_BUFSIZE (NAMEDATALEN + 20)
@@ -1218,7 +1218,7 @@ typedef struct knl_u_misc_context {
 
 /*
  *Session-level status of base backups
- * 
+ *
  *This is used in parallel with the shared memory status to control parallel
  *execution of base backup functions for a given session, be it a backend
  *dedicated to replication or a normal backend connected to a database. The
@@ -1541,7 +1541,7 @@ typedef struct PLpgSQL_compile_context {
     int datums_pkg_last;
     char* plpgsql_error_funcname;
     char* plpgsql_error_pkgname;
-    
+
     struct PLpgSQL_stmt_block* plpgsql_parse_result;
     struct PLpgSQL_stmt_block* plpgsql_parse_error_result;
     struct PLpgSQL_datum** plpgsql_Datums;
@@ -1640,7 +1640,7 @@ typedef struct knl_u_plpgsql_context {
     DList* plpgsqlpkg_dlist_objects; /* for plpgsql_pkg_HashEnt */
 
     int plpgsql_IndexErrorVariable;
-    
+
     int compile_status;
     struct PLpgSQL_compile_context* curr_compile_context;
     struct List* compile_context_list;
@@ -1675,8 +1675,8 @@ typedef struct knl_u_plpgsql_context {
 
     bool has_step_into;
 
-    /*This is a temporary comm_id, because when gms_debug is enabled, 
-    it does not immediately bind to a specific function, 
+    /*This is a temporary comm_id, because when gms_debug is enabled,
+    it does not immediately bind to a specific function,
     so a temporary id is needed as a transition.*/
     int gms_debug_idx;
 
@@ -1879,7 +1879,7 @@ typedef struct knl_u_stat_context {
 
     List* hotkeyCandidates;
     MemoryContext hotkeySessContext;
-    
+
 } knl_u_stat_context;
 
 #define MAX_LOCKMETHOD 2
@@ -2342,7 +2342,7 @@ typedef struct knl_u_unique_sql_context {
 
     /* handle nested portal calling */
     uint32 portal_nesting_level;
- 
+
     /* child statements in open cursor case, need always generate unique sql id */
     bool force_generate_unique_sql;
     /* when record all plsql to statement_history, we need to cache the value for opening a cursor */
@@ -2476,7 +2476,7 @@ typedef struct knl_u_inval_context {
 
     int partcache_callback_count;
 
-    uint64 SIMCounter; /* SharedInvalidMessageCounter, there are two counter, both on sess and thrd, 
+    uint64 SIMCounter; /* SharedInvalidMessageCounter, there are two counter, both on sess and thrd,
         u_sess->inval_cxt.SIMCounter;
         if (EnableLocalSysCache()) {t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter;} */
 
@@ -2555,7 +2555,7 @@ typedef struct knl_u_cache_context {
 
     bool PartRelCacheNeedEOXActWork;
 
-    bool bucket_cache_need_eoxact_work; 
+    bool bucket_cache_need_eoxact_work;
 
 } knl_u_cache_context;
 
@@ -3076,6 +3076,11 @@ struct BM25ScanDocScoreHashTable;
 typedef struct knl_u_bm25_context {
     BM25ScanDocScoreHashTable *scoreHashTable;
 } knl_u_bm25_context;
+
+typedef struct knl_u_sqlLimit_context {
+    List* limitSqls;
+} knl_u_sqlLimit_context;
+
 typedef struct knl_session_context {
     volatile knl_session_status status;
     /* used for threadworker, elem in m_readySessionList */
@@ -3126,7 +3131,7 @@ typedef struct knl_session_context {
     int on_sess_exit_index;
 
     PBEMessage pbe_message;
-    
+
     List* plsqlErrorList;
     knl_session_attr attr;
     struct knl_u_wlm_context* wlm_cxt;
@@ -3233,6 +3238,8 @@ typedef struct knl_session_context {
 
     knl_u_datavec_context datavec_ctx;
 
+    knl_u_sqlLimit_context sqlLimit_ctx;
+
     bool is_partition_autonomous_query;
     bool is_partition_autonomous_session;
 
@@ -3286,21 +3293,21 @@ extern THR_LOCAL knl_session_context* u_sess;
 extern void knl_u_mot_init(knl_u_mot_context* mot_cxt);
 #endif
 
-inline bool stp_disable_xact_and_set_err_msg(bool *save_commit_rollback_state, stp_xact_err_type type) 
+inline bool stp_disable_xact_and_set_err_msg(bool *save_commit_rollback_state, stp_xact_err_type type)
 {
     *save_commit_rollback_state = u_sess->SPI_cxt.is_allow_commit_rollback;
     u_sess->SPI_cxt.is_allow_commit_rollback = false;
     return stp_set_commit_rollback_err_msg(type);
 }
 
-inline bool stp_enable_and_get_old_xact_stmt_state() 
+inline bool stp_enable_and_get_old_xact_stmt_state()
 {
     bool save_commit_rollback_state = u_sess->SPI_cxt.is_allow_commit_rollback;
     u_sess->SPI_cxt.is_allow_commit_rollback = true;
     return save_commit_rollback_state;
 }
 
-inline void stp_retore_old_xact_stmt_state(bool OldState) 
+inline void stp_retore_old_xact_stmt_state(bool OldState)
 {
     u_sess->SPI_cxt.is_allow_commit_rollback = OldState;
 }

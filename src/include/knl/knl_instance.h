@@ -87,6 +87,7 @@ const int HOTKEY_ABANDON_LENGTH = 100;
 const int MAX_GLOBAL_CACHEMEM_NUM = 128;
 const int MAX_GLOBAL_PRC_NUM = 32;
 const int MAX_AUDIT_NUM = 48;
+const int MAX_SQL_LIMIT_TYPE = 4;
 
 /* Maximum number of max parallel decode threads */
 #define MAX_PARALLEL_DECODE_NUM 20
@@ -160,7 +161,7 @@ enum plugin_vecfunc_type {
     DOLPHIN_VEC = 0,
     WHALE_VEC,
 
-    /* 
+    /*
      * This is the number of vecfunc hash tables.
      * If you are adding a new plugin hash table, do not place an enumeration after it.
      */
@@ -231,6 +232,7 @@ typedef struct knl_g_pid_context {
     ThreadId CfsShrinkerPID;
     ThreadId DmsAuxiliaryPID;
     ThreadId SyncAuxiliaryPID;
+    ThreadId SqlLimitPID;
 #ifdef ENABLE_HTAP
     ThreadId IMCStoreVacuumPID;
 #endif
@@ -1320,6 +1322,18 @@ typedef struct knl_g_startup_context {
     XLogRecPtr suspend_lsn;
 }knl_g_startup_context;
 
+
+typedef struct knl_g_sqlLimit_context {
+    MemoryContext gSqlLimitCxt;
+    HTAB* uniqueSqlIdLimits;
+    HTAB* limitRegistry;
+    dlist_head keywordsLimits[MAX_SQL_LIMIT_TYPE];
+    volatile uint64 entryIdSequence;
+    uint32 entryCount;
+    TransactionId processedXmin;
+    bool cacheInited;
+} knl_g_sqlLimit_context;
+
 typedef struct knl_g_abo_context {
     MemoryContext abo_model_manager_mcxt;
 	LRUCache *lru_cache;
@@ -1549,7 +1563,7 @@ typedef struct knl_instance_context {
     knl_g_streaming_dr_context streaming_dr_cxt;
     struct PLGlobalPackageRuntimeCache* global_session_pkg;
     knl_g_startup_context startup_cxt;
-
+    knl_g_sqlLimit_context sqlLimit_cxt;
 
 #ifndef ENABLE_MULTIPLE_NODES
     void *raw_parser_hook[DB_CMPT_MAX];

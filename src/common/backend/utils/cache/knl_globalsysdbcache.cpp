@@ -37,6 +37,7 @@
 #include "catalog/pg_job_proc.h"
 #include "catalog/pg_extension_data_source.h"
 #include "catalog/gs_obsscaninfo.h"
+#include "catalog/gs_sql_limit.h"
 #include "catalog/indexing.h"
 #include "catalog/toasting.h"
 #include "catalog/pg_am.h"
@@ -448,7 +449,7 @@ void GlobalSysDBCache::GSCMemThresholdCheck()
         /* swapout all to recycle memory */
         case DynamicGSCMemoryOver:
             /* fall through */
-        
+
         /* swapout one to recycle memory */
         case DynamicGSCMemoryHigh:
             /* swapout once per cycle */
@@ -647,6 +648,8 @@ void GlobalSysDBCache::InitRelStoreInSharedFlag()
     m_rel_store_in_shared[ReplicationOriginRelationId] = true;
     m_rel_store_in_shared[ReplicationOriginIdentIndex] = true;
     m_rel_store_in_shared[ReplicationOriginNameIndex] = true;
+    m_rel_store_in_shared[GsSqlLimitRelationId] = true;
+    m_rel_store_in_shared[GsSqlLimitIdIndex] = true;
 }
 
 void GlobalSysDBCache::InitRelForInitSysCacheFlag()
@@ -1328,7 +1331,7 @@ Datum gs_gsc_table_detail(PG_FUNCTION_ARGS)
     attrno = rd_rel_to_datum(values + attrno, table_stat->rd_rel) + attrno;
     attrno = rd_att_to_datum(values + attrno, table_stat->rd_att) + attrno;
     Assert(attrno == GLOBAL_TABLE_INFO_NUM - 1);
-    
+
     /* form physical tuple and return as datum tuple */
     HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
     Datum result = HeapTupleGetDatum(tuple);
