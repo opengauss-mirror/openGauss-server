@@ -69,6 +69,7 @@ typedef struct {
 extern Node* build_column_default(Relation rel, int attrno, bool isInsertCmd = false, bool needOnUpdate = false);
 extern Node* makeAConst(Value* v, int location);
 extern Value* makeStringValue(char* str);
+extern VarBit* make_default_varbit_for_set(Oid settypoid);
 static Node* transformParamRef(ParseState* pstate, ParamRef* pref);
 static Node* transformAExprOp(ParseState* pstate, A_Expr* a);
 static Node* transformAExprAnd(ParseState* pstate, A_Expr* a);
@@ -243,7 +244,7 @@ static Const* BuildColumnBaseValue(Form_pg_attribute attTup)
                          attTup->atttypmod,
                          attTup->attcollation,
                          attTup->attlen,
-                         CStringGetTextDatum(""), /* datum */
+                         VarBitPGetDatum(make_default_varbit_for_set(attTup->atttypid)), /* datum */
                          false, /* constisnull */
                          attTup->attbyval);
     }

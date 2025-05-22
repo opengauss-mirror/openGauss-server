@@ -483,6 +483,12 @@ insert into ins_sel_t4 values(generate_series(1, 10));
 insert into ins_sel_t2 select * from ins_sel_t4 where a1 < 3;
 select * from ins_sel_t2 order by a1;
 
+-- issue: https://gitcode.com/opengauss/openGauss-server/issues/7016
+create table t_set(c0 int, c1 SET('beijing','shanghai','nanjing','wuhan') not null);
+insert into t_set values(1, concat(c1, 'beijing'));
+select * from t_set;
+drop table t_set;
+
 -- jdbc case
 DROP USER IF EXISTS rightref CASCADE;
 CREATE USER rightref WITH PASSWORD 'rightref@123';

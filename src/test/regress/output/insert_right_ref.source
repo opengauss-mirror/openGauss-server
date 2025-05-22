@@ -702,6 +702,17 @@ select * from ins_sel_t2 order by a1;
   2
 (2 rows)
 
+-- issue: https://gitcode.com/opengauss/openGauss-server/issues/7016
+create table t_set(c0 int, c1 SET('beijing','shanghai','nanjing','wuhan') not null);
+NOTICE:  CREATE TABLE will create implicit set "t_set_c1_set" for column "t_set.c1"
+insert into t_set values(1, concat(c1, 'beijing'));
+select * from t_set;
+ c0 |   c1    
+----+---------
+  1 | beijing
+(1 row)
+
+drop table t_set;
 -- jdbc case
 DROP USER IF EXISTS rightref CASCADE;
 NOTICE:  role "rightref" does not exist, skipping
