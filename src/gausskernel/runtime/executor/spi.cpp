@@ -3542,6 +3542,12 @@ int _SPI_end_call(bool use_exec)
      */
     u_sess->SPI_cxt._curid--;
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!StreamThreadAmI()) {
+        StreamNodeGroup::ReleaseStreamGroup(false);
+    }
+#endif
+
     /* must put last after smp thread has reach the sync point, then we can release the memory. */
     if (use_exec) {
         /* switch to the procedure memory context */

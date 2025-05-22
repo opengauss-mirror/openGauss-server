@@ -362,6 +362,7 @@ StreamNodeGroup::StreamNodeGroup()
 #ifndef ENABLE_MULTIPLE_NODES
     m_portal = NULL;
 #endif
+    m_spiLevel = u_sess->SPI_cxt._connected;
 }
 
 StreamNodeGroup::~StreamNodeGroup()
@@ -1075,18 +1076,21 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
 
 void StreamNodeGroup::ReleaseStreamGroup(bool resetSession, StreamObjStatus status)
 {
-    if (u_sess->stream_cxt.global_obj != NULL) {
-        StreamTopConsumerIam();
-        /* Set sync point for waiting all stream threads complete. */
-        StreamNodeGroup::syncQuit(status);
-        UnRegisterStreamSnapshots();
-        StreamNodeGroup::destroy(status);
-        if (!resetSession) {
-            /* reset some flag related to stream */
-            ResetStreamEnv();
-        }
+    /* we can only release inner StreamNodeGroup */
+    if (u_sess->stream_cxt.global_obj == NULL ||
+        u_sess->stream_cxt.global_obj->m_spiLevel < u_sess->SPI_cxt._connected) {
+        return;
     }
-    if (resetSession) {
+
+    StreamTopConsumerIam();
+    /* Set sync point for waiting all stream threads complete. */
+    StreamNodeGroup::syncQuit(status);
+    UnRegisterStreamSnapshots();
+    StreamNodeGroup::destroy(status);
+    if (!resetSession) {
+        /* reset some flag related to stream */
+        ResetStreamEnv();
+    } else {
         ResetSessionEnv();
     }
 }
