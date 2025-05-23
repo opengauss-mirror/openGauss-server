@@ -69,7 +69,6 @@ typedef enum
 	OBJECT_TYPE_ASSEMBLY_DML_TRIGGER,
 	OBJECT_TYPE_TSQL_TABLE_VALUED_FUNCTION,
 	OBJECT_TYPE_TSQL_DML_TRIGGER,
-	OBJECT_TYPE_TABLE_TYPE,
 	OBJECT_TYPE_TABLE,
 	OBJECT_TYPE_UNIQUE_CONSTRAINT,
 	OBJECT_TYPE_VIEW,
@@ -289,58 +288,7 @@ static int search_type_in_class(Oid* schema_id, Oid object_id, char* object_name
 		if ((pg_class->relpersistence == 'p' || pg_class->relpersistence == 'u' || pg_class->relpersistence == 't' ||
 				pg_class->relpersistence == 'g') && (pg_class->relkind == 'r'))
 		{
-			/* 
-			 * Check whether it is a Table type (TT) object.
-			 * The reltype of the pg_class object should be there in pg_type. The pg_type object found
-			 * should be of composite type (c) and the type of dependency should be DEPENDENCY_INTERNAL (i).
-			 * We scan pg_depend catalog to find the type of the dependency.
-			 */
-			HeapTuple tp;
-			tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pg_class->reltype));
-			if(HeapTupleIsValid(tp))
-			{
-				Form_pg_type typform = (Form_pg_type) GETSTRUCT(tp);
-
-				if (typform->typtype == 'c')
-				{
-					Relation	depRel;
-					ScanKeyData key[2];
-					SysScanDesc scan;
-					HeapTuple	tup;
-
-					depRel = table_open(DependRelationId, RowExclusiveLock);
-
-					ScanKeyInit(&key[0],
-								Anum_pg_depend_objid,
-								BTEqualStrategyNumber, F_OIDEQ,
-								ObjectIdGetDatum(typform->typrelid));
-					ScanKeyInit(&key[1],
-								Anum_pg_depend_refobjid,
-								BTEqualStrategyNumber, F_OIDEQ,
-								ObjectIdGetDatum(HeapTupleGetOid(tp)));
-
-					scan = systable_beginscan(depRel, InvalidOid, false,
-							  				NULL, 2, key);
-
-					if (HeapTupleIsValid(tup = systable_getnext(scan)))
-					{
-						Form_pg_depend depform = (Form_pg_depend) GETSTRUCT(tup);
-
-						if (depform->deptype == 'i')
-							type = OBJECT_TYPE_TABLE_TYPE;
-					}
-
-					systable_endscan(scan);
-
-					table_close(depRel, RowExclusiveLock);
-				}
-				ReleaseSysCache(tp);
-			}
-			/*
-			 * If the object is not of Table type (TT), it should be user defined table (U)
-			 */
-			if (type == 0 || type != OBJECT_TYPE_TABLE_TYPE)
-				type = OBJECT_TYPE_TABLE;
+            type = OBJECT_TYPE_TABLE;
 		}
 		else if (pg_class->relkind == 'v')
 			type = OBJECT_TYPE_VIEW;
@@ -1111,10 +1059,10 @@ static inline int dealwith_type_procedure(int type)
 static inline int dealwith_type_table(int type)
 {
 	/*
-	* The type of the object should be OBJECT_TYPE_INTERNAL_TABLE or OBJECT_TYPE_TABLE_TYPE or
+	* The type of the object should be OBJECT_TYPE_INTERNAL_TABLE or
 	* TABLE or OBJECT_TYPE_SYSTEM_BASE_TABLE.
 	*/
-	if (type == OBJECT_TYPE_INTERNAL_TABLE || type == OBJECT_TYPE_TABLE_TYPE ||
+    if (type == OBJECT_TYPE_INTERNAL_TABLE ||
 		type == OBJECT_TYPE_TABLE || type == OBJECT_TYPE_SYSTEM_BASE_TABLE)
 	{
 		return 1;
