@@ -179,10 +179,10 @@ typedef struct ss_recovery_info {
     bool disaster_cluster_promoting;         // standby cluster is promoting
     volatile ondemand_recovery_pause_status_t ondemand_recovery_pause_status;
     bool realtime_build_in_reform; // used to avoid starting realtime build during reform
-    volatile realtime_build_log_ctrl_status realtimeBuildLogCtrlStatus;
-    slock_t sleepTimeSyncLock;
-    volatile int globalSleepTime;
-    realtime_build_ctrl_t rtBuildCtrl[DMS_MAX_INSTANCES];
+    volatile realtime_build_log_ctrl_status realtimeBuildLogCtrlStatus;         // used in realtime build log ctrl
+    slock_t sleepTimeSyncLock;         // used in realtime build log ctrl
+    volatile int globalSleepTime;         // used in realtime build log ctrl
+    realtime_build_ctrl_t rtBuildCtrl[DMS_MAX_INSTANCES];         // used in realtime build log ctrl
 } ss_recovery_info_t;
 
 typedef struct ondemand_htab_ctrl {
