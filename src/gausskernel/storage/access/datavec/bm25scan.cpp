@@ -601,15 +601,19 @@ static void BM25IndexScan(Relation index, BM25QueryTokensInfo &queryTokenInfo, u
     }
 }
 
-static void ContructScanScoreKeys(Relation index, BM25ScanOpaque so)
+static void ConstructScanScoreKeys(Relation index, BM25ScanOpaque so)
 {
     IndexScanDesc scan;
     Oid heapRelOid;
     Relation heapRel;
     HeapTuple heapTuple;
+    char* scoreKey = nullptr;
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
     TupleTableSlot* slot = NULL;
+    EState* estate = NULL;
+    ExprContext* econtext = NULL;
+    List* predicate = NIL;
     IndexInfo* indexInfo;
 
     scan = RelationGetIndexScan(index, 0, 0);
@@ -618,12 +622,6 @@ static void ContructScanScoreKeys(Relation index, BM25ScanOpaque so)
     scan->heapRelation = heapRel;
     scan->xs_snapshot = GetActiveSnapshot();
     scan->xs_heapfetch = tableam_scan_index_fetch_begin(heapRel);
-    indexInfo = BuildIndexInfo(index);
-
-    char* scoreKey = nullptr;
-
-    MemoryContext oldCtx;
-
     u_sess->bm25_ctx.scoreHashTable = New(CurrentMemoryContext) BM25ScanDocScoreHashTable(so->candNums);
     for (int i = 0; i < so->candNums; ++i) {
         scan->xs_ctup.t_self = so->candDocs[i].heapCtid;
@@ -631,15 +629,38 @@ static void ContructScanScoreKeys(Relation index, BM25ScanOpaque so)
         if (heapTuple == NULL) {
             continue;
         }
+
+        estate = CreateExecutorState();
+        econtext = GetPerTupleExprContext(estate);
         slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRel));
-        (void)ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
-        FormIndexDatum(indexInfo, slot, NULL, values, isnull);
-        scoreKey = text_to_cstring(DatumGetVarCharPP(values[0]));
-        if (scoreKey == NULL) {
-            continue;
+        econtext->ecxt_scantuple = slot;
+        indexInfo = BuildIndexInfo(index);
+
+        if (estate->es_is_flt_frame) {
+            predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+        } else {
+            predicate = (List*)ExecPrepareExpr((Expr *)indexInfo->ii_Predicate, estate);
         }
-        u_sess->bm25_ctx.scoreHashTable->AddScore(so->candDocs[i].score, scoreKey);
+
+        (void)ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
+
+        if (predicate != NIL) {
+            if (!ExecQual(predicate, econtext)) {
+                ExecDropSingleTupleTableSlot(slot);
+                FreeExecutorState(estate);
+                pfree(indexInfo);
+                continue;
+            }
+        }
+
+        FormIndexDatum(indexInfo, slot, estate, values, isnull);
+        scoreKey = text_to_cstring(DatumGetVarCharPP(values[0]));
+        if (scoreKey != NULL) {
+            u_sess->bm25_ctx.scoreHashTable->AddScore(so->candDocs[i].score, scoreKey);
+        }
         ExecDropSingleTupleTableSlot(slot);
+        FreeExecutorState(estate);
+        pfree(indexInfo);
     }
 
     heap_close(heapRel, AccessShareLock);
@@ -756,10 +777,14 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
         }
         BM25QueryTokensInfo queryTokenInfo = GetQueryTokens(scan->indexRelation, TextDatumGetCString(
             PointerGetDatum(arr)));
+        if (queryTokenInfo.size == 0) {
+            return false;
+        }
+
         float avgdl = meta.tokenCount / meta.documentCount;
         BM25IndexScan(scan->indexRelation, queryTokenInfo, meta.documentCount, avgdl, so);
         DocIdsGetHeapCtids(scan->indexRelation, meta.entryPageList, so);
-        ContructScanScoreKeys(scan->indexRelation, so);
+        ConstructScanScoreKeys(scan->indexRelation, so);
         if (queryTokenInfo.queryTokens != nullptr) {
             pfree(queryTokenInfo.queryTokens);
             queryTokenInfo.queryTokens = nullptr;
