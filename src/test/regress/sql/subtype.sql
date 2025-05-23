@@ -242,7 +242,7 @@ create or replace procedure proc2 as
     subtype animal2 is int;
     a animal;
 begin
-    a := 10;
+    a := 8;
     raise info 'a = %',a;
     return a;
 end;
@@ -275,7 +275,7 @@ end pkg1;
 declare
     a pkg1.animal;
 begin
-    a := 10;
+    a := 8;
     raise info 'a = %', a;
 end;
 /
@@ -305,7 +305,7 @@ call pkg1.proc1(20);
 declare
     a pkg1.animal;
 begin
-    a := 10;
+    a := 8;
     raise info 'a = %', a;
 end;
 /
@@ -322,7 +322,7 @@ end;
 create or replace package body pkg1 as
     procedure proc1(a in animal) is
     begin
-        a := 10;
+        a := 8;
         raise info 'pkg1.proc1 a = %', a;
     end;
 end pkg1;
@@ -560,8 +560,8 @@ DECLARE
 r1 pkg_1154880.rec_type;
 rint pkg_1154880.rec_int;
 BEGIN
-r1.f1 := 10; r1.f2 := 'abcd';
-rint := 10;
+r1.f1 := 8; r1.f2 := 'abcd';
+rint := 8;
 pkg_1154880.print_rec_type(r1);
 pkg_1154880.print_rec_int(rint);
 END;
@@ -599,6 +599,15 @@ arrs(1).b := 2;
 raise info 'arrs = %', arrs;
 pkgnest022.ProcessData(arr);
 pkgnest022.ProcessData(arrs);
+END;
+/
+
+DECLARE
+    SUBTYPE Balance is number;
+    a Balance(6,2);
+    b varchar(10) := '10009.1234';
+BEGIN
+    a := b;
 END;
 /
 
