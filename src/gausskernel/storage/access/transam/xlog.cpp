@@ -2642,6 +2642,8 @@ void XLogUpdateShareStatus()
 
     pg_atomic_write_u64((volatile uint64 *)&g_instance.wal_cxt.flushResult, t_thrd.xlog_cxt.LogwrtResult->Flush);
     pg_write_barrier();
+    WalSndWakeupProcessRequests();
+    SendShareStorageXLogCopyBackendWakeupRequest();
 }
 
 
