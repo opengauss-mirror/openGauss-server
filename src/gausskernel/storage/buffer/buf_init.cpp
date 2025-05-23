@@ -213,9 +213,11 @@ void InitBufferPool(void)
         InitDmsBufCtrl();
     }
 
+#ifndef ENABLE_LITE_MODE
     if (!ENABLE_DMS) {
         InitCRBufPool();
     }
+#endif
 }
 
 /*

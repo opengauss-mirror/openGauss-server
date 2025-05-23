@@ -211,7 +211,11 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 
 #define FirstCRBufMappingLock (FirstScanningXLOGTrackLock + NUM_SCANNING_XLOG_TRACK_PARTITIONS)
 /* must be last: */
+#ifndef ENABLE_LITE_MODE
 #define NumFixedLWLocks (FirstCRBufMappingLock + NUM_BUFFER_PARTITIONS)
+#else
+#define NumFixedLWLocks (FirstScanningXLOGTrackLock + NUM_SCANNING_XLOG_TRACK_PARTITIONS)
+#endif
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
  *

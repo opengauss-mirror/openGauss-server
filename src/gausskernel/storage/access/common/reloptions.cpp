@@ -370,7 +370,7 @@ static relopt_string stringRelOpts[] = {
         INDEXSPLIT_OPT_INSERTPT,
     },
     {
-        {"index_type", "pcr, rcr", RELOPT_KIND_HEAP},
+        {"index_type", "rcr, pcr", RELOPT_KIND_HEAP},
         3,
         false,
         ValidateStrOptIndexType,
@@ -575,7 +575,7 @@ static relopt_string stringRelOpts[] = {
         {"index_type", "rcr, pcr", RELOPT_KIND_BTREE},
         strlen(UBTREE_INDEX_TYPE_RCR),
         false,
-        ValidateIndexTypeOption,
+        ValidateStrOptIndexType,
         UBTREE_INDEX_TYPE_RCR,
     },
     /* list terminator */
@@ -1914,7 +1914,8 @@ void ForbidToSetOptionsForUstoreTbl(List *options)
 void ForbidToSetOptionsForNotUstoreTbl(List *options)
 {
     static const char *unsupported[] = {
-        "init_td"
+        "init_td",
+        "index_type"
     };
 
     ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "relations except for ustore relation");
@@ -2286,10 +2287,14 @@ static void ValidateStrOptIndexsplit(const char *val)
  */
 static void ValidateStrOptIndexType(const char *val)
 {
+#ifdef ENABLE_LITE_MODE
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-support feature"),
+        errdetail("Forbid to set option \"index_type\" in lite mode.")));
+#endif
     if (pg_strcasecmp(val, UBTREE_INDEX_TYPE_PCR) != 0 &&
         pg_strcasecmp(val, UBTREE_INDEX_TYPE_RCR) != 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid string for  \"index_typle\" option"),
-            errdetail("Valid string are \"pcr\", \"rcr\".")));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid string for  \"index_type\" option"),
+            errdetail("Valid string are \"rcr\", \"pcr\".")));
     }
 }
 
@@ -3263,20 +3268,3 @@ void CheckSpqBTBuildOption(const char *val)
     }
 }
 #endif
-
-/*
- * Brief        : Validates the ubtree index type for a index
- * Input        : val, ubtree index type value.
- * Output       : None.
- * Return Value : None.
- * Notes        : None.
- */
-static void ValidateIndexTypeOption(const char* val)
-{
-    if (pg_strcasecmp(val, UBTREE_INDEX_TYPE_PCR) != 0 && pg_strcasecmp(val, UBTREE_INDEX_TYPE_RCR) != 0) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Invalid string for \"UBTREE_INDEX_TYPE\" option."),
-                errdetail("Valid strings are \"rcr\", \"pcr\"")));
-    }
-}

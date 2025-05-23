@@ -458,8 +458,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "max_error_count",
     "enable_expr_fusion",
     "heap_bulk_read_size",
-    "restrict_nonsystem_relation_kind",
-    "index_type"
+    "restrict_nonsystem_relation_kind"
     };
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);
@@ -2035,6 +2034,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+#ifndef ENABLE_LITE_MODE
         {{"enable_default_pcr_index",
             PGC_USERSET,
             NODE_SINGLENODE,
@@ -2047,6 +2047,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+#endif
 #ifndef ENABLE_FINANCE_MODE
         {{"enable_ustore",
             PGC_POSTMASTER,

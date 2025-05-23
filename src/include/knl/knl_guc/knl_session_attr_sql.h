@@ -254,7 +254,9 @@ typedef struct knl_session_attr_sql {
 
     bool mot_allow_index_on_nullable_column;
     bool enable_default_ustore_table;
+#ifndef ENABLE_LITE_MODE
     bool enable_default_pcr_index;
+#endif
     char* index_type;
     char* ustore_attr;
 #ifdef ENABLE_UT

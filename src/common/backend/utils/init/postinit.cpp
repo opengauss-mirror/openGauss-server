@@ -642,7 +642,9 @@ void BaseInit(void)
     smgrinit();
     InitBufferPoolAccess();
     if (!ENABLE_DSS) {
+#ifndef ENABLE_LITE_MODE
         InitCRBufPoolAccess();
+#endif
         undo::UndoLogInit();
     }
 }
