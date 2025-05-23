@@ -1934,7 +1934,7 @@ static void _outAgg(StringInfo str, Agg* node)
 
     WRITE_GRPOP_FIELD(grpOperators, numCols);
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+    if (!IS_SPQ_RUNNING && t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM && node->grp_collations) {
         WRITE_GRPOP_FIELD(grp_collations, numCols);
     }
 #endif
