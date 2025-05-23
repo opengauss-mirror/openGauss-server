@@ -9354,8 +9354,8 @@ void insert_pv_session_memory(Tuplestorestate* tupStore, TupleDesc tupDesc, cons
     getSessionID(sessId, entry->threadStartTime, entry->sessionid);
     values[ARR_0] = CStringGetTextDatum(sessId);
     values[ARR_1] = Int32GetDatum(entry->initMemInChunks << (chunkSizeInBits - BITS_IN_MB));
-    values[ARR_2] = Int32GetDatum((entry->queryMemInChunks - entry->initMemInChunks) << (chunkSizeInBits - BITS_IN_MB));
-    values[ARR_3] = Int32GetDatum((entry->peakChunksQuery - entry->initMemInChunks) << (chunkSizeInBits - BITS_IN_MB));
+    values[ARR_2] = Int32GetDatum(entry->queryMemInChunks << (chunkSizeInBits - BITS_IN_MB));
+    values[ARR_3] = Int32GetDatum(entry->peakChunksQuery << (chunkSizeInBits - BITS_IN_MB));
 
     tuplestore_putvalues(tupStore, tupDesc, values, nulls);
 }
