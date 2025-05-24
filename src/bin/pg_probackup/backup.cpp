@@ -467,10 +467,10 @@ static int64 calc_data_bytes()
 
     backup_data = current.pgdata_bytes + current.dssdata_bytes;
     pretty_size(current.pgdata_bytes, pretty_pgdata_bytes, lengthof(pretty_pgdata_bytes));
-    elog(INFO, "PGDATA size: %s", pretty_pgdata_bytes);
+    elog(INFO, "PGDATA estimated size: %s", pretty_pgdata_bytes);
     if (IsDssMode()) {
         pretty_size(current.dssdata_bytes, pretty_dssdata_bytes, lengthof(pretty_dssdata_bytes));
-        elog(INFO, "DSSDATA size: %s", pretty_dssdata_bytes);
+        elog(INFO, "DSSDATA estimated size: %s", pretty_dssdata_bytes);
     }
 
     return backup_data;
@@ -493,24 +493,11 @@ static bool backup_space_check(const char* backup_path)
         return false;
     }
 
-    DIR *dir = opendir(xlog_path);
-    if (dir == NULL) {
-        elog(ERROR, "failed to open directory: %s", xlog_path);
-        return false;
-    }
-    int file_num = 0;
-    while ((entry = readdir(dir)) != NULL) {
-        if(entry->d_type == DT_REG) {
-            file_num++;
-        }
-    }
-    (void)closedir(dir);
-
     /* Get the available size of the disk */
     disk_available_bytes = (int64)diskInfo.f_bavail * diskInfo.f_bsize;
     pretty_size(disk_available_bytes, pretty_available_bytes, lengthof(pretty_available_bytes));
     /* Calculate the total amount required for backup */
-    backup_bytes = calc_data_bytes() + (file_num * 1024);
+    backup_bytes = calc_data_bytes();
     pretty_size(backup_bytes, pretty_backup_bytes, lengthof(pretty_backup_bytes));
     elog(INFO, "The remaining disk space is: %s; The required space for backup is: %s;",
         pretty_available_bytes, pretty_backup_bytes);
