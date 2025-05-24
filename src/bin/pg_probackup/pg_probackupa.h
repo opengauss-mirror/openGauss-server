@@ -62,7 +62,8 @@ extern const char  *PROGRAM_FULL_PATH;
 #define PG_XLOG_CONTROL_FILE          "pg_control"
 #define BACKUP_CONTROL_FILE            "backup.control"
 #define BACKUP_CATALOG_CONF_FILE    "pg_probackup.conf"
-#define BACKUP_CATALOG_PID            "backup.pid"
+#define BACKUP_LOCK_FILE            "backup.pid"
+#define BACKUP_RO_LOCK_FILE         "backup_ro.pid"
 #define DATABASE_FILE_LIST            "backup_content.control"
 #define PG_BACKUP_LABEL_FILE        "backup_label"
 #define PG_TABLESPACE_MAP_FILE         "tablespace_map"
@@ -75,6 +76,9 @@ extern const char  *PROGRAM_FULL_PATH;
 #define PG_AB_RELATIVE_TBLSPC_DIR       "/pg_location"
 /* Timeout defaults */
 #define ARCHIVE_TIMEOUT_DEFAULT        300
+#define LOCK_TIMEOUT				   60
+#define LOCK_STALE_TIMEOUT			   30
+#define LOG_FREQ					   10
 
 /* Directory/File permission */
 #define DIR_PERMISSION        (0700)

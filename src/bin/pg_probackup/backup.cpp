@@ -1129,11 +1129,13 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
             deparse_compress_alg(current.compress_alg), current.compress_level);
 
     /* Create backup directory and BACKUP_CONTROL_FILE */
-    if (pgBackupCreateDir(&current))
+    if (pgBackupCreateDir(&current)) {
         elog(ERROR, "Cannot create backup directory");
-    if (!lock_backup(&current, true))
+    }
+    if (!lock_backup(&current, true, true)) {
         elog(ERROR, "Cannot lock backup %s directory",
             base36enc(current.start_time));
+    }
     write_backup(&current, true);
 
     /* set the error processing function for the backup process */
