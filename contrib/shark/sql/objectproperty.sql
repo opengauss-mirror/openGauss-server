@@ -228,3 +228,27 @@ create table object_schema.t1 (n1 int);
 
 RESET SESSION AUTHORIZATION;
 select object_id('object_schema.t1');
+
+DROP TABLE IF EXISTS t1;
+CREATE TABLE t1 (
+    id INT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    age INT DEFAULT 0,
+    grade DECIMAL(5, 2)
+);
+DROP TABLE IF EXISTS t2;
+CREATE TABLE t2 (
+    id INT,
+    name VARCHAR(100) NOT NULL,
+    age INT DEFAULT 0,
+    grade DECIMAL(5, 2)
+);
+
+select objectproperty(object_id('t1'), 'isindexed') as isindexed;
+select objectproperty(object_id('t2'), 'isindexed') as isindexed;
+
+select objectproperty(object_id('t1'), 'tablefulltextpopulatestatus') as isindexed;
+select objectproperty(object_id('t2'), 'tablefulltextpopulatestatus') as isindexed;
+
+DROP TABLE IF EXISTS t1;
+DROP TABLE IF EXISTS t2;

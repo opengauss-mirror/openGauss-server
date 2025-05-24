@@ -1018,3 +1018,46 @@ select object_id('object_schema.t1');
           
 (1 row)
 
+DROP TABLE IF EXISTS t1;
+NOTICE:  table "t1" does not exist, skipping
+CREATE TABLE t1 (
+    id INT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    age INT DEFAULT 0,
+    grade DECIMAL(5, 2)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+DROP TABLE IF EXISTS t2;
+NOTICE:  table "t2" does not exist, skipping
+CREATE TABLE t2 (
+    id INT,
+    name VARCHAR(100) NOT NULL,
+    age INT DEFAULT 0,
+    grade DECIMAL(5, 2)
+);
+select objectproperty(object_id('t1'), 'isindexed') as isindexed;
+ isindexed 
+-----------
+         1
+(1 row)
+
+select objectproperty(object_id('t2'), 'isindexed') as isindexed;
+ isindexed 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('t1'), 'tablefulltextpopulatestatus') as isindexed;
+ isindexed 
+-----------
+         0
+(1 row)
+
+select objectproperty(object_id('t2'), 'tablefulltextpopulatestatus') as isindexed;
+ isindexed 
+-----------
+         0
+(1 row)
+
+DROP TABLE IF EXISTS t1;
+DROP TABLE IF EXISTS t2;
