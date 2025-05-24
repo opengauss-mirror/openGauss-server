@@ -164,13 +164,6 @@ Node* MultiExecHash(HashState* node)
 
     /* resize the hash table if needed (NTUP_PER_BUCKET exceeded) */
     if (hashtable->nbuckets != hashtable->nbuckets_optimal) {
-        /* We never decrease the number of buckets. */
-        Assert(hashtable->nbuckets_optimal > hashtable->nbuckets);
-
-#ifdef HJDEBUG
-        printf("Increasing nbuckets %d => %d\n", hashtable->nbuckets, hashtable->nbuckets_optimal);
-#endif
-
         ExecHashIncreaseNumBuckets(hashtable);
     }
 
@@ -1164,20 +1157,16 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
         return;
     }
 
-    /*
-     * We already know the optimal number of buckets, so let's just
-     * compute the log2_nbuckets for it.
-     */
+#ifdef HJDEBUG
+    printf("Increasing nbuckets to %d => %d\n",
+            hashtable->nbuckets, hashtable->nbuckets_optimal);
+#endif
     hashtable->nbuckets = hashtable->nbuckets_optimal;
-    hashtable->log2_nbuckets = my_log2(hashtable->nbuckets_optimal);
+    hashtable->log2_nbuckets = hashtable->log2_nbuckets_optimal;
 
     Assert(hashtable->nbuckets > 1);
     Assert(hashtable->nbuckets <= (INT_MAX / 2));
     Assert(hashtable->nbuckets == (1 << hashtable->log2_nbuckets));
-
-#ifdef HJDEBUG
-    printf("Increasing nbuckets to %d\n", hashtable->nbuckets);
-#endif
 
     /*
      * Just reallocate the proper number of buckets - we don't need to
@@ -1187,7 +1176,8 @@ static void ExecHashIncreaseNumBuckets(HashJoinTable hashtable)
      */
     hashtable->buckets = (HashJoinTuple *)repalloc(hashtable->buckets, hashtable->nbuckets * sizeof(HashJoinTuple));
 
-    rc = memset_s(hashtable->buckets, sizeof(void *) * hashtable->nbuckets, 0, sizeof(void *) * hashtable->nbuckets);
+    rc = memset_s(hashtable->buckets, sizeof(HashJoinTuple) * hashtable->nbuckets,
+                    0, sizeof(HashJoinTuple) * hashtable->nbuckets);
     securec_check(rc, "\0", "\0");
 
     /* scan through all tuples in all chunks to rebuild the hash table */
@@ -1273,7 +1263,8 @@ void ExecHashTableInsert(HashJoinTable hashtable, TupleTableSlot *slot, uint32 h
          * NTUP_PER_BUCKET threshold, but only when there's still a single batch.
          */
         if ((hashtable->nbatch == 1) && (hashtable->nbuckets_optimal <= INT_MAX / 2) && /* overflow protection */
-            (ntuples >= (hashtable->nbuckets_optimal * NTUP_PER_BUCKET))) {
+            (ntuples >= (hashtable->nbuckets_optimal * NTUP_PER_BUCKET)) &&
+            hashtable->nbuckets_optimal * 2 <= MaxAllocSize / sizeof(HashJoinTuple)) {
             hashtable->nbuckets_optimal *= 2;
             hashtable->log2_nbuckets_optimal += 1;
         }
