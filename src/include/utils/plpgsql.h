@@ -2273,6 +2273,7 @@ extern void FunctionInSubprogramCompile(Oid parentFuncOid);
 extern void add_parent_func_compile(PLpgSQL_compile_context* context);
 extern void record_inline_subprogram_type(Oid typeoid);
 extern char* getPlpgsqlVarName(PLpgSQL_datum *datum, bool ref = true);
+extern void GsplsqlResetContextInAbout();
 
 extern void raise_application_error_context_callback(void* arg);
 

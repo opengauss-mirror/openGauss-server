@@ -3362,7 +3362,13 @@ static void exec_exception_begin(PLpgSQL_execstate* estate, ExceptionContext *co
     if (t_thrd.utils_cxt.STPSavedResourceOwner == NULL &&
         u_sess->SPI_cxt.portal_stp_exception_counter == 0 &&
         u_sess->plsql_cxt.stp_savepoint_cnt == 0) {
-        t_thrd.utils_cxt.STPSavedResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+        ResourceOwner nextChild = t_thrd.utils_cxt.CurrentResourceOwner;
+        while (nextChild != NULL) {
+            if (strcmp("Portal", ResourceOwnerGetName(nextChild)) == 0) {
+                t_thrd.utils_cxt.STPSavedResourceOwner = nextChild;
+            }
+            nextChild = ResourceOwnerGetNextChild(nextChild);
+        }
     }
 
     /* Execute statements in the block's body inside a sub-transaction */
@@ -14981,6 +14987,17 @@ void plpgsql_xact_cb(XactEvent event, void* arg)
     } else {
         u_sess->plsql_cxt.simple_eval_estate = NULL;
         u_sess->plsql_cxt.shared_simple_eval_resowner = NULL;
+    }
+}
+
+void GsplsqlResetContextInAbout()
+{
+    SimpleEcontextStackEntry *entry = u_sess->plsql_cxt.simple_econtext_stack;
+    while (entry != NULL) {
+        if (entry->has_change_parent) {
+            MemoryContextSetParent(entry->stack_econtext->ecxt_per_query_memory, u_sess->top_transaction_mem_cxt);
+        }
+        entry = entry->next;
     }
 }
 

@@ -939,6 +939,9 @@ void AtAbort_Portals(bool STP_rollback)
          */
         if(portal->status != PORTAL_ACTIVE) {
 #ifndef ENABLE_MULTIPLE_NODES
+            if (!STP_rollback) {
+                GsplsqlResetContextInAbout();
+            }
             /*
              * estate is under the queryDesc, and stream threads use it.
              * we should wait all stream threads exit to cleanup queryDesc.

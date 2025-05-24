@@ -1154,3 +1154,61 @@ select pkg_1189602.fun1_1189601(100);
 drop package pkg_1189602;
 drop package pkg_1189601;
 drop table t1_1189601;
+
+drop table if exists t_commit_rollback;
+drop table if exists tmp_commit_rollback;
+
+create table t_commit_rollback(a1 int, a2 int);
+create table tmp_commit_rollback(b int);
+insert into t_commit_rollback values(1, 2);
+insert into t_commit_rollback values(2, 3);
+insert into t_commit_rollback values(10, 30);
+insert into t_commit_rollback values(10, 6);
+insert into t_commit_rollback values(1, 20);
+insert into t_commit_rollback values(2, 30);
+insert into t_commit_rollback values(10, 3);
+insert into t_commit_rollback values(10, 60);
+
+CREATE OR REPLACE PACKAGE pkg_11900001
+is
+function a(c1 int, c2 in int) return int;
+end pkg_11900001;
+/
+
+CREATE OR REPLACE PACKAGE BODY pkg_11900001 AS
+function a(c1 int, c2 in int) return int
+as
+declare r int;
+begin
+if c1 > 1 then
+r = 30;
+elseif c2 > 1 then
+r = 6;
+end if;
+return r;
+EXCEPTION
+WHEN OTHERS THEN
+raise info 'pkg_11900001 has error';
+RETURN NULL;
+end;
+end pkg_11900001;
+/
+
+CREATE OR REPLACE VIEW t_view as select pkg_11900001.a(t_commit_rollback.a1, 5) as n from t_commit_rollback;
+
+declare V_COUNT INT8;
+BEGIN
+for i in(select n from t_view order by n) loop
+BEGIN
+insert into tmp_commit_rollback values(1);
+end;
+raise info '%',i;
+commit;
+end loop;
+end;
+/
+
+drop table tmp_commit_rollback;
+drop view t_view;
+drop table t_commit_rollback;
+drop package pkg_11900001;
