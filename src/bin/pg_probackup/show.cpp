@@ -14,12 +14,12 @@
 #include <time.h>
 #include <dirent.h>
 #include <sys/stat.h>
-
+#include <sys/vfs.h>
 #include "json.h"
 #include "common/fe_memutils.h"
 
 #define half_rounded(x)   (((x) + ((x) < 0 ? 0 : 1)) / 2)
-
+#define MIN_SPACE 1048576
 /* struct to align fields printed in plain format */
 typedef struct ShowBackendRow
 {
@@ -611,6 +611,8 @@ show_instance_plain(const char *instance_name, device_type_t instance_type,  par
     uint32        widths_sum = 0;
     ShowBackendRow *rows = NULL;
     TimeLineID parent_tli = 0;
+    int64 disk_available_bytes = 0;
+    struct statfs diskInfo = {0};
 
     for (i = 0; i < SHOW_FIELDS_COUNT; i++)
         widths[i] = strlen(names[i]);
@@ -745,6 +747,21 @@ show_instance_plain(const char *instance_name, device_type_t instance_type,  par
         cur++;
 
         /* Status */
+        int staRet = statfs(backup->root_dir, &diskInfo);
+        if (staRet < 0) {
+            elog(ERROR, "Get disk free space failed!");
+        }
+        disk_available_bytes = (int64)diskInfo.f_bavail * diskInfo.f_bsize;
+        int ret = system("ps ux | grep gs_probackup | grep -v grep | grep -v show");
+        if ((ret != 0) && (backup->status == BACKUP_STATUS_RUNNING)) {
+            if (disk_available_bytes <= MIN_SPACE) {
+                elog(WARNING, "Label is abnormal, and insufficient memory to modify file status,",
+                    "please clear disk space");
+            } else {
+                backup->status = BACKUP_STATUS_ERROR;
+                write_backup(backup, true);
+            }
+        }
         row->status = status2str(backup->status);
         widths[cur] = Max(widths[cur], strlen(row->status));
     }
