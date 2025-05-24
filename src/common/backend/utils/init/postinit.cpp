@@ -2826,6 +2826,7 @@ void PostgresInitializer::InitSettings()
 
     /* initialize client encoding */
     InitializeClientEncoding();
+    InitializeCharsetEncoding();
 }
 
 void PostgresInitializer::InitExtensionVariable()
