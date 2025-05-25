@@ -127,6 +127,9 @@ static void InsertItemToTokenMetaList(Relation index, BM25EntryPages &bm25EntryP
         if (!BlockNumberIsValid(nextblkno)) {
             break;
         }
+        if (!building) {
+            GenericXLogAbort(state);
+        }
         UnlockReleaseBuffer(cbuf);
     }
 
@@ -193,7 +196,7 @@ static void ReorderPosting(Relation index, BlockNumber postingBlkno, uint32 docC
         nextblkno = BM25PageGetOpaque(cpage)->nextblkno;
         UnlockReleaseBuffer(cbuf);
     }
-    qsort(postings, (size_t)docCount, sizeof(BM25TokenPostingItem), ComparePostingFunc);
+    qsort(postings, (size_t)docIdx, sizeof(BM25TokenPostingItem), ComparePostingFunc);
 
     // rewrite to posting list
     docIdx = 0;
