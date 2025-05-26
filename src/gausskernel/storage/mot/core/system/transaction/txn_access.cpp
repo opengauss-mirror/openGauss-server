@@ -390,7 +390,7 @@ Access* TxnAccess::GetNewInsertAccess(Sentinel* const& sentinel, Row* row, RC& r
                 break;
             case IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE:
                 node = static_cast<SecondarySentinelUnique*>(sentinel)->GetTopNode();
-                if (node->GetEndCSN() >= csn) {
+                if (node->GetEndCSN() > csn) {
                     rc = RC_UNIQUE_VIOLATION;
                     return nullptr;
                 }
