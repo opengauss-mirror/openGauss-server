@@ -73,16 +73,17 @@ bool will_shutdown = false;
  *       3.1.X  |    -     |     -      |     -     
  *       5.0.X  |  92656   |   92848    |   92898   
  *       6.0.X  |  92899   |   92950    |   92999
- *       NEXT   |  92899   |     ?      |     ?     
+ *       NEXT   |  92899   |     ?      |     ?
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 92967;
+const uint32 GRAND_VERSION_NUM = 92968;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 BM25_FULL_TEXT_INDEX = 92968;
 const uint32 FIX_HBA_CONF_BUG_VERSION_NUM = 92966;
 const uint32 MATEDATE_ERROR_PLPGSQL_DEPENDENCY = 92961;
 const uint32 FLUSH_LSN_FUN_VERSION_NUM = 92951;

@@ -83,6 +83,8 @@ separate_symbol()
 			echo "$x is a ini file, do not separate symbol"	
 		elif [[ "$x" = *".jar" ]];then
 			echo "$x is a jar file, do not separete symbol"
+		elif [[ "$x" = *".utf8" ]];then
+			echo "$x is a utf8 file, do not separete symbol"
 		elif [[ "$x" = "liblwgeom-2.4.so.0" ]];then
 			echo "the dynamically link $x do not separate symbol"
 		elif [ -f "$x" ];then

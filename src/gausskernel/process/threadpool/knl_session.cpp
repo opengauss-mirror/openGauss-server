@@ -1482,6 +1482,11 @@ static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
     datavec_cxt->ivfpq_kreorder = 0;
 }
 
+static void knl_u_bm25_init(knl_u_bm25_context* bm25_context)
+{
+    bm25_context->scoreHashTable = nullptr;
+}
+
 void knl_session_init(knl_session_context* sess_cxt)
 {
     Assert (0 != strncmp(CurrentMemoryContext->name, "ErrorContext", sizeof("ErrorContext")));
@@ -1583,7 +1588,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_clientConnTime_init(&sess_cxt->clientConnTime_cxt);
 
     knl_u_opfusion_reuse_init(&sess_cxt->opfusion_reuse_ctx);
-   
+
     knl_u_datavec_init(&sess_cxt->datavec_ctx);
 
     MemoryContextSeal(sess_cxt->top_mem_cxt);

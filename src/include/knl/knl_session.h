@@ -3013,6 +3013,11 @@ typedef struct knl_u_datavec_context {
     int ivfpq_kreorder;
 } knl_u_datavec_context;
 
+struct BM25ScanDocScoreHashTable;
+typedef struct knl_u_bm25_context {
+    BM25ScanDocScoreHashTable *scoreHashTable;
+} knl_u_bm25_context;
+
 typedef struct knl_session_context {
     volatile knl_session_status status;
     /* used for threadworker, elem in m_readySessionList */
@@ -3168,6 +3173,7 @@ typedef struct knl_session_context {
     knl_u_libsw_context libsw_cxt;
 
     knl_u_datavec_context datavec_ctx;
+    knl_u_bm25_context bm25_ctx;
 
 } knl_session_context;
 

@@ -399,5 +399,9 @@ DATA(insert OID = 8979 (403  sparsevec_ops PGNSP PGUID 8397 8307 t 0));
 
 DATA(insert OID = 8951 (4439  vector_ops PGNSP PGUID 8375 8305 t 0));
 DATA(insert OID = 8952 (4439  sparsevec_ops PGNSP PGUID 8376 8307 t 0));
+
+/* bm25 index */
+DATA(insert OID = 9737 (8302  bm25_textarr_ops PGNSP PGUID 6509 1009 t 0));
+DATA(insert OID = 9738 (8302  bm25_text_ops PGNSP PGUID 6510 25 t 0));
 #endif   /* PG_OPCLASS_H */
 

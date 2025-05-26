@@ -1975,6 +1975,11 @@ DESCR("sparsevec equal");
 DATA(insert OID = 8338 ("<>"      PGNSP PGUID b f f 8307 8307 16 8338 8337 sparsevec_ne neqsel neqjoinsel));
 DESCR("sparsevec unequal");
 
+DATA(insert OID = 6207 ("<&>"       PGNSP PGUID b f f 1009 1009 701 6207 0 bm25_scores_textarr 0 0));
+DESCR("bm25 text array similarity");
+DATA(insert OID = 6208 ("<&>"      PGNSP PGUID b f f 25 25 701 6208 0 bm25_scores_text 0 0));
+DESCR("bm25 text similarity");
+
 /*
  * function prototypes
  */
