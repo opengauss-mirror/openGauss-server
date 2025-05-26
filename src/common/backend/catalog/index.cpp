@@ -5761,6 +5761,7 @@ bool ReindexRelation(Oid relid, int flags, int reindexType, void *baseDesc, Adap
         foreach (indexId, indexIds) {
             Oid indexOid = lfirst_oid(indexId);
             Relation indexRel = index_open(indexOid, AccessShareLock);
+            bool index_unique = (indexRel->rd_index && indexRel->rd_index->indisunique);
 
             if ((((uint32)reindexType) & REINDEX_ALL_INDEX) ||
                 ((((uint32)reindexType) & REINDEX_BTREE_INDEX) && (indexRel->rd_rel->relam == BTREE_AM_OID)) ||
@@ -5773,7 +5774,7 @@ bool ReindexRelation(Oid relid, int flags, int reindexType, void *baseDesc, Adap
                     memInfo, dbWide, baseDesc, isTruncGTT);
 
 #ifndef ENABLE_MULTIPLE_NODES
-                if (RelationIsCUFormat(rel) && indexRel->rd_index != NULL && indexRel->rd_index->indisunique) {
+                if (RelationIsCUFormat(rel) && index_unique) {
                     ReindexDeltaIndex(indexOid, InvalidOid);
                 }
 #endif
