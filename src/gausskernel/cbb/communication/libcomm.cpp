@@ -1915,12 +1915,11 @@ bool gs_s_form_start_ctrl_msg(p_mailbox* pmailbox, FCMSG_T* msg)
         msg->extra_info = pmailbox->local_thread_id;
         msg->query_id = pmailbox->query_id;
 
-        cpylen = comm_get_cpylen(g_instance.comm_cxt.localinfo_cxt.g_self_nodename, NAMEDATALEN);
         ss_rc = memset_s(msg->nodename, NAMEDATALEN, 0x0, NAMEDATALEN);
         securec_check(ss_rc, "\0", "\0");
-        ss_rc = strncpy_s(msg->nodename, NAMEDATALEN, g_instance.comm_cxt.localinfo_cxt.g_self_nodename, cpylen + 1);
-        securec_check(ss_rc, "\0", "\0");
-        msg->nodename[cpylen] = '\0';
+        ss_rc = sprintf_s(msg->nodename, NAMEDATALEN, "%d_%s", pmailbox->shift,
+                          g_instance.comm_cxt.localinfo_cxt.g_self_nodename);
+        securec_check_ss_c(ss_rc, "\0", "\0");
 
         return true;
     }

@@ -1455,7 +1455,7 @@ int gs_send(gsocket* gs_sock, char* message, int m_len, int time_out, bool block
     int shift;
     ss_rc = sscanf_s(node_name, "%d_%s", &shift, &remote_nodename, (unsigned)NAMEDATALEN);
     securec_check_for_sscanf_s(ss_rc, 2, "\0", "\0");
-    if (0 == strcmp(remote_nodename, node_name)) {
+    if (0 == strcmp(remote_nodename, g_instance.comm_cxt.localinfo_cxt.g_self_nodename)) {
         LIBCOMM_PTHREAD_RWLOCK_RDLOCK(&g_instance.comm_cxt.g_senders->sender_conn[node_idx].rwlock);
         // remote_version is the cmailbox version, consumer use it to check.
         ret = gs_push_local_buffer(streamid, message, need_send_len, remote_version, node_name);
