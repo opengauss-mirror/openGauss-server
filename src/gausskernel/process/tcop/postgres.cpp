@@ -278,7 +278,7 @@ static XLogRecPtr xlogCopyStart = InvalidXLogRecPtr;
  *		decls for routines only used in this file
  * ----------------------------------------------------------------
  */
-static void exec_get_bind_message(StringInfo input_message, PqBindMessage *pqBindMessage, PreparedStatement **pstmt, CachedPlanSource** psrc);
+static void exec_get_bind_message(StringInfo input_message, BindMessage *pqBindMessage, PreparedStatement **pstmt, CachedPlanSource** psrc);
 static int InteractiveBackend(StringInfo inBuf);
 static int interactive_getc(void);
 static int ReadCommand(StringInfo inBuf);
@@ -3617,6 +3617,34 @@ static void GetParamOidFromName(char** paramTypeNames, Oid* paramTypes, int numP
 }
 #endif
 
+void exec_pre_parse_message()
+{
+#ifdef USE_RETRY_STUB
+    if (IsStmtRetryEnabled())
+        u_sess->exec_cxt.RetryController->stub_.StartOneStubTest('P');
+#endif
+
+    statement_init_metric_context();
+    instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
+}
+
+void exec_after_parse_message(const char* stmt_name)
+{
+    statement_commit_metirc_context();
+
+    /*
+     * since AbortTransaction can't clean named prepared statement, we need to
+     * cache prepared statement name here, and clean it later in long jump routine.
+     * only need to cache it if parse successfully, then cleaning is necessary if retry
+     * happens.
+     */
+    if (IsStmtRetryEnabled() && stmt_name[0] != '\0') {
+        u_sess->exec_cxt.RetryController->CacheStmtName(stmt_name);
+    }
+
+    resetErrorDataArea(true, false);
+}
+
 /*
  * exec_parse_message
  *
@@ -4626,7 +4654,8 @@ void exec_get_ddl_params(StringInfo input_message)
 }
 #endif
 
-void get_param_list_info(PqBindMessage* pqBindMessage, CachedPlanSource* psrc, ParamListInfo* params)
+void get_param_list_info(BindMessage* pqBindMessage, CachedPlanSource* psrc, ParamListInfo* params,
+    MemoryContext paramCtx, MemoryContext valueCtx)
 {
     int numParams = pqBindMessage->numParams;
     /*
@@ -4635,6 +4664,7 @@ void get_param_list_info(PqBindMessage* pqBindMessage, CachedPlanSource* psrc, P
     if (numParams <= 0) {
         return;
     }
+    MemoryContext oldCtx = MemoryContextSwitchTo(paramCtx);
     int paramno;
     Oid param_collation = GetCollationConnection();
     int param_charset = GetCharsetConnection();
@@ -4654,6 +4684,7 @@ void get_param_list_info(PqBindMessage* pqBindMessage, CachedPlanSource* psrc, P
         (*params)->params_lazy_bind = false;
     }
 
+    MemoryContextSwitchTo(valueCtx);
     for (paramno = 0; paramno < numParams; paramno++) {
         Oid ptype = psrc->param_types[paramno];
 #ifndef ENABLE_MULTIPLE_NODES			
@@ -4811,6 +4842,24 @@ void get_param_list_info(PqBindMessage* pqBindMessage, CachedPlanSource* psrc, P
         /* Reset the compatible illegal chars import flag */
         u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = false;
     }
+
+    MemoryContextSwitchTo(oldCtx);
+}
+
+void exec_pre_bind_message()
+{
+#ifdef USE_RETRY_STUB
+    if (IsStmtRetryEnabled()) {
+        u_sess->exec_cxt.RetryController->stub_.StartOneStubTest('B');
+    }
+#endif
+
+    statement_init_metric_context();
+    /*
+     * this message is complex enough that it seems best to put
+     * the field extraction out-of-line
+     */
+    instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
 }
 
 /*
@@ -4818,7 +4867,7 @@ void get_param_list_info(PqBindMessage* pqBindMessage, CachedPlanSource* psrc, P
  *
  * Process a "Bind" message to create a portal from a prepared statement
  */
-void exec_bind_message(PqBindMessage* pqBindMessage, PreparedStatement *pstmt, CachedPlanSource* psrc, bool send_end_msg, get_param_list_info_func get_param_func)
+void exec_bind_message(BindMessage* pqBindMessage, PreparedStatement *pstmt, CachedPlanSource* psrc, bool send_end_msg, get_param_list_info_func get_param_func)
 {
     const char* portal_name = pqBindMessage->portalName;
     const char* stmt_name = pqBindMessage->stmtName;
@@ -5129,7 +5178,7 @@ void exec_bind_message(PqBindMessage* pqBindMessage, PreparedStatement *pstmt, C
         snapshot_set = true;
     }
 
-    get_param_func(pqBindMessage, psrc, &params);
+    get_param_func(pqBindMessage, psrc, &params, CurrentMemoryContext, CurrentMemoryContext);
     /* u_sess->parser_cxt.param_info is for ddl pbe. If the logic is not ddl pbe, It will not be used*/
     if (t_thrd.proc->workingVersionNum >= DDL_PBE_VERSION_NUM) {
         u_sess->parser_cxt.param_info = (void*)params;
@@ -5180,6 +5229,9 @@ void exec_bind_message(PqBindMessage* pqBindMessage, PreparedStatement *pstmt, C
             if (snapshot_set)
                 PopActiveSnapshot();
 
+            if (send_end_msg && t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
+                pq_putemptymessage('2');
+            }
             gstrace_exit(GS_TRC_ID_exec_bind_message);
             return;
         }
@@ -5253,26 +5305,23 @@ void exec_bind_message(PqBindMessage* pqBindMessage, PreparedStatement *pstmt, C
     gstrace_exit(GS_TRC_ID_exec_bind_message);
 }
 
-/*
- * exec_execute_message
- *
- * Process an "Execute" message for a portal
- */
-void exec_execute_message(const char* portal_name, long max_rows, bool send_end_msg)
+bool exec_pre_execute_message(const char* portal_name, long max_rows, bool send_end_msg)
 {
-    CommandDest dest;
-    DestReceiver* receiver = NULL;
-    Portal portal;
-    bool completed = false;
     char completionTag[COMPLETION_TAG_BUFSIZE];
-    const char* sourceText = NULL;
-    const char* prepStmtName = NULL;
-    ParamListInfo portalParams;
-    bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
-    bool is_xact_command = false;
-    bool execute_is_fetch = false;
-    bool was_logged = false;
-    char msec_str[PRINTF_DST_MAX];
+    statement_init_metric_context_if_needs();
+    pgstat_report_trace_id(&u_sess->trace_cxt, true);
+
+    u_sess->pgxc_cxt.DisasterReadArrayInit = false;
+#ifdef ENABLE_MULTIPLE_NODES
+    if (lightProxy::processMsg(EXEC_MESSAGE, &input_message)) {
+        return true;
+    }
+#endif
+    if (u_sess->exec_cxt.CurrentOpFusionObj != NULL && IS_SINGLE_NODE) {
+        if (IS_UNIQUE_SQL_TRACK_TOP) {
+            SetIsTopUniqueSQL(true);
+        }
+    }
 
     bool isQueryCompleted = false;
     if (!u_sess->attr.attr_storage.phony_autocommit) {
@@ -5294,7 +5343,7 @@ void exec_execute_message(const char* portal_name, long max_rows, bool send_end_
         if (MEMORY_TRACKING_QUERY_PEAK)
             ereport(LOG, (errmsg("execute opfusion,  peak memory %ld(kb)",
                                  (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024))));
-        return;
+        return true;
     }
 
     /* Set statement_timestamp() */
@@ -5303,8 +5352,31 @@ void exec_execute_message(const char* portal_name, long max_rows, bool send_end_
     pgstatCountSQL4SessionLevel();
 #ifdef USE_RETRY_STUB
     if (IsStmtRetryEnabled())
-        u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
+        u_sess->exec_cxt.RetryController->stub_.StartOneStubTest('E');
 #endif
+    return false;
+}
+
+/*
+ * exec_execute_message
+ *
+ * Process an "Execute" message for a portal
+ */
+void exec_execute_message(const char* portal_name, long max_rows, bool send_end_msg)
+{
+    CommandDest dest;
+    DestReceiver* receiver = NULL;
+    Portal portal;
+    bool completed = false;
+    char completionTag[COMPLETION_TAG_BUFSIZE];
+    const char* sourceText = NULL;
+    const char* prepStmtName = NULL;
+    ParamListInfo portalParams;
+    bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
+    bool is_xact_command = false;
+    bool execute_is_fetch = false;
+    bool was_logged = false;
+    char msec_str[PRINTF_DST_MAX];
 
     gstrace_entry(GS_TRC_ID_exec_execute_message);
     /* Adjust destination to tell printtup.c what to do */
@@ -5588,6 +5660,27 @@ void exec_execute_message(const char* portal_name, long max_rows, bool send_end_
     t_thrd.postgres_cxt.cur_command_tag = T_Invalid;
     t_thrd.storage_cxt.timer_continued = {0, 0};
     gstrace_exit(GS_TRC_ID_exec_execute_message);
+}
+
+void exec_sync_message()
+{
+    OgRecordAutoController _local_opt(SRT10_S);
+#ifdef USE_RETRY_STUB
+    if (IsStmtRetryEnabled()) {
+        u_sess->exec_cxt.RetryController->stub_.StartOneStubTest('S');
+    }
+#endif
+    if (u_sess->xact_cxt.pbe_execute_complete == true) {
+        finish_xact_command();
+    } else {
+        u_sess->xact_cxt.pbe_execute_complete = true;
+    }
+
+    u_sess->debug_query_id = 0;
+
+    if (IsStmtRetryEnabled()) {
+        t_thrd.log_cxt.flush_message_immediately = false;
+    }
 }
 
 /*
@@ -9750,11 +9843,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 Oid* paramTypes = NULL;
                 char* paramModes = NULL;
                 char** paramTypeNames = NULL;
-
+#ifdef ENABLE_MULTIPLE_NODES
                 /* DN: get the node id. */
-                if (IS_PGXC_DATANODE && IsConnFromCoord())
+                if (IS_PGXC_DATANODE && IsConnFromCoord()) {
                     u_sess->pgxc_cxt.PGXCNodeId = pq_getmsgint(&input_message, 4);
-
+                }
+#endif
                 stmt_name = pq_getmsgstring(&input_message);
                 query_string = pq_getmsgstring(&input_message);
                 if (strlen(query_string) > SECUREC_MEM_MAX_LEN) {
@@ -9779,11 +9873,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                             paramTypes[i] = pq_getmsgint(&input_message, 4);
                     }
                 }
-
-#ifdef USE_RETRY_STUB
-                if (IsStmtRetryEnabled())
-                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
-#endif
 
 #ifndef ENABLE_MULTIPLE_NODES
                 if (PROC_OUTPARAM_OVERRIDE) {
@@ -9822,10 +9911,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     }
                 }
 #endif
-
                 pq_getmsgend(&input_message);
-                statement_init_metric_context();
-                instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
+
+                exec_pre_parse_message();
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams, true);
                 if (ENABLE_REMOTE_EXECUTE && (libpqsw_redirect() || libpqsw_get_set_command() || libpqsw_command_is_prepare()) &&
                     !libpqsw_only_localrun()) {
@@ -9835,37 +9923,15 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         libpqsw_get_set_command() ? RT_SET : RT_NORMAL
                         );
                 }
-                statement_commit_metirc_context();
-
-                /*
-                 * since AbortTransaction can't clean named prepared statement, we need to
-                 * cache prepared statement name here, and clean it later in long jump routine.
-                 * only need to cache it if parse successfully, then cleaning is necessary if retry
-                 * happens.
-                 */
-                if (IsStmtRetryEnabled() && stmt_name[0] != '\0') {
-                    u_sess->exec_cxt.RetryController->CacheStmtName(stmt_name);
-                }
-
-            resetErrorDataArea(true, false);
+                exec_after_parse_message(stmt_name);
             } break;
 
             case 'B': /* bind */
             {
                 OgRecordAutoController _local_opt(SRT7_B);
-#ifdef USE_RETRY_STUB
-                if (IsStmtRetryEnabled())
-                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
-#endif
+                exec_pre_bind_message();
 
-                statement_init_metric_context();
-                /*
-                 * this message is complex enough that it seems best to put
-                 * the field extraction out-of-line
-                 */
-                instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
-
-                PqBindMessage pqBindMessage;
+                BindMessage pqBindMessage;
                 PreparedStatement* pstmt = NULL;
                 CachedPlanSource* psrc = NULL;
                 exec_get_bind_message(&input_message, &pqBindMessage, &pstmt, &psrc);
@@ -9878,25 +9944,18 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 const char* portal_name = NULL;
                 int max_rows;
 
-                statement_init_metric_context_if_needs();
-                pgstat_report_trace_id(&u_sess->trace_cxt, true);
-                if ((unsigned int)input_message.len > SECUREC_MEM_MAX_LEN)
+                if (unlikely((unsigned int)input_message.len > SECUREC_MEM_MAX_LEN)) {
                     ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid execute message")));
-
-                u_sess->pgxc_cxt.DisasterReadArrayInit = false;
-                if (lightProxy::processMsg(EXEC_MESSAGE, &input_message)) {
-                    break;
                 }
 
-                if (u_sess->exec_cxt.CurrentOpFusionObj != NULL && IS_SINGLE_NODE) {
-                    if (IS_UNIQUE_SQL_TRACK_TOP) {
-                        SetIsTopUniqueSQL(true);
-                    }
-                }
                 portal_name = pq_getmsgstring(&input_message);
                 max_rows = pq_getmsgint(&input_message, 4);
                 pq_getmsgend(&input_message);
-                
+
+                if (exec_pre_execute_message(portal_name, max_rows, true)) {
+                    break;
+                }
+
                 exec_execute_message(portal_name, max_rows, true);
             } break;
 
@@ -10106,25 +10165,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'S': /* sync */
             {
-                OgRecordAutoController _local_opt(SRT10_S);
                 pq_getmsgend(&input_message);
-#ifdef USE_RETRY_STUB
-                if (IsStmtRetryEnabled()) {
-                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
-                }
-#endif
-                if (u_sess->xact_cxt.pbe_execute_complete == true) {
-                    finish_xact_command();
-                } else {
-                    u_sess->xact_cxt.pbe_execute_complete = true;
-                }
-
-                u_sess->debug_query_id = 0;
+                exec_sync_message();
                 send_ready_for_query = true;
-
-                if (IsStmtRetryEnabled()) {
-                    t_thrd.log_cxt.flush_message_immediately = false;
-                }
             } break;
 
             case 'K': /* client conn info net_time*/
@@ -12661,7 +12704,7 @@ void get_prepared_statement(const char *stmt_name, PreparedStatement **pstmt, Ca
     Assert(NULL != *psrc);
 }
 
-void exec_get_bind_message(StringInfo input_message, PqBindMessage *pqBindMessage, PreparedStatement **pstmt, CachedPlanSource** psrc)
+void exec_get_bind_message(StringInfo input_message, BindMessage *pqBindMessage, PreparedStatement **pstmt, CachedPlanSource** psrc)
 {
     const char *portalName = pq_getmsgstring(input_message);
     const char *stmtName = pq_getmsgstring(input_message);
@@ -12673,13 +12716,13 @@ void exec_get_bind_message(StringInfo input_message, PqBindMessage *pqBindMessag
     int numRFormats = 0;
     int16 *rformats = NULL;
 
+    MemoryContext oldContext = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
     if (numPFormats > 0) {
         pformats = (int16*)palloc(numPFormats * sizeof(int16));
         for (int i = 0; i < numPFormats; i++) {
             pformats[i] = pq_getmsgint(input_message, 2);
         }
     }
-    MemoryContext oldCxt = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
     /* Get the parameter value count */
     numParams = pq_getmsgint(input_message, 2);
 
@@ -12725,7 +12768,7 @@ void exec_get_bind_message(StringInfo input_message, PqBindMessage *pqBindMessag
     }
     pq_getmsgend(input_message);
 
-    MemoryContextSwitchTo(oldCxt);
+    MemoryContextSwitchTo(oldContext);
 
     pqBindMessage->portalName = portalName;
     pqBindMessage->stmtName = stmtName;

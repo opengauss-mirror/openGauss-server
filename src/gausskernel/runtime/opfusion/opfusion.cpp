@@ -784,13 +784,11 @@ void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPla
     return opfusionObj;
 }
 
-void OpFusion::updatePreAllocParamter(PqBindMessage* pqBindMessage, CachedPlanSource* psrc,
+void OpFusion::updatePreAllocParamter(BindMessage* pqBindMessage, CachedPlanSource* psrc,
     get_param_list_info_func get_param_func)
 {
-    /* Switch back to message context */
-    MemoryContext old_context = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
-    get_param_func(pqBindMessage, psrc, &m_local.m_params);
-    (void)MemoryContextSwitchTo(m_local.m_tmpContext);
+    MemoryContext old_context = CurrentMemoryContext;
+    get_param_func(pqBindMessage, psrc, &m_local.m_params, t_thrd.mem_cxt.msg_mem_cxt, m_local.m_tmpContext);
     CopyFormats(pqBindMessage->rformats, pqBindMessage->numRFormats);
     m_local.m_has_init_param = true;
     MemoryContextSwitchTo(old_context);

@@ -84,7 +84,7 @@ public:
 
     void CopyFormats(int16* formats, int numRFormats);
 
-    void updatePreAllocParamter(PqBindMessage* pqBindMessage, CachedPlanSource* psrc,
+    void updatePreAllocParamter(BindMessage* pqBindMessage, CachedPlanSource* psrc,
         get_param_list_info_func get_param_func);
 
     void useOuterParameter(ParamListInfo params);
