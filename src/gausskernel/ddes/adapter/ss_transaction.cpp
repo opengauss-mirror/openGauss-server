@@ -1163,7 +1163,15 @@ bool SSGetOldestXminFromAllStandby(TransactionId xmin, TransactionId xmax, Commi
     }
     return true;
 }
-/* broadcast to standby node update realtime-build logctrl enable */
+
+/**
+ * @brief Priamry node broadcast to standby node update realtime-build logctrl enable.
+ *
+ * @param canncelInReform   true: happend when primary node reload recovery_time_target,
+ *                              need to canncel broadcast in reform;
+ *                          false happend when primary node enable recovery_time_target
+ *                              before reform finish, wait until broadcast finish.
+ */
 void SSBroadcastRealtimeBuildLogCtrlEnable(bool canncelInReform)
 {
     dms_context_t dms_ctx;
@@ -1184,6 +1192,10 @@ void SSBroadcastRealtimeBuildLogCtrlEnable(bool canncelInReform)
         .check_session_kill = (unsigned char)true
     };
 
+    if (canncelInReform && SS_IN_REFORM) {
+        return;
+    }
+
     do {
         ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
         if (ret == DMS_SUCCESS || (canncelInReform && SS_IN_REFORM)) {
@@ -1198,6 +1210,9 @@ void SSBroadcastRealtimeBuildLogCtrlEnable(bool canncelInReform)
     }
 }
 
+/*
+ *  Primary node notify standby nodes whether enable or disable recovery_time_target.
+ */
 int SSUpdateRealtimeBuildLogCtrl(char* data, uint32 len)
 {
     if (unlikely(len != sizeof(SSBroadcastRealtimeBuildLogCtrl))) {
@@ -1272,7 +1287,13 @@ int SSGetStandbyRealtimeBuildPtr(char* data, uint32 len)
     SSBroadcastRealtimeBuildPtr *receiveMessage = (SSBroadcastRealtimeBuildPtr *)data;
     XLogRecPtr realtimePtr = receiveMessage->realtimeBuildPtr;
     int srcId = receiveMessage->srcInstId;
-
+    if (((0x1 << srcId) & g_instance.dms_cxt.SSReformInfo.new_bitmap) == 0) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS][On-demand] Get invalid realtime-build ptr from standby inst_id: %d, "
+                   "replayEndRecPtr: %X/%X, ignore it.",
+                   srcId, (uint32)(realtimePtr >> 32), (uint32)realtimePtr)));
+        return DMS_SUCCESS;
+    }
     realtime_build_ctrl_t *rtBuildCtrl = &g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[srcId];
     if (g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus == DISABLE) {
         g_instance.dms_cxt.SSRecoveryInfo.realtimeBuildLogCtrlStatus = ENABLE_LOG_CTRL;
