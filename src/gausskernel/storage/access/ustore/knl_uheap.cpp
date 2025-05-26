@@ -3708,6 +3708,13 @@ reacquire_buffer:
     for (i = 0; i < ntuples; i++)
         tuples[i]->ctid = uheaptuples[i]->ctid;
 
+    if (scratch != NULL) {
+        pfree(scratch);
+        scratch = NULL;
+    }
+    pfree(uheaptuples);
+    uheaptuples = NULL;
+
     pgstat_count_heap_insert(relation, ntuples);
 }
 
