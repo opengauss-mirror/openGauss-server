@@ -277,7 +277,7 @@ if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     )
 endif()
 
-if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON" AND "${ENABLE_OBS}" STREQUAL "ON")
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
    list(APPEND gaussdb_objects
        $<TARGET_OBJECTS:gausskernel_storage_access_archive>
    )

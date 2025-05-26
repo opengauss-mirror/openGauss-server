@@ -57,7 +57,7 @@ install: all installdirs
 # These headers are needed by madlib
 	$(MKDIR_P) '$(DESTDIR)$(includedir_server)'/cjson/
 	$(INSTALL_DATA) $(CJSON_INCLUDE_PATH)/cjson/cJSON.h '$(DESTDIR)$(includedir_server)'/cjson/cJSON.h
-ifeq ($(enable_lite_mode), no)
+ifeq ($(enable_lite_mode)_$(enable_obs), no_yes)
 	$(INSTALL_DATA) $(with_3rd)/$(BINARYPATH)/libobs/comm/include/eSDKOBS.h '$(DESTDIR)$(includedir_server)'/access/obs/eSDKOBS.h
 endif
 	$(INSTALL_DATA) $(srcdir)/access/hash.inl '$(DESTDIR)$(includedir_server)'/access/hash.inl

@@ -149,10 +149,71 @@ typedef struct OBSReadWriteHandler {
 #endif
 } OBSReadWriteHandler;
 
+#ifndef ENABLE_OBS
+typedef enum obs_status
+{
+    OBS_STATUS_OK = 0,                  // Operation succeeded
+    OBS_STATUS_ERROR = 1,               // General error
+    OBS_STATUS_INVALID_ARGUMENT = 2,    // Invalid argument passed to function
+    OBS_STATUS_NOT_FOUND = 3,           // Requested resource not found
+    OBS_STATUS_CONNECTION_FAILED = 4,   // Connection to OBS failed
+    OBS_STATUS_TIMEOUT = 5,             // Operation timed out
+    OBS_STATUS_AUTH_FAILED = 6,         // Authentication failed
+    OBS_STATUS_RETRYABLE = 7,           // Retryable error
+    OBS_STATUS_UNKNOWN = 8              // Unknown error
+} obs_status;
+
+struct obs_response_properties {
+    const char* etag;
+    const char* last_modified;
+    int content_length;
+};
+
+struct obs_error_details {
+    const char* message;
+    const char* resource;
+    const char* further_details;
+};
+
+struct obs_list_objects_content {
+    const char* key;
+    int64_t size;
+    const char* etag;
+    const char* last_modified;
+};
+
+struct obs_options {
+    struct {
+        const char* host_name;
+        const char* bucket_name;
+        bool protocol;  // true for HTTPS, false for HTTP
+        const char* access_key;
+        const char* secret_access_key;
+        const char* certificate_info;
+    } bucket_options;
+};
+
+typedef struct {
+    obs_status (*response_properties_callback)(const obs_response_properties *properties, void *callbackData);
+    void (*response_complete_callback)(obs_status status, const obs_error_details *error, void *callbackData);
+    obs_status (*list_objects_callback)(int isTruncated, const char *nextMarker, int contentsCount,
+                                        const obs_list_objects_content *contents, int commonPrefixesCount,
+                                        const char **commonPrefixes, void *callbackData);
+} obs_list_objects_handler;
+
+typedef struct {
+    int isTruncated;
+    char *nextMarker;
+    char *hostName;
+    const char *bucket;
+    List *objectList;
+} ListBucketCallBackData;
+#endif
+
 typedef struct ListServiceData {
     int headerPrinted;
     int allDetails;
-#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
+#if !defined(ENABLE_LITE_MODE)
     obs_status ret_status;
 #endif
 } ListServiceData;

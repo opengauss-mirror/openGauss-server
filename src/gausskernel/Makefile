@@ -637,15 +637,12 @@ endif
 	cp -d $(CJSON_LIB_PATH)/libcjson* '$(DESTDIR)$(libdir)/'
 
 ifneq ($(with_openeuler_os), yes)
-	cp -d $(LZ4_LIB_PATH)/liblz4* '$(DESTDIR)$(libdir)/'
 ifeq ($(enable_lite_mode), no)
 	cp -d $(with_3rd)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)/lib/libevent* '$(DESTDIR)$(libdir)/'
 endif
 	cp $(SECUREDYNAMICLIB_HOME)/libsecurec* '$(DESTDIR)$(libdir)/'
 ifneq (, $(findstring __USE_NUMA, $(CFLAGS)))
 	cp $(ZSTD_LIB_PATH)/libzstd* '$(DESTDIR)$(libdir)/'
-	cp $(LIBODBC_LIB_PATH)/libodbc* '$(DESTDIR)$(libdir)/'
-	cp $(NUMA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 endif
 ifeq ($(enable_mot), yes)
 	cp -d $(MASSTREE_LIB_PATH)/libmasstree* '$(DESTDIR)$(libdir)/'
@@ -682,12 +679,7 @@ endif
 endif
 
 ifeq ($(enable_lite_mode), no)
-	cp -r $(with_jdk)/jre/* '$(DESTDIR)$(bindir)/../jre/'
-ifneq ($(host_cpu), loongarch64)
-	cp $(PLJAVA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
-	cp $(PLJAVA_JAR_PATH)/$(JARPLJAVA) '$(DESTDIR)$(pkglibdir)/java/'
-	cp $(PLJAVA_HOME)/udstools.py '$(DESTDIR)$(datadir)/tmp/'
-endif
+	cp -r /usr/lib/jvm/java-1.8.0-openjdk-*/jre/* '$(DESTDIR)$(bindir)/../jre/'
 endif
 
 	cp '$(top_builddir)/src/include/ssl/openssl_gsql.cnf' '$(DESTDIR)$(datadir)/../sslcert/gsql/openssl.cnf'
@@ -715,7 +707,6 @@ ifeq ($(enable_lite_mode), no)
 endif
 endif
 	cp '$(ZSTD_LIB_PATH)'/libzstd.so* '$(DESTDIR)$(libdir)/'
-	cp '$(LIBODBC_LIB_PATH)'/libodbc* '$(DESTDIR)$(libdir)/'
 	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
 	cp -d '$(AWSSDK_LIB_PATH)'/libaws-cpp-sdk-core.so* '$(DESTDIR)$(libdir)/'
 	cp -d '$(AWSSDK_LIB_PATH)'/libaws-cpp-sdk-s3.so* '$(DESTDIR)$(libdir)/'

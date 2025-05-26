@@ -99,10 +99,8 @@ static void GetFileHeader(WritableParser* self, const char* path);
 #define parser_securec_check_ss(rc) securec_check_ss(rc, "\0", "\0")
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
 static size_t SourceRead_OBS(Source* self, void* buffer, size_t len);
 static bool SourceNext_OBS(Source* self);
-#endif
 #endif
 #endif
 
@@ -469,12 +467,10 @@ void Source::SourceInit(bool isWrite)
 #else
         if (m_sourcetype == SOURCE_TYPE_OBS) {
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
             SourceRead = SourceRead_OBS;
             SourceNext = SourceNext_OBS;
 #else
             FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
-#endif
 #endif
         } else {
             SourceRead = SourceRead_File;
@@ -1307,12 +1303,10 @@ int GDS::LineBuffer::AppendLine(const char* buf, int buf_len, bool isComplete)
             }
 #else
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
             /* for OBS, append  the overload data  in overload buffer */
             SaveOverloadBuf(m_overload_buf, buf, buf_len, isComplete);
 #else
             FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
-#endif
 #endif
 #endif
             /*
@@ -1477,7 +1471,6 @@ int GDS::LineBuffer::SendOverloadBuf(evbuffer* dest, const char* buf, int buf_le
 
 #ifdef OBS_SERVER
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
 static size_t SourceRead_OBS(Source* self, void* buffer, size_t len)
 {
     size_t nread = 0;
@@ -1697,6 +1690,5 @@ void GDS::LineBuffer::SaveOverloadBuf(StringInfo dest, const char* buf, int buf_
 
     MemoryContextSwitchTo(oldcontext);
 }
-#endif
 #endif
 #endif

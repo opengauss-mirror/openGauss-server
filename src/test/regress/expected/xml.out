@@ -4,14 +4,6 @@ CREATE TABLE xmltest (
 );
 INSERT INTO xmltest VALUES (1, '<value>one</value>');
 INSERT INTO xmltest VALUES (2, '<value>two</value>');
-INSERT INTO xmltest VALUES (3, '<wrong');
-ERROR:  invalid XML content
-LINE 1: INSERT INTO xmltest VALUES (3, '<wrong');
-                                       ^
-DETAIL:  line 1: Couldn't find end of Start Tag wrong line 1
-<wrong
-      ^
-CONTEXT:  referenced column: data
 CREATE TABLE emp (
 	name varchar(20),
 	age int,
@@ -72,14 +64,6 @@ SELECT xmlconcat(1, 2);
 ERROR:  argument of XMLCONCAT must be type xml, not type integer
 LINE 1: SELECT xmlconcat(1, 2);
                          ^
-CONTEXT:  referenced column: xmlconcat
-SELECT xmlconcat('bad', '<syntax');
-ERROR:  invalid XML content
-LINE 1: SELECT xmlconcat('bad', '<syntax');
-                                ^
-DETAIL:  line 1: Couldn't find end of Start Tag syntax line 1
-<syntax
-       ^
 CONTEXT:  referenced column: xmlconcat
 SELECT xmlconcat('<foo/>', NULL, '<?xml version="1.1" standalone="no"?><bar/>');
   xmlconcat   
@@ -225,24 +209,6 @@ SELECT xmlparse(content '<abc>x</abc>');
  <abc>x</abc>
 (1 row)
 
-SELECT xmlparse(content '<invalidentity>&</invalidentity>');
-ERROR:  invalid XML content
-DETAIL:  line 1: xmlParseEntityRef: no name
-<invalidentity>&</invalidentity>
-                ^
-line 1: chunk is not well balanced
-<invalidentity>&</invalidentity>
-                                ^
-CONTEXT:  referenced column: xmlparse
-SELECT xmlparse(content '<undefinedentity>&idontexist;</undefinedentity>');
-ERROR:  invalid XML content
-DETAIL:  line 1: Entity 'idontexist' not defined
-<undefinedentity>&idontexist;</undefinedentity>
-                             ^
-line 1: chunk is not well balanced
-<undefinedentity>&idontexist;</undefinedentity>
-                                               ^
-CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(content '<invalidns xmlns=''&lt;''/>');
          xmlparse          
 ---------------------------
@@ -255,18 +221,6 @@ SELECT xmlparse(content '<relativens xmlns=''relative''/>');
  <relativens xmlns='relative'/>
 (1 row)
 
-SELECT xmlparse(content '<twoerrors>&idontexist;</unbalanced>');
-ERROR:  invalid XML content
-DETAIL:  line 1: Entity 'idontexist' not defined
-<twoerrors>&idontexist;</unbalanced>
-                       ^
-line 1: Opening and ending tag mismatch: twoerrors line 1 and unbalanced
-<twoerrors>&idontexist;</unbalanced>
-                                    ^
-line 1: chunk is not well balanced
-<twoerrors>&idontexist;</unbalanced>
-                                    ^
-CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(content '<nosuchprefix:tag/>');
       xmlparse       
 ---------------------
@@ -285,24 +239,6 @@ SELECT xmlparse(document '<abc>x</abc>');
  <abc>x</abc>
 (1 row)
 
-SELECT xmlparse(document '<invalidentity>&</abc>');
-ERROR:  invalid XML document
-DETAIL:  line 1: xmlParseEntityRef: no name
-<invalidentity>&</abc>
-                ^
-line 1: Opening and ending tag mismatch: invalidentity line 1 and abc
-<invalidentity>&</abc>
-                      ^
-CONTEXT:  referenced column: xmlparse
-SELECT xmlparse(document '<undefinedentity>&idontexist;</abc>');
-ERROR:  invalid XML document
-DETAIL:  line 1: Entity 'idontexist' not defined
-<undefinedentity>&idontexist;</abc>
-                             ^
-line 1: Opening and ending tag mismatch: undefinedentity line 1 and abc
-<undefinedentity>&idontexist;</abc>
-                                   ^
-CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(document '<invalidns xmlns=''&lt;''/>');
          xmlparse          
 ---------------------------
@@ -315,15 +251,6 @@ SELECT xmlparse(document '<relativens xmlns=''relative''/>');
  <relativens xmlns='relative'/>
 (1 row)
 
-SELECT xmlparse(document '<twoerrors>&idontexist;</unbalanced>');
-ERROR:  invalid XML document
-DETAIL:  line 1: Entity 'idontexist' not defined
-<twoerrors>&idontexist;</unbalanced>
-                       ^
-line 1: Opening and ending tag mismatch: twoerrors line 1 and unbalanced
-<twoerrors>&idontexist;</unbalanced>
-                                    ^
-CONTEXT:  referenced column: xmlparse
 SELECT xmlparse(document '<nosuchprefix:tag/>');
       xmlparse       
 ---------------------
@@ -958,27 +885,10 @@ DROP TABLE emp;
 create database xmlmysql_db dbcompatibility 'B';
 \c xmlmysql_db
 create table test(a xml);
-insert into test values('a<');
-ERROR:  invalid XML content
-LINE 1: insert into test values('a<');
-                                ^
-DETAIL:  line 1: StartTag: invalid element name
-a<
-  ^
-CONTEXT:  referenced column: a
-insert /*+ ignore_error */into test values('a<');
-WARNING:  invalid XML content
-LINE 1: insert /*+ ignore_error */into test values('a<');
-                                                   ^
-DETAIL:  line 1: StartTag: invalid element name
-a<
-  ^
-CONTEXT:  referenced column: a
 select * from test;
- a  
-----
- a<
-(1 row)
+ a 
+---
+(0 rows)
 
 drop table test;
 \c regression

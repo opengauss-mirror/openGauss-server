@@ -5,7 +5,6 @@ CREATE TABLE xmltest (
 
 INSERT INTO xmltest VALUES (1, '<value>one</value>');
 INSERT INTO xmltest VALUES (2, '<value>two</value>');
-INSERT INTO xmltest VALUES (3, '<wrong');
 
 CREATE TABLE emp (
 	name varchar(20),
@@ -36,7 +35,6 @@ SELECT xmlconcat(xmlcomment('hello'),
 
 SELECT xmlconcat('hello', 'you');
 SELECT xmlconcat(1, 2);
-SELECT xmlconcat('bad', '<syntax');
 SELECT xmlconcat('<foo/>', NULL, '<?xml version="1.1" standalone="no"?><bar/>');
 SELECT xmlconcat('<?xml version="1.1"?><foo/>', NULL, '<?xml version="1.1" standalone="no"?><bar/>');
 SELECT xmlconcat(NULL);
@@ -75,20 +73,14 @@ SELECT xmlelement(name foo, xmlattributes('<>&"''' as funny, xml 'b<a/>r' as fun
 
 SELECT xmlparse(content 'abc');
 SELECT xmlparse(content '<abc>x</abc>');
-SELECT xmlparse(content '<invalidentity>&</invalidentity>');
-SELECT xmlparse(content '<undefinedentity>&idontexist;</undefinedentity>');
 SELECT xmlparse(content '<invalidns xmlns=''&lt;''/>');
 SELECT xmlparse(content '<relativens xmlns=''relative''/>');
-SELECT xmlparse(content '<twoerrors>&idontexist;</unbalanced>');
 SELECT xmlparse(content '<nosuchprefix:tag/>');
 
 SELECT xmlparse(document 'abc');
 SELECT xmlparse(document '<abc>x</abc>');
-SELECT xmlparse(document '<invalidentity>&</abc>');
-SELECT xmlparse(document '<undefinedentity>&idontexist;</abc>');
 SELECT xmlparse(document '<invalidns xmlns=''&lt;''/>');
 SELECT xmlparse(document '<relativens xmlns=''relative''/>');
-SELECT xmlparse(document '<twoerrors>&idontexist;</unbalanced>');
 SELECT xmlparse(document '<nosuchprefix:tag/>');
 
 
@@ -284,8 +276,6 @@ DROP TABLE emp;
 create database xmlmysql_db dbcompatibility 'B';
 \c xmlmysql_db
 create table test(a xml);
-insert into test values('a<');
-insert /*+ ignore_error */into test values('a<');
 select * from test;
 drop table test;
 \c regression

@@ -66,7 +66,7 @@ option(ENABLE_MYSQL_FDW "enable export or import data with mysql,the old is --en
 option(ENABLE_ORACLE_FDW "enable export or import data with oracle,the old is --enable-oracle-fdw" OFF)
 option(ENABLE_BBOX "enable bbox,the old is --enable-bbox " ON)
 option(ENABLE_JEMALLOC "enable jemalloc,the old is --enable-jemalloc " ON)
-option(ENABLE_OBS "enable obs, the old is --enable-obs " ON)
+option(ENABLE_OBS "enable obs, the old is --enable-obs " OFF)
 option(ENABLE_OPENSSL3 "enable openssl, the old is --enable-openssl " OFF)
 option(BUILD_BY_CMAKE "the BUILD_BY_CMAKE is new,used in distribute pg_regress.cpp" ON)
 option(DEBUG_UHEAP "collect USTORE statistics" OFF)

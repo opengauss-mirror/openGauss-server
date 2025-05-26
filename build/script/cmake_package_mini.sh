@@ -467,13 +467,13 @@ function install_gaussdb()
     fi
 
     if [[ -e "/etc/openEuler-release" && "$(cat /etc/openEuler-release | awk '{print $3}')" == "24.03" ]]; then
-        CMAKE_OPT="$CMAKE_OPT -DENABLE_OPENEULER_MAJOR=ON -DENABLE_OPENESSL3=OFF"
+        CMAKE_OPT="$CMAKE_OPT -DENABLE_OPENEULER_MAJOR=ON -DENABLE_OPENSSL3=OFF"
     fi
 
     if [ "${PLATFORM_ARCH}"x == "loongarch64"x ]; then
        CMAKE_OPT="$CMAKE_OPT -DENABLE_BBOX=OFF -DENABLE_JEMALLOC=OFF"
     fi
-    CMAKE_OPT="$CMAKE_OPT -DENABLE_OBS=ON"
+    CMAKE_OPT="$CMAKE_OPT -DENABLE_OBS=OFF"
     
     echo "CMAKE_OPT----> $CMAKE_OPT"
     echo "Begin run cmake for gaussdb server" >> "$LOG_FILE" 2>&1

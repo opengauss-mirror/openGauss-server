@@ -39,9 +39,7 @@ OBJS = autovacuum.o bgwriter.o fork_process.o pgarch.o pgstat.o og_record_time.o
 
 ifeq ($(enable_lite_mode), no)
 OBJS += aiocompleter.o barrier_preparse.o
-ifeq ($(with_obs), yes)
 OBJS += barrier_creator.o barrier_arch.o
-endif
 endif
 
 include $(top_srcdir)/src/gausskernel/common.mk

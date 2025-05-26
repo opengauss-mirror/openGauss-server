@@ -268,7 +268,6 @@ Datum pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
 Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
     Name name = PG_GETARG_NAME(0);
     bool isDummyStandby = PG_GETARG_BOOL(1);
     XLogRecPtr currFlushPtr = InvalidXLogRecPtr;
@@ -357,7 +356,6 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
 #else
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
     PG_RETURN_DATUM(0);
-#endif
 #endif
 }
 

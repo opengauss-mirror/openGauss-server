@@ -2599,7 +2599,6 @@ void MarkArchiveSlotOperate()
 }
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
 void get_hadr_cn_info(char* keyCn, bool* isExitKey, char* deleteCn, bool* isExitDelete, 
     ArchiveSlotConfig *archive_conf)
 {
@@ -2626,7 +2625,6 @@ void get_hadr_cn_info(char* keyCn, bool* isExitKey, char* deleteCn, bool* isExit
         ereport(LOG, ((errmsg("The file named %s cannot be found.", HADR_DELETE_CN_FILE))));
     }
 }
-#endif
 #endif
 
 void GetReplslotPath(char *path)

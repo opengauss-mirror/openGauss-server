@@ -30,13 +30,11 @@ size_t ArchiveRead(const char* fileName, const int offset, char *buffer, const i
     if (archive_config == NULL) {
         return 0;
     }
-#ifdef ENABLE_OBS
     if (archive_config->media_type == ARCHIVE_OBS) {
         return obsRead(fileName, offset, buffer, length, archive_config);
     } else if (archive_config->media_type == ARCHIVE_NAS) {
         return NasRead(fileName, offset, buffer, length, archive_config);
     }
-#endif
     return 0;
 }
 
@@ -47,13 +45,11 @@ int ArchiveWrite(const char* fileName, const char *buffer, const int bufferLengt
         return ret;
     }
 
-#ifdef ENABLE_OBS
     if (archive_config->media_type == ARCHIVE_OBS) {
         ret = obsWrite(fileName, buffer, bufferLength, archive_config);
     } else if (archive_config->media_type == ARCHIVE_NAS) {
         ret = NasWrite(fileName, buffer, bufferLength, archive_config);
     }
-#endif
     return ret;
 }
 
@@ -63,13 +59,11 @@ int ArchiveDelete(const char* fileName, ArchiveConfig *archive_config)
     if (archive_config == NULL) {
         return ret;
     }
-#ifdef ENABLE_OBS
     if (archive_config->media_type == ARCHIVE_OBS) {
         ret = obsDelete(fileName, archive_config);
     } else if (archive_config->media_type == ARCHIVE_NAS) {
         ret = NasDelete(fileName, archive_config);
     }
-#endif
     return ret;
 }
 
@@ -79,13 +73,11 @@ List* ArchiveList(const char* prefix, ArchiveConfig *archive_config, bool report
     if (archive_config == NULL) {
         return fileNameList;
     }
-#ifdef ENABLE_OBS
     if (archive_config->media_type == ARCHIVE_OBS) {
         fileNameList = obsList(prefix, archive_config, reportError, shortenConnTime);
     } else if (archive_config->media_type == ARCHIVE_NAS) {
         fileNameList = NasList(prefix, archive_config);
     }
-#endif
     return fileNameList;
 }
 
@@ -96,12 +88,10 @@ bool ArchiveFileExist(const char* file_path, ArchiveConfig *archive_config)
         ereport(WARNING, (errmsg("when check file exist, the archive config is null")));
         return ret;
     }
-#ifdef ENABLE_OBS
     if (archive_config->media_type == ARCHIVE_OBS) {
         ret = checkOBSFileExist(file_path, archive_config);
     } else if (archive_config->media_type == ARCHIVE_NAS) {
         ret = checkNASFileExist(file_path, archive_config);
     }
-#endif
     return ret;
 }

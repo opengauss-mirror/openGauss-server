@@ -385,7 +385,9 @@ static void list_obs_objects(char* bucketName, char* key, ListObjectsCallBackDat
             (void*)objectsData);
     } while (obs_status_is_retryable(statusG) && should_retry(retriesG));
 
+#ifdef ENABLE_OBS
     obs_deinitialize();
+#endif
 }
 
 /* delete objects */
@@ -422,7 +424,9 @@ static void delete_obs_objects(char* bucketName, char* key)
         printError();
     }
 
+#ifdef ENABLE_OBS
     obs_deinitialize();
+#endif
 }
 
 #if defined WIN32
