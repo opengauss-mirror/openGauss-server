@@ -3584,6 +3584,11 @@ void XLogDoFlush()
  */
 bool XLogBackgroundFlush(bool fsync)
 {
+    if (fsync) {
+        XLogDoFlush();
+        WakeupWalSemaphore(&g_instance.wal_cxt.walFlushWaitLock->l.sem);
+        return false;
+    }
     XLogRecPtr WriteRqstPtr = InvalidXLogRecPtr;
     XLogRecPtr InitializeRqstPtr = InvalidXLogRecPtr;
     int start_entry_idx, curr_entry_idx, next_entry_idx, entry_idx;
@@ -3784,7 +3789,7 @@ bool XLogBackgroundFlush(bool fsync)
     g_instance.wal_cxt.lastWalStatusEntryFlushed = curr_entry_idx;
     g_instance.wal_cxt.lastLRCWrited = curr_entry_ptr->LRC;
 
-    if (need_flush) {
+    if (ENABLE_DMS || !g_instance.attr.attr_common.xlog_write_flush_split || need_flush) {
         XLogDoFlush();
         WakeupWalSemaphore(&g_instance.wal_cxt.walFlushWaitLock->l.sem);
     }
