@@ -241,6 +241,14 @@ void InitializeClientEncoding(void)
                     pg_enc2name_tbl[u_sess->mb_cxt.pending_client_encoding].name,
                     GetDatabaseEncodingName())));
     }
+}
+
+void InitializeCharsetEncoding(void)
+{
+    if (!u_sess->mb_cxt.backend_startup_complete) {
+        return;
+    }
+
     u_sess->mb_cxt.character_set_connection = &pg_enc2name_tbl[GetDatabaseEncoding()];
     if (ENABLE_MULTI_CHARSET) {
         u_sess->mb_cxt.collation_connection = get_default_collation_by_charset(GetDatabaseEncoding(), false);

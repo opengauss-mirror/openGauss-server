@@ -471,6 +471,7 @@ extern mbcharacter_incrementer pg_database_encoding_character_incrementer(void);
 extern int PrepareClientEncoding(int encoding);
 extern int SetClientEncoding(int encoding);
 extern void InitializeClientEncoding(void);
+extern void InitializeCharsetEncoding(void);
 extern int pg_get_client_encoding(void);
 extern const char* pg_get_client_encoding_name(void);
 
