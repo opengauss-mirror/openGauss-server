@@ -342,8 +342,7 @@ bool MTLSRecoveryManager::ProcessSegment(LogSegment* segment)
     /* Update the max transaction id. */
     SetMaxTransactionId(intTxnId);
 
-    if (IsDDLTransaction(segment) || HasUpdateIndexColumn(segment) ||
-        (Is1VCCLogSegment(segment) && player->IsFirstSegment())) {
+    if (IsDDLTransaction(segment) || (Is1VCCLogSegment(segment) && player->IsFirstSegment())) {
         /*
          * In case of a DDL transaction we will flush in order to avoid a case when
          * a DDL (create index for example) is processed in parallel to a big insert
