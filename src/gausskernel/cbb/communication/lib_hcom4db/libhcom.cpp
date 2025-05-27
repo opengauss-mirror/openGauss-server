@@ -152,7 +152,7 @@ static void hcom_handle_CMD(OckRpcServerContext ctx, OckRpcMessage msg)
         return;
     }
     struct sock_id fd_id;
-    fd_id.id = cPeer->cindex + BASE_INDEX;
+    fd_id.fd = cPeer->cindex + BASE_INDEX;
     fd_id.id = 0;
     if (gs_map_sock_id_to_node_idx(fd_id, node_idx) < 0) {
         g_hcom_adapt.hcom_server_reply(ctx, 0, &rsp, nullptr);
@@ -244,7 +244,7 @@ int hcom_server_listener_init(const char* host, int port, const char* type)
         return -1;
     }
     OckRpcService handleRecvPacket = (OckRpcService){.id = 1, .handler = hcom_handle_recv};
-    if (g_hcom_adapt.hcom_server_add(g_server, &handleRecvPacket)) {
+    if (g_hcom_adapt.hcom_server_add(g_server, &handleRecvPacket) != OCK_RPC_OK) {
         LIBCOMM_ELOG(WARNING, "(hcom add server Buf)\tFailed detail[%s:%d] on type[%s]", host, port, type);
         return -1;
     }
@@ -279,7 +279,7 @@ static int hcom_client_connect(const char* host, int port)
     if (port == localPort && 0 == strcmp(host, g_localHost)) {
         LIBCOMM_ELOG(LOG, "hcom_client_connect connect self[%s:%d] clientid[%d]",
                      host, port, cPeer->cindex + BASE_INDEX);
-        return -1;
+        return (cPeer->cindex + BASE_INDEX);
     }
     if (cPeer->hcomClient != 0) {
         LIBCOMM_ELOG(WARNING, "hcom Client[%d] is not 0", cPeer->cindex);
@@ -405,6 +405,7 @@ int hcom_build_connection(libcommaddrinfo* libcomm_addrinfo, int node_idx)
                       libcomm_addrinfo->host,
                       cpylen + 1);
     securec_check_c(ss_rc, "\0", "\0");
+    g_instance.comm_cxt.g_senders->sender_conn[node_idx].remote_host[cpylen] = '\0';
     g_instance.comm_cxt.g_senders->sender_conn[node_idx].port = libcomm_addrinfo->listen_port;
     g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket = fd_id.fd;
     g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket_id = fd_id.id;
