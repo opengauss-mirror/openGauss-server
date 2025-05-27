@@ -139,6 +139,7 @@ typedef BM25DocForwardMetaPageData *BM25DocForwardMetaPage;
 typedef struct BM25DocForwardItem {
     uint32 tokenId;
     uint32 tokenHash;
+    uint32 docId;
 } BM25DocForwardItem;
 
 typedef struct BM25DocumentItem {
@@ -332,5 +333,8 @@ extern bool bm25insert_internal(Relation index, Datum *values, ItemPointer heapC
 extern IndexScanDesc bm25beginscan_internal(Relation rel, int nkeys, int norderbys);
 extern bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir);
 extern void bm25endscan_internal(IndexScanDesc scan);
+extern IndexBulkDeleteResult *bm25vacuumcleanup_internal(IndexVacuumInfo *info, IndexBulkDeleteResult *stats);
+extern IndexBulkDeleteResult *bm25bulkdelete_internal(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
+    IndexBulkDeleteCallback callback, void *callbackState);
 
 #endif // BM25_H

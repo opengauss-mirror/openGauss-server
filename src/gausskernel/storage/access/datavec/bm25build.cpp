@@ -142,6 +142,7 @@ static void InsertItemToTokenMetaList(Relation index, BM25EntryPages &bm25EntryP
     errno_t rc = strncpy_s(tokenMeta->token, BM25_MAX_TOKEN_LEN, tokenData.tokenValue, BM25_MAX_TOKEN_LEN - 1);
     securec_check_c(rc, "\0", "\0");
     tokenMeta->tokenId = BM25AllocateTokenId(index);
+    tokenData.tokenId = tokenMeta->tokenId;
     tokenMeta->hashValue = tokenData.hashValue;
     tokenMeta->maxScore = 0;
     tokenMeta->postingBlkno = InvalidBlockNumber;
@@ -422,7 +423,8 @@ static void InsertDocForwardItem(Relation index, uint32 docId, BM25TokenizedDocD
         BM25DocForwardItem *forwardItem =
             (BM25DocForwardItem*)((char *)page + sizeof(PageHeaderData) + offset * BM25_DOCUMENT_FORWARD_ITEM_SIZE);
         forwardItem->tokenId = tokenizedDoc.tokenDatas[i].tokenId;
-        forwardItem->tokenHash = tokenizedDoc.tokenDatas[i].tokenId;
+        forwardItem->tokenHash = tokenizedDoc.tokenDatas[i].hashValue;
+        forwardItem->docId = docId;
         tokenIdx++;
     }
     BM25CommitBuf(buf, &state, building);
