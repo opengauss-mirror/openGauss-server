@@ -312,6 +312,7 @@ static Node* MakeNoArgFunctionCall(List* funcName, int location);
 static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 static void contain_unsupport_node(Node* node, bool* has_unsupport_default_node);
 static List* TransformToConstStrNode(List *inExprList, char* raw_str);
+static Alias* generate_alias(Alias* clone_target, const char* default_alias_name);
 
 /* Please note that the following line will be replaced with the contents of given file name even if with starting with a comment */
 /*$$include "gram-tsql-prologue.y.h"*/
@@ -714,6 +715,7 @@ static List* TransformToConstStrNode(List *inExprList, char* raw_str);
 %type <defelt>	copy_generic_opt_elem
 %type <list>	copy_generic_opt_list copy_generic_opt_arg_list
 %type <list>	copy_options
+%type <node>    rotate_table unrotate_table
 
 %type <typnam>	Typename SimpleTypename ConstTypename
 				GenericType Numeric opt_float
@@ -25116,7 +25118,7 @@ select_clause:
  */
 simple_select:
 			SELECT hint_string opt_distinct target_list
-			opt_into_clause from_clause unrotate_clause where_clause start_with_clause
+			opt_into_clause from_clause where_clause start_with_clause
 			group_clause having_clause window_clause
 				{
 					SelectStmt *n = makeNode(SelectStmt);
@@ -25124,12 +25126,11 @@ simple_select:
 					n->targetList = $4;
 					n->intoClause = $5;
 					n->fromClause = $6;
-					n->unrotateInfo = $7;
-					n->whereClause = $8;
-					n->startWithClause = $9;
-					n->groupClause = $10;
-					n->havingClause = $11;
-					n->windowClause = $12;
+					n->whereClause = $7;
+					n->startWithClause = $8;
+					n->groupClause = $9;
+					n->havingClause = $10;
+					n->windowClause = $11;
 					n->hintState = create_hintstate($2);
 					n->hasPlus = getOperatorPlusFlag();
 					$$ = (Node *)n;
@@ -26003,6 +26004,7 @@ table_ref:
 			n->coldeflist = $4;
 			$$ = (Node *) n;
 		}
+	;
 
 /*
  * table_ref is where an alias clause can be attached.	Note we cannot make
@@ -26309,37 +26311,6 @@ table_ref_for_no_table_function:	relation_expr		%prec UMINUS
 					n->alias = $2;
 					$$ = (Node *) n;
 				}
-			| select_with_parens opt_alias_clause rotate_clause
-				{
-					RangeSubselect *n = makeNode(RangeSubselect);
-					n->lateral = false;
-					n->subquery = $1;
-					if ( $2 != NULL )
-						n->alias = $2;
-					else
-					{
-						n->alias = makeNode(Alias);
-						n->alias->aliasname = pstrdup("rotate_as_internal_t");
-					}
-					n->rotate = $3;
-					$$ = (Node *) n;
-				}
-			| relation_expr opt_alias_clause rotate_clause
-				{
-					RangeSubselect *n = makeNode(RangeSubselect);
-					n->lateral = false;
-					n->subquery = make_AStar_subquery($1);
-					if($2 != NULL)
-						n->alias = $2;
-					else
-					{
-						n->alias = makeNode(Alias);
-						n->alias->aliasname = pstrdup("rotate_as_internal_t");
-					}
-					n->rotate = $3;
-					$$ = (Node *) n;
-				}
-
 			| LATERAL_P select_with_parens opt_alias_clause  %prec LATERAL_P
 				{
 					RangeSubselect *n = makeNode(RangeSubselect);
@@ -26377,7 +26348,149 @@ table_ref_for_no_table_function:	relation_expr		%prec UMINUS
 					$2->alias = $4;
 					$$ = (Node *) $2;
 				}
+			| rotate_table
+				{
+					$$ = (Node *) $1;
+				}
+			| unrotate_table
+				{
+					$$ = (Node *) $1;
+				}
 		;
+
+
+rotate_table: select_with_parens opt_alias_clause rotate_clause
+				{
+					RangeSubselect *n = makeNode(RangeSubselect);
+					n->lateral = false;
+					n->subquery = $1;
+					if ( $2 != NULL )
+						n->alias = $2;
+					else
+					{
+						n->alias = makeNode(Alias);
+						n->alias->aliasname = pstrdup("rotate_as_internal_t");
+					}
+					n->rotate = $3;
+					$$ = (Node *) n;
+				}
+			| relation_expr opt_alias_clause rotate_clause
+				{
+					RangeSubselect *n = makeNode(RangeSubselect);
+					n->lateral = false;
+					n->subquery = make_AStar_subquery($1);
+					if($2 != NULL)
+						n->alias = $2;
+					else
+					{
+						n->alias = makeNode(Alias);
+						n->alias->aliasname = pstrdup("rotate_as_internal_t");
+					}
+					n->rotate = $3;
+					$$ = (Node *) n;
+				}
+			;
+
+
+unrotate_table:
+	relation_expr unrotate_clause
+		{
+			SelectStmt *s = (SelectStmt *)make_AStar_subquery($1);
+			s->unrotateInfo = $2;
+
+            RangeSubselect *n = makeNode(RangeSubselect);
+			n->lateral = false;
+			n->subquery = (Node*)s;
+			n->alias = generate_alias($2->alias, "not_rotate_as_internal_t");
+			$$ = (Node *) n;
+		}
+	| relation_expr opt_alias_clause unrotate_clause
+		{
+			RangeSubselect *n = makeNode(RangeSubselect);
+			n->lateral = false;
+
+			SelectStmt *subquery_node = (SelectStmt *)make_AStar_subquery($1);
+			subquery_node->unrotateInfo = $3;
+			n->subquery = (Node*)subquery_node;
+			n->alias = generate_alias($3->alias, "not_rotate_as_internal_t");
+			$$ = (Node *) n;
+		}		
+	| select_with_parens opt_alias_clause unrotate_clause
+		{
+			if (!IsA($1, SelectStmt)) {
+				ereport(ERROR,
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("VALUES in FROM must have an alias")));
+			}
+			SelectStmt* s1 = (SelectStmt*)$1;
+
+			RangeSubselect *rsubselect = makeNode(RangeSubselect);
+			rsubselect->subquery = (Node*)s1;
+			rsubselect->alias = generate_alias($3->alias, "not_rotate_as_internal_t");
+			SelectStmt *s2 = makeNode(SelectStmt);
+			ColumnRef *col = makeNode (ColumnRef);
+			col->fields = list_make1(makeNode(A_Star));
+			col->indnum = 0;
+
+			ResTarget *res = makeNode(ResTarget);
+			res->name = NULL;
+			res->indirection = NIL;
+			res->val = (Node *)col;
+			s2->targetList = list_make1(res);
+			s2->fromClause = list_make1(rsubselect);
+			s2->unrotateInfo = $3;
+
+			RangeSubselect *n = makeNode(RangeSubselect);
+			n->lateral = false;
+			n->alias = generate_alias($3->alias, "not_rotate_as_internal_t");
+			n->subquery = (Node*)s2;
+			$$ = (Node *) n;
+		}
+	| unrotate_table unrotate_clause
+		{
+			SelectStmt *s = makeNode(SelectStmt);
+			ColumnRef *col = makeNode (ColumnRef);
+			col->fields = list_make1(makeNode(A_Star));
+			col->indnum = 0;
+
+			ResTarget *res = makeNode(ResTarget);
+			res->name = NULL;
+			res->indirection = NIL;
+			res->val = (Node *)col;
+			s->targetList = list_make1(res);
+			s->fromClause = list_make1($1);
+			s->unrotateInfo = $2;
+
+			RangeSubselect *n = makeNode(RangeSubselect);
+			n->lateral = false;
+			n->subquery = (Node*)s;
+			n->alias = generate_alias($2->alias, "not_rotate_as_internal_t");
+
+			$$ = (Node *) n;
+		}
+	| rotate_table unrotate_clause
+		{
+			SelectStmt *s = makeNode(SelectStmt);
+			ColumnRef *col = makeNode (ColumnRef);
+			col->fields = list_make1(makeNode(A_Star));
+			col->indnum = 0;
+
+			ResTarget *res = makeNode(ResTarget);
+			res->name = NULL;
+			res->indirection = NIL;
+			res->val = (Node *)col;
+			s->targetList = list_make1(res);
+			s->fromClause = list_make1($1);
+			s->unrotateInfo = $2;
+
+			RangeSubselect *n = makeNode(RangeSubselect);
+			n->lateral = false;
+			n->subquery = (Node*)s;
+			n->alias = generate_alias($2->alias, "not_rotate_as_internal_t");
+
+			$$ = (Node *) n;
+		}
+	;
 
 
 /*
@@ -26597,7 +26710,6 @@ unrotate_clause:
 					n->inExprList = $7;
 					$$ = n;
 				}
-			| { $$ = NULL; }
 		;
 
 include_exclude_null_clause:
@@ -35042,6 +35154,16 @@ static List* TransformToConstStrNode(List *inExprList, char* raw_str)
 }
 
 
+static Alias* generate_alias(Alias* clone_target, const char* default_alias_name)
+{
+	if (clone_target != NULL) {
+		return (Alias*)copyObject(clone_target);
+	} else {
+		Alias* result = makeNode(Alias);
+		result->aliasname = pstrdup(default_alias_name);
+		return result;
+	}
+}
 
 /*
  * Must undefine this stuff before including scan.c, since it has different

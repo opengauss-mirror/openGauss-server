@@ -341,6 +341,25 @@ SELECT Product, Quarter, Sales FROM ( SELECT Product, Q1_Sales, Q2_Sales, Q3_Sal
 
 drop table t_not_rotate0001_01;
 
+-- some bug fix
+CREATE TABLE t_not_rotate0019 ( ProductID INT PRIMARY KEY, ProductName VARCHAR(50), Q1_Sales DECIMAL(10,2), Q2_Sales DECIMAL(10,2), Q1_Cost DECIMAL(10,2), Q2_Cost DECIMAL(10,2) );
+INSERT INTO t_not_rotate0019 VALUES (1, 'Laptop', 1500.00, 2000.00, 1000.00, 1200.00), (2, 'Phone', 800.00, 1200.00, 500.00, 700.00);
+SELECT ProductID, ProductName, Sales_Quarter, Sales_Amount, Cost_Quarter, Cost_Amount FROM t_not_rotate0019 not rotate ( Sales_Amount FOR Sales_Quarter IN (Q1_Sales, Q2_Sales) ) AS SalesUnpivot not rotate ( Cost_Amount FOR Cost_Quarter IN (Q1_Cost, Q2_Cost) ) AS CostUnpivot;
+drop table t_not_rotate0019;
+
+
+drop table if exists t_not_rotate0021_01;
+CREATE TABLE t_not_rotate0021_01 ( dept_id INT PRIMARY KEY, dept_name VARCHAR(50) NOT NULL UNIQUE, location VARCHAR(100) );
+INSERT INTO t_not_rotate0021_01 (dept_id, dept_name, location) VALUES (1, 'HR', 'Beijing'), (2, 'IT', 'Shanghai');
+drop table if exists t_not_rotate0021_02;
+CREATE TABLE t_not_rotate0021_02 ( emp_id INT PRIMARY KEY, emp_name VARCHAR(50) NOT NULL, email VARCHAR(100) UNIQUE, salary DECIMAL(10,2) CHECK (salary > 0), age INT CHECK (age > 18), hire_date DATE DEFAULT CURRENT_DATE, dept_id INT, CONSTRAINT fk_dept FOREIGN KEY (dept_id) REFERENCES t_not_rotate0021_01(dept_id) ON DELETE SET NULL );
+INSERT INTO t_not_rotate0021_02 (emp_id, emp_name, email, salary, age, dept_id) VALUES (101, 'Alice', 'alice@example.com', 50000.00, 25, 1), (102, 'Bob', 'bob@example.com', 60000.00, 30, 2);
+
+SELECT u.emp_id, u.emp_name, u.attribute, u.value, d.dept_name, d.location FROM ( SELECT emp_id, emp_name, salary, CAST(age AS DECIMAL(10,2)) AS age, dept_id FROM t_not_rotate0021_02 ) AS e not rotate ( value FOR attribute IN (salary, age) ) AS u JOIN t_not_rotate0021_01 d ON u.dept_id = d.dept_id ORDER BY u.emp_id, u.attribute;
+
+drop table t_not_rotate0021_02;
+drop table t_not_rotate0021_01;
+
 -- part3: ANSI_NULLS
 set ANSI_NULLS on;
 select NULL = NULL;

@@ -687,7 +687,9 @@ select year as yy, order_mode as mode, yearly_total as total from rotate_orders 
 
 drop table rotate_orders;
 SELECT a as sale1, 2 as sale2 not rotate (uuu For sale IN ("sale1", sale2, sale3, sale4)) order by sale;
-ERROR:  NOT ROTATE in from clause error
+ERROR:  syntax error at or near "not"
+LINE 1: SELECT a as sale1, 2 as sale2 not rotate (uuu For sale IN ("...
+                                      ^
 CREATE TABLE sales2 (  
     year INT,  
     product VARCHAR(50),  
