@@ -558,6 +558,7 @@ extern bool CheckReplChannel(const char* ChannelInfo);
 extern bool logging_module_check(char** newval, void** extra, GucSource source);
 extern void logging_module_guc_assign(const char* newval, void* extra);
 extern bool check_directory(char** newval, void** extra, GucSource source);
+extern bool check_audit_directory(char** newval, void** extra, GucSource source);
 extern bool transparent_encrypt_kms_url_region_check(char** newval, void** extra, GucSource source);
 extern bool check_canonical_path(char** newval, void** extra, GucSource source);
 extern char* SetVariableExprGetConfigOption(SetVariableExpr* set);

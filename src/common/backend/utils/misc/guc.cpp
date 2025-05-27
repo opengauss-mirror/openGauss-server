@@ -17,6 +17,7 @@
  *
  * --------------------------------------------------------------------
  */
+#include <unistd.h>
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
@@ -506,6 +507,7 @@ static void assign_comm_fault_injection(int newval, void* extra);
 
 bool check_canonical_path(char** newval, void** extra, GucSource source);
 bool check_directory(char** newval, void** extra, GucSource source);
+bool check_audit_directory(char** newval, void** extra, GucSource source);
 static bool check_log_filename(char** newval, void** extra, GucSource source);
 static bool check_perf_log(char** newval, void** extra, GucSource source);
 static bool check_timezone_abbreviations(char** newval, void** extra, GucSource source);
@@ -12123,6 +12125,31 @@ bool check_directory(char** newval, void** extra, GucSource source)
             errmsg("invalid value for GUC parameter of directory type.")));
         } else {
             canonicalize_path(*newval);
+        }
+    }
+    return true;
+}
+
+bool check_audit_directory(char** newval, void** extra, GucSource source)
+{
+    if (*newval != nullptr) {
+        if (strlen(*newval) == 0) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("invalid value for GUC parameter of directory type.")));
+        } else {
+            canonicalize_path(*newval);
+        }
+    } else {
+        return true;
+    }
+    if (strcmp(*newval, "pg_audit") != 0) {
+        if (access(*newval, F_OK) != 0) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("directory does not exist: %s, please check the audit_directory parameter configuration.", *newval)));
+        }
+        if (access(*newval, R_OK | W_OK) != 0) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("insufficient permissions to access directory: %s, please check the audit_directory parameter configuration.", *newval)));
         }
     }
     return true;
