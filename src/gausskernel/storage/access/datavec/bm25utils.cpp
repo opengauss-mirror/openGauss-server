@@ -134,8 +134,8 @@ void BM25CommitBuf(Buffer buf, GenericXLogState **state, bool building, bool rel
  *
  * The order is very important!!
  */
-void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, bool unlockOldBuf,
-    GenericXLogState **state, bool building)
+void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, GenericXLogState **state,
+    bool building)
 {
     /* Get new buffer */
     Buffer newbuf = BM25NewBuffer(index, forkNum);
@@ -143,9 +143,7 @@ void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum,
 
     /* Update the previous buffer */
     BM25PageGetOpaque(*page)->nextblkno = BufferGetBlockNumber(newbuf);
-    if (unlockOldBuf) {
-        BM25CommitBuf(*buf, state, building);
-    }
+    BM25CommitBuf(*buf, state, building);
 
     /* Init new page */
     BM25GetPage(index, &newpage, newbuf, state, building);
@@ -263,7 +261,7 @@ void RecordDocBlkno2DocBlknoTable(Relation index, BM25DocMetaPage docMetaPage,
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
         BM25GetPage(index, &page, buf, &state, building);
         if (PageGetFreeSpace(page) < itemSize) {
-            BM25AppendPage(index, &buf, &page, forkNum, true, &state, building);
+            BM25AppendPage(index, &buf, &page, forkNum, &state, building);
             curTableBlkno = BufferGetBlockNumber(buf);
             docMetaPage->docBlknoInsertPage = curTableBlkno;
         }
@@ -313,26 +311,13 @@ BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber docBlkno
     return docBlkno;
 }
 
-bool FindHashBucket(uint32 bucketId, BM25PageLocationInfo &bucketLocation, Buffer buf, Page page)
-{
-    OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
-    for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
-        BM25HashBucketPage bucket = (BM25HashBucketPage)PageGetItem(page, PageGetItemId(page, offno));
-        if (bucket->bucketId == bucketId) {
-            bucketLocation.blkno = BufferGetBlockNumber(buf);
-            bucketLocation.offno = offno;
-            return true;
-        }
-    }
-    return false;
-}
-
 bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLocation, Buffer buf, Page page)
 {
     OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
     for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
         BM25TokenMetaPage tokenMeta = (BM25TokenMetaPage)PageGetItem(page, PageGetItemId(page, offno));
-        if (strncmp(tokenMeta->token, tokenData.tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0) {
+        if ((tokenMeta->hashValue == tokenData.hashValue) &&
+			(strncmp(tokenMeta->token, tokenData.tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0)) {
             tokenMetaLocation.blkno = BufferGetBlockNumber(buf);
             tokenMetaLocation.offno = offno;
             return true;

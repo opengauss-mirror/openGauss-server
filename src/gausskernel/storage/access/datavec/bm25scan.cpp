@@ -51,19 +51,18 @@ typedef struct BM25QueryTokensInfo {
 } BM25QueryTokensInfo;
 
 static void FindBucketsLocation(Page page, BM25TokenizedDocData &tokenizedQuery, BlockNumber *bucketsLocation,
-    uint32 &bucketFoundCount)
+    uint32 maxHashBucketCount, uint32 &bucketFoundCount)
 {
     OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
-    for (OffsetNumber offnoBucket = FirstOffsetNumber; offnoBucket <= maxoffno; offnoBucket++) {
-        BM25HashBucketPage bucket = (BM25HashBucketPage)PageGetItem(page, PageGetItemId(page, offnoBucket));
-        for (size_t tokenIdx = 0; tokenIdx < tokenizedQuery.tokenCount; tokenIdx++) {
-            if (bucketsLocation[tokenIdx] == InvalidBlockNumber &&
-                bucket->bucketId == (tokenizedQuery.tokenDatas[tokenIdx].hashValue % BM25_BUCKET_MAX_NUM)) {
-                bucketsLocation[tokenIdx] = bucket->bucketBlkno;
-                bucketFoundCount++;
-                if (bucketFoundCount >= tokenizedQuery.tokenCount)
-                    return;
-            }
+    for (size_t tokenIdx = 0; tokenIdx < tokenizedQuery.tokenCount; tokenIdx++) {
+        uint32 bucketIdx = tokenizedQuery.tokenDatas[tokenIdx].hashValue %
+            (maxHashBucketCount * BM25_BUCKET_PAGE_ITEM_SIZE);
+        BM25HashBucketPage bucketInfo =
+            (BM25HashBucketPage)PageGetItem(page, PageGetItemId(page, (bucketIdx / BM25_BUCKET_PAGE_ITEM_SIZE) + 1));
+        if (bucketsLocation[tokenIdx] == InvalidBlockNumber &&
+            bucketInfo->bucketBlkno[bucketIdx % BM25_BUCKET_PAGE_ITEM_SIZE] != InvalidBlockNumber) {
+            bucketsLocation[tokenIdx] = bucketInfo->bucketBlkno[bucketIdx % BM25_BUCKET_PAGE_ITEM_SIZE];
+            bucketFoundCount++;
         }
     }
     return;
@@ -75,7 +74,8 @@ static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocDat
     OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
     for (OffsetNumber offnoTokenMeta = FirstOffsetNumber; offnoTokenMeta <= maxoffno; offnoTokenMeta++) {
         BM25TokenMetaPage tokenMeta = (BM25TokenMetaPage)PageGetItem(page, PageGetItemId(page, offnoTokenMeta));
-        if (strncmp(tokenMeta->token, tokenizedQuery.tokenDatas[tokenIdx].tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0) {
+        if ((tokenMeta->hashValue == tokenizedQuery.tokenDatas[tokenIdx].hashValue) &&
+            (strncmp(tokenMeta->token, tokenizedQuery.tokenDatas[tokenIdx].tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0)) {
             queryTokens[tokenIdx].qTokenMaxScore = tokenMeta->maxScore;
             queryTokens[tokenIdx].tokenPostingBlock = tokenMeta->postingBlkno;
             queryTokens[tokenIdx].qTokenIDFVal = tokenizedQuery.tokenDatas[tokenIdx].tokenFreq *
@@ -111,17 +111,15 @@ static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentenc
     BM25MetaPageData meta;
     BM25GetMetaPageInfo(index, &meta);
     BlockNumber hashBucketsBlkno = meta.entryPageList.hashBucketsPage;
-    BlockNumber nextHashBucketsBlkno = hashBucketsBlkno;
     Buffer cHashBucketsbuf;
     Page cHashBucketspage;
 
-    while (bucketFoundCount < tokenizedQuery.tokenCount && BlockNumberIsValid(nextHashBucketsBlkno)) {
-        OffsetNumber maxoffno;
-        cHashBucketsbuf = ReadBuffer(index, nextHashBucketsBlkno);
+    if (bucketFoundCount < tokenizedQuery.tokenCount && BlockNumberIsValid(hashBucketsBlkno)) {
+        cHashBucketsbuf = ReadBuffer(index, hashBucketsBlkno);
         LockBuffer(cHashBucketsbuf, BUFFER_LOCK_SHARE);
         cHashBucketspage = BufferGetPage(cHashBucketsbuf);
-        FindBucketsLocation(cHashBucketspage, tokenizedQuery, bucketsLocation, bucketFoundCount);
-        nextHashBucketsBlkno = BM25PageGetOpaque(cHashBucketspage)->nextblkno;
+        FindBucketsLocation(cHashBucketspage, tokenizedQuery, bucketsLocation, meta.entryPageList.maxHashBucketCount,
+            bucketFoundCount);
         UnlockReleaseBuffer(cHashBucketsbuf);
     }
 
@@ -134,7 +132,6 @@ static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentenc
         Page cTokenMetaspage;
         BlockNumber nextTokenMetasBlkno = bucketsLocation[tokenIdx];
         while (tokenFoundCount < tokenizedQuery.tokenCount && BlockNumberIsValid(nextTokenMetasBlkno)) {
-            OffsetNumber maxoffno;
             cTokenMetasbuf = ReadBuffer(index, nextTokenMetasBlkno);
             LockBuffer(cTokenMetasbuf, BUFFER_LOCK_SHARE);
             cTokenMetaspage = BufferGetPage(cTokenMetasbuf);
