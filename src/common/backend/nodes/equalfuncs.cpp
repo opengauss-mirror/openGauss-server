@@ -33,7 +33,6 @@
 #include "miscadmin.h"
 #include "bulkload/dist_fdw.h"
 #include "nodes/relation.h"
-#include "nodes/extensible.h"
 #include "utils/datum.h"
 #include "storage/proc.h"
 #include "storage/tcap.h"
@@ -100,23 +99,6 @@
 
 /* Compare a CoercionForm field (also a no-op, per comment in primnodes.h) */
 #define COMPARE_COERCIONFORM_FIELD(fldname) ((void)0)
-
-static bool
-_equalExtensibleNode(const ExtensibleNode *a, const ExtensibleNode *b)
-{
-	const ExtensibleNodeMethods *methods;
-
-	COMPARE_STRING_FIELD(extnodename);
-
-	/* At this point, we know extnodename is the same for both nodes. */
-	methods = GetExtensibleNodeMethods(a->extnodename, false);
-
-	/* compare the private fields */
-	if (!methods->nodeEqual(a, b))
-		return false;
-
-	return true;
-}
 
 /*
  *	Stuff from primnodes.h
@@ -4813,9 +4795,6 @@ bool equal(const void* a, const void* b)
             break;
         case T_GetDiagStmt:
             retval = _equalGetDiagStmt((const GetDiagStmt *)a, (const GetDiagStmt *)b);
-            break;
-        case T_ExtensibleNode:
-            retval = _equalExtensibleNode((const ExtensibleNode *)a, (const ExtensibleNode *)b);
             break;
 
         default:

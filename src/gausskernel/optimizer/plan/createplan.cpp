@@ -38,7 +38,6 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
 #include "nodes/primnodes.h"
-#include "nodes/extensible.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
 #include "optimizer/dataskew.h"
@@ -130,7 +129,6 @@ static NestLoop* create_nestloop_plan(PlannerInfo* root, NestPath* best_path, Pl
 static MergeJoin* create_mergejoin_plan(PlannerInfo* root, MergePath* best_path, Plan* outer_plan, Plan* inner_plan);
 static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Plan* outer_plan, Plan* inner_plan);
 static AsofJoin* create_asofjoin_plan(PlannerInfo* root, AsofPath* best_path, Plan* outer_plan, Plan* inner_plan);
-static CustomScan *create_customscan_plan(PlannerInfo *root, CustomPath *best_path, List *tlist, List *scan_clauses);
 static Node* replace_nestloop_params(PlannerInfo* root, Node* expr);
 static Node* replace_nestloop_params_mutator(Node* node, PlannerInfo* root);
 static void process_subquery_nestloop_params(PlannerInfo *root, List *subplan_params);
@@ -397,7 +395,6 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
         case T_WorkTableScan:
         case T_ForeignScan:
         case T_ExtensiblePlan:
-        case T_CustomScan:
             plan = create_scan_plan(root, best_path);
             break;
         case T_HashJoin:
@@ -665,8 +662,7 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
      * planner.c may replace the tlist we generate here, forcing projection to
      * occur.)
      */
-    if (!IsA(best_path, CustomPath) && use_physical_tlist(root, rel) &&
-        best_path->pathtype != T_ForeignScan) {
+    if (use_physical_tlist(root, rel) && best_path->pathtype != T_ForeignScan) {
         if (best_path->pathtype == T_IndexOnlyScan) {
             /* For index-only scan, the preferred tlist is the index's */
             tlist = (List*)copyObject(((IndexPath*)best_path)->indexinfo->indextlist);
@@ -786,9 +782,6 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
             plan = (Plan*)create_foreignscan_plan(root, (ForeignPath*)best_path, tlist, scan_clauses);
             break;
 
-        case T_CustomScan:
-            plan = (Plan *) create_customscan_plan(root, (CustomPath *) best_path, tlist, scan_clauses);
-			break;
         default: {
             ereport(ERROR,
                 (errmodule(MOD_OPT),
@@ -5329,73 +5322,6 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
     return join_plan;
 }
 
-/*
- * create_customscan_plan
- *
- * Transform a CustomPath into a Plan.
- */
-static CustomScan *
-create_customscan_plan(PlannerInfo *root, CustomPath *best_path,
-					   List *tlist, List *scan_clauses)
-{
-    CustomScan *cplan;
-    RelOptInfo *rel = best_path->path.parent;
-    List	   *custom_plans = NIL;
-	ListCell   *lc;
-
-	/* Recursively transform child paths. */
-	foreach(lc, best_path->custom_paths)
-	{
-		Plan	   *plan = create_plan_recurse(root, (Path *) lfirst(lc));
-
-		custom_plans = lappend(custom_plans, plan);
-	}
-
-	/*
-	 * Sort clauses into the best execution order, although custom-scan
-	 * provider can reorder them again.
-	 */
-	scan_clauses = order_qual_clauses(root, scan_clauses);
-
-	/*
-	 * Invoke custom plan provider to create the Plan node represented by the
-	 * CustomPath.
-	 */
-	cplan = castNode(CustomScan,
-					 best_path->methods->PlanCustomPath(root,
-														rel,
-														best_path,
-														tlist,
-														scan_clauses,
-														custom_plans));
-
-	/*
-	 * Copy cost data from Path to Plan; no need to make custom-plan providers
-	 * do this
-	 */
-	copy_generic_path_info(&cplan->scan.plan, &best_path->path);
-
-	/* Likewise, copy the relids that are represented by this custom scan */
-	cplan->custom_relids = best_path->path.parent->relids;
-
-	/*
-	 * Replace any outer-relation variables with nestloop params in the qual
-	 * and custom_exprs expressions.  We do this last so that the custom-plan
-	 * provider doesn't have to be involved.  (Note that parts of custom_exprs
-	 * could have come from join clauses, so doing this beforehand on the
-	 * scan_clauses wouldn't work.)  We assume custom_scan_tlist contains no
-	 * such variables.
-	 */
-	if (best_path->path.param_info)
-	{
-        cplan->scan.plan.qual = (List *)
-			replace_nestloop_params(root, (Node *) cplan->scan.plan.qual);
-		cplan->custom_exprs = (List *)
-			replace_nestloop_params(root, (Node *) cplan->custom_exprs);
-	}
-
-	return cplan;
-}
 /*****************************************************************************
  *
  *	SUPPORTING ROUTINES
@@ -10046,11 +9972,6 @@ bool is_projection_capable_plan(Plan* plan)
         case T_PartitionSelector:
 #endif
             return false;
-        case T_CustomScan:
-            if (((CustomScan *)plan)->flags & CUSTOMPATH_SUPPORT_PROJECTION) {
-                return true;
-            }
-			return false;
 
         case T_PartIterator:
             /* target: Data Partition */
@@ -11485,11 +11406,6 @@ bool is_projection_capable_path(Path *path)
         case T_ModifyTable:
         case T_MergeAppend:
         case T_RecursiveUnion:
-            return false;
-        case T_CustomScan:
-            if (castNode(CustomPath, path)->flags & CUSTOMPATH_SUPPORT_PROJECTION) {
-                return true;
-            }
             return false;
         case T_Append:
 

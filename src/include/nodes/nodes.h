@@ -80,7 +80,6 @@ typedef enum NodeTag {
     T_WorkTableScan,
     T_ForeignScan,
     T_ExtensiblePlan,
-    T_CustomScan,
     T_Join,
     T_NestLoop,
     T_MergeJoin,
@@ -201,7 +200,6 @@ typedef enum NodeTag {
     T_CteScanState,
     T_WorkTableScanState,
     T_ForeignScanState,
-    T_CustomScanState,
     T_ExtensiblePlanState,
     T_JoinState,
     T_NestLoopState,
@@ -378,7 +376,6 @@ typedef enum NodeTag {
     T_MaterialPath,
     T_UniquePath,
     T_PartIteratorPath,
-    T_CustomPath,
     T_EquivalenceClass,
     T_EquivalenceMember,
     T_PathKey,
@@ -718,7 +715,6 @@ typedef enum NodeTag {
     T_ErrorCacheEntry,
     T_ForeignPartState,
     T_RoachRoutine, /* in bulkload/roach_api.h */
-    T_ExtensibleNode, /* in nodes/extensible.h */
 
     /*
      * Vectorized Plan Nodes

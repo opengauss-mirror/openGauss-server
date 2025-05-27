@@ -34,7 +34,6 @@
 #include "bulkload/dist_fdw.h"
 #include "catalog/gs_opt_model.h"
 #include "nodes/primnodes.h"
-#include "nodes/extensible.h"
 #include "foreign/fdwapi.h"
 #include "nodes/plannodes.h"
 #include "optimizer/dataskew.h"
@@ -921,33 +920,6 @@ static Scan *_readScan(Scan *local_node);
 extern bool StreamTopConsumerAmI();
 static void read_mem_info(OpMemInfo *local_node);
 static void _readCursorData(Cursor_Data *local_node);
-
-static ExtensibleNode *
-_readExtensibleNode(void)
-{
-	const ExtensibleNodeMethods *methods;
-	ExtensibleNode *local_node;
-	const char *extnodename;
-
-	READ_TEMP_LOCALS();
-
-	token = pg_strtok(&length); /* skip :extnodename */
-	token = pg_strtok(&length); /* get extnodename */
-
-	extnodename = nullable_string(token, length);
-	if (!extnodename)
-		elog(ERROR, "extnodename has to be supplied");
-	methods = GetExtensibleNodeMethods(extnodename, false);
-
-	local_node = (ExtensibleNode *) newNode(methods->node_size,
-											T_ExtensibleNode);
-	local_node->extnodename = extnodename;
-
-	/* deserialize the private fields */
-	methods->nodeRead(local_node);
-
-	return local_node;
-}
 
 /*
  * _readBitmapset
@@ -4341,43 +4313,6 @@ static AnnIndexScan* _readAnnIndexScan(AnnIndexScan* local_node)
     READ_DONE();
 }
 
-static CustomScan *_readCustomScan(void)
-{
-    READ_LOCALS(CustomScan);
-    READ_FLOAT_FIELD(scan.plan.startup_cost);
-    READ_FLOAT_FIELD(scan.plan.total_cost);
-    READ_FLOAT_FIELD(scan.plan.plan_rows);
-    READ_INT_FIELD(scan.plan.plan_width);
-    READ_INT_FIELD(scan.plan.plan_node_id);
-    READ_NODE_FIELD(scan.plan.targetlist);
-    READ_NODE_FIELD(scan.plan.qual);
-    READ_NODE_FIELD(scan.plan.lefttree);
-    READ_NODE_FIELD(scan.plan.righttree);
-    READ_NODE_FIELD(scan.plan.initPlan);
-    READ_BITMAPSET_FIELD(scan.plan.extParam);
-    READ_BITMAPSET_FIELD(scan.plan.allParam);
-    READ_UINT_FIELD(scan.scanrelid);
-    READ_UINT_FIELD(flags);
-    READ_NODE_FIELD(custom_plans);
-    READ_NODE_FIELD(custom_exprs);
-    READ_NODE_FIELD(custom_private);
-    READ_NODE_FIELD(custom_scan_tlist);
-    READ_BITMAPSET_FIELD(custom_relids);
-
-    {
-        /* Lookup CustomScanMethods by CustomName */
-        char       *custom_name;
-        const CustomScanMethods *methods;
-        token = pg_strtok(&length); /* skip methods: */
-        token = pg_strtok(&length); /* CustomName */
-        custom_name = nullable_string(token, length);
-        methods = GetCustomScanMethods(custom_name, false);
-        local_node->methods = methods;
-    }
-
-    READ_DONE();
-}
-
 static Sort* _readSort(Sort* local_node)
 {
     READ_LOCALS_NULL(Sort);
@@ -7240,8 +7175,6 @@ Node* parseNodeString(void)
 #endif
     } else if (MATCH("VECSUBQUERYSCAN", 15)) {
         return_value = _readVecSubqueryScan(NULL);
-    } else if (MATCH("CUSTOMSCAN", 10)) {
-        return_value = _readCustomScan();
     } else if (MATCH("VECHASHJOIN", 11)) {
         return_value = _readVecHashJoin(NULL);
     } else if (MATCH("VECASOFJOIN", 11)) {
@@ -7434,8 +7367,6 @@ Node* parseNodeString(void)
         return_value = _readUnrotateClause();
     } else if (MATCH("SHRINK", 6)) {
         return_value = _readShrinkStmt();
-    } else if (MATCH("EXTENSIBLENODE", 14)) {
-        return_value = _readExtensibleNode();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

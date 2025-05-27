@@ -50,8 +50,7 @@ OBJS = execAmi.o execCurrent.o execGrouping.o execJunk.o execMain.o \
        nodePartIterator.o nodeStub.o execClusterResize.o lightProxy.o execMerge.o \
        nodeExtensible.o route.o nodeTrainModel.o db4ai_common.o spiDbesql.o \
        nodeProjectSet.o nodeSortGroup.o nodeAssertOp.o nodeSequence.o nodeSplitUpdate.o \
-       nodeShareInputScan.o nodeSpqSeqscan.o nodeSpqIndexscan.o nodeSpqIndexonlyscan.o nodeSpqBitmapHeapscan.o \
-       nodeCustom.o
+       nodeShareInputScan.o nodeSpqSeqscan.o nodeSpqIndexscan.o nodeSpqIndexonlyscan.o nodeSpqBitmapHeapscan.o
 
 override CPPFLAGS += -D__STDC_FORMAT_MACROS
 

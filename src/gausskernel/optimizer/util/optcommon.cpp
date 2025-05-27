@@ -19,7 +19,6 @@
 
 #include "executor/exec/execStream.h"
 #include "db4ai/db4ai_api.h"
-#include "nodes/extensible.h"
 
 /*
  * Optimizer common function that return a plan node's plain text, we wrapper it from
@@ -31,7 +30,6 @@ void GetPlanNodePlainText(
 {
     RemoteQuery* rq = NULL;
     char* extensible_name = NULL;
-    const char *custom_name = NULL;
     switch (nodeTag(plan)) {
 #ifdef USE_SPQ
         case T_Result:
@@ -382,17 +380,6 @@ void GetPlanNodePlainText(
             } else
                 *pname = *sname = *pt_options = "Foreign Scan";
             break;
-
-        case T_CustomScan:
-            *sname = "Custom Scan";
-            custom_name = ((CustomScan *) plan)->methods->CustomName;
-            if (custom_name) {
-                *pname = psprintf("Custom Scan (%s)", custom_name);
-            } else {
-                *pname = *sname;
-            }
-            break;
-
         case T_VecForeignScan:
             *pt_operation = "TABLE ACCESS";
             if (((Scan*)plan)->isPartTbl) {

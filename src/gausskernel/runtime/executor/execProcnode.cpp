@@ -83,7 +83,6 @@
 #include "executor/node/nodeBitmapIndexscan.h"
 #include "executor/node/nodeBitmapOr.h"
 #include "executor/node/nodeCtescan.h"
-#include "executor/node/nodeCustom.h"
 #include "executor/node/nodeExtensible.h"
 #include "executor/node/nodeForeignscan.h"
 #include "executor/node/nodeFunctionscan.h"
@@ -467,8 +466,6 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitVecWindowAgg((VecWindowAgg*)node, estate, eflags);
         case T_TrainModel:
             return (PlanState*)ExecInitTrainModel((TrainModel*)node, estate, eflags);
-        case T_CustomScan:
-            return (PlanState *)ExecInitCustomScan((CustomScan *)node, estate, eflags);
         default:
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
@@ -1238,10 +1235,6 @@ static void ExecEndNodeByType(PlanState* node)
 
         case T_PartIteratorState:
             ExecEndPartIterator((PartIteratorState*)node);
-            break;
-
-        case T_CustomScanState:
-            ExecEndCustomScan((CustomScanState *) node);
             break;
 
             /*

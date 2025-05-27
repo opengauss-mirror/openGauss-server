@@ -35,7 +35,6 @@ typedef struct OpMemInfo {
 #include "knl/knl_variable.h"
 
 #include "miscadmin.h"
-#include "nodes/extensible.h"
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
 #ifdef PGXC
@@ -8058,49 +8057,6 @@ static PrefixKey* _copyPrefixKey(const PrefixKey* from)
     return newnode;
 }
 
-static ExtensibleNode *_copyExtensibleNode(const ExtensibleNode *from)
-{
-	ExtensibleNode *newnode;
-	const ExtensibleNodeMethods *methods;
-
-	methods = GetExtensibleNodeMethods(from->extnodename, false);
-	newnode = (ExtensibleNode *) newNode(methods->node_size,
-										 T_ExtensibleNode);
-	COPY_STRING_FIELD(extnodename);
-
-	/* copy the private fields */
-	methods->nodeCopy(newnode, from);
-
-	return newnode;
-}
-
-static CustomScan *_copyCustomScan(const CustomScan *from)
-{
-    CustomScan *newnode = makeNode(CustomScan);
-    COPY_SCALAR_FIELD(scan.plan.startup_cost);
-    COPY_SCALAR_FIELD(scan.plan.total_cost);
-    COPY_SCALAR_FIELD(scan.plan.plan_rows);
-    COPY_SCALAR_FIELD(scan.plan.plan_width);
-    COPY_SCALAR_FIELD(scan.plan.plan_node_id);
-    COPY_NODE_FIELD(scan.plan.targetlist);
-    COPY_NODE_FIELD(scan.plan.qual);
-    COPY_NODE_FIELD(scan.plan.lefttree);
-    COPY_NODE_FIELD(scan.plan.righttree);
-    COPY_NODE_FIELD(scan.plan.initPlan);
-    COPY_BITMAPSET_FIELD(scan.plan.extParam);
-    COPY_BITMAPSET_FIELD(scan.plan.allParam);
-    COPY_SCALAR_FIELD(scan.scanrelid);
-    COPY_SCALAR_FIELD(flags);
-    COPY_NODE_FIELD(custom_plans);
-    COPY_NODE_FIELD(custom_exprs);
-    COPY_NODE_FIELD(custom_private);
-    COPY_NODE_FIELD(custom_scan_tlist);
-    COPY_BITMAPSET_FIELD(custom_relids);
-    COPY_SCALAR_FIELD(methods);
-
-    return newnode;
-}
-
 static CreateEventStmt *node_copy_create_event_info(const CreateEventStmt *from)
 {
     CreateEventStmt* newnode = makeNode(CreateEventStmt);
@@ -8297,9 +8253,6 @@ void* copyObject(const void* from)
             break;
         case T_ForeignScan:
             retval = _copyForeignScan((ForeignScan*)from);
-            break;
-        case T_CustomScan:
-            retval = _copyCustomScan((CustomScan *)from);
             break;
         case T_ExtensiblePlan:
             retval = _copyExtensiblePlan((ExtensiblePlan*)from);
@@ -9604,9 +9557,6 @@ void* copyObject(const void* from)
             retval = _copySplitUpdate((SplitUpdate*)from);
             break;
 #endif
-        case T_ExtensibleNode:
-            retval = _copyExtensibleNode((ExtensibleNode *) from);
-            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("copyObject: unrecognized node type: %d", (int)nodeTag(from))));

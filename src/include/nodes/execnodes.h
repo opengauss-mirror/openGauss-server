@@ -3049,30 +3049,5 @@ typedef struct CursorExpressionState {
 } CursorExpressionState;
 
 
-/* ----------------
- *	 CustomScanState information
- *
- *		CustomScan nodes are used to execute custom code within executor.
- *
- * Core code must avoid assuming that the CustomScanState is only as large as
- * the structure declared here; providers are allowed to make it the first
- * element in a larger structure, and typically would need to do so.  The
- * struct is actually allocated by the CreateCustomScanState method associated
- * with the plan node.  Any additional fields can be initialized there, or in
- * the BeginCustomScan method.
- * ----------------
- */
-struct CustomExecMethods;
-
-typedef struct CustomScanState
-{
-	ScanState	ss;
-	uint32		flags;			/* mask of CUSTOMPATH_* flags, see
-								 * nodes/extensible.h */
-	List	   *custom_ps;		/* list of child PlanState nodes, if any */
-	Size		pscan_len;		/* size of parallel coordination information */
-	const struct CustomExecMethods *methods;
-	const struct TableAmRoutine *tb_am;
-} CustomScanState;
 #endif /* EXECNODES_H */
 
