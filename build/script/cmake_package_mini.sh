@@ -509,6 +509,8 @@ function install_gaussdb()
     chmod 444 ${BUILD_DIR}/bin/cluster_guc.conf
     dos2unix ${BUILD_DIR}/bin/cluster_guc.conf > /dev/null 2>&1
 
+    chmod 755 ${BUILD_DIR}/bin/openssl
+
     #back to separate_debug_symbol.sh dir
     cd $SCRIPT_DIR
     if [ "$version_mode" = "release" -a "$separate_symbol" = "on" -a "$zip_package" = "on" ]; then
