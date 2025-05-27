@@ -2497,6 +2497,10 @@ int PostmasterMain(int argc, char* argv[])
     auto_explain_init();
     ledger_hook_init();
 
+    /* init extensible plan/node hash table before load shared lib */
+    InitExtensiblePlanMethodsHashTable();
+    InitExtensibleNodeMethodsHashTable();
+
     /*
     * process any libraries that should be preloaded at postmaster start
     */
@@ -2949,6 +2953,7 @@ int PostmasterMain(int argc, char* argv[])
     InitGlobalSeq();
     /* init mem_log directory */
     InitMemoryLogDirectory();
+
 #ifdef ENABLE_MULTIPLE_NODES
     /* init compaction */
     CompactionProcess::init_instance();
@@ -2959,7 +2964,6 @@ int PostmasterMain(int argc, char* argv[])
         TagsCacheMgr::GetInstance().init();
         PartIdMgr::GetInstance().init();
         Tsdb::PartCacheMgr::GetInstance().init();
-        InitExtensiblePlanMethodsHashTable();
     }
 #endif
 
