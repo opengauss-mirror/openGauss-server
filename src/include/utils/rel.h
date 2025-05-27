@@ -60,7 +60,12 @@ typedef struct LockInfoData {
     LockRelId lockRelId;
 } LockInfoData;
 
-typedef LockInfoData* LockInfo;
+typedef struct LockInfo
+{
+    char backup_id[10];
+    char backup_dir[MAXPGPATH];
+    bool exclusive;
+} LockInfo;
 #define InvalidLockRelId  { InvalidOid, InvalidOid, InvalidOid}
 #define LockRelIdIsInvalid(__lockrelid) (((__lockrelid).relId == InvalidOid) && ((__lockrelid).dbId == InvalidOid))
 

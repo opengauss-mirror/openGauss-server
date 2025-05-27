@@ -642,7 +642,7 @@ do_validate_instance(void)
             continue;
 
         /* Do not interrupt, validate the next backup */
-        if (!lock_backup(current_backup, true))
+        if (!lock_backup(current_backup, true, false))
         {
             elog(WARNING, "Cannot lock backup %s directory, skip validation",
                  base36enc(current_backup->start_time));
@@ -741,7 +741,7 @@ do_validate_instance(void)
                         if (backup->status == BACKUP_STATUS_ORPHAN)
                         {
                             /* Do not interrupt, validate the next backup */
-                            if (!lock_backup(backup, true))
+                            if (!lock_backup(backup, true, false))
                             {
                                 elog(WARNING, "Cannot lock backup %s directory, skip validation",
                                      base36enc(backup->start_time));

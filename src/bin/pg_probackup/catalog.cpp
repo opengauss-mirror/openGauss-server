@@ -34,6 +34,20 @@ static parray *lock_files = NULL;
 
 static void uncompress_decrypt_directory(const char *instance_name_str);
 
+static int grab_excl_lock_file(const char *backup_dir, const char *backup_id, bool strict);
+static int grab_shared_lock_file(pgBackup *backup);
+static int wait_shared_owners(pgBackup *backup);
+
+static void unlock_backup(const char *backup_dir, const char *backup_id, bool exclusive);
+static void release_excl_lock_file(const char *backup_dir);
+static void release_shared_lock_file(const char *backup_dir);
+static bool backup_lock_exit_hook_registered = false;
+
+#define LOCK_OK            0
+#define LOCK_FAIL_TIMEOUT  1
+#define LOCK_FAIL_ENOSPC   2
+#define LOCK_FAIL_EROFS    3
+
 static timelineInfo *
 timelineInfoNew(TimeLineID tli)
 {
@@ -75,17 +89,14 @@ unlink_lock_atexit(bool fatal, void *userdata)
 {
     int i;
 
-    if (lock_files == NULL)
-    return;
+    if (lock_files == NULL) {
+        return;
+    }
 
     for (i = 0; i < (int)parray_num(lock_files); i++)
     {
-        char    *lock_file = (char *) parray_get(lock_files, i);
-        int res;
-
-        res = fio_unlink(lock_file, FIO_BACKUP_HOST);
-        if (res != 0 && errno != ENOENT)
-            elog(WARNING, "%s: %s", lock_file, strerror(errno));
+        LockInfo *lock = (LockInfo *) parray_get(lock_files, i);
+        unlock_backup(lock->backup_dir, lock->backup_id, lock->exclusive);
     }
 
     parray_walk(lock_files, pfree);
@@ -188,58 +199,141 @@ bool fill_file(char *buffer, char *lock_file, int fd, bool strict)
  * Create exclusive lockfile in the backup's directory.
  */
 bool
-lock_backup(pgBackup *backup, bool strict)
+lock_backup(pgBackup *backup, bool strict, bool exclusive)
 {
-    char    lock_file[MAXPGPATH];
-    int fd;
-    char    buffer[MAXPGPATH * 2 + 256];
-    int ntries;
-    int len;
-    int     encoded_pid;
-    pid_t   my_pid,
-                my_p_pid;
-    int nRet = 0;
+    int       rc;
+    char      lock_file[MAXPGPATH];
+    bool      enospc_detected = false;
+    LockInfo  *lock = NULL;
     
-    join_path_components(lock_file, backup->root_dir, BACKUP_CATALOG_PID);
+    join_path_components(lock_file, backup->root_dir, BACKUP_LOCK_FILE);
+
+    rc = grab_excl_lock_file(backup->root_dir, base36enc(backup->backup_id), strict);
+    if (rc == LOCK_FAIL_TIMEOUT) {
+        return false;
+    } else if (rc == LOCK_FAIL_ENOSPC) {
+        /*
+         * If we failed to take exclusive lock due to ENOSPC,
+         * then in lax mode treat such condition as if lock was taken.
+         */
+        enospc_detected = true;
+        if (strict) {
+            return false;
+        }
+    } else if (rc == LOCK_FAIL_EROFS) {
+        /*
+         * If we failed to take exclusive lock due to EROFS,
+         * then in shared mode treat such condition as if lock was taken.
+         */
+        return !exclusive;
+    }
 
     /*
-     * If the PID in the lockfile is our own PID or our parent's or
-     * grandparent's PID, then the file must be stale (probably left over from
-     * a previous system boot cycle).  We need to check this because of the
-     * likelihood that a reboot will assign exactly the same PID as we had in
-     * the previous reboot, or one that's only one or two counts larger and
-     * hence the lockfile's PID now refers to an ancestor shell process.  We
-     * allow pg_ctl to pass down its parent shell PID (our grandparent PID)
-     * via the environment variable PG_GRANDPARENT_PID; this is so that
-     * launching the postmaster via pg_ctl can be just as reliable as
-     * launching it directly.  There is no provision for detecting
-     * further-removed ancestor processes, but if the init script is written
-     * carefully then all but the immediate parent shell will be root-owned
-     * processes and so the kill test will fail with EPERM.  Note that we
-     * cannot get a false negative this way, because an existing postmaster
-     * would surely never launch a competing postmaster or pg_ctl process
-     * directly.
+     * We have exclusive lock, now there are following scenarios:
+     *
+     * 1. If we are for exlusive lock, then we must open the shared lock file
+     *    and check if any of the processes listed there are still alive.
+     *    If some processes are alive and are not going away in lock_timeout,
+     *    then return false.
+     *
+     * 2. If we are here for non-exlusive lock, then write the pid
+     *    into shared lock file and release the exclusive lock.
      */
-    my_pid = getpid();
-#ifndef WIN32
-    my_p_pid = getppid();
-#else
+
+    if (exclusive) {
+        rc = wait_shared_owners(backup);
+    } else {
+        rc = grab_shared_lock_file(backup);
+    }
+
+    if (rc != 0) {
+        /*
+         * Failed to grab shared lock or (in case of exclusive mode) shared lock owners
+         * are not going away in time, release the exclusive lock file and return in shame.
+         */
+        release_excl_lock_file(backup->root_dir);
+        return false;
+    }
+
+    if (!exclusive) {
+        /* Shared lock file is grabbed, now we can release exclusive lock file */
+        release_excl_lock_file(backup->root_dir);
+    }
+
+    if (exclusive && !strict && enospc_detected) {
+        /* We are in lax exclusive mode and EONSPC was encountered:
+         * once again try to grab exclusive lock file,
+         * because there is a chance that release of shared lock file in wait_shared_owners may have
+         * freed some space on filesystem, thanks to unlinking of BACKUP_RO_LOCK_FILE.
+         * If somebody concurrently acquired exclusive lock file first, then we should give up.
+         */
+        if (grab_excl_lock_file(backup->root_dir, base36enc(backup->backup_id), strict) == LOCK_FAIL_TIMEOUT) {
+            return false;
+        }
+
+        return true;
+    }
 
     /*
-     * Windows hasn't got getppid(), but doesn't need it since it's not using
-     * real kill() either...
+     * Arrange the unlocking at proc_exit.
      */
-    my_p_pid = 0;
-#endif
+    if (!backup_lock_exit_hook_registered) {
+        pgut_atexit_push(unlink_lock_atexit, NULL);
+        backup_lock_exit_hook_registered = true;
+    }
+
+    /* save lock metadata for later unlocking */
+    lock = (LockInfo*)pgut_malloc(sizeof(LockInfo));
+    rc = snprintf_s(lock->backup_id, MAXPGPATH, MAXPGPATH - 1, "%s",
+                    base36enc(backup->backup_id));
+    securec_check_ss_c(rc, "\0", "\0");
+    rc = snprintf_s(lock->backup_dir, MAXPGPATH, MAXPGPATH - 1, "%s", backup->root_dir);
+    securec_check_ss_c(rc, "\0", "\0");
+    lock->exclusive = exclusive;
+
+    /* Use parray for lock release */
+    if (lock_files == NULL) {
+        lock_files = parray_new();
+    }
+    parray_append(lock_files, lock);
+
+    return true;
+}
+
+/*
+ * Lock backup in exclusive mode
+ * Result codes:
+ *  LOCK_OK           Success
+ *  LOCK_FAIL_TIMEOUT Failed to acquire lock in lock_timeout time
+ *  LOCK_FAIL_ENOSPC  Failed to acquire lock due to ENOSPC
+ *  LOCK_FAIL_EROFS   Failed to acquire lock due to EROFS
+ */
+int
+grab_excl_lock_file(const char *root_dir, const char *backup_id, bool strict)
+{
+    char        lock_file[MAXPGPATH];
+    int         fd = 0;
+    char        buffer[MAXPGPATH];
+    int         ntries = LOCK_TIMEOUT;
+    int         empty_tries = LOCK_STALE_TIMEOUT;
+    int         len;
+    int         encoded_pid;
+    int         rc = 0;
+
+    join_path_components(lock_file, root_dir, BACKUP_LOCK_FILE);
 
     /*
      * We need a loop here because of race conditions.  But don't loop forever
      * (for example, a non-writable $backup_instance_path directory might cause a failure
-     * that won't go away).  100 tries seems like plenty.
+     * that won't go away).
      */
-    for (ntries = 0;; ntries++)
-    {
-        bool is_create = false;
+    do {
+        FILE *fp_out = NULL;
+
+        if (interrupted) {
+            elog(ERROR, "Interrupted while locking backup %s", backup_id);
+        }
+
         /*
          * Try to create the lock file --- O_EXCL makes this atomic.
          *
@@ -247,105 +341,491 @@ lock_backup(pgBackup *backup, bool strict)
          * comments below.
          */
         fd = fio_open(lock_file, O_RDWR | O_CREAT | O_EXCL, FIO_BACKUP_HOST);
-        if (fd >= 0)
-            break;      /* Success; exit the retry loop */
+        if (fd >= 0) {
+            /* Success; exit the retry loop */
+            break;
+        }
+
+        /* read-only fs is a special case */
+        if (errno == EROFS) {
+            elog(WARNING, "Could not create lock file \"%s\": %s",
+                lock_file, strerror(errno));
+            return LOCK_FAIL_EROFS;
+        }
 
         /*
          * Couldn't create the pid file. Probably it already exists.
+         * If file already exists or we have some permission problem (???),
+         * then retry;
          */
-        is_create = (errno != EEXIST && errno != EACCES) || ntries > 100;
-        if (is_create)
+        if (errno != EEXIST) {
             elog(ERROR, "Could not create lock file \"%s\": %s",
                 lock_file, strerror(errno));
+        }
 
         /*
          * Read the file to get the old owner's PID.  Note race condition
          * here: file might have been deleted since we tried to create it.
          */
-        fd = fio_open(lock_file, O_RDONLY, FIO_BACKUP_HOST);
-        if (fd < 0)
-        {
-            if (errno == ENOENT)
-                continue;   /* race condition; try again */
-            elog(ERROR, "Could not open lock file \"%s\": %s",
-                lock_file, strerror(errno));
+
+        fp_out = fopen(lock_file, "r");
+        if (fp_out == NULL) {
+            if (errno == ENOENT) {
+                /* race condition; try again */
+                continue;
+            }
+            elog(ERROR, "Cannot open lock file \"%s\": %s", lock_file, strerror(errno));
         }
-        if ((len = fio_read(fd, buffer, sizeof(buffer) - 1)) < 0)
-            elog(ERROR, "Could not read lock file \"%s\": %s",
-                lock_file, strerror(errno));
-        fio_close(fd);
 
-        if (len == 0)
-            elog(ERROR, "Lock file \"%s\" is empty", lock_file);
+        len = fread(buffer, 1, sizeof(buffer) - 1, fp_out);
+        if (ferror(fp_out)) {
+            elog(ERROR, "Cannot read from lock file: \"%s\"", lock_file);
+        }
+        (void)fclose(fp_out);
 
-        buffer[len] = '\0';
+        /*
+         * There are several possible reasons for lock file
+         * to be empty:
+         * - system crash
+         * - process crash
+         * - race between writer and reader
+         *
+         * Consider empty file to be stale after LOCK_STALE_TIMEOUT attempts.
+         */
+        if (len == 0) {
+            if (empty_tries == 0) {
+                elog(WARNING, "Lock file \"%s\" is empty", lock_file);
+                goto grab_lock;
+            }
+
+            if ((empty_tries % LOG_FREQ) == 0) {
+                elog(WARNING, "Waiting %u seconds on empty exclusive lock for backup %s",
+                    empty_tries, backup_id);
+            }
+
+            sleep(1);
+            /*
+             * waiting on empty lock file should not affect
+             * the timer for concurrent lockers (ntries).
+             */
+            empty_tries--;
+            ntries++;
+            continue;
+        }
+
         encoded_pid = atoi(buffer);
-
-        if (encoded_pid <= 0)
-            elog(ERROR, "Bogus data in lock file \"%s\": \"%s\"",
+        if (encoded_pid <= 0) {
+            elog(WARNING, "Bogus data in lock file \"%s\": \"%s\"",
                 lock_file, buffer);
+            goto grab_lock;
+        }
 
         /*
          * Check to see if the other process still exists
-         *
-         * Per discussion above, my_pid, my_p_pid can be
-         * ignored as false matches.
-         *
          * Normally kill() will fail with ESRCH if the given PID doesn't
          * exist.
          */
-        if (encoded_pid != my_pid && encoded_pid != my_p_pid)
-        {
-            if (kill(encoded_pid, 0) == 0)
-            {
-                elog(WARNING, "Process %d is using backup %s and still is running",
-                    encoded_pid, base36enc(backup->start_time));
-                return false;
+        if (encoded_pid == my_pid) {
+            return LOCK_OK;
+        }
+
+        if (kill(encoded_pid, 0) == 0) {
+            /* complain every fifth interval */
+            if ((ntries % LOG_FREQ) == 0) {
+                elog(WARNING, "Process %d is using backup %s, and is still running",
+                    encoded_pid, backup_id);
+                elog(WARNING, "Waiting %u seconds on exclusive lock for backup %s",
+                    ntries, backup_id);
             }
-            else
-            {
-                if (errno == ESRCH)
-                    elog(WARNING, "Process %d which used backup %s no longer exists",
-                         encoded_pid, base36enc(backup->start_time));
-                else
-                    elog(WARNING, "Failed to send signal 0 to a process %d, this may be a kernal process",
-                        encoded_pid);
+
+            sleep(1);
+            /* try again */
+            continue;
+        } else {
+            if (errno == ESRCH) {
+                elog(WARNING, "Process %d which used backup %s no longer exists",
+                    encoded_pid, backup_id);
+            } else {
+                elog(ERROR, "Failed to send signal 0 to a process %d: %s",
+                    encoded_pid, strerror(errno));
             }
         }
 
+grab_lock:
         /*
          * Looks like nobody's home.  Unlink the file and try again to create
          * it.  Need a loop because of possible race condition against other
          * would-be creators.
          */
-        if (fio_unlink(lock_file, FIO_BACKUP_HOST) < 0)
+        if (fio_unlink(lock_file, FIO_BACKUP_HOST) < 0) {
+            if (errno == ENOENT) {
+                continue; /* race condition, again */
+            }
             elog(ERROR, "Could not remove old lock file \"%s\": %s",
-                 lock_file, strerror(errno));
+                lock_file, strerror(errno));
+        }
+    } while (ntries--);
+
+    /* Failed to acquire exclusive lock in time */
+    if (fd <= 0) {
+        return LOCK_FAIL_TIMEOUT;
     }
 
     /*
      * Successfully created the file, now fill it.
      */
-    nRet = snprintf_s(buffer, sizeof(buffer), sizeof(buffer) - 1,"%d\n", my_pid);
-    securec_check_ss_c(nRet, "\0", "\0");
+    rc = snprintf_s(buffer, MAXPGPATH, MAXPGPATH - 1, "%d\n", my_pid);
+    securec_check_ss_c(rc, "\0", "\0");
 
-    if (fill_file(buffer, lock_file, fd, strict))
-        return true;
+    errno = 0;
+    if (fio_write(fd, buffer, strlen(buffer)) != strlen(buffer)) {
+        int save_errno = errno;
 
-    /*
-    * Arrange to unlink the lock file(s) at proc_exit.
-    */
-    if (!exit_hook_registered)
-    {
-        exit_hook_registered = true;
+        fio_close(fd);
+        fio_unlink(lock_file, FIO_BACKUP_HOST);
+
+        /* In lax mode if we failed to grab lock because of 'out of space error',
+         * then treat backup as locked.
+         * Only delete command should be run in lax mode.
+         */
+        if (!strict && save_errno == ENOSPC) {
+            return LOCK_FAIL_ENOSPC;
+        } else {
+            elog(ERROR, "Could not write lock file \"%s\": %s",
+                lock_file, strerror(save_errno));
+        }
     }
 
-    /* Use parray so that the lock files are unlinked in a loop */
-    if (lock_files == NULL)
-        lock_files = parray_new();
-    parray_append(lock_files, pgut_strdup(lock_file));
+    if (fio_flush(fd) != 0) {
+        int save_errno = errno;
 
-    return true;
+        fio_close(fd);
+        fio_unlink(lock_file, FIO_BACKUP_HOST);
+
+        /* In lax mode if we failed to grab lock because of 'out of space error',
+         * then treat backup as locked.
+         * Only delete command should be run in lax mode.
+         */
+        if (!strict && save_errno == ENOSPC) {
+            return LOCK_FAIL_ENOSPC;
+        } else {
+            elog(ERROR, "Could not flush lock file \"%s\": %s",
+                lock_file, strerror(save_errno));
+        }
+    }
+
+    if (fio_close(fd) != 0) {
+        int save_errno = errno;
+
+        fio_unlink(lock_file, FIO_BACKUP_HOST);
+
+        if (!strict && errno == ENOSPC) {
+            return LOCK_FAIL_ENOSPC;
+        } else {
+            elog(ERROR, "Could not close lock file \"%s\": %s",
+                lock_file, strerror(save_errno));
+        }
+    }
+
+    elog(LOG, "Acquired exclusive lock for backup %s after %ds", backup_id,
+        LOCK_TIMEOUT - ntries + LOCK_STALE_TIMEOUT - empty_tries);
+
+    return LOCK_OK;
+}
+
+/* Wait until all shared lock owners are gone
+ * 0 - successs
+ * 1 - fail
+ */
+int
+wait_shared_owners(pgBackup *backup)
+{
+    FILE *fp = NULL;
+    char  buffer[256];
+    pid_t encoded_pid = 0;
+    int   ntries = LOCK_TIMEOUT;
+    char  lock_file[MAXPGPATH];
+
+    join_path_components(lock_file, backup->root_dir, BACKUP_RO_LOCK_FILE);
+
+    fp = fopen(lock_file, "r");
+    if (fp == NULL && errno != ENOENT) {
+        elog(ERROR, "Cannot open lock file \"%s\": %s", lock_file, strerror(errno));
+    }
+
+    /* iterate over pids in lock file */
+    while (fp && fgets(buffer, sizeof(buffer), fp)) {
+        encoded_pid = atoi(buffer);
+        if (encoded_pid <= 0) {
+            elog(WARNING, "Bogus data in lock file \"%s\": \"%s\"", lock_file, buffer);
+            continue;
+        }
+
+        /* wait until shared lock owners go away */
+        do {
+            if (interrupted) {
+                elog(ERROR, "Interrupted while locking backup %s",
+                    base36enc(backup->backup_id));
+            }
+
+            if (encoded_pid == my_pid) {
+                break;
+            }
+
+            /* check if lock owner is still alive */
+            if (kill(encoded_pid, 0) == 0) {
+                /* complain from time to time */
+                if ((ntries % LOG_FREQ) == 0) {
+                    elog(WARNING, "Process %d is using backup %s in shared mode, and is still running",
+                        encoded_pid, base36enc(backup->backup_id));
+
+                    elog(WARNING, "Waiting %u seconds on lock for backup %s", ntries,
+                        base36enc(backup->backup_id));
+                }
+
+                sleep(1);
+
+                /* try again */
+                continue;
+            } else if (errno != ESRCH) {
+                elog(ERROR, "Failed to send signal 0 to a process %d: %s",
+                    encoded_pid, strerror(errno));
+            }
+
+            /* locker is dead */
+            break;
+        } while (ntries--);
+    }
+
+    if (fp && ferror(fp)) {
+        elog(ERROR, "Cannot read from lock file: \"%s\"", lock_file);
+    }
+
+    if (fp) {
+        fclose(fp);
+    }
+
+    /* some shared owners are still alive */
+    if (ntries <= 0) {
+        elog(WARNING, "Cannot to lock backup %s in exclusive mode, because process %u owns shared lock",
+            base36enc(backup->backup_id), encoded_pid);
+        return 1;
+    }
+
+    /* unlink shared lock file */
+    fio_unlink(lock_file, FIO_BACKUP_HOST);
+    return 0;
+}
+
+/*
+ * Lock backup in shared mode
+ * 0 - successs
+ * 1 - fail
+ */
+int
+grab_shared_lock_file(pgBackup *backup)
+{
+    int  rc = 0;
+    FILE *fp_in = NULL;
+    FILE *fp_out = NULL;
+    char  buf_in[256];
+    pid_t encoded_pid;
+    char  lock_file[MAXPGPATH];
+
+    char  buffer[8192];
+    char  lock_file_tmp[MAXPGPATH];
+    int   buffer_len = 0;
+
+    join_path_components(lock_file, backup->root_dir, BACKUP_RO_LOCK_FILE);
+    rc = snprintf_s(lock_file_tmp, MAXPGPATH, MAXPGPATH - 1, "%s%s", lock_file, "tmp");
+    securec_check_ss_c(rc, "\0", "\0");
+
+    /* open already existing lock files */
+    fp_in = fopen(lock_file, "r");
+    if (fp_in == NULL && errno != ENOENT) {
+        elog(ERROR, "Cannot open lock file \"%s\": %s", lock_file, strerror(errno));
+    }
+
+    /* read PIDs of owners */
+    while (fp_in && fgets(buf_in, sizeof(buf_in), fp_in) != NULL) {
+        encoded_pid = atoi(buf_in);
+        if (encoded_pid <= 0) {
+            elog(WARNING, "Bogus data in lock file \"%s\": \"%s\"", lock_file, buf_in);
+            continue;
+        }
+
+        if (encoded_pid == my_pid) {
+            continue;
+        }
+
+        if (kill(encoded_pid, 0) == 0) {
+            /*
+             * Somebody is still using this backup in shared mode,
+             * copy this pid into a new file.
+             */
+            rc = snprintf_s(buffer + buffer_len, MAXPGPATH, MAXPGPATH - 1, "%u\n", encoded_pid);
+            securec_check_ss_c(rc, "\0", "\0");
+            buffer_len += rc;
+        } else if (errno != ESRCH) {
+            elog(ERROR, "Failed to send signal 0 to a process %d: %s",
+                encoded_pid, strerror(errno));
+        }
+    }
+
+    if (fp_in) {
+        if (ferror(fp_in)) {
+            elog(ERROR, "Cannot read from lock file: \"%s\"", lock_file);
+        }
+        fclose(fp_in);
+    }
+
+    fp_out = fopen(lock_file_tmp, "w");
+    if (fp_out == NULL) {
+        if (errno == EROFS) {
+            return 0;
+        }
+        elog(ERROR, "Cannot open temp lock file \"%s\": %s", lock_file_tmp, strerror(errno));
+    }
+
+    /* add my own pid */
+    rc = snprintf_s(buffer + buffer_len, MAXPGPATH, MAXPGPATH - 1, "%u\n", my_pid);
+    securec_check_ss_c(rc, "\0", "\0");
+    buffer_len += rc;
+
+    /* write out the collected PIDs to temp lock file */
+    rc = fwrite(buffer, 1, buffer_len, fp_out);
+    if (rc != buffer_len || ferror(fp_out)) {
+        elog(ERROR, "Cannot write to lock file \"%s\": %s (wrote %zu of %zu bytes)",
+            lock_file_tmp, strerror(errno), rc, buffer_len);
+    }
+
+    if (fclose(fp_out) != 0) {
+        elog(ERROR, "Cannot close temp lock file \"%s\": %s", lock_file_tmp, strerror(errno));
+    }
+
+    if (rename(lock_file_tmp, lock_file) < 0) {
+        elog(ERROR, "Cannot rename file \"%s\" to \"%s\": %s",
+            lock_file_tmp, lock_file, strerror(errno));
+    }
+
+    return 0;
+}
+
+void
+release_excl_lock_file(const char *backup_dir)
+{
+    char  lock_file[MAXPGPATH];
+    join_path_components(lock_file, backup_dir, BACKUP_LOCK_FILE);
+    /* unlink pid file */
+    fio_unlink(lock_file, FIO_BACKUP_HOST);
+}
+
+void
+release_shared_lock_file(const char *backup_dir)
+{
+    FILE *fp_in = NULL;
+    FILE *fp_out = NULL;
+    char  buf_in[256];
+    pid_t encoded_pid;
+    char  lock_file[MAXPGPATH];
+
+    char  buffer[8192];
+    char  lock_file_tmp[MAXPGPATH];
+    int   buffer_len = 0;
+    int   rc = 0;
+
+    join_path_components(lock_file, backup_dir, BACKUP_RO_LOCK_FILE);
+    rc = snprintf_s(lock_file_tmp, MAXPGPATH, MAXPGPATH - 1, "%s%s", lock_file, "tmp");
+    securec_check_ss_c(rc, "\0", "\0");
+
+    /* open lock file */
+    fp_in = fopen(lock_file, "r");
+    if (fp_in == NULL) {
+        if (errno == ENOENT) {
+            return;
+        } else {
+            elog(ERROR, "Cannot open lock file \"%s\": %s", lock_file, strerror(errno));
+        }
+    }
+
+    /* read PIDs of owners */
+    while (fgets(buf_in, sizeof(buf_in), fp_in) != NULL) {
+        encoded_pid = atoi(buf_in);
+        if (encoded_pid <= 0) {
+            elog(WARNING, "Bogus data in lock file \"%s\": \"%s\"", lock_file, buf_in);
+            continue;
+        }
+
+        /* remove my pid */
+        if (encoded_pid == my_pid) {
+            continue;
+        }
+
+        if (kill(encoded_pid, 0) == 0) {
+            /*
+             * Somebody is still using this backup in shared mode,
+             * copy this pid into a new file.
+             */
+            rc = snprintf_s(buffer+buffer_len, MAXPGPATH, MAXPGPATH - 1, "%u\n", encoded_pid);
+            securec_check_ss_c(rc, "\0", "\0");
+            buffer_len += rc;
+        } else if (errno != ESRCH) {
+            elog(ERROR, "Failed to send signal 0 to a process %d: %s",
+                encoded_pid, strerror(errno));
+        }
+    }
+
+    if (ferror(fp_in)) {
+        elog(ERROR, "Cannot read from lock file: \"%s\"", lock_file);
+    }
+    (void)fclose(fp_in);
+
+    /* if there is no active pid left, then there is nothing to do */
+    if (buffer_len == 0) {
+        fio_unlink(lock_file, FIO_BACKUP_HOST);
+        return;
+    }
+
+    fp_out = fopen(lock_file_tmp, "w");
+    if (fp_out == NULL) {
+        elog(ERROR, "Cannot open temp lock file \"%s\": %s", lock_file_tmp, strerror(errno));
+    }
+
+    /* write out the collected PIDs to temp lock file */
+    (void)fwrite(buffer, 1, buffer_len, fp_out);
+
+    if (ferror(fp_out)) {
+        elog(ERROR, "Cannot write to lock file: \"%s\"", lock_file_tmp);
+    }
+
+    if (fclose(fp_out) != 0) {
+        elog(ERROR, "Cannot close temp lock file \"%s\": %s", lock_file_tmp, strerror(errno));
+    }
+
+    if (rename(lock_file_tmp, lock_file) < 0) {
+        elog(ERROR, "Cannot rename file \"%s\" to \"%s\": %s",
+            lock_file_tmp, lock_file, strerror(errno));
+    }
+
+    return;
+}
+
+void
+unlock_backup(const char *backup_dir, const char *backup_id, bool exclusive)
+{
+    if (exclusive) {
+        release_excl_lock_file(backup_dir);
+        return;
+    }
+
+    /* To remove shared lock, we must briefly obtain exclusive lock, ... */
+    if (grab_excl_lock_file(backup_dir, backup_id, false) != LOCK_OK) {
+        /* ... if it's not possible then leave shared lock */
+        return;
+    }
+
+    release_shared_lock_file(backup_dir);
+    release_excl_lock_file(backup_dir);
 }
 
 /*
@@ -592,7 +1072,7 @@ get_backup_filelist(pgBackup *backup, bool strict)
  * Lock list of backups. Function goes in backward direction.
  */
 void
-catalog_lock_backup_list(parray *backup_list, int from_idx, int to_idx, bool strict)
+catalog_lock_backup_list(parray *backup_list, int from_idx, int to_idx, bool strict, bool exclusive)
 {
     int     start_idx,
             end_idx;
@@ -607,9 +1087,10 @@ catalog_lock_backup_list(parray *backup_list, int from_idx, int to_idx, bool str
     for (i = start_idx; i >= end_idx; i--)
     {
         pgBackup   *backup = (pgBackup *) parray_get(backup_list, i);
-        if (!lock_backup(backup, strict))
+        if (!lock_backup(backup, strict, exclusive)) {
             elog(ERROR, "Cannot lock backup %s directory",
                 base36enc(backup->start_time));
+        }
     }
 }
 
