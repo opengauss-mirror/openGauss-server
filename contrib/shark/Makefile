@@ -18,7 +18,7 @@ OBJS += $(BEPARSERDIR)/keywords.o
 OBJS += $(BEPARSERDIR)/varbinary.o
 OBJS += $(PLDIR)/pl_gram.o $(PLDIR)/pl_handler.o $(PLDIR)/pl_comp.o
 OBJS += $(PLDIR)/pl_scanner.o
-OBJS += $(BASECODEDIR)/tablecmds.o
+OBJS += $(BASECODEDIR)/tablecmds.o $(BASECODEDIR)/identitycmds.o
 
 subdir = contrib/shark
 top_builddir = ../..

@@ -460,7 +460,872 @@ CONTEXT:  referenced column: test_pltsql
            0
 (1 row)
 
+drop table t1;
+drop function test_pltsql();
+-- databasepropertyex
+create database test_databasepropertyex dbcompatibility 'd';
+select databasepropertyex('test_databasepropertyex', 'Collation');
+ databasepropertyex 
+--------------------
+--?.*
+(1 row)
+
+select pg_typeof(databasepropertyex('test_databasepropertyex', 'Collation'));
+  pg_typeof  
+-------------
+ sql_variant
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'ComparisonStyle');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'Edition');
+ databasepropertyex 
+--------------------
+ Standard
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsAnsiNullDefault');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsAnsiNullsEnabled');
+ databasepropertyex 
+--------------------
+ 1
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsAnsiPaddingEnabled');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsAnsiWarningsEnabled');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsArithmeticAbortEnabled');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsAutoClose');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsAutoCreateStatistics');
+ databasepropertyex 
+--------------------
+ 1
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsAutoCreateStatisticsIncremental');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsAutoShrink');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsAutoUpdateStatistics');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsClone');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsCloseCursorsOnCommitEnabled');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsDatabaseSuspendedForSnapshotBackup');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsFulltextEnabled');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsInStandBy');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsLocalCursorsDefault');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsMemoryOptimizedElevateToSnapshotEnabled');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsMergePublished');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsNullConcat');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsNumericRoundAbortEnabled');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsParameterizationForced');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsQuotedIdentifiersEnabled');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsPublished');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsRecursiveTriggersEnabled');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsSubscribed');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsSyncWithBackup');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsTornPageDetectionEnabled');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsVerifiedClone');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'IsXTPSupported');
+ databasepropertyex 
+--------------------
+ 0
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'LastGoodCheckDbTime');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'LCID');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'MaxSizeInBytes');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'Recovery');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'ServiceObjective');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'SQLSortOrder');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'Status');
+ databasepropertyex 
+--------------------
+ ONLINE
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'Updateability');
+ databasepropertyex 
+--------------------
+ READ_WRITE
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'UserAccess');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'Version');
+ databasepropertyex 
+--------------------
+ 93046
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'ReplicaID');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+--- expected null
+select databasepropertyex('test_databasepropertyex', 'Collation_fake');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex_fake', 'Collation');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('null', 'Collation');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('test_databasepropertyex', 'null');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+select databasepropertyex('null', 'null');
+ databasepropertyex 
+--------------------
+ 
+(1 row)
+
+drop database test_databasepropertyex;
+-- suser_name/suser_sname
+SELECT suser_name() AS CurrentLoginName;
+ currentloginname 
+------------------
+--?.*
+(1 row)
+
+create user u1 identified by 'Test@123';
+SET SESSION AUTHORIZATION u1 PASSWORD 'Test@123';
+SELECT suser_name() AS CurrentLoginName;
+ currentloginname 
+------------------
+ u1
+(1 row)
+
+RESET SESSION AUTHORIZATION;
+create role u2 identified by 'Test@123';
+SET SESSION AUTHORIZATION u2 PASSWORD 'Test@123';
+SELECT suser_name() AS CurrentLoginName;
+ currentloginname 
+------------------
+ 
+(1 row)
+
+RESET SESSION AUTHORIZATION;
+select suser_name(oid) from pg_authid where rolname in ('u1', 'u2');
+ suser_name 
+------------
+ u1
+ 
+(2 rows)
+
+drop user u1;
+drop user u2;
+SELECT suser_name(-111);
+ suser_name 
+------------
+ 
+(1 row)
+
+SELECT suser_name('-111');
+ suser_name 
+------------
+ 
+(1 row)
+
+SELECT suser_name('aaa');
+ERROR:  invalid input syntax for type oid: "aaa"
+LINE 1: SELECT suser_name('aaa');
+                          ^
+CONTEXT:  referenced column: suser_name
+SELECT suser_name(null);
+ suser_name 
+------------
+ 
+(1 row)
+
+SELECT suser_sname(-111);
+ERROR:  function suser_sname(integer) does not exist
+LINE 1: SELECT suser_sname(-111);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: suser_sname
+SELECT suser_sname('-111');
+ suser_sname 
+-------------
+ 
+(1 row)
+
+SELECT suser_sname('aaa');
+ suser_sname 
+-------------
+ 
+(1 row)
+
+SELECT suser_sname(null);
+ suser_sname 
+-------------
+ 
+(1 row)
+
+-- scope_identity
+--- This function returns the last identity value generated for any table in the current session and the current scope.
+create schema test_scope_identity;
+set search_path to test_scope_identity;
+--- base test
+create table t1 (c1 int identity(100, 1), c2 int);
+NOTICE:  CREATE TABLE will create implicit sequence "t1_c1_seq_identity" for serial column "t1.c1"
+insert into t1 values (1);
+insert into t1 values (2);
+insert into t1 values (3);
+insert into t1 values (4);
+insert into t1 values (5);
+select scope_identity();
+ scope_identity 
+----------------
+            104
+(1 row)
+
+insert into t1 values (6);
+select scope_identity();
+ scope_identity 
+----------------
+            105
+(1 row)
+
+create table t2 (c1 int, c2 int identity(200, 1));
+NOTICE:  CREATE TABLE will create implicit sequence "t2_c2_seq_identity" for serial column "t2.c2"
+insert into t2 values (1);
+insert into t2 values (2);
+select scope_identity();
+ scope_identity 
+----------------
+            201
+(1 row)
+
+insert into t2 values (3);
+select scope_identity();
+ scope_identity 
+----------------
+            202
+(1 row)
+
+insert into t1 values (7);
+select scope_identity();
+ scope_identity 
+----------------
+            106
+(1 row)
+
+insert into t2 values (4);
+select scope_identity();
+ scope_identity 
+----------------
+            203
+(1 row)
+
+--- function test
+create or replace function test_fn_scope_identity() returns int as $$
+begin
+    insert into t1 values (5);
+    return scope_identity();
+end; 
+$$ language plpgsql;
+select test_fn_scope_identity();
+ test_fn_scope_identity 
+------------------------
+                    107
+(1 row)
+
+select scope_identity();
+ scope_identity 
+----------------
+            107
+(1 row)
+
+insert into t2 values (5);
+select scope_identity();
+ scope_identity 
+----------------
+            204
+(1 row)
+
+--- procedure test
+create or replace procedure test_proc_scope_identity() as
+declare
+    v1 int;
+begin
+    insert into t1 values (6);
+    v1 := scope_identity();
+    raise notice 'test_proc_scope_identity, scope_identity: %', v1;
+end;
+/
+call test_proc_scope_identity();
+NOTICE:  test_proc_scope_identity, scope_identity: 108
+ test_proc_scope_identity 
+--------------------------
+ 
+(1 row)
+
+select scope_identity();
+ scope_identity 
+----------------
+            204
+(1 row)
+
+insert into t2 values (6);
+select scope_identity();
+ scope_identity 
+----------------
+            205
+(1 row)
+
+--- before trigger test
+create table t3 (c1 int identity(300, 1), c2 int);
+NOTICE:  CREATE TABLE will create implicit sequence "t3_c1_seq_identity" for serial column "t3.c1"
+create or replace function test_fn_trg_scope_identity_before() returns trigger as $$
+declare
+    v1 int;
+begin
+    insert into t1 values (7);
+    v1 := scope_identity();
+    raise notice 'test_fn_trg_scope_identity_before, scope_identity: %', v1;
+    return new;
+end;
+$$ language pltsql;
+create trigger trg_scope_identity_before
+    before insert on t3
+    for each row execute procedure test_fn_trg_scope_identity_before();
+insert into t3 values (1);
+NOTICE:  test_fn_trg_scope_identity_before, scope_identity: 109
+insert into t3 values (2);
+NOTICE:  test_fn_trg_scope_identity_before, scope_identity: 110
+select scope_identity();
+ scope_identity 
+----------------
+            301
+(1 row)
+
+insert into t3 values (3);
+NOTICE:  test_fn_trg_scope_identity_before, scope_identity: 111
+select scope_identity();
+ scope_identity 
+----------------
+            302
+(1 row)
+
+insert into t2 values (4);
+select scope_identity();
+ scope_identity 
+----------------
+            206
+(1 row)
+
+insert into t3 values (4);
+NOTICE:  test_fn_trg_scope_identity_before, scope_identity: 112
+select scope_identity();
+ scope_identity 
+----------------
+            303
+(1 row)
+
+--- after trigger test
+create table t4 (c1 int identity(400, 1), c2 int);
+NOTICE:  CREATE TABLE will create implicit sequence "t4_c1_seq_identity" for serial column "t4.c1"
+create or replace function test_fn_trg_scope_identity_after() returns trigger as $$
+declare
+    v1 int;
+begin
+    insert into t1 values (8);
+    v1 := scope_identity();
+    raise notice 'test_fn_trg_scope_identity_after, scope_identity: %', v1;
+    return new;
+end;
+$$ language pltsql;
+create trigger trg_scope_identity_after
+    after insert on t4
+    for each row execute procedure test_fn_trg_scope_identity_after();
+insert into t4 values (1);
+NOTICE:  test_fn_trg_scope_identity_after, scope_identity: 113
+insert into t4 values (2);
+NOTICE:  test_fn_trg_scope_identity_after, scope_identity: 114
+select scope_identity();
+ scope_identity 
+----------------
+            401
+(1 row)
+
+insert into t4 values (3);
+NOTICE:  test_fn_trg_scope_identity_after, scope_identity: 115
+select scope_identity();
+ scope_identity 
+----------------
+            402
+(1 row)
+
+insert into t2 values (5);
+select scope_identity();
+ scope_identity 
+----------------
+            207
+(1 row)
+
+insert into t4 values (4);
+NOTICE:  test_fn_trg_scope_identity_after, scope_identity: 116
+select scope_identity();
+ scope_identity 
+----------------
+            403
+(1 row)
+
+--- test plpgsql trigger
+create table t5 (c1 int identity(500, 1), c2 int);
+NOTICE:  CREATE TABLE will create implicit sequence "t5_c1_seq_identity" for serial column "t5.c1"
+create or replace function test_fn_trg_scope_identity_plpgsql() returns trigger as $$
+declare
+    v1 int;
+begin
+    insert into t1 values (9);
+    v1 := scope_identity();
+    raise notice 'test_fn_trg_scope_identity_plpgsql, scope_identity: %', v1;
+    return new;
+end;
+$$ language plpgsql;
+create trigger trg_scope_identity_plpgsql
+    before insert on t5
+    for each row execute procedure test_fn_trg_scope_identity_plpgsql();
+insert into t5 values (1);
+NOTICE:  test_fn_trg_scope_identity_plpgsql, scope_identity: 117
+insert into t5 values (2);
+NOTICE:  test_fn_trg_scope_identity_plpgsql, scope_identity: 118
+select scope_identity();
+ scope_identity 
+----------------
+            501
+(1 row)
+
+insert into t5 values (3);
+NOTICE:  test_fn_trg_scope_identity_plpgsql, scope_identity: 119
+select scope_identity();
+ scope_identity 
+----------------
+            502
+(1 row)
+
+insert into t2 values (6);
+select scope_identity();
+ scope_identity 
+----------------
+            208
+(1 row)
+
+insert into t5 values (4);
+NOTICE:  test_fn_trg_scope_identity_plpgsql, scope_identity: 120
+select scope_identity();
+ scope_identity 
+----------------
+            503
+(1 row)
+
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4; 
+drop table t5;
+drop function test_fn_scope_identity();
+drop function test_proc_scope_identity();
+drop function test_fn_trg_scope_identity_before();
+drop function test_fn_trg_scope_identity_after();
+drop function test_fn_trg_scope_identity_plpgsql();
+reset search_path;
+drop schema test_scope_identity cascade;
+-- @@PROCID
+--- test procedure
+CREATE OR REPLACE PROCEDURE test_procid 
+AS  
+DECLARE
+	ProcID integer; 
+BEGIN
+	ProcID = @@PROCID;
+	RAISE INFO 'Stored procedure: %', ProcID;
+END;
+/
+select test_procid();
+--?.*
+CONTEXT:  referenced column: test_procid
+ test_procid 
+-------------
+ 
+(1 row)
+
+SELECT oid FROM pg_proc WHERE proname = 'test_procid' AND prokind = 'p';
+  oid  
+-------
+--?.*
+(1 row)
+
+--- test function
+CREATE OR REPLACE FUNCTION test_funcid() returns int as $$
+begin
+    return @@PROCID;
+end; 
+$$ language pltsql;
+select test_funcid();
+ test_funcid 
+-------------
+--?.*
+(1 row)
+
+SELECT oid FROM pg_proc WHERE proname = 'test_funcid' AND prokind = 'f';
+  oid  
+-------
+--?.*
+(1 row)
+
+--- test trigger
+drop table if exists t;
+NOTICE:  table "t" does not exist, skipping
+create table t (c1 int identity, c2 int);
+NOTICE:  CREATE TABLE will create implicit sequence "t_c1_seq_identity" for serial column "t.c1"
+create or replace function test_triggerid() returns trigger as $$
+declare
+    val int;
+begin
+    val := @@PROCID;
+    raise notice 'Triggerid: %', val;
+    return new;
+end;
+$$ language plpgsql;
+create trigger trg_procid
+    before insert on t
+    for each row execute procedure test_triggerid();
+insert into t values (1);
+--?.*
+SELECT oid FROM pg_proc WHERE proname = 'test_triggerid' AND prokind = 'f';
+  oid  
+-------
+--?.*
+(1 row)
+
+drop table t;
+--- test nested call
+CREATE OR REPLACE PROCEDURE test_procid_inner
+AS  
+DECLARE
+	ProcID integer; 
+BEGIN
+	ProcID = @@PROCID;  
+	RAISE INFO 'Inner Stored procedure: %', ProcID;
+END;
+/
+CREATE OR REPLACE PROCEDURE test_procid_outer
+AS  
+DECLARE
+	OuterProcID integer;
+	InnerProcID integer;
+BEGIN
+	OuterProcID = @@PROCID;  
+	RAISE INFO 'Outer stored procedure: %', OuterProcID;
+	
+	PERFORM test_procid_inner();  
+END;
+/
+call test_procid_outer();
+--?.*
+--?.*
+CONTEXT:  referenced column: test_procid_inner
+SQL statement "SELECT test_procid_inner()"
+PL/pgSQL function test_procid_outer() line 8 at PERFORM
+ test_procid_outer 
+-------------------
+ 
+(1 row)
+
+SELECT oid FROM pg_proc WHERE proname = 'test_procid_outer' AND prokind = 'p';
+  oid  
+-------
+--?.*
+(1 row)
+
+SELECT oid FROM pg_proc WHERE proname = 'test_procid_inner' AND prokind = 'p';
+  oid  
+-------
+--?.*
+(1 row)
+
+--- test anonymous block
+declare
+    procid int;
+begin
+ 	procid = @@PROCID;  
+	RAISE INFO 'anonymous block: %', procid;
+end;
+/
+INFO:  anonymous block: 0
+-- test ident_current
+create schema test_ident_current;
+set search_path = 'test_ident_current';
+select sys.ident_current(null);
+ ident_current 
+---------------
+              
+(1 row)
+
+select sys.ident_current('t1');
+ ident_current 
+---------------
+              
+(1 row)
+
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1 (c1 int identity(100,1), c2 int);
+NOTICE:  CREATE TABLE will create implicit sequence "t1_c1_seq_identity" for serial column "t1.c1"
+select sys.ident_current('t1');
+ ident_current 
+---------------
+           100
+(1 row)
+
+insert into t1(c2) values(10);
+select * from t1;
+ c1  | c2 
+-----+----
+ 100 | 10
+(1 row)
+
+select sys.ident_current('t1');
+ ident_current 
+---------------
+           100
+(1 row)
+
+insert into t1(c2) values(11);
+select * from t1;
+ c1  | c2 
+-----+----
+ 100 | 10
+ 101 | 11
+(2 rows)
+
+select sys.ident_current('t1');
+ ident_current 
+---------------
+           101
+(1 row)
+
+drop table if exists t2;
+NOTICE:  table "t2" does not exist, skipping
+create table t2 (c1 int identity(200,1), c2 int);
+NOTICE:  CREATE TABLE will create implicit sequence "t2_c1_seq_identity" for serial column "t2.c1"
+select sys.ident_current('t2');
+ ident_current 
+---------------
+           200
+(1 row)
+
+insert into t2(c2) values(20);
+select * from t2;
+ c1  | c2 
+-----+----
+ 200 | 20
+(1 row)
+
+select sys.ident_current('t2');
+ ident_current 
+---------------
+           200
+(1 row)
+
+insert into t2(c2) values(21);
+select * from t2;
+ c1  | c2 
+-----+----
+ 200 | 20
+ 201 | 21
+(2 rows)
+
+select sys.ident_current('t2');
+ ident_current 
+---------------
+           201
+(1 row)
+
+drop table t1;
+drop table t2;
+reset search_path;
+drop schema test_ident_current;
 drop schema functions_test cascade;
-NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to table t1
-drop cascades to function test_pltsql()

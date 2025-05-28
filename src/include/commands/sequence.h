@@ -265,7 +265,8 @@ extern SeqTable GetSessSeqElm(Oid relid);
 extern char* GetGlobalSeqNameForUpdate(Relation seqrel, char** dbname, char** schemaname);
 extern uint32 RelidGetHash(Oid seq_relid);
 extern SeqTable GetGlobalSeqElm(Oid relid, GlobalSeqInfoHashBucket* bucket);
-extern Oid pg_get_serial_sequence_oid(text* tablename, text* columnname);
+extern Oid pg_get_serial_sequence_oid(text* tablename, text* columnname, bool find_identity = false);
 bool StrEndWith(const char *str, const char *suffix);
+typedef void (*InvokeNextvalHookType) (Oid relid, int128 val);
 
 #endif /* SEQUENCE_H */

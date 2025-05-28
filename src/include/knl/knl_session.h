@@ -3014,6 +3014,7 @@ typedef struct knl_u_hook_context {
     void *recomputeLimitsHook;
     void *checkIsMssqlHexHook;
     void *rewriteTypmodExprHook;
+    void *invokeNextvalHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

@@ -29,6 +29,7 @@
 #include "utils/pl_package.h"
 #include "funcapi.h"
 #include "commands/proclang.h"
+#include "shark.h"
 
 extern void saveCallFromFuncOid(Oid funcOid);
 extern Oid getCurrCallerFuncOid();
@@ -298,7 +299,9 @@ Datum pltsql_call_handler(PG_FUNCTION_ARGS)
     bool enableProcCoverage = u_sess->attr.attr_common.enable_proc_coverage;
     Oid saveCallerOid = InvalidOid;
     Oid savaCallerParentOid = InvalidOid;
+    Oid saveProcid = InvalidOid;
     bool is_pkg_func = false;
+    int scopeLevel = 0;
     
     /* Check if type body exists if using type method */
     HeapTuple proc_tup = NULL;
@@ -524,8 +527,11 @@ Datum pltsql_call_handler(PG_FUNCTION_ARGS)
         int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
         int save_compile_status = u_sess->plsql_cxt.compile_status;
         FormatCallStack* saveplcallstack = t_thrd.log_cxt.call_stack;
+        scopeLevel = PltsqlNewScopeIdentityNestLevel();
+        saveProcid = get_procid();
         PG_TRY();
         {
+            set_procid(func->fn_oid);
             /*
              * Determine if called as function or trigger and call appropriate
              * subhandler
@@ -568,9 +574,11 @@ Datum pltsql_call_handler(PG_FUNCTION_ARGS)
             if (func->fn_readonly) {
                 stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
             }
+            set_procid(saveProcid);
         }
         PG_CATCH();
         {
+            set_procid(saveProcid);
             /* reset cur_exception_cxt */
             u_sess->plsql_cxt.cur_exception_cxt = NULL;
 
@@ -712,10 +720,12 @@ Datum pltsql_call_handler(PG_FUNCTION_ARGS)
 
         /* destory all the SPI connect created in this PL function. */
         SPI_disconnect(connect);
+        PltsqlRevertLastScopeIdentity(scopeLevel);
         /* re-throw the original error messages */
         ReThrowError(edata);
     }
     PG_END_TRY();
+    PltsqlRevertLastScopeIdentity(scopeLevel);
     u_sess->plsql_cxt.need_create_depend = save_need_create_depend;
     u_sess->plsql_cxt.is_exec_autonomous = save_is_exec_autonomous;
     u_sess->plsql_cxt.is_pipelined = save_is_pipelined;
