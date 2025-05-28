@@ -1174,16 +1174,17 @@ static FILE* logfile_open(const char* filename, const char* mode, bool allow_err
             ereport(LOG, (errcode_for_file_access(), errmsg("could not open log file \"%s\": %m", filename)));
             errno = save_errno;
         } else {
-            t_thrd.int_cxt.ImmediateInterruptOK = false;
-            fflush(stdout);
-            fflush(stderr);
-
             /*
              * If open file failed, we can not write any log to file, make the
              * system crash is safe.
              */
-            ereport(FATAL, (errcode_for_file_access(), errmsg("Failed to open log file \"%s\": %m, "
-                "Please check the file or permissions.", filename)));
+
+            ereport(WARNING, (errcode_for_file_access(), errmsg("failed to open log file \"%s\": %m", filename)));
+
+            t_thrd.int_cxt.ImmediateInterruptOK = false;
+            fflush(stdout);
+            fflush(stderr);
+            abort();
         }
     }
 
