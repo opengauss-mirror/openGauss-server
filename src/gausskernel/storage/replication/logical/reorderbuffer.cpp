@@ -646,6 +646,38 @@ void ReorderBufferQueueChange(LogicalDecodingContext *ctx, TransactionId xid, XL
 }
 
 /*
+ * Special handling specifically for XLH_DELETE_IS_SUPER
+ *
+ * XLH_DELETE_IS_SUPER records are generated during the execution of an UPSERT statement.
+ * Specifically, after performing an INSERT, a conflict is detected with a concurrently
+ * committed transaction, leading to a DELETE and a UPDATE.
+ *
+ * Such a UPSERT with INSERT, DELETE and UPDATE cannot be logical decoded normally, because
+ * it would be unexecutable while INSERT might cause a key-conflict error. So when we meet
+ * such a delete record, we remove the last INSERT change and don't add DELETE change.
+ */
+void ReorderBufferRemoveChangeForUpsert(LogicalDecodingContext *ctx, TransactionId xid, XLogRecPtr lsn)
+{
+    ReorderBufferTXN *txn = NULL;
+
+    txn = ReorderBufferTXNByXid(ctx->reorder, xid, true, NULL, lsn, true);
+
+    /* there must be at least one entry */
+    Assert(txn->nentries > 0);
+
+    dlist_node *node = dlist_tail_node(&txn->changes);
+    ReorderBufferChange* entry = dlist_container(ReorderBufferChange, node, node);
+
+    /* last entry must be INSERT */
+    Assert(entry->action == REORDER_BUFFER_CHANGE_INSERT);
+
+    dlist_delete(node);
+    txn->nentries--;
+    txn->nentries_mem--;
+    pfree(entry);
+}
+
+/*
  * A transactional DDL message is queued to be processed upon commit.
  */
 void
