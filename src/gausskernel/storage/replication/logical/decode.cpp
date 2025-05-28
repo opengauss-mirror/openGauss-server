@@ -1705,7 +1705,11 @@ static void DecodeDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     change->data.tp.snapshotcsn = curCSN;
     change->data.tp.clear_toast_afterwards = true;
 
-    ReorderBufferQueueChange(ctx, XLogRecGetXid(r), buf->origptr, change);
+    if (xlrec->flags & XLH_DELETE_IS_SUPER) {
+        ReorderBufferRemoveChangeForUpsert(ctx, XLogRecGetXid(r), buf->origptr);
+    } else {
+        ReorderBufferQueueChange(ctx, XLogRecGetXid(r), buf->origptr, change);
+    }
 }
 
 /*
