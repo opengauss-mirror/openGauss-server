@@ -280,8 +280,10 @@ void BackgroundWorkerMain(void)
         /* Report the error to the parallel leader and the server log */
         EmitErrorReport();
 
-        /* Abort the current transaction in order to recover */
-        AbortCurrentTransaction();
+        if (individualThread) {
+            /* Abort the current transaction in order to recover */
+            AbortCurrentTransaction();
+        }
 
         /* release resource held by lsc */
         AtEOXact_SysDBCache(false);
@@ -307,6 +309,11 @@ void BackgroundWorkerMain(void)
 
         /* Flush any leaked data in the top-level context */
         MemoryContextResetAndDeleteChildren(workerContext);
+
+        if (individualThread) {
+            /* free bwc for individualThread, for non-indivi, it will free in BgworkerCleanupSharedContext */
+            pfree(bwc);
+        }
 
         /* and go away */
         proc_exit(1);
@@ -370,6 +377,11 @@ void BackgroundWorkerMain(void)
     }
     /* ... and if it returns, we're done */
     bgw->bgw_status = BGW_STOPPED;
+
+    if (individualThread) {
+        /* free bwc for individualThread, for non-indivi, it will free in BgworkerCleanupSharedContext */
+        pfree(bwc);
+    }
 
 out:
     proc_exit(0);
@@ -442,8 +454,10 @@ static void BgworkerCleanupSharedContext()
             pfree_ext(bwc->bgshared);
 
             /*
-             * TODO: maybe we can free bgwcontext for individual thread?
-             * now we don't free bgwcontext, maybe have mem leak.
+             * bgwcontext's memory is allocated in LaunchBackgroundWorkers, belong to
+             * INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), instance level, but
+             * we can't free it now, cause bgworker is still running. we will free it
+             * when individual bgworker exit
              */
             pfree_ext(t_thrd.bgworker_cxt.bgwcontext);
         }
@@ -632,7 +646,6 @@ void ShutdownAllBgWorker()
     BackgroundWorker* bgws = ((BGW_HDR *)g_instance.bgw_base)->bgws;
     for (int i = 0; i < g_max_worker_processes; i++) {
         if ((bgws[i].flag & BGWORKER_FLAG_INDIVIDUAL_THREAD) && gs_signal_send(bgws[i].bgw_notify_pid, SIGTERM) != 0) {
-            /* TODO: maybe need to retry send SIGTERM again to those failed thread */
             ereport(WARNING, (errmsg("ShutdownAllBgWorker kill(pid %lu, stat %d) failed: %m",
                                      bgws[i].bgw_notify_pid, bgws[i].bgw_status)));
         }
