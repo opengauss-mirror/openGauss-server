@@ -148,6 +148,10 @@ Datum gs_create_sql_limit(PG_FUNCTION_ARGS)
             "Please delete unused limits.", g_instance.sqlLimit_cxt.entryCount, MAX_SQL_LIMIT_COUNT)));
     }
 
+    if (RecoveryInProgress()) {
+        ereport(ERROR, (errmodule(MOD_WLM), errmsg("create sql limit is not allowed in standby.")));
+    }
+
     ValidateLimitParams(fcinfo, true);
 
     char *sqlType = text_to_cstring(PG_GETARG_TEXT_P(1));
@@ -219,6 +223,10 @@ static void SetReplacementFlags(bool* repl)
 // gs_update_sql_limit(limit_id,limit_name,work_node,max_concurrency,start_time,end_time,limit_opt,databases,users)
 Datum gs_update_sql_limit(PG_FUNCTION_ARGS)
 {
+    if (RecoveryInProgress()) {
+        ereport(ERROR, (errmodule(MOD_WLM), errmsg("update sql limit is not allowed in standby.")));
+    }
+
     ValidateLimitParams(fcinfo, false);
     Datum limitId = PG_GETARG_DATUM(0);
     ScanKeyData entry;
@@ -401,6 +409,10 @@ Datum gs_delete_sql_limit(PG_FUNCTION_ARGS)
     if (!u_sess->attr.attr_common.enable_sql_limit) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("enable_sql_limit is off, please set to on"))));
+    }
+
+    if (RecoveryInProgress()) {
+        ereport(ERROR, (errmodule(MOD_WLM), errmsg("delete sql limit is not allowed in standby.")));
     }
 
     Datum limitId = PG_GETARG_DATUM(0);
