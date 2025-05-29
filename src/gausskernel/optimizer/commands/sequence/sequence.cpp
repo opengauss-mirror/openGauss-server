@@ -610,6 +610,12 @@ static int128 GetNextvalLocal(SeqTable elm, Relation seqrel)
         }
     }
 
+    /* under b_format, when reach maximum value, return it */
+    if (DB_IS_CMPT(B_FORMAT) && !seq->is_cycled && last == maxv) {
+        UnlockReleaseBuffer(buf);
+        return maxv;
+    }
+
     log = FetchLogLocal<T_Int, large>(&next, &result, &last, maxv, minv, fetch, log, incby,
         rescnt, seq->is_cycled, cache, seqrel);
     /* Save info in local cache for temporary sequences */

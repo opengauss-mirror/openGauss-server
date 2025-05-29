@@ -788,10 +788,11 @@ set enable_seqscan = false;
 set enable_bitmapscan = false;
 create table account_instance_stats(id int primary key, stat_id int);
 insert into account_instance_stats values(1,1),(2,1),(3,1),(4,1);
+set query_dop = 1002;
+explain (costs off) SELECT stat_id, @pids := id FROM account_instance_stats where id >= @pids;
 set @pids = 1;
-
 SELECT stat_id, @pids := id FROM account_instance_stats where id >= @pids;
-
+set query_dop = 1;
 drop table account_instance_stats;
 set enable_seqscan = default;
 set enable_bitmapscan = default;

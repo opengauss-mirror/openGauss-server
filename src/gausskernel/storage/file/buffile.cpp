@@ -402,7 +402,7 @@ static void CloseTempBufFile(BufFile* file)
     (void)BufFileFlush(file);
     /* close the underlying file(s) (with delete if it's a temp file) */
     for (i = 0; i < file->numFiles; i++) {
-        FileClose(file->files[i]);
+        FileClose(file->files[i], file->isInterXact);
     }
     /* release the buffer space */
     pfree(file->files);
@@ -450,7 +450,8 @@ static void BufFileLoadBuffer(BufFile* file)
     /*
      * Read whatever we can get, up to a full bufferload.
      */
-    file->nbytes = FilePRead(thisfile, file->buffer, BLCKSZ, file->curOffset, WAIT_EVENT_BUFFILE_READ);
+    file->nbytes = FilePRead(thisfile, file->buffer, BLCKSZ, file->curOffset, WAIT_EVENT_BUFFILE_READ,
+                             file->isInterXact);
 
 #ifdef MEMORY_CONTEXT_CHECKING
 #ifndef ENABLE_MEMORY_CHECK
@@ -515,7 +516,8 @@ static void BufFileDumpBuffer(BufFile* file)
             file->offsets[file->curFile] = file->curOffset;
         }
         bytestowrite =
-            FilePWrite(thisfile, file->buffer + wpos, bytestowrite, file->curOffset, (uint32)WAIT_EVENT_BUFFILE_WRITE);
+            FilePWrite(thisfile, file->buffer + wpos, bytestowrite, file->curOffset,
+                       (uint32)WAIT_EVENT_BUFFILE_WRITE, 0, file->isInterXact);
         if (bytestowrite <= 0) {
             return; /* failed to write */
         }
@@ -817,11 +819,11 @@ int64 BufFileSize(BufFile *file)
     Assert(file->fileset != NULL);
 
     /* Get the size of the last physical file by seeking to end. */
-    lastFileSize = FileSeek(file->files[file->numFiles - 1], 0, SEEK_END);
+    lastFileSize = FileSeek(file->files[file->numFiles - 1], 0, SEEK_END, file->isInterXact);
     if (lastFileSize < 0) {
         ereport(ERROR, (errcode_for_file_access(),
             errmsg("could not determine size of temporary file \"%s\" from BufFile \"%s\": %m",
-            FilePathName(file->files[file->numFiles - 1]), file->name)));
+            FilePathName(file->files[file->numFiles - 1], file->isInterXact), file->name)));
     }
     file->offsets[file->numFiles - 1] = lastFileSize;
 

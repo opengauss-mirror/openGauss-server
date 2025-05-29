@@ -18,7 +18,7 @@ SET enable_dump_trigger_definer = on;
 SET behavior_compat_options = '';
 
 
-SET search_path = public;
+SET search_path = "public";
 
 SET default_tablespace = '';
 
@@ -28,20 +28,20 @@ SET default_with_oids = false;
 -- Name: test1; Type: TABLE; Schema: public; Owner: gauss; Tablespace: 
 --
 
-CREATE TABLE test1 (
-    a integer,
-    b text
+CREATE TABLE "test1" (
+    "a" integer,
+    "b" text
 )
 WITH (orientation=row, compression=no);
 
 
-ALTER TABLE public.test1 OWNER TO gauss;
+ALTER TABLE "public"."test1" OWNER TO "gauss";
 
 --
 -- Data for Name: test1; Type: TABLE DATA; Schema: public; Owner: gauss
 --
 
-COPY public.test1 (a, b) FROM stdin;
+COPY public."test1" ("a", "b") FROM stdin;
 1	one
 2	two
 \.
@@ -51,19 +51,19 @@ COPY public.test1 (a, b) FROM stdin;
 -- Name: mysub; Type: SUBSCRIPTION; Schema: -; Owner: gauss
 --
 
-CREATE SUBSCRIPTION mysub CONNECTION 'dbname=dump_db user=gauss password=encryptOptjE2MXqiXDNgPvWxcN5Aquu7xei4bJNFcxJodbu8jH3GC9i31q1H8plPam0fqj39x  host=127.0.0.1,127.0.0.1,127.0.0.1 port=25800,25803,25806' PUBLICATION mypub WITH (enabled = false, slot_name = 'mysub');
+CREATE SUBSCRIPTION "mysub" CONNECTION 'dbname=dump_db user=gauss password=encryptOptjE2MXqiXDNgPvWxcN5Aquu7xei4bJNFcxJodbu8jH3GC9i31q1H8plPam0fqj39x  host=127.0.0.1,127.0.0.1,127.0.0.1 port=25800,25803,25806' PUBLICATION mypub WITH (enabled = false, slot_name = 'mysub');
 
 
-ALTER SUBSCRIPTION mysub OWNER TO gauss;
+ALTER SUBSCRIPTION "mysub" OWNER TO "gauss";
 
 --
 -- Name: public; Type: ACL; Schema: -; Owner: gauss
 --
 
-REVOKE ALL ON SCHEMA public FROM PUBLIC;
-REVOKE ALL ON SCHEMA public FROM gauss;
-GRANT CREATE,USAGE ON SCHEMA public TO gauss;
-GRANT USAGE ON SCHEMA public TO PUBLIC;
+REVOKE ALL ON SCHEMA "public" FROM PUBLIC;
+REVOKE ALL ON SCHEMA "public" FROM "gauss";
+GRANT CREATE,USAGE ON SCHEMA "public" TO "gauss";
+GRANT USAGE ON SCHEMA "public" TO PUBLIC;
 
 
 --

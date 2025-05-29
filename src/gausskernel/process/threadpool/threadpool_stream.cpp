@@ -135,6 +135,7 @@ void ThreadPoolStream::InitStream()
 
     /* Init GUC option for this session. */
     InitializeGUCOptions();
+    init_set_user_params_htab();
     /* Read in remaining GUC variables */
     read_nondefault_variables();
 

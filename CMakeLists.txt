@@ -36,6 +36,12 @@ endif()
 if("${ENABLE_PRIVATEGAUSS}" STREQUAL "ON")
     MESSAGE(FATAL_ERROR " The option ENABLE_PRIVATEGAUSS is not supported thus should be turned off.")
 endif()
+if("${ENABLE_LITE_MODE}" STREQUAL "")
+    set(ENABLE_LITE_MODE "OFF")
+endif()
+if("${ENABLE_MOT}" STREQUAL "")
+    set(ENABLE_MOT "OFF")
+endif()
 
 #FIXME: make it an argument
 set(openGauss ".")
@@ -107,7 +113,7 @@ install(DIRECTORY ${CMAKE_BINARY_DIR}/pg_plugin DESTINATION lib/postgresql)
 install(DIRECTORY ${CMAKE_BINARY_DIR}/libsimsearch DESTINATION lib)
 
 if(EXISTS ${CMAKE_SOURCE_DIR}/contrib/dolphin)
-    install(CODE "execute_process(COMMAND bash cmake.sh WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/contrib/dolphin)")
+    install(CODE "execute_process(COMMAND bash cmake.sh ${ENABLE_LITE_MODE} ${ENABLE_MOT} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/contrib/dolphin)")
     install(FILES ${CMAKE_SOURCE_DIR}/contrib/dolphin/dolphin.control
         DESTINATION share/postgresql/extension/
     )

@@ -1195,10 +1195,17 @@ static void get_table_partitiondef(StringInfo query, StringInfo buf, Oid tableoi
 
     if (partstrategy == PART_STRATEGY_INTERVAL) {
         resetStringInfo(query);
-        appendStringInfo(query,
-            "SELECT p.interval[1] AS interval FROM pg_partition p "
-            "WHERE p.parentid = %u AND p.parttype = '%c' AND p.partstrategy = '%c'",
-            tableoid, PART_OBJ_TYPE_PARTED_TABLE, PART_STRATEGY_INTERVAL);
+        if (!u_sess->attr.attr_sql.dolphin) {
+            appendStringInfo(query,
+                "SELECT p.interval[1] AS interval FROM pg_partition p "
+                "WHERE p.parentid = %u AND p.parttype = '%c' AND p.partstrategy = '%c'",
+                tableoid, PART_OBJ_TYPE_PARTED_TABLE, PART_STRATEGY_INTERVAL);
+        } else {
+            appendStringInfo(query,
+                "SELECT p.`interval`[1] AS `interval` FROM pg_partition p "
+                "WHERE p.parentid = %u AND p.parttype = '%c' AND p.partstrategy = '%c'",
+                tableoid, PART_OBJ_TYPE_PARTED_TABLE, PART_STRATEGY_INTERVAL);
+        }
         (void)SPI_execute(query->data, true, INT_MAX);
         Assert(SPI_processed == 1);
 

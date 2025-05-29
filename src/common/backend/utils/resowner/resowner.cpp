@@ -2119,6 +2119,21 @@ LocalCatCTup* ResourceOwnerForgetLocalCatCTup(ResourceOwner owner, HeapTuple tup
     return NULL; /* keep compiler quiet */
 }
 
+bool ResourceOwnerTupleDead(ResourceOwner owner, HeapTuple tuple)
+{
+    if (!EnableLocalSysCache()) {
+        CatCTup* ct = (CatCTup*)(((char*)tuple) - offsetof(CatCTup, tuple));
+        return ct->dead;
+    }
+    for (int i = owner->nlocalcatctup - 1; i >= 0; i--) {
+        if (&owner->localcatctups[i]->global_ct->tuple == tuple) {
+            return owner->localcatctups[i]->global_ct->dead;
+        }
+    }
+    Assert(0);
+    return false;
+}
+
 void ResourceOwnerEnlargeGlobalCatCTup(ResourceOwner owner)
 {
     int newmax;

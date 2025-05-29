@@ -452,6 +452,9 @@ void sess_exit_prepare(int code)
 
     if (!EnableLocalSysCache()) {
         closeAllVfds();
+    } else {
+        /* close interxact files */
+        closeAllVfds(true);
     }
 
     PreventInterrupt();
@@ -462,7 +465,8 @@ void sess_exit_prepare(int code)
 
     for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++) {
         if (EnableLocalSysCache() && on_sess_exit_list[u_sess->on_sess_exit_index] == AtProcExit_Files) {
-            // we close this only on proc exit
+            /* unlink interxact files */
+            DestroyAllVfds(true);
             continue;
         }
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));

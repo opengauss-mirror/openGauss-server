@@ -43,10 +43,10 @@ function test_1() {
 		exit 1
 	fi
 
-	exec_dump_db $case_db $pub_node1_port "$dump_result_dir/dump_db_pub${pub_ddl}.pub" "all"
+	exec_dump_db $case_db $pub_node1_port "$dump_result_dir/dump_db_pub${pub_ddl}.pub --quote-all-identifiers" "all"
 	sedcmd="sed -i -e s/gauss/${g_username}/g $dump_expected_dir/dump_db_pub${pub_ddl}.pub"
 	$sedcmd
-	diff -I "dolphin.sql_mode" $dump_result_dir/dump_db_pub${pub_ddl}.pub $dump_expected_dir/dump_db_pub${pub_ddl}.pub > ${dump_result_dir}/dump_pub${pub_ddl}_pub.diff
+	diff -I "dolphin.sql_mode" -I "behavior_compat_options" $dump_result_dir/dump_db_pub${pub_ddl}.pub $dump_expected_dir/dump_db_pub${pub_ddl}.pub > ${dump_result_dir}/dump_pub${pub_ddl}_pub.diff
 	if [ -s ${dump_result_dir}/dump_puball_pub.diff ]; then
 		echo "$failed_keyword when dump publication"
 		exit 1
@@ -54,10 +54,10 @@ function test_1() {
 		echo "check publication dump data success"
 	fi
 
-    exec_dump_db $case_db $sub_node1_port "$dump_result_dir/dump_db_pub${pub_ddl}.sub" "all"
+    exec_dump_db $case_db $sub_node1_port "$dump_result_dir/dump_db_pub${pub_ddl}.sub --quote-all-identifiers" "all"
 	sedcmd="sed -i -e s/gauss/${g_username}/g $dump_expected_dir/dump_db_pub${pub_ddl}.sub"
 	$sedcmd
-	diff -I "dolphin.sql_mode" $dump_result_dir/dump_db_pub${pub_ddl}.sub $dump_expected_dir/dump_db_pub${pub_ddl}.sub > ${dump_result_dir}/dump_pub${pub_ddl}_sub.diff --ignore-matching-lines='password=encryptOpt'
+	diff -I "dolphin.sql_mode" -I "behavior_compat_options" $dump_result_dir/dump_db_pub${pub_ddl}.sub $dump_expected_dir/dump_db_pub${pub_ddl}.sub > ${dump_result_dir}/dump_pub${pub_ddl}_sub.diff --ignore-matching-lines='password=encryptOpt'
 	if [ -s ${dump_result_dir}/dump_pub${pub_ddl}_sub.diff ]; then
 		echo "$failed_keyword when dump subscription"
 		exit 1
