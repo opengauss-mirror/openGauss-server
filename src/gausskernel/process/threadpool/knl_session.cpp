@@ -621,6 +621,7 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->registerExclusiveHandlerdone = false;
     proc_cxt->check_auth = false;
     proc_cxt->nextQuery = false;
+    proc_cxt->nextSeqid = 0;
 }
 
 static void knl_u_time_init(knl_u_time_context* time_cxt)
