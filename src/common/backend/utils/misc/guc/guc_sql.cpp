@@ -206,6 +206,7 @@ static bool check_restrict_nonsystem_relation_kind(char **newval, void **extra, 
 static void assign_restrict_nonsystem_relation_kind(const char *newval, void *extra);
 static bool init_parameterized_query_context(bool* newval, void** extra, GucSource source);
 static bool check_td_compatible_truncation(bool* newval, void** extra, GucSource source);
+static bool check_mmap_set(bool* newval, void** extra, GucSource source);
 
 static void InitSqlConfigureNamesBool();
 static void InitSqlConfigureNamesInt();
@@ -1936,6 +1937,18 @@ static void InitSqlConfigureNamesBool()
             &u_sess->attr.attr_sql.enable_vector_targetlist, 
             false,
             NULL,
+            NULL,
+            NULL
+        },
+        {{"hnsw_use_mmap",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("enable mmap in hnsw"),
+            NULL},
+            &u_sess->datavec_ctx.hnsw_use_mmap,
+            false,
+            check_mmap_set,
             NULL,
             NULL
         },
@@ -4867,6 +4880,21 @@ static bool init_parameterized_query_context(bool* newval, void** extra, GucSour
                                                               HASH_ELEM | HASH_FUNCTION | HASH_COMPARE | HASH_CONTEXT);
 
         Assert(u_sess->param_cxt.parameterized_queries);
+    }
+    return true;
+}
+static bool check_mmap_set(bool* newval, void** extra, GucSource source)
+{
+    if (g_instance.attr.attr_storage.enable_mmap) {
+        return true;
+    }
+    if (PGC_S_FILE == source || PGC_S_DEFAULT == source) {
+        *newval = false;
+        return true;
+    }
+    if (*newval) {
+        GUC_check_errdetail("pls set enable_mmap on first");
+        return false;
     }
     return true;
 }
