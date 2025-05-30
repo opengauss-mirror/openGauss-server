@@ -2258,7 +2258,6 @@ bool function_parse_error_transpose(const char* prosrc)
         }
     }
 
-#ifdef ENABLE_MOT
     /*
      * When MOT JIT is active we need to be careful, because we might not have a portal yet.
      * This can happen when we trigger compilation of a function during a PERPARE statement
@@ -2268,16 +2267,13 @@ bool function_parse_error_transpose(const char* prosrc)
     if (ActivePortal == nullptr) {
         newerrposition = match_prosrc_to_query(prosrc, prosrc, origerrposition);
     } else {
-#endif
         /* We can get the original query text from the active portal (hack...) */
-        Assert(ActivePortal && ActivePortal->status == PORTAL_ACTIVE);
+        Assert(ActivePortal->status == PORTAL_ACTIVE);
         queryText = ActivePortal->sourceText;
 
         /* Try to locate the prosrc in the original text */
         newerrposition = match_prosrc_to_query(prosrc, queryText, origerrposition);
-#ifdef ENABLE_MOT
     }
-#endif
 
     if (newerrposition > 0) {
         /* Successful, so fix error position to reference original query */
