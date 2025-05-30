@@ -174,6 +174,9 @@ static RestrictInfo* rewrite_opclause_for_prefixkey(
 static Const *pad_string_in_like(PadContent content, const Const *strConst, int length, bool isPadMax);
 static int get_pad_length(Node *leftop, int prefixLen);
 static PadContent get_pad_content(Oid collation);
+static bool scalar_array_can_match_prefixkey(Node *saop_rexpr);
+RestrictInfo *expand_indexqual_scalar_array_op_expr(IndexOptInfo *index, RestrictInfo *rinfo,
+    Oid opfamily, int indexcol);
 void check_report_cause_type(FuncExpr *funcExpr, int indkey);
 Node* match_first_var_to_indkey(Node* node, int indkey);
 
@@ -2369,6 +2372,7 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
     Oid expr_op;
     Oid expr_coll;
     bool plain_op = false;
+    bool isMatchPrefixKey = true;
 
     Assert(indexcol < index->nkeycolumns);
     opfamily = index->opfamily[indexcol];
@@ -2417,6 +2421,7 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
         expr_op = saop->opno;
         expr_coll = saop->inputcollid;
         plain_op = false;
+        isMatchPrefixKey = scalar_array_can_match_prefixkey(rightop);
     } else if (clause && IsA(clause, RowCompareExpr)) {
         return match_rowcompare_to_indexcol(index, indexcol, opfamily, idxcollation, (RowCompareExpr*)clause);
     } else if (index->amsearchnulls && IsA(clause, NullTest)) {
@@ -2432,8 +2437,8 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
      * Check for clauses of the form: (indexkey operator constant) or
      * (constant operator indexkey).  See above notes about const-ness.
      */
-    if (match_index_to_operand(leftop, indexcol, index, true) && !bms_is_member(index_relid, right_relids) &&
-        !contain_volatile_functions(rightop)) {
+    if (match_index_to_operand(leftop, indexcol, index, isMatchPrefixKey) &&
+        !bms_is_member(index_relid, right_relids) && !contain_volatile_functions(rightop)) {
         if (IndexCollMatchesExprColl(idxcollation, expr_coll) && is_indexable_operator(expr_op, opfamily, true))
             return true;
 
@@ -2449,7 +2454,7 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
         return false;
     }
 
-    if (plain_op && match_index_to_operand(rightop, indexcol, index, true) &&
+    if (plain_op && match_index_to_operand(rightop, indexcol, index, isMatchPrefixKey) &&
         !bms_is_member(index_relid, left_relids) && !contain_volatile_functions(leftop)) {
         if (IndexCollMatchesExprColl(idxcollation, expr_coll) && is_indexable_operator(expr_op, opfamily, false))
             return true;
@@ -3510,7 +3515,7 @@ void expand_indexqual_conditions(
                 indexqualcols = lappend_int(indexqualcols, indexcol);
         } else if (IsA(clause, ScalarArrayOpExpr)) {
             /* no extra work at this time */
-            indexquals = lappend(indexquals, rinfo);
+            indexquals = lappend(indexquals, expand_indexqual_scalar_array_op_expr(index, rinfo, curFamily, indexcol));
             indexqualcols = lappend_int(indexqualcols, indexcol);
         } else if (IsA(clause, RowCompareExpr)) {
             indexquals = lappend(indexquals, expand_indexqual_rowcompare(rinfo, index, indexcol));
@@ -4695,4 +4700,161 @@ Node* match_first_var_to_indkey(Node* node, int indkey)
         }
     }
     return lastNode;
+}
+
+static Node *strip_array_coercion(Node *node)
+{
+    while (node) {
+        if (IsA(node, ArrayCoerceExpr) && ((ArrayCoerceExpr*)node)->elemfuncid == InvalidOid) {
+            node = (Node*)((ArrayCoerceExpr*)node)->arg;
+        } else if (IsA(node, RelabelType)) {
+            node = (Node*)((RelabelType*)node)->arg;
+        } else {
+            break;
+        }
+    }
+ 
+    return node;
+}
+ 
+/* To avoid error in expand_indexqual_scalar_array_op_expr, we cannot match prefix key with this condition. */
+static bool scalar_array_can_match_prefixkey(Node *saop_rexpr)
+{
+    Node* rexpr = strip_array_coercion(saop_rexpr);
+    if (!rexpr) {
+        return false;
+    }
+    if (IsA(rexpr, Const) ||
+        (IsA(rexpr, ArrayExpr) && !((ArrayExpr*)rexpr)->multidims)) {
+        return true;
+    }
+ 
+    /* We cannot rewrite ArrayCoerceExpr and other type node now. */
+    return false;
+}
+
+Datum get_prefix_datum(Datum src, int prefix_len, Oid datatype)
+{
+    int datum_len;
+    if (datatype == BYTEAOID || datatype == RAWOID || datatype == BLOBOID) {
+        /* length of bytes */
+        datum_len = VARSIZE_ANY_EXHDR(DatumGetPointer(src));
+        if (prefix_len < datum_len) {
+            return PointerGetDatum(bytea_substring(src, 1, prefix_len, false));
+        }
+    } else {
+        /* length of characters */
+        datum_len = text_length(src);
+        if (prefix_len < datum_len) {
+            return PointerGetDatum(text_substring(src, 1, prefix_len, false));
+        }
+    }
+    return src;
+}
+
+void prefix_array_const_items(Const* arr_const, int prefixkey_len)
+{
+    ArrayBuildState* astate = NULL;
+    Datum arraydatum = arr_const->constvalue;
+    ArrayType* arrayval = DatumGetArrayTypeP(arraydatum);
+    Oid elem_type = ARR_ELEMTYPE(arrayval);
+    int16 typlen;
+    bool typbyval;
+    char typalign;
+    Datum* elem_values = NULL;
+    bool* elem_nulls = NULL;
+    int num_elems;
+ 
+    get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
+    deconstruct_array(arrayval, elem_type, typlen, typbyval, typalign, &elem_values, &elem_nulls, &num_elems);
+ 
+    /* prefix every item */
+    Datum new_item;
+    for (int i = 0; i < num_elems; i++) {
+        if (elem_nulls[i]) {
+            new_item = 0;
+        } else {
+             new_item = get_prefix_datum(elem_values[i], prefixkey_len, elem_type);
+        }
+        astate = accumArrayResult(astate, PointerGetDatum(new_item), elem_nulls[i], elem_type, CurrentMemoryContext);
+    }
+ 
+    /* Replaced by prefixed array const. */
+    arr_const->constvalue = makeArrayResult(astate, CurrentMemoryContext);
+    pfree_ext(elem_nulls);
+    pfree_ext(elem_values);
+}
+
+void prefix_array_expr_items(ArrayExpr* arr_expr, int prefixkey_len)
+{
+    Node* chgnode = NULL;
+ 
+    foreach_cell(lc, arr_expr->elements) {
+        chgnode = (Node*)lfirst(lc);
+        if (IsA(chgnode, Const)) {
+            chgnode = (Node*)prefix_const_node((Const*)chgnode, prefixkey_len, ((Const*)chgnode)->consttype);
+        } else {
+            PrefixKey* pexpr = makeNode(PrefixKey);
+            pexpr->length = prefixkey_len;
+            pexpr->arg = (Expr*)chgnode;
+            chgnode = (Node*)pexpr;
+        }
+ 
+        lfirst(lc) = chgnode;
+    }
+}
+
+static Oid replace_operator_by_strategy(Oid op_oid, Oid opfamily, int16 strategy)
+{
+    Oid ltype;
+    Oid rtype;
+    get_operator_types(op_oid, &ltype, &rtype);
+    return get_opfamily_member(opfamily, ltype, rtype, strategy);
+}
+
+RestrictInfo* expand_indexqual_scalar_array_op_expr(IndexOptInfo* index, RestrictInfo* rinfo,
+    Oid opfamily, int indexcol)
+{
+    int prefixkey_len = get_index_column_prefix_lenth(index, indexcol);
+    /* Not a prefix key, keep original condition. */
+    if (prefixkey_len == 0) {
+        return rinfo;
+    }
+ 
+    /* Copy condition as new. Rewrite it later. */
+    RestrictInfo* new_rinfo = (RestrictInfo*)copyObject((Node*)rinfo);
+    ScalarArrayOpExpr* saop = (ScalarArrayOpExpr*)new_rinfo->clause;
+    Oid op_oid = saop->opno;
+    Node* rexpr = (Node*)lsecond(saop->args); /* 2nd argument of ScalarArrayOpExpr should not null */
+ 
+    /* Skip labals node. */
+    rexpr = strip_array_coercion(rexpr);
+    if (rexpr && IsA(rexpr, Const)) {
+        prefix_array_const_items((Const*)rexpr, prefixkey_len);
+    } else if (rexpr && IsA(rexpr, ArrayExpr) && !((ArrayExpr*)rexpr)->multidims) {
+        prefix_array_expr_items((ArrayExpr*)rexpr, prefixkey_len);
+    } else {
+        /* Should not happen. */
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            errmsg("unsupported indexqual type when expand indexqual conditions: %d", (int)nodeTag(saop)),
+            errdetail("Cannot rewrite expression %d for prefix key index.", rexpr ? (int)nodeTag(rexpr) : 0)));
+    }
+ 
+    /*
+     * Operators "> and "<" may cause required keys to be skipped.
+     * Replace them with ">=" or "<=".
+     */
+    int strategy = get_op_opfamily_strategy(op_oid, opfamily);
+    if (strategy == BTGreaterStrategyNumber) {
+        saop->opno = replace_operator_by_strategy(op_oid, opfamily, BTGreaterStrategyNumber);
+    } else if (strategy == BTLessStrategyNumber) {
+        saop->opno = replace_operator_by_strategy(op_oid, opfamily, BTLessStrategyNumber);
+    }
+ 
+    if (saop->opno == InvalidOid) {
+        ereport(ERROR, (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+            errmsg("no >= or <= operator for opfamily %u when generate indexqual for prefix key", opfamily)));
+    }
+    saop->opfuncid = get_opcode(saop->opno);
+    return new_rinfo;
 }

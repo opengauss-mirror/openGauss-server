@@ -1336,6 +1336,20 @@ RegProcedure get_oprrest(Oid opno)
     }
 }
 
+void get_operator_types(Oid opno, Oid* leftType, Oid* rightType)
+{
+    HeapTuple tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(opno));
+    if (HeapTupleIsValid(tuple)) {
+        Form_pg_operator opForm = (Form_pg_operator)GETSTRUCT(tuple);
+        *leftType = opForm->oprleft;
+        *rightType = opForm->oprright;
+        ReleaseSysCache(tuple);
+    } else {
+        *leftType = InvalidOid;
+        *rightType = InvalidOid;
+    }
+}
+
 /*
  * get_oprjoin
  *

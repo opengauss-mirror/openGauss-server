@@ -237,3 +237,34 @@ SELECT distinct(j),k
 drop table if exists gpi_J1_TBL;
 drop table if exists gpi_J2_TBL;
 set client_min_messages=notice;
+
+-- test gpi index_scan_only with none targetlist
+drop table if exists indexscan_pseudo_tlist cascade;
+CREATE TABLE indexscan_pseudo_tlist (
+  id integer,
+  k integer,
+  t integer
+)
+partition by range (id)
+(
+  partition indexscan_pseudo_tlist_p0 values less than (10000),
+  partition indexscan_pseudo_tlist_p1 values less than (20000),
+  partition indexscan_pseudo_tlist_p2 values less than (30000),
+  partition indexscan_pseudo_tlist_p3 values less than (maxvalue)
+);
+create index on indexscan_pseudo_tlist(id);
+insert into indexscan_pseudo_tlist values(1);
+
+reset enable_seqscan;
+select count(*) from (select * from indexscan_pseudo_tlist union all select * from indexscan_pseudo_tlist) where now() is not null;
+
+set enable_seqscan=off;
+explain(costs off) select count(*) from (select * from indexscan_pseudo_tlist union all select * from indexscan_pseudo_tlist) where now() is not null;
+select count(*) from (select * from indexscan_pseudo_tlist union all select * from indexscan_pseudo_tlist) where now() is not null;
+select count(*) from (select * from indexscan_pseudo_tlist union all select * from indexscan_pseudo_tlist) where now() is not null and id is not null;
+
+prepare test_index_pseudo as select count(*) from (select * from indexscan_pseudo_tlist union all select * from indexscan_pseudo_tlist) where id in (1) and id=$1;
+execute test_index_pseudo(1);
+
+reset enable_seqscan;
+drop table if exists indexscan_pseudo_tlist cascade;

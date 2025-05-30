@@ -5393,8 +5393,8 @@ void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks,
 
     // determine the lock mode
     if (OidIsValid(indexPartId)) {
-        indexLockMode = AccessShareLock;
-        heapLockMode = AccessShareLock;
+        indexLockMode = ShareUpdateExclusiveLock;
+        heapLockMode = ShareUpdateExclusiveLock;
     } else if (IsGlobalTempTableParallelTrunc() && isTruncGTT) {
         indexLockMode = RowExclusiveLock;
         heapLockMode = RowExclusiveLock;
