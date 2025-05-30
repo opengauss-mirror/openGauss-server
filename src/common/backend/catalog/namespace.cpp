@@ -307,7 +307,15 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
                 errDetail = RelnameGetRelidExtended(relation->relname, &relId, refSynOid, detailInfo);
                 if (OidIsValid(relId)) {
                     Oid namespaceId = get_rel_namespace(relId);
-                    LookupExplicitNamespace(get_namespace_name(namespaceId));
+                    char* nspname = get_namespace_name(namespaceId);
+                    if (nspname) {
+                        LookupExplicitNamespace(nspname);
+
+                        pfree(nspname);
+                    } else {
+                        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_SCHEMA),
+                            errmsg("schema with OID %u does not exist", namespaceId)));
+                    }
                 }
             } else {
                 relId = RelnameGetRelid(relation->relname, detailInfo);

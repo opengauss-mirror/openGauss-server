@@ -41,3 +41,54 @@ insert into tb3 values(6);
  7
 (7 rows)
 
+reset enable_union_all_subquery_orderby;
+-- test union all with none targetlist
+drop table if exists union_pseudo_tlist cascade;
+NOTICE:  table "union_pseudo_tlist" does not exist, skipping
+create table union_pseudo_tlist(id int);
+insert into union_pseudo_tlist values(1);
+create index on union_pseudo_tlist(id);
+set enable_seqscan=off;
+select count(*) from union_pseudo_tlist where now() is not null and id is not null;
+ count 
+-------
+     1
+(1 row)
+
+explain(costs off) select count(*) from (select * from union_pseudo_tlist union all select * from union_pseudo_tlist) where now() is not null;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Result
+         One-Time Filter: (now() IS NOT NULL)
+         ->  Append
+               ->  Result
+                     One-Time Filter: (now() IS NOT NULL)
+                     ->  Index Only Scan using union_pseudo_tlist_id_idx on union_pseudo_tlist
+               ->  Result
+                     One-Time Filter: (now() IS NOT NULL)
+                     ->  Index Only Scan using union_pseudo_tlist_id_idx on union_pseudo_tlist
+(10 rows)
+
+select count(*) from (select * from union_pseudo_tlist union all select * from union_pseudo_tlist) where now() is not null;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from (select * from union_pseudo_tlist union all select * from union_pseudo_tlist) where now() is not null and id is not null;
+ count 
+-------
+     2
+(1 row)
+
+-- use pbe
+prepare test_index_pseudo as select count(*) from (select * from union_pseudo_tlist union all select * from union_pseudo_tlist) where id in (1) and id=$1;
+execute test_index_pseudo(1);
+ count 
+-------
+     2
+(1 row)
+
+drop table if exists union_pseudo_tlist cascade;
+reset enable_seqscan;

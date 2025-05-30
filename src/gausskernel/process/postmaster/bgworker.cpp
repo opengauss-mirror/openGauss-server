@@ -364,7 +364,6 @@ bool RegisterBackgroundWorker(BgWorkerContext *bwc)
     BGW_HDR* bgworker_base = (BGW_HDR *)g_instance.bgw_base;
     BackgroundWorker *bgw = NULL;
     BackgroundWorkerArgs *bwa = NULL;
-    Backend* bn = nullptr;
 
     /* Construct bgworker thread args */
     bwa = (BackgroundWorkerArgs*)MemoryContextAllocZero(
@@ -388,48 +387,14 @@ bool RegisterBackgroundWorker(BgWorkerContext *bwc)
     bwa->bgworker = bgw;
     bwa->bgworkerId = bgw->bgw_id;
 
-    int slot = AssignPostmasterChildSlot();
-    if (slot == -1) {
-        pfree_ext(bwa);
-        BgworkerPutBackToFreeList(bgw);
-        return false;
-    }
-
-    bn  = AssignFreeBackEnd(slot);
-    int thisChildSlot = t_thrd.proc_cxt.MyPMChildSlot;
-    if (bn) {
-        GenerateCancelKey(false);
-        bn->cancel_key = t_thrd.proc_cxt.MyCancelKey;
-        bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
-        bn->role = BGWORKER;
-    } else {
-        ReleasePostmasterChildSlot(slot);
-        pfree_ext(bwa);
-        BgworkerPutBackToFreeList(bgw);
-        ereport(LOG, (errcode(ERRCODE_LOG), errmsg("assign backend failed in RegisterBackgroundWorker")));
-        return false;
-    }
-
     /* Fork a new worker thread */
     bgw->bgw_notify_pid = initialize_util_thread(BGWORKER, bwa);
-    t_thrd.proc_cxt.MyPMChildSlot = thisChildSlot;
-
     /* failed to fork a new thread */
     if (bgw->bgw_notify_pid == 0) {
         pfree_ext(bwa);
         BgworkerPutBackToFreeList(bgw);
-        ReleasePostmasterChildSlot(slot);
-
-        bn->pid = 0;
-        bn->role = (knl_thread_role)0;
-        bn = nullptr;
         return false;
     }
-
-    bn->pid = bgw->bgw_notify_pid;
-    bn->is_autovacuum = false;
-    DLInitElem(&bn->elem, bn);
-    DLAddHead(g_instance.backend_list, &bn->elem);
 
     if (g_threadPoolControler) {
         // Try to bind thread to available CPUs in threadpool
