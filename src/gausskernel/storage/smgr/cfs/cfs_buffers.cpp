@@ -436,11 +436,16 @@ pca_page_ctrl_t *pca_buf_read_page(const ExtentLocation& location, LWLockMode lo
 
 void pca_buf_free_page(pca_page_ctrl_t *ctrl, const ExtentLocation& location, bool need_write)
 {
+    errno_t rc;
     if (need_write) {
         int nbytes = BLCKSZ;
         auto pca_offs = location.GetPcaPhysicalOffset();
         // sync to disk
         if (location.is_segment_page && location.is_compress_allowed) {
+            rc = memcpy_s((char *)ctrl->pca_page + BLCKSZ - CFS_SEGMENT_PCA_MAGIC_SZ,
+                          CFS_SEGMENT_PCA_MAGIC_SZ, CFS_SEGMENT_PCA_MAGIC,
+                          CFS_SEGMENT_PCA_MAGIC_SZ);
+            securec_check(rc, "\0", "\0");
             nbytes = DirectFilePWrite(location.fd, (char *)ctrl->pca_page, BLCKSZ, pca_offs,
                                       (uint32)WAIT_EVENT_DATA_FILE_WRITE);
         } else {

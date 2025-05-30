@@ -17,6 +17,7 @@
 #include "PageCompression.h"
 #include "pg_lzcompress.h"
 #include "file.h"
+#include "storage/cfs/cfs_md.h"
 
 #include <unistd.h>
 #include <sys/stat.h>
@@ -300,6 +301,564 @@ int CompressionFilePCDPageReader::ReadPageFromRawExtent(CfsExtentHeader* rawPca,
     return size;
 }
 
+/**
+ * @class SegCompressFileDataPageReader
+ * @brief Handles reading of data pages from segment-compressed files in openGauss.
+ *
+ * This class provides functionality to read, validate, and process data pages from
+ * segment-compressed files. It manages the reading of physical and logical pages,
+ * checks for segment-compressed file types, and reorganizes compressed page chunks
+ * for backup operations. The class maintains internal state about the current extent,
+ * file information, and buffers for raw and reorganized extents.
+ */
+class SegCompressFileDataPageReader {
+public:
+    /**
+     * @brief Constructor for SegCompressFileDataPageReader.
+     *
+     * @param[in] file         Pointer to the file information to be backed up.
+     * @param[in] in           File handler for the input file.
+     * @param[in] fromFullpath Full path of the source file being read.
+     * @param[in] rawExtent    Buffer for the raw extent of the currently read extent.
+     */
+    explicit SegCompressFileDataPageReader(pgFile *file, FILE *in, const char *fromFullpath, char *rawExtent)
+        : m_file(file),
+          m_in(in),
+          m_fromFullpath(fromFullpath),
+          m_rawExtent(rawExtent) {}
+
+    /**
+     * @brief Reads information about the specified page.
+     *
+     * @param[in]      blockNo    Block number to read.
+     * @param[in,out]  page       Pointer to the page buffer, used to store the read page data.
+     * @param[in,out]  pageSt     Pointer to the page state, used to record information such as the page's LSN
+     *                            and checksum.
+     * @param[in]      preReadBuf Buffer for read-ahead memory.
+     * @return int                Status of the read operation, e.g., PageIsOk indicates success, PageIsCorrupted
+     *                            indicates page corruption.
+     */
+    int ReadSegFilePage(BlockNumber blockNo, Page page, PageState *pageSt, const PreReadBuf *preReadBuf);
+
+    /**
+     * @brief Checks if the file name corresponds to a segment-compressed file.
+     *
+     * @return bool       True if the file is segment-compressed, false otherwise.
+     */
+    bool MaybeSegmentCompressedFile();
+
+    /**
+     * @brief Checks if the extent containing the specified block number is a segment-compressed extent.
+     *
+     * Determines whether the extent is a segment-compressed extent by reading the magic number information
+     * at a specific position in the file.
+     *
+     * @param[in] blockNo Block number to check.
+     * @return bool       True if the extent is segment-compressed, false otherwise.
+     */
+    bool IsSegmentCompressedExtent(BlockNumber blockNo);
+
+private:
+    /* There may be a physical segment file name prefix for compressed extents */
+    static constexpr char cfsPhySegFileNamePrefix[3] = {'3', '4', '5'};
+
+    static constexpr int cfsPhySegFileNamePrefixIdx[3] = {0, 1, 2};
+
+    /* Equal to DF_MAP_HEAD_PAGE + FILE_HEAD */
+    static constexpr int segComFileMapGroupStartBlockNo = 3;
+
+    /* Equal to (DF_MAP_BIT_CNT * DF_MAP_GROUP_SIZE + EXTENTS_PER_IPBLOCK - 1) / EXTENTS_PER_IPBLOCK */
+    static constexpr int ipBlockGroupSize = 4090U;
+
+    static constexpr uint8 DF_MAP_GROUP_SIZE = 64;
+
+    /* Equal to (1LU * DF_MAP_BIT_CNT * DF_MAP_GROUP_SIZE) */
+    static constexpr uint64 DF_MAP_GROUP_EXTENTS = 4175872;
+
+    enum class SegExtentSize {
+        INVALID_SEG_EXTENT_SIZE = 0,
+        SEG_EXTENT_128 = 128,
+        SEG_EXTENT_1024 = 1024,
+        SEG_EXTENT_8192 = 8192
+    };
+
+    /**
+     * @brief Reads a physical page from the raw extent.
+     *
+     * @param[in] relativeBlockNo   Block number relative to the extent.
+     * @param[in] page              Pointer to the page buffer, used to store the read physical page data.
+     * @return int                  Status of the read operation, 0 indicates success, -1 indicates failure.
+     */
+    int ReadPhyPageFromRawExtent(BlockNumber relativeBlockNo, Page page);
+
+    /**
+     * @brief Gets the pointer to the raw PCA (Page Compression Area) header.
+     *
+     * @return CfsExtentHeader* Pointer to the raw PCA header.
+     */
+    CfsExtentHeader* GetRawPca() const
+    {
+        // Ensure that the raw extent buffer is not a null pointer
+        Assert(m_rawExtent != nullptr);
+        return reinterpret_cast<CfsExtentHeader *>(m_rawExtent + CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
+    }
+
+    /**
+     * @brief Validates whether the block addresses starting from the specified block number are valid.
+     *
+     * @param[in] blockNoValidate The starting block number to validate.
+     * @return bool               True if the block addresses are valid, false otherwise.
+     */
+    bool ValidateRawPCABlocksAddrFrom(uint16 blockNoValidate);
+
+    /**
+     * @brief Reads the data of the current extent from the file.
+     *
+     * @return bool     True if the extent data is successfully read and validated as valid, false otherwise.
+     */
+    bool ReadCurrentExtent();
+
+    /**
+     * @brief Reorganizes the raw compressed page chunks into compact compressed pages.
+     *
+     * @param[in]     reorganizedRawExtent  Pointer to the start of the buffer for storing compact compressed pages.
+     * @param[in]     reorgnrawPca          Pointer to the reorganized PCA header.
+     * @param[in]     nthBlock              Relative block number in the compressed page extent.
+     * @param[in/out] chunkPos              Currently allocated chunk position in the new stream extent content.
+     * @return int                          Size of the compressed page in the stream compressed extent. Returns -1
+     *                                      in case of any failure.
+     */
+    int AddCompactCompressedPage(char *reorganizedRawExtent,
+                                 CfsExtentHeader *reorgnrawPca, uint16 nthBlock,
+                                 uint32 &chunkPos);
+
+    /**
+     * @brief Checks if a character is a valid segment prefix.
+     *
+     * @param[in] ch Character to check.
+     * @return bool  True if the character is a valid segment prefix, false otherwise.
+     */
+    bool IsValidSegmentPrefix(char ch);
+
+    /** @var m_file
+     *  @brief Pointer to the file information to be backed up.
+     */
+    pgFile *m_file{nullptr};
+
+    /** @var m_in
+     *  @brief File handler for the input file.
+     */
+    FILE *m_in{nullptr};
+
+    /** @var m_fromFullpath
+     *  @brief Full path of the source file being read.
+     */
+    const char *m_fromFullpath{nullptr};
+
+    /** @var m_rawExtent
+     *  @brief Buffer for the raw extent of the currently read extent.
+     */
+    char *m_rawExtent{nullptr};
+
+    /** @var m_reorganizedRawExtent
+     *  @brief Buffer for the reorganized extent data.
+     */
+    char m_reorganizedRawExtent[BLCKSZ * CFS_EXTENT_SIZE]{0};
+
+    /**
+     * @var m_lastCheckOffset
+     * @brief Last checked offset of the compressed extent in the file.
+     *
+     * This variable holds the last checked offset of the extent within the file. A positive value
+     * indicates that the extent at this offset is a segment - compressed extent, and the class can
+     * reuse the read extent data to avoid redundant reads. Conversely, a negative value signifies
+     * that the extent at this offset is not a segment - compressed extent. It is initialized with
+     * InvalidBlockNumber, representing an invalid initial state.
+     */
+    int64 m_lastCheckOffset{InvalidBlockNumber};
+
+    /** @var m_tryMaxCount
+     *  @brief Maximum number of attempts to read a compressed extent.
+     */
+    int m_tryMaxCount{PAGE_READ_ATTEMPTS};
+
+    /** @var m_currentPhyBlockNo
+     *  @brief Currently processed physical block number.
+     */
+    BlockNumber m_currentPhyBlockNo{InvalidBlockNumber};
+
+    /** @var m_relativeBlockNoInComExt
+     * @brief Relative block number within the compressed extent.
+     */
+    BlockNumber m_relativeBlockNoInComExt{InvalidBlockNumber};
+
+    /** @var m_segmentExtentSize
+     * @brief Size of the segment extent.
+     */
+    uint16 m_segmentExtentSize{static_cast<uint16>(SegExtentSize::INVALID_SEG_EXTENT_SIZE)};
+
+    /** @var m_needReloadRawExt
+     * @brief Flag indicating whether the raw extent needs to be reloaded.
+     */
+    bool m_needReloadRawExt{true};
+};
+
+constexpr char SegCompressFileDataPageReader::cfsPhySegFileNamePrefix[3];
+
+int SegCompressFileDataPageReader::ReadSegFilePage(
+    BlockNumber blockNo, Page page, PageState *pageSt,
+    const PreReadBuf *preReadBuf)
+{
+    CfsExtentHeader* rawPca = NULL;
+    CfsExtentHeader* newPca = NULL;
+    pageSt->lsn = InvalidXLogRecPtr;
+    m_currentPhyBlockNo = blockNo;
+
+    if (m_needReloadRawExt) {
+        Assert(m_relativeBlockNoInComExt == 0);
+
+        m_tryMaxCount = PAGE_READ_ATTEMPTS;
+
+        // Read the current extent
+        if (!ReadCurrentExtent()) {
+            elog(ERROR,
+                 "Failed to read valid compress extent offset %lu of file %s",
+                 m_lastCheckOffset, m_fromFullpath);
+            return PageIsCorrupted;
+        }
+
+        rawPca = GetRawPca();
+
+        if (memset_s(m_reorganizedRawExtent, BLCKSZ * CFS_EXTENT_SIZE,
+                     0, BLCKSZ * CFS_EXTENT_SIZE) != EOK) {
+            elog(ERROR, "Failed to memset reorganizedRawExtent, block %lu of file %s", blockNo, m_fromFullpath);
+            return PageIsCorrupted;
+        }
+
+        if (memcpy_s(m_reorganizedRawExtent + BLCKSZ * CFS_EXTENT_SIZE -
+                         CFS_SEGMENT_PCA_MAGIC_SZ,
+                     CFS_SEGMENT_PCA_MAGIC_SZ, CFS_SEGMENT_PCA_MAGIC,
+                     CFS_SEGMENT_PCA_MAGIC_SZ) != EOK) {
+            elog(ERROR,
+                 "Failed to memcpy magic to reorganizedRawExtent, block %lu of "
+                 "file %s",
+                 blockNo, m_fromFullpath);
+            return PageIsCorrupted;
+        }
+
+        newPca = reinterpret_cast<CfsExtentHeader *>(m_reorganizedRawExtent + CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
+        char *ptr = m_reorganizedRawExtent;
+        newPca->algorithm = rawPca->algorithm;
+        newPca->chunk_size = rawPca->chunk_size;
+        uint32 newChunkPos = 1; // Start from 1 to reserve the first chunk for PCA header
+        for (uint16 nthBlock = 0; nthBlock < rawPca->nblocks; nthBlock++) {
+            auto size = AddCompactCompressedPage(ptr, newPca, nthBlock, newChunkPos);
+            if (size < 0) {
+                elog(ERROR, "Failed to reorganize this extentNo of file %s. ", m_fromFullpath);
+                return PageIsCorrupted;
+            }
+            /* read the next block */
+            ptr += size;
+        }
+
+        newPca->nblocks = rawPca->nblocks;
+        newPca->allocated_chunks = newChunkPos - 1;
+
+        m_needReloadRawExt = false;
+    }
+
+    // Read the physical page from the raw extent
+    if (ReadPhyPageFromRawExtent(m_relativeBlockNoInComExt, page)) {
+        elog(ERROR, "Failed to read this block %lu of file %s ", blockNo, m_fromFullpath);
+        return PageIsCorrupted;
+    }
+
+    // Extract LSN and checksum from the page
+    pageSt->lsn = PageXLogRecPtrGet((PageHeader(page))->pd_lsn);
+    BlockNumber absoluteBlockNo = m_file->segno * RELSEG_SIZE + blockNo;
+    pageSt->checksum = pg_checksum_page(page, absoluteBlockNo);
+
+    return PageIsOk;
+}
+
+int SegCompressFileDataPageReader::ReadPhyPageFromRawExtent(BlockNumber relativeBlockNo, Page page)
+{
+    // Copy the physical page data from the raw extent
+    if (memcpy_s(page, BLCKSZ, m_reorganizedRawExtent + relativeBlockNo * BLCKSZ, BLCKSZ) != EOK) {
+        return -1;
+    }
+    return 0;
+}
+
+bool SegCompressFileDataPageReader::IsValidSegmentPrefix(char ch)
+{
+    for (size_t i = 0; i < sizeof(cfsPhySegFileNamePrefix); i++) {
+        if (ch == cfsPhySegFileNamePrefix[i]) {
+            switch (i) {
+                case cfsPhySegFileNamePrefixIdx[0]:
+                    m_segmentExtentSize = static_cast<uint16>(SegExtentSize::SEG_EXTENT_128);
+                    break;
+                case cfsPhySegFileNamePrefixIdx[1]:
+                    m_segmentExtentSize = static_cast<uint16>(SegExtentSize::SEG_EXTENT_1024);
+                    break;
+                case cfsPhySegFileNamePrefixIdx[2]:
+                    m_segmentExtentSize = static_cast<uint16>(SegExtentSize::SEG_EXTENT_8192);
+                    break;
+                default:
+                    Assert(false);
+                    break;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SegCompressFileDataPageReader::MaybeSegmentCompressedFile()
+{
+    if (m_file == nullptr || m_file->name == nullptr || strlen(m_file->name) == 0) {
+        return false;
+    }
+    auto filename = m_file->name;
+    size_t filenameSize = strlen(filename);
+    // Check if the filename matches specific patterns for segment-compressed files
+    if (filenameSize == 1 && IsValidSegmentPrefix(filename[0])) {
+        return true;
+    }
+    const char separator = '.';
+    if (filenameSize >= 3 && IsValidSegmentPrefix(filename[0]) && filename[1] == separator) {
+        for (size_t i = 2; i < filenameSize; i++) {
+            if (!isdigit(filename[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    return false;
+}
+
+bool SegCompressFileDataPageReader::IsSegmentCompressedExtent(BlockNumber blockNo)
+{
+    const auto absoluteBlockNo = blockNo + m_file->segno * RELSEG_SIZE;
+
+    if (absoluteBlockNo < segComFileMapGroupStartBlockNo) {
+        return false;
+    }
+
+    Assert(m_segmentExtentSize != static_cast<uint16>(SegExtentSize::INVALID_SEG_EXTENT_SIZE));
+    const auto mapGroupHeaderSize = DF_MAP_GROUP_SIZE + ipBlockGroupSize;
+    const auto mapGroupSize =  mapGroupHeaderSize + DF_MAP_GROUP_EXTENTS * m_segmentExtentSize;
+    const auto mapGroupNo = (absoluteBlockNo - segComFileMapGroupStartBlockNo) / mapGroupSize;
+
+    if (absoluteBlockNo - segComFileMapGroupStartBlockNo - mapGroupNo * mapGroupSize < mapGroupHeaderSize) {
+        /* map page or ip page */
+        return false;
+    }
+
+    m_relativeBlockNoInComExt =
+        (absoluteBlockNo - mapGroupHeaderSize -
+         segComFileMapGroupStartBlockNo - mapGroupNo * mapGroupSize) %
+        CFS_EXTENT_SIZE;
+
+    const auto extentStartNo = absoluteBlockNo - m_relativeBlockNoInComExt;
+    /* If the extent spans physical files, skip */
+    if (extentStartNo / RELSEG_SIZE != (extentStartNo + CFS_EXTENT_SIZE) / RELSEG_SIZE) {
+        return false;
+    }
+
+    const auto comExtStartPhyOffset = (blockNo - m_relativeBlockNoInComExt) * BLCKSZ;
+    Assert(comExtStartPhyOffset >= 0);
+
+    if (comExtStartPhyOffset == m_lastCheckOffset) {
+        m_needReloadRawExt = false;
+        return true;
+    } else if (comExtStartPhyOffset == -(m_lastCheckOffset)) {
+        return false;
+    }
+
+    /* Seek to the magic buffer position in the file */
+    const auto magicOffset = comExtStartPhyOffset + CFS_EXTENT_SIZE * BLCKSZ - CFS_SEGMENT_PCA_MAGIC_SZ;
+    if (fseeko(m_in, magicOffset, SEEK_SET) != 0) {
+        elog(ERROR, "Failed to seek file: %s on position: %lu",
+            m_fromFullpath, magicOffset);
+        return false;
+    }
+
+    char magicBuffer[CFS_SEGMENT_PCA_MAGIC_SZ] = {0};
+    // Read the magic buffer and check its content
+    if (fread(magicBuffer, sizeof(char), CFS_SEGMENT_PCA_MAGIC_SZ, m_in) != CFS_SEGMENT_PCA_MAGIC_SZ && ferror(m_in)) {
+        elog(ERROR, "Fail to read file: %s on position: %lu",
+            m_fromFullpath, magicOffset);
+        return false;
+    }
+
+    if (memcmp(magicBuffer, CFS_SEGMENT_PCA_MAGIC, CFS_SEGMENT_PCA_MAGIC_SZ) == 0) {
+        m_lastCheckOffset = comExtStartPhyOffset;
+        m_needReloadRawExt = true;
+        return true;
+    }
+
+    m_lastCheckOffset = -(comExtStartPhyOffset);
+    return false;
+}
+
+bool SegCompressFileDataPageReader::ReadCurrentExtent()
+{
+    long offset = 0;
+    for (; m_tryMaxCount > 0; m_tryMaxCount--) {
+        // Clear the raw extent buffer
+        auto rc = memset_s(m_rawExtent, CFS_EXTENT_SIZE * BLCKSZ, 0xFF, CFS_EXTENT_SIZE * BLCKSZ);
+        securec_check(rc, "\0", "\0");
+        if (rc != EOK) {
+            break;
+        }
+
+        // Retry reading the extent after a delay
+        if (m_tryMaxCount < PAGE_READ_ATTEMPTS) {
+            pg_usleep(RETRY_SLEEP_TIME);
+            elog(LOG, "Retry to read compress extent offset: %lu in file %s, retry times: %lu",
+                m_lastCheckOffset, m_fromFullpath, PAGE_READ_ATTEMPTS - m_tryMaxCount + 1);
+        }
+
+        // Seek to the extent position in the file
+        Assert(m_lastCheckOffset >= 0);
+        if (fseeko(m_in, m_lastCheckOffset, SEEK_SET) != 0) {
+            elog(ERROR, "Failed to seek file: %s on position: %lu",
+                m_fromFullpath, m_lastCheckOffset);
+            return false;
+        }
+
+        // Read the extent data into the raw extent buffer
+        if (fread(m_rawExtent, sizeof(char), CFS_EXTENT_SIZE * BLCKSZ, m_in) != (CFS_EXTENT_SIZE * BLCKSZ) &&
+            ferror(m_in)) {
+            elog(ERROR, "Fail to read file: %s on position: %lu",
+                m_fromFullpath, offset);
+            return false;
+        }
+
+        // Check for interruptions
+        if (interrupted || thread_interrupted) {
+            elog(ERROR, "Interrupted during extent reading");
+            return false;
+        }
+
+        // Validate the block addresses in the extent
+        if (!ValidateRawPCABlocksAddrFrom(0)) {
+            continue;
+        }
+        return true;
+    }
+
+    elog(ERROR, "Failed to read the valid %luth extent in file %s "
+                "because of the corrupted PCA page, total read times: %lu",
+        offset, m_fromFullpath, PAGE_READ_ATTEMPTS - m_tryMaxCount);
+
+    return false;
+}
+
+bool SegCompressFileDataPageReader::ValidateRawPCABlocksAddrFrom(uint16 blockNoValidate)
+{
+    // Get the extent header and validate its properties
+    CfsExtentHeader *current_header = reinterpret_cast<CfsExtentHeader *>(
+                                      m_rawExtent + CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ);
+    BlockNumber nBlocks = current_header->nblocks;
+
+    if (nBlocks > CFS_LOGIC_BLOCKS_PER_EXTENT || blockNoValidate > nBlocks ||
+        current_header->chunk_size > CHUNK_SIZE_LIST[0]) {
+        elog(LOG,
+            "Found invalid PCA format during check block chunks address "
+            "from block %u in file %s, current extent offset: %lu, total blocks in extent: "
+            "%u, PCA chunk size: %u",
+            blockNoValidate, m_fromFullpath,
+            m_lastCheckOffset, nBlocks, current_header->chunk_size);
+        return false;
+    }
+
+    // Validate each block address in the extent
+    for (BlockNumber block = blockNoValidate; block < nBlocks; ++block) {
+        CfsExtentAddress *currentBlkAddress = GetExtentAddress(current_header, block);
+        if (currentBlkAddress->checksum != AddrChecksum32(currentBlkAddress, currentBlkAddress->allocated_chunks) ||
+            currentBlkAddress->allocated_chunks > (BLCKSZ / current_header->chunk_size)) {
+                elog(LOG,
+                    "Failed to validate block %u chunk address in file %s, "
+                    "current extent offset: %lu, allocated chunks: %u", block,
+                    m_fromFullpath, m_lastCheckOffset, current_header->allocated_chunks);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+int SegCompressFileDataPageReader::AddCompactCompressedPage(
+    char *ptr, CfsExtentHeader *newPca, uint16 nthBlock, uint32 &chunkPos)
+{
+    do {
+        auto pca = GetRawPca();
+        auto copiedPtr = ptr;
+        CfsExtentAddress *block_addr = GetExtentAddress(pca, nthBlock);
+        for (uint8 i = 0; i < block_addr->nchunks; i++) {
+            auto start_index = i;
+            auto chunk_start_pos = OffsetOfPageCompressChunk(pca->chunk_size, block_addr->chunknos[i]);
+
+            /* find continus chunks. */
+            while (i < block_addr->nchunks - 1 &&
+                block_addr->chunknos[i + 1] == block_addr->chunknos[i] + 1) {
+                i++;
+            }
+
+            auto sizeToCopy = (i - start_index + 1) * pca->chunk_size;
+
+            if (memcpy_s(copiedPtr, sizeToCopy, m_rawExtent + chunk_start_pos, sizeToCopy) != EOK) {
+                return -1;
+            }
+
+            copiedPtr += sizeToCopy;
+        }
+
+        if (unlikely(block_addr->nchunks) == 0) {
+            return 0;
+        }
+
+        /* validate the compressed page. */
+        auto compressedPageSize = block_addr->nchunks * pca->chunk_size;
+        if (compressedPageSize == BLCKSZ) {
+            auto absoluteBlockNo = m_file->segno * RELSEG_SIZE + m_currentPhyBlockNo;
+            auto actualChecksum = pg_checksum_page(ptr, absoluteBlockNo);
+            if (actualChecksum != (PageHeader(ptr))->pd_checksum) {
+                elog(LOG,
+                    "Found corrupted fake compressed page: %u for backup "
+                    "in extent offset %lu of file %s, actual checksum: %u, expected checksum: %u",
+                    absoluteBlockNo, m_lastCheckOffset, m_fromFullpath,
+                    actualChecksum, (PageHeader(ptr))->pd_checksum);
+                continue;
+            }
+        } else {
+            if (compressedPageSize != 0 && !CompressedChecksum(ptr)) {
+                elog(LOG,
+                    "Found corrupted compressed page: %u for backup in "
+                    "extent offset: %lu of file %s",
+                    m_currentPhyBlockNo, m_lastCheckOffset, m_fromFullpath);
+                continue;
+            }
+        }
+
+        /* reorganize the chunk position according to the new chunk layout */
+        CfsExtentAddress *newBlockAddr = GetExtentAddress(newPca, nthBlock);
+        for (uint8 i = 0; i < block_addr->nchunks; i++) {
+            newBlockAddr->chunknos[i] = chunkPos++;
+        }
+
+        newBlockAddr->nchunks = block_addr->nchunks;
+        newBlockAddr->allocated_chunks = block_addr->nchunks;
+        newBlockAddr->checksum = AddrChecksum32(newBlockAddr, newBlockAddr->nchunks);
+
+        return copiedPtr - ptr;
+    } while (--m_tryMaxCount > 0 && ReadCurrentExtent());
+
+    return -1;
+}
 
 uint32 CHECK_STEP = 2;
 static bool get_page_header(FILE *in, const char *fullpath, BackupPageHeader* bph,
@@ -1337,6 +1896,25 @@ restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
     return total_write_len;
 }
 
+static void SegCompressFilePunchHole(FILE *out, char *page, off_t pcaOffset)
+{
+    CfsExtentHeader *pca = (CfsExtentHeader *)page;
+    uint32 nChunks = pca->allocated_chunks;
+    uint32 punchOffset = nChunks * pca->chunk_size;
+    uint32 start = pcaOffset - CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ + punchOffset;
+    /* alignment of 4K, the unit of punch hole */
+    start = TYPEALIGN(MIN_FALLOCATE_SIZE, start);
+    int32 punchSize = TYPEALIGN_DOWN(MIN_FALLOCATE_SIZE, pcaOffset) - start;
+    if (punchSize <= 0) {
+        return;
+    }
+    Assert(punchSize % MIN_FALLOCATE_SIZE == 0);
+    if (fallocate(fileno(out), FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+        start, punchSize) != 0) {
+        elog(VERBOSE, "punch hole failed: %s", strerror(errno));
+    }
+}
+
 /* Restore block from "in" file to "out" file.
  * If "nblocks" is greater than zero, then skip restoring blocks,
  * whose position if greater than "nblocks".
@@ -1662,6 +2240,13 @@ restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint32 backup_vers
                     pg_free(preWriteBuf);
                     elog(ERROR, "Cannot write block %u of \"%s\": %s",
                         blknum, to_fullpath, strerror(errno));
+                }
+
+                /* segment file and compressed extent, need to punch hole */
+                if (memcmp(page.data + BLCKSZ - CFS_SEGMENT_PCA_MAGIC_SZ,
+                           CFS_SEGMENT_PCA_MAGIC,
+                           CFS_SEGMENT_PCA_MAGIC_SZ) == 0) {
+                    SegCompressFilePunchHole(out, page.data, cur_pos_out);
                 }
             }
         }
@@ -2089,6 +2674,11 @@ validate_one_page(Page page, BlockNumber absolute_blkno,
     if (page == NULL)
         return PAGE_IS_NOT_FOUND;
 
+    /* pca in segmentfile do not need to be verified */
+    if (memcmp(page + BLCKSZ - CFS_SEGMENT_PCA_MAGIC_SZ, CFS_SEGMENT_PCA_MAGIC, CFS_SEGMENT_PCA_MAGIC_SZ) == 0) {
+        return PAGE_IS_SEGMENT_PCA;
+    }
+
     /* check that page header is ok */
     if (!parse_page(page, &(page_st)->lsn))
     {
@@ -2418,6 +3008,9 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
                     is_valid = false;
                 }
                 break;
+            case PAGE_IS_SEGMENT_PCA:
+                elog(VERBOSE, "File: %s blknum %u, segment file pca pages", file->rel_path, blknum);
+                break;
             default:
                 break;
         }
@@ -2670,9 +3263,8 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
     /* stdio buffers */
     char *in_buf = NULL;
     char *out_buf = NULL;
-    char *rawExtent = nullptr;
+    char *rawExtent = static_cast<char *>(pgut_malloc(CFS_EXTENT_SIZE * BLCKSZ));
     if (file->compressed_file) {
-        rawExtent = static_cast<char *>(pgut_malloc(CFS_EXTENT_SIZE * BLCKSZ));
         /* force compress page if file is compressed file */
         calg = (calg == NOT_DEFINED_COMPRESS || calg == NONE_COMPRESS) ? PGLZ_COMPRESS : calg;
     }
@@ -2717,13 +3309,18 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
 
     parray *harray = parray_new();
     CompressionFilePCDPageReader compressionFilePCDPageReader(file, in, from_fullpath, rawExtent);
+    SegCompressFileDataPageReader segCompressFileDataPageReader(file, in, from_fullpath, rawExtent);
+    bool maybeSegmentCompressed = segCompressFileDataPageReader.MaybeSegmentCompressedFile();
 
     while (blknum < (BlockNumber)file->n_blocks)
     {
         PageState page_st;
         int read_len = -1;
         int rc;
-        if (file->compressed_file) {
+        if (maybeSegmentCompressed
+            && segCompressFileDataPageReader.IsSegmentCompressedExtent(blknum)) {
+            rc = segCompressFileDataPageReader.ReadSegFilePage(blknum, curr_page, &page_st, &preReadBuf);
+        } else if (file->compressed_file) {
             rc = compressionFilePCDPageReader.ReadPage(blknum, curr_page, &page_st, &preReadBuf);
         } else {
             rc = prepare_page(conn_arg, file, prev_backup_start_lsn,

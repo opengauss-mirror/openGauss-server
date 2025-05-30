@@ -200,6 +200,7 @@ extern bool pre_check_backup(pgBackup *backup);
 #define PAGE_CHECKSUM_MISMATCH (-5)
 #define PAGE_LSN_FROM_FUTURE (-6)
 #define PAGE_MAYBE_COMPRESSED (-7)
+constexpr int PAGE_IS_SEGMENT_PCA = -8;
 
 /* in catalog.c */
 extern pgBackup *read_backup(const char *root_dir);
