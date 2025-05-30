@@ -19,6 +19,9 @@
  */
 static constexpr size_t ALLOCATE_CHUNK_USAGE_LEN = CFS_LOGIC_BLOCKS_PER_EXTENT * (BLCKSZ / 1024) >> 3;
 
+#define CFS_SEGMENT_PCA_MAGIC_SZ 8
+#define CFS_SEGMENT_PCA_MAGIC "seg_comp"
+
 struct CfsExtentAddress {
     uint32 checksum;
     volatile uint8 nchunks;          /* number of chunks for this block */
