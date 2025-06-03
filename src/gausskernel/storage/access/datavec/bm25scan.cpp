@@ -51,19 +51,18 @@ typedef struct BM25QueryTokensInfo {
 } BM25QueryTokensInfo;
 
 static void FindBucketsLocation(Page page, BM25TokenizedDocData &tokenizedQuery, BlockNumber *bucketsLocation,
-    uint32 &bucketFoundCount)
+    uint32 maxHashBucketCount, uint32 &bucketFoundCount)
 {
     OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
-    for (OffsetNumber offnoBucket = FirstOffsetNumber; offnoBucket <= maxoffno; offnoBucket++) {
-        BM25HashBucketPage bucket = (BM25HashBucketPage)PageGetItem(page, PageGetItemId(page, offnoBucket));
-        for (size_t tokenIdx = 0; tokenIdx < tokenizedQuery.tokenCount; tokenIdx++) {
-            if (bucketsLocation[tokenIdx] == InvalidBlockNumber &&
-                bucket->bucketId == (tokenizedQuery.tokenDatas[tokenIdx].hashValue % BM25_BUCKET_MAX_NUM)) {
-                bucketsLocation[tokenIdx] = bucket->bucketBlkno;
-                bucketFoundCount++;
-                if (bucketFoundCount >= tokenizedQuery.tokenCount)
-                    return;
-            }
+    for (size_t tokenIdx = 0; tokenIdx < tokenizedQuery.tokenCount; tokenIdx++) {
+        uint32 bucketIdx = tokenizedQuery.tokenDatas[tokenIdx].hashValue %
+            (maxHashBucketCount * BM25_BUCKET_PAGE_ITEM_SIZE);
+        BM25HashBucketPage bucketInfo =
+            (BM25HashBucketPage)PageGetItem(page, PageGetItemId(page, (bucketIdx / BM25_BUCKET_PAGE_ITEM_SIZE) + 1));
+        if (bucketsLocation[tokenIdx] == InvalidBlockNumber &&
+            bucketInfo->bucketBlkno[bucketIdx % BM25_BUCKET_PAGE_ITEM_SIZE] != InvalidBlockNumber) {
+            bucketsLocation[tokenIdx] = bucketInfo->bucketBlkno[bucketIdx % BM25_BUCKET_PAGE_ITEM_SIZE];
+            bucketFoundCount++;
         }
     }
     return;
@@ -75,7 +74,8 @@ static void FindTokenInfo(BM25MetaPageData &meta, Page page, BM25TokenizedDocDat
     OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
     for (OffsetNumber offnoTokenMeta = FirstOffsetNumber; offnoTokenMeta <= maxoffno; offnoTokenMeta++) {
         BM25TokenMetaPage tokenMeta = (BM25TokenMetaPage)PageGetItem(page, PageGetItemId(page, offnoTokenMeta));
-        if (strncmp(tokenMeta->token, tokenizedQuery.tokenDatas[tokenIdx].tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0) {
+        if ((tokenMeta->hashValue == tokenizedQuery.tokenDatas[tokenIdx].hashValue) &&
+            (strncmp(tokenMeta->token, tokenizedQuery.tokenDatas[tokenIdx].tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0)) {
             queryTokens[tokenIdx].qTokenMaxScore = tokenMeta->maxScore;
             queryTokens[tokenIdx].tokenPostingBlock = tokenMeta->postingBlkno;
             queryTokens[tokenIdx].qTokenIDFVal = tokenizedQuery.tokenDatas[tokenIdx].tokenFreq *
@@ -111,17 +111,15 @@ static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentenc
     BM25MetaPageData meta;
     BM25GetMetaPageInfo(index, &meta);
     BlockNumber hashBucketsBlkno = meta.entryPageList.hashBucketsPage;
-    BlockNumber nextHashBucketsBlkno = hashBucketsBlkno;
     Buffer cHashBucketsbuf;
     Page cHashBucketspage;
 
-    while (bucketFoundCount < tokenizedQuery.tokenCount && BlockNumberIsValid(nextHashBucketsBlkno)) {
-        OffsetNumber maxoffno;
-        cHashBucketsbuf = ReadBuffer(index, nextHashBucketsBlkno);
+    if (bucketFoundCount < tokenizedQuery.tokenCount && BlockNumberIsValid(hashBucketsBlkno)) {
+        cHashBucketsbuf = ReadBuffer(index, hashBucketsBlkno);
         LockBuffer(cHashBucketsbuf, BUFFER_LOCK_SHARE);
         cHashBucketspage = BufferGetPage(cHashBucketsbuf);
-        FindBucketsLocation(cHashBucketspage, tokenizedQuery, bucketsLocation, bucketFoundCount);
-        nextHashBucketsBlkno = BM25PageGetOpaque(cHashBucketspage)->nextblkno;
+        FindBucketsLocation(cHashBucketspage, tokenizedQuery, bucketsLocation, meta.entryPageList.maxHashBucketCount,
+            bucketFoundCount);
         UnlockReleaseBuffer(cHashBucketsbuf);
     }
 
@@ -134,7 +132,6 @@ static BM25QueryToken *ScanIndexForTokenInfo(Relation index, const char *sentenc
         Page cTokenMetaspage;
         BlockNumber nextTokenMetasBlkno = bucketsLocation[tokenIdx];
         while (tokenFoundCount < tokenizedQuery.tokenCount && BlockNumberIsValid(nextTokenMetasBlkno)) {
-            OffsetNumber maxoffno;
             cTokenMetasbuf = ReadBuffer(index, nextTokenMetasBlkno);
             LockBuffer(cTokenMetasbuf, BUFFER_LOCK_SHARE);
             cTokenMetaspage = BufferGetPage(cTokenMetasbuf);
@@ -543,29 +540,22 @@ static void DocIdsGetHeapCtids(Relation index, BM25EntryPages &entryPages, BM25S
     buf = ReadBuffer(index, entryPages.documentMetaPage);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     BM25DocMetaPage docMetaPage = BM25PageGetDocMeta(BufferGetPage(buf));
-    curBlkno = docMetaPage->startDocPage;
+    curBlkno = docMetaPage->docBlknoTable;
     UnlockReleaseBuffer(buf);
 
-    uint32 curDocCapacity = 0;
-    buf = ReadBuffer(index, curBlkno);
-    LockBuffer(buf, BUFFER_LOCK_SHARE);
-    page = BufferGetPage(buf);
-    curDocCapacity += BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
     for (int i = 0; i < so->candNums; ++i) {
         curdDocId = so->candDocs[i].docId;
         if (curdDocId == BM25_INVALID_DOC_ID) {
             continue;
         }
+
+        BlockNumber docBlkno = SeekBlocknoForDoc(index, curdDocId, curBlkno);
         uint16 offset = curdDocId % BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
-        while (curDocCapacity <= curdDocId) {
-            curBlkno = BM25PageGetOpaque(page)->nextblkno;
-            UnlockReleaseBuffer(buf);
-            Assert(BlockNumberIsValid(curBlkno));
-            buf = ReadBuffer(index, curBlkno);
-            LockBuffer(buf, BUFFER_LOCK_SHARE);
-            page = BufferGetPage(buf);
-            curDocCapacity += BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
-        }
+        Assert(BlockNumberIsValid(docBlkno));
+        buf = ReadBuffer(index, docBlkno);
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        page = BufferGetPage(buf);
+
         BM25DocumentItem *docItem = (BM25DocumentItem*)((char *)page + sizeof(PageHeaderData) +
             offset * BM25_DOCUMENT_ITEM_SIZE);
         if (!docItem->isActived) {
@@ -573,8 +563,8 @@ static void DocIdsGetHeapCtids(Relation index, BM25EntryPages &entryPages, BM25S
             elog(ERROR, "Read invalid doc.");
         }
         so->candDocs[i].heapCtid = docItem->ctid.t_tid;
+        UnlockReleaseBuffer(buf);
     }
-    UnlockReleaseBuffer(buf);
     qsort(so->candDocs, (size_t)so->candNums, sizeof(BM25ScanData), CompareBM25ScanDataByScore);
 }
 
@@ -608,15 +598,19 @@ static void BM25IndexScan(Relation index, BM25QueryTokensInfo &queryTokenInfo, u
     }
 }
 
-static void ContructScanScoreKeys(Relation index, BM25ScanOpaque so)
+static void ConstructScanScoreKeys(Relation index, BM25ScanOpaque so)
 {
     IndexScanDesc scan;
     Oid heapRelOid;
     Relation heapRel;
     HeapTuple heapTuple;
+    char* scoreKey = nullptr;
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
     TupleTableSlot* slot = NULL;
+    EState* estate = NULL;
+    ExprContext* econtext = NULL;
+    List* predicate = NIL;
     IndexInfo* indexInfo;
 
     scan = RelationGetIndexScan(index, 0, 0);
@@ -625,12 +619,6 @@ static void ContructScanScoreKeys(Relation index, BM25ScanOpaque so)
     scan->heapRelation = heapRel;
     scan->xs_snapshot = GetActiveSnapshot();
     scan->xs_heapfetch = tableam_scan_index_fetch_begin(heapRel);
-    indexInfo = BuildIndexInfo(index);
-
-    char* scoreKey = nullptr;
-
-    MemoryContext oldCtx;
-
     u_sess->bm25_ctx.scoreHashTable = New(CurrentMemoryContext) BM25ScanDocScoreHashTable(so->candNums);
     for (int i = 0; i < so->candNums; ++i) {
         scan->xs_ctup.t_self = so->candDocs[i].heapCtid;
@@ -638,15 +626,38 @@ static void ContructScanScoreKeys(Relation index, BM25ScanOpaque so)
         if (heapTuple == NULL) {
             continue;
         }
+
+        estate = CreateExecutorState();
+        econtext = GetPerTupleExprContext(estate);
         slot = MakeSingleTupleTableSlot(RelationGetDescr(heapRel));
-        (void)ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
-        FormIndexDatum(indexInfo, slot, NULL, values, isnull);
-        scoreKey = text_to_cstring(DatumGetVarCharPP(values[0]));
-        if (scoreKey == NULL) {
-            continue;
+        econtext->ecxt_scantuple = slot;
+        indexInfo = BuildIndexInfo(index);
+
+        if (estate->es_is_flt_frame) {
+            predicate = (List*)ExecPrepareQualByFlatten(indexInfo->ii_Predicate, estate);
+        } else {
+            predicate = (List*)ExecPrepareExpr((Expr *)indexInfo->ii_Predicate, estate);
         }
-        u_sess->bm25_ctx.scoreHashTable->AddScore(so->candDocs[i].score, scoreKey);
+
+        (void)ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
+
+        if (predicate != NIL) {
+            if (!ExecQual(predicate, econtext)) {
+                ExecDropSingleTupleTableSlot(slot);
+                FreeExecutorState(estate);
+                pfree(indexInfo);
+                continue;
+            }
+        }
+
+        FormIndexDatum(indexInfo, slot, estate, values, isnull);
+        scoreKey = text_to_cstring(DatumGetVarCharPP(values[0]));
+        if (scoreKey != NULL) {
+            u_sess->bm25_ctx.scoreHashTable->AddScore(so->candDocs[i].score, scoreKey);
+        }
         ExecDropSingleTupleTableSlot(slot);
+        FreeExecutorState(estate);
+        pfree(indexInfo);
     }
 
     heap_close(heapRel, AccessShareLock);
@@ -749,6 +760,9 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
     BM25MetaPageData meta;
     BM25GetMetaPageInfo(scan->indexRelation, &meta);
     BM25ScanOpaque so = (BM25ScanOpaque)scan->opaque;
+    if (meta.documentCount == 0) {
+        return false;
+    }
 
     bool needSearch = CheckIfNeedExpandSearch(so);
     if (needSearch) {
@@ -760,10 +774,14 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
         }
         BM25QueryTokensInfo queryTokenInfo = GetQueryTokens(scan->indexRelation, TextDatumGetCString(
             PointerGetDatum(arr)));
+        if (queryTokenInfo.size == 0) {
+            return false;
+        }
+
         float avgdl = meta.tokenCount / meta.documentCount;
         BM25IndexScan(scan->indexRelation, queryTokenInfo, meta.documentCount, avgdl, so);
         DocIdsGetHeapCtids(scan->indexRelation, meta.entryPageList, so);
-        ContructScanScoreKeys(scan->indexRelation, so);
+        ConstructScanScoreKeys(scan->indexRelation, so);
         if (queryTokenInfo.queryTokens != nullptr) {
             pfree(queryTokenInfo.queryTokens);
             queryTokenInfo.queryTokens = nullptr;

@@ -134,8 +134,8 @@ void BM25CommitBuf(Buffer buf, GenericXLogState **state, bool building, bool rel
  *
  * The order is very important!!
  */
-void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, bool unlockOldBuf,
-    GenericXLogState **state, bool building)
+void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, GenericXLogState **state,
+    bool building)
 {
     /* Get new buffer */
     Buffer newbuf = BM25NewBuffer(index, forkNum);
@@ -143,9 +143,7 @@ void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum,
 
     /* Update the previous buffer */
     BM25PageGetOpaque(*page)->nextblkno = BufferGetBlockNumber(newbuf);
-    if (unlockOldBuf) {
-        BM25CommitBuf(*buf, state, building);
-    }
+    BM25CommitBuf(*buf, state, building);
 
     /* Init new page */
     BM25GetPage(index, &newpage, newbuf, state, building);
@@ -240,36 +238,77 @@ void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgd
     BM25CommitBuf(buf, &state, building);
 }
 
-BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber startBlkno, BlockNumber step)
+void RecordDocBlkno2DocBlknoTable(Relation index, BM25DocMetaPage docMetaPage,
+    BlockNumber newDocBlkno, bool building, ForkNumber forkNum)
 {
     Buffer buf;
     Page page;
-    BlockNumber docBlkno = startBlkno;
-    for (int i = 0; i < step; ++i) {
-        if (unlikely(!BlockNumberIsValid(docBlkno))) {
-            elog(ERROR, "SeekBlocknoForDoc: Invalid Block Number.");
+    BlockNumber curTableBlkno = docMetaPage->docBlknoInsertPage;
+    OffsetNumber offno;
+    GenericXLogState *state = nullptr;
+    uint32 itemSize = MAXALIGN(sizeof(BlockNumber));
+
+    /* first page */
+    if (!BlockNumberIsValid(curTableBlkno)) {
+        buf = BM25NewBuffer(index, forkNum);
+        BM25GetPage(index, &page, buf, &state, building);
+        BM25InitPage(buf, page);
+        curTableBlkno = BufferGetBlockNumber(buf);
+        docMetaPage->docBlknoTable = curTableBlkno;
+        docMetaPage->docBlknoInsertPage = curTableBlkno;
+    } else {
+        buf = ReadBuffer(index, curTableBlkno);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        BM25GetPage(index, &page, buf, &state, building);
+        if (PageGetFreeSpace(page) < itemSize) {
+            BM25AppendPage(index, &buf, &page, forkNum, &state, building);
+            curTableBlkno = BufferGetBlockNumber(buf);
+            docMetaPage->docBlknoInsertPage = curTableBlkno;
         }
-        buf = ReadBuffer(index, docBlkno);
-        LockBuffer(buf, BUFFER_LOCK_SHARE);
-        page = BufferGetPage(buf);
-        docBlkno = BM25PageGetOpaque(page)->nextblkno;
-        UnlockReleaseBuffer(buf);
     }
-    return docBlkno;
+    offno = PageAddItem(page, (Item)(&newDocBlkno), itemSize, InvalidOffsetNumber, false, false);
+    if (offno == InvalidOffsetNumber) {
+        if (!building)
+            GenericXLogAbort(state);
+        UnlockReleaseBuffer(buf);
+        elog(ERROR, "failed to add doc blkno item [DocBlknoTable] to \"%s\"", RelationGetRelationName(index));
+    }
+    BM25CommitBuf(buf, &state, building);
 }
 
-bool FindHashBucket(uint32 bucketId, BM25PageLocationInfo &bucketLocation, Buffer buf, Page page)
+BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber docBlknoTable)
 {
-    OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
-    for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
-        BM25HashBucketPage bucket = (BM25HashBucketPage)PageGetItem(page, PageGetItemId(page, offno));
-        if (bucket->bucketId == bucketId) {
-            bucketLocation.blkno = BufferGetBlockNumber(buf);
-            bucketLocation.offno = offno;
-            return true;
+    Buffer buf;
+    Page page;
+    BlockNumber curTableBlkno = docBlknoTable;
+    BlockNumber docBlkno = InvalidBlockNumber;
+    uint32 scanedDocBlknoNum = 0;
+    uint32 docBlknoIndex = docId / BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
+
+    /* insert or search */
+    /* get doc block number in docBlknoTable */
+    while (BlockNumberIsValid(curTableBlkno)) {
+        OffsetNumber maxoffno;
+        buf = ReadBuffer(index, curTableBlkno);
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        page = BufferGetPage(buf);
+        maxoffno = PageGetMaxOffsetNumber(page);
+        if (scanedDocBlknoNum + maxoffno >= docBlknoIndex + 1) {
+            uint16 offset = docBlknoIndex + 1 - scanedDocBlknoNum;
+            docBlkno = *((BlockNumber*)PageGetItem(page, PageGetItemId(page, offset)));
+            UnlockReleaseBuffer(buf);
+            break;
         }
+        scanedDocBlknoNum += maxoffno;
+        curTableBlkno = BM25PageGetOpaque(page)->nextblkno;
+        UnlockReleaseBuffer(buf);
     }
-    return false;
+
+    if (unlikely(!BlockNumberIsValid(docBlkno))) {
+        elog(ERROR, "Failed to search doc blkno for \"%s\"", RelationGetRelationName(index));
+    }
+
+    return docBlkno;
 }
 
 bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLocation, Buffer buf, Page page)
@@ -277,7 +316,8 @@ bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLoca
     OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
     for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
         BM25TokenMetaPage tokenMeta = (BM25TokenMetaPage)PageGetItem(page, PageGetItemId(page, offno));
-        if (strncmp(tokenMeta->token, tokenData.tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0) {
+        if ((tokenMeta->hashValue == tokenData.hashValue) &&
+			(strncmp(tokenMeta->token, tokenData.tokenValue, BM25_MAX_TOKEN_LEN - 1) == 0)) {
             tokenMetaLocation.blkno = BufferGetBlockNumber(buf);
             tokenMetaLocation.offno = offno;
             return true;
