@@ -25,6 +25,9 @@ test: explain_pbe
 
 # autonomous transaction Test
 
+# test object type
+test: parse_const_as_param_type unique_check
+
 #test jdbc pbe for bypass
 test: bypass_pbe
 #test: partition for hash list

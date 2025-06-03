@@ -153,6 +153,7 @@ const Oid function_id[] = {
     409,  /* convert char(n) to name */
     668,  /* adjust char() to typmod length */
     669,  /* adjust varchar() to typmod length */
+    714,  /* convert int8 to int2 */
     944,  /* convert text to char */
     946,  /* convert char to text */
     1200, /* adjust interval precision */
@@ -270,5 +271,7 @@ Relation InitPartitionIndexInFusion(Oid parentIndexOid, Oid partOid, Partition *
 void InitPartitionRelationInFusion(Oid partOid, Relation parentRel, Partition *partRel, Relation *rel);
 void ExeceDoneInIndexFusionConstruct(bool isPartTbl, Relation *parentRel, Partition *part, Relation *index,
     Relation *rel);
+
+#define RI_CONSTRAINT_TRIGGER_NAME_LEN 20   // foreign key trigger name must begin with RI_ConstraintTrigger
 
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_UTIL_H_ */

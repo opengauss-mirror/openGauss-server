@@ -48,6 +48,7 @@
 #include "pgxc/nodemgr.h"
 #include "pgxc/execRemote.h"
 #include "catalog/pgxc_node.h"
+#include "utils/int8.h"
 #endif
 #include "replication/walreceiver.h"
 #include "optimizer/gplanmgr.h"
@@ -548,6 +549,64 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     /* No need to pfree other memory, MemoryContext will be reset */
 }
 
+
+void perfer_parse_const_type_as_para_type(Node* expr, Oid param_type)
+{
+    if (!IsA(expr, Const)) {
+        return;
+    }
+    
+    Const* const_expr = (Const*)expr;
+    if (const_expr->consttype == param_type) {
+        return;
+    }
+
+    /* const only can be int4 or int8 */
+    if (const_expr->consttype != INT4OID && const_expr->consttype != INT8OID) {
+        return;
+    }
+
+    switch (param_type) {
+        case INT1OID:
+            if (const_expr->consttype == INT4OID) {
+                const_expr->constvalue = DirectFunctionCall1(i4toi1, const_expr->constvalue);
+            } else {
+                const_expr->constvalue = DirectFunctionCall1(i8toi1, const_expr->constvalue);
+            }
+            break;
+        
+        case INT2OID:
+            if (const_expr->consttype == INT4OID) {
+                const_expr->constvalue = DirectFunctionCall1(i4toi2, const_expr->constvalue);
+            } else {
+                const_expr->constvalue = DirectFunctionCall1(int82, const_expr->constvalue);
+            }
+            break;
+
+        case INT4OID:
+            if (const_expr->consttype == INT8OID) {
+                const_expr->constvalue = DirectFunctionCall1(int84, const_expr->constvalue);
+            } else {
+                return;
+            }
+            break;
+
+        case INT8OID:
+            if (const_expr->consttype == INT4OID) {
+                const_expr->constvalue = Int64GetDatum((int64)DatumGetInt32(const_expr->constvalue));
+            } else {
+                return;
+            }
+            break;
+
+        default:
+            return;
+    }
+
+    const_expr->consttype = param_type;
+}
+
+
 /*
  * EvaluateParams: evaluate a list of parameters.
  *
@@ -601,6 +660,8 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
         Oid given_type_id;
 
         expr = transformExpr(pstate, expr, EXPR_KIND_EXECUTE_PARAMETER);
+
+        perfer_parse_const_type_as_para_type(expr, expected_type_id);
 
         /* Cannot contain subselects or aggregates */
         if (pstate->p_hasSubLinks)

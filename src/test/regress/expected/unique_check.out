@@ -1,0 +1,19 @@
+create schema unique_check;
+set current_schema to 'unique_check';
+drop table if exists warehouse;
+NOTICE:  table "warehouse" does not exist, skipping
+create table warehouse (
+w_id smallint not null,
+w_name varchar(10), 
+primary key (w_id) );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "warehouse_pkey" for table "warehouse"
+insert into warehouse values (1, 1);
+insert into warehouse values (1, 1);
+ERROR:  duplicate key value violates unique constraint "warehouse_pkey"
+DETAIL:  Key (w_id)=(1) already exists.
+SET UNIQUE_CHECKS=0;
+insert into warehouse values (1, 1);
+drop table warehouse;
+reset UNIQUE_CHECKS;
+drop schema unique_check cascade;
+reset current_schema;

@@ -729,13 +729,34 @@ bool checkPartitionType(const Relation rel)
         return true;
     }
 }
+
+bool CheckIsRIConstraintTrigger(const TriggerDesc* trigdesc)
+{
+    if (trigdesc == NULL) {
+        return true;
+    }
+    for (int i = 0; i < trigdesc->numtriggers; i++) {
+        if (!(trigdesc->triggers[i].tgisinternal &&
+              strncmp(trigdesc->triggers[i].tgname, "RI_ConstraintTrigger", RI_CONSTRAINT_TRIGGER_NAME_LEN) == 0)) {
+            return false;
+        }
+    }
+    return true;
+}
 bool checkDMLRelation(const Relation rel, const PlannedStmt *plannedstmt, bool isInsert, bool isPartTbl)
 {
     bool result = false;
-    if (rel->rd_rel->relkind != RELKIND_RELATION || rel->rd_rel->relhasrules || rel->rd_rel->relhastriggers ||
+    if (rel->rd_rel->relkind != RELKIND_RELATION || rel->rd_rel->relhasrules ||
         rel->rd_rel->relhasoids || rel->rd_rel->relhassubclass || RelationIsColStore(rel) || RelationIsTsStore(rel) ||
         RelationInRedistribute(rel) || plannedstmt->hasReturning || RelationIsSubPartitioned(rel)) {
         result = true;
+    }
+    if (rel->rd_rel->relhastriggers) {
+        if (!u_sess->attr.attr_common.foreign_key_checks) {
+            result = !CheckIsRIConstraintTrigger(rel->trigdesc);
+        } else {
+            result = true;
+        }
     }
 
     if (isInsert) {
