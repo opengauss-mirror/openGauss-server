@@ -1424,7 +1424,6 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->num_held_lwlocks = 0;
     storage_cxt->held_lwlocks = (LWLockHandle*)palloc0(MAX_SIMUL_LWLOCKS * sizeof(LWLockHandle));
     storage_cxt->lwlock_held_times = (TimestampTz*)palloc0(MAX_SIMUL_LWLOCKS * sizeof(TimestampTz));
-    storage_cxt->trace_lwlock_time = false;
     storage_cxt->lock_addin_request = 0;
     storage_cxt->lock_addin_request_allowed = true;
     storage_cxt->counts_for_pid = 0;

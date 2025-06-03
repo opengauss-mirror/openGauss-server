@@ -1233,6 +1233,7 @@ typedef enum WaitState {
     STATE_WAIT_SYNC_BGWORKERS,
     STATE_STANDBY_READ_RECOVERY_CONFLICT,
     STATE_STANDBY_GET_SNAPSHOT,
+    STATE_WAIT_DMS,
     STATE_WAIT_NUM  // MUST be last, DO NOT use this value.
 } WaitState;
 
@@ -1249,6 +1250,15 @@ typedef enum WaitStatePhase {
     PHASE_WAIT_QUOTA,
     PHASE_AUTOVACUUM
 } WaitStatePhase;
+
+
+/* ----------
+ * Wait Event MASK
+ * ----------
+ */
+#define WAITEVENT_CLASS_MASK 0xFF000000U
+#define WAITEVENT_EVENT_MASK 0x00FFFFFFU
+
 
 /* ----------
  * Wait Event Classes
@@ -1543,6 +1553,40 @@ typedef struct WaitInfo {
     WaitStatusInfo status_info;
 } WaitInfo;
 
+
+/*
+ * This is a container used to storage information about the target object that DMS is waiting for.
+ * There are many class of target object that can be waited, but only one is avaliable at a time,
+ * therefore, we use a union to save memory.
+ *
+ * 'waitevent' is used to determine the information corresponding to the union,
+ * see decode_dms_waitevent_target()
+ *
+ *
+ * If there are new waiting target object types, perform it like following:
+ *   struct {
+ *       int info1;  #  some information
+ *       int info2;  #  some information
+ *   } object        #  object name
+ *
+ */
+typedef struct DMSWaiteventTarget {
+    union{
+        // waiting a page
+        struct {
+            Buffer buffer;
+            dms_lock_mode_t mode;
+        } page;
+
+	// others
+    };
+} DMSWaiteventTarget;
+
+extern void pgstat_report_dms_waitevent(const uint32 waitevent, const DMSWaiteventTarget* target=NULL);
+extern void decode_dms_waitevent_target(const uint32 waitevent, const DMSWaiteventTarget target, 
+    _out_ char** object, _out_ char** mode);
+
+
 /* ----------
  * PgBackendStatus
  *
@@ -1653,6 +1697,8 @@ typedef struct PgBackendStatus {
     int* lw_held_num;                      /* point to num_held_lwlocks */
     void* lw_held_locks;                   /* point to held_lwlocks[] */
     void* lw_held_times;                   /* point to lwlock_held_times[] */
+
+    DMSWaiteventTarget dms_wait_target;    /* dms wait target */
 
     volatile bool st_lw_access_flag;       /* valid flag */
     volatile bool st_lw_is_cleanning_flag; /* is cleanning lw ptr */
@@ -2878,6 +2924,7 @@ extern TableDistributionInfo* get_recovery_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* streaming_hadr_get_recovery_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_node_xid_csn(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_index_status(TupleDesc tuple_desc, const char *schname, const char *idxname);
+extern TableDistributionInfo* GetRemoteGsLWLockStatus(TupleDesc tuple_desc);
 
 #define SessionMemoryArraySize (BackendStatusArray_size)
 

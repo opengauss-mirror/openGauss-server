@@ -21,7 +21,9 @@
  *
  * ---------------------------------------------------------------------------------------
  */
-#include "ddes/dms/ss_dms_callback.h"
+ 
+#include "c.h"
+#include "pgstat.h"
 #include "postgres.h"
 #include "miscadmin.h"
 #include "postmaster/postmaster.h"
@@ -29,6 +31,7 @@
 #include "utils/palloc.h"
 #include "utils/resowner.h"
 #include "utils/postinit.h"
+#include "catalog/pg_authid.h"
 #include "storage/procarray.h"
 #include "access/xact.h"
 #include "access/transam.h"
@@ -43,6 +46,7 @@
 #include "replication/walsender_private.h"
 #include "replication/walreceiver.h"
 #include "replication/ss_disaster_cluster.h"
+#include "ddes/dms/ss_dms_callback.h"
 #include "ddes/dms/ss_switchover.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
@@ -622,6 +626,8 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     BufferDesc *buf_desc = NULL;
     RelFileNode relfilenode = tag->rnode;
     bool get_lock = false;
+    DMSWaiteventTarget target;
+    bool waitevent_started = false;
 
 #ifdef USE_ASSERT_CHECKING
     if (IsSegmentPhysicalRelNode(relfilenode)) {
@@ -645,6 +651,11 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             if (buf_id < 0) {
                 break;
             }
+
+            target.page.buffer = buf_id + 1;
+            target.page.mode = mode;
+            pgstat_report_dms_waitevent(WAIT_EVENT_DCS_TRANSFER_PAGE, &target);
+            waitevent_started = true;
 
             buf_desc = GetBufferDescriptor(buf_id);
             if (IsSegmentBufferID(buf_id)) {
@@ -732,6 +743,9 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     }
     PG_END_TRY();
 
+    if (waitevent_started) {
+        pgstat_report_dms_waitevent(WAIT_EVENT_END);
+    }
     return ret;
 }
 
@@ -795,6 +809,11 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
         /* not found in shared buffer */
         return ret;
     }
+
+    DMSWaiteventTarget target;
+    target.page.buffer = buf_id + 1;
+    target.page.mode = DMS_LOCK_EXCLUSIVE;
+    pgstat_report_dms_waitevent(WAIT_EVENT_DCS_INVLDT_SHARE_COPY_PROCESS, &target);
 
     BufferDesc *buf_desc = GetBufferDescriptor(buf_id);
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id);
@@ -919,6 +938,8 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
     if (ret == DMS_SUCCESS && buftag_equal) {
         Assert(buf_ctrl->lock_mode == DMS_LOCK_NULL);
     }
+    
+    pgstat_report_dms_waitevent(WAIT_EVENT_END);
 
     return ret;
 }
@@ -2085,8 +2106,11 @@ static int CBXLogWaitFlush(void *db_handle, unsigned long long lsn)
 static int CBDBCheckLock(void *db_handle)
 {
     if (t_thrd.storage_cxt.num_held_lwlocks > 0) {
-        ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS lock] hold lock, lock address:%p, lock mode:%u",
-            t_thrd.storage_cxt.held_lwlocks[0].lock, t_thrd.storage_cxt.held_lwlocks[0].mode)));
+        TimestampTz now = GetCurrentTimestamp();
+        ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS lock] hold lock, lock address:%p, lock mode:%u, time:%ld ms",
+            t_thrd.storage_cxt.held_lwlocks[0].lock,
+            t_thrd.storage_cxt.held_lwlocks[0].mode,
+            now - t_thrd.storage_cxt.lwlock_held_times[0])));
         return GS_ERROR;
     }
     return GS_SUCCESS;
@@ -2155,8 +2179,20 @@ void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
     Assert(t_thrd.utils_cxt.CurrentResourceOwner == NULL);
     t_thrd.utils_cxt.CurrentResourceOwner =
         ResourceOwnerCreate(NULL, "dms worker", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+
+    u_sess->misc_cxt.SessionUserId = BOOTSTRAP_SUPERUSERID;
+    char namebuf[NAMEDATALEN] = {0};
+    pthread_getname_np(pthread_self(), namebuf, sizeof(namebuf));
+
     SharedInvalBackendInit(false, false);
     pgstat_initialize();
+
+    if (g_instance.attr.attr_storage.dms_attr.enable_dyn_trace) {
+        pgstat_bestart();
+
+        pgstat_report_appname(namebuf);
+    }
+
     u_sess->attr.attr_common.Log_line_prefix = "\%m \%u \%d \%h \%p \%S ";
     log_timezone = g_instance.dms_cxt.log_timezone;
     (void)pg_atomic_sub_fetch_u32(&g_instance.dms_cxt.inDmsThreShmemInitCnt, 1);
