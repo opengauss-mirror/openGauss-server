@@ -241,7 +241,7 @@ extern int convert_int128_to_short_numeric_byscale(
 extern Datum convert_short_numeric_to_int64(_in_ Numeric inNum, _out_ bool* outSuccess);
 extern Datum convert_short_numeric_to_int128(_in_ Numeric inNum, _out_ bool* outSuccess);
 extern Datum try_convert_numeric_normal_to_fast(Datum value, ScalarVector *arr = NULL);
-extern Datum try_direct_convert_numeric_normal_to_fast(Datum value, ScalarVector *arr);
+extern Datum try_direct_convert_numeric_normal_to_fast(Datum value, ScalarVector *arr = NULL);
 extern int64 convert_short_numeric_to_int64_byscale(_in_ Numeric n, _in_ int scale);
 extern void convert_short_numeric_to_int128_byscale(_in_ Numeric n, _in_ int scale, _out_ int128& result);
 extern int32 get_ndigit_from_numeric(_in_ Numeric num);
