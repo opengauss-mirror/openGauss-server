@@ -31,6 +31,26 @@
 #include "securec_check.h"
 #include "storage/file/fio_device.h"
 
+
+#define RETRY_ON_CONNECT_ERR_BEGIN         \
+    {                                      \
+    int _retry_on_connect_err_count = 0;   \
+    do                                     \
+
+
+#define RETRY_ON_CONNECT_ERR                                                       \
+    if (errno == ERR_DSS_CONNECT_FAILED && _retry_on_connect_err_count < 1000) {   \
+        pg_usleep(5000L);                                                          \
+        _retry_on_connect_err_count++;                                             \
+        continue;                                                                  \
+    }
+
+
+#define RETRY_ON_CONNECT_ERR_END   \
+    while (0);                     \
+    }
+
+
 static char zero_area[FILE_EXTEND_STEP_SIZE + ALIGNOF_BUFFER] = { 0 };
 
 ssize_t buffer_align(char **unalign_buff, char **buff, size_t size);
@@ -116,10 +136,15 @@ int dss_access_file(const char *file_name, int mode)
 
 int dss_create_dir(const char *name, mode_t mode)
 {
-    if (g_dss_device_op.dss_create_dir(name) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_create_dir(name) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
@@ -129,12 +154,16 @@ int dss_open_dir(const char *name, DIR **dir_handle)
 
     /* dss_dir_t will be free in dss_close_dir */
     dss_dir = (DSS_DIR*)malloc(sizeof(DSS_DIR));
-    dss_dir->dir_handle = g_dss_device_op.dss_open_dir(name);
-    if (dss_dir->dir_handle == NULL) {
-        dss_set_errno(NULL);
-        free(dss_dir);
-        return GS_ERROR;
-    }
+
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        dss_dir->dir_handle = g_dss_device_op.dss_open_dir(name);
+        if (dss_dir->dir_handle == NULL) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            free(dss_dir);
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
 
     dss_dir->magic_head = DSS_MAGIC_NUMBER;
     *dir_handle = (DIR*)dss_dir;
@@ -149,10 +178,14 @@ int dss_read_dir(DIR *dir_handle, struct dirent **result)
     DSS_DIR *dss_dir = (DSS_DIR*)dir_handle;
 
     *result = NULL;
-    if (g_dss_device_op.dss_read_dir(dss_dir->dir_handle, &dirent_t, &item_t) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_read_dir(dss_dir->dir_handle, &dirent_t, &item_t) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
 
     if (item_t == NULL) {
         dss_set_errno(NULL);
@@ -174,38 +207,54 @@ int dss_close_dir(DIR *dir_handle)
     DSS_DIR *dss_dir_t = (DSS_DIR*)dir_handle;
     int result = GS_SUCCESS;
 
-    if (g_dss_device_op.dss_close_dir(dss_dir_t->dir_handle) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        result = GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_close_dir(dss_dir_t->dir_handle) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            result = GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     free(dss_dir_t);
     return result;
 }
 
 int dss_remove_dir(const char *name)
 {
-    if (g_dss_device_op.dss_remove_dir(name) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_remove_dir(name) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
 int dss_rename_file(const char *src, const char *dst)
 {
-    if (g_dss_device_op.dss_rename(src, dst) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_rename(src, dst) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
 int dss_remove_file(const char *name)
 {
-    if (g_dss_device_op.dss_remove(name) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_remove(name) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
@@ -213,18 +262,25 @@ int dss_open_file(const char *name, int flags, mode_t mode, int *handle)
 {
     struct stat st;
     if ((flags & O_CREAT) != 0 && dss_stat_file(name, &st) != GS_SUCCESS) {
-        // file not exists, create it first.
-        if (errno == ERR_DSS_FILE_NOT_EXIST && g_dss_device_op.dss_create(name, flags) != DSS_SUCCESS) {
-            dss_set_errno(NULL);
-            return GS_ERROR;
-        }
+        RETRY_ON_CONNECT_ERR_BEGIN {
+            // file not exists, create it first.
+            if (errno == ERR_DSS_FILE_NOT_EXIST && g_dss_device_op.dss_create(name, flags) != DSS_SUCCESS) {
+                dss_set_errno(NULL);
+                RETRY_ON_CONNECT_ERR;
+                return GS_ERROR;
+            }
+        } RETRY_ON_CONNECT_ERR_END;
     }
 
-    if (g_dss_device_op.dss_open(name, flags, handle) != DSS_SUCCESS) {
-        *handle = -1;
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_open(name, flags, handle) != DSS_SUCCESS) {
+            *handle = -1;
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
@@ -276,10 +332,14 @@ int dss_fopen_file(const char *name, const char* mode, FILE **stream)
 
 int dss_close_file(int handle)
 {
-    if (g_dss_device_op.dss_close(handle) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_close(handle) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
@@ -320,19 +380,23 @@ ssize_t dss_align_read(int handle, void *buf, size_t size, off_t offset, bool us
         buff = (char*)buf;
     }
 
-    if (use_p) {
-        ret = g_dss_device_op.dss_pread(handle, buff, newSize, offset, &r_size);
-    } else {
-        ret = g_dss_device_op.dss_read(handle, buff, newSize, &r_size);
-    }
-
-    if (ret != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        if (unalign_buff != NULL) {
-            free(unalign_buff);
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (use_p) {
+            ret = g_dss_device_op.dss_pread(handle, buff, newSize, offset, &r_size);
+        } else {
+            ret = g_dss_device_op.dss_read(handle, buff, newSize, &r_size);
         }
-        return -1;
-    }
+
+        if (ret != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+
+            if (unalign_buff != NULL) {
+                free(unalign_buff);
+            }
+            return -1;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
 
     if (unalign_buff != NULL) {
         int move = (int)size - (int)newSize;
@@ -361,75 +425,109 @@ size_t dss_fread_file(void *buf, size_t size, size_t nmemb, FILE *stream)
 
 ssize_t dss_write_file(int handle, const void *buf, size_t size)
 {
-    if (g_dss_device_op.dss_write(handle, buf, size) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return -1;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_write(handle, buf, size) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return -1;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return (ssize_t)size;
 }
 
 ssize_t dss_pwrite_file(int handle, const void *buf, size_t size, off_t offset)
 {
-    if (g_dss_device_op.dss_pwrite(handle, buf, size, offset) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return -1;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_pwrite(handle, buf, size, offset) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return -1;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return (ssize_t)size;
 }
 
 size_t dss_fwrite_file(const void *buf, size_t size, size_t count, FILE *stream)
 {
     DSS_STREAM *dss_fstream = (DSS_STREAM*)stream;
-    if (g_dss_device_op.dss_write(dss_fstream->handle, buf, size * count) != DSS_SUCCESS) {
-        dss_set_errno(&dss_fstream->errcode);
-        return (size_t)-1;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_write(dss_fstream->handle, buf, size * count) != DSS_SUCCESS) {
+            dss_set_errno(&dss_fstream->errcode);
+            RETRY_ON_CONNECT_ERR;
+            return (size_t)-1;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return count;
 }
 
 off_t dss_seek_file(int handle, off_t offset, int origin)
 {
+    off_t size;
     if (origin == SEEK_END) {
         origin = DSS_SEEK_MAXWR;
     }
-    off_t size = (off_t)g_dss_device_op.dss_seek(handle, offset, origin);
-    if (size == -1) {
-        dss_set_errno(NULL);
-    }
+
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        size = (off_t)g_dss_device_op.dss_seek(handle, offset, origin);
+        if (size == -1) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return size;
 }
 
 int dss_fseek_file(FILE *stream, long offset, int whence)
 {
+    DSS_STREAM *dss_fstream = (DSS_STREAM*)stream;
+    off_t size;
     if (whence == SEEK_END) {
         whence = DSS_SEEK_MAXWR;
     }
-    DSS_STREAM *dss_fstream = (DSS_STREAM*)stream;
-    off_t size = (off_t)g_dss_device_op.dss_seek(dss_fstream->handle, offset, whence);
-    if (size == -1) {
-        dss_set_errno(&dss_fstream->errcode);
-        return -1;
-    }
+
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        size = (off_t)g_dss_device_op.dss_seek(dss_fstream->handle, offset, whence);
+        if (size == -1) {
+            dss_set_errno(&dss_fstream->errcode);
+            RETRY_ON_CONNECT_ERR;
+            return -1;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return (int)size;
 }
 
 long dss_ftell_file(FILE *stream)
 {
+    off_t size;
     DSS_STREAM *dss_fstream = (DSS_STREAM*)stream;
-    off_t size = (off_t)g_dss_device_op.dss_seek(dss_fstream->handle, 0, SEEK_CUR);
-    if (size == -1) {
-        dss_set_errno(&dss_fstream->errcode);
-    }
+
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        size = (off_t)g_dss_device_op.dss_seek(dss_fstream->handle, 0, SEEK_CUR);
+        if (size == -1) {
+            dss_set_errno(&dss_fstream->errcode);
+            RETRY_ON_CONNECT_ERR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return size;
 }
 
 void dss_rewind_file(FILE *stream)
 {
     DSS_STREAM *dss_fstream = (DSS_STREAM*)stream;
-    off_t size = (off_t)g_dss_device_op.dss_seek(dss_fstream->handle, 0, SEEK_SET);
-    if (size == -1) {
-        dss_set_errno(&dss_fstream->errcode);
-    }
+
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        off_t size = (off_t)g_dss_device_op.dss_seek(dss_fstream->handle, 0, SEEK_SET);
+        if (size == -1) {
+            dss_set_errno(&dss_fstream->errcode);
+            RETRY_ON_CONNECT_ERR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
 }
 
 int dss_fflush_file(FILE *stream)
@@ -446,11 +544,15 @@ int dss_sync_file(int handle)
 
 int dss_truncate_file(int handle, off_t keep_size)
 {
-    /* not guarantee fill zero */
-    if (g_dss_device_op.dss_truncate(handle, keep_size) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        /* not guarantee fill zero */
+        if (g_dss_device_op.dss_truncate(handle, keep_size) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
@@ -462,10 +564,14 @@ int dss_ftruncate_file(FILE *stream, off_t keep_size)
 
 int dss_get_file_name(int handle, char *fname, size_t fname_size)
 {
-    if (g_dss_device_op.dss_fname(handle, fname, fname_size) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_fname(handle, fname, fname_size) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
@@ -473,10 +579,13 @@ off_t dss_get_file_size(const char *fname)
 {
     off_t fsize = INVALID_DEVICE_SIZE;
 
-    g_dss_device_op.dss_fsize(fname, &fsize);
-    if (fsize == INVALID_DEVICE_SIZE) {
-        dss_set_errno(NULL);
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        g_dss_device_op.dss_fsize(fname, &fsize);
+        if (fsize == INVALID_DEVICE_SIZE) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
 
     return fsize;
 }
@@ -488,28 +597,41 @@ int dss_fallocate_file(int handle, int mode, off_t offset, off_t len)
 
 int dss_link(const char *src, const char *dst)
 {
-    if (g_dss_device_op.dss_link(src, dst) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_link(src, dst) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
 int dss_unlink_target(const char *name)
 {
-    if (g_dss_device_op.dss_unlink(name) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return GS_ERROR;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_unlink(name) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
 ssize_t dss_read_link(const char *path, char *buf, size_t buf_size)
 {
-    ssize_t result = (ssize_t)g_dss_device_op.dss_read_link(path, buf, buf_size);
-    if (result == -1) {
-        dss_set_errno(NULL);
-    }
+    ssize_t result;
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        result = (ssize_t)g_dss_device_op.dss_read_link(path, buf, buf_size);
+        if (result == -1) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return result;
 }
 
@@ -546,10 +668,13 @@ int dss_fileno(FILE *stream)
 int dss_stat_file(const char *path, struct stat *buf)
 {
     dss_stat_t st;
-    if (g_dss_device_op.dss_stat(path, &st) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return -1;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_stat(path, &st) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
 
     // file type and mode
     switch (st.type) {
@@ -562,23 +687,26 @@ int dss_stat_file(const char *path, struct stat *buf)
         case DSS_LINK:
         /* fall-through */
         default:
-            return -1;
+            return GS_ERROR;
     }
     // total size, in bytes
     buf->st_size = (long)st.written_size;
     // time of last modification
     buf->st_mtime = st.update_time;
 
-    return 0;
+    return GS_SUCCESS;
 }
 
 int dss_fstat_file(int handle, struct stat *buf)
 {
     dss_stat_t st;
-    if (g_dss_device_op.dss_fstat(handle, &st) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return -1;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_fstat(handle, &st) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
 
     // file type and mode
     switch (st.type) {
@@ -591,24 +719,27 @@ int dss_fstat_file(int handle, struct stat *buf)
         case DSS_LINK:
         /* fall-through */
         default:
-            return -1;
+            return GS_ERROR;
     }
     // total size, in bytes
     buf->st_size = (long)st.written_size;
     // time of last modification
     buf->st_mtime = st.update_time;
 
-    return 0;
+    return GS_SUCCESS;
 }
 
 // return information of link itself when path is link
 int dss_lstat_file(const char *path, struct stat *buf)
 {
     dss_stat_t st;
-    if (g_dss_device_op.dss_lstat(path, &st) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return -1;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_lstat(path, &st) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
 
     // file type and mode
     switch (st.type) {
@@ -622,20 +753,20 @@ int dss_lstat_file(const char *path, struct stat *buf)
             buf->st_mode = S_IFLNK;
             break;
         default:
-            return -1;
+            return GS_ERROR;
     }
     // total size, in bytes
     buf->st_size = (long)st.written_size;
     // time of last modification
     buf->st_mtime = st.update_time;
 
-    return 0;
+    return GS_SUCCESS;
 }
 
 int dss_chmod_file(const char* path, mode_t mode)
 {
     // dss do not have mode
-    return 0;
+    return GS_SUCCESS;
 }
 
 ssize_t buffer_align(char **unalign_buff, char **buff, size_t size)
@@ -696,19 +827,28 @@ int dss_remove_dev(const char *name)
 int dss_get_addr(int handle, long long offset, char *poolname, char *imagename, char *objAddr,
     unsigned int *objId, unsigned long int *objOffset)
 {
-    if (g_dss_device_op.dss_get_addr(handle, offset, poolname, imagename, objAddr, objId, objOffset) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return -1;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_get_addr(
+                handle, offset, poolname, imagename, objAddr, objId, objOffset) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
 int dss_compare_size(const char *vg_name, long long *au_size)
 {
-    if (g_dss_device_op.dss_compare_size(vg_name, au_size) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return -1;
-    }
+    RETRY_ON_CONNECT_ERR_BEGIN {
+        if (g_dss_device_op.dss_compare_size(vg_name, au_size) != DSS_SUCCESS) {
+            dss_set_errno(NULL);
+            RETRY_ON_CONNECT_ERR;
+            return GS_ERROR;
+        }
+    } RETRY_ON_CONNECT_ERR_END;
+
     return GS_SUCCESS;
 }
 
