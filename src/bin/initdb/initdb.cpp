@@ -5649,7 +5649,12 @@ static void InitUndoSubsystemMeta(void)
     char undoFilePath[MAXPGPATH] = {'\0'};
     char tmpUndoFile[MAXPGPATH] = {'\0'};
 
-    printf("Begin init undo subsystem meta.\n");
+    if (enable_dss) {
+        printf("Skip init undo subsystem meta in shared storage mode.\n");
+        return;
+    } else {
+        printf("Begin init undo subsystem meta.\n");
+    }
     rc = sprintf_s(undoFilePath, sizeof(undoFilePath), "%s/%s", pg_data, UNDO_META_FILE);
     securec_check_ss_c(rc, "\0", "\0");
     rc = sprintf_s(tmpUndoFile, sizeof(tmpUndoFile), "%s/%s_%s", pg_data, UNDO_META_FILE, "tmp");

@@ -1756,6 +1756,276 @@ void CancelBlockedRedistWorker(LOCK* lock, LOCKMODE lockmode)
     LWLockRelease(ProcArrayLock);
 }
 
+
+static int ProcCheckMyWaitStatus(LOCALLOCK* locallock, int waitSec, bool *allowAvcCancel)
+{
+    int myWaitStatus;
+    LOCKMODE lockmode = locallock->tag.mode;
+    LOCK* lock = locallock->lock;
+
+    /*
+     * waitStatus could change from STATUS_WAITING to something else
+     * asynchronously.	Read it just once per loop to prevent surprising
+     * behavior (such as missing log messages).
+     */
+    myWaitStatus = t_thrd.proc->waitStatus;
+
+    /*
+     * If we are not deadlocked, but are waiting on an autovacuum-induced
+     * task, send a signal to interrupt it. If I am an autovacuum worker, don't
+     * send a signal to inerrutpt.
+     *
+     * If we are not deadlocked, but are waiting on a data redistribution
+     * -induced task, send a signal to interrupt it. No extra enable_cluster_resize
+     * check is needed, since DS_BLOCKED_BY_REDISTRIBUTION can only be set
+     * by blocking proc with enable_cluster_resize on.
+     */
+    if (t_thrd.storage_cxt.deadlock_state == DS_BLOCKED_BY_AUTOVACUUM && *allowAvcCancel &&
+        !IsAutoVacuumWorkerProcess()) {
+        /* cancle all existing blockers */
+        CancelAllBlockedAutovacWorkers(lock, lockmode);
+
+        /* prevent signal from being resent more than once */
+        *allowAvcCancel = false;
+    } else if (t_thrd.storage_cxt.deadlock_state == DS_BLOCKED_BY_REDISTRIBUTION) {
+        /*
+         * We only cancel blocked redistribution thread when redistribution_cancelable
+         * flag is on, otherwise we reset the thread local variable
+         * blocking_redistribution_proc to prevent the following scenario from
+         * happening.
+         *
+         * thread 1:
+         * set enable_cluster_resize=on;
+         * START TRANSACTION;
+         * select pg_enable_redis_proc_cancelable();
+         * LOCK TABLE t1 IN ACCESS SHARE MODE;
+         *
+         * thread 2:
+         * truncate t1; <-- waiting due to LOCK TABLE t1
+         * ctrl+c to cancel it
+         * truncate t1; <-- causing thread 1 exits even when t1 is not in append_mode
+         *
+         * The first truncate detects redistribution thread blocks t1 and set
+         * blocking_redistribution_proc and return DS_BLOCKED_BY_REDISTRIBUTION, however
+         * the blocking_redistribution_proc should be reset if object is not in append_mode
+         * so the global variable of blocking_redistribution_proc will not affect the very
+         * next truncate/drop statement.
+         */
+        if (u_sess->catalog_cxt.redistribution_cancelable) {
+            CancelBlockedRedistWorker(lock, lockmode);
+
+            u_sess->catalog_cxt.redistribution_cancelable = false;
+        } else {
+            t_thrd.storage_cxt.blocking_redistribution_proc = NULL;
+        }
+    }
+
+    /*
+     * If awoken after the deadlock check interrupt has run, and
+     * log_lock_waits is on, then report about the wait.
+     */
+    if ((u_sess->attr.attr_storage.log_lock_waits && t_thrd.storage_cxt.deadlock_state != DS_NOT_YET_CHECKED) ||
+        (t_thrd.storage_cxt.deadlock_state == DS_LOCK_TIMEOUT)) {
+        StringInfoData buf;
+        const char* modename = NULL;
+        long secs;
+        int usecs;
+        long msecs;
+
+        initStringInfo(&buf);
+        DescribeLockTag(&buf, &locallock->tag.lock);
+        modename = GetLockmodeName(locallock->tag.lock.locktag_lockmethodid, lockmode);
+        TimestampDifference(t_thrd.storage_cxt.timeout_start_time, GetCurrentTimestamp(), &secs, &usecs);
+        msecs = secs * 1000 + usecs / 1000;  // unit of time
+        usecs = usecs % 1000;                // unit of time
+
+        if (t_thrd.storage_cxt.deadlock_state == DS_SOFT_DEADLOCK) {
+            ereport(LOG,
+                    (errmsg("thread %lu avoided deadlock for %s on %s by rearranging queue order after %ld.%03d ms",
+                            t_thrd.proc_cxt.MyProcPid,
+                            modename,
+                            buf.data,
+                            msecs,
+                            usecs)));
+        } else if (t_thrd.storage_cxt.deadlock_state == DS_HARD_DEADLOCK) {
+            /*
+             * This message is a bit redundant with the error that will be
+             * reported subsequently, but in some cases the error report
+             * might not make it to the log (eg, if it's caught by an
+             * exception handler), and we want to ensure all long-wait
+             * events get logged.
+             */
+            ereport(LOG,
+                    (errmsg("thread %lu detected deadlock while waiting for %s on %s after %ld.%03d ms",
+                            t_thrd.proc_cxt.MyProcPid,
+                            modename,
+                            buf.data,
+                            msecs,
+                            usecs)));
+        }
+
+        if (myWaitStatus == STATUS_WAITING) {
+            ereport(LOG,
+                    (errmsg("thread %lu still waiting for %s on %s after %ld.%03d ms",
+                            t_thrd.proc_cxt.MyProcPid,
+                            modename,
+                            buf.data,
+                            msecs,
+                            usecs)));
+        } else if (myWaitStatus == STATUS_OK) {
+            ereport(LOG,
+                    (errmsg("thread %lu acquired %s on %s after %ld.%03d ms",
+                            t_thrd.proc_cxt.MyProcPid,
+                            modename,
+                            buf.data,
+                            msecs,
+                            usecs)));
+        } else {
+            Assert(myWaitStatus == STATUS_ERROR);
+
+            /*
+             * Currently, the deadlock checker always kicks its own
+             * process, which means that we'll only see STATUS_ERROR when
+             * deadlock_state == DS_HARD_DEADLOCK, and there's no need to
+             * print redundant messages.  But for completeness and
+             * future-proofing, print a message if it looks like someone
+             * else kicked us off the lock.
+             */
+            if (t_thrd.storage_cxt.deadlock_state != DS_HARD_DEADLOCK) {
+                ereport(LOG, (errmsg("thread %lu failed to acquire %s on %s after %ld.%03d ms",
+                                        t_thrd.proc_cxt.MyProcPid, modename, buf.data, msecs, usecs)));
+            }
+        }
+
+        /* ereport when we reach lock wait timeout to avoid distributed deadlock. */
+        if (t_thrd.storage_cxt.deadlock_state == DS_LOCK_TIMEOUT) {
+            if (waitSec > 0) {
+                ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+                    errmsg("could not obtain lock on row in relation,waitSec = %d", waitSec)));
+            } else {
+                StringInfoData callStack;
+                initStringInfo(&callStack);
+                get_stack_according_to_tid(t_thrd.storage_cxt.conflicting_lock_thread_id, &callStack);
+                FreeStringInfo(&callStack);
+                ereport(ERROR, (errcode(ERRCODE_LOCK_WAIT_TIMEOUT),
+                    (errmsg("Lock wait timeout: thread %lu on node %s waiting for %s on %s after %ld.%03d ms",
+                            t_thrd.proc_cxt.MyProcPid, g_instance.attr.attr_common.PGXCNodeName,
+                            modename, buf.data, msecs, usecs),
+                     errdetail("blocked by%sthread %lu, statement <%s>,%slockmode %s.",
+                               t_thrd.storage_cxt.conflicting_lock_by_holdlock ?
+                               " hold lock " : " lock requested waiter ",
+                               t_thrd.storage_cxt.conflicting_lock_thread_id,
+                               t_thrd.storage_cxt.conflicting_lock_thread_id == (ThreadId)0 ?
+                               "pending twophase transaction" :
+                               pgstat_get_backend_current_activity(
+                                   t_thrd.storage_cxt.conflicting_lock_thread_id, false),
+                               t_thrd.storage_cxt.conflicting_lock_by_holdlock ? " hold " : " requested ",
+                               t_thrd.storage_cxt.conflicting_lock_mode_name))));
+            }
+        }
+
+        /*
+        * At this point we might still need to wait for the lock. Reset
+        * state so we don't print the above messages again.
+        */
+        t_thrd.storage_cxt.deadlock_state = DS_NO_DEADLOCK;
+
+        pfree(buf.data);
+        buf.data = NULL;
+    }
+
+    return myWaitStatus;
+}
+
+
+static int ProcSleepForDeadLockTimeout(LOCALLOCK* locallock, int myWaitStatus, int needWaitTime,
+    int waitSec, bool *allowAvcCancel)
+{
+    if (myWaitStatus != STATUS_WAITING) {
+        return myWaitStatus;
+    }
+
+    /*
+     * Set timer so we can wake up after awhile and check for a deadlock. If a
+     * deadlock is detected, the handler releases the process's semaphore and
+     * sets t_thrd.proc->waitStatus = STATUS_ERROR, allowing us to know that we
+     * must report failure rather than success.
+     *
+     * By delaying the check until we've waited for a bit, we can avoid
+     * running the rather expensive deadlock-check code in most cases.
+     */
+    if (!enable_sig_alarm(needWaitTime, false))
+        ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("could not set timer for process wakeup")));
+
+    /*
+     * If someone wakes us between LWLockRelease and PGSemaphoreLock,
+     * PGSemaphoreLock will not block.	The wakeup is "saved" by the semaphore
+     * implementation.	While this is normally good, there are cases where a
+     * saved wakeup might be leftover from a previous operation (for example,
+     * we aborted ProcWaitForSignal just before someone did ProcSendSignal).
+     * So, loop to wait again if the waitStatus shows we haven't been granted
+     * nor denied the lock yet.
+     *
+     * We pass interruptOK = true, which eliminates a window in which
+     * cancel/die interrupts would be held off undesirably.  This is a promise
+     * that we don't mind losing control to a cancel/die interrupt here.  We
+     * don't, because we have no shared-state-change work to do after being
+     * granted the lock (the grantor did it all).  We do have to worry about
+     * updating the locallock table, but if we lose control to an error,
+     * LockErrorCleanup will fix that up.
+     */
+    do {
+        PGSemaphoreLock(&t_thrd.proc->sem, true);
+
+        /*
+         * If the deadlock timer was triggered, we need to check if we're in a
+         * deadlock. If we are, we need to abort the transaction.
+         */
+        myWaitStatus = ProcCheckMyWaitStatus(locallock, waitSec, allowAvcCancel);
+    } while (myWaitStatus == STATUS_WAITING && t_thrd.storage_cxt.deadlock_timeout_active);
+
+    return myWaitStatus;
+}
+
+
+static int ProcSleepForLockwaitTimeout(LOCALLOCK* locallock, int myWaitStatus, int needWaitTime,
+    int waitSec, bool *allowAvcCancel)
+{
+    if (myWaitStatus != STATUS_WAITING) {
+        return myWaitStatus;
+    }
+
+    Assert(myWaitStatus == STATUS_WAITING && !t_thrd.storage_cxt.deadlock_timeout_active);
+    
+    const int timeUnit = 1000;  // time unit
+    do {
+        /*
+         * Set timer so we can wake up after awhile and check for a lock acquire
+         * time out. If time out, ereport and abort current transaction.
+         */
+        if (waitSec > 0) {
+            if (t_thrd.storage_cxt.timer_continued.tv_sec != 0 || t_thrd.storage_cxt.timer_continued.tv_usec != 0) {
+                int tmpWaitTime = t_thrd.storage_cxt.timer_continued.tv_sec * timeUnit +
+                    t_thrd.storage_cxt.timer_continued.tv_usec / timeUnit;
+                needWaitTime = Max(1, tmpWaitTime - u_sess->attr.attr_storage.DeadlockTimeout);
+            } else {
+                needWaitTime =Max(1, (waitSec * timeUnit) - u_sess->attr.attr_storage.DeadlockTimeout);
+            }
+        }
+        if (needWaitTime > 0) {
+            if (!enable_lockwait_sig_alarm(needWaitTime)) {
+                ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not set timer for process wakeup")));
+            }
+        }
+        PGSemaphoreLock(&t_thrd.proc->sem, true);
+
+        myWaitStatus = ProcCheckMyWaitStatus(locallock, waitSec, allowAvcCancel);
+    } while (myWaitStatus == STATUS_WAITING);
+
+    return myWaitStatus;
+}
+
+
 /*
  * ProcSleep -- put a process to sleep on the specified lock
  *
@@ -1785,8 +2055,6 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
     PROC_QUEUE* waitQueue = &(lock->waitProcs);
     LOCKMASK myHeldLocks = t_thrd.proc->heldLocks;
     bool early_deadlock = false;
-    bool allow_autovacuum_cancel = true;
-    int myWaitStatus;
     PGPROC *proc = NULL;
     PGPROC *leader = t_thrd.proc->lockGroupLeader;
     int i;
@@ -1948,232 +2216,28 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
     /* enlarge the deadlock-check timeout if needed. */
     int deadLockTimeout = !t_thrd.storage_cxt.EnlargeDeadlockTimeout ? u_sess->attr.attr_storage.DeadlockTimeout
                         : u_sess->attr.attr_storage.DeadlockTimeout * 3;
-    int lockWaitTimeout = Max(1, (allow_con_update ? u_sess->attr.attr_storage.LockWaitUpdateTimeout
-	    : u_sess->attr.attr_storage.LockWaitTimeout));
+    int lockWaitTimeout = allow_con_update ? u_sess->attr.attr_storage.LockWaitUpdateTimeout
+	                    : u_sess->attr.attr_storage.LockWaitTimeout;
+    bool allow_autovacuum_cancel = true;
 
-    /*
-     * Set timer so we can wake up after awhile and check for a deadlock. If a
-     * deadlock is detected, the handler releases the process's semaphore and
-     * sets t_thrd.proc->waitStatus = STATUS_ERROR, allowing us to know that we
-     * must report failure rather than success.
-     *
-     * By delaying the check until we've waited for a bit, we can avoid
-     * running the rather expensive deadlock-check code in most cases.
-     */
-    if (!enable_sig_alarm(Min(deadLockTimeout, lockWaitTimeout), false))
-        ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("could not set timer for process wakeup")));
+    /* wait smaller timeout first. */
+    if (lockWaitTimeout == 0) {
+        int myWaitStatus = ProcSleepForDeadLockTimeout(
+            locallock, STATUS_WAITING, deadLockTimeout, waitSec, &allow_autovacuum_cancel);
+        ProcSleepForLockwaitTimeout(locallock, myWaitStatus, 0, waitSec, &allow_autovacuum_cancel);
 
-    /*
-     * If someone wakes us between LWLockRelease and PGSemaphoreLock,
-     * PGSemaphoreLock will not block.	The wakeup is "saved" by the semaphore
-     * implementation.	While this is normally good, there are cases where a
-     * saved wakeup might be leftover from a previous operation (for example,
-     * we aborted ProcWaitForSignal just before someone did ProcSendSignal).
-     * So, loop to wait again if the waitStatus shows we haven't been granted
-     * nor denied the lock yet.
-     *
-     * We pass interruptOK = true, which eliminates a window in which
-     * cancel/die interrupts would be held off undesirably.  This is a promise
-     * that we don't mind losing control to a cancel/die interrupt here.  We
-     * don't, because we have no shared-state-change work to do after being
-     * granted the lock (the grantor did it all).  We do have to worry about
-     * updating the locallock table, but if we lose control to an error,
-     * LockErrorCleanup will fix that up.
-     */
-    do {
-        PGSemaphoreLock(&t_thrd.proc->sem, true);
+    } else if (lockWaitTimeout <= deadLockTimeout) {
+        // sleep for lockwait, the result may be obtained or timeout error, so no need to check deadlock.
+        t_thrd.storage_cxt.timeout_start_time = GetCurrentTimestamp();
+        ProcSleepForLockwaitTimeout(
+            locallock, STATUS_WAITING, lockWaitTimeout, waitSec, &allow_autovacuum_cancel);
 
-        /*
-         * waitStatus could change from STATUS_WAITING to something else
-         * asynchronously.	Read it just once per loop to prevent surprising
-         * behavior (such as missing log messages).
-         */
-        myWaitStatus = t_thrd.proc->waitStatus;
-
-        /*
-         * If we are not deadlocked, but are waiting on an autovacuum-induced
-         * task, send a signal to interrupt it. If I am an autovacuum worker, don't
-         * send a signal to inerrutpt.
-         *
-         * If we are not deadlocked, but are waiting on a data redistribution
-         * -induced task, send a signal to interrupt it. No extra enable_cluster_resize
-         * check is needed, since DS_BLOCKED_BY_REDISTRIBUTION can only be set
-         * by blocking proc with enable_cluster_resize on.
-         */
-        if (t_thrd.storage_cxt.deadlock_state == DS_BLOCKED_BY_AUTOVACUUM && allow_autovacuum_cancel &&
-            !IsAutoVacuumWorkerProcess()) {
-            /* cancle all existing blockers */
-            CancelAllBlockedAutovacWorkers(lock, lockmode);
-
-            /* prevent signal from being resent more than once */
-            allow_autovacuum_cancel = false;
-        } else if (t_thrd.storage_cxt.deadlock_state == DS_BLOCKED_BY_REDISTRIBUTION) {
-            /*
-             * We only cancel blocked redistribution thread when redistribution_cancelable
-             * flag is on, otherwise we reset the thread local variable
-             * blocking_redistribution_proc to prevent the following scenario from
-             * happening.
-             *
-             * thread 1:
-             * set enable_cluster_resize=on;
-             * START TRANSACTION;
-             * select pg_enable_redis_proc_cancelable();
-             * LOCK TABLE t1 IN ACCESS SHARE MODE;
-             *
-             * thread 2:
-             * truncate t1; <-- waiting due to LOCK TABLE t1
-             * ctrl+c to cancel it
-             * truncate t1; <-- causing thread 1 exits even when t1 is not in append_mode
-             *
-             * The first truncate detects redistribution thread blocks t1 and set
-             * blocking_redistribution_proc and return DS_BLOCKED_BY_REDISTRIBUTION, however
-             * the blocking_redistribution_proc should be reset if object is not in append_mode
-             * so the global variable of blocking_redistribution_proc will not affect the very
-             * next truncate/drop statement.
-             */
-            if (u_sess->catalog_cxt.redistribution_cancelable) {
-                CancelBlockedRedistWorker(lock, lockmode);
-
-                u_sess->catalog_cxt.redistribution_cancelable = false;
-            } else {
-                t_thrd.storage_cxt.blocking_redistribution_proc = NULL;
-            }
-        }
-
-        /*
-         * If awoken after the deadlock check interrupt has run, and
-         * log_lock_waits is on, then report about the wait.
-         */
-        if ((u_sess->attr.attr_storage.log_lock_waits && t_thrd.storage_cxt.deadlock_state != DS_NOT_YET_CHECKED) ||
-            (t_thrd.storage_cxt.deadlock_state == DS_LOCK_TIMEOUT)) {
-            StringInfoData buf;
-            const char* modename = NULL;
-            long secs;
-            int usecs;
-            long msecs;
-
-            initStringInfo(&buf);
-            DescribeLockTag(&buf, &locallock->tag.lock);
-            modename = GetLockmodeName(locallock->tag.lock.locktag_lockmethodid, lockmode);
-            TimestampDifference(t_thrd.storage_cxt.timeout_start_time, GetCurrentTimestamp(), &secs, &usecs);
-            msecs = secs * 1000 + usecs / 1000;
-            usecs = usecs % 1000;
-
-            if (t_thrd.storage_cxt.deadlock_state == DS_SOFT_DEADLOCK) {
-                ereport(LOG,
-                        (errmsg("thread %lu avoided deadlock for %s on %s by rearranging queue order after %ld.%03d ms",
-                                t_thrd.proc_cxt.MyProcPid,
-                                modename,
-                                buf.data,
-                                msecs,
-                                usecs)));
-            } else if (t_thrd.storage_cxt.deadlock_state == DS_HARD_DEADLOCK) {
-                /*
-                 * This message is a bit redundant with the error that will be
-                 * reported subsequently, but in some cases the error report
-                 * might not make it to the log (eg, if it's caught by an
-                 * exception handler), and we want to ensure all long-wait
-                 * events get logged.
-                 */
-                ereport(LOG,
-                        (errmsg("thread %lu detected deadlock while waiting for %s on %s after %ld.%03d ms",
-                                t_thrd.proc_cxt.MyProcPid,
-                                modename,
-                                buf.data,
-                                msecs,
-                                usecs)));
-            }
-
-            if (myWaitStatus == STATUS_WAITING) {
-                ereport(LOG,
-                        (errmsg("thread %lu still waiting for %s on %s after %ld.%03d ms",
-                                t_thrd.proc_cxt.MyProcPid,
-                                modename,
-                                buf.data,
-                                msecs,
-                                usecs)));
-            } else if (myWaitStatus == STATUS_OK) {
-                ereport(LOG,
-                        (errmsg("thread %lu acquired %s on %s after %ld.%03d ms",
-                                t_thrd.proc_cxt.MyProcPid,
-                                modename,
-                                buf.data,
-                                msecs,
-                                usecs)));
-            } else {
-                Assert(myWaitStatus == STATUS_ERROR);
-
-                /*
-                 * Currently, the deadlock checker always kicks its own
-                 * process, which means that we'll only see STATUS_ERROR when
-                 * deadlock_state == DS_HARD_DEADLOCK, and there's no need to
-                 * print redundant messages.  But for completeness and
-                 * future-proofing, print a message if it looks like someone
-                 * else kicked us off the lock.
-                 */
-                if (t_thrd.storage_cxt.deadlock_state != DS_HARD_DEADLOCK) {
-                    ereport(LOG, (errmsg("thread %lu failed to acquire %s on %s after %ld.%03d ms",
-                                         t_thrd.proc_cxt.MyProcPid, modename, buf.data, msecs, usecs)));
-                }
-            }
-
-            /* ereport when we reach lock wait timeout to avoid distributed deadlock. */
-            if (t_thrd.storage_cxt.deadlock_state == DS_LOCK_TIMEOUT) {
-                if (waitSec > 0) {
-                    ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
-                        errmsg("could not obtain lock on row in relation,waitSec = %d", waitSec)));
-                } else {
-                    StringInfoData callStack;
-                    initStringInfo(&callStack);
-                    get_stack_according_to_tid(t_thrd.storage_cxt.conflicting_lock_thread_id, &callStack);
-                    FreeStringInfo(&callStack);
-                    ereport(ERROR, (errcode(ERRCODE_LOCK_WAIT_TIMEOUT),
-                                (errmsg("Lock wait timeout: thread %lu on node %s waiting for %s on %s after %ld.%03d ms",
-                                        t_thrd.proc_cxt.MyProcPid, g_instance.attr.attr_common.PGXCNodeName, modename, buf.data, msecs,
-                                        usecs),
-                                 errdetail("blocked by%sthread %lu, statement <%s>,%slockmode %s.",
-                                            t_thrd.storage_cxt.conflicting_lock_by_holdlock ? " hold lock " : " lock requested waiter ",
-                                            t_thrd.storage_cxt.conflicting_lock_thread_id,
-                                            t_thrd.storage_cxt.conflicting_lock_thread_id == (ThreadId)0 ?
-                                            "pending twophase transaction" :
-                                            pgstat_get_backend_current_activity(t_thrd.storage_cxt.conflicting_lock_thread_id, false),
-                                            t_thrd.storage_cxt.conflicting_lock_by_holdlock ? " hold " : " requested ",
-                                            t_thrd.storage_cxt.conflicting_lock_mode_name))));
-                }
-            }
-
-            /*
-             * At this point we might still need to wait for the lock. Reset
-             * state so we don't print the above messages again.
-             */
-            t_thrd.storage_cxt.deadlock_state = DS_NO_DEADLOCK;
-
-            pfree(buf.data);
-            buf.data = NULL;
-        }
-
-        /*
-         * Set timer so we can wake up after awhile and check for a lock acquire
-         * time out. If time out, ereport and abort current transaction.
-         */
-        int needWaitTime = Max(1, (allow_con_update ? u_sess->attr.attr_storage.LockWaitUpdateTimeout :
-                               u_sess->attr.attr_storage.LockWaitTimeout) - u_sess->attr.attr_storage.DeadlockTimeout);
-        if (waitSec > 0) {
-            if (t_thrd.storage_cxt.timer_continued.tv_sec != 0 || t_thrd.storage_cxt.timer_continued.tv_usec != 0) {
-                int tmpWaitTime = t_thrd.storage_cxt.timer_continued.tv_sec * 1000 +
-                    t_thrd.storage_cxt.timer_continued.tv_usec / 1000;
-                needWaitTime = Max(1, tmpWaitTime - u_sess->attr.attr_storage.DeadlockTimeout);
-            } else {
-                needWaitTime =Max(1, (waitSec * 1000) - u_sess->attr.attr_storage.DeadlockTimeout);
-            }
-        }
-
-        if (myWaitStatus == STATUS_WAITING && !t_thrd.storage_cxt.deadlock_timeout_active) {
-            if (!enable_lockwait_sig_alarm(needWaitTime)) {
-                ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not set timer for process wakeup")));
-            }
-        }
-    } while (myWaitStatus == STATUS_WAITING);
+    } else {
+        int timeRemaining = lockWaitTimeout - deadLockTimeout;
+        int myWaitStatus = ProcSleepForDeadLockTimeout(
+            locallock, STATUS_WAITING, deadLockTimeout, waitSec, &allow_autovacuum_cancel);
+        ProcSleepForLockwaitTimeout(locallock, myWaitStatus, timeRemaining, waitSec, &allow_autovacuum_cancel);
+    }
 
     /*
      * Disable the timer, if it's still running
@@ -2452,7 +2516,8 @@ static void CheckDeadLock(void)
          *
          */
         PGSemaphoreUnlock(&t_thrd.proc->sem);
-    } else if (u_sess->attr.attr_storage.LockWaitTimeout > 0) {
+    } else if (u_sess->attr.attr_storage.LockWaitTimeout >= 0 ||
+               u_sess->attr.attr_storage.LockWaitUpdateTimeout >= 0) {
         /*
          * Unlock my semaphore so that interrupt the ProcSleep() call and
          * Enable the SIGALRM interrupt for lock wait timeout.

@@ -601,6 +601,10 @@ static void InitUndoMeta(void)
 
 void RecoveryUndoSystemMeta(void)
 {
+    if (ENABLE_DMS) {
+        ereport(LOG, (errmsg("Skip recovery undo system meta in shared storage mode.")));
+        return;
+    }
     if (t_thrd.role == STARTUP) {
         /* Ensure that the undometa file exists. */
         if (access(UNDO_META_FILE, F_OK) != 0) {
