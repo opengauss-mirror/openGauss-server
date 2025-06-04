@@ -277,7 +277,11 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
      * that we produce a zero-element array if no tuples are produced (this is
      * a change from pre-8.3 behavior of returning NULL).
      */
+#ifdef USE_SPQ
+    result = BoolGetDatum(sub_link_type == ALL_SUBLINK || sub_link_type == NOT_EXISTS_SUBLINK);
+#else
     result = BoolGetDatum(sub_link_type == ALL_SUBLINK);
+#endif
     *isNull = false;
 
     for (slot = ExecProcNode(planstate); !TupIsNull(slot); slot = ExecProcNode(planstate)) {
@@ -294,6 +298,13 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
             result = BoolGetDatum(true);
             break;
         }
+#ifdef USE_SPQ
+        if (sub_link_type == NOT_EXISTS_SUBLINK) {
+            found = true;
+            result = BoolGetDatum(false);
+            break;
+        }
+#endif
 
         if (sub_link_type == EXPR_SUBLINK) {
             /* cannot allow multiple input tuples for EXPR sublink */
@@ -1008,13 +1019,22 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
         Assert(slot->tts_tupleDescriptor != NULL);
         int i = 1;
 
+#ifdef USE_SPQ
+        if (sub_link_type == EXISTS_SUBLINK || sub_link_type == NOT_EXISTS_SUBLINK) {
+#else
         if (sub_link_type == EXISTS_SUBLINK) {
+#endif
             /* There can be only one setParam... */
             int paramid = linitial_int(subplan->setParam);
             ParamExecData* prm = &(econtext->ecxt_param_exec_vals[paramid]);
 
             prm->execPlan = NULL;
             prm->value = BoolGetDatum(true);
+#ifdef USE_SPQ
+            if (sub_link_type == NOT_EXISTS_SUBLINK) {
+                prm->value = BoolGetDatum(false);
+            }
+#endif
             prm->isnull = false;
             found = true;
             break;
@@ -1091,13 +1111,22 @@ void ExecSetParamPlan(SubPlanState* node, ExprContext* econtext)
         prm->value = node->curArray;
         prm->isnull = false;
     } else if (!found) {
+#ifdef USE_SPQ
+        if (sub_link_type == EXISTS_SUBLINK || sub_link_type == NOT_EXISTS_SUBLINK) {
+#else
         if (sub_link_type == EXISTS_SUBLINK) {
+#endif
             /* There can be only one setParam... */
             int paramid = linitial_int(subplan->setParam);
             ParamExecData* prm = &(econtext->ecxt_param_exec_vals[paramid]);
 
             prm->execPlan = NULL;
             prm->value = BoolGetDatum(false);
+#ifdef USE_SPQ
+            if (sub_link_type == NOT_EXISTS_SUBLINK) {
+                prm->value = BoolGetDatum(true);
+            }
+#endif
             prm->isnull = false;
         } else {
             foreach (l, subplan->setParam) {
