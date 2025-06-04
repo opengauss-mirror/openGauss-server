@@ -650,23 +650,6 @@ int cfwrite(const void* ptr, int size, cfp* fp)
         return fwrite(ptr, 1, size, fp->uncompressedfp);
 }
 
-int cfwriteWithLock(const void* ptr, int size, cfp* fp)
-{
-    int rc = 0;
-#ifdef HAVE_LIBZ
-    if (fp->compressedfp != NULL) {
-        flock(fileno(fp->lock), LOCK_EX);
-        rc = gzwrite(fp->compressedfp, ptr, size);
-        flock(fileno(fp->lock), LOCK_UN);
-        return rc;
-    } else
-#endif
-    flock(fileno(fp->lock), LOCK_EX);
-    rc = fwrite(ptr, 1, size, fp->uncompressedfp);
-    flock(fileno(fp->lock), LOCK_UN);
-    return rc;
-}
-
 int cfgetc(cfp* fp)
 {
 #ifdef HAVE_LIBZ

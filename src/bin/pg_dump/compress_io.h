@@ -57,7 +57,6 @@ extern cfp* cfopen_write(const char* path, const char* mode, int compression);
 extern cfp* cfopen_write4Lock(const char* path, const char* mode, int compression);
 extern int cfread(void* ptr, int size, cfp* fp);
 extern int cfwrite(const void* ptr, int size, cfp* fp);
-extern int cfwriteWithLock(const void* ptr, int size, cfp* fp);
 extern int cfgetc(cfp* fp);
 extern char* cfgets(cfp* fp, char* buf, int len);
 extern int cfclose(cfp* fp);
