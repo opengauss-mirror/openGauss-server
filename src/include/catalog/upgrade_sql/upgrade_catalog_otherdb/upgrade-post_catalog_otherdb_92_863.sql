@@ -1,4 +1,5 @@
 DROP FUNCTION IF EXISTS pg_catalog.gs_xlog_keepers() CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 9040;
 CREATE OR REPLACE FUNCTION pg_catalog.gs_xlog_keepers
 (out keeptype pg_catalog.text,
 out keepsegment pg_catalog.text,
