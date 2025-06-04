@@ -779,6 +779,12 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         concurrent = false;
     }
 
+    if (concurrent && strcmp(stmt->accessMethod, "bm25") == 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("concurrent index creation is not supporteded for bm25")));
+    }
+
     /* Don't suppport gin/gist index on global temporary table */
     if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP &&
        (strcmp(stmt->accessMethod, "gin") == 0 || strcmp(stmt->accessMethod, "gist") == 0)) {
@@ -3684,6 +3690,15 @@ static bool checkIndexForReindexConcurrently(Relation indexRelation, bool reinde
         return false;
     }
 
+    if (strcmp(indexRelation->rd_am->amname.data, "bm25") == 0) {
+        ereport(errorType, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot reindex concurrently bm25 index \" %s.%s\"%s",
+                get_namespace_name(get_rel_namespace(indexRelation->rd_id)),
+                get_rel_name(indexRelation->rd_id),
+                reindexIndex ? "" : ", skipping")));
+        return false;
+    }
+
     return true;
 }
 
@@ -3817,8 +3832,10 @@ static void prepareReindexTableConcurrently(Oid relationOid, Oid relationPartOid
         Oid cellOid = lfirst_oid(lc);
         Relation indexRelation = index_open(cellOid, ShareUpdateExclusiveLock);
 
-        if (!checkIndexForReindexConcurrently(indexRelation, false))
+        if (!checkIndexForReindexConcurrently(indexRelation, false)) {
+            index_close(indexRelation, NoLock);
             continue;
+        }
 
         if (RelationIsPartitioned(indexRelation)) {
             if (OidIsValid(relationPartOid)) {

@@ -322,47 +322,57 @@ static void FreeBuildState(BM25BuildState *buildstate)
     MemoryContextDelete(buildstate->tmpCtx);
 }
 
-static void AllocateForwardIdxForToken(Relation index, uint32 tokenCount, uint64 *start, uint64 *end,
-    BlockNumber *startPage, BM25DocForwardMetaPage metaPage, ForkNumber forkNum, bool building)
+static void AllocateForwardIdxForToken(Relation index, uint32 tokenCount, BM25EntryPages &bm25EntryPages, uint64 *start,
+    uint64 *end, ForkNumber forkNum, bool building)
 {
     Buffer buf;
     Page page;
     GenericXLogState *state = nullptr;
-    /* first page */
-    if (metaPage->capacity == 0) {
+    Buffer metabuf;
+    Page metaPage;
+    GenericXLogState *metaState = nullptr;
+    BM25DocForwardMetaPage metaForwardPage;
+
+    /* open forward list */
+    metabuf = ReadBuffer(index, bm25EntryPages.docForwardPage);
+    LockBuffer(metabuf, BUFFER_LOCK_EXCLUSIVE);
+    BM25GetPage(index, &metaPage, metabuf, &metaState, building);
+    metaForwardPage = BM25PageGetDocForwardMeta(metaPage);
+    /* init first data page of forward list */
+    if (metaForwardPage->capacity == 0) {
         buf = BM25NewBuffer(index, forkNum);
         BM25GetPage(index, &page, buf, &state, building);
         BM25InitPage(buf, page);
         BlockNumber newblk = BufferGetBlockNumber(buf);
-        metaPage->startPage = newblk;
-        metaPage->lastPage = newblk;
-        metaPage->size = 0;
-        metaPage->capacity = BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+        metaForwardPage->startPage = newblk;
+        metaForwardPage->lastPage = newblk;
+        metaForwardPage->size = 0;
+        metaForwardPage->capacity = BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+        metaForwardPage->docForwardBlknoTable = InvalidBlockNumber;
+        metaForwardPage->docForwardBlknoInsertPage = InvalidBlockNumber;
+        RecordDocForwardBlkno2DocForwardBlknoTable(index, metaForwardPage, newblk, building, forkNum);
         BM25CommitBuf(buf, &state, building);
     }
-    *startPage = metaPage->lastPage;
-    /* need expand new page */
-    if (metaPage->capacity - metaPage->size < tokenCount) {
-        bool isFull = metaPage->capacity == metaPage->size;
-        buf = ReadBuffer(index, metaPage->lastPage);
+    /* need expand data page for forward list */
+    if (metaForwardPage->capacity - metaForwardPage->size < tokenCount) {
+        buf = ReadBuffer(index, metaForwardPage->lastPage);
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
         BM25GetPage(index, &page, buf, &state, building);
         /* start append */
-        while (metaPage->capacity - metaPage->size < tokenCount) {
+        while (metaForwardPage->capacity - metaForwardPage->size < tokenCount) {
             BM25AppendPage(index, &buf, &page, MAIN_FORKNUM, &state, building);
             BlockNumber newblk = BufferGetBlockNumber(buf);
-            if (isFull) {
-                *startPage = newblk;
-                isFull = false;
-            }
-            metaPage->lastPage = newblk;
-            metaPage->capacity += BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+            metaForwardPage->lastPage = newblk;
+            metaForwardPage->capacity += BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+            RecordDocForwardBlkno2DocForwardBlknoTable(index, metaForwardPage, newblk, building, forkNum);
         }
         BM25CommitBuf(buf, &state, building);
     }
-    *start = metaPage->size;
-    *end = metaPage->size + tokenCount - 1;
-    metaPage->size += tokenCount;
+    *start = metaForwardPage->size;
+    *end = metaForwardPage->size + tokenCount - 1;
+    metaForwardPage->size += tokenCount;
+
+    BM25CommitBuf(metabuf, &metaState, building);
 }
 
 static BlockNumber SeekForwardBlknoForToken(Relation index, BlockNumber startBlkno, BlockNumber step)
@@ -381,48 +391,47 @@ static BlockNumber SeekForwardBlknoForToken(Relation index, BlockNumber startBlk
 }
 
 static void InsertDocForwardItem(Relation index, uint32 docId, BM25TokenizedDocData &tokenizedDoc,
-    BM25EntryPages &bm25EntryPages, uint64 *forwardStart, uint64 *forwardEnd, ForkNumber forkNum, bool building)
+    BM25EntryPages &bm25EntryPages, uint64 forwardStart, uint64 forwardEnd, ForkNumber forkNum, bool building)
 {
     Buffer buf;
     Page page;
-    GenericXLogState *state = nullptr;
-    BlockNumber forwardStartBlkno;
     Buffer metabuf;
     Page metapage;
-    GenericXLogState *metaState = nullptr;
+    uint16 offset;
+    uint64 tokenIdx = forwardStart;
+    BlockNumber forwardBlkno;
+    BlockNumber docForwardBlknoTable;
+    BlockNumber curBlockIdx;
+    BlockNumber preBlockIdx;
+    GenericXLogState *state = nullptr;
     BM25DocForwardMetaPage metaForwardPage;
 
     /* open forward list */
     metabuf = ReadBuffer(index, bm25EntryPages.docForwardPage);
-    LockBuffer(metabuf, BUFFER_LOCK_EXCLUSIVE);
-    BM25GetPage(index, &metapage, metabuf, &metaState, building);
+    LockBuffer(metabuf, BUFFER_LOCK_SHARE);
+    metapage = BufferGetPage(metabuf);
     metaForwardPage = BM25PageGetDocForwardMeta(metapage);
-    AllocateForwardIdxForToken(index, tokenizedDoc.tokenCount, forwardStart, forwardEnd,
-        &forwardStartBlkno, metaForwardPage, forkNum, building);
-    MarkBufferDirty(metabuf);
+    docForwardBlknoTable = metaForwardPage->docForwardBlknoTable;
     UnlockReleaseBuffer(metabuf);
 
-    uint64 tokenIdx = *forwardStart;
-    BlockNumber curStep = tokenIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
-    BlockNumber preStep = curStep;
-    BlockNumber curBlkno = forwardStartBlkno;
-    uint16 offset;
-
-    buf = ReadBuffer(index, curBlkno);
+    curBlockIdx = tokenIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+    preBlockIdx = curBlockIdx;
+    forwardBlkno = SeekBlocknoForForwardToken(index, tokenIdx, docForwardBlknoTable);
+    buf = ReadBuffer(index, forwardBlkno);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
     BM25GetPage(index, &page, buf, &state, building);
-
     for (int i = 0; i < tokenizedDoc.tokenCount; i++) {
-        curStep = tokenIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
-        offset = tokenIdx % BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
-        if (curStep != preStep) {
-            curBlkno = BM25PageGetOpaque(page)->nextblkno;
+        Assert(forwardEnd >= tokenIdx);
+        curBlockIdx = tokenIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+        if (curBlockIdx != preBlockIdx) {
+            forwardBlkno = BM25PageGetOpaque(page)->nextblkno;
             BM25CommitBuf(buf, &state, building);
-            buf = ReadBuffer(index, curBlkno);
+            buf = ReadBuffer(index, forwardBlkno);
             LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
             BM25GetPage(index, &page, buf, &state, building);
-            preStep = curStep;
+            preBlockIdx = curBlockIdx;
         }
+        offset = tokenIdx % BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
         BM25DocForwardItem *forwardItem =
             (BM25DocForwardItem*)((char *)page + sizeof(PageHeaderData) + offset * BM25_DOCUMENT_FORWARD_ITEM_SIZE);
         forwardItem->tokenId = tokenizedDoc.tokenDatas[i].tokenId;
@@ -495,12 +504,9 @@ static void InsertDocumentItem(Relation index, uint32 docId, BM25TokenizedDocDat
     docBlknoTable = docMetaPage->docBlknoTable;
     BM25CommitBuf(metabuf, &metaState, building);
 
-    InsertDocForwardItem(index, docId, tokenizedDoc, bm25EntryPages, &forwardStart, &forwardEnd, forkNum, building);
-
     /* write doc info into target blk */
     docBlkno = SeekBlocknoForDoc(index, docId, docBlknoTable);
     docOffset = docId % BM25_DOCUMENT_MAX_COUNT_IN_PAGE;
-
     buf = ReadBuffer(index, docBlkno);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
     BM25GetPage(index, &page, buf, &state, building);
@@ -512,9 +518,18 @@ static void InsertDocumentItem(Relation index, uint32 docId, BM25TokenizedDocDat
     docItem->docId = docId;
     docItem->docLength = tokenizedDoc.docLength;
     docItem->isActived = true;
-    docItem->tokenStartIdx = forwardStart;
-    docItem->tokenEndIdx = forwardEnd;
+    if (docItem->tokenEndIdx == 0) {
+        AllocateForwardIdxForToken(index, tokenizedDoc.tokenCount, bm25EntryPages, &forwardStart, &forwardEnd,
+            forkNum, building);
+        docItem->tokenStartIdx = forwardStart;
+        docItem->tokenEndIdx = forwardEnd;
+    } else {
+        forwardStart = docItem->tokenStartIdx;
+        forwardEnd = docItem->tokenEndIdx;
+    }
     BM25CommitBuf(buf, &state, building);
+
+    InsertDocForwardItem(index, docId, tokenizedDoc, bm25EntryPages, forwardStart, forwardEnd, forkNum, building);
 }
 
 static bool BM25InsertDocument(Relation index, Datum *values, ItemPointerData &ctid, BM25EntryPages &bm25EntryPages,
@@ -534,7 +549,7 @@ static bool BM25InsertDocument(Relation index, Datum *values, ItemPointerData &c
         MemoryContextDelete(tempCtx);
         return false;
     }
-    uint32 docId = BM25AllocateDocId(index, building);
+    uint32 docId = BM25AllocateDocId(index, building, tokenizedDoc.tokenCount);
     float avgdl = 1.f;
     BM25IncreaseDocAndTokenCount(index, tokenizedDoc.docLength, avgdl, building);
     InsertToIvertedList(index, docId, tokenizedDoc, avgdl, bm25EntryPages, forkNum, building);
@@ -690,6 +705,8 @@ static BM25EntryPages CreateEntryPages(Relation index, ForkNumber forkNum)
     entryPages.documentMetaPage = CreateDocMetaPage(index, forkNum);
     entryPages.docForwardPage = CreateDocForwardMetaPage(index, forkNum);
     entryPages.hashBucketsPage = CreateBM25CommonPage(index, forkNum, true);
+    entryPages.docmentFreePage = CreateBM25CommonPage(index, forkNum, true);
+    entryPages.docmentFreeInsertPage = CreateBM25CommonPage(index, forkNum, true);
     entryPages.maxHashBucketCount = InitHashBucketsPage(index, entryPages.hashBucketsPage);
     return entryPages;
 }

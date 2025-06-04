@@ -91,6 +91,9 @@ typedef struct BM25EntryPages {
     BlockNumber documentMetaPage;
     BlockNumber docForwardPage;
     BlockNumber hashBucketsPage;
+    BlockNumber docmentFreePage;
+    BlockNumber docmentFreeInsertPage;
+
     uint32 maxHashBucketCount;
 } BM25EntryPages;
 
@@ -132,6 +135,9 @@ typedef struct BM25DocForwardMetaPageData {
     BlockNumber lastPage;
     uint64 size;
     uint64 capacity;
+
+    BlockNumber docForwardBlknoTable;
+    BlockNumber docForwardBlknoInsertPage;
 } BM25DocForwardMetaPageData;
 
 typedef BM25DocForwardMetaPageData *BM25DocForwardMetaPage;
@@ -150,6 +156,11 @@ typedef struct BM25DocumentItem {
     uint64 tokenStartIdx;
     uint64 tokenEndIdx;
 } BM25DocumentItem;
+
+typedef struct BM25FreeDocumentItem {
+    uint32 docId;
+    uint32 tokenCapacity;
+} BM25FreeDocumentItem;
 
 /* 2 BlockNumber in each BM25HashBucketItem (8-byte alignment) */
 typedef struct BM25HashBucketItem {
@@ -303,7 +314,7 @@ void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap);
 void BM25AppendPage(Relation index, Buffer *buf, Page *page, ForkNumber forkNum, GenericXLogState **state,
     bool building);
 void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap);
-uint32 BM25AllocateDocId(Relation index, bool building);
+uint32 BM25AllocateDocId(Relation index, bool building, uint32 docTokenCount);
 uint32 BM25AllocateTokenId(Relation index);
 void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgdl, bool building);
 void RecordDocBlkno2DocBlknoTable(Relation index, BM25DocMetaPage docMetaPage,
@@ -311,6 +322,9 @@ void RecordDocBlkno2DocBlknoTable(Relation index, BM25DocMetaPage docMetaPage,
 BlockNumber SeekBlocknoForDoc(Relation index, uint32 docId, BlockNumber docBlknoTable);
 bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLocation, Buffer buf, Page page);
 BM25TokenizedDocData BM25DocumentTokenize(const char* doc, bool cutForSearch = false);
+void RecordDocForwardBlkno2DocForwardBlknoTable(Relation index, BM25DocForwardMetaPage metaForwardPage,
+    BlockNumber newDocForwardBlkno, bool building, ForkNumber forkNum);
+BlockNumber SeekBlocknoForForwardToken(Relation index, uint32 forwardIdx, BlockNumber docForwardBlknoTable);
 
 Datum bm25build(PG_FUNCTION_ARGS);
 Datum bm25buildempty(PG_FUNCTION_ARGS);
