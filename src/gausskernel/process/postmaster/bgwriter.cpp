@@ -62,6 +62,7 @@
 #include "utils/timestamp.h"
 #include "gssignal/gs_signal.h"
 #include "replication/slot.h"
+#include "replication/ss_disaster_cluster.h"
 #include "access/hash.h"
 
 /*
