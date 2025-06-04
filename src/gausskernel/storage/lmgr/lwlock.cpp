@@ -560,127 +560,127 @@ static void InitializeLWLocks(int numLocks)
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NUM_INDIVIDUAL_LWLOCKS);
 
     for (id = 0; id < NUM_BUFFER_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_BUFMAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_BUFMAPPING, id);
     }
 
     for (id = 0; id < NUM_LOCK_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_LOCK_MANAGER);
+        LWLockInitialize(&lock->lock, LWTRANCHE_LOCK_MANAGER, id);
     }
 
     for (id = 0; id < NUM_PREDICATELOCK_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_PREDICATE_LOCK_MANAGER);
+        LWLockInitialize(&lock->lock, LWTRANCHE_PREDICATE_LOCK_MANAGER, id);
     }
 
     for (id = 0; id < NUM_OPERATOR_REALTIME_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_OPERATOR_REAL_TIME);
+        LWLockInitialize(&lock->lock, LWTRANCHE_OPERATOR_REAL_TIME, id);
     }
 
     for (id = 0; id < NUM_OPERATOR_HISTORY_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_OPERATOR_HISTORY);
+        LWLockInitialize(&lock->lock, LWTRANCHE_OPERATOR_HISTORY, id);
     }
 
     for (id = 0; id < NUM_SESSION_REALTIME_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_SESSION_REAL_TIME);
+        LWLockInitialize(&lock->lock, LWTRANCHE_SESSION_REAL_TIME, id);
     }
 
     for (id = 0; id < NUM_SESSION_HISTORY_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_SESSION_HISTORY);
+        LWLockInitialize(&lock->lock, LWTRANCHE_SESSION_HISTORY, id);
     }
 
     for (id = 0; id < NUM_INSTANCE_REALTIME_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_INSTANCE_REAL_TIME);
+        LWLockInitialize(&lock->lock, LWTRANCHE_INSTANCE_REAL_TIME, id);
     }
 
     for (id = 0; id < NUM_CACHE_BUFFER_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_CACHE_SLOT_MAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_CACHE_SLOT_MAPPING, id);
     }
 
     for (id = 0; id < NUM_CSNLOG_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_CSN_BUFMAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_CSN_BUFMAPPING, id);
     }
 
     for (id = 0; id < NUM_CLOG_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_CLOG_BUFMAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_CLOG_BUFMAPPING, id);
     }
 
     for (id = 0; id < NUM_UNIQUE_SQL_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_UNIQUE_SQLMAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_UNIQUE_SQLMAPPING, id);
     }
 
     for (id = 0; id < NUM_INSTR_USER_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_INSTR_USER);
+        LWLockInitialize(&lock->lock, LWTRANCHE_INSTR_USER, id);
     }
 
     for (id = 0; id < NUM_GPC_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_GPC_MAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_GPC_MAPPING, id);
     }
 
     for (id = 0; id < NUM_UNIQUE_SQL_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_ASP_MAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_ASP_MAPPING, id);
     }
 
     for (id = 0; id < NUM_GS_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_GlobalSeq);
+        LWLockInitialize(&lock->lock, LWTRANCHE_GlobalSeq, id);
     }
 
     for (id = 0; id < NUM_GWC_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_GWC_MAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_GWC_MAPPING, id);
     }
 
     for (id = 0; id < NUM_NORMALIZED_SQL_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_NORMALIZED_SQL);
+        LWLockInitialize(&lock->lock, LWTRANCHE_NORMALIZED_SQL, id);
     }
 
     for (id = 0; id < NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_MPFL);
+        LWLockInitialize(&lock->lock, LWTRANCHE_MPFL, id);
     }
 
     for (id = 0; id < NUM_NGROUP_INFO_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_NGROUP_MAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_NGROUP_MAPPING, id);
     }
 
     for (id = 0; id < NUM_IO_STAT_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_IO_STAT);
+        LWLockInitialize(&lock->lock, LWTRANCHE_IO_STAT, id);
     }
 
     for (id = 0; id < NUM_PROCXACT_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_PROC_XACT_MAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_PROC_XACT_MAPPING, id);
     }
 
     for (id = 0; id < NUM_STARTBLOCK_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_START_BLOCK_MAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_START_BLOCK_MAPPING, id);
     }
 
     for (id = 0; id < NUM_SEGMENT_HEAD_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_SEGHEAD_PARTITION);
+        LWLockInitialize(&lock->lock, LWTRANCHE_SEGHEAD_PARTITION, id);
     }
 
     for (id = 0; id < NUM_TWOPHASE_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_TWOPHASE_STATE);
+        LWLockInitialize(&lock->lock, LWTRANCHE_TWOPHASE_STATE, id);
     }
 
     for (id = 0; id < NUM_SESSION_ROLEID_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_ROLEID_PARTITION);
+        LWLockInitialize(&lock->lock, LWTRANCHE_ROLEID_PARTITION, id);
     }
 
     for (id = 0; id < NUM_GPRC_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_GPRC_MAPPING);
+        LWLockInitialize(&lock->lock, LWTRANCHE_GPRC_MAPPING, id);
     }
 
     for (id = 0; id < NUM_STANDBY_STMTHIST_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_STANDBY_STMTHIST);
+        LWLockInitialize(&lock->lock, LWTRANCHE_STANDBY_STMTHIST, id);
     }
 
     for (id = 0; id < NUM_XLOG_TRACK_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_XLOG_TRACK_PARTITION);
+        LWLockInitialize(&lock->lock, LWTRANCHE_XLOG_TRACK_PARTITION, id);
     }
 
     for (id = 0; id < NUM_TXNSTATUS_CACHE_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_SS_TXNSTATUS_PARTITION);
+        LWLockInitialize(&lock->lock, LWTRANCHE_SS_TXNSTATUS_PARTITION, id);
     }
 
     for (id = 0; id < NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_SS_SNAPSHOT_XMIN_PARTITION);
+        LWLockInitialize(&lock->lock, LWTRANCHE_SS_SNAPSHOT_XMIN_PARTITION, id);
     }
 
     for (id = 0; id < NUM_SCANNING_XLOG_TRACK_PARTITIONS; id++, lock++) {
@@ -802,7 +802,7 @@ static void RegisterLWLockTranches(void)
  * startup, but it is needed if any user-defined code tries to allocate
  * LWLocks after startup.
  */
-LWLock *LWLockAssign(int trancheId)
+LWLock *LWLockAssign(int trancheId, int tag)
 {
     LWLock *result = NULL;
 
@@ -818,13 +818,14 @@ LWLock *LWLockAssign(int trancheId)
     result = &t_thrd.shemem_ptr_cxt.mainLWLockArray[LWLockCounter[0]++].lock;
     SpinLockRelease(t_thrd.shemem_ptr_cxt.ShmemLock);
     result->tranche = trancheId;
+    result->tag = tag;
     return result;
 }
 
 /*
  * LWLockInitialize - initialize a new lwlock; it's initially unlocked
  */
-void LWLockInitialize(LWLock *lock, int tranche_id)
+void LWLockInitialize(LWLock *lock, int tranche_id, int tag)
 {
     pg_atomic_init_u64(&lock->state, LW_FLAG_RELEASE_OK);
 
@@ -837,6 +838,7 @@ void LWLockInitialize(LWLock *lock, int tranche_id)
 #endif
     lock->tranche = tranche_id;
     dlist_init(&lock->waiters);
+    lock->tag = tag;
 }
 
 static void LWThreadSuicide(PGPROC *proc, int extraWaits, LWLock *lock, LWLockMode mode)
@@ -1459,8 +1461,8 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
     /* Add lock to list of locks held by this backend */
     t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
     t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
-    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
-        t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : 0;
+    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] = 
+        (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
     t_thrd.storage_cxt.num_held_lwlocks++;
 
     /*
@@ -1511,9 +1513,10 @@ bool LWLockConditionalAcquire(LWLock *lock, LWLockMode mode)
         /* Add lock to list of locks held by this backend */
         t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
         t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
-        t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
-            t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : 0;
+        t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] = 
+            (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
         t_thrd.storage_cxt.num_held_lwlocks++;
+
         TRACE_POSTGRESQL_LWLOCK_CONDACQUIRE(T_NAME(lock), mode);
     }
     return !mustwait;
@@ -1634,9 +1637,10 @@ bool LWLockAcquireOrWait(LWLock *lock, LWLockMode mode)
         /* Add lock to list of locks held by this backend */
         t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
         t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
-        t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
-            t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : 0;
+        t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] = 
+            (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
         t_thrd.storage_cxt.num_held_lwlocks++;
+
         TRACE_POSTGRESQL_LWLOCK_WAIT_UNTIL_FREE(T_NAME(lock), mode);
     }
 
@@ -1846,7 +1850,6 @@ void LWLockRelease(LWLock *lock)
     uint64 oldstate;
     bool check_waiters = false;
     int i;
-    TimestampTz now = t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : (TimestampTz)0;
 
     /* Remove lock from list of locks held.  Usually, but not always, it will
      * be the latest-acquired lock; so search array backwards. */
@@ -1859,13 +1862,15 @@ void LWLockRelease(LWLock *lock)
     if (i < 0) {
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
     }
+
     /* if lwlock is held longer than 1min, ereport the detail and backtrace */
-    if (t_thrd.storage_cxt.trace_lwlock_time &&
+    TimestampTz now = (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
+    if (u_sess->attr.attr_common.pgstat_track_activities&&
         TimestampDifferenceExceeds(t_thrd.storage_cxt.lwlock_held_times[i], now, MSECS_PER_MIN)) {
         force_backtrace_messages = true;
         int old_backtrace_min_messages = u_sess->attr.attr_common.backtrace_min_messages;
         u_sess->attr.attr_common.backtrace_min_messages = LOG;
-        ereport(LOG, (errmodule(MOD_LWLOCK), (errmsg("lwlock %s mode %d is held "
+        ereport(LOG, ((errmsg("lwlock %s mode %d is held "
             "for %ld ms longer than 1 min", T_NAME(lock), (int)(t_thrd.storage_cxt.held_lwlocks[i].mode),
             now - t_thrd.storage_cxt.lwlock_held_times[i]))));
         u_sess->attr.attr_common.backtrace_min_messages = old_backtrace_min_messages;
@@ -2032,9 +2037,8 @@ void LWLockOwn(LWLock *lock)
     }
 
     t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
-    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
-        t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : 0;
-
+    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] = 
+        (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
     t_thrd.storage_cxt.num_held_lwlocks++;
 
     HOLD_INTERRUPTS();
@@ -2055,7 +2059,6 @@ void LWLockDisown(LWLock *lock)
 {
     uint64 expected_state;
     int i;
-    TimestampTz now = t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : (TimestampTz)0;
 
     /* Ensure that lock is held */
     expected_state = pg_atomic_read_u64(&lock->state);
@@ -2074,12 +2077,13 @@ void LWLockDisown(LWLock *lock)
     }
 
     /* if lwlock is held longer than 1min, ereport the detail and backtrace */
-    if (t_thrd.storage_cxt.trace_lwlock_time &&
+    TimestampTz now = (u_sess->attr.attr_common.pgstat_track_activities? GetCurrentTimestamp() : (TimestampTz)0);
+    if (u_sess->attr.attr_common.pgstat_track_activities &&
         TimestampDifferenceExceeds(t_thrd.storage_cxt.lwlock_held_times[i], now, MSECS_PER_MIN)) {
         force_backtrace_messages = true;
         int old_backtrace_min_messages = u_sess->attr.attr_common.backtrace_min_messages;
         u_sess->attr.attr_common.backtrace_min_messages = LOG;
-        ereport(LOG, (errmodule(MOD_LWLOCK), (errmsg("lwlock %s mode %d is held "
+        ereport(LOG, ((errmsg("lwlock %s mode %d is held "
             "for %ld ms longer than 1 min", T_NAME(lock), (int)(t_thrd.storage_cxt.held_lwlocks[i].mode),
             now - t_thrd.storage_cxt.lwlock_held_times[i]))));
         u_sess->attr.attr_common.backtrace_min_messages = old_backtrace_min_messages;
@@ -2088,7 +2092,6 @@ void LWLockDisown(LWLock *lock)
     t_thrd.storage_cxt.num_held_lwlocks--;
     for (; i < t_thrd.storage_cxt.num_held_lwlocks; i++) {
         t_thrd.storage_cxt.held_lwlocks[i] = t_thrd.storage_cxt.held_lwlocks[i + 1];
-        t_thrd.storage_cxt.lwlock_held_times[i] = t_thrd.storage_cxt.lwlock_held_times[i + 1];
     }
 
     RESUME_INTERRUPTS();
@@ -2112,7 +2115,7 @@ void *get_held_lwlocks(void)
     return (void *)t_thrd.storage_cxt.held_lwlocks;
 }
 
-/* get lwlock held times */
+/* get lwlocks now held */
 void *get_lwlock_held_times(void)
 {
     return (void *)t_thrd.storage_cxt.lwlock_held_times;
@@ -2291,7 +2294,33 @@ void CheckLWLockPartNumRange(void)
     }
 }
 
-const int GS_LWLOCK_STATUS_COL_NUM = 9;
+
+void LWLockExplainTag(LWLock* lock, char* buffer, int buflen)
+{
+    Assert(buflen > 0);
+    errno_t rc = EOK;
+
+    if (lock->tranche >= LWTRANCHE_NATIVE_TRANCHE_NUM) {
+        rc = snprintf_s(buffer, buflen, buflen - 1, "Non-native lwlock");
+        securec_check_ss(rc, "\0", "\0");
+        return;
+    }
+
+    switch (lock->tranche) {
+        case LWTRANCHE_BUFFER_CONTENT:
+        case LWTRANCHE_BUFFER_IO_IN_PROGRESS:
+        case LWTRANCHE_DMS_BUF_CTRL:
+            rc = snprintf_s(buffer, buflen, buflen - 1, "buffer:%d", lock->tag + 1);
+            break;
+        default:
+            rc = snprintf_s(buffer, buflen, buflen - 1, "id:%d", lock->tag);
+            break;
+    }
+    securec_check_ss(rc, "\0", "\0");
+}
+
+
+const int GS_LWLOCK_STATUS_COL_NUM = 10;
 typedef struct LWLockStatInfo {
     lwlock_id_mode lwlock;
     TimestampTz start_time;
@@ -2341,6 +2370,8 @@ static TupleDesc GetGsLWLockStatusFuncTupleDesc()
     TupleDescInitEntry(tupdesc, attrIdx, "granted", BOOLOID, -1, 0);
     attrIdx++;
     TupleDescInitEntry(tupdesc, attrIdx, "start_time", TIMESTAMPTZOID, -1, 0);
+    attrIdx++;
+    TupleDescInitEntry(tupdesc, attrIdx, "tag", TEXTOID, -1, 0);
     return BlessTupleDesc(tupdesc);
 }
 
@@ -2457,11 +2488,15 @@ static const char* GetLWLockModeType(LWLockMode mode)
 
 static uint64 GetLockIndex(LWLock* lockAddr)
 {
+    if (lockAddr->tranche >= LWTRANCHE_NATIVE_TRANCHE_NUM) {
+        return (uint64)-1;
+    }
     return (uint64)((char*)lockAddr - (char*)t_thrd.shemem_ptr_cxt.mainLWLockArray)/sizeof(LWLockPadded);
 }
 
 Datum gs_lwlock_status(PG_FUNCTION_ARGS)
 {
+#define TAG_BUFFER_LEN 64
     FuncCallContext* funcctx = NULL;
     GsLWLockStatus* mystatus = NULL;
     LWLockData* lwLockData = NULL;
@@ -2470,6 +2505,7 @@ Datum gs_lwlock_status(PG_FUNCTION_ARGS)
     Datum result;
     Datum values[GS_LWLOCK_STATUS_COL_NUM];
     bool nulls[GS_LWLOCK_STATUS_COL_NUM];
+    char tagBuffer[TAG_BUFFER_LEN] = {0};
     errno_t rc;
     int i = 0;
 
@@ -2485,6 +2521,9 @@ Datum gs_lwlock_status(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
         funcctx->tuple_desc = GetGsLWLockStatusFuncTupleDesc();
         mystatus = (GsLWLockStatus*)palloc0(sizeof(GsLWLockStatus));
+        if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+            mystatus->remoteStatus = GetRemoteGsLWLockStatus(funcctx->tuple_desc);
+        }
         funcctx->user_fctx = (void*)mystatus;
         mystatus->lwLockData = GetLWLockStatusData();
         (void)MemoryContextSwitchTo(oldcontext);
@@ -2510,9 +2549,14 @@ Datum gs_lwlock_status(PG_FUNCTION_ARGS)
             pfree(gId);
             values[attrIdx++] = CStringGetTextDatum(GetLWLockModeType(instance->lwlocks[curIdx].lwlock.lock_sx));
             values[attrIdx++] = BoolGetDatum(instance->lwlocks[curIdx].granted);
+            
             values[attrIdx] = TimestampTzGetDatum(instance->lwlocks[curIdx].start_time);
-            nulls[attrIdx] = (values[attrIdx] == 0);
+            nulls[attrIdx++] = (values[attrIdx] == 0);
+
+            LWLockExplainTag(instance->lwlocks[curIdx].lwlock.lock_addr.lock, tagBuffer, TAG_BUFFER_LEN);
+            values[attrIdx] = CStringGetTextDatum(tagBuffer);
         }
+
         mystatus->currLockInfoIdx++;
         /* till the end, continue next instance */
         if (mystatus->currLockInfoIdx == instance->lwlocks_num) {
@@ -2546,6 +2590,7 @@ Datum gs_lwlock_status(PG_FUNCTION_ARGS)
 
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
+
     SRF_RETURN_DONE(funcctx);
 }
 

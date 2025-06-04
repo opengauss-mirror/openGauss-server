@@ -1498,7 +1498,6 @@ extern Datum pg_try_advisory_xact_lock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_all(PG_FUNCTION_ARGS);
-extern Datum gs_lwlock_status(PG_FUNCTION_ARGS);
 
 /* pgstatfuncs.cpp */
 extern Datum gs_stack(PG_FUNCTION_ARGS);
@@ -1885,6 +1884,10 @@ extern Datum get_ondemand_recovery_status(PG_FUNCTION_ARGS);
 
 /* plhandler.cpp */
 extern Datum generate_procoverage_report(PG_FUNCTION_ARGS);
+
+/* lwlock.cpp */
+extern Datum gs_lwlock_status(PG_FUNCTION_ARGS);
+
 #else
 #endif
 extern char *pg_ultostr(char *str, uint32 value);

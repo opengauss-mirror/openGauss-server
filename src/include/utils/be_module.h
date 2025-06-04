@@ -153,7 +153,6 @@ enum ModuleId {
     MOD_UBTREE, /* debug info for UBTree */
     MOD_SRF, /* debug info for SRF */
     MOD_SS_TXNSTATUS, /* debug info for SS TXNSTATUS */
-	MOD_LWLOCK, /* debug info for lwlock held longer than a threshold*/
 
     /*
      * Add your module id above.

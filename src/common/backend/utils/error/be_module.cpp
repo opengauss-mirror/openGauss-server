@@ -139,7 +139,6 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_UBTREE, "UBTREE"},
     {MOD_SRF, "SRF"},
     {MOD_SS_TXNSTATUS, "SS_TXNSTATUS"},
-	{MOD_LWLOCK, "LWLOCK"},
 
     /* add your module name above */
     {MOD_MAX, "BACKEND"}};
