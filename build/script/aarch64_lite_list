@@ -19,6 +19,7 @@
 ./bin/gs_plan_simulator.sh
 ./bin/gs_retrieve
 ./bin/openssl
+./bin/spq*
 ./share/postgresql/db4ai
 ./share/postgresql/snowball_create.sql
 ./share/postgresql/pg_hba.conf.sample

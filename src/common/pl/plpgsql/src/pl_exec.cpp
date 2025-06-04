@@ -44,8 +44,6 @@
 #include "storage/mot/mot_fdw.h"
 #endif
 
-extern THR_LOCAL bool creating_extension;
-
 extern bool checkRecompileCondition(CachedPlanSource* plansource);
 static const char* const raise_skip_msg = "RAISE";
 typedef int (*SpiExecuteMultiResHook)(PLpgSQL_execstate* estate, PLpgSQL_expr* expr,
@@ -1544,7 +1542,7 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
             nspname = get_namespace_name(lfirst_oid(l));
             if (nspname != NULL) { /* watch out for deleted namespace */
                 if (IS_TEMP_NAMESPACE(nspname) ||
-                    (!creating_extension && IS_CATALOG_NAMESPACE(nspname))) {
+                    (!g_instance.attr.attr_common.allowSystemTableMods && IS_CATALOG_NAMESPACE(nspname))) {
                     continue;
                 }
                 if (!firstnsp) {

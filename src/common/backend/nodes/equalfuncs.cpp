@@ -3779,10 +3779,7 @@ static bool _equalExtensibleNode(const ExtensibleNode *a, const ExtensibleNode *
 	methods = GetExtensibleNodeMethods(a->extnodename, false);
 
 	/* compare the private fields */
-	if (!methods->nodeEqual(a, b))
-		return false;
-
-	return true;
+	return methods->nodeEqual(a, b);
 }
 
 static bool node_equal_create_event_info(const CreateEventStmt* a, const CreateEventStmt* b)

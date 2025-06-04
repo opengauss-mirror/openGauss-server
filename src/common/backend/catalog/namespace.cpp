@@ -84,8 +84,6 @@
 #include "parser/parse_type.h"
 #include "catalog/gs_collation.h"
 
-extern THR_LOCAL bool creating_extension;
-
 #ifdef ENABLE_MULTIPLE_NODES
 #include "streaming/planner.h"
 #endif
@@ -3634,11 +3632,11 @@ void CheckSetNamespace(Oid oldNspOid, Oid nspOid, Oid classid, Oid objid)
         ereport(
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into or out of TOAST schema")));
 
-    if (nspOid == PG_CATALOG_NAMESPACE && !creating_extension)
+    if (!g_instance.attr.attr_common.allowSystemTableMods && nspOid == PG_CATALOG_NAMESPACE)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into system schema")));
 
     /* disallow user to set table into system schema */
-    if (IsSysSchema(nspOid) && !creating_extension) {
+    if (!g_instance.attr.attr_common.allowSystemTableMods && IsSysSchema(nspOid)) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("cannot move objects into %s schema", get_namespace_name(nspOid))));
     }
