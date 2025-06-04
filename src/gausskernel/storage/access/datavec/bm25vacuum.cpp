@@ -53,6 +53,8 @@ static void MarkDeleteDocuments(Relation index, IndexBulkDeleteCallback callback
 {
     Page page;
     Buffer buf;
+    Buffer cbuf;
+    Page cpage;
     BM25DocumentMetaPageData docMetaData;
     GenericXLogState *state = nullptr;
 
@@ -68,8 +70,6 @@ static void MarkDeleteDocuments(Relation index, IndexBulkDeleteCallback callback
 
     BlockNumber curBlkno = docMetaData.startDocPage;
     while (BlockNumberIsValid(curBlkno)) {
-        Buffer cbuf;
-        Page cpage;
         cbuf = ReadBufferExtended(index, MAIN_FORKNUM, curBlkno, RBM_NORMAL, bas);
         LockBufferForCleanup(cbuf);
 
@@ -94,36 +94,55 @@ static void FindDocumetTokens(Relation index, Vector<BM25DocumentItem> &deleteDo
 {
     Page page;
     Buffer buf;
+    Buffer cbuf;
+    Page cpage;
+    GenericXLogState *state = nullptr;
+    BlockNumber curBlkno;
+    BlockNumber preBlockIdx;
+    BlockNumber curBlockIdx;
+    uint64 startTokenIdx;
+    uint64 endTokenIdx;
+    uint16 offset;
+    BM25DocForwardItem *forwardItem = nullptr;
 
+    /* read forward meta data */
     buf = ReadBuffer(index, entryPages.docForwardPage);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
     BM25DocForwardMetaPageData forwardData = *BM25PageGetDocForwardMeta(page);
     UnlockReleaseBuffer(buf);
 
-    BlockNumber curBlkno = forwardData.startPage;
-
+    /* find all doc tokens */
     for (uint32 i = 0; i < deleteDocs.size(); ++i) {
-        uint64 startToken = deleteDocs[i].tokenStartIdx;
-        uint64 endToken = deleteDocs[i].tokenEndIdx;
-        uint32 preBlockIndex = startToken / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
-        curBlkno = FindForwrdBlock(index, forwardData.startPage, startToken);
-        Buffer cbuf;
-        Page cpage;
+        startTokenIdx = deleteDocs[i].tokenStartIdx;
+        endTokenIdx = deleteDocs[i].tokenEndIdx;
+        curBlkno = SeekBlocknoForForwardToken(index, startTokenIdx, forwardData.docForwardBlknoTable);
+        preBlockIdx = startTokenIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+
         cbuf = ReadBufferExtended(index, MAIN_FORKNUM, curBlkno, RBM_NORMAL, bas);
         LockBufferForCleanup(cbuf);
-        while (startToken <= endToken) {
-            if (startToken / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE != preBlockIndex) {
+        state = GenericXLogStart(index);
+        cpage = GenericXLogRegisterBuffer(state, cbuf, GENERIC_XLOG_FULL_IMAGE);
+        while (startTokenIdx <= endTokenIdx) {
+            curBlockIdx = startTokenIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+            if (curBlockIdx != preBlockIdx) {
                 curBlkno = BM25PageGetOpaque(cpage)->nextblkno;
-                preBlockIndex = startToken / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+                preBlockIdx = startTokenIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+
+                GenericXLogFinish(state);
                 UnlockReleaseBuffer(cbuf);
+
                 cbuf = ReadBufferExtended(index, MAIN_FORKNUM, curBlkno, RBM_NORMAL, bas);
                 LockBufferForCleanup(cbuf);
+                state = GenericXLogStart(index);
+                cpage = GenericXLogRegisterBuffer(state, cbuf, GENERIC_XLOG_FULL_IMAGE);
             }
-            cpage = BufferGetPage(cbuf);
-            uint16 offset = startToken % BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
-            BM25DocForwardItem *forwardItem = (BM25DocForwardItem*)(
-                (char *)cpage + sizeof(PageHeaderData) + offset * BM25_DOCUMENT_FORWARD_ITEM_SIZE);
+            offset = startTokenIdx % BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
+            forwardItem = (BM25DocForwardItem*)((char *)cpage + sizeof(PageHeaderData) +
+                offset * BM25_DOCUMENT_FORWARD_ITEM_SIZE);
+            if (forwardItem->docId == BM25_INVALID_DOC_ID) {
+                break;
+            }
             if (deleteTokens.find(forwardItem->tokenId) == deleteTokens.end()) {
                 DeleteToken deleteToken;
                 deleteToken.tokenHash = forwardItem->tokenHash;
@@ -133,8 +152,9 @@ static void FindDocumetTokens(Relation index, Vector<BM25DocumentItem> &deleteDo
                 deleteTokens[forwardItem->tokenId].docIds.push_back(forwardItem->docId);
             }
             forwardItem->docId = BM25_INVALID_DOC_ID;
-            startToken++;
+            startTokenIdx++;
         }
+        GenericXLogFinish(state);
         UnlockReleaseBuffer(cbuf);
     }
 }
@@ -302,6 +322,46 @@ static void UpdateBM25Statistics(Relation index, Vector<BM25DocumentItem> &delet
     BM25CommitBuf(buf, &state, false);
 }
 
+static void AddDocIdsIntoFreeList(Relation index, Vector<BM25DocumentItem> &deleteDocs, BM25EntryPages &entryPages)
+{
+    Buffer buf;
+    Page page;
+    GenericXLogState *state = nullptr;
+    BlockNumber curFreePage = entryPages.docmentFreePage;
+    bool finished = false;
+    uint32 docIdx = 0;
+    uint32 itemSize = MAXALIGN(sizeof(BM25FreeDocumentItem));
+
+    buf = ReadBuffer(index, curFreePage);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    BM25GetPage(index, &page, buf, &state, false);
+    while (docIdx < deleteDocs.size()) {
+        if (PageGetFreeSpace(page) < itemSize) {
+            curFreePage = BM25PageGetOpaque(page)->nextblkno;
+            if (!BlockNumberIsValid(curFreePage)) {
+                BM25AppendPage(index, &buf, &page, MAIN_FORKNUM, &state, false);
+            } else {
+                BM25CommitBuf(buf, &state, false);
+                buf = ReadBuffer(index, curFreePage);
+                LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+                BM25GetPage(index, &page, buf, &state, false);
+            }
+        }
+        BM25FreeDocumentItem freeItem;
+        freeItem.docId = deleteDocs[docIdx].docId;
+        freeItem.tokenCapacity = deleteDocs[docIdx].tokenEndIdx - deleteDocs[docIdx].tokenStartIdx + 1;
+        OffsetNumber offno = PageAddItem(page, (Item)(&freeItem), MAXALIGN(sizeof(BM25FreeDocumentItem)),
+            InvalidOffsetNumber, false, false);
+        if (offno == InvalidOffsetNumber) {
+            GenericXLogAbort(state);
+            UnlockReleaseBuffer(buf);
+            elog(ERROR, "failed to add free doc item [BM25FreeDocumentItem] to \"%s\"", RelationGetRelationName(index));
+        }
+        docIdx++;
+    }
+    BM25CommitBuf(buf, &state, false);
+}
+
 static void BulkDeleteDocuments(Relation index, IndexBulkDeleteCallback callback, void *callbackState)
 {
     BM25MetaPageData meta;
@@ -322,6 +382,8 @@ static void BulkDeleteDocuments(Relation index, IndexBulkDeleteCallback callback
     DeleteTokensFromPostinglist(index, deleteTokens, entryPages);
 
     UpdateBM25Statistics(index, deleteDocs, entryPages);
+
+    AddDocIdsIntoFreeList(index, deleteDocs, entryPages);
 
     FreeAccessStrategy(bas);
 }
