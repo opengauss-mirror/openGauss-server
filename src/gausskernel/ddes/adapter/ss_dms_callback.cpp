@@ -1328,6 +1328,12 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
             case BCAST_RELOAD_REFORM_CTRL_PAGE:
                 ret = SSReloadReformCtrlPage(len);
                 break;
+            case BCAST_REALTIME_BUILD_LOG_CTRL_ENABLE:
+                ret = SSUpdateRealtimeBuildLogCtrl(data, len);
+                break;
+            case BCAST_REPORT_REALTIME_BUILD_PTR:
+                ret = SSGetStandbyRealtimeBuildPtr(data, len);
+                break;
             default:
                 ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS] invalid broadcast operate type")));
                 ret = DMS_ERROR;
@@ -1857,28 +1863,27 @@ static void FailoverCleanBackends()
     }
 
     /**
-     * for failover: wait for backend threads to exit, at most 30s
-     * why wait code write this
+     * for failover:
+     * Ensure one round of failover and clean up all backend threads
      *      step 1, sned signal to tell thread to exit
      *      step 2, PM detected backend exit
      *      step 3, reform proc wait
      */
     g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = false;
     SendPostmasterSignal(PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS);
-    long max_wait_time = 30000000L;
     long wait_time = 0;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] wait backends to exit")));
     while (true) {
         if (g_instance.dms_cxt.SSRecoveryInfo.no_backend_left && !CheckpointInProgress()) {
-            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] backends exit successfully")));
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] backends exit successfully, "
+                "wait_time = %ds", wait_time / FAILOVER_TIME_CONVERT)));
             break;
         }
-        if (wait_time > max_wait_time) {
-            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] failover failed, backends can not exit")));
-            /* check and print some thread which no exit. */
-            SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
-            _exit(0);
-        }
+
+        /* check and print some thread which no exit. */
+        int backendNum = SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+        ereport (WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] there are %d backends can not exit! "
+            "wait_time = %lds", backendNum, wait_time / FAILOVER_TIME_CONVERT)));
 
         if (dms_reform_failed()) {
             ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] reform failed during clean backends")));
@@ -1887,6 +1892,25 @@ static void FailoverCleanBackends()
 
         pg_usleep(REFORM_WAIT_TIME);
         wait_time += REFORM_WAIT_TIME;
+    }
+}
+
+static void RestartRealtimeBuildCtrl()
+{
+    if (SS_IN_REFORM && g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl) {
+        ereport(LOG, (errmsg("[SS reform][On-demand] reform happened, disable realtime build log ctrl, "
+                            "and will make it enable again after reform if needed.")));
+    }
+    g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
+    SpinLockInit(&g_instance.dms_cxt.SSRecoveryInfo.sleepTimeSyncLock);
+    g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime = 0;
+    errno_t rc = memset_s(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl,
+                          sizeof(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl),
+                          0,
+                          sizeof(g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl));
+    securec_check(rc, "", "");
+    if (SS_PRIMARY_MODE && ENABLE_REALTIME_BUILD_TARGET_RTO) {
+        SSBroadcastRealtimeBuildLogCtrlEnable(false);
     }
 }
 
@@ -2018,18 +2042,18 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     ReformTypeToString(reform_info->reform_type, reform_type_str);
     ereport(LOG, (errmodule(MOD_DMS),
         errmsg("[SS reform] reform start, role:%d, reform type:SS %s, standby scenario:%d, "
-            "bitmap_reconnect:%d, reform_ver:%ld.",
+            "bitmap_reconnect:%llu, reform_ver:%ld.",
             reform_info->dms_role, reform_type_str, SSPerformingStandbyScenario(),
             reform_info->bitmap_reconnect, reform_info->reform_ver)));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
         SSGrantDSSWritePermission();
     }
-
     int old_primary = SSGetPrimaryInstId();
     SSReadControlFile(old_primary, true);
     g_instance.dms_cxt.SSReformInfo.old_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] old cluster node bitmap: %lu", g_instance.dms_cxt.SSReformInfo.old_bitmap)));
 
+    g_instance.dms_cxt.SSRecoveryInfo.enableRealtimeBuildLogCtrl = false;
     if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
         FailoverCleanBackends();
     } else if (SSBackendNeedExitScenario()) {
@@ -2082,18 +2106,21 @@ static int CBReformDoneNotify(void *db_handle)
                 errmsg("[SS reform] Reform success, instance:%d is running.",
                        g_instance.attr.attr_storage.dms_attr.instance_id)));
 
+    if (ENABLE_REALTIME_BUILD_TARGET_RTO && SS_PRIMARY_MODE) {
+        RestartRealtimeBuildCtrl();
+    }
     /* reform success indicates that reform of primary and standby all complete, then update gaussdb.state */
     g_instance.dms_cxt.dms_status = (dms_status_t)DMS_STATUS_IN;
     SendPostmasterSignal(PMSIGNAL_DMS_REFORM_DONE);
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.realtime_build_in_reform = false;
     g_instance.dms_cxt.SSReformInfo.in_reform = false;
-    
-    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] reform done: pmState=%d, SSClusterState=%d, demotion=%d-%d, "
-                    "rec=%d, dmsStatus=%d.", pmState, g_instance.dms_cxt.SSClusterState,
-                    g_instance.demotion, t_thrd.walsender_cxt.WalSndCtl->demotion,
-                    t_thrd.walsender_cxt.WalSndCtl->demotion, t_thrd.xlog_cxt.InRecovery,
-                    g_instance.dms_cxt.dms_status)));
+
+    ereport(LOG, (errmodule(MOD_DMS),
+                errmsg("[SS reform] reform done: pmState=%d, SSClusterState=%d, demotion=%d-%d, "
+                       "rec=%d, dmsStatus=%d.", pmState, g_instance.dms_cxt.SSClusterState,
+                       g_instance.demotion, t_thrd.walsender_cxt.WalSndCtl->demotion,
+                       t_thrd.xlog_cxt.InRecovery, g_instance.dms_cxt.dms_status)));
     return GS_SUCCESS;
 }
 
@@ -2204,21 +2231,22 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
     BufferTag* tag = (BufferTag *)block_key;
 
     Assert(SS_PRIMARY_MODE);
+    Assert(!t_thrd.dms_cxt.in_ondemand_redo);
     // do nothing if not in ondemand recovery
     if (!SS_IN_ONDEMAND_RECOVERY) {
-        ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[SS][On-demand] Ignore standby redo page request, spc/db/rel/bucket "
-                         "fork-block: %u/%u/%u/%d %d-%u", tag->rnode.spcNode, tag->rnode.dbNode,
-                         tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
+        ereport(DEBUG1, (errmodule(MOD_DMS),
+            errmsg("[SS][On-demand] Ignore standby redo page request, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
+                tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode,
+                tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
         *redo_status = ONDEMAND_REDO_SKIP;
-        return GS_SUCCESS;;
+        return GS_SUCCESS;
     }
 
     if (SS_IN_REFORM) {
         ereport(DEBUG1, (errmodule(MOD_DMS),
             errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Reform happend when primary redo page for standby,"
-            "return ONDEMAND_REDO_FAIL.",
-            tag->rnode.spcNode, tag->rnode.dbNode,
-            tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
+                "return ONDEMAND_REDO_FAIL.", tag->rnode.spcNode, tag->rnode.dbNode,
+                tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
         *redo_status = ONDEMAND_REDO_FAIL;
         return GS_SUCCESS;
     }
@@ -2226,6 +2254,7 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
     Buffer buffer = InvalidBuffer;
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     *redo_status = ONDEMAND_REDO_DONE;
+    t_thrd.dms_cxt.in_ondemand_redo = true;
     smgrcloseall();
     PG_TRY();
     {
@@ -2242,7 +2271,7 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
         /* Save error info */
         ErrorData* edata = CopyErrorData();
         ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Error happend when primary redo page for standby.",
+            errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Error happend when primary redo page for standby.",
                 tag->rnode.spcNode, tag->rnode.dbNode,
                 tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum),
                 errdetail("%s", edata->detail)));
@@ -2252,10 +2281,12 @@ int CBOndemandRedoPageForStandby(void *block_key, int32 *redo_status)
     }
     PG_END_TRY();
 
-    ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Redo page for standby done. redo status: %d.",
-                            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode,
-                            tag->rnode.bucketNode, tag->forkNum, tag->blockNum, *redo_status)));
-    return GS_SUCCESS;;
+    t_thrd.dms_cxt.in_ondemand_redo = false;
+    ereport(DEBUG1, (errmodule(MOD_DMS),
+        errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Redo page for standby done. redo status: %d.",
+            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode,
+            tag->rnode.bucketNode, tag->forkNum, tag->blockNum, *redo_status)));
+    return GS_SUCCESS;
 }
 
 void CBGetBufInfo(char* resid, stat_buf_info_t *buf_info)

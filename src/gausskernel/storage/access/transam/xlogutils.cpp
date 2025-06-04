@@ -517,7 +517,7 @@ static void CollectInvalidPagesStates(uint32 *nstates_ptr, InvalidPagesState ***
 /* Complain about any remaining invalid-page entries */
 void XLogCheckInvalidPages(void)
 {
-    if (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_REDO_DONE) {
+    if (SS_PRIMARY_ONDEMAND_RECOVERY) {
         return;
     }
 

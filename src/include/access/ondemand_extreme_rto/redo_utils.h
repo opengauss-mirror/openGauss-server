@@ -32,6 +32,8 @@ typedef enum {
     PARSE_TYPE_SEG,
 } XLogRecParseType;
 
+const long MIN_REPLY_MILLISEC_TIME_DIFF = 200;
+
 Size OndemandRecoveryShmemSize(void);
 void OndemandRecoveryShmemInit(void);
 void OndemandXlogFileIdCacheInit(void);
@@ -55,5 +57,12 @@ void OnDemandNotifyHashMapPruneIfNeed();
 XLogRecParseType GetCurrentXLogRecParseType(XLogRecParseState *preState);
 bool IsRecParseStateHaveChildState(XLogRecParseState *checkState);
 void OndemandGlobalXLogMemReleaseIfNeed(RedoMemManager *memctl);
+bool OndemandAllowBufAccess();
 
+bool IsRealtimeBuildRtoOverTarget(int srcId);
+
+// return unit: millisecond
+long SSLogCtrlCalculateTimeDiff(TimestampTz startTime, TimestampTz endTime);
+void SSRealtimebuildLogCtrl(int srcId);
+void SSRealtimeBuildUpdateGlobalSyncLSN();
 #endif /* ONDEMAND_EXTREME_RTO_REDO_UTILS_H */

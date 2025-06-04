@@ -115,7 +115,7 @@
     (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status == CLUSTER_IN_ONDEMAND_REDO))
 #define SS_CLUSTER_ONDEMAND_NORMAL \
     (ENABLE_DMS && (g_instance.dms_cxt.SSRecoveryInfo.cluster_ondemand_status == CLUSTER_NORMAL))
-#define SS_PRIMARY_ONDEMAND_RECOVERY (SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_REDO_DONE)
+#define SS_PRIMARY_ONDEMAND_RECOVERY (SS_PRIMARY_MODE && SS_ONDEMAND_BUILD_DONE && !SS_ONDEMAND_REDO_DONE)
 #define SS_STANDBY_ONDEMAND_BUILD (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_BUILD)
 #define SS_STANDBY_ONDEMAND_RECOVERY (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_RECOVERY)
 #define SS_STANDBY_ONDEMAND_NORMAL (SS_STANDBY_MODE && SS_CLUSTER_ONDEMAND_NORMAL)
@@ -163,7 +163,10 @@
 /* max length of max int range as char */
 #define MAX_LEN_OF_MAXINTRANGE      12
 
-#define SS_AM_WORKER  (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == STREAM_WORKER)
+#define SS_AM_WORKER  (t_thrd.role == WORKER || \
+                       t_thrd.role == THREADPOOL_WORKER || \
+                       t_thrd.role == STREAM_WORKER || \
+                       t_thrd.role == TRACK_STMT_CLEANER)
 
 typedef enum SSBroadcastOp {
     BCAST_GET_XMIN = 0,
@@ -181,6 +184,8 @@ typedef enum SSBroadcastOp {
     BCAST_CHECK_DB_BACKENDS,
     BCAST_SEND_SNAPSHOT,
     BCAST_RELOAD_REFORM_CTRL_PAGE,
+    BCAST_REALTIME_BUILD_LOG_CTRL_ENABLE,
+    BCAST_REPORT_REALTIME_BUILD_PTR,
     BCAST_END
 } SSBroadcastOp;
 

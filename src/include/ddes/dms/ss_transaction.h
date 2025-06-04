@@ -94,6 +94,17 @@ typedef struct SSBroadcasDbBackendsAck {
     int count;
 } SSBroadcastDbBackendsAck;
 
+typedef struct SSBroadcastRealtimeBuildLogCtrl {
+    SSBroadcastOp type; // must be first
+    bool enableLogCtrl;
+} SSBroadcastRealtimeBuildLogCtrl;
+
+typedef struct SSBroadcastRealtimeBuildPtr {
+    SSBroadcastOp type; // must be first
+    XLogRecPtr realtimeBuildPtr;
+    int srcInstId;
+} SSBroadcastRealtimeBuildPtr;
+
 Snapshot SSGetSnapshotData(Snapshot snapshot);
 CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCommit, bool isMvcc, bool isNest,
     Snapshot snapshot, bool* sync);
@@ -101,6 +112,8 @@ void SSTransactionIdDidCommit(TransactionId transactionId, bool *ret_did_commit)
 void SSTransactionIdIsInProgress(TransactionId transactionId, bool *in_progress);
 TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2);
 bool SSGetOldestXminFromAllStandby(TransactionId xmin, TransactionId xmax, CommitSeqNo csn);
+void SSBroadcastRealtimeBuildLogCtrlEnable(bool canncelInReform);
+bool SSReportRealtimeBuildPtr(XLogRecPtr realtimeBuildPtr);
 int SSGetOldestXmin(char *data, uint32 len, char *output_msg, uint32 *output_msg_len);
 int SSGetOldestXminAck(SSBroadcastXminAck *ack_data);
 void SSIsPageHitDms(RelFileNode& node, BlockNumber page, int pagesNum, uint64 *pageMap, int *bitCount);
@@ -125,5 +138,7 @@ int SSUpdateLatestSnapshotOfStandby(char *data, uint32 len, char *output_msg, ui
 int SSReloadReformCtrlPage(uint32 len);
 void SSRequestAllStandbyReloadReformCtrlPage();
 bool SSCanFetchLocalSnapshotTxnRelatedInfo();
+int SSUpdateRealtimeBuildLogCtrl(char* data, uint32 len);
+int SSGetStandbyRealtimeBuildPtr(char* data, uint32 len);
 
 #endif

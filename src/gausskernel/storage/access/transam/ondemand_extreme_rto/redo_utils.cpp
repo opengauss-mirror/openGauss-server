@@ -30,6 +30,7 @@
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/lock/lwlock.h"
 #include "catalog/storage_xlog.h"
+#include "replication/syncrep.h"
 
 
 static void PrintXLogRecParseStateBlockHead(XLogRecParseState* blockState);
@@ -762,4 +763,245 @@ static void PrintXLogRecParseStateBlockHead(XLogRecParseState* blockState) {
     ereport(LOG,
         (errmsg("[On-demand][redo] blockState->blockparse.blockhead: %s.",
         res.data)));
+}
+
+bool OndemandAllowBufAccess()
+{
+    /*
+     * We allow dms worker thread access buffer in ondemand redo. Dont't worry for access old
+     * version buffer because we know it will redo these page.
+     */
+    if (AmDmsProcess() && SS_PRIMARY_ONDEMAND_RECOVERY && t_thrd.dms_cxt.in_ondemand_redo) {
+        return true;
+    }
+    return false;
+}
+
+static const int MICROSECONDS_PER_SECONDS = 1000000;
+static const int MILLISECONDS_PER_SECONDS = 1000;
+static const int MILLISECONDS_PER_MICROSECONDS = 1000;
+static const int SHIFT_SPEED = 3;
+static const int CALCULATE_INTERVAL_MILLISECONDS = 2000;
+static const uint64 MIN_BUILD_SPEED = 1;
+static const int NEEDS_LARGE_RANGE = 60;
+static const int LONG_LOG_CTRL_SLEEP_MICROSECONDS = 1500000;
+static const int SHORT_LOG_CTRL_SLEEP_MICROSECONDS = 1000000;
+static const int LOG_CTRL_REPORT_TIME_INTERVAL = 200;
+
+long SSLogCtrlCalculateTimeDiff(TimestampTz startTime, TimestampTz endTime)
+{
+    long secToTime;
+    int microsecToTime;
+    TimestampDifference(startTime, endTime, &secToTime, &microsecToTime);
+    return secToTime * MILLISECONDS_PER_SECONDS +
+        microsecToTime / MILLISECONDS_PER_MICROSECONDS;
+}
+
+bool IsRealtimeBuildRtoOverTarget(int srcId)
+{
+    realtime_build_ctrl_t *rtBuildCtrl = &g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[srcId];
+    if (SS_PRIMARY_ENABLE_TARGET_RTO &&
+        rtBuildCtrl->currentRTO > g_instance.attr.attr_storage.dms_attr.realtime_build_target_rto) {
+        return true;
+    }
+    return false;
+}
+
+static inline uint64 LogCtrlCountBigSpeed(uint64 originSpeed, uint64 curSpeed)
+{
+    uint64 updateSpeed = (((originSpeed << SHIFT_SPEED) - originSpeed) >> SHIFT_SPEED) + curSpeed;
+    return updateSpeed;
+}
+
+static bool ReplyMessageCheck(int srcId)
+{
+    realtime_build_ctrl_t *rtBuildCtrl = &g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[srcId];
+    bool checkResult = true;
+    if (XLByteLT(rtBuildCtrl->realtimeBuildPtr, rtBuildCtrl->prevBuildPtr) ||
+        rtBuildCtrl->prevReplyTime >= rtBuildCtrl->replyTime) {
+        checkResult = false;
+        ereport(WARNING, (errmodule(MOD_RTO_RPO),
+            errmsg("[On-demand] ReplyMessageCheck to false, rtBuildCtrl->prevBuildPtr: %lu, "
+                   "rtBuildCtrl->realtimeBuildPtr: %lu, "
+                   "rtBuildCtrl->prevReplyTime: %ld, rtBuildCtrl->replyTime: %ld.",
+                   rtBuildCtrl->prevBuildPtr, rtBuildCtrl->realtimeBuildPtr,
+                   rtBuildCtrl->prevReplyTime, rtBuildCtrl->replyTime)));
+    }
+    // no record needs to build, rto = 0
+    if (XLByteEQ(GetXLogInsertEndRecPtr(), rtBuildCtrl->realtimeBuildPtr)) {
+        rtBuildCtrl->currentRTO = 0;
+        checkResult = false;
+    }
+    // at lease get tow replies beform calculate rto.
+    if (rtBuildCtrl->prevReplyTime == 0 || !checkResult) {
+        rtBuildCtrl->prevCalculateTime = rtBuildCtrl->replyTime;
+        rtBuildCtrl->periodTotalBuild = 0;
+        checkResult = false;
+    }
+    return checkResult;
+}
+
+static void SSRealtimeBuildCalculateCurrentRTO(int srcId)
+{
+    if (!SS_NORMAL_PRIMARY || !ReplyMessageCheck(srcId)) {
+        return;
+    }
+    realtime_build_ctrl_t *rtBuildCtrl = &g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[srcId];
+    long millisecTimeDiff = SSLogCtrlCalculateTimeDiff(rtBuildCtrl->prevReplyTime, rtBuildCtrl->replyTime);
+    if (millisecTimeDiff < LOG_CTRL_REPORT_TIME_INTERVAL) {
+        Assert(false);
+        return;
+    }
+
+    XLogRecPtr buildPtr = rtBuildCtrl->realtimeBuildPtr;
+    uint64 needBuild = GetXLogInsertEndRecPtr() - buildPtr;
+    uint64 newBuild = buildPtr - rtBuildCtrl->prevBuildPtr;
+    uint64 periodTotalBuild = rtBuildCtrl->periodTotalBuild + newBuild;
+
+    long calculateTimeDiff = SSLogCtrlCalculateTimeDiff(rtBuildCtrl->prevCalculateTime, rtBuildCtrl->replyTime);
+    if (calculateTimeDiff <= 0) {
+        ereport(LOG, (errmodule(MOD_RTO_RPO),
+            errmsg("[On-demand] SSRealtimeBuildCalculateCurrentRTO calculateTimeDiff <= 0, "
+                   "rtBuildCtrl->prevCalculateTime %ld, rtBuildCtrl->replyTime %ld",
+                   rtBuildCtrl->prevCalculateTime, rtBuildCtrl->replyTime)));
+        return;
+    }
+
+    if ((rtBuildCtrl->buildRate >> SHIFT_SPEED) > 1) {
+        if (calculateTimeDiff > CALCULATE_INTERVAL_MILLISECONDS || IsRealtimeBuildRtoOverTarget(srcId)) {
+            rtBuildCtrl->buildRate = LogCtrlCountBigSpeed(rtBuildCtrl->buildRate,
+                                                        (uint64)(periodTotalBuild / calculateTimeDiff));
+            rtBuildCtrl->prevCalculateTime = rtBuildCtrl->replyTime;
+        }
+    } else {
+        rtBuildCtrl->buildRate = (uint64)((newBuild / millisecTimeDiff) << SHIFT_SPEED);
+    }
+    if (rtBuildCtrl->prevCalculateTime == rtBuildCtrl->replyTime) {
+        rtBuildCtrl->periodTotalBuild = 0;
+    } else {
+        rtBuildCtrl->periodTotalBuild = periodTotalBuild;
+    }
+
+    uint64 buildSpeed = (rtBuildCtrl->buildRate >> SHIFT_SPEED); // units: byte/ms
+    if (buildSpeed == 0) {
+        buildSpeed = MIN_BUILD_SPEED;
+    }
+
+    uint64 secRTO = needBuild / buildSpeed / MILLISECONDS_PER_SECONDS;
+    rtBuildCtrl->currentRTO = secRTO;
+
+    ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
+                errmsg("[On-demand] The RTO estimated is = : %lu seconds, or %lu microseconds. "
+                       "realtimeBuildPtr is %X/%X, prevBuildPtr is %X/%X, calculateTimeDiff is %ld, "
+                       "needBuild is %lu, buildSpeed is %lu, srcId is %d.",
+                       secRTO, (needBuild / buildSpeed),
+                       (uint32)(rtBuildCtrl->realtimeBuildPtr >> 32), (uint32)rtBuildCtrl->realtimeBuildPtr,
+                       (uint32)(rtBuildCtrl->prevBuildPtr >> 32), (uint32)rtBuildCtrl->prevBuildPtr,
+                       millisecTimeDiff, needBuild, buildSpeed, srcId)));
+}
+
+const int CDF_RANGE = 2;
+const int CDF_LEFT = -CDF_RANGE;
+const int CDF_RIGHT = CDF_RANGE;
+const double CDF_MEAN = 0;
+const double CDF_STDDEV = 1.0;
+
+static inline double GaussianCdf(double x, double mean, double stddev)
+{
+    return 0.5 * erfc(-(x - mean) / (stddev * sqrt(2)));
+}
+
+static double CalculateSleepTimeByCdf(int64 currentRTO, int64 targetRTO)
+{
+    double x = ((double)currentRTO - targetRTO / 2) / (double)(targetRTO / 2);
+    double tx = x * (CDF_RIGHT - CDF_LEFT) - CDF_RANGE;
+    double range = GaussianCdf(CDF_RIGHT, CDF_MEAN, CDF_STDDEV) - GaussianCdf(CDF_LEFT, CDF_MEAN, CDF_STDDEV);
+    double fx = GaussianCdf(tx, CDF_MEAN, CDF_STDDEV) - GaussianCdf(CDF_LEFT, CDF_MEAN, CDF_STDDEV);
+    ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
+        errmsg("[On-demand] CalculateSleepTimeByCdf  currentRTO: %ld, targetRTO: %ld, fx: %lf, "
+               "range: %lf, fx/range (sleepTime): %lf.",
+               currentRTO, targetRTO, fx, range, fx / range)));
+    return fx / range;
+}
+
+#define MIN_LOG_CTRL_ENABLE_RTO (g_instance.attr.attr_storage.dms_attr.realtime_build_target_rto / 2)
+static int SSRealtimeBuildCalculateSleepTime(int srcId)
+{
+    realtime_build_ctrl_t *rtBuildCtrl = &g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[srcId];
+    if (!SS_PRIMARY_ENABLE_TARGET_RTO) {
+        return 0;
+    }
+    int maxSleepTime;
+    int sleepTime = 0;
+    if (g_instance.attr.attr_storage.dms_attr.realtime_build_target_rto >= NEEDS_LARGE_RANGE) {
+        maxSleepTime = LONG_LOG_CTRL_SLEEP_MICROSECONDS;
+    } else {
+        maxSleepTime = SHORT_LOG_CTRL_SLEEP_MICROSECONDS;
+    }
+    if (rtBuildCtrl->currentRTO < MIN_LOG_CTRL_ENABLE_RTO) {
+        sleepTime = 0;
+        ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
+            errmsg("[On-demand] The RTO estimated is = : %lu seconds. sleeptime is = %d microseconds.",
+                rtBuildCtrl->currentRTO, sleepTime)));
+    } else if (rtBuildCtrl->currentRTO >= g_instance.attr.attr_storage.dms_attr.realtime_build_target_rto) {
+        sleepTime = maxSleepTime;
+        ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
+            errmsg("[On-demand] The RTO estimated is = : %lu seconds. sleeptime is = %d microseconds.",
+                rtBuildCtrl->currentRTO, sleepTime)));
+    } else {
+        // method 2
+        int64 targetRTO = (int64)g_instance.attr.attr_storage.dms_attr.realtime_build_target_rto;
+        sleepTime = (int)(CalculateSleepTimeByCdf(rtBuildCtrl->currentRTO, targetRTO) *maxSleepTime);
+        sleepTime = Min(maxSleepTime, Max(0, sleepTime));
+        ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
+            errmsg("[On-demand] The RTO estimated is = : %lu seconds. sleeptime is = %d microseconds.",
+                rtBuildCtrl->currentRTO, sleepTime)));
+    }
+    return sleepTime;
+}
+
+const int LOG_UPDATA_GAP = SHORT_LOG_CTRL_SLEEP_MICROSECONDS / 2;
+void SSRealtimeBuildUpdatGlobalSleepTime(int srcId, int localSleepTime)
+{
+    int oldSleepTime = g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime;
+    int newSleepTime = 0;
+    SpinLockAcquire(&g_instance.dms_cxt.SSRecoveryInfo.sleepTimeSyncLock);
+    if (SS_PRIMARY_ENABLE_TARGET_RTO) {
+        g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[srcId].sleepTime = localSleepTime;
+        int maxSleepTime = 0;
+        for (int i = 0; i < DMS_MAX_INSTANCES; i++) {
+            maxSleepTime = Max(maxSleepTime, g_instance.dms_cxt.SSRecoveryInfo.rtBuildCtrl[i].sleepTime);
+        }
+        g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime = maxSleepTime;
+    } else {
+        g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime = 0;
+    }
+    newSleepTime = g_instance.dms_cxt.SSRecoveryInfo.globalSleepTime;
+    SpinLockRelease(&g_instance.dms_cxt.SSRecoveryInfo.sleepTimeSyncLock);
+    if ((oldSleepTime == 0 && newSleepTime > 0) ||
+        (oldSleepTime > 0 && newSleepTime == 0) ||
+        (oldSleepTime > LOG_UPDATA_GAP && newSleepTime < LOG_UPDATA_GAP) ||
+        (oldSleepTime < LOG_UPDATA_GAP && newSleepTime > LOG_UPDATA_GAP) ||
+        (oldSleepTime != LONG_LOG_CTRL_SLEEP_MICROSECONDS && newSleepTime == LONG_LOG_CTRL_SLEEP_MICROSECONDS) ||
+        (oldSleepTime != SHORT_LOG_CTRL_SLEEP_MICROSECONDS && newSleepTime == SHORT_LOG_CTRL_SLEEP_MICROSECONDS)) {
+        ereport(LOG, (errmodule(MOD_RTO_RPO),
+            errmsg("[On-demand] realtime-build log ctl global sleep time update, "
+                   "oldSleepTime: %d microseconds, newSleepTime: %d microseconds.",
+                   oldSleepTime, newSleepTime)));
+    }
+}
+
+void SSRealtimebuildLogCtrl(int srcId)
+{
+    if (!SS_PRIMARY_ENABLE_TARGET_RTO) {
+        return;
+    }
+    // step 1:calculate rto for instance: srcId
+    SSRealtimeBuildCalculateCurrentRTO(srcId);
+
+    // step 2:calculate sleep time for instance: srcId
+    int localSleepTime = SSRealtimeBuildCalculateSleepTime(srcId);
+
+    // step 3:update global sleep time
+    SSRealtimeBuildUpdatGlobalSleepTime(srcId, localSleepTime);
 }
