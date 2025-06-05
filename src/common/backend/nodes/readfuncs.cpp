@@ -6826,31 +6826,29 @@ static UnrotateInCell *_readUnrotateCell()
     READ_DONE();
 }
 
-static ExtensibleNode *
-_readExtensibleNode(void)
+static ExtensibleNode *_readExtensibleNode(void)
 {
-	const ExtensibleNodeMethods *methods;
-	ExtensibleNode *local_node;
-	const char *extnodename;
+    const ExtensibleNodeMethods *methods;
+    ExtensibleNode *local_node;
+    const char *extnodename;
 
-	READ_TEMP_LOCALS();
+    READ_TEMP_LOCALS();
 
-	token = pg_strtok(&length); /* skip :extnodename */
-	token = pg_strtok(&length); /* get extnodename */
+    token = pg_strtok(&length); /* skip :extnodename */
+    token = pg_strtok(&length); /* get extnodename */
 
-	extnodename = nullable_string(token, length);
-	if (!extnodename)
-		elog(ERROR, "extnodename has to be supplied");
-	methods = GetExtensibleNodeMethods(extnodename, false);
+    extnodename = nullable_string(token, length);
+    if (!extnodename)
+        elog(ERROR, "extnodename has to be supplied");
+    methods = GetExtensibleNodeMethods(extnodename, false);
 
-	local_node = (ExtensibleNode *) newNode(methods->node_size,
-											T_EXTENSIBLE_NODE);
-	local_node->extnodename = extnodename;
+    local_node = (ExtensibleNode *) newNode(methods->node_size, T_EXTENSIBLE_NODE);
+    local_node->extnodename = extnodename;
 
-	/* deserialize the private fields */
-	methods->nodeRead(local_node);
+    /* deserialize the private fields */
+    methods->nodeRead(local_node);
 
-	READ_DONE();
+    READ_DONE();
 }
 
 /*

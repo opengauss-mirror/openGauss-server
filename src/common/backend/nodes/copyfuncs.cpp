@@ -8060,18 +8060,17 @@ static PrefixKey* _copyPrefixKey(const PrefixKey* from)
 
 static ExtensibleNode* _copyExtensibleNode(const ExtensibleNode *from)
 {
-	ExtensibleNode *newnode;
-	const ExtensibleNodeMethods *methods;
+    ExtensibleNode *newnode;
+    const ExtensibleNodeMethods *methods;
 
-	methods = GetExtensibleNodeMethods(from->extnodename, false);
-	newnode = (ExtensibleNode *) newNode(methods->node_size,
-										 T_EXTENSIBLE_NODE);
-	COPY_STRING_FIELD(extnodename);
+    methods = GetExtensibleNodeMethods(from->extnodename, false);
+    newnode = (ExtensibleNode *) newNode(methods->node_size, T_EXTENSIBLE_NODE);
+    COPY_STRING_FIELD(extnodename);
 
-	/* copy the private fields */
-	methods->nodeCopy(newnode, from);
+    /* copy the private fields */
+    methods->nodeCopy(newnode, from);
 
-	return newnode;
+    return newnode;
 }
 
 static CreateEventStmt *node_copy_create_event_info(const CreateEventStmt *from)

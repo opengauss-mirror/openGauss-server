@@ -30,7 +30,8 @@ extern int g_max_worker_processes;
 #define BGWORKER_STATUS_DURLIMIT 500
 
 #define BGWORKER_MAX_ERROR_LEN 256
-/* individual bgworker, not related to backend, current need to ignore SIGINT and don't reset xact info when commit/abort */
+/* individual bgworker, not related to backend, current need to ignore SIGINT
+and don't reset xact info when commit/abort */
 #define BGWORKER_FLAG_INDIVIDUAL_THREAD (1 << 0)
 
 typedef enum BgwHandleStatus {
@@ -94,7 +95,8 @@ typedef struct BackgroundWorkerArgs {
 
 /* Register a new bgworker during shared_preload_libraries */
 extern bool RegisterBackgroundWorker(BackgroundWorker *worker, int flag = 0);
-extern int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, bgworker_exit bgexit, int flag = 0);
+extern int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain,
+    bgworker_exit bgexit, int flag = 0);
 extern void BackgroundWorkerMain(void);
 extern bool IsBgWorkerProcess(void);
 extern bool IsDMSWorkerProcess(void);

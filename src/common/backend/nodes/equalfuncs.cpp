@@ -3771,15 +3771,15 @@ static bool _equalGetDiagStmt(const GetDiagStmt* a, const GetDiagStmt* b)
 
 static bool _equalExtensibleNode(const ExtensibleNode *a, const ExtensibleNode *b)
 {
-	const ExtensibleNodeMethods *methods;
+    const ExtensibleNodeMethods *methods;
 
-	COMPARE_STRING_FIELD(extnodename);
+    COMPARE_STRING_FIELD(extnodename);
 
-	/* At this point, we know extnodename is the same for both nodes. */
-	methods = GetExtensibleNodeMethods(a->extnodename, false);
+    /* At this point, we know extnodename is the same for both nodes. */
+    methods = GetExtensibleNodeMethods(a->extnodename, false);
 
 	/* compare the private fields */
-	return methods->nodeEqual(a, b);
+    return methods->nodeEqual(a, b);
 }
 
 static bool node_equal_create_event_info(const CreateEventStmt* a, const CreateEventStmt* b)

@@ -6643,16 +6643,16 @@ static void _outPrefixKey(StringInfo str, PrefixKey* node)
 
 static void _outExtensibleNode(StringInfo str, const ExtensibleNode *node)
 {
-	const ExtensibleNodeMethods *methods;
+    const ExtensibleNodeMethods *methods;
 
-	methods = GetExtensibleNodeMethods(node->extnodename, false);
+    methods = GetExtensibleNodeMethods(node->extnodename, false);
 
-	WRITE_NODE_TYPE("EXTENSIBLENODE");
+    WRITE_NODE_TYPE("EXTENSIBLENODE");
 
-	WRITE_STRING_FIELD(extnodename);
+    WRITE_STRING_FIELD(extnodename);
 
-	/* serialize the private fields */
-	methods->nodeOut(str, node);
+    /* serialize the private fields */
+    methods->nodeOut(str, node);
 }
 
 /*

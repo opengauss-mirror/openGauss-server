@@ -1071,8 +1071,9 @@ typedef struct ForeignScan {
  */
 typedef struct ExtensibleNode
 {
-	NodeTag		type;
-	const char *extnodename;	/* identifier of ExtensibleNodeMethods */
+    NodeTag		type;
+    /* identifier of ExtensibleNodeMethods */
+    const char *extnodename;
 } ExtensibleNode;
 
 /*
@@ -1099,15 +1100,15 @@ typedef struct ExtensibleNode
  */
 typedef struct ExtensibleNodeMethods
 {
-	const char *extnodename;
-	Size		node_size;
-	void		(*nodeCopy) (struct ExtensibleNode *newnode,
-							 const struct ExtensibleNode *oldnode);
-	bool		(*nodeEqual) (const struct ExtensibleNode *a,
-							  const struct ExtensibleNode *b);
-	void		(*nodeOut) (struct StringInfoData *str,
-							const struct ExtensibleNode *node);
-	void		(*nodeRead) (struct ExtensibleNode *node);
+    const char *extnodename;
+    Size node_size;
+    void (*nodeCopy) (struct ExtensibleNode *newnode,
+                      const struct ExtensibleNode *oldnode);
+    bool (*nodeEqual) (const struct ExtensibleNode *a,
+                       const struct ExtensibleNode *b);
+    void (*nodeOut) (struct StringInfoData *str,
+                     const struct ExtensibleNode *node);
+    void (*nodeRead) (struct ExtensibleNode *node);
 } ExtensibleNodeMethods;
 
 /* ----------------

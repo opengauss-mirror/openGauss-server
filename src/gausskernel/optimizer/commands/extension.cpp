@@ -856,11 +856,11 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
      */
     creating_extension = true;
     u_sess->cmd_cxt.CurrentExtensionObject = extensionOid;
-    bool creating_spq = pg_strcasecmp(control->name, "spq") == 0;
+    bool creatingSpq = pg_strcasecmp(control->name, "spq") == 0;
     bool prevAllowSystemTableMods = g_instance.attr.attr_common.allowSystemTableMods;
     PG_TRY();
     {
-        if (creating_spq) {
+        if (creatingSpq) {
             g_instance.attr.attr_common.allowSystemTableMods = true;
         }
         char* c_sql = read_extension_script_file(control, filename);
@@ -915,7 +915,7 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
     {
         creating_extension = false;
         u_sess->cmd_cxt.CurrentExtensionObject = InvalidOid;
-        if (creating_spq) {
+        if (creatingSpq) {
             g_instance.attr.attr_common.allowSystemTableMods = prevAllowSystemTableMods;
         }
         PG_RE_THROW();
@@ -924,7 +924,7 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
 
     creating_extension = false;
     u_sess->cmd_cxt.CurrentExtensionObject = InvalidOid;
-    if (creating_spq) {
+    if (creatingSpq) {
         g_instance.attr.attr_common.allowSystemTableMods = prevAllowSystemTableMods;
     }
 

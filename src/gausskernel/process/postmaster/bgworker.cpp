@@ -592,7 +592,7 @@ int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, 
     } else {
         /* individual thread, live with PM */
         mcxt = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
-        Assert(bgshared != NULL);
+        Assert(bgshared != nullptr);
     }
     oldcontext = MemoryContextSwitchTo(mcxt);
 
