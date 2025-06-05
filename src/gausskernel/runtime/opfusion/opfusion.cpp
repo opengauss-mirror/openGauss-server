@@ -41,6 +41,7 @@
 #include "opfusion/opfusion_insert.h"
 #include "opfusion/opfusion_select.h"
 #include "opfusion/opfusion_selectforupdate.h"
+#include "opfusion/opfusion_selectforann.h"
 #include "opfusion/opfusion_sort.h"
 #include "opfusion/opfusion_update.h"
 #include "optimizer/clauses.h"
@@ -762,6 +763,9 @@ void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPla
             break;
         case SORT_INDEX_FUSION:
             opfusionObj = New(objCxt)SortFusion(context, psrc, plantree_list, params);
+            break;
+        case SELECT_FOR_ANN_FUSION:
+            opfusionObj = New(objCxt)SelectForAnnFusion(context, psrc, plantree_list, params);
             break;
         case NONE_FUSION:
             opfusionObj = NULL;
