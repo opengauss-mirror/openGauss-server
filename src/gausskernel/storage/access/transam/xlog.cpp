@@ -9704,7 +9704,12 @@ void StartupXLOG(void)
                 tablespaceinfo *ti = (tablespaceinfo *)lfirst(lc);
                 int length = PG_TBLSPCS + strlen(ti->oid) + 1;
                 char *linkloc = (char *)palloc0(length);
-                rc = snprintf_s(linkloc, length, length - 1, "pg_tblspc/%s", ti->oid);
+                if (ENABLE_DSS) {
+                    rc = snprintf_s(linkloc, length, length - 1, "%s/pg_tblspc/%s", 
+                            g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name, ti->oid);
+                } else {
+                    rc = snprintf_s(linkloc, length, length - 1, "pg_tblspc/%s", ti->oid);
+                }
                 securec_check_ss_c(rc, "", "");
                 /*
                  * Remove the existing symlink if any and Create the symlink
@@ -16713,10 +16718,15 @@ void RedoSpeedDiag(XLogRecPtr readPtr, XLogRecPtr endPtr)
         g_instance.comm_cxt.predo_cxt.redoPf.speed_according_seg = static_cast<uint32>(speed_raw);
         if (g_instance.comm_cxt.predo_cxt.redoPf.recovery_done_ptr == 0 || module_logging_is_on(MOD_REDO)) {
             ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                          errmsg("RedoSpeedDiag: %lu us, redoBytes:%lu,"
-                                 "preEndPtr:%lu, readPtr:%lu, endPtr:%lu, speed:%lu KB/s, totalTime:%lu",
-                                 INSTR_TIME_GET_MICROSEC(tmpTime), redoBytes,
-                                 g_instance.comm_cxt.predo_cxt.redoPf.preEndPtr, readPtr, endPtr, speed, totalTime)));
+                        errmsg("RedoSpeedDiag: %lu us, redoBytes:%lu, "
+                                "preEndPtr:%X/%X, readPtr:%X/%X, endPtr:%X/%X, "
+                                "speed:%lu KB/s, totalTime:%lu",
+                                INSTR_TIME_GET_MICROSEC(tmpTime), redoBytes,
+                                (uint32)(g_instance.comm_cxt.predo_cxt.redoPf.preEndPtr >> 32), 
+                                (uint32)(g_instance.comm_cxt.predo_cxt.redoPf.preEndPtr),
+                                (uint32)(readPtr >> 32), (uint32)(readPtr),
+                                (uint32)(endPtr >> 32), (uint32)(endPtr),
+                                speed, totalTime)));
         }
         redo_refresh_stats(speed_raw);
         g_instance.comm_cxt.predo_cxt.redoPf.preEndPtr = endPtr;
