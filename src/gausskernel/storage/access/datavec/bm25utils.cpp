@@ -234,7 +234,7 @@ void BM25IncreaseDocAndTokenCount(Relation index, uint32 tokenCount, float &avgd
         elog(ERROR, "bm25 index is not valid");
     metapBuf->documentCount++;
     metapBuf->tokenCount += tokenCount;
-    avgdl = metapBuf->tokenCount / metapBuf->documentCount;
+    avgdl = (metapBuf->tokenCount * 1.0) / metapBuf->documentCount;
     BM25CommitBuf(buf, &state, building);
 }
 
