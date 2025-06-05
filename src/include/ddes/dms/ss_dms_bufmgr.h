@@ -84,6 +84,7 @@ void buftag_get_buf_info(BufferTag tag, stat_buf_info_t *buf_info);
 Buffer SSReadBuffer(BufferTag *tag, ReadBufferMode mode);
 void DmsReleaseBuffer(int buffer, bool is_seg);
 bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl);
+bool SSNeedTerminateRequestPageInPrimaryRestart(BufferDesc *buf_desc);
 void ForgetBufferNeedCheckPin(Buffer buf_id);
 
 inline bool SSBufferIsDirty(BufferDesc *buf_desc)

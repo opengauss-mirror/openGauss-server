@@ -2126,6 +2126,10 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                 }
             } else {
                 rdStatus = smgrread(smgr, forkNum, blockNum, (char *)bufBlock);
+                if (rdStatus == SMGR_RD_RETRY) {
+                    *need_repair = true;
+                    return false;
+                }
             }
 
             if (u_sess->attr.attr_common.track_io_timing) {
@@ -2280,6 +2284,10 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
             blockNum, readmode, isExtend, bufBlock, NULL, &need_repair);
     }
     if (need_repair) {
+        if (SS_AM_BACKENDS_WORKERS && SS_STANDBY_IN_PRIMARY_RESTART) {
+            t_thrd.dms_cxt.page_need_retry = true;
+            return InvalidBuffer;
+        }
         LWLockRelease(buf_desc->io_in_progress_lock);
         UnpinBuffer(buf_desc, true);
         AbortBufferIO();
@@ -2587,7 +2595,8 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
      * head may be re-used, i.e., the relfilenode may be reused. Thus the
      * smgrnblocks interface can not be used on standby. Just skip this check.
      */
-    } else if (RecoveryInProgress()) {
+    } else if (RecoveryInProgress() && 
+        !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
         BlockNumber totalBlkNum = smgrnblocks_cached(smgr, forkNum);
 
         /* Update cached blocks */
@@ -2677,6 +2686,7 @@ found_branch:
 
                 if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
                     bufHdr = RedoForOndemandExtremeRTOQuery(bufHdr, relpersistence, forkNum, blockNum, mode);
+                    ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
                 }
             }
             return BufferDescriptorGetBuffer(bufHdr);
@@ -2782,6 +2792,9 @@ found_branch:
                         /* when reform fail, should return InvalidBuffer to reform proc thread */
                         if (SSNeedTerminateRequestPageInReform(buf_ctrl)) {
                             SSUnPinBuffer(bufHdr);
+                            if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
+                                ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
+                            }
                             return InvalidBuffer;
                         }
                         /* when in failover, should return to worker thread exit */
@@ -2800,10 +2813,25 @@ found_branch:
                     */
                     buf_ctrl->state |= BUF_NEED_LOAD;
                 }
-                break;
+                Buffer tmpBuffer = TerminateReadPage(bufHdr, mode, pblk);
+                /**
+                 * Retry until reform finish to avoid dead lock between worker
+                 * and mes proc for standby node during primary restarting.
+                 */
+                if (BufferIsInvalid(tmpBuffer) && t_thrd.dms_cxt.page_need_retry) {
+                    t_thrd.dms_cxt.page_need_retry = false;
+                    ereport(DEBUG1, (errmodule(MOD_DMS),
+                        (errmsg("[SS][%u/%u/%u/%d %d-%u] ReadBuffer_common need reload in reform, buf_id:%d",
+                                bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode,
+                                bufHdr->tag.rnode.relNode, bufHdr->tag.rnode.bucketNode,
+                                bufHdr->tag.forkNum, bufHdr->tag.blockNum, bufHdr->buf_id))));
+                    continue;
+                }
+                if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
+                    ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
+                }
+                return tmpBuffer;
             } while (true);
-
-            return TerminateReadPage(bufHdr, mode, pblk);
         }
         ClearReadHint(bufHdr->buf_id);
     }
@@ -3051,6 +3079,11 @@ retry:
         if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY &&
             ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING) {
             UnpinBuffer(buf, true);
+            while (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) ==
+                ONDEMAND_HASHMAP_ENTRY_REDOING && SS_PRIMARY_MODE) {
+                pg_usleep(TEN_MICROSECOND);
+            }
+
             goto retry;
         }
 
@@ -3271,8 +3304,10 @@ retry_new_buffer:
                 buf_id = BufTableLookup(&new_tag, new_hash);
 
                 /* If the slot has been eliminated, find another slot and retry. */
-                if (buf_id < 0)
+                if (buf_id < 0) {
+                    ondemand_extreme_rto::ReleaseHashMapLockIfAny(buf, fork_num, block_num);
                     continue;
+                }
 
                 /* remaining code should match code at top of routine */
                 buf = GetBufferDescriptor(buf_id);
@@ -3287,9 +3322,14 @@ retry_new_buffer:
                 * Checkpoint if buffer need to redo and try hashMap partition lock,
                 * if need to redo but doesn't get lock, unpinbuffer and retry.
                 */
-                if (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) == ONDEMAND_HASHMAP_ENTRY_REDOING &&
-                    SS_PRIMARY_ONDEMAND_RECOVERY) {
+                if (SS_PRIMARY_ONDEMAND_RECOVERY &&
+                    ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) ==
+                    ONDEMAND_HASHMAP_ENTRY_REDOING) {
                     UnpinBuffer(buf, true);
+                    while (ondemand_extreme_rto::checkBlockRedoStateAndTryHashMapLock(buf, fork_num, block_num) ==
+                        ONDEMAND_HASHMAP_ENTRY_REDOING && SS_PRIMARY_MODE) {
+                        pg_usleep(TEN_MICROSECOND);
+                    }
                     goto retry_new_buffer;
                 }
             } else {
@@ -3679,7 +3719,7 @@ void MarkBufferDirty(Buffer buffer)
 
     UnlockBufHdr(buf_desc, buf_state);
 
-    if (SS_REFORM_REFORMER) {
+    if (SS_REFORM_REFORMER || SS_PRIMARY_ONDEMAND_RECOVERY) {
         dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
         buf_ctrl->state &= ~BUF_DIRTY_NEED_FLUSH;
     }
@@ -6375,6 +6415,14 @@ retry:
             }
 
             LWLockRelease(buf->content_lock);
+            /* when in failover worker thread should exit */
+            if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
+                ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
+            }
+            if (SSNeedTerminateRequestPageInPrimaryRestart(GetBufferDescriptor(buffer - 1))) {
+                t_thrd.dms_cxt.page_need_retry = true;
+                return;
+            }
 
             if (AmDmsReformProcProcess() && dms_reform_failed()) {
                 t_thrd.dms_cxt.flush_copy_get_page_failed = true;

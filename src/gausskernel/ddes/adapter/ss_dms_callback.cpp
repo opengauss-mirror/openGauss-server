@@ -58,6 +58,14 @@
 
 static void ReleaseResource();
 
+static inline void IniRedoInfo()
+{
+    g_instance.dms_cxt.SSReformInfo.redo_start_time = 0;
+    g_instance.dms_cxt.SSReformInfo.redo_end_time = 0;
+    g_instance.dms_cxt.SSReformInfo.construct_hashmap = 0;
+    g_instance.dms_cxt.SSReformInfo.redo_total_bytes = 0;
+}
+
 /*
  * Wake up startup process to replay WAL, or to notice that
  * failover has been requested.
@@ -426,7 +434,7 @@ static int CBSwitchoverDemote(void *db_handle)
         if (pmState == PM_RUN && g_instance.dms_cxt.SSClusterState == NODESTATE_PROMOTE_APPROVE) {
             SSResetDemoteReqType();
             ereport(LOG,
-                (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] Success in %s primary demote, running as"
+                (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] Success in %s primary demote, running as "
                     "standby, waiting for reformer setting new role.", DemoteModeDesc(demote_mode))));
             return DMS_SUCCESS;
         } else {
@@ -1801,6 +1809,7 @@ static void CBReformSetDmsRole(void *db_handle, unsigned int reformer_id)
     dms_role_t new_dms_role = reformer_id == (unsigned int)SS_MY_INST_ID ? DMS_ROLE_REFORMER : DMS_ROLE_PARTNER;
     if (new_dms_role == DMS_ROLE_REFORMER) {
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS switchover] begin to set currrent DSS as primary")));
+        g_instance.dms_cxt.SSRecoveryInfo.reform_ckpt_status = NOT_ALLOW_CKPT;
         SSGrantDSSWritePermission();
         g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
     }
@@ -1972,7 +1981,7 @@ static void FailoverStartNotify(dms_reform_start_context_t *rs_cxt)
         g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = true;
         if (rs_cxt->role == DMS_ROLE_REFORMER) {
             g_instance.dms_cxt.dw_init = false;
-            /* variable set order: SharedRecoveryInProgress -> failover_ckpt_status -> dms_role */
+            /* variable set order: SharedRecoveryInProgress -> reform_ckpt_status -> dms_role */
             volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
             SpinLockAcquire(&xlogctl->info_lck);
             xlogctl->IsRecoveryDone = false;
@@ -1980,7 +1989,7 @@ static void FailoverStartNotify(dms_reform_start_context_t *rs_cxt)
             SpinLockRelease(&xlogctl->info_lck);
             t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
             pg_memory_barrier();
-            g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ALLOW_CKPT;
+            g_instance.dms_cxt.SSRecoveryInfo.reform_ckpt_status = NOT_ALLOW_CKPT;
             g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_FAILOVER_PROMOTING;
 
             /* 
@@ -2033,6 +2042,7 @@ static void CBReformStartNotify(void *db_handle, dms_reform_start_context_t *rs_
     reform_info->bitmap_nodes = rs_cxt->bitmap_participated;
     reform_info->bitmap_reconnect = rs_cxt->bitmap_reconnect;
     reform_info->dms_role = rs_cxt->role;
+    IniRedoInfo();
     if (!ENABLE_SS_BCAST_GETOLDESTXMIN) {
         SSXminInfoPrepare();
     }
@@ -2084,7 +2094,7 @@ static int CBReformDoneNotify(void *db_handle)
     /* SSClusterState and in_reform must be set atomically */
     g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
     g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
-    g_instance.dms_cxt.SSRecoveryInfo.failover_ckpt_status = NOT_ACTIVE;
+    g_instance.dms_cxt.SSRecoveryInfo.reform_ckpt_status = NOT_ACTIVE;
     Assert(g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy == false);
     g_instance.dms_cxt.SSReformInfo.new_bitmap = g_instance.dms_cxt.SSReformerControl.list_stable;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] new cluster node bitmap: %lu",
@@ -2132,15 +2142,31 @@ static int CBXLogWaitFlush(void *db_handle, unsigned long long lsn)
 
 static int CBDBCheckLock(void *db_handle)
 {
-    if (t_thrd.storage_cxt.num_held_lwlocks > 0) {
-        TimestampTz now = GetCurrentTimestamp();
-        ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS lock] hold lock, lock address:%p, lock mode:%u, time:%ld ms",
-            t_thrd.storage_cxt.held_lwlocks[0].lock,
-            t_thrd.storage_cxt.held_lwlocks[0].mode,
-            now - t_thrd.storage_cxt.lwlock_held_times[0])));
-        return GS_ERROR;
+    if (t_thrd.storage_cxt.num_held_lwlocks <= 0) {
+        return GS_SUCCESS;
     }
-    return GS_SUCCESS;
+
+    int level = WARNING;
+#ifdef ENABLE_DEBUG
+    level = PANIC;
+#endif
+
+    TimestampTz now = GetCurrentTimestamp();
+    for (int i = t_thrd.storage_cxt.num_held_lwlocks - 1; i >= 0; i--) {
+        LWLockHandle handle = t_thrd.storage_cxt.held_lwlocks[i];
+        if (t_thrd.storage_cxt.held_lwlocks[i].lock != NULL) {
+            ereport(level, (errmodule(MOD_DMS),
+                errmsg("[SS lock] hold lock, lock address:%p, "
+                       "lock tranche:%u, lock mode:%u, time:%ld us",
+                       t_thrd.storage_cxt.held_lwlocks[i].lock,
+                       t_thrd.storage_cxt.held_lwlocks[i].lock->tranche,
+                       t_thrd.storage_cxt.held_lwlocks[i].mode,
+                       now - t_thrd.storage_cxt.lwlock_held_times[0])));
+            LWLockRelease(t_thrd.storage_cxt.held_lwlocks[i].lock);
+        }
+    }
+
+    return GS_ERROR;
 }
 
 static int CBCacheMsg(void *db_handle, char* msg)

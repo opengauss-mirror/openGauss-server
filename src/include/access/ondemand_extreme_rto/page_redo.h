@@ -212,6 +212,8 @@ struct PageRedoWorker {
     XLogRecPtr nextPrunePtr;
     bool inRealtimeBuild;
     uint32 currentHtabBlockNum;
+    XLogRecPtr lastQueueTopReadRecPtr;
+    XLogRecPtr lastQueueTopEndRecPtr;
 };
 
 
@@ -278,11 +280,14 @@ LWLock* OndemandGetXLogPartitionLock(BufferDesc* bufHdr, ForkNumber forkNum, Blo
 int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum);
 bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag, RedoItemHashEntry **redoItemEntry,
     bool holdLock);
+bool ReleaseHashMapLockIfAny(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum);
 void RedoWorkerQueueCallBack();
 void OndemandProcPauseStatus();
 void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat);
 void ReleaseBlockParseStateIfNotReplay(XLogRecParseState *preState, bool isChildState = false);
 bool SSXLogParseRecordNeedReplayInOndemandRealtimeBuild(XLogRecParseState *redoblockstate);
+void SetQueueTopReadEndPtr(PageRedoWorker *worker, XLogRecPtr readPtr, XLogRecPtr endPtr);
+void GetQueueTopReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr);
 
 }  // namespace ondemand_extreme_rto
 #endif

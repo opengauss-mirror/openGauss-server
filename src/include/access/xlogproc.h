@@ -1308,5 +1308,7 @@ void MarkSegPageRedoChildPageDirty(RedoBufferInfo *bufferinfo);
 XLogRedoAction SSCheckInitPageXLog(XLogReaderState *record, uint8 block_id, RedoBufferInfo *redo_buf);
 XLogRedoAction SSCheckInitPageXLogSimple(XLogReaderState *record, uint8 block_id, RedoBufferInfo *redo_buf);
 bool SSPageReplayNeedSkip(RedoBufferInfo *blockinfo, XLogRecPtr xlogLsn, XLogRecPtr *pageLsn);
+bool OndemandPageReplayNeedSkip(Buffer buf, RedoBufferTag *redoblock,
+                                RedoBufferInfo *redobufferinfo, XLogRecPtr xloglsn);
 
 #endif

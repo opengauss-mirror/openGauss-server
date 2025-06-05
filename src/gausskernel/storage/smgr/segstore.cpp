@@ -1211,6 +1211,10 @@ static Buffer read_head_buffer(SMgrRelation reln, ForkNumber forknum, bool creat
     SegmentCheck(reln->seg_desc[forknum] != NULL);
     Buffer buffer = ReadSegmentBuffer(reln->seg_space, reln->seg_desc[forknum]->head_blocknum);
 
+    if (BufferIsInvalid(buffer) && SS_AM_BACKENDS_WORKERS && SS_STANDBY_IN_PRIMARY_RESTART) {
+        return buffer;
+    }
+
 #ifdef USE_ASSERT_CHECKING
     SegmentHead *head = (SegmentHead *)PageGetContents(BufferGetPage(buffer));
     uint64 header_magic = head->magic;
@@ -1512,7 +1516,14 @@ SMGR_READ_STATUS seg_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blo
 
     Buffer seg_buffer = read_head_buffer(reln, forknum, false);
     if (ENABLE_DMS) {
+        if (BufferIsInvalid(seg_buffer) &&SS_STANDBY_IN_PRIMARY_RESTART) {
+            return SMGR_RD_RETRY;
+        }
         LockBuffer(seg_buffer, BUFFER_LOCK_SHARE);
+        if (t_thrd.dms_cxt.page_need_retry) {
+            t_thrd.dms_cxt.page_need_retry = false;
+            return SMGR_RD_RETRY;
+        }
     }
     SegmentCheck(BufferIsValid(seg_buffer));
     SegmentHead *seg_head = (SegmentHead *)PageGetContents(BufferGetBlock(seg_buffer));

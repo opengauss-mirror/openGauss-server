@@ -82,6 +82,10 @@
 #define MAX_PATH_LEN 1024
 extern const int g_reserve_param_num;
 #define PARTKEY_VALUE_MAXNUM 64
+#define SS_AM_BACKENDS_WORKERS (t_thrd.role == WORKER || \
+                               t_thrd.role == THREADPOOL_WORKER || \
+                               t_thrd.role == TRACK_STMT_CLEANER || \
+                               t_thrd.role == TRACK_STMT_WORKER)     
 
 typedef struct ResourceOwnerData* ResourceOwner;
 typedef struct logicalLog logicalLog;
@@ -3432,6 +3436,7 @@ typedef struct knl_t_dms_context {
     PinnedBufferItem* pincount_array;
     bool need_check_pincount;
     bool in_ondemand_redo;
+    bool page_need_retry;
 } knl_t_dms_context;
 
 typedef struct knl_t_ondemand_xlog_copy_context {

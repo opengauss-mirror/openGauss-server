@@ -336,6 +336,35 @@ loop:
 #endif /* __x86_64__ || __aarch64__ */
 }
 
+/* automic write for lastQueueTopReadRecPtr and lastQueueTopEndRecPtr */
+void SetQueueTopReadEndPtr(PageRedoWorker *worker, XLogRecPtr readPtr, XLogRecPtr endPtr)
+{
+    volatile PageRedoWorker *tmpWk = worker;
+#if defined(__x86_64__) || defined(__aarch64__)
+    uint128_u exchange;
+    uint128_u current;
+    uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastQueueTopReadRecPtr);
+
+    Assert(sizeof(tmpWk->lastQueueTopReadRecPtr) == 8);
+    Assert(sizeof(tmpWk->lastQueueTopEndRecPtr) == 8);
+
+    exchange.u64[0] = (uint64)readPtr;
+    exchange.u64[1] = (uint64)endPtr;
+
+loop:
+    current = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastQueueTopReadRecPtr, compare, exchange);
+    if (!UINT128_IS_EQUAL(compare, current)) {
+        UINT128_COPY(compare, current);
+        goto loop;
+    }
+#else
+    SpinLockAcquire(&tmpWk->ptrLck);
+    tmpWk->lastQueueTopReadRecPtr = readPtr;
+    tmpWk->lastQueueTopEndRecPtr = endPtr;
+    SpinLockRelease(&tmpWk->ptrLck);
+#endif /* __x86_64__ || __aarch64__ */
+}
+
 /* automic write for lastReplayedReadRecPtr and lastReplayedEndRecPtr */
 void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr)
 {
@@ -351,6 +380,25 @@ void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRec
     SpinLockAcquire(&tmpWk->ptrLck);
     *readPtr = tmpWk->lastReplayedReadRecPtr;
     *endPtr = tmpWk->lastReplayedEndRecPtr;
+    SpinLockRelease(&tmpWk->ptrLck);
+#endif /* __x86_64__ || __aarch64__ */
+}
+
+/* automic write for lastQueueTopReadRecPtr and lastQueueTopEndRecPtr */
+void GetQueueTopReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr)
+{
+    volatile PageRedoWorker *tmpWk = worker;
+#if defined(__x86_64__) || defined(__aarch64__)
+    uint128_u compare = atomic_compare_and_swap_u128((uint128_u *)&tmpWk->lastQueueTopReadRecPtr);
+    Assert(sizeof(tmpWk->lastQueueTopReadRecPtr) == 8);
+    Assert(sizeof(tmpWk->lastQueueTopEndRecPtr) == 8);
+
+    *readPtr = (XLogRecPtr)compare.u64[0];
+    *endPtr = (XLogRecPtr)compare.u64[1];
+#else
+    SpinLockAcquire(&tmpWk->ptrLck);
+    *readPtr = tmpWk->lastQueueTopReadRecPtr;
+    *endPtr = tmpWk->lastQueueTopEndRecPtr;
     SpinLockRelease(&tmpWk->ptrLck);
 #endif /* __x86_64__ || __aarch64__ */
 }
@@ -878,20 +926,33 @@ static void WaitSegRedoWorkersQueueEmpty()
     }
 }
 
-static void WaitTrxnRedoWorkersQueueEmpty()
+/*
+ * If parsestate == NULL, wait until TrxnRedoManagerQueue emtpy.
+ * Else, wait untils the recodes before parsestate has been handled.
+ */
+static void WaitTrxnRedoManagerQueueSync(XLogRecParseState *parsestate)
 {
+    XLogRecPtr readPtr;
+    XLogRecPtr endPtr;
+
     while (!SPSCBlockingQueueIsEmpty(g_dispatcher->trxnLine.managerThd->queue) ||
         !SPSCBlockingQueueIsEmpty(g_dispatcher->trxnQueue)) {
+        if (parsestate != NULL) {
+            GetQueueTopReadEndPtr(g_dispatcher->trxnLine.managerThd, &readPtr, &endPtr);
+            if (XLByteLE(parsestate->blockparse.blockhead.end_ptr, endPtr)) {
+                break;
+            }
+        }
         pg_usleep(100000L);   /* 100 ms */
         RedoInterruptCallBack();
     }
 }
 
-void RedoPageManagerDistributeBlockRecord(XLogRecParseState *parsestate)
+void RedoPageManageWaitPrevRecordDispatchFinish(XLogRecParseState *parsestate)
 {
     PageManagerPruneIfRealtimeBuildFailover();
     WaitSegRedoWorkersQueueEmpty();
-    WaitTrxnRedoWorkersQueueEmpty();
+    WaitTrxnRedoManagerQueueSync(parsestate);
     PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
     const uint32 WorkerNumPerMng = myRedoLine->redoThdNum;
     HASH_SEQ_STATUS status;
@@ -904,7 +965,11 @@ void RedoPageManagerDistributeBlockRecord(XLogRecParseState *parsestate)
         ReleaseRecParseState(curMap, redoItemEntry);
         RedoPageManagerDistributeToRedoThd(myRedoLine, curMap, redoItemEntry, workId);
     }
+}
 
+void RedoPageManagerDistributeBlockRecord(XLogRecParseState *parsestate)
+{
+    RedoPageManageWaitPrevRecordDispatchFinish(parsestate);
     if (parsestate != NULL) {
         RedoPageManagerDistributeToAllOneBlock(parsestate);
     }
@@ -1225,7 +1290,7 @@ void PageManagerProcLsnForwarder(RedoItem *lsnForwarder)
     } while (refCount != 0);
 
     SetCompletedReadEndPtr(g_redoWorker, lsnForwarder->record.ReadRecPtr, lsnForwarder->record.EndRecPtr);
-    RedoPageManagerDistributeBlockRecord(NULL);
+    RedoPageManageWaitPrevRecordDispatchFinish(NULL);
 }
 
 void PageManagerDistributeBcmBlock(XLogRecParseState *preState)
@@ -1289,7 +1354,7 @@ void PageManagerProcCheckPoint(XLogRecParseState *parseState)
 
 void PageManagerProcCreateTableSpace(XLogRecParseState *parseState)
 {
-    RedoPageManagerDistributeBlockRecord(NULL);
+    RedoPageManageWaitPrevRecordDispatchFinish(parseState);
     bool needWait = parseState->isFullSync;
     if (needWait) {
         pg_atomic_write_u32(&g_redoWorker->fullSyncFlag, 1);
@@ -1577,7 +1642,7 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
             break;
         case BLOCK_DATA_CREATE_DATABASE_TYPE:
             GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_6]);
-            RedoPageManagerDistributeBlockRecord(NULL);
+            RedoPageManageWaitPrevRecordDispatchFinish(preState);
             /* wait until queue empty */
             WaitCurrentPipeLineRedoWorkersQueueEmpty();
             /* do atcual action */
@@ -1599,7 +1664,7 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
             PageManagerProcCheckPoint(preState);
             break;
         case BLOCK_DATA_NEWCU_TYPE:
-            RedoPageManagerDistributeBlockRecord(NULL);
+            RedoPageManageWaitPrevRecordDispatchFinish(preState);
             PageManagerDistributeBcmBlock(preState);
             break;
         case BLOCK_DATA_SEG_SPACE_DROP:
@@ -1672,7 +1737,7 @@ bool PageManagerRedoDistributeItems(void **eleArry, uint32 eleNum)
             Assert(!SS_ONDEMAND_REALTIME_BUILD_NORMAL);
             // double check
             if (SS_ONDEMAND_RECOVERY_HASHMAP_FULL) {
-                RedoPageManagerDistributeBlockRecord(NULL);
+                RedoPageManageWaitPrevRecordDispatchFinish(NULL);
                 ReleaseRecParseStateUntilRedoNotPause();
             }
             continue;
@@ -1827,6 +1892,7 @@ bool TrxnManagerDistributeItemsBeforeEnd(RedoItem *item)
     } else if (item == (void *)&g_hashmapPruneMark) {
         TrxnManagerProcHashMapPrune();
     } else {
+        SetQueueTopReadEndPtr(g_redoWorker, item->record.ReadRecPtr, item->record.EndRecPtr);
         if (XLByteLT(item->record.EndRecPtr, g_redoWorker->nextPrunePtr)) {
             if (XactHasSegpageRelFiles(&item->record)) {
                 uint32 expected = 1;
@@ -2181,12 +2247,34 @@ LWLock* OndemandGetXLogPartitionLock(BufferDesc* bufHdr, ForkNumber forkNum, Blo
 }
 
 /**
+ * Try to release hashmap lock, if the lock is not held by current thread, return false.
+ * Otherwise, release the lock and return true.
+ */
+bool ReleaseHashMapLockIfAny(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum)
+{
+    ondemand_extreme_rto::RedoItemTag redoItemTag;
+
+    /* get hashmap by redoItemTag */
+    INIT_REDO_ITEM_TAG(redoItemTag, bufHdr->tag.rnode, forkNum, blockNum);
+
+    /* get partition lock by redoItemTag */
+    unsigned int partitionLockHash = XlogTrackTableHashCode(&redoItemTag);
+    LWLock *xlog_partition_lock = XlogTrackMappingPartitionLock(partitionLockHash);
+
+    if (LWLockHeldByMe(xlog_partition_lock)) {
+        LWLockRelease(xlog_partition_lock);
+        return true;
+    }
+    return false;
+}
+
+/**
  * Check the block if need to redo and try hashmap lock. 
  * There are three kinds of result as follow:
  * 1. ONDEMAND_HASHMAP_ENTRY_REDO_DONE: the recordes of this buffer redo done.
- * 2. ONDEMAND_HASHMAP_ENTRY_REDOING: the reordes of this buffer is redoing
+ * 2. ONDEMAND_HASHMAP_ENTRY_REDOING: the reordes of this buffer is redoing by other process.
  * 3. ONDEMAND_HASHMAP_ENTRY_NEED_REDO: the recordes of this buffer has not been redone,
- *    so get hashmap entry lock.
+ *    so leave with hashmap entry lock.
  */
 int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber blockNum) {
     LWLock *xlog_partition_lock = NULL;
@@ -2194,7 +2282,6 @@ int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum,
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
     bool noNeedRedo = false;
     bool getSharedLock = false;
-
     /* buffer redo done, no need to check */
     if (buf_ctrl->state & BUF_ONDEMAND_REDO_DONE) {
         return ONDEMAND_HASHMAP_ENTRY_REDO_DONE;
@@ -2212,6 +2299,17 @@ int checkBlockRedoStateAndTryHashMapLock(BufferDesc* bufHdr, ForkNumber forkNum,
     /* get partition lock by redoItemTag */
     unsigned int partitionLockHash = XlogTrackTableHashCode(&redoItemTag);
     xlog_partition_lock = XlogTrackMappingPartitionLock(partitionLockHash);
+
+    if (LWLockHeldByMe(xlog_partition_lock)) {
+        Assert(LWLockHeldByMeInMode(xlog_partition_lock, LW_EXCLUSIVE));
+        ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                errmsg("checkBlockRedoDoneFromHashMapAndLock, partitionLock has been locked when "
+                       "pinbuffer: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                       redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode,
+                       redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
+                       redoItemTag.forkNum, redoItemTag.blockNum)));
+        return ONDEMAND_HASHMAP_ENTRY_NEED_REDO;
+    }
 
     /* if buffer has be redone, set state to REDO_DONE and return REDO_DONE */
     if (checkBlockRedoDoneFromHashMap(xlog_partition_lock, hashMap, redoItemTag, &getSharedLock)) {
@@ -2312,9 +2410,10 @@ bool checkBlockRedoDoneFromHashMapAndLock(LWLock **lock, RedoItemTag redoItemTag
     if (LWLockHeldByMe(*lock)) {
         Assert(LWLockHeldByMeInMode(*lock, LW_EXCLUSIVE));
         ereport(DEBUG1, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                errmsg("checkBlockRedoDoneFromHashMapAndLock, partitionLock has been locked when pinbuffer: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
-                        redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode, redoItemTag.rNode.bucketNode,
-                        redoItemTag.forkNum, redoItemTag.blockNum)));
+                errmsg("checkBlockRedoDoneFromHashMapAndLock, partitionLock has been locked when "
+                       "pinbuffer: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                       redoItemTag.rNode.spcNode, redoItemTag.rNode.dbNode, redoItemTag.rNode.relNode,
+                       redoItemTag.rNode.bucketNode, redoItemTag.forkNum, redoItemTag.blockNum)));
         RedoItemHashEntry *entry = (RedoItemHashEntry *)hash_search(hashMap, (void *)&redoItemTag, HASH_FIND, &hashFound);
 
         /* Page is already up-to-date, no need to replay. */

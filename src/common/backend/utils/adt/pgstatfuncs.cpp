@@ -15239,7 +15239,7 @@ TupleDesc create_query_node_reform_info_tupdesc()
     TupleDescInitEntry(tupdesc, (AttrNumber)5, "is_reform_success", BOOLOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)6, "redo_start_time", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)7, "rode_end_time", TIMESTAMPTZOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)8, "xlog_total_bytes", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "xlog_total_bytes", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)9, "hashmap_construct_time", TIMESTAMPTZOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)10, "action", TEXTOID, -1, 0);
     BlessTupleDesc(tupdesc);
@@ -15319,14 +15319,26 @@ Datum query_node_reform_info(PG_FUNCTION_ARGS)
             values[4] = BoolGetDatum(reform_info.reform_success);
 
             if (reform_info.reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
-                values[5] = TimestampTzGetDatum(reform_info.redo_start_time);
-                if (reform_info.redo_start_time > reform_info.redo_end_time) {
+                if (reform_info.redo_start_time == 0) {
+                    nulls[5] = true;
+                } else {
+                    values[5] = TimestampTzGetDatum(reform_info.redo_start_time);
+                }
+                if ((reform_info.redo_start_time > reform_info.redo_end_time) || reform_info.redo_end_time == 0) {
                     nulls[6] = true;
                 } else {
                     values[6] = TimestampTzGetDatum(reform_info.redo_end_time);
                 }
-                values[7] = UInt64GetDatum(reform_info.redo_total_bytes);
-                values[8] = TimestampTzGetDatum(reform_info.construct_hashmap);
+                if (reform_info.redo_total_bytes == 0) {
+                    nulls[7] = true;
+                } else {
+                    values[7] = UInt64GetDatum(reform_info.redo_total_bytes);
+                }
+                if (reform_info.construct_hashmap == 0) {
+                    nulls[8] = true;
+                } else {
+                    values[8] = TimestampTzGetDatum(reform_info.construct_hashmap);
+                }
             } else {
                 values[7] = UInt64GetDatum(-1);
                 nulls[5] = true;

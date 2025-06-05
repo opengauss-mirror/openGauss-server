@@ -2048,7 +2048,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
-        {{"enable_remote_excute",
+        {{"enable_remote_execute",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
             QUERY_TUNING,
