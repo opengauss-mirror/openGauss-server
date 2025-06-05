@@ -386,6 +386,7 @@ static void getInstallationPaths(const char* argv0);
 static void checkDataDir(void);
 static void CheckGUCConflicts(void);
 static void CheckPgLogDisk(void);
+static void CheckLogDir(void);
 static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets);
 static Port* ConnCreate(int serverFd, int idx);
 static void reset_shared(int port);
@@ -2319,6 +2320,8 @@ int PostmasterMain(int argc, char* argv[])
     if (u_sess->attr.attr_common.Log_directory != NULL && is_absolute_path(u_sess->attr.attr_common.Log_directory)) {
         CheckPgLogDisk();
     }
+    
+    CheckLogDir();
 
     /* And switch working directory into it */
     ChangeToDataDir();
@@ -3373,6 +3376,39 @@ static void checkDataDir(void)
     }
 
     FreeFile(fp);
+}
+
+static void CheckLogDir(void)
+{
+    if (!g_instance.attr.attr_storage.dss_attr.ss_enable_dss) {
+        return;
+    }
+
+    DIR* dir = NULL;
+    errno_t rc;
+    struct stat statBuf;
+    char log_path[MAXPGPATH] = {0};
+
+    /* assign gs_log to sys_log_path, use it as alarm directory */
+    bool isAbsolute = is_absolute_path(u_sess->attr.attr_common.Log_directory);
+    if (isAbsolute) {
+        rc = strncpy_s(log_path, MAXPGPATH, u_sess->attr.attr_common.Log_directory,
+            strlen(u_sess->attr.attr_common.Log_directory));
+        securec_check(rc, "\0", "\0");
+    } else {
+        rc = snprintf_s(log_path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_log",
+                        g_instance.attr.attr_common.data_directory);
+        securec_check_ss(rc, "\0", "\0");
+    }
+
+    if ((dir = opendir(log_path)) == NULL) {
+        if (errno == ENOENT) {
+            return;
+        }
+        ereport(ERROR, (errmsg("open directory %s: %s", log_path, TRANSLATE_ERRNO)));
+    }
+
+    return;
 }
 
 static void CheckExtremeRtoGUCConflicts(void)
