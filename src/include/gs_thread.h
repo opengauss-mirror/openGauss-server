@@ -126,6 +126,7 @@ typedef enum knl_thread_role {
 #ifdef USE_SPQ
     SPQ_COORDINATOR,
 #endif
+    SYNCINFO_THREAD,
     DMS_AUXILIARY_THREAD,
     EXRTO_RECYCLER,
     BARRIER_PREPARSE,

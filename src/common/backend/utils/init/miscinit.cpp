@@ -2142,6 +2142,14 @@ void initDssPath(char *dssdir)
     securec_check_ss(rc, "", "");
 
     ss_initdwsubdir(dssdir, g_instance.attr.attr_storage.dms_attr.instance_id);
+
+    rc = snprintf_s(g_instance.datadir_cxt.configFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/shared_postgresql.conf",
+        dssdir);
+    securec_check_ss(rc, "", "");
+
+    rc = snprintf_s(g_instance.datadir_cxt.hbaConfigFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/shared_pg_hba.conf",
+        dssdir);
+    securec_check_ss(rc, "", "");
 }
 
 void initDSSConf(void)

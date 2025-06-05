@@ -271,6 +271,7 @@
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_auxiliary.h"
 #include "storage/gs_uwal/gs_uwal.h"
+#include "ddes/dms/ss_sync_auxiliary.h"
 #include "access/datavec/utils.h"
 
 #ifdef ENABLE_UT
@@ -3117,6 +3118,10 @@ int PostmasterMain(int argc, char* argv[])
         }
     }
 
+    if (ENABLE_DMS && ENABLE_DSS) {
+        g_instance.pid_cxt.SyncAuxiliaryPID = initialize_util_thread(SYNCINFO_THREAD);
+    }
+
     /* init uwal */
     if (g_instance.attr.attr_storage.enable_uwal) {
         int ret = GsUwalInit(t_thrd.postmaster_cxt.HaShmData->current_mode);
@@ -5881,6 +5886,7 @@ static void SIGHUP_handler(SIGNAL_ARGS)
             ereport(LOG, (errmsg("we try get lock times:%d", j)));
         }
 
+        sync_config_file();
         ProcessConfigFile(PGC_SIGHUP);
         release_file_lock(&filelock);
         LWLockRelease(ConfigFileLock);
@@ -5890,6 +5896,10 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->GetSessionCtrl()->SigHupHandler();
             g_threadPoolControler->GetScheduler()->SigHupHandler();
+        }
+
+        if (g_instance.pid_cxt.SyncAuxiliaryPID != 0) {
+            signal_child(g_instance.pid_cxt.SyncAuxiliaryPID, SIGHUP);
         }
 
         if (g_instance.pid_cxt.StartupPID != 0)
@@ -13705,6 +13715,9 @@ static void SetAuxType()
         case DMS_AUXILIARY_THREAD:
             t_thrd.bootstrap_cxt.MyAuxProcType = DmsAuxiliaryProcess;
             break;
+        case SYNCINFO_THREAD:
+            t_thrd.bootstrap_cxt.MyAuxProcType = SyncAuxiliaryProcess;
+            break;
         default:
             ereport(ERROR, (errmsg("unrecorgnized proc type %d", thread_role)));
     }
@@ -14013,6 +14026,10 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             DmsAuxiliaryMain();
             proc_exit(1);
             break;
+        case SYNCINFO_THREAD:
+            SyncAuxiliaryMain();
+            proc_exit(1);
+            break;
         default:
             ereport(PANIC, (errmsg("unrecognized process type: %d", (int)t_thrd.bootstrap_cxt.MyAuxProcType)));
             proc_exit(1);
@@ -14268,6 +14285,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case THREADPOOL_LISTENER:
         case THREADPOOL_SCHEDULER:
         case DMS_AUXILIARY_THREAD:
+        case SYNCINFO_THREAD:
         case UNDO_RECYCLER: {
             SetAuxType<thread_role>();
             /* Restore basic shared memory pointers */
@@ -14819,6 +14837,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
 #ifdef USE_SPQ
     { GaussDbThreadMain<SPQ_COORDINATOR>, SPQ_COORDINATOR, "spqcoordinator", "QC node coordinating thread" },
 #endif
+    { GaussDbThreadMain<SYNCINFO_THREAD>, SYNCINFO_THREAD, "sync_auxiliary", "synchronize configuration files" },
     { GaussDbThreadMain<DMS_AUXILIARY_THREAD>, DMS_AUXILIARY_THREAD, "dms_auxiliary", "maintenance xmin in dms" },
     { GaussDbThreadMain<EXRTO_RECYCLER>, EXRTO_RECYCLER, "exrtorecycler", "exrto recycler" },
     { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },

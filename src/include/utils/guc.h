@@ -496,12 +496,15 @@ typedef struct {
 #define PG_LOCKFILE_SIZE 1024
 
 #define CONFIG_BAK_FILENAME_WAL "postgresql.conf.wal"
+#define CONFIG_BAK_FILENAME_PM "postgresql.conf.pm"
+#define HBA_BAK_FILENAME_PM "pg_hba.conf.pm"
 
 extern void* pg_malloc(size_t size);
 extern char* xstrdup(const char* s);
 
 extern char** read_guc_file(const char* path);
 extern ErrCode write_guc_file(const char* path, char** lines);
+extern void sync_config_file();
 extern int find_guc_option(char** optlines, const char* opt_name,
     int* name_offset, int* name_len, int* value_offset, int* value_len, bool ignore_case);
 
