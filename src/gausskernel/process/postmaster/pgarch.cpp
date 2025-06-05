@@ -1201,7 +1201,7 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
         SpinLockAcquire(&walsnd->mutex);
         if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) 
             && !XLogRecPtrIsInvalid(walsnd->flush) && XLByteLE(targetLsn, walsnd->flush) &&
-            walsnd->is_cross_cluster == false) {
+            walsnd->is_cross_cluster == false && !strstr((char*)walsnd->remote_application_name, "gs_probackup")) {
             SpinLockRelease(&walsnd->mutex);
             if (g_instance.roach_cxt.isXLogForceRecycled) {
                 ereport(LOG, (errmsg("pgarch choose walsender index:%d and pid is %ld, when force advance slot",
@@ -1219,7 +1219,7 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
         SpinLockAcquire(&walsnd->mutex);
 
         if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) &&
-            walsnd->is_cross_cluster == false) {
+            walsnd->is_cross_cluster == false && !strstr((char*)walsnd->remote_application_name, "gs_probackup")) {
             if (XLByteLE(targetLsn, walsnd->flush)) {
                 SpinLockRelease(&walsnd->mutex);
                 ArchiveTaskStatus *archive_status = NULL;
