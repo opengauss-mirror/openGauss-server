@@ -102,6 +102,100 @@ SELECT * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]';
   1 | item1  | [0.211557,0.076130316,0.048887435]
 (26 rows)
 
+explain (verbose on, costs off) SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+                                         QUERY PLAN
+--------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit
+   Output: id, name, embedding, ((embedding <-> '[3,1,2]'::vector))
+   ->  Ann Index Scan using dimens3_scan_l2_100_embedding_idx on public.dimens3_scan_l2_100
+         Output: id, name, embedding, (embedding <-> '[3,1,2]'::vector)
+         Order By: (dimens3_scan_l2_100.embedding <-> '[3,1,2]'::vector)
+(6 rows)
+
+SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+ id |  name  |             embedding
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+(5 rows)
+
+explain (verbose on, costs off) SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]';
+                                      QUERY PLAN
+--------------------------------------------------------------------------------------
+ [Bypass]
+ Ann Index Scan using dimens3_scan_l2_100_embedding_idx on public.dimens3_scan_l2_100
+   Output: id, name, embedding, (embedding <-> '[3,1,2]'::vector)
+   Order By: (dimens3_scan_l2_100.embedding <-> '[3,1,2]'::vector)
+(4 rows)
+
+SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]';
+ id |  name  |             embedding
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+ 12 | item12 | [0.60868204,0.60846287,0.81605655]
+  3 | item3  | [0.564357,0.9264987,0.8182802]
+ 11 | item11 | [0.6052496,0.62827665,0.7768472]
+ 22 | item22 | [0.50915307,0.64196414,0.92056113]
+ 18 | item18 | [0.7649143,0.52333325,0.44966766]
+  6 | item6  | [0.972023,0.9026957,0.10480514]
+ 17 | item17 | [0.76680326,0.16413908,0.5166021]
+  8 | item8  | [0.49208698,0.6714301,0.71550953]
+  5 | item5  | [0.9748988,0.37120444,0.09020154]
+ 23 | item23 | [0.43124378,0.9630822,0.7278073]
+  7 | item7  | [0.34085152,0.6611158,0.979039]
+ 15 | item15 | [0.6947581,0.8751624,0.23263198]
+ 20 | item20 | [0.78923064,0.5646975,0.13470227]
+  4 | item4  | [0.79131657,0.46089557,0.06720783]
+ 21 | item21 | [0.71745884,0.26742905,0.17897958]
+ 24 | item24 | [0.8275961,0.1344125,0.004161737]
+ 25 | item25 | [0.2582034,0.6599453,0.5974597]
+ 16 | item16 | [0.02151876,0.5658726,0.6430642]
+ 13 | item13 | [0.36143646,0.5525224,0.010793276]
+ 19 | item19 | [0.21292055,0.985841,0.093416855]
+  1 | item1  | [0.211557,0.076130316,0.048887435]
+(26 rows)
+
+prepare p_select as SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> $1 LIMIT $2;
+execute p_select('[3,1,2]', 5);
+ id |  name  |             embedding
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+(5 rows)
+
+prepare p_select1 as SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT $1;
+execute p_select1(5);
+ id |  name  |             embedding
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+(5 rows)
+
+prepare p_select2 as SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ * FROM dimens3_scan_l2_100 ORDER BY embedding <-> $1 LIMIT 5;
+execute p_select2('[3,1,2]');
+ id |  name  |             embedding
+----+--------+------------------------------------
+ 14 | item14 | [0.85667425,0.39547122,0.98898655]
+  9 | item9  | [0.81576276,0.6386655,0.94059604]
+ 26 | item26 | [0.94438016,0.70233214,0.5453055]
+  2 | item2  | [0.8229326,0.487093,0.74873024]
+ 10 | item10 | [0.5982644,0.62692505,0.8370629]
+(5 rows)
+
 CREATE TABLE items (id int, embedding vector(3));
 INSERT INTO items VALUES (1, '[1,2,3]'), (2, '[4,5,6]'), (3, '[7,8,9]'), (4, '[10,11,12]'), (5, '[13,14,15]');
 CREATE INDEX ON items USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);

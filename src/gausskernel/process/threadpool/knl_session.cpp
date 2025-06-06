@@ -60,6 +60,8 @@
 #include "parser/scanner.h"
 #include "pgstat.h"
 #include "access/datavec/bitvec.h"
+#include "access/datavec/vector.h"
+#include "access/datavec/shortest_dec.h"
 
 THR_LOCAL knl_session_context* u_sess;
 
@@ -476,6 +478,7 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->varcharoutput_buffer = (char*)palloc0(256);
     utils_cxt->numericoutput_buffer = (char*)palloc0(64);
     utils_cxt->dateoutput_buffer = (char*)palloc0(MAXDATELEN + 1);
+    utils_cxt->vectoroutput_buffer =  (char*)palloc0(VECTOR_MAX_DIM * FLOAT_SHORTEST_DECIMAL_LEN + 2);
 
     (void)syscalllockInit(&utils_cxt->deleMemContextMutex);
 
