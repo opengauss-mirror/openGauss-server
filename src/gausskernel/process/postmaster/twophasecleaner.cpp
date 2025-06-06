@@ -841,9 +841,7 @@ static void DropTempSchemas(PGconn* conn)
         if (thirdLastPos == NULL) {
             PQfinish(conn);
             conn = NULL;
-            elog(ERROR, "strrchr failed, can't find '%c' in '%s'. "
-                "the schema name '%s' is reserved, advise to delete manually\n",
-                '_', tempBuffer2, tempSchema->tempSchemaName);
+            elog(ERROR, "strrchr failed, can't find '%c' in '%s'\n", '_', tempBuffer2);
         }
         uint32 timeLineID = strtol(thirdLastPos + 1, NULL, 10);
 
