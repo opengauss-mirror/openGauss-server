@@ -222,7 +222,6 @@ typedef struct knl_g_pid_context {
     ThreadId StackPerfPID;
     ThreadId CfsShrinkerPID;
     ThreadId DmsAuxiliaryPID;
-    ThreadId SyncAuxiliaryPID;
 } knl_g_pid_context;
 
 typedef struct {
@@ -1275,8 +1274,6 @@ typedef struct knl_g_datadir_context {
     char controlPath[MAXPGPATH];
     char controlBakPath[MAXPGPATH];
     char controlInfoPath[MAXPGPATH];
-    char configFilePath[MAXPGPATH];
-    char hbaConfigFilePath[MAXPGPATH];
     knl_g_dwsubdatadir_context dw_subdir_cxt;
 } knl_g_datadir_context;
 
