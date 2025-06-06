@@ -631,7 +631,7 @@ bool HnswInsertTupleOnDisk(Relation index, Datum value, Datum *values, const boo
         entryPoint = HnswGetEntryPoint(index);
     }
 
-    InitPQParamsOnDisk(&params, index, procinfo, dim, &enablePQ);
+    InitPQParamsOnDisk(&params, index, procinfo, dim, &enablePQ, false);
 
     Pointer codePtr = NULL;
     if (enablePQ) {

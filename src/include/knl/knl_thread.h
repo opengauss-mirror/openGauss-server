@@ -2906,6 +2906,7 @@ typedef struct knl_t_storage_context {
     union CRBufferDescPadded* CRBufferDescriptors;
     char *CRBufferBlocks;
     int *CRBufferRefCount;
+    struct HTAB* ShmemMmap;
 } knl_t_storage_context;
 
 typedef struct knl_t_port_context {

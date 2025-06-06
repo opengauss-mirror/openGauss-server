@@ -287,6 +287,7 @@ struct HnswElementData {
     HnswDatumPtr value;
     HnswDatumPtr pqcodes;
     LWLock lock;
+    bool fromMmap;
 };
 
 typedef HnswElementData *HnswElement;
@@ -617,8 +618,8 @@ bool HnswCheckNorm(FmgrInfo *procinfo, Oid collation, Datum value);
 Buffer HnswNewBuffer(Relation index, ForkNumber forkNum);
 void HnswInitPage(Buffer buf, Page page);
 List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation index, FmgrInfo *procinfo, Oid collation,
-                      int m, bool inserting, HnswElement skipElement, IndexScanDesc scan = NULL, bool enablePQ = false,
-                      PQSearchInfo *pqinfo = NULL);
+                      int m, bool inserting, HnswElement skipElement, bool tryMmap = false, IndexScanDesc scan = NULL,
+                      bool enablePQ = false, PQSearchInfo *pqinfo = NULL);
 HnswElement HnswGetEntryPoint(Relation index);
 void HnswGetMetaPageInfo(Relation index, int *m, HnswElement *entryPoint);
 void *HnswAlloc(HnswAllocator *allocator, Size size);
@@ -663,7 +664,7 @@ int GetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDistan
 int GetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
                   const float *pqDistanceTable, float *pqDistance);
 int getPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
-void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ);
+void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ, bool trymmap);
 
 Datum hnswhandler(PG_FUNCTION_ARGS);
 Datum hnswbuild(PG_FUNCTION_ARGS);
@@ -743,5 +744,20 @@ typedef struct OffsetHashEntry {
 #define SH_SCOPE extern
 #define SH_DECLARE
 #include "lib/simplehash.h"
+typedef union {
+    pointerhash_hash *pointers;
+    offsethash_hash *offsets;
+    tidhash_hash *tids;
+} VisitedHash;
 
+HnswCandidate *MMapEntryCandidate(char *base, HnswElement entryPoint, Datum q, Relation index, FmgrInfo *procinfo, Oid collation,
+                                    bool loadVec, IndexScanDesc scan = NULL, bool enablePQ = false, PQSearchInfo *pqinfo = NULL);
+
+uint8* LoadPQcode(HnswElementTuple tuple);
+bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
+                     bool loadVec, float *maxDistance, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo);
+void HnswLoadUnvisitedFromMmap(HnswElement element, HnswElement *unvisited, int *unvisitedLength,
+                          VisitedHash *v, Relation index, int m, int lm, int lc);
+void HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int *unvisitedLength,
+                          VisitedHash *v, Relation index, int m, int lm, int lc);
 #endif

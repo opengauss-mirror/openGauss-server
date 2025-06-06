@@ -49,7 +49,7 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
     int hnswEfSearch = so->length;
     int pqMode = so->pqMode;
     /* Get m and entry point */
-    HnswGetMetaPageInfo(index, &m, &entryPoint);
+    GetMMapMetaPageInfo(index, &m, (void**)(&entryPoint));
 
     if (entryPoint == NULL)
         return NIL;
@@ -73,23 +73,23 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
 
         pqinfo.pqMode = pqMode;
         pqinfo.lc = entryPoint->level;
-        ep = list_make1(HnswEntryCandidate(
+        ep = list_make1(MMapEntryCandidate(
                         base, entryPoint, q, index, procinfo, collation, false, NULL, enablePQ, &pqinfo));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
             pqinfo.lc = lc;
-            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, NULL, enablePQ, &pqinfo);
+            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, true, NULL, enablePQ, &pqinfo);
             ep = w;
         }
         pqinfo.lc = 0;
         w = HnswSearchLayer(base, q, ep, hnswEfSearch, 0, index, procinfo, collation, m,
-                            false, NULL, NULL, enablePQ, &pqinfo);
+                            false, NULL, true, NULL, enablePQ, &pqinfo);
     } else {
-        ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false));
+        ep = list_make1(MMapEntryCandidate(base, entryPoint, q, index, procinfo, collation, false));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
-            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL);
+            w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, true);
             ep = w;
         }
-        w = HnswSearchLayer(base, q, ep, hnswEfSearch, 0, index, procinfo, collation, m, false, NULL);
+        w = HnswSearchLayer(base, q, ep, hnswEfSearch, 0, index, procinfo, collation, m, false, NULL, true);
     }
     return w;
 }
@@ -148,7 +148,7 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
 
     dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
     so->pqMode = HNSW_PQMODE_DEFAULT;
-    InitPQParamsOnDisk(&params, index, so->procinfo, dim, &so->enablePQ);
+    InitPQParamsOnDisk(&params, index, so->procinfo, dim, &so->enablePQ, true);
     so->params = params;
 
     scan->opaque = so;
