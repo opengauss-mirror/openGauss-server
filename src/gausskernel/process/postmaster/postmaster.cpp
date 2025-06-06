@@ -3922,7 +3922,7 @@ static int ServerLoop(void)
         g_threadPoolControler->Init(enableNumaDistribute);
     }
     ereport(LOG, (errmsg("create thread end!")));
-
+    
     /* Only after postmaster_main thread starting completed, can reload listen_addresses */
     t_thrd.postmaster_cxt.can_listen_addresses_reload = true;
     for (;;) {
