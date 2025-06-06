@@ -2764,7 +2764,7 @@ static void do_switchover(uint32 term)
         }
         pg_log(PG_PRINT, _("\n"));
         if ((origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE && run_mode != MAIN_STANDBY_MODE) ||
-            (origin_run_mode == CASCADE_STANDBY_MODE && run_mode != STANDBY_MODE)) {
+            (origin_run_mode == CASCADE_STANDBY_MODE && run_mode != STANDBY_MODE && run_mode != MAIN_STANDBY_MODE)) {
             pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status or backtrack log.\n"), wait_seconds);
 
             if ((sofile = fopen(switchover_timeout_file, "w")) == NULL) {
