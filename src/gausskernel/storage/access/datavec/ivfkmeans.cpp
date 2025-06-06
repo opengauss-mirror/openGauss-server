@@ -325,7 +325,7 @@ static void ElkanKmeans(Relation index, VectorArray samples, VectorArray centers
     lowerBound = (float *)MemoryContextAllocExtended(CurrentMemoryContext, lowerBoundSize, MCXT_ALLOC_HUGE);
     upperBound = (float *)palloc(upperBoundSize);
     s = (float *)palloc(sSize);
-    halfcdist = (float *)palloc_extended(halfcdistSize, MCXT_ALLOC_HUGE);
+    halfcdist = (float *)MemoryContextAllocExtended(CurrentMemoryContext, halfcdistSize, MCXT_ALLOC_HUGE);
     newcdist = (float *)palloc(newcdistSize);
 
     /* Initialize new centers */
