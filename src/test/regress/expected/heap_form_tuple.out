@@ -798,9 +798,6 @@ DROP TEXT SEARCH CONFIGURATION test_tsconfig_exists;
 CREATE TRIGGER test_trigger_exists
     BEFORE UPDATE ON test_exists
     FOR EACH ROW EXECUTE PROCEDURE suppress_redundant_updates_trigger();
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 DROP TRIGGER test_trigger_exists ON test_exists;
 drop table test_exists cascade;
 select count(*) from pg_node_env;

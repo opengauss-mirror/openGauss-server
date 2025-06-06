@@ -1,4 +1,4 @@
-﻿/* -------------------------------------------------------------------------
+/* -------------------------------------------------------------------------
  *
  * postmaster.cpp
  *	  This program acts as a clearing house for requests to the
@@ -2497,6 +2497,10 @@ int PostmasterMain(int argc, char* argv[])
     auto_explain_init();
     ledger_hook_init();
 
+    /* init extensible plan/node hash table before load shared lib */
+    InitExtensiblePlanMethodsHashTable();
+    InitExtensibleNodeMethodsHashTable();
+
     /*
     * process any libraries that should be preloaded at postmaster start
     */
@@ -2949,6 +2953,7 @@ int PostmasterMain(int argc, char* argv[])
     InitGlobalSeq();
     /* init mem_log directory */
     InitMemoryLogDirectory();
+
 #ifdef ENABLE_MULTIPLE_NODES
     /* init compaction */
     CompactionProcess::init_instance();
@@ -2959,7 +2964,6 @@ int PostmasterMain(int argc, char* argv[])
         TagsCacheMgr::GetInstance().init();
         PartIdMgr::GetInstance().init();
         Tsdb::PartCacheMgr::GetInstance().init();
-        InitExtensiblePlanMethodsHashTable();
     }
 #endif
 
@@ -5407,6 +5411,14 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
         u_sess->attr.attr_common.remoteConnType = REMOTE_CONN_APP;
     }
 
+    /* Set connection_from_coordinator. If it's true, we skip redundant verifications. Currently, it's only
+    used to skip password verifications of set role and alter role launched by coordinator to data nodes. */
+    if (port->cmdline_options != NULL && strstr(port->cmdline_options, "remotetype=coordinator") != NULL) {
+        u_sess->attr.attr_common.connection_from_coordinator = true;
+    } else {
+        u_sess->attr.attr_common.connection_from_coordinator = false;
+    }
+
     /* We need to restore the socket settings to prevent unexpected errors. */
     if (isTvSeted && (comm_setsockopt(port->sock, SOL_SOCKET, SO_RCVTIMEO, &oldTv, oldTvLen) < 0)) {
         ereport(LOG, (errmsg("setsockopt(SO_RCVTIMEO) failed: %m")));
@@ -6512,6 +6524,8 @@ static void pmdie(SIGNAL_ARGS)
                 }
                 /* shut down all backends and autovac workers */
                 (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+                ShutdownAllBgWorker();
 
                 /* and the autovac launcher too */
                 if (g_instance.pid_cxt.AutoVacPID != 0)

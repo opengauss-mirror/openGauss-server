@@ -30,6 +30,9 @@ extern int g_max_worker_processes;
 #define BGWORKER_STATUS_DURLIMIT 500
 
 #define BGWORKER_MAX_ERROR_LEN 256
+/* individual bgworker, not related to backend, current need to ignore SIGINT
+and don't reset xact info when commit/abort */
+#define BGWORKER_FLAG_INDIVIDUAL_THREAD (1 << 0)
 
 typedef enum BgwHandleStatus {
     BGW_NOT_YET_STARTED,       /* worker hasn't been started yet */
@@ -56,6 +59,7 @@ typedef struct BgWorkerContext {
     Oid         myTempToastNamespace;
     bgworker_main main_entry;
     bgworker_exit exit_entry;
+    int         flag;
 } BgWorkerContext;
 
 typedef struct BgWorkerErrorData {
@@ -74,6 +78,7 @@ typedef struct BackgroundWorker {
     BgWorkerErrorData   bgw_edata;         /* error information of a bgworker */
     pg_atomic_uint32    disable_count;     /* indicate whether the bgworker is disabled */
     slist_node          rw_lnode;          /* list link */
+    int         flag;
 } BackgroundWorker;
 
 typedef struct BGW_HDR {
@@ -89,13 +94,16 @@ typedef struct BackgroundWorkerArgs {
 } BackgroundWorkerArgs;
 
 /* Register a new bgworker during shared_preload_libraries */
-extern bool RegisterBackgroundWorker(BackgroundWorker *worker);
-extern int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, bgworker_exit bgexit);
+extern bool RegisterBackgroundWorker(BackgroundWorker *worker, int flag = 0);
+extern int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain,
+    bgworker_exit bgexit, int flag = 0);
 extern void BackgroundWorkerMain(void);
 extern bool IsBgWorkerProcess(void);
 extern bool IsDMSWorkerProcess(void);
 extern void BgworkerListSyncQuit();
 extern void BgworkerListWaitFinish(int *nparticipants);
 extern void InitBgworkerGlobal(void);
+extern void ShutdownAllBgWorker();
+extern bool BgWorkerNeedResetXact();
 
 #endif   /* BGWORKER_H */

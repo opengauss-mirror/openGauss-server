@@ -56,7 +56,11 @@ typedef enum {
     XACT_EVENT_ROLLBACK_PREPARED,
     XACT_EVENT_PREROLLBACK_CLEANUP, // For MOT, to cleanup some internal resources.
     XACT_EVENT_POST_COMMIT_CLEANUP, // For MOT, to cleanup some dropped function JIT sources.
-    XACT_EVENT_STMT_FINISH          // For MOT, to notify end of statement.
+    XACT_EVENT_STMT_FINISH,          // For MOT, to notify end of statement.
+    /** The stage before XACT_EVENT_COMMIT. */
+    XACT_EVENT_PRE_COMMIT,
+    /** The stage before XACT_EVENT_PREPARE. */
+    XACT_EVENT_PRE_PREPARE
 } XactEvent;
 
 typedef void (*XactCallback)(XactEvent event, void* arg);

@@ -26,16 +26,10 @@ create trigger check_fkeys_pkey_exist
 	for each row
 	execute procedure
 	check_primary_key ('fkey1', 'fkey2', 'pkeys', 'pkey1', 'pkey2');
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 create trigger check_fkeys_pkey2_exist
 	before insert or update on fkeys
 	for each row
 	execute procedure check_primary_key ('fkey3', 'fkeys2', 'pkey23');
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 --
 -- For fkeys2:
 -- 	(fkey21, fkey22)	--> pkeys (pkey1, pkey2)
@@ -45,9 +39,6 @@ create trigger check_fkeys2_pkey_exist
 	for each row
 	execute procedure
 	check_primary_key ('fkey21', 'fkey22', 'pkeys', 'pkey1', 'pkey2');
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 -- Test comments
 COMMENT ON TRIGGER check_fkeys2_pkey_bad ON fkeys2 IS 'wrong';
 ERROR:  trigger "check_fkeys2_pkey_bad" for table "fkeys2" does not exist
@@ -64,9 +55,6 @@ create trigger check_pkeys_fkey_cascade
 	execute procedure
 	check_foreign_key (2, 'cascade', 'pkey1', 'pkey2',
 	'fkeys', 'fkey1', 'fkey2', 'fkeys2', 'fkey21', 'fkey22');
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 --
 -- For fkeys2:
 -- 	ON DELETE/UPDATE (pkey23) RESTRICT:
@@ -76,9 +64,6 @@ create trigger check_fkeys2_fkey_restrict
 	before delete or update on fkeys2
 	for each row
 	execute procedure check_foreign_key (1, 'restrict', 'pkey23', 'fkeys', 'fkey3');
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into fkeys2 values (10, '1', 1);
 insert into fkeys2 values (30, '3', 2);
 insert into fkeys2 values (40, '4', 5);
@@ -164,17 +149,11 @@ create trigger ttdummy
 	for each row
 	execute procedure
 	ttdummy (price_on, price_off);
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 create trigger ttserial
 	before insert or update on tttest
 	for each row
 	execute procedure
 	autoinc (price_on, ttdummy_seq);
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into tttest values (1, 1, null);
 insert into tttest values (2, 2, null);
 insert into tttest values (3, 3, 0);
@@ -828,9 +807,6 @@ LINE 1: INSERT INTO min_updates_test_oids VALUES ('a',1,2),('b','2',...
 CREATE TRIGGER z_min_update
 BEFORE UPDATE ON min_updates_test
 FOR EACH ROW EXECUTE PROCEDURE suppress_redundant_updates_trigger();
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 CREATE TRIGGER z_min_update
 BEFORE UPDATE ON min_updates_test_oids
 FOR EACH ROW EXECUTE PROCEDURE suppress_redundant_updates_trigger();

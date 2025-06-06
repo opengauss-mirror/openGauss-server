@@ -6826,6 +6826,31 @@ static UnrotateInCell *_readUnrotateCell()
     READ_DONE();
 }
 
+static ExtensibleNode *_readExtensibleNode(void)
+{
+    const ExtensibleNodeMethods *methods;
+    ExtensibleNode *local_node;
+    const char *extnodename;
+
+    READ_TEMP_LOCALS();
+
+    token = pg_strtok(&length); /* skip :extnodename */
+    token = pg_strtok(&length); /* get extnodename */
+
+    extnodename = nullable_string(token, length);
+    if (!extnodename)
+        elog(ERROR, "extnodename has to be supplied");
+    methods = GetExtensibleNodeMethods(extnodename, false);
+
+    local_node = (ExtensibleNode *) newNode(methods->node_size, T_EXTENSIBLE_NODE);
+    local_node->extnodename = extnodename;
+
+    /* deserialize the private fields */
+    methods->nodeRead(local_node);
+
+    READ_DONE();
+}
+
 /*
  * parseNodeString
  *
@@ -7367,6 +7392,8 @@ Node* parseNodeString(void)
         return_value = _readUnrotateClause();
     } else if (MATCH("SHRINK", 6)) {
         return_value = _readShrinkStmt();
+    } else if (MATCH("EXTENSIBLENODE", 14)) {
+        return_value = _readExtensibleNode();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

@@ -58,11 +58,11 @@
 #include "gssignal/gs_signal.h"
 
 /* Are we currently in WaitLatch? The signal handler would like to know. */
-static THR_LOCAL volatile sig_atomic_t waiting = false;
+THR_LOCAL volatile sig_atomic_t waiting = false;
 
 /* Read and write ends of the self-pipe */
-static THR_LOCAL int selfpipe_readfd = -1;
-static THR_LOCAL int selfpipe_writefd = -1;
+THR_LOCAL int selfpipe_readfd = -1;
+THR_LOCAL int selfpipe_writefd = -1;
 
 /* Private function prototypes */
 static void sendSelfPipeByte(void);

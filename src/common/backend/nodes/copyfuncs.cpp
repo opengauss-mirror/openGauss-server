@@ -53,6 +53,7 @@ typedef struct OpMemInfo {
 #include "bulkload/dist_fdw.h"
 #include "storage/tcap.h"
 #include "optimizer/gplanmgr.h"
+#include "executor/node/nodeExtensible.h"
 
 #endif /* FRONTEND_PARSER */
 
@@ -8057,6 +8058,21 @@ static PrefixKey* _copyPrefixKey(const PrefixKey* from)
     return newnode;
 }
 
+static ExtensibleNode* _copyExtensibleNode(const ExtensibleNode *from)
+{
+    ExtensibleNode *newnode;
+    const ExtensibleNodeMethods *methods;
+
+    methods = GetExtensibleNodeMethods(from->extnodename, false);
+    newnode = (ExtensibleNode *) newNode(methods->node_size, T_EXTENSIBLE_NODE);
+    COPY_STRING_FIELD(extnodename);
+
+    /* copy the private fields */
+    methods->nodeCopy(newnode, from);
+
+    return newnode;
+}
+
 static CreateEventStmt *node_copy_create_event_info(const CreateEventStmt *from)
 {
     CreateEventStmt* newnode = makeNode(CreateEventStmt);
@@ -9545,6 +9561,9 @@ void* copyObject(const void* from)
             break;
         case T_ShrinkStmt:
             retval = _copyShrinkStmt((ShrinkStmt*) from);
+            break;
+        case T_EXTENSIBLE_NODE:
+            retval = _copyExtensibleNode((ExtensibleNode *)from);
             break;
 #ifdef USE_SPQ
         case T_Motion:
