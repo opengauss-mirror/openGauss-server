@@ -2150,6 +2150,8 @@ void initDssPath(char *dssdir)
     rc = snprintf_s(g_instance.datadir_cxt.hbaConfigFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/shared_pg_hba.conf",
         dssdir);
     securec_check_ss(rc, "", "");
+
+    ss_initdwsubdir(dssdir);
 }
 
 void initDSSConf(void)
