@@ -172,8 +172,9 @@ static void BgworkerQuitAndClean(int code, Datum arg)
     }
 }
 
-static void BackgroundWorkerInit(BackgroundWorker *bgw)
+static void BackgroundWorkerInit()
 {
+    BackgroundWorker *bgw = (BackgroundWorker *)t_thrd.bgworker_cxt.bgworker;
     /* we are a postmaster subprocess now */
     IsUnderPostmaster = true;
     t_thrd.role = BGWORKER;
@@ -252,7 +253,7 @@ void BackgroundWorkerMain(void)
     }
     pthread_mutex_unlock(&g_instance.bgw_base_lock);
 
-    BackgroundWorkerInit(bgw);
+    BackgroundWorkerInit();
     workerContext = AllocSetContextCreate(t_thrd.top_mem_cxt, "BgWorker", ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
@@ -312,6 +313,9 @@ void BackgroundWorkerMain(void)
 
         if (individualThread) {
             /* free bwc for individualThread, for non-indivi, it will free in BgworkerCleanupSharedContext */
+            pfree_ext(bwc->databaseName);
+            pfree_ext(bwc->userName);
+            pfree_ext(bwc->bgshared);
             pfree(bwc);
         }
 
@@ -338,8 +342,7 @@ void BackgroundWorkerMain(void)
     u_sess->proc_cxt.MyProcPort->user_name = pstrdup(bwc->userName);
     (void)MemoryContextSwitchTo(oldcontext);
 
-    t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(u_sess->proc_cxt.MyProcPort->database_name,
-        InvalidOid, u_sess->proc_cxt.MyProcPort->user_name);
+    t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(bwc->databaseName, InvalidOid, bwc->userName);
     t_thrd.proc_cxt.PostInit->InitBgWorker();
     pgstat_report_appname("Bgworker");
     pgstat_report_queryid(bwc->parent_query_id);
@@ -380,6 +383,9 @@ void BackgroundWorkerMain(void)
 
     if (individualThread) {
         /* free bwc for individualThread, for non-indivi, it will free in BgworkerCleanupSharedContext */
+        pfree_ext(bwc->databaseName);
+        pfree_ext(bwc->userName);
+        pfree_ext(bwc->bgshared);
         pfree(bwc);
     }
 
