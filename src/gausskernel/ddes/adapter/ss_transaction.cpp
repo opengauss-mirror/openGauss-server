@@ -1281,7 +1281,7 @@ int SSGetStandbyRealtimeBuildPtr(char* data, uint32 len)
     if (unlikely(len != sizeof(SSBroadcastRealtimeBuildPtr))) {
         return DMS_ERROR;
     }
-    if (!ENABLE_REALTIME_BUILD_TARGET_RTO || !SS_PRIMARY_MODE || SS_IN_REFORM) {
+    if (!ENABLE_ONDEMAND_REALTIME_BUILD || !SS_PRIMARY_MODE || SS_IN_REFORM) {
         return DMS_SUCCESS;
     }
     SSBroadcastRealtimeBuildPtr *receiveMessage = (SSBroadcastRealtimeBuildPtr *)data;

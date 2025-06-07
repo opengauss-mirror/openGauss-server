@@ -4355,6 +4355,29 @@ bool SSXLogParseRecordNeedReplayInOndemandRealtimeBuild(XLogRecParseState *redob
     return true;
 }
 
+void GetRealtimeBuildQueueStatus(realtime_build_queue_stat * stat)
+{
+    if (SS_ONDEMAND_REALTIME_BUILD_NORMAL) {
+        errno_t rc = memset_s(stat, sizeof(realtime_build_queue_stat), 0, sizeof(realtime_build_queue_stat));
+        securec_check(rc, "\0", "\0");
+        stat->readline_queue_size = SPSCGetQueueCount(g_dispatcher->readLine.readPageThd->queue);
+        stat->trxn_manager_queue_size = SPSCGetQueueCount(g_dispatcher->trxnLine.managerThd->queue);
+        stat->trxn_worker_queue_size = SPSCGetQueueCount(g_dispatcher->trxnLine.redoThd->queue);
+        stat->segworker_queue_size = SPSCGetQueueCount(g_dispatcher->auxiliaryLine.segRedoThd->queue);
+        int batchThdNum = QUEUE_STAT_MAX_PIPLINES < g_dispatcher->pageLineNum ?
+            QUEUE_STAT_MAX_PIPLINES : g_dispatcher->pageLineNum;
+        stat->batch_num = batchThdNum;
+        for (uint32 i = 0; i < batchThdNum; ++i) {
+            stat->batchredo_queue_size[i] = SPSCGetQueueCount(g_dispatcher->pageLines[i].batchThd->queue);
+            stat->redomanager_queue_size[i] = SPSCGetQueueCount(g_dispatcher->pageLines[i].managerThd->queue);
+            stat->hashmap_manager_queue_size[i] = SPSCGetQueueCount(g_dispatcher->pageLines[i].htabThd->queue);
+        }
+    } else {
+        errno_t rc = memset_s(stat, sizeof(realtime_build_queue_stat), 0, sizeof(realtime_build_queue_stat));
+        securec_check(rc, "\0", "\0");
+    }
+}
+
 void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat)
 {
     if (IsExtremeRtoRunning()) {

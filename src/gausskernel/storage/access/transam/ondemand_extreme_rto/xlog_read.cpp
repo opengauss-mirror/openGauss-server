@@ -49,7 +49,9 @@ inline static XLogReaderState *ReadNextRecordFromQueue(int emode)
     SPSCBlockingQueue *linequeue = g_dispatcher->readLine.readPageThd->queue;
     XLogReaderState *xlogreader = NULL;
     do {
+        GetRedoStartTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_7]);
         xlogreader = (XLogReaderState *)SPSCBlockingQueueTake(linequeue);
+        CountRedoTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_7]);
         if (!xlogreader->isDecode) {
             XLogRecord *record = (XLogRecord *)xlogreader->readRecordBuf;
             GetRedoStartTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_5]);

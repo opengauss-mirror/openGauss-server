@@ -138,6 +138,18 @@ typedef struct ondemand_recovery_stat {
     uint64 recordItemMemUsed;
 } ondemand_recovery_stat;
 
+#define QUEUE_STAT_MAX_PIPLINES 4
+typedef struct realtime_build_queue_stat {
+    uint32 batch_num;
+    uint32 readline_queue_size;
+    uint32 trxn_manager_queue_size;
+    uint32 trxn_worker_queue_size;
+    uint32 segworker_queue_size;
+    uint32 batchredo_queue_size[QUEUE_STAT_MAX_PIPLINES];
+    uint32 redomanager_queue_size[QUEUE_STAT_MAX_PIPLINES];
+    uint32 hashmap_manager_queue_size[QUEUE_STAT_MAX_PIPLINES];
+} realtime_build_queue_stat;
+
 typedef struct realtime_build_log_ctrl {
     int64 currentRTO;
     TimestampTz prevReplyTime;
