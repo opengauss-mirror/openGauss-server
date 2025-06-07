@@ -1048,9 +1048,6 @@ SELECT to_tsquery('SKIES & My | booKs');
 CREATE TRIGGER tsvectorupdate
 BEFORE UPDATE OR INSERT ON test_tsvector
 FOR EACH ROW EXECUTE PROCEDURE tsvector_update_trigger(a, 'pg_catalog.english', t);
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 SELECT count(*) FROM test_tsvector WHERE a @@ to_tsquery('345&qwerty');
  count 
 -------
@@ -1122,54 +1119,36 @@ insert into test_tsvector_llt values (1,2);
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH STATEMENT   EXECUTE PROCEDURE tsvector_update_trigger(a, 'pg_catalog.english', t);
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  tsvector_update_trigger: must be fired for row
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
 CREATE TRIGGER tsvectorupdate_llt
 after UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH row   EXECUTE PROCEDURE tsvector_update_trigger(a, 'pg_catalog.english', t);
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  tsvector_update_trigger: must be fired BEFORE event
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE delete on test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger(a, 'pg_catalog.english', t);
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 delete from test_tsvector_llt;
 ERROR:  tsvector_update_trigger: must be fired for INSERT or UPDATE
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger(a, 'pg_catalog.english');
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  tsvector_update_trigger: arguments must be tsvector_field, ts_config, text_field1, ...)
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger(b, 'pg_catalog.english',t);
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  column "b" is not of tsvector type
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger(c, 'pg_catalog.english',t);
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  tsvector column "c" does not exist
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
@@ -1178,18 +1157,12 @@ create table test_tsvector_llt(a tsvector, b int);
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger(b, 'pg_catalog.english',t);
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  column "b" is not of tsvector type
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger(a, 'pg_catalog.english',t);
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  column "t" does not exist
  drop trigger tsvectorupdate_llt on test_tsvector_llt;
@@ -1197,36 +1170,24 @@ ERROR:  column "t" does not exist
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger(a, 'pg_catalog.english',b); 
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  column "b" is not of a character type
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger(a, 't',b); 
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  text search configuration name "t" must be schema-qualified
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger_column(a, 't',b); 
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  configuration column "t" does not exist
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger_column(a, 'a',b); 
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  column "a" is not of regconfig type
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
@@ -1235,9 +1196,6 @@ create table test_tsvector_llt(a tsvector, b regconfig);
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger_column(a, 'b',b); 
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt values('1',2);
 ERROR:  column "b" is not of a character type
 drop trigger tsvectorupdate_llt on test_tsvector_llt;
@@ -1246,9 +1204,6 @@ create table test_tsvector_llt(a tsvector, b regconfig default NULL);
 CREATE TRIGGER tsvectorupdate_llt
 BEFORE UPDATE OR INSERT ON test_tsvector_llt
 FOR EACH ROW   EXECUTE PROCEDURE tsvector_update_trigger_column(a, 'b',b); 
-WARNING:  Trigger function with non-plpgsql type is not recommended.
-DETAIL:  Non-plpgsql trigger function are not shippable by default.
-HINT:  Unshippable trigger may lead to bad performance.
 insert into test_tsvector_llt(a) values('1');
 ERROR:  configuration column "b" must not be null
 drop trigger tsvectorupdate_llt on test_tsvector_llt;

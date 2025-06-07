@@ -51,6 +51,7 @@
 #include "pgxc/pgFdwRemote.h"
 #endif
 #include "db4ai/gd.h"
+#include "executor/node/nodeExtensible.h"
 
 /*
  * Macros to simplify output of different kinds of fields.	Use these
@@ -6425,6 +6426,20 @@ static void _outPrefixKey(StringInfo str, PrefixKey* node)
     WRITE_INT_FIELD(length);
 }
 
+static void _outExtensibleNode(StringInfo str, const ExtensibleNode *node)
+{
+    const ExtensibleNodeMethods *methods;
+
+    methods = GetExtensibleNodeMethods(node->extnodename, false);
+
+    WRITE_NODE_TYPE("EXTENSIBLENODE");
+
+    WRITE_STRING_FIELD(extnodename);
+
+    /* serialize the private fields */
+    methods->nodeOut(str, node);
+}
+
 /*
  * _outNode -
  *	  converts a Node into ascii string and append it to 'str'
@@ -7423,6 +7438,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_IndexHintRelationData:
                 _outIndexHintRelationData(str, (IndexHintRelationData*)obj);
+                break;
+            case T_EXTENSIBLE_NODE:
+                _outExtensibleNode(str, (ExtensibleNode*)obj);
                 break;
             default:
 

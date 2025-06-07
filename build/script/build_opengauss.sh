@@ -172,6 +172,7 @@ function main()
     read_gaussdb_number
     gaussdb_pkg_pre_clean
     gaussdb_build
+    spq_build
 }
 main
 echo "now, all build has finished!"

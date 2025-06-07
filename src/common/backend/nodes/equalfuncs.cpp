@@ -36,6 +36,7 @@
 #include "utils/datum.h"
 #include "storage/proc.h"
 #include "storage/tcap.h"
+#include "executor/node/nodeExtensible.h"
 
 /*
  * Macros to simplify comparison of different kinds of fields.	Use these
@@ -3661,6 +3662,19 @@ static bool _equalGetDiagStmt(const GetDiagStmt* a, const GetDiagStmt* b)
     return true;
 }
 
+static bool _equalExtensibleNode(const ExtensibleNode *a, const ExtensibleNode *b)
+{
+    const ExtensibleNodeMethods *methods;
+
+    COMPARE_STRING_FIELD(extnodename);
+
+    /* At this point, we know extnodename is the same for both nodes. */
+    methods = GetExtensibleNodeMethods(a->extnodename, false);
+
+	/* compare the private fields */
+    return methods->nodeEqual(a, b);
+}
+
 static bool node_equal_create_event_info(const CreateEventStmt* a, const CreateEventStmt* b)
 {
     COMPARE_NODE_FIELD(event_name);
@@ -4678,6 +4692,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_GetDiagStmt:
             retval = _equalGetDiagStmt((const GetDiagStmt *)a, (const GetDiagStmt *)b);
+            break;
+        case T_EXTENSIBLE_NODE:
+            retval = _equalExtensibleNode((const ExtensibleNode *)a, (const ExtensibleNode *)b);
             break;
 
         default:

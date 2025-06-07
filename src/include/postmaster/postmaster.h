@@ -212,16 +212,9 @@ extern void set_disable_conn_mode(void);
 #define SPECIFY_CONNECTION_STR "specify_connection"
 #define PROHIBIT_CONNECTION_STR "prohibit_connection"
 
-#ifdef ENABLE_MULTIPLE_NODES
 #define IsConnPortFromCoord(port) \
     ((port)->cmdline_options != NULL && strstr((port)->cmdline_options, "remotetype=coordinator") != NULL)
-#else
-#ifdef USE_SPQ
-#define IsConnPortFromCoord(port) \
-    ((port)->cmdline_options != NULL && strstr((port)->cmdline_options, "remotetype=coordinator") != NULL)
-#else
-#define IsConnPortFromCoord(port) false
-#endif
+#ifndef ENABLE_MULTIPLE_NODES
 extern bool get_addr_from_socket(int sock, struct sockaddr *saddr);
 extern int get_ip_port_from_addr(char* sock_ip, int* port, struct sockaddr saddr);
 #endif

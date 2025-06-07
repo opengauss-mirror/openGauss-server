@@ -41,35 +41,37 @@
 
 const int EXTNODENAME_MAX_LEN = 64;
 static HTAB* g_extensible_plan_methods = NULL;
+static HTAB* g_extensible_node_methods = NULL;
 const int HASHTABLE_LENGTH = 100;
 const char* EXTENSIBLE_PLAN_METHODS_LABEL = "Extensible Plan Methods";
+const char* EXTENSIBLE_NODE_METHODS_LABEL = "Extensible Node Methods";
 
 static TupleTableSlot* ExecExtensiblePlan(PlanState* state);
+static void* GetExtensibleNodeEntry(HTAB* htable, const char* extnodename, bool missingOk);
 
 typedef struct {
     char extnodename[EXTNODENAME_MAX_LEN];
     void* extnodemethods;
 } ExtensibleNodeEntry;
 
-#ifdef ENABLE_MULTIPLE_NODES
 /*
  * An internal function to register a new callback structure
  */
-static void RegisterExtensibleNodeEntry(HTAB* p_htable, const char* ext_node_name, void* ext_node_methods)
+static void RegisterExtensibleNodeEntry(HTAB* p_htable, const char* extNodeName, void* extNodeMethods)
 {
     ExtensibleNodeEntry* entry = NULL;
     bool found = true;
-    if (strlen(ext_node_name) >= EXTNODENAME_MAX_LEN)
+    if (strlen(extNodeName) >= EXTNODENAME_MAX_LEN)
         elog(ERROR, "extensible node name is too long");
 
-    entry = (ExtensibleNodeEntry*)hash_search(p_htable, ext_node_name, HASH_ENTER, &found);
+    entry = (ExtensibleNodeEntry*)hash_search(p_htable, extNodeName, HASH_ENTER, &found);
     if (found)
         ereport(ERROR,
                 (errcode(ERRCODE_DUPLICATE_OBJECT),
                  errmsg("extensible node type \"%s\" already exists",
-                        ext_node_name)));
+                        extNodeName)));
 
-    entry->extnodemethods = ext_node_methods;
+    entry->extnodemethods = extNodeMethods;
 }
 
 void InitExtensiblePlanMethodsHashTable()
@@ -84,10 +86,52 @@ void InitExtensiblePlanMethodsHashTable()
         g_extensible_plan_methods = hash_create(EXTENSIBLE_PLAN_METHODS_LABEL, HASHTABLE_LENGTH,
             &ctl, HASH_ELEM | HASH_FUNCTION);
     }
+#ifdef ENABLE_MULTIPLE_NODES
     RegisterExtensibleNodeEntry(g_extensible_plan_methods, JOIN_TS_TAG_METHOD_NAME, &join_ts_tag_plan_methods);
     RegisterExtensibleNodeEntry(g_extensible_plan_methods, JOIN_TS_DELTA_METHOD_NAME, &join_ts_delta_plan_methods);
-}
 #endif
+}
+
+/*
+ * Register a new type of extensible node.
+ */
+void RegisterExtensibleNodeMethods(ExtensibleNodeMethods *methods)
+{
+    RegisterExtensibleNodeEntry(g_extensible_node_methods, methods->extnodename,
+                                methods);
+}
+
+void RegisterExtensiblePlanMethods(ExtensiblePlanMethods *methods)
+{
+    RegisterExtensibleNodeEntry(g_extensible_plan_methods, methods->ExtensibleName,
+                                methods);
+}
+
+void InitExtensibleNodeMethodsHashTable()
+{
+    HASHCTL ctl;
+    if (g_extensible_node_methods == NULL) {
+        errno_t rc = memset_s(&ctl, sizeof(HASHCTL), 0, sizeof(HASHCTL));
+        securec_check(rc, "", "");
+        ctl.keysize = EXTNODENAME_MAX_LEN;
+        ctl.entrysize = sizeof(ExtensibleNodeEntry);
+        ctl.hash = string_hash;
+        g_extensible_node_methods = hash_create(EXTENSIBLE_NODE_METHODS_LABEL, HASHTABLE_LENGTH,
+            &ctl, HASH_ELEM | HASH_FUNCTION);
+    }
+}
+
+/*
+ * Get the methods for a given type of extensible node.
+ */
+const ExtensibleNodeMethods *GetExtensibleNodeMethods(
+    const char *extnodename, bool missing_ok)
+{
+    return (const ExtensibleNodeMethods *)
+        GetExtensibleNodeEntry(g_extensible_node_methods,
+                               extnodename,
+                               missing_ok);
+}
 
 ExtensiblePlanState* ExecInitExtensiblePlan(ExtensiblePlan* eplan, EState* estate, int eflags)
 {
@@ -207,7 +251,7 @@ void ExecReScanExtensiblePlan(ExtensiblePlanState* node)
 /*
  * An internal routine to get an ExtensibleNodeEntry by the given identifier
  */
-static void* GetExtensibleNodeEntry(HTAB* htable, const char* extnodename, bool missing_ok)
+static void* GetExtensibleNodeEntry(HTAB* htable, const char* extnodename, bool missingOk)
 {
     ExtensibleNodeEntry* entry = NULL;
 
@@ -215,7 +259,7 @@ static void* GetExtensibleNodeEntry(HTAB* htable, const char* extnodename, bool 
         entry = (ExtensibleNodeEntry*)hash_search(htable, extnodename, HASH_FIND, NULL);
     }
     if (entry == NULL) {
-        if (missing_ok) {
+        if (missingOk) {
             return NULL;
         }
         ereport(ERROR,

@@ -1475,7 +1475,8 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
         foreach (l, search_path) {
             nspname = get_namespace_name(lfirst_oid(l));
             if (nspname != NULL) { /* watch out for deleted namespace */
-                if (IS_TEMP_NAMESPACE(nspname) || IS_CATALOG_NAMESPACE(nspname)) {
+                if (IS_TEMP_NAMESPACE(nspname) ||
+                    (!g_instance.attr.attr_common.allowSystemTableMods && IS_CATALOG_NAMESPACE(nspname))) {
                     continue;
                 }
                 if (!firstnsp) {

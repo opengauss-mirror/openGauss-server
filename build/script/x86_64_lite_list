@@ -18,6 +18,7 @@
 ./bin/lz4
 ./bin/gs_plan_simulator.sh
 ./bin/gs_retrieve
+./bin/spq*
 ./share/postgresql/db4ai
 ./share/postgresql/snowball_create.sql
 ./share/postgresql/pg_hba.conf.sample
@@ -65,6 +66,7 @@
 ./share/postgresql/extension/hstore--1.0--1.1.sql
 ./share/postgresql/extension/log_fdw--1.0.sql
 ./share/postgresql/extension/log_fdw.control
+./share/postgresql/extension/spq*
 ./share/postgresql/timezone/GB-Eire
 ./share/postgresql/timezone/Turkey
 ./share/postgresql/timezone/Kwajalein
@@ -755,6 +757,7 @@
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
 ./lib/postgresql/pgoutput.so
+./lib/postgresql/spq.so*
 ./lib/libxgboost.so
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
