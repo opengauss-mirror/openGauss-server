@@ -180,5 +180,6 @@ typedef struct IndexAmRoutine
 typedef IndexAmRoutine *AmRoutine;
 
 extern IndexAmRoutine *get_index_amroutine_for_nbtree();
+extern IndexAmRoutine *get_index_amroutine_for_hnsw();
 
 #endif

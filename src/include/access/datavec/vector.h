@@ -55,6 +55,7 @@ void VectorL2SquaredDistanceNY(size_t d, size_t ny, float *x, char *pqTable, Siz
 void VectorInnerProductNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis);
 void LogNewpageRange(Relation rel, ForkNumber forknum, BlockNumber startblk, BlockNumber endblk, bool page_std);
 int PlanCreateIndexWorkers(Relation heapRelation, IndexInfo *indexInfo);
+void PrintOutVector(char *msg, Datum arg);
 
 Datum vector_in(PG_FUNCTION_ARGS);
 Datum vector_out(PG_FUNCTION_ARGS);
