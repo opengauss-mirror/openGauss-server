@@ -17,6 +17,7 @@
 
 #include "access/heapam.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/objectaccess.h"
@@ -143,21 +144,17 @@ void RemoveConversionById(Oid conversionOid)
     HeapTuple tuple = NULL;
     TableScanDesc scan = NULL;
     ScanKeyData scanKeyData;
-
     ScanKeyInit(&scanKeyData, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(conversionOid));
-
     /* open pg_conversion */
     rel = heap_open(ConversionRelationId, RowExclusiveLock);
-
-    scan = heap_beginscan(rel, SnapshotNow, 1, &scanKeyData);
-
+    scan = tableam_scan_begin(rel, SnapshotNow, 1, &scanKeyData);
     /* search for the target tuple */
-    if (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection)))
+    if (HeapTupleIsValid(tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)))
         simple_heap_delete(rel, &tuple->t_self);
     else
         ereport(ERROR,
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("could not find tuple for conversion %u", conversionOid)));
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, RowExclusiveLock);
 }
 

@@ -562,10 +562,10 @@ static List *GetVacuumObjectOfSubpartitionTable(const Oid relId)
                 (void)MemoryContextSwitchTo(oldcontext);
             }
         }
-        heap_endscan(subPartScan);
+        tableam_scan_end(subPartScan);
     }
 
-    heap_endscan(partScan);
+    tableam_scan_end(partScan);
     heap_close(pgpartition, AccessShareLock);
 
     /*
@@ -833,7 +833,7 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                             (void)MemoryContextSwitchTo(oldcontext);
                         }
                     }
-                    heap_endscan(subPartScan);
+                    tableam_scan_end(subPartScan);
                     heap_close(pgpartition, AccessShareLock);
                     /* Also add the parent partition of subpartition for analyze */
                     if (vacstmt->options & VACOPT_ANALYZE) {
@@ -917,7 +917,7 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                         }
                     }
 
-                    heap_endscan(scan);
+                    tableam_scan_end(scan);
                     heap_close(pgpartition, AccessShareLock);
 
                     /*
@@ -1086,7 +1086,7 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                     }
                 }
 
-                heap_endscan(partScan);
+                tableam_scan_end(partScan);
                 heap_close(pgpartition, AccessShareLock);
 
                 /*
@@ -1107,7 +1107,7 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
             }
         }
 
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         heap_close(pgclass, AccessShareLock);
     }
 
@@ -1856,7 +1856,7 @@ static void vac_truncate_clog(TransactionId frozenXID, MultiXactId frozenMulti)
 #endif
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
 
     heap_close(relation, AccessShareLock);
 
@@ -3718,7 +3718,7 @@ static List* get_part_oid(Oid relid)
             (void)MemoryContextSwitchTo(oldcontext);        
         }
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pgpartition, AccessShareLock);
 
     return oid_list;
@@ -3961,7 +3961,7 @@ static List* get_tables_to_merge()
 
     } /* end while */
 
-    heap_endscan(relScan);
+    tableam_scan_end(relScan);
     heap_close(classRel, AccessShareLock);
 
     return infos;

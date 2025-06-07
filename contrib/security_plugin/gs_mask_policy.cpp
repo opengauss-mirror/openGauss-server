@@ -294,12 +294,12 @@ bool load_masking_policies(bool reload)
     Relation rel = NULL;
     rel = heap_open(GsMaskingPolicyRelationId, AccessShareLock);
 
-    TableScanDesc scan   = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan   = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup    = NULL;
     Form_gs_masking_policy rel_data = NULL;
 
     gs_policy_set* tmp_policies = new gs_policy_set;
-    while ((rtup = heap_getnext(scan, ForwardScanDirection))) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         rel_data = (Form_gs_masking_policy)GETSTRUCT(rtup);
         if (rel_data == NULL || !rel_data->polenabled) {
             continue;
@@ -311,7 +311,7 @@ bool load_masking_policies(bool reload)
         item.m_enabled = true;
         tmp_policies->insert(item);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     reset_masking_policy_filters(); /* must reload filters */
@@ -382,12 +382,12 @@ bool load_masking_actions(bool reload)
     Relation rel = NULL;
     rel = heap_open(GsMaskingPolicyActionsId, AccessShareLock);
 
-    TableScanDesc scan   = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan   = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup    = NULL;
     Form_gs_masking_policy_actions rel_data = NULL;
 
     pg_masking_action_map* tmp_actions = new pg_masking_action_map;
-    while ((rtup = heap_getnext(scan, ForwardScanDirection))) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         rel_data = (Form_gs_masking_policy_actions)GETSTRUCT(rtup);
         if (rel_data == NULL) {
             continue;
@@ -404,7 +404,7 @@ bool load_masking_actions(bool reload)
         parse_params(rel_data->actparams.data, &item.m_params);
         (*tmp_actions)[item.m_policy_id].insert(item);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     if (loaded_action != NULL) {
@@ -459,12 +459,12 @@ bool load_masking_policy_filters(bool reload)
     Relation rel = NULL;
     rel = heap_open(GsMaskingPolicyFiltersId, AccessShareLock);
 
-    TableScanDesc scan   = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan   = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup    = NULL;
     Form_gs_masking_policy_filters rel_data = NULL;
     gs_policy_filter_map* tmp_filters = new gs_policy_filter_map;
     global_roles_in_use* masking_roles_in_use_tmp = new global_roles_in_use;
-    while ((rtup = heap_getnext(scan, ForwardScanDirection))) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         rel_data = (Form_gs_masking_policy_filters)GETSTRUCT(rtup);
         if (rel_data == NULL)
             continue;
@@ -481,7 +481,7 @@ bool load_masking_policy_filters(bool reload)
         GsPolicyFilter item(ltree, rel_data->policyoid, rel_data->modifydate);
         set_filter(&item, tmp_filters);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     /* add policies without filter */
@@ -762,11 +762,11 @@ bool check_masking_policy_actions_for_label(const policy_labels_map *labels_to_d
     Relation rel = NULL;
     rel = heap_open(GsMaskingPolicyActionsId, RowExclusiveLock);
 
-    TableScanDesc scan   = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan   = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup    = NULL;
     Form_gs_masking_policy_actions rel_data = NULL;
     bool is_found = false;
-    while ((rtup = heap_getnext(scan, ForwardScanDirection)) && !is_found) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) && !is_found) {
         rel_data = (Form_gs_masking_policy_actions)GETSTRUCT(rtup);
         if (rel_data == NULL) {
             continue;
@@ -774,7 +774,7 @@ bool check_masking_policy_actions_for_label(const policy_labels_map *labels_to_d
         is_found = (labels_to_drop->find(rel_data->actlabelname.data) != labels_to_drop->end());
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, RowExclusiveLock);
 
     return is_found;

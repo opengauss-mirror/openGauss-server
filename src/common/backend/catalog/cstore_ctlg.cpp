@@ -778,6 +778,7 @@ static bool check_tupledesc_match(Relation rel, HeapTuple tuple)
         TableScanDesc partScan;
         HeapTuple partTuple;
         ScanKeyData keys[2];
+        int nkeys = 2;
 
         /* Process all plain partitions listed in pg_partition */
         ScanKeyInit(&keys[0],
@@ -788,9 +789,9 @@ static bool check_tupledesc_match(Relation rel, HeapTuple tuple)
 
         ScanKeyInit(&keys[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(mainRelOid));
         pgpartition = heap_open(PartitionRelationId, AccessShareLock);
-        partScan = heap_beginscan(pgpartition, SnapshotNow, 2, keys);
+        partScan = tableam_scan_begin(pgpartition, SnapshotNow, nkeys, keys);
         /* compare the first partition'delta with main table */
-        if ((partTuple = heap_getnext(partScan, ForwardScanDirection)) != NULL) {
+        if ((partTuple = (HeapTuple)tableam_scan_getnexttuple(partScan, ForwardScanDirection)) != NULL) {
             Form_pg_partition partitionForm = (Form_pg_partition)GETSTRUCT(partTuple);
             Oid deltaRelOid = partitionForm->reldeltarelid;
             Relation deltaRel = relation_open(deltaRelOid, AccessShareLock);
@@ -800,7 +801,7 @@ static bool check_tupledesc_match(Relation rel, HeapTuple tuple)
             relation_close(deltaRel, AccessShareLock);
         }
 
-        heap_endscan(partScan);
+        tableam_scan_end(partScan);
         heap_close(pgpartition, AccessShareLock);
     } else {
         /* for non-partition table */
@@ -922,12 +923,12 @@ static void sync_cstore_delta_Internal(Relation mainRel, Datum reloptions)
             /* check the delta table of the current partition that if it has data */
             Oid deltaRelid = partition->pd_part->reldeltarelid;
             Relation deltaRel = relation_open(deltaRelid, AccessShareLock);
-            TableScanDesc deltaScan = heap_beginscan(deltaRel, SnapshotNow, 0, NULL);
-            if (heap_getnext(deltaScan, ForwardScanDirection) != NULL) {
+            TableScanDesc deltaScan = tableam_scan_begin(deltaRel, SnapshotNow, 0, NULL);
+            if ((HeapTuple)tableam_scan_getnexttuple(deltaScan, ForwardScanDirection) != NULL) {
                 hasData = true;
             }
 
-            heap_endscan(deltaScan);
+            tableam_scan_end(deltaScan);
             relation_close(deltaRel, AccessShareLock);
 
             /* create a new delta table for the current partition */
@@ -959,12 +960,12 @@ static void sync_cstore_delta_Internal(Relation mainRel, Datum reloptions)
         bool hasData = false;
         Oid deltaRelid = mainRel->rd_rel->reldeltarelid;
         Relation deltaRel = relation_open(deltaRelid, AccessShareLock);
-        TableScanDesc deltaScan = heap_beginscan(deltaRel, SnapshotNow, 0, NULL);
-        if (heap_getnext(deltaScan, ForwardScanDirection) != NULL) {
+        TableScanDesc deltaScan = tableam_scan_begin(deltaRel, SnapshotNow, 0, NULL);
+        if (tableam_scan_getnexttuple(deltaScan, ForwardScanDirection) != NULL) {
             hasData = true;
         }
 
-        heap_endscan(deltaScan);
+        tableam_scan_end(deltaScan);
         relation_close(deltaRel, AccessShareLock);
 
         if (!hasData) {
@@ -1137,9 +1138,9 @@ Datum pg_sync_all_cstore_delta(PG_FUNCTION_ARGS)
         ScanKeyInit(&key, Anum_pg_class_relkind, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(RELKIND_RELATION));
 
         pgclass = heap_open(RelationRelationId, AccessShareLock);
-        scan = heap_beginscan(pgclass, SnapshotNow, 1, &key);
+        scan = tableam_scan_begin(pgclass, SnapshotNow, 1, &key);
 
-        while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             /* work only for column store table */
             if (rel_is_column_format(tuple, pgclassdesc)) {
                 /* check if the main table is ever modified */
@@ -1159,7 +1160,7 @@ Datum pg_sync_all_cstore_delta(PG_FUNCTION_ARGS)
         }
 
         /* clean */
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         heap_close(pgclass, AccessShareLock);
 
         if (warning_tables.len > 0)

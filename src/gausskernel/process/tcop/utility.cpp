@@ -11907,13 +11907,13 @@ static List* get_analyzable_relations(bool is_foreign_tables)
     if (!is_foreign_tables) {
         /* Process all plain relations listed in pg_class */
         ScanKeyInit(&key, Anum_pg_class_relkind, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(RELKIND_RELATION));
-        scan = heap_beginscan(pgclass, SnapshotNow, 1, &key);
+        scan = tableam_scan_begin(pgclass, SnapshotNow, 1, &key);
     } else {
         ScanKeyInit(&key, Anum_pg_class_relkind, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(RELKIND_FOREIGN_TABLE));
-        scan = heap_beginscan(pgclass, SnapshotNow, 1, &key);
+        scan = tableam_scan_begin(pgclass, SnapshotNow, 1, &key);
     }
 
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Form_pg_class class_form = (Form_pg_class)GETSTRUCT(tuple);
 
         if ((!is_foreign_tables && (class_form->relkind == RELKIND_RELATION || class_form->relkind == RELKIND_MATVIEW)) ||
@@ -11958,7 +11958,7 @@ static List* get_analyzable_relations(bool is_foreign_tables)
             oid_list = lappend_oid(oid_list, rel_oid);
         }
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
 
     /* get matview oids then concat with oid_list */
     List *matview_oids = get_analyzable_matviews(pgclass);

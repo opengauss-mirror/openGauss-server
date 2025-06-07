@@ -162,14 +162,14 @@ extern size_t get_num_of_existing_policies(Relation rel)
         return amount;
     HeapTuple   rtup;
     T rel_data;
-    TableScanDesc scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    while (scan && (rtup = heap_getnext(scan, ForwardScanDirection))) {
+    TableScanDesc scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    while (scan && (rtup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         rel_data = (T)GETSTRUCT(rtup);
         if (rel_data == NULL)
             continue;
         amount++;
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     return amount;
 }
 

@@ -23,6 +23,7 @@
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#include "access/tableam.h"
 #include "catalog/gs_client_global_keys.h"
 #include "catalog/gs_column_keys.h"
 #include "catalog/gs_encrypted_columns.h"
@@ -1147,9 +1148,9 @@ static bool hasTuples(const Oid relOid)
         return false;
     }
     rel = heap_open(relOid, AccessShareLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    result = (heap_getnext(scan, ForwardScanDirection) != NULL);
-    heap_endscan(scan);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    result = (tableam_scan_getnexttuple(scan, ForwardScanDirection) != NULL);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     return result;

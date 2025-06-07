@@ -4830,9 +4830,9 @@ int64 SearchAllAccounts()
         LockRelationOid(UserStatusRelationId, RowExclusiveLock);
         pgstat_initstats(pg_user_status_rel);
         pg_user_status_dsc = RelationGetDescr(pg_user_status_rel);
-        scan = (HeapScanDesc)heap_beginscan(pg_user_status_rel, SnapshotNow, 0, NULL);
+        scan = (HeapScanDesc)tableam_scan_begin(pg_user_status_rel, SnapshotNow, 0, NULL);
 
-        while ((tuple = heap_getnext((TableScanDesc)scan, ForwardScanDirection)) != NULL) {
+        while ((tuple = (HeapTuple)tableam_scan_getnexttuple((TableScanDesc)scan, ForwardScanDirection)) != NULL) {
             /* Database Security: Support database audit */
             roleid_datum = heap_getattr(tuple, Anum_pg_user_status_roloid, pg_user_status_dsc, &is_roleid_null);
             if (!(is_roleid_null || (void*)roleid_datum == NULL)) {
@@ -4847,7 +4847,7 @@ int64 SearchAllAccounts()
             }
         }
 
-        heap_endscan((TableScanDesc)scan);
+        tableam_scan_end((TableScanDesc)scan);
         AcceptInvalidationMessages();
         if (!SS_STANDBY_MODE) {
             (void)GetCurrentCommandId(true);

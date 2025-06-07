@@ -101,7 +101,7 @@ static List *get_subscription_list(void)
     rel = heap_open(SubscriptionRelationId, AccessShareLock);
     scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
 
-    while (HeapTupleIsValid(tup = heap_getnext(scan, ForwardScanDirection))) {
+    while (HeapTupleIsValid(tup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         Form_pg_subscription subform = (Form_pg_subscription)GETSTRUCT(tup);
         Subscription *sub;
         MemoryContext oldcxt;
@@ -126,7 +126,7 @@ static List *get_subscription_list(void)
         MemoryContextSwitchTo(oldcxt);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     CommitTransactionCommand();

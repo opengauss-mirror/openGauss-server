@@ -451,8 +451,8 @@ Datum ledger_hist_archive(PG_FUNCTION_ARGS)
         /* sum all hash_ins and hash_del for unification. */
         lock_hist_hash_cache(LW_EXCLUSIVE);
         Relation histRel = heap_open(get_relname_relid(hist_name, PG_BLOCKCHAIN_NAMESPACE), AccessExclusiveLock);
-        scan = heap_beginscan(histRel, SnapshotNow, 0, NULL);
-        while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        scan = tableam_scan_begin(histRel, SnapshotNow, 0, NULL);
+        while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             hist_empty = false;
             Datum value = heap_getattr(tuple, USERCHAIN_COLUMN_HASH_INS + 1, histRel->rd_att, &is_null);
             if (!is_null) {
@@ -471,7 +471,7 @@ Datum ledger_hist_archive(PG_FUNCTION_ARGS)
                     heap_getattr(tuple, USERCHAIN_COLUMN_PREVHASH + 1, histRel->rd_att, &is_null);
             }
         }
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         /* Empty table should not truncate and archive any more. */
         if (hist_empty) {
             heap_close(histRel, AccessExclusiveLock);

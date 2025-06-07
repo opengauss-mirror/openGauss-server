@@ -1357,14 +1357,14 @@ bool IsUDF(const char *funcname, Oid nspoid)
     Relation rel = NULL;
     rel = heap_open(GsMaskingPolicyActionsId, AccessShareLock);
     
-    TableScanDesc scan   = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan   = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup    = NULL;
     Form_gs_masking_policy_actions rel_data = NULL;
     bool is_found = false;
     char *parsed_funcname = NULL;
     Oid nsp_oid = InvalidOid;
     /* verify whether this function is used to be a masking function by searching gs_masking_policy_actions */
-    while ((rtup = heap_getnext(scan, ForwardScanDirection)) && !is_found) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) && !is_found) {
         rel_data = (Form_gs_masking_policy_actions)GETSTRUCT(rtup);
         if (rel_data == NULL) {
             continue;
@@ -1375,7 +1375,7 @@ bool IsUDF(const char *funcname, Oid nspoid)
         }
         pfree(parsed_funcname);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
     return is_found;
 }

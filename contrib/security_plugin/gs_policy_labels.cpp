@@ -69,9 +69,9 @@ bool update_label_value(const gs_stl::gs_string object_name, const gs_stl::gs_st
     }
 
     rel = heap_open(GsPolicyLabelRelationId, RowExclusiveLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     if (scan != NULL) {
-        while ((rtup = heap_getnext(scan, ForwardScanDirection))) {
+        while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
             Form_gs_policy_label rel_data = (Form_gs_policy_label)GETSTRUCT(rtup);
             if (rel_data == NULL) {
                 continue;
@@ -87,7 +87,7 @@ bool update_label_value(const gs_stl::gs_string object_name, const gs_stl::gs_st
             CatalogUpdateIndexes(rel, new_tuple);
             updated = true;
         }
-        heap_endscan(scan);
+        tableam_scan_end(scan);
     }
     heap_close(rel, RowExclusiveLock);
     return updated;
@@ -109,9 +109,9 @@ bool scan_policy_labels(loaded_labels *tmp_labels)
     Relation             rel = NULL;
 
     rel = heap_open(GsPolicyLabelRelationId, AccessShareLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     /* scan each row from gs_policy_label into tmp_labels */
-    while ((rtup = heap_getnext(scan, ForwardScanDirection))) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         rel_data = (Form_gs_policy_label)GETSTRUCT(rtup);
         if (rel_data == NULL) {
             continue;
@@ -133,7 +133,7 @@ bool scan_policy_labels(loaded_labels *tmp_labels)
         (*tmp_labels)[label_name][item.m_obj_type].insert(item);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
     return label_type_found;
 }

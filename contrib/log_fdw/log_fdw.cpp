@@ -34,6 +34,7 @@
 #include "log_fdw_private.h"
 #include "log_fdw.h"
 #include "access/reloptions.h"
+#include "access/tableam.h"
 #include "catalog/pg_foreign_server.h"
 #include "catalog/pg_foreign_table.h"
 #include "catalog/pg_type.h"
@@ -775,7 +776,7 @@ static inline char* get_nodename_same_to_cn_pgxcnode_table(void)
 
     Relation rel = heap_open(PgxcNodeRelationId, AccessShareLock);
     TableScanDesc scan;
-    scan  = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    scan  = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple tuple = NULL;
     char* name = NULL;
 
@@ -783,13 +784,13 @@ static inline char* get_nodename_same_to_cn_pgxcnode_table(void)
      * get node name from pgxc_node table in datanode.
      * this name is the same to node_name in pgxc_node of CN.
      */
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Form_pgxc_node nodeForm = (Form_pgxc_node)GETSTRUCT(tuple);
         name = pstrdup(NameStr(nodeForm->node_name));
         break;
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     if (NULL == name || '\0' == name[0]) {
@@ -848,10 +849,10 @@ static void build_hashtbl_of_master_dnname_and_ip(HTAB* tmp_htbl)
 
     Relation rel = heap_open(PgxcNodeRelationId, AccessShareLock);
     TableScanDesc scan;
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
 
     /* scan pgxc_node table and get all info */
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Form_pgxc_node nodeForm = (Form_pgxc_node)GETSTRUCT(tuple);
         /* master node name and ip will be passed down. so only care dn type */
         if (PGXC_NODE_DATANODE != nodeForm->node_type) {
@@ -889,7 +890,7 @@ static void build_hashtbl_of_master_dnname_and_ip(HTAB* tmp_htbl)
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     if (NULL != localhost_dnnames) {
@@ -998,13 +999,13 @@ static void build_hashtbl_of_unreachable(HTAB* unreach_htbl)
 {
     Relation rel = heap_open(PgxcNodeRelationId, AccessShareLock);
     TableScanDesc scan;
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple tuple = NULL;
     List* localhost_cn = NIL;
     List* localhost_dn = NIL;
     unr_host_type localhost_reachable = UHT_UNKNOWN;
 
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Form_pgxc_node nodeForm = (Form_pgxc_node)GETSTRUCT(tuple);
         if (PGXC_NODE_DATANODE == nodeForm->node_type) {
             if (0 != pg_strcasecmp(NameStr(nodeForm->node_host), "localhost")) {
@@ -1048,7 +1049,7 @@ static void build_hashtbl_of_unreachable(HTAB* unreach_htbl)
             }
         }
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     if (NULL != localhost_cn || NULL != localhost_dn) {

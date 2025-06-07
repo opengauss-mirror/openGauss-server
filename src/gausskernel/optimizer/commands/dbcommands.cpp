@@ -1369,16 +1369,16 @@ ObjectAddress RenameDatabase(const char* oldname, const char* newname)
      * change the database name in the pg_job. 
      */
     pg_job_tbl = heap_open(PgJobRelationId, ExclusiveLock);
-    scan = heap_beginscan(pg_job_tbl, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(pg_job_tbl, SnapshotNow, 0, NULL);
 
-    while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
+    while (HeapTupleIsValid(tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         Form_pg_job pg_job = (Form_pg_job)GETSTRUCT(tuple);
         if (strcmp(NameStr(pg_job->dbname), oldname) == 0) {
             update_pg_job_dbname(pg_job->job_id, newname);
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pg_job_tbl, ExclusiveLock);
 
     ObjectAddressSet(address, DatabaseRelationId, db_id);
