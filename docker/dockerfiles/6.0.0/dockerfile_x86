@@ -1,6 +1,6 @@
 FROM openeuler/openeuler:20.03-lts
 
-ARG VERSION=6.0.1
+ARG VERSION=6.0.2
 
 COPY openGauss-Server-${VERSION}-openEuler20.03-x86_64.tar.bz2 .
 COPY gosu-amd64 /usr/local/bin/gosu
