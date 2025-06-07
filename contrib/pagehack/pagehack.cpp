@@ -3216,15 +3216,17 @@ static void parse_heap_or_index_page(const char* buffer, int blkno, SegmentType 
                 fprintf(stdout, "\n\tUBtree tuple information on this page\n");    
             } else if (type == SEG_INDEX_UBTREE_PCR) {
                 fprintf(stdout, "\n\tUBtree PCR tuple information on this page\n");    
-            } else if (type == SEG_INDEX_BTREE) {
+            } else {
                 fprintf(stdout, "\n\tHeap tuple information on this page\n");
             }
         }
+
         if (type == SEG_INDEX_UBTREE_PCR) {
             nline = UBTPCRPageGetMaxOffsetNumber((Page)page); 
-        } else if (type == SEG_INDEX_BTREE || type == SEG_INDEX_UBTREE) {
+        } else {
             nline = PageGetMaxOffsetNumber((Page)page);
         }
+
         g_rpCount += (uint64)nline;
         g_rpMax = (uint64)nline > g_rpMax ? (uint64)nline : g_rpMax;
         for (i = FirstOffsetNumber; i <= nline; i++) {
