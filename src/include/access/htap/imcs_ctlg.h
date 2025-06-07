@@ -142,8 +142,6 @@ extern void UnPopulateImcsForPartitionOnStandby(Oid relOid, Oid partOid);
 extern void ParsePopulateImcsParam(
     Oid relOid, StringInfo inputMsg, int2vector* &imcsAttsNum, int* imcsNatts, XLogRecPtr* currentLsn);
 
-extern PGXCNodeHandle **GetStandbyConnections(int *connCount);
-
 extern void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int imcsNatts, int type);
 
 extern void SendUnImcstoredRequest(Oid relOid, Oid specifyPartOid, int type);
