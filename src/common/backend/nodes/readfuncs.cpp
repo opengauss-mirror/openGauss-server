@@ -1749,15 +1749,6 @@ static AlterTableStmt* _readAlterTableStmt(void)
     READ_DONE();
 }
 
-static AlterTriggerStmt* _readAlterTriggerStmt(void)
-{
-    READ_LOCALS(AlterTriggerStmt);
-    READ_STRING_FIELD(trigname);
-    READ_CHAR_FIELD(tgenabled);
-
-    READ_DONE();
-}
-
 static CreateMatViewLogStmt* _readCreateMatViewLogStmt(void)
 {
     READ_LOCALS(CreateMatViewLogStmt);
@@ -6804,24 +6795,6 @@ static UnrotateClause* _readUnrotateClause()
     READ_NODE_FIELD(colNameList);
     READ_NODE_FIELD(forColName);
     READ_NODE_FIELD(inExprList);
-
-    READ_DONE();
-}
-
-static RotateInCell *_readRotateCell()
-{
-    READ_LOCALS(RotateInCell);
-    READ_STRING_FIELD(aliasname);
-    READ_NODE_FIELD(rotateInExpr);
-
-    READ_DONE();
-}
-
-static UnrotateInCell *_readUnrotateCell()
-{
-    READ_LOCALS(UnrotateInCell);
-    READ_NODE_FIELD(aliaList);
-    READ_NODE_FIELD(unrotateInExpr);
 
     READ_DONE();
 }

@@ -4837,11 +4837,8 @@ static AsofJoin* create_asofjoin_plan(PlannerInfo* root, AsofPath* best_path, Pl
 
     List* tlist = build_relation_tlist(best_path->jpath.path.parent);
     List* joinclauses = NIL;
-    List* actual_joinclauses = NIL;
     List* otherclauses = NIL;
     List* hashclauses = NIL;
-    List* mergeclauses = NIL;
-    ListCell* lc = NULL;
     AsofJoin* join_plan = NULL;
 
     /* Sort join qual clauses into best execution order */

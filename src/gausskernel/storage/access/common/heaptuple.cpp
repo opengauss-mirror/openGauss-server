@@ -3474,7 +3474,6 @@ static void RememberBufferNeedCheckPin(Buffer buf_id, HeapTuple tuple)
         Page page = BufferGetPage(buf_id);
         ItemId lpp = HeapPageGetItemId(page, t_thrd.dms_cxt.pincount_array[target_index].lp_offset);
         t_thrd.dms_cxt.pincount_array[target_index].saved_off = lpp->lp_off;
-        uint32 count = pg_atomic_add_fetch_u32(&(buf_ctrl->pinned_count), 1);
     } else {
         ereport(WARNING, (errmsg("t_thrd.dms_cxt.pincount_array count is full")));
     }

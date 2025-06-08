@@ -44,7 +44,6 @@ static void pltsql_PreDropColumnHook(Relation rel, AttrNumber attnum);
 static void pltsql_PreAddConstraintsHook(Relation rel, ParseState *pstate, List *newColDefaults);
 static void pltsql_TransformSelectForLimitHook(SelectStmt* stmt);
 static void pltsql_RecomputeLimitsHook(float8 val);
-static ObjectAddress GetAttrDefaultColumnAddress(Oid attrdefoid);
 static bool check_nested_computed_column(Node *node, void *context);
 
 /* Hook to tablecmds.cpp in the engine */
@@ -318,41 +317,6 @@ static void pltsql_RecomputeLimitsHook(float8 val)
                 errmodule(MOD_EXECUTOR),
                 errmsg("Percent values must be between 0 and 100.")));
     }
-}
-
-/*
- * Given a pg_attrdef OID, return the relation OID and column number of
- * the owning column (represented as an ObjectAddress for convenience).
- *
- * Returns InvalidObjectAddress if there is no such pg_attrdef entry.
- */
-static ObjectAddress GetAttrDefaultColumnAddress(Oid attrdefoid)
-{
-    ObjectAddress result = InvalidObjectAddress;
-    Relation    attrdef;
-    ScanKeyData skey[1];
-    SysScanDesc scan;
-    HeapTuple    tup;
-
-    attrdef = relation_open(AttrDefaultRelationId, AccessShareLock);
-    ScanKeyInit(&skey[0],
-                Anum_pg_attrdef_adrelid,
-                BTEqualStrategyNumber, F_OIDEQ,
-                ObjectIdGetDatum(attrdefoid));
-    scan = systable_beginscan(attrdef, AttrDefaultOidIndexId, true,
-                              NULL, 1, skey);
-
-    if (HeapTupleIsValid(tup = systable_getnext(scan))) {
-        Form_pg_attrdef atdform = (Form_pg_attrdef) GETSTRUCT(tup);
-
-        result.classId = RelationRelationId;
-        result.objectId = atdform->adrelid;
-        result.objectSubId = atdform->adnum;
-    }
-
-    systable_endscan(scan);
-    relation_close(attrdef, AccessShareLock);
-    return result;
 }
 
 static bool check_nested_computed_column(Node *node, void *context)

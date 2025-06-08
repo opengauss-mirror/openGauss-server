@@ -1585,7 +1585,8 @@ static int32 CBBufRebuildDrcParallel(void* db_handle, unsigned char thread_index
 
 static int32 CBRcyClean(void* db_handle, unsigned char thread_index, unsigned char thread_num)
 {
-
+    // not used
+    return 0;
 }
 
 static int32 CBDrcBufValidate(void *db_handle)
