@@ -717,7 +717,7 @@ VectorL2SquaredDistance(int dim, float *ax, float *bx)
     }
     return distance;
 }
-#elif defined(__x86_64__)
+#elif defined(__x86_64__) && defined(__AVX__)
 static inline __m128 masked_read(int d, const float *x)
 {
     __attribute__((__aligned__(16))) float buf[4];
