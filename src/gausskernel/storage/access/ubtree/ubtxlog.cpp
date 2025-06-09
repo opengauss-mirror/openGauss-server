@@ -980,6 +980,9 @@ static UndoRecPtr PrepareUndoRecordForRedo(XLogReaderState *record,
         /* recover undo record */
         UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
         undorec->SetUrp(urecptr);
+        undorec->SetOffset(xlrec->offNum);
+        undorec->SetBlkprev(blkprev);
+        undorec->SetOldXactId(xlrec->prevXidOfTuple);
 
         /* We need to pass in tablespace and relfilenode in PrepareUndo but we never explicitly
          * wrote those information in the xlundohdr because we can grab them from the XLOG record itself.
@@ -1001,9 +1004,6 @@ static UndoRecPtr PrepareUndoRecordForRedo(XLogReaderState *record,
         }
 
         Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
-        undorec->SetOffset(xlrec->offNum);
-        undorec->SetBlkprev(blkprev);
-        undorec->SetOldXactId(xlrec->prevXidOfTuple);
         if (!skipInsert) {
             /* Insert the Undo record into the undo store */
             InsertPreparedUndo(t_thrd.ustore_cxt.urecvec, lsn);
@@ -1282,8 +1282,9 @@ static void UBTree3XlogInsertPcrInternal(XLogReaderState* record, bool hasMeta)
 
     if (XLogReadBufferForRedo(record, UBTREE3_INSERT_PCR_INTERNAL_BLOCK_NUM, &lbuf) == BLK_NEEDS_REDO) {
         Size dataLen;
-        char *dataPos = XLogRecGetBlockData(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &dataLen);
-        xl_btree_insert *xlrec = (xl_btree_insert *)dataPos;
+        char *dataPos = XLogRecGetBlockData(record, UBTREE3_INSERT_PCR_INTERNAL_BLOCK_NUM, &dataLen);
+        xl_btree_insert *xlrec = (xl_btree_insert *)XLogRecGetData(record);
+        Assert(xlrec->offnum != InvalidOffsetNumber);
         Page page = lbuf.pageinfo.page;
 
         if (UBTPCRPageAddItem(page, (Item)dataPos, dataLen, xlrec->offnum, false) == InvalidOffsetNumber) {
@@ -1450,7 +1451,7 @@ static void UBTree3XlogDelete(XLogReaderState* record)
         action = XLogReadBufferForRedo(record, 0, &buffer);
         if (action == BLK_NEEDS_REDO) {
             UBTree3XlogDeleteOperatorPage(&buffer, XLogRecGetData(record), urecptr);
-            if (BufferIsInvalid(buffer.buf)) {
+            if (BufferIsValid(buffer.buf)) {
                 MarkBufferDirty(buffer.buf);
             }
         }
@@ -1630,11 +1631,11 @@ static void UBTree3XlogSplit(XLogReaderState* record, bool onLeft, bool isRoot)
         RedoBufferInfo cbuf;
         if (XLogReadBufferForRedo(record, BTREE_SPLIT_CHILD_BLOCK_NUM, &cbuf) == BLK_NEEDS_REDO) {
             UBTreeXlogClearIncompleteSplit<UBTPCRPageOpaque>(&cbuf);
-            if (BufferIsInvalid(cbuf.buf)) {
+            if (BufferIsValid(cbuf.buf)) {
                 MarkBufferDirty(cbuf.buf);
             }
         }
-        if (BufferIsInvalid(cbuf.buf)) {
+        if (BufferIsValid(cbuf.buf)) {
             UnlockReleaseBuffer(cbuf.buf);
         }
     }
