@@ -78,7 +78,7 @@
 ./share/postgresql/extension/spqplugin.control
 ./share/postgresql/extension/spqplugin--1.0.sql
 ./share/postgresql/extension/dolphin.control
-./share/postgresql/extension/dolphin--4.1.sql
+./share/postgresql/extension/dolphin--4.2.sql
 ./share/postgresql/extension/dolphin--1.0--1.1.sql
 ./share/postgresql/extension/dolphin--1.1--1.0.sql
 ./share/postgresql/extension/dolphin--1.1--2.0.sql
@@ -93,6 +93,10 @@
 ./share/postgresql/extension/dolphin--4.0.1--4.0.sql
 ./share/postgresql/extension/dolphin--4.0--4.1.sql
 ./share/postgresql/extension/dolphin--4.1--4.0.sql
+./share/postgresql/extension/dolphin--4.1--4.2.sql
+./share/postgresql/extension/dolphin--4.2--4.1.sql
+./share/postgresql/extension/dolphin--4.2--5.0.sql
+./share/postgresql/extension/dolphin--5.0--4.2.sql
 ./share/postgresql/extension/openGauss_expr_dolphin.ir
 ./share/postgresql/extension/age--1.0.0.sql
 ./share/postgresql/extension/age.control
