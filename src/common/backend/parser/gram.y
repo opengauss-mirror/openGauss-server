@@ -10005,11 +10005,11 @@ CreateMatViewStmt:
                                 errmsg("It's not supported to specify distribute key on incremental materialized views")));
                    }
 #endif
-                   if (ENABLE_DMS) {
+				if (ENABLE_DMS) {
                         ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("matview is not supported while DMS and DSS enabled.")));
-                   }
-                    
+                }
+
 				   $6->ivm = $3;
 				   $$ = (Node *) ctas;
 			   }

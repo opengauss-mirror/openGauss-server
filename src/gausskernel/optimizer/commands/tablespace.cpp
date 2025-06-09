@@ -2975,8 +2975,11 @@ void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSi
             return;
         }
 
-        /* just refresh currentSize if it is within limit */
-        if (unlikely(currentSize) || (segment && requestSize != 0)) {
+        /* 
+         * just refresh currentSize if it is within limit;
+         * The empty directory size in DSS file system is zero.
+         */
+        if (ENABLE_DSS || unlikely(currentSize) || (segment && requestSize != 0)) {
             if (unlikely(TableSpaceUsageManager::IsFull(maxSize, currentSize, requestSize)) &&
                 !u_sess->attr.attr_common.IsInplaceUpgrade) {
                 /* 

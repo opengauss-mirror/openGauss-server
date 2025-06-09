@@ -2390,7 +2390,6 @@ finish:
     pg_free(backup_mode);
     pg_free(start_lsn);
     pg_free(stop_lsn);
-    pg_free(status);
     pg_free(parent_backup);
     pg_free(merge_dest_backup);
     pg_free(program_version);

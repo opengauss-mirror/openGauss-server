@@ -441,6 +441,7 @@ static int CBSwitchoverDemote(void *db_handle)
             if (ntries >= WAIT_DEMOTE || dms_reform_failed()) {
                 bool timeout = ntries >= WAIT_DEMOTE ? true : false;
                 SSHandleReformFailDuringDemote(timeout, demote_mode);
+                print_all_stack();
                 return DMS_ERROR;
             }
         }
@@ -1858,6 +1859,11 @@ static void ReformCleanBackends()
             ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform] reform failed, backends can not exit")));
             /* check and print some thread which no exit. */
             SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+#ifdef DEBUG
+            ereport(PANIC, (errmodule(MOD_DMS),
+                errmsg("[SS reform][SS switchover] primary demote fail, need core in debug mode!")));
+#endif
+            print_all_stack();
             SSProcessForceExit();
         }
 
@@ -1873,7 +1879,7 @@ static void FailoverCleanBackends()
                 "no need to clean backends.")));
         return;
     }
-
+    long maxWaitTime = 1200000000L; /* print failover timeout 1200s */
     if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_STANDBY_MODE) {
         OnDemandWaitRealtimeBuildShutDownInPartnerFailover();
     }
@@ -1906,8 +1912,20 @@ static void FailoverCleanBackends()
             return;
         }
 
-        pg_usleep(REFORM_WAIT_TIME);
-        wait_time += REFORM_WAIT_TIME;
+        if (wait_time > maxWaitTime) {
+            ereport(WARNING, (errmodule(MOD_DMS),
+                errmsg("[SS reform] [SS failover] failover failed, backends can not exit")));
+            /* check and print some thread which no exit. */
+            SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+#ifdef DEBUG
+            ereport(PANIC, (errmodule(MOD_DMS),
+                errmsg("[SS reform][SS switchover] primary demote fail, need core in debug mode!")));
+#endif
+            print_all_stack();
+        }
+
+        pg_usleep(FAILOVER_PERIOD * REFORM_WAIT_TIME);
+        wait_time += FAILOVER_PERIOD * REFORM_WAIT_TIME;
     }
 }
 

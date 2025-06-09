@@ -156,6 +156,15 @@ extern const uint32 PARALLEL_ENABLE_VERSION_NUM;
 extern const uint32 AUDIT_SHA_VERSION_NUM;
 extern const uint32 PARTITION_NAME_VERSION_NUM;
 extern const uint32 MINMAXEXPR_CMPTYPE_VERSION_NUM;
+extern const uint32 CHARBYTE_SEMANTIC_VERSION_NUMBER;
+extern const uint32 APPLY_JOIN_VERSION_NUMBER;
+extern const uint32 PUBLIC_SYNONYM_VERSION_NUMBER;
+extern const uint32 KEEP_FUNC_VERSION_NUMBER;
+extern const uint32 IGNORE_NULLS_VERSION_NUMBER;
+extern const uint32 CAST_FUNC_VERSION_NUMBER;
+extern const uint32 HASH_SAOP_VERSION_NUMBER;
+extern const uint32 ASOFJOIN_VERSION_NUM;
+extern const uint32 PAGE_BASED_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);

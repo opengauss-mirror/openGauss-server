@@ -16,7 +16,7 @@
 #include "file.h"
 
 #include <sys/stat.h>
-
+#include <sys/vfs.h>
 #include "tool_common.h"
 #include "configuration.h"
 #include "thread.h"
@@ -784,6 +784,13 @@ static void check_dss_input()
 
     if (instance_config.dss.enable_dss && instance_config.dss.socketpath == NULL) {
         instance_config.dss.socketpath = getSocketpathFromEnv();
+    }
+
+    if (instance_config.dss.socketpath != NULL) {
+        char* trueSocketpath = getSocketpathFromEnv();
+        if (strcmp(instance_config.dss.socketpath, trueSocketpath) != 0) {
+            elog(ERROR, "The input socket:%s is incorrect", instance_config.dss.socketpath);
+        }
     }
 }
 
