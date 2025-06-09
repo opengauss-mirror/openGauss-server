@@ -904,11 +904,11 @@ static void set_user_config_ssl_ciphers(const char* sslciphers)
     } else {
         cipherStr = (char*)strchr(sslciphers, ';'); /*if the sslciphers does not contain character ';',the count is 1*/
         while (cipherStr != NULL) {
-            counter++;
             cipherStr++;
             if (*cipherStr == '\0') {
                 break;
             }
+            counter++;
             cipherStr = strchr(cipherStr, ';');
         }
         ciphers_list = (char**)palloc(counter * sizeof(char*));

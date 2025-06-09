@@ -2460,19 +2460,6 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         return false;
     }
 
-    /*
-     * Silently ignore tables that are temp tables of other backends ---
-     * trying to vacuum these will lead to great unhappiness, since their
-     * contents are probably not up-to-date on disk.  (We don't throw a
-     * warning here; it would just lead to chatter during a database-wide
-     * VACUUM.)
-     */
-    if (ENABLE_DSS && RELATION_IS_TEMP(onerel)) {
-        CloseAllRelationsBeforeReturnFalse();
-        proc_snapshot_and_transaction();
-        return false;
-    }
-
     if (RELATION_IS_OTHER_TEMP(onerel)) {
         CloseAllRelationsBeforeReturnFalse();
 
