@@ -293,7 +293,7 @@ top:
                     UBTreePCROrWaitForTDSlot(minXid, true);
                 }
                 buf = InvalidBuffer;
-                if (checkUnique && itupKey->heapkeyspace) {
+                if (checkingunique && itupKey->heapkeyspace) {
                     itupKey->scantid = nullptr;
                 }
                 _bt_freestack(stack);
@@ -2105,7 +2105,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
         }
     }
 
-    if (isleaf) {
+    if (isleaf && !noinsert) {
         Page page = newitemonleft ? leftpage : rightpage;
         OffsetNumber offset = newitemonleft ? leftoff : rightoff;
         BlockNumber blkno = newitemonleft ? BufferGetBlockNumber(buf) : BufferGetBlockNumber(rbuf);
@@ -2213,7 +2213,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
     /* XLOG stuff */
     if (RelationNeedsWAL(rel)) {
         UBTree3WalInfo *walInfo = NULL;
-        if (UBTreePageGetTDSlotCount(origpage) > 0) {
+        if (UBTreePageGetTDSlotCount(origpage) > 0 && !noinsert) {
             walInfo = (UBTree3WalInfo*)palloc(sizeof(UBTree3WalInfo));
             uint8 flag = 0;
             UndoRecord *cur_urec = t_thrd.ustore_cxt.undo_records[0];
@@ -2252,7 +2252,7 @@ static Buffer UBTreePCRSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber
             pfree(walInfo);
         }
     }
-    if (isleaf) {
+    if (isleaf && !noinsert) {
         undo::FinishUndoMeta(UndoPersistenceForRelation(rel));
     }
     END_CRIT_SECTION();
@@ -2891,6 +2891,7 @@ void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumbe
     XLogRegisterData((char *)&xlrecSplit, SizeOfUbtree3Split);
 
     if (walInfo != NULL) {
+        Assert(tdSlot != UBTreeInvalidTDSlotId);
         XLogRegisterData((char *)&xlrecInsert, SizeOfUbtree3InsertOrDelete);
         XLogRegisterData((char *)walInfo->itup, IndexTupleSize(walInfo->itup));
         XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
@@ -2919,6 +2920,8 @@ void LogSplit(Buffer buf, Buffer rbuf, Buffer sbuf, Buffer leftCbuf, OffsetNumbe
     }
 
     if (newItemOnLeft) {
+        Assert(originOff != InvalidOffsetNumber);
+        Assert(originOff <= leftOff);
         IndexTuple itup = UBTreePCRGetIndexTuple(leftpage, leftOff);
         XLogRegisterBufData(0, (char *)itup, MAXALIGN(IndexTupleSize(itup)));
     }

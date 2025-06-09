@@ -578,7 +578,7 @@ void UBTree3PrunePagePcrDesc(StringInfo buf, XLogReaderState* record)
 void UBTree3FreezeTdSlotDesc(StringInfo buf, XLogReaderState* record)
 {
     xl_ubtree3_freeze_td_slot *xlrec = (xl_ubtree3_freeze_td_slot *)XLogRecGetData(record);
-    uint16* frozenSlots = (uint16*)(((char*)xlrec) + SizeOfUbtree3FreezeTDSlot);
+    uint8* frozenSlots = (uint8*)(((char*)xlrec) + SizeOfUbtree3FreezeTDSlot);
     appendStringInfo(buf, "XLOG_UBTREE3_FREEZE_TD_SLOT: latestFrozenXid: %lu, nFrozen: %d, frozen slots: [",
          xlrec->latestFrozenXid, xlrec->nFrozen);
     for (uint16 i = 0; i < xlrec->nFrozen; i ++) {
@@ -614,15 +614,15 @@ void UBTree3InsertOrDeleteSplit(StringInfo buf, char* rec, TransactionId xid)
     UndoRecPtr blkPrev = INVALID_UNDO_REC_PTR;
     UndoRecPtr prevUrp = INVALID_UNDO_REC_PTR;
     Oid partitionOid = InvalidOid ;
-    if (xlundohdr->flag & UBTREE_XLOG_HAS_BLK_PREV != 0) {
+    if ((xlundohdr->flag & UBTREE_XLOG_HAS_BLK_PREV) != 0) {
         blkPrev = *((UndoRecPtr *)rec);
         rec += sizeof(UndoRecPtr);
     }
-    if (xlundohdr->flag & UBTREE_XLOG_HAS_XACT_PREV != 0) {
+    if ((xlundohdr->flag & UBTREE_XLOG_HAS_XACT_PREV) != 0) {
         prevUrp = *((UndoRecPtr *)rec);
         rec += sizeof(UndoRecPtr);
     }
-    if (xlundohdr->flag & UBTREE_XLOG_HAS_PARTITION_OID != 0) {
+    if ((xlundohdr->flag & UBTREE_XLOG_HAS_PARTITION_OID) != 0) {
         partitionOid = *((Oid *)rec);
         rec += sizeof(Oid);
     }
@@ -645,25 +645,18 @@ void UBTree3SplitDesc(StringInfo buf, XLogReaderState* record, const char *desc)
 
     appendStringInfo(buf, "%s, ", desc);
     UBTPCRPageOpaque lo = &xlrec->letfPcrOpq;
-    if (lo->td_count > 0) {
+    if (xlrec->slotNo != UBTreeInvalidTDSlotId) {
         UBTree3InsertOrDeleteSplit(buf, rec, xid);
     }
 
     appendStringInfo(buf, "UBtree3Split: level: %u, firstRight: %u, newItemOff: %u, rightLower: %hu, slotNo: %hhu, "
         "fxid: %lu, urp: %lu. ",
         xlrec->level, xlrec->firstRight, xlrec->newItemOff, xlrec->rightLower, xlrec->slotNo, xlrec->fxid, xlrec->urp);
-    appendStringInfo(buf, "UBtree3Split: UBTPCRPageOpaque[btpo_prev: %u, btpo_next: %u, btpo(level: %u, xact_old: %u), "
-        "btpo_flags: %hu, btpo_cycleid: %hu, xact: %lu, last_delete_xid: %lu, last_commit_xid: %lu, td_count: %hhu, "
-        "activeTupleCount: %hu, flags: %lu]. ", xlrec->letfPcrOpq.btpo_prev, xlrec->letfPcrOpq.btpo_next,
-        xlrec->letfPcrOpq.btpo.level, xlrec->letfPcrOpq.btpo.xact_old, xlrec->letfPcrOpq.btpo_flags,
-        xlrec->letfPcrOpq.btpo_cycleid, xlrec->letfPcrOpq.xact, xlrec->letfPcrOpq.last_delete_xid,
-        xlrec->letfPcrOpq.last_commit_xid, xlrec->letfPcrOpq.td_count);
     appendStringInfo(buf, "UBTPCRPageOpaque:btpo_prev: %u, btpo_next: %u, btpo(level: %u, xact_old: %u), "
         "btpo_flags: %hu, btpo_cycleid: %hu, xact: %lu, last_delete_xid: %lu, last_commit_xid: %lu, td_count: %hhu, "
-        "activeTupleCount: %hu, flags: %lu.", lo->btpo_prev, lo->btpo_next,
-        lo->btpo.level, lo->btpo.xact_old, lo->btpo_flags,
-        lo->btpo_cycleid, lo->xact, lo->last_delete_xid,
-        lo->last_commit_xid, lo->td_count);
+        "activeTupleCount: %hu, flags: %lu.", lo->btpo_prev, lo->btpo_next, lo->btpo.level, lo->btpo.xact_old,
+        lo->btpo_flags, lo->btpo_cycleid, lo->xact, lo->last_delete_xid, lo->last_commit_xid, lo->td_count,
+        lo->activeTupleCount, lo->flags);
 }
 
 void UBTree3InsertOrDeletePcrDesc(StringInfo buf, XLogReaderState* record, const char *desc)
