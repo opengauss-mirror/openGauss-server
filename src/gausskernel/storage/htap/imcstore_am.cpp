@@ -29,6 +29,8 @@
 #include "access/tableam.h"
 #include "access/tuptoaster.h"
 #include "access/xact.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
+#include "ddes/dms/ss_transaction.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
 #include "utils/aiomem.h"
@@ -47,6 +49,8 @@
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/ss_imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
 #include "access/htap/imcstore_delta.h"
 #include "storage/cstore/cstore_compress.h"
 #include "storage/smgr/smgr.h"
@@ -71,6 +75,7 @@
 #include "securec_check.h"
 #include "commands/tablespace.h"
 #include "workload/workload.h"
+#include "nodes/plannodes.h"
 #include "executor/executor.h"
 
 IMCStore::IMCStore()
@@ -107,7 +112,7 @@ void IMCStore::InitScan(CStoreScanState* state, Snapshot snapshot)
     AutoContextSwitch newMemCnxt(m_scanMemContext);
     m_relation = state->ss_currentRelation;
 
-    m_imcstoreDesc = IMCU_CACHE->GetImcsDesc(RelationGetRelid(m_relation));
+    m_imcstoreDesc = IMCS_HASH_TABLE->GetImcsDesc(RelationGetRelid(m_relation));
     UnlockRowGroups();
     u_sess->imcstore_ctx.pinnedRowGroups = NIL;
     m_ctidCol = m_imcstoreDesc->imcsNatts;
@@ -146,6 +151,9 @@ void IMCStore::InitScan(CStoreScanState* state, Snapshot snapshot)
 
     /* remember node id of this plan */
     m_plan_node_id = state->ps.plan->plan_node_id;
+
+    SpqCStoreScan* cstoreScan = (SpqCStoreScan*)state->ps.plan;
+    m_isShareScan = cstoreScan->isShareScan;
 }
 
 IMCStore::~IMCStore()
@@ -295,10 +303,20 @@ bool IMCStore::ImcstoreFillByDeltaScan(_in_ CStoreScanState* state, _out_ Vector
         return false;
     }
 
+    uint32 totalThread = 1;
+    uint32 currentThreadID = 0;
+    if (u_sess->stream_cxt.producer_dop) {
+        totalThread *= u_sess->stream_cxt.producer_dop;
+        currentThreadID = u_sess->stream_cxt.smp_id;
+    }
+    if (IS_SPQ_RUNNING && !m_isShareScan) {
+        totalThread *= SS_IMCU_CACHE->spqNodeNum;
+        currentThreadID = SS_IMCU_CACHE->curSpqIdx + currentThreadID * SS_IMCU_CACHE->spqNodeNum;
+    }
     for (uint32 currid = m_delMaskCUId == InValidCUID ? 0 : m_delMaskCUId; currid <= cuid; ++currid) {
-        if (u_sess->stream_cxt.producer_dop > 1 &&
-            (currid % u_sess->stream_cxt.producer_dop != (uint32)u_sess->stream_cxt.smp_id))
+        if (totalThread > 1 && currid % totalThread != currentThreadID) {
             continue;
+        }
         FillPerRowGroupDelta((IMCStoreScanState*)state, currid, vecBatchOut);
 
         if (!BatchIsNull(vecBatchOut)) {
@@ -337,7 +355,7 @@ void IMCStore::InitPartReScan(Relation rel)
             DELETE_EX(m_imcuStorage[i]);
         }
     }
-    m_imcstoreDesc = IMCU_CACHE->GetImcsDesc(RelationGetRelid(m_relation));
+    m_imcstoreDesc = IMCS_HASH_TABLE->GetImcsDesc(RelationGetRelid(m_relation));
     m_ctidCol = m_imcstoreDesc->imcsNatts;
     m_deltaScanCurr = 0;
     m_deltaMaskMax = 0;
@@ -412,15 +430,29 @@ bool IMCStore::LoadCUDesc(
         needLengthInfo = m_relation->rd_att->attrs[col].attlen < 0;
     }
 
+    uint32 totalThread = 1;
+    uint32 currentThreadID = 0;
+    if (u_sess->stream_cxt.producer_dop && !m_isShareScan) {
+        totalThread *= u_sess->stream_cxt.producer_dop;
+        currentThreadID = u_sess->stream_cxt.smp_id;
+    }
+    if (IS_SPQ_RUNNING && !m_isShareScan) {
+        totalThread *= SS_IMCU_CACHE->spqNodeNum;
+        currentThreadID = SS_IMCU_CACHE->curSpqIdx + currentThreadID * SS_IMCU_CACHE->spqNodeNum;
+    }
     for (uint32 cuid = loadCUDescInfoPtr->nextCUID; cuid <= m_endCUID && loadCUDescInfoPtr->HasFreeSlot(); ++cuid) {
         /* Parallel scan CU divide. */
+        if (totalThread > 1 && cuid % totalThread != currentThreadID) {
+            continue;
+        }
+
         if (u_sess->stream_cxt.producer_dop > 1 &&
             (cuid % u_sess->stream_cxt.producer_dop != (uint32)u_sess->stream_cxt.smp_id))
             continue;
 
         RowGroup* rowgroup = m_imcstoreDesc->GetRowGroup(cuid);
         if (rowgroup != NULL) {
-            pthread_rwlock_rdlock(&rowgroup->m_mutex);
+            rowgroup->RDLockRowGroup();
             MemoryContext old = MemoryContextSwitchTo(m_scanMemContext);
             PinnedRowGroup* pinned = New(CurrentMemoryContext)PinnedRowGroup(rowgroup, m_imcstoreDesc);
             u_sess->imcstore_ctx.pinnedRowGroups = lappend(u_sess->imcstore_ctx.pinnedRowGroups, pinned);
@@ -508,6 +540,77 @@ int FindRowIDByCtid(CU* cu, ItemPointer item, int rowNumber)
     return -1;
 }
 
+void IMCStore::GetCUDeleteMaskFromRemote(_in_ uint32 cuid, _in_ Snapshot snapShot)
+{
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+    unsigned long long delta_max;
+    u_sess->imcstore_ctx.bitmap = m_cuDeltaMask;
+    SSRequestIMCStoreDelta(&dms_ctx, m_relation->rd_id, cuid, m_cuDeltaMask, &delta_max);
+    m_deltaMaskMax = u_sess->imcstore_ctx.max_size;
+
+    RowGroup* rowgroup = m_imcstoreDesc->GetRowGroup(cuid);
+    if (rowgroup == NULL) {
+        return;
+    }
+    CU* cu = NULL;
+    int slotId = CACHE_BLOCK_INVALID_IDX;
+    PG_TRY();
+    {
+        rowgroup->RDLockRowGroup();
+        if (rowgroup->m_cuDescs[m_ctidCol] != NULL) {
+            m_isCtidCU = true;
+            cu = GetCUData(rowgroup->m_cuDescs[m_ctidCol], m_ctidCol, sizeof(ImcstoreCtid), slotId);
+            m_isCtidCU = false;
+        }
+
+        uint64 curr = 0;
+        while (curr <= m_deltaMaskMax) {
+            if (m_cuDeltaMask[curr >> 3] == 0) {
+                // skip this byte
+                curr = ((curr >> 3) + 1) * 8;
+                continue;
+            }
+            if ((m_cuDeltaMask[curr >> 3] & (1 << (curr % 8))) == 0) {
+                ++curr;
+                continue;
+            }
+            ItemPointerData item;
+            BlockNumber blk = curr / MAX_POSSIBLE_ROW_PER_PAGE;
+            OffsetNumber offset = curr - blk * MAX_POSSIBLE_ROW_PER_PAGE;
+            blk += m_delMaskCUId * MAX_IMCS_PAGES_ONE_CU;
+            ItemPointerSetBlockNumber(&item, blk);
+            ItemPointerSetOffsetNumber(&item, offset);
+
+            int rowIdx = FindRowIDByCtid(cu, &item, rowgroup->m_cuDescs[m_ctidCol]->row_count);
+            if (rowIdx < 0) {
+                continue;
+            }
+            m_hasDeadRow = true;
+            if ((rowIdx >> 3) > MAX_IMCSTORE_DEL_BITMAP_SIZE) {
+                ereport(
+                    ERROR,
+                    (errmsg("Try build delete mask for hatp error, row index exceeds MAX_IMCSTORE_DEL_BITMAP_SIZE")));
+            }
+            m_cuDelMask[rowIdx >> 3] |= (1 << (rowIdx % 8));
+        }
+        rowgroup->UnlockRowGroup();
+        m_imcstoreDesc->UnReferenceRowGroup();
+        if (IsValidCacheSlotID(slotId)) {
+            UnPinCUDataBlock(slotId, rowgroup->m_cuDescs[m_ctidCol]);
+        }
+    }
+    PG_CATCH();
+    {
+        rowgroup->UnlockRowGroup();
+        m_imcstoreDesc->UnReferenceRowGroup();
+        if (IsValidCacheSlotID(slotId)) {
+            UnPinCUDataBlock(slotId, rowgroup->m_cuDescs[m_ctidCol]);
+        }
+    }
+    PG_END_TRY();
+}
+
 void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
 {
     if (m_delMaskCUId == cuid) {
@@ -526,6 +629,10 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
     m_deltaScanCurr = 0;
     m_deltaMaskMax = 0;
 
+    if (ENABLE_DMS && !SS_PRIMARY_MODE && m_imcstoreDesc->populateInShareMem) {
+        return;
+    }
+
     RowGroup* rowgroup = m_imcstoreDesc->GetRowGroup(cuid);
     if (rowgroup == NULL) {
         return;
@@ -536,29 +643,25 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
 
     PG_TRY();
     {
-        pthread_rwlock_rdlock(&rowgroup->m_mutex);
+        rowgroup->RDLockRowGroup();
         if (rowgroup->m_cuDescs[m_ctidCol] != NULL) {
             m_isCtidCU = true;
             cu = GetCUData(rowgroup->m_cuDescs[m_ctidCol], m_ctidCol, sizeof(ImcstoreCtid), slotId);
             m_isCtidCU = false;
         }
-        FormCUDeleteMask(rowgroup, cu, cuid);
-        pthread_rwlock_unlock(&rowgroup->m_mutex);
+        FormLocalCUDeleteMask(rowgroup, cu, cuid);
+        rowgroup->UnlockRowGroup();
         m_imcstoreDesc->UnReferenceRowGroup();
         if (IsValidCacheSlotID(slotId)) {
-            IMCU_CACHE->UnPinDataBlock(slotId);
+            UnPinCUDataBlock(slotId, rowgroup->m_cuDescs[m_ctidCol]);
         }
     }
     PG_CATCH();
     {
-        CUDesc* cuDescPtr = rowgroup->m_cuDescs[m_ctidCol];
-        pthread_rwlock_unlock(&rowgroup->m_mutex);
+        rowgroup->UnlockRowGroup();
         m_imcstoreDesc->UnReferenceRowGroup();
         if (IsValidCacheSlotID(slotId)) {
-            IMCU_CACHE->UnPinDataBlock(slotId);
-            IMCU_CACHE->DataBlockCompleteIO(slotId);
-            IMCU_CACHE->InvalidateCU((RelFileNodeOld *)&m_relation->rd_node, m_ctidCol, cuDescPtr->cu_id,
-                cuDescPtr->cu_pointer);
+            UnPinCUDataBlock(slotId, rowgroup->m_cuDescs[m_ctidCol]);
         }
         PG_RE_THROW();
     }
@@ -597,7 +700,7 @@ void IMCStore::FormCUDeleteMaskFullRowGroup(_in_ RowGroup* rowgroup, _in_ uint32
     }
 }
 
-void IMCStore::FormCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ uint32 cuid)
+void IMCStore::FormLocalCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ uint32 cuid)
 {
     if (rowgroup == NULL || rowgroup->m_delta == NULL) {
         ereport(ERROR, (errmsg(
@@ -675,6 +778,20 @@ CU* IMCStore::GetCUData(CUDesc* cuDescPtr, int colIdx, int valSize, int& slotId)
 
     CU* cuPtr = NULL;
     FormData_pg_attribute* attrs = m_relation->rd_att->attrs;
+    if (ENABLE_DSS && cuDescPtr->isSSImcstore) {
+        /* using ss shared cu */
+        DataSlotTag dataSlotTag = SS_IMCU_CACHE->InitCUSlotTag(
+            (RelFileNodeOld *)&m_relation->rd_node, imcsColIdx, cuDescPtr->cu_id, cuDescPtr->cu_pointer);
+        slotId = SS_IMCU_CACHE->FindDataBlock(&dataSlotTag, (m_rowCursorInCU == 0));
+        Assert(IsValidCacheSlotID(slotId));
+        cuPtr = SS_IMCU_CACHE->GetCUBuf(slotId);
+        cuPtr->m_inCUCache = true;
+        cuPtr->SetAttInfo(valSize, attrs[colIdx].atttypmod, attrs[colIdx].atttypid);
+        cuDescPtr->slot_id = slotId;
+        CheckConsistenceOfCUData(cuDescPtr, cuPtr, (AttrNumber)(colIdx + 1));
+        return cuPtr;
+    }
+
     CUUncompressedRetCode retCode = CU_OK;
     bool hasFound = false;
     DataSlotTag dataSlotTag = IMCU_CACHE->InitCUSlotTag(
@@ -867,7 +984,7 @@ void UnlockRowGroups()
     ListCell *lc = NULL;
     foreach(lc, u_sess->imcstore_ctx.pinnedRowGroups) {
         PinnedRowGroup* pinned = (PinnedRowGroup*)lfirst(lc);
-        pthread_rwlock_unlock(&pinned->rowgroup->m_mutex);
+        pinned->rowgroup->UnlockRowGroup();
         pinned->desc->UnReferenceRowGroup();
         delete pinned;
     }

@@ -144,6 +144,9 @@
 #include "vecexecutor/vecsetop.h"
 #ifdef ENABLE_HTAP
 #include "vecexecutor/vecnodeimcstorescan.h"
+#ifdef USE_SPQ
+#include "vecexecutor/vecspqcstorescan.h"
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
 #include "vecexecutor/vectsstorescan.h"
@@ -412,6 +415,15 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
             return (PlanState*)ExecInitIMCStoreScan((IMCStoreScan*)node, NULL, estate, eflags);
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+            if (init_cstorescan_hook) {
+                return (PlanState*)init_cstorescan_hook((SpqCStoreScan*)node, NULL, estate, eflags, false);
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("spqcstorescan hook init_cstorescan_hook uninited.")));
+            }
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:

@@ -6166,6 +6166,22 @@ static void _outIMCStoreScan(StringInfo str, IMCStoreScan* node)
     WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
     WRITE_BOOL_FIELD(is_replica_table);
 }
+
+#ifdef USE_SPQ
+static void _outSpqCStoreScan(StringInfo str, SpqCStoreScan* node)
+{
+    WRITE_NODE_TYPE("SPQCSTORESCAN");
+
+    _outScanInfo(str, (Scan*)node);
+
+    WRITE_NODE_FIELD(cstorequal);
+    WRITE_NODE_FIELD(minMaxInfo);
+    WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
+    WRITE_BOOL_FIELD(is_replica_table);
+    WRITE_BOOL_FIELD(isAdaptiveScan);
+    WRITE_BOOL_FIELD(isShareScan);
+}
+#endif
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -6301,6 +6317,9 @@ static void _outVecStream(StringInfo str, VecStream* node)
     WRITE_INT_FIELD(stream_level);
     WRITE_NODE_FIELD(origin_consumer_nodes);
     WRITE_BOOL_FIELD(is_recursive_local);
+#ifdef USE_SPQ
+    WRITE_INT_FIELD(streamID);
+#endif
 }
 
 #ifdef PGXC
@@ -7478,6 +7497,11 @@ static void _outNode(StringInfo str, const void* obj)
             case T_IMCStoreScan:
                 _outIMCStoreScan(str, (IMCStoreScan*)obj);
                 break;
+#ifdef USE_SPQ
+            case T_SpqCStoreScan:
+                _outSpqCStoreScan(str, (SpqCStoreScan*)obj);
+                break;
+#endif
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES

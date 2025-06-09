@@ -25,7 +25,7 @@
 #include "funcapi.h"
 #include "utils/hsearch.h"
 #ifdef ENABLE_HTAP
-#include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
 #endif
 #include "utils/lsyscache.h"
 #include "utils/builtins.h"
@@ -69,12 +69,12 @@ IMCStoreView* SearchAllIMCStoreViews(uint32 *num)
     IMCSDesc *imcsDesc = NULL;
     IMCStoreView* results = (IMCStoreView*)palloc(sizeof(IMCStoreView) * IMCSTORE_HASH_TAB_CAPACITY);
 
-    hash_seq_init(&hashSeq, IMCU_CACHE->m_imcs_hash);
+    hash_seq_init(&hashSeq, IMCS_HASH_TABLE->m_imcs_hash);
     while ((relOid = (Oid*)hash_seq_search(&hashSeq)) != NULL) {
-        LWLockAcquire(IMCU_CACHE->m_imcs_lock, LW_SHARED);
-        imcsDesc = (IMCSDesc*)hash_search(IMCU_CACHE->m_imcs_hash, relOid, HASH_FIND, &found);
+        LWLockAcquire(IMCS_HASH_TABLE->m_imcs_lock, LW_SHARED);
+        imcsDesc = (IMCSDesc*)hash_search(IMCS_HASH_TABLE->m_imcs_hash, relOid, HASH_FIND, &found);
         if (!found) {
-            LWLockRelease(IMCU_CACHE->m_imcs_lock);
+            LWLockRelease(IMCS_HASH_TABLE->m_imcs_lock);
             continue;
         }
         results[viewIndex].relOid = imcsDesc->relOid;
@@ -97,7 +97,7 @@ IMCStoreView* SearchAllIMCStoreViews(uint32 *num)
                                              IMCSTORE_DELTA_PAGE_SIZE;
         }
         viewIndex++;
-        LWLockRelease(IMCU_CACHE->m_imcs_lock);
+        LWLockRelease(IMCS_HASH_TABLE->m_imcs_lock);
     }
 
     *num = viewIndex;

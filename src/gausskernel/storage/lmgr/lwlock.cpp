@@ -101,6 +101,7 @@
 #include "storage/cfs/cfs_buffers.h"
 #ifdef ENABLE_HTAP
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/ss_imcucache_mgr.h"
 #endif
 
 #ifndef MAX
@@ -414,6 +415,7 @@ int NumLWLocks(void)
 #ifdef ENABLE_HTAP
     /* imcucache_mgr.cpp CU Cache calculates its own requirements */
     numLocks += IMCUDataCacheMgrNumLocks();
+    numLocks += SSIMCUDataCacheMgrNumLocks();
 #endif
 
     /* proc.c needs one for each backend or auxiliary process. For prepared xacts,

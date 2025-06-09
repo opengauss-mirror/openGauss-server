@@ -122,6 +122,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_drc_accessible));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_broadcast_opengauss_ddllock));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_reform_last_failed));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_init_latch2));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_latch_timed_x));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_latch_timed_s));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_unlatch));
@@ -231,7 +232,7 @@ int dms_request_page(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, dms_lock_mode
     pgstat_report_dms_waitevent(WAIT_EVENT_PCR_REQ_HEAP_PAGE, &target);
 
     int res = g_ss_dms_func.dms_request_page(dms_ctx, ctrl, mode);
-    
+
     pgstat_report_dms_waitevent(WAIT_EVENT_END);
     return res;
 }
@@ -279,6 +280,12 @@ int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned
 {
     return g_ss_dms_func.dms_broadcast_opengauss_ddllock(dms_ctx, data, len, handle_recv_msg, timeout,
         resend_after_reform);
+}
+
+void dms_init_latch2(dms_drlatch_t *dlatch, dms_dr_type_t type, unsigned int oid, unsigned short uid,
+                     unsigned int idx, unsigned int parent_part, unsigned int part)
+{
+    return g_ss_dms_func.dms_init_latch2(dlatch, type, oid, uid, idx, parent_part, part);
 }
 
 bool dms_latch_timed_x(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, void *dms_stat)

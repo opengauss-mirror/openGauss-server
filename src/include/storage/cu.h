@@ -32,7 +32,9 @@
 #include "utils/datum.h"
 #include "storage/lock/lwlock.h"
 #ifdef ENABLE_HTAP
+#include "miscadmin.h"
 #include "access/htap/borrow_mem_pool.h"
+#include "access/htap/share_mem_pool.h"
 #include "access/htap/imcstore_delta.h"
 
 #define ROW_GROUP_INIT_NUMS (1024)
@@ -179,6 +181,11 @@ struct CUDesc : public BaseObject {
     bool numericIntLikeCU;
     uint32 cuSrcBufSize;
     int32 cuOffsetSize;
+    bool isSSImcstore{false};
+    /*
+     * only for dss imcstore, all node cache cu slot id need to be the same. 
+     */
+    CacheSlotId_t slot_id;
 #endif
 
 public:
@@ -207,17 +214,28 @@ struct IMCSDesc;
 
 class RowGroup : public BaseObject {
 public:
+    bool isLocalLatch;
     pthread_rwlock_t m_mutex;
+    dms_drlatch_t dms_latch;
     TransactionId rgxmin;
     uint32 m_rowGroupId;
     bool m_actived;
     CUDesc** m_cuDescs;
     DeltaTable* m_delta;
     RowGroup(uint32 rowGroupId, int imcsNatts);
+    RowGroup(Oid rid, uint32 rowGroupId, int imcsNatts);
     ~RowGroup();
     void DropCUDescs(RelFileNode* relNode, int imcsNatts);
-    void Vacuum(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs, CU** newCUs, TransactionId xid);
+    void VacuumLocal(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs,
+                     CU** newCUs, TransactionId xid);
+    void VacuumLocalShm(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs,
+                        CU** newCUs, TransactionId xid, uint64 newBufSize);
+    void VacuumFromRemote(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs,
+                          CU** newCUs, TransactionId xid, uint64 newBufSize);
     void Insert(ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId);
+    void WRLockRowGroup();
+    void RDLockRowGroup();
+    void UnlockRowGroup();
 };
 struct IMCSDesc {
     Oid relOid;
@@ -239,12 +257,17 @@ struct IMCSDesc {
     uint32 maxRowGroupCapacity;
     bool isPartition;
     Oid parentOid;
+    /* In ss mode, mark whether CUs is stored in share memory when populate */
+    bool populateInShareMem;
+    ShareMemoryPool* shareMemPool;
+    bool isShmNotEnough;
+
     BorrowMemPool* borrowMemPool;
 
     IMCSDesc();
     ~IMCSDesc();
 
-    void Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts);
+    void Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts, bool useShareMemroy = false);
     void InitRowGroups(uint32 initRGNums, int imcsNatts);
     RowGroup* GetRowGroup(uint32 rowGroupId);
     RowGroup* GetNewRGForCUInsert(uint32 rowGroupId);
@@ -375,6 +398,8 @@ public:
     bool m_numericIntLike; /* whether all data in the numeric CU can be transformed to Int64 */
 
 #ifdef ENABLE_HTAP
+    int shmChunkNumber;
+    uint32 shmCUOffset;
     IMCSDesc* imcsDesc;
 #endif
 
@@ -587,7 +612,17 @@ template <bool freeByCUCacheMgr>
 void CU::FreeMem()
 {
     if (this->m_srcBuf) {
+#ifdef ENABLE_HTAP
+        /* this->shmCUOffset of ss imcstore is more than 0 */
+        if (ENABLE_DSS && this->shmCUOffset > 0) {
+            /* only SS_PRIMARY_MODE can write share memory */
+            if (SS_PRIMARY_MODE) {
+                imcsDesc->shareMemPool->FreeCUMem(this->shmChunkNumber, this->shmCUOffset);
+            }
+        } else if (!freeByCUCacheMgr) {
+#else
         if (!freeByCUCacheMgr) {
+#endif
             CStoreMemAlloc::Pfree(this->m_srcBuf, !this->m_inCUCache);
         } else {
             free(this->m_srcBuf);

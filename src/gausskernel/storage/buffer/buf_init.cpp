@@ -31,6 +31,7 @@
 #include "ddes/dms/ss_common_attr.h"
 #ifdef ENABLE_HTAP
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/ss_imcucache_mgr.h"
 #endif
 #include "storage/buf/crbuf.h"
 
@@ -204,6 +205,7 @@ void InitBufferPool(void)
 
 #ifdef ENABLE_HTAP
     IMCUDataCacheMgr::NewSingletonInstance();
+    SSIMCUDataCacheMgr::NewSingletonInstance();
 #endif
 
     /* Initialize per-backend file flush context */

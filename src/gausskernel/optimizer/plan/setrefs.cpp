@@ -321,6 +321,9 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
 #endif   /* ENABLE_MULTIPLE_NODES */
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
         case T_CStoreScan: {
             Scan* splan = (Scan*)plan;
@@ -568,6 +571,9 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
                 case T_CStoreScan:
 #ifdef ENABLE_HTAP
                 case T_IMCStoreScan:
+#ifdef USE_SPQ
+                case T_SpqCStoreScan:
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
                 case T_TsStoreScan:

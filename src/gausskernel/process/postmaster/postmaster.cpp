@@ -3019,6 +3019,9 @@ int PostmasterMain(int argc, char* argv[])
         status = init_stream_comm();
         if (status != STATUS_OK)
             ereport(FATAL, (errmsg("Init libcomm for stream failed, maybe listen port already in use")));
+#if defined(ENABLE_HTAP) && defined(USE_SPQ)
+        g_instance.imcstore_cxt.loadedSPQPlugin = true;
+#endif
     }
     if (g_instance.attr.attr_security.enable_tde) {
         /* init cloud KMS message instance */

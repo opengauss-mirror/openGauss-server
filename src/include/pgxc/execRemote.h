@@ -290,4 +290,9 @@ extern List* get_dnlist_for_hdfs(int fnum);
 extern void ReloadTransactionNodes(void);
 extern void PgFdwRemoteReply(StringInfo msg);
 #endif
+
+#ifdef USE_SPQ
+extern RemoteQueryState* ExecInitSpqRemoteQuery(RemoteQuery* node, EState* estate, int eflags, bool row_plan = true);
+extern void spq_do_query(RemoteQueryState* node);
+#endif /* USE_SPQ */
 #endif

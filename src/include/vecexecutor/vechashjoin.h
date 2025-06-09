@@ -43,6 +43,9 @@ typedef enum {
     HASH_JOIN_RIGHT_ANTI,
     HASH_JOIN_LEFT_ANTI_FULL,
     HASH_JOIN_RIGHT_ANTI_FULL,
+#ifdef USE_SPQ
+    HASH_JOIN_LASJ_NOTIN,
+#endif
     HASH_JOIN_TYPE_NUM
 } hashJoinType;
 
@@ -330,9 +333,11 @@ private:
     VectorBatch* (HashJoinTbl::*m_probeFun[2])();  // the probe function;
 
     VectorBatch* (HashJoinTbl::*m_joinFun)(VectorBatch* batch);  // join function
-
+#ifdef USE_SPQ
+    VectorBatch* (HashJoinTbl::*m_joinFunArray[40])(VectorBatch* batch);
+#else
     VectorBatch* (HashJoinTbl::*m_joinFunArray[36])(VectorBatch* batch);
-
+#endif
     typedef void (HashJoinTbl::*pMatchKeyFunc)(ScalarVector* key, int nrows, int hashValKeyIdx, int key_num);
 
     pMatchKeyFunc* m_matchKeyFunction;

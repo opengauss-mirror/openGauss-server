@@ -56,7 +56,7 @@
 #include "utils/selfuncs.h"
 #include "pgxc/pgxc.h"
 #ifdef ENABLE_HTAP
-#include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
 #endif
 
 /* Hook for plugins to get control in set_rel_pathlist() */
@@ -119,7 +119,7 @@ static void bitmap_path_walker(Path* path);
 bool CheckRelEnableImcstoreScan(Oid relOid, Bitmapset *scanAttrs)
 {
     Bitmapset *imcstoreAttrs = NULL;
-    IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(relOid);
+    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relOid);
     /* 1. check if imcstore is enabled for rel */
     if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) {
         return false;

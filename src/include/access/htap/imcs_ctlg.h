@@ -40,6 +40,8 @@
 #define TYPE_UNIMCSTORED 2
 #define TYPE_PARTITION_IMCSTORED 3
 #define TYPE_PARTITION_UNIMCSTORED 4
+#define TYPE_SS_IMCSTORED 5
+#define TYPE_SS_IMCSTORE_SYNC_CU 6
 #define CHECK_WALRCV_FREQ 1024
 #define WALRCV_STATUS_UP 0
 #define WALRCV_STATUS_DOWN 1
@@ -52,6 +54,7 @@
     (((RelationIsAstoreFormat(rel)) ? MaxHeapTuplesPerPage : MaxUHeapTuplesPerPage(rel)) * MAX_IMCS_PAGES_ONE_CU)
 #define IMCS_IS_PRIMARY_MODE (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE)
 #define IMCS_IS_STANDBY_MODE (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE)
+#define IMCS_IS_SS_MODE (ENABLE_DSS)
 
 #define imcs_free_uheap_tuple(tup)                                             \
     do {                                                                       \
@@ -63,10 +66,19 @@
 typedef struct SendStandbyPopulateParams {
     Oid relOid;
     Oid partOid;
+    int imcsNatts{0};
     int2 *attsNums;
     int msglen;
     int imcstoreType;
+    int shmChunksNum{0};
 } SendPopulateParams;
+
+typedef struct ParseStandbyPopulateParams {
+    int2vector* imcsAttsNum;
+    int imcsNatts;
+    XLogRecPtr currentLsn;
+    int shmChunksNum{0};
+} ParsePopulateParams;
 
 typedef struct ImcstoreCtid {
     ItemPointerData ctid;
@@ -84,6 +96,8 @@ typedef struct IMCSPopulateSharedContext {
 } PopulateSharedContext;
 
 extern void CheckImcstoreCacheReady();
+
+extern void CheckForSSMode(Relation rel, bool isShareMemory = false);
 
 extern void CheckAndSetDBName();
 
@@ -108,7 +122,7 @@ extern void CheckForDataType(Oid typeOid, int32 typeMod);
 
 extern void CreateImcsDescForPrimaryNode(Relation rel, int2vector* imcsAttsNum, int imcsNatts);
 
-extern void AlterTableEnableImcstore(Relation rel, int2vector* imcsAttsNum, int imcsNatts);
+extern void AlterTableEnableImcstore(Relation rel, int2vector* imcsAttsNum, int imcsNatts, bool useShareMemroy = false);
 
 extern void EnableImcstoreForRelation(Relation rel, int2vector* imcsAttsNum, int imcsNatts);
 
@@ -139,12 +153,10 @@ extern void UnPopulateImcsOnStandby(Oid relOid);
 
 extern void UnPopulateImcsForPartitionOnStandby(Oid relOid, Oid partOid);
 
-extern void ParsePopulateImcsParam(
-    Oid relOid, StringInfo inputMsg, int2vector* &imcsAttsNum, int* imcsNatts, XLogRecPtr* currentLsn);
+extern void ParsePopulateImcsParam(Oid relOid, StringInfo inputMsg, ParsePopulateParams& populateParams,
+    bool shareMemory = false);
 
-extern void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int imcsNatts, int type);
-
-extern void SendUnImcstoredRequest(Oid relOid, Oid specifyPartOid, int type);
+extern void SendImcstoredRequest(PGXCNodeHandle** connections, int connCount, const SendPopulateParams& populateParams);
 
 extern void CopyTupleInfo(Tuple tuple, Datum* val, uint32 *blkno);
 
@@ -160,5 +172,28 @@ extern void DropImcsForPartitionedRelIfNeed(Relation partitionedRel);
 
 extern void WaitXLogRedoToCurrentLsn(XLogRecPtr currentLsn);
 
-#endif /* IMCS_CTLG_H */
+extern void PopulateImcsOnSSReadNode(Oid relOid, StringInfo inputMsg);
 
+extern void SyncCUForSSImcstore(PGXCNodeHandle **connection, int connCount, Oid relOid);
+
+extern void SendSyncCURequestsForSS(
+    PGXCNodeHandle **connections, int conn_count, CUDesc *cuDesc, CU *cuPtr, int imcsColId, Oid relOid);
+
+extern void SSImcstoreCacheRemoteCU(Oid relOid, StringInfo inputMsg);
+
+extern void ParseRemoteCU(int &imcsColId, CU *cuPtr, CUDesc *cuDescPtr, StringInfo inputMsg);
+
+extern void PackStandbyPopulateParams(
+    SendPopulateParams &populateParams, Oid relOid, Oid partOid, int2* attsNums, int imcsNatts, int type);
+
+void SqlExecImcstored(Relation rel, List* colList);
+
+void SqlExecImcstoredWithShm(Relation rel, List* colList);
+
+void SqlExecUnImcstored(Relation rel);
+
+void SqlExecModifyPartitionImcstored(Relation rel, const char* partName, List* colList);
+
+void SqlExecModifyPartitionUnImcstored(Relation rel, const char* partName);
+
+#endif /* IMCS_CTLG_H */

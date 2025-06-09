@@ -197,6 +197,10 @@ typedef enum SSBroadcastOp {
     BCAST_REPORT_REALTIME_BUILD_PTR,
     BCAST_CONFIG_SYNC,
     BCAST_IS_EXTREME_REDO,
+#ifdef ENABLE_HTAP
+    BCAST_IMCSTORE_VACUUM,
+    BCAST_IMCSTORE_REQUEST_DELTA,
+#endif
     BCAST_END
 } SSBroadcastOp;
 
@@ -204,7 +208,10 @@ typedef enum SSBroadcastOpAck {
     BCAST_GET_XMIN_ACK = 0,
     BCAST_CANCEL_TRX_ACK,
     BCAST_CHECK_DB_BACKENDS_ACK,
+#ifdef ENABLE_HTAP
+    BCAST_IMCSTORE_REQUEST_DELTA_ACK,
     BCAST_ACK_END
+#endif
 } SSBroadcastOpAck;
 
 typedef struct SSBroadcastCmdOnly {

@@ -9387,7 +9387,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             continue;
         }
         _local_tmp_opt1.exit();
-
+        if (firstchar == 'x') {
+            elog(LOG, "HTAPTest: process with msg:%c.", firstchar);
+        }
         switch (firstchar) {
 #if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
             case 'Z':  // exeute plan directly.
@@ -10934,12 +10936,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 securec_check(rc, "\0", "\0");
 
                 Oid partOid = InvalidOid;
-                rc = memcpy_s(&partOid, sizeof(Oid),
+                if (type != TYPE_SS_IMCSTORE_SYNC_CU) {
+                    rc = memcpy_s(&partOid, sizeof(Oid),
                               pq_getmsgbytes(&input_message, sizeof(Oid)),
                               sizeof(Oid));
-                securec_check(rc, "\0", "\0");
-                ereport(DEBUG1, (errmsg("Received relOid for HTAP population.")));
-
+                    securec_check(rc, "\0", "\0");
+                }
                 switch (type) {
                     case TYPE_IMCSTORED: {
                         PopulateImcsOnStandby(relOid, &input_message);
@@ -10957,6 +10959,14 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     case TYPE_PARTITION_UNIMCSTORED:{
                         pq_getmsgend(&input_message);
                         UnPopulateImcsForPartitionOnStandby(relOid, partOid);
+                        break;
+                    }
+                    case TYPE_SS_IMCSTORED: {
+                        PopulateImcsOnSSReadNode(relOid, &input_message);
+                        break;
+                    }
+                    case TYPE_SS_IMCSTORE_SYNC_CU: {
+                        SSImcstoreCacheRemoteCU(relOid, &input_message);
                         break;
                     }
                     default:

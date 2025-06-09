@@ -30,12 +30,10 @@
 #include "pgxc/pgxc.h"
 #include "utils/builtins.h"
 #include "storage/cu.h"
-#include "replication/syncrep.h"
 #include "access/htap/borrow_mem_pool.h"
 #include "access/htap/imcs_ctlg.h"
+#include "access/htap/imcs_hash_table.h"
 #include "access/htap/imcucache_mgr.h"
-
-#define BUILD_BUG_ON_CONDITION(condition) ((void)sizeof(char[1 - 2 * (condition)]))
 
 static void CreateIMCUDir(const char* path);
 static void CreateIMCUDirAndClearCUFiles();
@@ -194,37 +192,16 @@ void IMCUDataCacheMgr::NewSingletonInstance(void)
         /* destroy all resources of its members */
         m_data_cache->m_cache_mgr->Destroy();
     }
+
+    IMCSHashTable::NewSingletonInstance();
+    MemoryContext oldcontext = MemoryContextSwitchTo(IMCS_HASH_TABLE->m_imcs_context);
     cache_size = IMCUCacheMgrCalcSize();
     m_data_cache->m_cstoreMaxSize = cache_size;
-
-    m_data_cache->m_imcs_context = AllocSetContextCreate(g_instance.instance_context,
-                                                         "imcs context",
-                                                         ALLOCSET_SMALL_MINSIZE,
-                                                         ALLOCSET_SMALL_INITSIZE,
-                                                         ALLOCSET_DEFAULT_MAXSIZE,
-                                                         SHARED_CONTEXT);
-    MemoryContext oldcontext = MemoryContextSwitchTo(m_data_cache->m_imcs_context);
-
     int64 imcs_block_size = BLCKSZ * MAX_IMCS_PAGES_ONE_CU;
     /* init or reset this instance */
-    m_data_cache->m_cache_mgr->isImcs = true;
+    m_data_cache->m_cache_mgr->storageType = IMCSTORAGE;
     m_data_cache->m_cache_mgr->Init(cache_size, imcs_block_size, MGR_CACHE_TYPE_DATA, sizeof(CU));
     ereport(LOG, (errmodule(MOD_CACHE), errmsg("set data cache  size(%ld)", cache_size)));
-
-    HASHCTL info;
-    int hash_flags = HASH_CONTEXT | HASH_EXTERN_CONTEXT | HASH_ELEM | HASH_FUNCTION | HASH_PARTITION;
-    errno_t rc = memset_s(&info, sizeof(info), 0, sizeof(info));
-    securec_check(rc, "\0", "\0");
-
-    info.keysize = sizeof(Oid);
-    info.entrysize = sizeof(IMCSDesc);
-    info.hash = tag_hash;
-    info.hcxt = m_data_cache->m_imcs_context;
-    info.num_partitions = NUM_CACHE_BUFFER_PARTITIONS / IMCSTORE_DOUBLE;
-    m_data_cache->m_imcs_hash = hash_create("IMCSDesc Lookup Table", IMCSTORE_HASH_TAB_CAPACITY, &info, hash_flags);
-
-    m_data_cache->m_xlog_latest_lsn = InvalidXLogRecPtr;
-    m_data_cache->m_imcs_lock = LWLockAssign(LWTRANCHE_IMCS_HASH_LOCK);
     m_data_cache->m_is_promote = false;
     MemoryContextSwitchTo(oldcontext);
 }
@@ -382,168 +359,6 @@ void IMCUDataCacheMgr::ResetCacheBlockInProgress(bool resetUncompress)
     }
 }
 
-void IMCUDataCacheMgr::CreateImcsDesc(Relation rel, int2vector* imcsAttsNum, int imcsNatts)
-{
-    bool found = false;
-    Oid relOid = RelationGetRelid(rel);
-    /* No need to be checked for partitions, because it has been checked for the parent rel. */
-    if (!OidIsValid(rel->parentId)) {
-        CheckAndSetDBName();
-    }
-    LWLockAcquire(m_imcs_lock, LW_EXCLUSIVE);
-    MemoryContext oldcontext = MemoryContextSwitchTo(m_imcs_context);
-    IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_ENTER, &found);
-    if (found) {
-        ereport(ERROR, (errmodule(MOD_HTAP),
-            (errmsg("existed imcstore for rel(%d).", RelationGetRelid(rel)))));
-    } else {
-        imcsDesc->Init(rel, imcsAttsNum, imcsNatts);
-        pg_atomic_add_fetch_u32(&g_instance.imcstore_cxt.imcs_tbl_cnt, 1);
-    }
-    MemoryContextSwitchTo(oldcontext);
-    LWLockRelease(m_imcs_lock);
-}
-
-IMCSDesc* IMCUDataCacheMgr::GetImcsDesc(Oid relOid)
-{
-    if (!HAVE_HTAP_TABLES || CHECK_IMCSTORE_CACHE_DOWN) {
-        return NULL;
-    }
-
-    LWLockAcquire(m_imcs_lock, LW_SHARED);
-    IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_FIND, NULL);
-    LWLockRelease(m_imcs_lock);
-    return imcsDesc;
-}
-
-void IMCUDataCacheMgr::UpdateImcsStatus(Oid relOid, int imcsStatus)
-{
-    bool found = false;
-    LWLockAcquire(m_imcs_lock, LW_EXCLUSIVE);
-    IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_FIND, &found);
-    if (!found) {
-        LWLockRelease(m_imcs_lock);
-        return;
-    }
-    imcsDesc->imcsStatus = imcsStatus;
-    LWLockRelease(m_imcs_lock);
-}
-
-void IMCUDataCacheMgr::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
-{
-    bool found = false;
-    if (!OidIsValid(relOid)) {
-        return;
-    }
-    LWLockAcquire(m_imcs_lock, LW_EXCLUSIVE);
-    IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_FIND, &found);
-    if (!found) {
-        LWLockRelease(m_imcs_lock);
-        return;
-    }
-
-    PG_TRY();
-    {
-        if (imcsDesc->imcuDescContext != NULL) {
-            /* drop rowgroup\cu\cudesc, no need to drop RowGroups for primary node */
-            LWLockAcquire(imcsDesc->imcsDescLock, LW_EXCLUSIVE);
-            Assert(relNode);
-            if (g_instance.attr.attr_memory.enable_borrow_memory && imcsDesc->borrowMemPool != NULL) {
-                imcsDesc->borrowMemPool->Destroy();
-                imcsDesc->borrowMemPool = NULL;
-            }
-            imcsDesc->DropRowGroups(relNode);
-            LWLockRelease(imcsDesc->imcsDescLock);
-            MemoryContextDelete(imcsDesc->imcuDescContext);
-        }
-        if (!imcsDesc->isPartition) {
-            ResetDBNameIfNeed();
-        }
-        (void)hash_search(m_imcs_hash, &relOid, HASH_REMOVE, NULL);
-        LWLockRelease(m_imcs_lock);
-        pg_atomic_sub_fetch_u32(&g_instance.imcstore_cxt.imcs_tbl_cnt, 1);
-    }
-    PG_CATCH();
-    {
-        LWLockRelease(m_imcs_lock);
-    }
-    PG_END_TRY();
-}
-
-void IMCUDataCacheMgr::ClearImcsMem(Oid relOid, RelFileNode* relNode)
-{
-    bool found = false;
-    LWLockAcquire(m_imcs_lock, LW_SHARED);
-    IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_FIND, &found);
-    if (!found) {
-        LWLockRelease(m_imcs_lock);
-        return;
-    }
-
-    PG_TRY();
-    {
-        if (imcsDesc->imcsStatus == IMCS_POPULATE_ERROR && imcsDesc->imcuDescContext != NULL) {
-            LWLockAcquire(imcsDesc->imcsDescLock, LW_EXCLUSIVE);
-            imcsDesc->DropRowGroups(relNode);
-            LWLockRelease(imcsDesc->imcsDescLock);
-            MemoryContextDelete(imcsDesc->imcuDescContext);
-            imcsDesc->imcuDescContext = NULL;
-        }
-        LWLockRelease(m_imcs_lock);
-    }
-    PG_CATCH();
-    {
-        LWLockRelease(m_imcs_lock);
-    }
-    PG_END_TRY();
-}
-
-void IMCUDataCacheMgr::UpdatePrimaryImcsStatus(Oid relOid, int imcsStatus)
-{
-    HASH_SEQ_STATUS hashSeq;
-    IMCSDesc *imcsDesc = NULL;
-    SyncRepStandbyData *syncStandbys;
-    int numStandbys = SyncRepGetSyncStandbys(&syncStandbys);
-
-    LWLockAcquire(m_imcs_lock, LW_EXCLUSIVE);
-    hash_seq_init(&hashSeq, m_imcs_hash);
-    while ((imcsDesc = (IMCSDesc*)hash_seq_search(&hashSeq)) != NULL) {
-        if (numStandbys == 0 || (imcsDesc->relOid == relOid ||
-            (imcsDesc->isPartition && imcsDesc->parentOid == relOid))) {
-            imcsDesc->imcsStatus = imcsStatus;
-        }
-    }
-    /* update sub partition imcs status */
-    if (numStandbys > 0) {
-        hash_seq_init(&hashSeq, m_imcs_hash);
-        while ((imcsDesc = (IMCSDesc*)hash_seq_search(&hashSeq)) != NULL) {
-            if (imcsDesc->isPartition && imcsDesc->imcsStatus != imcsStatus) {
-                IMCSDesc* parentImcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &(imcsDesc->parentOid), HASH_FIND, NULL);
-                imcsDesc->imcsStatus = (parentImcsDesc->imcsStatus == imcsStatus) ? imcsStatus : imcsDesc->imcsStatus;
-            }
-        }
-    }
-    LWLockRelease(m_imcs_lock);
-}
-
-bool IMCUDataCacheMgr::HasInitialImcsTable()
-{
-    Relation rel = NULL;
-    HASH_SEQ_STATUS hashSeq;
-    IMCSDesc *imcsDesc = NULL;
-
-    LWLockAcquire(m_imcs_lock, LW_SHARED);
-    hash_seq_init(&hashSeq, m_imcs_hash);
-    while ((imcsDesc = (IMCSDesc*)hash_seq_search(&hashSeq)) != NULL) {
-        if (imcsDesc->imcsStatus == IMCS_POPULATE_INITIAL) {
-            LWLockRelease(m_imcs_lock);
-            return true;
-        }
-    }
-    LWLockRelease(m_imcs_lock);
-    return false;
-}
-
 void IMCUDataCacheMgr::ResetInstance(bool isPromote)
 {
     if (m_data_cache == NULL) {
@@ -551,9 +366,9 @@ void IMCUDataCacheMgr::ResetInstance(bool isPromote)
     }
     ereport(WARNING, (errmsg("IMCStore data cache manager reset.")));
     if (g_instance.attr.attr_memory.enable_borrow_memory) {
-        m_data_cache->FreeAllBorrowMemPool();
+        IMCS_HASH_TABLE->FreeAllBorrowMemPool();
     }
-    HeapMemResetHash(m_data_cache->m_imcs_hash, "IMCSDesc Lookup Table");
+    HeapMemResetHash(IMCS_HASH_TABLE->m_imcs_hash, "IMCSDesc Lookup Table");
     m_data_cache->m_cache_mgr->FreeImcstoreCache();
     m_data_cache->m_is_promote = isPromote;
     CreateIMCUDirAndClearCUFiles();
@@ -568,18 +383,4 @@ bool IMCUDataCacheMgr::IsBorrowSlotId(CacheSlotId_t slotId)
 int64 IMCUDataCacheMgr::GetCurrBorrowMemSize()
 {
     return m_cache_mgr->GetCurrBorrowMemSize();
-}
-
-void IMCUDataCacheMgr::FreeAllBorrowMemPool()
-{
-    HASH_SEQ_STATUS hashSeq;
-    IMCSDesc *imcsDesc = NULL;
-
-    hash_seq_init(&hashSeq, m_imcs_hash);
-    while ((imcsDesc = (IMCSDesc*)hash_seq_search(&hashSeq)) != NULL) {
-        if (imcsDesc->borrowMemPool != NULL && !imcsDesc->isPartition) {
-            imcsDesc->borrowMemPool->Destroy();
-            imcsDesc->borrowMemPool = NULL;
-        }
-    }
 }

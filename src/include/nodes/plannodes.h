@@ -686,10 +686,15 @@ typedef struct CStoreScan : public Scan {
     List* minMaxInfo;              /* min/max information, mark get this column min or max value. */
     RelstoreType relStoreLocation; /* The store position information. */
     bool is_replica_table;         /* Is a replication table? */
+    bool isAdaptiveScan = false;
+    bool isShareScan = false;
 } CStoreScan;
 
 #ifdef ENABLE_HTAP
 typedef CStoreScan IMCStoreScan;
+#ifdef USE_SPQ
+typedef CStoreScan SpqCStoreScan;
+#endif
 #endif
 
 /*

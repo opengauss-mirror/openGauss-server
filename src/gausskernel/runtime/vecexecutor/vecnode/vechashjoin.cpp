@@ -665,6 +665,11 @@ void HashJoinTbl::SetJoinType()
         case JOIN_RIGHT_ANTI_FULL:
             m_joinType = HASH_JOIN_RIGHT_ANTI_FULL;
             break;
+#ifdef USE_SPQ
+        case JOIN_LASJ_NOTIN:
+            m_joinType = HASH_JOIN_LASJ_NOTIN;
+            break;
+#endif
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unsupport join type %d", node->join.jointype)));
@@ -1239,6 +1244,30 @@ VectorBatch* HashJoinTbl::Probe()
     return RuntimeBinding(m_probeFun, m_strategy)();
 }
 
+#ifdef USE_SPQ
+#define InitJoinTemplate(complicateFlag, flag)                                            \
+    do {                                                                                  \
+        m_joinFunArray[i++] = &HashJoinTbl::innerJoinT<complicateFlag, flag>;             \
+        m_joinFunArray[i++] = &HashJoinTbl::leftJoinT<complicateFlag, flag>;              \
+        m_joinFunArray[i++] = &HashJoinTbl::leftJoinWithQualT<complicateFlag, flag>;      \
+        m_joinFunArray[i++] = &HashJoinTbl::rightJoinT<complicateFlag, flag>;             \
+        m_joinFunArray[i++] = &HashJoinTbl::rightJoinWithQualT<complicateFlag, flag>;     \
+        m_joinFunArray[i++] = &HashJoinTbl::semiJoinT<complicateFlag, flag>;              \
+        m_joinFunArray[i++] = &HashJoinTbl::semiJoinWithQualT<complicateFlag, flag>;      \
+        m_joinFunArray[i++] = &HashJoinTbl::antiJoinT<complicateFlag, flag>;              \
+        m_joinFunArray[i++] = &HashJoinTbl::antiJoinWithQualT<complicateFlag, flag>;      \
+        m_joinFunArray[i++] = &HashJoinTbl::rightSemiJoinT<complicateFlag, flag>;         \
+        m_joinFunArray[i++] = &HashJoinTbl::rightSemiJoinWithQualT<complicateFlag, flag>; \
+        m_joinFunArray[i++] = &HashJoinTbl::rightAntiJoinT<complicateFlag, flag>;         \
+        m_joinFunArray[i++] = &HashJoinTbl::rightAntiJoinWithQualT<complicateFlag, flag>; \
+        m_joinFunArray[i++] = &HashJoinTbl::antiJoinT<complicateFlag, flag>;              \
+        m_joinFunArray[i++] = &HashJoinTbl::antiJoinWithQualT<complicateFlag, flag>;      \
+        m_joinFunArray[i++] = &HashJoinTbl::rightAntiJoinT<complicateFlag, flag>;         \
+        m_joinFunArray[i++] = &HashJoinTbl::rightAntiJoinWithQualT<complicateFlag, flag>; \
+        m_joinFunArray[i++] = &HashJoinTbl::antiJoinT<complicateFlag, flag>;              \
+        m_joinFunArray[i++] = &HashJoinTbl::antiJoinWithQualT<complicateFlag, flag>;      \
+    } while (0);
+#else
 #define InitJoinTemplate(complicateFlag, flag)                                            \
     do {                                                                                  \
         m_joinFunArray[i++] = &HashJoinTbl::innerJoinT<complicateFlag, flag>;             \
@@ -1259,6 +1288,7 @@ VectorBatch* HashJoinTbl::Probe()
         m_joinFunArray[i++] = &HashJoinTbl::rightAntiJoinT<complicateFlag, flag>;         \
         m_joinFunArray[i++] = &HashJoinTbl::rightAntiJoinWithQualT<complicateFlag, flag>; \
     } while (0);
+#endif
 
 template <bool complicate_join_key>
 void HashJoinTbl::bindingFp()
@@ -1274,8 +1304,14 @@ void HashJoinTbl::bindingFp()
     m_probeFun[1] = &HashJoinTbl::probeGrace;
 
     int i = 0;
+#ifdef USE_SPQ
+    int idx_array[] = {0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18};
+    int base_idx = m_keySimple ? 0 : 19;
+#else
     int idx_array[] = {0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     int base_idx = m_keySimple ? 0 : 17;
+#endif
+
     InitJoinTemplate(complicate_join_key, true) InitJoinTemplate(complicate_join_key, false);
     int array_idx = (m_runtime->js.joinqual == NULL) ? (2 * m_joinType) : (2 * m_joinType) + 1;
     m_joinFun = m_joinFunArray[base_idx + idx_array[array_idx]];
@@ -1521,6 +1557,9 @@ void HashJoinTbl::preparePartition()
             case HASH_JOIN_LEFT:
             case HASH_JOIN_ANTI:
             case HASH_JOIN_LEFT_ANTI_FULL:
+#ifdef USE_SPQ
+            case HASH_JOIN_LASJ_NOTIN:
+#endif
                 join_on_this_partition = (probe_side_row_num > 0);
                 break;
 

@@ -1222,6 +1222,9 @@ unsigned int ng_get_dest_num_data_nodes(Path* path)
             case T_CStoreScan:
 #ifdef ENABLE_HTAP
             case T_IMCStoreScan:
+#ifdef USE_SPQ
+            case T_SpqCStoreScan:
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
             case T_TsStoreScan:

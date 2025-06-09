@@ -131,7 +131,7 @@ void CacheMgr::Init(int64 cache_size, uint32 each_block_size, MgrCacheType type,
     m_cstoreCurrentSize = 0;
     m_cstoreMaxSize = cache_size;
 #ifdef ENABLE_HTAP
-    if (isImcs && g_instance.attr.attr_memory.enable_borrow_memory) {
+    if (storageType == IMCSTORAGE && g_instance.attr.attr_memory.enable_borrow_memory) {
         int64 borrowMemAvail = g_instance.attr.attr_memory.max_borrow_memory * 1024L;
         double p = (int)(g_instance.attr.attr_memory.htap_borrow_mem_percent) / 100.0;
         m_borrowMaxSize = (int64)(cache_size * p);
@@ -146,17 +146,17 @@ void CacheMgr::Init(int64 cache_size, uint32 each_block_size, MgrCacheType type,
     m_borrowCurrSize = 0;
     SpinLockInit(&m_borrowSizeLock);
 #endif
-    total_slots = isImcs ? (cache_size / each_block_size) * MaxHeapAttributeNumber
-                         : Min(cache_size / each_block_size, MAX_CACHE_SLOT_COUNT);
+    total_slots = (storageType == COLUMN_STORAGE) ? Min(cache_size / each_block_size, MAX_CACHE_SLOT_COUNT)
+                         : (cache_size / each_block_size) * MaxHeapAttributeNumber;
 
-    if (isImcs) {
+    if (storageType == COLUMN_STORAGE) {
+        m_CacheSlots = (char *)palloc0(total_slots * each_slot_length);
+        m_CacheDesc = (CacheDesc *)palloc0(total_slots * sizeof(CacheDesc));
+    } else {
         m_CacheSlots = (char *)palloc0_huge(CurrentMemoryContext, total_slots * each_slot_length);
         m_CacheDesc = (CacheDesc *)palloc0_huge(CurrentMemoryContext, total_slots * sizeof(CacheDesc));
         MemSetAligned(m_CacheSlots, 0, total_slots * each_slot_length);
         MemSetAligned(m_CacheDesc, 0, total_slots * sizeof(CacheDesc));
-    } else {
-        m_CacheSlots = (char *)palloc0(total_slots * each_slot_length);
-        m_CacheDesc = (CacheDesc *)palloc0(total_slots * sizeof(CacheDesc));
     }
 
     m_CacheSlotsNum = total_slots;
@@ -203,8 +203,10 @@ void CacheMgr::Init(int64 cache_size, uint32 each_block_size, MgrCacheType type,
     securec_check(rc, "\0", "\0");
 
     char hash_name[128] = {0};
-    if (isImcs) {
+    if (storageType == IMCSTORAGE) {
         rc = snprintf_s(hash_name, sizeof(hash_name), 127, "Imcstore Cache Buffer Lookup Table(%d)", type);
+    } else if (storageType == SS_IMCSTORAGE) {
+        rc = snprintf_s(hash_name, sizeof(hash_name), 127, "SS Imcstore Cache Buffer Lookup Table(%d)", type);
     } else {
         rc = snprintf_s(hash_name, sizeof(hash_name), 127, "Cache Buffer Lookup Table(%d)", type);
     }
@@ -555,7 +557,7 @@ CacheSlotId_t CacheMgr::EvictCacheBlock(int size, int retryNum)
     UnlockSweep();
 
 #ifdef ENABLE_HTAP
-    if (isImcs) {
+    if (storageType == IMCSTORAGE) {
         EvictCacheCUIntoDisk(slotId);
     }
 #endif
@@ -822,6 +824,11 @@ bool CacheMgr::ReserveCacheMem(int size)
         return true;
     }
     SpinLockRelease(&m_memsize_lock);
+#ifdef ENABLE_HTAP
+    if (storageType == SS_IMCSTORAGE) {
+        ereport(ERROR, (errmsg("HTAP: SS_IMCSTORAGE memory palloc failed, out of memory.")));
+    }
+#endif
     return false;
 }
 
@@ -1010,9 +1017,12 @@ bool CacheMgr::PinCacheBlock(CacheSlotId_t slotId)
         ResourceOwnerEnlargeMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
         ResourceOwnerRememberMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
 #ifdef ENABLE_HTAP
-    } else if (isImcs) {
+    } else if (storageType == IMCSTORAGE) {
         ResourceOwnerEnlargeIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
         ResourceOwnerRememberIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
+    } else if (storageType == SS_IMCSTORAGE) {
+        ResourceOwnerEnlargeSSIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
+        ResourceOwnerRememberSSIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
 #endif
     } else {
         ResourceOwnerEnlargeDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
@@ -1038,9 +1048,12 @@ void CacheMgr::PinCacheBlock_Locked(CacheSlotId_t slotId)
         ResourceOwnerEnlargeMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
         ResourceOwnerRememberMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
 #ifdef ENABLE_HTAP
-    } else if (isImcs) {
+    } else if (storageType == IMCSTORAGE) {
         ResourceOwnerEnlargeIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
         ResourceOwnerRememberIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
+    } else if (storageType == SS_IMCSTORAGE) {
+        ResourceOwnerEnlargeSSIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
+        ResourceOwnerRememberSSIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
 #endif
     } else {
         ResourceOwnerEnlargeDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner);
@@ -1068,8 +1081,10 @@ void CacheMgr::UnPinCacheBlock(CacheSlotId_t slotId)
     if (m_cache_type == MGR_CACHE_TYPE_INDEX) {
         ResourceOwnerForgetMetaCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
 #ifdef ENABLE_HTAP
-    } else if (isImcs) {
+    } else if (storageType == IMCSTORAGE) {
         ResourceOwnerForgetIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
+    } else if (storageType == SS_IMCSTORAGE) {
+        ResourceOwnerForgetSSIMCSDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);
 #endif
     } else {
         ResourceOwnerForgetDataCacheSlot(t_thrd.utils_cxt.CurrentResourceOwner, slotId);

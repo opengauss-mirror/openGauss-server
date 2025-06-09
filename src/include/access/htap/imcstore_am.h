@@ -66,7 +66,7 @@ public:
     // Get tuple deleted information from VC CU description.
     void GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot) override;
     void FormCUDeleteMaskFullRowGroup(_in_ RowGroup* rowgroup, _in_ uint32 cuid);
-    void FormCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ uint32 cuid);
+    void FormLocalCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ uint32 cuid);
 
     // Get CU data.
     // Note that the CU is pinned
@@ -80,6 +80,8 @@ public:
     bool ImcstoreFillByDeltaScan(_in_ CStoreScanState* state, _out_ VectorBatch* vecBatchOut) override;
     void LoadCU(int imcsColIdx, CU *cuPtr, CUDesc *cuDescPtr);
 
+    void GetCUDeleteMaskFromRemote(_in_ uint32 cuid, _in_ Snapshot snapShot);
+
 private:
     IMCUStorage** m_imcuStorage;
     IMCSDesc* m_imcstoreDesc;
@@ -90,6 +92,7 @@ private:
     uint64 m_deltaMaskMax;
     uint64 m_deltaScanCurr;
     List* m_currentRowGroups;
+    bool m_isShareScan = false;
 };
 
 typedef struct PinnedRowGroup : public BaseObject {

@@ -57,7 +57,15 @@ void MatrixMemFuncInit()
         {"RackMemMalloc", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemMalloc},
         {"RackMemMallocAsync", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemMallocAsync},
         {"RackMemFree", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemFree},
-        {"RackMemFreeAsync", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemFreeAsync}
+        {"RackMemFreeAsync", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemFreeAsync},
+        {"RackMemShmLookupShareRegions",
+			(void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmLookupShareRegions},
+        {"RackMemShmLookupRegionInfo", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmLookupRegionInfo},
+        {"RackMemShmCreate", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmCreate},
+        {"RackMemShmMmap", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmMmap},
+        {"RackMemShmCacheOpt", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmCacheOpt},
+        {"RackMemShmUnmmap", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmUnmmap},
+        {"RackMemShmDelete", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmDelete}
     };
 
     struct stat st;
@@ -108,4 +116,39 @@ void RackMemFree(void *ptr)
 int RackMemFreeAsync(void *ptr, AsyncFreeCallBack func, intptr_t ctx)
 {
     return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemFreeAsync(ptr, func, ctx);
+}
+
+int RackMemShmLookupShareRegions(const char *baseNid, ShmRegionType type, SHMRegions *regions)
+{
+    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmLookupShareRegions(baseNid, type, regions);
+}
+
+int RackMemShmLookupRegionInfo(SHMRegionDesc *region, SHMRegionInfo *info)
+{
+    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmLookupRegionInfo(region, info);
+}
+
+int RackMemShmCreate(char *name, uint64_t size, const char *baseNid, SHMRegionDesc *shmRegion)
+{
+    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmCreate(name, size, baseNid, shmRegion);
+}
+
+void *RackMemShmMmap(void *start, size_t length, int prot, int flags, const char *name, off_t offset)
+{
+    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmMmap(start, length, prot, flags, name, offset);
+}
+
+int RackMemShmCacheOpt(void *start, size_t length, ShmCacheOpt type)
+{
+    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmCacheOpt(start, length, type);
+}
+
+int RackMemShmUnmmap(void *start, size_t length)
+{
+    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmUnmmap(start, length);
+}
+
+int RackMemShmDelete(char *name)
+{
+    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmDelete(name);
 }

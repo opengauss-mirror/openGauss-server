@@ -1380,7 +1380,7 @@ void StreamProducer::DispatchBatchRedistrFunctionByRedisType()
 {
     switch (m_parallel_desc.distriType) {
         case PARALLEL_NONE:
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
         case REMOTE_DISTRIBUTE:
             m_channelCalVecFun = (list_length(m_consumerNodes->nodeList) == 1) ?
                                  &StreamProducer::redistributeBatchChannel<len, REMOTE_DIRECT_DISTRIBUTE> :
@@ -1388,6 +1388,9 @@ void StreamProducer::DispatchBatchRedistrFunctionByRedisType()
             break;
         case REMOTE_SPLIT_DISTRIBUTE:
             m_channelCalVecFun = &StreamProducer::redistributeBatchChannel<len, REMOTE_SPLIT_DISTRIBUTE>;
+            break;
+        case REMOTE_DIRECT_DISTRIBUTE:
+            m_channelCalVecFun = &StreamProducer::redistributeBatchChannel<len, REMOTE_DIRECT_DISTRIBUTE>;
             break;
 #endif
         case LOCAL_DISTRIBUTE:

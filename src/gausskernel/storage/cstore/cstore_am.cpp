@@ -70,6 +70,7 @@
 #include "executor/executor.h"
 #ifdef ENABLE_HTAP
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/ss_imcucache_mgr.h"
 #include "access/htap/imcstore_am.h"
 #endif
 
@@ -716,6 +717,9 @@ void CStoreAbortCU()
         CUCache->TerminateCU(true);
 #ifdef ENABLE_HTAP
         IMCU_CACHE->TerminateCU(true);
+        if (ENABLE_DSS) {
+            SS_IMCU_CACHE->TerminateCU(true);
+        }
 #endif
         CUListPrefetchAbort();
     }
@@ -2631,7 +2635,7 @@ int CStore::FillVector(_in_ int seq, _in_ CUDesc* cuDescPtr, _out_ ScalarVector*
 
     if (IsValidCacheSlotID(slotId)) {
         // CU is pinned
-        UnPinCUDataBlock(slotId);
+        UnPinCUDataBlock(slotId, cuDescPtr);
     } else
         Assert(false);
 
@@ -2832,7 +2836,7 @@ void CStore::FillVectorLateRead(
 
     if (IsValidCacheSlotID(slotId)) {
         // CU is pinned
-        UnPinCUDataBlock(slotId);
+        UnPinCUDataBlock(slotId, cuDescPtr);
     } else {
         Assert(false);
     }
@@ -2879,7 +2883,7 @@ void CStore::FillVectorByTids(_in_ int colIdx, _in_ ScalarVector* tids, _out_ Sc
                 // switch to new cu. so at first unpin the
                 // previous cu cache as earlier as possible.
                 Assert(slot != CACHE_BLOCK_INVALID_IDX);
-                UnPinCUDataBlock(slot);
+                UnPinCUDataBlock(slot, NULL);
 
                 // reset after unpin action.
                 lastCU = NULL;
@@ -3133,7 +3137,7 @@ void CStore::FillVectorByTids(_in_ int colIdx, _in_ ScalarVector* tids, _out_ Sc
     if (lastCU != NULL) {
         // Unpin the last used cu cache.
         Assert(slot != CACHE_BLOCK_INVALID_IDX);
-        UnPinCUDataBlock(slot);
+        UnPinCUDataBlock(slot, NULL);
     }
 
     vec->m_rows = pos;
@@ -4420,10 +4424,12 @@ void CStore::IncLoadCuDescCursor()
     return;
 }
 
-void CStore::UnPinCUDataBlock(int slotId)
+void CStore::UnPinCUDataBlock(int slotId, CUDesc *cuDescPtr)
 {
 #ifdef ENABLE_HTAP
-    if (m_isImcstore) {
+    if (cuDescPtr && cuDescPtr->isSSImcstore) {
+        SS_IMCU_CACHE->UnPinDataBlock(slotId);
+    } else if (m_isImcstore) {
         IMCU_CACHE->UnPinDataBlock(slotId);
     } else {
         CUCache->UnPinDataBlock(slotId);

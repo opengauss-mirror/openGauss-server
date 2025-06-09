@@ -47,6 +47,7 @@ typedef struct knl_instance_attr_memory {
     int max_process_memory;
 #ifdef ENABLE_HTAP
     int max_imcs_cache;
+    int ss_max_imcs_cache;
     int htap_borrow_mem_percent;
 #endif
     bool enable_memory_context_check_debug;

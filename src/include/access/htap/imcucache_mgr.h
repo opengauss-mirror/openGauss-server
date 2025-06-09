@@ -39,30 +39,13 @@
 #include "storage/custorage.h"
 #include "storage/cucache_mgr.h"
 
-#define IMCSTORE_HASH_TAB_CAPACITY 50000
+#define BUILD_BUG_ON_CONDITION(condition) ((void)sizeof(char[1 - 2 * (condition)]))
 #define IMCSTORE_DOUBLE 2
 #define WAIT_ROWGROUP_UNREFERENCE 100
 #define IMCU_CACHE (IMCUDataCacheMgr::GetInstance())
 
 extern const char* IMCU_GLOBAL_DIR;
 extern const char* IMCU_DEFAULT_DIR;
-
-typedef enum {
-    IMCS_POPULATE_INITIAL = 0,
-    IMCS_POPULATE_COMPLETE = 1,
-    IMCS_POPULATE_ONSTANDBY = 2,
-    IMCS_POPULATE_ERROR = 3,
-
-    // count status num, not real status
-    IMCS_POPULATE_STATUS_NUM = 4,
-} IMCSStatus;
-
-const char IMCSStatusMap[IMCS_POPULATE_STATUS_NUM][NAMEDATALEN] = {
-    "INITIAL",
-    "COMPLETE",
-    "ONSTANDBY",
-    "ERROR"
-};
 
 int64 IMCUCacheMgrCalcSize();
 
@@ -93,22 +76,9 @@ public:
     void SetCacheBlockInProgress(CacheSlotId_t ioCacheBlock, CacheSlotId_t uncompressCacheBlock) override;
     void ResetCacheBlockInProgress(bool resetUncompress) override;
 
-    void CreateImcsDesc(Relation rel, int2vector* imcsAttsNum, int imcsNatts);
-    IMCSDesc* GetImcsDesc(Oid relOid);
-    void UpdateImcsStatus(Oid relOid, int imcsStatus);
-    void DeleteImcsDesc(Oid relOid, RelFileNode* relNode);
-    void ClearImcsMem(Oid relOid, RelFileNode* relNode);
-    void UpdatePrimaryImcsStatus(Oid relOid, int imcsStatus);
-    bool HasInitialImcsTable();
-
     bool IsBorrowSlotId(CacheSlotId_t slotId);
     int64 GetCurrBorrowMemSize();
-    void FreeAllBorrowMemPool();
 
-    HTAB* m_imcs_hash;
-    LWLock *m_imcs_lock;
-    MemoryContext m_imcs_context;
-    XLogRecPtr m_xlog_latest_lsn;
     bool m_is_promote;
 
 #ifndef ENABLE_UT

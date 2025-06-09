@@ -981,6 +981,7 @@ typedef enum AlterTableType {
     AT_ConvertCharset,
     AT_ResetPartitionno,
     AT_Imcstored,
+    AT_ImcstoredWithShm,
     AT_UnImcstored,
     AT_ModifyPartitionImcstored,
     AT_ModifyPartitionUnImcstored,

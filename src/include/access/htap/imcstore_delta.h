@@ -35,6 +35,9 @@
 
 #define DEFAULT_DELTAPAGE_ELEMENTS (DEFAULT_DELTAPAGE_SIZE / sizeof(DeltaElement))
 
+class CUDesc;
+class CU;
+
 struct DeltaElement {
     ItemPointerData ctid;
     TransactionId xid;
@@ -76,8 +79,14 @@ public:
 };
 
 struct IMCStoreVacuumTarget {
+    bool isLocalType;
     uint32 relOid;
     uint32 rowGroupId;
+    /* this is used by sync vacuum from remote */
+    CUDesc** CUDescs;
+    CU** CUs;
+    uint64 newBufSize;
+    TransactionId xid;
 };
 
 struct knl_g_imcstore_context;
@@ -85,6 +94,8 @@ struct knl_g_imcstore_context;
 extern void ClearImcstoreCacheIfNeed(Oid droppingDBOid);
 extern void InitIMCStoreVacuumQueue(knl_g_imcstore_context* context);
 extern bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId);
+extern void IMCStoreSyncVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid, uint64 bufSize,
+                                       CUDesc** CUDesc, CU** CUs);
 extern void IMCStoreVacuumWorkerMain(void);
 
 extern void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid = InvalidTransactionId);

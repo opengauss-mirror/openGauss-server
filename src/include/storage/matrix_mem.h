@@ -26,6 +26,7 @@
 #define MATRIX_MEM_H
 
 #include "storage/rack_mem.h"
+#include "storage/rack_mem_shm.h"
 
 #ifdef __aarch64__
 #define ENABLE_RACK_MEM (g_instance.matrix_mem_cxt.matrix_mem_inited)
@@ -47,6 +48,13 @@ typedef struct MatrixMemFunc {
     void* (*rackMemMallocAsync)(size_t size, PerfLevel perfLevel, intptr_t attr, AsyncFreeCallBack func, intptr_t ctx);
     void (*rackMemFree)(void *ptr);
     int (*rackMemFreeAsync)(void *ptr, AsyncFreeCallBack func, intptr_t ctx);
+    int (*rackMemShmLookupShareRegions)(const char *baseNid, ShmRegionType type, SHMRegions *regions);
+    int (*rackMemShmLookupRegionInfo)(SHMRegionDesc *region, SHMRegionInfo *info);
+    int (*rackMemShmCreate)(char *name, uint64_t size, const char *baseNid, SHMRegionDesc *shmRegion);
+    void* (*rackMemShmMmap)(void *start, size_t length, int prot, int flags, const char *name, off_t offset);
+    int (*rackMemShmCacheOpt)(void *start, size_t length, ShmCacheOpt type);
+    int (*rackMemShmUnmmap)(void *start, size_t length);
+    int (*rackMemShmDelete)(char *name);
 } MatrixMemFunc;
 
 extern void MatrixMemFuncInit();

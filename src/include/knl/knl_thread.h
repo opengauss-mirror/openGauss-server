@@ -2735,6 +2735,8 @@ typedef struct knl_t_storage_context {
 #ifdef ENABLE_HTAP
     CacheSlotId_t IMCSCacheBlockInProgressIO;
     CacheSlotId_t IMCSCacheBlockInProgressUncompress;
+    CacheSlotId_t SSIMCSCacheBlockInProgressIO;
+    CacheSlotId_t SSIMCSCacheBlockInProgressUncompress;
 #endif
     CacheSlotId_t MetaBlockInProgressIO;
 

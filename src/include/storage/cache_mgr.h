@@ -78,6 +78,12 @@ typedef enum CacheType {
     CACHE_CARBONDATA_METADATA
 } CacheType;
 
+typedef enum ColStorageType {
+    COLUMN_STORAGE = 0,
+    IMCSTORAGE,
+    SS_IMCSTORAGE
+} ColStorageType;
+
 typedef enum MgrCacheType {
     /* cache manager type */
     MGR_CACHE_TYPE_DATA,
@@ -239,8 +245,8 @@ public:
 #endif
 
     char* m_CacheSlots;
-    /* only true when ImcuCacheMgr init */
-    bool isImcs = false;
+    /* default to cstore */
+    ColStorageType storageType = COLUMN_STORAGE;
 
 #ifndef ENABLE_UT
 private:

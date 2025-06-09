@@ -36,6 +36,10 @@
 #include "replication/libpqsw.h"
 #include "replication/walsender.h"
 #include "replication/ss_disaster_cluster.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcs_hash_table.h"
+#include "access/htap/imcs_ctlg.h"
+#endif
 
 static inline void txnstatusNetworkStats(uint64 timeDiff);
 static inline void txnstatusHashStats(uint64 timeDiff);
@@ -65,7 +69,7 @@ static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
         dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
         if (dms_request_opengauss_txn_snapshot(&dms_ctx, &dms_snapshot) == DMS_SUCCESS) {
             break;
-        } 
+        }
 
         if (AM_WAL_SENDER && SS_IN_REFORM) {
             return NULL;
@@ -501,7 +505,7 @@ void SSSendLatestSnapshotToStandby(TransactionId xmin, TransactionId xmax, Commi
         .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
         .handle_recv_msg = (unsigned char)false,
         .check_session_kill = (unsigned char)true
-    };                                        
+    };
     do {
         ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
 
@@ -1393,3 +1397,213 @@ int SSDisasterUpdateIsEnableExtremeRedo(char* data, uint32 len)
     g_instance.dms_cxt.SSRecoveryInfo.is_disaster_extreme_redo = ssmsg->is_enable_extreme_redo;
     return DMS_SUCCESS;
 }
+
+#ifdef ENABLE_HTAP
+void SSBroadcastIMCStoreVacuum(int chunkNum, Oid rid, uint32 rgid, TransactionId xid, bool actived,
+    int cols, CUDesc** CUDescs, CU** CUs)
+{
+    size_t size = sizeof(SSIMCStoreVacuum);
+    if (actived) {
+        size += cols * (sizeof(CUDesc) + sizeof(CU));
+    }
+    SSIMCStoreVacuum* info = (SSIMCStoreVacuum*)palloc(size);
+    info->type = BCAST_IMCSTORE_VACUUM;
+    info->rid = rid;
+    info->rgid = rgid;
+    info->xid = xid;
+    info->cols = cols;
+    info->actived = actived;
+    info->chunkNum = chunkNum;
+    if (actived) {
+        errno_t rc;
+        char* ptr = (char*)(info + 1);
+        size_t restSize = size - sizeof(SSIMCStoreVacuum);
+        for (int col = 0; col < cols; ++col) {
+            rc = memcpy_s(ptr, restSize, CUDescs[col], sizeof(CUDesc));
+            securec_check_c(rc, "", "");
+            ptr += sizeof(CUDesc);
+            restSize -= sizeof(CUDesc);
+            rc = memcpy_s(ptr, restSize, CUs[col], sizeof(CU));
+            securec_check_c(rc, "", "");
+            ptr += sizeof(CU);
+            restSize -= sizeof(CU);
+        }
+    }
+
+    dms_broadcast_info_t dms_broad_info = {
+            .data = (char *)info,
+            .len = size,
+            .output = NULL,
+            .output_len = NULL,
+            .scope = DMS_BROADCAST_ONLINE_LIST,
+            .inst_map = 0,
+            .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
+            .handle_recv_msg = (unsigned char)false,
+            .check_session_kill = (unsigned char)true
+    };
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+    int ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
+    if (ret != DMS_SUCCESS) {
+        ereport(WARNING, (errmsg("SS broadcast imcstore vacuum infomation failed!")));
+    }
+}
+
+int32 SSLoadIMCStoreVacuum(char *data, uint32 len)
+{
+    SSIMCStoreVacuum* info = (SSIMCStoreVacuum*)data;
+
+    IMCSDesc *imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(info->rid);
+    if (imcsDesc == NULL) {
+        return DMS_SUCCESS;
+    }
+
+    if (imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) {
+        return DMS_SUCCESS;
+    }
+
+    imcsDesc->shareMemPool->ShmChunkMmapAll(info->chunkNum);
+    imcsDesc->shareMemPool->FlushShmChunkAll(ShmCacheOpt::RACK_INVALID);
+
+    if (!info->actived) {
+        IMCStoreSyncVacuumPushWork(info->rid, info->rgid, info->xid, 0, nullptr, nullptr);
+        return DMS_SUCCESS;
+    }
+
+    MemoryContext oldcontext = MemoryContextSwitchTo(imcsDesc->imcuDescContext);
+    CUDesc** CUDescs = (CUDesc**)palloc(sizeof(CUDesc*) * info->cols);
+    CU** CUs = (CU**)palloc(sizeof(CU*) * info->cols);
+
+    errno_t rc;
+    len -= sizeof(SSIMCStoreVacuum);
+    char* ptr = data + sizeof(SSIMCStoreVacuum);
+    uint64 newBufSize = 0;
+    for (int i = 0; i < info->cols; ++i) {
+        CUDescs[i] = New(CurrentMemoryContext) CUDesc();
+        CUs[i] = New(CurrentMemoryContext) CU();
+
+        rc = memcpy_s(CUDescs[i], sizeof(CUDesc), ptr, sizeof(CUDesc) > len ? len : sizeof(CUDesc));
+        securec_check(rc, "\0", "\0");
+        ptr += sizeof(CUDesc);
+        len -= sizeof(CUDesc);
+        rc = memcpy_s(CUs[i], sizeof(CU), ptr, sizeof(CU) > len ? len : sizeof(CU));
+        securec_check(rc, "\0", "\0");
+        ptr += sizeof(CU);
+        len -= sizeof(CU);
+
+        newBufSize += CUs[i]->m_srcBufSize;
+    }
+    MemoryContextSwitchTo(oldcontext);
+    IMCStoreSyncVacuumPushWork(info->rid, info->rgid, info->xid, newBufSize, CUDescs, CUs);
+    return DMS_SUCCESS;
+}
+
+int SSRequestIMCStoreDelta(dms_context_t *dms_ctx, Oid tableid, uint32 rowgroup,
+    unsigned char* bitmap, unsigned long long *delta_max)
+{
+    unsigned int ackSize = sizeof(SSIMCStoreDeltaAck);
+    SSIMCStoreDeltaAck imcstoreDeltaAck;
+    size_t size = sizeof(SSIMCStoreDeltaReq);
+    SSIMCStoreDeltaReq* info = (SSIMCStoreDeltaReq*)palloc(size);
+    info->type = BCAST_IMCSTORE_REQUEST_DELTA;
+    info->tableid = tableid;
+    info->rowgroup = rowgroup;
+    ereport(DEBUG1, (errmsg("[SSRequestIMCStoreDelta] request delta from ss primary node failed, table(%u), rowgroup(%u)"
+              "ruid(%llu).", tableid, rowgroup, rowgroup)));
+
+    unsigned int maxsize = IMCSTORE_DELTA_BITMAP_SIZE;
+    for (int i = 0; i < maxsize;) {
+        info->begin = i;
+        dms_broadcast_info_t dms_broad_info = {
+            .data = (char *)info,
+            .len = size,
+            .output = (char *)&imcstoreDeltaAck,
+            .output_len = &ackSize,
+            .scope = DMS_BROADCAST_SPECIFY_LIST,
+            .inst_map = (unsigned long long)1 << SS_PRIMARY_ID,
+            .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
+            .handle_recv_msg = (unsigned char)true,
+            .check_session_kill = (unsigned char)true
+        };
+        int ret = dms_broadcast_msg(dms_ctx, &dms_broad_info);
+        if (ret != DMS_SUCCESS) {
+            ereport(ERROR, (errmsg("[IMCStoreScan] request delta from ss primary node failed, table(%u), rowgroup(%u)"
+                          "ruid(%llu) errcode(%u)", tableid, rowgroup, rowgroup, (uint32)ret)));
+        }
+        maxsize = u_sess->imcstore_ctx.max_size;
+        i = u_sess->imcstore_ctx.begin;
+    }
+    return DMS_SUCCESS;
+}
+
+bool GetIMCStoreDelta(Oid tableid, uint32 rowgroupid, unsigned char *bitmap,
+    unsigned int *maxSize)
+{
+    IMCSDesc* desc = IMCS_HASH_TABLE->GetImcsDesc(tableid);
+    if (desc == NULL) {
+        return false;
+    }
+    RowGroup* rowgroup = desc->GetRowGroup(rowgroupid);
+    if (rowgroup == NULL) {
+        return false;
+    }
+    CU* cu = NULL;
+    rowgroup->RDLockRowGroup();
+
+    DeltaTableIterator deltaIter = rowgroup->m_delta->ScanInit();
+    ItemPointer item = NULL;
+
+    while ((item = deltaIter.GetNext()) != NULL) {
+        BlockNumber blockoffset = ItemPointerGetBlockNumber(item) - rowgroupid * MAX_IMCS_PAGES_ONE_CU;
+        OffsetNumber offset = ItemPointerGetOffsetNumber(item);
+        uint64 idx = blockoffset * MAX_POSSIBLE_ROW_PER_PAGE + offset;
+        bitmap[idx >> 3] |= (1 << (idx % 8));
+        *maxSize = Max(*maxSize, idx);
+    }
+    rowgroup->UnlockRowGroup();
+    desc->UnReferenceRowGroup();
+    return true;
+}
+
+int SSProcessIMCStoreDelta(char *data, uint32 len, char *output_msg, uint32 *output_msg_len)
+{
+    if (unlikely(len != sizeof(SSIMCStoreDeltaReq))) {
+        ereport(DEBUG1, (errmsg("Invalid broadcast reuqest imcstore delta.")));
+        return DMS_ERROR;
+    }
+    SSIMCStoreDeltaReq *req = (SSIMCStoreDeltaReq *)data;
+    SSIMCStoreDeltaAck *ack = (SSIMCStoreDeltaAck *)output_msg;
+    ack->type = BCAST_IMCSTORE_REQUEST_DELTA_ACK;
+
+    unsigned char bitmap[IMCSTORE_DELTA_BITMAP_SIZE];
+    GetIMCStoreDelta(req->tableid, req->rowgroup, bitmap, &ack->max_size);
+    ereport(DEBUG1, (errmsg("[SSProcessIMCStoreDelta] proccees delta at ss primary node, table(%u), rowgroup(%u)"
+      "max_size(%u).", req->tableid, req->rowgroup, ack->max_size)));
+    unsigned int total = IMCSTORE_DELTA_BITMAP_SIZE;
+    ack->size = (total - req->begin) > IMCSTORE_DELTA_PER_MESSAGE ? IMCSTORE_DELTA_PER_MESSAGE : (total - req->begin);
+    errno_t rc = memcpy_s(ack->bitmap, IMCSTORE_DELTA_PER_MESSAGE, bitmap + req->begin, ack->size);
+    securec_check(rc, "\0", "\0");
+
+    *output_msg_len = sizeof(SSIMCStoreDeltaAck);
+    return DMS_SUCCESS;
+}
+
+int SSGetIMCStoreDeltaAck(char *data, uint32 len)
+{
+    SSIMCStoreDeltaAck *ack = (SSIMCStoreDeltaAck *)data;
+    unsigned char* bitmap = u_sess->imcstore_ctx.bitmap;
+    ereport(DEBUG1, (errmsg("[SSGetIMCStoreDeltaAck] copy delta at ss standy node, size(%u), max_size(%u).",
+        ack->size, ack->max_size)));
+    uint32 begin = u_sess->imcstore_ctx.begin;
+    errno_t err = memcpy_s(bitmap + begin, IMCSTORE_DELTA_BITMAP_SIZE - begin,
+                       &ack->bitmap, ack->size);
+    if (err != EOK) {
+        return DMS_ERROR;
+    }
+    ereport(DEBUG1, (errmsg("[SSGetIMCStoreDeltaAck] copy delta at ss standy node, old begin(%u), new begin(%u).",
+        u_sess->imcstore_ctx.begin, u_sess->imcstore_ctx.begin + ack->size)));
+    u_sess->imcstore_ctx.max_size = ack->max_size;
+    u_sess->imcstore_ctx.begin += ack->size;
+    return DMS_SUCCESS;
+}
+#endif

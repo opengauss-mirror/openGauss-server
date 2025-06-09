@@ -26,6 +26,7 @@
 #include "knl/knl_variable.h"
 #include "storage/cu.h"
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
 #include "access/htap/imcs_ctlg.h"
 #include "component/thread/mpmcqueue.h"
 
@@ -38,7 +39,7 @@ constexpr int CHAR_BIT_SIZE = 8;
 
 void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid)
 {
-    IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(relid);
+    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relid);
     if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) return;
 
     if (xid == InvalidTransactionId) {
@@ -56,7 +57,7 @@ void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid)
 
 void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid)
 {
-    IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(relid);
+    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relid);
     if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) return;
 
     if (xid == InvalidTransactionId) {
@@ -74,7 +75,7 @@ void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid)
 
 void IMCStoreUpdateHook(Oid relid, ItemPointer ctid, ItemPointer newCtid, TransactionId xid)
 {
-    IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(relid);
+    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relid);
     if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) return;
 
     if (xid == InvalidTransactionId) {

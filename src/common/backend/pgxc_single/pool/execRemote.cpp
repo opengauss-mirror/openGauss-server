@@ -1095,7 +1095,11 @@ static void ExecInitPlanState(PlanState* plan_state, EState* estate, RemoteQuery
 bool backward_connection_walker(Node *plan, void *cxt)
 {
     if (plan == nullptr) return false;
+#ifdef ENABLE_HTAP
+    if (IsA(plan, SpqSeqScan) || IsA(plan, SpqCStoreScan)) {
+#else
     if (IsA(plan, SpqSeqScan)) {
+#endif
         QCConnKey key = {
             .query_id = u_sess->debug_query_id,
             .plan_node_id = (uint32)((Plan*)plan)->plan_node_id,
@@ -1176,7 +1180,11 @@ void disconnect_qc_conn()
 bool build_connections(Node* plan, void* cxt)
 {
     if (plan == nullptr) return false;
-    if (IsA(plan, SpqSeqScan)) {
+#ifdef ENABLE_HTAP
+        if (IsA(plan, SpqSeqScan) || IsA(plan, SpqCStoreScan)) {
+#else
+        if (IsA(plan, SpqSeqScan)) {
+#endif
         int error;
         errno_t rc = EOK;
 
@@ -3190,6 +3198,14 @@ void BufferConnection(PGXCNodeHandle* conn, bool cachedata)
 
 void CopyDataRowToBatch(RemoteQueryState* node, VectorBatch* batch)
 {
+#ifdef USE_SPQ
+    batch->DeserializeWithLZ4Decompress(node->currentRow.msg, node->currentRow.msglen);
+    pfree_ext(node->currentRow.msg);
+    node->currentRow.msg = NULL;
+    node->currentRow.msglen = 0;
+    node->currentRow.msgnode = 0;
+    return;
+#endif
     Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return;
@@ -3516,6 +3532,9 @@ bool FetchTupleByMultiChannel(
 
 bool FetchBatch(RemoteQueryState* combiner, VectorBatch* batch)
 {
+#ifdef USE_SPQ
+    return FetchTupleByMultiChannel<true, false>(combiner, (TupleTableSlot*)batch);
+#endif
     Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return false;
