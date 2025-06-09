@@ -90,3 +90,29 @@ CREATE OR REPLACE FUNCTION pg_catalog.gs_delete_sql_limit
 )
 RETURNS boolean NOT FENCED NOT SHIPPABLE STABLE
 LANGUAGE internal AS $function$gs_delete_sql_limit$function$;
+
+
+DROP FUNCTION IF EXISTS pg_catalog.realtime_build_queue_status() CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 6993;
+CREATE OR REPLACE FUNCTION pg_catalog.realtime_build_queue_status(
+    OUT batch_num oid,
+    OUT readline_queue_size oid,
+    OUT trxn_manager_queue_size oid,
+    OUT trxn_worker_queue_size oid,
+    OUT segworker_queue_size oid,
+    OUT batchredo_queue_size1 oid,
+    OUT batchredo_queue_size2 oid,
+    OUT batchredo_queue_size3 oid,
+    OUT batchredo_queue_size4 oid,
+    OUT redomanager_queue_size1 oid,
+    OUT redomanager_queue_size2 oid,
+    OUT redomanager_queue_size3 oid,
+    OUT redomanager_queue_size4 oid,
+    OUT hashmap_manager_queue_size1 oid,
+    OUT hashmap_manager_queue_size2 oid,
+    OUT hashmap_manager_queue_size3 oid,
+    OUT hashmap_manager_queue_size4 oid
+)
+RETURNS SETOF record NOT FENCED NOT SHIPPABLE ROWS 1 STABLE
+LANGUAGE internal AS $function$get_realtime_build_queue_status$function$;
+

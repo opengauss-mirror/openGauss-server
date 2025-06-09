@@ -102,6 +102,7 @@
 #define MAX_DURATION_TIME 60
 #define DSS_IO_STAT_COLUMN_NUM 3
 #define ONDEMAND_RECOVERY_STAT_COLUMN_NUM 12
+#define REALTIME_BUILD_QUEUE_STATUS 17
 
 const uint32 INDEX_STATUS_VIEW_COL_NUM = 3;
 
@@ -14980,6 +14981,67 @@ Datum get_ondemand_recovery_status(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(result);
 }
 
+
+Datum get_realtime_build_queue_status(PG_FUNCTION_ARGS)
+{
+    if (!ENABLE_ONDEMAND_REALTIME_BUILD) {
+        ereport(ERROR, (errmsg("This function only supports when enable realtime build.")));
+    }
+    Datum result;
+    TupleDesc tupdesc;
+    realtime_build_queue_stat stat;
+    errno_t errorno = EOK;
+
+    ondemand_extreme_rto::GetRealtimeBuildQueueStatus(&stat);
+    // tuple header
+    int i = 1;
+    tupdesc = CreateTemplateTupleDesc(REALTIME_BUILD_QUEUE_STATUS, false);
+
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "batch_num", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "readline_queue_size", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "trxn_manager_queue_size", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "trxn_worker_queue_size", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "segworker_queue_size", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "batchredo_queue_size1", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "batchredo_queue_size2", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "batchredo_queue_size3", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "batchredo_queue_size4", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "redomanager_queue_size1", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "redomanager_queue_size2", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "redomanager_queue_size3", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "redomanager_queue_size4", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "hashmap_manager_queue_size1", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "hashmap_manager_queue_size2", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "hashmap_manager_queue_size3", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "hashmap_manager_queue_size4", OIDOID, -1, 0);
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    Datum values[REALTIME_BUILD_QUEUE_STATUS];
+    bool nulls[REALTIME_BUILD_QUEUE_STATUS] = {false};
+    i = 0;
+    values[i++] = UInt32GetDatum(stat.batch_num);
+    values[i++] = UInt32GetDatum(stat.readline_queue_size);
+    values[i++] = UInt32GetDatum(stat.trxn_manager_queue_size);
+    values[i++] = UInt32GetDatum(stat.trxn_worker_queue_size);
+    values[i++] = UInt32GetDatum(stat.segworker_queue_size);
+    values[i++] = UInt32GetDatum(stat.batchredo_queue_size[0]);
+    values[i++] = UInt32GetDatum(stat.batchredo_queue_size[1]);
+    values[i++] = UInt32GetDatum(stat.batchredo_queue_size[2]);
+    values[i++] = UInt32GetDatum(stat.batchredo_queue_size[3]);
+    values[i++] = UInt32GetDatum(stat.redomanager_queue_size[0]);
+    values[i++] = UInt32GetDatum(stat.redomanager_queue_size[1]);
+    values[i++] = UInt32GetDatum(stat.redomanager_queue_size[2]);
+    values[i++] = UInt32GetDatum(stat.redomanager_queue_size[3]);
+    values[i++] = UInt32GetDatum(stat.hashmap_manager_queue_size[0]);
+    values[i++] = UInt32GetDatum(stat.hashmap_manager_queue_size[1]);
+    values[i++] = UInt32GetDatum(stat.hashmap_manager_queue_size[2]);
+    values[i++] = UInt32GetDatum(stat.hashmap_manager_queue_size[3]);
+
+    HeapTuple heap_tuple = heap_form_tuple(tupdesc, values, nulls);
+    result = HeapTupleGetDatum(heap_tuple);
+    PG_RETURN_DATUM(result);
+}
+
 /*
  * @Description : Get the statistical information for DSS IO, including read bytes, write bytes and io times.
  * @in         	: Duration of statistics.
@@ -15024,6 +15086,7 @@ Datum dss_io_stat(PG_FUNCTION_ARGS)
     result = HeapTupleGetDatum(heap_tuple);
     PG_RETURN_DATUM(result); 
 }
+
 
 Datum get_realtime_build_log_ctrl_status(PG_FUNCTION_ARGS)
 {

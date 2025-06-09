@@ -285,6 +285,7 @@ bool ReleaseHashMapLockIfAny(BufferDesc* bufHdr, ForkNumber forkNum, BlockNumber
 void RedoWorkerQueueCallBack();
 void OndemandProcPauseStatus();
 void GetOndemandRecoveryStatus(ondemand_recovery_stat *stat);
+void GetRealtimeBuildQueueStatus(realtime_build_queue_stat * stat);
 void ReleaseBlockParseStateIfNotReplay(XLogRecParseState *preState, bool isChildState = false);
 bool SSXLogParseRecordNeedReplayInOndemandRealtimeBuild(XLogRecParseState *redoblockstate);
 void SetQueueTopReadEndPtr(PageRedoWorker *worker, XLogRecPtr readPtr, XLogRecPtr endPtr);

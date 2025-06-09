@@ -54,3 +54,5 @@ DROP FUNCTION IF EXISTS pg_catalog.gs_delete_sql_limit
 DROP INDEX IF EXISTS pg_catalog.gs_sql_limit_id_index;
 DROP TYPE IF EXISTS pg_catalog.gs_sql_limit;
 DROP TABLE IF EXISTS pg_catalog.gs_sql_limit;
+
+DROP FUNCTION IF EXISTS pg_catalog.realtime_build_queue_status() CASCADE;

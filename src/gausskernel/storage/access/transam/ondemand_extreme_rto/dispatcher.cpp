@@ -416,7 +416,7 @@ void HandleStartupInterruptsForExtremeRto()
     Assert(AmStartupProcess());
 
     uint32 newtriggered = (uint32)CheckForSatartupStatus();
-    if (newtriggered != TRIGGER_NORMAL) {
+    if (unlikely(newtriggered != TRIGGER_NORMAL)) {
         uint32 triggeredstate = pg_atomic_read_u32(&(g_startupTriggerState));
         if (triggeredstate != newtriggered) {
             ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
@@ -426,13 +426,13 @@ void HandleStartupInterruptsForExtremeRto()
         }
     }
 
-    if (t_thrd.startup_cxt.got_SIGHUP) {
+    if (unlikely(t_thrd.startup_cxt.got_SIGHUP)) {
         t_thrd.startup_cxt.got_SIGHUP = false;
         SendSingalToPageWorker(SIGHUP);
         ProcessConfigFile(PGC_SIGHUP);
     }
 
-    if (t_thrd.startup_cxt.shutdown_requested) {
+    if (unlikely(t_thrd.startup_cxt.shutdown_requested)) {
         if (g_instance.status != SmartShutdown) {
             if (ENABLE_ONDEMAND_REALTIME_BUILD &&
                 (SS_PERFORMING_SWITCHOVER || SS_STANDBY_MODE)) {
@@ -445,7 +445,7 @@ void HandleStartupInterruptsForExtremeRto()
             g_dispatcher->smartShutdown = true;
         }
     }
-    if (t_thrd.startup_cxt.check_repair) {
+    if (unlikely(t_thrd.startup_cxt.check_repair)) {
         t_thrd.startup_cxt.check_repair = false;
     }
 
