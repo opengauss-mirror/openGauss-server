@@ -778,7 +778,7 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
             return false;
         }
 
-        float avgdl = meta.tokenCount / meta.documentCount;
+        float avgdl = (meta.tokenCount * 1.0) / meta.documentCount;
         BM25IndexScan(scan->indexRelation, queryTokenInfo, meta.documentCount, avgdl, so);
         DocIdsGetHeapCtids(scan->indexRelation, meta.entryPageList, so);
         ConstructScanScoreKeys(scan->indexRelation, so);
