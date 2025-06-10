@@ -906,13 +906,13 @@ PGXCNodeHandle *InitMultiNodeExecutor(Oid nodeoid)
     return result;
 }
 
-PGXCNodeHandle **GetStandbyConnections(int *connCount)
+PGXCNodeHandle **GetStandbyConnections(int *connCount, PGconn** &nodeCons)
 {
     int dnConnCount = MAX_REPLNODE_NUM;
     PGXCNodeHandle **connections = (PGXCNodeHandle **)palloc(dnConnCount * sizeof(PGXCNodeHandle *));
     Oid *dnNode = (Oid *)palloc0(sizeof(Oid) * dnConnCount);
     char **connectionStrs = (char **)palloc0(sizeof(char *) * dnConnCount);
-    PGconn **nodeCons = (PGconn **)palloc0(sizeof(PGconn *) * dnConnCount);
+    nodeCons = (PGconn **)palloc0(sizeof(PGconn *) * dnConnCount);
     errno_t rc;
     int replArrLength;
     auto releaseConnect = [&](char *errMsg, int connIdx) {
@@ -959,7 +959,7 @@ PGXCNodeHandle **GetStandbyConnections(int *connCount)
         *connCount = *connCount + 1;
     }
 
-    PQconnectdbParallel(connectionStrs, dnConnCount, nodeCons, dnNode);
+    PQconnectdbParallel(connectionStrs, *connCount, nodeCons, dnNode);
 
     for (int i = 0; i < *connCount; i++) {
         if (nodeCons[i] && (CONNECTION_OK == nodeCons[i]->status)) {
@@ -1109,10 +1109,6 @@ static bool HandlePgxcReceive(int connCount, PGXCNodeHandle **tempConnections)
         pgxc_node_report_error(combiner);
     }
     ValidateAndCloseCombiner(combiner);
-    for (int i = 0; i < originConnCount; ++i) {
-        pgxc_node_free(tempConnections[i]);
-    }
-    pfree_ext(tempConnections);
     return hasError;
 }
 
@@ -1166,6 +1162,8 @@ static void PackBasicImcstoredRequest(
 void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int imcsNatts, int type)
 {
     int connCount = 0;
+    bool hasError = false;
+    PGconn** nodeCons = NULL;
     PGXCNodeHandle** connections = NULL;
     SendPopulateParams populateParams;
 
@@ -1178,7 +1176,7 @@ void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int im
         sizeof(int) + sizeof(int) + sizeof(Oid) + sizeof(Oid) + sizeof(int) +
         imcsNatts * sizeof(int2) + sizeof(XLogRecPtr);
 
-    connections = GetStandbyConnections(&connCount);
+    connections = GetStandbyConnections(&connCount, nodeCons);
     PGXCNodeHandle **temp_connections = NULL;
     /* use temp connections instead */
     int i = 0;
@@ -1211,7 +1209,20 @@ void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int im
         temp_connections[i]->state = DN_CONNECTION_STATE_QUERY;
     }
 
-    if (HandlePgxcReceive(connCount, temp_connections)) {
+    hasError = HandlePgxcReceive(connCount, temp_connections);
+
+    for (i = 0; i < connCount; ++i) {
+        PGXCNodeClose(nodeCons[i]);
+        nodeCons[i] = NULL;
+        PGXCNodeHandle *handle = temp_connections[i];
+        pfree_ext(handle->inBuffer);
+        pfree_ext(handle->outBuffer);
+        pfree_ext(handle->error);
+    }
+    pfree_ext(nodeCons);
+    pfree_ext(temp_connections);
+
+    if (hasError) {
         IMCU_CACHE->UpdatePrimaryImcsStatus(relOid, IMCS_POPULATE_ERROR);
         ereport(ERROR, (errmsg("HTAP populate failed, some standby occurs error.")));
     }
@@ -1220,6 +1231,8 @@ void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int im
 void SendUnImcstoredRequest(Oid relOid, Oid specifyPartOid, int type)
 {
     int connCount = 0;
+    bool hasError = false;
+    PGconn** nodeCons = NULL;
     PGXCNodeHandle** connections = NULL;
     SendPopulateParams populateParams;
 
@@ -1230,7 +1243,7 @@ void SendUnImcstoredRequest(Oid relOid, Oid specifyPartOid, int type)
     populateParams.imcstoreType = type;
     populateParams.msglen =
         sizeof(int) + sizeof(int) + sizeof(Oid) + sizeof(Oid);
-    connections = GetStandbyConnections(&connCount);
+    connections = GetStandbyConnections(&connCount, nodeCons);
     PGXCNodeHandle **temp_connections = NULL;
     /* use temp connections instead */
     int i = 0;
@@ -1261,7 +1274,20 @@ void SendUnImcstoredRequest(Oid relOid, Oid specifyPartOid, int type)
         temp_connections[i]->state = DN_CONNECTION_STATE_QUERY;
     }
 
-    if (HandlePgxcReceive(connCount, temp_connections)) {
+    hasError = HandlePgxcReceive(connCount, temp_connections);
+
+    for (i = 0; i < connCount; ++i) {
+        PGXCNodeClose(nodeCons[i]);
+        nodeCons[i] = NULL;
+        PGXCNodeHandle *handle = temp_connections[i];
+        pfree_ext(handle->inBuffer);
+        pfree_ext(handle->outBuffer);
+        pfree_ext(handle->error);
+    }
+    pfree_ext(nodeCons);
+    pfree_ext(temp_connections);
+
+    if (hasError) {
         ereport(ERROR, (errmsg("HTAP unpopulate failed, some standby occurs error.")));
     }
 }
