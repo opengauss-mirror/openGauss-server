@@ -833,8 +833,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
             buf_desc = GetBufferDescriptor(buf_id);
             if (SS_PRIMARY_MODE) {
                 buf_state = LockBufHdr(buf_desc);
-                if (BUF_STATE_GET_REFCOUNT(buf_state) != 0 || BUF_STATE_GET_USAGECOUNT(buf_state) != 0 ||
-                !BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
+                if (BUF_STATE_GET_REFCOUNT(buf_state) != 0 || !BUFFERTAGS_PTR_EQUAL(&buf_desc->tag, tag)) {
                     UnlockBufHdr(buf_desc, buf_state);
                     ret = DMS_ERROR;
                     break;
