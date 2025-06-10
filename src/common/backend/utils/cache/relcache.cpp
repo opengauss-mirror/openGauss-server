@@ -3524,6 +3524,7 @@ void RelationReloadIndexInfo(Relation relation)
          * will enroll this relation in ordinary relcache invalidation processing,
          */
         if (t_thrd.inval_msg_cxt.in_progress_list[offset].invalidated) {
+            RelationCloseSmgr(relation);
             relation->rd_isvalid = false;
             ResetInvalMsgProcListInval(offset);
             continue;
