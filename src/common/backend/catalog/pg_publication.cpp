@@ -383,14 +383,14 @@ static List *GetAllTablesPublicationRelations(void)
 
     scan = tableam_scan_begin(classRel, SnapshotNow, 1, key);
 
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Oid relid = HeapTupleGetOid(tuple);
         if (is_publishable_class(relid, tuple, NULL)) {
             result = lappend_oid(result, relid);
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(classRel, AccessShareLock);
 
     return result;

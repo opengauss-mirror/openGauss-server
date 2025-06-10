@@ -51,6 +51,7 @@
 #include "pgxc/groupmgr.h"
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_slow_query.h"
+#include "access/tableam.h"
 
 #ifdef PGXC
 #include "pgxc/poolutils.h"
@@ -1929,8 +1930,8 @@ void GetUserSpaceThroughAllDbs(const char* username)
     }
 
     /* scan db names */
-    scan = heap_beginscan(pg_database_rel, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pg_database_rel, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         datum = heap_getattr(tup, Anum_pg_database_datname, RelationGetDescr(pg_database_rel), &isNull);
         if (isNull) {
             ereport(WARNING,
@@ -1947,7 +1948,7 @@ void GetUserSpaceThroughAllDbs(const char* username)
 
         database_name_list = lappend(database_name_list, database_name);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pg_database_rel, AccessShareLock);
 
     WLMReadjustUserSpaceByQuery(username, database_name_list);

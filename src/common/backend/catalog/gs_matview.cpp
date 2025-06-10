@@ -115,7 +115,7 @@ void update_matview_tuple(Oid matviewOid, bool needrefresh, Datum curtime)
     }
 
     if (tup == NULL || !HeapTupleIsValid(tup)) {
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         heap_close(matview_relation, NoLock);
         return;
     }

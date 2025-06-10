@@ -1481,9 +1481,9 @@ void remove_job_by_oid(Oid oid, Delete_Pgjob_Oid oidFlag, bool local)
     }
 
     pg_job_tbl = heap_open(PgJobRelationId, ExclusiveLock);
-    scan = heap_beginscan(pg_job_tbl, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(pg_job_tbl, SnapshotNow, 0, NULL);
 
-    while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
+    while (HeapTupleIsValid(tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         /* non-scheduler jobs does not come with a job name */
         (void)heap_getattr(tuple, Anum_pg_job_job_name, pg_job_tbl->rd_att, &is_regular_job);
         Form_pg_job pg_job = (Form_pg_job)GETSTRUCT(tuple);
@@ -1495,7 +1495,7 @@ void remove_job_by_oid(Oid oid, Delete_Pgjob_Oid oidFlag, bool local)
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pg_job_tbl, ExclusiveLock);
 
     /* always remove scheduler objects when drop role */
@@ -1591,7 +1591,7 @@ void RemoveJobById(Oid objectId)
                 break;
             }
         }
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         if (!HeapTupleIsValid(cp_tuple)) {
             heap_close(relation, RowExclusiveLock);
             PG_TRY_RETURN();
@@ -1935,9 +1935,9 @@ void update_run_job_to_fail()
     replaces[Anum_pg_job_failure_count - 1] = true;
 
     pg_job_tbl = heap_open(PgJobRelationId, ExclusiveLock);
-    scan = heap_beginscan(pg_job_tbl, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(pg_job_tbl, SnapshotNow, 0, NULL);
 
-    while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
+    while (HeapTupleIsValid(tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         Form_pg_job pg_job = (Form_pg_job)GETSTRUCT(tuple);
         /* Every coordinator should update all tuples which job_status is 'r'. */
 #ifdef ENABLE_MULTIPLE_NODES
@@ -1993,7 +1993,7 @@ void update_run_job_to_fail()
         }
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pg_job_tbl, ExclusiveLock);
 }
 
@@ -2303,7 +2303,7 @@ static HeapTuple get_job_tup_from_rel(Relation job_rel, int job_id)
             /* Database Security:  Support separation of privilege.*/
             if (!(superuser_arg(GetUserId()) || systemDBA_arg(GetUserId())) &&
                 0 != strcmp(NameStr(job->log_user), myrolename)) {
-                heap_endscan(scan);
+                tableam_scan_end(scan);
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_OBJECT),
                         errmsg("Permission for current user to get this job. current_user: %s, job_user: %s, job_id: %ld",

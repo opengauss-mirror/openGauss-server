@@ -24,6 +24,7 @@
 
 #include "gs_ledger/ledger_utils.h"
 #include "catalog/gs_global_chain.h"
+#include "access/tableam.h"
 
 static pg_atomic_uint64 g_blocknum = 0;
 static HTAB *g_recnum_cache = NULL;
@@ -43,8 +44,8 @@ static uint32 reload_next_g_blocknum()
     bool isnull = false;
 
     gchain_rel = heap_open(GsGlobalChainRelationId, RowExclusiveLock);
-    scan = heap_beginscan(gchain_rel, SnapshotAny, 0, NULL);
-    while ((tup = heap_getnext(scan, BackwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(gchain_rel, SnapshotAny, 0, NULL);
+    while ((tup = (HeapTuple)tableam_scan_getnexttuple(scan, BackwardScanDirection)) != NULL) {
         blocknum = DatumGetUInt32(heap_getattr(tup, Anum_gs_global_chain_blocknum,
                                                RelationGetDescr(gchain_rel), &isnull));
         if (blocknum > max_num) {
@@ -53,7 +54,7 @@ static uint32 reload_next_g_blocknum()
             break;
         }
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(gchain_rel, RowExclusiveLock);
     return max_num;
 }
@@ -108,15 +109,15 @@ uint64 reload_g_rec_num(Oid histoid)
     bool found;
 
     histRelation = heap_open(histoid, AccessShareLock);
-    scan = heap_beginscan(histRelation, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, BackwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(histRelation, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple)tableam_scan_getnexttuple(scan, BackwardScanDirection)) != NULL) {
         rec_num = DatumGetUInt64(heap_getattr(tup, 1, RelationGetDescr(histRelation), &isnull));
         if (rec_num >= max_rec_num) {
             max_rec_num = rec_num;
             hist_empty = false;
         }
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(histRelation, AccessShareLock);
     RecNumItem *item = (RecNumItem *)hash_search(g_recnum_cache, &histoid, HASH_ENTER, &found);
     if (hist_empty) {

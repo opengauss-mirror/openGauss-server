@@ -14,6 +14,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_db_role_setting.h"
 #include "utils/fmgroids.h"
@@ -209,11 +210,11 @@ void DropSetting(Oid databaseid, Oid roleid)
         numkeys++;
     }
 
-    scan = heap_beginscan(relsetting, SnapshotNow, numkeys, keys);
-    while (HeapTupleIsValid(tup = heap_getnext(scan, ForwardScanDirection))) {
+    scan = tableam_scan_begin(relsetting, SnapshotNow, numkeys, keys);
+    while (HeapTupleIsValid(tup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         simple_heap_delete(relsetting, &tup->t_self);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
 
     heap_close(relsetting, RowExclusiveLock);
 }

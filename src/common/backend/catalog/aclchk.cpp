@@ -24,6 +24,7 @@
 #include "access/sysattr.h"
 #include "access/transam.h"
 #include "access/xact.h"
+#include "access/tableam.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -1027,13 +1028,13 @@ static List* objectsInSchemaToOids(GrantObjectType objtype, List* nspnames)
                     &key[0], Anum_pg_proc_pronamespace, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(namespaceId));
 
                 rel = heap_open(ProcedureRelationId, AccessShareLock);
-                scan = heap_beginscan(rel, SnapshotNow, 1, key);
+                scan = tableam_scan_begin(rel, SnapshotNow, 1, key);
 
-                while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+                while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
                     objects = lappend_oid(objects, HeapTupleGetOid(tuple));
                 }
 
-                heap_endscan(scan);
+                tableam_scan_end(scan);
                 heap_close(rel, AccessShareLock);
             }
                 break;
@@ -1045,11 +1046,11 @@ static List* objectsInSchemaToOids(GrantObjectType objtype, List* nspnames)
                 ScanKeyInit(
                     &key[0], Anum_gs_package_pkgnamespace, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(namespaceId));
                 rel = heap_open(PackageRelationId, AccessShareLock);
-                scan = heap_beginscan(rel, SnapshotNow, 1, key);
-                while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+                scan = tableam_scan_begin(rel, SnapshotNow, 1, key);
+                while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
                     objects = lappend_oid(objects, HeapTupleGetOid(tuple));
                 }
-                heap_endscan(scan);
+                tableam_scan_end(scan);
                 heap_close(rel, AccessShareLock);
             }
             break;
@@ -1063,13 +1064,13 @@ static List* objectsInSchemaToOids(GrantObjectType objtype, List* nspnames)
                     ObjectIdGetDatum(namespaceId));
 
                 rel = heap_open(ClientLogicGlobalSettingsId, AccessShareLock);
-                scan = heap_beginscan(rel, SnapshotNow, 1, key);
+                scan = tableam_scan_begin(rel, SnapshotNow, 1, key);
 
-                while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+                while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
                     objects = lappend_oid(objects, HeapTupleGetOid(tuple));
                 }
 
-                heap_endscan(scan);
+                tableam_scan_end(scan);
                 heap_close(rel, AccessShareLock);
             }
                 break;
@@ -1083,13 +1084,13 @@ static List* objectsInSchemaToOids(GrantObjectType objtype, List* nspnames)
                     ObjectIdGetDatum(namespaceId));
 
                 rel = heap_open(ClientLogicColumnSettingsId, AccessShareLock);
-                scan = heap_beginscan(rel, SnapshotNow, 1, key);
+                scan = tableam_scan_begin(rel, SnapshotNow, 1, key);
 
-                while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+                while ((tuple = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
                     objects = lappend_oid(objects, HeapTupleGetOid(tuple));
                 }
 
-                heap_endscan(scan);
+                tableam_scan_end(scan);
                 heap_close(rel, AccessShareLock);
             }
                 break;

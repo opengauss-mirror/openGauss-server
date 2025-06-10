@@ -38,6 +38,7 @@
 #include "storage/lock/lock.h"
 #include "storage/spin.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "commands/tablespace.h"
 #include "commands/dbcommands.h"
 #include "utils/atomic.h"
@@ -156,12 +157,12 @@ bool load_audit_policies(bool reload)
     }
 
     GET_RELATION(GsAuditingPolicyRelationId, AccessShareLock);
-    TableScanDesc scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup;
     Form_gs_auditing_policy rel_data;
 
     gs_policy_set *tmp_policies = new gs_policy_set;
-    while ((rtup = heap_getnext(scan, ForwardScanDirection))) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         rel_data = (Form_gs_auditing_policy)GETSTRUCT(rtup);
         if (rel_data == NULL || !rel_data->polenabled) {
             continue;
@@ -173,7 +174,7 @@ bool load_audit_policies(bool reload)
         item.m_modify_date = rel_data->modifydate;
         tmp_policies->insert(item);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     reset_policy_filters(); /* must reload filters */
@@ -213,13 +214,13 @@ bool load_policy_accesses(bool reload)
     }
 
     GET_RELATION(GsAuditingPolicyAccessRelationId, AccessShareLock);
-    TableScanDesc scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup;
     Form_gs_auditing_policy_access rel_data;
 
     gs_policy_base_map *tmp_accesses = new gs_policy_base_map;
     access_privilege_set *tmp_access = new access_privilege_set;
-    while ((rtup = heap_getnext(scan, ForwardScanDirection))) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         rel_data = (Form_gs_auditing_policy_access)GETSTRUCT(rtup);
         if (rel_data == NULL) {
             continue;
@@ -232,7 +233,7 @@ bool load_policy_accesses(bool reload)
         item.m_policy_id = rel_data->policyoid;
         (*tmp_accesses)[item.m_policy_id].insert(item);
     }   
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     if (loaded_access != NULL) {
@@ -297,12 +298,12 @@ bool load_policy_filters(bool reload)
     }
 
     GET_RELATION(GsAuditingPolicyFiltersRelationId, AccessShareLock);
-    TableScanDesc scan   = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan   = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup;
     Form_gs_auditing_policy_filters rel_data;
     gs_policy_filter_map *tmp_filters = new gs_policy_filter_map;
     global_roles_in_use *audit_roles_in_use_tmp = new global_roles_in_use;
-    while ((rtup = heap_getnext(scan, ForwardScanDirection))) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         rel_data = (Form_gs_auditing_policy_filters)GETSTRUCT(rtup);
         if (rel_data == NULL) {
             continue;
@@ -322,7 +323,7 @@ bool load_policy_filters(bool reload)
         GsPolicyFilter item(ltree, rel_data->policyoid, rel_data->modifydate);
         set_filter(&item, tmp_filters);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     /* add policies without filter */
@@ -600,13 +601,13 @@ bool load_policy_privileges(bool reload)
     }
 
     GET_RELATION(GsAuditingPolicyPrivilegesRelationId, AccessShareLock);
-    TableScanDesc scan   = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan   = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup;
     Form_gs_auditing_policy_privileges rel_data;
 
     gs_policy_base_map *tmp_privileges = new gs_policy_base_map;
     access_privilege_set *tmp_audited_priviliges = new access_privilege_set;
-    while ((rtup = heap_getnext(scan, ForwardScanDirection))) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         rel_data = (Form_gs_auditing_policy_privileges)GETSTRUCT(rtup);
         if (rel_data == NULL) {
             continue;
@@ -620,7 +621,7 @@ bool load_policy_privileges(bool reload)
         (*tmp_privileges)[item.m_policy_id].insert(item);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     if (loaded_privileges != NULL) {
@@ -662,11 +663,11 @@ bool check_audit_policy_privileges_for_label(const policy_labels_map *labels_to_
 {
     GET_RELATION(GsAuditingPolicyPrivilegesRelationId, RowExclusiveLock);
 
-    TableScanDesc scan   = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan   = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup;
     Form_gs_auditing_policy_privileges rel_data;
     bool is_found = false;
-    while ((rtup = heap_getnext(scan, ForwardScanDirection)) && !is_found) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) && !is_found) {
         rel_data = (Form_gs_auditing_policy_privileges)GETSTRUCT(rtup);
         if (rel_data == NULL) {
             continue;
@@ -674,7 +675,7 @@ bool check_audit_policy_privileges_for_label(const policy_labels_map *labels_to_
         is_found = (labels_to_drop->find(rel_data->privilegetype.data) != labels_to_drop->end());
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, RowExclusiveLock);
 
     return is_found;
@@ -684,18 +685,18 @@ bool check_audit_policy_access_for_label(const policy_labels_map *labels_to_drop
 {
     GET_RELATION(GsAuditingPolicyAccessRelationId, RowExclusiveLock);
 
-    TableScanDesc scan   = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    TableScanDesc scan   = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
     HeapTuple   rtup;
     Form_gs_auditing_policy_access rel_data;
     bool is_found = false;
-    while ((rtup = heap_getnext(scan, ForwardScanDirection)) && !is_found) {
+    while ((rtup = (HeapTuple)tableam_scan_getnexttuple(scan, ForwardScanDirection)) && !is_found) {
         rel_data = (Form_gs_auditing_policy_access)GETSTRUCT(rtup);
         if (rel_data == NULL) {
             continue;
         }
         is_found = (labels_to_drop->find(rel_data->labelname.data) != labels_to_drop->end());
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, RowExclusiveLock);
     return is_found;
 }
