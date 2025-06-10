@@ -1687,6 +1687,7 @@ void PartitionReloadIndexInfo(Partition part)
          * will enroll this relation in ordinary relcache invalidation processing,
          */
         if (t_thrd.inval_msg_cxt.in_progress_list[offset].invalidated) {
+            PartitionCloseSmgr(part);
             part->pd_isvalid = false;
             ResetInvalMsgProcListInval(offset);
             continue;
