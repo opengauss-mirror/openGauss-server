@@ -453,6 +453,7 @@ static void SearchDaatMaxscore(Relation index, BM25QueryTokensInfo &queryTokenIn
     while (firstNeIdx != 0 && upperBounds[firstNeIdx - 1] <= threshold) {
         --firstNeIdx;
         if (firstNeIdx == 0) {
+            CloseCursors(cursors);
             return;
         }
     }
@@ -559,8 +560,9 @@ static void DocIdsGetHeapCtids(Relation index, BM25EntryPages &entryPages, BM25S
         BM25DocumentItem *docItem = (BM25DocumentItem*)((char *)page + sizeof(PageHeaderData) +
             offset * BM25_DOCUMENT_ITEM_SIZE);
         if (!docItem->isActived) {
+            so->candDocs[i].docId = BM25_INVALID_DOC_ID;
             UnlockReleaseBuffer(buf);
-            elog(ERROR, "Read invalid doc.");
+            continue;
         }
         so->candDocs[i].heapCtid = docItem->ctid.t_tid;
         UnlockReleaseBuffer(buf);
@@ -621,6 +623,10 @@ static void ConstructScanScoreKeys(Relation index, BM25ScanOpaque so)
     scan->xs_heapfetch = tableam_scan_index_fetch_begin(heapRel);
     u_sess->bm25_ctx.scoreHashTable = New(CurrentMemoryContext) BM25ScanDocScoreHashTable(so->candNums);
     for (int i = 0; i < so->candNums; ++i) {
+        if (so->candDocs[i].docId == BM25_INVALID_DOC_ID) {
+            continue;
+        }
+
         scan->xs_ctup.t_self = so->candDocs[i].heapCtid;
         heapTuple = (HeapTuple)IndexFetchTuple(scan);
         if (heapTuple == NULL) {
@@ -685,7 +691,7 @@ IndexScanDesc bm25beginscan_internal(Relation index, int nkeys, int norderbys)
     so->candNums = 0;
     so->expectedCandNums = u_sess->attr.attr_sql.enable_bm25_taat ? 0 : u_sess->attr.attr_sql.bm25_topk;
     so->expandedTimes = 0;
-    so->docIdMaskSize = bm25MetaData.documentCount / 8 + 1;
+    so->docIdMaskSize = bm25MetaData.nextDocId / 8 + 1;
     so->docIdMask = (unsigned char*)palloc0(sizeof(unsigned char) * (so->docIdMaskSize));
 
     scan->opaque = so;
@@ -779,7 +785,7 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
         }
 
         float avgdl = (meta.tokenCount * 1.0) / meta.documentCount;
-        BM25IndexScan(scan->indexRelation, queryTokenInfo, meta.documentCount, avgdl, so);
+        BM25IndexScan(scan->indexRelation, queryTokenInfo, meta.nextDocId, avgdl, so);
         DocIdsGetHeapCtids(scan->indexRelation, meta.entryPageList, so);
         ConstructScanScoreKeys(scan->indexRelation, so);
         if (queryTokenInfo.queryTokens != nullptr) {
@@ -789,6 +795,9 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
     }
 
     bool found = false;
+    while (so->cursor < so->candNums && so->candDocs[so->cursor].docId == BM25_INVALID_DOC_ID) {
+        so->cursor++;
+    }
     if (so->cursor < so->candNums) {
         scan->xs_ctup.t_self = so->candDocs[so->cursor].heapCtid;
         scan->xs_recheck = false;
