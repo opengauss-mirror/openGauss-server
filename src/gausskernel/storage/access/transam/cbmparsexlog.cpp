@@ -841,7 +841,11 @@ static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd)
     XLogRecPtr startPoint = t_thrd.cbm_cxt.XlogCbmSys->startLSN;
     bool parseSkip = false;
 
-    readprivate.datadir = t_thrd.proc_cxt.DataDir;
+    if (ENABLE_DSS) {
+        readprivate.datadir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
+    } else {
+        readprivate.datadir = t_thrd.proc_cxt.DataDir;
+    }
     readprivate.tli = timeLine;
     xlogreader = XLogReaderAllocate(&CBMXLogPageRead, &readprivate);
     if (xlogreader == NULL)
@@ -930,12 +934,8 @@ static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr
     XLogPageReadPrivateCBM *readprivate = (XLogPageReadPrivateCBM *)xlogreader->private_data;
     uint32 targetPageOff;
     int rc = 0;
-    char *dssdir = NULL;
 
     targetPageOff = targetPagePtr % XLogSegSize;
-
-    if (ENABLE_DSS)
-        dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
 
     /*
      * See if we need to switch to a new segment because the requested record
@@ -960,17 +960,8 @@ static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr
                         (uint32)((t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo) % XLogSegmentsPerXLogId));
         securec_check_ss(rc, "", "");
 
-        if (ENABLE_DSS) {
-            char dss_xlog[MAXPGPATH];
-            rc = snprintf_s(dss_xlog, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "%d",
-                g_instance.attr.attr_storage.dms_attr.instance_id);
-            securec_check_ss(rc, "\0", "\0");
-            rc = snprintf_s(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, MAXPGPATH, MAXPGPATH - 1, 
-                "%s/%s/%s", dssdir, dss_xlog, xlogfname);
-        } else {
-            rc = snprintf_s(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, MAXPGPATH, MAXPGPATH - 1, 
-                "%s/" XLOGDIR "/%s", readprivate->datadir, xlogfname);
-        }
+        rc = snprintf_s(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, MAXPGPATH, MAXPGPATH - 1,  "%s/" XLOGDIR "/%s",
+                        readprivate->datadir, xlogfname);
         securec_check_ss(rc, "\0", "\0");
 
         t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = BasicOpenFile(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath,

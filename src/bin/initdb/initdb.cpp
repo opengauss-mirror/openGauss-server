@@ -1863,9 +1863,7 @@ static void bootstrap_template1(void)
     PG_CMD_OPEN;
     
     for (line = bki_lines; *line != NULL; line++) {
-        if (ss_need_mkclusterdir) {
-            PG_CMD_PUTS(*line);
-        }
+        PG_CMD_PUTS(*line);
         FREE_AND_RESET(*line);
     }
 
@@ -4815,36 +4813,34 @@ int main(int argc, char* argv[])
     }
 
     if (ss_issharedstorage) {
-        int ret = ss_check_shareddir(vgdata, ss_nodeid, &ss_need_mkclusterdir);
-        if (ret != 0) {
+        int ret_check = ss_check_shareddir(vgdata, ss_nodeid, &need_create_data);
+        if (ret_check != 0) {
             write_stderr("ERROR: %s: shared storage initdb failed because of the following error:\n", progname);
-            if (ret & ERROR_INSTANCEDIR_EXISTS) {
-                write_stderr(_("ERROR: [*]shared storage files of instance %d in the directory \"%s\" already exists\n"), ss_nodeid, vgdata);
-                write_stderr(_("If you want to create a new shared storage instance, either remove shared storage "
-                               "files of instance %d in the directory \"%s\" or run %s with other instance id.\n"),
-                    ss_nodeid,
-                    vgdata,
-                    progname);
+            switch (ret_check) {
+                /* primary node, but no need make cluster dirs */
+                case ERROR_CLUSTERDIR_EXISTS_BY_PRIMARY:
+                    write_stderr(_("ERROR: [*]shared storage files of cluster in the directory \"%s\" "
+                                   "already exists\n"), vgdata);
+                    write_stderr(_("You need clear all shared storages files in the directory \"%s\" "
+                                   "before init instance 0.\n"), vgdata);
+                    break;
+                /* not primary node, but need make cluster dirs */
+                case ERROR_CLUSTERDIR_NO_EXISTS_BY_STANDBY:
+                    write_stderr(_("ERROR: [*]shared storage files of cluster in the directory \"%s\" "
+                                   "does not exist\n"), vgdata);
+                    write_stderr(_("You need check storage files in the directory \"%s\" when init "
+                                   "instance 0.\n"), vgdata);
+                    break;
+                /* cluster dir is not complete */
+                case ERROR_CLUSTERDIR_INCOMPLETE:
+                    write_stderr(_("ERROR: [*]shared storage files of cluster in the directory \"%s\" "
+                                   "is not completed\n"), vgdata);
+                    write_stderr(_("You need check if the storage files in the directory \"%s\" is "
+                                   "completed.\n"), vgdata);
+                    break;
+                default:
+                    write_stderr(_("unkown state for ss_check_shareddir"));
             }
-
-            /* primary node, but no need make cluster dirs */
-            if (ret & ERROR_CLUSTERDIR_EXISTS_BY_PRIMARY) {
-                write_stderr(_("ERROR: [*]shared storage files of cluster in the directory \"%s\" already exists\n"), vgdata);
-                write_stderr(_("You need clear all shared storages files in the directory \"%s\" before init instance 0.\n"), vgdata);
-            }
-
-            /* not primary node, but need make cluster dirs */
-            if (ret & ERROR_CLUSTERDIR_NO_EXISTS_BY_STANDBY) {
-                write_stderr(_("ERROR: [*]shared storage files of cluster in the directory \"%s\" does not exist\n"), vgdata);
-                write_stderr(_("You need check storage files in the directory \"%s\" when init instance 0.\n"), vgdata);
-            }
-
-            /* cluster dir is not complete */
-            if (ret & ERROR_CLUSTERDIR_INCOMPLETE) {
-                write_stderr(_("ERROR: [*]shared storage files of cluster in the directory \"%s\" is not completed\n"), vgdata);
-                write_stderr(_("You need check if the storage files in the directory \"%s\" is completed.\n"), vgdata);
-            }
-            
             exit(1);
         }
     }
@@ -4945,8 +4941,7 @@ int main(int argc, char* argv[])
     }
     
     if (enable_dss && ss_issharedstorage) {
-        ss_need_mkspecialdir = !ss_check_specialdir(vgdata);
-        ss_mkdirdir(ss_nodeid, pg_data, vgdata, vglog, ss_need_mkclusterdir, ss_need_mkspecialdir);
+        ss_mkdirdir(pg_data, vgdata, vglog, need_create_data);
     } else {
         /* Create required subdirectories */
         printf(_("creating subdirectories ... in ordinary occasion"));
@@ -5037,7 +5032,7 @@ int main(int argc, char* argv[])
         backend_options = options;
     }
 
-    if (ss_need_mkclusterdir) {
+    if (need_create_data) {
         /* create or check pg_location path */
         mkdirForPgLocationDir();
         check_ok();
@@ -5056,19 +5051,16 @@ int main(int argc, char* argv[])
     /* Init undo subsystem meta. */
     InitUndoSubsystemMeta();
 
-    /* Bootstrap template1 */
-    bootstrap_template1();
-    
-    if (ss_need_mkclusterdir) {
-        /*
-        * Make the per-database PG_VERSION for template1 only after init'ing it
-        */
+    if (need_create_data) {
+        /* Bootstrap template1 */
+        bootstrap_template1();
+
+        /* Make the per-database PG_VERSION for template1 only after init'ing it */
         write_version_file("base/1");
 
         CreatePGDefaultTempDir();
 
         /* Create the stuff we don't need to use bootstrap mode for */
-
         setup_auth();
         get_set_pwd();
 

@@ -519,7 +519,6 @@ extern void InitializeSessionUserIdStandalone(void);
 extern void SetSessionAuthorization(Oid userid, bool is_superuser);
 extern Oid GetCurrentRoleId(void);
 extern void SetCurrentRoleId(Oid roleid, bool is_superuser);
-void ss_initdwsubdir(char *dssdir, int instance_id);
 extern void initDSSConf(void);
 
 extern Oid get_current_lcgroup_oid();

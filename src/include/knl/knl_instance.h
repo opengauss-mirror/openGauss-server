@@ -1291,7 +1291,6 @@ typedef struct knl_g_dms_context {
     bool dmsInited;
     XLogRecPtr ckptRedo;
     bool resetSyscache;
-    bool finishedRecoverOldPrimaryDWFile;
     bool dw_init;
     uint64 latest_snapshot_xmin;
     uint64 latest_snapshot_xmax;

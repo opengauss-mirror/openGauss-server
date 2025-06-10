@@ -2051,51 +2051,51 @@ bool contain_backend_version(uint32 version_number) {
             (version_number >= BACKEND_VERSION_INCLUDE_NUM));
 }
 
-void ss_initdwsubdir(char *dssdir, int instance_id)
+void ss_initdwsubdir(const char *dssdir)
 {
     int rc;
 
     /* file correspanding to double write directory */
     rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwOldPath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/pg_dw", dssdir, instance_id);
+        "%s/pg_doublewrite/pg_dw", dssdir);
     securec_check_ss(rc, "", "");
 
     rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwPathPrefix, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/pg_dw_", dssdir, instance_id);
+        "%s/pg_doublewrite/pg_dw_", dssdir);
     securec_check_ss(rc, "", "");
 
     rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwSinglePath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/pg_dw_single", dssdir, instance_id);
+        "%s/pg_doublewrite/pg_dw_single", dssdir);
     securec_check_ss(rc, "", "");
 
     rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwBuildPath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/pg_dw.build", dssdir, instance_id);
+        "%s/pg_doublewrite/pg_dw.build", dssdir);
     securec_check_ss(rc, "", "");
 
     rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwUpgradePath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/dw_upgrade", dssdir, instance_id);
+        "%s/pg_doublewrite/dw_upgrade", dssdir);
     securec_check_ss(rc, "", "");
 
     rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwBatchUpgradeMetaPath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/dw_batch_upgrade_meta", dssdir, instance_id);
+        "%s/pg_doublewrite/dw_batch_upgrade_meta", dssdir);
     securec_check_ss(rc, "", "");
 
     rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwBatchUpgradeFilePath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/dw_batch_upgrade_files", dssdir, instance_id);
+        "%s/pg_doublewrite/dw_batch_upgrade_files", dssdir);
     securec_check_ss(rc, "", "");
 
     rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwMetaPath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/pg_dw_meta", dssdir, instance_id);
+        "%s/pg_doublewrite/pg_dw_meta", dssdir);
     securec_check_ss(rc, "", "");
 
     rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwExtChunkPath, MAXPGPATH, MAXPGPATH - 1,
-        "%s/pg_doublewrite%d/pg_dw_ext_chunk", dssdir, instance_id);
+        "%s/pg_doublewrite/pg_dw_ext_chunk", dssdir);
     securec_check_ss(rc, "", "");
 
     g_instance.datadir_cxt.dw_subdir_cxt.dwStorageType = (uint8)DEV_TYPE_DSS;
 }
 
-void initDssPath(char *dssdir)
+void initDssPath(const char *dssdir, const char *xlogdir)
 {
     errno_t rc = EOK;
 
@@ -2126,22 +2126,20 @@ void initDssPath(char *dssdir)
     rc = snprintf_s(g_instance.datadir_cxt.multixactDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_multixact", dssdir);
     securec_check_ss(rc, "", "");
 
-    rc = snprintf_s(g_instance.datadir_cxt.xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d",
-        g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name, g_instance.attr.attr_storage.dms_attr.instance_id);
+    rc = snprintf_s(g_instance.datadir_cxt.xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", xlogdir);
     securec_check_ss(rc, "", "");
 
     rc = snprintf_s(g_instance.datadir_cxt.controlPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", dssdir);
     securec_check_ss(rc, "", "");
 
-    rc = snprintf_s(g_instance.datadir_cxt.controlBakPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control.backup",
-        dssdir);
+    rc = snprintf_s(g_instance.datadir_cxt.controlBakPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control.backup", dssdir);
     securec_check_ss(rc, "", "");
 
-    rc = snprintf_s(g_instance.datadir_cxt.controlInfoPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_replication/pg_ss_ctl_info",
-        dssdir);
+    rc = snprintf_s(g_instance.datadir_cxt.controlInfoPath, MAXPGPATH, MAXPGPATH - 1,
+        "%s/pg_replication/pg_ss_ctl_info", xlogdir);
     securec_check_ss(rc, "", "");
 
-    ss_initdwsubdir(dssdir, g_instance.attr.attr_storage.dms_attr.instance_id);
+    ss_initdwsubdir(dssdir);
 }
 
 void initDSSConf(void)
@@ -2159,11 +2157,12 @@ void initDSSConf(void)
             g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
             errhint("Check vgname and socketpath and restart later.")));
     } else {
-        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name;
+        const char *datadir = g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name;
+        const char *xlogdir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
 
         // do not overwrite
-        if (strncmp(g_instance.datadir_cxt.baseDir, dssdir, strlen(dssdir)) != 0) {
-            initDssPath(dssdir);
+        if (strncmp(g_instance.datadir_cxt.baseDir, datadir, strlen(datadir)) != 0) {
+            initDssPath(datadir, xlogdir);
         }
     }
 

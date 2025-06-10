@@ -3459,7 +3459,7 @@ static void RememberBufferNeedCheckPin(Buffer buf_id, HeapTuple tuple)
     dms_buf_ctrl_t *buf_ctrl = &t_thrd.storage_cxt.dmsBufCtl[buf_id - 1];
     int target_index = -1;
     for (int i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
-        if (t_thrd.dms_cxt.pincount_array[i].bufid == buf_id) {
+        if (t_thrd.dms_cxt.pincount_array[i].bufid == (uint32)buf_id) {
             return;
         }
 

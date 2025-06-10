@@ -109,7 +109,6 @@ Datum pg_control_system(PG_FUNCTION_ARGS)
 static void OpenControlFileForDSS(char *controlFilePath, ControlFileData *controlFile, size_t bufferCount,
                                   bool *crc_ok_p)
 {
-    int id = g_instance.attr.attr_storage.dms_attr.instance_id;
     pg_crc32c crc;
     errno_t rc = EOK;
     int fd = -1;
@@ -125,14 +124,11 @@ static void OpenControlFileForDSS(char *controlFilePath, ControlFileData *contro
                 (errcode_for_file_access(), errmsg("could not open control file %s : %s", fileName, TRANSLATE_ERRNO)));
     }
 
-    off_t seekpos = (off_t)BLCKSZ * id;
-
     len = sizeof(ControlFileData);
-
     read_size = (int)BUFFERALIGN(len);
     char buffer[read_size] __attribute__((__aligned__(ALIGNOF_BUFFER)));
     while (true) {
-        if (pread(fd, buffer, read_size, seekpos) != read_size) {
+        if (read(fd, buffer, read_size) != read_size) {
             LWLockRelease(ControlFileLock);
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not read from control file %s : %s", fileName,
                             TRANSLATE_ERRNO)));

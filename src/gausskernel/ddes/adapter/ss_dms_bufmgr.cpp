@@ -568,7 +568,7 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
     dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
     if (dms_reform_req_opengauss_ondemand_redo_buffer(&dms_ctx, &tag,
         (unsigned int)sizeof(BufferTag), &redo_status) != DMS_SUCCESS) {
-        SSReadControlFile(REFORM_CTRL_PAGE);
+        SSReadReformerCtrl();
         ereport(LOG,
             (errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Request primary node redo page timeout.",
                 tag.rnode.spcNode, tag.rnode.dbNode,
@@ -585,7 +585,7 @@ bool SSOndemandRequestPrimaryRedo(BufferTag tag)
         ereport(DEBUG1,
             (errmsg("[SS][On-demand] Primary node is not in ondemand recovery now and "
                 "ignore this redo request, so refresh reform control file")));
-        SSReadControlFile(REFORM_CTRL_PAGE);
+        SSReadReformerCtrl();
     } else if (redo_status == ONDEMAND_REDO_ERROR) {
         ereport(PANIC,
             (errmsg("[SS][On-demand][%u/%u/%u/%d %d-%u] Error happend in request primary node redo page, "
@@ -1194,7 +1194,7 @@ void ForgetBufferNeedCheckPin(Buffer buf_id)
     }
 
     for (int i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
-        if (t_thrd.dms_cxt.pincount_array[i].bufid == buf_id) {
+        if (t_thrd.dms_cxt.pincount_array[i].bufid == (uint32)buf_id) {
             t_thrd.dms_cxt.pincount_array[i].bufid = InvalidBuffer;
             dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id - 1);
             if (pg_atomic_read_u32(&buf_ctrl->pinned_count) > 0) {

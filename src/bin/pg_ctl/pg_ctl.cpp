@@ -7241,9 +7241,6 @@ int main(int argc, char** argv)
             goto Error;
         }
 
-        /* Prepare some g_datadir parameters */
-        g_datadir.instance_id = ss_instance_config.dss.instance_id;
-
         errno_t rc = strcpy_s(g_datadir.dss_data, strlen(ss_instance_config.dss.vgname) + 1, ss_instance_config.dss.vgname);
         securec_check_c(rc, "\0", "\0");
 

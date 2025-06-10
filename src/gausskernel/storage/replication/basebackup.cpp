@@ -195,9 +195,7 @@ static void send_xlog_location()
     int rc = 0;
     
     if (ENABLE_DSS) {
-        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name;
-        rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, "%s/pg_xlog%d", dssdir,
-             g_instance.attr.attr_storage.dms_attr.instance_id);
+        rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, SS_XLOGDIR);
     } else {
         rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, "%s/pg_xlog", t_thrd.proc_cxt.DataDir);
     }
@@ -1238,29 +1236,15 @@ bool IsSkipDir(const char * dirName)
         return true;
     if (strcmp(dirName, DISABLE_CONN_FILE) == 0)
         return true;
-    
-    /* skip .recycle in dss */
-    if (ENABLE_DSS && strcmp(dirName, ".recycle") == 0)
-        return true;
-    
-    /* skip directory which not belong to primary in dss */
+
+    /* skip directory in dss */
     if (ENABLE_DSS) {
-        /* skip primary doublewrite and other node doublewrite */
-        if (IsBeginWith(dirName, "pg_doublewrite") > 0) {
+        if (strcmp(dirName, "pg_doublewrite") > 0) {
             return true;
         }
-    
-        /* skip other node pg_xlog except primary */
-        if (IsBeginWith(dirName, "pg_xlog") > 0) { 
-            size_t dirNameLen = strlen("pg_xlog");
-            char instance_id[MAX_INSTANCEID_LEN];
-            errno_t rc = EOK;
-            rc = snprintf_s(instance_id, sizeof(instance_id), sizeof(instance_id) - 1, "%d",
-                            g_instance.attr.attr_storage.dms_attr.instance_id);
-            securec_check_ss_c(rc, "\0", "\0");
-            /* not skip pg_xlog directory in file systerm */
-            if (strlen(dirName) > dirNameLen && strcmp(dirName + dirNameLen, instance_id) != 0) 
-                return true;
+
+        if (strcmp(dirName, ".recycle") == 0) {
+            return true;
         }
     }
 
@@ -2255,9 +2239,6 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
     if (ENABLE_DSS && strcmp(tarfilename, XLOG_CONTROL_FILE) == 0) {
         int read_size = BUFFERALIGN(sizeof(ControlFileData));
         statbuf->st_size = read_size;
-        int primary_id = SSGetPrimaryInstId();
-        off_t seekpos = (off_t)BLCKSZ * primary_id;
-        fseek(fp, seekpos, SEEK_SET);
     }
     
     while ((cnt = fread(t_thrd.basebackup_cxt.buf_block, 1, Min(TAR_SEND_SIZE, statbuf->st_size - len), fp)) > 0) {

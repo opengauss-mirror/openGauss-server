@@ -5459,8 +5459,6 @@ void RelationCacheInvalidOid(Relation relation)
     HeapTuple htup;
     Form_pg_class relp;
     int natts = 0;
-    Datum datum;
-    bool isnull = false;
 
     htup = SearchSysCache1(RELOID, ObjectIdGetDatum(RelationGetRelid(relation)));
     if (!HeapTupleIsValid(htup))
@@ -8260,6 +8258,11 @@ void RelationCacheInitFilePostInvalidate(void)
  */
 void RelationCacheInitFileRemove(void)
 {
+    if (SS_STANDBY_MODE) {
+        ereport(LOG, (errmsg("[SS] Standby node skip relation cache init file remove")));
+        return;
+    }
+
     const char* tblspcdir = "pg_tblspc";
     DIR* dir = NULL;
     struct dirent* de = NULL;

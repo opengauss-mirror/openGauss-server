@@ -28,6 +28,7 @@
 #include "double_write_basic.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/checksum_impl.h"
+#include "ddes/dms/ss_common_attr.h"
 
 typedef enum BufTagVer {
     ORIGIN_TAG = 0,
@@ -269,9 +270,18 @@ void dw_ext_init();
  * double write only work when incremental checkpoint enabled and double write enabled
  * @return true if both enabled
  */
-inline bool dw_enabled()
+inline bool dw_allow_enabled()
 {
     return (ENABLE_INCRE_CKPT && g_instance.attr.attr_storage.enable_double_write);
+}
+
+inline bool dw_enabled()
+{
+    if (ENABLE_DMS) {
+        return dw_allow_enabled() && g_instance.dms_cxt.dw_init;
+    } else {
+        return dw_allow_enabled();
+    }
 }
 
 /**

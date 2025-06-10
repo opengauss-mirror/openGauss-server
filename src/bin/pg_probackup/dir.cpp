@@ -128,7 +128,6 @@ static char check_in_tablespace(pgFile *file, bool in_tablespace);
 static char check_db_dir(pgFile *file);
 static char check_digit_file(pgFile *file);
 static char check_nobackup_dir(pgFile *file);
-static char check_in_dss(pgFile *file, int include_id);
 static void dir_list_file_internal(parray *files, pgFile *parent, const char *parent_dir,
                                                     bool exclude, bool follow_symlink, bool backup_logs,
                                                     bool skip_hidden, int external_dir_num, fio_location location,
@@ -715,59 +714,12 @@ dir_check_file(pgFile *file, bool backup_logs, bool backup_replslots)
         }
     }
 
-    /* skip other instance files in dss mode */
-    check_res = check_in_dss(file, instance_config.dss.instance_id);
-    if (check_res != CHECK_TRUE) {
-        return check_res;
-    }
-
     ret = check_in_tablespace(file, in_tablespace);
     if (ret != -1) {
         return ret;
     }
 
     return check_db_dir(file);
-}
-
-static char check_in_dss(pgFile *file, int include_id)
-{
-    char instance_id[MAX_INSTANCEID_LEN];
-    char top_path[MAXPGPATH];
-    errno_t rc = EOK;
-    int move = 0;
-
-    if (!is_dss_type(file->type)) {
-        return CHECK_TRUE;
-    }
-
-    /* step1 : skip other instance owner file or dir */
-    strlcpy(top_path, file->rel_path, sizeof(top_path));
-    get_top_path(top_path);
-
-    rc = snprintf_s(instance_id, sizeof(instance_id), sizeof(instance_id) - 1, "%d", include_id);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    move = (int)strlen(top_path) - (int)strlen(instance_id);
-    if (move > 0 && move < MAXPGPATH && strcmp(top_path + move, instance_id) != 0) {
-        char tail = top_path[strlen(top_path) - 1];
-        /* Is this file or dir belongs to other instance? */
-        if (tail >= '0' && tail <= '9') {
-            return CHECK_FALSE;
-        }
-    }
-
-    /* step2: recheck dir is in the exclude list, include id will be considered */
-    if (S_ISDIR(file->mode)) {
-        for (int i = 0; pgdata_exclude_dir[i]; i++) {
-            int len = (int)strlen(pgdata_exclude_dir[i]);
-            if (strncmp(top_path, pgdata_exclude_dir[i], len) == 0 &&
-                strcmp(top_path + len, instance_id) == 0) {
-                return CHECK_EXCLUDE_FALSE;
-            }
-        }
-    }
-
-    return CHECK_TRUE;
 }
 
 static char check_in_tablespace(pgFile *file, bool in_tablespace)
@@ -1246,14 +1198,16 @@ opt_externaldir_map(ConfigOption *opt, const char *arg)
  * be restored as directory.
  */
 void
-create_data_directories(parray *dest_files, const char *data_dir, const char *backup_dir,
-                                                bool extract_tablespaces, bool incremental, fio_location location, bool is_restore)
+create_data_directories(parray *dest_files, const char *data_dir, const char *xlog_dir, const char *backup_dir,
+                        bool extract_tablespaces, bool incremental, fio_location location, bool is_restore)
 {
-    size_t     i = 0;
-    parray      *links = NULL;
-    mode_t  pg_tablespace_mode = DIR_PERMISSION;
-    char    to_path[MAXPGPATH];
+    size_t i = 0;
+    parray *links = NULL;
+    mode_t pg_tablespace_mode = DIR_PERMISSION;
+    char to_path[MAXPGPATH];
+    char link_path[MAXPGPATH];
     errno_t rc = 0;
+    bool need_dss_link = false;
 
     /* get tablespace map */
     if (extract_tablespaces)
@@ -1262,6 +1216,10 @@ create_data_directories(parray *dest_files, const char *data_dir, const char *ba
         read_tablespace_map(links, backup_dir);
         /* Sort links by a link name */
         parray_qsort(links, pgFileCompareName);
+    }
+
+    if (xlog_dir != NULL && pg_strcasecmp(data_dir, xlog_dir) != 0) {
+        need_dss_link = true;
     }
 
     /*
@@ -1324,21 +1282,6 @@ create_data_directories(parray *dest_files, const char *data_dir, const char *ba
         if (dir->external_dir_num != 0)
             continue;
 
-        if (is_dss_type(dir->type) && is_restore) {
-            if (is_ss_xlog(dir->rel_path)) {
-                ss_createdir(dir->rel_path, instance_config.dss.vgdata, instance_config.dss.vglog);
-                continue;
-            }
-
-            if (ss_create_if_doublewrite(dir, instance_config.dss.vgdata, instance_config.dss.instance_id)) {
-                continue;
-            }
-
-            if (ss_create_if_pg_replication(dir, instance_config.dss.vgdata, instance_config.dss.vglog)) {
-                continue;
-            }
-        }
-
         /* tablespace_map exists */
         if (links)
         {
@@ -1385,8 +1328,15 @@ create_data_directories(parray *dest_files, const char *data_dir, const char *ba
         /* This is not symlink, create directory */
         elog(VERBOSE, "Create directory \"%s\"", dir->rel_path);
 
-        join_path_components(to_path, data_dir, dir->rel_path);
-        fio_mkdir(to_path, dir->mode, location);
+        if (unlikely(is_dss_type(dir->type) && is_restore && need_dss_link && is_dss_xlog_dir(dir->rel_path))) {
+            join_path_components(to_path, xlog_dir, dir->rel_path);
+            join_path_components(link_path, data_dir, dir->rel_path);
+            fio_mkdir(to_path, dir->mode, location);
+            fio_symlink(to_path, link_path, true, location);
+        } else {
+            join_path_components(to_path, data_dir, dir->rel_path);
+            fio_mkdir(to_path, dir->mode, location);
+        }
     }
 
     if (extract_tablespaces)

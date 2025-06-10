@@ -48,11 +48,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "access/xlogproc.h"
-
-int SSGetPrimaryInstId()
-{
-    return g_instance.dms_cxt.SSReformerControl.primaryInstId;
-}
+#include "access/xlog.h"
 
 void SSSavePrimaryInstId(int id)
 {
@@ -162,13 +158,12 @@ void SSInitReformerControlPages(void)
      */
     struct stat st;
     if (stat(XLOG_CONTROL_FILE, &st) == 0 && S_ISREG(st.st_mode)) {
-        SSReadControlFile(REFORM_CTRL_PAGE);
-        if (g_instance.dms_cxt.SSReformerControl.primaryInstId == SS_MY_INST_ID) {
-            (void)printf("[SS] ERROR: files from last install must be cleared.\n");
+        SSReadReformerCtrl();
+        if (SS_OFFICIAL_PRIMARY) {
+            (void)printf("[SS] ERROR: files from last install must be cleared ... ");
             ereport(ERROR, (errmsg("Files from last initdb not cleared")));
         }
-        (void)printf("[SS] Current node:%d acknowledges cluster PRIMARY node:%d.\n",
-            SS_MY_INST_ID, g_instance.dms_cxt.SSReformerControl.primaryInstId);
+        (void)printf("[SS] Current node:%d acknowledges cluster PRIMARY node:%d ... ", SS_MY_INST_ID, SS_PRIMARY_ID);
         return;
     }
 
@@ -187,7 +182,7 @@ void SSInitReformerControlPages(void)
     g_instance.dms_cxt.SSReformerControl.version = REFORM_CTRL_VERSION;
     g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_NORMAL;
     g_instance.dms_cxt.SSReformerControl.clusterRunMode = RUN_MODE_PRIMARY;
-    (void)printf("[SS] Current node:%d initdb first, will become PRIMARY for first-time SS cluster startup.\n",
+    (void)printf("[SS] Current node:%d initdb first, will become PRIMARY for first-time SS cluster startup ... ",
         SS_MY_INST_ID);
 
     /* Contents are protected with a CRC */
@@ -237,38 +232,6 @@ void SShandle_promote_signal()
             "pmState: %d.", pmState)));
 }
 
-
-void ss_failover_dw_init_internal()
-{
-    /*
-     * step 1: remove self dw file dw_exit close self dw
-     * step 2: load old primary dw ,and finish dw recovery, exit
-     * step 3: rebuild dw file and init self dw
-     */
-
-    char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_data_vg_name;
-    int old_primary_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
-    int self_id = g_instance.attr.attr_storage.dms_attr.instance_id;
-    if (!g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
-        dw_exit(true);
-        dw_exit(false);
-    }
-
-    dw_exit(true);
-    dw_exit(false);
-    ss_initdwsubdir(dssdir, old_primary_id);
-    dw_ext_init();
-    dw_init();
-    g_instance.dms_cxt.finishedRecoverOldPrimaryDWFile = true;
-    dw_exit(true);
-    dw_exit(false);
-    ss_initdwsubdir(dssdir, self_id);
-    dw_ext_init();
-    dw_init();
-    g_instance.dms_cxt.finishedRecoverOldPrimaryDWFile = false;
-    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] dw init finish")));
-}
-
 void ss_failover_dw_init()
 {
     for (int i = 0; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
@@ -277,7 +240,9 @@ void ss_failover_dw_init()
         }
     }
     ckpt_shutdown_pagewriter();
-    ss_failover_dw_init_internal();
+    dw_ext_init();
+    dw_init();
+    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform][SS failover] dw init finish")));
     g_instance.dms_cxt.dw_init = true;
 }
 
@@ -302,7 +267,7 @@ XLogRecPtr SSOndemandRequestPrimaryCkptAndGetRedoLsn()
     }
 
     // read from DMS failed, so read from DSS
-    SSReadControlFile(SS_PRIMARY_ID, true);
+    ReadControlFile();
     primaryRedoLsn = g_instance.dms_cxt.ckptRedo;
     ereport(DEBUG1, (errmodule(MOD_DMS),
         errmsg("[SS][On-demand] read primary node %d checkpoint loc in control file, redoLoc %X/%X", SS_PRIMARY_ID,
@@ -317,10 +282,7 @@ void StartupOndemandRecovery()
     /* for other nodes in cluster and ondeamnd recovery failed */
     LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
     g_instance.dms_cxt.SSReformerControl.clusterStatus = CLUSTER_IN_ONDEMAND_BUILD;
-    g_instance.dms_cxt.SSReformerControl.recoveryInstId = g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id;
     SSUpdateReformerCtrl();
-    ereport(LOG, (errmsg("[SS][On-demand] StartupOndemandRecovery recovery instance id is %d",
-                         g_instance.dms_cxt.SSRecoveryInfo.recovery_inst_id)));
     LWLockRelease(ControlFileLock);
     SSRequestAllStandbyReloadReformCtrlPage();
     SetOndemandExtremeRtoMode();
@@ -330,7 +292,7 @@ void OndemandRealtimeBuildHandleFailover()
 {
     Assert(SS_ONDEMAND_REALTIME_BUILD_NORMAL);
 
-    SSReadControlFile(SSGetPrimaryInstId());
+    ReadControlFile();
     if (u_sess->storage_cxt.pendingOps == NULL) {
         InitSync();
         ss_failover_dw_init();

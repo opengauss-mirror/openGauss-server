@@ -1651,18 +1651,10 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 
             XLByteToSeg(recptr, t_thrd.xlog_cxt.sendSegNo);
 
-            /* in shard storage mode, read xlog from recovery_xlog_dir during recovery */
-            if (SS_STANDBY_FAILOVER) {
-                errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", g_instance.dms_cxt.SSRecoveryInfo.recovery_xlog_dir, tli,
-                                    (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                                    (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
-                securec_check_ss(errorno, "", "");
-            } else {
-                errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", SS_XLOGDIR, tli,
-                                    (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                                    (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
-                securec_check_ss(errorno, "", "");
-            }
+            errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", SS_XLOGDIR, tli,
+                                 (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                 (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+            securec_check_ss(errorno, "", "");
 
             t_thrd.xlog_cxt.sendFile = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
 

@@ -441,17 +441,13 @@ validate_wal(pgBackup *backup, const char *archivedir,
 
         if (IsDssMode())
         {
-            errno_t rc;
             join_path_components(backup_database_dir, backup->root_dir, DSSDATA_DIR);
-            rc = snprintf_s(backup_xlog_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s%d",
-                backup_database_dir, PG_XLOG_DIR, instance_config.dss.instance_id);
-            securec_check_ss_c(rc, "\0", "\0");
         }
         else
         {
             join_path_components(backup_database_dir, backup->root_dir, DATABASE_DIR);
-            join_path_components(backup_xlog_path, backup_database_dir, PG_XLOG_DIR);
         }
+        join_path_components(backup_xlog_path, backup_database_dir, PG_XLOG_DIR);
         validate_backup_wal_from_start_to_stop(backup, backup_xlog_path, tli,
                                                                             wal_seg_size);
     }
