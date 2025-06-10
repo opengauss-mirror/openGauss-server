@@ -58,6 +58,8 @@
 #include "communication/commproxy_interface.h"
 #include "utils/mem_snapshot.h"
 
+#include <thread>
+
 #ifdef HAVE_POLL_H
 #include <poll.h>
 #endif
@@ -590,16 +592,13 @@ void ThreadPoolControler::GetCpuAndNumaNum(int32 *totalCpuNum, int32 *totalNumaN
 {
     char buf[BUFSIZE];
 
+    *totalCpuNum = std::thread::hardware_concurrency();
+
     FILE* fp = NULL;
 
     if ((fp = popen("LANGUAGE=en_US.UTF-8;LANG=en_US.UTF-8;lscpu", "r")) != NULL) {
         while (fgets(buf, sizeof(buf), fp) != NULL) {
-            if (strncmp("CPU(s)", buf, strlen("CPU(s)")) == 0 &&
-                strncmp("On-line CPU(s) list", buf, strlen("On-line CPU(s) list")) != 0 &&
-                strncmp("NUMA node", buf, strlen("NUMA node")) != 0) {
-                char* loc = strchr(buf, ':');
-                *totalCpuNum = pg_strtoint32(loc + 1);
-            } else if (strncmp("NUMA node(s)", buf, strlen("NUMA node(s)")) == 0) {
+            if (strncmp("NUMA node(s)", buf, strlen("NUMA node(s)")) == 0) {
                 char* loc = strchr(buf, ':');
                 *totalNumaNum = pg_strtoint32(loc + 1);
             }
