@@ -214,6 +214,90 @@ static void putid(char* p, const char* s)
     *p = '\0';
 }
 
+static bool Chargevalue(int* typeList, int index) 
+{
+    for (int i = 0; typeList[i] != Natts_pg_authid; i++) {
+        if (index == typeList[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void GetValueAccordingToTheType(cJSON* root, int index, char* key, Datum rawData) 
+{
+    if (Chargevalue(Authid_Name_Data, index)) {
+        cJSON_AddStringToObject(root, key, DatumGetName(rawData)->data);
+        return;
+    }
+
+    if (Chargevalue(Authid_Bool, index)) {
+        cJSON_AddBoolToObject(root, key, BoolGetDatum(rawData));
+        return;
+    }
+
+    if (Chargevalue(Authid_Text, index)) {
+        cJSON_AddStringToObject(root, key, TextDatumGetCString(rawData));
+        return;
+    }
+
+    if (Chargevalue(Authid_Oid, index)) {
+        Oid oid = DatumGetObjectId(rawData);
+        StringInfoData str;
+        initStringInfo(&str);
+        appendStringInfo(&str, "%u", oid);
+        cJSON_AddStringToObject(root, key, str.data);
+        return;
+    }
+
+    if (Chargevalue(Authid_Int4, index)) {
+        cJSON_AddNumberToObject(root, key, DatumGetInt32(rawData));
+        return;
+    }
+
+    if (Chargevalue(Authid_TimeStamptz, index)) {
+        char* str = pstrdup(timestamptz_to_str(DatumGetTimestampTz(rawData)));
+        cJSON_AddStringToObject(root, key, str);
+        return;
+    }
+
+    if (Chargevalue(Authid_Char, index)) {
+        char c = DatumGetChar(rawData);
+        char str[2] = {c, '\0'};
+	    char* ptr = str;
+        cJSON_AddStringToObject(root, key, ptr);
+        return;
+    }
+}
+
+char* GetAuthIdFromSysCache(Oid roleId)
+{
+    cJSON* root = cJSON_CreateObject();
+    char* s = NULL;
+    bool isNull = true;
+    Relation relation = heap_open(AuthIdRelationId, AccessShareLock);
+    HeapTuple tuple = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleId));
+    TupleDesc tupDesc = RelationGetDescr(relation);
+    Datum datum = BoolGetDatum(false);
+
+    if (HeapTupleIsValid(tuple)) {
+        for (int i = 1; i <= tupDesc->natts; i++) {
+            Form_pg_attribute attr = TupleDescAttr(tupDesc, i - 1);
+            char* colName = NameStr(attr->attname);
+            datum = heap_getattr(tuple, i, RelationGetDescr(relation), &isNull);
+            if (isNull) {
+                cJSON_AddStringToObject(root, colName, "");
+            } else {
+                GetValueAccordingToTheType(root, i, colName, datum);
+            }
+        }
+        ReleaseSysCache(tuple);
+    }
+    heap_close(relation, AccessShareLock);
+    return cJSON_Print(root);
+}
+
+
 /*
  * aclparse
  *		Consumes and parses an ACL specification of the form:

@@ -1444,6 +1444,12 @@ void* std_palloc0_noexcept(Size size)
     return palloc_extended(size, MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
 }
 
+void* palloc_func(size_t size)
+{
+    return MemoryContextAlloc(CurrentMemoryContext, (size));
+}
+
+
 /*
  * pfree
  *		Release an allocated chunk.

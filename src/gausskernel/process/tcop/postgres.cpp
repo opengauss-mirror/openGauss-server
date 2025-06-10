@@ -22,6 +22,7 @@
 #include "knl/knl_variable.h"
 #include "catalog/pg_user_status.h"
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <limits.h>
 
@@ -247,6 +248,65 @@ pthread_mutex_t nodeDefCopyLock;
 
 Id64Gen gt_queryId = {0, 0, false};
 IdGen gt_tempId = {0, 0, false};
+
+/* Evild SQL Detect */
+#define DBSD_LOAD_SYMBOL_FUNC(func) DBSD_load_symbol(#func, (void **)&g_instance.DBSDFuncList.func)
+
+#define DBSD_LIB_NAME "DBSD.so"
+
+bool DBSD_open_dl(void **lib_handle, char * symbol)
+{
+    *lib_handle = dlopen(symbol, RTLD_LAZY);
+    if (*lib_handle == NULL) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not load library %s, %s", DBSD_LIB_NAME, dlerror())));
+        return false;
+    }
+    return true;
+}
+
+void DBSD_load_symbol(char* symbol, void **sym_lib_handle)
+{
+    const char* dlsym_err = NULL;
+    *sym_lib_handle = dlsym(g_instance.DBSDFuncList.handle, symbol);
+    dlsym_err = dlerror();
+    if (dlsym_err != NULL) {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_OPERATION),
+             errmsg("incompatible library  \"%s\", lod %s filed, %s", DBSD_LIB_NAME, symbol, dlsym_err)));
+    }
+}
+
+void InitDBSDFunc()
+{
+    if (!DBSD_open_dl(&g_instance.DBSDFuncList.handle, (char*)DBSD_LIB_NAME)) {
+        return;
+    }
+    DBSD_LOAD_SYMBOL_FUNC(DBSD_Init);
+    DBSD_LOAD_SYMBOL_FUNC(DBSD_Uninit);
+    DBSD_LOAD_SYMBOL_FUNC(DBSD_Start);
+    DBSD_LOAD_SYMBOL_FUNC(DBSD_Stop);
+    DBSD_LOAD_SYMBOL_FUNC(DBSD_SqliDetect);
+    DBSD_LOAD_SYMBOL_FUNC(DBSD_CheckUserInfo);
+    DBSD_LOAD_SYMBOL_FUNC(DBSD_SendUserInfo);
+}
+
+void InitDBSD()
+{
+    DBSD_Callbacks cb;
+    cb.memAlloc = palloc_func;
+    cb.memFree = pfree;
+    
+    char* rootDir = gs_getenv_r("GAUSSLOG");
+    char logRootDir[PATH_MAX + 1] = {'\0'};
+    if (rootDir != NULL) {
+        ereport(WARNING, (errmsg("Get GAUSSLOG failed, trun to HOME directory")));
+        rootDir = gs_getenv_r("HOME");
+    }
+    if (realpath(rootDir, logRootDir) == NULL) {
+        ereport(ERROR, (errmsg("Get GAUSSLOG/HOME directory failed, please check memory status.")));
+    }
+    g_instance.DBSDFuncList.DBSD_Init(&cb, logRootDir, logRootDir);
+    g_instance.DBSDFuncList.DBSD_Start();
+}
 
 /*
  * On IA64 we also have to remember the register stack base.
@@ -6135,6 +6195,39 @@ static bool IsTransactionPrepareStmt(const Node* parsetree)
 }
 #endif
 
+static void detectForDBSD(const char* queryString)
+{
+    if (!IsInitdb && g_instance.attr.attr_storage.enable_dbsd && u_sess->attr.attr_common.enalbe_evil_detect) {
+        Port* basePort = u_sess->proc_cxt.MyProcPort;
+        Oid roleId = get_role_oid(basePort->user_name, true);
+        char* temp_query = pstrdup(queryString);
+        int ret = g_instance.DBSDFuncList.DBSD_CheckUserInfo(roleId);
+        DBSD_SqliData data;
+        data.userId = roleId;
+        data.sqlStatementLen = strlen(temp_query);
+        data.userAddress = basePort->remote_host;
+        data.sqlStatement = temp_query;
+        if (ret == DBSD_RET_OK) {
+            int sendRet = g_instance.DBSDFuncList.DBSD_SendUserInfo(roleId, GetAuthIdFromSysCache(roleId));
+            if (sendRet == DBSD_RET_OK) {
+                int detectCode = g_instance.DBSDFuncList.DBSD_SqliDetect(&data, false);
+                if (detectCode != DBSD_RET_OK) {
+                    ereport(WARNING, (errmsg("DBSD_SqliDetect failed, errcode %d", detectCode)));
+                }
+            } else {
+                ereport(WARNING, (errmsg("DBSD_SendUserInfo failed, errcode %d", sendRet)));
+            }
+        } else if (ret == DBSD_RET_NO_NEED_CHECK_USER) {
+            int detectCode = g_instance.DBSDFuncList.DBSD_SqliDetect(&data, false);
+            if (detectCode != DBSD_RET_OK) {
+                ereport(WARNING, (errmsg("DBSD_SqliDetect failed, errcode %d", detectCode)));
+            }
+        } else {
+            ereport(WARNING, (errmsg("DBSD_CheckUserInfo failed, errcode %d", ret)));
+        }
+    }
+}
+
 /* Release any existing unnamed prepared statement */
 static void drop_unnamed_stmt(void)
 {
@@ -9392,6 +9485,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     u_sess->exec_cxt.RetryController->stub_.ECodeStubTest();
                 }
 #endif
+                detectForDBSD(query_string);
                 exec_simple_query(query_string, QUERY_MESSAGE, &input_message); /* @hdfs Add the second parameter */
 
                 if (MEMORY_TRACKING_QUERY_PEAK)
@@ -9762,7 +9856,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                     errmsg("Too long query_string.")));
                 }
-
+                detectForDBSD(query_string);
                 numParams = pq_getmsgint(&input_message, 2);
                 paramTypes = (Oid*)palloc(numParams * sizeof(Oid));
                 if (numParams > 0) {

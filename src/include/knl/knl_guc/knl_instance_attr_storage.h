@@ -147,6 +147,8 @@ typedef struct knl_instance_attr_storage {
     bool EnableHotStandby;
     bool enable_mix_replication;
     bool IsRoachStandbyCluster;
+    bool enable_dbsd;
+    bool enable_wal_compression;
     bool enable_gtm_free;
     bool comm_cn_dn_logic_conn;
     bool enable_adio_function;

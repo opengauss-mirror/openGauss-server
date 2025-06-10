@@ -109,6 +109,55 @@ enum knl_virtual_role {
     VSINGLENODE = 3,
 };
 
+/* DBSD func_ptr */
+typedef int (*DBSD_InitFunc_fn)(const void*, const char*, const char*);
+typedef int (*DBSD_UninitFunc_fn)(void);
+typedef int (*DBSD_StartFunc_fn)(void);
+typedef int (*DBSD_StopFunc_fn)(void);
+typedef int (*DBSD_SqliDetectFunc_fn)(const void*, int);
+typedef int (*DBSD_CheckUserInfo_fn)(const unsigned int);
+typedef int (*DBSD_SendUserInfo_fn)(const unsigned int, char*);
+
+typedef void* (*MemAlloc)(size_t size);
+typedef void (*MemFree)(void *memBuff);
+
+typedef struct TagDbsdCallbacks {
+    MemAlloc memAlloc;
+    MemFree memFree;
+} DBSD_Callbacks;
+
+typedef enum {
+    DBSD_RET_OK = 0,
+    DBSD_RET_ERR,
+    DBSD_RET_INVALID_ARG,
+    DBSD_RET_INITIALIZED,
+    DBSD_RET_NOT_INITIALIZED,
+    DBSD_RET_NOT_STARTED,
+    DBSD_RET_NO_MEM,
+    DBSD_RET_NO_NEED_CHECK_USER,
+    DBSD_RET_END = 99
+} DBSD_RET_CODE;
+
+typedef struct DBSDFunc {
+    void *handle;
+    DBSD_InitFunc_fn DBSD_Init;
+    DBSD_UninitFunc_fn DBSD_Uninit;
+    DBSD_StartFunc_fn DBSD_Start;
+    DBSD_StopFunc_fn DBSD_Stop;
+    DBSD_SqliDetectFunc_fn DBSD_SqliDetect;
+    DBSD_CheckUserInfo_fn DBSD_CheckUserInfo;
+    DBSD_SendUserInfo_fn DBSD_SendUserInfo;
+} DBSDFunc;
+
+typedef struct TagDbsdSqliData {
+    unsigned int userId;
+    unsigned int sqlStatementLen;
+    char* sqlStatement;
+    char* userAddress;
+} DBSD_SqliData;
+
+
+
 /*
  * start process: set to REDO_INIT
  * parallel redo begin:set to REDO_STARTING_BEGIN, wait for redo worker thread to start
@@ -1481,6 +1530,8 @@ typedef struct knl_instance_context {
     struct DistributeTestParam* distribute_test_param_instance;
     struct SegmentTestParam* segment_test_param_instance;
     struct WhiteboxTestParam* whitebox_test_param_instance;
+
+    DBSDFunc DBSDFuncList;
 
     /* Set by the -o option */
     char ExtraOptions[MAXPGPATH];

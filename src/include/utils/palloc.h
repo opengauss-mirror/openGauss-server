@@ -273,6 +273,7 @@ extern THR_LOCAL MemoryContext AlignMemoryContext;
 
 extern void pfree(void* pointer);
 extern void opt_pfree(void* pointer);
+extern void* palloc_func(size_t size);
 
 #define selfpfree(ptr) pfree((ptr))
 
