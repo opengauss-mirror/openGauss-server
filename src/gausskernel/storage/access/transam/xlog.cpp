@@ -11102,10 +11102,6 @@ void StartupXLOG(void)
         SSUpdateReformerCtrl();
         LWLockRelease(ControlFileLock);
         SSRequestAllStandbyReloadReformCtrlPage();
-        if (ENABLE_ONDEMAND_REALTIME_BUILD) {
-            ereport(LOG, (errmsg("[SS][On-demand] StartupXLOG: recovery instance id is %d in control file",
-                    g_instance.dms_cxt.SSReformerControl.recoveryInstId)));
-        }
     }
 
     ereport(LOG, (errmsg("redo done, nextXid: " XID_FMT ", startupMaxXid: " XID_FMT ", recentLocalXmin: " XID_FMT
