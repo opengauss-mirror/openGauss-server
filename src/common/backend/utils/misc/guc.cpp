@@ -2153,6 +2153,17 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_default_local_index",
+            PGC_USERSET,
+            NODE_ALL,
+            ERROR_HANDLING_OPTIONS,
+            gettext_noop("Enable create index default behavior is local index"),
+            NULL},
+            &u_sess->attr.attr_sql.enable_default_local_index,
+            false,
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
