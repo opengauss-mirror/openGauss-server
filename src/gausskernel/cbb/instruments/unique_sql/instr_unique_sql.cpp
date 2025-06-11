@@ -2697,8 +2697,9 @@ void ResetCurrentUniqueSQL(bool need_reset_cn_id)
     u_sess->unique_sql_cxt.force_generate_unique_sql = false;
 }
 
-void FindUniqueSQL(UniqueSQLKey key, char* unique_sql)
+bool FindUniqueSQL(UniqueSQLKey key, char* unique_sql)
 {
+    bool res = false;
     errno_t rc = 0;
     uint32 hashCode = uniqueSQLHashCode(&key, sizeof(key));
     (void)LockUniqueSQLHashPartition(hashCode, LW_SHARED);
@@ -2706,13 +2707,20 @@ void FindUniqueSQL(UniqueSQLKey key, char* unique_sql)
     UniqueSQL *entry = (UniqueSQL*)hash_search(g_instance.stat_cxt.UniqueSQLHashtbl, &key, HASH_FIND, NULL);
 
     if (entry == NULL) {
-        rc = strcpy_s(unique_sql, UNIQUE_SQL_MAX_LEN, "");
-        securec_check(rc, "\0", "\0");
+        if (unique_sql != NULL) {
+            rc = strcpy_s(unique_sql, UNIQUE_SQL_MAX_LEN, "");
+            securec_check(rc, "\0", "\0");
+        }
+        res = false;
     } else {
-        rc = strcpy_s(unique_sql, UNIQUE_SQL_MAX_LEN, entry->unique_sql);
-        securec_check(rc, "\0", "\0");
+        if (unique_sql != NULL) {
+            rc = strcpy_s(unique_sql, UNIQUE_SQL_MAX_LEN, entry->unique_sql);
+            securec_check(rc, "\0", "\0");
+        }
+        res = true;
     }
     UnlockUniqueSQLHashPartition(hashCode);
+    return res;
 }
 
 char* FindCurrentUniqueSQL()
