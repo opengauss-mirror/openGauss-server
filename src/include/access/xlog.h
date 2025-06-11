@@ -119,7 +119,8 @@ typedef enum WalLevel {
 } WalLevel;
 
 #define XLogArchivingActive() \
-    (u_sess->attr.attr_common.XLogArchiveMode && g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_ARCHIVE)
+    (u_sess->attr.attr_common.XLogArchiveMode && !SS_STANDBY_MODE && \
+     g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_ARCHIVE)
 #define XLogArchiveCommandSet() (u_sess->attr.attr_storage.XLogArchiveCommand[0] != '\0')
 #define XLogArchiveDestSet() (u_sess->attr.attr_storage.XLogArchiveDest[0] != '\0')
 

@@ -3659,14 +3659,6 @@ static void CheckGUCConflicts(void)
                 errmsg(
                     "WAL archival (archive_mode=on) requires wal_level \"archive\", \"hot_standby\" or \"logical\"")));
 
-    if (ENABLE_DSS) {
-        if (u_sess->attr.attr_common.XLogArchiveMode || strlen(u_sess->attr.attr_storage.XLogArchiveCommand) != 0) {
-            ereport(ERROR,
-                (errcode(ERRCODE_SYSTEM_ERROR),
-                    errmsg("archive functions are not supported when DMS and DSS enabled\n")));
-        }
-    }
-
     if (g_instance.attr.attr_storage.max_wal_senders > 0 && g_instance.attr.attr_storage.wal_level == WAL_LEVEL_MINIMAL)
         ereport(ERROR,
             (errcode(ERRCODE_SYSTEM_ERROR),
@@ -4418,7 +4410,8 @@ static int ServerLoop(void)
         /* If we have lost the archiver, try to start a new one */
         if (!dummyStandbyMode) {
             if (g_instance.pid_cxt.PgArchPID == 0 && pmState == PM_RUN && XLogArchivingActive() &&
-                (XLogArchiveCommandSet() || XLogArchiveDestSet())) {
+                (XLogArchiveCommandSet() || XLogArchiveDestSet()) &&
+                (!ENABLE_DSS || (pg_atomic_read_u32(&WorkingGrandVersionNum) >= SS_ARCHIVE_VERSION_NUM))) {
                 g_instance.pid_cxt.PgArchPID = pgarch_start();
             } else if (g_instance.archive_thread_info.obsArchPID != NULL &&
                 (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
@@ -4619,7 +4612,7 @@ static int initPollfd(struct pollfd* ufds)
     /* set default value for all pollfds */
     for (i = 0; i < MAXLISTEN * 2 + 1; i++) {
         ufds[i].fd = PGINVALID_SOCKET;
-        ufds[cnt].events = 0;
+        ufds[i].events = 0;
     }
 
     for (i = 0; i < MAXLISTEN; i++) {

@@ -898,6 +898,9 @@ static void knl_g_datadir_init(knl_g_datadir_context* datadir_init)
     errorno = strcpy_s(datadir_init->xlogDir, MAXPGPATH, "pg_xlog");
     securec_check_c(errorno, "\0", "\0");
 
+    errorno = strcpy_s(datadir_init->archiveDir, MAXPGPATH, "pg_xlog/archive_status");
+    securec_check_c(errorno, "\0", "\0");
+
     errorno = strcpy_s(datadir_init->controlPath, MAXPGPATH, "global/pg_control");
     securec_check_c(errorno, "\0", "\0");
 
