@@ -71,4 +71,52 @@ void VectorArrayFree(VectorArray arr);
 
 int PQInit();
 void PQUinit();
+
+typedef struct MmapShmemVal {
+    BlockNumber blockNum;
+    bool isMmap;
+    void* mptr = NULL;
+} MmapShmemVal;
+
+typedef struct MmapShmem {
+    BufferTag key;
+    int mfd;
+    size_t totalSize;       // file size
+    uint32 mmapPage;        // Page size
+    BlockNumber numPerPage; // total BlockNumber per page size
+    uint32 maxBlock;        // maxBlock =  totalSize / 8K
+    bool isUStore;
+    bool isInit =  false;
+    MmapShmemVal* mMate = NULL;
+    MmapShmemVal mShmem[RELSEG_SIZE];
+    MmapShmem* next;
+} MmapShmem;
+
+#define MAX_MMAP_BACKENDS 128
+#define NUM_MMAP_PARTITIONS (NUM_BUFFER_PARTITIONS / MAX_MMAP_BACKENDS)
+#define MMAP_FILE_MAX_SIZE (RELSEG_SIZE * BLCKSZ)
+#ifdef __x86_64__
+#define MMAP_PAGE_SIZE 0
+#else
+#define MMAP_PAGE_SIZE sysconf(_SC_PAGESIZE)
+#endif
+
+extern uint32 g_mmapOff;
+static inline uint32 InitMmapOff()
+{
+    if (unlikely(MMAP_PAGE_SIZE == 0)) {
+        return 0;
+    }
+    uint32 ret = 0;
+    if (MMAP_PAGE_SIZE < BLCKSZ) {
+        ret = ((BLCKSZ % MMAP_PAGE_SIZE) == 0) ? BLCKSZ : 0;
+    } else {
+        ret = ((MMAP_PAGE_SIZE % BLCKSZ) == 0) ? MMAP_PAGE_SIZE : 0;
+    }
+    return ret;
+}
+extern void MmapShmemInit(void);
+Size MmapShmemSize();
+void InitParamsMetaPage(Relation index, PQParams* params, bool* enablePQ, bool trymmap);
+void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint);
 #endif

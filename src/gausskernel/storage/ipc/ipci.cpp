@@ -88,6 +88,7 @@
 #ifdef USE_SPQ
 #include "executor/node/nodeShareInputScan.h"
 #endif
+#include "access/datavec/utils.h"
 
 extern void SetShmemCxt(void);
 #ifdef ENABLE_MULTIPLE_NODES
@@ -205,6 +206,9 @@ Size ComputeTotalSizeOfShmem()
 
         if (g_instance.attr.attr_storage.dms_attr.enable_ondemand_recovery) {
             size = add_size(size, OndemandRecoveryShmemSize());
+        }
+        if (g_instance.attr.attr_storage.enable_mmap) {
+            size = add_size(size, MmapShmemSize());
         }
         return size;
 }
@@ -363,6 +367,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 #ifdef USE_SPQ
     ShareInputShmemInit();
 #endif
+    MmapShmemInit();
     {
         CheckpointerShmemInit();
         CBMShmemInit();

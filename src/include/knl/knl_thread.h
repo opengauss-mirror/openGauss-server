@@ -2876,6 +2876,7 @@ typedef struct knl_t_storage_context {
     dms_buf_ctrl_t* dmsBufCtl;
     char* ondemandXLogMem;
     struct HTAB* ondemandXLogFileIdCache;
+    struct HTAB* ShmemMmap;
 } knl_t_storage_context;
 
 typedef struct knl_t_port_context {

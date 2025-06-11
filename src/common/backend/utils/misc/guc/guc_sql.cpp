@@ -199,6 +199,7 @@ static bool check_disable_keyword_options(char **newval, void **extra, GucSource
 static void assign_disable_keyword_options(const char *newval, void *extra);
 static bool check_restrict_nonsystem_relation_kind(char **newval, void **extra, GucSource source);
 static void assign_restrict_nonsystem_relation_kind(const char *newval, void *extra);
+static bool check_mmap_set(bool* newval, void** extra, GucSource source);
 
 static void InitSqlConfigureNamesBool();
 static void InitSqlConfigureNamesInt();
@@ -1875,6 +1876,18 @@ static void InitSqlConfigureNamesBool()
             &u_sess->attr.attr_sql.enable_vector_targetlist, 
             false,
             NULL,
+            NULL,
+            NULL
+        },
+        {{"hnsw_use_mmap",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("enable mmap in hnsw"),
+            NULL},
+            &u_sess->datavec_ctx.hnsw_use_mmap,
+            false,
+            check_mmap_set,
             NULL,
             NULL
         },
@@ -4648,4 +4661,20 @@ static void assign_restrict_nonsystem_relation_kind(const char *newval, void *ex
     list_free(elemlist);
 
     u_sess->utils_cxt.restrict_nonsystem_relation_kind_flags = result;
+}
+
+static bool check_mmap_set(bool* newval, void** extra, GucSource source)
+{
+    if (g_instance.attr.attr_storage.enable_mmap) {
+        return true;
+    }
+    if (PGC_S_FILE == source || PGC_S_DEFAULT == source) {
+        *newval = false;
+        return true;
+    }
+    if (*newval) {
+        GUC_check_errdetail("pls set enable_mmap on first");
+        return false;
+    }
+    return true;
 }
