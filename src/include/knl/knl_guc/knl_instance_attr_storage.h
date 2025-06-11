@@ -248,6 +248,7 @@ typedef struct knl_instance_attr_storage {
     bool uwal_async_append_switch;
 
     bool enable_pq;
+    bool enable_mmap;
     int parallel_recovery_dispatch_algorithm;
 } knl_instance_attr_storage;
 

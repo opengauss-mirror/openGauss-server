@@ -120,11 +120,6 @@ static uint32 hash_offset(Size offset)
 #define SH_DEFINE
 #include "lib/simplehash.h"
 
-typedef union {
-    pointerhash_hash *pointers;
-    offsethash_hash *offsets;
-    tidhash_hash *tids;
-} VisitedHash;
 
 /*
  * Get the max number of connections in an upper layer for each element in the index
@@ -303,6 +298,7 @@ HnswElement HnswInitElement(char *base, ItemPointer heaptid, int m, double ml, i
     HnswInitNeighbors(base, element, m, allocator);
 
     HnswPtrStore(base, element->value, (Pointer)NULL);
+    element->fromMmap = false;
 
     return element;
 }
@@ -327,6 +323,7 @@ HnswElement HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno)
     element->offno = offno;
     HnswPtrStore(base, element->neighbors, (HnswNeighborArrayPtr *)NULL);
     HnswPtrStore(base, element->value, (Pointer)NULL);
+    element->fromMmap = false;
     return element;
 }
 
@@ -959,8 +956,7 @@ HnswLoadUnvisitedFromMemory(char *base, HnswElement element, HnswElement *unvisi
 /*
  * Load unvisited neighbors from disk
  */
-static void
-HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int *unvisitedLength,
+void HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int *unvisitedLength,
                           VisitedHash *v, Relation index, int m, int lm, int lc)
 {
     Buffer buf;
@@ -1004,7 +1000,7 @@ HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int *unvi
  * Algorithm 2 from paper
  */
 List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation index, FmgrInfo *procinfo,
-                      Oid collation, int m, bool inserting, HnswElement skipElement,
+                      Oid collation, int m, bool inserting, HnswElement skipElement, bool tryMmap,
                       IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo)
 {
     List *w = NIL;
@@ -1068,7 +1064,11 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
             HnswLoadUnvisitedFromMemory(base, cElement, unvisited, &unvisitedLength, &v,
                                         lc, neighborhoodData, neighborhoodSize);
         } else {
-            HnswLoadUnvisitedFromDisk(cElement, unvisited, &unvisitedLength, &v, index, m, lm, lc);
+            if (tryMmap) {
+                HnswLoadUnvisitedFromMmap(cElement, unvisited, &unvisitedLength, &v, index, m, lm, lc);
+            } else {
+                HnswLoadUnvisitedFromDisk(cElement, unvisited, &unvisitedLength, &v, index, m, lm, lc);
+            }
         }
 
         for (int i = 0; i < unvisitedLength; i++) {
@@ -1086,8 +1086,13 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                     eDistance = GetCandidateDistance(base, eElement, q, procinfo, collation);
                 }
             } else {
-                HnswLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
-                                alwaysAdd ? NULL : &f->distance, NULL, enablePQ, pqinfo);
+                if (tryMmap) {
+                    MmapLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
+                                    alwaysAdd ? NULL : &f->distance, NULL, enablePQ, pqinfo);
+                } else {
+                    HnswLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
+                                    alwaysAdd ? NULL : &f->distance, NULL, enablePQ, pqinfo);
+                }
             }
 
             if (eDistance < f->distance || alwaysAdd) {
@@ -1588,17 +1593,10 @@ int getPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo)
     }
 }
 
-void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ)
+void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ, bool trymmap)
 {
     const HnswTypeInfo *typeInfo = HnswGetTypeInfo(index);
-    Buffer buf = ReadBuffer(index, HNSW_METAPAGE_BLKNO);
-    LockBuffer(buf, BUFFER_LOCK_SHARE);
-    Page page = BufferGetPage(buf);
-    HnswMetaPage metap = HnswPageGetMeta(page);
-    *enablePQ = metap->enablePQ;
-    params->pqM = metap->pqM;
-    params->pqKsub = metap->pqKsub;
-    UnlockReleaseBuffer(buf);
+    InitParamsMetaPage(index, params, enablePQ, trymmap);
     int pqMode = HNSW_PQMODE_DEFAULT;
 
     if (*enablePQ && !g_instance.pq_inited) {
