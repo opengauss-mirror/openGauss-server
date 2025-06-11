@@ -798,7 +798,7 @@ void ThreadPoolWorker::AddBackend(Backend* bn)
     DLAddHead(g_instance.backend_list, &bn->elem);
 }
 
-static void init_session_share_memory()
+void init_session_share_memory()
 {
     TableSpaceUsageManager::Init();
 #ifndef ENABLE_MULTIPLE_NODES

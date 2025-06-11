@@ -153,4 +153,6 @@ private:
     knl_thrd_context *m_thrd;
 };
 
+extern void init_session_share_memory();
+
 #endif /* THREAD_POOL_WORKER_H */

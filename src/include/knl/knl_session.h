@@ -2963,6 +2963,7 @@ typedef struct knl_u_hook_context {
     void *getIgnoreKeywordTokenHook;
     void *modifyTypeForPartitionKeyHook;
     void *deparseCollectedCommandHook;
+    void *enableProcedureExecutementHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {
