@@ -217,7 +217,7 @@ bool isUniqueSQLContextInvalid();
 void UpdateSingleNodeByPassUniqueSQLStat(bool isTopLevel);
 void UpdateUniqueSQLHashStats(HashJoinTable hashtable, TimestampTz* start_time);
 void UpdateUniqueSQLVecSortStats(Batchsortstate* state, uint64 spill_count, TimestampTz* start_time);
-void FindUniqueSQL(UniqueSQLKey key, char* unique_sql);
+bool FindUniqueSQL(UniqueSQLKey key, char* unique_sql);
 char* FindCurrentUniqueSQL();
 
 bool is_instr_top_portal();
