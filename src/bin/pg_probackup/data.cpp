@@ -616,9 +616,16 @@ bool SegCompressFileDataPageReader::IsValidSegmentPrefix(char ch)
 
 bool SegCompressFileDataPageReader::MaybeSegmentCompressedFile()
 {
-    if (m_file == nullptr || m_file->name == nullptr || strlen(m_file->name) == 0) {
+    if (m_file == nullptr || m_file->name == nullptr ||
+        m_fromFullpath == nullptr || strlen(m_fromFullpath) == 0 ||
+        strlen(m_file->name) == 0) {
         return false;
     }
+
+    if (is_dss_file(m_fromFullpath)) {
+        return false;
+    }
+
     auto filename = m_file->name;
     size_t filenameSize = strlen(filename);
     // Check if the filename matches specific patterns for segment-compressed files
