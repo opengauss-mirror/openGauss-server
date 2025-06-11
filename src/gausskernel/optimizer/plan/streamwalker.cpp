@@ -103,6 +103,13 @@ bool stream_walker(Node* node, void* context)
         case T_CoerceViaIO: {
             stream_walker_coerce((CoerceViaIO*) node, cxt);
         } break;
+        case T_UserSetElem: {
+            /*
+             * turn off dop for query with set uservar, as the uservar value is
+             * affected by the execution order, impacting the result set.
+             */
+            u_sess->opt_cxt.query_dop = 1;
+        } break;
         default:
             break;
     }
@@ -448,14 +455,6 @@ static void stream_walker_query(Query* query, shipping_context *cxt)
     if (list_length(query->resultRelations) > 1) {
         /* turn off push for multiple modify */
         cxt->current_shippable = false;
-    }
-
-    if (u_sess->parser_cxt.has_equal_uservar) {
-        /*
-         * turn off dop for query with set uservar, as the uservar value is
-         * affected by the execution order, impacting the result set.
-         */
-        u_sess->opt_cxt.query_dop = 1;
     }
 
     /* Mark query's can_push and global_shippable flag. */

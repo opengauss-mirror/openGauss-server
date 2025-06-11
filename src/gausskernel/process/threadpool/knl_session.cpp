@@ -166,6 +166,7 @@ void knl_u_executor_init(knl_u_executor_context* exec_cxt)
     exec_cxt->EventTriggerCacheContext = NULL;
     exec_cxt->EventTriggerState = NULL;
     exec_cxt->isFlashBack = false;
+    exec_cxt->has_equal_uservar = false;
 }
 
 static void knl_u_index_init(knl_u_index_context* index_cxt)

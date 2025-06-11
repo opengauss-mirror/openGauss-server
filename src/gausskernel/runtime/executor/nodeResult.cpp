@@ -76,7 +76,8 @@ static TupleTableSlot* ExecResult(PlanState* state)
     /*
      * check constant qualifications like (2 > 1), if not already done
      */
-    if ((node->rs_checkqual || (u_sess->parser_cxt.has_set_uservar && DB_IS_CMPT(B_FORMAT))) && !u_sess->parser_cxt.has_equal_uservar) {
+    if ((node->rs_checkqual || (u_sess->parser_cxt.has_set_uservar && DB_IS_CMPT(B_FORMAT))) &&
+        !u_sess->exec_cxt.has_equal_uservar) {
         bool qualResult = ExecQual((List*)node->resconstantqual, econtext, false);
 
         node->rs_checkqual = false;
@@ -109,8 +110,8 @@ static TupleTableSlot* ExecResult(PlanState* state)
     if (node->ps.ps_vec_TupFromTlist) {
         result_slot = ExecProject(node->ps.ps_ProjInfo, &is_done);
         if (is_done == ExprMultipleResult) {
-            if (u_sess->parser_cxt.has_equal_uservar) {
-                u_sess->parser_cxt.has_equal_uservar = false;
+            if (u_sess->exec_cxt.has_equal_uservar) {
+                u_sess->exec_cxt.has_equal_uservar = false;
                 bool qualResult = ExecQual((List*)node->resconstantqual, econtext, false);
 
                 node->rs_checkqual = false;
@@ -168,7 +169,7 @@ static TupleTableSlot* ExecResult(PlanState* state)
             node->rs_done = true;
         }
 
-        if (u_sess->parser_cxt.has_equal_uservar && node->resconstantqual != NULL) {
+        if (u_sess->exec_cxt.has_equal_uservar && node->resconstantqual != NULL) {
             bool qualResult = ExecQual((List*)node->resconstantqual, econtext, false);
 
             node->rs_checkqual = false;
@@ -190,8 +191,8 @@ static TupleTableSlot* ExecResult(PlanState* state)
          */
         result_slot = ExecProject(node->ps.ps_ProjInfo, &is_done);
 
-        if (u_sess->parser_cxt.has_equal_uservar && node->resconstantqual != NULL) {
-            u_sess->parser_cxt.has_equal_uservar = false;
+        if (u_sess->exec_cxt.has_equal_uservar && node->resconstantqual != NULL) {
+            u_sess->exec_cxt.has_equal_uservar = false;
             bool qualResult = ExecQual((List*)node->resconstantqual, econtext, false);
 
             node->rs_checkqual = false;

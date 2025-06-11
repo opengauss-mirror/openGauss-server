@@ -795,6 +795,11 @@ CREATE TABLE userset_t1 (a VARCHAR(500) CHARACTER SET UTF8);
 SET @num=1000;
 INSERT INTO userset_t1 VALUES (CONCAT((@num:=@num+1), 'a'));
 
+SELECT count(*)
+FROM (SELECT @cdate2:= sysdate + INTERVAL '1' day FROM userset_t1) tmp1
+WHERE @cdate2 > '2022-01-01' ;
+drop table userset_t1;
+
 set enable_set_variable_b_format = default;
 \c regression
 drop database if exists test_set;

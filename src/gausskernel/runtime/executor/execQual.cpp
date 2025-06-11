@@ -6007,9 +6007,9 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
         case T_UserVar:
         case T_SetVariableExpr:
             state = (ExprState*)makeNode(ExprState);
-           state->is_flt_frame = false;
-           state->evalfunc = ExecEvalConst;
-           break;
+            state->is_flt_frame = false;
+            state->evalfunc = ExecEvalConst;
+            break;
        case T_Param:
            state = (ExprState*)makeNode(ExprState);
            state->is_flt_frame = false;
@@ -6724,6 +6724,7 @@ ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
             state = (ExprState*)usestate;
             state->evalfunc = (ExprStateEvalFunc)ExecEvalUserSetElm;
             usestate->instate = ExecInitExpr((Expr *)useexpr->val, parent);
+            u_sess->exec_cxt.has_equal_uservar = true;
         } break;
        case T_PriorExpr:
             state = (ExprState*)makeNode(ExprState);

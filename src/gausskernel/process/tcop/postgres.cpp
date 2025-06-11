@@ -8773,7 +8773,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         u_sess->parser_cxt.isPerform = false;
         u_sess->parser_cxt.in_userset = false;
         u_sess->parser_cxt.has_set_uservar = false;
-        u_sess->parser_cxt.has_equal_uservar = false;
         u_sess->parser_cxt.stmt = NULL;
         u_sess->parser_cxt.cursor_expr_level = 0;
         OpFusion::tearDown(u_sess->exec_cxt.CurrentOpFusionObj);
