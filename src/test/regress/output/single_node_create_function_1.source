@@ -69,7 +69,7 @@ DETAIL:  Actual return type is text.
 CONTEXT:  SQL function "test1"
 CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
     AS 'not even SQL';
-ERROR:  syntax error at or near "not even"
+ERROR:  syntax error at or near "not"
 LINE 2:     AS 'not even SQL';
                 ^
 CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
