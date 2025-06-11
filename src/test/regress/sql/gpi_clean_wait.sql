@@ -184,7 +184,7 @@ alter index global_index_gpi_more_invalid_c rebuild;
 -- all global index usuable
 select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_gpi_more_invalid'::regclass ORDER BY c.relname;
 
-reset enable_seqscan；
+reset enable_seqscan;
 drop table test_gpi_more_invalid;
 
 drop table if exists interval_normal_date;
@@ -231,11 +231,12 @@ create index global_index_interval_partition_table_vacuum_a on interval_partitio
 
 \parallel on
 insert into interval_partition_table_vacuum values (generate_series(1,10), generate_series(1,10), generate_series(TO_DATE('1990-01-01', 'YYYY-MM-DD'),TO_DATE('2020-12-01', 'YYYY-MM-DD'),'1 day'));
-vacuum 	interval_partition_table_vacuum;
+vacuum interval_partition_table_vacuum;
 vacuum interval_partition_table_vacuum;
 vacuum analyze interval_partition_table_vacuum;
 \parallel off
 
+set enable_seqscan = off;
 set enable_bitmapscan = off;
 explain (costs off) select count(*) from interval_partition_table_vacuum where c1 = 1;
 -- 11293 rows
@@ -246,9 +247,9 @@ select true from (select count(*) as count from pg_partition a, pg_class b where
 vacuum analyze interval_partition_table_vacuum;
 -- 0 rows
 select count(*) from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_partition_table_vacuum' and a.reloptions[3] like '%wait_clean_gpi=y%';
+reset enable_seqscan;
 reset enable_bitmapscan;
 
 -- clean table
 drop table interval_partition_table_vacuum;
 drop table interval_normal_date;
-drop table test_gpi_more_invalid;

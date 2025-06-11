@@ -160,7 +160,7 @@ ERROR:  syntax error at or near "limit"
 LINE 1: ...update (g2, g3) = (select * from data2 where a = 5 limit 1);
                                                               ^
 insert into gg values(1,1,1) on duplicate key update (g2, g3) = (with tmptb(c1, c2) as (select * from data2) select * from tmptb limit 1); -- err, there is some syntax limitations;
-ERROR:  syntax error at or near "with tmptb"
+ERROR:  syntax error at or near "with"
 LINE 1: ...values(1,1,1) on duplicate key update (g2, g3) = (with tmptb...
                                                              ^
 insert into gg values(2,2,2) on duplicate key update (g2, g3) = (select a, b from data2 where a = 5);      -- suc

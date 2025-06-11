@@ -471,8 +471,7 @@ DROP TABLE some_t;
 -- bogus cases
 CREATE TRIGGER error_upd_and_col BEFORE UPDATE OR UPDATE OF a ON main_table
 FOR EACH ROW EXECUTE PROCEDURE trigger_func('error_upd_and_col');
-ERROR:  duplicate trigger events specified at or near "ON main_table
-FOR"
+ERROR:  duplicate trigger events specified at or near "ON"
 LINE 1: ...ER error_upd_and_col BEFORE UPDATE OR UPDATE OF a ON main_ta...
                                                              ^
 CREATE TRIGGER error_upd_a_a BEFORE UPDATE OF a, a ON main_table

@@ -88,7 +88,7 @@ ALTER TABLE range_range EXCHANGE PARTITION (p_201901) WITH TABLE ori;
 ERROR:  Un-support feature
 DETAIL:  For subpartition table, exchange partition is not yet supported.
 ALTER TABLE range_range EXCHANGE SUBPARTITION (p_201901) WITH TABLE ori;
-ERROR:  syntax error at or near "SUBPARTITION ("
+ERROR:  syntax error at or near "SUBPARTITION"
 LINE 1: ALTER TABLE range_range EXCHANGE SUBPARTITION (p_201901) WIT...
                                          ^
 -- drop
