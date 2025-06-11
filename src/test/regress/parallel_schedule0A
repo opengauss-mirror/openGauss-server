@@ -474,7 +474,7 @@ test: select_into subselect_part2 gs_aggregate
 test: holdable_cursor cursor_expression cursor_expression_dump
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
-test: test_float test_numeric_with_neg_scale test_float_dump
+test: test_float test_numeric_with_neg_scale test_float_dump db4ai_security
 
 test: alter_table_000 alter_table_002 alter_table_003 alter_table_modify
 #test: alter_table_001 alter_table_modify_ustore

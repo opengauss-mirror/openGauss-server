@@ -36,14 +36,13 @@ CREATE OR REPLACE FUNCTION db4ai.prepare_snapshot_internal(
     INOUT i_exec_cmds TEXT[],           -- DDL and DML for execution
     IN i_mapping NAME[] DEFAULT NULL    -- mapping of user columns to backing column; generate rules if not NULL
 )
-RETURNS RECORD LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
+RETURNS RECORD LANGUAGE plpgsql SECURITY INVOKER
 AS $$
 DECLARE
     command_str TEXT;     -- command string for iterator
     e_stack_act TEXT;     -- current stack for validation
     row_count BIGINT;     -- number of rows in this snapshot
 BEGIN
-
     BEGIN
         RAISE EXCEPTION 'SECURITY_STACK_CHECK';
     EXCEPTION WHEN OTHERS THEN
@@ -62,8 +61,8 @@ BEGIN
             e_stack_act := pg_catalog.substr(e_stack_act, 200);
         END IF;
 
-        IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (184|550|616|723) at assignment%'
-          AND e_stack_act NOT LIKE 'PL/pgSQL function db4ai.sample_snapshot(name,name,name[],numeric[],name[],text[]) line 224 at IF%'
+        IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (208|574|640|747) at assignment%'
+          AND e_stack_act NOT LIKE 'PL/pgSQL function db4ai.sample_snapshot(name,name,name[],numeric[],name[],text[]) line 264 at IF%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.prepare_snapshot_internal(bigint,bigint,bigint,bigint,name,name,text[],text,name,'
                             'int,text[],name[]) is not allowed'
@@ -201,6 +200,7 @@ DECLARE
     INSERT_OP INT := 2;                                         -- INSERT operation class
     DELETE_OP INT := 3;                                         -- DELETE operation class
     UPDATE_OP INT := 4;                                         -- UPDATE operation class
+    adminuser BOOLEAN;                                          -- current user privileges
     vers_arr INT[];                                             -- split version digits
     exec_cmds TEXT[];                                           -- commands for execution
     qual_name TEXT;                                             -- qualified snapshot name
@@ -222,9 +222,16 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.quote_ident(pg_catalog.current_setting('db4ai.message_level'));
         RAISE INFO 'effective client_min_messages is %', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
+    END;
+
+    BEGIN
+        EXECUTE 'SELECT rolsystemadmin FROM pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
+        IF adminuser IS FALSE THEN
+            RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
+        END IF;
     END;
 
     -- obtain active snapshot mode
@@ -260,6 +267,22 @@ BEGIN
     -- check all input parameters
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
+    END IF;
+
+    IF i_schema LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%', '%(%', '%)%']) THEN
+        RAISE EXCEPTION 'Please use specification input: schema name';
+    END IF;
+
+    IF i_parent LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%', '%(%', '%)%']) THEN
+        RAISE EXCEPTION 'Please use specification input: parent snapshot name';
+    END IF;
+
+    IF i_vers LIKE ANY(ARRAY['%;%', '%[%', '%]%', '%,%']) THEN
+        RAISE EXCEPTION 'Please use specification input: override version postfix';
+    END IF;
+
+    IF i_comment LIKE ANY(ARRAY['%;%', '%,%']) THEN
+        RAISE EXCEPTION 'Please use specification input: comment(snapshot description)';
     END IF;
 
     IF i_parent IS NULL OR i_parent = '' THEN
