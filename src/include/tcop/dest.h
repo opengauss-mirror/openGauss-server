@@ -154,6 +154,8 @@ struct _DestReceiver {
 
     void (*finalizeLocalStream)(DestReceiver* self);
 
+    void (*sendRowDesc)(StringInfo buf, TupleDesc typeinfo, List *targetlist, int16 *formats);
+
     /* send sample tuple to coordinator for analyze */
     bool forAnalyzeSampleTuple;
 

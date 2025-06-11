@@ -465,6 +465,7 @@ DestReceiver *printtup_create_DR(CommandDest dest)
     self->pub.rStartup = printtup_startup;
     self->pub.rShutdown = printtup_shutdown;
     self->pub.rDestroy = printtup_destroy;
+    self->pub.sendRowDesc = SendRowDescriptionMessage;
     self->pub.finalizeLocalStream = NULL;
     self->pub.mydest = dest;
     self->pub.tmpContext = NULL;

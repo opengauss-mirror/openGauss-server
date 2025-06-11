@@ -71,7 +71,8 @@ public:
 
     static void setCurrentOpFusionObj(OpFusion* obj);
 
-    static bool process(int op, StringInfo msg, char* completionTag, bool isTopLevel, bool* isQueryCompleted);
+    static bool process(int op, const char* portalName, long maxRows, char* completionTag, bool isTopLevel,
+        bool* isQueryCompleted);
 
     static void SaveInGPC(OpFusion* obj);
 
@@ -83,13 +84,15 @@ public:
 
     void CopyFormats(int16* formats, int numRFormats);
 
-    void updatePreAllocParamter(StringInfo msg);
+    void updatePreAllocParamter(BindMessage* pqBindMessage, CachedPlanSource* psrc,
+        get_param_list_info_func get_param_func);
 
     void useOuterParameter(ParamListInfo params);
 
-    void describe(StringInfo msg);
+    void describe();
 
-    void fusionExecute(StringInfo msg, char *completionTag, bool isTopLevel, bool *isQueryCompleted);
+    void fusionExecute(const char* portalName, long maxRows, char *completionTag, bool isTopLevel,
+        bool *isQueryCompleted);
 
     void CheckLogDuration();
 
@@ -148,7 +151,7 @@ public:
 
     static void removeFusionFromHtab(const char *portalname);
 
-    static void refreshCurFusion(StringInfo msg);
+    static void refreshCurFusion(const char *portalName);
 
     inline bool IsGlobal()
     {

@@ -1179,7 +1179,7 @@ static bool tryBypass(CachedPlanSource* psrc, ParameterizationInfo* paramInfo, D
             setCachedPlanBucketId(cps->gplan, *paramListInfo);
         }
 
-        if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, false, NULL)) {
+        if (OpFusion::process(FUSION_EXECUTE, NULL, 0, completionTag, false, NULL)) {
             return true;
         }
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Bypass process Failed")));
@@ -1213,7 +1213,7 @@ static bool executeParamQuery(CachedPlanSource* psrc, ParamListInfo paramListInf
             ((OpFusion*)psrc->opFusionObj)->useOuterParameter(paramListInfo);
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
 
-            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, false, NULL)) {
+            if (OpFusion::process(FUSION_EXECUTE, NULL, 0, completionTag, false, NULL)) {
                 return true;
             }
             Assert(0);

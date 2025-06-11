@@ -217,6 +217,40 @@ List* CopyLocalStmt(const List* stmt_list, const MemoryContext parent_cxt, Memor
 bool SPIParseEnableGPC(const Node *node);
 void CleanSessGPCPtr(knl_session_context* currentSession);
 void CleanSessionGPCDetach(knl_session_context* currentSession);
+extern void get_prepared_statement(const char *stmt_name, PreparedStatement **pstmt, CachedPlanSource** psrc);
+
+/* message needed by exec_bind_message */
+typedef struct {
+    const char *portalName;
+    const char *stmtName;
+    int numPFormats;
+    int16 *pformats;
+    int numParams;
+    int *plength;
+    const char **pvalue;
+    int numRFormats;
+    int16 *rformats;
+} BindMessage;
+
+typedef void (*get_param_list_info_func)(BindMessage* pqBindMessage, CachedPlanSource* psrc, ParamListInfo* params,
+    MemoryContext paramCtx, MemoryContext valueCtx);
+extern void exec_parse_message(const char* query_string, /* string to execute */
+    const char* stmt_name,                               /* name for prepared stmt */
+    Oid* paramTypes,                                     /* parameter types */
+    char** paramTypeNames,                               /* parameter type names */
+    const char* paramModes,
+    int numParams,                                       /* number of parameters */
+    bool send_end_msg);
+extern void exec_pre_parse_message();
+extern void exec_after_parse_message(const char* stmt_name);
+extern void exec_bind_message(BindMessage* pqBindMessage, PreparedStatement *pstmt, CachedPlanSource* psrc,
+    bool send_end_msg, get_param_list_info_func get_param_func = NULL);
+extern void exec_pre_bind_message();
+extern void exec_execute_message(const char* portal_name, long max_rows, bool send_end_msg);
+extern bool exec_pre_execute_message(const char* portal_name, long max_rows, bool send_end_msg);
+extern void get_param_list_info(BindMessage* pqBindMessage, CachedPlanSource* psrc, ParamListInfo* params,
+    MemoryContext paramCtx, MemoryContext valueCtx);
+extern void exec_sync_message();
 
 /* for HTAB SPICacheTable, global procedure plancache */
 extern SPIPlanCacheEnt*  SPIPlanCacheTableLookup(uint32 key);
