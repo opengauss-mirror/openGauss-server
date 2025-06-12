@@ -33,6 +33,9 @@
 
 pq_func_t g_pq_func = {0};
 uint32 g_mmapOff = 0;
+uint32 g_mmap_relNode = 0;
+uint32 g_mmap_dbNode = 0;
+LWLock g_mmap_nodeLock;
 
 Size VectorItemSize(int dimensions)
 {
@@ -148,7 +151,9 @@ void VectorArrayFree(VectorArray arr)
 
 Size MmapShmemSize() 
 {
+    ereport(WARNING, (errmsg("MMap is on")));
     g_mmapOff = InitMmapOff();
+    LWLockInitialize(&g_mmap_nodeLock, 0);
     return hash_estimate_size(MAX_MMAP_BACKENDS + NUM_MMAP_PARTITIONS, sizeof(MmapShmem));
 }
 
@@ -197,10 +202,20 @@ static void MMapDelete(BufferTag *tag, uint32 hashcode)
     return;
 }
 
-static bool CanUseMmap()
+static bool CanUseMmap(Relation index)
 {
-    bool result = g_instance.attr.attr_storage.enable_mmap && u_sess->datavec_ctx.hnsw_use_mmap && g_mmapOff != 0;
+    bool result = g_instance.attr.attr_storage.enable_mmap && u_sess->datavec_ctx.hnsw_use_mmap &&
+                    g_mmapOff != 0 && (g_mmap_relNode == 0 || index->rd_node.relNode == g_mmap_relNode);
     return result;
+}
+
+bool IsRelnodeMmapLoad(Oid relNode)
+{
+    return g_instance.attr.attr_storage.enable_mmap && g_mmap_relNode == relNode;
+}
+bool IsDBnodeMmapLoad(Oid dbNode)
+{
+    return g_instance.attr.attr_storage.enable_mmap && g_mmap_dbNode == dbNode;
 }
 
 static BlockNumber GetMMapBlocks()
@@ -269,7 +284,9 @@ static bool MmapInitMetaBlock(MmapShmem* sMmap)
         }
         Page page = (Page)metaprt;
         sMmap->isUStore = HnswPageGetOpaque(page)->pageType == HNSW_USTORE_PAGE_TYPE;
-        
+        if (sMmap->isUStore) {
+            return false;
+        }
     }
     off_t off = BLCKSZ;
     for(int i = 1; i < sMmap->numPerPage; i++) {
@@ -361,24 +378,37 @@ static bool RoadMainMmapPage(BufferTag* tag, BlockNumber block_num, char** page)
             LWLockRelease(new_partition_lock);
             continue;
         }
+        LWLockAcquire(&g_mmap_nodeLock, LW_EXCLUSIVE);
+        if (g_mmap_relNode != 0 && g_mmap_relNode != tag->rnode.relNode) {
+            ereport(LOG, (errmsg("mmap error. MMap is loaded by node[%d:%d], cur node[%d:%d]",
+                g_mmap_dbNode, g_mmap_relNode, tag->rnode.dbNode, tag->rnode.relNode)));
+            LWLockRelease(&g_mmap_nodeLock);
+            LWLockRelease(new_partition_lock);
+            return false;
+        }
         result = MMapInsert(tag, new_hash);
         if (result == NULL) {
+            LWLockRelease(&g_mmap_nodeLock);
             LWLockRelease(new_partition_lock);
             return false;
         }
         if (LoadMmapFile(result, tag, true, block_num) == false) {
             MMapDelete(tag, new_hash);
+            LWLockRelease(&g_mmap_nodeLock);
             LWLockRelease(new_partition_lock);
             return false;
         }
+        if (g_mmap_relNode == 0) {
+            g_mmap_relNode = tag->rnode.relNode;
+            g_mmap_dbNode = tag->rnode.dbNode;
+            ereport(LOG, (errmsg("New MMap is init by node[%d:%d]", g_mmap_dbNode, g_mmap_relNode)));
+        }
+        LWLockRelease(&g_mmap_nodeLock);
         LWLockRelease(new_partition_lock);
     }
     if (block_num == HNSW_METAPAGE_BLKNO) {
         *page = (char*)result->mMate->mptr;
         return *page != NULL;
-    }
-    if (result->isUStore) {
-        return false;
     }
     if (MmapBlock(result, block_num)) {
         *page = (char*)result->mShmem[block_num].mptr;
@@ -432,7 +462,7 @@ static void* GetMMapMetaPage(Relation index)
 }
 static void* GetMMapPage(Relation index, BlockNumber block_num)
 {
-    if (!CanUseMmap() || index->rd_backend != InvalidBackendId) {
+    if (!CanUseMmap(index) || index->rd_backend != InvalidBackendId) {
         return NULL;
     }
     BufferTag  new_tag;
@@ -456,7 +486,7 @@ static void* GetMMapPage(Relation index, BlockNumber block_num)
 
 void InitParamsMetaPage(Relation index, PQParams* params, bool* enablePQ, bool trymmap)
 {
-    if (trymmap && index->rd_backend == InvalidBackendId && CanUseMmap()) {
+    if (trymmap && index->rd_backend == InvalidBackendId && HnswGetEnableMMap(index) && CanUseMmap(index)) {
         HnswMetaPage metap = (HnswMetaPage)GetMMapMetaPage(index);
         if (metap != NULL) {
             *enablePQ = metap->enablePQ;
@@ -478,7 +508,7 @@ void InitParamsMetaPage(Relation index, PQParams* params, bool* enablePQ, bool t
 
 void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint)
 {
-    if (index->rd_backend == InvalidBackendId && CanUseMmap()) {
+    if (index->rd_backend == InvalidBackendId && CanUseMmap(index)) {
         HnswMetaPage metap = (HnswMetaPage)GetMMapMetaPage(index);
         if (metap != NULL) {
             if (unlikely(metap->magicNumber != HNSW_MAGIC_NUMBER))
@@ -564,7 +594,7 @@ bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation in
 HnswCandidate *MMapEntryCandidate(char *base, HnswElement entryPoint, Datum q, Relation index, FmgrInfo *procinfo,
                                   Oid collation, bool loadVec, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo)
 {
-    if (index == NULL || !entryPoint->fromMmap || !CanUseMmap()) {
+    if (index == NULL || !entryPoint->fromMmap || !CanUseMmap(index)) {
         return HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, loadVec, scan, enablePQ, pqinfo);
     }
     HnswCandidate *hc = (HnswCandidate *)palloc(sizeof(HnswCandidate));

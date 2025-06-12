@@ -1537,6 +1537,9 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, Hnsw
     if (buildstate->isUStore) {
         ereport(ERROR, (errmsg("ustore table cannot support hnsw.")));
     }
+    if (HnswGetEnableMMap(index)) {
+        ereport(LOG, (errmsg("Table MMap is on")));
+    }
 
     if (buildstate->enablePQ) {
         BuildPQtable(buildstate);

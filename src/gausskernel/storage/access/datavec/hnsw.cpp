@@ -89,8 +89,7 @@ static bytea *hnswoptions_internal(Datum reloptions, bool validate)
         {"enable_pq", RELOPT_TYPE_BOOL, offsetof(HnswOptions, enablePQ)},
         {"pq_m", RELOPT_TYPE_INT, offsetof(HnswOptions, pqM)},
         {"pq_ksub", RELOPT_TYPE_INT, offsetof(HnswOptions, pqKsub)},
-        {"parallel_workers", RELOPT_TYPE_INT, offsetof(StdRdOptions, parallel_workers)},
-        {"storage_type", RELOPT_TYPE_STRING, offsetof(HnswOptions, storage_type)}};
+        {"use_mmap", RELOPT_TYPE_BOOL, offsetof(HnswOptions, useMmap)}};
 
     relopt_value *options;
     int numoptions;
@@ -191,6 +190,9 @@ Datum hnswbuildempty(PG_FUNCTION_ARGS)
         elog(ERROR, "hnsw index do not support extreme rto.");
     }
     Relation index = (Relation)PG_GETARG_POINTER(0);
+    if (IsRelnodeMmapLoad(index->rd_node.relNode)) {
+        ereport(ERROR, (errmsg("cannot do empty after mmap load")));
+    }
     hnswbuildempty_internal(index);
 
     PG_RETURN_VOID();
@@ -223,6 +225,9 @@ Datum hnswbulkdelete(PG_FUNCTION_ARGS)
     IndexBulkDeleteResult *volatile stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
     void *callbackState = static_cast<void *>(PG_GETARG_POINTER(3));
+    if (IsRelnodeMmapLoad(info->index->rd_node.relNode)) {
+        ereport(ERROR, (errmsg("cannot do bulkdelete after mmap load")));
+    }
     stats = hnswbulkdelete_internal(info, stats, callback, callbackState);
 
     PG_RETURN_POINTER(stats);
@@ -236,6 +241,9 @@ Datum hnswvacuumcleanup(PG_FUNCTION_ARGS)
     }
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
+    if (IsRelnodeMmapLoad(info->index->rd_node.relNode)) {
+        ereport(ERROR, (errmsg("cannot do vacuum after mmap load")));
+    }
     stats = hnswvacuumcleanup_internal(info, stats);
 
     PG_RETURN_POINTER(stats);

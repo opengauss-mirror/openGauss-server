@@ -213,6 +213,10 @@ HnswElementTuple IndexFormHnswElementTuple(TupleDesc tupleDesc, Datum *values, c
 
 bool hnswdelete_internal(Relation index, Datum *values, const bool *isnull, ItemPointer heapTCtid, bool isRollbackIndex)
 {
+    if (IsRelnodeMmapLoad(index->rd_node.relNode)) {
+        ereport(ERROR, (errmsg("cannot do DML after mmap load")));
+        return false;
+    }
     bool found;
     HnswElementTuple etup;
 

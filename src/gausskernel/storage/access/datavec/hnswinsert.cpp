@@ -697,6 +697,10 @@ bool hnswinsert_internal(Relation index, Datum *values, bool *isnull, ItemPointe
     if (isnull[0]) {
         return false;
     }
+    if (IsRelnodeMmapLoad(index->rd_node.relNode)) {
+        ereport(ERROR, (errmsg("cannot do DML after mmap load")));
+        return false;
+    }
 
     /* Create memory context */
     insertCtx = AllocSetContextCreate(CurrentMemoryContext, "Hnsw insert temporary context", ALLOCSET_DEFAULT_SIZES);
