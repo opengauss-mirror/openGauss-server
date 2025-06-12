@@ -3223,34 +3223,6 @@ bool CheckSegmentStorageOption(List *options)
     return result;
 }
 
-static bool ValidateSegmentOption(List *options)
-{
-    if (options == NULL) {
-        return true;
-    }
-
-    ListCell *opt = NULL;
-    bool result = true;
-    foreach (opt, options) {
-        DefElem *def = (DefElem *)lfirst(opt);
-
-        if (pg_strcasecmp(def->defname, "compresstype") == 0) {
-            /*
-             * def->arg is NULL, that means it's a RESET action. ignore it.
-             * def->arg is not NULL, that means it's a SET action, so check it.
-             */
-            if (def->arg) {
-                int cmpType = (int)strtol(defGetString(def), NULL, RS_CUSTOM_VALUE_TEN);
-                if (cmpType != COMPRESS_TYPE_NONE)
-                    result = false;
-            }
-            break;
-        }
-    }
-
-    return result;
-}
-
 #ifdef USE_SPQ
 /*
  * before check spq reloption, make sure guc params of spq_enable_btbuild is on

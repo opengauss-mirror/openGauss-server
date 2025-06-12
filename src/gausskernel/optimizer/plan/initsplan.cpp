@@ -542,7 +542,6 @@ List* deconstruct_jointree(PlannerInfo* root, Relids* non_keypreserved)
     Relids qualscope = NULL;
     Relids inner_join_rels = NULL;
     List *postponed_qual_list = NIL;
-    List* result2 = NIL;
 
     /* Start recursion at top of jointree */
     AssertEreport(

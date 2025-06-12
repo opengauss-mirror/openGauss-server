@@ -314,7 +314,6 @@ extern void ModifyCBMReaderByConfig() {
 extern void WaitAndCheckCBMReaderWorkReboot(uint32 expectState, bool isSpecial, bool noNeedCheck) {
     bool enableWork = false;
     bool needWakeup = false;
-    uint32 state;
     while (!enableWork && noNeedCheck) {
         for (int i = 0; i < t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i++) {
             uint32 state = pg_atomic_read_u32(&g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[i].workState);
@@ -1081,13 +1080,6 @@ static bool CheckCBMWorkersStatus(int threadIndex) {
     }
 }
 
-static void ResetNodeInformation(CBM_RECORD* cbmRecord)
-{
-    cbmRecord->hashPtr = NULL;
-    pg_atomic_write_u32(&cbmRecord->parseState, CBM_READ_UNDO);
-    cbmRecord->threadIndex = 0;
-}
-
 extern void SignalCBMReaderWorker(int singal) 
 {
     for (int i = 0; i < t_thrd.cbm_cxt.XlogCbmSys->actualWorkerNum; i++) {
@@ -1260,7 +1252,6 @@ static bool ParseXlogIntoTaskFluent(bool isRecEnd) {
     WakeUpCBMWorkers();
 
     volatile CBM_QUEUE_NODE* head = t_thrd.cbm_cxt.XlogCbmSys->headQueueNode->next;
-    volatile CBM_QUEUE_NODE* temp = NULL;
     bool isNeedToCut = true;
     while (head != t_thrd.cbm_cxt.XlogCbmSys->headQueueNode) {
         uint32 state = pg_atomic_read_u32(&head->CBMRecord.parseState);
@@ -1282,7 +1273,6 @@ static bool ParseXlogIntoTaskFluent(bool isRecEnd) {
                 ereport(LOG, (errmsg("[CBMWriter]: This CBMRecord node is no need to parse, skip forward.")));
             }
             while (true) {
-                uint32 state = pg_atomic_read_u32(&head->CBMRecord.parseState);
                 uint32 readerStatus = pg_atomic_read_u32(
                     &g_instance.comm_cxt.cbm_cxt.CBMThreadStatusList[threadId].workState);
                 /* If this CBMRecord under  CBM_READ_UNDO or CBM_READ_PROCESSING, we must wait for it handled off. */
