@@ -32,6 +32,8 @@
 #define IsDssMode() (instance_config.dss.enable_dss == true)
 #endif
 #define IsSshProtocol() (instance_config.remote.host && strcmp(instance_config.remote.proto, "ssh") == 0)
+#define GS_SECURE_FILES_VERSION_CFG "gs_secure_files/version.cfg"
+#define FILE_PERMISSION_MASK_ALL 0777
 
 /* directory options */
 extern char       *backup_path;
@@ -482,6 +484,8 @@ extern datapagemap_t *fio_get_lsn_map(const char *fullpath, uint32 checksum_vers
 extern pid_t fio_check_postmaster(const char *pgdata, fio_location location);
 
 extern int32 fio_decompress(void* dst, void const* src, size_t size, int compress_alg);
+
+extern void sync_file_with_permissions(char* filepath, mode_t original_permissions);
 
 /* return codes for fio_send_pages() and fio_send_file() */
 #define SEND_OK       (0)
