@@ -11,6 +11,6 @@ set(TGT_datavec_INC
 )
 
 set(datavec_DEF_OPTIONS ${MACRO_OPTIONS})
-set(datavec_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
-set(datavec_LINK_OPTIONS ${BIN_LINK_OPTIONS})
+set(datavec_COMPILE_OPTIONS -fopenmp ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
+set(datavec_LINK_OPTIONS ${BIN_LINK_OPTIONS} -fopenmp)
 add_static_objtarget(gausskernel_storage_access_datavec TGT_datavec_SRC TGT_datavec_INC "${datavec_DEF_OPTIONS}" "${datavec_COMPILE_OPTIONS}" "${datavec_LINK_OPTIONS}")

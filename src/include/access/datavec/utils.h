@@ -47,6 +47,17 @@ typedef struct st_pq_func {
 } pq_func_t;
 extern pq_func_t g_pq_func;
 
+typedef struct st_npu_func {
+    bool inited;
+    void *handle;
+    int (*InitNPU)(int *useNPUDevices, int devNum);
+    int (*MatrixMulOnNPU)(float *matrixA, float *matrixB, float *resMatrix, int paramM, int paramN, int paramK,
+        uint8_t **matrixACacheAddr, int DevIdx, bool cacheMatrixA);
+    int (*ReleaseNPU)(void);
+    void (*ReleaseNPUCache)(uint8_t **cacheAddr, int DevIdx);
+} npu_func_t;
+extern npu_func_t g_npu_func;
+
 static inline Pointer VectorArrayGet(VectorArray arr, int offset)
 {
     return ((char *) arr->items) + (offset * arr->itemsize);

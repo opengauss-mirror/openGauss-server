@@ -290,12 +290,12 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:lib_gstrace_common>
     $<TARGET_OBJECTS:gausskernel_storage_matrix_mem>
 )
-set(gaussdb_LINK_OPTIONS ${BIN_LINK_OPTIONS} ${HOTPATCH_ATOMIC_LDS} -Wl,-E)
+set(gaussdb_LINK_OPTIONS -fopenmp ${BIN_LINK_OPTIONS} ${HOTPATCH_ATOMIC_LDS} -Wl,-E)
 
 set(gaussdb_LINK_DIRS "")
 message("******${gaussdb_server_lib}******")
 set(gaussdb_DEPEND_LIST config_static pgport_srv_static alarmclient_static plpgsql_static pq_static)
-set(gaussdb_LINK_LIBS libconfig.a libpgport_srv.a libalarmclient.a libpq.a libplpgsql.a -l${SECURE_C_CHECK})
+set(gaussdb_LINK_LIBS libconfig.a libpgport_srv.a libalarmclient.a libpq.a libplpgsql.a -fopenmp -lgomp -l${SECURE_C_CHECK})
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON" OR "${ENABLE_PRIVATEGAUSS}" STREQUAL "ON")
         list(APPEND gaussdb_LINK_LIBS ${gaussdb_server_lib} libhotpatchclient.a)

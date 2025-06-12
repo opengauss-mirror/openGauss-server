@@ -1890,6 +1890,17 @@ static void InitSqlConfigureNamesBool()
             init_parameterized_query_context,
             NULL,
             NULL},
+        {{"enable_npu",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enable ivfflat npu in datavec."),
+            NULL},
+            &u_sess->datavec_ctx.enable_npu,
+            false,
+            NULL,
+            NULL,
+            NULL},
 #ifndef ENABLE_MULTIPLE_NODES
         {{"plsql_show_all_error",
             PGC_USERSET,
@@ -3870,7 +3881,7 @@ static bool check_d_format_behavior_compat_options(char **newval, void **extra, 
     List *elemlist = NULL;
     ListCell *cell = NULL;
     int start = 0;
- 
+
     /* Need a modifiable copy of string */
     rawstring = pstrdup(*newval);
     /* Parse string into list of identifiers */
@@ -3879,15 +3890,15 @@ static bool check_d_format_behavior_compat_options(char **newval, void **extra, 
         GUC_check_errdetail("invalid paramater for behavior compat information.");
         pfree(rawstring);
         list_free(elemlist);
- 
+
         return false;
     }
- 
+
     foreach(cell, elemlist)
     {
         const char *item = (const char *)lfirst(cell);
         bool nfound = true;
- 
+
         for (start = 0; start < D_FORMAT_OPT_MAX; start++) {
             if (strcmp(item, d_format_behavior_compat_options[start].name) == 0) {
                 nfound = false;
@@ -3901,13 +3912,13 @@ static bool check_d_format_behavior_compat_options(char **newval, void **extra, 
             return false;
         }
     }
- 
+
     pfree(rawstring);
     list_free(elemlist);
- 
+
     return true;
 }
- 
+
 /*
  * assign_d_format_behavior_compat_options: GUC assign_hook for distribute_test_param
  */
@@ -3924,25 +3935,25 @@ static void assign_d_format_behavior_compat_options(const char *newval, void *ex
     char *rawstring = NULL;
     List *elemlist = NULL;
     ListCell *cell = NULL;
- 
+
     rawstring = pstrdup(newval);
     (void)SplitIdentifierString(rawstring, ',', &elemlist);
- 
+
     u_sess->utils_cxt.d_format_behavior_compat_flags = 0;
     foreach(cell, elemlist)
     {
         for (start = 0; start < D_FORMAT_OPT_MAX; start++) {
             const char *item = (const char *)lfirst(cell);
- 
+
             if (strcmp(item, d_format_behavior_compat_options[start].name) == 0 &&
                 !(result & d_format_behavior_compat_options[start].flag))
                     result += d_format_behavior_compat_options[start].flag;
         }
     }
- 
+
     pfree(rawstring);
     list_free(elemlist);
- 
+
     u_sess->utils_cxt.d_format_behavior_compat_flags = result;
 }
 #ifdef ENABLE_MULTIPLE_NODES
