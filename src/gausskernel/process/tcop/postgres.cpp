@@ -297,7 +297,7 @@ void InitDBSD()
     
     char* rootDir = gs_getenv_r("GAUSSLOG");
     char logRootDir[PATH_MAX + 1] = {'\0'};
-    if (rootDir != NULL) {
+    if (rootDir == NULL) {
         ereport(WARNING, (errmsg("Get GAUSSLOG failed, trun to HOME directory")));
         rootDir = gs_getenv_r("HOME");
     }
@@ -6289,7 +6289,7 @@ static bool IsTransactionPrepareStmt(const Node* parsetree)
 
 static void detectForDBSD(const char* queryString)
 {
-    if (!IsInitdb && g_instance.attr.attr_storage.enable_dbsd && u_sess->attr.attr_common.enalbe_evil_detect) {
+    if (!IsInitdb && g_instance.attr.attr_storage.enable_dbsd && u_sess->attr.attr_common.enable_evil_detect) {
         Port* basePort = u_sess->proc_cxt.MyProcPort;
         Oid roleId = get_role_oid(basePort->user_name, true);
         char* temp_query = pstrdup(queryString);

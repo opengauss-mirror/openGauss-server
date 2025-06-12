@@ -2775,6 +2775,11 @@ int PostmasterMain(int argc, char* argv[])
         ereport(FATAL, (errmsg("no socket created for listening")));
     }
 
+    /* DBSD init, this is enable when get DBSO.so */
+    if (g_instance.attr.attr_storage.enable_dbsd) {
+        InitDBSDFunc();
+        InitDBSD();
+    }
     InitDolpinProtoIfNeeded();
 
 #ifdef __aarch64__
