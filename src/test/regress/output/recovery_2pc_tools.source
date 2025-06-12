@@ -220,6 +220,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  disable_memory_protect                           | bool    |      |           | 
  disable_memory_stats                             | bool    |      |           | 
  dolphin_server_port                              | integer |      | 1024      | 65535
+ ds_limit_write_xlog_size                         | integer | KB   | 0         | 16384
  dw_file_num                                      | integer |      | 1         | 16
  dw_file_size                                     | integer |      | 32        | 256
  dynamic_library_path                             | string  |      |           | 
