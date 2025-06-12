@@ -37,11 +37,11 @@
 
 // return NPU_ERROR if error occurs
 #define NPU_RETURN_IFERR(ret)                            \
-    do {                                                \
-        int _status_ = (ret);                           \
-        if (SECUREC_UNLIKELY(_status_ != NPU_SUCCESS)) { \
-            return _status_;                            \
-        }                                               \
+    do {                                                 \
+        int status = (ret);                              \
+        if (SECUREC_UNLIKELY(status != NPU_SUCCESS)) {   \
+            return status;                               \
+        }                                                \
     } while (0)
 
 static bool FindNPUIdExist(Vector<int> &useNPUDevices, int &npuId)

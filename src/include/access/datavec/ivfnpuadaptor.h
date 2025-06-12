@@ -33,6 +33,6 @@ void NPUResourceInit();
 void NPUResourceRelease();
 int MatrixMulOnNPU(float *matrixA, float *matrixB, float *resMatrix, int paramM, int paramN, int paramK,
     uint8_t **matrixACacheAddr, int devIdx, bool cacheMatrixA);
-void ReleaseNPUCache(uint8_t **matrixACacheAddr, int listId);
+void ReleaseNPUCache(uint8_t **matrixACacheAddr, int devIdx);
 
 #endif

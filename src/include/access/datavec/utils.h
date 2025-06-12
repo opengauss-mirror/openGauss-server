@@ -52,9 +52,9 @@ typedef struct st_npu_func {
     void *handle;
     int (*InitNPU)(int *useNPUDevices, int devNum);
     int (*MatrixMulOnNPU)(float *matrixA, float *matrixB, float *resMatrix, int paramM, int paramN, int paramK,
-        uint8_t **matrixACacheAddr, int DevIdx, bool cacheMatrixA);
+        uint8_t **matrixACacheAddr, int devIdx, bool cacheMatrixA);
     int (*ReleaseNPU)(void);
-    void (*ReleaseNPUCache)(uint8_t **cacheAddr, int DevIdx);
+    void (*ReleaseNPUCache)(uint8_t **cacheAddr, int devIdx);
 } npu_func_t;
 extern npu_func_t g_npu_func;
 

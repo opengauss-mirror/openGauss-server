@@ -136,7 +136,7 @@
 const uint32 PosmagicNum = 0xDCDCDCDC;
 typedef struct AllocMagicData {
     void* aset;
-    uint32 size;  // chunk size
+    Size size;  // chunk size
     uint32 posnum;
 } AllocMagicData;
 #endif

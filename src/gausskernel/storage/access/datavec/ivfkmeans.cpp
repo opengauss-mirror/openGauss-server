@@ -24,6 +24,7 @@
 
 #include <cfloat>
 #include <cmath>
+#include <mutex>
 
 #include "access/datavec/bitvec.h"
 #include "access/datavec/halfutils.h"
@@ -34,13 +35,151 @@
 #include "utils/datum.h"
 #include "utils/memutils.h"
 #include "access/datavec/vector.h"
+#include "access/datavec/ivfnpuadaptor.h"
+
+#define L2_FUNC_OID 8433
+#define MAX_HBM 25.0
+
+static int g_deviceNum = 6;
+
+static void VectorsSquare(float *x, int dim, int xsize, float *res)
+{
+    for (int i = 0; i < xsize; i++) {
+        res[i] = VectorSquareNorm(x + dim * i, dim);
+    }
+}
+
+static void PreprocessMatrix(float *matrix, float *tmatrix, VectorArray samples, int maxNumSamples, int dim)
+{
+    for (int i = 0; i < samples->length; i++) {
+        float *sampleData = (float *)PointerGetDatum(VectorArrayGet(samples, i));
+        for (int j = 0; j < dim; j++) {
+            matrix[(int64)i * dim + j] = sampleData[j + 2];
+        }
+    }
+
+    if (dim == 0) ereport(ERROR, (errmsg("Please ensure dimension of vector type is not zero.")));
+    for (int i = 0; i < (maxNumSamples * dim); i++) {
+        tmatrix[(int64)(i % dim) * maxNumSamples + (i / dim)] = matrix[(int64)(i / dim) * dim + (i % dim)];
+    }
+}
+
+static float GetDiffDistance(FmgrInfo *procinfo, float A_square, float B_square, float AB_mult)
+{
+    if (procinfo->fn_oid == L2_FUNC_OID) {
+        return sqrt(A_square + B_square - 2 * AB_mult);
+    } else {
+        if (AB_mult > 1) {
+            AB_mult = 1;
+        } else if (AB_mult < -1) {
+            AB_mult = -1;
+        }
+        return acos(AB_mult) / M_PI;
+    }
+}
+
+ /*
+ * compute all samples distance on npu
+ */
+static float *ComputeDistance(FmgrInfo *procinfo, VectorArray samplesA, VectorArray samplesB, int dim,
+    uint8_t **tupleDevice, bool needCache, float *squareAmatrix, float *amatrix, float *tAmatrix)
+{
+    int numSamplesA = samplesA->length;
+    int numSamplesB = samplesB->length;
+
+    float *bmatrix = (float *)palloc(numSamplesB * sizeof(float) * dim);
+    float *tBmatrix = (float *)palloc(numSamplesB * sizeof(float) * dim);
+
+    float *squareBmatrix = nullptr;
+    float *distanceInSamples = nullptr;
+    errno_t rc = EOK;
+    Size size = (Size)numSamplesA * sizeof(float) * dim;
+
+    if (samplesA != samplesB) {
+        PreprocessMatrix(bmatrix, tBmatrix, samplesB, numSamplesB, dim);
+    } else {
+        rc = memcpy_s(tBmatrix, size, tAmatrix, size);
+        securec_check(rc, "\0", "\0");
+    }
+
+    /* (a^2 + a*b + b^2) */
+    if ((samplesA != samplesB) && (procinfo->fn_oid == L2_FUNC_OID)) {
+        squareBmatrix = new float[(int64)numSamplesB];
+        VectorsSquare(bmatrix, dim, numSamplesB, squareBmatrix);
+    }
+
+    distanceInSamples = (float *)palloc_huge(CurrentMemoryContext, sizeof(float) * numSamplesA * numSamplesB);
+
+    // batch computation
+    size_t totalMem =
+        ((double)((numSamplesA + numSamplesB) * dim + (int64)numSamplesA * (int64)numSamplesB) * sizeof(float)) /
+        (1024 * 1024);  // MB
+    int iterNum = std::max((int)(std::ceil((double)(totalMem) / (MAX_HBM * 1024))), 1);
+    int batchSize = (int)std::ceil((double)numSamplesA / iterNum);
+    int actualBatchSize = batchSize;
+
+    int offset = 0;
+    for (int i = 0; i < iterNum; i++) {
+        actualBatchSize = std::min(batchSize, numSamplesA - offset);
+        int ret = MatrixMulOnNPU(amatrix + (int64)offset * dim, tBmatrix,
+            distanceInSamples + (int64)offset * numSamplesB, actualBatchSize, numSamplesB, dim,
+            (uint8_t **)tupleDevice, g_deviceNum, needCache);
+        if (ret != 0) {
+            pfree(bmatrix);
+            pfree(tBmatrix);
+
+            delete [] squareBmatrix;
+            squareBmatrix = nullptr;
+            pfree(distanceInSamples);
+
+            if (*tupleDevice != nullptr) {
+                ReleaseNPUCache((uint8_t **)tupleDevice, g_deviceNum);
+            }
+            ereport(ERROR, (errmsg("MatrixMulOnNPU failed, errCode: %d.", ret)));
+        }
+        offset += actualBatchSize;
+    }
+
+    if ((samplesA == samplesB) && (procinfo->fn_oid == L2_FUNC_OID)) {
+        int stride = numSamplesA + 1;
+        for (int i = 0; i < numSamplesA; i++) {
+            squareAmatrix[i] = distanceInSamples[(int64)i * stride];
+        }
+    }
+
+    const bool isL2Distance = (procinfo->fn_oid == L2_FUNC_OID);
+    const bool isSameSamples = (samplesA == samplesB);
+    #pragma omp parallel for schedule(dynamic)
+    for (int i = 0; i < numSamplesA; i++) {
+        for (int j = 0; j < numSamplesB; j++) {
+            int64 idx = (int64)i * numSamplesB + j;
+            if (!isL2Distance) {
+                distanceInSamples[idx] =GetDiffDistance(procinfo, 0, 0, distanceInSamples[idx]);
+            } else {
+                float matrixIndexA = squareAmatrix[i];
+                float matrixIndexB = isSameSamples ? squareAmatrix[j] : squareBmatrix[j];
+                distanceInSamples[idx] = GetDiffDistance(procinfo, matrixIndexA, matrixIndexB,
+                    distanceInSamples[idx]);
+            }
+        }
+    }
+
+    pfree(bmatrix);
+    pfree(tBmatrix);
+
+    delete [] squareBmatrix;
+    squareBmatrix = nullptr;
+
+    return distanceInSamples;
+}
 
 /*
  * Initialize with kmeans++
  *
  * https://theory.stanford.edu/~sergei/papers/kMeansPP-soda.pdf
  */
-static void InitCenters(Relation index, VectorArray samples, VectorArray centers, float *lowerBound)
+static void InitCenters(Relation index, VectorArray samples, VectorArray centers, float *lowerBound,
+    float *distanceInSamples, int dim)
 {
     FmgrInfo *procinfo;
     Oid collation;
@@ -48,12 +187,14 @@ static void InitCenters(Relation index, VectorArray samples, VectorArray centers
     float *weight = (float *)palloc(samples->length * sizeof(float));
     int numCenters = centers->maxlen;
     int numSamples = samples->length;
+    int *initCenterIndices = (int *)palloc(sizeof(int) * numCenters * dim);
 
     procinfo = index_getprocinfo(index, 1, IVFFLAT_KMEANS_DISTANCE_PROC);
     collation = index->rd_indcollation[0];
 
     /* Choose an initial center uniformly at random */
-    VectorArraySet(centers, 0, VectorArrayGet(samples, RandomInt() % samples->length));
+    initCenterIndices[0] = RandomInt() % samples->length;
+    VectorArraySet(centers, 0, VectorArrayGet(samples, initCenterIndices[0]));
     centers->length++;
 
     for (j = 0; j < numSamples; j++)
@@ -73,8 +214,12 @@ static void InitCenters(Relation index, VectorArray samples, VectorArray centers
 
             /* Only need to compute distance for new center */
             /* TODO Use triangle inequality to reduce distance calculations */
-            distance = DatumGetFloat8(
-                FunctionCall2Coll(procinfo, collation, vec, PointerGetDatum(VectorArrayGet(centers, i))));
+            if (u_sess->datavec_ctx.enable_npu) {
+                distance = distanceInSamples[(int64)initCenterIndices[i] * numSamples + j];
+            } else {
+                distance = DatumGetFloat8(FunctionCall2Coll(procinfo, collation, vec,
+                    PointerGetDatum(VectorArrayGet(centers, i))));
+            }
 
             /* Set lower bound */
             lowerBound[j * numCenters + i] = distance;
@@ -102,10 +247,12 @@ static void InitCenters(Relation index, VectorArray samples, VectorArray centers
         }
 
         VectorArraySet(centers, i + 1, VectorArrayGet(samples, j));
+        initCenterIndices[i + 1] = j;
         centers->length++;
     }
 
     pfree(weight);
+    pfree(initCenterIndices);
 }
 
 /*
@@ -336,8 +483,8 @@ static void ElkanKmeans(Relation index, VectorArray samples, VectorArray centers
     ShowMemoryUsage(MemoryContextGetParent(CurrentMemoryContext));
 #endif
 
-    /* Pick initial centers */
-    InitCenters(index, samples, centers, lowerBound);
+     /* Pick initial centers */
+    InitCenters(index, samples, centers, lowerBound, NULL, dimensions);
 
     /* Assign each x to its closest initial center c(x) = argmin d(x,c) */
     for (int64 j = 0; j < numSamples; j++) {
@@ -496,6 +643,148 @@ static void ElkanKmeans(Relation index, VectorArray samples, VectorArray centers
     }
 }
 
+static void ElkanKmeansOnNPU(Relation index, VectorArray samples, VectorArray centers, const IvfflatTypeInfo *typeInfo)
+{
+    FmgrInfo *procinfo;
+    FmgrInfo *normprocinfo;
+    Oid collation;
+    int dimensions = centers->dim;
+    int numCenters = centers->maxlen;
+    int numSamples = samples->length;
+    VectorArray newCenters;
+    float *agg;
+    int *centerCounts;
+    int *closestCenters;
+    float *lowerBound;
+
+    /* Calculate allocation sizes */
+    Size samplesSize = VECTOR_ARRAY_SIZE(samples->maxlen, samples->itemsize);
+    Size centersSize = VECTOR_ARRAY_SIZE(centers->maxlen, centers->itemsize);
+    Size newCentersSize = VECTOR_ARRAY_SIZE(numCenters, centers->itemsize);
+    Size aggSize = sizeof(float) * (int64)numCenters * dimensions;
+    Size centerCountsSize = sizeof(int) * numCenters;
+    Size closestCentersSize = sizeof(int) * numSamples;
+    Size lowerBoundSize = sizeof(float) * numSamples * numCenters;
+
+    /* Calculate total size */
+    Size totalSize = samplesSize + centersSize + newCentersSize + aggSize + centerCountsSize + closestCentersSize +
+                     lowerBoundSize;
+
+    /* Check memory requirements */
+    /* Add one to error message to ceil */
+    if (totalSize > (Size)u_sess->attr.attr_memory.maintenance_work_mem * 1024L)
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("memory required is %zu MB, maintenance_work_mem is %d MB",
+                               totalSize / (1024 * 1024) + 1, u_sess->attr.attr_memory.maintenance_work_mem / 1024)));
+
+    /* Ensure indexing does not overflow */
+    if (numCenters * numCenters > INT_MAX)
+        elog(ERROR, "Indexing overflow detected. Please report a bug.");
+
+    /* Set support functions */
+    procinfo = index_getprocinfo(index, 1, IVFFLAT_KMEANS_DISTANCE_PROC);
+    normprocinfo = IvfflatOptionalProcInfo(index, IVFFLAT_KMEANS_NORM_PROC);
+    collation = index->rd_indcollation[0];
+
+    /* Allocate space */
+    /* Use float instead of double to save memory */
+    agg = (float *)palloc(aggSize);
+    centerCounts = (int *)palloc(centerCountsSize);
+    closestCenters = (int *)palloc(closestCentersSize);
+    lowerBound = (float *)MemoryContextAllocExtended(CurrentMemoryContext, lowerBoundSize, MCXT_ALLOC_HUGE);
+
+    /* Initialize new centers */
+    newCenters = VectorArrayInit(numCenters, dimensions, centers->itemsize);
+    newCenters->length = numCenters;
+
+#ifdef IVFFLAT_MEMORY
+    ShowMemoryUsage(MemoryContextGetParent(CurrentMemoryContext));
+#endif
+
+    uint8_t *tupleDevice = nullptr;
+    uint8_t *nullTmp = nullptr;
+
+    float *samplesMatrix = (float *)palloc(sizeof(float) * numSamples * dimensions);
+    float *tsamplesMatrix = (float *)palloc(sizeof(float) * dimensions * numSamples);
+    PreprocessMatrix(samplesMatrix, tsamplesMatrix, samples, numSamples, dimensions);
+
+    float *samplesSquare = (float *)palloc(sizeof(float) * numSamples);
+    float *disBetweenSamples = ComputeDistance(procinfo, samples, samples, dimensions, &nullTmp, false, samplesSquare,
+        samplesMatrix, tsamplesMatrix);
+
+    /* Pick initial centers */
+    InitCenters(index, samples, centers, lowerBound, disBetweenSamples, dimensions);
+
+    pfree(disBetweenSamples);
+
+    /* Assign each x to its closest initial center c(x) = argmin d(x,c) */
+    for (int64 j = 0; j < numSamples; j++) {
+        float minDistance = FLT_MAX;
+        int closestCenter = 0;
+
+        /* Find closest center */
+        for (int64 k = 0; k < numCenters; k++) {
+            float distance = lowerBound[j * numCenters + k];
+
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestCenter = k;
+            }
+        }
+        closestCenters[j] = closestCenter;
+    }
+
+    /* Give 500 iterations to converge */
+    for (int iteration = 0; iteration < 500; iteration++) {
+        int changes = 0;
+
+        /* Can take a while, so ensure we can interrupt */
+        CHECK_FOR_INTERRUPTS();
+
+        float *distBetweenSamplesAndCenters = ComputeDistance(procinfo, samples, centers, dimensions, &tupleDevice,
+            true, samplesSquare, samplesMatrix, tsamplesMatrix);
+
+        /* For all centers c, compute s(c) */
+        for (int64 j = 0; j < numSamples; j++) {
+            float minDistance = FLT_MAX;
+            int64 bestK = -1;
+
+            for (int64 k = 0; k < numCenters; k++) {
+                float dist = distBetweenSamplesAndCenters[(int64)j * numCenters + k];
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    bestK = k;
+                }
+            }
+
+           // Check for updates
+            if (bestK != closestCenters[j]) {
+                closestCenters[j] = bestK;
+                changes++;
+            }
+        }
+
+        pfree(distBetweenSamplesAndCenters);
+
+        /* Step 4: For each center c, let m(c) be mean of all points assigned */
+        ComputeNewCenters(samples, agg, newCenters, centerCounts, closestCenters, normprocinfo, collation, typeInfo);
+
+        /* Step 7 */
+        for (int j = 0; j < numCenters; j++) {
+            VectorArraySet(centers, j, VectorArrayGet(newCenters, j));
+        }
+
+        if (changes == 0 && iteration != 0) {
+            ReleaseNPUCache(&tupleDevice, g_deviceNum);   // delete cache in NPU
+            ereport(LOG, (errmsg("iteration : %d", iteration)));
+            break;
+        }
+    }
+    pfree(samplesSquare);
+    pfree(samplesMatrix);
+    pfree(tsamplesMatrix);
+}
+
 /*
  * Ensure no NaN or infinite values
  */
@@ -564,10 +853,14 @@ void IvfflatKmeans(Relation index, VectorArray samples, VectorArray centers, con
         AllocSetContextCreate(CurrentMemoryContext, "Ivfflat kmeans temporary context", ALLOCSET_DEFAULT_SIZES);
     MemoryContext oldCtx = MemoryContextSwitchTo(kmeansCtx);
 
-    if (samples->length == 0)
+    if (samples->length == 0) {
         RandomCenters(index, centers, typeInfo);
-    else
-        ElkanKmeans(index, samples, centers, typeInfo);
+    } else {
+        if (u_sess->datavec_ctx.enable_npu)
+            ElkanKmeansOnNPU(index, samples, centers, typeInfo);
+        else
+            ElkanKmeans(index, samples, centers, typeInfo);
+    }
 
     CheckCenters(index, centers, typeInfo);
 

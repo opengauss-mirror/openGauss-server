@@ -1831,3 +1831,15 @@ int PlanCreateIndexWorkers(Relation heapRelation, IndexInfo *indexInfo)
     }
     return parallelWorkers;
 }
+
+double VectorSquareNorm(float* x, int dim)
+{
+    double norm = 0.0;
+
+    /* Auto-vectorized */
+    for (int i = 0; i < dim; i++) {
+        norm += (double)x[i] * (double)x[i];
+    }
+
+    return norm;
+}

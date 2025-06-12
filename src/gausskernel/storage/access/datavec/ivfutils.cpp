@@ -169,7 +169,7 @@ void IvfflatGetMetaPageInfo(Relation index, int *lists, int *dimensions)
  * Update the start or insert page of a list
  */
 void IvfflatUpdateList(Relation index, ListInfo listInfo, BlockNumber insertPage, BlockNumber originalInsertPage,
-                       BlockNumber startPage, ForkNumber forkNum)
+                       BlockNumber startPage, ForkNumber forkNum, int addNums)
 {
     Buffer buf;
     Page page;
@@ -193,6 +193,11 @@ void IvfflatUpdateList(Relation index, ListInfo listInfo, BlockNumber insertPage
 
     if (BlockNumberIsValid(startPage) && startPage != list->startPage) {
         list->startPage = startPage;
+        changed = true;
+    }
+
+    if (addNums != 0) {
+        list->tupleNum += addNums;
         changed = true;
     }
 
@@ -374,6 +379,7 @@ const IvfflatTypeInfo *IvfflatGetTypeInfo(Relation index)
 
     if (procinfo == NULL) {
         static const IvfflatTypeInfo typeInfo = {.maxDimensions = IVFFLAT_MAX_DIM,
+                                                 .supportNPU = true,
                                                  .supportPQ = true,
                                                  .normalize = l2_normalize,
                                                  .itemSize = VectorItemSize,
@@ -390,6 +396,7 @@ PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflat_halfvec_support);
 Datum ivfflat_halfvec_support(PG_FUNCTION_ARGS)
 {
     static const IvfflatTypeInfo typeInfo = {.maxDimensions = IVFFLAT_MAX_DIM * 2,
+                                             .supportNPU = false,
                                              .supportPQ = false,
                                              .normalize = halfvec_l2_normalize,
                                              .itemSize = HalfvecItemSize,
@@ -403,6 +410,7 @@ PGDLLEXPORT PG_FUNCTION_INFO_V1(ivfflat_bit_support);
 Datum ivfflat_bit_support(PG_FUNCTION_ARGS)
 {
     static const IvfflatTypeInfo typeInfo = {.maxDimensions = IVFFLAT_MAX_DIM * 32,
+                                             .supportNPU = false,
                                              .supportPQ = false,
                                              .normalize = NULL,
                                              .itemSize = BitItemSize,

@@ -56,6 +56,7 @@ void VectorInnerProductNY(size_t d, size_t ny, float *x, char *pqTable, Size sub
 void LogNewpageRange(Relation rel, ForkNumber forknum, BlockNumber startblk, BlockNumber endblk, bool page_std);
 int PlanCreateIndexWorkers(Relation heapRelation, IndexInfo *indexInfo);
 void PrintOutVector(char *msg, Datum arg);
+double VectorSquareNorm(float* x, int dim);
 
 Datum vector_in(PG_FUNCTION_ARGS);
 Datum vector_out(PG_FUNCTION_ARGS);

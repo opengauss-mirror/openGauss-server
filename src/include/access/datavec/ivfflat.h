@@ -162,6 +162,9 @@ typedef struct IvfflatShared {
 #ifdef IVFFLAT_KMEANS_DEBUG
     double inertia;
 #endif
+
+    bool enablenpu;
+
     ParallelHeapScanDescData heapdesc;  // must come last
 } IvfflatShared;
 
@@ -175,6 +178,7 @@ typedef struct IvfflatLeader {
 
 typedef struct IvfflatTypeInfo {
     int maxDimensions;
+    bool supportNPU;
     bool supportPQ;
     Datum (*normalize)(PG_FUNCTION_ARGS);
     Size (*itemSize)(int dimensions);
@@ -244,6 +248,14 @@ typedef struct IvfflatBuildState {
     PQParams *params;
     float *preComputeTable;
     uint64 preComputeTableSize;
+
+    /* NPU info */
+    int *ivfclosestCentersIndexs;
+    float *ivfclosestCentersDistances;
+    int curtuple;
+    List *tupleslist;
+    List *tidslist;
+    bool enableNPU;
 } IvfflatBuildState;
 
 typedef struct IvfflatMetaPageData {
@@ -277,6 +289,8 @@ typedef IvfflatPageOpaqueData *IvfflatPageOpaque;
 typedef struct IvfflatListData {
     BlockNumber startPage;
     BlockNumber insertPage;
+    int listId;
+    int tupleNum;
     Vector center;
 } IvfflatListData;
 
@@ -288,6 +302,8 @@ typedef struct IvfflatScanList {
     double distance;
     int key;
     double pqDistance;
+    int listId;
+    int tupleNum;
 } IvfflatScanList;
 
 typedef struct IvfflatScanOpaqueData {
@@ -333,6 +349,13 @@ typedef struct IvfpqPairingHeapNode {
     OffsetNumber indexOff;
 } IvfpqPairingHeapNode;
 
+typedef struct IvfListInfo {
+    float *tupleNorms;
+    ItemPointerData *tupleTids;
+    uint8_t *deviceVecs;
+    bool initialized = false;
+} IvfListInfo;
+
 /* Methods */
 void IvfflatKmeans(Relation index, VectorArray samples, VectorArray centers, const IvfflatTypeInfo *typeInfo);
 FmgrInfo *IvfflatOptionalProcInfo(Relation index, uint16 procnum);
@@ -341,7 +364,7 @@ bool IvfflatCheckNorm(FmgrInfo *procinfo, Oid collation, Datum value);
 int IvfflatGetLists(Relation index);
 void IvfflatGetMetaPageInfo(Relation index, int *lists, int *dimensions);
 void IvfflatUpdateList(Relation index, ListInfo listInfo, BlockNumber insertPage, BlockNumber originalInsertPage,
-                       BlockNumber startPage, ForkNumber forkNum);
+                       BlockNumber startPage, ForkNumber forkNum, int addNums);
 void IvfflatCommitBuffer(Buffer buf, GenericXLogState *state);
 void IvfflatAppendPage(Relation index, Buffer *buf, Page *page, GenericXLogState **state, ForkNumber forkNum);
 Buffer IvfflatNewBuffer(Relation index, ForkNumber forkNum);
@@ -375,6 +398,8 @@ float GetPQDistance(float *pqDistanceTable, uint8 *code, double dis0, int pqM, i
 IvfpqPairingHeapNode * IvfpqCreatePairingHeapNode(float distance, ItemPointer heapTid,
                                                   BlockNumber indexBlk, OffsetNumber indexOff);
 char* IVFPQLoadPQtable(Relation index);
+
+void ReleaseIvfNpuContext(Oid indexid);
 
 Datum ivfflathandler(PG_FUNCTION_ARGS);
 Datum ivfflatbuild(PG_FUNCTION_ARGS);

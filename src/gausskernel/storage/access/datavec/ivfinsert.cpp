@@ -29,6 +29,9 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "utils/memutils.h"
+#include "access/datavec/ivfnpuadaptor.h"
+
+#define IvfflatNPUListInfo(i) (((IvfListInfo *)g_instance.npu_cxt.ivf_lists_info)[i])
 
 /*
  * Find the list that minimizes the distance function
@@ -128,6 +131,45 @@ static void InitPQParamsOnDisk(Relation index, PQParams *params, int dim, bool *
     } else {
         params->pqTable = NULL;
     }
+}
+
+void ReleaseIvfNpuContext(Oid current_index_oid)
+{
+    pthread_rwlock_wrlock(&g_instance.npu_cxt.context_mutex);
+    if (current_index_oid == g_instance.npu_cxt.index_oid &&
+        g_instance.npu_cxt.index_oid != -1) {
+            for (int i = 0; i < g_instance.npu_cxt.ivf_lists_num; i++) {
+                pthread_rwlock_wrlock(&g_instance.npu_cxt.ivf_lists_mutex[i]);
+                MemoryContext oldcxt = MemoryContextSwitchTo(g_instance.npu_cxt.ivf_list_context);
+                if (IvfflatNPUListInfo(i).tupleNorms != NULL) {
+                    pfree(IvfflatNPUListInfo(i).tupleNorms);
+                    IvfflatNPUListInfo(i).tupleNorms = NULL;
+                }
+                if (IvfflatNPUListInfo(i).tupleTids != NULL) {
+                    pfree(IvfflatNPUListInfo(i).tupleTids);
+                    IvfflatNPUListInfo(i).tupleTids = NULL;
+                }
+                MemoryContextSwitchTo(oldcxt);
+
+                ReleaseNPUCache(&(IvfflatNPUListInfo(i).deviceVecs), i);
+                IvfflatNPUListInfo(i).initialized = false;
+                pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[i]);
+                pthread_rwlock_destroy(&(g_instance.npu_cxt.ivf_lists_mutex[i]));
+            }
+            delete [] static_cast<IvfListInfo *>(g_instance.npu_cxt.ivf_lists_info);
+            g_instance.npu_cxt.ivf_lists_info = NULL;
+            delete [] (g_instance.npu_cxt.ivf_lists_mutex);
+            g_instance.npu_cxt.ivf_lists_mutex = NULL;
+
+            g_instance.npu_cxt.index_oid = -1;
+            g_instance.npu_cxt.ivf_lists_num = 0;
+
+        if (g_instance.npu_cxt.ivf_list_context != NULL) {
+            MemoryContextDelete(g_instance.npu_cxt.ivf_list_context);
+            g_instance.npu_cxt.ivf_list_context = NULL;
+        }
+    }
+    pthread_rwlock_unlock(&g_instance.npu_cxt.context_mutex);
 }
 
 /*
@@ -265,8 +307,16 @@ static void InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     IvfflatCommitBuffer(buf, state);
 
     /* Update the insert page */
-    if (insertPage != originalInsertPage)
-        IvfflatUpdateList(index, listInfo, insertPage, originalInsertPage, InvalidBlockNumber, MAIN_FORKNUM);
+    bool isSupportNPU = (u_sess->datavec_ctx.enable_npu || g_instance.attr.attr_storage.enable_ivfflat_npu);
+    if (isSupportNPU) {
+        IvfflatUpdateList(index, listInfo, insertPage, originalInsertPage, InvalidBlockNumber, MAIN_FORKNUM, 1);
+
+        /* Release Npu Cache */
+        Oid current_index_oid = RelationGetRelid(index);
+        ReleaseIvfNpuContext(current_index_oid);
+    } else if (!isSupportNPU && (insertPage != originalInsertPage)) {
+        IvfflatUpdateList(index, listInfo, insertPage, originalInsertPage, InvalidBlockNumber, MAIN_FORKNUM, 0);
+    }
 }
 
 /*
