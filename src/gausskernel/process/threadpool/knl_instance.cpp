@@ -1110,6 +1110,10 @@ void knl_instance_init()
 #ifdef USE_SPQ
     knl_g_spq_context_init(&g_instance.spq_cxt);
 #endif
+#ifdef USE_ASSERT_CHECKING
+    g_instance.fi_ctx_inited.store(false);
+    g_instance.fi_ctx_init_finished = false;
+#endif
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

@@ -159,6 +159,7 @@
 #define DMS_MSG_MAX_WAIT_TIME (10 * 1000) // 10s
 #define SS_REFORM_WAIT_TIME (5000) // 5ms
 #define SS_WAIT_TIME (20*10000000) // 200s
+#define SS_SPIN_WAIT_TIME (200000) // ns
 
 /* length of segment filename like '/1' */
 #define SEG_MAINFORK_FILENAME_LEN   2

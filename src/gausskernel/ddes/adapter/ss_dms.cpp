@@ -139,12 +139,16 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_req_opengauss_immediate_ckpt));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fsync_logfile));
 #ifdef USE_ASSERT_CHECKING
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fi_set_entries));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fi_set_entry_value));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fi_get_tls_trigger_custom));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fi_set_tls_trigger_custom));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(fault_injection_call));
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_fi_entry_custom_valid));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_get_context_size));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_set_and_init_context));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_set_entries));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_get_entry_value));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_set_entry_value));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_get_tls_trigger_custom));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_set_tls_trigger_custom));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_entry_custom_valid));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_call));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_call_ex));
 #endif
 
     g_ss_dms_func.inited = true;
@@ -277,19 +281,19 @@ int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned
         resend_after_reform);
 }
 
-bool dms_latch_timed_x(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks)
+bool dms_latch_timed_x(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, void *dms_stat)
 {
-    return (bool)g_ss_dms_func.dms_latch_timed_x(dms_ctx, dlatch, wait_ticks);
+    return (bool)g_ss_dms_func.dms_latch_timed_x(dlatch, sid, wait_ticks, dms_stat);
 }
 
-bool dms_latch_timed_s(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks, unsigned char is_force)
+bool dms_latch_timed_s(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, unsigned char is_force, void *dms_stat)
 {
-    return (bool)g_ss_dms_func.dms_latch_timed_s(dms_ctx, dlatch, wait_ticks, is_force);
+    return (bool)g_ss_dms_func.dms_latch_timed_s(dlatch, sid, wait_ticks, is_force, dms_stat);
 }
 
-void dms_unlatch(dms_context_t *dms_ctx, dms_drlatch_t *dlatch)
+void dms_unlatch(dms_drlatch_t *dlatch, void *dms_stat)
 {
-    g_ss_dms_func.dms_unlatch(dms_ctx, dlatch);
+    g_ss_dms_func.dms_unlatch(dlatch, dms_stat);
 }
 
 int dms_register_thread_init(dms_thread_init_t thrd_init)

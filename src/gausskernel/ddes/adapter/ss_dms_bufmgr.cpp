@@ -98,6 +98,7 @@ void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag)
     dlatch->drid.parent = locktag.locktag_field3;
     dlatch->drid.part = locktag.locktag_field4;
     dlatch->drid.uid = locktag.locktag_field5;
+    dlatch->handle = NULL;
 }
 
 static void CalcSegDmsPhysicalLoc(BufferDesc* buf_desc, Buffer buffer, bool check_standby)

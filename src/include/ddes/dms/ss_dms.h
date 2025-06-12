@@ -74,10 +74,10 @@ typedef struct st_ss_dms_func {
     int (*dms_broadcast_opengauss_ddllock)(dms_context_t *dms_ctx, char *data, unsigned int len,
         unsigned char handle_recv_msg, unsigned int timeout, unsigned char resend_after_reform);
     int (*dms_reform_last_failed)(void);
-    bool (*dms_latch_timed_x)(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks);
-    bool (*dms_latch_timed_s)(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks,
-        unsigned char is_force);
-    void (*dms_unlatch)(dms_context_t *dms_ctx, dms_drlatch_t *dlatch);
+    bool (*dms_latch_timed_x)(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, void *dms_stat);
+    bool (*dms_latch_timed_s)(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks,
+        unsigned char is_force, void *dms_stat);
+    void (*dms_unlatch)(dms_drlatch_t *dlatch, void *dms_stat);
     void (*dms_pre_uninit)(void);
     int (*dms_init_logger)(logger_param_t *log_param);
     void (*dms_refresh_logger)(char *log_field, unsigned long long *value);
@@ -93,12 +93,20 @@ typedef struct st_ss_dms_func {
     void (*dms_get_cmd_stat)(int index, wait_cmd_stat_result_t *cmd_stat_result);
     int (*dms_req_opengauss_immediate_ckpt)(dms_context_t *dms_ctx, unsigned long long *ckpt_loc);
     void (*dms_fsync_logfile)(void);
-    int (*dms_fi_set_entries)(unsigned int type, unsigned int *entries, unsigned int count);
-    int (*dms_fi_set_entry_value)(unsigned int type, unsigned int value);
-    int (*dms_fi_get_tls_trigger_custom)(void);
-    void (*dms_fi_set_tls_trigger_custom)(int val);
-    void (*fault_injection_call)(unsigned int point, ...);
-    unsigned char (*dms_fi_entry_custom_valid)(unsigned int point);
+
+    int (*ddes_fi_get_context_size)(void);
+    void (*ddes_fi_set_and_init_context)(void *context);
+    int (*ddes_fi_set_entries)(unsigned int type, unsigned int *entries, unsigned int count);
+    unsigned int (*ddes_fi_get_entry_value)(unsigned int type);
+    int (*ddes_fi_set_entry_value)(unsigned int type, unsigned int value);
+    int (*ddes_fi_get_tls_trigger_custom)(void);
+    void (*ddes_fi_set_tls_trigger_custom)(int val);
+    unsigned char (*ddes_fi_entry_custom_valid)(unsigned int point);
+
+    // this is for macro calling
+    void (*ddes_fi_call)(unsigned int point, ...);
+    // this is for function calling
+    void (*ddes_fi_call_ex)(unsigned int point, va_list args);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -138,9 +146,9 @@ int dms_drc_accessible(unsigned char res_type);
 int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned int len, unsigned char handle_recv_msg,
     unsigned int timeout, unsigned char resend_after_reform);
 int dms_reform_last_failed(void);
-bool dms_latch_timed_x(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks);
-bool dms_latch_timed_s(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks, unsigned char is_force);
-void dms_unlatch(dms_context_t *dms_ctx, dms_drlatch_t *dlatch);
+bool dms_latch_timed_x(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, void *dms_stat);
+bool dms_latch_timed_s(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, unsigned char is_force, void *dms_stat);
+void dms_unlatch(dms_drlatch_t *dlatch, void *dms_stat);
 void dms_pre_uninit(void);
 void dms_validate_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn, unsigned char is_dirty);
 int dms_reform_req_opengauss_ondemand_redo_buffer(dms_context_t *dms_ctx, void *block_key, unsigned int key_len,
