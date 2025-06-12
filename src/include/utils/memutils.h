@@ -86,6 +86,7 @@ extern MemoryContext AdioSharedContext;
 extern MemoryContext ProcSubXidCacheContext;
 extern MemoryContext PmTopMemoryContext;
 extern MemoryContext StreamInfoContext;
+extern MemoryContext DMSDrcContext;
 
 extern THR_LOCAL PGDLLIMPORT MemoryContext ErrorContext;
 
