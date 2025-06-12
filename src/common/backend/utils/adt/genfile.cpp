@@ -785,7 +785,7 @@ Datum compress_ratio_info(PG_FUNCTION_ARGS)
         compress_ratio_info_single(path, &file_count, &logic_size, &physic_size);
     } else if (PART_OBJ_TYPE_TABLE_PARTITION == relation->rd_rel->parttype ||
            PART_OBJ_TYPE_INDEX_PARTITION == relation->rd_rel->parttype) {
-        List *partid_list = getPartitionObjectIdList(relfilenode.rnode.node.relNode, relation->rd_rel->parttype);
+        List *partid_list = getPartitionObjectIdList(RelationGetRelid(relation), relation->rd_rel->parttype);
         ListCell *cell;
         RelFileNode rnode = relfilenode.rnode.node;
         foreach (cell, partid_list) {
@@ -800,7 +800,7 @@ Datum compress_ratio_info(PG_FUNCTION_ARGS)
             pfree(sub_path);
         }
     } else if (PART_OBJ_TYPE_TABLE_SUB_PARTITION == relation->rd_rel->parttype) {
-        List *subpartid_list = getSubPartitionObjectIdList(relfilenode.rnode.node.relNode);
+        List *subpartid_list = getSubPartitionObjectIdList(RelationGetRelid(relation));
         ListCell *cell;
         RelFileNode rnode = relfilenode.rnode.node;
         foreach (cell, subpartid_list) {

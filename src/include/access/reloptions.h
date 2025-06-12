@@ -135,7 +135,7 @@ typedef struct {
 
 struct TableCreateSupport {
     int compressType;
-    bool compressLevel;
+    int compressLevel;
     bool compressChunkSize;
     bool compressPreAllocChunks;
     bool compressByteConvert;

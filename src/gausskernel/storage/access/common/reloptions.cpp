@@ -3139,7 +3139,7 @@ void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSup
     } else if (pg_strcasecmp(defname, "compress_prealloc_chunks") == 0) {
         tableCreateSupport->compressPreAllocChunks = true;
     } else if (pg_strcasecmp(defname, "compress_level") == 0) {
-        tableCreateSupport->compressLevel = true;
+        tableCreateSupport->compressLevel = (int)strtol(defGetString(defElem), NULL, RS_CUSTOM_VALUE_TEN);
     } else if (pg_strcasecmp(defname, "compress_byte_convert") == 0) {
         tableCreateSupport->compressByteConvert = ReadBoolFromDefElem(defElem);
     } else if (pg_strcasecmp(defname, "compress_diff_convert") == 0) {
