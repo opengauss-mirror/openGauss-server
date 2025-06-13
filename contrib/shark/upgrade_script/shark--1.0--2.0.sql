@@ -1567,14 +1567,8 @@ SELECT
 	CAST(NULL AS TIMESTAMP) AS create_date,
 	CAST(NULL AS TINYINT) AS compatibility_level,
 	CAST(pg_catalog.getdatabaseencoding() AS NAME) AS collation_name,
-	CAST(
-	CASE WHEN datallowconn THEN 0 -- MULTI_USER
-	ELSE 1 -- SINGLE_USER (仅当数据库禁止连接时)
-	END AS TINYINT) AS user_access,
-	CAST(
-	CASE WHEN datallowconn THEN 'MULTI_USER' 
-	ELSE 'SINGLE_USER' 
-	END AS NVARCHAR(60)) AS user_access_desc,
+	CAST(0 AS TINYINT) AS user_access,
+	CAST('MULTI_USER' AS NVARCHAR(60)) AS user_access_desc,
 	CAST(0 AS BIT) AS is_read_onliy,
 	CAST(0 AS BIT) AS is_auto_close_on,
 	CAST(0 AS BIT) AS is_auto_shrink_on,
@@ -1605,6 +1599,7 @@ SELECT
 	CAST(1 AS BIT) AS is_ansi_nulls_on,
 	CAST(0 AS BIT) AS is_ansi_padding_on,
 	CAST(0 AS BIT) AS is_ansi_warnings_on,
+	CAST(1 AS BIT) AS is_arithabort_on,
 	CAST(1 AS BIT) AS is_concat_null_yields_null_on,
 	CAST(0 AS BIT) AS is_numeric_roundabort_on,
 	CAST(1 AS BIT) AS is_quoted_identifier_on,
