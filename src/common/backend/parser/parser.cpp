@@ -70,7 +70,6 @@ static void resetForbidTruncateFlag()
 static void resetHasSetUservarFlag()
 {
     u_sess->parser_cxt.has_set_uservar = false;
-    u_sess->parser_cxt.has_equal_uservar = false;
 }
 
 /*

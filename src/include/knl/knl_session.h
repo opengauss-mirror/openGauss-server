@@ -198,6 +198,7 @@ typedef struct knl_u_executor_context {
 
     bool isFlashBack;
     List **portal_data_list;
+    bool has_equal_uservar;
 } knl_u_executor_context;
 
 typedef struct knl_u_sig_context {
@@ -469,7 +470,6 @@ typedef struct knl_u_parser_context {
     bool has_hintwarning;
     bool in_userset;
     bool has_set_uservar;
-    bool has_equal_uservar;
     bool is_straight_join;
     int cursor_expr_level;
 

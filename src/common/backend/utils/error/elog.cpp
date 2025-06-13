@@ -609,6 +609,7 @@ void errfinish(int dummy, ...)
         u_sess->catalog_cxt.curCreateSchema = NULL;
         u_sess->exec_cxt.isLockRows = false;
         u_sess->exec_cxt.isFlashBack = false;
+        u_sess->exec_cxt.has_equal_uservar = false;
     }
 
     /*

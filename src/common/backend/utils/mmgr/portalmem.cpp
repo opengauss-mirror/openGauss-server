@@ -562,6 +562,7 @@ void PortalDrop(Portal portal, bool isTopCommit)
     }
 
     u_sess->exec_cxt.isFlashBack = false;
+    u_sess->exec_cxt.has_equal_uservar = false;
 
 #ifdef USE_SPQ
     QueryDesc* queryDesc = portal->queryDesc;
