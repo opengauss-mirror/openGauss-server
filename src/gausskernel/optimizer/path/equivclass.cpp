@@ -2017,6 +2017,26 @@ void mutate_eclass_expressions(PlannerInfo* root, Node* (*mutator)(), void* cont
     }
 }
 
+Relids find_childrel_parents(PlannerInfo* root, RelOptInfo* rel)
+{
+    Relids result = NULL;
+
+    Assert(rel->reloptkind == RELOPT_OTHER_MEMBER_REL);
+    Assert(rel->relid > 0 && rel->relid < root->simple_rel_array_size);
+
+    do {
+        AppendRelInfo* appinfo = root->append_rel_array[rel->relid];
+        Index prelid = appinfo->parent_relid;
+
+        result = bms_add_member(result, prelid);
+
+        /* traverse up to the parent rel, loop if it's also a child rel */
+        rel = find_base_rel(root, prelid);
+    } while (rel->reloptkind == RELOPT_OTHER_MEMBER_REL);
+    Assert(rel->reloptkind == RELOPT_BASEREL);
+    return result;
+}
+
 /*
  * generate_implied_equalities_for_indexcol
  *	  Create EC-derived joinclauses usable with a specific index column.
@@ -2037,14 +2057,14 @@ List* generate_implied_equalities_for_indexcol(PlannerInfo* root,
     List* result = NIL;
     RelOptInfo* rel = index->rel;
     bool is_child_rel = (rel->reloptkind == RELOPT_OTHER_MEMBER_REL);
-    Index parent_relid;
+    Relids parent_relids;
     ListCell* lc1 = NULL;
 
     /* If it's a child rel, we'll need to know what its parent is */
     if (is_child_rel)
-        parent_relid = find_childrel_appendrelinfo(root, rel)->parent_relid;
+        parent_relids = find_childrel_parents(root, rel);
     else
-        parent_relid = 0; /* not used, but keep compiler quiet */
+        parent_relids = 0; /* not used, but keep compiler quiet */
 
     foreach (lc1, root->eq_classes) {
         EquivalenceClass* cur_ec = (EquivalenceClass*)lfirst(lc1);
@@ -2111,7 +2131,7 @@ List* generate_implied_equalities_for_indexcol(PlannerInfo* root,
              * Also, if this is a child rel, avoid generating a useless join
              * to its parent rel.
              */
-            if (is_child_rel && bms_is_member(parent_relid, other_em->em_relids))
+            if (is_child_rel && bms_overlap(parent_relids, other_em->em_relids))
                 continue;
 
             eq_op = select_equality_operator(cur_ec, cur_em->em_datatype, other_em->em_datatype);
