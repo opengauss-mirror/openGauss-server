@@ -224,7 +224,7 @@ bool isL2Dis(FmgrInfo *procinfo)
     return procinfo->fn_oid == L2_DISTANCE_FUNC_OID;
 }
 
-void addSlots(IvfflatScanOpaque so, int listId, int num, bool isL2, float *resMatrix)
+void addSlots(IvfflatScanOpaque so, float *tupleNorms, ItemPointerData *tupleTids, int num, bool isL2, float *resMatrix)
 {
     /*
      * Add virtual tuple
@@ -236,10 +236,10 @@ void addSlots(IvfflatScanOpaque so, int listId, int num, bool isL2, float *resMa
     for (int i = 0; i < num; i++) {
         ExecClearTuple(slot);
         slot->tts_values[0] =
-            Float8GetDatum((double)(isL2 ? IvfflatNPUGetListInfo(listId).tupleNorms[i] - 2 * resMatrix[i] :
+            Float8GetDatum((double)(isL2 ? tupleNorms[i] - 2 * resMatrix[i] :
             -resMatrix[i]));
         slot->tts_isnull[0] = false;
-        slot->tts_values[1] = PointerGetDatum(&IvfflatNPUGetListInfo(listId).tupleTids[i]);
+        slot->tts_values[1] = PointerGetDatum(&tupleTids[i]);
         slot->tts_isnull[1] = false;
         ExecStoreVirtualTuple(slot);
 
@@ -260,7 +260,103 @@ static inline void InitNPUCxt()
 /*
  * Get items on NPU
  */
-static void GetScanItemsNPU(IndexScanDesc scan, Datum value)
+static void GetScanItemsNPUWithoutCache(IndexScanDesc scan, Datum value)
+{
+    IvfflatScanOpaque so = (IvfflatScanOpaque)scan->opaque;
+    TupleDesc tupdesc = RelationGetDescr(scan->indexRelation);
+    double tuples = 0;
+    TupleTableSlot *slot = MakeSingleTupleTableSlot(so->tupdesc);
+    BufferAccessStrategy bas = GetAccessStrategy(BAS_BULKREAD);
+    float *queryMatrix = DatumGetVector(value)->x;
+    bool isL2 = isL2Dis(so->procinfo);
+    errno_t rc = EOK;
+
+    /* Search closest probes lists */
+    int listCount = 0;
+    while (!pairingheap_is_empty(so->listQueue)) {
+        IvfflatScanList *list = (IvfflatScanList *)pairingheap_remove_first(so->listQueue);
+        if (list->tupleNum == 0) {
+            continue;
+        }
+        BlockNumber searchPage = list->startPage;
+        int listId = list->listId;
+        float *resMatrix = (float *)palloc(sizeof(float) * list->tupleNum);
+        float *norms = NULL;
+        if (isL2) {
+            norms = (float *)palloc(sizeof(float) * list->tupleNum);
+        }
+        ItemPointerData *tids =
+            (ItemPointerData *)palloc((sizeof(ItemPointerData) * list->tupleNum / 16 + 1) * 16);
+        float *tupleMatrix =
+            (float *)palloc0_huge(CurrentMemoryContext, sizeof(float) * list->tupleNum * so->dimensions);
+        int curTupleNum = 0;
+        uint8_t *tupleDevice = nullptr;
+
+        while (BlockNumberIsValid(searchPage)) {
+            Buffer buf;
+            Page page;
+            OffsetNumber maxoffno;
+
+            buf = ReadBufferExtended(scan->indexRelation, MAIN_FORKNUM, searchPage, RBM_NORMAL, bas);
+            LockBuffer(buf, BUFFER_LOCK_SHARE);
+            page = BufferGetPage(buf);
+            maxoffno = PageGetMaxOffsetNumber(page);
+
+            for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
+                bool isnull;
+                ItemId itemid = PageGetItemId(page, offno);
+                IndexTuple itup = (IndexTuple)PageGetItem(page, itemid);
+                Datum datum = index_getattr(itup, 1, tupdesc, &isnull);
+                float *vec = DatumGetVector(datum)->x;
+                int vecLen = so->dimensions * sizeof(float);
+                tids[curTupleNum] = itup->t_tid;
+                if (isL2Dis(so->procinfo)) {
+                    norms[curTupleNum] = VectorSquareNorm(vec, so->dimensions);
+                }
+                rc = memcpy_s(tupleMatrix + curTupleNum * so->dimensions, vecLen, vec, vecLen);
+                securec_check(rc, "\0", "\0");
+                curTupleNum++;
+            }
+            searchPage = IvfflatPageGetOpaque(page)->nextblkno;
+            UnlockReleaseBuffer(buf);
+        }
+        int ret = MatrixMulOnNPU(tupleMatrix, queryMatrix, resMatrix, list->tupleNum, 1, so->dimensions,
+            &tupleDevice, listId, false);
+        if (ret != 0) {
+            pfree(tupleMatrix);
+            pfree(tids);
+            if (norms != NULL) {
+                pfree(norms);
+            }
+            pfree_ext(resMatrix);
+            FreeAccessStrategy(bas);
+            ereport(ERROR, (errmsg("matrix mul failed on npu, errCode: %d.", ret)));
+        }
+        addSlots(so, norms, tids, list->tupleNum, isL2, resMatrix);
+        pfree(tupleMatrix);
+        pfree(tids);
+        if (norms != NULL) {
+            pfree(norms);
+        }
+        pfree_ext(resMatrix);
+
+        tuples += list->tupleNum;
+        ++listCount;
+        if (listCount >= so->probes) {
+            break;
+        }
+    }
+
+    FreeAccessStrategy(bas);
+
+    if (tuples < 100)
+        ereport(DEBUG1,
+                (errmsg("index scan found few tuples"), errdetail("Index may have been created with little data."),
+                 errhint("Recreate the index and possibly decrease lists.")));
+
+    tuplesort_performsort(so->sortstate);
+}
+static void GetScanItemsNPUWithCache(IndexScanDesc scan, Datum value)
 {
     IvfflatScanOpaque so = (IvfflatScanOpaque)scan->opaque;
     TupleDesc tupdesc = RelationGetDescr(scan->indexRelation);
@@ -330,7 +426,7 @@ static void GetScanItemsNPU(IndexScanDesc scan, Datum value)
                     UnlockReleaseBuffer(buf);
                 }
                 int ret = MatrixMulOnNPU(tupleMatrix, queryMatrix, resMatrix, list->tupleNum, 1, so->dimensions,
-                    &tupleDevice, listId, g_instance.attr.attr_storage.cache_data_on_npu);
+                    &tupleDevice, listId, true);
                 if (ret != 0) {
                     pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
                     pfree(tupleMatrix);
@@ -341,32 +437,35 @@ static void GetScanItemsNPU(IndexScanDesc scan, Datum value)
                 IvfflatNPUGetListInfo(listId).tupleNorms = norms;
                 IvfflatNPUGetListInfo(listId).deviceVecs = tupleDevice;
                 IvfflatNPUGetListInfo(listId).initialized = true;
-                addSlots(so, listId, list->tupleNum, isL2, resMatrix);
+                addSlots(so, IvfflatNPUGetListInfo(listId).tupleNorms, IvfflatNPUGetListInfo(listId).tupleTids,
+                    list->tupleNum, isL2, resMatrix);
                 pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
                 pfree(tupleMatrix);
             } else {
                 uint8_t *tupleDevice = IvfflatNPUGetListInfo(listId).deviceVecs;
                 int ret = MatrixMulOnNPU(NULL, queryMatrix, resMatrix, list->tupleNum, 1, so->dimensions, &tupleDevice,
-                    listId, g_instance.attr.attr_storage.cache_data_on_npu);
+                    listId, true);
                 if (ret != 0) {
                     pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
                     pfree_ext(resMatrix);
                     ereport(ERROR, (errmsg("matrix mul failed on npu, errCode: %d.", ret)));
                 }
-                addSlots(so, listId, list->tupleNum, isL2, resMatrix);
+                addSlots(so, IvfflatNPUGetListInfo(listId).tupleNorms, IvfflatNPUGetListInfo(listId).tupleTids,
+                    list->tupleNum, isL2, resMatrix);
                 pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
             }
         } else {
             pthread_rwlock_rdlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
             uint8_t *tupleDevice = IvfflatNPUGetListInfo(listId).deviceVecs;
             int ret = MatrixMulOnNPU(NULL, queryMatrix, resMatrix, list->tupleNum, 1, so->dimensions, &tupleDevice,
-                listId, g_instance.attr.attr_storage.cache_data_on_npu);
+                listId, true);
             if (ret != 0) {
                 pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
                 pfree_ext(resMatrix);
                 ereport(ERROR, (errmsg("matrix mul failed on npu, errCode: %d.", ret)));
             }
-            addSlots(so, listId, list->tupleNum, isL2, resMatrix);
+            addSlots(so, IvfflatNPUGetListInfo(listId).tupleNorms, IvfflatNPUGetListInfo(listId).tupleTids,
+                list->tupleNum, isL2, resMatrix);
             pthread_rwlock_unlock(&g_instance.npu_cxt.ivf_lists_mutex[listId]);
         }
         pfree_ext(resMatrix);
@@ -385,6 +484,16 @@ static void GetScanItemsNPU(IndexScanDesc scan, Datum value)
                  errhint("Recreate the index and possibly decrease lists.")));
 
     tuplesort_performsort(so->sortstate);
+}
+
+static void GetScanItemsNPU(IndexScanDesc scan, Datum value)
+{
+    if (g_instance.attr.attr_storage.cache_data_on_npu) {
+        GetScanItemsNPUWithCache(scan, value);
+    } else {
+        GetScanItemsNPUWithoutCache(scan, value);
+    }
+    return;
 }
 
 /*

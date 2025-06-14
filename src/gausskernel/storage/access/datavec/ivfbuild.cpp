@@ -993,14 +993,14 @@ static void ParallelAddTupleToSortOnNPU(IvfflatBuildState *buildstate)
 
         /* Create a virtual tuple */
         ExecClearTuple(slot);
-        slot->tts_values[0] = Int32GetDatum(buildstate->ivfclosestCentersIndexs[k]);
-        slot->tts_isnull[0] = false;
-        slot->tts_values[1] = PointerGetDatum(tmp_tid);
-        slot->tts_isnull[1] = false;
-        slot->tts_values[2] = value;
-        slot->tts_isnull[2] = false;
-        slot->tts_values[3] = NULL;
-        slot->tts_isnull[3] = true;
+        slot->tts_values[IVF_LISTID - 1] = Int32GetDatum(buildstate->ivfclosestCentersIndexs[k]);
+        slot->tts_isnull[IVF_LISTID - 1] = false;
+        slot->tts_values[IVF_TID - 1] = PointerGetDatum(tmp_tid);
+        slot->tts_isnull[IVF_TID - 1] = false;
+        slot->tts_values[IVF_VECTOR - 1] = value;
+        slot->tts_isnull[IVF_VECTOR - 1] = false;
+        slot->tts_values[IVF_RESIDUAL - 1] = NULL;
+        slot->tts_isnull[IVF_RESIDUAL - 1] = true;
         ExecStoreVirtualTuple(slot);
 
         /*
@@ -1047,14 +1047,14 @@ static void SingleAddTupleToSortOnNPU(Relation index, ItemPointer tid, Datum *va
 
     /* Create a virtual tuple */
     ExecClearTuple(slot);
-    slot->tts_values[0] = Int32GetDatum(curTupleInd);
-    slot->tts_isnull[0] = false;
-    slot->tts_values[1] = PointerGetDatum(tid);
-    slot->tts_isnull[1] = false;
-    slot->tts_values[2] = value;
-    slot->tts_isnull[2] = false;
-    slot->tts_values[3] = NULL;
-    slot->tts_isnull[3] = true;
+    slot->tts_values[IVF_LISTID - 1] = Int32GetDatum(curTupleInd);
+    slot->tts_isnull[IVF_LISTID - 1] = false;
+    slot->tts_values[IVF_TID - 1] = PointerGetDatum(tid);
+    slot->tts_isnull[IVF_TID - 1] = false;
+    slot->tts_values[IVF_VECTOR - 1] = value;
+    slot->tts_isnull[IVF_VECTOR - 1] = false;
+    slot->tts_values[IVF_RESIDUAL - 1] = NULL;
+    slot->tts_isnull[IVF_RESIDUAL - 1] = true;
     ExecStoreVirtualTuple(slot);
 
     /*
