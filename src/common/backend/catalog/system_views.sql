@@ -4715,3 +4715,94 @@ CREATE OR REPLACE FUNCTION pg_catalog.raise_application_error(
 ) RETURNS void
 AS '$libdir/plpgsql', 'raise_application_error'
 LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION dbe_perf.get_statement_history(IN in_time timestamp with time zone)
+RETURNS TABLE (
+    db_name name,
+    schema_name name,
+    origin_node integer,
+    user_name name,
+    application_name text,
+    client_addr text,
+    client_port integer,
+    unique_query_id bigint,
+    debug_query_id bigint,
+    query text,
+    start_time timestamp with time zone,
+    finish_time timestamp with time zone,
+    slow_sql_threshold bigint,
+    transaction_id bigint,
+    thread_id bigint,
+    session_id bigint,
+    n_soft_parse bigint,
+    n_hard_parse bigint,
+    query_plan text,
+    n_returned_rows bigint,
+    n_tuples_fetched bigint,
+    n_tuples_returned bigint,
+    n_tuples_inserted bigint,
+    n_tuples_updated bigint,
+    n_tuples_deleted bigint,
+    n_blocks_fetched bigint,
+    n_blocks_hit bigint,
+    db_time bigint,
+    cpu_time bigint,
+    execution_time bigint,
+    parse_time bigint,
+    plan_time bigint,
+    rewrite_time bigint,
+    pl_execution_time bigint,
+    pl_compilation_time bigint,
+    data_io_time bigint,
+    net_send_info text,
+    net_recv_info text,
+    net_stream_send_info text,
+    net_stream_recv_info text,
+    lock_count bigint,
+    lock_time bigint,
+    lock_wait_count bigint,
+    lock_wait_time bigint,
+    lock_max_count bigint,
+    lwlock_count bigint,
+    lwlock_wait_count bigint,
+    lwlock_time bigint,
+    lwlock_wait_time bigint,
+    details bytea,
+    is_slow_sql boolean,
+    trace_id text,
+    advise text,
+    net_send_time bigint,
+    srt1_q bigint,
+    srt2_simple_query bigint,
+    srt3_analyze_rewrite bigint,
+    srt4_plan_query bigint,
+    srt5_light_query bigint,
+    srt6_p bigint,
+    srt7_b bigint,
+    srt8_e bigint,
+    srt9_d bigint,
+    srt10_s bigint,
+    srt11_c bigint,
+    srt12_u bigint,
+    srt13_before_query bigint,
+    srt14_after_query bigint,
+    rtt_unknown bigint,
+    parent_query_id bigint,
+    net_trans_time bigint
+) AS $$
+DECLARE
+    node_role text;
+BEGIN
+    SELECT local_role INTO node_role FROM pg_stat_get_stream_replications() LIMIT 1;
+    
+    IF node_role = 'Primary' OR node_role = 'Normal' THEN
+        RETURN QUERY SELECT * FROM dbe_perf.statement_history where finish_time >= in_time and is_slow_sql = 't';
+    ELSIF node_role = 'Standby' OR node_role = 'Cascade Standby' THEN
+        RETURN QUERY SELECT * FROM dbe_perf.standby_statement_history(true, in_time, now());
+    ELSE
+        RAISE EXCEPTION 'unknown node role: %', node_role;
+    END IF;
+    
+    RETURN;
+END;
+$$ LANGUAGE plpgsql;
