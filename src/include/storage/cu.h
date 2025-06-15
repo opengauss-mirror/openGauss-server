@@ -182,9 +182,7 @@ struct CUDesc : public BaseObject {
     uint32 cuSrcBufSize;
     int32 cuOffsetSize;
     bool isSSImcstore{false};
-    /*
-     * only for dss imcstore, all node cache cu slot id need to be the same. 
-     */
+    /* only for dss imcstore, all node cache cu slot id need to be the same. */
     CacheSlotId_t slot_id;
 #endif
 

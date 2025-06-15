@@ -75,7 +75,7 @@ typedef struct st_ss_dms_func {
         unsigned char handle_recv_msg, unsigned int timeout, unsigned char resend_after_reform);
     int (*dms_reform_last_failed)(void);
     void (*dms_init_latch2)(dms_drlatch_t *dlatch, dms_dr_type_t type, unsigned int oid, unsigned short uid,
-                        unsigned int idx, unsigned int parent_part, unsigned int part);
+        unsigned int idx, unsigned int parent_part, unsigned int part);
     bool (*dms_latch_timed_x)(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, void *dms_stat);
     bool (*dms_latch_timed_s)(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks,
         unsigned char is_force, void *dms_stat);
@@ -148,8 +148,8 @@ int dms_drc_accessible(unsigned char res_type);
 int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned int len, unsigned char handle_recv_msg,
     unsigned int timeout, unsigned char resend_after_reform);
 int dms_reform_last_failed(void);
-    void dms_init_latch2(dms_drlatch_t *dlatch, dms_dr_type_t type, unsigned int oid, unsigned short uid,
-        unsigned int idx, unsigned int parent_part, unsigned int part);
+void dms_init_latch2(dms_drlatch_t *dlatch, dms_dr_type_t type, unsigned int oid, unsigned short uid,
+    unsigned int idx, unsigned int parent_part, unsigned int part);
 bool dms_latch_timed_x(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, void *dms_stat);
 bool dms_latch_timed_s(dms_drlatch_t *dlatch, unsigned int sid, unsigned int wait_ticks, unsigned char is_force, void *dms_stat);
 void dms_unlatch(dms_drlatch_t *dlatch, void *dms_stat);

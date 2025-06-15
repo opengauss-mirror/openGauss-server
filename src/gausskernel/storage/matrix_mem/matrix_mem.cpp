@@ -58,8 +58,8 @@ void MatrixMemFuncInit()
         {"RackMemMallocAsync", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemMallocAsync},
         {"RackMemFree", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemFree},
         {"RackMemFreeAsync", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemFreeAsync},
-        {"RackMemShmLookupShareRegions",
-			(void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmLookupShareRegions},
+        {"RackMemShmLookupShareRegions", (void **)&g_instance.
+            matrix_mem_cxt.matrix_mem_func.rackMemShmLookupShareRegions},
         {"RackMemShmLookupRegionInfo", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmLookupRegionInfo},
         {"RackMemShmCreate", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmCreate},
         {"RackMemShmMmap", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmMmap},

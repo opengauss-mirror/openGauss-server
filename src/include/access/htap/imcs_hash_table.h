@@ -12,14 +12,14 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * imcs_hash_table.h
  *      routines to support IMColStore
  *
- * 
+ *
  * IDENTIFICATION
  *        src/include/access/htap/imcs_hash_table.h
- * 
+ *
  * ---------------------------------------------------------------------------------------
  */
 

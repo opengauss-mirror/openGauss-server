@@ -1391,7 +1391,7 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
             break;
             case BCAST_IMCSTORE_REQUEST_DELTA:
                 ret = SSProcessIMCStoreDelta(data, len, output_msg, output_msg_len);
-            break;
+                break;
 #endif
             case BCAST_SEND_SNAPSHOT:
                 ret = SSUpdateLatestSnapshotOfStandby(data, len, output_msg, output_msg_len);

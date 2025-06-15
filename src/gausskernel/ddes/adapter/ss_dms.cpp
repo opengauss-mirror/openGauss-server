@@ -283,7 +283,7 @@ int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned
 }
 
 void dms_init_latch2(dms_drlatch_t *dlatch, dms_dr_type_t type, unsigned int oid, unsigned short uid,
-                     unsigned int idx, unsigned int parent_part, unsigned int part)
+    unsigned int idx, unsigned int parent_part, unsigned int part)
 {
     return g_ss_dms_func.dms_init_latch2(dlatch, type, oid, uid, idx, parent_part, part);
 }

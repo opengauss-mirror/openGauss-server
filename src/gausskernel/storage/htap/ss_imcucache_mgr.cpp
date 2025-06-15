@@ -38,7 +38,7 @@
 
 SSIMCUDataCacheMgr* SSIMCUDataCacheMgr::m_data_cache = NULL;
 
-int64 DSSIMCUCacheMgrCalcSize()
+int64 SSIMCUCacheMgrCalcSize()
 {
     return g_instance.attr.attr_memory.ss_max_imcs_cache * 1024L;
 }
@@ -54,7 +54,7 @@ int64 DSSIMCUCacheMgrCalcSize()
  */
 int64 SSIMCUDataCacheMgrNumLocks()
 {
-    int64 cache_size = DSSIMCUCacheMgrCalcSize();
+    int64 cache_size = SSIMCUCacheMgrCalcSize();
     return cache_size / (BLCKSZ * MAX_IMCS_PAGES_ONE_CU) * MaxHeapAttributeNumber * IMCSTORE_DOUBLE;
 }
 
@@ -91,7 +91,7 @@ void SSIMCUDataCacheMgr::NewSingletonInstance(void)
     }
 
     MemoryContext oldcontext = MemoryContextSwitchTo(IMCS_HASH_TABLE->m_imcs_context);
-    cache_size = DSSIMCUCacheMgrCalcSize();
+    cache_size = SSIMCUCacheMgrCalcSize();
     m_data_cache->m_cstoreMaxSize = cache_size;
     int64 imcs_block_size = BLCKSZ * MAX_IMCS_PAGES_ONE_CU;
     /* init or reset this instance */
@@ -116,8 +116,8 @@ void SSIMCUDataCacheMgr::SetSPQNodeNumAndIdx()
     const char *curNodeName = GetConfigOption("pgxc_node_name", false, false);
     const char *liststring = g_instance.attr.attr_sql.ss_htap_cluster_map;
     if (liststring == nullptr || liststring[0] == '\0') {
-        ereport(WARNING,(errmodule(MOD_HTAP),
-                          errmsg("ss_htap_cluster_map not set, can not enable dss imcstore.")));
+        ereport(WARNING, (errmodule(MOD_HTAP),
+            errmsg("ss_htap_cluster_map not set, can not enable dss imcstore.")));
         return;
     }
     rawname = pstrdup(liststring);

@@ -237,8 +237,7 @@ void ShareMemoryPool::ShmChunkMmapAll(int shmChunksNum)
         shmChunkPtr = ShmChunkMmap(shmChunkName);
         if (shmChunkPtr == nullptr) {
             pthread_rwlock_unlock(&m_shm_mutex);
-            ereport(ERROR, (errmsg("HTAP: dss_imcstore mmap share memory [%s] failed.",
-                                 shmChunkName)));
+            ereport(ERROR, (errmsg("HTAP: dss_imcstore mmap share memory [%s] failed.", shmChunkName)));
         }
         m_shmChunkNum++;
         pg_atomic_add_fetch_u64(&m_allocatedMemSize, (uint64)SHM_CHUNK_SIZE);

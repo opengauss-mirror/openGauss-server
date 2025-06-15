@@ -1431,15 +1431,15 @@ void SSBroadcastIMCStoreVacuum(int chunkNum, Oid rid, uint32 rgid, TransactionId
     }
 
     dms_broadcast_info_t dms_broad_info = {
-            .data = (char *)info,
-            .len = size,
-            .output = NULL,
-            .output_len = NULL,
-            .scope = DMS_BROADCAST_ONLINE_LIST,
-            .inst_map = 0,
-            .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
-            .handle_recv_msg = (unsigned char)false,
-            .check_session_kill = (unsigned char)true
+        .data = (char *)info,
+        .len = size,
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_ONLINE_LIST,
+        .inst_map = 0,
+        .timeout = SS_BROADCAST_WAIT_ONE_SECOND,
+        .handle_recv_msg = (unsigned char)false,
+        .check_session_kill = (unsigned char)true
     };
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
@@ -1508,8 +1508,8 @@ int SSRequestIMCStoreDelta(dms_context_t *dms_ctx, Oid tableid, uint32 rowgroup,
     info->type = BCAST_IMCSTORE_REQUEST_DELTA;
     info->tableid = tableid;
     info->rowgroup = rowgroup;
-    ereport(DEBUG1, (errmsg("[SSRequestIMCStoreDelta] request delta from ss primary node failed, table(%u), rowgroup(%u)"
-              "ruid(%llu).", tableid, rowgroup, rowgroup)));
+    ereport(DEBUG1, (errmsg("[SSRequestIMCStoreDelta] request delta from ss primary node, table(%u), rowgroup(%u)",
+        tableid, rowgroup)));
 
     unsigned int maxsize = IMCSTORE_DELTA_BITMAP_SIZE;
     for (int i = 0; i < maxsize;) {
@@ -1528,7 +1528,7 @@ int SSRequestIMCStoreDelta(dms_context_t *dms_ctx, Oid tableid, uint32 rowgroup,
         int ret = dms_broadcast_msg(dms_ctx, &dms_broad_info);
         if (ret != DMS_SUCCESS) {
             ereport(ERROR, (errmsg("[IMCStoreScan] request delta from ss primary node failed, table(%u), rowgroup(%u)"
-                          "ruid(%llu) errcode(%u)", tableid, rowgroup, rowgroup, (uint32)ret)));
+                "errcode(%u)", tableid, rowgroup, (uint32)ret)));
         }
         maxsize = u_sess->imcstore_ctx.max_size;
         i = u_sess->imcstore_ctx.begin;
@@ -1578,7 +1578,7 @@ int SSProcessIMCStoreDelta(char *data, uint32 len, char *output_msg, uint32 *out
     unsigned char bitmap[IMCSTORE_DELTA_BITMAP_SIZE];
     GetIMCStoreDelta(req->tableid, req->rowgroup, bitmap, &ack->max_size);
     ereport(DEBUG1, (errmsg("[SSProcessIMCStoreDelta] proccees delta at ss primary node, table(%u), rowgroup(%u)"
-      "max_size(%u).", req->tableid, req->rowgroup, ack->max_size)));
+        "max_size(%u).", req->tableid, req->rowgroup, ack->max_size)));
     unsigned int total = IMCSTORE_DELTA_BITMAP_SIZE;
     ack->size = (total - req->begin) > IMCSTORE_DELTA_PER_MESSAGE ? IMCSTORE_DELTA_PER_MESSAGE : (total - req->begin);
     errno_t rc = memcpy_s(ack->bitmap, IMCSTORE_DELTA_PER_MESSAGE, bitmap + req->begin, ack->size);
@@ -1595,8 +1595,7 @@ int SSGetIMCStoreDeltaAck(char *data, uint32 len)
     ereport(DEBUG1, (errmsg("[SSGetIMCStoreDeltaAck] copy delta at ss standy node, size(%u), max_size(%u).",
         ack->size, ack->max_size)));
     uint32 begin = u_sess->imcstore_ctx.begin;
-    errno_t err = memcpy_s(bitmap + begin, IMCSTORE_DELTA_BITMAP_SIZE - begin,
-                       &ack->bitmap, ack->size);
+    errno_t err = memcpy_s(bitmap + begin, IMCSTORE_DELTA_BITMAP_SIZE - begin, &ack->bitmap, ack->size);
     if (err != EOK) {
         return DMS_ERROR;
     }

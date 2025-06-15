@@ -57,12 +57,13 @@ void IMCSHashTable::NewSingletonInstance(void)
 
     m_imcs_hash_tbl = New(CurrentMemoryContext) IMCSHashTable;
 
-    m_imcs_hash_tbl->m_imcs_context = AllocSetContextCreate(g_instance.instance_context,
-                                                        "imcstore context",
-                                                        ALLOCSET_SMALL_MINSIZE,
-                                                        ALLOCSET_SMALL_INITSIZE,
-                                                        ALLOCSET_DEFAULT_MAXSIZE,
-                                                        SHARED_CONTEXT);
+    m_imcs_hash_tbl->m_imcs_context = AllocSetContextCreate(
+        g_instance.instance_context,
+        "imcstore context",
+        ALLOCSET_SMALL_MINSIZE,
+        ALLOCSET_SMALL_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE,
+        SHARED_CONTEXT);
     MemoryContext oldcontext = MemoryContextSwitchTo(m_imcs_hash_tbl->m_imcs_context);
     InitImcsHash();
     m_imcs_hash_tbl->m_imcs_lock = LWLockAssign(LWTRANCHE_IMCS_HASH_LOCK);

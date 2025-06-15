@@ -177,7 +177,7 @@ extern void PopulateImcsOnSSReadNode(Oid relOid, StringInfo inputMsg);
 extern void SyncCUForSSImcstore(PGXCNodeHandle **connection, int connCount, Oid relOid);
 
 extern void SendSyncCURequestsForSS(
-    PGXCNodeHandle **connections, int conn_count, CUDesc *cuDesc, CU *cuPtr, int imcsColId, Oid relOid);
+    PGXCNodeHandle **connections, int connCount, CUDesc *cuDesc, CU *cuPtr, int imcsColId, Oid relOid);
 
 extern void SSImcstoreCacheRemoteCU(Oid relOid, StringInfo inputMsg);
 
