@@ -167,6 +167,26 @@ typedef struct cached_re_str {
     regex_t cre_re;    /* the compiled regular expression */
 } cached_re_str;
 
+/* all the options of interest for regex functions */
+typedef struct pg_re_flags {
+    int cflags; /* compile flags for Spencer's regex code */
+    bool glob;  /* do it globally (for each occurrence) */
+} pg_re_flags;
+
+/* cross-call state for regexp_matches(), also regexp_split() */
+typedef struct regexp_matches_ctx {
+    text* orig_str; /* data string in original TEXT form */
+    int nmatches;   /* number of places where pattern matched */
+    int npatterns;  /* number of capturing subpatterns */
+    /* We store start char index and end+1 char index for each match */
+    /* so the number of entries in match_locs is nmatches * npatterns * 2 */
+    int* match_locs; /* 0-based character indexes */
+    int next_match;  /* 0-based index of next match to process */
+    /* workspace for build_regexp_matches_result() */
+    Datum* elems; /* has npatterns elements */
+    bool* nulls;  /* has npatterns elements */
+} regexp_matches_ctx;
+
 /*
  * the prototypes for exported functions
  */
@@ -176,5 +196,12 @@ extern int pg_regprefix(regex_t*, pg_wchar**, size_t*);
 extern void pg_regfree(regex_t*);
 extern size_t pg_regerror(int, const regex_t*, char*, size_t);
 extern void pg_set_regex_collation(Oid collation);
+extern void cleanup_regexp_matches(regexp_matches_ctx* matchctx);
+extern regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern,
+                                                pg_re_flags *re_flags,
+                                                Oid collation,
+                                                bool use_subpatterns,
+                                                bool ignore_degenerate,
+                                                int start_search);
 
 #endif /* _REGEX_H_ */

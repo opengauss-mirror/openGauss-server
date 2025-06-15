@@ -45,26 +45,6 @@
         u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) && \
         AFORMAT_REGEX_MATCH)
 
-/* all the options of interest for regex functions */
-typedef struct pg_re_flags {
-    int cflags; /* compile flags for Spencer's regex code */
-    bool glob;  /* do it globally (for each occurrence) */
-} pg_re_flags;
-
-/* cross-call state for regexp_matches(), also regexp_split() */
-typedef struct regexp_matches_ctx {
-    text* orig_str; /* data string in original TEXT form */
-    int nmatches;   /* number of places where pattern matched */
-    int npatterns;  /* number of capturing subpatterns */
-    /* We store start char index and end+1 char index for each match */
-    /* so the number of entries in match_locs is nmatches * npatterns * 2 */
-    int* match_locs; /* 0-based character indexes */
-    int next_match;  /* 0-based index of next match to process */
-    /* workspace for build_regexp_matches_result() */
-    Datum* elems; /* has npatterns elements */
-    bool* nulls;  /* has npatterns elements */
-} regexp_matches_ctx;
-
 /*
  * We cache precompiled regular expressions using a "self organizing list"
  * structure, in which recently-used items tend to be near the front.
@@ -90,10 +70,6 @@ typedef struct regexp_matches_ctx {
  */
 
 /* Local functions */
-static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern,
-    pg_re_flags *re_flags, Oid collation,
-    bool use_subpatterns, bool ignore_degenerate, int start_search);
-static void cleanup_regexp_matches(regexp_matches_ctx* matchctx);
 static ArrayType* build_regexp_matches_result(regexp_matches_ctx* matchctx);
 static Datum build_regexp_split_result(regexp_matches_ctx* splitctx);
 
@@ -1172,7 +1148,7 @@ Datum regexp_matches_no_flags(PG_FUNCTION_ARGS)
  * but it seems clearer to distinguish the functionality this way than to
  * key it all off one "is_split" flag.
  */
-static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern,
+regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern,
                                                 pg_re_flags *re_flags,
                                                 Oid collation,
                                                 bool use_subpatterns,
@@ -1278,7 +1254,7 @@ static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern,
 /*
  * cleanup_regexp_matches - release memory of a regexp_matches_ctx
  */
-static void cleanup_regexp_matches(regexp_matches_ctx* matchctx)
+void cleanup_regexp_matches(regexp_matches_ctx* matchctx)
 {
     pfree_ext(matchctx->orig_str);
     pfree_ext(matchctx->match_locs);

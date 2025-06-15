@@ -49,28 +49,54 @@
 
 #include "jit_plan_sp.h"
 
-#include <regex>
+#include "postgres.h"
+#include "fmgr.h"
+#include "utils/pg_locale.h"
+#include "regex/regex.h"
+#include "catalog/pg_collation.h"
 
 namespace JitExec {
 DECLARE_LOGGER(JitPlanSp, JitExec)
 
+static text* string_to_text(const std::string& str)
+{
+    return cstring_to_text(str.c_str());
+}
+
 static bool NameMatchesRegExList(const std::string& name, const std::string& regExList)
 {
+    int position = 1;
+    bool has_null = false;
+
+    text* name_text = string_to_text(name);
+    
     std::string::size_type pos = 0;
     std::string::size_type nextPos = regExList.find(';');
-
+    
+    pg_re_flags re_flags;
+    re_flags.glob = true;
+#define DEFAULT_COLLATION 100
     MOT_LOG_TRACE("Matching name %s against reg-ex list: %s", name.c_str(), regExList.c_str());
     while (pos < regExList.length()) {
         std::string regExStr =
             (nextPos != std::string::npos) ? regExList.substr(pos, nextPos - pos) : regExList.substr(pos);
-        std::regex regEx(regExStr);
-        if (std::regex_match(name, regEx)) {
+
+        regexp_matches_ctx* matchctx = setup_regexp_matches(
+            name_text,
+            string_to_text(regExStr), &re_flags,
+            DEFAULT_COLLATION, false, false, 0
+        );
+
+        if (matchctx->nmatches > 0) {
+            cleanup_regexp_matches(matchctx);
             MOT_LOG_TRACE("Name %s matches regular expression %s", name.c_str(), regExStr.c_str());
             return true;
         }
+
         if (nextPos == std::string::npos) {
             break;
         }
+
         pos = nextPos + 1;
         nextPos = regExList.find(';', pos);
     }
