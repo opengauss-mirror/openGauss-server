@@ -9387,9 +9387,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             continue;
         }
         _local_tmp_opt1.exit();
-        if (firstchar == 'x') {
-            elog(LOG, "HTAPTest: process with msg:%c.", firstchar);
-        }
         switch (firstchar) {
 #if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
             case 'Z':  // exeute plan directly.

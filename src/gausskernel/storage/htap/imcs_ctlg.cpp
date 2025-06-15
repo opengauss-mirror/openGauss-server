@@ -77,6 +77,13 @@ void CheckForSSMode(Relation rel, bool isShareMemory)
                  errdetail("HTAP is not supported for SS mode if SPQ Plugin not pre-load.")));
     }
 
+    if (isShareMemory && !g_instance.matrix_mem_cxt.matrix_mem_inited) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Un-support feature"),
+                 errdetail("HTAP is not supported for SS mode if failed to load matrix memory lib.")));
+    }
+
     const char *clusterMap = g_instance.attr.attr_sql.ss_htap_cluster_map;
     if (clusterMap == nullptr || clusterMap[0] == '\0') {
         ereport(ERROR, (errmsg("Try to enable htap for SS mode error: ss_htap_cluster_map not set")));
@@ -1375,7 +1382,7 @@ void PopulateImcsOnSSReadNode(Oid relOid, StringInfo inputMsg)
     {
         CheckAndSetDBName();
         /* create imcsdesc, cu data will be sync from SS primary later */
-        IMCS_HASH_TABLE->CreateImcsDesc(rel, populateParams.imcsAttsNum, populateParams.imcsNatts);
+        IMCS_HASH_TABLE->CreateImcsDesc(rel, populateParams.imcsAttsNum, populateParams.imcsNatts, true);
         IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relOid);
         imcsDesc->shareMemPool->ShmChunkMmapAll(populateParams.shmChunksNum);
         imcsDesc->shareMemPool->FlushShmChunkAll(RACK_INVALID);
@@ -1771,7 +1778,7 @@ void SqlExecImcstoredWithShm(Relation rel, List* colList)
         connections = GetSSStandbyConnections(&connCount, nodeCons);
         PackStandbyPopulateParams(populateParams, relOid, InvalidOid, imcsAtts->values, imcsNatts, TYPE_SS_IMCSTORED);
 
-        AlterTableEnableImcstore(rel, imcsAtts, imcsNatts);
+        AlterTableEnableImcstore(rel, imcsAtts, imcsNatts, true);
 
         IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relOid);
         Assert(imcsDesc->imcsStatus == IMCS_POPULATE_COMPLETE);
@@ -1847,6 +1854,7 @@ void SqlExecModifyPartitionImcstored(Relation rel, const char* partName, List* c
     {
         /* populate on standbynode */
         if (IMCS_IS_PRIMARY_MODE) {
+            CheckForSSMode(rel);
             AbortIfSinglePrimary();
             CreateImcsDescForPrimaryNode(partRel, imcsAtts, imcsNatts);
             connections = GetStandbyConnections(&connCount, nodeCons);

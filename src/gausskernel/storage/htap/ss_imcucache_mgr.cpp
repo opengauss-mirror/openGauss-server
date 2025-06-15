@@ -183,6 +183,10 @@ bool SSIMCUDataCacheMgr::CacheShmCU(CU* srcCU, CU* slotCU, CUDesc* cuDescPtr, IM
     IMCUDataCacheMgr::BaseCacheCU(srcCU, slotCU);
 
     if (srcCU->m_srcBufSize != 0) {
+        if (!SS_IMCU_CACHE->PreAllocateShmForRel(srcCU->m_srcBufSize)) {
+            ereport(ERROR, (errmsg("can't alloc share memory, share memory is exhausted.")));;
+        }
+
         char *buf = (char *)(imcsDesc->shareMemPool->AllocateCUMem(
             srcCU->m_srcBufSize, cuDescPtr->slot_id, &slotCU->shmCUOffset, &slotCU->shmChunkNumber));
         if (buf == nullptr) {
@@ -221,8 +225,6 @@ void SSIMCUDataCacheMgr::SaveCU(IMCSDesc* imcsDesc, RelFileNodeOld* rnode, int c
     cuDescPtr->slot_id = slotId;
     if (CacheShmCU(cuPtr, slotCU, cuDescPtr, imcsDesc)) {
         cuPtr->Destroy();
-    } else {
-        ereport(WARNING, (errmsg("HTAP: dss imcstore share memory is exhausted.")));
     }
     slotCU->imcsDesc = imcsDesc;
     UnPinDataBlock(slotId);

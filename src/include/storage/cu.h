@@ -612,7 +612,7 @@ void CU::FreeMem()
     if (this->m_srcBuf) {
 #ifdef ENABLE_HTAP
         /* this->shmCUOffset of ss imcstore is more than 0 */
-        if (ENABLE_DSS && this->shmCUOffset > 0) {
+        if (ENABLE_DSS && imcsDesc != NULL && imcsDesc->populateInShareMem) {
             /* only SS_PRIMARY_MODE can write share memory */
             if (SS_PRIMARY_MODE) {
                 imcsDesc->shareMemPool->FreeCUMem(this->shmChunkNumber, this->shmCUOffset);

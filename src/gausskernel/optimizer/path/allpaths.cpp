@@ -197,6 +197,10 @@ void try_add_imcstorescan_path(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry
         return;
     }
 
+    if (ENABLE_DSS) {
+        return;
+    }
+
     if (root->parse->commandType != CMD_SELECT) {
         return;
     }
