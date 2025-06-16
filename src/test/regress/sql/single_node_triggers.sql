@@ -1308,4 +1308,71 @@ insert into trg_test values(1,'引用package中的变量');
 insert into trg_test values(1,'引用package中的变量');
 
 drop package func_test_pkg1;
+
+
+-- without for each row
+DROP TABLE IF EXISTS test_table;
+CREATE TABLE test_table (id1 INT, id2 INT, id3 INT);
+DROP FUNCTION IF EXISTS test_function;
+CREATE FUNCTION test_function() RETURNS TRIGGER AS
+$$
+BEGIN
+    UPDATE test_table SET id2 = 5 WHERE id1 = NEW.id1;
+    RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+
+DROP TRIGGER IF EXISTS test_trigger ON test_table;
+
+CREATE TRIGGER test_trigger
+BEFORE INSERT ON test_table
+EXECUTE PROCEDURE test_function();
+
+ALTER TABLE test_table DISABLE TRIGGER test_trigger;
+
+ALTER TABLE test_table ENABLE TRIGGER test_trigger;
+
+INSERT INTO test_table (id1, id2, id3) VALUES (1, 10, 100);
+INSERT INTO test_table (id1, id2, id3) VALUES (1, 10, 100);
+INSERT INTO test_table (id1, id2, id3) VALUES (1, 10, 100);
+INSERT INTO test_table (id1, id2, id3) VALUES (1, 10, 100);
+
+SELECT * FROM test_table;
+DROP TRIGGER test_trigger ON test_table;
+DROP FUNCTION test_function;
+DROP TABLE test_table;
+
+DROP TABLE IF EXISTS test_table;
+CREATE TABLE test_table (id1 INT, id2 INT, id3 INT);
+DROP FUNCTION IF EXISTS test_function;
+CREATE FUNCTION test_function() RETURNS TRIGGER AS
+$$
+BEGIN
+    UPDATE test_table SET id2 = 5 WHERE id1 = NEW.id1;
+    RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+
+DROP TRIGGER IF EXISTS test_trigger ON test_table;
+
+CREATE TRIGGER test_trigger
+BEFORE INSERT ON test_table
+for each row
+EXECUTE PROCEDURE test_function();
+
+ALTER TABLE test_table DISABLE TRIGGER test_trigger;
+
+ALTER TABLE test_table ENABLE TRIGGER test_trigger;
+
+INSERT INTO test_table (id1, id2, id3) VALUES (1, 10, 100);
+INSERT INTO test_table (id1, id2, id3) VALUES (1, 10, 100);
+INSERT INTO test_table (id1, id2, id3) VALUES (1, 10, 100);
+INSERT INTO test_table (id1, id2, id3) VALUES (1, 10, 100);
+
+SELECT * FROM test_table;
+DROP TRIGGER test_trigger ON test_table;
+DROP FUNCTION test_function;
+DROP TABLE test_table;
+
+
 drop schema test_schema_for_trigger cascade;

@@ -11855,13 +11855,6 @@ static void exec_eval_datum(PLpgSQL_execstate* estate, PLpgSQL_datum* datum, Oid
             int fno;
 
             rec = (PLpgSQL_rec*)(estate->datums[recfield->recparentno]);
-            if (!HeapTupleIsValid(rec->tup)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmodule(MOD_PLSQL),
-                        errmsg("record \"%s\" is not assigned yet when evaluate datum", rec->refname),
-                        errdetail("The tuple structure of a not-yet-assigned record is indeterminate.")));
-            }
             fno = SPI_fnumber(rec->tupdesc, recfield->fieldname);
             if (fno == SPI_ERROR_NOATTRIBUTE) {
                 ereport(ERROR,
@@ -11878,7 +11871,13 @@ static void exec_eval_datum(PLpgSQL_execstate* estate, PLpgSQL_datum* datum, Oid
             } else {
                 *typetypmod = -1;
             }
-            *value = SPI_getbinval(rec->tup, rec->tupdesc, fno, isnull);
+            
+            if (!HeapTupleIsValid(rec->tup)) {
+                *isnull = true;
+                *value = (Datum) 0;
+            } else {
+                *value = SPI_getbinval(rec->tup, rec->tupdesc, fno, isnull);
+            }
             break;
         }
 
