@@ -42,6 +42,7 @@ AnnIndexScanFusion::AnnIndexScanFusion(AnnIndexScan* node, PlannedStmt* planstmt
     m_parentRel = NULL;
     m_partRel = NULL;
     m_tuple = NULL;
+    m_scanslot = NULL;
 
     m_node = node;
     m_keyInit = false;
@@ -184,10 +185,12 @@ void AnnIndexScanFusion::Init(long max_rows)
     }
 
     m_epq_indexqual = m_node->indexqualorig;
-    if (m_can_reused && m_reslot != NULL) {
-        ExecSetSlotDescriptor(m_reslot, m_tupDesc); 
+    if (m_can_reused && m_reslot != NULL && m_scanslot!= NULL) {
+        ExecSetSlotDescriptor(m_reslot, m_tupDesc);
+        ExecSetSlotDescriptor(m_scanslot, RelationGetDescr(m_rel));
     } else {
         m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, m_rel->rd_tam_ops);
+        m_scanslot = MakeSingleTupleTableSlot(RelationGetDescr(m_rel), false, m_rel->rd_tam_ops);
     }
     if (m_isustore) {
         m_tuple = New(CurrentMemoryContext) GetUTuple();
@@ -195,37 +198,76 @@ void AnnIndexScanFusion::Init(long max_rows)
         m_tuple = New(CurrentMemoryContext) GetATuple();
         setAttrMap();
         ExecStoreVirtualTuple(m_reslot);
-        m_oldvalues = m_reslot->tts_values;
-        m_oldisnull = m_reslot->tts_isnull;
-        if (m_remap) {
-            m_reslot->tts_values = m_tmpvals;
-            m_reslot->tts_isnull = m_tmpisnull;
-        } else {
-            m_reslot->tts_values = m_values;
-            m_reslot->tts_isnull = m_isnull; 
-        }
+        ExecStoreVirtualTuple(m_scanslot);
     }
 }
+bool AnnIndexScanFusion::CheckTlistMatchesTupdesc() // tlist_matches_tupdesc
+{
+    ListCell* tlist_item = list_head(m_targetList);
+    int attr_no;
+    TupleDesc inputDesc = RelationGetDescr(m_rel);
+    int num_attrs = inputDesc->natts;
+
+    /* Check the tlist attributes */
+    for (attr_no = 1; attr_no <= num_attrs; attr_no++) {
+        Form_pg_attribute att_tup = &inputDesc->attrs[attr_no - 1];
+        Var* var = NULL;
+
+        if (tlist_item == NULL)
+            return false; /* tlist too short */
+        var = (Var*)((TargetEntry*)lfirst(tlist_item))->expr;
+        if (var == NULL || !IsA(var, Var))
+            return false; /* tlist item not a Var */
+        /* if these Asserts fail, planner messed up */
+        Assert(var->varlevelsup == 0);
+        if (var->varattno != attr_no)
+            return false; /* out of order */
+        if (att_tup->attisdropped)
+            return false; /* table contains dropped columns */
+        if (var->vartype != att_tup->atttypid || (var->vartypmod != att_tup->atttypmod && var->vartypmod != -1))
+            return false; /* type mismatch */
+
+        tlist_item = lnext(tlist_item);
+    }
+    while (tlist_item != NULL) {
+        TargetEntry *res = (TargetEntry*)lfirst(tlist_item);
+        if (res->resjunk) {
+            tlist_item = lnext(tlist_item);
+            continue;
+        }
+        return false; /* tlist too long */
+    }
+    return true;
+}
+
 
 void AnnIndexScanFusion::setAttrMap() // lite ExecBuildProjectionInfoByRecursion
 {
+    if (CheckTlistMatchesTupdesc()) {
+        m_numSimpleVars = 0;
+        m_lastScanVar = RelationGetDescr(m_rel)->natts;
+        return;
+    }
     ListCell* lc = NULL;
     int cur_resno = 0;
-    TupleDesc  tup_desc = m_reslot->tts_tupleDescriptor;
-    int num_attrs = tup_desc->natts;
+    TupleDesc  inputDesc = RelationGetDescr(m_rel);
+    int num_attrs = inputDesc->natts;
     m_lastScanVar = 0;
     m_attrno = (int16*)palloc(m_tupDesc->natts * sizeof(int16));
-    m_remap = false;
+    m_numSimpleVars = 0;
 
     foreach (lc, m_targetList) {
         TargetEntry *res = (TargetEntry*)lfirst(lc);
+        if (res->resjunk) {
+            continue;
+        }
         Var *variable = (Var*)res->expr;
         bool isSimpleVar = false;
         if (variable != NULL && IsA(variable, Var) && variable->varattno > 0) {
             if (variable->varattno <= num_attrs) {
                 Form_pg_attribute attr;
 
-                attr = &tup_desc->attrs[variable->varattno - 1];
+                attr = &inputDesc->attrs[variable->varattno - 1];
                 if (!attr->attisdropped && variable->vartype == attr->atttypid)
                     isSimpleVar = true;
             }
@@ -237,10 +279,8 @@ void AnnIndexScanFusion::setAttrMap() // lite ExecBuildProjectionInfoByRecursion
                 m_lastScanVar =  attnum;
             }
             cur_resno++;
+            m_numSimpleVars++;
         }
-    }
-    if (num_attrs != cur_resno) {
-        m_remap = true;
     }
 }
 void AnnIndexScanFusion::IndexOrderByKey(List* indexqual)
@@ -371,23 +411,25 @@ TupleTableSlot* GetATuple::getTuple(IndexFusion* index)
             return NULL;
         }
         AnnIndexScanFusion* annindex = (AnnIndexScanFusion*)index;
-        heap_deform_tuple_natts(index->m_reslot, tuple, index->m_reslot->tts_tupleDescriptor,
-            index->m_values, index->m_isnull, annindex->m_lastScanVar);
+        heap_deform_tuple_natts(annindex->m_scanslot, tuple, annindex->m_scanslot->tts_tupleDescriptor,
+            annindex->m_scanslot->tts_values, annindex->m_scanslot->tts_isnull, annindex->m_lastScanVar);
         IndexScanDesc indexScan = GetIndexScanDesc(index->m_scandesc);
 
-        if (indexScan->xs_recheck && index->EpqCheck(index->m_values, index->m_isnull)) {
+        if (indexScan->xs_recheck &&
+            index->EpqCheck(annindex->m_scanslot->tts_values, annindex->m_scanslot->tts_isnull)) {
             continue;
         }
 
         /* remapping */
-        if (annindex->m_remap) {
-            for (int i = 0; i < index->m_tupDesc->natts; i++) {
+        if (annindex->m_numSimpleVars > 0) {
+            for (int i = 0; i < annindex->m_numSimpleVars; i++) {
                 Assert(index->m_attrno[i] > 0);
-                index->m_tmpvals[i] = index->m_values[index->m_attrno[i] - 1];
-                index->m_tmpisnull[i] = index->m_isnull[index->m_attrno[i] - 1];
+                index->m_reslot->tts_values[i] = annindex->m_scanslot->tts_values[index->m_attrno[i] - 1];
+                index->m_reslot->tts_isnull[i] = annindex->m_scanslot->tts_isnull[index->m_attrno[i] - 1];
             }
+            return index->m_reslot;
         }
-        return index->m_reslot;
+        return annindex->m_scanslot;
     } while (true);
 
     return NULL;
@@ -475,19 +517,17 @@ void AnnIndexScanFusion::End(bool isCompleted)
         }
         m_rel = NULL;
     }
-    if (m_reslot != NULL) {
-        if (!m_isustore) {
-            m_reslot->tts_values =  m_oldvalues;
-            m_reslot->tts_isnull = m_oldisnull;
+    if (!m_isustore) {
+        if (m_reslot != NULL)
             (void)ExecDropSingleTupleTableSlot(m_reslot);
-        }
+        if (m_scanslot != NULL)
+            (void)ExecDropSingleTupleTableSlot(m_scanslot);
+        if (m_attrno != NULL)
+            pfree_ext(m_attrno);
         m_reslot = NULL;
-    }
-    if (m_attrno != NULL && !m_isustore) {
-        pfree_ext(m_attrno);
+        m_scanslot = NULL;
         m_attrno = NULL;
     }
-
 }
 void AnnIndexScanFusion::ResetAnnIndexScanFusion(AnnIndexScan* node, PlannedStmt* planstmt, ParamListInfo params)
 {
