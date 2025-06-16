@@ -64,6 +64,10 @@ static void ValidateLimitParams(FunctionCallInfo fcinfo, bool isCreate)
         aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, "must be system admin to execute");
     }
 
+    if (RecoveryInProgress()) {
+        ereport(ERROR, (errmodule(MOD_WLM), errmsg("sql limit operation is not allowed in standby.")));
+    }
+
     if (!u_sess->attr.attr_common.enable_sql_limit) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("enable_sql_limit is off, please set to on"))));
@@ -140,26 +144,29 @@ static void UpdateLimitValidity(Datum* values, bool* nulls, bool* repl)
     repl[Anum_gs_sql_limit_is_valid - 1] = true;
 }
 
+static void ValidateNameArray(Datum* values, bool* nulls)
+{
+    if (!nulls[Anum_gs_sql_limit_databases - 1]) {
+        (void)ParseNameArrayToOidList(values[Anum_gs_sql_limit_databases - 1], get_database_oid, false);
+    }
+
+    if (!nulls[Anum_gs_sql_limit_users - 1]) {
+        (void)ParseNameArrayToOidList(values[Anum_gs_sql_limit_users - 1], get_role_oid, false);
+    }
+}
+
 // gs_create_sql_limit(limit_name,limit_type,work_node,max_concurrency,start_time,end_time,limit_opt,databases,users)
 Datum gs_create_sql_limit(PG_FUNCTION_ARGS)
 {
-    if (g_instance.sqlLimit_cxt.entryCount >= MAX_SQL_LIMIT_COUNT) {
-        ereport(ERROR, (errmodule(MOD_WLM), errmsg("sql limit count(%d) is over the limit(%d). "
-            "Please delete unused limits.", g_instance.sqlLimit_cxt.entryCount, MAX_SQL_LIMIT_COUNT)));
-    }
-
-    if (RecoveryInProgress()) {
-        ereport(ERROR, (errmodule(MOD_WLM), errmsg("create sql limit is not allowed in standby.")));
+    uint32 entryCount = pg_atomic_read_u32(&g_instance.sqlLimit_cxt.entryCount);
+    if (entryCount >= MAX_SQL_LIMIT_COUNT) {
+        ereport(ERROR, (errmodule(MOD_WLM), errmsg("sql limit count(%u) is over the limit(%d). "
+            "Please delete unused limits.", entryCount, MAX_SQL_LIMIT_COUNT)));
     }
 
     ValidateLimitParams(fcinfo, true);
 
     char *sqlType = text_to_cstring(PG_GETARG_TEXT_P(1));
-    if (!IsSqlLimitTypeValid(sqlType)) {
-        ereport(ERROR, (errmodule(MOD_WLM), errmsg("limit_type %s is invalid. "
-            "expected: sqlId, select, update, insert, delete", sqlType)));
-    }
-
     uint64 uniqueSqlid = 0;
     Datum datum = PG_GETARG_DATUM(6);
     SqlType ruleTypeEnum = GetSqlLimitType(sqlType);
@@ -168,13 +175,10 @@ Datum gs_create_sql_limit(PG_FUNCTION_ARGS)
         return false;
     }
 
-    (void)ValidateAndExtractOption(ruleTypeEnum, &datum, &uniqueSqlid);
+    (void)ValidateAndExtractOption(ruleTypeEnum, &datum, &uniqueSqlid, false);
 
     Datum values[Natts_gs_sql_limit] = {};
     bool nulls[Natts_gs_sql_limit] = {};
-
-    uint64 limitId = pg_atomic_fetch_add_u64(&g_instance.sqlLimit_cxt.entryIdSequence, 1);
-    values[Anum_gs_sql_limit_limit_id - 1] = Int64GetDatum(limitId);
 
     if (PG_ARGISNULL(0)) {
         nulls[Anum_gs_sql_limit_limit_name - 1] = true;
@@ -185,18 +189,22 @@ Datum gs_create_sql_limit(PG_FUNCTION_ARGS)
     values[Anum_gs_sql_limit_limit_type - 1] = PG_GETARG_DATUM(1); // limit_type
 
     FillLimitParams(values, nulls, fcinfo);
+    ValidateNameArray(values, nulls);
+
+    uint64 limitId = pg_atomic_read_u64(&g_instance.sqlLimit_cxt.entryIdSequence);
+    values[Anum_gs_sql_limit_limit_id - 1] = Int64GetDatum(limitId);
 
     TimestampTz startTime = DatumGetTimestampTz(values[Anum_gs_sql_limit_start_time - 1]);
     TimestampTz endTime = DatumGetTimestampTz(values[Anum_gs_sql_limit_end_time - 1]);
     TimestampTz now = GetCurrentTimestamp();
     int64 maxConcurrency = DatumGetInt64(values[Anum_gs_sql_limit_max_concurrency - 1]);
-    bool isValid = !(maxConcurrency < 0 || (startTime != 0 && startTime > now) ||
-        (endTime != 0 && endTime < now));
+    bool isValid = !(maxConcurrency < 0 || (endTime < now && endTime > 0) ||
+        (startTime != 0 && endTime != 0 && startTime > endTime));
     values[Anum_gs_sql_limit_is_valid - 1] = BoolGetDatum(isValid);
     nulls[Anum_gs_sql_limit_is_valid - 1] = false;
 
     CreateSqlLimit(values, nulls, &uniqueSqlid);
-
+    pg_atomic_fetch_add_u64(&g_instance.sqlLimit_cxt.entryIdSequence, 1);
     Relation rel = heap_open(GsSqlLimitRelationId, RowExclusiveLock);
     TupleDesc tupedesc = RelationGetDescr(rel);
     HeapTuple tuple = heap_form_tuple(tupedesc, values, nulls);
@@ -223,10 +231,6 @@ static void SetReplacementFlags(bool* repl)
 // gs_update_sql_limit(limit_id,limit_name,work_node,max_concurrency,start_time,end_time,limit_opt,databases,users)
 Datum gs_update_sql_limit(PG_FUNCTION_ARGS)
 {
-    if (RecoveryInProgress()) {
-        ereport(ERROR, (errmodule(MOD_WLM), errmsg("update sql limit is not allowed in standby.")));
-    }
-
     ValidateLimitParams(fcinfo, false);
     Datum limitId = PG_GETARG_DATUM(0);
     ScanKeyData entry;
@@ -262,9 +266,10 @@ Datum gs_update_sql_limit(PG_FUNCTION_ARGS)
             errmsg("invalid rule type: %s", sqlType)));
     }
 
-    (void)ValidateAndExtractOption(ruleTypeEnum, datum, &uinqueSqlid);
+    (void)ValidateAndExtractOption(ruleTypeEnum, datum, &uinqueSqlid, false);
     // reconstruction
     FillLimitParams(values, nulls, fcinfo);
+    ValidateNameArray(values, nulls);
 
     SetReplacementFlags(repl);
 
