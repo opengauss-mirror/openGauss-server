@@ -364,15 +364,98 @@ int pgtsql_base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             }
             break;
         case WITH:
-            /*
-             * WITH TIME must be reduced to one token
-             */
             GET_NEXT_TOKEN();
+            core_yystype_1 = cur_yylval;
+            cur_yylloc_1 = cur_yylloc;
+            cur_yyleng_1 = cur_yyleng;
+            next_token_1 = next_token;
+            next_yyleng_1 = next_yyleng;
 
             switch (next_token) {
+                /*
+                * WITH TIME must be reduced to one token
+                */
                 case TIME:
                     cur_token = WITH_TIME;
                     break;
+                case '(':
+                    if (!DB_IS_CMPT(D_FORMAT)) {
+                        /* save the lookahead token for next time */
+                        SET_LOOKAHEAD_TOKEN();
+
+                        /* and back up the output info to cur_token */
+                        lvalp->core_yystype = cur_yylval;
+                        *llocp = cur_yylloc;
+                        scanbuf[cur_yylloc + cur_yyleng] = '\0';
+                        break;
+                    }
+
+                    GET_NEXT_TOKEN();
+                    core_yystype_2 = cur_yylval;
+                    cur_yylloc_2 = cur_yylloc;
+                    next_token_2 = next_token;
+                    next_yyleng_2 = next_yyleng;
+
+                    switch (next_token) {
+                        case TSQL_NOLOCK:
+                        case TSQL_READUNCOMMITTED:
+                        case TSQL_UPDLOCK:
+                        case TSQL_REPEATABLEREAD:
+                        case SERIALIZABLE:
+                        case TSQL_READCOMMITTED:
+                        case TSQL_TABLOCK:
+                        case TSQL_TABLOCKX:
+                        case TSQL_PAGLOCK:
+                        case TSQL_ROWLOCK:
+                        case NOWAIT:
+                        case TSQL_READPAST:
+                        case TSQL_XLOCK:
+                        case SNAPSHOT:
+                        case TSQL_NOEXPAND:
+                            cur_token = WITH_paren;
+                            // back to current position
+                        default:
+                            /* save the lookahead token for next time */
+                            SET_LOOKAHEAD_2_TOKEN();
+                            break;
+                    }
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
+                    break;
+            }
+            break;
+        
+        case '(':
+            if (!DB_IS_CMPT(D_FORMAT) || ENABLE_TABLE_HINT_IDENTIFIER) {
+                break;
+            }
+
+            GET_NEXT_TOKEN();
+            switch (next_token) {
+                case TSQL_NOLOCK:
+                case TSQL_READUNCOMMITTED:
+                case TSQL_UPDLOCK:
+                case TSQL_REPEATABLEREAD:
+                case SERIALIZABLE:
+                case TSQL_READCOMMITTED:
+                case TSQL_TABLOCK:
+                case TSQL_TABLOCKX:
+                case TSQL_PAGLOCK:
+                case TSQL_ROWLOCK:
+                case NOWAIT:
+                case TSQL_READPAST:
+                case TSQL_XLOCK:
+                case SNAPSHOT:
+                case TSQL_NOEXPAND:
+                    cur_token = TSQL_HINT_START_BRACKET;
+                    // back to current position
                 default:
                     /* save the lookahead token for next time */
                     SET_LOOKAHEAD_TOKEN();

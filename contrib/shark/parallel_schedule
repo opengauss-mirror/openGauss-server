@@ -13,3 +13,4 @@ test: test_sysviews test_sysviews2
 test: gs_dump_d_format rotate_part2_dump
 test: varbinary
 test: test_sqlvariant
+test: table_hint
