@@ -293,6 +293,7 @@ struct ParseState {
     bool is_outer_parse_state;  /*is parse state is from outer scope, for cursor expression case*/
     List* cursor_expression_para_var;
     int p_expr_transform_level;   /* indicast the expr transform level in the target list */
+    bool has_rotate;
 };
 
 /* An element of p_relnamespace or p_varnamespace */

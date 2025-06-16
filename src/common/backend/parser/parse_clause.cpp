@@ -805,6 +805,7 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
                 subQueryStmt->targetList = lappend(subQueryStmt->targetList, resT);
             }
         }
+        pstate->has_rotate = true;
     }
 
     /*

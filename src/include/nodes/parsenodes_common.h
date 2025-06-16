@@ -2225,6 +2225,7 @@ typedef struct Query {
     ParentStmtType parentStmtType;
 #endif
     bool has_uservar;
+    bool has_rotate;
 } Query;
 
 /* ----------------------

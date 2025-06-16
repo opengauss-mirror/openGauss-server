@@ -174,6 +174,7 @@ extern const uint32 ASOFJOIN_VERSION_NUM;
 extern const uint32 PAGE_BASED_VERSION_NUM;
 extern const uint32 SS_ARCHIVE_VERSION_NUM;
 extern const uint32 UBTREE_PCR_VERSION_NUM;
+extern const uint32 SELECT_STMT_HAS_ROTATE;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);

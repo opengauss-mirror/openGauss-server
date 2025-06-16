@@ -360,6 +360,28 @@ SELECT u.emp_id, u.emp_name, u.attribute, u.value, d.dept_name, d.location FROM 
 drop table t_not_rotate0021_02;
 drop table t_not_rotate0021_01;
 
+create table product_column (id int, name varchar(20), value int) with (orientation = column) ;
+insert into product_column values(1,'a',10),(2,'b',20),(3,'c',30),(4,'a',40),(5,'b',50),(6,'c',60);
+
+set d_format_behavior_compat_options ='enable_sbr_identifier'; 
+
+explain(costs off) SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt;
+explain(costs off) SELECT id, name, value FROM ( SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt ) AS pivoted_data not rotate ( value FOR name IN ([a], [b], [c]) ) AS unpvt;
+
+SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt;
+
+SELECT id, name, value FROM ( SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt ) AS pivoted_data not rotate ( value FOR name IN ([a], [b], [c]) ) AS unpvt;
+
+CREATE TABLE t_not_rotate0019 ( ProductID INT PRIMARY KEY, ProductName VARCHAR(50), Q1_Sales DECIMAL(10,2), Q2_Sales DECIMAL(10,2), Q1_Cost DECIMAL(10,2), Q2_Cost DECIMAL(10,2) );
+
+INSERT INTO t_not_rotate0019 VALUES (1, 'Laptop', 1500.00, 2000.00, 1000.00, 1200.00), (2, 'Phone', 800.00, 1200.00, 500.00, 700.00);
+
+WITH SalesUnpivot AS ( SELECT ProductID, REPLACE(Quarter, '_sales', '') AS Quarter, Sales_Amount FROM t_not_rotate0019 not rotate ( Sales_Amount FOR Quarter IN (Q1_Sales, Q2_Sales) ) AS Sales ), CostUnpivot AS ( SELECT ProductID, REPLACE(Quarter, '_cost', '') AS Quarter, Cost_Amount FROM t_not_rotate0019 not rotate ( Cost_Amount FOR Quarter IN (Q1_Cost, Q2_Cost) ) AS Cost ) SELECT s.ProductID, s.Quarter, s.Sales_Amount, c.Cost_Amount FROM SalesUnpivot s JOIN CostUnpivot c ON s.ProductID = c.ProductID AND s.Quarter = c.Quarter;
+
+drop table product_column;
+drop table t_not_rotate0019;
+
+
 -- part3: ANSI_NULLS
 set ANSI_NULLS on;
 select NULL = NULL;

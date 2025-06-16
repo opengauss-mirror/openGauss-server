@@ -77,12 +77,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93046;
+const uint32 GRAND_VERSION_NUM = 93047;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 SELECT_STMT_HAS_ROTATE = 93047;
 const uint32 SQL_LIMIT_VERSION_NUM = 93046;
 const uint32 BM25_FULL_TEXT_INDEX = 93045;
 const uint32 AUTO_PARAMETERIZATION_VERSION_NUMBER = 93044;

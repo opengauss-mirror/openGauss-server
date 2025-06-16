@@ -1684,6 +1684,10 @@ static Query* _readQuery(void)
     {
         READ_BOOL_FIELD(has_uservar);
     }
+    IF_EXIST(has_rotate)
+    {
+        READ_BOOL_FIELD(has_rotate);
+    }
 
     READ_DONE();
 }

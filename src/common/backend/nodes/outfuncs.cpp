@@ -5209,6 +5209,9 @@ static void _outQuery(StringInfo str, Query* node)
     if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_USERVAR) {
         WRITE_BOOL_FIELD(has_uservar);
     }
+    if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_ROTATE) {
+        WRITE_BOOL_FIELD(has_rotate);
+    }
 }
 
 static void _outWithCheckOption(StringInfo str, const WithCheckOption* node)

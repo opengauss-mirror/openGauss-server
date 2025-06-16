@@ -705,6 +705,79 @@ SELECT u.emp_id, u.emp_name, u.attribute, u.value, d.dept_name, d.location FROM 
 
 drop table t_not_rotate0021_02;
 drop table t_not_rotate0021_01;
+create table product_column (id int, name varchar(20), value int) with (orientation = column) ;
+insert into product_column values(1,'a',10),(2,'b',20),(3,'c',30),(4,'a',40),(5,'b',50),(6,'c',60);
+set d_format_behavior_compat_options ='enable_sbr_identifier'; 
+explain(costs off) SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt;
+                QUERY PLAN                 
+-------------------------------------------
+ HashAggregate
+   Group By Key: product_column.id
+   ->  Row Adapter
+         ->  CStore Scan on product_column
+(4 rows)
+
+explain(costs off) SELECT id, name, value FROM ( SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt ) AS pivoted_data not rotate ( value FOR name IN ([a], [b], [c]) ) AS unpvt;
+                                                                                  QUERY PLAN                                                                                  
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Result
+   ->  Append
+         ->  Subquery Scan on pvt
+               ->  HashAggregate
+                     Group By Key: shark_rotate_test_part2.product_column.id
+                     Filter: (max(shark_rotate_test_part2.product_column.value) FILTER (WHERE ((shark_rotate_test_part2.product_column.name)::text = 'a'::text)) IS NOT NULL)
+                     ->  Row Adapter
+                           ->  CStore Scan on product_column
+         ->  Subquery Scan on pvt
+               ->  HashAggregate
+                     Group By Key: shark_rotate_test_part2.product_column.id
+                     Filter: (max(shark_rotate_test_part2.product_column.value) FILTER (WHERE ((shark_rotate_test_part2.product_column.name)::text = 'b'::text)) IS NOT NULL)
+                     ->  Row Adapter
+                           ->  CStore Scan on product_column
+         ->  Subquery Scan on pvt
+               ->  HashAggregate
+                     Group By Key: shark_rotate_test_part2.product_column.id
+                     Filter: (max(shark_rotate_test_part2.product_column.value) FILTER (WHERE ((shark_rotate_test_part2.product_column.name)::text = 'c'::text)) IS NOT NULL)
+                     ->  Row Adapter
+                           ->  CStore Scan on product_column
+(20 rows)
+
+SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt;
+ id | a  | b  | c  
+----+----+----+----
+  1 | 10 |    |   
+  4 | 40 |    |   
+  3 |    |    | 30
+  5 |    | 50 |   
+  6 |    |    | 60
+  2 |    | 20 |   
+(6 rows)
+
+SELECT id, name, value FROM ( SELECT id, [a], [b], [c] FROM ( SELECT id, name, value FROM product_column ) AS src rotate ( MAX(value) FOR name IN ([a], [b], [c]) ) AS pvt ) AS pivoted_data not rotate ( value FOR name IN ([a], [b], [c]) ) AS unpvt;
+ id | name | value 
+----+------+-------
+  1 | a    |    10
+  4 | a    |    40
+  5 | b    |    50
+  2 | b    |    20
+  3 | c    |    30
+  6 | c    |    60
+(6 rows)
+
+CREATE TABLE t_not_rotate0019 ( ProductID INT PRIMARY KEY, ProductName VARCHAR(50), Q1_Sales DECIMAL(10,2), Q2_Sales DECIMAL(10,2), Q1_Cost DECIMAL(10,2), Q2_Cost DECIMAL(10,2) );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_not_rotate0019_pkey" for table "t_not_rotate0019"
+INSERT INTO t_not_rotate0019 VALUES (1, 'Laptop', 1500.00, 2000.00, 1000.00, 1200.00), (2, 'Phone', 800.00, 1200.00, 500.00, 700.00);
+WITH SalesUnpivot AS ( SELECT ProductID, REPLACE(Quarter, '_sales', '') AS Quarter, Sales_Amount FROM t_not_rotate0019 not rotate ( Sales_Amount FOR Quarter IN (Q1_Sales, Q2_Sales) ) AS Sales ), CostUnpivot AS ( SELECT ProductID, REPLACE(Quarter, '_cost', '') AS Quarter, Cost_Amount FROM t_not_rotate0019 not rotate ( Cost_Amount FOR Quarter IN (Q1_Cost, Q2_Cost) ) AS Cost ) SELECT s.ProductID, s.Quarter, s.Sales_Amount, c.Cost_Amount FROM SalesUnpivot s JOIN CostUnpivot c ON s.ProductID = c.ProductID AND s.Quarter = c.Quarter;
+ productid | quarter | sales_amount | cost_amount 
+-----------+---------+--------------+-------------
+         1 | q1      |      1500.00 |     1000.00
+         2 | q1      |       800.00 |      500.00
+         1 | q2      |      2000.00 |     1200.00
+         2 | q2      |      1200.00 |      700.00
+(4 rows)
+
+drop table product_column;
+drop table t_not_rotate0019;
 -- part3: ANSI_NULLS
 set ANSI_NULLS on;
 select NULL = NULL;
