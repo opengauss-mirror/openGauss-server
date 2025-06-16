@@ -281,6 +281,7 @@ static bool check_uwal_log_path(char** newval, void** extra, GucSource source);
 static void assign_recovery_parallelism(int newval, void* extra);
 static bool check_xlog_archive_command(char** newval, void** extra, GucSource source);
 static bool check_xlog_archive_dest(char** newval, void** extra, GucSource source);
+static bool check_enable_mmap_guc(bool* newval, void** extra, GucSource source);
 
 static const struct config_enum_entry resource_track_log_options[] = {
     {"summary", SUMMARY, false},
@@ -1444,7 +1445,7 @@ static void InitStorageConfigureNamesBool()
             NULL},
             &g_instance.attr.attr_storage.enable_mmap,
             false,
-            NULL,
+            check_enable_mmap_guc,
             NULL,
             NULL},
         /* End-of-list marker */
@@ -7586,5 +7587,17 @@ static bool check_xlog_archive_dest(char** newval, void** extra, GucSource sourc
         return false;
     }
 
+    return true;
+}
+
+static bool check_enable_mmap_guc(bool* newval, void** extra, GucSource source)
+{
+#ifdef __x86_64__
+    if (*newval) {
+        GUC_check_errdetail("MMap only support in arm.");
+        return false;
+    }
+    return true;
+#endif
     return true;
 }

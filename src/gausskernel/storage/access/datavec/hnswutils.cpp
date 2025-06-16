@@ -160,6 +160,16 @@ bool HnswGetEnablePQ(Relation index)
 
     return GENERIC_DEFAULT_ENABLE_PQ;
 }
+bool HnswGetEnableMMap(Relation index)
+{
+    HnswOptions *opts = (HnswOptions *)index->rd_options;
+
+    if (opts) {
+        return opts->useMmap;
+    }
+
+    return GENERIC_DEFAULT_USE_MMAP;
+}
 
 /*
  * Get the number of subquantizer

@@ -6,6 +6,7 @@
 #include <vector>
 
 #define GENERIC_DEFAULT_ENABLE_PQ false
+#define GENERIC_DEFAULT_USE_MMAP false
 #define GENERIC_DEFAULT_PQ_M 8
 #define GENERIC_MIN_PQ_M 1
 #define GENERIC_MAX_PQ_M HNSW_MAX_DIM
@@ -119,6 +120,6 @@ extern void MmapShmemInit(void);
 Size MmapShmemSize();
 void InitParamsMetaPage(Relation index, PQParams* params, bool* enablePQ, bool trymmap);
 void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint);
-
-
+bool IsRelnodeMmapLoad(Oid relNode);
+bool IsDBnodeMmapLoad(Oid dbNode);
 #endif
