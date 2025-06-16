@@ -726,6 +726,14 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
     result->querySource = QSRC_ORIGINAL;
     result->canSetTag = true;
     result->has_uservar = pstate->has_uservar;
+    result->has_rotate = pstate->has_rotate;
+    if (pstate->has_rotate) {
+        ParseState* pstate_parent_temp = pstate->parentParseState;
+        while (pstate_parent_temp != NULL) {
+            pstate_parent_temp->has_rotate = true;
+            pstate_parent_temp = pstate_parent_temp->parentParseState;
+        }
+    }
 
     /* Mark whether synonym object is in rtables or not. */
     result->hasSynonyms = pstate->p_hasSynonyms;
@@ -3157,6 +3165,7 @@ static Query* transformUnrotateStmt(ParseState* pstate, SelectStmt* stmt)
     int in_counter = 0;
     List *targetList = NIL;
     List *aStarList = NIL;
+    pstate->has_rotate = true;
 
     if (stmt->withClause) {
         WithClause *withclause = (WithClause *)copyObject(stmt->withClause);

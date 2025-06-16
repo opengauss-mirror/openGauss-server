@@ -85,6 +85,7 @@ ParseState* make_parsestate(ParseState* parentParseState)
         pstate->p_describeco_hook_state = parentParseState->p_describeco_hook_state;
         pstate->p_has_ignore = parentParseState->p_has_ignore;
         pstate->transform_outer_columnref_as_param_hook = parentParseState->transform_outer_columnref_as_param_hook;
+        pstate->has_rotate = parentParseState->has_rotate;
     }
 
     return pstate;

@@ -9493,7 +9493,8 @@ Plan* try_vectorize_plan(Plan* top_plan, Query* parse, bool from_subplan, Planne
      * Fallback to original non-vectorized plan, if either the GUC 'enable_vector_engine'
      * is turned off or the plan cannot go through vector_engine_walker.
      */
-    if (!u_sess->attr.attr_sql.enable_vector_engine ||
+    if (parse->has_rotate ||
+        !u_sess->attr.attr_sql.enable_vector_engine ||
         (subroot != NULL && subroot->is_under_recursive_tree) ||
         vector_engine_walker(top_plan, from_subplan) ||
         (ENABLE_PRED_PUSH_ALL(NULL) || (subroot != NULL && SUBQUERY_PREDPUSH(subroot)))) {

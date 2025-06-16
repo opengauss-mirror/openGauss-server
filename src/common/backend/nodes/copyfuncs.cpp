@@ -5153,6 +5153,9 @@ static Query* _copyQuery(const Query* from)
     if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_USERVAR) {
         COPY_SCALAR_FIELD(has_uservar);
     }
+    if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_ROTATE) {
+        COPY_SCALAR_FIELD(has_rotate);
+    }
 
     newnode->rightRefState = CopyRightRefState(from->rightRefState);
 

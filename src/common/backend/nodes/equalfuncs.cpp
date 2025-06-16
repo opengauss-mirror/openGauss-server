@@ -1060,6 +1060,9 @@ static bool _equalQuery(const Query* a, const Query* b)
     if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_USERVAR) {
         COMPARE_SCALAR_FIELD(has_uservar);
     }
+    if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_ROTATE) {
+        COMPARE_SCALAR_FIELD(has_rotate);
+    }
     
     return true;
 }
