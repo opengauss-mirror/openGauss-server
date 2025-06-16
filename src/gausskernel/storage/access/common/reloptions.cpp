@@ -126,6 +126,7 @@ static relopt_bool boolRelOpts[] = {
      false},
     {{"deduplication", "Enables \"deduplication\" feature for btree index", RELOPT_KIND_BTREE}, false},
     {{"enable_pq", "Whether to enable PQ", RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT }, GENERIC_DEFAULT_ENABLE_PQ },
+    {{"use_mmap", "Whether to enable use mmap during hnsw search", RELOPT_KIND_HNSW }, GENERIC_DEFAULT_USE_MMAP },
     {{"by_residual", "Whether to use residual during IVFPQ", RELOPT_KIND_IVFFLAT}, IVFPQ_DEFAULT_RESIDUAL},
     /* list terminator */
     {{NULL}}};
@@ -490,7 +491,7 @@ static relopt_string stringRelOpts[] = {
     },
     {
         {"storage_type", "Specifies the Table accessor routines",
-         RELOPT_KIND_HEAP | RELOPT_KIND_BTREE | RELOPT_KIND_TOAST | RELOPT_KIND_HNSW},
+        RELOPT_KIND_HEAP | RELOPT_KIND_BTREE | RELOPT_KIND_TOAST },
         strlen(TABLE_ACCESS_METHOD_ASTORE),
         false,
         ValidateStrOptTableAccessMethod,

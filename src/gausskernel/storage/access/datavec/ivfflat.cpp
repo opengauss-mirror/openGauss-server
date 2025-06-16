@@ -115,8 +115,7 @@ static bytea *ivfflatoptions_internal(Datum reloptions, bool validate)
         {"enable_pq", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, enablePQ)},
         {"pq_m", RELOPT_TYPE_INT, offsetof(IvfflatOptions, pqM)},
         {"pq_ksub", RELOPT_TYPE_INT, offsetof(IvfflatOptions, pqKsub)},
-        {"by_residual", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, byResidual)},
-        {"parallel_workers", RELOPT_TYPE_INT, offsetof(StdRdOptions, parallel_workers)}};
+        {"by_residual", RELOPT_TYPE_BOOL, offsetof(IvfflatOptions, byResidual)}};
 
     relopt_value *options;
     int numoptions;
