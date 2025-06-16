@@ -154,6 +154,8 @@ drop table sales;
 
 select count(1) from sales;
 
+select pg_get_tabledef('sales');
+
 drop table sales;
 
 \c regression 

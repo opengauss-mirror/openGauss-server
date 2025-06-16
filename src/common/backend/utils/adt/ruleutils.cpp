@@ -1428,8 +1428,8 @@ static void AppendRangeIntervalPartitionInfo(StringInfo buf, Oid tableoid, table
         "FROM pg_catalog.pg_partition p LEFT JOIN pg_catalog.pg_tablespace t "
         "ON p.reltablespace = t.oid "
         "WHERE p.parentid = %u AND p.parttype = '%c' "
-        "AND p.partstrategy = '%c' ORDER BY ",
-        tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_RANGE);
+        "AND p.partstrategy in ('%c', '%c') ORDER BY ",
+        tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_RANGE, PART_STRATEGY_INTERVAL);
     for (int i = 1; i <= partkeynum; i++) {
         if (i == partkeynum) {
             appendStringInfo(query, "p.boundaries[%d]::%s ASC NULLS LAST", i, get_typename(iPartboundary[i - 1]));
