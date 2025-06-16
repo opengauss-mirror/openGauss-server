@@ -2756,6 +2756,25 @@ static void parse_one_item(const Item item, unsigned len, int blkno, int lineno,
     }
 }
 
+static void CheckParseFile(const char* buffer, int blkno, SegmentType type)
+{
+    const PageHeader page = (const PageHeader)buffer;
+    if (blkno == 0) {
+        BTMetaPageData* metad = BTPageGetMeta(page);
+        if (type == SEG_INDEX_UBTREE) {
+            if (metad->btm_magic != BTREE_MAGIC || metad->btm_version != UBTREE_VERSION) {
+                fprintf(stderr, "it is not ubtree index file, please choose correct type\n");
+                exit(1);
+            }
+        } else if (type == SEG_INDEX_UBTREE_PCR) {
+            if (metad->btm_magic != BTREE_MAGIC || metad->btm_version != UBTREE_PCR_VERSION) {
+                fprintf(stderr, "it is not ubtree index file, please choose correct type\n");
+                exit(1);
+            }
+        }
+    }
+}
+
 static void ParseHeapPageHeader(const PageHeader page, int blkno, int blknum)
 {
     bool checksum_matched = false;
@@ -2953,8 +2972,8 @@ static void parse_special_data(const char* buffer, SegmentType type)
         if (P_ISROOT(uopaque)) {
             fprintf(stdout, "BTP_ROOT ");
         }
-        if (P_ISMETA(uopaque)) { 
-            fprintf(stdout, "BTP_META ");
+        if (!P_ISLEAF(uopaque) && !P_ISROOT(uopaque)) {
+            fprintf(stdout, "BTP_INTERNAL ");
         }
         if (P_ISDELETED(uopaque)) {
             fprintf(stdout, "BTP_DELETED ");
@@ -2985,14 +3004,12 @@ static void parse_special_data(const char* buffer, SegmentType type)
         fprintf(stdout, "\tubtree PCR flag: ");
         if (P_ISLEAF(uPCRopaque)) {
             fprintf(stdout, "BTP_LEAF ");
-        } else {
-            fprintf(stdout, "BTP_INTERNAL ");
         }
         if (P_ISROOT(uPCRopaque)) {
             fprintf(stdout, "BTP_ROOT ");
         }
-        if (P_ISMETA(uPCRopaque)) { 
-            fprintf(stdout, "BTP_META ");
+        if (!P_ISLEAF(uPCRopaque) && !P_ISROOT(uPCRopaque)) {
+            fprintf(stdout, "BTP_INTERNAL ");
         }
         if (P_ISDELETED(uPCRopaque)) {
             fprintf(stdout, "BTP_DELETED ");
@@ -3377,6 +3394,8 @@ static int parse_a_page(const char* buffer, int blkno, int blknum, SegmentType t
 {
     const PageHeader page = (const PageHeader)buffer;
     uint16 headersize;
+    CheckParseFile(buffer, blkno, type);
+
     if (PageIsNew(page)) {
         fprintf(stdout, "Page information of block %d/%d : new page\n\n", blkno, blknum);
         ParsePageHeader(page, blkno, blknum, type);
@@ -3706,8 +3725,10 @@ static int parse_uncompressed_page_file(const char *filename, SegmentType type, 
     fprintf(stdout, "Relation information : pageCount %lu.\n", g_pageCount);
     fprintf(stdout, "RP information : rpCount %lu, rpMax %lu, rpAvg %f.\n",
         g_rpCount, g_rpMax, rpAvg);
-    fprintf(stdout, "TD information : tdCount %lu, tdMax %lu, tdAvg %f.\n",
-        g_tdCount, g_tdMax, tdAvg);
+    if (type == SEG_INDEX_UBTREE_PCR || type == SEG_UHEAP) {
+        fprintf(stdout, "TD information : tdCount %lu, tdMax %lu, tdAvg %f.\n",
+            g_tdCount, g_tdMax, tdAvg);
+    }
     fprintf(stdout, "Freespace information : freeTotal %lu, freeMax %lu, freeAvg %f.\n",
         g_freeSpace, g_freeMax, freeAvg);
     fclose(fd);
