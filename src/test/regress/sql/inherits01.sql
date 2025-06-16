@@ -459,6 +459,28 @@ DROP TABLE kid_2023 CASCADE;
 DROP TABLE fa_wai CASCADE;
 DROP TABLESPACE example1;
 
+create schema test;
+CREATE TABLE test.gs_edge (
+    id SERIAL PRIMARY KEY,
+    start INTEGER NOT NULL,
+    "end" INTEGER NOT NULL,
+    properties JSONB 
+);
+CREATE TABLE test.knows () INHERITS (test.gs_edge);
+CREATE INDEX idx_gs_edge_start ON test.gs_edge (start);
+
+CREATE TABLE test.gs_vertex (
+    id INTEGER PRIMARY KEY,
+    properties JSONB 
+);
+SELECT *
+FROM (
+    SELECT id, start, "end", properties, ctid FROM test.gs_edge
+    UNION ALL
+    SELECT id, start, "end", properties, ctid FROM test.knows
+) e
+JOIN test.gs_vertex n ON e.start = n.id;
+
 \c regression
 DROP DATABASE inherit_base;
 

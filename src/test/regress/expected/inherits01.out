@@ -1507,6 +1507,33 @@ DROP TABLE kid_2023 CASCADE;
 DROP TABLE fa_wai CASCADE;
 NOTICE:  drop cascades to table kid_wai
 DROP TABLESPACE example1;
+create schema test;
+CREATE TABLE test.gs_edge (
+    id SERIAL PRIMARY KEY,
+    start INTEGER NOT NULL,
+    "end" INTEGER NOT NULL,
+    properties JSONB 
+);
+NOTICE:  CREATE TABLE will create implicit sequence "gs_edge_id_seq" for serial column "gs_edge.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gs_edge_pkey" for table "gs_edge"
+CREATE TABLE test.knows () INHERITS (test.gs_edge);
+CREATE INDEX idx_gs_edge_start ON test.gs_edge (start);
+CREATE TABLE test.gs_vertex (
+    id INTEGER PRIMARY KEY,
+    properties JSONB 
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gs_vertex_pkey" for table "gs_vertex"
+SELECT *
+FROM (
+    SELECT id, start, "end", properties, ctid FROM test.gs_edge
+    UNION ALL
+    SELECT id, start, "end", properties, ctid FROM test.knows
+) e
+JOIN test.gs_vertex n ON e.start = n.id;
+ id | start | end | properties | ctid | id | properties 
+----+-------+-----+------------+------+----+------------
+(0 rows)
+
 \c regression
 DROP DATABASE inherit_base;
 -- ustore
