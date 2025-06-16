@@ -258,12 +258,38 @@ CREATE INDEX
 Indexes:
     "index_sales" btree (prod_id) LOCAL TABLESPACE pg_default
 Partition By RANGE( time_id) INTERVAL('1 day')
-Number of partitions: 2 (View pg_partition to check each partition range.)
+Number of partitions: 4 (View pg_partition to check each partition range.)
 
 select count(1) from sales;
  count 
 -------
      0
+(1 row)
+
+select pg_get_tabledef('sales');
+                                                                                    pg_get_tabledef                                                                                    
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                                                                                                            +
+ CREATE TABLE sales (                                                                                                                                                                 +
+     prod_id numeric(6,0),                                                                                                                                                            +
+     " cust_id" numeric,                                                                                                                                                              +
+     " time_id" timestamp(0) without time zone,                                                                                                                                       +
+     " channel_id" character(1),                                                                                                                                                      +
+     " promo_id" numeric(6,0),                                                                                                                                                        +
+     " quantity_sold" numeric(3,0),                                                                                                                                                   +
+     " amount_sold" numeric(10,2)                                                                                                                                                     +
+ )                                                                                                                                                                                    +
+ WITH (orientation=row, compression=no)                                                                                                                                               +
+ PARTITION BY RANGE (" time_id")                                                                                                                                                      +
+ INTERVAL ('1 day')                                                                                                                                                                   +
+ (                                                                                                                                                                                    +
+     PARTITION p1 VALUES LESS THAN ('2019-02-01 00:00:00'),                                                                                                                           +
+     PARTITION p2 VALUES LESS THAN ('2019-02-02 00:00:00'),                                                                                                                           +
+     PARTITION sys_p2 VALUES LESS THAN ('Mon Feb 04 00:00:00 2019'),                                                                                                                  +
+     PARTITION sys_p1 VALUES LESS THAN ('Wed Feb 06 00:00:00 2019')                                                                                                                   +
+ )                                                                                                                                                                                    +
+ ENABLE ROW MOVEMENT;                                                                                                                                                                 +
+ CREATE INDEX index_sales ON sales USING btree (prod_id) LOCAL(PARTITION idx_p1, PARTITION idx_p2, PARTITION sys_p2_prod_id_idx, PARTITION sys_p1_prod_id_idx)  TABLESPACE pg_default;
 (1 row)
 
 drop table sales;

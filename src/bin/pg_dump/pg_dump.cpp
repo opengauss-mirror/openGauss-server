@@ -8707,11 +8707,11 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
             appendPQExpBuffer(query,
                 "SELECT t.tableoid, t.oid, "
                 "t.relname AS indexname, "
-                "pg_catalog.pg_get_indexdef(i.indexrelid, %s) AS indexdef, "
+                "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
                 "i.indnkeyatts AS indnkeyatts, "
                 "i.indnatts AS indnatts, "
                 "t.relnatts AS indnkeys, "
-                "i.indkey, i.indisclustered, i.indisusable, ", schemaOnly ? "true" : "false");
+                "i.indkey, i.indisclustered, i.indisusable, ");
             if (true == is_column_exists(AH->connection, IndexRelationId, "indisreplident")) {
                 appendPQExpBuffer(query, "i.indisreplident, ");
             } else {
@@ -19680,10 +19680,10 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 "FROM pg_partition p LEFT JOIN pg_tablespace t "
                 "ON p.reltablespace = t.oid "
                 "WHERE p.parentid = '%u' AND p.parttype = '%c' "
-                "AND p.partstrategy = '%c' ORDER BY ",
+                "AND p.partstrategy in ('%c', '%c') ORDER BY ",
                 tbinfo->dobj.catId.oid,
                 PART_OBJ_TYPE_TABLE_PARTITION,
-                newStrategy);
+                newStrategy, partStrategy);
             for (i = 1; i <= partkeynum; i++) {
                 
                 if (!partkeyexprIsNull) {
