@@ -316,9 +316,9 @@ typedef struct HnswOptions {
     int m;              /* number of connections */
     int efConstruction; /* size of dynamic candidate list */
     bool enablePQ;
+    bool useMmap;
     int pqM;            /* number of subquantizer */
     int pqKsub;         /* number of centroids for each subquantizer */
-    char *storage_type; /* table access method kind */
 } HnswOptions;
 
 typedef struct HnswGraph {
@@ -610,6 +610,7 @@ typedef struct Candidate {
 int HnswGetM(Relation index);
 int HnswGetEfConstruction(Relation index);
 bool HnswGetEnablePQ(Relation index);
+bool HnswGetEnableMMap(Relation index);
 int HnswGetPqM(Relation index);
 int HnswGetPqKsub(Relation index);
 FmgrInfo *HnswOptionalProcInfo(Relation index, uint16 procnum);
