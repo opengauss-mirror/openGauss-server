@@ -89,6 +89,7 @@
 #include "access/parallel_recovery/dispatcher.h"
 #ifdef ENABLE_HTAP
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/ss_imcucache_mgr.h"
 #endif
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
@@ -10134,7 +10135,7 @@ Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS)
 }
 
 #ifdef ENABLE_HTAP
-#define MEMORY_TYPES_CNT 27
+#define MEMORY_TYPES_CNT 29
 #else
 #define MEMORY_TYPES_CNT 24
 #endif
@@ -10166,6 +10167,8 @@ const char* MemoryTypeName[] = {"max_process_memory",
     "imcstore_max_memory",
     "imcstore_used_memory",
     "imcstore_borrowed_memory",
+    "ss_imcstore_max_share_memory",
+    "ss_imcstore_used_share_memory",
 #endif
     };
 
@@ -10301,6 +10304,8 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
         mem_size[24] = (int)(g_instance.attr.attr_memory.max_imcs_cache >> BITS_IN_KB);
         mem_size[25] = IMCU_CACHE->GetCurrentMemSize() >> BITS_IN_MB;
         mem_size[26] = IMCU_CACHE->GetCurrBorrowMemSize() >> BITS_IN_MB;
+        mem_size[27] = (int)(g_instance.attr.attr_memory.ss_max_imcs_cache >> BITS_IN_KB);
+        mem_size[28] = pg_atomic_read_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used) >> BITS_IN_MB;
 #endif
     }
 

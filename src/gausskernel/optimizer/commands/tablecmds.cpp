@@ -218,7 +218,6 @@
 #endif
 
 #ifdef ENABLE_HTAP
-#include "access/htap/imcucache_mgr.h"
 #include "access/htap/imcs_ctlg.h"
 #endif
 
@@ -767,6 +766,7 @@ static void ATPrepResetPartitionno(Relation rel);
 static void ATExecResetPartitionno(Relation rel);
 #ifdef ENABLE_HTAP
 static void ATExecIMCSTORED(Relation rel, List* colList);
+static void ATExecIMCSTOREDWithShm(Relation rel, List* colList);
 static void ATExecUNIMCSTORED(Relation rel);
 static void ATExecModifyPartitionIMCSTORED(Relation rel, const char* partName, List* colList);
 static void ATExecModifyPartitionUNIMCSTORED(Relation rel, const char* partName);
@@ -8908,6 +8908,10 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
             ATSimplePermissions(rel, ATT_TABLE);
             pass = AT_PASS_ADD_CONSTR;
             break;
+        case AT_ImcstoredWithShm:
+            ATSimplePermissions(rel, ATT_TABLE);
+            pass = AT_PASS_ADD_CONSTR;
+        break;
         case AT_UnImcstored:
             ATSimplePermissions(rel, ATT_TABLE);
             pass = AT_PASS_DROP;
@@ -9670,6 +9674,9 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
 #ifdef ENABLE_HTAP
         case AT_Imcstored:
             ATExecIMCSTORED(rel, (List*)cmd->def);
+            break;
+        case AT_ImcstoredWithShm:
+            ATExecIMCSTOREDWithShm(rel, (List*)cmd->def);
             break;
         case AT_UnImcstored:
             ATExecUNIMCSTORED(rel);
@@ -22437,42 +22444,25 @@ static void ATExecGenericOptions(Relation rel, List* options)
 /*
  * ALTER TABLE <name> IMCSTORED(...)
  */
-static void ATExecIMCSTORED(Relation rel, List* colList) 
+static void ATExecIMCSTORED(Relation rel, List* colList)
 {
-    Oid relOid = RelationGetRelid(rel);
-    int2vector* imcsAtts = NULL;
-    int imcsNatts = 0;
+    SqlExecImcstored(rel, colList);
+}
 
-    CheckImcstoreCacheReady();
-    CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts);
-    /* standbynode populate */
-    if (IMCS_IS_PRIMARY_MODE) {
-        AbortIfSinglePrimary();
-        CreateImcsDescForPrimaryNode(rel, imcsAtts, imcsNatts);
-        SendImcstoredRequest(relOid, InvalidOid, imcsAtts->values, imcsNatts, TYPE_IMCSTORED);
-    } else {
-        AlterTableEnableImcstore(rel, imcsAtts, imcsNatts);
-    }
-    pfree_ext(imcsAtts);
+/*
+ * ALTER TABLE <name> IMCSTORED(...) WITH SHARE_MEMORY
+ */
+static void ATExecIMCSTOREDWithShm(Relation rel, List* colList)
+{
+    SqlExecImcstoredWithShm(rel, colList);
 }
 
 /*
  * ALTER TABLE <name> UNIMCSTORED
  */
-static void ATExecUNIMCSTORED(Relation rel) 
+static void ATExecUNIMCSTORED(Relation rel)
 {
-    Oid relOid = RelationGetRelid(rel);
-
-    CheckImcstoreCacheReady();
-    if (!RelHasImcs(relOid) && !IMCU_CACHE->m_is_promote) {
-        ereport(ERROR, (errmsg("rel not populated, no need to be unpopulate.")));
-    }
-
-    if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
-        AbortIfSinglePrimary();
-        SendUnImcstoredRequest(relOid, InvalidOid, TYPE_UNIMCSTORED);
-    }
-    AlterTableDisableImcstore(rel);
+    SqlExecUnImcstored(rel);
 }
 
 /*
@@ -22480,51 +22470,7 @@ static void ATExecUNIMCSTORED(Relation rel)
  */
 static void ATExecModifyPartitionIMCSTORED(Relation rel, const char* partName, List* colList)
 {
-    Oid partOid = InvalidOid;
-    Oid relOid = RelationGetRelid(rel);
-    int2vector* imcsAtts = NULL;
-    int imcsNatts = 0;
-
-    CheckImcstoreCacheReady();
-    partOid = ImcsPartNameGetPartOid(relOid, partName);
-    CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts, partOid);
-
-    /* check if other partitions of partitioned table populated */
-    if (IMCU_CACHE->GetImcsDesc(relOid) == NULL) {
-        // first partitition to populate, create imcsdesc for partitioned table
-        // In case of specify partition, different table may have different imcs cols,
-        // do not remember imcs cols for partitioned table */
-        IMCU_CACHE->CreateImcsDesc(rel, NULL, 0);
-    }
-
-    /* start populate partition */
-    Partition part = partitionOpen(rel, partOid, AccessExclusiveLock);
-    Relation partRel = partitionGetRelation(rel, part);
-    PG_TRY();
-    {
-        /* populate on standbynode */
-        if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
-            AbortIfSinglePrimary();
-            CreateImcsDescForPrimaryNode(partRel, imcsAtts, imcsNatts);
-            SendImcstoredRequest(relOid, partOid, imcsAtts->values, imcsNatts, TYPE_PARTITION_IMCSTORED);
-        } else {
-            /* populate on currrent node */
-            AlterTableEnableImcstore(partRel, imcsAtts, imcsNatts);
-            IMCU_CACHE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_COMPLETE);
-        }
-    }
-    PG_CATCH();
-    {
-        releaseDummyRelation(&partRel);
-        partitionClose(rel, part, AccessExclusiveLock);
-        pfree_ext(imcsAtts);
-        IMCU_CACHE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_ERROR);
-        PG_RE_THROW();
-    }
-    PG_END_TRY();
-    releaseDummyRelation(&partRel);
-    partitionClose(rel, part, AccessExclusiveLock);
-    pfree_ext(imcsAtts);
+    SqlExecModifyPartitionImcstored(rel, partName, colList);
 }
 
 /*
@@ -22532,38 +22478,7 @@ static void ATExecModifyPartitionIMCSTORED(Relation rel, const char* partName, L
  */
 static void ATExecModifyPartitionUNIMCSTORED(Relation rel, const char* partName)
 {
-    Oid partOid = InvalidOid;
-    Oid relOid = RelationGetRelid(rel);
-
-    CheckImcstoreCacheReady();
-    partOid = ImcsPartNameGetPartOid(relOid, partName);
-    if ((!RelHasImcs(relOid) || !RelHasImcs(partOid)) && !IMCU_CACHE->m_is_promote) {
-        ereport(ERROR, (errmsg("partition %d of rel %d not populated", partOid, relOid)));
-    }
-
-    /* start unpopulate partition */
-    Partition part = partitionOpen(rel, partOid, AccessExclusiveLock);
-    Relation partRel = partitionGetRelation(rel, part);
-    PG_TRY();
-    {
-        /* unpopulate partition on standby node */
-        if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
-            AbortIfSinglePrimary();
-            SendUnImcstoredRequest(relOid, partOid, TYPE_PARTITION_UNIMCSTORED);
-        }
-        /* unpopulate partition on current node */
-        AlterTableDisableImcstore(partRel);
-        /* drop imcs for rel if all partition unpopulated */
-        DropImcsForPartitionedRelIfNeed(rel);
-    }
-    PG_CATCH();
-    {
-        releaseDummyRelation(&partRel);
-        partitionClose(rel, part, AccessExclusiveLock);
-    }
-    PG_END_TRY();
-    releaseDummyRelation(&partRel);
-    partitionClose(rel, part, AccessExclusiveLock);
+    SqlExecModifyPartitionUnImcstored(rel, partName);
 }
 #endif
 

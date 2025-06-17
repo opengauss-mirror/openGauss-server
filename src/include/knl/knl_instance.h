@@ -1470,9 +1470,12 @@ typedef struct knl_g_imcstore_context {
     MpmcBoundedQueue<IMCStoreVacuumTarget> *vacuum_queue;
 
     pg_atomic_uint32 imcs_tbl_cnt;
+    pg_atomic_uint64 imcs_shm_cur_used;
     pg_atomic_uint32 is_walrcv_down;
     pg_atomic_uint32 is_imcstore_cache_down;
     Oid dboid;
+
+    bool loadedSPQPlugin;
 } knl_g_imcstore_context;
 #endif
 

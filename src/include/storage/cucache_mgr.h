@@ -156,7 +156,9 @@ public:
 
     int64 m_cstoreMaxSize;
 
+#ifndef ENABLE_UT
 protected:
+#endif  // ENABLE_UT
     DataCacheMgr()
     {}
     ~DataCacheMgr()

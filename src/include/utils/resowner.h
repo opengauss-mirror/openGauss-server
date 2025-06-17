@@ -143,6 +143,11 @@ extern void ResourceOwnerForgetDataCacheSlot(ResourceOwner owner, CacheSlotId_t 
 extern void ResourceOwnerEnlargeIMCSDataCacheSlot(ResourceOwner owner);
 extern void ResourceOwnerRememberIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid);
 extern void ResourceOwnerForgetIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid);
+
+/* support for SS imcs data cache refcount management */
+extern void ResourceOwnerEnlargeSSIMCSDataCacheSlot(ResourceOwner owner);
+extern void ResourceOwnerRememberSSIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid);
+extern void ResourceOwnerForgetSSIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid);
 #endif
 
 /* support for meta cache refcount management */

@@ -271,6 +271,9 @@ bool checkPlanAndFindScanRelId(Plan* plan, Index* rel_id_idx)
 #endif   /* ENABLE_MULTIPLE_NODES */
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
         case T_CStoreScan: {
             /* get scan relation index of ragne table */

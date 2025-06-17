@@ -1989,6 +1989,9 @@ bool IsIOCostNode(NodeTag node)
         case T_CStoreScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:

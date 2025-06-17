@@ -1381,6 +1381,8 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
 #ifdef ENABLE_HTAP
     storage_cxt->IMCSCacheBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
     storage_cxt->IMCSCacheBlockInProgressUncompress = CACHE_BLOCK_INVALID_IDX;
+    storage_cxt->SSIMCSCacheBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
+    storage_cxt->SSIMCSCacheBlockInProgressUncompress = CACHE_BLOCK_INVALID_IDX;
 #endif
     storage_cxt->MetaBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
 

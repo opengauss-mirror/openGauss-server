@@ -220,6 +220,25 @@ void GetPlanNodePlainText(
                 }
             }
             break;
+
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+            *pt_operation = "TABLE ACCESS";
+            if (!((Scan*)plan)->tablesample) {
+                if (((Scan*)plan)->isPartTbl) {
+                    *pname = *sname = *pt_options = "Partitioned Spq CStore Scan";
+                } else {
+                    *pname = *sname = *pt_options = "Spq CStore Scan";
+                }
+            } else {
+                if (((Scan*)plan)->isPartTbl) {
+                    *pname = *sname = *pt_options = "Partitioned InMemory VecSample Scan";
+                } else {
+                    *pname = *sname = *pt_options = "InMemory VecSample Scan";
+                }
+            }
+            break;
+#endif
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES

@@ -39,17 +39,24 @@
 #include "port/pg_crc32c.h"
 #include "utils/builtins.h"
 #ifdef ENABLE_HTAP
+#include "ddes/dms/ss_dms_bufmgr.h"
+#include "ddes/dms/ss_transaction.h"
 #include "utils/elog.h"
 #include "storage/lock/lwlock.h"
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/ss_imcucache_mgr.h"
 #include "access/htap/imcstore_delta.h"
 #include "access/htap/imcustorage.h"
 #include "access/htap/imcstore_am.h"
 #include "access/tableam.h"
 #include "access/htap/imcstore_insert.h"
 #include "access/htap/imcs_ctlg.h"
+#include "access/htap/imcs_hash_table.h"
 #endif
 #include "storage/time_series_compress.h"
+
+/* use DMS_DR_TYPE_SE_ALCK for rowgroup, DMS_DR_TYPE_SE_ALCK is not used by openGauss */
+#define DMS_DR_TYPE_ROWGROUP DMS_DR_TYPE_SE_ALCK
 
 int CUAlignUtils::GetCuAlignSizeColumnId(int columnId)
 {
@@ -107,6 +114,8 @@ void CUDesc::Reset()
     numericIntLikeCU = false;
     cuSrcBufSize = 0;
     cuOffsetSize = 0;
+    slot_id = CACHE_BLOCK_INVALID_IDX;
+    isSSImcstore = false;
 #endif
 }
 
@@ -1855,7 +1864,7 @@ int CU::GetCurScanPos(int rowCursorInCU)
 }
 
 #ifdef ENABLE_HTAP
-void IMCSDesc::Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts)
+void IMCSDesc::Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts, bool useShareMemroy)
 {
     relOid = RelationGetRelid(rel);
     imcsAttsNum = int2vectorCopy(imcstoreAttsNum);
@@ -1863,6 +1872,8 @@ void IMCSDesc::Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts
     imcsStatus = t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE
                            ? IMCS_POPULATE_ONSTANDBY
                            : IMCS_POPULATE_INITIAL;
+    populateInShareMem = useShareMemroy;
+    isShmNotEnough = false;
     isPartition = rel->parentId == InvalidOid ? false : true;
     parentOid = rel->parentId;
     relname = isPartition ? getPartitionName(relOid, false) : pstrdup(NameStr(rel->rd_rel->relname));
@@ -1901,6 +1912,7 @@ void IMCSDesc::Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts
             borrowMemPool = New(CurrentMemoryContext) BorrowMemPool(relOid);
         }
         uint32 totalBlks = RelationGetNumberOfBlocks(rel);
+        shareMemPool = populateInShareMem ? New(CurrentMemoryContext) ShareMemoryPool(relOid) : NULL;
         uint32 rowGroupNums = ImcsCeil(totalBlks, MAX_IMCS_PAGES_ONE_CU);
         imcuDescContext = AllocSetContextCreate(CurrentMemoryContext,
             "imcu desc context",
@@ -1933,7 +1945,11 @@ void IMCSDesc::InitRowGroups(uint32 initRGNums, int imcsNatts)
     }
     rowGroups = (RowGroup**)palloc0(sizeof(RowGroup*) * maxRowGroupCapacity);
     for (uint32 i = 0; i < curMaxRowGroupId + 1; i++) {
-        rowGroups[i] = New(CurrentMemoryContext)RowGroup(i, imcsNatts);
+        if (ENABLE_DMS) {
+            rowGroups[i] = New(CurrentMemoryContext)RowGroup(relOid, i, imcsNatts);
+        } else {
+            rowGroups[i] = New(CurrentMemoryContext)RowGroup(i, imcsNatts);
+        }
     }
 }
 
@@ -1970,7 +1986,11 @@ RowGroup* IMCSDesc::GetNewRGForCUInsert(uint32 rowGroupId)
         ExtendRowGroups();
     }
     for (uint32 i = curMaxRowGroupId + 1; i <= rowGroupId; i++) {
-        rowGroups[i] = New(CurrentMemoryContext)RowGroup(i, imcsNatts);
+        if (ENABLE_DMS) {
+            rowGroups[i] = New(CurrentMemoryContext)RowGroup(relOid, i, imcsNatts);
+        } else {
+            rowGroups[i] = New(CurrentMemoryContext)RowGroup(i, imcsNatts);
+        }
     }
 
     result = rowGroups[rowGroupId];
@@ -2038,6 +2058,9 @@ IMCSDesc::IMCSDesc()
     pg_atomic_init_u64(&cuSizeInMem, 0);
     pg_atomic_init_u64(&cuNumsInDisk, 0);
     borrowMemPool = NULL;
+    shareMemPool = NULL;
+    populateInShareMem = false;
+    isShmNotEnough = false;
 }
 
 IMCSDesc::~IMCSDesc()
@@ -2061,6 +2084,9 @@ IMCSDesc::~IMCSDesc()
     if (borrowMemPool != NULL) {
         DELETE_EX(borrowMemPool);
     }
+    if (shareMemPool != NULL) {
+        DELETE_EX(shareMemPool);
+    }
 }
 
 RowGroup::RowGroup(uint32 rowGroupId, int imcsNatts)
@@ -2071,6 +2097,17 @@ RowGroup::RowGroup(uint32 rowGroupId, int imcsNatts)
     m_cuDescs = (CUDesc**)palloc0((imcsNatts + 1) * sizeof(CUDesc*));
     m_delta = New(CurrentMemoryContext) DeltaTable();
     m_mutex = PTHREAD_RWLOCK_INITIALIZER;
+    isLocalLatch = true;
+}
+
+RowGroup::RowGroup(Oid rid, uint32 rowGroupId, int imcsNatts)
+{
+    m_rowGroupId = rowGroupId;
+    m_actived = false;
+    m_cuDescs = (CUDesc**)palloc0((imcsNatts + 1) * sizeof(CUDesc*));
+    m_delta = New(CurrentMemoryContext) DeltaTable();
+    dms_init_latch2(&dms_latch, DMS_DR_TYPE_ROWGROUP, rid, 0, rowGroupId, InvalidOid, InvalidOid);
+    isLocalLatch = false;
 }
 
 RowGroup::~RowGroup()
@@ -2078,7 +2115,56 @@ RowGroup::~RowGroup()
     if (m_cuDescs != NULL) {
         pfree_ext(m_cuDescs);
     }
-    pthread_rwlock_destroy(&m_mutex);
+    if (isLocalLatch) {
+        pthread_rwlock_destroy(&m_mutex);
+    }
+}
+
+void RowGroup::WRLockRowGroup()
+{
+    if (isLocalLatch) {
+        pthread_rwlock_wrlock(&m_mutex);
+    } else {
+        bool ret = true;
+        uint32 sid = (uint32)(t_thrd.proc ? t_thrd.proc->logictid : t_thrd.myLogicTid + GLOBAL_ALL_PROCS);
+        do {
+            ret = dms_latch_timed_x(&dms_latch, sid, SS_ACQUIRE_LOCK_DO_NOT_WAIT, NULL);
+            // acquire failed
+            if (!ret) {
+                CHECK_FOR_INTERRUPTS();
+
+                pg_usleep(SS_ACQUIRE_LOCK_RETRY_INTERVAL * MILLISEC2MICROSEC);
+            }
+        } while (!ret);
+    }
+}
+
+void RowGroup::RDLockRowGroup()
+{
+    if (isLocalLatch) {
+        pthread_rwlock_rdlock(&m_mutex);
+    } else {
+        bool ret = true;
+        uint32 sid = (uint32)(t_thrd.proc ? t_thrd.proc->logictid : t_thrd.myLogicTid + GLOBAL_ALL_PROCS);
+        do {
+            ret = dms_latch_timed_s(&dms_latch, sid, SS_ACQUIRE_LOCK_DO_NOT_WAIT, (unsigned char)false, NULL);
+            // acquire failed
+            if (!ret) {
+                CHECK_FOR_INTERRUPTS();
+
+                pg_usleep(SS_ACQUIRE_LOCK_RETRY_INTERVAL * MILLISEC2MICROSEC);
+            }
+        } while (!ret);
+    }
+}
+
+void RowGroup::UnlockRowGroup()
+{
+    if (isLocalLatch) {
+        pthread_rwlock_unlock(&m_mutex);
+    } else {
+        dms_unlatch(&dms_latch, NULL);
+    }
 }
 
 void RowGroup::DropCUDescs(RelFileNode* relNode, int imcsNatts)
@@ -2093,17 +2179,23 @@ void RowGroup::DropCUDescs(RelFileNode* relNode, int imcsNatts)
         if (m_cuDescs[col] == NULL) {
             continue;
         }
-        IMCU_CACHE->InvalidateCU((RelFileNodeOld*)relNode, col, m_cuDescs[col]->cu_id, m_cuDescs[col]->cu_pointer);
-        imcuStorage->TryRemoveCUFile(m_cuDescs[col]->cu_id, col);
+        if (m_cuDescs[col]->isSSImcstore) {
+            SS_IMCU_CACHE->InvalidateCU(
+                (RelFileNodeOld*)relNode, col, m_cuDescs[col]->cu_id, m_cuDescs[col]->cu_pointer);
+        } else {
+            IMCU_CACHE->InvalidateCU((RelFileNodeOld*)relNode, col, m_cuDescs[col]->cu_id, m_cuDescs[col]->cu_pointer);
+            imcuStorage->TryRemoveCUFile(m_cuDescs[col]->cu_id, col);
+        }
         DELETE_EX(m_cuDescs[col]);
     }
     DELETE_EX(imcuStorage);
 }
 
 /* this function will replace cudesc and vacuum delta by xid, need lock rowgroup before use this function */
-void RowGroup::Vacuum(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs, CU** newCUs, TransactionId xid)
+void RowGroup::VacuumLocal(Relation fakeRelation, IMCSDesc* imcsDesc,
+                           CUDesc** newCUDescs, CU** newCUs, TransactionId xid)
 {
-    pthread_rwlock_wrlock(&m_mutex);
+    WRLockRowGroup();
     m_delta->Vacuum(xid);
     rgxmin = xid;
 
@@ -2117,20 +2209,110 @@ void RowGroup::Vacuum(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUD
     }
     for (int col = 0; col < fakeRelation->rd_att->natts; ++col) {
         if (m_actived) {
-            IMCU_CACHE->SaveCU(imcsDesc, relNodeOid, col, newCUs[col], newCUDescs[col]);
+            newCUDescs[col]->isSSImcstore = imcsDesc->populateInShareMem;
+            IMCStoreInsert::InsertCU(imcsDesc, relNodeOid, col, newCUs[col], newCUDescs[col]);
             m_cuDescs[col] = newCUDescs[col];
         } else {
             m_cuDescs[col] = NULL;
         }
     }
-    pthread_rwlock_unlock(&m_mutex);
+    UnlockRowGroup();
+}
+
+void RowGroup::VacuumLocalShm(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs,
+                              CU** newCUs, TransactionId xid, uint64 newBufSize)
+{
+    uint64 begsize;
+    uint64 endsize;
+    begsize = pg_atomic_read_u64(&imcsDesc->shareMemPool->m_usedMemSize);
+    if (!SS_IMCU_CACHE->PreAllocateShmForRel(newBufSize)) {
+        imcsDesc->isShmNotEnough = true;
+        ereport(ERROR, (errmsg("IMCStore vacuum failed: can't prealloc share memory, "
+            "please unimcstored. Otherwise local memory expansion may occur ")));
+    }
+    WRLockRowGroup();
+
+    imcsDesc->isShmNotEnough = false;
+    RelFileNodeOld* relNodeOid = (RelFileNodeOld*)&fakeRelation->rd_node;
+    DropCUDescs(&fakeRelation->rd_node, fakeRelation->rd_att->natts - 1);
+
+    if (newCUDescs && newCUs && newCUDescs[0]->row_count > 0) {
+        m_actived = true;
+    } else {
+        m_actived = false;
+    }
+    for (int col = 0; col < fakeRelation->rd_att->natts; ++col) {
+        if (m_actived) {
+            newCUDescs[col]->isSSImcstore = imcsDesc->populateInShareMem;
+            IMCStoreInsert::InsertCU(imcsDesc, relNodeOid, col, newCUs[col], newCUDescs[col]);
+            m_cuDescs[col] = newCUDescs[col];
+        } else {
+            m_cuDescs[col] = NULL;
+        }
+    }
+    m_delta->Vacuum(xid);
+
+    int chunkNum = imcsDesc->shareMemPool->GetChunkNum();
+    if (!m_actived) {
+        SSBroadcastIMCStoreVacuum(chunkNum, imcsDesc->relOid, m_rowGroupId, xid, m_actived,
+                                  fakeRelation->rd_att->natts, nullptr, nullptr);
+    } else {
+        for (int col = 0; col < fakeRelation->rd_att->natts; ++col) {
+            SS_IMCU_CACHE->PinDataBlock(m_cuDescs[col]->slot_id);
+            newCUs[col] = SS_IMCU_CACHE->GetCUBuf(m_cuDescs[col]->slot_id);
+        }
+        SSBroadcastIMCStoreVacuum(chunkNum, imcsDesc->relOid, m_rowGroupId, xid, m_actived,
+                                  fakeRelation->rd_att->natts, m_cuDescs, newCUs);
+        for (int col = 0; col < fakeRelation->rd_att->natts; ++col) {
+            SS_IMCU_CACHE->UnPinDataBlock(m_cuDescs[col]->slot_id);
+        }
+    }
+
+    UnlockRowGroup();
+    endsize = pg_atomic_read_u64(&imcsDesc->shareMemPool->m_usedMemSize);
+    SS_IMCU_CACHE->FixDifferenceAfterVacuum(begsize, endsize, newBufSize);
+}
+
+void RowGroup::VacuumFromRemote(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs,
+                                CU** newCUs, TransactionId xid, uint64 newBufSize)
+{
+    uint64 begsize;
+    uint64 endsize;
+    begsize = pg_atomic_read_u64(&imcsDesc->shareMemPool->m_usedMemSize);
+    if (!SS_IMCU_CACHE->PreAllocateShmForRel(newBufSize)) {
+        imcsDesc->isShmNotEnough = true;
+        ereport(ERROR, (errmsg("IMCStore vacuum failed: can't prealloc share memory, "
+            "please unimcstored. Otherwise local memory expansion may occur ")));
+    }
+    WRLockRowGroup();
+    imcsDesc->isShmNotEnough = false;
+    RelFileNodeOld* relNodeOid = (RelFileNodeOld*)&fakeRelation->rd_node;
+    DropCUDescs(&fakeRelation->rd_node, fakeRelation->rd_att->natts - 1);
+
+    if (newCUDescs && newCUs && newCUDescs[0]->row_count > 0) {
+        m_actived = true;
+    } else {
+        m_actived = false;
+    }
+    for (int col = 0; col < fakeRelation->rd_att->natts; ++col) {
+        if (m_actived) {
+            newCUDescs[col]->isSSImcstore = imcsDesc->populateInShareMem;
+            SS_IMCU_CACHE->SaveSSRemoteCU(fakeRelation, col, newCUs[col], newCUDescs[col], imcsDesc);
+            m_cuDescs[col] = newCUDescs[col];
+        } else {
+            m_cuDescs[col] = NULL;
+        }
+    }
+    UnlockRowGroup();
+    endsize = pg_atomic_read_u64(&imcsDesc->shareMemPool->m_usedMemSize);
+    SS_IMCU_CACHE->FixDifferenceAfterVacuum(begsize, endsize, newBufSize);
 }
 
 void RowGroup::Insert(ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId)
 {
-    pthread_rwlock_wrlock(&m_mutex);
+    WRLockRowGroup();
     m_delta->Insert(ctid, xid, relid, cuId);
-    pthread_rwlock_unlock(&m_mutex);
+    UnlockRowGroup();
 }
 
 void CU::PackNumericCUForFlushToDisk()

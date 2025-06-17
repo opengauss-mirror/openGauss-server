@@ -116,7 +116,7 @@
 #include "tsdb/storage/part.h"
 #endif   /* ENABLE_MULTIPLE_NODES */
 #ifdef ENABLE_HTAP
-#include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
 #include "access/htap/imcs_ctlg.h"
 #include "utils/relfilenodemap.h"
 #endif   /* ENABLE_HTAP */
@@ -7478,10 +7478,10 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
             if (HAVE_HTAP_TABLES) {
                 for (int i = 0; i < nrels; i++) {
                     RelFileNode rnode = (newColFileNodes + i)->filenode;
-                    IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(rnode.relNode);
+                    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(rnode.relNode);
                     if (imcsDesc != NULL) {
-                        IMCU_CACHE->DeleteImcsDesc(imcsDesc->parentOid, NULL);
-                        IMCU_CACHE->DeleteImcsDesc(rnode.relNode, &rnode);
+                        IMCS_HASH_TABLE->DeleteImcsDesc(imcsDesc->parentOid, NULL);
+                        IMCS_HASH_TABLE->DeleteImcsDesc(rnode.relNode, &rnode);
                     }
                 }
             }

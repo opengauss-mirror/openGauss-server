@@ -197,6 +197,9 @@ void RecordCstorePartNum(VecToRowState* state, const VecToRow* node)
             case T_CStoreIndexHeapScan:
 #ifdef ENABLE_HTAP
             case T_IMCStoreScan:
+#ifdef USE_SPQ
+            case T_SpqCStoreScan:
+#endif
 #endif
                 state->part_id = ((ScanState*)outerPlanState(state))->part_id;
                 state->subpartitions = ((ScanState*)outerPlanState(state))->subpartitions;

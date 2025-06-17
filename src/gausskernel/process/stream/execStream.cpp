@@ -96,20 +96,40 @@ bool IsThreadSkipDirectResult(StreamState* node)
     if (node == NULL || node->consumer == NULL) {
         return false;
     }
+
     if (IS_SPQ_EXECUTOR) {
         Plan* plan = node->ss.ps.plan;
-        Assert(IsA(plan, Stream));
-        Stream* stream = (Stream*) plan;
-        if (node->type == STREAM_GATHER && stream->smpDesc.distriType == REMOTE_DIRECT_DISTRIBUTE) {
-            const char* nodeName = GetConfigOption("pgxc_node_name", false, false);
-            if (!(strcmp(node->consumer->getExpectProducerNodeName(), nodeName) == 0)) {
-                return true;
+        switch (nodeTag(plan)) {
+            case T_Stream: {
+                Stream* stream = (Stream*) plan;
+                if (node->type == STREAM_GATHER && stream->smpDesc.distriType == REMOTE_DIRECT_DISTRIBUTE) {
+                    const char* nodeName = GetConfigOption("pgxc_node_name", false, false);
+                    if (!(strcmp(node->consumer->getExpectProducerNodeName(), nodeName) == 0)) {
+                        return true;
+                    }
+                    if (u_sess->stream_cxt.smp_id != 0) {
+                        return true;
+                    }
+                }
+                return false;
             }
-            if (u_sess->stream_cxt.smp_id != 0) {
-               return true;
+            case T_VecStream: {
+                VecStream* stream = (VecStream*) plan;
+                if (node->type == STREAM_GATHER && stream->smpDesc.distriType == REMOTE_DIRECT_DISTRIBUTE) {
+                    const char* nodeName = GetConfigOption("pgxc_node_name", false, false);
+                    if (!(strcmp(node->consumer->getExpectProducerNodeName(), nodeName) == 0)) {
+                        return true;
+                    }
+                    if (u_sess->stream_cxt.smp_id != 0) {
+                        return true;
+                    }
+                }
+                return false;
             }
+            default:
+                ereport(ERROR, (errmsg("unrecognized node type: %d .", (int)nodeTag(node))));
+                return false; /* keep compiler quiet */
         }
-        return false;
     }
     return false;
 }

@@ -1115,6 +1115,24 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
             }
             plan_type = IO_OP;
             break;
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+            if (!((Scan*)plan)->tablesample) {
+                if (((Scan*)plan)->isPartTbl) {
+                    pname = "Partitioned Spq CStore Scan";
+                } else {
+                    pname = "Spq CStore Scan";
+                }
+            } else {
+                if (((Scan*)plan)->isPartTbl) {
+                    pname = "Partitioned InMemory VecSample Scan";
+                } else {
+                    pname = "InMemory VecSample Scan";
+                }
+            }
+            plan_type = IO_OP;
+            break;
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:

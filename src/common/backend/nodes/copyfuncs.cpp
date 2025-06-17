@@ -1901,6 +1901,26 @@ static IMCStoreScan* _copyIMCStoreScan(const IMCStoreScan* from)
 
     return newnode;
 }
+#ifdef USE_SPQ
+static SpqCStoreScan* _copySpqCStoreScan(const SpqCStoreScan* from)
+{
+    SpqCStoreScan* newnode = makeNode(SpqCStoreScan);
+
+    /*
+     * copy node superclass fields
+     */
+    CopyScanFields((const Scan*)from, (Scan*)newnode);
+
+    COPY_LOCATION_FIELD(selectionRatio);
+    COPY_NODE_FIELD(cstorequal);
+    COPY_NODE_FIELD(minMaxInfo);
+    COPY_LOCATION_FIELD(relStoreLocation);
+    COPY_SCALAR_FIELD(isAdaptiveScan);
+    COPY_SCALAR_FIELD(isShareScan);
+
+    return newnode;
+}
+#endif
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -2272,7 +2292,9 @@ static VecStream* _copyVecStream(const VecStream* from)
     COPY_SCALAR_FIELD(stream_level);
     COPY_NODE_FIELD(origin_consumer_nodes);
     COPY_SCALAR_FIELD(is_recursive_local);
-
+#ifdef USE_SPQ
+    COPY_SCALAR_FIELD(streamID);
+#endif
     return newnode;
 }
 
@@ -8370,6 +8392,11 @@ void* copyObject(const void* from)
         case T_IMCStoreScan:
             retval = _copyIMCStoreScan((IMCStoreScan*)from);
             break;
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+            retval = _copySpqCStoreScan((SpqCStoreScan*)from);
+            break;
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:

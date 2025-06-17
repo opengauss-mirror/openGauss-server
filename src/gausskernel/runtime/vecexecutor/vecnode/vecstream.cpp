@@ -334,12 +334,12 @@ VecStreamState* BuildVecStreamRuntime(Stream* node, EState* estate, int eflags)
     }
 
     // Stream runtime only set up on datanode.
-    if (IS_PGXC_DATANODE)
+    if (!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE)
         SetupStreamRuntime(stream_state);
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR) {
 #else
-    if (StreamTopConsumerAmI()) {
+    if ((IS_SPQ_COORDINATOR) || (!IS_SPQ_RUNNING && StreamTopConsumerAmI())) {
 #endif
         if (innerPlan(node))
             innerPlanState(stream_state) = ExecInitNode(innerPlan(node), estate, eflags);
@@ -352,7 +352,7 @@ VecStreamState* BuildVecStreamRuntime(Stream* node, EState* estate, int eflags)
     }
 
     /* Stream runtime only set up on datanode. */
-    if (IS_PGXC_DATANODE)
+    if (!IS_SPQ_COORDINATOR && IS_PGXC_DATANODE)
         SetupStreamRuntime(stream_state);
 
     return stream_state;
@@ -408,12 +408,19 @@ VecStreamState* ExecInitVecStream(Stream* node, EState* estate, int eflags)
     switch (node->type) {
         // gather is just like broadcast stream.
         case STREAM_GATHER:
+#ifdef USE_SPQ
+            if (node->smpDesc.distriType == REMOTE_DIRECT_DISTRIBUTE) {
+                state->redistribute = true;
+                break;
+            }
+#endif
         case STREAM_BROADCAST:
             state->redistribute = false;
             break;
 
         case STREAM_REDISTRIBUTE:
-            if (node->smpDesc.distriType == LOCAL_ROUNDROBIN || node->smpDesc.distriType == LOCAL_BROADCAST)
+            if (node->smpDesc.distriType == LOCAL_ROUNDROBIN || node->smpDesc.distriType == LOCAL_BROADCAST ||
+                node->smpDesc.distriType == REMOTE_ROUNDROBIN)
                 state->redistribute = false;
             else
                 state->redistribute = true;

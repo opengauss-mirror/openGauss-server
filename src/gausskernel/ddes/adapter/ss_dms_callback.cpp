@@ -56,6 +56,11 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "utils/elog.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_am.h"
+#include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
+#endif
 
 XLogRecPtr lastLsn = InvalidXLogRecPtr;
 long long lastDynLogTime = 0;
@@ -1380,6 +1385,14 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
             case BCAST_CHECK_DB_BACKENDS:
                 ret = SSCheckDbBackends(data, len, output_msg, output_msg_len);
                 break;
+#ifdef ENABLE_HTAP
+            case BCAST_IMCSTORE_VACUUM:
+                ret = SSLoadIMCStoreVacuum(data, len);
+            break;
+            case BCAST_IMCSTORE_REQUEST_DELTA:
+                ret = SSProcessIMCStoreDelta(data, len, output_msg, output_msg_len);
+                break;
+#endif
             case BCAST_SEND_SNAPSHOT:
                 ret = SSUpdateLatestSnapshotOfStandby(data, len, output_msg, output_msg_len);
                 break;
@@ -1430,6 +1443,11 @@ static int32 CBProcessBroadcastAck(void *db_handle, dms_broadcast_context_t *bro
         case BCAST_CHECK_DB_BACKENDS_ACK:
             ret = SSCheckDbBackendsAck(data, len);
             break;
+#ifdef ENABLE_HTAP
+        case BCAST_IMCSTORE_REQUEST_DELTA_ACK:
+            ret = SSGetIMCStoreDeltaAck(data, len);
+            break;
+#endif
         default:
             ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS] invalid broadcast ack type")));
             ret = DMS_ERROR;
@@ -2087,7 +2105,7 @@ static void FailoverStartNotify(dms_reform_start_context_t *rs_cxt)
             g_instance.dms_cxt.SSRecoveryInfo.reform_ckpt_status = NOT_ALLOW_CKPT;
             g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_FAILOVER_PROMOTING;
 
-            /* 
+            /*
              * single cluster: SET PM_WAIT_BACKENDS in check PMSIGNAL_DMS_FAILOVER_TERM_BACKENDS.
              * standby cluster of dual cluster: Backends should exit in here, this step should be
              * bring forward and not in CBFailoverPromote.

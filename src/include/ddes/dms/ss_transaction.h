@@ -29,6 +29,10 @@
 #include "access/transam.h"
 #include "storage/sinval.h"
 
+#ifdef ENABLE_HTAP
+#define IMCSTORE_DELTA_BITMAP_SIZE 69377
+#define IMCSTORE_DELTA_PER_MESSAGE 25600
+#endif
 #define DMS_NO_RUNNING_BACKENDS (DMS_SUCCESS)
 #define DMS_EXIST_RUNNING_BACKENDS (DMS_ERROR)
 
@@ -114,6 +118,32 @@ typedef struct SSBroadcastIsExtremeRedo {
     bool is_enable_extreme_redo;
 } SSBroadcastIsExtremeRedo;
 
+#ifdef ENABLE_HTAP
+typedef struct SSIMCStoreVacuum {
+    SSBroadcastOp type; // must be first
+    Oid rid;
+    uint32 rgid;
+    TransactionId xid;
+    int cols;
+    bool actived;
+    int chunkNum;
+} SSIMCStoreVacuum;
+
+typedef struct SSIMCStoreDeltaReq {
+    SSBroadcastOp type; // must be first
+    Oid tableid;
+    uint32 rowgroup;
+    uint32 begin;
+} SSIMCStoreDeltaReq;
+
+typedef struct SSIMCStoreDeltaAck {
+    SSBroadcastOpAck type; // must be first
+    unsigned int size;
+    unsigned int max_size;
+    unsigned char bitmap[IMCSTORE_DELTA_PER_MESSAGE];
+} SSIMCStoreDeltaAck;
+#endif
+
 Snapshot SSGetSnapshotData(Snapshot snapshot);
 CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCommit, bool isMvcc, bool isNest,
     Snapshot snapshot, bool* sync);
@@ -153,4 +183,13 @@ int SSUpdateRealtimeBuildLogCtrl(char* data, uint32 len);
 int SSGetStandbyRealtimeBuildPtr(char* data, uint32 len);
 int SSUpdateLocalConfFile(char* data, uint32 len);
 int SSDisasterUpdateIsEnableExtremeRedo(char* data, uint32 len);
+#ifdef ENABLE_HTAP
+int32 SSLoadIMCStoreVacuum(char *data, uint32 len);
+void SSBroadcastIMCStoreVacuum(int chunkNum, Oid rid, uint32 rgid, TransactionId xid, bool actived, int cols,
+    CUDesc** CUDescs, CU** CUs);
+int SSRequestIMCStoreDelta(dms_context_t *dms_ctx, Oid tableid, uint32 rowgroup,
+    unsigned char* bitmap, unsigned long long *delta_max);
+int SSProcessIMCStoreDelta(char *data, uint32 len, char *output_msg, uint32 *output_msg_len);
+int SSGetIMCStoreDeltaAck(char *data, uint32 len);
+#endif
 #endif

@@ -730,6 +730,9 @@ typedef enum NodeTag {
     T_CStoreScan,
 #ifdef ENABLE_HTAP
     T_IMCStoreScan,
+#ifdef USE_SPQ
+    T_SpqCStoreScan,
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
     T_TsStoreScan,

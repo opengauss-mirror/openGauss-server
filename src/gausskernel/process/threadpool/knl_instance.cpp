@@ -330,7 +330,9 @@ static void knl_g_imcstore_init(knl_g_imcstore_context* context)
     pg_atomic_init_u32(&(context->dbname_reference_count), 0);
     context->should_clean = false;
     pg_atomic_init_u32(&(context->is_imcstore_cache_down), IMCSTORE_CACHE_UP);
+    pg_atomic_init_u64(&(context->imcs_shm_cur_used), 0);
     context->dboid = InvalidOid;
+    context->loadedSPQPlugin = false;
 }
 #endif
 

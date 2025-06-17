@@ -39,6 +39,7 @@ public:
     void Destroy() override;
 
     void RemoveCUFromCache(int col, uint32 cuid, CUDesc* origdesc);
+    static void InsertCU(IMCSDesc* imcsDesc, RelFileNodeOld* rnode, int colId, CU* cuPtr, CUDesc* cuDescPtr);
     void BatchInsertCommon(uint32 cuid);
     void BatchReInsertCommon(IMCSDesc* imcsDesc, uint32 cuid, TransactionId xid);
     void AppendOneTuple(Datum *values, const bool *isnull);

@@ -28,6 +28,7 @@
 #include "utils/rel_gs.h"
 #include "commands/dbcommands.h"
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/ss_imcucache_mgr.h"
 #include "parser/parse_type.h"
 #include "utils/builtins.h"
 #include "access/tableam.h"
@@ -39,12 +40,53 @@
 #include "replication/syncrep.h"
 #include "replication/walreceiver.h"
 #include "access/htap/imcstore_insert.h"
+#include "access/htap/share_mem_pool.h"
+#include "access/htap/imcs_hash_table.h"
 #include "access/htap/imcs_ctlg.h"
 
 void CheckImcstoreCacheReady()
 {
     if (CHECK_IMCSTORE_CACHE_DOWN) {
         ereport(ERROR, (errmsg("Imcstore Cache is recovering, please wait or restart database.")));
+    }
+}
+
+void CheckForSSMode(Relation rel, bool isShareMemory)
+{
+    if (!IMCS_IS_SS_MODE) {
+        if (isShareMemory) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("Un-support feature"),
+                     errdetail("HTAP can only use share memory in SS mode.")));
+        }
+        return;
+    }
+
+    if (RelationIsPartitioned(rel)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Un-support feature"),
+                 errdetail("HTAP not support partition tables in SS mode.")));
+    }
+
+    if (!g_instance.imcstore_cxt.loadedSPQPlugin) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Un-support feature"),
+                 errdetail("HTAP is not supported for SS mode if SPQ Plugin not pre-load.")));
+    }
+
+    if (isShareMemory && !g_instance.matrix_mem_cxt.matrix_mem_inited) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Un-support feature"),
+                 errdetail("HTAP is not supported for SS mode if failed to load matrix memory lib.")));
+    }
+
+    const char *clusterMap = g_instance.attr.attr_sql.ss_htap_cluster_map;
+    if (clusterMap == nullptr || clusterMap[0] == '\0') {
+        ereport(ERROR, (errmsg("Try to enable htap for SS mode error: ss_htap_cluster_map not set")));
     }
 }
 
@@ -143,7 +185,7 @@ void CheckForEnableImcs(Relation rel, List* colList, int2vector* &imcsAttsNum, i
 
 bool RelHasImcs(Oid relOid)
 {
-    if (IMCU_CACHE->GetImcsDesc(relOid) != NULL) {
+    if (IMCS_HASH_TABLE->GetImcsDesc(relOid) != NULL) {
         return true;
     }
     return false;
@@ -172,6 +214,9 @@ bool CheckIsInTrans()
 
 void AbortIfSinglePrimary()
 {
+    if (IMCS_IS_SS_MODE) {
+        return;
+    }
     SyncRepStandbyData *syncStandbys;
     int numStandbys = SyncRepGetSyncStandbys(&syncStandbys);
     if (syncStandbys != NULL) {
@@ -341,7 +386,7 @@ void CheckForDataType(Oid typeOid, int32 typeMod)
 void CreateImcsDescForPrimaryNode(Relation rel, int2vector* imcsAttsNum, int imcsNatts)
 {
     /* create imcsdesc for rel */
-    IMCU_CACHE->CreateImcsDesc(rel, imcsAttsNum, imcsNatts);
+    IMCS_HASH_TABLE->CreateImcsDesc(rel, imcsAttsNum, imcsNatts);
     /* rel is partitioned table, all patitions alse need to create imcsdesc */
     if (RelationIsPartitioned(rel)) {
         Relation partRel = NULL;
@@ -359,10 +404,10 @@ void CreateImcsDescForPrimaryNode(Relation rel, int2vector* imcsAttsNum, int imc
     }
 }
 
-void AlterTableEnableImcstore(Relation rel, int2vector* imcsAttsNum, int imcsNatts)
+void AlterTableEnableImcstore(Relation rel, int2vector* imcsAttsNum, int imcsNatts, bool useShareMemroy)
 {
     /* 1. create imcsdesc for rel */
-    IMCU_CACHE->CreateImcsDesc(rel, imcsAttsNum, imcsNatts);
+    IMCS_HASH_TABLE->CreateImcsDesc(rel, imcsAttsNum, imcsNatts, useShareMemroy);
     PG_TRY();
     {
         /* 2. partitioned rel, need to populate all partitions */
@@ -375,7 +420,7 @@ void AlterTableEnableImcstore(Relation rel, int2vector* imcsAttsNum, int imcsNat
                 partition = (Partition)lfirst(cell);
                 partRel = partitionGetRelation(rel, partition);
 				/* start to populate partition */
-                AlterTableEnableImcstore(partRel, imcsAttsNum, imcsNatts);
+                AlterTableEnableImcstore(partRel, imcsAttsNum, imcsNatts, useShareMemroy);
                 releaseDummyRelation(&partRel);
             }
             releasePartitionList(rel, &partitions, NoLock);
@@ -384,7 +429,7 @@ void AlterTableEnableImcstore(Relation rel, int2vector* imcsAttsNum, int imcsNat
             EnableImcstoreForRelation(rel, imcsAttsNum, imcsNatts);
         }
         /* 4. update status */
-        IMCU_CACHE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_COMPLETE);
+        IMCS_HASH_TABLE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_COMPLETE);
     }
     PG_CATCH();
     {
@@ -394,8 +439,8 @@ void AlterTableEnableImcstore(Relation rel, int2vector* imcsAttsNum, int imcsNat
             IMCUDataCacheMgr::ResetInstance();
             PG_RE_THROW();
         }
-        IMCU_CACHE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_ERROR);
-        IMCU_CACHE->ClearImcsMem(RelationGetRelid(rel), &(rel->rd_node));
+        IMCS_HASH_TABLE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_ERROR);
+        IMCS_HASH_TABLE->ClearImcsMem(RelationGetRelid(rel), &(rel->rd_node));
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -434,8 +479,8 @@ void PopulateImcs(Relation rel, int2vector* imcsAttsNum, int imcsNatts)
 
     PG_TRY();
     {
+        IMCSDesc *imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(RelationGetRelid(rel));
         if (g_instance.attr.attr_memory.enable_borrow_memory) {
-            IMCSDesc *imcsDesc = IMCU_CACHE->GetImcsDesc(RelationGetRelid(rel));
             u_sess->imcstore_ctx.pinnedBorrowMemPool = imcsDesc->borrowMemPool;
         }
         while ((tuple = tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
@@ -449,6 +494,11 @@ void PopulateImcs(Relation rel, int2vector* imcsAttsNum, int imcsNatts)
                 imcstoreInsert.BatchInsertCommon(cuid);
                 cuid = currCu;
                 imcstoreInsert.ResetBatchRows(true);
+            }
+            if (IMCS_IS_SS_MODE && !imcsDesc->populateInShareMem &&
+                currCu % SS_IMCU_CACHE->spqNodeNum != SS_IMCU_CACHE->curSpqIdx) {
+                imcs_free_uheap_tuple(tuple);
+                continue;
             }
             imcstoreInsert.AppendOneTuple(val, null);
             imcs_free_uheap_tuple(tuple);
@@ -556,8 +606,8 @@ void ParallelPopulateImcsMain(const BgWorkerContext *bwc)
     IMCStoreInsert imcstoreInsert(rel, shared->imcsTupleDesc, shared->imcsAttsNum);
     PG_TRY();
     {
+        IMCSDesc *imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(RelationGetRelid(rel));
         if (g_instance.attr.attr_memory.enable_borrow_memory) {
-            IMCSDesc *imcsDesc = IMCU_CACHE->GetImcsDesc(RelationGetRelid(rel));
             u_sess->imcstore_ctx.pinnedBorrowMemPool = imcsDesc->borrowMemPool;
         }
         while ((tuple = tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
@@ -578,6 +628,11 @@ void ParallelPopulateImcsMain(const BgWorkerContext *bwc)
                 imcstoreInsert.BatchInsertCommon(cuid);
                 cuid = currCu;
                 imcstoreInsert.ResetBatchRows(true);
+            }
+            if (IMCS_IS_SS_MODE && !imcsDesc->populateInShareMem &&
+                currCu % SS_IMCU_CACHE->spqNodeNum != SS_IMCU_CACHE->curSpqIdx) {
+                imcs_free_uheap_tuple(tuple);
+                continue;
             }
             imcstoreInsert.AppendOneTuple(val, null);
             imcs_free_uheap_tuple(tuple);
@@ -708,22 +763,20 @@ void UnPopulateImcs(Relation rel)
                           : &(rel->rd_node);
     PG_TRY();
     {
-        IMCU_CACHE->DeleteImcsDesc(RelationGetRelid(rel), relNode);
+        IMCS_HASH_TABLE->DeleteImcsDesc(RelationGetRelid(rel), relNode);
     }
     PG_CATCH();
     {
-        IMCU_CACHE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_ERROR);
+        IMCS_HASH_TABLE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_ERROR);
     }
     PG_END_TRY();
 }
 
 void PopulateImcsOnStandby(Oid relOid, StringInfo inputMsg)
 {
-    int imcsNatts = 0;
-    int2vector* imcsAtts = NULL;
-    XLogRecPtr currentLsn = InvalidXLogRecPtr;
-    ParsePopulateImcsParam(relOid, inputMsg, imcsAtts, &imcsNatts, &currentLsn);
-    WaitXLogRedoToCurrentLsn(currentLsn);
+    ParsePopulateParams populateParams;
+    ParsePopulateImcsParam(relOid, inputMsg, populateParams);
+    WaitXLogRedoToCurrentLsn(populateParams.currentLsn);
     /* Make sure we are in a transaction command */
     start_xact_command();
     PushActiveSnapshot(GetTransactionSnapshot(false));
@@ -731,11 +784,11 @@ void PopulateImcsOnStandby(Oid relOid, StringInfo inputMsg)
     PG_TRY();
     {
         CheckImcstoreCacheReady();
-        AlterTableEnableImcstore(rel, imcsAtts, imcsNatts);
+        AlterTableEnableImcstore(rel, populateParams.imcsAttsNum, populateParams.imcsNatts);
     }
     PG_CATCH();
     {
-        pfree_ext(imcsAtts);
+        pfree_ext(populateParams.imcsAttsNum);
         heap_close(rel, NoLock);
         pq_putemptymessage('E'); /* PlanIdComplete */
         pq_flush();
@@ -743,6 +796,7 @@ void PopulateImcsOnStandby(Oid relOid, StringInfo inputMsg)
     }
     PG_END_TRY();
     heap_close(rel, NoLock);
+    pfree_ext(populateParams.imcsAttsNum);
     pq_putemptymessage('O'); /* PlanIdComplete */
     pq_flush();
     PopActiveSnapshot();
@@ -751,11 +805,9 @@ void PopulateImcsOnStandby(Oid relOid, StringInfo inputMsg)
 
 void PopulateImcsForPartitionOnStandby(Oid relOid, Oid partOid, StringInfo inputMsg)
 {
-    int imcsNatts = 0;
-    int2vector* imcsAtts = NULL;
-    XLogRecPtr currentLsn = InvalidXLogRecPtr;
-    ParsePopulateImcsParam(relOid, inputMsg, imcsAtts, &imcsNatts, &currentLsn);
-    WaitXLogRedoToCurrentLsn(currentLsn);
+    ParsePopulateParams populateParams;
+    ParsePopulateImcsParam(relOid, inputMsg, populateParams);
+    WaitXLogRedoToCurrentLsn(populateParams.currentLsn);
     /* Make sure we are in a transaction command */
     start_xact_command();
     PushActiveSnapshot(GetTransactionSnapshot(false));
@@ -768,23 +820,23 @@ void PopulateImcsForPartitionOnStandby(Oid relOid, Oid partOid, StringInfo input
     {
         CheckImcstoreCacheReady();
         /* create imcsdesc for rel if not populated  */
-        if (IMCU_CACHE->GetImcsDesc(relOid) == NULL) {
+        if (IMCS_HASH_TABLE->GetImcsDesc(relOid) == NULL) {
             // first partitition to populate, create imcsdesc for partitioned table
             // In case of specify partition, different table may have different imcs cols,
             // do not remember imcs cols for partitioned table */
-            IMCU_CACHE->CreateImcsDesc(rel, NULL, 0);
+            IMCS_HASH_TABLE->CreateImcsDesc(rel, NULL, 0);
         }
 
         /* start populate partition */
-        AlterTableEnableImcstore(partRel, imcsAtts, imcsNatts);
-        IMCU_CACHE->UpdateImcsStatus(relOid, IMCS_POPULATE_COMPLETE);
+        AlterTableEnableImcstore(partRel, populateParams.imcsAttsNum, populateParams.imcsNatts);
+        IMCS_HASH_TABLE->UpdateImcsStatus(relOid, IMCS_POPULATE_COMPLETE);
     }
     PG_CATCH();
     {
-        IMCU_CACHE->UpdateImcsStatus(relOid, IMCS_POPULATE_ERROR);
+        IMCS_HASH_TABLE->UpdateImcsStatus(relOid, IMCS_POPULATE_ERROR);
         releaseDummyRelation(&partRel);
         partitionClose(rel, part, NoLock);
-        pfree_ext(imcsAtts);
+        pfree_ext(populateParams.imcsAttsNum);
         heap_close(rel, NoLock);
         pq_putemptymessage('E'); /* PlanIdComplete */
         pq_flush();
@@ -794,6 +846,7 @@ void PopulateImcsForPartitionOnStandby(Oid relOid, Oid partOid, StringInfo input
     releaseDummyRelation(&partRel);
     partitionClose(rel, part, NoLock);
     heap_close(rel, NoLock);
+    pfree_ext(populateParams.imcsAttsNum);
     pq_putemptymessage('O'); /* PlanIdComplete */
     pq_flush();
     PopActiveSnapshot();
@@ -869,8 +922,7 @@ void UnPopulateImcsForPartitionOnStandby(Oid relOid, Oid partOid)
     pq_flush();
 }
 
-void ParsePopulateImcsParam(
-    Oid relOid, StringInfo inputMsg, int2vector* &imcsAttsNum, int* imcsNatts, XLogRecPtr* currentLsn)
+void ParsePopulateImcsParam(Oid relOid, StringInfo inputMsg, ParsePopulateParams& populateParams, bool shareMemory)
 {
     errno_t rc = EOK;
     /* get column_name_list */
@@ -882,26 +934,35 @@ void ParsePopulateImcsParam(
     rc = memcpy_s(attsNums, sizeof(int2) * count, pq_getmsgbytes(inputMsg, sizeof(int2) * count), sizeof(int2) * count);
     securec_check(rc, "\0", "\0");
 
-    /* get current lsn from primary */
-    rc = memcpy_s(currentLsn, sizeof(XLogRecPtr), pq_getmsgbytes(inputMsg, sizeof(XLogRecPtr)),
-        sizeof(XLogRecPtr));
-    securec_check(rc, "\0", "\0");
-    ereport(DEBUG1, (errmsg("Received lsn for HTAP population.")));
+    if (shareMemory) {
+        Assert(IMCS_IS_SS_MODE);
+        rc = memcpy_s(&populateParams.shmChunksNum, sizeof(int), pq_getmsgbytes(inputMsg, sizeof(int)),
+            sizeof(int));
+        securec_check(rc, "\0", "\0");
+    } else {
+        rc = memcpy_s(&populateParams.currentLsn, sizeof(XLogRecPtr), pq_getmsgbytes(inputMsg, sizeof(XLogRecPtr)),
+            sizeof(XLogRecPtr));
+        securec_check(rc, "\0", "\0");
+        ereport(DEBUG1, (errmsg("Received lsn for HTAP population.")));
+    }
     pq_getmsgend(inputMsg);
 
-    imcsAttsNum = buildint2vector(attsNums, count);
-    *imcsNatts = count;
+    populateParams.imcsAttsNum = buildint2vector(attsNums, count);
+    populateParams.imcsNatts = count;
     pfree(attsNums);
-    return;
 }
 
 // copy void InitMultinodeExecutor(bool is_force)
-PGXCNodeHandle *InitMultiNodeExecutor(Oid nodeoid)
+PGXCNodeHandle *InitMultiNodeExecutor(Oid nodeoid, char* nodename)
 {
     PGXCNodeHandle *result = (PGXCNodeHandle *)palloc0(sizeof(PGXCNodeHandle));
     result->sock = NO_SOCKET;
     init_pgxc_handle(result);
     result->nodeoid = nodeoid;
+    if (IMCS_IS_SS_MODE) {
+        Assert(nodename);
+        result->remoteNodeName = nodename;
+    }
     result->remote_node_type = VDATANODE;
     return result;
 }
@@ -954,7 +1015,7 @@ PGXCNodeHandle **GetStandbyConnections(int *connCount, PGconn** &nodeCons)
             u_sess->proc_cxt.MyProcPort->user_name, GRAND_VERSION_NUM);
         securec_check_ss_c(rc, "\0", "\0");
         dnNode[i - 1] = node->nodeoid;
-        connections[i - 1] = InitMultiNodeExecutor(node->nodeoid);
+        connections[i - 1] = InitMultiNodeExecutor(node->nodeoid, NULL);
         connections[i - 1]->nodeIdx = i;
         *connCount = *connCount + 1;
     }
@@ -981,6 +1042,82 @@ PGXCNodeHandle **GetStandbyConnections(int *connCount, PGconn** &nodeCons)
         }
     }
     releaseConnect(NULL, 0);
+    return connections;
+}
+
+PGXCNodeHandle **GetSSStandbyConnections(int *connCount, PGconn** &nodeCons)
+{
+    int dnConnCount = SS_IMCU_CACHE->spqNodeNum - 1;
+    if (dnConnCount <= 0) {
+        ereport(ERROR, (errmodule(MOD_HTAP),
+                          errmsg("GUC Param: ss_htap_cluster_map not set, can not enable SS imcstore")));
+    }
+    PGXCNodeHandle **connections = (PGXCNodeHandle **)palloc(dnConnCount * sizeof(PGXCNodeHandle *));
+    Oid *dnNode = (Oid *)palloc0(sizeof(Oid) * dnConnCount);
+    char **connectionStrs = (char **)palloc0(sizeof(char *) * dnConnCount);
+    nodeCons = (PGconn **)palloc0(sizeof(PGconn *) * dnConnCount);
+    auto releaseConnect = [&](char *errMsg) {
+        for (int i = 0; i < dnConnCount; i++) {
+            pfree_ext(connectionStrs[i]);
+        }
+        pfree_ext(dnNode);
+        pfree_ext(connectionStrs);
+        if (errMsg != NULL) {
+            pfree_ext(connections);
+            connections = NULL;
+            ereport(ERROR, (errmsg("PQconnectdbParallel error: %s", errMsg)));
+        }
+        return;
+    };
+
+    for (int i = 0, j = 0; i < SS_IMCU_CACHE->spqNodeNum && j < dnConnCount; i++) {
+        if (i == SS_IMCU_CACHE->curSpqIdx) {
+            continue;
+        }
+
+        connectionStrs[j] = (char *)palloc0(INITIAL_EXPBUFFER_SIZE * 4);
+        NodeDefinition *node = &(SS_IMCU_CACHE->nodesDefinition[i]);
+        errno_t rc = sprintf_s(connectionStrs[j], INITIAL_EXPBUFFER_SIZE * 4,
+            "host=%s port=%d dbname=%s user=%s application_name=coordinator1 connect_timeout=600 rw_timeout=600 \
+        options='-c remotetype=coordinator  -c DateStyle=iso,mdy -c timezone=prc -c geqo=on -c intervalstyle=postgres \
+        -c lc_monetary=C -c lc_numeric=C\t-c lc_time=C -c omit_encoding_error=off' \
+        prototype=1 keepalives_idle=600 keepalives_interval=30 keepalives_count=20 \
+        backend_version=%u enable_ce=1",
+            node->nodehost.data, node->nodeport, u_sess->proc_cxt.MyProcPort->database_name,
+            u_sess->proc_cxt.MyProcPort->user_name, GRAND_VERSION_NUM);
+        securec_check_ss(rc, "", "");
+        elog(LOG, "HTAPTest: connection info :%s.", connectionStrs[j]);
+        dnNode[j] = node->nodeoid;
+        connections[j] = InitMultiNodeExecutor(node->nodeoid, node->nodename.data);
+        connections[j]->nodeIdx = j;
+        *connCount = *connCount + 1;
+        j++;
+    }
+
+    PQconnectdbParallel(connectionStrs, *connCount, nodeCons, dnNode);
+
+    for (int i = 0; i < *connCount; i++) {
+        if (nodeCons[i] && (CONNECTION_OK == nodeCons[i]->status)) {
+            pgxc_node_init(connections[i], nodeCons[i]->sock);
+            elog(LOG, "HTAPTest: connected to standby");
+        } else {
+            char firstError[INITIAL_EXPBUFFER_SIZE] = {0};
+            errno_t ss_rc = EOK;
+            if (nodeCons[i] == NULL) {
+                ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, "out of memory");
+            } else if (nodeCons[i]->errorMessage.data != NULL) {
+                if (strlen(nodeCons[i]->errorMessage.data) >= INITIAL_EXPBUFFER_SIZE) {
+                    nodeCons[i]->errorMessage.data[INITIAL_EXPBUFFER_SIZE - 1] = '\0';
+                }
+                ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, nodeCons[i]->errorMessage.data);
+            } else {
+                ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, "unknown error");
+            }
+            securec_check(ss_rc, "", "");
+            releaseConnect(firstError);
+        }
+    }
+    releaseConnect(NULL);
     return connections;
 }
 
@@ -1112,11 +1249,10 @@ static bool HandlePgxcReceive(int connCount, PGXCNodeHandle **tempConnections)
     return hasError;
 }
 
-static void PackBasicImcstoredRequest(
-    PGXCNodeHandle *temp_connection, SendPopulateParams* populateParams, int imcsNatts)
+static void PackBasicImcstoredRequest(PGXCNodeHandle *temp_connection, const SendPopulateParams& populateParams)
 {
     errno_t ss_rc = EOK;
-    int msglen = populateParams->msglen;
+    int msglen = populateParams.msglen;
     /* msgType + msgLen */
     ensure_out_buffer_capacity(1 + msglen, temp_connection);
     Assert(temp_connection->outBuffer != NULL);
@@ -1128,55 +1264,47 @@ static void PackBasicImcstoredRequest(
     temp_connection->outEnd += sizeof(int);
 
     ss_rc = memcpy_s(temp_connection->outBuffer + temp_connection->outEnd,
-        temp_connection->outSize - temp_connection->outEnd - 1, &populateParams->imcstoreType, sizeof(int));
+        temp_connection->outSize - temp_connection->outEnd - 1, &populateParams.imcstoreType, sizeof(int));
     securec_check(ss_rc, "\0", "\0");
     temp_connection->outEnd += sizeof(int);
 
     ss_rc = memcpy_s(temp_connection->outBuffer + temp_connection->outEnd,
-        temp_connection->outSize - temp_connection->outEnd, &populateParams->relOid, sizeof(Oid));
+        temp_connection->outSize - temp_connection->outEnd, &populateParams.relOid, sizeof(Oid));
     securec_check(ss_rc, "\0", "\0");
     temp_connection->outEnd += sizeof(Oid);
 
     ss_rc = memcpy_s(temp_connection->outBuffer + temp_connection->outEnd,
-        temp_connection->outSize - temp_connection->outEnd, &populateParams->partOid, sizeof(Oid));
+        temp_connection->outSize - temp_connection->outEnd, &populateParams.partOid, sizeof(Oid));
     securec_check(ss_rc, "\0", "\0");
     temp_connection->outEnd += sizeof(Oid);
 
-    if (imcsNatts > 0) {
+    if (populateParams.imcsNatts > 0) {
         ss_rc = memcpy_s(temp_connection->outBuffer + temp_connection->outEnd,
-            temp_connection->outSize - temp_connection->outEnd, &imcsNatts, sizeof(int));
+            temp_connection->outSize - temp_connection->outEnd, &populateParams.imcsNatts, sizeof(int));
         securec_check(ss_rc, "\0", "\0");
         temp_connection->outEnd += sizeof(int);
         ss_rc = memcpy_s(temp_connection->outBuffer + temp_connection->outEnd,
-            temp_connection->outSize - temp_connection->outEnd, populateParams->attsNums, sizeof(int2) * imcsNatts);
+            temp_connection->outSize - temp_connection->outEnd,
+            populateParams.attsNums, sizeof(int2) * populateParams.imcsNatts);
         securec_check(ss_rc, "\0", "\0");
-        temp_connection->outEnd += sizeof(int2) * imcsNatts;
-        XLogRecPtr lsn = t_thrd.shemem_ptr_cxt.XLogCtl->LogwrtRqst.Write;
-        ss_rc = memcpy_s(temp_connection->outBuffer + temp_connection->outEnd,
-            temp_connection->outSize - temp_connection->outEnd, &lsn, sizeof(XLogRecPtr));
-        securec_check(ss_rc, "\0", "\0");
-        temp_connection->outEnd += sizeof(XLogRecPtr);
+        temp_connection->outEnd += sizeof(int2) * populateParams.imcsNatts;
+        if (populateParams.imcstoreType == TYPE_SS_IMCSTORED) {
+            ss_rc = memcpy_s(temp_connection->outBuffer + temp_connection->outEnd,
+                temp_connection->outSize - temp_connection->outEnd, &populateParams.shmChunksNum, sizeof(int));
+            securec_check(ss_rc, "\0", "\0");
+            temp_connection->outEnd += sizeof(int);
+        } else {
+            XLogRecPtr lsn = t_thrd.shemem_ptr_cxt.XLogCtl->LogwrtRqst.Write;
+            ss_rc = memcpy_s(temp_connection->outBuffer + temp_connection->outEnd,
+                temp_connection->outSize - temp_connection->outEnd, &lsn, sizeof(XLogRecPtr));
+            securec_check(ss_rc, "\0", "\0");
+            temp_connection->outEnd += sizeof(XLogRecPtr);
+        }
     }
 }
 
-void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int imcsNatts, int type)
+void SendImcstoredRequest(PGXCNodeHandle** connections, int connCount, const SendPopulateParams& populateParams)
 {
-    int connCount = 0;
-    bool hasError = false;
-    PGconn** nodeCons = NULL;
-    PGXCNodeHandle** connections = NULL;
-    SendPopulateParams populateParams;
-
-    /* init send populate params */
-    populateParams.relOid = relOid;
-    populateParams.partOid = specifyPartOid;
-    populateParams.attsNums = attsNums;
-    populateParams.imcstoreType = type;
-    populateParams.msglen =
-        sizeof(int) + sizeof(int) + sizeof(Oid) + sizeof(Oid) + sizeof(int) +
-        imcsNatts * sizeof(int2) + sizeof(XLogRecPtr);
-
-    connections = GetStandbyConnections(&connCount, nodeCons);
     PGXCNodeHandle **temp_connections = NULL;
     /* use temp connections instead */
     int i = 0;
@@ -1198,7 +1326,7 @@ void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int im
                 temp_connections[i]->remoteNodeName, temp_connections[i]->gsock.idx, temp_connections[i]->gsock.sid,
                 temp_connections[i]->state);
 
-        PackBasicImcstoredRequest(temp_connections[i], &populateParams, imcsNatts);
+        PackBasicImcstoredRequest(temp_connections[i], populateParams);
 
         if (pgxc_node_flush(temp_connections[i]) != 0) {
             temp_connections[i]->state = DN_CONNECTION_STATE_ERROR_FATAL;
@@ -1209,86 +1337,10 @@ void SendImcstoredRequest(Oid relOid, Oid specifyPartOid, int2* attsNums, int im
         temp_connections[i]->state = DN_CONNECTION_STATE_QUERY;
     }
 
-    hasError = HandlePgxcReceive(connCount, temp_connections);
-
-    for (i = 0; i < connCount; ++i) {
-        PGXCNodeClose(nodeCons[i]);
-        nodeCons[i] = NULL;
-        PGXCNodeHandle *handle = temp_connections[i];
-        pfree_ext(handle->inBuffer);
-        pfree_ext(handle->outBuffer);
-        pfree_ext(handle->error);
-    }
-    pfree_ext(nodeCons);
-    pfree_ext(temp_connections);
-
+    bool hasError = HandlePgxcReceive(connCount, temp_connections);
     if (hasError) {
-        IMCU_CACHE->UpdatePrimaryImcsStatus(relOid, IMCS_POPULATE_ERROR);
+        IMCS_HASH_TABLE->UpdatePrimaryImcsStatus(populateParams.relOid, IMCS_POPULATE_ERROR);
         ereport(ERROR, (errmsg("HTAP populate failed, some standby occurs error.")));
-    }
-}
-
-void SendUnImcstoredRequest(Oid relOid, Oid specifyPartOid, int type)
-{
-    int connCount = 0;
-    bool hasError = false;
-    PGconn** nodeCons = NULL;
-    PGXCNodeHandle** connections = NULL;
-    SendPopulateParams populateParams;
-
-    /* init send populate params */
-    populateParams.relOid = relOid;
-    populateParams.partOid = specifyPartOid;
-    populateParams.attsNums = NULL;
-    populateParams.imcstoreType = type;
-    populateParams.msglen =
-        sizeof(int) + sizeof(int) + sizeof(Oid) + sizeof(Oid);
-    connections = GetStandbyConnections(&connCount, nodeCons);
-    PGXCNodeHandle **temp_connections = NULL;
-    /* use temp connections instead */
-    int i = 0;
-    int connCountTemp = 0;
-    temp_connections = (PGXCNodeHandle **)palloc(connCount * sizeof(PGXCNodeHandle *));
-    for (i = 0; i < connCount; i++) {
-        if (connections[i]->state != DN_CONNECTION_STATE_ERROR_FATAL) {
-            temp_connections[connCountTemp++] = connections[i];
-        }
-    }
-    connCount = connCountTemp;
-
-    for (i = 0; i < connCount; i++) {
-        if (temp_connections[i]->state == DN_CONNECTION_STATE_QUERY)
-            BufferConnection(temp_connections[i]);
-        if (connections[i]->state != DN_CONNECTION_STATE_IDLE)
-            LIBCOMM_DEBUG_LOG("Unpopulate failed, send rel_id to node:%s[nid:%hu,sid:%hu] with abnormal state:%d",
-                temp_connections[i]->remoteNodeName, temp_connections[i]->gsock.idx, temp_connections[i]->gsock.sid,
-                temp_connections[i]->state);
-
-        PackBasicImcstoredRequest(temp_connections[i], &populateParams, 0);
-        if (pgxc_node_flush(temp_connections[i]) != 0) {
-            temp_connections[i]->state = DN_CONNECTION_STATE_ERROR_FATAL;
-            ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION),
-                errmsg("Failed to send unpopulate request to %s", temp_connections[i]->remoteNodeName)));
-        }
-
-        temp_connections[i]->state = DN_CONNECTION_STATE_QUERY;
-    }
-
-    hasError = HandlePgxcReceive(connCount, temp_connections);
-
-    for (i = 0; i < connCount; ++i) {
-        PGXCNodeClose(nodeCons[i]);
-        nodeCons[i] = NULL;
-        PGXCNodeHandle *handle = temp_connections[i];
-        pfree_ext(handle->inBuffer);
-        pfree_ext(handle->outBuffer);
-        pfree_ext(handle->error);
-    }
-    pfree_ext(nodeCons);
-    pfree_ext(temp_connections);
-
-    if (hasError) {
-        ereport(ERROR, (errmsg("HTAP unpopulate failed, some standby occurs error.")));
     }
 }
 
@@ -1316,6 +1368,205 @@ uint32 ImcsCeil(uint32 x, uint32 y)
 {
     Assert(y > 0);
     return (x % y) == 0 ? (x / y) : (x / y + 1);
+}
+
+void PopulateImcsOnSSReadNode(Oid relOid, StringInfo inputMsg)
+{
+    ParsePopulateParams populateParams;
+    ParsePopulateImcsParam(relOid, inputMsg, populateParams, true);
+    /* Make sure we are in a transaction command */
+    start_xact_command();
+    PushActiveSnapshot(GetTransactionSnapshot(false));
+    Relation rel = heap_open(relOid, NoLock);
+    PG_TRY();
+    {
+        CheckAndSetDBName();
+        /* create imcsdesc, cu data will be sync from SS primary later */
+        IMCS_HASH_TABLE->CreateImcsDesc(rel, populateParams.imcsAttsNum, populateParams.imcsNatts, true);
+        IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relOid);
+        imcsDesc->shareMemPool->ShmChunkMmapAll(populateParams.shmChunksNum);
+        imcsDesc->shareMemPool->FlushShmChunkAll(RACK_INVALID);
+        if (populateParams.shmChunksNum == 0) {
+            IMCS_HASH_TABLE->UpdateImcsStatus(relOid, IMCS_POPULATE_COMPLETE);
+        }
+    }
+    PG_CATCH();
+    {
+        IMCS_HASH_TABLE->UpdateImcsStatus(relOid, IMCS_POPULATE_ERROR);
+        pfree_ext(populateParams.imcsAttsNum);
+        heap_close(rel, NoLock);
+        pq_putemptymessage('E'); /* PlanIdComplete */
+        pq_flush();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    pfree_ext(populateParams.imcsAttsNum);
+    heap_close(rel, NoLock);
+    pq_putemptymessage('O'); /* PlanIdComplete */
+    pq_flush();
+    PopActiveSnapshot();
+    finish_xact_command();
+}
+
+void SyncCUForSSImcstore(PGXCNodeHandle **connection, int connCount, Oid relOid)
+{
+    IMCSDesc *imcsDesc = NULL;
+    RowGroup *rowGroup = NULL;
+    CUDesc *cuDesc = NULL;
+    CU *cu = NULL;
+
+    imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relOid);
+    Assert(imcsDesc != NULL && imcsDesc->populateInShareMem);
+    for (uint32 i = 0; i <= imcsDesc->curMaxRowGroupId; i++) {
+        rowGroup = imcsDesc->rowGroups[i];
+        if (!rowGroup->m_actived) {
+            continue;
+        }
+        for (int j = 0; j < imcsDesc->imcsNatts + 1; j++) {
+            cuDesc = rowGroup->m_cuDescs[j];
+            if (cuDesc->IsNullCU()) {
+                CU tmpCU = CU();
+                SendSyncCURequestsForSS(connection, connCount, cuDesc, &tmpCU, j, relOid);
+            } else {
+                SS_IMCU_CACHE->PinDataBlock(cuDesc->slot_id);
+                cu = SS_IMCU_CACHE->GetCUBuf(cuDesc->slot_id);
+                SS_IMCU_CACHE->UnPinDataBlock(cuDesc->slot_id);
+                SendSyncCURequestsForSS(connection, connCount, cuDesc, cu, j, relOid);
+            }
+        }
+    }
+}
+
+void SendSyncCURequestsForSS(
+    PGXCNodeHandle **connections, int connCount, CUDesc *cuDesc, CU *cuPtr, int imcsColId, Oid relOid)
+{
+    errno_t ss_rc = EOK;
+    int type = TYPE_SS_IMCSTORE_SYNC_CU;
+    PGXCNodeHandle **temp_connections = NULL;
+    /* use temp connections instead */
+    int i = 0;
+    temp_connections = (PGXCNodeHandle **)palloc(connCount * sizeof(PGXCNodeHandle *));
+    for (i = 0; i < connCount; i++)
+        temp_connections[i] = connections[i];
+
+    for (i = 0; i < connCount; i++) {
+        if (temp_connections[i]->state == DN_CONNECTION_STATE_QUERY)
+            BufferConnection(temp_connections[i]);
+
+        if (connections[i]->state != DN_CONNECTION_STATE_IDLE)
+            LIBCOMM_DEBUG_LOG("Populate failed, send rel_id to node:%s[nid:%hu,sid:%hu] with abnormal state:%d",
+                              temp_connections[i]->remoteNodeName, temp_connections[i]->gsock.idx,
+                              temp_connections[i]->gsock.sid, temp_connections[i]->state);
+
+        /* msgType + msgLen */
+        int msglen = sizeof(int) + sizeof(int) + sizeof(Oid) + sizeof(int) + sizeof(CUDesc) + sizeof(CU);
+        ensure_out_buffer_capacity(1 + msglen, temp_connections[i]);
+        Assert(temp_connections[i]->outBuffer != NULL);
+        temp_connections[i]->outBuffer[temp_connections[i]->outEnd++] = 'x';
+        msglen = htonl(msglen);
+        ss_rc = memcpy_s(temp_connections[i]->outBuffer + temp_connections[i]->outEnd,
+                         temp_connections[i]->outSize - temp_connections[i]->outEnd - 1, &msglen, sizeof(int));
+        securec_check(ss_rc, "\0", "\0");
+        temp_connections[i]->outEnd += sizeof(int);
+
+        ss_rc = memcpy_s(temp_connections[i]->outBuffer + temp_connections[i]->outEnd,
+                         temp_connections[i]->outSize - temp_connections[i]->outEnd - 1, &type, sizeof(int));
+        securec_check(ss_rc, "\0", "\0");
+        temp_connections[i]->outEnd += sizeof(int);
+
+        ss_rc = memcpy_s(temp_connections[i]->outBuffer + temp_connections[i]->outEnd,
+                         temp_connections[i]->outSize - temp_connections[i]->outEnd - 1, &relOid, sizeof(Oid));
+        securec_check(ss_rc, "\0", "\0");
+        temp_connections[i]->outEnd += sizeof(Oid);
+
+        ss_rc = memcpy_s(temp_connections[i]->outBuffer + temp_connections[i]->outEnd,
+                         temp_connections[i]->outSize - temp_connections[i]->outEnd - 1, &imcsColId, sizeof(int));
+        securec_check(ss_rc, "\0", "\0");
+        temp_connections[i]->outEnd += sizeof(int);
+
+        ss_rc = memcpy_s(temp_connections[i]->outBuffer + temp_connections[i]->outEnd,
+                         temp_connections[i]->outSize - temp_connections[i]->outEnd - 1, cuDesc, sizeof(CUDesc));
+        securec_check(ss_rc, "\0", "\0");
+        temp_connections[i]->outEnd += sizeof(CUDesc);
+
+        ss_rc = memcpy_s(temp_connections[i]->outBuffer + temp_connections[i]->outEnd,
+                         temp_connections[i]->outSize - temp_connections[i]->outEnd - 1, cuPtr, sizeof(CU));
+        securec_check(ss_rc, "\0", "\0");
+        temp_connections[i]->outEnd += sizeof(CU);
+
+        if (pgxc_node_flush(temp_connections[i]) != 0) {
+            temp_connections[i]->state = DN_CONNECTION_STATE_ERROR_FATAL;
+            ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION),
+                            errmsg("Failed to send populate request to %s", temp_connections[i]->remoteNodeName)));
+        }
+
+        temp_connections[i]->state = DN_CONNECTION_STATE_QUERY;
+    }
+
+    HandlePgxcReceive(connCount, temp_connections);
+}
+
+void SSImcstoreCacheRemoteCU(Oid relOid, StringInfo inputMsg)
+{
+    int imcsColId = 0;
+    CU *cuPtr = NULL;
+    CUDesc *cuDescPtr = NULL;
+    IMCSDesc *imcsDesc = NULL;
+    MemoryContext oldcontext = NULL;
+
+    /* Make sure we are in a transaction command */
+    start_xact_command();
+    PushActiveSnapshot(GetTransactionSnapshot(false));
+    Relation rel = heap_open(relOid, NoLock);
+    PG_TRY();
+    {
+        imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relOid);
+        oldcontext = MemoryContextSwitchTo(imcsDesc->imcuDescContext);
+        cuPtr = New(CurrentMemoryContext) CU();
+        cuDescPtr = New(CurrentMemoryContext) CUDesc();
+
+        ParseRemoteCU(imcsColId, cuPtr, cuDescPtr, inputMsg);
+        SS_IMCU_CACHE->SaveSSRemoteCU(rel, imcsColId, cuPtr, cuDescPtr, imcsDesc);
+        imcsDesc->rowGroups[cuDescPtr->cu_id]->m_cuDescs[imcsColId] = cuDescPtr;
+        if (imcsColId == imcsDesc->imcsNatts) {
+            imcsDesc->rowGroups[cuDescPtr->cu_id]->m_actived = true;
+            if (cuDescPtr->cu_id == imcsDesc->curMaxRowGroupId) {
+                IMCS_HASH_TABLE->UpdateImcsStatus(relOid, IMCS_POPULATE_COMPLETE);
+                SS_IMCU_CACHE->AdjustUsedShmAfterPopulate(relOid);
+            }
+        }
+        DELETE_EX(cuPtr);
+        MemoryContextSwitchTo(oldcontext);
+    }
+    PG_CATCH();
+    {
+        DELETE_EX(cuPtr);
+        DELETE_EX(cuDescPtr);
+        IMCS_HASH_TABLE->UpdateImcsStatus(relOid, IMCS_POPULATE_ERROR);
+        heap_close(rel, NoLock);
+        MemoryContextSwitchTo(oldcontext);
+        pq_putemptymessage('E'); /* PlanIdComplete */
+        pq_flush();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    heap_close(rel, NoLock);
+    pq_putemptymessage('O'); /* PlanIdComplete */
+    pq_flush();
+    PopActiveSnapshot();
+    finish_xact_command();
+}
+
+void ParseRemoteCU(int& imcsColId, CU *cuPtr, CUDesc *cuDescPtr, StringInfo inputMsg)
+{
+    errno_t rc = EOK;
+    rc = memcpy_s(&imcsColId, sizeof(int), pq_getmsgbytes(inputMsg, sizeof(int)), sizeof(int));
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(cuDescPtr, sizeof(CUDesc), pq_getmsgbytes(inputMsg, sizeof(CUDesc)), sizeof(CUDesc));
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(cuPtr, sizeof(CU), pq_getmsgbytes(inputMsg, sizeof(CU)), sizeof(CU));
+    securec_check(rc, "\0", "\0");
+    pq_getmsgend(inputMsg);
 }
 
 Relation ParallelImcsOpenRelation(Relation rel)
@@ -1386,10 +1637,13 @@ void DropImcsForPartitionedRelIfNeed(Relation partitionedRel)
 /* Check whether the standby node has been rolled back to the current LSN. */
 void WaitXLogRedoToCurrentLsn(XLogRecPtr currentLsn)
 {
+    if (IMCS_IS_SS_MODE) {
+        return;
+    }
     int waitTimeMs = 0;
     XLogRecPtr latestXLogLsn = InvalidXLogRecPtr;
     do {
-        latestXLogLsn = pg_atomic_read_u64(&IMCU_CACHE->m_xlog_latest_lsn);
+        latestXLogLsn = pg_atomic_read_u64(&IMCS_HASH_TABLE->m_xlog_latest_lsn);
         ereport(DEBUG1, (errmsg("Wait lsn for HTAP population, current lsn: %lu, xlog redo lsn: %lu.",
             currentLsn, latestXLogLsn)));
         Assert(XLogRecPtrIsValid(latestXLogLsn));
@@ -1408,4 +1662,267 @@ void WaitXLogRedoToCurrentLsn(XLogRecPtr currentLsn)
         pg_usleep(100000); /* sleep 100ms */
         waitTimeMs = waitTimeMs + 100;
     } while (true);
+}
+
+void PackStandbyPopulateParams(
+    SendPopulateParams &populateParams, Oid relOid, Oid partOid, int2* attsNums, int imcsNatts, int type)
+{
+    /* init send populate params */
+    populateParams.relOid = relOid;
+    populateParams.partOid = partOid;
+    populateParams.imcsNatts = imcsNatts;
+    populateParams.attsNums = attsNums;
+    populateParams.imcstoreType = type;
+    switch (type) {
+        case TYPE_IMCSTORED:
+        case TYPE_PARTITION_IMCSTORED:
+            /* msglen + type + relOid + partOid + imcsNatts + length(attsNums) + lsn */
+            populateParams.msglen =
+                sizeof(int) + sizeof(int) + sizeof(Oid) + sizeof(Oid) + sizeof(int) +
+                imcsNatts * sizeof(int2) + sizeof(XLogRecPtr);
+            break;
+        case TYPE_UNIMCSTORED:
+        case TYPE_PARTITION_UNIMCSTORED:
+            /* msglen + type + relOid + partOid */
+            populateParams.msglen = sizeof(int) + sizeof(int) + sizeof(Oid) + sizeof(Oid);
+            break;
+        case TYPE_SS_IMCSTORED:
+            /* msglen + type + relOid + partOid + imcsNatts + length(attsNums) + shmChunksNum */
+            populateParams.msglen =
+                sizeof(int) + sizeof(int) + sizeof(Oid) + sizeof(Oid) + sizeof(int) +
+                imcsNatts * sizeof(int2) + sizeof(int);
+            break;
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                    errmsg("unrecognized populate type: %d", type)));
+    }
+}
+
+static void CloseStandbyConnections(PGXCNodeHandle** connections, int connCount, PGconn **nodeCons)
+{
+    if (connections == NULL) {
+        return;
+    }
+    for (int i = 0; i < connCount; ++i) {
+        PGXCNodeClose(nodeCons[i]);
+        nodeCons[i] = NULL;
+        PGXCNodeHandle *handle = connections[i];
+        pfree_ext(handle->inBuffer);
+        pfree_ext(handle->outBuffer);
+        pfree_ext(handle->error);
+    }
+    pfree_ext(nodeCons);
+    pfree_ext(connections);
+}
+
+void SqlExecImcstored(Relation rel, List* colList)
+{
+    Oid relOid = RelationGetRelid(rel);
+    int2vector* imcsAtts = NULL;
+    int imcsNatts = 0;
+    int connCount = 0;
+    SendPopulateParams populateParams;
+    PGXCNodeHandle** connections = NULL;
+    PGconn **nodeCons = NULL;
+
+    PG_TRY();
+    {
+        CheckForSSMode(rel);
+        CheckImcstoreCacheReady();
+        CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts);
+        if (IMCS_IS_PRIMARY_MODE) {
+            AbortIfSinglePrimary();
+            CreateImcsDescForPrimaryNode(rel, imcsAtts, imcsNatts);
+            connections = GetStandbyConnections(&connCount, nodeCons);
+            PackStandbyPopulateParams(populateParams, relOid, InvalidOid, imcsAtts->values, imcsNatts, TYPE_IMCSTORED);
+            SendImcstoredRequest(connections, connCount, populateParams);
+            CloseStandbyConnections(connections, connCount, nodeCons);
+            pfree_ext(imcsAtts);
+            return;
+        }
+        AlterTableEnableImcstore(rel, imcsAtts, imcsNatts);
+        if (IMCS_IS_SS_MODE) {
+            connections = GetSSStandbyConnections(&connCount, nodeCons);
+            PackStandbyPopulateParams(populateParams, relOid, InvalidOid, imcsAtts->values, imcsNatts, TYPE_IMCSTORED);
+            SendImcstoredRequest(connections, connCount, populateParams);
+            CloseStandbyConnections(connections, connCount, nodeCons);
+        }
+        pfree_ext(imcsAtts);
+    }
+    PG_CATCH();
+    {
+        CloseStandbyConnections(connections, connCount, nodeCons);
+        IMCS_HASH_TABLE->UpdateImcsStatus(relOid, IMCS_POPULATE_ERROR);
+        pfree_ext(imcsAtts);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+}
+
+void SqlExecImcstoredWithShm(Relation rel, List* colList)
+{
+    Oid relOid = RelationGetRelid(rel);
+    int2vector* imcsAtts = NULL;
+    int imcsNatts = 0;
+    int connCount = 0;
+    SendPopulateParams populateParams;
+    PGXCNodeHandle** connections = NULL;
+    PGconn **nodeCons = NULL;
+
+    PG_TRY();
+    {
+        CheckForSSMode(rel, true);
+        CheckImcstoreCacheReady();
+        CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts);
+        connections = GetSSStandbyConnections(&connCount, nodeCons);
+        PackStandbyPopulateParams(populateParams, relOid, InvalidOid, imcsAtts->values, imcsNatts, TYPE_SS_IMCSTORED);
+
+        AlterTableEnableImcstore(rel, imcsAtts, imcsNatts, true);
+
+        IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relOid);
+        Assert(imcsDesc->imcsStatus == IMCS_POPULATE_COMPLETE);
+        imcsDesc->shareMemPool->FlushShmChunkAll(RACK_FLUSH);
+
+        populateParams.shmChunksNum = imcsDesc->shareMemPool->m_shmChunkNum;
+        SendImcstoredRequest(connections, connCount, populateParams);
+        SyncCUForSSImcstore(connections, connCount, relOid);
+        CloseStandbyConnections(connections, connCount, nodeCons);
+        pfree_ext(imcsAtts);
+    }
+    PG_CATCH();
+    {
+        IMCS_HASH_TABLE->UpdateImcsStatus(relOid, IMCS_POPULATE_ERROR);
+        CloseStandbyConnections(connections, connCount, nodeCons);
+        pfree_ext(imcsAtts);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+}
+
+void SqlExecUnImcstored(Relation rel)
+{
+    int connCount = 0;
+    SendPopulateParams populateParams;
+    PGXCNodeHandle** connections = NULL;
+    Oid relOid = RelationGetRelid(rel);
+    PGconn **nodeCons = NULL;
+
+    CheckImcstoreCacheReady();
+    if (!RelHasImcs(relOid) && !IMCU_CACHE->m_is_promote) {
+        ereport(ERROR, (errmsg("rel not populated, no need to be unpopulate.")));
+    }
+
+    if (IMCS_IS_PRIMARY_MODE || IMCS_IS_SS_MODE) {
+        AbortIfSinglePrimary();
+        connections = IMCS_IS_PRIMARY_MODE ? GetStandbyConnections(&connCount, nodeCons)
+                                           : GetSSStandbyConnections(&connCount, nodeCons);
+        PackStandbyPopulateParams(populateParams, relOid, InvalidOid, NULL, 0, TYPE_UNIMCSTORED);
+        SendImcstoredRequest(connections, connCount, populateParams);
+        CloseStandbyConnections(connections, connCount, nodeCons);
+    }
+    AlterTableDisableImcstore(rel);
+}
+
+void SqlExecModifyPartitionImcstored(Relation rel, const char* partName, List* colList)
+{
+    int connCount = 0;
+    Oid partOid = InvalidOid;
+    Oid relOid = RelationGetRelid(rel);
+    int2vector* imcsAtts = NULL;
+    int imcsNatts = 0;
+    SendPopulateParams populateParams;
+    PGXCNodeHandle** connections = NULL;
+    PGconn **nodeCons = NULL;
+
+    CheckImcstoreCacheReady();
+    partOid = ImcsPartNameGetPartOid(relOid, partName);
+    CheckForEnableImcs(rel, colList, imcsAtts, &imcsNatts, partOid);
+
+    /* check if other partitions of partitioned table populated */
+    if (IMCS_HASH_TABLE->GetImcsDesc(relOid) == NULL) {
+        // first partitition to populate, create imcsdesc for partitioned table
+        // In case of specify partition, different table may have different imcs cols,
+        // do not remember imcs cols for partitioned table */
+        IMCS_HASH_TABLE->CreateImcsDesc(rel, NULL, 0);
+    }
+
+    /* start populate partition */
+    Partition part = partitionOpen(rel, partOid, AccessExclusiveLock);
+    Relation partRel = partitionGetRelation(rel, part);
+    PG_TRY();
+    {
+        /* populate on standbynode */
+        if (IMCS_IS_PRIMARY_MODE) {
+            CheckForSSMode(rel);
+            AbortIfSinglePrimary();
+            CreateImcsDescForPrimaryNode(partRel, imcsAtts, imcsNatts);
+            connections = GetStandbyConnections(&connCount, nodeCons);
+            PackStandbyPopulateParams(populateParams, relOid, partOid, imcsAtts->values, imcsNatts,
+                TYPE_PARTITION_IMCSTORED);
+            SendImcstoredRequest(connections, connCount, populateParams);
+            CloseStandbyConnections(connections, connCount, nodeCons);
+        } else {
+            /* populate on currrent node */
+            AlterTableEnableImcstore(partRel, imcsAtts, imcsNatts);
+            IMCS_HASH_TABLE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_COMPLETE);
+        }
+    }
+    PG_CATCH();
+    {
+        releaseDummyRelation(&partRel);
+        partitionClose(rel, part, AccessExclusiveLock);
+        pfree_ext(imcsAtts);
+        CloseStandbyConnections(connections, connCount, nodeCons);
+        IMCS_HASH_TABLE->UpdateImcsStatus(RelationGetRelid(rel), IMCS_POPULATE_ERROR);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    releaseDummyRelation(&partRel);
+    partitionClose(rel, part, AccessExclusiveLock);
+    pfree_ext(imcsAtts);
+}
+
+void SqlExecModifyPartitionUnImcstored(Relation rel, const char* partName)
+{
+    int connCount = 0;
+    Oid partOid = InvalidOid;
+    Oid relOid = RelationGetRelid(rel);
+    SendPopulateParams populateParams;
+    PGXCNodeHandle** connections = NULL;
+    PGconn **nodeCons = NULL;
+
+    CheckImcstoreCacheReady();
+    partOid = ImcsPartNameGetPartOid(relOid, partName);
+    if ((!RelHasImcs(relOid) || !RelHasImcs(partOid)) && !IMCU_CACHE->m_is_promote) {
+        ereport(ERROR, (errmsg("partition %d of rel %d not populated", partOid, relOid)));
+    }
+
+    /* start unpopulate partition */
+    Partition part = partitionOpen(rel, partOid, AccessExclusiveLock);
+    Relation partRel = partitionGetRelation(rel, part);
+    PG_TRY();
+    {
+        /* unpopulate partition on standby node */
+        if (IMCS_IS_PRIMARY_MODE) {
+            AbortIfSinglePrimary();
+            connections = GetStandbyConnections(&connCount, nodeCons);
+            PackStandbyPopulateParams(populateParams, relOid, partOid, NULL, 0, TYPE_PARTITION_UNIMCSTORED);
+            SendImcstoredRequest(connections, connCount, populateParams);
+            CloseStandbyConnections(connections, connCount, nodeCons);
+        }
+        /* unpopulate partition on current node */
+        AlterTableDisableImcstore(partRel);
+        /* drop imcs for rel if all partition unpopulated */
+        DropImcsForPartitionedRelIfNeed(rel);
+    }
+    PG_CATCH();
+    {
+        releaseDummyRelation(&partRel);
+        partitionClose(rel, part, AccessExclusiveLock);
+        CloseStandbyConnections(connections, connCount, nodeCons);
+    }
+    PG_END_TRY();
+    releaseDummyRelation(&partRel);
+    partitionClose(rel, part, AccessExclusiveLock);
 }

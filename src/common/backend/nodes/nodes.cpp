@@ -543,6 +543,9 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_CStoreScan, "CStoreScan"},
 #ifdef ENABLE_HTAP
     {T_IMCStoreScan, "IMCStoreScan"},
+#ifdef USE_SPQ
+    {T_SpqCStoreScan, "SpqCStoreScan"},
+#endif
 #endif
     {T_VecIndexScan, "VecIndexScan"},
     {T_VecIndexOnlyScan, "VecIndexOnlyScan"},

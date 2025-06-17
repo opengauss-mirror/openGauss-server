@@ -140,11 +140,23 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
     aggstate->input_done = false;
     aggstate->sort_in = NULL;
     aggstate->sort_out = NULL;
+#ifdef USE_SPQ
+    aggstate->aggsplittype = node->aggsplittype;
+#endif
 
     is_singlenode = node->single_node || node->is_final;
 
     if (IS_PGXC_COORDINATOR && node->is_final == false)
         is_singlenode = true;
+
+#ifdef USE_SPQ
+    if (t_thrd.spq_ctx.spq_role != ROLE_UTILITY) {
+        if (DO_AGGSPLIT_SKIPFINAL(aggstate->aggsplittype))
+            is_singlenode = false;
+        else
+            is_singlenode = true;
+    }
+#endif
 
     if (node->aggstrategy == AGG_HASHED) {
         int64 operator_mem = SET_NODEMEM(((Plan*)node)->operatorMemKB[0], ((Plan*)node)->dop);

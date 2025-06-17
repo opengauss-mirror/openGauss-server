@@ -36,6 +36,8 @@
 #include "access/tableam.h"
 #include "access/htap/imcstore_insert.h"
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/ss_imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
 #include "access/htap/imcustorage.h"
 #include "access/htap/imcs_ctlg.h"
 #include "access/htap/imcstore_delta.h"
@@ -86,10 +88,10 @@ bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId)
         return false;
     }
 
-    IMCStoreVacuumTarget target = {
-        .relOid = relid,
-        .rowGroupId = cuId,
-    };
+    IMCStoreVacuumTarget target;
+    target.isLocalType = true;
+    target.relOid = relid;
+    target.rowGroupId = cuId;
     for (int i = 0; i < TRY_ENQUEUE_TIMES; ++i) {
         if (g_instance.imcstore_cxt.vacuum_queue->Enqueue(target)) {
             break;
@@ -99,6 +101,26 @@ bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId)
     }
     SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
     return true;
+}
+
+void IMCStoreSyncVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid, uint64 bufSize, CUDesc** CUDesc, CU** CUs)
+{
+    IMCStoreVacuumTarget target;
+    target.isLocalType = false;
+    target.relOid = relid;
+    target.rowGroupId = cuId;
+    target.CUDescs = CUDesc;
+    target.CUs = CUs;
+    target.newBufSize = bufSize;
+    target.xid = xid;
+    for (int i = 0; i < TRY_ENQUEUE_TIMES; ++i) {
+        if (g_instance.imcstore_cxt.vacuum_queue->Enqueue(target)) {
+            break;
+        }
+        SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
+        pg_usleep(VACUUM_PUSH_WAIT_TIME);
+    }
+    SetLatch(&g_instance.imcstore_cxt.vacuum_latch);
 }
 
 /* SIGHUP: set flag to re-read config file at next convenient time */
@@ -454,7 +476,7 @@ void IMCStoreVacuumWorkerMain(void)
             continue;
         }
 
-        IMCSDesc *imcsDesc = (IMCSDesc *)IMCU_CACHE->GetImcsDesc(target.relOid);
+        IMCSDesc *imcsDesc = (IMCSDesc *)IMCS_HASH_TABLE->GetImcsDesc(target.relOid);
         if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) {
             continue;
         }
@@ -465,7 +487,13 @@ void IMCStoreVacuumWorkerMain(void)
             if (g_instance.attr.attr_memory.enable_borrow_memory && imcsDesc->borrowMemPool != NULL) {
                 u_sess->imcstore_ctx.pinnedBorrowMemPool = imcsDesc->borrowMemPool;
             }
-            IMCStoreVacuum(rel, imcsDesc, target.rowGroupId);
+            if (target.isLocalType) {
+                IMCStoreVacuum(rel, imcsDesc, target.rowGroupId);
+            } else {
+                RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(target.rowGroupId);
+                rowgroup->VacuumFromRemote(rel, imcsDesc, target.CUDescs, target.CUs, target.xid, target.newBufSize);
+                imcsDesc->UnReferenceRowGroup();
+            }
         }
         PG_CATCH();
         {

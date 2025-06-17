@@ -135,9 +135,14 @@ typedef struct ResourceOwnerData {
     int maxDataCacheSlots;         /* currently allocated array size */
 
 #ifdef ENABLE_HTAP
+    /* imcstore */
     int nIMCSDataCacheSlots;           /* number of owned data cache block pins */
     CacheSlotId_t* imcsDataCacheSlots; /* dynamically allocated array */
     int maxIMCSDataCacheSlots;         /* currently allocated array size */
+    /* ss imcstore */
+    int nSSIMCSDataCacheSlots;           /* number of owned data cache block pins */
+    CacheSlotId_t* ssImcsDataCacheSlots; /* dynamically allocated array */
+    int maxSSIMCSDataCacheSlots;         /* currently allocated array size */
 #endif
 
     int nMetaCacheSlots;           /* number of owned meta cache block pins */
@@ -655,6 +660,11 @@ static void ResourceOwnerConcatPart2(ResourceOwner target, ResourceOwner source)
         ResourceOwnerEnlargeIMCSDataCacheSlot(target);
         ResourceOwnerRememberIMCSDataCacheSlot(target, source->imcsDataCacheSlots[--source->nIMCSDataCacheSlots]);
     }
+
+    while (source->nSSIMCSDataCacheSlots > 0) {
+        ResourceOwnerEnlargeSSIMCSDataCacheSlot(target);
+        ResourceOwnerRememberSSIMCSDataCacheSlot(target, source->ssImcsDataCacheSlots[--source->nSSIMCSDataCacheSlots]);
+    }
 #endif
 
     while (source->nMetaCacheSlots > 0) {
@@ -704,7 +714,7 @@ void ResourceOwnerConcat(ResourceOwner target, ResourceOwner source)
      * function needs to be adapted when tracing new types of resources.
      */
 #ifdef ENABLE_HTAP
-    Assert(sizeof(ResourceOwnerData) == 464); /* The current size of ResourceOwnerData is 464 */
+    Assert(sizeof(ResourceOwnerData) == 480); /* The current size of ResourceOwnerData is 480 */
 #else
     Assert(sizeof(ResourceOwnerData) == 448); /* The current size of ResourceOwnerData is 448 */
 #endif
@@ -865,6 +875,24 @@ void ResourceOwnerEnlargeIMCSDataCacheSlot(ResourceOwner owner)
         owner->maxIMCSDataCacheSlots = newmax;
     }
 }
+
+void ResourceOwnerEnlargeSSIMCSDataCacheSlot(ResourceOwner owner)
+{
+    int newmax;
+
+    if (owner == NULL || owner->nSSIMCSDataCacheSlots < owner->maxSSIMCSDataCacheSlots)
+        return; /* nothing to do */
+
+    if (owner->ssImcsDataCacheSlots == NULL) {
+        newmax = 16;
+        owner->ssImcsDataCacheSlots = (CacheSlotId_t*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(CacheSlotId_t));
+        owner->maxSSIMCSDataCacheSlots = newmax;
+    } else {
+        newmax = owner->maxSSIMCSDataCacheSlots * 2;
+        owner->ssImcsDataCacheSlots = (Buffer*)repalloc(owner->ssImcsDataCacheSlots, newmax * sizeof(Buffer));
+        owner->maxSSIMCSDataCacheSlots = newmax;
+    }
+}
 #endif
 
 /*
@@ -934,6 +962,14 @@ void ResourceOwnerRememberIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t s
         Assert(owner->nIMCSDataCacheSlots < owner->maxIMCSDataCacheSlots);
         owner->imcsDataCacheSlots[owner->nIMCSDataCacheSlots] = slotid;
         owner->nIMCSDataCacheSlots++;
+    }
+}
+void ResourceOwnerRememberSSIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid)
+{
+    if (owner != NULL) {
+        Assert(owner->nSSIMCSDataCacheSlots < owner->maxSSIMCSDataCacheSlots);
+        owner->ssImcsDataCacheSlots[owner->nSSIMCSDataCacheSlots] = slotid;
+        owner->nSSIMCSDataCacheSlots++;
     }
 }
 #endif
@@ -1007,6 +1043,34 @@ void ResourceOwnerForgetIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slo
                     i++;
                 }
                 owner->nIMCSDataCacheSlots = nb1;
+                return;
+            }
+        }
+        ereport(ERROR,
+            (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+                errmsg("data cache block %d is not owned by resource owner %s", slotid, owner->name)));
+    }
+}
+
+void ResourceOwnerForgetSSIMCSDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid)
+{
+    if (owner != NULL && owner->valid) {
+        CacheSlotId_t* dataCacheSlots = owner->ssImcsDataCacheSlots;
+        int nb1 = owner->nSSIMCSDataCacheSlots - 1;
+        int i;
+
+        /*
+         * Scan back-to-front because it's more likely we are releasing a
+         * recently pinned buffer.	This isn't always the case of course, but
+         * it's the way to bet.
+         */
+        for (i = nb1; i >= 0; i--) {
+            if (dataCacheSlots[i] == slotid) {
+                while (i < nb1) {
+                    dataCacheSlots[i] = dataCacheSlots[i + 1];
+                    i++;
+                }
+                owner->nSSIMCSDataCacheSlots = nb1;
                 return;
             }
         }

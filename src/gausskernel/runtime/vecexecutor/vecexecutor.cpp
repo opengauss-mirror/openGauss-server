@@ -122,7 +122,7 @@ VectorEngineFunc VectorEngineRunner[] = {
 FORCE_INLINE
 int GetRunnerIdx(int idx)
 {
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(USE_SPQ)
     if (idx > T_VecStartState && idx < T_VecEndState)
 #else
     if (idx > T_VecStartState && idx < T_VecEndState && idx != T_VecRemoteQueryState)
@@ -238,6 +238,9 @@ void ExecVecMarkPos(PlanState* node)
         case T_CStoreIndexHeapScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -292,6 +295,9 @@ void ExecVecRestrPos(PlanState* node)
         case T_CStoreIndexHeapScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:

@@ -24,6 +24,8 @@
 #include "postgres.h"
 #include "storage/cu.h"
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/ss_imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
 #include "access/htap/imcs_ctlg.h"
 #include "access/cstore_insert.h"
 #include "access/htap/imcustorage.h"
@@ -93,6 +95,15 @@ void IMCStoreInsert::Destroy()
     pfree_ext(m_formCUFuncArray);
 }
 
+void IMCStoreInsert::InsertCU(IMCSDesc* imcsDesc, RelFileNodeOld* rnode, int colId, CU* cuPtr, CUDesc* cuDescPtr)
+{
+    if (cuDescPtr->isSSImcstore) {
+        SS_IMCU_CACHE->SaveCU(imcsDesc, rnode, colId, cuPtr, cuDescPtr);
+    } else {
+        IMCU_CACHE->SaveCU(imcsDesc, rnode, colId, cuPtr, cuDescPtr);
+    }
+}
+
 void IMCStoreInsert::BatchInsertCommon(uint32 cuid)
 {
     if (unlikely(m_tmpBatchRows == NULL || m_tmpBatchRows->m_rows_curnum == 0))
@@ -103,7 +114,7 @@ void IMCStoreInsert::BatchInsertCommon(uint32 cuid)
     RowGroup* rowGroup = NULL;
     MemoryContext oldcontext = NULL;
     CHECK_FOR_INTERRUPTS();
-    IMCSDesc* imcsDesc = IMCU_CACHE->GetImcsDesc(m_relOid);
+    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(m_relOid);
     if (unlikely(imcsDesc == NULL)) {
         ereport(ERROR, (errmodule(MOD_HTAP),
             (errmsg("Fail to enable imcs for rel(%d), imcstore desc not exists.", m_relOid))));
@@ -121,8 +132,9 @@ void IMCStoreInsert::BatchInsertCommon(uint32 cuid)
             m_cuCmprsOptions[col].m_sampling_finished = true;
             cuDescPtr->cu_id = cuid;
             cuDescPtr->cu_pointer = (uint64)0;
+            cuDescPtr->isSSImcstore = imcsDesc->populateInShareMem;
             /* save cu and cudesc */
-            IMCU_CACHE->SaveCU(imcsDesc, (RelFileNodeOld*)&m_relation->rd_node, col, cuPtr, cuDescPtr);
+            InsertCU(imcsDesc, (RelFileNodeOld*)&m_relation->rd_node, col, cuPtr, cuDescPtr);
             rowGroup->m_cuDescs[col] = cuDescPtr;
             cuDescPtr = NULL;
             cuPtr = NULL;
@@ -153,8 +165,13 @@ void IMCStoreInsert::BatchReInsertCommon(IMCSDesc* imcsDesc, uint32 cuid, Transa
     MemoryContext oldcontext = MemoryContextSwitchTo(imcsDesc->imcuDescContext);
     RowGroup* rowGroup = imcsDesc->GetRowGroup(cuid);
 
+    uint64 newBufSize = 0;
     if (m_tmpBatchRows->m_rows_curnum == 0) {
-        rowGroup->Vacuum(m_relation, imcsDesc, nullptr, nullptr, xid);
+        if (imcsDesc->populateInShareMem) {
+            rowGroup->VacuumLocalShm(m_relation, imcsDesc, nullptr, nullptr, xid, newBufSize);
+        } else {
+            rowGroup->VacuumLocal(m_relation, imcsDesc, nullptr, nullptr, xid);
+        }
         imcsDesc->UnReferenceRowGroup();
         return;
     }
@@ -169,6 +186,7 @@ void IMCStoreInsert::BatchReInsertCommon(IMCSDesc* imcsDesc, uint32 cuid, Transa
         /* form CU and CUDesc */
         cuDescPtr = New(CurrentMemoryContext)CUDesc();
         cuPtr = FormCU(col, m_tmpBatchRows, cuDescPtr);
+        newBufSize += cuPtr->m_srcBufSize;
         m_cuCmprsOptions[col].m_sampling_finished = true;
         cuDescPtr->cu_id = cuid;
         cuDescPtr->cu_pointer = (uint64)0;
@@ -176,7 +194,11 @@ void IMCStoreInsert::BatchReInsertCommon(IMCSDesc* imcsDesc, uint32 cuid, Transa
         tmpCUs[col] = cuPtr;
     }
 
-    rowGroup->Vacuum(m_relation, imcsDesc, tmpCUDescs, tmpCUs, xid);
+    if (imcsDesc->populateInShareMem) {
+        rowGroup->VacuumLocalShm(m_relation, imcsDesc, tmpCUDescs, tmpCUs, xid, newBufSize);
+    } else {
+        rowGroup->VacuumLocal(m_relation, imcsDesc, tmpCUDescs, tmpCUs, xid);
+    }
     imcsDesc->UnReferenceRowGroup();
 
     MemoryContextSwitchTo(oldcontext);

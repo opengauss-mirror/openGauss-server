@@ -150,7 +150,7 @@
 #endif
 
 #ifdef ENABLE_HTAP
-#include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
 #endif
 
 /* just for libpqrcv_connect_for_TLI and ha_set_rebuild_connerror */
@@ -10523,7 +10523,7 @@ void StartupXLOG(void)
 
 #ifdef ENABLE_HTAP
                 if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
-                    pg_atomic_write_u64(&IMCU_CACHE->m_xlog_latest_lsn, xlogreader->EndRecPtr);
+                    pg_atomic_write_u64(&IMCS_HASH_TABLE->m_xlog_latest_lsn, xlogreader->EndRecPtr);
                 }
 #endif
 

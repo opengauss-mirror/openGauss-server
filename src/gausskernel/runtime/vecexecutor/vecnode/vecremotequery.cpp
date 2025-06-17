@@ -28,8 +28,41 @@
 #include "vecexecutor/vecexecutor.h"
 #include "utils/batchsort.h"
 
+#ifdef USE_SPQ
+VectorBatch* ExecVecSpqRemoteQuery(VecRemoteQueryState* node)
+{
+    RemoteQueryState* parent = (RemoteQueryState*)node;
+    VectorBatch* result_batch = node->resultBatch;
+
+    // we assume that we do not do any qual calculation in the vector remotequery node.
+    Assert(parent->ss.ps.qual == NULL);
+    Assert(!parent->update_cursor);
+
+    if (!parent->query_Done) {
+        spq_do_query(node);
+        parent->query_Done = true;
+    }
+    result_batch->Reset();
+
+    FetchBatch(parent, result_batch);
+
+    /* When finish remote query already, should better reset the flag. */
+    if (BatchIsNull(result_batch))
+        node->need_error_check = false;
+
+    /* report error if any */
+    pgxc_node_report_error(node);
+
+    return result_batch;
+}
+#endif
+
 VectorBatch* ExecVecRemoteQuery(VecRemoteQueryState* node)
 {
+#ifdef USE_SPQ
+    return ExecVecSpqRemoteQuery(node);
+#endif
+
     PlanState* outer_node = NULL;
 
     RemoteQueryState* parent = (RemoteQueryState*)node;
@@ -91,8 +124,34 @@ VectorBatch* ExecVecRemoteQuery(VecRemoteQueryState* node)
     return NULL;
 }
 
+#ifdef USE_SPQ
+VecRemoteQueryState* ExecInitSpqVecRemoteQuery(VecRemoteQuery* node, EState* estate, int eflags)
+{
+    VecRemoteQueryState* state = NULL;
+    RemoteQueryState* rstate = NULL;
+
+    state = makeNode(VecRemoteQueryState);
+
+    rstate = ExecInitSpqRemoteQuery((RemoteQuery*)node, estate, eflags, false);
+
+    state->resultBatch = New(CurrentMemoryContext)
+        VectorBatch(CurrentMemoryContext, rstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor);
+
+    *(RemoteQueryState*)state = *rstate;
+    state->ss.ps.vectorized = true;
+    state->ss.ps.type = T_VecRemoteQueryState;
+
+    estate->es_remotequerystates = lcons(state, estate->es_remotequerystates);
+    return state;
+}
+#endif
+
 VecRemoteQueryState* ExecInitVecRemoteQuery(VecRemoteQuery* node, EState* estate, int eflags)
 {
+#ifdef USE_SPQ
+    return ExecInitSpqVecRemoteQuery(node, estate, eflags);
+#endif
+
     VecRemoteQueryState* state = NULL;
     RemoteQueryState* rstate = NULL;
 

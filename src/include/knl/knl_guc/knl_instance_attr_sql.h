@@ -53,6 +53,9 @@ typedef struct knl_instance_attr_sql {
     int job_queue_processes;
     int max_compile_functions;
     int max_resource_package;
+#ifdef ENABLE_HTAP
+    char *ss_htap_cluster_map;
+#endif
 } knl_instance_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_SQL */

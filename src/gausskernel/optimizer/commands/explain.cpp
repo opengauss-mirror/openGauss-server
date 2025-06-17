@@ -1941,7 +1941,15 @@ static void ExplainNodePartition(const Plan* plan, ExplainState* es)
                 appendStringInfo(es->str, "Iterations: %s", "PART");
                 flag = 1;
             }
-        break;
+            break;
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+            if (((SpqCStoreScan*)plan->lefttree)->pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -1992,6 +2000,9 @@ static bool GetSubPartitionIterations(const Plan* plan, const ExplainState* es, 
         case T_CStoreScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
         case T_TidScan: {
             PruningResult* pr = ((Scan*)curPlan->lefttree)->pruningInfo;
@@ -2174,6 +2185,9 @@ static void ExplainNode(
         case T_CStoreScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -2842,6 +2856,9 @@ static void ExplainNode(
         case T_CStoreScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -3245,6 +3262,9 @@ static void ExplainNode(
         case T_CStoreScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -3492,6 +3512,9 @@ static void CalculateProcessedRows(
         case T_CStoreScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -8524,6 +8547,9 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es, bool multi
         case T_CStoreScan:
 #ifdef ENABLE_HTAP
         case T_IMCStoreScan:
+#ifdef USE_SPQ
+        case T_SpqCStoreScan:
+#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:

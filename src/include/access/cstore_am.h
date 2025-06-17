@@ -296,7 +296,7 @@ protected: // inherited by IMCStore
 
     /* for imcstore delta scan, not for cstore */
     virtual bool ImcstoreFillByDeltaScan(_in_ CStoreScanState* state, _out_ VectorBatch* vecBatchOut);
-    void UnPinCUDataBlock(int slotId);
+    void UnPinCUDataBlock(int slotId, CUDesc *cuDescPtr);
 
 protected:
     // control private memory used locally.

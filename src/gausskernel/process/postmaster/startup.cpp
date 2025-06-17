@@ -43,6 +43,7 @@
 #ifdef ENABLE_HTAP
 #include "access/htap/imcs_ctlg.h"
 #include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
 #endif
 
 /* Signal handlers */
@@ -157,7 +158,7 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
 #endif
         WakeupRecovery();
 #ifdef ENABLE_HTAP
-        if (!IMCU_CACHE->HasInitialImcsTable()) {
+        if (!IMCS_HASH_TABLE->HasInitialImcsTable()) {
             IMCUDataCacheMgr::ResetInstance(true);
         }
 #endif
@@ -168,7 +169,7 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
 #endif
         WakeupRecovery();
 #ifdef ENABLE_HTAP
-        if (!IMCU_CACHE->HasInitialImcsTable()) {
+        if (!IMCS_HASH_TABLE->HasInitialImcsTable()) {
             IMCUDataCacheMgr::ResetInstance(true);
         }
 #endif
