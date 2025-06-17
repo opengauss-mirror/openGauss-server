@@ -73,6 +73,7 @@ IndexBulkDeleteResult *ivfflatbulkdelete_internal(IndexVacuumInfo *info, IndexBu
         for (coffno = FirstOffsetNumber; coffno <= cmaxoffno; coffno = OffsetNumberNext(coffno)) {
             BlockNumber searchPage = startPages[coffno - FirstOffsetNumber];
             BlockNumber insertPage = InvalidBlockNumber;
+            int delTuplePerList = 0;
 
             /* Iterate over entry pages */
             while (BlockNumberIsValid(searchPage)) {
@@ -129,6 +130,8 @@ IndexBulkDeleteResult *ivfflatbulkdelete_internal(IndexVacuumInfo *info, IndexBu
                     GenericXLogAbort(state);
 
                 UnlockReleaseBuffer(buf);
+
+                delTuplePerList += ndeletable;
             }
 
             /*
@@ -139,7 +142,8 @@ IndexBulkDeleteResult *ivfflatbulkdelete_internal(IndexVacuumInfo *info, IndexBu
              */
             if (BlockNumberIsValid(insertPage)) {
                 listInfo.offno = coffno;
-                IvfflatUpdateList(index, listInfo, insertPage, InvalidBlockNumber, InvalidBlockNumber, MAIN_FORKNUM);
+                IvfflatUpdateList(index, listInfo, insertPage, InvalidBlockNumber, InvalidBlockNumber, MAIN_FORKNUM,
+                    -delTuplePerList);
             }
         }
     }

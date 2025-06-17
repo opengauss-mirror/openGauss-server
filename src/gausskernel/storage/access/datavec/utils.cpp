@@ -32,6 +32,7 @@
 #include "utils/dynahash.h"
 
 pq_func_t g_pq_func = {0};
+npu_func_t g_npu_func = {0};
 uint32 g_mmapOff = 0;
 uint32 g_mmap_relNode = 0;
 uint32 g_mmap_dbNode = 0;
@@ -165,7 +166,7 @@ void MmapShmemInit(void)
         info.entrysize = sizeof(MmapShmem);
         info.hash = tag_hash;
         info.num_partitions = NUM_MMAP_PARTITIONS;
-        t_thrd.storage_cxt.ShmemMmap = ShmemInitHash("Mmap Shared Buffer", MAX_MMAP_BACKENDS + NUM_MMAP_PARTITIONS, 
+        t_thrd.storage_cxt.ShmemMmap = ShmemInitHash("Mmap Shared Buffer", MAX_MMAP_BACKENDS + NUM_MMAP_PARTITIONS,
                                                     MAX_MMAP_BACKENDS + NUM_MMAP_PARTITIONS, &info, HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
     }
 }
@@ -413,7 +414,7 @@ static bool RoadMainMmapPage(BufferTag* tag, BlockNumber block_num, char** page)
     if (MmapBlock(result, block_num)) {
         *page = (char*)result->mShmem[block_num].mptr;
     }
-    
+
     return *page != NULL;
 }
 
@@ -444,7 +445,7 @@ static bool RoadMmapPage(BufferTag* tag, BlockNumber block_num, char** page)
     if (MmapBlock(result, target_block)) {
         *page = (char*)result->mShmem[target_block].mptr;
     }
-    
+
     return *page != NULL;
 
 }
@@ -455,7 +456,7 @@ static void* GetMMapMetaPage(Relation index)
     new_tag.rnode = index->rd_node;
     new_tag.forkNum = MAIN_FORKNUM;
     new_tag.blockNum = HNSW_METAPAGE_BLKNO;
-    if (RoadMainMmapPage(&new_tag, HNSW_METAPAGE_BLKNO, (char**)&page)) { 
+    if (RoadMainMmapPage(&new_tag, HNSW_METAPAGE_BLKNO, (char**)&page)) {
         return (void*)HnswPageGetMeta(page);
     }
     return NULL;
@@ -468,20 +469,20 @@ static void* GetMMapPage(Relation index, BlockNumber block_num)
     BufferTag  new_tag;
     Page page = NULL;
     new_tag.rnode = index->rd_node;
-    new_tag.forkNum = MAIN_FORKNUM; 
+    new_tag.forkNum = MAIN_FORKNUM;
     new_tag.blockNum = block_num / RELSEG_SIZE;
     if (block_num < RELSEG_SIZE) {
-        if (RoadMainMmapPage(&new_tag, block_num, (char**)&page)) { 
+        if (RoadMainMmapPage(&new_tag, block_num, (char**)&page)) {
             return (void*)page;
-        } 
+        }
         return NULL;
     }
-    if (RoadMmapPage(&new_tag, block_num, (char**)&page)) { 
+    if (RoadMmapPage(&new_tag, block_num, (char**)&page)) {
         return (void*)page;
     }
     return NULL;
 
-    
+
 }
 
 void InitParamsMetaPage(Relation index, PQParams* params, bool* enablePQ, bool trymmap)
@@ -534,7 +535,7 @@ void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint)
 bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
                      bool loadVec, float *maxDistance, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo)
 {
-    
+
     HnswElementTuple etup;
     uint8 *ePQCode;
     PQParams *params;

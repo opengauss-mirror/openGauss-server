@@ -3064,6 +3064,7 @@ typedef struct knl_u_datavec_context {
     int hnsw_earlystop_threshold;
     int ivfflat_probes;
     int ivfpq_kreorder;
+    bool enable_npu;
     bool hnsw_use_mmap;
 } knl_u_datavec_context;
 

@@ -1075,6 +1075,16 @@ void knl_g_spq_context_init(knl_g_spq_context* spq_context)
 }
 #endif
 
+void knl_g_npu_context_init(knl_g_npu_context* npu_context)
+{
+    npu_context->context_mutex = PTHREAD_RWLOCK_INITIALIZER;
+    npu_context->index_oid = -1;
+    npu_context->ivf_list_context = NULL;
+    npu_context->ivf_lists_mutex = NULL;
+    npu_context->ivf_lists_info = NULL;
+    npu_context->ivf_lists_num = 0;
+}
+
 void knl_instance_init()
 {
     g_instance.binaryupgrade = false;
@@ -1199,6 +1209,8 @@ void knl_instance_init()
     g_instance.fi_ctx_inited.store(false);
     g_instance.fi_ctx_init_finished = false;
 #endif
+
+    knl_g_npu_context_init(&g_instance.npu_cxt);
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

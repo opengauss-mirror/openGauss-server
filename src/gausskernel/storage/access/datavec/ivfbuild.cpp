@@ -23,6 +23,7 @@
 #include "postgres.h"
 
 #include <cfloat>
+#include <mutex>
 
 #include "access/tableam.h"
 #include "access/xact.h"
@@ -37,6 +38,7 @@
 #include "access/datavec/vector.h"
 #include "postmaster/bgworker.h"
 #include "commands/vacuum.h"
+#include "access/datavec/ivfnpuadaptor.h"
 
 #include "pgstat.h"
 
@@ -46,6 +48,10 @@
 #define PARALLEL_KEY_TUPLESORT UINT64CONST(0xA000000000000002)
 #define PARALLEL_KEY_IVFFLAT_CENTERS UINT64CONST(0xA000000000000003)
 #define PARALLEL_KEY_QUERY_TEXT UINT64CONST(0xA000000000000004)
+
+#define MAX_HBM 1.0
+#define L2_OID 8431
+static int g_deviceNum = 0;
 
 /*
  * Create PQ-related pages
@@ -375,6 +381,7 @@ static void BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values, 
 {
     IvfflatBuildState *buildstate = (IvfflatBuildState *)state;
     MemoryContext oldCtx;
+    errno_t rc = EOK;
 
     ItemPointer tid = &hup->t_self;
 
@@ -389,12 +396,35 @@ static void BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values, 
     /* Use memory context since detoast can allocate */
     oldCtx = MemoryContextSwitchTo(buildstate->tmpCtx);
 
-    /* Add tuple to sort */
-    AddTupleToSort(index, tid, values, buildstate);
+    if (buildstate->enableNPU) {
+        Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
+
+         /* Normalize if needed */
+        if (buildstate->normprocinfo != NULL) {
+            if (!IvfflatCheckNorm(buildstate->normprocinfo, buildstate->collation, value)) {
+                return;
+            }
+
+            value = IvfflatNormValue(buildstate->typeInfo, buildstate->collation, value);
+        }
+        Vector *vector = DatumGetVector(value);
+        buildstate->tupleslist = lappend(buildstate->tupleslist, vector);
+
+        ItemPointer tmptid = (ItemPointer)palloc(sizeof(ItemPointerData));
+        rc = memcpy_s(tmptid, sizeof(ItemPointerData), tid, sizeof(ItemPointerData));
+        securec_check(rc, "\0", "\0");
+
+        buildstate->tidslist = lappend(buildstate->tidslist, tmptid);
+        buildstate->indtuples++;
+    } else {
+        AddTupleToSort(index, tid, values, buildstate);
+    }
 
     /* Reset memory context */
     MemoryContextSwitchTo(oldCtx);
-    MemoryContextReset(buildstate->tmpCtx);
+    if (!buildstate->enableNPU) {
+        MemoryContextReset(buildstate->tmpCtx);
+    }
 }
 
 /*
@@ -449,6 +479,7 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
         GenericXLogState *state;
         BlockNumber startPage;
         BlockNumber insertPage;
+        int tuplePerList = 0;
 
         /* Can take a while, so ensure we can interrupt */
         /* Needs to be called when no buffer locks are held */
@@ -485,6 +516,8 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
 
             pfree(itup);
 
+            tuplePerList++;
+
             UpdateProgress(PROGRESS_CREATEIDX_TUPLES_DONE, ++inserted);
 
             GetNextTuple(buildstate->sortstate, tupdesc, slot, &itup, &list);
@@ -495,7 +528,8 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
         IvfflatCommitBuffer(buf, state);
 
         /* Set the start and insert pages */
-        IvfflatUpdateList(index, buildstate->listInfo[i], insertPage, InvalidBlockNumber, startPage, forkNum);
+        IvfflatUpdateList(index, buildstate->listInfo[i], insertPage, InvalidBlockNumber, startPage, forkNum,
+            tuplePerList);
     }
 }
 
@@ -602,6 +636,19 @@ static void InitBuildState(IvfflatBuildState *buildstate, Relation heap, Relatio
         buildstate->preComputeTable = NULL;
     }
     buildstate->pqDistanceTable = NULL;
+
+    buildstate->ivfclosestCentersIndexs = NULL;
+    buildstate->ivfclosestCentersDistances = NULL;
+    buildstate->tupleslist = NIL;
+    buildstate->tidslist = NIL;
+    buildstate->curtuple = 0;
+    buildstate->enableNPU = u_sess->datavec_ctx.enable_npu;
+    if (buildstate->enableNPU && !buildstate->typeInfo->supportNPU) {
+        ereport(ERROR, (errmsg("this data type cannot support ivfnpu.")));
+    }
+    if (buildstate->enableNPU && !g_npu_func.inited) {
+        ereport(ERROR, (errmsg("this instance has not currently loaded the ivfflatnpu dynamic library.")));
+    }
 }
 
 /*
@@ -739,6 +786,8 @@ static void CreateListPages(Relation index, VectorArray centers, int dimensions,
         /* Load list */
         list->startPage = InvalidBlockNumber;
         list->insertPage = InvalidBlockNumber;
+        list->listId = i;
+        list->tupleNum = 0;
         rc = memcpy_s(&list->center, VARSIZE_ANY(VectorArrayGet(centers, i)), VectorArrayGet(centers, i), VARSIZE_ANY(VectorArrayGet(centers, i)));
         securec_check(rc, "\0", "\0");
 
@@ -802,6 +851,335 @@ static void PrintKmeansMetrics(IvfflatBuildState *buildstate)
     }
 }
 #endif
+
+bool isL2Op(FmgrInfo *procinfo)
+{
+    return procinfo->fn_oid == L2_OID;
+}
+
+static void CountBuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values, const bool *isnull,
+    bool tupleIsAlive, void *state)
+{
+    IvfflatBuildState *buildstate = (IvfflatBuildState *)state;
+    MemoryContext oldCtx;
+
+    /* Skip nulls */
+    if (isnull[0]) {
+        return;
+    }
+
+    /* Use memory context since detoast can allocate */
+    oldCtx = MemoryContextSwitchTo(buildstate->tmpCtx);
+
+    /* Add tuple to sort */
+    buildstate->curtuple++;
+
+    /* Reset memory context */
+    MemoryContextSwitchTo(oldCtx);
+    MemoryContextReset(buildstate->tmpCtx);
+}
+
+static void GetClosestCenterOnNPU(int *closestCenterIndexs, float *closestCenterDistances, float *samples,
+    float *tCentersMatrix, float *centersNorm, VectorArray centers, int dimensions, int centersNum, int numSamples,
+    FmgrInfo *procinfo)
+{
+    float *resMatrix = (float *)palloc0_huge(CurrentMemoryContext, sizeof(float) * numSamples * centersNum);
+    uint8_t *tupleDevice = nullptr;
+
+    {
+        std::mutex mDevice;
+        std::lock_guard<std::mutex> lock(mDevice);
+        g_deviceNum++;
+    }
+
+    size_t totalMem = (((double)(numSamples + centersNum) * dimensions + (int64)numSamples * (int64)centersNum) *
+        sizeof(float)) / (1024 * 1024);  // MB
+    int iterNum = std::max((int)(std::ceil((double)(totalMem) / (MAX_HBM * 1024))), 1);
+    int batchSize = (int)std::ceil((double)numSamples / iterNum);
+    int actualBatchSize = batchSize;
+    int offset = 0;
+
+    for (int i = 0; i < iterNum; i++) {
+        actualBatchSize = std::min(batchSize, numSamples - offset);
+        int ret = MatrixMulOnNPU(samples + offset * dimensions, tCentersMatrix, resMatrix + offset * centersNum,
+            actualBatchSize, centersNum, dimensions, &tupleDevice, g_deviceNum - 1, false);
+        if (ret != 0) {
+            pfree(resMatrix);
+            ereport(ERROR, (errmsg("matrix mul on npu failed, errCode: %d.", ret)));
+        }
+        offset += actualBatchSize;
+    }
+
+    #pragma omp parallel for schedule(dynamic)
+    for (int i = 0; i < numSamples; i++) {
+        int curMinIndex = -1;
+        float curMinDistance = FLT_MAX;
+        for (int j = 0; j < centersNum; j++) {
+            float temp = isL2Op(procinfo) ? centersNorm[j] - 2 * resMatrix[j + i * centersNum]
+                    : -resMatrix[j + i * centersNum];
+            if (curMinDistance > temp) {
+                curMinIndex = j;
+                curMinDistance = temp;
+            }
+        }
+        closestCenterIndexs[i] = curMinIndex;
+        closestCenterDistances[i] = curMinDistance;
+    }
+    
+    pfree(resMatrix);
+}
+
+static void ParallelAddTupleToSortOnNPU(IvfflatBuildState *buildstate)
+{
+    int batchsize = (int)buildstate->indtuples;
+    float *centersMatrix = nullptr;
+    float *centersNorm = nullptr;
+    VectorArray centers = buildstate->centers;
+    TupleTableSlot *slot = buildstate->slot;
+    int dimensions = buildstate->dimensions;
+
+    centersMatrix = (float *)palloc0_huge(CurrentMemoryContext, sizeof(float) * centers->length * dimensions);
+    centersNorm = (float *)palloc0(sizeof(float) * centers->length);
+    
+    for (int i = 0; i < centers->length; i++) {
+        float *centerData = (float *)PointerGetDatum(VectorArrayGet(centers, i));
+        for (int j = 0; j < dimensions; j++) {
+            centersMatrix[i * dimensions + j] = centerData[j + 2];
+            if (isL2Op(buildstate->procinfo)) {
+                centersNorm[i] += (centerData[j + 2] * centerData[j + 2]);
+            }
+        }
+    }
+
+    float *tCentersMatrix = (float *)palloc(sizeof(float) * dimensions * centers->length);
+    for (int i = 0; i < centers->length * dimensions; i++) {
+        tCentersMatrix[(i % dimensions) * centers->length + (i / dimensions)] =
+             centersMatrix[(i / dimensions) * dimensions + (i % dimensions)];
+    }
+
+    float *tupleMatrix = (float *)palloc_huge(CurrentMemoryContext, batchsize * dimensions * sizeof(float));
+
+    ListCell *cell = NULL;
+    int i = 0;
+    foreach (cell, buildstate->tupleslist) {
+        Vector* tuple = (Vector *)lfirst(cell);
+        for (int j = 0; j < dimensions; j++) {
+            tupleMatrix[j + i * dimensions] = tuple->x[j];
+        }
+        i++;
+    }
+
+    buildstate->ivfclosestCentersIndexs = (int *)palloc0(sizeof(int) * batchsize);
+    buildstate->ivfclosestCentersDistances = (float *)palloc0(sizeof(float) * batchsize);
+    GetClosestCenterOnNPU(buildstate->ivfclosestCentersIndexs, buildstate->ivfclosestCentersDistances, tupleMatrix,
+        tCentersMatrix, centersNorm, centers, dimensions, centers->length, batchsize, buildstate->procinfo);
+
+    pfree(tupleMatrix);
+    pfree(tCentersMatrix);
+    
+    for (int k = 0; k < batchsize; k++) {
+        Vector *tmp_tuple = (Vector *)linitial(buildstate->tupleslist);
+        buildstate->tupleslist = list_delete_first(buildstate->tupleslist);
+        Datum value = PointerGetDatum(tmp_tuple);
+
+        ItemPointer tmp_tid = (ItemPointer)linitial(buildstate->tidslist);
+        buildstate->tidslist = list_delete_first(buildstate->tidslist);
+
+#ifdef IVFFLAT_KMEANS_DEBUG
+        buildstate->inertia += buildstate->ivfclosestCentersDistances[k];
+        buildstate->listSums[buildstate->ivfclosestCentersIndexs[k]] += buildstate->ivfclosestCentersDistances[k];
+        buildstate->listCounts[buildstate->ivfclosestCentersIndexs[k]]++;
+#endif
+
+        /* Create a virtual tuple */
+        ExecClearTuple(slot);
+        slot->tts_values[IVF_LISTID - 1] = Int32GetDatum(buildstate->ivfclosestCentersIndexs[k]);
+        slot->tts_isnull[IVF_LISTID - 1] = false;
+        slot->tts_values[IVF_TID - 1] = PointerGetDatum(tmp_tid);
+        slot->tts_isnull[IVF_TID - 1] = false;
+        slot->tts_values[IVF_VECTOR - 1] = value;
+        slot->tts_isnull[IVF_VECTOR - 1] = false;
+        slot->tts_values[IVF_RESIDUAL - 1] = NULL;
+        slot->tts_isnull[IVF_RESIDUAL - 1] = true;
+        ExecStoreVirtualTuple(slot);
+
+        /*
+        * Add tuple to sort
+        *
+        * tuplesort_puttupleslot comment: Input data is always copied; the caller
+        * need not save it.
+        */
+        tuplesort_puttupleslot(buildstate->sortstate, slot);
+    }
+    pfree(buildstate->ivfclosestCentersIndexs);
+    pfree(buildstate->ivfclosestCentersDistances);
+
+    list_free(buildstate->tupleslist);
+    list_free(buildstate->tidslist);
+
+    pfree(centersMatrix);
+    pfree(centersNorm);
+}
+
+static void SingleAddTupleToSortOnNPU(Relation index, ItemPointer tid, Datum *values, IvfflatBuildState *buildstate)
+{
+    TupleTableSlot *slot = buildstate->slot;
+    double curTupleDis = buildstate->ivfclosestCentersDistances[buildstate->curtuple];
+    int curTupleInd = buildstate->ivfclosestCentersIndexs[buildstate->curtuple];
+
+    /* Detoast once for all calls */
+    Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
+
+    /* Normalize if needed */
+    if (buildstate->normprocinfo != NULL) {
+        if (!IvfflatCheckNorm(buildstate->normprocinfo, buildstate->collation, value)) {
+            return;
+        }
+
+        value = IvfflatNormValue(buildstate->typeInfo, buildstate->collation, value);
+    }
+
+    #ifdef IVFFLAT_KMEANS_DEBUG
+    buildstate->inertia += curTupleDis;
+    buildstate->listSums[curTupleInd] += curTupleDis;
+    buildstate->listCounts[curTupleInd]++;
+    #endif
+
+    /* Create a virtual tuple */
+    ExecClearTuple(slot);
+    slot->tts_values[IVF_LISTID - 1] = Int32GetDatum(curTupleInd);
+    slot->tts_isnull[IVF_LISTID - 1] = false;
+    slot->tts_values[IVF_TID - 1] = PointerGetDatum(tid);
+    slot->tts_isnull[IVF_TID - 1] = false;
+    slot->tts_values[IVF_VECTOR - 1] = value;
+    slot->tts_isnull[IVF_VECTOR - 1] = false;
+    slot->tts_values[IVF_RESIDUAL - 1] = NULL;
+    slot->tts_isnull[IVF_RESIDUAL - 1] = true;
+    ExecStoreVirtualTuple(slot);
+
+    /*
+     * Add tuple to sort
+     *
+     * tuplesort_puttupleslot comment: Input data is always copied; the caller
+     * need not save it.
+     */
+    tuplesort_puttupleslot(buildstate->sortstate, slot);
+
+    buildstate->indtuples++;
+    buildstate->curtuple++;
+}
+
+/*
+ * Callback for table_index_build_scan for npu
+ */
+static void BuildCallbackOnNPU(Relation index, CALLBACK_ITEM_POINTER, Datum *values, const bool *isnull,
+    bool tupleIsAlive, void *state)
+{
+    IvfflatBuildState *buildstate = (IvfflatBuildState *)state;
+    MemoryContext oldCtx;
+
+    ItemPointer tid = &hup->t_self;
+
+    /* Skip nulls */
+    if (isnull[0]) {
+        return;
+    }
+
+    /* Use memory context since detoast can allocate */
+    oldCtx = MemoryContextSwitchTo(buildstate->tmpCtx);
+
+    /* Add tuple to sort */
+    SingleAddTupleToSortOnNPU(index, tid, values, buildstate);
+
+    /* Reset memory context */
+    MemoryContextSwitchTo(oldCtx);
+    MemoryContextReset(buildstate->tmpCtx);
+}
+
+static double SingleTableAmIndexBuildOnNPU(IvfflatBuildState *buildstate)
+{
+    Relation heap = buildstate->heap;
+    Relation index = buildstate->index;
+    IndexInfo *indexInfo = buildstate->indexInfo;
+
+    float *centersMatrix = nullptr;
+    float *centersNorm = nullptr;
+    VectorArray centers = buildstate->centers;
+    TupleTableSlot *slot = buildstate->slot;
+    int dimensions = buildstate->dimensions;
+
+    BlockNumber startblock = 0;
+    BlockNumber totalblocks = 0;
+
+    centersMatrix = (float *)palloc0_huge(CurrentMemoryContext, sizeof(float) * centers->length * dimensions);
+    centersNorm = (float *)palloc0(sizeof(float) * centers->length);
+    for (int i = 0; i < centers->length; i++) {
+        float *centerData = (float *)PointerGetDatum(VectorArrayGet(centers, i));
+        for (int j = 0; j < dimensions; j++) {
+            centersMatrix[i * dimensions + j] = centerData[j + 2];
+            if (isL2Op(buildstate->procinfo)) {
+                centersNorm[i] += (centerData[j + 2] * centerData[j + 2]);
+            }
+        }
+    }
+
+    float *tCentersMatrix = (float *)palloc(sizeof(float) * dimensions * centers->length);
+    for (int i = 0; i < centers->length * dimensions; i++) {
+        tCentersMatrix[(i % dimensions) * centers->length + (i / dimensions)] =
+             centersMatrix[(i / dimensions) * dimensions + (i % dimensions)];
+    }
+
+    if (buildstate->heap != NULL) {
+        buildstate->reltuples =
+            tableam_index_build_scan(heap, index, indexInfo, true, CountBuildCallback, (void *)buildstate, NULL);
+        totalblocks = RelationGetNumberOfBlocks(buildstate->heap);
+    }
+
+    size_t totalMem = ((double)((centers->length + buildstate->reltuples) * dimensions +
+                       (int64)centers->length * (int64)buildstate->reltuples) * sizeof(float)) / (1024 * 1024);  // MB
+    int numbatch = std::max((int)(std::ceil((double)(totalMem) / (MAX_HBM * 1024))), 1);
+    BlockNumber numblocks = (BlockNumber)(std::max((int)((int)totalblocks / numbatch), 1));
+    int numSamples = (int)(std::ceil(buildstate->reltuples / (int)totalblocks)) * (int)numblocks + 2000;
+
+    buildstate->reltuples = 0;
+    while (startblock < totalblocks) {
+        int realblocks = std::min(numblocks, totalblocks - startblock);
+        buildstate->curtuple = 0;
+        buildstate->samples = VectorArrayInit(numSamples, buildstate->dimensions, buildstate->centers->itemsize);
+        tableam_index_build_scan(heap, index, indexInfo, false, SampleCallback, (void *)buildstate, NULL,
+            startblock, realblocks);
+
+        int realNumSamples = buildstate->samples->length;
+
+        float *tupleMatrix = (float *)palloc0_huge(CurrentMemoryContext, sizeof(float) * realNumSamples * dimensions);
+        for (int i = 0; i < realNumSamples; i++) {
+            float *tupleData = (float *)PointerGetDatum(VectorArrayGet(buildstate->samples, i));
+            for (int j = 0; j < dimensions; j++) {
+                tupleMatrix[i * dimensions + j] = tupleData[j + 2];
+            }
+        }
+
+        buildstate->ivfclosestCentersIndexs = (int *)palloc0(sizeof(int) * realNumSamples);
+        buildstate->ivfclosestCentersDistances = (float *)palloc0(sizeof(float) * realNumSamples);
+
+        GetClosestCenterOnNPU(buildstate->ivfclosestCentersIndexs, buildstate->ivfclosestCentersDistances, tupleMatrix,
+            tCentersMatrix, centersNorm, centers, dimensions, centers->length, realNumSamples, buildstate->procinfo);
+
+        buildstate->reltuples += tableam_index_build_scan(heap, index, indexInfo, false, BuildCallbackOnNPU,
+            (void *)buildstate, NULL, startblock, realblocks);
+        VectorArrayFree(buildstate->samples);
+        startblock += numblocks;
+        
+        pfree(buildstate->ivfclosestCentersIndexs);
+        pfree(buildstate->ivfclosestCentersDistances);
+        pfree(tupleMatrix);
+    }
+    pfree(centersMatrix);
+    pfree(centersNorm);
+    pfree(tCentersMatrix);
+
+    return buildstate->reltuples;
+}
 
 /*
  * Within leader, wait for end of heap scan
@@ -867,10 +1245,25 @@ static void IvfflatParallelScanAndSort(IvfflatSpool *ivfspool, IvfflatShared *iv
     ivfspool->sortstate = tuplesort_begin_heap(buildstate.tupdesc, 1, attNums, sortOperators, sortCollations,
                                                nullsFirstFlags, sortmem, false, 0, 0, 1, coordinate);
     buildstate.sortstate = ivfspool->sortstate;
+    buildstate.enableNPU = ivfshared->enablenpu;
 
     scan = tableam_scan_begin_parallel(ivfspool->heap, &ivfshared->heapdesc);
-    reltuples = tableam_index_build_scan(ivfspool->heap, ivfspool->index, indexInfo, true, BuildCallback,
-                                         (void *)&buildstate, scan);
+
+    if (buildstate.enableNPU) {
+        reltuples = tableam_index_build_scan(ivfspool->heap, ivfspool->index, indexInfo, true, BuildCallback,
+            (void *)&buildstate, scan);
+        if (reltuples != 0) {
+            MemoryContext oldCtx = MemoryContextSwitchTo(buildstate.tmpCtx);
+
+            ParallelAddTupleToSortOnNPU(&buildstate);
+
+            MemoryContextSwitchTo(oldCtx);
+            MemoryContextReset(buildstate.tmpCtx);
+        }
+    } else {
+        reltuples = tableam_index_build_scan(ivfspool->heap, ivfspool->index, indexInfo, true, BuildCallback,
+            (void *)&buildstate, scan);
+    }
 
     /* Execute this worker's part of the sort */
     tuplesort_performsort(ivfspool->sortstate);
@@ -987,6 +1380,7 @@ static IvfflatShared *IvfflatParallelInitshared(IvfflatBuildState *buildstate, i
     errno_t rc = memcpy_s(ivfcenters, estcenters, buildstate->centers->items, estcenters);
     securec_check(rc, "\0", "\0");
     ivfshared->ivfcenters = (Vector *)ivfcenters;
+    ivfshared->enablenpu = u_sess->datavec_ctx.enable_npu;
 
     ivfshared->tmpCtx =
         AllocSetContextCreate(CurrentMemoryContext, "Ivfflat build temporary context", ALLOCSET_DEFAULT_SIZES);
@@ -1041,7 +1435,11 @@ static double AssignTupleUtility(IvfflatBuildState *buildstate)
     /* Fill spool using either serial or parallel heap scan */
     if (!buildstate->ivfleader) {
     serial_build:
-        reltuples = tableam_index_build_scan(heap, index, indexInfo, true, BuildCallback, (void *)buildstate, NULL);
+        if (u_sess->datavec_ctx.enable_npu) {
+            reltuples = SingleTableAmIndexBuildOnNPU(buildstate);
+        } else {
+            reltuples = tableam_index_build_scan(heap, index, indexInfo, true, BuildCallback, (void *)buildstate, NULL);
+        }
     } else {
         reltuples = ParallelHeapScan(buildstate);
         IvfflatShared *ivfshared = buildstate->ivfleader->ivfshared;

@@ -43,6 +43,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "access/csnlog.h"
+#include "access/datavec/ivfflat.h"
 #include "access/heapam.h"
 #include "access/hio.h"
 #include "access/multixact.h"
@@ -4459,6 +4460,18 @@ static inline bool xmax_infomask_changed(uint16 new_infomask, uint16 new_infomas
     return false;
 }
 
+void heap_release_npu_cache(Relation relation)
+{
+    ListCell* indlist = NULL;
+    foreach (indlist, RelationGetIndexList(relation)) {
+        Oid indexId = lfirst_oid(indlist);
+        if (g_instance.npu_cxt.index_oid == indexId) {
+            ReleaseIvfNpuContext(indexId);
+            break;
+        } 
+    }
+}
+
 /*
  *	heap_delete - delete a tuple
  *
@@ -4919,6 +4932,10 @@ l1:
      */
     if (have_tuple_lock) {
         UNLOCK_TUPLE_TUP_LOCK(relation, &(tp.t_self), LockTupleExclusive);
+    }
+
+    if (g_instance.attr.attr_storage.enable_ivfflat_npu) {
+        heap_release_npu_cache(relation);
     }
 
     pgstat_count_heap_delete(relation);
@@ -5844,6 +5861,10 @@ l2:
      */
     if (have_tuple_lock) {
         UNLOCK_TUPLE_TUP_LOCK(relation, &(oldtup.t_self), mode);
+    }
+
+    if (g_instance.attr.attr_storage.enable_ivfflat_npu) {
+        heap_release_npu_cache(relation);
     }
 
     pgstat_count_heap_update(relation, use_hot_update);

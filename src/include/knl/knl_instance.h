@@ -1476,6 +1476,15 @@ typedef struct knl_g_imcstore_context {
 } knl_g_imcstore_context;
 #endif
 
+typedef struct knl_g_npu_context {
+    pthread_rwlock_t context_mutex;
+    Oid index_oid;
+    MemoryContext ivf_list_context;
+    pthread_rwlock_t *ivf_lists_mutex;
+    void *ivf_lists_info;
+    int ivf_lists_num = 0;
+} knl_g_npu_context;
+
 typedef struct knl_g_matrix_mem_context {
     MatrixMemFunc matrix_mem_func;
     bool matrix_mem_inited;
@@ -1640,6 +1649,7 @@ typedef struct knl_instance_context {
     std::atomic<bool> fi_ctx_inited;
     bool fi_ctx_init_finished;
 #endif
+    knl_g_npu_context npu_cxt;
 } knl_instance_context;
 
 extern long random();

@@ -23,6 +23,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "access/cstore_delta.h"
+#include "access/datavec/ivfflat.h"
 #include "access/reloptions.h"
 #include "access/relscan.h"
 #include "access/nbtree.h"
@@ -2376,6 +2377,10 @@ void index_drop(Oid indexId, bool concurrent, bool concurrent_lock_mode)
     lockmode = (concurrent || concurrent_lock_mode) ? ShareUpdateExclusiveLock : AccessExclusiveLock;
     userHeapRelation = heap_open(heapId, lockmode);
     userIndexRelation = index_open(indexId, lockmode);
+
+    if (g_instance.attr.attr_storage.enable_ivfflat_npu) {
+        ReleaseIvfNpuContext(indexId);
+    }
 
     /*
      * We might still have open queries using it in our own session, which the

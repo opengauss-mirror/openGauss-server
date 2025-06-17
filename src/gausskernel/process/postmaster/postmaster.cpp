@@ -282,6 +282,8 @@
 #include "access/datavec/utils.h"
 #include "query_anomaly/query_anomaly.h"
 #include "workload/sql_limit_base.h"
+#include "access/datavec/ivfnpuadaptor.h"
+
 #ifdef ENABLE_UT
 #define static
 #endif
@@ -3179,6 +3181,11 @@ int PostmasterMain(int argc, char* argv[])
             ereport(PANIC, (errmsg("datavec PQ init failed, ret: %d", ret)));
         }
         ereport(LOG, (errmsg("datavec PQ init success.")));
+    }
+
+    /* init npu for datavec */
+    if (g_instance.attr.attr_storage.enable_ivfflat_npu) {
+        NPUResourceInit();
     }
 
     /* init sharestorge(dorado) */
@@ -9893,6 +9900,7 @@ void ExitPostmaster(int status)
      */
     DMSUninit();
     PQUinit();
+    NPUResourceRelease();
 
     CloseGaussPidDir();
 

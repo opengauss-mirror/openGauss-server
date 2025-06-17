@@ -256,6 +256,9 @@ typedef struct knl_instance_attr_storage {
     bool uwal_async_append_switch;
 
     bool enable_pq;
+    bool enable_ivfflat_npu;
+    bool cache_data_on_npu;
+    char* ivfflat_npubind_info;
     bool enable_mmap;
     int num_slru_buffers[SLRU_BUFFER_KIND];
     char* num_slru_buffers_str;
