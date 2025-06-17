@@ -128,6 +128,10 @@ const char* getBypassReason(FusionType result)
             return "Bypass not executed because query used limit-ann grammar with a non-constant or param value";
         }
 
+        case NOBYPASS_ANNINDEXSCAN_WITH_UNSUPPORT_TARGETLIST: {
+            return "Bypass not executed because query used annindexscan with unsupport targetlist";
+        }
+
         case NOBYPASS_INDEXSCAN_CONDITION_INVALID: {
             return "Bypass not executed because query used unsupported indexscan condition";
         }
@@ -793,6 +797,24 @@ static FusionType checkFuncType(Expr* node, ParamListInfo params)
     return ret;
 }
 
+static FusionType checkAnnTargetList(List* targetlist)
+{
+    ListCell* lc = NULL;
+    TargetEntry* target = NULL;
+    FusionType ret = SELECT_FOR_ANN_FUSION;
+    foreach (lc, targetlist) {
+        target = (TargetEntry*)lfirst(lc);
+        if (target->resjunk) {
+            continue;
+        }
+        if (target->expr == NULL || nodeTag((Node*)target->expr) != T_Var ||
+            ((Var*)target->expr)->varattno <= 0) {
+            return NOBYPASS_ANNINDEXSCAN_WITH_UNSUPPORT_TARGETLIST;
+        }
+    }
+    return ret;
+}
+
 static FusionType checkFuncExpr(FuncExpr* funcexpr, ParamListInfo params)
 {
     if (funcexpr->funcid == F_INT48 || funcexpr->funcid == F_I2TOI4) {
@@ -843,12 +865,16 @@ FusionType getSelectAnnIndexType(Plan *top_plan, ParamListInfo params)
                 (((Param *)limit->limitCount)->paramtype == INT8OID || ((Param *)limit->limitCount)->paramtype == FLOAT8OID)) {
                 ret = SELECT_FOR_ANN_FUSION;
             } else if (IsA(limit->limitCount, FuncExpr) && !limit->isPercent && !limit->withTies) {
-                return checkFuncExpr((FuncExpr*)(limit->limitCount), params);
+                ret = checkFuncExpr((FuncExpr*)(limit->limitCount), params);
             } else {
                 return NOBYPASS_LIMIT_ANNINDEXSCAN_NOT_SUPPORT;
             }
         }
     }
+    if (ret != SELECT_FOR_ANN_FUSION) {
+        return ret;
+    }
+    ret = checkAnnTargetList(annIndex->targetlist);
     return ret;
 }
 
