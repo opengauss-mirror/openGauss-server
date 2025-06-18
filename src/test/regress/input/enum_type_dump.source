@@ -1,0 +1,25 @@
+create database enum_type_dump;
+\c enum_type_dump
+create schema enum_type_dump;
+set search_path to enum_type_dump;
+
+
+CREATE TYPE user_status AS ENUM ('active', 'inactive', 'banned');
+
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    status user_status NOT NULL DEFAULT 'active'
+);
+
+
+\! @abs_bindir@/gs_dump enum_type_dump -p @portstring@ -f @abs_bindir@/enum_type_dump.sql -n enum_type_dump -w >/dev/null 2>&1; echo $?
+drop schema enum_type_dump cascade;
+\! @abs_bindir@/gsql -denum_type_dump -p @portstring@ -f "@abs_bindir@/enum_type_dump.sql";
+
+
+select * from users;
+
+drop schema enum_type_dump cascade;
+\c postgres
+drop database enum_type_dump;

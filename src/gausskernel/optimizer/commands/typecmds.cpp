@@ -1133,7 +1133,7 @@ ObjectAddress DefineEnum(CreateEnumStmt* stmt)
         -1,                              /* typMod (Domains only) */
         0,                               /* Array dimensions of typbasetype */
         false,                           /* Type NOT NULL */
-        InvalidOid);                     /* type's collation */
+        DEFAULT_COLLATION_OID);                     /* type's collation */
 
     /* Enter the enum's values into pg_enum */
     EnumValuesCreate(enumTypeAddr.objectId, stmt->vals);
@@ -1173,7 +1173,7 @@ ObjectAddress DefineEnum(CreateEnumStmt* stmt)
         -1,                  /* typMod (Domains only) */
         0,                   /* Array dimensions of typbasetype */
         false,               /* Type NOT NULL */
-        InvalidOid);         /* type's collation */
+        DEFAULT_COLLATION_OID);         /* type's collation */
 
     pfree_ext(enumArrayName);
     return enumTypeAddr;

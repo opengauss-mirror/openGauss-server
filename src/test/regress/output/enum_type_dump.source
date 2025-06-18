@@ -1,0 +1,57 @@
+create database enum_type_dump;
+\c enum_type_dump
+create schema enum_type_dump;
+set search_path to enum_type_dump;
+CREATE TYPE user_status AS ENUM ('active', 'inactive', 'banned');
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    status user_status NOT NULL DEFAULT 'active'
+);
+NOTICE:  CREATE TABLE will create implicit sequence "users_id_seq" for serial column "users.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "users_pkey" for table "users"
+\! @abs_bindir@/gs_dump enum_type_dump -p @portstring@ -f @abs_bindir@/enum_type_dump.sql -n enum_type_dump -w >/dev/null 2>&1; echo $?
+0
+drop schema enum_type_dump cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to type user_status
+drop cascades to table users
+\! @abs_bindir@/gsql -denum_type_dump -p @portstring@ -f "@abs_bindir@/enum_type_dump.sql";
+SET
+SET
+SET
+SET
+SET
+SET
+SET
+CREATE SCHEMA
+ALTER SCHEMA
+SET
+CREATE TYPE
+ALTER TYPE
+SET
+SET
+CREATE TABLE
+ALTER TABLE
+CREATE SEQUENCE
+ALTER SEQUENCE
+ALTER SEQUENCE
+ALTER TABLE
+ setval 
+--------
+      1
+(1 row)
+
+ALTER TABLE
+--?.*
+select * from users;
+ id | username | status 
+----+----------+--------
+(0 rows)
+
+drop schema enum_type_dump cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to type user_status
+drop cascades to table users
+\c postgres
+drop database enum_type_dump;
