@@ -196,6 +196,38 @@ execute p_select2('[3,1,2]');
  10 | item10 | [0.5982644,0.62692505,0.8370629]
 (5 rows)
 
+explain (verbose on, costs off) SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ embedding, id, name FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit
+   Output: embedding, id, name, ((embedding <-> '[3,1,2]'::vector))
+   ->  Ann Index Scan using dimens3_scan_l2_100_embedding_idx on public.dimens3_scan_l2_100
+         Output: embedding, id, name, (embedding <-> '[3,1,2]'::vector)
+         Order By: (dimens3_scan_l2_100.embedding <-> '[3,1,2]'::vector)
+(6 rows)
+
+SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ embedding, id, name FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]' LIMIT 5;
+             embedding              | id |  name  
+------------------------------------+----+--------
+ [0.85667425,0.39547122,0.98898655] | 14 | item14
+ [0.81576276,0.6386655,0.94059604]  |  9 | item9
+ [0.94438016,0.70233214,0.5453055]  | 26 | item26
+ [0.8229326,0.487093,0.74873024]    |  2 | item2
+ [0.5982644,0.62692505,0.8370629]   | 10 | item10
+(5 rows)
+
+set opfusion_debug_mode=log;
+explain (verbose on, costs off) SELECT /*+ indexscan(dimens3_scan_l2_100 dimens3_scan_l2_100_embedding_idx) */ *, (embedding OPERATOR(pg_catalog.<#>) '[3,1,2]') as c2 FROM dimens3_scan_l2_100 ORDER BY embedding <-> '[3,1,2]';
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used annindexscan with unsupport targetlist.
+ Ann Index Scan using dimens3_scan_l2_100_embedding_idx on public.dimens3_scan_l2_100
+   Output: id, name, embedding, (embedding <#> '[3,1,2]'::vector), (embedding <-> '[3,1,2]'::vector)
+   Order By: (dimens3_scan_l2_100.embedding <-> '[3,1,2]'::vector)
+(4 rows)
+
+set opfusion_debug_mode=off;
 CREATE TABLE items (id int, embedding vector(3));
 INSERT INTO items VALUES (1, '[1,2,3]'), (2, '[4,5,6]'), (3, '[7,8,9]'), (4, '[10,11,12]'), (5, '[13,14,15]');
 CREATE INDEX ON items USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);

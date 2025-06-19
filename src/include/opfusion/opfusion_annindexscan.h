@@ -64,6 +64,7 @@ public:
 
     void setAttrMap();
 
+    bool CheckTlistMatchesTupdesc();
 private:
     int m_orderbyNum;
     ScanKey m_orderbyKeys;
@@ -72,11 +73,9 @@ private:
     bool m_can_reused;
     BaseGetTuple* m_tuple;
 public:
-
-    bool m_remap;
+    int m_numSimpleVars;
     int m_lastScanVar;
     bool m_isustore;
-    Datum *m_oldvalues;
-    bool *m_oldisnull;
+    TupleTableSlot* m_scanslot;
 };
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_ANNINDEXSCAN_H_ */
