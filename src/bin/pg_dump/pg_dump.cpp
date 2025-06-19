@@ -10332,8 +10332,12 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                     "WHEN t.typtype = 's' THEN concat('set(', (select pg_catalog.string_agg(concat('''', setlabel, ''''), ',' order by setsortorder) from pg_catalog.pg_set group by settypid having settypid = t.oid), ')') ");
 
             }
+            if (findDBCompatibility(fout, PQdb(GetConnection(fout)))) {
+                appendPQExpBuffer(q,
+                "WHEN t.typtype = 'e' and t.typname LIKE '%%anonymous_enum%%' THEN concat('enum(', (select pg_catalog.string_agg(concat('''', enumlabel, ''''), ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid), ')') ");
+            }
             appendPQExpBuffer(q,
-                "WHEN t.typtype = 'e' THEN concat('enum(', (select pg_catalog.string_agg(concat('''', enumlabel, ''''), ',' order by enumsortorder) from pg_catalog.pg_enum group by enumtypid having enumtypid = t.oid), ')') ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
+                "ELSE pg_catalog.format_type(t.oid,a.atttypmod) END "
                 "AS atttypname, "
                 "pg_catalog.array_to_string(a.attoptions, ', ') AS attoptions, "
                 "CASE WHEN a.attcollation <> t.typcollation "
@@ -12417,7 +12421,8 @@ static void dumpType(Archive* fout, TypeInfo* tyinfo)
         dumpObjectTypeBody(fout, tyinfo);
     }
     else if (tyinfo->typtype == TYPTYPE_ENUM) {
-        if (findDBCompatibility(fout, PQdb(GetConnection(fout))) && hasSpecificExtension(fout, "dolphin")) {
+        if (findDBCompatibility(fout, PQdb(GetConnection(fout))) && hasSpecificExtension(fout, "dolphin") &&
+            strstr(tyinfo->dobj.name, "anonymous_enum") != NULL) {
             return;
         }
         dumpEnumType(fout, tyinfo);
