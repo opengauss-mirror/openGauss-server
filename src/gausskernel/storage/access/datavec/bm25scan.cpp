@@ -206,7 +206,7 @@ struct BM25ScanDocScoreHashTable : public BaseObject {
     static constexpr uint32 INIT_TABLE_SHIFT = 4;
     static constexpr uint8_t MAX_TABLE_SHIFT = 63;
 public:
-    BM25ScanDocScoreHashTable(uint32 maxDocCount)
+    BM25ScanDocScoreHashTable(uint32 maxDocCount, const char* query)
     {
         size_t capacity = INIT_TABLE_CAPACITY;
         uint8_t shift = INIT_TABLE_SHIFT;
@@ -217,6 +217,7 @@ public:
         capacity <<= 1;
         scoreArray = (BM25ScanScoreHashEntry*)palloc0(sizeof(BM25ScanScoreHashEntry) * capacity);
         scoreHashCapacity = capacity;
+        queryString = pg_strdup(query);
     }
 
     uint32 GetDocHash(const char* doc)
@@ -266,6 +267,14 @@ public:
         return 0.0;
     }
 
+    bool CheckQuery(const char *inputQuery)
+    {
+        if (inputQuery != nullptr && strcmp(inputQuery, queryString) == 0) {
+            return true;
+        }
+        return false;
+    }
+
     void Destroy()
     {
         pfree_ext(scoreArray);
@@ -273,6 +282,7 @@ public:
 
 private:
     BM25ScanScoreHashEntry* scoreArray;
+    char* queryString;
     size_t scoreHashCapacity;
 };
 
@@ -600,7 +610,7 @@ static void BM25IndexScan(Relation index, BM25QueryTokensInfo &queryTokenInfo, u
     }
 }
 
-static void ConstructScanScoreKeys(Relation index, BM25ScanOpaque so)
+static void ConstructScanScoreKeys(Relation index, BM25ScanOpaque so, const char* queryString)
 {
     IndexScanDesc scan;
     Oid heapRelOid;
@@ -621,7 +631,7 @@ static void ConstructScanScoreKeys(Relation index, BM25ScanOpaque so)
     scan->heapRelation = heapRel;
     scan->xs_snapshot = GetActiveSnapshot();
     scan->xs_heapfetch = tableam_scan_index_fetch_begin(heapRel);
-    u_sess->bm25_ctx.scoreHashTable = New(CurrentMemoryContext) BM25ScanDocScoreHashTable(so->candNums);
+    u_sess->bm25_ctx.scoreHashTable = New(CurrentMemoryContext) BM25ScanDocScoreHashTable(so->candNums, queryString);
     for (int i = 0; i < so->candNums; ++i) {
         if (so->candDocs[i].docId == BM25_INVALID_DOC_ID) {
             continue;
@@ -773,13 +783,16 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
     bool needSearch = CheckIfNeedExpandSearch(so);
     if (needSearch) {
         ArrayType *arr = NULL;
-        if (scan->orderByData != NULL) {
+        if (scan->orderByData != NULL && !(scan->orderByData[0].sk_flags & SK_ISNULL)) {
             arr = DatumGetArrayTypeP(scan->orderByData[0].sk_argument);
-        } else if (scan->keyData != NULL) {
+        } else if (scan->keyData != NULL && !(scan->keyData[0].sk_flags & SK_ISNULL)) {
             arr = DatumGetArrayTypeP(scan->keyData[0].sk_argument);
         }
-        BM25QueryTokensInfo queryTokenInfo = GetQueryTokens(scan->indexRelation, TextDatumGetCString(
-            PointerGetDatum(arr)));
+        if (arr == NULL) {
+            ereport(ERROR, (errmsg("Query is null, can not find any document.")));
+        }
+        char* queryString = TextDatumGetCString(PointerGetDatum(arr));
+        BM25QueryTokensInfo queryTokenInfo = GetQueryTokens(scan->indexRelation, queryString);
         if (queryTokenInfo.size == 0) {
             return false;
         }
@@ -787,7 +800,7 @@ bool bm25gettuple_internal(IndexScanDesc scan, ScanDirection dir)
         float avgdl = (meta.tokenCount * 1.0) / meta.documentCount;
         BM25IndexScan(scan->indexRelation, queryTokenInfo, meta.nextDocId, avgdl, so);
         DocIdsGetHeapCtids(scan->indexRelation, meta.entryPageList, so);
-        ConstructScanScoreKeys(scan->indexRelation, so);
+        ConstructScanScoreKeys(scan->indexRelation, so, queryString);
         if (queryTokenInfo.queryTokens != nullptr) {
             pfree(queryTokenInfo.queryTokens);
             queryTokenInfo.queryTokens = nullptr;
@@ -819,6 +832,64 @@ void bm25endscan_internal(IndexScanDesc scan)
     scan->opaque = NULL;
 }
 
+static bool ExpressionContainVar(Node* node, void* context)
+{
+    if (node == NULL) {
+        return false;
+    } else if (IsA(node, Var)) {
+        return true;
+    }
+
+    return expression_tree_walker(node, (bool (*)())ExpressionContainVar, context);
+}
+
+static bool DocIsInLeftKey(List* args)
+{
+    Node* node = (Node*)linitial(args);
+    return ExpressionContainVar(node, NULL);
+}
+
+static void GetQueryAndDoc(PG_FUNCTION_ARGS, char* &query, char* &doc)
+{
+    bool* fnExtra = nullptr;
+    bool docInLeft = false;
+    List* args = NULL;
+    Node* expr = NULL;
+
+    if (fcinfo->flinfo->fn_extra) {
+        docInLeft = *(bool*)fcinfo->flinfo->fn_extra;
+    } else {
+        expr = (Node*)fcinfo->flinfo->fn_expr;
+        if (expr && IsA(expr, OpExpr)) {
+            args = ((OpExpr*)expr)->args;
+        } else if (expr && IsA(expr, FuncExpr)) {
+            args = ((FuncExpr*)expr)->args;
+        }
+
+        if (args == NULL) {
+            ereport(ERROR, (errmsg(
+                "Unexpected Node type, \"%s\".", expr ? nodeTagToString(nodeTag(expr)) : "UnknownTag")));
+        }
+
+        if (DocIsInLeftKey(args)) {
+            docInLeft = true;
+        }
+        MemoryContext oldcontext = MemoryContextSwitchTo(fcinfo->flinfo->fn_mcxt);
+        fnExtra = (bool*)palloc0(sizeof(bool));
+        *fnExtra = docInLeft;
+        fcinfo->flinfo->fn_extra = fnExtra;
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    if (docInLeft) {
+        doc = text_to_cstring(DatumGetVarCharPP(PG_GETARG_DATUM(0)));
+        query = text_to_cstring(DatumGetVarCharPP(PG_GETARG_DATUM(1)));
+    } else {
+        query = text_to_cstring(DatumGetVarCharPP(PG_GETARG_DATUM(0)));
+        doc = text_to_cstring(DatumGetVarCharPP(PG_GETARG_DATUM(1)));
+    }
+}
+
 Datum bm25_scores_textarr(PG_FUNCTION_ARGS)
 {
     ereport(ERROR, (errmsg("Textarr not support for BM25 index currently.")));
@@ -829,20 +900,28 @@ Datum bm25_scores_text(PG_FUNCTION_ARGS)
     if (u_sess->bm25_ctx.scoreHashTable == NULL) {
         ereport(ERROR, (errmsg("No BM25 index is used to the scan, please check the plan.")));
     }
-    char* leftKey = text_to_cstring(DatumGetVarCharPP(PG_GETARG_DATUM(0)));
-    char* rightKey = text_to_cstring(DatumGetVarCharPP(PG_GETARG_DATUM(1)));
-    bool findLeft = false;
-    bool findRight = false;
-    float leftScore = u_sess->bm25_ctx.scoreHashTable->SearchScoreForDoc(leftKey, &findLeft);
-    float rightScore = u_sess->bm25_ctx.scoreHashTable->SearchScoreForDoc(rightKey, &findRight);
-    if (!findLeft && !findRight) {
-        pfree_ext(leftKey);
-        pfree_ext(rightKey);
+
+    bool findDoc = false;
+    char* doc = nullptr;
+    char* query = nullptr;
+
+    GetQueryAndDoc(fcinfo, query, doc);
+    if (!u_sess->bm25_ctx.scoreHashTable->CheckQuery(query)) {
+        pfree_ext(query);
+        pfree_ext(doc);
+        DELETE_EX(u_sess->bm25_ctx.scoreHashTable);
+        ereport(ERROR, (errmsg("Incorrect query string, please check the statement.")));
+    }
+
+    float score = u_sess->bm25_ctx.scoreHashTable->SearchScoreForDoc(doc, &findDoc);
+
+    if (!findDoc) {
+        pfree_ext(query);
+        pfree_ext(doc);
         DELETE_EX(u_sess->bm25_ctx.scoreHashTable);
         ereport(ERROR, (errmsg("No result not found in bm25scan hash table.")));
     }
-    float score = leftScore > rightScore ? leftScore : rightScore;
-    pfree_ext(leftKey);
-    pfree_ext(rightKey);
+    pfree_ext(query);
+    pfree_ext(doc);
     PG_RETURN_FLOAT8(score);
 }
