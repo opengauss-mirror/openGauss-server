@@ -736,6 +736,15 @@ TSQL_CreateFunctionStmt:
 				}
 		;
 
+TSQL_DoStmt: DO dostmt_opt_list
+				{
+					DoStmt *n = makeNode(DoStmt);
+					n->args = $2;
+					n->args = lappend(n->args, makeDefElem("language", (Node *)makeString("pltsql")));
+					$$ = (Node *)n;
+				}
+		;
+
 
 tsql_stmt :
 			AlterAppWorkloadGroupMappingStmt
@@ -858,7 +867,7 @@ tsql_stmt :
 			| DefineStmt
 			| DeleteStmt
 			| DiscardStmt
-			| DoStmt
+			| TSQL_DoStmt
 			| DropAppWorkloadGroupMappingStmt
 			| DropAssertStmt
 			| DropCastStmt

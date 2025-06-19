@@ -342,5 +342,114 @@ insert into t1 values(4);
 rollback;
 select * from t1;
 
+truncate table t1;
+create or replace procedure p1 () as 
+BEGIN
+    insert into t1 values(1);
+    commit transaction;
+    insert into t1 values(2);
+    rollback transaction;
+    save tran savepoint1;
+    insert into t1 values(3);
+    rollback tran savepoint1;
+    insert into t1 values(4);
+    commit transaction transactionName1;
+END;
+/
+
+select p1();
+select * from t1;
+
+truncate table t1;
+create or replace function f1 () returns int language pltsql as 
+$$
+BEGIN
+    insert into t1 values(5);
+    commit tran transactionName2;
+    insert into t1 values(6);
+    rollback tran;
+    save tran savepoint1;
+    insert into t1 values(7);
+    rollback tran savepoint1;
+    insert into t1 values(8);
+    commit tran;
+    return 1;
+end;
+$$;
+select f1();
+select * from t1;
+
+truncate table t1;
+do $$
+BEGIN
+    insert into t1 values(1);
+    commit transaction;
+    insert into t1 values(2);
+    rollback transaction;
+    save tran savepoint1;
+    insert into t1 values(3);
+    rollback tran savepoint1;
+    insert into t1 values(4);
+    commit transaction;
+END
+$$;
+
+
+drop table if exists ValueTable;
+CREATE TABLE ValueTable (id INT);
+
+create or replace procedure procedure_15()
+is
+begin
+INSERT INTO ValueTable VALUES(1);
+rollback;
+COMMIT;
+end;
+/
+
+create or replace procedure procedure_15()
+is
+begin
+INSERT INTO ValueTable VALUES(2);
+SAVE TRAN save_point1;
+COMMIT;
+end;
+/
+
+create or replace procedure procedure_15()
+is
+begin
+INSERT INTO ValueTable VALUES(3);
+ROLLBACK TRAN;
+COMMIT TRAN;
+end;
+/
+
+create or replace procedure procedure_15()
+is
+begin
+INSERT INTO ValueTable VALUES(4);
+ROLLBACK TRANSACTION;
+COMMIT TRANSACTION;
+end;
+/
+
+drop procedure procedure_15();
+
+BEGIN
+    INSERT INTO ValueTable VALUES(1);
+    SAVE TRAN save_point1;
+    INSERT INTO ValueTable VALUES(2);
+    ROLLBACK TRAN save_point1;
+    INSERT INTO ValueTable VALUES(3);
+    COMMIT TRANSACTION;
+END;
+/
+
+select * from ValueTable;
+
+drop table ValueTable;
+drop function p1();
+drop function f1();
 drop table t1;
 drop schema transaction_test cascade;
