@@ -31,6 +31,9 @@
 static void bm25costestimate_internal(PlannerInfo *root, IndexPath *path, double loop_count, Cost *indexStartupCost,
                                       Cost *indexTotalCost, Selectivity *indexSelectivity, double *indexCorrelation)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "bm25 index do not support extreme rto, please disable extreme rto and re-create bm25 index.");
+    }
     /* Never use index without order */
     if (path->indexorderbys == NULL) {
         *indexStartupCost = DBL_MAX;
