@@ -2,11 +2,20 @@ SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0,
 
 SET search_path TO information_schema;
 
-DROP VIEW IF EXISTS information_schema.tables CASCADE;
-DROP VIEW IF EXISTS information_schema.columns CASCADE;
 
-CREATE VIEW tables AS
-    SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS table_catalog,
+DO $$
+DECLARE
+    function_exists BOOLEAN;
+BEGIN
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_proc
+        WHERE proname = 'pg_relation_is_updatable'
+    ) INTO function_exists;
+    IF function_exists THEN
+    DROP VIEW IF EXISTS information_schema.tables CASCADE;
+    CREATE VIEW tables AS
+       SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS table_catalog,
            CAST(nc.nspname AS sql_identifier) AS table_schema,
            CAST(c.relname AS sql_identifier) AS table_name,
 
@@ -44,9 +53,24 @@ CREATE VIEW tables AS
           AND (pg_catalog.pg_has_role(c.relowner, 'USAGE')
                OR pg_catalog.has_table_privilege(c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
                OR pg_catalog.has_any_column_privilege(c.oid, 'SELECT, INSERT, UPDATE, REFERENCES') );
+    END IF;
+END $$;
 
-CREATE VIEW columns AS
-    SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS table_catalog,
+
+DO $$
+DECLARE
+    function_exists BOOLEAN;
+BEGIN
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_proc
+        WHERE proname = 'pg_column_is_updatable'
+    ) INTO function_exists;
+    IF function_exists THEN
+    
+    DROP VIEW IF EXISTS information_schema.columns CASCADE;
+    CREATE VIEW columns AS
+       SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS table_catalog,
            CAST(nc.nspname AS sql_identifier) AS table_schema,
            CAST(c.relname AS sql_identifier) AS table_name,
            CAST(a.attname AS sql_identifier) AS column_name,
@@ -164,16 +188,32 @@ CREATE VIEW columns AS
           AND (pg_catalog.pg_has_role(c.relowner, 'USAGE')
                OR pg_catalog.has_column_privilege(c.oid, a.attnum,
                                        'SELECT, INSERT, UPDATE, REFERENCES'));
+    END IF;
+END $$;
 
-CREATE VIEW data_type_privileges AS
-    SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS object_catalog,
+
+DO $$
+DECLARE
+    view_exists BOOLEAN;
+BEGIN
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_class c
+        JOIN pg_namespace n ON c.relnamespace = n.oid
+        WHERE c.relname = 'data_type_privileges'
+          AND n.nspname = 'information_schema'
+          AND c.relkind = 'v'
+    ) INTO view_exists;
+    IF NOT view_exists THEN
+    CREATE VIEW data_type_privileges AS
+        SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS object_catalog,
            CAST(x.objschema AS sql_identifier) AS object_schema,
            CAST(x.objname AS sql_identifier) AS object_name,
            CAST(x.objtype AS character_data) AS object_type,
            CAST(x.objdtdid AS sql_identifier) AS dtd_identifier
 
-    FROM
-      (
+     FROM
+       (
         SELECT udt_schema, udt_name, 'USER-DEFINED TYPE'::text, dtd_identifier FROM attributes
         UNION ALL
         SELECT table_schema, table_name, 'TABLE'::text, dtd_identifier FROM columns
@@ -183,11 +223,26 @@ CREATE VIEW data_type_privileges AS
         SELECT specific_schema, specific_name, 'ROUTINE'::text, dtd_identifier FROM parameters
         UNION ALL
         SELECT specific_schema, specific_name, 'ROUTINE'::text, dtd_identifier FROM routines
-      ) AS x (objschema, objname, objtype, objdtdid);
+       ) AS x (objschema, objname, objtype, objdtdid);
+    END IF;
+END $$;
 
 
-CREATE VIEW element_types AS
-    SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS object_catalog,
+DO $$
+DECLARE
+    view_exists BOOLEAN;
+BEGIN
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_class c
+        JOIN pg_namespace n ON c.relnamespace = n.oid
+        WHERE c.relname = 'element_types'
+          AND n.nspname = 'information_schema'
+          AND c.relkind = 'v'
+    ) INTO view_exists;
+    IF NOT view_exists THEN
+    CREATE VIEW element_types AS
+        SELECT CAST(pg_catalog.current_database() AS sql_identifier) AS object_catalog,
            CAST(n.nspname AS sql_identifier) AS object_schema,
            CAST(x.objname AS sql_identifier) AS object_name,
            CAST(x.objtype AS character_data) AS object_type,
@@ -273,6 +328,9 @@ CREATE VIEW element_types AS
           AND (n.nspname, x.objname, x.objtype, CAST(x.objdtdid AS sql_identifier)) IN
               ( SELECT object_schema, object_name, object_type, dtd_identifier
                     FROM data_type_privileges );
+    END IF;
+END $$;
+
 
 do $$DECLARE
     user_name text;
