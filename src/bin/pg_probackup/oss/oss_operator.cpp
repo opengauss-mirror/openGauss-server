@@ -220,21 +220,41 @@ void Oss::RemoveObject(const char* bucket_name, const char* objcet_key) {
     }
 }
 
+static const int MAX_KEYS = 1000;
 void Oss::ListObjectsWithPrefix(char* bucket_name, char* prefix, parray* objects)
 {
     auto s3_client = reinterpret_cast<Aws::S3::S3Client *>(s3_client_);
     Aws::S3::Model::ListObjectsRequest request;
     request.WithBucket(bucket_name);
     request.SetPrefix(prefix);
-    auto outcome = s3_client->ListObjects(request);
-    if (!outcome.IsSuccess()) {
-        auto err = outcome.GetError();
-        elog(ERROR, "ListObjectsWithPrefix: %s, %s", err.GetExceptionName().c_str(), err.GetMessage().c_str());
-    }
-    Aws::Vector<Aws::S3::Model::Object> resp = outcome.GetResult().GetContents();
-    for (auto &bucket : resp) {
-        char* key = pg_strdup(bucket.GetKey().c_str());
-        parray_append(objects, key);
+    request.SetMaxKeys(MAX_KEYS);
+
+    bool hasMoreObjects = true;
+    Aws::String marker;
+
+    while (hasMoreObjects) {
+        if (!marker.empty()) {
+            request.SetMarker(marker);
+        }
+
+        auto outcome = s3_client->ListObjects(request);
+        if (!outcome.IsSuccess()) {
+            auto err = outcome.GetError();
+            elog(ERROR, "ListObjectsWithPrefix: %s, %s",
+                err.GetExceptionName().c_str(), err.GetMessage().c_str());
+            break;
+        }
+
+        Aws::Vector<Aws::S3::Model::Object> resp = outcome.GetResult().GetContents();
+        for (auto &bucket : resp) {
+            char* key = pg_strdup(bucket.GetKey().c_str());
+            parray_append(objects, key);
+        }
+
+        hasMoreObjects = outcome.GetResult().GetIsTruncated();
+        if (hasMoreObjects) {
+            marker = resp.back().GetKey();
+        }
     }
 }
 

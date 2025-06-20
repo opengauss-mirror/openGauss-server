@@ -476,8 +476,11 @@ typedef enum FILE_APPEND_SEG_TYPE
     FILE_APPEND_TYPE_FILE,
     FILE_APPEND_TYPE_FILE_CONTENT,
     FILE_APPEND_TYPE_FILE_END,
-    FILE_APPEND_TYPE_FILES_END
+    FILE_APPEND_TYPE_FILES_END,
+    FILE_APPEND_TYPE_MAX
 } FILE_APPEND_SEG_TYPE;
+
+using NO_VERSION_SEG_TYPE = FILE_APPEND_SEG_TYPE;
 
 typedef struct FileAppender {
     void* filePtr; /* hold the buffer context handle */
@@ -487,7 +490,7 @@ typedef struct FileAppender {
     uint32 minFileNo;
     uint32 maxFileNo;
     uint64 currFileSize;
-    FILE_APPEND_SEG_TYPE type;
+    pthread_spinlock_t lock;
 } FileAppender;
 
 /* Special value for compressed_size field */

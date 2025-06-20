@@ -333,19 +333,21 @@ extern bool check_data_file(ConnectionArgs *arguments, pgFile *file,
                             const char *from_fullpath, uint32 checksum_version);
 
 extern void backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
-                                 const char *from_fullpath, const char *to_fullpath,
-                                 XLogRecPtr prev_backup_start_lsn, BackupMode backup_mode,
-                                 CompressAlg calg, int clevel, uint32 checksum_version,
-                                 HeaderMap *hdr_map, bool missing_ok,
-                                 FileAppender* appender = NULL, char* fileBuffer = NULL);
+                             const char *from_fullpath, const char *to_fullpath,
+                             XLogRecPtr prev_backup_start_lsn, BackupMode backup_mode,
+                             CompressAlg calg, int clevel, uint32 checksum_version,
+                             HeaderMap *hdr_map, bool missing_ok,
+                             FileAppender* appender = NULL, char* fileBuffer = NULL, short readerIndexId = 0);
 extern void backup_non_data_file(pgFile *file, pgFile *prev_file,
                                  const char *from_fullpath, const char *to_fullpath,
                                  BackupMode backup_mode, time_t parent_backup_time,
-                                 bool missing_ok, FileAppender* appender = NULL, char* fileBuffer = NULL);
+                                 bool missing_ok, FileAppender* appender = NULL,
+                                 char* fileBuffer = NULL, short readerIndexId = 0);
 extern void backup_non_data_file_internal(const char *from_fullpath,
                                           fio_location from_location,
-                                          const char *to_fullpath, pgFile *file,
-                                          bool missing_ok, FileAppender* appender = NULL, char** fileBuffer = NULL);
+                                          const char *to_fullpath, pgFile *file, bool missing_ok,
+                                          FileAppender* appender = NULL, char** fileBuffer = NULL,
+                                          short readerIndexId = 0);
 
 extern size_t restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
                                 const char *to_fullpath, bool use_bitmap, PageState *checksum_map,
@@ -456,19 +458,21 @@ extern FILE* open_local_file_rw(const char *to_fullpath, char **out_buf, uint32 
 extern int send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_fullpath,
                       pgFile *file, XLogRecPtr prev_backup_start_lsn, CompressAlg calg, int clevel,
                       uint32 checksum_version, bool use_pagemap, BackupPageHeader2 **headers,
-                      BackupMode backup_mode, FileAppender* appender = NULL, char* fileBuffer = NULL);
+                      BackupMode backup_mode,
+                      FileAppender* appender = NULL, char* fileBuffer = NULL, short readerIndexId = 0);
 
 /* FIO */
 extern void fio_delete(mode_t mode, const char *fullpath, fio_location location);
 extern int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *file,
                           XLogRecPtr horizonLsn, int calg, int clevel, uint32 checksum_version,
                           bool use_pagemap, BlockNumber *err_blknum, char **errormsg,
-                          BackupPageHeader2 **headers, FileAppender* appender = NULL, char** fileBuffer = NULL);
+                          BackupPageHeader2 **headers, FileAppender* appender = NULL,
+                          char** fileBuffer = NULL, short readerIndexId = 0);
 /* return codes for fio_send_pages */
 extern int fio_send_file_gz(const char *from_fullpath, const char *to_fullpath, FILE* out, char **errormsg);
 extern int fio_send_file(const char *from_fullpath, const char *to_fullpath, FILE* out,
-                                                        pgFile *file, char **errormsg,
-                                                        FileAppender* appender = NULL, char** fileBuffer = NULL);
+                         pgFile *file, char **errormsg,
+                         FileAppender* appender = NULL, char** fileBuffer = NULL, short readerIndexId = 0);
 
 extern void fio_list_dir(parray *files, const char *root, bool exclude, bool follow_symlink,
                          bool add_root, bool backup_logs, bool skip_hidden, int external_dir_num,

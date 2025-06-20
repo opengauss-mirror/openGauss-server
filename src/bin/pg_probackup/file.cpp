@@ -1201,9 +1201,10 @@ static void fio_load_file(int out, char const* path)
  * otherwise it should be set to InvalidXLogRecPtr.
  */
 int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *file,
-                                    XLogRecPtr horizonLsn, int calg, int clevel, uint32 checksum_version,
-                                    bool use_pagemap, BlockNumber* err_blknum, char **errormsg,
-                                    BackupPageHeader2 **headers, FileAppender* appender, char** fileBuffer)
+                   XLogRecPtr horizonLsn, int calg, int clevel, uint32 checksum_version,
+                   bool use_pagemap, BlockNumber* err_blknum, char **errormsg,
+                   BackupPageHeader2 **headers, FileAppender* appender, char** fileBuffer, short readerIndexId)
+
 {
     FILE *out = NULL;
     char *out_buf = NULL;
@@ -1337,10 +1338,10 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
                     *fileBuffer += hdr.size;
                 } else {
                     /* write data page */
-                    FileAppenderSegHeader content_header;
-                    constructHeader(&content_header, FILE_APPEND_TYPE_FILE_CONTENT, hdr.size, 0, file);
-                    writeHeader(&content_header, appender);
-                    writePayload((char*)buf, hdr.size, appender);
+                    ParallelFileAppenderSegHeader contentHeader;
+                    constructParallelHeader(&contentHeader, FILE_APPEND_TYPE_FILE_CONTENT,
+                                            hdr.size, 0, file, readerIndexId);
+                    WriteDataBlock(&contentHeader, (char*)buf, hdr.size, appender);
                 }
             } else {
                 if (fio_fwrite(out, buf, hdr.size) != hdr.size) {
@@ -1692,8 +1693,8 @@ static char *ProcessErrorIn(int out, fio_header &hdr, const char *fromFullpath)
  * If pgFile is not NULL then we must calculate crc and read_size for it.
  */
 int fio_send_file(const char *from_fullpath, const char *to_fullpath, FILE* out,
-                                pgFile *file, char **errormsg,
-                                FileAppender* appender, char** fileBuffer)
+                  pgFile *file, char **errormsg,
+                  FileAppender* appender, char** fileBuffer, short readerIndexId)
 {
     fio_header hdr;
     int exit_code = SEND_OK;
@@ -1748,10 +1749,10 @@ int fio_send_file(const char *from_fullpath, const char *to_fullpath, FILE* out,
                     /* Update CRC */
                     COMP_FILE_CRC32(true, file->crc, buf, hdr.size);
                     /* write data page */
-                    FileAppenderSegHeader content_header;
-                    constructHeader(&content_header, FILE_APPEND_TYPE_FILE_CONTENT, hdr.size, 0, file);
-                    writeHeader(&content_header, appender);
-                    writePayload((char*)buf, hdr.size, appender);
+                    ParallelFileAppenderSegHeader contentHeader;
+                    constructParallelHeader(&contentHeader, FILE_APPEND_TYPE_FILE_CONTENT,
+                                            hdr.size, 0, file, readerIndexId);
+                    WriteDataBlock(&contentHeader, (char*)buf, hdr.size, appender);
                 }
                 file->read_size += hdr.size;
             } else {

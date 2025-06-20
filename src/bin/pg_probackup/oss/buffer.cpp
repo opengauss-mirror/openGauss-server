@@ -53,6 +53,7 @@ void destroyBufferCxt(BufferCxt* cxt)
 BufferDesc* getNextFreeWriteBuffer(BufferCxt* cxt)
 {
     BufferDesc* buff = NULL;
+
     const size_t producerIdx = cxt->producerIdx.load(std::memory_order_relaxed);
     const size_t nextIdx = (producerIdx + 1) % buffNum(cxt);
     /* check whether the buffer queue is full */
@@ -67,7 +68,8 @@ BufferDesc* getNextFreeWriteBuffer(BufferCxt* cxt)
         pg_usleep(WAIT_FOR_BUFF_SLEEP_TIME);
         return NULL;
     }
-    if (testBufferFlag(buff, BUFF_FLAG_FILE_FINISHED | BUFF_FLAG_FILE_CLOSED)) {
+    if (testBufferFlag(buff, BUFF_FLAG_FILE_FINISHED | BUFF_FLAG_FILE_CLOSED) ||
+        (cxt->producerCount.load() < cxt->consumerCount.load())) {
         cxt->producerIdx.store(nextIdx, std::memory_order_release);
         cxt->producerCount.fetch_add(1);
         return NULL;
@@ -116,6 +118,7 @@ BufferDesc* tryGetNextFreeReadBuffer(BufferCxt* cxt)
 {
     BufferDesc* buff = NULL;
     while (!(buff = getNextFreeReadBuffer(cxt))) {
+        pg_usleep(GET_BUFF_RETRY_TIME);
         continue;
     }
     /* the buffer is ready */
@@ -165,7 +168,6 @@ bool hasBufferForRead(BufferCxt* cxt)
 void* openWriteBufferFile(const char* filename, const char* mode)
 {
     BufferCxt* buffCxt = current.sender_cxt->bufferCxt;
-    BufferDesc* buff = NULL;
     SendFileInfo* fileInfo = NULL;
     int32 fileId = -1;
     fileInfo = (SendFileInfo*)palloc(sizeof(SendFileInfo));

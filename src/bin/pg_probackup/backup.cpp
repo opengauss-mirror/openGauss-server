@@ -480,7 +480,6 @@ static bool backup_space_check(const char* backup_path)
     int64 backup_bytes = 0;
     char pretty_available_bytes[BYTES_PATH_LEN];
     char pretty_backup_bytes[BYTES_PATH_LEN];
-    char data_path[MAX_PATH_LEN] = {0};
     struct statfs diskInfo = {0};
     elog(INFO, "The instance_config.pgdata is: %s", backup_path);
     int ret = statfs(backup_path, &diskInfo);
