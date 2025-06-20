@@ -22,14 +22,8 @@
 static void pltsql_nextval_identity(Oid relid, int128 val);
 static void update_scope_identity_stack(SeqTableIdentityData *elm);
 
-/* Hook to tablecmds.cpp in the engine */
-static void* g_prevInvokeNextvalHook = NULL;
-
 void AssignIdentitycmdsHook()
 {
-    if (u_sess->hook_cxt.invokeNextvalHook) {
-        g_prevInvokeNextvalHook = u_sess->hook_cxt.invokeNextvalHook;
-    }
     u_sess->hook_cxt.invokeNextvalHook = (void*)&pltsql_nextval_identity;
 }
 
@@ -60,10 +54,6 @@ static void pltsql_nextval_identity(Oid seqid, int128 val)
 {
     if (!DB_IS_CMPT(D_FORMAT)) {
         return;
-    }
-
-    if (g_prevInvokeNextvalHook) {
-        ((InvokeNextvalHookType)(g_prevInvokeNextvalHook))(seqid, val);
     }
 
     SeqTableIdentityData elm;

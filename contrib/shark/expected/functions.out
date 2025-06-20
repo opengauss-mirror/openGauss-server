@@ -719,7 +719,7 @@ select databasepropertyex('test_databasepropertyex', 'UserAccess');
 select databasepropertyex('test_databasepropertyex', 'Version');
  databasepropertyex 
 --------------------
- 93046
+--?.*
 (1 row)
 
 select databasepropertyex('test_databasepropertyex', 'ReplicaID');

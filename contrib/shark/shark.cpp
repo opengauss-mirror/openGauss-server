@@ -192,13 +192,14 @@ Datum databasepropertyex(PG_FUNCTION_ARGS)
     int64_t intVal = 0;
     const char* strVal = NULL;
     const char* dbname = text_to_cstring(PG_GETARG_TEXT_P(0));
-    const char* property = text_to_cstring(PG_GETARG_TEXT_P(1));
     bool resisnull = false;
     Oid dboid = get_database_oid(dbname, true);
     pfree_ext(dbname);
     if (dboid == InvalidOid) {
         PG_RETURN_NULL();
     }
+
+    const char* property = text_to_cstring(PG_GETARG_TEXT_P(1));
 
     if (strcasecmp(property, "Collation") == 0) {
         strVal = get_collation_name_for_db(dboid);
@@ -277,8 +278,7 @@ Datum databasepropertyex(PG_FUNCTION_ARGS)
     } else if (strcasecmp(property, "Status") == 0) {
         strVal = pstrdup("ONLINE");
     } else if (strcasecmp(property, "Updateability") == 0) {
-        strVal = strcmp(GetConfigOption("transaction_read_only", true, false), "on") == 0 ? pstrdup("READ_ONLY")
-                                                                                          : pstrdup("READ_WRITE");
+        strVal = u_sess->attr.attr_common.XactReadOnly ? pstrdup("READ_ONLY") : pstrdup("READ_WRITE");
     } else if (strcasecmp(property, "UserAccess") == 0) {
         resisnull = true;
     } else if (strcasecmp(property, "Version") == 0) {

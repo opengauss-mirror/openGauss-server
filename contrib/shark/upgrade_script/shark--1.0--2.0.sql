@@ -2362,10 +2362,7 @@ LANGUAGE C IMMUTABLE;
 
 create or replace function sys.suser_name(IN server_user_id OID)
 returns nvarchar(128) as $$
-    select case
-        when server_user_id IS NULL THEN NULL
-        else sys.suser_name_internal(server_user_id)
-    end;
+    select sys.suser_name_internal(server_user_id);
 $$
 language sql IMMUTABLE STRICT;
 
