@@ -745,7 +745,29 @@ CREATE VIEW columns AS
 
            CAST(CASE WHEN c.relkind = 'r'
                           OR (c.relkind in ('v', 'f') AND pg_column_is_updatable(c.oid, a.attnum, false))
-                THEN 'YES' ELSE 'NO' END AS yes_or_no) AS is_updatable
+                THEN 'YES' ELSE 'NO' END AS yes_or_no) AS is_updatable,
+           CAST(
+             CASE WHEN t.typtype = 'd' THEN
+               CASE WHEN bt.typelem <> 0 AND bt.typlen = -1 THEN 'ARRAY'
+                    WHEN nbt.nspname = 'pg_catalog' THEN pg_catalog.format_type(t.typbasetype, null)
+                    ELSE 'USER-DEFINED' END
+             ELSE
+               CASE WHEN t.typelem <> 0 AND t.typlen = -1 THEN 'ARRAY'
+                    WHEN nt.nspname = 'pg_catalog' THEN pg_catalog.format_type(a.atttypid, null)
+                    ELSE 'USER-DEFINED' END
+             END
+             AS character_data)
+             AS COLUMN_TYPE,
+            CAST(d.description AS information_schema.character_data) AS COLUMN_COMMENT,
+            CAST(
+               CASE WHEN ad.adsrc = 'AUTO_INCREMENT' THEN 'AUTO_INCREMENT' 
+               ELSE
+                  CASE WHEN ad.adsrc_on_update is not null THEN CONCAT('DEFAULT_GENERATED on update ', ad.adsrc_on_update)
+                  ELSE null
+                  END
+               END 
+               AS character_data)
+            AS EXTRA
 
     FROM (pg_attribute a LEFT JOIN pg_attrdef ad ON attrelid = adrelid AND attnum = adnum)
          JOIN (pg_class c JOIN pg_namespace nc ON (c.relnamespace = nc.oid)) ON a.attrelid = c.oid
@@ -754,6 +776,7 @@ CREATE VIEW columns AS
            ON (t.typtype = 'd' AND t.typbasetype = bt.oid)
          LEFT JOIN (pg_collation co JOIN pg_namespace nco ON (co.collnamespace = nco.oid))
            ON a.attcollation = co.oid AND (nco.nspname, co.collname) <> ('pg_catalog', 'default')
+         LEFT JOIN pg_description d on d.objoid = a.attrelid  and d.objsubid = a.attnum
 
     WHERE (NOT pg_catalog.pg_is_other_temp_schema(nc.oid))
 
@@ -1889,10 +1912,12 @@ CREATE VIEW tables AS
                 THEN 'YES' ELSE 'NO' END AS yes_or_no) AS is_insertable_into,
 
            CAST(CASE WHEN t.typname IS NOT NULL THEN 'YES' ELSE 'NO' END AS yes_or_no) AS is_typed,
-           CAST(null AS character_data) AS commit_action
+           CAST(null AS character_data) AS commit_action,
+           CAST(d.description AS information_schema.character_data) AS TABLE_COMMENT
 
     FROM pg_namespace nc JOIN pg_class c ON (nc.oid = c.relnamespace)
            LEFT JOIN (pg_type t JOIN pg_namespace nt ON (t.typnamespace = nt.oid)) ON (c.reloftype = t.oid)
+           LEFT JOIN pg_description d on d.objoid = c.oid and objsubid = 0
 
     WHERE c.relkind IN ('r', 'm', 'v', 'f')
           AND (c.relname not like 'mlog\_%' AND c.relname not like 'matviewmap\_%')
