@@ -3430,6 +3430,13 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
         ResultRelInfo* resultRelInfo = NULL;
 
         slot = plan_slot;
+
+        slot = ExecInsert(node, slot, plan_slot, estate, node->canSetTag, hi_options, &partition_list, partExprKeyStr,
+                          replaceNull);
+        if (!node->isConflict) {
+            break;
+        }
+
         resultRelInfo = estate->es_result_relation_info;
         targetrel = resultRelInfo->ri_RelationDesc;
         heaprel = targetrel;
@@ -3463,13 +3470,9 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
         }
 
         targetrel = heaprel;
-        slot = ExecInsert(node, slot, plan_slot, estate, node->canSetTag, hi_options, &partition_list, partExprKeyStr,
-                          replaceNull);
-        if (!node->isConflict) {
-            break;
-        } else if (!ExecCheckIndexConstraints(plan_slot, estate, targetrel,
-                                              partition, &isgpi, bucketid, &conflictInfo,
-                                              &conflictPartOid, &conflictBucketid)) {
+        if (!ExecCheckIndexConstraints(plan_slot, estate, targetrel,
+                                       partition, &isgpi, bucketid, &conflictInfo,
+                                       &conflictPartOid, &conflictBucketid)) {
             ExecDelete(&(&conflictInfo)->conflictTid, conflictPartOid,
                        conflictBucketid, NULL, plan_slot, &node->mt_epqstate,
                        node, node->canSetTag);
