@@ -643,6 +643,25 @@ TSQL_CreateFunctionStmt:
 					n->funcname = $5;
 					n->parameters = $6;
 					n->returnType = $8;
+					if (list_length($8->names) == 1 && pg_strcasecmp(strVal(linitial($8->names)), "trigger") == 0) {
+						DefElem* language_item = NULL;
+						ListCell* option = NULL;
+						foreach (option, $9) {
+							DefElem* defel = (DefElem*)lfirst(option);
+							if (pg_strcasecmp(defel->defname, "language") == 0) {
+								language_item = defel;
+								char* language = strVal(defel->arg);
+								if (pg_strcasecmp(language, "plpgsql") == 0) {
+									defel->arg = (Node *) makeString("pltsql");
+								}
+								break;
+							}
+						}
+						if (language_item) {
+							$9 = list_delete($9, language_item);
+						}
+						$9 = lappend($9, makeDefElem("language", (Node *)makeString("pltsql")));
+					}
 					n->options = $9;
 					n->withClause = $10;
 					n->isProcedure = false;

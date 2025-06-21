@@ -48,6 +48,7 @@
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
 #include "commands/matview.h"
+#include "commands/sequence.h"
 #ifdef PGXC
 #include "access/sysattr.h"
 #endif
@@ -91,6 +92,7 @@
 #include "gs_ledger/ledger_utils.h"
 #include "gs_ledger/userchain.h"
 
+
 #ifdef PGXC
 static void RecoredGeneratedExpr(ResultRelInfo *resultRelInfo, EState *estate, CmdType cmdtype);
 
@@ -110,7 +112,6 @@ extern void FlushInsertSelectBulk(
 extern void FlushErrorInfo(Relation rel, EState* estate, ErrorCacheEntry* cache);
 extern void HeapInsertCStore(Relation relation, ResultRelInfo* resultRelInfo, HeapTuple tup, int option);
 extern void HeapDeleteCStore(Relation relation, ItemPointer tid, Oid tableOid, Snapshot snapshot);
-extern Oid pg_get_serial_sequence_oid(text* tablename, text* columnname);
 #ifdef ENABLE_MULTIPLE_NODES
 extern void HeapInsertTsStore(Relation relation, ResultRelInfo* resultRelInfo, HeapTuple tup, int option);
 static TupleTableSlot* fill_slot_with_oldvals(TupleTableSlot* slot, HeapTupleHeader oldtuphd, Bitmapset* modifiedCols);

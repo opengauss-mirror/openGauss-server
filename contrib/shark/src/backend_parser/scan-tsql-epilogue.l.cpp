@@ -112,7 +112,8 @@ bool IsTsqlAtatGlobalVar(const char* varname)
     // List of all T-SQL global "@@" variables:
     return ((pg_strcasecmp("@@FETCH_STATUS", varname) == 0) ||
             (pg_strcasecmp("@@ROWCOUNT", varname) == 0) ||
-            (pg_strcasecmp("@@SPID", varname) == 0));
+            (pg_strcasecmp("@@SPID", varname) == 0) ||
+            (pg_strcasecmp("@@PROCID", varname) == 0));
 }
 
 static bool IsTsqlTranStmt(const char *haystack, int haystackLen)

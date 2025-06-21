@@ -13463,7 +13463,7 @@ static void replace_cl_types_in_argtypes(Oid func_id, int numargs, Oid* argtypes
     }
 }
 
-Oid pg_get_serial_sequence_oid(text* tablename, text* columnname)
+Oid pg_get_serial_sequence_oid(text* tablename, text* columnname, bool find_identity)
 {
     RangeVar* tablerv = NULL;
     Oid tableOid;
@@ -13504,6 +13504,15 @@ Oid pg_get_serial_sequence_oid(text* tablename, text* columnname)
         
         if (deprec->classid == RelationRelationId && deprec->objsubid == 0 && deprec->deptype == DEPENDENCY_AUTO &&
             get_rel_relkind(deprec->objid) == RELKIND_SEQUENCE) {
+            if (find_identity) {
+                char* relname = get_rel_name(deprec->objid);
+                if (relname && StrEndWith(relname, "_seq_identity")) {
+                    sequenceId = deprec->objid;
+                    break;
+                } else {
+                    continue;
+                }
+            }
             sequenceId = deprec->objid;
             break;
         }

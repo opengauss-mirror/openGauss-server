@@ -51,6 +51,7 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_trigger.h"
 #include "libpq/pqformat.h"
+#include "shark.h"
 
 /* limit for sql_variant */
 constexpr int MAX_SQL_VARIANT_SIZE = 8016;
@@ -114,15 +115,10 @@ static int get_typeprio(Oid typoid, TYPCATEGORY tcategory)
     return result;
 }
 
-extern "C" Datum sql_variantin(PG_FUNCTION_ARGS);
-extern "C" Datum sql_variantout(PG_FUNCTION_ARGS);
-extern "C" Datum sql_variantrecv(PG_FUNCTION_ARGS);
-extern "C" Datum sql_variantsend(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(sql_variantin);
 PG_FUNCTION_INFO_V1(sql_variantout);
 PG_FUNCTION_INFO_V1(sql_variantrecv);
 PG_FUNCTION_INFO_V1(sql_variantsend);
-
 
 static Datum from_sql_variant(bytea* valena, Oid* typeoid, int32* typmod)
 {

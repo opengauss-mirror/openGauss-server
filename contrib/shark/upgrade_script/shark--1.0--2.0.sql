@@ -45,6 +45,9 @@ create function sys.rowcount_big()
 create function sys.spid()
     returns bigint language sql as $$ select pg_current_sessid() $$;
 
+create function sys.procid()
+    returns bigint as 'MODULE_PATHNAME' language C;
+
 -- sys view: sysobjects
 create or replace view sys.sysobjects as
 select
@@ -2323,3 +2326,87 @@ LANGUAGE C VOLATILE STRICT ;
 CREATE CAST (sys.SQL_VARIANT AS CHAR)
 WITH FUNCTION sys.sqlvariant_char (sys.SQL_VARIANT);
 reset search_path;
+
+-- sys.databasepropertyex
+create or replace function sys.databasepropertyex (nvarchar(128), nvarchar(128))
+returns sys.SQL_VARIANT AS
+'$libdir/shark', 'databasepropertyex'
+language C IMMUTABLE STRICT;
+
+-- sys.suser_id
+create or replace function sys.suser_id_internal(IN login nvarchar(256))
+RETURNS OID AS
+'$libdir/shark', 'suser_id'
+LANGUAGE C IMMUTABLE;
+
+create or replace function sys.suser_id(IN login nvarchar(256))
+returns OID as $$
+    select case
+        when login IS NULL THEN NULL
+        else sys.suser_id_internal(login)
+    end;
+$$
+language sql IMMUTABLE STRICT;
+
+create or replace function sys.suser_id()
+returns OID as $$
+    select sys.suser_id_internal(NULL);
+$$
+language sql IMMUTABLE;
+
+-- sys.suser_name
+create or replace function sys.suser_name_internal(IN server_user_id OID)
+RETURNS nvarchar(128) AS
+'$libdir/shark', 'suser_name'
+LANGUAGE C IMMUTABLE;
+
+create or replace function sys.suser_name(IN server_user_id OID)
+returns nvarchar(128) as $$
+    select sys.suser_name_internal(server_user_id);
+$$
+language sql IMMUTABLE STRICT;
+
+create or replace function sys.suser_name()
+returns nvarchar(128) as $$
+    select sys.suser_name_internal(sys.suser_id());
+$$
+language sql IMMUTABLE;
+
+-- sys.suser_sname
+-- Since openGauss currently does not support SIDs, this function ultimately behaves the same as suser_name, but
+-- with a different input parameter type.
+create or replace function sys.suser_sname(IN server_user_sid varbinary(85))
+returns nvarchar(128) as $$
+    select sys.suser_name(cast(server_user_sid as int));
+$$
+language sql IMMUTABLE;
+
+create or replace function sys.suser_sname()
+returns nvarchar(128) as $$
+    select sys.suser_name();
+$$
+language sql IMMUTABLE;
+
+-- sys.scope_identity
+create or replace function sys.get_scope_identity()
+returns int16 AS
+'$libdir/shark', 'get_scope_identity'
+language C STABLE STRICT;
+
+create or replace function sys.scope_identity()
+returns numeric(38, 0) as $$
+    select sys.get_scope_identity()::numeric(38, 0);
+$$
+language sql STABLE;
+
+-- sys.ident_current
+create or replace function sys.get_ident_current(IN tablename nvarchar(128))
+RETURNS int16 AS
+'$libdir/shark', 'get_ident_current'
+LANGUAGE C STRICT;
+
+create or replace function sys.ident_current(IN tablename nvarchar(128))
+returns numeric(38, 0) as $$
+    select sys.get_ident_current(tablename)::numeric(38, 0);
+$$
+language sql;

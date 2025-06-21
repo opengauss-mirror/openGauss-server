@@ -79,9 +79,9 @@ typedef enum
 Oid tsql_get_proc_nsp_oid(Oid object_id);
 Oid tsql_get_constraint_nsp_oid(Oid object_id, Oid user_id);
 
-static char* get_physical_schema_name(char *db_name, const char *schema_name);
+extern char* GetPhysicalSchemaName(char *dbName, const char *schemaName);
 static bool is_shared_schema(const char *name);
-static char* get_current_physical_schema_name(char* schema_name);
+static char* GetCurrentPhysicalSchemaName(char* schemaName);
 static Oid search_oid_in_class(char* obj_name, Oid schema_oid);
 static Oid search_oid_in_proc(char* obj_name, Oid schema_oid);
 static Oid search_oid_in_trigger(char* obj_name, Oid schema_oid);
@@ -552,11 +552,11 @@ object_id_internal(PG_FUNCTION_ARGS)
                 break;
             case 2:
                 obj_name = strVal(lsecond(nameList));
-                schema_name = get_current_physical_schema_name(strVal(linitial(nameList)));
+                schema_name = GetCurrentPhysicalSchemaName(strVal(linitial(nameList)));
                 break;
             case 3:
                 obj_name = strVal(lthird(nameList));
-                schema_name = get_current_physical_schema_name(strVal(lsecond(nameList)));
+                schema_name = GetCurrentPhysicalSchemaName(strVal(lsecond(nameList)));
                 db_name = strVal(linitial(nameList));
                 break;
             default:
@@ -798,49 +798,46 @@ static bool is_shared_schema(const char *name)
 		return false;
 }
 
-
-static char* get_physical_schema_name(char *db_name, const char *schema_name)
+char* GetPhysicalSchemaName(char* dbName, const char* schemaName)
 {
-	char	   *name;
-	int			len;
-	errno_t errorno = EOK;
+    char* name;
+    int len;
+    errno_t errorno = EOK;
 
-	if (!schema_name)
-		return NULL;
-
-	len = strlen(schema_name);
-	if (len == 0)
-		return NULL;
-	
-	if ((get_database_oid(db_name, true)) == InvalidOid) {
-	ereport(ERROR,
-			(errcode(ERRCODE_UNDEFINED_DATABASE),
-				errmsg("database \"%s\" does not exist. Make sure that the name is entered correctly.", db_name)));
+    if (!schemaName) {
+        return nullptr;
     }
 
-	if (len >= NAMEDATALEN ) {
-            ereport(ERROR,
-                (errcode(ERRCODE_NAME_TOO_LONG),
-                    errmsg("type name too long"),
-                    errdetail("schema name should be less the %d letters.",
-                        NAMEDATALEN)));
-            u_sess->plsql_cxt.have_error = true;
+    len = strlen(schemaName);
+    if (len == 0) {
+        return nullptr;
     }
-	name = (char*)palloc0(len + 1);
-	errorno = strncpy_s(name, len + 1, schema_name, len);
+
+    if ((get_database_oid(dbName, true)) == InvalidOid) {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_DATABASE),
+                 errmsg("database \"%s\" does not exist. Make sure that the name is entered correctly.", dbName)));
+    }
+
+    if (len >= NAMEDATALEN) {
+        ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("type name too long"),
+                        errdetail("schema name should be less the %d letters.", NAMEDATALEN)));
+        u_sess->plsql_cxt.have_error = true;
+    }
+    name = static_cast<char*>(palloc0(len + 1));
+    errorno = strncpy_s(name, len + 1, schemaName, len);
     securec_check(errorno, "\0", "\0");
 
-	if (is_shared_schema(name))
-	{
-		return name;
-	}
+    if (is_shared_schema(name)) {
+        return name;
+    }
 
-	/*
-	 * Parser guarantees identifier will always be truncated to 64B. Schema
-	 * name that comes from other source (e.g scheam_id function) needs one
-	 * more truncate function call
-	 */
-	truncate_identifier(name, strlen(name), false);
+    /*
+     * Parser guarantees identifier will always be truncated to 64B. Schema
+     * name that comes from other source (e.g scheam_id function) needs one
+     * more truncate function call
+     */
+    truncate_identifier(name, strlen(name), false);
 
     /* all schema names are not prepended with db name on single-db */
     return name;
@@ -920,18 +917,19 @@ tsql_get_constraint_nsp_oid(Oid object_id, Oid user_id)
 	return namespace_oid;
 }
 
-static char* get_current_physical_schema_name(char* schema_name)
+static char* GetCurrentPhysicalSchemaName(char* schemaName)
 {
-	char	   *cur_db_name;
-	char	   *ret;
+    char* curDbName;
+    char* ret;
 
-	if (strlen(schema_name) < 1)
-		return NULL;
-	
-	cur_db_name = get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true);
-	ret = get_physical_schema_name(cur_db_name, schema_name);
+    if (strlen(schemaName) < 1) {
+        return nullptr;
+    }
 
-	 return ret;
+    curDbName = get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true);
+    ret = GetPhysicalSchemaName(curDbName, schemaName);
+
+    return ret;
 }
 
 static inline int dealwith_type_ownerid(int type, Oid schema_id)

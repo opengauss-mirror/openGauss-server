@@ -1504,6 +1504,9 @@ int128 nextval_internal(Oid relid)
         char* buf_last = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(elm->last)));
         char* buf_cached = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(elm->cached)));
 
+        if (u_sess->hook_cxt.invokeNextvalHook) {
+            ((InvokeNextvalHookType)(u_sess->hook_cxt.invokeNextvalHook))(elm->relid, elm->last);
+        }
         ereport(DEBUG2,
             (errmodule(MOD_SEQ),
                 (errmsg("Sequence %s retrun ID %s from cache, the cached is %s, ",
@@ -1531,6 +1534,9 @@ int128 nextval_internal(Oid relid)
     }
 
     u_sess->cmd_cxt.last_used_seq = elm;
+    if (u_sess->hook_cxt.invokeNextvalHook) {
+        ((InvokeNextvalHookType)(u_sess->hook_cxt.invokeNextvalHook))(elm->relid, result);
+    }
     char* buf = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(result)));
     ereport(DEBUG2,
         (errmodule(MOD_SEQ),
