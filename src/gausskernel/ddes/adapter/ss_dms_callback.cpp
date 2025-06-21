@@ -1237,9 +1237,14 @@ static void CBDMSMemFree(void *pointer)
 static void *CBDrcMemAlloc(size_t size)
 {
     void *ptr = NULL;
+    if (AllocSizeIsValid(size)) {
+        ptr = MemoryContextAlloc(DMSDrcContext, size);
+    } else {
+        ptr = palloc_huge(DMSDrcContext, size);
+    }
     ptr = palloc_huge(DMSDrcContext, size);
     if (ptr == NULL) {
-        ereport(FATAL, (errmsg("Failed to allocate memory for DMSDrcContext.")));
+        ereport(FATAL, (errmsg("Failed to allocate memory for DMSDemContext.")));
     }
     return ptr;
 }
@@ -2623,8 +2628,8 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->mem_free = CBMemFree;
     callback->mem_reset = CBMemReset;
 
-    callback->dms_malloc_prot = CBDMSMemAlloc;
-    callback->dms_free_prot = CBDMSMemFree;
+    callback->dms_malloc_prot = CBDrcMemAlloc;
+    callback->dms_free_prot = CBDrcMemFree;
 
     callback->drc_malloc_prot = CBDrcMemAlloc;
     callback->drc_free_prot = CBDrcMemFree;
