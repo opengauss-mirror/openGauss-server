@@ -9,7 +9,7 @@ test: test_ddl_and_dml
 test: rotate-test-part2 rotate-test-part2_ci
 test: functions transaction
 test: test_dbcc test_dbcc_case_sen
-test: test_sysviews
+test: test_sysviews test_sysviews2
 test: gs_dump_d_format rotate_part2_dump
 test: varbinary
 test: test_sqlvariant
