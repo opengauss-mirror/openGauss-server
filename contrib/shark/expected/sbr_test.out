@@ -87,8 +87,7 @@ CREATE TABLE Users (
     UserName NVARCHAR(50),
     Email NVARCHAR(100)
 );
-ERROR:  relation "users" already exists in schema "public"
-DETAIL:  creating new table with existing name in the same schema
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "users_pkey" for table "users"
 CREATE CLUSTERED INDEX [UserID]
 ON Users (UserID);
 NOTICE:  The CLUSTERED option is currently ignored

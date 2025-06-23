@@ -1090,6 +1090,67 @@ int pgtsql_base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                 *llocp = cur_yylloc;
             }
             break;
+        case UNIQUE:
+            GET_NEXT_TOKEN();
+            core_yystype_1 = cur_yylval;
+            cur_yylloc_1 = cur_yylloc;
+            cur_yyleng_1 = cur_yyleng;
+            next_token_1 = next_token;
+            next_yyleng_1 = next_yyleng;
+
+            switch (next_token) {
+                case TSQL_NONCLUSTERED:
+                    cur_token = TSQL_UNIQUE_NONCLUSTERED;
+                    break;
+                case TSQL_CLUSTERED:
+                    cur_token = TSQL_UNIQUE_CLUSTERED;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    scanbuf[cur_yylloc + cur_yyleng] = '\0';
+                    break;
+            }
+            break;
+        case PRIMARY:
+            GET_NEXT_TOKEN();
+            core_yystype_1 = cur_yylval;
+            cur_yylloc_1 = cur_yylloc;
+            cur_yyleng_1 = cur_yyleng;
+            next_token_1 = next_token;
+            next_yyleng_1 = next_yyleng;
+
+            if (next_token == KEY) {
+                GET_NEXT_TOKEN();
+                core_yystype_2 = cur_yylval;
+                cur_yylloc_2 = cur_yylloc;
+                next_token_2 = next_token;
+                next_yyleng_2 = next_yyleng;
+
+                switch (next_token) {
+                    case TSQL_NONCLUSTERED:
+                        cur_token = TSQL_PRIMAY_KEY_NONCLUSTERED;
+                        break;
+                    case TSQL_CLUSTERED:
+                        cur_token = TSQL_PRIMAY_KEY_CLUSTERED;
+                        break;
+                    default:
+                        SET_LOOKAHEAD_2_TOKEN();
+                        break;
+                }
+            } else {
+                /* save the lookahead token for next time */
+                SET_LOOKAHEAD_TOKEN();
+                /* and back up the output info to cur_token */
+                lvalp->core_yystype = cur_yylval;
+                *llocp = cur_yylloc;
+                scanbuf[cur_yylloc + cur_yyleng] = '\0';
+                break;
+            }
+            break;
         default:
             break;
     }
