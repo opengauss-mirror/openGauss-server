@@ -932,6 +932,8 @@ set search_path to sys_view_test_02;
  numeric_precision_radix  | smallint                     | 
  numeric_scale            | integer                      | 
  datetime_precision       | smallint                     | 
+ character_set_catalog    | nvarchar2(128)               | 
+ character_set_schema     | nvarchar2(128)               | 
  character_set_name       | nvarchar2(128)               | 
  collation_catalog        | nvarchar2(128)               | 
  collation_schema         | nvarchar2(128)               | 
