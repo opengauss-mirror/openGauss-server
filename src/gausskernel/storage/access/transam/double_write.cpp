@@ -960,7 +960,9 @@ static bool dw_batch_head_broken(dw_batch_file_context *cxt, dw_batch_t *curr_he
         }
     } else {
         dw_log_recover_state(cxt, WARNING, "Head broken", curr_head);
-        dw_log_recover_state(cxt, WARNING, "Tail unknown", curr_tail);
+        if ((char*)curr_tail <= cxt->max_page_addr) {
+            dw_log_recover_state(cxt, WARNING, "Tail unknown", curr_tail);
+        }
         broken = true;
     }
     return broken;
@@ -1049,7 +1051,7 @@ static void dw_recover_partial_write_batch(dw_batch_file_context *cxt)
         dw_read_pages(&read_asst, reading_pages);
         curr_head = (dw_batch_t *)(read_asst.buf + (read_asst.buf_start * BLCKSZ));
 
-        if (!dw_verify_batch(curr_head, cxt->file_head->head.dwn)) {
+        if (!dw_verify_batch(curr_head, cxt->max_page_addr, cxt->file_head->head.dwn)) {
             dw_file_broken = dw_batch_head_broken(cxt, curr_head);
             break;
         }
@@ -1540,6 +1542,7 @@ static void dw_file_cxt_init_batch(int id, dw_batch_file_context *batch_file_cxt
     batch_file_cxt->fd = dw_open_file(batch_file_cxt->file_name);
     buf_size = DW_MEM_CTX_MAX_BLOCK_SIZE_FOR_NOHBK;
     batch_file_cxt->unaligned_buf = (char *)palloc0(buf_size); /* one more BLCKSZ for alignment */
+    batch_file_cxt->max_page_addr = batch_file_cxt->unaligned_buf + buf_size - BLCKSZ;
     buf = (char *)TYPEALIGN(BLCKSZ, batch_file_cxt->unaligned_buf);
 
     batch_file_cxt->file_head = (dw_file_head_t *)buf;

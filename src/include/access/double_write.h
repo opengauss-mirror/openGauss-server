@@ -232,11 +232,13 @@ inline dw_batch_t* dw_batch_tail_page(dw_batch_t* head_page)
  * @param dwn double write number
  * @return true dwn and checksum match
  */
-inline bool dw_verify_batch(dw_batch_t* head_page, uint16 dwn)
+inline bool dw_verify_batch(dw_batch_t* head_page, char* max_page_addr, uint16 dwn)
 {
     if (head_page->head.dwn == dwn && dw_verify_page(head_page)) {
         dw_batch_t* tail_page = dw_batch_tail_page(head_page);
-        return tail_page->head.dwn == dwn && dw_verify_page(tail_page);
+        return (char*) tail_page <= max_page_addr && 
+               tail_page->head.dwn == dwn &&
+               dw_verify_page(tail_page);
     }
 
     return false;

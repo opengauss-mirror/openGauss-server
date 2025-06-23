@@ -647,7 +647,9 @@ typedef struct dw_batch_file_context{
 
     char* unaligned_buf;
     char* buf;
-
+    /*The address of the last page in unaligned_buf, it is used to verify the validity of the memory*/
+    char* max_page_addr;
+    
     struct LWLock* flush_lock;
     dw_file_head_t* file_head;
     volatile uint32 write_pos;  /* the copied pages in buffer, updated when mark page */
