@@ -1570,9 +1570,7 @@ retry:
     (void)ExecClearTuple(slot);
     MemoryContextReset(node->scanMcxt);
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
     SetObsMemoryContext(((CopyState)importState)->copycontext);
-#endif
 #endif
     ReportIllegalCharExceptionThreshold();
 

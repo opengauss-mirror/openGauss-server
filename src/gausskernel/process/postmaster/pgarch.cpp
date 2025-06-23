@@ -110,7 +110,6 @@ static bool pgarch_readyXlog(char* xlog, int xlog_length);
 static void pgarch_archiveDone(const char* xlog);
 static void archKill(int code, Datum arg);
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
 static void pgarch_archiveRoachForPitrStandby();
 static bool pgarch_archiveRoachForPitrMaster(XLogRecPtr targetLsn);
 static bool pgarch_archiveRoachForCoordinator(XLogRecPtr targetLsn);
@@ -118,7 +117,6 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn);
 typedef bool(*doArchive)(XLogRecPtr);
 static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun);
 static void InitArchiverLastTaskLsn(ArchiveSlotConfig* obs_archive_slot);
-#endif
 #endif
 
 AlarmCheckResult DataInstArchChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
@@ -245,9 +243,7 @@ NON_EXEC_STATIC void PgArchiverMain(knl_thread_arg* arg)
     setObsArchLatch(&t_thrd.arch.mainloop_latch);
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
     InitArchiverLastTaskLsn(NULL);
-#endif
 #endif
     pgarch_MainLoop();
 
@@ -343,10 +339,8 @@ static void pgarch_MainLoop(void)
     gettimeofday(&last_copy_time, NULL);
     bool time_to_stop = false;
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
     doArchive fun = NULL;
     const int millitosec = 1000;
-#endif
 #endif
 
     /*
@@ -400,7 +394,6 @@ static void pgarch_MainLoop(void)
                 break;
         }
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
         load_server_mode();
         if (IsServerModeStandby()) {
             
@@ -420,13 +413,11 @@ static void pgarch_MainLoop(void)
             }
         }
 #endif
-#endif
 
         /* Do what we're here for */
         if (t_thrd.arch.wakened || time_to_stop) {
             t_thrd.arch.wakened = false;
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
             obs_archive_slot = getArchiveReplicationSlot();
             if (obs_archive_slot != NULL && !IsServerModeStandby()) {
                 gettimeofday(&curtime, NULL);
@@ -484,13 +475,10 @@ static void pgarch_MainLoop(void)
                 }
             } else {
 #endif
-#endif
                 pgarch_ArchiverCopyLoop();
                 gettimeofday(&last_copy_time, NULL);
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
             }
-#endif
 #endif
         }
 
@@ -697,7 +685,6 @@ static inline void UpdateArchivedLsn(XLogRecPtr targetLsn)
 }
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
 /*
  * pgarch_ArchiverObsCopyLoop
  *
@@ -780,7 +767,6 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
         }
     } while (XLByteLT(t_thrd.arch.pitr_task_last_lsn, flushPtr));
 }
-#endif
 #endif
 
 /*
@@ -1042,7 +1028,6 @@ static void archKill(int code, Datum arg)
 }
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
 /*
  * pgarch_archiveRoachForPitrStandby
  * get signal from walreceiver, fork a roach process to archive xlog
@@ -1318,5 +1303,4 @@ static void InitArchiverLastTaskLsn(ArchiveSlotConfig* obs_archive_slot)
     }
 }
 
-#endif
 #endif

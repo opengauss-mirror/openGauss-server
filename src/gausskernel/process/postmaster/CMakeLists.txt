@@ -1,7 +1,7 @@
 #This is the main CMAKE for build bin.
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_postmaster_SRC)
 
-if("${ENABLE_LITE_MODE}" STREQUAL "ON" OR NOT "${ENABLE_OBS}" STREQUAL "ON")
+if("${ENABLE_LITE_MODE}" STREQUAL "ON")
     list(REMOVE_ITEM TGT_postmaster_SRC
         ${CMAKE_CURRENT_SOURCE_DIR}/barrier_creator.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/barrier_arch.cpp

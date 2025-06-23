@@ -7783,7 +7783,6 @@ static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis)
 #endif
     else if (XLogRecGetRmid(record) == RM_BARRIER_ID) {
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
         if (record_info == XLOG_BARRIER_CREATE) {
             recordBarrierId = (char *)XLogRecGetData(record);
             ereport(u_sess->attr.attr_storage.HaModuleDebug ? LOG : DEBUG4,
@@ -7793,7 +7792,6 @@ static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis)
         }
 #else
         FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
-#endif
 #endif
     } else if (XLogRecGetRmid(record) == RM_XLOG_ID) {
         if (record_info == XLOG_RESTORE_POINT) {
@@ -10382,9 +10380,7 @@ void StartupXLOG(void)
                                  (uint32)t_thrd.xlog_cxt.ReadRecPtr)));
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
             update_stop_barrier();
-#endif
 #endif
             INSTR_TIME_SET_CURRENT(rec_startTime);
             g_instance.dms_cxt.SSReformInfo.redo_start_time = GetCurrentTimestamp();

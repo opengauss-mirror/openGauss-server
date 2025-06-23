@@ -1887,7 +1887,7 @@ int PostmasterMain(int argc, char* argv[])
      */
     initialize_feature_flags();
 
-#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
+#if !defined(ENABLE_LITE_MODE)
     /*
      * @OBS
      * Create a global OBS CA object shared among threads
@@ -3037,10 +3037,8 @@ int PostmasterMain(int argc, char* argv[])
     }
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
     if (g_instance.attr.attr_storage.enable_adio_function)
         AioResourceInitialize();
-#endif
 #endif
 
     /* start alarm checker thread. */
@@ -6464,7 +6462,6 @@ static void pmdie(SIGNAL_ARGS)
             }
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
             if (g_instance.pid_cxt.BarrierCreatorPID != 0) {
                 barrier_creator_thread_shutdown();
                 signal_child(g_instance.pid_cxt.BarrierCreatorPID, SIGTERM);
@@ -6477,7 +6474,6 @@ static void pmdie(SIGNAL_ARGS)
                     }
                 }
             }
-#endif
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -6930,12 +6926,10 @@ static void ProcessDemoteRequest(void)
             }
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
             if (g_instance.pid_cxt.BarrierCreatorPID != 0) {
                 barrier_creator_thread_shutdown();
                 signal_child(g_instance.pid_cxt.BarrierCreatorPID, SIGTERM);
             }
-#endif
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -8715,12 +8709,10 @@ static void PostmasterStateMachineReadOnly(void)
                 signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
             if (g_instance.pid_cxt.BarrierCreatorPID != 0) {
                 barrier_creator_thread_shutdown();
                 signal_child(g_instance.pid_cxt.BarrierCreatorPID, SIGTERM);
             }
-#endif
 #endif
 #ifdef ENABLE_MULTIPLE_NODES
             if (g_instance.pid_cxt.CsnminSyncPID != 0) {
@@ -15021,7 +15013,6 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         } break;
 
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
         case BARRIER_CREATOR: {
             if (START_BARRIER_CREATOR) {
                 t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
@@ -15046,7 +15037,6 @@ int GaussDbThreadMain(knl_thread_arg* arg)
                 proc_exit(0);
             }
        } break;
-#endif
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES

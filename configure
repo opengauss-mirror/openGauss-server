@@ -3469,7 +3469,7 @@ if [[ "$(cat /etc/system-release)" =~ ^"openEuler release 22.03".* ]]; then
     with_openeuler_major=yes
 fi
 
-with_obs=yes
+with_obs=no
 if [[ "$(cat /etc/system-release)" =~ ^"openEuler release 24.03".* ]]; then
     with_openeuler_major=yes
     with_openssl3=no
@@ -6850,9 +6850,9 @@ else
     with_libxml=no
 fi
 
-xml2_cflag=${with_3rdpartydir}/kernel/dependency/libxml2/comm/include/libxml2
-xml2_lib=${with_3rdpartydir}/kernel/dependency/libxml2/comm/lib
-xml2_config=${with_3rdpartydir}/kernel/dependency/libxml2/comm/bin/xml2-config
+xml2_cflag=/usr/include/libxml2
+xml2_lib=/usr/lib64
+xml2_config=/usr/bin/xml2-config
 
 if test "$with_libxml" = yes; then
     for ac_prog in ${xml2_config}; do

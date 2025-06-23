@@ -235,7 +235,8 @@ FETCH_URL_ERROR2:
                     errmsg("OBS URL's %s is not valid '%s'", invalid_element, folderName)));
 }
 
-#if !defined(ENABLE_LITE_MODE) && defined(ENABLE_OBS)
+#if !defined(ENABLE_LITE_MODE)
+#ifdef ENABLE_OBS
 // Some Windows stuff
 #ifndef FOPEN_EXTRA_FLAGS
 #define FOPEN_EXTRA_FLAGS ""
@@ -2720,4 +2721,346 @@ bool DownloadOneItemFromOBS(char* netBackupPath, char* localPath, ArchiveConfig 
     pfree_ext(metadataBuffer);
     return true;
 }
+#else
+// Some Windows stuff
+#ifndef FOPEN_EXTRA_FLAGS
+#define FOPEN_EXTRA_FLAGS ""
+#endif
+
+// Some Unix stuff (to work around Windows issues)
+#ifndef SLEEP_UNITS_PER_SECOND
+#define SLEEP_UNITS_PER_SECOND 1
+#endif
+
+#define MAX_RETRIES 3
+#define ERROR_MESSAGE_LEN 1024
+#define ERROR_DETAIL_LEN 4096
+#define MAX_PATH_LEN 1024
+
+#define OBS_MAX_PART 10000
+static int64 ifModifiedSince = -1;
+static int64 ifNotModifiedSince = -1;
+static char* ifMatch = 0;
+static char* ifNotMatch = 0;
+static int headerLen = 22;
+
+#define OBS_CIPHER_LIST "ECDHE-ECDSA-AES128-GCM-SHA256:" \
+                        "ECDHE-ECDSA-AES256-GCM-SHA384:" \
+                        "ECDHE-RSA-AES128-GCM-SHA256:" \
+                        "ECDHE-RSA-AES256-GCM-SHA384:" \
+                        "ECDHE-ECDSA-AES128-CCM:" \
+                        "ECDHE-ECDSA-AES256-CCM"
+
+using namespace std;
+
+extern void decryptKeyString(const char *keyStr, char destplainStr[], uint32 destplainLength, const char *obskey);
+
+void SetObsMemoryContext(MemoryContext mctx)
+{
+}
+
+void UnSetObsMemoryContext(void)
+{
+}
+
+MemoryContext GetObsMemoryContext(void)
+{
+    return NULL;
+}
+
+void check_danger_character(const char *inputEnvValue)
+{
+}
+
+void getOBSCredential(char **client_crt_filepath)
+{
+}
+
+void initOBSCacheObject()
+{
+}
+
+char *getCAInfo()
+{
+    return NULL;
+}
+
+int should_retry(int &retriesG)
+{
+    return 0;
+}
+
+obs_status responsePropertiesCallback(const obs_response_properties *properties, void *callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+void responseCompleteCallback(obs_status status, const obs_error_details *error, void *callbackData)
+{
+}
+
+obs_status listServiceCallback(const char *ownerId, const char *bucketName, int64_t creationDateSeconds,
+                               const char *ownerDisplayName, void *callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+obs_status listBucketObjectCallback(int isTruncated, const char *nextMarker, int contentsCount,
+                                    const obs_list_objects_content *contents, int commonPrefixesCount,
+                                    const char **commonPrefixes, void *callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+obs_status listBucketObjectCallbackForAnalyze(int isTruncated, const char *nextMarker, int contentsCount,
+                                              const obs_list_objects_content *contents, int commonPrefixesCount,
+                                              const char **commonPrefixes, void *callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+obs_status listBucketObjectCallbackForQuery(int isTruncated, const char *nextMarker, int contentsCount,
+                                            const obs_list_objects_content *contents, int commonPrefixesCount,
+                                            const char **commonPrefixes, void *callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+int list_bucket_objects_loop(obs_options *pobsOption, char *prefix, void (*cleanList)(List *),
+                             obs_list_objects_handler *plistObjectsHandler, ListBucketCallBackData *callbackdata,
+                             bool reportError)
+{
+    return 0;
+}
+
+List *list_bucket_objects_analyze(const char *uri, bool encrypt, const char *access_key, const char *secret_access_key)
+{
+    return NIL;
+}
+
+List *list_obs_bucket_objects(const char *uri, bool encrypt, const char *access_key, const char *secret_access_key)
+{
+    return NIL;
+}
+
+List *listObsObjects(OBSReadWriteHandler *handler, bool reportError)
+{
+    return NIL;
+}
+
+List *list_bucket_objects_for_query(OBSReadWriteHandler *handler, const char *bucket, char *prefix)
+{
+    return NIL;
+}
+
+void release_object_list(List *object_list)
+{
+}
+
+obs_status getObjectDataCallback(int bufferSize, const char *buffer, void *callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+size_t read_bucket_object(OBSReadWriteHandler *handler, char *output_buffer, uint32_t len)
+{
+    return 0;
+}
+
+int putObjectDataCallback(int bufferSize, char *buffer, void *callbackData)
+{
+    return 0;
+}
+
+int putTmpObjectDataCallback(int bufferSize, char *buffer, void *callbackData)
+{
+    return 0;
+}
+
+size_t write_bucket_object(OBSReadWriteHandler *handler, BufFile *buffile, uint32_t total_len)
+{
+    return 0;
+}
+
+int writeObsTempFile(OBSReadWriteHandler *handler, const char *bufferData, int dataSize)
+{
+    return -1;
+}
+
+int deleteOBSObject(OBSReadWriteHandler *handler)
+{
+    return -1;
+}
+
+int S3_init()
+{
+    return -1;
+}
+
+OBSReadWriteHandler *CreateObsReadWriteHandler(const char *object_url, OBSHandlerType type, ObsCopyOptions *options)
+{
+    return NULL;
+}
+
+OBSReadWriteHandler *CreateObsReadWriteHandlerForQuery(ObsOptions *options)
+{
+    return NULL;
+}
+
+void ObsReadWriteHandlerSetType(OBSReadWriteHandler *handler, OBSHandlerType type)
+{
+}
+
+void DestroyObsReadWriteHandler(OBSReadWriteHandler *handler, bool obsQueryType)
+{
+}
+
+void checkOBSServerValidity(char *hostName, char *ak, char *sk, bool encrypt)
+{
+}
+
+ObsOptions *copyObsOptions(ObsOptions *from)
+{
+    return NULL;
+}
+
+void freeObsOptions(ObsOptions *obsOptions, bool useSimpleFree)
+{
+}
+
+bool is_ip_address_format(const char *addr)
+{
+    return false;
+}
+
+ArchiveConfig *getArchiveConfig()
+{
+    return NULL;
+}
+
+void fillBucketContext(OBSReadWriteHandler *handler, const char* key, ArchiveConfig *obs_config, bool shortenConnTime)
+{
+}
+
+size_t obsRead(const char* fileName, const int offset, char *buffer, const int length, ArchiveConfig *obs_config)
+{
+    return 0;
+}
+
+int obsWrite(const char* fileName, const char *buffer, const int bufferLength, ArchiveConfig *obs_config)
+{
+    return -1;
+}
+
+int obsDelete(const char* fileName, ArchiveConfig *obs_config)
+{
+    return -1;
+}
+
+List* obsList(const char* prefix, ArchiveConfig *obs_config, bool reportError, bool shortenConnTime)
+{
+    return NIL;
+}
+
+void fillObsOption(obs_options *option, ArchiveConfig *obs_config)
+{
+}
+
+obs_status responsePropertiesCallbackForWrite(const obs_response_properties* properties, void* callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+obs_status responsePropertiesCallbackForOpen(const obs_response_properties* properties, void* callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+obs_status CompleteMultipartUploadCallback(
+    const char* location, const char* bucket, const char* key, const char* eTag, void* callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+obs_status responsePropertiesCallbackForRead(const obs_response_properties* properties, void* callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+obs_status openReadOBSFileCallback(int isTruncated, const char* nextMarker, int contentsCount,
+    const obs_list_objects_content* contents, int commonPrefixesCount, const char** commonPrefixes, void* callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+obs_status readOBSFileCallback(int bufferSize, const char* buffer, void* callbackData)
+{
+    return OBS_STATUS_OK;
+}
+
+obs_status head_properties_callback(const obs_response_properties *properties, void *callback_data)
+{
+    return OBS_STATUS_OK;
+}
+
+void head_complete_callback(obs_status status,
+                            const obs_error_details *error,
+                            void *callback_data)
+{
+}
+
+void* createOBSFile(const char* file_path, const char* mode, ArchiveConfig *obs_config)
+{
+    return NULL;
+}
+
+int writeOBSData(const void* write_data, size_t size, size_t len, OBSFile* fp, size_t* writeSize, ArchiveConfig *obs_config)
+{
+    return -1;
+}
+
+int closeOBSFile(void* filePtr, ArchiveConfig *obs_config)
+{
+    return -1;
+}
+
+void* openReadOBSFile(const char* file_path, const char* mode, ArchiveConfig *obs_config)
+{
+    return NULL;
+}
+
+int readOBSFile(char* data, size_t size, size_t len, void* fp, size_t* readSize, ArchiveConfig *obs_config)
+{
+    return -1;
+}
+
+int closeReadOBSFile(void* fp)
+{
+    return -1;
+}
+
+bool checkOBSFileExist(const char* file_path, ArchiveConfig *obs_config)
+{
+    return false;
+}
+
+bool feofReadOBSFile(const void* fp)
+{
+    return false;
+}
+
+void initializeOBS()
+{
+}
+
+bool UploadOneFileToOBS(char* localFilePath, char* netBackupPath, ArchiveConfig *obs_config)
+{
+    return false;
+}
+
+bool DownloadOneItemFromOBS(char* netBackupPath, char* localPath, ArchiveConfig *obs_config)
+{
+    return false;
+}
+#endif
 #endif

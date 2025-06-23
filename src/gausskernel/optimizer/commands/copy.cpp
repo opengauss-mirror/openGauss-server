@@ -6838,14 +6838,12 @@ retry:
         if (cstate->mode == MODE_NORMAL) {
             if (cstate->filename && is_obs_protocol(cstate->filename)) {
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
                 if (getNextOBS(cstate)) {
                     cstate->eol_type = EOL_UNKNOWN;
                     goto retry;
                 }
 #else
                 FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
-#endif
 #endif
             } else {
                 if (getNextGDS<true>(cstate)) {
@@ -9661,7 +9659,6 @@ void bulkloadFuncFactory(CopyState cstate)
         case MODE_NORMAL: /* for GDS oriented dist import */
             if (is_obs_protocol(cstate->filename)) {
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
                 /* Attache working house routines for OBS oriented dist import */
                 func.initBulkLoad = initOBSModeState;
                 func.endBulkLoad = endOBSModeBulkLoad;
@@ -9670,7 +9667,6 @@ void bulkloadFuncFactory(CopyState cstate)
                 getNextCopyFunc = getNextOBS;
 #else
                 FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
-#endif
 #endif
             } else {
                 /* Attache working house routines for GDS oriented dist import */
@@ -9738,7 +9734,6 @@ CopyState beginExport(
 
             if (is_obs_protocol(filename)) {
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
                 /* Fetch OBS write only table related attribtues */
                 getOBSOptions(&cstate->obs_copy_options, options);
 
@@ -9757,7 +9752,6 @@ CopyState beginExport(
                 initOBSModeState(cstate, object_path, tasklist);
 #else
                 FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
-#endif
 #endif
             } else {
                 initNormalModeState<false>(cstate, filename, tasklist);
@@ -9922,7 +9916,6 @@ void endExport(CopyState cstate)
         }
     } else if (cstate->copy_dest == COPY_OBS) {
 #ifndef ENABLE_LITE_MODE
-#ifdef ENABLE_OBS
         if (IS_PGXC_DATANODE) {
             if (cstate->outBuffer->len > 0)
                 RemoteExportFlushData(cstate);
@@ -9932,7 +9925,6 @@ void endExport(CopyState cstate)
         }
 #else
         FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
-#endif
 #endif
     } else
         exportDeinitOutBuffer(cstate);

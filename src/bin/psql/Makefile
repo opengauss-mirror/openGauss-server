@@ -24,7 +24,6 @@ SGMLDIR= $(top_builddir)/doc/src/sgml
 ###################################################################
 # libedit component
 ###################################################################
-LIBEDIT_HOME = $(with_3rd)/$(BINARYPATH)/libedit/$(LIB_SUPPORT_LLT)
 LIBEDIT_INCLUDE_PATH = $(LIBEDIT_HOME)/include
 LIBEDIT_LIB_PATH = $(LIBEDIT_HOME)/lib
 

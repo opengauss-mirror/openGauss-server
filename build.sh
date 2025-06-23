@@ -14,6 +14,19 @@ declare not_optimized=''
 declare config_file=''
 declare product_mode='opengauss'
 declare extra_config_opt=''
+
+declare -a DEPENDENCIES_YUM=(
+    "jemalloc-devel"
+    "libedit-devel"
+    "libxml2-devel"
+    "lz4-devel"
+    "numactl-devel"
+    "unixODBC-devel"
+    "java-1.8.0-openjdk-devel"
+)
+
+declare missing_deps=()
+declare pkg_manager=""
 #########################################################################
 ##read command line paramenters
 #######################################################################
@@ -34,6 +47,43 @@ function print_help()
     --relocation                      generate gaussdb.map with relocation(GCC >=10.3).
     --cmake                           use cmake to build openGauss, which is faster than traditional configure/autoconf
     "
+}
+
+detect_pkg_manager() {
+    if command -v yum >/dev/null 2>&1; then
+        pkg_manager="yum"
+    elif command -v apt-get >/dev/null 2>&1; then
+        pkg_manager="apt"
+    else
+        echo "Error: Unsupported package manager. Only yum and apt are supported."
+        exit 1
+    fi
+}
+
+check_dependencies() {
+    detect_pkg_manager
+
+    if [ "$pkg_manager" == "yum" ]; then
+        for dep in "${DEPENDENCIES_YUM[@]}"; do
+            if ! rpm -q "$dep" >/dev/null 2>&1; then
+                missing_deps+=("$dep")
+            fi
+        done
+    fi
+
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        echo "Error: Missing required dependencies:"
+        printf "  %s\n" "${missing_deps[@]}"
+        
+        if [ "$pkg_manager" == "yum" ]; then
+            echo -e "\nPlease install the missing dependencies using:"
+            echo "sudo yum install -y ${missing_deps[*]}"
+        fi
+        
+        exit 1
+    else
+        echo "All required dependencies are installed."
+    fi
 }
 
 while [ $# -gt 0 ]; do
@@ -103,6 +153,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+check_dependencies
 
 ROOT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 echo "ROOT_DIR : $ROOT_DIR"
