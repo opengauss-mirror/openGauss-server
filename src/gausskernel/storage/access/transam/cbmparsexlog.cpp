@@ -838,10 +838,11 @@ extern void CBMReadAndParseXLog(void)
                 PGSemaphoreLock(&g_instance.wal_cxt.cbmWaitTaskLock->l.sem, true);
                 LWLockRelease(g_instance.wal_cxt.cbmWaitTaskLock->l.lock);
             }
-            ereport(LOG, (errmsg("Thread %d have waken up for parse.", t_thrd.cbm_cxt.CBMReaderIndex)));
             continue;
         }
         
+        ereport(LOG, (errmsg("Thread %d have waken up for parse.", t_thrd.cbm_cxt.CBMReaderIndex)));
+
         if (needSkip) {
             ereport(LOG, (errmsg("This CBM Node have been occupie by %d, skip it.",
                             pg_atomic_read_u32(&queueNodePtr->CBMRecord.threadIndex))));
@@ -865,11 +866,11 @@ extern void CBMReadAndParseXLog(void)
         
         if (ParseXlogIntoCBMPagesByCBMReader((CBM_RECORD*)&queueNodePtr->CBMRecord, queueNodePtr->CBMRecord.isLastOne)) {
             /* If something wrong in xlog parse. */
-            ereport(LOG, (errmsg("Thread CBM Reader %d parse failed.", t_thrd.cbm_cxt.CBMReaderIndex)));
             pg_atomic_write_u32(&g_instance.comm_cxt.cbm_cxt.skipIncomingRequest, CBM_REJECT_TASK);
             /* We should reset the cbmReaderNormalContext duo to useless hash left. */
-            MemoryContextReset(t_thrd.cbm_cxt.CBMReaderStatus->cbmReaderNormalContext);
             t_thrd.cbm_cxt.cbmPageHash = NULL;
+            MemoryContextReset(t_thrd.cbm_cxt.CBMReaderStatus->cbmReaderNormalContext);
+            ereport(LOG, (errmsg("Thread CBM Reader %d parse failed and reset cbmPageHash.", t_thrd.cbm_cxt.CBMReaderIndex)));
 	    } else {
             /* If get success in xlog parse. */
             ereport(LOG, (errmsg("Thread CBM Reader %d parse success.", t_thrd.cbm_cxt.CBMReaderIndex)));
