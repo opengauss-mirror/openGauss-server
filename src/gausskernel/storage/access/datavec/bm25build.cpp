@@ -889,14 +889,14 @@ void ParallelReorderMain(const BgWorkerContext *bwc)
 
     /* Look up shared state */
     BM25ReorderShared *reorderShared = (BM25ReorderShared *)bwc->bgshared;
-    pg_atomic_add_fetch_u32(&reorderShared->curThreadId, 1);
+    uint32 curThreadId = pg_atomic_add_fetch_u32(&reorderShared->curThreadId, 1);
 
     /* Open relations within worker */
     heapRel = heap_open(reorderShared->heaprelid, NoLock);
     indexRel = index_open(reorderShared->indexrelid, NoLock);
 
-    BM25PageLocationInfo startLocation = reorderShared->startPageLocation[reorderShared->curThreadId - 1];
-    ereport(LOG, (errmsg("launch reorder background threadId: %d.", reorderShared->curThreadId)));
+    BM25PageLocationInfo startLocation = reorderShared->startPageLocation[curThreadId - 1];
+    ereport(LOG, (errmsg("launch reorder background threadId: %d.", curThreadId)));
 
     // loop buckets
     BlockNumber hashBucketsBlkno = startLocation.blkno;
