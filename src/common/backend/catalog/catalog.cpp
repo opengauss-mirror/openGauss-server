@@ -118,6 +118,10 @@ const char *packageSchemaList[] = {"dbe_application_info",
                                    "pkg_util",
                                    "sqladvisor"};
 
+const char *packageSchemaListSharkExtra[] = {"sys",
+                                             "information_schema_tsql"};
+
+
 /*
  * forkname_to_number - look up fork number by name
  */
@@ -1287,6 +1291,15 @@ bool IsPackageSchemaName(const char* schemaName)
     for (int i = 0; i < schemaNum; ++i) {
         if (strcmp(schemaName, packageSchemaList[i]) == 0) {
             return true;
+        }
+    }
+    /* system catalog cannot be modify after shark extention load */
+    if (DB_IS_CMPT(D_FORMAT) && u_sess->attr.attr_sql.shark) {
+        int schemaNumD = lengthof(packageSchemaListSharkExtra);
+        for (int i = 0; i < schemaNumD; ++i) {
+            if (strcmp(schemaName, packageSchemaListSharkExtra[i]) == 0) {
+                return true;
+            }
         }
     }
     return false;

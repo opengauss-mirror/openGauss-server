@@ -2897,15 +2897,16 @@ void PostgresInitializer::InitExtensionVariable()
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     const char* whale = "whale";
     const char* dolphin = "dolphin";
+    const char* shark = "shark";
     u_sess->attr.attr_sql.dolphin = CheckIfExtensionExists(dolphin);
     u_sess->attr.attr_sql.whale = CheckIfExtensionExists(whale);
+    u_sess->attr.attr_sql.shark = CheckIfExtensionExists(shark);
 
-    if (DB_IS_CMPT(D_FORMAT) && CheckIfExtensionExists("shark") && g_instance.raw_parser_hook[DB_CMPT_D] == NULL) {
+    if (DB_IS_CMPT(D_FORMAT) && u_sess->attr.attr_sql.shark && g_instance.raw_parser_hook[DB_CMPT_D] == NULL) {
         ereport(ERROR, (errmsg("Please add \"shark\" into parameter \"shared_preload_libraries\" and restart, "
                                "because database you connect had created extension \"shark\" before")));
     }
 #endif
-
 }
 
 void PostgresInitializer::FinishInit()

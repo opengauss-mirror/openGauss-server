@@ -1,0 +1,42 @@
+set search_path to sys;
+create table test1(id int);
+ERROR:  permission denied to create "sys.test1"
+DETAIL:  System catalog modifications are currently disallowed.
+create view v1 as select 1;
+ERROR:  permission denied to create "sys.v1"
+DETAIL:  System catalog modifications are currently disallowed.
+set search_path to information_schema_tsql;
+create table test1(id int);
+ERROR:  permission denied to create "information_schema_tsql.test1"
+DETAIL:  System catalog modifications are currently disallowed.
+create view v1 as select 1;
+ERROR:  permission denied to create "information_schema_tsql.v1"
+DETAIL:  System catalog modifications are currently disallowed.
+reset search_path;
+alter system set upgrade_mode to 2;
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+set isinplaceupgrade to on;
+set search_path to sys;
+create table test1(id int);
+create view v1 as select 1;
+select * from test1;
+ id 
+----
+(0 rows)
+
+set search_path to information_schema_tsql;
+create table test1(id int);
+create view v1 as select 1;
+select * from test1;
+ id 
+----
+(0 rows)
+
+reset search_path;
+set isinplaceupgrade to off;
+alter system set upgrade_mode to 0;

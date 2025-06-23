@@ -1,15 +1,19 @@
-CREATE TABLE sys.students (
+create schema sys1;
+
+set search_path to 'sys1';
+
+CREATE TABLE sys1.students (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     age INT DEFAULT 0,
     grade DECIMAL(5, 2)
 );
 
-CREATE VIEW sys.student_grades AS
+CREATE VIEW sys1.student_grades AS
 SELECT name, grade
 FROM students;
 
-CREATE OR REPLACE FUNCTION sys.calculate_total_grade()
+CREATE OR REPLACE FUNCTION sys1.calculate_total_grade()
 RETURNS DECIMAL(10, 2) AS $$
 DECLARE
     total_grade DECIMAL(10, 2) := 0;
@@ -19,7 +23,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE sys.insert_student(
+CREATE OR REPLACE PROCEDURE sys1.insert_student(
     student_name VARCHAR(100),
     student_age INT,
     student_grade DECIMAL(5, 2)
@@ -29,7 +33,7 @@ BEGIN
 END;
 /
 
-CREATE OR REPLACE FUNCTION sys.update_total_grade()
+CREATE OR REPLACE FUNCTION sys1.update_total_grade()
 RETURNS TRIGGER AS $$
 BEGIN
     RAISE NOTICE 'Total grade updated: %', calculate_total_grade();
@@ -41,14 +45,14 @@ CREATE TRIGGER trigger_update_total_grade
 AFTER INSERT OR UPDATE OR DELETE ON students
 FOR EACH STATEMENT EXECUTE PROCEDURE update_total_grade();
 
-select object_id('sys.students');
-select object_id('sys.students_pkey');
-select object_id('sys.student_grades');
-select object_id('sys.calculate_total_grade');
-select object_id('sys.insert_student');
-select object_id('sys.trigger_update_total_grade');
+select object_id('sys1.students');
+select object_id('sys1.students_pkey');
+select object_id('sys1.student_grades');
+select object_id('sys1.calculate_total_grade');
+select object_id('sys1.insert_student');
+select object_id('sys1.trigger_update_total_grade');
 
-set search_path = 'sys';
+set search_path = 'sys1';
 select object_id('contrib_regression.students');
 select object_id('contrib_regression..students');
 select object_id('contrib_regression...students');
@@ -60,8 +64,8 @@ select object_id('calculate_total_grade', 'FN');
 select object_id('insert_student', 'P');
 select object_id('trigger_update_total_grade', 'TR');
 
-select object_id('sys.students');
-select object_id('contrib_regression.sys.students');
+select object_id('sys1.students');
+select object_id('contrib_regression.sys1.students');
 
 select objectproperty(object_id('students'), 'istable') as istable;
 select objectproperty(object_id('students'), 'ownerid') as ownerid;
@@ -196,7 +200,7 @@ select objectproperty(object_id('students_pkey'), 'isrule') as isrule;
 select objectproperty(object_id('students_pkey'), 'istrigger') as istrigger;
 
 --异常用例
-CREATE TEMP TABLE sys.temp_sales (
+CREATE TEMP TABLE sys1.temp_sales (
     product_name VARCHAR(255),
     sale_amount NUMERIC(10, 2),
     sale_date DATE
@@ -252,3 +256,5 @@ select objectproperty(object_id('t2'), 'tablefulltextpopulatestatus') as isindex
 
 DROP TABLE IF EXISTS t1;
 DROP TABLE IF EXISTS t2;
+reset current_schema;
+drop schema sys1 cascade; 

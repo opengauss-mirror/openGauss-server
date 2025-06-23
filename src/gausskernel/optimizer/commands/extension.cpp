@@ -1494,6 +1494,8 @@ ObjectAddress CreateExtension(CreateExtensionStmt* stmt)
         u_sess->attr.attr_sql.dolphin = true;
     } else if (pg_strcasecmp(stmt->extname, "whale") == 0) {
         u_sess->attr.attr_sql.whale = true;
+    } else if (pg_strcasecmp(stmt->extname, "shark") == 0) {
+        u_sess->attr.attr_sql.shark = true;
     }
 #endif
     return address;
