@@ -570,6 +570,34 @@ select json_textcontains('{"family" : {"id":12, "ages":[25,23], "address" : {"st
  t
 (1 row)
 
+select json_textcontains('{
+    "name":"web",
+    "num":3,
+    "sites": [
+        { "name":"Google", "info":[ "Android", "Google Search", "Googlee" ] },
+        { "name":"Runoob", "info":[ "book", "tool", "wechat" ] },
+        { "name":"Taobao", "info":[ "taobao", "shop" ] }
+    ]
+}', '$.sites.info.name','shop');
+ json_textcontains 
+-------------------
+ f
+(1 row)
+
+select json_textcontains('{
+    "name":"web",
+    "num":3,
+    "sites": [
+        { "name":"Google", "info":[[ {"name":"Android"}, {"name":"Google Search"}, {"name":"Googlee"} ]] },
+        { "name":"Runoob", "info":[[ {"name":"book"}, {"name":"tool"}, "wechat" ]] },
+        { "name":"Taobao", "info":[[ {"name":"taobao"}, "shop" ]] }
+    ]
+}', '$.sites.info.name','Androidd,Search,Googlee');
+ json_textcontains 
+-------------------
+ t
+(1 row)
+
 create or replace procedure p_JsonTextcontains_Case0011(col1 text,col2 text,col3 text)
 as
 val1 bool;
