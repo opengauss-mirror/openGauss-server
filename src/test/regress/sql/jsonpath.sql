@@ -178,4 +178,16 @@ end;
 call p_JsonTextcontains_Case0011('{"family" : {"id":12, "ages":[25,23], "address" : {"street" : "300 Oak Street", "apt" : 10}}}',
                                  '$.family','25,38');
 
+drop table if exists t_JsonExists_Case0006;
+CREATE TABLE t_JsonExists_Case0006(po_document VARCHAR2 (2000));
+INSERT INTO t_JsonExists_Case0006
+  VALUES ('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]');
+INSERT INTO t_JsonExists_Case0006
+  VALUES ('{
+  "name":[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}],
+  "age":[{"John":"20"}, {"Mark":"35"}, {"Smith":"29"}]
+}'); 
+SELECT po.po_document FROM t_JsonExists_Case0006 po WHERE json_exists(po.po_document,'$[0][0]');
+drop table t_JsonExists_Case0006;
+
 DROP SCHEMA test_jsonpath CASCADE;

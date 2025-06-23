@@ -3543,6 +3543,40 @@ static List* GetObjectValues(text* json)
     return resultList;
 }
 
+static void JsonPathIgnoreTailingZero(JsonPathItem* path)
+{
+    JsonPathItem* prevstep = path;
+    JsonPathItem* step = path;
+    JsonPathItem* tail = nullptr;
+    while (step->next) {
+        prevstep = step;
+        step = step->next;
+        if (step->type != JPI_ARRAY) {
+            tail = nullptr;
+            continue;
+        }
+        JsonPathArrayStep* as = (JsonPathArrayStep*)step;
+        if (as->indexes != NIL) {
+            ListCell* idxCell = nullptr;
+            foreach (idxCell, as->indexes) {
+                int index = lfirst_int(idxCell);
+                if (index == 0) {
+                    break;
+                }
+            }
+            /* Loop reaches the end, no zero in the list. */
+            if (idxCell == nullptr) {
+                tail = nullptr;
+                continue;
+            }
+        }
+        tail = tail == nullptr? prevstep : tail;
+    }
+    if (tail != nullptr) {
+        tail->next = nullptr;
+    }
+}
+
 static void JPWalkArrayStep(JsonPathItem* path, text* json,
     void (*pwalker)(text*, void*), void* context)
 {
@@ -3630,35 +3664,12 @@ static void JPWalkObjectStep(JsonPathItem* path, text* json,
     }
 }
 
-static bool JsonElemntType(text* json)
-{
-    char* jsonType = text_to_cstring(DatumGetTextP(DirectFunctionCall1(json_typeof, PointerGetDatum(json))));
-    return ((strcmp(jsonType, "object") != 0) && (strcmp(jsonType, "array") != 0));
-}
-
 static void JsonPathWalker(JsonPathItem* path, text* json, void (*pwalker)(text*, void*), void* context)
 {
     if (path == NULL) {
         pwalker(json, context);
         return;
-    } else if (json == NULL || !IsJsonText(json) || JsonElemntType(json)) {
-        /* allow redundant tailing [0] in syntax relaxation */
-        JsonPathRelaxState relax = ((JsonPathContext*)context)->relax;
-        if (relax == JSON_PATH_NO_RELAX || path->type != JPI_ARRAY) {
-            return;
-        }
-        ListCell* idxCell = NULL;
-        foreach (idxCell, ((JsonPathArrayStep*)path)->indexes) {
-            int index = lfirst_int(idxCell);
-            if (index == 0) {
-                if (path->next != NULL) {
-                    JsonPathWalker(path->next, json, pwalker, context);
-                } else {
-                    pwalker(json, context);
-                }
-                return;
-            }
-        }
+    } else if (json == NULL || !IsJsonText(json)) {
         return;
     }
 
@@ -3736,6 +3747,7 @@ Datum json_path_exists(PG_FUNCTION_ARGS)
         context.cxt.topJson = json;
         context.cxt.relax = JSON_PATH_ALLOW_RELAX;
         context.result = false;
+        JsonPathIgnoreTailingZero(path);
         JsonPathWalker(path, json, (void (*)(text*, void*))JsonPathExistsPathWalker, (void*)(&context));
     }
 

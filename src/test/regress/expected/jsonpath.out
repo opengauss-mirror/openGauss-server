@@ -586,6 +586,27 @@ NOTICE:  result=t
  
 (1 row)
 
+drop table if exists t_JsonExists_Case0006;
+NOTICE:  table "t_jsonexists_case0006" does not exist, skipping
+CREATE TABLE t_JsonExists_Case0006(po_document VARCHAR2 (2000));
+INSERT INTO t_JsonExists_Case0006
+  VALUES ('[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]');
+INSERT INTO t_JsonExists_Case0006
+  VALUES ('{
+  "name":[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}],
+  "age":[{"John":"20"}, {"Mark":"35"}, {"Smith":"29"}]
+}'); 
+SELECT po.po_document FROM t_JsonExists_Case0006 po WHERE json_exists(po.po_document,'$[0][0]');
+                            po_document                            
+-------------------------------------------------------------------
+ [{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}]
+ {                                                                +
+   "name":[{"first":"John"}, {"middle":"Mark"}, {"last":"Smith"}],+
+   "age":[{"John":"20"}, {"Mark":"35"}, {"Smith":"29"}]           +
+ }
+(2 rows)
+
+drop table t_JsonExists_Case0006;
 DROP SCHEMA test_jsonpath CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table t
