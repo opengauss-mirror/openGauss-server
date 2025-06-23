@@ -124,25 +124,62 @@ opt_with_no_infomsgs: WITH NO_INFOMSGS				{$$ = TRUE;}
 			| /*EMPTY*/								{$$ = FALSE;}
 		;		
 
+tsql_unique_clustered:
+			TSQL_UNIQUE_NONCLUSTERED
+			{
+				ereport(NOTICE,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("The NONCLUSTERED option is currently ignored")));
+			}
+			| TSQL_UNIQUE_CLUSTERED
+			{
+				ereport(NOTICE,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("The CLUSTERED option is currently ignored")));
+			}
+		;
+
+tsql_primary_key_clustered:
+			TSQL_PRIMAY_KEY_NONCLUSTERED
+			{
+				ereport(NOTICE,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("The NONCLUSTERED option is currently ignored")));
+			}
+			| TSQL_PRIMAY_KEY_CLUSTERED
+			{
+				ereport(NOTICE,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("The CLUSTERED option is currently ignored")));
+			}
+		;
+
+tsql_opt_unique_clustered:
+			tsql_unique_clustered		{ $$ = TRUE; }
+			| tsql_opt_clustered		{ $$ = FALSE; }
+			| UNIQUE					{ $$ = TRUE; }
+		;
+	
+
 tsql_IndexStmt:
-				CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
+				CREATE tsql_opt_unique_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
 				ON qualified_name access_method_clause '(' index_params ')'
 				opt_include opt_reloptions OptPartitionElement opt_table_index_options where_clause
 				{
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
-					n->concurrent = $6;
+					n->concurrent = $5;
 					n->missing_ok = false;
-					n->schemaname = $7->schemaname;
-					n->idxname = $7->relname;
-					n->relation = $9;
-					n->accessMethod = $10;
-					n->indexParams = $12;
-					n->indexIncludingParams = $14;
-					n->options = $15;
-					n->tableSpace = $16;
-					n->indexOptions = $17;
-					n->whereClause = $18;
+					n->schemaname = $6->schemaname;
+					n->idxname = $6->relname;
+					n->relation = $8;
+					n->accessMethod = $9;
+					n->indexParams = $11;
+					n->indexIncludingParams = $13;
+					n->options = $14;
+					n->tableSpace = $15;
+					n->indexOptions = $16;
+					n->whereClause = $17;
 					n->excludeOpNames = NIL;
 					n->idxcomment = NULL;
 					n->indexOid = InvalidOid;
@@ -156,25 +193,25 @@ tsql_IndexStmt:
 					n->initdeferred = false;
 					$$ = (Node *)n;
 				}
-				| CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
+				| CREATE tsql_opt_unique_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
 					LOCAL opt_partition_index_def opt_include opt_reloptions OptTableSpace opt_table_index_options
 				{
 
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
-					n->concurrent = $6;
+					n->concurrent = $5;
 					n->missing_ok = false;
-					n->schemaname = $7->schemaname;
-					n->idxname = $7->relname;
-					n->relation = $9;
-					n->accessMethod = $10;
-					n->indexParams = $12;
-					n->partClause  = $15;
-					n->indexIncludingParams = $16;
-					n->options = $17;
-					n->tableSpace = $18;
-					n->indexOptions = $19;
+					n->schemaname = $6->schemaname;
+					n->idxname = $6->relname;
+					n->relation = $8;
+					n->accessMethod = $9;
+					n->indexParams = $11;
+					n->partClause  = $14;
+					n->indexIncludingParams = $15;
+					n->options = $16;
+					n->tableSpace = $17;
+					n->indexOptions = $18;
 					n->isPartitioned = true;
 					n->isGlobal = false;
 					n->excludeOpNames = NIL;
@@ -188,25 +225,25 @@ tsql_IndexStmt:
 					$$ = (Node *)n;
 
 				}
-				| CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
+				| CREATE tsql_opt_unique_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
 					GLOBAL opt_include opt_reloptions OptTableSpace opt_table_index_options
 				{
 
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
-					n->concurrent = $6;
+					n->concurrent = $5;
 					n->missing_ok = false;
-					n->schemaname = $7->schemaname;
-					n->idxname = $7->relname;
-					n->relation = $9;
-					n->accessMethod = $10;
-					n->indexParams = $12;
+					n->schemaname = $6->schemaname;
+					n->idxname = $6->relname;
+					n->relation = $8;
+					n->accessMethod = $9;
+					n->indexParams = $11;
 					n->partClause  = NULL;
-					n->indexIncludingParams = $15;
-					n->options = $16;
-					n->tableSpace = $17;
-					n->indexOptions = $18;
+					n->indexIncludingParams = $14;
+					n->options = $15;
+					n->tableSpace = $16;
+					n->indexOptions = $17;
 					n->isPartitioned = true;
 					n->isGlobal = true;
 					n->excludeOpNames = NIL;
@@ -220,24 +257,24 @@ tsql_IndexStmt:
 					$$ = (Node *)n;
 
 				}
-				| CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
+				| CREATE tsql_opt_unique_clustered tsql_opt_columnstore INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
 					opt_include opt_reloptions OptPartitionElement opt_index_options where_clause
 				{
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
-					n->concurrent = $6;
+					n->concurrent = $5;
 					n->missing_ok = true;
-					n->schemaname = $10->schemaname;
-					n->idxname = $10->relname;
-					n->relation = $12;
-					n->accessMethod = $13;
-					n->indexParams = $15;
-					n->indexIncludingParams = $17;
-					n->options = $18;
-					n->tableSpace = $19;
-					n->indexOptions = $20;
-					n->whereClause = $21;
+					n->schemaname = $9->schemaname;
+					n->idxname = $9->relname;
+					n->relation = $11;
+					n->accessMethod = $12;
+					n->indexParams = $14;
+					n->indexIncludingParams = $16;
+					n->options = $17;
+					n->tableSpace = $18;
+					n->indexOptions = $19;
+					n->whereClause = $20;
 					n->excludeOpNames = NIL;
 					n->idxcomment = NULL;
 					n->indexOid = InvalidOid;
@@ -251,24 +288,24 @@ tsql_IndexStmt:
 					n->initdeferred = false;
 					$$ = (Node *)n;
 				}
-				| CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
+				| CREATE tsql_opt_unique_clustered tsql_opt_columnstore INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
 					LOCAL opt_partition_index_def opt_include opt_reloptions OptTableSpace opt_index_options
 				{
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
-					n->concurrent = $6;
+					n->concurrent = $5;
 					n->missing_ok = true;
-					n->schemaname = $10->schemaname;
-					n->idxname = $10->relname;
-					n->relation = $12;
-					n->accessMethod = $13;
-					n->indexParams = $15;
-					n->partClause  = $18;
-					n->indexIncludingParams = $19;
-					n->options = $20;
-					n->tableSpace = $21;
-					n->indexOptions = $22;
+					n->schemaname = $9->schemaname;
+					n->idxname = $9->relname;
+					n->relation = $11;
+					n->accessMethod = $12;
+					n->indexParams = $14;
+					n->partClause  = $17;
+					n->indexIncludingParams = $18;
+					n->options = $19;
+					n->tableSpace = $20;
+					n->indexOptions = $21;
 					n->isPartitioned = true;
 					n->isGlobal = false;
 					n->excludeOpNames = NIL;
@@ -281,24 +318,24 @@ tsql_IndexStmt:
 					n->initdeferred = false;
 					$$ = (Node *)n;
 				}
-				| CREATE opt_unique tsql_opt_clustered tsql_opt_columnstore INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
+				| CREATE tsql_opt_unique_clustered tsql_opt_columnstore INDEX opt_concurrently IF_P NOT EXISTS opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
 					GLOBAL opt_include opt_reloptions OptTableSpace opt_index_options
 				{
 					IndexStmt *n = makeNode(IndexStmt);
 					n->missing_ok = true;
 					n->unique = $2;
-					n->concurrent = $6;
-					n->schemaname = $10->schemaname;
-					n->idxname = $10->relname;
-					n->relation = $12;
-					n->accessMethod = $13;
-					n->indexParams = $15;
+					n->concurrent = $5;
+					n->schemaname = $9->schemaname;
+					n->idxname = $9->relname;
+					n->relation = $11;
+					n->accessMethod = $12;
+					n->indexParams = $14;
 					n->partClause  = NULL;
-					n->indexIncludingParams = $18;
-					n->options = $19;
-					n->tableSpace = $20;
-					n->indexOptions = $21;
+					n->indexIncludingParams = $17;
+					n->options = $18;
+					n->tableSpace = $19;
+					n->indexOptions = $20;
 					n->isPartitioned = true;
 					n->isGlobal = true;
 					n->excludeOpNames = NIL;
@@ -311,6 +348,7 @@ tsql_IndexStmt:
 					n->initdeferred = false;
 					$$ = (Node *)n;
 				}
+		;
 
 InsertStmt: opt_with_clause INSERT hint_string insert_target insert_rest returning_clause
 			{
@@ -764,6 +802,52 @@ TSQL_DoStmt: DO dostmt_opt_list
 				}
 		;
 
+ConstraintElem:
+			tsql_unique_clustered '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_UNIQUE;
+					n->location = @1;
+					n->keys = $3;
+					n->including = $5;
+					n->options = $6;
+					n->indexname = NULL;
+					n->indexspace = NULL;
+					n->constraintOptions = $7;
+					processCASbits($8, @8, "UNIQUE",
+								   &n->deferrable, &n->initdeferred, &n->skip_validation,
+								   NULL, yyscanner);
+					n->inforConstraint = (InformationalConstraint *) $9; /* informational constraint info */
+					n->initially_valid = !n->skip_validation;
+					if ($8 & (CAS_DISABLE_VALIDATE | CAS_DISABLE_NO_VALIDATE))
+						n->isdisable = true;
+					setAccessMethod(n);
+					$$ = (Node *)n;
+				}
+				| tsql_primary_key_clustered '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_PRIMARY;
+					n->location = @1;
+					n->keys = $3;
+					n->including = $5;
+					n->options = $6;
+					n->indexname = NULL;
+					n->indexspace = NULL;
+					n->constraintOptions = $7;
+					processCASbits($8, @8, "PRIMARY KEY",
+								   &n->deferrable, &n->initdeferred, &n->skip_validation,
+								   NULL, yyscanner);
+					n->inforConstraint = (InformationalConstraint *) $9; /* informational constraint info */
+					n->initially_valid = !n->skip_validation;
+					if ($8 & (CAS_DISABLE_VALIDATE | CAS_DISABLE_NO_VALIDATE))
+						n->isdisable = true;
+					setAccessMethod(n);
+					$$ = (Node *)n;
+				}
+		;
 
 tsql_stmt :
 			AlterAppWorkloadGroupMappingStmt

@@ -1,3 +1,5 @@
+create schema clustered_index;
+set current_schema = clustered_index;
 CREATE TABLE Users (
     UserID INT PRIMARY KEY,
     UserName NVARCHAR(50),
@@ -38,3 +40,34 @@ SELECT * FROM Users WHERE UserName = 'Bob';
       2 | Bob      | bob@example.com
 (1 row)
 
+CREATE TABLE AM_COMMENT(
+    COM_ID int NOT NULL,
+ CONSTRAINT PK_AM_COMMENT PRIMARY KEY CLUSTERED(COM_ID)
+);
+NOTICE:  The CLUSTERED option is currently ignored
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_am_comment" for table "am_comment"
+CREATE TABLE AM_COMMENT2(
+    COM_ID int NOT NULL,
+ CONSTRAINT PK_AM_COMMENT2 UNIQUE CLUSTERED(COM_ID)
+);
+NOTICE:  The CLUSTERED option is currently ignored
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "pk_am_comment2" for table "am_comment2"
+CREATE TABLE AM_COMMENT3(
+    COM_ID int NOT NULL,
+ CONSTRAINT PK_AM_COMMENT3 PRIMARY KEY NONCLUSTERED(COM_ID)
+);
+NOTICE:  The NONCLUSTERED option is currently ignored
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_am_comment3" for table "am_comment3"
+CREATE TABLE AM_COMMENT4(
+    COM_ID int NOT NULL,
+ CONSTRAINT PK_AM_COMMENT4 UNIQUE NONCLUSTERED(COM_ID)
+);
+NOTICE:  The NONCLUSTERED option is currently ignored
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "pk_am_comment4" for table "am_comment4"
+drop schema clustered_index cascade;
+NOTICE:  drop cascades to 5 other objects
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
