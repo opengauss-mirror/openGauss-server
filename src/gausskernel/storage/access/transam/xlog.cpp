@@ -3820,6 +3820,7 @@ bool XLogBackgroundFlush(bool fsync)
 
     if (InitializeRqstPtr != InvalidXLogRecPtr && XLByteLT(g_instance.wal_cxt.sentResult, InitializeRqstPtr)) {
         AdvanceXLInsertBuffer<false>(InitializeRqstPtr, false);
+        pg_memory_barrier();
 
         (void)pg_atomic_exchange_u64((uint64 *)&g_instance.wal_cxt.sentResult, InitializeRqstPtr);
 
