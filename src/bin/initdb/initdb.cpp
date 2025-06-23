@@ -360,6 +360,7 @@ static int CreateRestrictedProcess(char* cmd, PROCESS_INFORMATION* processInfo);
 
 static void InitUndoSubsystemMeta();
 static void check_input_spec_char(char* input_env_value, bool skip_dollar = false);
+static bool IsValidIdentUsername(char* input);
 
 /*
  * macros for running pipes to openGauss
@@ -4179,6 +4180,9 @@ int main(int argc, char* argv[])
                 FREE_NOT_STATIC_ZERO_STRING(username);
                 check_input_spec_char(optarg, true);
                 username = xstrdup(optarg);
+                if (!IsValidIdentUsername(username)) {
+                    exit(1);
+                }
                 break;
             case 'd':
                 debug = true;
@@ -4503,6 +4507,9 @@ int main(int argc, char* argv[])
     if (strlen(username) == 0) {
         if (username != (char*)"") {
             FREE_AND_RESET(username);
+        }
+        if (!IsValidIdentUsername(effective_user)) {
+            exit(1);
         }
         username = effective_user;
     }
@@ -5710,4 +5717,33 @@ static void InitUndoSubsystemMeta(void)
         printf("[INIT UNDO] Init undo subsystem meta failed, exit.\n");
         exit(1);
     }
+}
+
+static bool IsValidIdentUsername(char* input)
+{
+    char c = input[0];
+    /* The first character id numbers or dollar */
+    if ((c >= '0' && c <= '9') || c == '$') {
+        fprintf(stderr,
+                "invalid username: \"%s\", username starts with number or mark $ is not allowed, please set a valid "
+                "username with gs_initdb -U\n",
+                input);
+        return false;
+    }
+
+    int len = strlen(input);
+    for (int i = 0; i < len; i++) {
+        c = input[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '$' ||
+            c == '#') {
+            continue;
+        } else {
+            fprintf(stderr,
+                    "invalid username: \"%s\", username contains illegal character, please set a valid "
+                    "username with gs_initdb -U\n",
+                    input);
+            return false;
+        }
+    }
+    return true;
 }
