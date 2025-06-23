@@ -1428,8 +1428,8 @@ static void AppendRangeIntervalPartitionInfo(StringInfo buf, Oid tableoid, table
         "FROM pg_catalog.pg_partition p LEFT JOIN pg_catalog.pg_tablespace t "
         "ON p.reltablespace = t.oid "
         "WHERE p.parentid = %u AND p.parttype = '%c' "
-        "AND p.partstrategy in ('%c', '%c') ORDER BY ",
-        tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_RANGE, PART_STRATEGY_INTERVAL);
+        "AND p.partstrategy = '%c' ORDER BY ",
+        tableoid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_RANGE);
     for (int i = 1; i <= partkeynum; i++) {
         if (i == partkeynum) {
             appendStringInfo(query, "p.boundaries[%d]::%s ASC NULLS LAST", i, get_typename(iPartboundary[i - 1]));
@@ -2380,13 +2380,13 @@ static void get_index_list_info(Oid tableoid, StringInfo buf, const char* relnam
                     get_table_constraint_info(conForm, tup, buf, constriantid, relname);
                     appendStringInfo(buf, ";");
                 } else {
-                    appendStringInfo(buf, "\n%s;", pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0));
+                    appendStringInfo(buf, "\n%s;", pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0, true));
                 }
                 /* Cleanup */
                 ReleaseSysCache(tup);
     		}
         } else {
-            appendStringInfo(buf, "\n%s;", pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0));
+            appendStringInfo(buf, "\n%s;", pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0, true));
 
             /* If the index is clustered, we need to record that. */
             if (index->indisclustered) {

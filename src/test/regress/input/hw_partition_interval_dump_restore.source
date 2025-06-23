@@ -142,8 +142,20 @@ INSERT INTO sales VALUES(1, 12, '2019-02-03 00:00:00', 'a', 1, 1, 1);
 
 \d sales
 
+select pg_get_tabledef('sales');
+
+-- dump data
+\! @abs_bindir@/gs_dump interval_db -p @portstring@ -t sales -f @abs_bindir@/backup_data.sql
+
 -- only dump schema data
 \! @abs_bindir@/gs_dump interval_db -p @portstring@ -s -t sales -f @abs_bindir@/backup.sql
+
+drop table sales;
+
+-- restore data with backup_data
+\! @abs_bindir@/gsql -p @portstring@ -d interval_db -f @abs_bindir@/backup_data.sql
+
+\d sales
 
 drop table sales;
 
@@ -153,8 +165,6 @@ drop table sales;
 \d sales
 
 select count(1) from sales;
-
-select pg_get_tabledef('sales');
 
 drop table sales;
 
