@@ -3623,7 +3623,7 @@ retry:
         goto retry;
     }
 
-    if (ENABLE_DMS && (buf_state & BM_TAG_VALID)) {
+    if (ENABLE_DMS && (buf_state & BM_TAG_VALID) && !SS_DISASTER_MAIN_STANDBY_NODE) {
         if (!DmsReleaseOwner(buf->tag, buf->buf_id)) {
             UnlockBufHdr(buf, buf_state);
             LWLockRelease(old_partition_lock);
