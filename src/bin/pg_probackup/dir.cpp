@@ -42,7 +42,7 @@ const char *pgdata_exclude_dir[] =
     * there.
     */
     (const char *)"pg_stat_tmp",
-    (const char *)"pgsql_tmp",
+    (const char *)"base/pgsql_tmp",
 
     /* Contents removed on startup, see dsm_cleanup_for_mmap(). */
     (const char *)"pg_dynshmem",
