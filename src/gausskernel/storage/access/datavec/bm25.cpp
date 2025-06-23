@@ -158,10 +158,8 @@ Datum bm25insert(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25options);
 Datum bm25options(PG_FUNCTION_ARGS)
 {
-    /* No options for bm25 currently. */
-    PG_RETURN_NULL();
+    elog(ERROR, "bm25 index do not support any options.");
 }
-
 
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25bulkdelete);
 Datum bm25bulkdelete(PG_FUNCTION_ARGS)
