@@ -614,7 +614,7 @@ from pg_class t
 inner join pg_namespace s on s.oid = t.relnamespace
 inner join pg_object o on o.object_oid = t.oid
 where t.relpersistence in ('p', 'u', 't')
-and t.relkind = 'r'
+and (t.relkind = 'r' or t.relkind = 'f')
 and has_table_privilege(quote_ident(s.nspname) ||'.'||quote_ident(t.relname), 'SELECT');
 end $$
 language plpgsql;
@@ -1427,6 +1427,8 @@ SELECT
 	CAST(information_schema_tsql._pgtsql_numeric_precision_radix(t.typname, a.atttypid, a.atttypmod) AS smallint) AS numeric_precision_radix,
 	CAST(information_schema_tsql._pgtsql_numeric_scale(t.typname, a.atttypid, a.atttypmod) AS int) AS numeric_scale,
 	CAST(information_schema_tsql._pgtsql_datetime_precision(t.typname, a.atttypmod) AS smallint) AS datetime_precision,
+  CAST(null AS nvarchar(128)) AS character_set_catalog,
+  CAST(null AS nvarchar(128)) AS character_set_schema,
 	CAST(pg_encoding_to_char(co.collencoding) AS nvarchar(128)) AS character_set_name,
 	CAST(null as nvarchar(128)) as collation_catalog,
 	CAST(null as nvarchar(128)) as collation_schema,
