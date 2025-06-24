@@ -613,7 +613,8 @@ static unsigned int CBIncAndGetSrsn(uint32 sessid)
     return ++t_thrd.dms_cxt.srsn;
 }
 
-static unsigned int CBPageHashCode(const char pageid[DMS_PAGEID_SIZE])
+static unsigned int CBPageHashCode(const char pageid[DMS_PAGEID_SIZE],
+    unsigned char group_hash, unsigned int *hash_key, unsigned int *hash_val)
 {
     BufferTag *tag = (BufferTag *)pageid;
     return BufTableHashCode(tag);

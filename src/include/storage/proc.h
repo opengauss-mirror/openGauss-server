@@ -504,6 +504,8 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
 #define NUM_DMS_WORK_THREAD_PROCS (g_instance.attr.attr_storage.dms_attr.work_thread_pool_max_cnt != 0 ? \
     NUM_DMS_MAX_WORK_THREAD_PROCS + NUM_DMS_WORK_SCHEDULER_PROC : \
     g_instance.attr.attr_storage.dms_attr.work_thread_count)
+#define NUM_DMS_DRC_RECYCLE_PROCS (1)   // for drc_recycle_thread
+#define NUM_DMS_DRM_PROCS (1)  // for drm_thread
 #define NUM_DMS_CALLBACK_PROCS \
         (g_instance.attr.attr_storage.dms_attr.enable_dms ? \
         (NUM_DMS_RECV_THREAD_CNT + \
@@ -512,7 +514,9 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
         NUM_DMS_LSNR_CALLBACK_PROC + \
         NUM_DMS_SMON_CALLBACK_PROC + \
         NUM_DMS_PARALLEL_CALLBACK_PROC + \
-        NUM_DMS_REFORM_CALLLBACK_PROCS ) : 0)
+        NUM_DMS_REFORM_CALLLBACK_PROCS + \
+        NUM_DMS_DRC_RECYCLE_PROCS + \
+        NUM_DMS_DRM_PROCS) : 0)
 
 #define GLOBAL_ALL_PROCS \
     (g_instance.shmem_cxt.MaxBackends + \
