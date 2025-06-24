@@ -2433,8 +2433,9 @@ write_backup(pgBackup *backup, bool strict)
     char    buf[4096];
     int nRet = 0;
 
+    my_pid = getpid();
     join_path_components(path, backup->root_dir, BACKUP_CONTROL_FILE);
-    nRet = snprintf_s(path_temp, sizeof(path_temp), sizeof(path_temp) - 1,"%s.tmp", path);
+    nRet = snprintf_s(path_temp, sizeof(path_temp), sizeof(path_temp) - 1, "%s-%d.tmp", path, my_pid);
     securec_check_ss_c(nRet, "\0", "\0");
     canonicalize_path(path_temp);
     fp = fopen(path_temp, PG_BINARY_W);
