@@ -1,3 +1,7 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92967 then
+
 DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ops USING btree CASCADE; 
 DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ops USING btree CASCADE;
 DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ops USING ubtree CASCADE;
@@ -7,7 +11,6 @@ DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ops USING btree CASCADE;
 DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_ops USING ubtree CASCADE; 
 DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_ops USING ubtree CASCADE; 
 
-DO $$
 DECLARE
     cnt int;
 BEGIN
@@ -22,9 +25,8 @@ BEGIN
         DROP OPERATOR FAMILY IF EXISTS pg_catalog.bit_hamming_ops USING ivfflat CASCADE; 
         DROP OPERATOR CLASS IF EXISTS pg_catalog.bit_hamming_ops USING ivfflat CASCADE; 
     end if;
-END$$;
+END;
 
-DO $$
 DECLARE
     cnt int;
 BEGIN
@@ -51,9 +53,8 @@ BEGIN
         DROP OPERATOR FAMILY IF EXISTS pg_catalog.sparsevec_l1_ops USING hnsw CASCADE;
         DROP OPERATOR CLASS IF EXISTS pg_catalog.sparsevec_l1_ops USING hnsw CASCADE;
     end if;
-END$$;
+END;
 
-DO $$
 DECLARE
 ans boolean;
 BEGIN
@@ -87,12 +88,11 @@ BEGIN
         DROP OPERATOR IF EXISTS pg_catalog.>=(sparsevec, sparsevec) CASCADE;
         DROP OPERATOR IF EXISTS pg_catalog.>(sparsevec, sparsevec) CASCADE;
     end if;
-END$$;
+END;
 
 DROP FUNCTION IF EXISTS pg_catalog.sparsevec_in(cstring, oid, int4) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.sparsevec_typmod_in(_cstring) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.sparsevec_recv(internal, oid, int4) CASCADE;
-DO $$
 DECLARE
 ans boolean;
 BEGIN
@@ -101,11 +101,10 @@ BEGIN
         DROP FUNCTION IF EXISTS pg_catalog.sparsevec_out(pg_catalog.sparsevec) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.sparsevec_send(pg_catalog.sparsevec) CASCADE;
     end if;
-END$$;
+END;
 DROP TYPE IF EXISTS pg_catalog.sparsevec CASCADE;
 DROP TYPE IF EXISTS pg_catalog._sparsevec CASCADE;
 
-DO $$
 DECLARE
 ans boolean;
 BEGIN
@@ -160,12 +159,11 @@ BEGIN
         drop aggregate if exists pg_catalog.avg(vector) CASCADE;
         drop aggregate if exists pg_catalog.sum(vector) CASCADE;
     end if;
-END$$;
+END;
 
 DROP FUNCTION IF EXISTS pg_catalog.vector_in(cstring, oid, int4) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.vector_typmod_in(_cstring) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.vector_recv(internal, oid, int4) CASCADE;
-DO $$
 DECLARE
 ans boolean;
 BEGIN
@@ -174,7 +172,7 @@ BEGIN
         DROP FUNCTION IF EXISTS pg_catalog.vector_out(pg_catalog.vector) CASCADE;
         DROP FUNCTION IF EXISTS pg_catalog.vector_send(pg_catalog.vector) CASCADE;
     end if;
-END$$;
+END;
 DROP TYPE IF EXISTS pg_catalog.vector CASCADE;
 DROP TYPE IF EXISTS pg_catalog._vector CASCADE;
 
@@ -221,3 +219,5 @@ DROP FUNCTION IF EXISTS pg_catalog.hnsw_sparsevec_support(internal) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.hamming_distance(bit, bit) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.jaccard_distance(bit, bit) CASCADE;
 
+END IF;
+END $upgrade$;
