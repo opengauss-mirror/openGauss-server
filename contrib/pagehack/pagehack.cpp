@@ -4682,7 +4682,7 @@ static bool read_batch_pages(
     return true;
 }
 
-static bool verify_batch_continous(dw_batch_t* curr_head, uint16 dwn)
+static bool verify_batch_continous(dw_batch_t* curr_head, char* max_page_addr, uint16 dwn)
 {
     dw_batch_t* curr_tail = dw_batch_tail_page(curr_head);
     if (dw_verify_page(curr_head) && dw_verify_page(curr_tail)) {
@@ -4697,7 +4697,7 @@ static bool verify_batch_continous(dw_batch_t* curr_head, uint16 dwn)
                 curr_tail->head.dwn,
                 curr_tail->page_num);
         }
-    } else if (!dw_verify_batch(curr_head, dwn)) {
+    } else if (!dw_verify_batch(curr_head, max_page_addr, dwn)) {
         if (dw_verify_page(curr_head) && (curr_head->page_num == 0 || curr_head->head.page_id == DW_BATCH_FILE_START)) {
             fprintf(stdout,
                 "no double write pages since last ckpt or file full: "
@@ -4794,7 +4794,7 @@ static uint16 calc_reading_pages(dw_batch_t** curr_head, char* start_buf, uint16
     return (uint16)readingPages;
 }
 
-static void parse_dw_batch(char* buf, FILE* fd, dw_file_head_t* file_head, uint16 page_num, uint16 dw_batch_page_num)
+static void parse_dw_batch(char* buf, char* max_page_addr, FILE* fd, dw_file_head_t* file_head, uint16 page_num, uint16 dw_batch_page_num)
 {
     uint16 file_page_id, read_pages;
     uint16 reading_pages;
@@ -4822,7 +4822,7 @@ static void parse_dw_batch(char* buf, FILE* fd, dw_file_head_t* file_head, uint1
             fprintf(stdout, "no double write pages since last ckpt or file full\n");
             break;
         }
-        if (!verify_batch_continous(curr_head, file_head->head.dwn)) {
+        if (!verify_batch_continous(curr_head, max_page_addr, file_head->head.dwn)) {
             break;
         }
 
@@ -4857,6 +4857,7 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
     dw_batch_meta_file* batch_meta_file;
     char* meta_buf = NULL;
     char* dw_buf = NULL;
+    char* max_page_addr;
 
     /* copy the full path of dw file to meta_full_path */
     if (realpath(file_name, meta_full_path) == NULL && file_name[0] == '\0') {
@@ -4918,6 +4919,7 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
         return false;
     }
 
+    max_page_addr = dw_buf + BLCKSZ * (DW_BUF_MAX_FOR_NOHBK - 1);
     result = fread(dw_buf, BLCKSZ, 1, fd);
     if (result != 1) {
         free(dw_buf);
@@ -4950,7 +4952,7 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
         page_num = dw_batch_page_num - start_page;
     }
 
-    parse_dw_batch(dw_buf, fd, &file_head, (uint16)page_num, (uint16)dw_batch_page_num);
+    parse_dw_batch(dw_buf, max_page_addr, fd, &file_head, (uint16)page_num, (uint16)dw_batch_page_num);
 
     free(dw_buf);
     fclose(fd);
