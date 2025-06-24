@@ -1,3 +1,7 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92967 then
+
 DROP TYPE IF EXISTS pg_catalog.vector CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_TYPE, 8305, 8308, b;
 CREATE TYPE pg_catalog.vector;
@@ -1435,3 +1439,5 @@ CREATE OPERATOR CLASS pg_catalog.sparsevec_l1_ops
 	OPERATOR 1 pg_catalog.<+>(sparsevec, sparsevec) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.l1_distance(sparsevec, sparsevec),
 	FUNCTION 3 pg_catalog.hnsw_sparsevec_support(internal);
+END IF;
+END $upgrade$;
