@@ -34,6 +34,7 @@
 #include "access/htap/imcucache_mgr.h"
 #include "access/htap/imcustorage.h"
 #include "storage/smgr/relfilenode.h"
+#include "storage/matrix_mem.h"
 #endif
 
 const int MAX_LOOPS = 16;
@@ -628,7 +629,7 @@ void CacheMgr::ResetBorrowSlot(CacheSlotId_t slotId)
 bool CacheMgr::ReserveBorrowMem(int size)
 {
     if (g_instance.attr.attr_memory.enable_borrow_memory &&
-        g_instance.matrix_mem_cxt.matrix_mem_inited &&
+        g_matrixMemFunc.matrix_mem_inited &&
         u_sess->imcstore_ctx.pinnedBorrowMemPool != NULL &&
         u_sess->imcstore_ctx.pinnedBorrowMemPool->CanBorrow()) {
         SpinLockAcquire(&m_borrowSizeLock);

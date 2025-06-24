@@ -28,6 +28,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_loader
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_persist
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_retrieve
+    ${CMAKE_CURRENT_SOURCE_DIR}/smb_mgr
 )
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON")
     add_subdirectory(gs_log)
@@ -59,3 +60,4 @@ else()
     endif()
 endif()
 add_subdirectory(gs_retrieve)
+add_subdirectory(smb_mgr)

@@ -55,11 +55,13 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel_recovery
     ${CMAKE_CURRENT_SOURCE_DIR}/extreme_rto
     ${CMAKE_CURRENT_SOURCE_DIR}/ondemand_extreme_rto
+    ${CMAKE_CURRENT_SOURCE_DIR}/smb_recovery
 )
 
 add_subdirectory(parallel_recovery)
 add_subdirectory(extreme_rto)
 add_subdirectory(ondemand_extreme_rto)
+add_subdirectory(smb_recovery)
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/recovery.conf.sample
     DESTINATION share/postgresql/

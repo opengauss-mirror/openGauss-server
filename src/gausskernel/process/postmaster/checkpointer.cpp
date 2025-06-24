@@ -41,6 +41,7 @@
 
 #include "access/xlog_internal.h"
 #include "access/xlog.h"
+#include "access/smb.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -390,6 +391,16 @@ void CheckpointerMain(void)
          * Process any requests or signals received recently.
          */
         CkptAbsorbFsyncRequests();
+
+        if (ENABLE_ASYNC_REDO) {
+            if (g_instance.smb_cxt.use_smb && g_instance.smb_cxt.start_flag && !g_instance.smb_cxt.end_flag) {
+                pgstat_report_activity(STATE_IDLE, NULL);
+                rc = WaitLatch(&t_thrd.proc->procLatch,
+                    WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+                    u_sess->attr.attr_storage.CheckPointTimeout * 1000L /* convert to ms */);
+                continue;
+            }
+        }
 
         if (t_thrd.checkpoint_cxt.got_SIGHUP) {
             t_thrd.checkpoint_cxt.got_SIGHUP = false;

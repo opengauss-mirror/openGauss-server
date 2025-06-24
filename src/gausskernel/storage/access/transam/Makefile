@@ -21,7 +21,7 @@ OBJS = clog.o gtm_single.o multixact.o rmgr.o slru.o csnlog.o transam.o twophase
 	xloginsert.o xlogreader.o xlogutils.o cbmparsexlog.o cbmfuncs.o
 endif
 
-SUBDIRS = parallel_recovery extreme_rto ondemand_extreme_rto 
+SUBDIRS = parallel_recovery extreme_rto ondemand_extreme_rto smb_recovery
     
 include $(top_srcdir)/src/gausskernel/common.mk
 

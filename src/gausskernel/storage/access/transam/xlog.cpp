@@ -171,6 +171,9 @@
 #include "ddes/dms/ss_dms_recovery.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "storage/file/fio_device.h"
+
+/* SMB API*/
+#include "access/smb.h"
 #ifdef ENABLE_UT
 #define STATIC
 #else
@@ -6824,6 +6827,10 @@ void XLOGShmemInit(void)
         InitSharedLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupDelayLatch);
     }
 
+    if (g_instance.smb_cxt.use_smb) {
+        InitSharedLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->SMBWakeupLatch);
+    }
+
     /*
      * If we are not in bootstrap mode, pg_control should already exist. Read
      * and validate it immediately (see comments in ReadControlFile() for the
@@ -10095,6 +10102,9 @@ void StartupXLOG(void)
     ReadRemainSegsFile();
     /* Determine whether it is currently in the switchover of streaming disaster recovery */
     checkHadrInSwitchover();
+    if (g_instance.smb_cxt.use_smb) {
+        smb_recovery::InitSMBWriter();
+    }
     /* REDO */
     if (t_thrd.xlog_cxt.InRecovery) {
         /* use volatile pointer to prevent code rearrangement */
@@ -10387,6 +10397,10 @@ void StartupXLOG(void)
             record = ReadRecord(xlogreader, InvalidXLogRecPtr, LOG, false);
         }
 
+        if (g_instance.smb_cxt.use_smb) {
+            smb_recovery::InitSMBAly();
+        }
+
         XLogReaderState *oldXlogReader = xlogreader;
 
         if (record != NULL) {
@@ -10598,6 +10612,31 @@ void StartupXLOG(void)
                     record = ReadRecord(xlogreader, InvalidXLogRecPtr, LOG, false);
                 }
                 CountRedoTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_1]);
+
+                if (g_instance.smb_cxt.use_smb && smb_recovery::IsSMBSafe(t_thrd.xlog_cxt.EndRecPtr)) {   
+                    if (IsExtremeRedo()) {
+                        ExtremeWaitAllReplayWorkerIdle();                      
+                    } else if (IsParallelRedo()) {
+                        parallel_recovery::WaitAllPageWorkersQueueEmpty();
+                    }
+                    ereport(LOG, (errmsg("SMB pull page start, cur_redo_lsn : %lu, end_lsn : %lu",
+                        t_thrd.xlog_cxt.EndRecPtr, g_instance.smb_cxt.smb_end_lsn)));
+                    smb_recovery::SMBStartPullPages(t_thrd.xlog_cxt.EndRecPtr);
+                    if (xlogreader->isPRProcess && IsExtremeRedo()) {
+                        while (XLByteLT(t_thrd.xlog_cxt.ReadRecPtr, g_instance.smb_cxt.smb_end_lsn)) {
+                            ExtremeRtoSMBReadNextXLogRecord(xlogreader);
+                            record = ExtremeReadNextXLogRecord(&xlogreader, LOG);
+                        }
+                    } else {
+                        record = ReadRecord(xlogreader, g_instance.smb_cxt.smb_end_lsn, LOG, false);
+                    }
+                    ereport(LOG, (errmsg("SMB skip to %lu.", g_instance.smb_cxt.smb_end_lsn)));
+                    if (!ENABLE_ASYNC_REDO) {
+                        while (!g_instance.smb_cxt.end_flag) {
+                            pg_usleep(10000L);
+                        }
+                    }
+                }
             } while (record != NULL);  // end of main redo apply loop
 
             if (SS_IN_ONDEMAND_RECOVERY) {
@@ -11072,6 +11111,13 @@ void StartupXLOG(void)
      * updates to shared memory.)
      */
     {
+        if (g_instance.smb_cxt.use_smb) {
+            //close SMB if not
+            g_instance.smb_cxt.shutdownSMBAly = true;
+            while (g_instance.smb_cxt.SMBAlyPID || g_instance.smb_cxt.SMBAlyAuxPID) {
+                pg_usleep(1000L);
+            }
+        }
         /* use volatile pointer to prevent code rearrangement */
         volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
 

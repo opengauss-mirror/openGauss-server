@@ -1218,7 +1218,6 @@ void clog_redo(XLogReaderState *record)
 
         slotno = ZeroCLOGPage(pageno, false);
         SimpleLruWritePage(ClogCtl(pageno), slotno);
-        Assert(!ClogCtl(pageno)->shared->page_dirty[slotno]);
 
         LWLockRelease(lock);
         g_instance.comm_cxt.predo_cxt.max_clog_pageno = pageno;

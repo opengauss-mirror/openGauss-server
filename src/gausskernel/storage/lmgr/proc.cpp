@@ -43,6 +43,7 @@
 #include "access/transam.h"
 #include "access/twophase.h"
 #include "access/xact.h"
+#include "access/smb.h"
 #include "catalog/namespace.h"
 #include "job/job_scheduler.h"
 #include "job/job_worker.h"
@@ -1213,21 +1214,29 @@ int GetAuxProcEntryIndex(int baseIdx)
             index += t_thrd.threadpool_cxt.listener->GetGroup()->GetGroupId() +
                      MAX_PAGE_WRITER_THREAD_NUM +
                      MAX_RECOVERY_THREAD_NUM +
+                     SMBWRITERAUX_THREAD_NUM +
                      MAX_CBM_THREAD_NUM;
         } else if (t_thrd.bootstrap_cxt.MyAuxProcType == CBMReaderProcess) {
             index += t_thrd.cbm_cxt.CBMReaderIndex +
                      MAX_PAGE_WRITER_THREAD_NUM +
-                     MAX_RECOVERY_THREAD_NUM;
+                     MAX_RECOVERY_THREAD_NUM +
+                     SMBWRITERAUX_THREAD_NUM;
         }
 #ifdef ENABLE_MULTIPLE_NODES
         else if (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionConsumerProcess) {
             index += CompactionWorkerProcess::GetMyCompactionConsumerOrignId() +
                      MAX_PAGE_WRITER_THREAD_NUM +
                      MAX_RECOVERY_THREAD_NUM +
+                     SMBWRITERAUX_THREAD_NUM +
                      MAX_CBM_THREAD_NUM +
                      g_instance.shmem_cxt.ThreadPoolGroupNum;
         }
 #endif /* ENABLE_MULTIPLE_NODES */
+        else if (t_thrd.bootstrap_cxt.MyAuxProcType == SMBWriterAuxiliaryProcess) {
+            index += smb_recovery::SMBWriterLoadThreadIndex() +
+                    MAX_PAGE_WRITER_THREAD_NUM +
+                    MAX_RECOVERY_THREAD_NUM;
+        }
     }
 
     return index;

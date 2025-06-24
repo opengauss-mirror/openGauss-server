@@ -585,6 +585,8 @@ typedef struct XLogCtlData {
 
     Latch dataRecoveryLatch;
 
+    Latch SMBWakeupLatch;
+
     /*
      * During recovery, we keep a copy of the latest checkpoint record here.
      * Used by the background writer when it wants to create a restartpoint.

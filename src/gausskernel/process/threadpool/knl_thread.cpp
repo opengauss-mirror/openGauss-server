@@ -1881,6 +1881,11 @@ static void knlTSPQCxtInit(knl_t_spq_context *spqCxt)
 }
 #endif
 
+static void KnlTSmbWriterInit(KnlTSmbWriterContext *smbWriterCxt)
+{
+    smbWriterCxt->smbWriterAuxIdx = -1;
+}
+
 void knl_thread_init(knl_thread_role role)
 {
     t_thrd.role = role;
@@ -2029,6 +2034,7 @@ void knl_thread_init(knl_thread_role role)
 #endif
     knl_t_inval_msg_init(&t_thrd.inval_msg_cxt);
     knl_t_sql_limit_init(&t_thrd.sql_limit_cxt);
+    KnlTSmbWriterInit(&t_thrd.smbWriterCxt);
 }
 
 __attribute__ ((__used__)) knl_thrd_context *GetCurrentThread()

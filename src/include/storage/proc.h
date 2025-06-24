@@ -449,12 +449,15 @@ const int MAX_COMPACTION_THREAD_NUM = 100;
 const int MAX_COMPACTION_THREAD_NUM = 10;
 #endif
 
+const int SMBWRITERAUX_THREAD_NUM = 7;
+
 /* number of multi auxiliary threads. */
 #define NUM_MULTI_AUX_PROC \
     (MAX_PAGE_WRITER_THREAD_NUM + \
      MAX_RECOVERY_THREAD_NUM + \
      g_instance.shmem_cxt.ThreadPoolGroupNum + \
-     MAX_COMPACTION_THREAD_NUM \
+     MAX_COMPACTION_THREAD_NUM + \
+     SMBWRITERAUX_THREAD_NUM \
     )
 
 #define NUM_AUXILIARY_PROCS (NUM_SINGLE_AUX_PROC + NUM_MULTI_AUX_PROC) 

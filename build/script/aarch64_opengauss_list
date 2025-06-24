@@ -52,6 +52,7 @@
 ./bin/pg_archivecleanup
 ./bin/gs_assessment
 ./bin/gs_retrieve
+./bin/smb_mgr
 ./bin/spq*
 ./etc/kerberos/kadm5.acl  
 ./etc/kerberos/kdc.conf  

@@ -430,3 +430,22 @@ void ExtremeRtoRedoManagerSendEndToStartup()
             Assert(true);
     }
 }
+
+void ExtremeRtoSMBReadNextXLogRecord(XLogReaderState *ptr)
+{
+    void *item;
+    switch (g_extreme_rto_type) {
+        case DEFAULT_EXTREME_RTO:
+            item = extreme_rto::GetRedoItemPtr(ptr);
+            extreme_rto::FreeRedoItem((extreme_rto::RedoItem *)item);
+            ptr = NULL;
+            break;
+        case ONDEMAND_EXTREME_RTO:
+            item = extreme_rto::GetRedoItemPtr(ptr);
+            ondemand_extreme_rto::FreeRedoItem((ondemand_extreme_rto::RedoItem *)item);
+            ptr = NULL;
+            break;
+        default:
+            Assert(true);
+    }
+}

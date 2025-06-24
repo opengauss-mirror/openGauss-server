@@ -3516,6 +3516,10 @@ typedef struct knl_t_invalidation_message_context {
     bool b_can_not_process; /* Currently unable to process invalid messages */
 } knl_t_invalidation_message_context;
 
+typedef struct KnlTSmbWriterContext {
+    int smbWriterAuxIdx;
+} KnlTSmbWriterContext;
+
 /* thread context. */
 typedef struct knl_thrd_context {
     knl_thread_role role;
@@ -3678,6 +3682,7 @@ typedef struct knl_thrd_context {
     knl_t_invalidation_message_context inval_msg_cxt;
     knl_t_sql_limit_context sql_limit_cxt;
     XLogRecPtr repairLsn;
+    KnlTSmbWriterContext smbWriterCxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT

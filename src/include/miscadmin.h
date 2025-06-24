@@ -656,6 +656,9 @@ typedef enum {
     BarrierPreParseBackendProcess,
     DmsAuxiliaryProcess,
     ExrtoRecyclerProcess,
+    SMBWriterProcess,
+    SMBAnalyzeProcess,
+    SMBAnalyzeAuxiliaryProcess,
     NUM_SINGLE_AUX_PROC, /* Sentry for auxiliary type with single thread. */
     SyncAuxiliaryProcess,
 
@@ -666,6 +669,7 @@ typedef enum {
      */
     PageWriterProcess,
     PageRedoProcess,
+    SMBWriterAuxiliaryProcess,
 #ifdef PGXC
     CBMReaderProcess,
 #endif

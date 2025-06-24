@@ -42,6 +42,7 @@
 #include "utils/memprot.h"
 #include "utils/memtrack.h"
 #include "storage/procarray.h"
+#include "storage/matrix_mem.h"
 
 #define MAX_RACK_MEMORY_CHUNK_SIZE MIN_RACK_ALLOC_SIZE
 #define MAX_RACK_MEMORY_ALLOC_SIZE (MAX_RACK_MEMORY_CHUNK_SIZE - sizeof(RackPrefix))
@@ -155,7 +156,7 @@ pg_atomic_uint64 rackUsedSize = 0;
 
 bool EnableBorrowWorkMemory()
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_inited &&
+    return g_matrixMemFunc.matrix_mem_inited &&
            g_instance.attr.attr_memory.enable_borrow_memory &&
            u_sess->attr.attr_memory.borrow_work_mem > 0 &&
            g_instance.attr.attr_memory.avail_borrow_mem > 0;

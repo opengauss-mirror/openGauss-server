@@ -336,13 +336,6 @@ static void knl_g_imcstore_init(knl_g_imcstore_context* context)
 }
 #endif
 
-static void knl_g_matrix_mem_context_init(knl_g_matrix_mem_context* matrix_mem_cxt)
-{
-    Assert(matrix_mem_cxt != NULL);
-    matrix_mem_cxt->matrix_mem_func = {0};
-    matrix_mem_cxt->matrix_mem_inited = false;
-}
-
 static void knl_g_mctcp_init(knl_g_mctcp_context* mctcp_cxt)
 {
     Assert(mctcp_cxt != NULL);
@@ -1087,6 +1080,14 @@ void knl_g_npu_context_init(knl_g_npu_context* npu_context)
     npu_context->ivf_lists_num = 0;
 }
 
+static void knl_g_smb_init(knl_g_smb_context* smb_cxt)
+{
+    Assert(smb_cxt != NULL);
+    errno_t rc = memset_s(smb_cxt, sizeof(knl_g_smb_context), 0, sizeof(knl_g_smb_context));
+    securec_check(rc, "\0", "\0");
+    smb_cxt->stderrFd = -1;
+}
+
 void knl_instance_init()
 {
     g_instance.binaryupgrade = false;
@@ -1153,7 +1154,6 @@ void knl_instance_init()
     knl_g_imcstore_init(&g_instance.imcstore_cxt);
 #endif
 
-    knl_g_matrix_mem_context_init(&g_instance.matrix_mem_cxt);
     g_instance.ckpt_cxt_ctl = &g_instance.ckpt_cxt;
     g_instance.ckpt_cxt_ctl = (knl_g_ckpt_context*)TYPEALIGN(SIZE_OF_TWO_UINT64, g_instance.ckpt_cxt_ctl);
     knl_g_heartbeat_init(&g_instance.heartbeat_cxt);
@@ -1213,6 +1213,7 @@ void knl_instance_init()
 #endif
 
     knl_g_npu_context_init(&g_instance.npu_cxt);
+    knl_g_smb_init(&g_instance.smb_cxt);
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

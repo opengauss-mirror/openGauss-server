@@ -918,6 +918,9 @@ XLogRecord *XLogParallelReadNextRecord(XLogReaderState *xlogreader)
         char *errormsg = NULL;
 
         record = ParallelReadRecord(xlogreader, InvalidXLogRecPtr, &errormsg, SS_XLOGDIR);
+        if (g_instance.smb_cxt.start_flag && XLByteLT(xlogreader->ReadRecPtr, g_instance.smb_cxt.smb_end_lsn)) {
+            record = ParallelReadRecord(xlogreader, g_instance.smb_cxt.smb_end_lsn, &errormsg, NULL);
+        }
         t_thrd.xlog_cxt.ReadRecPtr = xlogreader->ReadRecPtr;
         t_thrd.xlog_cxt.EndRecPtr = xlogreader->EndRecPtr;
         g_instance.comm_cxt.predo_cxt.redoPf.read_ptr = t_thrd.xlog_cxt.ReadRecPtr;
