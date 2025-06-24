@@ -93,5 +93,6 @@ bool IsExtremeMultiThreadRedoRunning();
 bool IsExtremeRtoRunning();
 bool IsExtremeRtoSmartShutdown();
 void ExtremeRtoRedoManagerSendEndToStartup();
+void ExtremeRtoSMBReadNextXLogRecord(XLogReaderState *ptr);
 
 #endif

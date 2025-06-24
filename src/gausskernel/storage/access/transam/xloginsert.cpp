@@ -38,6 +38,7 @@
 #include "replication/ss_disaster_cluster.h"
 #include "pgstat.h"
 #include "access/ustore/knl_upage.h"
+#include "access/smb.h"
 
 /*
  * For each block reference registered with XLogRegisterBuffer, we fill in
@@ -566,6 +567,16 @@ XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id, bool istoast, Tran
      */
     if (module_logging_is_on(MOD_REDO)) {
         XLogInsertTrace(rmid, info, EndPos);
+    }
+
+    if (ENABLE_SMB_CKPT) {
+        for (int i = 0; i < t_thrd.xlog_cxt.max_registered_block_id; i++) {
+            registered_buffer *regbuf = &t_thrd.xlog_cxt.registered_buffers[i];
+            if (!regbuf->in_use)
+                continue;
+            
+            smb_recovery::SMBMarkDirty(BlockGetBuffer(regbuf->page), EndPos);
+        }
     }
 
     /*

@@ -88,6 +88,7 @@ const int MAX_GLOBAL_CACHEMEM_NUM = 128;
 const int MAX_GLOBAL_PRC_NUM = 32;
 const int MAX_AUDIT_NUM = 48;
 const int MAX_SQL_LIMIT_TYPE = 4;
+const int SMBWRITER_THD_NUM = 8;
 
 /* Maximum number of max parallel decode threads */
 #define MAX_PARALLEL_DECODE_NUM 20
@@ -1495,6 +1496,53 @@ typedef struct knl_g_matrix_mem_context {
     bool matrix_mem_inited;
 } knl_g_matrix_mem_context;
 
+namespace smb_recovery {
+    struct SMBAnalyseMem;
+    struct SMBAnalysePageQueue;
+    struct SMBBufMetaMem;
+    struct SMBDirtyPageQueue;
+    struct SMBStatusInfo;
+}
+
+typedef struct knl_g_smb_context {
+    int stderrFd;                   // Specially used to output the failure log to thr foreground when SMB mount fails.
+    int NSMBBuffers;                // SMB buffer nums
+    bool use_smb;
+    MemoryContext ctx;
+    MemoryContext old_ctx;
+
+    ThreadId SMBAlyPID;
+    ThreadId SMBAlyAuxPID;
+    ThreadId SMBWriterPID;
+    ThreadId SMBWriterAuxPID[SMBWRITER_THD_NUM - 1];
+    volatile bool SMBWriterAuxWriting[SMBWRITER_THD_NUM - 1];
+    volatile bool shutdownSMBAly;
+    volatile bool shutdownSMBWriter;
+    volatile sig_atomic_t trigger;
+
+    XLogRecPtr cur_lsn;             // SMB analysis start lsn
+    XLogRecPtr smb_start_lsn;       // SMB page first lan
+    XLogRecPtr smb_end_lsn;         // SMB page last lsn
+    XLogRecPtr smb_unsafe_max_lsn;  // SMB analysis max unsafe lsn
+    int chunkNum;                   // SMB chunk nums
+    void *SMBAlyMem;
+    struct smb_recovery::SMBAnalyseMem *SMBMgr;
+    struct smb_recovery::SMBAnalysePageQueue *SMBAlyPageQueue;
+    void **SMBBufMem;
+    struct smb_recovery::SMBBufMetaMem *SMBBufMgr;
+
+    bool has_gap;
+    volatile bool mount_end_flag;
+    volatile bool aly_mem_init_flag;
+    volatile bool analyze_end_flag;
+    volatile bool analyze_aux_end_flag;
+    volatile bool start_flag;
+    volatile bool end_flag;
+    struct smb_recovery::SMBDirtyPageQueue *pageQueue;
+    struct smb_recovery::SMBStatusInfo *smbInfo;
+    volatile uint32 curSMBWriterIndex;
+} knl_g_smb_context;
+
 typedef struct knl_instance_context {
     knl_virtual_role role;
     volatile int status;
@@ -1619,7 +1667,6 @@ typedef struct knl_instance_context {
     knl_g_imcstore_context imcstore_cxt;
 #endif
 
-    knl_g_matrix_mem_context matrix_mem_cxt;
     knl_g_segment_context segment_cxt;
     knl_g_pldebug_context pldebug_cxt;
     knl_g_spi_plan_context spi_plan_cxt;
@@ -1655,6 +1702,7 @@ typedef struct knl_instance_context {
     bool fi_ctx_init_finished;
 #endif
     knl_g_npu_context npu_cxt;
+    knl_g_smb_context smb_cxt;
 } knl_instance_context;
 
 extern long random();

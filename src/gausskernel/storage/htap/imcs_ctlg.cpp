@@ -42,6 +42,7 @@
 #include "access/htap/imcstore_insert.h"
 #include "access/htap/share_mem_pool.h"
 #include "access/htap/imcs_hash_table.h"
+#include "storage/matrix_mem.h"
 #include "access/htap/imcs_ctlg.h"
 
 void CheckImcstoreCacheReady()
@@ -77,7 +78,7 @@ void CheckForSSMode(Relation rel, bool isShareMemory)
                  errdetail("HTAP is not supported for SS mode if SPQ Plugin not pre-load.")));
     }
 
-    if (isShareMemory && !g_instance.matrix_mem_cxt.matrix_mem_inited) {
+    if (isShareMemory && !g_matrixMemFunc.matrix_mem_inited) {
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  errmsg("Un-support feature"),

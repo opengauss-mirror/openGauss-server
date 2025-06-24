@@ -25,6 +25,7 @@
 
 #include "access/double_write.h"
 #include "access/xlogproc.h"
+#include "access/smb.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/proc.h"
@@ -675,6 +676,12 @@ Buffer ReadBufferFastNormal(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum
         bufHdr->lsn_dirty = InvalidXLogRecPtr;
 #endif
         SegTerminateBufferIO(bufHdr, false, BM_VALID);
+        if (ENABLE_ASYNC_REDO) {
+            if (g_instance.smb_cxt.use_smb && t_thrd.role != SMBWRITER &&
+                g_instance.smb_cxt.start_flag && !g_instance.smb_cxt.end_flag) {
+                smb_recovery::SMBPullOnePageWithBuf(bufHdr);
+            }
+        }
     }
 
 found_branch:
@@ -687,6 +694,12 @@ found_branch:
         }
     }
 
+    if (ENABLE_ASYNC_REDO) {
+        if (g_instance.smb_cxt.use_smb && t_thrd.role != SMBWRITER &&
+            g_instance.smb_cxt.start_flag && !g_instance.smb_cxt.end_flag) {
+            smb_recovery::SMBPullOnePageWithBuf(bufHdr);
+        }
+    }
     SegmentCheck(SegBufferIsPinned(bufHdr));
     return BufferDescriptorGetBuffer(bufHdr);
 }
@@ -732,6 +745,15 @@ retry:
         if (!BUFFERTAGS_PTR_EQUAL(&buf->tag, &new_tag)) {
             SegUnpinBuffer(buf);
             goto retry;
+        }
+
+        if (ENABLE_ASYNC_REDO) {
+            if (g_instance.smb_cxt.use_smb && t_thrd.role != SMBWRITER &&
+                g_instance.smb_cxt.start_flag && !g_instance.smb_cxt.end_flag &&
+                smb_recovery::CheckPagePullStateFromSMB(buf->tag) == SMB_REDOING) {
+                SegUnpinBuffer(buf);
+                goto retry;
+            }
         }
 
         *foundPtr = true;

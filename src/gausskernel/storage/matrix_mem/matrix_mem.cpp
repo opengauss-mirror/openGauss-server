@@ -29,13 +29,19 @@
 #include "knl/knl_instance.h"
 #include "storage/matrix_mem.h"
 
+MatrixMemFunc g_matrixMemFunc = {0};
+
 int MaxtrixMemLoadSymbol(char *symbol, void **symLibHandle)
 {
     const char *dlsymErr = NULL;
-    *symLibHandle = dlsym(g_instance.matrix_mem_cxt.matrix_mem_func.handle, symbol);
+    *symLibHandle = dlsym(g_matrixMemFunc.handle, symbol);
     dlsymErr = dlerror();
     if (dlsymErr != NULL) {
+#ifdef FRONTEND
+        fprintf(stderr, _("matrix mem load symbol: %s, error: %s"), symbol, dlsymErr);
+#else
         ereport(WARNING, (errmsg("matrix mem load symbol: %s, error: %s", symbol, dlsymErr)));
+#endif
         return MATRIX_MEM_ERROR;
     }
     return MATRIX_MEM_SUCCESS;
@@ -45,38 +51,43 @@ int MaxtrixMemOpenDl(void **libHandle, char *symbol)
 {
     *libHandle = dlopen(symbol, RTLD_LAZY);
     if (*libHandle == NULL) {
+#ifdef FRONTEND
+        fprintf(stderr, _("load matrix mem dynamic lib: %s, error: %s"), symbol, dlerror());
+#else
         ereport(WARNING, (errmsg("load matrix mem dynamic lib: %s, error: %s", symbol, dlerror())));
+#endif
         return MATRIX_MEM_ERROR;
     }
     return MATRIX_MEM_SUCCESS;
 }
 
-void MatrixMemFuncInit()
+void MatrixMemFuncInit(char* lmemfabricClientPath)
 {
     SymbolInfo symbols[] = {
-        {"RackMemMalloc", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemMalloc},
-        {"RackMemMallocAsync", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemMallocAsync},
-        {"RackMemFree", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemFree},
-        {"RackMemFreeAsync", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemFreeAsync},
-        {"RackMemShmLookupShareRegions", (void **)&g_instance.
-            matrix_mem_cxt.matrix_mem_func.rackMemShmLookupShareRegions},
-        {"RackMemShmLookupRegionInfo", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmLookupRegionInfo},
-        {"RackMemShmCreate", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmCreate},
-        {"RackMemShmMmap", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmMmap},
-        {"RackMemShmCacheOpt", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmCacheOpt},
-        {"RackMemShmUnmmap", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmUnmmap},
-        {"RackMemShmDelete", (void **)&g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmDelete}
+        {"RackMemMalloc", (void **)&g_matrixMemFunc.rackMemMalloc},
+        {"RackMemMallocAsync", (void **)&g_matrixMemFunc.rackMemMallocAsync},
+        {"RackMemFree", (void **)&g_matrixMemFunc.rackMemFree},
+        {"RackMemFreeAsync", (void **)&g_matrixMemFunc.rackMemFreeAsync},
+        {"RackMemShmLookupShareRegions", (void **)&g_matrixMemFunc.rackMemShmLookupShareRegions},
+        {"RackMemShmLookupRegionInfo", (void **)&g_matrixMemFunc.rackMemShmLookupRegionInfo},
+        {"RackMemShmCreate", (void **)&g_matrixMemFunc.rackMemShmCreate},
+        {"RackMemShmMmap", (void **)&g_matrixMemFunc.rackMemShmMmap},
+        {"RackMemShmCacheOpt", (void **)&g_matrixMemFunc.rackMemShmCacheOpt},
+        {"RackMemShmUnmmap", (void **)&g_matrixMemFunc.rackMemShmUnmmap},
+        {"RackMemShmDelete", (void **)&g_matrixMemFunc.rackMemShmDelete}
     };
 
     struct stat st;
-    if (lstat((const char*)g_instance.attr.attr_storage.lmemfabric_client_path, &st) == -1) {
-        ereport(WARNING, (errmsg("load matrix mem dynamic lib error: %s, lib not exists",
-            g_instance.attr.attr_storage.lmemfabric_client_path)));
+    if (lstat((const char*)lmemfabricClientPath, &st) == -1) {
+#ifdef FRONTEND
+        fprintf(stderr, _("load matrix mem dynamic lib error: %s, lib not exists"), lmemfabricClientPath);
+#else
+        ereport(WARNING, (errmsg("load matrix mem dynamic lib error: %s, lib not exists", lmemfabricClientPath)));
+#endif
         return;
     }
 
-    if (SECUREC_UNLIKELY(MaxtrixMemOpenDl(&g_instance.matrix_mem_cxt.matrix_mem_func.handle,
-        g_instance.attr.attr_storage.lmemfabric_client_path) != MATRIX_MEM_SUCCESS)) {
+    if (SECUREC_UNLIKELY(MaxtrixMemOpenDl(&g_matrixMemFunc.handle, lmemfabricClientPath) != MATRIX_MEM_SUCCESS)) {
         return;
     }
 
@@ -88,67 +99,67 @@ void MatrixMemFuncInit()
     }
 
     /* succeeded to load */
-    g_instance.matrix_mem_cxt.matrix_mem_inited = true;
+    g_matrixMemFunc.matrix_mem_inited = true;
 }
 
 void MatrixMemFuncUnInit()
 {
-    if (g_instance.matrix_mem_cxt.matrix_mem_inited) {
-        (void)dlclose(g_instance.matrix_mem_cxt.matrix_mem_func.handle);
-        g_instance.matrix_mem_cxt.matrix_mem_func.handle = NULL;
-        g_instance.matrix_mem_cxt.matrix_mem_inited = false;
+    if (g_matrixMemFunc.matrix_mem_inited) {
+        (void)dlclose(g_matrixMemFunc.handle);
+        g_matrixMemFunc.handle = NULL;
+        g_matrixMemFunc.matrix_mem_inited = false;
     }
 }
 
 void *RackMemMalloc(size_t size, PerfLevel perfLevel, intptr_t attr)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemMalloc(size, perfLevel, attr);
+    return g_matrixMemFunc.rackMemMalloc(size, perfLevel, attr);
 }
 void *RackMemMallocAsync(size_t size, PerfLevel perfLevel, intptr_t attr, AsyncFreeCallBack func, intptr_t ctx)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemMallocAsync(size, perfLevel, attr, func, ctx);
+    return g_matrixMemFunc.rackMemMallocAsync(size, perfLevel, attr, func, ctx);
 }
 void RackMemFree(void *ptr)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemFree(ptr);
+    return g_matrixMemFunc.rackMemFree(ptr);
 }
 
 int RackMemFreeAsync(void *ptr, AsyncFreeCallBack func, intptr_t ctx)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemFreeAsync(ptr, func, ctx);
+    return g_matrixMemFunc.rackMemFreeAsync(ptr, func, ctx);
 }
 
 int RackMemShmLookupShareRegions(const char *baseNid, ShmRegionType type, SHMRegions *regions)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmLookupShareRegions(baseNid, type, regions);
+    return g_matrixMemFunc.rackMemShmLookupShareRegions(baseNid, type, regions);
 }
 
 int RackMemShmLookupRegionInfo(SHMRegionDesc *region, SHMRegionInfo *info)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmLookupRegionInfo(region, info);
+    return g_matrixMemFunc.rackMemShmLookupRegionInfo(region, info);
 }
 
 int RackMemShmCreate(char *name, uint64_t size, const char *baseNid, SHMRegionDesc *shmRegion)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmCreate(name, size, baseNid, shmRegion);
+    return g_matrixMemFunc.rackMemShmCreate(name, size, baseNid, shmRegion);
 }
 
 void *RackMemShmMmap(void *start, size_t length, int prot, int flags, const char *name, off_t offset)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmMmap(start, length, prot, flags, name, offset);
+    return g_matrixMemFunc.rackMemShmMmap(start, length, prot, flags, name, offset);
 }
 
 int RackMemShmCacheOpt(void *start, size_t length, ShmCacheOpt type)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmCacheOpt(start, length, type);
+    return g_matrixMemFunc.rackMemShmCacheOpt(start, length, type);
 }
 
 int RackMemShmUnmmap(void *start, size_t length)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmUnmmap(start, length);
+    return g_matrixMemFunc.rackMemShmUnmmap(start, length);
 }
 
 int RackMemShmDelete(char *name)
 {
-    return g_instance.matrix_mem_cxt.matrix_mem_func.rackMemShmDelete(name);
+    return g_matrixMemFunc.rackMemShmDelete(name);
 }

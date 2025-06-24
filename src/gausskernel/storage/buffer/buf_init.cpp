@@ -185,6 +185,7 @@ void InitBufferPool(void)
             pg_atomic_init_u64(&buf->extra->rec_lsn, InvalidXLogRecPtr);
             buf->extra->aio_in_progress = false;
             buf->extra->dirty_queue_loc = PG_UINT64_MAX;
+            pg_atomic_init_u64(&buf->extra->smb_rec_lsn, InvalidXLogRecPtr);
             buf->extra->encrypt = false;
         }
         g_instance.bgwriter_cxt.rel_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_TBL);

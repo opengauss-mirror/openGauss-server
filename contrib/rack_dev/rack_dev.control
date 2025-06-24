@@ -1,0 +1,5 @@
+# rack_dev extension
+comment = 'rack sever develop tools'
+default_version = '1.0'
+module_pathname = '$libdir/rack_dev'
+relocatable = true

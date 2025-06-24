@@ -282,6 +282,7 @@ static void assign_recovery_parallelism(int newval, void* extra);
 static bool check_xlog_archive_command(char** newval, void** extra, GucSource source);
 static bool check_xlog_archive_dest(char** newval, void** extra, GucSource source);
 static bool check_enable_mmap_guc(bool* newval, void** extra, GucSource source);
+static void AssignSmbBuffers(int newval, void* extra);
 
 static const struct config_enum_entry resource_track_log_options[] = {
     {"summary", SUMMARY, false},
@@ -1587,6 +1588,20 @@ static void InitStorageConfigureNamesInt()
             INT_MAX / 2,
             NULL,
             NULL,
+            NULL},
+        {{"max_smb_memory",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the maximum number of shared memory buffer."),
+            NULL,
+            GUC_UNIT_BLOCKS},
+            &g_instance.smb_cxt.NSMBBuffers,
+            0,
+            0,
+            13107200, /* 100GB */
+            NULL,
+            AssignSmbBuffers,
             NULL},
         {{"vacuum_bulk_read_size",
             PGC_SIGHUP,
@@ -7671,4 +7686,11 @@ static bool check_enable_mmap_guc(bool* newval, void** extra, GucSource source)
     return true;
 #endif
     return true;
+}
+
+static void AssignSmbBuffers(int newval, void* extra)
+{
+    if (!g_instance.smb_cxt.use_smb) {
+        g_instance.smb_cxt.use_smb = (newval != 0);
+    }
 }

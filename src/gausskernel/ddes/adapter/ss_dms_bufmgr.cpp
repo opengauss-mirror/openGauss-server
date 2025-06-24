@@ -812,7 +812,8 @@ bool CheckPageNeedSkipInRecovery(Buffer buf, uint64 xlogLsn)
 dms_session_e DMSGetProcType4RequestPage()
 {
     // proc type used in DMS request page
-    if (AmDmsReformProcProcess() || ((AmPageRedoProcess() || AmStartupProcess()) && !SS_ONDEMAND_BUILD_DONE)) {
+    if (AmDmsReformProcProcess() || ((AmPageRedoProcess() || AmStartupProcess()) && !SS_ONDEMAND_BUILD_DONE)
+        || (t_thrd.role == SMBWRITER && (g_instance.smb_cxt.start_flag))) {
         /* When SS double cluster, main standby always is in recovery.
          * When pmState is PM_HOT_STANDBY, this case indicates main standby support to read only. So here
          * DMS_SESSION_RECOVER_HOT_STANDBY will be returned, it indicates that normal threads can access

@@ -29,7 +29,7 @@
 #include "storage/rack_mem_shm.h"
 
 #ifdef __aarch64__
-#define ENABLE_RACK_MEM (g_instance.matrix_mem_cxt.matrix_mem_inited)
+#define ENABLE_RACK_MEM (g_matrixMemFunc.matrix_mem_inited)
 #else
 #define ENABLE_RACK_MEM false
 #endif
@@ -43,6 +43,7 @@ typedef struct SymbolInfo {
 } SymbolInfo;
 
 typedef struct MatrixMemFunc {
+    bool matrix_mem_inited;
     void *handle;
     void* (*rackMemMalloc)(size_t size, PerfLevel perfLevel, intptr_t attr);
     void* (*rackMemMallocAsync)(size_t size, PerfLevel perfLevel, intptr_t attr, AsyncFreeCallBack func, intptr_t ctx);
@@ -57,7 +58,9 @@ typedef struct MatrixMemFunc {
     int (*rackMemShmDelete)(char *name);
 } MatrixMemFunc;
 
-extern void MatrixMemFuncInit();
+extern MatrixMemFunc g_matrixMemFunc;
+
+extern void MatrixMemFuncInit(char* lmemfabricClientPath);
 
 extern void MatrixMemFuncUnInit();
 

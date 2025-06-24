@@ -248,6 +248,7 @@
 #include "access/extreme_rto/standby_read/lsn_info_meta.h"
 #include "access/extreme_rto/standby_read/standby_read_base.h"
 #include "utils/distribute_test.h"
+#include "access/smb.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/compaction/compaction_entry.h"
 #include "tsdb/compaction/compaction_worker_entry.h"
@@ -2785,7 +2786,7 @@ int PostmasterMain(int argc, char* argv[])
     InitDolpinProtoIfNeeded();
 
 #ifdef __aarch64__
-    MatrixMemFuncInit();
+    MatrixMemFuncInit(g_instance.attr.attr_storage.lmemfabric_client_path);
 #endif
 
     /*
@@ -2977,6 +2978,11 @@ int PostmasterMain(int argc, char* argv[])
         Tsdb::PartCacheMgr::GetInstance().init();
     }
 #endif
+
+    if (g_instance.smb_cxt.use_smb && (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE ||
+        t_thrd.xlog_cxt.server_mode == NORMAL_MODE)) {
+        g_instance.smb_cxt.stderrFd = dup(fileno(stderr));
+    }
 
     /*
      * If enabled, start up syslogger collection subprocess, and init LogCtl memory.
@@ -6561,6 +6567,14 @@ static void pmdie(SIGNAL_ARGS)
              * PostmasterStateMachine will take the next step.
              */
             PostmasterStateMachine();
+            if (g_instance.smb_cxt.SMBWriterPID != 0) {
+                signal_child(g_instance.smb_cxt.SMBWriterPID, SIGTERM);
+                for (int i = 0; i < smb_recovery::SMB_BUF_MGR_NUM - 1; i++) {
+                    if (g_instance.smb_cxt.SMBWriterAuxPID[i] != 0) {
+                        signal_child(g_instance.smb_cxt.SMBWriterAuxPID[i], SIGTERM);
+                    }
+                }
+            }
             break;
 
         case SIGQUIT:
@@ -7100,6 +7114,14 @@ dms_demote:
      * PostmasterStateMachine will take the next step.
      */
     PostmasterStateMachine();
+    if (g_instance.smb_cxt.SMBWriterPID != 0) {
+        signal_child(g_instance.smb_cxt.SMBWriterPID, SIGTERM);
+        for (int i = 0; i < smb_recovery::SMB_BUF_MGR_NUM - 1; i++) {
+            if (g_instance.smb_cxt.SMBWriterAuxPID[i] != 0) {
+                signal_child(g_instance.smb_cxt.SMBWriterAuxPID[i], SIGTERM);
+            }
+        }
+    }
 }
 
 /*
@@ -7575,6 +7597,24 @@ static void reaper(SIGNAL_ARGS)
             }
 
             if (is_pagewriter_thread) {
+                continue;
+            }
+        }
+
+        if (g_instance.smb_cxt.use_smb) {
+            bool isSmbWriterAuxThread = false;
+            for (int i = 0; i < smb_recovery::SMB_BUF_MGR_NUM - 1; i++) {
+                if (pid == g_instance.smb_cxt.SMBWriterAuxPID[i]) {
+                    Assert(!dummyStandbyMode);
+                    g_instance.smb_cxt.SMBWriterAuxPID[i] = 0;
+                    if (!EXIT_STATUS_0(exitstatus)) {
+                        HandleChildCrash(pid, exitstatus, _("smb aux writer process"));
+                    }
+                    isSmbWriterAuxThread = true;
+                    break;
+                }
+            }
+            if (isSmbWriterAuxThread) {
                 continue;
             }
         }
@@ -13972,6 +14012,18 @@ static void SetAuxType()
         case SQL_LIMIT_THREAD:
             t_thrd.bootstrap_cxt.MyAuxProcType = SqlLimitProcess;
             break;
+        case SMBWRITER:
+            t_thrd.bootstrap_cxt.MyAuxProcType = SMBWriterProcess;
+            break;
+        case SMBWRITERAUXILIARY:
+            t_thrd.bootstrap_cxt.MyAuxProcType = SMBWriterAuxiliaryProcess;
+            break;
+        case SMB_ALY_THREAD:
+            t_thrd.bootstrap_cxt.MyAuxProcType = SMBAnalyzeProcess;
+            break;
+        case SMB_ALY_AUXILIARY_THREAD:
+            t_thrd.bootstrap_cxt.MyAuxProcType = SMBAnalyzeAuxiliaryProcess;
+            break;
         default:
             ereport(ERROR, (errmsg("unrecorgnized proc type %d", thread_role)));
     }
@@ -14035,6 +14087,10 @@ void SetExtraThreadInfo(knl_thread_arg* arg)
             t_thrd.bgworker_cxt.bgworker   = ((BackgroundWorkerArgs *)arg->payload)->bgworker;
             t_thrd.bgworker_cxt.bgworkerId = ((BackgroundWorkerArgs *)arg->payload)->bgworkerId;
             pfree_ext(arg->payload);
+            break;
+        }
+        case SMB_ALY_THREAD: {
+            smb_recovery::SetSMBAnalyzerInfo((smb_recovery::SMBAnalyzer *)arg->payload);
             break;
         }
         default:
@@ -14237,6 +14293,26 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
 
         case PAGEWRITER_THREAD:
             ckpt_pagewriter_main();
+            proc_exit(1);
+            break;
+
+        case SMBWRITER:
+            smb_recovery::SMBWriterMain();
+            proc_exit(1);
+            break;
+
+        case SMBWRITERAUXILIARY:
+            smb_recovery::SMBWriterAuxiliaryMain();
+            proc_exit(1);
+            break;
+
+        case SMB_ALY_THREAD:
+            smb_recovery::SMBAnalysisMain();
+            proc_exit(1);
+            break;
+
+        case SMB_ALY_AUXILIARY_THREAD:
+            smb_recovery::SMBAnalysisAuxiliaryMain();
             proc_exit(1);
             break;
 
@@ -14541,6 +14617,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case STARTUP:
         case PAGEWRITER_THREAD:
         case PAGEREPAIR_THREAD:
+        case SMBWRITER:
+        case SMBWRITERAUXILIARY:
+        case SMB_ALY_THREAD:
+        case SMB_ALY_AUXILIARY_THREAD:
         case HEARTBEAT:
         case SHARE_STORAGE_XLOG_COPYER:
         case EXRTO_RECYCLER:
@@ -15105,6 +15185,10 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<CBMREADER>, CBMREADER, "CBMReader", "CBM reader" },
     { GaussDbThreadMain<PAGEWRITER_THREAD>, PAGEWRITER_THREAD, "pagewriter", "page writer" },
     { GaussDbThreadMain<PAGEREPAIR_THREAD>, PAGEREPAIR_THREAD, "pagerepair", "page repair" },
+    { GaussDbThreadMain<SMBWRITER>, SMBWRITER, "SMBWriter", "SMB Writer" },
+    { GaussDbThreadMain<SMBWRITERAUXILIARY>, SMBWRITERAUXILIARY, "SMBWriterAux", "SMB Writer Auxiliary" },
+    { GaussDbThreadMain<SMB_ALY_THREAD>, SMB_ALY_THREAD, "SMBanalyze", "SMB analyze" },
+    { GaussDbThreadMain<SMB_ALY_AUXILIARY_THREAD>, SMB_ALY_AUXILIARY_THREAD, "SMBauxanalyze", "SMB auxiliary analyze" },
     { GaussDbThreadMain<HEARTBEAT>, HEARTBEAT, "heartbeat", "heart beat" },
     { GaussDbThreadMain<COMM_SENDERFLOWER>, COMM_SENDERFLOWER, "COMMsendflow", "communicator sender flower" },
     { GaussDbThreadMain<COMM_RECEIVERFLOWER>, COMM_RECEIVERFLOWER, "COMMrecvflow", "communicator receiver flower" },

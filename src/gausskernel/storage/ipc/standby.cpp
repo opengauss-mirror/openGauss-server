@@ -859,6 +859,9 @@ void standby_redo(XLogReaderState* record)
 
     /* Backup blocks are not used in standby records */
     Assert(!XLogRecHasAnyBlockRefs(record));
+    if (g_instance.smb_cxt.use_smb) {
+        return;
+    }
 
     if (info == XLOG_STANDBY_CSN_COMMITTING || info == XLOG_STANDBY_CSN_ABORTED) {
         DealCSNLogForHotStby(record, info);

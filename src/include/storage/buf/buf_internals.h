@@ -205,6 +205,7 @@ typedef struct BufferDescExtra {
     /* below fields are used for incremental checkpoint */
     pg_atomic_uint64 rec_lsn;        /* recovery LSN */
     volatile uint64 dirty_queue_loc; /* actual loc of dirty page queue */
+    pg_atomic_uint64 smb_rec_lsn;
     bool encrypt; /* enable table's level data encryption */
 
     volatile uint64 lsn_on_disk;

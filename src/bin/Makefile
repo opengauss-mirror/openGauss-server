@@ -32,7 +32,8 @@ SUBDIRS = \
 	gsqlerr \
 	pg_upgrade \
 	pg_basebackup \
-	pg_probackup
+	pg_probackup \
+	smb_mgr
 
 ifeq ($(PORTNAME), win32)
 SUBDIRS += pgevent
@@ -56,7 +57,8 @@ SUBDIRS = \
 	pg_basebackup \
 	pg_probackup \
 	gs_plan_simulator \
-	gs_retrieve
+	gs_retrieve \
+	smb_mgr
 
 ifeq ($(enable_ut), yes)
 	SUBDIRS += gs_persist

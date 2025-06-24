@@ -153,6 +153,7 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
         t_thrd.startup_cxt.standby_triggered = true;
     } else if (CheckNotifySignal(NOTIFY_FAILOVER)) {
         t_thrd.startup_cxt.failover_triggered = true;
+        g_instance.smb_cxt.trigger = true;
 #ifndef ENABLE_MULTIPLE_NODES
         WaitApplyAllDCFLog();
 #endif
@@ -164,6 +165,7 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
 #endif
     } else if (CheckNotifySignal(NOTIFY_SWITCHOVER)) {
         t_thrd.startup_cxt.switchover_triggered = true;
+        g_instance.smb_cxt.trigger = true;
 #ifndef ENABLE_MULTIPLE_NODES
         WaitApplyAllDCFLog();
 #endif
