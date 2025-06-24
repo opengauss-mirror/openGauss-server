@@ -2549,12 +2549,7 @@ static Relation RelationBuildDescExtended(Oid targetRelId, bool insertIt, bool b
      * mlog oid
      */
     if (!IsCatalogRelation(relation)) {
-        /* if do not have incremental matview, no need to insert into mlog */
-        if (is_table_in_incre_matview(relid)) {
-            relation->rd_mlogoid = find_matview_mlog_table(relid);
-        } else {
-            relation->rd_mlogoid = InvalidOid;
-        }
+        relation->rd_mlogoid = find_matview_mlog_table(relid);
     }
 
     /*

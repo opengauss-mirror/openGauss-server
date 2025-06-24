@@ -67,7 +67,6 @@ extern Oid create_matview_map(Oid intoRelationId);
 extern void insert_into_matview_map(Oid mapid, Oid matid, ItemPointer matcitd,
                             Oid relid, ItemPointer relctid, TransactionId xid);
 extern Oid find_matview_mlog_table(Oid relid);
-extern bool is_table_in_incre_matview(Oid relid);
 extern void insert_into_mlog_table(Relation rel, Oid mlogid, HeapTuple tuple,
                             ItemPointer tid, TransactionId xid, char action);
 extern void create_matview_meta(Query *query, RangeVar *rel, bool incremental);
