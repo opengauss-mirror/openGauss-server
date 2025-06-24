@@ -170,64 +170,61 @@ SELECT mfg
 FROM brand ,trait_value ,WITH_001
 START WITH TRAIT_VALUE_CD=brand_name
 CONNECT BY PRIOR brand_cd=UOM_CD;
-                                                                       QUERY PLAN                                                                        
----------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                          QUERY PLAN                                                                           
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: array_key_3
            ->  Recursive Union
                  ->  Hash Join
-                       Hash Cond: ((swtest.brand.brand_name)::text = (swtest.trait_value.trait_value_cd)::text)
-                       ->  Seq Scan on brand
+                       Hash Cond: ((swtest.trait_value.trait_value_cd)::text = (swtest.brand.brand_name)::text)
+                       ->  Seq Scan on trait_value
                        ->  Hash
                              ->  Nested Loop
+                                   ->  Seq Scan on brand
                                    ->  CTE Scan on tmp_reuslt
                                          CTE tmp_reuslt
                                            ->  StartWith Operator
                                                  Start With pseudo atts: array_key_4
                                                  ->  Recursive Union
                                                        ->  Hash Join
-                                                             Hash Cond: ((swtest.trait_value.trait_val)::text = (swtest.offers_20050701.party_id)::text)
-                                                             ->  Seq Scan on trait_value
-                                                             ->  Hash
-                                                                   ->  Seq Scan on offers_20050701
-                                                       ->  Nested Loop
+                                                             Hash Cond: ((swtest.offers_20050701.party_id)::text = (swtest.trait_value.trait_val)::text)
                                                              ->  Seq Scan on offers_20050701
-                                                             ->  Materialize
-                                                                   ->  Nested Loop
-                                                                         ->  WorkTable Scan on tmp_reuslt
-                                                                               Filter: (("trait_value@trait_value_cd")::text ~~ '%V%'::text)
-                                                                         ->  Seq Scan on trait_value
-                                   ->  Materialize
-                                         ->  Seq Scan on trait_value
+                                                             ->  Hash
+                                                                   ->  Seq Scan on trait_value
+                                                       ->  Nested Loop
+                                                             ->  Nested Loop
+                                                                   ->  WorkTable Scan on tmp_reuslt
+                                                                         Filter: (("trait_value@trait_value_cd")::text ~~ '%V%'::text)
+                                                                   ->  Seq Scan on offers_20050701
+                                                             ->  Seq Scan on trait_value
                  ->  Hash Join
                        Hash Cond: ((tmp_reuslt."brand@brand_cd")::text = (swtest.trait_value.uom_cd)::text)
-                       ->  Nested Loop
-                             ->  WorkTable Scan on tmp_reuslt
-                             ->  Seq Scan on brand
+                       ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
                              ->  Nested Loop
-                                   ->  CTE Scan on tmp_reuslt
-                                         CTE tmp_reuslt
-                                           ->  StartWith Operator
-                                                 Start With pseudo atts: array_key_4
-                                                 ->  Recursive Union
-                                                       ->  Hash Join
-                                                             Hash Cond: ((swtest.trait_value.trait_val)::text = (swtest.offers_20050701.party_id)::text)
-                                                             ->  Seq Scan on trait_value
-                                                             ->  Hash
+                                   ->  Nested Loop
+                                         ->  Seq Scan on brand
+                                         ->  CTE Scan on tmp_reuslt
+                                               CTE tmp_reuslt
+                                                 ->  StartWith Operator
+                                                       Start With pseudo atts: array_key_4
+                                                       ->  Recursive Union
+                                                             ->  Hash Join
+                                                                   Hash Cond: ((swtest.offers_20050701.party_id)::text = (swtest.trait_value.trait_val)::text)
                                                                    ->  Seq Scan on offers_20050701
-                                                       ->  Nested Loop
-                                                             ->  Seq Scan on offers_20050701
-                                                             ->  Materialize
+                                                                   ->  Hash
+                                                                         ->  Seq Scan on trait_value
+                                                             ->  Nested Loop
                                                                    ->  Nested Loop
                                                                          ->  WorkTable Scan on tmp_reuslt
                                                                                Filter: (("trait_value@trait_value_cd")::text ~~ '%V%'::text)
-                                                                         ->  Seq Scan on trait_value
+                                                                         ->  Seq Scan on offers_20050701
+                                                                   ->  Seq Scan on trait_value
                                    ->  Materialize
                                          ->  Seq Scan on trait_value
-(55 rows)
+(52 rows)
 
 WITH WITH_001 AS (SELECT 1 FROM offers_20050701 ,trait_value START WITH PARTY_ID=TRAIT_VAL CONNECT BY PRIOR TRAIT_VALUE_CD LIKE '%V%')
 SELECT mfg

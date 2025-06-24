@@ -32,6 +32,7 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
 #include "catalog/storage_gtt.h"
+#include "catalog/pg_statistic_history.h"
 #include "commands/dbcommands.h"
 #include "executor/node/nodeModifyTable.h"
 #include "foreign/fdwapi.h"
@@ -927,6 +928,24 @@ void get_relation_info(PlannerInfo* root, RangeTblEntry* rte, RelOptInfo* rel)
         (*get_relation_info_hook) (root, relationObjectId, inhparent, rel);
 }
 
+bool is_table_vacuumed_or_analyzed(Oid relid)
+{
+    Relation pgstahis = NULL;
+    SysScanDesc scan = NULL;
+    ScanKeyData key[1];
+    HeapTuple tuple = NULL;
+    bool found = false;
+    ScanKeyInit(&key[0], Anum_pg_statistic_history_starelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
+    pgstahis = relation_open(StatisticHistoryRelationId, AccessShareLock);
+    scan = systable_beginscan(pgstahis, StatisticHistoryTabTypAttnumIndexId, true, NULL, 1, key);
+    if (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        found = true;
+    }
+    systable_endscan(scan);
+    relation_close(pgstahis, AccessShareLock);
+    return found;
+}
+
 /*
  * estimate_rel_size - estimate # pages and # tuples in a table or index
  *
@@ -1071,11 +1090,7 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
              * happen instantaneously, and it won't happen at all for cases
              * such as temporary tables.)
              *
-             * We approximate "never vacuumed" by "has relpages = 0", which
-             * means this will also fire on genuinely empty relations.	Not
-             * great, but fortunately that's a seldom-seen case in the real
-             * world, and it shouldn't degrade the quality of the plan too
-             * much anyway to err in this direction.
+             * We check "never vacuumed" by search pg_statistic_history.
              *
              * There are two exceptions wherein we don't apply this heuristic.
              * One is if the table has inheritance children.  Totally empty
@@ -1084,9 +1099,10 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
              * minimum to indexes.
              */
             if (curpages < 10 && rel->rd_rel->relpages == 0 && !rel->rd_rel->relhassubclass &&
-                rel->rd_rel->relkind != RELKIND_INDEX)
+                rel->rd_rel->relkind != RELKIND_INDEX && !is_table_vacuumed_or_analyzed(rel->rd_id)) {
                 curpages = 10;
-
+            }
+                
             /* report estimated # pages */
             *pages = curpages;
             /* quick exit if rel is clearly empty */

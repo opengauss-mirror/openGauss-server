@@ -1906,20 +1906,18 @@ select * from vector_bitmap_table_01 t1 inner join vector_bitmap_table_01 t2 on 
 ----
 explain (verbose on, costs off)
 select * from vector_bitmap_table_03 where (col_int1 in (2, 9, 21) and col_num in (1.5, 2.3) and length(col_txt) < 10) and col_int2 < 10 order by 1, 2, 3, 4;
-                                                                                                    QUERY PLAN                                                                                                    
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                  QUERY PLAN                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Row Adapter
    Output: col_int1, col_num, col_txt, col_int2
    ->  Vector Sort
          Output: col_int1, col_num, col_txt, col_int2
          Sort Key: vector_bitmap_table_03.col_int1, vector_bitmap_table_03.col_num, vector_bitmap_table_03.col_txt, vector_bitmap_table_03.col_int2
-         ->  CStore Index Heap Scan on vector_bitmap_engine.vector_bitmap_table_03
+         ->  CStore Index Only Scan using bitmap_03_1 on vector_bitmap_engine.vector_bitmap_table_03
                Output: col_int1, col_num, col_txt, col_int2
-               Recheck Cond: ((vector_bitmap_table_03.col_int1 = ANY ('{2,9,21}'::integer[])) AND (vector_bitmap_table_03.col_num = ANY ('{1.5,2.3}'::numeric[])) AND (vector_bitmap_table_03.col_int2 < 10))
-               Filter: (length(vector_bitmap_table_03.col_txt) < 10)
---?               ->  CStore Index Ctid Scan on bitmap_03_.*
-                     Index Cond: ((vector_bitmap_table_03.col_int1 = ANY ('{2,9,21}'::integer[])) AND (vector_bitmap_table_03.col_num = ANY ('{1.5,2.3}'::numeric[])) AND (vector_bitmap_table_03.col_int2 < 10))
-(11 rows)
+               Index Cond: (vector_bitmap_table_03.col_int2 < 10)
+               Filter: ((vector_bitmap_table_03.col_num = ANY ('{1.5,2.3}'::numeric[])) AND (vector_bitmap_table_03.col_int1 = ANY ('{2,9,21}'::integer[])) AND (length(vector_bitmap_table_03.col_txt) < 10))
+(9 rows)
 
 select * from vector_bitmap_table_03 where (col_int1 in (2, 9, 21) and col_num in (1.5, 2.3) and length(col_txt) < 10) and col_int2 < 10 order by 1, 2, 3, 4;
  col_int1 | col_num | col_txt | col_int2 
