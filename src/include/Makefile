@@ -174,6 +174,7 @@ endif
 	$(INSTALL_DATA) executor/node/nodeCtescan.h '$(DESTDIR)$(includedir_server)/executor/node/nodeCtescan.h'
 	$(INSTALL_DATA) executor/exec/execStream.h '$(DESTDIR)$(includedir_server)/executor/exec/execStream.h'
 	$(INSTALL_DATA) instruments/unique_sql_basic.h '$(DESTDIR)$(includedir_server)/instruments/unique_sql_basic.h'
+	$(INSTALL_DATA) instruments/instr_trace.h '$(DESTDIR)$(includedir_server)/instruments/instr_trace.h'
 	$(INSTALL_DATA) storage/file/fio_device_com.h '$(DESTDIR)$(includedir_server)/storage/file/fio_device_com.h'
 	$(INSTALL_DATA) storage/gs_uwal/uwal.h '$(DESTDIR)$(includedir_server)/storage/gs_uwal/uwal.h'
 	$(INSTALL_DATA) ddes/dms/ss_aio.h '$(DESTDIR)$(includedir_server)/ddes/dms/ss_aio.h'

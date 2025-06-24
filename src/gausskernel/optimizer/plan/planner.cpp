@@ -102,6 +102,8 @@ THR_LOCAL ndp_pushdown_hook_type ndp_pushdown_hook = NULL;
 #ifdef USE_SPQ
 THR_LOCAL spq_planner_hook_type spq_planner_hook = NULL;
 #endif
+/* Hook for plugins to get control in planner() */
+THR_LOCAL planner_hook_type planner_hook = NULL;
 
 #ifndef MIN
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
@@ -415,7 +417,8 @@ PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams)
         result = pgxc_planner(parse, cursorOptions, boundParams);
     } else
 #endif
-        result = standard_planner(parse, cursorOptions, boundParams);
+        result = (planner_hook != NULL)?
+		(*planner_hook)(parse, cursorOptions, boundParams) : standard_planner(parse, cursorOptions, boundParams);
 
     totaltime += elapsed_time(&starttime);
     result->plannertime = totaltime;

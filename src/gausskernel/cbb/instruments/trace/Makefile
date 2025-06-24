@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+# Copyright (c) 2025 Huawei Technologies Co.,Ltd.
 #
 # openGauss is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -15,18 +15,21 @@
 # -------------------------------------------------------------------------
 #
 # IDENTIFICATION
-# src/gausskernel/cbb/instruments/Makefile
+#    src/gausskernel/cbb/instruments/trace/Makefile
 #
 # -------------------------------------------------------------------------
-#
 
-subdir = src/gausskernel/cbb/instruments
-top_builddir = ../../../..
+subdir = src/gausskernel/cbb/instruments/trace
+top_builddir = ../../../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = utils unique_sql workload event user percentile wdr slow_query ash capture_view statement func_control gs_stack trace
+ifneq "$(MAKECMDGOALS)" "clean"
+  ifneq "$(MAKECMDGOALS)" "distclean"
+     ifneq "$(shell which g++ |grep hutaf_llt |wc -l)" "1"
+        -include $(DEPEND)
+     endif
+  endif
+endif
+OBJS = instr_trace.o instr_trace_span.o instr_trace_planstate.o instr_trace_sql_func.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
-
-fz_instruments.so:
-	$(CC) -fPIC -shared $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) -o fz_instruments.so

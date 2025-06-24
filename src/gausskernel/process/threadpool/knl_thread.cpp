@@ -1662,6 +1662,13 @@ static void knl_t_statement_init(knl_t_statement_context* statement_cxt)
     statement_cxt->full_sql_retention_time = 0;
     statement_cxt->slow_sql_retention_time = 0;
     statement_cxt->instr_prev_post_parse_analyze_hook = NULL;
+    statement_cxt->instr_trace_prev_post_parse_analyze_hook = NULL;
+    statement_cxt->instr_trace_prev_planner_hook = NULL;
+    statement_cxt->instr_trace_prev_ExecutorStart = NULL;
+    statement_cxt->instr_trace_prev_ExecutorRun = NULL;
+    statement_cxt->instr_trace_prev_ExecutorFinish = NULL;
+    statement_cxt->instr_trace_prev_ExecutorEnd = NULL;
+    statement_cxt->instr_trace_prev_ProcessUtility = NULL;
     statement_cxt->slow_max_mblock = 0;
     statement_cxt->slow_max_block = 0;
     statement_cxt->fast_max_mblock = 0;

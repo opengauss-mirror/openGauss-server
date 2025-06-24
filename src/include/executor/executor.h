@@ -27,6 +27,7 @@
 #include "utils/plpgsql.h"
 #include "utils/guc.h"
 #include "catalog/pg_resource_pool.h"
+#include "pgstat.h"
 
 /*
  * The "eflags" argument to ExecutorStart and the various ExecInitNode
@@ -277,9 +278,10 @@ extern void instr_stmt_report_query_plan(QueryDesc *queryDesc);
 
 static inline TupleTableSlot *ExecProcNode(PlanState *node)
 {
-    if (u_sess->statement_cxt.is_exceed_query_plan_threshold) {
-        instr_stmt_report_query_plan((QueryDesc *)u_sess->statement_cxt.root_query_plan);
-        u_sess->statement_cxt.root_query_plan = NULL;
+    statement_beentry_full_sql_context sscxt = t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt;
+    if (sscxt.is_exceed_query_plan_threshold) {
+        instr_stmt_report_query_plan((QueryDesc *)(sscxt.root_query_plan));
+        sscxt.root_query_plan = NULL;
     }
     TupleTableSlot* result;
     Assert(node->ExecProcNode);

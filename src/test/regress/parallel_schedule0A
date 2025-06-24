@@ -42,6 +42,7 @@ test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_vi
 
 # test multiple statistics
 test: functional_dependency record_slow_sql_in_proc
+test: record_sql_trace
 test: pg_proc_test test_row_type_in_proc exec_result_test
 
 # test fdw

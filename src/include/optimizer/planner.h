@@ -55,6 +55,8 @@ extern PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListI
 extern Plan* grouping_planner(PlannerInfo* root, double tuple_fraction);
 
 typedef PlannedStmt* (*planner_hook_type) (Query* parse, int cursorOptions, ParamListInfo boundParams);
+extern THR_LOCAL PGDLLIMPORT planner_hook_type planner_hook;
+
 typedef List* (*for_tsdb_hook_type) (PlannerInfo *root,RelOptInfo *rel,
 						CmdType operation, bool canSetTag,
 						Index nominalRelation,

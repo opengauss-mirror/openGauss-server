@@ -5467,7 +5467,7 @@ static void CheckCleanCodeWarningInfo(const int baseNum, const int currentNum,
     return;
 }
 
-#define BASE_GLOBAL_VARIABLE_NUM 239
+#define BASE_GLOBAL_VARIABLE_NUM 240
 
 #define CMAKE_CMD_BUF_LEN 1000
 
@@ -5516,7 +5516,7 @@ static void check_global_variables()
     }
 }
 
-#define BASE_PGXC_LIKE_MACRO_NUM 1393
+#define BASE_PGXC_LIKE_MACRO_NUM 1398
 static void check_pgxc_like_macros()
 {
 #ifdef BUILD_BY_CMAKE 

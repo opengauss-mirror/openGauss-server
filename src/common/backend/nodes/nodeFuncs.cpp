@@ -43,6 +43,10 @@ static bool expression_rownum_walker(Node* node, void* context);
 static int leftmostLoc(int loc1, int loc2);
 static void AssertExprCollation(const Node* expr, Oid collation);
 Oid userSetElemTypeCollInfo(const Node* expr, Oid (*exprFunc)(const Node*));
+static bool planstate_walk_subplans(List *plans, planstate_tree_walker_callback walker, void *context);
+static bool planstate_walk_members(PlanState **planstates, int nplans,
+    planstate_tree_walker_callback walker, void *context);
+
 
 /*
  *	exprType -
@@ -3691,3 +3695,119 @@ Oid userSetElemTypeCollInfo(const Node* expr, Oid (*exprFunc)(const Node*))
     }
     return coll;
 }
+
+/*
+ * planstate_tree_walker --- walk plan state trees
+ *
+ * The walker has already visited the current node, and so we need only
+ * recurse into any sub-nodes it has.
+ */
+bool planstate_tree_walker_impl(PlanState *planstate,
+    planstate_tree_walker_callback walker, void *context)
+{
+    Plan *plan = planstate->plan;
+    ListCell *lc;
+
+    /* We don't need implicit coercions to Node here */
+#define PSWALK(n) walker(n, context)
+
+    /* Guard against stack overflow due to overly complex plan trees */
+    check_stack_depth();
+
+    /* initPlan-s */
+    if (planstate_walk_subplans(planstate->initPlan, walker, context)) {
+        return true;
+    }
+
+    /* lefttree */
+    if (outerPlanState(planstate)) {
+        if (PSWALK(outerPlanState(planstate))) {
+            return true;
+        }
+    }
+
+    /* righttree */
+    if (innerPlanState(planstate)) {
+        if (PSWALK(innerPlanState(planstate))) {
+            return true;
+        }
+    }
+
+    /* special child plans */
+    switch (nodeTag(plan)) {
+        case T_Append:
+            if (planstate_walk_members(((AppendState *) planstate)->appendplans,
+                ((AppendState *) planstate)->as_nplans, walker, context)) {
+                return true;
+            }
+            break;
+        case T_MergeAppend:
+            if (planstate_walk_members(((MergeAppendState *) planstate)->mergeplans,
+                ((MergeAppendState *) planstate)->ms_nplans, walker, context)) {
+                return true;
+            }
+            break;
+        case T_BitmapAnd:
+            if (planstate_walk_members(((BitmapAndState *) planstate)->bitmapplans,
+                ((BitmapAndState *) planstate)->nplans, walker, context)) {
+                return true;
+            }
+            break;
+        case T_BitmapOr:
+            if (planstate_walk_members(((BitmapOrState *) planstate)->bitmapplans,
+                ((BitmapOrState *) planstate)->nplans, walker, context)) {
+                return true;
+            }
+            break;
+        case T_SubqueryScan:
+            if (PSWALK(((SubqueryScanState *) planstate)->subplan)) {
+                return true;
+            }
+            break;
+        default:
+            break;
+    }
+
+    /* subPlan-s */
+    if (planstate_walk_subplans(planstate->subPlan, walker, context)) {
+        return true;
+    }
+
+    return false;
+}
+
+/*
+ * Walk a list of SubPlans (or initPlans, which also use SubPlan nodes).
+ */
+static bool planstate_walk_subplans(List *plans, planstate_tree_walker_callback walker, void *context)
+{
+    ListCell *lc;
+
+    foreach(lc, plans) {
+        SubPlanState *sps = lfirst_node(SubPlanState, lc);
+        if (PSWALK(sps->planstate)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+ * Walk the constituent plans of a ModifyTable, Append, MergeAppend,
+ * BitmapAnd, or BitmapOr node.
+ */
+static bool planstate_walk_members(PlanState **planstates, int nplans,
+    planstate_tree_walker_callback walker, void *context)
+{
+    int j;
+
+    for (j = 0; j < nplans; j++) {
+        if (PSWALK(planstates[j])) {
+            return true;
+        }
+    }
+
+    return false;
+}
+

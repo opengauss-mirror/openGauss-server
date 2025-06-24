@@ -1420,6 +1420,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5730 | locktag_decode
  5731 | working_version_num
  5732 | statement_detail_decode
+ 5736 | statement_trace_decode
  5733 | dynamic_func_control
  5801 | pg_ddl_command_in
  5803 | pg_ddl_command_out

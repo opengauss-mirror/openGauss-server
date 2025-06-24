@@ -149,6 +149,28 @@ Bitmapset* bms_make_singleton(int x)
 }
 
 /*
+ * bms_build_with_length_noexcept - build a bitmapset containing a length
+ */
+Bitmapset* bms_build_with_length_noexcept(int x)
+{
+    Bitmapset* result = NULL;
+    int wordnum;
+
+    if (x < 0) {
+        ereport(ERROR,
+            (errmodule(MOD_CACHE), errcode(ERRCODE_DATA_EXCEPTION),
+            errmsg("negative bitmapset member not allowed")));
+    }
+    wordnum = WORDNUM(x);
+    result = (Bitmapset*)palloc0(BITMAPSET_SIZE(wordnum + 1));
+    if (result == NULL) {
+        return NULL;
+    }
+    result->nwords = wordnum + 1;
+    return result;
+}
+
+/*
  * bms_free - free a bitmapset
  *
  * Same as pfree except for allowing NULL input

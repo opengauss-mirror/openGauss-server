@@ -2726,7 +2726,7 @@ bool enable_lockwait_sig_alarm(int delayms)
 
 bool enable_query_plan_sig_alarm(int delayms)
 {
-    if (CURRENT_STMT_METRIC_HANDLE == NULL || u_sess->statement_cxt.stmt_stat_cxt == NULL) {
+    if (CURRENT_STMT_METRIC_HANDLE == NULL || BEENTRY_STMEMENET_CXT.stmt_stat_cxt == NULL) {
         return true;
     }
 
@@ -2735,25 +2735,25 @@ bool enable_query_plan_sig_alarm(int delayms)
     }
 
     TimestampTz start_time = CURRENT_STMT_METRIC_HANDLE->start_time;
-    u_sess->statement_cxt.record_query_plan_fin_time = TimestampTzPlusMilliseconds(start_time, delayms);
+    BEENTRY_STMEMENET_CXT.record_query_plan_fin_time = TimestampTzPlusMilliseconds(start_time, delayms);
     
     /* if query plan timeout > session timeout or statement timeout, 
      * don't set timer to ensure that sess or statement timeout take effect 
      */
     if (t_thrd.storage_cxt.statement_timeout_active && 
-        (u_sess->statement_cxt.record_query_plan_fin_time >= t_thrd.storage_cxt.statement_fin_time)) {
+        (BEENTRY_STMEMENET_CXT.record_query_plan_fin_time >= t_thrd.storage_cxt.statement_fin_time)) {
         return true;  
     }
 
     if (u_sess->storage_cxt.session_timeout_active && 
-        (u_sess->statement_cxt.record_query_plan_fin_time >= u_sess->storage_cxt.session_fin_time)) {
+        (BEENTRY_STMEMENET_CXT.record_query_plan_fin_time >= u_sess->storage_cxt.session_fin_time)) {
         return true;
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
     if (u_sess->storage_cxt.idle_in_transaction_session_timeout_active &&
-        (u_sess->statement_cxt.record_query_plan_fin_time >= 
-         u_sess->storage_cxt.idle_in_transaction_session_fin_time)) {
+        (BEENTRY_STMEMENET_CXT.record_query_plan_fin_time >=
+        u_sess->storage_cxt.idle_in_transaction_session_fin_time)) {
         return true;
     }
 #endif
@@ -2762,7 +2762,7 @@ bool enable_query_plan_sig_alarm(int delayms)
     long secs;
     int usecs;
     /* start to set signal timer, if now >= query plan timeout, start 1us timer */
-    TimestampDifference(GetCurrentTimestamp(), u_sess->statement_cxt.record_query_plan_fin_time, &secs, &usecs);
+    TimestampDifference(GetCurrentTimestamp(), BEENTRY_STMEMENET_CXT.record_query_plan_fin_time, &secs, &usecs);
     if (secs == 0 && usecs == 0) {
         usecs = 1;
     }
@@ -3496,8 +3496,8 @@ void CheckQueryPlanThreshold()
     }
 
     TimestampTz now = GetCurrentTimestamp();
-    if (now > u_sess->statement_cxt.record_query_plan_fin_time) {
-        u_sess->statement_cxt.is_exceed_query_plan_threshold = true;
+    if (now > BEENTRY_STMEMENET_CXT.record_query_plan_fin_time) {
+        BEENTRY_STMEMENET_CXT.is_exceed_query_plan_threshold = true;
         u_sess->statement_cxt.query_plan_threshold_active = false;
     }
 }

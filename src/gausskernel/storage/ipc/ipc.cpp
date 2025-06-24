@@ -169,15 +169,6 @@ void proc_exit(int code)
         }
     }
 
-    /* Wait for all statements that have not been flushed to complete flushing.
-     * The flush usleep wait interval is 100,000 microseconds,
-     * therefore we set it here to 300,000 microseconds for a safe margin.
-     */
-    if (u_sess->statement_cxt.suspend_count != 0) {
-        int flushWaitInterval = 3 * FLUSH_USLEEP_INTERVAL;
-        pg_usleep(flushWaitInterval);
-    }
-
     if (t_thrd.utils_cxt.backend_reserved) {
         ereport(DEBUG2, (errmodule(MOD_MEM),
             errmsg("[BackendReservedExit] current thread role is: %d, used memory is: %d MB\n",

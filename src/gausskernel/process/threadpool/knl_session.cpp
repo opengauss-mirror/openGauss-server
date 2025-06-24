@@ -39,6 +39,7 @@
 #include "optimizer/dynsmp.h"
 #include "optimizer/planmain.h"
 #include "optimizer/planner.h"
+#include "executor/executor.h"
 #include "optimizer/streamplan.h"
 #include "pgxc/execRemote.h"
 #include "pgxc/pgFdwRemote.h"
@@ -64,6 +65,7 @@
 #include "pgstat.h"
 #include "access/datavec/bitvec.h"
 #include "access/datavec/vector.h"
+#include "instruments/instr_trace.h"
 
 THR_LOCAL knl_session_context* u_sess;
 
@@ -1138,6 +1140,18 @@ static void knl_u_slow_query_init(knl_u_slow_query_context* slow_query_cxt)
 static void knl_u_trace_context_init(knl_u_trace_context* trace_cxt)
 {
     Assert(trace_cxt != NULL);
+    trace_cxt->parse_traceparent = NULL;
+    trace_cxt->executor_traceparent = NULL;
+    trace_cxt->tx_traceparent = NULL;
+    trace_cxt->commit_span = NULL;
+    trace_cxt->tx_block_span = NULL;
+    trace_cxt->next_active_span = NULL;
+    trace_cxt->latest_lxid = InvalidLocalTransactionId;
+    trace_cxt->current_trace_spans = NULL;
+    trace_cxt->active_spans = NULL;
+    trace_cxt->nested_level = 0;
+    trace_cxt->current_query_id = 0;
+    trace_cxt->per_level_infos = NULL;
     trace_cxt->trace_id[0] = '\0';
 }
 
@@ -1172,45 +1186,6 @@ static void knl_u_user_login_init(knl_u_user_login_context* user_login_cxt)
 {
     Assert(user_login_cxt != NULL);
     user_login_cxt->CurrentInstrLoginUserOid = InvalidOid;
-}
-
-static void knl_u_statement_init(knl_u_statement_context* statement_cxt)
-{
-    Assert(statement_cxt != NULL);
-
-    statement_cxt->db_name = NULL;
-    statement_cxt->user_name = NULL;
-    statement_cxt->client_addr = NULL;
-    statement_cxt->client_port = INSTR_STMT_NULL_PORT;
-    statement_cxt->session_id = 0;
-
-    statement_cxt->curStatementMetrics = NULL;
-    statement_cxt->allocatedCxtCnt = 0;
-
-    statement_cxt->free_count = 0;
-    statement_cxt->toFreeStatementList = NULL;
-    statement_cxt->suspend_count = 0;
-    statement_cxt->suspendStatementList = NULL;
-    statement_cxt->executer_run_level = 0;
-
-    (void)syscalllockInit(&statement_cxt->list_protect);
-    statement_cxt->stmt_stat_cxt = NULL;
-    statement_cxt->wait_events = NULL;
-
-    /* pre-allocate memory for wait events bitmap */
-    statement_cxt->wait_events_bms = NULL;
-    statement_cxt->enable_wait_events_bitmap = false;
-    statement_cxt->is_session_bms_active = false;
-
-    statement_cxt->root_query_plan = NULL;
-    statement_cxt->query_plan_threshold_active = false;
-    statement_cxt->is_exceed_query_plan_threshold = false;
-    statement_cxt->record_query_plan_fin_time = 0;
-
-    statement_cxt->remote_support_trace = false;
-    statement_cxt->previous_stmt_flushed = true;
-    statement_cxt->nettime_trace_is_working = false;
-    statement_cxt->total_db_time = 0;
 }
 
 void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt)
@@ -1560,8 +1535,6 @@ void knl_session_init(knl_session_context* sess_cxt)
     sess_cxt->sess_ident.cn_sessid = 0;
     sess_cxt->sess_ident.cn_nodeid = 0;
     sess_cxt->sess_ident.cn_timeline = 0;
-    sess_cxt->statement_cxt.current_row_count = -1;
-    sess_cxt->statement_cxt.last_row_count = -1;
     sess_cxt->is_partition_autonomous_query = false;
     sess_cxt->is_partition_autonomous_session = false;
     MemoryContextUnSeal(sess_cxt->top_mem_cxt);
@@ -1617,7 +1590,6 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_percentile_init(&sess_cxt->percentile_cxt);
     knl_u_slow_query_init(&sess_cxt->slow_query_cxt);
     knl_u_trace_context_init(&sess_cxt->trace_cxt);
-    knl_u_statement_init(&sess_cxt->statement_cxt);
     knl_u_streaming_init(&sess_cxt->streaming_cxt);
     knl_u_ledger_init(&sess_cxt->ledger_cxt);
 #ifdef ENABLE_MOT
@@ -1675,6 +1647,12 @@ static void alloc_context_from_top(knl_session_context* sess, MemoryContext top_
         ALLOCSET_DEFAULT_MAXSIZE);
     sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt =AllocSetContextCreate(top_mem_cxt,
         "DolphinErrorData",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+    /* Initialize pg_tracing memory context */
+    sess->trace_cxt.trace_mem_ctx = AllocSetContextCreate(top_mem_cxt,
+        "TraceMemoryContext",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);

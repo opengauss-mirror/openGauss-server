@@ -4011,7 +4011,8 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
    OUT srt13_before_query bigint,
    OUT srt14_after_query bigint,
    OUT rtt_unknown bigint,
-   OUT net_trans_time bigint
+   OUT net_trans_time bigint,
+   OUT trace bytea
    )
  RETURNS setof record
  AS $$
@@ -4099,6 +4100,7 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
           srt14_after_query := row_data.srt14_after_query;
           rtt_unknown := row_data.rtt_unknown;
           net_trans_time := row_data.net_trans_time;
+          trace := row_data.trace;
           return next;
           END IF;
        END LOOP;
@@ -4180,7 +4182,8 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_slow_sql_by_timestamp
    OUT srt13_before_query bigint,
    OUT srt14_after_query bigint,
    OUT rtt_unknown bigint,
-   OUT net_trans_time bigint)
+   OUT net_trans_time bigint,
+   OUT trace bytea)
  RETURNS setof record
  AS $$
  DECLARE
@@ -4267,6 +4270,7 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_slow_sql_by_timestamp
           srt14_after_query := row_data.srt14_after_query;
           rtt_unknown := row_data.rtt_unknown;
           net_trans_time := row_data.net_trans_time;
+          trace := row_data.trace;
           return next;
           END IF;
        END LOOP;

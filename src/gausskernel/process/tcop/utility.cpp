@@ -1594,7 +1594,7 @@ void ProcessUtility(processutility_context* processutility_cxt,
      * call standard_ProcessUtility().
      * it's unsafe to deal with plugins hooks as dynamic lib may be released
      */
-    if (ProcessUtility_hook && !(g_instance.status > NoShutdown))
+    if (ProcessUtility_hook && !(g_instance.status > NoShutdown)) {
         (*ProcessUtility_hook)(processutility_cxt,
             dest,
 #ifdef PGXC
@@ -1603,7 +1603,7 @@ void ProcessUtility(processutility_context* processutility_cxt,
             completion_tag,
             context,
             isCTAS);
-    else
+    } else {
         standard_ProcessUtility(processutility_cxt,
             dest,
 #ifdef PGXC
@@ -1612,15 +1612,16 @@ void ProcessUtility(processutility_context* processutility_cxt,
             completion_tag,
             context,
             isCTAS);
-    
+    }
     /* 
      * Record the number of rows affected into the session, but only support 
      * DML statement now, for DDL statement, always set to 0
      */
     NodeTag nt = nodeTag(processutility_cxt->parse_tree);
     if (nt != T_ExecuteStmt) {
-        u_sess->statement_cxt.current_row_count = 0;
-        u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+        t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt.current_row_count = 0;
+        t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt.last_row_count =
+            t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt.current_row_count;
         /* If it is an EXECUTE/FETCH statement here, the PortalRun function will be
            called twice nested, and the right data will be modified when it is 
            first executed (Generally in function ExecutorRun), so there do 

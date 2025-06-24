@@ -74,4 +74,13 @@ extern bool lockNextvalWalker(Node* node, void* context);
 
 extern void find_nextval_seqoid_walker(Node* node, Oid* seqoid);
 
+typedef bool (*planstate_tree_walker_callback) (struct PlanState *planstate, void *context);
+
+extern bool planstate_tree_walker_impl(PlanState *planstate,
+    planstate_tree_walker_callback walker, void *context);
+
+#define planstate_tree_walker(ps, w, c) \
+    planstate_tree_walker_impl(ps, (planstate_tree_walker_callback) (w), c)
+
+
 #endif /* NODEFUNCS_H */

@@ -1887,7 +1887,7 @@ void SetParamsFromParams(ParamListInfo params)
             pfree(pstring);
         }
 
-        oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+        oldcontext = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
 
         CURRENT_STMT_METRIC_HANDLE->params = pstrdup(param_str.data);
 

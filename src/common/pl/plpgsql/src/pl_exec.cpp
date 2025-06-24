@@ -5392,7 +5392,7 @@ static int exec_stmt_b_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* 
                             exec_assign_value(estate, var, -1, INT4OID, &isnull);
                         } else {
                             if (B_DIAGNOSTICS) {
-                                exec_assign_value(estate, var, UInt32GetDatum(u_sess->statement_cxt.current_row_count), INT4OID, &isnull);
+                                exec_assign_value(estate, var, UInt32GetDatum(BEENTRY_STMEMENET_CXT.current_row_count), INT4OID, &isnull);
                             } else {
                                 exec_assign_value(estate, var, UInt32GetDatum(estate->eval_processed), INT4OID, &isnull);
                             }
@@ -5435,7 +5435,7 @@ static int exec_stmt_b_getdiag(PLpgSQL_execstate* estate, PLpgSQL_stmt_getdiag* 
                         appendStringInfo(&buf, "set @%s = %d;", diag_item->user_ident, condCount);
                         break;
                     case PLPGSQL_GETDIAG_ROW_COUNT:
-                        appendStringInfo(&buf, "set @%s = %ld;", diag_item->user_ident, u_sess->statement_cxt.current_row_count);
+                        appendStringInfo(&buf, "set @%s = %ld;", diag_item->user_ident, BEENTRY_STMEMENET_CXT.current_row_count);
                         break;
                     default:
                         ereport(ERROR,
