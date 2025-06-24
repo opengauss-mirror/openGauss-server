@@ -175,7 +175,7 @@ void BM25GetMetaPageInfo(Relation index, BM25MetaPage metap)
     UnlockReleaseBuffer(buf);
 }
 
-uint32 BM25AllocateDocId(Relation index, bool building)
+uint32 BM25AllocateNewDocId(Relation index, bool building)
 {
     Buffer buf;
     Page page;
@@ -196,6 +196,57 @@ uint32 BM25AllocateDocId(Relation index, bool building)
 
     metapBuf->nextDocId++;
     BM25CommitBuf(buf, &state, building);
+    return docId;
+}
+
+uint32 TryAllocateDocIdFromFreePage(Relation index, uint32 docTokenCount)
+{
+    Buffer buf;
+    Page page;
+    GenericXLogState *state = nullptr;
+    BM25MetaPageData meta;
+    BM25GetMetaPageInfo(index, &meta);
+    BM25EntryPages entryPages = meta.entryPageList;
+    uint32 docId = BM25_INVALID_DOC_ID;
+    bool allocated = false;
+
+    BlockNumber curFreePage = entryPages.docmentFreePage;
+    while (BlockNumberIsValid(curFreePage)) {
+        buf = ReadBuffer(index, curFreePage);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        BM25GetPage(index, &page, buf, &state, false);
+        OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
+        for (OffsetNumber offno = FirstOffsetNumber; offno <= maxoffno; offno = OffsetNumberNext(offno)) {
+            BM25FreeDocumentItem* freeItem = (BM25FreeDocumentItem*)PageGetItem(page, PageGetItemId(page, offno));
+            if (freeItem->tokenCapacity >= docTokenCount) {
+                docId = freeItem->docId;
+                freeItem->docId = BM25_INVALID_DOC_ID;
+                freeItem->tokenCapacity = 0;
+                allocated = true;
+                PageIndexTupleDelete(page, offno);
+                break;
+            }
+        }
+        if (allocated) {
+            BM25CommitBuf(buf, &state, false);
+            break;
+        }
+        curFreePage = BM25PageGetOpaque(page)->nextblkno;
+        BM25CommitBuf(buf, &state, false);
+    }
+    return docId;
+}
+
+uint32 BM25AllocateDocId(Relation index, bool building, uint32 docTokenCount)
+{
+    uint32 docId = BM25_INVALID_DOC_ID;
+    if (building) {
+        return BM25AllocateNewDocId(index, building);
+    }
+    docId = TryAllocateDocIdFromFreePage(index, docTokenCount);
+    if (docId == BM25_INVALID_DOC_ID) {
+        return BM25AllocateNewDocId(index, building);
+    }
     return docId;
 }
 
@@ -324,4 +375,76 @@ bool FindTokenMeta(BM25TokenData &tokenData, BM25PageLocationInfo &tokenMetaLoca
         }
     }
     return false;
+}
+
+void RecordDocForwardBlkno2DocForwardBlknoTable(Relation index, BM25DocForwardMetaPage metaForwardPage,
+    BlockNumber newDocForwardBlkno, bool building, ForkNumber forkNum)
+{
+    Buffer buf;
+    Page page;
+    BlockNumber curTableBlkno = metaForwardPage->docForwardBlknoInsertPage;
+    OffsetNumber offno;
+    GenericXLogState *state = nullptr;
+    uint32 itemSize = MAXALIGN(sizeof(BlockNumber));
+
+    /* first page */
+    if (!BlockNumberIsValid(curTableBlkno)) {
+        buf = BM25NewBuffer(index, forkNum);
+        BM25GetPage(index, &page, buf, &state, building);
+        BM25InitPage(buf, page);
+        curTableBlkno = BufferGetBlockNumber(buf);
+        metaForwardPage->docForwardBlknoTable = curTableBlkno;
+        metaForwardPage->docForwardBlknoInsertPage = curTableBlkno;
+    } else {
+        buf = ReadBuffer(index, curTableBlkno);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        BM25GetPage(index, &page, buf, &state, building);
+        if (PageGetFreeSpace(page) < itemSize) {
+            BM25AppendPage(index, &buf, &page, forkNum, &state, building);
+            curTableBlkno = BufferGetBlockNumber(buf);
+            metaForwardPage->docForwardBlknoInsertPage = curTableBlkno;
+        }
+    }
+    offno = PageAddItem(page, (Item)(&newDocForwardBlkno), itemSize, InvalidOffsetNumber, false, false);
+    if (offno == InvalidOffsetNumber) {
+        if (!building)
+            GenericXLogAbort(state);
+        UnlockReleaseBuffer(buf);
+        elog(ERROR, "failed to add doc forward blkno item [DocForwardBlknoTable] to \"%s\"",
+            RelationGetRelationName(index));
+    }
+    BM25CommitBuf(buf, &state, building);
+}
+
+BlockNumber SeekBlocknoForForwardToken(Relation index, uint32 forwardIdx, BlockNumber docForwardBlknoTable)
+{
+    Buffer buf;
+    Page page;
+    BlockNumber curTableBlkno = docForwardBlknoTable;
+    BlockNumber docForwardBlkno = InvalidBlockNumber;
+    uint32 scanedForwardBlknoNum = 0;
+    uint32 docForwardBlknoIndex = forwardIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE + 1;
+
+    while (BlockNumberIsValid(curTableBlkno)) {
+        OffsetNumber maxoffno;
+        buf = ReadBuffer(index, curTableBlkno);
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        page = BufferGetPage(buf);
+        maxoffno = PageGetMaxOffsetNumber(page);
+        if (scanedForwardBlknoNum + maxoffno >= docForwardBlknoIndex) {
+            uint16 offset = docForwardBlknoIndex - scanedForwardBlknoNum;
+            docForwardBlkno = *((BlockNumber*)PageGetItem(page, PageGetItemId(page, offset)));
+            UnlockReleaseBuffer(buf);
+            break;
+        }
+        scanedForwardBlknoNum += maxoffno;
+        curTableBlkno = BM25PageGetOpaque(page)->nextblkno;
+        UnlockReleaseBuffer(buf);
+    }
+
+    if (unlikely(!BlockNumberIsValid(docForwardBlkno))) {
+        elog(ERROR, "Failed to search doc forward blkno for \"%s\"", RelationGetRelationName(index));
+    }
+
+    return docForwardBlkno;
 }
