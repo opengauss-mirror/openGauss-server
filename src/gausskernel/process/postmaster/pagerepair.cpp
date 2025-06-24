@@ -26,6 +26,8 @@
 #include "access/multi_redo_api.h"
 #include "access/parallel_recovery/page_redo.h"
 #include "access/parallel_recovery/dispatcher.h"
+#include "access/extreme_rto/page_redo.h"
+#include "access/extreme_rto/dispatcher.h"
 #include "catalog/catalog.h"
 #include "gssignal/gs_signal.h"
 #include "knl/knl_instance.h"
@@ -51,6 +53,14 @@ const int TEN_MILLISECOND = 10;
 #define MAX(A, B) ((B) > (A) ? (B) : (A))
 #define FILE_REPAIR_LOCK g_instance.repair_cxt.file_repair_hashtbl_lock
 
+const char* InvalidPageTypeName[INVALID_PAGE_ERROR] = {
+    "NOT_PRESENT",
+    "NOT_INITIALIZED",
+    "LSN_CHECK_ERROR",
+    "CRC_CHECK_ERROR",
+    "SEGPAGE_LSN_CHECK_ERROR",
+};
+
 typedef struct XLogPageReadPrivate {
     int emode;
     bool fetching_ckpt; /* are we fetching a checkpoint record? */
@@ -69,7 +79,6 @@ static void PageRepairShutDownHandler(SIGNAL_ARGS);
 static void PageRepairQuickDie(SIGNAL_ARGS);
 static void PageRepairHandleInterrupts(void);
 
-static void SeqRemoteReadPage();
 static void SeqRemoteReadFile();
 static void checkOtherFile(RepairFileKey key, uint32 max_segno, uint64 size);
 static void PushBadFileToRemoteHashTbl(RepairFileKey key);
@@ -215,18 +224,11 @@ bool CheckPrimaryPageLSN(XLogRecPtr page_old_lsn, XLogRecPtr page_new_lsn, Repai
     return false;
 }
 
-void PageRepairHashTblInit(void)
+void ThreadPageRepairedHashTableInit(void)
 {
     HASHCTL ctl;
-    if (g_instance.pid_cxt.PageRepairPID == 0) {
-        return;
-    }
-
-    if (g_instance.repair_cxt.page_repair_hashtbl_lock == NULL) {
-        g_instance.repair_cxt.page_repair_hashtbl_lock = LWLockAssign(LWTRANCHE_PAGE_REPAIR);
-    }
-
-    if (g_instance.repair_cxt.page_repair_hashtbl == NULL) {
+    /* If we enable the repair function */
+    if (t_thrd.xlog_cxt.pageRpairedHashTable == NULL) {
         /* hash accessed by database file id */
         errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
         securec_check(rc, "", "");
@@ -235,99 +237,27 @@ void PageRepairHashTblInit(void)
         ctl.hash = RepairBlockKeyHash;
         ctl.match = RepairBlockKeyMatch;
         ctl.hcxt = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
-        g_instance.repair_cxt.page_repair_hashtbl =
+        t_thrd.xlog_cxt.pageRpairedHashTable =
             hash_create("Page Repair Hash Table", MAX_REPAIR_PAGE_NUM, &ctl,
                         HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
 
-        if (!g_instance.repair_cxt.page_repair_hashtbl)
-            ereport(FATAL, (errmsg("could not initialize page repair Hash table")));
+        if (!t_thrd.xlog_cxt.pageRpairedHashTable)
+            ereport(FATAL, (errmsg("could not initialize thread page repair Hash table")));
     }
-
-    return;
 }
 
 void ClearPageRepairTheadMem(void)
 {
-    if (g_instance.repair_cxt.page_repair_hashtbl != NULL) {
-        hash_destroy(g_instance.repair_cxt.page_repair_hashtbl);
-        g_instance.repair_cxt.page_repair_hashtbl = NULL;
-    }
-
-    if (g_instance.repair_cxt.file_repair_hashtbl != NULL) {
-        hash_destroy(g_instance.repair_cxt.file_repair_hashtbl);
-        g_instance.repair_cxt.file_repair_hashtbl = NULL;
-    }
-
-    return;
-}
-
-/* CopyPageToRepairHashTbl
- *                After remote read, copy the page to hash table and update the page_new_lsn
- * of page repair hash table, means that the page is correct.
- */
-void CopyPageToRepairHashTbl(RepairBlockEntry *entry, char *page_content)
-{
-    XLogRecPtr page_lsn = PageGetLSN(page_content);
-    errno_t rc = 0;
-
-    rc = memcpy_s(entry->page_content, BLCKSZ, page_content, BLCKSZ);
-    securec_check(rc, "", "");
-
-    if (entry->error_type == CRC_CHECK_FAIL) {
-        entry->page_new_lsn = page_lsn;
-        entry->page_state = WAIT_REPAIR;
-    } else {
-        entry->page_state = WAIT_LSN_CHECK;
+    if (t_thrd.xlog_cxt.pageRpairedHashTable != NULL) {
+        hash_destroy(t_thrd.xlog_cxt.pageRpairedHashTable);
+        t_thrd.xlog_cxt.pageRpairedHashTable = NULL;
     }
     return;
 }
 
-void CheckPageLSN(RepairBlockKey key)
+const char* GetInvalidPageTypeNameByNumber(InvalidPageType invalidPageType)
 {
-    HTAB *repair_hash = g_instance.repair_cxt.page_repair_hashtbl;
-    XLogRecPtr standby_flush_lsn;
-    RepairBlockEntry *entry = NULL;
-    bool found = false;
-    XLogRecPtr page_lsn;
-    XLogRecPtr page_old_lsn;
-
-    LWLockAcquire(g_instance.repair_cxt.page_repair_hashtbl_lock, LW_EXCLUSIVE);
-
-    entry = (RepairBlockEntry*)hash_search(repair_hash, &(key), HASH_FIND, &found);
-    if (found) {
-        page_old_lsn = entry->page_old_lsn;
-        page_lsn = PageGetLSN(entry->page_content);
-
-        LWLockRelease(g_instance.repair_cxt.page_repair_hashtbl_lock);
-        standby_flush_lsn = GetStandbyFlushRecPtr(NULL);
-        if (XLByteLE(standby_flush_lsn, page_lsn)) {
-            return;
-        }
-        /* after release the lock, check the page lsn where the error_type is LSN_CHECK_FAIL */
-        bool check = CheckPrimaryPageLSN(page_old_lsn, page_lsn, key);
-        if (check) {
-            LWLockAcquire(g_instance.repair_cxt.page_repair_hashtbl_lock, LW_EXCLUSIVE);
-            entry = (RepairBlockEntry*)hash_search(repair_hash, &(key), HASH_FIND, &found);
-            if (found) {
-                entry->page_new_lsn = page_lsn;
-                entry->page_state = WAIT_REPAIR;
-                (void)gs_signal_send(entry->recovery_tid, SIGUSR1);
-            }
-            LWLockRelease(g_instance.repair_cxt.page_repair_hashtbl_lock);
-        } else {
-            ereport(PANIC,
-                (errmsg("check the repair page lsn failed, could not repair the page, "
-                    "page old lsn is %X/%X, primary lsn is %X/%X, "
-                    "page info is %u/%u/%u bucketnode %d, forknum is %u, blocknum is %u",
-                    (uint32)(page_old_lsn >> XLOG_LSN_SWAP), (uint32)page_old_lsn,
-                    (uint32)(page_lsn >> XLOG_LSN_SWAP), (uint32)page_lsn,
-                    key.relfilenode.spcNode, key.relfilenode.dbNode, key.relfilenode.relNode,
-                    key.relfilenode.bucketNode, key.forknum, key.blocknum)));
-        }
-    } else {
-        LWLockRelease(g_instance.repair_cxt.page_repair_hashtbl_lock);
-    }
-    return;
+    return InvalidPageTypeName[invalidPageType];
 }
 
 int RemoteReadFileSizeNoError(RepairFileKey *key, int64 *size)
@@ -417,95 +347,10 @@ int RemoteReadBlockNoError(RepairBlockKey *key, char *buf, XLogRecPtr lsn, const
 
 static void RepairPage(RepairBlockEntry *entry, char *page)
 {
-    int retCode = 0;
-
-    /* we need check the pca header page first if the relation is compression relation,
-       and we need to try our best to repair this pca header page and the whole extent */
-    if (IS_COMPRESSED_RNODE(entry->key.relfilenode, MAIN_FORKNUM)) {
-        bool need_repair_pca = false;
-        SMgrRelation smgr = smgropen(entry->key.relfilenode, InvalidBackendId, GetColumnNum(MAIN_FORKNUM));
-        if (!IsSegmentPhysicalRelNode(entry->key.relfilenode)) {
-            CfsHeaderPageCheckAndRepair(smgr, entry->key.blocknum, NULL, ERR_MSG_LEN, &need_repair_pca);
-            if (need_repair_pca) {
-                /* clear local cache and smgr */
-                CacheInvalidateSmgr(smgr->smgr_rnode);
-
-                /* try repair the whole extent */
-                gs_tryrepair_compress_extent(smgr, entry->key.blocknum);
-            }
-        } else {
-            ;
-        }
-    }
-
-    if (entry->pblk.relNode != InvalidOid) {
-        retCode = RemoteReadBlockNoError(&entry->key, page, entry->page_old_lsn, &entry->pblk);
-    } else {
-        retCode = RemoteReadBlockNoError(&entry->key, page, entry->page_old_lsn, NULL);
-    }
-    if (retCode == REMOTE_READ_OK) {
-        CopyPageToRepairHashTbl(entry, page);
-    }
-
     return;
 }
 
 const int MAX_CHECK_LSN_NUM = 100;
-static void SeqRemoteReadPage()
-{
-    HTAB *repair_hash = g_instance.repair_cxt.page_repair_hashtbl;
-    RepairBlockEntry *entry = NULL;
-    HASH_SEQ_STATUS status;
-    RepairBlockKey lsncheck[MAX_CHECK_LSN_NUM];
-    int check_lsn_num = 0;
-    int need_repair_num = 0;
-    int repair_num = 0;
-    char page[BLCKSZ] = {0};
-
-    LWLockAcquire(g_instance.repair_cxt.page_repair_hashtbl_lock, LW_EXCLUSIVE);
-
-    hash_seq_init(&status, repair_hash);
-    while ((entry = (RepairBlockEntry *)hash_seq_search(&status)) != NULL) {
-        need_repair_num++;
-        switch (entry->page_state) {
-            case WAIT_REMOTE_READ:
-                RepairPage(entry, page);
-                if (entry->error_type == LSN_CHECK_FAIL && entry->page_state == WAIT_LSN_CHECK &&
-                    check_lsn_num < MAX_CHECK_LSN_NUM) {
-                    lsncheck[check_lsn_num] = entry->key;
-                    check_lsn_num++;
-                }
-                if (entry->page_state == WAIT_REPAIR) {
-                    (void)gs_signal_send(entry->recovery_tid, SIGUSR1);
-                    repair_num++;
-                }
-                break;
-            case WAIT_LSN_CHECK:
-                if (check_lsn_num < MAX_CHECK_LSN_NUM) {
-                    lsncheck[check_lsn_num] = entry->key;
-                    check_lsn_num++;
-                }
-                break;
-            case WAIT_REPAIR:
-                repair_num++;
-                (void)gs_signal_send(entry->recovery_tid, SIGUSR1);
-                break;
-            default:
-                ereport(ERROR, (errmsg("error page state during remote read")));
-        }
-    }
-
-    LWLockRelease(g_instance.repair_cxt.page_repair_hashtbl_lock);
-
-    for (int i = 0; i < check_lsn_num; i++) {
-        RepairBlockKey temp = lsncheck[i];
-        CheckPageLSN(temp);
-    }
-    if (need_repair_num == repair_num) {
-        t_thrd.pagerepair_cxt.page_repair_requested = false;
-    }
-    return;
-}
 
 static void PageRepairHandleInterrupts(void)
 {
@@ -519,71 +364,6 @@ static void PageRepairHandleInterrupts(void)
 
         u_sess->attr.attr_common.ExitOnAnyError = true;
         proc_exit(0);
-    }
-}
-
-void PageRepairMain(void)
-{
-    MemoryContext pagerepair_context;
-    char name[MAX_THREAD_NAME_LEN] = {0};
-    uint32 rc = 0;
-
-    t_thrd.role = PAGEREPAIR_THREAD;
-
-    SetupPageRepairSignalHook();
-
-    /* We allow SIGQUIT (quickdie) at all times */
-    (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
-
-    ereport(LOG, (errmodule(MOD_REDO), errmsg("pagerepair started")));
-
-    /*
-     * Create a resource owner to keep track of our resources (currently only
-     * buffer pins).
-     */
-    errno_t err_rc = snprintf_s(
-        name, MAX_THREAD_NAME_LEN, MAX_THREAD_NAME_LEN - 1, "%s", "PageRepair");
-    securec_check_ss(err_rc, "", "");
-
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, name,
-        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
-
-    /*
-     * Create a memory context that we will do all our work in.  We do this so
-     * that we can reset the context during error recovery and thereby avoid
-     * possible memory leaks.  Formerly this code just ran in
-     * TopMemoryContext, but resetting that would be a really bad idea.
-     */
-    pagerepair_context = AllocSetContextCreate(
-        TopMemoryContext, name, ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-    (void)MemoryContextSwitchTo(pagerepair_context);
-
-    /*
-     * Unblock signals (they were blocked when the postmaster forked us)
-     */
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
-    (void)gs_signal_unblock_sigusr2();
-
-    pgstat_report_appname("PageRepair");
-    pgstat_report_activity(STATE_IDLE, NULL);
-
-    /*
-     * Loop forever
-     */
-    for (;;) {
-        PageRepairHandleInterrupts();
-        pgstat_report_activity(STATE_IDLE, NULL);
-        rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_POSTMASTER_DEATH, (long)TEN_MILLISECOND);
-        if (rc & WL_POSTMASTER_DEATH) {
-            gs_thread_exit(1);
-        }
-
-        ResetLatch(&t_thrd.proc->procLatch);
-        pgstat_report_activity(STATE_RUNNING, NULL);
-        if (!t_thrd.pagerepair_cxt.shutdown_requested) {
-            SeqRemoteReadPage();
-            SeqRemoteReadFile();
-        }
     }
 }
 
@@ -686,41 +466,6 @@ static void PageRepairQuickDie(SIGNAL_ARGS)
 
 /* recovery thread function */
 
-bool PushBadPageToRemoteHashTbl(RepairBlockKey key, PageErrorType error_type, XLogRecPtr old_lsn,
-    XLogPhyBlock pblk, ThreadId tid)
-{
-    HTAB *repair_hash = g_instance.repair_cxt.page_repair_hashtbl;
-    bool found = false;
-
-    Assert(repair_hash != NULL);
-
-    LWLockAcquire(g_instance.repair_cxt.page_repair_hashtbl_lock, LW_EXCLUSIVE);
-    RepairBlockEntry *entry = (RepairBlockEntry*)hash_search(repair_hash, &(key), HASH_ENTER, &found);
-    if (!found) {
-        entry->key = key;
-        entry->recovery_tid = tid;
-        entry->error_type = error_type;
-        entry->page_state = WAIT_REMOTE_READ;
-        entry->page_old_lsn = old_lsn;
-        entry->page_new_lsn = InvalidXLogRecPtr;
-        entry->pblk = pblk;
-    }
-    LWLockRelease(g_instance.repair_cxt.page_repair_hashtbl_lock);
-
-    if (!found) {
-        /* need add array and wakeup the page repair thread */
-        ThreadId PageRepairPID = g_instance.pid_cxt.PageRepairPID;
-        if (PageRepairPID != 0) {
-            (void)gs_signal_send(PageRepairPID, SIGUSR1);
-        }
-        if (g_instance.repair_cxt.repair_proc_latch != NULL) {
-            SetLatch(g_instance.repair_cxt.repair_proc_latch);
-        }
-    }
-
-    return found;
-}
-
 bool BlockNodeMatch(RepairBlockKey key, XLogPhyBlock pblk, RelFileNode node,
     ForkNumber forknum, BlockNumber minblkno, bool segment_shrink)
 {
@@ -753,25 +498,66 @@ bool dbNodeandSpcNodeMatch(RelFileNode *rnode, Oid spcNode, Oid dbNode)
  */
 void BatchClearPageRepairHashTbl(Oid spcNode, Oid dbNode)
 {
-    HTAB *repair_hash = g_instance.repair_cxt.page_repair_hashtbl;
+    HTAB* repairHash =t_thrd.xlog_cxt.pageRpairedHashTable;
     bool found = false;
     RepairBlockEntry *entry = NULL;
     HASH_SEQ_STATUS status;
 
-    LWLockAcquire(g_instance.repair_cxt.page_repair_hashtbl_lock, LW_EXCLUSIVE);
-
-    hash_seq_init(&status, repair_hash);
+    hash_seq_init(&status, repairHash);
     while ((entry = (RepairBlockEntry *)hash_seq_search(&status)) != NULL) {
         if (dbNodeandSpcNodeMatch(&(entry->key.relfilenode), spcNode, dbNode)) {
-            if (hash_search(repair_hash, &(entry->key), HASH_REMOVE, &found) == NULL) {
+            if (hash_search(repairHash, &(entry->key), HASH_REMOVE, &found) == NULL) {
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("page repair hash table corrupted")));
             }
         }
     }
 
-    LWLockRelease(g_instance.repair_cxt.page_repair_hashtbl_lock);
-
     return;
+}
+
+static void RepairPageForAllInvalidHashTable(HTAB* xlogInvalidPages)
+{
+    if (xlogInvalidPages == NULL) {
+        return;
+    }
+    HASH_SEQ_STATUS status;
+    xl_invalid_page* entry = NULL;
+    hash_seq_init(&status, xlogInvalidPages);
+    while ((entry = (xl_invalid_page*)hash_seq_search(&status)) != NULL) {
+        RepairPageForSpecificPage(entry, xlogInvalidPages);
+    }
+    ereport(LOG, (errmsg("[REPAIR] Try to repair all invalid pages of invalid hashtbl.")));
+}
+
+void RepairAllInvalidBlock()
+{
+    if (IsParallelRedo() || IsExtremeRedo()) {
+        MemoryContext oldCtx = NULL;
+        if (IsMultiThreadRedoRunning()) {
+            oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
+        }
+        if (IsParallelRedo()) {
+            /* Parralle redo */
+            if (parallel_recovery::GetPageWorkerCount() > 0) {
+                for (uint32 i =0; i < parallel_recovery::g_dispatcher->pageWorkerCount; i++) {
+                    RepairPageForAllInvalidHashTable(*(parallel_recovery::g_dispatcher->pageWorkers[i]->xlogInvalidPagesLoc));
+                }
+            }
+        } else {
+            /* extreme redo */
+            if (extreme_rto::GetBatchCount() > 0) {
+                for (uint32 i =0; i < extreme_rto::g_dispatcher->allWorkersCnt; i++) {
+                    RepairPageForAllInvalidHashTable(*(extreme_rto::g_dispatcher->allWorkers[i]->xlogInvalidPagesLoc));
+                }
+            }
+        }
+
+        if (IsMultiThreadRedoRunning()) {
+            MemoryContextSwitchTo(oldCtx);
+        }
+    } else {
+        RepairPageForAllInvalidHashTable(t_thrd.xlog_cxt.invalid_page_tab);
+    }
 }
 
 /* ClearPageRepairHashTbl
@@ -781,26 +567,48 @@ void BatchClearPageRepairHashTbl(Oid spcNode, Oid dbNode)
 void ClearPageRepairHashTbl(const RelFileNode &node, ForkNumber forknum, BlockNumber minblkno,
     bool segment_shrink)
 {
-    HTAB *repair_hash = g_instance.repair_cxt.page_repair_hashtbl;
+    if (t_thrd.xlog_cxt.pageRpairedHashTable == NULL) {
+        return;
+    }
+    HTAB* repairHash =t_thrd.xlog_cxt.pageRpairedHashTable;
     bool found = false;
     RepairBlockEntry *entry = NULL;
     HASH_SEQ_STATUS status;
 
-    LWLockAcquire(g_instance.repair_cxt.page_repair_hashtbl_lock, LW_EXCLUSIVE);
-
-    hash_seq_init(&status, repair_hash);
+    hash_seq_init(&status, repairHash);
     while ((entry = (RepairBlockEntry *)hash_seq_search(&status)) != NULL) {
         if (BlockNodeMatch(entry->key, entry->pblk, node, forknum, minblkno, segment_shrink)) {
-            if (hash_search(repair_hash, &(entry->key), HASH_REMOVE, &found) == NULL) {
+            if (hash_search(repairHash, &(entry->key), HASH_REMOVE, &found) == NULL) {
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("page repair hash table corrupted")));
             }
         }
     }
 
-    LWLockRelease(g_instance.repair_cxt.page_repair_hashtbl_lock);
-
     return;
 }
+
+uint32 RecordRepairHashTablePageNum(bool addToHashTable)
+{ 
+    uint32 ret = 0;
+    if (AmStartupProcess()) {
+        /* Normal redo mod. */
+        if (addToHashTable) {
+            ret = pg_atomic_add_fetch_u32(&g_instance.startup_cxt.remoteReadPageNum, 1);
+        } else {
+            ret = pg_atomic_sub_fetch_u32(&g_instance.startup_cxt.remoteReadPageNum, 1);
+        }
+    } else if (IsParallelRedo() || IsExtremeRedo()) {
+        if (addToHashTable) {
+            ret = IsParallelRedo() ? pg_atomic_add_fetch_u32(&parallel_recovery::g_redoWorker->remoteReadPageNum, 1) :
+                                pg_atomic_add_fetch_u32(&extreme_rto::g_redoWorker->remoteReadPageNum, 1);
+        } else {
+            ret = IsParallelRedo() ? pg_atomic_sub_fetch_u32(&parallel_recovery::g_redoWorker->remoteReadPageNum, 1) :
+                                pg_atomic_sub_fetch_u32(&extreme_rto::g_redoWorker->remoteReadPageNum, 1);
+        }
+    }
+    return ret;
+}
+
 
 /* ClearSpecificsPageRepairHashTbl
  *         If the page repair finish, need clear the page repair hashTbl.
@@ -808,18 +616,14 @@ void ClearPageRepairHashTbl(const RelFileNode &node, ForkNumber forknum, BlockNu
 void ClearSpecificsPageRepairHashTbl(RepairBlockKey key)
 {
     bool found = false;
-    HTAB *repair_hash = g_instance.repair_cxt.page_repair_hashtbl;
+    HTAB *repairHash = t_thrd.xlog_cxt.pageRpairedHashTable;
 
-    LWLockAcquire(g_instance.repair_cxt.page_repair_hashtbl_lock, LW_EXCLUSIVE);
-
-    if ((RepairBlockEntry*)hash_search(repair_hash, &(key), HASH_REMOVE, &found) == NULL) {
+    if ((RepairBlockEntry*)hash_search(repairHash, &(key), HASH_REMOVE, &found) == NULL) {
         ereport(WARNING,
             (errmsg("the %u/%u/%u bucketnode %d forknum %u, blknum %u, remove form repair hashtbl, not found",
                 key.relfilenode.spcNode, key.relfilenode.dbNode, key.relfilenode.relNode, key.relfilenode.bucketNode,
                 key.forknum, key.blocknum)));
     }
-
-    LWLockRelease(g_instance.repair_cxt.page_repair_hashtbl_lock);
     return;
 }
 
@@ -829,29 +633,11 @@ void ClearSpecificsPageRepairHashTbl(RepairBlockKey key)
  */
 bool CheckRepairPage(RepairBlockKey key, XLogRecPtr min_lsn, XLogRecPtr max_lsn, char *page)
 {
-    bool found = false;
-    bool can_recovery = false;
-    RepairBlockEntry *entry = NULL;
-    HTAB *repair_hash = g_instance.repair_cxt.page_repair_hashtbl;
-
-    LWLockAcquire(g_instance.repair_cxt.page_repair_hashtbl_lock, LW_EXCLUSIVE);
-
-    entry = (RepairBlockEntry*)hash_search(repair_hash, &(key), HASH_FIND, &found);
-    if (entry == NULL) {
-        ereport(ERROR, (errmsg("the page repair hash table corrupted ")));
+    XLogRecPtr page_new_lsn = PageGetLSN(page);
+    if (XLByteLE(min_lsn, page_new_lsn) && XLByteLE(page_new_lsn, max_lsn)) {
+        return true;
     }
-
-    /* the page_new_lsn is in the range from record_min_lsn to record_max_lsn */
-    if (entry->page_state == WAIT_REPAIR && entry->page_new_lsn <= max_lsn && entry->page_new_lsn >= min_lsn) {
-        errno_t rc;
-        can_recovery = true;
-
-        rc = memcpy_s(page, BLCKSZ, entry->page_content, BLCKSZ);
-        securec_check(rc, "", "");
-    }
-    LWLockRelease(g_instance.repair_cxt.page_repair_hashtbl_lock);
-
-    return can_recovery;
+    return false;
 }
 
 void WaitRepalyFinish()
@@ -935,26 +721,6 @@ bool CheckFileRepairHashTbl(RelFileNode rnode, ForkNumber forknum, uint32 segno)
     return found;
 }
 
-void CheckNeedRecordBadFile(RepairFileKey key, uint32 nblock, uint32 blocknum, const XLogPhyBlock *pblk)
-{
-    if (g_instance.pid_cxt.PageRepairPID != 0) {
-        return;
-    }
-    BlockNumber relSegSize =
-        IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM) ? CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE;
-    if (CheckVerionSupportRepair() && (nblock == 0 || blocknum / relSegSize > nblock / relSegSize) &&
-        IsPrimaryClusterStandbyDN() && g_instance.repair_cxt.support_repair) {
-        if (pblk != NULL) {
-            key.relfilenode.relNode = pblk->relNode;
-            key.segno = pblk->block / relSegSize;
-        }
-        if (IsSegmentFileNode(key.relfilenode)) {
-            key.relfilenode.bucketNode = SegmentBktId;
-        }
-        PushBadFileToRemoteHashTbl(key);
-    }
-}
-
 static void PushBadFileToRemoteHashTbl(RepairFileKey key)
 {
     HTAB *file_hash = g_instance.repair_cxt.file_repair_hashtbl;
@@ -1022,34 +788,139 @@ void ClearBadFileHashTbl(const RelFileNode &node, ForkNumber forknum, uint32 seg
     return;
 }
 
-
-void BatchClearBadFileHashTbl(Oid spcNode, Oid dbNode)
+/* Check if standby repair is enabled */
+static bool IsStandbyRepairEnabled() 
 {
-    HTAB *file_hash = g_instance.repair_cxt.file_repair_hashtbl;
-    RepairFileEntry *entry = NULL;
-    bool found = false;
-    HASH_SEQ_STATUS status;
+    return g_instance.attr.attr_storage.isRepairCanInToNomralState && ENABLE_REPAIR;
+}
 
-    LWLockAcquire(FILE_REPAIR_LOCK, LW_EXCLUSIVE);
+/* We will initialize repair hash table if not already done */
+static void InitializeRepairHashTableIfNeeded() 
+{
+    if (t_thrd.xlog_cxt.pageRpairedHashTable == NULL) {
+        ThreadPageRepairedHashTableInit();
+    }
+}
 
-    hash_seq_init(&status, file_hash);
-    while ((entry = (RepairFileEntry *)hash_seq_search(&status)) != NULL) {
-        if (dbNodeandSpcNodeMatch(&(entry->key.relfilenode), spcNode, dbNode)) {
-            if (hash_search(file_hash, &(entry->key), HASH_REMOVE, &found) == NULL) {
-                LWLockRelease(FILE_REPAIR_LOCK);
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("file repair hash table corrupted")));
-            } else {
-                ereport(LOG, (errmodule(MOD_REDO),
-                    errmsg("[file repair] file %s segno is %u entry remove when drop database or segment space",
-                    relpathperm(entry->key.relfilenode, entry->key.forknum), entry->key.segno)));
-            }
+/* 
+ * If we need get older version for clean all invalid page,
+ * we only get lsn to get page.
+ */
+static XLogRecPtr DetermineComparisonLsn(XLogRecPtr lsn) 
+{
+    if (!XLByteEQ(lsn, InvalidXLogRecPtr)) {
+        return lsn;
+    }
+    if (IsExtremeRedo()) {
+        return t_thrd.xlog_cxt.current_redo_xlog_lsn;
+    }
+    return t_thrd.xlog_cxt.EndRecPtr;
+}
+
+/* Try to get a normal page form remote. */
+static bool isGetPageFromRemote(RepairBlockKey key, char* pageBuffer)
+{
+    int ret = RemoteReadBlockNoError(&key, pageBuffer, InvalidXLogRecPtr, NULL);
+    if (ret != REMOTE_READ_OK || pageBuffer == InvalidBuffer || PageIsNew((Page)pageBuffer)) {
+        pfree(pageBuffer);
+        return false;
+    }
+    return true;
+}
+
+static XLogRecPtr GetPageCommparedLSN(RepairBlockKey key, bool isPageFound, 
+                                        char* repairBuffer, bool& isSucess, RepairBlockEntry* hashEntry)
+{
+    if (!isPageFound) {
+        if (!isGetPageFromRemote(key, repairBuffer)) {
+            /* If Page is not found, and get page false, no need to go on. */
+            isSucess = false;
+            return InvalidXLogRecPtr;
         }
+        return PageGetLSN((Page)repairBuffer);
+    } else {
+        return hashEntry->page_new_lsn;
+    }
+}
+/* Main entry for the standby bad block repair */
+bool MainEntryForPageRepair(RepairBlockKey key, InvalidPageType invalidPageType, 
+                         char* bufBlock, XLogRecPtr lastLsn, HTAB* invalidHashTable) {
+    if (!IsStandbyRepairEnabled()) {
+        return false;
     }
 
-    LWLockRelease(FILE_REPAIR_LOCK);
+    InitializeRepairHashTableIfNeeded();
 
-    return;
-}
+    /* This is normal flag of repair process, it must be true during the repair */
+    bool sucessFlag = true;
+    XLogRecPtr comparisonLsn = DetermineComparisonLsn(lastLsn);
+    HTAB* repairHashTable = t_thrd.xlog_cxt.pageRpairedHashTable;
+    bool isPageFound = false;
+    XLogRecPtr pageLsn;
+    bool repairResult = false;
+    errno_t rc;
+    char* repairBuffer = (char*)palloc0(BLCKSZ);
+    RepairBlockEntry* hashEntry = (RepairBlockEntry*)hash_search(repairHashTable, &key, HASH_FIND, &isPageFound);
+    pageLsn = GetPageCommparedLSN(key, isPageFound, repairBuffer, sucessFlag, hashEntry);
+    if (!sucessFlag) {
+        /* Repair false, just quit. */
+        return false;
+    }
+    if (XLByteLT(pageLsn, comparisonLsn) && isPageFound) {
+        /* If page is from hashtable, we should try to remote read again. */
+        forget_specified_invalid_pages(key, invalidHashTable);    
+        pageLsn = GetPageCommparedLSN(key, false, repairBuffer, sucessFlag, NULL);
+        if (!sucessFlag) {
+            /* Repair false, just quit. */
+            return false;
+        }
+    } 
+    
+    if (XLByteLT(pageLsn, comparisonLsn)) {
+        repairResult = false;
+    } else if (XLByteEQ(pageLsn, comparisonLsn) || IS_UNDO_RELFILENODE(key.relfilenode)) {
+        if (isPageFound) {
+            rc = memcpy_s(bufBlock, BLCKSZ, hashEntry->page_content, BLCKSZ);
+            hash_search(repairHashTable, &key, HASH_REMOVE, &isPageFound) == NULL;
+        } else {
+            rc = memcpy_s(bufBlock, BLCKSZ, repairBuffer, BLCKSZ);
+        }
+        securec_check(rc, "", "");
+        forget_specified_invalid_pages(key, invalidHashTable);
+        ereport(LOG, (errmsg("[REPAIR] It had repair page,relation %u/%u/%u, blocknum:%u, "
+                    "and there is %u pages in repairhashtable.",
+                    key.relfilenode.spcNode, key.relfilenode.dbNode, key.relfilenode.relNode, key.blocknum,
+                    RecordRepairHashTablePageNum(false))));
+        repairResult = true;
+    } else {
+        /* If we enter this function from normal read instead of need a specify version page. */
+        bool addToHashTable = XLByteEQ(lastLsn, InvalidXLogRecPtr) && !isPageFound;
+        if (addToHashTable) {
+            /* 
+             * Third Condition.
+             * We get a newer page from primary, just save, and reload hash table; 
+            */
+            hashEntry = (RepairBlockEntry*)hash_search(repairHashTable, &key, HASH_ENTER, &isPageFound);
+            hashEntry->error_type = invalidPageType;
+            hashEntry->page_new_lsn = pageLsn;
+            rc = memcpy_s(hashEntry->page_content, BLCKSZ, repairBuffer, BLCKSZ);
+            securec_check(rc, "", "");
+            
+            ereport(LOG, (errmsg("[REPAIR] Cannot repair page this epoch,relation %u/%u/%u, blocknum:%u, "
+                "pageLsn:%X/%X, recptr:%X/%X, and there is %u pages in repairhashtable.",
+                key.relfilenode.spcNode, key.relfilenode.dbNode, key.relfilenode.relNode, key.blocknum,
+                (uint32)(pageLsn >> 32), (uint32)pageLsn, (uint32)(comparisonLsn >> 32), (uint32)comparisonLsn,
+                RecordRepairHashTablePageNum(true))));
+        } else if (!isPageFound) {
+            ereport(LOG, (errmsg("[REPAIR] No need to record, relation %u/%u/%u, blocknum:%u, pageLsn:%X/%X, recptr:%X/%X",
+                    key.relfilenode.spcNode, key.relfilenode.dbNode, key.relfilenode.relNode, key.blocknum,
+                    (uint32)(pageLsn >> 32), (uint32)pageLsn, (uint32)(comparisonLsn >> 32), (uint32)comparisonLsn)));
+        }
+        repairResult = false;
+    }
+    pfree(repairBuffer);
+    return repairResult;
+}       
 
 void RenameRepairFile(RepairFileKey *key, bool clear_entry)
 {
@@ -1251,7 +1122,7 @@ void CheckIsStopRecovery(void)
             if (NOT_SUPPORT_PAGE_REPAIR) {
                 return;
             }
-            if (t_thrd.xlog_cxt.server_mode == STANDBY_MODE && g_instance.repair_cxt.support_repair) {
+            if (t_thrd.xlog_cxt.server_mode == STANDBY_MODE && ENABLE_REPAIR) {
                 SetRecoverySuspend(true);
                 ereport(LOG, (errmodule(MOD_REDO),
                     errmsg("set recovery suspend to true, the need repair num is %d, need rename num is %d",

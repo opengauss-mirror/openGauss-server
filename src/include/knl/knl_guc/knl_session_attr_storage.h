@@ -119,6 +119,7 @@ typedef struct knl_session_attr_storage {
     bool enable_incremental_catchup;
     bool auto_explain_log_verbose;
     bool enable_candidate_buf_usage_count;
+    bool enable_page_repair_function;
     bool enable_ustore_partial_seqscan;
     int keep_sync_window;
     int wait_dummy_time;

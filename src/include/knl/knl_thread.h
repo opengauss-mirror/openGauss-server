@@ -759,7 +759,9 @@ typedef struct knl_t_xlog_context {
     /* Memory context to hold the registered buffer and data references. */
     MemoryContext xloginsert_cxt;
 
+    /* Standby bad block repaired. */
     struct HTAB* invalid_page_tab;
+    struct HTAB* pageRpairedHashTable;
 
     struct HTAB* remain_segs;
 
@@ -3675,6 +3677,7 @@ typedef struct knl_thrd_context {
     knl_t_sync_auxiliary_context sync_auxiliary_cxt;
     knl_t_invalidation_message_context inval_msg_cxt;
     knl_t_sql_limit_context sql_limit_cxt;
+    XLogRecPtr repairLsn;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT

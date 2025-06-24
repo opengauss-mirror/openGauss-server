@@ -28,13 +28,20 @@ typedef enum {
                      * replayed) */
 } XLogRedoAction;
 
-typedef enum {
-    NOT_PRESENT,
-    NOT_INITIALIZED,
-    LSN_CHECK_ERROR,
-    CRC_CHECK_ERROR,
-    SEGPAGE_LSN_CHECK_ERROR,
-}InvalidPageType;
+typedef struct xl_invalid_page_key{
+    RelFileNode node;
+    ForkNumber forkno;
+    BlockNumber blkno;
+}xl_invalid_page_key;
+
+typedef struct xl_invalid_page{
+    xl_invalid_page_key key;
+    InvalidPageType type;
+    XLogRecPtr lsn;
+    XLogRecPtr last_lsn;
+    XLogPhyBlock pblk;
+}xl_invalid_page;
+
 
 extern bool XLogHaveInvalidPages(void);
 extern void* XLogGetInvalidPages();
@@ -84,6 +91,7 @@ bool ParseStateUseShareBuf();
 bool ParseStateUseLocalBuf();
 bool ParseStateWithoutCache();
 
-extern void forget_specified_invalid_pages(RepairBlockKey key);
+extern void forget_specified_invalid_pages(RepairBlockKey key, HTAB* hasTable = NULL);
 extern void forget_range_invalid_pages(void *pageinfo);
+extern bool RepairPageForSpecificPage(xl_invalid_page* entry, HTAB* invalidHashTable = NULL);
 #endif

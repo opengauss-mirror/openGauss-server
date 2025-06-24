@@ -1317,6 +1317,7 @@ extern void XLogBlockSegDdlDoRealAction(XLogBlockHead* blockhead, void* blockrec
 extern void GinRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void GistRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo);
 extern bool IsCheckPoint(const XLogRecParseState *parseState);
+RepairBlockKey XLogBlockDataToGetKey(XLogBlockDataParse* datadecode);
 bool is_backup_end(const XLogRecParseState *parse_state);
 void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const char *data);
 void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr read_ptr, XLogRecPtr lsn);

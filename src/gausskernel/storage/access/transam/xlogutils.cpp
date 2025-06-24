@@ -50,6 +50,8 @@
 #include "storage/cfs/cfs_converter.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_reform_common.h"
+#include "access/parallel_recovery/page_redo.h"
+#include "access/extreme_rto/page_redo.h"
 
 /*
  * During XLOG replay, we may see XLOG records for incremental updates of
@@ -61,18 +63,6 @@
  * complain if we don't actually see a drop or truncate covering the page
  * later in replay.
  */
-typedef struct xl_invalid_page_key {
-    RelFileNode node;  /* the relation */
-    ForkNumber forkno; /* the fork number */
-    BlockNumber blkno; /* the page */
-} xl_invalid_page_key;
-
-typedef struct xl_invalid_page {
-    xl_invalid_page_key key; /* hash key ... must be first */
-    InvalidPageType type;    /* invalid page type */
-    XLogRecPtr lsn;          /* first xlog when the invalid page found */
-    XLogPhyBlock pblk;       /* physical location for segment-page storage */
-} xl_invalid_page;
 
 /* Report a reference to an invalid page */
 static void report_invalid_page(int elevel, xl_invalid_page *invalid_page)
@@ -194,9 +184,8 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
 
         ctl.keysize = sizeof(xl_invalid_page_key);
         ctl.entrysize = sizeof(xl_invalid_page);
-        ctl.hash = XlInvalidPageKeyHash;
-        ctl.match = XlInvalidPageKeyMatch;
-        int flag = HASH_ELEM | HASH_FUNCTION | HASH_COMPARE;
+        ctl.hash = tag_hash;
+        int flag = HASH_ELEM | HASH_FUNCTION;
         if (IsMultiThreadRedoRunning()) {
             ctl.hcxt = g_instance.comm_cxt.predo_cxt.parallelRedoCtx;
             flag |= HASH_SHRCTX;
@@ -211,6 +200,7 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
         /* hash_search already filled in the key */
         hentry->type = type;
         hentry->lsn = GetCurrentXLogLSN();
+        hentry->last_lsn = GetCurrentXLogLSN();
         if (pblk) {
             hentry->pblk = *pblk;
         } else {
@@ -218,11 +208,19 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
             hentry->pblk.block = InvalidBlockNumber;
         }
         report_invalid_page(LOG, hentry);
+    } else {
+        /* update last_lsn */
+        hentry->last_lsn = GetCurrentXLogLSN();
     }
 
     if (IsMultiThreadRedoRunning()) {
         (void)MemoryContextSwitchTo(oldCtx);
     }
+    ereport(LOG, (errmsg("[REPAIR] It will log an invlid page, %s of relation %u/%u/%u, blocknum:%u, "
+                    "current_redo_xlog_lsn:%X/%X, EndRecPtr:%X/%X.",
+                    GetInvalidPageTypeNameByNumber(type), node.spcNode, node.dbNode, node.relNode, blkno,
+                    (uint32)(t_thrd.xlog_cxt.current_redo_xlog_lsn >> 32), (uint32)(t_thrd.xlog_cxt.current_redo_xlog_lsn),
+                    (uint32)(t_thrd.xlog_cxt.EndRecPtr >> 32), (uint32)(t_thrd.xlog_cxt.EndRecPtr))));
 }
 
 static bool specified_invalid_page_match(xl_invalid_page *entry, RepairBlockKey key)
@@ -234,31 +232,33 @@ static bool specified_invalid_page_match(xl_invalid_page *entry, RepairBlockKey 
     return false;
 }
 
-void forget_specified_invalid_pages(RepairBlockKey key)
+// Muyulinzhong 从inalvied_page_tab中去除某个页面；
+void forget_specified_invalid_pages(RepairBlockKey key, HTAB* hashTable)
 {
     HASH_SEQ_STATUS status;
-    xl_invalid_page *hentry = NULL;
 
-    if (t_thrd.xlog_cxt.invalid_page_tab == NULL)
-        return; /* nothing to do */
-
+    if (hashTable == NULL && t_thrd.xlog_cxt.invalid_page_tab == NULL) {
+        return;
+    }
+    if (hashTable == NULL) {
+        hashTable = t_thrd.xlog_cxt.invalid_page_tab;
+    }
     MemoryContext oldCtx = NULL;
     if (IsMultiThreadRedoRunning()) {
         oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
     }
 
-    hash_seq_init(&status, t_thrd.xlog_cxt.invalid_page_tab);
+    hash_seq_init(&status, hashTable);
 
-    while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
-        if (specified_invalid_page_match(hentry, key)) {
-            char *path = relpathperm(hentry->key.node, key.forknum);
-            ereport(LOG, (errmodule(MOD_REDO), errmsg("page %u of relation %s(%u/%u) has been dropped",
-                hentry->key.blkno, path, hentry->pblk.relNode, hentry->pblk.block)));
-            pfree(path);
-            if (hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void *)&hentry->key, HASH_REMOVE, NULL) == NULL) {
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash table corrupted")));
-            }
-        }
+    xl_invalid_page_key searchkey;
+    searchkey.node = key.relfilenode;
+    searchkey.forkno = key.forknum;
+    searchkey.blkno = key.blocknum;
+    bool found = false;
+    (void)hash_search(hashTable, &searchkey, HASH_REMOVE, &found);
+    if (found) {
+        ereport(LOG, (errmsg("[REPAIR] Drop an invalid page info from tbl, relation %u/%u/%u, blocknum:%u.",
+                    key.relfilenode.spcNode, key.relfilenode.dbNode, key.relfilenode.relNode, key.blocknum)));
     }
 
     if (IsMultiThreadRedoRunning()) {
@@ -819,18 +819,18 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
             bool notSkip = DoLsnCheck(bufferinfo, willinit, lastLsn, 
                 (blockinfo.pblk.relNode != InvalidOid) ? &blockinfo.pblk : NULL, &needRepair);
  
-            if (needRepair && g_instance.pid_cxt.PageRepairPID != 0) {
-                XLogRecPtr pageCurLsn = PageGetLSN(bufferinfo->pageinfo.page);
+            if (needRepair) {
                 RepairBlockKey key;
-
-                UnlockReleaseBuffer(bufferinfo->buf);
                 (void)XLogRecGetBlockTag(record, block_id, &key.relfilenode, &key.forknum, &key.blocknum);
-                parallel_recovery::RecordBadBlockAndPushToRemote(record, key, LSN_CHECK_FAIL, pageCurLsn,
-                    blockinfo.pblk);
-
-                bufferinfo->buf = InvalidBuffer;
-                bufferinfo->pageinfo = {0};
-                return BLK_NOTFOUND;
+                if (MainEntryForPageRepair(key, LSN_CHECK_ERROR, (char*)bufferinfo->pageinfo.page)) {
+                    MarkBufferDirty(bufferinfo->buf);
+                    return BLK_DONE;
+                } else {
+                    UnlockReleaseBuffer(bufferinfo->buf);
+                    bufferinfo->buf = InvalidBuffer;
+                    bufferinfo->pageinfo = {0};
+                    return BLK_NOTFOUND;
+                }
             }
 
             if (!notSkip) {
@@ -928,14 +928,6 @@ Buffer XLogReadBufferExtendedWithoutBuffer(RelFileNode rnode, ForkNumber forknum
     } else {
         if (mode == RBM_NORMAL) {
             log_invalid_page(rnode, forknum, blkno, NOT_PRESENT, NULL);
-            RepairFileKey key;
-            key.relfilenode = rnode;
-            key.forknum = forknum;
-            key.segno =
-                blkno / (IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM)
-                             ? (unsigned int)CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE);
-
-            CheckNeedRecordBadFile(key, lastblock, blkno, NULL);
             return InvalidBuffer;
         }
         if (mode == RBM_NORMAL_NO_LOG)
@@ -970,12 +962,6 @@ Buffer XLogReadBufferExtendedWithoutBuffer(RelFileNode rnode, ForkNumber forknum
             Assert(!PageIsLogical(page));
             XLogRedoBufferReleaseFunc(buffer);
             log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED, NULL);
-            RepairFileKey key;
-            key.relfilenode = rnode;
-            key.forknum = forknum;
-            key.segno = blkno / (IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM)
-                                     ? (BlockNumber)CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE);
-            CheckNeedRecordBadFile(key, lastblock, blkno, NULL);
             return InvalidBuffer;
         }
     }
@@ -1120,7 +1106,6 @@ Buffer XLogReadBufferExtendedForHeapDisk(const RelFileNode &rnode, ForkNumber fo
     }
 
     smgr->encrypt = tde;
-
     if (pageExistsInFile) {
         /* page exists in file */
         buffer = ReadBufferWithoutRelcache(rnode, forknum, blkno, mode, NULL, pblk);
@@ -1130,16 +1115,22 @@ Buffer XLogReadBufferExtendedForHeapDisk(const RelFileNode &rnode, ForkNumber fo
     } else {
         buffer = XLogReadBufferExceedFileRange(rnode, forknum, blkno, mode, pblk);
         if (BufferIsInvalid(buffer)) {
-            /* can not read */
-            if (mode == RBM_NORMAL) {
-                RepairFileKey key;
-                key.relfilenode = rnode;
-                key.forknum = forknum;
-                key.segno = blkno / (IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM)
-                                         ? (BlockNumber)CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE);
-                CheckNeedRecordBadFile(key, lastblock, blkno, pblk);
+            if (!g_instance.attr.attr_storage.isRepairCanInToNomralState && ENABLE_REPAIR) {
+                return buffer;
             }
-            return buffer;
+            xl_invalid_page hentry;
+            hentry.key.node = rnode;
+            hentry.key.forkno = forknum;
+            hentry.key.blkno = blkno;
+            hentry.type = NOT_PRESENT;
+            hentry.last_lsn = InvalidXLogRecPtr;
+            if (!RepairPageForSpecificPage(&hentry)) {
+                return InvalidBuffer;
+            }
+            buffer = ReadBufferWithoutRelcache(rnode, forknum, blkno, mode, NULL, pblk);
+            if (BufferIsInvalid(buffer)) {
+                return buffer;
+            }
         }
     }
 
@@ -1165,16 +1156,22 @@ Buffer XLogReadBufferExtendedForHeapDisk(const RelFileNode &rnode, ForkNumber fo
 
         if (PageIsNew(page)) {
             Assert(!PageIsLogical(page));
-            if (ENABLE_DMS && buffer_is_locked) {
-                LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+            if (ENABLE_DMS) {
+                if (buffer_is_locked) {
+                    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+                }
             }
-            ReleaseBuffer(buffer);
-            RepairFileKey key;
+            RepairBlockKey key;
             key.relfilenode = rnode;
             key.forknum = forknum;
-            key.segno = blkno / (IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM)
-                                     ? (BlockNumber)CFS_LOGIC_BLOCKS_PER_FILE : RELSEG_SIZE);
-            CheckNeedRecordBadFile(key, lastblock, blkno, pblk);
+            key.blocknum = blkno;
+            if (MainEntryForPageRepair(key, NOT_INITIALIZED, (char*)page)) {
+                LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+                MarkBufferDirty(buffer);
+                LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+                return buffer;
+            }
+            ReleaseBuffer(buffer);
             log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED, pblk);
             return InvalidBuffer;
         }
@@ -1213,13 +1210,6 @@ Buffer XLogReadBufferExtendedForSegpage(const RelFileNode &rnode, ForkNumber for
                         rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, forknum, blkno, spc_nblocks)));
 
             /* As segpage use physical block number, we do not have to set pblk */
-            RepairFileKey key;
-            key.relfilenode = rnode;
-            key.forknum = forknum;
-            key.segno =
-                blkno / (IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM)
-                             ? (unsigned int)CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE);
-            CheckNeedRecordBadFile(key, spc_nblocks, blkno, NULL);
             log_invalid_page(rnode, forknum, blkno, NOT_PRESENT, NULL);
             return InvalidBuffer;
         }
@@ -1257,7 +1247,6 @@ Buffer XLogReadBufferExtendedForSegpage(const RelFileNode &rnode, ForkNumber for
                 key.segno =
                     blkno / (IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM) ?
 				    (unsigned int)CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE);
-                CheckNeedRecordBadFile(key, spc_nblocks, blkno, NULL);
                 log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED, NULL);
                 return InvalidBuffer;
             }
@@ -1479,11 +1468,8 @@ void XLogDropRelation(const RelFileNode &rnode, ForkNumber forknum)
     }
 
     /* clear relfilenode match entry of page repair thread hashtbl */
-    if (g_instance.pid_cxt.PageRepairPID != 0) {
+    if (ENABLE_REPAIR) {
         ClearPageRepairHashTbl(rnode, forknum, 0, false);
-        if (!IsSegmentFileNode(rnode)) {
-            ClearBadFileHashTbl(rnode, forknum, 0);
-        }
     }
 }
 
@@ -1552,13 +1538,12 @@ void XLogDropDatabase(Oid dbid)
 
     /* clear dbNode match entry of recovery thread hashtbl */
     if (IsExtremeRedo()) {
-        ExtremeBatchClearRecoveryThreadHashTbl(InvalidOid, dbid);
+        extreme_rto::BatchClearRecoveryThreadHashTbl(InvalidOid, dbid);
     } else {
         parallel_recovery::BatchClearRecoveryThreadHashTbl(InvalidOid, dbid);
     }
-    if (g_instance.pid_cxt.PageRepairPID != 0) {
+    if (ENABLE_REPAIR) {
         BatchClearPageRepairHashTbl(InvalidOid, dbid);
-        BatchClearBadFileHashTbl(InvalidOid, dbid);
     }
 }
 
@@ -1571,14 +1556,9 @@ void XLogDropSegmentSpace(Oid spcNode, Oid dbNode)
 
     /* clear spcNode and dbNode match entry of recovery thread hashtbl */
     if (IsExtremeRedo()) {
-        ExtremeBatchClearRecoveryThreadHashTbl(spcNode, dbNode);
+        extreme_rto::BatchClearRecoveryThreadHashTbl(spcNode, dbNode);
     } else {
         parallel_recovery::BatchClearRecoveryThreadHashTbl(spcNode, dbNode);
-    }
-    /* clear spcNode and dbNode match entry of page repair thread hashtbl */
-    if (g_instance.pid_cxt.PageRepairPID != 0) {
-        BatchClearPageRepairHashTbl(spcNode, dbNode);
-        BatchClearBadFileHashTbl(spcNode, dbNode);
     }
 }
 
@@ -1591,32 +1571,19 @@ void XLogTruncateRelation(RelFileNode rnode, ForkNumber forkNum, BlockNumber nbl
 {
     forget_invalid_pages(rnode, forkNum, nblocks, false);
     /* clear relfilenode match entry of recovery thread hashtbl */
-    if (g_instance.pid_cxt.PageRepairPID != 0) {
+    if (ENABLE_REPAIR) {
         if (IsExtremeRedo()) {
             ExtremeClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
         } else {
             parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
         }
         ClearPageRepairHashTbl(rnode, forkNum, nblocks, false);
-        int truncate_segno = (nblocks % RELSEG_SIZE) == 0 ? (nblocks / RELSEG_SIZE) : (nblocks / RELSEG_SIZE + 1);
-        ClearBadFileHashTbl(rnode, forkNum, truncate_segno);
     }
 }
 
 void XLogTruncateSegmentSpace(RelFileNode rnode, ForkNumber forkNum, BlockNumber nblocks)
 {
     forget_invalid_pages(rnode, forkNum, nblocks, true);
-    /* clear relfilenode match entry of recovery thread hashtbl */
-    if (g_instance.pid_cxt.PageRepairPID != 0) {
-        if (IsExtremeRedo()) {
-            ExtremeClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
-        } else {
-            parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
-        }
-        ClearPageRepairHashTbl(rnode, forkNum, nblocks, true);
-        int truncate_segno = (nblocks % RELSEG_SIZE) == 0 ? (nblocks / RELSEG_SIZE) : (nblocks / RELSEG_SIZE + 1);
-        ClearBadFileHashTbl(rnode, forkNum, truncate_segno);
-    }
 }
 
 /*

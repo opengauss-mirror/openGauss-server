@@ -76,8 +76,7 @@ bool will_shutdown = false;
  *       NEXT   |  93000   |     ?      |     ?
  *
  ********************************************/
-
-const uint32 GRAND_VERSION_NUM = 93049;
+const uint32 GRAND_VERSION_NUM = 93051;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
@@ -188,7 +187,6 @@ const uint32 DISASTER_READ_VERSION_NUM = 92592;
 const uint32 ANALYZER_HOOK_VERSION_NUM = 92592;
 const uint32 ENHANCED_TUPLE_LOCK_VERSION_NUM = 92583;
 const uint32 PUBLICATION_VERSION_NUM = 92580;
-const uint32 SUPPORT_DATA_REPAIR = 92579;
 const uint32 WAIT_N_TUPLE_LOCK_VERSION_NUM = 92573;
 const uint32 CREATE_INDEX_CONCURRENTLY_DIST_VERSION_NUM = 92569;
 const uint32 SCAN_BATCH_MODE_VERSION_NUM = 92568;
@@ -250,6 +248,7 @@ const uint32 FLOAT_VERSION_NUMBER = 92938;
 
 const uint32 PAGE_BASED_VERSION_NUM = 93039;
 const uint32 SS_ARCHIVE_VERSION_NUM = 93040;
+const uint32 SUPPORT_DATA_REPAIR = 93050;
 
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;

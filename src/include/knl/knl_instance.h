@@ -716,7 +716,7 @@ typedef struct knl_g_repair_context {
     HTAB *file_repair_hashtbl;          /* standby store file repair info */
     LWLock *file_repair_hashtbl_lock;
     HTAB *global_repair_bad_block_stat; /* local_bad_block_info use this */
-    bool support_repair;
+    bool enableRepair;                  /*  is repair function start */
 } knl_g_repair_context;
 
 typedef struct {
@@ -1362,7 +1362,7 @@ typedef struct knl_g_listen_context {
 } knl_g_listen_context;
 
 typedef struct knl_g_startup_context {
-    uint32 remoteReadPageNum;
+    pg_atomic_uint32 remoteReadPageNum;
     HTAB *badPageHashTbl;
     char page[BLCKSZ];
     XLogReaderState *current_record;

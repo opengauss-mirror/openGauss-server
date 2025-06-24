@@ -462,7 +462,7 @@ void ReportInvalidPage(RepairBlockKey key)
 {
     /* record bad page, wait the pagerepair thread repair the page */
     if (CheckVerionSupportRepair() && (AmStartupProcess() || AmPageRedoWorker()) &&
-        IsPrimaryClusterStandbyDN() && g_instance.repair_cxt.support_repair) {
+        IsPrimaryClusterStandbyDN() && ENABLE_REPAIR) {
         XLogPhyBlock pblk_bak = {0};
         RedoPageRepairCallBack(key, pblk_bak);
         log_invalid_page(key.relfilenode, key.forknum, key.blocknum, CRC_CHECK_ERROR, NULL);

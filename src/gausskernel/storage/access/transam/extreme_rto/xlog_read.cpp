@@ -156,6 +156,7 @@ int ParallelXLogReadWorkBufRead(XLogReaderState *xlogreader, XLogRecPtr targetPa
 
     pg_atomic_write_u64(&g_dispatcher->rtoXlogBufState.expectLsn, expectedRecPtr);
     for (;;) {
+        RepairPageToAllRightState(false);
         // Check to see if the trigger file exists. If so, update the gaussdb state file.
         if (CheckForStandbyTrigger()
 #ifndef ENABLE_MULTIPLE_NODES
@@ -551,6 +552,7 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
     for (;;) {
         uint32 readSource = pg_atomic_read_u32(&(g_recordbuffer->readSource));
         if (readSource & XLOG_FROM_STREAM && !SS_DISASTER_STANDBY_CLUSTER) {
+            g_instance.attr.attr_storage.isSwitchToStream = true;
             readLen = ParallelXLogReadWorkBufRead(xlogreader, targetPagePtr, reqLen, targetRecPtr, readTLI);
         } else {
             if (ENABLE_DSS) {

@@ -65,6 +65,8 @@ extern void GetIPAndPort(char* address, char* ip, char* port, size_t len);
 extern bool CanRemoteRead();
 
 extern bool IsRemoteReadModeOn();
+
+extern void GetPrimaryServiceAddress(char* address, size_t address_len);
 extern int SetRemoteReadModeOffAndGetOldMode();
 extern void SetRemoteReadMode(int mode);
 

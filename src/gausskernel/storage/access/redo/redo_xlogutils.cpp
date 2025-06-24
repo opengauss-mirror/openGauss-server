@@ -142,7 +142,7 @@ bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr last
             return XLogLsnCheckLogInvalidPage(bufferinfo, LSN_CHECK_ERROR, pblk);
         } else {
             int elevel = PANIC;
-            if (CheckVerionSupportRepair() && IsPrimaryClusterStandbyDN() && g_instance.repair_cxt.support_repair) {
+            if (CheckVerionSupportRepair() && IsPrimaryClusterStandbyDN() && ENABLE_REPAIR) {
                 elevel = WARNING;
                 *needRepair = true;
                 XLogLsnCheckLogInvalidPage(bufferinfo, LSN_CHECK_ERROR, pblk);
@@ -225,6 +225,22 @@ bool XLogBlockRefreshRedoBufferInfo(XLogBlockHead *blockhead, RedoBufferInfo *bu
     return true;
 }
 
+RepairBlockKey XLogBlockDataToGetKey(XLogBlockDataParse *datadecode)
+{
+    RepairBlockKey key;
+    XLogBlockParse *block = STRUCT_CONTAINER(XLogBlockParse, extra_rec, datadecode);
+    XLogRecParseState *state = STRUCT_CONTAINER(XLogRecParseState, blockparse, block);
+
+    key.relfilenode.spcNode = state->blockparse.blockhead.spcNode;
+    key.relfilenode.dbNode = state->blockparse.blockhead.dbNode;
+    key.relfilenode.relNode = state->blockparse.blockhead.relNode;
+    key.relfilenode.bucketNode = state->blockparse.blockhead.bucketNode;
+    key.relfilenode.opt = state->blockparse.blockhead.opt;
+    key.forknum = state->blockparse.blockhead.forknum;
+    key.blocknum = state->blockparse.blockhead.blkno;
+    return key;
+}
+
 void XLogBlockInitRedoBlockInfo(XLogBlockHead *blockhead, RedoBufferTag *blockinfo)
 {
     /* init blockinfo */
@@ -279,17 +295,21 @@ XLogRedoAction XLogCheckBlockDataRedoAction(XLogBlockDataParse *datadecode, Redo
                     bool notSkip = DoLsnCheck(bufferinfo, willinit, XLogBlockDataGetLastBlockLSN(datadecode), 
                         (bufferinfo->blockinfo.pblk.relNode != InvalidOid) ? &bufferinfo->blockinfo.pblk : NULL,
                         &needRepair);
-                    if (needRepair && g_instance.pid_cxt.PageRepairPID != 0) {
-                        XLogRecPtr pageCurLsn = PageGetLSN(bufferinfo->pageinfo.page);
-                        UnlockReleaseBuffer(bufferinfo->buf);
-                        ExtremeRecordBadBlockAndPushToRemote(datadecode, LSN_CHECK_FAIL, pageCurLsn,
-                            bufferinfo->blockinfo.pblk);
-                        bufferinfo->buf = InvalidBuffer;
-                        bufferinfo->pageinfo = {0};
+                    if (needRepair) {
+                        RepairBlockKey key = XLogBlockDataToGetKey(datadecode);
+                        bool isRepaired = MainEntryForPageRepair(key, LSN_CHECK_ERROR, (char*)bufferinfo->pageinfo.page);
+                        if (isRepaired) {
+                            MarkBufferDirty(bufferinfo->buf);
+                            return BLK_DONE;
+                        } else {
+                            UnlockReleaseBuffer(bufferinfo->buf);
+                            bufferinfo->buf = InvalidBuffer;
+                            bufferinfo->pageinfo = {0};
 #ifdef USE_ASSERT_CHECKING
-                        bufferinfo->pageinfo.ignorecheck = true;
+                            bufferinfo->pageinfo.ignorecheck = true;
 #endif
-                        return BLK_NOTFOUND;
+                            return BLK_NOTFOUND;
+                        }
                     }
                     if (!notSkip) {
                         return BLK_DONE;
@@ -1623,6 +1643,26 @@ static inline bool GetCleanupLock(const XLogBlockHead *blockhead)
     return false;
 }
 
+static bool ModifyInvliadPageHashTableLSN(XLogBlockHead* blockhead)
+{
+    xl_invalid_page_key key;
+    key.node.spcNode = blockhead->spcNode;
+    key.node.dbNode = blockhead->dbNode;
+    key.node.relNode = blockhead->relNode;
+    key.node.bucketNode = blockhead->bucketNode;
+    key.node.opt = blockhead->opt;
+    key.forkno = blockhead->forknum;
+    key.blkno = blockhead->blkno;
+    bool found = false;
+    RepairBlockEntry* repairBlockEntry = (RepairBlockEntry*)hash_search(t_thrd.xlog_cxt.pageRpairedHashTable, (void*)&key, HASH_FIND, &found);
+    if (found && XLByteEQ(repairBlockEntry->page_new_lsn, blockhead->end_ptr)) {
+        return false;
+    }
+    xl_invalid_page* hentry = (xl_invalid_page*)hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void*)&key, HASH_FIND, &found);
+    hentry->last_lsn = blockhead->end_ptr;
+    return true;
+}
+
 XLogRedoAction XLogBlockGetOperatorBuffer(XLogBlockHead *blockhead, void *blockrecbody, RedoBufferInfo *bufferinfo,
                                           bool notfound, ReadBufferMethod readmethod)
 {
@@ -1645,11 +1685,13 @@ XLogRedoAction XLogBlockGetOperatorBuffer(XLogBlockHead *blockhead, void *blockr
         bool buf_willinit = XLogBlockDataGetBlockFlags(blockdatarec) & REGBUF_WILL_INIT;
         RedoBufferTag *blockinfo = &bufferinfo->blockinfo;
         if ((willinit == false) && (notfound == true)) {
-            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS redo][%u/%u/%u/%d %d-%u] XLogBlockGetOperatorBuffer:"
-                "page not found, xlogLsn:%lu, pageLsn:%lu", blockinfo->rnode.spcNode,
-                blockinfo->rnode.dbNode, blockinfo->rnode.relNode, blockinfo->rnode.bucketNode,
-                blockinfo->forknum, blockinfo->blkno, xlogLsn, pageLsn)));
-            return BLK_NOTFOUND;
+            // muyulinzhong 存疑
+            if (!ENABLE_REPAIR) {
+                return BLK_NOTFOUND;
+            }
+            if (ModifyInvliadPageHashTableLSN(blockhead)) {
+                return BLK_DONE;
+            }
         }
 
         bool getCleanupLock = GetCleanupLock(blockhead);
@@ -1816,6 +1858,7 @@ bool need_restore_new_page_version(XLogRecParseState *redo_block_state)
     return true;
 }
 
+// muyulinzhong:进行极致RTO Redo；
 bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo *bufferinfo,  bool notfound,
     RedoTimeCost &readBufCost, RedoTimeCost &redoCost)
 {
@@ -1833,7 +1876,7 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
     GetRedoStartTime(readBufCost);
     redoaction = XLogBlockGetOperatorBuffer(blockhead, blockrecbody, bufferinfo, notfound, G_BUFFERREADMETHOD);
     CountRedoTime(readBufCost);
-    if (redoaction == BLK_NOTFOUND) {
+    if (redoaction == BLK_NOTFOUND || (notfound && redoaction == BLK_DONE)) {
 #ifdef USE_ASSERT_CHECKING
         ereport(WARNING, (errmsg("XLogBlockRedoForExtremeRTO:lsn %X/%X, page %u/%u/%u %u not found",
                                  (uint32)(blockhead->end_ptr >> 32), (uint32)(blockhead->end_ptr), blockhead->spcNode,
