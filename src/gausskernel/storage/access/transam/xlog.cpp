@@ -9266,6 +9266,27 @@ static inline void set_hot_standby_recycle_xid()
     closedir(dir);
 }
 
+static TimestampTz getRecordTimestamp(XLogReaderState* record)
+{
+    uint8 xactInfo = XLogRecGetInfo(record) & (~XLR_INFO_MASK);
+    uint8 rmid = XLogRecGetRmid(record);
+    TimestampTz xtime = 0;
+
+    if (rmid == RM_XACT_ID) {
+        if ((xactInfo == XLOG_XACT_COMMIT) || (xactInfo == XLOG_STANDBY_CSN_COMMITTING) ||
+            (xactInfo == XLOG_XACT_COMMIT_PREPARED)) {
+            xtime = ((xl_xact_commit*)XLogRecGetData(record))->xact_time;
+        } else if (xactInfo == XLOG_XACT_COMMIT_COMPACT) {
+            xtime = ((xl_xact_commit_compact*)XLogRecGetData(record))->xact_time;
+        } else if ((xactInfo == XLOG_XACT_ABORT) || (xactInfo == XLOG_XACT_ABORT_PREPARED) ||
+                   (xactInfo == XLOG_XACT_ABORT_WITH_XID)) {
+            xtime = ((xl_xact_commit*)XLogRecGetData(record))->xact_time;
+        }
+    }
+
+    return xtime;
+}
+
 /*
  * This must be called ONCE during postmaster or standalone-backend startup
  */
@@ -10526,7 +10547,11 @@ void StartupXLOG(void)
                 } else if (!SS_ONDEMAND_REALTIME_BUILD_NORMAL && TransactionIdIsValid(xl_xid)) {
                     ExtendCSNLOG(xl_xid);
                 }
-                xtime = GetLatestXTime();
+                /* get xtime from xlog record */
+                xtime = getRecordTimestamp(xlogreader);
+                if (xtime == 0) {
+                    xtime = GetLatestXTime();
+                }
                 XLogReaderState *newXlogReader = xlogreader;
                 if (xlogreader->isPRProcess && !IsExtremeRedo()) {
                     newXlogReader = parallel_recovery::NewReaderState(xlogreader);
