@@ -1,0 +1,1019 @@
+create schema test_table_hint;
+set current_schema to test_table_hint;
+-- select
+create table test_hint(id int);
+select * from test_hint;
+ id 
+----
+(0 rows)
+
+select * from test_hint t;
+ id 
+----
+(0 rows)
+
+select * from test_hint t (nolock);
+NOTICE:  The nolock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (readuncommitted);
+NOTICE:  The readuncommitted option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (updlock);
+NOTICE:  The updlock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (repeatableread);
+NOTICE:  The repeatableread option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (serializable);
+NOTICE:  The serializable option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (readcommitted);
+NOTICE:  The readcommitted option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (tablock);
+NOTICE:  The tablock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (tablockx);
+NOTICE:  The tablockx option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (paglock);
+NOTICE:  The paglock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (rowlock);
+NOTICE:  The rowlock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (nowait);
+NOTICE:  The nowait option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (readpast);
+NOTICE:  The readpast option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (xlock);
+NOTICE:  The xlock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (snapshot);
+NOTICE:  The snapshot option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (noexpand);
+NOTICE:  The noexpand option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t (error_hint); -- error hint, result same as A database
+ error_hint 
+------------
+(0 rows)
+
+select * from test_hint (nolock); --ok, no alias
+NOTICE:  The nolock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (readuncommitted);
+NOTICE:  The readuncommitted option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (updlock);
+NOTICE:  The updlock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (repeatableread);
+NOTICE:  The repeatableread option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (serializable);
+NOTICE:  The serializable option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (readcommitted);
+NOTICE:  The readcommitted option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (tablock);
+NOTICE:  The tablock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (tablockx);
+NOTICE:  The tablockx option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (paglock);
+NOTICE:  The paglock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (rowlock);
+NOTICE:  The rowlock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (nowait);
+NOTICE:  The nowait option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (readpast);
+NOTICE:  The readpast option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (xlock);
+NOTICE:  The xlock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (snapshot);
+NOTICE:  The snapshot option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (noexpand);
+NOTICE:  The noexpand option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint(xlock); --ok
+NOTICE:  The xlock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t(noexpand); --ok
+NOTICE:  The noexpand option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint (error_hint); -- error hint, result same as A database
+ERROR:  column "error_hint" does not exist
+LINE 1: select * from test_hint (error_hint);
+                                 ^
+select * from test_hint (error_hint) t; -- error hint, result same as A database
+ERROR:  column "error_hint" does not exist
+LINE 1: select * from test_hint (error_hint) t;
+                                 ^
+select * from test_hint (nolock) t; --error, hint should after alias 
+NOTICE:  The nolock option is currently ignored
+ERROR:  syntax error at or near "t"
+LINE 1: select * from test_hint (nolock) t;
+                                         ^
+select * from test_hint t with(nolock); --ok
+NOTICE:  The nolock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with (nolock); --ok
+NOTICE:  The nolock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with ( nolock); --ok
+NOTICE:  The nolock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with (nolock ); --ok
+NOTICE:  The nolock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with ( nolock ); --ok
+NOTICE:  The nolock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with (nolock, nowait);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with (nolock, nowait, noexpand);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+NOTICE:  The noexpand option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with (nolock, nowait, noexpand);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+NOTICE:  The noexpand option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with (nolock, nowait, noexpand) where id = 10;
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+NOTICE:  The noexpand option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with (nolock, nowait, noexpand) order by id;
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+NOTICE:  The noexpand option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with (updlock) where id is not null;
+NOTICE:  The updlock option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with (nolock,nowait); --ok
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ id 
+----
+(0 rows)
+
+select * from test_hint t with (nolock. nowait); --error, delimiter
+NOTICE:  The nolock option is currently ignored
+ERROR:  syntax error at or near "."
+LINE 1: select * from test_hint t with (nolock. nowait);
+                                              ^
+select * from test_hint t with (nolock; nowait); --error, delimiter
+NOTICE:  The nolock option is currently ignored
+ERROR:  syntax error at or near ";"
+LINE 1: select * from test_hint t with (nolock; nowait);
+                                              ^
+select * from test_hint t with (nolock, nowait, error_hint); --error hint
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "error_hint"
+LINE 1: select * from test_hint t with (nolock, nowait, error_hint);
+                                                        ^
+select * from test_hint t (nolock, nowait); --error, no with
+NOTICE:  The nolock option is currently ignored
+ERROR:  syntax error at or near ","
+LINE 1: select * from test_hint t (nolock, nowait);
+                                         ^
+select * from test_hint t nolock, nowait; --error, no with and parenthesis
+ERROR:  syntax error at or near "nolock"
+LINE 1: select * from test_hint t nolock, nowait;
+                                  ^
+select * from test_hint t with nolock, nowait; --error, no parenthesis
+ERROR:  syntax error at or near "with"
+LINE 1: select * from test_hint t with nolock, nowait;
+                                  ^
+select * from test_hint t with nolock; --error, no parenthesis
+ERROR:  syntax error at or near "with"
+LINE 1: select * from test_hint t with nolock;
+                                  ^
+select * from test_hint t nolock; --error, no parenthesis
+ERROR:  syntax error at or near "nolock"
+LINE 1: select * from test_hint t nolock;
+                                  ^
+select * from test_hint with(nolock nowait); --d database ok, og ok, table hint can be splited by space
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ id 
+----
+(0 rows)
+
+drop table test_hint;
+-- join
+create table t1(col1 int, col2 int, col3 int, col4 int, col5 int);
+create table t2(col1 int, col2 int, col3 int, col4 int, col5 int);
+create table t3(col1 int, col2 int, col3 int, col4 int, col5 int);
+create table t4(col1 int, col2 int, col3 int, col4 int, col5 int);
+create table t5(col1 int, col2 int, col3 int, col4 int, col5 int);
+select * from t1 a (nolock) left join t2 b (nolock) on a.col1 = b.col1; --ok
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+ col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 
+------+------+------+------+------+------+------+------+------+------
+(0 rows)
+
+select * from t1 (nolock) left join t2 (nolock) on t1.col1 = t2.col1; --ok
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+ col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 
+------+------+------+------+------+------+------+------+------+------
+(0 rows)
+
+select * from t1 a inner join t2 b (nolock) on a.col1 = b.col1 inner join t3 c (nolock) on b.col2 = c.col2 
+inner join t4 d (nolock) on c.col3 = d.col3 left join t5 e (nolock) on a.col4 = e.col4; --ok
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+ col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 
+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------
+(0 rows)
+
+select * from t1 a  inner join t2 b (nolock) on a.col1 = b.col1 left outer join t3 c (nolock) on b.col2 = c.col2 
+right join t4 d (nolock) on c.col3 = d.col3 left join t5 e (nolock) on a.col4 = e.col4; --ok
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+ col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 
+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------
+(0 rows)
+
+select * from t1 a  inner join t2 b (nolock) on a.col1 = b.col1 join t3 c (nolock) on b.col2 = c.col2 
+cross join t4 d (nolock) left join t5 e (nolock) on a.col4 = e.col4; --ok
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+ col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 
+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------
+(0 rows)
+
+select * from t1 a  asof join t2 b (nolock) on a.col1 = b.col1; --d database error because asof
+NOTICE:  The nolock option is currently ignored
+ col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 
+------+------+------+------+------+------+------+------+------+------
+(0 rows)
+
+select * from t1 a  natural join t3 c (nolock) cross apply t4 d (nolock) outer apply t5 e (nolock); --d database error because natural
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nolock option is currently ignored
+ col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 
+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------
+(0 rows)
+
+select * from t1 a full join t5 e (nolock) on a.col4 = e.col4; --ok
+NOTICE:  The nolock option is currently ignored
+ col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 
+------+------+------+------+------+------+------+------+------+------
+(0 rows)
+
+select * from t1 a full join t5 e (nolock) on a.col4 = e.col4 where a.col1 > 10 and e.col4 < 100; --ok
+NOTICE:  The nolock option is currently ignored
+ col1 | col2 | col3 | col4 | col5 | col1 | col2 | col3 | col4 | col5 
+------+------+------+------+------+------+------+------+------+------
+(0 rows)
+
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+drop table t5;
+-- select into
+create table t6(col1 int, col2 int, col3 int, col4 int, col5 int);
+create table t7(c1 int, c2 int, c3 int, c4 int, c5 int);
+select * into test6_copy1 from t6 with (nolock, nowait);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+select * into test6_copy2 from t6 with (nolock, nowait) where col1 >10;
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+select * into table test6_copy3 from t6 with (nolock, nowait) where col1 >10; --d database error
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+select * into test6_copy31 from t6 with (nolock, nowait) where col1 >10; --d database ok
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+select col1, col2 into table test6_copy4 from t6 with (nolock, nowait) where col1 >10; --d database error
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+select col1, col2 into test6_copy41 from t6 with (nolock, nowait) where col1 >10; --d database ok
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+select * into test6_copy5 from t6 with (nolock, nowait) cross join t7 with (nolock,nowait);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+select * into test6_copy6 from t6 with (nolock, nowait) cross join t7 with (nolock, nowait); 
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+select * into test6_copy7 with (nolock, nowait) from t6 with (nolock, nowait) cross join t7 with (nolock, nowait); --error
+ERROR:  syntax error at or near "with"
+LINE 1: select * into test6_copy7 with (nolock, nowait) from t6 with...
+                                  ^
+drop table t6;
+drop table t7;
+-- with cte
+CREATE TABLE employees (
+id SERIAL PRIMARY KEY,
+name TEXT,
+department TEXT,
+salary INT
+);
+NOTICE:  CREATE TABLE will create implicit sequence "employees_id_seq" for serial column "employees.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+INSERT INTO employees (name, department, salary) VALUES
+('Alice', 'HR', 6000),
+('Bob', 'IT', 8000),
+('Charlie', 'IT', 7500),
+('David', 'Sales', 5500);
+WITH department_avg AS (
+SELECT department, AVG(salary) AS avg_salary
+FROM employees
+GROUP BY department
+) select * from department_avg;
+ department |      avg_salary       
+------------+-----------------------
+ Sales      | 5500.0000000000000000
+ HR         | 6000.0000000000000000
+ IT         | 7750.0000000000000000
+(3 rows)
+
+WITH department_avg AS (
+SELECT department, AVG(salary) AS avg_salary
+FROM employees with (nowait)
+GROUP BY department
+) select * from department_avg with (nowait);
+NOTICE:  The nowait option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ department |      avg_salary       
+------------+-----------------------
+ Sales      | 5500.0000000000000000
+ HR         | 6000.0000000000000000
+ IT         | 7750.0000000000000000
+(3 rows)
+
+-- partition table
+CREATE TABLE partition_table1
+(
+    WR_RETURNED_DATE_SK       INTEGER,
+    WR_RETURNED_TIME_SK       INTEGER
+)
+PARTITION BY RANGE(WR_RETURNED_DATE_SK)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(2451910),
+        PARTITION P5 VALUES LESS THAN(2452275),
+        PARTITION P6 VALUES LESS THAN(2452640),
+        PARTITION P7 VALUES LESS THAN(2453005),
+        PARTITION P8 VALUES LESS THAN(MAXVALUE)
+);
+insert into partition_table1 values(2451176);
+SELECT count(*) FROM partition_table1 with (nolock, nowait) PARTITION (p2);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "PARTITION"
+LINE 1: ...nt(*) FROM partition_table1 with (nolock, nowait) PARTITION ...
+                                                             ^
+SELECT COUNT(*) FROM partition_table1 with (nolock, nowait) PARTITION FOR (2451176);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "FOR"
+LINE 1: ... partition_table1 with (nolock, nowait) PARTITION FOR (24511...
+                                                             ^
+SELECT count(*) FROM partition_table1 PARTITION (p2) with (nolock, nowait);
+ERROR:  syntax error at or near "with"
+LINE 1: ...ECT count(*) FROM partition_table1 PARTITION (p2) with (nolo...
+                                                             ^
+SELECT COUNT(*) FROM partition_table1 PARTITION FOR (2451176) with (nolock, nowait);
+ERROR:  syntax error at or near "with"
+LINE 1: ...(*) FROM partition_table1 PARTITION FOR (2451176) with (nolo...
+                                                             ^
+drop table partition_table1;
+-- merge into
+DROP TABLE if exists products;
+NOTICE:  table "products" does not exist, skipping
+DROP TABLE if exists newproducts;
+NOTICE:  table "newproducts" does not exist, skipping
+CREATE TABLE products
+(
+product_id INTEGER,
+product_name VARCHAR(60),
+category VARCHAR(60)
+);
+INSERT INTO products VALUES (1501, 'vivitar 35mm', 'electrncs');
+INSERT INTO products VALUES (1502, 'olympus is50', 'electrncs');
+INSERT INTO products VALUES (1600, 'play gym', 'toys');
+INSERT INTO products VALUES (1601, 'lamaze', 'toys');
+INSERT INTO products VALUES (1666, 'harry potter', 'dvd');
+CREATE TABLE newproducts
+(
+product_id INTEGER,
+product_name VARCHAR(60),
+category VARCHAR(60)
+);
+INSERT INTO newproducts VALUES (1502, 'olympus camera', 'electrncs');
+INSERT INTO newproducts VALUES (1601, 'lamaze', 'toys');
+INSERT INTO newproducts VALUES (1666, 'harry potter', 'toys');
+INSERT INTO newproducts VALUES (1700, 'wait interface', 'books');
+-- error for result table with hint
+MERGE INTO products p with (nowait) 
+USING newproducts np 
+ON (p.product_id = np.product_id)   
+WHEN MATCHED THEN  
+  UPDATE SET p.product_name = np.product_name, p.category = np.category WHERE p.product_name != 'play gym'  
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category) WHERE np.category = 'books'; -- d database error
+ERROR:  syntax error at or near "with"
+LINE 1: MERGE INTO products p with (nowait) 
+                              ^
+-- error for result table with hint
+MERGE INTO products p with (nowait) 
+USING newproducts np with (nowait) 
+ON (p.product_id = np.product_id)   
+WHEN MATCHED THEN  
+  UPDATE SET p.product_name = np.product_name, p.category = np.category WHERE p.product_name != 'play gym'  
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category) WHERE np.category = 'books'; -- d database error
+ERROR:  syntax error at or near "with"
+LINE 1: MERGE INTO products p with (nowait) 
+                              ^
+MERGE INTO products p 
+USING newproducts np with (nowait)
+ON (p.product_id = np.product_id)
+WHEN MATCHED AND p.product_name != 'play gym' THEN  
+  UPDATE SET 
+    p.product_name = np.product_name, 
+    p.category = np.category
+WHEN NOT MATCHED AND np.category = 'books' THEN  
+  INSERT (product_id, product_name, category) 
+  VALUES (np.product_id, np.product_name, np.category); --d database gram ok
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "AND"
+LINE 4: WHEN MATCHED AND p.product_name != 'play gym' THEN  
+                     ^
+MERGE INTO products p 
+USING newproducts np
+ON (p.product_id = np.product_id)   
+WHEN MATCHED THEN  
+  UPDATE SET p.product_name = np.product_name, p.category = np.category WHERE p.product_name != 'play gym'
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category) WHERE np.category = 'books'; --og ok
+SELECT * FROM products with (nowait) ORDER BY product_id;
+NOTICE:  The nowait option is currently ignored
+ product_id |  product_name  | category  
+------------+----------------+-----------
+       1501 | vivitar 35mm   | electrncs
+       1502 | olympus camera | electrncs
+       1600 | play gym       | toys
+       1601 | lamaze         | toys
+       1666 | harry potter   | toys
+       1700 | wait interface | books
+(6 rows)
+
+-- og using table with hint
+MERGE INTO products p 
+USING newproducts np with (nowait) 
+ON (p.product_id = np.product_id)   
+WHEN MATCHED THEN  
+  UPDATE SET p.product_name = np.product_name, p.category = np.category WHERE p.product_name != 'play gym'
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category) WHERE np.category = 'books';
+NOTICE:  The nowait option is currently ignored
+SELECT * FROM products with (nowait) ORDER BY product_id;
+NOTICE:  The nowait option is currently ignored
+ product_id |  product_name  | category  
+------------+----------------+-----------
+       1501 | vivitar 35mm   | electrncs
+       1502 | olympus camera | electrncs
+       1600 | play gym       | toys
+       1601 | lamaze         | toys
+       1666 | harry potter   | toys
+       1700 | wait interface | books
+(6 rows)
+
+DROP TABLE products;
+DROP TABLE newproducts;
+-- insert
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(c1 int, c2 int);
+insert into t1 values(1, 2);
+insert into t1 with (nowait) values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert into t1 with(nowait) values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert into t1 with(nowait) (c1, c2) values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert into t1 with(nowait) (c1,c2) values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert into t1 with(nowait) (c1,c2)values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert into t1 with(nowait)(c1,c2)values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert into t1 with(nowait)(c1,c2,c3)values(3, 4); --error, c3 is not exist
+NOTICE:  The nowait option is currently ignored
+ERROR:  column "c3" of relation "t1" does not exist
+LINE 1: insert into t1 with(nowait)(c1,c2,c3)values(3, 4);
+                                          ^
+insert into t1 (nowait) values(3, 4); -- d database error, og error, with is necessary
+ERROR:  syntax error at or near "("
+LINE 1: insert into t1 (nowait) values(3, 4);
+                       ^
+insert into t1 with (nowait) values(5, 6); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert into t1 with (xlock, nowait) values(7, 8); -- d database ok
+NOTICE:  The xlock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+insert into t1 as table_t1 (c1, c2) values(9,10); --d database error
+insert into t1 as table_t1 (nowait) (c1, c2) values(9,10); --d database error, og error no with
+ERROR:  syntax error at or near "("
+LINE 1: insert into t1 as table_t1 (nowait) (c1, c2) values(9,10);
+                                   ^
+insert into t1 as table_t1 with (nowait) (c1, c2) values(9,10); --d database error
+NOTICE:  The nowait option is currently ignored
+insert into t1 as table_t1 with (nowait, nolock) (c1, c2) values(9,10); --d database error
+NOTICE:  The nowait option is currently ignored
+NOTICE:  The nolock option is currently ignored
+-- no into in insert statement
+insert t1 values(1, 2);
+insert t1 with (nowait) values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert t1 with(nowait) values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert t1 with(nowait) (c1, c2) values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert t1 with(nowait) (c1,c2) values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert t1 with(nowait) (c1,c2)values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert t1 with(nowait)(c1,c2)values(3, 4); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert t1 with(nowait)(c1,c2,c3)values(3, 4); --error, c3 is not exist
+NOTICE:  The nowait option is currently ignored
+ERROR:  column "c3" of relation "t1" does not exist
+LINE 1: insert t1 with(nowait)(c1,c2,c3)values(3, 4);
+                                     ^
+insert t1 (nowait) values(3, 4); -- d database error, og error, with is necessary
+ERROR:  syntax error at or near "("
+LINE 1: insert t1 (nowait) values(3, 4);
+                  ^
+insert t1 with (nowait) values(5, 6); -- d database ok
+NOTICE:  The nowait option is currently ignored
+insert t1 with (xlock, nowait) values(7, 8); -- d database ok
+NOTICE:  The xlock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+insert t1 as table_t1 (c1, c2) values(9,10); --d database error
+insert t1 as table_t1 (nowait) (c1, c2) values(9,10); --d database error, og error no with
+ERROR:  syntax error at or near "("
+LINE 1: insert t1 as table_t1 (nowait) (c1, c2) values(9,10);
+                              ^
+insert t1 as table_t1 with (nowait) (c1, c2) values(9,10); --d database error
+NOTICE:  The nowait option is currently ignored
+insert t1 as table_t1 with (nowait, nolock) (c1, c2) values(9,10); --d database error
+NOTICE:  The nowait option is currently ignored
+NOTICE:  The nolock option is currently ignored
+-- table hint as identifier
+show d_format_behavior_compat_options;
+ d_format_behavior_compat_options 
+----------------------------------
+ 
+(1 row)
+
+create table testabc(nowait int);
+ERROR:  syntax error at or near "("
+LINE 1: create table testabc(nowait int);
+                            ^
+insert into testabc (nowait) values(1);
+ERROR:  syntax error at or near "("
+LINE 1: insert into testabc (nowait) values(1);
+                            ^
+insert into testabc (nowait) (nowait) values(1);
+ERROR:  syntax error at or near "("
+LINE 1: insert into testabc (nowait) (nowait) values(1);
+                            ^
+insert into testabc with (nowait) (nowait) values(1);
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "("
+LINE 1: insert into testabc with (nowait) (nowait) values(1);
+                                          ^
+insert into testabc values(1);
+ERROR:  relation "testabc" does not exist on datanode1
+LINE 1: insert into testabc values(1);
+                    ^
+select max(nowait) from testabc;
+ERROR:  syntax error at or near "("
+LINE 1: select max(nowait) from testabc;
+                  ^
+drop table testabc;
+ERROR:  table "testabc" does not exist
+create table test_hint_keyword(nolock int, readuncommitted int, updlock int, repeatableread int, serializable int, readcommitted int,
+tablock int, tablockx int, paglock int, rowlock int, nowait int, readpast int, xlock int, snapshot int, noexpand int);
+ERROR:  syntax error at or near "("
+LINE 1: create table test_hint_keyword(nolock int, readuncommitted i...
+                                      ^
+drop table test_hint_keyword;
+ERROR:  table "test_hint_keyword" does not exist
+CREATE OR REPLACE FUNCTION add_numbers(nowait INT, nolock INT)
+RETURNS INT AS $$
+DECLARE
+    result INT;
+BEGIN
+    result := a + b;
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql;
+ERROR:  syntax error at or near "("
+LINE 1: CREATE OR REPLACE FUNCTION add_numbers(nowait INT, nolock IN...
+                                              ^
+select add_numbers(3, 7);
+ERROR:  function add_numbers(integer, integer) does not exist
+LINE 1: select add_numbers(3, 7);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: add_numbers
+drop function add_numbers();
+ERROR:  function add_numbers does not exist
+-- table hint as identifier, need to set guc param
+set d_format_behavior_compat_options = 'enable_table_hint_identifier';
+create table testabc(nowait int);
+insert into testabc (nowait) values(1);
+insert into testabc (nowait) (nowait) values(1);
+ERROR:  syntax error at or near "nowait"
+LINE 1: insert into testabc (nowait) (nowait) values(1);
+                                      ^
+insert into testabc with (nowait) (nowait) values(1);
+ERROR:  syntax error at or near "("
+LINE 1: insert into testabc with (nowait) (nowait) values(1);
+                                 ^
+insert into testabc values(1);
+select max(nowait) from testabc;
+ max 
+-----
+   1
+(1 row)
+
+drop table testabc;
+create table test_hint_keyword(nolock int, readuncommitted int, updlock int, repeatableread int, serializable int, readcommitted int,
+tablock int, tablockx int, paglock int, rowlock int, nowait int, readpast int, xlock int, snapshot int, noexpand int);
+drop table test_hint_keyword;
+CREATE OR REPLACE FUNCTION add_numbers(a INT, b INT)
+RETURNS INT AS $$
+DECLARE
+    result INT;
+BEGIN
+    result := a + b;
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql;
+select add_numbers(3, 7);
+ add_numbers 
+-------------
+          10
+(1 row)
+
+drop function add_numbers();
+set d_format_behavior_compat_options = '';
+show d_format_behavior_compat_options;
+ d_format_behavior_compat_options 
+----------------------------------
+ 
+(1 row)
+
+-- partition table
+drop table if exists partition_table1;
+NOTICE:  table "partition_table1" does not exist, skipping
+CREATE TABLE partition_table1
+(
+    WR_RETURNED_DATE_SK       INTEGER,
+    WR_RETURNED_TIME_SK       INTEGER
+)
+PARTITION BY RANGE(WR_RETURNED_DATE_SK)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P8 VALUES LESS THAN(MAXVALUE)
+);
+insert into partition_table1 with (nolock, nowait) values(2451176, 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+insert into partition_table1 with (nolock, nowait) partition (p1) values(2450000, 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "partition"
+LINE 1: ...nsert into partition_table1 with (nolock, nowait) partition ...
+                                                             ^
+insert into partition_table1 with (nolock, nowait) partition for (2451176) values(2451176, 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "for"
+LINE 1: ... partition_table1 with (nolock, nowait) partition for (24511...
+                                                             ^
+insert into partition_table1 with (nolock, nowait) partition for (2451176) as table1_alias values(2451176, 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "for"
+LINE 1: ... partition_table1 with (nolock, nowait) partition for (24511...
+                                                             ^
+insert into partition_table1 partition (p1) with (nolock, nowait) values(2450000, 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+insert into partition_table1 partition for (2451176) with (nolock, nowait) values(2451176, 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+insert into partition_table1 partition for (2451176) as table1_alias with (nolock, nowait) values(2451176, 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+drop table partition_table1;
+-- attention alias and hint position
+drop table if exists list_list;
+NOTICE:  table "list_list" does not exist, skipping
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+insert into list_list (nolock) partition (p_201901) values('201902', '1', '1', 1);
+ERROR:  syntax error at or near "("
+LINE 1: insert into list_list (nolock) partition (p_201901) values('...
+                              ^
+insert into list_list with (nolock) partition for ('201902') values('201902', '1', '1', 1);
+NOTICE:  The nolock option is currently ignored
+ERROR:  syntax error at or near "for"
+LINE 1: insert into list_list with (nolock) partition for ('201902')...
+                                                      ^
+insert into list_list with (nolock, nowait) SUBPARTITION (p_201901_b) values('201902', '2', '1', 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "SUBPARTITION"
+LINE 1: insert into list_list with (nolock, nowait) SUBPARTITION (p_...
+                                                    ^
+insert into list_list (nolock) partition (p_201902) as t1 values('201903', '1', '1', 1);
+ERROR:  syntax error at or near "("
+LINE 1: insert into list_list (nolock) partition (p_201902) as t1 va...
+                              ^
+insert into list_list with (nolock) partition for ('201903') as t1 values('201903', '1', '1', 1);
+NOTICE:  The nolock option is currently ignored
+ERROR:  syntax error at or near "for"
+LINE 1: insert into list_list with (nolock) partition for ('201903')...
+                                                      ^
+insert into list_list with (nolock, nowait) SUBPARTITION (p_201902_b) as t1 values('201903', '2', '1', 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "SUBPARTITION"
+LINE 1: insert into list_list with (nolock, nowait) SUBPARTITION (p_...
+                                                    ^
+insert into list_list partition (p_201901) (nolock) values('201902', '1', '1', 1);
+ERROR:  syntax error at or near "("
+LINE 1: insert into list_list partition (p_201901) (nolock) values('...
+                                                   ^
+insert into list_list partition for ('201902') with (nolock) values('201902', '1', '1', 1);
+NOTICE:  The nolock option is currently ignored
+insert into list_list SUBPARTITION (p_201901_b) with (nolock, nowait) values('201902', '2', '1', 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+insert into list_list partition (p_201902) as t1 (nolock) values('201903', '1', '1', 1);
+ERROR:  syntax error at or near "("
+LINE 1: insert into list_list partition (p_201902) as t1 (nolock) va...
+                                                         ^
+insert into list_list partition for ('201903') as t1 with (nolock) values('201903', '1', '1', 1);
+NOTICE:  The nolock option is currently ignored
+insert into list_list SUBPARTITION (p_201902_b) as t1 with (nolock, nowait) values('201903', '2', '1', 1);
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+select * from list_list;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+(4 rows)
+
+drop table list_list;
+-- update
+update t1 (xlock) set c1 = 5 where c1 = 3; -- d database error
+NOTICE:  The xlock option is currently ignored
+ERROR:  syntax error at or near "set"
+LINE 1: update t1 (xlock) set c1 = 5 where c1 = 3;
+                          ^
+update t1 with (xlock) set c1 = 10 where c1 = 5; -- d database ok
+NOTICE:  The xlock option is currently ignored
+update t1 with (xlock, nowait) set c1 = 3 where c1 = 10; -- d database ok
+NOTICE:  The xlock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+update t1 (xlock) as alias_t1 set c1 = 20 where c1 = 2; -- d database not support as alias
+NOTICE:  The xlock option is currently ignored
+ERROR:  syntax error at or near "as"
+LINE 1: update t1 (xlock) as alias_t1 set c1 = 20 where c1 = 2;
+                          ^
+update t1 with (xlock) as alias_t1 set c1 = 20 where c1 = 2; -- d database not support as alias
+NOTICE:  The xlock option is currently ignored
+ERROR:  syntax error at or near "as"
+LINE 1: update t1 with (xlock) as alias_t1 set c1 = 20 where c1 = 2;
+                               ^
+update t1 with (xlock, nowait) as alias_t1 set c1 = 20 where c1 = 2; -- d database not support as alias
+NOTICE:  The xlock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+ERROR:  syntax error at or near "as"
+LINE 1: update t1 with (xlock, nowait) as alias_t1 set c1 = 20 where...
+                                       ^
+update t1 as alias_t1 (lock) set c1 = 20 where c1 = 2; -- d database not support as alias
+update t1 as alias_t1 with (xlock) set c1 = 20 where c1 = 2; -- d database not support as alias
+NOTICE:  The xlock option is currently ignored
+update t1 as alias_t1 with (xlock, nowait) set c1 = 20 where c1 = 2; -- d database not support as alias
+NOTICE:  The xlock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+-- delete
+delete from t1 (nolock) where c1 = 3;
+ERROR:  syntax error at or near "("
+LINE 1: delete from t1 (nolock) where c1 = 3;
+                       ^
+delete from t1 with (nolock) where c1 = 4;
+NOTICE:  The nolock option is currently ignored
+delete from t1 with (nolock, nowait) where c1 = 5;
+NOTICE:  The nolock option is currently ignored
+NOTICE:  The nowait option is currently ignored
+drop table t1;
+drop schema test_table_hint cascade;
+NOTICE:  drop cascades to 9 other objects
+DETAIL:  drop cascades to table test6_copy1
+drop cascades to table test6_copy2
+drop cascades to table test6_copy3
+drop cascades to table test6_copy31
+drop cascades to table test6_copy4
+drop cascades to table test6_copy41
+drop cascades to table test6_copy5
+drop cascades to table test6_copy6
+drop cascades to table employees

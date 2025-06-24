@@ -350,108 +350,6 @@ tsql_IndexStmt:
 				}
 		;
 
-InsertStmt: opt_with_clause INSERT hint_string insert_target insert_rest returning_clause
-			{
-				$5->relation = $4;
-				$5->returningList = $6;
-				$5->withClause = $1;
-				$5->isReplace = false;
-				$5->hintState = create_hintstate($3);
-				$$ = (Node *) $5;
-			}
-			| opt_with_clause INSERT hint_string insert_target insert_rest upsert_clause returning_clause
-				{
-					if ($1 != NULL) {
-						const char* message = "WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.";
-    					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-						ereport(errstate,
-							(errmodule(MOD_PARSER),
-							 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("%s", message)));
-					}
-
-					if (u_sess->attr.attr_sql.enable_upsert_to_merge
-#ifdef ENABLE_MULTIPLE_NODES					
-					    ||t_thrd.proc->workingVersionNum < UPSERT_ROW_STORE_VERSION_NUM
-#endif						
-					    ) {
-
-						if ($5 != NULL && $5->cols != NIL) {
-							ListCell *c = NULL;
-							List *cols = $5->cols;
-							foreach (c, cols) {
-								ResTarget *rt = (ResTarget *)lfirst(c);
-								if (rt->indirection != NIL) {
-									const char* message = "Try assign a composite or an array expression to column ";
-    								InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-									ereport(errstate,
-										(errmodule(MOD_PARSER),
-										 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-										 errmsg("Subfield name or array subscript of column \"%s\" "
-											"is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.",
-											rt->name),
-										 errhint("%s\"%s\".", message, rt->name)));
-								}
-							}
-						}
-
-
-						MergeStmt *m = makeNode(MergeStmt);
-						m->is_insert_update = true;
-
-						/* for UPSERT, keep the INSERT statement as well */
-						$5->relation = $4;
-						$5->returningList = $7;
-						$5->isReplace = false;
-						$5->withClause = $1;
-						$5->hintState = create_hintstate($3);
-#ifdef ENABLE_MULTIPLE_NODES						
-						if (t_thrd.proc->workingVersionNum >= UPSERT_ROW_STORE_VERSION_NUM) {
-							UpsertClause *uc = makeNode(UpsertClause);
-							if ($6 == NULL)
-								uc->targetList = NIL;
-							else
-								uc->targetList = ((MergeWhenClause *)$6)->targetList;
-							$5->upsertClause = uc;
-						}
-#endif						
-						m->insert_stmt = (Node *)copyObject($5);
-
-						/* fill a MERGE statement*/
-						m->relation = $4;
-
-						Alias *a1 = makeAlias(($4->relname), NIL);
-						$4->alias = a1;
-
-						Alias *a2 = makeAlias("excluded", NIL);
-						RangeSubselect *r = makeNode(RangeSubselect);
-						r->alias = a2;
-						r->subquery = (Node *) ($5->selectStmt);
-						m->source_relation = (Node *) r;
-
-						MergeWhenClause *n = makeNode(MergeWhenClause);
-						n->matched = false;
-						n->commandType = CMD_INSERT;
-						n->cols = $5->cols;
-						n->values = NULL;
-
-						m->mergeWhenClauses = list_make1((Node *) n);
-						if ($6 != NULL)
-							m->mergeWhenClauses = list_concat(list_make1($6), m->mergeWhenClauses);
-
-
-						$$ = (Node *)m;
-					} else {
-						$5->relation = $4;
-						$5->returningList = $7;
-						$5->withClause = $1;
-						$5->upsertClause = (UpsertClause *)$6;
-						$5->isReplace = false;
-						$5->hintState = create_hintstate($3);   
-						$$ = (Node *) $5;
-					}
-				}
-
 tsql_CreateProcedureStmt:
 			CREATE opt_or_replace definer_user PROCEDURE func_name_opt_arg proc_args
 			opt_createproc_opt_list as_is {
@@ -576,7 +474,19 @@ unreserved_keyword:
 			| RESEED
 			| TSQL_CLUSTERED
 			| TSQL_NONCLUSTERED
-			| TSQL_PERSISTED ;
+			| TSQL_PERSISTED
+			| TSQL_NOLOCK
+			| TSQL_READUNCOMMITTED
+			| TSQL_UPDLOCK
+			| TSQL_REPEATABLEREAD
+			| TSQL_READCOMMITTED
+			| TSQL_TABLOCK
+			| TSQL_TABLOCKX
+			| TSQL_PAGLOCK
+			| TSQL_ROWLOCK
+			| TSQL_READPAST
+			| TSQL_XLOCK
+			| TSQL_NOEXPAND ;
 
 
 DBCCCheckIdentStmt:
@@ -1009,7 +919,7 @@ tsql_stmt :
 			| GrantRoleStmt
 			| GrantDbStmt
 			| tsql_IndexStmt
-			| InsertStmt
+			| tsql_InsertStmt
 			| ListenStmt
 			| RefreshMatViewStmt
 			| LoadStmt
@@ -1612,6 +1522,8 @@ direct_label_keyword: ABORT_P
             | NOCOMPRESS
             | NOCYCLE
             | NODE
+			| TSQL_NOEXPAND
+			| TSQL_NOLOCK
             | NOLOGGING
             | NOMAXVALUE
             | NOMINVALUE
@@ -1652,6 +1564,7 @@ direct_label_keyword: ABORT_P
             | OWNER
             | PACKAGE
             | PACKAGES
+			| TSQL_PAGLOCK
             | PARALLEL_ENABLE
             | PARSER
             | PARTIAL
@@ -1699,6 +1612,9 @@ direct_label_keyword: ABORT_P
             | RATIO
             | RAW
             | READ
+			| TSQL_READCOMMITTED
+			| TSQL_READPAST
+			| TSQL_READUNCOMMITTED
             | REAL
             | REASSIGN
             | REBUILD
@@ -1719,6 +1635,7 @@ direct_label_keyword: ABORT_P
             | RENAME
             | REPEAT
             | REPEATABLE
+			| TSQL_REPEATABLEREAD
             | REPLACE
             | REPLICA
             | RESEED
@@ -1743,6 +1660,7 @@ direct_label_keyword: ABORT_P
             | ROTATION
             | ROW
             | ROW_COUNT
+			| TSQL_ROWLOCK
             | ROWNUM
             | ROWS
             | ROWTYPE_P
@@ -1825,6 +1743,8 @@ direct_label_keyword: ABORT_P
             | TABLES
             | TABLESAMPLE
             | TABLESPACE
+			| TSQL_TABLOCK
+			| TSQL_TABLOCKX
             | TEMP
             | TEMPLATE
             | TEMPORARY
@@ -1871,6 +1791,7 @@ direct_label_keyword: ABORT_P
             | UNTIL
             | UNUSABLE
             | UPDATE
+			| TSQL_UPDLOCK
             | USE_P
             | USEEOF
             | USER
@@ -1903,6 +1824,7 @@ direct_label_keyword: ABORT_P
             | WORKLOAD
             | WRAPPER
             | WRITE
+			| TSQL_XLOCK
             | XMLATTRIBUTES
             | XMLCONCAT
             | XMLELEMENT
@@ -2105,5 +2027,330 @@ tsql_TransactionStmt:
 					n->options = list_make1(makeDefElem("savepoint_name",
 														(Node *)makeString($3)));
 					$$ = (Node *)n;
+				}
+		;
+
+/*
+ * SQL table hints apply to DELETE, INSERT, SELECT and UPDATE statements.
+ * In SELECT statement, it's specified in the FROM clause.
+ * Table hint can start without WITH keyword. To avoid s/r conflict, we handle
+ * such cases by looking up an additional token and check if it's a valid hint,
+ * and re-assign the token '(' to TSQL_HINT_START_BRACKET.
+ * when used without "WITH", the table hint can only be specified alone.
+ */
+tsql_opt_table_hint_expr_with:
+			tsql_table_hint_expr_with                       { $$ = $1; }
+			| /*EMPTY*/                                     { $$ = NIL; }
+		;
+
+tsql_table_hint_expr_with:
+			WITH_paren TSQL_HINT_START_BRACKET tsql_table_hint_list ')'       { $$ = $3; }
+		;
+
+tsql_table_hint_expr_no_with:
+            TSQL_HINT_START_BRACKET tsql_table_hint ')' 			{ $$ = list_make1($2); }
+
+tsql_table_hint_list:
+			tsql_table_hint
+				{
+					$$ = list_make1($1);
+				}
+			| tsql_table_hint_list ',' tsql_table_hint
+				{
+					$$ = lappend($1, $3);
+				}
+			| tsql_table_hint_list tsql_table_hint
+				{
+					$$ = lappend($1, $2);
+				}
+		;
+
+tsql_table_hint:
+			tsql_table_hint_kw_no_with
+				{
+					$$ = (Node* ) $1;
+					ereport(NOTICE,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("The %s option is currently ignored", $1)));
+				}
+		;
+
+/*
+ * Table hints that can be used without "WITH" keyword.
+ * We explicitly add these keywords only to allow us to detect
+ * TSQL_HINT_START_BRACKET to avoid s/r conflicts. It seems unnecessary to
+ * add all the hints since we do not need to do anything with them yet.
+ * It is up to the designer of table hint later to decide whether we should
+ * add all hints as keywords or just do some checking inside the code block.
+ */
+tsql_table_hint_kw_no_with:
+			TSQL_NOLOCK                             {$$ = pstrdup($1);}
+			| TSQL_READUNCOMMITTED                  {$$ = pstrdup($1);}
+			| TSQL_UPDLOCK                          {$$ = pstrdup($1);}
+			| TSQL_REPEATABLEREAD                   {$$ = pstrdup($1);}
+			| SERIALIZABLE                          {$$ = pstrdup($1);}
+			| TSQL_READCOMMITTED                    {$$ = pstrdup($1);}
+			| TSQL_TABLOCK                          {$$ = pstrdup($1);}
+			| TSQL_TABLOCKX                         {$$ = pstrdup($1);}
+			| TSQL_PAGLOCK                          {$$ = pstrdup($1);}
+			| TSQL_ROWLOCK                          {$$ = pstrdup($1);}
+			| NOWAIT                                {$$ = pstrdup($1);}
+			| TSQL_READPAST                         {$$ = pstrdup($1);}
+			| TSQL_XLOCK                            {$$ = pstrdup($1);}
+			| SNAPSHOT                              {$$ = pstrdup($1);}
+			| TSQL_NOEXPAND                         {$$ = pstrdup($1);}
+		;
+
+tsql_InsertStmt: opt_with_clause INSERT hint_string INTO insert_target tsql_opt_table_hint_expr_with insert_rest returning_clause
+			{
+				$7->relation = $5;
+				$7->returningList = $8;
+				$7->withClause = $1;
+				$7->isReplace = false;
+				$7->hintState = create_hintstate($3);
+				$7->hasIgnore = ($7->hintState != NULL && $7->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
+				$$ = (Node *) $7;
+			}
+			| opt_with_clause INSERT hint_string insert_target tsql_opt_table_hint_expr_with insert_rest returning_clause
+			{
+				$6->relation = $4;
+				$6->returningList = $7;
+				$6->withClause = $1;
+				$6->isReplace = false;
+				$6->hintState = create_hintstate($3);
+				$$ = (Node *) $6;
+			}
+			| opt_with_clause INSERT hint_string insert_target tsql_opt_table_hint_expr_with insert_rest upsert_clause returning_clause
+				{
+					if ($1 != NULL) {
+						const char* message = "WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.";
+    					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+							 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("%s", message)));
+					}
+
+					if (u_sess->attr.attr_sql.enable_upsert_to_merge
+#ifdef ENABLE_MULTIPLE_NODES					
+					    ||t_thrd.proc->workingVersionNum < UPSERT_ROW_STORE_VERSION_NUM
+#endif						
+					    ) {
+
+						if ($6 != NULL && $6->cols != NIL) {
+							ListCell *c = NULL;
+							List *cols = $6->cols;
+							foreach (c, cols) {
+								ResTarget *rt = (ResTarget *)lfirst(c);
+								if (rt->indirection != NIL) {
+									const char* message = "Try assign a composite or an array expression to column ";
+    								InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+									ereport(errstate,
+										(errmodule(MOD_PARSER),
+										 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+										 errmsg("Subfield name or array subscript of column \"%s\" "
+											"is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.",
+											rt->name),
+										 errhint("%s\"%s\".", message, rt->name)));
+								}
+							}
+						}
+
+
+						MergeStmt *m = makeNode(MergeStmt);
+						m->is_insert_update = true;
+
+						/* for UPSERT, keep the INSERT statement as well */
+						$6->relation = $4;
+						$6->returningList = $8;
+						$6->isReplace = false;
+						$6->withClause = $1;
+						$6->hintState = create_hintstate($3);
+#ifdef ENABLE_MULTIPLE_NODES						
+						if (t_thrd.proc->workingVersionNum >= UPSERT_ROW_STORE_VERSION_NUM) {
+							UpsertClause *uc = makeNode(UpsertClause);
+							if ($7 == NULL)
+								uc->targetList = NIL;
+							else
+								uc->targetList = ((MergeWhenClause *)$7)->targetList;
+							$6->upsertClause = uc;
+						}
+#endif						
+						m->insert_stmt = (Node *)copyObject($6);
+
+						/* fill a MERGE statement*/
+						m->relation = $4;
+
+						Alias *a1 = makeAlias(($4->relname), NIL);
+						$4->alias = a1;
+
+						Alias *a2 = makeAlias("excluded", NIL);
+						RangeSubselect *r = makeNode(RangeSubselect);
+						r->alias = a2;
+						r->subquery = (Node *) ($6->selectStmt);
+						m->source_relation = (Node *) r;
+
+						MergeWhenClause *n = makeNode(MergeWhenClause);
+						n->matched = false;
+						n->commandType = CMD_INSERT;
+						n->cols = $6->cols;
+						n->values = NULL;
+
+						m->mergeWhenClauses = list_make1((Node *) n);
+						if ($7 != NULL)
+							m->mergeWhenClauses = list_concat(list_make1($7), m->mergeWhenClauses);
+
+
+						$$ = (Node *)m;
+					} else {
+						$6->relation = $4;
+						$6->returningList = $8;
+						$6->withClause = $1;
+						$6->upsertClause = (UpsertClause *)$7;
+						$6->isReplace = false;
+						$6->hintState = create_hintstate($3);   
+						$$ = (Node *) $6;
+					}
+				}
+			| opt_with_clause INSERT hint_string INTO insert_target tsql_opt_table_hint_expr_with insert_rest upsert_clause returning_clause
+				{
+					if ($1 != NULL) {
+						const char* message = "WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.";
+    					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+							 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.")));
+					}
+
+					if (u_sess->attr.attr_sql.enable_upsert_to_merge
+#ifdef ENABLE_MULTIPLE_NODES					
+					    ||t_thrd.proc->workingVersionNum < UPSERT_ROW_STORE_VERSION_NUM
+#endif						
+					    ) {
+
+						if ($7 != NULL && $7->cols != NIL) {
+							ListCell *c = NULL;
+							List *cols = $7->cols;
+							foreach (c, cols) {
+								ResTarget *rt = (ResTarget *)lfirst(c);
+								if (rt->indirection != NIL) {
+									const char* message = "Try assign a composite or an array expression to column ";
+    								InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+									ereport(errstate,
+										(errmodule(MOD_PARSER),
+										 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+										 errmsg("Subfield name or array subscript of column \"%s\" "
+											"is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.",
+											rt->name),
+										 errhint("Try assign a composite or an array expression to column \"%s\".", rt->name)));
+								}
+							}
+						}
+
+
+						MergeStmt *m = makeNode(MergeStmt);
+						m->is_insert_update = true;
+
+						/* for UPSERT, keep the INSERT statement as well */
+						$7->relation = $5;
+						$7->returningList = $9;
+						$7->isReplace = false;
+						$7->withClause = $1;
+						$7->hintState = create_hintstate($3);
+						$7->hasIgnore = ($7->hintState != NULL && $7->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
+#ifdef ENABLE_MULTIPLE_NODES						
+						if (t_thrd.proc->workingVersionNum >= UPSERT_ROW_STORE_VERSION_NUM) {
+							UpsertClause *uc = makeNode(UpsertClause);
+							if ($8 == NULL)
+								uc->targetList = NIL;
+							else
+								uc->targetList = ((MergeWhenClause *)$8)->targetList;
+							$7->upsertClause = uc;
+						}
+#endif						
+						m->insert_stmt = (Node *)copyObject($7);
+
+						/* fill a MERGE statement*/
+						m->relation = $5;
+
+						Alias *a1 = makeAlias(($5->relname), NIL);
+						$5->alias = a1;
+
+						Alias *a2 = makeAlias("excluded", NIL);
+						RangeSubselect *r = makeNode(RangeSubselect);
+						r->alias = a2;
+						r->subquery = (Node *) ($7->selectStmt);
+						m->source_relation = (Node *) r;
+
+						MergeWhenClause *n = makeNode(MergeWhenClause);
+						n->matched = false;
+						n->commandType = CMD_INSERT;
+						n->cols = $7->cols;
+						n->values = NULL;
+
+						m->mergeWhenClauses = list_make1((Node *) n);
+						if ($8 != NULL)
+							m->mergeWhenClauses = list_concat(list_make1($7), m->mergeWhenClauses);
+						$$ = (Node *)m;
+					} else {
+						$7->relation = $5;
+						$7->returningList = $9;
+						$7->withClause = $1;
+						$7->upsertClause = (UpsertClause *)$8;
+						$7->isReplace = false;
+						$7->hintState = create_hintstate($3);   
+						$7->hasIgnore = ($7->hintState != NULL && $7->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
+						$$ = (Node *) $7;
+					}
+				}
+		;
+
+/* table hint for delete statement */
+delete_relation_expr_opt_alias_with_hint: delete_relation_expr_opt_alias tsql_table_hint_expr_with { $$ = $1; }
+			;
+
+relation_expr_opt_alias_list: 
+			delete_relation_expr_opt_alias_with_hint                                      { $$ = list_make1($1); }
+			| relation_expr_opt_alias_list ',' delete_relation_expr_opt_alias_with_hint   { $$ = lappend($1, $3); }
+		;
+
+/* table hint for update and select statement */
+table_ref_for_no_table_function:
+			relation_expr tsql_table_hint_expr_with  %prec UMINUS
+				{
+					$$ = (Node *) $1;
+				}
+			| relation_expr alias_clause tsql_table_hint_expr_with
+				{
+					$1->alias = $2;
+					$$ = (Node *) $1;
+				}
+			| relation_expr opt_alias_clause tablesample_clause tsql_table_hint_expr_with
+				{
+					RangeTableSample *n = (RangeTableSample *) $3;
+					$1->alias = $2;
+					n->relation = (Node *) $1;
+					$$ = (Node *) n;
+				}
+		;
+
+/* table hint for select statement, can use without with keyword for single hint */
+table_ref:
+			relation_expr tsql_table_hint_expr_no_with  %prec UMINUS
+				{
+					$$ = (Node *) $1;
+				}
+			| relation_expr alias_clause tsql_table_hint_expr_no_with
+				{
+					$1->alias = $2;
+					$$ = (Node *) $1;
+				}
+			| relation_expr opt_alias_clause tablesample_clause tsql_table_hint_expr_no_with
+				{
+					RangeTableSample *n = (RangeTableSample *) $3;
+					$1->alias = $2;
+					n->relation = (Node *) $1;
+					$$ = (Node *) n;
 				}
 		;

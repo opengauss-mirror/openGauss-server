@@ -373,7 +373,8 @@ static const struct format_behavior_compat_entry b_format_behavior_compat_option
 
 
 static const struct format_behavior_compat_entry d_format_behavior_compat_options[D_FORMAT_OPT_MAX] = {
-    {"enable_sbr_identifier", D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER}
+    {"enable_sbr_identifier", D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER},
+    {"enable_table_hint_identifier", D_FORMAT_OPT_ENABLE_TABLE_HINT_IDENTIFIER}
 };
 
 static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
