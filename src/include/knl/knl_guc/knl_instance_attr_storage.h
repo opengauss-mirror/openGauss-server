@@ -140,6 +140,7 @@ typedef struct knl_instance_attr_dms {
     int32 work_thread_pool_max_cnt;
     bool enable_dyn_trace;
     bool enable_reform_trace;
+    bool enable_distirbution_storage;
 } knl_instance_attr_dms;
 
 typedef struct knl_instance_attr_storage {
@@ -241,6 +242,7 @@ typedef struct knl_instance_attr_storage {
     int parallel_recovery_timeout;
     int parallel_recovery_batch;
     int ss_disaster_mode;
+    int ds_limit_write_xlog_size;
     
     bool enable_uwal;
     char* uwal_config;

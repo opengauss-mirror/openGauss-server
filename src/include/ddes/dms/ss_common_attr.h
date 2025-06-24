@@ -48,6 +48,7 @@
         g_instance.attr.attr_storage.ss_disaster_mode == SS_DISASTER_SINGLE)
 #define SS_SINGLE_CLUSTER (ENABLE_DMS && g_instance.attr.attr_storage.ss_disaster_mode == SS_DISASTER_SINGLE)
 #endif
+#define ENABLE_DSTORAGE g_instance.attr.attr_storage.dms_attr.enable_distirbution_storage
 
 #define SS_REFORM_REFORMER                                                  \
     (ENABLE_DMS && (g_instance.dms_cxt.SSReformInfo.in_reform == true) \

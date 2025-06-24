@@ -3695,6 +3695,23 @@ bool XLogBackgroundFlush(bool fsync)
             }
             break;
         }
+        
+        if (ENABLE_DSTORAGE && curr_entry_ptr->endLSN != 0 && g_instance.attr.attr_storage.ds_limit_write_xlog_size != 0) {
+            int nbytes = curr_entry_ptr->endLSN - startLSN;
+            if (nbytes > curAverageXlogFlushBytes) {
+                WriteRqstPtr = ((XLogRecPtr)pg_atomic_barrier_read_u64(&curr_entry_ptr->endLSN) & MAX_XLOG_REC_PTR);
+                ereport(DEBUG5, (errmsg("distribute_storage_limit_write_xlog_size: %lu, xlog bg flush request %X/%X;"
+                            " write %X/%X; flush %X/%X, nbytes:%d", 
+                            g_instance.attr.attr_storage.ds_limit_write_xlog_size,
+                            (uint32)(WriteRqstPtr >> 32),
+                            (uint32)WriteRqstPtr, (uint32)(t_thrd.xlog_cxt.LogwrtResult->Write >> 32),
+                            (uint32)t_thrd.xlog_cxt.LogwrtResult->Write,
+                            (uint32)(t_thrd.xlog_cxt.LogwrtResult->Flush >> 32),
+                            (uint32)t_thrd.xlog_cxt.LogwrtResult->Flush,
+                            (long unsigned)nbytes)));
+                break;
+            }
+        }
 
         /*
          * Flush if accumulate enough bytes or till the LSN in the entry before
@@ -3704,6 +3721,11 @@ bool XLogBackgroundFlush(bool fsync)
             if (u_sess->attr.attr_common.lc_xlog_flush_opt) {
                 break;
             }
+
+            if (ENABLE_DSTORAGE && g_instance.attr.attr_storage.ds_limit_write_xlog_size != 0) {
+                curAverageXlogFlushBytes = (g_instance.attr.attr_storage.ds_limit_write_xlog_size * 1024);
+            }   
+
             if (((curr_entry_ptr->endLSN - startLSN) > curAverageXlogFlushBytes) ||
                 (GetCurrentTimestamp() - stTime >= (uint64)g_instance.attr.attr_storage.wal_flush_timeout)) {
                 break;
