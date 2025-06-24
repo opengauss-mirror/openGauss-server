@@ -25,8 +25,8 @@ left join
    using (join_key)
   ) foo3
 using (join_key);
-                            QUERY PLAN                            
-------------------------------------------------------------------
+                         QUERY PLAN                         
+------------------------------------------------------------
  Nested Loop Left Join
    Output: "*VALUES*".column1, i1.f1, (666)
    Join Filter: ("*VALUES*".column1 = i1.f1)
@@ -34,16 +34,14 @@ using (join_key);
          Output: "*VALUES*".column1
    ->  Materialize
          Output: i1.f1, (666)
-         ->  Hash Right Join
+         ->  Nested Loop Left Join
                Output: i1.f1, 666
-               Hash Cond: (i2.c1 = i1.f1)
+               Join Filter: (i1.f1 = i2.c1)
+               ->  Seq Scan on outerjoin_bugfix.foo_tab1 i1
+                     Output: i1.f1, i1.f2
                ->  Seq Scan on outerjoin_bugfix.foo_tab2 i2
                      Output: i2.c1, i2.c2
-               ->  Hash
-                     Output: i1.f1
-                     ->  Seq Scan on outerjoin_bugfix.foo_tab1 i1
-                           Output: i1.f1
-(16 rows)
+(14 rows)
 
 select foo1.join_key as foo1_id, foo3.join_key AS foo3_id, bug_field from
   (values (0),(1)) foo1(join_key)

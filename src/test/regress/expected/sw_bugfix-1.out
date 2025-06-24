@@ -465,10 +465,10 @@ explain (costs off) select t1.ID,t1.VCH,pid,NAME,PTEX from TEST_HCB_FQB t1,TEST_
                        ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
                              ->  Hash Join
-                                   Hash Cond: (t2.id = t1.id)
-                                   ->  Seq Scan on test_sublink t2
+                                   Hash Cond: (t1.id = t2.id)
+                                   ->  Seq Scan on test_hcb_fqb t1
                                    ->  Hash
-                                         ->  Seq Scan on test_hcb_fqb t1
+                                         ->  Seq Scan on test_sublink t2
 (19 rows)
 
 CREATE OR REPLACE FUNCTION test_hcb_pro1(i_id in int) return int
@@ -513,10 +513,10 @@ start with tt.id=1 CONNECT BY PRIOR tt.id = tt.pid ;
                        ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
                              ->  Hash Join
-                                   Hash Cond: (t2.id = t1.id)
-                                   ->  Seq Scan on test_sublink t2
+                                   Hash Cond: (t1.id = t2.id)
+                                   ->  Seq Scan on test_hcb_fqb t1
                                    ->  Hash
-                                         ->  Seq Scan on test_hcb_fqb t1
+                                         ->  Seq Scan on test_sublink t2
 (19 rows)
 
 select test.id,test.pid,test.name
