@@ -270,3 +270,35 @@ copy imv_ind_t from stdin;
 refresh incremental materialized view imv_ind_v;
 select * from imv_ind_v;
 drop table imv_ind_t cascade;
+
+-- clear mlog
+create table clear_t(c1 int);
+create incremental materialized view clear_v as select * from clear_t;
+insert into clear_t values(1);
+create table clear_mlog_record(c1 int);
+declare
+    oid int := (select oid from pg_class where relname = 'clear_t');
+    table_name varchar(20) := 'mlog_' || oid;
+    stmt text := 'insert into clear_mlog_record select count(*) from ' || table_name;
+begin
+    execute stmt;
+    commit;
+END;
+/
+select * from clear_mlog_record;
+truncate table clear_mlog_record;
+
+refresh incremental materialized view clear_v;
+
+declare
+    oid int := (select oid from pg_class where relname = 'clear_t');
+    table_name varchar(20) := 'mlog_' || oid;
+    stmt text := 'insert into clear_mlog_record select count(*) from ' || table_name;
+begin
+    execute stmt;
+    commit;
+END;
+/
+select * from clear_mlog_record;
+drop materialized view clear_v;
+drop table clear_t, clear_mlog_record;
