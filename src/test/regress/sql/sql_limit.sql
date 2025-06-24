@@ -1,11 +1,13 @@
 \c postgres;
 ALTER SYSTEM SET enable_sql_limit = 'on';
 SELECT pg_reload_conf();
+create database db;
 create table test_table(i int);
 select count(*) from test_table where i > 10 and i < 1000;
 insert into test_table select generate_series(1,100000);
 
 create user test_table_user with password 'Gauss@123';
+create user user1 with password 'Gauss@123';
 grant select,insert,update,delete on test_table to test_table_user;
 
 select gs_create_sql_limit('rule_1','sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],null,null);
@@ -124,11 +126,11 @@ select * from gs_select_sql_limit();
 
 -- update rule to sepecific user
 reset role;
-select gs_update_sql_limit(1,'sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],null,'{user}');
-select gs_update_sql_limit(2,'select',0,0,'now()','','{select,from,test_table,where}',null,'{user}');
-select gs_update_sql_limit(3,'insert',0,0,'now()','','{insert,into,test_table,values}',null,'{user}');
-select gs_update_sql_limit(4,'update',0,0,'now()','','{update,test_table,set,where}',null,'{user}');
-select gs_update_sql_limit(5,'delete',0,0,'now()','','{delete,from,test_table,where}',null,'{user}');
+select gs_update_sql_limit(1,'sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],null,'{user1}');
+select gs_update_sql_limit(2,'select',0,0,'now()','','{select,from,test_table,where}',null,'{user1}');
+select gs_update_sql_limit(3,'insert',0,0,'now()','','{insert,into,test_table,values}',null,'{user1}');
+select gs_update_sql_limit(4,'update',0,0,'now()','','{update,test_table,set,where}',null,'{user1}');
+select gs_update_sql_limit(5,'delete',0,0,'now()','','{delete,from,test_table,where}',null,'{user1}');
 
 set role test_table_user password 'Gauss@123';
 -- expect sqlid rule not hit
@@ -153,11 +155,11 @@ select * from gs_select_sql_limit();
 
 -- update rule to sepecific database
 reset role;
-select gs_update_sql_limit(1,'sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],'{db}','{user}');
-select gs_update_sql_limit(2,'select',0,0,'now()','','{select,from,test_table,where}','{db}','{user}');
-select gs_update_sql_limit(3,'insert',0,0,'now()','','{insert,into,test_table,values}','{db}','{user}');
-select gs_update_sql_limit(4,'update',0,0,'now()','','{update,test_table,set,where}','{db}','{user}');
-select gs_update_sql_limit(5,'delete',0,0,'now()','','{delete,from,test_table,where}','{db}','{user}');
+select gs_update_sql_limit(1,'sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],'{db}','{user1}');
+select gs_update_sql_limit(2,'select',0,0,'now()','','{select,from,test_table,where}','{db}','{user1}');
+select gs_update_sql_limit(3,'insert',0,0,'now()','','{insert,into,test_table,values}','{db}','{user1}');
+select gs_update_sql_limit(4,'update',0,0,'now()','','{update,test_table,set,where}','{db}','{user1}');
+select gs_update_sql_limit(5,'delete',0,0,'now()','','{delete,from,test_table,where}','{db}','{user1}');
 
 set role test_table_user password 'Gauss@123';
 -- expect sqlid rule not hit
@@ -185,11 +187,11 @@ select * from gs_select_sql_limit();
 
 -- update rule to sepecific database
 reset role;
-select gs_update_sql_limit(1,'sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],'{postgres}','{user}');
-select gs_update_sql_limit(2,'select',0,0,'now()','','{select,from,test_table,where}','{postgres}','{user}');
-select gs_update_sql_limit(3,'insert',0,0,'now()','','{insert,into,test_table,values}','{postgres}','{user}');
-select gs_update_sql_limit(4,'update',0,0,'now()','','{update,test_table,set,where}','{postgres}','{user}');
-select gs_update_sql_limit(5,'delete',0,0,'now()','','{delete,from,test_table,where}','{postgres}','{user}');
+select gs_update_sql_limit(1,'sqlid',0,0,'now()','',ARRAY(select unique_sql_id::text from dbe_perf.statement where query like 'select count(*) from test_table where i > ? and i < ?%')::name[],'{postgres}','{user1}');
+select gs_update_sql_limit(2,'select',0,0,'now()','','{select,from,test_table,where}','{postgres}','{user1}');
+select gs_update_sql_limit(3,'insert',0,0,'now()','','{insert,into,test_table,values}','{postgres}','{user1}');
+select gs_update_sql_limit(4,'update',0,0,'now()','','{update,test_table,set,where}','{postgres}','{user1}');
+select gs_update_sql_limit(5,'delete',0,0,'now()','','{delete,from,test_table,where}','{postgres}','{user1}');
 
 set role test_table_user password 'Gauss@123';
 -- expect sqlid rule not hit
@@ -225,4 +227,5 @@ SELECT pg_reload_conf();
 
 drop table test_table;
 drop user test_table_user;
-
+drop user user1;
+drop database db;

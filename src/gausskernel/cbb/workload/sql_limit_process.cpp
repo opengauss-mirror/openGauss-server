@@ -162,7 +162,7 @@ void CleanSqlLimitCache()
     LWLockRelease(SqlLimitLock);
 }
 
-List* ParseNameArrayToOidList(Datum arrayDatum, Oid (*getOidFunc)(const char*, bool))
+List* ParseNameArrayToOidList(Datum arrayDatum, Oid (*getOidFunc)(const char*, bool), bool missingOk)
 {
     List* oidList = NIL;
     ArrayType* inputArray = DatumGetArrayTypeP(arrayDatum);
@@ -176,7 +176,7 @@ List* ParseNameArrayToOidList(Datum arrayDatum, Oid (*getOidFunc)(const char*, b
         }
 
         char* name = NameStr(*(DatumGetName(elementValue)));
-        Oid oid = getOidFunc(name, true);
+        Oid oid = getOidFunc(name, missingOk);
         oidList = lappend_oid(oidList, oid);
     }
 
@@ -202,19 +202,19 @@ static List* ParseOptionValues(Datum values)
     return valuesList;
 }
 
-static void SetScopeFields(SqlLimit* limit, Datum* values, bool* nulls)
+static void SetScopeFields(SqlLimit* limit, Datum* values, bool* nulls, bool missingOk)
 {
     if (!nulls[Anum_gs_sql_limit_databases - 1]) {
         List* databases = ParseNameArrayToOidList(
             values[Anum_gs_sql_limit_databases - 1],
-            get_database_oid);
+            get_database_oid, missingOk);
         SqlLimitSetDatabases(limit, databases);
     }
 
     if (!nulls[Anum_gs_sql_limit_users - 1]) {
         List* users = ParseNameArrayToOidList(
             values[Anum_gs_sql_limit_users - 1],
-            get_role_oid);
+            get_role_oid, missingOk);
         SqlLimitSetUsers(limit, users);
     }
 }
@@ -250,11 +250,11 @@ static void SetTimeWindow(SqlLimit* limit, Datum* values, bool* nulls)
     TimeWindowSet(&limit->timeWindow, startTime, endTime);
 }
 
-static void PopulateBaseSqlLimitFields(SqlLimit* limit, Datum* values, bool* nulls)
+static void PopulateBaseSqlLimitFields(SqlLimit* limit, Datum* values, bool* nulls, bool missingOk)
 {
     limit->limitId = DatumGetUInt64(values[Anum_gs_sql_limit_limit_id - 1]);
 
-    SetScopeFields(limit, values, nulls);
+    SetScopeFields(limit, values, nulls, missingOk);
 
     SetControlFields(limit, values, nulls);
 
@@ -304,7 +304,7 @@ static void PopulateUniqueSqlIdLimitFields(SqlLimit* limit, uint64* uniqueSqlid)
     limit->typeData.uniqueSql.uniqueSqlId = *uniqueSqlid;
 }
 
-static void ApplySqlLimitChanges(SqlLimit* limit, Datum* values, bool* nulls, uint64* uniqueSqlid)
+static void ApplySqlLimitChanges(SqlLimit* limit, Datum* values, bool* nulls, uint64* uniqueSqlid, bool missingOk)
 {
     if (limit == NULL || limit->sqlType == SQL_TYPE_OTHER) {
         return;
@@ -312,7 +312,7 @@ static void ApplySqlLimitChanges(SqlLimit* limit, Datum* values, bool* nulls, ui
 
     SqlType sqlType = limit->sqlType;
     SqlLimitClear(limit);
-    PopulateBaseSqlLimitFields(limit, values, nulls);
+    PopulateBaseSqlLimitFields(limit, values, nulls, missingOk);
 
     switch (sqlType) {
         case SQL_TYPE_UNIQUE_SQLID:
@@ -351,20 +351,22 @@ SqlLimit* SearchSqlLimitCache(uint64 limitId)
     return registryEntry->limit;
 }
 
-static SqlLimit* CreateKeywordsLimitCache(Datum* values, bool* nulls)
+static SqlLimit* CreateKeywordsLimitCache(Datum* values, bool* nulls, bool missingOk)
 {
+    int errLevel = missingOk ? WARNING : ERROR;
     uint64 limitId = DatumGetUInt64(values[Anum_gs_sql_limit_limit_id - 1]);
     bool found = false;
     SqlLimitHashEntry* entry = (SqlLimitHashEntry*)hash_search(
         g_instance.sqlLimit_cxt.limitRegistry,  &limitId, HASH_ENTER, &found);
 
     if (found) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        ereport(errLevel, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("Cannot create keywords limit: limit_id %lu already exists.", limitId)));
+        return NULL;
     }
 
     SqlLimit* limit = SqlLimitCreate(limitId, SQL_TYPE_OTHER);
-    PopulateBaseSqlLimitFields(limit, values, nulls);
+    PopulateBaseSqlLimitFields(limit, values, nulls, missingOk);
     PopulateKeywordLimitFields(limit, values, nulls);
 
     SqlType sqlType = limit->sqlType;
@@ -384,26 +386,29 @@ static SqlLimit* CreateKeywordsLimitCache(Datum* values, bool* nulls)
     return limit;
 }
 
-static SqlLimit* CreateUniqueSqlidLimitCache(Datum* values, bool* nulls, uint64* uniqueSqlid)
+static SqlLimit* CreateUniqueSqlidLimitCache(Datum* values, bool* nulls, uint64* uniqueSqlid, bool missingOk)
 {
+    int errLevel = missingOk ? WARNING : ERROR;
     bool found = false;
     UniqueSqlIdHashEntry* entry = (UniqueSqlIdHashEntry*)hash_search(g_instance.sqlLimit_cxt.uniqueSqlIdLimits,
         (void*)uniqueSqlid, HASH_ENTER, &found);
     if (found) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        ereport(errLevel, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("Cannot create limit: unique_sql_id %lu already exists.", *uniqueSqlid)));
+        return NULL;
     }
     uint64 limitId = DatumGetUInt64(values[Anum_gs_sql_limit_limit_id - 1]);
     SqlLimitHashEntry* registryEntry = (SqlLimitHashEntry*)hash_search(g_instance.sqlLimit_cxt.limitRegistry,
         (void*)&limitId, HASH_ENTER, &found);
     if (found) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        ereport(errLevel, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("Cannot create limit: limit_id %lu already exists.", limitId)));
+        return NULL;
     }
 
     SqlLimit* limit = SqlLimitCreate(limitId, SQL_TYPE_UNIQUE_SQLID);
     entry->limit = limit;
-    PopulateBaseSqlLimitFields(limit, values, nulls);
+    PopulateBaseSqlLimitFields(limit, values, nulls, missingOk);
     PopulateUniqueSqlIdLimitFields(limit, uniqueSqlid);
     registryEntry->limit = limit;
     registryEntry->sqlType = SQL_TYPE_UNIQUE_SQLID;
@@ -411,15 +416,16 @@ static SqlLimit* CreateUniqueSqlidLimitCache(Datum* values, bool* nulls, uint64*
     return limit;
 }
 
-bool ValidateAndExtractOption(SqlType sqlType, Datum* values, uint64* uniqueSqlid)
+bool ValidateAndExtractOption(SqlType sqlType, Datum* values, uint64* uniqueSqlid, bool missingOk)
 {
     if (sqlType != SQL_TYPE_UNIQUE_SQLID) {
         return true;
     }
 
+    int errLevel = missingOk ? WARNING : ERROR;
     List* valuesList = ParseOptionValues(*values);
     if (valuesList == NIL) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+        ereport(errLevel, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("unique SQL ID parameter is empty")));
         return false;
     }
@@ -432,7 +438,7 @@ bool ValidateAndExtractOption(SqlType sqlType, Datum* values, uint64* uniqueSqli
     list_free_deep(valuesList);
 
     if (sqlIdValue <= 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+        ereport(errLevel, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("unique SQL ID must be a positive integer, received: %ld", sqlIdValue)));
         return false;
     }
@@ -460,19 +466,19 @@ static bool ProcessLimitOptions(Datum* values, bool* nulls, SqlType limitTypeEnu
     Datum* datum = nulls[Anum_gs_sql_limit_limit_opt - 1] ?
         NULL : &values[Anum_gs_sql_limit_limit_opt - 1];
 
-    bool res = ValidateAndExtractOption(limitTypeEnum, datum, uniqueSqlid);
+    bool res = ValidateAndExtractOption(limitTypeEnum, datum, uniqueSqlid, true);
     if (!res) {
         return false;
     }
     return true;
 }
 
-static void ApplyLimitChanges(SqlLimit* limit, Datum* values, bool* nulls, uint64* uniqueSqlid)
+static void ApplyLimitChanges(SqlLimit* limit, Datum* values, bool* nulls, uint64* uniqueSqlid, bool missingOk)
 {
     if (limit->sqlType == SQL_TYPE_UNIQUE_SQLID) {
-        ApplySqlLimitChanges(limit, values, nulls, uniqueSqlid);
+        ApplySqlLimitChanges(limit, values, nulls, uniqueSqlid, missingOk);
     } else if (IsKeywordsLimit(limit->sqlType)) {
-        ApplySqlLimitChanges(limit, values, nulls, NULL);
+        ApplySqlLimitChanges(limit, values, nulls, NULL, missingOk);
     } else {
         ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("invalid limit type, please check the input")));
@@ -500,9 +506,6 @@ void DoUpdateSqlLimitCacheStandby(HeapTuple tuple, TupleDesc tupleDesc, Transact
     }
 
     uint64 limitId = DatumGetUInt64(values[Anum_gs_sql_limit_limit_id - 1]);
-    if (limitId == 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid limit id: %lu", limitId)));
-    }
 
     LWLockAcquire(SqlLimitLock, LW_EXCLUSIVE);
     SqlLimit* limit = SearchSqlLimitCache(limitId);
@@ -518,9 +521,9 @@ void DoUpdateSqlLimitCacheStandby(HeapTuple tuple, TupleDesc tupleDesc, Transact
     MemoryContext oldCxt = MemoryContextSwitchTo(g_instance.sqlLimit_cxt.gSqlLimitCxt);
     if (limit == NULL) {
         if (limitTypeEnum == SQL_TYPE_UNIQUE_SQLID) {
-            limit = CreateUniqueSqlidLimitCache(values, nulls, &uniqueSqlid);
+            limit = CreateUniqueSqlidLimitCache(values, nulls, &uniqueSqlid, true);
         } else if (IsKeywordsLimit(limitTypeEnum)) {
-            limit = CreateKeywordsLimitCache(values, nulls);
+            limit = CreateKeywordsLimitCache(values, nulls, true);
         } else {
             ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid limit type, please check the input")));
@@ -528,9 +531,10 @@ void DoUpdateSqlLimitCacheStandby(HeapTuple tuple, TupleDesc tupleDesc, Transact
 
         if (limit != NULL) {
             limit->xmin = currentXmin;
+            g_instance.sqlLimit_cxt.entryCount++;
         }
     } else {
-        ApplyLimitChanges(limit, values, nulls, &uniqueSqlid);
+        ApplyLimitChanges(limit, values, nulls, &uniqueSqlid, true);
     }
     MemoryContextSwitchTo(oldCxt);
     LWLockRelease(SqlLimitLock);
@@ -557,11 +561,11 @@ void UpdateSqlLimitCache()
     heap_close(rel, AccessShareLock);
 }
 
-static SqlLimit* CreateSqlLimitCache(Datum* values, bool* nulls, uint64* uniqueSqlid)
+static SqlLimit* CreateSqlLimitCache(Datum* values, bool* nulls, uint64* uniqueSqlid, bool missingOk)
 {
+    int errLevel = missingOk ? WARNING : ERROR;
     if (nulls[Anum_gs_sql_limit_limit_type - 1]) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("limit type is empty.")));
+        ereport(errLevel, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("limit type is empty.")));
         return NULL;
     }
 
@@ -569,19 +573,18 @@ static SqlLimit* CreateSqlLimitCache(Datum* values, bool* nulls, uint64* uniqueS
     SqlLimit* limit = NULL;
     SqlType limitTypeEnum = GetSqlLimitType(sqlType);
     if (limitTypeEnum == SQL_TYPE_OTHER) {
-        ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-            errmsg("invalid limit type: %s", sqlType)));
+        ereport(errLevel, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid limit type: %s", sqlType)));
         pfree_ext(sqlType);
         return NULL;
     }
 
     if (limitTypeEnum == SQL_TYPE_UNIQUE_SQLID) {
-        limit = CreateUniqueSqlidLimitCache(values, nulls, uniqueSqlid);
+        limit = CreateUniqueSqlidLimitCache(values, nulls, uniqueSqlid, missingOk);
     } else if (IsKeywordsLimit(limitTypeEnum)) {
-        limit = CreateKeywordsLimitCache(values, nulls);
+        limit = CreateKeywordsLimitCache(values, nulls, missingOk);
     } else {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("invalid limit type: %s", sqlType)));
+        ereport(errLevel, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("invalid limit type: %s", sqlType)));
+        pfree_ext(sqlType);
         return NULL;
     }
 
@@ -608,13 +611,13 @@ bool UpdateSqlLimit(Datum* values, bool* nulls, uint64* uniqueSqlid)
     uint64 limitId = DatumGetUInt64(values[Anum_gs_sql_limit_limit_id - 1]);
     SqlLimit* limit = SearchSqlLimitCache(limitId);
     if (limit == NULL) {
-        (void)CreateSqlLimitCache(values, nulls, uniqueSqlid);
+        (void)CreateSqlLimitCache(values, nulls, uniqueSqlid, false);
         MemoryContextSwitchTo(oldCxt);
         LWLockRelease(SqlLimitLock);
         return true;
     }
 
-    ApplySqlLimitChanges(limit, values, nulls, uniqueSqlid);
+    ApplySqlLimitChanges(limit, values, nulls, uniqueSqlid, false);
 
     MemoryContextSwitchTo(oldCxt);
     LWLockRelease(SqlLimitLock);
@@ -631,7 +634,7 @@ void CreateSqlLimit(Datum* values, bool* nulls, uint64* uniqueSqlid)
     }
 
     MemoryContext oldCxt = MemoryContextSwitchTo(g_instance.sqlLimit_cxt.gSqlLimitCxt);
-    (void)CreateSqlLimitCache(values, nulls, uniqueSqlid);
+    (void)CreateSqlLimitCache(values, nulls, uniqueSqlid, false);
     MemoryContextSwitchTo(oldCxt);
     LWLockRelease(SqlLimitLock);
 }
@@ -664,12 +667,12 @@ static void ConstructSqlLimits()
             NULL : &values[Anum_gs_sql_limit_limit_opt - 1];
 
         uint64 uniqueSqlid = 0;
-        bool res = ValidateAndExtractOption(limitTypeEnum, datum, &uniqueSqlid);
+        bool res = ValidateAndExtractOption(limitTypeEnum, datum, &uniqueSqlid, true);
         if (!res) {
             continue;
         }
 
-        SqlLimit* limit = CreateSqlLimitCache(values, nulls, &uniqueSqlid);
+        SqlLimit* limit = CreateSqlLimitCache(values, nulls, &uniqueSqlid, true);
         if (limit == NULL) {
             continue;
         }
@@ -733,28 +736,21 @@ SqlLimit* MatchKeywordsLimit(const char* commandTag, const char* queryString)
 
 static void RemoveUniqueSqlIdLimit(SqlLimit* limit)
 {
-    bool found = false;
     uint64 uniqueSqlId = limit->typeData.uniqueSql.uniqueSqlId;
-
-    (void)hash_search(g_instance.sqlLimit_cxt.uniqueSqlIdLimits, (void*)&uniqueSqlId, HASH_REMOVE, &found);
-
-    if (!found) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("limit id %lu not found in unique sql id limit hash while deleting sqlid limit.", limit->limitId)));
-    }
+    (void)hash_search(g_instance.sqlLimit_cxt.uniqueSqlIdLimits, (void*)&uniqueSqlId, HASH_REMOVE, NULL);
 }
 
-static void RemoveKeywordsLimit(uint64 limitId)
+static void RemoveKeywordsLimit(SqlLimit* limit)
 {
-    bool found = false;
-    SqlLimitHashEntry* entry = (SqlLimitHashEntry*)hash_search(g_instance.sqlLimit_cxt.limitRegistry,
-        (void*)&limitId, HASH_FIND, &found);
-
-    if (found && entry->keywordsNode != NULL) {
-        KeywordsLimitNode* keywordsNode =
-            (KeywordsLimitNode*)dlist_container(KeywordsLimitNode, node, entry->keywordsNode);
-        dlist_delete(entry->keywordsNode);
-        pfree_ext(keywordsNode);
+    dlist_iter iter;
+    dlist_foreach(iter, &g_instance.sqlLimit_cxt.keywordsLimits[limit->sqlType]) {
+        KeywordsLimitNode* keywordsNode = (KeywordsLimitNode*)dlist_container(KeywordsLimitNode, node, iter.cur);
+        SqlLimit* sqlLimit = (SqlLimit*)(keywordsNode->limit);
+        if (sqlLimit != NULL && limit->limitId == sqlLimit->limitId) {
+            dlist_delete(iter.cur);
+            pfree_ext(keywordsNode);
+            break;
+        }
     }
 }
 
@@ -763,23 +759,24 @@ bool DeleteSqlLimitCache(uint64 limitId)
     LWLockAcquire(SqlLimitLock, LW_EXCLUSIVE);
     if (!g_instance.sqlLimit_cxt.cacheInited) {
         LWLockRelease(SqlLimitLock);
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        ereport(WARNING, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("sql limit cache is not initialized")));
+        return false;
     }
 
-    MemoryContext old_cxt = MemoryContextSwitchTo(g_instance.sqlLimit_cxt.gSqlLimitCxt);
+    MemoryContext oldCxt = MemoryContextSwitchTo(g_instance.sqlLimit_cxt.gSqlLimitCxt);
     SqlLimit* limit = SearchSqlLimitCache(limitId);
     if (limit != NULL) {
         if (limit->sqlType == SQL_TYPE_UNIQUE_SQLID) {
             RemoveUniqueSqlIdLimit(limit);
         } else if (IsKeywordsLimit(limit->sqlType)) {
-            RemoveKeywordsLimit(limitId);
+            RemoveKeywordsLimit(limit);
         }
         (void)hash_search(g_instance.sqlLimit_cxt.limitRegistry, (void*)&limitId, HASH_REMOVE, NULL);
         SqlLimitDestroy(limit);
         g_instance.sqlLimit_cxt.entryCount--;
     }
-    MemoryContextSwitchTo(old_cxt);
+    MemoryContextSwitchTo(oldCxt);
     LWLockRelease(SqlLimitLock);
     return true;
 }

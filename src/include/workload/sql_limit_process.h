@@ -41,8 +41,9 @@ void LimitCurrentQuery(const char* commandTag, const char* queryString);
 void UnlimitCurrentQuery();
 void InitSqlLimitCache();
 SqlType GetSqlLimitType(const char* sqlType);
-bool ValidateAndExtractOption(SqlType sqlType, Datum* values, uint64* uniqueSqlid);
+bool ValidateAndExtractOption(SqlType sqlType, Datum* values, uint64* uniqueSqlid, bool missingOk);
 void CreateSqlLimit(Datum* values, bool* nulls, uint64* uniqueSqlid);
 bool UpdateSqlLimit(Datum* values, bool* nulls, uint64* uniqueSqlid);
+List* ParseNameArrayToOidList(Datum arrayDatum, Oid (*getOidFunc)(const char*, bool), bool missingOk);
 
 #endif
