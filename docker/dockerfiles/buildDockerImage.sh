@@ -207,27 +207,27 @@ echo "Building image '$IMAGE_NAME' ..."
 BUILD_START=$(date '+%s')
 if [ "$mode" != "lite" ]; then
     if [ -f "/etc/openEuler-release" ];then
-        opengauss_files_tar=(openGauss-Server-*-openEuler20.03-${file_arch}.tar.bz2)
+        opengauss_files_tar=(openGauss-Server-*-openEuler22.03-${file_arch}.tar.bz2)
         if [[ ${#opengauss_files_tar[@]} -ne 1 || ! -f "${opengauss_files_tar[0]}" ]]; then
           echo "ERROR: unable to choose server pkg"
           echo "${opengauss_files_tar[0]}"
           exit 1
         fi
         opengauss_tar="${opengauss_files_tar[0]}"
-        opengauss_version=$(echo "${opengauss_tar}" | sed "s/.*openGauss-Server-\(.*\)-openEuler20.03-${file_arch}.tar.bz2/\1/")
+        opengauss_version=$(echo "${opengauss_tar}" | sed "s/.*openGauss-Server-\(.*\)-openEuler22.03-${file_arch}.tar.bz2/\1/")
     else
         opengauss_version=""
     fi
 else
     if [ -f "/etc/openEuler-release" ];then
-        opengauss_files_tar=(openGauss-Lite-*-openEuler20.03-${file_arch}.tar.gz)
+        opengauss_files_tar=(openGauss-Lite-*-openEuler22.03-${file_arch}.tar.gz)
         if [[ ${#opengauss_files_tar[@]} -ne 1 || ! -f "${opengauss_files_tar[0]}" ]]; then
           echo "ERROR: unable to choose server pkg"
           echo "${opengauss_files_tar[0]}"
           exit 1
         fi
         opengauss_tar="${opengauss_files_tar[0]}"
-        opengauss_version=$(echo "${opengauss_tar}" | sed "s/.*openGauss-Lite-\(.*\)-openEuler20.03-${file_arch}.tar.gz/\1/")
+        opengauss_version=$(echo "${opengauss_tar}" | sed "s/.*openGauss-Lite-\(.*\)-openEuler22.03-${file_arch}.tar.gz/\1/")
     else
         opengauss_version=""
     fi
