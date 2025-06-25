@@ -5,6 +5,8 @@ CREATE TABLE buffercache_test(
 
 INSERT INTO buffercache_test VALUES(generate_series(1, 10000), 'To make a prairie it takes a clover and one bee, One clover and a bee, And revery. The revery alone will do, If bees are few.');
 
+checkpoint;
+
 SELECT storage_type, reldatabase, relforknumber, relblocknumber, isdirty, isvalid, usage_count, pinning_backends
 FROM
 	(SELECT relfilenode, 
