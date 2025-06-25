@@ -737,18 +737,6 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                 break;
             }
 
-            if (seq <= (*buf_ctrl)->seq) {
-                *buf_ctrl = NULL;
-                ret = DMS_ERROR;
-                LWLockRelease(buf_desc->content_lock);
-                DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
-                ereport(WARNING, (errmodule(MOD_DMS),
-                    errmsg("[SS page][%u/%u/%u/%d %d-%u] message expired",
-                    tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                    tag->forkNum, tag->blockNum)));
-                break;
-            }
-
             if ((*buf_ctrl)->lock_mode == DMS_LOCK_NULL) {
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[SS page][%u/%u/%u/%d %d-%u] lock mode is null, still need to transfer page",
@@ -866,15 +854,6 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                     buf_ctrl->seg_fileno = EXTENT_INVALID;
                     buf_ctrl->seg_blockno = InvalidBlockNumber;
                     ret = DMS_SUCCESS;
-                    break;
-                }
-
-                if (seq <= buf_ctrl->seq) {
-                    ereport(LOG, (errmodule(MOD_DMS),
-                        errmsg("[SS page][%d/%d/%d/%d %d-%d] expired message", tag->rnode.spcNode, tag->rnode.dbNode,
-                        tag->rnode.relNode, tag->rnode.bucketNode, tag->forkNum, tag->blockNum)));
-                    UnlockBufHdr(buf_desc, buf_state);
-                    ret = DMS_ERROR;
                     break;
                 }
 
@@ -1510,6 +1489,7 @@ static int SSBufRebuildOneDrc(int index, unsigned char thread_index)
     bool need_rebuild = true;
     LWLockAcquire((LWLock*)buf_ctrl->ctrl_lock, LW_EXCLUSIVE);
     bool is_owner = DMS_BUF_CTRL_IS_OWNER(buf_ctrl);
+    buf_ctrl->seq = 0;
     LWLockRelease((LWLock*)buf_ctrl->ctrl_lock);
     if (is_owner) {
         uint64 buf_state = pg_atomic_read_u64(&buf_desc->state); 
