@@ -472,13 +472,13 @@ static void PushSMBMem(int queueId)
         pg_atomic_write_u64(&buf_desc->extra->smb_rec_lsn, InvalidXLogRecPtr);
         PinBuffer_Locked(buf_desc);
         if (!BUFFERTAGS_EQUAL(slot->tag, buf_desc->tag)) {
-            UnpinBuffer(buf_desc, lsn);
+            UnpinBuffer(buf_desc, true);
             pg_atomic_init_u32(&slot->slot_state, 0);
             (void)pg_atomic_fetch_add_u64(&queue->head, 1);
             g_instance.smb_cxt.has_gap = true;
             break;
         }
-        SMBPushOnePage(buf_desc, true);
+        SMBPushOnePage(buf_desc, lsn);
         UnpinBuffer(buf_desc, true);
         pg_atomic_init_u32(&slot->slot_state, 0);
         (void)pg_atomic_fetch_add_u64(&queue->head, 1);
