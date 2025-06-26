@@ -445,11 +445,6 @@ bool IMCStore::LoadCUDesc(
         if (totalThread > 1 && cuid % totalThread != currentThreadID) {
             continue;
         }
-
-        if (u_sess->stream_cxt.producer_dop > 1 &&
-            (cuid % u_sess->stream_cxt.producer_dop != (uint32)u_sess->stream_cxt.smp_id))
-            continue;
-
         RowGroup* rowgroup = m_imcstoreDesc->GetRowGroup(cuid);
         if (rowgroup != NULL) {
             rowgroup->RDLockRowGroup();
@@ -545,9 +540,8 @@ void IMCStore::GetCUDeleteMaskFromRemote(_in_ uint32 cuid, _in_ Snapshot snapSho
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
     unsigned long long delta_max;
-    u_sess->imcstore_ctx.bitmap = m_cuDeltaMask;
-    SSRequestIMCStoreDelta(&dms_ctx, m_relation->rd_id, cuid, m_cuDeltaMask, &delta_max);
-    m_deltaMaskMax = u_sess->imcstore_ctx.max_size;
+    dms_request_imcstore_delta(&dms_ctx, m_relation->rd_id, cuid, m_cuDeltaMask, &delta_max);
+    m_deltaMaskMax = delta_max;
 
     RowGroup* rowgroup = m_imcstoreDesc->GetRowGroup(cuid);
     if (rowgroup == NULL) {
@@ -581,6 +575,7 @@ void IMCStore::GetCUDeleteMaskFromRemote(_in_ uint32 cuid, _in_ Snapshot snapSho
             blk += m_delMaskCUId * MAX_IMCS_PAGES_ONE_CU;
             ItemPointerSetBlockNumber(&item, blk);
             ItemPointerSetOffsetNumber(&item, offset);
+            ++curr;
 
             int rowIdx = FindRowIDByCtid(cu, &item, rowgroup->m_cuDescs[m_ctidCol]->row_count);
             if (rowIdx < 0) {
@@ -611,6 +606,26 @@ void IMCStore::GetCUDeleteMaskFromRemote(_in_ uint32 cuid, _in_ Snapshot snapSho
     PG_END_TRY();
 }
 
+void IMCStore::GetCUDeleteMaskIfNeedForSSStandby(_in_ uint32 cuid)
+{
+    RowGroup* rowgroup = m_imcstoreDesc->GetRowGroup(cuid);
+    if (rowgroup == NULL) {
+        return;
+    }
+    rowgroup->RDLockRowGroup();
+    if (rowgroup->rgxmin != InvalidTransactionId && rowgroup->rgxmin >= m_snapshot->xmin) {
+        FormCUDeleteMaskFullRowGroup(rowgroup, cuid);
+        rowgroup->UnlockRowGroup();
+        m_imcstoreDesc->UnReferenceRowGroup();
+        return;
+    }
+    rowgroup->UnlockRowGroup();
+    m_imcstoreDesc->UnReferenceRowGroup();
+
+    GetCUDeleteMaskFromRemote(cuid, m_snapshot);
+    return;
+}
+
 void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
 {
     if (m_delMaskCUId == cuid) {
@@ -630,6 +645,7 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
     m_deltaMaskMax = 0;
 
     if (ENABLE_DMS && !SS_PRIMARY_MODE && m_imcstoreDesc->populateInShareMem) {
+        GetCUDeleteMaskIfNeedForSSStandby(cuid);
         return;
     }
 
@@ -706,7 +722,7 @@ void IMCStore::FormLocalCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ ui
         ereport(ERROR, (errmsg(
             "Try build delete mask for htap error, row group is invalid.")));
     }
-    if (rowgroup->rgxmin != InvalidTransactionId) {
+    if (rowgroup->rgxmin >= m_snapshot->xmin) {
         FormCUDeleteMaskFullRowGroup(rowgroup, cuid);
         return;
     }

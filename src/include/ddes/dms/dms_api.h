@@ -113,6 +113,7 @@ typedef enum en_dms_dr_type {
     DMS_DR_TYPE_PCRD_LATCH = 32,
     DMS_DR_TYPE_PCRD_LIST_LATCH = 33,
     DMS_DR_TYPE_PCRD_SPIN = 34,
+    DMS_DR_TYPE_ROWGROUP = 35,
     DMS_DR_TYPE_MAX,
 } dms_dr_type_t;
 
@@ -629,6 +630,7 @@ typedef enum en_dms_wait_event {
     DMS_EVT_DRC_FROZEN,
     DMS_EVT_DRC_ENQ_ITEM_NOT_ENOUGH,
     DMS_EVT_DRC_ENQ_ITEM_CONFLICT,
+    DMS_EVT_REQ_IMCSTORE_DELTA,
 
 // add new enum at tail, or make adaptations to openGauss
     DMS_EVT_COUNT,
@@ -1041,6 +1043,8 @@ typedef void(*dms_inc_buffer_remote_reads)(void *db_handle);
 typedef void(*dms_begin_event_wait)(unsigned int sid, unsigned int dms_event, unsigned char immediate);
 typedef void(*dms_end_event_wait)(unsigned int sid, unsigned int prev_dms_event, unsigned int dms_event);
 typedef int(*dms_check_session_status)(void *db_handle);
+typedef bool (*dms_get_imcstore_delta)(unsigned int tableid, unsigned int rowgroupid,
+    unsigned char *bitmap, unsigned long long *maxSize);
 
 typedef struct st_dms_callback {
     // used in reform
@@ -1256,6 +1260,7 @@ typedef struct st_dms_callback {
     dms_begin_event_wait begin_event_wait;
     dms_end_event_wait end_event_wait;
     dms_check_session_status check_session_status;
+    dms_get_imcstore_delta get_imcstore_delta;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
