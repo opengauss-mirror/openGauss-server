@@ -104,6 +104,7 @@ int dss_device_init(const char *conn_path, bool enable_dss)
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_ftruncate", (void **)&device_op.dss_truncate));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_fwrite", (void **)&device_op.dss_write));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_fcopy", (void **)&device_op.dss_fcopy));
+    SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_append", (void **)&device_op.dss_append));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_pwrite", (void **)&device_op.dss_pwrite));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_dmake", (void **)&device_op.dss_create_dir));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_dopen", (void **)&device_op.dss_open_dir));
