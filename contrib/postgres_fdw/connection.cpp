@@ -822,9 +822,22 @@ static void pgfdw_xact_callback(XactEvent event, void *arg)
             elog(DEBUG3, "closing remote transaction on connection %p", entry->conn);
 
             switch (event) {
-                case XACT_EVENT_COMMIT:
+                case XACT_EVENT_PRE_COMMIT:
                     pgfdw_xact_callback_commit(entry);
                     break;
+                case XACT_EVENT_PRE_PREPARE:
+                	/*
+					 * We disallow any remote transactions, since it's not
+					 * very reasonable to hold them open until the prepared
+					 * transaction is committed.  For the moment, throw error
+					 * unconditionally; later we might allow read-only cases.
+					 * Note that the error will cause us to come right back
+					 * here with event == XACT_EVENT_ABORT, so we'll clean up
+					 * the connection state at that point.
+					 */
+                    elog(ERROR, "cannot PREPARE a transaction that has operated on postgres_fdw foreign tables");
+                    break;
+                case XACT_EVENT_COMMIT:
                 case XACT_EVENT_PREPARE:
                     /* Pre-commit should have closed the open transaction */
                     elog(ERROR, "missed cleaning up connection during pre-commit");
