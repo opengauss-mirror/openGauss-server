@@ -417,6 +417,10 @@ void GlobalSysDBCache::GSCMemThresholdCheck()
         return;
     }
 
+    if (unlikely(t_thrd.utils_cxt.CurrentResourceOwner == NULL)) {
+        return;
+    }
+
     /* only one clean is enough */
     ResourceOwnerEnlargeGlobalIsExclusive(LOCAL_SYSDB_RESOWNER);
     if (!atomic_compare_exchange_u32(&m_is_memorychecking, 0, 1)) {
