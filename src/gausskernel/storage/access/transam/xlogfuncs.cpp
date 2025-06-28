@@ -616,9 +616,16 @@ Datum pg_last_xlog_replay_location(PG_FUNCTION_ARGS)
     uint32 max_term = Max(g_instance.comm_cxt.localinfo_cxt.term_from_xlog,
                           g_instance.comm_cxt.localinfo_cxt.term_from_file);
 
+    errorno = snprintf_s(term_text, sizeof(term_text), sizeof(term_text) - 1, "%u", max_term);
+    securec_check_ss(errorno, "", "");
+
     recptr = GetXLogReplayRecPtrInPending();
     if (recptr == 0) {
-        values[0] = CStringGetTextDatum("0");
+        if (IsRecoveryDone()) {
+            values[0] = CStringGetTextDatum(term_text);
+        } else {
+            values[0] = CStringGetTextDatum("0");
+        }
         nulls[0] = false;
         values[1] = CStringGetTextDatum("0/0");
         nulls[1] = false;
@@ -626,9 +633,6 @@ Datum pg_last_xlog_replay_location(PG_FUNCTION_ARGS)
         /* Build a tuple descriptor for our result type */
         errorno = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(recptr >> 32),
                              (uint32)recptr);
-        securec_check_ss(errorno, "", "");
-
-        errorno = snprintf_s(term_text, sizeof(term_text), sizeof(term_text) - 1, "%u", max_term);
         securec_check_ss(errorno, "", "");
 
         values[0] = CStringGetTextDatum(term_text);
