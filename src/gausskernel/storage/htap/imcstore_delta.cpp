@@ -37,9 +37,14 @@
 constexpr uint32 AUTO_VACUUM_TRIGGER_LIMIT = Min(IMCSTORE_MAX_ROW_PER_CU / 3, DEFAULT_DELTAPAGE_ELEMENTS * 10);
 constexpr int CHAR_BIT_SIZE = 8;
 
-void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid)
+void IMCStoreInsertHook(Oid relid, ItemPointer ctid, bool isRelNode, TransactionId xid)
 {
-    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relid);
+    IMCSDesc* imcsDesc = NULL;
+    if (isRelNode) {
+        imcsDesc = IMCS_HASH_TABLE->GetImcsDescByRelNode(relid);
+    } else {
+        imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relid);
+    }
     if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) return;
 
     if (xid == InvalidTransactionId) {
@@ -55,9 +60,14 @@ void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid)
     MemoryContextSwitchTo(oldcontext);
 }
 
-void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid)
+void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, bool isRelNode, TransactionId xid)
 {
-    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relid);
+    IMCSDesc* imcsDesc = NULL;
+    if (isRelNode) {
+        imcsDesc = IMCS_HASH_TABLE->GetImcsDescByRelNode(relid);
+    } else {
+        imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relid);
+    }
     if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) return;
 
     if (xid == InvalidTransactionId) {
@@ -73,9 +83,14 @@ void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid)
     MemoryContextSwitchTo(oldcontext);
 }
 
-void IMCStoreUpdateHook(Oid relid, ItemPointer ctid, ItemPointer newCtid, TransactionId xid)
+void IMCStoreUpdateHook(Oid relid, ItemPointer ctid, ItemPointer newCtid, bool isRelNode, TransactionId xid)
 {
-    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relid);
+    IMCSDesc* imcsDesc = NULL;
+    if (isRelNode) {
+        imcsDesc = IMCS_HASH_TABLE->GetImcsDescByRelNode(relid);
+    } else {
+        imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relid);
+    }
     if (imcsDesc == NULL || imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) return;
 
     if (xid == InvalidTransactionId) {

@@ -7478,10 +7478,10 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
             if (HAVE_HTAP_TABLES) {
                 for (int i = 0; i < nrels; i++) {
                     RelFileNode rnode = (newColFileNodes + i)->filenode;
-                    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(rnode.relNode);
+                    IMCSDesc* imcsDesc = IMCS_HASH_TABLE->GetImcsDescByRelNode(rnode.relNode);
                     if (imcsDesc != NULL) {
                         IMCS_HASH_TABLE->DeleteImcsDesc(imcsDesc->parentOid, NULL);
-                        IMCS_HASH_TABLE->DeleteImcsDesc(rnode.relNode, &rnode);
+                        IMCS_HASH_TABLE->DeleteImcsDesc(imcsDesc->relOid, &rnode);
                     }
                 }
             }

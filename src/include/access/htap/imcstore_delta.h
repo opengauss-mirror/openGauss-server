@@ -98,10 +98,12 @@ extern void IMCStoreSyncVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid
                                        CUDesc** CUDesc, CU** CUs);
 extern void IMCStoreVacuumWorkerMain(void);
 
-extern void IMCStoreInsertHook(Oid relid, ItemPointer ctid, TransactionId xid = InvalidTransactionId);
-extern void IMCStoreDeleteHook(Oid relid, ItemPointer ctid, TransactionId xid = InvalidTransactionId);
+extern void IMCStoreInsertHook(
+    Oid relid, ItemPointer ctid, bool isRelNode = false, TransactionId xid = InvalidTransactionId);
+extern void IMCStoreDeleteHook(
+    Oid relid, ItemPointer ctid, bool isRelNode = false, TransactionId xid = InvalidTransactionId);
 extern void IMCStoreUpdateHook(
-    Oid relid, ItemPointer ctid, ItemPointer newCtid, TransactionId xid = InvalidTransactionId);
+    Oid relid, ItemPointer ctid, ItemPointer newCtid, bool isRelNode = false, TransactionId xid = InvalidTransactionId);
 
 #endif /* ENABLE_HTAP */
 #endif /* IMCSTORE_DELTA_H */
