@@ -177,4 +177,16 @@ select * from t1;
 create database latin1_db dbcompatibility 'b' encoding 'latin1' lc_ctype = 'C' lc_collate = 'C';
 \c latin1_db
 select '高斯aa' = '高斯AA';
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options='enable_multi_charset'" >/dev/null 2>&1
+select pg_sleep(1);
+
+\! mkdir @abs_srcdir@/tmp_check/charset_connection_test_backup/
+\! @abs_bindir@/gs_basebackup -hlocalhost -p@portstring@ -D @abs_srcdir@/tmp_check/charset_connection_test_backup/ 2>&1 |grep successfully
+
+\! rm -rf @abs_srcdir@/tmp_check/charset_connection_test_backup/
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "b_format_behavior_compat_options=''" >/dev/null 2>&1
+select pg_sleep(1);
+
 \c regression
