@@ -44,7 +44,6 @@
 #define SRC_INCLUDE_KNL_KNL_SESSION_H_
 
 #include <signal.h>
-
 #include "postgres.h"
 #ifdef ENABLE_HTAP
 #include "access/htap/borrow_mem_pool.h"
@@ -2378,14 +2377,17 @@ typedef struct WaitEventEntry {
 #define INSTR_STMT_NULL_PORT (-2)
 typedef struct knl_u_statement_context {
     int statement_level[STATEMENT_SQL_KIND]; /* diff levels for full or slow SQL */
+    int executer_run_level;
+    bool query_plan_threshold_active; /* active if need start query_plan threshold timer */
+} knl_u_statement_context;
 
+typedef struct  statement_beentry_full_sql_context{
     /* basic information, should not be changed during one session  */
     char* db_name;          /* which database */
     char* user_name;        /* client's user name */
     char* client_addr;      /* client's IP address */
     int client_port;        /* client's port */
     uint64 session_id;     /* session's identifier */
-
 
     void *curStatementMetrics;      /* current Statement handler to record metrics */
     int allocatedCxtCnt;            /* how many of handers allocated */
@@ -2395,17 +2397,16 @@ typedef struct knl_u_statement_context {
     int suspend_count;              /* length of suspendStatementList */
     syscalllock list_protect;       /* concurrency control for above two lists */
     MemoryContext stmt_stat_cxt;    /* statement stat context */
-    int executer_run_level;
 
     WaitEventEntry *wait_events;
     Bitmapset *wait_events_bms;
+    bool is_wait_events_oom;
     bool is_session_bms_active;     /* active after stmt handle copies wait events in backend entry */
     bool enable_wait_events_bitmap; /* change to true in init stage of stmt handle */
     int64 current_row_count; /* Record the number of rows affected by current query */
     int64 last_row_count; /* Record the number of rows affected by last query */
 
     void *root_query_plan; /* Record the root query plan before report */
-    bool query_plan_threshold_active; /* active if need start query_plan threshold timer */
     bool is_exceed_query_plan_threshold; /* if true when slow sql take effect */
     TimestampTz record_query_plan_fin_time; /* finish time when execute time exceed log_min_duration_statement */
 
@@ -2417,7 +2418,12 @@ typedef struct knl_u_statement_context {
     bool nettime_trace_is_working;
     /* record total db_time like execute(sql1;sql2) */
     int64 total_db_time;
-} knl_u_statement_context;
+
+    /* the num of slow sql entries flush to table within the cycle */
+    int current_flush_max_num;
+    /* flushed times within the cycle */
+    int1 current_flush_cycle_times;
+} statement_beentry_full_sql_context;
 
 struct Qid_key {
     Oid procId;        /* cn id for the statement */
@@ -2939,9 +2945,47 @@ typedef struct sess_orient{
 }sess_orient;
 
 struct SessionInfo;
+struct Traceparent;
+struct TraceSpans;
+struct Span;
+struct PerLevelInfos;
+struct TracedPlanstate;
+#define MAX_TRACE_ID_SIZE (33)
 
-#define MAX_TRACE_ID_SIZE 33
 typedef struct knl_u_trace_context {
+    MemoryContext trace_mem_ctx;
+    /* trace context at the root level of parse/planning hook */
+    Traceparent* parse_traceparent;
+    /* trace context used in nested levels or within executor hooks */
+    Traceparent* executor_traceparent;
+    /* traceparent of the current transaction */
+    Traceparent* tx_traceparent;
+    /* Latest local transaction id traced */
+    LocalTransactionId latest_lxid;
+    /* Store spans for the current trace.
+     * They will be added to shared_spans at the end of the query tracing. */
+    TraceSpans* current_trace_spans;
+    /* Stack of active spans */
+    TraceSpans* active_spans;
+    /* Active parse for the next statement. Used to deal with extended
+     * protocol parsing the next statement while tracing of the previous
+     * statement is still ongoing. We save the span in next_active_span and
+     * restore it once tracing of the previous statement is finished. */
+    Span* next_active_span;
+    /* Current nesting depth of Planner+ExecutorRun+ProcessUtility calls */
+    int nested_level;
+    /* Commit span used in xact callbacks */
+    Span* commit_span;
+    /* Tx block span used to represent explicit transaction block */
+    Span* tx_block_span;
+    /* query id at level 0 of the current tracing. Used to assign queryId to the commit span */
+    uint64 current_query_id;
+    PerLevelInfos* per_level_infos;
+    /* Current available slot in the traced_planstates array */
+    int index_planstart;
+    /* Maximum elements allocated in the traced_planstates array */
+    int max_planstart;
+    TracedPlanstate* traced_planstates;
     char trace_id[MAX_TRACE_ID_SIZE];
 } knl_u_trace_context;
 

@@ -87,10 +87,12 @@
 #include "commands/explain.h"
 #include "workload/workload.h"
 #include "instruments/instr_unique_sql.h"
+#include "instruments/instr_trace.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/executer_gstrace.h"
 #include "instruments/instr_slow_query.h"
 #include "instruments/instr_statement.h"
+#include "instruments/instr_handle_mgr.h"
 #ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
 #endif
@@ -224,10 +226,11 @@ void ExecutorStart(QueryDesc* queryDesc, int eflags)
     gstrace_entry(GS_TRC_ID_ExecutorStart);
 
     /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
-    if (ExecutorStart_hook && !(g_instance.status > NoShutdown))
+    if (ExecutorStart_hook && !(g_instance.status > NoShutdown)) {
         (*ExecutorStart_hook)(queryDesc, eflags);
-    else
+    } else {
         standard_ExecutorStart(queryDesc, eflags);
+    }
 
     gstrace_exit(GS_TRC_ID_ExecutorStart);
 }
@@ -268,6 +271,10 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
      */
     estate = CreateExecutorState();
     queryDesc->estate = estate;
+
+    if (instr_level_trace_enable()) {
+        queryDesc->instrument_options = INSTRUMENT_TIMER;
+    }
 
     /* record the init memory track of the executor engine */
     if (u_sess->attr.attr_memory.memory_tracking_mode > MEMORY_TRACKING_NONE &&
@@ -475,7 +482,7 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
      * which may cause incorrect query_plan in statement_history
      */
     if (u_sess->statement_cxt.executer_run_level == 0) {
-        u_sess->statement_cxt.root_query_plan = queryDesc;
+        BEENTRY_STMEMENET_CXT.root_query_plan = queryDesc;
     }
     u_sess->statement_cxt.executer_run_level++;
     if (u_sess->SPI_cxt._connected >= 0) {
@@ -567,17 +574,17 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
             case CMD_UPDATE:
             case CMD_DELETE:
             case CMD_MERGE:
-                u_sess->statement_cxt.current_row_count = queryDesc->estate->es_processed;
-                u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+                BEENTRY_STMEMENET_CXT.current_row_count = queryDesc->estate->es_processed;
+                BEENTRY_STMEMENET_CXT.last_row_count = BEENTRY_STMEMENET_CXT.current_row_count;
                 break;
             case CMD_SELECT:
-                u_sess->statement_cxt.current_row_count = -1;
-                u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+                BEENTRY_STMEMENET_CXT.current_row_count = -1;
+                BEENTRY_STMEMENET_CXT.last_row_count = BEENTRY_STMEMENET_CXT.current_row_count;
                 break;
             default:
                 /* default set queryDesc->estate->es_processed */
-                u_sess->statement_cxt.current_row_count = queryDesc->estate->es_processed;
-                u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+                BEENTRY_STMEMENET_CXT.current_row_count = queryDesc->estate->es_processed;
+                BEENTRY_STMEMENET_CXT.last_row_count = BEENTRY_STMEMENET_CXT.current_row_count;
                 break;
         }
         if (u_sess->hook_cxt.rowcountHook) {
@@ -744,7 +751,6 @@ void ExecutorFinish(QueryDesc *queryDesc)
     } else {
         standard_ExecutorFinish(queryDesc);
     }
-
 }
 
 void standard_ExecutorFinish(QueryDesc *queryDesc)

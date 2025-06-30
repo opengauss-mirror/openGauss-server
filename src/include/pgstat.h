@@ -1710,7 +1710,7 @@ typedef struct PgBackendStatus {
 
     volatile uint64 st_block_sessionid; /* block session */
     syscalllock statement_cxt_lock;     /* mutex for statement context(between session and statement flush thread) */
-    void* statement_cxt;                /* statement context of full sql */
+    statement_beentry_full_sql_context statement_cxt;                /* statement context of full sql */
     knl_u_trace_context trace_cxt;      /* request trace id */
 
     HTAB* my_prepared_queries;

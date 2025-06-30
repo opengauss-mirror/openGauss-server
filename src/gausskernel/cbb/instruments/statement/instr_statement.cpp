@@ -28,6 +28,7 @@
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_slow_query.h"
 #include "instruments/instr_mfchain.h"
+#include "instruments/instr_trace.h"
 #include "postgres.h"
 #include "pgxc/pgxc.h"
 #include "pgstat.h"
@@ -76,7 +77,7 @@
 
 #define STATEMENT_DETAILS_HEAD_SIZE (1)     /* [VERSION] */
 #define INSTR_STMT_UNIX_DOMAIN_PORT (-1)
-#define INSTR_STATEMENT_ATTRNUM (45 + TOTAL_TIME_INFO_TYPES)
+#define INSTR_STATEMENT_ATTRNUM (46 + TOTAL_TIME_INFO_TYPES)
 
 /* support different areas in stmt detail column */
 #define STATEMENT_DETAIL_TYPE_LEN (1)
@@ -95,6 +96,9 @@
 /* stbyStmtHistSlow and stbyStmtHistFast always have the same life cycle. */
 #define STBYSTMTHIST_IS_READY (g_instance.stat_cxt.stbyStmtHistSlow->state != MFCHAIN_STATE_NOT_READY)
 
+#define STMT_FREE_FLUSH_CYCLE_TIMES (5)
+#define STMT_FREE_SUSPEND_MULTI (2)
+#define STMT_FREE_REMAIN_CNT (20)
 
 /* lock/lwlock's detail information */
 typedef struct {
@@ -423,7 +427,7 @@ static void set_stmt_row_activity_cache_io(StatementStatContext* statementInfo, 
     values[(*i)++] = Int64GetDatum(statementInfo->cache_io.blocks_hit);
 }
 
-static void set_stmt_basic_info(const knl_u_statement_context* statementCxt, StatementStatContext* statementInfo,
+static void set_stmt_basic_info(StatementStatContext* statementInfo,
     Datum values[], bool nulls[], int* i)
 {
     /* query basic info */
@@ -435,7 +439,7 @@ static void set_stmt_basic_info(const knl_u_statement_context* statementCxt, Sta
     values[(*i)++] = Int64GetDatum(statementInfo->slow_query_threshold);
     values[(*i)++] = Int64GetDatum(statementInfo->txn_id);
     values[(*i)++] = Int64GetDatum(statementInfo->tid);
-    values[(*i)++] = Int64GetDatum(statementCxt->session_id);
+    values[(*i)++] = Int64GetDatum(statementInfo->session_id);
 
     /* parse info */
     values[(*i)++] = Int64GetDatum(statementInfo->parse.soft_parse);
@@ -483,7 +487,7 @@ static void set_stmt_advise(StatementStatContext* statementInfo, Datum values[],
 }
 
 static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statementInfo,
-    const knl_u_statement_context* statementCxt, bool* isSlow = NULL)
+    bool* isSlow = NULL)
 {
     int i = 0;
     Datum values[INSTR_STATEMENT_ATTRNUM];
@@ -492,21 +496,22 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     securec_check(rc, "\0", "\0");
 
     /* get statment tuple */
-    SET_NAME_VALUES(statementCxt->db_name, i++);
+    SET_NAME_VALUES(statementInfo->db_name, i++);
     SET_NAME_VALUES(statementInfo->schema_name, i++);
     values[i++] = UInt32GetDatum(statementInfo->unique_sql_cn_id);
-    SET_NAME_VALUES(statementCxt->user_name, i++);
+    SET_NAME_VALUES(statementInfo->user_name, i++);
 
     /* client info */
     SET_TEXT_VALUES(statementInfo->application_name, i++);
-    SET_TEXT_VALUES(statementCxt->client_addr, i++);
+    SET_TEXT_VALUES(statementInfo->client_addr, i++);
 
-    if (statementCxt->client_port != INSTR_STMT_NULL_PORT)
-        values[i++] = Int32GetDatum(statementCxt->client_port);
-    else
+    if (statementInfo->client_port != INSTR_STMT_NULL_PORT) {
+        values[i++] = Int32GetDatum(statementInfo->client_port);
+    } else {
         nulls[i++] = true;
+    }
 
-    set_stmt_basic_info(statementCxt, statementInfo, values, nulls, &i);
+    set_stmt_basic_info(statementInfo, values, nulls, &i);
     set_stmt_row_activity_cache_io(statementInfo, values, &i);
 
     /* time info */
@@ -534,7 +539,8 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     set_stmt_lock_summary(&statementInfo->lock_summary, values, &i);
 
     /* lock + wait event detail */
-    if (statementInfo->details.n_items == 0 && bms_num_members(statementInfo->wait_events_bitmap) == 0) {
+    if (statementInfo->wait_events != NULL && statementInfo->wait_events_bitmap != NULL &&
+        statementInfo->details.n_items == 0 && bms_num_members(statementInfo->wait_events_bitmap) == 0) {
         nulls[i++] = true;
     } else {
         /* generate stmt wait events */
@@ -567,6 +573,14 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     for (int num = TOTAL_TIME_INFO_TYPES_P2; num < TOTAL_TIME_INFO_TYPES; num++) {
         values[i++] = Int64GetDatum(statementInfo->timeModel[num]);
     }
+
+    /* trace spans info */
+    if (statementInfo->trace_info.n_nodes == 0) {
+        nulls[i++] = true;
+    } else {
+        values[i++] = PointerGetDatum(get_statement_trace_info(&(statementInfo->trace_info)));
+    }
+
     Assert(INSTR_STATEMENT_ATTRNUM == i);
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }
@@ -805,7 +819,7 @@ static void CleanStatementTable()
 }
 
 /* flush statement list info to statement_history table or mem-file chain */
-static void FlushStatementToTableOrMFChain(StatementStatContext* suspendList, const knl_u_statement_context* statementCxt)
+static void FlushStatementToTableOrMFChain(StatementStatContext* suspendList)
 {
     Assert (suspendList != NULL);
     HeapTuple tuple = NULL;
@@ -827,7 +841,7 @@ static void FlushStatementToTableOrMFChain(StatementStatContext* suspendList, co
                 break;
             }
 
-            tuple = GetStatementTuple(rel, flushItem, statementCxt, &isSlow);
+            tuple = GetStatementTuple(rel, flushItem, &isSlow);
             if (pmState == PM_HOT_STANDBY || SS_STANDBY_MODE) {
                 /*
                  * mefchain-insert action does not means this is a write transaction, it must be a read only trans,
@@ -866,6 +880,39 @@ static void FlushStatementToTableOrMFChain(StatementStatContext* suspendList, co
     PG_END_TRY();
 }
 
+static void FreeIdleMemory(statement_beentry_full_sql_context* statementCxt)
+{
+    (void)syscalllockAcquire(&statementCxt->list_protect);
+    int suspendCnt = statementCxt->suspend_count;
+    int freeCnt = statementCxt->free_count;
+
+    statementCxt->current_flush_max_num = Max(statementCxt->current_flush_max_num, suspendCnt);
+    statementCxt->current_flush_cycle_times++;
+    if (statementCxt->current_flush_cycle_times >= STMT_FREE_FLUSH_CYCLE_TIMES) {
+        if (statementCxt->current_flush_max_num       * STMT_FREE_SUSPEND_MULTI < freeCnt &&
+            (suspendCnt + freeCnt) >= STMT_FREE_REMAIN_CNT) {
+            int numRemain = freeCnt / STMT_FREE_SUSPEND_MULTI - 1;
+            StatementStatContext *remianList = (StatementStatContext *)(statementCxt->toFreeStatementList);
+
+            int deleteCnt = freeCnt - numRemain;
+            StatementStatContext *freeTmp = NULL;
+            for (int i = 1; i <= deleteCnt; i++) {
+                freeTmp = remianList;
+                remianList = (StatementStatContext *)(remianList->next);
+                stmt_reset_stat_context(freeTmp);
+                pfree_ext(freeTmp->wait_events_bitmap);
+                pfree_ext(freeTmp);
+                statementCxt->allocatedCxtCnt--;
+            }
+            statementCxt->free_count = numRemain;
+            statementCxt->toFreeStatementList = remianList;
+        }
+        statementCxt->current_flush_max_num = 0;
+        statementCxt->current_flush_cycle_times = 0;
+    }
+    (void)syscalllockRelease(&statementCxt->list_protect);
+}
+
 static void FlushAllStatement()
 {
     PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray;
@@ -876,7 +923,7 @@ static void FlushAllStatement()
         /* Prevent the release of statementcxt memory when the session exits */
         (void)syscalllockAcquire(&beentry->statement_cxt_lock);
 
-        knl_u_statement_context* statementCxt = (knl_u_statement_context*)beentry->statement_cxt;
+        statement_beentry_full_sql_context* statementCxt = &(beentry->statement_cxt);
         if (statementCxt != NULL) {
             /* read suspend statement list head to local */
             (void)syscalllockAcquire(&statementCxt->list_protect);
@@ -887,9 +934,11 @@ static void FlushAllStatement()
             (void)syscalllockRelease(&statementCxt->list_protect);
         }
 
+        FreeIdleMemory(statementCxt);
+
         if (suspendList != NULL) {
             /* flush statement list info to statement_history table or mem-file chain */
-            FlushStatementToTableOrMFChain(suspendList, statementCxt);
+            FlushStatementToTableOrMFChain(suspendList);
 
             /* append list to free list */
             (void)syscalllockAcquire(&statementCxt->list_protect);
@@ -1161,7 +1210,7 @@ static void* get_stmt_lock_detail(const StmtLockDetail *detail, TimestampTz curT
 
 static bool statement_extend_detail_item(StatementStatContext *ssctx, bool first)
 {
-    MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+    MemoryContext oldcontext = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
     StatementDetailItem *item = (StatementDetailItem *)palloc0_noexcept(sizeof(StatementDetailItem));
     (void)MemoryContextSwitchTo(oldcontext);
 
@@ -1367,26 +1416,25 @@ static void update_stmt_lock_time(StatementStatContext *ssctx, StmtDetailType ty
 
 void instr_stmt_report_lock(StmtDetailType type, int lockmode, const LOCKTAG *locktag, uint16 lwlockId)
 {
-    StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
-
-    if (likely(ssctx != NULL)) {
-        Assert(ssctx->level == STMT_TRACK_L0 ||
-            ssctx->level == STMT_TRACK_L1 || ssctx->level == STMT_TRACK_L2);
+    CHECK_STMT_HANDLE();
+    if (likely(CURRENT_STMT_METRIC_HANDLE != NULL)) {
+        Assert(CURRENT_STMT_METRIC_HANDLE->level == STMT_TRACK_L0 ||
+            CURRENT_STMT_METRIC_HANDLE->level == STMT_TRACK_L1 || CURRENT_STMT_METRIC_HANDLE->level == STMT_TRACK_L2);
 
         /* always capture the lock count */
-        update_stmt_lock_cnt(ssctx, type, lockmode);
+        update_stmt_lock_cnt(CURRENT_STMT_METRIC_HANDLE, type, lockmode);
 
-        if (ssctx->level != STMT_TRACK_L0) {
+        if (CURRENT_STMT_METRIC_HANDLE->level != STMT_TRACK_L0) {
             TimestampTz curTime = GetCurrentTimestamp();
 
-            update_stmt_lock_time(ssctx, type, curTime);
-            if (ssctx->level == STMT_TRACK_L2) {
+            update_stmt_lock_time(CURRENT_STMT_METRIC_HANDLE, type, curTime);
+            if (CURRENT_STMT_METRIC_HANDLE->level == STMT_TRACK_L2) {
                 size_t size = 0;
                 char *bytes = NULL;
                 StmtLockDetail detail = {type, locktag, lwlockId, lockmode};
 
                 bytes = (char*)get_stmt_lock_detail(&detail, curTime, &size);
-                statement_detail_info_record(ssctx, bytes, size);
+                statement_detail_info_record(CURRENT_STMT_METRIC_HANDLE, bytes, size);
                 pfree_ext(bytes);
             }
         }
@@ -1949,15 +1997,15 @@ static void instr_stmt_check_need_update(bool* to_update_db_name,
 {
     PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
 
-    if (u_sess->statement_cxt.db_name == NULL && OidIsValid(beentry->st_databaseid)) {
+    if (BEENTRY_STMEMENET_CXT.db_name == NULL && OidIsValid(beentry->st_databaseid)) {
         *to_update_db_name = true;
     }
 
-    if (u_sess->statement_cxt.user_name == NULL && OidIsValid(beentry->st_userid)) {
+    if (BEENTRY_STMEMENET_CXT.user_name == NULL && OidIsValid(beentry->st_userid)) {
         *to_update_user_name = true;
     }
 
-    if ((u_sess->statement_cxt.client_addr == NULL && u_sess->statement_cxt.client_port == INSTR_STMT_NULL_PORT) &&
+    if ((BEENTRY_STMEMENET_CXT.client_addr == NULL && BEENTRY_STMEMENET_CXT.client_port == INSTR_STMT_NULL_PORT) &&
         (beentry->st_clientaddr.addr.ss_family == AF_INET || beentry->st_clientaddr.addr.ss_family == AF_INET6 ||
         beentry->st_clientaddr.addr.ss_family == AF_UNIX)) {
         *to_update_client_addr = true;
@@ -1970,7 +2018,7 @@ static void instr_stmt_update_client_info(const PgBackendStatus* beentry)
     errno_t rc = memset_s(&zero_clientaddr, sizeof(SockAddr), 0, sizeof(SockAddr));
     securec_check(rc, "\0", "\0");
 
-    u_sess->statement_cxt.client_port = INSTR_STMT_NULL_PORT;
+    BEENTRY_STMEMENET_CXT.client_port = INSTR_STMT_NULL_PORT;
     if (memcmp(&(beentry->st_clientaddr), &zero_clientaddr, sizeof(SockAddr)) != 0) {
         if (beentry->st_clientaddr.addr.ss_family == AF_INET
 #ifdef HAVE_IPV6
@@ -1985,11 +2033,11 @@ static void instr_stmt_update_client_info(const PgBackendStatus* beentry)
                 NI_NUMERICHOST | NI_NUMERICSERV);
             if (ret == 0) {
                 clean_ipv6_addr(beentry->st_clientaddr.addr.ss_family, client_host);
-                u_sess->statement_cxt.client_addr = pstrdup(client_host);
-                u_sess->statement_cxt.client_port = atoi(client_port);
+                BEENTRY_STMEMENET_CXT.client_addr = pstrdup(client_host);
+                BEENTRY_STMEMENET_CXT.client_port = atoi(client_port);
             }
         } else if (beentry->st_clientaddr.addr.ss_family == AF_UNIX) {
-            u_sess->statement_cxt.client_port = INSTR_STMT_UNIX_DOMAIN_PORT;
+            BEENTRY_STMEMENET_CXT.client_port = INSTR_STMT_UNIX_DOMAIN_PORT;
         }
     }
 }
@@ -2003,7 +2051,7 @@ static void instr_stmt_update_client_info(const PgBackendStatus* beentry)
  */
 void instr_stmt_report_basic_info()
 {
-    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL || u_sess->statement_cxt.stmt_stat_cxt == NULL) {
+    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL || BEENTRY_STMEMENET_CXT.stmt_stat_cxt == NULL) {
         return;
     }
 
@@ -2013,20 +2061,20 @@ void instr_stmt_report_basic_info()
     instr_stmt_check_need_update(&to_update_db_name, &to_update_user_name, &to_update_client_addr);
 
     PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-    if (u_sess->statement_cxt.session_id == 0) {
-        u_sess->statement_cxt.session_id = ENABLE_THREAD_POOL ? beentry->st_sessionid : beentry->st_procpid;
+    if (BEENTRY_STMEMENET_CXT.session_id == 0) {
+        BEENTRY_STMEMENET_CXT.session_id = ENABLE_THREAD_POOL ? beentry->st_sessionid : beentry->st_procpid;
     }
     if (to_update_db_name || to_update_user_name || to_update_client_addr) {
         ResourceOwner old_cur_owner = t_thrd.utils_cxt.CurrentResourceOwner;
         t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(old_cur_owner, "Full/Slow SQL",
             THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX));
 
-        MemoryContext old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+        MemoryContext old_ctx = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
         if (to_update_db_name) {
-            u_sess->statement_cxt.db_name = get_database_name(beentry->st_databaseid);
+            BEENTRY_STMEMENET_CXT.db_name = get_database_name(beentry->st_databaseid);
         }
         if (to_update_user_name) {
-            u_sess->statement_cxt.user_name = GetUserNameById(beentry->st_userid);
+            BEENTRY_STMEMENET_CXT.user_name = GetUserNameById(beentry->st_userid);
         }
         if (to_update_client_addr) {
             instr_stmt_update_client_info(beentry);
@@ -2040,6 +2088,14 @@ void instr_stmt_report_basic_info()
         t_thrd.utils_cxt.CurrentResourceOwner = old_cur_owner;
         ResourceOwnerDelete(tmpOwner);
     }
+
+    MemoryContext old_ctx = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
+    CURRENT_STMT_METRIC_HANDLE->db_name = pstrdup(BEENTRY_STMEMENET_CXT.db_name);
+    CURRENT_STMT_METRIC_HANDLE->user_name = pstrdup(BEENTRY_STMEMENET_CXT.user_name);
+    CURRENT_STMT_METRIC_HANDLE->client_addr = pstrdup(BEENTRY_STMEMENET_CXT.client_addr);
+    (void)MemoryContextSwitchTo(old_ctx);
+    CURRENT_STMT_METRIC_HANDLE->session_id = BEENTRY_STMEMENET_CXT.session_id;
+    CURRENT_STMT_METRIC_HANDLE->client_port = BEENTRY_STMEMENET_CXT.client_port;
 }
 
 void instr_stmt_report_start_time()
@@ -2101,7 +2157,7 @@ void instr_stmt_report_query(uint64 unique_query_id)
         return;
     }
 
-    MemoryContext old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+    MemoryContext old_ctx = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
 
     if (!u_sess->attr.attr_common.track_stmt_parameter) {
         CURRENT_STMT_METRIC_HANDLE->query = FindCurrentUniqueSQL();
@@ -2183,7 +2239,7 @@ void instr_stmt_report_stat_at_handle_commit()
 {
     CHECK_STMT_HANDLE();
 
-    MemoryContext old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+    MemoryContext old_ctx = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
     CURRENT_STMT_METRIC_HANDLE->schema_name = pstrdup(u_sess->attr.attr_common.namespace_search_path);
     CURRENT_STMT_METRIC_HANDLE->application_name = pstrdup(u_sess->attr.attr_common.application_name);
     CURRENT_STMT_METRIC_HANDLE->tid = t_thrd.proc_cxt.MyProcPid;
@@ -2223,46 +2279,45 @@ void instr_stmt_report_returned_rows(uint64 returned_rows)
 void instr_stmt_report_unique_sql_info(const PgStat_TableCounts *agg_table_stat,
     const int64 timeInfo[], const uint64 *netInfo)
 {
-    if (u_sess->unique_sql_cxt.unique_sql_id == 0 || u_sess->statement_cxt.curStatementMetrics == NULL) {
+    if (u_sess->unique_sql_cxt.unique_sql_id == 0 || CURRENT_STMT_METRIC_HANDLE == NULL) {
         return;
     }
 
-    StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
     if (agg_table_stat != NULL) {
         // row activity
-        ssctx->row_activity.tuples_fetched += (uint64)agg_table_stat->t_tuples_fetched;
-        ssctx->row_activity.tuples_returned += (uint64)agg_table_stat->t_tuples_returned;
+        CURRENT_STMT_METRIC_HANDLE->row_activity.tuples_fetched += (uint64)agg_table_stat->t_tuples_fetched;
+        CURRENT_STMT_METRIC_HANDLE->row_activity.tuples_returned += (uint64)agg_table_stat->t_tuples_returned;
 
-        ssctx->row_activity.tuples_inserted += (uint64)agg_table_stat->t_tuples_inserted;
-        ssctx->row_activity.tuples_updated += (uint64)agg_table_stat->t_tuples_updated;
-        ssctx->row_activity.tuples_deleted += (uint64)agg_table_stat->t_tuples_deleted;
+        CURRENT_STMT_METRIC_HANDLE->row_activity.tuples_inserted += (uint64)agg_table_stat->t_tuples_inserted;
+        CURRENT_STMT_METRIC_HANDLE->row_activity.tuples_updated += (uint64)agg_table_stat->t_tuples_updated;
+        CURRENT_STMT_METRIC_HANDLE->row_activity.tuples_deleted += (uint64)agg_table_stat->t_tuples_deleted;
 
         // cache_io
-        ssctx->cache_io.blocks_fetched += (uint64)agg_table_stat->t_blocks_fetched;
-        ssctx->cache_io.blocks_hit += (uint64)agg_table_stat->t_blocks_hit;
+        CURRENT_STMT_METRIC_HANDLE->cache_io.blocks_fetched += (uint64)agg_table_stat->t_blocks_fetched;
+        CURRENT_STMT_METRIC_HANDLE->cache_io.blocks_hit += (uint64)agg_table_stat->t_blocks_hit;
     }
 
     if (timeInfo != NULL) {
         for (int idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
-            ssctx->timeModel[idx] += timeInfo[idx];
+            CURRENT_STMT_METRIC_HANDLE->timeModel[idx] += timeInfo[idx];
         }
     }
 
     if (netInfo != NULL) {
         for (int i = 0; i < TOTAL_NET_INFO_TYPES; i++) {
-            ssctx->networkInfo[i] += netInfo[i];
+            CURRENT_STMT_METRIC_HANDLE->networkInfo[i] += netInfo[i];
         }
     }
 }
 
-static inline bool instr_stmt_level_fullsql_open()
+bool instr_stmt_level_fullsql_open()
 {
     int fullsql_level = u_sess->statement_cxt.statement_level[0];
     /* record query plan when level >= L0 */
     return fullsql_level >= STMT_TRACK_L0 && fullsql_level <= STMT_TRACK_L2;
 }
 
-static inline bool instr_stmt_level_slowsql_only_open()
+bool instr_stmt_level_slowsql_only_open()
 {
     if (CURRENT_STMT_METRIC_HANDLE == NULL || CURRENT_STMT_METRIC_HANDLE->slow_query_threshold < 0) {
         return false;
@@ -2273,12 +2328,12 @@ static inline bool instr_stmt_level_slowsql_only_open()
     return slowsql_level >= STMT_TRACK_L0 && slowsql_level <= STMT_TRACK_L2;
 }
 
-static inline bool instr_stmt_is_slowsql()
+bool instr_stmt_is_slowsql()
 {
     if (CURRENT_STMT_METRIC_HANDLE->slow_query_threshold == 0) {
         return true;
     }
-    StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
+    StatementStatContext *ssctx = (StatementStatContext *)(BEENTRY_STMEMENET_CXT.curStatementMetrics);
     if (ssctx->query_plan != NULL) {
         return false;
     }
@@ -2333,11 +2388,12 @@ void instr_stmt_exec_report_query_plan(QueryDesc *queryDesc)
 
 void instr_stmt_report_query_plan(QueryDesc *queryDesc)
 {
-    StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
-    if (queryDesc == NULL || queryDesc->planstate == NULL || ssctx == NULL || ssctx->level > STMT_TRACK_L2
-        || (ssctx->plan_size != 0 && !u_sess->unique_sql_cxt.is_open_cursor)
-        || (u_sess->statement_cxt.executer_run_level > 1 && !IS_UNIQUE_SQL_TRACK_ALL)
-        || queryDesc->for_simplify_func) {
+    if (queryDesc == NULL || queryDesc->planstate == NULL ||
+        CURRENT_STMT_METRIC_HANDLE == NULL ||
+        CURRENT_STMT_METRIC_HANDLE->level > STMT_TRACK_L2 ||
+        (CURRENT_STMT_METRIC_HANDLE->plan_size != 0 && !u_sess->unique_sql_cxt.is_open_cursor) ||
+        (u_sess->statement_cxt.executer_run_level > 1 && !IS_UNIQUE_SQL_TRACK_ALL) ||
+        queryDesc->for_simplify_func) {
         return;
     }
     /* when getting plan directly from CN, the plan is partial, deparse plan will be failed,
@@ -2350,22 +2406,22 @@ void instr_stmt_report_query_plan(QueryDesc *queryDesc)
     ExplainState es;
     explain_querydesc(&es, queryDesc);
 
-    MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
-    ssctx->query_plan = (char*)palloc0((Size)es.str->len + 1);
+    MemoryContext oldcontext = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
+    CURRENT_STMT_METRIC_HANDLE->query_plan = (char*)palloc0((Size)es.str->len + 1);
     errno_t rc =
-        memcpy_s(ssctx->query_plan, (size_t)es.str->len, es.str->data, (size_t)es.str->len);
+        memcpy_s(CURRENT_STMT_METRIC_HANDLE->query_plan, (size_t)es.str->len, es.str->data, (size_t)es.str->len);
     securec_check(rc, "\0", "\0");
-    ssctx->query_plan[es.str->len] = '\0';
-    ssctx->plan_size = (uint64)es.str->len + 1;
+    CURRENT_STMT_METRIC_HANDLE->query_plan[es.str->len] = '\0';
+    CURRENT_STMT_METRIC_HANDLE->plan_size = (uint64)es.str->len + 1;
     (void)MemoryContextSwitchTo(oldcontext);
 
     ereport(DEBUG1,
         (errmodule(MOD_INSTR), errmsg("exec_auto_explain %s %s to %lu",
-            ssctx->query_plan, queryDesc->sourceText, u_sess->unique_sql_cxt.unique_sql_id)));
+            CURRENT_STMT_METRIC_HANDLE->query_plan, queryDesc->sourceText, u_sess->unique_sql_cxt.unique_sql_id)));
     pfree(es.str->data);
 
-    if (u_sess->statement_cxt.is_exceed_query_plan_threshold) {
-        u_sess->statement_cxt.is_exceed_query_plan_threshold = false;
+    if (BEENTRY_STMEMENET_CXT.is_exceed_query_plan_threshold) {
+        BEENTRY_STMEMENET_CXT.is_exceed_query_plan_threshold = false;
     }
 }
 
@@ -2395,7 +2451,7 @@ static bool is_valid_detail_record(uint32 bytea_data_len, const char *details, u
 
 static void instr_stmt_set_wait_events_in_session_bms(int32 bms_event_idx)
 {
-    if (u_sess->statement_cxt.stmt_stat_cxt == NULL || !u_sess->statement_cxt.is_session_bms_active ||
+    if (BEENTRY_STMEMENET_CXT.stmt_stat_cxt == NULL || !BEENTRY_STMEMENET_CXT.is_session_bms_active ||
         bms_event_idx == -1)
         return;
 
@@ -2405,12 +2461,12 @@ static void instr_stmt_set_wait_events_in_session_bms(int32 bms_event_idx)
 static void instr_stmt_set_wait_events_in_handle_bms(int32 bms_event_idx)
 {
     CHECK_STMT_HANDLE();
-    if (!u_sess->statement_cxt.enable_wait_events_bitmap) {
+    if (!BEENTRY_STMEMENET_CXT.enable_wait_events_bitmap || BEENTRY_STMEMENET_CXT.is_wait_events_oom) {
         return;
     }
 
     if (bms_event_idx >= 0) {
-        MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+        MemoryContext oldcontext = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
         PG_TRY();
         {
             ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] mark delta BMS in handle - ID: %d",
@@ -2466,18 +2522,41 @@ static int32 get_wait_events_idx_in_bms(uint32 class_id, uint32 event_id)
     return event_idx;
 }
 
+void instr_stmt_reset_wait_events_bitmap()
+{
+    CHECK_STMT_HANDLE();
+    if (CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap == NULL) {
+        MemoryContext oldcontext = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
+        CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap =
+            bms_build_with_length_noexcept(wait_event_state_wait_max_index);
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+    if (CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap != NULL) {
+        errno_t rc = memset_s((void*)CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap->words,
+            sizeof(bitmapword) * CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap->nwords,
+            0, sizeof(bitmapword) * CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap->nwords);
+        securec_check(rc, "\0", "\0");
+    } else {
+        BEENTRY_STMEMENET_CXT.is_wait_events_oom = TRUE;
+        ereport(WARNING, (errmodule(MOD_INSTR), errmsg("[Statement] diff BMS WARNNING because OOM")));
+    }
+}
+
 void instr_stmt_set_wait_events_bitmap(uint32 class_id, uint32 event_id)
 {
-    if (u_sess->statement_cxt.stmt_stat_cxt == NULL)
+    if (BEENTRY_STMEMENET_CXT.stmt_stat_cxt == NULL) {
         return;
+    }
 
     int32 bms_event_idx = -1;
     bms_event_idx = get_wait_events_idx_in_bms(class_id, event_id);
-    if (bms_event_idx == -1) {
+    if (bms_event_idx == -1 || bms_event_idx > wait_event_state_wait_max_index) {
+        ereport(LOG, (errmodule(MOD_INSTR),
+                errmsg("[Statement] set_wait_events_bitmap failed bms_event_idx: %d.\n", bms_event_idx)));
         return;
     }
     /* 1, after session BMS inited, we always mark events in BMS */
-    if (u_sess->statement_cxt.is_session_bms_active) {
+    if (BEENTRY_STMEMENET_CXT.is_session_bms_active) {
         instr_stmt_set_wait_events_in_session_bms(bms_event_idx);
     }
 
@@ -2552,14 +2631,14 @@ static void get_wait_events_full_info(StatementStatContext *statement_stat, Stri
 
 static void mark_session_bms(uint32 index, uint64 total_duration, bool is_init)
 {
-    if (is_init && (total_duration == 0)) {
+    if ((is_init && (total_duration == 0))  || BEENTRY_STMEMENET_CXT.wait_events_bms == NULL) {
         return;
     }
 
-    MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+    MemoryContext oldcontext = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
     PG_TRY();
     {
-        u_sess->statement_cxt.wait_events_bms = bms_add_member(u_sess->statement_cxt.wait_events_bms, index);
+        BEENTRY_STMEMENET_CXT.wait_events_bms = bms_add_member(BEENTRY_STMEMENET_CXT.wait_events_bms, index);
     }
     PG_CATCH();
     {
@@ -2578,63 +2657,80 @@ static void mark_session_bms(uint32 index, uint64 total_duration, bool is_init)
         errmsg("[Statement] %s base BMS - ID: %u", is_init ? "init" : "mark", index)));
 }
 
+static bool init_session_bms(uint32 index)
+{
+    MemoryContext oldcontext = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
+    BEENTRY_STMEMENET_CXT.wait_events_bms = bms_build_with_length_noexcept(index);
+    (void)MemoryContextSwitchTo(oldcontext);
+    if (BEENTRY_STMEMENET_CXT.wait_events == NULL) {
+        BEENTRY_STMEMENET_CXT.is_wait_events_oom = TRUE;
+        ereport(WARNING, (errmodule(MOD_INSTR), errmsg("[Statement] diff BMS WARNNING because OOM: %d", index)));
+        return FALSE;
+    }
+    return TRUE;
+}
+
 /* full sql - wait events: copy wait events from backend entry to user session by using BMS */
 void instr_stmt_copy_wait_events()
 {
     CHECK_STMT_HANDLE();
-    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL) {
+    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL || BEENTRY_STMEMENET_CXT.is_wait_events_oom) {
         return;
     }
 
     /* 1, if the first time enter the function for the session */
     /*   1.1 init bitmap by using the wait events info in backend entry */
     /*   1.2 copy wait events from backend entry to statement handle */
-    if (!u_sess->statement_cxt.is_session_bms_active) {
+    if (!BEENTRY_STMEMENET_CXT.is_session_bms_active) {
         /* maybe no events changed */
-        u_sess->statement_cxt.is_session_bms_active = true;
+        bool init_succeed = init_session_bms(wait_event_state_wait_max_index);
+        if (!init_succeed) {
+            return;
+        }
+        BEENTRY_STMEMENET_CXT.is_session_bms_active = true;
         ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] begin to init base BMS")));
 
         uint32 start_idx = 0, end_idx = wait_event_io_event_max_index;
         WaitStatisticsInfo *wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.io_info;
         for (; start_idx < end_idx; start_idx++) {
-            u_sess->statement_cxt.wait_events[start_idx].total_duration = wait_event_info[start_idx].total_duration;
-            mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
+            BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration = wait_event_info[start_idx].total_duration;
+            mark_session_bms(start_idx, BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration);
         }
 
         wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.dms_info;
         start_idx = wait_event_io_event_max_index;
         end_idx = wait_event_dms_event_max_index;
         for (; start_idx < end_idx; start_idx++) {
-            u_sess->statement_cxt.wait_events[start_idx].total_duration =
+            BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration =
                 wait_event_info[start_idx - wait_event_io_event_max_index].total_duration;
-            mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
+            mark_session_bms(start_idx, BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration);
         }
 
         wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.lock_info;
         start_idx = wait_event_dms_event_max_index;
         end_idx = wait_event_lock_event_max_index;
         for (; start_idx < end_idx; start_idx++) {
-            u_sess->statement_cxt.wait_events[start_idx].total_duration =
+            BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration =
                 wait_event_info[start_idx - wait_event_dms_event_max_index].total_duration;
-            mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
+            mark_session_bms(start_idx, BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration);
         }
 
         wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.lwlock_info;
         start_idx = wait_event_lock_event_max_index;
         end_idx = wait_event_lwlock_event_max_index;
         for (; start_idx < end_idx; start_idx++) {
-            u_sess->statement_cxt.wait_events[start_idx].total_duration =
+            BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration =
                 wait_event_info[start_idx - wait_event_lock_event_max_index].total_duration;
-            mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
+            mark_session_bms(start_idx, BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration);
         }
 
         wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.status_info.statistics_info;
         start_idx = wait_event_lwlock_event_max_index;
         end_idx = wait_event_state_wait_max_index + 1;
         for (; start_idx < end_idx; start_idx++) {
-            u_sess->statement_cxt.wait_events[start_idx].total_duration =
+            BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration =
                 wait_event_info[start_idx - wait_event_lwlock_event_max_index].total_duration;
-            mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
+            mark_session_bms(start_idx, BEENTRY_STMEMENET_CXT.wait_events[start_idx].total_duration);
         }
     } else {
         /* 2 if not the first time */
@@ -2644,12 +2740,12 @@ void instr_stmt_copy_wait_events()
         uint64 total_duration = 0;
 
         ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] begin to copy base event by using BMS")));
-        while ((event_idx = bms_next_member(u_sess->statement_cxt.wait_events_bms, event_idx)) >= 0) {
+        while ((event_idx = bms_next_member(BEENTRY_STMEMENET_CXT.wait_events_bms, event_idx)) >= 0) {
             if (!instr_stmt_get_event_data(event_idx, &event_type, &event_real_id, &total_duration))
                 continue;
             ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] copy base - (%s) event index: %d, real index:%d",
                 get_stmt_event_type_str(event_type), event_idx, event_real_id)));
-            u_sess->statement_cxt.wait_events[event_idx].total_duration = total_duration;
+            BEENTRY_STMEMENET_CXT.wait_events[event_idx].total_duration = total_duration;
         }
     }
 }
@@ -2657,7 +2753,7 @@ void instr_stmt_copy_wait_events()
 void instr_stmt_diff_wait_events()
 {
     CHECK_STMT_HANDLE();
-    if (!u_sess->statement_cxt.enable_wait_events_bitmap) {
+    if (!BEENTRY_STMEMENET_CXT.enable_wait_events_bitmap || BEENTRY_STMEMENET_CXT.is_wait_events_oom) {
         return;
     }
     /*
@@ -2671,29 +2767,34 @@ void instr_stmt_diff_wait_events()
     }
 
     ereport(DEBUG2, (errmodule(MOD_INSTR), errmsg("[Statement] diff BMS - changed events count - %d", count)));
-    MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+    MemoryContext oldcontext = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
     WaitEventEntry *wait_events = (WaitEventEntry*)palloc0_noexcept(count * sizeof(WaitEventEntry));
     (void)MemoryContextSwitchTo(oldcontext);
-    if (wait_events != NULL) {
-        int event_idx = -1, handle_idx = 0;
-        while ((event_idx = bms_next_member(CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap, event_idx)) >= 0) {
-            Assert(handle_idx < count);
-
-            int event_real_id = 0;
-            uint8 event_type = 0;
-            uint64 total_duration = 0;
-
-            if (!instr_stmt_get_event_data(event_idx, &event_type, &event_real_id, &total_duration))
-                continue;
-            ereport(DEBUG3, (errmodule(MOD_INSTR), errmsg("[Statement] diff BMS - (%s) event index: %d, real index: %d",
-                get_stmt_event_type_str(event_type), event_idx, event_real_id)));
-            wait_events[handle_idx].total_duration =
-                total_duration - u_sess->statement_cxt.wait_events[event_idx].total_duration;
-            handle_idx++;
-        }
-
-        CURRENT_STMT_METRIC_HANDLE->wait_events = wait_events;
+    if (wait_events == NULL) {
+        ereport(WARNING, (errmodule(MOD_INSTR), errmsg("[Statement] diff BMS WARNNING because wait "
+            "events is empty, debug_query_id: %lu\n", CURRENT_STMT_METRIC_HANDLE->debug_query_id)));
+        return;
     }
+    int event_idx = -1;
+    int handle_idx = 0;
+    while ((event_idx = bms_next_member(CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap, event_idx)) >= 0) {
+        Assert(handle_idx < count);
+
+        int event_real_id = 0;
+        uint8 event_type = 0;
+        uint64 total_duration = 0;
+
+        if (!instr_stmt_get_event_data(event_idx, &event_type, &event_real_id, &total_duration)) {
+            continue;
+        }
+        ereport(DEBUG3, (errmodule(MOD_INSTR), errmsg("[Statement] diff BMS - (%s) event index: %d, real index: %d",
+            get_stmt_event_type_str(event_type), event_idx, event_real_id)));
+        wait_events[handle_idx].total_duration =
+            total_duration - BEENTRY_STMEMENET_CXT.wait_events[event_idx].total_duration;
+        handle_idx++;
+    }
+
+    CURRENT_STMT_METRIC_HANDLE->wait_events = wait_events;
 }
 
 /* get event type/real id/duration */
@@ -2730,11 +2831,16 @@ static bool instr_stmt_get_event_data(int32 event_idx, uint8 *event_type, int32 
 /* allocate memory for full sql wait events */
 void init_full_sql_wait_events()
 {
-    if (u_sess->statement_cxt.wait_events == NULL && u_sess->statement_cxt.stmt_stat_cxt != NULL) {
-        MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
-        u_sess->statement_cxt.wait_events = (WaitEventEntry*)palloc0_noexcept(sizeof(WaitEventEntry) *
+    BEENTRY_STMEMENET_CXT.is_wait_events_oom = FALSE;
+    if (BEENTRY_STMEMENET_CXT.wait_events == NULL && BEENTRY_STMEMENET_CXT.stmt_stat_cxt != NULL) {
+        MemoryContext oldcontext = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
+        BEENTRY_STMEMENET_CXT.wait_events = (WaitEventEntry*)palloc0_noexcept(sizeof(WaitEventEntry) *
             (wait_event_state_wait_max_index + 1));
         (void)MemoryContextSwitchTo(oldcontext);
+    }
+    if (BEENTRY_STMEMENET_CXT.wait_events == NULL) {
+        BEENTRY_STMEMENET_CXT.is_wait_events_oom = TRUE;
+        ereport(WARNING, (errmodule(MOD_INSTR), errmsg("[Statement] diff BMS WARNNING because OOM")));
     }
 }
 

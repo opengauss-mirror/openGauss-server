@@ -29,14 +29,17 @@
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_statement.h"
 
-#define CURRENT_STMT_METRIC_HANDLE ((StatementStatContext*)(u_sess->statement_cxt.curStatementMetrics))
+#define BEENTRY_STMEMENET_CXT ((t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt))
+#define CURRENT_STMT_METRIC_HANDLE ((StatementStatContext*)(BEENTRY_STMEMENET_CXT.curStatementMetrics))
 #define CHECK_STMT_HANDLE() \
 {                                                                                               \
-    if (CURRENT_STMT_METRIC_HANDLE == NULL || u_sess->statement_cxt.stmt_stat_cxt == NULL) {    \
+    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL ||          \
+        CURRENT_STMT_METRIC_HANDLE == NULL || BEENTRY_STMEMENET_CXT.stmt_stat_cxt == NULL) {    \
         return;                                                                                 \
     }                                                                                           \
 }
 
+void stmt_reset_stat_context(StatementStatContext* stmt_stat_handle);
 void statement_init_metric_context();
 void statement_init_metric_context_if_needs();
 void statement_commit_metirc_context(bool commit_delay = false);

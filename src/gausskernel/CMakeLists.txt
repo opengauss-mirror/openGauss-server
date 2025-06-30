@@ -81,6 +81,7 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_cbb_instruments_statement>
     $<TARGET_OBJECTS:gausskernel_cbb_instruments_func_control>
     $<TARGET_OBJECTS:gausskernel_cbb_instruments_gs_stack>
+    $<TARGET_OBJECTS:gausskernel_cbb_instruments_trace>
     $<TARGET_OBJECTS:gausskernel_cbb_communication_libcomm_core>
     $<TARGET_OBJECTS:gausskernel_cbb_communication_lib_hcom4db>
     $<TARGET_OBJECTS:gausskernel_cbb_communication_comm_proxy>

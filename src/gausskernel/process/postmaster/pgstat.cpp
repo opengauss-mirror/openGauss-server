@@ -2819,6 +2819,7 @@ void CreateSharedBackendStatus(void)
         TimestampTz current_time = GetCurrentTimestamp();
         for (i = 0; i < BackendStatusArray_size; i++) {
             (void)syscalllockInit(&t_thrd.shemem_ptr_cxt.BackendStatusArray[i].statement_cxt_lock);
+            (void)syscalllockInit(&t_thrd.shemem_ptr_cxt.BackendStatusArray[i].statement_cxt.list_protect);
             /* init last updated time for wait event */
             InstrWaitEventInitLastUpdated(&t_thrd.shemem_ptr_cxt.BackendStatusArray[i], current_time);
         }
@@ -3035,6 +3036,13 @@ void pgstat_deinitialize_session(void)
 
     /* proc_exit already release the slot of MyBeEntry, cannot release again */
     if (!t_thrd.proc_cxt.proc_exit_inprogress) {
+        if (t_thrd.shemem_ptr_cxt.MyBEEntry !=     NULL) {
+            t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt.client_port = 0;
+            t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt.session_id = 0;
+            pfree_ext(t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt.client_addr);
+            pfree_ext(t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt.db_name);
+            pfree_ext(t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt.user_name);
+        }
         t_thrd.shemem_ptr_cxt.MyBEEntry = &t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1];
 
         /*
@@ -3186,7 +3194,6 @@ void pgstat_bestart(void)
     beentry->st_lw_is_cleanning_flag = false;
 
     pgstat_increment_changecount_after(beentry);
-    beentry->statement_cxt = bind_statement_context();
 
     /* add remote node info */
     if (u_sess->proc_cxt.MyProcPort != NULL) {
@@ -8430,7 +8437,7 @@ void ResetMemory(void* dest, size_t size)
 
 bool nettime_trace_is_working()
 {
-    return u_sess->statement_cxt.remote_support_trace && u_sess->attr.attr_common.enable_record_nettime;
+    return BEENTRY_STMEMENET_CXT.remote_support_trace && u_sess->attr.attr_common.enable_record_nettime;
 }
 
 void timeInfoRecordStart(void)
@@ -8455,8 +8462,8 @@ void timeInfoRecordEnd(bool update_delay)
     }
     og_time_record_end();
     og_get_record_stat()->print_self();
-    if (u_sess->statement_cxt.nettime_trace_is_working && CURRENT_STMT_METRIC_HANDLE) {
-        u_sess->statement_cxt.total_db_time += u_sess->stat_cxt.localTimeInfoArray[DB_TIME];
+    if (BEENTRY_STMEMENET_CXT.nettime_trace_is_working && CURRENT_STMT_METRIC_HANDLE) {
+        BEENTRY_STMEMENET_CXT.total_db_time += u_sess->stat_cxt.localTimeInfoArray[DB_TIME];
     }
     if (!update_delay) {
         update_sql_state();

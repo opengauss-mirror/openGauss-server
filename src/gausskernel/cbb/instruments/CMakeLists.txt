@@ -20,7 +20,7 @@ set(CMAKE_MODULE_PATH
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/percentile
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/func_control
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/gs_stack
-
+    ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/trace
 )
 
 add_subdirectory(ash)
@@ -36,3 +36,4 @@ add_subdirectory(workload)
 add_subdirectory(percentile)
 add_subdirectory(func_control)
 add_subdirectory(gs_stack)
+add_subdirectory(trace)

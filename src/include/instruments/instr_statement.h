@@ -163,6 +163,22 @@ struct StatementDetail {
 
 #define Anum_statement_history_finish_time 12
 #define FLUSH_USLEEP_INTERVAL 100000
+
+#define STATEMENT_TRACE_BUFSIZE 2048
+typedef struct TraceNode {
+    void *next;     /* next node */
+    char buf[STATEMENT_TRACE_BUFSIZE]; /* [version, [LOCK_START, timestamp, locktag, lockmode], [...]] */
+} TraceNode;
+
+/* beentry trace info */
+typedef struct TraceInfo {
+    int n_nodes;        /* how many of detail nodes */
+    uint32 cur_pos;     /* the write position of the last item */
+    bool oom;           /* whether OutOfMemory happened. */
+    TraceNode *head;    /* the first detail item. */
+    TraceNode *tail;    /* the last detail item. */
+} TraceInfo;
+
 /* entry for full/slow sql stat */
 typedef struct StatementStatContext {
     void *next;             /* next item if in free or suspend list */
@@ -204,6 +220,16 @@ typedef struct StatementStatContext {
     /* wait events */
     WaitEventEntry *wait_events;
     Bitmapset      *wait_events_bitmap;
+
+    /* basic information, should not be changed during one session  */
+    char* db_name;          /* which database */
+    char* user_name;        /* client's user name */
+    char* client_addr;      /* client's IP address */
+    int client_port;        /* client's port */
+    uint64 session_id;     /* session's identifier */
+
+    int32 peak_memory;
+    TraceInfo trace_info;
 } StatementStatContext;
 extern void StatementFlushMain();
 extern void CleanStatementMain();
@@ -235,6 +261,7 @@ extern void instr_stmt_report_returned_rows(uint64 returned_rows);
 extern void instr_stmt_report_soft_parse(uint64 soft_parse);
 extern void instr_stmt_report_hard_parse(uint64 hard_parse);
 extern void instr_stmt_dynamic_change_level();
+extern void instr_stmt_reset_wait_events_bitmap();
 extern void instr_stmt_set_wait_events_bitmap(uint32 class_id, uint32 event_id);
 extern void instr_stmt_copy_wait_events();
 extern void instr_stmt_diff_wait_events();
@@ -242,6 +269,9 @@ extern void init_full_sql_wait_events();
 extern void instr_stmt_report_cause_type(uint32 type);
 extern bool instr_stmt_plan_need_report_cause_type();
 extern uint32 instr_stmt_plan_get_cause_type();
+extern bool instr_stmt_is_slowsql();
+extern bool instr_stmt_level_fullsql_open();
+extern bool instr_stmt_level_slowsql_only_open();
 
 #endif
 

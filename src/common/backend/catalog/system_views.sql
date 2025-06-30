@@ -3520,7 +3520,8 @@ CREATE unlogged table statement_history(
     srt14_after_query bigint,
     rtt_unknown bigint,
     parent_query_id bigint,
-    net_trans_time bigint
+    net_trans_time bigint,
+    trace bytea
 );
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
@@ -4788,7 +4789,8 @@ RETURNS TABLE (
     srt14_after_query bigint,
     rtt_unknown bigint,
     parent_query_id bigint,
-    net_trans_time bigint
+    net_trans_time bigint,
+    trace bytea
 ) AS $$
 DECLARE
     node_role text;

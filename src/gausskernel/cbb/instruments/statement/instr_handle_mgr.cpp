@@ -24,6 +24,7 @@
 #include "postgres.h"
 #include "instruments/instr_handle_mgr.h"
 #include "instruments/instr_statement.h"
+#include "instruments/instr_trace.h"
 #include "knl/knl_variable.h"
 #include "utils/memutils.h"
 #include "utils/palloc.h"
@@ -54,19 +55,20 @@ static bool is_stmt_wait_events_enabled()
 }
 
 /* reset the reused handle from freelist */
-static void reset_statement_handle()
+void stmt_reset_stat_context(StatementStatContext* stmt_stat_handle)
 {
-    CHECK_STMT_HANDLE();
-
     /* release dynamic memory of the entry */
-    pfree_ext(CURRENT_STMT_METRIC_HANDLE->schema_name);
-    pfree_ext(CURRENT_STMT_METRIC_HANDLE->application_name);
-    pfree_ext(CURRENT_STMT_METRIC_HANDLE->query);
-    pfree_ext(CURRENT_STMT_METRIC_HANDLE->query_plan);
-    pfree_ext(CURRENT_STMT_METRIC_HANDLE->wait_events);
+    pfree_ext(stmt_stat_handle->schema_name);
+    pfree_ext(stmt_stat_handle->application_name);
+    pfree_ext(stmt_stat_handle->query);
+    pfree_ext(stmt_stat_handle->query_plan);
+    pfree_ext(stmt_stat_handle->wait_events);
+    pfree_ext(stmt_stat_handle->db_name);
+    pfree_ext(stmt_stat_handle->user_name);
+    pfree_ext(stmt_stat_handle->client_addr);
 
     /* release detail list from the entry */
-    StatementDetailItem *cur_pos = CURRENT_STMT_METRIC_HANDLE->details.head;
+    StatementDetailItem *cur_pos = stmt_stat_handle->details.head;
     StatementDetailItem *pre_pos = NULL;
     while (cur_pos != NULL) {
         pre_pos = cur_pos;
@@ -74,23 +76,27 @@ static void reset_statement_handle()
         pfree_ext(pre_pos);
     }
 
+    TraceNode *trace_cur_pos = stmt_stat_handle->trace_info.head;
+    TraceNode *trace_pre_pos = NULL;
+    while (trace_cur_pos != NULL) {
+        trace_pre_pos = trace_cur_pos;
+        trace_cur_pos = (TraceNode*)(trace_cur_pos->next);
+        pfree_ext(trace_pre_pos);
+    }
+}
+
+/* reset the reused handle from freelist */
+void reset_statement_handle()
+{
+    CHECK_STMT_HANDLE();
+
+    stmt_reset_stat_context(CURRENT_STMT_METRIC_HANDLE);
     /* reset counter and stat */
     Bitmapset *tmpBitmap = CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap;
     errno_t rc = memset_s(CURRENT_STMT_METRIC_HANDLE,
         sizeof(StatementStatContext), 0, sizeof(StatementStatContext));
     securec_check(rc, "\0", "\0");
     CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap = tmpBitmap;
-}
-
-static void instr_stmt_reset_wait_events_bitmap()
-{
-    CHECK_STMT_HANDLE();
-    if (CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap != NULL) {
-        errno_t rc = memset_s((void*)CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap->words,
-            sizeof(bitmapword) * CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap->nwords,
-            0, sizeof(bitmapword) * CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap->nwords);
-        securec_check(rc, "\0", "\0");
-    }
 }
 
 /* alloc handle for current session */
@@ -105,38 +111,44 @@ void statement_init_metric_context()
     CHECK_STMT_TRACK_ENABLED();
 
     /* create context under TopMemoryContext */
-    if (u_sess->statement_cxt.stmt_stat_cxt == NULL) {
-        u_sess->statement_cxt.stmt_stat_cxt = AllocSetContextCreate(u_sess->top_mem_cxt, "TrackStmtContext",
-            ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    if (BEENTRY_STMEMENET_CXT.stmt_stat_cxt == NULL) {
+        BEENTRY_STMEMENET_CXT.stmt_stat_cxt = AllocSetContextCreate(g_instance.instance_context,
+                                                                    "TrackStmtContext",
+                                                                    ALLOCSET_DEFAULT_MINSIZE,
+                                                                    ALLOCSET_DEFAULT_INITSIZE,
+                                                                    ALLOCSET_DEFAULT_MAXSIZE,
+                                                                    SHARED_CONTEXT);
         ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("init - stmt cxt: %p, parent cxt: %p",
-            u_sess->statement_cxt.stmt_stat_cxt, u_sess->top_mem_cxt)));
+            BEENTRY_STMEMENET_CXT.stmt_stat_cxt, g_instance.instance_context)));
     }
     init_full_sql_wait_events();
 
     /* commit for previous allocated handle like PBE/PBE...S*/
-    if (u_sess->statement_cxt.curStatementMetrics != NULL) {
+    if (CURRENT_STMT_METRIC_HANDLE != NULL) {
         statement_commit_metirc_context();
     }
 
     HOLD_INTERRUPTS();
-    (void)syscalllockAcquire(&u_sess->statement_cxt.list_protect);
+    (void)syscalllockAcquire(&(BEENTRY_STMEMENET_CXT.list_protect));
 
     PG_TRY();
     {
         /* 1, check free list: free detail stat; reuse entry in free list */
-        if (u_sess->statement_cxt.free_count > 0) {
-            reusedHandle = (StatementStatContext*)u_sess->statement_cxt.toFreeStatementList;
-            u_sess->statement_cxt.curStatementMetrics = reusedHandle;
-            u_sess->statement_cxt.toFreeStatementList = reusedHandle->next;
-            u_sess->statement_cxt.free_count--;
+        if (BEENTRY_STMEMENET_CXT.free_count > 0) {
+            reusedHandle = (StatementStatContext*)BEENTRY_STMEMENET_CXT.toFreeStatementList;
+            BEENTRY_STMEMENET_CXT.curStatementMetrics = reusedHandle;
+            BEENTRY_STMEMENET_CXT.toFreeStatementList = reusedHandle->next;
+            BEENTRY_STMEMENET_CXT.free_count--;
+            /* clear handler before reuse it */
+            reset_statement_handle();
         } else {
             /* 2, no free slot int free list, allocate new one */
-            if (u_sess->statement_cxt.allocatedCxtCnt < u_sess->attr.attr_common.track_stmt_session_slot) {
-                MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+            if (BEENTRY_STMEMENET_CXT.allocatedCxtCnt < u_sess->attr.attr_common.track_stmt_session_slot) {
+                MemoryContext oldcontext = MemoryContextSwitchTo(BEENTRY_STMEMENET_CXT.stmt_stat_cxt);
 
-                u_sess->statement_cxt.curStatementMetrics = palloc0_noexcept(sizeof(StatementStatContext));
-                if (u_sess->statement_cxt.curStatementMetrics != NULL) {
-                    u_sess->statement_cxt.allocatedCxtCnt++;
+                BEENTRY_STMEMENET_CXT.curStatementMetrics = palloc0_noexcept(sizeof(StatementStatContext));
+                if (BEENTRY_STMEMENET_CXT.curStatementMetrics != NULL) {
+                    BEENTRY_STMEMENET_CXT.allocatedCxtCnt++;
                 }
                 (void)MemoryContextSwitchTo(oldcontext);
             }
@@ -144,33 +156,28 @@ void statement_init_metric_context()
     }
     PG_CATCH();
     {
-        (void)syscalllockRelease(&u_sess->statement_cxt.list_protect);
+        (void)syscalllockRelease(&BEENTRY_STMEMENET_CXT.list_protect);
         RESUME_INTERRUPTS();
         PG_RE_THROW();
     }
     PG_END_TRY();
-    (void)syscalllockRelease(&u_sess->statement_cxt.list_protect);
+    (void)syscalllockRelease(&BEENTRY_STMEMENET_CXT.list_protect);
     RESUME_INTERRUPTS();
 
     ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] init - free list length: %d, suspend list length: %d",
-        u_sess->statement_cxt.free_count, u_sess->statement_cxt.suspend_count)));
+        BEENTRY_STMEMENET_CXT.free_count, BEENTRY_STMEMENET_CXT.suspend_count)));
 
     if (CURRENT_STMT_METRIC_HANDLE == NULL) {
-        if (u_sess->statement_cxt.allocatedCxtCnt >= u_sess->attr.attr_common.track_stmt_session_slot) {
+        if (BEENTRY_STMEMENET_CXT.allocatedCxtCnt >= u_sess->attr.attr_common.track_stmt_session_slot) {
             ereport(LOG, (errmodule(MOD_INSTR), errmsg("[Statement] no free slot for statement entry!")));
         } else {
             ereport(LOG, (errmodule(MOD_INSTR), errmsg("[Statement] OOM for statement entry!")));
         }
     } else {
-        /* clear handler before reuse it */
-        if (reusedHandle == CURRENT_STMT_METRIC_HANDLE) {
-            reset_statement_handle();
-        }
-
         instr_stmt_report_stat_at_handle_init();
         instr_stmt_reset_wait_events_bitmap();
         if (is_stmt_wait_events_enabled()) {
-            u_sess->statement_cxt.enable_wait_events_bitmap = true;
+            BEENTRY_STMEMENET_CXT.enable_wait_events_bitmap = true;
             instr_stmt_copy_wait_events();
         }
         if (IsConnFromCoord()) {
@@ -197,13 +204,13 @@ static void print_stmt_common_debug_log(int log_level)
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("*************** statement handle information************")));
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("0, ----statement level: %d", CURRENT_STMT_METRIC_HANDLE->level)));
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("1, ----Basic Information Area(common)----")));
-    ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t Database: %s", u_sess->statement_cxt.db_name)));
+    ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t Database: %s", BEENTRY_STMEMENET_CXT.db_name)));
     ereport(log_level, (errmodule(MOD_INSTR),
         errmsg("\t Origin node: %u", CURRENT_STMT_METRIC_HANDLE->unique_sql_cn_id)));
-    ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t User: %s", u_sess->statement_cxt.user_name)));
-    ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t Client Addr: %s", u_sess->statement_cxt.client_addr)));
-    ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t Client Port: %d", u_sess->statement_cxt.client_port)));
-    ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t Session Id: %lu", u_sess->statement_cxt.session_id)));
+    ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t User: %s", BEENTRY_STMEMENET_CXT.user_name)));
+    ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t Client Addr: %s", BEENTRY_STMEMENET_CXT.client_addr)));
+    ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t Client Port: %d", BEENTRY_STMEMENET_CXT.client_port)));
+    ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t Session Id: %lu", BEENTRY_STMEMENET_CXT.session_id)));
 }
 
 static void print_stmt_basic_debug_log(int log_level)
@@ -393,7 +400,7 @@ static void print_stmt_debug_log()
 
 void commit_metirc_context() {
     CHECK_STMT_HANDLE();
-    (void)syscalllockAcquire(&u_sess->statement_cxt.list_protect);
+    (void)syscalllockAcquire(&(BEENTRY_STMEMENET_CXT.list_protect));
 
     /*
      * Rules to persist handle to statement_history
@@ -412,22 +419,22 @@ void commit_metirc_context() {
         (!u_sess->attr.attr_common.track_stmt_parameter ||
         (u_sess->attr.attr_common.track_stmt_parameter && CURRENT_STMT_METRIC_HANDLE->timeModel[0] > 0))))) {
         /* need to persist, put to suspend list */
-        CURRENT_STMT_METRIC_HANDLE->next = u_sess->statement_cxt.suspendStatementList;
-        u_sess->statement_cxt.suspendStatementList = CURRENT_STMT_METRIC_HANDLE;
-        u_sess->statement_cxt.suspend_count++;
+        CURRENT_STMT_METRIC_HANDLE->next = BEENTRY_STMEMENET_CXT.suspendStatementList;
+        BEENTRY_STMEMENET_CXT.suspendStatementList = CURRENT_STMT_METRIC_HANDLE;
+        BEENTRY_STMEMENET_CXT.suspend_count++;
     } else {
         /* not need to persist, put to free list */
-        CURRENT_STMT_METRIC_HANDLE->next = u_sess->statement_cxt.toFreeStatementList;
-        u_sess->statement_cxt.toFreeStatementList = CURRENT_STMT_METRIC_HANDLE;
-        u_sess->statement_cxt.free_count++;
+        CURRENT_STMT_METRIC_HANDLE->next = BEENTRY_STMEMENET_CXT.toFreeStatementList;
+        BEENTRY_STMEMENET_CXT.toFreeStatementList = CURRENT_STMT_METRIC_HANDLE;
+        BEENTRY_STMEMENET_CXT.free_count++;
     }
 
-    (void)syscalllockRelease(&u_sess->statement_cxt.list_protect);
-    u_sess->statement_cxt.curStatementMetrics = NULL;
+    (void)syscalllockRelease(&(BEENTRY_STMEMENET_CXT.list_protect));
+    BEENTRY_STMEMENET_CXT.curStatementMetrics = NULL;
 
     ereport(DEBUG1, (errmodule(MOD_INSTR),
         errmsg("[Statement] commit - free list length: %d, suspend list length: %d",
-            u_sess->statement_cxt.free_count, u_sess->statement_cxt.suspend_count)));
+            BEENTRY_STMEMENET_CXT.free_count, BEENTRY_STMEMENET_CXT.suspend_count)));
 }
 
 /* put current handle to suspend list */
@@ -438,9 +445,10 @@ void statement_commit_metirc_context(bool commit_delay)
     instr_stmt_report_stat_at_handle_commit();
 
     instr_stmt_diff_wait_events();
-    u_sess->statement_cxt.enable_wait_events_bitmap = false;
+    BEENTRY_STMEMENET_CXT.enable_wait_events_bitmap = false;
     print_stmt_debug_log();
-    
+
+    end_tracing();
     if (!commit_delay) {
         commit_metirc_context();
     }
@@ -451,45 +459,12 @@ void release_statement_context(PgBackendStatus* beentry, const char* func, int l
     ereport(DEBUG1, (errmodule(MOD_INSTR),
         errmsg("release_statement_context - %s:%d, entry: %p", func, line, beentry)));
 
-    if (beentry == NULL || beentry->statement_cxt == NULL) {
+    if (beentry == NULL) {
         ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] release_statement_context - nothing to do.")));
         return;
     }
 
-    (void)syscalllockAcquire(&beentry->statement_cxt_lock);
-    MemoryContext stmtCxt = ((knl_u_statement_context *)(beentry->statement_cxt))->stmt_stat_cxt;
-    beentry->statement_cxt = NULL;
-    (void)syscalllockRelease(&beentry->statement_cxt_lock);
-
-    /* to avoid using the handle, mark it to NULL */
-    u_sess->statement_cxt.curStatementMetrics = NULL;
-    if (stmtCxt != NULL) {
-        MemoryContextDelete(stmtCxt);
-    }
-    u_sess->statement_cxt.stmt_stat_cxt = NULL;
-
     ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] release_statement_context end - entry:%p", beentry)));
-}
-
-void* bind_statement_context()
-{
-    if (!u_sess->attr.attr_common.enable_stmt_track)
-        return NULL;
-
-    switch (t_thrd.role) {
-        case WORKER:
-        case THREADPOOL_WORKER:
-        case THREADPOOL_STREAM:
-        case STREAM_WORKER:
-        case JOB_WORKER:
-            ereport(DEBUG1, (errmodule(MOD_INSTR),
-                errmsg("[Statement] bind backend entry - entry: %p, statement cxt: %p",
-                       t_thrd.shemem_ptr_cxt.MyBEEntry, &u_sess->statement_cxt)));
-            return &u_sess->statement_cxt;
-        default:
-            break;
-    }
-    return NULL;
 }
 
 /*
@@ -542,12 +517,11 @@ void PLSQLStmtTrackStack::push()
     save_old_info();
     reset_current_info();
     parent_handler = CURRENT_STMT_METRIC_HANDLE;
-    u_sess->statement_cxt.curStatementMetrics = NULL;
+    BEENTRY_STMEMENET_CXT.curStatementMetrics = NULL;
     parent_handler->debug_query_id = old_debug_query_id;
     statement_init_metric_context();
     instr_stmt_report_stat_at_handle_init();
     instr_stmt_report_start_time();
-
 }
 
 /*
@@ -573,5 +547,5 @@ void PLSQLStmtTrackStack::pop()
     u_sess->unique_sql_cxt.force_generate_unique_sql = old_force_gen_unique_sql;
 
     statement_commit_metirc_context();
-    u_sess->statement_cxt.curStatementMetrics = parent_handler;
+    BEENTRY_STMEMENET_CXT.curStatementMetrics = parent_handler;
 }

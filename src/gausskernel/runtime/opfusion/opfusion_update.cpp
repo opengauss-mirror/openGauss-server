@@ -32,6 +32,7 @@
 #include "executor/node/nodeModifyTable.h"
 #include "opfusion/opfusion_indexscan.h"
 #include "parser/parse_coerce.h"
+#include "instruments/instr_handle_mgr.h"
 
 UHeapTuple UpdateFusion::uheapModifyTuple(UHeapTuple tuple, Relation rel)
 {
@@ -680,8 +681,8 @@ bool UpdateFusion::execute(long max_rows, char *completionTag)
     }
     securec_check_ss(errorno, "\0", "\0");
     FreeExecutorStateForOpfusion(m_c_local.m_estate);
-    u_sess->statement_cxt.current_row_count = nprocessed;
-    u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+    BEENTRY_STMEMENET_CXT.current_row_count = nprocessed;
+    BEENTRY_STMEMENET_CXT.last_row_count = BEENTRY_STMEMENET_CXT.current_row_count;
     return success;
 }
 

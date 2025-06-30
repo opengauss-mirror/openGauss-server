@@ -31,6 +31,7 @@
 #include "commands/matview.h"
 #include "opfusion/opfusion_indexscan.h"
 #include "executor/node/nodeSeqscan.h"
+#include "instruments/instr_handle_mgr.h"
 
 DeleteFusion::DeleteFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
@@ -311,8 +312,8 @@ bool DeleteFusion::execute(long max_rows, char *completionTag)
     }
     securec_check_ss(errorno, "\0", "\0");
     FreeExecutorStateForOpfusion(m_c_local.m_estate);
-    u_sess->statement_cxt.current_row_count = nprocessed;
-    u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+    BEENTRY_STMEMENET_CXT.current_row_count = nprocessed;
+    BEENTRY_STMEMENET_CXT.last_row_count = BEENTRY_STMEMENET_CXT.current_row_count;
 
     if (u_sess->hook_cxt.rowcountHook) {
         ((RowcountHook)(u_sess->hook_cxt.rowcountHook))(nprocessed);
@@ -668,7 +669,7 @@ bool DeleteSubFusion::execute(long max_rows, char* completionTag)
     ExecEndPlan(m_c_local.m_ps, m_c_local.m_estate);
 
     FreeExecutorStateForOpfusion(m_c_local.m_estate);
-    u_sess->statement_cxt.current_row_count = nprocessed;
-    u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+    BEENTRY_STMEMENET_CXT.current_row_count = nprocessed;
+    BEENTRY_STMEMENET_CXT.last_row_count = BEENTRY_STMEMENET_CXT.current_row_count;
     return success;
 }

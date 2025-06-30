@@ -6334,7 +6334,8 @@ void getDiagnosticsInfo(List* condInfo, bool hasCondNum, List* condNum)
                     appendStringInfo(&buf, "set @%s = %d;", uv->name, condCount);
                     break;
                 case COND_INFO_ROW_COUNT:
-                    appendStringInfo(&buf, "set @%s = %ld;", uv->name, u_sess->statement_cxt.current_row_count);
+                    appendStringInfo(&buf, "set @%s = %ld;", uv->name,
+                        t_thrd.shemem_ptr_cxt.MyBEEntry->statement_cxt.current_row_count);
                     break;
                 default:
                     break;

@@ -104,6 +104,7 @@
 #include "instruments/instr_slow_query.h"
 #include "instruments/instr_statement.h"
 #include "instruments/instr_func_control.h"
+#include "instruments/instr_trace.h"
 
 #include "lib/dllist.h"
 #include "libpq/auth.h"
@@ -284,6 +285,7 @@
 #include "query_anomaly/query_anomaly.h"
 #include "workload/sql_limit_base.h"
 #include "access/datavec/ivfnpuadaptor.h"
+#include "access/datavec/pg_prng.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -1839,6 +1841,46 @@ static void rebuild_listen_address_socket()
 #endif
 
 /*
+ * InitProcessGlobals -- set MyProcPid, MyStartTime[stamp], random seeds
+ *
+ * Called early in the postmaster and every backend.
+ */
+void InitProcessGlobals(void)
+{
+    ThreadId MyProcPid = gs_thread_self();
+    TimestampTz MyStartTimestamp = GetCurrentTimestamp();
+    pg_time_t MyStartTime = timestamptz_to_time_t(MyStartTimestamp);
+
+    /*
+     * Set a different global seed in every process.  We want something
+     * unpredictable, so if possible, use high-quality random bits for the
+     * seed.  Otherwise, fall back to a seed based on timestamp and PID.
+     */
+    uint64 rseed;
+
+        /*
+         * Since PIDs and timestamps tend to change more frequently in their
+         * least significant bits, shift the timestamp left to allow a larger
+         * total number of seeds in a given time period.  Since that would
+         * leave only 20 bits of the timestamp that cycle every ~1 second,
+         * also mix in some higher bits.
+         */
+    rseed = ((uint64) MyProcPid) ^
+        ((uint64) MyStartTimestamp << 12) ^
+        ((uint64) MyStartTimestamp >> 20);
+
+    pg_prng_seed(&pg_global_prng_state, rseed);
+
+    /*
+     * Also make sure that we've set a good seed for random(3).  Use of that
+     * is deprecated in core Postgres, but extensions might use it.
+     */
+#ifndef WIN32
+    srandom(pg_prng_uint32(&pg_global_prng_state));
+#endif
+}
+
+/*
  * Postmaster main entry point
  */
 int PostmasterMain(int argc, char* argv[])
@@ -1852,6 +1894,8 @@ int PostmasterMain(int argc, char* argv[])
     OptParseContext optCtxt;
     errno_t rc = 0;
     Port port;
+
+    InitProcessGlobals();
 
     t_thrd.proc_cxt.MyProcPid = PostmasterPid = gs_thread_self();
 
@@ -14564,6 +14608,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
 
             /* query anomaly hook */
             install_query_anomaly_hook();
+
+            /* sql trace hooks */
+            instr_trace_register_hook();
 
             /* hypopg index hooks */
             hypopg_register_hook();

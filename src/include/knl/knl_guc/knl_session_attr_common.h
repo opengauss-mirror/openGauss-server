@@ -209,6 +209,7 @@ typedef struct knl_session_attr_common {
     int track_stmt_session_slot;
     char *track_stmt_stat_level;
     int64 track_stmt_details_size;
+    int64 track_stmt_trace_size;
     char* track_stmt_retention_time;
     // using for standby
     char* track_stmt_standby_chain_size;

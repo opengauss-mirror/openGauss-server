@@ -2534,8 +2534,8 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
      */
     char* sql_query_string = NULL;
     char* info_query_string = NULL;
-    u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
-    u_sess->statement_cxt.current_row_count = -1;
+    BEENTRY_STMEMENET_CXT.last_row_count = BEENTRY_STMEMENET_CXT.current_row_count;
+    BEENTRY_STMEMENET_CXT.current_row_count = -1;
 #ifdef ENABLE_DISTRIBUTE_TEST
     if (IS_PGXC_COORDINATOR && IsConnFromCoord()) {
         if (TEST_STUB(NON_EXEC_CN_IS_DOWN, twophase_default_error_emit)) {
@@ -6933,7 +6933,7 @@ void ProcessInterrupts(void)
                 (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating snapshot process due to administrator command")));
         } else {
             /* handle when remote conn lost like session timeout */
-            if (!u_sess->statement_cxt.previous_stmt_flushed) {
+            if (!BEENTRY_STMEMENET_CXT.previous_stmt_flushed) {
                 handle_commit_previous_metirc_context();
             }
             ereport(FATAL,
@@ -9117,12 +9117,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             if (og_time_record_is_started()) {
                 _local_tmp_opt.exit();
             }
-            timeInfoRecordEnd(u_sess->statement_cxt.nettime_trace_is_working);
+            timeInfoRecordEnd(BEENTRY_STMEMENET_CXT.nettime_trace_is_working);
 
-            if (u_sess->statement_cxt.nettime_trace_is_working) {
-                send_dbtime_to_driver(u_sess->statement_cxt.total_db_time);
-                u_sess->statement_cxt.total_db_time = 0;
-            }
+            if (BEENTRY_STMEMENET_CXT.nettime_trace_is_working) {
+                send_dbtime_to_driver(BEENTRY_STMEMENET_CXT.total_db_time);
+                BEENTRY_STMEMENET_CXT.total_db_time = 0;
+            } 
 
             /*
              * If connection to client is lost, we do not need to send message to client.
@@ -9163,9 +9163,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
              * lost the unique sql entry.
              */
             ReportQueryStatus();
-            statement_commit_metirc_context(u_sess->statement_cxt.nettime_trace_is_working);
-            if (u_sess->statement_cxt.nettime_trace_is_working) {
-                u_sess->statement_cxt.previous_stmt_flushed = false;
+            statement_commit_metirc_context(BEENTRY_STMEMENET_CXT.nettime_trace_is_working);
+            if (BEENTRY_STMEMENET_CXT.nettime_trace_is_working) {
+                BEENTRY_STMEMENET_CXT.previous_stmt_flushed = false;
             } else {
                 ResetCurrentUniqueSQL();
             }
@@ -9279,7 +9279,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #endif
         if (!query_started) {
             query_started = true;
-            u_sess->statement_cxt.nettime_trace_is_working = nettime_trace_is_working();
+            BEENTRY_STMEMENET_CXT.nettime_trace_is_working = nettime_trace_is_working();        
         }
 
         /* update our elapsed time statistics. */
@@ -9564,9 +9564,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
                 pgstatCountSQL4SessionLevel();
 
-                if (!u_sess->statement_cxt.previous_stmt_flushed) {
+                if (!BEENTRY_STMEMENET_CXT.previous_stmt_flushed) {
                     handle_commit_previous_metirc_context();
-                    u_sess->statement_cxt.previous_stmt_flushed = true;
+                    BEENTRY_STMEMENET_CXT.previous_stmt_flushed = true;
                 }
                 statement_init_metric_context();
 #ifdef USE_RETRY_STUB
@@ -10267,7 +10267,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 int64 net_trans_time = pq_getmsgint64(&input_message);
                 u_sess->stat_cxt.localTimeInfoArray[NET_TRANS_TIME] = net_trans_time;
                 handle_commit_previous_metirc_context();
-                u_sess->statement_cxt.previous_stmt_flushed = true;
+                BEENTRY_STMEMENET_CXT.previous_stmt_flushed = true;
                 ResetCurrentUniqueSQL();
 
             } break;
@@ -10277,7 +10277,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  * client does not send this message.
                  */
             case 'V':
-                u_sess->statement_cxt.remote_support_trace = true;
+                BEENTRY_STMEMENET_CXT.remote_support_trace = true;
                 query_started = false;
                 break;
 
@@ -10294,7 +10294,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  * perform normal shutdown.
                  */
             case EOF:
-                if (!u_sess->statement_cxt.previous_stmt_flushed) {
+                if (!BEENTRY_STMEMENET_CXT.previous_stmt_flushed) {
                     handle_commit_previous_metirc_context();
                 }
                 deal_fronted_lost();

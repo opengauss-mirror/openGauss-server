@@ -3150,7 +3150,14 @@ typedef struct knl_t_statement_context {
     int slow_sql_retention_time;
     int full_sql_retention_time;
     void *instr_prev_post_parse_analyze_hook;
-    
+
+    void *instr_trace_prev_post_parse_analyze_hook;
+    void *instr_trace_prev_planner_hook;
+    void *instr_trace_prev_ExecutorStart;
+    void *instr_trace_prev_ExecutorRun;
+    void *instr_trace_prev_ExecutorFinish;
+    void *instr_trace_prev_ExecutorEnd;
+    void *instr_trace_prev_ProcessUtility;
     /* using for standby, memory and disk size for slow and fast sql mem-file chain */
     int slow_max_mblock;
     int slow_max_block;
