@@ -3674,6 +3674,9 @@ bool XLogBackgroundFlush(bool fsync)
     uint64 averageXlogFlushBytes = (totalXlogIterTimes == 0) ? 0 : totalXlogIterBytes / totalXlogIterTimes;
     uint64 curAverageXlogFlushBytes = (averageXlogFlushBytes == 0) ? XLOG_FLUSH_SIZE_INIT :
                                       (averageXlogFlushBytes / PAGE_SIZE_BYTES + 1) * PAGE_SIZE_BYTES;
+    if (ENABLE_DSTORAGE && g_instance.attr.attr_storage.ds_limit_write_xlog_size != 0) {
+        curAverageXlogFlushBytes = (g_instance.attr.attr_storage.ds_limit_write_xlog_size * 1024);
+    }
     do {
         curr_entry_ptr = next_entry_ptr;
         curr_entry_idx = next_entry_idx;
@@ -3725,10 +3728,6 @@ bool XLogBackgroundFlush(bool fsync)
             if (u_sess->attr.attr_common.lc_xlog_flush_opt) {
                 break;
             }
-
-            if (ENABLE_DSTORAGE && g_instance.attr.attr_storage.ds_limit_write_xlog_size != 0) {
-                curAverageXlogFlushBytes = (g_instance.attr.attr_storage.ds_limit_write_xlog_size * 1024);
-            }   
 
             if (((curr_entry_ptr->endLSN - startLSN) > curAverageXlogFlushBytes) ||
                 (GetCurrentTimestamp() - stTime >= (uint64)g_instance.attr.attr_storage.wal_flush_timeout)) {
