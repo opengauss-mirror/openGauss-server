@@ -847,6 +847,7 @@ typedef struct knl_t_cbm_context {
     volatile sig_atomic_t shutdown_requested;
     MemoryContext cbmwriter_context;
     MemoryContext cbmwriter_page_context;
+    char* preReadBuff;
 } knl_t_cbm_context;
 
 /* thread local pointer to the shared memory */

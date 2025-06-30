@@ -19935,7 +19935,8 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
         actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen,
                                     t_thrd.xlog_cxt.readOff);
     } else {
-        actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf, t_thrd.xlog_cxt.readLen);
+        actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf, t_thrd.xlog_cxt.readLen,
+                                                    t_thrd.xlog_cxt.readFile);
     }
 
     if (actualBytes != t_thrd.xlog_cxt.readLen) {
@@ -20254,7 +20255,8 @@ needread:
     if (xlogreader->preReadBuf == NULL) {
         actualBytes = (uint32)pread(t_thrd.xlog_cxt.readFile, readBuf, t_thrd.xlog_cxt.readLen, t_thrd.xlog_cxt.readOff);
     } else {
-        actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf, t_thrd.xlog_cxt.readLen);
+        actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf, t_thrd.xlog_cxt.readLen,
+                                                    t_thrd.xlog_cxt.readFile);
     }
 
     if (actualBytes != t_thrd.xlog_cxt.readLen) {

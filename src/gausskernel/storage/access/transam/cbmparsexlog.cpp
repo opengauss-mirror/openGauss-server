@@ -51,6 +51,7 @@
 #include "utils/memutils.h"
 #include "utils/relmapper.h"
 #include "storage/file/fio_device.h"
+#include "ddes/dms/ss_reform_common.h"
 
 /* we can put the following globals into XlogCbmSys */
 static XLogRecPtr tmpTargetLSN = InvalidXLogRecPtr;
@@ -832,6 +833,95 @@ static bool checkUserRequstAndRotateCbm()
     }
     return false;
 }
+
+static int CBMXLogPageReadSS(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
+                           char *readBuf, TimeLineID *pageTLI, char* xlog_path)
+{
+    XLogPageReadPrivateCBM *readprivate = (XLogPageReadPrivateCBM *)xlogreader->private_data;
+    uint32 targetPageOff;
+    uint32 actualBytes;
+    int rc = 0;
+
+#ifdef USE_ASSERT_CHECKING
+    XLogSegNo targetSegNo;
+
+    XLByteToSeg(targetPagePtr, targetSegNo);
+#endif
+
+    targetPageOff = targetPagePtr % XLogSegSize;
+
+    /*
+     * See if we need to switch to a new segment because the requested record
+     * is not in the currently open one.
+     */
+    if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd >= 0 &&
+        !XLByteInSeg(targetPagePtr, t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo)) {
+        if (close(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd) != 0)
+            ereport(WARNING, (errcode_for_file_access(),
+                              errmsg("could not close file \"%s\" ", t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath)));
+
+        t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = -1;
+    }
+
+    XLByteToSeg(targetPagePtr, t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo);
+
+    if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd < 0) {
+        char xlogfname[MAXFNAMELEN];
+
+        rc = snprintf_s(xlogfname, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", readprivate->tli,
+                        (uint32)((t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo) / XLogSegmentsPerXLogId),
+                        (uint32)((t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo) % XLogSegmentsPerXLogId));
+        securec_check_ss(rc, "", "");
+        
+        rc = snprintf_s(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, MAXPGPATH, MAXPGPATH - 1,
+                "%s/" XLOGDIR "/%s", readprivate->datadir, xlogfname);
+        securec_check_ss(rc, "\0", "\0");
+
+        t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = BasicOpenFile(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath,
+                                                               O_RDONLY | PG_BINARY, 0);
+
+        if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd < 0) {
+            ereport(WARNING, (errmsg("could not open file \"%s\": %s", t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath,
+                                     strerror(errno))));
+            return -1;
+        }
+    }
+
+    /*
+     * At this point, we have the right segment open and if we're streaming we
+     * know the requested record is in it.
+     */
+    Assert(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd != -1);
+
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
+
+    actualBytes = (uint32)SSReadXlogInternal(xlogreader, targetPagePtr, targetRecPtr, readBuf, XLOG_BLCKSZ,
+                                                t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd);
+
+    if (actualBytes != XLOG_BLCKSZ) {
+        PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
+        ereport(WARNING, (errmsg("could not read page from file \"%s\" at page offset %u: %s",
+                                 t_thrd.cbm_cxt.XlogCbmSys->xlogRead.filePath, targetPageOff, TRANSLATE_ERRNO)));
+        goto next_record_is_invalid;
+    }
+
+    Assert(targetSegNo == t_thrd.cbm_cxt.XlogCbmSys->xlogRead.logSegNo);
+    Assert((uint32)reqLen <= XLOG_BLCKSZ);
+
+    *pageTLI = readprivate->tli;
+
+    return XLOG_BLCKSZ;
+
+next_record_is_invalid:
+    if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd >= 0) {
+        (void)close(t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd);
+    }
+    t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd = -1;
+
+    return -1;
+}
+
 static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd)
 {
     XLogRecord *record = NULL;
@@ -847,7 +937,14 @@ static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd)
         readprivate.datadir = t_thrd.proc_cxt.DataDir;
     }
     readprivate.tli = timeLine;
-    xlogreader = XLogReaderAllocate(&CBMXLogPageRead, &readprivate);
+
+    if (ENABLE_DMS) {
+        /* We use Pre-read to accelerate the reading speed. */
+        xlogreader = SSXLogReaderAllocate(&CBMXLogPageReadSS, &readprivate, ALIGNOF_BUFFER);
+    } else {
+        xlogreader = XLogReaderAllocate(&CBMXLogPageRead, &readprivate);   
+    }
+
     if (xlogreader == NULL)
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
                         errmsg("memory is temporarily unavailable while allocate xlog reader")));
@@ -914,6 +1011,11 @@ static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd)
 
         startPoint = InvalidXLogRecPtr; /* continue reading at next record */
     } while (true);
+
+    if (ENABLE_DMS && AmCBMWriterProcess()) {
+        xlogreader->preReadBufOrigin = NULL;
+        xlogreader->preReadBuf = NULL;
+    }
 
     XLogReaderFree(xlogreader);
     if (t_thrd.cbm_cxt.XlogCbmSys->xlogRead.fd != -1) {
