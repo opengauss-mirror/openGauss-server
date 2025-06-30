@@ -89,7 +89,6 @@ static Node* transformGroupingSet(List** flatresult, ParseState* pstate, Groupin
 static Index transformGroupClauseExpr(List** flatresult, Bitmapset* seen_local, ParseState* pstate, Node* gexpr,
     List** targetlist, List* sortClause, ParseExprKind exprKind, bool useSQL99, bool toplevel);
 static void CheckOrderbyColumns(ParseState* pstate, List* targetList, bool isAggregate);
-static bool ColNameInFuncParasList(char *colName, List *funcParaList);
 
 /*
  * @Description: append from clause item to the left tree
@@ -594,6 +593,40 @@ static RangeTblEntry* transformCTEReference(ParseState* pstate, RangeVar* r, Com
     return rte;
 }
 
+bool PullColumnRefWalker(Node* node, PullColumnRefContext* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+    if (IsA(node, ColumnRef)) {
+        context->columnRefs = lappend(context->columnRefs, node);
+        return false;
+    }
+    return raw_expression_tree_walker(node, (bool (*)())PullColumnRefWalker, (void*)context);
+}
+
+List* PullColumnRefs(Node* node)
+{
+    PullColumnRefContext context;
+    context.columnRefs = NIL;
+    
+    PullColumnRefWalker(node, &context);
+    
+    return context.columnRefs;
+}
+
+static bool ColNameInFuncParasList(char* colName, List* columnsInAggFunc)
+{
+    ListCell* cell;
+
+    foreach (cell, columnsInAggFunc) {
+        ColumnRef* cr = (ColumnRef*)lfirst(cell);
+        if (strcmp(colName, strVal(lfirst(list_head(cr->fields)))) == 0)
+            return true;
+    }
+    return false;
+}
+
 /*
  * transformRangeSubselect --- transform a sub-SELECT appearing in FROM
  */
@@ -625,6 +658,7 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
         ColumnRef *cref;
         ResTarget *resT;
         List *filterlist;
+        List *columnsInAggFunc = NIL;
         subQueryStmt = (SelectStmt *)r->subquery;
         prev = NULL;
         if (1 == list_length(subQueryStmt->targetList)) {
@@ -658,13 +692,14 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
         }
 
         /* remove target */
+        columnsInAggFunc = PullColumnRefs((Node*)r->rotate->aggregateFuncCallList);
         for (targetCell = list_head(subQueryStmt->targetList); targetCell; targetCell = next) {
             ResTarget *resTarget = (ResTarget *)lfirst(targetCell);
             next = lnext(targetCell);
             if (IsA(resTarget->val, ColumnRef)) {
                 char *colName = strVal(lfirst(list_head(((ColumnRef *)resTarget->val)->fields)));
                 if (list_member(r->rotate->forColName, lfirst(list_head(((ColumnRef *)resTarget->val)->fields))) ||
-                    ColNameInFuncParasList(colName, r->rotate->aggregateFuncCallList))
+                    ColNameInFuncParasList(colName, columnsInAggFunc))
                     subQueryStmt->targetList = list_delete_cell(subQueryStmt->targetList, targetCell, prev);
                 else
                     prev = targetCell;
@@ -794,21 +829,6 @@ static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect
     rte = addRangeTableEntryForSubquery(pstate, query, r->alias, r->lateral, true);
 
     return rte;
-}
-
-static bool ColNameInFuncParasList(char *colName, List *funcParaList)
-{
-    ListCell *cell;
-    ListCell *paracell;
-    foreach (cell, funcParaList) {
-        FuncCall *aggregateFuncCall = (FuncCall *)lfirst(cell);
-        foreach (paracell, aggregateFuncCall->args) {
-            ColumnRef *cr = (ColumnRef *)lfirst(paracell);
-            if (strcmp(colName, strVal(lfirst(list_head(cr->fields)))) == 0)
-                return true;
-        }
-    }
-    return false;
 }
 
 /*
