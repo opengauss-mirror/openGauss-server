@@ -43,6 +43,7 @@
 #include "utils/memtrack.h"
 #include "storage/procarray.h"
 #include "storage/matrix_mem.h"
+#include "postmaster/rack_mem_cleaner.h"
 
 #define MAX_RACK_MEMORY_CHUNK_SIZE MIN_RACK_ALLOC_SIZE
 #define MAX_RACK_MEMORY_ALLOC_SIZE (MAX_RACK_MEMORY_CHUNK_SIZE - sizeof(RackPrefix))
@@ -159,7 +160,8 @@ bool EnableBorrowWorkMemory()
     return g_matrixMemFunc.matrix_mem_inited &&
            g_instance.attr.attr_memory.enable_borrow_memory &&
            u_sess->attr.attr_memory.borrow_work_mem > 0 &&
-           g_instance.attr.attr_memory.avail_borrow_mem > 0;
+           g_instance.attr.attr_memory.avail_borrow_mem > 0 &&
+           g_instance.rackMemCleanerCxt.rack_available == 1;
 }
 
 Size GetAvailRackMemory(int dop)
@@ -171,6 +173,22 @@ Size GetAvailRackMemory(int dop)
         dop = 1;
     }
     return TYPEALIGN_DOWN(MAX_RACK_MEMORY_ALLOC_SIZE / 1024L, u_sess->attr.attr_memory.borrow_work_mem / dop);
+}
+
+static bool TryRackMemFree(void* ptr)
+{
+    if (u_sess->enable_rack_memory_free_test) {
+        RegisterFailedFreeMemory(ptr);
+        return false;
+    }
+
+    int ret = RackMemFree(ptr);
+    if (ret != 0) {
+        RegisterFailedFreeMemory(ptr);
+        ereport(LOG, (errmsg("RackMemFree failed")));
+        return false;
+    }
+    return true;
 }
 
 bool RackMemoryBusy(int64 used)
@@ -231,7 +249,7 @@ static inline void RackFreeConverter(void* ptr)
     Assert(ptr);
     RackPrefix* prefix = (RackPrefix*)(ptr - sizeof(RackPrefix));
     Size size = prefix->size;
-    RackMemFree((void*)prefix);
+    TryRackMemFree((void*)prefix);
 
     pg_atomic_sub_fetch_u64(&rackUsedSize, size);
 }

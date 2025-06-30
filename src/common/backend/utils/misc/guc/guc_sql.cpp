@@ -1964,6 +1964,18 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_rack_memory_free_test",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("enable rack memory free quick path."),
+            nullptr},
+            &u_sess->enable_rack_memory_free_test,
+            false,
+            nullptr,
+            nullptr,
+            nullptr
+        },
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

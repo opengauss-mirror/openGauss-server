@@ -32,11 +32,33 @@
 
 constexpr size_t MIN_RACK_ALLOC_SIZE = (size_t) 1024 * 1024 * 128;
 constexpr size_t MAX_RACK_ALLOC_SIZE = (size_t) 1024 * 1024 * 1024 * 4;
+constexpr double MAX_RACK_MEMORY_PERCENT = 0.25;
+
+#define MAX_HOSTNAME_LENGTH 48
+#define MAX_SOCKET_NUM 2
+#define MAX_HOST_NUM 16
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+struct SocketInfo {
+    int memTotal;
+    int memUsed;
+    int memExport;
+    int memImport;
+};
+
+struct HostInfo {
+    char hostName[MAX_HOSTNAME_LENGTH];
+    int num;
+    SocketInfo socket[MAX_SOCKET_NUM];
+};
+
+struct ClusterInfo {
+    int num;
+    HostInfo host[MAX_HOST_NUM];
+};
 typedef struct tagRackMemMallocResult {
     int code;
     void *ptr;
@@ -50,10 +72,11 @@ typedef void (*AsyncMallocCallBack)(intptr_t ctx, RackMemMallocResult *result);
 
 int RackMemMallocAsync(size_t size, PerfLevel perfLevel, intptr_t attr, AsyncMallocCallBack func, intptr_t ctx);
 
-void RackMemFree(void *ptr);
+int RackMemFree(void *ptr);
 
 int RackMemFreeAsync(void* ptr, AsyncFreeCallBack func, intptr_t ctx);
 
+int RackMemLookupClusterStatistic(ClusterInfo *cluster);
 #ifdef __cplusplus
 }
 #endif

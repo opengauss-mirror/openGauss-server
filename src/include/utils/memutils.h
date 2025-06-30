@@ -33,6 +33,7 @@ enum MemoryContextType {
 extern bool EnableBorrowWorkMemory();
 extern bool RackMemoryBusy(int64 used);
 extern Size GetAvailRackMemory(int dop);
+extern pg_atomic_uint64 rackUsedSize;
 
 /*
  * MaxAllocSize

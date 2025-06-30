@@ -52,6 +52,7 @@
 #include "utils/atomic.h"
 #include "postmaster/bgwriter.h"
 #include "postmaster/pagewriter.h"
+#include "postmaster/rack_mem_cleaner.h"
 #include "replication/heartbeat.h"
 #include "access/multi_redo_settings.h"
 #include "access/redo_statistic_msg.h"
@@ -280,6 +281,7 @@ typedef struct knl_g_pid_context {
     ThreadId ApplyLauncerPID;
     ThreadId StackPerfPID;
     ThreadId CfsShrinkerPID;
+    ThreadId rackMemCleanerPID;
     ThreadId DmsAuxiliaryPID;
     ThreadId SyncAuxiliaryPID;
     ThreadId SqlLimitPID;
@@ -1703,6 +1705,7 @@ typedef struct knl_instance_context {
 #endif
     knl_g_npu_context npu_cxt;
     knl_g_smb_context smb_cxt;
+    knl_g_rack_mem_cleaner_context rackMemCleanerCxt;
 } knl_instance_context;
 
 extern long random();

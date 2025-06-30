@@ -79,6 +79,7 @@
 #include "port/pg_crc32c.h"
 #include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_txnstatus.h"
+#include "postmaster/rack_mem_cleaner.h"
 
 #define MAX_PATH_LEN 1024
 #define BYTES_PATH_LEN 20

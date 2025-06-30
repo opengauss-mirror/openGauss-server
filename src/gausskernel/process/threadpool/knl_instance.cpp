@@ -160,6 +160,17 @@ static void knl_g_wal_init(knl_g_wal_context *const wal_cxt)
     }
 }
 
+static void knl_g_rackmem_cleaner_init(knl_g_rack_mem_cleaner_context *cleaner_cxt)
+{
+    Assert(cleaner_cxt != nullptr);
+    cleaner_cxt->memoryContext = nullptr;
+    cleaner_cxt->cleanupActive = false;
+    cleaner_cxt->queueHead = nullptr;
+    cleaner_cxt->total = 0;
+    cleaner_cxt->countToProcess = 0;
+    cleaner_cxt->freeCount = 0;
+}
+
 static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)
 {
     Assert(bgwriter_cxt != NULL);
@@ -1167,6 +1178,7 @@ void knl_instance_init()
     knl_g_numa_init(&g_instance.numa_cxt);
     knl_g_adv_init(&g_instance.adv_cxt);
     knl_g_flashback_init(&g_instance.flashback_cxt);
+    knl_g_rackmem_cleaner_init(&g_instance.rackMemCleanerCxt);
 
 #ifdef ENABLE_MOT
     knl_g_mot_init(&g_instance.mot_cxt);

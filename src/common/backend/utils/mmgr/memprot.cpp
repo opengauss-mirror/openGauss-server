@@ -1040,6 +1040,7 @@ void gs_memprot_init(Size size)
 #else
         double pre_occupy = 0;
 #endif
+        g_instance.attr.attr_memory.max_borrow_memory = g_instance.attr.attr_memory.max_borrow_memory_input;
         g_instance.attr.attr_memory.avail_borrow_mem = g_instance.attr.attr_memory.max_borrow_memory - pre_occupy;
         if (g_instance.attr.attr_memory.avail_borrow_mem <= 0) {
             ereport(WARNING, (errmsg("max_imcs_cache * htap_borrow_mem_percent is larger than max_borrow_memory")));
