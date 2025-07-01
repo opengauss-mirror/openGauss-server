@@ -46,6 +46,7 @@ IMCStoreInsert::IMCStoreInsert(
     Relation fakeImcsRel = CreateFakeRelcacheEntry(relation->rd_node);
     fakeImcsRel->pgstat_info = relation->pgstat_info;
     fakeImcsRel->rd_att = imcsTupleDescWithCtid;
+    fakeImcsRel->rd_id = relation->rd_id;
     m_relation = fakeImcsRel;
     m_relOid = RelationGetRelid(relation);
 
@@ -163,7 +164,7 @@ void IMCStoreInsert::BatchReInsertCommon(IMCSDesc* imcsDesc, uint32 cuid, Transa
     int col = 0;
 
     MemoryContext oldcontext = MemoryContextSwitchTo(imcsDesc->imcuDescContext);
-    RowGroup* rowGroup = imcsDesc->GetRowGroup(cuid);
+    RowGroup* rowGroup = imcsDesc->GetNewRGForCUInsert(cuid);
 
     uint64 newBufSize = 0;
     if (m_tmpBatchRows->m_rows_curnum == 0) {

@@ -71,7 +71,7 @@ public:
     uint32 rowNumber;
     bool vacuumInProcess;
 
-    DeltaTable() : pages(NULL), rowNumber(0) {}
+    DeltaTable() : pages(NULL), rowNumber(0), vacuumInProcess(false) {}
     ~DeltaTable() {}
     void Insert(ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId);
     void Vacuum(TransactionId xid);
@@ -93,7 +93,7 @@ struct knl_g_imcstore_context;
 
 extern void ClearImcstoreCacheIfNeed(Oid droppingDBOid);
 extern void InitIMCStoreVacuumQueue(knl_g_imcstore_context* context);
-extern bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId);
+extern bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid = InvalidTransactionId);
 extern void IMCStoreSyncVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid, uint64 bufSize,
                                        CUDesc** CUDesc, CU** CUs);
 extern void IMCStoreVacuumWorkerMain(void);

@@ -615,7 +615,7 @@ void CU::FreeMem()
         /* this->shmCUOffset of ss imcstore is more than 0 */
         if (ENABLE_DSS && imcsDesc != NULL && imcsDesc->populateInShareMem) {
             /* only SS_PRIMARY_MODE can write share memory */
-            if (SS_PRIMARY_MODE) {
+            if (SS_PRIMARY_MODE && imcsDesc->shareMemPool != NULL) {
                 imcsDesc->shareMemPool->FreeCUMem(this->shmChunkNumber, this->shmCUOffset);
             }
         } else if (!freeByCUCacheMgr) {

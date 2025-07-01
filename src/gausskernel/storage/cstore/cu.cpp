@@ -2215,6 +2215,9 @@ void RowGroup::VacuumLocal(Relation fakeRelation, IMCSDesc* imcsDesc,
             m_cuDescs[col] = NULL;
         }
     }
+    if (SS_STANDBY_MODE) {
+        SSNotifyPrimaryVacuumLocalMemorySuccess(RelationGetRelid(fakeRelation), m_rowGroupId, xid);
+    }
     UnlockRowGroup();
 }
 

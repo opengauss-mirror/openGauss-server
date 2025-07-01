@@ -46,6 +46,7 @@ public:
 
 public:
     void SetSPQNodeNumAndIdx();
+    bool CheckRGOwnedByCurNode(uint32 rgid);
     void SaveCU(IMCSDesc* imcsDesc, RelFileNodeOld* rnode, int colId, CU* cuPtr, CUDesc* cuDescPtr);
     int64 GetCurrentMemSize() override;
     void GetCacheBlockInProgress(CacheSlotId_t *ioCacheBlock, CacheSlotId_t *uncompressCacheBlock) override;

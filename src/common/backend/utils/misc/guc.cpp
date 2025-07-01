@@ -3298,6 +3298,22 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+#ifdef ENABLE_HTAP
+        {{"imcs_parallel_populate_workers",
+          PGC_USERSET,
+          NODE_ALL,
+          RESOURCES_WORKLOAD,
+          gettext_noop("Sets the numbers of worker threads for imcstore population."),
+          NULL},
+         &u_sess->attr.attr_common.imcs_parallel_populate_workers,
+         8,
+         8,
+         64,
+         NULL,
+         NULL,
+         NULL
+        },
+#endif
         {{"ts_consumer_workers",
             PGC_SIGHUP,
             NODE_DISTRIBUTE,

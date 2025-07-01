@@ -162,7 +162,10 @@ void DeltaTable::Insert(ItemPointer ctid, TransactionId xid, Oid relid, uint32 c
     }
     page->Insert(ctid, xid);
     ++rowNumber;
+
     if (!vacuumInProcess && rowNumber > AUTO_VACUUM_TRIGGER_LIMIT && IMCStoreVacuumPushWork(relid, cuId)) {
+        elog(DEBUG1, "IMCStoreVacuumPushWork: rel(%u), cuid(%u), rowNumber(%u), AUTO_VACUUM_TRIGGER_LIMIT(%u).",
+            relid, cuId, rowNumber, AUTO_VACUUM_TRIGGER_LIMIT);
         // change the statistic to avoid push work in a short time
         vacuumInProcess = true;
     }
@@ -184,6 +187,7 @@ void DeltaTable::Vacuum(TransactionId xid)
         pages = list_delete_cell(pages, lnext(currPage), currPage);
     }
     vacuumInProcess = false;
+    elog(DEBUG1, "DeltaTable::Vacuum, xid(%u), rest rowNumber(%u).", xid, rowNumber);
 }
 
 DeltaTableIterator DeltaTable::ScanInit()
