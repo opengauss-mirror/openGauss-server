@@ -24,6 +24,7 @@ typedef enum AlarmId {
 
     /*alarm on data instances(alarm checker)*/
     ALM_AI_MissingDataInstDataOrRedoDir = 0x404E0001,
+    ALM_AI_MissingDataInstDataDir = 0x404E0002,
     ALM_AI_MissingDataInstWalSegmt = 0x404E0003,
     ALM_AI_TooManyDataInstConn = 0x404F0001,
 
@@ -88,6 +89,21 @@ typedef enum AlarmId {
     ALM_AI_PgxcNodeMismatch = 0x404F0061,
     ALM_AI_StreamingDisasterRecoveryCnDisconnected = 0x404F0070,
     ALM_AI_StreamingDisasterRecoveryDnDisconnected = 0x404F0071,
+    ALM_AI_DbUserLoginFailed = 0x404F0072,
+    ALM_AI_ListenSocketFailed = 0x404F0073,
+    ALM_AI_CommandExecTimeout = 0x404F0074,
+    ALM_AI_SecurityAccountLock = 0x404F0075,
+    ALM_AI_SecurityAccountFailedAttempt = 0x404F0076,
+    ALM_AI_MemoryUsageAbnormal = 0x404F0077,
+    ALM_AI_CpuUsageAbnormal = 0x404F0078,
+    ALM_AI_DiskIOAbnormal = 0x404F0079,
+    ALM_AI_DeadLock = 0x404F007B,
+    ALM_AI_DatanodeNetworkIsolated = 0x404F007C,
+    ALM_AI_DiskUsageAbnormal = 0x404F007D,
+    ALM_AI_DiskDamage = 0x404F007E,
+    ALM_AI_SlowDisk = 0x404F007F,
+    ALM_AI_AbnormalInstRestart = 0x404F0080,
+    ALM_AI_XlogAccumulate = 0x404F0081,
     ALM_AI_BUTT = 0x7FFFFFFFFFFFFFFF             /*force compiler to decide AlarmId as uint64*/
 } AlarmId;
 

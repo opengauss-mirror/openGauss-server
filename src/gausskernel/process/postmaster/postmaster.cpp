@@ -1840,6 +1840,24 @@ static void rebuild_listen_address_socket()
 }
 #endif
 
+void ReportListenFailureAlarm() {
+    Alarm alarmItem[1];
+    AlarmAdditionalParam tempAdditionalParam;
+
+    // Initialize the alarm item
+    AlarmItemInitialize(alarmItem, ALM_AI_ListenSocketFailed, ALM_AS_Normal, NULL);
+    // fill the alarm message
+    WriteAlarmAdditionalInfo(&tempAdditionalParam,
+                             g_instance.attr.attr_common.PGXCNodeName,
+                             "",
+                             "",
+                             alarmItem,
+                             ALM_AT_Event,
+                             g_instance.attr.attr_common.PGXCNodeName);
+    // report the alarm
+    AlarmReporter(alarmItem, ALM_AT_Event, &tempAdditionalParam);
+}
+
 /*
  * InitProcessGlobals -- set MyProcPid, MyStartTime[stamp], random seeds
  *
@@ -2657,6 +2675,7 @@ int PostmasterMain(int argc, char* argv[])
             if (status == STATUS_OK)
                 success++;
             else {
+                ReportListenFailureAlarm();
                 print_port_info();
                 ereport(FATAL,
                     (errmsg("could not create listen socket for \"%s:%d\"",
