@@ -54,9 +54,11 @@ typedef struct knl_instance_attr_memory {
     int global_syscache_threshold;
     bool disable_memory_stats;
     bool enable_borrow_memory;
-    int max_borrow_memory;
+    int max_borrow_memory_input;
+    volatile int max_borrow_memory;
     int borrow_work_mem;
     int avail_borrow_mem;
+    bool enable_rack_memory_cleaner;
 } knl_instance_attr_memory;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_MEMORY_H_ */

@@ -48,6 +48,7 @@ typedef struct TagRackMemSHMRegionDesc {
     ShmRegionType type;
     int num;
     char nodeId[MEM_TOPOLOGY_MAX_HOSTS][MEM_MAX_ID_LENGTH];
+    char hostName[MEM_TOPOLOGY_MAX_HOSTS][MAX_HOSTNAME_LENGTH];
 } SHMRegionDesc;
 
 typedef struct TagRackMemSHMRegions {

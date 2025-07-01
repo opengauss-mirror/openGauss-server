@@ -1,7 +1,7 @@
 # contrib/rack_dev/Makefile
 
 MODULE_big = rack_dev
-OBJS = rack_dev.o rack_mem_tuple_desc.o
+OBJS = rack_dev.o rack_mem_tuple_desc.o rack_mem_cleaner_dev.o
 PG_CPPFLAGS = -I$(libpq_srcdir) -I${top_builddir}/contrib/rack_dev/ -I${top_builddir}/contrib/rack_dev/include
 
 EXTENSION = rack_dev

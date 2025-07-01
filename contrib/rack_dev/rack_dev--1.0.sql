@@ -29,9 +29,16 @@ CREATE FUNCTION pg_catalog.smb_dirty_page_queue_info(
 
 CREATE TYPE smb_status_type AS (
     lru_removed_num int
-)
+);
 
 CREATE FUNCTION pg_catalog.smb_status_info()
 RETURNS smb_status_type
 AS 'MODULE_PATHNAME', 'smb_status_info'
 LANGUAGE C STRICT;
+
+CREATE FUNCTION pg_catalog.rack_mem_cleaner_details(
+    OUT total_mem_count bigint,
+    OUT queue_mem_count bigint,
+    OUT free_mem_count bigint,
+    OUT process_mem_count bigint
+) RETURNS RECORD AS 'MODULE_PATHNAME','rack_mem_cleaner_details' LANGUAGE C STRICT;

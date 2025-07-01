@@ -4547,6 +4547,11 @@ static int ServerLoop(void)
             g_instance.pid_cxt.CfsShrinkerPID = StartCfsShrinkerCapturer();
 #endif
 
+        if (g_instance.attr.attr_memory.enable_rack_memory_cleaner && g_instance.pid_cxt.rackMemCleanerPID == 0 &&
+            (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
+            g_instance.pid_cxt.rackMemCleanerPID = initialize_util_thread(RACK_MEM_FREE_THREAD);
+        }
+
         /* If we have lost the rbcleaner, try to start a new one */
         if (ENABLE_TCAP_RECYCLEBIN && (g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
             g_instance.pid_cxt.RbCleanrPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
@@ -6452,6 +6457,10 @@ static void pmdie(SIGNAL_ARGS)
                 signal_child(g_instance.pid_cxt.CfsShrinkerPID, SIGTERM);
             }
 
+            if (g_instance.pid_cxt.rackMemCleanerPID != 0) {
+                signal_child(g_instance.pid_cxt.rackMemCleanerPID, SIGTERM);
+            }
+
             if (g_instance.pid_cxt.WLMMonitorPID != 0)
                 signal_child(g_instance.pid_cxt.WLMMonitorPID, SIGTERM);
 
@@ -6940,6 +6949,10 @@ static void ProcessDemoteRequest(void)
 
             if (g_instance.pid_cxt.CfsShrinkerPID != 0) {
                 signal_child(g_instance.pid_cxt.CfsShrinkerPID, SIGTERM);
+            }
+
+            if (g_instance.pid_cxt.rackMemCleanerPID != 0) {
+                signal_child(g_instance.pid_cxt.rackMemCleanerPID, SIGTERM);
             }
 
             if (g_instance.pid_cxt.RbCleanrPID != 0) {
@@ -7488,6 +7501,11 @@ static void reaper(SIGNAL_ARGS)
                 g_instance.pid_cxt.CfsShrinkerPID = StartCfsShrinkerCapturer();
 #endif
 
+            if (g_instance.attr.attr_memory.enable_rack_memory_cleaner && g_instance.pid_cxt.rackMemCleanerPID == 0 &&
+                (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
+                g_instance.pid_cxt.rackMemCleanerPID = initialize_util_thread(RACK_MEM_FREE_THREAD);
+            }
+
             if (ENABLE_TCAP_RECYCLEBIN && (g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
                 g_instance.pid_cxt.RbCleanrPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
                 g_instance.pid_cxt.RbCleanrPID = StartRbCleaner();
@@ -7753,6 +7771,9 @@ static void reaper(SIGNAL_ARGS)
 
                 if (g_instance.pid_cxt.CfsShrinkerPID != 0)
                     signal_child(g_instance.pid_cxt.CfsShrinkerPID, SIGQUIT);
+                
+                if (g_instance.pid_cxt.rackMemCleanerPID != 0)
+                    signal_child(g_instance.pid_cxt.rackMemCleanerPID, SIGQUIT);
 
                 if (g_instance.pid_cxt.RbCleanrPID != 0)
                     signal_child(g_instance.pid_cxt.RbCleanrPID, SIGQUIT);
@@ -7999,6 +8020,18 @@ static void reaper(SIGNAL_ARGS)
 
             if (pmState <= PM_RUN)
                 g_instance.pid_cxt.CfsShrinkerPID = StartCfsShrinkerCapturer();
+            continue;
+        }
+
+        if (pid == g_instance.pid_cxt.rackMemCleanerPID) {
+            g_instance.pid_cxt.rackMemCleanerPID = 0;
+
+            if (!EXIT_STATUS_0(exitstatus))
+                LogChildExit(LOG, _("rack mem cleaner process"), pid, exitstatus);
+
+            if (g_instance.pid_cxt.rackMemCleanerPID == 0 && pmState == PM_RUN) {
+                g_instance.pid_cxt.rackMemCleanerPID = initialize_util_thread(RACK_MEM_FREE_THREAD);
+            }
             continue;
         }
 
@@ -8417,6 +8450,8 @@ static const char* GetProcName(ThreadId pid)
         return "stack perf process";
     else if (pid == g_instance.pid_cxt.CfsShrinkerPID)
         return "cfs shrinker process";
+    else if (pid == g_instance.pid_cxt.rackMemCleanerPID)
+        return "rack mem cleaner process";
     else if (pid == g_instance.pid_cxt.SqlLimitPID)
         return "sql limit process";
 #ifdef ENABLE_HTAP
@@ -8875,6 +8910,7 @@ static void AsssertAllChildThreadExit()
     Assert(g_instance.pid_cxt.sharedStorageXlogCopyThreadPID == 0);
     Assert(g_instance.pid_cxt.StackPerfPID == 0);
     Assert(g_instance.pid_cxt.CfsShrinkerPID == 0);
+    Assert(g_instance.pid_cxt.rackMemCleanerPID == 0);
 }
 
 /*
@@ -8930,7 +8966,8 @@ static void PostmasterStateMachine(void)
             g_instance.pid_cxt.AshPID == 0 && g_instance.pid_cxt.CsnminSyncPID == 0 &&
             g_instance.pid_cxt.StackPerfPID == 0 &&
             g_instance.pid_cxt.CfsShrinkerPID == 0 &&
-            g_instance.pid_cxt.BarrierCreatorPID == 0 &&
+            g_instance.pid_cxt.rackMemCleanerPID == 0 &&
+            g_instance.pid_cxt.BarrierCreatorPID == 0 &&  g_instance.pid_cxt.PageRepairPID == 0 &&
             g_instance.pid_cxt.BarrierPreParsePID == 0 && g_instance.pid_cxt.SqlLimitPID == 0 &&
 #ifdef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.CommPoolerCleanPID == 0 && streaming_backend_manager(STREAMING_BACKEND_SHUTDOWN) &&
@@ -15061,6 +15098,11 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             proc_exit(0);
         } break;
 
+        case RACK_MEM_FREE_THREAD: {
+            RackMemCleanerMain();
+            proc_exit(0);
+        }
+
         case APPLY_LAUNCHER: {
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
             if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
@@ -15267,6 +15309,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<DMS_AUXILIARY_THREAD>, DMS_AUXILIARY_THREAD, "dms_auxiliary", "maintenance xmin in dms" },
     { GaussDbThreadMain<EXRTO_RECYCLER>, EXRTO_RECYCLER, "exrtorecycler", "exrto recycler" },
     { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
+    { GaussDbThreadMain<RACK_MEM_FREE_THREAD>, RACK_MEM_FREE_THREAD, "rackmem_cleaner", "rack mem cleaner" },
     /* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES
     { GaussDbThreadMain<TS_COMPACTION>, TS_COMPACTION, "TScompaction",
