@@ -8001,6 +8001,98 @@ void RemoveTempNamespace()
 
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
 #define INITIAL_USER_ID 10
+#define GS_CLEAN "gs_clean"
+
+static PGconn* LoginDatabase(char* host, int port, char* user, char* password,
+    char* dbname, const char* progname, char* encoding)
+{
+    PGconn* conn = NULL;
+    char portValue[32];
+#define PARAMS_ARRAY_SIZE 10
+    const char* keywords[PARAMS_ARRAY_SIZE];
+    const char* values[PARAMS_ARRAY_SIZE];
+    int count = 0;
+    int retryNum = 10;
+    int rc;
+
+    rc = sprintf_s(portValue, sizeof(portValue), "%d", port);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    keywords[0] = "host";
+    values[0] = host;
+    keywords[1] = "port";
+    values[1] = portValue;
+    keywords[2] = "user";
+    values[2] = user;
+    keywords[3] = "password";
+    values[3] = password;
+    keywords[4] = "dbname";
+    values[4] = dbname;
+    keywords[5] = "fallback_application_name";
+    values[5] = progname;
+    keywords[6] = "client_encoding";
+    values[6] = encoding;
+    keywords[7] = "connect_timeout";
+    values[7] = "5";
+    keywords[8] = "options";
+    /* this mode: remove timeout */
+    values[8] = "-c xc_maintenance_mode=on";
+    keywords[9] = NULL;
+    values[9] = NULL;
+
+retry:
+    /* try to connect to database */
+    conn = PQconnectdbParams(keywords, values, true);
+    if (PQstatus(conn) != CONNECTION_OK) {
+        if (++count < retryNum) {
+            ereport(LOG, (errmsg("Could not connect to the %s, the connection info : %s",
+                                 dbname, PQerrorMessage(conn))));
+            PQfinish(conn);
+            conn = NULL;
+
+            /* sleep 0.1 s */
+            pg_usleep(100000L);
+            goto retry;
+        }
+
+        char connErrorMsg[MAX_ERRMSG_LENGTH] = {0};
+        errno_t rc;
+        rc = snprintf_s(connErrorMsg, MAX_ERRMSG_LENGTH, MAX_ERRMSG_LENGTH - 1,
+                        "%s", PQerrorMessage(conn));
+        securec_check_ss(rc, "\0", "\0");
+
+        PQfinish(conn);
+        conn = NULL;
+        ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
+                       (errmsg("Could not connect to the %s, "
+                               "we have tried %d times, the connection info: %s",
+                               dbname, count, connErrorMsg))));
+    }
+
+    return (conn);
+}
+
+static void start_gs_clean_load_dolphin()
+{
+    start_xact_command();
+    char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
+    /* start gs_clean to load dolphin while connecting */
+    PGconn* conn = LoginDatabase("localhost", g_instance.attr.attr_network.PostPortNumber,
+        NULL, NULL, dbname, GS_CLEAN, "auto");
+
+    if (conn == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        (errmsg("Could not connect to the database %s.",
+                                dbname))));
+    }
+    PQfinish(conn);
+    conn = NULL;
+
+    u_sess->attr.attr_sql.dolphin = CheckIfExtensionExists("dolphin");
+    finish_xact_command();
+    InitBSqlPluginHookIfNeeded();
+}
+
 /*
  * IMPORTANT:
  * 1. load plugin should call after process is normal, cause heap_create_with_catalog will check it.
@@ -8015,8 +8107,9 @@ void LoadSqlPlugin()
         if (!u_sess->attr.attr_sql.dolphin && u_sess->attr.attr_common.upgrade_mode == 0) {
             Oid userId = GetUserId();
             if (userId != INITIAL_USER_ID) {
-                ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                    errmsg("Please use the original role to connect B-compatibility database first, to load extension dolphin")));
+                /* dolphin need to be created by initial user, if not, start one. */
+                start_gs_clean_load_dolphin();
+                return;
             }
 
             /* Creating extension dolphin must init mask_password_mem_cxt before */
