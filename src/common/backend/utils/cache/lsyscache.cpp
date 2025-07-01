@@ -4555,6 +4555,9 @@ Oid get_typcollation(Oid typid)
             return DEFAULT_COLLATION_OID;
         } break;
         default: {
+            if (type_is_enum(typid)) {
+                return DEFAULT_COLLATION_OID;
+            }
             HeapTuple tp;
             tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
             if (HeapTupleIsValid(tp)) {
