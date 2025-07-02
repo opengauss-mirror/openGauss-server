@@ -71,6 +71,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/misc
     ${CMAKE_CURRENT_SOURCE_DIR}/sort
     ${CMAKE_CURRENT_SOURCE_DIR}/gsplsql
+    ${CMAKE_CURRENT_SOURCE_DIR}/matrix
 )
 
 add_subdirectory(adt)
@@ -86,6 +87,7 @@ add_subdirectory(mb)
 add_subdirectory(misc)
 add_subdirectory(sort)
 add_subdirectory(gsplsql)
+add_subdirectory(matrix)
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/errcodes.h DESTINATION include/postgresql/server/utils)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/fmgroids.h DESTINATION include/postgresql/server/utils)

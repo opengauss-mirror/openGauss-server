@@ -77,6 +77,7 @@
 #include "instruments/instr_statement.h"
 #include "instruments/instr_handle_mgr.h"
 #include "utils/builtins.h"
+#include "utils/matrix_adaptor.h"
 #include "instruments/ash.h"
 #include "pgaudit.h"
 #ifdef ENABLE_MULTIPLE_NODES
@@ -165,7 +166,7 @@ void InitNuma(void)
             ereport(FATAL, (errmsg("InitNuma NUMA is not available")));
         }
 
-        int numaNodeNum = numa_max_node() + 1;
+        int numaNodeNum = MatrixMaxNumaNode();
         if (numaNodeNum <= 1) {
             ereport(WARNING,
                     (errmsg("No multiple NUMA nodes available: %d.", numaNodeNum)));
@@ -704,6 +705,68 @@ void ProcBaseLockRelease(pthread_mutex_t *procBaseLock)
     t_thrd.utils_cxt.holdProcBaseLock = false;
 }
 
+#ifdef __USE_NUMA
+/*
+ * Bind the current thread to CPUs of the specified NUMA node.
+ * This should only be used for InitProcess() in NUMA mode.
+ */
+static void bind_thread_to_numa(int numa_node_id)
+{
+    // Sanity check: Validate NUMA configuration preconditions
+    Assert(g_instance.shmem_cxt.numaNodeNum > 1);
+    Assert(!g_instance.numa_cxt.inheritThreadPool);
+
+    // Fallback to full NUMA node binding if global mask is not configured
+    bool excluded_cpu = g_instance.attr.attr_network.enable_gazelle_performance_mode;
+    cpu_set_t process_mask;
+    if (excluded_cpu) {
+        // Dynamically get the CPU affinity mask of the current process.
+        CPU_ZERO(&process_mask);
+        if (sched_getaffinity(0, sizeof(cpu_set_t), &process_mask) == -1) {
+            ereport(WARNING, (errmsg("sched_getaffinity failed. errno:%d", errno)));
+            excluded_cpu = false;
+        }
+    }
+
+    if (!excluded_cpu) {
+        // Bind current thread to all CPUs in the NUMA node
+        if (-1 == numa_run_on_node(numa_node_id)) {
+            ereport(PANIC, (errmsg("InitProcess numa_run_on_node_mask failed. errno:%d ", errno)));
+        }
+        return;
+    }
+
+    // Get CPU mask for the target NUMA node
+    struct bitmask* numa_cpus = numa_allocate_cpumask();
+    if (numa_node_to_cpus(numa_node_id, numa_cpus) == -1) {
+        ereport(PANIC, (errmsg("numa_node_to_cpus failed. errno:%d ", errno)));
+    }
+
+    cpu_set_t final_mask;
+    CPU_ZERO(&final_mask);
+
+    for (int cpu = 0; cpu < numa_cpus->size; cpu++) {
+        if (numa_bitmask_isbitset(numa_cpus, cpu) && CPU_ISSET(cpu, &process_mask)) {
+            CPU_SET(cpu, &final_mask);
+        }
+    }
+
+    if (CPU_COUNT(&final_mask) == 0) {
+        // Fallback to full NUMA binding on empty mask
+        if (-1 == numa_run_on_node(numa_node_id)) {
+            ereport(PANIC, (errmsg("InitProcess numa_run_on_node_mask failed. errno:%d ", errno)));
+        }
+    } else {
+        // Apply calculated CPU affinity to current thread
+        if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &final_mask) != 0) {
+            ereport(PANIC, (errmsg("pthread_setaffinity_np failed. errno:%d ", errno)));
+        }
+    }
+    // Cleanup resources
+    numa_free_cpumask(numa_cpus);
+}
+#endif
+
 /*
  * InitProcess -- initialize a per-process data structure for this backend
  */
@@ -811,9 +874,7 @@ void InitProcess(void)
 #ifdef __USE_NUMA
     if (g_instance.shmem_cxt.numaNodeNum > 1) {
         if (!g_instance.numa_cxt.inheritThreadPool) {
-            if (-1 == numa_run_on_node(t_thrd.proc->nodeno)) {
-                ereport(PANIC, (errmsg("InitProcess numa_run_on_node_mask failed. errno:%d ", errno)));
-            }
+            bind_thread_to_numa(t_thrd.proc->nodeno);
         }
         numa_set_localalloc();
     }

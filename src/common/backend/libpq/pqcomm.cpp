@@ -1247,6 +1247,10 @@ static int pq_recvbuf(void)
                 continue; /* Ok if interrupted */
             }
 
+            if (r == -1 && errno == EAGAIN) {
+                continue; /* try again if EAGAIN */
+            }
+
             /*
              * Careful: an ereport() that tries to write to the client would
              * cause recursion to here, leading to stack overflow and core
