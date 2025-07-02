@@ -50,6 +50,7 @@
 #include "utils/builtins.h"
 #include "utils/formatting.h"
 #include "utils/guc.h"
+#include "utils/matrix_adaptor.h"
 #include "utils/memutils.h"
 #include "utils/palloc.h"
 #include "utils/ps_status.h"
@@ -590,12 +591,12 @@ void ThreadPoolControler::InitCpuInfo()
 
 void ThreadPoolControler::GetCpuAndNumaNum(int32 *totalCpuNum, int32 *totalNumaNum)
 {
-    char buf[BUFSIZE];
-
     *totalCpuNum = std::thread::hardware_concurrency();
-
+#ifdef __USE_NUMA
+    *totalNumaNum = MatrixMaxNumaNode();
+#else
+    char buf[BUFSIZE];
     FILE* fp = NULL;
-
     if ((fp = popen("LANGUAGE=en_US.UTF-8;LANG=en_US.UTF-8;lscpu", "r")) != NULL) {
         while (fgets(buf, sizeof(buf), fp) != NULL) {
             if (strncmp("NUMA node(s)", buf, strlen("NUMA node(s)")) == 0) {
@@ -605,6 +606,7 @@ void ThreadPoolControler::GetCpuAndNumaNum(int32 *totalCpuNum, int32 *totalNumaN
         }
         pclose(fp);
     }
+#endif
 }
 
 bool ThreadPoolControler::IsActiveCpu(int cpuid, int numaid)

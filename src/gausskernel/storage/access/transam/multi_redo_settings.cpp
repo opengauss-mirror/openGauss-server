@@ -29,6 +29,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "utils/guc.h"
+#include "utils/matrix_adaptor.h"
 #include "commands/copy.h"
 #include "access/multi_redo_settings.h"
 #include "access/multi_redo_api.h"
@@ -237,7 +238,7 @@ bool CheckRedoBindConfigValid(RedoCpuBindControl *contrl)
         return false;
     }
 #ifdef __USE_NUMA
-    int numaNodeNum = numa_max_node() + 1;
+    int numaNodeNum = MatrixMaxNumaNode();
     if (numaNodeNum <= 1) {
         ereport(WARNING, (errmsg("CheckRedoBindConfigValid No multiple NUMA nodes available: %d.", numaNodeNum)));
         return false;

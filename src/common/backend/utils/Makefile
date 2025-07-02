@@ -16,7 +16,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 OBJS        = fmgrtab.o
-SUBDIRS     = adt cache error fmgr hash init mb misc mmgr resowner sort time gsplsql
+SUBDIRS     = adt cache error fmgr hash init mb misc mmgr resowner sort time gsplsql matrix
 
 # location of Catalog.pm
 catalogdir  = $(top_srcdir)/src/common/backend/catalog
