@@ -451,6 +451,15 @@ ssize_t dss_write_file(int handle, const void *buf, size_t size)
     return (ssize_t)size;
 }
 
+int dss_append(int handle, void *buf, size_t size)
+{
+    if (g_dss_device_op.dss_append(handle, buf, size) != DSS_SUCCESS) {
+        dss_set_errno(NULL);
+        return -1;
+    }
+    return (ssize_t)size;
+}
+
 ssize_t dss_pwrite_file(int handle, const void *buf, size_t size, off_t offset)
 {
     RETRY_ON_CONNECT_ERR_BEGIN {
