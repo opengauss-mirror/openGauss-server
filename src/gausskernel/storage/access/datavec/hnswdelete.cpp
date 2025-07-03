@@ -160,7 +160,7 @@ bool HnswDeleteIndex(Relation index, HnswElementTuple etup)
     ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false, NULL));
 
     for (int lc = entryPoint->level; lc >= 0; lc--) {
-        w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL);
+        w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, NULL, NULL, true, NULL);
         ep = w;
     }
 
