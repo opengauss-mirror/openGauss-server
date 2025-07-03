@@ -1892,7 +1892,7 @@ static void ReformCleanBackends()
         SendPostmasterSignal(PMSIGNAL_DMS_REFORM);
     }
     
-    long max_wait_time = 60000000L;
+    long max_wait_time = 6000000L;
     long wait_time = 0;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] wait backends to exit")));
     while (true) {
