@@ -2905,7 +2905,7 @@ extern void pgstat_set_stmt_tag(WorkloadManagerStmtTag stmttag);
 extern ThreadId* pgstat_get_user_io_entry(Oid userid, int* num);
 extern ThreadId* pgstat_get_stmttag_write_entry(int* num);
 extern PgBackendStatusNode* pgstat_get_backend_status_by_appname(const char* appName, int* num);
-extern List* pgstat_get_user_backend_entry(Oid userid);
+extern int pgstat_get_user_backend_entry(Oid userid);
 extern void pgstat_reset_current_status(void);
 extern WaitInfo* read_current_instr_wait_info(void);
 extern TableDistributionInfo* getTableDataDistribution(
@@ -3097,6 +3097,7 @@ typedef struct IoWaitStatGlobalInfo {
 void pgstat_release_session_memory_entry();
 extern void gs_stat_free_stat_node(PgBackendStatusNode* node);
 extern void gs_stat_free_stat_beentry(PgBackendStatus* beentry);
+extern void gs_stat_free_stat_node_without_beentry(PgBackendStatusNode* node, PgBackendStatus* outbeentry = NULL);
 
 #define MAX_PATH 256
 
