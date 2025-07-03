@@ -45,7 +45,7 @@ typedef struct SSBroadcastCancelTrx {
 } SSBroadcastCancelTrx;
 
 int SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, XLogRecPtr targetRecPtr, char *buf,
-    int readLen);
+    int readLen, int readFile);
 XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data, Size alignedSize);
 void SSUpdateReformerCtrl();
 void SSReadReformerCtrl();
