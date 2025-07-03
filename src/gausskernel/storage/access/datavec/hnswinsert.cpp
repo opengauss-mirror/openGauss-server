@@ -75,7 +75,7 @@ static BlockNumber GetInsertPage(Relation index)
  */
 static bool HnswFreeOffset(Relation index, Buffer buf, Page page, HnswElement element, Size ntupSize, Buffer *nbuf,
                            Page *npage, OffsetNumber *freeOffno, OffsetNumber *freeNeighborOffno,
-                           BlockNumber *newInsertPage)
+                           BlockNumber *newInsertPage, uint8 *tupleVersion)
 {
     OffsetNumber offno;
     OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
@@ -111,6 +111,7 @@ static bool HnswFreeOffset(Relation index, Buffer buf, Page page, HnswElement el
             if (PageGetFreeSpace(*npage) + ItemIdGetLength(itemid) - sizeof(ItemIdData) >= ntupSize) {
                 *freeOffno = offno;
                 *freeNeighborOffno = neighborOffno;
+                *tupleVersion = etup->version;
                 return true;
             } else if (*nbuf != buf)
                 UnlockReleaseBuffer(*nbuf);
@@ -165,6 +166,7 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
     OffsetNumber freeOffno = InvalidOffsetNumber;
     OffsetNumber freeNeighborOffno = InvalidOffsetNumber;
     BlockNumber newInsertPage = InvalidBlockNumber;
+    uint8 tupleVersion;
     char *base = NULL;
     bool isUStore;
     IndexTransInfo *idxXid;
@@ -236,7 +238,7 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
 
         /* Next, try space from a deleted element */
         if (HnswFreeOffset(index, buf, page, e, ntupSize, &nbuf, &npage, &freeOffno, &freeNeighborOffno,
-                           &newInsertPage)) {
+                           &newInsertPage, &tupleVersion)) {
             if (nbuf != buf) {
                 if (building) {
                     npage = BufferGetPage(nbuf);
@@ -244,6 +246,10 @@ static void AddElementOnDisk(Relation index, HnswElement e, int m, BlockNumber i
                     npage = GenericXLogRegisterBuffer(state, nbuf, 0);
                 }
             }
+
+            /* Set tuple version */
+            etup->version = tupleVersion;
+            ntup->version = tupleVersion;
 
             break;
         }

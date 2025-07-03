@@ -35,6 +35,48 @@
 #include "access/datavec/rabitq.h"
 #include "access/datavec/hnswlsg.h"
 
+/* Hash tables */
+typedef struct TidHashEntry {
+    ItemPointerData tid;
+    char status;
+} TidHashEntry;
+
+#define SH_PREFIX tidhash
+#define SH_ELEMENT_TYPE TidHashEntry
+#define SH_KEY_TYPE ItemPointerData
+#define SH_SCOPE extern
+#define SH_DECLARE
+#include "lib/simplehash.h"
+
+typedef struct PointerHashEntry {
+    uintptr_t ptr;
+    char status;
+} PointerHashEntry;
+
+#define SH_PREFIX pointerhash
+#define SH_ELEMENT_TYPE PointerHashEntry
+#define SH_KEY_TYPE uintptr_t
+#define SH_SCOPE extern
+#define SH_DECLARE
+#include "lib/simplehash.h"
+
+typedef struct OffsetHashEntry {
+    Size offset;
+    char status;
+} OffsetHashEntry;
+
+#define SH_PREFIX offsethash
+#define SH_ELEMENT_TYPE OffsetHashEntry
+#define SH_KEY_TYPE Size
+#define SH_SCOPE extern
+#define SH_DECLARE
+#include "lib/simplehash.h"
+typedef union {
+    pointerhash_hash *pointers;
+    offsethash_hash *offsets;
+    tidhash_hash *tids;
+} VisitedHash;
+
 #define HNSW_MAX_DIM 2000
 #define HNSW_MAX_NNZ 1000
 
@@ -113,6 +155,8 @@
 #endif
 
 #define HNSWPQ_DEFAULT_TARGET_ROWS 300
+#define HNSW_ELEMENT_TUPLE_MIN_VERSION 1
+#define HNSW_ELEMENT_TUPLE_MAX_VERSION 15
 
 #define PQ_ENV_PATH "DATAVEC_PQ_LIB_PATH"
 #define PQ_SO_NAME "libkvecturbo.so"
@@ -192,6 +236,11 @@
         255)
 
 #define HnswGetValue(base, element) PointerGetDatum(HnswPtrAccess(base, (element)->value))
+
+#define HnswGetPairingHeapCandidate(membername, ptr) \
+(pairingheap_container(HnswPairingHeapNode, membername, ptr)->inner)
+#define HnswGetPairingHeapCandidateConst(membername, ptr) \
+(pairingheap_const_container(HnswPairingHeapNode, membername, ptr)->inner)
 
 #define relptr_offset(rp) ((rp).relptr_off - 1)
 
@@ -282,6 +331,7 @@ struct HnswElementData {
     uint8 heaptidsLength;
     uint8 level;
     uint8 deleted;
+    uint8 version;
     uint32 hash;
     HnswNeighborsPtr neighbors;
     BlockNumber blkno;
@@ -559,10 +609,10 @@ typedef struct HnswElementTupleData {
     uint8 type;
     uint8 level;
     uint8 deleted;
-    uint8 unused;
+    uint8 version;
     ItemPointerData heaptids[HNSW_HEAPTIDS];
     ItemPointerData neighbortid;
-    uint16 unused2;
+    uint16 unused;
     Vector data;
 } HnswElementTupleData;
 
@@ -570,7 +620,7 @@ typedef HnswElementTupleData *HnswElementTuple;
 
 typedef struct HnswNeighborTupleData {
     uint8 type;
-    uint8 unused;
+    uint8 version;
     uint16 count;
     ItemPointerData indextids[FLEXIBLE_ARRAY_MEMBER];
 } HnswNeighborTupleData;
@@ -600,6 +650,12 @@ typedef struct HnswScanOpaqueData {
     const HnswTypeInfo *typeInfo;
     bool first;
     List *w;
+    VisitedHash v;
+    pairingheap *discarded;
+    Datum q;
+    int m;
+    int64 tuples;
+    double previousDistance;
     MemoryContext tmpCtx;
 
     /* Support functions */
@@ -691,8 +747,10 @@ Buffer HnswNewBuffer(Relation index, ForkNumber forkNum);
 void HnswInitPage(Buffer buf, Page page);
 List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation index, FmgrInfo *procinfo, Oid collation,
                       int m, bool inserting, HnswElement skipElement, bool enableRabitQ, RabitqQueryParams *rbqParams,
-                      RabitqInsertOnDiskParams *rbqDiskParams, bool tryMmap = false, IndexScanDesc scan = NULL,
-                      bool enablePQ = false, PQSearchInfo *pqinfo = NULL, bool enableLsg = false);
+                      RabitqInsertOnDiskParams *rbqDiskParams, VisitedHash *v = NULL,
+                      pairingheap **discarded = NULL, bool initVisited = true, int64 *tuples = NULL,
+                      bool tryMmap = false, IndexScanDesc scan = NULL, bool enablePQ = false,
+                      PQSearchInfo *pqinfo = NULL, bool enableLsg = false);
 HnswElement HnswGetEntryPoint(Relation index);
 void HnswGetMetaPageInfo(Relation index, int *m, HnswElement *entryPoint);
 void *HnswAlloc(HnswAllocator *allocator, Size size);
@@ -803,49 +861,6 @@ static inline HnswNeighborArray *HnswGetNeighbors(char *base, HnswElement elemen
 
     return (HnswNeighborArray *)HnswPtrAccess(base, neighborList[lc]);
 }
-
-/* Hash tables */
-typedef struct TidHashEntry {
-    ItemPointerData tid;
-    char status;
-} TidHashEntry;
-
-#define SH_PREFIX tidhash
-#define SH_ELEMENT_TYPE TidHashEntry
-#define SH_KEY_TYPE ItemPointerData
-#define SH_SCOPE extern
-#define SH_DECLARE
-#include "lib/simplehash.h"
-
-typedef struct PointerHashEntry {
-    uintptr_t ptr;
-    char status;
-} PointerHashEntry;
-
-#define SH_PREFIX pointerhash
-#define SH_ELEMENT_TYPE PointerHashEntry
-#define SH_KEY_TYPE uintptr_t
-#define SH_SCOPE extern
-#define SH_DECLARE
-#include "lib/simplehash.h"
-
-typedef struct OffsetHashEntry {
-    Size offset;
-    char status;
-} OffsetHashEntry;
-
-#define SH_PREFIX offsethash
-#define SH_ELEMENT_TYPE OffsetHashEntry
-#define SH_KEY_TYPE Size
-#define SH_SCOPE extern
-#define SH_DECLARE
-#include "lib/simplehash.h"
-
-typedef union {
-    pointerhash_hash *pointers;
-    offsethash_hash *offsets;
-    tidhash_hash *tids;
-} VisitedHash;
 
 HnswCandidate *MMapEntryCandidate(char *base, HnswElement entryPoint, Datum q, Relation index, FmgrInfo *procinfo, Oid collation,
                                     bool loadVec, bool enableRabitQ, RabitqQueryParams *rbqParams,

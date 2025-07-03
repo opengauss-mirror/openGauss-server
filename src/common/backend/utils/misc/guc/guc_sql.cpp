@@ -354,6 +354,13 @@ static const struct config_enum_entry multi_stats_options[] = {
     {NULL, 0, false}
 };
 
+static const struct config_enum_entry hnsw_iterative_scan_options[] = {
+    {"off", HNSW_ITERATIVE_SCAN_OFF, false},
+    {"relaxed_order", HNSW_ITERATIVE_SCAN_RELAXED, false},
+    {"strict_order", HNSW_ITERATIVE_SCAN_STRICT, false},
+    {NULL, 0, false}
+};
+
 typedef struct format_behavior_compat_entry {
     const char *name; /* name of behavior compat entry */
     int flag;         /* bit flag position */
@@ -2668,6 +2675,19 @@ static void InitSqlConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"hnsw_max_scan_tuples",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Sets the max number of tuples to visit for hnsw iterative scans."),
+            gettext_noop("Valid range is -1..INT_MAX.")},
+            &u_sess->datavec_ctx.hnsw_max_scan_tuples,
+            -1,
+            -1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
         {{"ivfflat_probes",
             PGC_USERSET,
             NODE_ALL,
@@ -3466,6 +3486,18 @@ static void InitSqlConfigureNamesEnum()
             &u_sess->attr.attr_sql.multi_stats_type,
             BAYESNET_OPTION,
             multi_stats_options,
+            NULL,
+            NULL,
+            NULL},
+        {{"hnsw_iterative_scan",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Sets the mode for hnsw iterative scans."),
+            NULL},
+            &u_sess->datavec_ctx.hnsw_iterative_scan,
+            HNSW_ITERATIVE_SCAN_RELAXED,
+            hnsw_iterative_scan_options,
             NULL,
             NULL,
             NULL},
