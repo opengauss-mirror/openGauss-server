@@ -2758,7 +2758,7 @@ void dywlm_client_verify_register_internal(ClientDynamicManager* climgr)
             hash_search(climgr->dynamic_info_hashtbl, &nodes[i].qid, HASH_REMOVE, NULL);
         }
     }
-
+    gs_stat_free_stat_node_without_beentry(node);
     pfree(nodes);
 }
 
