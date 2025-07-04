@@ -90,6 +90,8 @@ SELECT * FROM test_lob;
 SELECT * FROM test_lob;
 DROP TABLE test_lob;
 
+SELECT 'E4B8ADE69687E6B58BE8AF95'::blob::clob;
+
 /* d.Varchar,char and Varchar2 type*/
 CREATE TABLE char_t(c1 varchar2(12), c2 char(10), c3 varchar(12));
 insert into char_t values('varchar2test','chartest','varchartest');

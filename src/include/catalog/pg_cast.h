@@ -460,6 +460,7 @@ DATA(insert (  869 3969  730 a f _null_));
 DATA(insert (	16 3969 2971 a f _null_));
 DATA(insert (  142 3969    0 a b _null_));
 DATA(insert ( 3969	142 2896 e f _null_));
+DATA(insert (   88   90    0 a b _null_));
 
 /*
  * Cross-category casts to and from BPCHAR
