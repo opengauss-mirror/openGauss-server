@@ -763,6 +763,7 @@
 ./lib/postgresql/pgoutput.so
 ./lib/postgresql/spq.so*
 ./lib/libxgboost.so
+./lib/libsecurec.so
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
 ./include/postgresql/server/pgtime.h
