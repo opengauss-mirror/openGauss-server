@@ -780,18 +780,6 @@ static T_Int FetchLogLocal(T_Int* next, T_Int* result, T_Int* last, T_Int maxv, 
     return log;
 }
 
-template<typename T, bool large>
-static Datum GetIntDefVal(TypeName* name, T value)
-{
-    if (large) {
-        *name = makeTypeNameFromOid(INT16OID, -1);
-        return Int128GetDatum(value);
-    } else {
-        *name = makeTypeNameFromOid(INT8OID, -1);
-        return Int64GetDatumFast(value);
-    }
-}
-
 ObjectAddress DefineSequenceWrapper(CreateSeqStmt* seq)
 {
     if (seq->is_large) {

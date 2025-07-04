@@ -25,6 +25,7 @@
 #define C_STRINGS_MAP_H
 #include <cstdio>
 #include <string>
+#include <cstdint>
 
 #define MAX_VAL_LEN 1024
 #define NAMEDATALEN 64
