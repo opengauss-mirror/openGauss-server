@@ -275,6 +275,7 @@ PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls)
 
     beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + BackendStatusArray_size - 1;
     localtable = (PgBackendStatusNode*)palloc(sizeof(PgBackendStatusNode));
+    localtable->data = NULL;
     localtable->next = NULL;
     PgBackendStatusNode* tmpLocaltable = localtable;
 
@@ -300,11 +301,12 @@ PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls)
             localentry = (PgBackendStatus*)palloc0(sizeof(PgBackendStatus));
         }
         if (gs_stat_encap_status_info(localentry, beentry)) {
+            tmpLocaltable->data = localentry;
             PgBackendStatusNode* entry_node = (PgBackendStatusNode*)palloc(sizeof(PgBackendStatusNode));
-            entry_node->data = localentry;
+            entry_node->data = NULL;
+            entry_node->next = NULL;
             tmpLocaltable->next = entry_node;
-            tmpLocaltable = tmpLocaltable->next;
-            tmpLocaltable->next = NULL;
+            tmpLocaltable = entry_node;
             if (maxCalls != NULL) {
                 (*maxCalls)++;
             }
@@ -321,7 +323,7 @@ PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls)
         localentry = NULL;
     }
     (void)MemoryContextSwitchTo(oldContext);
-    return localtable->next;
+    return localtable;
 }
 
 // Using TupleStore to optimize the process
@@ -385,21 +387,23 @@ PgBackendStatus* gs_stat_fetch_stat_beentry(int32 beid)
     }
 
     PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
+    PgBackendStatusNode* temp = node;
     while (node != NULL) {
         beentry = node->data;
         if (beentry != NULL) {
             if (index == beid) {
+                gs_stat_free_stat_node_without_beentry(temp, beentry);
                 return beentry;
             }
         }
         index++;
         node = node->next;
     }
-
+    gs_stat_free_stat_node_without_beentry(temp);
     return NULL;
 }
 
-void gs_stat_free_stat_node(PgBackendStatusNode* node)
+void gs_stat_free_stat_node_without_beentry(PgBackendStatusNode* node, PgBackendStatus* outbeentry)
 {
     PgBackendStatusNode* tmpNode = node;
     PgBackendStatusNode* freeNode = NULL;
@@ -407,11 +411,18 @@ void gs_stat_free_stat_node(PgBackendStatusNode* node)
  
     while (tmpNode != NULL) {
         beentry = tmpNode->data;
-        gs_stat_free_stat_beentry(beentry);
+        if (outbeentry != beentry) {
+            gs_stat_free_stat_beentry(beentry);
+        }
         freeNode = tmpNode;
         tmpNode = tmpNode->next;
         pfree_ext(freeNode);
     }
+}
+
+void gs_stat_free_stat_node(PgBackendStatusNode* node)
+{
+    gs_stat_free_stat_node_without_beentry(node);
 }
 
 void gs_stat_free_stat_beentry(PgBackendStatus* beentry)

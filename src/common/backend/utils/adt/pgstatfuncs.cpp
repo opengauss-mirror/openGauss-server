@@ -4180,6 +4180,7 @@ Datum pg_stat_get_backend_pid(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
     st_procpid = beentry->st_procpid;
+    gs_stat_free_stat_beentry(beentry);
     PG_RETURN_INT64(st_procpid);
 }
 
@@ -4193,6 +4194,7 @@ Datum pg_stat_get_backend_dbid(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
     st_databaseid = beentry->st_databaseid;
+    gs_stat_free_stat_beentry(beentry);
     PG_RETURN_OID(st_databaseid);
 }
 
@@ -4205,12 +4207,13 @@ Datum pg_stat_get_backend_userid(PG_FUNCTION_ARGS)
     if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL) {
         PG_RETURN_NULL();
     }
-    if ((!superuser()) && (beentry->st_userid != GetUserId())) {
+    st_userid = beentry->st_userid;
+    gs_stat_free_stat_beentry(beentry);
+    if ((!superuser()) && (st_userid != GetUserId())) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("must be system admin or owner to use this function")));
     }
-    st_userid = beentry->st_userid;
     PG_RETURN_OID(st_userid);
 }
 
@@ -4230,6 +4233,7 @@ Datum pg_stat_get_backend_activity(PG_FUNCTION_ARGS)
         activity = beentry->st_activity;
 
     result = cstring_to_text(activity);
+    gs_stat_free_stat_beentry(beentry);
 
     PG_RETURN_TEXT_P(result);
 }
@@ -4243,10 +4247,13 @@ Datum pg_stat_get_backend_waiting(PG_FUNCTION_ARGS)
     if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL)
         PG_RETURN_NULL();
 
-    if (!superuser() && beentry->st_userid != GetUserId())
+    if (!superuser() && beentry->st_userid != GetUserId()) {
+        gs_stat_free_stat_beentry(beentry);
         PG_RETURN_NULL();
+    }
 
     result = pgstat_get_waitlock(beentry->st_waitevent);
+    gs_stat_free_stat_beentry(beentry);
     PG_RETURN_BOOL(result);
 }
 
@@ -4259,10 +4266,13 @@ Datum pg_stat_get_backend_activity_start(PG_FUNCTION_ARGS)
     if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL)
         PG_RETURN_NULL();
 
-    if (!superuser() && beentry->st_userid != GetUserId())
+    if (!superuser() && beentry->st_userid != GetUserId()) {
+        gs_stat_free_stat_beentry(beentry);
         PG_RETURN_NULL();
+    }
 
     result = beentry->st_activity_start_timestamp;
+    gs_stat_free_stat_beentry(beentry);
     /*
      * No time recorded for start of current query -- this is the case if the
      * user hasn't enabled query-level stats collection.
@@ -4283,9 +4293,11 @@ Datum pg_stat_get_backend_xact_start(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
 
     if (!superuser() && beentry->st_userid != GetUserId()) {
+        gs_stat_free_stat_beentry(beentry);
         PG_RETURN_NULL();
     }
     result = beentry->st_xact_start_timestamp;
+    gs_stat_free_stat_beentry(beentry);
 
     if (result == 0) /* not in a transaction */
         PG_RETURN_NULL();
@@ -4303,10 +4315,12 @@ Datum pg_stat_get_backend_start(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
 
     if (!superuser() && beentry->st_userid != GetUserId()) {
+        gs_stat_free_stat_beentry(beentry);
         PG_RETURN_NULL();
     }
 
     result = beentry->st_proc_start_timestamp;
+    gs_stat_free_stat_beentry(beentry);
 
     if (result == 0) /* probably can't happen? */
         PG_RETURN_NULL();
@@ -4327,6 +4341,7 @@ Datum pg_stat_get_backend_client_addr(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
 
     if (!superuser() && beentry->st_userid != GetUserId()) {
+        gs_stat_free_stat_beentry(beentry);
         PG_RETURN_NULL();
     }
 
@@ -4334,6 +4349,7 @@ Datum pg_stat_get_backend_client_addr(PG_FUNCTION_ARGS)
     rc = memset_s(&zero_clientaddr, sizeof(zero_clientaddr), 0, sizeof(zero_clientaddr));
     securec_check(rc, "\0", "\0");
     if (memcmp(&(beentry->st_clientaddr), &zero_clientaddr, sizeof(zero_clientaddr)) == 0) {
+        gs_stat_free_stat_beentry(beentry);
         PG_RETURN_NULL();
     }
     switch (beentry->st_clientaddr.addr.ss_family) {
@@ -4342,7 +4358,8 @@ Datum pg_stat_get_backend_client_addr(PG_FUNCTION_ARGS)
         case AF_INET6:
 #endif
             break;
-        default:            
+        default:
+            gs_stat_free_stat_beentry(beentry);          
             PG_RETURN_NULL();
             break;
     }
@@ -4356,9 +4373,11 @@ Datum pg_stat_get_backend_client_addr(PG_FUNCTION_ARGS)
         0,
         NI_NUMERICHOST | NI_NUMERICSERV);
     if (ret != 0) {
+        gs_stat_free_stat_beentry(beentry);
         PG_RETURN_NULL();
     }
     clean_ipv6_addr(beentry->st_clientaddr.addr.ss_family, remote_host);
+    gs_stat_free_stat_beentry(beentry);
     PG_RETURN_INET_P(DirectFunctionCall1(inet_in, CStringGetDatum(remote_host)));
 }
 
@@ -4374,12 +4393,14 @@ Datum pg_stat_get_backend_client_port(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
 
     if (!superuser() && beentry->st_userid != GetUserId()) {
+        gs_stat_free_stat_beentry(beentry);
         PG_RETURN_NULL();
     }
     /* A zeroed client addr means we don't know */
     errno_t rc = memset_s(&zero_clientaddr, sizeof(zero_clientaddr), 0, sizeof(zero_clientaddr));
     securec_check(rc, "\0", "\0");
     if (memcmp(&(beentry->st_clientaddr), &zero_clientaddr, sizeof(zero_clientaddr)) == 0) {
+        gs_stat_free_stat_beentry(beentry);
         PG_RETURN_NULL();
     }
     switch (beentry->st_clientaddr.addr.ss_family) {
@@ -4388,9 +4409,11 @@ Datum pg_stat_get_backend_client_port(PG_FUNCTION_ARGS)
         case AF_INET6:
 #endif
             break;
-        case AF_UNIX:            
+        case AF_UNIX:  
+            gs_stat_free_stat_beentry(beentry);          
             PG_RETURN_INT32(-1);
         default:
+            gs_stat_free_stat_beentry(beentry);
             PG_RETURN_NULL();
             break;
     }
@@ -4403,6 +4426,7 @@ Datum pg_stat_get_backend_client_port(PG_FUNCTION_ARGS)
         remote_port,
         sizeof(remote_port),
         NI_NUMERICHOST | NI_NUMERICSERV);
+    gs_stat_free_stat_beentry(beentry);
     if (ret != 0) {
         PG_RETURN_NULL();
     }
@@ -4858,6 +4882,7 @@ Datum pg_stat_get_mem_mbytes_reserved(PG_FUNCTION_ARGS)
     /*get backend status with thread id*/
     PgBackendStatus* beentry = NULL;
     PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
+    PgBackendStatusNode* temp = node;
     while (node != NULL) {
         PgBackendStatus* tmpBeentry = node->data;
         if ((tmpBeentry != NULL) && (tmpBeentry->st_sessionid == pid)) {
@@ -4892,7 +4917,7 @@ Datum pg_stat_get_mem_mbytes_reserved(PG_FUNCTION_ARGS)
 
         result = buf.data;
     }
-
+    gs_stat_free_stat_node_without_beentry(temp);
     PG_RETURN_TEXT_P(cstring_to_text(result));
 }
 
