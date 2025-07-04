@@ -16,7 +16,6 @@ declare product_mode='opengauss'
 declare extra_config_opt=''
 
 declare -a DEPENDENCIES_YUM=(
-    "jemalloc-devel"
     "libedit-devel"
     "libxml2-devel"
     "lz4-devel"
