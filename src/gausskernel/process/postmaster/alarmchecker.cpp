@@ -85,24 +85,24 @@ void DataInstAlarmItemInitialize(void)
     int i = 0;
     // ALM_AI_MissingDataInstDataOrRedoDir
     AlarmItemInitialize(
-        &(DataInstAlarmList[i++]), ALM_AI_MissingDataInstDataOrRedoDir, ALM_AS_Normal, DataOrRedoDirNotExistChecker);
+        &(DataInstAlarmList[i++]), ALM_AI_MissingDataInstDataOrRedoDir, ALM_AS_Init, DataOrRedoDirNotExistChecker);
     // ALM_AI_MissingDataInstWalSegmt
     AlarmItemInitialize(
-        &(DataInstAlarmList[i++]), ALM_AI_MissingDataInstWalSegmt, ALM_AS_Normal, WalSegmentsRemovedChecker);
+        &(DataInstAlarmList[i++]), ALM_AI_MissingDataInstWalSegmt, ALM_AS_Init, WalSegmentsRemovedChecker);
     // ALM_AI_TooManyDataInstConn
     AlarmItemInitialize(
-        &(DataInstAlarmList[i++]), ALM_AI_TooManyDataInstConn, ALM_AS_Normal, ConnectionOverloadChecker);
+        &(DataInstAlarmList[i++]), ALM_AI_TooManyDataInstConn, ALM_AS_Init, ConnectionOverloadChecker);
     // ALM_AI_AbnormalDataInstArch
-    AlarmItemInitialize(&(DataInstAlarmList[i++]), ALM_AI_AbnormalDataInstArch, ALM_AS_Normal, DataInstArchChecker);
+    AlarmItemInitialize(&(DataInstAlarmList[i++]), ALM_AI_AbnormalDataInstArch, ALM_AS_Init, DataInstArchChecker);
     // ALM_AI_AbnormalDataInstConnAuthMethod
     AlarmItemInitialize(
-        &(DataInstAlarmList[i++]), ALM_AI_AbnormalDataInstConnAuthMethod, ALM_AS_Normal, ConnAuthMethodChecker);
+        &(DataInstAlarmList[i++]), ALM_AI_AbnormalDataInstConnAuthMethod, ALM_AS_Init, ConnAuthMethodChecker);
     // ALM_AI_AbnormalDataInstConnToGTM
     AlarmItemInitialize(
-        &(DataInstAlarmList[i++]), ALM_AI_AbnormalDataInstConnToGTM, ALM_AS_Normal, DataInstConnToGTMChecker);
+        &(DataInstAlarmList[i++]), ALM_AI_AbnormalDataInstConnToGTM, ALM_AS_Init, DataInstConnToGTMChecker);
     // ALM_AI_XlogAccumulate
     AlarmItemInitialize(
-        &(DataInstAlarmList[i++]), ALM_AI_XlogAccumulate, ALM_AS_Normal, XlogOverloadChecker);
+        &(DataInstAlarmList[i++]), ALM_AI_XlogAccumulate, ALM_AS_Init, XlogOverloadChecker);
 }
 
 void PrepareAlarmEnvironment()
