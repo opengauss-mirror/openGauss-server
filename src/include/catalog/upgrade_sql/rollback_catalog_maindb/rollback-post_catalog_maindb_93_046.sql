@@ -57,4 +57,6 @@ DROP TABLE IF EXISTS pg_catalog.gs_sql_limit;
 
 DROP FUNCTION IF EXISTS pg_catalog.realtime_build_queue_status() CASCADE;
 
-DROP FUNCTION IF EXISTS dbe_perf.get_statement_history(IN in_time timestamp with time zone) CASCADE;
+DROP FUNCTION IF EXISTS dbe_perf.get_statement_history(
+    IN start_time_point timestamp with time zone,
+    IN finish_time_point timestamp with time zone) CASCADE;

@@ -4717,7 +4717,9 @@ CREATE OR REPLACE FUNCTION pg_catalog.raise_application_error(
 AS '$libdir/plpgsql', 'raise_application_error'
 LANGUAGE C VOLATILE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION dbe_perf.get_statement_history(IN in_time timestamp with time zone)
+CREATE OR REPLACE FUNCTION dbe_perf.get_statement_history(
+    IN start_time_point timestamp with time zone,
+    IN finish_time_point timestamp with time zone)
 RETURNS TABLE (
     db_name name,
     schema_name name,
@@ -4798,9 +4800,9 @@ BEGIN
     SELECT local_role INTO node_role FROM pg_stat_get_stream_replications() LIMIT 1;
     
     IF node_role = 'Primary' OR node_role = 'Normal' THEN
-        RETURN QUERY SELECT * FROM dbe_perf.statement_history where finish_time >= in_time and is_slow_sql = 't';
-    ELSIF node_role = 'Standby' OR node_role = 'Cascade Standby' THEN
-        RETURN QUERY SELECT * FROM dbe_perf.standby_statement_history(true, in_time, now());
+        RETURN QUERY SELECT * FROM dbe_perf.statement_history where start_time >= start_time_point and is_slow_sql = 't';
+    ELSIF node_role = 'Standby' OR node_role = 'Cascade Standby' OR node_role = 'Main Standby' THEN
+        RETURN QUERY SELECT * FROM dbe_perf.standby_statement_history(true, finish_time_point, now());
     ELSE
         RAISE EXCEPTION 'unknown node role: %', node_role;
     END IF;
