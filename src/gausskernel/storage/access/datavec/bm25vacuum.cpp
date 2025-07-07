@@ -34,20 +34,6 @@ struct DeleteToken {
     Vector<uint32> docIds;
 };
 
-static BlockNumber FindForwrdBlock(Relation index, BlockNumber startBlkno, uint64 tokenStartIdx)
-{
-    Buffer cbuf;
-    Page cpage;
-    uint32 step = tokenStartIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
-    for (uint32 i = 0; i < step; i++) {
-        cbuf = ReadBuffer(index, startBlkno);
-        LockBuffer(cbuf, BUFFER_LOCK_SHARE);
-        startBlkno = BM25PageGetOpaque(cpage)->nextblkno;
-        UnlockReleaseBuffer(cbuf);
-    }
-    return startBlkno;
-}
-
 static void MarkDeleteDocuments(Relation index, IndexBulkDeleteCallback callback, void *callbackState,
     Vector<BM25DocumentItem> &deleteDocs, BM25EntryPages &entryPages, BufferAccessStrategy &bas)
 {
@@ -75,7 +61,7 @@ static void MarkDeleteDocuments(Relation index, IndexBulkDeleteCallback callback
 
         state = GenericXLogStart(index);
         cpage = GenericXLogRegisterBuffer(state, cbuf, GENERIC_XLOG_FULL_IMAGE);
-        for (int i = 0; i < BM25_DOCUMENT_MAX_COUNT_IN_PAGE; i++) {
+        for (uint32 i = 0; i < BM25_DOCUMENT_MAX_COUNT_IN_PAGE; i++) {
             BM25DocumentItem *docItem =
                 (BM25DocumentItem*)((char *)cpage + sizeof(PageHeaderData) + i * BM25_DOCUMENT_ITEM_SIZE);
             if (docItem->isActived && callback(&docItem->ctid.t_tid, callbackState, InvalidOid, InvalidBktId)) {
@@ -328,7 +314,6 @@ static void AddDocIdsIntoFreeList(Relation index, Vector<BM25DocumentItem> &dele
     Page page;
     GenericXLogState *state = nullptr;
     BlockNumber curFreePage = entryPages.docmentFreePage;
-    bool finished = false;
     uint32 docIdx = 0;
     uint32 itemSize = MAXALIGN(sizeof(BM25FreeDocumentItem));
 

@@ -286,7 +286,7 @@ static void knl_u_parser_init(knl_u_parser_context* parser_cxt)
     parser_cxt->stmt = NULL;
 }
 
-static void knl_u_advisor_init(knl_u_advisor_context* adv_cxt) 
+static void knl_u_advisor_init(knl_u_advisor_context* adv_cxt)
 {
     adv_cxt->adviseMode = AM_NONE;
     adv_cxt->adviseType = AT_NONE;
@@ -499,7 +499,7 @@ static void knl_u_security_init(knl_u_security_context* sec_cxt) {
     sec_cxt->roleid_callback_registered = false;
 }
 
-static void knl_u_streaming_init(knl_u_streaming_context* streaming_cxt) 
+static void knl_u_streaming_init(knl_u_streaming_context* streaming_cxt)
 {
     streaming_cxt->gather_session = false;
     streaming_cxt->streaming_ddl_session = false;
@@ -1357,7 +1357,7 @@ static void knl_u_erand_init(knl_u_erand_context* rand_cxt)
         seed = t_thrd.postmaster_cxt.random_start_time.tv_usec ^
                ((time.tv_usec << 16) | ((time.tv_usec >> 16) & 0xffff));
     } while (seed == 0);
-    
+
     rand_cxt->rand48_seed[0] = RAND48_SEED_0;
     rand_cxt->rand48_seed[1] = (unsigned short)seed;
     rand_cxt->rand48_seed[2] = (unsigned short)(seed >> 16);
@@ -1488,6 +1488,12 @@ static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
 
 static void knl_u_bm25_init(knl_u_bm25_context* bm25_context)
 {
+    bm25_context->indexOids = NIL;
+    bm25_context->indexOidForCount = InvalidOid;
+    bm25_context->insertTupleNum = 0;
+    bm25_context->insertXid = InvalidTransactionId;
+    bm25_context->isFirstTuple = true;
+
     bm25_context->scoreHashTable = nullptr;
 }
 
@@ -1593,6 +1599,7 @@ void knl_session_init(knl_session_context* sess_cxt)
 
     knl_u_opfusion_reuse_init(&sess_cxt->opfusion_reuse_ctx);
 
+    knl_u_bm25_init(&sess_cxt->bm25_ctx);
     knl_u_datavec_init(&sess_cxt->datavec_ctx);
 
     MemoryContextSeal(sess_cxt->top_mem_cxt);
@@ -1790,7 +1797,7 @@ bool stp_set_commit_rollback_err_msg(stp_xact_err_type type)
                 break;
         }
         if (rt < 0 || rt > ((int)maxMsgLen)) {
-            ereport(ERROR, (errmsg("string of invalid transaction message would overflow buffer"))); 
+            ereport(ERROR, (errmsg("string of invalid transaction message would overflow buffer")));
         }
         return true;
     }

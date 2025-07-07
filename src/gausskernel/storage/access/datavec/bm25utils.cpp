@@ -448,3 +448,68 @@ BlockNumber SeekBlocknoForForwardToken(Relation index, uint32 forwardIdx, BlockN
 
     return docForwardBlkno;
 }
+
+void BM25BatchInsertRecord(Relation index)
+{
+    Oid indexOid = RelationGetRelid(index);
+    knl_u_bm25_context* bm25_ctx = &u_sess->bm25_ctx;
+
+    /* means insert the second tuple */
+    if (unlikely(indexOid == bm25_ctx->indexOidForCount && bm25_ctx->insertTupleNum == 1)) {
+        bm25_ctx->isFirstTuple = false;
+    }
+
+    /* record first index oid and count tuple num */
+    if (unlikely(!OidIsValid(bm25_ctx->indexOidForCount))) {
+        bm25_ctx->insertXid = GetCurrentTransactionIdIfAny();
+        bm25_ctx->indexOidForCount = indexOid;
+        bm25_ctx->insertTupleNum += 1;
+        bm25_ctx->indexOids = lappend_oid(bm25_ctx->indexOids, indexOid);
+        return;
+    }
+
+    if (likely(bm25_ctx->indexOidForCount == indexOid)) {
+        bm25_ctx->insertTupleNum += 1;
+    } else if (bm25_ctx->isFirstTuple) {
+        bm25_ctx->indexOids = lappend_oid(bm25_ctx->indexOids, indexOid);
+    }
+}
+
+void BM25BatchInsertResetRecord()
+{
+    list_free_ext(u_sess->bm25_ctx.indexOids);
+    u_sess->bm25_ctx.indexOidForCount = InvalidOid;
+    u_sess->bm25_ctx.insertTupleNum = 0;
+    u_sess->bm25_ctx.insertXid = InvalidTransactionId;
+    u_sess->bm25_ctx.isFirstTuple = true;
+}
+
+void BM25BatchInsertAbort()
+{
+    Oid indexOid;
+    Relation index;
+    Buffer buf;
+    Page page;
+    GenericXLogState *state = nullptr;
+    BM25MetaPage metapBuf;
+    ListCell *lc = NULL;
+
+    if (u_sess->bm25_ctx.indexOids == NIL) {
+        return;
+    }
+
+    foreach (lc, u_sess->bm25_ctx.indexOids) {
+        Oid indexOid = (Oid)lfirst_oid(lc);
+        index = index_open(indexOid, NoLock);
+        buf = ReadBuffer(index, BM25_METAPAGE_BLKNO);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        BM25GetPage(index, &page, buf, &state, false);
+        metapBuf = BM25PageGetMeta(page);
+        if (unlikely(metapBuf->magicNumber != BM25_MAGIC_NUMBER))
+            elog(ERROR, "bm25 index is not valid");
+        metapBuf->lastBacthInsertFailed = true;
+        BM25CommitBuf(buf, &state, false);
+        index_close(index, NoLock);
+    }
+    BM25BatchInsertResetRecord();
+}

@@ -3019,6 +3019,12 @@ typedef struct knl_u_datavec_context {
 
 struct BM25ScanDocScoreHashTable;
 typedef struct knl_u_bm25_context {
+    List* indexOids;
+    Oid indexOidForCount;
+    uint32 insertTupleNum;
+    TransactionId insertXid;
+    bool isFirstTuple;
+
     BM25ScanDocScoreHashTable *scoreHashTable;
 } knl_u_bm25_context;
 
