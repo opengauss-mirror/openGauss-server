@@ -4868,7 +4868,7 @@ int pgstat_get_current_active_numbackends(void)
     }
 
     PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
-
+    PgBackendStatusNode* temp = node;
     while (node != NULL) {
         PgBackendStatus* beentry = node->data;
 
@@ -4887,6 +4887,7 @@ int pgstat_get_current_active_numbackends(void)
     if (result_counter > g_instance.attr.attr_network.MaxConnections)
         result_counter = g_instance.attr.attr_network.MaxConnections;
 
+    gs_stat_free_stat_node_without_beentry(temp);
     return result_counter;
 }
 
@@ -4920,18 +4921,19 @@ PgBackendStatus* pgstat_get_backend_single_entry(uint64 sessionid)
  * @Return: user data list
  * @See also:
  */
-List* pgstat_get_user_backend_entry(Oid userid)
+int pgstat_get_user_backend_entry(Oid userid)
 {
     // If BackendStatusArray is NULL, we will get it from other thread.
     if (t_thrd.shemem_ptr_cxt.BackendStatusArray == NULL) {
         if (PgBackendStatusArray != NULL)
             t_thrd.shemem_ptr_cxt.BackendStatusArray = PgBackendStatusArray;
         else
-            return NULL;
+            return 0;
     }
 
-    List* entry_list = NULL;
+    int ret = 0;
     PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
+    PgBackendStatusNode* temp = node;
 
     while (node != NULL) {
         PgBackendStatus* beentry = node->data;
@@ -4959,14 +4961,16 @@ List* pgstat_get_user_backend_entry(Oid userid)
                     (strcmp(backstat->enqueue, "None") == 0 || strcmp(backstat->enqueue, "Respool") == 0)) ||
                 (backstat->status && strcmp(backstat->status, "finished") == 0 && backstat->enqueue &&
                     strcmp(backstat->enqueue, "Respool") == 0)) {
-                entry_list = lappend(entry_list, beentry);
+                if (!(superuser_arg(beentry->st_userid) || systemDBA_arg(beentry->st_userid))) {
+                    ++ret;
+                }
             }
         }
 
         node = node->next;
     }
-
-    return entry_list;
+    gs_stat_free_stat_node_without_beentry(temp);
+    return ret;
 }
 /*
  * @Description: get user backend entry
@@ -4989,13 +4993,16 @@ ThreadId* pgstat_get_user_io_entry(Oid userid, int* num)
 
     uint32 num_backends = 0;
     PgBackendStatusNode* node = gs_stat_read_current_status(&num_backends);
-    if (num_backends == 0)
+    PgBackendStatusNode* temp = node;
+    if (num_backends == 0) {
+        gs_stat_free_stat_node_without_beentry(temp);
         return NULL;
-
+    }
     Assert(!u_sess->stat_cxt.pgStatRunningInCollector);
 
     ThreadId* threads = (ThreadId*)palloc0_noexcept(num_backends * sizeof(ThreadId));
     if (threads == NULL) {
+        gs_stat_free_stat_node_without_beentry(temp);
         pgstat_reset_current_status();
         ereport(LOG, (errmsg("alloc memory failed for get user io entry.")));
         return NULL;
@@ -5017,7 +5024,7 @@ ThreadId* pgstat_get_user_io_entry(Oid userid, int* num)
     }
 
     *num = idx;
-
+    gs_stat_free_stat_node_without_beentry(temp);
     pgstat_reset_current_status();
 
     return threads;
@@ -5043,14 +5050,18 @@ ThreadId* pgstat_get_stmttag_write_entry(int* num)
 
     uint32 num_backends = 0;
     PgBackendStatusNode* node = gs_stat_read_current_status(&num_backends);
-    if (num_backends == 0)
+    PgBackendStatusNode* temp = node;
+    if (num_backends == 0) {
+        gs_stat_free_stat_node_without_beentry(temp);
         return NULL;
+    }
 
     Assert(!u_sess->stat_cxt.pgStatRunningInCollector);
 
     ThreadId* threads = (ThreadId*)palloc0_noexcept(num_backends * sizeof(ThreadId));
 
     if (threads == NULL) {
+        gs_stat_free_stat_node_without_beentry(temp);
         pgstat_reset_current_status();
         ereport(WARNING, (errmsg("Failed to allocate memory for get io write entry.")));
         return NULL;
@@ -5078,7 +5089,7 @@ ThreadId* pgstat_get_stmttag_write_entry(int* num)
     }
 
     *num = idx;
-
+    gs_stat_free_stat_node_without_beentry(temp);
     pgstat_reset_current_status();
 
     return threads;
@@ -5469,6 +5480,7 @@ static void PgstatCollectThreadStatus(void)
     pgstat_collect_thread_status_setup_memcxt();
 
     PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
+    PgBackendStatusNode* temp = node;
     while (node != NULL) {
         PgBackendStatus* beentry = node->data;
         node = node->next;
@@ -5499,7 +5511,7 @@ static void PgstatCollectThreadStatus(void)
 
         pfree(wait_status);
     }
-
+    gs_stat_free_stat_node_without_beentry(temp);
     pgstat_collect_thread_status_clear_resource();
 }
 
