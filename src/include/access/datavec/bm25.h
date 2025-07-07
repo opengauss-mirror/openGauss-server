@@ -107,6 +107,7 @@ typedef struct BM25MetaPageData {
     uint64 tokenCount;
     uint32 nextDocId;
     uint32 nextTokenId;
+    bool lastBacthInsertFailed;
 } BM25MetaPageData;
 
 typedef BM25MetaPageData *BM25MetaPage;
@@ -325,6 +326,9 @@ BM25TokenizedDocData BM25DocumentTokenize(const char* doc, bool cutForSearch = f
 void RecordDocForwardBlkno2DocForwardBlknoTable(Relation index, BM25DocForwardMetaPage metaForwardPage,
     BlockNumber newDocForwardBlkno, bool building, ForkNumber forkNum);
 BlockNumber SeekBlocknoForForwardToken(Relation index, uint32 forwardIdx, BlockNumber docForwardBlknoTable);
+void BM25BatchInsertRecord(Relation index);
+void BM25BatchInsertAbort();
+void BM25BatchInsertResetRecord();
 
 Datum bm25build(PG_FUNCTION_ARGS);
 Datum bm25buildempty(PG_FUNCTION_ARGS);
