@@ -13,7 +13,7 @@ ENV LANG en_US.utf8
 #RUN yum install -y epel-release
 
 RUN set -eux; \
-    yum install -y bzip2 curl libaio shadow tar jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd java-1.8.0-openjdk-devel openssl-devel && \
+    yum install -y bzip2 curl libaio shadow tar jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd java-1.8.0-openjdk-devel openssl-devel wget && \
     groupadd -g 70 omm; \
     useradd -u 70 -g omm -d /home/omm omm; \
     mkdir -p /var/lib/opengauss && \
@@ -24,6 +24,10 @@ RUN set -eux; \
     chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
     chmod 2777 /var/run/opengauss && \
     rm -rf openGauss-Server-${VERSION}-openEuler22.03-aarch64.tar.bz2 && \
+    wget https://kunpeng-repo.obs.cn-north-4.myhuaweicloud.com/Kunpeng%20BoostKit/Kunpeng%20BoostKit%2025.0.RC1/BoostKit-SRA_Recall-1.1.0.zip && \
+    unzip BoostKit-SRA_Recall-1.1.0.zip && \
+    rpm -ivf boostkit-sra_recall-1.1.0-1.aarch64.rpm && \
+    rm -rf BoostKit-SRA_Recall-1.1.0.zip && \
     tar -xzvf scws.tar.gz; chown -R omm:omm /scws; rm -rf scws.tar.gz && \
     chmod 1777 /tmp && \
     yum clean all
@@ -31,7 +35,8 @@ RUN set -eux; \
 RUN set -eux; \
     echo "export GAUSSHOME=/usr/local/opengauss"  >> /home/omm/.bashrc && \
     echo "export PATH=\$GAUSSHOME/bin:\$PATH " >> /home/omm/.bashrc && \
-    echo "export LD_LIBRARY_PATH=\$GAUSSHOME/lib:\$LD_LIBRARY_PATH" >> /home/omm/.bashrc
+    echo "export LD_LIBRARY_PATH=\$GAUSSHOME/lib:\$LD_LIBRARY_PATH" >> /home/omm/.bashrc && \
+    echo "export DATAVEC_PQ_LIB_PATH=/usr/local/sra_recall/lib" >> /home/omm/.bashrc
 
 RUN set -eux; echo "export TMOUT=0 >> /etc/bashrc"
 

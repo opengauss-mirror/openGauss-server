@@ -260,7 +260,6 @@ typedef struct knl_instance_attr_storage {
     int uwal_truncate_interval;
     bool uwal_async_append_switch;
 
-    bool enable_pq;
     bool enable_ivfflat_npu;
     bool cache_data_on_npu;
     char* ivfflat_npubind_info;
