@@ -200,6 +200,7 @@ static void TransformModifyColumndef(CreateStmtContext* cxt, AlterTableCmd* cmd)
 static void TransformColumnDefinitionOptions(CreateStmtContext* cxt, ColumnDef* column);
 static void TransformColumnDefinitionConstraints(
     CreateStmtContext* cxt, ColumnDef* column, bool preCheck, bool is_modify);
+extern Oid pg_get_serial_sequence_internal(Oid tableOid, AttrNumber attnum, bool find_identity, char** out_seq_name);
 #define REDIS_SCHEMA "data_redis"
 
 /*
@@ -1026,13 +1027,9 @@ static void checkSeqInAlterStmt(CreateStmtContext* cxt)
     HeapTuple tuple;
     Form_pg_attribute attrForm;
     char* columnName;
-    FunctionCallInfoData funcinfo;
-    char* sequenceName;
-    Datum re_seq;
     Datum DaRel;
     bool isdropped = false;
 
-    InitFunctionCallInfoData(funcinfo, NULL, 2, InvalidOid, NULL, NULL);
     attRelation = heap_open(AttributeRelationId, AccessShareLock);
 
     rel = heap_openrv(cxt->relation, AccessShareLock);
@@ -1048,20 +1045,13 @@ static void checkSeqInAlterStmt(CreateStmtContext* cxt)
         if (isdropped) {
             continue;
         }
-        funcinfo.arg[0] = CStringGetTextDatum(cxt->relation->relname);
-        funcinfo.arg[1] = CStringGetTextDatum(columnName);
-        re_seq = pg_get_serial_sequence(&funcinfo);
-        if (re_seq != NULL) {
-            sequenceName = TextDatumGetCString(re_seq);
-        } else {
-            continue;
-        }
 
-        if (sequenceName != NULL && StrEndWith(sequenceName, "_seq_identity"))
+        if (OidIsValid(pg_get_serial_sequence_internal(RelationGetRelid(rel), attrForm->attnum, true, NULL))) {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-                                   errmsg("multiple identity specifications for column \"%s\" of table \"%s\"",
+                            errmsg("multiple identity specifications for column \"%s\" of table \"%s\"",
                                    columnName, cxt->relation->relname),
-                                   parser_errposition(cxt->pstate, -1)));
+                            parser_errposition(cxt->pstate, -1)));
+        }
     }
     systable_endscan(scan);
     heap_close(rel, AccessShareLock);

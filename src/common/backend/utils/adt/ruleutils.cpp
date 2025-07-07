@@ -4536,40 +4536,13 @@ Datum pg_check_authid(PG_FUNCTION_ARGS)
     }
 }
 
-/*
- * pg_get_serial_sequence
- *		Get the name of the sequence used by a serial column,
- *		formatted suitably for passing to setval, nextval or currval.
- *		First parameter is not treated as double-quoted, second parameter
- *		is --- see documentation for reason.
- */
-Datum pg_get_serial_sequence(PG_FUNCTION_ARGS)
+Oid pg_get_serial_sequence_internal(Oid tableOid, AttrNumber attnum, bool find_identity, char** out_seq_name)
 {
-    text* tablename = PG_GETARG_TEXT_P(0);
-    text* columnname = PG_GETARG_TEXT_PP(1);
-    RangeVar* tablerv = NULL;
-    Oid tableOid;
-    char* column = NULL;
-    AttrNumber attnum;
     Oid sequenceId = InvalidOid;
     Relation depRel;
     ScanKeyData key[3];
     SysScanDesc scan;
     HeapTuple tup;
-    List* names = NIL;
-
-    /* Look up table name.	Can't lock it - we might not have privileges. */
-    names = textToQualifiedNameList(tablename);
-    tablerv = makeRangeVarFromNameList(names);
-    tableOid = RangeVarGetRelid(tablerv, NoLock, false);
-
-    /* Get the number of the column */
-    column = text_to_cstring(columnname);
-    attnum = get_attnum(tableOid, column);
-    if (attnum == InvalidAttrNumber)
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg("column \"%s\" of relation \"%s\" does not exist", column, tablerv->relname)));
 
     /* Search the dependency table for the dependent sequence */
     depRel = heap_open(DependRelationId, AccessShareLock);
@@ -4591,6 +4564,15 @@ Datum pg_get_serial_sequence(PG_FUNCTION_ARGS)
          */
         if (deprec->classid == RelationRelationId && deprec->objsubid == 0 && deprec->deptype == DEPENDENCY_AUTO &&
             RELKIND_IS_SEQUENCE(get_rel_relkind(deprec->objid))) {
+            if (find_identity) {
+                char* relname = get_rel_name(deprec->objid);
+                if (relname && StrEndWith(relname, "_seq_identity")) {
+                    sequenceId = deprec->objid;
+                    break;
+                } else {
+                    continue;
+                }
+            }
             sequenceId = deprec->objid;
             break;
         }
@@ -4603,33 +4585,78 @@ Datum pg_get_serial_sequence(PG_FUNCTION_ARGS)
         HeapTuple classtup;
         Form_pg_class classtuple;
         char* nspname = NULL;
-        char* result = NULL;
 
         /* Get the sequence's pg_class entry */
         classtup = SearchSysCache1(RELOID, ObjectIdGetDatum(sequenceId));
-        if (!HeapTupleIsValid(classtup))
+        if (!HeapTupleIsValid(classtup)) {
+            if (find_identity) {
+                return InvalidOid;
+            }
             ereport(ERROR,
                 (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", sequenceId)));
+        }
 
         classtuple = (Form_pg_class)GETSTRUCT(classtup);
 
         /* Get the namespace */
         nspname = get_namespace_name(classtuple->relnamespace);
-        if (nspname == NULL)
+        if (nspname == NULL) {
+            if (find_identity) {
+                return InvalidOid;
+            }
             ereport(ERROR,
                 (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                     errmsg("cache lookup failed for namespace %u", classtuple->relnamespace)));
+        }
 
         /* And construct the result string */
-        result = quote_qualified_identifier(nspname, NameStr(classtuple->relname));
+        if (out_seq_name != NULL) {
+            *out_seq_name = quote_qualified_identifier(nspname, NameStr(classtuple->relname));
+        }
 
         ReleaseSysCache(classtup);
-        list_free_ext(names);
+    }
 
+    return sequenceId;
+}
+
+/*
+ * pg_get_serial_sequence
+ *		Get the name of the sequence used by a serial column,
+ *		formatted suitably for passing to setval, nextval or currval.
+ *		First parameter is not treated as double-quoted, second parameter
+ *		is --- see documentation for reason.
+ */
+Datum pg_get_serial_sequence(PG_FUNCTION_ARGS)
+{
+    text* tablename = PG_GETARG_TEXT_P(0);
+    text* columnname = PG_GETARG_TEXT_PP(1);
+    RangeVar* tablerv = NULL;
+    Oid tableOid;
+    char* column = NULL;
+    AttrNumber attnum;
+    List* names = NIL;
+    char* result = NULL;
+
+    /* Look up table name.	Can't lock it - we might not have privileges. */
+    names = textToQualifiedNameList(tablename);
+    tablerv = makeRangeVarFromNameList(names);
+    tableOid = RangeVarGetRelid(tablerv, NoLock, false);
+
+    /* Get the number of the column */
+    column = text_to_cstring(columnname);
+    attnum = get_attnum(tableOid, column);
+    if (attnum == InvalidAttrNumber)
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_COLUMN),
+                errmsg("column \"%s\" of relation \"%s\" does not exist", column, tablerv->relname)));
+
+    list_free_ext(names);
+
+    if (OidIsValid(pg_get_serial_sequence_internal(tableOid, attnum, false, &result))) {
         PG_RETURN_TEXT_P(string_to_text(result));
     }
 
-    list_free_ext(names);
     PG_RETURN_NULL();
 }
 
@@ -13469,11 +13496,6 @@ Oid pg_get_serial_sequence_oid(text* tablename, text* columnname, bool find_iden
     Oid tableOid;
     char* column = NULL;
     AttrNumber attnum;
-    Oid sequenceId = InvalidOid;
-    Relation depRel;
-    ScanKeyData key[3];
-    SysScanDesc scan;
-    HeapTuple tup;
     List* names = NIL;
 
     /* Look up table name. */
@@ -13489,57 +13511,7 @@ Oid pg_get_serial_sequence_oid(text* tablename, text* columnname, bool find_iden
             (errcode(ERRCODE_UNDEFINED_COLUMN),
                 errmsg("column \"%s\" of relation \"%s\" does not exist", column, tablerv->relname)));
 
-    /* Search the dependency table for the dependent sequence */
-    depRel = heap_open(DependRelationId, AccessShareLock);
+    list_free_ext(names);
 
-    ScanKeyInit(
-        &key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationRelationId));
-    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableOid));
-    ScanKeyInit(&key[2], Anum_pg_depend_refobjsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(attnum));
-
-    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 3, key);
-
-    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
-        Form_pg_depend deprec = (Form_pg_depend)GETSTRUCT(tup);
-        
-        if (deprec->classid == RelationRelationId && deprec->objsubid == 0 && deprec->deptype == DEPENDENCY_AUTO &&
-            get_rel_relkind(deprec->objid) == RELKIND_SEQUENCE) {
-            if (find_identity) {
-                char* relname = get_rel_name(deprec->objid);
-                if (relname && StrEndWith(relname, "_seq_identity")) {
-                    sequenceId = deprec->objid;
-                    break;
-                } else {
-                    continue;
-                }
-            }
-            sequenceId = deprec->objid;
-            break;
-        }
-    }
-    systable_endscan(scan);
-    heap_close(depRel, AccessShareLock);
-
-    if (OidIsValid(sequenceId)) {
-        HeapTuple classtup;
-        Form_pg_class classtuple;
-        char* nspname = NULL;
-
-        classtup = SearchSysCache1(RELOID, ObjectIdGetDatum(sequenceId));
-        if (!HeapTupleIsValid(classtup))
-            return InvalidOid;
-
-        classtuple = (Form_pg_class)GETSTRUCT(classtup);
-
-        nspname = get_namespace_name(classtuple->relnamespace);
-
-        if (nspname == NULL) {
-            ReleaseSysCache(classtup);
-            return InvalidOid;
-        }
-
-        ReleaseSysCache(classtup);
-        return sequenceId;
-    }
-    return InvalidOid;
+    return pg_get_serial_sequence_internal(tableOid, attnum, find_identity, NULL);
 }

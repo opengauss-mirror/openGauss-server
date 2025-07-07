@@ -1,3 +1,5 @@
+create schema identity_schema;
+set current_schema = identity_schema;
 CREATE TABLE book(bookId int IDENTITY, bookname NVARCHAR(50), author NVARCHAR(50));
 INSERT INTO book VALUES('book1','author1'),('book2','author2');
 INSERT INTO book(bookname,author) VALUES('book3','author3'),('book4','author4');
@@ -161,3 +163,12 @@ drop table if exists t_identity;
 
 CREATE TABLE t_identity(id decimal(12,2) not null identity(1,1), col text);
 
+create schema sch_1130412;
+create table sch_1130412.tab_1130412(a1 sql_variant);
+insert into sch_1130412.tab_1130412 values('aa'::char(8)),('cc'::char(8));
+select * from sch_1130412.tab_1130412 order by a1;
+drop table sch_1130412.tab_1130412;
+drop schema sch_1130412;
+
+reset current_schema;
+drop schema identity_schema;
