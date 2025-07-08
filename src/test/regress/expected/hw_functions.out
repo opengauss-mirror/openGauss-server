@@ -898,6 +898,18 @@ SELECT TO_CHAR(INTERVAL '123-2' YEAR(4) TO MONTH, 'YYYY-MON-DD', 'NLS_DATE_LANGU
 ERROR:  NLS parameter  is not supported!
 DETAIL:  Not support the given nls parameter.
 CONTEXT:  referenced column: to_char
+SELECT TO_CHAR(time '15:24:52', 'HH24:MI:SS');
+ to_char  
+----------
+ 15:24:52
+(1 row)
+
+SELECT TO_CHAR(timetz '15:24:52', 'HH24:MI:SS');
+ to_char  
+----------
+ 15:24:52
+(1 row)
+
 CREATE TABLE blob_table (c1 BLOB);
 INSERT INTO blob_table (c1) VALUES ( (encode('Hello World!','hex'))::RAW );
 SELECT to_char(c1, 873) FROM blob_table ;

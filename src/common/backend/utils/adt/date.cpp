@@ -47,8 +47,6 @@
  */
 
 static void EncodeSpecialDate(DateADT dt, char* str, int strlen);
-static int time2tm(TimeADT time, struct pg_tm* tm, fsec_t* fsec);
-static int timetz2tm(TimeTzADT* time, struct pg_tm* tm, fsec_t* fsec, int* tzp);
 static int tm2time(struct pg_tm* tm, fsec_t fsec, TimeADT* result);
 static int tm2timetz(struct pg_tm* tm, fsec_t fsec, int tz, TimeTzADT* result);
 static void AdjustTimeForTypmod(TimeADT* time, int32 typmod);
@@ -1253,7 +1251,7 @@ static int tm2time(struct pg_tm* tm, fsec_t fsec, TimeADT* result)
  * If out of this range, leave as UTC (in practice that could only happen
  * if pg_time_t is just 32 bits) - thomas 97/05/27
  */
-static int time2tm(TimeADT time, struct pg_tm* tm, fsec_t* fsec)
+int time2tm(TimeADT time, struct pg_tm* tm, fsec_t* fsec)
 {
 #ifdef HAVE_INT64_TIMESTAMP
     tm->tm_hour = time / USECS_PER_HOUR;
@@ -2084,7 +2082,7 @@ Datum timetztypmodout(PG_FUNCTION_ARGS)
 /* timetz2tm()
  * Convert TIME WITH TIME ZONE data type to POSIX time structure.
  */
-static int timetz2tm(TimeTzADT* time, struct pg_tm* tm, fsec_t* fsec, int* tzp)
+int timetz2tm(TimeTzADT* time, struct pg_tm* tm, fsec_t* fsec, int* tzp)
 {
     TimeOffset trem = time->time;
 
