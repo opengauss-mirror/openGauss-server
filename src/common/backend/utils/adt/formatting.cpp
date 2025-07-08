@@ -4514,6 +4514,58 @@ Datum timestamptz_to_char_nlsparam(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(res);
 }
 
+Datum time_to_char(PG_FUNCTION_ARGS)
+{
+    TimeADT time = PG_GETARG_TIMEADT(0);
+    text *fmt = PG_GETARG_TEXT_P(1);
+    text *res = nullptr;
+    TmToChar tmtc;
+    struct pg_tm* tm = nullptr;
+
+    if ((VARSIZE(fmt) - VARHDRSZ) <= 0) {
+        PG_RETURN_NULL();
+    }
+
+    ZERO_tmtc(&tmtc);
+    tm = tmtcTm(&tmtc);
+
+    if (time2tm(time, tm, &tmtcFsec(&tmtc)) != 0) {
+        PG_RETURN_NULL();
+    }
+
+    if (!(res = datetime_to_char_body(&tmtc, fmt, true, PG_GET_COLLATION()))) {
+        PG_RETURN_NULL();
+    }
+
+    PG_RETURN_TEXT_P(res);
+}
+
+Datum timetz_to_char(PG_FUNCTION_ARGS)
+{
+    TimeTzADT* time = PG_GETARG_TIMETZADT_P(0);
+    text *fmt = PG_GETARG_TEXT_P(1);
+    text *res = nullptr;
+    TmToChar tmtc;
+    struct pg_tm* tm = nullptr;
+
+    if ((VARSIZE(fmt) - VARHDRSZ) <= 0) {
+        PG_RETURN_NULL();
+    }
+
+    ZERO_tmtc(&tmtc);
+    tm = tmtcTm(&tmtc);
+
+    if (timetz2tm(time, tm, &tmtcFsec(&tmtc), nullptr) != 0) {
+        PG_RETURN_NULL();
+    }
+
+    if (!(res = datetime_to_char_body(&tmtc, fmt, true, PG_GET_COLLATION()))) {
+        PG_RETURN_NULL();
+    }
+
+    PG_RETURN_TEXT_P(res);
+}
+
 /* -------------------
  * INTERVAL to_char()
  * -------------------

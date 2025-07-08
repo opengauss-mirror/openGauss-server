@@ -93,6 +93,8 @@ extern char* asc_initcap(const char* buff, size_t nbytes);
 extern Datum timestamp_to_char(PG_FUNCTION_ARGS);
 extern Datum timestamptz_to_char(PG_FUNCTION_ARGS);
 extern Datum interval_to_char(PG_FUNCTION_ARGS);
+extern Datum time_to_char(PG_FUNCTION_ARGS);
+extern Datum timetz_to_char(PG_FUNCTION_ARGS);
 extern Datum interval_to_char_nlsparam(PG_FUNCTION_ARGS);
 extern Datum to_timestamp(PG_FUNCTION_ARGS);
 extern Datum to_date(PG_FUNCTION_ARGS);

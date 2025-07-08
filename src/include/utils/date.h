@@ -90,6 +90,8 @@ typedef struct {
 
 /* date.c */
 extern double date2timestamp_no_overflow(DateADT dateVal);
+extern int time2tm(TimeADT time, struct pg_tm* tm, fsec_t* fsec);
+extern int timetz2tm(TimeTzADT* time, struct pg_tm* tm, fsec_t* fsec, int* tzp);
 
 extern Datum date_in(PG_FUNCTION_ARGS);
 extern Datum input_date_in(char* str, bool can_ignore);
