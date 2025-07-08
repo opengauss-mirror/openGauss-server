@@ -2797,11 +2797,6 @@ found_branch:
                             }
                             return InvalidBuffer;
                         }
-                        /* when in failover, should return to worker thread exit */
-                        if ((SS_IN_FAILOVER) && ((t_thrd.role == WORKER) || (t_thrd.role == THREADPOOL_WORKER))) {
-                            SSUnPinBuffer(bufHdr);
-                            return InvalidBuffer;
-                        }
                         pg_usleep(5000L);
                         continue;
                     }
@@ -6394,10 +6389,7 @@ retry:
             buf_ctrl->state &= ~BUF_READ_MODE_ZERO_LOCK;
         }
         bool with_io_in_progress = true;
-        /* when in failover, should return to worker thread exit */
-        if ((SS_IN_FAILOVER) && ((t_thrd.role == WORKER) || (t_thrd.role == THREADPOOL_WORKER))) {
-            return;
-        }
+
         if (IsSegmentBufferID(buf->buf_id)) {
             tmp_buffer = DmsReadSegPage(buffer, lock_mode, read_mode, &with_io_in_progress);
         } else {
@@ -6415,10 +6407,7 @@ retry:
             }
 
             LWLockRelease(buf->content_lock);
-            /* when in failover worker thread should exit */
-            if (SS_IN_FAILOVER && SS_AM_BACKENDS_WORKERS) {
-                ereport(ERROR, (errmodule(MOD_DMS), (errmsg("worker thread which in failover are exiting"))));
-            }
+
             if (SSNeedTerminateRequestPageInPrimaryRestart(GetBufferDescriptor(buffer - 1))) {
                 t_thrd.dms_cxt.page_need_retry = true;
                 return;

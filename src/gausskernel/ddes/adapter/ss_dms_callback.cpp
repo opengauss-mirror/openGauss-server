@@ -1932,7 +1932,7 @@ static void FailoverCleanBackends()
                 "no need to clean backends.")));
         return;
     }
-    long maxWaitTime = 1200000000L; /* print failover timeout 1200s */
+    long maxWaitTime = 30000000L; /* failover timeout 30s and then exit */
     if (ENABLE_ONDEMAND_REALTIME_BUILD && SS_STANDBY_MODE) {
         OnDemandWaitRealtimeBuildShutDownInPartnerFailover();
     }
@@ -1975,6 +1975,7 @@ static void FailoverCleanBackends()
                 errmsg("[SS reform][SS switchover] primary demote fail, need core in debug mode!")));
 #endif
             print_all_stack();
+            _exit(0);
         }
 
         pg_usleep(FAILOVER_PERIOD * REFORM_WAIT_TIME);
