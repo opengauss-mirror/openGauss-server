@@ -8047,7 +8047,8 @@ static void reaper(SIGNAL_ARGS)
             if (!EXIT_STATUS_0(exitstatus))
                 LogChildExit(LOG, _("rack mem cleaner process"), pid, exitstatus);
 
-            if (g_instance.pid_cxt.rackMemCleanerPID == 0 && pmState == PM_RUN) {
+            if (g_instance.pid_cxt.rackMemCleanerPID == 0 && pmState == PM_RUN &&
+                g_instance.attr.attr_memory.enable_rack_memory_cleaner) {
                 g_instance.pid_cxt.rackMemCleanerPID = initialize_util_thread(RACK_MEM_FREE_THREAD);
             }
             continue;

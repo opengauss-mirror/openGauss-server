@@ -166,6 +166,7 @@ static void knl_g_rackmem_cleaner_init(knl_g_rack_mem_cleaner_context *cleaner_c
     cleaner_cxt->memoryContext = nullptr;
     cleaner_cxt->cleanupActive = false;
     cleaner_cxt->queueHead = nullptr;
+    cleaner_cxt->rack_available = 1;
     cleaner_cxt->total = 0;
     cleaner_cxt->countToProcess = 0;
     cleaner_cxt->freeCount = 0;
