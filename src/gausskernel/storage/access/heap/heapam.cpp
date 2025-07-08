@@ -9180,7 +9180,7 @@ static void heap_xlog_delete(XLogReaderState* record)
         rel = target_node.relNode;
         TransactionId recordxid = XLogRecGetXid(record);
         ItemPointerSet(&ctid, blkno, xlrec->offnum);
-        IMCStoreDeleteHook(rel, &ctid, recordxid);
+        IMCStoreDeleteHook(rel, &ctid, true, recordxid);
     }
 #endif
 
@@ -9234,7 +9234,7 @@ static void heap_xlog_insert(XLogReaderState* record)
         ItemPointerData ctid;
         ItemPointerSet(&ctid, blkno, xlrec->offnum);
         TransactionId recordxid = XLogRecGetXid(record);
-        IMCStoreInsertHook(target_node.relNode, &ctid, recordxid);
+        IMCStoreInsertHook(target_node.relNode, &ctid, true, recordxid);
     }
 #endif
     if (isinit) {
@@ -9410,7 +9410,7 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
         ItemPointerSet(&ctid, oldblk, xlrec->old_offnum);
         ItemPointerSet(&newCtid, newblk, xlrec->new_offnum);
         TransactionId recordxid = XLogRecGetXid(record);
-        IMCStoreUpdateHook(rnode.relNode, &ctid, &newCtid, recordxid);
+        IMCStoreUpdateHook(rnode.relNode, &ctid, &newCtid, true, recordxid);
     }
 #endif
     /* Deal with old tuple version */

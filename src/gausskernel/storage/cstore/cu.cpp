@@ -1864,6 +1864,7 @@ int CU::GetCurScanPos(int rowCursorInCU)
 void IMCSDesc::Init(Relation rel, int2vector* imcstoreAttsNum, int imcstoreNatts, bool useShareMemroy)
 {
     relOid = RelationGetRelid(rel);
+    relfilenode = RelationGetRelFileNode(rel);
     imcsAttsNum = int2vectorCopy(imcstoreAttsNum);
     imcsNatts = imcstoreNatts;
     imcsStatus = t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE

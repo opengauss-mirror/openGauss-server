@@ -59,6 +59,11 @@ const char IMCSStatusMap[IMCS_POPULATE_STATUS_NUM][NAMEDATALEN] = {
     "ERROR"
 };
 
+typedef struct {
+    Oid relfileNode;
+    Oid relOid;
+} IMCSRelnodeMapEntry;
+
 /*
  * This class is to manage imcstore desc hash table.
  */
@@ -71,6 +76,7 @@ public:
 public:
     void CreateImcsDesc(Relation rel, int2vector* imcsAttsNum, int imcsNatts, bool useShareMemroy = false);
     IMCSDesc* GetImcsDesc(Oid relOid);
+    IMCSDesc* GetImcsDescByRelNode(Oid relNode);
     void UpdateImcsStatus(Oid relOid, int imcsStatus);
     void DeleteImcsDesc(Oid relOid, RelFileNode* relNode);
     void ClearImcsMem(Oid relOid, RelFileNode* relNode);
@@ -79,6 +85,7 @@ public:
     void FreeAllShareMemPool();
     void FreeAllBorrowMemPool();
     HTAB* m_imcs_hash;
+    HTAB* m_relfilenode_hash;
     LWLock *m_imcs_lock;
     MemoryContext m_imcs_context;
     pg_atomic_uint64 m_xlog_latest_lsn;

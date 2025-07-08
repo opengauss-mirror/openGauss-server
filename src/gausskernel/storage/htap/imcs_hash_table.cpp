@@ -85,12 +85,23 @@ void IMCSHashTable::InitImcsHash()
     info.num_partitions = NUM_CACHE_BUFFER_PARTITIONS / 2;
     m_imcs_hash_tbl->m_imcs_hash = hash_create(
         "IMCSDesc Lookup Table", IMCSTORE_HASH_TAB_CAPACITY, &info, hash_flags);
+
+    rc = memset_s(&info, sizeof(info), 0, sizeof(info));
+    securec_check(rc, "\0", "\0");
+    info.keysize = sizeof(Oid);
+    info.entrysize = sizeof(IMCSRelnodeMapEntry);
+    info.hash = tag_hash;
+    info.hcxt = m_imcs_hash_tbl->m_imcs_context;
+    info.num_partitions = NUM_CACHE_BUFFER_PARTITIONS / 2;
+    m_imcs_hash_tbl->m_relfilenode_hash = hash_create(
+        "IMCSDesc Relfilenode Map Table", IMCSTORE_HASH_TAB_CAPACITY, &info, hash_flags);
 }
 
 void IMCSHashTable::CreateImcsDesc(Relation rel, int2vector* imcsAttsNum, int imcsNatts, bool useShareMemroy)
 {
     bool found = false;
     Oid relOid = RelationGetRelid(rel);
+    Oid relfileNode = RelationGetRelFileNode(rel);
     /* No need to be checked for partitions, because it has been checked for the parent rel. */
     if (!OidIsValid(rel->parentId)) {
         CheckAndSetDBName();
@@ -104,6 +115,9 @@ void IMCSHashTable::CreateImcsDesc(Relation rel, int2vector* imcsAttsNum, int im
     } else {
         imcsDesc->Init(rel, imcsAttsNum, imcsNatts, useShareMemroy);
         pg_atomic_add_fetch_u32(&g_instance.imcstore_cxt.imcs_tbl_cnt, 1);
+        IMCSRelnodeMapEntry* entry = (IMCSRelnodeMapEntry*)hash_search(
+            m_relfilenode_hash, &relfileNode, HASH_ENTER, &found);
+        entry->relOid = relOid;
     }
     MemoryContextSwitchTo(oldcontext);
     LWLockRelease(m_imcs_lock);
@@ -116,6 +130,23 @@ IMCSDesc* IMCSHashTable::GetImcsDesc(Oid relOid)
     }
     LWLockAcquire(m_imcs_lock, LW_SHARED);
     IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_FIND, NULL);
+    LWLockRelease(m_imcs_lock);
+    return imcsDesc;
+}
+
+IMCSDesc* IMCSHashTable::GetImcsDescByRelNode(Oid relNode)
+{
+    bool found = false;
+    IMCSDesc* imcsDesc = NULL;
+    IMCSRelnodeMapEntry* entry = NULL;
+    if (!HAVE_HTAP_TABLES || CHECK_IMCSTORE_CACHE_DOWN) {
+        return NULL;
+    }
+    LWLockAcquire(m_imcs_lock, LW_SHARED);
+    entry = (IMCSRelnodeMapEntry*)hash_search(m_relfilenode_hash, &relNode, HASH_FIND, &found);
+    if (found) {
+        imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &entry->relOid, HASH_FIND, NULL);
+    }
     LWLockRelease(m_imcs_lock);
     return imcsDesc;
 }
@@ -169,6 +200,7 @@ void IMCSHashTable::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
         if (!imcsDesc->isPartition) {
             ResetDBNameIfNeed();
         }
+        (void)hash_search(m_relfilenode_hash, &imcsDesc->relfilenode, HASH_REMOVE, NULL);
         (void)hash_search(m_imcs_hash, &relOid, HASH_REMOVE, NULL);
         LWLockRelease(m_imcs_lock);
         pg_atomic_sub_fetch_u32(&g_instance.imcstore_cxt.imcs_tbl_cnt, 1);

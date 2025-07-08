@@ -279,7 +279,7 @@ void UHeapXlogInsert(XLogReaderState *record)
             ItemPointerData ctid;
             XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
             ItemPointerSet(&ctid, blkno, xlrec->offnum);
-            IMCStoreInsertHook(targetNode.relNode, &ctid, XLogRecGetXid(record));
+            IMCStoreInsertHook(targetNode.relNode, &ctid, true, XLogRecGetXid(record));
         }
 #endif
         action = GetInsertRedoAction(record, &buffer, skipSize);
@@ -479,7 +479,7 @@ static void UHeapXlogDelete(XLogReaderState *record)
     if (allReplay || !onlyReplayUndo) {
 #ifdef ENABLE_HTAP
         if (HAVE_HTAP_TABLES) {
-            IMCStoreDeleteHook(targetNode.relNode, &targetTid, XLogRecGetXid(record));
+            IMCStoreDeleteHook(targetNode.relNode, &targetTid, true, XLogRecGetXid(record));
         }
 #endif
         action = XLogReadBufferForRedo(record, 0, &buffer);
@@ -1318,7 +1318,7 @@ static void UHeapXlogUpdate(XLogReaderState *record)
             ItemPointerData newCtid;
             ItemPointerSet(&ctid, oldblk, xlrec->old_offnum);
             ItemPointerSet(&newCtid, newblk, xlrec->new_offnum);
-            IMCStoreUpdateHook(rnode.relNode, &ctid, &newCtid);
+            IMCStoreUpdateHook(rnode.relNode, &ctid, &newCtid, true);
         }
 #endif
         /* Read old page */

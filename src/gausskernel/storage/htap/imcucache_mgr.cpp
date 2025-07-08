@@ -369,6 +369,7 @@ void IMCUDataCacheMgr::ResetInstance(bool isPromote)
         IMCS_HASH_TABLE->FreeAllBorrowMemPool();
     }
     HeapMemResetHash(IMCS_HASH_TABLE->m_imcs_hash, "IMCSDesc Lookup Table");
+    HeapMemResetHash(IMCS_HASH_TABLE->m_relfilenode_hash, "IMCSDesc Relfilenode Map Table");
     m_data_cache->m_cache_mgr->FreeImcstoreCache();
     m_data_cache->m_is_promote = isPromote;
     CreateIMCUDirAndClearCUFiles();

@@ -237,6 +237,7 @@ public:
 };
 struct IMCSDesc {
     Oid relOid;
+    Oid relfilenode;
     const char* relname;
     int2vector* imcsAttsNum;
     /* rel attid -> imcs index */
