@@ -131,7 +131,7 @@ typedef struct AlarmAdditionalParam {
 typedef enum AlarmType { ALM_AT_Fault = 0, ALM_AT_Resume = 2, ALM_AT_OPLog, ALM_AT_Event, ALM_AT_Delete } AlarmType;
 
 /*status of a specific alarm.*/
-typedef enum AlarmStat { ALM_AS_Normal, ALM_AS_Reported } AlarmStat;
+typedef enum AlarmStat {ALM_AS_Init, ALM_AS_Normal, ALM_AS_Reported } AlarmStat;
 
 /*result types of alarm check functions.*/
 typedef enum AlarmCheckResult {
