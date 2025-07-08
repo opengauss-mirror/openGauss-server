@@ -7042,12 +7042,6 @@ if [[ -z "$with_jdk" ]] && [[ ! -z "${with_3rdpartydir}" ]] && [[ "$with_openeul
             break;
         fi
     done
-
-    if [ -z "$with_jdk" ]; then
-        $as_echo "$as_me:$LINENO: error: there is no jdk (containing jre) found in 3rd party repo" >&5
-        $as_echo "$as_me: error: there is no jdk (containing jre) found in 3rd party repo" >&2
-        exit 1
-    fi
 fi
 
 

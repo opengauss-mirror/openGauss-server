@@ -276,6 +276,7 @@ ifeq ($(with_3rd), NONE)
   INSTALL_TOOLS_PATH = binarylibs/install_tools
   COMPONENTPATH = binarylibs/component
 
+  JEMALLOC_HOME = $(top_builddir)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
   LIBHOTPATCH_HOME = $(top_builddir)/$(PLATFORMPATH)/hotpatch
   LIBCGROUP_HOME = $(top_builddir)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
   LIBLLVM_HOME = $(top_builddir)/$(BINARYPATH)/llvm/comm
@@ -311,6 +312,7 @@ else
   PLATFORMPATH = kernel/platform
   BUILD_TOOLS_PATH = buildtools
 
+  JEMALLOC_HOME = $(with_3rd)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
   LIBCGROUP_HOME = $(with_3rd)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
   LIBHOTPATCH_HOME = $(with_3rd)/$(PLATFORMPATH)/hotpatch
   LIBLLVM_HOME = $(with_3rd)/$(BINARYPATH)/llvm/comm
