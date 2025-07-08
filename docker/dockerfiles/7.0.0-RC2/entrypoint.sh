@@ -9,6 +9,7 @@ set -Eeo pipefail
 export GAUSSHOME=/usr/local/opengauss
 export PATH=$GAUSSHOME/bin:/scws/bin:$PATH
 export LD_LIBRARY_PATH=$GAUSSHOME/lib:/scws/lib:$LD_LIBRARY_PATH
+export DATAVEC_PQ_LIB_PATH=/usr/local/sra_recall/lib
 
 file_env() {
         local var="$1"

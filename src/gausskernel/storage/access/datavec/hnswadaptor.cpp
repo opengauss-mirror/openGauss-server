@@ -58,7 +58,7 @@ int pq_load_symbol(char *symbol, void **sym_lib_handle)
     *sym_lib_handle = dlsym(g_pq_func.handle, symbol);
     dlsym_err = dlerror();
     if (dlsym_err != NULL) {
-        ereport(FATAL, (errcode(ERRCODE_INVALID_OPERATION),
+        ereport(WARNING, (errcode(ERRCODE_INVALID_OPERATION),
             errmsg("incompatible library \"%s\", load %s failed, %s", PQ_SO_NAME, symbol, dlsym_err)));
         return PQ_ERROR;
     }
@@ -73,7 +73,7 @@ int pq_open_dl(void **lib_handle, char *symbol)
 #ifndef WIN32
     *lib_handle = dlopen(symbol, RTLD_LAZY);
     if (*lib_handle == NULL) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not load library %s, %s", PQ_SO_NAME, dlerror())));
+        ereport(WARNING, (errcode_for_file_access(), errmsg("could not load library %s, %s", PQ_SO_NAME, dlerror())));
         return PQ_ERROR;
     }
     return PQ_SUCCESS;
@@ -111,13 +111,13 @@ int pq_func_init()
     char lib_dl_path[MAX_PATH_LEN] = { 0 };
     char* raw_path = getenv(PQ_ENV_PATH);
     if (raw_path == nullptr) {
-        ereport(ERROR, (errmsg("failed to get DATAVEC_PQ_LIB_PATH")));
+        ereport(WARNING, (errmsg("failed to get DATAVEC_PQ_LIB_PATH")));
         return PQ_ERROR;
     }
 
     int ret = pq_resolve_path(lib_dl_path, raw_path, PQ_SO_NAME);
     if (ret != PQ_SUCCESS) {
-        ereport(ERROR, (errmsg(
+        ereport(WARNING, (errmsg(
             "failed to resolve the path of libvecturbo.so, lib_dl_path %s, raw_path %s",
             lib_dl_path, raw_path)));
         return PQ_ERROR;
@@ -135,10 +135,9 @@ int pq_func_init()
 int PQInit()
 {
 #ifdef __x86_64__
-    ereport(FATAL, (errmsg("PQ only support in arm.")));
+    return PQ_ERROR;
 #endif
     if (pq_func_init() != PQ_SUCCESS) {
-        ereport(FATAL, (errmsg("failed to init PQ library")));
         return PQ_ERROR;
     }
     g_instance.pq_inited = true;
@@ -147,7 +146,7 @@ int PQInit()
 
 void PQUinit()
 {
-    if (!g_instance.attr.attr_storage.enable_pq || ! g_instance.pq_inited) {
+    if (!g_instance.pq_inited) {
         return;
     }
     g_instance.pq_inited = false;
