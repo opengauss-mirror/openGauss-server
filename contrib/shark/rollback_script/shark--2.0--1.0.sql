@@ -142,11 +142,7 @@ DROP FUNCTION IF EXISTS sys.sql_variantge(sys.sql_variant, sys.sql_variant);
 DROP FUNCTION IF EXISTS sys.sql_varianteq(sys.sql_variant, sys.sql_variant);
 DROP FUNCTION IF EXISTS sys.sql_variantcmp(sys.sql_variant, sys.sql_variant);
 
-DROP FUNCTION IF EXISTS sys.sql_variantin(cstring);
-DROP FUNCTION IF EXISTS sys.sql_variantout(sys.sql_variant);
-DROP FUNCTION IF EXISTS sys.sql_variantsend(sys.sql_variant);
-DROP FUNCTION IF EXISTS sys.sql_variantrecv(internal);
-drop type IF EXISTS sys.sql_variant;
+drop type IF EXISTS sys.sql_variant cascade;
 
 drop function if exists sys.databasepropertyex (nvarchar(128), nvarchar(128));
 drop function if exists sys.suser_id_internal(IN login nvarchar(256));
@@ -155,9 +151,13 @@ drop function if exists sys.suser_id();
 drop function if exists sys.suser_name_internal(IN server_user_id OID);
 drop function if exists sys.suser_name(IN server_user_id OID);
 drop function if exists sys.suser_name();
-drop function if exists function sys.suser_sname(IN server_user_sid varbinary(85));
+drop function if exists sys.suser_sname(IN server_user_sid varbinary(85));
 drop function if exists sys.suser_sname();
 drop function if exists sys.get_scope_identity();
 drop function if exists sys.scope_identity();
 drop function if exists sys.ident_current(IN tablename nvarchar(128));
 drop function if exists sys.get_ident_current(IN tablename nvarchar(128));
+
+drop type if exists sys.varbinary cascade;
+drop function if exists sys.varbinarytypmodin(cstring[]);
+drop function if exists sys.varbinarytypmodout(integer);
