@@ -19,6 +19,7 @@
 
 #include "access/datavec/hnsw.h"
 #include "access/datavec/ivfflat.h"
+#include "access/datavec/diskann.h"
 #include "access/gist_private.h"
 #include "access/hash.h"
 #include "access/nbtree.h"
