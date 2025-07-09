@@ -318,6 +318,11 @@ static void setop_fill_hash_table(SetOpState* setopstate)
     MemoryContext old_context = NULL;
 
     /*
+     * Whether there is data in the left table, used for short-circuit handling.
+     */
+    bool left_has_data = false;
+
+    /*
      * get state info from node
      */
     first_flag = node->firstFlag;
@@ -345,6 +350,7 @@ static void setop_fill_hash_table(SetOpState* setopstate)
         /* Identify whether it's left or right input */
         flag = fetch_tuple_flag(setopstate, outer_slot);
         if (flag == first_flag) {
+            left_has_data = true;
             /* (still) in first input relation */
             Assert(in_first_rel);
 
@@ -395,6 +401,11 @@ static void setop_fill_hash_table(SetOpState* setopstate)
                 advance_counts(&entry->pergroup, flag);
             }
         } else {
+            if (!left_has_data) {
+                setopstate->setop_done = true;
+                (void)pgstat_report_waitstatus(old_status);
+                break;
+            }
             /* reached second relation */
             in_first_rel = false;
 
