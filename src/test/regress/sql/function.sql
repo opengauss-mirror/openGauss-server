@@ -958,8 +958,53 @@ end; $$ language plpgsql;
 select select_into_null_func('aaa');
 select select_into_null_func('aaa') is null;
 
+CREATE OR REPLACE FUNCTION execute_into_null_func(canshu varchar(16))
+returns int
+as $$
+DECLARE test_table_030a int;
+begin
+    EXECUTE 'SELECT ID FROM test_table_030 WHERE NAME = ' || quote_literal(canshu) into test_table_030a;
+    return test_table_030a;
+end; $$ language plpgsql;
+
+select execute_into_null_func('aaa');
+select execute_into_null_func('aaa') is null;
+
+CREATE OR REPLACE FUNCTION strict_select_into_null_func(canshu varchar(16))
+returns int
+as $$
+DECLARE test_table_030a int;
+begin
+    SELECT ID into STRICT test_table_030a FROM test_table_030 WHERE NAME = canshu;
+    return test_table_030a;
+end; $$ language plpgsql;
+select strict_select_into_null_func('aaa');
+
+CREATE OR REPLACE FUNCTION strict_execute_into_null_func(canshu varchar(16))
+returns int
+as $$
+DECLARE test_table_030a int;
+begin
+    EXECUTE 'SELECT ID FROM test_table_030 WHERE NAME = ' || quote_literal(canshu) into STRICT test_table_030a;
+    return test_table_030a;
+end; $$ language plpgsql;
+select strict_execute_into_null_func('aaa');
+
+reset behavior_compat_options;
+select select_into_null_func('aaa');
+select execute_into_null_func('aaa');
+
+set behavior_compat_options='select_into_return_null';
+select select_into_null_func('aaa');
+select select_into_null_func('aaa') is null;
+select execute_into_null_func('aaa');
+select execute_into_null_func('aaa') is null;
+
 drop table test_table_030;
 drop function select_into_null_func;
+drop function execute_into_null_func;
+drop function strict_select_into_null_func;
+drop function strict_execute_into_null_func;
 reset behavior_compat_options;
 \c regression;
 drop database IF EXISTS pl_test_funcion;
