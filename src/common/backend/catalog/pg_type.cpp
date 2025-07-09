@@ -149,7 +149,8 @@ ObjectAddress TypeShellMake(const char* typname, Oid typeNamespace, Oid ownerId)
      * Create dependencies.  We can/must skip this in bootstrap mode
      * and during inplace upgrade.
      */
-    if (!IsBootstrapProcessingMode() && !u_sess->attr.attr_common.IsInplaceUpgrade)
+    if (!IsBootstrapProcessingMode() &&
+        !(u_sess->attr.attr_common.IsInplaceUpgrade && typoid < FirstBootstrapObjectId)) {
         GenerateTypeDependencies(typeNamespace,
             typoid,
             InvalidOid,
@@ -168,6 +169,7 @@ ObjectAddress TypeShellMake(const char* typname, Oid typeNamespace, Oid ownerId)
             InvalidOid,
             NULL,
             false);
+    }
 
     /* Post creation hook for new shell type */
     InvokeObjectAccessHook(OAT_POST_CREATE, TypeRelationId, typoid, 0, NULL);

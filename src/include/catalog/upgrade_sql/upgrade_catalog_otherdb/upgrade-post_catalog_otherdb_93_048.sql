@@ -201,7 +201,7 @@ CREATE VIEW data_type_privileges AS
       (
         SELECT udt_schema, udt_name, 'USER-DEFINED TYPE'::text, dtd_identifier FROM attributes
         UNION ALL
-        SELECT table_schema, table_name, 'TABLE'::text, dtd_identifier FROM columns
+        SELECT table_schema, table_name, 'TABLE'::text, dtd_identifier FROM information_schema.columns
         UNION ALL
         SELECT domain_schema, domain_name, 'DOMAIN'::text, dtd_identifier FROM domains
         UNION ALL
