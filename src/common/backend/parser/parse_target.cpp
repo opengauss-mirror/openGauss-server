@@ -56,6 +56,7 @@ static List* ExpandRowReference(ParseState* pstate, Node* expr, bool targetlist)
 static int FigureColnameInternal(Node* node, char** name);
 
 extern void checkArrayTypeInsert(ParseState* pstate, Expr* expr);
+extern Oid pg_get_serial_sequence_internal(Oid tableOid, AttrNumber attnum, bool find_identity, char** out_seq_name);
 
 /*
  * @Description: return the last filed's name and ignore * or subscrpts
@@ -924,24 +925,9 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
                 continue;
             }
             /* skip the identity default value in D format */
-            if (u_sess->attr.attr_sql.sql_compatibility == D_FORMAT) {
-                FunctionCallInfoData funcinfo;
-                Datum re_seq;
-                char* sequenceName = NULL;
-                int nargs = 2;
-
-                InitFunctionCallInfoData(funcinfo, NULL, nargs, InvalidOid, NULL, NULL);
-
-                funcinfo.arg[0] = CStringGetTextDatum(RelationGetRelationName(targetrel));
-                funcinfo.arg[1] = CStringGetTextDatum(col->name);
-
-                re_seq = pg_get_serial_sequence(&funcinfo);
-                if (re_seq != NULL) {
-                    sequenceName = TextDatumGetCString(re_seq);
-                    if (sequenceName != NULL && StrEndWith(sequenceName, "_seq_identity")) {
-                        continue;
-                    }
-                }
+            if (DB_IS_CMPT(D_FORMAT) && OidIsValid(pg_get_serial_sequence_internal(RelationGetRelid(targetrel),
+                                                                                   attr[i].attnum, true, NULL))) {
+                continue;
             }
 
             col->indirection = NIL;
