@@ -989,6 +989,8 @@ int PGTYPESnumeric_div(numeric* var1, numeric* var2, numeric* result)
     init_numeric(&dividend);
     for (i = 1; i < 10; i++) {
         init_numeric(&divisor[i]);
+
+        divisor[i].buf = NULL;
     }
 
     /*

@@ -231,25 +231,31 @@ main(void)
 	}
 	free(decarr);
 
+    char* desc[] = {"43920000.0000000000000000000000", "53920000.0000000000000000000000"};
     decimal* dDqlx = PGTYPESdecimal_new();
     decimal* dJcjxts = PGTYPESdecimal_new();
     decimal* dtmp = PGTYPESdecimal_new();
     int retdecdiv = 0;
-    char* number1 = "53920000.0000000000000000000000";
-    char* number2 = "360.0";
-    retdecdiv = deccvasc(number1, strlen(number1), dDqlx);
-    retdecdiv = deccvasc(number2, strlen(number2), dJcjxts);
-    char printStr[60];
-    dectoasc(dDqlx, printStr, sizeof(printStr) - 1, -1);
-    printf("dDqlx = [%s]\n", printStr);
-    dectoasc(dJcjxts, printStr, sizeof(printStr) - 1, -1);
-    printf("dJcjxts = [%s]\n", printStr);
-    retdecdiv = decdiv(dDqlx, dJcjxts, dtmp);
-    dectoasc(dtmp, printStr, sizeof(printStr) - 1, -1);
-    printf("dtmp = [%s]\n", printStr);
-    free(dDqlx);
-    free(dJcjxts);
-    free(dtmp);
+    int index = 0;
+    int breakTime = 2;
+    while (index < breakTime) {
+        char* number1 = desc[index];
+        char* number2 = "360.0";
+        retdecdiv = deccvasc(number1, strlen(number1), dDqlx);
+        retdecdiv = deccvasc(number2, strlen(number2), dJcjxts);
+        char printStr[60];
+        dectoasc(dDqlx, printStr, sizeof(printStr) - 1, -1);
+        printf("dDqlx = [%s]\n", printStr);
+        dectoasc(dJcjxts, printStr, sizeof(printStr) - 1, -1);
+        printf("dJcjxts = [%s]\n", printStr);
+        retdecdiv = decdiv(dDqlx, dJcjxts, dtmp);
+        dectoasc(dtmp, printStr, sizeof(printStr) - 1, -1);
+        printf("dtmp = [%s]\n", printStr);
+        free(dDqlx);
+        free(dJcjxts);
+        free(dtmp);
+        index++;
+    }
 
 	return (0);
 }
