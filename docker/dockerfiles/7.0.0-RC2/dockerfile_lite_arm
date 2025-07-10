@@ -13,7 +13,7 @@ ENV LANG en_US.utf8
 #RUN yum install -y epel-release
 
 RUN set -eux; \
-    yum install -y bzip2 curl libaio shadow tar jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd java-1.8.0-openjdk-devel openssl-devel wget&& \
+    yum install -y bzip2 curl libaio shadow tar jemalloc-devel libcgroup-devel libcurl-devel libedit-devel libxml2-devel lz4-devel numactl-devel unixODBC-devel zstd java-1.8.0-openjdk-devel openssl-devel wget unzip && \
     groupadd -g 70 omm; \
     useradd -u 70 -g omm -d /home/omm omm; \
     mkdir -p /var/lib/opengauss && \
