@@ -255,8 +255,8 @@ partition p_default values less than (maxvalue)
     restart_guc "pub_datanode2" "recovery_max_workers = 1"
 
     # BUG8: fix publisher choose relation incorrectly if there are more than one relation in different schemas with the same name.
-    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP TABLE testTab1 cascade"
-    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;DROP TABLE testTab1 cascade"
+    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP TABLE t1 cascade"
+    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;"
 
     exec_sql $case_db $pub_node1_port "create table logical_tb1(id int primary key,name varchar(20));"
     exec_sql $case_db $pub_node1_port "create schema test_sche;create table test_sche.logical_tb1(id int primary key,id1 int);"
@@ -277,6 +277,30 @@ partition p_default values less than (maxvalue)
         echo "check if table sync success"
     else
         echo "$failed_keyword when check if table sync"
+        exit 1
+    fi
+
+    # BUG9: fix subscription failed while creating index with parallel_worker
+    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP TABLE logical_tb1 cascade;DROP SCHEMA test_sche cascade;"
+    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;DROP SCHEMA test_sche cascade;"
+
+    echo "create publication and subscription."
+    publisher_connstr="port=$pub_node1_port host=$g_local_ip dbname=$case_db user=$username password=$passwd"
+    exec_sql $case_db $pub_node1_port "CREATE PUBLICATION tap_pub FOR all tables with (ddl='all');"
+    exec_sql $case_db $sub_node1_port "CREATE SUBSCRIPTION tap_sub CONNECTION '$publisher_connstr' PUBLICATION tap_pub"
+
+    wait_for_subscription_sync $case_db $sub_node1_port
+
+    exec_sql $case_db $pub_node1_port "create table parallel_index_t1(id int, name varchar(20));"
+    exec_sql $case_db $pub_node1_port "alter table parallel_index_t1 set (parallel_workers=2);"
+    exec_sql $case_db $pub_node1_port "create index on parallel_index_t1(id);"
+
+    wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+    if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM pg_index where indrelid = 'parallel_index_t1'::regclass")" = "1" ]; then
+        echo "check if index sync success"
+    else
+        echo "$failed_keyword when check if index sync"
         exit 1
     fi
 }
