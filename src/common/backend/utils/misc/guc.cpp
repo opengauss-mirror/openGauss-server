@@ -18,12 +18,15 @@
  * --------------------------------------------------------------------
  */
 #include <unistd.h>
+#include <sys/stat.h>
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include <string.h> 
 #include <float.h>
 #include <math.h>
 #include <limits.h>
+#include <errno.h>
 #include "utils/elog.h"
 
 #ifdef HAVE_SYSLOG
@@ -6094,7 +6097,7 @@ bool SelectConfigFiles(const char* userDoption, const char* progname)
 {
     char* configdir = NULL;
     char* fname = NULL;
-    struct stat stat_buf;
+    struct stat statBuf;
 #ifdef ENABLE_MOT
     char* motfname = NULL;
 #endif
@@ -6151,7 +6154,7 @@ bool SelectConfigFiles(const char* userDoption, const char* progname)
      * Now read the config file for the first time.
      */
     if (g_instance.attr.attr_common.ConfigFileName != NULL &&
-        stat(g_instance.attr.attr_common.ConfigFileName, &stat_buf) != 0) {
+        stat(g_instance.attr.attr_common.ConfigFileName, &statBuf) != 0) {
         int str_len = strlen(g_instance.attr.attr_common.ConfigFileName);
         rc = strncpy_s(
             TempConfigFile, MAXPGPATH, g_instance.attr.attr_common.ConfigFileName, Min(str_len, MAXPGPATH - 1));
@@ -6163,7 +6166,7 @@ bool SelectConfigFiles(const char* userDoption, const char* progname)
         get_parent_directory(TempConfigPath);
         rc = snprintf_s(TempConfigFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s", TempConfigPath, CONFIG_BAK_FILENAME_WAL);
         securec_check_ss(rc, configdir, "\0");
-        if (lstat(TempConfigFileName, &stat_buf) != 0) {
+        if (lstat(TempConfigFileName, &statBuf) != 0) {
             write_stderr("%s cannot access the server configuration file \"%s\": %s\n",
                 progname,
                 g_instance.attr.attr_common.ConfigFileName,
@@ -12162,26 +12165,64 @@ bool check_directory(char** newval, void** extra, GucSource source)
 
 bool check_audit_directory(char** newval, void** extra, GucSource source)
 {
-    if (*newval != nullptr) {
-        if (strlen(*newval) == 0) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-            errmsg("invalid value for GUC parameter of directory type.")));
-        } else {
-            canonicalize_path(*newval);
-        }
-    } else {
+    char *pathCopy = nullptr;
+    char *ptr = nullptr;
+    bool hasWritableParent = false;
+    if (*newval == nullptr) {
         return true;
     }
-    if (strcmp(*newval, "pg_audit") != 0) {
-        if (access(*newval, F_OK) != 0) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-            errmsg("directory does not exist: %s, please check the audit_directory parameter configuration.", *newval)));
-        }
-        if (access(*newval, R_OK | W_OK) != 0) {
-            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-            errmsg("insufficient permissions to access directory: %s, please check the audit_directory parameter configuration.", *newval)));
+    if (strlen(*newval) == 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+        errmsg("invalid value for GUC parameter of directory type.")));
+    }
+    
+    if (strcmp(*newval, "pg_audit") == 0) {
+        return true;
+    }
+
+    canonicalize_path(*newval);
+    pathCopy = strdup(*newval);
+    if (access(pathCopy, F_OK) == 0) {
+        if (access(pathCopy, R_OK | W_OK) != 0) {
+            free(pathCopy);
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("insufficient permissions to access directory: %s", *newval)));
+        } else {
+            free(pathCopy);
+            return true;
         }
     }
+
+    // The directory does not exist, check if you have permission to create it.
+    ptr = pathCopy;
+    while (true) {
+        // Find the last slash in the current path.
+        ptr = strrchr(ptr, '/');
+        if (ptr == nullptr) {
+            break;
+        }
+
+        // Truncate the path to point to the parent directory.
+        *ptr = '\0';
+        
+        // Skip empty path (first slash after root directory).
+        if (strlen(pathCopy) == 0) {
+            strcpy_s(pathCopy, strlen("/") + 1, "/");
+            ptr = pathCopy + 1;
+        }
+        if (access(pathCopy, F_OK) == 0) {
+            // Check if there is write and read permission.
+            if (access(pathCopy, R_OK | W_OK) == 0) {
+                hasWritableParent = true;
+            }
+            break;
+        }
+        ptr = pathCopy;
+    }
+    if (!hasWritableParent) {
+        free(pathCopy);
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("insufficient permissions to access directory: %s", *newval)));
+    }
+    free(pathCopy);
     return true;
 }
 
