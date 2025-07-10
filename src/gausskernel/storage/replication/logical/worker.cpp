@@ -2226,9 +2226,14 @@ void ApplyWorkerMain()
     /* has setDatabase and LockDatabase in InitApplyWorker */
     t_thrd.proc_cxt.PostInit->GetDatabaseName(dbname);
     oldctx = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
-    if (u_sess->proc_cxt.MyProcPort->database_name)
+    if (u_sess->proc_cxt.MyProcPort->database_name) {
         pfree_ext(u_sess->proc_cxt.MyProcPort->database_name);
+    }
     u_sess->proc_cxt.MyProcPort->database_name = pstrdup(dbname);
+    if (u_sess->proc_cxt.MyProcPort->user_name) {
+        pfree_ext(u_sess->proc_cxt.MyProcPort->user_name);
+    }
+    u_sess->proc_cxt.MyProcPort->user_name = GetUserNameById(t_thrd.applyworker_cxt.curWorker->userid);
     (void)MemoryContextSwitchTo(oldctx);
 
     pgstat_report_appname("ApplyWorker");
