@@ -7837,6 +7837,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     Cursor_Data* saved_cursor_data = NULL;
     bool has_alloc = false;
     bool multi_res_return = false;
+    bool isStrict = stmt->strict;
     NodeTag old_node_tag = t_thrd.postgres_cxt.cur_command_tag;
     TransactionId oldTransactionId = SPI_get_top_transaction_id();
  
@@ -7908,17 +7909,17 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     if (stmt->into) {
         if (!stmt->mod_stmt && !stmt->bulk_collect) {
             if (!DB_IS_CMPT(PG_FORMAT | B_FORMAT) || SELECT_INTO_RETURN_NULL == 0) {
-                stmt->strict = true;
+                isStrict = true;
             }
         }
 #ifdef ENABLE_MULTIPLE_NODES
         if (!stmt->mod_stmt && !stmt->bulk_collect) {
-            stmt->strict = true;
+            isStrict = true;
         }
 #endif
         if (stmt->bulk_collect) {
             tcount = 0;
-        } else if (stmt->strict || stmt->mod_stmt) {
+        } else if (isStrict || stmt->mod_stmt) {
             tcount = 2;
         } else {
             tcount = 1;
@@ -8087,7 +8088,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
          * allow the query to find any number of rows.
          */
         if (n == 0) {
-            if (stmt->strict) {
+            if (isStrict) {
                 ereport(ERROR,
                     (errcode(ERRCODE_NO_DATA_FOUND),
                         errmodule(MOD_PLSQL),
@@ -8198,6 +8199,8 @@ static void exec_into_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexec
     uint32 n = SPI_processed;
     PLpgSQL_rec* rec = NULL;
     PLpgSQL_row* row = NULL;
+    bool isStrict = stmt->strict || !DB_IS_CMPT(PG_FORMAT | B_FORMAT) ||
+                    SELECT_INTO_RETURN_NULL == 0;
 
     if (!stmt->into) {
         return;
@@ -8234,14 +8237,14 @@ static void exec_into_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexec
          * allow the query to find any number of rows.
          */
         if (n == 0) {
-            if (stmt->strict) {
+            if (isStrict) {
                 ereport(
                     ERROR, (errcode(ERRCODE_NO_DATA_FOUND), errmodule(MOD_PLSQL), errmsg("query returned no rows")));
             }
             /* set the target to NULL(s) */
             exec_move_row(estate, rec, row, NULL, tuptab->tupdesc);
         } else {
-            if (n > 1 && stmt->strict) {
+            if (n > 1 && isStrict) {
                 ereport(ERROR,
                     (errcode(ERRCODE_TOO_MANY_ROWS), errmodule(MOD_PLSQL), errmsg("query returned more than one row")));
             }
@@ -8517,6 +8520,9 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
     /* normal way: for only one statement in dynamic query */
     if (stmt->into) {
         tcount = stmt->strict ? 2 : 1;
+        if (!DB_IS_CMPT(PG_FORMAT | B_FORMAT) || SELECT_INTO_RETURN_NULL == 0) {
+            tcount = 2;
+        }
     } else {
         tcount = 0;
     }
