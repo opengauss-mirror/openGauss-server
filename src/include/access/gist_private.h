@@ -113,6 +113,7 @@ typedef struct GISTSTATE {
 typedef struct GISTSearchHeapItem {
     ItemPointerData heapPtr;
     bool recheck; /* T if quals must be rechecked */
+    bool recheckDistances; /* T if distances must be rechecked */
 } GISTSearchHeapItem;
 
 /* Unvisited item, either index page or heap tuple */
@@ -124,7 +125,10 @@ typedef struct GISTSearchItem {
         /* we must store parentlsn to detect whether a split occurred */
         GISTSearchHeapItem heap; /* heap info, if heap tuple */
     } data;
+    double distances[FLEXIBLE_ARRAY_MEMBER]; /* numberOfOrderBys entries */
 } GISTSearchItem;
+
+#define GSIHDRSZ offsetof(GISTSearchItem, distances)
 
 #define GISTSearchItemIsHeap(item) ((item).blkno == InvalidBlockNumber)
 
@@ -147,6 +151,7 @@ typedef struct GISTSearchTreeItem {
  */
 typedef struct GISTScanOpaqueData {
     GISTSTATE *giststate;   /* index information, see above */
+    Oid *orderByTypes;      /* datatypes of ORDER BY expressions */
     RBTree *queue;          /* queue of unvisited items */
     MemoryContext queueCxt; /* context holding the queue */
     bool qual_ok;           /* false if qual can never be satisfied */

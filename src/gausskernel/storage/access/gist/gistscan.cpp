@@ -19,6 +19,7 @@
 #include "access/gist_private.h"
 #include "access/gistscan.h"
 #include "access/relscan.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -118,6 +119,14 @@ Datum gistbeginscan(PG_FUNCTION_ARGS)
     so->tmpTreeItem = (GISTSearchTreeItem *)palloc(GSTIHDRSZ + sizeof(double) * scan->numberOfOrderBys);
     so->distances = (double *)palloc(sizeof(double) * scan->numberOfOrderBys);
     so->qual_ok = true; /* in case there are zero keys */
+    if (scan->numberOfOrderBys > 0) {
+        errno_t rc = EOK;
+        scan->xs_orderbyvals = (Datum*)palloc0(sizeof(Datum) * scan->numberOfOrderBys);
+        scan->xs_orderbynulls = (bool*)palloc(sizeof(bool) * scan->numberOfOrderBys);
+        rc = memset_s(scan->xs_orderbynulls, sizeof(bool) * scan->numberOfOrderBys,
+                      true, sizeof(bool) * scan->numberOfOrderBys);
+        securec_check(rc, "\0", "\0");
+    }
 
     scan->opaque = so;
 
@@ -235,6 +244,7 @@ Datum gistrescan(PG_FUNCTION_ARGS)
         ret = memmove_s(scan->orderByData, scan->numberOfOrderBys * sizeof(ScanKeyData), orderbys,
                         scan->numberOfOrderBys * sizeof(ScanKeyData));
         securec_check(ret, "", "");
+        so->orderByTypes = (Oid *) palloc(scan->numberOfOrderBys * sizeof(Oid));
 
         /*
          * Modify the order-by key so that the Distance method is called for
@@ -256,6 +266,19 @@ Datum gistrescan(PG_FUNCTION_ARGS)
                         (errcode(ERRCODE_INDEX_CORRUPTED),
                          errmsg("missing support function %d for attribute %d of index \"%s\"", GIST_DISTANCE_PROC,
                                 skey->sk_attno, RelationGetRelationName(scan->indexRelation))));
+            /*
+             * Look up the datatype returned by the original ordering operator.
+             * GiST always uses a float8 for the distance function, but the
+             * ordering operator could be anything else.
+             *
+             * XXX: The distance function is only allowed to be lossy if the
+             * ordering operator's result type is float4 or float8.  Otherwise
+             * we don't know how to return the distance to the executor.  But
+             * we cannot check that here, as we won't know if the distance
+             * function is lossy until it returns *recheck = true for the
+             * first time.
+             */
+            so->orderByTypes[i] = get_func_rettype(skey->sk_func.fn_oid);
         }
     }
 

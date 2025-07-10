@@ -1253,6 +1253,7 @@ Datum gist_point_distance(PG_FUNCTION_ARGS)
     StrategyNumber strategy = (StrategyNumber)PG_GETARG_UINT16(2);
     double distance;
     StrategyNumber strategyGroup = strategy / GeoStrategyNumberOffset;
+    bool* recheck = (bool *) PG_GETARG_POINTER(4);
 
     switch (strategyGroup) {
         case PointStrategyNumberGroup:
@@ -1262,6 +1263,42 @@ Datum gist_point_distance(PG_FUNCTION_ARGS)
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unknown strategy number: %d", strategy)));
             distance = 0.0; /* keep compiler quiet */
     }
+
+    *recheck = false;
+    PG_RETURN_FLOAT8(distance);
+}
+
+static float8 gist_bbox_distance(GISTENTRY *entry, Datum query, StrategyNumber strategy)
+{
+    StrategyNumber strategyGroup = strategy / GeoStrategyNumberOffset;
+    if (strategyGroup == PointStrategyNumberGroup) {
+        return computeDistance(false, DatumGetBoxP(entry->key), DatumGetPointP(query));
+    }
+    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unknown strategy number: %d", strategy)));
+    return 0.0f; /* keep compiler quiet */
+}
+
+/*
+ * The inexact GiST distance methods for geometric types that store bounding
+ * boxes.
+ *
+ * Compute lossy distance from point to index entries.  The result is inexact
+ * because index entries are bounding boxes, not the exact shapes of the
+ * indexed geometric types.  We use distance from point to MBR of index entry.
+ * This is a lower bound estimate of distance from point to indexed geometric
+ * type.
+ */
+Datum gist_circle_distance(PG_FUNCTION_ARGS)
+{
+    GISTENTRY* entry = (GISTENTRY *) PG_GETARG_POINTER(0);
+    Datum query = PG_GETARG_DATUM(1);
+    StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
+
+    bool* recheck = (bool *) PG_GETARG_POINTER(4);
+    float8 distance;
+
+    distance = gist_bbox_distance(entry, query, strategy);
+    *recheck = true;
 
     PG_RETURN_FLOAT8(distance);
 }
