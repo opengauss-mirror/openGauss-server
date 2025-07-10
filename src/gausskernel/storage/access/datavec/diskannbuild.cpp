@@ -338,7 +338,11 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
 
     InsertFrozenPoint(buildstate->index, frozen);
 
-    // todo: graph link
+    for (size_t i = 0; i < buildstate->blocksList.size(); i++) {
+        BlockNumber blk = buildstate->blocksList[i];
+        DiskAnnGraph graph(buildstate->index, buildstate->dimensions, frozen, buildstate->graphStore);
+        graph.Link(blk, buildstate->indexSize);
+    }
 }
 
 void InsertFrozenPoint(Relation index, BlockNumber frozen)
