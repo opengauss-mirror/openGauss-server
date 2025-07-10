@@ -500,7 +500,13 @@ FusionType checkFusionAgg(Agg *node, ParamListInfo params)
             /* count(*) has no arg, so we can return here */
             return BYPASS_OK;
         default:
-            return NOBYPASS_JUST_SUM_ALLOWED;
+            char* function_name = get_func_name(aggref->aggfnoid);
+            if (function_name == NULL || strcmp(function_name, "sum_ext") != 0) {
+                pfree_ext(function_name);
+                return NOBYPASS_JUST_SUM_ALLOWED;
+            }
+            pfree_ext(function_name);
+            break;
     }
 
     res = (TargetEntry *)linitial(aggref->args);

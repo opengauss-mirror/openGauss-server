@@ -76,7 +76,8 @@ void AggFusion::InitGlobals()
             m_c_global->m_aggFunc = &AggFusion::agg_star_count;
             break;
         default:
-            elog(ERROR, "unsupported aggfnoid %u for bypass.", aggref->aggfnoid);
+            if (!InitDynamicOidFunc(aggref))
+                elog(ERROR, "unsupported aggfnoid %u for bypass.", aggref->aggfnoid);
             break;
     }
     m_c_global->m_aggFnOid = aggref->aggfnoid;
@@ -134,6 +135,35 @@ void AggFusion::InitLocals(ParamListInfo params)
     m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
     m_local.m_values = (Datum*)palloc0(m_global->m_tupDesc->natts * sizeof(Datum));
     m_local.m_isnull = (bool*)palloc0(m_global->m_tupDesc->natts * sizeof(bool));
+}
+
+bool AggFusion::InitDynamicOidFunc(Aggref *aggref)
+{
+    char* function_name = get_func_name(aggref->aggfnoid);
+    if (function_name != NULL && strcmp(function_name, "sum_ext") == 0) {
+        TargetEntry* res = (TargetEntry *)linitial(aggref->args);
+        Oid agg_arg_type = InvalidOid;
+        if (IsA(res->expr, Var)) {
+            agg_arg_type = ((Var*)(res->expr))->vartype;
+        } else if (IsA(res->expr, Const)) {
+            agg_arg_type = ((Const*)(res->expr))->consttype;
+        }
+    
+        pfree_ext(function_name);
+        if (agg_arg_type == INT2OID) {
+            m_c_global->m_aggFunc = &AggFusion::agg_int2_sum_ext;
+            return true;
+        }
+        if (agg_arg_type == INT4OID) {
+            m_c_global->m_aggFunc = &AggFusion::agg_int4_sum_ext;
+            return true;
+        }
+        if (agg_arg_type == FLOAT4OID) {
+            m_c_global->m_aggFunc = &AggFusion::agg_float4_sum_ext;
+            return true;
+        }
+    }
+    return false;
 }
 
 long AggFusion::agg_process_special_count(long max_rows, Datum* values, bool* isnull)
@@ -263,6 +293,18 @@ AggFusion::agg_int2_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool in
 }
 
 void
+AggFusion::agg_int2_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+{
+    if (unlikely(inIsNull)) {
+        return;
+    }
+
+    int16 val = DatumGetInt16(*inVal);
+    Datum int64Val = Int64GetDatum((int64)val);
+    AggFusion::agg_int8_sum(transVal, transIsNull, &int64Val, inIsNull);
+}
+
+void
 AggFusion::agg_int4_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
 {
     int64 newval;
@@ -280,6 +322,44 @@ AggFusion::agg_int4_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool in
     int64 oldsum = DatumGetInt64(*transVal);
     newval = oldsum + (int64)DatumGetInt32(*inVal);
     *transVal = Int64GetDatum(newval);
+}
+
+void
+AggFusion::agg_int4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+{
+    if (unlikely(inIsNull)) {
+        return;
+    }
+
+    int32 val = DatumGetInt32(*inVal);
+    Datum int32Val = Int64GetDatum((int64)val);
+    AggFusion::agg_int8_sum(transVal, transIsNull, &int32Val, inIsNull);
+}
+
+void
+AggFusion::agg_float4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+{
+    float8 newval;
+    float8 result;
+
+    if (unlikely(inIsNull)) {
+        return;
+    }
+
+    if (unlikely(transIsNull)) {
+        newval = (float8)DatumGetFloat4(*inVal);
+        *transVal = Float8GetDatum(newval);
+        return;
+    }
+
+    float8 oldsum = DatumGetFloat8(*transVal);
+    newval = (float8)DatumGetFloat4(*inVal);
+    result = oldsum + newval;
+
+    if (unlikely(isinf(result) && !(isinf(oldsum) || isinf(newval))))
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("value out of range: overflow")));
+
+    *transVal = Float8GetDatum(result);
 }
 
 void
