@@ -63,6 +63,14 @@ protected:
 
     long agg_process_common(long max_rows, Datum* values, bool* isnull);
 
+    void agg_int2_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+
+    void agg_int4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+
+    void agg_float4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+
+    bool InitDynamicOidFunc(Aggref *aggref);
+
     inline void init_var_from_num(Numeric num, NumericVar *dest)
     {
         Assert(!NUMERIC_IS_BI(num));
