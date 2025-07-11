@@ -1479,11 +1479,11 @@ int32 prepare_page(ConnectionArgs *conn_arg,
 /* split this function in two: compress() and backup() */
 static int
 compress_and_backup_page(pgFile *file, BlockNumber blknum,
-                                                        FILE *in, FILE *out, pg_crc32 *crc,
-                                                        int page_state, Page page,
-                                                        CompressAlg calg, int clevel,
-                                                        const char *from_fullpath, const char *to_fullpath,
-                                                        FileAppender* appender, char** fileBuffer)
+                         FILE *in, FILE *out, pg_crc32 *crc,
+                         int page_state, Page page,
+                         CompressAlg calg, int clevel,
+                         const char *from_fullpath, const char *to_fullpath,
+                         FileAppender* appender, char** fileBuffer, short readerIndexId)
 {
     int         compressed_size = 0;
     size_t      write_buffer_size = 0;
@@ -1527,10 +1527,10 @@ compress_and_backup_page(pgFile *file, BlockNumber blknum,
             COMP_FILE_CRC32(true, *crc, write_buffer, write_buffer_size);
             file->crc = *crc;
             /* write data page */
-            FileAppenderSegHeader content_header;
-            constructHeader(&content_header, FILE_APPEND_TYPE_FILE_CONTENT, write_buffer_size, 0, file);
-            writeHeader(&content_header, appender);
-            writePayload((char*)write_buffer, write_buffer_size, appender);
+            ParallelFileAppenderSegHeader contentHeader;
+            constructParallelHeader(&contentHeader, FILE_APPEND_TYPE_FILE_CONTENT,
+                                    write_buffer_size, 0, file, readerIndexId);
+            WriteDataBlock(&contentHeader, (char*)write_buffer, write_buffer_size, appender);
         }
     } else {
         /* Update CRC */
@@ -1556,11 +1556,11 @@ compress_and_backup_page(pgFile *file, BlockNumber blknum,
  */
 void
 backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
-                                const char *from_fullpath, const char *to_fullpath,
-                                XLogRecPtr prev_backup_start_lsn, BackupMode backup_mode,
-                                CompressAlg calg, int clevel, uint32 checksum_version,
-                                HeaderMap *hdr_map, bool is_merge,
-                                FileAppender* appender, char* fileBuffer)
+                 const char *from_fullpath, const char *to_fullpath,
+                 XLogRecPtr prev_backup_start_lsn, BackupMode backup_mode,
+                 CompressAlg calg, int clevel, uint32 checksum_version,
+                 HeaderMap *hdr_map, bool is_merge,
+                 FileAppender* appender, char* fileBuffer, short readerIndexId)
 {
     int         rc;
     bool        use_pagemap;
@@ -1607,10 +1607,9 @@ backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
 
     if (fileBuffer == NULL && current.media_type == MEDIA_TYPE_OSS) {
         size_t pathLen = strlen(file->rel_path);
-        FileAppenderSegHeader start_header;
-        constructHeader(&start_header, FILE_APPEND_TYPE_FILE, pathLen, 0, file);
-        writeHeader(&start_header, appender);
-        writePayload((char*)file->rel_path, pathLen, appender);
+        ParallelFileAppenderSegHeader startHeader;
+        constructParallelHeader(&startHeader, FILE_APPEND_TYPE_FILE, pathLen, 0, file, readerIndexId);
+        WriteDataBlock(&startHeader, (char*)file->rel_path, pathLen, appender);
     }
 
     /*
@@ -1629,23 +1628,22 @@ backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
     /* Remote mode */
     if (fio_is_remote(FIO_DB_HOST))
     {
-
         rc = fio_send_pages(to_fullpath, from_fullpath, file,
-                                        InvalidXLogRecPtr,
-                                        calg, clevel, checksum_version,
-                                        /* send pagemap if any */
-                                        use_pagemap,
-                                        /* variables for error reporting */
-                                        &err_blknum, &errmsg, &headers,
-                                        appender, fileBuffer ? &fileBuffer : NULL);
+                            InvalidXLogRecPtr,
+                            calg, clevel, checksum_version,
+                            /* send pagemap if any */
+                            use_pagemap,
+                            /* variables for error reporting */
+                            &err_blknum, &errmsg, &headers,
+                            appender, fileBuffer ? &fileBuffer : NULL, readerIndexId);
     }
     else
     {
         rc = send_pages(conn_arg, to_fullpath, from_fullpath, file,
-                                /* send prev backup START_LSN */
-                                InvalidXLogRecPtr,
-                                calg, clevel, checksum_version, use_pagemap,
-                                &headers, backup_mode, appender, fileBuffer);
+                        /* send prev backup START_LSN */
+                        InvalidXLogRecPtr,
+                        calg, clevel, checksum_version, use_pagemap,
+                        &headers, backup_mode, appender, fileBuffer, readerIndexId);
     }
 
     /* check for errors */
@@ -1710,9 +1708,9 @@ cleanup:
     write_page_headers(headers, file, hdr_map, is_merge);
 
     if (fileBuffer == NULL && current.media_type == MEDIA_TYPE_OSS) {
-        FileAppenderSegHeader end_header;
-        constructHeader(&end_header, FILE_APPEND_TYPE_FILE_END, 0, file->read_size, file);
-        writeHeader(&end_header, appender);
+        ParallelFileAppenderSegHeader endHeader;
+        constructParallelHeader(&endHeader, FILE_APPEND_TYPE_FILE_END, 0, file->read_size, file, readerIndexId);
+        WriteHeader(&endHeader, appender);
     }
 
     pg_free(errmsg);
@@ -1727,10 +1725,11 @@ cleanup:
  */
 void
 backup_non_data_file(pgFile *file, pgFile *prev_file,
-                                            const char *from_fullpath, const char *to_fullpath,
-                                            BackupMode backup_mode, time_t parent_backup_time,
-                                            bool missing_ok, FileAppender* appender, char* fileBuffer)
+                     const char *from_fullpath, const char *to_fullpath,
+                     BackupMode backup_mode, time_t parent_backup_time,
+                     bool missing_ok, FileAppender* appender, char* fileBuffer, short readerIndexId)
 {
+    Assert(appender == NULL || fileBuffer == NULL);
     fio_location from_location = is_dss_file(from_fullpath) ? FIO_DSS_HOST : FIO_DB_HOST;
     /* special treatment for global/pg_control */
     if (file->external_dir_num == 0 && strcmp(file->name, PG_XLOG_CONTROL_FILE) == 0)
@@ -1761,18 +1760,17 @@ backup_non_data_file(pgFile *file, pgFile *prev_file,
         // write file start header and from_fullpath
         size_t pathLen = strlen(file->rel_path);
         INIT_FILE_CRC32(true, file->crc);
-        FileAppenderSegHeader start_header;
-        constructHeader(&start_header, FILE_APPEND_TYPE_FILE, pathLen, 0, file);
-        writeHeader(&start_header, appender);
-        writePayload((char*)file->rel_path, pathLen, appender);
+        ParallelFileAppenderSegHeader startHeader;
+        constructParallelHeader(&startHeader, FILE_APPEND_TYPE_FILE, pathLen, 0, file, readerIndexId);
+        WriteDataBlock(&startHeader, (char*)file->rel_path, pathLen, appender);
     }
     backup_non_data_file_internal(from_fullpath, from_location, to_fullpath, file, true,
-                                  appender, fileBuffer ? &fileBuffer : NULL);
+                                  appender, fileBuffer ? &fileBuffer : NULL, readerIndexId);
     if (fileBuffer == NULL && current.media_type == MEDIA_TYPE_OSS) {
         // write file end header
-        FileAppenderSegHeader end_header;
-        constructHeader(&end_header, FILE_APPEND_TYPE_FILE_END, 0, file->read_size, file);
-        writeHeader(&end_header, appender);
+        ParallelFileAppenderSegHeader endHeader;
+        constructParallelHeader(&endHeader, FILE_APPEND_TYPE_FILE_END, 0, file->read_size, file, readerIndexId);
+        WriteHeader(&endHeader, appender);
     }
 }
 
@@ -2440,11 +2438,10 @@ restore_non_data_file(parray *parent_chain, pgBackup *dest_backup,
 }
 
 bool backup_remote_file(const char *from_fullpath, const char *to_fullpath, pgFile *file, bool missing_ok, FILE *out,
-                        FileAppender* appender, char** fileBuffer)
+                        FileAppender* appender, char** fileBuffer, short readerIndexId = 0)
 {
     char *errmsg = NULL;
-    int rc = fio_send_file(from_fullpath, to_fullpath, out, file, &errmsg, appender, fileBuffer);
-
+    int rc = fio_send_file(from_fullpath, to_fullpath, out, file, &errmsg, appender, fileBuffer, readerIndexId);
     /* handle errors */
     if (rc == FILE_MISSING)
     {
@@ -2481,7 +2478,7 @@ bool backup_remote_file(const char *from_fullpath, const char *to_fullpath, pgFi
 void
 backup_non_data_file_internal(const char *from_fullpath, fio_location from_location,
                               const char *to_fullpath, pgFile *file, bool missing_ok,
-                              FileAppender* appender, char** fileBuffer)
+                              FileAppender* appender, char** fileBuffer, short readerIndexId)
 {
     FILE       *in = NULL;
     FILE       *out = NULL;
@@ -2534,8 +2531,10 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
     /* backup remote file  */
     if (fio_is_remote(FIO_DB_HOST))
     {
-        if (!backup_remote_file(from_fullpath, to_fullpath, file, missing_ok, out, appender, fileBuffer))
+        if (!backup_remote_file(from_fullpath, to_fullpath, file, missing_ok,
+                                out, appender, fileBuffer, readerIndexId)) {
             goto cleanup;
+        }
     }
     /* backup local file */
     else
@@ -2590,10 +2589,10 @@ backup_non_data_file_internal(const char *from_fullpath, fio_location from_locat
                         /* Update CRC */
                         COMP_FILE_CRC32(true, file->crc, buf, read_len);
                         /* write data page */
-                        FileAppenderSegHeader content_header;
-                        constructHeader(&content_header, FILE_APPEND_TYPE_FILE_CONTENT, read_len, 0, file);
-                        writeHeader(&content_header, appender);
-                        writePayload((char*)buf, read_len, appender);
+                        ParallelFileAppenderSegHeader contentHeader;
+                        constructParallelHeader(&contentHeader, FILE_APPEND_TYPE_FILE_CONTENT,
+                                                read_len, 0, file, readerIndexId);
+                        WriteDataBlock(&contentHeader, (char*)buf, read_len, appender);
                     }
                 } else {
                     if (fwrite(buf, 1, read_len, out) != (size_t)read_len)
@@ -3253,9 +3252,9 @@ open_local_file_rw(const char *to_fullpath, char **out_buf, uint32 buf_size)
 /* backup local file */
 int
 send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_fullpath,
-                        pgFile *file, XLogRecPtr prev_backup_start_lsn, CompressAlg calg, int clevel,
-                        uint32 checksum_version, bool use_pagemap, BackupPageHeader2 **headers,
-                        BackupMode backup_mode, FileAppender* appender, char* fileBuffer)
+           pgFile *file, XLogRecPtr prev_backup_start_lsn, CompressAlg calg, int clevel,
+           uint32 checksum_version, bool use_pagemap, BackupPageHeader2 **headers,
+           BackupMode backup_mode, FileAppender* appender, char* fileBuffer, short readerIndexId)
 {
     FILE *in = NULL;
     FILE *out = NULL;
@@ -3357,10 +3356,12 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
                 phdr->pd_lower |= COMP_ASIGNMENT;
             }
 
-            compressed_size = compress_and_backup_page(file, blknum, in, out, &(file->crc),
-            rc, curr_page, calg, clevel,
-            from_fullpath, to_fullpath,
-            appender, fileBuffer ? &fileBuffer : NULL);
+            compressed_size = compress_and_backup_page(
+                file, blknum, in, out, &(file->crc),
+                rc, curr_page, calg, clevel,
+                from_fullpath, to_fullpath,
+                appender, fileBuffer ? &fileBuffer : NULL, readerIndexId);
+
             cur_pos_out += compressed_size + sizeof(BackupPageHeader);
         }
 

@@ -48,6 +48,7 @@ void backupDataFiles(backup_files_arg* arg)
         return;
     }
     appender->baseFileName = pg_strdup(current.root_dir);
+    pthread_spin_init(&appender->lock, PTHREAD_PROCESS_PRIVATE);
     initFileAppender(appender, FILE_APPEND_TYPE_FILES, 0, 0);
     /* backup starts */
     backupDirectories(appender, arg);
@@ -86,17 +87,18 @@ void backupDirectories(FileAppender* appender, backup_files_arg* arg)
 void appendDir(FileAppender* appender, const char* dirPath, uint32 permission,
                int external_dir_num, device_type_t type)
 {
-    FileAppenderSegHeader header;
+    ParallelFileAppenderSegHeader header;
     size_t pathLen = strlen(dirPath);
-    header.type = FILE_APPEND_TYPE_DIR;
+    setSegHeaderVersion(&header, SEG_HEADER_PARALLEL_VERSION);
+    SetSegHeaderType(&header, FILE_APPEND_TYPE_DIR);
     header.size = pathLen;
     header.permission = permission;
     header.filesize = 0;
     header.crc = 0;
     header.external_dir_num = external_dir_num;
     header.file_type = type;
-    writeHeader(&header, appender);
-    writePayload((char*)dirPath, pathLen, appender);
+    header.threadId = 0; // probackup main thread
+    WriteDataBlock(&header, (char*)dirPath, pathLen, appender);
 }
 
 void backupFiles(FileAppender* appender, backup_files_arg* arg)
@@ -199,41 +201,26 @@ void backupFiles(FileAppender* appender, backup_files_arg* arg)
             pg_free(dirpath);
         }
 
-        /* If the file size is less than 8MB,
-         * a load-balancing reason prevents the direct writing of the appender file 
+        /*
+         * Select a free reader thread to backup files, probackup thread only dispatch tasks.
          */
-        if (file->size <= FILE_BUFFER_SIZE && current.readerThreadCount > 0) {
-            int thread_slot = getFreeReaderThread();
-            while (thread_slot == -1) {
-                flushReaderContexts(arg);
-                thread_slot = getFreeReaderThread();
-            }
-            ReaderCxt* reader_cxt = &current.readerCxt[thread_slot];
-            int current_fileidx = reader_cxt->fileCount;
-            reader_cxt->file[current_fileidx] = file;
-            reader_cxt->prefile[current_fileidx] = prev_file;
-            reader_cxt->fromPath[current_fileidx] = pgut_strdup(from_fullpath);
-            reader_cxt->toPath[current_fileidx] = pgut_strdup(to_fullpath);
-            reader_cxt->appender = appender;
-            reader_cxt->segType[current_fileidx] = FILE_APPEND_TYPE_FILE;
-            reader_cxt->fileRemoved[current_fileidx] = false;
-            reader_cxt->fileCount++;
-            if (reader_cxt->fileCount == READER_THREAD_FILE_COUNT) {
-                setReaderState(reader_cxt, READER_THREAD_STATE_START);
-            }
-        } else {
-            if (file->is_datafile && !file->is_cfs) {
-                backup_data_file(&(arg->conn_arg), file, from_fullpath, to_fullpath,
-                                 arg->prev_start_lsn,
-                                 current.backup_mode,
-                                 instance_config.compress_alg,
-                                 instance_config.compress_level,
-                                 arg->nodeInfo->checksum_version,
-                                 arg->hdr_map, false, appender, NULL);
-            } else {
-                backup_non_data_file(file, prev_file, from_fullpath, to_fullpath,
-                                     current.backup_mode, current.parent_backup, true, appender, NULL);
-            }
+        int threadSlot = getFreeReaderThread();
+        while (threadSlot == -1) {
+            flushReaderContexts(arg);
+            threadSlot = getFreeReaderThread();
+        }
+        ReaderCxt* readerCxt = &current.readerCxt[threadSlot];
+        int currentFillIdx = readerCxt->fileCount;
+        readerCxt->file[currentFillIdx] = file;
+        readerCxt->prefile[currentFillIdx] = prev_file;
+        readerCxt->fromPath[currentFillIdx] = pgut_strdup(from_fullpath);
+        readerCxt->toPath[currentFillIdx] = pgut_strdup(to_fullpath);
+        readerCxt->appender = appender;
+        readerCxt->segType[currentFillIdx] = FILE_APPEND_TYPE_FILE;
+        readerCxt->fileRemoved[currentFillIdx] = false;
+        readerCxt->fileCount++;
+        if (readerCxt->fileCount == READER_THREAD_FILE_COUNT || file->size >= FILE_BUFFER_SIZE) {
+            setReaderState(readerCxt, READER_THREAD_STATE_START);
         }
 
         if (file->write_size == FILE_NOT_FOUND) {
@@ -267,18 +254,16 @@ void backupFiles(FileAppender* appender, backup_files_arg* arg)
 }
 
 
-/* static function*/
-
+/* used by probackup main thread */
 static void handleZeroSizeFile(FileAppender *appender, pgFile* file)
 {
     size_t pathLen = strlen(file->rel_path);
-    FileAppenderSegHeader start_header;
-    constructHeader(&start_header, FILE_APPEND_TYPE_FILE, pathLen, 0, file);
-    writeHeader(&start_header, appender);
-    writePayload((char*)file->rel_path, pathLen, appender);
-    FileAppenderSegHeader end_header;
-    constructHeader(&end_header, FILE_APPEND_TYPE_FILE_END, 0, 0, file);
-    writeHeader(&end_header, appender);
+    ParallelFileAppenderSegHeader startHeader;
+    constructParallelHeader(&startHeader, FILE_APPEND_TYPE_FILE, pathLen, 0, file, 0);
+    WriteDataBlock(&startHeader, (char*)file->rel_path, pathLen, appender);
+    ParallelFileAppenderSegHeader endHeader;
+    constructParallelHeader(&endHeader, FILE_APPEND_TYPE_FILE_END, 0, 0, file, 0);
+    WriteHeader(&endHeader, appender);
 }
 
 /* copy from backup.c for static variables*/

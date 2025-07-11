@@ -15,25 +15,27 @@
 #include "include/restore.h"
 #include "common/fe_memutils.h"
 
-void initFileAppender(FileAppender* appender, FILE_APPEND_SEG_TYPE type, uint32 minFileNo, uint32 maxFileNo)
+void initFileAppender(FileAppender* appender, NO_VERSION_SEG_TYPE type, uint32 minFileNo, uint32 maxFileNo)
 {
     appender->fileNo = maxFileNo;
     appender->minFileNo = minFileNo;
     appender->maxFileNo = maxFileNo;
-    appender->type = type;
     appender->currFileSize = 0;
     appender->filePtr = NULL;
     appender->currFileName = getAppendFileName(appender->baseFileName, appender->fileNo);
     appender->filePtr = openWriteBufferFile(appender->currFileName, "wb");
-    FileAppenderSegHeader header;
-    header.type = type;
+    ParallelFileAppenderSegHeader header;
+    setSegHeaderVersion(&header, SEG_HEADER_PARALLEL_VERSION);
+    SetSegHeaderType(&header, type);
+    Assert(getSegHeaderVersion(&header) == SEG_HEADER_PARALLEL_VERSION);
     header.size = 0;
     header.permission = 0;
     header.filesize = 0;
     header.crc = 0;
     header.external_dir_num = 0;
     header.file_type = DEV_TYPE_INVALID;
-    writeHeader(&header,appender);
+    header.threadId = 0;
+    WriteHeader(&header, appender);
 }
 
 void initSegDescriptor(FileAppenderSegDescriptor** segDesc)
@@ -43,36 +45,47 @@ void initSegDescriptor(FileAppenderSegDescriptor** segDesc)
         elog(ERROR, "Failed to allocate memory for seg descriptor.");
         return;
     }
-    desc->header.type = FILE_APPEND_TYPE_UNKNOWN;
+    desc->header = (char *)palloc(SEG_HEADER_MAX_SIZE);
+    if (desc->header == NULL) {
+        elog(ERROR, "desc->header allocate failed: out of memory");
+    }
+    SetSegHeaderType(desc->header, FILE_APPEND_TYPE_UNKNOWN);
+    setSegHeaderVersion(desc->header, SEG_HEADER_DEFAULT_VERSION);
+
     desc->header_offset = -1;
     desc->payload_offset = -1;
-    desc->crc = 0;
     desc->payload = NULL;
-    desc->outputFile = NULL;
-    desc->inputFile = NULL;
+    for (int i = 0; i < MAX_BACKUP_THREAD; i++) {
+        desc->inputFile[i] = NULL;
+        desc->outputFile[i] = NULL;
+        desc->crc[i] = 0;
+    }
     *segDesc = desc;
 }
 
-void getSegDescriptor(FileAppenderSegDescriptor* desc, char** buffOffset, size_t* remainBuffLen, BufferCxt* cxt)
+void getSegDescriptor(FileAppenderSegDescriptor* desc, char** buffOffset, size_t* remainBuffLen,
+                      BufferCxt* cxt, uint32 headerVersion, size_t segHdrLen)
 {
     errno_t rc;
-    *remainBuffLen = *remainBuffLen - sizeof(FileAppenderSegHeader);
+    *remainBuffLen = *remainBuffLen - getSegHeaderSize(headerVersion);
+
     /* The header may span across two buffs.
      * So, we cannot directly copy the header from the buffer.
      */
     if (likely(desc->header_offset == -1)) {
-        rc = memcpy_s(&desc->header, sizeof(FileAppenderSegHeader), *buffOffset, sizeof(FileAppenderSegHeader));
+        rc = memcpy_s(desc->header, segHdrLen, *buffOffset, segHdrLen);
         securec_check(rc, "\0", "\0");
-        desc->payload = *buffOffset + sizeof(FileAppenderSegHeader);
+        desc->payload = *buffOffset + segHdrLen;
         *buffOffset = desc->payload;
     } else {
-        rc = memcpy_s(&desc->header, desc->header_offset, *buffOffset, desc->header_offset);
+        rc = memcpy_s(desc->header, desc->header_offset, *buffOffset, desc->header_offset);
         securec_check(rc, "\0", "\0");
-        rc = memcpy_s(&desc->header + desc->header_offset, (sizeof(FileAppenderSegHeader) - desc->header_offset),
-                      cxt->bufData, (sizeof(FileAppenderSegHeader) - desc->header_offset));
+        rc = memcpy_s(desc->header + desc->header_offset, (segHdrLen - desc->header_offset),
+                      cxt->bufData, (segHdrLen - desc->header_offset));
         securec_check(rc, "\0", "\0");
-        desc->payload = cxt->bufData + (sizeof(FileAppenderSegHeader) - desc->header_offset);
+        desc->payload = cxt->bufData + (segHdrLen - desc->header_offset);
         *buffOffset = desc->payload;
+        desc->header_offset = -1;
     }
 }
 
@@ -80,37 +93,56 @@ void parseSegDescriptor(FileAppenderSegDescriptor* desc, char** buffOffset, size
                         BufferCxt* cxt, pgBackup* dest_backup, bool isValidate, validate_files_arg* arg) {
     error_t rc = 0;
     parray* files = dest_backup->files;
-    *remainBuffLen = *remainBuffLen - desc->header.size;
-
-    if (desc->payload_offset == -1) {
-        rc = memcpy_s(tempBuffer, desc->header.size, desc->payload, desc->header.size);
-        securec_check(rc, "\0", "\0");
-        *buffOffset = desc->payload + desc->header.size;
-    } else {
-        rc = memcpy_s(tempBuffer, desc->payload_offset, desc->payload, desc->payload_offset);
-        securec_check(rc, "\0", "\0");
-        rc = memcpy_s(tempBuffer + desc->payload_offset, (desc->header.size - desc->payload_offset),
-                      cxt->bufData, (desc->header.size - desc->payload_offset));
-        securec_check(rc, "\0", "\0");
-        *buffOffset = cxt->bufData + (desc->header.size - desc->payload_offset);
-        desc->payload_offset = -1;
+    uint32 payloadSize = ((FileAppenderSegHeader*)(desc->header))->size;
+    *remainBuffLen = *remainBuffLen - payloadSize;
+    uint32 version = desc->version;
+    uint32 fileIndex = 0;
+    if (version >= SEG_HEADER_PARALLEL_VERSION) {
+        fileIndex = ((ParallelFileAppenderSegHeader*)(desc->header))->threadId;
     }
 
-    if (desc->header.type == FILE_APPEND_TYPE_FILES_END || desc->header.type == FILE_APPEND_TYPE_FILES) {
+    FileAppenderSegHeader* header = (FileAppenderSegHeader*)(desc->header);
+    Assert(desc->version == getSegHeaderVersion(desc->header));
+    if (desc->version != getSegHeaderVersion(desc->header)) {
+        elog(ERROR, "Check segheader version failed, expect version: %d, segheader version: %d."
+            "seg header info: type: %u, size: %u, permission: %u, filesize: %u, crc: %u, "
+            "external_dir_num: %u, file_type: %u.",
+            desc->version, getSegHeaderVersion(desc->header), GetSegHeaderType(desc->header), header->size,
+            header->permission, header->filesize, header->crc, header->external_dir_num, header->file_type);
+    }
+
+    if (desc->payload_offset == -1) {
+        rc = memcpy_s(tempBuffer, payloadSize, desc->payload, payloadSize);
+        securec_check(rc, "\0", "\0");
+        *buffOffset = desc->payload + payloadSize;
+    } else {
+        if (desc->payload_offset > 0) {
+            rc = memcpy_s(tempBuffer, desc->payload_offset, desc->payload, desc->payload_offset);
+            securec_check(rc, "\0", "\0");
+        }
+        rc = memcpy_s(tempBuffer + desc->payload_offset, payloadSize - desc->payload_offset,
+                      cxt->bufData, (payloadSize - desc->payload_offset));
+        securec_check(rc, "\0", "\0");
+        *buffOffset = cxt->bufData + (payloadSize - desc->payload_offset);
+        desc->payload_offset = -1;
+    }
+    if (GetSegHeaderType(desc->header) == FILE_APPEND_TYPE_FILES_END ||
+        GetSegHeaderType(desc->header) == FILE_APPEND_TYPE_FILES) {
         return;
-    } else if (desc->header.type == FILE_APPEND_TYPE_DIR) {
+    } else if (GetSegHeaderType(desc->header) == FILE_APPEND_TYPE_DIR) {
         restoreDir(tempBuffer, desc, dest_backup, files, isValidate);
-    } else if (desc->header.type == FILE_APPEND_TYPE_FILE) {
+    } else if (GetSegHeaderType(desc->header) == FILE_APPEND_TYPE_FILE) {
         openRestoreFile(tempBuffer, desc, dest_backup, files, isValidate, arg);
-    } else if (desc->header.type == FILE_APPEND_TYPE_FILE_CONTENT) {
+    } else if (GetSegHeaderType(desc->header) == FILE_APPEND_TYPE_FILE_CONTENT) {
         writeOrValidateRestoreFile(tempBuffer, desc, isValidate, arg);
-    } else if (desc->header.type == FILE_APPEND_TYPE_FILE_END) {
+    } else if (GetSegHeaderType(desc->header) == FILE_APPEND_TYPE_FILE_END) {
         closeRestoreFile(desc);
     } else {
         if (isValidate) {
             arg->corrupted = true;
         } else {
-            elog(ERROR, "Unknown file type: %d, when restore file: %s", desc->header.type, desc->inputFile->rel_path);
+            elog(ERROR, "Unknown file type: %d, when restore file: %s",
+                GetSegHeaderType(desc->header), desc->inputFile[fileIndex]->rel_path);
         }
     }
 }
@@ -118,6 +150,7 @@ void parseSegDescriptor(FileAppenderSegDescriptor* desc, char** buffOffset, size
 void destorySegDescriptor(FileAppenderSegDescriptor** descriptor)
 {
     FileAppenderSegDescriptor* desc = *descriptor;
+    pfree_ext(desc->header);
     pfree_ext(desc);
 }
 
@@ -126,16 +159,18 @@ void closeFileAppender(FileAppender* appender)
     if (!appender) {
         return;
     }
-    FileAppenderSegHeader header;
-    header.type = FILE_APPEND_TYPE_FILES_END;
+    ParallelFileAppenderSegHeader header;
+    setSegHeaderVersion(&header, SEG_HEADER_PARALLEL_VERSION);
+    SetSegHeaderType(&header, FILE_APPEND_TYPE_FILES_END);
     header.size = 0;
     header.permission = 0;
     header.filesize = 0;
     header.crc = 0;
     header.external_dir_num = 0;
     header.file_type = DEV_TYPE_INVALID;
+    header.threadId = 0;
     ((BufferCxt *)appender->filePtr)->fileEnd.store(true);
-    writeHeader(&header, appender);
+    WriteHeader(&header, appender);
 }
 
 void destoryFileAppender(FileAppender** retAppender)
@@ -169,6 +204,7 @@ char* getAppendFileName(const char* baseFileName, uint32 fileNo)
     return fileName;
 }
 
+/* no used */
 void constructHeader(FileAppenderSegHeader* header, FILE_APPEND_SEG_TYPE type,
                      uint32 size, off_t filesize, pgFile* file)
 {
@@ -181,27 +217,66 @@ void constructHeader(FileAppenderSegHeader* header, FILE_APPEND_SEG_TYPE type,
     header->file_type = file->type;
 }
 
-void writeHeader(FileAppenderSegHeader* header, FileAppender* appender)
+void constructParallelHeader(ParallelFileAppenderSegHeader* header, NO_VERSION_SEG_TYPE type,
+                             uint32 size, off_t filesize, pgFile* file, short readerIndexId)
+{
+    setSegHeaderVersion(header, SEG_HEADER_PARALLEL_VERSION);
+    SetSegHeaderType(header, type);
+    header->size = size;
+    header->permission = file->mode;
+    header->filesize = filesize;
+    header->crc = file->crc;
+    header->external_dir_num = file->external_dir_num;
+    header->file_type = file->type;
+    header->threadId = readerIndexId;
+}
+
+void WriteHeader(ParallelFileAppenderSegHeader* header, FileAppender* appender)
 {
     size_t writeLen = 0;
-    if (!appender || ((appender->currFileSize + APPEND_FILE_HEADER_SIZE) > APPEND_FILE_MAX_SIZE)) {
+
+    /* only header with 0 size can be written alone, or use WriteDataBlock */
+    Assert(header->size == 0);
+    Assert(GetSegHeaderType(header) < FILE_APPEND_TYPE_MAX);
+    Assert(getSegHeaderVersion(header) == SEG_HEADER_PARALLEL_VERSION);
+
+    if (getSegHeaderVersion(header) != SEG_HEADER_PARALLEL_VERSION) {
+        elog(ERROR, "WriteHeader check segheader version failed, expect version: %d, segheader version: %d."
+            "seg header info: type: %u, size: %u, permission: %u, filesize: %u, crc: %u, "
+            "external_dir_num: %u, file_type: %u.",
+            SEG_HEADER_PARALLEL_VERSION, getSegHeaderVersion(header), GetSegHeaderType(header), header->size,
+            header->permission, header->filesize, header->crc, header->external_dir_num, header->file_type);
+    }
+
+    if (appender == NULL || ((appender->currFileSize + PARALLEL_APPEND_FILE_HEADER_SIZE) > APPEND_FILE_MAX_SIZE)) {
         elog(ERROR, "Write header failed.");
     }
-    if (header->type != FILE_APPEND_TYPE_FILES_END && (appender->currFileSize + APPEND_FILE_HEADER_SIZE + header->size) >
-        (APPEND_FILE_MAX_SIZE - APPEND_FILE_HEADER_SIZE)) {
+
+    if (GetSegHeaderType(header) != FILE_APPEND_TYPE_FILES &&
+        GetSegHeaderType(header) != FILE_APPEND_TYPE_FILES_END) {
+        pthread_spin_lock(&appender->lock);
+    }
+    if (GetSegHeaderType(header) != FILE_APPEND_TYPE_FILES_END &&
+        (appender->currFileSize + PARALLEL_APPEND_FILE_HEADER_SIZE + header->size) >
+        (APPEND_FILE_MAX_SIZE - PARALLEL_APPEND_FILE_HEADER_SIZE)) {
         uint32 minFileNo = appender->minFileNo;
         uint32 maxFileNo = appender->maxFileNo;
         closeFileAppender(appender);
         initFileAppender(appender, FILE_APPEND_TYPE_FILES, minFileNo, maxFileNo + 1);
     }
-    /* filePtr is a buffer context*/
-    writeLen = writeToCompFile((char*)header, sizeof(FileAppenderSegHeader), appender->filePtr);
-    if (writeLen != sizeof(FileAppenderSegHeader)) {
-        elog(ERROR, "Write header failed, write length: %lu.", writeLen);
+    /* filePtr is a buffer context */
+    writeLen = writeToCompFile((char*)header, PARALLEL_APPEND_FILE_HEADER_SIZE, appender->filePtr);
+    if (writeLen != PARALLEL_APPEND_FILE_HEADER_SIZE) {
+        elog(ERROR, "Write header failed, write length: %lu, except length: %lu.",
+            writeLen, PARALLEL_APPEND_FILE_HEADER_SIZE);
     }
     appender->currFileSize += writeLen;
-}
 
+    if (GetSegHeaderType(header) != FILE_APPEND_TYPE_FILES &&
+        GetSegHeaderType(header) != FILE_APPEND_TYPE_FILES_END) {
+        pthread_spin_unlock(&appender->lock);
+    }
+}
 
 size_t writeToCompFile(const char* data, size_t len, void* file)
 {
@@ -211,17 +286,56 @@ size_t writeToCompFile(const char* data, size_t len, void* file)
     return len;
 }
 
-void writePayload(const char* data, size_t len, FileAppender* appender)
+/* write header and payload */
+void WriteDataBlock(ParallelFileAppenderSegHeader* header, const char* payload, size_t payloadSize,
+                    FileAppender* appender)
 {
-    if (appender->currFileSize + len > (APPEND_FILE_MAX_SIZE - APPEND_FILE_HEADER_SIZE)) {
+    size_t writeLen = 0;
+    size_t blockSize = PARALLEL_APPEND_FILE_HEADER_SIZE + payloadSize;
+    errno_t rc;
+
+    Assert(GetSegHeaderType(header) < FILE_APPEND_TYPE_MAX);
+    Assert(getSegHeaderVersion(header) == SEG_HEADER_PARALLEL_VERSION);
+    if (getSegHeaderVersion(header) != SEG_HEADER_PARALLEL_VERSION) {
+        elog(ERROR, "WriteDataBlock check segheader version failed, expect version: %d, segheader version: %d."
+            "seg header info: type: %u, size: %u, permission: %u, filesize: %u, crc: %u, "
+            "external_dir_num: %u, file_type: %u.",
+            SEG_HEADER_PARALLEL_VERSION, getSegHeaderVersion(header), GetSegHeaderType(header), header->size,
+            header->permission, header->filesize, header->crc, header->external_dir_num, header->file_type);
+    }
+
+    if (appender == NULL || (appender->currFileSize + PARALLEL_APPEND_FILE_HEADER_SIZE) > APPEND_FILE_MAX_SIZE) {
+        elog(ERROR, "Write header failed.");
+    }
+
+    /* construct the buffer to write */
+    char* buffer = (char*)palloc(blockSize);
+    if (buffer == NULL) {
+        elog(ERROR, "Failed to allocate memory for buffer, size: %d", blockSize);
+    }
+    rc = memcpy_s(buffer, blockSize, header, PARALLEL_APPEND_FILE_HEADER_SIZE);
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(buffer + PARALLEL_APPEND_FILE_HEADER_SIZE, blockSize - PARALLEL_APPEND_FILE_HEADER_SIZE,
+                  payload, payloadSize);
+    securec_check(rc, "\0", "\0");
+
+    pthread_spin_lock(&appender->lock);
+    if (GetSegHeaderType(header) != FILE_APPEND_TYPE_FILES_END &&
+        appender->currFileSize + blockSize > APPEND_FILE_MAX_SIZE - PARALLEL_APPEND_FILE_HEADER_SIZE) {
         uint32 minFileNo = appender->minFileNo;
         uint32 maxFileNo = appender->maxFileNo;
         closeFileAppender(appender);
         initFileAppender(appender, FILE_APPEND_TYPE_FILES, minFileNo, maxFileNo + 1);
     }
-    size_t writeLen = writeToCompFile(data, len, appender->filePtr);
-    if (writeLen != len) {
-        elog(ERROR, "Write payload data failed, write length: %lu.", writeLen);
+
+    /* filePtr is a buffer context */
+    writeLen = writeToCompFile(buffer, blockSize, appender->filePtr);
+    if (writeLen != blockSize) {
+        pthread_spin_unlock(&appender->lock);
+        pfree_ext(buffer);
+        elog(ERROR, "Write data block failed, write length: %lu, expect length: %lu.", writeLen, blockSize);
     }
     appender->currFileSize += writeLen;
+    pthread_spin_unlock(&appender->lock);
+    pfree_ext(buffer);
 }

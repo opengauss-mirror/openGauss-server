@@ -170,7 +170,8 @@ void* backupSenderThreadMain(void* arg)
 void initBackupReaderContexts(ReaderCxt** cxt)
 {
     ReaderCxt* readerCxt= NULL;
-    current.readerThreadCount = num_threads - 1;
+    /* num of reader thread, pg_probackup thread only dispatch */
+    current.readerThreadCount = num_threads;
     /* alloc memmory */
     ReaderCxt* current_readerCxt = (ReaderCxt*)palloc(sizeof(ReaderCxt) * current.readerThreadCount);
     if (current_readerCxt == NULL) {
@@ -213,7 +214,7 @@ void initBackupReaderContexts(ReaderCxt** cxt)
     for (uint i = 0; i < current.readerThreadCount; i++) {
         readerCxt = &current_readerCxt[i];
         readerCxt->fileCount = 0;
-        readerCxt->readerThreadId = 0;
+        readerCxt->readerThreadPid = 0;
         readerCxt->appender = NULL;
         for (uint j = 0; j < READER_THREAD_FILE_COUNT; j++) {
             readerCxt->file[j] = NULL;
@@ -223,6 +224,7 @@ void initBackupReaderContexts(ReaderCxt** cxt)
             readerCxt->segType[j] = FILE_APPEND_TYPE_UNKNOWN;
             readerCxt->fileRemoved[j] = false;
         }
+        readerCxt->readerIndexId = i + 1;
     }
     *cxt = current_readerCxt;
 }
@@ -233,7 +235,7 @@ void startBackupReaders(backup_files_arg* arg, backupReaderThreadArgs* thread_ar
         backupReaderThreadArgs* args = &thread_args[i];
         args->arg = arg;
         args->readerCxt = &current.readerCxt[i];
-        pthread_create(&(args->readerCxt->readerThreadId), nullptr, backupReaderThreadMain, (void*)args);
+        pthread_create(&(args->readerCxt->readerThreadPid), nullptr, backupReaderThreadMain, (void*)args);
     }
 }
 
@@ -263,17 +265,19 @@ void copyFileToFileBuffer(ReaderCxt* readerCxt, int fileIndex, backup_files_arg*
     char* fileBuffer = readerCxt->fileBuffer + fileIndex * FILE_BUFFER_SIZE;
     char* from_fullpath = readerCxt->fromPath[fileIndex];
     char* to_fullpath = readerCxt->toPath[fileIndex];
+    short readerIndexId = readerCxt->readerIndexId;
     if (file->is_datafile && !file->is_cfs) {
         backup_data_file(&(arg->conn_arg), file, from_fullpath, to_fullpath,
-                           arg->prev_start_lsn,
-                           current.backup_mode,
-                           instance_config.compress_alg,
-                           instance_config.compress_level,
-                           arg->nodeInfo->checksum_version,
-                           arg->hdr_map, false, NULL, fileBuffer);
+                         arg->prev_start_lsn,
+                         current.backup_mode,
+                         instance_config.compress_alg,
+                         instance_config.compress_level,
+                         arg->nodeInfo->checksum_version,
+                         arg->hdr_map, false, readerCxt->appender, NULL, readerIndexId);
     } else {
         backup_non_data_file(file, prev_file, from_fullpath, to_fullpath,
-                             current.backup_mode, current.parent_backup, true, NULL, fileBuffer);
+                            current.backup_mode, current.parent_backup, true,
+                            readerCxt->appender, NULL, readerIndexId);
     }
 }
 
@@ -307,6 +311,9 @@ SenderThreadState getSenderState(SenderCxt* senderCxt)
     return state;
 }
 
+/*
+ * flush data from reader contexts buffer
+ */
 void flushReaderContexts(void* arg)
 {
     ReaderCxt* readerCxt = NULL;
@@ -317,19 +324,6 @@ void flushReaderContexts(void* arg)
         readerCxt = &current.readerCxt[i];
         for (uint j = 0; j < readerCxt->fileCount; j++) {
             if (!readerCxt->fileRemoved[j]) {
-                fileBuffer = readerCxt->fileBuffer + j * FILE_BUFFER_SIZE;
-                if (readerCxt->file[j]->is_datafile && !readerCxt->file[j]->is_cfs) {
-                    backup_data_file(&(args->conn_arg), readerCxt->file[j], readerCxt->fromPath[j], readerCxt->toPath[j],
-                                       args->prev_start_lsn,
-                                       current.backup_mode,
-                                       instance_config.compress_alg,
-                                       instance_config.compress_level,
-                                       args->nodeInfo->checksum_version,
-                                       args->hdr_map, false, readerCxt->appender, NULL);
-                } else {
-                    backup_non_data_file(readerCxt->file[j], readerCxt->prefile[j], readerCxt->fromPath[j], readerCxt->toPath[j],
-                                         current.backup_mode, current.parent_backup, true, readerCxt->appender, NULL);
-                }
                 pg_free(readerCxt->fromPath[j]);
                 pg_free(readerCxt->toPath[j]);
                 readerCxt->fileRemoved[j] = true;
@@ -379,7 +373,7 @@ void stopBackupReaders()
     }
     for (uint i = 0; i < current.readerThreadCount; i++) {
         readerCxt = &current.readerCxt[i];
-        pthread_join(readerCxt->readerThreadId, NULL);
+        pthread_join(readerCxt->readerThreadPid, NULL);
     }
 }
 

@@ -8,8 +8,8 @@
  *
  *-------------------------------------------------------------------------
  */
-#ifndef THREAD_H
-#define THREAD_H
+#ifndef OSS_THREAD_H
+#define OSS_THREAD_H
 
 #include "../../pg_probackup.h"
 #include "appender.h"
@@ -21,7 +21,7 @@
 constexpr int SENDER_BUFFER_SIZE = 536870912; /* 512 * 1024 * 1024 Bytes, 512MB */
 #define READER_THREAD_FILE_COUNT 8
 #define FILE_BUFFER_SIZE 8388608 /* 8 * 1024 * 1024, 8MB */
-#define WAIT_FOR_STATE_CHANGE_TIME 100000 /* 100 ms*/
+#define WAIT_FOR_STATE_CHANGE_TIME 100000 /* 100 ms */
 
 /* Data Structure Definition*/
 typedef enum readerThreadState {
@@ -50,11 +50,12 @@ typedef struct ReaderCxt {
     char* fileBuffer;
     uint32 fileCount;
     FileAppender* appender;
-    FILE_APPEND_SEG_TYPE* segType;
+    NO_VERSION_SEG_TYPE* segType; /* no used */
     bool* fileRemoved;
-    pthread_t readerThreadId;
+    pthread_t readerThreadPid; /* phtread id */
     ReaderThreadState state;
     pthread_spinlock_t lock;
+    short readerIndexId; /* probackup thread id: 0, reader thread index id: 1~10 */
 } ReaderCxt;
 
 typedef struct SenderCxt {
@@ -74,6 +75,10 @@ typedef struct backupReaderThreadArgs
     backup_files_arg* arg;
     ReaderCxt* readerCxt;
 } backupReaderThreadArgs;
+
+typedef struct BackupReaderInfo {
+    short readerIndexId; /* probackup thread id: 0, reader thread index id: 1~10 */
+} BackupReaderInfo;
 
 /* API Function */
 
@@ -121,4 +126,4 @@ extern void waitForReadersCopyComplete();
 
 extern void* restoreReaderThreadMain(void* arg);
 
-#endif /* THREAD_H */
+#endif /* OSS_THREAD_H */

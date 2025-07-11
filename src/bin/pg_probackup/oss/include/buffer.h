@@ -23,6 +23,7 @@
 constexpr int BUFF_FLAG_FILE_USED = 0x1;
 #define BUFF_FLAG_FILE_CLOSED 0x2
 #define BUFF_FLAG_FILE_FINISHED 0x4
+const int GET_BUFF_RETRY_TIME = 50;
 
 #ifdef __cpp_lib_hardware_interference_size
     static constexpr size_t CacheLineSize =
@@ -145,6 +146,7 @@ inline void addBuffLen(BufferDesc* buff, uint32 len)
     pthread_spin_lock(&buff->lock);
     buff->usedLen += len;
     pthread_spin_unlock(&buff->lock);
+    Assert(buff->usedLen <= BUFSIZE);
 }
 
 inline void markBufferFlag(BufferDesc* buff, uint32 flag)

@@ -65,19 +65,39 @@ void performRestoreOrValidate(pgBackup *dest_backup, bool isValidate)
 
     char tempBuffer[BUFSIZE];
     BufferDesc* buff = NULL;
+    /* used if payload spans across two buffs */
     BufferDesc* nextBuff = NULL;
+    /* used if header spans across two buffs */
     BufferDesc* prevBuff = NULL;
     FileAppenderSegDescriptor* desc = NULL;
-    FileAppenderSegDescriptor* predesc = NULL;
     initSegDescriptor(&desc);
-    initSegDescriptor(&predesc);
-    const size_t segHdrLen = sizeof(FileAppenderSegHeader);
     char* buffOffset = NULL;
     size_t remainBuffLen = 0;
     int filenum = 0;
+
+    /*
+     * Expectly there is only one type of header in on backup instance,
+     * or you have to adapt yourself.
+     */
+    uint32 headerVersion = 0xFFFFFFFF;
+    size_t segHdrLen = 0;
+
     while(true) {
         buff = tryGetNextFreeReadBuffer(bufferCxt);
         markBufferFlag(buff, BUFF_FLAG_FILE_USED);
+        /* expect all the header of backup has the same version. */
+        if (unlikely(headerVersion == 0xFFFFFFFF)) {
+            headerVersion = getSegHeaderVersion(buffLoc(buff, bufferCxt));
+            desc->version = headerVersion;
+            segHdrLen = getSegHeaderSize(headerVersion);
+            if (headerVersion >= SEG_HEADER_VERSION_MAX) {
+                elog(ERROR, "Invalid oss file versionL %u, max version: %u.",
+                     headerVersion, SEG_HEADER_VERSION_MAX);
+            } else {
+                elog(INFO, "oss file version: %u", headerVersion);
+            }
+        }
+
         uint32 usedLen = buffUsedLen(buff);
         char* buffEnd = buffLoc(buff, bufferCxt) + usedLen;
         if (remainBuffLen == 0) {
@@ -89,22 +109,22 @@ void performRestoreOrValidate(pgBackup *dest_backup, bool isValidate)
             remainBuffLen = buffEnd - buffOffset;
         }
         while (segHdrLen <= remainBuffLen) {
-            int ret = memcpy_s(predesc, sizeof(FileAppenderSegDescriptor), desc, sizeof(FileAppenderSegDescriptor));
-            securec_check(ret, "\0", "\0");
-            getSegDescriptor(desc, &buffOffset, &remainBuffLen, bufferCxt);
+            getSegDescriptor(desc, &buffOffset, &remainBuffLen, bufferCxt, headerVersion, segHdrLen);
             if (prevBuff != NULL) {
+                /* set pre buffer unused */
                 clearBuff(prevBuff);
                 prevBuff = NULL;
             }
             // The payload spans across two buffs.
-            if (desc->header.size > 0 && desc->header.size > remainBuffLen) {
+            if (((FileAppenderSegHeader*)(desc->header))->size > 0 &&
+                ((FileAppenderSegHeader*)(desc->header))->size > remainBuffLen) {
                 nextBuff = tryGetNextFreeReadBuffer(bufferCxt);
                 while (nextBuff->bufId == buff->bufId) {
                     nextBuff = tryGetNextFreeReadBuffer(bufferCxt);
                 }
                 markBufferFlag(nextBuff, BUFF_FLAG_FILE_USED);
                 // rewind
-                if (nextBuff->bufId == 0 && remainBuffLen > 0) {
+                if (nextBuff->bufId == 0 && remainBuffLen >= 0) {
                     desc->payload_offset = remainBuffLen;
                 }
                 remainBuffLen = remainBuffLen + buffUsedLen(nextBuff);
@@ -115,7 +135,7 @@ void performRestoreOrValidate(pgBackup *dest_backup, bool isValidate)
                 corrupted = true;
                 break;
             }
-            if (desc->header.type == FILE_APPEND_TYPE_FILES_END) {
+            if (GetSegHeaderType(desc->header) == FILE_APPEND_TYPE_FILES_END) {
                 filenum++;
                 if (filenum == bufferCxt->fileNum) {
                     break;
@@ -175,14 +195,21 @@ void restoreDir(const char* path, FileAppenderSegDescriptor* desc, pgBackup* des
     if (isValidate) {
         return;
     }
+    uint32 version = desc->version;
+    uint32 fileIndex = 0;
+    if (version >= SEG_HEADER_PARALLEL_VERSION) {
+        fileIndex = ((ParallelFileAppenderSegHeader*)(desc->header))->threadId;
+    }
+
     /* create directories */
     char to_path[MAXPGPATH];
     char from_root[MAXPGPATH];
     char dir_path[MAXPGPATH];
     errno_t rc;
-    size_t pathlen = desc->header.size;
+    FileAppenderSegHeader* commonSegHeader = (FileAppenderSegHeader*)(desc->header);
+    size_t pathlen = commonSegHeader->size;
     rc = strncpy_s(to_path, pathlen + 1, path, pathlen);
-    pgFile* dir = findpgFile(files, to_path, desc->header.external_dir_num, desc->header.file_type);
+    pgFile* dir = findpgFile(files, to_path, commonSegHeader->external_dir_num, commonSegHeader->file_type);
     if (dir == NULL) {
         elog(ERROR, "Cannot find dir \"%s\"", to_path);
     }
@@ -190,7 +217,7 @@ void restoreDir(const char* path, FileAppenderSegDescriptor* desc, pgBackup* des
     if (dir->external_dir_num != 0) {
         char external_prefix[MAXPGPATH];
         join_path_components(external_prefix, dest_backup->root_dir, EXTERNAL_DIR);
-        makeExternalDirPathByNum(from_root, external_prefix, desc->inputFile->external_dir_num);
+        makeExternalDirPathByNum(from_root, external_prefix, desc->inputFile[fileIndex]->external_dir_num);
     }
     else if (is_dss_type(dir->type)) {
         join_path_components(from_root, dest_backup->root_dir, DSSDATA_DIR);
@@ -198,7 +225,7 @@ void restoreDir(const char* path, FileAppenderSegDescriptor* desc, pgBackup* des
         join_path_components(from_root, dest_backup->root_dir, DATABASE_DIR);
     }
     join_path_components(dir_path, from_root, to_path);
-    fio_mkdir(dir_path, desc->header.permission, location);
+    fio_mkdir(dir_path, commonSegHeader->permission, location);
 }
 
 void openRestoreFile(const char* path, FileAppenderSegDescriptor* desc, pgBackup* dest_backup,
@@ -207,89 +234,113 @@ void openRestoreFile(const char* path, FileAppenderSegDescriptor* desc, pgBackup
     char to_path[MAXPGPATH];
     char from_root[MAXPGPATH];
     char filepath[MAXPGPATH];
+    uint32 version = desc->version;
+    uint32 fileIndex = 0;
+    if (version >= SEG_HEADER_PARALLEL_VERSION) {
+        fileIndex = ((ParallelFileAppenderSegHeader*)(desc->header))->threadId;
+    }
+    FileAppenderSegHeader* commonSegHeader = (FileAppenderSegHeader*)(desc->header);
+
     errno_t rc;
-    rc = strncpy_s(to_path, desc->header.size + 1, path, desc->header.size);
+    rc = strncpy_s(to_path, commonSegHeader->size + 1, path, commonSegHeader->size);
     securec_check_c(rc, "\0", "\0");
-    desc->inputFile = findpgFile(files, to_path, desc->header.external_dir_num, desc->header.file_type);
-    if (desc->inputFile == NULL) {
+    desc->inputFile[fileIndex] = findpgFile(files, to_path, commonSegHeader->external_dir_num,
+                                            commonSegHeader->file_type);
+
+    if (desc->inputFile[fileIndex] == NULL) {
         elog(ERROR, "Cannot find file \"%s\"", to_path);
     }
     if (isValidate) {
-        if (desc->inputFile->write_size == BYTES_INVALID) {
+        if (desc->inputFile[fileIndex]->write_size == BYTES_INVALID) {
             if (arg->backup_mode == BACKUP_MODE_FULL) {
                 /* It is illegal for file in FULL backup to have BYTES_INVALID */
                 elog(WARNING, "Backup file \"%s\" has invalid size. Possible metadata corruption.",
-                     desc->inputFile->rel_path);
+                     desc->inputFile[fileIndex]->rel_path);
                 arg->corrupted = true;
             }
             return;
         }
-        INIT_FILE_CRC32(true, desc->crc);
+        INIT_FILE_CRC32(true, desc->crc[fileIndex]);
     } else {
-        if (desc->inputFile->external_dir_num != 0) {
+        if (desc->inputFile[fileIndex]->external_dir_num != 0) {
             char external_prefix[MAXPGPATH];
             join_path_components(external_prefix, dest_backup->root_dir, EXTERNAL_DIR);
-            makeExternalDirPathByNum(from_root, external_prefix, desc->inputFile->external_dir_num);
+            makeExternalDirPathByNum(from_root, external_prefix, desc->inputFile[fileIndex]->external_dir_num);
         }
-        else if (is_dss_type(desc->inputFile->type)) {
+        else if (is_dss_type(desc->inputFile[fileIndex]->type)) {
             join_path_components(from_root, dest_backup->root_dir, DSSDATA_DIR);
         } else {
             join_path_components(from_root, dest_backup->root_dir, DATABASE_DIR);
         }
-        join_path_components(filepath, from_root, desc->inputFile->rel_path);
+        join_path_components(filepath, from_root, desc->inputFile[fileIndex]->rel_path);
 
-        if (desc->outputFile == NULL) {
-            desc->outputFile = fio_fopen(filepath, PG_BINARY_W, location);
-        } else if (desc->outputFile != NULL) {
-            desc->outputFile = fio_fopen(filepath, PG_BINARY_R "+", location);
+        if (desc->outputFile[fileIndex] == NULL) {
+            desc->outputFile[fileIndex] = fio_fopen(filepath, PG_BINARY_W, location);
+        } else if (desc->outputFile[fileIndex] != NULL) {
+            desc->outputFile[fileIndex] = fio_fopen(filepath, PG_BINARY_R "+", location);
         }
-        if (desc->outputFile == NULL) {
+        if (desc->outputFile[fileIndex] == NULL) {
             elog(ERROR, "Cannot open restore file \"%s\": %s",
                     filepath, strerror(errno));
         }
-        setvbuf(desc->outputFile, NULL, _IONBF, BUFSIZ);
+        setvbuf(desc->outputFile[fileIndex], NULL, _IONBF, BUFSIZ);
     }
 }
 
 void closeRestoreFile(FileAppenderSegDescriptor* desc)
 {
-    if (desc->outputFile && fio_fclose(desc->outputFile) != 0) {
+    uint32 version = desc->version;
+    uint32 fileIndex = 0;
+    if (version >= SEG_HEADER_PARALLEL_VERSION) {
+        fileIndex = ((ParallelFileAppenderSegHeader*)(desc->header))->threadId;
+    }
+
+    if (desc->outputFile[fileIndex] && fio_fclose(desc->outputFile[fileIndex]) != 0) {
         elog(ERROR, "Cannot close file!", strerror(errno));
     }
-    desc->outputFile = NULL;
-    desc->inputFile = NULL;
+    desc->outputFile[fileIndex] = NULL;
+    desc->inputFile[fileIndex] = NULL;
 }
 
 void writeOrValidateRestoreFile(const char* data, FileAppenderSegDescriptor* desc,
                                 bool isValidate, validate_files_arg* arg)
 {
-    pgFile* dest_file = desc->inputFile;
-    if (dest_file == NULL) {
+    uint32 version = desc->version;
+    uint32 fileIndex = 0;
+    uint32 payloadSize = ((FileAppenderSegHeader*)(desc->header))->size;
+    pg_crc32 payloadCrc = ((FileAppenderSegHeader*)(desc->header))->crc;
+
+    if (version >= SEG_HEADER_PARALLEL_VERSION) {
+        fileIndex = ((ParallelFileAppenderSegHeader*)(desc->header))->threadId;
+    }
+
+    pgFile* destFile = desc->inputFile[fileIndex];
+    if (destFile == NULL) {
         return;
     }
     /* Restore or Validate destination file */
     if (isValidate) {
-        if (!S_ISREG(dest_file->mode) || dest_file->write_size == 0 ||
-            strcmp(dest_file->name, PG_XLOG_CONTROL_FILE) == 0) {
+        if (!S_ISREG(destFile->mode) || destFile->write_size == 0 ||
+            strcmp(destFile->name, PG_XLOG_CONTROL_FILE) == 0) {
             return;
         }
-        if (dest_file->write_size == BYTES_INVALID) {
+        if (destFile->write_size == BYTES_INVALID) {
             if (arg->backup_mode == BACKUP_MODE_FULL) {
                 elog(WARNING, "Backup file \"%s\" has invalid size. Possible metadata corruption.",
-                     dest_file->rel_path);
+                     destFile->rel_path);
                 arg->corrupted = true;
                 return;
             }
             return;
         }
-        COMP_FILE_CRC32(true, desc->crc, data, desc->header.size);
-        if (desc->crc != desc->header.crc) {
+        COMP_FILE_CRC32(true, desc->crc[fileIndex], data, payloadSize);
+        if (desc->crc[fileIndex] != payloadCrc) {
             arg->corrupted = true;
             return;
         }
-    } else if (desc->header.size > 0) {
-        if (fio_fwrite(desc->outputFile, data, desc->header.size) != desc->header.size) {
-            elog(ERROR, "Cannot write blocks of \"%s\": %s", desc->inputFile->rel_path, strerror(errno));
+    } else if (payloadSize > 0) {
+        if (fio_fwrite(desc->outputFile[fileIndex], data, payloadSize) != payloadSize) {
+            elog(ERROR, "Cannot write blocks of \"%s\": %s", desc->inputFile[fileIndex]->rel_path, strerror(errno));
         }
     }
 }
