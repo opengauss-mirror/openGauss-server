@@ -149,10 +149,6 @@ struct RackAllocSetContext : AllocSetContext {
 
 using RackAllocSet = RackAllocSetContext*;
 
-struct RackPrefix {
-    Size size;
-};
-
 pg_atomic_uint64 rackUsedSize = 0;
 
 bool EnableBorrowWorkMemory()
@@ -173,22 +169,6 @@ Size GetAvailRackMemory(int dop)
         dop = 1;
     }
     return TYPEALIGN_DOWN(MAX_RACK_MEMORY_ALLOC_SIZE / 1024L, u_sess->attr.attr_memory.borrow_work_mem / dop);
-}
-
-static bool TryRackMemFree(void* ptr)
-{
-    if (u_sess->enable_rack_memory_free_test) {
-        RegisterFailedFreeMemory(ptr);
-        return false;
-    }
-
-    int ret = RackMemFree(ptr);
-    if (ret != 0) {
-        RegisterFailedFreeMemory(ptr);
-        ereport(LOG, (errmsg("RackMemFree failed")));
-        return false;
-    }
-    return true;
 }
 
 bool RackMemoryBusy(int64 used)
@@ -247,11 +227,20 @@ static inline void* RackMallocConverter(Size size)
 static inline void RackFreeConverter(void* ptr)
 {
     Assert(ptr);
+    if (u_sess->enable_rack_memory_free_test) {
+        RegisterFailedFreeMemory(ptr);
+        return;
+    }
+
     RackPrefix* prefix = (RackPrefix*)(ptr - sizeof(RackPrefix));
     Size size = prefix->size;
-    TryRackMemFree((void*)prefix);
-
-    pg_atomic_sub_fetch_u64(&rackUsedSize, size);
+    int ret = RackMemFree((void *)prefix);
+    if (ret != 0) {
+        RegisterFailedFreeMemory(ptr);
+        ereport(LOG, (errmsg("RackMemFree failed")));
+    } else {
+        pg_atomic_sub_fetch_u64(&rackUsedSize, size);
+    }
 }
 
 static inline void* RackReallocConverter(void* ptr, Size ptrsize, Size newSize)

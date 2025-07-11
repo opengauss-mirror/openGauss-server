@@ -137,7 +137,7 @@ static const ErrorInfo *GetErrorInfo(int errCode)
     return nullptr;
 }
 
-static void HandleError(const char *funcName, int lastErrno, int retry, bool isLastRetry)
+static void PrintError(const char *funcName, int lastErrno, int retry, bool isLastRetry)
 {
     const char *errorMsg = ErrCodeToStr(lastErrno);
     const ErrorInfo *info = GetErrorInfo(lastErrno);
@@ -157,55 +157,57 @@ static void HandleError(const char *funcName, int lastErrno, int retry, bool isL
 #endif
     } else {
 #ifdef FRONTEND
-        fprintf(stdout, _("%s failed, code:[%d], error: %s, will retry after 1s. %s\n"), funcName, retry + 1,
-            errorMsg, logHint);
+        fprintf(stdout, _("%s failed for [%d] time, code:[%d], error: %s, will retry after 1s. %s\n"), funcName,
+                retry + 1, lastErrno, errorMsg, logHint);
 #else
-        ereport(WARNING, (errmsg("%s failed, code:[%d], error: %s, will retry after 1s. %s", funcName, retry + 1,
-                                 errorMsg, logHint)));
+        ereport(WARNING, (errmsg("%s failed for [%d] time, code:[%d], error: %s, will retry after 1s. %s", funcName,
+                                 retry + 1, lastErrno, errorMsg, logHint)));
 #endif
-        pg_usleep(1000000L);
     }
 }
 
-static bool Retry(std::function<int(void **)> func, const char *funcName, void **result)
+template<typename Func>
+static int Retry(Func func, const char *funcName)
 {
     int retry = 0;
     int errorCode = MATRIX_MEM_ERROR;
 
     while (retry < MAX_RETRY_TIMES) {
-        errorCode = func(result);
+        errorCode = func();
         if (errorCode == MATRIX_MEM_SUCCESS) {
-            return true;
+            return MATRIX_MEM_SUCCESS;
         }
 
-        HandleError(funcName, errorCode, retry, (retry == MAX_RETRY_TIMES - 1));
+        PrintError(funcName, errorCode, retry, (retry == MAX_RETRY_TIMES - 1));
 
         const ErrorInfo *info = GetErrorInfo(errorCode);
         bool shouldRetry = (info && info->shouldRetry);
 
         if (shouldRetry && retry < MAX_RETRY_TIMES - 1) {
             retry++;
+            pg_usleep(1000000L);
             continue;
         }
 
         break;
     }
 
-    return false;
+    return errorCode;
 }
 
 void *RackMemMalloc(size_t size, PerfLevel perfLevel, intptr_t attr)
 {
     void *result = nullptr;
-    std::function<int(void **)> func = [size, perfLevel, attr](void **res) -> int {
-        *res = g_matrixMemFunc.rackMemMalloc(size, perfLevel, attr);
-        if (res != nullptr) {
+    std::function<int()> func = [&]() -> int {
+        result = g_matrixMemFunc.rackMemMalloc(size, perfLevel, attr);
+        if (SECUREC_LIKELY(result != nullptr)) {
             return MATRIX_MEM_SUCCESS;
         } else {
             return errno;
         };
     };
-    if (Retry(func, "RackMemMalloc", &result)) {
+    int ret = Retry(func, "RackMemMalloc");
+    if (SECUREC_LIKELY(ret == MATRIX_MEM_SUCCESS)) {
         return result;
     }
     return nullptr;
@@ -213,95 +215,66 @@ void *RackMemMalloc(size_t size, PerfLevel perfLevel, intptr_t attr)
 
 int RackMemMallocAsync(size_t size, PerfLevel perfLevel, intptr_t attr, AsyncFreeCallBack func, intptr_t ctx)
 {
-    void *result = nullptr;
-    std::function<int(void **)> funcin = [size, perfLevel, attr, func, ctx](void **res) -> int {
-        res = nullptr;
+    std::function<int()> funcin = [&]() -> int {
         return g_matrixMemFunc.rackMemMallocAsync(size, perfLevel, attr, func, ctx);
     };
-    if (Retry(funcin, "RackMemMallocAsync", &result)) {
-        return MATRIX_MEM_SUCCESS;
-    }
-    return MATRIX_MEM_ERROR;
+    return Retry(funcin, "RackMemMallocAsync");
 }
 
 int RackMemFree(void *ptr)
 {
-    void *result = nullptr;
-    std::function<int(void **)> funcin = [ptr](void **res) -> int {
-        res = nullptr;
+    std::function<int()> func = [&]() -> int {
         g_matrixMemFunc.rackMemFree(ptr);
         return errno;
     };
-    if (Retry(funcin, "RackMemFree", &result)) {
-        return MATRIX_MEM_SUCCESS;
-    }
-    return MATRIX_MEM_ERROR;
+    return Retry(func, "RackMemFree");
 }
 
 int RackMemFreeAsync(void *ptr, AsyncFreeCallBack func, intptr_t ctx)
 {
-    void *result = nullptr;
-    std::function<int(void **)> funcin = [ptr, func, ctx](void **res) -> int {
-        res = nullptr;
+    std::function<int()> funcin = [&]() -> int {
         return g_matrixMemFunc.rackMemFreeAsync(ptr, func, ctx);
     };
-    if (Retry(funcin, "RackMemFreeAsync", &result)) {
-        return MATRIX_MEM_SUCCESS;
-    }
-    return MATRIX_MEM_ERROR;
+    return Retry(funcin, "RackMemFreeAsync");
 }
 
 int RackMemShmLookupShareRegions(const char *baseNid, ShmRegionType type, SHMRegions *regions)
 {
-    void *result = nullptr;
-    std::function<int(void **)> funcin = [baseNid, type, regions](void **res) -> int {
-        res = nullptr;
+    std::function<int()> func = [&]() -> int {
         return g_matrixMemFunc.rackMemShmLookupShareRegions(baseNid, type, regions);
     };
-    if (Retry(funcin, "RackMemShmLookupShareRegions", &result)) {
-        return MATRIX_MEM_SUCCESS;
-    }
-    return MATRIX_MEM_ERROR;
+    return Retry(func, "RackMemShmLookupShareRegions");
 }
 
 int RackMemShmLookupRegionInfo(SHMRegionDesc *region, SHMRegionInfo *info)
 {
-    void *result = nullptr;
-    std::function<int(void **)> funcin = [region, info](void **res) -> int {
-        res = nullptr;
+    std::function<int()> func = [&]() -> int {
         return g_matrixMemFunc.rackMemShmLookupRegionInfo(region, info);
     };
-    if (Retry(funcin, "RackMemShmLookupRegionInfo", &result)) {
-        return MATRIX_MEM_SUCCESS;
-    }
-    return MATRIX_MEM_ERROR;
+    return Retry(func, "RackMemShmLookupRegionInfo");
 }
 
 int RackMemShmCreate(char *name, uint64_t size, const char *baseNid, SHMRegionDesc *shmRegion)
 {
-    void *result = nullptr;
-    std::function<int(void **)> funcin = [name, size, baseNid, shmRegion](void **res) -> int {
-        res = nullptr;
+    std::function<int()> func = [&]() -> int {
         return g_matrixMemFunc.rackMemShmCreate(name, size, baseNid, shmRegion);
     };
-    if (Retry(funcin, "RackMemShmCreate", &result)) {
-        return MATRIX_MEM_SUCCESS;
-    }
-    return MATRIX_MEM_ERROR;
+    return Retry(func, "RackMemShmCreate");
 }
 
 void *RackMemShmMmap(void *start, size_t length, int prot, int flags, const char *name, off_t offset)
 {
     void *result = nullptr;
-    std::function<int(void **)> func = [start, length, prot, flags, name, offset](void **res) -> int {
-        *res = g_matrixMemFunc.rackMemShmMmap(start, length, prot, flags, name, offset);
-        if (res != nullptr) {
+    std::function<int()> func = [&]() -> int {
+        result = g_matrixMemFunc.rackMemShmMmap(start, length, prot, flags, name, offset);
+        if (SECUREC_LIKELY(result != nullptr)) {
             return MATRIX_MEM_SUCCESS;
         } else {
             return errno;
         };
     };
-    if (Retry(func, "RackMemShmMmap", &result)) {
+    int ret = Retry(func, "RackMemShmMmap");
+    if (SECUREC_LIKELY(ret == MATRIX_MEM_SUCCESS)) {
         return result;
     }
     return nullptr;
@@ -309,54 +282,39 @@ void *RackMemShmMmap(void *start, size_t length, int prot, int flags, const char
 
 int RackMemShmCacheOpt(void *start, size_t length, ShmCacheOpt type)
 {
-    void *result = nullptr;
-    std::function<int(void **)> func = [start, length, type](void **res) -> int {
-        res = nullptr;
+    std::function<int()> func = [&]() -> int {
         return g_matrixMemFunc.rackMemShmCacheOpt(start, length, type);
     };
-    if (Retry(func, "RackMemShmCacheOpt", &result)) {
-        return MATRIX_MEM_SUCCESS;
-    }
-    return MATRIX_MEM_ERROR;
+    return Retry(func, "RackMemShmCacheOpt");
 }
 
 int RackMemShmUnmmap(void *start, size_t length)
 {
-    void *result = nullptr;
-    std::function<int(void **)> func = [start, length](void **res) -> int {
-        res = nullptr;
+    std::function<int()> func = [&]() -> int {
         return g_matrixMemFunc.rackMemShmUnmmap(start, length);
     };
-    if (Retry(func, "RackMemShmUnmmap", &result)) {
-        return MATRIX_MEM_SUCCESS;
-    }
-    return MATRIX_MEM_ERROR;
+    return Retry(func, "RackMemShmUnmmap");
 }
 
 int RackMemShmDelete(char *name)
 {
-    void *result = nullptr;
-    std::function<int(void **)> func = [name](void **res) -> int {
-        res = nullptr;
+    std::function<int()> func = [&]() -> int {
         return g_matrixMemFunc.rackMemShmDelete(name);
     };
-    if (Retry(func, "RackMemShmDelete", &result)) {
+    int ret = Retry(func, "RackMemShmDelete");
+    if (ret == HOK || ret == E_CODE_RESOURCE_NOT_CREATE) {
         return MATRIX_MEM_SUCCESS;
+    } else {
+        return ret;
     }
-    return MATRIX_MEM_ERROR;
 }
 
 int RackMemLookupClusterStatistic(ClusterInfo *cluster)
 {
-    void *result = nullptr;
-    std::function<int(void **)> func = [cluster](void **res) -> int {
-        res = nullptr;
+    std::function<int()> func = [&]() -> int {
         return g_matrixMemFunc.rackMemLookupClusterStatistic(cluster);
     };
-    if (Retry(func, "RackMemLookupClusterStatistic", &result)) {
-        return MATRIX_MEM_SUCCESS;
-    }
-    return MATRIX_MEM_ERROR;
+    return Retry(func, "RackMemLookupClusterStatistic");
 }
 
 static void RackMemGetNodeInfo()

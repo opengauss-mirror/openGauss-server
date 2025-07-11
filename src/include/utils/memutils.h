@@ -30,6 +30,10 @@ enum MemoryContextType {
     RACK_CONTEXT,      // borrow memory context
 };
 
+struct RackPrefix {
+    Size size;
+};
+
 extern bool EnableBorrowWorkMemory();
 extern bool RackMemoryBusy(int64 used);
 extern Size GetAvailRackMemory(int dop);
