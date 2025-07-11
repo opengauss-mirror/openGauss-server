@@ -379,17 +379,6 @@ int pgtsql_base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     cur_token = WITH_TIME;
                     break;
                 case '(':
-                    if (!DB_IS_CMPT(D_FORMAT)) {
-                        /* save the lookahead token for next time */
-                        SET_LOOKAHEAD_TOKEN();
-
-                        /* and back up the output info to cur_token */
-                        lvalp->core_yystype = cur_yylval;
-                        *llocp = cur_yylloc;
-                        scanbuf[cur_yylloc + cur_yyleng] = '\0';
-                        break;
-                    }
-
                     GET_NEXT_TOKEN();
                     core_yystype_2 = cur_yylval;
                     cur_yylloc_2 = cur_yylloc;
@@ -433,7 +422,7 @@ int pgtsql_base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             break;
         
         case '(':
-            if (!DB_IS_CMPT(D_FORMAT) || ENABLE_TABLE_HINT_IDENTIFIER) {
+            if (ENABLE_TABLE_HINT_IDENTIFIER) {
                 break;
             }
 
