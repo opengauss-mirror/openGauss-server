@@ -83,6 +83,8 @@
 #define DiskAnnPageGetOpaque(page) ((DiskAnnPageOpaque)PageGetSpecialPointer(page))
 #define DiskAnnPageGetIndexTuple(page) ((IndexTuple)PageGetItem(page, PageGetItemId(page, FirstOffsetNumber)))
 
+enum ParallelBuildFlag { CREATE_ENTRY_PAGE = 1, LINK = 2 };
+
 struct Neighbor {
     unsigned id;
     float distance;
@@ -276,7 +278,7 @@ class DiskAnnGraph : public BaseObject {
 public:
     DiskAnnGraph(Relation rel, double dim, BlockNumber blkno, DiskAnnGraphStore* graphStore);
     ~DiskAnnGraph();
-    void Link(BlockNumber blk, int index_size);
+    void Link(BlockNumber blk, int indexSize);
     void IterateToFixedPoint(BlockNumber blk, const uint32 Lsize, BlockNumber frozen, VectorList<Neighbor>* pool,
                              bool search_invocatio);
     void PruneNeighbors(BlockNumber blk, VectorList<Neighbor>* pool, VectorList<Neighbor>* pruned_list);
@@ -295,6 +297,38 @@ private:
     bool saturateGraph = false;
 };
 
+typedef struct DiskAnnShared {
+    /* Immutable state */
+    Oid heaprelid;
+    Oid indexrelid;
+
+    /* Mutex for mutable state */
+    slock_t mutex;
+
+    VectorList<BlockNumber> blocksList;
+    slock_t block_mutex;
+
+    BufferAccessStrategy parallel_strategy;
+
+    /* Mutable state */
+    int nparticipantsdone;
+    double reltuples;
+
+    int parallelWorker;
+    pg_atomic_uint32 workers;
+    ParallelBuildFlag flag;
+    uint32 indexSize;
+    BlockNumber frozen;
+    uint16 dimensions;
+
+    ParallelHeapScanDescData heapdesc;
+} DiskAnnShared;
+
+typedef struct DiskAnnLeader {
+    int nparticipanttuplesorts;
+    DiskAnnShared* diskannshared;
+} DiskAnnLeader;
+
 typedef struct DiskAnnBuildState {
     /* Info */
     Relation heap;
@@ -311,6 +345,10 @@ typedef struct DiskAnnBuildState {
     /* Statistics */
     double indtuples;
     double reltuples;
+
+    /* Parallel builds */
+    DiskAnnLeader* diskannleader;
+    DiskAnnShared* diskannshared;
 
     /* Support functions */
     FmgrInfo* procinfo;

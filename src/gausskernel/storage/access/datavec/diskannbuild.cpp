@@ -23,6 +23,7 @@
 #include "postgres.h"
 #include "access/datavec/diskann.h"
 #include "access/tableam.h"
+#include "postmaster/bgworker.h"
 
 #define CALLBACK_ITEM_POINTER HeapTuple hup
 
@@ -67,6 +68,9 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
 
     buildstate->reltuples = 0;
     buildstate->indtuples = 0;
+
+    buildstate->diskannleader = NULL;
+    buildstate->diskannshared = NULL;
 
     /* Get support functions */
     buildstate->procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
@@ -285,17 +289,220 @@ static void BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum* values, 
     MemoryContextReset(buildstate->tmpCtx);
 }
 
+
+/*
+ * Perform a worker's portion of a parallel insert
+ */
+static void DiskAnnParallelScanAndInsert(Relation heapRel, Relation indexRel, DiskAnnShared *diskannshared)
+{
+    DiskAnnBuildState buildstate;
+    TableScanDesc scan;
+    double reltuples;
+    IndexInfo *indexInfo;
+
+    /* Join parallel scan */
+    indexInfo = BuildIndexInfo(indexRel);
+    InitBuildState(&buildstate, heapRel, indexRel, indexInfo);
+
+    DiskAnnLeader temp_leader;
+    temp_leader.diskannshared = diskannshared;
+    buildstate.diskannleader = &temp_leader;
+    scan = tableam_scan_begin_parallel(heapRel, &diskannshared->heapdesc);
+    reltuples = tableam_index_build_scan(heapRel, indexRel, indexInfo, true, BuildCallback, (void *)&buildstate, scan);
+
+    /* Record statistics */
+    SpinLockAcquire(&diskannshared->mutex);
+    diskannshared->nparticipantsdone++;
+    diskannshared->reltuples += reltuples;
+    SpinLockRelease(&diskannshared->mutex);
+    buildstate.diskannleader = NULL;
+    FreeBuildState(&buildstate);
+}
+
+/*
+ * Perform work within a launched parallel process
+ */
+void DiskAnnParallelBuildMain(const BgWorkerContext *bwc)
+{
+    DiskAnnShared *diskannshared;
+    Relation heapRel;
+    Relation indexRel;
+
+    /* Look up shared state */
+    diskannshared = (DiskAnnShared *)bwc->bgshared;
+
+    /* Open relations within worker */
+    heapRel = heap_open(diskannshared->heaprelid, NoLock);
+    indexRel = index_open(diskannshared->indexrelid, NoLock);
+
+    if (diskannshared->flag == ParallelBuildFlag::CREATE_ENTRY_PAGE) {
+        /* Perform inserts */
+        DiskAnnParallelScanAndInsert(heapRel, indexRel, diskannshared);
+    } else if (diskannshared->flag == ParallelBuildFlag::LINK) {
+        uint32 worker_id = pg_atomic_fetch_add_u32(&diskannshared->workers, 1);
+        size_t total_blocks = diskannshared->blocksList.size();
+        size_t worker_block_count = total_blocks / diskannshared->parallelWorker;
+        size_t remainder = total_blocks % diskannshared->parallelWorker;
+
+        /* Adjust for remainder - first 'remainder' workers get one extra block */
+        if (worker_id < remainder) {
+            worker_block_count++;
+        }
+
+        size_t start = worker_id * (total_blocks / diskannshared->parallelWorker) +
+                       Min(worker_id, remainder);
+
+        const BlockNumber* worker_blk = diskannshared->blocksList.begin() + start;
+        for (size_t i = 0; i < worker_block_count; i++) {
+            DiskAnnGraph graph(indexRel, diskannshared->dimensions, diskannshared->frozen);
+            BlockNumber blk = worker_blk[i];
+            graph.Link(blk, diskannshared->indexSize);
+            graph.Clear();
+        }
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid parallel build flag")));
+    }
+
+    /* Close relations within worker */
+    index_close(indexRel, NoLock);
+    heap_close(heapRel, NoLock);
+}
+
+/*
+ * End parallel build
+ */
+static void DiskAnnEndParallel(DiskAnnLeader *diskannleader)
+{
+    pfree_ext(diskannleader);
+    BgworkerListSyncQuit();
+}
+
+static double ParallelBuild(DiskAnnBuildState *buildstate, int *nparticipanttuplesorts)
+{
+    DiskAnnShared *diskannshared = buildstate->diskannleader->diskannshared;
+    double reltuples;
+
+    BgworkerListWaitFinish(&buildstate->diskannleader->nparticipanttuplesorts);
+    pg_memory_barrier();
+
+    *nparticipanttuplesorts = buildstate->diskannleader->nparticipanttuplesorts;
+    reltuples = diskannshared->reltuples;
+
+    return reltuples;
+}
+
+static DiskAnnShared *DiskAnnParallelInitshared(DiskAnnBuildState *buildstate)
+{
+    DiskAnnShared *diskannshared;
+    errno_t rc;
+
+    /* Store shared build state, for which we reserved space */
+    diskannshared =
+        (DiskAnnShared *)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(DiskAnnShared));
+
+    /* Initialize immutable state */
+    diskannshared->heaprelid = RelationGetRelid(buildstate->heap);
+    diskannshared->indexrelid = RelationGetRelid(buildstate->index);
+
+    SpinLockInit(&diskannshared->mutex);
+    diskannshared->blocksList = VectorList<BlockNumber>();
+    SpinLockInit(&diskannshared->block_mutex);
+
+    diskannshared->parallel_strategy = GetAccessStrategy(BAS_BULKWRITE);
+
+    diskannshared->dimensions = buildstate->dimensions;
+    diskannshared->workers = 0;
+    /* Initialize mutable state */
+    diskannshared->nparticipantsdone = 0;
+    diskannshared->reltuples = 0;
+    HeapParallelscanInitialize(&diskannshared->heapdesc, buildstate->heap);
+
+    return diskannshared;
+}
+
+/*
+ * Begin parallel build
+ */
+static void DiskAnnBeginParallel(DiskAnnBuildState *buildstate, int request, ParallelBuildFlag flag)
+{
+    DiskAnnShared *diskannshared;
+    DiskAnnLeader *diskannleader = (DiskAnnLeader *)palloc0(sizeof(DiskAnnLeader));
+
+    Assert(request > 0);
+
+    diskannshared = DiskAnnParallelInitshared(buildstate);
+    diskannshared->flag = flag;
+    diskannshared->parallelWorker = request;
+
+    Buffer buf;
+    Page page;
+    buf = ReadBuffer(buildstate->index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    page = BufferGetPage(buf);
+    DiskAnnMetaPage metapage = DiskAnnPageGetMeta(page);
+    diskannshared->indexSize = metapage->indexSize;
+    diskannshared->frozen = metapage->frozenBlkno[0];
+    UnlockReleaseBuffer(buf);
+
+    SpinLockAcquire(&diskannshared->block_mutex);
+    diskannshared->blocksList = buildstate->blocksList;
+    SpinLockRelease(&diskannshared->block_mutex);
+
+    /* Launch workers, saving status for leader/caller */
+    diskannleader->nparticipanttuplesorts = LaunchBackgroundWorkers(request, diskannshared, DiskAnnParallelBuildMain, NULL);
+    diskannleader->diskannshared = diskannshared;
+
+    /* If no workers were successfully launched, back out (do serial build) */
+    if (diskannleader->nparticipanttuplesorts == 0) {
+        DiskAnnEndParallel(diskannleader);
+        return;
+    }
+
+    /* Log participants */
+    ereport(WARNING, (errmsg("using %d parallel workers", diskannleader->nparticipanttuplesorts)));
+
+    /* Save leader state now that it's clear build will be parallel */
+    buildstate->diskannleader = diskannleader;
+}
+
 static double AssignTuples(DiskAnnBuildState* buildstate)
 {
+    int parallelWorkers = 0;
+    buildstate->reltuples = 0;
+
     if (buildstate->heap != NULL) {
-        Relation heap = buildstate->heap;
-        Relation index = buildstate->index;
-        IndexInfo* indexInfo = buildstate->indexInfo;
-        buildstate->reltuples =
-            tableam_index_build_scan(heap, index, indexInfo, true, BuildCallback, (void*)buildstate, NULL);
-        return buildstate->reltuples;
+        parallelWorkers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
     }
-    return 0.0;  // default value
+
+    if (parallelWorkers > 0) {
+        DiskAnnBeginParallel(buildstate, parallelWorkers, ParallelBuildFlag::CREATE_ENTRY_PAGE);
+    }
+    if (buildstate->heap != NULL) {
+        if (!buildstate->diskannleader) {
+        serial_build:
+            buildstate->reltuples = tableam_index_build_scan(buildstate->heap, buildstate->index, buildstate->indexInfo,
+                                                             true, BuildCallback, (void *)buildstate, NULL);
+        } else {
+            int nruns;
+            buildstate->reltuples = ParallelBuild(buildstate, &nruns);
+            if (nruns == 0) {
+                /* failed to startup any bgworker, retry to do serial build */
+                goto serial_build;
+            }
+            DiskAnnShared *shared = buildstate->diskannleader->diskannshared;
+            SpinLockAcquire(&shared->mutex);
+            buildstate->blocksList = shared->blocksList;
+            SpinLockRelease(&shared->mutex);
+        }
+
+    }
+
+    /* End parallel build */
+    if (buildstate->diskannleader) {
+        DiskAnnEndParallel(buildstate->diskannleader);
+    }
+
+    return buildstate->reltuples;
 }
 
 static void CreateEntryPages(DiskAnnBuildState* buildstate, ForkNumber forkNum)
@@ -338,10 +545,37 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
 
     InsertFrozenPoint(buildstate->index, frozen);
 
-    for (size_t i = 0; i < buildstate->blocksList.size(); i++) {
-        BlockNumber blk = buildstate->blocksList[i];
-        DiskAnnGraph graph(buildstate->index, buildstate->dimensions, frozen, buildstate->graphStore);
-        graph.Link(blk, buildstate->indexSize);
+    int parallelWorkers = 0;
+    if (buildstate->heap != NULL) {
+        parallelWorkers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
+    }
+
+    if (parallelWorkers > 0) {
+        DiskAnnBeginParallel(buildstate, parallelWorkers, ParallelBuildFlag::LINK);
+    }
+
+    if (buildstate->heap != NULL) {
+        if (!buildstate->diskannleader) {
+        serial_build:
+            for (size_t i = 0; i < buildstate->blocksList.size(); i++) {
+                DiskAnnGraph graph(buildstate->index, buildstate->dimensions, frozen);
+                BlockNumber blk = buildstate->blocksList[i];
+                graph.Link(blk, buildstate->indexSize);
+                graph.Clear();
+            }
+        } else {
+            int nruns;
+            buildstate->reltuples = ParallelBuild(buildstate, &nruns);
+            if (nruns == 0) {
+                /* failed to startup any bgworker, retry to do serial build */
+                goto serial_build;
+            }
+        }
+    }
+
+    /* End parallel build */
+    if (buildstate->diskannleader) {
+        DiskAnnEndParallel(buildstate->diskannleader);
     }
 }
 
