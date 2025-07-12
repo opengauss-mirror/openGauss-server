@@ -523,6 +523,126 @@ select sys.ident_current('t2');
 drop table t1;
 drop table t2;
 
+create table "T_IDENTITY_0001"(id int identity, name varchar(10));
+insert into "T_IDENTITY_0001"(name) values('zhangsan');
+insert into "T_IDENTITY_0001"(name) values('lisi');
+select * from "T_IDENTITY_0001";
+select ident_current('"T_IDENTITY_0001"');
+select ident_current("T_IDENTITY_0001");
+
+create or replace view "V_IDENTITY_0001" as select * from "T_IDENTITY_0001";
+select * from "V_IDENTITY_0001";
+select ident_current('"V_IDENTITY_0001"');
+select ident_current('"T_IDENTITY_0001"');
+
+drop view "V_IDENTITY_0001";
+drop table "T_IDENTITY_0001";
+
+create table test_identity1(id int identity(100, 1), idd serial, name varchar(20));
+insert into test_identity1(name) values('test1');
+select * from test_identity1;
+select ident_current('test_identity1');
+drop table test_identity1;
+
+-- ident_current only for identity, not for serial
+create table test_identity2(idd serial, name varchar(20));
+insert into test_identity2(name) values('test1');
+select * from test_identity2;
+select ident_current('test_identity2');
+drop table test_identity2;
+
+create table t_identity_0020(id int identity, name varchar(10));
+insert into t_identity_0020(name) values('zhangsan');
+select * from t_identity_0020;
+select ident_current('t_identity_0020');
+
+alter table t_identity_0020 drop column id;
+select * from t_identity_0020;
+select ident_current('t_identity_0020');
+
+alter table t_identity_0020 add column id int identity;
+select * from t_identity_0020;
+select ident_current('t_identity_0020');
+insert into t_identity_0020(name) values('name1');
+select * from t_identity_0020;
+select ident_current('t_identity_0020');
+
+alter table t_identity_0020 drop column id;
+select * from t_identity_0020;
+select ident_current('t_identity_0020');
+
+alter table t_identity_0020 add column id int identity(100, 5);
+select * from t_identity_0020;
+select ident_current('t_identity_0020');
+insert into t_identity_0020(name) values('name5');
+select * from t_identity_0020;
+select ident_current('t_identity_0020');
+
+drop table t_identity_0020;
+
+create schema schema_ident_current_0001;
+create table schema_ident_current_0001.t_identity_0001(id int identity(101,1), name varchar(10));
+insert into schema_ident_current_0001.t_identity_0001(name) values('zhangsan');
+select * from schema_ident_current_0001.t_identity_0001;
+select ident_current('schema_ident_current_0001.t_identity_0001');
+drop table schema_ident_current_0001.t_identity_0001;
+drop schema schema_ident_current_0001 cascade;
+
+create table t_identity_0033(c1 decimal identity(100,1), c2 varchar(100));
+insert into t_identity_0033(c2) values ('a');
+insert into t_identity_0033(c2) values ('b');
+insert into t_identity_0033(c2) values ('c');
+select * from t_identity_0033;
+select ident_current('t_identity_0033');
+
+create table t_identity_0033_01(c1 numeric identity(100,1), c2 varchar(100));
+insert into t_identity_0033_01(c2) values ('a');
+insert into t_identity_0033_01(c2) values ('b');
+insert into t_identity_0033_01(c2) values ('c');
+select * from t_identity_0033_01;
+select ident_current('t_identity_0033_01');
+
+create table t_identity_0033_02(c1 number identity(100,1), c2 varchar(100));
+insert into t_identity_0033_02(c2) values ('a');
+insert into t_identity_0033_02(c2) values ('b');
+insert into t_identity_0033_02(c2) values ('c');
+select * from t_identity_0033_02;
+select ident_current('t_identity_0033_02');
+
+drop table t_identity_0033;
+drop table t_identity_0033_01;
+drop table t_identity_0033_02;
+
+drop table if exists t_ident_current0001_01;
+drop table if exists t_ident_current0001_02;
+create table t_ident_current0001_01(id int identity(100,1) primary key, name varchar(10));
+CREATE TABLE t_ident_current0001_02 (log_id int identity PRIMARY KEY, log_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, table_name TEXT, last_identity BIGINT unique);
+INSERT INTO t_ident_current0001_02 (table_name, last_identity) SELECT 't_ident_current0001_01', ident_current('t_ident_current0001_01');
+select log_id, table_name, last_identity from t_ident_current0001_02;
+
+drop table if exists t_ident_current0001_01;
+drop table if exists t_ident_current0001_02;
+
+create table t_ident_current0001_01(id int identity(100,1) primary key, name varchar(10));
+CREATE TABLE t_ident_current0001_02 (log_id int identity PRIMARY KEY, log_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, table_name TEXT, last_identity BIGINT);
+INSERT INTO t_ident_current0001_02 (table_name, last_identity) SELECT 't_ident_current0001_01', ident_current('t_ident_current0001_01');
+select log_id, table_name, last_identity from t_ident_current0001_02;
+INSERT INTO t_ident_current0001_02 (table_name, last_identity) SELECT 'hr', ident_current('t_ident_current0001_01');
+select log_id, table_name, last_identity from t_ident_current0001_02;
+
+drop table t_ident_current0001_01;
+drop table t_ident_current0001_02;
+
+CREATE TABLE Employees (EmployeeID INT IDENTITY(1,1) PRIMARY KEY, FirstName NVARCHAR(50), LastName NVARCHAR(50) );
+CREATE VIEW v_Employees AS SELECT EmployeeID, FirstName, LastName FROM Employees;
+INSERT INTO Employees (FirstName, LastName) VALUES ('John', 'Doe');
+INSERT INTO Employees (FirstName, LastName) VALUES ('Jane', 'Smith');
+select * from Employees;
+select * from v_Employees;
+SELECT IDENT_CURRENT('Employees');
+SELECT IDENT_CURRENT('v_Employees');
+drop table Employees cascade;
+
 reset search_path;
 drop schema test_ident_current;
 

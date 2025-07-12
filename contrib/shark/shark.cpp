@@ -18,6 +18,7 @@ static uint32 shark_index;
 
 extern List* tsql_raw_parser(const char* str, List** query_string_locationlist);
 extern void assign_tablecmds_hook(void);
+extern Oid pg_get_serial_sequence_internal(Oid tableOid, AttrNumber attnum, bool find_identity, char** out_seq_name);
 static List* RewriteTypmodExpr(List *expr_list);
 static bool CheckIsMssqlHex(char *str);
 static Node *make_int_const(int val, int location);
@@ -539,28 +540,25 @@ static RangeVar* pltsqlMakeRangeVarFromName(const char *ident)
 static Oid get_table_identity(Oid tableOid)
 {
     Relation	rel = nullptr;
-    text*       relname = nullptr;
     TupleDesc	tupdesc = nullptr;
     AttrNumber	attnum = 0;
     Oid			seqid = InvalidOid;
 
     rel = RelationIdGetRelation(tableOid);
-    relname = cstring_to_text(RelationGetRelationName(rel));
     tupdesc = RelationGetDescr(rel);
 
     for (attnum = 0; attnum < tupdesc->natts; attnum++) {
         Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum);
-        text* att_name = cstring_to_text(NameStr(attr->attname));
-
-        if (OidIsValid(seqid = pg_get_serial_sequence_oid(relname, att_name, true))) {
-            pfree_ext(att_name);
+        if (attr->attisdropped) {
+            continue;
+        }
+        seqid = pg_get_serial_sequence_internal(tableOid, attr->attnum, true, NULL);
+        if (OidIsValid(seqid)) {
             break;
         }
-        pfree_ext(att_name);
     }
 
     RelationClose(rel);
-    pfree_ext(relname);
     return seqid;
 }
 
