@@ -895,3 +895,8 @@ int dss_aio_post_pwrite(void *iocb, int fd, size_t count, long long offset)
 {
     return g_dss_device_op.dss_aio_post_pwrite(iocb, fd, count, offset);
 }
+
+int dss_reopen_specific_vg_handle(const char *name)
+{
+    return g_dss_device_op.dss_reopen_vg_handle(name);
+}

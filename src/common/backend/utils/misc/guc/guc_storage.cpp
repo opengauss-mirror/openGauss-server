@@ -2897,6 +2897,7 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+
         {{"max_sync_workers_per_subscription",
             PGC_SIGHUP,
             NODE_SINGLENODE,
