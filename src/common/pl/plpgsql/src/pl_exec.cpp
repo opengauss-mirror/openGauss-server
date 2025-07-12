@@ -8101,7 +8101,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
                 exec_move_row(estate, rec, row, NULL, tuptab->tupdesc, true);
             }
         } else {
-            if (n > 1 && (stmt->strict || stmt->mod_stmt) && !stmt->bulk_collect) {
+            if (n > 1 && (isStrict || stmt->mod_stmt) && !stmt->bulk_collect) {
                 ereport(ERROR,
                     (errcode(ERRCODE_TOO_MANY_ROWS),
                         errmodule(MOD_PLSQL),
