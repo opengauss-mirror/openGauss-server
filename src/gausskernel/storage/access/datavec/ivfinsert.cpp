@@ -116,7 +116,7 @@ static void InitPQParamsOnDisk(Relation index, PQParams *params, int dim, bool *
         }
         FmgrInfo *procinfo = index_getprocinfo(index, 1, IVFFLAT_DISTANCE_PROC);
         FmgrInfo *normprocinfo = IvfflatOptionalProcInfo(index, IVFFLAT_NORM_PROC);
-        params->funcType = getIVFPQfunctionType(procinfo, normprocinfo);
+        params->funcType = GetPQfunctionType(procinfo, normprocinfo);
         params->dim = dim;
         Size subItemsize = typeInfo->itemSize(dim / params->pqM);
         params->subItemSize = MAXALIGN(subItemsize);

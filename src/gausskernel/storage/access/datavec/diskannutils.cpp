@@ -78,7 +78,7 @@ void DiskAnnUpdateMetaPage(Relation index, BlockNumber blkno, ForkNumber forkNum
 
     DiskAnnMetaPage metaPage = DiskAnnPageGetMeta(page);
     metaPage->insertPage = blkno;
-    MarkBufferDirty(buf);
+    MarkBufferDirty(buf);  // todo: add xlog for meta page
     UnlockReleaseBuffer(buf);
 }
 
@@ -290,7 +290,7 @@ void DiskAnnGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk) con
     rc = memcpy_s(etup, m_edgeSize, edgePage, m_edgeSize);
     securec_check_c(rc, "\0", "\0");
 
-    MarkBufferDirty(buf);
+    MarkBufferDirty(buf);   // todo: add xlog for edge page
     UnlockReleaseBuffer(buf);
 }
 
@@ -349,7 +349,7 @@ void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData ti
         } else {
             ntup->heaptids[ntup->heaptidsLength] = tid;
             ntup->heaptidsLength++;
-            MarkBufferDirty(buf);
+            MarkBufferDirty(buf);   // todo: add xlog
         }
     }
     UnlockReleaseBuffer(buf);
@@ -754,4 +754,118 @@ int CmpNeighborInfo(const void* a, const void* b)
     }
     Assert(left->id != right->id);
     return left->id > right->id ? -1 : 1;
+}
+
+int DiskAnnComputePQTable(VectorArray samples, PQParams* params)
+{
+    // todo g_diskann_pq_func.DiskAnnComputePQTable(samples, params);
+    return -1;
+}
+
+int DiskAnnComputeVectorPQCode(float* vector, const PQParams* params, uint8* pqCode)
+{
+    // todo g_diskann_pq_func.DiskAnnComputeVectorPQCode(vector, params, pqCode);
+    return -1;
+}
+
+/*
+ * Get whether to enable PQ
+ */
+bool DiskAnnEnablePQ(Relation index)
+{
+    DiskAnnOptions* opts = (DiskAnnOptions*)index->rd_options;
+    return opts ? opts->enablePQ : GENERIC_DEFAULT_ENABLE_PQ;
+}
+
+/*
+ * Get the number of subquantizer
+ */
+int DiskAnnGetPqM(Relation index)
+{
+    DiskAnnOptions* opts = (DiskAnnOptions*)index->rd_options;
+    return opts ? opts->pqM : GENERIC_DEFAULT_PQ_M;
+}
+
+/*
+ * Get the number of centroids for each subquantizer
+ */
+int DiskAnnGetPqKsub(Relation index)
+{
+    DiskAnnOptions* opts = (DiskAnnOptions*)index->rd_options;
+    return opts ? opts->pqKsub : GENERIC_DEFAULT_PQ_KSUB;
+}
+
+/*
+ * Flush PQ table into page during index building
+ */
+void DiskAnnFlushPQInfo(DiskAnnBuildState* buildstate)
+{
+    Relation index = buildstate->index;
+    char* pqTable = buildstate->pqTable;
+    uint16 pqTableNblk;
+    uint16 pqDisTableNblk;
+    uint32 pqTableSize;
+    uint32 pqDisTableSize;
+
+    DiskAnnGetPQInfoFromMetaPage(index, &pqTableNblk, &pqTableSize, &pqDisTableNblk, &pqDisTableSize);
+
+    /* Flush pq table */
+    DiskAnnFlushPQInfoInternal(index, pqTable, DISKANN_PQTABLE_START_BLKNO, pqTableNblk, pqTableSize);
+}
+
+/*
+ * Get the info related to pqTable in metapage
+ */
+void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16* pqTableNblk, uint32* pqTableSize, uint16* pqDisTableNblk,
+                                  uint32* pqDisTableSize)
+{
+    Buffer buf;
+    Page page;
+    DiskAnnMetaPage metap;
+
+    buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    page = BufferGetPage(buf);
+    metap = DiskAnnPageGetMeta(page);
+    if (unlikely(metap->magicNumber != DISKANN_MAGIC_NUMBER)) {
+        UnlockReleaseBuffer(buf);
+        elog(ERROR, "diskann index is not valid");
+    }
+
+    if (pqTableNblk != NULL) {
+        *pqTableNblk = metap->pqTableNblk;
+    }
+    if (pqTableSize != NULL) {
+        *pqTableSize = metap->pqTableSize;
+    }
+    if (pqDisTableNblk != NULL) {
+        *pqDisTableNblk = metap->pqDisTableNblk;
+    }
+    if (pqDisTableSize != NULL) {
+        *pqDisTableSize = metap->pqDisTableSize;
+    }
+
+    UnlockReleaseBuffer(buf);
+}
+
+void DiskAnnFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint32 nblks, uint64 totalSize)
+{
+    Buffer buf;
+    Page page;
+    PageHeader p;
+    uint32 curFlushSize;
+
+    for (uint32 i = 0; i < nblks; i++) {
+        curFlushSize = (i == nblks - 1) ? (totalSize - i * PQTABLE_STORAGE_SIZE) : PQTABLE_STORAGE_SIZE;
+        buf = ReadBufferExtended(index, MAIN_FORKNUM, P_NEW, RBM_NORMAL, NULL);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        page = DiskAnnInitRegisterPage(index, buf);
+        errno_t err =
+            memcpy_s(PageGetContents(page), curFlushSize, table + i * PQTABLE_STORAGE_SIZE, curFlushSize);
+        securec_check(err, "\0", "\0");
+        p = (PageHeader)page;
+        p->pd_lower += curFlushSize;
+        MarkBufferDirty(buf);  // todo: add xlog for pq table
+        UnlockReleaseBuffer(buf);
+    }
 }

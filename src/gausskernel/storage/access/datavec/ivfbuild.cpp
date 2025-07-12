@@ -50,7 +50,7 @@
 #define PARALLEL_KEY_QUERY_TEXT UINT64CONST(0xA000000000000004)
 
 #define MAX_HBM 1.0
-#define L2_OID 8431
+
 static int g_deviceNum = 0;
 
 /*
@@ -208,7 +208,7 @@ PQParams *InitIVFPQParamsInMemory(IvfflatBuildState *buildstate)
     PQParams *params = (PQParams*)palloc(sizeof(PQParams));
     params->pqM = buildstate->pqM;
     params->pqKsub = buildstate->pqKsub;
-    params->funcType = getIVFPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
+    params->funcType = GetPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
     params->dim = buildstate->dimensions;
     Size subItemsize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
     params->subItemSize = MAXALIGN(subItemsize);
@@ -620,7 +620,7 @@ static void InitBuildState(IvfflatBuildState *buildstate, Relation heap, Relatio
         buildstate->params = InitIVFPQParamsInMemory(buildstate);
 
         if (buildstate->byResidual &&
-            (buildstate->params->funcType == IVF_PQ_DIS_L2 || buildstate->params->funcType == IVF_PQ_DIS_COSINE)) {
+            (buildstate->params->funcType == PQ_DIS_L2 || buildstate->params->funcType == PQ_DIS_COSINE)) {
             buildstate->preComputeTableSize = buildstate->lists * buildstate->pqM * buildstate->pqKsub;
             buildstate->preComputeTable = (float*)palloc0(buildstate->preComputeTableSize * sizeof(float));
         } else {
@@ -736,20 +736,22 @@ static void CreateMetaPage(Relation index, IvfflatBuildState *buildstate, ForkNu
     metap->pqcodeSize = buildstate->pqcodeSize;
     metap->pqPreComputeTableSize = 0;
     metap->pqPreComputeTableNblk = 0;
-
+    metap->pqTableSize = (uint32)buildstate->pqTableSize;
+    metap->pqTableNblk =
+        buildstate->enablePQ
+            ? (uint16)((metap->pqTableSize + PQTABLE_STORAGE_SIZE - 1) / PQTABLE_STORAGE_SIZE)
+            : 0;
     if (buildstate->enablePQ) {
-        metap->pqTableSize = (uint32)buildstate->pqTableSize;
         metap->pqTableNblk = (uint16)(
-            (metap->pqTableSize + IVF_PQTABLE_STORAGE_SIZE - 1) / IVF_PQTABLE_STORAGE_SIZE);
+            (metap->pqTableSize + PQTABLE_STORAGE_SIZE - 1) / PQTABLE_STORAGE_SIZE);
         if (buildstate->byResidual &&
-            (buildstate->params->funcType == IVF_PQ_DIS_L2 || buildstate->params->funcType == IVF_PQ_DIS_COSINE)) {
+            (buildstate->params->funcType == PQ_DIS_L2 || buildstate->params->funcType == PQ_DIS_COSINE)) {
             uint64 TableLen = buildstate->lists * buildstate->pqM * buildstate->pqKsub;
             metap->pqPreComputeTableSize = (uint64)TableLen * sizeof(float);
             metap->pqPreComputeTableNblk = (uint32)(
-                (metap->pqPreComputeTableSize + IVF_PQTABLE_STORAGE_SIZE - 1) / IVF_PQTABLE_STORAGE_SIZE);
+                (metap->pqPreComputeTableSize + PQTABLE_STORAGE_SIZE - 1) / PQTABLE_STORAGE_SIZE);
         }
     } else {
-        metap->pqTableSize = 0;
         metap->pqTableNblk = 0;
     }
 
@@ -854,7 +856,7 @@ static void PrintKmeansMetrics(IvfflatBuildState *buildstate)
 
 bool isL2Op(FmgrInfo *procinfo)
 {
-    return procinfo->fn_oid == L2_OID;
+    return procinfo->fn_oid == L2_FUNC_OID;
 }
 
 static void CountBuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values, const bool *isnull,
@@ -1520,7 +1522,7 @@ static void CreateEntryPages(IvfflatBuildState *buildstate, ForkNumber forkNum)
         CopyResidaulFromList(buildstate);
         ComputeIvfPQ(buildstate);
         if (buildstate->byResidual &&
-            (buildstate->params->funcType == IVF_PQ_DIS_L2 || buildstate->params->funcType == IVF_PQ_DIS_COSINE))
+            (buildstate->params->funcType == PQ_DIS_L2 || buildstate->params->funcType == PQ_DIS_COSINE))
             ComputePreTable(buildstate);
     }
 

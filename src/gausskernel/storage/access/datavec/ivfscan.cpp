@@ -32,7 +32,6 @@
 #include "storage/buf/bufmgr.h"
 #include "access/datavec/ivfnpuadaptor.h"
 
-#define L2_DISTANCE_FUNC_OID 8431
 #define IvfflatNPUGetListInfo(i) (((IvfListInfo *)g_instance.npu_cxt.ivf_lists_info)[i])
 
 /*
@@ -96,7 +95,7 @@ static void GetScanLists(IndexScanDesc scan, Datum value)
                 scanlist->tupleNum = list->tupleNum;
                 listId++;
                 listCount++;
-                if (so->funcType == IVFPQ_DIS_COSINE && so->byResidual) {
+                if (so->funcType == PQ_DIS_COSINE && so->byResidual) {
                     Vector *vd = (Vector *)DatumGetPointer(value);
                     scanlist->pqDistance = VectorL2SquaredDistance(so->dimensions, list->center.x, vd->x);
                 } else {
@@ -221,7 +220,7 @@ static void GetScanItems(IndexScanDesc scan, Datum value)
 
 bool isL2Dis(FmgrInfo *procinfo)
 {
-    return procinfo->fn_oid == L2_DISTANCE_FUNC_OID;
+    return procinfo->fn_oid == L2_FUNC_OID;
 }
 
 void addSlots(IvfflatScanOpaque so, float *tupleNorms, ItemPointerData *tupleTids, int num, bool isL2, float *resMatrix)
@@ -539,7 +538,7 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
     int pqM = so->pqM;
     int pqKsub = so->pqKsub;
     int kreorder = so->kreorder;
-    bool l2CosResidual = so->funcType != IVFPQ_DIS_IP && so->byResidual;
+    bool l2CosResidual = so->funcType != PQ_DIS_IP && so->byResidual;
     pairingheap *reOrderCandidate = pairingheap_allocate(CompareFurthestCandidates, NULL);
     int canLen = 0;
 
@@ -602,7 +601,7 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
                 if (l2CosResidual) {
                     distance = GetPQDistance(simTable2, code, dis0, pqM, pqKsub, false);
                 } else {
-                    distance = GetPQDistance(simTable, code, dis0, pqM, pqKsub, so->funcType == IVFPQ_DIS_IP);
+                    distance = GetPQDistance(simTable, code, dis0, pqM, pqKsub, so->funcType == PQ_DIS_IP);
                 }
 
                 if (kreorder == 0) {

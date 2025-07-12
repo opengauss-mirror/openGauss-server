@@ -58,20 +58,22 @@
 #define INDEXINGMAXC 500
 #define DISKANN_HEAPTIDS 10
 #define DISKANN_METAPAGE_BLKNO 0
+#define DISKANN_HEAD_BLKNO 1                            /* first element page */
+#define DISKANN_PQTABLE_START_BLKNO 1                   /* pqtable start page */
 
 #define DISKANN_DIS_L2 1
 #define DISKANN_DIS_IP 2
 #define DISKANN_DIS_COSINE 3
 
 #ifdef DISKANN_BENCH
-#define DiskAnnBench(name, code)                                            \
-    do {                                                                    \
-        instr_time start;                                                   \
-        instr_time duration;                                                \
-        INSTR_TIME_SET_CURRENT(start);                                      \
-        double result = (code);                                             \
-        INSTR_TIME_SET_CURRENT(duration);                                   \
-        INSTR_TIME_SUBTRACT(duration, start);                               \
+#define DiskAnnBench(name, code)                                                                             \
+    do {                                                                                                     \
+        instr_time start;                                                                                    \
+        instr_time duration;                                                                                 \
+        INSTR_TIME_SET_CURRENT(start);                                                                       \
+        double result = (code);                                                                              \
+        INSTR_TIME_SET_CURRENT(duration);                                                                    \
+        INSTR_TIME_SUBTRACT(duration, start);                                                                \
         elog(INFO, "%s: %.3f ms, assign tuples num: %.0f", name, INSTR_TIME_GET_MILLISEC(duration), result); \
     } while (0)
 #else
@@ -242,6 +244,9 @@ typedef struct DiskAnnOptions {
     int maxDegree;
     int maxAlpha;
     int indexSize;
+    bool enablePQ;
+    int pqM;    /* number of subquantizer */
+    int pqKsub; /* number of centroids for each subquantizer */
 } DiskAnnOptions;
 
 typedef struct DiskAnnEdgePageData {
@@ -301,14 +306,14 @@ typedef struct DiskAnnShared {
     /* Immutable state */
     Oid heaprelid;
     Oid indexrelid;
+    char* pqTable;
 
     /* Mutex for mutable state */
     slock_t mutex;
 
     VectorList<BlockNumber> blocksList;
-    slock_t block_mutex;
 
-    BufferAccessStrategy parallel_strategy;
+    BufferAccessStrategy parallelStrategy;
 
     /* Mutable state */
     int nparticipantsdone;
@@ -363,6 +368,20 @@ typedef struct DiskAnnBuildState {
     uint32 edgeSize;
     uint32 itemSize;
 
+    /* PQ info */
+    bool enablePQ;
+    int pqM;
+    int pqKsub;
+    char* pqTable;
+    Size pqTableSize;
+    float* pqDistanceTable;
+    uint16 pqcodeSize;
+    PQParams* params;
+    VectorArray samples;
+    BlockSamplerData bs;
+    double rstate;
+    int rowstoskip;
+
     /* Memory */
     MemoryContext tmpCtx;
 } DiskAnnBuildState;
@@ -378,15 +397,24 @@ typedef DiskAnnPageOpaqueData* DiskAnnPageOpaque;
 typedef struct DiskAnnMetaPageData {
     uint32 magicNumber;
     uint32 version;
-    uint16 dimensions;
     uint32 maxDegree;
     uint32 maxAlpha;
     uint32 nodeSize;
     uint32 itemSize;
     uint32 edgeSize;
     uint32 indexSize;
-    uint16 nfrozen;
+    uint32 pqTableSize;
+    uint32 pqDisTableSize;
     BlockNumber insertPage;
+
+    uint16 dimensions;
+    uint16 nfrozen;
+    uint16 pqM;
+    uint16 pqKsub;
+    uint16 pqcodeSize;
+    uint16 pqTableNblk;
+    uint16 pqDisTableNblk;
+    bool enablePQ;
     BlockNumber frozenBlkno[FROZEN_POINT_SIZE];
 } DiskAnnMetaPageData;
 typedef DiskAnnMetaPageData* DiskAnnMetaPage;
@@ -399,6 +427,7 @@ typedef struct DiskAnnNodePageData {
     double sqrSum;
     ItemPointerData heaptids[DISKANN_HEAPTIDS];
     uint8 heaptidsLength;
+    uint8 pqcode[FLEXIBLE_ARRAY_MEMBER];
 } DiskAnnNodePageData;
 typedef DiskAnnNodePageData* DiskAnnNodePage;
 
@@ -428,6 +457,19 @@ float ComputeL2DistanceFast(const float* u, const double su, const float* v, con
 void GetEdgeTuple(DiskAnnEdgePage tup, BlockNumber blkno, Relation idx, uint32 nodeSize, uint32 edgeSize);
 int CmpNeighborInfo(const void* a, const void* b);
 void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta);
+int DiskAnnComputePQTable(VectorArray samples, PQParams* params);
+int DiskAnnComputeVectorPQCode(float* vector, const PQParams* params, uint8* pqCode);
+int DiskAnnGetPQDistanceTable(float* vector, const PQParams* params, float* pqDistanceTable);
+int DiskAnnGetPQDistance(const uint8* basecode, const PQParams* params, const float* pqDistanceTable,
+                         float* pqDistance);
+bool DiskAnnEnablePQ(Relation index);
+int DiskAnnGetPqM(Relation index);
+int DiskAnnGetPqKsub(Relation index);
+void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16* pqTableNblk, uint32* pqTableSize, uint16* pqDisTableNblk,
+                                  uint32* pqDisTableSize);
+void DiskAnnFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint32 nblks, uint64 totalSize);
+void DiskAnnFlushPQInfo(DiskAnnBuildState* buildstate);
+PQParams* GetPQInfo(DiskAnnBuildState* buildstate);
 
 IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo* indexInfo);
 void diskannbuildempty_internal(Relation index);
