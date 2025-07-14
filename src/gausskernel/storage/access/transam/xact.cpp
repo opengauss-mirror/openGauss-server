@@ -109,6 +109,7 @@
 #include "postmaster/bgworker.h"
 #include "replication/walreceiver.h"
 #include "ddes/dms/ss_common_attr.h"
+#include "access/datavec/bm25.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/cache/queryid_cachemgr.h"
 #include "tsdb/cache/part_cachemgr.h"
@@ -2627,6 +2628,11 @@ static void CommitTransaction(bool STP_commit)
     ResetPartitionLockInfo();
 #endif
 
+    if (unlikely(TransactionIdIsValid(u_sess->bm25_ctx.insertXid) &&
+        TransactionIdIsCurrentTransactionId(u_sess->bm25_ctx.insertXid))) {
+        BM25BatchInsertResetRecord();
+    }
+
     /* Check relcache init flag */
     if (needNewLocalCacheFile) {
         ereport(WARNING, (errcode(ERRCODE_WARNING), errmsg("Wrong flag of relcache init flag at commit transaction.")));
@@ -3703,6 +3709,12 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
     CStoreAbortCU();
     /* abort async io, must before LWlock release */
     AbortAsyncListIO();
+
+    /* when insert data failed, set bm25 index flag if exist */
+    if (unlikely(TransactionIdIsValid(u_sess->bm25_ctx.insertXid) &&
+        TransactionIdIsCurrentTransactionId(u_sess->bm25_ctx.insertXid))) {
+        BM25BatchInsertAbort();
+    }
 
     /*
      * clean urecvec when transaction is aborted

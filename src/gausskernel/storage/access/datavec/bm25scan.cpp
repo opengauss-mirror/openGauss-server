@@ -53,7 +53,6 @@ typedef struct BM25QueryTokensInfo {
 static void FindBucketsLocation(Page page, BM25TokenizedDocData &tokenizedQuery, BlockNumber *bucketsLocation,
     uint32 maxHashBucketCount, uint32 &bucketFoundCount)
 {
-    OffsetNumber maxoffno = PageGetMaxOffsetNumber(page);
     for (size_t tokenIdx = 0; tokenIdx < tokenizedQuery.tokenCount; tokenIdx++) {
         uint32 bucketIdx = tokenizedQuery.tokenDatas[tokenIdx].hashValue %
             (maxHashBucketCount * BM25_BUCKET_PAGE_ITEM_SIZE);
@@ -386,7 +385,7 @@ static Vector<BM25ScanCursor> MakeBM25ScanCursors(Relation index, BM25QueryToken
     unsigned char* docIdMask)
 {
     Vector<BM25ScanCursor> cursors;
-    for (int i = 0; i < querySize; ++i) {
+    for (uint32 i = 0; i < querySize; ++i) {
         BM25ScanCursor cursor(index, queryTokens[i].tokenPostingBlock,
             queryTokens[i].qTokenMaxScore * queryTokens[i].qTokenIDFVal * u_sess->attr.attr_sql.max_score_ratio,
             queryTokens[i].qTokenIDFVal, docIdMask);
@@ -397,7 +396,7 @@ static Vector<BM25ScanCursor> MakeBM25ScanCursors(Relation index, BM25QueryToken
 
 static void CloseCursors(Vector<BM25ScanCursor> &cursors)
 {
-    for (int i = 0; i < cursors.size(); ++i) {
+    for (uint32 i = 0; i < cursors.size(); ++i) {
         cursors[i].Close();
     }
     cursors.clear();
@@ -554,7 +553,7 @@ static void DocIdsGetHeapCtids(Relation index, BM25EntryPages &entryPages, BM25S
     curBlkno = docMetaPage->docBlknoTable;
     UnlockReleaseBuffer(buf);
 
-    for (int i = 0; i < so->candNums; ++i) {
+    for (uint32 i = 0; i < so->candNums; ++i) {
         curdDocId = so->candDocs[i].docId;
         if (curdDocId == BM25_INVALID_DOC_ID) {
             continue;
@@ -632,7 +631,7 @@ static void ConstructScanScoreKeys(Relation index, BM25ScanOpaque so, const char
     scan->xs_snapshot = GetActiveSnapshot();
     scan->xs_heapfetch = tableam_scan_index_fetch_begin(heapRel);
     u_sess->bm25_ctx.scoreHashTable = New(CurrentMemoryContext) BM25ScanDocScoreHashTable(so->candNums, queryString);
-    for (int i = 0; i < so->candNums; ++i) {
+    for (uint32 i = 0; i < so->candNums; ++i) {
         if (so->candDocs[i].docId == BM25_INVALID_DOC_ID) {
             continue;
         }
@@ -695,6 +694,11 @@ IndexScanDesc bm25beginscan_internal(Relation index, int nkeys, int norderbys)
 
     scan = RelationGetIndexScan(index, nkeys, norderbys);
     BM25GetMetaPageInfo(index, &bm25MetaData);
+    if (bm25MetaData.lastBacthInsertFailed) {
+        elog(ERROR, "Last batch insert document failed, scanned score maybe affected, "
+            "please reindex or recreate bm25 index [%s].", index->rd_rel->relname);
+    }
+
     so = (BM25ScanOpaque)palloc(sizeof(BM25ScanOpaqueData));
     so->cursor = 0;
     so->candDocs = nullptr;
@@ -893,6 +897,7 @@ static void GetQueryAndDoc(PG_FUNCTION_ARGS, char* &query, char* &doc)
 Datum bm25_scores_textarr(PG_FUNCTION_ARGS)
 {
     ereport(ERROR, (errmsg("Textarr not support for BM25 index currently.")));
+    PG_RETURN_NULL();
 }
 
 Datum bm25_scores_text(PG_FUNCTION_ARGS)

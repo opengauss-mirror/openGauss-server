@@ -147,8 +147,6 @@ Datum bm25insert(PG_FUNCTION_ARGS)
     Datum *values = (Datum *)PG_GETARG_POINTER(1);
     bool *isnull = reinterpret_cast<bool *>(PG_GETARG_POINTER(2));
     ItemPointer ht_ctid = (ItemPointer)PG_GETARG_POINTER(3);
-    Relation heaprel = (Relation)PG_GETARG_POINTER(4);
-    IndexUniqueCheck checkunique = (IndexUniqueCheck)PG_GETARG_INT32(5);
     if (isnull[0]) {
         PG_RETURN_BOOL(false);
     }
@@ -162,6 +160,7 @@ PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25options);
 Datum bm25options(PG_FUNCTION_ARGS)
 {
     elog(ERROR, "bm25 index do not support any options.");
+    PG_RETURN_NULL();
 }
 
 PGDLLEXPORT PG_FUNCTION_INFO_V1(bm25bulkdelete);
