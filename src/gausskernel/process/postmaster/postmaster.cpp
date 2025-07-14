@@ -4566,7 +4566,7 @@ static int ServerLoop(void)
 #endif
 
         if (g_instance.attr.attr_memory.enable_rack_memory_cleaner && g_instance.pid_cxt.rackMemCleanerPID == 0 &&
-            (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
+            (pmState == PM_RUN || pmState == PM_HOT_STANDBY) && g_matrixMemFunc.matrix_mem_inited) {
             g_instance.pid_cxt.rackMemCleanerPID = initialize_util_thread(RACK_MEM_FREE_THREAD);
         }
 
@@ -7520,7 +7520,7 @@ static void reaper(SIGNAL_ARGS)
 #endif
 
             if (g_instance.attr.attr_memory.enable_rack_memory_cleaner && g_instance.pid_cxt.rackMemCleanerPID == 0 &&
-                (pmState == PM_RUN || pmState == PM_HOT_STANDBY)) {
+                (pmState == PM_RUN || pmState == PM_HOT_STANDBY) && g_matrixMemFunc.matrix_mem_inited) {
                 g_instance.pid_cxt.rackMemCleanerPID = initialize_util_thread(RACK_MEM_FREE_THREAD);
             }
 
@@ -8048,7 +8048,7 @@ static void reaper(SIGNAL_ARGS)
                 LogChildExit(LOG, _("rack mem cleaner process"), pid, exitstatus);
 
             if (g_instance.pid_cxt.rackMemCleanerPID == 0 && pmState == PM_RUN &&
-                g_instance.attr.attr_memory.enable_rack_memory_cleaner) {
+                g_instance.attr.attr_memory.enable_rack_memory_cleaner && g_matrixMemFunc.matrix_mem_inited) {
                 g_instance.pid_cxt.rackMemCleanerPID = initialize_util_thread(RACK_MEM_FREE_THREAD);
             }
             continue;

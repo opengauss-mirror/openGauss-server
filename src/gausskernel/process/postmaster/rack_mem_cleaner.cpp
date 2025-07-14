@@ -72,6 +72,8 @@ void RegisterFailedFreeMemory(void *ptr)
     }
 
     if (!g_instance.attr.attr_memory.enable_rack_memory_cleaner || !g_instance.rackMemCleanerCxt.cleanupActive) {
+        ereport(LOG, (errmsg("add rack mem to free_queue failed, enable_rack_memory_cleaner is [%d]",
+                             g_instance.attr.attr_memory.enable_rack_memory_cleaner)));
         return;
     }
 
@@ -101,11 +103,13 @@ void RegisterFailedFreeMemory(void *ptr)
 
 static bool CustomFree(void *ptr)
 {
-    int ret = RackMemFree(ptr);
+    RackPrefix* prefix = (RackPrefix*)(ptr - sizeof(RackPrefix));
+    Size size = prefix->size;
+    int ret = RackMemFree((void *)prefix);
     if (ret != 0) {
         return false;
     }
-
+    pg_atomic_sub_fetch_u64(&rackUsedSize, size);
     return true;
 }
 
