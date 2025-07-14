@@ -19,6 +19,8 @@ SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, true, true, 0, 
 
 CREATE INDEX IF NOT EXISTS gs_sql_limit_id_index ON pg_catalog.gs_sql_limit USING btree (limit_id int8_ops);
 
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
+
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 8231;
 
 CREATE OR REPLACE FUNCTION pg_catalog.gs_create_sql_limit
