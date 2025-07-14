@@ -202,14 +202,24 @@ bool launch_agent(void)
 #else
         if (needs_quotes(instance_config.remote.path) || needs_quotes(PROGRAM_NAME_FULL))
         {
-            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s %s/%s\" agent",
-                    libenv, instance_config.remote.path, probackup);
+            if (!NODE_NAME_REAL || strlen(NODE_NAME_REAL) == 0) {
+                rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s %s/%s\" agent", libenv,
+                                instance_config.remote.path, probackup);
+            } else {
+                rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s %s/%s\" agent %s", libenv,
+                                instance_config.remote.path, probackup, NODE_NAME_REAL);
+            }
             securec_check_ss_c(rc, "\0", "\0");
         }
         else
         {
-            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "%s %s/%s agent",
-                    libenv, instance_config.remote.path, probackup);
+            if (!NODE_NAME_REAL || strlen(NODE_NAME_REAL) == 0) {
+                rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "%s %s/%s agent", libenv,
+                                instance_config.remote.path, probackup);
+            } else {
+                rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "%s %s/%s agent %s", libenv,
+                                instance_config.remote.path, probackup, NODE_NAME_REAL);
+            }
             securec_check_ss_c(rc, "\0", "\0");
         }
 #endif

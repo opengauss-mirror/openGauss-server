@@ -27,6 +27,7 @@
 #include <sys/resource.h>
 #include "oss/include/restore.h"
 #include "common_cipher.h"
+#include "catalog/catalog.h"
 
 #define MIN_ULIMIT_STACK_SIZE 8388608     // 1024 * 1024 * 8
 #define PROG_NAME "gs_probackup"
@@ -171,6 +172,10 @@ bool enc_flag = false;
 /* Oss Client*/
 void* oss_client = NULL;
 
+char* TS_DIR_WITH_PGXC = NULL;
+char* NODE_NAME_WITH_PGXC = NULL;
+static void set_ts_ver_dir_real_remote(char* nodename);
+
 static bool help_opt = false;
 
 static void opt_incr_restore_mode(ConfigOption *opt, const char *arg);
@@ -281,11 +286,14 @@ static void parse_non_subcommand_option(char *option, int argc, char *argv[])
 #endif
         if (strcmp(argv[1], "agent") == 0)
         {
-            if (argc > 2)
-            {
-                elog(ERROR, "Version mismatch, gs_probackup binary with version '%s' "
-                        "is launched as an agent for gs_probackup binary with version '%s'",
-                        PROGRAM_VERSION, argv[2]);
+            if (argc == 3) {
+                set_ts_ver_dir_real_remote(argv[2]);
+            }
+            if (argc > 3) {
+                elog(ERROR,
+                     "Version mismatch, gs_probackup binary with version '%s' "
+                     "is launched as an agent for gs_probackup binary with version '%s'",
+                     PROGRAM_VERSION, argv[3]);
             }
             fio_communicate(STDIN_FILENO, STDOUT_FILENO);
             exit(0);
@@ -1113,4 +1121,23 @@ static void dss_init(void)
         XLogSegmentSize = DSS_XLOG_SEG_SIZE;
         instance_config.xlog_seg_size = DSS_XLOG_SEG_SIZE;
     }
+}
+
+static void set_ts_ver_dir_real_remote(char* nodename)
+{
+    errno_t rc = 0;
+    NODE_NAME_WITH_PGXC = (char*)pg_malloc(strlen(nodename) + 1);
+    pgut_atexit_push(pg_free_callback, NODE_NAME_WITH_PGXC);
+    rc = strncpy_s(NODE_NAME_WITH_PGXC, strlen(nodename) + 1, nodename, strlen(nodename));
+    securec_check_c(rc, "", "");
+
+    TS_DIR_WITH_PGXC = (char*)pg_malloc(sizeof(TABLESPACE_VERSION_DIRECTORY "_") + strlen(nodename) + 1);
+    pgut_atexit_push(pg_free_callback, TS_DIR_WITH_PGXC);
+    rc = strncpy_s(TS_DIR_WITH_PGXC, sizeof(TABLESPACE_VERSION_DIRECTORY "_"), TABLESPACE_VERSION_DIRECTORY "_",
+                   sizeof(TABLESPACE_VERSION_DIRECTORY "_") - 1);
+    securec_check_c(rc, "", "");
+
+    rc = strncpy_s(TS_DIR_WITH_PGXC + sizeof(TABLESPACE_VERSION_DIRECTORY "_") - 1, strlen(nodename) + 1, nodename,
+                   strlen(nodename));
+    securec_check_c(rc, "", "");
 }

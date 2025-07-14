@@ -1742,15 +1742,12 @@ backup_non_data_file(pgFile *file, pgFile *prev_file,
     /*
     * If nonedata file exists in previous backup
     * and its mtime is less than parent backup start time ... */
-    if (prev_file && file->exists_in_prev &&
-        file->mtime <= parent_backup_time)
-    {
-
+    if (prev_file && file->exists_in_prev && file->mtime <= parent_backup_time &&
+        strcmp(file->name, PG_CONFIG_FILE) != 0) {
         file->crc = fio_get_crc32(from_fullpath, from_location, false);
 
         /* ...and checksum is the same... */
-        if (EQ_TRADITIONAL_CRC32(file->crc, prev_file->crc))
-        {
+        if (EQ_TRADITIONAL_CRC32(file->crc, prev_file->crc)) {
             file->write_size = BYTES_INVALID;
             return; /* ...skip copying file. */
         }

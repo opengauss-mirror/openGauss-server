@@ -149,6 +149,9 @@ static void *ProgressReportSyncBackupFile(void *arg);
 
 static void compress_encrypt_directory();
 
+static void set_ts_ver_dir_real(PGconn  *cur_conn);
+
+
 static void
 backup_stopbackup_callback(bool fatal, void *userdata)
 {
@@ -1134,7 +1137,7 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
      * fill basic info about instance
      */
     backup_conn = pgdata_basic_setup(instance_config.conn_opt, &nodeInfo);
-
+    set_ts_ver_dir_real(backup_conn);
     if (current.from_replica) {
         elog(INFO, "Backup %s is going to be taken from standby", base36enc((unsigned long int)start_time));
     }
@@ -2487,7 +2490,7 @@ parse_filelist_filenames(parray *files, const char *root)
         path_is_prefix_of_path(PG_TBLSPC_DIR, file->rel_path))
     {
         /*
-         * Found file in pg_tblspc/tblsOid/TABLESPACE_VERSION_DIRECTORY
+         * Found file in pg_tblspc/tblsOid/TABLESPACE_VERSION_DIRECTORY_REAL
          * Legal only in case of 'pg_compression'
          */
         if (strcmp(file->name, "pg_compression") == 0)
@@ -2497,16 +2500,16 @@ parse_filelist_filenames(parray *files, const char *root)
             char    tmp_rel_path[MAXPGPATH];
             /*
             * Check that the file is located under
-            * TABLESPACE_VERSION_DIRECTORY
+            * TABLESPACE_VERSION_DIRECTORY_REAL
             */
             sscanf_result = sscanf_s(file->rel_path, PG_TBLSPC_DIR "/%u/%s/%u",
                                          &tblspcOid, tmp_rel_path, &dbOid);
 
             /* Yes, it is */
-            if (sscanf_result == 2 &&
-                strncmp(tmp_rel_path, TABLESPACE_VERSION_DIRECTORY,
-                    strlen(TABLESPACE_VERSION_DIRECTORY)) == 0)
+            if (sscanf_result == 2 && strncmp(tmp_rel_path, TABLESPACE_VERSION_DIRECTORY_REAL,
+                                              strlen(TABLESPACE_VERSION_DIRECTORY_REAL)) == 0) {
                 set_cfs_datafiles(files, root, file->rel_path, i);
+            }
         }
     }
 
@@ -2549,11 +2552,11 @@ parse_filelist_filenames(parray *files, const char *root)
  * that contain cfs_tablespace in his path as 'is_cfs'
  * Goings back through array 'files' is valid option possible because of current
  * sort rules:
- * tblspcOid/TABLESPACE_VERSION_DIRECTORY
- * tblspcOid/TABLESPACE_VERSION_DIRECTORY/dboid
- * tblspcOid/TABLESPACE_VERSION_DIRECTORY/dboid/1
- * tblspcOid/TABLESPACE_VERSION_DIRECTORY/dboid/1.cfm
- * tblspcOid/TABLESPACE_VERSION_DIRECTORY/pg_compression
+ * tblspcOid/TABLESPACE_VERSION_DIRECTORY_REAL
+ * tblspcOid/TABLESPACE_VERSION_DIRECTORY_REAL/dboid
+ * tblspcOid/TABLESPACE_VERSION_DIRECTORY_REAL/dboid/1
+ * tblspcOid/TABLESPACE_VERSION_DIRECTORY_REAL/dboid/1.cfm
+ * tblspcOid/TABLESPACE_VERSION_DIRECTORY_REAL/pg_compression
  */
 static void
 set_cfs_datafiles(parray *files, const char *root, char *relative, size_t i)
@@ -3220,4 +3223,35 @@ static bool IsPrimary(PGconn* conn)
         return true;
     }
     return false;
+}
+
+static void set_ts_ver_dir_real(PGconn* cur_conn)
+{
+    errno_t rc = 0;
+    PGresult* res;
+
+    res = pgut_execute(cur_conn, "show pgxc_node_name", 0, NULL);
+    if (PQresultStatus(res) == PGRES_TUPLES_OK && (PQntuples(res) == 1) && strlen(PQgetvalue(res, 0, 0)) > 0) {
+        char* nodeName = PQgetvalue(res, 0, 0);
+        size_t nodeNameLen = strlen(nodeName);
+
+        Assert(NODE_NAME_WITH_PGXC == NULL);
+        NODE_NAME_WITH_PGXC = (char*)pg_malloc(nodeNameLen + 1);
+        pgut_atexit_push(pg_free_callback, NODE_NAME_WITH_PGXC);
+        rc = strncpy_s(NODE_NAME_WITH_PGXC, nodeNameLen + 1, nodeName, nodeNameLen + 1);
+
+        TS_DIR_WITH_PGXC = (char*)pg_malloc(sizeof(TABLESPACE_VERSION_DIRECTORY "_") + nodeNameLen + 1);
+        pgut_atexit_push(pg_free_callback, TS_DIR_WITH_PGXC);
+        rc = strncpy_s(TS_DIR_WITH_PGXC, sizeof(TABLESPACE_VERSION_DIRECTORY "_"), TABLESPACE_VERSION_DIRECTORY "_",
+                       sizeof(TABLESPACE_VERSION_DIRECTORY "_") - 1);
+        securec_check_c(rc, "", "");
+
+        rc = strncpy_s(TS_DIR_WITH_PGXC + sizeof(TABLESPACE_VERSION_DIRECTORY "_") - 1, nodeNameLen + 1, nodeName,
+                       nodeNameLen);
+        securec_check_c(rc, "", "");
+    } else {
+        elog(ERROR, "can't get instance node name pgxc_node_name");
+    }
+
+    PQclear(res);
 }

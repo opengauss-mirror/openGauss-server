@@ -51,6 +51,9 @@ extern const char  *PROGRAM_NAME;
 extern const char  *PROGRAM_NAME_FULL;
 extern const char  *PROGRAM_FULL_PATH;
 
+#define TABLESPACE_VERSION_DIRECTORY_REAL TS_DIR_WITH_PGXC
+#define NODE_NAME_REAL NODE_NAME_WITH_PGXC
+
 /* Directory/File names */
 #define DATABASE_DIR                "database"
 #define DSSDATA_DIR                  "dssdata"
@@ -74,6 +77,8 @@ extern const char  *PROGRAM_FULL_PATH;
 #define PG_RELATIVE_TBLSPC_DIR       "pg_location"
 #define PG_REPLSLOT_DIR              "pg_replslot"
 #define PG_AB_RELATIVE_TBLSPC_DIR       "/pg_location"
+#define PG_CONFIG_FILE "postgresql.conf"
+
 /* Timeout defaults */
 #define ARCHIVE_TIMEOUT_DEFAULT        300
 #define LOCK_TIMEOUT				   60
