@@ -1664,10 +1664,17 @@ static void check_hba(hbaPort* port)
                     hba->auth_method = get_default_auth_method(port->user_name);
                     hba->remoteTrust = false;
                 } else {
-                    /* Remote connection with trust method is not allowed, but maybe there will be other rules that
-                    current hbaPort meets, so we continue to search next rule instead of report error. */
-                    continue;
+                    ConnAuthMethodCorrect = false;
+                    pfree_ext(hba);
+                    ereport(FATAL,
+                        (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                            errmsg("Forbid remote connection with trust method!")));
                 }
+            }
+
+            /* Remote connection launched by coordinator should use trust method, skip rules with other method. */
+            if (IsConnPortFromCoord(port) && hba->auth_method != uaTrust) {
+                continue;
             }
         }
 
