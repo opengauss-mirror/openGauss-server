@@ -4059,7 +4059,7 @@ static int expand_stmts(PLpgSQL_execstate* estate, List* stmts, bool& exception_
         return PLPGSQL_RC_OK;
     }
 
-    while(stmtid < num_stmts && !early_exit) {
+    while(stmtid < num_stmts && !early_exit && rc != PLPGSQL_RC_EXIT) {
         if (exception_flag) {
             if (rc == -1)
                 rc = PLPGSQL_RC_EXIT;
