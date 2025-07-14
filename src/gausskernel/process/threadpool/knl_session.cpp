@@ -1499,6 +1499,12 @@ static void knl_u_imcstore_init(knl_u_imcstore_context* imcstore_context)
 
 static void knl_u_bm25_init(knl_u_bm25_context* bm25_context)
 {
+    bm25_context->indexOids = NIL;
+    bm25_context->indexOidForCount = InvalidOid;
+    bm25_context->insertTupleNum = 0;
+    bm25_context->insertXid = InvalidTransactionId;
+    bm25_context->isFirstTuple = true;
+
     bm25_context->scoreHashTable = nullptr;
 }
 
@@ -1608,6 +1614,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_imcstore_init(&sess_cxt->imcstore_ctx);
 #endif
 
+    knl_u_bm25_init(&sess_cxt->bm25_ctx);
     knl_u_datavec_init(&sess_cxt->datavec_ctx);
     knl_u_sqlLimit_init(&sess_cxt->sqlLimit_ctx);
 

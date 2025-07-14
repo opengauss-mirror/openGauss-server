@@ -111,7 +111,6 @@ static void InsertItemToTokenMetaList(Relation index, BM25EntryPages &bm25EntryP
     Page cpage;
     GenericXLogState *state = nullptr;
     while (BlockNumberIsValid(nextblkno)) {
-        OffsetNumber maxoffno;
         cbuf = ReadBuffer(index, nextblkno);
         LockBuffer(cbuf, BUFFER_LOCK_EXCLUSIVE);
         BM25GetPage(index, &cpage, cbuf, &state, building);
@@ -247,7 +246,6 @@ static void InsertItemToPostingList(Relation index, BM25PageLocationInfo &tokenM
     Page cpage;
     GenericXLogState *state = nullptr;
     for (;;) {
-        OffsetNumber maxoffno;
         cbuf = ReadBuffer(index, insertPage);
         LockBuffer(cbuf, BUFFER_LOCK_EXCLUSIVE);
         BM25GetPage(index, &cpage, cbuf, &state, building);
@@ -261,9 +259,7 @@ static void InsertItemToPostingList(Relation index, BM25PageLocationInfo &tokenM
                 GenericXLogAbort(state);
             UnlockReleaseBuffer(cbuf);
         } else {
-            Buffer newbuf;
-            Page newpage;
-            newbuf = BM25NewBuffer(index, forkNum);
+            Buffer newbuf = BM25NewBuffer(index, forkNum);
             insertPage = BufferGetBlockNumber(newbuf);
             BM25PageGetOpaque(cpage)->nextblkno = insertPage;
             BM25CommitBuf(cbuf, &state, building);
@@ -375,21 +371,6 @@ static void AllocateForwardIdxForToken(Relation index, uint32 tokenCount, BM25En
     BM25CommitBuf(metabuf, &metaState, building);
 }
 
-static BlockNumber SeekForwardBlknoForToken(Relation index, BlockNumber startBlkno, BlockNumber step)
-{
-    Buffer buf;
-    Page page;
-    BlockNumber curBlkno = startBlkno;
-    for (int i = 0; i < step; ++i) {
-        buf = ReadBuffer(index, curBlkno);
-        LockBuffer(buf, BUFFER_LOCK_SHARE);
-        page = BufferGetPage(buf);
-        curBlkno = BM25PageGetOpaque(page)->nextblkno;
-        UnlockReleaseBuffer(buf);
-    }
-    return curBlkno;
-}
-
 static void InsertDocForwardItem(Relation index, uint32 docId, BM25TokenizedDocData &tokenizedDoc,
     BM25EntryPages &bm25EntryPages, uint64 forwardStart, uint64 forwardEnd, ForkNumber forkNum, bool building)
 {
@@ -420,7 +401,7 @@ static void InsertDocForwardItem(Relation index, uint32 docId, BM25TokenizedDocD
     buf = ReadBuffer(index, forwardBlkno);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
     BM25GetPage(index, &page, buf, &state, building);
-    for (int i = 0; i < tokenizedDoc.tokenCount; i++) {
+    for (uint32 i = 0; i < tokenizedDoc.tokenCount; i++) {
         Assert(forwardEnd >= tokenIdx);
         curBlockIdx = tokenIdx / BM25_DOC_FORWARD_MAX_COUNT_IN_PAGE;
         if (curBlockIdx != preBlockIdx) {
@@ -591,7 +572,6 @@ static void BM25BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *valu
 static BlockNumber CreateDocMetaPage(Relation index, ForkNumber forkNum)
 {
     Page page;
-    GenericXLogState *state;
     BlockNumber metaBlkbo;
     BM25DocMetaPage docMetaPage;
 
@@ -901,8 +881,6 @@ void ParallelReorderMain(const BgWorkerContext *bwc)
     // loop buckets
     BlockNumber hashBucketsBlkno = startLocation.blkno;
     OffsetNumber startoffno = startLocation.offno;
-    bool isStartPage = true;
-    bool isEnd = false;
     uint32 scanBucketCount = 0;
     Buffer cbuf;
     Page cpage;
@@ -972,7 +950,7 @@ static void BM25InitReorderShared(BM25ReorderShared *reorderShared, BM25BuildSta
 
 static void BuildBM25Index(BM25BuildState *buildstate, ForkNumber forkNum)
 {
-    int parallelWorkers = 0;
+    uint32 parallelWorkers = 0;
 
     /* Calculate parallel workers */
     if (buildstate->heap != NULL) {
@@ -1074,7 +1052,6 @@ IndexBuildResult* bm25build_internal(Relation heap, Relation index, IndexInfo *i
 
 void bm25buildempty_internal(Relation index)
 {
-    IndexBuildResult *result;
     BM25BuildState buildstate;
 
     BuildIndexCheck(index);
@@ -1086,6 +1063,9 @@ bool bm25insert_internal(Relation index, Datum *values, ItemPointer heapCtid)
     BM25MetaPageData meta;
     BM25GetMetaPageInfo(index, &meta);
 
+    if (!meta.lastBacthInsertFailed) {
+        BM25BatchInsertRecord(index);
+    }
     BM25InsertDocument(index, values, *heapCtid, meta.entryPageList, MAIN_FORKNUM, false);
     return true;
 }
