@@ -7072,18 +7072,7 @@ Datum numeric_to_number(PG_FUNCTION_ARGS)
     Datum result;
     bool resultNull = false;
 
-    PG_TRY();
-    {
-        result = to_numeric_to_number_internal(value, fmt, PG_GET_COLLATION(), &resultNull);
-    }
-    PG_CATCH();
-    {
-        char* msg = Geterrmsg();
-        int errcode = geterrcode();
-        FlushErrorState();
-        ereport(ERROR,  (errcode, errmsg("%s", msg)));
-    }
-    PG_END_TRY();
+    result = to_numeric_to_number_internal(value, fmt, PG_GET_COLLATION(), &resultNull);
 
     if (resultNull) {
         PG_RETURN_NULL();
@@ -7163,11 +7152,7 @@ Datum numeric_to_text_number(PG_FUNCTION_ARGS)
                 result = NumericGetDatum(defaultNumVal);
             }
         } else {
-            char* msg = Geterrmsg();
-            int errcode = geterrcode();
-            FlushErrorState();
-
-            ereport(ERROR,  (errcode, errmsg("%s", msg)));
+            PG_RE_THROW();
         }
     }
     PG_END_TRY();
@@ -7236,10 +7221,7 @@ Datum numeric_to_default_without_defaultval(PG_FUNCTION_ARGS)
                 result = default_val;
             }
         } else {
-            char* msg = Geterrmsg();
-            int errcode = geterrcode();
-            FlushErrorState();
-            ereport(ERROR,  (errcode, errmsg("%s", msg)));
+            PG_RE_THROW();
         }
     }
     PG_END_TRY();

@@ -520,6 +520,7 @@ select TO_NUMBER('1A3E' DEFAULT 199 ON CONVERSION ERROR, 'XXXX');
 -- with  fmt
 SELECT TO_NUMBER(1.79769313486231E+100, '9G999D99');  -- error: overflow. numeric field overflow
 ERROR:  numeric field overflow
+DETAIL:  A field with precision 4, scale 0 must round to an absolute value less than 10^4.
 CONTEXT:  referenced column: to_number
 SELECT TO_NUMBER(2.22507485850720E-100, '9G999D99');
  to_number 
