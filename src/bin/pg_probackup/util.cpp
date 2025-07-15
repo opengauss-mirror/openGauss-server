@@ -891,3 +891,10 @@ void replace_password(int argc, char** argv, const char* optionName)
         }
     }
 }
+
+void pg_free_callback(bool fatal, void* userdata)
+{
+    if (userdata) {
+        pg_free(userdata);
+    }
+}

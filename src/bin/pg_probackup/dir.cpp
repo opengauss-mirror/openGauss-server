@@ -693,7 +693,7 @@ dir_check_file(pgFile *file, bool backup_logs, bool backup_replslots)
     * inside the PGDATA.
     */
     if (S_ISDIR(file->mode) &&
-        strcmp(file->name, TABLESPACE_VERSION_DIRECTORY) == 0)
+        strcmp(file->name, TABLESPACE_VERSION_DIRECTORY_REAL) == 0)
     {
         Oid tblspcOid;
         char    tmp_rel_path[MAXPGPATH];
@@ -702,7 +702,7 @@ dir_check_file(pgFile *file, bool backup_logs, bool backup_replslots)
             return CHECK_FALSE;
         /*
         * Valid path for the tablespace is
-        * pg_tblspc/tblsOid/TABLESPACE_VERSION_DIRECTORY
+        * pg_tblspc/tblsOid/TABLESPACE_VERSION_DIRECTORY_REAL
         */
         if (!IsDssMode())
         {
@@ -736,14 +736,15 @@ static char check_in_tablespace(pgFile *file, bool in_tablespace)
 
         /*
         * We should skip other files and directories rather than
-        * TABLESPACE_VERSION_DIRECTORY, if this is recursive tablespace.
+        * TABLESPACE_VERSION_DIRECTORY_REAL, if this is recursive tablespace.
         */
-        if (sscanf_res == 2 && strcmp(tmp_rel_path, TABLESPACE_VERSION_DIRECTORY) != 0)
+        if (sscanf_res == 2 && strcmp(tmp_rel_path, TABLESPACE_VERSION_DIRECTORY_REAL) != 0) {
             return CHECK_FALSE;
+        }
 
-        if (sscanf_res == 3 && S_ISDIR(file->mode) &&
-            strcmp(tmp_rel_path, TABLESPACE_VERSION_DIRECTORY) == 0)
+        if (sscanf_res == 3 && S_ISDIR(file->mode) && strcmp(tmp_rel_path, TABLESPACE_VERSION_DIRECTORY_REAL) == 0) {
             file->is_database = true;
+        }
     }
     else if (path_is_prefix_of_path("global", file->rel_path))
     {
