@@ -254,7 +254,7 @@ void cleanup_tracing(void)
      * parsing of the next statement was already done and stored in
      * parse_traceparent.
      */
-    reset_traceparent(u_sess->trace_cxt.executor_traceparent);
+    u_sess->trace_cxt.executor_traceparent = NULL;
     u_sess->trace_cxt.current_trace_spans = NULL;
     u_sess->trace_cxt.per_level_infos = NULL;
     u_sess->trace_cxt.max_planstart = 0;
