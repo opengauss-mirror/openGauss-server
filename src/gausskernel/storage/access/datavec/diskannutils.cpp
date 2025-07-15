@@ -249,7 +249,7 @@ void DiskAnnGraphStore::GetNeighbors(BlockNumber blkno, VectorList<Neighbor>* nb
 
     /* Reserve space */
     nbrs->reset();
-    nbrs->reserve((size_t)(ceil(GRAPH_SLACK_FACTOR * OUTDEGREE)));
+    nbrs->reserve((size_t)(ceil(GRAPH_SLACK_FACTOR * DISKANN_MAX_DEGREE)));
 
     buf = ReadBuffer(m_rel, blkno);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
@@ -421,7 +421,7 @@ void DiskAnnGraph::Link(BlockNumber blk, int index_size)
 
     prunedList = VectorList<Neighbor>();
     PruneNeighbors(blk, &pool, &prunedList);
-    Assert(prunedList.size() <= OUTDEGREE);
+    Assert(prunedList.size() <= DISKANN_MAX_DEGREE);
 
     edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
     GetEdgeTuple(edgePage, blk, graphStore->m_rel, graphStore->m_nodeSize, graphStore->m_edgeSize);
@@ -504,15 +504,15 @@ void DiskAnnGraph::PruneNeighbors(BlockNumber location, VectorList<Neighbor>* po
     }
     qsort(&((*pool)[0]), pool->size(), sizeof(Neighbor), CmpNeighborInfo);
     prunedList->reset();
-    prunedList->reserve(OUTDEGREE);
+    prunedList->reserve(DISKANN_MAX_DEGREE);
     float alpha = INDEXING_ALPHA;
     OccludeList(location, pool, prunedList, alpha);
-    Assert(prunedList->size() <= OUTDEGREE);
+    Assert(prunedList->size() <= DISKANN_MAX_DEGREE);
 
     if (saturateGraph && alpha > 1) {
         for (size_t i = 0; i < pool->size(); i++) {
             const auto& node = (*pool)[i];
-            if (prunedList->size() >= OUTDEGREE)
+            if (prunedList->size() >= DISKANN_MAX_DEGREE)
                 break;
             if (!prunedList->contains(node) && node.id != location) {
                 prunedList->push_back(node);
@@ -524,15 +524,12 @@ void DiskAnnGraph::PruneNeighbors(BlockNumber location, VectorList<Neighbor>* po
 void DiskAnnGraph::OccludeList(BlockNumber location, VectorList<Neighbor>* pool, VectorList<Neighbor>* result,
                                const float alpha)
 {
-    uint32_t degree = OUTDEGREE;
-    uint32_t maxc = INDEXINGMAXC;
-
     if (pool->size() == 0)
         return;
 
     Assert(result->size() == 0);
-    if (pool->size() > maxc)
-        pool->resize(maxc);
+    if (pool->size() > INDEXINGMAXC)
+        pool->resize(INDEXINGMAXC);
 
     VectorList<float> occlude_factor = VectorList<float>();
     // occlude_list can be called with the same scratch more than once by
@@ -543,12 +540,12 @@ void DiskAnnGraph::OccludeList(BlockNumber location, VectorList<Neighbor>* pool,
     securec_check(rc, "\0", "\0");
 
     float cur_alpha = 1;
-    while (cur_alpha <= alpha && result->size() < degree) {
+    while (cur_alpha <= alpha && result->size() < DISKANN_MAX_DEGREE) {
         // used for MIPS, where we store a value of eps in cur_alpha to
         // denote pruned out entries which we can skip in later rounds.
         float eps = cur_alpha + 0.01f;
         unsigned int idx = 0;
-        for (auto iter = pool->begin(); result->size() < degree && iter != pool->end(); ++iter, ++idx) {
+        for (auto iter = pool->begin(); result->size() < DISKANN_MAX_DEGREE && iter != pool->end(); ++iter, ++idx) {
             size_t slot = (size_t)(iter - pool->begin());
             if (occlude_factor[slot] > cur_alpha) {
                 continue;
@@ -618,10 +615,10 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
         distance = graphStore->ComputeDistance(des.id, scratch->alignedQuery, scratch->sqrSum);
         nn = Neighbor(blk, distance);
         if (!desPool.contains(nn)) {
-            if (desPool.size() < OUTDEGREE) {
+            if (desPool.size() < DISKANN_MAX_DEGREE) {
                 DiskAnnEdgePage edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
                 GetEdgeTuple(edgePage, des.id, graphStore->m_rel, graphStore->m_nodeSize, graphStore->m_edgeSize);
-                if (graphStore->NeighborExists(edgePage, blk) || edgePage->count >= OUTDEGREE) {
+                if (graphStore->NeighborExists(edgePage, blk) || edgePage->count >= DISKANN_MAX_DEGREE) {
                     desPool.clear();
                     copyNeighbors.clear();
                     break;
@@ -643,7 +640,7 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
             VectorList<Neighbor> pruned;
             DiskAnnEdgePage edge;
 
-            size_t reserveSize = (size_t)(ceil(GRAPH_SLACK_FACTOR * OUTDEGREE));
+            size_t reserveSize = (size_t)(ceil(GRAPH_SLACK_FACTOR * DISKANN_MAX_DEGREE));
             dummyPool.reset();
             dummyPool.reserve(reserveSize);
 

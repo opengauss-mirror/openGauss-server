@@ -76,16 +76,16 @@ static void diskanncostestimate_internal(PlannerInfo* root, IndexPath* path, dou
 static bytea* diskannoptions_internal(Datum reloptions, bool validate)
 {
     static const relopt_parse_elt tab[] = {
-        {"dimensions", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, dimensions)},
-        {"maxDegree", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, maxDegree)},
-        {"maxAlpha", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, maxAlpha)},
-        {"indexSize", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, indexSize)}};
+        {"index_size", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, indexSize)},
+        {"enable_pq", RELOPT_TYPE_BOOL, offsetof(DiskAnnOptions, enablePQ)},
+        {"pq_m", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pqM)},
+        {"pq_ksub", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pqKsub)}};
 
     relopt_value* options;
     int numoptions;
     DiskAnnOptions* rdopts;
 
-    options = parseRelOptions(reloptions, validate, RELOPT_KIND_HNSW, &numoptions);
+    options = parseRelOptions(reloptions, validate, RELOPT_KIND_DISKANN, &numoptions);
     rdopts = (DiskAnnOptions*)allocateReloptStruct(sizeof(DiskAnnOptions), options, numoptions);
     fillRelOptions((void*)rdopts, sizeof(DiskAnnOptions), options, numoptions, validate, tab, lengthof(tab));
 

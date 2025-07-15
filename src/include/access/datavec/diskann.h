@@ -33,7 +33,7 @@
 #include "access/datavec/utils.h"
 #include "access/amapi.h"
 
-#define DISKANN_FUNC_NUM 5
+#define DISKANN_FUNC_NUM 4
 
 #define DISKANN_VERSION 1
 #define DISKANN_MAGIC_NUMBER 0x14FF1A7
@@ -50,9 +50,9 @@
 #define DISKANN_DEFAULT_MAX_ALPHA 1
 #define DISKANN_MIN_INDEX_SIZE 16
 #define DISKANN_MAX_INDEX_SIZE 1000
-#define DISKANN_DEFAULT_INDEX_SIZE 16
+#define DISKANN_DEFAULT_INDEX_SIZE 100
+#define DISKANN_MAX_DEGREE 96
 
-#define OUTDEGREE 96
 #define FROZEN_POINT_SIZE 1
 #define DISKANN_DISTANCE_THRESHOLD (1e-9)
 #define INDEXINGMAXC 500
@@ -240,9 +240,6 @@ typedef struct DiskAnnTypeInfo {
 /* DiskAnn index options */
 typedef struct DiskAnnOptions {
     StdRdOptions* rd_options;
-    int dimensions;
-    int maxDegree;
-    int maxAlpha;
     int indexSize;
     bool enablePQ;
     int pqM;    /* number of subquantizer */
@@ -252,8 +249,8 @@ typedef struct DiskAnnOptions {
 typedef struct DiskAnnEdgePageData {
     uint8 type;
     uint16 count;
-    BlockNumber nexts[OUTDEGREE];
-    float distance[OUTDEGREE];
+    BlockNumber nexts[DISKANN_MAX_DEGREE];
+    float distance[DISKANN_MAX_DEGREE];
 } DiskAnnEdgePageData;
 typedef DiskAnnEdgePageData* DiskAnnEdgePage;
 
@@ -343,8 +340,6 @@ typedef struct DiskAnnBuildState {
 
     /* Settings */
     uint16 dimensions;
-    uint32 maxDegree;
-    uint32 maxAlpha;
     uint32 indexSize;
 
     /* Statistics */
@@ -397,8 +392,6 @@ typedef DiskAnnPageOpaqueData* DiskAnnPageOpaque;
 typedef struct DiskAnnMetaPageData {
     uint32 magicNumber;
     uint32 version;
-    uint32 maxDegree;
-    uint32 maxAlpha;
     uint32 nodeSize;
     uint32 itemSize;
     uint32 edgeSize;

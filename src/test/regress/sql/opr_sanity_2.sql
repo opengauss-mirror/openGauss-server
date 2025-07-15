@@ -287,7 +287,7 @@ WHERE p2.opfmethod = p1.oid AND p3.amprocfamily = p2.oid AND
     NOT BETWEEN
       (CASE WHEN p1.amname IN ('gist', 'gin', 'bm25') THEN p1.amsupport - 1
             WHEN p1.amname IN ('btree', 'ubtree') THEN p1.amsupport - 2
-            WHEN p1.amname IN ('ivfflat', 'hnsw') THEN p1.amsupport - 3
+            WHEN p1.amname IN ('ivfflat', 'hnsw', 'diskann') THEN p1.amsupport - 3
             ELSE p1.amsupport END)
       AND p1.amsupport;
 
@@ -300,7 +300,7 @@ FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
      LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
          amproclefttype = amprocrighttype AND amproclefttype = opcintype
 WHERE am.amname <> 'btree' AND am.amname <> 'gist' AND am.amname <> 'gin' AND am.amname <> 'ubtree'
-    AND am.amname <> 'hnsw' AND am.amname <> 'ivfflat' AND am.amname <> 'bm25'
+    AND am.amname <> 'hnsw' AND am.amname <> 'ivfflat' AND am.amname <> 'bm25' AND am.amname <> 'diskann'
 GROUP BY amname, amsupport, opcname, amprocfamily
 HAVING count(*) != amsupport OR amprocfamily IS NULL;
 

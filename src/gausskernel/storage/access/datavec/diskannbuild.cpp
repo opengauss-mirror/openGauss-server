@@ -63,15 +63,7 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
              buildstate->typeInfo->maxDimensions);
     }
 
-    if (opts) {
-        buildstate->maxDegree = opts->maxDegree;
-        buildstate->maxAlpha = opts->maxAlpha;
-        buildstate->indexSize = opts->indexSize;
-    } else {
-        buildstate->maxDegree = DISKANN_DEFAULT_MAX_DEGREE;
-        buildstate->maxAlpha = DISKANN_DEFAULT_MAX_ALPHA;
-        buildstate->indexSize = DISKANN_DEFAULT_INDEX_SIZE;
-    }
+    buildstate->indexSize = opts ? opts->indexSize : DISKANN_DEFAULT_INDEX_SIZE;
 
     buildstate->reltuples = 0;
     buildstate->indtuples = 0;
@@ -125,7 +117,7 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
     buildstate->nodeSize = offsetof(DiskAnnNodePageData, pqcode) + buildstate->pqcodeSize;
     buildstate->edgeSize = sizeof(DiskAnnEdgePageData);
     buildstate->itemSize = buildstate->nodeSize + buildstate->edgeSize;
-    buildstate->graphStore = New(CurrentMemoryContext) DiskAnnGraphStore(index);
+    buildstate->graphStore = nullptr;
     buildstate->tmpCtx =
         AllocSetContextCreate(CurrentMemoryContext, "diskann build temporary context", ALLOCSET_DEFAULT_SIZES);
 }
@@ -162,8 +154,6 @@ static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNu
     metap->magicNumber = DISKANN_MAGIC_NUMBER;
     metap->version = DISKANN_VERSION;
     metap->dimensions = buildstate->dimensions;
-    metap->maxDegree = buildstate->maxDegree;
-    metap->maxAlpha = buildstate->maxAlpha;
     metap->nodeSize = buildstate->nodeSize;
     metap->edgeSize = buildstate->edgeSize;
     metap->itemSize = metap->nodeSize + metap->edgeSize;
@@ -262,7 +252,7 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
 
     /*  initialize edge page */
     DiskAnnEdgePage etup = (DiskAnnEdgePage)((uint8_t*)tup + buildstate->nodeSize);
-    for (uint16_t pos = 0; pos < OUTDEGREE; pos++) {
+    for (uint16_t pos = 0; pos < DISKANN_MAX_DEGREE; pos++) {
         etup->nexts[pos] = InvalidBlockNumber;
         etup->distance[pos] = FLT_MAX;
     }
@@ -722,6 +712,7 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo* indexInfo, Disk
         DiskAnnFlushPQInfo(buildstate);
     }
 
+    buildstate->graphStore = New(CurrentMemoryContext) DiskAnnGraphStore(index);
     CreateEntryPages(buildstate);
 
     BuildVamanaIndex(buildstate);
