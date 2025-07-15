@@ -184,7 +184,6 @@ void IMCSHashTable::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
             LWLockAcquire(imcsDesc->imcsDescLock, LW_EXCLUSIVE);
             Assert(relNode);
             uint64 curUsedShareMem = imcsDesc->populateInShareMem ? imcsDesc->shareMemPool->m_usedMemSize : 0;
-            imcsDesc->DropRowGroups(relNode);
             if (imcsDesc->populateInShareMem && imcsDesc->shareMemPool != NULL) {
                 SS_IMCU_CACHE->AdjustUsedShmAfterUnPopulate(curUsedShareMem);
                 imcsDesc->shareMemPool->Destroy();
@@ -194,6 +193,7 @@ void IMCSHashTable::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
                 imcsDesc->borrowMemPool->Destroy();
                 imcsDesc->borrowMemPool = NULL;
             }
+            imcsDesc->DropRowGroups(relNode);
             LWLockRelease(imcsDesc->imcsDescLock);
             MemoryContextDelete(imcsDesc->imcuDescContext);
         }
