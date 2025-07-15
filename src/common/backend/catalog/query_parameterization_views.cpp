@@ -51,7 +51,7 @@ static void FillParamViewValues(Datum* paramViewsValues, bool* paramViewsNulls, 
 {
     paramViewsValues[Anum_parameterization_views_reloid - 1] = ObjectIdGetDatum(paramView->relOid);
     paramViewsValues[Anum_parameterization_views_is_bypass - 1] = BoolGetDatum(paramView->isBypass);
-    paramViewsValues[Anum_parameterization_views_query_type - 1] = NameGetDatum(paramView->queryType);
+    paramViewsValues[Anum_parameterization_views_query_type - 1] = CStringGetTextDatum(paramView->queryType);
     if (paramView->paramNums > 0) {
         paramViewsValues[Anum_parameterization_views_types - 1] = PointerGetDatum(paramView->paramTypes);
     } else {
@@ -118,7 +118,7 @@ Datum query_parameterization_views(PG_FUNCTION_ARGS)
         tupDesc = CreateTemplateTupleDesc(Natts_parameterization_views, false, TableAmHeap);
 
         TupleDescInitEntry(tupDesc, (AttrNumber)Anum_parameterization_views_reloid, "reloid", OIDOID, -1, 0);
-        TupleDescInitEntry(tupDesc, (AttrNumber)Anum_parameterization_views_query_type, "query_type", NAMEOID, -1, 0);
+        TupleDescInitEntry(tupDesc, (AttrNumber)Anum_parameterization_views_query_type, "query_type", TEXTOID, -1, 0);
         TupleDescInitEntry(tupDesc, (AttrNumber)Anum_parameterization_views_is_bypass, "is_bypass", BOOLOID, -1, 0);
         TupleDescInitEntry(tupDesc, (AttrNumber)Anum_parameterization_views_types, "param_types", INT2VECTOROID, -1, 0);
         TupleDescInitEntry(tupDesc, (AttrNumber)Anum_parameterization_views_param_nums, "param_nums", INT2OID, -1, 0);
