@@ -718,7 +718,7 @@ protocol to make nodes agree on a serializable transactional order.
     A simple example of a <filename>recovery.conf</> is:
 <programlisting>
 standby_mode = 'on'
-primary_conninfo = 'host=192.168.1.50 port=5432 user=foo password=foopass'
+primary_conninfo = 'host=192.168.1.50 port=5432 user=foo password=********'
 restore_command = 'cp /path/to/archive/%f %p'
 archive_cleanup_command = 'pg_archivecleanup /path/to/archive %r'
 </programlisting>
@@ -839,14 +839,14 @@ host    replication     foo             192.168.1.100/32        md5
      field).
      For example, if the primary is running on host IP <literal>192.168.1.50</>,
      port <literal>5432</literal>, the account name for replication is
-     <literal>foo</>, and the password is <literal>foopass</>, the administrator
+     <literal>foo</>, and the password is <literal>********</>, the administrator
      can add the following line to the <filename>recovery.conf</> file on the
      standby:
 
 <programlisting>
 # The standby connects to the primary that is running on host 192.168.1.50
-# and port 5432 as the user "foo" whose password is "foopass".
-primary_conninfo = 'host=192.168.1.50 port=5432 user=foo password=foopass'
+# and port 5432 as the user "foo" whose password is "********".
+primary_conninfo = 'host=192.168.1.50 port=5432 user=foo password=********'
 </programlisting>
     </para>
    </sect3>
