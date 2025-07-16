@@ -4653,11 +4653,21 @@ static void set_var_from_num(Numeric num, NumericVar* dest)
 void init_var_from_num(Numeric num, NumericVar* dest)
 {
     Assert(!NUMERIC_IS_BI(num));
+    uint16 n_header = SHORT_NUMERIC_N_HEADER(num);
+    bool is_short = NUMERIC_IS_SHORT(num);
     dest->ndigits = NUMERIC_NDIGITS(num);
-    dest->weight = NUMERIC_WEIGHT(num);
-    dest->sign = NUMERIC_SIGN(num);
-    dest->dscale = NUMERIC_DSCALE(num);
-    dest->digits = NUMERIC_DIGITS(num);
+    if (is_short) {
+        dest->weight = GET_SHORT_NUMERIC_WEIGHT(n_header);
+        dest->sign = GET_SHORT_NUMERIC_SIGN(n_header);
+        dest->dscale = GET_SHORT_NUMERIC_DSCALE(n_header);
+        dest->digits = GET_SHORT_NUMERIC_DIGITS(num);
+    } else {
+        dest->weight = GET_LONG_NUMERIC_WEIGHT(num);
+        dest->sign = GET_LONG_NUMERIC_SIGN(num);
+        dest->dscale = GET_LONG_NUMERIC_DSCALE(num);
+        dest->digits = GET_LONG_NUMERIC_DIGITS(num);
+    }
+
     dest->buf = dest->ndb;
 }
 
