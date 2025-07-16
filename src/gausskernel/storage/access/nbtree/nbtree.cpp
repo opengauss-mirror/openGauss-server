@@ -1576,6 +1576,6 @@ static BTVacuumPosting btree_vacuum_posting(BTVacState *vac_state, IndexTuple po
  */
 void* Btbuildparallelscan(void)
 {
-    void *btPscan = new BTParallelScanDescData;
-    return btPscan;
+    BTParallelScanDesc btPscan = (BTParallelScanDesc)palloc(sizeof(BTParallelScanDescData));
+    return (void*)btPscan;
 }

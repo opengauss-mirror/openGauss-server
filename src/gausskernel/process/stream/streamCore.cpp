@@ -1973,7 +1973,7 @@ void StreamNodeGroup::DestroyStreamDesc(const uint64& queryId, Plan* node)
             element = (StreamDescElement*)hash_search(m_streamDescHashTbl, &streamKey, HASH_FIND, &found);
             if (found == true) {
                 if (((ParallelIndexScanDescData*)element->parallelDesc)->psBtpscan) {
-                    delete ((ParallelIndexScanDescData*)element->parallelDesc)->psBtpscan;
+                    pfree(((ParallelIndexScanDescData*)element->parallelDesc)->psBtpscan);
                 }
                 pfree(element->parallelDesc);
                 (StreamDescElement*)hash_search(m_streamDescHashTbl, &streamKey, HASH_REMOVE, NULL);
