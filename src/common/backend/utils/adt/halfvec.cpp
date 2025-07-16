@@ -534,7 +534,7 @@ Datum halfvec_l2_distance(PG_FUNCTION_ARGS)
 
     CheckDims(a, b);
 
-    PG_RETURN_FLOAT8(sqrt((double)HalfvecL2SquaredDistance(a->dim, a->x, b->x)));
+    PG_RETURN_FLOAT8(sqrt((double)HalfvecL2SquaredDistanceDefault(a->dim, a->x, b->x)));
 }
 
 /*
@@ -548,7 +548,7 @@ Datum halfvec_l2_squared_distance(PG_FUNCTION_ARGS)
 
     CheckDims(a, b);
 
-    PG_RETURN_FLOAT8((double)HalfvecL2SquaredDistance(a->dim, a->x, b->x));
+    PG_RETURN_FLOAT8((double)HalfvecL2SquaredDistanceDefault(a->dim, a->x, b->x));
 }
 
 /*
@@ -562,7 +562,7 @@ Datum halfvec_inner_product(PG_FUNCTION_ARGS)
 
     CheckDims(a, b);
 
-    PG_RETURN_FLOAT8((double)HalfvecInnerProduct(a->dim, a->x, b->x));
+    PG_RETURN_FLOAT8((double)HalfvecInnerProductDefault(a->dim, a->x, b->x));
 }
 
 /*
@@ -576,7 +576,7 @@ Datum halfvec_negative_inner_product(PG_FUNCTION_ARGS)
 
     CheckDims(a, b);
 
-    PG_RETURN_FLOAT8((double)-HalfvecInnerProduct(a->dim, a->x, b->x));
+    PG_RETURN_FLOAT8((double)-HalfvecInnerProductDefault(a->dim, a->x, b->x));
 }
 
 /*
@@ -591,7 +591,7 @@ Datum halfvec_cosine_distance(PG_FUNCTION_ARGS)
 
     CheckDims(a, b);
 
-    similarity = HalfvecCosineSimilarity(a->dim, a->x, b->x);
+    similarity = HalfvecCosineSimilarityDefault(a->dim, a->x, b->x);
 #ifdef _MSC_VER
     /* /fp:fast may not propagate NaN */
     if (isnan(similarity)) {
@@ -623,7 +623,7 @@ Datum halfvec_spherical_distance(PG_FUNCTION_ARGS)
 
     CheckDims(a, b);
 
-    distance = (double)HalfvecInnerProduct(a->dim, a->x, b->x);
+    distance = (double)HalfvecInnerProductDefault(a->dim, a->x, b->x);
     /* Prevent NaN with acos with loss of precision */
     if (distance > 1) {
         distance = 1;
@@ -645,7 +645,7 @@ Datum halfvec_l1_distance(PG_FUNCTION_ARGS)
 
     CheckDims(a, b);
 
-    PG_RETURN_FLOAT8((double)HalfvecL1Distance(a->dim, a->x, b->x));
+    PG_RETURN_FLOAT8((double)HalfvecL1DistanceDefault(a->dim, a->x, b->x));
 }
 
 /*

@@ -77,12 +77,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93059;
+const uint32 GRAND_VERSION_NUM = 93060;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 HALFVEC_VERSION_NUM = 93060;
 const uint32 IDENTITY_VERSION_NUM = 93059;
 const uint32 DISKANN_INDEX = 93058;
 const uint32 INSTR_TRACE_VERSION_NUMBER = 93053;

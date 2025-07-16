@@ -1940,6 +1940,15 @@ DESCR("sparsevec_cosine_distance");
 DATA(insert OID = 8322 ("<+>"     PGNSP PGUID b f f  8307  8307    701  8322  0 8467 - -));
 DESCR("sparsevec_l1_distance");
 
+DATA(insert OID = 8980 ("<->"     PGNSP PGUID b f f 8306 8306 701 8980 0 8430 - -));
+DESCR("halfvec_l2_distance");
+DATA(insert OID = 8981 ("<#>"     PGNSP PGUID b f f 8306 8306 701 8981 0 halfvec_negative_inner_product - -));
+DESCR("halfvec_negative_inner_product");
+DATA(insert OID = 8982 ("<=>"     PGNSP PGUID b f f 8306 8306 701 8982 0 8544 - -));
+DESCR("halfvec_cosine_distance");
+DATA(insert OID = 8983 ("<+>"     PGNSP PGUID b f f  8306  8306    701  8983  0 8484 - -));
+DESCR("halfvec_l1_distance");
+
 DATA(insert OID = 8323 ("<~>"     PGNSP PGUID b f f 1560 1560 701 8323 0 hamming_distance - -));
 DESCR("hamming_distance");
 DATA(insert OID = 8324 ("<%>"     PGNSP PGUID b f f 1560 1560 701 8324 0 jaccard_distance - -));
@@ -1976,6 +1985,19 @@ DATA(insert OID = 8337 ("="       PGNSP PGUID b f t 8307 8307 16 8337 8338 spars
 DESCR("sparsevec equal");
 DATA(insert OID = 8338 ("<>"      PGNSP PGUID b f f 8307 8307 16 8338 8337 sparsevec_ne neqsel neqjoinsel));
 DESCR("sparsevec unequal");
+
+DATA(insert OID = 8343 ("<"       PGNSP PGUID b f f 8306 8306 16  8345 8346 halfvec_lt scalarltsel scalarltjoinsel));
+DESCR("halfvec less than");
+DATA(insert OID = 8344 ("<="      PGNSP PGUID b f f 8306 8306 16  8346 8345 halfvec_le scalarltsel scalarltjoinsel));
+DESCR("halfvec less than or equal");
+DATA(insert OID = 8345 (">"       PGNSP PGUID b f f 8306 8306 16  8343 8344 halfvec_gt scalargtsel scalargtjoinsel));
+DESCR("halfvec greater than");
+DATA(insert OID = 8346 (">="      PGNSP PGUID b f f 8306 8306 16  8344 8343 halfvec_ge scalargtsel scalargtjoinsel));
+DESCR("halfvec greater than or equal");
+DATA(insert OID = 8347 ("="       PGNSP PGUID b f t 8306 8306 16 8347 8348 halfvec_eq eqsel eqjoinsel));
+DESCR("halfvec equal");
+DATA(insert OID = 8348 ("<>"      PGNSP PGUID b f f 8306 8306 16 8348 8347 halfvec_ne neqsel neqjoinsel));
+DESCR("halfvec unequal");
 
 DATA(insert OID = 6207 ("<&>"       PGNSP PGUID b f f 1009 1009 701 6207 0 bm25_scores_textarr 0 0));
 DESCR("bm25 text array similarity");

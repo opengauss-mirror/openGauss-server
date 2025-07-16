@@ -400,9 +400,11 @@ DATA(insert OID = 8923 (8301  bit_hamming_ops PGNSP PGUID 8394 1560 f 0));
 
 DATA(insert OID = 8977 (403  vector_ops PGNSP PGUID 8392 8305 t 0));
 DATA(insert OID = 8979 (403  sparsevec_ops PGNSP PGUID 8397 8307 t 0));
+DATA(insert OID = 8519 (403  halfvec_ops PGNSP PGUID 8520 8306 t 0));
 
 DATA(insert OID = 8951 (4439  vector_ops PGNSP PGUID 8375 8305 t 0));
 DATA(insert OID = 8952 (4439  sparsevec_ops PGNSP PGUID 8376 8307 t 0));
+DATA(insert OID = 8521 (4439  halfvec_ops PGNSP PGUID 8582 8306 t 0));
 
 /* bm25 index */
 DATA(insert OID = 9737 (8302  bm25_textarr_ops PGNSP PGUID 6509 1009 t 0));

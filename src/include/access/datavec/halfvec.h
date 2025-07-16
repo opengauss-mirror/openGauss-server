@@ -61,18 +61,10 @@
 /* F16C has better performance than _Float16 (on x86-64) */
 #if defined(__F16C__)
 #define F16C_SUPPORT
-#elif defined(__FLT16_MAX__) && !defined(HALFVEC_DISPATCH)
-#define FLT16_SUPPORT
 #endif
 
-// TODO support _Float16
-#ifdef FLT16_SUPPORT
-#define half float
-#define HALF_MAX FLT16_MAX
-#else
 #define half uint16
 #define HALF_MAX 65504
-#endif
 
 #define HALFVEC_MAX_DIM 16000
 
