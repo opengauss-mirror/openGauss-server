@@ -192,7 +192,15 @@ function parse_params() {
     echo "curent instance: name $current_node, ip ${current_ip}, role ${current_role}"
 
     if [ "$ogpassword" == "" ]; then
-        ogpassword=Default@123
+        echo "Please enter a password with at least 8-16 digits containing numbers, letters, and special characters: " 
+        read -s ogpassword
+        if [[ "$ogpassword" =~  ^(.{8,}).*$ ]] &&  [[ "$ogpassword" =~ ^(.*[a-z]+).*$ ]] && [[ "$ogpassword" =~ ^(.*[A-Z]).*$ ]] &&  [[ "$ogpassword" =~ ^(.*[0-9]).*$ ]] && [[ "$ogpassword" =~ ^(.*[#?!@$%^&*-]).*$ ]]; then
+            echo "The supplied ogpassword is meet requirements."
+        else
+            echo "Please Check if the password contains uppercase, lowercase, numbers, special characters, and password length(8).
+                  At least one uppercase, lowercase, numeric, special character."
+            exit 1
+        fi
     fi
 }
 

@@ -27,7 +27,7 @@
 # Define default values
 NETWORK_NAME="opengaussnetwork"
 OG_SUBNET="172.11.0.0/24"
-GS_PASSWORD="Enmo@123"
+GS_PASSWORD=
 MASTER_IP="172.11.0.101"
 MASTER_HOST_PORT="5432"
 MASTER_NODENAME="dn_6001"
@@ -37,6 +37,16 @@ SLAVE_IP=("172.11.0.102" "172.11.0.103" "172.11.0.104" "172.11.0.105" "172.11.0.
 SLAVE_HOST_PORT=("6432" "7432" "8432" "9432" "10432" "11432" "12432" "13432")
 SLAVE_NODENAME=("dn_6002" "dn_6003" "dn_6004" "dn_6005" "dn_6006" "dn_6007" "dn_6008" "dn_6009")
 SLAVE_COUNT=1
+
+echo "Please enter a password with at least 8-16 digits containing numbers, letters, and special characters: " 
+read -s GS_PASSWORD
+if [[ "$GS_PASSWORD" =~  ^(.{8,}).*$ ]] &&  [[ "$GS_PASSWORD" =~ ^(.*[a-z]+).*$ ]] && [[ "$GS_PASSWORD" =~ ^(.*[A-Z]).*$ ]] &&  [[ "$GS_PASSWORD" =~ ^(.*[0-9]).*$ ]] && [[ "$GS_PASSWORD" =~ ^(.*[#?!@$%^&*-]).*$ ]]; then
+    echo "The supplied GS_PASSWORD is meet requirements."
+else 
+    echo "Please Check if the password contains uppercase, lowercase, numbers, special characters, and password length(8).
+          At least one uppercase, lowercase, numeric, special character."
+    exit 1
+fi
 
 ARGS=$(getopt -o h --long OG_SUBNET:,GS_PASSWORD:,MASTER_IP:,MASTER_HOST_PORT:,MASTER_LOCAL_PORT:,MASTER_NODENAME:,VERSION:,SLAVE_COUNT:,NETWORK_NAME: -- "$@")
 if [ $? != 0 ]; then
@@ -101,7 +111,6 @@ done
 
 # Output the set values
 echo "OG_SUBNET set $OG_SUBNET"
-echo "GS_PASSWORD set $GS_PASSWORD"
 echo "MASTER_IP set $MASTER_IP"
 echo "MASTER_HOST_PORT set $MASTER_HOST_PORT"
 echo "MASTER_NODENAME set $MASTER_NODENAME"
