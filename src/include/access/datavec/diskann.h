@@ -1,6 +1,8 @@
 /*
- * Copyright (c) 2025 Huawei Technologies Co.,Ltd.
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT license.
  *
+ * Portions Copyright (c) 2025 Huawei Technologies Co.,Ltd.
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
  * You may obtain a copy of Mulan PSL v2 at:
@@ -31,7 +33,7 @@
 #include "access/datavec/utils.h"
 #include "access/amapi.h"
 
-#define DISKANN_FUNC_NUM  5
+#define DISKANN_FUNC_NUM 5
 
 #define DISKANN_VERSION 1
 #define DISKANN_MAGIC_NUMBER 0x14FF1A7
@@ -52,8 +54,14 @@
 
 #define OUTDEGREE 96
 #define FROZEN_POINT_SIZE 1
+#define DISKANN_DISTANCE_THRESHOLD (1e-9)
+#define INDEXINGMAXC 500
 #define DISKANN_HEAPTIDS 10
 #define DISKANN_METAPAGE_BLKNO 0
+
+#define DISKANN_DIS_L2 1
+#define DISKANN_DIS_IP 2
+#define DISKANN_DIS_COSINE 3
 
 #ifdef DISKANN_BENCH
 #define DiskAnnBench(name, code)                                            \
@@ -73,6 +81,7 @@
 #define DiskAnnPageGetMeta(page) ((DiskAnnMetaPageData*)PageGetContents(page))
 #define DiskAnnPageGetNode(itup) ((DiskAnnNodePage)((char*)(itup) + IndexTupleSize(itup)))
 #define DiskAnnPageGetOpaque(page) ((DiskAnnPageOpaque)PageGetSpecialPointer(page))
+#define DiskAnnPageGetIndexTuple(page) ((IndexTuple)PageGetItem(page, PageGetItemId(page, FirstOffsetNumber)))
 
 struct Neighbor {
     unsigned id;
@@ -97,6 +106,125 @@ struct Neighbor {
     }
 };
 
+typedef struct NeighborPriorityQueue {
+public:
+    size_t _size;
+    size_t _capacity;
+    size_t _cur;
+    VectorList<Neighbor> _data;
+
+    void reserve(size_t capacity)
+    {
+        if (capacity + 1 > _data.size()) {
+            _data.reserve(capacity + 1);
+        }
+        _capacity = capacity;
+    }
+
+    void insert(const Neighbor& nbr)
+    {
+        if (_size == _capacity && _data[_size - 1] < nbr) {
+            return;
+        }
+
+        size_t lo = 0;
+        size_t hi = _size;
+        while (lo < hi) {
+            size_t mid = (lo + hi) >> 1;
+            if (nbr < _data[mid]) {
+                hi = mid;
+                // Make sure the same id isn't inserted into the set
+            } else if (_data[mid].id == nbr.id) {
+                return;
+            } else {
+                lo = mid + 1;
+            }
+        }
+
+        if (lo < _capacity) {
+            std::memmove(&_data[lo + 1], &_data[lo], (_size - lo) * sizeof(Neighbor));
+        }
+        _data[lo] = {nbr.id, nbr.distance};
+        _data[lo].id = nbr.id;
+        _data[lo].distance = nbr.distance;
+        _data[lo].expanded = false;
+        _data[lo].heaptidsLength = nbr.heaptidsLength;
+        for (int i = 0; i < nbr.heaptidsLength; i++) {
+            _data[lo].heaptids[i] = nbr.heaptids[i];
+        }
+        if (_size < _capacity) {
+            _size++;
+        }
+        if (lo < _cur) {
+            _cur = lo;
+        }
+    }
+
+    Neighbor closest_unexpanded()
+    {
+        _data[_cur].expanded = true;
+        size_t pre = _cur;
+        while (_cur < _size && _data[_cur].expanded) {
+            _cur++;
+        }
+        return _data[pre];
+    }
+
+    bool has_unexpanded_node() const
+    {
+        return _cur < _size;
+    }
+
+    size_t size() const
+    {
+        return _size;
+    }
+
+    size_t capacity() const
+    {
+        return _capacity;
+    }
+
+    void remove(size_t idx)
+    {
+        if (_size > idx + 1) {
+            errno_t rc = memmove_s(&_data[idx], ((_size - idx) - 1) * sizeof(Neighbor), &_data[idx + 1],
+                                   ((_size - idx) - 1) * sizeof(Neighbor));
+            securec_check(rc, "\0", "\0");
+        }
+        _size--;
+        if (_cur > idx) {
+            _cur--;
+        }
+        while (_cur < _size && _data[_cur].expanded) {
+            _cur++;
+        }
+    }
+
+    Neighbor& operator[](size_t i)
+    {
+        return _data[i];
+    }
+
+    Neighbor operator[](size_t i) const
+    {
+        return _data[i];
+    }
+
+    void clear()
+    {
+        _size = 0;
+        _cur = 0;
+    }
+} NeighborPriorityQueue;
+
+struct QueryScratch {
+    NeighborPriorityQueue* bestLNodes;
+    float* alignedQuery;
+    double sqrSum;
+    HTAB* insertedNodeHash;
+};
+
 typedef struct DiskAnnTypeInfo {
     int maxDimensions;
     bool supportPQ;
@@ -114,16 +242,57 @@ typedef struct DiskAnnOptions {
     int indexSize;
 } DiskAnnOptions;
 
+typedef struct DiskAnnEdgePageData {
+    uint8 type;
+    uint16 count;
+    BlockNumber nexts[OUTDEGREE];
+    float distance[OUTDEGREE];
+} DiskAnnEdgePageData;
+typedef DiskAnnEdgePageData* DiskAnnEdgePage;
+
 struct DiskAnnGraphStore : public BaseObject {
     DiskAnnGraphStore(Relation index);
     ~DiskAnnGraphStore();
 
-    void GetVector(BlockNumber blkno, float* vec, double* sqr_sum, ItemPointerData* hctid) const;
+    void GetVector(BlockNumber blkno, float* vec, double* sqrSum, ItemPointerData* hctid) const;
+    float GetDistance(BlockNumber blk1, BlockNumber blk2) const;
+    float ComputeDistance(BlockNumber blk1, float* vec, double sqrSum) const;
+    void GetNeighbors(BlockNumber blkno, VectorList<Neighbor>* nbrs);
+    void AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float distance) const;
+    void FlushEdge(DiskAnnEdgePage edge, BlockNumber id) const;
+    bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const;
+    void AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid);
+    bool NeighborExists(const DiskAnnEdgePage edge, BlockNumber id) const;
+    void Clear() const;
+
     Relation m_rel;
     uint32 m_nodeSize;
     uint32 m_edgeSize;
     uint32 m_itemSize;
     double m_dimension;
+};
+
+class DiskAnnGraph : public BaseObject {
+public:
+    DiskAnnGraph(Relation rel, double dim, BlockNumber blkno, DiskAnnGraphStore* graphStore);
+    ~DiskAnnGraph();
+    void Link(BlockNumber blk, int index_size);
+    void IterateToFixedPoint(BlockNumber blk, const uint32 Lsize, BlockNumber frozen, VectorList<Neighbor>* pool,
+                             bool search_invocatio);
+    void PruneNeighbors(BlockNumber blk, VectorList<Neighbor>* pool, VectorList<Neighbor>* pruned_list);
+
+    void OccludeList(BlockNumber location, VectorList<Neighbor>* pool, VectorList<Neighbor>* result, const float alpha);
+
+    void InterInsert(BlockNumber blk, VectorList<Neighbor>* pruned_list);
+    bool FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, BlockNumber blk);
+    void Clear();
+
+private:
+    int functype;
+    DiskAnnGraphStore* graphStore = NULL;
+    QueryScratch* scratch;
+    BlockNumber frozen;
+    bool saturateGraph = false;
 };
 
 typedef struct DiskAnnBuildState {
@@ -195,14 +364,6 @@ typedef struct DiskAnnNodePageData {
 } DiskAnnNodePageData;
 typedef DiskAnnNodePageData* DiskAnnNodePage;
 
-typedef struct DiskAnnEdgePageData {
-    uint8 type;
-    uint16 count;
-    BlockNumber nexts[OUTDEGREE];
-    float distance[OUTDEGREE];
-} DiskAnnEdgePageData;
-typedef DiskAnnEdgePageData* DiskAnnEdgePage;
-
 Datum diskannhandler(PG_FUNCTION_ARGS);
 Datum diskannbuild(PG_FUNCTION_ARGS);
 Datum diskannbuildempty(PG_FUNCTION_ARGS);
@@ -225,6 +386,9 @@ void DiskAnnInitPage(Page page, Size pagesize);
 Page DiskAnnInitRegisterPage(Relation index, Buffer buf);
 void DiskAnnUpdateMetaPage(Relation index, BlockNumber blkno, ForkNumber forkNum);
 void InsertFrozenPoint(Relation index, BlockNumber frozen);
+float ComputeL2DistanceFast(const float* u, const double su, const float* v, const double sv, uint16_t dim);
+void GetEdgeTuple(DiskAnnEdgePage tup, BlockNumber blkno, Relation idx, uint32 nodeSize, uint32 edgeSize);
+int CmpNeighborInfo(const void* a, const void* b);
 void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta);
 
 IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo* indexInfo);
