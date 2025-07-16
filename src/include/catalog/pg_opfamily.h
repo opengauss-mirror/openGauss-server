@@ -213,6 +213,15 @@ DATA(insert OID = 8382 (8300 sparsevec_ip_ops PGNSP PGUID));
 DATA(insert OID = 8383 (8300 sparsevec_cosine_ops PGNSP PGUID));
 DATA(insert OID = 8384 (8300 sparsevec_l1_ops PGNSP PGUID));
 
+DATA(insert OID = 8515 (8300 halfvec_l2_ops PGNSP PGUID));
+DATA(insert OID = 8516 (8300 halfvec_ip_ops PGNSP PGUID));
+DATA(insert OID = 8517 (8300 halfvec_cosine_ops PGNSP PGUID));
+DATA(insert OID = 8518 (8300 halfvec_l1_ops PGNSP PGUID));
+
+DATA(insert OID = 8615 (8301 halfvec_l2_ops PGNSP PGUID));
+DATA(insert OID = 8616 (8301 halfvec_ip_ops PGNSP PGUID));
+DATA(insert OID = 8617 (8301 halfvec_cosine_ops PGNSP PGUID));
+
 DATA(insert OID = 8385 (8301 vector_l2_ops PGNSP PGUID));
 DATA(insert OID = 8386 (8301 vector_ip_ops PGNSP PGUID));
 DATA(insert OID = 8387 (8301 vector_cosine_ops PGNSP PGUID));
