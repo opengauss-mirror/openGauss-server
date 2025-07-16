@@ -206,13 +206,13 @@ main(void)
 	}
 	free(decarr);
 
-    char* desc[] = {"43920000.0000000000000000000000", "53920000.0000000000000000000000"};
+    char* desc[] = {"43920000.0000000000000000000000", "53920000.0000000000000000000000", "720.0"};
     decimal* dDqlx = PGTYPESdecimal_new();
     decimal* dJcjxts = PGTYPESdecimal_new();
     decimal* dtmp = PGTYPESdecimal_new();
     int retdecdiv = 0;
     int index = 0;
-    int breakTime = 2;
+    int breakTime = 3;
     while (index < breakTime) {
         char* number1 = desc[index];
         char* number2 = "360.0";
