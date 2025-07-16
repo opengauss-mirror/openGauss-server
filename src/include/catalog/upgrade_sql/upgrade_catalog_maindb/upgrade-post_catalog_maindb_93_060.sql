@@ -155,6 +155,54 @@ AS 'halfvec_cmp'
 LANGUAGE INTERNAL
 IMMUTABLE STRICT;
 
+DROP FUNCTION IF EXISTS pg_catalog.halfvec_add(halfvec, halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8529;
+CREATE FUNCTION pg_catalog.halfvec_add(halfvec, halfvec)
+RETURNS halfvec
+AS 'halfvec_add'
+LANGUAGE INTERNAL
+STABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.halfvec_sub(halfvec, halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8530;
+CREATE FUNCTION pg_catalog.halfvec_sub(halfvec, halfvec)
+RETURNS halfvec
+AS 'halfvec_sub'
+LANGUAGE INTERNAL
+STABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.halfvec_mul(halfvec, halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8547;
+CREATE FUNCTION pg_catalog.halfvec_mul(halfvec, halfvec)
+RETURNS halfvec
+AS 'halfvec_mul'
+LANGUAGE INTERNAL
+STABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.halfvec_concat(halfvec, halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8548;
+CREATE FUNCTION pg_catalog.halfvec_concat(halfvec, halfvec)
+RETURNS halfvec
+AS 'halfvec_concat'
+LANGUAGE INTERNAL
+STABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.halfvec_avg(_float8) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8549;
+CREATE FUNCTION pg_catalog.halfvec_avg(_float8)
+RETURNS halfvec
+AS 'halfvec_avg'
+LANGUAGE INTERNAL
+STABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.halfvec_accum(_float8, halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8550;
+CREATE FUNCTION pg_catalog.halfvec_accum(_float8, halfvec)
+RETURNS _float8
+AS 'halfvec_accum'
+LANGUAGE INTERNAL
+STABLE STRICT;
+
 DROP FUNCTION IF EXISTS pg_catalog.halfvec_l2_squared_distance(halfvec, halfvec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8644;
 CREATE FUNCTION pg_catalog.halfvec_l2_squared_distance(halfvec, halfvec)
@@ -195,6 +243,89 @@ AS 'halfvec_to_vector'
 LANGUAGE INTERNAL
 IMMUTABLE STRICT;
 
+DROP FUNCTION IF EXISTS pg_catalog.array_to_halfvec(_int4, int4, boolean) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8236;
+CREATE FUNCTION pg_catalog.array_to_halfvec(_int4, int4, boolean)
+RETURNS halfvec
+AS 'array_to_halfvec'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.array_to_halfvec(_float4, int4, boolean) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8237;
+CREATE FUNCTION pg_catalog.array_to_halfvec(_float4, int4, boolean)
+RETURNS halfvec
+AS 'array_to_halfvec'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.array_to_halfvec(_float8, int4, boolean) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8238;
+CREATE FUNCTION pg_catalog.array_to_halfvec(_float8, int4, boolean)
+RETURNS halfvec
+AS 'array_to_halfvec'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.array_to_halfvec(_numeric, int4, boolean) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8239;
+CREATE FUNCTION pg_catalog.array_to_halfvec(_numeric, int4, boolean)
+RETURNS halfvec
+AS 'array_to_halfvec'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.halfvec_to_float4(halfvec, int4, boolean) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8240;
+CREATE FUNCTION pg_catalog.halfvec_to_float4(halfvec, int4, boolean)
+RETURNS _float4
+AS 'halfvec_to_float4'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.vector_dims(halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8528;
+CREATE FUNCTION pg_catalog.vector_dims(halfvec)
+RETURNS int4
+AS 'vector_dims'
+LANGUAGE INTERNAL
+STABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.binary_quantize(halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8545;
+CREATE FUNCTION pg_catalog.binary_quantize(halfvec)
+RETURNS varbit
+AS 'binary_quantize'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.subvector(halfvec, int, int) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8546;
+CREATE FUNCTION pg_catalog.subvector(halfvec, int, int)
+RETURNS halfvec
+AS 'subvector'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.hnsw_halfvec_support(internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8656;
+CREATE FUNCTION pg_catalog.hnsw_halfvec_support(internal)
+RETURNS internal
+AS 'hnsw_halfvec_support'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
+DROP FUNCTION IF EXISTS pg_catalog.ivfflat_halfvec_support(internal) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8657;
+CREATE FUNCTION pg_catalog.ivfflat_halfvec_support(internal)
+RETURNS internal
+AS 'ivfflat_halfvec_support'
+LANGUAGE INTERNAL
+IMMUTABLE STRICT;
+
+COMMENT ON FUNCTION pg_catalog.vector_dims(halfvec) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.binary_quantize(halfvec) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.subvector(halfvec, int, int) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.halfvec_in(cstring, oid, int4) IS 'I/O';
 COMMENT ON FUNCTION pg_catalog.halfvec_out(halfvec) IS 'I/O';
 COMMENT ON FUNCTION pg_catalog.halfvec_typmod_in(_cstring) IS 'NULL';
@@ -213,11 +344,32 @@ COMMENT ON FUNCTION pg_catalog.halfvec_ne(halfvec, halfvec) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.halfvec_ge(halfvec, halfvec) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.halfvec_gt(halfvec, halfvec) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.halfvec_cmp(halfvec, halfvec) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.halfvec_add(halfvec, halfvec) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.halfvec_sub(halfvec, halfvec) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.halfvec_mul(halfvec, halfvec) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.halfvec_concat(halfvec, halfvec) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.halfvec_accum(_float8, halfvec) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.halfvec_avg(_float8) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.halfvec_l2_squared_distance(halfvec, halfvec) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.halfvec_negative_inner_product(halfvec, halfvec) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.halfvec(halfvec, int4, boolean) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.vector_to_halfvec(vector, int4, boolean) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.halfvec_to_vector(halfvec, int4, boolean) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.array_to_halfvec(_int4, int4, boolean) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.array_to_halfvec(_float4, int4, boolean) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.array_to_halfvec(_float8, int4, boolean) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.array_to_halfvec(_numeric, int4, boolean) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.halfvec_to_float4(halfvec, int4, boolean) IS 'NULL';
+
+drop aggregate if exists pg_catalog.avg(halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8243;
+create aggregate pg_catalog.avg(halfvec) (SFUNC=halfvec_accum, STYPE= _float8, finalfunc = halfvec_avg,CFUNC = vector_combine,INITCOND = '{0}', INITCOLLECT='{0}');
+COMMENT ON aggregate pg_catalog.avg(halfvec) IS 'concatenate aggregate input into an array';
+
+drop aggregate if exists pg_catalog.sum(halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8244;
+create aggregate pg_catalog.sum(halfvec) (SFUNC=halfvec_add, STYPE= halfvec, CFUNC = halfvec_add);
+COMMENT ON aggregate pg_catalog.sum(halfvec) IS 'the average (arithmetic mean) as numeric of all bigint values';
 
 DROP CAST IF EXISTS (halfvec AS halfvec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8507;
@@ -233,6 +385,31 @@ DROP CAST IF EXISTS (vector AS halfvec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8508;
 CREATE CAST (vector AS halfvec)
 	WITH FUNCTION vector_to_halfvec(vector, int4, boolean) AS IMPLICIT;
+
+DROP CAST IF EXISTS (_int4 AS halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8598;
+CREATE CAST (_int4 AS halfvec)
+	WITH FUNCTION array_to_halfvec(_int4, int4, boolean) AS ASSIGNMENT;
+
+DROP CAST IF EXISTS (_float4 AS halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8597;
+CREATE CAST (_float4 AS halfvec)
+	WITH FUNCTION array_to_halfvec(_float4, int4, boolean) AS ASSIGNMENT;
+
+DROP CAST IF EXISTS (_float8 AS halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8596;
+CREATE CAST (_float8 AS halfvec)
+	WITH FUNCTION array_to_halfvec(_float8, int4, boolean) AS ASSIGNMENT;
+
+DROP CAST IF EXISTS (_numeric AS halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8595;
+CREATE CAST (_numeric AS halfvec)
+	WITH FUNCTION array_to_halfvec(_numeric, int4, boolean) AS ASSIGNMENT;
+
+DROP CAST IF EXISTS (halfvec AS _float4) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8599;
+CREATE CAST (halfvec AS _float4)
+	WITH FUNCTION halfvec_to_float4(halfvec, int4, boolean) AS IMPLICIT;
 
 DROP OPERATOR IF EXISTS pg_catalog.<->(halfvec, halfvec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8980;
@@ -260,6 +437,33 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8983;
 CREATE OPERATOR pg_catalog.<+>(
 	LEFTARG = halfvec, RIGHTARG = halfvec, PROCEDURE = pg_catalog.l1_distance,
 	COMMUTATOR = '<+>'
+);
+
+DROP OPERATOR IF EXISTS pg_catalog.+(halfvec, halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8340;
+CREATE OPERATOR pg_catalog.+(
+	LEFTARG = halfvec, RIGHTARG = halfvec, PROCEDURE = pg_catalog.halfvec_add,
+	COMMUTATOR = '+'
+);
+
+DROP OPERATOR IF EXISTS pg_catalog.-(halfvec, halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8341;
+CREATE OPERATOR pg_catalog.-(
+	LEFTARG = halfvec, RIGHTARG = halfvec, PROCEDURE = pg_catalog.halfvec_sub,
+	COMMUTATOR = '-'
+);
+
+DROP OPERATOR IF EXISTS pg_catalog.*(halfvec, halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8342;
+CREATE OPERATOR pg_catalog.*(
+	LEFTARG = halfvec, RIGHTARG = halfvec, PROCEDURE = pg_catalog.halfvec_mul,
+	COMMUTATOR = '*'
+);
+
+DROP OPERATOR IF EXISTS pg_catalog.||(halfvec, halfvec) CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8984;
+CREATE OPERATOR pg_catalog.||(
+	LEFTARG = halfvec, RIGHTARG = halfvec, PROCEDURE = pg_catalog.halfvec_concat
 );
 
 DROP OPERATOR IF EXISTS pg_catalog.<(halfvec, halfvec) CASCADE;
@@ -312,6 +516,10 @@ COMMENT ON OPERATOR pg_catalog.<->(halfvec,halfvec) IS 'halfvec_l2_distance';
 COMMENT ON OPERATOR pg_catalog.<#>(halfvec,halfvec) IS 'halfvec_negative_inner_product';
 COMMENT ON OPERATOR pg_catalog.<=>(halfvec,halfvec) IS 'halfvec_cosine_distance';
 COMMENT ON OPERATOR pg_catalog.<+>(halfvec,halfvec) IS 'halfvec_l1_distance';
+COMMENT ON OPERATOR pg_catalog.||(halfvec,halfvec) IS 'halfvec_concat';
+COMMENT ON OPERATOR pg_catalog.+(halfvec,halfvec) IS 'halfvec_add';
+COMMENT ON OPERATOR pg_catalog.-(halfvec,halfvec) IS 'halfvec_sub';
+COMMENT ON OPERATOR pg_catalog.*(halfvec,halfvec) IS 'halfvec_mul';
 COMMENT ON OPERATOR pg_catalog.<(halfvec,halfvec) IS 'halfvec less than';
 COMMENT ON OPERATOR pg_catalog.<=(halfvec,halfvec) IS 'halfvec less than or equal';
 COMMENT ON OPERATOR pg_catalog.>(halfvec,halfvec) IS 'halfvec greater than';
@@ -348,3 +556,89 @@ CREATE OPERATOR CLASS pg_catalog.halfvec_ops DEFAULT
 	OPERATOR 4 pg_catalog.>=(halfvec, halfvec),
 	OPERATOR 5 pg_catalog.>(halfvec, halfvec),
 	FUNCTION 1 halfvec_cmp(halfvec, halfvec);
+
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.halfvec_l2_ops USING hnsw CASCADE; 
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8515;
+CREATE OPERATOR FAMILY pg_catalog.halfvec_l2_ops USING hnsw;
+
+DROP OPERATOR CLASS IF EXISTS pg_catalog.halfvec_l2_ops USING hnsw CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8511;
+CREATE OPERATOR CLASS pg_catalog.halfvec_l2_ops
+	FOR TYPE halfvec USING hnsw AS
+	OPERATOR 1 pg_catalog.<->(halfvec, halfvec) FOR ORDER BY float_ops,
+	FUNCTION 1 pg_catalog.halfvec_l2_squared_distance(halfvec, halfvec),
+	FUNCTION 3 pg_catalog.hnsw_halfvec_support(internal);
+
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.halfvec_ip_ops USING hnsw CASCADE; 
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8516;
+CREATE OPERATOR FAMILY pg_catalog.halfvec_ip_ops USING hnsw;
+
+DROP OPERATOR CLASS IF EXISTS pg_catalog.halfvec_ip_ops USING hnsw CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8512;
+CREATE OPERATOR CLASS pg_catalog.halfvec_ip_ops
+	FOR TYPE halfvec USING hnsw AS
+	OPERATOR 1 pg_catalog.<#>(halfvec, halfvec) FOR ORDER BY float_ops,
+	FUNCTION 1 pg_catalog.halfvec_negative_inner_product(halfvec, halfvec),
+	FUNCTION 3 pg_catalog.hnsw_halfvec_support(internal);
+
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.halfvec_cosine_ops USING hnsw CASCADE; 
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8517;
+CREATE OPERATOR FAMILY pg_catalog.halfvec_cosine_ops USING hnsw;
+
+DROP OPERATOR CLASS IF EXISTS pg_catalog.halfvec_cosine_ops USING hnsw CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8513;
+CREATE OPERATOR CLASS pg_catalog.halfvec_cosine_ops
+	FOR TYPE halfvec USING hnsw AS
+	OPERATOR 1 pg_catalog.<=>(halfvec, halfvec) FOR ORDER BY float_ops,
+	FUNCTION 1 pg_catalog.halfvec_negative_inner_product(halfvec, halfvec),
+	FUNCTION 2 pg_catalog.l2_norm(halfvec),
+	FUNCTION 3 pg_catalog.hnsw_halfvec_support(internal);
+
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.halfvec_l1_ops USING hnsw CASCADE; 
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8518;
+CREATE OPERATOR FAMILY pg_catalog.halfvec_l1_ops USING hnsw;
+
+DROP OPERATOR CLASS IF EXISTS pg_catalog.halfvec_l1_ops USING hnsw CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8514;
+CREATE OPERATOR CLASS pg_catalog.halfvec_l1_ops
+	FOR TYPE halfvec USING hnsw AS
+	OPERATOR 1 pg_catalog.<+>(halfvec, halfvec) FOR ORDER BY float_ops,
+	FUNCTION 1 pg_catalog.l1_distance(halfvec, halfvec),
+	FUNCTION 3 pg_catalog.hnsw_halfvec_support(internal);
+
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.halfvec_l2_ops USING ivfflat CASCADE; 
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8615;
+CREATE OPERATOR FAMILY pg_catalog.halfvec_l2_ops USING ivfflat;
+
+DROP OPERATOR CLASS IF EXISTS pg_catalog.halfvec_l2_ops USING ivfflat CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8621;
+CREATE OPERATOR CLASS pg_catalog.halfvec_l2_ops
+	DEFAULT FOR TYPE halfvec USING ivfflat AS
+	OPERATOR 1 pg_catalog.<->(halfvec, halfvec) FOR ORDER BY float_ops,
+	FUNCTION 1 pg_catalog.halfvec_l2_squared_distance(halfvec, halfvec),
+	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal);
+
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.halfvec_ip_ops USING ivfflat CASCADE; 
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8616;
+CREATE OPERATOR FAMILY pg_catalog.halfvec_ip_ops USING ivfflat;
+
+DROP OPERATOR CLASS IF EXISTS pg_catalog.halfvec_ip_ops USING ivfflat CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8622;
+CREATE OPERATOR CLASS pg_catalog.halfvec_ip_ops
+	FOR TYPE halfvec USING ivfflat AS
+	OPERATOR 1 pg_catalog.<#>(halfvec, halfvec) FOR ORDER BY float_ops,
+	FUNCTION 1 pg_catalog.halfvec_negative_inner_product(halfvec, halfvec),
+	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal);
+
+DROP OPERATOR FAMILY IF EXISTS pg_catalog.halfvec_cosine_ops USING ivfflat CASCADE; 
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8617;
+CREATE OPERATOR FAMILY pg_catalog.halfvec_cosine_ops USING ivfflat;
+
+DROP OPERATOR CLASS IF EXISTS pg_catalog.halfvec_cosine_ops USING ivfflat CASCADE;
+SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8623;
+CREATE OPERATOR CLASS pg_catalog.halfvec_cosine_ops
+	FOR TYPE halfvec USING ivfflat AS
+	OPERATOR 1 pg_catalog.<=>(halfvec, halfvec) FOR ORDER BY float_ops,
+	FUNCTION 1 pg_catalog.halfvec_negative_inner_product(halfvec, halfvec),
+	FUNCTION 2 pg_catalog.l2_norm(halfvec),
+	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal);

@@ -622,4 +622,9 @@ DATA(insert OID = 8507 (8306 8306 8510 i f _null_));
 DATA(insert OID = 8508 (8305 8306 8505 i f _null_));
 DATA(insert OID = 8509 (8306 8305 8506 a f _null_));
 
+DATA(insert OID = 8598 (1007 8306 8236 a f _null_));
+DATA(insert OID = 8597 (1021 8306 8237 a f _null_));
+DATA(insert OID = 8596 (1022 8306 8238 a f _null_));
+DATA(insert OID = 8595 (1231 8306 8239 a f _null_));
+DATA(insert OID = 8599 (8306 1021 8240 i f _null_));
 #endif   /* PG_CAST_H */
