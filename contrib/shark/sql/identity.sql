@@ -170,5 +170,68 @@ select * from sch_1130412.tab_1130412 order by a1;
 drop table sch_1130412.tab_1130412;
 drop schema sch_1130412;
 
+drop table if exists t_identity_0020;
+create table t_identity_0020(id int identity(1,50), name varchar(10));
+
+DO $$ 
+DECLARE last_id date; 
+BEGIN 
+INSERT INTO t_identity_0020 (name) VALUES ('示例'); 
+last_id := scope_identity(); 
+RAISE NOTICE 'NOTICE:新插入记录的 ID 为: %', last_id; 
+END; $$;
+
+DO $$ 
+DECLARE last_id time; 
+BEGIN 
+INSERT INTO t_identity_0020 (name) VALUES ('示例'); 
+last_id := scope_identity(); 
+RAISE NOTICE 'NOTICE:新插入记录的 ID 为: %', last_id; 
+END; $$;
+
+DO $$ DECLARE last_id timestamp; 
+BEGIN 
+INSERT INTO t_identity_0020 (name) VALUES ('示例'); 
+last_id := scope_identity(); 
+RAISE NOTICE 'NOTICE:新插入记录的 ID 为: %', last_id; 
+END; $$;
+
+DO $$ DECLARE last_id varchar2(2); 
+BEGIN 
+INSERT INTO t_identity_0020 (name) VALUES ('示例'); 
+last_id := scope_identity(); 
+RAISE NOTICE 'NOTICE:新插入记录的 ID 为: %', last_id; 
+END; $$;
+
+DO $$ 
+DECLARE last_id date; 
+BEGIN 
+last_id := ident_current('t_identity_0020'); 
+RAISE NOTICE 'NOTICE:新插入记录的 ID 为: %', last_id; 
+END; $$;
+
+DO $$ 
+DECLARE last_id time; 
+BEGIN 
+last_id := ident_current('t_identity_0020'); 
+RAISE NOTICE 'NOTICE:新插入记录的 ID 为: %', last_id; 
+END; $$;
+
+DO $$ 
+DECLARE last_id timestamp;
+BEGIN 
+last_id := ident_current('t_identity_0020'); 
+RAISE NOTICE 'NOTICE:新插入记录的 ID 为: %', last_id; 
+END; $$;
+
+DO $$ 
+DECLARE last_id varchar2(2); 
+BEGIN 
+last_id := ident_current('t_identity_0020'); 
+RAISE NOTICE 'NOTICE:新插入记录的 ID 为: %', last_id; 
+END; $$;
+
+drop table t_identity_0020;
+
 reset current_schema;
 drop schema identity_schema;

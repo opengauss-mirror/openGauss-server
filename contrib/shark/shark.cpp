@@ -27,6 +27,7 @@ static bool is_login(Oid id);
 static RangeVar* pltsqlMakeRangeVarFromName(const char *ident);
 static Oid get_table_identity(Oid tableOid);
 static int128 get_last_value_from_seq(Oid seqid);
+static bool get_seed(Oid seqid, int64* start, int128* res, bool* success);
 
 void _PG_init(void)
 {}
@@ -406,16 +407,25 @@ static bool is_login(Oid id)
 PG_FUNCTION_INFO_V1(get_scope_identity);
 Datum get_scope_identity(PG_FUNCTION_ARGS)
 {
+    int128 res = 0;
+    bool success = false;
+
     PG_TRY();
     {
-        PG_RETURN_INT128(last_scope_identity_value());
+        res = last_scope_identity_value();
+        success = true;
     }
     PG_CATCH();
     {
         FlushErrorState();
-        PG_RETURN_NULL();
     }
     PG_END_TRY();
+
+    if (success) {
+        PG_RETURN_INT128(res);
+    }
+
+    PG_RETURN_NULL();
 }
 
 PG_FUNCTION_INFO_V1(get_ident_current);
@@ -427,6 +437,10 @@ Datum get_ident_current(PG_FUNCTION_ARGS)
     RangeVar* tablerv = nullptr;
     Oid tableOid = InvalidOid;
     Oid seqid = InvalidOid;
+    int128 res  = 0;
+    bool success = false;
+    int64 start = 0;
+    bool seqidSuccess = false;
 
     PG_TRY();
     {
@@ -443,41 +457,52 @@ Datum get_ident_current(PG_FUNCTION_ARGS)
         if (pg_class_aclcheck(tableOid, GetUserId(), ACL_SELECT | ACL_USAGE) != ACLCHECK_OK) {
             PG_RETURN_NULL();
         }
-
         seqid = get_table_identity(tableOid);
 
-        PG_TRY();
-        {
-            /* Check the tuple directly. Catch error if NULL */
-            PG_RETURN_INT128(get_last_value_from_seq(seqid));
-        }
-        PG_CATCH();
-        {
-            FlushErrorState();
-        }
-        PG_END_TRY();
-
-        /* If the relation exists, return the seed */
-        if (seqid != InvalidOid) {
-            int64 uuid = 0;
-            int64 start = 0;
-            int64 increment = 0;
-            int64 maxvalue = 0;
-            int64 minvalue = 0;
-            int64 cachevalue = 0;
-            bool cycle = false;
-            Relation relseq = relation_open(seqid, AccessShareLock);
-            get_sequence_params(relseq, &uuid, &start, &increment, &maxvalue, &minvalue, &cachevalue, &cycle);
-            relation_close(relseq, AccessShareLock);
-            PG_RETURN_INT64(start);
-        }
+        seqidSuccess = get_seed(seqid, &start, &res, &success);
     }
     PG_CATCH();
     {
         FlushErrorState();
     }
     PG_END_TRY();
+    if (success) {
+        PG_RETURN_INT128(res);
+    }
+    if (seqidSuccess) {
+        PG_RETURN_INT64(start);
+    }
     PG_RETURN_NULL();
+}
+
+static bool get_seed(Oid seqid, int64* start, int128* res, bool* success)
+{
+    PG_TRY();
+    {
+        /* Check the tuple directly. Catch error if NULL */
+        *res = get_last_value_from_seq(seqid);
+        *success = true;
+    }
+    PG_CATCH();
+    {
+        FlushErrorState();
+    }
+    PG_END_TRY();
+
+    /* If the relation exists, return the seed */
+    if (seqid != InvalidOid) {
+        int64 uuid = 0;
+        int64 increment = 0;
+        int64 maxvalue = 0;
+        int64 minvalue = 0;
+        int64 cachevalue = 0;
+        bool cycle = false;
+        Relation relseq = relation_open(seqid, AccessShareLock);
+        get_sequence_params(relseq, &uuid, start, &increment, &maxvalue, &minvalue, &cachevalue, &cycle);
+        relation_close(relseq, AccessShareLock);
+        return true;
+    }
+    return false;
 }
 
 /*
