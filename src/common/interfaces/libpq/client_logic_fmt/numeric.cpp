@@ -42,22 +42,26 @@
 #define NUMERIC_IS_SHORT(n) (NUMERIC_FLAGBITS(n) == NUMERIC_SHORT)
 #define NUMERIC_SHORT_SIGN_MASK 0x2000
 #define NUMERIC_DSCALE_MASK 0x3FFF
-#define NUMERIC_SIGN(n)                                                                           \
-    (NUMERIC_IS_SHORT(n)                                                                   \
-         ? (((n)->choice.n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ? NUMERIC_NEG : NUMERIC_POS) \
-         : NUMERIC_FLAGBITS(n))
-#define NUMERIC_DSCALE(n)                                                                           \
-    (NUMERIC_HEADER_IS_SHORT((n))                                                                   \
-         ? ((n)->choice.n_short.n_header & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT \
-         : ((n)->choice.n_long.n_sign_dscale & NUMERIC_DSCALE_MASK))
 
-#define NUMERIC_WEIGHT(n)                                                                                      \
-    (NUMERIC_HEADER_IS_SHORT((n))                                                                              \
-         ? (((n)->choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_SIGN_MASK ? ~NUMERIC_SHORT_WEIGHT_MASK : 0) | \
-            ((n)->choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_MASK))                                        \
-         : ((n)->choice.n_long.n_weight))
+#define SHORT_NUMERIC_N_HEADER(n) ((n)->choice.n_short.n_header)
+#define GET_SHORT_NUMERIC_SIGN(n_header) (((n_header) & NUMERIC_SHORT_SIGN_MASK) ? NUMERIC_NEG : NUMERIC_POS)
+#define GET_LONG_NUMERIC_SIGN(n) NUMERIC_FLAGBITS(n)
+#define NUMERIC_SIGN(n) (NUMERIC_IS_SHORT(n) ? GET_SHORT_NUMERIC_SIGN(SHORT_NUMERIC_N_HEADER(n)) :                  \
+                                                        GET_LONG_NUMERIC_SIGN(n))
+#define GET_SHORT_NUMERIC_DSCALE(n_header) (((n_header) & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT)
+#define GET_LONG_NUMERIC_DSCALE(n) ((n)->choice.n_long.n_sign_dscale & NUMERIC_DSCALE_MASK)
+#define NUMERIC_DSCALE(n)                                                                                           \
+            (NUMERIC_IS_SHORT((n)) ? GET_SHORT_NUMERIC_DSCALE(SHORT_NUMERIC_N_HEADER(n)) : GET_LONG_NUMERIC_DSCALE(n))
+#define GET_SHORT_NUMERIC_WEIGHT(n_header)                                                          \
+            (((n_header) & NUMERIC_SHORT_WEIGHT_SIGN_MASK ? ~NUMERIC_SHORT_WEIGHT_MASK : 0) |               \
+                ((n_header) & NUMERIC_SHORT_WEIGHT_MASK))
+#define GET_LONG_NUMERIC_WEIGHT(n) ((n)->choice.n_long.n_weight)
+#define NUMERIC_WEIGHT(n)                                                                                           \
+            (NUMERIC_IS_SHORT((n)) ? GET_SHORT_NUMERIC_WEIGHT(SHORT_NUMERIC_N_HEADER(n)) : GET_LONG_NUMERIC_WEIGHT(n))
+#define GET_SHORT_NUMERIC_DIGITS(num) ((num)->choice.n_short.n_data)
+#define GET_LONG_NUMERIC_DIGITS(num) ((num)->choice.n_long.n_data)
+#define NUMERIC_DIGITS(num) (NUMERIC_IS_SHORT(num) ? GET_SHORT_NUMERIC_DIGITS(num) : GET_LONG_NUMERIC_DIGITS(num))
 
-#define NUMERIC_DIGITS(num) (NUMERIC_HEADER_IS_SHORT(num) ? (num)->choice.n_short.n_data : (num)->choice.n_long.n_data)
 #define NUMERIC_64 0xD000
 #define NUMERIC_64VALUE(n) (*((int64 *)((n)->choice.n_bi.n_data)))
 #define NUMERIC_SHORT_DSCALE_MASK 0x1F80
