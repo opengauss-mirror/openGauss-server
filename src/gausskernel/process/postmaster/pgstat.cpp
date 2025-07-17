@@ -3746,17 +3746,15 @@ void pgstat_report_queryid(uint64 queryid)
     beentry->st_queryid = queryid;
 }
 
-void pgstat_report_trace_id(knl_u_trace_context *trace_cxt, bool is_report_trace_id)
+void pgstat_report_trace_id(knl_u_trace_context *trace_cxt)
 {
     volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-    if (IS_PGSTATE_TRACK_UNDEFINE)
+    if (IS_PGSTATE_TRACK_UNDEFINE) {
         return;
-    if (is_report_trace_id) {
-        errno_t rc =
-            memcpy_s((void*)beentry->trace_cxt.trace_id, MAX_TRACE_ID_SIZE, trace_cxt->trace_id,
-                     strlen(trace_cxt->trace_id) + 1);
-        securec_check(rc, "\0", "\0");
     }
+    errno_t rc = memcpy_s((void*)beentry->trace_cxt.trace_id, MAX_TRACE_ID_SIZE, trace_cxt->trace_id,
+                 strlen(trace_cxt->trace_id) + 1);
+    securec_check(rc, "\0", "\0");
 }
 
 void pgstat_report_jobid(uint64 jobid)

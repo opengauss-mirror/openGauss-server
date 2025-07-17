@@ -430,8 +430,9 @@ void pq_putemptymessage_noblock(char msgtype)
  */
 int pq_getmsgbyte(StringInfo msg)
 {
-    if (msg->cursor >= msg->len)
+    if (unlikely(msg->cursor >= msg->len)) {
         ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("no data left in message")));
+    }
     return (unsigned char)msg->data[msg->cursor++];
 }
 

@@ -5239,11 +5239,12 @@ void exec_bind_message(BindMessage* pqBindMessage, PreparedStatement *pstmt, Cac
     }
 
     get_param_func(pqBindMessage, psrc, &params, CurrentMemoryContext, CurrentMemoryContext);
+#ifdef ENABLE_MULTIPLE_NODES
     /* u_sess->parser_cxt.param_info is for ddl pbe. If the logic is not ddl pbe, It will not be used*/
     if (t_thrd.proc->workingVersionNum >= DDL_PBE_VERSION_NUM) {
         u_sess->parser_cxt.param_info = (void*)params;
     }
-
+#endif
     /* Done storing stuff in portal's context */
     MemoryContextSwitchTo(oldContext);
 
@@ -5369,7 +5370,7 @@ bool exec_pre_execute_message(const char* portal_name, long max_rows, bool send_
 {
     char completionTag[COMPLETION_TAG_BUFSIZE];
     statement_init_metric_context_if_needs();
-    pgstat_report_trace_id(&u_sess->trace_cxt, true);
+    pgstat_report_trace_id(&u_sess->trace_cxt);
 
     u_sess->pgxc_cxt.DisasterReadArrayInit = false;
 #ifdef ENABLE_MULTIPLE_NODES
@@ -9640,7 +9641,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 const char* query_string = NULL;
                 OgRecordAutoController _local_opt(SRT1_Q);
 
-                pgstat_report_trace_id(&u_sess->trace_cxt, true);
+                pgstat_report_trace_id(&u_sess->trace_cxt);
                 query_string = pq_getmsgstring(&input_message);
                 if (query_string == NULL) {
                     ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),

@@ -1876,7 +1876,7 @@ extern void pgstat_report_smpid(uint32 smpid);
 
 extern void pgstat_report_blocksid(void* waitLockThrd, uint64 blockSessionId);
 
-extern void pgstat_report_trace_id(knl_u_trace_context *trace_cxt, bool is_report_trace_id = false);
+extern void pgstat_report_trace_id(knl_u_trace_context *trace_cxt);
 extern bool pgstat_get_waitlock(uint32 wait_event_info);
 extern const char* pgstat_get_wait_event(uint32 wait_event_info);
 extern const char* pgstat_get_backend_current_activity(ThreadId pid, bool checkUser);
