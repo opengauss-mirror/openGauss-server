@@ -1385,6 +1385,7 @@ static void knl_u_xact_init(knl_u_xact_context* xact_cxt)
     xact_cxt->savePrepareGID = NULL;
 
     xact_cxt->pbe_execute_complete = true;
+    xact_cxt->commit_pending = false;
     xact_cxt->sendSeqDbName = NULL;
     xact_cxt->sendSeqSchmaName = NULL;
     xact_cxt->sendSeqName = NULL;

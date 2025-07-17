@@ -5731,7 +5731,12 @@ void exec_sync_message()
     }
 #endif
     if (u_sess->xact_cxt.pbe_execute_complete == true) {
-        finish_xact_command();
+        if (u_sess->attr.attr_common.enable_beta_features && GetTopTransactionIdIfAny() == InvalidTransactionId) {
+            u_sess->xact_cxt.commit_pending = true;
+        } else {
+            finish_xact_command();
+            u_sess->xact_cxt.commit_pending = false;
+        }
     } else {
         u_sess->xact_cxt.pbe_execute_complete = true;
     }
@@ -9019,6 +9024,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         /* Now we not allow pool_validate interrupts again */
         PREVENT_POOL_VALIDATE_SIGUSR2();
+
+        if (u_sess->xact_cxt.commit_pending) {
+            finish_xact_command();
+            u_sess->xact_cxt.commit_pending = false;
+        }
     }
     oldTryCounter = gstrace_tryblock_entry(&curTryCounter);
 
@@ -9232,6 +9242,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                      */
                     CHECK_FOR_INTERRUPTS();
                     MyProcPort->protocol_config->fn_send_ready_for_query((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
+                    if (u_sess->xact_cxt.commit_pending) {
+                        finish_xact_command();
+                        u_sess->xact_cxt.commit_pending = false;
+                    }
                }
             }
             if (ENABLE_REMOTE_EXECUTE) {

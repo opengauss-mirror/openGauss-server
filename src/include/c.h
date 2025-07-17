@@ -1050,6 +1050,12 @@ static inline void* MemCpy(void* dest, const void* src, Size len)
 #define FORCE_INLINE
 #endif
 #define NO_INLINE __attribute__((noinline))
+// auto-vectorization flags
+// used in function declaration to enable auto-vectorization without the need to add flags to cmake
+#define AUTO_VECTORIZE __attribute__((optimize( \
+    "tree-vectorize", "unswitch-loops", "tree-loop-vectorize", "tree-loop-distribute-patterns", \
+    "split-paths", "tree-slp-vectorize",  "vect-cost-model",  "tree-partial-pre", "peel-loops", \
+    "opt-info-loop-optimized")))
 #endif
 
 // SAL annotations -- remove when compiler annotation header is fixed.

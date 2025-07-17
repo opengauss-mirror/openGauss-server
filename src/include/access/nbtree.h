@@ -1351,7 +1351,10 @@ extern inline IndexBulkDeleteResult *btbulkdelete_internal(IndexVacuumInfo *info
 
 extern inline IndexBulkDeleteResult *btvacuumcleanup_internal(IndexVacuumInfo *info, IndexBulkDeleteResult *stats);
 
-extern inline bool btcanreturn_internal();
+inline bool btcanreturn_internal()
+{
+    return true;
+}
 
 extern inline IndexScanDesc btbeginscan_internal(Relation rel, int nkeys, int norderbys);
 
