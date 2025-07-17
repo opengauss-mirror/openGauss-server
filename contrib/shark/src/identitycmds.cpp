@@ -119,11 +119,6 @@ int128 last_scope_identity_value()
 
     /* Check the current identity in the scope */
     curr_seq_identity = &cxt->lastUsedScopeSeqIdentity->last_used_seq_identity_in_scope;
-    if (!OidIsValid(curr_seq_identity->relid) ||
-        !SearchSysCacheExists1(RELOID, ObjectIdGetDatum(curr_seq_identity->relid))) {
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("last scope identity not yet defined in this session")));
-    }
 
     if (!curr_seq_identity->lastIdentityValid)
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("last identity not valid")));

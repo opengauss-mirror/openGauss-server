@@ -271,6 +271,78 @@ select * from t_identity partition(p4);
 (1 row)
 
 drop table t_identity;
+create table t_identity_0020(id int identity, name varchar(10));
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0020_id_seq_identity" for serial column "t_identity_0020.id"
+insert into t_identity_0020(name) values('zhangsan');
+select scope_identity();
+ scope_identity 
+----------------
+              1
+(1 row)
+
+alter table t_identity_0020 drop column id;
+select scope_identity();
+ scope_identity 
+----------------
+              1
+(1 row)
+
+drop table t_identity_0020;
+create table t_identity_0032(id int identity(1,2), name varchar(10));
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0032_id_seq_identity" for serial column "t_identity_0032.id"
+insert into t_identity_0032(name) values('zhangsan');
+select SCOPE_IDENTITY();
+ scope_identity 
+----------------
+              1
+(1 row)
+
+drop table t_identity_0032;
+select SCOPE_IDENTITY();
+ scope_identity 
+----------------
+              1
+(1 row)
+
+create table t_identity_0020(id int identity, name varchar(10));
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0020_id_seq_identity" for serial column "t_identity_0020.id"
+insert into t_identity_0020(name) values('zhangsan');
+insert into t_identity_0020(name) values('lisi');
+insert into t_identity_0020(name) values('wangwu');
+insert into t_identity_0020(name) values('zhaoliu');
+select scope_identity();
+ scope_identity 
+----------------
+              4
+(1 row)
+
+drop table t_identity_0020;
+select scope_identity();
+ scope_identity 
+----------------
+              4
+(1 row)
+
+create table t_identity_0021(id int identity, name varchar(10));
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0021_id_seq_identity" for serial column "t_identity_0021.id"
+insert into t_identity_0021(name) values('zhangsan');
+insert into t_identity_0021(name) values('lisi');
+insert into t_identity_0021(name) values('wangwu');
+insert into t_identity_0021(name) values('zhaoliu');
+insert into t_identity_0021(name) values('qianqi');
+select scope_identity();
+ scope_identity 
+----------------
+              5
+(1 row)
+
+drop table t_identity_0021;
+select scope_identity();
+ scope_identity 
+----------------
+              5
+(1 row)
+
 CREATE TABLE t_identity(id decimal(12) not null identity(1,1), col text);
 NOTICE:  CREATE TABLE will create implicit sequence "t_identity_id_seq_identity" for serial column "t_identity.id"
 insert into t_identity values('aaa');
