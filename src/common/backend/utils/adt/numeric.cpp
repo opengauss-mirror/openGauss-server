@@ -245,7 +245,7 @@ static int estimate_ln_dweight(NumericVar* var);
 static void ln_var(NumericVar* arg, NumericVar* result, int rscale);
 static void log_var(NumericVar* base, NumericVar* num, NumericVar* result);
 static void power_var(NumericVar* base, NumericVar* exp, NumericVar* result);
-static void power_var_int(NumericVar* base, int exp, NumericVar* result, int rscale);
+static void power_var_int(NumericVar* base, int exp, int exp_dscale, NumericVar* result);
 
 static int cmp_abs(NumericVar* var1, NumericVar* var2);
 static int cmp_abs_common(const NumericDigit* var1digits, int var1ndigits, int var1weight,
@@ -5115,7 +5115,7 @@ static char* get_str_from_var_sci(NumericVar* var, int rscale)
     init_var(&denominator);
     init_var(&significand);
 
-    power_var_int(&const_ten, exponent, &denominator, denom_scale);
+    power_var_int(&const_ten, exponent, denom_scale, &denominator);
     div_var(var, &denominator, &significand, rscale, true);
     sig_out = get_str_from_var(&significand);
 
@@ -5328,7 +5328,8 @@ static void round_float_var(NumericVar* var, int precision)
     /* count all significant digits  */
     all_di = exponent + var->dscale + 1;
 
-    power_var_int(&const_ten, exponent, &denominator, denom_scale);
+    power_var_int(&const_ten, exponent, denom_scale, &denominator);
+    
     if (all_di >= precision) {
         div_var(var, &denominator, &significand, precision - 1, true);
     } else {
@@ -7164,12 +7165,8 @@ static void power_var(NumericVar* base, NumericVar* exp, NumericVar* result)
             /* Test for overflow by reverse-conversion. */
             if ((int64)expval == expval64) {
                 /* Okay, select rscale */
-                rscale = NUMERIC_MIN_SIG_DIGITS;
-                rscale = Max(rscale, base->dscale);
-                rscale = Max(rscale, NUMERIC_MIN_DISPLAY_SCALE);
-                rscale = Min(rscale, NUMERIC_MAX_DISPLAY_SCALE);
 
-                power_var_int(base, expval, result, rscale);
+                power_var_int(base, expval, exp->dscale, result);
                 return;
             }
         }
@@ -7251,17 +7248,72 @@ static void power_var(NumericVar* base, NumericVar* exp, NumericVar* result)
  * power_var_int() -
  *
  *	Raise base to the power of exp, where exp is an integer.
+ *
+ *  Note: this routine chooses dscale of the result
  */
-static void power_var_int(NumericVar* base, int exp, NumericVar* result, int rscale)
+static void power_var_int(NumericVar* base, int exp, int exp_dscale, NumericVar* result)
 {
     double f;
     int p;
     int i;
+    int rscale;
     int sig_digits;
     unsigned int mask;
     bool neg = false;
     NumericVar base_prod;
     int local_rscale;
+
+	/*
+	 * Choose the result scale.  For this we need an estimate of the decimal
+	 * weight of the result, which we obtain by approximating using double
+	 * precision arithmetic.
+	 *
+	 * We also perform crude overflow/underflow tests here so that we can exit
+	 * early if the result is sure to overflow/underflow, and to guard against
+	 * integer overflow when choosing the result scale.
+	 */
+	if (base->ndigits != 0) {
+		/*----------
+		 * Choose f (double) and p (int) such that base ~= f * 10^p.
+		 * Then log10(result) = log10(base^exp) ~= exp * (log10(f) + p).
+		 *----------
+		 */
+		f = base->digits[0];
+		p = base->weight * DEC_DIGITS;
+
+		for (i = 1; i < base->ndigits && i * DEC_DIGITS < 16; i++) {
+			f = f * NBASE + base->digits[i];
+			p -= DEC_DIGITS;
+		}
+
+		f = exp * (log10(f) + p);	/* approximate decimal result weight */
+	} else {
+        f = 0;					/* result is 0 or 1 (weight 0), or error */
+    }
+
+	/* overflow/underflow tests with fuzz factors */
+	if (f > (SHRT_MAX + 1) * DEC_DIGITS) {
+		ereport(ERROR,
+				(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+				 errmsg("value overflows numeric format")));
+    }
+	if (f + 1 < -NUMERIC_MAX_DISPLAY_SCALE) {
+		zero_var(result);
+		result->dscale = NUMERIC_MAX_DISPLAY_SCALE;
+		return;
+	}
+
+	/*
+	 * Choose the result scale in the same way as power_var(), so it has at
+	 * least NUMERIC_MIN_SIG_DIGITS significant digits and is not less than
+	 * either input's display scale.
+	 */
+	rscale = NUMERIC_MIN_SIG_DIGITS - (int) f;
+	rscale = Max(rscale, base->dscale);
+	rscale = Max(rscale, exp_dscale);
+	rscale = Max(rscale, NUMERIC_MIN_DISPLAY_SCALE);
+	rscale = Min(rscale, NUMERIC_MAX_DISPLAY_SCALE);
+
 
     /* Handle some common special cases, as well as corner cases */
     switch (exp) {
@@ -7304,39 +7356,12 @@ static void power_var_int(NumericVar* base, int exp, NumericVar* result, int rsc
      * The general case repeatedly multiplies base according to the bit
      * pattern of exp.
      *
-     * First we need to estimate the weight of the result so that we know how
-     * many significant digits are needed.
      */
-    f = base->digits[0];
-    p = base->weight * DEC_DIGITS;
-
-    for (i = 1; i < base->ndigits && i * DEC_DIGITS < 16; i++) {
-        f = f * NBASE + base->digits[i];
-        p -= DEC_DIGITS;
-    }
-
-    /* ----------
-     * We have base ~= f * 10^p
-     * so log10(result) = log10(base^exp) ~= exp * (log10(f) + p)
-     * ----------
-     */
-    f = exp * (log10(f) + p);
-
-    /*
-     * Apply crude overflow/underflow tests so we can exit early if the result
-     * certainly will overflow/underflow.
-     */
-    if (f > 3 * SHRT_MAX * DEC_DIGITS)
-        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("value overflows numeric format")));
-    if (f + 1 < -rscale || f + 1 < -NUMERIC_MAX_DISPLAY_SCALE) {
-        zero_var(result);
-        result->dscale = rscale;
-        return;
-    }
-
+    
     /*
      * Approximate number of significant digits in the result.  Note that the
-     * underflow test above means that this is necessarily >= 0.
+     * underflow test above, together with the choice of rscale, ensures that
+     * this approximation is necessarily > 0.
      */
     sig_digits = 1 + rscale + (int)f;
 
