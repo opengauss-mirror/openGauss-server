@@ -3048,6 +3048,7 @@ typedef struct knl_t_buf_context {
     char show_tcp_keepalives_interval_buf[16];
     char show_tcp_keepalives_count_buf[16];
     char show_unix_socket_permissions_buf[8];
+    char show_tcp_user_timeout_buf[16];
 } knl_t_buf_context;
 #define SQL_STATE_BUF_LEN 12
 
