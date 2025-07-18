@@ -156,6 +156,38 @@ select * from t_identity partition(p3);
 select * from t_identity partition(p4);
 drop table t_identity;
 
+create table t_identity_0020(id int identity, name varchar(10));
+insert into t_identity_0020(name) values('zhangsan');
+select scope_identity();
+alter table t_identity_0020 drop column id;
+select scope_identity();
+drop table t_identity_0020;
+
+create table t_identity_0032(id int identity(1,2), name varchar(10));
+insert into t_identity_0032(name) values('zhangsan');
+select SCOPE_IDENTITY();
+drop table t_identity_0032;
+select SCOPE_IDENTITY();
+
+create table t_identity_0020(id int identity, name varchar(10));
+insert into t_identity_0020(name) values('zhangsan');
+insert into t_identity_0020(name) values('lisi');
+insert into t_identity_0020(name) values('wangwu');
+insert into t_identity_0020(name) values('zhaoliu');
+select scope_identity();
+drop table t_identity_0020;
+select scope_identity();
+
+create table t_identity_0021(id int identity, name varchar(10));
+insert into t_identity_0021(name) values('zhangsan');
+insert into t_identity_0021(name) values('lisi');
+insert into t_identity_0021(name) values('wangwu');
+insert into t_identity_0021(name) values('zhaoliu');
+insert into t_identity_0021(name) values('qianqi');
+select scope_identity();
+drop table t_identity_0021;
+select scope_identity();
+
 CREATE TABLE t_identity(id decimal(12) not null identity(1,1), col text);
 insert into t_identity values('aaa');
 select * from t_identity;
