@@ -884,6 +884,17 @@ endif
 # append zlib for compression: zlib
 LDFLAGS += -L$(ZLIB_LIB_PATH) -I$(ZLIB_INCLUDE_PATH)
 
+# jemalloc
+ifeq ($(enable_jemalloc), yes)
+    LDFLAGS += -L$(JEMALLOC_LIB_PATH)
+    CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
+endif
+
+ifeq ($(enable_jemalloc_debug), yes)
+    LDFLAGS += -L$(JEMALLOC_LIB_PATH)
+    CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
+endif
+
 #append zstd for compression: zstd
 LDFLAGS += -L$(ZSTD_LIB_PATH) -I$(ZSTD_INCLUDE_PATH)
 
@@ -1082,17 +1093,6 @@ rpathdir = $(libdir)
 
 ifeq ($(enable_rpath), yes)
 LDFLAGS += $(rpath)
-endif
-
-# jemalloc
-ifeq ($(enable_jemalloc), yes)
-    LDFLAGS += -L$(JEMALLOC_LIB_PATH)
-    CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
-endif
-
-ifeq ($(enable_jemalloc_debug), yes)
-    LDFLAGS += -L$(JEMALLOC_LIB_PATH)
-    CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
 endif
 
 ##########################################################################
