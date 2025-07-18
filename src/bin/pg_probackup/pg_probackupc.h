@@ -117,9 +117,6 @@ extern const char *pgdata_exclude_dir[];
 extern bool is_valid_cmd(char *cmd);
 extern void delete_backup_directory(char *instance_name);
 
-extern char* TS_DIR_WITH_PGXC;
-extern char* NODE_NAME_WITH_PGXC;
-
 /* in backup.c */
 extern int do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
                      bool no_validate, bool no_sync, bool backup_logs, bool backup_replslots);
@@ -447,8 +444,6 @@ extern void pretty_time_interval(double time, char *buf, size_t len);
 extern PGconn *pgdata_basic_setup(const ConnectionOptions conn_opt, PGNodeInfo *nodeInfo);
 extern void check_system_identifiers(PGconn *conn, const char *pgdata);
 extern void parse_filelist_filenames(parray *files, const char *root);
-
-extern void pg_free_callback(bool fatal, void *userdata);
 
 /* in ptrack.c */
 extern parray * make_pagemap_from_ptrack(parray* files,
