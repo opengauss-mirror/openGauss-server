@@ -951,45 +951,81 @@ void PortalSetResultFormat(Portal portal, int nFormats, int16* formats)
     }
 }
 
+typedef enum {
+    UNKNOWN = -1,
+    INSERT,
+    UPDATE,
+    COPY,
+    CREATE_TABLE,
+    ALTER_TABLE,
+    CREATE_INDEX,
+    REINDEX_INDEX,
+    CLUSTER,
+    VACUUM,
+    ANALYZE,
+    CREATE_TABLE_AS
+} CommandTag;
+
+/* keep sequence same as CommandTag */
+static const char* g_commanTagList[] = {
+    "INSERT",
+    "UPDATE",
+    "COPY",
+    "CREATE TABLE",
+    "ALTER TABLE",
+    "CREATE INDEX",
+    "REINDEX INDEX",
+    "CLUSTER",
+    "VACUUM",
+    "ANALYZE",
+    "CREATE TABLE AS"
+};
+static const int COMMAN_TAG_LIST_LEN = sizeof(g_commanTagList) / sizeof(char*);
+
+static inline CommandTag GetCommandTag(const char* tag)
+{
+    for (int i = 0; i < COMMAN_TAG_LIST_LEN; i++) {
+        if (strcmp(tag, g_commanTagList[i]) == 0) {
+            return (CommandTag)i;
+        }
+    }
+    return UNKNOWN;
+}
+
 void PotalSetIoState(Portal portal)
 {
-    if (strcmp(portal->commandTag, "COPY") == 0)
-        pgstat_set_io_state(IOSTATE_WRITE);
+    CommandTag commandTag = GetCommandTag(portal->commandTag);
 
-    if (strcmp(portal->commandTag, "VACUUM") == 0)
-        pgstat_set_io_state(IOSTATE_VACUUM);
-
-    if (strcmp(portal->commandTag, "UPDATE") == 0)
-        pgstat_set_io_state(IOSTATE_WRITE);
-
-    if (strcmp(portal->commandTag, "INSERT") == 0)
-        pgstat_set_io_state(IOSTATE_WRITE);
-
-    if (strcmp(portal->commandTag, "CREATE TABLE") == 0)
-        pgstat_set_io_state(IOSTATE_WRITE);
-
-    if (strcmp(portal->commandTag, "ALTER TABLE") == 0)
-        pgstat_set_io_state(IOSTATE_WRITE);
-
-    if (strcmp(portal->commandTag, "CREATE INDEX") == 0)
-        pgstat_set_io_state(IOSTATE_WRITE);
-
-    if (strcmp(portal->commandTag, "REINDEX INDEX") == 0)
-        pgstat_set_io_state(IOSTATE_WRITE);
-
-    if (strcmp(portal->commandTag, "CLUSTER") == 0)
-        pgstat_set_io_state(IOSTATE_WRITE);
-
-    if (strcmp(portal->commandTag, "ANALYZE") == 0)
-        pgstat_set_io_state(IOSTATE_READ);
-
-    /* set write for backend status for the thread, we will use it to check default transaction readOnly */
     pgstat_set_stmt_tag(STMTTAG_NONE);
-    if (strcmp(portal->commandTag, "INSERT") == 0 || strcmp(portal->commandTag, "UPDATE") == 0 ||
-        strcmp(portal->commandTag, "CREATE TABLE AS") == 0 || strcmp(portal->commandTag, "CREATE INDEX") == 0 ||
-        strcmp(portal->commandTag, "ALTER TABLE") == 0 || strcmp(portal->commandTag, "CLUSTER") == 0)
-        pgstat_set_stmt_tag(STMTTAG_WRITE);
-
+    switch (commandTag) {
+        case CREATE_TABLE_AS:
+            pgstat_set_stmt_tag(STMTTAG_WRITE);
+            break;
+        case CREATE_INDEX:
+        case ALTER_TABLE:
+        case UPDATE:
+        case INSERT:
+        case CLUSTER: {
+            pgstat_set_stmt_tag(STMTTAG_WRITE);
+        }
+        /* fall through */
+        case COPY:
+        case CREATE_TABLE:
+        case REINDEX_INDEX: {
+            pgstat_set_io_state(IOSTATE_WRITE);
+            break;
+        }
+        case VACUUM: {
+            pgstat_set_io_state(IOSTATE_VACUUM);
+            break;
+        }
+        case ANALYZE: {
+            pgstat_set_io_state(IOSTATE_READ);
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 /*
@@ -1806,7 +1842,7 @@ static void PortalRunMulti(
     ListCell* stmtlist_item = NULL;
     OgRecordAutoController _local_opt(EXECUTION_TIME);
     PGSTAT_INIT_TIME_RECORD();
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     CombineTag combine;
 
     combine.cmdType = CMD_UNKNOWN;
@@ -1905,7 +1941,7 @@ static void PortalRunMulti(
 #else
                 ProcessQuery(pstmt, portal->sourceText, portal->portalParams, dest, completionTag);
 #endif
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
                 /* it's special for INSERT */
                 if (IS_PGXC_COORDINATOR && pstmt->commandType == CMD_INSERT)
                     HandleCmdComplete(pstmt->commandType, &combine, completionTag, strlen(completionTag));
@@ -1989,7 +2025,7 @@ static void PortalRunMulti(
      * one row was updated.  See QueryRewrite(), step 3, for details.
      */
     errno_t errorno = EOK;
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && completionTag != NULL && combine.data[0] != '\0') {
         errorno = strcpy_s(completionTag, COMPLETION_TAG_BUFSIZE, combine.data);
         securec_check(errorno, "\0", "\0");

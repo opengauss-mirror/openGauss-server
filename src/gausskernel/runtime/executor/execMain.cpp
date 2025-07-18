@@ -173,29 +173,22 @@ extern void CheckWriteCommandWithDisableIndex(PlannedStmt *plannedstmt);
  */
 static void report_iud_time(QueryDesc *query)
 {
-    ListCell *lc = NULL;
-    Oid rid;
-    if (u_sess->attr.attr_sql.enable_save_datachanged_timestamp == false) {
+    if (u_sess->attr.attr_sql.enable_save_datachanged_timestamp == false ||
+        query->estate->es_num_result_relations <= 0) {
         return;
     }
 
-    PlannedStmt *plannedstmt = query->plannedstmt;
-    if (plannedstmt->resultRelations) {
-        foreach (lc, (List*)linitial(plannedstmt->resultRelations)) {
-            Index idx = lfirst_int(lc);
-            rid = getrelid(idx, plannedstmt->rtable);
-            if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
-                continue;
+    for (int i = 0; i < query->estate->es_num_result_relations; i++) {
+        Relation rel = query->estate->es_result_relations[i].ri_RelationDesc;
+        Oid rid = rel->rd_id;
+        if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
+            continue;
+        }
+        if (rel->rd_rel->relkind == RELKIND_RELATION) {
+            if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
+                rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
+                pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
             }
-            Relation rel = NULL;
-            rel = heap_open(rid, AccessShareLock);
-            if (rel->rd_rel->relkind == RELKIND_RELATION) {
-                if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
-                    rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
-                    pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
-                }
-            }
-            heap_close(rel, AccessShareLock);
         }
     }
 }
