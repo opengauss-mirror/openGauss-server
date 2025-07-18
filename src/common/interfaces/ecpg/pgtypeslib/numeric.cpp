@@ -930,6 +930,13 @@ static int select_div_scale(numeric* var1, numeric* var2, int* rscale)
     return res_dscale;
 }
 
+static void Initial_Numeric_Local(numeric *var1)
+{
+    int idx;
+    int total = sizeof(var1->local)/sizeof(var1->local[0]);
+    for (idx = 0; idx < total; idx++) { var1->local[idx] = 0; }
+}
+
 int PGTYPESnumeric_div(numeric* var1, numeric* var2, numeric* result)
 {
     NumericDigit* res_digits = NULL;
@@ -986,8 +993,10 @@ int PGTYPESnumeric_div(numeric* var1, numeric* var2, numeric* result)
     /*
      * Initialize local variables
      */
+    Initial_Numeric_Local(&dividend);
     init_numeric(&dividend);
     for (i = 1; i < 10; i++) {
+        Initial_Numeric_Local(&divisor[i]);
         init_numeric(&divisor[i]);
 
         divisor[i].buf = NULL;
