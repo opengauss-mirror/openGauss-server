@@ -29,6 +29,7 @@
 #include "storage/ipc.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/rack_mem_shm.h"
+#include "storage/matrix_mem.h"
 
 namespace smb_recovery {
 
@@ -600,6 +601,12 @@ static void MountFailedCallBack()
 static void SMBWriterMemMount()
 {
     ereport(LOG, (errmsg("SMB start init Mem.")));
+
+    if (!g_matrixMemFunc.matrix_mem_inited) {
+        MountFailedCallBack();
+        return;
+    }
+
     g_instance.smb_cxt.mount_end_flag = false;
     /* meta data */
     g_instance.smb_cxt.SMBBufMem[0] = RackMemShmMmap(nullptr, MAX_RACK_ALLOC_SIZE,
@@ -777,7 +784,7 @@ void SMBWriterMain(void)
     while (pg_atomic_read_u32(&g_instance.smb_cxt.curSMBWriterIndex) != 0) {
         pg_usleep(10000L);
     }
-    if (g_instance.smb_cxt.SMBBufMgr != nullptr) {
+    if (g_matrixMemFunc.matrix_mem_inited && g_instance.smb_cxt.SMBBufMgr != nullptr) {
         SMBWriterMemUnmmap();
     }
     g_instance.smb_cxt.SMBWriterPID = 0;
