@@ -109,7 +109,9 @@ void ChecksumForZeroPadding(uint32 *sums, const uint32 *dataArr, uint32 currentL
     }
 }
 
-uint32 pg_checksum_block(char* data, uint32 size)
+#pragma GCC push_options
+#pragma GCC optimize ("unroll-loops")
+uint32 AUTO_VECTORIZE pg_checksum_block(char* data, uint32 size)
 {
     uint32 sums[N_SUMS];
     uint32* dataArr = (uint32*)data;
@@ -148,6 +150,7 @@ uint32 pg_checksum_block(char* data, uint32 size)
     }
 
     return result;
+#pragma GCC pop_options
 }
 
 /*

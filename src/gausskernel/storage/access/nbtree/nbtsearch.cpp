@@ -305,6 +305,31 @@ static int btree_binsrch_posting(BTScanInsert key, Page page, OffsetNumber offnu
 	return low;
 }
 
+template <bool has_scantid>
+OffsetNumber _bt_binsrch_internal(Relation rel, Page page, BTScanInsert key, OffsetNumber low, OffsetNumber high,
+                                  int *posting_off)
+{
+    int32 cmpval = (int32)(!key->nextkey); /* select comparison value */
+    int32 result;
+    while (high > low) {
+        OffsetNumber mid = (uint16)(((uint32)low + (uint32)high) >> 1);
+
+        /* We have low <= mid < high, so mid points at a real slot */
+        result = _bt_compare(rel, key, page, mid);
+        if (result >= cmpval) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+
+        if (has_scantid && result == 0) {
+            *posting_off = btree_binsrch_posting(key, page, mid);
+        }
+    }
+
+    return low;
+}
+
 /*
  *	_bt_binsrch() -- Do a binary search for a key on a particular page.
  *
@@ -337,7 +362,6 @@ OffsetNumber _bt_binsrch(Relation rel, BTScanInsert key, Buffer buf, int *postin
     Page page;
     BTPageOpaqueInternal opaque;
     OffsetNumber low, high;
-    int32 result, cmpval;
 
     page = BufferGetPage(buf);
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -354,8 +378,9 @@ OffsetNumber _bt_binsrch(Relation rel, BTScanInsert key, Buffer buf, int *postin
      * This can never happen on an internal page, however, since they are
      * never empty (an internal page must have children).
      */
-    if (high < low)
+    if (unlikely(high < low)) {
         return low;
+    }
 
     /*
      * Binary search to find the first key on the page >= scan key, or first
@@ -371,21 +396,10 @@ OffsetNumber _bt_binsrch(Relation rel, BTScanInsert key, Buffer buf, int *postin
      */
     high++; /* establish the loop invariant for high */
 
-    cmpval = (int32)(!key->nextkey); /* select comparison value */
-
-    while (high > low) {
-        OffsetNumber mid = (uint16)(((int32)low + (int32)high) / 2);
-
-        /* We have low <= mid < high, so mid points at a real slot */
-        result = _bt_compare(rel, key, page, mid);
-        if (result >= cmpval)
-            low = mid + 1;
-        else
-            high = mid;
-
-        if (result == 0 && key->scantid != NULL) {
-            *posting_off = btree_binsrch_posting(key, page, mid);
-        }
+    if (likely(key->scantid == NULL)) {
+        low = _bt_binsrch_internal<false>(rel, page, key, low, high, posting_off);
+    } else {
+        low = _bt_binsrch_internal<true>(rel, page, key, low, high, posting_off);
     }
 
     /*
@@ -443,7 +457,9 @@ int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum
     /*
      * Check tuple has correct number of attributes.
      */
-    _bt_check_natts_correct(rel, key->heapkeyspace, page, offnum);
+    if (!u_sess->attr.attr_common.enable_indexscan_optimization) {
+        _bt_check_natts_correct(rel, key->heapkeyspace, page, offnum);
+    }
 
     /*
      * Force result ">" if target item is first data item on an internal page

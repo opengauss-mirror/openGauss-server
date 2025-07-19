@@ -1373,11 +1373,6 @@ Datum btcanreturn(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(true);
 }
 
-bool btcanreturn_internal()
-{
-    return true;
-}
-
 /* btmerge() -- merge 2 or more ordered btree-indexes together */
 Datum btmerge(PG_FUNCTION_ARGS)
 {
