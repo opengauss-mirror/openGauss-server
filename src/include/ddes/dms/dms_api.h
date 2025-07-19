@@ -36,7 +36,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           185
+#define DMS_LOCAL_VERSION           179
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -110,10 +110,6 @@ typedef enum en_dms_dr_type {
     DMS_DR_TYPE_SS_LINK = 29,
     DMS_DR_TYPE_TX_ALCK = 30,
     DMS_DR_TYPE_SE_ALCK = 31,
-    DMS_DR_TYPE_PCRD_LATCH = 32,
-    DMS_DR_TYPE_PCRD_LIST_LATCH = 33,
-    DMS_DR_TYPE_PCRD_SPIN = 34,
-    DMS_DR_TYPE_ROWGROUP = 35,
     DMS_DR_TYPE_MAX,
 } dms_dr_type_t;
 
@@ -263,13 +259,15 @@ typedef struct st_dms_cr_assist_t {
     dms_cr_status_t status;                 /* OUT parameter */
 } dms_cr_assist_t;
 
-typedef struct st_dms_drlatch {
-    dms_drid_t         drid;
-    void              *handle;
-    unsigned long long version;
-} dms_drlatch_t;
+typedef struct st_dms_drlock {
+    dms_drid_t      drid;
+    void           *handle;
+} dms_drlock_t;
 
-typedef dms_drlatch_t dms_drlock_t;
+typedef struct st_dms_drlatch {
+    dms_drid_t      drid;
+    void           *handle;
+} dms_drlatch_t;
 
 typedef struct st_dms_xid_ctx {
     unsigned long long xid;
@@ -321,14 +319,10 @@ typedef struct st_dms_context {
         dms_process_context_t proc_ctx;
     };
     dms_session_e sess_type;  // request page: recovery session flag
-    unsigned char is_try      : 1;
-    unsigned char is_upgrade  : 1;
-    unsigned char is_timeout  : 1;   // used for ask remote page
-    unsigned char unused      : 5;
+    unsigned char is_try;
     unsigned char type;
+    unsigned char is_upgrade;
     unsigned short len;
-    unsigned char curr_mode;    // used for table lock
-    unsigned char intercept_type;
     unsigned long long ctx_ruid; /* this ruid indicates one message ack is pending recv */
     union {
         char resid[DMS_RESID_SIZE];
@@ -339,7 +333,11 @@ typedef struct st_dms_context {
         unsigned char edp_inst;
         drc_global_xid_t global_xid;
     };
-    void *check_handle;
+    void *stat;
+    void *stat_instance;
+    unsigned long long wait_usecs;
+    unsigned char intercept_type;
+    unsigned char curr_mode;    // used for table lock
     unsigned long long max_wait_rsp_time; // unit ms. under some circumstances, dms need get rsp quickly for timeout.
 } dms_context_t;
 
@@ -623,14 +621,8 @@ typedef enum en_dms_wait_event {
     DMS_EVT_REQ_CKPT,
     DMS_EVT_PROC_GENERIC_REQ,
     DMS_EVT_PROC_REFORM_REQ,
-    DMS_EVT_DCS_TRANSFER_PAGE_LSNDWAIT,
+    DMS_EVT_DCS_TRANSTER_PAGE_LSNDWAIT,
     DMS_EVT_DCS_INVALID_DRC_LSNDWAIT,
-    DMS_EVT_DRC_RECYCLE,
-    DMS_EVT_DRC_NOT_ENOUGH,
-    DMS_EVT_DRC_FROZEN,
-    DMS_EVT_DRC_ENQ_ITEM_NOT_ENOUGH,
-    DMS_EVT_DRC_ENQ_ITEM_CONFLICT,
-    DMS_EVT_REQ_IMCSTORE_DELTA,
 
 // add new enum at tail, or make adaptations to openGauss
     DMS_EVT_COUNT,
@@ -772,7 +764,6 @@ typedef struct st_dv_drc_buf_info {
     unsigned char           converting_req_info_curr_mode;
     unsigned char           converting_req_info_req_mode;
     unsigned char           is_valid;
-    unsigned char           hash_key;
 } dv_drc_buf_info;
 
 typedef struct st_dms_reform_start_context {
@@ -797,7 +788,7 @@ typedef struct st_dms_broadcast_info {
     unsigned long long inst_map; /* when scope is DMS_BROADCAST_SPECIFY_LIST, inst_map is used */
     unsigned int timeout;
     unsigned char handle_recv_msg;
-    unsigned char check_session_kill;
+    unsigned char check_session_kill; 
 } dms_broadcast_info_t;
 
 typedef enum en_dms_stat_cmd {
@@ -819,11 +810,6 @@ typedef struct st_dms_stat_by_cmd {
 typedef struct st_dms_msg_stats {
     dms_stat_by_cmd_t stat_cmd[DMS_STAT_CMD_COUNT];
 } dms_msg_stats_t;
-
-typedef enum en_dms_reform_event {
-    DMS_REFORM_EVENT_INVALID = 0,
-    DMS_REFORM_EVENT_AFTER_PUSH_GCV,
-} dms_reform_event_e;
 
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
 typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stable, unsigned char reformer_id,
@@ -850,11 +836,9 @@ typedef int(*dms_tx_rollback_start)(void *db_handle, unsigned char inst_id);
 typedef int(*dms_convert_to_readwrite)(void *db_handle);
 typedef int(*dms_tx_rollback_finish)(void *db_handle, unsigned char inst_id);
 typedef unsigned char(*dms_recovery_in_progress)(void *db_handle);
-typedef unsigned int(*dms_get_page_hash_val)(const char pageid[DMS_PAGEID_SIZE],
-    unsigned char group_hash, unsigned int *hash_key, unsigned int *hash_val);
+typedef unsigned int(*dms_get_page_hash_val)(const char pageid[DMS_PAGEID_SIZE]);
 typedef unsigned int(*dms_inc_and_get_srsn)(unsigned int sess_id);
 typedef unsigned long long(*dms_get_page_lsn)(const dms_buf_ctrl_t *dms_ctrl);
-typedef int(*dms_set_flushed_lsn)(dms_buf_ctrl_t *dms_ctrl);
 typedef int(*dms_set_buf_load_status)(dms_buf_ctrl_t *dms_ctrl, dms_buf_load_status_t dms_buf_load_status);
 typedef void(*dms_stats_buf)(void *db_handle, dms_buf_ctrl_t *dms_ctrl, dms_buf_stats_type_e stats_type);
 typedef void(*dms_update_global_lsn)(void *db_handle, unsigned long long lamport_lsn);
@@ -943,7 +927,6 @@ typedef int (*dms_drc_xa_res_rebuild)(void *db_handle, unsigned char thread_inde
 typedef void (*dms_reform_shrink_xa_rms)(void *db_handle, unsigned char undo_seg_id);
 typedef void (*dms_ckpt_unblock_rcy_local)(void *db_handle, unsigned long long list_in);
 typedef int (*dms_drc_rebuild_parallel)(void *db_handle, unsigned char thread_index, unsigned char thread_num);
-typedef int (*dms_reform_event_notify)(void *db_handle, dms_reform_event_e event);
 
 // for openGauss
 typedef void (*dms_thread_init_t)(unsigned char need_startup, char **reg_data);
@@ -1037,14 +1020,6 @@ typedef unsigned int (*dms_check_is_maintain)(void);
 typedef dms_session_e(*dms_get_session_type)(unsigned int sid);
 typedef unsigned char(*dms_get_intercept_type)(unsigned int sid);
 typedef unsigned char(*dms_db_in_rollback)(void *db_handle);
-typedef void (*dms_get_inst_cnt)(void *db_handle, unsigned int *inst_count, unsigned long long int *inst_map);
-typedef int (*dms_check_if_reform_session)(void *db_handle);
-typedef void(*dms_inc_buffer_remote_reads)(void *db_handle);
-typedef void(*dms_begin_event_wait)(unsigned int sid, unsigned int dms_event, unsigned char immediate);
-typedef void(*dms_end_event_wait)(unsigned int sid, unsigned int prev_dms_event, unsigned int dms_event);
-typedef int(*dms_check_session_status)(void *db_handle);
-typedef bool (*dms_get_imcstore_delta)(unsigned int tableid, unsigned int rowgroupid,
-    unsigned char *bitmap, unsigned long long *maxSize);
 
 typedef struct st_dms_callback {
     // used in reform
@@ -1077,11 +1052,8 @@ typedef struct st_dms_callback {
     dms_drc_xa_res_rebuild dms_reform_rebuild_xa_res;
     dms_reform_shrink_xa_rms dms_shrink_xa_rms;
     dms_ckpt_unblock_rcy_local ckpt_unblock_rcy_local;
-    dms_check_if_reform_session check_if_reform_session;
 
     dms_drc_rebuild_parallel rebuild_alock_parallel;
-    dms_reform_event_notify reform_event_notify;
-
     // used in reform for opengauss
     dms_thread_init_t dms_thread_init;
     dms_thread_deinit_t dms_thread_deinit;
@@ -1096,7 +1068,6 @@ typedef struct st_dms_callback {
     dms_inc_and_get_srsn inc_and_get_srsn;
     dms_get_page_hash_val get_page_hash_val;
     dms_get_page_lsn get_page_lsn;
-    dms_set_flushed_lsn set_flushed_lsn;
     dms_set_buf_load_status set_buf_load_status;
     dms_update_global_scn update_global_scn;
     dms_update_global_lsn update_global_lsn;
@@ -1255,12 +1226,6 @@ typedef struct st_dms_callback {
     dms_get_session_type get_session_type;
     dms_get_intercept_type get_intercept_type;
     dms_db_in_rollback db_in_rollback;
-    dms_get_inst_cnt get_inst_cnt;
-    dms_inc_buffer_remote_reads inc_buffer_remote_reads;
-    dms_begin_event_wait begin_event_wait;
-    dms_end_event_wait end_event_wait;
-    dms_check_session_status check_session_status;
-    dms_get_imcstore_delta get_imcstore_delta;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -1280,6 +1245,8 @@ typedef struct st_dms_profile {
     unsigned int channel_cnt;     // Number of connections between instances
     unsigned int work_thread_cnt; // Number of MES working threads
     unsigned int max_session_cnt; // Number of client sessions to be supported
+    unsigned short mfc_tickets; // message flow control, max requests from A instance to B instance
+    unsigned short mfc_max_wait_ticket_time; // max time to wait for ticket while sending a message
     unsigned int page_size;
     unsigned long long recv_msg_buf_size;
     unsigned int log_level;
@@ -1322,7 +1289,7 @@ typedef struct st_dms_profile {
     unsigned char enable_dyn_trace;
     unsigned char enable_reform_trace;
     unsigned long long drc_buf_size;
-    unsigned int  spin_sleep_time_nsec;
+    unsigned int spin_sleep_time_nsec;
 } dms_profile_t;
 
 typedef struct st_logger_param {
@@ -1443,10 +1410,6 @@ typedef struct st_mes_worker_msg_stats_info {
     unsigned int msg_src_inst;
     mes_msg_info_t msg_info;
     char msg_cmd_desc[DMS_CMD_DESC_LEN];
-    unsigned long long longest_cost_time; // longest_cost_time in history
-    unsigned long long longest_get_msgitem_time; // longest_cost_time in history: longest_get_msgitem_time
-    char longest_cmd_desc[DMS_CMD_DESC_LEN]; // longest_cost_time in history: longest_cmd_desc
-    unsigned char is_free;
 } mes_worker_msg_stats_info_t;
 
 typedef struct st_mes_task_priority_stats_info {
@@ -1455,7 +1418,6 @@ typedef struct st_mes_task_priority_stats_info {
     unsigned long long inqueue_msgitem_num;
     unsigned long long finished_msgitem_num;
     unsigned long long msgitem_free_num;
-    double avg_cost_time;
 } mes_task_priority_stats_info_t;
 
 typedef struct st_mem_info_stat {
@@ -1483,10 +1445,6 @@ typedef enum en_dms_param_index {
 #endif
     DMS_PARAM_SS_COUNT,
 } dms_param_index;
-
-typedef struct st_dms_version_info {
-    unsigned int dms_proto_version;
-} dms_version_info_t;
 
 #ifdef __cplusplus
 }
