@@ -1,25 +1,38 @@
-/*
- * Copyright (c) 2024 Huawei Technologies Co.,Ltd.
- *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
- *
- * ryu_common.h
- *
- * IDENTIFICATION
- *        src/include/access/datavec/ryu_common.h
- *
- * -------------------------------------------------------------------------
- */
+/*---------------------------------------------------------------------------
+*
+* Common routines for Ryu floating-point output.
+*
+* Portions Copyright (c) 2025, openGauss Contributors
+* Portions Copyright (c) 2018-2024, PostgreSQL Global Development Group
+*
+* IDENTIFICATION
+*    src/include/access/datavec/ryu_common.h
+*
+* This is a modification of code taken from github.com/ulfjack/ryu under the
+* terms of the Boost license (not the Apache license). The original copyright
+* notice follows:
+*
+* Copyright 2018 Ulf Adams
+*
+* The contents of this file may be used under the terms of the Apache
+* License, Version 2.0.
+*
+*     (See accompanying file LICENSE-Apache or copy at
+*      http://www.apache.org/licenses/LICENSE-2.0)
+*
+* Alternatively, the contents of this file may be used under the terms of the
+* Boost Software License, Version 1.0.
+*
+*     (See accompanying file LICENSE-Boost or copy at
+*      https://www.boost.org/LICENSE_1_0.txt)
+*
+* Unless required by applicable law or agreed to in writing, this software is
+* distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+* KIND, either express or implied.
+*
+*---------------------------------------------------------------------------
+*/
+
 #ifndef RYU_COMMON_H
 #define RYU_COMMON_H
 
