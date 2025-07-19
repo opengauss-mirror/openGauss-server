@@ -1,5 +1,26 @@
 create schema identity_schema;
 set current_schema = identity_schema;
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(id serial primary key,name varchar(10));
+NOTICE:  CREATE TABLE will create implicit sequence "t1_id_seq" for serial column "t1.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1(name) values('zhangsan');
+insert into t1(name) values('lisi');
+insert into t1(name) values('wangwu');
+select SCOPE_IDENTITY();
+ scope_identity 
+----------------
+               
+(1 row)
+
+select ident_current('t1');
+ ident_current 
+---------------
+              
+(1 row)
+
+drop table t1;
 CREATE TABLE book(bookId int IDENTITY, bookname NVARCHAR(50), author NVARCHAR(50));
 NOTICE:  CREATE TABLE will create implicit sequence "book_bookid_seq_identity" for serial column "book.bookid"
 INSERT INTO book VALUES('book1','author1'),('book2','author2');

@@ -1,5 +1,15 @@
 create schema identity_schema;
 set current_schema = identity_schema;
+
+drop table if exists t1;
+create table t1(id serial primary key,name varchar(10));
+insert into t1(name) values('zhangsan');
+insert into t1(name) values('lisi');
+insert into t1(name) values('wangwu');
+select SCOPE_IDENTITY();
+select ident_current('t1');
+drop table t1;
+
 CREATE TABLE book(bookId int IDENTITY, bookname NVARCHAR(50), author NVARCHAR(50));
 INSERT INTO book VALUES('book1','author1'),('book2','author2');
 INSERT INTO book(bookname,author) VALUES('book3','author3'),('book4','author4');
