@@ -98,7 +98,6 @@ typedef struct knl_instance_attr_nvm {
 
 typedef struct knl_instance_attr_dss {
     bool ss_enable_dss;
-    bool ss_enable_vtable;
     char* ss_dss_data_vg_name;
     char* ss_dss_xlog_vg_name;
     char* ss_dss_conn_path;

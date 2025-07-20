@@ -104,7 +104,6 @@ int dss_device_init(const char *conn_path, bool enable_dss)
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_ftruncate", (void **)&device_op.dss_truncate));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_fwrite", (void **)&device_op.dss_write));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_fcopy", (void **)&device_op.dss_fcopy));
-    SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_append", (void **)&device_op.dss_append));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_pwrite", (void **)&device_op.dss_pwrite));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_dmake", (void **)&device_op.dss_create_dir));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_dopen", (void **)&device_op.dss_open_dir));
@@ -135,8 +134,6 @@ int dss_device_init(const char *conn_path, bool enable_dss)
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_aio_post_pwrite", (void **)&device_op.dss_aio_post_pwrite));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_init_logger", (void **)&device_op.dss_init_logger));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_refresh_logger", (void **)&device_op.dss_refresh_logger));
-    SS_RETURN_IFERR(
-        dss_load_symbol(device_op.handle, "dss_reopen_vg_handle", (void **)&device_op.dss_reopen_vg_handle));
 
     int my_version = dss_get_my_version();
     int lib_version = dss_get_lib_version();

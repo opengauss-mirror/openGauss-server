@@ -152,8 +152,6 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(ddes_fi_call_ex));
 #endif
 
-    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_request_imcstore_delta));
-
     g_ss_dms_func.inited = true;
     return DMS_SUCCESS;
 }
@@ -439,10 +437,4 @@ void dms_get_cmd_stat(int index, wait_cmd_stat_result_t *cmd_stat_result)
 int dms_req_opengauss_immediate_checkpoint(dms_context_t *dms_ctx, unsigned long long *redo_lsn)
 {
     return g_ss_dms_func.dms_req_opengauss_immediate_ckpt(dms_ctx, redo_lsn);
-}
-
-int dms_request_imcstore_delta(dms_context_t *dms_ctx, unsigned int tableid, unsigned int rowgroup,
-    unsigned char* bitmap, unsigned long long *delta_max)
-{
-    return g_ss_dms_func.dms_request_imcstore_delta(dms_ctx, tableid, rowgroup, bitmap, delta_max);
 }

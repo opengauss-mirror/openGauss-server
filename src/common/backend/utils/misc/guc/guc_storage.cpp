@@ -1146,19 +1146,6 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 
-        {{"ss_enable_vtable",
-          PGC_POSTMASTER,
-          NODE_SINGLENODE,
-          SHARED_STORAGE_OPTIONS,
-          gettext_noop("Whether use vtable"),
-          NULL,
-          GUC_SUPERUSER_ONLY},
-         &g_instance.attr.attr_storage.dss_attr.ss_enable_vtable,
-         false,
-         NULL,
-         NULL,
-         NULL},
-        
         {{"ss_enable_aio",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
@@ -2897,7 +2884,6 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
         {{"max_sync_workers_per_subscription",
             PGC_SIGHUP,
             NODE_SINGLENODE,

@@ -613,8 +613,7 @@ static unsigned int CBIncAndGetSrsn(uint32 sessid)
     return ++t_thrd.dms_cxt.srsn;
 }
 
-static unsigned int CBPageHashCode(const char pageid[DMS_PAGEID_SIZE],
-    unsigned char group_hash, unsigned int *hash_key, unsigned int *hash_val)
+static unsigned int CBPageHashCode(const char pageid[DMS_PAGEID_SIZE])
 {
     BufferTag *tag = (BufferTag *)pageid;
     return BufTableHashCode(tag);
@@ -1394,6 +1393,9 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
 #ifdef ENABLE_HTAP
             case BCAST_IMCSTORE_VACUUM:
                 ret = SSLoadIMCStoreVacuum(data, len);
+            break;
+            case BCAST_IMCSTORE_REQUEST_DELTA:
+                ret = SSProcessIMCStoreDelta(data, len, output_msg, output_msg_len);
                 break;
 #endif
             case BCAST_SEND_SNAPSHOT:
@@ -1446,6 +1448,11 @@ static int32 CBProcessBroadcastAck(void *db_handle, dms_broadcast_context_t *bro
         case BCAST_CHECK_DB_BACKENDS_ACK:
             ret = SSCheckDbBackendsAck(data, len);
             break;
+#ifdef ENABLE_HTAP
+        case BCAST_IMCSTORE_REQUEST_DELTA_ACK:
+            ret = SSGetIMCStoreDeltaAck(data, len);
+            break;
+#endif
         default:
             ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS] invalid broadcast ack type")));
             ret = DMS_ERROR;
@@ -2322,39 +2329,6 @@ static int CBUpdateNodeOldestXmin(void *db_handle, uint8 inst_id, unsigned long 
     return GS_SUCCESS;
 }
 
-bool CBGetIMCStoreDelta(unsigned int tableid, unsigned int rowgroupid, unsigned char *bitmap,
-    unsigned long long *maxSize)
-{
-#ifdef ENABLE_HTAP
-    IMCSDesc* desc = IMCS_HASH_TABLE->GetImcsDesc(tableid);
-    if (desc == NULL) {
-        return false;
-    }
-    RowGroup* rowgroup = desc->GetRowGroup(rowgroupid);
-    if (rowgroup == NULL) {
-        return false;
-    }
-    CU* cu = NULL;
-    rowgroup->RDLockRowGroup();
-
-    DeltaTableIterator deltaIter = rowgroup->m_delta->ScanInit();
-    ItemPointer item = NULL;
-
-    while ((item = deltaIter.GetNext()) != NULL) {
-        BlockNumber blockoffset = ItemPointerGetBlockNumber(item) - rowgroupid * MAX_IMCS_PAGES_ONE_CU;
-        OffsetNumber offset = ItemPointerGetOffsetNumber(item);
-        uint64 idx = blockoffset * MAX_POSSIBLE_ROW_PER_PAGE + offset;
-        bitmap[idx >> 3] |= (1 << (idx % 8));
-        *maxSize = Max(*maxSize, idx);
-    }
-    rowgroup->UnlockRowGroup();
-    desc->UnReferenceRowGroup();
-    return true;
-#else
-    ereport(ERROR, (errmsg("CBGetIMCStoreDelta: not supported without HTAP.")));
-#endif
-}
-
 void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
 {
     /* in dorado mode, we need to wait sharestorageinit finished */
@@ -2695,5 +2669,4 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->get_session_type = CBDmsGetSessionType;
     callback->get_intercept_type = CBDmsGetInterceptType;
     callback->reform_check_opengauss = CBReformHealthCheck;
-    callback->get_imcstore_delta = CBGetIMCStoreDelta;
 }

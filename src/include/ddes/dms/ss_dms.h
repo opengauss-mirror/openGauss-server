@@ -109,8 +109,6 @@ typedef struct st_ss_dms_func {
     void (*ddes_fi_call)(unsigned int point, ...);
     // this is for function calling
     void (*ddes_fi_call_ex)(unsigned int point, va_list args);
-    int (*dms_request_imcstore_delta)(dms_context_t *dms_ctx, unsigned int tableid, unsigned int rowgroup,
-        unsigned char* bitmap, unsigned long long *delta_max);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -159,8 +157,6 @@ void dms_pre_uninit(void);
 void dms_validate_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn, unsigned char is_dirty);
 int dms_reform_req_opengauss_ondemand_redo_buffer(dms_context_t *dms_ctx, void *block_key, unsigned int key_len,
                                                   int *redo_status);
-int dms_request_imcstore_delta(dms_context_t *dms_ctx, unsigned int tableid, unsigned int rowgroup,
-    unsigned char* bitmap, unsigned long long *delta_max);
 unsigned int dms_get_mes_max_watting_rooms(void);
 int dms_send_opengauss_oldest_xmin(dms_context_t *dms_ctx, unsigned long long oldest_xmin, unsigned char dest_id);
 int dms_req_opengauss_immediate_checkpoint(dms_context_t *dms_ctx, unsigned long long *redo_lsn);

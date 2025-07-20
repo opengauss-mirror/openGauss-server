@@ -191,9 +191,9 @@ function Start()
     fi
 
     pid=`program_pid dssserver ${DSS_HOME}`
-    if [[ -z ${pid} ||! -e ${DSS_HOME}/.dss_unix_d_socket ]]
+    if [[ -z ${pid} ]]
     then
-        log "dssserver not exist in dir ${DSS_HOME} or dssserver has not been started...."
+        log "dssserver not exist in dir ${DSS_HOME}..."
         exit 6
     else
         log "Starting dn..."

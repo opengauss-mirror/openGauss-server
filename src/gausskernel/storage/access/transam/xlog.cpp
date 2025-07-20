@@ -2797,18 +2797,6 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
             instr_time endTime;
             PgStat_Counter elapsedTime;
 
-            /* Need to seek in the file? */
-            bool enableDssAppend = g_instance.attr.attr_storage.dss_attr.ss_enable_vtable && ENABLE_DMS;
-            if (enableDssAppend && t_thrd.xlog_cxt.openLogOff != startoffset) {
-                if (lseek(t_thrd.xlog_cxt.openLogFile, (off_t)startoffset, SEEK_SET) < 0) {
-                    ereport(PANIC, (errcode_for_file_access(),
-                                    errmsg("could not seek in log file %s to offset %u: %s",
-                                           XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.openLogSegNo),
-                                           startoffset, TRANSLATE_ERRNO)));
-                }
-                t_thrd.xlog_cxt.openLogOff = startoffset;
-            }
-            
             /* OK to write the page(s) */
             char *from = t_thrd.shemem_ptr_cxt.XLogCtl->pages + startidx * (Size)XLOG_BLCKSZ;
             Size nbytes = npages * (Size)XLOG_BLCKSZ;
@@ -2823,11 +2811,7 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
 
             pgstat_report_waitevent(WAIT_EVENT_WAL_WRITE);
             INSTR_TIME_SET_CURRENT(startTime);
-            if (g_instance.attr.attr_storage.dss_attr.ss_enable_vtable && ENABLE_DMS) {
-                actualBytes = dss_append(t_thrd.xlog_cxt.openLogFile, from, nbytes);
-            } else {
-                actualBytes = pwrite(t_thrd.xlog_cxt.openLogFile, from, nbytes, startoffset);
-            }
+            actualBytes = pwrite(t_thrd.xlog_cxt.openLogFile, from, nbytes, startoffset);
             INSTR_TIME_SET_CURRENT(endTime);
             INSTR_TIME_SUBTRACT(endTime, startTime);
             /* when track_activities and enable_instr_track_wait are on,
@@ -8596,12 +8580,8 @@ void ResourceManagerStop(void)
 
 static void EndRedoXlog()
 {
-    if (ENABLE_DMS && !g_instance.attr.attr_storage.EnableHotStandby) {
-        ereport(LOG, (errmsg("no need to ExtremeCheckCommittingCsnList when hot_standby = off.")));
-    } else {
-        if (IsExtremeRtoRunning()) {
-            ExtremeCheckCommittingCsnList();
-        }
+    if (IsExtremeRtoRunning()) {
+        ExtremeCheckCommittingCsnList();
     }
 
     if ((get_real_recovery_parallelism() > 1) && (!parallel_recovery::DispatchPtrIsNull())) {
@@ -10997,12 +10977,6 @@ void StartupXLOG(void)
          * index cleanup actions.  So temporarily enable XLogInsertAllowed in
          * this process only.
          */
-        if (ENABLE_DMS && ENABLE_DSTORAGE && g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
-            if(dss_reopen_specific_vg_handle(g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name) != 0) {
-                ereport(ERROR, (errmsg("[SS reform] fail to reopen xlog file for failover.")));   
-            }
-            ereport(LOG, (errmsg("[SS reform] success to reopen xlog file for failover end.")));
-        }
         LocalSetXLogInsertAllowed();
         EndRedoXlog();
         /* Disallow XLogInsert again */

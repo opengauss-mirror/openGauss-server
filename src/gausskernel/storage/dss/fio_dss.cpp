@@ -451,15 +451,6 @@ ssize_t dss_write_file(int handle, const void *buf, size_t size)
     return (ssize_t)size;
 }
 
-int dss_append(int handle, void *buf, size_t size)
-{
-    if (g_dss_device_op.dss_append(handle, buf, size) != DSS_SUCCESS) {
-        dss_set_errno(NULL);
-        return -1;
-    }
-    return (ssize_t)size;
-}
-
 ssize_t dss_pwrite_file(int handle, const void *buf, size_t size, off_t offset)
 {
     RETRY_ON_CONNECT_ERR_BEGIN {
@@ -894,9 +885,4 @@ int dss_aio_prep_pread(void *iocb, int fd, void *buf, size_t count, long long of
 int dss_aio_post_pwrite(void *iocb, int fd, size_t count, long long offset)
 {
     return g_dss_device_op.dss_aio_post_pwrite(iocb, fd, count, offset);
-}
-
-int dss_reopen_specific_vg_handle(const char *name)
-{
-    return g_dss_device_op.dss_reopen_vg_handle(name);
 }
