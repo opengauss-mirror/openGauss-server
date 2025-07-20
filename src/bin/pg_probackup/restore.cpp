@@ -164,8 +164,6 @@ set_orphan_status(parray *backups, pgBackup *parent_backup)
     pg_free(parent_backup_id);
 }
 
-static void set_ts_ver_dir_real(pgBackup *dest_backup);
-
 /*
  * Entry point of pg_probackup RESTORE and VALIDATE subcommands.
  */
@@ -266,10 +264,6 @@ do_restore_or_validate(time_t target_backup_id, pgRecoveryTarget *rt,
             elog(ERROR, "Backup satisfying target options is not found.");
         /* TODO: check if user asked PITR or just restore of latest backup */
     }
-
-    /* Get nodeName of target server from postgresql.conf */
-    if (dest_backup != NULL)
-        set_ts_ver_dir_real(dest_backup);
 
     /* If we already found dest_backup, look for full backup. */
     if (dest_backup->backup_mode == BACKUP_MODE_FULL)
@@ -1129,13 +1123,12 @@ static void remove_redundant_files(const char *pgdata_path,
     time(&start_time);
     for (int i = 0; (size_t)i < parray_num(pgdata_and_dssdata_files); i++) {
         pgFile	   *file = (pgFile *)parray_get(pgdata_and_dssdata_files, i);
-        bool inRelativeTblspc = false;
+        bool    in_tablespace = false;
 
         /* For incremental backups, we need to skip some files */
-        inRelativeTblspc = path_is_prefix_of_path(PG_RELATIVE_TBLSPC_DIR, file->rel_path);
-        if (inRelativeTblspc) {
+        in_tablespace = path_is_prefix_of_path(PG_TBLSPC_DIR, file->rel_path);
+        if (in_tablespace && skip_some_tblspc_files(file))
             continue;
-        }
 
         /* if file does not exists in destination list, then we can safely unlink it */
         if (parray_bsearch(dest_backup->files, file, 
@@ -2263,29 +2256,3 @@ check_incremental_compatibility(const char *pgdata, uint64 system_identifier,
         elog(ERROR, "Incremental restore is impossible");
 }
 
-static void set_ts_ver_dir_real(pgBackup* dest_backup)
-{
-    errno_t rc = 0;
-    int parsed_options = 0;
-    char* pgxc_node_name = NULL;
-    char conf_path[MAXPGPATH];
-
-    ConfigOption options[] = {{'s', 0, "pgxc_node_name", &pgxc_node_name, SOURCE_FILE_STRICT}, {0}};
-
-    join_path_components(conf_path, dest_backup->root_dir, "database/postgresql.conf");
-    parsed_options = config_read_opt(conf_path, options, INFO, false, true);
-    TS_DIR_WITH_PGXC = (char*)pg_malloc(sizeof(TABLESPACE_VERSION_DIRECTORY "_") + strlen(pgxc_node_name) + 1);
-
-    pgut_atexit_push(pg_free_callback, TS_DIR_WITH_PGXC);
-    rc = strncpy_s(TS_DIR_WITH_PGXC, sizeof(TABLESPACE_VERSION_DIRECTORY "_"), TABLESPACE_VERSION_DIRECTORY "_",
-                   sizeof(TABLESPACE_VERSION_DIRECTORY "_") - 1);
-    securec_check_c(rc, "", "");
-
-    rc = strncpy_s(TS_DIR_WITH_PGXC + sizeof(TABLESPACE_VERSION_DIRECTORY "_") - 1, strlen(pgxc_node_name) + 1,
-                   pgxc_node_name, strlen(pgxc_node_name));
-    securec_check_c(rc, "", "");
-
-    if (likely(pgxc_node_name)) {
-        pg_free(pgxc_node_name);
-    }
-}
