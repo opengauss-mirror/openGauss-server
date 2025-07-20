@@ -38,7 +38,6 @@ typedef int (*dss_open_device)(const char *name, int flags, int *handle);
 typedef int (*dss_read_device)(int handle, void *buf, int size, int *read_size);
 typedef int (*dss_write_device)(int handle, const void *buf, int size);
 typedef int (*dss_pread_device)(int handle, void *buf, int size, long offset, int *read_size);
-typedef int (*dss_append_device)(int handle, const void *buf, int size);
 typedef int (*dss_pwrite_device)(int handle, const void *buf, int size, long offset);
 typedef long (*dss_seek_device)(int handle, long offset, int origin);
 typedef int (*dss_trucate_device)(int handle, long keep_size);
@@ -85,7 +84,6 @@ typedef struct st_dss_device_op_t {
     dss_read_device dss_read;
     dss_pread_device dss_pread;
     dss_write_device dss_write;
-    dss_append_device dss_append;
     dss_pwrite_device dss_pwrite;
     dss_seek_device dss_seek;
     dss_trucate_device dss_truncate;

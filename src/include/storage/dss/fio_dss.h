@@ -79,7 +79,6 @@ int dss_get_addr(int handle, long long offset, char *poolname, char *imagename, 
     unsigned int *objId, unsigned long int *objOffset);
 int dss_compare_size(const char *vg_name, long long *au_size);
 int dss_file_copy(const char *src_path, const char *dest_path);
-int dss_append(int handle, void *buf, size_t size);
 int dss_aio_prep_pwrite(void *iocb, int fd, void *buf, size_t count, long long offset);
 int dss_aio_prep_pread(void *iocb, int fd, void *buf, size_t count, long long offset);
 int dss_aio_post_pwrite(void *iocb, int fd, size_t count, long long offset);

@@ -837,7 +837,6 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #------------------------------------------------------------------------------
 #ss_enable_dms = off
 #ss_enable_dss = off
-#ss_enable_vtable = off
 #ss_enable_ssl = on
 #ss_enable_aio = on
 #ss_enable_catalog_centralized = on
