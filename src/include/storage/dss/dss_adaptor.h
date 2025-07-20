@@ -76,8 +76,6 @@ typedef int (*dss_init_logger_t)(char *log_home, unsigned int log_level, unsigne
     unsigned long long log_max_file_size);
 typedef void (*dss_refresh_logger_t)(char *log_field, unsigned long long *value);
 typedef int (*dss_set_main)(void);
-typedef int (*dss_reopen_vg_handle_t)(const char *name);
-
 typedef struct st_dss_device_op_t {
     bool inited;
     void *handle;
@@ -121,7 +119,6 @@ typedef struct st_dss_device_op_t {
     dss_init_logger_t dss_init_logger;
     dss_refresh_logger_t dss_refresh_logger;
     dss_set_main dss_set_main_inst;
-    dss_reopen_vg_handle_t dss_reopen_vg_handle;
 } dss_device_op_t;
 
 void dss_register_log_callback(dss_log_output cb_log_output);

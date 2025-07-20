@@ -8596,12 +8596,8 @@ void ResourceManagerStop(void)
 
 static void EndRedoXlog()
 {
-    if (ENABLE_DMS && !g_instance.attr.attr_storage.EnableHotStandby) {
-        ereport(LOG, (errmsg("no need to ExtremeCheckCommittingCsnList when hot_standby = off.")));
-    } else {
-        if (IsExtremeRtoRunning()) {
-            ExtremeCheckCommittingCsnList();
-        }
+    if (IsExtremeRtoRunning()) {
+        ExtremeCheckCommittingCsnList();
     }
 
     if ((get_real_recovery_parallelism() > 1) && (!parallel_recovery::DispatchPtrIsNull())) {
