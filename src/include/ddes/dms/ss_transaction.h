@@ -29,6 +29,10 @@
 #include "access/transam.h"
 #include "storage/sinval.h"
 
+#ifdef ENABLE_HTAP
+#define IMCSTORE_DELTA_BITMAP_SIZE 69377
+#define IMCSTORE_DELTA_PER_MESSAGE 25600
+#endif
 #define DMS_NO_RUNNING_BACKENDS (DMS_SUCCESS)
 #define DMS_EXIST_RUNNING_BACKENDS (DMS_ERROR)
 
@@ -124,6 +128,20 @@ typedef struct SSIMCStoreVacuum {
     bool actived;
     int chunkNum;
 } SSIMCStoreVacuum;
+
+typedef struct SSIMCStoreDeltaReq {
+    SSBroadcastOp type; // must be first
+    Oid tableid;
+    uint32 rowgroup;
+    uint32 begin;
+} SSIMCStoreDeltaReq;
+
+typedef struct SSIMCStoreDeltaAck {
+    SSBroadcastOpAck type; // must be first
+    unsigned int size;
+    unsigned int max_size;
+    unsigned char bitmap[IMCSTORE_DELTA_PER_MESSAGE];
+} SSIMCStoreDeltaAck;
 #endif
 
 Snapshot SSGetSnapshotData(Snapshot snapshot);
@@ -169,5 +187,9 @@ int SSDisasterUpdateIsEnableExtremeRedo(char* data, uint32 len);
 int32 SSLoadIMCStoreVacuum(char *data, uint32 len);
 void SSBroadcastIMCStoreVacuum(int chunkNum, Oid rid, uint32 rgid, TransactionId xid, bool actived, int cols,
     CUDesc** CUDescs, CU** CUs);
+int SSRequestIMCStoreDelta(dms_context_t *dms_ctx, Oid tableid, uint32 rowgroup,
+    unsigned char* bitmap, unsigned long long *delta_max);
+int SSProcessIMCStoreDelta(char *data, uint32 len, char *output_msg, uint32 *output_msg_len);
+int SSGetIMCStoreDeltaAck(char *data, uint32 len);
 #endif
 #endif

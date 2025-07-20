@@ -3117,6 +3117,11 @@ typedef struct knl_u_datavec_context {
 typedef struct knl_u_imcstore_context {
     List* pinnedRowGroups;
     BorrowMemPool* pinnedBorrowMemPool;
+    /* for ss mode */
+    unsigned char* bitmap;
+    unsigned int max_size;
+    uint32 begin;
+    bool isValidBitmap;
 } knl_u_imcstore_context;
 #endif
 
