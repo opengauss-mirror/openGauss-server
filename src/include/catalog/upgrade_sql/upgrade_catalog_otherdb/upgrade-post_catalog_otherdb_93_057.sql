@@ -8,7 +8,7 @@ CREATE TABLE ENGINES (
   TRANSACTIONS varchar(3) DEFAULT NULL,
   XA varchar(3) DEFAULT NULL,
   SAVEPOINTS varchar(3) DEFAULT NULL
-) WITHOUT OIDS;
+) WITH (orientation=row, compression=no);
 
 insert into ENGINES values ('MEMORY', 'YES', 'Hash based, stored in memory, useful for temporary tables', 'NO', 'NO', 'NO');
 insert into ENGINES values ('InnoDB', 'DEFAULT', 'Supports transactions, row-level locking, and foreign keys', 'YES', 'YES', 'YES');
