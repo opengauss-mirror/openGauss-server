@@ -12394,12 +12394,13 @@ static void assign_tcp_keepalives_idle(int newval, void *extra)
 static const char* show_tcp_keepalives_idle(void)
 {
     /* See comments in assign_tcp_keepalives_idle */
-    const int maxBufLen = 16;
-    static char nbuf[maxBufLen];
+    char* buf = t_thrd.buf_cxt.show_tcp_keepalives_idle_buf;
+    Size size = sizeof(t_thrd.buf_cxt.show_tcp_keepalives_idle_buf);
+    int rcs = 0;
 
-    errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d", pq_getkeepalivesidle(u_sess->proc_cxt.MyProcPort));
-    securec_check_ss(rc, "\0", "\0");
-    return nbuf;
+    rcs = snprintf_s(buf, size, size - 1, "%d", pq_getkeepalivesidle(u_sess->proc_cxt.MyProcPort));
+    securec_check_ss(rcs, "\0", "\0");
+    return buf;
 }
 
 static void assign_tcp_keepalives_interval(int newval, void *extra)
@@ -12411,13 +12412,13 @@ static void assign_tcp_keepalives_interval(int newval, void *extra)
 static const char* show_tcp_keepalives_interval(void)
 {
     /* See comments in assign_tcp_keepalives_idle */
-    const int maxBufLen = 16;
-    static char nbuf[maxBufLen];
+    char* buf = t_thrd.buf_cxt.show_tcp_keepalives_interval_buf;
+    Size size = sizeof(t_thrd.buf_cxt.show_tcp_keepalives_interval_buf);
+    int rcs = 0;
 
-    errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d",
-                            pq_getkeepalivesinterval(u_sess->proc_cxt.MyProcPort));
-    securec_check_ss(rc, "\0", "\0");
-    return nbuf;
+    rcs = snprintf_s(buf, size, size - 1, "%d", pq_getkeepalivesinterval(u_sess->proc_cxt.MyProcPort));
+    securec_check_ss(rcs, "\0", "\0");
+    return buf;
 }
 
 static void assign_tcp_keepalives_count(int newval, void *extra)
@@ -12429,12 +12430,13 @@ static void assign_tcp_keepalives_count(int newval, void *extra)
 static const char* show_tcp_keepalives_count(void)
 {
     /* See comments in assign_tcp_keepalives_idle */
-    const int maxBufLen = 16;
-    static char nbuf[maxBufLen];
+    char* buf = t_thrd.buf_cxt.show_tcp_keepalives_count_buf;
+    Size size = sizeof(t_thrd.buf_cxt.show_tcp_keepalives_count_buf);
+    int rcs = 0;
 
-    errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d", pq_getkeepalivescount(u_sess->proc_cxt.MyProcPort));
-    securec_check_ss(rc, "\0", "\0");
-    return nbuf;
+    rcs = snprintf_s(buf, size, size - 1, "%d", pq_getkeepalivescount(u_sess->proc_cxt.MyProcPort));
+    securec_check_ss(rcs, "\0", "\0");
+    return buf;
 }
 
 static void assign_tcp_user_timeout(int newval, void *extra)
@@ -12444,12 +12446,13 @@ static void assign_tcp_user_timeout(int newval, void *extra)
 
 static const char* show_tcp_user_timeout(void)
 {
-    const int maxBufLen = 16;
-    static char nbuf[maxBufLen];
+    char* buf = t_thrd.buf_cxt.show_tcp_user_timeout_buf;
+    Size size = sizeof(t_thrd.buf_cxt.show_tcp_user_timeout_buf);
+    int rcs = 0;
 
-    errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d", pq_gettcpusertimeout(u_sess->proc_cxt.MyProcPort));
-    securec_check_ss(rc, "\0", "\0");
-    return nbuf;
+    rcs = snprintf_s(buf, size, size - 1, "%d", pq_gettcpusertimeout(u_sess->proc_cxt.MyProcPort));
+    securec_check_ss(rcs, "\0", "\0");
+    return buf;
 }
 
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source)
