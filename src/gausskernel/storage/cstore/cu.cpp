@@ -55,9 +55,6 @@
 #endif
 #include "storage/time_series_compress.h"
 
-/* use DMS_DR_TYPE_SE_ALCK for rowgroup, DMS_DR_TYPE_SE_ALCK is not used by openGauss */
-#define DMS_DR_TYPE_ROWGROUP DMS_DR_TYPE_SE_ALCK
-
 int CUAlignUtils::GetCuAlignSizeColumnId(int columnId)
 {
     Assert(columnId > 0);
@@ -2104,6 +2101,7 @@ RowGroup::RowGroup(uint32 rowGroupId, int imcsNatts)
 RowGroup::RowGroup(Oid rid, uint32 rowGroupId, int imcsNatts)
 {
     m_rowGroupId = rowGroupId;
+    rgxmin = InvalidTransactionId;
     m_actived = false;
     m_cuDescs = (CUDesc**)palloc0((imcsNatts + 1) * sizeof(CUDesc*));
     m_delta = New(CurrentMemoryContext) DeltaTable();
