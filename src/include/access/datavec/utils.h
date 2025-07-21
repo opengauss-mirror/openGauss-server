@@ -13,6 +13,14 @@
 #define GENERIC_DEFAULT_PQ_KSUB 256
 #define GENERIC_MIN_PQ_KSUB 1
 #define GENERIC_MAX_PQ_KSUB 256
+#define PQ_DIS_L2 1
+#define PQ_DIS_IP 2
+#define PQ_DIS_COSINE 3
+#define L2_FUNC_OID 8431
+#define IP_FUNC_OID 8434
+#define PQTABLE_STORAGE_SIZE (uint16)(6 * 1024)
+
+#define DEFAULT_TARGET_ROWS 300
 
 template <typename T>
 class VectorList {
@@ -299,6 +307,24 @@ typedef struct PQParams {
     char *pqTable;
 } PQParams;
 
+/* Sampling context structure */
+typedef struct {
+    Relation onerel;          /* Relation being sampled */
+    Buffer targbuffer;        /* Current buffer */
+    Page targpage;            /* Current page */
+    BlockNumber targblock;    /* Current block number */
+    TransactionId OldestXmin; /* Oldest transaction ID */
+    double liverows;          /* Number of live rows */
+    double deadrows;          /* Number of dead rows */
+    double samplerows;        /* Number of sampled rows */
+    int64 targrows;           /* Target number of rows to sample */
+    int64 numrows;            /* Current number of sampled rows */
+    double rowstoskip;        /* Number of rows to skip */
+    double rstate;           /* Random state for sampling */
+    bool isAnalyzing;         /* Whether we're analyzing */
+    bool estimateTableRownum;  /* Whether to estimate table row count */
+} SamplingContext;
+
 #define VECTOR_ARRAY_SIZE(_length, _size) (sizeof(VectorArrayData) + (_length) * MAXALIGN(_size))
 
 typedef VectorArrayData * VectorArray;
@@ -348,7 +374,8 @@ void HalfvecSumCenter(Pointer v, float *x);
 void BitSumCenter(Pointer v, float *x);
 VectorArray VectorArrayInit(int maxlen, int dimensions, Size itemsize);
 void VectorArrayFree(VectorArray arr);
-
+void EstimateRows(Relation onerel, double *totalrows);
+int GetPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
 int PQInit();
 void PQUinit();
 

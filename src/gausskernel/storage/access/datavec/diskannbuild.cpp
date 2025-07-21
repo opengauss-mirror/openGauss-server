@@ -23,13 +23,21 @@
 #include "postgres.h"
 #include "access/datavec/diskann.h"
 #include "access/tableam.h"
+#include "postmaster/bgworker.h"
+#include "commands/vacuum.h"
 
 #define CALLBACK_ITEM_POINTER HeapTuple hup
+
+static void GetBaseData(DiskAnnBuildState* buildstate);
+static void SampleCallback(Relation index, CALLBACK_ITEM_POINTER, Datum* values, const bool* isnull, bool tupleIsAlive,
+                           void* state);
+static void AddSample(Datum* values, DiskAnnBuildState* buildstate);
 
 /*
  * Initialize the build state
  */
-static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relation index, IndexInfo* indexInfo)
+static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relation index, IndexInfo* indexInfo,
+                           bool parallel)
 {
     buildstate->heap = heap;
     buildstate->index = index;
@@ -68,6 +76,9 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
     buildstate->reltuples = 0;
     buildstate->indtuples = 0;
 
+    buildstate->diskannleader = NULL;
+    buildstate->diskannshared = NULL;
+
     /* Get support functions */
     buildstate->procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
     buildstate->normprocinfo = DiskAnnOptionalProcInfo(index, DISKANN_NORM_PROC);
@@ -79,7 +90,39 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
         elog(ERROR, "dimensions must be greater than one for this opclass");
     }
 
-    buildstate->nodeSize = sizeof(DiskAnnNodePageData);
+    buildstate->enablePQ = DiskAnnEnablePQ(index);
+    if (buildstate->enablePQ && !buildstate->typeInfo->supportPQ) {
+        ereport(ERROR, (errmsg("this data type cannot support diskann pq.")));
+    }
+    if (buildstate->enablePQ && !g_instance.pq_inited) {
+        ereport(ERROR, (errmsg("this instance has not currently loaded the pq dynamic library.")));
+    }
+
+    buildstate->pqM = DiskAnnGetPqM(index);
+    buildstate->pqKsub = DiskAnnGetPqKsub(index);
+    if (buildstate->enablePQ) {
+        if (buildstate->kmeansnormprocinfo != NULL && buildstate->dimensions == 1) {
+            ereport(ERROR, (errmsg("dimensions must be greater than one for this opclass.")));
+        }
+        if (buildstate->dimensions % buildstate->pqM != 0) {
+            ereport(ERROR, (errmsg("dimensions={%d} must be divisible by pq_M={%d}, please reset pq_M.}",
+                                   buildstate->dimensions, buildstate->pqM)));
+        }
+        Size subItemsize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
+        subItemsize = MAXALIGN(subItemsize);
+        buildstate->pqTableSize = buildstate->pqM * buildstate->pqKsub * subItemsize;
+        buildstate->pqTable = parallel ? NULL : (char*)palloc0(buildstate->pqTableSize);
+        buildstate->pqcodeSize = buildstate->pqM * sizeof(uint8);
+        buildstate->params = GetPQInfo(buildstate);
+    } else {
+        buildstate->pqTable = NULL;
+        buildstate->pqTableSize = 0;
+        buildstate->pqcodeSize = 0;
+        buildstate->params = NULL;
+    }
+    buildstate->pqDistanceTable = NULL;
+
+    buildstate->nodeSize = offsetof(DiskAnnNodePageData, pqcode) + buildstate->pqcodeSize;
     buildstate->edgeSize = sizeof(DiskAnnEdgePageData);
     buildstate->itemSize = buildstate->nodeSize + buildstate->edgeSize;
     buildstate->graphStore = New(CurrentMemoryContext) DiskAnnGraphStore(index);
@@ -87,11 +130,15 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
         AllocSetContextCreate(CurrentMemoryContext, "diskann build temporary context", ALLOCSET_DEFAULT_SIZES);
 }
 
-/*
- * Free resources
- */
-static void FreeBuildState(DiskAnnBuildState* buildstate)
+static void FreeBuildState(DiskAnnBuildState* buildstate, bool parallel)
 {
+    if (buildstate->enablePQ) {
+        if (!parallel) {
+            pfree(buildstate->pqTable);
+        }
+        pfree(buildstate->params);
+    }
+
     if (buildstate->graphStore) {
         delete buildstate->graphStore;
         buildstate->graphStore = nullptr;
@@ -103,6 +150,7 @@ static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNu
 {
     Buffer buf;
     Page page;
+    char* pqTable;
     DiskAnnMetaPage metap;
 
     buf = ReadBufferExtended(index, MAIN_FORKNUM, P_NEW, RBM_NORMAL, NULL);
@@ -121,6 +169,18 @@ static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNu
     metap->itemSize = metap->nodeSize + metap->edgeSize;
     metap->insertPage = InvalidBlockNumber;
 
+    /* set PQ info */
+    metap->enablePQ = buildstate->enablePQ;
+    metap->pqM = buildstate->pqM;
+    metap->pqKsub = buildstate->pqKsub;
+    metap->pqcodeSize = buildstate->pqcodeSize;
+    metap->pqDisTableSize = 0;
+    metap->pqDisTableNblk = 0;
+    metap->pqTableSize = (uint32)buildstate->pqTableSize;
+    metap->pqTableNblk =
+        buildstate->enablePQ
+            ? (uint16)((metap->pqTableSize + PQTABLE_STORAGE_SIZE - 1) / PQTABLE_STORAGE_SIZE)
+            : 0;
     ((PageHeader)page)->pd_lower = ((char*)metap + sizeof(DiskAnnMetaPageData)) - (char*)page;
 
     MarkBufferDirty(buf);
@@ -192,6 +252,14 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
         tup->heaptids[0] = *heaptid;
     }
 
+    if (buildstate->enablePQ) {
+        Size codesize = buildstate->params->pqM * sizeof(uint8);
+        uint8* pqcode = (uint8*)palloc(codesize);
+        DiskAnnComputeVectorPQCode(DatumGetVector(value)->x, buildstate->params, pqcode);
+        errno_t err = memcpy_s(tup->pqcode, codesize, pqcode, codesize);
+        securec_check(err, "\0", "\0");
+    }
+
     /*  initialize edge page */
     DiskAnnEdgePage etup = (DiskAnnEdgePage)((uint8_t*)tup + buildstate->nodeSize);
     for (uint16_t pos = 0; pos < OUTDEGREE; pos++) {
@@ -208,8 +276,7 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
     return blkno;
 }
 
-static BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid,
-                               DiskAnnBuildState* buildstate)
+static BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnBuildState* buildstate)
 {
     Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
     /* Normalize if needed */
@@ -285,20 +352,216 @@ static void BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum* values, 
     MemoryContextReset(buildstate->tmpCtx);
 }
 
-static double AssignTuples(DiskAnnBuildState* buildstate)
+/*
+ * Perform a worker's portion of a parallel insert
+ */
+static void DiskAnnParallelScanAndInsert(Relation heapRel, Relation indexRel, DiskAnnShared* diskannshared)
 {
-    if (buildstate->heap != NULL) {
-        Relation heap = buildstate->heap;
-        Relation index = buildstate->index;
-        IndexInfo* indexInfo = buildstate->indexInfo;
-        buildstate->reltuples =
-            tableam_index_build_scan(heap, index, indexInfo, true, BuildCallback, (void*)buildstate, NULL);
-        return buildstate->reltuples;
+    DiskAnnBuildState buildstate;
+    TableScanDesc scan;
+    double reltuples;
+    IndexInfo* indexInfo;
+
+    /* Join parallel scan */
+    indexInfo = BuildIndexInfo(indexRel);
+    InitBuildState(&buildstate, heapRel, indexRel, indexInfo, true);
+
+    buildstate.pqTable = diskannshared->pqTable;
+    if (buildstate.enablePQ) {
+        buildstate.params->pqTable = diskannshared->pqTable;
     }
-    return 0.0;  // default value
+    scan = tableam_scan_begin_parallel(heapRel, &diskannshared->heapdesc);
+    reltuples = tableam_index_build_scan(heapRel, indexRel, indexInfo, true, BuildCallback, (void*)&buildstate, scan);
+
+    /* Record statistics */
+    SpinLockAcquire(&diskannshared->mutex);
+    diskannshared->nparticipantsdone++;
+    diskannshared->reltuples += reltuples;
+    SpinLockRelease(&diskannshared->mutex);
+    FreeBuildState(&buildstate, true);
 }
 
-static void CreateEntryPages(DiskAnnBuildState* buildstate, ForkNumber forkNum)
+void DiskAnnParallelBuildMain(const BgWorkerContext* bwc)
+{
+    DiskAnnShared* diskannshared;
+    Relation heapRel;
+    Relation indexRel;
+
+    /* Look up shared state */
+    diskannshared = (DiskAnnShared*)bwc->bgshared;
+
+    /* Open relations within worker */
+    heapRel = heap_open(diskannshared->heaprelid, NoLock);
+    indexRel = index_open(diskannshared->indexrelid, NoLock);
+
+    if (diskannshared->flag == ParallelBuildFlag::CREATE_ENTRY_PAGE) {
+        DiskAnnParallelScanAndInsert(heapRel, indexRel, diskannshared);
+    } else if (diskannshared->flag == ParallelBuildFlag::LINK) {
+        uint32 workerId = pg_atomic_fetch_add_u32(&diskannshared->workers, 1);
+        size_t totalBlocks = diskannshared->blocksList.size();
+        size_t workerBlockCount = totalBlocks / diskannshared->parallelWorker;
+        size_t remainder = totalBlocks % diskannshared->parallelWorker;
+
+        if (workerId < remainder) {
+            workerBlockCount++;
+        }
+
+        size_t start = workerId * (totalBlocks / diskannshared->parallelWorker) + Min(workerId, remainder);
+        const BlockNumber* workerBlk = diskannshared->blocksList.begin() + start;
+        DiskAnnGraphStore graphStore(indexRel);
+        for (size_t i = 0; i < workerBlockCount; i++) {
+            DiskAnnGraph graph(indexRel, diskannshared->dimensions, diskannshared->frozen, &graphStore);
+            BlockNumber blk = workerBlk[i];
+            graph.Link(blk, diskannshared->indexSize);
+        }
+    }
+
+    index_close(indexRel, NoLock);
+    heap_close(heapRel, NoLock);
+}
+
+
+static void DiskAnnEndParallel(DiskAnnLeader* diskannleader)
+{
+    pfree_ext(diskannleader);
+    BgworkerListSyncQuit();
+}
+
+static double ParallelBuild(DiskAnnBuildState* buildstate, int* nparticipanttuplesorts)
+{
+    DiskAnnShared* diskannshared = buildstate->diskannleader->diskannshared;
+    double reltuples;
+
+    BgworkerListWaitFinish(&buildstate->diskannleader->nparticipanttuplesorts);
+    pg_memory_barrier();
+
+    *nparticipanttuplesorts = buildstate->diskannleader->nparticipanttuplesorts;
+    reltuples = diskannshared->reltuples;
+
+    return reltuples;
+}
+
+static DiskAnnShared* DiskAnnParallelInitshared(DiskAnnBuildState* buildstate)
+{
+    DiskAnnShared* diskannshared;
+    char* pqTable;
+    errno_t rc;
+
+    /* Store shared build state, for which we reserved space */
+    diskannshared = (DiskAnnShared*)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
+                                                           sizeof(DiskAnnShared));
+
+    /* Initialize immutable state */
+    diskannshared->heaprelid = RelationGetRelid(buildstate->heap);
+    diskannshared->indexrelid = RelationGetRelid(buildstate->index);
+
+    if (buildstate->enablePQ) {
+        pqTable =
+            (char*)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), buildstate->pqTableSize);
+        rc = memcpy_s(pqTable, buildstate->pqTableSize, buildstate->pqTable, buildstate->pqTableSize);
+        securec_check_c(rc, "\0", "\0");
+        diskannshared->pqTable = pqTable;
+    } else {
+        diskannshared->pqTable = NULL;
+    }
+
+    SpinLockInit(&diskannshared->mutex);
+    diskannshared->blocksList = VectorList<BlockNumber>();
+
+    diskannshared->parallelStrategy = GetAccessStrategy(BAS_BULKWRITE);
+
+    diskannshared->dimensions = buildstate->dimensions;
+    diskannshared->workers = 0;
+    /* Initialize mutable state */
+    diskannshared->nparticipantsdone = 0;
+    diskannshared->reltuples = 0;
+    HeapParallelscanInitialize(&diskannshared->heapdesc, buildstate->heap);
+
+    return diskannshared;
+}
+
+/*
+ * Begin parallel build
+ */
+static void DiskAnnBeginParallel(DiskAnnBuildState* buildstate, int nworkers, ParallelBuildFlag flag)
+{
+    Buffer buf;
+    Page page;
+    DiskAnnShared* diskannshared;
+    DiskAnnLeader* diskannleader = (DiskAnnLeader*)palloc0(sizeof(DiskAnnLeader));
+
+    Assert(nworkers > 0);
+
+    diskannshared = DiskAnnParallelInitshared(buildstate);
+    diskannshared->flag = flag;
+    diskannshared->parallelWorker = nworkers;
+
+    buf = ReadBuffer(buildstate->index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    page = BufferGetPage(buf);
+    DiskAnnMetaPage metapage = DiskAnnPageGetMeta(page);
+    diskannshared->indexSize = metapage->indexSize;
+    diskannshared->frozen = metapage->frozenBlkno[0];
+    UnlockReleaseBuffer(buf);
+
+    diskannshared->blocksList = buildstate->blocksList;
+
+    /* Launch workers, saving status for leader/caller */
+    diskannleader->nparticipanttuplesorts =
+        LaunchBackgroundWorkers(nworkers, diskannshared, DiskAnnParallelBuildMain, NULL);
+    diskannleader->diskannshared = diskannshared;
+
+    /* If no workers were successfully launched, back out (do serial build) */
+    if (diskannleader->nparticipanttuplesorts == 0) {
+        DiskAnnEndParallel(diskannleader);
+        return;
+    }
+
+    /* Log participants */
+    ereport(DEBUG1, (errmsg("using %d parallel workers", diskannleader->nparticipanttuplesorts)));
+
+    /* Save leader state now that it's clear build will be parallel */
+    buildstate->diskannleader = diskannleader;
+}
+
+static double AssignTuples(DiskAnnBuildState* buildstate)
+{
+    buildstate->reltuples = 0;
+    if (buildstate->heap == NULL) {
+        return buildstate->reltuples;
+    }
+
+    int parallelWorkers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
+    if (parallelWorkers > 0) {
+        DiskAnnBeginParallel(buildstate, parallelWorkers, ParallelBuildFlag::CREATE_ENTRY_PAGE);
+    }
+
+    if (!buildstate->diskannleader) {
+    serial_build:
+        buildstate->reltuples = tableam_index_build_scan(buildstate->heap, buildstate->index, buildstate->indexInfo,
+                                                         true, BuildCallback, (void*)buildstate, NULL);
+    } else {
+        int nruns;
+        buildstate->reltuples = ParallelBuild(buildstate, &nruns);
+        if (nruns == 0) {
+            /* failed to startup any bgworker, retry to do serial build */
+            goto serial_build;
+        }
+        DiskAnnShared* shared = buildstate->diskannleader->diskannshared;
+        SpinLockAcquire(&shared->mutex);
+        buildstate->blocksList = shared->blocksList;
+        SpinLockRelease(&shared->mutex);
+    }
+
+    /* End parallel build */
+    if (buildstate->diskannleader) {
+        DiskAnnEndParallel(buildstate->diskannleader);
+    }
+
+    return buildstate->reltuples;
+}
+
+static void CreateEntryPages(DiskAnnBuildState* buildstate)
 {
     /* Assign */
     DiskAnnBench("DiskAnn assign tuples", AssignTuples(buildstate));
@@ -338,10 +601,36 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
 
     InsertFrozenPoint(buildstate->index, frozen);
 
-    for (size_t i = 0; i < buildstate->blocksList.size(); i++) {
-        BlockNumber blk = buildstate->blocksList[i];
-        DiskAnnGraph graph(buildstate->index, buildstate->dimensions, frozen, buildstate->graphStore);
-        graph.Link(blk, buildstate->indexSize);
+    int parallelWorkers = 0;
+    if (buildstate->heap != NULL) {
+        parallelWorkers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
+    }
+
+    if (parallelWorkers > 0) {
+        DiskAnnBeginParallel(buildstate, parallelWorkers, ParallelBuildFlag::LINK);
+    }
+
+    if (buildstate->heap != NULL) {
+        if (!buildstate->diskannleader) {
+        serial_build:
+            for (size_t i = 0; i < buildstate->blocksList.size(); i++) {
+                DiskAnnGraph graph(buildstate->index, buildstate->dimensions, frozen, buildstate->graphStore);
+                BlockNumber blk = buildstate->blocksList[i];
+                graph.Link(blk, buildstate->indexSize);
+            }
+        } else {
+            int nruns;
+            buildstate->reltuples = ParallelBuild(buildstate, &nruns);
+            if (nruns == 0) {
+                /* failed to startup any bgworker, retry to do serial build */
+                goto serial_build;
+            }
+        }
+    }
+
+    /* End parallel build */
+    if (buildstate->diskannleader) {
+        DiskAnnEndParallel(buildstate->diskannleader);
     }
 }
 
@@ -361,6 +650,50 @@ void InsertFrozenPoint(Relation index, BlockNumber frozen)
     UnlockReleaseBuffer(buf);
 }
 
+static void GeneratePQData(DiskAnnBuildState* buildstate)
+{
+    int numSamples;
+    Relation index = buildstate->index;
+
+    /* Skip samples for unlogged table */
+    if (buildstate->heap == NULL) {
+        numSamples = 1;
+    } else {
+        double num;
+        EstimateRows(buildstate->heap, &num);
+        numSamples = (int)num;
+    }
+    PG_TRY();
+    {
+        /* Sample rows */
+        buildstate->samples =
+            VectorArrayInit(numSamples, buildstate->dimensions, buildstate->typeInfo->itemSize(buildstate->dimensions));
+    }
+    PG_CATCH();
+    {
+        ereport(ERROR, (errmsg("memory alloc failed during PQtable sampling, suggest using diskann without PQ.")));
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    if (buildstate->heap != NULL) {
+        GetBaseData(buildstate);
+        if (buildstate->samples->length < buildstate->pqKsub) {
+            ereport(NOTICE,
+                    (errmsg("DiskAnn PQ table created with little data"), errdetail("This will cause low recall."),
+                     errhint("Drop the index until the table has more data.")));
+        }
+    }
+
+    MemoryContext pqCtx =
+        AllocSetContextCreate(CurrentMemoryContext, "DiskAnn PQ temporary context", ALLOCSET_DEFAULT_SIZES);
+    MemoryContext oldCtx = MemoryContextSwitchTo(pqCtx);
+    DiskAnnComputePQTable(buildstate->samples, buildstate->params);
+
+    MemoryContextSwitchTo(oldCtx);
+    MemoryContextDelete(pqCtx);
+    VectorArrayFree(buildstate->samples);
+}
+
 /*
  * Build DiskANN Index
  * 1. Initialize the build state
@@ -376,16 +709,111 @@ void InsertFrozenPoint(Relation index, BlockNumber frozen)
 static void BuildIndex(Relation heap, Relation index, IndexInfo* indexInfo, DiskAnnBuildState* buildstate,
                        ForkNumber forkNum)
 {
-    InitBuildState(buildstate, heap, index, indexInfo);
+    InitBuildState(buildstate, heap, index, indexInfo, false);
+
+    if (buildstate->enablePQ) {
+        GeneratePQData(buildstate);
+    }
 
     /* Create pages */
     CreateMetaPage(index, buildstate, forkNum);
 
-    CreateEntryPages(buildstate, forkNum);
+    if (buildstate->enablePQ) {
+        DiskAnnFlushPQInfo(buildstate);
+    }
+
+    CreateEntryPages(buildstate);
 
     BuildVamanaIndex(buildstate);
 
-    FreeBuildState(buildstate);
+    FreeBuildState(buildstate, false);
+}
+
+static void GetBaseData(DiskAnnBuildState* buildstate)
+{
+    int targsamples = buildstate->samples->maxlen;
+    BlockNumber totalblocks = RelationGetNumberOfBlocks(buildstate->heap);
+
+    buildstate->rowstoskip = -1;
+    BlockSampler_Init(&buildstate->bs, totalblocks, targsamples);
+
+    buildstate->rstate = anl_init_selection_state(targsamples);
+    while (BlockSampler_HasMore(&buildstate->bs)) {
+        BlockNumber targblock = BlockSampler_Next(&buildstate->bs);
+        tableam_index_build_scan(buildstate->heap, buildstate->index, buildstate->indexInfo, false, SampleCallback,
+                                 (void*)buildstate, NULL, targblock, 1);
+    }
+}
+
+/*
+ * Callback for sampling
+ */
+static void SampleCallback(Relation index, CALLBACK_ITEM_POINTER, Datum* values, const bool* isnull, bool tupleIsAlive,
+                           void* state)
+{
+    DiskAnnBuildState* buildstate = (DiskAnnBuildState*)state;
+    MemoryContext oldCtx;
+
+    if (isnull[0]) {
+        return;
+    }
+
+    /* Use memory context since detoast can allocate */
+    oldCtx = MemoryContextSwitchTo(buildstate->tmpCtx);
+    /* Add sample */
+    AddSample(values, buildstate);
+    /* Reset memory context */
+    MemoryContextSwitchTo(oldCtx);
+    MemoryContextReset(buildstate->tmpCtx);
+}
+
+/*
+ * Add sample
+ */
+static void AddSample(Datum* values, DiskAnnBuildState* buildstate)
+{
+    VectorArray samples = buildstate->samples;
+    int targsamples = samples->maxlen;
+
+    /* Detoast once for all calls */
+    Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
+
+    if (buildstate->kmeansnormprocinfo != NULL) {
+        if (!DiskAnnCheckNorm(buildstate->kmeansnormprocinfo, buildstate->collation, value)) {
+            return;
+        }
+
+        value = DiskAnnNormValue(buildstate->typeInfo, buildstate->collation, value);
+    }
+
+    if (samples->length < targsamples) {
+        VectorArraySet(samples, samples->length, DatumGetPointer(value));
+        samples->length++;
+    } else {
+        if (buildstate->rowstoskip < 0) {
+            buildstate->rowstoskip = anl_get_next_S(samples->length, targsamples, &buildstate->rstate);
+        }
+
+        if (buildstate->rowstoskip <= 0) {
+            int k = (int)(targsamples * anl_random_fract());
+            Assert(k >= 0 && k < targsamples);
+            VectorArraySet(samples, k, DatumGetPointer(value));
+        }
+
+        buildstate->rowstoskip -= 1;
+    }
+}
+
+PQParams* GetPQInfo(DiskAnnBuildState* buildstate)
+{
+    PQParams* params = (PQParams*)palloc(sizeof(PQParams));
+    params->pqM = buildstate->pqM;
+    params->pqKsub = buildstate->pqKsub;
+    params->funcType = GetPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
+    params->dim = buildstate->dimensions;
+    params->subItemSize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
+    params->pqTable = buildstate->pqTable;
+    return params;
 }
 
 IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo* indexInfo)

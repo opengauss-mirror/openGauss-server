@@ -137,7 +137,7 @@ PQParams *InitPQParamsInMemory(HnswBuildState *buildstate)
     PQParams *params = (PQParams*)palloc(sizeof(PQParams));
     params->pqM = buildstate->pqM;
     params->pqKsub = buildstate->pqKsub;
-    params->funcType = getPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
+    params->funcType = GetPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
     params->dim = buildstate->dimensions;
     Size subItemsize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
     params->subItemSize = MAXALIGN(subItemsize);
@@ -155,247 +155,6 @@ static void ComputeHnswPQ(HnswBuildState *buildstate)
     ComputePQTable(buildstate->samples, buildstate->params);
     MemoryContextSwitchTo(oldCtx);
     MemoryContextDelete(pqCtx);
-}
-
-BlockNumber BlockSamplerGetBlock(BlockSampler bs)
-{
-    if (BlockSampler_HasMore(bs)) {
-        return BlockSampler_Next(bs);
-    }
-    return InvalidBlockNumber;
-}
-
-static void EstimateRows(Relation onerel, double *totalrows)
-{
-    int64 targrows = HNSWPQ_DEFAULT_TARGET_ROWS * abs(default_statistics_target);
-    int64 numrows = 0;      /* # rows now in reservoir */
-    double samplerows = 0;  /* total # rows collected */
-    double liverows = 0;    /* # live rows seen */
-    double deadrows = 0;    /* # dead rows seen */
-    double rowstoskip = -1; /* -1 means not set yet */
-    BlockNumber totalblocks;
-    TransactionId OldestXmin;
-    BlockSamplerData bs;
-    double rstate;
-    BlockNumber targblock = 0;
-    BlockNumber sampleblock = 0;
-    bool estimateTableRownum = false;
-    bool isAnalyzing = true;
-
-    totalblocks = RelationGetNumberOfBlocks(onerel);
-    OldestXmin = GetOldestXmin(onerel);
-    /* Prepare for sampling block numbers */
-    BlockSampler_Init(&bs, totalblocks, targrows);
-    /* Prepare for sampling rows */
-    rstate = anl_init_selection_state(targrows);
-
-    while (InvalidBlockNumber != (targblock = BlockSamplerGetBlock(&bs))) {
-        Buffer targbuffer;
-        Page targpage;
-        OffsetNumber targoffset, maxoffset;
-
-        vacuum_delay_point();
-        sampleblock++;
-
-        targbuffer = ReadBufferExtended(onerel, MAIN_FORKNUM, targblock, RBM_NORMAL, NULL);
-        LockBuffer(targbuffer, BUFFER_LOCK_SHARE);
-        targpage = BufferGetPage(targbuffer);
-
-        if (RelationIsUstoreFormat(onerel)) {
-            for (int i = 0; i < onerel->rd_att->natts; i++) {
-                if (onerel->rd_att->attrs[i].attcacheoff >= 0) {
-                    onerel->rd_att->attrs[i].attcacheoff = -1;
-                }
-            }
-
-            TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(onerel), false, onerel->rd_tam_ops);
-            maxoffset = UHeapPageGetMaxOffsetNumber(targpage);
-
-            /* Inner loop over all tuples on the selected page */
-            for (targoffset = FirstOffsetNumber; targoffset <= maxoffset; targoffset++) {
-                RowPtr *lp = UPageGetRowPtr(targpage, targoffset);
-                bool sampleIt = false;
-                TransactionId xid;
-                UHeapTuple targTuple;
-                if (RowPtrIsDeleted(lp)) {
-                    deadrows += 1;
-                    continue;
-                }
-                if (!RowPtrIsNormal(lp)) {
-                    if (RowPtrIsDeleted(lp)) {
-                        deadrows += 1;
-                    }
-                    continue;
-                }
-
-                if (!RowPtrHasStorage(lp)) {
-                    continue;
-                }
-
-                /* Allocate memory for target tuple. */
-                targTuple = UHeapGetTuple(onerel, targbuffer, targoffset);
-
-                switch (UHeapTupleSatisfiesOldestXmin(targTuple, OldestXmin,
-                    targbuffer, true, &targTuple, &xid, NULL, onerel)) {
-                    case UHEAPTUPLE_LIVE:
-                        sampleIt = true;
-                        liverows += 1;
-                        break;
-
-                    case UHEAPTUPLE_DEAD:
-                    case UHEAPTUPLE_RECENTLY_DEAD:
-                        /* Count dead and recently-dead rows */
-                        deadrows += 1;
-                        break;
-
-                    case UHEAPTUPLE_INSERT_IN_PROGRESS:
-                        if (TransactionIdIsCurrentTransactionId(xid)) {
-                            sampleIt = true;
-                            liverows += 1;
-                        }
-                        break;
-
-                    case UHEAPTUPLE_DELETE_IN_PROGRESS:
-                        if (TransactionIdIsCurrentTransactionId(xid)) {
-                            deadrows += 1;
-                        } else {
-                            liverows += 1;
-                        }
-                        break;
-
-                    default:
-                        elog(ERROR, "unexpected UHeapTupleSatisfiesOldestXmin result");
-                        break;
-                }
-
-                if (sampleIt) {
-                    ExecStoreTuple(targTuple, slot, InvalidBuffer, false);
-
-                    if (numrows >= targrows) {
-                        if (rowstoskip < 0) {
-                            rowstoskip = anl_get_next_S(samplerows, targrows, &rstate);
-                        }
-                        if (rowstoskip <= 0) {
-                            int64 k = (int64)(targrows * anl_random_fract());
-
-                            AssertEreport(k >= 0 && k < targrows, MOD_OPT,
-                                "Index number out of range when replacing tuples.");
-                        }
-                        rowstoskip -= 1;
-                    }
-                    samplerows += 1;
-                }
-
-                /* Free memory for target tuple. */
-                if (targTuple) {
-                    UHeapFreeTuple(targTuple);
-                }
-            }
-
-            /* Now release the lock and pin on the page */
-            ExecDropSingleTupleTableSlot(slot);
-
-            for (int i = 0; i < onerel->rd_att->natts; i++) {
-                if (onerel->rd_att->attrs[i].attcacheoff >= 0) {
-                    onerel->rd_att->attrs[i].attcacheoff = -1;
-                }
-            }
-
-            goto uheap_end;
-        }
-
-        maxoffset = PageGetMaxOffsetNumber(targpage);
-        /* Inner loop over all tuples on the selected page */
-        for (targoffset = FirstOffsetNumber; targoffset <= maxoffset; targoffset++) {
-            ItemId itemid;
-            HeapTupleData targtuple;
-            bool sample_it = false;
-
-            /* IO collector and IO scheduler for analyze statement */
-            if (ENABLE_WORKLOAD_CONTROL)
-                IOSchedulerAndUpdate(IO_TYPE_READ, 10, IO_TYPE_ROW);
-
-            targtuple.t_tableOid = InvalidOid;
-            targtuple.t_bucketId = InvalidBktId;
-            HeapTupleCopyBaseFromPage(&targtuple, targpage);
-            itemid = PageGetItemId(targpage, targoffset);
-
-            if (!ItemIdIsNormal(itemid)) {
-                if (ItemIdIsDead(itemid))
-                    deadrows += 1;
-                continue;
-            }
-
-            ItemPointerSet(&targtuple.t_self, targblock, targoffset);
-
-            targtuple.t_tableOid = RelationGetRelid(onerel);
-            targtuple.t_bucketId = RelationGetBktid(onerel);
-            targtuple.t_data = (HeapTupleHeader)PageGetItem(targpage, itemid);
-            targtuple.t_len = ItemIdGetLength(itemid);
-
-            switch (HeapTupleSatisfiesVacuum(&targtuple, OldestXmin, targbuffer, isAnalyzing)) {
-                case HEAPTUPLE_LIVE:
-                    sample_it = true;
-                    liverows += 1;
-                    break;
-
-                case HEAPTUPLE_DEAD:
-                case HEAPTUPLE_RECENTLY_DEAD:
-                    /* Count dead and recently-dead rows */
-                    deadrows += 1;
-                    break;
-
-                case HEAPTUPLE_INSERT_IN_PROGRESS:
-                    if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(targpage, targtuple.t_data))) {
-                        sample_it = true;
-                        liverows += 1;
-                    }
-                    break;
-
-                case HEAPTUPLE_DELETE_IN_PROGRESS:
-                    if (TransactionIdIsCurrentTransactionId(HeapTupleGetUpdateXid(&targtuple)))
-                        deadrows += 1;
-                    else {
-                        sample_it = true;
-                        liverows += 1;
-                    }
-                    break;
-
-                default:
-                    ereport(
-                        ERROR, (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("unexpected HeapTupleSatisfiesVacuum result")));
-                    break;
-            }
-
-            if (sample_it) {
-                if (numrows < targrows) {
-                    if (estimateTableRownum) {
-                        numrows++;
-                    }
-                } else {
-                    if (rowstoskip < 0) {
-                        rowstoskip = anl_get_next_S(samplerows, targrows, &rstate);
-                    }
-
-                    if (rowstoskip <= 0) {
-                        int64 k = (int64)(targrows * anl_random_fract());
-                        AssertEreport(
-                            k >= 0 && k < targrows, MOD_OPT, "Index number out of range when replacing tuples.");
-                    }
-                    rowstoskip -= 1;
-                }
-                samplerows += 1;
-            }
-        }
-
-uheap_end:
-        UnlockReleaseBuffer(targbuffer);
-    }
-    if (bs.m > 0) {
-        *totalrows = floor((liverows / bs.m) * totalblocks + 0.5);
-    } else {
-        *totalrows = 0.0;
-    }
 }
 
 /*
@@ -481,12 +240,12 @@ static void CreateMetaPage(HnswBuildState *buildstate)
     if (buildstate->enablePQ) {
         metap->pqTableSize = (uint32)buildstate->pqTableSize;
         metap->pqTableNblk = (uint16)(
-            (metap->pqTableSize + HNSW_PQTABLE_STORAGE_SIZE - 1) / HNSW_PQTABLE_STORAGE_SIZE);
+            (metap->pqTableSize + PQTABLE_STORAGE_SIZE - 1) / PQTABLE_STORAGE_SIZE);
         if (buildstate->pqMode == HNSW_PQMODE_SDC) {
             uint32 disTableLen = buildstate->pqM * buildstate->pqKsub * buildstate->pqKsub;
             metap->pqDisTableSize = (uint32)disTableLen * sizeof(float);
             metap->pqDisTableNblk = (uint16)(
-                (metap->pqDisTableSize + HNSW_PQTABLE_STORAGE_SIZE - 1) / HNSW_PQTABLE_STORAGE_SIZE);
+                (metap->pqDisTableSize + PQTABLE_STORAGE_SIZE - 1) / PQTABLE_STORAGE_SIZE);
         }
     } else {
         metap->pqTableSize = 0;

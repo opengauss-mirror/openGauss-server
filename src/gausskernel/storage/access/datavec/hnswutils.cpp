@@ -499,12 +499,11 @@ void FlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, ui
     uint32 curFlushSize;
     for (uint16 i = 0; i < nblks; i++) {
         curFlushSize = (i == nblks - 1) ?
-                        (totalSize - i * HNSW_PQTABLE_STORAGE_SIZE) : HNSW_PQTABLE_STORAGE_SIZE;
+                        (totalSize - i * PQTABLE_STORAGE_SIZE) : PQTABLE_STORAGE_SIZE;
         buf = ReadBufferExtended(index, MAIN_FORKNUM, startBlkno + i, RBM_NORMAL, NULL);
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
         page = BufferGetPage(buf);
-        errno_t err = memcpy_s(PageGetContents(page), curFlushSize,
-                        table + i * HNSW_PQTABLE_STORAGE_SIZE, curFlushSize);
+        errno_t err = memcpy_s(PageGetContents(page), curFlushSize, table + i * PQTABLE_STORAGE_SIZE, curFlushSize);
         securec_check(err, "\0", "\0");
         p = (PageHeader)page;
         p->pd_lower += curFlushSize;
@@ -550,11 +549,11 @@ char* LoadPQtable(Relation index)
     pqTable = (char*)palloc0(pqTableSize);
 
     for (uint16 i = 0; i < nblks; i++) {
-        curFlushSize = (i == nblks - 1) ? (pqTableSize - i * HNSW_PQTABLE_STORAGE_SIZE) : HNSW_PQTABLE_STORAGE_SIZE;
+        curFlushSize = (i == nblks - 1) ? (pqTableSize - i * PQTABLE_STORAGE_SIZE) : PQTABLE_STORAGE_SIZE;
         buf = ReadBuffer(index, HNSW_PQTABLE_START_BLKNO + i);
         LockBuffer(buf, BUFFER_LOCK_SHARE);
         page = BufferGetPage(buf);
-        errno_t err = memcpy_s(pqTable + i * HNSW_PQTABLE_STORAGE_SIZE, curFlushSize,
+        errno_t err = memcpy_s(pqTable + i * PQTABLE_STORAGE_SIZE, curFlushSize,
                                PageGetContents(page), curFlushSize);
         securec_check(err, "\0", "\0");
         UnlockReleaseBuffer(buf);
@@ -577,11 +576,11 @@ float* LoadPQDisTable(Relation index)
 
     BlockNumber startBlkno = HNSW_PQTABLE_START_BLKNO + pqTableNblk;
     for (uint16 i = 0; i < nblks; i++) {
-        curFlushSize = (i == nblks - 1) ? (pqDisTableSize - i * HNSW_PQTABLE_STORAGE_SIZE) : HNSW_PQTABLE_STORAGE_SIZE;
+        curFlushSize = (i == nblks - 1) ? (pqDisTableSize - i * PQTABLE_STORAGE_SIZE) : PQTABLE_STORAGE_SIZE;
         buf = ReadBuffer(index, startBlkno + i);
         LockBuffer(buf, BUFFER_LOCK_SHARE);
         page = BufferGetPage(buf);
-        errno_t err = memcpy_s((char*)disTable + i * HNSW_PQTABLE_STORAGE_SIZE, curFlushSize,
+        errno_t err = memcpy_s((char*)disTable + i * PQTABLE_STORAGE_SIZE, curFlushSize,
                                 PageGetContents(page), curFlushSize);
         securec_check(err, "\0", "\0");
         UnlockReleaseBuffer(buf);
@@ -796,7 +795,7 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
             Vector *vd1 = &etup->data;
             Vector *vd2 = (Vector *)DatumGetPointer(*q);
             float exactDis;
-            if (pqinfo->params.funcType == HNSW_PQ_DIS_IP) {
+            if (pqinfo->params.funcType == PQ_DIS_IP) {
                 exactDis = -VectorInnerProduct(params->dim, vd1->x, vd2->x);
             } else {
                 exactDis = VectorL2SquaredDistance(params->dim, vd1->x, vd2->x);
@@ -1588,22 +1587,6 @@ void HnswGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTa
     UnlockReleaseBuffer(buf);
 }
 
-int getPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo)
-{
-    if (procinfo->fn_oid == 8431) {
-        return HNSW_PQ_DIS_L2;
-    } else if (procinfo->fn_oid == 8434) {
-        if (normprocinfo == NULL) {
-            return HNSW_PQ_DIS_IP;
-        } else {
-            return HNSW_PQ_DIS_COSINE;
-        }
-    } else {
-        ereport(ERROR, (errmsg("current data type or distance type can't support hnswpq.")));
-        return -1;
-    }
-}
-
 void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ, bool trymmap)
 {
     const HnswTypeInfo *typeInfo = HnswGetTypeInfo(index);
@@ -1616,7 +1599,7 @@ void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, in
     }
 
     if (*enablePQ) {
-        params->funcType = getPQfunctionType(procinfo, HnswOptionalProcInfo(index, HNSW_NORM_PROC));
+        params->funcType = GetPQfunctionType(procinfo, HnswOptionalProcInfo(index, HNSW_NORM_PROC));
         params->dim = dim;
         Size subItemsize = typeInfo->itemSize(dim / params->pqM);
         params->subItemSize = MAXALIGN(subItemsize);

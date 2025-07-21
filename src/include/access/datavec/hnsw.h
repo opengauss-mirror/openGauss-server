@@ -50,7 +50,6 @@
 #define HNSW_METAPAGE_BLKNO 0
 #define HNSW_HEAD_BLKNO 1                            /* first element page */
 #define HNSW_PQTABLE_START_BLKNO 1                   /* pqtable start page */
-#define HNSW_PQTABLE_STORAGE_SIZE (uint16)(6 * 1024) /* pqtable storage size in each page */
 
 /* Append page slot info */
 #define HNSW_DEFAULT_NPAGES_PER_SLOT 50
@@ -78,9 +77,6 @@
 #define HNSW_PQMODE_ADC 1
 #define HNSW_PQMODE_SDC 2
 #define HNSW_PQMODE_DEFAULT HNSW_PQMODE_ADC
-#define HNSW_PQ_DIS_L2 1
-#define HNSW_PQ_DIS_IP 2
-#define HNSW_PQ_DIS_COSINE 3
 
 /* Tuple types */
 #define HNSW_ELEMENT_TUPLE_TYPE 1
@@ -109,8 +105,6 @@
 #ifndef MAX_PATH_LEN
 #define MAX_PATH_LEN UWAL_MAX_PATH_LEN
 #endif
-
-#define HNSWPQ_DEFAULT_TARGET_ROWS 300
 
 #define PQ_ENV_PATH "DATAVEC_PQ_LIB_PATH"
 #define PQ_SO_NAME "libkvecturbo.so"
@@ -664,7 +658,6 @@ int GetPQDistanceTableSdc(const PQParams *params, float *pqDistanceTable);
 int GetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDistanceTable);
 int GetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
                   const float *pqDistanceTable, float *pqDistance);
-int getPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
 void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ, bool trymmap);
 
 Datum hnswhandler(PG_FUNCTION_ARGS);

@@ -66,10 +66,6 @@
 
 /* IVFPQ parameters */
 #define IVFPQ_DEFAULT_RESIDUAL false
-#define IVFPQ_DIS_L2 1
-#define IVFPQ_DIS_IP 2
-#define IVFPQ_DIS_COSINE 3
-#define IVFPQTABLE_STORAGE_SIZE (uint16)(6 * 1024) /* pqtable storage size in each page */
 
 /* Build phases */
 /* PROGRESS_CREATEIDX_SUBPHASE_INITIALIZE is 1 */
@@ -106,15 +102,10 @@
 #define RandomDouble() (((double)random()) / MAX_RANDOM_VALUE)
 #define RandomInt() random()
 
-#define IVF_PQ_DIS_L2 1
-#define IVF_PQ_DIS_IP 2
-#define IVF_PQ_DIS_COSINE 3
-
 /* Preserved page numbers */
 #define IVF_METAPAGE_BLKNO 0
 #define IVF_HEAD_BLKNO 1                            /* first element page */
 #define IVF_PQTABLE_START_BLKNO 1                   /* pqtable start page */
-#define IVF_PQTABLE_STORAGE_SIZE (uint16)(6 * 1024) /* pqtable storage size in each page */
 
 typedef struct ListInfo {
     BlockNumber blkno;
@@ -381,7 +372,6 @@ int IvfGetByResidual(Relation index);
 
 void IvfGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
                               uint32 *pqPreComputeTableNblk, uint64 *pqPreComputeTableSize);
-int getIVFPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
 void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint32 nblks, uint64 totalSize);
 void IvfFlushPQInfo(IvfflatBuildState *buildstate);
 
