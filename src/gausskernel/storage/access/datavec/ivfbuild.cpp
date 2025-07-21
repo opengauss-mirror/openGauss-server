@@ -156,16 +156,17 @@ static void ComputePreTable(IvfflatBuildState *buildstate)
 /*
  * Compute PQTable
  */
-static void ComputeIvfPQ(IvfflatBuildState *buildstate)
+static int ComputeIvfPQ(IvfflatBuildState *buildstate)
 {
     MemoryContext pqCtx = AllocSetContextCreate(CurrentMemoryContext,
                                                 "Ivfflat PQ temporary context",
                                                 ALLOCSET_DEFAULT_SIZES);
     MemoryContext oldCtx = MemoryContextSwitchTo(pqCtx);
 
-    IvfComputePQTable(buildstate->residuals, buildstate->params);
+    int res = IvfComputePQTable(buildstate->residuals, buildstate->params);
     MemoryContextSwitchTo(oldCtx);
     MemoryContextDelete(pqCtx);
+    return res;
 }
 
 /*
@@ -1120,7 +1121,13 @@ static void CreateEntryPages(IvfflatBuildState *buildstate, ForkNumber forkNum)
     /* Build PQTable by residusal */
     if (buildstate->enablePQ) {
         CopyResidaulFromList(buildstate);
-        ComputeIvfPQ(buildstate);
+        ereport(LOG, (errmsg("IVFPQ start to train codebook.")));
+        int success = ComputeIvfPQ(buildstate);
+        if (success == -1) {
+            ereport(ERROR, (errmsg("IVFPQ training codebook is failed.")));
+        } else {
+            ereport(LOG, (errmsg("IVFPQ finish to train codebook.")));
+        }
         if (buildstate->byResidual &&
             (buildstate->params->funcType == IVF_PQ_DIS_L2 || buildstate->params->funcType == IVF_PQ_DIS_COSINE))
             ComputePreTable(buildstate);
