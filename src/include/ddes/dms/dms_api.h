@@ -110,6 +110,7 @@ typedef enum en_dms_dr_type {
     DMS_DR_TYPE_SS_LINK = 29,
     DMS_DR_TYPE_TX_ALCK = 30,
     DMS_DR_TYPE_SE_ALCK = 31,
+    DMS_DR_TYPE_ROWGROUP = 32,
     DMS_DR_TYPE_MAX,
 } dms_dr_type_t;
 
@@ -623,6 +624,7 @@ typedef enum en_dms_wait_event {
     DMS_EVT_PROC_REFORM_REQ,
     DMS_EVT_DCS_TRANSTER_PAGE_LSNDWAIT,
     DMS_EVT_DCS_INVALID_DRC_LSNDWAIT,
+    DMS_EVT_REQ_IMCSTORE_DELTA,
 
 // add new enum at tail, or make adaptations to openGauss
     DMS_EVT_COUNT,
@@ -788,7 +790,7 @@ typedef struct st_dms_broadcast_info {
     unsigned long long inst_map; /* when scope is DMS_BROADCAST_SPECIFY_LIST, inst_map is used */
     unsigned int timeout;
     unsigned char handle_recv_msg;
-    unsigned char check_session_kill; 
+    unsigned char check_session_kill;
 } dms_broadcast_info_t;
 
 typedef enum en_dms_stat_cmd {
@@ -1020,6 +1022,9 @@ typedef unsigned int (*dms_check_is_maintain)(void);
 typedef dms_session_e(*dms_get_session_type)(unsigned int sid);
 typedef unsigned char(*dms_get_intercept_type)(unsigned int sid);
 typedef unsigned char(*dms_db_in_rollback)(void *db_handle);
+typedef bool (*dms_get_imcstore_delta)(unsigned int tableid, unsigned int rowgroupid,
+    unsigned char *bitmap, unsigned long long *maxSize);
+
 
 typedef struct st_dms_callback {
     // used in reform
@@ -1226,6 +1231,7 @@ typedef struct st_dms_callback {
     dms_get_session_type get_session_type;
     dms_get_intercept_type get_intercept_type;
     dms_db_in_rollback db_in_rollback;
+    dms_get_imcstore_delta get_imcstore_delta;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
