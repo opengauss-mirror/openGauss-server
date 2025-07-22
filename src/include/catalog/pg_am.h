@@ -168,6 +168,10 @@ DATA(insert OID = 8302 (  bm25		0 2 f t f f f t f f f f f 0 bm25insert bm25begin
 DESCR("bm25 index access method");
 #define BM25_AM_OID 8302
 
+DATA(insert OID = 8303 (  diskann		0 4 f t f f f t f f f f f 0 diskanninsert diskannbeginscan diskanngettuple - diskannrescan diskannendscan - - - diskannbuild diskannbuildempty diskannbulkdelete diskannvacuumcleanup - diskanncostestimate diskannoptions - -));
+DESCR("diskann index access method");
+#define DISKANN_AM_OID 8303
+
 #define OID_IS_BTREE(oid) ((oid) == BTREE_AM_OID || (oid) == UBTREE_AM_OID)
 
 #endif   /* PG_AM_H */
