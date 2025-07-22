@@ -134,6 +134,8 @@ int dss_device_init(const char *conn_path, bool enable_dss)
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_aio_post_pwrite", (void **)&device_op.dss_aio_post_pwrite));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_init_logger", (void **)&device_op.dss_init_logger));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_refresh_logger", (void **)&device_op.dss_refresh_logger));
+    SS_RETURN_IFERR(
+        dss_load_symbol(device_op.handle, "dss_reopen_vg_handle", (void **)&device_op.dss_reopen_vg_handle));
 
     int my_version = dss_get_my_version();
     int lib_version = dss_get_lib_version();

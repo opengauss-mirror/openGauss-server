@@ -8580,8 +8580,12 @@ void ResourceManagerStop(void)
 
 static void EndRedoXlog()
 {
-    if (IsExtremeRtoRunning()) {
-        ExtremeCheckCommittingCsnList();
+    if (ENABLE_DMS && !g_instance.attr.attr_storage.EnableHotStandby) {
+        ereport(LOG, (errmsg("no need to ExtremeCheckCommittingCsnList when hot_standby = off.")));
+    } else {
+        if (IsExtremeRtoRunning()) {
+            ExtremeCheckCommittingCsnList();
+        }
     }
 
     if ((get_real_recovery_parallelism() > 1) && (!parallel_recovery::DispatchPtrIsNull())) {
@@ -10977,6 +10981,12 @@ void StartupXLOG(void)
          * index cleanup actions.  So temporarily enable XLogInsertAllowed in
          * this process only.
          */
+        if (ENABLE_DMS && ENABLE_DSTORAGE && g_instance.dms_cxt.SSRecoveryInfo.disaster_cluster_promoting) {
+            if(dss_reopen_specific_vg_handle(g_instance.attr.attr_storage.dss_attr.ss_dss_xlog_vg_name) != 0) {
+                ereport(ERROR, (errmsg("[SS reform] fail to reopen xlog file for failover.")));   
+            }
+            ereport(LOG, (errmsg("[SS reform] success to reopen xlog file for failover end.")));
+        }
         LocalSetXLogInsertAllowed();
         EndRedoXlog();
         /* Disallow XLogInsert again */
