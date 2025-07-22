@@ -138,4 +138,19 @@ INSERT INTO t6 (col1, col5, col6) VALUES (7, 10, 10), (7, 100, 100) ON DUPLICATE
     col7 = col3 * 100;
 SELECT * FROM t6 WHERE col1 = 7 ORDER BY col1, col3, col6, col7;
 
+CREATE TABLE upsert_insert_part_seqscan
+(
+a integer,
+b integer
+)
+PARTITION BY RANGE (b)
+(
+PARTITION P1 VALUES LESS THAN(100),
+PARTITION P2 VALUES LESS THAN(200),
+PARTITION P3 VALUES LESS THAN(MAXVALUE)
+);
+WITH upsert AS (
+UPDATE upsert_insert_part_seqscan SET b = 5 WHERE a = 3 returning *)
+INSERT INTO upsert_insert_part_seqscan (a, b) VALUES (3, 1);
+
 DROP SCHEMA test_insert_update_010 CASCADE;

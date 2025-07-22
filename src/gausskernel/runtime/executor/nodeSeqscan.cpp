@@ -629,6 +629,7 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
                 case CMD_UPDATE:
                 case CMD_DELETE:
                 case CMD_MERGE:
+                case CMD_INSERT:
                     lockmode = RowExclusiveLock;
                     break;
 
