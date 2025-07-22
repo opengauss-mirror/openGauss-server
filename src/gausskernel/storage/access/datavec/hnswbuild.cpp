@@ -145,16 +145,17 @@ PQParams *InitPQParamsInMemory(HnswBuildState *buildstate)
     return params;
 }
 
-static void ComputeHnswPQ(HnswBuildState *buildstate)
+static int ComputeHnswPQ(HnswBuildState *buildstate)
 {
     MemoryContext pqCtx = AllocSetContextCreate(CurrentMemoryContext,
                                                 "Hnsw PQ temporary context",
                                                 ALLOCSET_DEFAULT_SIZES);
     MemoryContext oldCtx = MemoryContextSwitchTo(pqCtx);
 
-    ComputePQTable(buildstate->samples, buildstate->params);
+    int res = ComputePQTable(buildstate->samples, buildstate->params);
     MemoryContextSwitchTo(oldCtx);
     MemoryContextDelete(pqCtx);
+    return res;
 }
 
 BlockNumber BlockSamplerGetBlock(BlockSampler bs)
@@ -417,6 +418,7 @@ static void BuildPQtable(HnswBuildState *buildstate)
     PG_TRY();
     {
         /* Sample rows */
+        ereport(LOG, (errmsg("HNSWPQ start sample rows.")));
         buildstate->samples = VectorArrayInit(numSamples, buildstate->dimensions,
                                               buildstate->typeInfo->itemSize(buildstate->dimensions));
     }
@@ -435,8 +437,14 @@ static void BuildPQtable(HnswBuildState *buildstate)
                             errhint("Drop the index until the table has more data.")));
         }
     }
-    ComputeHnswPQ(buildstate);
+    ereport(LOG, (errmsg("HNSWPQ start to train codebook.")));
+    int success = ComputeHnswPQ(buildstate);
     VectorArrayFree(buildstate->samples);
+    if (success == -1) {
+        ereport(ERROR, (errmsg("HNSWPQ training codebook is failed.")));
+    } else {
+        ereport(LOG, (errmsg("HNSWPQ finish to train codebook.")));
+    }
 }
 
 
