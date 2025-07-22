@@ -1232,6 +1232,7 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
             if (!isSpec && pkg != NULL) {
                 gsplsql_pkg_set_status(pkg, true, false, GetCurrCompilePgObjStatus(), false,
                         pkg_spec_valid, pkg_body_valid);
+                pkg = plpgsql_pkg_HashTableLookup(&hashkey);
                 pkg = do_pkg_compile(pkgOid, pkg_tup, pkg, &hashkey, false, isCreate);
                 if (pkg == NULL) {
                     ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
