@@ -6010,6 +6010,21 @@ static void _outConstraint(StringInfo str, Constraint* node)
             appendStringInfo(str, "ATTR_IMMEDIATE");
             break;
 
+        case CONSTR_GENERATED:
+            if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
+                appendStringInfo(str, "GENERATED");
+                WRITE_CHAR_FIELD(generated_when);
+                WRITE_CHAR_FIELD(generated_kind);
+            }
+            break;
+
+        case CONSTR_IDENTITY:
+            if (t_thrd.proc->workingVersionNum >= IDENTITY_VERSION_NUM) {
+                appendStringInfo(str, "IDENTITY");
+                WRITE_CHAR_FIELD(generated_when);
+            }
+            break;
+
         default:
             appendStringInfo(str, "<unrecognized_constraint %d>", (int)node->contype);
             break;

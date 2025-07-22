@@ -6409,6 +6409,19 @@ static Constraint* _readConstraint()
         local_node->contype = CONSTR_ATTR_DEFERRED;
     } else if (MATCH_TYPE("ATTR_IMMEDIATE")) {
         local_node->contype = CONSTR_ATTR_IMMEDIATE;
+    } else if (MATCH_TYPE("GENERATED")) {
+        local_node->contype = CONSTR_GENERATED;
+        IF_EXIST(generated_when) {
+            READ_CHAR_FIELD(generated_when);
+        }
+        IF_EXIST(generated_kind) {
+            READ_CHAR_FIELD(generated_kind);
+        }
+    } else if (MATCH_TYPE("IDENTITY")) {
+        local_node->contype = CONSTR_IDENTITY;
+        IF_EXIST(generated_when) {
+            READ_CHAR_FIELD(generated_when);
+        }
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("_readConstraint(): badly contype \"%s\"...", token)));
