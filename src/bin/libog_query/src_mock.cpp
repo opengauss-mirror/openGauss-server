@@ -51,6 +51,7 @@ extern "C" List* dolphin_raw_parser(const char* str, List** query_string_locatio
 #endif
 #if NOT_USE_WHITE_LIST
 extern "C" OgQueryParseResult raw_parser_opengauss_dolphin(const char* str);
+extern "C" void free_parse_result(OgQueryParseResult* result);
 #else
 extern "C" bool raw_parser_opengauss_dolphin(const char* str, const char* typelist, const char* funclist);
 #endif
@@ -508,7 +509,6 @@ static List* raw_parser_opengauss(const char* str, parser_walker_context* contex
     t_thrd.proc = &proc;
     proc.workingVersionNum = 0;
     List* parsetree_list = NULL;
-    char* json_tree = NULL;
 
     PG_TRY();
     {
@@ -532,19 +532,6 @@ static List* raw_parser_opengauss(const char* str, parser_walker_context* contex
         context->has_error = true;
     }
     PG_END_TRY();
-
-    json_walker_context json_context;
-    json_context.root_obj = cJSON_CreateObject();
-    json_context.cur_obj = json_context.root_obj;
-    json_context.parent_node = NULL;
-    cJSON_AddArrayToObject(json_context.root_obj, "stmts");
-    ListCell* raw_parsetree_item = NULL;
-    foreach (raw_parsetree_item, parsetree_list) {
-        Node* parsetree = (Node*)lfirst(raw_parsetree_item);
-        create_json_walker(parsetree, &json_context);
-        json_context.cur_obj = json_context.root_obj;
-    }
-    json_tree = cJSON_Print(json_context.root_obj);
 
 #if DEBUG_MODE
         printf("Details: %s\n\n", nodeToString(parsetree_list));
@@ -590,10 +577,25 @@ OgQueryParseResult raw_parser_opengauss_dolphin(const char* str)
         result.is_passed = false;
     }
     result.parse_tree_json = cJSON_Print(json_context.root_obj);
+    // release the JSON object.
+    cJSON_Delete(json_context.root_obj);
 #if DEBUG_MODE
         printf("Json: %s\n\n", result.parse_tree_json);
 #endif
     return result;
+}
+
+// The caller needs to free the memory after using JSON.
+void free_parse_result(OgQueryParseResult* result)
+{
+    if (result->parse_tree_json) {
+        free(result->parse_tree_json);
+        result->parse_tree_json = nullptr;
+    }
+    if (result->err_msg) {
+        free(result->err_msg);
+        result->err_msg = nullptr;
+    }
 }
 
 List* pg_parse_query(const char* query_string, List** query_string_locationlist,

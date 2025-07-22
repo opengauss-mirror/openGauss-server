@@ -28,3 +28,8 @@ TRUNCATE TABLE tpcds.reason_t1;
 
 except Exception as e:
     print("Exception", e)
+
+finally:
+    if 'result' in locals():
+        libpg_query.free_parse_result(ctypes.byref(result))
+        print("Memory released successfully")
