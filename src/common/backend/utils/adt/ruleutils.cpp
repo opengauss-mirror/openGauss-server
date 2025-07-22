@@ -13511,6 +13511,7 @@ Oid pg_get_serial_sequence_oid(text* tablename, text* columnname, bool find_iden
             (errcode(ERRCODE_UNDEFINED_COLUMN),
                 errmsg("column \"%s\" of relation \"%s\" does not exist", column, tablerv->relname)));
 
+    pfree_ext(column);
     list_free_ext(names);
 
     return pg_get_serial_sequence_internal(tableOid, attnum, find_identity, NULL);

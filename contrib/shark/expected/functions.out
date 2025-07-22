@@ -1326,6 +1326,340 @@ select sys.ident_current('t2');
 
 drop table t1;
 drop table t2;
+create table "T_IDENTITY_0001"(id int identity, name varchar(10));
+NOTICE:  CREATE TABLE will create implicit sequence "T_IDENTITY_0001_id_seq_identity" for serial column "T_IDENTITY_0001.id"
+insert into "T_IDENTITY_0001"(name) values('zhangsan');
+insert into "T_IDENTITY_0001"(name) values('lisi');
+select * from "T_IDENTITY_0001";
+ id |   name   
+----+----------
+  1 | zhangsan
+  2 | lisi
+(2 rows)
+
+select ident_current('"T_IDENTITY_0001"');
+ ident_current 
+---------------
+             2
+(1 row)
+
+select ident_current("T_IDENTITY_0001");
+ERROR:  column "T_IDENTITY_0001" does not exist
+LINE 1: select ident_current("T_IDENTITY_0001");
+                             ^
+CONTEXT:  referenced column: ident_current
+create or replace view "V_IDENTITY_0001" as select * from "T_IDENTITY_0001";
+select * from "V_IDENTITY_0001";
+ id |   name   
+----+----------
+  1 | zhangsan
+  2 | lisi
+(2 rows)
+
+select ident_current('"V_IDENTITY_0001"');
+ ident_current 
+---------------
+              
+(1 row)
+
+select ident_current('"T_IDENTITY_0001"');
+ ident_current 
+---------------
+             2
+(1 row)
+
+drop view "V_IDENTITY_0001";
+drop table "T_IDENTITY_0001";
+create table test_identity1(id int identity(100, 1), idd serial, name varchar(20));
+NOTICE:  CREATE TABLE will create implicit sequence "test_identity1_id_seq_identity" for serial column "test_identity1.id"
+NOTICE:  CREATE TABLE will create implicit sequence "test_identity1_idd_seq" for serial column "test_identity1.idd"
+insert into test_identity1(name) values('test1');
+select * from test_identity1;
+ id  | idd | name  
+-----+-----+-------
+ 100 |   1 | test1
+(1 row)
+
+select ident_current('test_identity1');
+ ident_current 
+---------------
+           100
+(1 row)
+
+drop table test_identity1;
+-- ident_current only for identity, not for serial
+create table test_identity2(idd serial, name varchar(20));
+NOTICE:  CREATE TABLE will create implicit sequence "test_identity2_idd_seq" for serial column "test_identity2.idd"
+insert into test_identity2(name) values('test1');
+select * from test_identity2;
+ idd | name  
+-----+-------
+   1 | test1
+(1 row)
+
+select ident_current('test_identity2');
+ ident_current 
+---------------
+              
+(1 row)
+
+drop table test_identity2;
+create table t_identity_0020(id int identity, name varchar(10));
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0020_id_seq_identity" for serial column "t_identity_0020.id"
+insert into t_identity_0020(name) values('zhangsan');
+select * from t_identity_0020;
+ id |   name   
+----+----------
+  1 | zhangsan
+(1 row)
+
+select ident_current('t_identity_0020');
+ ident_current 
+---------------
+             1
+(1 row)
+
+alter table t_identity_0020 drop column id;
+select * from t_identity_0020;
+   name   
+----------
+ zhangsan
+(1 row)
+
+select ident_current('t_identity_0020');
+ ident_current 
+---------------
+              
+(1 row)
+
+alter table t_identity_0020 add column id int identity;
+NOTICE:  ALTER TABLE will create implicit sequence "t_identity_0020_id_seq_identity" for serial column "t_identity_0020.id"
+select * from t_identity_0020;
+   name   | id 
+----------+----
+ zhangsan |  1
+(1 row)
+
+select ident_current('t_identity_0020');
+ ident_current 
+---------------
+             1
+(1 row)
+
+insert into t_identity_0020(name) values('name1');
+select * from t_identity_0020;
+   name   | id 
+----------+----
+ zhangsan |  1
+ name1    |  2
+(2 rows)
+
+select ident_current('t_identity_0020');
+ ident_current 
+---------------
+             2
+(1 row)
+
+alter table t_identity_0020 drop column id;
+select * from t_identity_0020;
+   name   
+----------
+ zhangsan
+ name1
+(2 rows)
+
+select ident_current('t_identity_0020');
+ ident_current 
+---------------
+              
+(1 row)
+
+alter table t_identity_0020 add column id int identity(100, 5);
+NOTICE:  ALTER TABLE will create implicit sequence "t_identity_0020_id_seq_identity" for serial column "t_identity_0020.id"
+select * from t_identity_0020;
+   name   | id  
+----------+-----
+ zhangsan | 100
+ name1    | 105
+(2 rows)
+
+select ident_current('t_identity_0020');
+ ident_current 
+---------------
+           105
+(1 row)
+
+insert into t_identity_0020(name) values('name5');
+select * from t_identity_0020;
+   name   | id  
+----------+-----
+ zhangsan | 100
+ name1    | 105
+ name5    | 110
+(3 rows)
+
+select ident_current('t_identity_0020');
+ ident_current 
+---------------
+           110
+(1 row)
+
+drop table t_identity_0020;
+create schema schema_ident_current_0001;
+create table schema_ident_current_0001.t_identity_0001(id int identity(101,1), name varchar(10));
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0001_id_seq_identity" for serial column "t_identity_0001.id"
+insert into schema_ident_current_0001.t_identity_0001(name) values('zhangsan');
+select * from schema_ident_current_0001.t_identity_0001;
+ id  |   name   
+-----+----------
+ 101 | zhangsan
+(1 row)
+
+select ident_current('schema_ident_current_0001.t_identity_0001');
+ ident_current 
+---------------
+           101
+(1 row)
+
+drop table schema_ident_current_0001.t_identity_0001;
+drop schema schema_ident_current_0001 cascade;
+create table t_identity_0033(c1 decimal identity(100,1), c2 varchar(100));
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0033_c1_seq_identity" for serial column "t_identity_0033.c1"
+insert into t_identity_0033(c2) values ('a');
+insert into t_identity_0033(c2) values ('b');
+insert into t_identity_0033(c2) values ('c');
+select * from t_identity_0033;
+ c1  | c2 
+-----+----
+ 100 | a
+ 101 | b
+ 102 | c
+(3 rows)
+
+select ident_current('t_identity_0033');
+ ident_current 
+---------------
+           102
+(1 row)
+
+create table t_identity_0033_01(c1 numeric identity(100,1), c2 varchar(100));
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0033_01_c1_seq_identity" for serial column "t_identity_0033_01.c1"
+insert into t_identity_0033_01(c2) values ('a');
+insert into t_identity_0033_01(c2) values ('b');
+insert into t_identity_0033_01(c2) values ('c');
+select * from t_identity_0033_01;
+ c1  | c2 
+-----+----
+ 100 | a
+ 101 | b
+ 102 | c
+(3 rows)
+
+select ident_current('t_identity_0033_01');
+ ident_current 
+---------------
+           102
+(1 row)
+
+create table t_identity_0033_02(c1 number identity(100,1), c2 varchar(100));
+NOTICE:  CREATE TABLE will create implicit sequence "t_identity_0033_02_c1_seq_identity" for serial column "t_identity_0033_02.c1"
+insert into t_identity_0033_02(c2) values ('a');
+insert into t_identity_0033_02(c2) values ('b');
+insert into t_identity_0033_02(c2) values ('c');
+select * from t_identity_0033_02;
+ c1  | c2 
+-----+----
+ 100 | a
+ 101 | b
+ 102 | c
+(3 rows)
+
+select ident_current('t_identity_0033_02');
+ ident_current 
+---------------
+           102
+(1 row)
+
+drop table t_identity_0033;
+drop table t_identity_0033_01;
+drop table t_identity_0033_02;
+drop table if exists t_ident_current0001_01;
+NOTICE:  table "t_ident_current0001_01" does not exist, skipping
+drop table if exists t_ident_current0001_02;
+NOTICE:  table "t_ident_current0001_02" does not exist, skipping
+create table t_ident_current0001_01(id int identity(100,1) primary key, name varchar(10));
+NOTICE:  CREATE TABLE will create implicit sequence "t_ident_current0001_01_id_seq_identity" for serial column "t_ident_current0001_01.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_ident_current0001_01_pkey" for table "t_ident_current0001_01"
+CREATE TABLE t_ident_current0001_02 (log_id int identity PRIMARY KEY, log_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, table_name TEXT, last_identity BIGINT unique);
+NOTICE:  CREATE TABLE will create implicit sequence "t_ident_current0001_02_log_id_seq_identity" for serial column "t_ident_current0001_02.log_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_ident_current0001_02_pkey" for table "t_ident_current0001_02"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_ident_current0001_02_last_identity_key" for table "t_ident_current0001_02"
+INSERT INTO t_ident_current0001_02 (table_name, last_identity) SELECT 't_ident_current0001_01', ident_current('t_ident_current0001_01');
+select log_id, table_name, last_identity from t_ident_current0001_02;
+ log_id |       table_name       | last_identity 
+--------+------------------------+---------------
+      1 | t_ident_current0001_01 |           100
+(1 row)
+
+drop table if exists t_ident_current0001_01;
+drop table if exists t_ident_current0001_02;
+create table t_ident_current0001_01(id int identity(100,1) primary key, name varchar(10));
+NOTICE:  CREATE TABLE will create implicit sequence "t_ident_current0001_01_id_seq_identity" for serial column "t_ident_current0001_01.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_ident_current0001_01_pkey" for table "t_ident_current0001_01"
+CREATE TABLE t_ident_current0001_02 (log_id int identity PRIMARY KEY, log_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, table_name TEXT, last_identity BIGINT);
+NOTICE:  CREATE TABLE will create implicit sequence "t_ident_current0001_02_log_id_seq_identity" for serial column "t_ident_current0001_02.log_id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_ident_current0001_02_pkey" for table "t_ident_current0001_02"
+INSERT INTO t_ident_current0001_02 (table_name, last_identity) SELECT 't_ident_current0001_01', ident_current('t_ident_current0001_01');
+select log_id, table_name, last_identity from t_ident_current0001_02;
+ log_id |       table_name       | last_identity 
+--------+------------------------+---------------
+      1 | t_ident_current0001_01 |           100
+(1 row)
+
+INSERT INTO t_ident_current0001_02 (table_name, last_identity) SELECT 'hr', ident_current('t_ident_current0001_01');
+select log_id, table_name, last_identity from t_ident_current0001_02;
+ log_id |       table_name       | last_identity 
+--------+------------------------+---------------
+      1 | t_ident_current0001_01 |           100
+      2 | hr                     |           100
+(2 rows)
+
+drop table t_ident_current0001_01;
+drop table t_ident_current0001_02;
+CREATE TABLE Employees (EmployeeID INT IDENTITY(1,1) PRIMARY KEY, FirstName NVARCHAR(50), LastName NVARCHAR(50) );
+NOTICE:  CREATE TABLE will create implicit sequence "employees_employeeid_seq_identity" for serial column "employees.employeeid"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "employees_pkey" for table "employees"
+CREATE VIEW v_Employees AS SELECT EmployeeID, FirstName, LastName FROM Employees;
+INSERT INTO Employees (FirstName, LastName) VALUES ('John', 'Doe');
+INSERT INTO Employees (FirstName, LastName) VALUES ('Jane', 'Smith');
+select * from Employees;
+ employeeid | firstname | lastname 
+------------+-----------+----------
+          1 | John      | Doe
+          2 | Jane      | Smith
+(2 rows)
+
+select * from v_Employees;
+ employeeid | firstname | lastname 
+------------+-----------+----------
+          1 | John      | Doe
+          2 | Jane      | Smith
+(2 rows)
+
+SELECT IDENT_CURRENT('Employees');
+ ident_current 
+---------------
+             2
+(1 row)
+
+SELECT IDENT_CURRENT('v_Employees');
+ ident_current 
+---------------
+              
+(1 row)
+
+drop table Employees cascade;
+NOTICE:  drop cascades to view v_employees
 reset search_path;
 drop schema test_ident_current;
 drop schema functions_test cascade;
