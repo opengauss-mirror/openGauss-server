@@ -7533,17 +7533,17 @@ bool WLMUpdateMemoryInfo(bool need_adjust)
     int adjust_count = MEMPROT_ADJUST_SIZE >> (chunkSizeInBits - BITS_IN_MB);
 
     /* if current used value is larger than recorded value, reset it */
-    if ((mctx_real_used + adjust_count) < processMemInChunks) {
+    if ((mctx_real_used + adjust_count) < processMemInChunks.value) {
         if (need_adjust) {
             adjust_count /= 2;  // just adjust 2GB
 
             (void)pg_atomic_sub_fetch_u32((volatile uint32*)&dynmicTrackedMemChunks, adjust_count);
-            (void)pg_atomic_sub_fetch_u32((volatile uint32*)&processMemInChunks, adjust_count);
+            (void)pg_atomic_sub_fetch_u32((volatile uint32*)&processMemInChunks.value, adjust_count);
             ereport(LOG,
                 (errmsg("Reset memory counting for real used memory is %d MB "
                         "and counting used memory is %d MB, adjust memory is %d MB.",
                     mctx_real_used,
-                    processMemInChunks,
+                    processMemInChunks.value,
                     adjust_count)));
 
             return false;

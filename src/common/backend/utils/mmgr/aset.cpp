@@ -497,7 +497,7 @@ MemoryContext GenericMemoryAllocator::AllocSetContextCreate(MemoryContext parent
     NodeTag type = isShared ? T_SharedAllocSetContext : T_AllocSetContext;
     bool isTracked = false;
     unsigned long value = isShared ? IS_SHARED : 0;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     if (isShared)
         func = &SharedFunctions;
@@ -668,7 +668,7 @@ void GenericMemoryAllocator::AllocSetReset(MemoryContext context)
 {
     AllocSet set = (AllocSet)context;
     AllocBlock block;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AllocSetIsValid(set));
 
@@ -752,7 +752,7 @@ void GenericMemoryAllocator::AllocSetDelete(MemoryContext context)
     AssertArg(AllocSetIsValid(set));
 
     AllocBlock block = set->blocks;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     if (set->blocks == NULL) {
         return;
@@ -820,7 +820,7 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
 #endif
     Size chunk_size;
     Size blksize;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AllocSetIsValid(set));
     AssertArg(align == 0);
@@ -1191,7 +1191,7 @@ void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
     AllocSet set = (AllocSet)context;
     AllocChunk chunk = AllocPointerGetChunk(pointer);
     Size tempSize = 0;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AllocSetIsValid(set));
 
@@ -1308,7 +1308,7 @@ void* GenericMemoryAllocator::AllocSetRealloc(
     AllocSet set = (AllocSet)context;
     AllocChunk chunk = AllocPointerGetChunk(pointer);
     Size oldsize = chunk->size;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AllocSetIsValid(set));
     AssertArg(align == 0);

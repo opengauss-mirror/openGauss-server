@@ -1691,12 +1691,10 @@ typedef struct PgBackendStatus {
     /* lwlock object now requiring */
     LWLock* lw_want_lock;
     LWLockMode lw_want_mode;
-    TimestampTz lw_want_start_time;
 
     /* all lwlocks held by this thread */
     int* lw_held_num;                      /* point to num_held_lwlocks */
     void* lw_held_locks;                   /* point to held_lwlocks[] */
-    void* lw_held_times;                   /* point to lwlock_held_times[] */
 
     DMSWaiteventTarget dms_wait_target;    /* dms wait target */
 

@@ -177,7 +177,7 @@ void AsanMemoryAllocator::AllocSetContextSetMethods(unsigned long value, MemoryC
     }
 }
 
-inline MemoryProtectFuncDef* setProtectFunc(bool isShared, bool isSession, MemoryContext parent)
+inline const MemoryProtectFuncDef* setProtectFunc(bool isShared, bool isSession, MemoryContext parent)
 {
     if (isShared) {
         return &SharedFunctions;
@@ -193,7 +193,7 @@ inline MemoryProtectFuncDef* setProtectFunc(bool isShared, bool isSession, Memor
  * We somewhat arbitrarily enforce a minimum 1K block size.
  */
 inline void CheckContextParameter(const char* name, bool isTracked, MemoryContext parent, Size minContextSize,
-    Size initBlockSize, Size maxBlockSize, AsanSet context, MemoryProtectFuncDef* func)
+    Size initBlockSize, Size maxBlockSize, AsanSet context, const MemoryProtectFuncDef* func)
 {
     initBlockSize = MAXALIGN(initBlockSize);
     if (initBlockSize < 1024) {
@@ -262,7 +262,7 @@ MemoryContext AsanMemoryAllocator::AllocSetContextCreate(MemoryContext parent, c
     NodeTag type = isShared ? T_SharedAllocSetContext : T_AsanSetContext;
     bool isTracked = false;
     unsigned long value = isShared ? IS_SHARED : 0;
-    MemoryProtectFuncDef* func = setProtectFunc(isShared, isSession, parent);
+    const MemoryProtectFuncDef* func = setProtectFunc(isShared, isSession, parent);
 
     /* we want to be sure ErrorContext still has some memory
      * even if we've run out elsewhere!
@@ -349,7 +349,7 @@ void AsanMemoryAllocator::AllocSetReset(MemoryContext context)
 {
     AsanSet set = (AsanSet)context;
     AsanBlock block;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AsanSetIsValid(set));
 
@@ -416,7 +416,7 @@ void AsanMemoryAllocator::AllocSetDelete(MemoryContext context)
 {
     AsanSet set = (AsanSet)context;
     AsanBlock block = set->blocks;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AsanSetIsValid(set));
     MemoryContextLock(context);
@@ -462,7 +462,7 @@ void AsanMemoryAllocator::AllocSetDelete(MemoryContext context)
 }
 
 inline AsanBlock DoAllocMemoryInternal(MemoryContext context, Size size, const char* file, int line,
-    MemoryProtectFuncDef* func, bool isTracked, bool isProtect)
+    const MemoryProtectFuncDef* func, bool isTracked, bool isProtect)
 {
     AsanSet set = (AsanSet)context;
     AsanBlock block;
@@ -526,7 +526,7 @@ template <bool enableMemoryProtect, bool isShared, bool isTracked>
 void* AsanMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Size size, const char* file, int line)
 {
     AsanBlock block;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(align == 0);
 
@@ -576,7 +576,7 @@ void AsanMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
     AsanSet set = (AsanSet)context;
     AsanBlock block = AsanPointerGetBlock(pointer);
     Size tempSize = 0;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AsanSetIsValid(set));
 
@@ -644,7 +644,7 @@ void AsanMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
 }
 
 AsanBlock DoReallocMemoryInternal(MemoryContext context, AsanBlock oldBlock, Size oldSize, Size size, const char* file,
-    int line, MemoryProtectFuncDef* func, bool isTracked, bool isProtect)
+    int line, const MemoryProtectFuncDef* func, bool isTracked, bool isProtect)
 {
     AsanSet set = (AsanSet)context;
     AsanBlock newBlock;
@@ -695,7 +695,7 @@ void* AsanMemoryAllocator::AllocSetRealloc(
     AsanSet set = (AsanSet)context;
     AsanBlock oldBlock = AsanPointerGetBlock(pointer);
     Size oldSize = ASAN_BLOCKRELSZ(oldBlock->requestSize);
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
     AsanBlock newBlock;
 
     AssertArg(AsanSetIsValid(set));

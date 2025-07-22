@@ -373,7 +373,7 @@ MemoryContext RackMemoryAllocator::AllocSetContextCreate(MemoryContext parent, c
     NodeTag type = isShared ? T_RackSharedAllocSetContext : T_RackAllocSetContext;
     bool isTracked = false;
     unsigned long value = isShared ? IS_SHARED : 0;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
     Size localInitBlock = initBlockSize;
     Size localMaxBlock = maxBlockSize;
     Size localMax = maxSize;
@@ -521,7 +521,7 @@ void RackMemoryAllocator::AllocSetReset(MemoryContext context)
 {
     RackAllocSet set = (RackAllocSet)context;
     AllocBlock block;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
     MemoryContextReset(set->local_context);
 
     AssertArg(AllocSetIsValid(set));
@@ -603,7 +603,7 @@ void RackMemoryAllocator::AllocSetDelete(MemoryContext context)
     AssertArg(AllocSetIsValid(set));
 
     AllocBlock block = set->blocks;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     if (set->blocks == NULL) {
         return;
@@ -669,7 +669,7 @@ void* RackMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Size
 #endif
     Size chunk_size;
     Size blksize;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AllocSetIsValid(set));
     AssertArg(align == 0);
@@ -1026,7 +1026,7 @@ void RackMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
     RackAllocSet set = (RackAllocSet)context;
     AllocChunk chunk = AllocPointerGetChunk(pointer);
     Size tempSize = 0;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AllocSetIsValid(set));
 
@@ -1147,7 +1147,7 @@ void* RackMemoryAllocator::AllocSetRealloc(
     RackAllocSet set = (RackAllocSet)context;
     AllocChunk chunk = AllocPointerGetChunk(pointer);
     Size oldsize = chunk->size;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AllocSetIsValid(set));
     AssertArg(align == 0);

@@ -221,9 +221,9 @@ typedef struct MemoryProtectFuncDef {
     int (*memalign)(void** memptr, Size alignment, Size sz, bool needProtect);
 } MemoryProtectFuncDef;
 
-extern MemoryProtectFuncDef GenericFunctions;
-extern MemoryProtectFuncDef SessionFunctions;
-extern MemoryProtectFuncDef SharedFunctions;
+extern const MemoryProtectFuncDef GenericFunctions;
+extern const MemoryProtectFuncDef SessionFunctions;
+extern const MemoryProtectFuncDef SharedFunctions;
 
 #define IsOptAllocSetContext(cxt)           \
     ((cxt) != NULL && (IsA((cxt), OptAllocSetContext)))
