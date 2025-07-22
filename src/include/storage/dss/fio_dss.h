@@ -82,4 +82,5 @@ int dss_file_copy(const char *src_path, const char *dest_path);
 int dss_aio_prep_pwrite(void *iocb, int fd, void *buf, size_t count, long long offset);
 int dss_aio_prep_pread(void *iocb, int fd, void *buf, size_t count, long long offset);
 int dss_aio_post_pwrite(void *iocb, int fd, size_t count, long long offset);
+int dss_reopen_specific_vg_handle(const char* name);
 #endif // FIO_DSS_H
