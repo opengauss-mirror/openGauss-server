@@ -392,7 +392,7 @@ DATA(insert OID = 8914 (8301  vector_l2_ops PGNSP PGUID 8385 8305 t 0));
 DATA(insert OID = 8915 (8301  vector_ip_ops PGNSP PGUID 8386 8305 f 0));
 DATA(insert OID = 8916 (8301  vector_cosine_ops PGNSP PGUID 8387 8305 f 0));
 
-DATA(insert OID = 8917 (8303  vector_l2_ops PGNSP PGUID 8400 8305 t 0));
+DATA(insert OID = 8917 (8303  vector_l2_ops PGNSP PGUID 8400 8305 f 0));
 DATA(insert OID = 8918 (8303  vector_ip_ops PGNSP PGUID 8401 8305 f 0));
 DATA(insert OID = 8919 (8303  vector_cosine_ops PGNSP PGUID 8402 8305 f 0));
 
