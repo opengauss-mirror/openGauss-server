@@ -599,6 +599,9 @@ typedef struct ResultRelInfo {
     int ri_NumUnusableIndices;
     RelationPtr ri_UnusableIndexRelationDescs;
     IndexInfo** ri_UnusableIndexRelationInfo;
+
+    /* mark if there is a diskann index */
+    bool ri_hasDiskannIndex;
 } ResultRelInfo;
 
 /* bloom filter controller */

@@ -38,6 +38,11 @@ static Datum GetScanValue(IndexScanDesc scan)
         /* Value should not be compressed or toasted */
         Assert(!VARATT_IS_COMPRESSED(DatumGetPointer(value)));
         Assert(!VARATT_IS_EXTENDED(DatumGetPointer(value)));
+
+        /* Normalize if needed */
+        if (so->normprocinfo != NULL) {
+            value = DirectFunctionCall1Coll(l2_normalize, so->collation, value);
+        }
     }
 
     return value;
@@ -79,7 +84,7 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
     so->delSearch = false;
     so->curIterNum = 0;
     so->frozenBlks = VectorList<BlockNumber>();
-    so->candidates = VectorList<ItemPointerData>();
+    so->candidates = VectorList<DiskAnnCandidatesData>();
     so->enablePQ = false;
 
     so->procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
@@ -131,10 +136,6 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
     value = GetScanValue(scan);
     so->value = value;
 
-    if (so->normprocinfo != NULL) {
-        DirectFunctionCall1Coll(l2_normalize, so->collation, value);
-    }
-
     if ((so->curpos == 0 || so->curpos == so->ncandidates) && so->curIterNum < MAX_SEARCH_ITERATION) {
         if (so->curIterNum == 0) {
             so->nexpextedCandidates = (uint32_t)DEFAULT_CADIDATES_NUMBER;
@@ -150,7 +151,7 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
 
     bool found = false;
     if (so->curpos < so->ncandidates) {
-        scan->xs_ctup.t_self = so->candidates[so->curpos];
+        scan->xs_ctup.t_self = so->candidates[so->curpos].heapTid;
         scan->xs_recheck = false;
         so->curpos++;
         found = true;
@@ -163,7 +164,7 @@ bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
 void diskannsearch(DiskAnnScanOpaque so)
 {
     NeighborPriorityQueue *queue = so->queue;
-    VectorList<ItemPointerData> *searchedResults = &(so->candidates);
+    VectorList<DiskAnnCandidatesData> *searchedResults = &(so->candidates);
     uint32_t expectedSize = so->nexpextedCandidates;
     float *query = DatumGetVector(so->value)->x;
     int16 dim = DatumGetVector(so->value)->dim;
@@ -189,8 +190,9 @@ void diskannsearch(DiskAnnScanOpaque so)
         }
 
         for (size_t j = 0; j < queue->_data[i].heaptidsLength; j++) {
-            if (!searchedResults->contains(queue->_data[i].heaptids[j])) {
-                searchedResults->push_back(queue->_data[i].heaptids[j]);
+            DiskAnnCandidatesData candidate = {.id = queue->_data[i].id, .heapTid = queue->_data[i].heaptids[j]};
+            if (!searchedResults->contains(candidate)) {
+                searchedResults->push_back(candidate);
             }
         }
     }

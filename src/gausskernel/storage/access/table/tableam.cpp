@@ -47,6 +47,7 @@
 #include "storage/shmem.h"
 #include "storage/tcap.h"
 #include "catalog/index.h"
+#include "access/datavec/diskann.h"
 
 #include "access/ustore/knl_utuple.h"
 #include "access/ustore/knl_uvisibility.h"
@@ -148,13 +149,18 @@ static ItemPointer HeapamTopsGetTSelf(Tuple tup)
 static void HeapamTopsExecDeleteIndexTuples(TupleTableSlot *slot, Relation relation, ModifyTableState *node,
     ItemPointer tupleid, ExecIndexTuplesState exec_index_tuples_state, Bitmapset *modifiedIdxAttrs)
 {
-    return;
+    if (unlikely(exec_index_tuples_state.estate->es_result_relation_info->ri_hasDiskannIndex)) {
+        DeleteDiskAnnIndexTuples(slot, tupleid, exec_index_tuples_state.estate, exec_index_tuples_state.p);
+    }
 }
 
 List *HeapamTopsExecUpdateIndexTuples(TupleTableSlot *slot, TupleTableSlot *oldslot, Relation relation,
     ModifyTableState *node, Tuple tuple, ItemPointer tupleid, ExecIndexTuplesState exec_index_tuples_state,
     int2 bucketid, Bitmapset *modifiedIdxAttrs)
 {
+    if (unlikely(exec_index_tuples_state.estate->es_result_relation_info->ri_hasDiskannIndex)) {
+        DeleteDiskAnnIndexTuples(slot, tupleid, exec_index_tuples_state.estate, exec_index_tuples_state.p);
+    }
     List *recheckIndexes = NULL;
     /*
      * insert index entries for tuple
@@ -242,7 +248,7 @@ int HeapamTupleMultiInsert(Relation relation, Relation parent, Tuple *tuples, in
 TM_Result HeapamTupleDelete(Relation relation, ItemPointer tid, CommandId cid, Snapshot crosscheck, Snapshot snapshot,
                             bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd, bool allow_delete_self)
 {
-    return heap_delete(relation, tid, cid, crosscheck, wait, tmfd, allow_delete_self);
+    return heap_delete(relation, tid, cid, crosscheck, wait, tmfd, allow_delete_self, oldslot);
 }
 
 /* 

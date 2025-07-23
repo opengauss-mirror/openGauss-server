@@ -908,22 +908,19 @@ bool IsMarkDeleted(Relation index, BlockNumber master)
     bool masterIsVacuumDeleted = false;
     bool foundAlive = false;
     BlockNumber curVertex = master;
-    while (curVertex != InvalidBlockNumber) {
-        Buffer cbuf = ReadBuffer(index, curVertex);
-        LockBuffer(cbuf, BUFFER_LOCK_SHARE);
-        Page cpage = BufferGetPage(cbuf);
-        IndexTuple itup = DiskAnnPageGetIndexTuple(cpage);
-        DiskAnnNodePage tup_src = DiskAnnPageGetNode(itup);
-        ItemId iid = PageGetItemId((cpage), FirstOffsetNumber);
-        bool isDeleted = ItemIdIsDead(iid);
-        if (isDeleted && curVertex == master && (!DiskAnnNodeIsInserted(tup_src->tag))) {
-            masterIsVacuumDeleted = true;
-        }
-        UnlockReleaseBuffer(cbuf);
-        if (!isDeleted) {
-            foundAlive = true;
-            break;
-        }
+    Buffer cbuf = ReadBuffer(index, curVertex);
+    LockBuffer(cbuf, BUFFER_LOCK_SHARE);
+    Page cpage = BufferGetPage(cbuf);
+    IndexTuple itup = DiskAnnPageGetIndexTuple(cpage);
+    DiskAnnNodePage tup_src = DiskAnnPageGetNode(itup);
+    ItemId iid = PageGetItemId((cpage), FirstOffsetNumber);
+    bool isDeleted = ItemIdIsDead(iid);
+    if (isDeleted && curVertex == master && (!DiskAnnNodeIsInserted(tup_src->tag))) {
+        masterIsVacuumDeleted = true;
+    }
+    UnlockReleaseBuffer(cbuf);
+    if (!isDeleted) {
+        foundAlive = true;
     }
     return (!foundAlive);
 }
