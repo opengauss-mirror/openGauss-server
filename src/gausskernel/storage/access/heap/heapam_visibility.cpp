@@ -150,9 +150,6 @@ static inline void LogSetHintBit(HeapTupleHeader tuple, Buffer buffer, uint16 in
  */
 static inline void SetHintBits(HeapTupleHeader tuple, Buffer buffer, uint16 infomask, TransactionId xid)
 {
-    if (SS_STANDBY_MODE) {
-        return;
-    }
 #ifdef PGXC
     // The following scenario may use local snapshot, so do not set hint bits.
     // Notice: we don't support two or more bits within infomask.
@@ -177,6 +174,11 @@ static inline void SetHintBits(HeapTupleHeader tuple, Buffer buffer, uint16 info
 
     /* The infomask has been set. */
     if (tuple->t_infomask & infomask) {
+        return;
+    }
+
+    if (SS_STANDBY_MODE) {
+        tuple->t_infomask |= infomask;
         return;
     }
 

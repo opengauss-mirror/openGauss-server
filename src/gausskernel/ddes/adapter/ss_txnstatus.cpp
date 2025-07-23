@@ -26,6 +26,7 @@
 #include "postgres.h"
 #include "utils/dynahash.h"
 #include "access/transam.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
 
 static inline int LRUIsFull(LRUQueue* queue)
 {
@@ -293,26 +294,25 @@ bool TxnStatusCacheLookup(TransactionId *xid, uint32 hashcode, CommitSeqNo *cach
     const uint32 queueId = TxnStatusCachePartitionId(hashcode);
     LRUQueue* queue = &t_thrd.dms_cxt.SSTxnStatusLRU[queueId];
     partlock = TxnStatusCachePartitionLock(hashcode);
-
-    LWLockAcquire(partlock, LW_EXCLUSIVE);
-    entry = (TxnStatusEntry *)hash_search_with_hash_value(t_thrd.dms_cxt.SSTxnStatusHash,
-        (const void *)xid, hashcode, HASH_FIND, NULL);
-
-    if (entry != NULL) {
-        if (entry->queueId != queueId) {
-            Assert(0); /* should not happen */
+    if (SSLWLockAcquireTimeout(partlock, LW_EXCLUSIVE)) {
+        entry = (TxnStatusEntry *)hash_search_with_hash_value(t_thrd.dms_cxt.SSTxnStatusHash,
+            (const void *)xid, hashcode, HASH_FIND, NULL);
+        if (entry != NULL) {
+            if (entry->queueId != queueId) {
+                Assert(0); /* should not happen */
+            } else {
+                *cached = entry->csn;
+                referLRUEntry(queue, entry);
+            }
         } else {
-            *cached = entry->csn;
-            referLRUEntry(queue, entry);
+            ereport(DEBUG1, (errmodule(MOD_SS_TXNSTATUS),
+                errmsg("SSTxnStatusCache xid=%lu not extant or lock timeout", (uint64)*xid)));
+            LWLockRelease(partlock);
+            return false;
         }
-    } else {
-        ereport(DEBUG1, (errmodule(MOD_SS_TXNSTATUS),
-            errmsg("SSTxnStatusCache xid=%lu not extant or lock timeout", (uint64)*xid)));
-        LWLockRelease(partlock);
-        return false;
-    }
 
-    LWLockRelease(partlock);
+        LWLockRelease(partlock);
+    }
     return true;
 }
 
