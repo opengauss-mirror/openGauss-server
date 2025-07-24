@@ -217,6 +217,10 @@ DATA(insert OID = 8385 (8301 vector_l2_ops PGNSP PGUID));
 DATA(insert OID = 8386 (8301 vector_ip_ops PGNSP PGUID));
 DATA(insert OID = 8387 (8301 vector_cosine_ops PGNSP PGUID));
 
+DATA(insert OID = 8400 (8303 vector_l2_ops PGNSP PGUID));
+DATA(insert OID = 8401 (8303 vector_ip_ops PGNSP PGUID));
+DATA(insert OID = 8402 (8303 vector_cosine_ops PGNSP PGUID));
+
 DATA(insert OID = 8394 (8301 bit_hamming_ops PGNSP PGUID));
 DATA(insert OID = 8392 (403 vector_ops PGNSP PGUID));
 DATA(insert OID = 8397 (403 sparsevec_ops PGNSP PGUID));

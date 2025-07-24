@@ -3055,6 +3055,8 @@ static bool _equalConstraint(const Constraint* a, const Constraint* b)
     COMPARE_SCALAR_FIELD(skip_validation);
     COMPARE_SCALAR_FIELD(initially_valid);
     COMPARE_NODE_FIELD(constraintOptions);
+    COMPARE_SCALAR_FIELD(generated_when);
+    COMPARE_SCALAR_FIELD(generated_kind);
     COMPARE_NODE_FIELD(update_expr);
     COMPARE_SCALAR_FIELD(isdisable);
 

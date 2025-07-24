@@ -77,12 +77,14 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 93057;
+const uint32 GRAND_VERSION_NUM = 93059;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 IDENTITY_VERSION_NUM = 93059;
+const uint32 DISKANN_INDEX = 93058;
 const uint32 INSTR_TRACE_VERSION_NUMBER = 93053;
 const uint32 SELECT_STMT_HAS_ROTATE = 93047;
 const uint32 SQL_LIMIT_VERSION_NUM = 93046;
