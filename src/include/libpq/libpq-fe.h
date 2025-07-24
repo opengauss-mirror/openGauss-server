@@ -262,6 +262,14 @@ typedef struct pgresAttDesc {
 #endif
 } PGresAttDesc;
 
+typedef struct {
+    int paramCount;
+    const char **paramValues;
+    const int *paramLengths;
+    const int *paramFormats;
+    int resultFormat;
+} QueryParams;
+
 /* ----------------
  * Exported functions of libpq
  * ----------------
@@ -526,6 +534,10 @@ extern unsigned char* PQunescapeBytea(const unsigned char* strtext, size_t* retb
 extern size_t PQescapeString(char* to, const char* from, size_t length);
 extern unsigned char* PQescapeBytea(const unsigned char* from, size_t from_length, size_t* to_length);
 extern PGresult* checkRefreshCacheOnError(PGconn* conn);
+
+extern PGresult **PQexecMultiSearchParams(const char *connParams, const char *queryTemplate,
+    const QueryParams *queryParams, const int queryCount, const char *preExecForConn, int threadCount);
+extern void PQclearMultiResults(PGresult **results, int resultCount);
 
 /* === in fe-print.c === */
 
