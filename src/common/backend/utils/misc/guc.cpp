@@ -525,6 +525,7 @@ static const char* show_tcp_keepalives_idle(void);
 static const char* show_tcp_keepalives_interval(void);
 static const char* show_tcp_keepalives_count(void);
 static const char* show_tcp_user_timeout(void);
+static void assign_shared_preload_libraries(const char* newval, void* extra);
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source);
 static void assign_effective_io_concurrency(int newval, void* extra);
 static void assign_pgstat_temp_directory(const char* newval, void* extra);
@@ -3690,7 +3691,7 @@ static void InitConfigureNamesString()
             &g_instance.attr.attr_common.shared_preload_libraries_string,
             "security_plugin",
             NULL,
-            NULL,
+            assign_shared_preload_libraries,
             NULL},
         {{"thread_pool_attr",
             PGC_POSTMASTER,
@@ -12453,6 +12454,24 @@ static const char* show_tcp_user_timeout(void)
     rcs = snprintf_s(buf, size, size - 1, "%d", pq_gettcpusertimeout(u_sess->proc_cxt.MyProcPort));
     securec_check_ss(rcs, "\0", "\0");
     return buf;
+}
+
+static void assign_shared_preload_libraries(const char* newval, void* extra)
+{
+    char* new_value = NULL;
+    int rcs = 0;
+
+    if (newval == NULL || strlen(newval) == 0) {
+        new_value = pstrdup("security_plugin");
+    } else if (strstr(newval, "security_plugin") != NULL) {
+        new_value = pstrdup(newval);
+    } else {
+        size_t total_len = strlen(newval) + strlen(",security_plugin") + 1;
+        new_value = (char*)palloc(total_len);
+        rcs = snprintf_s(new_value, total_len, total_len - 1, "%s,security_plugin", newval);
+        securec_check_ss(rcs, "\0", "\0");
+    }
+    g_instance.attr.attr_common.shared_preload_libraries_string = new_value;
 }
 
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source)
