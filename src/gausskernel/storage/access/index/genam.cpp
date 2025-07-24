@@ -143,6 +143,10 @@ IndexScanDesc RelationGetIndexScan(Relation index_relation, int nkeys, int norde
     scan->xs_cbuf = InvalidBuffer;
     scan->xs_continue_hot = false;
 
+    scan->xs_recheckorderby = false;
+    scan->xs_orderbyvals = NULL;
+    scan->xs_orderbynulls = NULL;
+
     return scan;
 }
 
