@@ -3129,6 +3129,23 @@ static bool check_rowtype_has_been_changed(TupleDesc row_tupdesc, TupleDesc type
     return false;
 }
 
+static bool check_rowtype_compatible_changed(TupleDesc row_tupdesc, TupleDesc type_tupdesc)
+{
+
+    // only support add or drop column
+    int check_natts = row_tupdesc->natts < type_tupdesc->natts ? row_tupdesc->natts : type_tupdesc->natts;
+    for (int i = 0; i < check_natts; i++) {
+        Form_pg_attribute row_attr = &row_tupdesc->attrs[i];
+        Form_pg_attribute type_attr = &type_tupdesc->attrs[i];
+        if (row_attr->attnum != type_attr->attnum || row_attr->atttypid != type_attr->atttypid ||
+            row_attr->attisdropped != type_attr->attisdropped) {
+            return true;
+        }
+    }
+    return false;
+}
+
+
 static inline void gsplsql_report_row_var_check_err(Oid typ_oid)
 {
     ereport(ERROR,
@@ -3195,17 +3212,21 @@ PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum)
             result = (PLpgSQL_datum*)newm;
         } break;
         case PLPGSQL_DTYPE_ROW: {
-            if (enable_plpgsql_gsdependency_guc()) {
-                PLpgSQL_row* row = (PLpgSQL_row*)datum;
-                if (row->rowtupdesc && row->rowtupdesc->tdtypeid != RECORDOID) {
-                    TupleDesc tup_desc = lookup_rowtype_tupdesc(row->rowtupdesc->tdtypeid, row->rowtupdesc->tdtypmod);
-                    if (check_rowtype_has_been_changed(row->rowtupdesc, tup_desc)) {
-                        Oid type_oid = tup_desc->tdtypeid;
-                        ReleaseTupleDesc(tup_desc);
-                        gsplsql_report_row_var_check_err(type_oid);
-                    }
-                    ReleaseTupleDesc(tup_desc);
+            PLpgSQL_row* row = (PLpgSQL_row*)datum;
+            if (row->rowtupdesc && row->rowtupdesc->tdtypeid != RECORDOID) {
+                TupleDesc tup_desc = lookup_rowtype_tupdesc(row->rowtupdesc->tdtypeid, row->rowtupdesc->tdtypmod);
+                bool check_result = false;
+                if (enable_plpgsql_gsdependency_guc()) {
+                    check_result = check_rowtype_has_been_changed(row->rowtupdesc, tup_desc);
+                } else {
+                    check_result = check_rowtype_compatible_changed(row->rowtupdesc, tup_desc);
                 }
+                if (check_result) {
+                    Oid type_oid = tup_desc->tdtypeid;
+                    ReleaseTupleDesc(tup_desc);
+                    gsplsql_report_row_var_check_err(type_oid);
+                }
+                ReleaseTupleDesc(tup_desc);
             }
             result = datum;
         } break;
