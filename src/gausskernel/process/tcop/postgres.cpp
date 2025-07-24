@@ -5801,6 +5801,11 @@ int check_log_duration(char* msec_str, bool was_logged)
 
         u_sess->slow_query_cxt.slow_query.debug_query_sql_id = u_sess->debug_query_id;
 
+        if (!u_sess->attr.attr_sql.log_duration) {
+            msec_str[0] = '\0';
+            return 0;
+        }
+
         TimestampDifference(GetCurrentStatementLocalStartTimestamp(), GetCurrentTimestamp(), &secs, &usecs);
         msecs = usecs / 1000;
 
@@ -5819,15 +5824,13 @@ int check_log_duration(char* msec_str, bool was_logged)
          * This condition can reduce the impactation on performance.
          */
         if (exceeded) {
-            if (u_sess->attr.attr_sql.log_duration) {
-                errno_t rc =
-                    snprintf_s(msec_str, PRINTF_DST_MAX, PRINTF_DST_MAX - 1, "%ld.%03d", secs * 1000 + msecs, usecs % 1000);
-                securec_check_ss(rc, "", "");
-                if (exceeded && !was_logged) {
-                    return 2;
-                } else {
-                    return 1;
-                }
+            errno_t rc =
+                snprintf_s(msec_str, PRINTF_DST_MAX, PRINTF_DST_MAX - 1, "%ld.%03d", secs * 1000 + msecs, usecs % 1000);
+            securec_check_ss(rc, "", "");
+            if (!was_logged) {
+                return 2;
+            } else {
+                return 1;
             }
         }
     }

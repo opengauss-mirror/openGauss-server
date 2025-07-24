@@ -105,7 +105,7 @@ void statement_init_metric_context()
     StatementStatContext *reusedHandle = NULL;
 
     /* won't assign handle when statement flush thread not started */
-    if (g_instance.pid_cxt.StatementPID == 0 || u_sess -> attr.attr_storage.DefaultXactReadOnly) {
+    if (g_instance.pid_cxt.StatementPID == 0 || u_sess->attr.attr_storage.DefaultXactReadOnly) {
         return;
     }
     CHECK_STMT_TRACK_ENABLED();
