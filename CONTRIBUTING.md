@@ -16,7 +16,7 @@ When reporting issues, refer to this format:
 - Anything else we need to know?
 - Environment
 
-See more about [ISSUE_TEMPLATE](.gitee/ISSUE_TEMPLATE.en.md).
+See more about [ISSUE_TEMPLATE](https://gitcode.com/opengauss/.gitcode/tree/main/.gitcode/ISSUE_TEMPLATE).
 
 ## Submit pull requests
 
@@ -68,7 +68,7 @@ When submitting pull requests, refer to this format:
 - Special notes for your reviewer
 - Release note
 
-See more about [PULL_REQUEST_TEMPLATE](.gitee/PULL_REQUEST_TEMPLATE.en.md).
+See more about [PULL_REQUEST_TEMPLATE](https://gitcode.com/opengauss/.gitcode/blob/main/.gitcode/PULL_REQUEST_TEMPLATE.zh-CN.md).
 
 ### Code style
 

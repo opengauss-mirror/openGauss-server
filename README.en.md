@@ -558,13 +558,13 @@ See the [Quick Start](https://opengauss.org/zh/docs/2.1.0/docs/Quickstart/Quicks
 
 ## Docs
 
-For more details about the installation guide, tutorials, and APIs, please see the [User Documentation](https://gitee.com/opengauss/docs).
+For more details about the installation guide, tutorials, and APIs, please see the [User Documentation](https://gitcode.com/opengauss/docs).
 
 ## Community
 
 ### Governance
 
-Check out how openGauss implements open governance [works](https://gitee.com/opengauss/community/blob/master/governance.md).
+Check out how openGauss implements open governance [works](https://gitcode.com/opengauss/community/blob/master/governance.md).
 
 ### Communication
 
@@ -582,4 +582,4 @@ For the release notes, see our [RELEASE](https://opengauss.org/zh/docs/2.1.0/doc
 
 ## License
 
-[Apache License 2.0](https://gitee.com/opengauss/community/blob/master/LICENSE)
+[MulanPSL-2.0](http://license.coscl.org.cn/MulanPSL2)
