@@ -869,10 +869,7 @@ void LimitCurrentQuery(const char* commandTag, const char* queryString)
 void UnlimitCurrentQuery()
 {
     if (!g_instance.sqlLimit_cxt.cacheInited) {
-        if (u_sess->sqlLimit_ctx.limitSqls != NIL) {
-            list_free_ext(u_sess->sqlLimit_ctx.limitSqls);
-        }
-        u_sess->sqlLimit_ctx.limitSqls = NIL;
+        list_free_ext(u_sess->sqlLimit_ctx.limitSqls);
         return;
     }
 
