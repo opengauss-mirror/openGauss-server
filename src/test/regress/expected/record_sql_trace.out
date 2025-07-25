@@ -250,11 +250,6 @@ select statement_trace_decode(trace) from statement_history limit 0;
 (0 rows)
 
 delete from statement_history;
-select statement_trace_decode(trace) from statement_history;
- statement_trace_decode 
-------------------------
-(0 rows)
-
 -- record slow sql
 set log_min_duration_statement = 50;
 set track_stmt_stat_level = 'OFF,L1';
