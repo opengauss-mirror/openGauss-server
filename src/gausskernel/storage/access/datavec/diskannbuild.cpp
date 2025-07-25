@@ -233,6 +233,7 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
     IndexTuple ctup = (IndexTuple)PageGetItem(page, PageGetItemId(page, FirstOffsetNumber));
     DiskAnnNodePage tup = DiskAnnPageGetNode(ctup);
     tup->sqrSum = (sqrSum >= 0) ? sqrSum : VectorSquareNorm(vec->x, vec->dim);
+    tup->master = InvalidBlockNumber;
 
     for (int pos = 0; pos < DISKANN_HEAPTIDS; pos++) {
         ItemPointerSetInvalid(&tup->heaptids[pos]);

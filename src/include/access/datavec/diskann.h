@@ -61,6 +61,20 @@
 #define DISKANN_HEAD_BLKNO 1                            /* first element page */
 #define DISKANN_PQTABLE_START_BLKNO 1                   /* pqtable start page */
 
+typedef struct BlockNumberHashEntry {
+    BlockNumber block;
+    char status;
+} BlockNumberHaskEntry;
+
+#define VAMANA_CAP 32766
+#define SH_PREFIX blockhash
+#define SH_ELEMENT_TYPE BlockNumberHashEntry
+#define SH_KEY_TYPE BlockNumber
+#define SH_SCOPE extern
+#define SH_DECLARE
+#include "lib/simplehash.h"
+#define DISKANN_PQ_SO_NAME "libdisksearch.so"
+
 #define DISKANN_DIS_L2 1
 #define DISKANN_DIS_IP 2
 #define DISKANN_DIS_COSINE 3
@@ -84,6 +98,37 @@
 #define DiskAnnPageGetNode(itup) ((DiskAnnNodePage)((char*)(itup) + IndexTupleSize(itup)))
 #define DiskAnnPageGetOpaque(page) ((DiskAnnPageOpaque)PageGetSpecialPointer(page))
 #define DiskAnnPageGetIndexTuple(page) ((IndexTuple)PageGetItem(page, PageGetItemId(page, FirstOffsetNumber)))
+#define DiskAnnNodeIsSlave(tag) ((bool)(tag & DiskANNPageTag::P_IS_SLAVE))
+#define DiskAnnNodeIsMaster(tag) (!(bool)(tag & DiskANNPageTag::P_IS_SLAVE))
+#define DiskAnnNodeIsInserted(tag) (!(bool)(tag & DiskANNPageTag::P_IS_INSERTED))
+
+#define SEARCH_DOUBLE 2
+#define MAX_SEARCH_ITERATION 10
+#define DEFAULT_CADIDATES_NUMBER 128
+#define SEARCH_DOUBLE 2
+#define DISKANN_NEIGHBOR_BLKNO 0x1
+#define DISKANN_NEIGHBOR_PQ 0x2
+#define DISKANN_NEIGHBOR_DISTANCE 0x4
+#define DISKANN_NEIGHBOR_VECTOR 0x8
+#define DISKANN_METAPAGE_BLKNO 0
+
+enum VectorDistanceType {
+    UNKNOWN_DIST_FUNC = 0,
+    L2_DIST_FUNC,
+    COSINE_DIST_FUNC,
+    IP_DIST_FUNC
+};
+
+enum DiskANNPageTag {
+    P_IS_SLAVE = 1,
+    P_IS_INSERTED = 2
+};
+
+typedef enum {
+    BEGIN = 0,
+    NEXT,
+    PREV,
+} MoveDirection;
 
 enum ParallelBuildFlag { CREATE_ENTRY_PAGE = 1, LINK = 2 };
 
@@ -381,6 +426,67 @@ typedef struct DiskAnnBuildState {
     MemoryContext tmpCtx;
 } DiskAnnBuildState;
 
+struct DiskAnnIdxScanData {
+    BlockNumber id;
+    ItemPointerData heapCtid;
+    bool needRecheck;
+    IndexTuple itup;
+    float distance;
+};
+
+struct DiskAnnScanOpaqueData {
+    Relation rel;
+    MemoryContext tmpCtx;
+    uint32_t nodeSize;
+    uint32_t nexpextedCandidates;
+    uint32_t ncandidates;
+    uint32_t curpos;
+    uint32_t curIterNum;
+    uint32_t nfrozen;
+    VectorDistanceType disType;
+    Datum value;
+    double querySqrSum;
+    bool delSearch;
+
+    FmgrInfo *procinfo;
+    FmgrInfo *normprocinfo;
+    Oid collation;
+
+    bool enablePQ;
+    PQParams params;
+
+    blockhash_hash *blocks;
+    VectorList<BlockNumber> frozenBlks;
+    VectorList<ItemPointerData> candidates;
+    NeighborPriorityQueue* queue;
+};
+typedef struct DiskAnnScanOpaqueData *DiskAnnScanOpaque;
+
+typedef struct DiskAnnNeighborInfo {
+    double sqrSum;
+    bool freeVector;
+    Datum vector;
+    BlockNumber blkno;
+    float distance;
+} DiskAnnNeighborInfoT;
+
+struct DiskAnnAliveSlaveIterator {
+    BlockNumber master;
+    BlockNumber curVertex;
+    BlockNumber nextVertex;
+    Relation index;
+    DiskAnnIdxScanData data;
+    uint16_t dim;
+
+    DiskAnnAliveSlaveIterator(BlockNumber blk);
+    ~DiskAnnAliveSlaveIterator() {}
+
+    DiskAnnIdxScanData GetCurVer();
+    void begin();
+    void next();
+    bool isFinished();
+};
+
 typedef struct DiskAnnPageOpaqueData {
     BlockNumber nextblkno;
     uint8 pageType;
@@ -418,11 +524,38 @@ typedef struct DiskAnnNodePageData {
     uint16 len;
     uint16 res;
     double sqrSum;
+    uint32_t tag;
+    BlockNumber master;
     ItemPointerData heaptids[DISKANN_HEAPTIDS];
     uint8 heaptidsLength;
     uint8 pqcode[FLEXIBLE_ARRAY_MEMBER];
 } DiskAnnNodePageData;
 typedef DiskAnnNodePageData* DiskAnnNodePage;
+
+struct VamanaVertexNbIterator {
+    Relation rel;
+    bool skipVisited;
+    uint16 curNeighborId;
+    uint32_t infoFlag;
+
+    DiskAnnEdgePage edges;
+    Buffer nodeBuf;
+    Buffer curNeighborBuf;
+    DiskAnnNodePage curNbtup;
+    IndexTuple curItup;
+    uint32_t nodeSize;
+    blockhash_hash *blocks;
+    VamanaVertexNbIterator(Relation index, BlockNumber blk, uint32_t flag);
+    ~VamanaVertexNbIterator() {}
+
+    BlockNumber getCurNeighborInfo(DiskAnnNeighborInfoT *info);
+    void getCurNeighborBuffer();
+    void releaseCurNeighborBuffer();
+    void conditionMove(MoveDirection direction);
+    void begin();
+    void next();
+    bool isFinished();
+};
 
 Datum diskannhandler(PG_FUNCTION_ARGS);
 Datum diskannbuild(PG_FUNCTION_ARGS);
@@ -475,4 +608,17 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
 void diskannrescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys);
 bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir);
 void diskannendscan_internal(IndexScanDesc scan);
+void diskannsearch(DiskAnnScanOpaque so);
+bool IsMarkDeleted(Relation index, BlockNumber master);
+void SearchFixedPoint(DiskAnnScanOpaque so);
+float GetDistance(DiskAnnScanOpaque so, BlockNumber blk, ItemPointer heaptids, uint8* heaptidsLength);
+int CmpIdxScanData(const void *a, const void *b);
+Neighbor *GetNextNeighbor(NeighborPriorityQueue* queue, size_t *idx);
+VamanaVertexNbIterator *CreateIterator(BlockNumber blk, DiskAnnScanOpaque so, uint32_t infoFlag);
+void ReleaseIterator(VamanaVertexNbIterator *iter);
+float ComputeL2DistanceFast(const float *u, const double su, const float *v, const double sv, uint16_t dim);
+DiskAnnAliveSlaveIterator *CreateSlaveIterator(Relation index, BlockNumber vertex,
+                                               float *query, uint16_t dim, double sqrsum);
+double VectorSquareNorm(const float *a, int dim);
+uint8_t *GetCurNeighborPQCode();
 #endif

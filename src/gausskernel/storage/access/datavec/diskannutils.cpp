@@ -23,13 +23,48 @@
  *
  * -------------------------------------------------------------------------
  */
+#include <dlfcn.h>
 #include "postgres.h"
 #include "access/datavec/diskann.h"
+#include "access/datavec/hnsw.h"
 
 #define INDEXING_ALPHA (1.2)
 #define GRAPH_SLACK_FACTOR (1.365f)
 #define INIT_INSERT_NODE_SIZE 16
 #define DISTANCE_FACTOR 2
+
+static inline uint64 murmurhash64(uint64 data)
+{
+    uint64 h = data;
+
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccd;
+    h ^= h >> 33;
+    h *= 0xc4ceb9fe1a85ec53;
+    h ^= h >> 33;
+
+    return h;
+}
+
+/* BlockNumber hash table */
+static uint32 hash_block(BlockNumber blk)
+{
+#if SIZEOF_VOID_P == 8
+    return murmurhash64((uint64)blk);
+#else
+    return murmurhash32((uint32)blk);
+#endif
+}
+
+#define SH_PREFIX blockhash
+#define SH_ELEMENT_TYPE BlockNumberHashEntry
+#define SH_KEY_TYPE BlockNumber
+#define SH_KEY block
+#define SH_HASH_KEY(tb, key) hash_block(key)
+#define SH_EQUAL(tb, a, b) ((a) == (b))
+#define SH_SCOPE extern
+#define SH_DEFINE
+#include "lib/simplehash.h"
 
 /*
  * Get type info
@@ -753,16 +788,17 @@ int CmpNeighborInfo(const void* a, const void* b)
     return left->id > right->id ? -1 : 1;
 }
 
-int DiskAnnComputePQTable(VectorArray samples, PQParams* params)
+int CmpIdxScanData(const void *a, const void *b)
 {
-    // todo g_diskann_pq_func.DiskAnnComputePQTable(samples, params);
-    return -1;
-}
-
-int DiskAnnComputeVectorPQCode(float* vector, const PQParams* params, uint8* pqCode)
-{
-    // todo g_diskann_pq_func.DiskAnnComputeVectorPQCode(vector, params, pqCode);
-    return -1;
+    const DiskAnnIdxScanData *left = (const DiskAnnIdxScanData *)a;
+    const DiskAnnIdxScanData *right = (const DiskAnnIdxScanData *)b;
+    if (left->distance < right->distance) {
+        return -1;
+    } else if (left->distance > right->distance) {
+        return 1;
+    }
+    Assert(left->id != right->id);
+    return left->id > right->id ? -1 : 1;
 }
 
 /*
@@ -865,4 +901,341 @@ void DiskAnnFlushPQInfoInternal(Relation index, char* table, BlockNumber startBl
         MarkBufferDirty(buf);  // todo: add xlog for pq table
         UnlockReleaseBuffer(buf);
     }
+}
+
+bool IsMarkDeleted(Relation index, BlockNumber master)
+{
+    bool masterIsVacuumDeleted = false;
+    bool foundAlive = false;
+    BlockNumber curVertex = master;
+    while (curVertex != InvalidBlockNumber) {
+        Buffer cbuf = ReadBuffer(index, curVertex);
+        LockBuffer(cbuf, BUFFER_LOCK_SHARE);
+        Page cpage = BufferGetPage(cbuf);
+        IndexTuple itup = DiskAnnPageGetIndexTuple(cpage);
+        DiskAnnNodePage tup_src = DiskAnnPageGetNode(itup);
+        ItemId iid = PageGetItemId((cpage), FirstOffsetNumber);
+        bool isDeleted = ItemIdIsDead(iid);
+        if (isDeleted && curVertex == master && (!DiskAnnNodeIsInserted(tup_src->tag))) {
+            masterIsVacuumDeleted = true;
+        }
+        UnlockReleaseBuffer(cbuf);
+        if (!isDeleted) {
+            foundAlive = true;
+            break;
+        }
+    }
+    return (!foundAlive);
+}
+
+VamanaVertexNbIterator::VamanaVertexNbIterator(Relation index, BlockNumber blk, uint32_t flag)
+{
+    infoFlag = flag;
+    curNeighborId = DISKANN_MAX_DEGREE;
+    curNeighborBuf = InvalidBuffer;
+    curNbtup = NULL;
+    curItup = NULL;
+    Buffer nodeBuf = ReadBuffer(index, blk);
+    LockBuffer(nodeBuf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(nodeBuf);
+    DiskAnnNodePage tup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
+    if (DiskAnnNodeIsSlave(tup->tag)) {
+        Assert(tup->master != InvalidBlockNumber);
+        Buffer masterBuf = ReadBuffer(index, tup->master);
+        LockBuffer(masterBuf, BUFFER_LOCK_SHARE);
+        Page masterPage = BufferGetPage(masterBuf);
+        tup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(masterPage));
+        UnlockReleaseBuffer(nodeBuf);
+        nodeBuf = masterBuf;
+        Assert(DiskAnnNodeIsMaster(tup->tag));
+    }
+    edges = (DiskAnnEdgePage)((uint8_t *)tup + nodeSize);
+}
+
+void VamanaVertexNbIterator::begin()
+{
+    conditionMove(BEGIN);
+}
+
+void VamanaVertexNbIterator::next()
+{
+    conditionMove(NEXT);
+}
+
+bool VamanaVertexNbIterator::isFinished()
+{
+    return curNeighborId >= edges->count;
+}
+
+void VamanaVertexNbIterator::conditionMove(MoveDirection direction)
+{
+    bool found = false;
+    releaseCurNeighborBuffer();
+    if (direction == BEGIN) {
+        curNeighborId = 0;
+    } else if (direction == NEXT) {
+        curNeighborId++;
+    }
+    if (skipVisited) {
+        for (; curNeighborId < edges->count; curNeighborId++) {
+            blockhash_insert(blocks, edges->nexts[curNeighborId], &found);
+            if (!found) {
+                break;
+            }
+        }
+    }
+}
+
+BlockNumber VamanaVertexNbIterator::getCurNeighborInfo(DiskAnnNeighborInfoT *info)
+{
+    if ((infoFlag & DISKANN_NEIGHBOR_VECTOR) == DISKANN_NEIGHBOR_VECTOR) {
+        getCurNeighborBuffer();
+    }
+
+    DiskAnnNeighborInfoT nbinfo = {0};
+    if ((infoFlag & DISKANN_NEIGHBOR_BLKNO) == DISKANN_NEIGHBOR_BLKNO) {
+        nbinfo.blkno = edges->nexts[curNeighborId];
+    }
+    if ((infoFlag & DISKANN_NEIGHBOR_DISTANCE) == DISKANN_NEIGHBOR_DISTANCE) {
+        nbinfo.distance = edges->distance[curNeighborId];
+    }
+    if ((infoFlag & DISKANN_NEIGHBOR_VECTOR) == DISKANN_NEIGHBOR_VECTOR) {
+        Assert(curItup != NULL);
+        Assert(curNbtup != NULL);
+        TupleDesc tupdesc = RelationGetDescr(rel);
+        bool isnull;
+        Datum src = index_getattr(curItup, 1, tupdesc, &isnull);
+        Datum dst = PointerGetDatum(PG_DETOAST_DATUM(src));
+        nbinfo.vector = dst;
+        nbinfo.sqrSum = curNbtup->sqrSum;
+        if (DatumGetPointer(dst) != DatumGetPointer(src)) {
+            /* Mark vector needs to be released by the user */
+            nbinfo.freeVector = true;
+        }
+    }
+    *info = nbinfo;
+    return info->blkno;
+}
+
+void VamanaVertexNbIterator::getCurNeighborBuffer()
+{
+    curNeighborBuf = ReadBuffer(rel, edges->nexts[curNeighborId]);
+    LockBuffer(curNeighborBuf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(curNeighborBuf);
+    curItup = DiskAnnPageGetIndexTuple(page);
+    curNbtup = DiskAnnPageGetNode(curItup);
+}
+
+void VamanaVertexNbIterator::releaseCurNeighborBuffer()
+{
+    if (curNeighborBuf != InvalidBuffer) {
+        UnlockReleaseBuffer(curNeighborBuf);
+        curNeighborBuf = InvalidBuffer;
+        curNbtup = NULL;
+        curItup = NULL;
+    }
+}
+
+DiskAnnAliveSlaveIterator::DiskAnnAliveSlaveIterator(BlockNumber blk)
+{
+    master = blk;
+    curVertex = InvalidBlockNumber;
+    nextVertex = InvalidBlockNumber;
+}
+
+DiskAnnIdxScanData DiskAnnAliveSlaveIterator::GetCurVer()
+{
+    curVertex = nextVertex;
+    return data;
+}
+
+void DiskAnnAliveSlaveIterator::begin()
+{
+    curVertex = master;
+    next();
+}
+
+void DiskAnnAliveSlaveIterator::next()
+{
+    while (curVertex != InvalidBlockNumber) {
+        Buffer cbuf = ReadBuffer(index, curVertex);
+        LockBuffer(cbuf, BUFFER_LOCK_SHARE);
+        Page cpage = BufferGetPage(cbuf);
+        IndexTuple itup = DiskAnnPageGetIndexTuple(cpage);
+        DiskAnnNodePage tup = DiskAnnPageGetNode(itup);
+
+        bool visible = true;
+        bool needRecheck = false;
+        ItemId iid = PageGetItemId((cpage), FirstOffsetNumber);
+        bool isDead = ItemIdIsDead(iid);
+
+        data.id = curVertex;
+        data.heapCtid = itup->t_tid;
+        data.needRecheck = needRecheck;
+        data.itup = itup;
+
+        UnlockReleaseBuffer(cbuf);
+        if (visible && (!isDead)) {
+            break;
+        } else {
+            curVertex = nextVertex;
+        }
+    }
+}
+
+bool DiskAnnAliveSlaveIterator::isFinished()
+{
+    return curVertex == InvalidBlockNumber;
+}
+
+// return PQ_ERROR if error occurs
+#define PQ_RETURN_IFERR(ret)                            \
+    do {                                                \
+        int status = (ret);                           \
+        if (SECUREC_UNLIKELY(status != PQ_SUCCESS)) { \
+            return status;                            \
+        }                                               \
+    } while (0)
+
+int diskann_pq_load_symbol(char *symbol, void **sym_lib_handle)
+{
+#ifndef WIN32
+    const char *dlsym_err = NULL;
+    *sym_lib_handle = dlsym(g_diskann_pq_func.handle, symbol);
+    dlsym_err = dlerror();
+    if (dlsym_err != NULL) {
+        ereport(WARNING, (errcode(ERRCODE_INVALID_OPERATION),
+            errmsg("incompatible library \"%s\", load %s failed, %s", DISKANN_PQ_SO_NAME, symbol, dlsym_err)));
+        return PQ_ERROR;
+    }
+#endif // !WIN32
+    return PQ_SUCCESS;
+}
+
+#define PQ_LOAD_SYMBOL_FUNC(func) diskann_pq_load_symbol(#func, (void **)&g_diskann_pq_func.func)
+
+int diskann_pq_resolve_path(char* absolute_path, const char* raw_path, const char* filename)
+{
+    char path[MAX_PATH_LEN] = { 0 };
+
+    if (!realpath(raw_path, path)) {
+        if (errno != ENOENT && errno != EACCES) {
+            return PQ_ERROR;
+        }
+    }
+
+    int ret = snprintf_s(absolute_path, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", path, filename);
+    if (ret < 0) {
+        return PQ_ERROR;
+    }
+    return PQ_SUCCESS;
+}
+
+int diskann_pq_open_dl(void **lib_handle, char *symbol)
+{
+#ifndef WIN32
+    *lib_handle = dlopen(symbol, RTLD_LAZY);
+    if (*lib_handle == NULL) {
+        ereport(WARNING, (errcode_for_file_access(), errmsg("could not load library %s, %s", DISKANN_PQ_SO_NAME, dlerror())));
+        return PQ_ERROR;
+    }
+    return PQ_SUCCESS;
+#else
+    return PQ_ERROR;
+#endif
+}
+
+void diskann_pq_close_dl(void *lib_handle)
+{
+#ifndef WIN32
+    (void)dlclose(lib_handle);
+#endif
+}
+
+int diskann_pq_load_symbols(char *lib_dl_path)
+{
+    PQ_RETURN_IFERR(diskann_pq_open_dl(&g_diskann_pq_func.handle, lib_dl_path));
+
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(DiskAnnComputePQTable));
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(DiskAnnComputeVectorPQCode));
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(DiskAnnGetPQDistanceTable));
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(DiskAnnGetPQDistance));
+
+    return PQ_SUCCESS;
+}
+
+int diskann_pq_func_init()
+{
+    if (g_diskann_pq_func.inited) {
+        return PQ_SUCCESS;
+    }
+
+    char lib_dl_path[MAX_PATH_LEN] = { 0 };
+    char *raw_path = getenv(PQ_ENV_PATH);
+    if (raw_path == nullptr) {
+        ereport(WARNING, (errmsg("failed to get DATAVEC_PQ_LIB_PATH")));
+        return PQ_ERROR;
+    }
+
+    int ret = diskann_pq_resolve_path(lib_dl_path, raw_path, DISKANN_PQ_SO_NAME);
+    if (ret != PQ_SUCCESS) {
+        ereport(WARNING, (errmsg("failed to resolve the path of libdisksearch.so, lib_dl_path %s, raw_path %s", lib_dl_path, raw_path)));
+        return PQ_ERROR;
+    }
+
+    ret = diskann_pq_load_symbols(lib_dl_path);
+    if (ret != PQ_SUCCESS) {
+        ereport(ERROR, (errmsg("failed to load libdisksearch.so, lib_dl_path %s, raw_path %s", lib_dl_path, raw_path)));
+        return PQ_ERROR;
+    }
+
+    g_diskann_pq_func.inited = true;
+    return PQ_SUCCESS;
+}
+
+int DiskAnnPQInit()
+{
+#ifdef __x86_64__
+    return PQ_ERROR;
+#endif
+    if (diskann_pq_func_init() != PQ_SUCCESS) {
+        return PQ_ERROR;
+    }
+    g_instance.pq_inited = true;
+    return PQ_SUCCESS;
+}
+
+void DiskAnnPQUinit()
+{
+    if (!g_instance.pq_inited) {
+        return;
+    }
+    g_instance.pq_inited = false;
+    ereport(LOG, (errmsg("datavec diskann PQ uninit")));
+    if (g_diskann_pq_func.handle != NULL) {
+        diskann_pq_close_dl(g_diskann_pq_func.handle);
+        g_diskann_pq_func.handle = NULL;
+        g_diskann_pq_func.inited = false;
+    }
+}
+
+int DiskAnnComputePQTable(VectorArray samples, PQParams *params)
+{
+    return g_diskann_pq_func.DiskAnnComputePQTable(samples, params);
+}
+
+int DiskAnnComputeVectorPQCode(float *vector, const PQParams *params, uint8 *pqCode)
+{
+    return g_diskann_pq_func.DiskAnnComputeVectorPQCode(vector, params, pqCode);
+}
+
+int DiskAnnGetPQDistanceTable(float *vector, const PQParams *params, float *pqDistanceTable)
+{
+    return g_diskann_pq_func.DiskAnnGetPQDistanceTable(vector, params, pqDistanceTable);
+}
+
+int DiskAnnGetPQDistance(const uint8 *basecode, const PQParams *params,
+                         const float *pqDistanceTable, float *pqDistance)
+{
+    return g_diskann_pq_func.DiskAnnGetPQDistance(basecode, params, pqDistanceTable, pqDistance);
 }

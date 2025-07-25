@@ -309,31 +309,3 @@ IndexBulkDeleteResult* diskannvacuumcleanup_internal(IndexVacuumInfo* info, Inde
 {
     return NULL;
 }
-
-/*
- * Prepare for an index scan
- */
-IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys)
-{
-    return NULL;
-}
-
-/*
- * Start or restart an index scan
- */
-void diskannrescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys)
-{}
-
-/*
- * Fetch the next tuple in the given scan
- */
-bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
-{
-    return false;
-}
-
-/*
- * End a scan and release resources
- */
-void diskannendscan_internal(IndexScanDesc scan)
-{}
