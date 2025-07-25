@@ -310,6 +310,9 @@ Datum statement_trace_decode(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0)) {
         PG_RETURN_NULL();
     }
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, "statement_trace_decode");
+    }
     bytea *traceText = DatumGetByteaP(PG_GETARG_DATUM(0));
 
     char *traceStr = instr_trace_decode(traceText);
