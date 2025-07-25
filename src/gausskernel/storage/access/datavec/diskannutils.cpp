@@ -1179,13 +1179,15 @@ int diskann_pq_func_init()
 
     int ret = diskann_pq_resolve_path(lib_dl_path, raw_path, DISKANN_PQ_SO_NAME);
     if (ret != PQ_SUCCESS) {
-        ereport(WARNING, (errmsg("failed to resolve the path of libdisksearch.so, lib_dl_path %s, raw_path %s", lib_dl_path, raw_path)));
+        ereport(WARNING, (errmsg("failed to resolve the path of libdisksearch.so, lib_dl_path %s, raw_path %s",
+                                 lib_dl_path, raw_path)));
         return PQ_ERROR;
     }
 
     ret = diskann_pq_load_symbols(lib_dl_path);
     if (ret != PQ_SUCCESS) {
-        ereport(ERROR, (errmsg("failed to load libdisksearch.so, lib_dl_path %s, raw_path %s", lib_dl_path, raw_path)));
+        ereport(WARNING,
+                (errmsg("failed to load libdisksearch.so, lib_dl_path %s, raw_path %s", lib_dl_path, raw_path)));
         return PQ_ERROR;
     }
 

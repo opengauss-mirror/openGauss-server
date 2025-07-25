@@ -314,7 +314,16 @@ static void AddTupleToSort(Relation index, ItemPointer tid, Datum* values, DiskA
     insertValue[0] = PointerGetDatum(insertVector);
 
     blkno = InsertTuple(index, insertValue, tid, buildstate);
-    buildstate->blocksList.push_back(blkno);
+    // parallel build
+    if (buildstate->diskannleader) {
+        DiskAnnShared *shared = buildstate->diskannleader->diskannshared;
+        SpinLockAcquire(&shared->mutex);
+        shared->blocksList.push_back(blkno);
+        SpinLockRelease(&shared->mutex);
+    } else {
+        // serial build
+        buildstate->blocksList.push_back(blkno);
+    }
     buildstate->indtuples++;
     pfree(insertVector);
 }
@@ -356,6 +365,9 @@ static void DiskAnnParallelScanAndInsert(Relation heapRel, Relation indexRel, Di
     /* Join parallel scan */
     indexInfo = BuildIndexInfo(indexRel);
     InitBuildState(&buildstate, heapRel, indexRel, indexInfo, true);
+    DiskAnnLeader tmpLeader;
+    tmpLeader.diskannshared = diskannshared;
+    buildstate.diskannleader = &tmpLeader;
 
     buildstate.pqTable = diskannshared->pqTable;
     if (buildstate.enablePQ) {
