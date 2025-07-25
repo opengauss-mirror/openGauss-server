@@ -165,6 +165,7 @@ constexpr uint8 VARBYTE_CONTINUATION_BIT = 0x80;  /* Continuation bit. */
 constexpr uint8 VARBYTE_DATA_BITS = 0x7F;         /* The least significant 7 bits are the data bits. */
 constexpr int VARBYTE_SHIFT_PER_BYTE = 7;         /* Shift per byte */
 constexpr int BLOCK_ID_HIGH_SHIFT = 16;           /* Move 16 bits to get the high block ID */
+constexpr int MAX_VARBYTE_SHIFT_BYTES = 6;        /* varbyte encoding uses at most 6 bytes */
 
 /* Constants for pg_relnode.map decoding */
 constexpr unsigned int RELMAPPER_MAGICSIZE = 4;
