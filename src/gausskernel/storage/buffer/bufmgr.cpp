@@ -2219,10 +2219,32 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                         }
                     } else {
                         /* No need to repair, just report error. */
-                        int elevel = ENABLE_DMS ? PANIC : ERROR;
-                        ereport(elevel, (errcode(ERRCODE_DATA_CORRUPTED),
-                            errmsg("invalid page in block %u of relation %s",
-                                blockNum, relpath(smgr->smgr_rnode, forkNum))));
+                        if (ENABLE_DMS) {
+                            BlockNumber totalBlkNumByCache = smgrnblocks_cached(smgr, forkNum);
+                            BlockNumber totalBlkNum = smgrnblocks(smgr, forkNum);
+                            if (totalBlkNumByCache > totalBlkNum || blockNum > totalBlkNumByCache ||
+                                blockNum > totalBlkNumByCache) {
+                                Page page = (Page)bufBlock;
+                                PageHeader phdr = (PageHeader)page;
+                                OffsetNumber nline = PageGetMaxOffsetNumber(page);
+                            
+                                ereport(WARNING, (errcode(ERRCODE_DATA_CORRUPTED),
+                                    errmsg("reportRelationInfo: totalBlkNumByCache: %u, totalBlkNum: %u, blocknum: %u."
+                                    "reportPageInfo: lsn:%X/%X, pd_checksum:%u, flags:%u, lower:%u, upper:%u, "
+                                    "special:%u, pagesize_version:%u, prune_xid:%u.",
+                                    totalBlkNumByCache, totalBlkNum, blockNum,
+                                    phdr->pd_lsn.xlogid, phdr->pd_lsn.xrecoff, phdr->pd_checksum, phdr->pd_flags,
+                                    phdr->pd_lower, phdr->pd_upper, phdr->pd_special, phdr->pd_pagesize_version,
+                                    phdr->pd_prune_xid)));
+                            }
+                            ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
+                                    errmsg("read buffer from disk: CRC error, invalid page in block %u of relation %s",
+                                    blockNum, relpath(smgr->smgr_rnode, forkNum))));
+                        } else {
+                            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                                    errmsg("invalid page in block %u of relation %s",
+                                    blockNum, relpath(smgr->smgr_rnode, forkNum))));
+                        }
                     }
                 }
             }
