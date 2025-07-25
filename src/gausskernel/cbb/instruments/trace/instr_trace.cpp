@@ -286,8 +286,9 @@ void end_tracing(void)
         return;
     }
 
+    int64 min_span_bytes = sizeof(TraceHeader) + TRACE_SPAN_SIZE;
     // total_len + version + spancount + span1 + span2 + ... + span...
-    if (u_sess->attr.attr_common.track_stmt_trace_size == 0) {
+    if (u_sess->attr.attr_common.track_stmt_trace_size < min_span_bytes) {
         ereport(LOG, (errmodule(MOD_INSTR), errmsg("[Statement] trace is lost due to OOM.")));
         return;
     }
@@ -301,7 +302,7 @@ void end_tracing(void)
     instr_trace_store_str((char*)&header, sizeof(TraceHeader));
 
     /* We're at the end, add all stored spans to the shared memory */
-    for (int i = 0; i < current_trace_spans->end; i++) {
+    for (int i = 0; i < total_span_cnt; i++) {
         Span       *span = &current_trace_spans->spans[i];
         instr_trace_store_str((char*)span, TRACE_SPAN_SIZE);
     }
