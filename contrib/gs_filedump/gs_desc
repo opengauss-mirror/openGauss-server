@@ -1,0 +1,348 @@
+#!/usr/bin/python3
+import os
+import re
+import sys
+import shutil
+import subprocess
+import argparse
+import hashlib
+
+# Suggest types for gs_filedump input
+def init_dist_types():
+    # Initialize data type mapping dictionary
+    dist_types = {}
+    dist_types['int2'] = 'smallint'
+    dist_types['int4'] = 'int'
+    dist_types['int8'] = 'bigint'
+    dist_types['bpchar'] = 'text'
+    dist_types['varchar'] = 'text'
+    dist_types['text'] = 'text'
+    return dist_types
+
+def ConsumeOptions():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser.add_argument('-s', '--searchpath', type=str, help='Specify the search path', required=False)  # Add -s parameter
+    parser.add_argument('-n', '--namespace', type=str, nargs='+', help='Specify the namespace(s)', required=False)
+    parser.add_argument('-t', '--tablename', type=str, nargs='+', help='Specify the tablename(s)', required=True)  # Support multiple table names
+
+    args = parser.parse_args()
+    return args.searchpath, args.namespace, args.tablename  # Return searchpath parameter
+
+# Dict init
+def dict_init(dist_name, key, fmt):
+    # If the key does not exist in the dictionary, add the key-value pair
+    if key not in dist_name:
+        dist_name[key] = fmt
+
+# List append if not exists
+def list_append(lst, value):
+    # If the value is not in the list, add it to the list
+    if value not in lst:
+        lst.append(value)
+
+def calculate_md5(file_path):
+    # Calculate the MD5 hash value of the file
+    hash_md5 = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+
+# Search for all filename files under path and add them to filepath
+def search_files(path, filename, filepath):
+    # Search for all files under the specified path and add the matching file paths to the filepath list
+    # Check if the path exists
+    if not os.path.exists(path):
+        print(f"Error: The path '{path}' does not exist.")
+        sys.exit(-1)
+    
+    # Check if the path is accessible
+    if not os.access(path, os.R_OK):
+        print(f"Error: Permission denied to access the path '{path}'.")
+        sys.exit(-1)
+    
+    for file in os.listdir(path):
+        fp = os.path.join(path, file)
+        if os.path.isfile(fp) and fp.endswith("/" + filename):
+            if fp not in filepath:
+                md5_value = calculate_md5(fp)
+                if md5_value not in [calculate_md5(p) for p in filepath]:
+                    list_append(filepath, fp)
+        elif os.path.isdir(fp):
+            search_files(fp, filename, filepath)
+
+# Execute command and capture output
+def execute_command(cmd):
+    # Execute command and capture output
+    try:
+        res = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        output = res.stdout.readlines()
+        res.stdout.close()
+        return output
+    except Exception as e:
+        print(f"Error executing command: {cmd}")
+        print(e)
+        sys.exit(-1)
+
+def get_oid_mapping(searchpath):
+    # Get OID mapping dictionary
+    map_paths = []
+    oid_mapping = {}
+    search_files(searchpath, 'pg_filenode.map', map_paths)
+    for path in map_paths:
+        cmd = f"{gs_filedump} -m {path} | grep 'OID:'"
+        try:
+            for line in execute_command(cmd):
+                line_arr = line.decode('utf-8').strip().split('\t')
+                oid = line_arr[0].split(' ')[1]
+                filenode = line_arr[1].split(' ')[1]
+                oid_mapping[oid] = filenode
+        except Exception as e:
+            print(f"Error processing filenode map at {path}")
+            print(e)
+    return oid_mapping
+
+def get_pg_class_info(searchpath, user_tables, oid_mapping):
+    # Get information from pg_class table
+    pg_tables = ["pg_database", "pg_namespace", "pg_class", "pg_attribute", "pg_type", "pg_toast_"]
+    tables = user_tables + pg_tables
+    table_regex = "|".join(tables)
+    pattern = r'([a-zA-Z]*)=([a-zA-Z]*)'
+    
+    pg_class_paths = []
+    table_info_list = []
+    
+    pg_class_filenode = oid_mapping.get("1259")  # get pg_class filenode
+    if pg_class_filenode is None:
+        print("Error: pg_class OID not found in filenode map.")
+        sys.exit(-1)
+    search_files(searchpath, pg_class_filenode, pg_class_paths)
+    grep_regex = f" |grep -iE 'oid:|copy:' | grep -B1 -iE '{table_regex}' | grep -v '-' | awk '{{print $2,$3,$4,$8,$13,$NF}}' |xargs -n11 | awk '{{if($8 != 0){{print $5,$6,$7,$9,$10,$11}}}}'"
+    for path in pg_class_paths:
+        cmd = f"{gs_filedump} -io -D  name,oid,oid,oid,oid,oid,oid,oid,float8,float8,int,oid,oid,oid,oid,oid,oid,bool,bool,char,char,smallint,smallint,bool,bool,bool,bool,bool,char,bool,bool,char,int,text,text,~ {path} {grep_regex}"
+        try:
+            for line in execute_command(cmd):
+                line_arr = line.decode('utf-8').strip().split(' ')
+                if (line_arr[5] != 'N'):
+                    matches = re.findall(pattern, line_arr[5])
+                    reloptions = ', '.join(f'{key}={value}' for key, value in matches)
+                else:
+                    reloptions = 'N'
+                
+                table_info = {'oid': line_arr[0], 'relname': line_arr[1], 'relnamespace': line_arr[2], 'relfilenode': line_arr[3], 'reltoastrelid': line_arr[4], 'reloptions': reloptions}
+                list_append(table_info_list, table_info)
+        except Exception as e:
+            print(f"Error processing pg_class at {path}")
+            print(e)
+    return table_info_list
+
+def get_namespace_mapping(searchpath, table_info_list, oid_mapping):
+    # Get namespace mapping dictionary
+    pg_namespace_paths = []
+    namespace_mapping = {}
+    for item in table_info_list:
+        if item['relname'] == 'pg_namespace':
+            search_files(searchpath, item['relfilenode'], pg_namespace_paths)
+    for path in pg_namespace_paths:
+        cmd = f"{gs_filedump} -i -D name,~ {path} | grep -iE 'oid:|copy:' | awk '{{print $NF}}' | xargs -n2 "
+        try:
+            for line in execute_command(cmd):
+                line_arr = line.decode('utf-8').strip().split('\t')
+                oid = int(line_arr[0].split()[0])
+                nsp = line_arr[0].split()[1]
+                if oid not in namespace_mapping:
+                    namespace_mapping[oid] = nsp
+        except Exception as e:
+            print(f"Error processing namespace at {path}")
+            print(e)
+    return namespace_mapping
+
+def get_attribute_info(searchpath, table_info_list, oid_mapping, result_table_dict):
+    # Get attribute information
+    pg_attribute_paths = []
+    column_info_dict = {}
+    dropped_column_dict = {}
+    type_oids = []
+    max_column_name_length = 0
+    
+    if not result_table_dict:
+        return column_info_dict, dropped_column_dict, type_oids
+    
+    table_oids_regex = '|'.join(str(i) for i in result_table_dict.keys())
+    
+    for item in table_info_list:
+        if item['relname'] == 'pg_attribute':
+            search_files(searchpath, oid_mapping.get(item['oid']), pg_attribute_paths)
+    for path in pg_attribute_paths:
+        cmd = f"{gs_filedump} -o -D oid,name,oid,int,smallint,smallint,~ {path} | grep -i COPY | grep -E '{table_oids_regex}' | uniq"
+        try:
+            for line in execute_command(cmd):
+                line_arr = line.decode('utf-8').strip().split('\t')
+                attrelid, attname, atttypid, attlen, attnum = int(line_arr[0].split()[1]), line_arr[1], int(line_arr[2]), int(line_arr[4]), int(line_arr[5])
+                dict_init(column_info_dict, attrelid, {})
+                dict_init(dropped_column_dict, attrelid, {})
+                if attnum > 0:
+                    if atttypid > 0:
+                        column_info_dict[attrelid][attnum] = [attname, atttypid, attlen]
+                        list_append(type_oids, atttypid)
+                        max_column_name_length = max(max_column_name_length, len(attname))
+                    else:
+                        dropped_column_dict[attrelid][attnum] = [attname, atttypid, attlen]
+        except Exception as e:
+            print(f"Error processing attributes at {path}")
+            print(e)
+    
+    # Remove tables with multiple matches
+    for oid in list(column_info_dict.keys()):
+        if str(oid) not in result_table_dict.keys():
+            del column_info_dict[oid]
+            del dropped_column_dict[oid]
+    
+    return column_info_dict, dropped_column_dict, type_oids, max_column_name_length
+
+def get_type_info(searchpath, table_info_list, oid_mapping, type_oids):
+    # Get type information
+    type_info_dict = {}
+    pg_type_paths = []
+    oid_regex = '|'.join(f'OID: {oid}$' for oid in type_oids)
+    for item in table_info_list:
+        if item['relname'] == 'pg_type':
+            search_files(searchpath, oid_mapping.get(item['oid']), pg_type_paths)
+
+    for path in pg_type_paths:
+        cmd = f"{gs_filedump} -i -D name,~ {path} | grep -EA 5 '{oid_regex}' | grep -E 'OID|COPY' | grep -v infomask | awk '{{print $NF}}' | xargs -n 2"
+        try:
+            for line in execute_command(cmd):
+                line_arr = line.decode('utf-8').strip().split(' ')
+                type_info_dict[int(line_arr[0])] = line_arr[1]
+        except Exception as e:
+            print(f"Error processing types at {path}")
+            print(e)
+    return type_info_dict
+
+def format_table(column_info_dict, dropped_column_dict, type_info_dict, max_column_name_length, namespace_mapping, table_info_list, oid_mapping):
+    # Format and print table information
+    dist_suggest_type = init_dist_types()
+    max_column_name_length = max_column_name_length if max_column_name_length > 10 else 10
+    format_string = f"{{:<{max_column_name_length + 4}}} | {{}}"
+    for oid, columns in column_info_dict.items():
+        types = []
+        table_info = {}
+        for table in table_info_list:
+            if int(table['oid']) == int(oid):
+                table_info = table.copy()
+                for table in table_info_list:
+                    if (int(table['oid']) == int(table_info['reltoastrelid'])):
+                        table_info['reltoastrelid'] = table['relfilenode']
+                        break
+        if not table_info:
+            continue
+        print(f"\tTable \"{namespace_mapping[int(table_info['relnamespace'])]}.{table_info['relname']}\"")
+        print(format_string.format("Column Name", "Type"))
+        print('-' * (max_column_name_length + 5) + '+' + '-' * 8)
+        for i in range(1, max(columns.keys()) + 1):
+            if i in columns:
+                print(format_string.format(columns[i][0], type_info_dict[columns[i][1]]))
+                types.append(dist_suggest_type.get(type_info_dict[columns[i][1]], type_info_dict[columns[i][1]]))
+            elif i in dropped_column_dict[oid]:
+                print(dropped_column_dict[oid][i][0])
+            else:
+                print(format_string.format("-", "-"))
+            
+        print(f"\nOID: {oid}, Relname.Relfilenode: {table_info['relfilenode']}, Toast.Relfilenode: {table_info['reltoastrelid']}")
+        table_paths = []
+        
+        search_files(searchpath, table_info['relfilenode'], table_paths)
+        table_id = oid_mapping.get(str(oid), 0)
+        search_files(searchpath, str(table_id), table_paths)
+        
+        ustore_on = 'type=ustore' in table_info['reloptions'].lower()
+        segment_on = 'segment=on' in table_info['reloptions'].lower()
+        
+        if segment_on:
+            search_files(searchpath, "1", table_paths)
+            if table_info['reltoastrelid'] != '0':
+                print("Suggest Query Type: \n    -r {} -T {} -D {}".format(table_info['relfilenode'], table_info['reltoastrelid'], ','.join(types)))
+            else:
+                print("Suggest Query Type: \n    -r {} -D {}".format(table_info['relfilenode'],  ','.join(types)))
+            print("Location of Binary file: \n   {}\n".format('\n   '.join(p for p in table_paths)))
+        else:
+            print("Suggest Query Type: \n    {} -D {}".format('-u' if ustore_on else '', ','.join(types)))
+            print("Location of Binary file : \n   {}\n".format('\n   '.join(p for p in table_paths)))
+        print("Options: {}\n".format(table_info['reloptions']))
+        
+
+
+def main(searchpath, namespaces, table_names):
+    # Main function, execute main logic
+    oid_mapping = get_oid_mapping(searchpath)      # get dict of mapping
+    if not oid_mapping:
+        print(f"Error: No mapping found in path `{searchpath}`.")
+        sys.exit(-1)
+
+    table_info_list = get_pg_class_info(searchpath, table_names, oid_mapping)    # get list of pg_class
+    namespace_mapping = get_namespace_mapping(searchpath, table_info_list, oid_mapping)          # get list of namespace
+    
+    namespace_oids = []
+    if namespaces:
+        for ns in namespaces:
+            if ns in namespace_mapping.values():
+                for k, v in namespace_mapping.items():
+                    if v == ns:
+                        namespace_oids.append(k)
+    
+    result_table_dict = {}
+    for item in table_info_list:
+        if namespace_oids:
+            if item['relname'] in table_names and (int(item['relnamespace']) in namespace_oids):
+                result_table_dict[item['oid']] = item
+        elif item['relname'] in table_names:
+            result_table_dict[item['oid']] = item
+    
+    if not result_table_dict:
+        print(f"Error: Not found table `{table_names}` in namespace `{namespaces}`.")
+        sys.exit(-1)
+        
+    column_info_dict, dropped_column_dict, type_oids, max_column_name_length = get_attribute_info(searchpath, table_info_list, oid_mapping, result_table_dict)
+    type_info_dict = get_type_info(searchpath, table_info_list, oid_mapping, type_oids)
+    format_table(column_info_dict, dropped_column_dict, type_info_dict, max_column_name_length, namespace_mapping, table_info_list, oid_mapping)
+    
+    # print tables Not Found
+    tables_not_found = table_names
+    for t in result_table_dict.values():
+        if t['relname'] in tables_not_found:
+            tables_not_found.remove(t['relname'])
+            
+    print("@"*10)
+    if tables_not_found:
+        print(f"Not found table(s): {tables_not_found}")
+    else:
+        print("All table(s) found.")
+    print("@"*10)
+
+if __name__ == "__main__":
+    # Program entry
+    exename = "gs_filedump"
+    gs_filedump = shutil.which(exename)
+    if gs_filedump is None:
+        print(f"Command {exename} not found at env $PATH.")
+        sys.exit(-1)
+    
+    try:
+        searchpath, namespaces, tablenames = ConsumeOptions()  # Get searchpath parameter
+        if not tablenames:
+            print("Error: -t (tablename) is required.")
+            sys.exit(-1)
+        
+        if not searchpath:
+            searchpath = os.environ.get('PGDATA')
+            
+        print("*" * 50 + "\n*")
+        print(f"* \t Namespaces: {namespaces}, Tables: {tablenames}")    
+        print("*\n" + "*" * 50)
+        main(searchpath, namespaces, tablenames)
+        
+    except SystemExit:
+        pass
