@@ -435,13 +435,13 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
         opFusionObj->setPreparedDestReceiver(dest);
         opFusionObj->useOuterParameter(paramLI);
         opFusionObj->setCurrentOpFusionObj(opFusionObj);
-
+#ifdef ENABLE_MULTIPLE_NODES
         CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
         bool needBucketId = cps != NULL && cps->gplan;
         if (needBucketId) {
             setCachedPlanBucketId(cps->gplan, paramLI);
         }
-
+#endif
         if (OpFusion::process(FUSION_EXECUTE, NULL, 0, completionTag, false, NULL)) {
             return;
         }
@@ -2401,13 +2401,13 @@ bool quickPlanner(List* querytree_list, Node* parsetree, const char*queryString,
             opFusionObj->setPreparedDestReceiver(receiver);
             opFusionObj->useOuterParameter(paramLI);
             opFusionObj->setCurrentOpFusionObj(opFusionObj);
-
+#ifdef ENABLE_MULTIPLE_NODES
             CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
             bool needBucketId = cps != NULL && cps->gplan;
             if (needBucketId) {
                 setCachedPlanBucketId(cps->gplan, paramLI);
             }
-
+#endif
             if (OpFusion::process(FUSION_EXECUTE, NULL, 0, completionTag, false, NULL)) {
                 MemoryContextSwitchTo(oldcxt);
                 return true;

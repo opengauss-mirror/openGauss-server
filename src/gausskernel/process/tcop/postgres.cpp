@@ -5052,11 +5052,12 @@ void exec_bind_message(BindMessage* pqBindMessage, PreparedStatement *pstmt, Cac
             opFusionObj->updatePreAllocParamter(pqBindMessage, psrc, get_param_func);
             opFusionObj->setCurrentOpFusionObj(opFusionObj);
             opFusionObj->storeFusion(portal_name);
-
+#ifdef ENABLE_MULTIPLE_NODES
             CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
             if (cps != NULL && cps->gplan) {
                 setCachedPlanBucketId(cps->gplan, opFusionObj->m_local.m_params);
             }
+#endif
             /*
              * Send BindComplete.
              */
@@ -11603,12 +11604,12 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
             opFusionObj->setCurrentOpFusionObj(opFusionObj);
             opFusionObj->CopyFormats(rformats, numRFormats);
             opFusionObj->storeFusion("");
-
+#ifdef ENABLE_MULTIPLE_NODES
             CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
             if (cps != NULL && cps->gplan) {
                 setCachedPlanBucketId(cps->gplan, params);
             }
-
+#endif
             if (OpFusion::process(FUSION_EXECUTE, NULL, 0, completionTag, true, NULL)) {
                 CommandCounterIncrement();
                 return;
