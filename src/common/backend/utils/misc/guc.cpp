@@ -511,7 +511,6 @@ static void assign_comm_fault_injection(int newval, void* extra);
 
 bool check_canonical_path(char** newval, void** extra, GucSource source);
 bool check_directory(char** newval, void** extra, GucSource source);
-bool check_audit_directory(char** newval, void** extra, GucSource source);
 static bool check_log_filename(char** newval, void** extra, GucSource source);
 static bool check_perf_log(char** newval, void** extra, GucSource source);
 static bool check_timezone_abbreviations(char** newval, void** extra, GucSource source);
@@ -12161,69 +12160,6 @@ bool check_directory(char** newval, void** extra, GucSource source)
             canonicalize_path(*newval);
         }
     }
-    return true;
-}
-
-bool check_audit_directory(char** newval, void** extra, GucSource source)
-{
-    char *pathCopy = nullptr;
-    char *ptr = nullptr;
-    bool hasWritableParent = false;
-    if (*newval == nullptr) {
-        return true;
-    }
-    if (strlen(*newval) == 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-        errmsg("invalid value for GUC parameter of directory type.")));
-    }
-    
-    if (strcmp(*newval, "pg_audit") == 0) {
-        return true;
-    }
-
-    canonicalize_path(*newval);
-    pathCopy = strdup(*newval);
-    if (access(pathCopy, F_OK) == 0) {
-        if (access(pathCopy, R_OK | W_OK) != 0) {
-            free(pathCopy);
-            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("insufficient permissions to access directory: %s", *newval)));
-        } else {
-            free(pathCopy);
-            return true;
-        }
-    }
-
-    // The directory does not exist, check if you have permission to create it.
-    ptr = pathCopy;
-    while (true) {
-        // Find the last slash in the current path.
-        ptr = strrchr(ptr, '/');
-        if (ptr == nullptr) {
-            break;
-        }
-
-        // Truncate the path to point to the parent directory.
-        *ptr = '\0';
-        
-        // Skip empty path (first slash after root directory).
-        if (strlen(pathCopy) == 0) {
-            strcpy_s(pathCopy, strlen("/") + 1, "/");
-            ptr = pathCopy + 1;
-        }
-        if (access(pathCopy, F_OK) == 0) {
-            // Check if there is write and read permission.
-            if (access(pathCopy, R_OK | W_OK) == 0) {
-                hasWritableParent = true;
-            }
-            break;
-        }
-        ptr = pathCopy;
-    }
-    if (!hasWritableParent) {
-        free(pathCopy);
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("insufficient permissions to access directory: %s", *newval)));
-    }
-    free(pathCopy);
     return true;
 }
 
