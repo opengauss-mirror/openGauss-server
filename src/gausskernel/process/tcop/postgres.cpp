@@ -7538,10 +7538,75 @@ static void clear_memory(char* qstr, char* msg, int maxlen)
     }
 }
 
+static void ResetSIGHUPFlag()
+{
+    switch (t_thrd.role) {
+        case ASH_WORKER:
+            t_thrd.ash_cxt.got_SIGHUP = false;
+            break;
+        case APPLY_WORKER:
+            t_thrd.applyworker_cxt.got_SIGHUP = false;
+            break;
+        case JOB_SCHEDULER:
+            t_thrd.job_cxt.got_SIGHUP = false;
+            break;
+        case AUTOVACUUM_LAUNCHER:
+            t_thrd.autovacuum_cxt.got_SIGHUP = false;
+            break;
+        case TXNSNAP_CAPTURER:
+        case TXNSNAP_WORKER:
+            t_thrd.snapcapturer_cxt.got_SIGHUP = false;
+            break;
+        case RBCLEANER:
+            t_thrd.rbcleaner_cxt.got_SIGHUP = false;
+            break;
+        case UNDO_WORKER:
+            t_thrd.undoworker_cxt.got_SIGHUP = false;
+            break;
+        case WLM_WORKER:
+        case WLM_MONITOR:
+        case WLM_ARBITER:
+            t_thrd.wlm_cxt.wlm_got_sighup = false;
+            break;
+        default:
+            u_sess->sig_cxt.got_SIGHUP = false;
+            break;
+    }
+
+    return;
+}
+
+static bool CheckSIGHUPFlag()
+{
+    switch (t_thrd.role) {
+        case ASH_WORKER:
+            return t_thrd.ash_cxt.got_SIGHUP;
+        case APPLY_WORKER:
+            return t_thrd.applyworker_cxt.got_SIGHUP;
+        case JOB_SCHEDULER:
+            return t_thrd.job_cxt.got_SIGHUP;
+        case AUTOVACUUM_LAUNCHER:
+            return t_thrd.autovacuum_cxt.got_SIGHUP;
+        case TXNSNAP_CAPTURER:
+        case TXNSNAP_WORKER:
+            return t_thrd.snapcapturer_cxt.got_SIGHUP;
+        case RBCLEANER:
+            return t_thrd.rbcleaner_cxt.got_SIGHUP;
+        case UNDO_WORKER:
+            return t_thrd.undoworker_cxt.got_SIGHUP;
+        case WLM_WORKER:
+        case WLM_MONITOR:
+        case WLM_ARBITER:
+            return t_thrd.wlm_cxt.wlm_got_sighup;
+        default:
+            return u_sess->sig_cxt.got_SIGHUP;
+    }
+}
+
 /* read and process the configuration file, just for openGauss backend workers */
 void reload_configfile(void)
 {
-    if (u_sess->sig_cxt.got_SIGHUP) {
+    if (CheckSIGHUPFlag()) {
         ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
         if (currentOwner == NULL) {
             /* we use t_thrd.mem_cxt.msg_mem_cxt to remember config info in this cluster. */
@@ -7550,7 +7615,7 @@ void reload_configfile(void)
                 THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
             (void)MemoryContextSwitchTo(old);
         }
-        u_sess->sig_cxt.got_SIGHUP = false;
+        ResetSIGHUPFlag();
         ProcessConfigFile(PGC_SIGHUP);
         most_available_sync = (volatile bool) u_sess->attr.attr_storage.guc_most_available_sync;
         SyncRepUpdateSyncStandbysDefined();
