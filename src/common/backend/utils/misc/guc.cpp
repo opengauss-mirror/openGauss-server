@@ -1261,7 +1261,7 @@ static void InitConfigureNamesBool()
             gettext_noop("Enable the feature that supported username as user@host, 'user'@'host' and 'user'"),
             gettext_noop("It affected in DDL scenario and the connecting DB scenario.")},
             &u_sess->attr.attr_common.b_compatibility_user_host_auth,
-            false,
+            true,
             NULL,
             NULL,
             NULL},
