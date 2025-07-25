@@ -18,6 +18,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include <cstddef>
 #include <float.h>
 #include <math.h>
 #include <limits.h>
@@ -1230,7 +1231,7 @@ static void InitSecurityConfigureNamesString()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_security.Audit_directory,
             "pg_audit",
-            check_audit_directory,
+            check_directory,
             NULL,
             NULL},
         {{"audit_data_format",

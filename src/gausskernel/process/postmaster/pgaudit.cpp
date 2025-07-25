@@ -1271,6 +1271,57 @@ retry:
     (void)fflush(t_thrd.audit.policyauditFile);
 }
 
+static void check_audit_directory(char* path)
+{
+    char *pathCopy = nullptr;
+    char *ptr = nullptr;
+    bool hasWritableParent = false;
+
+    canonicalize_path(path);
+    pathCopy = strdup(path);
+    if (access(pathCopy, F_OK) == 0) {
+        if (access(pathCopy, R_OK | W_OK) != 0) {
+            free(pathCopy);
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("insufficient permissions to access directory: %s", path)));
+        } else {
+            free(pathCopy);
+            return;
+        }
+    }
+
+    // The directory does not exist, check if you have permission to create it.
+    ptr = pathCopy;
+    while (true) {
+        // Find the last slash in the current path.
+        ptr = strrchr(ptr, '/');
+        if (ptr == nullptr) {
+            break;
+        }
+
+        // Truncate the path to point to the parent directory.
+        *ptr = '\0';
+        
+        // Skip empty path (first slash after root directory).
+        if (strlen(pathCopy) == 0) {
+            strcpy_s(pathCopy, strlen("/") + 1, "/");
+            ptr = pathCopy + 1;
+        }
+        if (access(pathCopy, F_OK) == 0) {
+            // Check if there is write and read permission.
+            if (access(pathCopy, R_OK | W_OK) == 0) {
+                hasWritableParent = true;
+            }
+            break;
+        }
+        ptr = pathCopy;
+    }
+    if (!hasWritableParent) {
+        free(pathCopy);
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("insufficient permissions to access directory: %s", path)));
+    }
+    free(pathCopy);
+}
+
 /*
  * Brief        : initialize the audit file.
  * Description  : set parameter allow_erros as error level, do not allow error as default
@@ -3551,6 +3602,7 @@ static void CheckAuditFile(void)
      * make sure init audit file if pgaudit_filepath accessable
      * directly return when sysauditFile exist
      */
+    check_audit_directory(g_instance.attr.attr_security.Audit_directory);
     auditfile_init(true);
 }
 
