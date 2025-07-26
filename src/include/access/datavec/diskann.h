@@ -58,8 +58,9 @@
 #define INDEXINGMAXC 500
 #define DISKANN_HEAPTIDS 10
 #define DISKANN_METAPAGE_BLKNO 0
-#define DISKANN_HEAD_BLKNO 1                            /* first element page */
-#define DISKANN_PQTABLE_START_BLKNO 1                   /* pqtable start page */
+#define DISKANN_EXTENTION_LOCK_BLKNO 1
+#define DISKANN_HEAD_BLKNO 2                            /* first element page */
+#define DISKANN_PQTABLE_START_BLKNO 2                   /* pqtable start page */
 
 typedef struct BlockNumberHashEntry {
     BlockNumber block;
@@ -376,6 +377,31 @@ typedef struct DiskAnnLeader {
     DiskAnnShared* diskannshared;
 } DiskAnnLeader;
 
+typedef struct DiskAnnMetaPageData {
+    uint32 magicNumber;
+    uint32 version;
+    uint32 nodeSize;
+    uint32 itemSize;
+    uint32 edgeSize;
+    uint32 indexSize;
+    uint32 pqTableSize;
+    uint32 pqDisTableSize;
+    BlockNumber insertPage;
+    BlockNumber extendPageLocker;
+
+    uint16 dimensions;
+    uint16 nfrozen;
+    uint16 pqM;
+    uint16 pqKsub;
+    uint16 pqcodeSize;
+    uint16 pqTableNblk;
+    uint16 pqDisTableNblk;
+    bool enablePQ;
+    BlockNumber frozenBlkno[FROZEN_POINT_SIZE];
+    PQParams* params;
+} DiskAnnMetaPageData;
+typedef DiskAnnMetaPageData* DiskAnnMetaPage;
+
 typedef struct DiskAnnBuildState {
     /* Info */
     Relation heap;
@@ -407,6 +433,7 @@ typedef struct DiskAnnBuildState {
     uint32 nodeSize;
     uint32 edgeSize;
     uint32 itemSize;
+    DiskAnnMetaPageData metaPage;
 
     /* PQ info */
     bool enablePQ;
@@ -434,6 +461,15 @@ struct DiskAnnIdxScanData {
     float distance;
 };
 
+struct DiskAnnCandidatesData {
+    BlockNumber id;
+    ItemPointerData heapTid;
+    bool operator==(const DiskAnnCandidatesData &other) const
+    {
+        return this->id == other.id && this->heapTid == other.heapTid;
+    }
+};
+
 struct DiskAnnScanOpaqueData {
     Relation rel;
     MemoryContext tmpCtx;
@@ -457,7 +493,7 @@ struct DiskAnnScanOpaqueData {
 
     blockhash_hash *blocks;
     VectorList<BlockNumber> frozenBlks;
-    VectorList<ItemPointerData> candidates;
+    VectorList<DiskAnnCandidatesData> candidates;
     NeighborPriorityQueue* queue;
 };
 typedef struct DiskAnnScanOpaqueData *DiskAnnScanOpaque;
@@ -494,29 +530,6 @@ typedef struct DiskAnnPageOpaqueData {
     uint16 pageId; /* for identification of DiskAnn indexes */
 } DiskAnnPageOpaqueData;
 typedef DiskAnnPageOpaqueData* DiskAnnPageOpaque;
-
-typedef struct DiskAnnMetaPageData {
-    uint32 magicNumber;
-    uint32 version;
-    uint32 nodeSize;
-    uint32 itemSize;
-    uint32 edgeSize;
-    uint32 indexSize;
-    uint32 pqTableSize;
-    uint32 pqDisTableSize;
-    BlockNumber insertPage;
-
-    uint16 dimensions;
-    uint16 nfrozen;
-    uint16 pqM;
-    uint16 pqKsub;
-    uint16 pqcodeSize;
-    uint16 pqTableNblk;
-    uint16 pqDisTableNblk;
-    bool enablePQ;
-    BlockNumber frozenBlkno[FROZEN_POINT_SIZE];
-} DiskAnnMetaPageData;
-typedef DiskAnnMetaPageData* DiskAnnMetaPage;
 
 typedef struct DiskAnnNodePageData {
     uint8 type;
@@ -621,4 +634,6 @@ DiskAnnAliveSlaveIterator *CreateSlaveIterator(Relation index, BlockNumber verte
                                                float *query, uint16_t dim, double sqrsum);
 double VectorSquareNorm(const float *a, int dim);
 uint8_t *GetCurNeighborPQCode();
+BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnMetaPage metaPage);
+void DeleteDiskAnnIndexTuples(TupleTableSlot* slot, ItemPointer tid, EState* estate, Partition p);
 #endif

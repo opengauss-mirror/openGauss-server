@@ -76,5 +76,49 @@ SELECT /*+ indexscan(diskann_t2 idx_vectors_10d_100) */ id, description
 FROM diskann_t2
 ORDER BY embedding <-> '[0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]' LIMIT 3;
 
+CREATE TABLE diskann_t3
+(
+    id INT UNIQUE,
+    vector VECTOR(20)
+);
+
+INSERT INTO diskann_t3 VALUES
+    (0, '[64, 83, 99, 42, 52, 92, 19, 33, 32, 36, 76, 72, 0, 85, 42, 94, 71, 78, 85, 89]'),
+    (1, '[47, 29, 34, 58, 17, 89, 67, 43, 95, 94, 1, 82, 36, 3, 80, 72, 82, 78, 61, 75]'),
+    (2, '[47, 63, 36, 94, 87, 72, 53, 69, 85, 89, 19, 28, 25, 76, 30, 15, 8, 0, 31, 35]'),
+    (3, '[81, 75, 93, 97, 93, 68, 34, 73, 53, 8, 17, 27, 95, 29, 91, 73, 2, 17, 46, 18]'),
+    (4, '[36, 68, 76, 52, 31, 65, 48, 45, 51, 96, 80, 78, 88, 43, 4, 57, 51, 21, 58, 64]'),
+    (5, '[65, 98, 43, 60, 8, 65, 6, 94, 56, 94, 61, 99, 76, 86, 20, 56, 27, 6, 28, 14]'),
+    (6, '[12, 32, 96, 61, 9, 20, 76, 85, 89, 32, 10, 19, 69, 23, 87, 37, 100, 8, 14, 34]'),
+    (7, '[93, 96, 8, 51, 15, 94, 50, 6, 6, 10, 78, 66, 36, 45, 7, 26, 60, 80, 65, 7]'),
+    (8, '[31, 79, 19, 39, 23, 82, 56, 39, 25, 19, 58, 12, 67, 46, 68, 84, 1, 54, 18, 81]'),
+    (9, '[43, 78, 87, 41, 21, 32, 23, 1, 83, 93, 23, 1, 73, 65, 19, 36, 39, 89, 96, 37]');
+
+CREATE INDEX idx_vectors_t3_cosine ON diskann_t3 USING diskann(vector vector_cosine_ops);
+
+SELECT /*+ indexscan(diskann_t3 idx_vectors_t3_cosine) */ *
+FROM diskann_t3
+ORDER BY vector <-> '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ,14, 15, 16, 17, 18, 19, 20]' LIMIT 2;
+
+DELETE FROM diskann_t3 WHERE id = 8;
+SELECT /*+ indexscan(diskann_t3 idx_vectors_t3_cosine) */ *
+FROM diskann_t3
+ORDER BY vector <-> '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ,14, 15, 16, 17, 18, 19, 20]' LIMIT 2;
+
+INSERT INTO diskann_t3 VALUES (10, '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ,14, 15, 16, 17, 18, 19, 20]');
+SELECT /*+ indexscan(diskann_t3 idx_vectors_t3_cosine) */ *
+FROM diskann_t3
+ORDER BY vector <-> '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ,14, 15, 16, 17, 18, 19, 20]' LIMIT 2;
+
+UPDATE diskann_t3 set vector = '[20, 19, 18, 17, 16, 15, 14, 13 ,12 ,11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]' WHERE id = 7;
+SELECT /*+ indexscan(diskann_t3 idx_vectors_t3_cosine) */ *
+FROM diskann_t3
+ORDER BY vector <-> '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ,14, 15, 16, 17, 18, 19, 20]' LIMIT 2;
+
+DELETE FROM diskann_t3 WHERE id = 10 OR id = 7;
+SELECT /*+ indexscan(diskann_t3 idx_vectors_t3_cosine) */ *
+FROM diskann_t3
+ORDER BY vector <-> '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ,14, 15, 16, 17, 18, 19, 20]' LIMIT 2;
+
 \c regression
 drop database test;

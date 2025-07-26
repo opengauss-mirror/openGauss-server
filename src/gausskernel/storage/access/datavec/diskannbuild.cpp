@@ -21,6 +21,8 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "knl/knl_variable.h"
+#include "storage/freespace.h"
 #include "access/datavec/diskann.h"
 #include "access/tableam.h"
 #include "postmaster/bgworker.h"
@@ -138,6 +140,21 @@ static void FreeBuildState(DiskAnnBuildState* buildstate, bool parallel)
     MemoryContextDelete(buildstate->tmpCtx);
 }
 
+static BlockNumber CreateRelationLockPage(Relation index)
+{
+    Buffer buf;
+    Page page;
+    BlockNumber blk;
+    buf = ReadBufferExtended(index, MAIN_FORKNUM, P_NEW, RBM_NORMAL, NULL);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    page = DiskAnnInitRegisterPage(index, buf);
+    ((PageHeader)page)->pd_lower = MAXALIGN(GetPageHeaderSize(page)) + MaxHeapTupleSize;
+    blk = BufferGetBlockNumber(buf);
+    MarkBufferDirty(buf);
+    UnlockReleaseBuffer(buf);
+    return blk;
+}
+
 static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNumber forkNum)
 {
     Buffer buf;
@@ -153,11 +170,13 @@ static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNu
     metap = DiskAnnPageGetMeta(page);
     metap->magicNumber = DISKANN_MAGIC_NUMBER;
     metap->version = DISKANN_VERSION;
+    metap->indexSize = buildstate->indexSize;
     metap->dimensions = buildstate->dimensions;
     metap->nodeSize = buildstate->nodeSize;
     metap->edgeSize = buildstate->edgeSize;
     metap->itemSize = metap->nodeSize + metap->edgeSize;
     metap->insertPage = InvalidBlockNumber;
+    metap->extendPageLocker = CreateRelationLockPage(index);
 
     /* set PQ info */
     metap->enablePQ = buildstate->enablePQ;
@@ -195,12 +214,25 @@ static char* ReserveSpace(Page page, Size size)
     return dst;
 }
 
+BlockNumber DiskAnnPageExtension(Relation index, BlockNumber pageLocker, Buffer &buf)
+{
+    Buffer extensionBufLock = ReadBufferExtended(index, MAIN_FORKNUM, pageLocker, RBM_NORMAL, NULL);
+    LockBuffer(extensionBufLock, BUFFER_LOCK_EXCLUSIVE);
+
+    BlockNumber blkid = GetPageWithFreeSpace(index, MaxHeapTupleSize);
+    buf = ReadBufferExtended(index, MAIN_FORKNUM, (blkid != InvalidBlockNumber) ? blkid : P_NEW, RBM_NORMAL, NULL);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+
+    UnlockReleaseBuffer(extensionBufLock);
+    return BufferGetBlockNumber(buf);
+}
+
 /*
  * Insert vector into page, reserve and initialize node & edge page
  *
  */
 static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrSum, ItemPointer heaptid,
-                                        DiskAnnBuildState* buildstate)
+                                        DiskAnnMetaPage metaPage)
 {
     Buffer buf;
     Page page;
@@ -217,12 +249,11 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
            BLCKSZ - MAXALIGN(SizeOfPageHeaderData) - MAXALIGN(sizeof(DiskAnnPageOpaqueData)) - sizeof(ItemIdData));
 
     /* initialize page */
-    buf = ReadBufferExtended(index, MAIN_FORKNUM, P_NEW, RBM_NORMAL, NULL);
-    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    BlockNumber blk = DiskAnnPageExtension(index, metaPage->extendPageLocker, buf);
     page = DiskAnnInitRegisterPage(index, buf);
 
     /* reserve space for node & edge page and add item into page */
-    ReserveSpace(page, buildstate->itemSize);
+    ReserveSpace(page, metaPage->itemSize);
     if (PageAddItem(page, (Item)itup, itemsz, InvalidOffsetNumber, false, false) == InvalidOffsetNumber) {
         UnlockReleaseBuffer(buf);
         pfree(itup);
@@ -243,16 +274,16 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
         tup->heaptids[0] = *heaptid;
     }
 
-    if (buildstate->enablePQ) {
-        Size codesize = buildstate->params->pqM * sizeof(uint8);
+    if (metaPage->enablePQ) {
+        Size codesize = metaPage->params->pqM * sizeof(uint8);
         uint8* pqcode = (uint8*)palloc(codesize);
-        DiskAnnComputeVectorPQCode(DatumGetVector(value)->x, buildstate->params, pqcode);
+        DiskAnnComputeVectorPQCode(DatumGetVector(value)->x, metaPage->params, pqcode);
         errno_t err = memcpy_s(tup->pqcode, codesize, pqcode, codesize);
         securec_check(err, "\0", "\0");
     }
 
     /*  initialize edge page */
-    DiskAnnEdgePage etup = (DiskAnnEdgePage)((uint8_t*)tup + buildstate->nodeSize);
+    DiskAnnEdgePage etup = (DiskAnnEdgePage)((uint8_t*)tup + metaPage->nodeSize);
     for (uint16_t pos = 0; pos < DISKANN_MAX_DEGREE; pos++) {
         etup->nexts[pos] = InvalidBlockNumber;
         etup->distance[pos] = FLT_MAX;
@@ -267,28 +298,31 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
     return blkno;
 }
 
-static BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnBuildState* buildstate)
+BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnMetaPage metaPage)
 {
     Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
     /* Normalize if needed */
-    if (buildstate->normprocinfo != NULL) {
-        if (!DiskAnnCheckNorm(buildstate->normprocinfo, buildstate->collation, value)) {
+    FmgrInfo* normprocinfo = DiskAnnOptionalProcInfo(index, DISKANN_NORM_PROC);
+    if (normprocinfo != NULL) {
+        const DiskAnnTypeInfo* typeInfo = DiskAnnGetTypeInfo(index);
+        Oid collation = index->rd_indcollation[0];
+        if (!DiskAnnCheckNorm(normprocinfo, collation, value)) {
             return InvalidBlockNumber;
         }
 
-        value = DiskAnnNormValue(buildstate->typeInfo, buildstate->collation, value);
+        value = DiskAnnNormValue(typeInfo, collation, value);
     }
 
     /* form vector */
-    Vector* vec = InitVector(buildstate->dimensions);
-    errno_t rc = memcpy_s(&vec->x[0], buildstate->dimensions * sizeof(float), ((Vector*)DatumGetPointer(value))->x,
-                          buildstate->dimensions * sizeof(float));
+    Vector* vec = InitVector(metaPage->dimensions);
+    errno_t rc = memcpy_s(&vec->x[0], metaPage->dimensions * sizeof(float), ((Vector*)DatumGetPointer(value))->x,
+                          metaPage->dimensions * sizeof(float));
     securec_check_c(rc, "\0", "\0");
 
     /* insert into page */
     BlockNumber blkno = InsertVectorIntoPage(index, vec,
                                              -1,  // calculate sqrSum by VectorSquareNorm
-                                             heaptid, buildstate);
+                                             heaptid, metaPage);
 
     BlockNumber currentPage = GetInsertPage(index);
     if (BlockNumberIsValid(blkno) && blkno != currentPage) {
@@ -313,7 +347,7 @@ static void AddTupleToSort(Relation index, ItemPointer tid, Datum* values, DiskA
     securec_check_c(rc, "\0", "\0");
     insertValue[0] = PointerGetDatum(insertVector);
 
-    blkno = InsertTuple(index, insertValue, tid, buildstate);
+    blkno = InsertTuple(index, insertValue, tid, &buildstate->metaPage);
     // parallel build
     if (buildstate->diskannleader) {
         DiskAnnShared *shared = buildstate->diskannleader->diskannshared;
@@ -365,6 +399,7 @@ static void DiskAnnParallelScanAndInsert(Relation heapRel, Relation indexRel, Di
     /* Join parallel scan */
     indexInfo = BuildIndexInfo(indexRel);
     InitBuildState(&buildstate, heapRel, indexRel, indexInfo, true);
+    DiskANNGetMetaPageInfo(indexRel, &buildstate.metaPage);
     DiskAnnLeader tmpLeader;
     tmpLeader.diskannshared = diskannshared;
     buildstate.diskannleader = &tmpLeader;
@@ -590,7 +625,7 @@ static BlockNumber GenerateFrozenPoint(DiskAnnBuildState* buildstate)
     /* insert into page */
     BlockNumber blkno = InsertVectorIntoPage(buildstate->index, vector,
                                              sqrSum,  // use vec sqrsum
-                                             &hctid, buildstate);
+                                             &hctid, &buildstate->metaPage);
 
     pfree(vector);
     pfree(vec);
@@ -726,6 +761,7 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo* indexInfo, Disk
     }
 
     buildstate->graphStore = New(CurrentMemoryContext) DiskAnnGraphStore(index);
+    DiskANNGetMetaPageInfo(index, &buildstate->metaPage);
     CreateEntryPages(buildstate);
 
     BuildVamanaIndex(buildstate);

@@ -22,6 +22,7 @@
  */
 #include "postgres.h"
 #include "access/reloptions.h"
+#include "storage/freespace.h"
 #include "commands/vacuum.h"
 #include "miscadmin.h"
 #include "utils/guc.h"
@@ -298,6 +299,27 @@ Datum diskannendscan(PG_FUNCTION_ARGS)
 bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, ItemPointer heap_tid, Relation heap,
                             IndexUniqueCheck checkUnique)
 {
+    Datum dst = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
+    Vector* value = (Vector*)DatumGetPointer(dst);
+
+    DiskAnnMetaPageData metapage;
+    DiskANNGetMetaPageInfo(index, &metapage);
+
+    BlockNumber blkno = InsertTuple(index, values, heap_tid, &metapage);
+
+    if (0 == metapage.nfrozen) {
+        ItemPointerData hctid;
+        ItemPointerSetInvalid(&hctid);
+
+        BlockNumber frozen = InsertTuple(index, values, &hctid, &metapage);
+        InsertFrozenPoint(index, frozen);
+        DiskANNGetMetaPageInfo(index, &metapage);
+    }
+
+    DiskAnnGraphStore* graphStore = New(CurrentMemoryContext) DiskAnnGraphStore(index);
+    DiskAnnGraph graph(index, metapage.dimensions, metapage.frozenBlkno[0], graphStore);
+    graph.Link(blkno, metapage.indexSize);
+
     return false;
 }
 IndexBulkDeleteResult* diskannbulkdelete_internal(IndexVacuumInfo* info, IndexBulkDeleteResult* stats,
@@ -307,5 +329,11 @@ IndexBulkDeleteResult* diskannbulkdelete_internal(IndexVacuumInfo* info, IndexBu
 }
 IndexBulkDeleteResult* diskannvacuumcleanup_internal(IndexVacuumInfo* info, IndexBulkDeleteResult* stats)
 {
-    return NULL;
+    if (!stats) {
+        stats = (IndexBulkDeleteResult*)palloc0(sizeof(IndexBulkDeleteResult));
+    }
+
+    FreeSpaceMapVacuum(info->index);
+
+    return stats;
 }

@@ -1339,6 +1339,10 @@ void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative)
             resultRelInfo->ri_ContainGPI = true;
         }
 
+        if (unlikely(!resultRelInfo->ri_hasDiskannIndex && indexDesc->rd_rel->relam == DISKANN_AM_OID)) {
+            resultRelInfo->ri_hasDiskannIndex = true;
+        }
+
         /* extract index key information from the index's pg_index info */
         ii = BuildIndexInfo(indexDesc);
 

@@ -1879,6 +1879,7 @@ void InitResultRelInfo(ResultRelInfo *resultRelInfo, Relation resultRelationDesc
 #ifdef USE_SPQ
     resultRelInfo->ri_actionAttno = InvalidAttrNumber;
 #endif
+    resultRelInfo->ri_hasDiskannIndex = false;
 }
 
 /*

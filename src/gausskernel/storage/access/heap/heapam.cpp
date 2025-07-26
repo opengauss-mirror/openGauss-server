@@ -4498,7 +4498,7 @@ void heap_release_npu_cache(Relation relation)
  * (t_xmax is needed to verify that the replacement tuple matches.)
  */
 TM_Result heap_delete(Relation relation, ItemPointer tid, CommandId cid,
-    Snapshot crosscheck, bool wait, TM_FailureData *tmfd, bool allow_delete_self)
+    Snapshot crosscheck, bool wait, TM_FailureData *tmfd, bool allow_delete_self, TupleTableSlot** oldslot)
 {
     TM_Result result;
     TransactionId xid = GetCurrentTransactionId();
@@ -4756,6 +4756,16 @@ l1:
      * we don't PANIC upon a memory allocation failure.
      */
     old_key_tuple = ExtractReplicaIdentity(relation, &tp, true, &old_key_copied, &identity);
+
+    if (unlikely(oldslot != NULL)) {
+        TupleDesc tupDesc = RelationGetDescr(relation);
+        *oldslot = MakeSingleTupleTableSlot(tupDesc);
+        bool *nulls = (bool*)palloc0(sizeof(bool) * tupDesc->natts);
+        heap_deform_tuple(&tp, tupDesc, (*oldslot)->tts_values, nulls);
+        HeapTuple tuple = heap_form_tuple(tupDesc, (*oldslot)->tts_values, nulls);
+        pfree(nulls);
+        (*oldslot)->tts_tuple = (Tuple)tuple;
+    }
 
     /*
      * If this is the first possibly-multixact-able operation in the
