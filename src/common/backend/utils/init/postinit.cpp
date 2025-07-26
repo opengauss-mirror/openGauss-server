@@ -2876,8 +2876,8 @@ void PostgresInitializer::InitExtensionVariable()
         (void**)MemoryContextAllocZero(u_sess->self_mem_cxt, (Size)(initExtArraySize * sizeof(void*)));
 
     DynamicFileList* file_scanner = NULL;
-    AutoMutexLock libraryLock(&file_list_lock);
-    libraryLock.lock();
+    AutoRWLock libraryLock(&g_file_list_lock_rw);
+    libraryLock.RdLock();
 
     for (file_scanner = file_list; file_scanner != NULL; file_scanner = file_scanner->next) {
         /* 
@@ -2889,7 +2889,7 @@ void PostgresInitializer::InitExtensionVariable()
             (*init_session_vars)();   /*It is assumed that this does not cause a deadlock for the file_list_lock*/
     }
 
-    libraryLock.unLock();
+    libraryLock.UnLock();
     
     /* check whether the extension has been created 
     *  at most one will be true.

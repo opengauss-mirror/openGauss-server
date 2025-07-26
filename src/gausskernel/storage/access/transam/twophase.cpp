@@ -2780,8 +2780,8 @@ void parseAndRemoveLibrary(char *library, int nlibrary)
     errno_t rc = 0;
 
     /* Function delete_file_handle have change to process member, here need add lock. */
-    AutoMutexLock libraryLock(&dlerror_lock);
-    libraryLock.lock();
+    AutoRWLock libraryLock(&g_dlerror_lock_rw);
+    libraryLock.WrLock();
 
     while (nlib > 0) {
         int libraryLen = 0;
@@ -2802,7 +2802,7 @@ void parseAndRemoveLibrary(char *library, int nlibrary)
         nlib--;
     }
 
-    libraryLock.unLock();
+    libraryLock.UnLock();
 }
 
 /*

@@ -524,9 +524,8 @@ static void fmgr_info_C_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedur
         LockDatabaseObject(ProcedureRelationId, functionId, 0, AccessShareLock);
     }
 
-    AutoMutexLock libraryLock(&dlerror_lock);
-
-    libraryLock.lock();
+    AutoRWLock libraryLock(&g_dlerror_lock_rw);
+    libraryLock.RdLock();
 
     /*
      * We use function RunUdFFencedMode to replace if this UDF
@@ -539,10 +538,10 @@ static void fmgr_info_C_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedur
      * See if we have the function address cached already
      */
     hashentry = lookup_C_func(procedureTuple);
-
     if (hashentry != NULL) {
         user_fn = hashentry->user_fn;
         inforec = hashentry->inforec;
+        libraryLock.UnLock();
     } else {
         /* Look up the function itself */
         if (strcmp(probinstring, "$libdir/plpgsql") && strcmp(probinstring, "$libdir/dist_fdw") &&
@@ -554,18 +553,31 @@ static void fmgr_info_C_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedur
             strcmp(probinstring, "$libdir/mot_fdw")
 #endif
             ) {
+            /* change to write lock */
+            libraryLock.UnLock();
+            libraryLock.WrLock();
+            hashentry = lookup_C_func(procedureTuple); /* double check */
+            if (hashentry != NULL) {
+                /* load by other thread, don't need lock anymore */
+                user_fn = hashentry->user_fn;
+                inforec = hashentry->inforec;
+                libraryLock.UnLock();
+                goto hashentry_not_null;
+            }
             funInfo = load_external_function(probinstring, prosrcstring, true, false);
             user_fn = funInfo.user_fn;
             inforec = funInfo.inforec;
 
             /* Cache the addresses for later calls */
             record_C_func(procedureTuple, user_fn, inforec);
+            libraryLock.UnLock();
         } else {
+            libraryLock.UnLock();
             /* These function define in system codes, their version must be 1.*/
             user_fn = load_plpgsql_function(prosrcstring);
         }
     }
-
+hashentry_not_null:
     switch (inforec->api_version) {
         case 0:
         case 1:
@@ -582,8 +594,6 @@ static void fmgr_info_C_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedur
 
     pfree_ext(probinstring);
     pfree_ext(prosrcstring);
-
-    libraryLock.unLock();
 }
 
 /*

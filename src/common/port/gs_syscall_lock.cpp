@@ -29,11 +29,10 @@
 
 syscalllock getpwuid_lock;
 syscalllock env_lock;
-syscalllock dlerror_lock;
 syscalllock kerberos_conn_lock;
 syscalllock read_cipher_lock;
-syscalllock file_list_lock;
-
+pthread_rwlock_t g_file_list_lock_rw;
+pthread_rwlock_t g_dlerror_lock_rw;
 
 /*
  * @Description: Atomic set val into *ptr in a 32-bit address, and return the previous pointed by ptr
