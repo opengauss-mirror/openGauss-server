@@ -280,6 +280,7 @@ extern TimestampTz time_t_to_timestamptz(pg_time_t tm);
 extern pg_time_t timestamptz_to_time_t(TimestampTz t);
 
 extern const char* timestamptz_to_str(TimestampTz t);
+void timestamp_out(Timestamp ts, char* buf);
 
 extern int tm2timestamp(struct pg_tm* tm, const fsec_t fsec, const int* tzp, Timestamp* dt);
 extern int timestamp2tm(Timestamp dt, int* tzp, struct pg_tm* tm, fsec_t* fsec, const char** tzn, pg_tz* attimezone);
