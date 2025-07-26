@@ -707,6 +707,7 @@ typedef struct knl_u_utils_context {
     char* numericoutput_buffer;
     char* dateoutput_buffer;
     char* vectoroutput_buffer;
+    char* timestamp_output_buffer;
 
     syscalllock deleMemContextMutex;
 

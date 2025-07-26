@@ -3553,11 +3553,18 @@ void EncodeDateTime(struct pg_tm* tm, fsec_t fsec, bool print_tz, int tz, const 
             *str++ = '-';
             str = pg_ultostr_zeropad_width_2(str, tm->tm_mday);
             *str++ = (style == USE_ISO_DATES) ? ' ' : 'T';
-            str = pg_ultostr_zeropad_width_2(str, tm->tm_hour);
-            *str++ = ':';
-            str = pg_ultostr_zeropad_width_2(str, tm->tm_min);
-            *str++ = ':';
-            str = AppendTimestampSeconds(str, tm, fsec);
+            if (tm->tm_hour || tm->tm_min || tm->tm_sec || fsec) {
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_hour);
+                *str++ = ':';
+                str = pg_ultostr_zeropad_width_2(str, tm->tm_min);
+                *str++ = ':';
+                str = AppendTimestampSeconds(str, tm, fsec);
+            } else {
+                constexpr char TIME_ZERO[] = "00:00:00";
+                rc = memcpy_sp(str, MAXDATELEN + 1, TIME_ZERO, sizeof(TIME_ZERO));
+                securec_check(rc, "\0", "\0");
+                str += sizeof(TIME_ZERO) - 1;
+            }
             if (print_tz)
                 str = EncodeTimezone(str, tz, style);
             break;
