@@ -34,7 +34,7 @@
 
 #define MAX_IMCS_PAGES_ONE_CU 1024
 #define MAX_IMCS_COL_LENGTH 8192
-#define MAX_PARALLEL_WORK_NUMS 8
+#define MAX_PARALLEL_WORK_NUMS (u_sess->attr.attr_common.imcs_parallel_populate_workers)
 #define VIRTUAL_IMCS_CTID (-1)
 #define TYPE_IMCSTORED 1
 #define TYPE_UNIMCSTORED 2

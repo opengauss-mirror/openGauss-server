@@ -365,8 +365,8 @@ void IMCUDataCacheMgr::ResetInstance(bool isPromote)
         return;
     }
     ereport(WARNING, (errmsg("IMCStore data cache manager reset.")));
-    if (g_instance.attr.attr_memory.enable_borrow_memory) {
-        IMCS_HASH_TABLE->FreeAllBorrowMemPool();
+    if (g_instance.attr.attr_memory.enable_borrow_memory || ENABLE_DSS) {
+        IMCS_HASH_TABLE->FreeAllRackMemPool();
     }
     HeapMemResetHash(IMCS_HASH_TABLE->m_imcs_hash, "IMCSDesc Lookup Table");
     HeapMemResetHash(IMCS_HASH_TABLE->m_relfilenode_hash, "IMCSDesc Relfilenode Map Table");

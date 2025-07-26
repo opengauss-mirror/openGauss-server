@@ -82,8 +82,7 @@ public:
     void ClearImcsMem(Oid relOid, RelFileNode* relNode);
     void UpdatePrimaryImcsStatus(Oid relOid, int imcsStatus);
     bool HasInitialImcsTable();
-    void FreeAllShareMemPool();
-    void FreeAllBorrowMemPool();
+    void FreeAllRackMemPool();
     HTAB* m_imcs_hash;
     HTAB* m_relfilenode_hash;
     LWLock *m_imcs_lock;

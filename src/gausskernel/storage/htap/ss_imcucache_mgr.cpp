@@ -151,6 +151,11 @@ void SSIMCUDataCacheMgr::SetSPQNodeNumAndIdx()
     pfree(rawname);
 }
 
+bool SSIMCUDataCacheMgr::CheckRGOwnedByCurNode(uint32 rgid)
+{
+    return (rgid % SS_IMCU_CACHE->spqNodeNum) == SS_IMCU_CACHE->curSpqIdx;
+}
+
 void SSIMCUDataCacheMgr::BaseCacheCU(CU* srcCU, CU* slotCU)
 {
     slotCU->m_compressedBuf = NULL;

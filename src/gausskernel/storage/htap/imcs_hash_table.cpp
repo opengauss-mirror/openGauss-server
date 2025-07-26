@@ -110,6 +110,7 @@ void IMCSHashTable::CreateImcsDesc(Relation rel, int2vector* imcsAttsNum, int im
     MemoryContext oldcontext = MemoryContextSwitchTo(m_imcs_context);
     IMCSDesc* imcsDesc = (IMCSDesc*)hash_search(m_imcs_hash, &relOid, HASH_ENTER, &found);
     if (found) {
+        LWLockRelease(m_imcs_lock);
         ereport(ERROR, (errmodule(MOD_HTAP),
             (errmsg("existed imcstore for rel(%d).", RelationGetRelid(rel)))));
     } else {
@@ -204,7 +205,6 @@ void IMCSHashTable::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
         (void)hash_search(m_imcs_hash, &relOid, HASH_REMOVE, NULL);
         LWLockRelease(m_imcs_lock);
         pg_atomic_sub_fetch_u32(&g_instance.imcstore_cxt.imcs_tbl_cnt, 1);
-
     }
     PG_CATCH();
     {
@@ -287,28 +287,7 @@ bool IMCSHashTable::HasInitialImcsTable()
     return false;
 }
 
-void IMCSHashTable::FreeAllShareMemPool()
-{
-    bool found = false;
-    Oid* relOid = NULL;
-    int ret = 0;
-    HASH_SEQ_STATUS hashSeq;
-    IMCSDesc *imcsDesc = NULL;
-
-    hash_seq_init(&hashSeq, m_imcs_hash);
-    while ((imcsDesc = (IMCSDesc*)hash_seq_search(&hashSeq)) != NULL) {
-        if (imcsDesc->shareMemPool != NULL) {
-            ret = imcsDesc->shareMemPool->DestoryShmChunk();
-            if (ret != 0) {
-                ereport(WARNING, (errmsg("Failed to unmap share memory, error code: %d", ret)));
-                continue;
-            }
-            imcsDesc->borrowMemPool = NULL;
-        }
-    }
-}
-
-void IMCSHashTable::FreeAllBorrowMemPool()
+void IMCSHashTable::FreeAllRackMemPool()
 {
     HASH_SEQ_STATUS hashSeq;
     IMCSDesc *imcsDesc = NULL;
@@ -318,6 +297,14 @@ void IMCSHashTable::FreeAllBorrowMemPool()
         if (imcsDesc->borrowMemPool != NULL && !imcsDesc->isPartition) {
             imcsDesc->borrowMemPool->Destroy();
             imcsDesc->borrowMemPool = NULL;
+        }
+        if (imcsDesc->shareMemPool != NULL) {
+            int ret = imcsDesc->shareMemPool->DestoryShmChunk();
+            if (ret != 0) {
+                ereport(WARNING, (errmsg("Failed to free share memory pool, error code: %d", ret)));
+                continue;
+            }
+            imcsDesc->shareMemPool = NULL;
         }
     }
 }

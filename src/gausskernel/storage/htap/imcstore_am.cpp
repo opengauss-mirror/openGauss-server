@@ -337,7 +337,7 @@ bool IMCStore::ImcstoreFillByDeltaScan(_in_ CStoreScanState* state, _out_ Vector
  */
 void IMCStore::SetScanRange()
 {
-    uint32 maxCuId = IMCStore::GetMaxCUID(m_imcstoreDesc);
+    uint32 maxCuId = IMCStore::GetMaxCUID(m_imcstoreDesc, m_relation);
 
     m_startCUID = 0;
     m_endCUID = maxCuId;
@@ -376,11 +376,19 @@ void IMCStore::InitPartReScan(Relation rel)
     }
 }
 
-uint32 IMCStore::GetMaxCUID(IMCSDesc* imcstoreDesc)
+uint32 IMCStore::GetMaxCUID(IMCSDesc* imcstoreDesc, Relation rel)
 {
     if (imcstoreDesc == NULL) {
         return 0;
     }
+
+    if (SS_STANDBY_MODE) {
+        uint32 realRGNums = ImcsCeil(RelationGetNumberOfBlocks(rel), MAX_IMCS_PAGES_ONE_CU);
+        uint32 realMaxRgId = realRGNums == 0 ? realRGNums : realRGNums - 1;
+        elog(DEBUG1, "local max rg id: [%u], real max rg id: [%u].", imcstoreDesc->curMaxRowGroupId, realMaxRgId);
+        return Max(realMaxRgId, imcstoreDesc->curMaxRowGroupId);
+    }
+
     return imcstoreDesc->curMaxRowGroupId;
 }
 
@@ -457,7 +465,7 @@ bool IMCStore::LoadCUDesc(
         if (rowgroup == NULL || !rowgroup->m_actived) {
             continue;
         }
-        if (rowgroup->rgxmin != InvalidTransactionId) {
+        if (rowgroup->rgxmin != InvalidTransactionId && rowgroup->rgxmin > m_snapshot->xmin) {
             continue;
         }
 
@@ -581,6 +589,7 @@ void IMCStore::GetCUDeleteMaskFromRemote(_in_ uint32 cuid, _in_ Snapshot snapSho
             if (rowIdx < 0) {
                 continue;
             }
+
             m_hasDeadRow = true;
             if ((rowIdx >> 3) > MAX_IMCSTORE_DEL_BITMAP_SIZE) {
                 ereport(
@@ -610,10 +619,14 @@ void IMCStore::GetCUDeleteMaskIfNeedForSSStandby(_in_ uint32 cuid)
 {
     RowGroup* rowgroup = m_imcstoreDesc->GetRowGroup(cuid);
     if (rowgroup == NULL) {
+        elog(DEBUG1, "GetCUDeleteMaskIfNeedForSSStandby: rowgroup is null.");
+        FormCUDeleteMaskFullRowGroup(rowgroup, cuid);
         return;
     }
+
     rowgroup->RDLockRowGroup();
-    if (rowgroup->rgxmin != InvalidTransactionId && rowgroup->rgxmin >= m_snapshot->xmin) {
+    if ((rowgroup->rgxmin != InvalidTransactionId && rowgroup->rgxmin > m_snapshot->xmin)) {
+        elog(DEBUG1, "GetCUDeleteMaskIfNeedForSSStandby: rowgroup->rgxmin > m_snapshot->xmin, rgid(%u).", cuid);
         FormCUDeleteMaskFullRowGroup(rowgroup, cuid);
         rowgroup->UnlockRowGroup();
         m_imcstoreDesc->UnReferenceRowGroup();
@@ -622,6 +635,7 @@ void IMCStore::GetCUDeleteMaskIfNeedForSSStandby(_in_ uint32 cuid)
     rowgroup->UnlockRowGroup();
     m_imcstoreDesc->UnReferenceRowGroup();
 
+    elog(DEBUG1, "GetCUDeleteMaskIfNeedForSSStandby: get delta from remote.");
     GetCUDeleteMaskFromRemote(cuid, m_snapshot);
     return;
 }
@@ -644,7 +658,7 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
     m_deltaScanCurr = 0;
     m_deltaMaskMax = 0;
 
-    if (ENABLE_DMS && !SS_PRIMARY_MODE && m_imcstoreDesc->populateInShareMem) {
+    if (ENABLE_DMS && !SS_PRIMARY_MODE) {
         GetCUDeleteMaskIfNeedForSSStandby(cuid);
         return;
     }
@@ -686,7 +700,7 @@ void IMCStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
 
 void IMCStore::FormCUDeleteMaskFullRowGroup(_in_ RowGroup* rowgroup, _in_ uint32 cuid)
 {
-    if (rowgroup->m_actived) {
+    if (rowgroup && rowgroup->m_actived) {
         for (int i = 0; i < rowgroup->m_cuDescs[m_ctidCol]->row_count; ++i) {
             m_cuDelMask[i >> 3] |= (1 << (i % 8));
         }
@@ -722,7 +736,7 @@ void IMCStore::FormLocalCUDeleteMask(_in_ RowGroup* rowgroup, CU* cuPtr, _in_ ui
         ereport(ERROR, (errmsg(
             "Try build delete mask for htap error, row group is invalid.")));
     }
-    if (rowgroup->rgxmin >= m_snapshot->xmin) {
+    if (rowgroup->rgxmin > m_snapshot->xmin) {
         FormCUDeleteMaskFullRowGroup(rowgroup, cuid);
         return;
     }

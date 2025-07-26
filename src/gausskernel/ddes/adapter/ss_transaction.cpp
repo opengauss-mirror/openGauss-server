@@ -39,6 +39,7 @@
 #ifdef ENABLE_HTAP
 #include "access/htap/imcs_hash_table.h"
 #include "access/htap/imcs_ctlg.h"
+#include "access/htap/ss_imcucache_mgr.h"
 #endif
 
 static inline void txnstatusNetworkStats(uint64 timeDiff);
@@ -1495,6 +1496,115 @@ int32 SSLoadIMCStoreVacuum(char *data, uint32 len)
     }
     MemoryContextSwitchTo(oldcontext);
     IMCStoreSyncVacuumPushWork(info->rid, info->rgid, info->xid, newBufSize, CUDescs, CUs);
+    return DMS_SUCCESS;
+}
+
+void SSBroadcastIMCStoreVacuumLocalMemory(Oid rid, uint32 rgid, TransactionId xid)
+{
+    size_t size = sizeof(SSIMCStoreVacuum);
+    SSIMCStoreVacuum* info = (SSIMCStoreVacuum*)palloc(size);
+    info->type = BCAST_IMCSTORE_VACUUM_LOCAL_MEMORY;
+    info->rid = rid;
+    info->rgid = rgid;
+    info->xid = xid;
+    info->cols = 0;
+    info->actived = false;
+    info->chunkNum = 0;
+
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)info,
+        .len = size,
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_ONLINE_LIST,
+        .inst_map = 0,
+        .timeout = SS_BROADCAST_WAIT_FIVE_SECONDS,
+        .handle_recv_msg = (unsigned char)false,
+        .check_session_kill = (unsigned char)true
+    };
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+    elog(DEBUG1, "SS broadcast imcstore for local memory to standby: rid(%u), rgid(%u), xid(%u).", rid, rgid, xid);
+    int ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
+    if (ret != DMS_SUCCESS) {
+        ereport(WARNING, (errmsg("SS broadcast imcstore vacuum for local memory infomation failed!")));
+    }
+    elog(DEBUG1, "Succeeded to SS broadcast imcstore for local memory.");
+}
+
+int32 SSLoadIMCStoreVacuumLocalMemory(char *data, uint32 len)
+{
+    SSIMCStoreVacuum* info = (SSIMCStoreVacuum*)data;
+    elog(DEBUG1, "SS recieve imcstore vacuum for local memory from primary: rid(%u), rgid(%u), xid(%u).",
+        info->rid, info->rgid, info->xid);
+    if (!SS_IMCU_CACHE->CheckRGOwnedByCurNode(info->rgid)) {
+        return DMS_SUCCESS;
+    }
+
+    IMCSDesc *imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(info->rid);
+    if (imcsDesc == NULL) {
+        return DMS_SUCCESS;
+    }
+
+    if (imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) {
+        return DMS_SUCCESS;
+    }
+
+    IMCStoreVacuumPushWork(info->rid, info->rgid, info->xid);
+    elog(DEBUG1, "Succeed to process imcstore vacuum for local memory from succeed.");
+    return DMS_SUCCESS;
+}
+
+void SSNotifyPrimaryVacuumLocalMemorySuccess(Oid rid, uint32 rgid, TransactionId xid)
+{
+    size_t size = sizeof(SSIMCStoreVacuum);
+    SSIMCStoreVacuum* info = (SSIMCStoreVacuum*)palloc(size);
+    info->type = BCAST_NOITIFY_PRIMARY_LOCAL_MEMORY_SUCCESS;
+    info->rid = rid;
+    info->rgid = rgid;
+    info->xid = xid;
+    info->cols = 0;
+    info->actived = false;
+    info->chunkNum = 0;
+
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)info,
+        .len = size,
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_SPECIFY_LIST,
+        .inst_map = (unsigned long long)1 << SS_PRIMARY_ID,
+        .timeout = SS_BROADCAST_WAIT_FIVE_SECONDS,
+        .handle_recv_msg = (unsigned char)false,
+        .check_session_kill = (unsigned char)true
+    };
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+    elog(DEBUG1, "Notify primary node that the vacuum for local memory successfully: rid(%u), rgid(%u), xid(%u).",
+        rid, rgid, xid);
+    int ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
+    if (ret != DMS_SUCCESS) {
+        ereport(WARNING, (errmsg("Notify primary node that the vacuum for local memory infomation failed!")));
+    }
+    elog(DEBUG1, "Notify primary node successfully.");
+}
+
+int32 SSUpdateIMCStoreVacuumLocalMemoryDelta(char *data, uint32 len)
+{
+    SSIMCStoreVacuum* info = (SSIMCStoreVacuum*)data;
+    elog(DEBUG1, "SS primary node recieve the request to vaccum imcstore delta for local memory:"
+        "rid(%u), rgid(%u), xid(%u).", info->rid, info->rgid, info->xid);
+    IMCSDesc *imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(info->rid);
+    if (imcsDesc == NULL) {
+        return DMS_SUCCESS;
+    }
+    if (imcsDesc->imcsStatus != IMCS_POPULATE_COMPLETE) {
+        return DMS_SUCCESS;
+    }
+    RowGroup* rowgroup = imcsDesc->GetRowGroup(info->rgid);
+    rowgroup->m_delta->Vacuum(info->xid);
+    imcsDesc->UnReferenceRowGroup();
+    elog(DEBUG1, "SS primary node vaccum imcstore delta successfully.");
     return DMS_SUCCESS;
 }
 #endif
