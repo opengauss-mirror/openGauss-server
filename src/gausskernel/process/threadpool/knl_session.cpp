@@ -1488,6 +1488,7 @@ static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
     datavec_cxt->hnsw_earlystop_threshold = 0;
     datavec_cxt->ivfflat_probes = 0;
     datavec_cxt->ivfpq_kreorder = 0;
+    datavec_cxt->diskann_probes = 0;
     datavec_cxt->enable_npu = false;
 }
 
