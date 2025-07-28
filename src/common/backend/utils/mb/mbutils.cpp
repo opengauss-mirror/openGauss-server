@@ -250,7 +250,7 @@ void InitializeCharsetEncoding(void)
     }
 
     u_sess->mb_cxt.character_set_connection = &pg_enc2name_tbl[GetDatabaseEncoding()];
-    if (ENABLE_MULTI_CHARSET) {
+    if (!IsBootstrapProcessingMode() && ENABLE_MULTI_CHARSET) {
         u_sess->mb_cxt.collation_connection = get_default_collation_by_charset(GetDatabaseEncoding(), false);
     } else {
         u_sess->mb_cxt.collation_connection = InvalidOid;
