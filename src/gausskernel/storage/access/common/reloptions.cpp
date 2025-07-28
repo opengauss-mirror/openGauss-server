@@ -274,7 +274,7 @@ static relopt_int intRelOpts[] = {
      GENERIC_MIN_PQ_M,
      GENERIC_MAX_PQ_M },
     {{"pq_ksub", "Number of centroids for each PQ subquantizer",
-      RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT | RELOPT_KIND_DISKANN},
+      RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT },
      GENERIC_DEFAULT_PQ_KSUB,
      GENERIC_MIN_PQ_KSUB,
      GENERIC_MAX_PQ_KSUB},

@@ -311,6 +311,18 @@ typedef struct PQParams {
     char *pqTable;
 } PQParams;
 
+/* DiskAnn PQ Params */
+
+typedef struct DiskPQParams {
+    int pqChunks = 512;
+    int funcType = 0;
+    int dim = 4096;
+    char *pqTable = nullptr;
+    uint32_t *offsets = nullptr;
+    char *tablesTransposed = nullptr;
+    char *centroids = nullptr;
+} DiskPQParams;
+
 /* Sampling context structure */
 typedef struct {
     Relation onerel;          /* Relation being sampled */
@@ -359,11 +371,11 @@ extern npu_func_t g_npu_func;
 typedef struct st_diskann_pq_func {
     bool inited;
     void *handle;
-    int (*DiskAnnComputePQTable)(VectorArray samples, PQParams *params);
-    int (*DiskAnnComputeVectorPQCode)(float *vector, const PQParams *params, uint8 *pqCode);
-    int (*DiskAnnGetPQDistanceTable)(float *vector, const PQParams *params, float *pqDistanceTable);
-    int (*DiskAnnGetPQDistance)(const uint8 *basecode, const PQParams *params,
-        const float *pqDistanceTable, float *pqDistance);
+    int (*ComputePQTable)(VectorArray samples, DiskPQParams *params);
+    int (*ComputeVectorPQCode)(VectorArray baseData, const DiskPQParams *params, uint8_t *pqCode);
+    int (*GetPQDistanceTable)(char *vec, const DiskPQParams *params, float *pqDistanceTable);
+    int (*GetPQDistance)(const uint8_t *basecode, const DiskPQParams *params,
+                         const float *pqDistanceTable, float &pqDistance);
 } diskann_pq_func_t;
 extern diskann_pq_func_t g_diskann_pq_func;
 

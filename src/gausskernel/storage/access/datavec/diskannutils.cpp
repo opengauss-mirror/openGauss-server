@@ -117,6 +117,13 @@ void DiskAnnUpdateMetaPage(Relation index, BlockNumber blkno, ForkNumber forkNum
     UnlockReleaseBuffer(buf);
 }
 
+Buffer DiskAnnNewBuffer(Relation index, ForkNumber forkNum)
+{
+    Buffer buf = ReadBufferExtended(index, forkNum, P_NEW, RBM_NORMAL, NULL);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    return buf;
+}
+
 void DiskAnnInitPage(Page page, Size pagesize)
 {
     PageInit(page, pagesize, sizeof(DiskAnnPageOpaqueData));
@@ -819,90 +826,6 @@ int DiskAnnGetPqM(Relation index)
     return opts ? opts->pqM : GENERIC_DEFAULT_PQ_M;
 }
 
-/*
- * Get the number of centroids for each subquantizer
- */
-int DiskAnnGetPqKsub(Relation index)
-{
-    DiskAnnOptions* opts = (DiskAnnOptions*)index->rd_options;
-    return opts ? opts->pqKsub : GENERIC_DEFAULT_PQ_KSUB;
-}
-
-/*
- * Flush PQ table into page during index building
- */
-void DiskAnnFlushPQInfo(DiskAnnBuildState* buildstate)
-{
-    Relation index = buildstate->index;
-    char* pqTable = buildstate->pqTable;
-    uint16 pqTableNblk;
-    uint16 pqDisTableNblk;
-    uint32 pqTableSize;
-    uint32 pqDisTableSize;
-
-    DiskAnnGetPQInfoFromMetaPage(index, &pqTableNblk, &pqTableSize, &pqDisTableNblk, &pqDisTableSize);
-
-    /* Flush pq table */
-    DiskAnnFlushPQInfoInternal(index, pqTable, DISKANN_PQTABLE_START_BLKNO, pqTableNblk, pqTableSize);
-}
-
-/*
- * Get the info related to pqTable in metapage
- */
-void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16* pqTableNblk, uint32* pqTableSize, uint16* pqDisTableNblk,
-                                  uint32* pqDisTableSize)
-{
-    Buffer buf;
-    Page page;
-    DiskAnnMetaPage metap;
-
-    buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
-    LockBuffer(buf, BUFFER_LOCK_SHARE);
-    page = BufferGetPage(buf);
-    metap = DiskAnnPageGetMeta(page);
-    if (unlikely(metap->magicNumber != DISKANN_MAGIC_NUMBER)) {
-        UnlockReleaseBuffer(buf);
-        elog(ERROR, "diskann index is not valid");
-    }
-
-    if (pqTableNblk != NULL) {
-        *pqTableNblk = metap->pqTableNblk;
-    }
-    if (pqTableSize != NULL) {
-        *pqTableSize = metap->pqTableSize;
-    }
-    if (pqDisTableNblk != NULL) {
-        *pqDisTableNblk = metap->pqDisTableNblk;
-    }
-    if (pqDisTableSize != NULL) {
-        *pqDisTableSize = metap->pqDisTableSize;
-    }
-
-    UnlockReleaseBuffer(buf);
-}
-
-void DiskAnnFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint32 nblks, uint64 totalSize)
-{
-    Buffer buf;
-    Page page;
-    PageHeader p;
-    uint32 curFlushSize;
-
-    for (uint32 i = 0; i < nblks; i++) {
-        curFlushSize = (i == nblks - 1) ? (totalSize - i * PQTABLE_STORAGE_SIZE) : PQTABLE_STORAGE_SIZE;
-        buf = ReadBufferExtended(index, MAIN_FORKNUM, P_NEW, RBM_NORMAL, NULL);
-        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-        page = DiskAnnInitRegisterPage(index, buf);
-        errno_t err =
-            memcpy_s(PageGetContents(page), curFlushSize, table + i * PQTABLE_STORAGE_SIZE, curFlushSize);
-        securec_check(err, "\0", "\0");
-        p = (PageHeader)page;
-        p->pd_lower += curFlushSize;
-        MarkBufferDirty(buf);  // todo: add xlog for pq table
-        UnlockReleaseBuffer(buf);
-    }
-}
-
 bool IsMarkDeleted(Relation index, BlockNumber master)
 {
     bool masterIsVacuumDeleted = false;
@@ -1153,10 +1076,10 @@ int diskann_pq_load_symbols(char *lib_dl_path)
 {
     PQ_RETURN_IFERR(diskann_pq_open_dl(&g_diskann_pq_func.handle, lib_dl_path));
 
-    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(DiskAnnComputePQTable));
-    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(DiskAnnComputeVectorPQCode));
-    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(DiskAnnGetPQDistanceTable));
-    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(DiskAnnGetPQDistance));
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(ComputePQTable));
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(ComputeVectorPQCode));
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(GetPQDistanceTable));
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(GetPQDistance));
 
     return PQ_SUCCESS;
 }
@@ -1176,7 +1099,7 @@ int diskann_pq_func_init()
 
     int ret = diskann_pq_resolve_path(lib_dl_path, raw_path, DISKANN_PQ_SO_NAME);
     if (ret != PQ_SUCCESS) {
-        ereport(WARNING, (errmsg("failed to resolve the path of libdisksearch.so, lib_dl_path %s, raw_path %s",
+        ereport(WARNING, (errmsg("failed to resolve the path of libdisksearch_opgs.so, lib_dl_path %s, raw_path %s",
                                  lib_dl_path, raw_path)));
         return PQ_ERROR;
     }
@@ -1184,7 +1107,7 @@ int diskann_pq_func_init()
     ret = diskann_pq_load_symbols(lib_dl_path);
     if (ret != PQ_SUCCESS) {
         ereport(WARNING,
-                (errmsg("failed to load libdisksearch.so, lib_dl_path %s, raw_path %s", lib_dl_path, raw_path)));
+                (errmsg("failed to load libdisksearch_opgs.so, lib_dl_path %s, raw_path %s", lib_dl_path, raw_path)));
         return PQ_ERROR;
     }
 
@@ -1218,23 +1141,202 @@ void DiskAnnPQUinit()
     }
 }
 
-int DiskAnnComputePQTable(VectorArray samples, PQParams *params)
+int ComputePQTable(VectorArray samples, DiskPQParams *params)
 {
-    return g_diskann_pq_func.DiskAnnComputePQTable(samples, params);
+    return g_diskann_pq_func.ComputePQTable(samples, params);
 }
 
-int DiskAnnComputeVectorPQCode(float *vector, const PQParams *params, uint8 *pqCode)
+int ComputeVectorPQCode(VectorArray baseData, const DiskPQParams *params, uint8_t *pqCode)
 {
-    return g_diskann_pq_func.DiskAnnComputeVectorPQCode(vector, params, pqCode);
+    return g_diskann_pq_func.ComputeVectorPQCode(baseData, params, pqCode);
 }
 
-int DiskAnnGetPQDistanceTable(float *vector, const PQParams *params, float *pqDistanceTable)
+int GetPQDistanceTable(char *vec, const DiskPQParams *params, float *pqDistanceTable)
 {
-    return g_diskann_pq_func.DiskAnnGetPQDistanceTable(vector, params, pqDistanceTable);
+    return g_diskann_pq_func.GetPQDistanceTable(vec, params, pqDistanceTable);
 }
 
-int DiskAnnGetPQDistance(const uint8 *basecode, const PQParams *params,
-                         const float *pqDistanceTable, float *pqDistance)
+int GetPQDistance(const uint8_t *basecode, const DiskPQParams *params,
+                  const float *pqDistanceTable, float &pqDistance)
 {
-    return g_diskann_pq_func.DiskAnnGetPQDistance(basecode, params, pqDistanceTable, pqDistance);
+    return g_diskann_pq_func.GetPQDistance(basecode, params, pqDistanceTable, pqDistance);
 }
+
+void DiskAnnCreatePQPages(DiskAnnBuildState *buildstate)
+{
+    Relation index = buildstate->index;
+    Buffer buf;
+    Page page;
+    uint16 pqTableNblk;
+    uint16 pqCentroidsblk;
+    uint16 pqOffsetblk;
+
+    DiskAnnGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqCentroidsblk, NULL, &pqOffsetblk, NULL);
+
+    /* create pq table transposed page */
+    for (uint16 i = 0; i < pqTableNblk; i++) {
+        buf = DiskAnnNewBuffer(index, MAIN_FORKNUM);
+        page = DiskAnnInitRegisterPage(index, buf);
+        MarkBufferDirty(buf);
+        UnlockReleaseBuffer(buf);
+    }
+
+    /* create pq centroids page */
+    for (uint16 i = 0; i < pqCentroidsblk; i++) {
+        buf = DiskAnnNewBuffer(index, MAIN_FORKNUM);
+        page = DiskAnnInitRegisterPage(index, buf);
+        MarkBufferDirty(buf);
+        UnlockReleaseBuffer(buf);
+    }
+
+    /* create pq offset page */
+    for (uint16 i = 0; i < pqOffsetblk; i++) {
+        buf = DiskAnnNewBuffer(index, MAIN_FORKNUM);
+        page = DiskAnnInitRegisterPage(index, buf);
+        MarkBufferDirty(buf);
+        UnlockReleaseBuffer(buf);
+    }
+}
+
+/*
+* Flush PQ table into page during index building
+ */
+void DiskAnnFlushPQInfo(DiskAnnBuildState *buildstate)
+{
+    Relation index = buildstate->index;
+    char* pqTableTransposed = buildstate->params->tablesTransposed;
+    char* pqCentroids = buildstate->params->centroids;
+    uint32 *pqOffset = buildstate->params->offsets;
+    uint16 pqTableNblk;
+    uint32 pqTableSize;
+    uint16 pqCentroidsblk;
+    uint32 pqCentroidsSize;
+    uint16 pqOffsetblk;
+    uint32 pqOffsetSize;
+
+    DiskAnnCreatePQPages(buildstate);
+
+    DiskAnnGetPQInfoFromMetaPage(index, &pqTableNblk, &pqTableSize, &pqCentroidsblk, &pqCentroidsSize,
+                                 &pqOffsetblk, &pqOffsetSize);
+
+    /* Flush pq table transposed */
+    DiskAnnFlushPQInfoInternal(index, pqTableTransposed, DISKANN_PQDATA_START_BLKNO, pqTableNblk, pqTableSize);
+
+    /* Flush pqCentroids */
+    DiskAnnFlushPQInfoInternal(index, pqCentroids, DISKANN_PQDATA_START_BLKNO + pqTableNblk,
+                               pqCentroidsblk, pqCentroidsSize);
+
+    /* Flush pqOffsets */
+    DiskAnnFlushPQInfoInternal(index, pqOffset, DISKANN_PQDATA_START_BLKNO + pqTableNblk + pqCentroidsblk,
+                               pqOffsetblk, pqOffsetSize);
+}
+
+/*
+* Get the info related to pqTable in metapage
+ */
+void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
+                                  uint16 *pqCentroidsblk, uint32 *pqCentroidsSize,
+                                  uint16 *pqOffsetblk, uint32 *pqOffsetSize)
+{
+    Buffer buf;
+    Page page;
+    DiskAnnMetaPage metap;
+
+    buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    page = BufferGetPage(buf);
+    metap = DiskAnnPageGetMeta(page);
+    if (unlikely(metap->magicNumber != DISKANN_MAGIC_NUMBER)) {
+        UnlockReleaseBuffer(buf);
+        elog(ERROR, "diskann index is not valid");
+    }
+    if (pqTableNblk != NULL) {
+        *pqTableNblk = metap->pqTableNblk;
+    }
+    if (pqTableSize != NULL) {
+        *pqTableSize = metap->pqTableSize;
+    }
+    if (pqCentroidsblk != NULL) {
+        *pqCentroidsblk = metap->pqCentroidsblk;
+    }
+    if (pqCentroidsSize != NULL) {
+        *pqCentroidsSize = metap->pqCentroidsSize;
+    }
+    if (pqOffsetblk != NULL) {
+        *pqOffsetblk = metap->pqOffsetblk;
+    }
+    if (pqOffsetSize != NULL) {
+        *pqOffsetSize = metap->pqOffsetSize;
+    }
+
+    UnlockReleaseBuffer(buf);
+}
+
+DiskPQParams* InitDiskPQParamsOnDisk(Relation index, FmgrInfo *procinfo, int dim, bool enablePQ)
+{
+    if (!enablePQ) {
+        return NULL;
+    }
+
+    DiskPQParams *params = (DiskPQParams*)palloc(sizeof(DiskPQParams));
+
+    Buffer buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(buf);
+    DiskAnnMetaPage metap = DiskAnnPageGetMeta(page);
+    params->pqChunks = metap->pqM;
+    UnlockReleaseBuffer(buf);
+
+    if (!g_instance.pq_inited) {
+        ereport(ERROR, (errmsg("the SQL involves operations related to DiskPQ, "
+                               "but this instance has not currently loaded the PQ dynamic library.")));
+    }
+
+    params->funcType = GetPQfunctionType(procinfo, DiskAnnOptionalProcInfo(index, DISKANN_NORM_PROC));
+    params->dim = dim;
+    
+    uint16 pqTableNblk;
+    uint32 pqTableSize;
+    uint16 pqCentroidsblk;
+    uint32 pqCentroidsSize;
+    uint16 pqOffsetblk;
+    uint32 pqOffsetSize;
+
+    DiskAnnGetPQInfoFromMetaPage(index, &pqTableNblk, &pqTableSize, &pqCentroidsblk, &pqCentroidsSize,
+                                 &pqOffsetblk, &pqOffsetSize);
+
+    /* Only load data once per relation to prevent repeated loading for every search */
+    bool needLoadIndex = false;
+    MemoryContext oldcxt;
+    if (index->diskPQTableTransposed == NULL || index->centroids == NULL || index->offsets == NULL) {
+        needLoadIndex = true;
+        oldcxt = MemoryContextSwitchTo(index->rd_indexcxt);
+    }
+
+    /* Load pq table transposed into relation's fields */
+    if (index->diskPQTableTransposed == NULL) {
+        LoadPQInfo(index, index->diskPQTableTransposed, DISKANN_PQDATA_START_BLKNO, pqTableNblk, pqTableSize);
+    }
+
+    /* Load pqCentroids */
+    if (index->centroids == NULL) {
+        LoadPQInfo(index, index->centroids, DISKANN_PQDATA_START_BLKNO + pqTableNblk, pqCentroidsblk, pqCentroidsSize);
+    }
+
+    /* Load pqOffsets */
+    if (index->offsets == NULL) {
+        LoadPQInfo(index, index->offsets, DISKANN_PQDATA_START_BLKNO + pqTableNblk + pqCentroidsblk,
+                   pqOffsetblk, pqOffsetSize);
+    }
+
+    if (needLoadIndex) { // once load pq is done, we switch to the original context
+        (void)MemoryContextSwitchTo(oldcxt);
+    }
+
+    params->tablesTransposed = index->diskPQTableTransposed;
+    params->centroids = index->centroids;
+    params->offsets = index->offsets;
+
+    return params;
+}
+
