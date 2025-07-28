@@ -105,7 +105,7 @@ typedef struct BlockNumberHashEntry {
 
 #define SEARCH_DOUBLE 2
 #define MAX_SEARCH_ITERATION 10
-#define DEFAULT_CADIDATES_NUMBER 128
+#define DEFAULT_CADIDATES_NUMBER (u_sess->datavec_ctx.diskann_probes)
 #define SEARCH_DOUBLE 2
 #define DISKANN_NEIGHBOR_BLKNO 0x1
 #define DISKANN_NEIGHBOR_PQ 0x2

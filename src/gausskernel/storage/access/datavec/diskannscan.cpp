@@ -85,7 +85,7 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
     so->curIterNum = 0;
     so->frozenBlks = VectorList<BlockNumber>();
     so->candidates = VectorList<DiskAnnCandidatesData>();
-    so->enablePQ = false;
+    so->enablePQ = metapage.enablePQ;
 
     so->procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
     so->normprocinfo = NULL;
