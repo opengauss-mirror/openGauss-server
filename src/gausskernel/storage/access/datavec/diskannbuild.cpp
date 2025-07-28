@@ -26,6 +26,7 @@
 #include "knl/knl_variable.h"
 #include "storage/freespace.h"
 #include "access/datavec/diskann.h"
+#include "access/generic_xlog.h"
 #include "access/tableam.h"
 #include "postmaster/bgworker.h"
 #include "commands/vacuum.h"
@@ -254,10 +255,11 @@ VectorArray CreateVectorForExistingData(float *data, int dim, int len = 1)
  * Insert vector into page, reserve and initialize node & edge page
  */
 static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrSum, ItemPointer heaptid,
-                                        DiskAnnMetaPage metaPage)
+                                        DiskAnnMetaPage metaPage, bool building)
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state;
     IndexTuple itup;
     Datum value = PointerGetDatum(vec);
     bool isnull[1] = {false};
@@ -272,7 +274,13 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
 
     /* initialize page */
     BlockNumber blk = DiskAnnPageExtension(index, metaPage->extendPageLocker, buf);
-    page = DiskAnnInitRegisterPage(index, buf);
+    if (building) {
+        page = DiskAnnInitRegisterPage(index, buf);
+    } else {
+        state = GenericXLogStart(index);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+        DiskAnnInitPage(page, BufferGetPageSize(buf));
+    }
 
     /* reserve space for node & edge page and add item into page */
     ReserveSpace(page, metaPage->itemSize);
@@ -319,14 +327,18 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
     etup->count = 0;
 
     BlockNumber blkno = BufferGetBlockNumber(buf);
-    MarkBufferDirty(buf);
+    if (building) {
+        MarkBufferDirty(buf);
+    } else {
+        GenericXLogFinish(state);
+    }
     UnlockReleaseBuffer(buf);
 
     pfree(itup);
     return blkno;
 }
 
-BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnMetaPage metaPage)
+BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnMetaPage metaPage, bool building)
 {
     Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
     /* Normalize if needed */
@@ -350,11 +362,11 @@ BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, Disk
     /* insert into page */
     BlockNumber blkno = InsertVectorIntoPage(index, vec,
                                              -1,  // calculate sqrSum by VectorSquareNorm
-                                             heaptid, metaPage);
+                                             heaptid, metaPage, building);
 
     BlockNumber currentPage = GetInsertPage(index);
     if (BlockNumberIsValid(blkno) && blkno != currentPage) {
-        DiskAnnUpdateMetaPage(index, blkno, MAIN_FORKNUM);
+        DiskAnnUpdateMetaPage(index, blkno, MAIN_FORKNUM, building);
     }
 
     pfree(vec);
@@ -375,7 +387,7 @@ static void AddTupleToSort(Relation index, ItemPointer tid, Datum* values, DiskA
     securec_check_c(rc, "\0", "\0");
     insertValue[0] = PointerGetDatum(insertVector);
 
-    blkno = InsertTuple(index, insertValue, tid, &buildstate->metaPage);
+    blkno = InsertTuple(index, insertValue, tid, &buildstate->metaPage, true);
     // parallel build
     if (buildstate->diskannleader) {
         DiskAnnShared *shared = buildstate->diskannleader->diskannshared;
@@ -474,7 +486,7 @@ void DiskAnnParallelBuildMain(const BgWorkerContext* bwc)
         for (size_t i = 0; i < workerBlockCount; i++) {
             DiskAnnGraph graph(indexRel, diskannshared->dimensions, diskannshared->frozen, &graphStore);
             BlockNumber blk = workerBlk[i];
-            graph.Link(blk, diskannshared->indexSize);
+            graph.Link(blk, diskannshared->indexSize, true);
         }
     }
 
@@ -637,7 +649,7 @@ static BlockNumber GenerateFrozenPoint(DiskAnnBuildState* buildstate)
     /* insert into page */
     BlockNumber blkno = InsertVectorIntoPage(buildstate->index, vector,
                                              sqrSum,  // use vec sqrsum
-                                             &hctid, &buildstate->metaPage);
+                                             &hctid, &buildstate->metaPage, true);
 
     pfree(vector);
     pfree(vec);
@@ -649,7 +661,7 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
 {
     BlockNumber frozen = GenerateFrozenPoint(buildstate);
 
-    InsertFrozenPoint(buildstate->index, frozen);
+    InsertFrozenPoint(buildstate->index, frozen, true);
 
     int parallelWorkers = 0;
     if (buildstate->heap != NULL) {
@@ -666,7 +678,7 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
             for (size_t i = 0; i < buildstate->blocksList.size(); i++) {
                 DiskAnnGraph graph(buildstate->index, buildstate->dimensions, frozen, buildstate->graphStore);
                 BlockNumber blk = buildstate->blocksList[i];
-                graph.Link(blk, buildstate->indexSize);
+                graph.Link(blk, buildstate->indexSize, true);
             }
         } else {
             int nruns;
@@ -684,18 +696,28 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
     }
 }
 
-void InsertFrozenPoint(Relation index, BlockNumber frozen)
+void InsertFrozenPoint(Relation index, BlockNumber frozen, bool building)
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state;
     buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-    page = BufferGetPage(buf);
+    if (building) {
+        page = BufferGetPage(buf);
+    } else {
+        state = GenericXLogStart(index);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+    }
     DiskAnnMetaPage metaPage = DiskAnnPageGetMeta(page);
     if (metaPage->nfrozen < FROZEN_POINT_SIZE) {
         metaPage->frozenBlkno[metaPage->nfrozen] = frozen;
         metaPage->nfrozen++;
-        MarkBufferDirty(buf);
+        if (building) {
+            MarkBufferDirty(buf);
+        } else {
+            GenericXLogFinish(state);
+        }
     }
     UnlockReleaseBuffer(buf);
 }
@@ -781,6 +803,9 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo* indexInfo, Disk
     CreateEntryPages(buildstate);
 
     BuildVamanaIndex(buildstate);
+    
+    if (RelationNeedsWAL(index) || forkNum == INIT_FORKNUM)
+        LogNewpageRange(index, forkNum, 0, RelationGetNumberOfBlocksInFork(index, forkNum), true);
 
     FreeBuildState(buildstate, false);
 }

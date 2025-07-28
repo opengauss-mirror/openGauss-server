@@ -155,6 +155,9 @@ Datum diskannhandler(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(diskannbuild);
 Datum diskannbuild(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "diskann index do not support extreme rto.");
+    }
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
     IndexInfo* indexinfo = (IndexInfo*)PG_GETARG_POINTER(2);
@@ -166,6 +169,9 @@ Datum diskannbuild(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(diskannbuildempty);
 Datum diskannbuildempty(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "diskann index do not support extreme rto.");
+    }
     Relation index = (Relation)PG_GETARG_POINTER(0);
     diskannbuildempty_internal(index);
 
@@ -175,6 +181,9 @@ Datum diskannbuildempty(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(diskanninsert);
 Datum diskanninsert(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "diskann index do not support extreme rto.");
+    }
     Relation rel = (Relation)PG_GETARG_POINTER(0);
     Datum* values = (Datum*)PG_GETARG_POINTER(1);
     bool* isnull = reinterpret_cast<bool*>(PG_GETARG_POINTER(2));
@@ -189,6 +198,9 @@ Datum diskanninsert(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(diskannbulkdelete);
 Datum diskannbulkdelete(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "diskann index do not support extreme rto.");
+    }
     IndexVacuumInfo* info = (IndexVacuumInfo*)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult* volatile stats = (IndexBulkDeleteResult*)PG_GETARG_POINTER(1);
     IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
@@ -201,6 +213,9 @@ Datum diskannbulkdelete(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(diskannvacuumcleanup);
 Datum diskannvacuumcleanup(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "diskann index do not support extreme rto.");
+    }
     IndexVacuumInfo* info = (IndexVacuumInfo*)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult* stats = (IndexBulkDeleteResult*)PG_GETARG_POINTER(1);
     stats = diskannvacuumcleanup_internal(info, stats);
@@ -306,20 +321,20 @@ bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, I
     FmgrInfo* procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
     metapage.params = InitDiskPQParamsOnDisk(index, procinfo, metapage.dimensions, metapage.enablePQ);
 
-    BlockNumber blkno = InsertTuple(index, values, heap_tid, &metapage);
+    BlockNumber blkno = InsertTuple(index, values, heap_tid, &metapage, false);
 
     if (0 == metapage.nfrozen) {
         ItemPointerData hctid;
         ItemPointerSetInvalid(&hctid);
 
-        BlockNumber frozen = InsertTuple(index, values, &hctid, &metapage);
-        InsertFrozenPoint(index, frozen);
+        BlockNumber frozen = InsertTuple(index, values, &hctid, &metapage, false);
+        InsertFrozenPoint(index, frozen, false);
         DiskANNGetMetaPageInfo(index, &metapage);
     }
 
     DiskAnnGraphStore* graphStore = New(CurrentMemoryContext) DiskAnnGraphStore(index);
     DiskAnnGraph graph(index, metapage.dimensions, metapage.frozenBlkno[0], graphStore);
-    graph.Link(blkno, metapage.indexSize);
+    graph.Link(blkno, metapage.indexSize, false);
 
     return false;
 }

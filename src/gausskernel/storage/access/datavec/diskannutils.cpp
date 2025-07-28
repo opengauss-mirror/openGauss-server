@@ -27,6 +27,7 @@
 #include "postgres.h"
 #include "access/datavec/diskann.h"
 #include "access/datavec/hnsw.h"
+#include "access/generic_xlog.h"
 
 #define INDEXING_ALPHA (1.2)
 #define GRAPH_SLACK_FACTOR (1.365f)
@@ -103,17 +104,27 @@ bool DiskAnnCheckNorm(FmgrInfo* procinfo, Oid collation, Datum value)
     return DatumGetFloat8(FunctionCall1Coll(procinfo, collation, value)) > 0;
 }
 
-void DiskAnnUpdateMetaPage(Relation index, BlockNumber blkno, ForkNumber forkNum)
+void DiskAnnUpdateMetaPage(Relation index, BlockNumber blkno, ForkNumber forkNum, bool building)
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state;
     buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-    page = BufferGetPage(buf);
+    if (building) {
+        page = BufferGetPage(buf);
+    } else {
+        state = GenericXLogStart(index);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+    }
 
     DiskAnnMetaPage metaPage = DiskAnnPageGetMeta(page);
     metaPage->insertPage = blkno;
-    MarkBufferDirty(buf);  // todo: add xlog for meta page
+    if (building) {
+        MarkBufferDirty(buf);
+    } else {
+        GenericXLogFinish(state);
+    }
     UnlockReleaseBuffer(buf);
 }
 
@@ -315,10 +326,11 @@ void DiskAnnGraphStore::AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float 
     edge->count++;
 }
 
-void DiskAnnGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk) const
+void DiskAnnGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk, bool building) const
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state;
     DiskAnnNodePage ntup;
     DiskAnnEdgePage etup;
     errno_t rc;
@@ -326,13 +338,22 @@ void DiskAnnGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk) con
     buf = ReadBuffer(m_rel, blk);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
-    page = BufferGetPage(buf);
+    if (building) {
+        page = BufferGetPage(buf);
+    } else {
+        state = GenericXLogStart(m_rel);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+    }
     ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
     etup = (DiskAnnEdgePage)((uint8_t*)ntup + m_nodeSize);
     rc = memcpy_s(etup, m_edgeSize, edgePage, m_edgeSize);
     securec_check_c(rc, "\0", "\0");
 
-    MarkBufferDirty(buf);   // todo: add xlog for edge page
+    if (building) {
+        MarkBufferDirty(buf);
+    } else {
+        GenericXLogFinish(state);
+    }
     UnlockReleaseBuffer(buf);
 }
 
@@ -364,17 +385,23 @@ bool DiskAnnGraphStore::ContainsNeighbors(BlockNumber src, BlockNumber blk) cons
     return found;
 }
 
-void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid)
+void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building)
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state;
     DiskAnnNodePage ntup;
     bool found = false;
 
     buf = ReadBuffer(m_rel, src);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
-    page = BufferGetPage(buf);
+    if (building) {
+        page = BufferGetPage(buf);
+    } else {
+        state = GenericXLogStart(m_rel);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+    }
     ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
     for (int i = 0; i < ntup->heaptidsLength; i++) {
         if (ItemPointerEquals(&ntup->heaptids[i], &tid)) {
@@ -391,7 +418,11 @@ void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData ti
         } else {
             ntup->heaptids[ntup->heaptidsLength] = tid;
             ntup->heaptidsLength++;
-            MarkBufferDirty(buf);   // todo: add xlog
+            if (building) {
+                MarkBufferDirty(buf);
+            } else {
+                GenericXLogFinish(state);
+            }    
         }
     }
     UnlockReleaseBuffer(buf);
@@ -440,7 +471,7 @@ void DiskAnnGraph::Clear()
     scratch = NULL;
 }
 
-void DiskAnnGraph::Link(BlockNumber blk, int index_size)
+void DiskAnnGraph::Link(BlockNumber blk, int index_size, bool building)
 {
     VectorList<Neighbor> pool;
     ItemPointerData hctid;
@@ -455,7 +486,7 @@ void DiskAnnGraph::Link(BlockNumber blk, int index_size)
     /* Find and add appropriate graph edges */
     IterateToFixedPoint(blk, index_size, frozen, &pool, false);
 
-    if (FindDuplicateNeighbor(scratch->bestLNodes, blk)) {
+    if (FindDuplicateNeighbor(scratch->bestLNodes, blk, building)) {
         scratch->bestLNodes->clear();
         pool.clear();
         return;
@@ -475,11 +506,11 @@ void DiskAnnGraph::Link(BlockNumber blk, int index_size)
     for (uint32 i = 0; i < (uint32)prunedList.size(); i++) {
         graphStore->AddNeighbor(edgePage, prunedList[i].id, prunedList[i].distance);
     }
-    graphStore->FlushEdge(edgePage, blk);
+    graphStore->FlushEdge(edgePage, blk, building);
     pfree(edgePage);
 
     /* Establish conns for blk and its neighbors */
-    InterInsert(blk, &prunedList);
+    InterInsert(blk, &prunedList, building);
 
     /* Clean up */
     scratch->bestLNodes->clear();
@@ -626,7 +657,7 @@ void DiskAnnGraph::OccludeList(BlockNumber location, VectorList<Neighbor>* pool,
     occlude_factor.clear();
 }
 
-void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList)
+void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList, bool building)
 {
     VectorList<Neighbor>* pool = prunedList;
     ItemPointerData hctid;
@@ -666,7 +697,7 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
                     break;
                 }
                 graphStore->AddNeighbor(edgePage, blk, distance);
-                graphStore->FlushEdge(edgePage, des.id);
+                graphStore->FlushEdge(edgePage, des.id, building);
 
                 pfree(edgePage);
                 prune_needed = false;
@@ -716,7 +747,7 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
             for (uint32 i = 0; i < (uint32)pruned.size(); i++) {
                 graphStore->AddNeighbor(edge, pruned[i].id, pruned[i].distance);
             }
-            graphStore->FlushEdge(edge, des.id);
+            graphStore->FlushEdge(edge, des.id, building);
 
             /* Clean up */
             pruned.clear();
@@ -730,7 +761,7 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
     }
 }
 
-bool DiskAnnGraph::FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, BlockNumber blk)
+bool DiskAnnGraph::FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, BlockNumber blk, bool building)
 {
     for (size_t i = 0; i < bestLNodes->size(); i++) {
         Neighbor res = bestLNodes->_data[i];
@@ -746,7 +777,7 @@ bool DiskAnnGraph::FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, Bloc
 
             page = BufferGetPage(buf);
             IndexTuple itup = DiskAnnPageGetIndexTuple(page);
-            graphStore->AddDuplicateNeighbor(res.id, itup->t_tid);
+            graphStore->AddDuplicateNeighbor(res.id, itup->t_tid, building);
             UnlockReleaseBuffer(buf);
             return true;
         }
