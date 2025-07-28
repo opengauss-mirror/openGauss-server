@@ -20,6 +20,8 @@
  *
  * -------------------------------------------------------------------------
  */
+#include <algorithm>
+
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "storage/freespace.h"
@@ -93,7 +95,6 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
     }
 
     buildstate->pqM = DiskAnnGetPqM(index);
-    buildstate->pqKsub = DiskAnnGetPqKsub(index);
     if (buildstate->enablePQ) {
         if (buildstate->kmeansnormprocinfo != NULL && buildstate->dimensions == 1) {
             ereport(ERROR, (errmsg("dimensions must be greater than one for this opclass.")));
@@ -102,19 +103,15 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
             ereport(ERROR, (errmsg("dimensions={%d} must be divisible by pq_M={%d}, please reset pq_M.}",
                                    buildstate->dimensions, buildstate->pqM)));
         }
-        Size subItemsize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
-        subItemsize = MAXALIGN(subItemsize);
-        buildstate->pqTableSize = buildstate->pqM * buildstate->pqKsub * subItemsize;
-        buildstate->pqTable = parallel ? NULL : (char*)palloc0(buildstate->pqTableSize);
+        // Here we use sizeof(float) since we only support Vector type for now
+        buildstate->pqTableSize = sizeof(float) * buildstate->dimensions * GENERIC_DEFAULT_PQ_KSUB;
         buildstate->pqcodeSize = buildstate->pqM * sizeof(uint8);
-        buildstate->params = GetPQInfo(buildstate);
+        buildstate->params = parallel ? NULL : InitDiskPQParams(buildstate);
     } else {
-        buildstate->pqTable = NULL;
         buildstate->pqTableSize = 0;
         buildstate->pqcodeSize = 0;
         buildstate->params = NULL;
     }
-    buildstate->pqDistanceTable = NULL;
 
     buildstate->nodeSize = offsetof(DiskAnnNodePageData, pqcode) + buildstate->pqcodeSize;
     buildstate->edgeSize = sizeof(DiskAnnEdgePageData);
@@ -126,10 +123,10 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
 
 static void FreeBuildState(DiskAnnBuildState* buildstate, bool parallel)
 {
-    if (buildstate->enablePQ) {
-        if (!parallel) {
-            pfree(buildstate->pqTable);
-        }
+    // Only free DiskPQParam's content if not parallel since no allocation when parallel
+    if (buildstate->enablePQ && !parallel) {
+        // First deallocate memory required with new keyword within PQ API
+        FreeDiskPQParams(buildstate->params);
         pfree(buildstate->params);
     }
 
@@ -181,15 +178,26 @@ static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNu
     /* set PQ info */
     metap->enablePQ = buildstate->enablePQ;
     metap->pqM = buildstate->pqM;
-    metap->pqKsub = buildstate->pqKsub;
     metap->pqcodeSize = buildstate->pqcodeSize;
-    metap->pqDisTableSize = 0;
-    metap->pqDisTableNblk = 0;
-    metap->pqTableSize = (uint32)buildstate->pqTableSize;
-    metap->pqTableNblk =
-        buildstate->enablePQ
-            ? (uint16)((metap->pqTableSize + PQTABLE_STORAGE_SIZE - 1) / PQTABLE_STORAGE_SIZE)
-            : 0;
+    if (buildstate->enablePQ) {
+        metap->pqTableSize = (uint32)buildstate->pqTableSize;
+        metap->pqTableNblk = (uint16)((metap->pqTableSize + DISKANN_PQDATA_STORAGE_SIZE - 1) /
+            DISKANN_PQDATA_STORAGE_SIZE);
+        metap->pqCentroidsSize = (uint32)metap->dimensions * sizeof(float);
+        metap->pqCentroidsblk = (uint16)((metap->pqCentroidsSize + DISKANN_PQDATA_STORAGE_SIZE - 1) /
+            DISKANN_PQDATA_STORAGE_SIZE);
+        metap->pqOffsetSize = (uint32)((metap->pqM + 1) * sizeof(uint32));
+        metap->pqOffsetblk = (uint16)((metap->pqOffsetSize + DISKANN_PQDATA_STORAGE_SIZE - 1) /
+            DISKANN_PQDATA_STORAGE_SIZE);
+    } else {
+        metap->pqTableSize = 0;
+        metap->pqTableNblk = 0;
+        metap->pqCentroidsSize = 0;
+        metap->pqCentroidsblk = 0;
+        metap->pqOffsetSize = 0;
+        metap->pqOffsetblk = 0;
+    }
+    metap->params = buildstate->params;
     ((PageHeader)page)->pd_lower = ((char*)metap + sizeof(DiskAnnMetaPageData)) - (char*)page;
 
     MarkBufferDirty(buf);
@@ -228,8 +236,22 @@ BlockNumber DiskAnnPageExtension(Relation index, BlockNumber pageLocker, Buffer 
 }
 
 /*
+ * Current implementation compute pq code one vector at a time, we need to wrap the vector into a VectorArray
+ * to make it compatible for PQ API, which computes PQ Code in batches
+ */
+VectorArray CreateVectorForExistingData(float *data, int dim, int len = 1)
+{
+    VectorArray res = (VectorArray)palloc(sizeof(VectorArrayData));
+    res->length = len;
+    res->dim = dim;
+    res->maxlen = len;
+    res->itemsize = 0; // Do not need itemsize within PQ API so set it to 0 for now
+    res->items = (char *)(data);
+    return res;
+}
+
+/*
  * Insert vector into page, reserve and initialize node & edge page
- *
  */
 static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrSum, ItemPointer heaptid,
                                         DiskAnnMetaPage metaPage)
@@ -275,11 +297,17 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
     }
 
     if (metaPage->enablePQ) {
-        Size codesize = metaPage->params->pqM * sizeof(uint8);
-        uint8* pqcode = (uint8*)palloc(codesize);
-        DiskAnnComputeVectorPQCode(DatumGetVector(value)->x, metaPage->params, pqcode);
+        Size codesize = metaPage->params->pqChunks * sizeof(uint8);
+        uint8 *pqcode = (uint8*)palloc(codesize);
+        VectorArray arr = CreateVectorForExistingData(DatumGetVector(value)->x, metaPage->params->dim);
+        int ret = ComputeVectorPQCode(arr, metaPage->params, pqcode);
+        if (ret != 0) {
+            ereport(WARNING, (ret, errmsg("ComputeVectorPQCode failed.")));
+        }
         errno_t err = memcpy_s(tup->pqcode, codesize, pqcode, codesize);
         securec_check(err, "\0", "\0");
+        arr->items = NULL;
+        VectorArrayFree(arr);
     }
 
     /*  initialize edge page */
@@ -404,10 +432,6 @@ static void DiskAnnParallelScanAndInsert(Relation heapRel, Relation indexRel, Di
     tmpLeader.diskannshared = diskannshared;
     buildstate.diskannleader = &tmpLeader;
 
-    buildstate.pqTable = diskannshared->pqTable;
-    if (buildstate.enablePQ) {
-        buildstate.params->pqTable = diskannshared->pqTable;
-    }
     scan = tableam_scan_begin_parallel(heapRel, &diskannshared->heapdesc);
     reltuples = tableam_index_build_scan(heapRel, indexRel, indexInfo, true, BuildCallback, (void*)&buildstate, scan);
 
@@ -482,8 +506,6 @@ static double ParallelBuild(DiskAnnBuildState* buildstate, int* nparticipanttupl
 static DiskAnnShared* DiskAnnParallelInitshared(DiskAnnBuildState* buildstate)
 {
     DiskAnnShared* diskannshared;
-    char* pqTable;
-    errno_t rc;
 
     /* Store shared build state, for which we reserved space */
     diskannshared = (DiskAnnShared*)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
@@ -492,16 +514,6 @@ static DiskAnnShared* DiskAnnParallelInitshared(DiskAnnBuildState* buildstate)
     /* Initialize immutable state */
     diskannshared->heaprelid = RelationGetRelid(buildstate->heap);
     diskannshared->indexrelid = RelationGetRelid(buildstate->index);
-
-    if (buildstate->enablePQ) {
-        pqTable =
-            (char*)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), buildstate->pqTableSize);
-        rc = memcpy_s(pqTable, buildstate->pqTableSize, buildstate->pqTable, buildstate->pqTableSize);
-        securec_check_c(rc, "\0", "\0");
-        diskannshared->pqTable = pqTable;
-    } else {
-        diskannshared->pqTable = NULL;
-    }
 
     SpinLockInit(&diskannshared->mutex);
     diskannshared->blocksList = VectorList<BlockNumber>();
@@ -700,6 +712,7 @@ static void GeneratePQData(DiskAnnBuildState* buildstate)
         double num;
         EstimateRows(buildstate->heap, &num);
         numSamples = (int)num;
+        numSamples = std::min(numSamples, DISKANN_MAX_PQ_TRAINING_SIZE);
     }
     PG_TRY();
     {
@@ -709,24 +722,27 @@ static void GeneratePQData(DiskAnnBuildState* buildstate)
     }
     PG_CATCH();
     {
-        ereport(ERROR, (errmsg("memory alloc failed during PQtable sampling, suggest using diskann without PQ.")));
+        ereport(WARNING, (errmsg("memory alloc failed during PQtable sampling, suggest using diskann without PQ.")));
         PG_RE_THROW();
     }
     PG_END_TRY();
     if (buildstate->heap != NULL) {
         GetBaseData(buildstate);
-        if (buildstate->samples->length < buildstate->pqKsub) {
+        if (buildstate->samples->length < GENERIC_DEFAULT_PQ_KSUB) {
             ereport(NOTICE,
                     (errmsg("DiskAnn PQ table created with little data"), errdetail("This will cause low recall."),
                      errhint("Drop the index until the table has more data.")));
         }
     }
 
-    MemoryContext pqCtx =
-        AllocSetContextCreate(CurrentMemoryContext, "DiskAnn PQ temporary context", ALLOCSET_DEFAULT_SIZES);
+    MemoryContext pqCtx = AllocSetContextCreate(CurrentMemoryContext,
+                                                "DiskAnn PQ temporary context",
+                                                ALLOCSET_DEFAULT_SIZES);
     MemoryContext oldCtx = MemoryContextSwitchTo(pqCtx);
-    DiskAnnComputePQTable(buildstate->samples, buildstate->params);
-
+    int ret = ComputePQTable(buildstate->samples, buildstate->params);
+    if (ret != 0) {
+        ereport(WARNING, (ret, errmsg("ComputePQTable failed.")));
+    }
     MemoryContextSwitchTo(oldCtx);
     MemoryContextDelete(pqCtx);
     VectorArrayFree(buildstate->samples);
@@ -844,16 +860,36 @@ static void AddSample(Datum* values, DiskAnnBuildState* buildstate)
     }
 }
 
-PQParams* GetPQInfo(DiskAnnBuildState* buildstate)
+DiskPQParams *InitDiskPQParams(DiskAnnBuildState *buildstate)
 {
-    PQParams* params = (PQParams*)palloc(sizeof(PQParams));
-    params->pqM = buildstate->pqM;
-    params->pqKsub = buildstate->pqKsub;
-    params->funcType = GetPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
+    DiskPQParams *params = (DiskPQParams*)palloc(sizeof(DiskPQParams));
     params->dim = buildstate->dimensions;
-    params->subItemSize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
-    params->pqTable = buildstate->pqTable;
+    params->funcType = GetPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
+    params->pqChunks = buildstate->pqM;
+    params->pqTable = NULL;
+    params->tablesTransposed = NULL;
+    params->centroids = NULL;
+    params->offsets = NULL;
     return params;
+}
+
+void FreeDiskPQParams(DiskPQParams *params)
+{
+    if (params == NULL) {
+        return;
+    }
+    if (params->pqTable != NULL) {
+        delete[] params->pqTable;
+    }
+    if (params->tablesTransposed != NULL) {
+        delete[] params->tablesTransposed;
+    }
+    if (params->offsets != NULL) {
+        delete[] params->offsets;
+    }
+    if (params->centroids != NULL) {
+        delete[] params->centroids;
+    }
 }
 
 IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo* indexInfo)
@@ -877,3 +913,4 @@ void diskannbuildempty_internal(Relation index)
 
     BuildIndex(NULL, index, indexInfo, &buildstate, INIT_FORKNUM);
 }
+

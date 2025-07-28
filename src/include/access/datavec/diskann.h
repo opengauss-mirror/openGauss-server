@@ -57,10 +57,16 @@
 #define DISKANN_DISTANCE_THRESHOLD (1e-9)
 #define INDEXINGMAXC 500
 #define DISKANN_HEAPTIDS 10
+
 #define DISKANN_METAPAGE_BLKNO 0
 #define DISKANN_EXTENTION_LOCK_BLKNO 1
+#define DISKANN_PQDATA_START_BLKNO 2
 #define DISKANN_HEAD_BLKNO 2                            /* first element page */
-#define DISKANN_PQTABLE_START_BLKNO 2                   /* pqtable start page */
+
+#define DISKANN_PQDATA_STORAGE_SIZE (uint16)(6 * 1024)
+
+/* Max points for PQ table is 256000; todo: need to make this adjustable for users if memory is of concern */
+#define DISKANN_MAX_PQ_TRAINING_SIZE 256000
 
 typedef struct BlockNumberHashEntry {
     BlockNumber block;
@@ -74,7 +80,7 @@ typedef struct BlockNumberHashEntry {
 #define SH_SCOPE extern
 #define SH_DECLARE
 #include "lib/simplehash.h"
-#define DISKANN_PQ_SO_NAME "libdisksearch.so"
+#define DISKANN_PQ_SO_NAME "libdisksearch_opgs.so"
 
 #define DISKANN_DIS_L2 1
 #define DISKANN_DIS_IP 2
@@ -349,7 +355,6 @@ typedef struct DiskAnnShared {
     /* Immutable state */
     Oid heaprelid;
     Oid indexrelid;
-    char* pqTable;
 
     /* Mutex for mutable state */
     slock_t mutex;
@@ -384,21 +389,25 @@ typedef struct DiskAnnMetaPageData {
     uint32 itemSize;
     uint32 edgeSize;
     uint32 indexSize;
-    uint32 pqTableSize;
-    uint32 pqDisTableSize;
     BlockNumber insertPage;
     BlockNumber extendPageLocker;
 
     uint16 dimensions;
     uint16 nfrozen;
+
+    /* pq-related members */
     uint16 pqM;
-    uint16 pqKsub;
     uint16 pqcodeSize;
+    uint32 pqTableSize;
     uint16 pqTableNblk;
-    uint16 pqDisTableNblk;
+    uint32 pqCentroidsSize;
+    uint16 pqCentroidsblk;
+    uint32 pqOffsetSize;
+    uint16 pqOffsetblk;
     bool enablePQ;
+    DiskPQParams* params;
+
     BlockNumber frozenBlkno[FROZEN_POINT_SIZE];
-    PQParams* params;
 } DiskAnnMetaPageData;
 typedef DiskAnnMetaPageData* DiskAnnMetaPage;
 
@@ -438,12 +447,9 @@ typedef struct DiskAnnBuildState {
     /* PQ info */
     bool enablePQ;
     int pqM;
-    int pqKsub;
-    char* pqTable;
     Size pqTableSize;
-    float* pqDistanceTable;
     uint16 pqcodeSize;
-    PQParams* params;
+    DiskPQParams* params;
     VectorArray samples;
     BlockSamplerData bs;
     double rstate;
@@ -489,7 +495,7 @@ struct DiskAnnScanOpaqueData {
     Oid collation;
 
     bool enablePQ;
-    PQParams params;
+    DiskPQParams params;
 
     blockhash_hash *blocks;
     VectorList<BlockNumber> frozenBlks;
@@ -584,6 +590,13 @@ Datum diskannrescan(PG_FUNCTION_ARGS);
 Datum diskanngettuple(PG_FUNCTION_ARGS);
 Datum diskannendscan(PG_FUNCTION_ARGS);
 
+int ComputePQTable(VectorArray samples, DiskPQParams *params);
+int ComputeVectorPQCode(VectorArray baseData, const DiskPQParams *params, uint8_t *pqCode);
+int GetPQDistanceTable(char *vec, const DiskPQParams *params, float *pqDistanceTable);
+int GetPQDistance(const uint8_t *basecode, const DiskPQParams *params,
+                  const float *pqDistanceTable, float &pqDistance);
+
+Buffer DiskAnnNewBuffer(Relation index, ForkNumber forkNum);
 Datum DiskAnnNormValue(const DiskAnnTypeInfo* typeInfo, Oid collation, Datum value);
 bool DiskAnnCheckNorm(FmgrInfo* procinfo, Oid collation, Datum value);
 const DiskAnnTypeInfo* DiskAnnGetTypeInfo(Relation index);
@@ -596,19 +609,6 @@ float ComputeL2DistanceFast(const float* u, const double su, const float* v, con
 void GetEdgeTuple(DiskAnnEdgePage tup, BlockNumber blkno, Relation idx, uint32 nodeSize, uint32 edgeSize);
 int CmpNeighborInfo(const void* a, const void* b);
 void DiskANNGetMetaPageInfo(Relation index, DiskAnnMetaPage meta);
-int DiskAnnComputePQTable(VectorArray samples, PQParams* params);
-int DiskAnnComputeVectorPQCode(float* vector, const PQParams* params, uint8* pqCode);
-int DiskAnnGetPQDistanceTable(float* vector, const PQParams* params, float* pqDistanceTable);
-int DiskAnnGetPQDistance(const uint8* basecode, const PQParams* params, const float* pqDistanceTable,
-                         float* pqDistance);
-bool DiskAnnEnablePQ(Relation index);
-int DiskAnnGetPqM(Relation index);
-int DiskAnnGetPqKsub(Relation index);
-void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16* pqTableNblk, uint32* pqTableSize, uint16* pqDisTableNblk,
-                                  uint32* pqDisTableSize);
-void DiskAnnFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint32 nblks, uint64 totalSize);
-void DiskAnnFlushPQInfo(DiskAnnBuildState* buildstate);
-PQParams* GetPQInfo(DiskAnnBuildState* buildstate);
 
 IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo* indexInfo);
 void diskannbuildempty_internal(Relation index);
@@ -633,7 +633,66 @@ float ComputeL2DistanceFast(const float *u, const double su, const float *v, con
 DiskAnnAliveSlaveIterator *CreateSlaveIterator(Relation index, BlockNumber vertex,
                                                float *query, uint16_t dim, double sqrsum);
 double VectorSquareNorm(const float *a, int dim);
-uint8_t *GetCurNeighborPQCode();
 BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnMetaPage metaPage);
 void DeleteDiskAnnIndexTuples(TupleTableSlot* slot, ItemPointer tid, EState* estate, Partition p);
+
+/* PQ related functions */
+bool DiskAnnEnablePQ(Relation index);
+int DiskAnnGetPqM(Relation index);
+DiskPQParams *InitDiskPQParams(DiskAnnBuildState *buildstate);
+void DiskAnnCreatePQPages(DiskAnnBuildState *buildstate);
+void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
+                                  uint16 *pqCentroidsblk, uint32 *pqCentroidsSize,
+                                  uint16 *pqOffsetblk, uint32 *pqOffsetSize);
+void DiskAnnFlushPQInfo(DiskAnnBuildState* buildstate);
+void FreeDiskPQParams(DiskPQParams *params);
+DiskPQParams* InitDiskPQParamsOnDisk(Relation index, FmgrInfo *procinfo, int dim, bool enablePQ);
+
+template <typename dataT>
+void DiskAnnFlushPQInfoInternal(Relation index, dataT* data, BlockNumber startBlkno, uint16 nblks, uint32 totalSize)
+{
+    Buffer buf;
+    Page page;
+    PageHeader p;
+    uint32 curFlushSize;
+    size_t dataPtrMov = DISKANN_PQDATA_STORAGE_SIZE / sizeof(dataT);
+
+    for (uint16 i = 0; i < nblks; i++) {
+        curFlushSize = (i == nblks - 1) ?
+                                        (totalSize - i * DISKANN_PQDATA_STORAGE_SIZE) : DISKANN_PQDATA_STORAGE_SIZE;
+        buf = ReadBuffer(index, startBlkno + i);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        page = BufferGetPage(buf);
+        errno_t err = memcpy_s(PageGetContents(page), curFlushSize, data + i * dataPtrMov, curFlushSize);
+        securec_check(err, "\0", "\0");
+        p = (PageHeader)page;
+        p->pd_lower += curFlushSize;
+        MarkBufferDirty(buf);
+        UnlockReleaseBuffer(buf);
+    }
+}
+
+// FlushPQInfoInternal的逆操作；接收一个空指针data，进行内存分配, 并将对应的PQ数据拷贝进入指针内
+template <typename dataT>
+void LoadPQInfo(Relation index, dataT *&data, BlockNumber startBlkno, uint16 nblks, uint32 totalSize)
+{
+    Buffer buf;
+    Page page;
+    uint32 curFlushSize;
+    data = (dataT *)palloc0(totalSize);
+    size_t dataPtrMov = DISKANN_PQDATA_STORAGE_SIZE / sizeof(dataT);
+
+    for (uint16 i = 0; i < nblks; i++) {
+        curFlushSize = (i == nblks - 1) ?
+                                        (totalSize - i * DISKANN_PQDATA_STORAGE_SIZE) : DISKANN_PQDATA_STORAGE_SIZE;
+        buf = ReadBuffer(index, startBlkno + i);
+        LockBuffer(buf, BUFFER_LOCK_SHARE);
+        page = BufferGetPage(buf);
+        errno_t err = memcpy_s(data + i * dataPtrMov, curFlushSize, PageGetContents(page), curFlushSize);
+        securec_check(err, "\0", "\0");
+        UnlockReleaseBuffer(buf);
+    }
+}
+
 #endif
+

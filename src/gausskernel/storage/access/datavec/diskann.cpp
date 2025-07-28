@@ -79,8 +79,7 @@ static bytea* diskannoptions_internal(Datum reloptions, bool validate)
     static const relopt_parse_elt tab[] = {
         {"index_size", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, indexSize)},
         {"enable_pq", RELOPT_TYPE_BOOL, offsetof(DiskAnnOptions, enablePQ)},
-        {"pq_m", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pqM)},
-        {"pq_ksub", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pqKsub)}};
+        {"pq_m", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pqM)}};
 
     relopt_value* options;
     int numoptions;
@@ -304,6 +303,8 @@ bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, I
 
     DiskAnnMetaPageData metapage;
     DiskANNGetMetaPageInfo(index, &metapage);
+    FmgrInfo* procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
+    metapage.params = InitDiskPQParamsOnDisk(index, procinfo, metapage.dimensions, metapage.enablePQ);
 
     BlockNumber blkno = InsertTuple(index, values, heap_tid, &metapage);
 

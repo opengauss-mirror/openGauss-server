@@ -86,8 +86,11 @@ IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys
     so->frozenBlks = VectorList<BlockNumber>();
     so->candidates = VectorList<DiskAnnCandidatesData>();
     so->enablePQ = metapage.enablePQ;
-
     so->procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
+    DiskPQParams *tmpDiskPQParams = InitDiskPQParamsOnDisk(index, so->procinfo, metapage.dimensions, so->enablePQ);
+    if (tmpDiskPQParams != NULL) {
+        so->params = *tmpDiskPQParams;
+    }
     so->normprocinfo = NULL;
     if (OidIsValid(index_getprocid(index, 1, DISKANN_NORM_PROC)))
         so->normprocinfo = index_getprocinfo(index, 1, DISKANN_NORM_PROC);
@@ -207,7 +210,7 @@ void SearchFixedPoint(DiskAnnScanOpaque so)
 {
     NeighborPriorityQueue *queue = so->queue;
     blockhash_hash *blocks = so->blocks;
-    PQParams* params = &so->params;
+    DiskPQParams* params = &so->params;
     bool enablePQ = so->enablePQ;
     float* queryPQDistance = NULL;
     bool found = false;
@@ -218,9 +221,12 @@ void SearchFixedPoint(DiskAnnScanOpaque so)
     VectorList<BlockNumber> *frozenBlknos = &(so->frozenBlks);
 
     if (enablePQ) {
-        size_t tmpSize = 0;
+        size_t tmpSize = sizeof(float) * params->pqChunks * GENERIC_DEFAULT_PQ_KSUB;
         queryPQDistance = (float*)palloc(tmpSize);
-        DiskAnnGetPQDistanceTable(query, params, queryPQDistance);
+        int ret = GetPQDistanceTable((char *)query, params, queryPQDistance);
+        if (ret != 0) {
+            ereport(WARNING, (ret, errmsg("GetPQDistanceTable failed.")));
+        }
     }
 
     // Add frozen nodes to the priority queue
@@ -262,8 +268,11 @@ void SearchFixedPoint(DiskAnnScanOpaque so)
             if (!enablePQ) {
                 distance = DatumGetFloat8(FunctionCall2Coll(so->procinfo, so->collation, so->value, PointerGetDatum(nVec)));
             } else {
-                uint8_t *curNeighborPQCode = GetCurNeighborPQCode();
-                DiskAnnGetPQDistance(curNeighborPQCode, params, queryPQDistance, &distance);
+                uint8_t *curNeighborPQCode = nbIter->curNbtup->pqcode;
+                int ret = GetPQDistance(curNeighborPQCode, params, queryPQDistance, distance);
+                if (ret != 0) {
+                    ereport(WARNING, (ret, errmsg("GetPQDistanceTable failed.")));
+                }
             }
             if (nbinfo.freeVector) {
                 pfree(DatumGetPointer(nbinfo.vector));
@@ -373,6 +382,3 @@ DiskAnnAliveSlaveIterator *CreateSlaveIterator(Relation index, BlockNumber verte
     return iter;
 }
 
-uint8_t *GetCurNeighborPQCode()
-{
-}
