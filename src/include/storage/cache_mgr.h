@@ -241,6 +241,7 @@ public:
     bool IsBorrowSlotId(CacheSlotId_t slotId);
     void ResetBorrowSlot(CacheSlotId_t slotId);
     void ReleaseBorrowMem(int size);
+    bool ReserveMemForRowgroupVaccum(int64 size);
     int64 GetCurrBorrowMemSize();
 #endif
 

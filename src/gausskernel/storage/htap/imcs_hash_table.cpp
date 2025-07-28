@@ -184,9 +184,7 @@ void IMCSHashTable::DeleteImcsDesc(Oid relOid, RelFileNode* relNode)
             /* drop rowgroup\cu\cudesc, no need to drop RowGroups for primary node */
             LWLockAcquire(imcsDesc->imcsDescLock, LW_EXCLUSIVE);
             Assert(relNode);
-            uint64 curUsedShareMem = imcsDesc->populateInShareMem ? imcsDesc->shareMemPool->m_usedMemSize : 0;
             if (imcsDesc->populateInShareMem && imcsDesc->shareMemPool != NULL) {
-                SS_IMCU_CACHE->AdjustUsedShmAfterUnPopulate(curUsedShareMem);
                 imcsDesc->shareMemPool->Destroy();
                 imcsDesc->shareMemPool = NULL;
             }
@@ -227,6 +225,11 @@ void IMCSHashTable::ClearImcsMem(Oid relOid, RelFileNode* relNode)
     {
         if (imcsDesc->imcsStatus == IMCS_POPULATE_ERROR && imcsDesc->imcuDescContext != NULL) {
             LWLockAcquire(imcsDesc->imcsDescLock, LW_EXCLUSIVE);
+            if (imcsDesc->populateInShareMem && imcsDesc->shareMemPool != NULL) {
+                imcsDesc->shareMemPool->Destroy();
+                imcsDesc->shareMemPool = NULL;
+            }
+
             imcsDesc->DropRowGroups(relNode);
             LWLockRelease(imcsDesc->imcsDescLock);
             MemoryContextDelete(imcsDesc->imcuDescContext);
@@ -251,7 +254,7 @@ void IMCSHashTable::UpdatePrimaryImcsStatus(Oid relOid, int imcsStatus)
     LWLockAcquire(m_imcs_lock, LW_EXCLUSIVE);
     hash_seq_init(&hashSeq, m_imcs_hash);
     while ((imcsDesc = (IMCSDesc*)hash_seq_search(&hashSeq)) != NULL) {
-        if (numStandbys == 0 || (imcsDesc->relOid == relOid ||
+        if ((!IMCS_IS_SS_MODE && numStandbys == 0) || (imcsDesc->relOid == relOid ||
             (imcsDesc->isPartition && imcsDesc->parentOid == relOid))) {
             imcsDesc->imcsStatus = imcsStatus;
         }

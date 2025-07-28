@@ -3120,6 +3120,7 @@ typedef struct knl_u_datavec_context {
 typedef struct knl_u_imcstore_context {
     List* pinnedRowGroups;
     BorrowMemPool* pinnedBorrowMemPool;
+    bool inVaccum;
 } knl_u_imcstore_context;
 #endif
 

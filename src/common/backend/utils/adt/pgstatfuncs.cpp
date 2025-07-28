@@ -10330,7 +10330,7 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
         mem_size[25] = IMCU_CACHE->GetCurrentMemSize() >> BITS_IN_MB;
         mem_size[26] = IMCU_CACHE->GetCurrBorrowMemSize() >> BITS_IN_MB;
         mem_size[27] = (int)(g_instance.attr.attr_memory.ss_max_imcs_cache >> BITS_IN_KB);
-        mem_size[28] = pg_atomic_read_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used) >> BITS_IN_MB;
+        mem_size[28] = ENABLE_DSS ? (SS_IMCU_CACHE->GetCurrentMemSize() >> BITS_IN_MB) : 0;
 #endif
     }
 

@@ -85,7 +85,7 @@ struct IMCStoreVacuumTarget {
     /* this is used by sync vacuum from remote */
     CUDesc** CUDescs;
     CU** CUs;
-    uint64 newBufSize;
+    uint32 newCuSize;
     TransactionId xid;
 };
 
