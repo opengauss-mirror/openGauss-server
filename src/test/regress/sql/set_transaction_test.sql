@@ -1,3 +1,4 @@
+set b_format_behavior_compat_string = '';
 \h SET TRANSACTION
 SET GLOBAL TRANSACTION READ ONLY;
 SET SESSION TRANSACTION READ ONLY;

@@ -1,3 +1,4 @@
+set b_format_behavior_compat_string = '';
 -- error
 set @v1 := 1;
 ERROR:  syntax error at or near "@"

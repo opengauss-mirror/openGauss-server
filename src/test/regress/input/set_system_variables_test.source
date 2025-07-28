@@ -1,4 +1,4 @@
-
+set b_format_behavior_compat_string = '';
 -- dbcompatibility is A Format
 set codegen_cost_threshold = default;
 set codegen_cost_threshold = 10000;
