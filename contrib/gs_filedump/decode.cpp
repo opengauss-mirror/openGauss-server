@@ -978,3 +978,394 @@ static int Handle4ByteCompressed(const char *dataStart, unsigned int buffSize, u
     return result;
 }
 
+static int ExtractData(const char *buffer, unsigned int buffSize, unsigned int *outSize,
+                       int (*parseValue)(const char *, int))
+{
+    if (g_itemIsNull) {
+        return static_cast<int>(DecodeResult::DECODE_SUCCESS);
+    }
+
+    int padding = 0;
+    const char *dataStart = buffer;
+
+    /* Skip padding bytes. */
+    while (*dataStart == 0x00) {
+        padding++;
+        buffSize--;
+        dataStart++;
+    }
+
+    if (buffSize == 0) {
+        return static_cast<int>(DecodeResult::DECODE_BUFF_SIZE_IS_ZERO);
+    }
+
+    if (VARATT_IS_1B_E(dataStart)) {
+        return HandleToastPointer(dataStart, buffSize, outSize, parseValue, padding);
+    }
+
+    if (VARATT_IS_1B(dataStart)) {
+        return Handle1ByteInline(dataStart, buffSize, outSize, parseValue, padding);
+    }
+
+    if (VARATT_IS_4B_U(dataStart) && buffSize >= 4) {
+        return Handle4ByteUncompressed(dataStart, buffSize, outSize, parseValue, padding);
+    }
+
+    if (VARATT_IS_4B_C(dataStart) && buffSize >= 8) {
+        return Handle4ByteCompressed(dataStart, buffSize, outSize, parseValue, padding);
+    }
+
+    return static_cast<int>(DecodeResult::DECODE_FAILURE);
+}
+
+/*
+ * Try to decode a tuple using a types string provided previously.
+ *
+ * Arguments:
+ *   tupleData   - pointer to the tuple data
+ *   tupleSize   - tuple size in bytes
+ */
+
+void PrintDecodeError(const char *errorMsg, int currAttr)
+{
+    printf("Error: unable to decode a tuple, callback #%d returned: %s. Partial data: %s\n",
+           currAttr + 1, errorMsg, copyString.data);
+}
+
+void HandleDecodeError(int errorCode, int currAttr)
+{
+    switch (errorCode) {
+        case static_cast<int>(DecodeResult::DECODE_BUFF_SIZE_LESS_THAN_DELTA):
+            PrintDecodeError("buffSize_LESS_THAN_delta", currAttr);
+            break;
+        case static_cast<int>(DecodeResult::DECODE_BUFF_SIZE_LESS_THAN_REQUIRED):
+            PrintDecodeError("buffSize_LESS_THAN_required", currAttr);
+            break;
+        case static_cast<int>(DecodeResult::DECODE_BUFF_SIZE_IS_ZERO):
+            PrintDecodeError("buffSize_IS_ZERO", currAttr);
+            break;
+        case static_cast<int>(DecodeResult::DECODE_FAILURE):
+            PrintDecodeError("FAILURE", currAttr);
+            break;
+        default:
+            printf("Error: unable to decode a tuple, callback #%d returned %d. Partial data: %s\n",
+                   currAttr + 1, errorCode, copyString.data);
+            break;
+    }
+}
+
+void FormatDecode(const char *tupleData, unsigned int tupleSize)
+{
+    UHeapDiskTuple uheader = (UHeapDiskTuple)tupleData;
+    HeapTupleHeader header = (HeapTupleHeader)tupleData;
+
+    const char *data = nullptr;
+    unsigned int size = 0;
+    g_itemSize = tupleSize;
+    CopyClear();
+
+    if (g_isUHeap) {
+        data = tupleData + uheader->t_hoff;
+        size = tupleSize - uheader->t_hoff;
+    } else {
+        data = tupleData + header->t_hoff;
+        size = tupleSize - header->t_hoff;
+    }
+
+    for (int currAttr = 0; currAttr < g_ncallbacks; currAttr++) {
+        int ret;
+        unsigned int processedSize = 0;
+
+        if (g_isUHeap) {
+            if ((uheader->flag & UHEAP_HAS_NULL) && att_isnull(currAttr, uheader->data)) {
+                if (currAttr != g_ignoreLocation) {
+                    CopyAppend("\\N");
+                    g_itemIsNull = true;
+                }
+            } else if (size < 0) {
+                printf("Error: unable to decode a tuple, no more bytes left. Partial data: %s\n", copyString.data);
+                return;
+            } else {
+                g_itemIsNull = false;
+            }
+        } else {
+            if ((header->t_infomask & HEAP_HASNULL) && att_isnull(currAttr, header->t_bits)) {
+                if (currAttr != g_ignoreLocation) {
+                    CopyAppend("\\N");
+                    continue;
+                }
+            }
+            if (size < 0) {
+                printf("Error: unable to decode a tuple, no more bytes left. Partial data: %s\n", copyString.data);
+                return;
+            }
+        }
+        ret = g_callbacks[currAttr](data, size, &processedSize);
+        if (ret < 0) {
+            HandleDecodeError(ret, currAttr);
+            return;
+        }
+
+        size -= processedSize;
+        data += processedSize;
+    }
+
+    if (size != 0) {
+        printf("Error: unable to decode a tuple, %u bytes left, 0 expected. Partial data: %s\n", size, copyString.data);
+        return;
+    }
+
+    CopyFlush();
+}
+
+static int DumpCompressedString(const char *data, int32 compressed_size, int (*parseValue)(const char *, int))
+{
+    uint32 decompress_ret;
+    char *decompressTmpBuff = static_cast<char *>(malloc(TOAST_COMPRESS_RAWSIZE(data)));
+    if (!decompressTmpBuff) {
+        perror("Memory allocation failed for decompressTmpBuff");
+        return MEMORY_ALL_FAILED;
+    }
+    ToastCompressionId cmid = (ToastCompressionId)TOAST_COMPRESS_RAWMETHOD(data);
+
+    switch (cmid) {
+        case ToastCompressionId::TOAST_PGLZ_COMPRESSION_ID:
+            decompress_ret = pglz_decompress(TOAST_COMPRESS_RAWDATA(data), compressed_size - TOAST_COMPRESS_HEADER_SIZE,
+                                             decompressTmpBuff, TOAST_COMPRESS_RAWSIZE(data), true);
+            break;
+        case ToastCompressionId::TOAST_LZ4_COMPRESSION_ID:
+            printf("Error: compression method lz4 not supported.\n");
+            printf("Try to rebuild gs_filedump for PostgreSQL server of version 14+ with --with-lz4 option.\n");
+            free(decompressTmpBuff);
+            return MEMORY_ALL_FAILED;
+        default:
+            decompress_ret = -1;
+            break;
+    }
+
+    if ((decompress_ret != TOAST_COMPRESS_RAWSIZE(data)) || (decompress_ret < 0)) {
+        printf("WARNING: Unable to decompress a string. Data is corrupted.\n");
+        printf("Returned %d while expected %d.\n", decompress_ret, TOAST_COMPRESS_RAWSIZE(data));
+    } else {
+        CopyAppendEncode(decompressTmpBuff, decompress_ret);
+    }
+
+    free(decompressTmpBuff);
+
+    return decompress_ret;
+}
+
+static int ReadStringFromToast(const char *buffer, unsigned int buffSize, unsigned int *outSize,
+                               int (*parseValue)(const char *, int))
+{
+    int result = 0;
+
+    /* If toasted value is on disk, we'll try to restore it. */
+    if (VARATT_IS_EXTERNAL_ONDISK(buffer)) {
+        varatt_external toast_ptr;
+        char *toastData = nullptr;
+
+        FILE *toastRelFp;
+
+        VARATT_EXTERNAL_GET_POINTER(toast_ptr, buffer);
+
+        /* Extract TOASTed value */
+        int32 toast_ext_size = toast_ptr.va_extsize;
+        int32 num_chunks = (toast_ext_size - 1) / TOAST_MAX_CHUNK_SIZE + 1;
+        printf("  TOAST value. Raw size: %8d, external size: %8d, "
+               "value id: %6d, toast relation id: %6d, chunks: %6d\n",
+               toast_ptr.va_rawsize, toast_ext_size, toast_ptr.va_valueid, toast_ptr.va_toastrelid, num_chunks);
+
+        /* Open TOAST relation file */
+        char *toastRelationPath = strdup(g_fileName);
+        get_parent_directory(toastRelationPath);
+
+        /* Filename of TOAST relation file */
+        char toast_relation_filename[MAXPGPATH];
+        errno_t rc;
+        if (g_isSegment) {
+            rc = sprintf_s(toast_relation_filename, MAXPGPATH, "%s/%d_%s", *toastRelationPath ? toastRelationPath : ".",
+                           g_toastRelfilenode, SEGTOASTTAG);
+        } else {
+            rc = sprintf_s(toast_relation_filename, MAXPGPATH, "%s/%d", *toastRelationPath ? toastRelationPath : ".",
+                           toast_ptr.va_toastrelid);
+        }
+
+        securec_check(rc, "\0", "\0");
+        toastRelFp = fopen(toast_relation_filename, "rb");
+        if (!toastRelFp) {
+            printf("Cannot open TOAST relation %s\n", toast_relation_filename);
+            return static_cast<int>(DecodeResult::DECODE_FAILURE);
+        }
+
+        unsigned int toastRelationBlockSize = GetBlockSize(toastRelFp);
+        fseek(toastRelFp, 0, SEEK_SET);
+
+        toastData = static_cast<char *>(malloc(toast_ptr.va_rawsize));
+        if (!toastData) {
+            perror("malloc failed.");
+            fclose(toastRelFp);
+            return static_cast<int>(DecodeResult::DECODE_FAILURE);
+        }
+        if (g_isUHeap) {
+            result = DumpUHeapFileContents(g_blockOptions, g_controlOptions, toastRelFp, toastRelationBlockSize,
+                                           -1,   /* no start block */
+                                           -1,   /* no end block */
+                                           true, /* is toast relation */
+                                           toast_ptr.va_valueid, toast_ext_size, toastData);
+        } else {
+            result = DumpFileContents(g_blockOptions, g_controlOptions, toastRelFp, toastRelationBlockSize,
+                                      -1,   /* no start block */
+                                      -1,   /* no end block */
+                                      true, /* is toast relation */
+                                      toast_ptr.va_valueid, toast_ext_size, toastData);
+        }
+        if (result != 0) {
+            printf("Error in TOAST file.\n");
+        } else if (VARATT_EXTERNAL_IS_COMPRESSED(toast_ptr)) {
+            result = DumpCompressedString(toastData, toast_ext_size, parseValue);
+        } else {
+            result = parseValue(toastData, toast_ext_size);
+        }
+
+        free(toastData);
+        fclose(toastRelFp);
+        free(toastRelationPath);
+    } else {
+        /* If tag is indirect or expanded, it was stored in memory. */
+        CopyAppend("(TOASTED IN MEMORY)");
+    }
+
+    return result;
+}
+
+/* Decode an Oid as int type and pass value out. */
+static int DecodeOidBinary(const char *buffer, unsigned int buffSize, unsigned int *processedSize, Oid *result)
+{
+    unsigned int delta = 0;
+    if (!g_isUHeap) {
+        const char *newBuffer = reinterpret_cast<const char *>(INTALIGN(buffer));
+        delta = static_cast<unsigned int>((uintptr_t)newBuffer - (uintptr_t)buffer);
+
+        CHECK_BUFFER_DELTA_SIZE(buffSize, delta);
+        buffSize -= delta;
+        buffer = newBuffer;
+    }
+
+    CHECK_BUFFER_SIZE(buffSize, sizeof(int32));
+    *result = *(Oid *)buffer;
+    *processedSize = sizeof(Oid) + delta;
+
+    return static_cast<int>(DecodeResult::DECODE_SUCCESS);
+}
+
+/* Decode char(N), varchar(N), text, json or xml types and pass data out. */
+static int DecodeBytesBinary(const char *buffer, unsigned int buffSize, unsigned int *processedSize, char *outData,
+                             unsigned int *outLength)
+{
+    if (!VARATT_IS_EXTENDED(buffer)) {
+        *outLength = VARSIZE(buffer) - VARHDRSZ;
+
+        *processedSize = VARSIZE(buffer);
+        errno_t rc = memcpy_s(outData, *outLength, VARDATA(buffer), *outLength);
+        securec_check(rc, "\0", "\0");
+    } else {
+        printf("Error: unable read TOAST value.\n");
+    }
+
+    return static_cast<int>(DecodeResult::DECODE_SUCCESS);
+}
+
+/*
+ * Decode a TOAST chunk as a tuple (Oid toast_id, Oid chunk_id, text data).
+ * If decoded OID is equal toast_oid, copy data into chunkData.
+ *
+ * Parameters:
+ *     tupleData - data of the tuple
+ *     tupleSize - length of the tuple
+ *     toast_oid - [out] oid of the TOAST value
+ *     chunk_id - [out] number of the TOAST chunk stored in the tuple
+ *     chunk - [out] extracted chunk data
+ *     chunk_size - [out] number of bytes extracted from the chunk
+ */
+void ToastChunkDecode(const char *tupleData, unsigned int tupleSize, Oid toast_oid, uint32 *chunk_id, char *chunkData,
+                      unsigned int *chunkDataSize)
+{
+    UHeapDiskTuple uheader = (UHeapDiskTuple)tupleData;
+    HeapTupleHeader header = (HeapTupleHeader)tupleData;
+    const char *data = nullptr;
+    unsigned int size = 0;
+    if (g_isUHeap) {
+        data = tupleData + uheader->t_hoff;
+        size = tupleSize - uheader->t_hoff;
+    } else {
+        data = tupleData + header->t_hoff;
+        size = tupleSize - header->t_hoff;
+    }
+
+    unsigned int processedSize = 0;
+    Oid read_toast_oid = 0;
+
+    /* decode toast_id */
+    int ret = DecodeOidBinary(data, size, &processedSize, &read_toast_oid);
+    if (ret < 0) {
+        printf("Error: unable to decode a TOAST tuple toast_id, "
+               "decode function returned %d. Partial data: %s\n",
+               ret, copyString.data);
+        return;
+    }
+
+    size -= processedSize;
+    data += processedSize;
+    if (size <= 0) {
+        printf("Error: unable to decode a TOAST chunk tuple, no more bytes "
+               "left. Partial data: %s\n",
+               copyString.data);
+        return;
+    }
+
+    /* It is not what we are looking for */
+    if (toast_oid != read_toast_oid) {
+        return;
+    }
+
+    /* decode chunk_id */
+    ret = DecodeOidBinary(data, size, &processedSize, chunk_id);
+    if (ret < 0) {
+        printf("Error: unable to decode a TOAST tuple chunk_id, decode "
+               "function returned %d. Partial data: %s\n",
+               ret, copyString.data);
+        return;
+    }
+
+    size -= processedSize;
+    data += processedSize;
+    if (g_isUHeap) {
+        size -= 1;
+        data += 1;
+    }
+
+    if (size <= 0) {
+        printf("Error: unable to decode a TOAST chunk tuple, no more bytes "
+               "left. Partial data: %s\n",
+               copyString.data);
+        return;
+    }
+
+    /* decode data */
+    ret = DecodeBytesBinary(data, size, &processedSize, chunkData, chunkDataSize);
+    if (ret < 0) {
+        printf("Error: unable to decode a TOAST chunk data, decode function "
+               "returned %d. Partial data: %s\n",
+               ret, copyString.data);
+        return;
+    }
+
+    size -= processedSize;
+    if (size != 0) {
+        printf("Error: unable to decode a TOAST chunk tuple, %u bytes left. "
+               "Partial data: %s\n",
+               size, copyString.data);
+        return;
+    }
+}
