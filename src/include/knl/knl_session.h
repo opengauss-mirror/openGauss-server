@@ -224,6 +224,7 @@ typedef struct TableOfIndexPass {
     HTAB* tableOfIndex = NULL;
     int tableOfNestLayer = -1; /* number of layers of this tablevar */
     int tableOfGetNestLayer = -1; /* number of layers of this tablevar needs to be get */
+    pthread_rwlock_t tableOfIndexLock;
 } TableOfIndexPass;
 
 typedef struct knl_u_SPI_context {

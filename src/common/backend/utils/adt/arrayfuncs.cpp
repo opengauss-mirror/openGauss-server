@@ -108,6 +108,7 @@ static ArrayType* create_array_envelope(int ndims, int* dimv, const int* lbv, in
 static ArrayType* array_fill_internal(
     ArrayType* dims, ArrayType* lbs, Datum value, bool isnull, Oid elmtype, FunctionCallInfo fcinfo);
 static ArrayType* array_deleteidx_internal(ArrayType *v, int delIndex);
+static ArrayType* array_deleteidx_internal_db_a(ArrayType *v, int delIndex1, int delIndex2, bool multi_args);
 static void checkEnv();
 
 /*
@@ -1802,7 +1803,7 @@ Datum array_varchar_exists(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL || 
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_varchar_exists must be call in procedure")));
+            errmsg("array_varchar_exists cannot be executed when tableOfIndex is not initialised.")));
     }
 
     /* transfer varchar format */
@@ -1837,7 +1838,7 @@ Datum array_integer_exists(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_integer_exists must be call in procedure")));
+            errmsg("array_integer_exists cannot be executed when tableOfIndex is not initialised.")));
     }
 
     bool result = array_index_exists_internal(v,
@@ -1983,7 +1984,7 @@ Datum array_varchar_next(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_varchar_next must be call in procedure")));
+            errmsg("array_varchar_next cannot be executed when tableOfIndex is not initialised.")));
     }
 
     /* transfer varchar format */
@@ -2034,7 +2035,7 @@ Datum array_varchar_prior(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_varchar_prior must be call in procedure")));
+            errmsg("array_varchar_prior cannot be executed when tableOfIndex is not initialised.")));
     }
     /* transfer varchar format */
     bool isTran = false;
@@ -2080,7 +2081,7 @@ Datum array_varchar_first(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_varchar_first must be call in procedure")));
+            errmsg("array_varchar_first cannot be executed when tableOfIndex is not initialised.")));
     }
     /* turn varchar index */
     HTAB* table_index = u_sess->SPI_cxt.cur_tableof_index->tableOfIndex;
@@ -2128,7 +2129,7 @@ Datum array_integer_next(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_integer_next must be call in procedure")));
+            errmsg("array_integer_next cannot be executed when tableOfIndex is not initialised.")));
     }
     /* turn integer index */
     HTAB* table_index = u_sess->SPI_cxt.cur_tableof_index->tableOfIndex;
@@ -2186,7 +2187,7 @@ Datum array_integer_prior(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_integer_prior must be call in procedure")));
+            errmsg("array_integer_prior cannot be executed when tableOfIndex is not initialised.")));
     }
     /* turn varchar index */
     HTAB* table_index = u_sess->SPI_cxt.cur_tableof_index->tableOfIndex;
@@ -2240,7 +2241,7 @@ Datum array_integer_first(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_integer_first must be call in procedure")));
+            errmsg("array_integer_first cannot be executed when tableOfIndex is not initialised.")));
     }
 
     HTAB* table_index = u_sess->SPI_cxt.cur_tableof_index->tableOfIndex;
@@ -2285,7 +2286,7 @@ Datum array_integer_last(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_integer_last must be call in procedure")));
+            errmsg("array_integer_last cannot be executed when tableOfIndex is not initialised.")));
     }
 
     HTAB* table_index = u_sess->SPI_cxt.cur_tableof_index->tableOfIndex;
@@ -2311,7 +2312,7 @@ Datum array_varchar_last(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_varchar_last must be call in procedure")));
+            errmsg("array_varchar_last cannot be executed when tableOfIndex is not initialised.")));
     }
     /* turn varchar index */
     HTAB* table_index = u_sess->SPI_cxt.cur_tableof_index->tableOfIndex;
@@ -2320,6 +2321,18 @@ Datum array_varchar_last(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     } else {
         PG_RETURN_VARCHAR_P(last_datum);
+    }
+}
+
+void del_array_idx_in_hash(HTAB* hashp, int delIdx)
+{
+    HASH_SEQ_STATUS status;
+    hash_seq_init(&status, hashp);
+    TableOfIndexEntry* entry = NULL;
+    while (entry = ((TableOfIndexEntry*)hash_seq_search(&status))) {
+        if (delIdx > 0 && entry->index > delIdx) {
+            entry->index = entry->index  - 1;
+        }
     }
 }
 
@@ -2337,7 +2350,7 @@ static ArrayType* array_index_delete_internal(ArrayType* v, HTAB* table_index, O
     ArrayType* array = array_deleteidx_internal(v, index);
     bool found = false;
     (void)hash_search(table_index, (const void*)&key, HASH_REMOVE, &found);
-
+    del_array_idx_in_hash(table_index, index);
     /* for nest table, need delete inner vars */
     if (var != NULL && var->tableOfIndex != NULL) {
         HASH_SEQ_STATUS hashSeq;
@@ -2346,6 +2359,61 @@ static ArrayType* array_index_delete_internal(ArrayType* v, HTAB* table_index, O
         while ((srcEntry = (TableOfIndexEntry*)hash_seq_search(&hashSeq)) != NULL) {
             var->value = (Datum)array_index_delete_internal(DatumGetArrayTypeP(var->value), var->tableOfIndex,
                                                             var->tableOfIndexType, srcEntry->key.exprdatum);
+        }
+    }
+
+    return array;
+}
+
+static ArrayType* array_index_delete_internal_db_a(ArrayType* v, HTAB* table_index,
+		  Oid tableOfIndexType, Datum index_datum, Datum index_datum2, bool multi_args)
+{
+    TableOfIndexKey key;
+    key.exprtypeid = tableOfIndexType;
+    key.exprdatum = index_datum;
+    TableOfIndexKey key2;
+    key2.exprtypeid = tableOfIndexType;
+    key2.exprdatum = index_datum2;
+    PLpgSQL_var* var = NULL;
+    PLpgSQL_var* var2 = NULL;
+    ArrayType* array = NULL;
+    bool found = false;
+    int index = 0;
+    int index2 = 0;
+    index = getTableOfIndexByDatumValue(key, table_index, &var);
+    if (index < 0) {
+        return v;
+    }
+    if (multi_args) {
+        index2 = getTableOfIndexByDatumValue(key2, table_index, &var2);
+        if (index2 < 0 || index2 < index) {
+            return v;
+        }
+        if (tableOfIndexType == VARCHAROID) {
+            array = array_deleteidx_internal_db_a(v, index, -1, false);
+            array = array_deleteidx_internal_db_a(v, index2, -1, false);
+        } else {
+            array = array_deleteidx_internal_db_a(v, index, index2, true);
+        }
+    } else {
+        array = array_deleteidx_internal_db_a(v, index, -1, false);
+    }
+
+    (void)hash_search(table_index, (const void*)&key, HASH_REMOVE, &found);
+
+    /* for nest table, need delete inner vars */
+    if (var != NULL && var->tableOfIndex != NULL) {
+        HASH_SEQ_STATUS hashSeq;
+        hash_seq_init(&hashSeq, var->tableOfIndex);
+        TableOfIndexEntry* srcEntry = NULL;
+        while ((srcEntry = (TableOfIndexEntry*)hash_seq_search(&hashSeq)) != NULL) {
+            var->value = (Datum)array_index_delete_internal_db_a(
+                DatumGetArrayTypeP(var->value),
+                var->tableOfIndex,
+                var->tableOfIndexType,
+                srcEntry->key.exprdatum,
+                NULL,
+                false);
         }
     }
 
@@ -2367,16 +2435,73 @@ Datum array_integer_deleteidx(PG_FUNCTION_ARGS)
     Datum index_datum = PG_GETARG_DATUM(1);
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_integer_deleteidx must be call in procedure")));
+        int ndim = ARR_NDIM(v);
+        if (ndim > 1) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Multidimensional arrays currently do not support DELETE (X) or DELETE (X, Y).")));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("array_integer_deleteidx cannot be executed when tableOfIndex is not initialised.")));
+        }
     }
+    pthread_rwlock_wrlock(&u_sess->SPI_cxt.cur_tableof_index->tableOfIndexLock);
     ArrayType* array = array_index_delete_internal(v,
                                                    u_sess->SPI_cxt.cur_tableof_index->tableOfIndex,
                                                    u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType,
                                                    index_datum);
+    pthread_rwlock_unlock(&u_sess->SPI_cxt.cur_tableof_index->tableOfIndexLock);
     PG_RETURN_ARRAYTYPE_P(array);
 }
 
+static ArrayType* array_integer_deleteidx_db_a_inner(ArrayType* v, Datum index_datum, Datum index_datum2, bool is_multi)
+{
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("array_integer_multi_deleteidx_db_a cannot be executed when tableOfIndex is not initialised.")));
+    }
+
+    pthread_rwlock_wrlock(&u_sess->SPI_cxt.cur_tableof_index->tableOfIndexLock);
+    ArrayType* array = array_index_delete_internal_db_a(v,
+                                                        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex,
+                                                        u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType,
+                                                        index_datum, index_datum2, is_multi);
+    pthread_rwlock_unlock(&u_sess->SPI_cxt.cur_tableof_index->tableOfIndexLock);
+    return array;
+}
+
+Datum array_integer_deleteidx_db_a(PG_FUNCTION_ARGS)
+{
+    checkEnv();
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
+    ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
+    /* Sanity check: does it look like an array at all */
+    if (ARR_NDIM(v) <= 0 || ARR_NDIM(v) > MAXDIM) {
+        PG_RETURN_ARRAYTYPE_P(v);
+    }
+    Datum index_datum = PG_GETARG_DATUM(1);
+    ArrayType* array = array_integer_deleteidx_db_a_inner(v, index_datum, (Datum)0, false);
+    PG_RETURN_ARRAYTYPE_P(array);
+}
+
+Datum array_integer_multi_deleteidx_db_a(PG_FUNCTION_ARGS)
+{
+    checkEnv();
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
+    ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
+    /* Sanity check: does it look like an array at all */
+    if (ARR_NDIM(v) <= 0 || ARR_NDIM(v) > MAXDIM) {
+        PG_RETURN_ARRAYTYPE_P(v);
+    }
+    Datum index_datum = PG_GETARG_DATUM(1);
+    Datum index_datum2 = PG_GETARG_DATUM(2);
+    ArrayType* array = array_integer_deleteidx_db_a_inner(v, index_datum, index_datum2, true);
+    PG_RETURN_ARRAYTYPE_P(array);
+}
 
 Datum array_varchar_deleteidx(PG_FUNCTION_ARGS)
 {
@@ -2394,7 +2519,7 @@ Datum array_varchar_deleteidx(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_varchar_deleteidx must be call in procedure")));
+            errmsg("array_varchar_deleteidx cannot be executed when tableOfIndex is not initialised.")));
     }
     /* transfer varchar format */
     bool isTran = false;
@@ -2402,13 +2527,83 @@ Datum array_varchar_deleteidx(PG_FUNCTION_ARGS)
         index_datum = transVaratt1BTo4B(index_datum);
         isTran = true;
     }
+
+    pthread_rwlock_wrlock(&u_sess->SPI_cxt.cur_tableof_index->tableOfIndexLock);
     ArrayType* array = array_index_delete_internal(v,
                                                    u_sess->SPI_cxt.cur_tableof_index->tableOfIndex,
                                                    u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType,
                                                    index_datum);
+    pthread_rwlock_unlock(&u_sess->SPI_cxt.cur_tableof_index->tableOfIndexLock);
     if (isTran) {
         pfree(DatumGetPointer(index_datum));
     }
+    PG_RETURN_ARRAYTYPE_P(array);
+}
+
+static ArrayType* array_varchar_deleteidx_db_a_inner(ArrayType* v, Datum index_datum, Datum index_datum2, bool is_multi)
+{
+    bool isTran1 = false;
+    bool isTran2 = false;
+
+    if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("array_varchar_deleteidx_db_a cannot be executed when tableOfIndex is not initialised.")));
+    }
+    /* transfer varchar format */
+    if (VARATT_IS_1B(index_datum)) {
+        index_datum = transVaratt1BTo4B(index_datum);
+        isTran1 = true;
+    }
+    if (is_multi && VARATT_IS_1B(index_datum2)) {
+        index_datum2 = transVaratt1BTo4B(index_datum2);
+        isTran2 = true;
+    }
+    pthread_rwlock_wrlock(&u_sess->SPI_cxt.cur_tableof_index->tableOfIndexLock);
+    ArrayType* array = array_index_delete_internal_db_a(v,
+                                                        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex,
+                                                        u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType,
+                                                        index_datum, index_datum2, is_multi);
+    pthread_rwlock_unlock(&u_sess->SPI_cxt.cur_tableof_index->tableOfIndexLock);
+    if (isTran1) {
+        pfree(DatumGetPointer(index_datum));
+    }
+    if (isTran2) {
+        pfree(DatumGetPointer(index_datum2));
+    }
+    return array;
+}
+
+Datum array_varchar_deleteidx_db_a(PG_FUNCTION_ARGS)
+{
+    checkEnv();
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
+    ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
+    /* Sanity check: does it look like an array at all */
+    if (ARR_NDIM(v) <= 0 || ARR_NDIM(v) > MAXDIM) {
+        PG_RETURN_ARRAYTYPE_P(v);
+    }
+    Datum index_datum = PG_GETARG_DATUM(1);
+    ArrayType* array = array_varchar_deleteidx_db_a_inner(v, index_datum, (Datum)0, false);
+    PG_RETURN_ARRAYTYPE_P(array);
+}
+
+Datum array_varchar_multi_deleteidx_db_a(PG_FUNCTION_ARGS)
+{
+    checkEnv();
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
+    ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
+    /* Sanity check: does it look like an array at all */
+    if (ARR_NDIM(v) <= 0 || ARR_NDIM(v) > MAXDIM) {
+        PG_RETURN_ARRAYTYPE_P(v);
+    }
+    Datum index_datum = PG_GETARG_DATUM(1);
+    Datum index_datum2 = PG_GETARG_DATUM(2);
+    ArrayType* array = array_varchar_deleteidx_db_a_inner(v, index_datum, index_datum2, true);
     PG_RETURN_ARRAYTYPE_P(array);
 }
 
@@ -2488,6 +2683,44 @@ Datum array_extendnull(PG_FUNCTION_ARGS)
     }
 
     PG_RETURN_ARRAYTYPE_P(array);
+}
+
+static ArrayType* array_deleteidx_internal_db_a(ArrayType *v, int delIndex1, int delIndex2, bool multi_args)
+{
+    Oid element_type = InvalidOid;
+    Datum newelem = (Datum)0;
+    int16 typlen = 0;
+    bool typbyval = false;
+    char typalign = 0;
+    int *dimv = NULL;
+    int *lb = NULL;
+    int lower = 0;
+    int upper = 0;
+    int length = 0;
+    int i = 0;
+    int drop = 0;
+
+    if (ARR_NDIM(v) <= 0 || ARR_NDIM(v) > MAXDIM) {
+        return v;
+    }
+
+    dimv = ARR_DIMS(v);
+    length = dimv[0];
+    lb = ARR_LBOUND(v);
+    lower = lb[0];
+    upper = lower + length - 1;
+
+    element_type = ARR_ELEMTYPE(v);
+    get_typlenbyvalalign(element_type, &typlen, &typbyval, &typalign);
+
+    for (i = lower; i <= upper; i++) {
+        bool isDelIdx = multi_args ? (i >= delIndex1 && i <= delIndex2) : i == delIndex1;
+        if (isDelIdx) {
+            drop = i;
+            v = array_set(v, 1, &drop, newelem, true, -1, typlen, typbyval, typalign);
+        }
+    }
+    return v;
 }
 
 static ArrayType* array_deleteidx_internal(ArrayType *v, int delIndex)
@@ -2577,6 +2810,25 @@ Datum array_delete(PG_FUNCTION_ARGS)
     PG_RETURN_ARRAYTYPE_P(array);
 }
 
+Datum array_deleteidx_db_a(PG_FUNCTION_ARGS)
+{
+    ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
+    int delIndex = PG_GETARG_INT32(1);
+    ArrayType* array = array_deleteidx_internal_db_a(v, delIndex, -1, false);
+
+    PG_RETURN_ARRAYTYPE_P(array);
+}
+
+Datum array_multi_deleteidx_db_a(PG_FUNCTION_ARGS)
+{
+    ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
+    int delIndex1 = PG_GETARG_INT32(1);
+    int delIndex2 = PG_GETARG_INT32(2);
+    ArrayType* array = array_deleteidx_internal_db_a(v, delIndex1, delIndex2, true);
+
+    PG_RETURN_ARRAYTYPE_P(array);
+}
+
 static void deleteTableOfIndexElement(HTAB* tableOfIndex)
 {
     if (tableOfIndex == NULL) {
@@ -2602,7 +2854,7 @@ Datum array_indexby_delete(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt.cur_tableof_index == NULL ||
         u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("array_indexby_delete must be call in procedure")));
+            errmsg("array_indexby_delete cannot be executed when tableOfIndex is not initialised.")));
     }
     deleteTableOfIndexElement(u_sess->SPI_cxt.cur_tableof_index->tableOfIndex);
     
