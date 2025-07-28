@@ -240,6 +240,967 @@ static char *GetFilename(char *path)
     }
     return (*filename != '\0') ? filename : nullptr;
 }
+
+/*	Iterate through the provided options and set the option flags.
+ *	An error will result in a positive rc and will force a display
+ *	of the usage information.  This routine returns enum
+ *	optionReturnCode values. */
+static unsigned int ConsumeOptions(int numOptions, char **options)
+{
+    unsigned int rc = OPT_RC_VALID;
+    int x;
+    unsigned int optionStringLength;
+    char *optionString;
+    char duplicateSwitch = 0x00;
+    for (x = 1; x < numOptions; x++) {
+        optionString = options[x];
+        optionStringLength = strlen(optionString);
+        /* Range is a special case where we have to consume the next 1 or 2
+         * parameters to mark the range start and end */
+        if ((optionStringLength == 2) && (strcmp(optionString, "-R") == 0)) {
+            int range = 0;
+            SET_OPTION(g_blockOptions, BLOCK_RANGE, 'R');
+            /* Only accept the range option once */
+            if (rc == OPT_RC_DUPLICATE) {
+                break;
+            }
+            /* Make sure there are options after the range identifier */
+            if (x >= (numOptions - 2)) {
+                rc = OPT_RC_INVALID;
+                printf("Error: Missing range start identifier.\n");
+                g_exitCode = 1;
+                break;
+            }
+            /*
+             * Mark that we have the range and advance the option to what
+             * should be the range start. Check the value of the next
+             * parameter */
+            optionString = options[++x];
+            if ((range = GetOptionValue(optionString)) < 0) {
+                rc = OPT_RC_INVALID;
+                printf("Error: Invalid range start identifier <%s>.\n", optionString);
+                g_exitCode = 1;
+                break;
+            }
+
+            /* The default is to dump only one block */
+            g_blockStart = g_blockEnd = static_cast<unsigned int>(range);
+            /* We have our range start marker, check if there is an end
+             * marker on the option line.  Assume that the last option
+             * is the file we are dumping, so check if there are options
+             * range start marker and the file */
+            if (x <= (numOptions - 3)) {
+                if ((range = GetOptionValue(options[x + 1])) >= 0) {
+                    /* End range must be => start range */
+                    if (g_blockStart <= range) {
+                        g_blockEnd = static_cast<unsigned int>(range);
+                        x++;
+                    } else {
+                        rc = OPT_RC_INVALID;
+                        printf("Error: Requested block range start <%d> is "
+                               "greater than end <%d>.\n",
+                               g_blockStart, range);
+                        g_exitCode = 1;
+                        break;
+                    }
+                }
+            }
+        } else if ((optionStringLength == 2) && (strcmp(optionString, "-S") == 0)) {
+            int localBlockSize;
+            /* Check for the special case where the user forces a block size
+             * instead of having the tool determine it.  This is useful if
+             * the header of block 0 is corrupt and gives a garbage block size */
+            SET_OPTION(g_blockOptions, BLOCK_FORCED, 'S');
+            /* Only accept the forced size option once */
+            if (rc == OPT_RC_DUPLICATE) {
+                break;
+            }
+
+            /* The token immediately following -S is the block size */
+            if (x >= (numOptions - 2)) {
+                rc = OPT_RC_INVALID;
+                printf("Error: Missing block size identifier.\n");
+                break;
+            }
+            /* Next option encountered must be forced block size */
+            optionString = options[++x];
+            if ((localBlockSize = GetOptionValue(optionString)) > 0) {
+                g_blockSize = static_cast<unsigned int>(localBlockSize);
+            } else {
+                rc = OPT_RC_INVALID;
+                printf("Error: Invalid block size requested <%s>.\n", optionString);
+                g_exitCode = 1;
+                break;
+            }
+        } else if ((optionStringLength == 2) && (strcmp(optionString, "-s") == 0)) {
+            int localSegmentSize;
+            /* Check for the special case where the user forces a segment size. */
+            SET_OPTION(g_segmentOptions, SEGMENT_SIZE_FORCED, 's');
+            /* Only accept the forced size option once */
+            if (rc == OPT_RC_DUPLICATE) {
+                break;
+            }
+            /* The token immediately following -s is the segment size */
+            if (x >= (numOptions - 2)) {
+                rc = OPT_RC_INVALID;
+                printf("Error: Missing segment size identifier.\n");
+                g_exitCode = 1;
+                break;
+            }
+            /* Next option encountered must be forced segment size */
+            optionString = options[++x];
+            if ((localSegmentSize = GetOptionValue(optionString)) > 0) {
+                g_segmentSize = static_cast<unsigned int>(localSegmentSize);
+            } else {
+                rc = OPT_RC_INVALID;
+                printf("Error: Invalid segment size requested <%s>.\n", optionString);
+                g_exitCode = 1;
+                break;
+            }
+        } else if ((optionStringLength == 2) && (strcmp(optionString, "-r") == 0)) {
+            int localTableRelfilenode;
+            /* The token immediately following -r is attrubute types string */
+            if (x >= (numOptions - 2)) {
+                rc = OPT_RC_INVALID;
+                printf("Error: Missing table relfilenode string.\n");
+                g_exitCode = 1;
+                break;
+            }
+            /* Next option encountered must be forced segment size */
+            optionString = options[++x];
+            if ((localTableRelfilenode = GetOptionValue(optionString)) > 0) {
+                g_tableRelfilenode = static_cast<int>(localTableRelfilenode);
+            } else {
+                rc = OPT_RC_INVALID;
+                printf("Error: Invalid segment size requested <%s>.\n", optionString);
+                g_exitCode = 1;
+                break;
+            }
+        } else if ((optionStringLength == 2) && (strcmp(optionString, "-T") == 0)) {
+            int localToastRelfilenode;
+            SET_OPTION(g_blockOptions, BLOCK_DECODE_TOAST, 't');
+            /* The token immediately following -r is attrubute types string */
+            if (x >= (numOptions - 2)) {
+                rc = OPT_RC_INVALID;
+                printf("Error: Missing toast relfilenode string.\n");
+                g_exitCode = 1;
+                break;
+            }
+
+            /* Next option encountered must be forced segment size */
+            optionString = options[++x];
+            if ((localToastRelfilenode = GetOptionValue(optionString)) > 0) {
+                g_toastRelfilenode = static_cast<int>(localToastRelfilenode);
+            } else {
+                rc = OPT_RC_INVALID;
+                printf("Error: Invalid segment size requested <%s>.\n", optionString);
+                g_exitCode = 1;
+                break;
+            }
+        } else if ((optionStringLength == 2) && (strcmp(optionString, "-D") == 0)) {
+            /* Check for the special case where the user forces tuples decoding. */
+            SET_OPTION(g_blockOptions, BLOCK_DECODE, 'D');
+            /* Only accept the decode option once */
+            if (rc == OPT_RC_DUPLICATE) {
+                break;
+            }
+            /* The token immediately following -D is attrubute types string */
+            if (x >= (numOptions - 2)) {
+                rc = OPT_RC_INVALID;
+                printf("Error: Missing attribute types string.\n");
+                g_exitCode = 1;
+                break;
+            }
+            /* Next option encountered must be attribute types string */
+            optionString = options[++x];
+            if (ParseAttributeTypesString(optionString) < 0) {
+                rc = OPT_RC_INVALID;
+                printf("Error: Invalid attribute types string <%s>.\n", optionString);
+                g_exitCode = 1;
+                break;
+            }
+        } else if ((optionStringLength == 2) && (strcmp(optionString, "-n") == 0)) {
+            /* Check for the special case where the user forces a segment number
+             * instead of having the tool determine it by file name. */
+            int localSegmentNumber;
+            SET_OPTION(g_segmentOptions, SEGMENT_NUMBER_FORCED, 'n');
+            /* Only accept the forced segment number option once */
+            if (rc == OPT_RC_DUPLICATE) {
+                break;
+            }
+            /* The token immediately following -n is the segment number */
+            if (x >= (numOptions - 2)) {
+                rc = OPT_RC_INVALID;
+                printf("Error: Missing segment number identifier.\n");
+                g_exitCode = 1;
+                break;
+            }
+            /* Next option encountered must be forced segment number */
+            optionString = options[++x];
+            if ((localSegmentNumber = GetOptionValue(optionString)) > 0) {
+                g_segmentNumber = static_cast<unsigned int>(localSegmentNumber);
+            } else {
+                rc = OPT_RC_INVALID;
+                printf("Error: Invalid segment number requested <%s>.\n", optionString);
+                g_exitCode = 1;
+                break;
+            }
+        } else if (x == (numOptions - 1)) {
+            /* The last option MUST be the file name */
+            /* Check to see if this looks like an option string before opening */
+            if (optionString[0] != '-') {
+                char *segMataFile = nullptr;
+                char *segToastMataFile = nullptr;
+                if (strcmp(GetFilename(optionString), "1") == 0) {
+                    g_isSegment = true;
+                    if (not(g_blockOptions & BLOCK_RANGE)) {
+                        SET_OPTION(g_blockOptions, BLOCK_RANGE, 'R');
+                    }
+                    if (g_tableRelfilenode < 0) {
+                        rc = OPT_RC_INVALID;
+                        printf("Error: `-r` is requested <%s>.\n", optionString);
+                        g_exitCode = 1;
+                        break;
+                    } else if ((g_blockOptions & BLOCK_DECODE_TOAST) && (g_toastRelfilenode < 0)) {
+                        rc = OPT_RC_INVALID;
+                        printf("Error: `-t` 2 `-T [g_toastRelfilenode]` <%s>.\n", optionString);
+                        g_exitCode = 1;
+                        break;
+                    }
+                    if (g_toastRelfilenode > 0) {
+                        segToastMataFile = SliceFilename(optionString, (g_toastRelfilenode / DF_FILE_SLICE_BLOCKS));
+                        fpToast = fopen(segToastMataFile, "rb");
+                        if (not fpToast) {
+                            rc = OPT_RC_FILE;
+                            printf("Error: Could not open file <%s>.\n", segToastMataFile);
+                            g_exitCode = 1;
+                            break;
+                        }
+                    }
+                }
+
+                if (g_isSegment) {
+                    segMataFile = SliceFilename(optionString, (g_tableRelfilenode / DF_FILE_SLICE_BLOCKS));
+                    fp = fopen(segMataFile, "rb");
+                } else {
+                    fp = fopen(optionString, "rb");
+                }
+                if (fp) {
+                    g_fileName = options[x];
+                    if (!(g_segmentOptions & SEGMENT_NUMBER_FORCED)) {
+                        g_segmentNumber = GetSegmentNumberFromFileName(g_fileName);
+                    }
+                } else {
+                    rc = OPT_RC_FILE;
+                    printf("Error: Could not open file <%s>.\n", optionString);
+                    g_exitCode = 1;
+                    break;
+                }
+            } else {
+                /* Could be the case where the help flag is used without a
+                 * filename. Otherwise, the last option isn't a file */
+                if (strcmp(optionString, "-h") == 0) {
+                    rc = OPT_RC_COPYRIGHT;
+                } else {
+                    rc = OPT_RC_FILE;
+                    printf("Error: Missing file name to dump.\n");
+                    g_exitCode = 1;
+                }
+                break;
+            }
+        } else {
+            unsigned int y;
+
+            /* Option strings must start with '-' and contain switches */
+            if (optionString[0] != '-') {
+                rc = OPT_RC_INVALID;
+                printf("Error: Invalid option string <%s>.\n", optionString);
+                g_exitCode = 1;
+                break;
+            }
+            /* Iterate through the singular option string, throw out
+             * garbage, duplicates and set flags to be used in formatting */
+            for (y = 1; y < optionStringLength; y++) {
+                switch (optionString[y]) {
+                        /* Use absolute addressing */
+                    case 'a':
+                        SET_OPTION(g_blockOptions, BLOCK_ABSOLUTE, 'a');
+                        break;
+
+                        /* Dump the binary contents of the page */
+                    case 'b':
+                        SET_OPTION(g_blockOptions, BLOCK_BINARY, 'b');
+                        break;
+
+                        /* Dump the listed file as a control file */
+                    case 'c':
+                        SET_OPTION(g_controlOptions, CONTROL_DUMP, 'c');
+                        break;
+
+                        /* Do not interpret the data. Format to hex and ascii. */
+                    case 'd':
+                        SET_OPTION(g_blockOptions, BLOCK_NO_INTR, 'd');
+                        break;
+
+                    case 'u':
+                        SET_OPTION(g_blockOptions, BLOCK_USTORE, 'u');
+                        break;
+
+                        /*
+                         * Format the contents of the block with
+                         * interpretation of the headers */
+                    case 'f':
+                        SET_OPTION(g_blockOptions, BLOCK_FORMAT, 'f');
+                        break;
+
+                        /* Display the usage screen */
+                    case 'h':
+                        rc = OPT_RC_COPYRIGHT;
+                        break;
+
+                        /* Format the items in detail */
+                    case 'i':
+                        SET_OPTION(g_itemOptions, ITEM_DETAIL, 'i');
+                        break;
+
+                        /* Verify block checksums */
+                    case 'k':
+                        SET_OPTION(g_blockOptions, BLOCK_CHECKSUMS, 'k');
+                        break;
+
+                        /* Treat file as pg_filenode.map file */
+                    case 'm':
+                        g_isRelMapFile = true;
+                        break;
+
+                        /* Display old values. Ignore Xmax */
+                    case 'o':
+                        SET_OPTION(g_blockOptions, BLOCK_IGNORE_OLD, 'o');
+                        break;
+
+                    case 't':
+                        SET_OPTION(g_blockOptions, BLOCK_DECODE_TOAST, 't');
+                        break;
+
+                    case 'v':
+                        g_verbose = true;
+                        break;
+
+                        /* Interpret items as standard index values */
+                    case 'x':
+                        SET_OPTION(g_itemOptions, ITEM_INDEX, 'x');
+                        if (g_itemOptions & ITEM_HEAP) {
+                            rc = OPT_RC_INVALID;
+                            printf("Error: Options <y> and <x> are "
+                                   "mutually exclusive.\n");
+                            g_exitCode = 1;
+                        }
+                        break;
+
+                        /* Interpret items as heap values */
+                    case 'y':
+                        SET_OPTION(g_itemOptions, ITEM_HEAP, 'y');
+                        if (g_itemOptions & ITEM_INDEX) {
+                            rc = OPT_RC_INVALID;
+                            printf("Error: Options <x> and <y> are "
+                                   "mutually exclusive.\n");
+                            g_exitCode = 1;
+                        }
+                        break;
+
+                    default:
+                        rc = OPT_RC_INVALID;
+                        printf("Error: Unknown option <%c>.\n", optionString[y]);
+                        g_exitCode = 1;
+                        break;
+                }
+
+                if (rc) {
+                    break;
+                }
+            }
+        }
+    }
+    g_isUHeap = g_blockOptions & BLOCK_USTORE;
+    if (g_isSegment && g_isUHeap) {
+        rc = OPT_RC_INVALID;
+        printf("Error: `-u` is not supported when segment is on.\n");
+        g_exitCode = 1;
+    }
+    if (rc == OPT_RC_DUPLICATE) {
+        printf("Error: Duplicate option listed <%c>.\n", duplicateSwitch);
+        g_exitCode = 1;
+    }
+
+    /* If the user requested a control file dump, a pure binary
+     * block dump or a non-interpreted formatted dump, mask off
+     * all other block level options (with a few exceptions) */
+    if (rc == OPT_RC_VALID) {
+        /* The user has requested a control file dump, only -f and */
+        /* -S are valid... turn off all other formatting */
+        if (g_controlOptions & CONTROL_DUMP) {
+            if ((g_blockOptions & ~(BLOCK_FORMAT | BLOCK_FORCED)) || (g_itemOptions)) {
+                rc = OPT_RC_INVALID;
+                printf("Error: Invalid options used for Control File dump.\n"
+                       "       Only options <Sf> may be used with <c>.\n");
+                g_exitCode = 1;
+            } else {
+                g_controlOptions |= (g_blockOptions & (BLOCK_FORMAT | BLOCK_FORCED));
+                g_blockOptions = g_itemOptions = 0;
+            }
+        } else if (g_blockOptions & BLOCK_BINARY) {
+            /* The user has requested a binary block dump... only -R and -f are honoured */
+            g_blockOptions &= (BLOCK_BINARY | BLOCK_RANGE | BLOCK_FORCED);
+            g_itemOptions = 0;
+        } else if (g_blockOptions & BLOCK_NO_INTR) {
+            /* The user has requested a non-interpreted dump... only -a, -R and -f are honoured */
+            g_blockOptions &= (BLOCK_NO_INTR | BLOCK_ABSOLUTE | BLOCK_RANGE | BLOCK_FORCED);
+            g_itemOptions = 0;
+        }
+    }
+    return (rc);
+}
+
+/* Given the index into the parameter list, convert and return the
+ * current string to a number if possible */
+static int GetOptionValue(char *optionString)
+{
+    int x;
+    int value = -1;
+    int optionStringLength = strlen(optionString);
+
+    /* Verify the next option looks like a number */
+    for (x = 0; x < optionStringLength; x++) {
+        if (!isdigit(static_cast<unsigned char>(optionString[x]))) {
+            break;
+        }
+    }
+    /* Convert the string to a number if it looks good */
+    if (x == optionStringLength) {
+        value = atoi(optionString);
+    }
+    return (value);
+}
+
+/* Read the page header off of block 0 to determine the block size
+ * used in this file.  Can be overridden using the -S option. The
+ * returned value is the block size of block 0 on disk */
+unsigned int GetBlockSize(FILE *fp)
+{
+    unsigned int localSize = 0;
+    int bytesRead = 0;
+    size_t headerSize = g_isUHeap ? sizeof(UHeapPageHeaderData) : sizeof(PageHeaderData);
+    char localCache[headerSize];
+    /* Read the first header off of block 0 to determine the block size */
+    bytesRead = fread(&localCache, 1, headerSize, fp);
+    rewind(fp);
+
+    if (static_cast<size_t>(bytesRead) == headerSize) {
+        if (g_isUHeap) {
+            localSize = static_cast<unsigned int>(
+                (Size)(((UHeapPageHeader)(localCache))->pd_pagesize_version & (uint16)0xFF00));
+        } else {
+            localSize = static_cast<unsigned int>(PageGetPageSize(localCache));
+        }
+    } else {
+        printf("Error: Unable to read full page header from block 0.\n"
+               "  ===> Read %d bytes\n",
+               bytesRead);
+        g_exitCode = 1;
+    }
+
+    if (localSize == 0) {
+        printf("Notice: Block size determined from reading block 0 is zero, using default %d instead.\n", BLCKSZ);
+        printf("Hint: Use -S <size> to specify the size manually.\n");
+        localSize = BLCKSZ;
+    }
+
+    return (localSize);
+}
+
+/* Determine the contents of the special section on the block and
+ * return this enum value */
+static unsigned int GetSpecialSectionType(char *buffer, Page page)
+{
+    unsigned int rc;
+    unsigned int specialOffset;
+    unsigned int specialSize;
+    unsigned int specialValue;
+    void *pageHeader = g_isUHeap ? (void *)((UHeapPageHeader)page) : (void *)((PageHeader)page);
+
+    /* If this is not a partial header, check the validity of the
+     * special section offset and contents */
+    if (g_bytesToFormat > (g_isUHeap ? sizeof(UHeapPageHeaderData) : sizeof(PageHeaderData))) {
+        specialOffset = static_cast<unsigned int>(g_isUHeap ? ((UHeapPageHeader)pageHeader)->pd_special
+                                                            : ((PageHeader)pageHeader)->pd_special);
+
+        /* Check that the special offset can remain on the block or
+         * the partial block */
+        if ((specialOffset == 0) || (specialOffset > g_blockSize) || (specialOffset > g_bytesToFormat)) {
+            rc = SPEC_SECT_ERROR_BOUNDARY;
+        } else {
+            /* we may need to examine last 2 bytes of page to identify index */
+            uint16 *ptype = reinterpret_cast<uint16 *>(const_cast<char *>(buffer) + g_blockSize - sizeof(uint16));
+
+            specialSize = g_blockSize - specialOffset;
+
+            /* If there is a special section, use its size to guess its
+             * contents, checking the last 2 bytes of the page in cases
+             * that are ambiguous.  Note we don't attempt to dereference
+             * the pointers without checking g_bytesToFormat == g_blockSize. */
+            if (specialSize == 0) {
+                rc = SPEC_SECT_NONE;
+            } else if (specialSize == MAXALIGN(sizeof(uint32))) {
+                /* If MAXALIGN is 8, this could be either a sequence or
+                 * SP-GiST or GIN. */
+                if (g_bytesToFormat == g_blockSize) {
+                    specialValue = *reinterpret_cast<int *>(buffer + specialOffset);
+                    if (specialValue == SEQUENCE_MAGIC) {
+                        rc = SPEC_SECT_SEQUENCE;
+                    } else if (specialSize == MAXALIGN(sizeof(SpGistPageOpaqueData)) && *ptype == SPGIST_PAGE_ID) {
+                        rc = SPEC_SECT_INDEX_SPGIST;
+                    } else if (specialSize == MAXALIGN(sizeof(GinPageOpaqueData))) {
+                        rc = SPEC_SECT_INDEX_GIN;
+                    } else {
+                        rc = SPEC_SECT_ERROR_UNKNOWN;
+                    }
+                } else {
+                    rc = SPEC_SECT_ERROR_UNKNOWN;
+                }
+            } else if (specialSize == MAXALIGN(sizeof(SpGistPageOpaqueData)) && g_bytesToFormat == g_blockSize &&
+                       *ptype == SPGIST_PAGE_ID) {
+                /* SP-GiST and GIN have same size special section, so check the page ID bytes first. */
+                rc = SPEC_SECT_INDEX_SPGIST;
+            } else if (specialSize == MAXALIGN(sizeof(GinPageOpaqueData))) {
+                rc = SPEC_SECT_INDEX_GIN;
+            } else if (specialSize > 2 && g_bytesToFormat == g_blockSize) {
+                /* As of 8.3, BTree, Hash, and GIST all have the same size
+                 * special section, but the last two bytes of the section
+                 * can be checked to determine what's what. */
+                if (*ptype <= MAX_BT_CYCLE_ID && specialSize == MAXALIGN(sizeof(BTPageOpaqueData))) {
+                    rc = SPEC_SECT_INDEX_BTREE;
+                } else if (*ptype == HASHO_PAGE_ID && specialSize == MAXALIGN(sizeof(HashPageOpaqueData))) {
+                    rc = SPEC_SECT_INDEX_HASH;
+                } else if (*ptype == GIST_PAGE_ID && specialSize == MAXALIGN(sizeof(GISTPageOpaqueData))) {
+                    rc = SPEC_SECT_INDEX_GIST;
+                } else {
+                    rc = SPEC_SECT_ERROR_UNKNOWN;
+                }
+            } else {
+                rc = SPEC_SECT_ERROR_UNKNOWN;
+            }
+        }
+    } else {
+        rc = SPEC_SECT_ERROR_UNKNOWN;
+    }
+
+    return (rc);
+}
+
+/*	Check whether page is a btree meta page */
+static bool IsBtreeMetaPage(Page page)
+{
+    PageHeader pageHeader = (PageHeader)page;
+    if ((PageGetSpecialSize(page) == (MAXALIGN(sizeof(BTPageOpaqueData)))) && (g_bytesToFormat == g_blockSize)) {
+        BTPageOpaque btpo = (BTPageOpaque)((char *)page + pageHeader->pd_special);
+
+        /* Must check the cycleid to be sure it's really btree. */
+        if ((btpo->bt_internal.btpo_cycleid <= MAX_BT_CYCLE_ID) && (btpo->bt_internal.btpo_flags & BTP_META)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*	Check whether page is a gin meta page */
+static bool IsGinMetaPage(Page page)
+{
+    if ((PageGetSpecialSize(page) == (MAXALIGN(sizeof(GinPageOpaqueData)))) && (g_bytesToFormat == g_blockSize)) {
+        GinPageOpaque gpo = GinPageGetOpaque(page);
+        if (gpo->flags & GIN_META) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*	Check whether page is a gin leaf page */
+static bool IsGinLeafPage(Page page)
+{
+    if ((PageGetSpecialSize(page) == (MAXALIGN(sizeof(GinPageOpaqueData)))) && (g_bytesToFormat == g_blockSize)) {
+        GinPageOpaque gpo = GinPageGetOpaque(page);
+        if (gpo->flags & GIN_LEAF) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*	Check whether page is a gin leaf page */
+static bool IsUHeapGinLeafPage(Page page)
+{
+    if ((PageGetSpecialSize(page) == ((sizeof(GinPageOpaqueData)))) && (g_bytesToFormat == g_blockSize)) {
+        GinPageOpaque gpo = GinPageGetOpaque(page);
+        if (gpo->flags & GIN_LEAF) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Check whether page is a SpGist meta page */
+static bool IsSpGistMetaPage(Page page)
+{
+    if ((PageGetSpecialSize(page) == ((sizeof(SpGistPageOpaqueData)))) && (g_bytesToFormat == g_blockSize)) {
+        SpGistPageOpaque spgpo = SpGistPageGetOpaque(page);
+        if ((spgpo->spgist_page_id == SPGIST_PAGE_ID) && (spgpo->flags & SPGIST_META)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Display a header for the dump so we know the file name, the options
+ * used and the time the dump was taken */
+static void CreateDumpFileHeader(int numOptions, char **options)
+{
+    char optionBuffer[52] = "\0";
+    /* Iterate through the options and cache them.
+     * The maximum we can display is 50 option characters + spaces. */
+    for (int x = 1; x < (numOptions - 1); x++) {
+        if ((strlen(optionBuffer) + strlen(options[x])) > MAX_OPTION_LINE_LENGTH) {
+            break;
+        }
+        int len = strlen(optionBuffer);
+        int res = snprintf(optionBuffer + len, sizeof(optionBuffer) - len, "%s", options[x]);
+        if (res < 0 || res >= static_cast<int>(sizeof(optionBuffer) - len)) {
+            printf(" Error: Dump FileHeader Failed.\n\n");
+        }
+        if (x < numOptions - 2) {
+            strcat_s(optionBuffer, sizeof(optionBuffer), " ");
+        }
+    }
+    printf("\n*******************************************************************\n"
+           "* PostgreSQL File/Block Formatted Dump Utility\n"
+           "*\n"
+           "* File: %s\n"
+           "* Options used: %s\n"
+           "*******************************************************************\n",
+           g_fileName, (strlen(optionBuffer)) ? optionBuffer : "None");
+}
+
+/*	Dump out a formatted block header for the requested block */
+static int FormatHeader(char *buffer, Page page, BlockNumber blkno, bool isToast)
+{
+    int rc = 0;
+    unsigned int headerBytes;
+    PageHeader pageHeader = (PageHeader)page;
+    const char *indent = isToast ? "\t" : "";
+    if (!isToast || g_verbose) {
+        printf("%s<Header> -----\n", indent);
+    }
+    /* Only attempt to format the header if the entire header (minus the item
+     * array) is available */
+    if (g_bytesToFormat < offsetof(PageHeaderData, pd_linp[0])) {
+        headerBytes = g_bytesToFormat;
+        rc = EOF_ENCOUNTERED;
+    } else {
+        XLogRecPtr pageLSN = PageGetLSN(page);
+        unsigned int maxOffset = PageGetMaxOffsetNumber(page);
+        char flagString[100];
+
+        headerBytes = offsetof(PageHeaderData, pd_linp[0]);
+        g_blockVersion = (unsigned int)PageGetPageLayoutVersion(page);
+
+        /* The full header exists but we have to check that the item array
+         * is available or how far we can index into it */
+        if (maxOffset > 0) {
+            unsigned int itemsLength = maxOffset * sizeof(ItemIdData);
+
+            if (g_bytesToFormat < (headerBytes + itemsLength)) {
+                headerBytes = g_bytesToFormat;
+                rc = EOF_ENCOUNTERED;
+            } else {
+                headerBytes += itemsLength;
+            }
+        }
+
+        flagString[0] = '\0';
+        if (pageHeader->pd_flags & PD_HAS_FREE_LINES) {
+            strcat_s(flagString, sizeof(flagString), "HAS_FREE_LINES|");
+        }
+        if (pageHeader->pd_flags & PD_PAGE_FULL) {
+            strcat_s(flagString, sizeof(flagString), "PAGE_FULL|");
+        }
+        if (pageHeader->pd_flags & PD_ALL_VISIBLE) {
+            strcat_s(flagString, sizeof(flagString), "ALL_VISIBLE|");
+        }
+        if (PageIsCompressed(page)) {
+            strcat_s(flagString, sizeof(flagString), "COMPRESSED_PAGE|");
+        }
+        if (PageIsLogical(page)) {
+            strcat_s(flagString, sizeof(flagString), "LOGICAL_PAGE|");
+        }
+        if (PageIsEncrypt(page)) {
+            strcat_s(flagString, sizeof(flagString), "ENCRYPT_PAGE|");
+        }
+        if (pageHeader->pd_flags & PD_CHECKSUM_FNV1A) {
+            strcat_s(flagString, sizeof(flagString), "CHECKSUM_FNV1A|");
+        }
+        if (pageHeader->pd_flags & PD_JUST_AFTER_FPW) {
+            strcat_s(flagString, sizeof(flagString), "JUST_AFTER_FPW|");
+        }
+        if (pageHeader->pd_flags & PD_EXRTO_PAGE) {
+            strcat_s(flagString, sizeof(flagString), "EXRTO_PAGE|");
+        }
+        if (pageHeader->pd_flags & PD_TDE_PAGE) {
+            strcat_s(flagString, sizeof(flagString), "TDE_PAGE|");
+        }
+        if (strlen(flagString)) {
+            flagString[strlen(flagString) - 1] = '\0';
+        }
+        /* Interpret the content of the header */
+        if (!isToast || g_verbose) {
+            printf("%s Block Offset: 0x%08x         Offsets: Lower    %4u (0x%04hx)\n", indent, g_pageOffset,
+                   pageHeader->pd_lower, pageHeader->pd_lower);
+            printf("%s Block: Size %4d  Version %4u            Upper    %4u (0x%04hx)\n", indent,
+                   (int)PageGetPageSize(page), g_blockVersion, pageHeader->pd_upper, pageHeader->pd_upper);
+            printf("%s LSN:  logid %6d recoff 0x%08x      Special  %4u (0x%04hx)\n", indent, (uint32)(pageLSN >> 32),
+                   (uint32)pageLSN, pageHeader->pd_special, pageHeader->pd_special);
+            printf("%s Items: %4u                      Free Space: %4u\n", indent, maxOffset,
+                   pageHeader->pd_upper - pageHeader->pd_lower);
+            printf("%s Checksum: 0x%04x  Prune XID: 0x%08lx  Flags: 0x%04x (%s)\n", indent, pageHeader->pd_checksum,
+                   ((HeapPageHeader)(page))->pd_prune_xid + ((HeapPageHeader)(page))->pd_xid_base, pageHeader->pd_flags,
+                   flagString);
+            printf("%s Length (including item array): %u\n\n", indent, headerBytes);
+        }
+
+        /* If it's a btree meta page, print the contents of the meta block. */
+        if (IsBtreeMetaPage(page)) {
+            BTMetaPageData *btpMeta = BTPageGetMeta(buffer);
+
+            if (!isToast || g_verbose) {
+                printf("%s BTree Meta Data:  Magic (0x%08x)   Version (%u)\n", indent, btpMeta->btm_magic,
+                       btpMeta->btm_version);
+                printf("%s                   Root:     Block (%u)  Level (%u)\n", indent, btpMeta->btm_root,
+                       btpMeta->btm_level);
+                printf("%s                   FastRoot: Block (%u)  Level (%u)\n\n", indent, btpMeta->btm_fastroot,
+                       btpMeta->btm_fastlevel);
+            }
+            headerBytes += sizeof(BTMetaPageData);
+        }
+
+        /* Eye the contents of the header and alert the user to possible
+         * problems. */
+        if ((maxOffset < 0) || (maxOffset > g_blockSize) || (pageHeader->pd_upper > g_blockSize) ||
+            (pageHeader->pd_upper > pageHeader->pd_special) ||
+            (pageHeader->pd_lower < (sizeof(PageHeaderData) - sizeof(ItemIdData))) ||
+            (pageHeader->pd_lower > g_blockSize) || (pageHeader->pd_upper < pageHeader->pd_lower) ||
+            (pageHeader->pd_special > g_blockSize)) {
+            printf(" Error: Invalid header information.\n\n");
+            g_exitCode = 1;
+        }
+
+        if (g_blockOptions & BLOCK_CHECKSUMS) {
+            uint32 delta = (g_segmentSize / g_blockSize) * g_segmentNumber;
+            uint16 calc_checksum = pg_checksum_page(page, delta + blkno);
+            if (calc_checksum != pageHeader->pd_checksum) {
+                printf(" Error: checksum failure: calculated 0x%04x.\n\n", calc_checksum);
+                g_exitCode = 1;
+            }
+        }
+    }
+    /* If we have reached the end of file while interpreting the header, let
+     * the user know about it */
+    if (rc == EOF_ENCOUNTERED) {
+        if (!isToast || g_verbose) {
+            printf("%s Error: End of block encountered within the header."
+                   " Bytes read: %4u.\n\n",
+                   indent, g_bytesToFormat);
+        }
+        g_exitCode = 1;
+    }
+    /* A request to dump the formatted binary of the block (header,
+     * items and special section).  It's best to dump even on an error
+     * so the user can see the raw image. */
+    if (g_blockOptions & BLOCK_FORMAT) {
+        FormatBinary(buffer, headerBytes, 0);
+    }
+    return (rc);
+}
+
+/*	Dump out a formatted block header for the requested block */
+static int FormatUHeapHeader(char *buffer, Page page, BlockNumber blkno, bool isToast)
+{
+    int rc = 0;
+    unsigned int headerBytes;
+    UHeapPageHeader upageHeader = (UHeapPageHeader)page;
+    const char *indent = isToast ? "\t" : "";
+    if (!isToast || g_verbose) {
+        printf("%s<Header> -----\n", indent);
+    }
+    /* Only attempt to format the header if the entire header (minus the item
+     * array) is available */
+    if (g_bytesToFormat < offsetof(UHeapPageHeaderData, td_count)) {
+        headerBytes = g_bytesToFormat;
+        rc = EOF_ENCOUNTERED;
+    } else {
+        unsigned int maxOffset = UHeapPageGetMaxOffsetNumber(page);
+        char flagString[100];
+        headerBytes = SizeOfUHeapPageHeaderData;
+        g_blockVersion = (unsigned int)(upageHeader->pd_pagesize_version);
+
+        /* The full header exists but we have to check that the item array
+         * is available or how far we can index into it */
+        if (maxOffset > 0) {
+            unsigned int itemsLength = maxOffset * sizeof(ItemIdData);
+
+            if (g_bytesToFormat < (headerBytes + itemsLength)) {
+                headerBytes = g_bytesToFormat;
+                rc = EOF_ENCOUNTERED;
+            } else {
+                headerBytes += itemsLength;
+            }
+        }
+
+        flagString[0] = '\0';
+        if (upageHeader->pd_flags & UHEAP_HAS_FREE_LINES) {
+            strcat_s(flagString, sizeof(flagString), "HAS_FREE_LINES|");
+        }
+        if (upageHeader->pd_flags & UHEAP_PAGE_FULL) {
+            strcat_s(flagString, sizeof(flagString), "PAGE_FULL|");
+        }
+        if (upageHeader->pd_flags & UHP_ALL_VISIBLE) {
+            strcat_s(flagString, sizeof(flagString), "ALL_VISIBLE|");
+        }
+        if (UPageIsFull(page)) {
+            strcat_s(flagString, sizeof(flagString), "UPAGE_IS_FULL|");
+        }
+        if (UPageHasFreeLinePointers(page)) {
+            strcat_s(flagString, sizeof(flagString), "UPAGE_HAS_FREE_LINE_POINTERS|");
+        }
+        if (strlen(flagString)) {
+            flagString[strlen(flagString) - 1] = '\0';
+        }
+
+        /* Interpret the content of the header */
+        if (!isToast || g_verbose) {
+            printf("%s Block Offset: 0x%08x         Offsets: Lower    %4u (0x%04hx)\n", indent, g_pageOffset,
+                   upageHeader->pd_lower, upageHeader->pd_lower);
+            printf("%s Block: Size %4d  Version %4u            Upper    %4u (0x%04hx)\n", indent,
+                   (int)PageGetPageSize(page), g_blockVersion, upageHeader->pd_upper, upageHeader->pd_upper);
+            printf("%s PD_LSN: %X/0x%08lx,   Special  %4u (0x%04hx)\n", indent, upageHeader->pd_lsn.xlogid,
+                   ((uint64)upageHeader->pd_lsn.xlogid << XLOG_LSN_HIGH_OFF) + upageHeader->pd_lsn.xrecoff,
+                   upageHeader->pd_special, upageHeader->pd_special);
+            printf("%s Items: %4u                      Free Space: %d\n", indent, maxOffset,
+                   upageHeader->pd_upper - upageHeader->pd_lower);
+            printf("%s Checksum: 0x%04x  Prune XID: 0x%08lx  Flags: 0x%04x (%s)\n", indent, upageHeader->pd_checksum,
+                   ((HeapPageHeader)(page))->pd_prune_xid + ((HeapPageHeader)(page))->pd_xid_base,
+                   upageHeader->pd_flags, flagString);
+            printf("%s Length (including item array): %u\n\n", indent, headerBytes);
+        }
+
+        /* If it's a btree meta page, print the contents of the meta block. */
+        if (IsBtreeMetaPage(page)) {
+            BTMetaPageData *btpMeta = BTPageGetMeta(buffer);
+
+            if (!isToast || g_verbose) {
+                printf("%s BTree Meta Data:  Magic (0x%08x)   Version (%u)\n", indent, btpMeta->btm_magic,
+                       btpMeta->btm_version);
+                printf("%s                   Root:     Block (%u)  Level (%u)\n", indent, btpMeta->btm_root,
+                       btpMeta->btm_level);
+                printf("%s                   FastRoot: Block (%u)  Level (%u)\n\n", indent, btpMeta->btm_fastroot,
+                       btpMeta->btm_fastlevel);
+            }
+            headerBytes += sizeof(BTMetaPageData);
+        }
+
+        /* Eye the contents of the header and alert the user to possible
+         * problems. */
+        if ((maxOffset < 0) || (maxOffset > g_blockSize) || (upageHeader->pd_upper > g_blockSize) ||
+            (upageHeader->pd_upper > upageHeader->pd_special) ||
+            (upageHeader->pd_lower < (sizeof(PageHeaderData) - sizeof(ItemIdData))) ||
+            (upageHeader->pd_lower > g_blockSize) || (upageHeader->pd_upper < upageHeader->pd_lower) ||
+            (upageHeader->pd_special > g_blockSize)) {
+            printf(" Error: Invalid header information.\n\n");
+            g_exitCode = 1;
+        }
+
+        if (g_blockOptions & BLOCK_CHECKSUMS) {
+            uint32 delta = (g_segmentSize / g_blockSize) * g_segmentNumber;
+            uint16 calc_checksum = pg_checksum_page(page, delta + blkno);
+            if (calc_checksum != upageHeader->pd_checksum) {
+                printf(" Error: checksum failure: calculated 0x%04x.\n\n", calc_checksum);
+                g_exitCode = 1;
+            }
+        }
+    }
+
+    /* If we have reached the end of file while interpreting the header, let
+     * the user know about it */
+    if (rc == EOF_ENCOUNTERED) {
+        if (!isToast || g_verbose) {
+            printf("%s Error: End of block encountered within the header."
+                   " Bytes read: %4u.\n\n",
+                   indent, g_bytesToFormat);
+        }
+        g_exitCode = 1;
+    }
+
+    /* A request to dump the formatted binary of the block (header,
+     * items and special section).  It's best to dump even on an error
+     * so the user can see the raw image. */
+    if (g_blockOptions & BLOCK_FORMAT) {
+        FormatBinary(buffer, headerBytes, 0);
+    }
+
+    return (rc);
+}
+
+/* Copied from ginpostinglist.c */
+constexpr int MAX_HEAP_TUPLES_PER_PAGE_BITS = 11;
+static uint64 itemptr_to_uint64(const ItemPointer iptr)
+{
+    uint64 val = 0;
+    val = GinItemPointerGetBlockNumber(iptr);
+    val <<= MAX_HEAP_TUPLES_PER_PAGE_BITS;
+    val |= GinItemPointerGetOffsetNumber(iptr);
+    return val;
+}
+
+static void uint64_to_itemptr(uint64 val, ItemPointer iptr)
+{
+    GinItemPointerSetOffsetNumber(iptr, val & ((1 << MAX_HEAP_TUPLES_PER_PAGE_BITS) - 1));
+    val = val >> MAX_HEAP_TUPLES_PER_PAGE_BITS;
+    GinItemPointerSetBlockNumber(iptr, val);
+}
+
+/*
+ * Decode varbyte-encoded integer at *ptr. *ptr is incremented to next integer.
+ */
+static uint64 decode_varbyte(unsigned char **ptr)
+{
+    uint64 val = 0;
+    unsigned char *p = *ptr;
+    int shift = 0;
+
+    while (true) {
+        uint64 c = *(p++);
+        val |= (c & VARBYTE_DATA_BITS) << shift;
+        if (!(c & VARBYTE_CONTINUATION_BIT)) {
+            break;
+        }
+        shift += VARBYTE_SHIFT_PER_BYTE;
+        if (shift > (VARBYTE_SHIFT_PER_BYTE * MAX_VARBYTE_SHIFT_BYTES)) {
+            Assert((c & VARBYTE_CONTINUATION_BIT) == 0);
+            break;
+        }
+    }
+    
+    *ptr = p;
+    return val;
+}
+
 /* Dump out the contents of the block in hex and ascii.
  * BYTES_PER_LINE bytes are formatted in each line. */
 static void FormatBinary(char *buffer, unsigned int numBytes, unsigned int startIndex)
