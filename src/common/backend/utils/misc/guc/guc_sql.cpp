@@ -3157,8 +3157,8 @@ static void InitSqlConfigureNamesString()
             NULL,
             GUC_LIST_INPUT | GUC_REPORT},
             &u_sess->attr.attr_sql.b_format_behavior_compat_string,
-            "enable_set_variables,set_session_transaction,enable_modify_column,fetch,"
-            "enable_multi_charset,diagnostics",
+            "enable_set_variables,set_session_transaction,enable_modify_column,default_collation,fetch,"
+            "diagnostics",
             check_b_format_behavior_compat_options,
             assign_b_format_behavior_compat_options,
             NULL},
