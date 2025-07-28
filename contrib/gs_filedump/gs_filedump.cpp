@@ -1201,6 +1201,951 @@ static uint64 decode_varbyte(unsigned char **ptr)
     return val;
 }
 
+/*	Dump out gin-specific content of block */
+static void FormatGinBlock(char *buffer, bool isToast, Oid toastOid, unsigned int toastExternalSize, char *toastValue,
+                           unsigned int *toastRead)
+{
+    Page page = (Page)buffer;
+    const char *indent = isToast ? "\t" : "";
+    if (isToast && !g_verbose) {
+        return;
+    }
+    printf("%s<Data> -----\n", indent);
+    if (IsGinLeafPage(page)) {
+        if (GinPageIsCompressed(page)) {
+            GinPostingList *seg = GinDataLeafPageGetPostingList(page);
+            int plistIdx = 1;
+            Size len = GinDataLeafPageGetPostingListSize(page);
+            Pointer endptr = ((Pointer)seg) + len;
+            ItemPointer cur;
+
+            while ((Pointer)seg < endptr) {
+                int itemIdx = 1;
+                uint64 val;
+                unsigned char *endseg = seg->bytes + seg->nbytes;
+                unsigned char *ptr = seg->bytes;
+
+                cur = &seg->first;
+                printf("\n%s Posting List	%3d -- Length: %4u\n", indent, plistIdx, seg->nbytes);
+                printf("%s	ItemPointer %3d -- Block Id: %4u linp Index: %4u\n", indent, itemIdx,
+                       ((uint32)((cur->ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)cur->ip_blkid.bi_lo)),
+                       cur->ip_posid);
+
+                val = itemptr_to_uint64(&seg->first);
+                while (ptr < endseg) {
+                    val += decode_varbyte(&ptr);
+                    itemIdx++;
+
+                    uint64_to_itemptr(val, cur);
+                    printf("%s	ItemPointer %3d -- Block Id: %4u linp Index: %4u\n", indent, itemIdx,
+                           ((uint32)((cur->ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)cur->ip_blkid.bi_lo)),
+                           cur->ip_posid);
+                }
+                plistIdx++;
+                seg = GinNextPostingListSegment(seg);
+            }
+        } else {
+            int i = GinPageGetOpaque(page)->maxoff;
+            int nitems = GinPageGetOpaque(page)->maxoff;
+            ItemPointer items = (ItemPointer)GinDataPageGetData(page);
+            for (i = 0; i < nitems; i++) {
+                printf("%s ItemPointer %d -- Block Id: %u linp Index: %u\n", indent, i + 1,
+                       ((uint32)((items[i].ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)items[i].ip_blkid.bi_lo)),
+                       items[i].ip_posid);
+            }
+        }
+    } else {
+        OffsetNumber cur = GinPageGetOpaque(page)->maxoff;
+        OffsetNumber high = GinPageGetOpaque(page)->maxoff;
+        PostingItem *pitem = NULL;
+        for (cur = FirstOffsetNumber; cur <= high; cur = OffsetNumberNext(cur)) {
+            pitem = GinDataPageGetPostingItem(page, cur);
+            printf("%s PostingItem %d -- child Block Id: (%u) Block Id: %u linp Index: %u\n", indent, cur,
+                   ((uint32)((pitem->child_blkno.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)pitem->child_blkno.bi_lo)),
+                   ((uint32)((pitem->key.ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)pitem->key.ip_blkid.bi_lo)),
+                   pitem->key.ip_posid);
+        }
+    }
+    printf("\n");
+}
+
+/*	Dump out gin-specific content of block */
+static void FormatUHeapGinBlock(char *buffer, bool isToast, Oid toastOid, unsigned int toastExternalSize,
+                                char *toastValue, unsigned int *toastRead)
+{
+    Page page = (Page)buffer;
+    const char *indent = isToast ? "\t" : "";
+    if (isToast && !g_verbose) {
+        return;
+    }
+    printf("%s<Data> -----\n", indent);
+    if (IsUHeapGinLeafPage(page)) {
+        if (GinPageIsCompressed(page)) {
+            GinPostingList *seg = GinDataLeafPageGetPostingList(page);
+            int plistIdx = 1;
+            Size len = GinDataLeafPageGetPostingListSize(page);
+            Pointer endptr = ((Pointer)seg) + len;
+            ItemPointer cur;
+
+            while ((Pointer)seg < endptr) {
+                int itemIdx = 1;
+                uint64 val;
+                unsigned char *endseg = seg->bytes + seg->nbytes;
+                unsigned char *ptr = seg->bytes;
+                cur = &seg->first;
+                printf("\n%s Posting List	%3d -- Length: %4u\n", indent, plistIdx, seg->nbytes);
+                printf("%s	ItemPointer %3d -- Block Id: %4u linp Index: %4u\n", indent, itemIdx,
+                       ((uint32)((cur->ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)cur->ip_blkid.bi_lo)),
+                       cur->ip_posid);
+
+                val = itemptr_to_uint64(&seg->first);
+                while (ptr < endseg) {
+                    val += decode_varbyte(&ptr);
+                    itemIdx++;
+
+                    uint64_to_itemptr(val, cur);
+                    printf("%s	ItemPointer %3d -- Block Id: %4u linp Index: %4u\n", indent, itemIdx,
+                           ((uint32)((cur->ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)cur->ip_blkid.bi_lo)),
+                           cur->ip_posid);
+                }
+                plistIdx++;
+                seg = GinNextPostingListSegment(seg);
+            }
+        } else {
+            int i = GinPageGetOpaque(page)->maxoff;
+            int nitems = GinPageGetOpaque(page)->maxoff;
+            ItemPointer items = (ItemPointer)GinDataPageGetData(page);
+            for (i = 0; i < nitems; i++) {
+                printf("%s ItemPointer %d -- Block Id: %u linp Index: %u\n", indent, i + 1,
+                       ((uint32)((items[i].ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)items[i].ip_blkid.bi_lo)),
+                       items[i].ip_posid);
+            }
+        }
+    } else {
+        OffsetNumber cur = GinPageGetOpaque(page)->maxoff;
+        OffsetNumber high = GinPageGetOpaque(page)->maxoff;
+        PostingItem *pitem = NULL;
+        for (cur = FirstOffsetNumber; cur <= high; cur = OffsetNumberNext(cur)) {
+            pitem = GinDataPageGetPostingItem(page, cur);
+            printf("%s PostingItem %d -- child Block Id: (%u) Block Id: %u linp Index: %u\n", indent, cur,
+                   ((uint32)((pitem->child_blkno.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)pitem->child_blkno.bi_lo)),
+                   ((uint32)((pitem->key.ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)pitem->key.ip_blkid.bi_lo)),
+                   pitem->key.ip_posid);
+        }
+    }
+
+    printf("\n");
+}
+
+/*	Dump out formatted items that reside on this block */
+static void FormatItemBlock(char *buffer, Page page, bool isToast, Oid toastOid, unsigned int toastExternalSize,
+                            char *toastValue, unsigned int *toastRead)
+{
+    unsigned int x;
+    unsigned int itemSize;
+    unsigned int itemOffset;
+    unsigned int itemFlags;
+    ItemId itemId;
+    unsigned int maxOffset = PageGetMaxOffsetNumber(page);
+    const char *indent = isToast ? "\t" : "";
+    errno_t rc;
+
+    /* If it's a btree meta page, the meta block is where items would normally
+     * be; don't print garbage. */
+    if (IsBtreeMetaPage(page)) {
+        return;
+    }
+
+    /* Same as above */
+    if (IsSpGistMetaPage(page)) {
+        return;
+    }
+
+    /* Same as above */
+    if (IsGinMetaPage(page)) {
+        return;
+    }
+
+    /* Leaf pages of GIN index contain posting lists
+     * instead of item array.
+     */
+    if (g_specialType == SPEC_SECT_INDEX_GIN) {
+        FormatGinBlock(buffer, isToast, toastOid, toastExternalSize, toastValue, toastRead);
+        return;
+    }
+
+    if (!isToast || g_verbose) {
+        printf("%s<Data> -----\n", indent);
+    }
+
+    /* Loop through the items on the block.  Check if the block is
+     * empty and has a sensible item array listed before running
+     * through each item */
+    if (maxOffset == 0) {
+        if (!isToast || g_verbose) {
+            printf("%s Empty block - no items listed \n\n", indent);
+        }
+    } else if ((maxOffset < 0) || (maxOffset > g_blockSize)) {
+        if (!isToast || g_verbose) {
+            printf("%s Error: Item index corrupt on block. Offset: <%u>.\n\n", indent, maxOffset);
+        }
+        g_exitCode = 1;
+    } else {
+        int formatAs;
+        char textFlags[16];
+        uint32 chunkId;
+        unsigned int chunkSize = 0;
+
+        /* First, honour requests to format items a special way, then
+         * use the special section to determine the format style */
+        if (g_itemOptions & ITEM_INDEX) {
+            formatAs = ITEM_INDEX;
+        } else if (g_itemOptions & ITEM_HEAP) {
+            formatAs = ITEM_HEAP;
+        } else {
+            switch (g_specialType) {
+                case SPEC_SECT_INDEX_BTREE:
+                case SPEC_SECT_INDEX_HASH:
+                case SPEC_SECT_INDEX_GIST:
+                case SPEC_SECT_INDEX_GIN:
+                    formatAs = ITEM_INDEX;
+                    break;
+                case SPEC_SECT_INDEX_SPGIST: {
+                    SpGistPageOpaque spgpo = (SpGistPageOpaque)((char *)page + ((PageHeader)page)->pd_special);
+
+                    if (spgpo->flags & SPGIST_LEAF) {
+                        formatAs = ITEM_SPG_LEAF;
+                    } else {
+                        formatAs = ITEM_SPG_INNER;
+                    }
+                    break;
+                }
+                default:
+                    formatAs = ITEM_HEAP;
+                    break;
+            }
+        }
+
+        for (x = 1; x < (maxOffset + 1); x++) {
+            itemId = PageGetItemId(page, x);
+            itemFlags = (unsigned int)ItemIdGetFlags(itemId);
+            itemSize = (unsigned int)ItemIdGetLength(itemId);
+            itemOffset = (unsigned int)ItemIdGetOffset(itemId);
+            switch (itemFlags) {
+                case LP_UNUSED:
+                    rc = strcpy_s(textFlags, sizeof textFlags, "UNUSED");
+                    securec_check(rc, "\0", "\0");
+                    break;
+                case LP_NORMAL:
+                    rc = strcpy_s(textFlags, sizeof textFlags, "NORMAL");
+                    securec_check(rc, "\0", "\0");
+                    break;
+                case LP_REDIRECT:
+                    rc = strcpy_s(textFlags, sizeof textFlags, "REDIRECT");
+                    securec_check(rc, "\0", "\0");
+                    break;
+                case LP_DEAD:
+                    rc = strcpy_s(textFlags, sizeof textFlags, "DEAD");
+                    securec_check(rc, "\0", "\0");
+                    break;
+                default:
+                    /* shouldn't be possible */
+                    rc = sprintf_s(textFlags, strlen(textFlags) + 1, "0x%02x", itemFlags);
+                    securec_check(rc, "\0", "\0");
+                    break;
+            }
+
+            if (!isToast || g_verbose) {
+                printf("%s Item %3u -- Length: %4u  Offset: %4u (0x%04x)"
+                       "  Flags: %s\n",
+                       indent, x, itemSize, itemOffset, itemOffset, textFlags);
+            }
+
+            /* Make sure the item can physically fit on this block before
+             * formatting */
+            if ((itemOffset + itemSize > g_blockSize) || (itemOffset + itemSize > g_bytesToFormat)) {
+                if (!isToast || g_verbose) {
+                    printf("%s  Error: Item contents extend beyond block.\n"
+                           "%s         BlockSize<%u> Bytes Read<%u> Item Start<%u>.\n",
+                           indent, indent, g_blockSize, g_bytesToFormat, itemOffset + itemSize);
+                }
+                g_exitCode = 1;
+            } else {
+                HeapTupleHeader tuple_header;
+                TransactionId xmax;
+
+                /* If the user requests that the items be interpreted as
+                 * heap or index items... */
+                if (g_itemOptions & ITEM_DETAIL) {
+                    FormatItem(buffer, itemSize, itemOffset, formatAs);
+                }
+
+                /* Dump the items contents in hex and ascii */
+                if (g_blockOptions & BLOCK_FORMAT) {
+                    FormatBinary(buffer, itemSize, itemOffset);
+                }
+
+                /* Check if tuple was deleted */
+                tuple_header = (HeapTupleHeader)(&buffer[itemOffset]);
+                xmax = HeapTupleHeaderGetRawXmax(page, tuple_header);
+                if ((g_blockOptions & BLOCK_IGNORE_OLD) && (xmax != 0)) {
+                    if (!isToast || g_verbose) {
+                        printf("%stuple was removed by transaction #%ld\n", indent, xmax);
+                    }
+                } else if (isToast) {
+                    ToastChunkDecode(&buffer[itemOffset], itemSize, toastOid, &chunkId, toastValue + *toastRead,
+                                     &chunkSize);
+
+                    if (!isToast || g_verbose) {
+                        printf("%s  Read TOAST chunk. TOAST Oid: %d, chunk id: %d, "
+                               "chunk data size: %u\n",
+                               indent, toastOid, chunkId, chunkSize);
+                    }
+
+                    *toastRead += chunkSize;
+
+                    if (*toastRead >= toastExternalSize) {
+                        break;
+                    }
+                } else if ((g_blockOptions & BLOCK_DECODE) && (itemFlags == LP_NORMAL)) {
+                    /* Decode tuple data */
+                    FormatDecode(&buffer[itemOffset], itemSize);
+                }
+
+                if (!isToast && x == maxOffset) {
+                    printf("\n");
+                }
+            }
+        }
+    }
+}
+
+/*	Dump out formatted items that reside on this block */
+static void FormatUHeapItemBlock(char *buffer, Page page, bool isToast, Oid toastOid, unsigned int toastExternalSize,
+                                 char *toastValue, unsigned int *toastRead)
+{
+    unsigned int x;
+    unsigned int itemSize;
+    unsigned int itemOffset;
+    unsigned int itemFlags;
+    RowPtr *itemId;
+    unsigned int maxOffset = UHeapPageGetMaxOffsetNumber(page);
+    const char *indent = isToast ? "\t" : "";
+    errno_t rc;
+
+    /* If it's a btree meta page, the meta block is where items would normally
+     * be; don't print garbage. */
+    if (IsBtreeMetaPage(page)) {
+        return;
+    }
+
+    /* Same as above */
+    if (IsSpGistMetaPage(page)) {
+        return;
+    }
+
+    /* Same as above */
+    if (IsGinMetaPage(page)) {
+        return;
+    }
+
+    /* Leaf pages of GIN index contain posting lists
+     * instead of item array.
+     */
+    if (g_specialType == SPEC_SECT_INDEX_GIN) {
+        FormatUHeapGinBlock(buffer, isToast, toastOid, toastExternalSize, toastValue, toastRead);
+        return;
+    }
+
+    if (!isToast || g_verbose) {
+        printf("%s<Data> -----\n", indent);
+    }
+
+    /* Loop through the items on the block.  Check if the block is
+     * empty and has a sensible item array listed before running
+     * through each item */
+    if (maxOffset == 0) {
+        if (!isToast || g_verbose) {
+            printf("%s Empty block - no items listed \n\n", indent);
+        }
+    } else if ((maxOffset < 0) || (maxOffset > g_blockSize)) {
+        if (!isToast || g_verbose) {
+            printf("%s Error: Item index corrupt on block. Offset: <%u>.\n\n", indent, maxOffset);
+        }
+        g_exitCode = 1;
+    } else {
+        int formatAs;
+        char textFlags[16];
+        uint32 chunkId;
+        unsigned int chunkSize = 0;
+
+        /* First, honour requests to format items a special way, then
+         * use the special section to determine the format style */
+        if (g_itemOptions & ITEM_INDEX) {
+            formatAs = ITEM_INDEX;
+        } else if (g_itemOptions & ITEM_HEAP) {
+            formatAs = ITEM_HEAP;
+        } else {
+            switch (g_specialType) {
+                case SPEC_SECT_INDEX_BTREE:
+                case SPEC_SECT_INDEX_HASH:
+                case SPEC_SECT_INDEX_GIST:
+                case SPEC_SECT_INDEX_GIN:
+                    formatAs = ITEM_INDEX;
+                    break;
+                case SPEC_SECT_INDEX_SPGIST: {
+                    SpGistPageOpaque spgpo = (SpGistPageOpaque)((char *)page + ((UHeapPageHeader)page)->pd_special);
+
+                    if (spgpo->flags & SPGIST_LEAF) {
+                        formatAs = ITEM_SPG_LEAF;
+                    } else {
+                        formatAs = ITEM_SPG_INNER;
+                    }
+                    break;
+                }
+                default:
+                    formatAs = ITEM_HEAP;
+                    break;
+            }
+        }
+
+        for (x = 1; x < (maxOffset + 1); x++) {
+            itemId = UPageGetRowPtr(page, x);
+            itemFlags = (unsigned int)itemId->flags;
+            itemSize = (unsigned int)itemId->len;
+            itemOffset = RowPtrGetOffset(itemId);
+
+            switch (itemFlags) {
+                case RP_UNUSED:
+                    rc = strcpy_s(textFlags, sizeof textFlags, "UNUSED");
+                    securec_check(rc, "\0", "\0");
+                    break;
+                case RP_NORMAL:
+                    rc = strcpy_s(textFlags, sizeof textFlags, "NORMAL");
+                    securec_check(rc, "\0", "\0");
+                    break;
+                case RP_REDIRECT:
+                    rc = strcpy_s(textFlags, sizeof textFlags, "REDIRECT");
+                    securec_check(rc, "\0", "\0");
+                    break;
+                case RP_DEAD:
+                    rc = strcpy_s(textFlags, sizeof textFlags, "DEAD");
+                    securec_check(rc, "\0", "\0");
+                    break;
+                default:
+                    /* shouldn't be possible */
+                    rc = sprintf_s(textFlags, strlen(textFlags) + 1, "0x%02x", itemFlags);
+                    securec_check(rc, "\0", "\0");
+                    break;
+            }
+
+            if (!isToast || g_verbose) {
+                printf("%s Item %3u -- Length: %4u  Offset: %4u (0x%04x)"
+                       "  Flags: %s\n",
+                       indent, x, itemSize, itemOffset, itemOffset, textFlags);
+            }
+
+            /* Make sure the item can physically fit on this block before
+             * formatting */
+            if ((itemOffset + itemSize > g_blockSize) || (itemOffset + itemSize > g_bytesToFormat)) {
+                if (!isToast || g_verbose) {
+                    printf("%s  Error: Item contents extend beyond block.\n"
+                           "%s         BlockSize<%u> Bytes Read<%u> Item Start<%u>.\n",
+                           indent, indent, g_blockSize, g_bytesToFormat, itemOffset + itemSize);
+                }
+                g_exitCode = 1;
+            } else {
+                UHeapDiskTuple utuple_header;
+                TransactionId xmax;
+
+                /* If the user requests that the items be interpreted as
+                 * heap or index items... */
+                if (g_itemOptions & ITEM_DETAIL) {
+                    FormatUHeapItem(buffer, itemSize, itemOffset, formatAs);
+                }
+
+                /* Dump the items contents in hex and ascii */
+                if (g_blockOptions & BLOCK_FORMAT) {
+                    FormatBinary(buffer, itemSize, itemOffset);
+                }
+
+                /* Check if tuple was deleted */
+                utuple_header = (UHeapDiskTuple)(&buffer[itemOffset]);
+                xmax = UHEAP_XID_IS_TRANS(utuple_header->flag);
+                if ((g_blockOptions & BLOCK_IGNORE_OLD) && (xmax == 0)) {
+                    if (!isToast || g_verbose) {
+                        printf("%stuple was removed by transaction.\n", indent);
+                    }
+                } else if (isToast) {
+                    ToastChunkDecode(&buffer[itemOffset], itemSize, toastOid, &chunkId, toastValue + *toastRead,
+                                     &chunkSize);
+
+                    if (!isToast || g_verbose) {
+                        printf("%s  Read TOAST chunk. TOAST Oid: %d, chunk id: %d, "
+                               "chunk data size: %u\n",
+                               indent, toastOid, chunkId, chunkSize);
+                    }
+
+                    *toastRead += chunkSize;
+
+                    if (*toastRead >= toastExternalSize) {
+                        break;
+                    }
+                } else if ((g_blockOptions & BLOCK_DECODE) && (itemFlags == LP_NORMAL)) {
+                    /* Decode tuple data */
+                    FormatDecode(&buffer[itemOffset], itemSize);
+                }
+
+                if (!isToast && x == maxOffset) {
+                    printf("\n");
+                }
+            }
+        }
+    }
+}
+
+/* Interpret the contents of the item based on whether it has a special
+ * section and/or the user has hinted */
+static void FormatItem(char *buffer, unsigned int numBytes, unsigned int startIndex, unsigned int formatAs)
+{
+    static const char *const spgistTupstates[4] = {"LIVE", "REDIRECT", "DEAD", "PLACEHOLDER"};
+
+    if (formatAs == ITEM_INDEX) {
+        /* It is an IndexTuple item, so dump the index header */
+        if (numBytes < sizeof(ItemPointerData)) {
+            if (numBytes) {
+                printf("  Error: This item does not look like an index item.\n");
+                g_exitCode = 1;
+            }
+        } else {
+            IndexTuple itup = (IndexTuple)(&(buffer[startIndex]));
+
+            printf("  Block Id: %u  linp Index: %u  Size: %d\n"
+                   "  Has Nulls: %u  Has Varwidths: %u\n\n",
+                   ((uint32)((itup->t_tid.ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)itup->t_tid.ip_blkid.bi_lo)),
+                   itup->t_tid.ip_posid, (int)IndexTupleSize(itup), IndexTupleHasNulls(itup) ? 1 : 0,
+                   IndexTupleHasVarwidths(itup) ? 1 : 0);
+
+            if (numBytes != IndexTupleSize(itup)) {
+                printf("  Error: Item size difference. Given <%u>, "
+                       "Internal <%d>.\n",
+                       numBytes, (int)IndexTupleSize(itup));
+                g_exitCode = 1;
+            }
+        }
+    } else if (formatAs == ITEM_SPG_INNER) {
+        /* It is an SpGistInnerTuple item, so dump the index header */
+        if (numBytes < SGITHDRSZ) {
+            if (numBytes) {
+                printf("  Error: This item does not look like an SPGiST item.\n");
+                g_exitCode = 1;
+            }
+        } else {
+            SpGistInnerTuple itup = (SpGistInnerTuple)(&(buffer[startIndex]));
+
+            printf("  State: %s  allTheSame: %d nNodes: %u prefixSize: %u\n\n", spgistTupstates[itup->tupstate],
+                   itup->allTheSame, itup->nNodes, itup->prefixSize);
+
+            if (numBytes != itup->size) {
+                printf("  Error: Item size difference. Given <%u>, "
+                       "Internal <%d>.\n",
+                       numBytes, (int)itup->size);
+                g_exitCode = 1;
+            } else if (itup->prefixSize == MAXALIGN(itup->prefixSize)) {
+                int i;
+                SpGistNodeTuple node;
+
+                /* Dump the prefix contents in hex and ascii */
+                if ((g_blockOptions & BLOCK_FORMAT) && SGITHDRSZ + itup->prefixSize <= numBytes) {
+                    FormatBinary(buffer, SGITHDRSZ + itup->prefixSize, startIndex);
+                }
+
+                /* Try to print the nodes, but only while pointer is sane */
+                SGITITERATE(itup, i, node)
+                {
+                    int off = (char *)node - (char *)itup;
+
+                    if (off + SGNTHDRSZ > numBytes) {
+                        break;
+                    }
+                    printf("  Node %2d:  Downlink: %u/%u  Size: %d  Null: %u\n", i,
+                           ((uint32)((node->t_tid.ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) |
+                           (uint16)node->t_tid.ip_blkid.bi_lo)),
+                           node->t_tid.ip_posid, (int)IndexTupleSize(node), IndexTupleHasNulls(node) ? 1 : 0);
+                    /* Dump the node's contents in hex and ascii */
+                    if ((g_blockOptions & BLOCK_FORMAT) && off + IndexTupleSize(node) <= numBytes) {
+                        FormatBinary(buffer, IndexTupleSize(node), startIndex + off);
+                    }
+                    if (IndexTupleSize(node) != MAXALIGN(IndexTupleSize(node))) {
+                        break;
+                    }
+                }
+            }
+            printf("\n");
+        }
+    } else if (formatAs == ITEM_SPG_LEAF) {
+        /* It is an SpGistLeafTuple item, so dump the index header */
+        if (numBytes < SGLTHDRSZ) {
+            if (numBytes) {
+                printf("  Error: This item does not look like an SPGiST item.\n");
+                g_exitCode = 1;
+            }
+        } else {
+            SpGistLeafTuple itup = (SpGistLeafTuple)(&(buffer[startIndex]));
+            printf("  State: %s  nextOffset: %u  Block Id: %u  linp Index: %u\n\n", spgistTupstates[itup->tupstate],
+                   itup->nextOffset,
+                   ((uint32)((itup->heapPtr.ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) |
+                   (uint16)itup->heapPtr.ip_blkid.bi_lo)),
+                   itup->heapPtr.ip_posid);
+
+            if (numBytes != itup->size) {
+                printf("  Error: Item size difference. Given <%u>, "
+                       "Internal <%d>.\n",
+                       numBytes, (int)itup->size);
+                g_exitCode = 1;
+            }
+        }
+    } else {
+        /* It is a HeapTuple item, so dump the heap header */
+        unsigned int alignedSize = MAXALIGN(sizeof(HeapTupleHeaderData));
+        if (numBytes < alignedSize) {
+            if (numBytes) {
+                printf("  Error: This item does not look like a heap item.\n");
+                g_exitCode = 1;
+            }
+        } else {
+            char flagString[256];
+            unsigned int x;
+            unsigned int bitmapLength = 0;
+            unsigned int oidLength = 0;
+            unsigned int computedLength;
+            unsigned int infoMask;
+            unsigned int infoMask2;
+            int localNatts;
+            unsigned int localHoff;
+            bits8 *localBits;
+            unsigned int localBitOffset;
+
+            HeapTupleHeader htup = (HeapTupleHeader)(&buffer[startIndex]);
+            TupleDesc tdup = (TupleDesc)(&buffer[startIndex]);
+
+            infoMask = htup->t_infomask;
+            infoMask2 = htup->t_infomask2;
+            localBits = &(htup->t_bits[0]);
+            localNatts = HeapTupleHeaderGetNatts(htup, tdup);
+            localHoff = htup->t_hoff;
+            localBitOffset = offsetof(HeapTupleHeaderData, t_bits);
+
+            printf("  XMIN: %lu  XMAX: %u  CID|XVAC: %u", HeapTupleHeaderGetXmin_tuple(htup),
+                   htup->t_choice.t_heap.t_xmax, HeapTupleHeaderGetRawCommandId(htup));
+
+            if (infoMask & HEAP_HASOID) {
+                printf("  OID: %u", HeapTupleHeaderGetOid(htup));
+            }
+            printf("\n"
+                   "  Block Id: %u  linp Index: %u   Attributes: %d   Size: %d\n",
+                   ((uint32)((htup->t_ctid.ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) |
+                   (uint16)htup->t_ctid.ip_blkid.bi_lo)),
+                   htup->t_ctid.ip_posid, localNatts, htup->t_hoff);
+
+            /* Place readable versions of the tuple info mask into a buffer.
+             * Assume that the string can not expand beyond 256. */
+            flagString[0] = '\0';
+            if (infoMask & HEAP_HASNULL) {
+                strcat_s(flagString, sizeof(flagString), "HASNULL|");
+            }
+            if (infoMask & HEAP_HASVARWIDTH) {
+                strcat_s(flagString, sizeof(flagString), "HASVARWIDTH|");
+            }
+            if (infoMask & HEAP_HASEXTERNAL) {
+                strcat_s(flagString, sizeof(flagString), "HASEXTERNAL|");
+            }
+            if (infoMask & HEAP_HASOID) {
+                strcat_s(flagString, sizeof(flagString), "HASOID|");
+            }
+            if (infoMask & HEAP_XMAX_KEYSHR_LOCK) {
+                strcat_s(flagString, sizeof(flagString), "XMAX_KEYSHR_LOCK|");
+            }
+            if (infoMask & HEAP_COMBOCID) {
+                strcat_s(flagString, sizeof(flagString), "COMBOCID|");
+            }
+            if (infoMask & HEAP_XMAX_EXCL_LOCK) {
+                strcat_s(flagString, sizeof(flagString), "XMAX_EXCL_LOCK|");
+            }
+            if (infoMask & HEAP_XMAX_LOCK_ONLY) {
+                strcat_s(flagString, sizeof(flagString), "XMAX_LOCK_ONLY|");
+            }
+            if (infoMask & HEAP_XMIN_COMMITTED) {
+                strcat_s(flagString, sizeof(flagString), "XMIN_COMMITTED|");
+            }
+            if (infoMask & HEAP_XMIN_INVALID) {
+                strcat_s(flagString, sizeof(flagString), "XMIN_INVALID|");
+            }
+            if (infoMask & HEAP_XMAX_COMMITTED) {
+                strcat_s(flagString, sizeof(flagString), "XMAX_COMMITTED|");
+            }
+            if (infoMask & HEAP_XMAX_INVALID) {
+                strcat_s(flagString, sizeof(flagString), "XMAX_INVALID|");
+            }
+            if (infoMask & HEAP_XMAX_IS_MULTI) {
+                strcat_s(flagString, sizeof(flagString), "XMAX_IS_MULTI|");
+            }
+            if (infoMask & HEAP_UPDATED) {
+                strcat_s(flagString, sizeof(flagString), "UPDATED|");
+            }
+            if (infoMask & HEAP_MOVED_OFF) {
+                strcat_s(flagString, sizeof(flagString), "MOVED_OFF|");
+            }
+            if (infoMask & HEAP_MOVED_IN) {
+                strcat_s(flagString, sizeof(flagString), "MOVED_IN|");
+            }
+
+            if (infoMask2 & HEAP_KEYS_UPDATED) {
+                strcat_s(flagString, sizeof(flagString), "KEYS_UPDATED|");
+            }
+            if (infoMask2 & HEAP_HOT_UPDATED) {
+                strcat_s(flagString, sizeof(flagString), "HOT_UPDATED|");
+            }
+            if (infoMask2 & HEAP_ONLY_TUPLE) {
+                strcat_s(flagString, sizeof(flagString), "HEAP_ONLY|");
+            }
+
+            if (strlen(flagString)) {
+                flagString[strlen(flagString) - 1] = '\0';
+            }
+
+            printf("  infomask: 0x%04x (%s) \n", infoMask, flagString);
+
+            /* As t_bits is a variable length array, determine the length of
+             * the header proper */
+            if (infoMask & HEAP_HASNULL) {
+                bitmapLength = BITMAPLEN(localNatts);
+            } else {
+                bitmapLength = 0;
+            }
+            if (infoMask & HEAP_HASOID) {
+                oidLength += sizeof(Oid);
+            }
+            computedLength = MAXALIGN(localBitOffset + bitmapLength + oidLength);
+            /* Inform the user of a header size mismatch or dump the t_bits
+             * array */
+            if (computedLength != localHoff) {
+                printf("  Error: Computed header length not equal to header size.\n"
+                       "         Computed <%u>  Header: <%u>\n",
+                       computedLength, localHoff);
+                g_exitCode = 1;
+            } else if ((infoMask & HEAP_HASNULL) && bitmapLength) {
+                printf("  t_bits: ");
+                for (x = 0; x < bitmapLength; x++) {
+                    printf("[%u]: 0x%02x ", x, localBits[x]);
+                    if (((x & 0x03) == 0x03) && (x < bitmapLength - 1)) {
+                        printf("\n          ");
+                    }
+                }
+                printf("\n");
+            }
+            printf("\n");
+        }
+    }
+}
+
+/* Interpret the contents of the item based on whether it has a special
+ * section and/or the user has hinted */
+static void FormatUHeapItem(char *buffer, unsigned int numBytes, unsigned int startIndex, unsigned int formatAs)
+{
+    static const char *const spgistTupstates[4] = {"LIVE", "REDIRECT", "DEAD", "PLACEHOLDER"};
+
+    if (formatAs == ITEM_INDEX) {
+        /* It is an IndexTuple item, so dump the index header */
+        if (numBytes < sizeof(ItemPointerData)) {
+            if (numBytes) {
+                printf("  Error: This item does not look like an index item.\n");
+                g_exitCode = 1;
+            }
+        } else {
+            IndexTuple itup = (IndexTuple)(&(buffer[startIndex]));
+            printf("  Block Id: %u  linp Index: %u  Size: %d\n"
+                   "  Has Nulls: %u  Has Varwidths: %u\n\n",
+                   ((uint32)((itup->t_tid.ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) | (uint16)itup->t_tid.ip_blkid.bi_lo)),
+                   itup->t_tid.ip_posid, (int)IndexTupleSize(itup), IndexTupleHasNulls(itup) ? 1 : 0,
+                   IndexTupleHasVarwidths(itup) ? 1 : 0);
+
+            if (numBytes != IndexTupleSize(itup)) {
+                printf("  Error: Item size difference. Given <%u>, "
+                       "Internal <%d>.\n",
+                       numBytes, (int)IndexTupleSize(itup));
+                g_exitCode = 1;
+            }
+        }
+    } else if (formatAs == ITEM_SPG_INNER) {
+        /* It is an SpGistInnerTuple item, so dump the index header */
+        if (numBytes < SGITHDRSZ) {
+            if (numBytes) {
+                printf("  Error: This item does not look like an SPGiST item.\n");
+                g_exitCode = 1;
+            }
+        } else {
+            SpGistInnerTuple itup = (SpGistInnerTuple)(&(buffer[startIndex]));
+
+            printf("  State: %s  allTheSame: %d nNodes: %u prefixSize: %u\n\n", spgistTupstates[itup->tupstate],
+                   itup->allTheSame, itup->nNodes, itup->prefixSize);
+            if (numBytes != itup->size) {
+                printf("  Error: Item size difference. Given <%u>, "
+                       "Internal <%d>.\n",
+                       numBytes, (int)itup->size);
+                g_exitCode = 1;
+            } else if (itup->prefixSize == MAXALIGN(itup->prefixSize)) {
+                int i;
+                SpGistNodeTuple node;
+                /* Dump the prefix contents in hex and ascii */
+                if ((g_blockOptions & BLOCK_FORMAT) && SGITHDRSZ + itup->prefixSize <= numBytes) {
+                    FormatBinary(buffer, SGITHDRSZ + itup->prefixSize, startIndex);
+                }
+                /* Try to print the nodes, but only while pointer is sane */
+                SGITITERATE(itup, i, node)
+                {
+                    int off = (char *)node - (char *)itup;
+                    if (off + SGNTHDRSZ > numBytes) {
+                        break;
+                    }
+                    printf("  Node %2d:  Downlink: %u/%u  Size: %d  Null: %u\n", i,
+                           ((uint32)((node->t_tid.ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) |
+                           (uint16)node->t_tid.ip_blkid.bi_lo)),
+                           node->t_tid.ip_posid, (int)IndexTupleSize(node), IndexTupleHasNulls(node) ? 1 : 0);
+                    /* Dump the node's contents in hex and ascii */
+                    if ((g_blockOptions & BLOCK_FORMAT) && off + IndexTupleSize(node) <= numBytes) {
+                        FormatBinary(buffer, IndexTupleSize(node), startIndex + off);
+                    }
+                    if (IndexTupleSize(node) != MAXALIGN(IndexTupleSize(node))) {
+                        break;
+                    }
+                }
+            }
+            printf("\n");
+        }
+    } else if (formatAs == ITEM_SPG_LEAF) {
+        /* It is an SpGistLeafTuple item, so dump the index header */
+        if (numBytes < SGLTHDRSZ) {
+            if (numBytes) {
+                printf("  Error: This item does not look like an SPGiST item.\n");
+                g_exitCode = 1;
+            }
+        } else {
+            SpGistLeafTuple itup = (SpGistLeafTuple)(&(buffer[startIndex]));
+
+            printf("  State: %s  nextOffset: %u  Block Id: %u  linp Index: %u\n\n", spgistTupstates[itup->tupstate],
+                   itup->nextOffset,
+                   ((uint32)((itup->heapPtr.ip_blkid.bi_hi << BLOCK_ID_HIGH_SHIFT) |
+                   (uint16)itup->heapPtr.ip_blkid.bi_lo)),
+                   itup->heapPtr.ip_posid);
+
+            if (numBytes != itup->size) {
+                printf("  Error: Item size difference. Given <%u>, "
+                       "Internal <%d>.\n",
+                       numBytes, (int)itup->size);
+                g_exitCode = 1;
+            }
+        }
+    } else {
+        /* It is a HeapTuple item, so dump the heap header */
+        unsigned int alignedSize = UHeapDiskTupleDataHeaderSize;
+
+        if (numBytes < alignedSize) {
+            if (numBytes) {
+                printf("  Error: This item does not look like a heap item.\n");
+                g_exitCode = 1;
+            }
+        } else {
+            char flagString[256];
+            unsigned int bitmapLength = 0;
+            unsigned int oidLength = 0;
+            unsigned int computedLength;
+            unsigned int infoMask;
+            unsigned int infoMask2;
+            int localNatts;
+            unsigned int localHoff;
+            bits8 *localBits;
+            unsigned int localBitOffset;
+            UHeapDiskTuple utuple = (UHeapDiskTuple)(&buffer[startIndex]);
+
+            infoMask = utuple->flag;
+            infoMask2 = utuple->flag2;
+            localBits = &(utuple->data[0]);
+            localNatts = UHeapTupleHeaderGetNatts(utuple);
+            localHoff = utuple->t_hoff;
+            localBitOffset = offsetof(UHeapDiskTupleData, data);
+
+            printf("  xid: %u \t td: %d \t locker_td : %d \n"
+                   "  Attributes: %u, localHoff : %u \n",
+                   utuple->xid, utuple->td_id, utuple->reserved, infoMask2, localHoff);
+
+            /* Place readable versions of the tuple info mask into a buffer.
+             * Assume that the string can not expand beyond 256. */
+            flagString[0] = '\0';
+            if (infoMask & UHEAP_HAS_NULL) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_HAS_NULL|");
+            }
+            if (infoMask & UHEAP_HASVARWIDTH) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_HASVARWIDTH|");
+            }
+            if (infoMask & UHEAP_HASEXTERNAL) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_HASEXTERNAL|");
+            }
+            if (infoMask & UHEAP_DELETED) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_DELETED|");
+            }
+            if (infoMask & UHEAP_INPLACE_UPDATED) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_INPLACE_UPDATED|");
+            }
+            if (infoMask & UHEAP_UPDATED) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_UPDATED|");
+            }
+            if (infoMask & UHEAP_XID_KEYSHR_LOCK) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_XID_KEYSHR_LOCK|");
+            }
+            if (infoMask & UHEAP_XID_NOKEY_EXCL_LOCK) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_XID_NOKEY_EXCL_LOCK|");
+            }
+            if (infoMask & UHEAP_XID_EXCL_LOCK) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_XID_EXCL_LOCK|");
+            }
+            if (infoMask & UHEAP_MULTI_LOCKERS) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_MULTI_LOCKERS|");
+            }
+            if (infoMask & UHEAP_INVALID_XACT_SLOT) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_INVALID_XACT_SLOT|");
+            }
+            if (infoMask & UHEAP_XID_COMMITTED) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_XID_COMMITTED|");
+            }
+            if (infoMask & UHEAP_XID_INVALID) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_XID_INVALID|");
+            }
+            if (infoMask & UHEAP_XID_FROZEN) {
+                strcat_s(flagString, sizeof(flagString), "UHEAP_XID_FROZEN|");
+            }
+
+            if (strlen(flagString)) {
+                flagString[strlen(flagString) - 1] = '\0';
+            }
+
+            printf("  infomask: 0x%04x (%s) \n", infoMask, flagString);
+
+            /* As t_bits is a variable length array, determine the length of
+             * the header proper */
+            if (infoMask & UHEAP_HAS_NULL) {
+                bitmapLength = BITMAPLEN(localNatts);
+            } else {
+                bitmapLength = 0;
+            }
+
+            computedLength = localBitOffset + bitmapLength + oidLength;
+
+            printf("\n");
+        }
+    }
+}
+
 /* Dump out the contents of the block in hex and ascii.
  * BYTES_PER_LINE bytes are formatted in each line. */
 static void FormatBinary(char *buffer, unsigned int numBytes, unsigned int startIndex)
