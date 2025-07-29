@@ -65,17 +65,17 @@
 extern unsigned int chunkSizeInBits;
 
 extern int32 maxChunksPerProcess;
-extern volatile int32 processMemInChunks;
+extern Padding<volatile int32> processMemInChunks;
 extern int32 peakChunksPerProcess;
-extern volatile int32 shareTrackedMemChunks;
+extern Padding<volatile int32> shareTrackedMemChunks;
 extern int32 peakChunksSharedContext;
 extern int32 maxChunksPerQuery;
 extern int32 comm_original_memory;
 extern int32 maxSharedMemory;
 extern volatile int32 dynmicTrackedMemChunks;
-extern int64 storageTrackedBytes;
+extern Padding<int64> storageTrackedBytes;
 extern int32 backendReservedMemInChunk;
-extern volatile int32 backendUsedMemInChunk;
+extern Padding<volatile int32> backendUsedMemInChunk;
 
 /* functions from memprot.cpp */
 #ifdef MEMORY_CONTEXT_CHECKING

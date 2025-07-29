@@ -42,11 +42,11 @@
 #include "replication/walsender.h"
 
 /* Track memory usage by all shared memory context */
-volatile int32 shareTrackedMemChunks = 0;
-int64 shareTrackedBytes = 0;
+Padding<volatile int32> shareTrackedMemChunks = { 0 };
+Padding<int64> shareTrackedBytes = { 0 };
 
 /* Track memory usage in storage for it calls malloc directly */
-int64 storageTrackedBytes = 0;
+Padding<int64> storageTrackedBytes = { 0 };
 
 /* peak size of shared memory context */
 int32 peakChunksSharedContext = 0;
@@ -61,12 +61,12 @@ int physicalMemQuotaInChunks = 0;
 int eliminateErrorsMemoryBytes = 1 * 1024 * 512;
 
 int32 maxChunksPerProcess = 0;   // be set by GUC variable --max_dynamic_memory
-volatile int32 processMemInChunks = 200;  // track the memory used by process --dynamic_used_memory
+Padding<volatile int32> processMemInChunks = { 200 };  // track the memory used by process --dynamic_used_memory
 int32 peakChunksPerProcess = 0;  // the peak memory of process --dynamic_peak_memory
 int32 comm_original_memory = 0;  // original comm memory
 int32 maxSharedMemory = 0;       // original shared memory
 int32 backendReservedMemInChunk = 0;  // reserved memory for backend threads
-volatile int32 backendUsedMemInChunk = 0;      // the memory usage for backend threads
+Padding<volatile int32> backendUsedMemInChunk = { 0 };      // the memory usage for backend threads
 
 /* Track memory usage by all dynamic memory context */
 volatile int32 dynmicTrackedMemChunks = 200;
@@ -77,17 +77,17 @@ THR_LOCAL TimestampTz last_print_timestamp = 0;
 /*
  * This is the virtual function table for Memory Functions
  */
-MemoryProtectFuncDef GenericFunctions = {MemoryProtectFunctions::gs_memprot_malloc<MEM_THRD>,
+const MemoryProtectFuncDef GenericFunctions = {MemoryProtectFunctions::gs_memprot_malloc<MEM_THRD>,
     MemoryProtectFunctions::gs_memprot_free<MEM_THRD>,
     MemoryProtectFunctions::gs_memprot_realloc<MEM_THRD>,
     MemoryProtectFunctions::gs_posix_memalign<MEM_THRD>};
 
-MemoryProtectFuncDef SessionFunctions = {MemoryProtectFunctions::gs_memprot_malloc<MEM_SESS>,
+const MemoryProtectFuncDef SessionFunctions = {MemoryProtectFunctions::gs_memprot_malloc<MEM_SESS>,
     MemoryProtectFunctions::gs_memprot_free<MEM_SESS>,
     MemoryProtectFunctions::gs_memprot_realloc<MEM_SESS>,
     MemoryProtectFunctions::gs_posix_memalign<MEM_SESS>};
 
-MemoryProtectFuncDef SharedFunctions = {MemoryProtectFunctions::gs_memprot_malloc<MEM_SHRD>,
+const MemoryProtectFuncDef SharedFunctions = {MemoryProtectFunctions::gs_memprot_malloc<MEM_SHRD>,
     MemoryProtectFunctions::gs_memprot_free<MEM_SHRD>,
     MemoryProtectFunctions::gs_memprot_realloc<MEM_SHRD>,
     MemoryProtectFunctions::gs_posix_memalign<MEM_SHRD>};
@@ -124,7 +124,7 @@ FORCE_INLINE bool gs_sysmemory_busy(int64 used, bool strict)
     if (!GS_MP_INITED)
         return false;
 
-    int64 percent = (processMemInChunks * 100) / maxChunksPerProcess;
+    int64 percent = (processMemInChunks.value * 100) / maxChunksPerProcess;
     int usedInChunk = used >> chunkSizeInBits;
 
     if ((g_instance.wlm_cxt->stat_manager.comp_count > 1 || strict) && percent >= LOW_PROCMEM_MARK &&
@@ -153,7 +153,7 @@ bool gs_sysmemory_avail(int64 requestedBytes)
     int32 newszChunk = (uint64)newsize >> chunkSizeInBits;
 
     if (newszChunk > t_thrd.utils_cxt.trackedMemChunks &&
-        (processMemInChunks + newszChunk - t_thrd.utils_cxt.trackedMemChunks) > maxChunksPerProcess)
+        (processMemInChunks.value + newszChunk - t_thrd.utils_cxt.trackedMemChunks) > maxChunksPerProcess)
         return false;
 
     return true;
@@ -414,9 +414,9 @@ void gs_display_uncontrolled_query(int* procIdx)
 void gs_output_memory_info(void)
 {
     int max_dynamic_memory = (int)(maxChunksPerProcess << (chunkSizeInBits - BITS_IN_MB));
-    int dynamic_used_memory = processMemInChunks << (chunkSizeInBits - BITS_IN_MB);
+    int dynamic_used_memory = processMemInChunks.value << (chunkSizeInBits - BITS_IN_MB);
     int dynamic_peak_memory = (int)(peakChunksPerProcess << (chunkSizeInBits - BITS_IN_MB));
-    int dynamic_used_shrctx = (int)(shareTrackedMemChunks << (chunkSizeInBits - BITS_IN_MB));
+    int dynamic_used_shrctx = (int)(shareTrackedMemChunks.value << (chunkSizeInBits - BITS_IN_MB));
     int dynamic_peak_shrctx = (int)(peakChunksSharedContext << (chunkSizeInBits - BITS_IN_MB));
     int max_sctpcomm_memory = comm_original_memory;
     int sctpcomm_used_memory = (int)(gs_get_comm_used_memory() >> BITS_IN_MB);
@@ -425,7 +425,7 @@ void gs_output_memory_info(void)
     int gpu_max_dynamic_memory = 0;
     int gpu_dynamic_used_memory = 0;
     int gpu_dynamic_peak_memory = 0;
-    int large_storage_memory = (int)(storageTrackedBytes >> BITS_IN_MB);
+    int large_storage_memory = (int)(storageTrackedBytes.value >> BITS_IN_MB);
     int procIdx = 0;
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -584,10 +584,10 @@ static bool memTracker_ReserveMemChunks(int32 numChunksToReserve, bool needProte
 
     /* increase chunk quota at global gaussdb process level */
     if (t_thrd.utils_cxt.backend_reserved) {
-        currSize = &backendUsedMemInChunk;
+        currSize = &backendUsedMemInChunk.value;
         maxSize = &backendReservedMemInChunk;
     } else {
-        currSize = &processMemInChunks;
+        currSize = &processMemInChunks.value;
         maxSize = &maxChunksPerProcess;
     }
     total = pg_atomic_add_fetch_u32((volatile uint32*)currSize, numChunksToReserve);
@@ -613,17 +613,17 @@ static bool memTracker_ReserveMemChunks(int32 numChunksToReserve, bool needProte
             gs_lock_test_and_set(&(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery), total);
     }
 
-    if (peakChunksPerProcess < processMemInChunks + backendUsedMemInChunk) {
-        peakChunksPerProcess = processMemInChunks + backendUsedMemInChunk;
+    if (peakChunksPerProcess < processMemInChunks.value + backendUsedMemInChunk.value) {
+        peakChunksPerProcess = processMemInChunks.value + backendUsedMemInChunk.value;
 
         /*Print memory alarm information every 1 minute.*/
         int threshold = PROCMEM_HIGHWATER_THRESHOLD >> (chunkSizeInBits - BITS_IN_MB);
-        if ((backendUsedMemInChunk + processMemInChunks) >
+        if ((backendUsedMemInChunk.value + processMemInChunks.value) >
             (backendReservedMemInChunk + maxChunksPerProcess + threshold)) {
             TimestampTz current = GetCurrentTimestamp();
             if (u_sess != NULL && TimestampDifferenceExceeds(last_print_timestamp, current, 60000)) {
                 uint32 processMemMB =
-                    (uint32)(backendUsedMemInChunk + processMemInChunks) << (chunkSizeInBits - BITS_IN_MB);
+                    (uint32)(backendUsedMemInChunk.value + processMemInChunks.value) << (chunkSizeInBits - BITS_IN_MB);
                 uint32 reserveMemMB = (uint32)numChunksToReserve << (chunkSizeInBits - BITS_IN_MB);
                 write_stderr("WARNING: process memory allocation %u MB, pid %lu, "
                              "thread self memory %ld bytes, new %ld bytes allocated, statement(%s).\n",
@@ -655,9 +655,9 @@ bool memTracker_ReserveMem(int64 requestedBytes, bool needProtect)
     int32 needChunk = 0;
 
     if (type == MEM_SHRD) {
-        tc = (uint64)shareTrackedBytes >> chunkSizeInBits;
-        tb = gs_atomic_add_64(&shareTrackedBytes, requestedBytes);
-        gs_lock_test_and_set(&shareTrackedMemChunks, tc); /* reset the value */
+        tc = (uint64)shareTrackedBytes.value >> chunkSizeInBits;
+        tb = gs_atomic_add_64(&shareTrackedBytes.value, requestedBytes);
+        gs_lock_test_and_set(&shareTrackedMemChunks.value, tc); /* reset the value */
     } else if (type == MEM_THRD) {
         tc = t_thrd.utils_cxt.trackedMemChunks;
         t_thrd.utils_cxt.trackedBytes += requestedBytes;
@@ -682,16 +682,16 @@ bool memTracker_ReserveMem(int64 requestedBytes, bool needProtect)
 
     if (status == false) {
         if (type == MEM_SHRD)
-            gs_atomic_add_64(&shareTrackedBytes, -requestedBytes);
+            gs_atomic_add_64(&shareTrackedBytes.value, -requestedBytes);
         else if (type == MEM_THRD)
             t_thrd.utils_cxt.trackedBytes -= requestedBytes;
         else
             u_sess->stat_cxt.trackedBytes -= requestedBytes;
     } else {
         if (type == MEM_SHRD) {
-            (void)pg_atomic_add_fetch_u32((volatile uint32*)&shareTrackedMemChunks, needChunk);
-            if (shareTrackedMemChunks > peakChunksSharedContext)
-                peakChunksSharedContext = shareTrackedMemChunks;
+            (void)pg_atomic_add_fetch_u32((volatile uint32*)&shareTrackedMemChunks.value, needChunk);
+            if (shareTrackedMemChunks.value > peakChunksSharedContext)
+                peakChunksSharedContext = shareTrackedMemChunks.value;
         } else {
             if (type == MEM_THRD)
                 t_thrd.utils_cxt.trackedMemChunks = newszChunk;
@@ -721,9 +721,9 @@ static void memTracker_ReleaseMemChunks(int reduction)
 
     /* reduce chunk quota at global gaussdb process level */
     if (t_thrd.utils_cxt.backend_reserved) {
-        total = pg_atomic_sub_fetch_u32((volatile uint32*)&backendUsedMemInChunk, reduction);
+        total = pg_atomic_sub_fetch_u32((volatile uint32*)&backendUsedMemInChunk.value, reduction);
     } else {
-        total = pg_atomic_sub_fetch_u32((volatile uint32*)&processMemInChunks, reduction);
+        total = pg_atomic_sub_fetch_u32((volatile uint32*)&processMemInChunks.value, reduction);
     }
 
     if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry && type != MEM_SHRD) {
@@ -749,7 +749,7 @@ void memTracker_ReleaseMem(int64 toBeFreedRequested)
      * tracking system was initialized.
      */
     if (type == MEM_SHRD)
-        tb = shareTrackedBytes;
+        tb = shareTrackedBytes.value;
     else if (type == MEM_THRD)
         tb = t_thrd.utils_cxt.trackedBytes;
     else
@@ -761,9 +761,9 @@ void memTracker_ReleaseMem(int64 toBeFreedRequested)
     }
 
     if (type == MEM_SHRD) {
-        tc = (uint64)shareTrackedBytes >> chunkSizeInBits;
-        tb = gs_atomic_add_64(&shareTrackedBytes, -toBeFreed);
-        gs_lock_test_and_set(&shareTrackedMemChunks, tc); /* reset the value */
+        tc = (uint64)shareTrackedBytes.value >> chunkSizeInBits;
+        tb = gs_atomic_add_64(&shareTrackedBytes.value, -toBeFreed);
+        gs_lock_test_and_set(&shareTrackedMemChunks.value, tc); /* reset the value */
     } else if (type == MEM_THRD) {
         tc = t_thrd.utils_cxt.trackedMemChunks;
         t_thrd.utils_cxt.trackedBytes -= toBeFreed;
@@ -787,7 +787,7 @@ void memTracker_ReleaseMem(int64 toBeFreedRequested)
         memTracker_ReleaseMemChunks<type>(reduction);
 
         if (type == MEM_SHRD)
-            (void)pg_atomic_sub_fetch_u32((volatile uint32*)&shareTrackedMemChunks, reduction);
+            (void)pg_atomic_sub_fetch_u32((volatile uint32*)&shareTrackedMemChunks.value, reduction);
         else {
             if (type == MEM_THRD)
                 t_thrd.utils_cxt.trackedMemChunks = newszChunk;
@@ -797,8 +797,8 @@ void memTracker_ReleaseMem(int64 toBeFreedRequested)
         }
 
         /* reset the total value if not matching */
-        int total = shareTrackedMemChunks + dynmicTrackedMemChunks;
-        gs_lock_test_and_set(&processMemInChunks, total);
+        int total = shareTrackedMemChunks.value + dynmicTrackedMemChunks;
+        gs_lock_test_and_set(&processMemInChunks.value, total);
     }
 }
 

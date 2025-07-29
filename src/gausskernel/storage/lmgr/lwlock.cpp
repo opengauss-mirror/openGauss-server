@@ -1331,8 +1331,6 @@ static inline void remember_lwlock_hold(LWLock *lock, LWLockMode mode)
 {
     t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
     t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode = mode;
-    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] =
-        (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
     t_thrd.storage_cxt.num_held_lwlocks++;
 }
 
@@ -2229,8 +2227,6 @@ void LWLockOwn(LWLock *lock)
     }
 
     t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
-    t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] = 
-        (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
     t_thrd.storage_cxt.num_held_lwlocks++;
 
     HOLD_INTERRUPTS();
@@ -2280,11 +2276,6 @@ void *get_held_lwlocks(void)
     return (void *)t_thrd.storage_cxt.held_lwlocks;
 }
 
-/* get lwlocks now held */
-void *get_lwlock_held_times(void)
-{
-    return (void *)t_thrd.storage_cxt.lwlock_held_times;
-}
 
 #define COPY_LWLOCK_HANDLE(src, dst) do { \
         (dst)->lock_addr.lock = (src)->lock; \
@@ -2543,11 +2534,10 @@ static TupleDesc GetGsLWLockStatusFuncTupleDesc()
 static void copy_lwlock_infos(void *held_locks, void *held_times, LWLockStatInfo *dst, int num_locks)
 {
     LWLockHandle *src_locks = (LWLockHandle *)held_locks;
-    TimestampTz *src_times = (TimestampTz *)held_times;
     for (int i = 0; i < num_locks; i++) {
         dst[i].lwlock.lock_addr.lock = src_locks[i].lock;
         dst[i].lwlock.lock_sx = src_locks[i].mode;
-        dst[i].start_time = src_times[i];
+        dst[i].start_time = 0;
         dst[i].granted = true;
     }
 }
@@ -2570,22 +2560,20 @@ static void GetBeentryLWLockInfo(LWLockInstanceData *localEntry, volatile PgBack
         if (IsVaildBeentry(beentry)) {
             int *lw_held_num = beentry->lw_held_num;
             void *lw_held_locks = beentry->lw_held_locks;
-            void *lw_held_times = beentry->lw_held_times;
             LWLock *lw_want_lock = beentry->lw_want_lock;
             LWLockMode lw_want_mode = beentry->lw_want_mode;
-            TimestampTz lw_want_start_time = beentry->lw_want_start_time;
-            if (lw_held_num != NULL && lw_held_locks != NULL && lw_held_times != NULL) {
+            if (lw_held_num != NULL && lw_held_locks != NULL) {
                 localEntry->lwlocks_num = *lw_held_num;
                 if ((uint32)localEntry->lwlocks_num > get_held_lwlocks_maxnum()) {
                     localEntry->lwlocks_num = 0;
                     break;
                 }
-                copy_lwlock_infos(lw_held_locks, lw_held_times, localEntry->lwlocks, localEntry->lwlocks_num);
+                copy_lwlock_infos(lw_held_locks, NULL, localEntry->lwlocks, localEntry->lwlocks_num);
             }
             if (lw_want_lock != NULL) {
                 localEntry->lwlocks[localEntry->lwlocks_num].lwlock.lock_addr.lock = lw_want_lock;
                 localEntry->lwlocks[localEntry->lwlocks_num].lwlock.lock_sx = lw_want_mode;
-                localEntry->lwlocks[localEntry->lwlocks_num].start_time = lw_want_start_time;
+                localEntry->lwlocks[localEntry->lwlocks_num].start_time = 0;
                 localEntry->lwlocks[localEntry->lwlocks_num].granted = false;
                 localEntry->lwlocks_num++;
             }

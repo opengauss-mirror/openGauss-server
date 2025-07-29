@@ -14493,7 +14493,7 @@ static void is_memory_backend_reserved(const knl_thread_arg* arg)
 {
     if (arg->role == WORKER) {
         Port port = ((BackendParameters*)(arg->save_para))->port;
-        if (processMemInChunks >= maxChunksPerProcess * 0.8 &&
+        if (processMemInChunks.value >= maxChunksPerProcess * 0.8 &&
             IsHAPort(&port)) {
             t_thrd.utils_cxt.backend_reserved = true;
         } else {

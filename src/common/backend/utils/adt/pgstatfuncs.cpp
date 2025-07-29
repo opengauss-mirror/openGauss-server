@@ -10241,7 +10241,7 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
         (void)MemoryContextSwitchTo(oldcontext);
 
         int mctx_max_size = maxChunksPerProcess << (chunkSizeInBits - BITS_IN_MB);
-        int mctx_used_size = processMemInChunks << (chunkSizeInBits - BITS_IN_MB);
+        int mctx_used_size = processMemInChunks.value << (chunkSizeInBits - BITS_IN_MB);
         int cu_size = CUCache->GetCurrentMemSize() >> BITS_IN_MB;
         int comm_size = (int)(gs_get_comm_used_memory() >> BITS_IN_MB);
         int comm_peak_size = (int)(gs_get_comm_peak_memory() >> BITS_IN_MB);
@@ -10275,10 +10275,10 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
         if (MEMPROT_INIT_SIZE > mem_size[3])
             mem_size[3] = MEMPROT_INIT_SIZE;
         mem_size[4] = (int)(peakChunksPerProcess << (chunkSizeInBits - BITS_IN_MB));
-        mem_size[5] = (int)(shareTrackedMemChunks << (chunkSizeInBits - BITS_IN_MB));
+        mem_size[5] = (int)(shareTrackedMemChunks.value << (chunkSizeInBits - BITS_IN_MB));
         mem_size[6] = (int)(peakChunksSharedContext << (chunkSizeInBits - BITS_IN_MB));
         mem_size[7] = (int)(backendReservedMemInChunk << (chunkSizeInBits - BITS_IN_MB));
-        mem_size[8] = (int)(backendUsedMemInChunk << (chunkSizeInBits - BITS_IN_MB));
+        mem_size[8] = (int)(backendUsedMemInChunk.value << (chunkSizeInBits - BITS_IN_MB));
         if (mem_size[8] < 0) {
             mem_size[8] = 0;
         }
@@ -10318,7 +10318,7 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
         mem_size[20] = 0;
         mem_size[21] = 0;
 #endif
-        mem_size[22] = (int)(storageTrackedBytes >> BITS_IN_MB);
+        mem_size[22] = (int)(storageTrackedBytes.value >> BITS_IN_MB);
 
         Assert(g_instance.attr.attr_sql.udf_memory_limit >= UDF_DEFAULT_MEMORY);
         mem_size[23] = (int)((g_instance.attr.attr_sql.udf_memory_limit - UDF_DEFAULT_MEMORY) >> BITS_IN_KB);

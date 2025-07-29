@@ -907,12 +907,12 @@ static bool InitSession(knl_session_context* session)
     }
 
     /* check if memory already reach the max_dynamic_memory */
-    if (t_thrd.utils_cxt.gs_mp_inited && processMemInChunks > maxChunksPerProcess) {
+    if (t_thrd.utils_cxt.gs_mp_inited && processMemInChunks.value > maxChunksPerProcess) {
         ereport(ERROR,
             (errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),
                 errmsg("memory usage reach the max_dynamic_memory"),
                 errdetail("current memory usage is: %u MB, max_dynamic_memory is: %u MB",
-                    (unsigned int)processMemInChunks << (chunkSizeInBits - BITS_IN_MB),
+                    (unsigned int)processMemInChunks.value << (chunkSizeInBits - BITS_IN_MB),
                     (unsigned int)maxChunksPerProcess << (chunkSizeInBits - BITS_IN_MB))));
     }
 

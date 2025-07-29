@@ -469,7 +469,7 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
 
             /* we only use 90% of the total available memory */
             int totalMemSize = ((int)(maxChunksPerProcess << (chunkSizeInBits - BITS_IN_MB)));
-            int usedMemSize = processMemInChunks << (chunkSizeInBits - BITS_IN_MB);
+            int usedMemSize = processMemInChunks.value << (chunkSizeInBits - BITS_IN_MB);
             int comm_mempool = (g_instance.attr.attr_network.comm_memory_pool >> BITS_IN_KB) *
                                g_instance.attr.attr_network.comm_memory_pool_percent / 100;
 
