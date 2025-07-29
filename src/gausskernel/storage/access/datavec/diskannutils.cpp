@@ -444,8 +444,6 @@ void DiskAnnGraph::Link(BlockNumber blk, int index_size)
 {
     VectorList<Neighbor> pool;
     ItemPointerData hctid;
-    VectorList<Neighbor> prunedList;
-    DiskAnnEdgePage edgePage;
 
     scratch->bestLNodes->clear();
     ItemPointerSetInvalid(&hctid);
@@ -461,11 +459,11 @@ void DiskAnnGraph::Link(BlockNumber blk, int index_size)
         return;
     }
 
-    prunedList = VectorList<Neighbor>();
+    VectorList<Neighbor> prunedList = VectorList<Neighbor>();
     PruneNeighbors(blk, &pool, &prunedList);
     Assert(prunedList.size() <= DISKANN_MAX_DEGREE);
 
-    edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
+    DiskAnnEdgePage edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
     GetEdgeTuple(edgePage, blk, graphStore->m_rel, graphStore->m_nodeSize, graphStore->m_edgeSize);
     for (uint16 i = 0; i < edgePage->count; i++) {
         edgePage->nexts[i] = InvalidOffsetNumber;
@@ -509,7 +507,6 @@ void DiskAnnGraph::IterateToFixedPoint(BlockNumber blk, const uint32 Lsize, Bloc
     }
 
     while (bestLNodes->has_unexpanded_node()) {
-        VectorList<Neighbor> neighbors;
         Neighbor nbr;
         BlockNumber blockNumber;
 
@@ -520,7 +517,7 @@ void DiskAnnGraph::IterateToFixedPoint(BlockNumber blk, const uint32 Lsize, Bloc
             pool->push_back(nbr);
         }
 
-        neighbors = VectorList<Neighbor>();
+        VectorList<Neighbor> neighbors = VectorList<Neighbor>();
         graphStore->GetNeighbors(blockNumber, &neighbors);
         if (!neighbors.empty()) {
             float distance;
@@ -630,7 +627,6 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
 {
     VectorList<Neighbor>* pool = prunedList;
     ItemPointerData hctid;
-
     ItemPointerSetInvalid(&hctid);
 
     /* Save origin block node info into scratch */
@@ -638,24 +634,22 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
 
     for (size_t i = 0; i < pool->size(); ++i) {
         bool prune_needed = false;
-        VectorList<Neighbor> copyNeighbors;
-        VectorList<Neighbor> desPool;
-        float distance;
-        Neighbor nn;
-
         auto des = (*pool)[i];
         /* Skip existed neighbor node */
         if (graphStore->ContainsNeighbors(des.id, blk)) {
             continue;
         }
 
-        /* Get destination block neighbors */
-        desPool = VectorList<Neighbor>();
-        graphStore->GetNeighbors(des.id, &desPool);
-
+        float distance;
+        Neighbor nn;
         /* Calculate distance between destination node and origin block node */
         distance = graphStore->ComputeDistance(des.id, scratch->alignedQuery, scratch->sqrSum);
         nn = Neighbor(blk, distance);
+        /* Get destination block neighbors */
+        VectorList<Neighbor> copyNeighbors;
+        VectorList<Neighbor> desPool = VectorList<Neighbor>();
+        graphStore->GetNeighbors(des.id, &desPool);
+
         if (!desPool.contains(nn)) {
             if (desPool.size() < DISKANN_MAX_DEGREE) {
                 DiskAnnEdgePage edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
@@ -677,10 +671,10 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
             }
         }
 
+        desPool.clear();
+
         if (prune_needed) {
             VectorList<Neighbor> dummyPool;
-            VectorList<Neighbor> pruned;
-            DiskAnnEdgePage edge;
 
             size_t reserveSize = (size_t)(ceil(GRAPH_SLACK_FACTOR * DISKANN_MAX_DEGREE));
             dummyPool.reset();
@@ -705,8 +699,9 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
             }
             hash_destroy(dummyVisited);
 
+            VectorList<Neighbor> pruned;
             PruneNeighbors(des.id, &dummyPool, &pruned);
-            edge = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
+            DiskAnnEdgePage edge = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
             GetEdgeTuple(edge, des.id, graphStore->m_rel, graphStore->m_nodeSize, graphStore->m_edgeSize);
             for (uint16 i = 0; i < edge->count; i++) {
                 edge->nexts[i] = InvalidBlockNumber;
@@ -725,7 +720,6 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
         }
 
         /* Clean up */
-        desPool.clear();
         copyNeighbors.clear();
     }
 }
