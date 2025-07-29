@@ -18,6 +18,10 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <pthread.h>
+#include <memory>
+#include <string>
+#include <algorithm>
 
 #include "libpq/libpq-fe.h"
 #include "libpq/libpq-int.h"
@@ -54,6 +58,9 @@ char* const pgresStatus[] = {"PGRES_EMPTY_QUERY",
     "PGRES_FATAL_ERROR",
     "PGRES_COPY_BOTH",
     "PGRES_SINGLE_TUPLE"};
+
+static const char* datavecOperators[] = {"<->", "<#>", "<=>", "<+>", "<~>", "<%>"};
+static const int datavecOperatorsCount = sizeof(datavecOperators) / sizeof(datavecOperators[0]);
 
 /*
  * static state needed by PQescapeString and PQescapeBytea; initialize to
@@ -4113,4 +4120,422 @@ unsigned char* PQunescapeBytea(const unsigned char* strtext, size_t* retbuflen)
 
     *retbuflen = buflen;
     return tmpbuf;
+}
+
+/* function of concurrently executing query */
+class ConnectionPool {
+public:
+    explicit ConnectionPool(int poolSize) : size(poolSize), connections(nullptr), mutexes(nullptr) {}
+
+    ~ConnectionPool()
+    {
+        if (connections) {
+            for (int i = 0; i < size; ++i) {
+                if (connections[i]) {
+                    PQfinish(connections[i]);
+                    connections[i] = nullptr;
+                }
+            }
+            free(connections);
+            connections = nullptr;
+        }
+        
+        if (mutexes) {
+            for (int i = 0; i < size; ++i) {
+                pthread_mutex_destroy(&mutexes[i]);
+            }
+            free(mutexes);
+            mutexes = nullptr;
+        }
+    }
+
+    bool InitConnPool(const char *connParams, const char *preExecForConn)
+    {
+        if (!connParams || size <= 0) {
+            return false;
+        }
+        if (connections) {
+            free(connections);
+            connections = nullptr;
+        }
+        if (mutexes) {
+            free(mutexes);
+            mutexes = nullptr;
+        }
+
+        connections = (PGconn**)malloc(sizeof(PGconn*) * size);
+        mutexes = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t) * size);
+        if (!connections || !mutexes) {
+            free(connections);
+            free(mutexes);
+            connections = nullptr;
+            mutexes = nullptr;
+            return false;
+        }
+        errno_t rc = memset_s(connections, sizeof(PGconn*) * size, 0, sizeof(PGconn*) * size);
+        securec_check_c(rc, "\0", "\0");
+        rc = memset_s(mutexes, sizeof(pthread_mutex_t) * size, 0, sizeof(pthread_mutex_t) * size);
+        securec_check_c(rc, "\0", "\0");
+        
+        for (int i = 0; i < size; ++i) {
+            PGconn *conn = PQconnectdb(connParams);
+            if (PQstatus(conn) != CONNECTION_OK) {
+                for (int j = 0; j < i; ++j) {
+                    if (connections[j]) {
+                        PQfinish(connections[j]);
+                        connections[j] = nullptr;
+                    }
+                    pthread_mutex_destroy(&mutexes[j]);
+                }
+                return false;
+            }
+
+            if (preExecForConn != nullptr) {
+                PGresult *preRes = PQexec(conn, preExecForConn);
+                if (PQresultStatus(preRes) != PGRES_COMMAND_OK) {
+                    PQclear(preRes);
+                    PQfinish(conn);
+                    for (int j = 0; j < i; ++j) {
+                        PQfinish(connections[j]);
+                        pthread_mutex_destroy(&mutexes[j]);
+                    }
+                    return false;
+                }
+                PQclear(preRes);
+            }
+
+            if (pthread_mutex_init(&mutexes[i], NULL) != 0) {
+                PQfinish(conn);
+                for (int j = 0; j < i; ++j) {
+                    PQfinish(connections[j]);
+                    pthread_mutex_destroy(&mutexes[j]);
+                }
+                return false;
+            }
+            connections[i] = conn;
+        }
+        return true;
+    }
+
+    PGconn* GetConnection(int index)
+    {
+        if (index < 0 || index >= size || !connections) {
+            return nullptr;
+        }
+        return connections[index];
+    }
+
+    int LockConnection(int index)
+    {
+        if (index < 0 || index >= size || !mutexes) {
+            return -1;
+        }
+        return pthread_mutex_lock(&mutexes[index]);
+    }
+
+    int UnlockConnection(int index)
+    {
+        if (index < 0 || index >= size || !mutexes) {
+            return -1;
+        }
+        return pthread_mutex_unlock(&mutexes[index]);
+    }
+
+    int GetSize() const
+    {
+        return size;
+    }
+
+private:
+    PGconn** connections;
+    pthread_mutex_t* mutexes;
+    int size;
+};
+
+struct QueryTask {
+    int queryIndex;
+    const char *queryTemplate;
+    const QueryParams *params;
+    PGresult **results;
+};
+
+class TaskQueue {
+public:
+    explicit TaskQueue(int capacity): queueCapacity(capacity)
+    {
+        if (queueCapacity <= 0) {
+            queueCapacity = 0;
+        }
+        
+        pthread_mutex_init(&mutex, NULL);
+        pthread_cond_init(&cond, NULL);
+        queue = (QueryTask*)malloc(sizeof(QueryTask) * queueCapacity);
+        if (!queue) {
+            queueCapacity = 0;
+        }
+    }
+
+    ~TaskQueue()
+    {
+        pthread_mutex_destroy(&mutex);
+        pthread_cond_destroy(&cond);
+        if (queue) {
+            free(queue);
+            queue = nullptr;
+        }
+    }
+
+    void Enqueue(const QueryTask &task)
+    {
+        pthread_mutex_lock(&mutex);
+        if (!stopped && queueSize < queueCapacity) {
+            queue[rear] = task;
+            rear = (rear + 1) % queueCapacity;
+            queueSize++;
+            pthread_cond_signal(&cond);
+        }
+        pthread_mutex_unlock(&mutex);
+    }
+
+    bool Dequeue(QueryTask &task)
+    {
+        pthread_mutex_lock(&mutex);
+        while (!stopped && queueSize == 0) {
+            pthread_cond_wait(&cond, &mutex);
+        }
+        if (stopped || queueSize == 0) {
+            pthread_mutex_unlock(&mutex);
+            return false;
+        }
+
+        task = queue[front];
+        front = (front + 1) % queueCapacity;
+        queueSize--;
+        if (queueSize == 0) {
+            pthread_cond_signal(&cond);
+        }
+        pthread_mutex_unlock(&mutex);
+        return true;
+    }
+
+    void WaitAndStop()
+    {
+        pthread_mutex_lock(&mutex);
+        while (queueSize > 0) {
+            pthread_cond_wait(&cond, &mutex);
+        }
+        stopped = true;
+        pthread_cond_broadcast(&cond);
+        pthread_mutex_unlock(&mutex);
+    }
+
+    void ForceStop()
+    {
+        pthread_mutex_lock(&mutex);
+        stopped = true;
+        queueSize = 0;
+        front = 0;
+        rear = 0;
+        pthread_cond_broadcast(&cond);
+        pthread_mutex_unlock(&mutex);
+    }
+
+    int GetQueueCapacity()
+    {
+        return queueCapacity;
+    }
+
+private:
+    QueryTask* queue = nullptr;
+    int queueSize = 0;
+    int queueCapacity = 0;
+    int front = 0;
+    int rear = 0;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    bool stopped = false;
+};
+
+struct ThreadPoolContext {
+    ConnectionPool *connPool = nullptr;
+    TaskQueue *taskQueue = nullptr;
+};
+
+static void* WorkerThread(void *arg)
+{
+    ThreadPoolContext *ctx = static_cast<ThreadPoolContext*>(arg);
+    QueryTask task;
+
+    while (ctx->taskQueue->Dequeue(task)) {
+        if (!task.queryTemplate || !task.params || !task.results) {
+            continue;
+        }
+
+        static pthread_mutex_t indexMutex = PTHREAD_MUTEX_INITIALIZER;
+        static int currentConn = 0;
+        pthread_mutex_lock(&indexMutex);
+        int connIdx = currentConn++ % ctx->connPool->GetSize();
+        pthread_mutex_unlock(&indexMutex);
+        if (ctx->connPool->LockConnection(connIdx) != 0) {
+            continue;
+        }
+
+        PGconn *conn = ctx->connPool->GetConnection(connIdx);
+        if (!conn) {
+            ctx->connPool->UnlockConnection(connIdx);
+            continue;
+        }
+
+        PGresult *res = PQexecParams(conn, task.queryTemplate, task.params->paramCount, NULL, task.params->paramValues,
+            task.params->paramLengths, task.params->paramFormats, task.params->resultFormat);
+        task.results[task.queryIndex] = res;
+        ctx->connPool->UnlockConnection(connIdx);
+    }
+
+    return NULL;
+}
+
+static std::string TrimWhitespace(const char *cstr)
+{
+    if (!cstr) {
+        return "";
+    }
+    std::string str(cstr);
+    size_t start = str.find_first_not_of(" \t\n\r");
+    if (start == std::string::npos) {
+        return "";
+    }
+    size_t end = str.find_last_not_of(" \t\n\r");
+    return str.substr(start, end - start + 1);
+}
+
+static bool CheckSingleSelectQuery(const std::string &originalSql)
+{
+    if (originalSql.empty()) {
+        return false;
+    }
+
+    /* check that there is only one statement */
+    int semicolonCount = std::count(originalSql.begin(), originalSql.end(), ';');
+    if (semicolonCount > 1) {
+        return false;
+    }
+    if (semicolonCount == 1) {
+        size_t lastNonSpace = originalSql.find_last_not_of(" \t\n\r");
+        if (lastNonSpace == std::string::npos) {
+            return false;
+        }
+        if (originalSql[lastNonSpace] != ';') {
+            return false;
+        }
+    }
+
+    /* check statement starts with 'select' */
+    const std::string selectPrefix = "SELECT";
+    if (originalSql.size() < selectPrefix.size()) {
+        return false;
+    }
+    std::string firstPart = originalSql.substr(0, selectPrefix.size());
+    std::transform(firstPart.begin(), firstPart.end(), firstPart.begin(), ::toupper);
+    if (firstPart != selectPrefix) {
+        return false;
+    }
+    if (originalSql.size() > selectPrefix.size()) {
+        char nextChar = originalSql[selectPrefix.size()];
+        if (!isspace(static_cast<unsigned char>(nextChar))) {
+            return false;
+        }
+    }
+
+    for (int idx = 0; idx < datavecOperatorsCount; idx++) {
+        if (originalSql.find(datavecOperators[idx]) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+PGresult **PQexecMultiSearchParams(const char *connParams, const char *queryTemplate, const QueryParams *queryParams,
+    const int queryCount, const char *preExecForConn, int threadCount)
+{
+    if (queryCount <= 0 || !queryTemplate || !queryParams || threadCount <= 0 || !connParams) {
+        return NULL;
+    }
+    std::string queryStr = TrimWhitespace(queryTemplate);
+    if (!CheckSingleSelectQuery(queryStr)) {
+        return NULL;
+    }
+    int actualConnections = (threadCount > queryCount) ? queryCount : threadCount;
+    PGresult **results = static_cast<PGresult**>(malloc(queryCount * sizeof(PGresult*)));
+    if (!results) {
+        return NULL;
+    }
+    errno_t rc = memset_s(results, queryCount * sizeof(PGresult*), 0, queryCount * sizeof(PGresult*));
+    securec_check_c(rc, "\0", "\0");
+
+    try {
+        ConnectionPool connPool(actualConnections);
+        if (!connPool.InitConnPool(connParams, preExecForConn)) {
+            free(results);
+            return NULL;
+        }
+        TaskQueue taskQueue(queryCount);
+        if (taskQueue.GetQueueCapacity() == 0) {
+            free(results);
+            return NULL;
+        }
+        ThreadPoolContext ctx;
+        ctx.connPool = &connPool;
+        ctx.taskQueue = &taskQueue;
+        pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * actualConnections);
+        if (!threads) {
+            free(results);
+            return NULL;
+        }
+        for (int i = 0; i < actualConnections; ++i) {
+            if (pthread_create(&threads[i], NULL, WorkerThread, &ctx) != 0) {
+                taskQueue.ForceStop();
+                for (int j = 0; j < i; ++j) {
+                    pthread_join(threads[j], NULL);
+                }
+                free(threads);
+                free(results);
+                return NULL;
+            }
+        }
+        for (int i = 0; i < queryCount; ++i) {
+            QueryTask task;
+            task.queryIndex = i;
+            task.queryTemplate = queryTemplate;
+            task.params = &queryParams[i];
+            task.results = results;
+            taskQueue.Enqueue(task);
+        }
+        taskQueue.WaitAndStop();
+        for (int i = 0; i < actualConnections; ++i) {
+            pthread_join(threads[i], NULL);
+        }
+        
+        free(threads);
+    } catch (const std::exception &e) {
+        PQclearMultiResults(results, queryCount);
+        return NULL;
+    }
+    return results;
+}
+
+void PQclearMultiResults(PGresult **results, int resultCount)
+{
+    if (!results || resultCount <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < resultCount; ++i) {
+        if (results[i]) {
+            PQclear(results[i]);
+            results[i] = nullptr;
+        }
+    }
+    free(results);
+    return;
 }
