@@ -113,6 +113,7 @@ set(TGT_shark_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/${PLDIR}/pl_comp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${PLDIR}/pl_scanner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BASECODEDIR}/tablecmds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/${BASECODEDIR}/identitycmds.cpp
 )
 set(TGT_shark_INC 
     ${PROJECT_OPENGS_DIR}/contrib/shark
