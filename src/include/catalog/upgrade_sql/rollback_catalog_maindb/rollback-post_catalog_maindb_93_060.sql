@@ -104,4 +104,4 @@ DROP FUNCTION IF EXISTS pg_catalog.array_to_halfvec(_float4, int4, boolean) CASC
 DROP FUNCTION IF EXISTS pg_catalog.array_to_halfvec(_float8, int4, boolean) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.array_to_halfvec(_numeric, int4, boolean) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.hnsw_halfvec_support(internal) CASCADE;
-DROP FUNCTION IF EXISTS pg_catalog.ivfflat_halfvec_support(internal) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.ivfflat_halfvec_support(internal, internal) CASCADE;

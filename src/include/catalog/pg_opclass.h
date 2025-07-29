@@ -393,7 +393,7 @@ DATA(insert OID = 8512 (8300  halfvec_ip_ops PGNSP PGUID 8516 8306 f 0));
 DATA(insert OID = 8513 (8300  halfvec_cosine_ops PGNSP PGUID 8517 8306 f 0));
 DATA(insert OID = 8514 (8300  halfvec_l1_ops PGNSP PGUID 8518 8306 f 0));
 
-DATA(insert OID = 8621 (8301  halfvec_l2_ops PGNSP PGUID 8615 8306 f 0));
+DATA(insert OID = 8621 (8301  halfvec_l2_ops PGNSP PGUID 8615 8306 t 0));
 DATA(insert OID = 8622 (8301  halfvec_ip_ops PGNSP PGUID 8616 8306 f 0));
 DATA(insert OID = 8623 (8301  halfvec_cosine_ops PGNSP PGUID 8617 8306 f 0));
 

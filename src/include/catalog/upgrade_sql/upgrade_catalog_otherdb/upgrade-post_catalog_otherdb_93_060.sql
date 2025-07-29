@@ -315,9 +315,9 @@ AS 'hnsw_halfvec_support'
 LANGUAGE INTERNAL
 IMMUTABLE STRICT;
 
-DROP FUNCTION IF EXISTS pg_catalog.ivfflat_halfvec_support(internal) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.ivfflat_halfvec_support(internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8657;
-CREATE FUNCTION pg_catalog.ivfflat_halfvec_support(internal)
+CREATE FUNCTION pg_catalog.ivfflat_halfvec_support(internal, internal)
 RETURNS internal
 AS 'ivfflat_halfvec_support'
 LANGUAGE INTERNAL
@@ -360,6 +360,8 @@ COMMENT ON FUNCTION pg_catalog.array_to_halfvec(_float4, int4, boolean) IS 'NULL
 COMMENT ON FUNCTION pg_catalog.array_to_halfvec(_float8, int4, boolean) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.array_to_halfvec(_numeric, int4, boolean) IS 'NULL';
 COMMENT ON FUNCTION pg_catalog.halfvec_to_float4(halfvec, int4, boolean) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.hnsw_halfvec_support(internal) IS 'NULL';
+COMMENT ON FUNCTION pg_catalog.ivfflat_halfvec_support(internal, internal) IS 'NULL';
 
 drop aggregate if exists pg_catalog.avg(halfvec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8243;
@@ -616,7 +618,7 @@ CREATE OPERATOR CLASS pg_catalog.halfvec_l2_ops
 	DEFAULT FOR TYPE halfvec USING ivfflat AS
 	OPERATOR 1 pg_catalog.<->(halfvec, halfvec) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.halfvec_l2_squared_distance(halfvec, halfvec),
-	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal);
+	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal, internal);
 
 DROP OPERATOR FAMILY IF EXISTS pg_catalog.halfvec_ip_ops USING ivfflat CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8616;
@@ -628,7 +630,7 @@ CREATE OPERATOR CLASS pg_catalog.halfvec_ip_ops
 	FOR TYPE halfvec USING ivfflat AS
 	OPERATOR 1 pg_catalog.<#>(halfvec, halfvec) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.halfvec_negative_inner_product(halfvec, halfvec),
-	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal);
+	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal, internal);
 
 DROP OPERATOR FAMILY IF EXISTS pg_catalog.halfvec_cosine_ops USING ivfflat CASCADE; 
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8617;
@@ -641,4 +643,4 @@ CREATE OPERATOR CLASS pg_catalog.halfvec_cosine_ops
 	OPERATOR 1 pg_catalog.<=>(halfvec, halfvec) FOR ORDER BY float_ops,
 	FUNCTION 1 pg_catalog.halfvec_negative_inner_product(halfvec, halfvec),
 	FUNCTION 2 pg_catalog.l2_norm(halfvec),
-	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal);
+	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal, internal);
