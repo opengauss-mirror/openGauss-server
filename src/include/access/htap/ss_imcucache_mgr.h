@@ -55,10 +55,7 @@ public:
 
     void PinDataBlock(CacheSlotId_t slotId);
     void SaveSSRemoteCU(Relation rel, int imcsColId, CU *cuPtr, CUDesc *cuDescPtr, IMCSDesc *imcsDesc);
-    bool PreAllocateShmForRel(uint64 dataSize);
-    void FixDifferenceAfterVacuum(uint64 begin, uint64 end, uint64 prealloc);
-    void AdjustUsedShmAfterPopulate(Oid relOid);
-    void AdjustUsedShmAfterUnPopulate(uint64 usedShmMemSize);
+    bool ReserveMemForRowgroupVaccum(int64 rowgroupSize);
 
     /* for DSS imcstore and spq scan */
     int spqNodeNum;

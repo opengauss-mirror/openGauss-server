@@ -1497,6 +1497,7 @@ static void knl_u_imcstore_init(knl_u_imcstore_context* imcstore_context)
 {
     imcstore_context->pinnedRowGroups = NIL;
     imcstore_context->pinnedBorrowMemPool = NULL;
+    imcstore_context->inVaccum = false;
 }
 #endif
 

@@ -1478,7 +1478,7 @@ int32 SSLoadIMCStoreVacuum(char *data, uint32 len)
     errno_t rc;
     len -= sizeof(SSIMCStoreVacuum);
     char* ptr = data + sizeof(SSIMCStoreVacuum);
-    uint64 newBufSize = 0;
+    uint32 newCuSize = 0;
     for (int i = 0; i < info->cols; ++i) {
         CUDescs[i] = New(CurrentMemoryContext) CUDesc();
         CUs[i] = New(CurrentMemoryContext) CU();
@@ -1492,10 +1492,10 @@ int32 SSLoadIMCStoreVacuum(char *data, uint32 len)
         ptr += sizeof(CU);
         len -= sizeof(CU);
 
-        newBufSize += CUs[i]->m_srcBufSize;
+        newCuSize += CUs[i]->m_cuSize;
     }
     MemoryContextSwitchTo(oldcontext);
-    IMCStoreSyncVacuumPushWork(info->rid, info->rgid, info->xid, newBufSize, CUDescs, CUs);
+    IMCStoreSyncVacuumPushWork(info->rid, info->rgid, info->xid, newCuSize, CUDescs, CUs);
     return DMS_SUCCESS;
 }
 

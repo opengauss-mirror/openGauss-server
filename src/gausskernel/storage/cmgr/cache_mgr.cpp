@@ -818,6 +818,13 @@ int CacheMgr::GetCacheBlockMemSize(CacheSlotId_t slot)
  */
 bool CacheMgr::ReserveCacheMem(int size)
 {
+#ifdef ENABLE_HTAP
+    // preallcate before
+    if (SS_PRIMARY_MODE && u_sess->imcstore_ctx.inVaccum) {
+        return true;
+    }
+#endif
+
     SpinLockAcquire(&m_memsize_lock);
     if ((m_cstoreCurrentSize + size) <= m_cstoreMaxSize) {
         m_cstoreCurrentSize += size;
@@ -832,6 +839,21 @@ bool CacheMgr::ReserveCacheMem(int size)
 #endif
     return false;
 }
+
+#ifdef ENABLE_HTAP
+bool CacheMgr::ReserveMemForRowgroupVaccum(int64 size)
+{
+    Assert(storageType == SS_IMCSTORAGE);
+    SpinLockAcquire(&m_memsize_lock);
+    if ((m_cstoreCurrentSize + size) <= m_cstoreMaxSize) {
+        m_cstoreCurrentSize += size;
+        SpinLockRelease(&m_memsize_lock);
+        return true;
+    }
+    SpinLockRelease(&m_memsize_lock);
+    return false;
+}
+#endif
 
 /*
  * @Description: Reduce the reserved memory by size

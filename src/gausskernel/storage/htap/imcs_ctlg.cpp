@@ -1533,7 +1533,6 @@ void SSImcstoreCacheRemoteCU(Oid relOid, StringInfo inputMsg)
             imcsDesc->rowGroups[cuDescPtr->cu_id]->m_actived = true;
             if (cuDescPtr->cu_id == imcsDesc->curMaxRowGroupId) {
                 IMCS_HASH_TABLE->UpdateImcsStatus(relOid, IMCS_POPULATE_COMPLETE);
-                SS_IMCU_CACHE->AdjustUsedShmAfterPopulate(relOid);
             }
         }
         DELETE_EX(cuPtr);

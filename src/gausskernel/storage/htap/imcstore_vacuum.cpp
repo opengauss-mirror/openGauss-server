@@ -105,7 +105,7 @@ bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid)
     return true;
 }
 
-void IMCStoreSyncVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid, uint64 bufSize, CUDesc** CUDesc, CU** CUs)
+void IMCStoreSyncVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid, uint64 cuSize, CUDesc** CUDesc, CU** CUs)
 {
     IMCStoreVacuumTarget target;
     target.isLocalType = false;
@@ -113,7 +113,7 @@ void IMCStoreSyncVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid, uint6
     target.rowGroupId = cuId;
     target.CUDescs = CUDesc;
     target.CUs = CUs;
-    target.newBufSize = bufSize;
+    target.newCuSize = cuSize;
     target.xid = xid;
     for (int i = 0; i < TRY_ENQUEUE_TIMES; ++i) {
         if (g_instance.imcstore_cxt.vacuum_queue->Enqueue(target)) {
@@ -504,7 +504,7 @@ void IMCStoreVacuumWorkerMain(void)
                 IMCStoreVacuum(rel, imcsDesc, target.rowGroupId, target.xid);
             } else {
                 RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(target.rowGroupId);
-                rowgroup->VacuumFromRemote(rel, imcsDesc, target.CUDescs, target.CUs, target.xid, target.newBufSize);
+                rowgroup->VacuumFromRemote(rel, imcsDesc, target.CUDescs, target.CUs, target.xid, target.newCuSize);
                 imcsDesc->UnReferenceRowGroup();
             }
         }

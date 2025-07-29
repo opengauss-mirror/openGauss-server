@@ -130,6 +130,8 @@ void IMCStoreInsert::BatchInsertCommon(uint32 cuid)
             /* form CU and CUDesc */
             cuDescPtr = New(CurrentMemoryContext) CUDesc();
             cuPtr = FormCU(col, m_tmpBatchRows, cuDescPtr);
+            cuPtr->shmChunkNumber = INVALID_SHM_CHUNK_NUMBER;
+            cuPtr->shmCUOffset = 0;
             m_cuCmprsOptions[col].m_sampling_finished = true;
             cuDescPtr->cu_id = cuid;
             cuDescPtr->cu_pointer = (uint64)0;
@@ -166,10 +168,10 @@ void IMCStoreInsert::BatchReInsertCommon(IMCSDesc* imcsDesc, uint32 cuid, Transa
     MemoryContext oldcontext = MemoryContextSwitchTo(imcsDesc->imcuDescContext);
     RowGroup* rowGroup = imcsDesc->GetNewRGForCUInsert(cuid);
 
-    uint64 newBufSize = 0;
+    uint32 newCuSize = 0;
     if (m_tmpBatchRows->m_rows_curnum == 0) {
         if (imcsDesc->populateInShareMem) {
-            rowGroup->VacuumLocalShm(m_relation, imcsDesc, nullptr, nullptr, xid, newBufSize);
+            rowGroup->VacuumLocalShm(m_relation, imcsDesc, nullptr, nullptr, xid, newCuSize);
         } else {
             rowGroup->VacuumLocal(m_relation, imcsDesc, nullptr, nullptr, xid);
         }
@@ -187,7 +189,9 @@ void IMCStoreInsert::BatchReInsertCommon(IMCSDesc* imcsDesc, uint32 cuid, Transa
         /* form CU and CUDesc */
         cuDescPtr = New(CurrentMemoryContext)CUDesc();
         cuPtr = FormCU(col, m_tmpBatchRows, cuDescPtr);
-        newBufSize += cuPtr->m_srcBufSize;
+        cuPtr->shmChunkNumber = INVALID_SHM_CHUNK_NUMBER;
+        cuPtr->shmCUOffset = 0;
+        newCuSize += cuPtr->m_cuSize;
         m_cuCmprsOptions[col].m_sampling_finished = true;
         cuDescPtr->cu_id = cuid;
         cuDescPtr->cu_pointer = (uint64)0;
@@ -196,7 +200,7 @@ void IMCStoreInsert::BatchReInsertCommon(IMCSDesc* imcsDesc, uint32 cuid, Transa
     }
 
     if (imcsDesc->populateInShareMem) {
-        rowGroup->VacuumLocalShm(m_relation, imcsDesc, tmpCUDescs, tmpCUs, xid, newBufSize);
+        rowGroup->VacuumLocalShm(m_relation, imcsDesc, tmpCUDescs, tmpCUs, xid, newCuSize);
     } else {
         rowGroup->VacuumLocal(m_relation, imcsDesc, tmpCUDescs, tmpCUs, xid);
     }
