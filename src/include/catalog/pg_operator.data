@@ -1948,6 +1948,8 @@ DATA(insert OID = 8982 ("<=>"     PGNSP PGUID b f f 8306 8306 701 8982 0 8544 - 
 DESCR("halfvec_cosine_distance");
 DATA(insert OID = 8983 ("<+>"     PGNSP PGUID b f f  8306  8306    701  8983  0 8484 - -));
 DESCR("halfvec_l1_distance");
+DATA(insert OID = 8984 ("||"      PGNSP PGUID b f f  8306  8306    8306  0  0 halfvec_concat - -));
+DESCR("halfvec_concat");
 
 DATA(insert OID = 8323 ("<~>"     PGNSP PGUID b f f 1560 1560 701 8323 0 hamming_distance - -));
 DESCR("hamming_distance");
@@ -1986,6 +1988,12 @@ DESCR("sparsevec equal");
 DATA(insert OID = 8338 ("<>"      PGNSP PGUID b f f 8307 8307 16 8338 8337 sparsevec_ne neqsel neqjoinsel));
 DESCR("sparsevec unequal");
 
+DATA(insert OID = 8340 ("+"       PGNSP PGUID b f f 8306 8306 8306 8340 0 halfvec_add 0 0));
+DESCR("halfvec_add");
+DATA(insert OID = 8341 ("-"       PGNSP PGUID b f f 8306 8306 8306 8341 0 halfvec_sub 0 0));
+DESCR("halfvec_sub");
+DATA(insert OID = 8342 ("*"       PGNSP PGUID b f f 8306 8306 8306 8342 0 8547 0 0));
+DESCR("halfvec_mul");
 DATA(insert OID = 8343 ("<"       PGNSP PGUID b f f 8306 8306 16  8345 8346 halfvec_lt scalarltsel scalarltjoinsel));
 DESCR("halfvec less than");
 DATA(insert OID = 8344 ("<="      PGNSP PGUID b f f 8306 8306 16  8346 8345 halfvec_le scalarltsel scalarltjoinsel));
