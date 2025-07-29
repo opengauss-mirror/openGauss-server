@@ -616,4 +616,10 @@ DATA(insert OID = 8289 (8305 1015 8223 i f _null_));
 DATA(insert OID = 8285 (8307 8307 8228 i f _null_));
 DATA(insert OID = 8284 (8305 8307 8229 i f _null_));
 DATA(insert OID = 8283 (8307 8305 8230 a f _null_));
+
+/* halfvec <-> int[] float4[] float8[] numeric[] vector */
+DATA(insert OID = 8507 (8306 8306 8510 i f _null_));
+DATA(insert OID = 8508 (8305 8306 8505 i f _null_));
+DATA(insert OID = 8509 (8306 8305 8506 a f _null_));
+
 #endif   /* PG_CAST_H */
