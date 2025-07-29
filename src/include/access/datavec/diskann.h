@@ -315,9 +315,9 @@ struct DiskAnnGraphStore : public BaseObject {
     float ComputeDistance(BlockNumber blk1, float* vec, double sqrSum) const;
     void GetNeighbors(BlockNumber blkno, VectorList<Neighbor>* nbrs);
     void AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float distance) const;
-    void FlushEdge(DiskAnnEdgePage edge, BlockNumber id) const;
+    void FlushEdge(DiskAnnEdgePage edge, BlockNumber id, bool building) const;
     bool ContainsNeighbors(BlockNumber src, BlockNumber blk) const;
-    void AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid);
+    void AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building);
     bool NeighborExists(const DiskAnnEdgePage edge, BlockNumber id) const;
     void Clear() const;
 
@@ -332,15 +332,15 @@ class DiskAnnGraph : public BaseObject {
 public:
     DiskAnnGraph(Relation rel, double dim, BlockNumber blkno, DiskAnnGraphStore* graphStore);
     ~DiskAnnGraph();
-    void Link(BlockNumber blk, int indexSize);
+    void Link(BlockNumber blk, int indexSize, bool building);
     void IterateToFixedPoint(BlockNumber blk, const uint32 Lsize, BlockNumber frozen, VectorList<Neighbor>* pool,
                              bool search_invocatio);
     void PruneNeighbors(BlockNumber blk, VectorList<Neighbor>* pool, VectorList<Neighbor>* pruned_list);
 
     void OccludeList(BlockNumber location, VectorList<Neighbor>* pool, VectorList<Neighbor>* result, const float alpha);
 
-    void InterInsert(BlockNumber blk, VectorList<Neighbor>* pruned_list);
-    bool FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, BlockNumber blk);
+    void InterInsert(BlockNumber blk, VectorList<Neighbor>* pruned_list, bool building);
+    bool FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, BlockNumber blk, bool building);
     void Clear();
 
 private:
@@ -603,8 +603,8 @@ const DiskAnnTypeInfo* DiskAnnGetTypeInfo(Relation index);
 FmgrInfo* DiskAnnOptionalProcInfo(Relation index, uint16 procnum);
 void DiskAnnInitPage(Page page, Size pagesize);
 Page DiskAnnInitRegisterPage(Relation index, Buffer buf);
-void DiskAnnUpdateMetaPage(Relation index, BlockNumber blkno, ForkNumber forkNum);
-void InsertFrozenPoint(Relation index, BlockNumber frozen);
+void DiskAnnUpdateMetaPage(Relation index, BlockNumber blkno, ForkNumber forkNum, bool building);
+void InsertFrozenPoint(Relation index, BlockNumber frozen, bool building);
 float ComputeL2DistanceFast(const float* u, const double su, const float* v, const double sv, uint16_t dim);
 void GetEdgeTuple(DiskAnnEdgePage tup, BlockNumber blkno, Relation idx, uint32 nodeSize, uint32 edgeSize);
 int CmpNeighborInfo(const void* a, const void* b);
@@ -633,7 +633,7 @@ float ComputeL2DistanceFast(const float *u, const double su, const float *v, con
 DiskAnnAliveSlaveIterator *CreateSlaveIterator(Relation index, BlockNumber vertex,
                                                float *query, uint16_t dim, double sqrsum);
 double VectorSquareNorm(const float *a, int dim);
-BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnMetaPage metaPage);
+BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnMetaPage metaPage, bool building);
 void DeleteDiskAnnIndexTuples(TupleTableSlot* slot, ItemPointer tid, EState* estate, Partition p);
 
 /* PQ related functions */
