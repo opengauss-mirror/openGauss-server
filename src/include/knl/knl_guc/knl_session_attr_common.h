@@ -260,6 +260,7 @@ typedef struct knl_session_attr_common {
     bool enable_dump_trigger_definer;
 #ifdef ENABLE_HTAP
     bool enable_parallel_populate;
+    int imcs_parallel_populate_workers;
 #endif
     bool enable_aggr_coerce_type;
     bool enable_nonowner_remote_ddl;

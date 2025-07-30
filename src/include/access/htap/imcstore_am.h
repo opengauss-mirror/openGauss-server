@@ -45,7 +45,7 @@
 class IMCStore : public CStore {
     // public static area
 public:
-    static uint32 GetMaxCUID(IMCSDesc* imcstoreDesc);
+    static uint32 GetMaxCUID(IMCSDesc* imcstoreDesc, Relation rel);
 
 public:
     IMCStore();

@@ -154,6 +154,17 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext SelfMemoryContext;
 extern THR_LOCAL PGDLLIMPORT MemoryContext TopMemoryContext;
 #endif /* WIN32 */
 
+template<class T>
+union alignas(PG_CACHE_LINE_SIZE) Padding {
+    T value;
+    char padding[PG_CACHE_LINE_SIZE];
+};
+
+#define STATIC_PADDING(type, name) static union alignas(PG_CACHE_LINE_SIZE) { \
+    type name; \
+    char padding[PG_CACHE_LINE_SIZE]; \
+}
+
 #ifdef MEMORY_CONTEXT_CHECKING
 const uint64 BlkMagicNum = 0xDADADADADADADADA;
 const uint32 PremagicNum = 0xBABABABA;

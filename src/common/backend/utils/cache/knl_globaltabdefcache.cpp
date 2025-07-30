@@ -433,7 +433,7 @@ Relation CopyRelationData(Relation newrel, Relation rel, MemoryContext rules_cxt
      * otherwise, do the copy work here
      * if the variable changed, there is no lock and no rel inval msg,
      * set it zero and reinit it when copy into local */
-#define RD_SIZE 552
+#define RD_SIZE 576
     Assert(sizeof(RelationData) == RD_SIZE);
     /* all copied exclude pointer */
     *newrel = *rel;

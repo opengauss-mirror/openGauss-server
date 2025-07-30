@@ -110,7 +110,7 @@ MemoryContext AlignMemoryAllocator::AllocSetContextCreate(MemoryContext parent, 
     NodeTag type = isShared ? T_MemalignSharedAllocSetContext : T_MemalignAllocSetContext;
     bool isTracked = false;
     unsigned long value = isShared ? IS_SHARED : 0;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     if (isShared)
         func = &SharedFunctions;
@@ -225,7 +225,7 @@ void* AlignMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Siz
     AllocSet set = (AllocSet)context;
     AllocBlock block;
     Size blksize;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
     void* addr = NULL;
     int ret = 0;
 
@@ -300,7 +300,7 @@ void AlignMemoryAllocator::AllocSetFree(MemoryContext context, void* ptr)
     AllocSet set = (AllocSet)context;
     Size tempSize = 0;
     void* tmpptr = NULL;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     AssertArg(AllocSetIsValid(set));
 
@@ -461,7 +461,7 @@ template <bool is_shared, bool is_tracked>
 void AlignMemoryAllocator::AllocSetReset(MemoryContext context)
 {
     AllocSet set = (AllocSet)context;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
     AllocBlock block;
 
     AssertArg(AllocSetIsValid(set));
@@ -539,7 +539,7 @@ template <bool is_shared, bool is_tracked>
 void AlignMemoryAllocator::AllocSetDelete(MemoryContext context)
 {
     AllocSet set = (AllocSet)context;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
     AllocBlock block = NULL;
 
     AssertArg(AllocSetIsValid(set));

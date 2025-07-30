@@ -22,6 +22,7 @@
  */
 #include "postgres.h"
 #include "access/reloptions.h"
+#include "storage/freespace.h"
 #include "commands/vacuum.h"
 #include "miscadmin.h"
 #include "utils/guc.h"
@@ -78,8 +79,7 @@ static bytea* diskannoptions_internal(Datum reloptions, bool validate)
     static const relopt_parse_elt tab[] = {
         {"index_size", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, indexSize)},
         {"enable_pq", RELOPT_TYPE_BOOL, offsetof(DiskAnnOptions, enablePQ)},
-        {"pq_m", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pqM)},
-        {"pq_ksub", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pqKsub)}};
+        {"pq_m", RELOPT_TYPE_INT, offsetof(DiskAnnOptions, pqM)}};
 
     relopt_value* options;
     int numoptions;
@@ -155,6 +155,9 @@ Datum diskannhandler(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(diskannbuild);
 Datum diskannbuild(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "diskann index do not support extreme rto.");
+    }
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
     IndexInfo* indexinfo = (IndexInfo*)PG_GETARG_POINTER(2);
@@ -166,6 +169,9 @@ Datum diskannbuild(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(diskannbuildempty);
 Datum diskannbuildempty(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "diskann index do not support extreme rto.");
+    }
     Relation index = (Relation)PG_GETARG_POINTER(0);
     diskannbuildempty_internal(index);
 
@@ -175,6 +181,9 @@ Datum diskannbuildempty(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(diskanninsert);
 Datum diskanninsert(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "diskann index do not support extreme rto.");
+    }
     Relation rel = (Relation)PG_GETARG_POINTER(0);
     Datum* values = (Datum*)PG_GETARG_POINTER(1);
     bool* isnull = reinterpret_cast<bool*>(PG_GETARG_POINTER(2));
@@ -189,6 +198,9 @@ Datum diskanninsert(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(diskannbulkdelete);
 Datum diskannbulkdelete(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "diskann index do not support extreme rto.");
+    }
     IndexVacuumInfo* info = (IndexVacuumInfo*)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult* volatile stats = (IndexBulkDeleteResult*)PG_GETARG_POINTER(1);
     IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
@@ -201,6 +213,9 @@ Datum diskannbulkdelete(PG_FUNCTION_ARGS)
 PGDLLEXPORT PG_FUNCTION_INFO_V1(diskannvacuumcleanup);
 Datum diskannvacuumcleanup(PG_FUNCTION_ARGS)
 {
+    if (IsExtremeRedo()) {
+        elog(ERROR, "diskann index do not support extreme rto.");
+    }
     IndexVacuumInfo* info = (IndexVacuumInfo*)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult* stats = (IndexBulkDeleteResult*)PG_GETARG_POINTER(1);
     stats = diskannvacuumcleanup_internal(info, stats);
@@ -298,6 +313,29 @@ Datum diskannendscan(PG_FUNCTION_ARGS)
 bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, ItemPointer heap_tid, Relation heap,
                             IndexUniqueCheck checkUnique)
 {
+    Datum dst = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
+    Vector* value = (Vector*)DatumGetPointer(dst);
+
+    DiskAnnMetaPageData metapage;
+    DiskANNGetMetaPageInfo(index, &metapage);
+    FmgrInfo* procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
+    metapage.params = InitDiskPQParamsOnDisk(index, procinfo, metapage.dimensions, metapage.enablePQ);
+
+    BlockNumber blkno = InsertTuple(index, values, heap_tid, &metapage, false);
+
+    if (0 == metapage.nfrozen) {
+        ItemPointerData hctid;
+        ItemPointerSetInvalid(&hctid);
+
+        BlockNumber frozen = InsertTuple(index, values, &hctid, &metapage, false);
+        InsertFrozenPoint(index, frozen, false);
+        DiskANNGetMetaPageInfo(index, &metapage);
+    }
+
+    DiskAnnGraphStore* graphStore = New(CurrentMemoryContext) DiskAnnGraphStore(index);
+    DiskAnnGraph graph(index, metapage.dimensions, metapage.frozenBlkno[0], graphStore);
+    graph.Link(blkno, metapage.indexSize, false);
+
     return false;
 }
 IndexBulkDeleteResult* diskannbulkdelete_internal(IndexVacuumInfo* info, IndexBulkDeleteResult* stats,
@@ -307,33 +345,11 @@ IndexBulkDeleteResult* diskannbulkdelete_internal(IndexVacuumInfo* info, IndexBu
 }
 IndexBulkDeleteResult* diskannvacuumcleanup_internal(IndexVacuumInfo* info, IndexBulkDeleteResult* stats)
 {
-    return NULL;
+    if (!stats) {
+        stats = (IndexBulkDeleteResult*)palloc0(sizeof(IndexBulkDeleteResult));
+    }
+
+    FreeSpaceMapVacuum(info->index);
+
+    return stats;
 }
-
-/*
- * Prepare for an index scan
- */
-IndexScanDesc diskannbeginscan_internal(Relation index, int nkeys, int norderbys)
-{
-    return NULL;
-}
-
-/*
- * Start or restart an index scan
- */
-void diskannrescan_internal(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys)
-{}
-
-/*
- * Fetch the next tuple in the given scan
- */
-bool diskanngettuple_internal(IndexScanDesc scan, ScanDirection dir)
-{
-    return false;
-}
-
-/*
- * End a scan and release resources
- */
-void diskannendscan_internal(IndexScanDesc scan)
-{}

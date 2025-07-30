@@ -63,7 +63,7 @@ void BufferHelperMalloc(BufferHelper* p, Size in_size)
         p->bufType = FromMemProt;
         p->buf = (char*)GS_MEMPROT_MALLOC(s, true);
         MEMPROT_ALLOC_VALID(p->buf, s);
-        gs_atomic_add_64(&storageTrackedBytes, s);
+        gs_atomic_add_64(&storageTrackedBytes.value, s);
     }
     p->bufSize = s;
 }
@@ -89,7 +89,7 @@ void BufferHelperRemalloc(BufferHelper* p, Size in_size)
             /* fetch big memory, and copy original data. */
             char* buf = (char*)GS_MEMPROT_MALLOC(s, true);
             MEMPROT_ALLOC_VALID(buf, s);
-            gs_atomic_add_64(&storageTrackedBytes, s);
+            gs_atomic_add_64(&storageTrackedBytes.value, s);
 
             errno_t ecode = memcpy_s(buf, s, p->buf, p->bufSize);
             securec_check(ecode, "", "");
@@ -105,13 +105,13 @@ void BufferHelperRemalloc(BufferHelper* p, Size in_size)
             /* realloc directly from protected memory */
             p->buf = (char*)GS_MEMPROT_REALLOC(p->buf, p->bufSize, s, true);
             MEMPROT_ALLOC_VALID(p->buf, s - p->bufSize);
-            gs_atomic_add_64(&storageTrackedBytes, s - p->bufSize);
+            gs_atomic_add_64(&storageTrackedBytes.value, s - p->bufSize);
             p->bufSize = s;
         } else {
             /* malloc a new bigger memory from protected memory */
             char* buf = (char*)GS_MEMPROT_MALLOC(s, true);
             MEMPROT_ALLOC_VALID(buf, s);
-            gs_atomic_add_64(&storageTrackedBytes, s);
+            gs_atomic_add_64(&storageTrackedBytes.value, s);
 
             /* copy data into new buffer */
             errno_t ecode = memcpy_s(buf, s, p->buf, p->bufSize);
@@ -119,7 +119,7 @@ void BufferHelperRemalloc(BufferHelper* p, Size in_size)
 
             /* free old buffer */
             GS_MEMPROT_FREE(p->buf, p->bufSize);
-            gs_atomic_add_64(&storageTrackedBytes, -1 * p->bufSize);
+            gs_atomic_add_64(&storageTrackedBytes.value, -1 * p->bufSize);
 
             /* remember the new buffer and its size */
             p->buf = buf;
@@ -141,7 +141,7 @@ void BufferHelperFree(BufferHelper* p)
         pfree(p->buf);
     } else if (FromMemProt == p->bufType) {
         GS_MEMPROT_FREE(p->buf, p->bufSize);
-        gs_atomic_add_64(&storageTrackedBytes, -1 * p->bufSize);
+        gs_atomic_add_64(&storageTrackedBytes.value, -1 * p->bufSize);
     }
     p->buf = NULL;
     p->bufSize = 0;

@@ -1394,6 +1394,12 @@ static int32 CBProcessBroadcast(void *db_handle, dms_broadcast_context_t *broad_
             case BCAST_IMCSTORE_VACUUM:
                 ret = SSLoadIMCStoreVacuum(data, len);
                 break;
+            case BCAST_IMCSTORE_VACUUM_LOCAL_MEMORY:
+                ret = SSLoadIMCStoreVacuumLocalMemory(data, len);
+                break;
+            case BCAST_NOITIFY_PRIMARY_LOCAL_MEMORY_SUCCESS:
+                ret = SSUpdateIMCStoreVacuumLocalMemoryDelta(data, len);
+                break;
 #endif
             case BCAST_SEND_SNAPSHOT:
                 ret = SSUpdateLatestSnapshotOfStandby(data, len, output_msg, output_msg_len);
@@ -2289,17 +2295,15 @@ static int CBDBCheckLock(void *db_handle)
     level = PANIC;
 #endif
 
-    TimestampTz now = GetCurrentTimestamp();
     for (int i = t_thrd.storage_cxt.num_held_lwlocks - 1; i >= 0; i--) {
         LWLockHandle handle = t_thrd.storage_cxt.held_lwlocks[i];
         if (t_thrd.storage_cxt.held_lwlocks[i].lock != NULL) {
             ereport(level, (errmodule(MOD_DMS),
                 errmsg("[SS lock] hold lock, lock address:%p, "
-                       "lock tranche:%u, lock mode:%u, time:%ld us",
+                       "lock tranche:%u, lock mode:%u",
                        t_thrd.storage_cxt.held_lwlocks[i].lock,
                        t_thrd.storage_cxt.held_lwlocks[i].lock->tranche,
-                       t_thrd.storage_cxt.held_lwlocks[i].mode,
-                       now - t_thrd.storage_cxt.lwlock_held_times[0])));
+                       t_thrd.storage_cxt.held_lwlocks[i].mode)));
             LWLockRelease(t_thrd.storage_cxt.held_lwlocks[i].lock);
         }
     }

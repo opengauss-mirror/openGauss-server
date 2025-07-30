@@ -29,7 +29,7 @@
 #define MAX_SHM_CHUNK_NAME_LENGTH 256
 
 static constexpr auto BASE_NID = "";
-static constexpr auto SHARE_MEM_NAME_PREFIX = "dss_imcs_shm";
+static constexpr auto SHARE_MEM_NAME_PREFIX = "ss_imcs_shm";
 
 ShareMemoryPool::ShareMemoryPool(Oid relOid)
 {
@@ -91,7 +91,9 @@ int ShareMemoryPool::CreateNewShmChunk()
     }
     GetShmChunkName(name, m_relOid, newShmChunkId);
     ret = RackMemShmCreate(name, SHM_CHUNK_SIZE, BASE_NID, &regions.region[0]);
-    if (ret != 0) {
+    if (ret == E_CODE_RESOURCE_EXIST) {
+        ereport(WARNING, (errmsg("Reuse share memory chunk, name: [%s], code: [%d]", name, ret)));
+    } else if (ret != 0) {
         ereport(WARNING, (errmsg("Failed to create share memory chunk, name: [%s], code: [%d]", name, ret)));
         return INVALID_SHM_CHUNK_NUMBER;
     }

@@ -737,7 +737,7 @@ void get_relation_info(PlannerInfo* root, RangeTblEntry* rte, RelOptInfo* rel)
             info->amsearchnulls = indexRelation->rd_am->amsearchnulls;
             info->amhasgettuple = OidIsValid(indexRelation->rd_am->amgettuple);
             info->amhasgetbitmap = OidIsValid(indexRelation->rd_am->amgetbitmap);
-            info->isAnnIndex = (info->relam == HNSW_AM_OID || info->relam == IVFFLAT_AM_OID);
+            info->isAnnIndex = (info->relam == HNSW_AM_OID || info->relam == IVFFLAT_AM_OID || info->relam == DISKANN_AM_OID);
 
             /*
              * Fetch the ordering information for the index, if any.

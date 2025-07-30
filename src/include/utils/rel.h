@@ -311,6 +311,11 @@ typedef struct RelationData {
     char *pqTable;
     float *pqDistanceTable; 
     bool rd_optionsValid;
+
+    /* used only for datavec diskann */
+    char *diskPQTableTransposed;
+    char *centroids;
+    uint32 *offsets;
 } RelationData;
 
 /*

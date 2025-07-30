@@ -388,6 +388,15 @@ DATA(insert OID = 8911 (8300  sparsevec_ip_ops PGNSP PGUID 8382 8307 f 0));
 DATA(insert OID = 8912 (8300  sparsevec_cosine_ops PGNSP PGUID 8383 8307 f 0));
 DATA(insert OID = 8913 (8300  sparsevec_l1_ops PGNSP PGUID 8384 8307 f 0));
 
+DATA(insert OID = 8511 (8300  halfvec_l2_ops PGNSP PGUID 8515 8306 f 0));
+DATA(insert OID = 8512 (8300  halfvec_ip_ops PGNSP PGUID 8516 8306 f 0));
+DATA(insert OID = 8513 (8300  halfvec_cosine_ops PGNSP PGUID 8517 8306 f 0));
+DATA(insert OID = 8514 (8300  halfvec_l1_ops PGNSP PGUID 8518 8306 f 0));
+
+DATA(insert OID = 8621 (8301  halfvec_l2_ops PGNSP PGUID 8615 8306 t 0));
+DATA(insert OID = 8622 (8301  halfvec_ip_ops PGNSP PGUID 8616 8306 f 0));
+DATA(insert OID = 8623 (8301  halfvec_cosine_ops PGNSP PGUID 8617 8306 f 0));
+
 DATA(insert OID = 8914 (8301  vector_l2_ops PGNSP PGUID 8385 8305 t 0));
 DATA(insert OID = 8915 (8301  vector_ip_ops PGNSP PGUID 8386 8305 f 0));
 DATA(insert OID = 8916 (8301  vector_cosine_ops PGNSP PGUID 8387 8305 f 0));
@@ -400,9 +409,11 @@ DATA(insert OID = 8923 (8301  bit_hamming_ops PGNSP PGUID 8394 1560 f 0));
 
 DATA(insert OID = 8977 (403  vector_ops PGNSP PGUID 8392 8305 t 0));
 DATA(insert OID = 8979 (403  sparsevec_ops PGNSP PGUID 8397 8307 t 0));
+DATA(insert OID = 8519 (403  halfvec_ops PGNSP PGUID 8520 8306 t 0));
 
 DATA(insert OID = 8951 (4439  vector_ops PGNSP PGUID 8375 8305 t 0));
 DATA(insert OID = 8952 (4439  sparsevec_ops PGNSP PGUID 8376 8307 t 0));
+DATA(insert OID = 8521 (4439  halfvec_ops PGNSP PGUID 8582 8306 t 0));
 
 /* bm25 index */
 DATA(insert OID = 9737 (8302  bm25_textarr_ops PGNSP PGUID 6509 1009 t 0));

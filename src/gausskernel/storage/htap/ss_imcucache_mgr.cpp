@@ -151,6 +151,11 @@ void SSIMCUDataCacheMgr::SetSPQNodeNumAndIdx()
     pfree(rawname);
 }
 
+bool SSIMCUDataCacheMgr::CheckRGOwnedByCurNode(uint32 rgid)
+{
+    return (rgid % SS_IMCU_CACHE->spqNodeNum) == SS_IMCU_CACHE->curSpqIdx;
+}
+
 void SSIMCUDataCacheMgr::BaseCacheCU(CU* srcCU, CU* slotCU)
 {
     slotCU->m_compressedBuf = NULL;
@@ -183,10 +188,6 @@ bool SSIMCUDataCacheMgr::CacheShmCU(CU* srcCU, CU* slotCU, CUDesc* cuDescPtr, IM
     IMCUDataCacheMgr::BaseCacheCU(srcCU, slotCU);
 
     if (srcCU->m_srcBufSize != 0) {
-        if (!SS_IMCU_CACHE->PreAllocateShmForRel(srcCU->m_srcBufSize)) {
-            ereport(ERROR, (errmsg("can't alloc share memory, share memory is exhausted.")));;
-        }
-
         char *buf = (char *)(imcsDesc->shareMemPool->AllocateCUMem(
             srcCU->m_srcBufSize, cuDescPtr->slot_id, &slotCU->shmCUOffset, &slotCU->shmChunkNumber));
         if (buf == nullptr) {
@@ -239,7 +240,13 @@ void SSIMCUDataCacheMgr::SaveCU(IMCSDesc* imcsDesc, RelFileNodeOld* rnode, int c
  */
 int64 SSIMCUDataCacheMgr::GetCurrentMemSize()
 {
-    return pg_atomic_read_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used);
+    return m_cache_mgr->GetCurrentMemSize();
+}
+
+bool SSIMCUDataCacheMgr::ReserveMemForRowgroupVaccum(int64 rowgroupSize)
+{
+    Assert(rowgroupSize >= 0);
+    return m_cache_mgr->ReserveMemForRowgroupVaccum(rowgroupSize);
 }
 
 /*
@@ -325,50 +332,4 @@ void SSIMCUDataCacheMgr::SaveSSRemoteCU(Relation rel, int imcsColId, CU *cuPtr, 
     pg_atomic_add_fetch_u64(&imcsDesc->cuSizeInMem, (uint64)cuDescPtr->cu_size);
     pg_atomic_add_fetch_u64(&imcsDesc->cuNumsInMem, 1);
     cuPtr->Reset();
-}
-
-bool SSIMCUDataCacheMgr::PreAllocateShmForRel(uint64 dataSize)
-{
-    bool isAllocated = false;
-    uint64 usedMem = 0;
-    pthread_rwlock_wrlock(&g_instance.imcstore_cxt.context_mutex);
-    usedMem = pg_atomic_read_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used);
-    if (usedMem + dataSize < m_cstoreMaxSize) {
-        pg_atomic_add_fetch_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used, dataSize);
-        isAllocated = true;
-    }
-    pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
-    return isAllocated;
-}
-
-void SSIMCUDataCacheMgr::FixDifferenceAfterVacuum(uint64 begin, uint64 end, uint64 prealloc)
-{
-    pg_atomic_sub_fetch_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used, prealloc);
-    pg_atomic_sub_fetch_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used, begin);
-    pg_atomic_add_fetch_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used, end);
-}
-
-void SSIMCUDataCacheMgr::AdjustUsedShmAfterPopulate(Oid relOid)
-{
-    IMCSDesc* imcsDesc = NULL;
-    uint64 preUsedMem = 0;
-    uint64 actualUsedMem = 0;
-
-    imcsDesc = IMCS_HASH_TABLE->GetImcsDesc(relOid);
-    pthread_rwlock_wrlock(&g_instance.imcstore_cxt.context_mutex);
-    preUsedMem = 0;
-    actualUsedMem = imcsDesc->shareMemPool->m_usedMemSize;
-    if (preUsedMem > actualUsedMem) {
-        pg_atomic_sub_fetch_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used, preUsedMem - actualUsedMem);
-    } else {
-        pg_atomic_add_fetch_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used, actualUsedMem - preUsedMem);
-    }
-    pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
-}
-
-void SSIMCUDataCacheMgr::AdjustUsedShmAfterUnPopulate(uint64 usedShmMemSize)
-{
-    pthread_rwlock_wrlock(&g_instance.imcstore_cxt.context_mutex);
-    pg_atomic_sub_fetch_u64(&g_instance.imcstore_cxt.imcs_shm_cur_used, usedShmMemSize);
-    pthread_rwlock_unlock(&g_instance.imcstore_cxt.context_mutex);
 }

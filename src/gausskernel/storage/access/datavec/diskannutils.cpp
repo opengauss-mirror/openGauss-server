@@ -23,13 +23,49 @@
  *
  * -------------------------------------------------------------------------
  */
+#include <dlfcn.h>
 #include "postgres.h"
 #include "access/datavec/diskann.h"
+#include "access/datavec/hnsw.h"
+#include "access/generic_xlog.h"
 
 #define INDEXING_ALPHA (1.2)
 #define GRAPH_SLACK_FACTOR (1.365f)
 #define INIT_INSERT_NODE_SIZE 16
 #define DISTANCE_FACTOR 2
+
+static inline uint64 murmurhash64(uint64 data)
+{
+    uint64 h = data;
+
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccd;
+    h ^= h >> 33;
+    h *= 0xc4ceb9fe1a85ec53;
+    h ^= h >> 33;
+
+    return h;
+}
+
+/* BlockNumber hash table */
+static uint32 hash_block(BlockNumber blk)
+{
+#if SIZEOF_VOID_P == 8
+    return murmurhash64((uint64)blk);
+#else
+    return murmurhash32((uint32)blk);
+#endif
+}
+
+#define SH_PREFIX blockhash
+#define SH_ELEMENT_TYPE BlockNumberHashEntry
+#define SH_KEY_TYPE BlockNumber
+#define SH_KEY block
+#define SH_HASH_KEY(tb, key) hash_block(key)
+#define SH_EQUAL(tb, a, b) ((a) == (b))
+#define SH_SCOPE extern
+#define SH_DEFINE
+#include "lib/simplehash.h"
 
 /*
  * Get type info
@@ -68,18 +104,35 @@ bool DiskAnnCheckNorm(FmgrInfo* procinfo, Oid collation, Datum value)
     return DatumGetFloat8(FunctionCall1Coll(procinfo, collation, value)) > 0;
 }
 
-void DiskAnnUpdateMetaPage(Relation index, BlockNumber blkno, ForkNumber forkNum)
+void DiskAnnUpdateMetaPage(Relation index, BlockNumber blkno, ForkNumber forkNum, bool building)
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state;
     buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-    page = BufferGetPage(buf);
+    if (building) {
+        page = BufferGetPage(buf);
+    } else {
+        state = GenericXLogStart(index);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+    }
 
     DiskAnnMetaPage metaPage = DiskAnnPageGetMeta(page);
     metaPage->insertPage = blkno;
-    MarkBufferDirty(buf);  // todo: add xlog for meta page
+    if (building) {
+        MarkBufferDirty(buf);
+    } else {
+        GenericXLogFinish(state);
+    }
     UnlockReleaseBuffer(buf);
+}
+
+Buffer DiskAnnNewBuffer(Relation index, ForkNumber forkNum)
+{
+    Buffer buf = ReadBufferExtended(index, forkNum, P_NEW, RBM_NORMAL, NULL);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    return buf;
 }
 
 void DiskAnnInitPage(Page page, Size pagesize)
@@ -273,10 +326,11 @@ void DiskAnnGraphStore::AddNeighbor(DiskAnnEdgePage edge, BlockNumber id, float 
     edge->count++;
 }
 
-void DiskAnnGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk) const
+void DiskAnnGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk, bool building) const
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state;
     DiskAnnNodePage ntup;
     DiskAnnEdgePage etup;
     errno_t rc;
@@ -284,13 +338,22 @@ void DiskAnnGraphStore::FlushEdge(DiskAnnEdgePage edgePage, BlockNumber blk) con
     buf = ReadBuffer(m_rel, blk);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
-    page = BufferGetPage(buf);
+    if (building) {
+        page = BufferGetPage(buf);
+    } else {
+        state = GenericXLogStart(m_rel);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+    }
     ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
     etup = (DiskAnnEdgePage)((uint8_t*)ntup + m_nodeSize);
     rc = memcpy_s(etup, m_edgeSize, edgePage, m_edgeSize);
     securec_check_c(rc, "\0", "\0");
 
-    MarkBufferDirty(buf);   // todo: add xlog for edge page
+    if (building) {
+        MarkBufferDirty(buf);
+    } else {
+        GenericXLogFinish(state);
+    }
     UnlockReleaseBuffer(buf);
 }
 
@@ -322,17 +385,23 @@ bool DiskAnnGraphStore::ContainsNeighbors(BlockNumber src, BlockNumber blk) cons
     return found;
 }
 
-void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid)
+void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData tid, bool building)
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state;
     DiskAnnNodePage ntup;
     bool found = false;
 
     buf = ReadBuffer(m_rel, src);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
-    page = BufferGetPage(buf);
+    if (building) {
+        page = BufferGetPage(buf);
+    } else {
+        state = GenericXLogStart(m_rel);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+    }
     ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
     for (int i = 0; i < ntup->heaptidsLength; i++) {
         if (ItemPointerEquals(&ntup->heaptids[i], &tid)) {
@@ -349,7 +418,11 @@ void DiskAnnGraphStore::AddDuplicateNeighbor(BlockNumber src, ItemPointerData ti
         } else {
             ntup->heaptids[ntup->heaptidsLength] = tid;
             ntup->heaptidsLength++;
-            MarkBufferDirty(buf);   // todo: add xlog
+            if (building) {
+                MarkBufferDirty(buf);
+            } else {
+                GenericXLogFinish(state);
+            }    
         }
     }
     UnlockReleaseBuffer(buf);
@@ -398,12 +471,10 @@ void DiskAnnGraph::Clear()
     scratch = NULL;
 }
 
-void DiskAnnGraph::Link(BlockNumber blk, int index_size)
+void DiskAnnGraph::Link(BlockNumber blk, int index_size, bool building)
 {
     VectorList<Neighbor> pool;
     ItemPointerData hctid;
-    VectorList<Neighbor> prunedList;
-    DiskAnnEdgePage edgePage;
 
     scratch->bestLNodes->clear();
     ItemPointerSetInvalid(&hctid);
@@ -413,17 +484,17 @@ void DiskAnnGraph::Link(BlockNumber blk, int index_size)
     /* Find and add appropriate graph edges */
     IterateToFixedPoint(blk, index_size, frozen, &pool, false);
 
-    if (FindDuplicateNeighbor(scratch->bestLNodes, blk)) {
+    if (FindDuplicateNeighbor(scratch->bestLNodes, blk, building)) {
         scratch->bestLNodes->clear();
         pool.clear();
         return;
     }
 
-    prunedList = VectorList<Neighbor>();
+    VectorList<Neighbor> prunedList = VectorList<Neighbor>();
     PruneNeighbors(blk, &pool, &prunedList);
     Assert(prunedList.size() <= DISKANN_MAX_DEGREE);
 
-    edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
+    DiskAnnEdgePage edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
     GetEdgeTuple(edgePage, blk, graphStore->m_rel, graphStore->m_nodeSize, graphStore->m_edgeSize);
     for (uint16 i = 0; i < edgePage->count; i++) {
         edgePage->nexts[i] = InvalidOffsetNumber;
@@ -433,11 +504,11 @@ void DiskAnnGraph::Link(BlockNumber blk, int index_size)
     for (uint32 i = 0; i < (uint32)prunedList.size(); i++) {
         graphStore->AddNeighbor(edgePage, prunedList[i].id, prunedList[i].distance);
     }
-    graphStore->FlushEdge(edgePage, blk);
+    graphStore->FlushEdge(edgePage, blk, building);
     pfree(edgePage);
 
     /* Establish conns for blk and its neighbors */
-    InterInsert(blk, &prunedList);
+    InterInsert(blk, &prunedList, building);
 
     /* Clean up */
     scratch->bestLNodes->clear();
@@ -467,7 +538,6 @@ void DiskAnnGraph::IterateToFixedPoint(BlockNumber blk, const uint32 Lsize, Bloc
     }
 
     while (bestLNodes->has_unexpanded_node()) {
-        VectorList<Neighbor> neighbors;
         Neighbor nbr;
         BlockNumber blockNumber;
 
@@ -478,7 +548,7 @@ void DiskAnnGraph::IterateToFixedPoint(BlockNumber blk, const uint32 Lsize, Bloc
             pool->push_back(nbr);
         }
 
-        neighbors = VectorList<Neighbor>();
+        VectorList<Neighbor> neighbors = VectorList<Neighbor>();
         graphStore->GetNeighbors(blockNumber, &neighbors);
         if (!neighbors.empty()) {
             float distance;
@@ -584,11 +654,10 @@ void DiskAnnGraph::OccludeList(BlockNumber location, VectorList<Neighbor>* pool,
     occlude_factor.clear();
 }
 
-void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList)
+void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList, bool building)
 {
     VectorList<Neighbor>* pool = prunedList;
     ItemPointerData hctid;
-
     ItemPointerSetInvalid(&hctid);
 
     /* Save origin block node info into scratch */
@@ -596,24 +665,22 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
 
     for (size_t i = 0; i < pool->size(); ++i) {
         bool prune_needed = false;
-        VectorList<Neighbor> copyNeighbors;
-        VectorList<Neighbor> desPool;
-        float distance;
-        Neighbor nn;
-
         auto des = (*pool)[i];
         /* Skip existed neighbor node */
         if (graphStore->ContainsNeighbors(des.id, blk)) {
             continue;
         }
 
-        /* Get destination block neighbors */
-        desPool = VectorList<Neighbor>();
-        graphStore->GetNeighbors(des.id, &desPool);
-
+        float distance;
+        Neighbor nn;
         /* Calculate distance between destination node and origin block node */
         distance = graphStore->ComputeDistance(des.id, scratch->alignedQuery, scratch->sqrSum);
         nn = Neighbor(blk, distance);
+        /* Get destination block neighbors */
+        VectorList<Neighbor> copyNeighbors;
+        VectorList<Neighbor> desPool = VectorList<Neighbor>();
+        graphStore->GetNeighbors(des.id, &desPool);
+
         if (!desPool.contains(nn)) {
             if (desPool.size() < DISKANN_MAX_DEGREE) {
                 DiskAnnEdgePage edgePage = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
@@ -624,7 +691,7 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
                     break;
                 }
                 graphStore->AddNeighbor(edgePage, blk, distance);
-                graphStore->FlushEdge(edgePage, des.id);
+                graphStore->FlushEdge(edgePage, des.id, building);
 
                 pfree(edgePage);
                 prune_needed = false;
@@ -635,10 +702,10 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
             }
         }
 
+        desPool.clear();
+
         if (prune_needed) {
             VectorList<Neighbor> dummyPool;
-            VectorList<Neighbor> pruned;
-            DiskAnnEdgePage edge;
 
             size_t reserveSize = (size_t)(ceil(GRAPH_SLACK_FACTOR * DISKANN_MAX_DEGREE));
             dummyPool.reset();
@@ -663,8 +730,9 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
             }
             hash_destroy(dummyVisited);
 
+            VectorList<Neighbor> pruned;
             PruneNeighbors(des.id, &dummyPool, &pruned);
-            edge = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
+            DiskAnnEdgePage edge = (DiskAnnEdgePage)palloc(graphStore->m_edgeSize);
             GetEdgeTuple(edge, des.id, graphStore->m_rel, graphStore->m_nodeSize, graphStore->m_edgeSize);
             for (uint16 i = 0; i < edge->count; i++) {
                 edge->nexts[i] = InvalidBlockNumber;
@@ -674,7 +742,7 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
             for (uint32 i = 0; i < (uint32)pruned.size(); i++) {
                 graphStore->AddNeighbor(edge, pruned[i].id, pruned[i].distance);
             }
-            graphStore->FlushEdge(edge, des.id);
+            graphStore->FlushEdge(edge, des.id, building);
 
             /* Clean up */
             pruned.clear();
@@ -683,12 +751,11 @@ void DiskAnnGraph::InterInsert(BlockNumber blk, VectorList<Neighbor>* prunedList
         }
 
         /* Clean up */
-        desPool.clear();
         copyNeighbors.clear();
     }
 }
 
-bool DiskAnnGraph::FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, BlockNumber blk)
+bool DiskAnnGraph::FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, BlockNumber blk, bool building)
 {
     for (size_t i = 0; i < bestLNodes->size(); i++) {
         Neighbor res = bestLNodes->_data[i];
@@ -704,7 +771,7 @@ bool DiskAnnGraph::FindDuplicateNeighbor(NeighborPriorityQueue* bestLNodes, Bloc
 
             page = BufferGetPage(buf);
             IndexTuple itup = DiskAnnPageGetIndexTuple(page);
-            graphStore->AddDuplicateNeighbor(res.id, itup->t_tid);
+            graphStore->AddDuplicateNeighbor(res.id, itup->t_tid, building);
             UnlockReleaseBuffer(buf);
             return true;
         }
@@ -753,16 +820,17 @@ int CmpNeighborInfo(const void* a, const void* b)
     return left->id > right->id ? -1 : 1;
 }
 
-int DiskAnnComputePQTable(VectorArray samples, PQParams* params)
+int CmpIdxScanData(const void *a, const void *b)
 {
-    // todo g_diskann_pq_func.DiskAnnComputePQTable(samples, params);
-    return -1;
-}
-
-int DiskAnnComputeVectorPQCode(float* vector, const PQParams* params, uint8* pqCode)
-{
-    // todo g_diskann_pq_func.DiskAnnComputeVectorPQCode(vector, params, pqCode);
-    return -1;
+    const DiskAnnIdxScanData *left = (const DiskAnnIdxScanData *)a;
+    const DiskAnnIdxScanData *right = (const DiskAnnIdxScanData *)b;
+    if (left->distance < right->distance) {
+        return -1;
+    } else if (left->distance > right->distance) {
+        return 1;
+    }
+    Assert(left->id != right->id);
+    return left->id > right->id ? -1 : 1;
 }
 
 /*
@@ -783,38 +851,417 @@ int DiskAnnGetPqM(Relation index)
     return opts ? opts->pqM : GENERIC_DEFAULT_PQ_M;
 }
 
-/*
- * Get the number of centroids for each subquantizer
- */
-int DiskAnnGetPqKsub(Relation index)
+bool IsMarkDeleted(Relation index, BlockNumber master)
 {
-    DiskAnnOptions* opts = (DiskAnnOptions*)index->rd_options;
-    return opts ? opts->pqKsub : GENERIC_DEFAULT_PQ_KSUB;
+    bool masterIsVacuumDeleted = false;
+    bool foundAlive = false;
+    BlockNumber curVertex = master;
+    Buffer cbuf = ReadBuffer(index, curVertex);
+    LockBuffer(cbuf, BUFFER_LOCK_SHARE);
+    Page cpage = BufferGetPage(cbuf);
+    IndexTuple itup = DiskAnnPageGetIndexTuple(cpage);
+    DiskAnnNodePage tup_src = DiskAnnPageGetNode(itup);
+    ItemId iid = PageGetItemId((cpage), FirstOffsetNumber);
+    bool isDeleted = ItemIdIsDead(iid);
+    if (isDeleted && curVertex == master && (!DiskAnnNodeIsInserted(tup_src->tag))) {
+        masterIsVacuumDeleted = true;
+    }
+    UnlockReleaseBuffer(cbuf);
+    if (!isDeleted) {
+        foundAlive = true;
+    }
+    return (!foundAlive);
 }
 
-/*
- * Flush PQ table into page during index building
- */
-void DiskAnnFlushPQInfo(DiskAnnBuildState* buildstate)
+VamanaVertexNbIterator::VamanaVertexNbIterator(Relation index, BlockNumber blk, uint32_t flag)
+{
+    infoFlag = flag;
+    curNeighborId = DISKANN_MAX_DEGREE;
+    curNeighborBuf = InvalidBuffer;
+    curNbtup = NULL;
+    curItup = NULL;
+    Buffer nodeBuf = ReadBuffer(index, blk);
+    LockBuffer(nodeBuf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(nodeBuf);
+    DiskAnnNodePage tup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
+    if (DiskAnnNodeIsSlave(tup->tag)) {
+        Assert(tup->master != InvalidBlockNumber);
+        Buffer masterBuf = ReadBuffer(index, tup->master);
+        LockBuffer(masterBuf, BUFFER_LOCK_SHARE);
+        Page masterPage = BufferGetPage(masterBuf);
+        tup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(masterPage));
+        UnlockReleaseBuffer(nodeBuf);
+        nodeBuf = masterBuf;
+        Assert(DiskAnnNodeIsMaster(tup->tag));
+    }
+    edges = (DiskAnnEdgePage)((uint8_t *)tup + nodeSize);
+}
+
+void VamanaVertexNbIterator::begin()
+{
+    conditionMove(BEGIN);
+}
+
+void VamanaVertexNbIterator::next()
+{
+    conditionMove(NEXT);
+}
+
+bool VamanaVertexNbIterator::isFinished()
+{
+    return curNeighborId >= edges->count;
+}
+
+void VamanaVertexNbIterator::conditionMove(MoveDirection direction)
+{
+    bool found = false;
+    releaseCurNeighborBuffer();
+    if (direction == BEGIN) {
+        curNeighborId = 0;
+    } else if (direction == NEXT) {
+        curNeighborId++;
+    }
+    if (skipVisited) {
+        for (; curNeighborId < edges->count; curNeighborId++) {
+            blockhash_insert(blocks, edges->nexts[curNeighborId], &found);
+            if (!found) {
+                break;
+            }
+        }
+    }
+}
+
+BlockNumber VamanaVertexNbIterator::getCurNeighborInfo(DiskAnnNeighborInfoT *info)
+{
+    if ((infoFlag & DISKANN_NEIGHBOR_VECTOR) == DISKANN_NEIGHBOR_VECTOR) {
+        getCurNeighborBuffer();
+    }
+
+    DiskAnnNeighborInfoT nbinfo = {0};
+    if ((infoFlag & DISKANN_NEIGHBOR_BLKNO) == DISKANN_NEIGHBOR_BLKNO) {
+        nbinfo.blkno = edges->nexts[curNeighborId];
+    }
+    if ((infoFlag & DISKANN_NEIGHBOR_DISTANCE) == DISKANN_NEIGHBOR_DISTANCE) {
+        nbinfo.distance = edges->distance[curNeighborId];
+    }
+    if ((infoFlag & DISKANN_NEIGHBOR_VECTOR) == DISKANN_NEIGHBOR_VECTOR) {
+        Assert(curItup != NULL);
+        Assert(curNbtup != NULL);
+        TupleDesc tupdesc = RelationGetDescr(rel);
+        bool isnull;
+        Datum src = index_getattr(curItup, 1, tupdesc, &isnull);
+        Datum dst = PointerGetDatum(PG_DETOAST_DATUM(src));
+        nbinfo.vector = dst;
+        nbinfo.sqrSum = curNbtup->sqrSum;
+        if (DatumGetPointer(dst) != DatumGetPointer(src)) {
+            /* Mark vector needs to be released by the user */
+            nbinfo.freeVector = true;
+        }
+    }
+    *info = nbinfo;
+    return info->blkno;
+}
+
+void VamanaVertexNbIterator::getCurNeighborBuffer()
+{
+    curNeighborBuf = ReadBuffer(rel, edges->nexts[curNeighborId]);
+    LockBuffer(curNeighborBuf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(curNeighborBuf);
+    curItup = DiskAnnPageGetIndexTuple(page);
+    curNbtup = DiskAnnPageGetNode(curItup);
+}
+
+void VamanaVertexNbIterator::releaseCurNeighborBuffer()
+{
+    if (curNeighborBuf != InvalidBuffer) {
+        UnlockReleaseBuffer(curNeighborBuf);
+        curNeighborBuf = InvalidBuffer;
+        curNbtup = NULL;
+        curItup = NULL;
+    }
+}
+
+DiskAnnAliveSlaveIterator::DiskAnnAliveSlaveIterator(BlockNumber blk)
+{
+    master = blk;
+    curVertex = InvalidBlockNumber;
+    nextVertex = InvalidBlockNumber;
+}
+
+DiskAnnIdxScanData DiskAnnAliveSlaveIterator::GetCurVer()
+{
+    curVertex = nextVertex;
+    return data;
+}
+
+void DiskAnnAliveSlaveIterator::begin()
+{
+    curVertex = master;
+    next();
+}
+
+void DiskAnnAliveSlaveIterator::next()
+{
+    while (curVertex != InvalidBlockNumber) {
+        Buffer cbuf = ReadBuffer(index, curVertex);
+        LockBuffer(cbuf, BUFFER_LOCK_SHARE);
+        Page cpage = BufferGetPage(cbuf);
+        IndexTuple itup = DiskAnnPageGetIndexTuple(cpage);
+        DiskAnnNodePage tup = DiskAnnPageGetNode(itup);
+
+        bool visible = true;
+        bool needRecheck = false;
+        ItemId iid = PageGetItemId((cpage), FirstOffsetNumber);
+        bool isDead = ItemIdIsDead(iid);
+
+        data.id = curVertex;
+        data.heapCtid = itup->t_tid;
+        data.needRecheck = needRecheck;
+        data.itup = itup;
+
+        UnlockReleaseBuffer(cbuf);
+        if (visible && (!isDead)) {
+            break;
+        } else {
+            curVertex = nextVertex;
+        }
+    }
+}
+
+bool DiskAnnAliveSlaveIterator::isFinished()
+{
+    return curVertex == InvalidBlockNumber;
+}
+
+// return PQ_ERROR if error occurs
+#define PQ_RETURN_IFERR(ret)                            \
+    do {                                                \
+        int status = (ret);                           \
+        if (SECUREC_UNLIKELY(status != PQ_SUCCESS)) { \
+            return status;                            \
+        }                                               \
+    } while (0)
+
+int diskann_pq_load_symbol(char *symbol, void **sym_lib_handle)
+{
+#ifndef WIN32
+    const char *dlsym_err = NULL;
+    *sym_lib_handle = dlsym(g_diskann_pq_func.handle, symbol);
+    dlsym_err = dlerror();
+    if (dlsym_err != NULL) {
+        ereport(WARNING, (errcode(ERRCODE_INVALID_OPERATION),
+            errmsg("incompatible library \"%s\", load %s failed, %s", DISKANN_PQ_SO_NAME, symbol, dlsym_err)));
+        return PQ_ERROR;
+    }
+#endif // !WIN32
+    return PQ_SUCCESS;
+}
+
+#define PQ_LOAD_SYMBOL_FUNC(func) diskann_pq_load_symbol(#func, (void **)&g_diskann_pq_func.func)
+
+int diskann_pq_resolve_path(char* absolute_path, const char* raw_path, const char* filename)
+{
+    char path[MAX_PATH_LEN] = { 0 };
+
+    if (!realpath(raw_path, path)) {
+        if (errno != ENOENT && errno != EACCES) {
+            return PQ_ERROR;
+        }
+    }
+
+    int ret = snprintf_s(absolute_path, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", path, filename);
+    if (ret < 0) {
+        return PQ_ERROR;
+    }
+    return PQ_SUCCESS;
+}
+
+int diskann_pq_open_dl(void **lib_handle, char *symbol)
+{
+#ifndef WIN32
+    *lib_handle = dlopen(symbol, RTLD_LAZY);
+    if (*lib_handle == NULL) {
+        ereport(WARNING, (errcode_for_file_access(), errmsg("could not load library %s, %s", DISKANN_PQ_SO_NAME, dlerror())));
+        return PQ_ERROR;
+    }
+    return PQ_SUCCESS;
+#else
+    return PQ_ERROR;
+#endif
+}
+
+void diskann_pq_close_dl(void *lib_handle)
+{
+#ifndef WIN32
+    (void)dlclose(lib_handle);
+#endif
+}
+
+int diskann_pq_load_symbols(char *lib_dl_path)
+{
+    PQ_RETURN_IFERR(diskann_pq_open_dl(&g_diskann_pq_func.handle, lib_dl_path));
+
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(ComputePQTable));
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(ComputeVectorPQCode));
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(GetPQDistanceTable));
+    PQ_RETURN_IFERR(PQ_LOAD_SYMBOL_FUNC(GetPQDistance));
+
+    return PQ_SUCCESS;
+}
+
+int diskann_pq_func_init()
+{
+    if (g_diskann_pq_func.inited) {
+        return PQ_SUCCESS;
+    }
+
+    char lib_dl_path[MAX_PATH_LEN] = { 0 };
+    char *raw_path = getenv(PQ_ENV_PATH);
+    if (raw_path == nullptr) {
+        ereport(WARNING, (errmsg("failed to get DATAVEC_PQ_LIB_PATH")));
+        return PQ_ERROR;
+    }
+
+    int ret = diskann_pq_resolve_path(lib_dl_path, raw_path, DISKANN_PQ_SO_NAME);
+    if (ret != PQ_SUCCESS) {
+        ereport(WARNING, (errmsg("failed to resolve the path of libdisksearch_opgs.so, lib_dl_path %s, raw_path %s",
+                                 lib_dl_path, raw_path)));
+        return PQ_ERROR;
+    }
+
+    ret = diskann_pq_load_symbols(lib_dl_path);
+    if (ret != PQ_SUCCESS) {
+        ereport(WARNING,
+                (errmsg("failed to load libdisksearch_opgs.so, lib_dl_path %s, raw_path %s", lib_dl_path, raw_path)));
+        return PQ_ERROR;
+    }
+
+    g_diskann_pq_func.inited = true;
+    return PQ_SUCCESS;
+}
+
+int DiskAnnPQInit()
+{
+#ifdef __x86_64__
+    return PQ_ERROR;
+#endif
+    if (diskann_pq_func_init() != PQ_SUCCESS) {
+        return PQ_ERROR;
+    }
+    g_instance.pq_inited = true;
+    return PQ_SUCCESS;
+}
+
+void DiskAnnPQUinit()
+{
+    if (!g_instance.pq_inited) {
+        return;
+    }
+    g_instance.pq_inited = false;
+    ereport(LOG, (errmsg("datavec diskann PQ uninit")));
+    if (g_diskann_pq_func.handle != NULL) {
+        diskann_pq_close_dl(g_diskann_pq_func.handle);
+        g_diskann_pq_func.handle = NULL;
+        g_diskann_pq_func.inited = false;
+    }
+}
+
+int ComputePQTable(VectorArray samples, DiskPQParams *params)
+{
+    return g_diskann_pq_func.ComputePQTable(samples, params);
+}
+
+int ComputeVectorPQCode(VectorArray baseData, const DiskPQParams *params, uint8_t *pqCode)
+{
+    return g_diskann_pq_func.ComputeVectorPQCode(baseData, params, pqCode);
+}
+
+int GetPQDistanceTable(char *vec, const DiskPQParams *params, float *pqDistanceTable)
+{
+    return g_diskann_pq_func.GetPQDistanceTable(vec, params, pqDistanceTable);
+}
+
+int GetPQDistance(const uint8_t *basecode, const DiskPQParams *params,
+                  const float *pqDistanceTable, float &pqDistance)
+{
+    return g_diskann_pq_func.GetPQDistance(basecode, params, pqDistanceTable, pqDistance);
+}
+
+void DiskAnnCreatePQPages(DiskAnnBuildState *buildstate)
 {
     Relation index = buildstate->index;
-    char* pqTable = buildstate->pqTable;
+    Buffer buf;
+    Page page;
     uint16 pqTableNblk;
-    uint16 pqDisTableNblk;
-    uint32 pqTableSize;
-    uint32 pqDisTableSize;
+    uint16 pqCentroidsblk;
+    uint16 pqOffsetblk;
 
-    DiskAnnGetPQInfoFromMetaPage(index, &pqTableNblk, &pqTableSize, &pqDisTableNblk, &pqDisTableSize);
+    DiskAnnGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqCentroidsblk, NULL, &pqOffsetblk, NULL);
 
-    /* Flush pq table */
-    DiskAnnFlushPQInfoInternal(index, pqTable, DISKANN_PQTABLE_START_BLKNO, pqTableNblk, pqTableSize);
+    /* create pq table transposed page */
+    for (uint16 i = 0; i < pqTableNblk; i++) {
+        buf = DiskAnnNewBuffer(index, MAIN_FORKNUM);
+        page = DiskAnnInitRegisterPage(index, buf);
+        MarkBufferDirty(buf);
+        UnlockReleaseBuffer(buf);
+    }
+
+    /* create pq centroids page */
+    for (uint16 i = 0; i < pqCentroidsblk; i++) {
+        buf = DiskAnnNewBuffer(index, MAIN_FORKNUM);
+        page = DiskAnnInitRegisterPage(index, buf);
+        MarkBufferDirty(buf);
+        UnlockReleaseBuffer(buf);
+    }
+
+    /* create pq offset page */
+    for (uint16 i = 0; i < pqOffsetblk; i++) {
+        buf = DiskAnnNewBuffer(index, MAIN_FORKNUM);
+        page = DiskAnnInitRegisterPage(index, buf);
+        MarkBufferDirty(buf);
+        UnlockReleaseBuffer(buf);
+    }
 }
 
 /*
- * Get the info related to pqTable in metapage
+* Flush PQ table into page during index building
  */
-void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16* pqTableNblk, uint32* pqTableSize, uint16* pqDisTableNblk,
-                                  uint32* pqDisTableSize)
+void DiskAnnFlushPQInfo(DiskAnnBuildState *buildstate)
+{
+    Relation index = buildstate->index;
+    char* pqTableTransposed = buildstate->params->tablesTransposed;
+    char* pqCentroids = buildstate->params->centroids;
+    uint32 *pqOffset = buildstate->params->offsets;
+    uint16 pqTableNblk;
+    uint32 pqTableSize;
+    uint16 pqCentroidsblk;
+    uint32 pqCentroidsSize;
+    uint16 pqOffsetblk;
+    uint32 pqOffsetSize;
+
+    DiskAnnCreatePQPages(buildstate);
+
+    DiskAnnGetPQInfoFromMetaPage(index, &pqTableNblk, &pqTableSize, &pqCentroidsblk, &pqCentroidsSize,
+                                 &pqOffsetblk, &pqOffsetSize);
+
+    /* Flush pq table transposed */
+    DiskAnnFlushPQInfoInternal(index, pqTableTransposed, DISKANN_PQDATA_START_BLKNO, pqTableNblk, pqTableSize);
+
+    /* Flush pqCentroids */
+    DiskAnnFlushPQInfoInternal(index, pqCentroids, DISKANN_PQDATA_START_BLKNO + pqTableNblk,
+                               pqCentroidsblk, pqCentroidsSize);
+
+    /* Flush pqOffsets */
+    DiskAnnFlushPQInfoInternal(index, pqOffset, DISKANN_PQDATA_START_BLKNO + pqTableNblk + pqCentroidsblk,
+                               pqOffsetblk, pqOffsetSize);
+}
+
+/*
+* Get the info related to pqTable in metapage
+ */
+void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTableSize,
+                                  uint16 *pqCentroidsblk, uint32 *pqCentroidsSize,
+                                  uint16 *pqOffsetblk, uint32 *pqOffsetSize)
 {
     Buffer buf;
     Page page;
@@ -828,41 +1275,93 @@ void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16* pqTableNblk, uint32* p
         UnlockReleaseBuffer(buf);
         elog(ERROR, "diskann index is not valid");
     }
-
     if (pqTableNblk != NULL) {
         *pqTableNblk = metap->pqTableNblk;
     }
     if (pqTableSize != NULL) {
         *pqTableSize = metap->pqTableSize;
     }
-    if (pqDisTableNblk != NULL) {
-        *pqDisTableNblk = metap->pqDisTableNblk;
+    if (pqCentroidsblk != NULL) {
+        *pqCentroidsblk = metap->pqCentroidsblk;
     }
-    if (pqDisTableSize != NULL) {
-        *pqDisTableSize = metap->pqDisTableSize;
+    if (pqCentroidsSize != NULL) {
+        *pqCentroidsSize = metap->pqCentroidsSize;
+    }
+    if (pqOffsetblk != NULL) {
+        *pqOffsetblk = metap->pqOffsetblk;
+    }
+    if (pqOffsetSize != NULL) {
+        *pqOffsetSize = metap->pqOffsetSize;
     }
 
     UnlockReleaseBuffer(buf);
 }
 
-void DiskAnnFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint32 nblks, uint64 totalSize)
+DiskPQParams* InitDiskPQParamsOnDisk(Relation index, FmgrInfo *procinfo, int dim, bool enablePQ)
 {
-    Buffer buf;
-    Page page;
-    PageHeader p;
-    uint32 curFlushSize;
-
-    for (uint32 i = 0; i < nblks; i++) {
-        curFlushSize = (i == nblks - 1) ? (totalSize - i * PQTABLE_STORAGE_SIZE) : PQTABLE_STORAGE_SIZE;
-        buf = ReadBufferExtended(index, MAIN_FORKNUM, P_NEW, RBM_NORMAL, NULL);
-        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-        page = DiskAnnInitRegisterPage(index, buf);
-        errno_t err =
-            memcpy_s(PageGetContents(page), curFlushSize, table + i * PQTABLE_STORAGE_SIZE, curFlushSize);
-        securec_check(err, "\0", "\0");
-        p = (PageHeader)page;
-        p->pd_lower += curFlushSize;
-        MarkBufferDirty(buf);  // todo: add xlog for pq table
-        UnlockReleaseBuffer(buf);
+    if (!enablePQ) {
+        return NULL;
     }
+
+    DiskPQParams *params = (DiskPQParams*)palloc(sizeof(DiskPQParams));
+
+    Buffer buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    Page page = BufferGetPage(buf);
+    DiskAnnMetaPage metap = DiskAnnPageGetMeta(page);
+    params->pqChunks = metap->pqM;
+    UnlockReleaseBuffer(buf);
+
+    if (!g_instance.pq_inited) {
+        ereport(ERROR, (errmsg("the SQL involves operations related to DiskPQ, "
+                               "but this instance has not currently loaded the PQ dynamic library.")));
+    }
+
+    params->funcType = GetPQfunctionType(procinfo, DiskAnnOptionalProcInfo(index, DISKANN_NORM_PROC));
+    params->dim = dim;
+    
+    uint16 pqTableNblk;
+    uint32 pqTableSize;
+    uint16 pqCentroidsblk;
+    uint32 pqCentroidsSize;
+    uint16 pqOffsetblk;
+    uint32 pqOffsetSize;
+
+    DiskAnnGetPQInfoFromMetaPage(index, &pqTableNblk, &pqTableSize, &pqCentroidsblk, &pqCentroidsSize,
+                                 &pqOffsetblk, &pqOffsetSize);
+
+    /* Only load data once per relation to prevent repeated loading for every search */
+    bool needLoadIndex = false;
+    MemoryContext oldcxt;
+    if (index->diskPQTableTransposed == NULL || index->centroids == NULL || index->offsets == NULL) {
+        needLoadIndex = true;
+        oldcxt = MemoryContextSwitchTo(index->rd_indexcxt);
+    }
+
+    /* Load pq table transposed into relation's fields */
+    if (index->diskPQTableTransposed == NULL) {
+        LoadPQInfo(index, index->diskPQTableTransposed, DISKANN_PQDATA_START_BLKNO, pqTableNblk, pqTableSize);
+    }
+
+    /* Load pqCentroids */
+    if (index->centroids == NULL) {
+        LoadPQInfo(index, index->centroids, DISKANN_PQDATA_START_BLKNO + pqTableNblk, pqCentroidsblk, pqCentroidsSize);
+    }
+
+    /* Load pqOffsets */
+    if (index->offsets == NULL) {
+        LoadPQInfo(index, index->offsets, DISKANN_PQDATA_START_BLKNO + pqTableNblk + pqCentroidsblk,
+                   pqOffsetblk, pqOffsetSize);
+    }
+
+    if (needLoadIndex) { // once load pq is done, we switch to the original context
+        (void)MemoryContextSwitchTo(oldcxt);
+    }
+
+    params->tablesTransposed = index->diskPQTableTransposed;
+    params->centroids = index->centroids;
+    params->offsets = index->offsets;
+
+    return params;
 }
+

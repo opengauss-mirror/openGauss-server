@@ -126,7 +126,7 @@ typedef struct {
 } generate_series_timestamptz_fctx;
 
 static TimeOffset time2t(const int hour, const int min, const int sec, const fsec_t fsec);
-static void EncodeSpecialTimestamp(Timestamp dt, char* str);
+void EncodeSpecialTimestamp(Timestamp dt, char* str);
 static Timestamp dt2local(Timestamp dt, int timezone);
 static void AdjustTimestampForTypmod(Timestamp* time, int32 typmod);
 static void AdjustIntervalForTypmod(Interval* interval, int32 typmod);
@@ -388,6 +388,21 @@ static void CheckNlsFormat()
     }
 }
 
+void timestamp_out(Timestamp ts, char* buf)
+{
+    pg_tm tm;
+    fsec_t fsec;
+
+    CheckNlsFormat();
+
+    if (TIMESTAMP_NOT_FINITE(ts))
+        EncodeSpecialTimestamp(ts, buf);
+    else if (timestamp2tm(ts, NULL, &tm, &fsec, NULL, NULL) == 0)
+        EncodeDateTime(&tm, fsec, false, 0, NULL, u_sess->time_cxt.DateStyle, buf);
+    else
+        ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
+}
+
 /* timestamp_out()
  * Convert a timestamp to external form.
  */
@@ -395,18 +410,9 @@ Datum timestamp_out(PG_FUNCTION_ARGS)
 {
     Timestamp timestamp = PG_GETARG_TIMESTAMP(0);
     char* result = NULL;
-    struct pg_tm tt, *tm = &tt;
-    fsec_t fsec;
     char buf[MAXDATELEN + 1];
 
-    CheckNlsFormat();
-
-    if (TIMESTAMP_NOT_FINITE(timestamp))
-        EncodeSpecialTimestamp(timestamp, buf);
-    else if (timestamp2tm(timestamp, NULL, tm, &fsec, NULL, NULL) == 0)
-        EncodeDateTime(tm, fsec, false, 0, NULL, u_sess->time_cxt.DateStyle, buf);
-    else
-        ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
+    timestamp_out(timestamp, buf);
 
     result = pstrdup(buf);
     PG_RETURN_CSTRING(result);
@@ -1564,7 +1570,7 @@ static void AdjustIntervalForTypmod(Interval* interval, int32 typmod)
 /* EncodeSpecialTimestamp()
  * Convert reserved timestamp data type to string.
  */
-static void EncodeSpecialTimestamp(Timestamp dt, char* str)
+void EncodeSpecialTimestamp(Timestamp dt, char* str)
 {
     int rc = 0;
     if (TIMESTAMP_IS_NOBEGIN(dt)) {
@@ -1861,7 +1867,12 @@ int timestamp2tm(Timestamp dt, int* tzp, struct pg_tm* tm, fsec_t* fsec, const c
         return -1;
 
     j2date((int)date, &tm->tm_year, &tm->tm_mon, &tm->tm_mday);
-    dt2time(time, &tm->tm_hour, &tm->tm_min, &tm->tm_sec, fsec);
+
+    if (time == 0) {
+        tm->tm_hour = tm->tm_min = tm->tm_sec = *fsec = 0;
+    } else {
+        dt2time(time, &tm->tm_hour, &tm->tm_min, &tm->tm_sec, fsec);
+    }
 #else
     time = dt;
     TMODULO(time, date, (double)SECS_PER_DAY);

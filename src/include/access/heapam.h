@@ -360,7 +360,7 @@ extern bool rewrite_page_prepare_for_xid(Page page, TransactionId xid, bool mult
 extern int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int ntuples, CommandId cid, int options,
     BulkInsertState bistate, HeapMultiInsertExtraArgs* args);
 extern TM_Result heap_delete(Relation relation, ItemPointer tid, CommandId cid, Snapshot crosscheck, 
-    bool wait, TM_FailureData *tmfd, bool allow_delete_self = false);
+    bool wait, TM_FailureData *tmfd, bool allow_delete_self = false, TupleTableSlot** oldslot = NULL);
 extern TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer otid, HeapTuple newtup,
     CommandId cid, Snapshot crosscheck, bool wait, TM_FailureData *tmfd, LockTupleMode *lockmode,
     bool allow_delete_self = false);

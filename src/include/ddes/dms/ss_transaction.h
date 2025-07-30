@@ -169,5 +169,9 @@ int SSDisasterUpdateIsEnableExtremeRedo(char* data, uint32 len);
 int32 SSLoadIMCStoreVacuum(char *data, uint32 len);
 void SSBroadcastIMCStoreVacuum(int chunkNum, Oid rid, uint32 rgid, TransactionId xid, bool actived, int cols,
     CUDesc** CUDescs, CU** CUs);
+void SSBroadcastIMCStoreVacuumLocalMemory(Oid rid, uint32 rgid, TransactionId xid);
+int32 SSLoadIMCStoreVacuumLocalMemory(char *data, uint32 len);
+void SSNotifyPrimaryVacuumLocalMemorySuccess(Oid rid, uint32 rgid, TransactionId xid);
+int32 SSUpdateIMCStoreVacuumLocalMemoryDelta(char *data, uint32 len);
 #endif
 #endif

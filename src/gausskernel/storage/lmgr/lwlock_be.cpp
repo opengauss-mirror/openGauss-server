@@ -39,8 +39,6 @@ void remember_lwlock_acquire(LWLock *lock, LWLockMode mode)
          */
         beentry->lw_want_lock = lock;
         beentry->lw_want_mode = mode;
-        beentry->lw_want_start_time = 
-            (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
     }
 }
 
@@ -82,22 +80,6 @@ int find_lwlock_hold(LWLock *lock)
         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
     }
 
-    /* if lwlock is held longer than 1min, ereport the detail and backtrace */
-    TimestampTz now = (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
-    if (u_sess->attr.attr_common.pgstat_track_activities &&
-        TimestampDifferenceExceeds(t_thrd.storage_cxt.lwlock_held_times[i], now, MSECS_PER_MIN)) {
-        force_backtrace_messages = true;
-        int old_backtrace_min_messages = u_sess->attr.attr_common.backtrace_min_messages;
-
-        u_sess->attr.attr_common.backtrace_min_messages = LOG;
-        ereport(LOG,
-            (errmsg("lwlock %s mode %d is held for %ld us longer than 1 min",
-                    T_NAME(lock),
-                    (int)(t_thrd.storage_cxt.held_lwlocks[i].mode),
-                    now - t_thrd.storage_cxt.lwlock_held_times[i])));
-
-        u_sess->attr.attr_common.backtrace_min_messages = old_backtrace_min_messages;
-    }
 
     return i;
 }
@@ -115,7 +97,6 @@ LWLockMode forget_lwlock_hold(LWLock *lock)
     t_thrd.storage_cxt.num_held_lwlocks--;
     for (; i < t_thrd.storage_cxt.num_held_lwlocks; i++) {
         t_thrd.storage_cxt.held_lwlocks[i] = t_thrd.storage_cxt.held_lwlocks[i + 1];
-        t_thrd.storage_cxt.lwlock_held_times[i] = t_thrd.storage_cxt.lwlock_held_times[i + 1];
     }
 
     return mode;

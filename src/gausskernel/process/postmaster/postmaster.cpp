@@ -3251,6 +3251,12 @@ int PostmasterMain(int argc, char* argv[])
     } else {
         ereport(LOG, (errmsg("datavec PQ init success.")));
     }
+    ret = DiskAnnPQInit();
+    if (ret != 0) {
+        ereport(WARNING, (errmsg("datavec diskann PQ init failed, ret: %d", ret)));
+    } else {
+        ereport(LOG, (errmsg("datavec diskann PQ init success.")));
+    }
 
     /* init npu for datavec */
     if (g_instance.attr.attr_storage.enable_ivfflat_npu) {
@@ -10004,6 +10010,7 @@ void ExitPostmaster(int status)
      */
     DMSUninit();
     PQUinit();
+    DiskAnnPQUinit();
     NPUResourceRelease();
 
     CloseGaussPidDir();
@@ -14486,7 +14493,7 @@ static void is_memory_backend_reserved(const knl_thread_arg* arg)
 {
     if (arg->role == WORKER) {
         Port port = ((BackendParameters*)(arg->save_para))->port;
-        if (processMemInChunks >= maxChunksPerProcess * 0.8 &&
+        if (processMemInChunks.value >= maxChunksPerProcess * 0.8 &&
             IsHAPort(&port)) {
             t_thrd.utils_cxt.backend_reserved = true;
         } else {

@@ -2163,6 +2163,27 @@ void ResourceOwnerForgetPthreadRWlock(ResourceOwner owner, pthread_rwlock_t* pRW
             errmsg("pthread rwlock is not owned by resource owner %s", owner->name)));
 }
 
+void ResourceOwnerForgetIfExistPthreadRWlock(ResourceOwner owner, pthread_rwlock_t* pRWlock)
+{
+    if (owner == NULL) {
+        return PthreadRWlockUnlock(owner, pRWlock);
+    }
+    pthread_rwlock_t** rwlocks = owner->pThdRWlocks;
+    int ns1 = owner->nPthreadRWlock - 1;
+
+    if (!owner->valid) {
+        return;
+    }
+
+    for (int i = ns1; i >= 0; i--) {
+        if (rwlocks[i] == pRWlock) {
+            PthreadRWlockUnlock(owner, pRWlock);
+            return;
+        }
+    }
+    return;
+}
+
 int ResourceOwnerForgetIfExistPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex, bool trace)
 {
     if (owner == NULL) {
@@ -2170,11 +2191,11 @@ int ResourceOwnerForgetIfExistPthreadMutex(ResourceOwner owner, pthread_mutex_t*
     }
     pthread_mutex_t** mutexs = owner->pThdMutexs;
     int ns1 = owner->nPthreadMutex - 1;
- 
+
     if (!owner->valid) {
         return 0;
     }
- 
+
     for (int i = ns1; i >= 0; i--) {
         if (mutexs[i] == pMutex) {
             return PthreadMutexUnlock(owner, pMutex, trace);

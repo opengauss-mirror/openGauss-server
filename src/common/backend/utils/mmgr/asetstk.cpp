@@ -131,7 +131,7 @@ MemoryContext StackMemoryAllocator::AllocSetContextCreate(MemoryContext parent, 
     StackSet context = NULL;
     bool isTracked = false;
     unsigned long value = 0;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     if (!isSession && (parent == NULL || parent->session_id == 0))
         func = &GenericFunctions;
@@ -239,7 +239,7 @@ void* StackMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Siz
     StackSet set = (StackSet)context;
     Size blksize;
     void* addr = NULL;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     if (context->session_id > 0)
         func = &SessionFunctions;
@@ -408,7 +408,7 @@ void StackMemoryAllocator::AllocSetReset(MemoryContext context)
 {
     StackSet set = (StackSet)context;
     StackBlock block;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     if (context->session_id > 0)
         func = &SessionFunctions;
@@ -470,7 +470,7 @@ void StackMemoryAllocator::AllocSetDelete(MemoryContext context)
 {
     StackSet set = (StackSet)context;
     StackBlock block = set->blocks;
-    MemoryProtectFuncDef* func = NULL;
+    const MemoryProtectFuncDef* func = NULL;
 
     if (context->session_id > 0)
         func = &SessionFunctions;

@@ -585,12 +585,12 @@ static void EncapGlobalMemoryInfo(cJSON *root)
     }
 
     int maxDynamicMemory = (int)(maxChunksPerProcess << (chunkSizeInBits - BITS_IN_MB));
-    int dynamicUsedMemory = (int)(processMemInChunks << (chunkSizeInBits - BITS_IN_MB));
+    int dynamicUsedMemory = (int)(processMemInChunks.value << (chunkSizeInBits - BITS_IN_MB));
     int dynamicPeakMemory = (int)(peakChunksPerProcess << (chunkSizeInBits - BITS_IN_MB));
-    int dynamicUsedShrctx = (int)(shareTrackedMemChunks << (chunkSizeInBits - BITS_IN_MB));
+    int dynamicUsedShrctx = (int)(shareTrackedMemChunks.value << (chunkSizeInBits - BITS_IN_MB));
     int dynamicPeakShrctx = (int)(peakChunksSharedContext << (chunkSizeInBits - BITS_IN_MB));
     int maxBackendMemory = (int)(backendReservedMemInChunk << (chunkSizeInBits - BITS_IN_MB));
-    int backendUsedMemory = (int)(backendUsedMemInChunk << (chunkSizeInBits - BITS_IN_MB));
+    int backendUsedMemory = (int)(backendUsedMemInChunk.value << (chunkSizeInBits - BITS_IN_MB));
     int cuSize = (int)(CUCache->GetCurrentMemSize() >> BITS_IN_MB);
     int otherUsedMemory = (int)(res - shared - text) - dynamicUsedMemory - cuSize;
     if (otherUsedMemory < 0) {
@@ -730,7 +730,7 @@ static bool CheckMemoryReachResetLimit()
         return false;
     }
 
-    if ((processMemInChunks > maxChunksPerProcess
+    if ((processMemInChunks.value > maxChunksPerProcess
         * u_sess->attr.attr_memory.memory_reset_percent_list[PERCENT_HIGH_KIND] / FULL_PERCENT)) {
         return true;
     }
@@ -778,7 +778,7 @@ static bool CheckMemoryReachSnapshotLimit()
         return false;
     }
 
-    if (processMemInChunks > maxChunksPerProcess * MEMORY_TRACE_PERCENT / FULL_PERCENT) {
+    if (processMemInChunks.value > maxChunksPerProcess * MEMORY_TRACE_PERCENT / FULL_PERCENT) {
         return true;
     }
 
@@ -865,7 +865,7 @@ static void TerminateALLConnection()
     qsort(sessUsage, sessNum, sizeof(SessMemoryUsage), memoryUsageCompare);
 
     int i = 0;
-    uint64 currentMemory = (uint64)processMemInChunks << chunkSizeInBits;
+    uint64 currentMemory = (uint64)processMemInChunks.value << chunkSizeInBits;
     uint64 targetMemory = ((uint64)maxChunksPerProcess << chunkSizeInBits) *
             (uint64)u_sess->attr.attr_memory.memory_reset_percent_list[PERCENT_LOW_KIND] / FULL_PERCENT;
     for (i = 0; i < sessNum; i++) {
@@ -898,7 +898,7 @@ static void CleanConnectionByMemory()
         g_instance.comm_cxt.rejectRequest = true;
         TerminateALLConnection();
         while (true) {
-            if (processMemInChunks < maxChunksPerProcess *
+            if (processMemInChunks.value < maxChunksPerProcess *
                 u_sess->attr.attr_memory.memory_reset_percent_list[PERCENT_LOW_KIND] / FULL_PERCENT) {
                 break;
             }

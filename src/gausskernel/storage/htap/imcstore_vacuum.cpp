@@ -34,6 +34,7 @@
 #include "catalog/pg_database.h"
 #include "gssignal/gs_signal.h"
 #include "access/tableam.h"
+#include "ddes/dms/ss_transaction.h"
 #include "access/htap/imcstore_insert.h"
 #include "access/htap/imcucache_mgr.h"
 #include "access/htap/ss_imcucache_mgr.h"
@@ -79,7 +80,7 @@ void InitIMCStoreVacuumQueue(knl_g_imcstore_context* context)
     on_proc_exit(&IMCStoreVacuumQueueCleanup, (Datum)context->vacuum_queue);
 }
 
-bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId)
+bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid)
 {
     pthread_rwlock_rdlock(&g_instance.imcstore_cxt.context_mutex);
     bool needClean = g_instance.imcstore_cxt.should_clean;
@@ -92,6 +93,7 @@ bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId)
     target.isLocalType = true;
     target.relOid = relid;
     target.rowGroupId = cuId;
+    target.xid = xid;
     for (int i = 0; i < TRY_ENQUEUE_TIMES; ++i) {
         if (g_instance.imcstore_cxt.vacuum_queue->Enqueue(target)) {
             break;
@@ -103,7 +105,7 @@ bool IMCStoreVacuumPushWork(Oid relid, uint32 cuId)
     return true;
 }
 
-void IMCStoreSyncVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid, uint64 bufSize, CUDesc** CUDesc, CU** CUs)
+void IMCStoreSyncVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid, uint64 cuSize, CUDesc** CUDesc, CU** CUs)
 {
     IMCStoreVacuumTarget target;
     target.isLocalType = false;
@@ -111,7 +113,7 @@ void IMCStoreSyncVacuumPushWork(Oid relid, uint32 cuId, TransactionId xid, uint6
     target.rowGroupId = cuId;
     target.CUDescs = CUDesc;
     target.CUs = CUs;
-    target.newBufSize = bufSize;
+    target.newCuSize = cuSize;
     target.xid = xid;
     for (int i = 0; i < TRY_ENQUEUE_TIMES; ++i) {
         if (g_instance.imcstore_cxt.vacuum_queue->Enqueue(target)) {
@@ -210,7 +212,7 @@ void ItempointerGetTuple(Relation rel, ItemPointerData item, Datum *val, bool *n
         if (!heap_fetch(rel, SnapshotAny, tuple, &buf, false, NULL)) {
             return;
         }
-        HTSV_Result result  = HeapTupleSatisfiesVacuum(tuple, frozen, buf);
+        HTSV_Result result = HeapTupleSatisfiesVacuum(tuple, frozen, buf);
         if (result != HEAPTUPLE_LIVE && result != HEAPTUPLE_RECENTLY_DEAD) {
             ReleaseBuffer(buf);
             return;
@@ -221,12 +223,9 @@ void ItempointerGetTuple(Relation rel, ItemPointerData item, Datum *val, bool *n
     }
 }
 
-void IMCStoreVacuum(Relation rel, IMCSDesc *imcsDesc, uint32 cuid)
+void IMCStoreVacuumLocalNode(Relation rel, IMCSDesc *imcsDesc, uint32 cuid, TransactionId frozen)
 {
     TupleDesc relTupleDesc = rel->rd_att;
-    unsigned char deltaMask[MAX_IMCSTORE_DEL_BITMAP_SIZE] = {0};
-    TransactionId frozen = GetOldestXmin(rel);
-
     Datum *val = (Datum *)palloc(sizeof(Datum) * (relTupleDesc->natts + 1));
     bool *null = (bool *)palloc(sizeof(bool) * (relTupleDesc->natts + 1));
 
@@ -269,6 +268,20 @@ void IMCStoreVacuum(Relation rel, IMCSDesc *imcsDesc, uint32 cuid)
     pfree(val);
     pfree(null);
     imcstoreInsert.Destroy();
+}
+
+void IMCStoreVacuum(Relation rel, IMCSDesc *imcsDesc, uint32 cuid, TransactionId xid)
+{
+    TransactionId frozen = TransactionIdIsValid(xid) ? xid : GetOldestXmin(rel);
+    if (SS_PRIMARY_MODE && !imcsDesc->populateInShareMem && !SS_IMCU_CACHE->CheckRGOwnedByCurNode(cuid)) {
+        elog(DEBUG1, "SS Send vacuum request to standy: cuid(%u), rel(%s), xid(%u).",
+            cuid, RelationGetRelationName(rel), xid);
+        SSBroadcastIMCStoreVacuumLocalMemory(RelationGetRelid(rel), cuid, frozen);
+        return;
+    }
+
+    elog(DEBUG1, "vacuum on local node: cuid(%u), rel(%s), xid(%u).", cuid, RelationGetRelationName(rel), xid);
+    IMCStoreVacuumLocalNode(rel, imcsDesc, cuid, frozen);
 }
 
 void IMCStoreVacuumWorkerMain(void)
@@ -488,10 +501,10 @@ void IMCStoreVacuumWorkerMain(void)
                 u_sess->imcstore_ctx.pinnedBorrowMemPool = imcsDesc->borrowMemPool;
             }
             if (target.isLocalType) {
-                IMCStoreVacuum(rel, imcsDesc, target.rowGroupId);
+                IMCStoreVacuum(rel, imcsDesc, target.rowGroupId, target.xid);
             } else {
                 RowGroup* rowgroup = imcsDesc->GetNewRGForCUInsert(target.rowGroupId);
-                rowgroup->VacuumFromRemote(rel, imcsDesc, target.CUDescs, target.CUs, target.xid, target.newBufSize);
+                rowgroup->VacuumFromRemote(rel, imcsDesc, target.CUDescs, target.CUs, target.xid, target.newCuSize);
                 imcsDesc->UnReferenceRowGroup();
             }
         }

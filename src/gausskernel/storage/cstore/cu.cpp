@@ -2215,23 +2215,24 @@ void RowGroup::VacuumLocal(Relation fakeRelation, IMCSDesc* imcsDesc,
             m_cuDescs[col] = NULL;
         }
     }
+    if (SS_STANDBY_MODE) {
+        SSNotifyPrimaryVacuumLocalMemorySuccess(RelationGetRelid(fakeRelation), m_rowGroupId, xid);
+    }
     UnlockRowGroup();
 }
 
 void RowGroup::VacuumLocalShm(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs,
-                              CU** newCUs, TransactionId xid, uint64 newBufSize)
+    CU** newCUs, TransactionId xid, uint32 newCuSize)
 {
-    uint64 begsize;
-    uint64 endsize;
-    begsize = pg_atomic_read_u64(&imcsDesc->shareMemPool->m_usedMemSize);
-    if (!SS_IMCU_CACHE->PreAllocateShmForRel(newBufSize)) {
-        imcsDesc->isShmNotEnough = true;
-        ereport(ERROR, (errmsg("IMCStore vacuum failed: can't prealloc share memory, "
-            "please unimcstored. Otherwise local memory expansion may occur ")));
-    }
     WRLockRowGroup();
+    if (!SS_IMCU_CACHE->ReserveMemForRowgroupVaccum(newCuSize)) {
+        imcsDesc->isShmNotEnough = true;
+        UnlockRowGroup();
+        imcsDesc->UnReferenceRowGroup();
+        ereport(ERROR, (errmsg("share memory is not enough.")));
+    }
 
-    imcsDesc->isShmNotEnough = false;
+    u_sess->imcstore_ctx.inVaccum = true;
     RelFileNodeOld* relNodeOid = (RelFileNodeOld*)&fakeRelation->rd_node;
     DropCUDescs(&fakeRelation->rd_node, fakeRelation->rd_att->natts - 1);
 
@@ -2250,6 +2251,7 @@ void RowGroup::VacuumLocalShm(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc*
         }
     }
     m_delta->Vacuum(xid);
+    u_sess->imcstore_ctx.inVaccum = false;
 
     int chunkNum = imcsDesc->shareMemPool->GetChunkNum();
     if (!m_actived) {
@@ -2268,23 +2270,12 @@ void RowGroup::VacuumLocalShm(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc*
     }
 
     UnlockRowGroup();
-    endsize = pg_atomic_read_u64(&imcsDesc->shareMemPool->m_usedMemSize);
-    SS_IMCU_CACHE->FixDifferenceAfterVacuum(begsize, endsize, newBufSize);
 }
 
 void RowGroup::VacuumFromRemote(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs,
-                                CU** newCUs, TransactionId xid, uint64 newBufSize)
+    CU** newCUs, TransactionId xid, uint32 newCuSize)
 {
-    uint64 begsize;
-    uint64 endsize;
-    begsize = pg_atomic_read_u64(&imcsDesc->shareMemPool->m_usedMemSize);
-    if (!SS_IMCU_CACHE->PreAllocateShmForRel(newBufSize)) {
-        imcsDesc->isShmNotEnough = true;
-        ereport(ERROR, (errmsg("IMCStore vacuum failed: can't prealloc share memory, "
-            "please unimcstored. Otherwise local memory expansion may occur ")));
-    }
     WRLockRowGroup();
-    imcsDesc->isShmNotEnough = false;
     RelFileNodeOld* relNodeOid = (RelFileNodeOld*)&fakeRelation->rd_node;
     DropCUDescs(&fakeRelation->rd_node, fakeRelation->rd_att->natts - 1);
 
@@ -2303,8 +2294,6 @@ void RowGroup::VacuumFromRemote(Relation fakeRelation, IMCSDesc* imcsDesc, CUDes
         }
     }
     UnlockRowGroup();
-    endsize = pg_atomic_read_u64(&imcsDesc->shareMemPool->m_usedMemSize);
-    SS_IMCU_CACHE->FixDifferenceAfterVacuum(begsize, endsize, newBufSize);
 }
 
 void RowGroup::Insert(ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId)

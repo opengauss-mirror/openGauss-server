@@ -33,6 +33,7 @@
 #include "commands/vacuum.h"
 
 pq_func_t g_pq_func = {0};
+diskann_pq_func_t g_diskann_pq_func = {0};
 npu_func_t g_npu_func = {0};
 uint32 g_mmapOff = 0;
 uint32 g_mmap_relNode = 0;

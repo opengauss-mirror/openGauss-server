@@ -1172,13 +1172,13 @@ static bool tryBypass(CachedPlanSource* psrc, ParameterizationInfo* paramInfo, D
         opFusionObj->useOuterParameter(*paramListInfo);
         opFusionObj->setCurrentOpFusionObj(opFusionObj);
         opFusionObj->m_local.m_isFirst = true;
-        
+#ifdef ENABLE_MULTIPLE_NODES
         CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
         bool needBucketId = cps != NULL && cps->gplan;
         if (needBucketId) {
             setCachedPlanBucketId(cps->gplan, *paramListInfo);
         }
-
+#endif
         if (OpFusion::process(FUSION_EXECUTE, NULL, 0, completionTag, false, NULL)) {
             return true;
         }

@@ -182,7 +182,6 @@ struct CUDesc : public BaseObject {
     uint32 cuSrcBufSize;
     int32 cuOffsetSize;
     bool isSSImcstore{false};
-    /* only for dss imcstore, all node cache cu slot id need to be the same. */
     CacheSlotId_t slot_id;
 #endif
 
@@ -227,9 +226,9 @@ public:
     void VacuumLocal(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs,
                      CU** newCUs, TransactionId xid);
     void VacuumLocalShm(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs,
-                        CU** newCUs, TransactionId xid, uint64 newBufSize);
+                        CU** newCUs, TransactionId xid, uint32 newCuSize);
     void VacuumFromRemote(Relation fakeRelation, IMCSDesc* imcsDesc, CUDesc** newCUDescs,
-                          CU** newCUs, TransactionId xid, uint64 newBufSize);
+                          CU** newCUs, TransactionId xid, uint32 newCuSize);
     void Insert(ItemPointer ctid, TransactionId xid, Oid relid, uint32 cuId);
     void WRLockRowGroup();
     void RDLockRowGroup();
@@ -615,7 +614,7 @@ void CU::FreeMem()
         /* this->shmCUOffset of ss imcstore is more than 0 */
         if (ENABLE_DSS && imcsDesc != NULL && imcsDesc->populateInShareMem) {
             /* only SS_PRIMARY_MODE can write share memory */
-            if (SS_PRIMARY_MODE) {
+            if (SS_PRIMARY_MODE && imcsDesc->shareMemPool != NULL && IS_VALID_SHM_CHUNK_NUMBER(this->shmChunkNumber)) {
                 imcsDesc->shareMemPool->FreeCUMem(this->shmChunkNumber, this->shmCUOffset);
             }
         } else if (!freeByCUCacheMgr) {

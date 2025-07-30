@@ -665,7 +665,7 @@ int64 dywlm_client_get_memory(void)
     }
 
     uint64 totalMemSize = (uint64)maxChunksPerProcess << (chunkSizeInBits - BITS_IN_MB);
-    uint64 usedMemSize = (uint64)processMemInChunks << (chunkSizeInBits - BITS_IN_MB);
+    uint64 usedMemSize = (uint64)processMemInChunks.value << (chunkSizeInBits - BITS_IN_MB);
     int64 freeSize = totalMemSize - usedMemSize;
     int64 extsize = 0L;
 

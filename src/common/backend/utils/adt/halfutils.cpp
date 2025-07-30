@@ -43,7 +43,7 @@ float (*HalfvecInnerProduct)(int dim, half *ax, half *bx);
 double (*HalfvecCosineSimilarity)(int dim, half *ax, half *bx);
 float (*HalfvecL1Distance)(int dim, half *ax, half *bx);
 
-static float HalfvecL2SquaredDistanceDefault(int dim, half *ax, half *bx)
+float HalfvecL2SquaredDistanceDefault(int dim, half *ax, half *bx)
 {
     float distance = 0.0;
 
@@ -90,7 +90,7 @@ TARGET_F16C static float HalfvecL2SquaredDistanceF16c(int dim, half *ax, half *b
 }
 #endif
 
-static float HalfvecInnerProductDefault(int dim, half *ax, half *bx)
+float HalfvecInnerProductDefault(int dim, half *ax, half *bx)
 {
     float distance = 0.0;
 
@@ -130,7 +130,7 @@ TARGET_F16C static float HalfvecInnerProductF16c(int dim, half *ax, half *bx)
 }
 #endif
 
-static double HalfvecCosineSimilarityDefault(int dim, half *ax, half *bx)
+double HalfvecCosineSimilarityDefault(int dim, half *ax, half *bx)
 {
     float similarity = 0.0;
     float norma = 0.0;
@@ -198,7 +198,7 @@ TARGET_F16C static double HalfvecCosineSimilarityF16c(int dim, half *ax, half *b
 }
 #endif
 
-static float HalfvecL1DistanceDefault(int dim, half *ax, half *bx)
+float HalfvecL1DistanceDefault(int dim, half *ax, half *bx)
 {
     float distance = 0.0;
 

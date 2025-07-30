@@ -20,8 +20,13 @@
  *
  * -------------------------------------------------------------------------
  */
+#include <algorithm>
+
 #include "postgres.h"
+#include "knl/knl_variable.h"
+#include "storage/freespace.h"
 #include "access/datavec/diskann.h"
+#include "access/generic_xlog.h"
 #include "access/tableam.h"
 #include "postmaster/bgworker.h"
 #include "commands/vacuum.h"
@@ -91,7 +96,6 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
     }
 
     buildstate->pqM = DiskAnnGetPqM(index);
-    buildstate->pqKsub = DiskAnnGetPqKsub(index);
     if (buildstate->enablePQ) {
         if (buildstate->kmeansnormprocinfo != NULL && buildstate->dimensions == 1) {
             ereport(ERROR, (errmsg("dimensions must be greater than one for this opclass.")));
@@ -100,19 +104,15 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
             ereport(ERROR, (errmsg("dimensions={%d} must be divisible by pq_M={%d}, please reset pq_M.}",
                                    buildstate->dimensions, buildstate->pqM)));
         }
-        Size subItemsize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
-        subItemsize = MAXALIGN(subItemsize);
-        buildstate->pqTableSize = buildstate->pqM * buildstate->pqKsub * subItemsize;
-        buildstate->pqTable = parallel ? NULL : (char*)palloc0(buildstate->pqTableSize);
+        // Here we use sizeof(float) since we only support Vector type for now
+        buildstate->pqTableSize = sizeof(float) * buildstate->dimensions * GENERIC_DEFAULT_PQ_KSUB;
         buildstate->pqcodeSize = buildstate->pqM * sizeof(uint8);
-        buildstate->params = GetPQInfo(buildstate);
+        buildstate->params = parallel ? NULL : InitDiskPQParams(buildstate);
     } else {
-        buildstate->pqTable = NULL;
         buildstate->pqTableSize = 0;
         buildstate->pqcodeSize = 0;
         buildstate->params = NULL;
     }
-    buildstate->pqDistanceTable = NULL;
 
     buildstate->nodeSize = offsetof(DiskAnnNodePageData, pqcode) + buildstate->pqcodeSize;
     buildstate->edgeSize = sizeof(DiskAnnEdgePageData);
@@ -124,10 +124,10 @@ static void InitBuildState(DiskAnnBuildState* buildstate, Relation heap, Relatio
 
 static void FreeBuildState(DiskAnnBuildState* buildstate, bool parallel)
 {
-    if (buildstate->enablePQ) {
-        if (!parallel) {
-            pfree(buildstate->pqTable);
-        }
+    // Only free DiskPQParam's content if not parallel since no allocation when parallel
+    if (buildstate->enablePQ && !parallel) {
+        // First deallocate memory required with new keyword within PQ API
+        FreeDiskPQParams(buildstate->params);
         pfree(buildstate->params);
     }
 
@@ -136,6 +136,21 @@ static void FreeBuildState(DiskAnnBuildState* buildstate, bool parallel)
         buildstate->graphStore = nullptr;
     }
     MemoryContextDelete(buildstate->tmpCtx);
+}
+
+static BlockNumber CreateRelationLockPage(Relation index)
+{
+    Buffer buf;
+    Page page;
+    BlockNumber blk;
+    buf = ReadBufferExtended(index, MAIN_FORKNUM, P_NEW, RBM_NORMAL, NULL);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    page = DiskAnnInitRegisterPage(index, buf);
+    ((PageHeader)page)->pd_lower = MAXALIGN(GetPageHeaderSize(page)) + MaxHeapTupleSize;
+    blk = BufferGetBlockNumber(buf);
+    MarkBufferDirty(buf);
+    UnlockReleaseBuffer(buf);
+    return blk;
 }
 
 static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNumber forkNum)
@@ -153,24 +168,37 @@ static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNu
     metap = DiskAnnPageGetMeta(page);
     metap->magicNumber = DISKANN_MAGIC_NUMBER;
     metap->version = DISKANN_VERSION;
+    metap->indexSize = buildstate->indexSize;
     metap->dimensions = buildstate->dimensions;
     metap->nodeSize = buildstate->nodeSize;
     metap->edgeSize = buildstate->edgeSize;
     metap->itemSize = metap->nodeSize + metap->edgeSize;
     metap->insertPage = InvalidBlockNumber;
+    metap->extendPageLocker = CreateRelationLockPage(index);
 
     /* set PQ info */
     metap->enablePQ = buildstate->enablePQ;
     metap->pqM = buildstate->pqM;
-    metap->pqKsub = buildstate->pqKsub;
     metap->pqcodeSize = buildstate->pqcodeSize;
-    metap->pqDisTableSize = 0;
-    metap->pqDisTableNblk = 0;
-    metap->pqTableSize = (uint32)buildstate->pqTableSize;
-    metap->pqTableNblk =
-        buildstate->enablePQ
-            ? (uint16)((metap->pqTableSize + PQTABLE_STORAGE_SIZE - 1) / PQTABLE_STORAGE_SIZE)
-            : 0;
+    if (buildstate->enablePQ) {
+        metap->pqTableSize = (uint32)buildstate->pqTableSize;
+        metap->pqTableNblk = (uint16)((metap->pqTableSize + DISKANN_PQDATA_STORAGE_SIZE - 1) /
+            DISKANN_PQDATA_STORAGE_SIZE);
+        metap->pqCentroidsSize = (uint32)metap->dimensions * sizeof(float);
+        metap->pqCentroidsblk = (uint16)((metap->pqCentroidsSize + DISKANN_PQDATA_STORAGE_SIZE - 1) /
+            DISKANN_PQDATA_STORAGE_SIZE);
+        metap->pqOffsetSize = (uint32)((metap->pqM + 1) * sizeof(uint32));
+        metap->pqOffsetblk = (uint16)((metap->pqOffsetSize + DISKANN_PQDATA_STORAGE_SIZE - 1) /
+            DISKANN_PQDATA_STORAGE_SIZE);
+    } else {
+        metap->pqTableSize = 0;
+        metap->pqTableNblk = 0;
+        metap->pqCentroidsSize = 0;
+        metap->pqCentroidsblk = 0;
+        metap->pqOffsetSize = 0;
+        metap->pqOffsetblk = 0;
+    }
+    metap->params = buildstate->params;
     ((PageHeader)page)->pd_lower = ((char*)metap + sizeof(DiskAnnMetaPageData)) - (char*)page;
 
     MarkBufferDirty(buf);
@@ -195,15 +223,43 @@ static char* ReserveSpace(Page page, Size size)
     return dst;
 }
 
+BlockNumber DiskAnnPageExtension(Relation index, BlockNumber pageLocker, Buffer &buf)
+{
+    Buffer extensionBufLock = ReadBufferExtended(index, MAIN_FORKNUM, pageLocker, RBM_NORMAL, NULL);
+    LockBuffer(extensionBufLock, BUFFER_LOCK_EXCLUSIVE);
+
+    BlockNumber blkid = GetPageWithFreeSpace(index, MaxHeapTupleSize);
+    buf = ReadBufferExtended(index, MAIN_FORKNUM, (blkid != InvalidBlockNumber) ? blkid : P_NEW, RBM_NORMAL, NULL);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+
+    UnlockReleaseBuffer(extensionBufLock);
+    return BufferGetBlockNumber(buf);
+}
+
+/*
+ * Current implementation compute pq code one vector at a time, we need to wrap the vector into a VectorArray
+ * to make it compatible for PQ API, which computes PQ Code in batches
+ */
+VectorArray CreateVectorForExistingData(float *data, int dim, int len = 1)
+{
+    VectorArray res = (VectorArray)palloc(sizeof(VectorArrayData));
+    res->length = len;
+    res->dim = dim;
+    res->maxlen = len;
+    res->itemsize = 0; // Do not need itemsize within PQ API so set it to 0 for now
+    res->items = (char *)(data);
+    return res;
+}
+
 /*
  * Insert vector into page, reserve and initialize node & edge page
- *
  */
 static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrSum, ItemPointer heaptid,
-                                        DiskAnnBuildState* buildstate)
+                                        DiskAnnMetaPage metaPage, bool building)
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state;
     IndexTuple itup;
     Datum value = PointerGetDatum(vec);
     bool isnull[1] = {false};
@@ -217,12 +273,17 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
            BLCKSZ - MAXALIGN(SizeOfPageHeaderData) - MAXALIGN(sizeof(DiskAnnPageOpaqueData)) - sizeof(ItemIdData));
 
     /* initialize page */
-    buf = ReadBufferExtended(index, MAIN_FORKNUM, P_NEW, RBM_NORMAL, NULL);
-    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-    page = DiskAnnInitRegisterPage(index, buf);
+    BlockNumber blk = DiskAnnPageExtension(index, metaPage->extendPageLocker, buf);
+    if (building) {
+        page = DiskAnnInitRegisterPage(index, buf);
+    } else {
+        state = GenericXLogStart(index);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+        DiskAnnInitPage(page, BufferGetPageSize(buf));
+    }
 
     /* reserve space for node & edge page and add item into page */
-    ReserveSpace(page, buildstate->itemSize);
+    ReserveSpace(page, metaPage->itemSize);
     if (PageAddItem(page, (Item)itup, itemsz, InvalidOffsetNumber, false, false) == InvalidOffsetNumber) {
         UnlockReleaseBuffer(buf);
         pfree(itup);
@@ -233,6 +294,7 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
     IndexTuple ctup = (IndexTuple)PageGetItem(page, PageGetItemId(page, FirstOffsetNumber));
     DiskAnnNodePage tup = DiskAnnPageGetNode(ctup);
     tup->sqrSum = (sqrSum >= 0) ? sqrSum : VectorSquareNorm(vec->x, vec->dim);
+    tup->master = InvalidBlockNumber;
 
     for (int pos = 0; pos < DISKANN_HEAPTIDS; pos++) {
         ItemPointerSetInvalid(&tup->heaptids[pos]);
@@ -242,16 +304,22 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
         tup->heaptids[0] = *heaptid;
     }
 
-    if (buildstate->enablePQ) {
-        Size codesize = buildstate->params->pqM * sizeof(uint8);
-        uint8* pqcode = (uint8*)palloc(codesize);
-        DiskAnnComputeVectorPQCode(DatumGetVector(value)->x, buildstate->params, pqcode);
+    if (metaPage->enablePQ) {
+        Size codesize = metaPage->params->pqChunks * sizeof(uint8);
+        uint8 *pqcode = (uint8*)palloc(codesize);
+        VectorArray arr = CreateVectorForExistingData(DatumGetVector(value)->x, metaPage->params->dim);
+        int ret = ComputeVectorPQCode(arr, metaPage->params, pqcode);
+        if (ret != 0) {
+            ereport(WARNING, (ret, errmsg("ComputeVectorPQCode failed.")));
+        }
         errno_t err = memcpy_s(tup->pqcode, codesize, pqcode, codesize);
         securec_check(err, "\0", "\0");
+        arr->items = NULL;
+        VectorArrayFree(arr);
     }
 
     /*  initialize edge page */
-    DiskAnnEdgePage etup = (DiskAnnEdgePage)((uint8_t*)tup + buildstate->nodeSize);
+    DiskAnnEdgePage etup = (DiskAnnEdgePage)((uint8_t*)tup + metaPage->nodeSize);
     for (uint16_t pos = 0; pos < DISKANN_MAX_DEGREE; pos++) {
         etup->nexts[pos] = InvalidBlockNumber;
         etup->distance[pos] = FLT_MAX;
@@ -259,39 +327,46 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
     etup->count = 0;
 
     BlockNumber blkno = BufferGetBlockNumber(buf);
-    MarkBufferDirty(buf);
+    if (building) {
+        MarkBufferDirty(buf);
+    } else {
+        GenericXLogFinish(state);
+    }
     UnlockReleaseBuffer(buf);
 
     pfree(itup);
     return blkno;
 }
 
-static BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnBuildState* buildstate)
+BlockNumber InsertTuple(Relation index, Datum* values, ItemPointer heaptid, DiskAnnMetaPage metaPage, bool building)
 {
     Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
     /* Normalize if needed */
-    if (buildstate->normprocinfo != NULL) {
-        if (!DiskAnnCheckNorm(buildstate->normprocinfo, buildstate->collation, value)) {
+    FmgrInfo* normprocinfo = DiskAnnOptionalProcInfo(index, DISKANN_NORM_PROC);
+    if (normprocinfo != NULL) {
+        const DiskAnnTypeInfo* typeInfo = DiskAnnGetTypeInfo(index);
+        Oid collation = index->rd_indcollation[0];
+        if (!DiskAnnCheckNorm(normprocinfo, collation, value)) {
             return InvalidBlockNumber;
         }
 
-        value = DiskAnnNormValue(buildstate->typeInfo, buildstate->collation, value);
+        value = DiskAnnNormValue(typeInfo, collation, value);
     }
 
     /* form vector */
-    Vector* vec = InitVector(buildstate->dimensions);
-    errno_t rc = memcpy_s(&vec->x[0], buildstate->dimensions * sizeof(float), ((Vector*)DatumGetPointer(value))->x,
-                          buildstate->dimensions * sizeof(float));
+    Vector* vec = InitVector(metaPage->dimensions);
+    errno_t rc = memcpy_s(&vec->x[0], metaPage->dimensions * sizeof(float), ((Vector*)DatumGetPointer(value))->x,
+                          metaPage->dimensions * sizeof(float));
     securec_check_c(rc, "\0", "\0");
 
     /* insert into page */
     BlockNumber blkno = InsertVectorIntoPage(index, vec,
                                              -1,  // calculate sqrSum by VectorSquareNorm
-                                             heaptid, buildstate);
+                                             heaptid, metaPage, building);
 
     BlockNumber currentPage = GetInsertPage(index);
     if (BlockNumberIsValid(blkno) && blkno != currentPage) {
-        DiskAnnUpdateMetaPage(index, blkno, MAIN_FORKNUM);
+        DiskAnnUpdateMetaPage(index, blkno, MAIN_FORKNUM, building);
     }
 
     pfree(vec);
@@ -312,8 +387,17 @@ static void AddTupleToSort(Relation index, ItemPointer tid, Datum* values, DiskA
     securec_check_c(rc, "\0", "\0");
     insertValue[0] = PointerGetDatum(insertVector);
 
-    blkno = InsertTuple(index, insertValue, tid, buildstate);
-    buildstate->blocksList.push_back(blkno);
+    blkno = InsertTuple(index, insertValue, tid, &buildstate->metaPage, true);
+    // parallel build
+    if (buildstate->diskannleader) {
+        DiskAnnShared *shared = buildstate->diskannleader->diskannshared;
+        SpinLockAcquire(&shared->mutex);
+        shared->blocksList.push_back(blkno);
+        SpinLockRelease(&shared->mutex);
+    } else {
+        // serial build
+        buildstate->blocksList.push_back(blkno);
+    }
     buildstate->indtuples++;
     pfree(insertVector);
 }
@@ -355,11 +439,11 @@ static void DiskAnnParallelScanAndInsert(Relation heapRel, Relation indexRel, Di
     /* Join parallel scan */
     indexInfo = BuildIndexInfo(indexRel);
     InitBuildState(&buildstate, heapRel, indexRel, indexInfo, true);
+    DiskANNGetMetaPageInfo(indexRel, &buildstate.metaPage);
+    DiskAnnLeader tmpLeader;
+    tmpLeader.diskannshared = diskannshared;
+    buildstate.diskannleader = &tmpLeader;
 
-    buildstate.pqTable = diskannshared->pqTable;
-    if (buildstate.enablePQ) {
-        buildstate.params->pqTable = diskannshared->pqTable;
-    }
     scan = tableam_scan_begin_parallel(heapRel, &diskannshared->heapdesc);
     reltuples = tableam_index_build_scan(heapRel, indexRel, indexInfo, true, BuildCallback, (void*)&buildstate, scan);
 
@@ -402,7 +486,7 @@ void DiskAnnParallelBuildMain(const BgWorkerContext* bwc)
         for (size_t i = 0; i < workerBlockCount; i++) {
             DiskAnnGraph graph(indexRel, diskannshared->dimensions, diskannshared->frozen, &graphStore);
             BlockNumber blk = workerBlk[i];
-            graph.Link(blk, diskannshared->indexSize);
+            graph.Link(blk, diskannshared->indexSize, true);
         }
     }
 
@@ -434,8 +518,6 @@ static double ParallelBuild(DiskAnnBuildState* buildstate, int* nparticipanttupl
 static DiskAnnShared* DiskAnnParallelInitshared(DiskAnnBuildState* buildstate)
 {
     DiskAnnShared* diskannshared;
-    char* pqTable;
-    errno_t rc;
 
     /* Store shared build state, for which we reserved space */
     diskannshared = (DiskAnnShared*)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
@@ -444,16 +526,6 @@ static DiskAnnShared* DiskAnnParallelInitshared(DiskAnnBuildState* buildstate)
     /* Initialize immutable state */
     diskannshared->heaprelid = RelationGetRelid(buildstate->heap);
     diskannshared->indexrelid = RelationGetRelid(buildstate->index);
-
-    if (buildstate->enablePQ) {
-        pqTable =
-            (char*)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), buildstate->pqTableSize);
-        rc = memcpy_s(pqTable, buildstate->pqTableSize, buildstate->pqTable, buildstate->pqTableSize);
-        securec_check_c(rc, "\0", "\0");
-        diskannshared->pqTable = pqTable;
-    } else {
-        diskannshared->pqTable = NULL;
-    }
 
     SpinLockInit(&diskannshared->mutex);
     diskannshared->blocksList = VectorList<BlockNumber>();
@@ -577,7 +649,7 @@ static BlockNumber GenerateFrozenPoint(DiskAnnBuildState* buildstate)
     /* insert into page */
     BlockNumber blkno = InsertVectorIntoPage(buildstate->index, vector,
                                              sqrSum,  // use vec sqrsum
-                                             &hctid, buildstate);
+                                             &hctid, &buildstate->metaPage, true);
 
     pfree(vector);
     pfree(vec);
@@ -589,7 +661,7 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
 {
     BlockNumber frozen = GenerateFrozenPoint(buildstate);
 
-    InsertFrozenPoint(buildstate->index, frozen);
+    InsertFrozenPoint(buildstate->index, frozen, true);
 
     int parallelWorkers = 0;
     if (buildstate->heap != NULL) {
@@ -606,7 +678,7 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
             for (size_t i = 0; i < buildstate->blocksList.size(); i++) {
                 DiskAnnGraph graph(buildstate->index, buildstate->dimensions, frozen, buildstate->graphStore);
                 BlockNumber blk = buildstate->blocksList[i];
-                graph.Link(blk, buildstate->indexSize);
+                graph.Link(blk, buildstate->indexSize, true);
             }
         } else {
             int nruns;
@@ -624,18 +696,28 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
     }
 }
 
-void InsertFrozenPoint(Relation index, BlockNumber frozen)
+void InsertFrozenPoint(Relation index, BlockNumber frozen, bool building)
 {
     Buffer buf;
     Page page;
+    GenericXLogState *state;
     buf = ReadBuffer(index, DISKANN_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-    page = BufferGetPage(buf);
+    if (building) {
+        page = BufferGetPage(buf);
+    } else {
+        state = GenericXLogStart(index);
+        page = GenericXLogRegisterBuffer(state, buf, 0);
+    }
     DiskAnnMetaPage metaPage = DiskAnnPageGetMeta(page);
     if (metaPage->nfrozen < FROZEN_POINT_SIZE) {
         metaPage->frozenBlkno[metaPage->nfrozen] = frozen;
         metaPage->nfrozen++;
-        MarkBufferDirty(buf);
+        if (building) {
+            MarkBufferDirty(buf);
+        } else {
+            GenericXLogFinish(state);
+        }
     }
     UnlockReleaseBuffer(buf);
 }
@@ -652,6 +734,7 @@ static void GeneratePQData(DiskAnnBuildState* buildstate)
         double num;
         EstimateRows(buildstate->heap, &num);
         numSamples = (int)num;
+        numSamples = std::min(numSamples, DISKANN_MAX_PQ_TRAINING_SIZE);
     }
     PG_TRY();
     {
@@ -661,24 +744,27 @@ static void GeneratePQData(DiskAnnBuildState* buildstate)
     }
     PG_CATCH();
     {
-        ereport(ERROR, (errmsg("memory alloc failed during PQtable sampling, suggest using diskann without PQ.")));
+        ereport(WARNING, (errmsg("memory alloc failed during PQtable sampling, suggest using diskann without PQ.")));
         PG_RE_THROW();
     }
     PG_END_TRY();
     if (buildstate->heap != NULL) {
         GetBaseData(buildstate);
-        if (buildstate->samples->length < buildstate->pqKsub) {
+        if (buildstate->samples->length < GENERIC_DEFAULT_PQ_KSUB) {
             ereport(NOTICE,
                     (errmsg("DiskAnn PQ table created with little data"), errdetail("This will cause low recall."),
                      errhint("Drop the index until the table has more data.")));
         }
     }
 
-    MemoryContext pqCtx =
-        AllocSetContextCreate(CurrentMemoryContext, "DiskAnn PQ temporary context", ALLOCSET_DEFAULT_SIZES);
+    MemoryContext pqCtx = AllocSetContextCreate(CurrentMemoryContext,
+                                                "DiskAnn PQ temporary context",
+                                                ALLOCSET_DEFAULT_SIZES);
     MemoryContext oldCtx = MemoryContextSwitchTo(pqCtx);
-    DiskAnnComputePQTable(buildstate->samples, buildstate->params);
-
+    int ret = ComputePQTable(buildstate->samples, buildstate->params);
+    if (ret != 0) {
+        ereport(WARNING, (ret, errmsg("ComputePQTable failed.")));
+    }
     MemoryContextSwitchTo(oldCtx);
     MemoryContextDelete(pqCtx);
     VectorArrayFree(buildstate->samples);
@@ -713,9 +799,13 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo* indexInfo, Disk
     }
 
     buildstate->graphStore = New(CurrentMemoryContext) DiskAnnGraphStore(index);
+    DiskANNGetMetaPageInfo(index, &buildstate->metaPage);
     CreateEntryPages(buildstate);
 
     BuildVamanaIndex(buildstate);
+    
+    if (RelationNeedsWAL(index) || forkNum == INIT_FORKNUM)
+        LogNewpageRange(index, forkNum, 0, RelationGetNumberOfBlocksInFork(index, forkNum), true);
 
     FreeBuildState(buildstate, false);
 }
@@ -795,16 +885,36 @@ static void AddSample(Datum* values, DiskAnnBuildState* buildstate)
     }
 }
 
-PQParams* GetPQInfo(DiskAnnBuildState* buildstate)
+DiskPQParams *InitDiskPQParams(DiskAnnBuildState *buildstate)
 {
-    PQParams* params = (PQParams*)palloc(sizeof(PQParams));
-    params->pqM = buildstate->pqM;
-    params->pqKsub = buildstate->pqKsub;
-    params->funcType = GetPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
+    DiskPQParams *params = (DiskPQParams*)palloc(sizeof(DiskPQParams));
     params->dim = buildstate->dimensions;
-    params->subItemSize = buildstate->typeInfo->itemSize(buildstate->dimensions / buildstate->pqM);
-    params->pqTable = buildstate->pqTable;
+    params->funcType = GetPQfunctionType(buildstate->procinfo, buildstate->normprocinfo);
+    params->pqChunks = buildstate->pqM;
+    params->pqTable = NULL;
+    params->tablesTransposed = NULL;
+    params->centroids = NULL;
+    params->offsets = NULL;
     return params;
+}
+
+void FreeDiskPQParams(DiskPQParams *params)
+{
+    if (params == NULL) {
+        return;
+    }
+    if (params->pqTable != NULL) {
+        delete[] params->pqTable;
+    }
+    if (params->tablesTransposed != NULL) {
+        delete[] params->tablesTransposed;
+    }
+    if (params->offsets != NULL) {
+        delete[] params->offsets;
+    }
+    if (params->centroids != NULL) {
+        delete[] params->centroids;
+    }
 }
 
 IndexBuildResult* diskannbuild_internal(Relation heap, Relation index, IndexInfo* indexInfo)
@@ -828,3 +938,4 @@ void diskannbuildempty_internal(Relation index)
 
     BuildIndex(NULL, index, indexInfo, &buildstate, INIT_FORKNUM);
 }
+

@@ -5052,11 +5052,12 @@ void exec_bind_message(BindMessage* pqBindMessage, PreparedStatement *pstmt, Cac
             opFusionObj->updatePreAllocParamter(pqBindMessage, psrc, get_param_func);
             opFusionObj->setCurrentOpFusionObj(opFusionObj);
             opFusionObj->storeFusion(portal_name);
-
+#ifdef ENABLE_MULTIPLE_NODES
             CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
             if (cps != NULL && cps->gplan) {
                 setCachedPlanBucketId(cps->gplan, opFusionObj->m_local.m_params);
             }
+#endif
             /*
              * Send BindComplete.
              */
@@ -5801,6 +5802,11 @@ int check_log_duration(char* msec_str, bool was_logged)
 
         u_sess->slow_query_cxt.slow_query.debug_query_sql_id = u_sess->debug_query_id;
 
+        if (!u_sess->attr.attr_sql.log_duration) {
+            msec_str[0] = '\0';
+            return 0;
+        }
+
         TimestampDifference(GetCurrentStatementLocalStartTimestamp(), GetCurrentTimestamp(), &secs, &usecs);
         msecs = usecs / 1000;
 
@@ -5819,15 +5825,13 @@ int check_log_duration(char* msec_str, bool was_logged)
          * This condition can reduce the impactation on performance.
          */
         if (exceeded) {
-            if (u_sess->attr.attr_sql.log_duration) {
-                errno_t rc =
-                    snprintf_s(msec_str, PRINTF_DST_MAX, PRINTF_DST_MAX - 1, "%ld.%03d", secs * 1000 + msecs, usecs % 1000);
-                securec_check_ss(rc, "", "");
-                if (exceeded && !was_logged) {
-                    return 2;
-                } else {
-                    return 1;
-                }
+            errno_t rc =
+                snprintf_s(msec_str, PRINTF_DST_MAX, PRINTF_DST_MAX - 1, "%ld.%03d", secs * 1000 + msecs, usecs % 1000);
+            securec_check_ss(rc, "", "");
+            if (!was_logged) {
+                return 2;
+            } else {
+                return 1;
             }
         }
     }
@@ -7786,10 +7790,75 @@ static void clear_memory(char* qstr, char* msg, int maxlen)
     }
 }
 
+static void ResetSIGHUPFlag()
+{
+    switch (t_thrd.role) {
+        case ASH_WORKER:
+            t_thrd.ash_cxt.got_SIGHUP = false;
+            break;
+        case APPLY_WORKER:
+            t_thrd.applyworker_cxt.got_SIGHUP = false;
+            break;
+        case JOB_SCHEDULER:
+            t_thrd.job_cxt.got_SIGHUP = false;
+            break;
+        case AUTOVACUUM_LAUNCHER:
+            t_thrd.autovacuum_cxt.got_SIGHUP = false;
+            break;
+        case TXNSNAP_CAPTURER:
+        case TXNSNAP_WORKER:
+            t_thrd.snapcapturer_cxt.got_SIGHUP = false;
+            break;
+        case RBCLEANER:
+            t_thrd.rbcleaner_cxt.got_SIGHUP = false;
+            break;
+        case UNDO_WORKER:
+            t_thrd.undoworker_cxt.got_SIGHUP = false;
+            break;
+        case WLM_WORKER:
+        case WLM_MONITOR:
+        case WLM_ARBITER:
+            t_thrd.wlm_cxt.wlm_got_sighup = false;
+            break;
+        default:
+            u_sess->sig_cxt.got_SIGHUP = false;
+            break;
+    }
+
+    return;
+}
+
+static bool CheckSIGHUPFlag()
+{
+    switch (t_thrd.role) {
+        case ASH_WORKER:
+            return t_thrd.ash_cxt.got_SIGHUP;
+        case APPLY_WORKER:
+            return t_thrd.applyworker_cxt.got_SIGHUP;
+        case JOB_SCHEDULER:
+            return t_thrd.job_cxt.got_SIGHUP;
+        case AUTOVACUUM_LAUNCHER:
+            return t_thrd.autovacuum_cxt.got_SIGHUP;
+        case TXNSNAP_CAPTURER:
+        case TXNSNAP_WORKER:
+            return t_thrd.snapcapturer_cxt.got_SIGHUP;
+        case RBCLEANER:
+            return t_thrd.rbcleaner_cxt.got_SIGHUP;
+        case UNDO_WORKER:
+            return t_thrd.undoworker_cxt.got_SIGHUP;
+        case WLM_WORKER:
+        case WLM_MONITOR:
+        case WLM_ARBITER:
+            return t_thrd.wlm_cxt.wlm_got_sighup;
+        default:
+            return u_sess->sig_cxt.got_SIGHUP;
+    }
+}
+
 /* read and process the configuration file, just for openGauss backend workers */
 void reload_configfile(void)
 {
-    if (u_sess->sig_cxt.got_SIGHUP) {
+    if (CheckSIGHUPFlag()) {
         ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
         if (currentOwner == NULL) {
             /* we use t_thrd.mem_cxt.msg_mem_cxt to remember config info in this cluster. */
@@ -7798,7 +7867,7 @@ void reload_configfile(void)
                 THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
             (void)MemoryContextSwitchTo(old);
         }
-        u_sess->sig_cxt.got_SIGHUP = false;
+        ResetSIGHUPFlag();
         ProcessConfigFile(PGC_SIGHUP);
         most_available_sync = (volatile bool) u_sess->attr.attr_storage.guc_most_available_sync;
         SyncRepUpdateSyncStandbysDefined();
@@ -11535,12 +11604,12 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
             opFusionObj->setCurrentOpFusionObj(opFusionObj);
             opFusionObj->CopyFormats(rformats, numRFormats);
             opFusionObj->storeFusion("");
-
+#ifdef ENABLE_MULTIPLE_NODES
             CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
             if (cps != NULL && cps->gplan) {
                 setCachedPlanBucketId(cps->gplan, params);
             }
-
+#endif
             if (OpFusion::process(FUSION_EXECUTE, NULL, 0, completionTag, true, NULL)) {
                 CommandCounterIncrement();
                 return;

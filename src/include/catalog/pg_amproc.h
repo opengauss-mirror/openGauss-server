@@ -683,6 +683,29 @@ DATA(insert (8383   8307 8307 3 8479));
 DATA(insert (8384   8307 8307 1 8467));
 DATA(insert (8384   8307 8307 3 8479));
 
+DATA(insert (8515   8306 8306 1 8644));
+DATA(insert (8515   8306 8306 3 8656));
+
+DATA(insert (8516   8306 8306 1 8493));
+DATA(insert (8516   8306 8306 3 8656));
+
+DATA(insert (8517   8306 8306 1 8493));
+DATA(insert (8517   8306 8306 2 8503));
+DATA(insert (8517   8306 8306 3 8656));
+
+DATA(insert (8518   8306 8306 1 8484));
+DATA(insert (8518   8306 8306 3 8656));
+
+DATA(insert (8615   8306 8306 1 8644));
+DATA(insert (8615   8306 8306 3 8657));
+
+DATA(insert (8616   8306 8306 1 8493));
+DATA(insert (8616   8306 8306 3 8657));
+
+DATA(insert (8617   8306 8306 1 8493));
+DATA(insert (8617   8306 8306 2 8503));
+DATA(insert (8617   8306 8306 3 8657));
+
 DATA(insert (8385   8305 8305 1 8431));
 DATA(insert (8385   8305 8305 3 8433));
 
@@ -709,9 +732,11 @@ DATA(insert (8394   1560 1560 3 8469));
 DATA(insert (8394   1560 1560 5 8210));
 DATA(insert (8392   8305 8305 1 8450));
 DATA(insert (8397   8307 8307 1 8464));
+DATA(insert (8520   8306 8306 1 8494));
 
 DATA(insert (8375   8305 8305 1 8450));
 DATA(insert (8376   8307 8307 1 8464));
+DATA(insert (8582   8306 8306 1 8494));
 DATA(insert (6509   1009 1009 1 8487));
 DATA(insert (6510   25 25 1 8489));
 #endif   /* PG_AMPROC_H */

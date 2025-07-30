@@ -128,7 +128,7 @@ unsigned long DeleteFusion::ExecDelete(Relation rel, ResultRelInfo* resultRelInf
         }
 
     ldelete:
-	    TupleTableSlot* oldslot = NULL;
+        TupleTableSlot* oldslot = NULL;
         Bitmapset *modifiedIdxAttrs = NULL;
         Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
         Relation fake_relation = (bucket_rel == NULL) ? destRel : bucket_rel;

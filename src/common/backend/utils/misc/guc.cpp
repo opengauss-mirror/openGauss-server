@@ -511,7 +511,6 @@ static void assign_comm_fault_injection(int newval, void* extra);
 
 bool check_canonical_path(char** newval, void** extra, GucSource source);
 bool check_directory(char** newval, void** extra, GucSource source);
-bool check_audit_directory(char** newval, void** extra, GucSource source);
 static bool check_log_filename(char** newval, void** extra, GucSource source);
 static bool check_perf_log(char** newval, void** extra, GucSource source);
 static bool check_timezone_abbreviations(char** newval, void** extra, GucSource source);
@@ -525,6 +524,7 @@ static const char* show_tcp_keepalives_idle(void);
 static const char* show_tcp_keepalives_interval(void);
 static const char* show_tcp_keepalives_count(void);
 static const char* show_tcp_user_timeout(void);
+static void assign_shared_preload_libraries(const char* newval, void* extra);
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source);
 static void assign_effective_io_concurrency(int newval, void* extra);
 static void assign_pgstat_temp_directory(const char* newval, void* extra);
@@ -3297,6 +3297,22 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+#ifdef ENABLE_HTAP
+        {{"imcs_parallel_populate_workers",
+          PGC_USERSET,
+          NODE_ALL,
+          RESOURCES_WORKLOAD,
+          gettext_noop("Sets the numbers of worker threads for imcstore population."),
+          NULL},
+         &u_sess->attr.attr_common.imcs_parallel_populate_workers,
+         8,
+         8,
+         64,
+         NULL,
+         NULL,
+         NULL
+        },
+#endif
         {{"ts_consumer_workers",
             PGC_SIGHUP,
             NODE_DISTRIBUTE,
@@ -3690,7 +3706,7 @@ static void InitConfigureNamesString()
             &g_instance.attr.attr_common.shared_preload_libraries_string,
             "security_plugin",
             NULL,
-            NULL,
+            assign_shared_preload_libraries,
             NULL},
         {{"thread_pool_attr",
             PGC_POSTMASTER,
@@ -12163,69 +12179,6 @@ bool check_directory(char** newval, void** extra, GucSource source)
     return true;
 }
 
-bool check_audit_directory(char** newval, void** extra, GucSource source)
-{
-    char *pathCopy = nullptr;
-    char *ptr = nullptr;
-    bool hasWritableParent = false;
-    if (*newval == nullptr) {
-        return true;
-    }
-    if (strlen(*newval) == 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-        errmsg("invalid value for GUC parameter of directory type.")));
-    }
-    
-    if (strcmp(*newval, "pg_audit") == 0) {
-        return true;
-    }
-
-    canonicalize_path(*newval);
-    pathCopy = strdup(*newval);
-    if (access(pathCopy, F_OK) == 0) {
-        if (access(pathCopy, R_OK | W_OK) != 0) {
-            free(pathCopy);
-            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("insufficient permissions to access directory: %s", *newval)));
-        } else {
-            free(pathCopy);
-            return true;
-        }
-    }
-
-    // The directory does not exist, check if you have permission to create it.
-    ptr = pathCopy;
-    while (true) {
-        // Find the last slash in the current path.
-        ptr = strrchr(ptr, '/');
-        if (ptr == nullptr) {
-            break;
-        }
-
-        // Truncate the path to point to the parent directory.
-        *ptr = '\0';
-        
-        // Skip empty path (first slash after root directory).
-        if (strlen(pathCopy) == 0) {
-            strcpy_s(pathCopy, strlen("/") + 1, "/");
-            ptr = pathCopy + 1;
-        }
-        if (access(pathCopy, F_OK) == 0) {
-            // Check if there is write and read permission.
-            if (access(pathCopy, R_OK | W_OK) == 0) {
-                hasWritableParent = true;
-            }
-            break;
-        }
-        ptr = pathCopy;
-    }
-    if (!hasWritableParent) {
-        free(pathCopy);
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("insufficient permissions to access directory: %s", *newval)));
-    }
-    free(pathCopy);
-    return true;
-}
-
 static bool check_log_filename(char** newval, void** extra, GucSource source)
 {
     if (*newval == NULL || strlen(*newval) == 0) {
@@ -12453,6 +12406,24 @@ static const char* show_tcp_user_timeout(void)
     rcs = snprintf_s(buf, size, size - 1, "%d", pq_gettcpusertimeout(u_sess->proc_cxt.MyProcPort));
     securec_check_ss(rcs, "\0", "\0");
     return buf;
+}
+
+static void assign_shared_preload_libraries(const char* newval, void* extra)
+{
+    char* new_value = NULL;
+    int rcs = 0;
+
+    if (newval == NULL || strlen(newval) == 0) {
+        new_value = pstrdup("security_plugin");
+    } else if (strstr(newval, "security_plugin") != NULL) {
+        new_value = pstrdup(newval);
+    } else {
+        size_t total_len = strlen(newval) + strlen(",security_plugin") + 1;
+        new_value = (char*)palloc(total_len);
+        rcs = snprintf_s(new_value, total_len, total_len - 1, "%s,security_plugin", newval);
+        securec_check_ss(rcs, "\0", "\0");
+    }
+    g_instance.attr.attr_common.shared_preload_libraries_string = new_value;
 }
 
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source)

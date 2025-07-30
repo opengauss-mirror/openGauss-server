@@ -22,6 +22,10 @@
 
 #define DEFAULT_TARGET_ROWS 300
 
+inline bool operator==(const ItemPointerData& lhs, const ItemPointerData& rhs) {
+    return (lhs.ip_blkid.bi_hi == rhs.ip_blkid.bi_hi) && (lhs.ip_blkid.bi_lo == rhs.ip_blkid.bi_lo) && (lhs.ip_posid == rhs.ip_posid);
+}
+
 template <typename T>
 class VectorList {
 public:
@@ -307,6 +311,18 @@ typedef struct PQParams {
     char *pqTable;
 } PQParams;
 
+/* DiskAnn PQ Params */
+
+typedef struct DiskPQParams {
+    int pqChunks = 512;
+    int funcType = 0;
+    int dim = 4096;
+    char *pqTable = nullptr;
+    uint32_t *offsets = nullptr;
+    char *tablesTransposed = nullptr;
+    char *centroids = nullptr;
+} DiskPQParams;
+
 /* Sampling context structure */
 typedef struct {
     Relation onerel;          /* Relation being sampled */
@@ -352,6 +368,17 @@ typedef struct st_npu_func {
 } npu_func_t;
 extern npu_func_t g_npu_func;
 
+typedef struct st_diskann_pq_func {
+    bool inited;
+    void *handle;
+    int (*ComputePQTable)(VectorArray samples, DiskPQParams *params);
+    int (*ComputeVectorPQCode)(VectorArray baseData, const DiskPQParams *params, uint8_t *pqCode);
+    int (*GetPQDistanceTable)(char *vec, const DiskPQParams *params, float *pqDistanceTable);
+    int (*GetPQDistance)(const uint8_t *basecode, const DiskPQParams *params,
+                         const float *pqDistanceTable, float &pqDistance);
+} diskann_pq_func_t;
+extern diskann_pq_func_t g_diskann_pq_func;
+
 static inline Pointer VectorArrayGet(VectorArray arr, int offset)
 {
     return ((char *) arr->items) + (offset * arr->itemsize);
@@ -378,6 +405,8 @@ void EstimateRows(Relation onerel, double *totalrows);
 int GetPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
 int PQInit();
 void PQUinit();
+int DiskAnnPQInit();
+void DiskAnnPQUinit();
 
 typedef struct MmapShmemVal {
     BlockNumber blockNum;

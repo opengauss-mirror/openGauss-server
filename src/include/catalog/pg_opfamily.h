@@ -213,6 +213,15 @@ DATA(insert OID = 8382 (8300 sparsevec_ip_ops PGNSP PGUID));
 DATA(insert OID = 8383 (8300 sparsevec_cosine_ops PGNSP PGUID));
 DATA(insert OID = 8384 (8300 sparsevec_l1_ops PGNSP PGUID));
 
+DATA(insert OID = 8515 (8300 halfvec_l2_ops PGNSP PGUID));
+DATA(insert OID = 8516 (8300 halfvec_ip_ops PGNSP PGUID));
+DATA(insert OID = 8517 (8300 halfvec_cosine_ops PGNSP PGUID));
+DATA(insert OID = 8518 (8300 halfvec_l1_ops PGNSP PGUID));
+
+DATA(insert OID = 8615 (8301 halfvec_l2_ops PGNSP PGUID));
+DATA(insert OID = 8616 (8301 halfvec_ip_ops PGNSP PGUID));
+DATA(insert OID = 8617 (8301 halfvec_cosine_ops PGNSP PGUID));
+
 DATA(insert OID = 8385 (8301 vector_l2_ops PGNSP PGUID));
 DATA(insert OID = 8386 (8301 vector_ip_ops PGNSP PGUID));
 DATA(insert OID = 8387 (8301 vector_cosine_ops PGNSP PGUID));
@@ -224,9 +233,11 @@ DATA(insert OID = 8402 (8303 vector_cosine_ops PGNSP PGUID));
 DATA(insert OID = 8394 (8301 bit_hamming_ops PGNSP PGUID));
 DATA(insert OID = 8392 (403 vector_ops PGNSP PGUID));
 DATA(insert OID = 8397 (403 sparsevec_ops PGNSP PGUID));
+DATA(insert OID = 8520 (403 halfvec_ops PGNSP PGUID));
 
 DATA(insert OID = 8375 (4439 vector_ops PGNSP PGUID));
 DATA(insert OID = 8376 (4439 sparsevec_ops PGNSP PGUID));
+DATA(insert OID = 8582 (4439 halfvec_ops PGNSP PGUID));
 /* ubtree index */
 #define BTREE_UBTREE_FAM_OID_DIFF 5000
 #define BTREE_UBTREE_FAM_OID_SPECIAL_DIFF 4000

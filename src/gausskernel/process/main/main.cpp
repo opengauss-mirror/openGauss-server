@@ -586,8 +586,8 @@ static void syscall_lock_init(void)
 {
     syscalllockInit(&getpwuid_lock);
     syscalllockInit(&env_lock);
-    syscalllockInit(&dlerror_lock);
     syscalllockInit(&kerberos_conn_lock);
     syscalllockInit(&read_cipher_lock);
-    syscalllockInit(&file_list_lock);
+    pthread_rwlock_init(&g_file_list_lock_rw, NULL);
+    pthread_rwlock_init(&g_dlerror_lock_rw, NULL);
 }

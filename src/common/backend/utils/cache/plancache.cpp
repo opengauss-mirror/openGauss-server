@@ -1972,11 +1972,11 @@ CachedPlan* GetWiseCachedPlan(CachedPlanSource* plansource,
         }
         plan->is_saved = true;
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
     if (!customplan) {
         setCachedPlanBucketId(plan, boundParams);
     }
-
+#endif
 #ifdef ENABLE_MOT
     /* set plan storageEngineType */
     plan->storageEngineType = plansource->storageEngineType;
@@ -2235,11 +2235,11 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
         }
         plan->is_saved = true;
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
     if (!customplan) {
         setCachedPlanBucketId(plan, boundParams);
     }
-
+#endif
 #ifdef ENABLE_MOT
     Assert(plan->storageEngineType == plansource->storageEngineType);
     Assert(plan->mot_jit_context == plansource->mot_jit_context);

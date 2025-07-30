@@ -487,6 +487,7 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->numericoutput_buffer = (char*)palloc0(64);
     utils_cxt->dateoutput_buffer = (char*)palloc0(MAXDATELEN + 1);
     utils_cxt->vectoroutput_buffer =  (char*)palloc0(VECTOR_MAX_DIM * FLOAT_SHORTEST_DECIMAL_LEN + 2);
+    utils_cxt->timestamp_output_buffer = (char*)palloc0(MAXDATELEN + 1);
 
     (void)syscalllockInit(&utils_cxt->deleMemContextMutex);
 
@@ -1487,6 +1488,7 @@ static void knl_u_datavec_init(knl_u_datavec_context* datavec_cxt)
     datavec_cxt->hnsw_earlystop_threshold = 0;
     datavec_cxt->ivfflat_probes = 0;
     datavec_cxt->ivfpq_kreorder = 0;
+    datavec_cxt->diskann_probes = 0;
     datavec_cxt->enable_npu = false;
 }
 
@@ -1495,6 +1497,7 @@ static void knl_u_imcstore_init(knl_u_imcstore_context* imcstore_context)
 {
     imcstore_context->pinnedRowGroups = NIL;
     imcstore_context->pinnedBorrowMemPool = NULL;
+    imcstore_context->inVaccum = false;
 }
 #endif
 

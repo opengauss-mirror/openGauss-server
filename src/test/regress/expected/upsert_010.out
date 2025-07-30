@@ -304,8 +304,23 @@ SELECT * FROM t6 WHERE col1 = 7 ORDER BY col1, col3, col6, col7;
     7 |    1 |   18 | 100.00000 |  100 | 1800
 (2 rows)
 
+CREATE TABLE upsert_insert_part_seqscan
+(
+a integer,
+b integer
+)
+PARTITION BY RANGE (b)
+(
+PARTITION P1 VALUES LESS THAN(100),
+PARTITION P2 VALUES LESS THAN(200),
+PARTITION P3 VALUES LESS THAN(MAXVALUE)
+);
+WITH upsert AS (
+UPDATE upsert_insert_part_seqscan SET b = 5 WHERE a = 3 returning *)
+INSERT INTO upsert_insert_part_seqscan (a, b) VALUES (3, 1);
 DROP SCHEMA test_insert_update_010 CASCADE;
-NOTICE:  drop cascades to 3 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to table t4
 drop cascades to table t5
 drop cascades to table t6
+drop cascades to table upsert_insert_part_seqscan

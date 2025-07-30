@@ -38,7 +38,6 @@ show track_stmt_stat_level;
 call test_slow_sql();
 select statement_trace_decode(trace) from statement_history limit 0;
 delete from statement_history;
-select statement_trace_decode(trace) from statement_history;
 
 -- record slow sql
 set log_min_duration_statement = 50;
