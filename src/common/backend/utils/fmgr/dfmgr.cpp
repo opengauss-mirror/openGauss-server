@@ -150,11 +150,11 @@ void load_file(const char* filename, bool restricted)
     /* Unload the library if currently loaded */
     internal_unload_library(fullname);
 
-    AutoMutexLock libraryLock(&dlerror_lock);
-    libraryLock.lock();
+    AutoRWLock libraryLock(&g_dlerror_lock_rw);
+    libraryLock.WrLock();
     /* Load the shared library */
     (void)internal_load_library(fullname);
-    libraryLock.unLock();
+    libraryLock.UnLock();
 
     pfree_ext(fullname);
 }
@@ -175,8 +175,8 @@ void internal_delete_library()
 {
     DynamicFileList* file_scanner = NULL;
 
-    AutoMutexLock libraryLock(&file_list_lock);
-    libraryLock.lock();
+    AutoRWLock libraryLock(&g_file_list_lock_rw);
+    libraryLock.WrLock();
 
     while (file_list != NULL) {
         file_scanner = file_list;
@@ -195,7 +195,29 @@ void internal_delete_library()
         file_scanner = NULL;
     }
     file_list = file_tail = NULL;
-    libraryLock.unLock();
+    libraryLock.UnLock();
+}
+
+static DynamicFileList* get_file_scanner(const char* libname, struct stat* stat_buf)
+{
+    DynamicFileList* fs = NULL;
+    /*
+     * Scan the list of loaded FILES to see if the file has been loaded.
+     */
+    for (fs = file_list; fs != NULL && strcmp(libname, fs->filename) != 0; fs = fs->next) {}
+    if (fs == NULL) {
+        /*
+         * Check for same files - different paths (ie, symlink or link)
+         */
+        if (stat(libname, stat_buf) == -1) {
+            char* file = last_dir_separator(libname);
+            file = (file == NULL) ? ((char*)libname) : (file + 1);
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not access file \"%s\": %m", file)));
+        }
+
+        for (fs = file_list; fs != NULL && !SAME_INODE(*stat_buf, *fs); fs = fs->next) {}
+    }
+    return fs;
 }
 
 /*
@@ -217,28 +239,21 @@ void* internal_load_library(const char* libname)
     char* file = last_dir_separator(libname);
     file = (file == NULL) ? ((char*)libname) : (file + 1);
 
-    PthreadMutexLock(t_thrd.utils_cxt.CurrentResourceOwner, &file_list_lock, true);
-    /*
-     * Scan the list of loaded FILES to see if the file has been loaded.
-     */
-    for (file_scanner = file_list; file_scanner != NULL && strcmp(libname, file_scanner->filename) != 0;
-         file_scanner = file_scanner->next)
-        ;
-
+    /* use read lock to check file_list first */
+    PthreadRWlockRdlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
+    file_scanner = get_file_scanner(libname, &stat_buf);
     if (file_scanner == NULL) {
-        /*
-         * Check for same files - different paths (ie, symlink or link)
-         */
-        if (stat(libname, &stat_buf) == -1) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not access file \"%s\": %m", file)));
+        /* we don't have this library in file_list, so change to write lock to add us to file_list */
+        ResourceOwnerForgetIfExistPthreadRWlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
+        PthreadRWlockWrlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
+        /* double check after we got write lock, maybe it has been load by another thread */
+        file_scanner = get_file_scanner(libname, &stat_buf);
+        if (file_scanner != NULL) {
+             /* other thread has added, we can change back to read lock and break */
+            ResourceOwnerForgetIfExistPthreadRWlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
+            PthreadRWlockRdlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
+            goto file_scanner_not_null;
         }
-
-        for (file_scanner = file_list; file_scanner != NULL && !SAME_INODE(stat_buf, *file_scanner);
-             file_scanner = file_scanner->next)
-            ;
-    }
-
-    if (file_scanner == NULL) {
         size_t tmplen = 0;
         errno_t rc = EOK;
 
@@ -249,7 +264,6 @@ void* internal_load_library(const char* libname)
 
         file_scanner = (DynamicFileList*)MemoryContextAlloc(
             INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), tmplen);
-
         if (file_scanner == NULL) {
             ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
         }
@@ -294,7 +308,6 @@ void* internal_load_library(const char* libname)
         }
 #endif
         file_scanner->handle = pg_dlopen(file_scanner->filename);
-
         if (file_scanner->handle == NULL) {
             char* load_error = NULL;
             char error[DLERROR_MSG_MAX_LEN + 1];
@@ -316,7 +329,6 @@ void* internal_load_library(const char* libname)
 
         /* Check the magic function to determine compatibility */
         magic_func = (PGModuleMagicFunction)pg_dlsym(file_scanner->handle, PG_MAGIC_FUNCTION_NAME_STRING);
-
         if (magic_func) {
             const Pg_magic_struct* magic_data_ptr = (*magic_func)();
 
@@ -367,8 +379,13 @@ void* internal_load_library(const char* libname)
             file_tail->next = file_scanner;
 
         file_tail = file_scanner;
+
+        /* change file_list done, we can change back to read lock now */
+        ResourceOwnerForgetIfExistPthreadRWlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
+        PthreadRWlockRdlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
     }
 
+file_scanner_not_null:
     /*
      * check if the file_scanner has been registered
      */
@@ -399,7 +416,7 @@ void* internal_load_library(const char* libname)
         u_sess->fmgr_cxt.file_init_tail = file_init_scanner;
     }
 
-    ResourceOwnerForgetIfExistPthreadMutex(t_thrd.utils_cxt.CurrentResourceOwner, &file_list_lock, true);
+    ResourceOwnerForgetIfExistPthreadRWlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
 
     return file_scanner->handle;
 }
@@ -524,10 +541,10 @@ static void internal_unload_library(const char* libname)
      * inode, else internal_load_library() will still think it's present.
      */
 
-    AutoMutexLock dlerrorLock(&dlerror_lock);
-    dlerrorLock.lock();
-    AutoMutexLock libraryLock(&file_list_lock);
-    libraryLock.lock();
+    AutoRWLock dlerrorLock(&g_dlerror_lock_rw);
+    dlerrorLock.WrLock();
+    AutoRWLock libraryLock(&g_file_list_lock_rw);
+    libraryLock.WrLock();
 
     for (file_scanner = file_list; file_scanner != NULL; file_scanner = nxt) {
         nxt = file_scanner->next;
@@ -557,8 +574,8 @@ static void internal_unload_library(const char* libname)
         }
     }
 
-    libraryLock.unLock();
-    dlerrorLock.unLock();
+    libraryLock.UnLock();
+    dlerrorLock.UnLock();
 
 #endif /* NOT_USED */
 }

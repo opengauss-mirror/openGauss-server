@@ -739,6 +739,7 @@ extern Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot* slot, bool
 
 extern Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 extern int ResourceOwnerForgetIfExistPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex, bool trace);
+extern void ResourceOwnerForgetIfExistPthreadRWlock(ResourceOwner owner, pthread_rwlock_t* pRWlock);
 
 typedef bool (*replaceNullOrNotFunc)();
 
@@ -764,9 +765,6 @@ public:
     AutoMutexLock(pthread_mutex_t* mutex, bool trace = true)
         : m_mutex(mutex), m_fLocked(false), m_trace(trace), m_owner(t_thrd.utils_cxt.CurrentResourceOwner)
     {
-        if (mutex == &file_list_lock) {
-            m_owner = t_thrd.lsc_cxt.local_sysdb_resowner;
-        }
     }
 
     ~AutoMutexLock()
@@ -814,11 +812,7 @@ public:
         if (m_fLocked) {
             int ret = 0;
 
-            if (m_mutex == &file_list_lock) {
-                ret = ResourceOwnerForgetIfExistPthreadMutex(m_owner, m_mutex, m_trace);
-            } else {
-                ret = PthreadMutexUnlock(m_owner, m_mutex, m_trace);
-            }
+            ret = PthreadMutexUnlock(m_owner, m_mutex, m_trace);
             m_fLocked = (ret == 0 ? false : true);
             if (m_fLocked) {
                 /* this should never happen, system may be completely in a mess */
@@ -838,6 +832,60 @@ private:
     pthread_mutex_t* m_mutex;
     bool m_fLocked;
     bool m_trace;
+    ResourceOwner m_owner;
+};
+
+class AutoRWLock {
+public:
+    AutoRWLock(pthread_rwlock_t* rwlock)
+        : m_rwlock(rwlock), m_rdLocked(false), m_wrLocked(false), m_owner(t_thrd.utils_cxt.CurrentResourceOwner)
+    {
+        if (rwlock == &g_file_list_lock_rw) {
+            m_owner = t_thrd.lsc_cxt.local_sysdb_resowner;
+        }
+    }
+
+    ~AutoRWLock()
+    {
+        UnLock();
+    }
+
+    inline void RdLock()
+    {
+        // Guard against recursive lock, but we don't check rdlock and wrlock conflict
+        if (!m_rdLocked) {
+            PthreadRWlockRdlock(m_owner, m_rwlock);
+            m_rdLocked = true;
+        }
+    }
+
+    inline void WrLock()
+    {
+        // Guard against recursive lock, but we don't check rdlock and wrlock conflict
+        //
+        if (!m_wrLocked) {
+            PthreadRWlockWrlock(m_owner, m_rwlock);
+            m_wrLocked = true;
+        }
+    }
+
+    inline void UnLock()
+    {
+        if (m_rdLocked || m_wrLocked) {
+            if (m_rwlock == &g_file_list_lock_rw) {
+                ResourceOwnerForgetIfExistPthreadRWlock(m_owner, m_rwlock);
+            } else {
+                PthreadRWlockUnlock(m_owner, m_rwlock);
+            }
+            m_rdLocked = false;
+            m_wrLocked = false;
+        }
+    }
+
+private:
+    pthread_rwlock_t* m_rwlock;
+    bool m_rdLocked;
+    bool m_wrLocked;
     ResourceOwner m_owner;
 };
 
