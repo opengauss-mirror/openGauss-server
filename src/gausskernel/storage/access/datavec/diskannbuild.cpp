@@ -659,8 +659,11 @@ static BlockNumber GenerateFrozenPoint(DiskAnnBuildState* buildstate)
 
 static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
 {
-    BlockNumber frozen = GenerateFrozenPoint(buildstate);
+    if (buildstate->blocksList.size() == 0) {
+        return;
+    }
 
+    BlockNumber frozen = GenerateFrozenPoint(buildstate);
     InsertFrozenPoint(buildstate->index, frozen, true);
 
     int parallelWorkers = 0;
