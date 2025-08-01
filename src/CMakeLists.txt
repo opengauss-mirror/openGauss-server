@@ -284,11 +284,11 @@ install(CODE "execute_process(
 
 # install(DIRECTORY ${LIBCGROUP_LIB_PATH} DESTINATION . FILES_MATCHING PATTERN "libcgroup.so*")
 install(CODE "execute_process(
-COMMAND cp ${LIBCGROUP_LIB_PATH}/libcgroup.so.1.0.42 ${prefix_home}/lib/libcgroup.so
-COMMAND ln -fs libcgroup.so libcgroup.so.1
+COMMAND cp ${LIBCGROUP_LIB_PATH}/libcgroup.so.2.0.3 ${prefix_home}/lib/libcgroup.so
+COMMAND ln -fs libcgroup.so libcgroup.so.2
 WORKING_DIRECTORY ${prefix_home}/lib)"
 )
-install(CODE "message(\"-- Created symlink: libcgroup.so.1 -> libcgroup.so\")")
+install(CODE "message(\"-- Created symlink: libcgroup.so.2 -> libcgroup.so\")")
  
 # fastcheck part
 install(FILES ${PROJECT_SRC_DIR}/test/regress/stub/roach_api_stub/roach_api_stub.control

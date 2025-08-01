@@ -795,7 +795,7 @@ libcgroup:
 	cd $(DESTDIR)$(libdir) && rm -f libcgroup.*
 ifneq ($(with_openeuler_os), yes)
 	cp $(LIBCGROUP_LIB_PATH)/$(LIBCGROUP) '$(DESTDIR)$(libdir)/$(LIBCGROUP)'
-	cd $(DESTDIR)$(libdir) && $(LN_S) $(LIBCGROUP) libcgroup.so.1
+	cd $(DESTDIR)$(libdir) && $(LN_S) $(LIBCGROUP) libcgroup.so.2
 endif
 
 ##########################################################################
