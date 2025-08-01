@@ -3470,9 +3470,9 @@ if [[ "$(cat /etc/system-release)" =~ ^"openEuler release 22.03".* ]]; then
 fi
 
 with_obs=no
+with_openssl3=yes
 if [[ "$(cat /etc/system-release)" =~ ^"openEuler release 24.03".* ]]; then
     with_openeuler_major=yes
-    with_openssl3=no
 fi
 
 if [[ "$(cat /etc/system-release)" =~ ^"CSIOS release 1.0".* ]]; then
