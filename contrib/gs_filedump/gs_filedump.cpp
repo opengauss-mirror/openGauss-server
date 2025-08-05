@@ -159,106 +159,109 @@ static const DbStateMapping dbStateTable[] = {
 };
 
 static const FlagMapping flagTable[] = {
-    {UHEAP_HAS_NULL, "UHEAP_HAS_NULL"},
-    {UHEAP_HASVARWIDTH, "UHEAP_HASVARWIDTH"},
-    {UHEAP_HASEXTERNAL, "UHEAP_HASEXTERNAL"},
-    {UHEAP_DELETED, "UHEAP_DELETED"},
-    {UHEAP_INPLACE_UPDATED, "UHEAP_INPLACE_UPDATED"},
-    {UHEAP_UPDATED, "UHEAP_UPDATED"},
-    {UHEAP_XID_KEYSHR_LOCK, "UHEAP_XID_KEYSHR_LOCK"},
-    {UHEAP_XID_NOKEY_EXCL_LOCK, "UHEAP_XID_NOKEY_EXCL_LOCK"},
-    {UHEAP_XID_EXCL_LOCK, "UHEAP_XID_EXCL_LOCK"},
-    {UHEAP_MULTI_LOCKERS, "UHEAP_MULTI_LOCKERS"},
-    {UHEAP_INVALID_XACT_SLOT, "UHEAP_INVALID_XACT_SLOT"},
-    {UHEAP_XID_COMMITTED, "UHEAP_XID_COMMITTED"},
-    {UHEAP_XID_INVALID, "UHEAP_XID_INVALID"},
-    {UHEAP_XID_FROZEN, "UHEAP_XID_FROZEN"}
+    {UHEAP_HAS_NULL, "UHEAP_HAS_NULL|"},
+    {UHEAP_HASVARWIDTH, "UHEAP_HASVARWIDTH|"},
+    {UHEAP_HASEXTERNAL, "UHEAP_HASEXTERNAL|"},
+    {UHEAP_DELETED, "UHEAP_DELETED|"},
+    {UHEAP_INPLACE_UPDATED, "UHEAP_INPLACE_UPDATED|"},
+    {UHEAP_UPDATED, "UHEAP_UPDATED|"},
+    {UHEAP_XID_KEYSHR_LOCK, "UHEAP_XID_KEYSHR_LOCK|"},
+    {UHEAP_XID_NOKEY_EXCL_LOCK, "UHEAP_XID_NOKEY_EXCL_LOCK|"},
+    {UHEAP_XID_EXCL_LOCK, "UHEAP_XID_EXCL_LOCK|"},
+    {UHEAP_MULTI_LOCKERS, "UHEAP_MULTI_LOCKERS|"},
+    {UHEAP_INVALID_XACT_SLOT, "UHEAP_INVALID_XACT_SLOT|"},
+    {UHEAP_XID_COMMITTED, "UHEAP_XID_COMMITTED|"},
+    {UHEAP_XID_INVALID, "UHEAP_XID_INVALID|"},
+    {UHEAP_XID_FROZEN, "UHEAP_XID_FROZEN|"}
 };
 
 static const FlagMapping btreeFlagTable[] = {
-    {BTP_LEAF, "LEAF"},
-    {BTP_ROOT, "ROOT"},
-    {BTP_DELETED, "DELETED"},
-    {BTP_META, "META"},
-    {BTP_HALF_DEAD, "HALFDEAD"},
-    {BTP_SPLIT_END, "SPLITEND"},
-    {BTP_HAS_GARBAGE, "HASGARBAGE"},
-    {BTP_INCOMPLETE_SPLIT, "INCOMPLETESPLIT"}
+    {BTP_LEAF, "LEAF|"},
+    {BTP_ROOT, "ROOT|"},
+    {BTP_DELETED, "DELETED|"},
+    {BTP_META, "META|"},
+    {BTP_HALF_DEAD, "HALFDEAD|"},
+    {BTP_SPLIT_END, "SPLITEND|"},
+    {BTP_HAS_GARBAGE, "HASGARBAGE|"},
+    {BTP_INCOMPLETE_SPLIT, "INCOMPLETESPLIT|"}
 };
 
 static const FlagMapping hashFlagTable[] = {
-    {LH_UNUSED_PAGE, "UNUSED"},
-    {LH_OVERFLOW_PAGE, "OVERFLOW"},
-    {LH_BUCKET_PAGE, "BUCKET"},
-    {LH_BITMAP_PAGE, "BITMAP"},
-    {LH_META_PAGE, "META"},
-    {LH_BUCKET_BEING_POPULATED, "BUCKET_BEING_POPULATED"},
-    {LH_BUCKET_BEING_SPLIT, "BUCKET_BEING_SPLIT"},
-    {LH_BUCKET_NEEDS_SPLIT_CLEANUP, "BUCKET_NEEDS_SPLIT_CLEANUP"},
-    {LH_PAGE_HAS_DEAD_TUPLES, "PAGE_HAS_DEAD_TUPLES"}
+    {LH_UNUSED_PAGE, "UNUSED|"},
+    {LH_OVERFLOW_PAGE, "OVERFLOW|"},
+    {LH_BUCKET_PAGE, "BUCKET|"},
+    {LH_BITMAP_PAGE, "BITMAP|"},
+    {LH_META_PAGE, "META|"},
+    {LH_BUCKET_BEING_POPULATED, "BUCKET_BEING_POPULATED|"},
+    {LH_BUCKET_BEING_SPLIT, "BUCKET_BEING_SPLIT|"},
+    {LH_BUCKET_NEEDS_SPLIT_CLEANUP, "BUCKET_NEEDS_SPLIT_CLEANUP|"},
+    {LH_PAGE_HAS_DEAD_TUPLES, "PAGE_HAS_DEAD_TUPLES|"}
 };
 
 static const FlagMapping gistFlagTable[] = {
-    {F_LEAF, "LEAF"},
-    {F_DELETED, "DELETED"},
-    {F_TUPLES_DELETED, "TUPLES_DELETED"},
-    {F_FOLLOW_RIGHT, "FOLLOW_RIGHT"},
-    {F_HAS_GARBAGE, "HAS_GARBAGE"}
+    {F_LEAF, "LEAF|"},
+    {F_DELETED, "DELETED|"},
+    {F_TUPLES_DELETED, "TUPLES_DELETED|"},
+    {F_FOLLOW_RIGHT, "FOLLOW_RIGHT|"},
+    {F_HAS_GARBAGE, "HAS_GARBAGE|"}
 };
 
 static const FlagMapping spgistFlagTable[] = {
-    {SPGIST_META, "META"},
-    {SPGIST_DELETED, "DELETED"},
-    {SPGIST_LEAF, "LEAF"},
-    {SPGIST_NULLS, "NULLS"}
+    {SPGIST_META, "META|"},
+    {SPGIST_DELETED, "DELETED|"},
+    {SPGIST_LEAF, "LEAF|"},
+    {SPGIST_NULLS, "NULLS|"}
 };
 
 static const FlagMapping ginFlagTable[] = {
-    {GIN_DATA, "DATA"},
-    {GIN_LEAF, "LEAF"},
-    {GIN_DELETED, "DELETED"},
-    {GIN_META, "META"},
-    {GIN_LIST, "LIST"},
-    {GIN_LIST_FULLROW, "FULLROW"},
-    {GIN_INCOMPLETE_SPLIT, "INCOMPLETESPLIT"},
-    {GIN_COMPRESSED, "COMPRESSED"}
+    {GIN_DATA, "DATA|"},
+    {GIN_LEAF, "LEAF|"},
+    {GIN_DELETED, "DELETED|"},
+    {GIN_META, "META|"},
+    {GIN_LIST, "LIST|"},
+    {GIN_LIST_FULLROW, "FULLROW|"},
+    {GIN_INCOMPLETE_SPLIT, "INCOMPLETESPLIT|"},
+    {GIN_COMPRESSED, "COMPRESSED|"}
 };
 
 static const FlagMapping pageFlagTable[] = {
-    {PD_HAS_FREE_LINES, "HAS_FREE_LINES"},
-    {PD_PAGE_FULL, "PAGE_FULL"},
-    {PD_ALL_VISIBLE, "ALL_VISIBLE"},
-    {PD_COMPRESSED_PAGE, "COMPRESSED_PAGE"},
-    {PD_LOGICAL_PAGE, "LOGICAL_PAGE"},
-    {PD_ENCRYPT_PAGE, "ENCRYPT_PAGE"},
-    {UHEAP_PAGE_FULL, "UPAGE_IS_FULL"},
-    {UHEAP_HAS_FREE_LINES, "UPAGE_HAS_FREE_LINE_POINTERS"},
-    {PD_CHECKSUM_FNV1A, "CHECKSUM_FNV1A"},
-    {PD_JUST_AFTER_FPW, "JUST_AFTER_FPW"},
-    {PD_EXRTO_PAGE, "EXRTO_PAGE"},
-    {PD_TDE_PAGE, "TDE_PAGE"}
+    {PD_HAS_FREE_LINES, "HAS_FREE_LINES|"},
+    {PD_PAGE_FULL, "PAGE_FULL|"},
+    {PD_ALL_VISIBLE, "ALL_VISIBLE|"},
+    {PD_COMPRESSED_PAGE, "COMPRESSED_PAGE|"},
+    {PD_LOGICAL_PAGE, "LOGICAL_PAGE|"},
+    {PD_ENCRYPT_PAGE, "ENCRYPT_PAGE|"},
+    {UHEAP_PAGE_FULL, "UPAGE_IS_FULL|"},
+    {UHEAP_HAS_FREE_LINES, "UPAGE_HAS_FREE_LINE_POINTERS|"},
+    {PD_CHECKSUM_FNV1A, "CHECKSUM_FNV1A|"},
+    {PD_JUST_AFTER_FPW, "JUST_AFTER_FPW|"},
+    {PD_EXRTO_PAGE, "EXRTO_PAGE|"},
+    {PD_TDE_PAGE, "TDE_PAGE|"}
 };
 
 static const FlagMapping maskFlags[] = {
-    {HEAP_HASNULL, "HASNULL"},
-    {HEAP_HASVARWIDTH, "HASVARWIDTH"},
-    {HEAP_HASEXTERNAL, "HASEXTERNAL"},
-    {HEAP_HASOID, "HASOID"},
-    {HEAP_XMAX_KEYSHR_LOCK, "XMAX_KEYSHR_LOCK"},
-    {HEAP_COMBOCID, "COMBOCID"},
-    {HEAP_XMAX_EXCL_LOCK, "XMAX_EXCL_LOCK"},
-    {HEAP_XMAX_LOCK_ONLY, "XMAX_LOCK_ONLY"},
-    {HEAP_XMIN_COMMITTED, "XMIN_COMMITTED"},
-    {HEAP_XMIN_INVALID, "XMIN_INVALID"},
-    {HEAP_XMAX_COMMITTED, "XMAX_COMMITTED"},
-    {HEAP_XMAX_INVALID, "XMAX_INVALID"},
-    {HEAP_XMAX_IS_MULTI, "XMAX_IS_MULTI"},
-    {HEAP_UPDATED, "UPDATED"},
-    {HEAP_MOVED_OFF, "MOVED_OFF"},
-    {HEAP_MOVED_IN, "MOVED_IN"},
-    {HEAP_KEYS_UPDATED, "KEYS_UPDATED"},
-    {HEAP_HOT_UPDATED, "HOT_UPDATED"},
-    {HEAP_ONLY_TUPLE, "HEAP_ONLY"},
+    {HEAP_HASNULL, "HASNULL|"},
+    {HEAP_HASVARWIDTH, "HASVARWIDTH|"},
+    {HEAP_HASEXTERNAL, "HASEXTERNAL|"},
+    {HEAP_HASOID, "HASOID|"},
+    {HEAP_XMAX_KEYSHR_LOCK, "XMAX_KEYSHR_LOCK|"},
+    {HEAP_COMBOCID, "COMBOCID|"},
+    {HEAP_XMAX_EXCL_LOCK, "XMAX_EXCL_LOCK|"},
+    {HEAP_XMAX_LOCK_ONLY, "XMAX_LOCK_ONLY|"},
+    {HEAP_XMIN_COMMITTED, "XMIN_COMMITTED|"},
+    {HEAP_XMIN_INVALID, "XMIN_INVALID|"},
+    {HEAP_XMAX_COMMITTED, "XMAX_COMMITTED|"},
+    {HEAP_XMAX_INVALID, "XMAX_INVALID|"},
+    {HEAP_XMAX_IS_MULTI, "XMAX_IS_MULTI|"},
+    {HEAP_UPDATED, "UPDATED|"},
+    {HEAP_MOVED_OFF, "MOVED_OFF|"},
+    {HEAP_MOVED_IN, "MOVED_IN|"},
+};
+
+static const FlagMapping mask2Flags[] = {
+    {HEAP_KEYS_UPDATED, "KEYS_UPDATED|"},
+    {HEAP_HOT_UPDATED, "HOT_UPDATED|"},
+    {HEAP_ONLY_TUPLE, "HEAP_ONLY|"},
 };
 
 /* Send properly formed usage information to the user. */
@@ -1047,8 +1050,6 @@ static int FormatHeader(char *buffer, Page page, BlockNumber blkno, bool isToast
             if (pageHeader->pd_flags & entry.mask) {
                 rc = strcat_s(flagString, sizeof(flagString), entry.name);
                 securec_check(rc, "\0", "\0");
-                rc = strcat_s(flagString, sizeof(flagString), "|");
-                securec_check(rc, "\0", "\0");
             }
         }
         
@@ -1164,8 +1165,6 @@ static int FormatUHeapHeader(char *buffer, Page page, BlockNumber blkno, bool is
         for (const auto& entry : pageFlagTable) {
             if (upageHeader->pd_flags & entry.mask) {
                 rc = strcat_s(flagString, sizeof(flagString), entry.name);
-                securec_check(rc, "\0", "\0");
-                rc = strcat_s(flagString, sizeof(flagString), "|");
                 securec_check(rc, "\0", "\0");
             }
         }
@@ -1475,137 +1474,144 @@ static void FormatItemBlock(char *buffer, Page page, bool isToast, Oid toastOid,
         if (!isToast || g_verbose) {
             printf("%s Empty block - no items listed \n\n", indent);
         }
-    } else if ((maxOffset < 0) || (maxOffset > g_blockSize)) {
+        return;
+    }
+
+    if ((maxOffset < 0) || (maxOffset > g_blockSize)) {
         if (!isToast || g_verbose) {
             printf("%s Error: Item index corrupt on block. Offset: <%u>.\n\n", indent, maxOffset);
         }
         g_exitCode = 1;
+        return;
+    }
+    int formatAs;
+    char textFlags[16];
+    uint32 chunkId;
+    unsigned int chunkSize = 0;
+
+    /* First, honour requests to format items a special way, then
+        * use the special section to determine the format style */
+    if (g_itemOptions & ITEM_INDEX) {
+        formatAs = ITEM_INDEX;
+    } else if (g_itemOptions & ITEM_HEAP) {
+        formatAs = ITEM_HEAP;
     } else {
-        int formatAs;
-        char textFlags[16];
-        uint32 chunkId;
-        unsigned int chunkSize = 0;
+        switch (g_specialType) {
+            case SPEC_SECT_INDEX_BTREE:
+            case SPEC_SECT_INDEX_HASH:
+            case SPEC_SECT_INDEX_GIST:
+            case SPEC_SECT_INDEX_GIN:
+                formatAs = ITEM_INDEX;
+                break;
+            case SPEC_SECT_INDEX_SPGIST: {
+                SpGistPageOpaque spgpo = (SpGistPageOpaque)((char *)page + ((PageHeader)page)->pd_special);
 
-        /* First, honour requests to format items a special way, then
-         * use the special section to determine the format style */
-        if (g_itemOptions & ITEM_INDEX) {
-            formatAs = ITEM_INDEX;
-        } else if (g_itemOptions & ITEM_HEAP) {
-            formatAs = ITEM_HEAP;
-        } else {
-            switch (g_specialType) {
-                case SPEC_SECT_INDEX_BTREE:
-                case SPEC_SECT_INDEX_HASH:
-                case SPEC_SECT_INDEX_GIST:
-                case SPEC_SECT_INDEX_GIN:
-                    formatAs = ITEM_INDEX;
-                    break;
-                case SPEC_SECT_INDEX_SPGIST: {
-                    SpGistPageOpaque spgpo = (SpGistPageOpaque)((char *)page + ((PageHeader)page)->pd_special);
-
-                    if (spgpo->flags & SPGIST_LEAF) {
-                        formatAs = ITEM_SPG_LEAF;
-                    } else {
-                        formatAs = ITEM_SPG_INNER;
-                    }
-                    break;
+                if (spgpo->flags & SPGIST_LEAF) {
+                    formatAs = ITEM_SPG_LEAF;
+                } else {
+                    formatAs = ITEM_SPG_INNER;
                 }
-                default:
-                    formatAs = ITEM_HEAP;
-                    break;
+                break;
             }
+            default:
+                formatAs = ITEM_HEAP;
+                break;
+        }
+    }
+
+    for (x = 1; x < (maxOffset + 1); x++) {
+        itemId = PageGetItemId(page, x);
+        itemFlags = (unsigned int)ItemIdGetFlags(itemId);
+        itemSize = (unsigned int)ItemIdGetLength(itemId);
+        itemOffset = (unsigned int)ItemIdGetOffset(itemId);
+        switch (itemFlags) {
+            case LP_UNUSED:
+                rc = strcpy_s(textFlags, sizeof textFlags, "UNUSED");
+                securec_check(rc, "\0", "\0");
+                break;
+            case LP_NORMAL:
+                rc = strcpy_s(textFlags, sizeof textFlags, "NORMAL");
+                securec_check(rc, "\0", "\0");
+                break;
+            case LP_REDIRECT:
+                rc = strcpy_s(textFlags, sizeof textFlags, "REDIRECT");
+                securec_check(rc, "\0", "\0");
+                break;
+            case LP_DEAD:
+                rc = strcpy_s(textFlags, sizeof textFlags, "DEAD");
+                securec_check(rc, "\0", "\0");
+                break;
+            default:
+                /* shouldn't be possible */
+                rc = sprintf_s(textFlags, strlen(textFlags) + 1, "0x%02x", itemFlags);
+                securec_check(rc, "\0", "\0");
+                break;
         }
 
-        for (x = 1; x < (maxOffset + 1); x++) {
-            itemId = PageGetItemId(page, x);
-            itemFlags = (unsigned int)ItemIdGetFlags(itemId);
-            itemSize = (unsigned int)ItemIdGetLength(itemId);
-            itemOffset = (unsigned int)ItemIdGetOffset(itemId);
-            switch (itemFlags) {
-                case LP_UNUSED:
-                    rc = strcpy_s(textFlags, sizeof textFlags, "UNUSED");
-                    securec_check(rc, "\0", "\0");
-                    break;
-                case LP_NORMAL:
-                    rc = strcpy_s(textFlags, sizeof textFlags, "NORMAL");
-                    securec_check(rc, "\0", "\0");
-                    break;
-                case LP_REDIRECT:
-                    rc = strcpy_s(textFlags, sizeof textFlags, "REDIRECT");
-                    securec_check(rc, "\0", "\0");
-                    break;
-                case LP_DEAD:
-                    rc = strcpy_s(textFlags, sizeof textFlags, "DEAD");
-                    securec_check(rc, "\0", "\0");
-                    break;
-                default:
-                    /* shouldn't be possible */
-                    rc = sprintf_s(textFlags, strlen(textFlags) + 1, "0x%02x", itemFlags);
-                    securec_check(rc, "\0", "\0");
-                    break;
+        if (!isToast || g_verbose) {
+            printf("%s Item %3u -- Length: %4u  Offset: %4u (0x%04x)"
+                   "  Flags: %s\n",
+                   indent, x, itemSize, itemOffset, itemOffset, textFlags);
+        }
+
+        /* Make sure the item can physically fit on this block before
+            * formatting */
+        if ((itemOffset + itemSize > g_blockSize) || (itemOffset + itemSize > g_bytesToFormat)) {
+            if (!isToast || g_verbose) {
+                printf("%s  Error: Item contents extend beyond block.\n"
+                       "%s         BlockSize<%u> Bytes Read<%u> Item Start<%u>.\n",
+                       indent, indent, g_blockSize, g_bytesToFormat, itemOffset + itemSize);
             }
+            g_exitCode = 1;
+            return;
+        }
+        HeapTupleHeader tuple_header;
+        TransactionId xmax;
+
+        /* If the user requests that the items be interpreted as
+            * heap or index items... */
+        if (g_itemOptions & ITEM_DETAIL) {
+            FormatItem(buffer, itemSize, itemOffset, formatAs);
+        }
+
+        /* Dump the items contents in hex and ascii */
+        if (g_blockOptions & BLOCK_FORMAT) {
+            FormatBinary(buffer, itemSize, itemOffset);
+        }
+
+        /* Check if tuple was deleted */
+        tuple_header = (HeapTupleHeader)(&buffer[itemOffset]);
+        xmax = HeapTupleHeaderGetRawXmax(page, tuple_header);
+        if ((g_blockOptions & BLOCK_IGNORE_OLD) && xmax != 0) {
+            if (!isToast || g_verbose) {
+                printf("%stuple was removed by transaction #%ld\n", indent, xmax);
+            }
+        } else if (isToast) {
+            ToastChunkDecode(&buffer[itemOffset], itemSize, toastOid, &chunkId, toastValue + *toastRead,
+                             &chunkSize);
 
             if (!isToast || g_verbose) {
-                printf("%s Item %3u -- Length: %4u  Offset: %4u (0x%04x)"
-                       "  Flags: %s\n",
-                       indent, x, itemSize, itemOffset, itemOffset, textFlags);
+                printf("%s  Read TOAST chunk. TOAST Oid: %d, chunk id: %d, "
+                       "chunk data size: %u\n",
+                       indent, toastOid, chunkId, chunkSize);
             }
 
-            /* Make sure the item can physically fit on this block before
-             * formatting */
-            if ((itemOffset + itemSize > g_blockSize) || (itemOffset + itemSize > g_bytesToFormat)) {
-                if (!isToast || g_verbose) {
-                    printf("%s  Error: Item contents extend beyond block.\n"
-                           "%s         BlockSize<%u> Bytes Read<%u> Item Start<%u>.\n",
-                           indent, indent, g_blockSize, g_bytesToFormat, itemOffset + itemSize);
-                }
-                g_exitCode = 1;
-            } else {
-                HeapTupleHeader tuple_header;
-                TransactionId xmax;
+            *toastRead += chunkSize;
 
-                /* If the user requests that the items be interpreted as
-                 * heap or index items... */
-                if (g_itemOptions & ITEM_DETAIL) {
-                    FormatItem(buffer, itemSize, itemOffset, formatAs);
-                }
-
-                /* Dump the items contents in hex and ascii */
-                if (g_blockOptions & BLOCK_FORMAT) {
-                    FormatBinary(buffer, itemSize, itemOffset);
-                }
-
-                /* Check if tuple was deleted */
-                tuple_header = (HeapTupleHeader)(&buffer[itemOffset]);
-                xmax = HeapTupleHeaderGetRawXmax(page, tuple_header);
-                if ((g_blockOptions & BLOCK_IGNORE_OLD) && (xmax != 0)) {
-                    if (!isToast || g_verbose) {
-                        printf("%stuple was removed by transaction #%ld\n", indent, xmax);
-                    }
-                } else if (isToast) {
-                    ToastChunkDecode(&buffer[itemOffset], itemSize, toastOid, &chunkId, toastValue + *toastRead,
-                                     &chunkSize);
-
-                    if (!isToast || g_verbose) {
-                        printf("%s  Read TOAST chunk. TOAST Oid: %d, chunk id: %d, "
-                               "chunk data size: %u\n",
-                               indent, toastOid, chunkId, chunkSize);
-                    }
-
-                    *toastRead += chunkSize;
-
-                    if (*toastRead >= toastExternalSize) {
-                        break;
-                    }
-                } else if ((g_blockOptions & BLOCK_DECODE) && (itemFlags == LP_NORMAL)) {
-                    /* Decode tuple data */
-                    FormatDecode(&buffer[itemOffset], itemSize);
-                }
-
-                if (!isToast && x == maxOffset) {
-                    printf("\n");
-                }
+            if (*toastRead >= toastExternalSize) {
+                break;
             }
+        } else if ((g_blockOptions & BLOCK_IGNORE_OLD) && !HeapTupleHeaderXminCommitted(tuple_header)) {
+            if (!isToast || g_verbose) {
+                printf("%stuple was not committed. \n", indent);
+            }
+        } else if ((g_blockOptions & BLOCK_DECODE) && (itemFlags == LP_NORMAL)) {
+            /* Decode tuple data */
+            FormatDecode(&buffer[itemOffset], itemSize);
+        }
+
+        if (!isToast && x == maxOffset) {
+            printf("\n");
         }
     }
 }
@@ -1658,138 +1664,140 @@ static void FormatUHeapItemBlock(char *buffer, Page page, bool isToast, Oid toas
         if (!isToast || g_verbose) {
             printf("%s Empty block - no items listed \n\n", indent);
         }
-    } else if ((maxOffset < 0) || (maxOffset > g_blockSize)) {
+        return;
+    }
+    if ((maxOffset < 0) || (maxOffset > g_blockSize)) {
         if (!isToast || g_verbose) {
             printf("%s Error: Item index corrupt on block. Offset: <%u>.\n\n", indent, maxOffset);
         }
         g_exitCode = 1;
+        return;
+    }
+    int formatAs;
+    char textFlags[16];
+    uint32 chunkId;
+    unsigned int chunkSize = 0;
+
+    /* First, honour requests to format items a special way, then
+        * use the special section to determine the format style */
+    if (g_itemOptions & ITEM_INDEX) {
+        formatAs = ITEM_INDEX;
+    } else if (g_itemOptions & ITEM_HEAP) {
+        formatAs = ITEM_HEAP;
     } else {
-        int formatAs;
-        char textFlags[16];
-        uint32 chunkId;
-        unsigned int chunkSize = 0;
+        switch (g_specialType) {
+            case SPEC_SECT_INDEX_BTREE:
+            case SPEC_SECT_INDEX_HASH:
+            case SPEC_SECT_INDEX_GIST:
+            case SPEC_SECT_INDEX_GIN:
+                formatAs = ITEM_INDEX;
+                break;
+            case SPEC_SECT_INDEX_SPGIST: {
+                SpGistPageOpaque spgpo = (SpGistPageOpaque)((char *)page + ((UHeapPageHeader)page)->pd_special);
 
-        /* First, honour requests to format items a special way, then
-         * use the special section to determine the format style */
-        if (g_itemOptions & ITEM_INDEX) {
-            formatAs = ITEM_INDEX;
-        } else if (g_itemOptions & ITEM_HEAP) {
-            formatAs = ITEM_HEAP;
-        } else {
-            switch (g_specialType) {
-                case SPEC_SECT_INDEX_BTREE:
-                case SPEC_SECT_INDEX_HASH:
-                case SPEC_SECT_INDEX_GIST:
-                case SPEC_SECT_INDEX_GIN:
-                    formatAs = ITEM_INDEX;
-                    break;
-                case SPEC_SECT_INDEX_SPGIST: {
-                    SpGistPageOpaque spgpo = (SpGistPageOpaque)((char *)page + ((UHeapPageHeader)page)->pd_special);
-
-                    if (spgpo->flags & SPGIST_LEAF) {
-                        formatAs = ITEM_SPG_LEAF;
-                    } else {
-                        formatAs = ITEM_SPG_INNER;
-                    }
-                    break;
+                if (spgpo->flags & SPGIST_LEAF) {
+                    formatAs = ITEM_SPG_LEAF;
+                } else {
+                    formatAs = ITEM_SPG_INNER;
                 }
-                default:
-                    formatAs = ITEM_HEAP;
-                    break;
+                break;
             }
+            default:
+                formatAs = ITEM_HEAP;
+                break;
+        }
+    }
+
+    for (x = 1; x < (maxOffset + 1); x++) {
+        itemId = UPageGetRowPtr(page, x);
+        itemFlags = (unsigned int)itemId->flags;
+        itemSize = (unsigned int)itemId->len;
+        itemOffset = RowPtrGetOffset(itemId);
+
+        switch (itemFlags) {
+            case RP_UNUSED:
+                rc = strcpy_s(textFlags, sizeof textFlags, "UNUSED");
+                securec_check(rc, "\0", "\0");
+                break;
+            case RP_NORMAL:
+                rc = strcpy_s(textFlags, sizeof textFlags, "NORMAL");
+                securec_check(rc, "\0", "\0");
+                break;
+            case RP_REDIRECT:
+                rc = strcpy_s(textFlags, sizeof textFlags, "REDIRECT");
+                securec_check(rc, "\0", "\0");
+                break;
+            case RP_DEAD:
+                rc = strcpy_s(textFlags, sizeof textFlags, "DEAD");
+                securec_check(rc, "\0", "\0");
+                break;
+            default:
+                /* shouldn't be possible */
+                rc = sprintf_s(textFlags, strlen(textFlags) + 1, "0x%02x", itemFlags);
+                securec_check(rc, "\0", "\0");
+                break;
         }
 
-        for (x = 1; x < (maxOffset + 1); x++) {
-            itemId = UPageGetRowPtr(page, x);
-            itemFlags = (unsigned int)itemId->flags;
-            itemSize = (unsigned int)itemId->len;
-            itemOffset = RowPtrGetOffset(itemId);
+        if (!isToast || g_verbose) {
+            printf("%s Item %3u -- Length: %4u  Offset: %4u (0x%04x)"
+                   "  Flags: %s\n",
+                   indent, x, itemSize, itemOffset, itemOffset, textFlags);
+        }
 
-            switch (itemFlags) {
-                case RP_UNUSED:
-                    rc = strcpy_s(textFlags, sizeof textFlags, "UNUSED");
-                    securec_check(rc, "\0", "\0");
-                    break;
-                case RP_NORMAL:
-                    rc = strcpy_s(textFlags, sizeof textFlags, "NORMAL");
-                    securec_check(rc, "\0", "\0");
-                    break;
-                case RP_REDIRECT:
-                    rc = strcpy_s(textFlags, sizeof textFlags, "REDIRECT");
-                    securec_check(rc, "\0", "\0");
-                    break;
-                case RP_DEAD:
-                    rc = strcpy_s(textFlags, sizeof textFlags, "DEAD");
-                    securec_check(rc, "\0", "\0");
-                    break;
-                default:
-                    /* shouldn't be possible */
-                    rc = sprintf_s(textFlags, strlen(textFlags) + 1, "0x%02x", itemFlags);
-                    securec_check(rc, "\0", "\0");
-                    break;
+        /* Make sure the item can physically fit on this block before
+            * formatting */
+        if ((itemOffset + itemSize > g_blockSize) || (itemOffset + itemSize > g_bytesToFormat)) {
+            if (!isToast || g_verbose) {
+                printf("%s  Error: Item contents extend beyond block.\n"
+                       "%s         BlockSize<%u> Bytes Read<%u> Item Start<%u>.\n",
+                       indent, indent, g_blockSize, g_bytesToFormat, itemOffset + itemSize);
             }
+            g_exitCode = 1;
+            return;
+        }
+        UHeapDiskTuple utuple_header;
+        TransactionId xmax;
+
+        /* If the user requests that the items be interpreted as
+            * heap or index items... */
+        if (g_itemOptions & ITEM_DETAIL) {
+            FormatUHeapItem(buffer, itemSize, itemOffset, formatAs);
+        }
+
+        /* Dump the items contents in hex and ascii */
+        if (g_blockOptions & BLOCK_FORMAT) {
+            FormatBinary(buffer, itemSize, itemOffset);
+        }
+
+        /* Check if tuple was deleted */
+        utuple_header = (UHeapDiskTuple)(&buffer[itemOffset]);
+        xmax = UHeapDiskTupleDeleted(utuple_header);
+        if ((g_blockOptions & BLOCK_IGNORE_OLD) && (xmax != 0)) {
+            if (!isToast || g_verbose) {
+                printf("%stuple was removed by transaction.\n", indent);
+            }
+        } else if (isToast) {
+            ToastChunkDecode(&buffer[itemOffset], itemSize, toastOid, &chunkId, toastValue + *toastRead,
+                             &chunkSize);
 
             if (!isToast || g_verbose) {
-                printf("%s Item %3u -- Length: %4u  Offset: %4u (0x%04x)"
-                       "  Flags: %s\n",
-                       indent, x, itemSize, itemOffset, itemOffset, textFlags);
+                printf("%s  Read TOAST chunk. TOAST Oid: %d, chunk id: %d, "
+                       "chunk data size: %u\n",
+                       indent, toastOid, chunkId, chunkSize);
             }
 
-            /* Make sure the item can physically fit on this block before
-             * formatting */
-            if ((itemOffset + itemSize > g_blockSize) || (itemOffset + itemSize > g_bytesToFormat)) {
-                if (!isToast || g_verbose) {
-                    printf("%s  Error: Item contents extend beyond block.\n"
-                           "%s         BlockSize<%u> Bytes Read<%u> Item Start<%u>.\n",
-                           indent, indent, g_blockSize, g_bytesToFormat, itemOffset + itemSize);
-                }
-                g_exitCode = 1;
-            } else {
-                UHeapDiskTuple utuple_header;
-                TransactionId xmax;
+            *toastRead += chunkSize;
 
-                /* If the user requests that the items be interpreted as
-                 * heap or index items... */
-                if (g_itemOptions & ITEM_DETAIL) {
-                    FormatUHeapItem(buffer, itemSize, itemOffset, formatAs);
-                }
-
-                /* Dump the items contents in hex and ascii */
-                if (g_blockOptions & BLOCK_FORMAT) {
-                    FormatBinary(buffer, itemSize, itemOffset);
-                }
-
-                /* Check if tuple was deleted */
-                utuple_header = (UHeapDiskTuple)(&buffer[itemOffset]);
-                xmax = UHEAP_XID_IS_TRANS(utuple_header->flag);
-                if ((g_blockOptions & BLOCK_IGNORE_OLD) && (xmax == 0)) {
-                    if (!isToast || g_verbose) {
-                        printf("%stuple was removed by transaction.\n", indent);
-                    }
-                } else if (isToast) {
-                    ToastChunkDecode(&buffer[itemOffset], itemSize, toastOid, &chunkId, toastValue + *toastRead,
-                                     &chunkSize);
-
-                    if (!isToast || g_verbose) {
-                        printf("%s  Read TOAST chunk. TOAST Oid: %d, chunk id: %d, "
-                               "chunk data size: %u\n",
-                               indent, toastOid, chunkId, chunkSize);
-                    }
-
-                    *toastRead += chunkSize;
-
-                    if (*toastRead >= toastExternalSize) {
-                        break;
-                    }
-                } else if ((g_blockOptions & BLOCK_DECODE) && (itemFlags == LP_NORMAL)) {
-                    /* Decode tuple data */
-                    FormatDecode(&buffer[itemOffset], itemSize);
-                }
-
-                if (!isToast && x == maxOffset) {
-                    printf("\n");
-                }
+            if (*toastRead >= toastExternalSize) {
+                break;
             }
+        } else if ((g_blockOptions & BLOCK_DECODE) && (itemFlags == LP_NORMAL)) {
+            /* Decode tuple data */
+            FormatDecode(&buffer[itemOffset], itemSize);
+        }
+
+        if (!isToast && x == maxOffset) {
+            printf("\n");
         }
     }
 }
@@ -1943,10 +1951,15 @@ static void FormatItem(char *buffer, unsigned int numBytes, unsigned int startIn
             flagString[0] = '\0';
             errno_t rc;
             for (const FlagMapping& entry : maskFlags) {
-                if ((infoMask & entry.mask) || (infoMask2 & entry.mask)) {
+                if ((infoMask & entry.mask)) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
                     securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
+                }
+            }
+
+            for (const FlagMapping& entry : mask2Flags) {
+                if ((infoMask2 & entry.mask)) {
+                    rc = strcat_s(flagString, sizeof(flagString), entry.name);
                     securec_check(rc, "\0", "\0");
                 }
             }
@@ -2128,8 +2141,6 @@ static void FormatUHeapItem(char *buffer, unsigned int numBytes, unsigned int st
                 if (infoMask & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
                     securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
-                    securec_check(rc, "\0", "\0");
                 }
             }
 
@@ -2183,8 +2194,6 @@ static void FormatSpecial(char *buffer)
                 if (btreeSection->bt_internal.btpo_flags & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
                     securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
-                    securec_check(rc, "\0", "\0");
                 }
             }
 
@@ -2209,8 +2218,6 @@ static void FormatSpecial(char *buffer)
                 if (hashSection->hasho_flag & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
                     securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
-                    securec_check(rc, "\0", "\0");
                 }
             }
 
@@ -2234,8 +2241,6 @@ static void FormatSpecial(char *buffer)
                 if (gistSection->flags & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
                     securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
-                    securec_check(rc, "\0", "\0");
                 }
             }
 
@@ -2257,8 +2262,6 @@ static void FormatSpecial(char *buffer)
                 if (ginSection->flags & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
                     securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
-                    securec_check(rc, "\0", "\0");
                 }
             }
 
@@ -2278,8 +2281,6 @@ static void FormatSpecial(char *buffer)
             for (const auto& entry : spgistFlagTable) {
                 if (spgistSection->flags & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
-                    securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
                     securec_check(rc, "\0", "\0");
                 }
             }
@@ -2344,8 +2345,6 @@ static void FormatUHeapSpecial(char *buffer)
                 if (btreeSection->bt_internal.btpo_flags & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
                     securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
-                    securec_check(rc, "\0", "\0");
                 }
             }
 
@@ -2370,8 +2369,6 @@ static void FormatUHeapSpecial(char *buffer)
                 if (hashSection->hasho_flag & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
                     securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
-                    securec_check(rc, "\0", "\0");
                 }
             }
 
@@ -2393,8 +2390,6 @@ static void FormatUHeapSpecial(char *buffer)
             for (const auto& entry : gistFlagTable) {
                 if (gistSection->flags & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
-                    securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
                     securec_check(rc, "\0", "\0");
                 }
             }
@@ -2418,8 +2413,6 @@ static void FormatUHeapSpecial(char *buffer)
                 if (ginSection->flags & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
                     securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
-                    securec_check(rc, "\0", "\0");
                 }
             }
 
@@ -2440,8 +2433,6 @@ static void FormatUHeapSpecial(char *buffer)
             for (const auto& entry : spgistFlagTable) {
                 if (spgistSection->flags & entry.mask) {
                     rc = strcat_s(flagString, sizeof(flagString), entry.name);
-                    securec_check(rc, "\0", "\0");
-                    rc = strcat_s(flagString, sizeof(flagString), "|");
                     securec_check(rc, "\0", "\0");
                 }
             }

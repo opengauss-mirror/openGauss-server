@@ -264,12 +264,12 @@ def format_table(column_info_dict, dropped_column_dict, type_info_dict, max_colu
         if segment_on:
             search_files(searchpath, "1", table_paths)
             if table_info['reltoastrelid'] != '0':
-                print("Suggest Query Type: \n    -r {} -T {} -D {}".format(table_info['relfilenode'], table_info['reltoastrelid'], ','.join(types)))
+                print("Suggest Query Type: \n    -o -r {} -T {} -D {}".format(table_info['relfilenode'], table_info['reltoastrelid'], ','.join(types)))
             else:
-                print("Suggest Query Type: \n    -r {} -D {}".format(table_info['relfilenode'],  ','.join(types)))
+                print("Suggest Query Type: \n    -o -r {} -D {}".format(table_info['relfilenode'],  ','.join(types)))
             print("Location of Binary file: \n   {}\n".format('\n   '.join(p for p in table_paths)))
         else:
-            print("Suggest Query Type: \n    {} -D {}".format('-u' if ustore_on else '', ','.join(types)))
+            print("Suggest Query Type: \n    {} -o -D {}".format('-u' if ustore_on else '', ','.join(types)))
             print("Location of Binary file : \n   {}\n".format('\n   '.join(p for p in table_paths)))
         print("Options: {}\n".format(table_info['reloptions']))
         
