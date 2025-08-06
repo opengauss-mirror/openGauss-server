@@ -294,6 +294,26 @@ static void PartMapHashEntryDestroy(ListPartitionMap* listMap)
     }
 }
 
+static bool CanCompareAsInt8(Const* value, int64* covertedValue)
+{
+    switch (value->consttype) {
+        case INT2OID: {
+            *covertedValue = (int64)DatumGetInt16(value->constvalue);
+            return true;
+        }
+        case INT4OID: {
+            *covertedValue = (int64)DatumGetInt32(value->constvalue);
+            return true;
+        }
+        case INT8OID: {
+            *covertedValue = DatumGetInt64(value->constvalue);
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
 /*
  * @Description: partition value routing
  * @Param[IN] compare: returned value
@@ -328,7 +348,13 @@ void constCompare(Const* value1, Const* value2, Oid collation, int& compare)
         if (value1->consttype == value2->consttype) {
             constCompare_baseType(value1, value2, collation, compare);
         } else {
-            compare = constCompare_constType(value1, value2, collation);
+            int64 num1 = 0;
+            int64 num2 = 0;
+            if (CanCompareAsInt8(value1, &num1) && CanCompareAsInt8(value2, &num2)) {
+                int_cmp_partition(num1, num2, compare);
+            } else {
+                compare = constCompare_constType(value1, value2, collation);
+            }
         }
     }
     PG_CATCH();
