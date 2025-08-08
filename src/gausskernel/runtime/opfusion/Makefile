@@ -36,7 +36,7 @@ endif
 OBJS = opfusion_agg.o opfusion_delete.o opfusion_index.o opfusion_indexonlyscan.o opfusion_indexscan.o \
        opfusion_insert.o opfusion_mot.o opfusion_scan.o opfusion_select.o opfusion_selectforupdate.o \
        opfusion_sort.o opfusion_uheaptablescan.o opfusion_update.o opfusion_util.o opfusion.o \
-       opfusion_annindexscan.o opfusion_selectforann.o 
+       opfusion_annindexscan.o opfusion_selectforann.o opfusion_unique_sort.o
 
 override CPPFLAGS += -D__STDC_FORMAT_MACROS
 

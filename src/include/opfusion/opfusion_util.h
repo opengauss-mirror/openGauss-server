@@ -32,6 +32,7 @@
 #include "pgxc/pgxcnode.h"
 #include "utils/plancache.h"
 #include "utils/syscache.h"
+#include "executor/executor.h"
 
 const int FUSION_EXECUTE = 0;
 const int FUSION_DESCRIB = 1;
@@ -56,6 +57,7 @@ enum FusionType {
     AGG_INDEX_FUSION,
     SORT_INDEX_FUSION,
     SELECT_FOR_ANN_FUSION,
+    UNIQUE_SORT_INDEX_FUSION,
 
     MOT_JIT_SELECT_FUSION,
     MOT_JIT_MODIFY_FUSION,
