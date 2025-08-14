@@ -7014,7 +7014,10 @@ int xactGetCommittedChildren(TransactionId **ptr)
     return s->nChildXids;
 }
 
-HTAB *relfilenode_hashtbl_create()
+/** create a relfilenode hash table.
+ @param[in]  withOpt  true if consider opt. Otherwise, ignore opt in hash function.
+ @return  hash table. */
+HTAB *relfilenode_hashtbl_create(bool considerOpt)
 {
     HASHCTL hashCtrl;
     HTAB *hashtbl = NULL;
@@ -7024,7 +7027,7 @@ HTAB *relfilenode_hashtbl_create()
     securec_check(rc, "", "");
     hashCtrl.hcxt = (MemoryContext)CurrentMemoryContext;
     hashCtrl.hash = tag_hash;
-    hashCtrl.keysize = sizeof(RelFileNode);
+    hashCtrl.keysize = considerOpt ? sizeof(RelFileNode) : offsetof(RelFileNode, opt);
     /* keep  entrysize >= keysize, stupid limits */
     hashCtrl.entrysize = sizeof(RelFileNode);
 

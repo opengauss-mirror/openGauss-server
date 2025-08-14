@@ -2274,7 +2274,7 @@ void DropBufferForDelRelinXlogUsingScan(ColFileNode *delrels, int ndelrels)
 
 void DropBufferForDelRelsinXlogUsingHash(ColFileNode *delrels, int ndelrels)
 {
-    HTAB *relfilenode_hashtbl = relfilenode_hashtbl_create();
+    HTAB *relfilenode_hashtbl = relfilenode_hashtbl_create(false);
 
     int enter_cnt = 0;
     bool found = false;

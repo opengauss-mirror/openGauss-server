@@ -870,7 +870,7 @@ void smgrDoDropBufferUsingHashTbl(bool isCommit)
     RelFileNode rnodes[DROP_BUFFER_USING_HASH_DEL_REL_NUM_THRESHOLD];
 
     int nestLevel = GetCurrentTransactionNestLevel();
-    HTAB* relfilenode_hashtbl = relfilenode_hashtbl_create();
+    HTAB* relfilenode_hashtbl = relfilenode_hashtbl_create(false);
     int enter_cnt = 0;
     bool found = false;
     for (pending = u_sess->catalog_cxt.pendingDeletes; pending != NULL; pending = next) {

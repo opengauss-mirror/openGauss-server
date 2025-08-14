@@ -5838,7 +5838,11 @@ void DropRelFileNodeOneForkAllBuffersUsingHash(HTAB *relfilenode_hashtbl)
 
 static FORCE_INLINE int compare_rnode_func(const void *left, const void *right)
 {
-    int128 res = (int128)((*(const uint128 *)left) - (*(const uint128 *)right));
+    /* First 4 members of RelFileNode is unique for each table, no need to compare
+    opt while releasing buffers belong to out of date relations. Also, for compressed
+    index alter, the opt in tag maybe different with rnodes, so it's necessary to
+    ignore them. */
+    int128 res = memcmp(left, right, offsetof(RelFileNode, opt));
     if (res > 0) {
         return 1;
     } else if (res < 0) {

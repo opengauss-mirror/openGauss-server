@@ -111,8 +111,6 @@ DROP TABLE alter_compress_params_schema.alter_column_table_compressed_options;
 CREATE TABLE alter_compress_params_schema.alter_segment_table_compressed_options (id int, value varchar) WITH (segment = on);
 INSERT INTO alter_compress_params_schema.alter_segment_table_compressed_options SELECT generate_series(1,5), 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 ALTER TABLE alter_compress_params_schema.alter_segment_table_compressed_options SET (compresstype = 1); -- fail
-ERROR:  Un-support feature
-DETAIL:  Option "compresstype" doesn't allow ALTER
 DROP TABLE alter_compress_params_schema.alter_segment_table_compressed_options;
 -- set compressed options of index
 CREATE TABLE alter_compress_params_schema.segment_table (id int, c1 text) WITH( segment=on);
@@ -1344,4 +1342,149 @@ SELECT count(*) FROM alter_compress_params_schema.all_options_subpartitioned_unc
 (1 row)
 
 DROP TABLE alter_compress_params_schema.all_options_subpartitioned_uncompressed;
+--Test relfilenode reuse for compressed segment table index.
+--1.create compressed segment table
+CREATE TABLE alter_compress_params_schema.seg_tbl_with_index(id int, c1 text) WITH(compresstype=1, segment=on);
+CREATE TABLE alter_compress_params_schema.seg_tbl_with_20index(id int, c1 text) WITH(compresstype=1, segment=on);
+INSERT INTO alter_compress_params_schema.seg_tbl_with_index SELECT id, id::text FROM generate_series(1,1000) id;
+INSERT INTO alter_compress_params_schema.seg_tbl_with_20index SELECT id, id::text FROM generate_series(1,1000) id;
+select count(*) from alter_compress_params_schema.seg_tbl_with_index;
+ count 
+-------
+  1000
+(1 row)
+
+select count(*) from alter_compress_params_schema.seg_tbl_with_index where id < 100;
+ count 
+-------
+    99
+(1 row)
+
+select count(*) from alter_compress_params_schema.seg_tbl_with_20index;
+ count 
+-------
+  1000
+(1 row)
+
+select count(*) from alter_compress_params_schema.seg_tbl_with_20index where id < 100;
+ count 
+-------
+    99
+(1 row)
+
+checkpoint;
+vacuum alter_compress_params_schema.seg_tbl_with_index;
+vacuum alter_compress_params_schema.seg_tbl_with_20index;
+select count(*) from alter_compress_params_schema.seg_tbl_with_index;
+ count 
+-------
+  1000
+(1 row)
+
+select count(*) from alter_compress_params_schema.seg_tbl_with_index where id < 100;
+ count 
+-------
+    99
+(1 row)
+
+select count(*) from alter_compress_params_schema.seg_tbl_with_20index;
+ count 
+-------
+  1000
+(1 row)
+
+select count(*) from alter_compress_params_schema.seg_tbl_with_20index where id < 100;
+ count 
+-------
+    99
+(1 row)
+
+--2.create compressed segment index
+create index on alter_compress_params_schema.seg_tbl_with_index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+create index on alter_compress_params_schema.seg_tbl_with_20index(id) WITH (compresstype=2,compress_chunk_size=1024);
+--3.alter the compressed segment index, after this the filenode in index metadata and in page buffers tag will by different
+--since the index is not rebuilt so the buffer tag remains the same but the filenode opt for index is changed.
+alter index alter_compress_params_schema.seg_tbl_with_index_id_idx set (compresstype=1); --failed
+ERROR:  change compresstype OPTION is not supported
+alter index alter_compress_params_schema.seg_tbl_with_index_id_idx set (compress_chunk_size=2048); --failed
+ERROR:  change compress_chunk_size OPTION is not supported
+alter index alter_compress_params_schema.seg_tbl_with_index_id_idx set (compress_prealloc_chunks=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_index_id_idx set (compress_level=2); --success
+select count(*) from alter_compress_params_schema.seg_tbl_with_index;
+ count 
+-------
+  1000
+(1 row)
+
+select count(*) from alter_compress_params_schema.seg_tbl_with_index where id < 100;
+ count 
+-------
+    99
+(1 row)
+
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx1 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx2 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx3 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx4 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx5 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx6 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx7 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx8 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx9 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx10 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx11 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx12 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx13 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx14 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx15 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx16 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx17 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx18 set (compress_level=2); --success
+alter index alter_compress_params_schema.seg_tbl_with_20index_id_idx19 set (compress_level=2); --success
+--4.drop table and it will trigger index drop, which will contain DropRelFileNodeAllBuffersUsingScan to clean buffers.
+--Though the relfilenode differs in opt, we should ignore it and find the right buffers to clean.
+drop table alter_compress_params_schema.seg_tbl_with_index;
+drop table alter_compress_params_schema.seg_tbl_with_20index;
+--5.create normal segment tables, if we didn't clean out of date buffers in step 4, here we will find unexpected buffers
+--in memory, which should be on disk and not loaded till now, and it will lead to crash.
+CREATE TABLE alter_compress_params_schema.seg_tbl_normal1 (id int, value varchar) WITH (segment = on);
+CREATE TABLE alter_compress_params_schema.seg_tbl_normal2 (id int, value varchar) WITH (segment = on);
+CREATE TABLE alter_compress_params_schema.seg_tbl_normal3 (id int, value varchar) WITH (segment = on);
+CREATE TABLE alter_compress_params_schema.seg_tbl_normal4 (id int, value varchar) WITH (segment = on);
+CREATE TABLE alter_compress_params_schema.seg_tbl_normal5 (id int, value varchar) WITH (segment = on);
+CREATE TABLE alter_compress_params_schema.seg_tbl_normal6 (id int, value varchar) WITH (segment = on);
+CREATE TABLE alter_compress_params_schema.seg_tbl_normal7 (id int, value varchar) WITH (segment = on);
+CREATE TABLE alter_compress_params_schema.seg_tbl_normal8 (id int, value varchar) WITH (segment = on);
+CREATE TABLE alter_compress_params_schema.seg_tbl_normal9 (id int, value varchar) WITH (segment = on);
+CREATE TABLE alter_compress_params_schema.seg_tbl_normal10 (id int, value varchar) WITH (segment = on);
+drop table alter_compress_params_schema.seg_tbl_normal1;
+drop table alter_compress_params_schema.seg_tbl_normal2;
+drop table alter_compress_params_schema.seg_tbl_normal3;
+drop table alter_compress_params_schema.seg_tbl_normal4;
+drop table alter_compress_params_schema.seg_tbl_normal5;
+drop table alter_compress_params_schema.seg_tbl_normal6;
+drop table alter_compress_params_schema.seg_tbl_normal7;
+drop table alter_compress_params_schema.seg_tbl_normal8;
+drop table alter_compress_params_schema.seg_tbl_normal9;
+drop table alter_compress_params_schema.seg_tbl_normal10;
 DROP SCHEMA alter_compress_params_schema;
