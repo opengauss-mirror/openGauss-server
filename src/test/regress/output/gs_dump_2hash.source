@@ -22,6 +22,7 @@ partition by hash(c1_date) subpartition by range(c2_int)
     subpartition p2_b values less than(200)
   )
 );
+alter table t_hash_2nd_partition owner to u_hash;
 \! @abs_bindir@/gs_dump -p @portstring@ db_hash -f @abs_bindir@/dump -F c -w > @abs_bindir@/gs_dump_2hash.log 2>&1 ; echo $?
 0
 \! @abs_bindir@/gs_restore -h 127.0.0.1 -p @portstring@ -U u_hash -W 1234@abcd -d db_restore -F c @abs_bindir@/dump > @abs_bindir@/gs_dump_2hash.log 2>&1 ; echo $?

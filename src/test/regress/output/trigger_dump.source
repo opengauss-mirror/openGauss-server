@@ -11,6 +11,8 @@ create user sys2_dump with sysadmin password 'Aa@12356';
 \c test_dump
 create table old_dump(id int,c1 int);
 create table tab_dump(id int,c1 int);
+alter table old_dump owner to sys_dump;
+alter table tab_dump owner to sys_dump;
 create user use_dump password 'Aa@12356';
 grant insert,update,select,delete on table old_dump to use_dump;
 grant insert,update,select,delete on table tab_dump to use_dump;
