@@ -363,7 +363,7 @@ extern TM_Result heap_delete(Relation relation, ItemPointer tid, CommandId cid, 
     bool wait, TM_FailureData *tmfd, bool allow_delete_self = false, TupleTableSlot** oldslot = NULL);
 extern TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer otid, HeapTuple newtup,
     CommandId cid, Snapshot crosscheck, bool wait, TM_FailureData *tmfd, LockTupleMode *lockmode,
-    bool allow_delete_self = false);
+    bool allow_delete_self = false, TupleTableSlot** oldslot = NULL);
 extern TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, 
     CommandId cid, LockTupleMode mode, LockWaitPolicy waitPolicy, bool follow_updates, TM_FailureData *tmfd,
     bool allow_lock_self = false, int waitSec = 0);
