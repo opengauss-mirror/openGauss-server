@@ -2660,7 +2660,7 @@ List* get_user_from_index_expressions(List* indexExpressions)
     List* user_oid_list = NIL;
     bool is_null = false;
     foreach (expr, indexExpressions) {
-        if (check_func_user_created_walker((Node*)(lfirst(expr)), NULL)) {
+        if (check_func_user_created_walker((Node*)(lfirst(expr)), NULL) && IsA(lfirst(expr), FuncExpr)) {
             Oid func_oid = ((FuncExpr*)(lfirst(expr)))->funcid;
             HeapTuple tup = SearchCatCache1(PROCOID, ObjectIdGetDatum(func_oid));
             if (!HeapTupleIsValid(tup)) {
