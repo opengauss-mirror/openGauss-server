@@ -269,4 +269,5 @@ void ScanBucketsInsertIndex(Relation rel, const List* idxRelList, const List* id
 extern void ScanPartitionInsertIndex(Relation partTableRel, Relation partRel, const List* indexRelList,
                               const List* indexInfoList);
 void ScanHeapInsertCBI(Relation parentRel, Relation heapRel, Relation idxRel, Oid tmpPartOid);
+List* get_user_from_index_expressions(List* indexExpressions);
 #endif   /* INDEX_H */
