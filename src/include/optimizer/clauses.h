@@ -50,6 +50,7 @@ typedef struct {
     List* active_fns;
     Node* case_val;
     bool estimate;
+    bool change_user;
 } eval_const_expressions_context;
 
 typedef enum { UNIQUE_CONSTRAINT, NOT_NULL_CONSTRAINT } constraintType;
@@ -109,6 +110,8 @@ extern void CommuteRowCompareExpr(RowCompareExpr* clause);
 extern Node* strip_implicit_coercions(Node* node);
 
 extern Node* eval_const_expressions(PlannerInfo* root, Node* node);
+
+extern Node* eval_index_const_expressions(PlannerInfo* root, Node* node);
 
 extern Node* eval_const_expression_value(PlannerInfo* root, Node* node);
 

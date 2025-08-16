@@ -2639,8 +2639,9 @@ void index_drop(Oid indexId, bool concurrent, bool concurrent_lock_mode)
 
 static bool check_func_user_created_walker(Node* node, Node* cxt)
 {
-    if (node == NULL)
+    if (node == NULL) {
         return false;
+    }
     if (IsA(node, FuncExpr)) {
         FuncExpr* func = (FuncExpr*)node;
         if (func->funcid >= FirstNormalObjectId) {
@@ -2662,7 +2663,7 @@ List* get_user_from_index_expressions(List* indexExpressions)
     foreach (expr, indexExpressions) {
         if (check_func_user_created_walker((Node*)(lfirst(expr)), NULL) && IsA(lfirst(expr), FuncExpr)) {
             Oid func_oid = ((FuncExpr*)(lfirst(expr)))->funcid;
-            HeapTuple tup = SearchCatCache1(PROCOID, ObjectIdGetDatum(func_oid));
+            HeapTuple tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
             if (!HeapTupleIsValid(tup)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
@@ -2709,12 +2710,12 @@ IndexInfo* BuildIndexInfo(Relation index)
     List* indexExpressions = RelationGetIndexExpressions(index);
     List* expressionUsers = get_user_from_index_expressions(indexExpressions);
     IndexInfo* ii = makeIndexInfo(indexStruct->indnatts,
-                       indexExpressions,
-                       expressionUsers,
-                       RelationGetIndexPredicate(index),
-                       indexStruct->indisunique,
-                       IndexIsReady(indexStruct),
-                       false);
+                                  indexExpressions,
+                                  expressionUsers,
+                                  RelationGetIndexPredicate(index),
+                                  indexStruct->indisunique,
+                                  IndexIsReady(indexStruct),
+                                  false);
 
     ii->ii_NumIndexAttrs = numAtts;
     ii->ii_NumIndexKeyAttrs = IndexRelationGetNumberOfKeyAttributes(index);
@@ -2891,7 +2892,7 @@ void FormIndexDatum(IndexInfo* indexInfo, TupleTableSlot* slot, EState* estate, 
         Assert(GetPerTupleExprContext(estate)->ecxt_scantuple == slot);
     }
     indexpr_item = list_head(indexInfo->ii_ExpressionsState);
-    ubdexor_user = list_head(indexInfo->ii_ExpressionUsers);
+    indexpr_user = list_head(indexInfo->ii_ExpressionUsers);
 
     for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++) {
         int keycol = indexInfo->ii_KeyAttrNumbers[i];
