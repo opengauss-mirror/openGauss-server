@@ -964,13 +964,14 @@ StmtResult *SearchEventInfo(ShowEventStmt *stmt)
     appendStringInfo(&buf, "FROM PG_JOB ");
 
     /* Concatenate where clause */
-    appendStringInfo(&buf, "WHERE dbname=\'%s\' AND ", get_database_name(u_sess->proc_cxt.MyDatabaseId));
+    appendStringInfo(&buf, "WHERE dbname=%s AND ",
+                        quote_literal_cstr(get_database_name(u_sess->proc_cxt.MyDatabaseId)));
     if (stmt->from_clause) {
         A_Const *fc = (A_Const *)stmt->from_clause;
-        appendStringInfo(&buf, "nspname=\'%s\' ", (char *)fc->val.val.str);
+        appendStringInfo(&buf, "nspname=%s ", quote_literal_cstr((char *)fc->val.val.str));
     } else {
         char *schema_name = get_real_search_schema();
-        appendStringInfo(&buf, "nspname=\'%s\' ", schema_name);
+        appendStringInfo(&buf, "nspname=%s ", quote_literal_cstr(schema_name));
     }
     appendStringInfo(&buf, " AND job_name IS NOT NULL ");
     if (stmt->where_clause) {
