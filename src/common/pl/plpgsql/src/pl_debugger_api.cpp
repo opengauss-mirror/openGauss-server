@@ -1455,6 +1455,19 @@ bool CheckPlpgsqlFunc(Oid funcoid, bool report_error)
         return false;
     }
     pfree(langname);
+    Oid nspoid = get_func_namespace(funcoid);
+    if ((nspoid <= FirstNormalObjectId && nspoid != PG_PUBLIC_NAMESPACE) ||
+        funcoid <= FirstNormalObjectId) {
+        if (report_error) {
+            ereport(ERROR,
+                (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("pl debugger do not support function on system schema"),
+                    errdetail("the given oid of function is %u, schema %u", funcoid, nspoid),
+                    errcause("pl debugger do not support the given function"),
+                    erraction("use pl debugger with only user create function")));
+        }
+        return false;
+    }
     return true;
 }
 
