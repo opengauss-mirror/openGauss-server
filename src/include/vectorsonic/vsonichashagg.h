@@ -73,6 +73,8 @@ private:
 
     void initHashTable();
 
+    void initSimpleMatchFuncByType(const int typesize, const int index);
+
     void initMatchFunc(TupleDesc desc, uint16* keyIdx, uint16 keyNum);
 
     void BindingFp();
@@ -81,10 +83,10 @@ private:
      * Build hash table and process match procedure.
      */
     /* match function. */
-    template <bool simpleType>
+    template <bool simpleType, typename cmpType = uint64>
     bool matchValue(ScalarVector* pVector, uint16 keyIdx, int16 pVectorIdx, uint32 cmpIdx);
 
-    template <bool simpleType>
+    template <bool simpleType, typename cmpType = uint64>
     void matchArray(ScalarVector* pVector, uint16 keyIdx, uint16 cmpRows);
 
     /* build sonic hash table function */
