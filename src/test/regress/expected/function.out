@@ -2355,4 +2355,28 @@ alter system set enable_stmt_track=off;
 reset log_min_duration_statement;
 reset track_stmt_stat_level;
 alter system set instr_unique_sql_count = 100;
+create table test_table_030(id int, name text);
+insert into test_table_030 values(1,'a'),(2,'b');
+DECLARE
+    temp integer;
+    _id INTEGER;
+    begin for temp in 0..5 loop
+        UPDATE test_table_030 SET name = 'aaa' WHERE id=temp returning id BULK COLLECT INTO _id;
+    end loop;
+end;
+/
+ERROR:  Unsupported bulk collect into target
+DETAIL:  Unable to find any array elements in target
+CONTEXT:  PL/pgSQL function inline_code_block line 4 at SQL statement
+DECLARE
+    temp integer;
+    _id INTEGER;
+    begin for temp in 0..5 loop
+        DELETE FROM test_table_030 WHERE id=temp returning id INTO _id;
+    end loop;
+end;
+/
+ERROR:  query returned no rows when process INTO
+CONTEXT:  PL/pgSQL function inline_code_block line 4 at SQL statement
+drop table test_table_030;
 \c regression
