@@ -41,6 +41,7 @@
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_control.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_object.h"
@@ -323,6 +324,25 @@ void RecompilePackage(CompileStmt* stmt)
     }
 }
 
+void HasPrivilegeAlter(Oid roleid, bool isSecdef)
+{
+    bool enablePrivilegesSeparate = g_instance.attr.attr_security.enablePrivilegesSeparate;
+    Oid current_user = GetUserId();
+    if (enablePrivilegesSeparate) {
+        if (current_user != roleid && isSecdef && current_user != BOOTSTRAP_SUPERUSERID) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("openGauss not support alter security definer packager owner.")));
+        }
+    } else {
+        if (current_user != BOOTSTRAP_SUPERUSERID && roleid == BOOTSTRAP_SUPERUSERID) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("only super user can alter owner to super user.")));
+        }
+    }
+}
+
 /*
  * Change package owner by name
  */
@@ -335,12 +355,20 @@ ObjectAddress AlterPackageOwner(List* name, Oid newOwnerId)
     Oid pkgOid = PackageNameListGetOid(name, false, false);
     Relation rel;
     HeapTuple tup;
+    bool enablePrivilegesSeparate = g_instance.attr.attr_security.enablePrivilegesSeparate;
     ObjectAddress address;
     if (IsSystemObjOid(pkgOid)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
                 errmsg("ownerId change failed for package %u, because it is a builtin package.", pkgOid)));
     }
+
+    if (!initialuser() && BOOTSTRAP_SUPERUSERID == newOwnerId) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
+                errmsg("only super user can set package owner to super user.")));
+    }
+
     rel = heap_open(PackageRelationId, RowExclusiveLock);
     tup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
     /* should not happen */
@@ -373,9 +401,30 @@ ObjectAddress AlterPackageOwner(List* name, Oid newOwnerId)
     bool isNull = false;
     HeapTuple newtuple;
     AclResult aclresult;
+    Datum pkgsecdefDatum;
+    bool pkgsecdef = false;
+    pkgsecdefDatum = SysCacheGetAttr(PACKAGEOID, tup, Anum_gs_package_pkgsecdef, &isNull);
+    if (!isNull) {
+        pkgsecdef = BoolGetDatum(pkgsecdefDatum);
+    }
 
+    if ((!superuser_arg(GetUserId()) && pkgsecdef && !enablePrivilegesSeparate) ||
+            (enablePrivilegesSeparate && pkgsecdef)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
+                errmsg("security definer package not allow alter owner.")));
+    }
+
+    if (superuser_arg(GetUserId()) && isOperatoradmin(newOwnerId)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
+                errmsg("sysadmin can not alter security definer package owner to peradmin.")));
+    }
+
+    HasPrivilegeAlter(newOwnerId, pkgsecdef);
     /* Superusers can always do it */
-    if (!superuser()) {
+    if ((!superuser_arg(GetUserId()) && enablePrivilegesSeparate) ||
+            (!superuser() && !enablePrivilegesSeparate)) {
         /* Otherwise, must be owner of the existing object */
         if (!pg_package_ownercheck(pkgOid, GetUserId()))
             aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PACKAGE, NameStr(gs_package_tuple->pkgname));
