@@ -905,6 +905,12 @@ gaussdb: <replaceable>user</> <replaceable>database</> <replaceable>host</> <rep
      <entry>Number of sequential scans initiated on this table</entry>
     </row>
     <row>
+     <entry><structfield>last_seq_scan</></entry>
+     <entry><type>timestamptz</></entry>
+     <entry>The time of the last sequential scan on this table, based on the
+       most recent transaction stop time</entry>
+    </row>
+    <row>
      <entry><structfield>seq_tup_read</></entry>
      <entry><type>bigint</></entry>
      <entry>Number of live rows fetched by sequential scans</entry>
@@ -913,6 +919,12 @@ gaussdb: <replaceable>user</> <replaceable>database</> <replaceable>host</> <rep
      <entry><structfield>idx_scan</></entry>
      <entry><type>bigint</></entry>
      <entry>Number of index scans initiated on this table</entry>
+    </row>
+    <row>
+     <entry><structfield>last_idx_scan</></entry>
+     <entry><type>timestamptz</></entry>
+     <entry>The time of the last index scan on this table, based on the
+       most recent transaction stop time</entry>
     </row>
     <row>
      <entry><structfield>idx_tup_fetch</></entry>
@@ -1051,6 +1063,12 @@ gaussdb: <replaceable>user</> <replaceable>database</> <replaceable>host</> <rep
      <entry><structfield>idx_scan</></entry>
      <entry><type>bigint</></entry>
      <entry>Number of index scans initiated on this index</entry>
+    </row>
+    <row>
+     <entry><structfield>last_idx_scan</></entry>
+     <entry><type>timestamptz</></entry>
+     <entry>The time of the last scan on this index, based on the
+       most recent transaction stop time</entry>
     </row>
     <row>
      <entry><structfield>idx_tup_read</></entry>

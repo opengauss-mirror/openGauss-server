@@ -454,11 +454,10 @@ test: create_view1 create_view2 create_view3 create_view4 create_view5
 #dupliacated select int8
 #test: select
 #test: misc
-#test: stats
 #test: alter_system_set
 
 #dispatch from 13
-test: function
+test: function stats
 test: aggregates_part1 aggregates_part2 aggregates_part3 count_distinct_part1 count_distinct_part2 count_distinct_part4
 test: aggregate_B_database
 test: group_concat_max_len_gs_guc
