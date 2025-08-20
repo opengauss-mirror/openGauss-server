@@ -3237,7 +3237,7 @@ static int64 AcquireSampleCStoreRows(Relation onerel, int elevel, HeapTuple* row
 {
     int64 numrows = 0;       /* # rows now in reservoir */
     int64 delta_numrows = 0; /* # delta rows now in reservoir */
-    int32 samplerows = 0;    /* total # rows collected */
+    int64 samplerows = 0;    /* total # rows collected */
     int64 liverows = 0;      /* # live rows seen */
     int64 deadrows = 0;      /* # dead rows seen */
     BlockNumber totalblocks = 0;
