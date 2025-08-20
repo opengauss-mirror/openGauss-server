@@ -22,8 +22,7 @@
  * -------------------------------------------------------------------------
  */
 
-GRANT USAGE ON SCHEMA db4ai TO PUBLIC;
-
+--GRANT USAGE ON SCHEMA db4ai TO PUBLIC;
 --CREATE SEQUENCE db4ai.snapshot_sequence; -- openGauss BUG: cannot create sequences in initdb
 --GRANT USAGE ON SEQUENCE db4ai.snapshot_sequence TO db4ai;
 
@@ -72,5 +71,3 @@ COMMENT ON COLUMN db4ai.snapshot.created IS       'timestamp of snapshot creatio
 
 -- public read-only access to snapshot catalog
 REVOKE ALL PRIVILEGES ON db4ai.snapshot FROM PUBLIC;
-GRANT SELECT ON db4ai.snapshot TO PUBLIC;
--- GRANT UPDATE ON db4ai.snapshot_sequence TO PUBLIC;
