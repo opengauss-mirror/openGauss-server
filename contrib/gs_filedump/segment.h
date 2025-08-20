@@ -1,9 +1,6 @@
 #ifndef GS_FILEDUMP_SEGMENT_H_
 #define GS_FILEDUMP_SEGMENT_H_
 
-/* The offset of the starting data block after skipping the reserved leading blocks (such as metadata blocks) */
-const int BLOCK_OFFSET_RESERVED_HEADER = 2;
-
 using BlockLocationT = struct BlockLocationT {
     unsigned int blockId;
     unsigned int extentId;      // extent id
