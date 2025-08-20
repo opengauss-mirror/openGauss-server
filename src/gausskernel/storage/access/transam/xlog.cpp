@@ -10595,12 +10595,6 @@ void StartupXLOG(void)
                 /* Remember this record as the last-applied one */
                 t_thrd.xlog_cxt.LastRec = t_thrd.xlog_cxt.ReadRecPtr;
 
-#ifdef ENABLE_HTAP
-                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
-                    pg_atomic_write_u64(&IMCS_HASH_TABLE->m_xlog_latest_lsn, xlogreader->EndRecPtr);
-                }
-#endif
-
                 /* Exit loop if we reached inclusive recovery target */
                 if (!recoveryContinue &&
                     (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE || t_thrd.xlog_cxt.server_mode == NORMAL_MODE ||

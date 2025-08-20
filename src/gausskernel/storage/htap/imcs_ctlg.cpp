@@ -1642,8 +1642,12 @@ void WaitXLogRedoToCurrentLsn(XLogRecPtr currentLsn)
     }
     int waitTimeMs = 0;
     XLogRecPtr latestXLogLsn = InvalidXLogRecPtr;
+    XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
+
     do {
-        latestXLogLsn = pg_atomic_read_u64(&IMCS_HASH_TABLE->m_xlog_latest_lsn);
+        SpinLockAcquire(&xlogctl->info_lck);
+        latestXLogLsn = t_thrd.shemem_ptr_cxt.XLogCtl->lastReplayedReadRecPtr;
+        SpinLockRelease(&xlogctl->info_lck);
         ereport(DEBUG1, (errmsg("Wait lsn for HTAP population, current lsn: %lu, xlog redo lsn: %lu.",
             currentLsn, latestXLogLsn)));
         Assert(XLogRecPtrIsValid(latestXLogLsn));
