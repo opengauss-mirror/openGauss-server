@@ -38,6 +38,7 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
+extern const uint32 PGSTAT_LAST_SCAN_VERSION_NUM;
 extern const uint32 INLINEVIEW_DML_VERSION_NUM;
 extern const uint32 IDENTITY_VERSION_NUM;
 extern const uint32 COMPUTED_COLUMNS_VERSION_NUMBER;

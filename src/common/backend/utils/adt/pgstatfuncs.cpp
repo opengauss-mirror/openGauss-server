@@ -740,6 +740,36 @@ void pg_stat_get_stat_list(List** stat_list, uint32* statFlag_ref, Oid relid)
     }
 }
 
+Datum pg_stat_get_lastscan(PG_FUNCTION_ARGS)
+{
+    Oid relid = PG_GETARG_OID(0);
+    List* stat_list = NIL;
+    ListCell* stat_cell = NULL;
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry *tabentry;
+    TimestampTz result = 0;
+
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
+
+    foreach (stat_cell, stat_list) {
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (PointerIsValid(tabentry) && tabentry->lastscan > result) {
+            result = tabentry->lastscan;
+        }
+    }
+
+    if (PointerIsValid(stat_list)) {
+        list_free(stat_list);
+    }
+
+    if (result == 0)
+        PG_RETURN_NULL();
+    else
+        PG_RETURN_TIMESTAMPTZ(result);
+}
+
 Datum pg_stat_get_tuples_returned(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
@@ -8008,6 +8038,13 @@ Datum pg_stat_clear_snapshot(PG_FUNCTION_ARGS)
         pfree_ext(buf.data);
     }
 
+    PG_RETURN_VOID();
+}
+
+/* Force statistics to be reported at the next occasion */
+Datum pg_stat_force_next_flush(PG_FUNCTION_ARGS)
+{
+    u_sess->stat_cxt.last_report = 0;
     PG_RETURN_VOID();
 }
 

@@ -109,6 +109,7 @@ typedef int64 PgStat_Counter;
  */
 typedef struct PgStat_TableCounts {
     PgStat_Counter t_numscans;
+    TimestampTz lastscan;
 
     PgStat_Counter t_tuples_returned;
     PgStat_Counter t_tuples_fetched;
@@ -945,7 +946,9 @@ typedef union PgStat_Msg {
  * ------------------------------------------------------------
  */
 
-#define PGSTAT_FILE_FORMAT_ID 0x01A5BC9B
+#define PGSTAT_FILE_FORMAT_ID 0x01A5BC9C
+
+#define PGSTAT_FILE_FORMAT_ID_NO_LAST_SCAN 0x01A5BC9B
 
 /* ----------
  * PgStat_StatDBEntry			The collector's data per database
@@ -1067,6 +1070,7 @@ typedef struct PgStat_StatTabEntry {
     PgStat_StatTabKey tablekey;
 
     PgStat_Counter numscans;
+    TimestampTz lastscan;
 
     PgStat_Counter tuples_returned;
     PgStat_Counter tuples_fetched;

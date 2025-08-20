@@ -361,6 +361,7 @@ static void pgstat_sighup_handler(SIGNAL_ARGS);
 static PgStat_StatDBEntry* pgstat_get_db_entry(Oid databaseid, bool create);
 static PgStat_StatTabEntry* pgstat_get_tab_entry(
     PgStat_StatDBEntry* dbentry, Oid tableoid, bool create, uint32 statFlag);
+template <bool save_last_scan>
 static void pgstat_write_statsfile(bool permanent);
 static HTAB* pgstat_read_statsfile(Oid onlydb, bool permanent);
 static void backend_read_statsfile(void);
@@ -868,6 +869,13 @@ void pgstat_report_stat(bool force)
             rc =
                 memcpy_s(&this_ent->t_counts, sizeof(PgStat_TableCounts), &entry->t_counts, sizeof(PgStat_TableCounts));
             securec_check(rc, "", "");
+            if (entry->t_counts.t_numscans) {
+                TimestampTz t = t_thrd.xact_cxt.xactStopTimestamp;
+                if (t == 0)
+                    t = GetCurrentTimestamp();
+                if (t > this_ent->t_counts.lastscan)
+                    this_ent->t_counts.lastscan = t;
+            }
             if ((unsigned int)++this_msg->m_nentries >= PGSTAT_NUM_TABENTRIES) {
                 pgstat_send_tabstat(this_msg);
                 this_msg->m_nentries = 0;
@@ -5644,7 +5652,7 @@ void PgstatCollectorMain()
              * satisfied by existing file.
              */
             if (g_instance.stat_cxt.last_statwrite < g_instance.stat_cxt.last_statrequest)
-                pgstat_write_statsfile(false);
+                pgstat_write_statsfile<true>(false);
 
             PgstatUpdateHotkeys();
 
@@ -5830,7 +5838,11 @@ void PgstatCollectorMain()
     /*
      * Save the final stats to reuse at next startup.
      */
-    pgstat_write_statsfile(true);
+    if (likely(t_thrd.proc->workingVersionNum >= PGSTAT_LAST_SCAN_VERSION_NUM)) {
+        pgstat_write_statsfile<true>(true);
+    } else {
+        pgstat_write_statsfile<false>(true);
+    }
 
     DEC_NUM_ALIVE_THREADS_WAITTED();
     gs_thread_exit(0);
@@ -5993,6 +6005,7 @@ static PgStat_StatTabEntry* pgstat_get_tab_entry(
  *	the new collector is ready.
  * ----------
  */
+template <bool save_last_scan>
 static void pgstat_write_statsfile(bool permanent)
 {
     HASH_SEQ_STATUS hstat;
@@ -6025,7 +6038,14 @@ static void pgstat_write_statsfile(bool permanent)
     /*
      * Write the file header --- currently just a format ID.
      */
-    format_id = PGSTAT_FILE_FORMAT_ID;
+    if (save_last_scan) {
+        format_id = PGSTAT_FILE_FORMAT_ID;
+    } else {
+        format_id = PGSTAT_FILE_FORMAT_ID_NO_LAST_SCAN;
+        /* Ensure lastscan is preceded by numscans and followed by tuples_returned. */
+        Assert((offsetof(PgStat_StatTabEntry, numscans) + sizeof(PgStat_Counter)
+                + sizeof(TimestampTz)) == offsetof(PgStat_StatTabEntry, tuples_returned));
+    }
     rc = fwrite(&format_id, sizeof(format_id), 1, fpout);
     (void)rc; /* we'll check for error with ferror */
 
@@ -6055,8 +6075,22 @@ static void pgstat_write_statsfile(bool permanent)
         hash_seq_init(&tstat, dbentry->tables);
         while ((tabentry = (PgStat_StatTabEntry*)hash_seq_search(&tstat)) != NULL) {
             fputc('T', fpout);
-            rc = fwrite(tabentry, sizeof(PgStat_StatTabEntry), 1, fpout);
-            (void)rc; /* we'll check for error with ferror */
+            if (save_last_scan) {
+                rc = fwrite(tabentry, sizeof(PgStat_StatTabEntry), 1, fpout);
+                (void)rc; /* we'll check for error with ferror */
+            } else {
+                PgStat_StatTabEntry tabbuf;
+                size_t copylen1 = offsetof(PgStat_StatTabEntry, lastscan);
+                size_t copylen2 = sizeof(PgStat_StatTabEntry) - offsetof(PgStat_StatTabEntry, tuples_returned);
+                Assert((copylen1 + sizeof(TimestampTz) + copylen2) == sizeof(PgStat_StatTabEntry));
+                rc = memcpy_s(&tabbuf, copylen1, tabentry, copylen1);
+                securec_check(rc, "", "");
+                rc = memcpy_s(((char*)&tabbuf) + copylen1, copylen2, 
+                              ((char*)tabentry) + copylen1 + sizeof(TimestampTz), copylen2);
+                securec_check(rc, "", "");
+                rc = fwrite(&tabbuf, sizeof(PgStat_StatTabEntry) - sizeof(TimestampTz), 1, fpout);
+                (void)rc; /* we'll check for error with ferror */
+            }
         }
 
         /*
@@ -6183,6 +6217,8 @@ static HTAB* pgstat_read_statsfile(Oid onlydb, bool permanent)
     bool found = false;
     const char* statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : u_sess->stat_cxt.pgstat_stat_filename;
     errno_t rc = EOK;
+    size_t statTabEntrySize = sizeof(PgStat_StatTabEntry);
+    size_t statTabEntryMoveLen = 0;
 
     /*
      * The tables will live in u_sess->stat_cxt.pgStatLocalContext.
@@ -6234,10 +6270,19 @@ static HTAB* pgstat_read_statsfile(Oid onlydb, bool permanent)
     /*
      * Verify it's of the expected format.
      */
-    if (fread(&format_id, 1, sizeof(format_id), fpin) != sizeof(format_id) || format_id != PGSTAT_FILE_FORMAT_ID) {
+    if (fread(&format_id, 1, sizeof(format_id), fpin) != sizeof(format_id) || (format_id != PGSTAT_FILE_FORMAT_ID && format_id != PGSTAT_FILE_FORMAT_ID_NO_LAST_SCAN)) {
         ereport(u_sess->stat_cxt.pgStatRunningInCollector ? LOG : WARNING,
             (errmsg("corrupted statistics file \"%s\"", statfile)));
         goto done;
+    }
+
+    if (unlikely(format_id == PGSTAT_FILE_FORMAT_ID_NO_LAST_SCAN)) {
+        /* Ensure lastscan is preceded by numscans and followed by tuples_returned. */
+        Assert((offsetof(PgStat_StatTabEntry, numscans) + sizeof(PgStat_Counter)
+                + sizeof(TimestampTz)) == offsetof(PgStat_StatTabEntry, tuples_returned));
+
+        statTabEntrySize = sizeof(PgStat_StatTabEntry) - sizeof(TimestampTz);
+        statTabEntryMoveLen = sizeof(PgStat_StatTabEntry) - offsetof(PgStat_StatTabEntry, tuples_returned);
     }
 
     /*
@@ -6328,7 +6373,7 @@ static HTAB* pgstat_read_statsfile(Oid onlydb, bool permanent)
                  * 'T'	A PgStat_StatTabEntry follows.
                  */
             case 'T':
-                if (fread(&tabbuf, 1, sizeof(PgStat_StatTabEntry), fpin) != sizeof(PgStat_StatTabEntry)) {
+                if (fread(&tabbuf, 1, statTabEntrySize, fpin) != statTabEntrySize) {
                     ereport(u_sess->stat_cxt.pgStatRunningInCollector ? LOG : WARNING,
                         (errmsg("corrupted statistics file \"%s\"", statfile)));
                     goto done;
@@ -6350,6 +6395,21 @@ static HTAB* pgstat_read_statsfile(Oid onlydb, bool permanent)
 
                 rc = memcpy_s(tabentry, sizeof(PgStat_StatTabEntry), &tabbuf, sizeof(tabbuf));
                 securec_check(rc, "", "");
+
+                /*
+                 * The data in the PgStat_StatTabEntry structure within the old
+                 * file is missing the lastscan field. After reading the binary
+                 * data, it's necessary to shift the data to ensure correct
+                 * values for both tuples_returned and subsequent attributes.
+                 */
+                if (unlikely(format_id == PGSTAT_FILE_FORMAT_ID_NO_LAST_SCAN)) {
+                    rc = memmove_s(((char*)tabentry) + offsetof(PgStat_StatTabEntry, tuples_returned),
+                                   statTabEntryMoveLen,
+                                   ((char*)tabentry) + offsetof(PgStat_StatTabEntry, lastscan),
+                                   statTabEntryMoveLen);
+                    securec_check(rc, "", "");
+                    tabentry->lastscan = 0;
+                }
                 break;
 
                 /*
@@ -6923,6 +6983,11 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg, int len)
             tabentry->cu_hdd_asyn += tabmsg->t_counts.t_cu_hdd_asyn;
         }
 
+        if (tabmsg->t_counts.t_numscans) {
+            if (tabmsg->t_counts.lastscan > tabentry->lastscan)
+                tabentry->lastscan = tabmsg->t_counts.lastscan;
+        }
+
         /* Clamp n_live_tuples in case of negative delta_live_tuples */
         tabentry->n_live_tuples = Max(tabentry->n_live_tuples, 0);
         /* Likewise for n_dead_tuples */
@@ -7005,6 +7070,11 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg, int len)
             tabentry->cu_mem_hit += tabmsg->t_counts.t_cu_mem_hit;
             tabentry->cu_hdd_sync += tabmsg->t_counts.t_cu_hdd_sync;
             tabentry->cu_hdd_asyn += tabmsg->t_counts.t_cu_hdd_asyn;
+        }
+
+        if (tabmsg->t_counts.t_numscans) {
+            if (tabmsg->t_counts.lastscan > tabentry->lastscan)
+                tabentry->lastscan = tabmsg->t_counts.lastscan;
         }
     }
 }
