@@ -1311,6 +1311,7 @@ tryAgain:
         }
         report_invalid_record(xlogreader, "SimpleXLogPageRead could not seek in file \"%s\": %s, retryCnt(%u)\n",
                               xlogfpath, strerror(errno), retryCnt);
+        CLOSE_FD(xlogreadfd);
         return -1;
     }
     if (read(xlogreadfd, readBuf, XLOG_BLCKSZ) != XLOG_BLCKSZ) {
@@ -1319,6 +1320,7 @@ tryAgain:
         }
         report_invalid_record(xlogreader, "SimpleXLogPageRead could not read from file \"%s\": %s, retryCnt(%u)\n",
                               xlogfpath, strerror(errno), retryCnt);
+        CLOSE_FD(xlogreadfd);
         return -1;
     }
     retryCnt = 0;
