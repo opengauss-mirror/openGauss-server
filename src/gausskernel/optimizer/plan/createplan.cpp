@@ -97,6 +97,7 @@ static void adjust_scan_targetlist(ResultPath* best_path, Plan* subplan);
 static Plan* create_projection_plan(PlannerInfo* root, ProjectionPath* best_path);
 static ProjectSet* create_project_set_plan(PlannerInfo* root, ProjectSetPath* best_path);
 static Material* create_material_plan(PlannerInfo* root, MaterialPath* best_path);
+static Memoize* create_memoize_plan(PlannerInfo *root, MemoizePath *best_path);//, int flags);
 static Plan* create_unique_plan(PlannerInfo* root, UniquePath* best_path);
 static SeqScan* create_seqscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
 static CStoreScan* create_cstorescan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
@@ -145,6 +146,9 @@ static CStoreScan* make_cstorescan(List* qptlist, List* qpqual, Index scanrelid)
 #ifdef ENABLE_HTAP
 static IMCStoreScan* make_imcstorescan(List* qptlist, List* qpqual, Index scanrelid);
 #endif
+static Memoize* make_memoize(Plan *lefttree, Oid *hashoperators, Oid *collations,
+			                  List *param_exprs, bool singlerow, bool binary_mode,
+			                  uint32 est_entries, Bitmapset *keyparamids);
 #ifdef ENABLE_MULTIPLE_NODES
 static TsStoreScan* make_tsstorescan(List* qptlist, List* qpqual, Index scanrelid);
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -654,6 +658,9 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
             break;
         case T_ProjectSet:
             plan = (Plan *) create_project_set_plan(root, (ProjectSetPath *) best_path);
+            break;
+        case T_Memoize:
+            plan = (Plan*)create_memoize_plan(root, (MemoizePath*)best_path);
             break;
         case T_Material:
             plan = (Plan*)create_material_plan(root, (MaterialPath*)best_path);
@@ -1944,7 +1951,57 @@ static Material* create_material_plan(PlannerInfo* root, MaterialPath* best_path
 
     return plan;
 }
+/*
+ * create_memoize_plan
+ *      Create a Memoize plan for 'best_path' and (recursively) plans for its
+ *      subpaths.
+ *
+ *      Returns a Plan node.
+ */
+static Memoize *
+create_memoize_plan(PlannerInfo *root, MemoizePath *best_path)//;, int flags)
+{
+    Memoize *plan;
+    Bitmapset *keyparamids;
+    Plan *subplan;
+    Oid *operators;
+    Oid *collations;
+    List *param_exprs = NIL;
+    ListCell *lc;
+    ListCell *lc2;
+    int nkeys;
+    int i;
 
+    subplan = create_plan_recurse(root, best_path->subpath);
+
+    param_exprs = (List *) replace_nestloop_params(root, (Node *)
+                                                   best_path->param_exprs);
+
+    nkeys = list_length(param_exprs);
+    Assert(nkeys > 0);
+    operators = (Oid*)palloc(nkeys * sizeof(Oid));
+    collations = (Oid*)palloc(nkeys * sizeof(Oid));
+
+    i = 0;
+    forboth(lc, param_exprs, lc2, best_path->hash_operators) {
+        Expr       *param_expr = (Expr *) lfirst(lc);
+        Oid            opno = lfirst_oid(lc2);
+
+        operators[i] = opno;
+        collations[i] = exprCollation((Node *) param_expr);
+        i++;
+    }
+
+    keyparamids = pull_paramids((Expr *) param_exprs);
+
+    plan = make_memoize(subplan, operators, collations, param_exprs,
+                        best_path->singlerow, best_path->binary_mode,
+                        best_path->est_entries, keyparamids);
+
+    copy_generic_path_info(&plan->plan, (Path *) best_path);
+
+    return plan;
+}
 /*
  * create_unique_plan
  *	  Create a Unique plan for 'best_path' and (recursively) plans
@@ -11694,7 +11751,29 @@ bool is_projection_capable_path(Path *path)
     }
     return true;
 }
+static Memoize *make_memoize(Plan *lefttree, Oid *hashoperators, Oid *collations,
+             List *param_exprs, bool singlerow, bool binary_mode,
+             uint32 est_entries, Bitmapset *keyparamids)
+{
+    Memoize *node = makeNode(Memoize);
+    Plan *plan = &node->plan;
 
+    plan->targetlist = lefttree->targetlist;
+    plan->qual = NIL;
+    plan->lefttree = lefttree;
+    plan->righttree = NULL;
+
+    node->numKeys = list_length(param_exprs);
+    node->hashOperators = hashoperators;
+    node->collations = collations;
+    node->param_exprs = param_exprs;
+    node->singlerow = singlerow;
+    node->binary_mode = binary_mode;
+    node->est_entries = est_entries;
+    node->keyparamids = keyparamids;
+
+    return node;
+}
 #ifdef USE_SPQ
 List* spq_make_null_eq_clause(List* joinqual, List** otherqual, List* nullinfo)
 {

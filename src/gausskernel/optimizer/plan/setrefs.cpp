@@ -602,6 +602,7 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
 
         case T_Hash:
         case T_Material:
+        case T_Memoize:
         case T_VecMaterial:
         case T_Sort:
         case T_SortGroup:

@@ -40,6 +40,7 @@
 #include "utils/rel_gs.h"
 #include "utils/selfuncs.h"
 #include "utils/syscache.h"
+#include "utils/typcache.h"
 #include "optimizer/streamplan.h"
 #include "pgxc/pgxc.h"
 #include "parser/parsetree.h"
@@ -622,6 +623,284 @@ static void TryNestLoopPathSingle(PlannerInfo* root, RelOptInfo* joinrel, JoinTy
     }
 
     return;
+}
+/*
+ * paraminfo_get_equal_hashops
+ *        Determine if the clauses in param_info and innerrel's lateral_vars
+ *        can be hashed.
+ *        Returns true if hashing is possible, otherwise false.
+ *
+ * Additionally, on success we collect the outer expressions and the
+ * appropriate equality operators for each hashable parameter to innerrel.
+ * These are returned in parallel lists in *param_exprs and *operators.
+ * We also set *binaryMode to indicate whether strict binary matching is
+ * required.
+ */
+static bool paraminfo_get_equal_hashops(PlannerInfo *root,
+                                        ParamPathInfo *param_info,
+                                        RelOptInfo *outerrel,
+                                        RelOptInfo *innerrel,
+                                        List **param_exprs,
+                                        List **operators,
+                                        bool *binaryMode)
+
+{
+    ListCell   *lc;
+
+    *param_exprs = NIL;
+    *operators = NIL;
+    *binaryMode = false;
+
+    /* Add join clauses from param_info to the hash key */
+    if (param_info != NULL) {
+        List       *clauses = param_info->ppi_clauses;
+
+        foreach(lc, clauses) {
+            RestrictInfo *rinfo = (RestrictInfo *) lfirst(lc);
+            OpExpr       *opexpr;
+            Node       *expr;
+            Oid            hasheqoperator;
+
+            opexpr = (OpExpr *) rinfo->clause;
+
+            /*
+             * Bail if the rinfo is not compatible.  We need a join OpExpr
+             * with 2 args.
+             */
+            if (!IsA(opexpr, OpExpr) || list_length(opexpr->args) != 2 ||
+                !clause_sides_match_join(rinfo, outerrel, innerrel)) {
+                list_free(*operators);
+                list_free(*param_exprs);
+                return false;
+            }
+
+            if (rinfo->outer_is_left) {
+                expr = (Node *) linitial(opexpr->args);
+                hasheqoperator = rinfo->left_hasheqoperator;
+            } else {
+                expr = (Node *) lsecond(opexpr->args);
+                hasheqoperator = rinfo->right_hasheqoperator;
+            }
+
+            /* can't do memoize if we can't hash the outer type */
+            if (!OidIsValid(hasheqoperator)) {
+                list_free(*operators);
+                list_free(*param_exprs);
+                return false;
+            }
+
+            /*
+             * 'expr' may already exist as a parameter from a previous item in
+             * ppi_clauses.  No need to include it again, however we'd better
+             * ensure we do switch into binary mode if required.  See below.
+             */
+            if (!list_member(*param_exprs, expr)) {
+                *operators = lappend_oid(*operators, hasheqoperator);
+                *param_exprs = lappend(*param_exprs, expr);
+            }
+
+            /*
+             * When the join operator is not hashable then it's possible that
+             * the operator will be able to distinguish something that the
+             * hash equality operator could not. For example with floating
+             * point types -0.0 and +0.0 are classed as equal by the hash
+             * function and equality function, but some other operator may be
+             * able to tell those values apart.  This means that we must put
+             * memoize into binary comparison mode so that it does bit-by-bit
+             * comparisons rather than a "logical" comparison as it would
+             * using the hash equality operator.
+             */
+            if (!OidIsValid(rinfo->hashjoinoperator))
+                *binaryMode = true;
+        }
+    }
+
+    /* Now add any lateral vars to the cache key too */
+    foreach(lc, innerrel->lateral_vars) {
+        Node       *expr = (Node *) lfirst(lc);
+        TypeCacheEntry *typentry;
+
+        /* Reject if there are any volatile functions in lateral vars */
+        if (contain_volatile_functions(expr)) {
+            list_free(*operators);
+            list_free(*param_exprs);
+            return false;
+        }
+        typentry = lookup_type_cache(exprType(expr),
+                                     TYPECACHE_HASH_PROC | TYPECACHE_EQ_OPR);
+        /* can't use memoize without a valid hash proc and equals operator */
+        if (!OidIsValid(typentry->hash_proc) || !OidIsValid(typentry->eq_opr)) {
+            list_free(*operators);
+            list_free(*param_exprs);
+            return false;
+        }
+        /*
+         * 'expr' may already exist as a parameter from the ppi_clauses.  No
+         * need to include it again, however we'd better ensure we do switch
+         * into binary mode.
+         */
+        if (!list_member(*param_exprs, expr)) {
+            *operators = lappend_oid(*operators, typentry->eq_opr);
+            *param_exprs = lappend(*param_exprs, expr);
+        }
+
+        /*
+         * We must go into binary mode as we don't have too much of an idea of
+         * how these lateral Vars are being used.  See comment above when we
+         * set *binaryMode for the non-lateral Var case. This could be
+         * relaxed a bit if we had the RestrictInfos and knew the operators
+         * being used, however for cases like Vars that are arguments to
+         * functions we must operate in binary mode as we don't have
+         * visibility into what the function is doing with the Vars.
+         */
+        *binaryMode = true;
+    }
+
+    /* We're okay to use memoize */
+    return true;
+}
+/*
+ * get_memoize_path
+ *        If possible, make and return a Memoize path atop of 'inner_path'.
+ *        Otherwise return NULL.
+ */
+static Path* get_memoize_path(PlannerInfo *root, RelOptInfo *innerrel,
+                              RelOptInfo *outerrel, Path *inner_path,
+                              Path *outer_path, JoinType jointype,
+                              JoinPathExtraData *extra)
+{
+    List       *param_exprs;
+    List       *hash_operators;
+    ListCell   *lc;
+    bool        binaryMode;
+
+    /* Obviously not if it's disabled */
+    if (!u_sess->attr.attr_sql.enable_memoize) {
+        return NULL;
+    }
+
+    /*
+     * We can safely not bother with all this unless we expect to perform more
+     * than one inner scan.  The first scan is always going to be a cache
+     * miss.  This would likely fail later anyway based on costs, so this is
+     * really just to save some wasted effort.
+     */
+    if (outer_path->parent->rows < 2) {
+        return NULL;
+    }
+
+    /*
+     * We can only have a memoize node when there's some kind of cache key,
+     * either parameterized path clauses or lateral Vars.  No cache key sounds
+     * more like something a Materialize node might be more useful for.
+     */
+    if ((inner_path->param_info == NULL ||
+         inner_path->param_info->ppi_clauses == NIL) &&
+        innerrel->lateral_vars == NIL) {
+        return NULL;
+    }
+
+    /*
+     * Currently we don't do this for SEMI and ANTI joins unless they're
+     * marked as inner_unique.  This is because nested loop SEMI/ANTI joins
+     * don't scan the inner node to completion, which will mean memoize cannot
+     * mark the cache entry as complete.
+     *
+     * XXX Currently we don't attempt to mark SEMI/ANTI joins as inner_unique
+     * = true.  Should we?  See add_paths_to_joinrel()
+     */
+    if (!extra->inner_unique && (jointype == JOIN_SEMI ||
+                                 jointype == JOIN_ANTI)) {
+        return NULL;
+    }
+
+    /*
+     * Memoize normally marks cache entries as complete when it runs out of
+     * tuples to read from its subplan.  However, with unique joins, Nested
+     * Loop will skip to the next outer tuple after finding the first matching
+     * inner tuple.  This means that we may not read the inner side of the
+     * join to completion which leaves no opportunity to mark the cache entry
+     * as complete.  To work around that, when the join is unique we
+     * automatically mark cache entries as complete after fetching the first
+     * tuple.  This works when the entire join condition is parameterized.
+     * Otherwise, when the parameterization is only a subset of the join
+     * condition, we can't be sure which part of it causes the join to be
+     * unique.  This means there are no guarantees that only 1 tuple will be
+     * read.  We cannot mark the cache entry as complete after reading the
+     * first tuple without that guarantee.  This means the scope of Memoize
+     * node's usefulness is limited to only outer rows that have no join
+     * partner as this is the only case where Nested Loop would exhaust the
+     * inner scan of a unique join.  Since the scope is limited to that, we
+     * just don't bother making a memoize path in this case.
+     *
+     * Lateral vars needn't be considered here as they're not considered when
+     * determining if the join is unique.
+     *
+     * XXX this could be enabled if the remaining join quals were made part of
+     * the inner scan's filter instead of the join filter.  Maybe it's worth
+     * considering doing that?
+     */
+    /*
+    if (extra->inner_unique &&
+        (inner_path->param_info == NULL ||
+         bms_num_members(inner_path->param_info->ppi_serials) <
+         list_length(extra->restrictlist)))
+        return NULL;
+        */
+
+    /*
+     * We can't use a memoize node if there are volatile functions in the
+     * inner rel's target list or restrict list.  A cache hit could reduce the
+     * number of calls to these functions.
+     */
+    if (contain_volatile_functions((Node *) innerrel->reltarget)) {
+        return NULL;
+    }
+
+    foreach(lc, innerrel->baserestrictinfo) {
+        RestrictInfo *rinfo = (RestrictInfo *) lfirst(lc);
+
+        if (contain_volatile_functions((Node *) rinfo)) {
+            return NULL;
+        }
+    }
+
+    /*
+     * Also check the parameterized path restrictinfos for volatile functions.
+     * Indexed functions must be immutable so shouldn't have any volatile
+     * functions, however, with a lateral join the inner scan may not be an
+     * index scan.
+     */
+    if (inner_path->param_info != NULL) {
+        foreach(lc, inner_path->param_info->ppi_clauses) {
+            RestrictInfo *rinfo = (RestrictInfo *) lfirst(lc);
+            if (contain_volatile_functions((Node *) rinfo)) {
+                return NULL;
+            }
+        }
+    }
+
+    /* Check if we have hash ops for each parameter to the path */
+    /* SMP do not support memoize,  we only consider memoize when query dop = 1 */
+    if (u_sess->opt_cxt.query_dop == 1 &&
+        paraminfo_get_equal_hashops(root,
+                                    inner_path->param_info,
+                                    outerrel,
+                                    innerrel,
+                                    &param_exprs,
+                                    &hash_operators,
+                                    &binaryMode)) {
+        return (Path *) create_memoize_path(root,
+                                            innerrel,
+                                            inner_path,
+                                            param_exprs,
+                                            hash_operators,
+                                            extra->inner_unique,
+                                            binaryMode,
+                                            outer_path->rows);
+    }
+
+    return NULL;
 }
 
 /*
@@ -1627,6 +1906,7 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
 
                     foreach (llc2, all_paths) {
                         Path* innerpath = (Path*)lfirst(llc2);
+                        Path* mpath;
 
                         try_nestloop_path(root,
                             joinrel,
@@ -1639,6 +1919,20 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                             innerpath,
                             restrictlist,
                             merge_pathkeys);
+                        /* try add memoize path */
+                        mpath = get_memoize_path(root, innerrel, outerrel, innerpath, outerpath, jointype, extra);
+                        if (mpath != NULL)
+                            try_nestloop_path(root,
+                                joinrel,
+                                jointype,
+                                save_jointype,
+                                extra,
+                                param_source_rels,
+                                extra_lateral_rels,
+                                outerpath,
+                                mpath,
+                                restrictlist,
+                                merge_pathkeys);
                     }
 
                     list_free_ext(all_paths);

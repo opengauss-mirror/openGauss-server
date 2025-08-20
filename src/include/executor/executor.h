@@ -526,6 +526,7 @@ extern TupleTableSlot *ExecInitNullTupleSlot(EState *estate, TupleDesc tupType);
 extern TupleDesc ExecTypeFromTL(List *targetList, bool hasoid, bool markdropped = false,
                                 const TableAmRoutine *tam_ops = TableAmHeap);
 extern TupleDesc ExecCleanTypeFromTL(List *targetList, bool hasoid, const TableAmRoutine *tam_ops = TableAmHeap);
+extern TupleDesc pg_ExecTypeFromExprList(List *exprList);
 extern TupleDesc ExecTypeFromExprList(List *exprList, List *namesList, const TableAmRoutine *tam_ops = TableAmHeap);
 extern void UpdateChangedParamSet(PlanState *node, Bitmapset *newchg);
 extern void InitOutputValues(RightRefState* refState, Datum* values, bool* isnull, bool* hasExecs);

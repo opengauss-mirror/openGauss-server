@@ -76,6 +76,7 @@ typedef struct knl_session_attr_sql {
     bool enable_hashagg;
     bool enable_sortgroup_agg;
     bool enable_material;
+    bool enable_memoize;
     bool enable_nestloop;
     bool enable_mergejoin;
     bool enable_hashjoin;

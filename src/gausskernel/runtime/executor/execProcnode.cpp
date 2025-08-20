@@ -94,6 +94,7 @@
 #include "executor/node/nodeLimit.h"
 #include "executor/node/nodeLockRows.h"
 #include "executor/node/nodeMaterial.h"
+#include "executor/node/nodeMemoize.h"
 #include "executor/node/nodeMergeAppend.h"
 #include "executor/node/nodeMergejoin.h"
 #include "executor/node/nodeModifyTable.h"
@@ -373,6 +374,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitHashJoin((HashJoin*)node, estate, eflags);
         case T_Material:
             return (PlanState*)ExecInitMaterial((Material*)node, estate, eflags);
+        case T_Memoize:
+            return (PlanState*)ExecInitMemoize((Memoize*)node, estate, eflags);
         case T_Sort:
             return (PlanState*)ExecInitSort((Sort*)node, estate, eflags);
         case T_SortGroup:
@@ -1269,6 +1272,10 @@ static void ExecEndNodeByType(PlanState* node)
              */
         case T_MaterialState:
             ExecEndMaterial((MaterialState*)node);
+            break;
+
+        case T_MemoizeState:
+            ExecEndMemoize((MemoizeState*)node);
             break;
 
         case T_SortState:

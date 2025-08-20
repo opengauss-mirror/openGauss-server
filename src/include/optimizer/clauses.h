@@ -167,7 +167,7 @@ extern List* get_quals_lists(Node *jtnode);
 extern bool isTableofType(Oid typeOid, Oid* base_oid, Oid* indexbyType);
 extern Expr* simplify_function(Oid funcid, Oid result_type, int32 result_typmod, Oid result_collid, Oid input_collid,
     List** args_p, bool process_args, bool allow_non_const, eval_const_expressions_context* context);
- 
+extern Bitmapset *pull_paramids(Expr *expr); 
 #ifdef USE_SPQ
 extern Query *fold_constants(PlannerInfo *root, Query *q, ParamListInfo boundParams, Size max_size);
 extern Query *flatten_join_alias_var_optimizer(Query *query, int queryLevel);

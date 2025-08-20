@@ -416,6 +416,9 @@ void GetPlanNodePlainText(
             else
                 *pname = *pt_operation = *sname = "Extensible Plan";
             break;
+        case T_Memoize:
+            *pname = *sname = *pt_operation = "Memoize";
+            break;
         case T_Material:
             *pname = *sname = *pt_operation = "Materialize";
             break;

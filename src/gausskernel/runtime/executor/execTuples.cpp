@@ -816,7 +816,37 @@ static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool sk
 
     return type_info;
 }
+/*
+ * ExecTypeFromExprList - build a tuple descriptor from a list of Exprs
+ *
+ * This is roughly like ExecTypeFromTL, but we work from bare expressions
+ * not TargetEntrys.  No names are attached to the tupledesc's columns.
+ */
+TupleDesc pg_ExecTypeFromExprList(List *exprList)
+{
+    TupleDesc typeInfo;
+    ListCell *lc;
+    int cur_resno = 1;
 
+    typeInfo = CreateTemplateTupleDesc(list_length(exprList), false);
+
+    foreach(lc, exprList) {
+        Node *e = (Node*)lfirst(lc);
+
+        TupleDescInitEntry(typeInfo,
+                           cur_resno,
+                           NULL,
+                           exprType(e),
+                           exprTypmod(e),
+                           0);
+        TupleDescInitEntryCollation(typeInfo,
+                                    cur_resno,
+                                    exprCollation(e));
+        cur_resno++;
+    }
+
+    return typeInfo;
+}
 /*
  * ExecTypeFromExprList - build a tuple descriptor from a list of Exprs
  *

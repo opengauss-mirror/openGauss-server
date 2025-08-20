@@ -776,6 +776,8 @@ extern void CancelBackup(void);
 
 extern void EarlyBindingTLSVariables(void);
 
+/* in executor/nodeHash.c */
+extern size_t GetHashMemoryLimit(void);
 /*
  * converts the 64 bits unsigned integer between host byte order and network byte order.
  * Note that the network byte order is BIG ENDIAN.

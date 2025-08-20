@@ -2717,7 +2717,184 @@ void cost_merge_append(Path* path, PlannerInfo* root, List* pathkeys, int n_stre
     path->startup_cost = startup_cost + input_startup_cost;
     path->total_cost = startup_cost + run_cost + input_total_cost;
 }
+/*
+ * get_expr_width
+ *        Estimate the width of the given expr attempting to use the width
+ *        cached in a Var's owning RelOptInfo, else fallback on the type's
+ *        average width when unable to or when the given Node is not a Var.
+ */
+static int32 get_expr_width(PlannerInfo *root, const Node *expr)
+{
+    int32        width;
 
+    if (IsA(expr, Var)) {
+        const Var  *var = (const Var *) expr;
+
+        /* We should not see any upper-level Vars here */
+        Assert(var->varlevelsup == 0);
+
+        /* Try to get data from RelOptInfo cache */
+        if (!IS_SPECIAL_VARNO(var->varno) &&
+            var->varno < root->simple_rel_array_size) {
+            RelOptInfo *rel = root->simple_rel_array[var->varno];
+
+            if (rel != NULL &&
+                var->varattno >= rel->min_attr &&
+                var->varattno <= rel->max_attr) {
+                int ndx = var->varattno - rel->min_attr;
+
+                if (rel->attr_widths[ndx] > 0) {
+                    return rel->attr_widths[ndx];
+                }
+            }
+        }
+
+        /*
+         * No cached data available, so estimate using just the type info.
+         */
+        width = get_typavgwidth(var->vartype, var->vartypmod);
+        Assert(width > 0);
+
+        return width;
+    }
+
+    width = get_typavgwidth(exprType(expr), exprTypmod(expr));
+    Assert(width > 0);
+    return width;
+}
+/*
+ * cost_memoize_rescan
+ *      Determines the estimated cost of rescanning a Memoize node.
+ *
+ * In order to estimate this, we must gain knowledge of how often we expect to
+ * be called and how many distinct sets of parameters we are likely to be
+ * called with. If we expect a good cache hit ratio, then we can set our
+ * costs to account for that hit ratio, plus a little bit of cost for the
+ * caching itself.  Caching will not work out well if we expect to be called
+ * with too many distinct parameter values.  The worst-case here is that we
+ * never see any parameter value twice, in which case we'd never get a cache
+ * hit and caching would be a complete waste of effort.
+ */
+void cost_memoize_rescan(PlannerInfo *root, MemoizePath *mpath,
+                         Cost *rescan_startup_cost, Cost *rescan_total_cost)
+{
+    ListCell *lc;
+    Cost input_startup_cost = mpath->subpath->startup_cost;
+    Cost input_total_cost = mpath->subpath->total_cost;
+    double tuples = mpath->subpath->rows;
+    double calls = mpath->calls;
+    int width = mpath->subpath->pathtarget->width;
+
+    double hashMemBytes;
+    double estEntryBytes;
+    double estCacheEntries;
+    double ndistinct;
+    double evictRatio;
+    double hitRatio;
+    Cost startup_cost;
+    Cost total_cost;
+
+    /* available cache space */
+    hashMemBytes = GetHashMemoryLimit();
+
+    /*
+     * Set the number of bytes each cache entry should consume in the cache.
+     * To provide us with better estimations on how many cache entries we can
+     * store at once, we make a call to the executor here to ask it what
+     * memory overheads there are for a single cache entry.
+     */
+    estEntryBytes = relation_byte_size(tuples, width, false);
+
+    /* include the estimated width for the cache keys */
+    foreach(lc, mpath->param_exprs)
+        estEntryBytes += get_expr_width(root, (Node *) lfirst(lc));
+
+    /* estimate on the upper limit of cache entries we can hold at once */
+    estCacheEntries = floor(hashMemBytes / estEntryBytes);
+
+    /* estimate on the distinct number of parameter values */
+    ndistinct = estimate_num_groups(root, mpath->param_exprs, calls, 1);
+
+    /*
+     * When the estimation fell back on using a default value, it's a bit too
+     * risky to assume that it's ok to use a Memoize node.  The use of a
+     * default could cause us to use a Memoize node when it's really
+     * inappropriate to do so.  If we see that this has been done, then we'll
+     * assume that every call will have unique parameters, which will almost
+     * certainly mean a MemoizePath will never survive add_path().
+     * Since we've already estimated the maximum number of entries we can
+     * store at once and know the estimated number of distinct values we'll be
+     * called with, we'll take this opportunity to set the path's est_entries.
+     * This will ultimately determine the hash table size that the executor
+     * will use.  If we leave this at zero, the executor will just choose the
+     * size itself.  Really this is not the right place to do this, but it's
+     * convenient since everything is already calculated.
+     */
+    mpath->est_entries = Min(Min(ndistinct, estCacheEntries),
+                             PG_UINT32_MAX);
+
+    /*
+     * When the number of distinct parameter values is above the amount we can
+     * store in the cache, then we'll have to evict some entries from the
+     * cache.  This is not free. Here we estimate how often we'll incur the
+     * cost of that eviction.
+     */
+    evictRatio = 1.0 - Min(estCacheEntries, ndistinct) / ndistinct;
+
+    /*
+     * In order to estimate how costly a single scan will be, we need to
+     * attempt to estimate what the cache hit ratio will be.  To do that we
+     * must look at how many scans are estimated in total for this node and
+     * how many of those scans we expect to get a cache hit.
+     */
+    hitRatio = ((calls - ndistinct) / calls) *
+        (estCacheEntries / Max(ndistinct, estCacheEntries));
+
+    Assert(hitRatio >= 0 && hitRatio <= 1.0);
+
+    /*
+     * Set the total_cost accounting for the expected cache hit ratio.  We
+     * also add on a cpu_operator_cost to account for a cache lookup. This
+     * will happen regardless of whether it's a cache hit or not.
+     */
+    total_cost = input_total_cost * (1.0 - hitRatio) + u_sess->attr.attr_sql.cpu_operator_cost;
+
+    /* Now adjust the total cost to account for cache evictions */
+
+    /* Charge a cpu_tuple_cost for evicting the actual cache entry */
+    total_cost += u_sess->attr.attr_sql.cpu_tuple_cost * evictRatio;
+
+    /*
+     * Charge a 10th of cpu_operator_cost to evict every tuple in that entry.
+     * The per-tuple eviction is really just a pfree, so charging a whole
+     * cpu_operator_cost seems a little excessive.
+     */
+    total_cost += u_sess->attr.attr_sql.cpu_operator_cost / 10.0 * evictRatio * tuples;
+
+    /*
+     * Now adjust for storing things in the cache, since that's not free
+     * either.  Everything must go in the cache.  We don't proportion this
+     * over any ratio, just apply it once for the scan.  We charge a
+     * cpu_tuple_cost for the creation of the cache entry and also a
+     * cpu_operator_cost for each tuple we expect to cache.
+     */
+    total_cost += u_sess->attr.attr_sql.cpu_tuple_cost + u_sess->attr.attr_sql.cpu_operator_cost * tuples;
+
+    /*
+     * Getting the first row must be also be proportioned according to the
+     * expected cache hit ratio.
+     */
+    startup_cost = input_startup_cost * (1.0 - hitRatio);
+
+    /*
+     * Additionally we charge a cpu_tuple_cost to account for cache lookups,
+     * which we'll do regardless of whether it was a cache hit or not.
+     */
+    startup_cost += u_sess->attr.attr_sql.cpu_tuple_cost;
+
+    *rescan_startup_cost = startup_cost;
+    *rescan_total_cost = total_cost;
+}
 /*
  * cost_material
  *	  Determines and returns the cost of materializing a relation, including
@@ -3397,6 +3574,7 @@ void final_cost_nestloop(PlannerInfo* root, NestPath* path, JoinCostWorkspace* w
 
     if (path->innerjoinpath->pathtype == T_Material)
         copy_mem_info(&((MaterialPath*)path->innerjoinpath)->mem_info, &workspace->inner_mem_info);
+
 
     ereport(DEBUG2,
         (errmodule(MOD_OPT_JOIN),
@@ -5244,6 +5422,11 @@ void cost_rescan(PlannerInfo* root, Path* path, Cost* rescan_startup_cost, /* ou
                 mem_info,
                 root->glob->vectorized,
                 dop);
+        } break;
+        case T_Memoize: {
+            /* All the hard work is done by cost_memoize_rescan */
+            cost_memoize_rescan(root, (MemoizePath *) path,
+                                rescan_startup_cost, rescan_total_cost);
         } break;
         default:
             *rescan_startup_cost = path->startup_cost;

@@ -3169,6 +3169,55 @@ MaterialPath* create_material_path(Path* subpath, bool materialize_all)
 
     return pathnode;
 }
+/*
+ * create_memoize_path
+ *      Creates a path corresponding to a Memoize plan, returning the pathnode.
+ */
+MemoizePath *create_memoize_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath,
+                    List *param_exprs, List *hash_operators,
+                    bool singlerow, bool binary_mode, double calls)
+{
+    MemoizePath *pathnode = makeNode(MemoizePath);
+
+    Assert(subpath->parent == rel);
+
+    pathnode->path.pathtype = T_Memoize;
+    pathnode->path.parent = rel;
+    pathnode->path.pathtarget = rel->reltarget;
+    pathnode->path.param_info = subpath->param_info;
+    /*
+    pathnode->path.parallel_aware = false;
+    pathnode->path.parallel_safe = rel->consider_parallel &&
+    subpath->parallel_safe;
+    pathnode->path.parallel_workers = subpath->parallel_workers;
+    */
+    pathnode->path.pathkeys = subpath->pathkeys;
+
+    pathnode->subpath = subpath;
+    pathnode->hash_operators = hash_operators;
+    pathnode->param_exprs = param_exprs;
+    pathnode->singlerow = singlerow;
+    pathnode->binary_mode = binary_mode;
+    pathnode->calls = calls;
+
+    /*
+     * For now we set est_entries to 0.  cost_memoize_rescan() does all the
+     * hard work to determine how many cache entries there are likely to be,
+     * so it seems best to leave it up to that function to fill this field in.
+     * If left at 0, the executor will make a guess at a good value.
+     */
+    pathnode->est_entries = 0;
+
+    /*
+     * Add a small additional charge for caching the first entry.  All the
+     * harder calculations for rescans are performed in cost_memoize_rescan().
+     */
+    pathnode->path.startup_cost = subpath->startup_cost + u_sess->attr.attr_sql.cpu_tuple_cost;
+    pathnode->path.total_cost = subpath->total_cost + u_sess->attr.attr_sql.cpu_tuple_cost;
+    pathnode->path.rows = subpath->rows;
+
+    return pathnode;
+}
 
 /*
  * create_unique_path

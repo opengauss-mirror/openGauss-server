@@ -141,6 +141,8 @@ static bool is_operator_pushdown(Oid opno);
 static bool contain_var_unsubstitutable_functions_walker(Node* node, void* context);
 static bool is_accurate_estimatable_func(Oid funcId);
 
+static bool pull_paramids_walker(Node *node, Bitmapset **context);
+
 /*****************************************************************************
  *		OPERATOR clause functions
  *****************************************************************************/
@@ -1196,6 +1198,30 @@ static bool contain_specified_functions_walker(Node* node, check_function_contex
     } else if (IsA(node, UserSetElem)) {
         /* UserSetElem is volatile */
         return context->checktype == CONTAIN_VOLATILE_FUNTION;
+    } else if (IsA(node, PathTarget)) {
+        PathTarget *target = (PathTarget *) node;
+
+        /*
+         * We also do caching for PathTarget the same as we do above for
+         * RestrictInfos.
+         */
+        bool hasvolatile = false;
+        hasvolatile = contain_volatile_functions((Node *) target->exprs);
+        return hasvolatile;
+    } else if (IsA(node, RestrictInfo)) {
+        RestrictInfo *rinfo = (RestrictInfo *) node;
+
+        /*
+         * For RestrictInfo, check if we've checked the volatility of it
+         * before.  If so, we can just use the cached value and not bother
+         * checking it again.  Otherwise, check it and cache if whether we
+         * found any volatile functions.
+         */
+        bool hasvolatile;
+
+        hasvolatile = contain_volatile_functions((Node *) rinfo->clause);
+
+        return hasvolatile;
     }
     return expression_tree_walker(node, (bool (*)())contain_specified_functions_walker<isSimpleVar>, context);
 }
@@ -5736,7 +5762,34 @@ List *get_quals_lists(Node *jtnode)
 
     return quallist;
 }
+/*
+ * pull_paramids
+ *        Returns a Bitmapset containing the paramids of all Params in 'expr'.
+ */
+Bitmapset* pull_paramids(Expr *expr)
+{
+    Bitmapset* result = NULL;
 
+    (void) pull_paramids_walker((Node *) expr, &result);
+
+    return result;
+}
+
+static bool pull_paramids_walker(Node *node, Bitmapset **context)
+{
+    if (node == NULL) {
+        return false;
+    }
+    if (IsA(node, Param)) {
+        Param       *param = (Param *) node;
+
+        *context = bms_add_member(*context, param->paramid);
+        return false;
+    }
+
+    return expression_tree_walker(node, (bool(*)()) pull_paramids_walker,
+                                  (void *) context);
+}
 #ifdef USE_SPQ
 
 /*
