@@ -22,11 +22,11 @@
 #include "plpy_elog.h"
 #include "plpy_main.h"
 #include "plpy_planobject.h"
+#include "plpy_plpymodule.h"
 #include "plpy_procedure.h"
 #include "plpy_resultobject.h"
 
 static PyObject* PLy_spi_execute_query(char* query, long limit);
-static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit);
 static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows, int status);
 static void PLy_spi_exception_set(PyObject* excclass, ErrorData* edata);
 
@@ -57,12 +57,27 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
         return NULL;
     }
 
+    /*
+     * Because of the gc problem, it is possible that the lifecycle of the plan
+     * object is longer than the session, so the memory has to be requested at
+     * the level of the instance
+     */
+    plan->mcxt = AllocSetContextCreate(g_ply_ctx->ply_mctx,
+                                       "PL/Python plan context",
+                                       ALLOCSET_DEFAULT_MINSIZE,
+                                       ALLOCSET_DEFAULT_INITSIZE,
+                                       ALLOCSET_DEFAULT_MAXSIZE,
+                                       SHARED_CONTEXT);
+    oldcontext = MemoryContextSwitchTo(plan->mcxt);
+
     nargs = list ? PySequence_Length(list) : 0;
 
     plan->nargs = nargs;
-    plan->types = nargs ? (Oid*)PLy_malloc(sizeof(Oid) * nargs) : NULL;
-    plan->values = nargs ? (Datum*)PLy_malloc(sizeof(Datum) * nargs) : NULL;
-    plan->args = nargs ? (PLyTypeInfo*)PLy_malloc(sizeof(PLyTypeInfo) * nargs) : NULL;
+    plan->types = nargs ? (Oid*)palloc(sizeof(Oid) * nargs) : NULL;
+    plan->values = nargs ? (Datum*)palloc(sizeof(Datum) * nargs) : NULL;
+    plan->args = nargs ? (PLyTypeInfo*)palloc(sizeof(PLyTypeInfo) * nargs) : NULL;
+
+    MemoryContextSwitchTo(oldcontext);
 
     oldcontext = CurrentMemoryContext;
     oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
@@ -78,7 +93,7 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
          * isn't properly initialized the Py_DECREF(plan) will go boom
          */
         for (i = 0; i < nargs; i++) {
-            PLy_typeinfo_init(&plan->args[i]);
+            PLy_typeinfo_init(&plan->args[i], plan->mcxt);
             plan->values[i] = PointerGetDatum(NULL);
         }
 
@@ -185,11 +200,12 @@ PyObject* PLy_spi_execute(PyObject* self, PyObject* args)
         return PLy_spi_execute_plan(plan, list, limit);
     }
 
-    PLy_exception_set(g_plpy_t_context.PLy_exc_error, "plpy.execute expected a query or a plan");
+    PLy_exception_set(g_ply_ctx->PLy_exc_error, "plpy.execute expected a query or a plan");
+
     return NULL;
 }
 
-static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
+PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
 {
     volatile int nargs;
     int i, rv;
@@ -310,7 +326,8 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
 
     if (rv < 0) {
         PLy_exception_set(
-            g_plpy_t_context.PLy_exc_spi_error, "SPI_execute_plan failed: %s", SPI_result_code_string(rv));
+            g_ply_ctx->PLy_exc_spi_error, "SPI_execute_plan failed: %s", SPI_result_code_string(rv));
+
         return NULL;
     }
 
@@ -348,7 +365,7 @@ static PyObject* PLy_spi_execute_query(char* query, long limit)
 
     if (rv < 0) {
         Py_XDECREF(ret);
-        PLy_exception_set(g_plpy_t_context.PLy_exc_spi_error, "SPI_execute failed: %s", SPI_result_code_string(rv));
+        PLy_exception_set(g_ply_ctx->PLy_exc_spi_error, "SPI_execute failed: %s", SPI_result_code_string(rv));
         return NULL;
     }
 
@@ -373,7 +390,8 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
 
         Py_DECREF(result->nrows);
         result->nrows = PyInt_FromLong(rows);
-        PLy_typeinfo_init(&args);
+
+        PLy_typeinfo_init(&args, u_sess->attr.attr_common.g_PlySessionCtx->session_tmp_mctx);
 
         oldcontext = CurrentMemoryContext;
         PG_TRY();
@@ -397,7 +415,7 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
 
                 PLy_input_tuple_funcs(&args, tuptable->tupdesc);
                 for (i = 0; i < rows; i++) {
-                    PyObject *row = PLyDict_FromTuple(&args, tuptable->vals[i], tuptable->tupdesc, true);
+                    PyObject* row = PLyDict_FromTuple(&args, tuptable->vals[i], tuptable->tupdesc, true);
 
                     PyList_SetItem(result->rows, i, row);
                 }
@@ -407,16 +425,16 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
         {
             MemoryContextSwitchTo(oldcontext);
             if (!PyErr_Occurred()) {
-                PLy_exception_set(g_plpy_t_context.PLy_exc_error, "unrecognized error in PLy_spi_execute_fetch_result");
+                PLy_exception_set(g_ply_ctx->PLy_exc_error, "unrecognized error in PLy_spi_execute_fetch_result");
             }
-            PLy_typeinfo_dealloc(&args);
+            MemoryContextReset(u_sess->attr.attr_common.g_PlySessionCtx->session_tmp_mctx);
             SPI_freetuptable(tuptable);
             Py_DECREF(result);
             return NULL;
         }
         PG_END_TRY();
 
-        PLy_typeinfo_dealloc(&args);
+        MemoryContextReset(u_sess->attr.attr_common.g_PlySessionCtx->session_tmp_mctx);
         SPI_freetuptable(tuptable);
     }
 
@@ -515,10 +533,11 @@ void PLy_spi_subtransaction_abort(MemoryContext oldcontext, ResourceOwner oldown
     SPI_restore_connection();
 
     /* Look up the correct exception */
-    entry = (PLyExceptionEntry*)hash_search(g_plpy_t_context.PLy_spi_exceptions, &(edata->sqlerrcode), HASH_FIND, NULL);
+    entry = (PLyExceptionEntry*)hash_search(g_ply_ctx->PLy_spi_exceptions, &(edata->sqlerrcode), HASH_FIND, NULL);
+
     /* We really should find it, but just in case have a fallback */
     Assert(entry != NULL);
-    exc = entry ? entry->exc : g_plpy_t_context.PLy_exc_spi_error;
+    exc = entry ? entry->exc : g_ply_ctx->PLy_exc_spi_error;
     /* Make Python raise the exception */
     PLy_spi_exception_set(exc, edata);
     FreeErrorData(edata);

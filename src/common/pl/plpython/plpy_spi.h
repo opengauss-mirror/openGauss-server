@@ -14,6 +14,7 @@
 
 extern PyObject* PLy_spi_prepare(PyObject* self, PyObject* args);
 extern PyObject* PLy_spi_execute(PyObject* self, PyObject* args);
+extern PyObject *PLy_spi_execute_plan(PyObject *ob, PyObject *list, long limit);
 
 typedef struct PLyExceptionEntry {
     int sqlstate;  /* hash key, must be first */

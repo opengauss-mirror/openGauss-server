@@ -30,7 +30,6 @@
 #include "plpy_plpymodule.h"
 #include "plpy_procedure.h"
 
-
 /* exported functions */
 #if PY_MAJOR_VERSION >= 3
 /* Use separate names to avoid clash in pg_pltemplate */
@@ -71,82 +70,217 @@ static void PLy_init_interp(void);
 static PLyExecutionContext* PLy_push_execution_context(void);
 static void PLy_pop_execution_context(void);
 static void AuditPlpythonFunction(Oid funcoid, const char* funcname, AuditResult result);
+static void InitPlySessionCtx(void);
+static void release_PlySessionCtx(PlySessionCtx* ctx);
+static void SetupPythonEnvs(void);
+static void InitPlyGlobalsCtx(void);
 
-static const int plpython_python_version = PY_MAJOR_VERSION;
-
+PlyGlobalsCtx* g_ply_ctx;
 /* this doesn't need to be global; use PLy_current_execution_context() */
-static THR_LOCAL PLyExecutionContext* PLy_execution_contexts = NULL;
-THR_LOCAL plpy_t_context_struct g_plpy_t_context = {0};
 
-pthread_mutex_t g_plyLocaleMutex = PTHREAD_MUTEX_INITIALIZER;
+/*
+ * there are problems such as memory leaks, deadlocks, crashes in 'plpy',
+ * so turn it off by default.
+ */
+const bool ENABLE_PLPY = false;
+const int PYTHON_MAJOR_VERSION = 3;
+const int PYTHON_MINOR_VERSION = 7;
 
-void PG_init(void)
+/*
+ * Perform one-time setup of PL/Python, after checking for a conflict
+ * with other versions of Python.
+ */
+static void PLyInitialize(void)
 {
-    /* Be sure we do initialization only once (should be redundant now) */
-    const int** version_ptr;
+    /* initialize python interpreter, only executed once in the process */
+    if (!plpython_state->is_init) {
+        MemoryContext old;
 
-    if (g_plpy_t_context.inited) {
-        return;
-    }
+        plpython_state->release_PlySessionCtx_callback = release_PlySessionCtx;
+        Assert(PY_MAJOR_VERSION >= PYTHON_MAJOR_VERSION);
 
-    /* Be sure we don't run Python 2 and 3 in the same session (might crash) */
-    version_ptr = (const int**)find_rendezvous_variable("plpython_python_version");
-    if (!(*version_ptr)) {
-        *version_ptr = &plpython_python_version;
+        SetupPythonEnvs();
+
+        InitPlyGlobalsCtx();
+
+        Assert(g_ply_ctx);
+
+        old = MemoryContextSwitchTo(g_ply_ctx->ply_mctx);
+        PyImport_AppendInittab("plpy", PyInit_plpy);
+
+        Py_Initialize();
+        PyImport_ImportModule("plpy");
+        PLy_init_interp();
+        PLy_init_plpy();
+        if (PyErr_Occurred())
+            PLy_elog(FATAL, "untrapped error in initialization");
+
+        MemoryContextSwitchTo(old);
+
+        plpython_state->is_init = true;
     } else {
-        if (**version_ptr != plpython_python_version) {
-            ereport(FATAL,
-                (errmsg("Python major version mismatch in session"),
-                    errdetail("This session has previously used Python major version %d, and it is now attempting to "
-                              "use Python major version %d.",
-                        **version_ptr,
-                        plpython_python_version),
-                    errhint("Start a new session to use a different Python major version.")));
-        }
+        g_ply_ctx = plpython_state->PlyGlobalsCtx;
     }
 
-    pg_bindtextdomain(TEXTDOMAIN);
-
-#if PY_MAJOR_VERSION >= 3
-    PyImport_AppendInittab("plpy", PyInit_plpy);
-#endif
-
-#if PY_MAJOR_VERSION < 3
-    if (!PyEval_ThreadsInitialized()) {
-        PyEval_InitThreads();
+    /* initialize session */
+    if (!u_sess->plpython_ctx) {
+        pg_bindtextdomain(PG_TEXTDOMAIN("plpython"));
+        InitPlySessionCtx();
+        Assert(u_sess->attr.attr_common.g_PlySessionCtx);
+        u_sess->plpython_ctx = u_sess->attr.attr_common.g_PlySessionCtx;
+    } else {
+        u_sess->attr.attr_common.g_PlySessionCtx = (PlySessionCtx*)u_sess->plpython_ctx;
     }
-#endif
-
-    Py_Initialize();
-#if PY_MAJOR_VERSION >= 3
-    PyImport_ImportModule("plpy");
-#endif
-
-#if PY_MAJOR_VERSION >= 3
-    if (!PyEval_ThreadsInitialized()) {
-        PyEval_InitThreads();
-        PyEval_SaveThread();
-    }
-#endif
-
-    PLy_init_interp();
-    PLy_init_plpy();
-    if (PyErr_Occurred()) {
-        PLy_elog(FATAL, "untrapped error in initialization");
-    }
-
-    init_procedure_caches();
-
-    g_plpy_t_context.explicit_subtransactions = NIL;
-
-    PLy_execution_contexts = NULL;
-
-    g_plpy_t_context.inited = true;
 }
 
 void _PG_init(void)
 {
-    PG_init();
+    /* Only support Python 3.7 */
+    if (PY_MAJOR_VERSION != PYTHON_MAJOR_VERSION || PY_MINOR_VERSION != PYTHON_MINOR_VERSION) {
+        ereport(ERROR, (errmsg("Python version is not 3.7, check if PYTHONHOME is valid.")));
+    }
+}
+
+static void SetupPythonEnvs(void)
+{
+    /*
+     * openGauss requires PYTHONHOME to be set (reason unknown, crashes otherwise)
+     * Therefore during 'make install' we install the corresponding PYTHONHOME
+     * under PGHOME/python directory. Set PYTHONHOME before initializing Python.
+     */
+    char pyhome[MAXPGPATH];
+    size_t size;
+
+    GetPythonhomePath(my_exec_path, pyhome);
+
+    size = mbstowcs(NULL, pyhome, strlen(pyhome));
+    if (size < 0) {
+        PLy_elog(FATAL, "untrapped error in initialization");
+    }
+
+    wchar_t w_pythonhome[size];
+    size = mbstowcs(w_pythonhome, pyhome, strlen(pyhome));
+    if (size < 0) {
+        PLy_elog(FATAL, "untrapped error in initialization");
+    }
+    w_pythonhome[size] = 0;
+
+    Py_SetPythonHome(w_pythonhome);
+}
+
+static void InitPlyGlobalsCtx(void)
+{
+    /* Initialized only once and accessible by all processes, hence using a global variable is straightforward */
+    static PlyGlobalsCtx plySessionCtx;
+    /*
+     * Reserved an extra connection, so free list is never NULL,
+     * simplifies boundary condition handling
+     */
+    int maxConnections = g_instance.attr.attr_network.MaxConnections + 1;
+    memset_s(&plySessionCtx, sizeof(plySessionCtx), 0, sizeof(plySessionCtx));
+
+    g_ply_ctx = &plySessionCtx;
+    g_ply_ctx->ply_mctx = AllocSetContextCreate(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT),
+        "plpy global context",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE,
+        SHARED_CONTEXT);
+    g_ply_ctx->numberFreeContexts = maxConnections;
+    g_ply_ctx->numberContexts = maxConnections;
+    g_ply_ctx->sessionContexts = (PlySessionCtx*)MemoryContextAllocZero(g_ply_ctx->ply_mctx,
+            maxConnections * sizeof(PlySessionCtx));
+
+    for (int i = 0; i < maxConnections; i++) {
+        PlySessionCtx* ctx = &g_ply_ctx->sessionContexts[i];
+        ctx->ply_ctx_id = i;
+        if (i == maxConnections - 1) {
+            ctx->next_free_context = NULL; /* the last one */
+        } else {
+            ctx->next_free_context = &g_ply_ctx->sessionContexts[i + 1];
+        }
+    }
+
+    g_ply_ctx->free_session_head = &g_ply_ctx->sessionContexts[0];
+    g_ply_ctx->free_session_tail = &g_ply_ctx->sessionContexts[maxConnections - 1];
+
+    plpython_state->PlyGlobalsCtx = g_ply_ctx;
+}
+
+static void InitPlySessionCtx()
+{
+    if (g_ply_ctx->numberFreeContexts <= 1) {
+        PLy_elog(FATAL, "untrapped error in initialization");
+    }
+    Assert(g_ply_ctx->free_session_head);
+
+    u_sess->attr.attr_common.g_PlySessionCtx = g_ply_ctx->free_session_head;
+    g_ply_ctx->free_session_head = u_sess->attr.attr_common.g_PlySessionCtx->next_free_context;
+    g_ply_ctx->numberFreeContexts--;
+    u_sess->attr.attr_common.g_PlySessionCtx->next_free_context = NULL;
+    Assert(g_ply_ctx->free_session_head);
+
+    Assert(!u_sess->attr.attr_common.g_PlySessionCtx->session_mctx);
+    char contextName[128];
+    snprintf(contextName, sizeof(contextName),  "PL/Python session context %d", u_sess->attr.attr_common.g_PlySessionCtx->ply_ctx_id);
+    u_sess->attr.attr_common.g_PlySessionCtx->session_mctx = AllocSetContextCreate(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT),
+                                                                contextName,
+                                                                ALLOCSET_DEFAULT_MINSIZE,
+                                                                ALLOCSET_DEFAULT_INITSIZE,
+                                                                ALLOCSET_DEFAULT_MAXSIZE);
+
+    snprintf(contextName, sizeof(contextName),  "PL/Python temp context %d", u_sess->attr.attr_common.g_PlySessionCtx->ply_ctx_id);
+    u_sess->attr.attr_common.g_PlySessionCtx->session_tmp_mctx = AllocSetContextCreate(u_sess->attr.attr_common.g_PlySessionCtx->session_mctx,
+                                                                contextName,
+                                                                ALLOCSET_DEFAULT_MINSIZE,
+                                                                ALLOCSET_DEFAULT_INITSIZE,
+                                                                ALLOCSET_DEFAULT_MAXSIZE);
+
+    u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions = NULL;
+    u_sess->attr.attr_common.g_PlySessionCtx->PLy_execution_contexts = NULL;
+    u_sess->attr.attr_common.g_PlySessionCtx->PLy_session_gd = PyDict_New();
+    if (!u_sess->attr.attr_common.g_PlySessionCtx->PLy_session_gd)
+        PLy_elog(ERROR, "could not create globals");
+
+    Assert(!u_sess->attr.attr_common.g_PlySessionCtx->PLy_procedure_cache);
+    init_procedure_caches();
+}
+
+static void release_PlySessionCtx(PlySessionCtx* ctx)
+{
+    if (ctx->PLy_procedure_cache) {
+        HASH_SEQ_STATUS scan;
+        PLyProcedureEntry* entry = NULL;
+        PLyProcedure* proc = NULL;
+        hash_seq_init(&scan, ctx->PLy_procedure_cache);
+        while ((entry = (PLyProcedureEntry *)hash_seq_search(&scan))) {
+            proc = entry->proc;
+            PLy_procedure_delete(proc);
+        }
+
+        hash_destroy(ctx->PLy_procedure_cache);
+        ctx->PLy_procedure_cache = NULL;
+    }
+    if (ctx->PLy_session_gd) {
+        Py_DECREF(ctx->PLy_session_gd);
+        ctx->PLy_session_gd = NULL;
+    }
+
+    if (ctx->session_mctx) {
+        MemoryContextDelete(ctx->session_mctx);
+        ctx->session_tmp_mctx = NULL;
+        ctx->session_mctx = NULL;
+    }
+
+    ctx->explicit_subtransactions = NULL;
+    ctx->PLy_execution_contexts = NULL;
+    Assert(ctx->next_free_context == NULL);
+    Assert(g_ply_ctx->free_session_tail);
+    Assert(g_ply_ctx->numberFreeContexts > 0);
+    g_ply_ctx->free_session_tail->next_free_context = ctx;
+    g_ply_ctx->free_session_tail = ctx;
+
+    g_ply_ctx->numberFreeContexts++;
 }
 
 /*
@@ -155,7 +289,6 @@ void _PG_init(void)
  */
 void PLy_init_interp(void)
 {
-    static PyObject* PLy_interp_safe_globals = NULL;
     PyObject* mainmod = NULL;
 
     mainmod = PyImport_AddModule("__main__");
@@ -163,14 +296,10 @@ void PLy_init_interp(void)
         PLy_elog(ERROR, "could not import \"__main__\" module");
     }
     Py_INCREF(mainmod);
-    g_plpy_t_context.PLy_interp_globals = PyModule_GetDict(mainmod);
-    PLy_interp_safe_globals = PyDict_New();
-    if (PLy_interp_safe_globals == NULL) {
-        PLy_elog(ERROR, "could not create globals");
-    }
-    PyDict_SetItemString(g_plpy_t_context.PLy_interp_globals, "GD", PLy_interp_safe_globals);
+
+    g_ply_ctx->PLy_interp_globals = PyModule_GetDict(mainmod);
     Py_DECREF(mainmod);
-    if (g_plpy_t_context.PLy_interp_globals == NULL || PyErr_Occurred()) {
+    if (g_ply_ctx->PLy_interp_globals == NULL || PyErr_Occurred()) {
         PLy_elog(ERROR, "could not initialize globals");
     }
 }
@@ -190,16 +319,10 @@ Datum plpython_validator(PG_FUNCTION_ARGS)
         PG_RETURN_VOID();
     }
 
-    AutoMutexLock plpythonLock(&g_plyLocaleMutex);
-    if (g_plpy_t_context.Ply_LockLevel == 0) {
-        plpythonLock.lock();
-    }
-
-    PyLock pyLock(&(g_plpy_t_context.Ply_LockLevel));
-
     PG_TRY();
     {
-        PG_init();
+        PlPyGilAcquire();
+        PLyInitialize();
 
         /* Get the new function's pg_proc entry */
         tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcoid));
@@ -209,9 +332,6 @@ Datum plpython_validator(PG_FUNCTION_ARGS)
         procStruct = (Form_pg_proc)GETSTRUCT(tuple);
 
         is_trigger = PLy_procedure_is_trigger(procStruct);
-        if (is_trigger) {
-            elog(ERROR, "PL/Python does not support trigger");
-        }
 
         ReleaseSysCache(tuple);
 
@@ -220,8 +340,6 @@ Datum plpython_validator(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        pyLock.Reset();
-        plpythonLock.unLock();
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -238,21 +356,14 @@ Datum plpython2_validator(PG_FUNCTION_ARGS)
 
 Datum plpython_call_handler(PG_FUNCTION_ARGS)
 {
-    AutoMutexLock plpythonLock(&g_plyLocaleMutex);
-
-    if (g_plpy_t_context.Ply_LockLevel == 0) {
-        plpythonLock.lock();
-    }
-
     Datum retval;
     PLyExecutionContext* exec_ctx = NULL;
     ErrorContextCallback plerrcontext;
 
-    PyLock pyLock(&(g_plpy_t_context.Ply_LockLevel));
-
     PG_TRY();
     {
-        PG_init();
+        PlPyGilAcquire();
+        PLyInitialize();
 
         /* Note: SPI_finish() happens in plpy_exec.cpp, which is dubious design */
         if (SPI_connect() != SPI_OK_CONNECT) {
@@ -275,8 +386,6 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        pyLock.Reset();
-        plpythonLock.unLock();
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -287,7 +396,6 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     PG_TRY();
     {
         if (CALLED_AS_TRIGGER(fcinfo)) {
-            elog(ERROR, "PL/Python does not support trigger");
             Relation tgrel = ((TriggerData*)fcinfo->context)->tg_relation;
             HeapTuple trv;
 
@@ -307,13 +415,8 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        if (AUDIT_EXEC_ENABLED) {
-            AuditPlpythonFunction(funcoid, proc->proname, AUDIT_FAILED);
-        }
         PLy_pop_execution_context();
         PyErr_Clear();
-        pyLock.Reset();
-        plpythonLock.unLock();
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -327,8 +430,6 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        pyLock.Reset();
-        plpythonLock.unLock();
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -345,12 +446,6 @@ Datum plpython2_call_handler(PG_FUNCTION_ARGS)
 
 Datum plpython_inline_handler(PG_FUNCTION_ARGS)
 {
-    AutoMutexLock plpythonLock(&g_plyLocaleMutex);
-    if (g_plpy_t_context.Ply_LockLevel == 0) {
-        plpythonLock.lock();
-    }
-    PyLock pyLock(&(g_plpy_t_context.Ply_LockLevel));
-
     InlineCodeBlock* codeblock = (InlineCodeBlock*)DatumGetPointer(PG_GETARG_DATUM(0));
     FunctionCallInfoData fake_fcinfo;
     FmgrInfo flinfo;
@@ -361,7 +456,8 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
 
     PG_TRY();
     {
-        PG_init();
+        PlPyGilAcquire();
+        PLyInitialize();
 
         /* Note: SPI_finish() happens in plpy_exec.c, which is dubious design */
         if (SPI_connect() != SPI_OK_CONNECT) {
@@ -380,7 +476,13 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
         rc = memset_s(&proc, sizeof(PLyProcedure), 0, sizeof(PLyProcedure));
         securec_check(rc, "\0", "\0");
 
-        proc.pyname = PLy_strdup("__plpython_inline_block");
+        proc.mcxt = AllocSetContextCreate(u_sess->attr.attr_common.g_PlySessionCtx->session_mctx,
+            "__plpython_inline_block",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+
+        proc.pyname = MemoryContextStrdup(proc.mcxt, "__plpython_inline_block");
         proc.result.out.d.typoid = VOIDOID;
 
         /*
@@ -401,8 +503,6 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        plpythonLock.unLock();
-        pyLock.Reset();
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -425,8 +525,6 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
         PLy_pop_execution_context();
         PLy_procedure_delete(&proc);
         PyErr_Clear();
-        plpythonLock.unLock();
-        pyLock.Reset();
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -443,8 +541,6 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        plpythonLock.unLock();
-        pyLock.Reset();
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -488,40 +584,56 @@ static void plpython_inline_error_callback(void* arg)
 
 PLyExecutionContext* PLy_current_execution_context(void)
 {
-    if (PLy_execution_contexts == NULL) {
+    if (u_sess->attr.attr_common.g_PlySessionCtx->PLy_execution_contexts == NULL) {
         elog(ERROR, "no Python function is currently executing");
     }
 
-    return PLy_execution_contexts;
+    return u_sess->attr.attr_common.g_PlySessionCtx->PLy_execution_contexts;
+}
+
+MemoryContext PLy_get_scratch_context(PLyExecutionContext *context)
+{
+    /*
+     * A scratch context might never be needed in a given plpython procedure,
+     * so allocate it on first request.
+     */
+    if (context->scratch_ctx == NULL)
+        context->scratch_ctx =
+            AllocSetContextCreate(u_sess->attr.attr_common.g_PlySessionCtx->session_mctx,
+                                "PL/Python scratch context",
+                                ALLOCSET_DEFAULT_MINSIZE,
+                                ALLOCSET_DEFAULT_INITSIZE,
+                                ALLOCSET_DEFAULT_MAXSIZE);
+    return context->scratch_ctx;
 }
 
 static PLyExecutionContext* PLy_push_execution_context(void)
 {
-    PLyExecutionContext* context = (PLyExecutionContext*)PLy_malloc(sizeof(PLyExecutionContext));
+    PLyExecutionContext *context;
+
+    context = (PLyExecutionContext *)MemoryContextAlloc(
+        u_sess->attr.attr_common.g_PlySessionCtx->session_mctx, sizeof(PLyExecutionContext));
 
     context->curr_proc = NULL;
-    context->scratch_ctx = AllocSetContextCreate(u_sess->top_transaction_mem_cxt,
-        "PL/Python scratch context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
-    context->next = PLy_execution_contexts;
-    PLy_execution_contexts = context;
+    context->scratch_ctx = NULL;
+    context->next = u_sess->attr.attr_common.g_PlySessionCtx->PLy_execution_contexts;
+    u_sess->attr.attr_common.g_PlySessionCtx->PLy_execution_contexts = context;
     return context;
 }
 
 static void PLy_pop_execution_context(void)
 {
-    PLyExecutionContext* context = PLy_execution_contexts;
+    PLyExecutionContext* context = u_sess->attr.attr_common.g_PlySessionCtx->PLy_execution_contexts;
 
     if (context == NULL) {
         elog(ERROR, "no Python function is currently executing");
     }
 
-    PLy_execution_contexts = context->next;
+    u_sess->attr.attr_common.g_PlySessionCtx->PLy_execution_contexts = context->next;
 
-    MemoryContextDelete(context->scratch_ctx);
-    PLy_free(context);
+    if (context->scratch_ctx) {
+        MemoryContextDelete(context->scratch_ctx);
+    }
 }
 
 static void AuditPlpythonFunction(Oid funcoid, const char* funcname, AuditResult result)
@@ -541,7 +653,7 @@ static void AuditPlpythonFunction(Oid funcoid, const char* funcname, AuditResult
         }
     } else {
         // for abnormal function
-        rc = snprintf_s(details, PGAUDIT_MAXLENGTH, PGAUDIT_MAXLENGTH - 1, 
+        rc = snprintf_s(details, PGAUDIT_MAXLENGTH, PGAUDIT_MAXLENGTH - 1,
             "Execute PLpython function(%s). ", funcname);
     }
 

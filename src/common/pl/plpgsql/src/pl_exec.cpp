@@ -1553,8 +1553,10 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
                 firstnsp = false;
             }
         }
-        appendStringInfoChar(&buf, ';');
-        (void)u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery(buf.data, NULL, 0);
+        if (!firstnsp) { 
+            appendStringInfoChar(&buf, ';');
+            (void)u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery(buf.data, NULL, 0);
+        }
         list_free_ext(search_path);
         if (buf.data != NULL) {
             pfree(buf.data);

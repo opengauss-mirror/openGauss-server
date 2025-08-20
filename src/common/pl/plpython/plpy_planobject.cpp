@@ -8,17 +8,25 @@
 #include "knl/knl_variable.h"
 
 #include "plpython.h"
-
-#include "plpy_planobject.h"
-
+#include "plpy_cursorobject.h"
 #include "plpy_elog.h"
+#include "plpy_planobject.h"
+#include "plpy_spi.h"
+#include "utils/memutils.h"
 
 static void PLy_plan_dealloc(PyObject* arg);
+static PyObject *PLy_plan_cursor(PyObject *self, PyObject *args);
+static PyObject *PLy_plan_execute(PyObject *self, PyObject *args);
 static PyObject* PLy_plan_status(PyObject* self, PyObject* args);
 
 static char PLy_plan_doc[] = {"Store a PostgreSQL plan"};
 
-static PyMethodDef PLy_plan_methods[] = {{"status", PLy_plan_status, METH_VARARGS, NULL}, {NULL, NULL, 0, NULL}};
+static PyMethodDef PLy_plan_methods[] = {
+    {"cursor", PLy_plan_cursor, METH_VARARGS, NULL},
+    {"execute", PLy_plan_execute, METH_VARARGS, NULL},
+    {"status", PLy_plan_status, METH_VARARGS, NULL},
+    {NULL, NULL, 0, NULL}
+};
 
 static PyTypeObject PLy_PlanType = {
     PyVarObject_HEAD_INIT(NULL, 0) "PLyPlan", /* tp_name */
@@ -74,6 +82,7 @@ PyObject* PLy_plan_new(void)
     ob->types = NULL;
     ob->values = NULL;
     ob->args = NULL;
+    ob->mcxt = NULL;
 
     return (PyObject*)ob;
 }
@@ -89,23 +98,36 @@ static void PLy_plan_dealloc(PyObject* arg)
 
     if (ob->plan != NULL) {
         SPI_freeplan(ob->plan);
+        ob->plan = NULL;
     }
-    if (ob->types != NULL) {
-        PLy_free(ob->types);
-    }
-    if (ob->values != NULL) {
-        PLy_free(ob->values);
-    }
-    if (ob->args != NULL) {
-        int i;
 
-        for (i = 0; i < ob->nargs; i++) {
-            PLy_typeinfo_dealloc(&ob->args[i]);
-        }
-        PLy_free(ob->args);
+    if (ob->mcxt) {
+        MemoryContextDelete(ob->mcxt);
+        ob->mcxt = NULL;
     }
 
     arg->ob_type->tp_free(arg);
+}
+
+static PyObject *PLy_plan_cursor(PyObject *self, PyObject *args)
+{
+    PyObject *planargs = NULL;
+
+    if (!PyArg_ParseTuple(args, "|O", &planargs))
+        return NULL;
+
+    return PLy_cursor_plan(self, planargs);
+}
+
+static PyObject *PLy_plan_execute(PyObject *self, PyObject *args)
+{
+    PyObject *list = NULL;
+    long limit = 0;
+
+    if (!PyArg_ParseTuple(args, "|Ol", &list, &limit))
+        return NULL;
+
+    return PLy_spi_execute_plan(self, list, limit);
 }
 
 static PyObject* PLy_plan_status(PyObject* self, PyObject* args)
@@ -114,6 +136,8 @@ static PyObject* PLy_plan_status(PyObject* self, PyObject* args)
         Py_INCREF(Py_True);
         return Py_True;
     }
-    PLy_exception_set(g_plpy_t_context.PLy_exc_error, "plan.status takes no arguments");
+
+    PLy_exception_set(g_ply_ctx->PLy_exc_error, "plan.status takes no arguments");
+
     return NULL;
 }

@@ -726,6 +726,32 @@ Tuple heapam_copytuple(Tuple tuple)
     return heap_copytuple((HeapTuple)tuple);
 }
 
+/* ----------------
+ *		heap_copy_tuple_as_datum
+ *
+ *		copy a tuple as a composite-type Datum
+ * ----------------
+ */
+Datum
+heap_copy_tuple_as_datum(HeapTuple tuple, TupleDesc tupleDesc)
+{
+    HeapTupleHeader td;
+    /*
+     * Fast path for easy case: just make a palloc'd copy and insert the
+     * correct composite-Datum header fields (since those may not be set if
+     * the given tuple came from disk, rather than from heap_form_tuple).
+     */
+    td = (HeapTupleHeader) palloc(tuple->t_len);
+    int rc = memcpy_s((char *) td, tuple->t_len, (char *) tuple->t_data, tuple->t_len);
+    securec_check(rc, "\0", "\0");
+
+    HeapTupleHeaderSetDatumLength(td, tuple->t_len);
+    HeapTupleHeaderSetTypeId(td, tupleDesc->tdtypeid);
+    HeapTupleHeaderSetTypMod(td, tupleDesc->tdtypmod);
+
+    return PointerGetDatum(td);
+}
+
 /*
  * heap_form_tuple
  *		construct a tuple from the given values[] and isnull[] arrays,

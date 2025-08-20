@@ -25,8 +25,6 @@
  * used by the PL/Python code, and all PostgreSQL headers should be included
  * earlier, so this should be pretty safe.
  */
-#undef _POSIX_C_SOURCE
-#undef _XOPEN_SOURCE
 #undef HAVE_STRERROR
 #undef HAVE_TZNAME
 
@@ -43,12 +41,10 @@
 #if defined(_MSC_VER) && defined(_DEBUG)
 /* Python uses #pragma to bring in a non-default libpython on VC++ if
  * _DEBUG is defined */
-#undef _DEBUG
 /* Also hide away errcode, since we load Python.h before postgres.h */
 #define errcode __msvc_errcode
 #include <Python.h>
 #undef errcode
-#define _DEBUG
 #elif defined(_MSC_VER)
 #define errcode __msvc_errcode
 #include <Python.h>
@@ -61,7 +57,6 @@
  * Py_ssize_t compat for Python <= 2.4
  */
 #if PY_VERSION_HEX < 0x02050000 && !defined(PY_SSIZE_T_MIN)
-typedef int Py_ssize_t;
 
 #define PY_SSIZE_T_MAX INT_MAX
 #define PY_SSIZE_T_MIN INT_MIN
@@ -81,14 +76,14 @@ typedef int Py_ssize_t;
 
 #if PY_VERSION_HEX < 0x02060000
 /* This is exactly the compatibility layer that Python 2.6 uses. */
-#define PyBytes_AsString PyString_AsString
-#define PyBytes_FromStringAndSize PyString_FromStringAndSize
-#define PyBytes_Size PyString_Size
-#define PyObject_Bytes PyObject_Str
+#define PY_BYTES_AS_STRING PyString_AsString
+#define PY_BYTES_FROM_STRING_AND_SIZE PyString_FromStringAndSize
+#define PY_BYTES_SIZE PyString_Size
+#define PY_OBJECT_BYTES PyObject_Str
 #endif
 
 #if PY_MAJOR_VERSION >= 3
-#define PyString_Check(x) 0
+#define PyString_Check(x) (0)
 #define PyString_AsString(x) PLyUnicode_AsString(x)
 #define PyString_FromString(x) PLyUnicode_FromString(x)
 #endif
@@ -119,24 +114,51 @@ typedef int Py_ssize_t;
 #undef TEXTDOMAIN
 #define TEXTDOMAIN PG_TEXTDOMAIN("plpython")
 
-typedef struct plpy_t_context_struct {
-    bool inited;
-    MemoryContext plpython_func_cxt;
-    HTAB* PLy_spi_exceptions;
+struct PLyExecutionContext;
+typedef struct PlySessionCtx {
+    /* 
+     * OG has only one python interpreter, use this id to isolate sessions, 
+     * avoid defining the same function in different sessions 
+     */
+    int ply_ctx_id;
+    /* session level context */      
+    MemoryContext session_mctx;
+    /* temporary objects can use this context */
+    MemoryContext session_tmp_mctx;
+    /* GD variable, isolated between sessions according to pg's implementation */
+    PyObject* PLy_session_gd;       
+    /* PL/Python execution stack */
+    struct PLyExecutionContext* PLy_execution_contexts;  
+    /* session level function compilation cache */
     HTAB* PLy_procedure_cache;
-
     /* a list of nested explicit subtransactions */
     List* explicit_subtransactions;
 
+    struct PlySessionCtx *next_free_context;
+} PlySessionCtx;
+
+typedef struct PlyGlobalsCtx {
+    /* instance level MemoryContext */
+    MemoryContext ply_mctx;
+    /* plpython interpreter default global variables */
+    PyObject* PLy_interp_globals;
+    
     PyObject* PLy_exc_error;
     PyObject* PLy_exc_fatal;
     PyObject* PLy_exc_spi_error;
-    PyObject* PLy_interp_globals;
+    /* spi exceptions */
+    HTAB* PLy_spi_exceptions;
 
-    int Ply_LockLevel;
-} plpy_t_context_struct;
+    int numberContexts;
+    PlySessionCtx* sessionContexts;
+    
+    int numberFreeContexts;
+    PlySessionCtx* free_session_head;
+    PlySessionCtx* free_session_tail;
+} PlyGlobalsCtx;
 
-extern THR_LOCAL plpy_t_context_struct g_plpy_t_context;
+extern PlyGlobalsCtx* g_ply_ctx;     /* save instance level objects */
+extern const bool ENABLE_PLPY;
 
 #include <compile.h>
 #include <eval.h>
@@ -163,5 +185,6 @@ extern THR_LOCAL plpy_t_context_struct g_plpy_t_context;
  * just include it everywhere.
  */
 #include "plpy_util.h"
+#include "storage/plpython_init.h"
 
 #endif /* PLPYTHON_H */

@@ -6415,6 +6415,8 @@ else
 
 fi
 
+with_python=yes
+
 if test "$with_gssapi" = yes; then
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_PYTHON 1
@@ -8426,6 +8428,9 @@ $as_echo "$as_me: error: Python not found" >&2;}
    { (exit 1); exit 1; }; }
 fi
 
+PYTHONHOME=${with_3rdpartydir}/kernel/platform/python3.7
+LD_LIBRARY_PATH=${with_3rdpartydir}/kernel/platform/python3.7/lib64:${LD_LIBRARY_PATH}
+echo `${PYTHON} -c 'import distutils'`
 
 { $as_echo "$as_me:$LINENO: checking for Python distutils module" >&5
 $as_echo_n "checking for Python distutils module... " >&6; }
@@ -8442,10 +8447,15 @@ $as_echo "$as_me: error: distutils module not found" >&2;}
 fi
 { $as_echo "$as_me:$LINENO: checking Python configuration directory" >&5
 $as_echo_n "checking Python configuration directory... " >&6; }
-python_majorversion=`${PYTHON} -c "import sys; print(sys.version[0])"`
-python_version=`${PYTHON} -c "import sys; print(sys.version[:3])"`
-python_configdir=`${PYTHON} -c "import distutils.sysconfig; print(' '.join(filter(None,distutils.sysconfig.get_config_vars('LIBPL'))))"`
-python_includespec=`${PYTHON} -c "import distutils.sysconfig; print('-I'+distutils.sysconfig.get_python_inc())"`
+
+PYTHON=${with_3rdpartydir}/kernel/platform/python3.7/bin/python3
+
+python_base=`echo ${PYTHON%/*/*}`
+hardware_name=`uname -m`
+python_majorversion=3
+python_version=3.7
+python_configdir="${python_base}/lib/python3.7/config-3.7m-${hardware_name}-linux-gnu"
+python_includespec="-I${python_base}/include/python3.7m"
 
 # This should be enough of a message.
 { $as_echo "$as_me:$LINENO: result: $python_configdir" >&5
@@ -8455,10 +8465,10 @@ $as_echo "$python_configdir" >&6; }
 { $as_echo "$as_me:$LINENO: checking how to link an embedded Python application" >&5
 $as_echo_n "checking how to link an embedded Python application... " >&6; }
 
-python_libdir=`${PYTHON} -c "import distutils.sysconfig; print(' '.join(filter(None,distutils.sysconfig.get_config_vars('LIBDIR'))))"`
-python_ldlibrary=`${PYTHON} -c "import distutils.sysconfig; print(' '.join(filter(None,distutils.sysconfig.get_config_vars('LDLIBRARY'))))"`
-python_so=`${PYTHON} -c "import distutils.sysconfig; print(' '.join(filter(None,distutils.sysconfig.get_config_vars('SO'))))"`
-ldlibrary=`echo "${python_ldlibrary}" | sed "s/${python_so}$//"`
+python_libdir="${python_base}/lib64"
+python_ldlibrary="libpython3.7m.so"
+python_so=".cpython-37-${hardware_name}-linux-gnu.so"
+ldlibrary= `echo "${python_ldlibrary}" | sed "s/${python_so}$//"`
 
 if test x"${python_libdir}" != x"" -a x"${python_ldlibrary}" != x"" -a x"${python_ldlibrary}" != x"${ldlibrary}"
 then
@@ -8469,14 +8479,14 @@ else
 	# Old way: use libpython from python_configdir
 	python_libdir="${python_configdir}"
 	# LDVERSION was introduced in Python 3.2.
-	python_ldversion=`${PYTHON} -c "import distutils.sysconfig; print(' '.join(filter(None,distutils.sysconfig.get_config_vars('LDVERSION'))))"`
+	python_ldversion=3.7
 	if test x"${python_ldversion}" = x""; then
 		python_ldversion=$python_version
 	fi
 	python_libspec="-L${python_libdir} -lpython${python_ldversion}"
 fi
 
-python_additional_libs=`${PYTHON} -c "import distutils.sysconfig; print(' '.join(filter(None,distutils.sysconfig.get_config_vars('LIBS','LIBC','LIBM','BASEMODLIBS'))))"`
+python_additional_libs="crypt -pthread -ldl -lutil -lm -lm"
 
 { $as_echo "$as_me:$LINENO: result: ${python_libspec} ${python_additional_libs}" >&5
 $as_echo "${python_libspec} ${python_additional_libs}" >&6; }
@@ -8485,7 +8495,7 @@ $as_echo "${python_libspec} ${python_additional_libs}" >&6; }
 # threaded python is not supported on OpenBSD
 { $as_echo "$as_me:$LINENO: checking whether Python is compiled with thread support" >&5
 $as_echo_n "checking whether Python is compiled with thread support... " >&6; }
-pythreads=`${PYTHON} -c "import sys; print(int('thread' in sys.builtin_module_names))"`
+pythreads=0
 if test "$pythreads" = "1"; then
   { $as_echo "$as_me:$LINENO: result: yes" >&5
 $as_echo "yes" >&6; }
@@ -29684,6 +29694,8 @@ if test "$with_python" = yes; then
   ac_save_CPPFLAGS=$CPPFLAGS
   CPPFLAGS="$python_includespec $CPPFLAGS"
 
+echo $CPPFLAGS
+
 if test $python_majorversion = 2; then
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_PYTHON2 1
@@ -29839,6 +29851,8 @@ fi
 
   CPPFLAGS=$ac_save_CPPFLAGS
 fi
+
+CPPFLAGS="$python_includespec $CPPFLAGS"
 
 #
 # Check for DocBook and tools

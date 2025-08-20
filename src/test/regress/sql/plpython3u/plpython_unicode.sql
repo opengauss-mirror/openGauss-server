@@ -1,0 +1,25 @@
+--
+-- Unicode handling
+--
+
+SET client_encoding TO UTF8;
+
+CREATE TABLE unicode_test (
+	testvalue  text NOT NULL
+);
+
+CREATE FUNCTION unicode_return() RETURNS text AS E'
+return "\\x80"
+' LANGUAGE plpython3u;
+
+CREATE FUNCTION unicode_trigger() RETURNS trigger AS E'
+TD["new"]["testvalue"] = "\\x80"
+return "MODIFY"
+' LANGUAGE plpython3u;
+
+CREATE TRIGGER unicode_test_bi BEFORE INSERT ON unicode_test
+  FOR EACH ROW EXECUTE PROCEDURE unicode_trigger();
+
+SELECT unicode_return();
+INSERT INTO unicode_test (testvalue) VALUES ('test');
+SELECT * FROM unicode_test;

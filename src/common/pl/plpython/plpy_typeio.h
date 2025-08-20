@@ -78,10 +78,12 @@ typedef struct PLyTypeInfo {
     Oid typ_relid;
     TransactionId typrel_xmin;
     ItemPointerData typrel_tid;
+
+    /* context for subsidiary data (doesn't belong to this struct though) */
+    MemoryContext mcxt;
 } PLyTypeInfo;
 
-extern void PLy_typeinfo_init(PLyTypeInfo* arg);
-extern void PLy_typeinfo_dealloc(PLyTypeInfo* arg);
+extern void PLy_typeinfo_init(PLyTypeInfo* arg, MemoryContext mcxt);
 
 extern void PLy_input_datum_func(PLyTypeInfo* arg, Oid typeOid, HeapTuple typeTup);
 extern void PLy_output_datum_func(PLyTypeInfo* arg, HeapTuple typeTup);
@@ -95,6 +97,6 @@ extern void PLy_output_record_funcs(PLyTypeInfo* arg, TupleDesc desc);
 extern Datum PLyObject_ToCompositeDatum(PLyTypeInfo* info, TupleDesc desc, PyObject* plrv);
 
 /* conversion from heap tuples to Python dictionaries */
-extern PyObject *PLyDict_FromTuple(PLyTypeInfo *info, HeapTuple tuple, TupleDesc desc, bool include_generated);
+extern PyObject* PLyDict_FromTuple(PLyTypeInfo* info, HeapTuple tuple, TupleDesc desc, bool include_generated);
 
 #endif /* PLPY_TYPEIO_H */

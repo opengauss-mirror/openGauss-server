@@ -282,7 +282,7 @@ void* internal_load_library(const char* libname)
 #endif
 
 #ifdef ENABLE_PYTHON3
-    #define PYTHON_LIB_NAME "libpython3.so"
+    #define PYTHON_LIB_NAME "libpython3.7m.so"
 #endif
         /*
          * In C++, when you try to open a shared library use dlopen with flag RTLD_NOW,

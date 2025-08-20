@@ -9,6 +9,7 @@
 
 #include "access/xact.h"
 #include "mb/pg_wchar.h"
+#include "utils/memutils.h"
 
 #include "plpython.h"
 
@@ -22,7 +23,6 @@
 #include "plpy_spi.h"
 
 static PyObject* PLy_cursor_query(const char* query);
-static PyObject* PLy_cursor_plan(PyObject* ob, PyObject* args);
 static void PLy_cursor_dealloc(PyObject* arg);
 static PyObject* PLy_cursor_iternext(PyObject* self);
 static PyObject* PLy_cursor_fetch(PyObject* self, PyObject* args);
@@ -90,8 +90,7 @@ PyObject* PLy_cursor(PyObject* self, PyObject* args)
     if (PyArg_ParseTuple(args, "O|O", &plan, &planargs)) {
         return PLy_cursor_plan(plan, planargs);
     }
-
-    PLy_exception_set(g_plpy_t_context.PLy_exc_error, "plpy.cursor expected a query or a plan");
+    PLy_exception_set(g_ply_ctx->PLy_exc_error, "plpy.cursor expected a query or a plan");
     return NULL;
 }
 
@@ -106,7 +105,18 @@ static PyObject* PLy_cursor_query(const char* query)
     }
     cursor->portalname = NULL;
     cursor->closed = false;
-    PLy_typeinfo_init(&cursor->result);
+    /*
+     * Due to Python GC, cursors may be released by other sessions after
+     * the original session ends. Therefore, allocate memory in an
+     * instance-level MemoryContext
+     */
+    cursor->mcxt = AllocSetContextCreate(g_ply_ctx->ply_mctx,
+        "PL/Python cursor context",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE,
+        SHARED_CONTEXT);
+    PLy_typeinfo_init(&cursor->result, cursor->mcxt);
 
     oldcontext = CurrentMemoryContext;
     oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
@@ -133,7 +143,7 @@ static PyObject* PLy_cursor_query(const char* query)
             elog(ERROR, "SPI_cursor_open() failed: %s", SPI_result_code_string(SPI_result));
         }
 
-        cursor->portalname = PLy_strdup(portal->name);
+        cursor->portalname = MemoryContextStrdup(cursor->mcxt, portal->name);
 
         PLy_spi_subtransaction_commit(oldcontext, oldowner);
     }
@@ -148,7 +158,7 @@ static PyObject* PLy_cursor_query(const char* query)
     return (PyObject*)cursor;
 }
 
-static PyObject* PLy_cursor_plan(PyObject* ob, PyObject* args)
+PyObject* PLy_cursor_plan(PyObject* ob, PyObject* args)
 {
     PLyCursorObject* cursor = NULL;
     volatile int nargs;
@@ -194,7 +204,18 @@ static PyObject* PLy_cursor_plan(PyObject* ob, PyObject* args)
     }
     cursor->portalname = NULL;
     cursor->closed = false;
-    PLy_typeinfo_init(&cursor->result);
+    /*
+     * Due to Python GC, cursors may be released by other sessions after
+     * the original session ends. Therefore, allocate memory in an
+     * instance-level MemoryContext
+     */
+    cursor->mcxt = AllocSetContextCreate(g_ply_ctx->ply_mctx,
+                                         "PL/Python cursor context",
+                                         ALLOCSET_DEFAULT_MINSIZE,
+                                         ALLOCSET_DEFAULT_INITSIZE,
+                                         ALLOCSET_DEFAULT_MAXSIZE,
+                                         SHARED_CONTEXT);
+    PLy_typeinfo_init(&cursor->result, cursor->mcxt);
 
     oldcontext = CurrentMemoryContext;
     oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
@@ -245,7 +266,7 @@ static PyObject* PLy_cursor_plan(PyObject* ob, PyObject* args)
             elog(ERROR, "SPI_cursor_open() failed: %s", SPI_result_code_string(SPI_result));
         }
 
-        cursor->portalname = PLy_strdup(portal->name);
+        cursor->portalname = MemoryContextStrdup(cursor->mcxt, portal->name);
 
         PLy_spi_subtransaction_commit(oldcontext, oldowner);
     }
@@ -291,12 +312,13 @@ static void PLy_cursor_dealloc(PyObject* arg)
         if (PortalIsValid(portal)) {
             SPI_cursor_close(portal);
         }
+        cursor->closed = true;
     }
 
-    PLy_free(cursor->portalname);
-    cursor->portalname = NULL;
-
-    PLy_typeinfo_dealloc(&cursor->result);
+    if (cursor->mcxt) {
+        MemoryContextDelete(cursor->mcxt);
+        cursor->mcxt = NULL;
+    }
     arg->ob_type->tp_free(arg);
 }
 
@@ -411,7 +433,8 @@ static PyObject* PLy_cursor_fetch(PyObject* self, PyObject* args)
             ret->rows = PyList_New(SPI_processed);
 
             for (uint32 i = 0; i < SPI_processed; i++) {
-                PyObject *row = PLyDict_FromTuple(&cursor->result, SPI_tuptable->vals[i], SPI_tuptable->tupdesc, true);
+                PyObject* row = PLyDict_FromTuple(&cursor->result, SPI_tuptable->vals[i], SPI_tuptable->tupdesc, true);
+
                 PyList_SetItem(ret->rows, i, row);
             }
         }

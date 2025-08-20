@@ -36,6 +36,7 @@
 #include "storage/latch.h"
 #include "storage/procarray.h"
 #include "gssignal/gs_signal.h"
+#include "storage/plpython_init.h"
 #include "storage/pmsignal.h"
 #include "access/gtm.h"
 #include "access/ustore/undo/knl_uundoapi.h"
@@ -270,6 +271,8 @@ void proc_exit(int code)
     if (u_sess->SPI_cxt.autonomous_session) {
         DestoryAutonomousSession(true);
     }
+
+    free_plpython_session_context(u_sess);
 
     /* Clean up everything that must be cleaned up */
     proc_exit_prepare(code);

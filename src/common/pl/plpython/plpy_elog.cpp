@@ -47,11 +47,11 @@ void PLy_elog(int elevel, const char* fmt, ...)
 
     PyErr_Fetch(&exc, &val, &tb);
     if (exc != NULL) {
-        if (PyErr_GivenExceptionMatches(val, g_plpy_t_context.PLy_exc_spi_error)) {
+        if (PyErr_GivenExceptionMatches(val, g_ply_ctx->PLy_exc_spi_error)) {
             PLy_get_spi_error_data(val, &sqlerrcode, &detail, &hint, &query, &position);
             hint = pstrdup(hint);
             query = pstrdup(query);
-        } else if (PyErr_GivenExceptionMatches(val, g_plpy_t_context.PLy_exc_fatal)) {
+        } else if (PyErr_GivenExceptionMatches(val, g_ply_ctx->PLy_exc_fatal)) {
             elevel = FATAL;
         }
     }
@@ -66,7 +66,7 @@ void PLy_elog(int elevel, const char* fmt, ...)
             bool success = false;
 
             va_start(ap, fmt);
-            success = appendStringInfoVA(&emsg, dgettext(TEXTDOMAIN, fmt), ap);
+            success = appendStringInfoVA(&emsg, dgettext(PG_TEXTDOMAIN("plpython"), fmt), ap);
             va_end(ap);
             if (success) {
                 break;
@@ -435,7 +435,7 @@ void PLy_exception_set(PyObject* exc, const char* fmt, ...)
     errno_t rc = EOK;
 
     va_start(ap, fmt);
-    rc = vsnprintf_s(buf, sizeof(buf), sizeof(buf) - 1, dgettext(TEXTDOMAIN, fmt), ap);
+    rc = vsnprintf_s(buf, sizeof(buf), sizeof(buf) - 1, dgettext(PG_TEXTDOMAIN("plpython"), fmt), ap);
     securec_check_ss(rc, "\0", "\0");
     va_end(ap);
 
@@ -450,7 +450,8 @@ void PLy_exception_set_plural(PyObject* exc, const char* fmt_singular, const cha
     errno_t rc = EOK;
 
     va_start(ap, n);
-    rc = vsnprintf_s(buf, sizeof(buf), sizeof(buf) - 1, dngettext(TEXTDOMAIN, fmt_singular, fmt_plural, n), ap);
+    rc = vsnprintf_s(buf, sizeof(buf), sizeof(buf) - 1,
+        dngettext(PG_TEXTDOMAIN("plpython"), fmt_singular, fmt_plural, n), ap);
     securec_check_ss(rc, "\0", "\0");
     va_end(ap);
 

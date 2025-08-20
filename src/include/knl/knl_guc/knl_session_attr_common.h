@@ -40,6 +40,7 @@
 #define SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_
 
 #include "knl/knl_guc/knl_guc_common.h"
+#include "plpython.h"
 
 typedef struct knl_session_attr_common {
     bool enable_beta_features;
@@ -266,6 +267,8 @@ typedef struct knl_session_attr_common {
     bool enable_nonowner_remote_ddl;
     bool enable_sql_limit;
     bool connection_from_coordinator;
+    /* save session level objects, set when the session first uses plpython */
+    PlySessionCtx* g_PlySessionCtx;
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

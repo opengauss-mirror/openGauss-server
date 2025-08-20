@@ -24,6 +24,8 @@ static bool PLy_procedure_argument_valid(PLyTypeInfo* arg);
 static bool PLy_procedure_valid(PLyProcedure* proc, HeapTuple procTup);
 static char* PLy_procedure_munge_source(const char* name, const char* src);
 
+const int PLPY_PROCEDURE_PART_NUMS = 32;
+
 void init_procedure_caches(void)
 {
     HASHCTL hash_ctl;
@@ -35,8 +37,11 @@ void init_procedure_caches(void)
     hash_ctl.keysize = sizeof(PLyProcedureKey);
     hash_ctl.entrysize = sizeof(PLyProcedureEntry);
     hash_ctl.hash = tag_hash;
-    g_plpy_t_context.PLy_procedure_cache =
-        hash_create("PL/Python procedures", 32, &hash_ctl, HASH_ELEM | HASH_FUNCTION);
+    hash_ctl.hcxt = u_sess->attr.attr_common.g_PlySessionCtx->session_mctx;
+
+    u_sess->attr.attr_common.g_PlySessionCtx->PLy_procedure_cache = hash_create(
+        "PL/Python procedures", PLPY_PROCEDURE_PART_NUMS, &hash_ctl,
+        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
 /*
@@ -86,9 +91,11 @@ PLyProcedure* PLy_procedure_get(Oid fn_oid, Oid fn_rel, bool is_trigger)
      * anything.
      */
     if (use_cache) {
+        Assert(u_sess->attr.attr_common.g_PlySessionCtx->PLy_procedure_cache);
         key.fn_oid = fn_oid;
         key.fn_rel = fn_rel;
-        entry = (PLyProcedureEntry*)hash_search(g_plpy_t_context.PLy_procedure_cache, &key, HASH_ENTER, &found);
+        entry = (PLyProcedureEntry*)hash_search(
+            u_sess->attr.attr_common.g_PlySessionCtx->PLy_procedure_cache, &key, HASH_ENTER, &found);
         proc = entry->proc;
     }
 
@@ -102,8 +109,10 @@ PLyProcedure* PLy_procedure_get(Oid fn_oid, Oid fn_rel, bool is_trigger)
             }
         } else if (!PLy_procedure_valid(proc, procTup)) {
             /* Found it, but it's invalid, free and reuse the cache entry */
-            PLy_procedure_delete(proc);
-            PLy_free(proc);
+            entry->proc = NULL;
+            if (proc) {
+                PLy_procedure_delete(proc);
+            }
             proc = PLy_procedure_create(procTup, fn_oid, is_trigger);
             entry->proc = proc;
         }
@@ -113,7 +122,7 @@ PLyProcedure* PLy_procedure_get(Oid fn_oid, Oid fn_rel, bool is_trigger)
     {
         /* Do not leave an uninitialised entry in the cache */
         if (use_cache) {
-            hash_search(g_plpy_t_context.PLy_procedure_cache, &key, HASH_REMOVE, NULL);
+            hash_search(u_sess->attr.attr_common.g_PlySessionCtx->PLy_procedure_cache, &key, HASH_REMOVE, NULL);
         }
         PG_RE_THROW();
     }
@@ -132,18 +141,19 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
     char procName[NAMEDATALEN + 256];
     Form_pg_proc procStruct;
     PLyProcedure* proc = NULL;
-    char* volatile procSource = NULL;
-    Datum prosrcdatum;
-    bool isnull = false;
-    int i, rv;
+    MemoryContext cxt;
+    MemoryContext oldcxt;
+    int rv;
 
     procStruct = (Form_pg_proc)GETSTRUCT(procTup);
     rv = snprintf_s(procName,
         sizeof(procName),
         sizeof(procName) - 1,
-        "__plpython_procedure_%s_%u",
+        "__plpython_procedure_%s_%u_%d",
         NameStr(procStruct->proname),
-        fn_oid);
+        fn_oid,
+        /* Use ply_ctx_id for session isolation, to avoid overwriting functions defined in other sessions */
+        u_sess->attr.attr_common.g_PlySessionCtx->ply_ctx_id);
     if (rv >= (int)sizeof(procName) || rv < 0) {
         elog(ERROR, "procedure name would overrun buffer");
     }
@@ -155,27 +165,42 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
         }
     }
 
-    proc = (PLyProcedure*)PLy_malloc(sizeof(PLyProcedure));
-    proc->proname = PLy_strdup(NameStr(procStruct->proname));
-    proc->pyname = PLy_strdup(procName);
-    proc->fn_xmin = HeapTupleGetRawXmin(procTup);
-    proc->fn_tid = procTup->t_self;
-    /* Remember if function is STABLE/IMMUTABLE */
-    proc->fn_readonly = (procStruct->provolatile != PROVOLATILE_VOLATILE);
-    PLy_typeinfo_init(&proc->result);
-    for (i = 0; i < FUNC_MAX_ARGS; i++) {
-        PLy_typeinfo_init(&proc->args[i]);
-    }
-    proc->nargs = 0;
-    proc->code = proc->statics = NULL;
-    proc->globals = NULL;
-    proc->is_setof = procStruct->proretset;
-    proc->setof = NULL;
-    proc->src = NULL;
-    proc->argnames = NULL;
+    cxt = AllocSetContextCreate(u_sess->attr.attr_common.g_PlySessionCtx->session_mctx,
+                                procName,
+                                ALLOCSET_DEFAULT_MINSIZE,
+                                ALLOCSET_DEFAULT_INITSIZE,
+                                ALLOCSET_DEFAULT_MAXSIZE);
+    oldcxt = MemoryContextSwitchTo(cxt);
+
+    proc = (PLyProcedure*)palloc0(sizeof(PLyProcedure));
+    proc->mcxt = cxt;
 
     PG_TRY();
     {
+        Datum prosrcdatum;
+        bool isnull;
+        char *procSource;
+        int i;
+
+        proc->proname = pstrdup(NameStr(procStruct->proname));
+        proc->pyname = pstrdup(procName);
+
+        proc->fn_xmin = HeapTupleGetRawXmin(procTup);
+        proc->fn_tid = procTup->t_self;
+        /* Remember if function is STABLE/IMMUTABLE */
+        proc->fn_readonly = (procStruct->provolatile != PROVOLATILE_VOLATILE);
+        PLy_typeinfo_init(&proc->result, proc->mcxt);
+        for (i = 0; i < FUNC_MAX_ARGS; i++) {
+            PLy_typeinfo_init(&proc->args[i], proc->mcxt);
+        }
+        proc->nargs = 0;
+        proc->code = proc->statics = NULL;
+        proc->globals = NULL;
+        proc->is_setof = procStruct->proretset;
+        proc->setof = NULL;
+        proc->src = NULL;
+        proc->argnames = NULL;
+
         /*
          * get information required for output conversion of the return value,
          * but only if this isn't a trigger.
@@ -230,7 +255,8 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
             Oid* types = NULL;
             char** names = NULL;
             char* modes = NULL;
-            int i, pos, total;
+            int pos;
+            int total;
 
             /* extract argument type info from the pg_proc tuple */
             total = get_func_arg_info(procTup, &types, &names, &modes);
@@ -247,7 +273,7 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
                 }
             }
 
-            proc->argnames = (char**)PLy_malloc0(sizeof(char*) * proc->nargs);
+            proc->argnames = (char**)palloc0(sizeof(char*) * proc->nargs);
             for (i = pos = 0; i < total; i++) {
                 HeapTuple argTypeTup;
                 Form_pg_type argTypeStruct;
@@ -281,7 +307,7 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
                 }
 
                 /* get argument name */
-                proc->argnames[pos] = names ? PLy_strdup(names[i]) : NULL;
+                proc->argnames[pos] = names ? pstrdup(names[i]) : NULL;
 
                 ReleaseSysCache(argTypeTup);
 
@@ -301,19 +327,17 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
         PLy_procedure_compile(proc, procSource);
 
         pfree(procSource);
-        procSource = NULL;
     }
     PG_CATCH();
     {
+        MemoryContextSwitchTo(oldcxt);
         PLy_procedure_delete(proc);
-        if (procSource != NULL) {
-            pfree(procSource);
-        }
 
         PG_RE_THROW();
     }
     PG_END_TRY();
 
+    MemoryContextSwitchTo(oldcxt);
     return proc;
 }
 
@@ -325,13 +349,14 @@ void PLy_procedure_compile(PLyProcedure* proc, const char* src)
     PyObject* crv = NULL;
     char* msrc = NULL;
 
-    proc->globals = PyDict_Copy(g_plpy_t_context.PLy_interp_globals);
+    proc->globals = PyDict_Copy(g_ply_ctx->PLy_interp_globals);
 
     /*
      * SD is private preserved data between calls. GD is global data shared by
      * all functions
      */
     proc->statics = PyDict_New();
+    PyDict_SetItemString(proc->globals, "GD", u_sess->attr.attr_common.g_PlySessionCtx->PLy_session_gd);
     PyDict_SetItemString(proc->globals, "SD", proc->statics);
 
     /*
@@ -339,7 +364,7 @@ void PLy_procedure_compile(PLyProcedure* proc, const char* src)
      */
     msrc = PLy_procedure_munge_source(proc->pyname, src);
     /* Save the mangled source for later inclusion in tracebacks */
-    proc->src = PLy_strdup(msrc);
+    proc->src = MemoryContextStrdup(proc->mcxt, msrc);
     crv = PyRun_String(msrc, Py_file_input, proc->globals, NULL);
     pfree(msrc);
 
@@ -371,36 +396,9 @@ void PLy_procedure_compile(PLyProcedure* proc, const char* src)
 
 void PLy_procedure_delete(PLyProcedure* proc)
 {
-    int i;
-
-    Py_XDECREF(proc->code);
     Py_XDECREF(proc->statics);
     Py_XDECREF(proc->globals);
-    if (proc->proname != NULL) {
-        PLy_free(proc->proname);
-    }
-    if (proc->pyname) {
-        PLy_free(proc->pyname);
-    }
-    for (i = 0; i < proc->nargs; i++) {
-        if (proc->args[i].is_rowtype == 1) {
-            if (proc->args[i].in.r.atts) {
-                PLy_free(proc->args[i].in.r.atts);
-            }
-            if (proc->args[i].out.r.atts) {
-                PLy_free(proc->args[i].out.r.atts);
-            }
-        }
-        if (proc->argnames && proc->argnames[i]) {
-            PLy_free(proc->argnames[i]);
-        }
-    }
-    if (proc->src) {
-        PLy_free(proc->src);
-    }
-    if (proc->argnames) {
-        PLy_free(proc->argnames);
-    }
+    MemoryContextDelete(proc->mcxt);
 }
 
 /*
@@ -450,7 +448,9 @@ static bool PLy_procedure_valid(PLyProcedure* proc, HeapTuple procTup)
     int i;
     bool valid = false;
 
-    Assert(proc != NULL);
+    if (proc == NULL) {
+        return false;
+    }
 
     /* If the pg_proc tuple has changed, it's not valid */
     if (!(proc->fn_xmin == HeapTupleGetRawXmin(procTup) && ItemPointerEquals(&proc->fn_tid, &procTup->t_self))) {

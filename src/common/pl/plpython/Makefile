@@ -101,7 +101,8 @@ REGRESS = \
 	plpython_quote \
 	plpython_composite \
 	plpython_subtransaction \
-	plpython_drop
+	plpython_drop \
+	plpython_gms_xmldom
 
 # where to find psql for running the tests
 PSQLDIR = $(bindir)
@@ -110,13 +111,22 @@ include $(top_srcdir)/src/Makefile.shlib
 
 all: all-lib
 
+python_bin_dir := $(shell dirname $(PYTHON))
 
-install: all install-lib install-data
+# Install PYTHONHOME to PGHOME/python directory
+install-python:
+	$(MKDIR_P) '$(DESTDIR)$(bindir)/../python/'
+	cp -r $(python_bin_dir)/../* '$(DESTDIR)$(bindir)/../python/'
+
+install: all install-lib install-data install-python
 
 installdirs: installdirs-lib
 	$(MKDIR_P) '$(DESTDIR)$(datadir)/extension'
 
-uninstall: uninstall-lib uninstall-data
+uninstall-python:
+	rm -rf '$(DESTDIR)$(bindir)/../python/'
+
+uninstall: uninstall-lib uninstall-data uninstall-python
 
 install-data: installdirs
 	$(INSTALL_DATA) $(addprefix $(srcdir)/, $(DATA)) '$(DESTDIR)$(datadir)/extension/'
