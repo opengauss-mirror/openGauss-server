@@ -83,7 +83,7 @@ extern bool is_dummy_plan(Plan* plan);
 
 extern bool is_single_baseresult_plan(Plan* plan);
 
-extern Expr* expression_planner(Expr* expr);
+extern Expr* expression_planner(Expr* expr, bool isExprIndex = false);
 
 extern Expr *preprocess_phv_expression(PlannerInfo *root, Expr *expr);
 

@@ -8149,7 +8149,7 @@ static void get_column_info_for_window(PlannerInfo* root, WindowClause* wc, List
  * we first do an expression_tree_mutator-based walk, what is returned will
  * be a new node tree.)
  */
-Expr* expression_planner(Expr* expr)
+Expr* expression_planner(Expr* expr, bool isExprIndex)
 {
     Node* result = NULL;
 
@@ -8157,7 +8157,12 @@ Expr* expression_planner(Expr* expr)
      * Convert named-argument function calls, insert default arguments and
      * simplify constant subexprs
      */
-    result = eval_const_expressions(NULL, (Node*)expr);
+    if (isExprIndex) {
+        result = eval_index_const_expressions(NULL, (Node*)expr);
+    } else {
+        result = eval_const_expressions(NULL, (Node*)expr);
+    }
+    
 
     /* Fill in opfuncid values if missing */
     fix_opfuncids(result);

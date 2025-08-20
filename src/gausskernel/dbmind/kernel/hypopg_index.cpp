@@ -67,7 +67,6 @@ static explain_get_index_name_hook_type prev_explain_get_index_name_hook = NULL;
 
 extern Oid GetIndexOpClass(List *opclass, Oid attrType, const char *accessMethodName, Oid accessMethodId);
 extern void CheckPredicate(Expr *predicate);
-extern bool CheckMutability(Expr *expr);
 static void hypo_utility_hook(processutility_context* processutility_cxt,
     DestReceiver *dest, bool sentToRemote, char *completionTag, ProcessUtilityContext context, bool isCtas);
 static void hypo_executorEnd_hook(QueryDesc *queryDesc);
