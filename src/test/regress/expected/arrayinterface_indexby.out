@@ -13,7 +13,7 @@ create schema plpgsql_array_interface_indexby;
 set current_schema = plpgsql_array_interface_indexby;
 -- must be call in procedure --
 select array_indexby_delete(array[1, 2]);
-ERROR:  array_indexby_delete must be call in procedure
+ERROR:  array_indexby_delete cannot be executed when tableOfIndex is not initialised.
 CONTEXT:  referenced column: array_indexby_delete
 -- test array interface count --
 create or replace procedure array_interface_p1() as
@@ -1415,10 +1415,9 @@ begin
 end;
 /
 ERROR:  do not support more than 2 table of index by variables call functions in an expr at or near "c2"
-LINE 7:     if c1.first = c2.first then
+LINE 6:     if c1.first = c2.first then
                           ^
-QUERY:  
-declare
+QUERY:  declare
     type ta is table of varchar(32) index by varchar;
     c1 ta;
     c2 ta;
@@ -1437,10 +1436,9 @@ begin
 end;
 /
 ERROR:  do not support more than 2 table of index by variables call functions in an expr at or near "c2"
-LINE 7:     raise info '%', c1.next(c2.first);
+LINE 6:     raise info '%', c1.next(c2.first);
                                     ^
-QUERY:  
-declare
+QUERY:  declare
     type ta is table of varchar(32) index by varchar;
     c1 ta;
     c2 ta;

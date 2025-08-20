@@ -291,6 +291,10 @@ static void yylex_object_type_selfparam(char** fieldnames,
 static void CheckParallelCursorOpr(PLpgSQL_stmt_fetch* fetch);
 static void HandleSubprogram();
 static void HandleBlockLevel();
+static void append_array_deleteidx_num(StringInfo sqlBuf, List* idents, int tok, Oid indexType);
+static void append_array_deleteidx(StringInfo sqlBuf);
+static void append_array_integer_delete(StringInfo sqlBuf);
+static void append_array_varchar_delete(StringInfo sqlBuf);
 %}
 
 %expect 0
@@ -5891,130 +5895,14 @@ stmt_execsql			: K_ALTER
                             $$ = NULL;
                             yyerror("syntax error");
                         } else {
-                            if (tok1 == '-') {
-                                if (indexType == VARCHAROID) {
-                                    yyerror("syntax error");
-                                }
-
-                                int tok3 = yylex();
-                                if (tok3 != ICONST && tok3 != T_WORD && tok3 != T_DATUM) {
-                                    yyerror("syntax error");
-                                }
-
-                                if (ICONST == tok3) {
-                                    if (indexType == INT4OID) {
-                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'-%d\')", yylval.ival);
-                                    } else {
-                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "-%d)", yylval.ival);
-                                    }
-                                } else if (T_WORD == tok3) {
-                                    if (indexType == INT4OID) {
-                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'-%s\')", yylval.word.ident);
-                                    } else {
-                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "-%s)", yylval.word.ident);
-                                    }
-
-                                } else {
-                                    char *datName = NameOfDatum(&yylval.wdatum);
-                                    if (indexType == INT4OID) {
-                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'-%s\')", datName);
-                                    } else {
-                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "-%s)", datName);
-                                    }
-
-                                    pfree_ext(datName);
-                                }
-                            } else {
-                                if (ICONST == tok1) {
-                                    if (indexType == VARCHAROID) {
-                                        appendStringInfo(&sqlBuf, "array_varchar_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'%d\')", yylval.ival);
-                                    } else if (indexType == INT4OID) {
-                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'%d\')", yylval.ival);
-                                    } else {
-                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "%d)", yylval.ival);
-                                    }
-                                } else if (SCONST == tok1) {
-                                    if (indexType == VARCHAROID) {
-                                        appendStringInfo(&sqlBuf, "array_varchar_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'%s\')", yylval.str);
-                                    } else if (indexType == INT4OID) {
-                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'%s\')", yylval.str);
-                                    } else {
-                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "%s)", yylval.str);
-                                    }
-
-                                } else if (T_WORD == tok1) {
-                                    if (indexType == VARCHAROID) {
-                                        appendStringInfo(&sqlBuf, "array_varchar_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'%s\')", yylval.word.ident);
-                                    } else if (indexType == INT4OID) {
-                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'%s\')", yylval.word.ident);
-                                    } else {
-                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "%s)", yylval.word.ident);
-                                    }
-
-                                } else {
-                                    char *datName = NameOfDatum(&yylval.wdatum);
-                                    if (indexType == VARCHAROID) {
-                                        appendStringInfo(&sqlBuf, "array_varchar_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'%s\')", datName);
-                                    } else if (indexType == INT4OID) {
-                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "\'%s\')", datName);
-                                    } else {
-                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                        appendStringInfo(&sqlBuf, "%s)", datName);
-                                    }
-
-                                    pfree_ext(datName);
-                                }
-                            }
-                            
-                            int tok2 = yylex();
-                            if (tok2 != ')') {
+                            append_array_deleteidx_num(&sqlBuf, idents, tok1, indexType);
+                            int tok3 = yylex();
+                            if (tok3 != ';') {
                                 plpgsql_push_back_token(tok);
                                 $$ = NULL;
                                 yyerror("syntax error");
                             } else {
-                                int tok3 = yylex();
-                                if (tok3 != ';') {
-                                    plpgsql_push_back_token(tok);
-                                    $$ = NULL;
-                                    yyerror("syntax error");
-                                } else {
-                                    $$ = make_callfunc_stmt(sqlBuf.data, @1, false, false, NULL, dno);
-                                }
+                                $$ = make_callfunc_stmt(sqlBuf.data, @1, false, false, NULL, dno);
                             }
                         }
                     } else {
@@ -7541,9 +7429,12 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
     bool	multi_func = false;
     const char *varray_delete = "array_delete(\"";
     const char *varray_indexby_delete = "array_indexby_delete(\"";
-    const char *varray_deleteidx = "array_deleteidx(\"";
-    const char *varray_deletevarchar = "array_varchar_delete(\"";
-    const char *varray_deleteinteger = "array_integer_delete(\"";
+    const char *varray_deleteidx = u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+        COMPATIBLE_A_DB_ARRAY ? "array_deleteidx_db_a(\"" : "array_deleteidx(\"";
+    const char *varray_deletevarchar = u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+        COMPATIBLE_A_DB_ARRAY ? "array_varchar_deleteidx_db_a(\"" : "array_varchar_deleteidx(\"";
+    const char *varray_deleteinteger = u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+        COMPATIBLE_A_DB_ARRAY ? "array_integer_deleteidx_db_a(\"" : "array_integer_deleteidx(\"";
     const char *varray_extend= "array_extendnull(\"";
     const char *varray_trim = "array_trim(\"";
 
@@ -9904,13 +9795,13 @@ read_sql_construct6(int until,
                     TokenData* temptokendata1 = build_token_data(first_tok);
                     tokenstack = dlappend(tokenstack, temptokendata1);
                     if (first_tok != '(') {
-                        yyerror("table of index by does not support syntax");
+                        yyerror("Array with index cannot be assigned this way, only support: a = a();");
                     }
 
                     int second_tok = yylex();
                     temptokendata1 = build_token_data(second_tok);
                     if (second_tok != ')') {
-                        yyerror("table of index by does not support syntax");
+                        yyerror("Array with index cannot be assigned this way, only support: a = a();");
                     }
                     tokenstack = dlappend(tokenstack, temptokendata1);
                     /* restore yylex */
@@ -15767,4 +15658,62 @@ static void HandleSubprogram(){
 static void HandleBlockLevel() {
     if(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL)
         u_sess->plsql_cxt.block_level++;
+}
+
+static void append_array_deleteidx_num(StringInfo sqlBuf, List* idents, int tok, Oid indexType) {
+    int loc = yylloc;
+    int endloc = 0;
+    bool stop_count = false;
+    int stop_tok;
+    if (indexType == VARCHAROID) {
+        append_array_varchar_delete(sqlBuf);
+    } else if (indexType == INT4OID) {
+        append_array_integer_delete(sqlBuf);
+    } else {
+        append_array_deleteidx(sqlBuf);
+    }
+    CastArrayNameToArrayFunc(sqlBuf, idents);
+    while (tok != ';' || stop_count) {
+        tok = yylex();
+        endloc = yylloc;
+        if (stop_count == false) {
+            if (tok == '\"' || tok == '\'') {
+                stop_count = true;
+                stop_tok = tok;
+            }
+        } else {
+            if (tok == stop_tok) {
+                stop_count = false;
+            }
+        }
+    }
+    plpgsql_append_source_text(sqlBuf, loc, endloc);
+    plpgsql_push_back_token(tok);
+}
+
+static void append_array_deleteidx(StringInfo sqlBuf) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+    COMPATIBLE_A_DB_ARRAY) {
+        appendStringInfo(sqlBuf, "array_deleteidx_db_a(");
+    } else {
+        appendStringInfo(sqlBuf, "array_deleteidx(");
+    }
+}
+
+static void append_array_integer_delete(StringInfo sqlBuf) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+    COMPATIBLE_A_DB_ARRAY) {
+        appendStringInfo(sqlBuf, "array_integer_deleteidx_db_a(");
+    } else {
+        appendStringInfo(sqlBuf, "array_integer_deleteidx(");
+    }
+}
+
+static void append_array_varchar_delete(StringInfo sqlBuf) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+    COMPATIBLE_A_DB_ARRAY) {
+        appendStringInfo(sqlBuf, "array_varchar_deleteidx_db_a(");
+    } else {
+        appendStringInfo(sqlBuf, "array_varchar_deleteidx(");
+    }
 }

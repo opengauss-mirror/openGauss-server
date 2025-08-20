@@ -560,6 +560,7 @@ void _PG_init(void)
                 SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(TableOfIndexPass));
             u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType = InvalidOid;
             u_sess->SPI_cxt.cur_tableof_index->tableOfIndex = NULL;
+            pthread_rwlock_init(&(u_sess->SPI_cxt.cur_tableof_index->tableOfIndexLock), NULL);
         }
         PG_CATCH();
         {

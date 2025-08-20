@@ -200,6 +200,8 @@ extern Datum array_prior(PG_FUNCTION_ARGS);
 extern Datum array_trim(PG_FUNCTION_ARGS);
 extern Datum array_delete(PG_FUNCTION_ARGS);
 extern Datum array_deleteidx(PG_FUNCTION_ARGS);
+extern Datum array_multi_deleteidx_db_a(PG_FUNCTION_ARGS);
+extern Datum array_deleteidx_db_a(PG_FUNCTION_ARGS);
 extern Datum array_extendnull(PG_FUNCTION_ARGS);
 extern Datum array_larger(PG_FUNCTION_ARGS);
 extern Datum array_smaller(PG_FUNCTION_ARGS);
