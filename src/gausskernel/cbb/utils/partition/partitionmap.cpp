@@ -958,10 +958,26 @@ static void RelationInitPartitionMapExtended(Relation relation, bool isSubPartit
         (void)MemoryContextSwitchTo(old_context);
         MemoryContextDelete(tmp_context);
 
-        ereport(ERROR,
-            (errcode(ERRCODE_PARTITION_ERROR),
-                errmsg("Fail to build partitionmap for partitioned table \"%s\".", RelationGetRelationName(relation)),
-                errdetail("Could not find partition for the partitioned table.")));
+        if (RecoveryInProgress()) {
+            /*
+             * Considering the incomplete transactional capabilities of the stanby server, an error should by thrown
+             * here to avoid more severe data inconsistency issues.
+             * */
+            ereport(ERROR,
+                (errcode(ERRCODE_PARTITION_ERROR),
+                    errmsg("Fail to build partitionmap for partitioned table \"%s\".",
+                        RelationGetRelationName(relation)),
+                    errdetail("Could not find partition for the partitioned table."),
+                    errcause("Could not find partition for the partitioned table.",
+                    erraction("Check partition in pg_partitioned."))));
+        } else {
+            ereport(LOG,
+                (errcode(ERRCODE_PARTITION_ERROR),
+                    errmsg("Missing partition tuple info for partitioned relation \"%s\".",
+                        RelationGetRelationName(relation)),
+                    errdetail("This partitioned table may be dropping now.")));
+            return;
+        }
     }
 
     char partstrategy = GetSubPartitionStrategy(partition_list, partitioned_form, isSubPartition);
@@ -1040,6 +1056,13 @@ ValuePartitionMap* buildValuePartitionMap(Relation relation, Relation pg_partiti
 
 void RebuildPartitonMap(PartitionMap* oldMap, PartitionMap* newMap)
 {
+    if (!PointerIsValid(newMap)) {
+        oldMap->isDirty = true;
+        SetRelCacheNeedEOXActWork(true);
+        elog(LOG, "build new partmap failed when RebuildPartitonMap.");
+        return;
+    }
+
     if (oldMap->type != newMap->type) {
         ereport(ERROR,
             (errcode(ERRCODE_PARTITION_ERROR),
