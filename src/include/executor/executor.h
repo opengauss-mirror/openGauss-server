@@ -172,6 +172,8 @@ ScanState* search_plan_tree(PlanState* node, Oid table_oid);
 /*
  * prototypes from functions in execGrouping.c
  */
+extern bool compareTuplesNotDistinct(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
+                                     FmgrInfo* eqfunctions, Oid* collations);
 extern bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
     FmgrInfo* eqfunctions, MemoryContext evalContext, Oid *collations);
 extern bool execTuplesUnequal(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,

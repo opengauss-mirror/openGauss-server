@@ -30,6 +30,48 @@
 static uint32 TupleHashTableHash(const void* key, Size keysize);
 static int TupleHashTableMatch(const void* key1, const void* key2, Size keysize);
 
+bool compareTuplesNotDistinct(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols,
+                              AttrNumber* matchColIdx, FmgrInfo* eqfunctions, Oid* collations)
+{
+    bool result = true;
+    int i = 0;
+
+    for (i = numCols; --i >= 0;) {
+        AttrNumber att = matchColIdx[i];
+        Datum attr1 = 0;
+        Datum attr2 = 0;
+        bool isNull1 = false;
+        bool isNull2 = false;
+
+        attr1 = tableam_tslot_getattr(slot1, att, &isNull1);
+
+        attr2 = tableam_tslot_getattr(slot2, att, &isNull2);
+
+        if (isNull1 != isNull2) {
+            result = false; /* one null and one not; they aren't equal */
+            break;
+        }
+
+        if (isNull1) {
+            continue; /* both are null, treat as equal */
+        }
+
+        /* Apply the type-specific equality function */
+        if (DB_IS_CMPT(B_FORMAT) && collations != NULL) {
+            if (!DatumGetBool(FunctionCall2Coll(&eqfunctions[i], collations[i], attr1, attr2))) {
+                result = false; /* they aren't equal */
+                break;
+            }
+        } else {
+            if (!DatumGetBool(FunctionCall2(&eqfunctions[i], attr1, attr2))) {
+                result = false; /* representing not equal */
+                break;
+            }
+        }
+    }
+    return result;
+}
+
 /*****************************************************************************
  *		Utility routines for grouping tuples together
  *****************************************************************************/
@@ -65,41 +107,7 @@ bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, 
      * comparing at the last field (least significant sort key). That's the
      * most likely to be different if we are dealing with sorted input.
      */
-    result = true;
-
-    for (i = numCols; --i >= 0;) {
-        AttrNumber att = matchColIdx[i];
-        Datum attr1, attr2;
-        bool isNull1 = false;
-        bool isNull2 = false;
-
-        attr1 = tableam_tslot_getattr(slot1, att, &isNull1);
-
-        attr2 = tableam_tslot_getattr(slot2, att, &isNull2);
-
-        if (isNull1 != isNull2) {
-            result = false; /* one null and one not; they aren't equal */
-            break;
-        }
-
-        if (isNull1) {
-            continue; /* both are null, treat as equal */
-        }
-
-        /* Apply the type-specific equality function */
-        if (DB_IS_CMPT(B_FORMAT) && collations != NULL) {
-            if (!DatumGetBool(FunctionCall2Coll(&eqfunctions[i], collations[i], attr1, attr2))) {
-                result = false; /* they aren't equal */
-                break;
-            }
-        } else {
-            if (!DatumGetBool(FunctionCall2(&eqfunctions[i], attr1, attr2))) {
-                result = false; /* representing not equal */
-                break;
-            }
-        }
-    }
-
+    result = compareTuplesNotDistinct(slot1, slot2, numCols, matchColIdx, eqfunctions, collations);
     MemoryContextSwitchTo(oldContext);
 
     return result;

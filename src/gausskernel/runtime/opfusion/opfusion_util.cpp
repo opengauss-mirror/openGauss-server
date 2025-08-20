@@ -1004,6 +1004,18 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
         }
 #endif
 
+    /* check select for unique sort */
+    if (u_sess->attr.attr_sql.enable_beta_opfusion && !limitplan && IsA(top_plan, Unique) &&
+        IsA(top_plan->lefttree, Sort) && ftype == SELECT_FUSION) {
+        FusionType ttype = NONE_FUSION;
+        ttype = checkFusionSort((Sort *)top_plan->lefttree, params);
+        if (ttype > BYPASS_OK) {
+            return ttype;
+        }
+        ftype = UNIQUE_SORT_INDEX_FUSION;
+        top_plan = top_plan->lefttree->lefttree;
+    }
+
     /* check for partition table */
     if (IsA(top_plan, PartIterator)) {
         if (!u_sess->attr.attr_sql.enable_partition_opfusion) {

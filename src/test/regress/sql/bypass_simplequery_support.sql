@@ -417,6 +417,23 @@ revoke select on test_bypass_sq7 from qps;
 DROP OWNED BY qps;
 DROP ROLE qps;
 
+-- bypass / unique + sort
+set enable_hashagg=off;
+set enable_beta_opfusion=on;
+drop table if exists test_bypass_sq9;
+create table test_bypass_sq9(col1 int, col2 int);
+insert into test_bypass_sq9(col1, col2)
+select
+    generate_series(1, 5000),
+    (generate_series(1, 5000) % 20) + 1
+;
+create index idx_col1 on test_bypass_sq9(col1);
+analyze test_bypass_sq9;
+explain select distinct col2 from test_bypass_sq9 where col1 < 100 order by col2;
+select distinct col2 from test_bypass_sq9 where col1 < 100 order by col2;
+reset enable_hashagg;
+reset enable_beta_opfusion;
+
 -- test rule do nothing
 create table test(a int);
 create view v_test as select * from test;
@@ -477,5 +494,6 @@ drop table test_bypass_sq5;
 drop table test_bypass_sq6;
 drop table test_bypass_sq7;
 drop table test_bypass_sq8;
+drop table test_bypass_sq9;
 drop function tri_bypass;
 drop type complextype;

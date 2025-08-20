@@ -1906,6 +1906,57 @@ revoke update on test_bypass_sq7 from qps;
 revoke select on test_bypass_sq7 from qps;
 DROP OWNED BY qps;
 DROP ROLE qps;
+-- bypass / unique + sort
+set enable_hashagg=off;
+set enable_beta_opfusion=on;
+drop table if exists test_bypass_sq9;
+NOTICE:  table "test_bypass_sq9" does not exist, skipping
+create table test_bypass_sq9(col1 int, col2 int);
+insert into test_bypass_sq9(col1, col2)
+select
+    generate_series(1, 5000),
+    (generate_series(1, 5000) % 20) + 1
+;
+create index idx_col1 on test_bypass_sq9(col1);
+analyze test_bypass_sq9;
+explain select distinct col2 from test_bypass_sq9 where col1 < 100 order by col2;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ [Bypass]
+ Unique  (cost=13.32..13.82 rows=1 width=4)
+   ->  Sort  (cost=13.32..13.57 rows=100 width=4)
+         Sort Key: col2
+         ->  Index Scan using idx_col1 on test_bypass_sq9  (cost=0.00..10.00 rows=100 width=4)
+               Index Cond: (col1 < 100)
+(6 rows)
+
+select distinct col2 from test_bypass_sq9 where col1 < 100 order by col2;
+ col2 
+------
+    1
+    2
+    3
+    4
+    5
+    6
+    7
+    8
+    9
+   10
+   11
+   12
+   13
+   14
+   15
+   16
+   17
+   18
+   19
+   20
+(20 rows)
+
+reset enable_hashagg;
+reset enable_beta_opfusion;
 -- test rule do nothing
 create table test(a int);
 create view v_test as select * from test;
@@ -1976,6 +2027,7 @@ drop table test_bypass_sq6;
 drop table test_bypass_sq7;
 drop table test_bypass_sq8;
 ERROR:  table "test_bypass_sq8" does not exist
+drop table test_bypass_sq9;
 drop function tri_bypass;
 ERROR:  function tri_bypass does not exist
 drop type complextype;
