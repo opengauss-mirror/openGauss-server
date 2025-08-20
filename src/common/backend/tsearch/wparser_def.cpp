@@ -923,6 +923,8 @@ static int p_ishost(TParser* prs)
 
     check_stack_depth();
 
+    CHECK_FOR_INTERRUPTS();
+
     if (TParserGet(tmpprs) && tmpprs->type == HOST) {
         prs->state->posbyte += tmpprs->lenbytetoken;
         prs->state->poschar += tmpprs->lenchartoken;

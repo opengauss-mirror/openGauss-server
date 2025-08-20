@@ -55,7 +55,7 @@ extern syscalllock getpwuid_lock;
 extern syscalllock env_lock;
 extern syscalllock kerberos_conn_lock;
 extern syscalllock read_cipher_lock;
+extern syscalllock g_dllErrorLock;
 extern pthread_rwlock_t g_file_list_lock_rw;
-extern pthread_rwlock_t g_dlerror_lock_rw;
 
 #endif /* SYSCALL_LOCK_H_ */

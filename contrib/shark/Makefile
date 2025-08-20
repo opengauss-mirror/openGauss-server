@@ -11,13 +11,14 @@ DATA_built = shark--2.0.sql
 DATA = shark--2.0.sql upgrade_script/shark--1.0--2.0.sql rollback_script/shark--2.0--1.0.sql
 REGRESS = dummy
 
-OBJS = shark.o dbcc.o varlena.o sqlvariant.o
+OBJS = shark.o dbcc.o varlena.o sqlvariant.o datefuncs.o
 OBJS += $(BEPARSERDIR)/parser.o
 OBJS += $(BEPARSERDIR)/gram-backend.o
 OBJS += $(BEPARSERDIR)/keywords.o
 OBJS += $(BEPARSERDIR)/varbinary.o
 OBJS += $(PLDIR)/pl_gram.o $(PLDIR)/pl_handler.o $(PLDIR)/pl_comp.o
 OBJS += $(PLDIR)/pl_scanner.o
+OBJS += $(PLDIR)/pl_funcs.o
 OBJS += $(BASECODEDIR)/tablecmds.o $(BASECODEDIR)/identitycmds.o
 
 subdir = contrib/shark
@@ -81,7 +82,7 @@ GEN_KEYWORDLIST_DEPS = $(TOOLSDIR)/gen_keywordlist.pl $(TOOLSDIR)/PerfectHash.pm
 $(BEPARSERDIR)/kwlist_d.h: $(BEPARSERDIR)/kwlist.h $(GEN_KEYWORDLIST_DEPS)
 	$(GEN_KEYWORDLIST) --extern -o $(BEPARSERDIR)/ $(BEPARSERDIR)/kwlist.h --varname pgtsql_ScanKeywords
 
-$(PLDIR)/pl_gram.o $(PLDIR)/pl_handler.o $(PLDIR)/pl_comp.o $(PLDIR)/pl_scanner.o: $(PLDIR)/pl_gram.hpp $(PLDIR)/plerrcodes.h
+$(PLDIR)/pl_gram.o $(PLDIR)/pl_handler.o $(PLDIR)/pl_comp.o $(PLDIR)/pl_funcs.o $(PLDIR)/pl_scanner.o: $(PLDIR)/pl_gram.hpp $(PLDIR)/plerrcodes.h
 $(PLDIR)/pl_scanner.o: $(PLDIR)/pl_reserved_kwlist_d.h $(PLDIR)/pl_unreserved_kwlist_d.h
 
 $(PLDIR)/pl_gram.hpp: $(PLDIR)/pl_gram.cpp ;

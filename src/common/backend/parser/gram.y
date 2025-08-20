@@ -57,6 +57,7 @@
 #include "catalog/index.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_ext.h"
 #include "catalog/pg_type.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_am.h"
@@ -313,6 +314,7 @@ static char* IdentResolveToChar(char *ident, core_yyscan_t yyscanner);
 static void contain_unsupport_node(Node* node, bool* has_unsupport_default_node);
 static List* TransformToConstStrNode(List *inExprList, char* raw_str);
 static Alias* generate_alias(Alias* clone_target, const char* default_alias_name);
+static void Funcname_Judge(List *names, List *args);
 
 /* Please note that the following line will be replaced with the contents of given file name even if with starting with a comment */
 /*$$include "gram-tsql-prologue.y.h"*/
@@ -524,6 +526,7 @@ static Alias* generate_alias(Alias* clone_target, const char* default_alias_name
 
 %type <range>	qualified_name insert_target OptConstrFromTable opt_index_name insert_partition_clause update_delete_partition_clause
 				qualified_trigger_name qualified_name_for_delete
+%type <node>	inline_view insert_inline_view_target
 
 %type <str>		all_Op MathOp
 
@@ -699,7 +702,8 @@ static Alias* generate_alias(Alias* clone_target, const char* default_alias_name
 %type <node>	table_ref_for_no_table_function
 %type <jexpr>	joined_table
 %type <range>	relation_expr relation_expr_for_delete relation_expr_common
-%type <range>	relation_expr_opt_alias delete_relation_expr_opt_alias relation_expr_opt_alias_for_delete
+%type <range>	relation_expr_opt_alias 
+%type <node>	relation_expr_opt_alias_for_delete delete_relation_expr_opt_alias
 %type <target>	target_el single_set_clause set_target insert_column_item connect_by_root_expr
 %type <node>	tablesample_clause timecapsule_clause opt_timecapsule_clause opt_repeatable_clause end_expr start_expr
 
@@ -760,7 +764,7 @@ static Alias* generate_alias(Alias* clone_target, const char* default_alias_name
 %type <boolean> OptRelative
 %type <boolean> OptGPI
 %type <str>		OptTableSpace OptConsTableSpace OptConsTableSpaceWithEmpty OptTableSpaceOwner LoggingStr size_clause OptMaxSize OptDatafileSize OptReuse OptAuto OptNextStr OptDatanodeName
-%type <ival>	opt_check_option view_security_expression view_security_option
+%type <ival>	opt_check_option view_security_expression view_security_option check_option
 
 %type <str>		opt_provider security_label
 
@@ -1006,7 +1010,7 @@ static Alias* generate_alias(Alias* clone_target, const char* default_alias_name
 
 	RANDOMIZED RANGE RATIO RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE RECYCLEBIN REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
 	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEAT REPEATABLE REPLACE REPLICA
-	RESET RESIZE RESOURCE RESPECT_P RESTART RESTRICT RETURN RETURNED_SQLSTATE RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP ROTATE
+	RESET RESIZE RESOURCE RESPECT_P RESTART RESTRICT RESULT_CACHE RETURN RETURNED_SQLSTATE RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP ROTATE
 	ROTATION ROW ROW_COUNT ROWNUM ROWS ROWTYPE_P RULE
 
 	SAMPLE SAVEPOINT SCHEDULE SCHEMA SCHEMA_NAME SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES SHARE_MEMORY
@@ -16391,6 +16395,7 @@ CreateFunctionStmt:
 					n->options = $9;
 					n->withClause = $10;
 					n->isProcedure = false;
+					check_func_can_cache_result(n, false);
 					$$ = (Node *)n;
 				}
 			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
@@ -16412,6 +16417,7 @@ CreateFunctionStmt:
 					n->options = $12;
 					n->withClause = $13;
 					n->isProcedure = false;
+					check_func_can_cache_result(n, true);
 					$$ = (Node *)n;
 				}
 			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
@@ -16432,6 +16438,7 @@ CreateFunctionStmt:
 					n->options = $7;
 					n->withClause = $8;
 					n->isProcedure = false;
+					check_func_can_cache_result(n, false);
 					$$ = (Node *)n;
 				}
 			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
@@ -16477,6 +16484,7 @@ CreateFunctionStmt:
 					n->withClause = NIL;
 					n->isProcedure = false;
                     u_sess->parser_cxt.isCreateFuncOrProc = false;
+					check_func_can_cache_result(n, false);
 					$$ = (Node *)n;
 				}
 		;
@@ -18287,6 +18295,14 @@ common_func_opt_item:
 					BCompatibilityOptionSupportCheck($1);
 					$$ = makeDefElem("comment", (Node *)makeString($2));
 			    }
+			| RESULT_CACHE
+				{
+					$$ = makeDefElem("result_cache", (Node*)makeInteger(TRUE));
+				}
+			| NOT RESULT_CACHE
+				{
+					$$ = makeDefElem("result_cache", (Node*)makeInteger(FALSE));
+				}
 		;
 
 parallel_partition_opt:
@@ -21048,10 +21064,14 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 				}
 		;
 
-opt_check_option:
+check_option:
 		WITH CHECK OPTION				{ $$ = CASCADED_CHECK_OPTION; }
 		| WITH CASCADED CHECK OPTION	{ $$ = CASCADED_CHECK_OPTION; }
 		| WITH LOCAL CHECK OPTION		{ $$ = LOCAL_CHECK_OPTION; }
+		;
+
+opt_check_option:
+		check_option					{ $$ = $1; }
 		| /* EMPTY */					{ $$ = NO_CHECK_OPTION; }
 		;
 
@@ -24153,12 +24173,23 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 				$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
 				$$ = (Node *) $6;
 			}
+			| opt_with_clause INSERT hint_string INTO insert_inline_view_target insert_rest returning_clause
+			{
+				InsertStmt* stmt = $6;
+				$6->relation = (RangeVar*)$5;
+				$6->returningList = $7;
+				$6->withClause = $1;
+				$6->isReplace = false;
+				$6->hintState = create_hintstate($3);
+				$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
+				$$ = (Node *) $6;
+			}
             | REPLACE hint_string INTO insert_target insert_rest returning_clause
             {
 #ifndef ENABLE_MULTIPLE_NODES
                 if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
                 {
-                    $5->relation = $4;
+                    $5->relation = (RangeVar*)$4;
                     $5->returningList = $6;
                     $5->hintState = create_hintstate($2);
                     $5->isReplace = true;
@@ -24184,7 +24215,7 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
                 if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
                 {
                      InsertStmt* n = makeNode(InsertStmt);
-                     n->relation = $4;
+                     n->relation = (RangeVar*)$4;
                      n->targetList = $6;
                      n->hintState = create_hintstate($2);
                      n->isReplace = true;
@@ -24245,7 +24276,7 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 						m->is_insert_update = true;
 
 						/* for UPSERT, keep the INSERT statement as well */
-						$6->relation = $5;
+						$6->relation = (RangeVar*)$5;
 						$6->returningList = $8;
 						$6->isReplace = false;
 						$6->withClause = $1;
@@ -24264,10 +24295,10 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 						m->insert_stmt = (Node *)copyObject($6);
 
 						/* fill a MERGE statement*/
-						m->relation = $5;
+						m->relation = (RangeVar*)$5;
 
-						Alias *a1 = makeAlias(($5->relname), NIL);
-						$5->alias = a1;
+						Alias *a1 = makeAlias((((RangeVar*)$5)->relname), NIL);
+						((RangeVar*)$5)->alias = a1;
 
 						Alias *a2 = makeAlias("excluded", NIL);
 						RangeSubselect *r = makeNode(RangeSubselect);
@@ -24288,7 +24319,7 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 
 						$$ = (Node *)m;
 					} else {
-						$6->relation = $5;
+						$6->relation = (RangeVar*)$5;
 						$6->returningList = $8;
 						$6->withClause = $1;
 						$6->upsertClause = (UpsertClause *)$7;
@@ -24333,6 +24364,25 @@ insert_target:
 					$$ = $1;
 				}
 		;
+
+insert_inline_view_target:
+			inline_view ColId
+				{
+					RangeSubselect *n = (RangeSubselect *)$1;
+					Alias *alias = makeNode(Alias);
+					alias->aliasname = $2;
+					n->alias = alias;
+					$$ = (Node*) n;
+				}
+			| inline_view AS ColId
+				{
+					RangeSubselect *n = (RangeSubselect *)$1;
+					Alias *alias = makeNode(Alias);
+					alias->aliasname = $3;
+					n->alias = alias;
+					$$ = (Node*) n;
+				}
+			;
 
 insert_rest:
 			SelectStmt
@@ -24571,7 +24621,8 @@ UpdateStmt: opt_with_clause UPDATE hint_string from_list_for_no_table_function
 							    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								 errmsg("multi-relation update is not yet supported.")));
 					}
-					if (!IsA(linitial($4), RangeVar)) {
+					if (!IsA(linitial($4), RangeVar) &&
+						!(IsA(linitial($4), RangeSubselect) && DB_IS_CMPT(A_FORMAT))) {
 							ereport(errstate,
 								    (errcode(ERRCODE_SYNTAX_ERROR),
 								     errmsg("invalid target relation name."),
@@ -24584,7 +24635,8 @@ UpdateStmt: opt_with_clause UPDATE hint_string from_list_for_no_table_function
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 									 errmsg("multi-relation update only support in B-format or D-format database")));
 						}
-						if (!IsA(linitial($4), RangeVar)) {
+						if (!IsA(linitial($4), RangeVar) &&
+							!(IsA(linitial($4), RangeSubselect) && DB_IS_CMPT(A_FORMAT))) {
 							ereport(errstate,
 								    (errcode(ERRCODE_SYNTAX_ERROR),
 								     errmsg("invalid target relation name."),
@@ -24928,6 +24980,29 @@ SelectStmt: select_no_parens			%prec UMINUS
 select_with_parens:
 			'(' select_no_parens ')'				{ $$ = $2; }
 			| '(' select_with_parens ')'			{ $$ = $2; }
+		;
+
+inline_view: 
+			select_with_parens
+				{
+					RangeSubselect* n = makeNode(RangeSubselect);
+					n->subquery = $1;
+					$$ = (Node*)n;
+				}
+			| '(' select_no_parens check_option ')'
+				{
+					RangeSubselect* n = makeNode(RangeSubselect);
+					n->subquery = $2;
+					n->withCheckOption = (ViewCheckOption)$3;
+					$$ = (Node*)n;
+				}
+			| '(' select_with_parens check_option ')'
+				{
+					RangeSubselect* n = makeNode(RangeSubselect);
+					n->subquery = $2;
+					n->withCheckOption = (ViewCheckOption)$3;
+					$$ = (Node*)n;
+				}
 		;
 
 /*
@@ -25960,6 +26035,13 @@ from_list:
 table_ref:
 	table_ref_for_no_table_function
 		{
+			Node* n = $1;
+			if (IsA(n, RangeSubselect)) {
+				RangeSubselect* sub = (RangeSubselect*) n;
+				if (sub->withCheckOption != NO_CHECK_OPTION) {
+					parser_yyerror("syntax error");
+				}
+			}
 			$$ = $1;
 		}
 	| func_table_with_table		%prec UMINUS
@@ -26263,7 +26345,7 @@ table_ref_for_no_table_function:	relation_expr		%prec UMINUS
 					n->coldeflist = $4;
 					$$ = (Node *) n;
 				}
-			| select_with_parens		%prec UMINUS
+			| inline_view		%prec UMINUS
 				{
 					/*
 					 * The SQL spec does not permit a subselect
@@ -26278,8 +26360,9 @@ table_ref_for_no_table_function:	relation_expr		%prec UMINUS
 					 */
 					/* add select_with_parens whthout alias_clause adapt A db for procedure dubug */
 					$$ = NULL;
-					if (IsA($1, SelectStmt) &&
-						((SelectStmt *) $1)->valuesLists) {
+					RangeSubselect* sub = (RangeSubselect*) $1;
+					if (IsA(sub->subquery, SelectStmt) &&
+						((SelectStmt *) (sub->subquery))->valuesLists) {
 						const char* message = "VALUES in FROM must have an alias";
 						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 						ereport(errstate,
@@ -26295,19 +26378,17 @@ table_ref_for_no_table_function:	relation_expr		%prec UMINUS
 						* simulate A db to support no alias for subquery,
 						* give the suqquery a default name "anonymous_table"
 						*/
-						RangeSubselect *n = makeNode(RangeSubselect);
-						Alias *a = makeNode(Alias);
-						n->subquery = $1;
+						RangeSubselect *n = (RangeSubselect*) $1;
 						n->alias = NULL;
+						Alias *a = makeNode(Alias);
 						a->aliasname = pstrdup("__unnamed_subquery__");
 						n->alias = a;
 						$$ = (Node *) n;
 					}
 				}
-			| select_with_parens alias_clause
+			| inline_view alias_clause
 				{
-					RangeSubselect *n = makeNode(RangeSubselect);
-					n->subquery = $1;
+					RangeSubselect *n = (RangeSubselect*) $1;
 					n->alias = $2;
 					$$ = (Node *) n;
 				}
@@ -26359,11 +26440,13 @@ table_ref_for_no_table_function:	relation_expr		%prec UMINUS
 		;
 
 
-rotate_table: select_with_parens opt_alias_clause rotate_clause
+rotate_table: inline_view opt_alias_clause rotate_clause
 				{
-					RangeSubselect *n = makeNode(RangeSubselect);
+					RangeSubselect *n = (RangeSubselect*) $1;
 					n->lateral = false;
-					n->subquery = $1;
+					if (n->withCheckOption != NO_CHECK_OPTION) {
+						parser_yyerror("syntax error");
+					}
 					if ( $2 != NULL )
 						n->alias = $2;
 					else
@@ -26415,14 +26498,17 @@ unrotate_table:
 			n->alias = generate_alias($3->alias, "not_rotate_as_internal_t");
 			$$ = (Node *) n;
 		}		
-	| select_with_parens opt_alias_clause unrotate_clause
+	| inline_view opt_alias_clause unrotate_clause
 		{
-			if (!IsA($1, SelectStmt)) {
+			if (!IsA(((RangeSubselect*)$1)->subquery, SelectStmt)) {
 				ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
 					errmsg("VALUES in FROM must have an alias")));
 			}
-			SelectStmt* s1 = (SelectStmt*)$1;
+			if (((RangeSubselect*)$1)->withCheckOption != NO_CHECK_OPTION) {
+				parser_yyerror("syntax error");
+			}
+			SelectStmt* s1 = (SelectStmt*)(((RangeSubselect*)$1)->subquery);
 
 			RangeSubselect *rsubselect = makeNode(RangeSubselect);
 			rsubselect->subquery = (Node*)s1;
@@ -26972,11 +27058,12 @@ delete_relation_expr_opt_alias:
              * a subpartition name instead of a strict partition name.
              * Put it in partitionNameList to avoid error reporting.
              */
+            RangeVar* rv = (RangeVar*)$1;
             if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT &&
-                $1->partitionname != NULL && $1->alias == NULL) {
-                $1->partitionNameList = list_make1(makeString($1->partitionname));
-                $1->partitionname = NULL;
-                $1->ispartition = FALSE;
+                rv->partitionname != NULL && rv->alias == NULL) {
+                rv->partitionNameList = list_make1(makeString(rv->partitionname));
+                rv->partitionname = NULL;
+                rv->ispartition = FALSE;
             }
             $$ = $1;
         }
@@ -26994,7 +27081,7 @@ delete_relation_expr_opt_alias:
 	                        errmsg("this partition syntax is supported only in B-format database")));
 	    }
             $1->partitionNameList = lcons(makeString($4), $6);
-            $$ = $1;
+            $$ = (Node*) $1;
         }
     | relation_expr_for_delete ColId PARTITION '(' name_list ')'
         {
@@ -27013,7 +27100,7 @@ delete_relation_expr_opt_alias:
             alias->aliasname = $2;
             $1->alias = alias;
             $1->partitionNameList = $5;
-            $$ = $1;
+            $$ = (Node*) $1;
         }
     | relation_expr_for_delete AS ColId PARTITION '(' name_list ')'
         {
@@ -27032,7 +27119,7 @@ delete_relation_expr_opt_alias:
             alias->aliasname = $3;
             $1->alias = alias;
             $1->partitionNameList = $6;
-            $$ = $1;
+            $$ = (Node*) $1;
         }
 ;
 
@@ -27107,21 +27194,21 @@ relation_expr_opt_alias: relation_expr					%prec UMINUS
 /* used for multi delete stmt */
 relation_expr_opt_alias_for_delete: relation_expr_for_delete					%prec UMINUS
 				{
-					$$ = $1;
+					$$ = (Node*) $1;
 				}
 			| relation_expr_for_delete ColId
 				{
 					Alias *alias = makeNode(Alias);
 					alias->aliasname = $2;
 					$1->alias = alias;
-					$$ = $1;
+					$$ = (Node*) $1;
 				}
 			| relation_expr_for_delete AS ColId
 				{
 					Alias *alias = makeNode(Alias);
 					alias->aliasname = $3;
 					$1->alias = alias;
-					$$ = $1;
+					$$ = (Node*) $1;
 				}
 			| relation_expr_for_delete  update_delete_partition_clause 			%prec UMINUS
 				{
@@ -27132,7 +27219,7 @@ relation_expr_opt_alias_for_delete: relation_expr_for_delete					%prec UMINUS
 						$1->subpartitionname = $2->subpartitionname;
 						$1->issubpartition = $2->issubpartition;
 					}
-					$$ = $1;
+					$$ = (Node*) $1;
 				}
 			| relation_expr_for_delete update_delete_partition_clause ColId
 				{
@@ -27146,7 +27233,7 @@ relation_expr_opt_alias_for_delete: relation_expr_for_delete					%prec UMINUS
 					Alias *alias = makeNode(Alias);
 					alias->aliasname = $3;
 					$1->alias = alias;
-					$$ = $1;
+					$$ = (Node*) $1;
 				}
 			| relation_expr_for_delete update_delete_partition_clause AS ColId
 				{
@@ -27160,7 +27247,21 @@ relation_expr_opt_alias_for_delete: relation_expr_for_delete					%prec UMINUS
 					Alias *alias = makeNode(Alias);
 					alias->aliasname = $4;
 					$1->alias = alias;
-					$$ = $1;
+					$$ = (Node*) $1;
+				}
+			| inline_view alias_clause %prec UMINUS
+				{
+					RangeSubselect *n = (RangeSubselect *)$1;
+					n->alias = $2;
+					$$ = (Node *) n;
+				}
+			| inline_view
+				{
+					RangeSubselect *n = (RangeSubselect *)$1;
+					Alias *a = makeNode(Alias);
+					a->aliasname = pstrdup("__unnamed_subquery__");
+					n->alias = a;
+					$$ = (Node *) n;
 				}
 		;
 
@@ -29388,6 +29489,9 @@ ignNulls: 	IGNORE NULLS_P
 func_application:	func_name '(' func_arg_list opt_sort_clause ')'
 				{
 					FuncCall *n = makeNode(FuncCall);
+					if (DB_IS_CMPT(D_FORMAT)) {
+						Funcname_Judge($1, $3);
+					}
 					ListCell* l = list_head($1);
 					n->funcname = $1;
 					n->args = $3;
@@ -32219,6 +32323,7 @@ unreserved_keyword:
 			| RESPECT_P
 			| RESTART
 			| RESTRICT
+			| RESULT_CACHE
 			| RESULT
 			| RETURN
 			| RETURNED_SQLSTATE
@@ -35100,7 +35205,6 @@ void contain_unsupport_node(Node* node, bool* has_unsupport_default_node)
     (void)raw_expression_tree_walker(node, (bool (*)())contain_unsupport_node, (void*)has_unsupport_default_node);
 }
 
-
 static List* TransformToConstStrNode(List *inExprList, char* raw_str)
 {
 	ListCell* cell = NULL;
@@ -35178,6 +35282,30 @@ static Alias* generate_alias(Alias* clone_target, const char* default_alias_name
 	}
 }
 
+static void Funcname_Judge(List *names, List *args)
+{
+    if (list_length(names) > 2 || (list_length(names)== 2 && strcmp(strVal(lfirst(list_head(names))), "sys") != 0)) {
+        return;
+    }
+
+    char *funcname = strVal(lfirst(list_tail(names)));
+
+    if (strcmp(funcname, "datename") == 0 || strcmp(funcname, "datepart") == 0) {
+        Node *firstnode = (Node *)linitial(args);
+        if (IsA(firstnode, ColumnRef) && list_length(((ColumnRef *) firstnode)->fields) == 1 &&
+            IsA(linitial(((ColumnRef *) firstnode)->fields), String) && list_length(args) == 2) {
+            char *name = strVal(linitial(((ColumnRef *) firstnode)->fields));
+            linitial(args) = makeStringConst(name, -1);
+        }
+    } else if (strcmp(funcname, "dateadd") == 0) {
+        Node *firstnode = (Node *)linitial(args);
+        if (IsA(firstnode, ColumnRef) && list_length(((ColumnRef *) firstnode)->fields) == 1 &&
+            IsA(linitial(((ColumnRef *) firstnode)->fields), String) && list_length(args) == 3) {
+            char *name = strVal(linitial(((ColumnRef *) firstnode)->fields));
+            linitial(args) = makeStringConst(name, -1);
+        }
+    }
+}
 /*
  * Must undefine this stuff before including scan.c, since it has different
  * definitions for these macros.

@@ -6616,6 +6616,72 @@ static Const* string_to_bytea_const(const char* str, size_t str_len)
  *
  * -------------------------------------------------------------------------
  */
+List* deconstruct_indexquals(IndexPath *path)
+{
+    List *result = NIL;
+    IndexOptInfo *index = path->indexinfo;
+    ListCell *lcc;
+    ListCell *lci;
+
+    forboth(lcc, path->indexquals, lci, path->indexqualcols) {
+        RestrictInfo *rinfo = lfirst_node(RestrictInfo, lcc);
+        int indexcol = lfirst_int(lci);
+        Expr *clause;
+        Node *leftop;
+        Node *rightop;
+        IndexQualInfo *qinfo;
+
+        clause = rinfo->clause;
+
+        qinfo = (IndexQualInfo *)palloc(sizeof(IndexQualInfo));
+        qinfo->rinfo = rinfo;
+        qinfo->indexcol = indexcol;
+
+        if (IsA(clause, OpExpr)) {
+            qinfo->clause_op = ((OpExpr *)clause)->opno;
+            leftop = get_leftop(clause);
+            rightop = get_rightop(clause);
+            if (match_index_to_operand(leftop, indexcol, index)) {
+                qinfo->varonleft = true;
+                qinfo->other_operand = rightop;
+            } else {
+                Assert(match_index_to_operand(rightop, indexcol, index));
+                qinfo->varonleft = false;
+                qinfo->other_operand = leftop;
+            }
+        } else if (IsA(clause, RowCompareExpr)) {
+            RowCompareExpr *rc = (RowCompareExpr *)clause;
+            qinfo->clause_op = linitial_oid(rc->opnos);
+            /* Examine only first columns to determine left/right sides */
+            if (match_index_to_operand((Node *)linitial(rc->largs), indexcol, index)) {
+                qinfo->varonleft = true;
+                qinfo->other_operand = (Node *)rc->rargs;
+            } else {
+                Assert(match_index_to_operand((Node *)linitial(rc->rargs), indexcol, index));
+                qinfo->varonleft = false;
+                qinfo->other_operand = (Node *)rc->largs;
+            }
+        } else if (IsA(clause, ScalarArrayOpExpr)) {
+            ScalarArrayOpExpr *saop = (ScalarArrayOpExpr *)clause;
+            qinfo->clause_op = saop->opno;
+            /* index column is always on the left in this case */
+            Assert(match_index_to_operand((Node *)linitial(saop->args), indexcol, index));
+            qinfo->varonleft = true;
+            qinfo->other_operand = (Node *)lsecond(saop->args);
+        } else if (IsA(clause, NullTest)) {
+            qinfo->clause_op = InvalidOid;
+            Assert(match_index_to_operand((Node *)((NullTest *)clause)->arg, indexcol, index));
+            qinfo->varonleft = true;
+            qinfo->other_operand = NULL;
+        } else {
+            elog(ERROR, "unsupported indexqual type: %d", (int)nodeTag(clause));
+        }
+
+        result = lappend(result, qinfo);
+    }
+    
+    return result;
+}
 
 /*
  * If the index is partial, add its predicate to the given qual list.

@@ -845,6 +845,42 @@ DATA(insert OID = 8309 (  _halfvec	PGNSP PGUID -1 f b A f t \054 0	8306 0 array_
 DATA(insert OID = 8310 (  _sparsevec	PGNSP PGUID -1 f b A f t \054 0	8307 0 array_in array_out array_recv array_send sparsevec_typmod_in - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define SPARSEVECARRAYOID 8310
 
+DATA(insert OID = 5850 (natural PGNSP PGUID 4 t b N f t \054 0 0 5851 natural_in natural_out natural_recv natural_send - - - i p f 0 -1 0 0 _null_ _null_ _null_));
+#define NATURALOID 5850
+
+DATA(insert OID = 5851 (_natural PGNSP PGUID -1 f b A f t \054 0 5850 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_));
+#define NATURALARRAYOID 5851
+
+DATA(insert OID = 5852 (naturaln PGNSP PGUID 4 t b N f t \054 0 0 5853 naturaln_in naturaln_out naturaln_recv naturaln_send - - - i p f 0 -1 0 0 _null_ _null_ _null_));
+#define NATURALNOID 5852
+
+DATA(insert OID = 5853 (_naturaln PGNSP PGUID -1 f b A f t \054 0 5852 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_));
+#define NATURALNARRAYOID 5853
+
+DATA(insert OID = 5854 (positive PGNSP PGUID 4 t b N f t \054 0 0 5855 positive_in positive_out positive_recv positive_send - - - i p f 0 -1 0 0 _null_ _null_ _null_));
+#define POSITIVEOID 5854
+
+DATA(insert OID = 5855 (_positive PGNSP PGUID -1 f b A f t \054 0 5854 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_));
+#define POSITIVEARRAYOID 5855
+
+DATA(insert OID = 5856 (positiven PGNSP PGUID 4 t b N f t \054 0 0 5857 positiven_in positiven_out positiven_recv positiven_send - - - i p f 0 -1 0 0 _null_ _null_ _null_));
+#define POSITIVENOID 5856
+
+DATA(insert OID = 5857 (_positiven PGNSP PGUID -1 f b A f t \054 0 5856 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_));
+#define POSITIVENARRAYOID 5857
+
+DATA(insert OID = 5858 (signtype PGNSP PGUID 4 t b N f t \054 0 0 5859 signtype_in signtype_out signtype_recv signtype_send - - - i p f 0 -1 0 0 _null_ _null_ _null_));
+#define SIGNTYPEOID 5858
+
+DATA(insert OID = 5859 (_signtype PGNSP PGUID -1 f b A f t \054 0 5858 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_));
+#define SIGNTYPEARRAYOID 5859
+
+DATA(insert OID = 5860 (simple_integer PGNSP PGUID 4 t b N f t \054 0 0 5861 simple_integer_in simple_integer_out simple_integer_recv simple_integer_send - - - i p f 0 -1 0 0 _null_ _null_ _null_));
+#define SIMPLE_INTEGER_OID 5860
+
+DATA(insert OID = 5861 (_simple_integer PGNSP PGUID -1 f b A f t \054 0 5860 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_));
+#define SIMPLE_INTEGER_ARRAYOID 5861
+
 /*
  * macros
  */

@@ -114,28 +114,40 @@ SELECT count(*) FROM INT16_TBL WHERE q2 >= q2 + 1;
 
 -- support type casts
 \dC int16
-                          List of casts
-   Source type    |   Target type    |  Function  |   Implicit?   
-------------------+------------------+------------+---------------
- bigint           | int16            | int16      | yes
- boolean          | int16            | int16      | yes
- double precision | int16            | int16      | yes
- int16            | bigint           | int8       | in assignment
- int16            | boolean          | int16_bool | yes
- int16            | double precision | float8     | yes
- int16            | integer          | int4       | in assignment
- int16            | numeric          | numeric    | yes
- int16            | oid              | oid        | yes
- int16            | real             | float4     | yes
- int16            | smallint         | int2       | in assignment
- int16            | tinyint          | i16toi1    | in assignment
- integer          | int16            | int16      | yes
- numeric          | int16            | int16      | yes
- oid              | int16            | int16      | yes
- real             | int16            | int16      | yes
- smallint         | int16            | int16      | yes
- tinyint          | int16            | int16      | yes
-(18 rows)
+                            List of casts
+   Source type    |   Target type    |    Function    |   Implicit?   
+------------------+------------------+----------------+---------------
+ bigint           | int16            | int16          | yes
+ boolean          | int16            | int16          | yes
+ double precision | int16            | int16          | yes
+ int16            | bigint           | int8           | in assignment
+ int16            | boolean          | int16_bool     | yes
+ int16            | double precision | float8         | yes
+ int16            | integer          | int4           | in assignment
+ int16            | "natural"        | natural        | in assignment
+ int16            | naturaln         | naturaln       | in assignment
+ int16            | numeric          | numeric        | yes
+ int16            | oid              | oid            | yes
+ int16            | positive         | positive       | in assignment
+ int16            | positiven        | positiven      | in assignment
+ int16            | real             | float4         | yes
+ int16            | signtype         | signtype       | in assignment
+ int16            | simple_integer   | simple_integer | in assignment
+ int16            | smallint         | int2           | in assignment
+ int16            | tinyint          | i16toi1        | in assignment
+ integer          | int16            | int16          | yes
+ "natural"        | int16            | int16          | yes
+ naturaln         | int16            | int16          | yes
+ numeric          | int16            | int16          | yes
+ oid              | int16            | int16          | yes
+ positive         | int16            | int16          | yes
+ positiven        | int16            | int16          | yes
+ real             | int16            | int16          | yes
+ signtype         | int16            | int16          | yes
+ simple_integer   | int16            | int16          | yes
+ smallint         | int16            | int16          | yes
+ tinyint          | int16            | int16          | yes
+(30 rows)
 
 SELECT CAST(q1 AS int2) FROM INT16_TBL WHERE q3 < 3 ORDER BY q3;
  q1  

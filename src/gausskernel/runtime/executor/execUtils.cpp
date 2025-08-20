@@ -51,6 +51,7 @@
 #include "catalog/heap.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_partition_fn.h"
+#include "catalog/pg_proc_ext.h"
 #include "executor/exec/execdebug.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/parsetree.h"
@@ -78,6 +79,97 @@
 #include "catalog/pg_proc_fn.h"
 #include "catalog/pg_proc_fn.h"
 #include "funcapi.h"
+
+/* Function Cached Result */
+
+#define FNCACHE_NUM_ARGS			(0x00FF)
+#define FNCACHE_NUMARGS(fflags)		((short)((fflags) & FNCACHE_NUM_ARGS))
+
+#define FNCACHE_REF_COUNT			(0xFF00)
+#define FNCACHE_REFCOUNT(fflags)	((fflags) & FNCACHE_REF_COUNT)
+#define FNCACHE_REF_MAX				(0xFF00)
+#define FNCACHE_REF_ONE				(0x0100)
+
+#define FNCACHE_CHECKED			    (1 << 24)   /* function is checked */
+#define FNCACHE_ENABLE_CACHE		(1 << 25)   /* function can use cache */
+#define FNCACHE_ARG_UNIQUE		    (1 << 26)   /* function has unique arg */
+
+#define FCR_REFCOUNT_ONE 1
+#define FCR_REFCOUNT_MASK ((1U << 4) - 1)
+
+#define FCR_USAGECOUNT_MASK 0x003C0000U
+#define FCR_USAGECOUNT_ONE (1U << 18)
+#define FCR_USAGECOUNT_SHIFT 18
+#define FCR_FLAG_MASK 0xFFC00000U
+
+#define FCR_STATE_GET_REFCOUNT(state) ((state) & FCR_REFCOUNT_MASK)
+#define FCR_STATE_GET_USAGECOUNT(state) (((state) & FCR_USAGECOUNT_MASK) >> FCR_USAGECOUNT_SHIFT)
+
+/* Function Result Flags */
+#define FR_VALID				(1U << 24)	/* cache is valid */
+#define FR_RETNULL				(1U << 25)	/* result is null */
+#define FR_HITTED				(1U << 26)	/* cache has hitted */
+
+#define FR_STATE_IS_VALID(state) (((state) & FR_VALID) == FR_VALID)
+#define FR_STATE_RET_NULL(state) (((state) & FR_RETNULL) == FR_RETNULL)
+#define FR_STATE_HITTED(state) (((state) & FR_HITTED) == FR_HITTED)
+
+#define FR_MAX_REF_COUNT	FCR_REFCOUNT_MASK
+#define FR_MAX_USAGE_COUNT	5
+
+#define FR_CACHE_NUM_BUCKETS (32)
+#define FR_CACHE_SIZE_SECTION (4)
+#define FR_CACHE_NUM_SECTIONS (4)
+#define FR_CACHE_SIZE_BUCKET (FR_CACHE_SIZE_SECTION * FR_CACHE_NUM_SECTIONS)
+#define FR_CACHE_MAX_SIZE ((FR_CACHE_NUM_BUCKETS) * (FR_CACHE_SIZE_BUCKET))
+
+#define FR_CACHE_SEG_RANGE ((UINT32_MAX + 1) / FR_CACHE_NUM_BUCKETS)
+
+#if FUNC_MAX_ARGS > 16
+#define FCR_MAX_ARGS (16)
+#else
+#define FCR_MAX_ARGS (FUNC_MAX_ARGS)
+#endif
+
+#if FNCACHE_NUM_ARGS < FCR_MAX_ARGS
+#error FCR_MAX_ARGS too large
+#endif
+
+typedef struct FuncRetCache
+{
+    uint32 state;
+    uint32 argisnull;
+    Datum* args;
+    Datum retval;
+} FuncRetCache;
+
+typedef struct FuncRetBucket
+{
+    short nextvict;
+    pg_crc32c* argcrcs;
+    FuncRetCache** retcache;
+} FuncRetBucket;
+
+typedef struct FuncCacheData
+{
+    Oid fnoid;
+    Oid fncoll;
+    uint32 fcflags;
+    bool security;
+    short prevhit;
+    Oid *argtypes;
+    Oid rettype;
+    int usagecount;
+    int hitcount;
+    union
+    {
+        FuncRetBucket** retbuckets;
+        FuncRetCache* retcache;
+    } cacheptr;
+} FuncCacheData;
+
+static FuncCache EStateFuncGetCache(EState *es, Oid fid, Oid fncoll);
+static FuncCache EStateFuncPutCache(EState *es, Oid fid, Oid fncoll);
 
 static bool get_last_attnums(Node* node, ProjectionInfo* projInfo);
 static bool index_recheck_constraint(
@@ -1275,7 +1367,7 @@ void ExecOpenUnusedIndices(ResultRelInfo* resultRelInfo, bool speculative)
  *		resultRelInfo->ri_RelationDesc.
  * ----------------------------------------------------------------
  */
-void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative)
+void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative, bool checkDisableIndex)
 {
     Relation resultRelation = resultRelInfo->ri_RelationDesc;
     List* indexoidlist = NIL;
@@ -1327,6 +1419,14 @@ void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative)
         IndexInfo* ii = NULL;
 
         indexDesc = index_open(indexOid, RowExclusiveLock);
+
+        /* don't support IUD if there is an diable index */
+        if (checkDisableIndex && indexOid >= FirstNormalObjectId &&
+            !GetIndexEnableStateByTuple(indexDesc->rd_indextuple)) {
+            ereport(ERROR, (errcode(ERRCODE_OPERATOR_INTERVENTION),
+                errmsg("The relation(%s) has no permit to write because it has index(%s) in disable state",
+                RelationGetRelationName(resultRelation), RelationGetRelationName(indexDesc))));
+        }
 
         // ignore INSERT/UPDATE/DELETE on unusable index
         if (!IndexIsUsable(indexDesc->rd_index)) {
@@ -3207,4 +3307,1258 @@ void set_result_for_plpgsql_language_function_with_outparam_by_flatten(Datum *re
     *isNull = nulls[0];
     pfree(values);
     pfree(nulls);
+}
+
+static bool func_cache_support_type(Oid typ)
+{
+    if (typ >= FirstBootstrapObjectId) {
+        Oid basetyp = getBaseType(typ);
+        if (!OidIsValid(basetyp)) {
+            return false;
+        }
+        if (basetyp >= FirstBootstrapObjectId) {
+            return false;
+        }
+        return func_cache_support_type(basetyp);
+    }
+
+    switch(typ) {
+        case BOOLOID:
+        case CHAROID:
+        case INT2OID:
+        case INT4OID:
+        case INT8OID:
+        case FLOAT4OID:
+        case FLOAT8OID:
+        case TIMEOID:
+        case DATEOID:
+        case TIMESTAMPOID:
+        case TIMESTAMPTZOID:
+        case TEXTOID:
+        case BPCHAROID:
+        case VARCHAROID:
+        case NVARCHAR2OID:
+        case NUMERICOID:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool func_cache_support_proc(FuncExpr *fexpr, HeapTuple proctup)
+{
+    short i;
+    short nargs;
+    bool isNull;
+    Datum tmp;
+
+    Form_pg_proc procform = (Form_pg_proc) GETSTRUCT(proctup);
+
+    Assert(!procform->proretset);
+
+    if (!IsPlpgsqlLanguageOid(procform->prolang) ||
+            procform->provolatile == PROVOLATILE_VOLATILE ||
+            procform->proisagg || procform->proiswindow ||
+            list_length(fexpr->args) != procform->pronargs) {
+        return false;
+    }
+
+    tmp = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_prokind, &isNull);
+    if (isNull) {
+        return false;
+    }
+
+    if (DatumGetChar(tmp) != PROKIND_FUNCTION) {
+        return false;
+    }
+
+    (void)SysCacheGetAttr(PROCNAMEARGSNSP, proctup,
+                          Anum_pg_proc_proallargtypes,
+                          &isNull);
+    /* Containing none-IN args */
+    if (!isNull) {
+        return false;
+    }
+
+    nargs = procform->pronargs;
+
+    /* Too many args */
+    if (nargs > FCR_MAX_ARGS) {
+        return false;
+    }
+
+    for (i = 0; i < nargs; i++) {
+        if (!func_cache_support_type(procform->proargtypes.values[i])) {
+            return false;
+        }
+    }
+
+    fexpr->funcflags |= nargs;
+
+    return true;
+}
+
+bool check_func_need_rescache(FuncExpr *fexpr)
+{
+    HeapTuple proctup;
+    Relation relation;
+    Datum datum;
+    bool isNull = false;
+    bool hasResultCacheFlag = false;
+
+    /*
+     * builtin functions not support.
+     */
+    if (fexpr->funcid < FirstNormalObjectId) {
+        return false;
+    }
+
+    if (fexpr->funcretset || fexpr->funcvariadic ||
+            !func_cache_support_type(fexpr->funcresulttype)) {
+        return false;
+    }
+
+    proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
+    if (!HeapTupleIsValid(proctup)) {
+        return false;
+    }
+
+    /* Function's RESULT_CACHE property is false, not support */
+    hasResultCacheFlag = GetResultCacheByOid(fexpr->funcid);
+    if (!hasResultCacheFlag) {
+        ReleaseSysCache(proctup);
+        return false;
+    }
+
+    if (!func_cache_support_proc(fexpr, proctup)) {
+        ReleaseSysCache(proctup);
+        return false;
+    }
+
+    ReleaseSysCache(proctup);
+
+    return true;
+}
+
+void set_func_checked(FuncExpr *fexpr)
+{
+    fexpr->funcflags = FNCACHE_CHECKED;
+}
+
+void estimate_func_retcache(FuncExpr *fexpr, PlannerInfo *root)
+{
+    ListCell *lc;
+    Node *arg;
+    VariableStatData rdata;
+
+    Assert(IsA(fexpr, FuncExpr));
+    Assert((fexpr->funcflags & FNCACHE_CHECKED) == 0);
+
+    fexpr->funcflags = FNCACHE_CHECKED;
+
+    if (!check_func_need_rescache(fexpr)) {
+        return;
+    }
+
+    fexpr->funcflags |= FNCACHE_ENABLE_CACHE;
+
+    if (root == NULL) {
+        return;
+    }
+
+    foreach(lc, fexpr->args) {
+        arg = (Node *)lfirst(lc);
+        if (IsA(arg, Var)) {
+            examine_variable(root, arg, 0, &rdata);
+            if (rdata.isunique)
+                fexpr->funcflags |= FNCACHE_ARG_UNIQUE;
+            ReleaseVariableStats(rdata);
+        }
+    }
+}
+
+void EStateFuncAssignCache(ExprState *state, ExprContext *ectx, FuncExpr *fe, FunctionCallInfo fcinfo)
+{
+    Oid fnid;
+    Oid fncoll;
+    EState *es_top;
+    FmgrInfo *flinfo;
+    FuncCache fncache;
+
+    Assert(!(state && ectx));
+    Assert(state != NULL || ectx != NULL);
+
+    if ((state == NULL && ectx == NULL) || fe == NULL || fcinfo == NULL) {
+        return;
+    }
+
+    if (!ActivePortal || ActivePortal->func_retcache_cxt == NULL) {
+        return;
+    }
+
+    if (!IsA(fe, FuncExpr)) {
+        return;
+    }
+
+    if (fe->funcid < FirstNormalObjectId) {
+        return;
+    }
+
+    /* smp not support */
+    if (StreamThreadAmI() || StreamTopConsumerAmI()) {
+        return;
+    }
+
+    if (state) {
+        /* From ExecInitFunc */
+        return;
+    } else if (ectx && ActivePortal->top_estate) {
+        /* From ExecEvalFunc */
+        es_top = ActivePortal->top_estate;
+    } else {
+        /* EState not found */
+        return;
+    }
+
+    if (es_top->es_topstate) {
+        es_top = es_top->es_topstate;
+    }
+
+    if (es_top->es_topstate) {
+        return;
+    }
+
+    flinfo = fcinfo->flinfo;
+
+    Assert(flinfo->fn_oid >= FirstNormalObjectId);
+    Assert(!flinfo->fn_retset);
+
+    if (flinfo->fn_nargs > FCR_MAX_ARGS) {
+        return;
+    }
+
+    fnid = flinfo->fn_oid;
+    fncoll = fcinfo->fncollation;
+
+    /*
+     * Save top EState to function.
+     */
+    fcinfo->top_estate = es_top;
+    Assert(fcinfo->fncache == NULL);
+    fncache = EStateFuncGetCache(es_top, fnid, fncoll);
+
+    if (fncache) {
+        /* Just in case. Variable arguments and default arguments. */
+        if (FNCACHE_NUMARGS(fncache->fcflags) != fcinfo->nargs) {
+            return;
+        }
+
+        if ((fncache->fcflags & FNCACHE_ENABLE_CACHE) == 0) {
+            /* Function has checked, not support result cache. */
+            return;
+        }
+
+        if (FNCACHE_REFCOUNT(fncache->fcflags) >= FNCACHE_REF_MAX) {
+            /* * Cache can only be used for the first 255 calls to the same function in same plan. */
+            return;
+        }
+
+        if ((fe->funcflags & FNCACHE_ARG_UNIQUE) &&
+                (fncache->fcflags & FNCACHE_ARG_UNIQUE) == 0) {
+            fncache->fcflags |= FNCACHE_ARG_UNIQUE;
+        }
+
+        fncache->fcflags += FNCACHE_REF_ONE;
+        fcinfo->fncache = fncache;
+
+        return;
+    }
+
+    /* Function has not yet created a cache. */
+
+    /*
+     * Function has not yet checked? Check if support function result cache.
+     */
+    if ((fe->funcflags & FNCACHE_CHECKED) == 0) {
+        estimate_func_retcache(fe, NULL);
+    }
+
+    fncache = EStateFuncPutCache(es_top, fnid, fncoll);
+    if (fncache == NULL) {
+        return;
+    }
+
+    Assert(fncache);
+
+    /* Function result can not cached, return. */
+    if ((fe->funcflags & FNCACHE_ENABLE_CACHE) == 0) {
+        fncache->fcflags = FNCACHE_CHECKED;
+        return;
+    }
+
+    fncache->fcflags = fe->funcflags;
+    Assert(FNCACHE_REFCOUNT(fncache->fcflags) == 0);
+
+    fncache->prevhit = -1;
+
+    fncache->fcflags += FNCACHE_REF_ONE;
+
+    Assert(fncache->argtypes == NULL);
+    Assert(!OidIsValid(fncache->rettype));
+
+    fcinfo->fncache = fncache;
+
+    /*
+     * Save function args and return type, found their base types.
+     */
+    if (flinfo->fn_nargs > 0) {
+        HeapTuple proctup;
+        Form_pg_proc procform;
+        short i;
+        short nargs;
+        Oid* argtypes;
+
+        proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fnid));
+        Assert(HeapTupleIsValid(proctup));
+
+        procform = (Form_pg_proc) GETSTRUCT(proctup);
+        Assert(procform->pronargs == fcinfo->flinfo->fn_nargs);
+
+        nargs = procform->pronargs;
+        argtypes = procform->proargtypes.values;
+
+        fncache->security = procform->prosecdef;
+        fncache->argtypes = (Oid *)MemoryContextAllocZero(ActivePortal->func_retcache_cxt,
+                                                          sizeof(Oid) * nargs);
+
+        /* transform to base types */
+        for (i = 0; i < nargs; i++) {
+            if (argtypes[i] < FirstBootstrapObjectId) {
+                fncache->argtypes[i] = argtypes[i];
+                continue;
+            }
+
+            fncache->argtypes[i] = getBaseType(argtypes[i]);
+            Assert(OidIsValid(fncache->argtypes[i]));
+            Assert(fncache->argtypes[i] < FirstBootstrapObjectId);
+        }
+
+        ReleaseSysCache(proctup);
+    } else if (flinfo->fn_nargs == 0) {
+        HeapTuple proctup;
+        Form_pg_proc procform;
+
+        proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fnid));
+        Assert(HeapTupleIsValid(proctup));
+
+        procform = (Form_pg_proc) GETSTRUCT(proctup);
+        fncache->security = procform->prosecdef;
+        ReleaseSysCache(proctup);
+    }
+
+    fncache->rettype = fe->funcresulttype;
+
+    /* transform to base types */
+    if (fncache->rettype >= FirstBootstrapObjectId) {
+        fncache->rettype = getBaseType(fncache->rettype);
+        Assert(OidIsValid(fncache->rettype));
+        Assert(fncache->rettype < FirstBootstrapObjectId);
+    }
+}
+
+#define FNCACHE_ARRAY_SIZE (8)
+#define MAX_FNCACHE_SLOT (16)   /* max slot: 14 */
+
+/*
+ * Before all functions in the plan are initialized, we cannot predict how
+ * many functions need to be processed, including other functions called in
+ * PL/pgSQL functions.
+ *
+ * Each function's own result cache is associated with a pointer after allocation,
+ * so the location cannot be changed, and space needs to be saved as much as possible.
+ * This cache only needs to be associated during the executor initialization phase,
+ * and there is no need to worry about performance.
+ *
+ * When allocating function cache, an array of 8 pointers is used for management:
+ * 1. When more space is needed, an array of pointers of 8 elements is allocated;
+ * 2. The last element of the array points to the next array;
+ * 3. Any function expression is initialized only once, so sequential traversal is tolerable.
+ *
+ * If a plan involves a lot of function calls, this may need to be reconsidered.
+ * Currently limited to MAX_FNCACHE_SLOT.
+ *
+ * Use function oid and collation as cache key.
+ */
+static FuncCache EStateFuncGetCache(EState *es, Oid fnid, Oid fncoll)
+{
+    short i;
+    FuncCache *fncaches;
+
+    Assert(es);
+    Assert(OidIsValid(fnid));
+    Assert(fnid >= FirstNormalObjectId);
+    Assert(es->es_topstate == NULL);
+
+    if (es->es_topstate)
+        return NULL;
+
+    if (es->es_funcache.fncaches == NULL)
+        return NULL;
+
+    fncaches = es->es_funcache.fncaches;
+
+    /* search FuncCache using by fnid,fncoll */
+    for (i = 0;;) {
+        if (i < (FNCACHE_ARRAY_SIZE - 1)) {
+            /*
+             * If fnoid is invalid, it indicates that the subsequent slots have not been used.
+             * In this case, simply return.
+             */
+            if (!OidIsValid(fncaches[i]->fnoid)) {
+                break;
+            }
+
+            /*
+             * Check whether the slot is consistent with the current fnid and fncoll.
+             * If it is, use this slot directly; otherwise, continue to iterate
+             */
+            if (fncaches[i]->fnoid != fnid || fncaches[i]->fncoll != fncoll) {
+                i++;
+                continue;
+            }
+
+            return fncaches[i];
+        }
+
+        /*
+         * Check if the next 8 arrays are empty. If they are empty,
+         * it means they haven't been initialized, so return directly.
+         */
+        if (fncaches[FNCACHE_ARRAY_SIZE - 1] == NULL) {
+            break;
+        }
+
+        i = 0;
+        /* Iterate the next 8 arrays */
+        fncaches = (FuncCache *)fncaches[FNCACHE_ARRAY_SIZE - 1];
+    }
+
+    return NULL;
+}
+
+/*
+ * Create function result cache.
+ */
+static FuncCache EStateFuncPutCache(EState *es, Oid fnid, Oid fncoll)
+{
+    short i;
+    FuncCache *fncaches;
+    FuncCache fncache;
+
+    Assert(es);
+    Assert(OidIsValid(fnid));
+    Assert(fnid >= FirstNormalObjectId);
+    Assert(es->es_topstate == NULL);
+
+    if (es->es_topstate) {
+        return NULL;
+    }
+
+    Assert(EStateFuncGetCache(es, fnid, fncoll) == NULL);
+
+    if (es->es_funcache.fncaches == NULL) {
+        fncaches = (FuncCache *)MemoryContextAllocZero(ActivePortal->func_retcache_cxt,
+                                                       sizeof(FuncCache) * FNCACHE_ARRAY_SIZE);
+
+        fncache = (FuncCache)MemoryContextAllocZero(ActivePortal->func_retcache_cxt,
+                                                    sizeof(FuncCacheData) * (FNCACHE_ARRAY_SIZE - 1));
+
+        for (i = 0; i < FNCACHE_ARRAY_SIZE - 1; i++) {
+            fncaches[i] = fncache + i;
+        }
+
+        es->es_funcache.fncaches = fncaches;
+        ActivePortal->funcRetcacheSlotCount += FNCACHE_ARRAY_SIZE;
+    } else {
+        i = 0;
+        fncaches = es->es_funcache.fncaches;
+
+        for (;;) {
+            if (i < (FNCACHE_ARRAY_SIZE - 1)) {
+                if (OidIsValid(fncaches[i]->fnoid)) {
+                    i++;
+                    continue;
+                }
+
+                fncache = fncaches[i];
+                break;
+            }
+
+            if (fncaches[FNCACHE_ARRAY_SIZE - 1]) {
+                i = 0;
+                fncaches = (FuncCache *)fncaches[FNCACHE_ARRAY_SIZE - 1];
+                continue;
+            }
+
+            if (ActivePortal->funcRetcacheSlotCount < MAX_FNCACHE_SLOT) {
+                fncaches[FNCACHE_ARRAY_SIZE - 1] = (FuncCache)MemoryContextAllocZero(
+                    ActivePortal->func_retcache_cxt,
+                    sizeof(FuncCache) * FNCACHE_ARRAY_SIZE);
+
+                fncache = (FuncCache)MemoryContextAllocZero(
+                    ActivePortal->func_retcache_cxt,
+                    sizeof(FuncCacheData) * (FNCACHE_ARRAY_SIZE - 1));
+
+                fncaches = (FuncCache *)fncaches[FNCACHE_ARRAY_SIZE - 1];
+                for (i = 0; i < FNCACHE_ARRAY_SIZE - 1; i++) {
+                    fncaches[i] = fncache + i;
+                }
+
+                fncache = fncaches[0];
+                ActivePortal->funcRetcacheSlotCount += FNCACHE_ARRAY_SIZE;
+            } else {
+                return NULL;
+            }
+            break;
+        }
+    }
+
+    Assert(fncache);
+
+    fncache->fnoid = fnid;
+    fncache->fncoll = fncoll;
+
+    return fncache;
+}
+
+/*
+ * Recycling cache is mainly used for:
+ * 1. The plan is called only once and uses unique parameters. The parameters
+ *    are different each time and it is impossible to hit.
+ * 2. There is no hit after several calls during the execution process.
+ *
+ * Although the cost of the result cache itself is much lower than the cost of
+ * UDF calls, it is still not negligible, so it is best to stop using it at the
+ * right time.
+ */
+static void EStateFuncReclaimCache(FuncCache fncache)
+{
+    Oid dtmtype;
+    short i;
+    short j;
+    short k;
+    short nargs;
+    FuncRetBucket *retbucket;
+    FuncRetCache *retcache;
+
+    if (FNCACHE_REFCOUNT(fncache->fcflags) > FNCACHE_REF_ONE) {
+        fncache->fcflags -= FNCACHE_REF_ONE;
+        return;
+    }
+
+    if (fncache->cacheptr.retbuckets == NULL) {
+        return;
+    }
+
+    nargs = FNCACHE_NUMARGS(fncache->fcflags);
+
+    Assert(fncache->cacheptr.retbuckets);
+    for (i = 0; i < FR_CACHE_NUM_BUCKETS; i++) {
+        retbucket = fncache->cacheptr.retbuckets[i];
+
+        if (retbucket == NULL) {
+            continue;
+        }
+
+        for (j = FR_CACHE_SIZE_BUCKET - 1; j >= 0; j--) {
+            if (retbucket->retcache[j] == NULL) {
+                continue;
+            }
+
+            retcache = retbucket->retcache[j];
+            if (!FR_STATE_IS_VALID(retcache->state)) {
+                continue;
+            }
+
+            for (k = 0; k < nargs; k++) {
+                dtmtype = fncache->argtypes[k];
+
+                if (dtmtype == TEXTOID || dtmtype == VARCHAROID ||
+                        dtmtype == NVARCHAR2OID || dtmtype == BPCHAROID ||
+                        dtmtype == NUMERICOID) {
+                    pfree(DatumGetPointer(retcache->args[k]));
+                }
+            }
+
+            dtmtype = fncache->rettype;
+            if (dtmtype == TEXTOID || dtmtype == VARCHAROID ||
+                    dtmtype == NVARCHAR2OID || dtmtype == BPCHAROID ||
+                    dtmtype == NUMERICOID) {
+                pfree(DatumGetPointer(retcache->retval));
+            }
+
+            if ((j % FR_CACHE_SIZE_SECTION) == 0) {
+                pfree(retbucket->retcache[j]->args);
+                pfree(retbucket->retcache[j]);
+            }
+        }
+
+        pfree(retbucket->retcache);
+    }
+
+    pfree(fncache->cacheptr.retbuckets);
+}
+
+/* Strings that are too long are difficult to match and are not cached. */
+#define FCR_DATUM_LENGTH_THRESHOLD (127)
+
+/*
+ * Check Datum if not support cache.
+ */
+static inline bool FunctionDatumToolong(Datum d, Oid dtype)
+{
+    if (dtype == TEXTOID || dtype == VARCHAROID ||
+        dtype == NVARCHAR2OID || dtype == BPCHAROID) {
+        if (VARSIZE_ANY(DatumGetPointer(d)) > FCR_DATUM_LENGTH_THRESHOLD) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+ * Check whether the function args used in this call cannot be cached.
+ */
+static bool FunctionArgCannotCache(FuncCache fncache, FunctionCallInfo fcinfo)
+{
+    short i;
+    short nargs = fcinfo->nargs;
+    Datum *fargs = fcinfo->arg;
+    bool *argnull = fcinfo->argnull;
+
+    if (nargs != fcinfo->flinfo->fn_nargs) {
+        return true;
+    }
+
+    for (i = 0; i < nargs; i++) {
+        if (argnull[i]) {
+            continue;
+        }
+
+        if (FunctionDatumToolong(fargs[i], fncache->argtypes[i])) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+ * Copy Datum to the current context according to type.
+ *
+ * Datum has some judgments before getting the cache, see FunctionDatumToolong,
+ * and blocks the parts that are unclear and worry about problems. Here you can
+ * directly use datumcopy.
+ *
+ * In the future, when adding new types or making adjustments, you should also
+ * pay attention to the differences in operations of different types.
+ */
+static inline Datum FunctionDatumCopy(Datum d, Oid dtype)
+{
+    if (dtype == NUMERICOID) {
+        return NumericGetDatum(DatumGetNumericCopy(d));
+    } else if (dtype == TEXTOID || dtype == VARCHAROID ||
+               dtype == NVARCHAR2OID || dtype == BPCHAROID) {
+        return datumCopy(d, false, -1);
+    } else {
+        return d;
+    }
+}
+
+#define INVALID_ARG_CRC32C (0u)
+#define FISRT_ARG_CRC32C (1u)
+#define ARG_CRC32C_IS_VALID(c) (!EQ_CRC32C(c, INVALID_ARG_CRC32C))
+
+#if ((UINT32_MAX + 1) % FR_CACHE_MAX_SIZE != 0)
+#error Wrong FR_CACHE_MAX_SIZE, must be divisible by UINT32_MAX + 1.
+#endif
+
+/*
+ * Because not too many results are cached, the instruction set CRC operation
+ * is faster and the hash range is sufficient.
+ *
+ * FunctionArgCannotCache first filters the parameters, so there is no need to
+ * worry about data validity issues here.
+ *
+ * Pay attention to this when adjusting or adding supported types in the future.
+ */
+static inline pg_crc32c EStateFuncHashArgs(Oid *argtypes, Datum *fargs, bool *isnull, short nargs)
+{
+    struct varlena *vl;
+    pg_crc32c tmpcrc;
+    pg_crc32c argcrc;
+    short i;
+    Oid argtype;
+
+    INIT_CRC32C(argcrc);
+
+    for (i = 0; i < nargs; i++) {
+        if (isnull[i]) {
+            continue;
+        }
+
+        argtype = argtypes[i];
+
+        if (argtype == NUMERICOID) {
+            Size len;
+
+            vl = (struct varlena*)DatumGetPointer(fargs[i]);
+
+            Assert(!VARATT_IS_EXTENDED(vl) || !VARATT_IS_HUGE_TOAST_POINTER(vl));
+
+            len = VARATT_IS_HUGE_TOAST_POINTER(vl) ? VARSIZE_EXTERNAL(vl) : VARSIZE(vl);
+
+            INIT_CRC32C(tmpcrc);
+            COMP_CRC32C(tmpcrc, vl, VARSIZE_ANY(vl));
+            FIN_CRC32C(tmpcrc);
+
+            COMP_CRC32C(argcrc, &tmpcrc, sizeof(pg_crc32c));
+        } else if (argtype == TEXTOID || argtype == VARCHAROID ||
+                   argtype == NVARCHAR2OID || argtype == BPCHAROID) {
+            INIT_CRC32C(tmpcrc);
+            vl = (struct varlena *) DatumGetPointer(fargs[i]);
+            COMP_CRC32C(tmpcrc, vl, VARSIZE_ANY(vl));
+            FIN_CRC32C(tmpcrc);
+
+            COMP_CRC32C(argcrc, &tmpcrc, sizeof(pg_crc32c));
+        } else {
+            COMP_CRC32C(argcrc, fargs + i, sizeof(Datum));
+        }
+    }
+
+    FIN_CRC32C(argcrc);
+
+    if EQ_CRC32C(argcrc, INVALID_ARG_CRC32C) {
+        argcrc = FISRT_ARG_CRC32C;
+    }
+
+    return argcrc;
+}
+
+/*
+ * Compare the parameters Dautm one by one according to type for equality.
+ */
+static inline bool EStateFuncCompareArgs(Oid *argtypes, FuncRetCache *retcache, Datum *fargs, bool *isnull, short nargs)
+{
+    short i;
+    Oid argtype;
+    Datum *args = retcache->args;
+    uint32 argisnull = retcache->argisnull;
+
+    for (i = 0; i < nargs; i++) {
+        /* Function arg input is NULL */
+        if (isnull[i]) {
+            if (argisnull & (1 << i)) {
+                continue;
+            } else {
+                break;
+            }
+        }
+        /* Function arg input is not NULL but cached arg is NULL */
+        if (argisnull & (1 << i)) {
+            break;
+        }
+
+        argtype = argtypes[i];
+
+        if (argtype == NUMERICOID) {
+            if (!DatumGetBool(DirectFunctionCall2(numeric_eq, fargs[i], args[i]))) {
+                break;
+            }
+        } else if (argtype == TEXTOID || argtype == VARCHAROID ||
+                   argtype == NVARCHAR2OID || argtype == BPCHAROID) {
+            if (!datumIsEqual(fargs[i], args[i], false, -1)) {
+                break;
+            }
+        } else if (fargs[i] != args[i]) {
+            break;
+        }
+    }
+
+    if (i == nargs) {
+        return true;
+    }
+
+    return false;
+}
+
+/*
+ * Get function's result cache.
+ */
+bool EStateFuncGetRetCache(FunctionCallInfo fcinfo, Datum *retvalue, bool *retnull)
+{
+    short i;
+    short nargs;
+    short prevhit;
+    short buck;
+    short offs;
+    Datum *fargs;
+    bool *argnull;
+    FuncCache fncache;
+    FuncRetBucket *retbucket;
+    FuncRetCache *retcache;
+    FuncRetCache **retcachea;
+    pg_crc32c argcrc;
+    pg_crc32c *argcrcs;
+
+    Assert(fcinfo->fncache);
+    Assert(fcinfo->top_estate);
+
+    fncache = fcinfo->fncache;
+
+    /*
+     * Contains only one parameter and is called only once, disabling caching.
+     * It should be determined when deciding whether to use caching (before create_plan),
+     * but the current framework is difficult to code.
+     * It is necessary to observe the number of function calls and whether the function
+     * parameters are consistent, which cannot be done with one recursion.
+     *
+     * When it contains only one parameter, it is determined and closed in the first call.
+     * Only the allocated internal elements are recycled, and the structures themselves are
+     * retained because their pointers are allocated to each call. If recycled, it will
+     * affect all other functions.
+     */
+    if (unlikely((fncache->fcflags & FNCACHE_ARG_UNIQUE) &&
+            (fncache->fcflags & FNCACHE_REF_COUNT) == 1)) {
+        Assert(fncache->cacheptr.retbuckets == NULL);
+
+        if (fncache->argtypes) {
+            pfree(fncache->argtypes);
+        }
+
+        fcinfo->fncache = NULL;
+
+        return false;
+    }
+
+    /*
+     * The number of times used reaches the cache number, and the hit rate is less than 15%.
+     */
+    if (unlikely(fncache->usagecount >= FR_MAX_USAGE_COUNT * FR_CACHE_MAX_SIZE &&
+            ((fncache->hitcount / 0.15) < fncache->usagecount))) {
+        /* A function without parameters will hit all of them after being called once. */
+        Assert(FNCACHE_NUMARGS(fncache->fcflags) > 0);
+
+        EStateFuncReclaimCache(fncache);
+
+        fcinfo->fncache = NULL;
+
+        return false;
+    }
+
+    if (fncache->usagecount < INT32_MAX) {
+        fncache->usagecount++;
+    }
+
+    nargs = fcinfo->nargs;
+
+    if (nargs == 0) {
+        /* Never match when function first call. */
+        if (unlikely(fncache->cacheptr.retcache == NULL)) {
+            return false;
+        }
+
+        retcache = fncache->cacheptr.retcache;
+
+        Assert(FR_STATE_IS_VALID(retcache->state));
+
+        if (fncache->usagecount < INT32_MAX) {
+            fncache->hitcount++;
+        }
+
+        /* Found cached results, no need to call function to return directly. */
+        *retvalue = retcache->retval;
+        *retnull = FR_STATE_RET_NULL(retcache->state);
+
+        return true;
+    }
+
+    /*
+     * Calculate CRC of function parameters for bucket matching.
+     */
+    fcinfo->arghash = INVALID_ARG_CRC32C;
+
+    /* Check whether the function args used in this call cannot be cached. */
+    if (FunctionArgCannotCache(fncache, fcinfo)) {
+        return false;
+    }
+
+    fargs = fcinfo->arg;
+    argnull = fcinfo->argnull;
+
+    argcrc = EStateFuncHashArgs(fncache->argtypes, fargs, argnull, nargs);
+    Assert(ARG_CRC32C_IS_VALID(argcrc));
+
+    fcinfo->arghash = argcrc;
+
+    /* No cache yet */
+    if (fncache->cacheptr.retbuckets == NULL) {
+        return false;
+    }
+
+    /*
+     * When called multiple times, the next call may use the same parameters,
+     * and the cache that hit the last time will be tried first.
+     */
+    if (fncache->prevhit >= 0) {
+        prevhit = fncache->prevhit;
+
+        buck = prevhit / FR_CACHE_SIZE_BUCKET;
+        offs = prevhit % FR_CACHE_SIZE_BUCKET;
+
+        Assert(fncache->cacheptr.retbuckets);
+        retbucket = fncache->cacheptr.retbuckets[buck];
+
+        Assert(retbucket);
+        Assert(retbucket->retcache);
+
+        Assert(ARG_CRC32C_IS_VALID(retbucket->argcrcs[offs]));
+
+        retcache = retbucket->retcache[offs];
+        Assert(retcache);
+        Assert(FR_STATE_IS_VALID(retcache->state));
+
+        if (EQ_CRC32C(argcrc, retbucket->argcrcs[offs]) &&
+                EStateFuncCompareArgs(fncache->argtypes, retcache, fargs, argnull, nargs)) {
+            if (fncache->usagecount < INT32_MAX)
+                fncache->hitcount++;
+
+            /* Matches the previous call and returns directly. */
+            *retvalue = retcache->retval;
+            *retnull = FR_STATE_RET_NULL(retcache->state);
+
+            return true;
+        } else {
+            fncache->prevhit = -1;
+        }
+    }
+
+    /* Locate the bucket where the cache for this call is located. */
+    buck = argcrc % FR_CACHE_NUM_BUCKETS;
+    retbucket = fncache->cacheptr.retbuckets[buck];
+    if (retbucket == NULL) {
+        return false;
+    }
+
+    retcachea = retbucket->retcache;
+    argcrcs = retbucket->argcrcs;
+
+    for (i = 0; i < FR_CACHE_SIZE_BUCKET; i++) {
+        /* The last valid cache in the bucket has been reached. */
+        if (!ARG_CRC32C_IS_VALID(argcrcs[i])) {
+            break;
+        }
+
+        /* If the CRC is different, the parameters will also be different. Continue to compare the next. */
+        if (!EQ_CRC32C(argcrc, argcrcs[i])) {
+            continue;
+        }
+
+        /* CRC is the same, check if the parameters are the same. */
+        if (!EStateFuncCompareArgs(fncache->argtypes, retcachea[i], fargs, argnull, nargs)) {
+            continue;
+        }
+
+        if (fncache->usagecount < INT32_MAX) {
+            fncache->hitcount++;
+        }
+
+        if (FCR_STATE_GET_USAGECOUNT(retcachea[i]->state) < FR_MAX_USAGE_COUNT) {
+            retcachea[i]->state += FCR_USAGECOUNT_ONE;
+        }
+
+        if ((retcachea[i]->state & FR_HITTED) == 0) {
+            retcachea[i]->state |= FR_HITTED;
+        }
+
+        /*
+         * The function appears multiple times in the plan, and the next call may use the
+         * same parameters, for example:
+         *   SELECT f1(col1), f1(col1) ... FROM t1;
+         * Record the hit position this time, and expect to hit it directly next time.
+         */
+        if ((fncache->fcflags & FNCACHE_REF_COUNT) > 1) {
+            /*
+             * Note that the way the last hit is saved here is different from the bucket
+             * positioning method.
+             */
+            fncache->prevhit = buck * FR_CACHE_SIZE_BUCKET + i;
+        }
+
+        /* Found cached results, no need to call the function to return directly. */
+        *retvalue = retcachea[i]->retval;
+        *retnull = FR_STATE_RET_NULL(retcachea[i]->state);
+
+        return true;
+    }
+
+    return false;
+}
+
+extern PLpgSQL_function* get_security_function(FunctionCallInfo fcinfo);
+
+/*
+ * Result cache of procedural language functions
+ *
+ * Currently, function inputs are difficult to predict because they often contain expressions
+ * or even the output of other functions.
+ *
+ * Some scenarios of relation scan operators can estimate the number of calls more accurately,
+ * but the distribution of parameters is still difficult to predict. Therefore, the design
+ * considers fragmenting the cache in order to create as small a cache as possible.
+ *
+ * In practice, the cost of cache management in the PG environment is still considerable. For
+ * the simplest function that contains only one native type parameter and directly returns the
+ * result, the hit rate is less than about 15%, which will result in negative returns.
+ *
+ * The function cost is closely related to the management of the result cache, but unfortunately,
+ * there are problems with the current function cost system and it is difficult to solve it for
+ * the time being. The first phase of implementation uses a rough empirical coefficient.
+ *
+ * Fragmented cache, divided into 32 buckets, each with a capacity of 16, and a total cache of 512.
+ * 1. Bucket slots are allocated at once
+ * 2. There are many buckets, and some buckets may not be used when the result set is small,
+ *    reducing memory allocation
+ * 3. Four positions are allocated in the bucket each time, and the bucket can be not full when
+ *    the result set is small, reducing memory allocation
+ * 4. The bucket size is small, and the matching process is faster
+ * 5. The parameters use the instruction set to calculate the CRC matching bucket, in order to be faster
+ * Extreme scenarios, such as all input parameters are constants, only one bucket is used, 4 blocks.
+ */
+bool EStateFuncPutRetCache(FunctionCallInfo fcinfo, Datum ret)
+{
+    short i;
+    short nargs;
+    short buck;
+    short nextvict;
+    Oid datumtype;
+    pg_crc32c argcrc;
+    pg_crc32c *argcrcs;
+    int	usagecount;
+    Datum *fargs;
+    bool *argnull;
+    Datum *args;
+    EState *es;
+    FuncCache fncache;
+    FuncRetBucket **retbuckets;
+    FuncRetBucket *retbucket;
+    FuncRetCache **retcache;
+    FuncRetCache *buckcache;
+    FuncRetCache *cret;
+    FuncRetCache *rret;
+    MemoryContext oldctx;
+
+    Assert(fcinfo->fncache);
+    Assert(fcinfo->top_estate);
+    Assert(FNCACHE_NUMARGS(fcinfo->fncache->fcflags) == fcinfo->nargs);
+
+    /* Autonomous transaction functions and subroutines do not support caching. */
+    if (fcinfo->flinfo && fcinfo->flinfo->fn_extra) {
+        PLpgSQL_function* func;
+        if (fcinfo->fncache->security) {
+            func = get_security_function(fcinfo);
+        } else {
+            func = (PLpgSQL_function*)fcinfo->flinfo->fn_extra;
+        }
+        if (func->action->isAutonomous || func->proc_list != NIL || OidIsValid(func->parent_oid)) {
+            EStateFuncReclaimCache(fcinfo->fncache);
+
+            fcinfo->fncache = NULL;
+            return false;
+        }
+    }
+
+    fncache = fcinfo->fncache;
+    es = fcinfo->top_estate;
+    nargs = fcinfo->nargs;
+
+    if (nargs == 0) {
+        /* No arguments, only cached one result. */
+        FuncRetCache *funcretcache;
+
+        Assert(fncache->cacheptr.retcache == NULL);
+
+        oldctx = MemoryContextSwitchTo(ActivePortal->func_retcache_cxt);
+
+        funcretcache = (FuncRetCache *)palloc0(sizeof(FuncRetCache));
+
+        funcretcache->state = FR_VALID;
+
+        if (fcinfo->isnull) {
+            funcretcache->state |= FR_RETNULL;
+        } else {
+            funcretcache->retval = FunctionDatumCopy(ret, fncache->rettype);
+        }
+
+        MemoryContextSwitchTo(oldctx);
+
+        fncache->cacheptr.retcache = funcretcache;
+
+        return true;
+    }
+
+    /* CRC is invalid, FunctionArgCannotCache check considers the arguments to be uncached */
+    if (!ARG_CRC32C_IS_VALID(fcinfo->arghash)) {
+        return false;
+    }
+
+    argcrc = fcinfo->arghash;
+
+    Assert(!FunctionArgCannotCache(fncache, fcinfo));
+
+    /* Check if the function result can be cached. */
+    if (!fcinfo->isnull && FunctionDatumToolong(ret, fncache->rettype)) {
+        return true;
+    }
+
+    buck = argcrc % FR_CACHE_NUM_BUCKETS;
+
+    oldctx = MemoryContextSwitchTo(ActivePortal->func_retcache_cxt);
+
+    if (fncache->cacheptr.retbuckets) {
+        retbuckets = fncache->cacheptr.retbuckets;
+    } else {
+        /* cache initial */
+        retbuckets = (FuncRetBucket **)palloc0(sizeof(FuncRetBucket *) * FR_CACHE_NUM_BUCKETS);
+        fncache->cacheptr.retbuckets = retbuckets;
+    }
+
+    if (retbuckets[buck]) {
+        retbucket = retbuckets[buck];
+    } else {
+        /* bucket initial */
+        retbucket = (FuncRetBucket *)palloc0(sizeof(FuncRetBucket));
+        retbuckets[buck] = retbucket;
+
+        retbucket->argcrcs = (pg_crc32c *)palloc0(sizeof(pg_crc32c) * FR_CACHE_SIZE_BUCKET);
+        retbucket->retcache = (FuncRetCache **)palloc0(sizeof(FuncRetCache *) * FR_CACHE_SIZE_BUCKET);
+
+        buckcache = (FuncRetCache *)palloc0(sizeof(FuncRetCache) * FR_CACHE_SIZE_SECTION);
+        args = (Datum *)palloc0(sizeof(Datum) * FR_CACHE_SIZE_SECTION * nargs);
+
+        for (i = 0; i < FR_CACHE_SIZE_SECTION; i++) {
+            buckcache[i].args = args + nargs * i;
+            retbucket->retcache[i] = buckcache + i;
+        }
+    }
+
+    rret = NULL;
+    nextvict = retbucket->nextvict;
+    argcrcs = retbucket->argcrcs;
+    retcache = retbucket->retcache;
+
+    for (;;) {
+        cret = retcache[nextvict];
+
+        if (unlikely(cret == NULL)) {
+            /* Initialize the next segment */
+            Assert(!ARG_CRC32C_IS_VALID(argcrcs[nextvict]));
+            Assert((nextvict % FR_CACHE_SIZE_SECTION) == 0);
+
+            buckcache = (FuncRetCache *)palloc0(sizeof(FuncRetCache) * FR_CACHE_SIZE_SECTION);
+            args = (Datum *)palloc0(sizeof(Datum) * FR_CACHE_SIZE_SECTION * nargs);
+
+            for (i = 0; i < FR_CACHE_SIZE_SECTION; i++) {
+                buckcache[i].args = args + nargs * i;
+                retbucket->retcache[i + nextvict] = buckcache + i;
+            }
+
+            cret = buckcache;
+        }
+
+        /* Free to use */
+        if (!FR_STATE_IS_VALID(cret->state)) {
+            rret = cret;
+            break;
+        }
+
+        usagecount = FCR_STATE_GET_USAGECOUNT(cret->state);
+
+        /* If have a hit result, it will have one more chance to stay before being kicked out. */
+        if (FR_STATE_HITTED(cret->state)) {
+            cret->state &= ~FR_HITTED;
+        } else if (usagecount > 0) {
+            cret->state -= FCR_USAGECOUNT_ONE;
+        } else {
+            rret = cret;
+            break;
+        }
+
+        nextvict++;
+        if (nextvict >= FR_CACHE_SIZE_BUCKET) {
+            nextvict = 0;
+        }
+    }
+
+    if (rret == NULL) {
+        MemoryContextSwitchTo(oldctx);
+
+        return false;
+    }
+
+    argcrcs[nextvict] = argcrc;
+
+    nextvict++;
+    if (nextvict >= FR_CACHE_SIZE_BUCKET) {
+        nextvict = 0;
+    }
+    retbucket->nextvict = nextvict;
+
+    rret->state = FR_VALID;
+    rret->state += FCR_USAGECOUNT_ONE;
+
+    if (fcinfo->isnull) {
+        rret->state |= FR_RETNULL;
+    } else {
+        datumtype = fncache->rettype;
+
+        if (datumtype == NUMERICOID || datumtype == TEXTOID ||
+                datumtype == VARCHAROID || datumtype == NVARCHAR2OID ||
+                datumtype == BPCHAROID) {
+            if (rret->retval) {
+                pfree(DatumGetPointer(rret->retval));
+            }
+        }
+
+        rret->retval = FunctionDatumCopy(ret, datumtype);
+    }
+
+    fargs = fcinfo->arg;
+    argnull = fcinfo->argnull;
+
+    rret->argisnull = 0;
+
+    for (i = 0; i < nargs; i++) {
+        if (argnull[i]) {
+            rret->argisnull |= (1 << i);
+            continue;
+        }
+
+        datumtype = fncache->argtypes[i];
+
+        if (datumtype == NUMERICOID || datumtype == TEXTOID ||
+                datumtype == VARCHAROID || datumtype == NVARCHAR2OID ||
+                datumtype == BPCHAROID) {
+            if (rret->args[i]) {
+                pfree(DatumGetPointer(rret->args[i]));
+            }
+        }
+
+        rret->args[i] = FunctionDatumCopy(fargs[i], datumtype);
+    }
+
+    MemoryContextSwitchTo(oldctx);
+
+    return true;
 }

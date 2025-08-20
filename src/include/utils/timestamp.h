@@ -267,6 +267,8 @@ extern Datum pg_conf_load_time(PG_FUNCTION_ARGS);
 extern Datum generate_series_timestamp(PG_FUNCTION_ARGS);
 extern Datum generate_series_timestamptz(PG_FUNCTION_ARGS);
 
+extern Datum make_timestamp(PG_FUNCTION_ARGS);
+
 /* Internal routines (not fmgr-callable) */
 
 extern TimestampTz GetCurrentTimestamp(void);

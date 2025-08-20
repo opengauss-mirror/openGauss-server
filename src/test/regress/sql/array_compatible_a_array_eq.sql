@@ -1,0 +1,193 @@
+set behavior_compat_options='compatible_a_db_array';
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('b', 'b', 'c');
+    set2 my_table := my_table('c', 'b', 'b');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('b', 'b', 'c');
+    set2 my_table := my_table('c', 'c', 'b');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('b', 'b', 'c');
+    set2 my_table := my_table('c', 'b', 'c');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('b', 'b', 'c', 'y');
+    set2 my_table := my_table('c', 'b', 'b', 'y');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('a', 'b', 'c');
+    set2 my_table := my_table('c', 'b', 'a');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('a', 'b', 'c');
+    set2 my_table := my_table('a', 'b', 'c');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF BLOB;
+    set1 my_table := my_table();
+    set2 my_table := my_table();
+BEGIN
+    set1(1) := '012345'::BLOB;
+	set1(2) := '345'::BLOB;
+	set2(2) := '012345'::BLOB;
+	set2(1) := '345'::BLOB;
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+set behavior_compat_options='';
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('b', 'b', 'c');
+    set2 my_table := my_table('c', 'b', 'b');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('b', 'b', 'c');
+    set2 my_table := my_table('c', 'c', 'b');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('b', 'b', 'c');
+    set2 my_table := my_table('c', 'b', 'c');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('b', 'b', 'c', 'y');
+    set2 my_table := my_table('c', 'b', 'b', 'y');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('a', 'b', 'c');
+    set2 my_table := my_table('c', 'b', 'a');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF VARCHAR2(100);
+    set1 my_table := my_table('a', 'b', 'c');
+    set2 my_table := my_table('a', 'b', 'c');
+BEGIN
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/
+
+DECLARE
+    TYPE my_table IS TABLE OF BLOB;
+    set1 my_table := my_table();
+    set2 my_table := my_table();
+BEGIN
+    set1(1) := '012345'::BLOB;
+	set1(2) := '345'::BLOB;
+	set2(2) := '012345'::BLOB;
+	set2(1) := '345'::BLOB;
+    IF set1 = set2 THEN
+        raise info '集合相等';
+    ELSE
+        raise info'集合不相等';
+    END IF;
+END;
+/

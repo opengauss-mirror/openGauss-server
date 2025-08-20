@@ -833,14 +833,17 @@ static bool checkDeleteStmtForPlanTable(List* relations)
     ListCell *lc = NULL;
     Oid plan_table_data_oid = RelnameGetRelid(T_PLAN_TABLE_DATA);
     foreach (lc, relations) {
-        RangeVar* rv = (RangeVar*)lfirst(lc);
-        if (strcasecmp(rv->relname, target_rel) == 0 && plan_table_data_oid != InvalidOid) {
-            if (list_length(relations) > 1) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("plan_table cannot be deleted in mutiple tables delete")));
-            } else {
-                return true;
+        Node* n = (Node*)lfirst(lc);
+        if (IsA(n, RangeVar)) {
+            RangeVar* rv = (RangeVar*) n;
+            if (strcasecmp(rv->relname, target_rel) == 0 && plan_table_data_oid != InvalidOid) {
+                if (list_length(relations) > 1) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("plan_table cannot be deleted in mutiple tables delete")));
+                } else {
+                    return true;
+                }
             }
         }
     }
@@ -1063,7 +1066,8 @@ static void CheckTsDelete(const ParseState* pstate, const Query* qry)
     }
     foreach (l, pstate->p_target_relation) {
         Relation targetrel = (Relation)lfirst(l);
-        if (g_instance.attr.attr_common.enable_tsdb && RelationIsTsStore(targetrel)) {
+        if (g_instance.attr.attr_common.enable_tsdb && RelationIsValid(targetrel) &&
+            RelationIsTsStore(targetrel)) {
             if (qry->jointree == NULL) {
                 ereport(ERROR, (errmodule(MOD_TIMESERIES), errmsg("Timeseries only supports deletion by time range!")));
             } else {
@@ -1237,10 +1241,13 @@ static void CheckUDRelations(ParseState* pstate, List* sortClause, Node* limitCl
                              bool forDel)
 {
     if (list_length(pstate->p_target_relation) == 1) {
-        if (forDel) {
-            CheckDeleteRelation((Relation)linitial(pstate->p_target_relation));
-        } else {
-            CheckUpdateRelation((Relation)linitial(pstate->p_target_relation));
+        Relation rel = (Relation)linitial(pstate->p_target_relation);
+        if (RelationIsValid(rel)) {
+            if (forDel) {
+                CheckDeleteRelation(rel);
+            } else {
+                CheckUpdateRelation(rel);
+            }
         }
         return;
     }
@@ -1267,7 +1274,9 @@ static void CheckUDRelations(ParseState* pstate, List* sortClause, Node* limitCl
 
     foreach_cell (l, pstate->p_target_relation) {
         Relation targetrel = (Relation)lfirst(l);
-        CheckRelationSupportMultiModify(targetrel, forDel);
+        if (RelationIsValid(targetrel)) {
+            CheckRelationSupportMultiModify(targetrel, forDel);
+        }
     }
 }
 
@@ -1376,22 +1385,22 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
         nsitem->p_lateral_ok = true;
     }
 
-
-
     qual = transformWhereClause(pstate, stmt->whereClause, EXPR_KIND_WHERE, "WHERE");
 
     Relation targetrel = (Relation)linitial(pstate->p_target_relation);
     qry->returningList = transformReturningList(pstate, stmt->returningList);
-    if (pstate->p_target_relation && qry->returningList != NIL && RelationIsColStore(targetrel)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Un-support feature"),
-                errdetail("column stored relation doesn't support DELETE returning")));
-    } else if (pstate->p_target_relation && qry->returningList != NIL && RelationIsTsStore(targetrel)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Un-support feature"),
-                errdetail("Timeseries stored relation doesn't support DELETE returning")));
+    if (RelationIsValid(targetrel)) {
+        if (pstate->p_target_relation && qry->returningList != NIL && RelationIsColStore(targetrel)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("column stored relation doesn't support DELETE returning")));
+        } else if (pstate->p_target_relation && qry->returningList != NIL && RelationIsTsStore(targetrel)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("Timeseries stored relation doesn't support DELETE returning")));
+        }
     }
 
     if (!checkAllowedTableCombination(pstate)) {
@@ -1728,8 +1737,12 @@ static void CheckUnsupportInsertSelectClause(Query* query)
 static void SetInsertAttrnoState(ParseState* pstate, List* attrnos, int exprLen) 
 {
     RightRefState* rstate = pstate->rightRefState;
+    RangeTblEntry* rte = (RangeTblEntry*)linitial(pstate->p_target_rangetblentry);
     Relation relation = (Relation)linitial(pstate->p_target_relation);
-    rstate->colCnt = RelationGetNumberOfAttributes(relation);
+    Assert(RelationIsValid(relation) || rte->subquery != NULL);
+    rstate->colCnt = RelationIsValid(relation) ?
+        RelationGetNumberOfAttributes(relation) :
+        list_length(rte->subquery->targetList);
     rstate->explicitAttrLen = exprLen;
     rstate->explicitAttrNos = (int*)palloc0(sizeof(int) * exprLen);
     
@@ -1946,19 +1959,22 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     qry->resultRelations = setTargetTables(pstate, list_make1(stmt->relation), false, false, targetPerms);
     targetrel = (Relation)linitial(pstate->p_target_relation);
+    if (RelationIsValid(targetrel)) {
+        CheckInsertTargetRelation(pstate, stmt, targetrel, true);
 
-    CheckInsertTargetRelation(pstate, stmt, targetrel, true);
-
-    if (qry->is_dist_insertselect) {
-        Oid relid = RelationGetRelid(targetrel);
-        HeapTuple classtup = SearchSysCache1(RELOID, relid);
-        Form_pg_class class_struct = (Form_pg_class)GETSTRUCT(classtup);
-        if (class_struct->parttype == PARTTYPE_PARTITIONED_RELATION ||
-            class_struct->parttype == PARTTYPE_SUBPARTITIONED_RELATION ||
-            class_struct->parttype == PARTTYPE_VALUE_PARTITIONED_RELATION ) {
-            qry->is_dist_insertselect = false;
+        if (qry->is_dist_insertselect) {
+            Oid relid = RelationGetRelid(targetrel);
+            HeapTuple classtup = SearchSysCache1(RELOID, relid);
+            Form_pg_class class_struct = (Form_pg_class)GETSTRUCT(classtup);
+            if (class_struct->parttype == PARTTYPE_PARTITIONED_RELATION ||
+                class_struct->parttype == PARTTYPE_SUBPARTITIONED_RELATION ||
+                class_struct->parttype == PARTTYPE_VALUE_PARTITIONED_RELATION) {
+                qry->is_dist_insertselect = false;
+            }
+            ReleaseSysCache(classtup);
         }
-        ReleaseSysCache(classtup);
+    } else {
+        qry->is_dist_insertselect = false;
     }
 
     /* Validate stmt->cols list, or build default list if no list given */
@@ -1975,6 +1991,12 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
          * emitting an empty targetlist --- all columns will be defaulted when
          * the planner expands the targetlist.
          */
+        if (!RelationIsValid(targetrel)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("INSERT ... DEFAULT VALUES is not supported for subquery \"%s\"",
+                        ((RangeSubselect*)(stmt->relation))->alias->aliasname)));
+        }
         exprList = NIL;
     } else if (isGeneralSelect) {
         /*
@@ -2341,7 +2363,8 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         pstate->rightRefState = nullptr;
         addRTEtoQuery(pstate, rte, false, true, true);
         qry->returningList = transformReturningList(pstate, stmt->returningList);
-        if (qry->returningList != NIL && RelationIsColStore(targetrel)) {
+        if (qry->returningList != NIL &&
+            RelationIsValid(targetrel) && RelationIsColStore(targetrel)) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Un-support feature"),
@@ -4420,7 +4443,9 @@ static void transformMultiTargetList(List* target_rangetblentry, List** targetLi
         while (l3 && l4) {
             RangeTblEntry* rte2 = (RangeTblEntry*)lfirst(l3);
             int rtindex2 = lfirst_int(l4);
-            if (rte2->relid == rte1->relid) {
+            if (rte2->rtekind == RTE_RELATION &&
+                rte1->rtekind == RTE_RELATION &&
+                rte2->relid == rte1->relid) {
                 MergeTargetList(targetLists, rte1, rtindex1, rte2, rtindex2);
             }
             l3 = lnext(l3);
@@ -4462,6 +4487,9 @@ static List* remove_update_redundant_relation(List* resultRelations, List* targe
 static void CheckUpdateRelation(Relation targetrel)
 {
 	// check column store relation distributed by replication
+    if (!RelationIsValid(targetrel)) {
+        return;
+    }
     if (RelationIsColStore(targetrel) &&
         targetrel->rd_locator_info &&
         IsLocatorReplicated(targetrel->rd_locator_info->locatorType)) {
@@ -4546,7 +4574,8 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
         qry->hasModifyingCTE = pstate->p_hasModifyingCTE;
     }
 
-    if (list_length(stmt->relationClause) > 1 || !IsA(linitial(stmt->relationClause), RangeVar)) {
+    if (list_length(stmt->relationClause) > 1 ||
+        (!IsA(linitial(stmt->relationClause), RangeVar) && !IsA(linitial(stmt->relationClause), RangeSubselect))) {
         /* add all relations from relationClause to resultRelations. */
         transformFromClause(pstate, stmt->relationClause, true, false, true);
         qry->resultRelations = pstate->p_updateRelations;
@@ -4602,7 +4631,9 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
     qry->resultRelations = remove_update_redundant_relation(qry->resultRelations, pstate->p_target_rangetblentry);
 
     qry->returningList = transformReturningList(pstate, stmt->returningList);
-    if (qry->returningList != NIL && RelationIsColStore(((Relation)linitial(pstate->p_target_relation)))) {
+    if (qry->returningList != NIL &&
+        RelationIsValid(((Relation)linitial(pstate->p_target_relation))) &&
+        RelationIsColStore(((Relation)linitial(pstate->p_target_relation)))) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Un-support feature"),
@@ -4681,6 +4712,89 @@ char* checkUpdateResTargetName(Relation rd, RangeVar* rel, ResTarget* res, bool*
     return resname;
 }
 
+char* checkUpdateResTargetNameForSubquery(RangeTblEntry* rte, RangeSubselect* sub, ResTarget* res,
+    bool* matchRelname, bool* colAmbiguous, int* attrno)
+{
+    Oid attrtypeid = InvalidOid;
+    int32 attrtypmod;
+    Oid attrcollid;
+    Oid typrelid = InvalidOid;
+    bool isMatchedResName = false;
+    *attrno = InvalidAttrNumber;
+
+    /* the length of indireciton can't less than 1 and the first item type must not be A_Indices */
+    if ((list_length(res->indirection) < 1) || IsA(linitial(res->indirection), A_Indices) ||
+    /* name must relname or aliasname */
+        (strcmp(sub->alias->aliasname, res->name) != 0)) {
+        return res->name;
+    }
+
+    /*
+    * if meet set_clause like a.b.c = 1 then the indirection will exceed one,
+    * so treat first indirection as tablename/alisename like a in this ex.
+    */
+    char* resname = pstrdup(strVal(linitial(res->indirection)));
+    if (list_length(res->indirection) > 1) {
+        *matchRelname = true;
+        return resname;
+    }
+
+    /*
+    * Here only meet set_clause which has two elements like a.b or test.b.
+    * So first keep forward-compatibility behavior of old version, that results
+    * if a is a composite type and also relname/alisename then we first handle it as
+    * composite type.
+    * Otherwise we handle it like a.b like relname/alisename, then a is a relname just
+    * update set_clause over.
+    */
+
+    /* For subqueries, there could be several attributes with the same name that
+    * meet set_clause. If they are of different types, find the one that is of
+    * composite type and matches. If many of them matches, mark the result as ambiguous.
+    */
+    List* attrnoIndNameCandidates = getSubqueryRteAttnum(rte, resname);
+    List* attrnoResNameCandidates = getSubqueryRteAttnum(rte, res->name);
+    AttrNumber attrnoIndName = (AttrNumber)linitial_int(attrnoIndNameCandidates);
+    AttrNumber attrnoResName = (AttrNumber)linitial_int(attrnoResNameCandidates);
+    if (attrnoResName > 0) {
+        ListCell* lc = NULL;
+        foreach (lc, attrnoResNameCandidates) {
+            attrnoResName = (AttrNumber)lfirst_int(lc);
+            get_rte_attribute_type(rte, attrnoResName, &attrtypeid, &attrtypmod, &attrcollid);
+            typrelid = typeidTypeRelid(attrtypeid);
+            if ((typrelid == InvalidAttrNumber) ||
+                (get_attnum(typrelid, resname) == InvalidAttrNumber)) {
+                    continue;
+            }
+            if (isMatchedResName) {
+                *colAmbiguous = true;
+            } else {
+                isMatchedResName = true;
+                *attrno = attrnoResName;
+            }
+        }
+    }
+    if (isMatchedResName || (OidIsValid(typrelid) && attrnoIndName <= 0)) {
+        ereport(
+            NOTICE, (errmsg("update field '%s' of column '%s', though it's ambiguous.", resname, res->name)));
+        return res->name;
+    }
+
+    *matchRelname = true;
+    return resname;
+}
+
+static inline bool RelnameOrAliasMatched(Node* n, ResTarget* res)
+{
+    if (IsA(n, RangeVar)) {
+        RangeVar* rv = (RangeVar*)n;
+        return ((strcmp(rv->relname, res->name) == 0) ||
+        ((rv->alias != NULL) && (strcmp(rv->alias->aliasname, res->name) == 0)));
+    } else if (IsA(n, RangeSubselect)) {
+        return (strcmp(((RangeSubselect*)n)->alias->aliasname, res->name) == 0);
+    }
+}
+
 /* Find the attrno corresponding to ResTarget from target tables. */
 static int fixUpdateResTargetName(ParseState* pstate, List* resultRelations, ResTarget* res, int* rti,
     Relation* rd, RangeTblEntry** rte)
@@ -4699,20 +4813,30 @@ static int fixUpdateResTargetName(ParseState* pstate, List* resultRelations, Res
         l4, resultRelations) {
         RangeTblEntry* target_rte = (RangeTblEntry*)lfirst(l1);
         Relation targetrel = (Relation)lfirst(l2);
-        RangeVar* rangeVar = (RangeVar*)lfirst(l3);
+        Node* n = (Node*)lfirst(l3);
         int rtindex = lfirst_int(l4);
-        
-        resname = checkUpdateResTargetName(targetrel, rangeVar, res, &matchRelname);
-        attrno = attnameAttNum(targetrel, resname, true);
+        bool colAmbiguous = false;
+        if (IsA(n, RangeVar)) {
+            resname = checkUpdateResTargetName(targetrel, (RangeVar*)n, res, &matchRelname);
+            attrno = attnameAttNum(targetrel, resname, true);
+        } else if (IsA(n, RangeSubselect)) {
+            resname = checkUpdateResTargetNameForSubquery(
+                target_rte, (RangeSubselect*)n, res, &matchRelname, &colAmbiguous, &attrno);
+            if (attrno == InvalidAttrNumber && !colAmbiguous) {
+                List* attrnos = getSubqueryRteAttnum(target_rte, resname);
+                colAmbiguous = (list_length(attrnos) > 1);
+                attrno = linitial_int(attrnos);
+            }
+        }
         if (attrno != InvalidAttrNumber) {
             /*
              * If the targetlist matches more than once and when target contains a relname(matchRelname)
              * is the same as before(removeRelname), report error.
              */
-            if (isMatched == true && (matchRelname == removeRelname)) {
+            if ((isMatched == true && (matchRelname == removeRelname)) || colAmbiguous) {
                 ereport(ERROR,
                     (errcode(ERRCODE_AMBIGUOUS_COLUMN),
-                        errmsg("column reference \"%s\" is ambiguous", res->name),
+                        errmsg("column reference \"%s\" is ambiguous", resname),
                         parser_errposition(pstate, res->location)));
             }
             resultAttrno = attrno;
@@ -4725,8 +4849,16 @@ static int fixUpdateResTargetName(ParseState* pstate, List* resultRelations, Res
             /* Mark the target column as requiring update permissions */
             target_rte->updatedCols = bms_add_member(target_rte->updatedCols,
                                                      attrno - FirstLowInvalidHeapAttributeNumber);
-            if (DB_IS_CMPT(B_FORMAT) && ((strcmp(rangeVar->relname, res->name) == 0) ||
-                ((rangeVar->alias != NULL) && (strcmp((rangeVar->alias)->aliasname, res->name) == 0)))) {
+            if (IsA(n, RangeSubselect)) {
+                RangeSubselect* subselect = (RangeSubselect*)n;
+                if (IsA(res->val, SetToDefault)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("SET TO DEFAULT is not supported for subquery \"%s\"",
+                                ((RangeSubselect*)n)->alias->aliasname)));
+                }
+            }
+            if (DB_IS_CMPT(B_FORMAT) && RelnameOrAliasMatched(n, res)) {
                 if (matchRelname == true) {
                     removeRelname = true;
                 }
@@ -4755,13 +4887,15 @@ static int fixUpdateResTargetName(ParseState* pstate, List* resultRelations, Res
 
 static void UndefinedColumnError(ParseState* pstate, ResTarget* origTarget, int targetRelationNum)
 {
+    Relation rel = (Relation)linitial(pstate->p_target_relation);
+    RangeTblEntry* rte = (RangeTblEntry*)linitial(pstate->p_rtable);
     if (!origTarget->indirection) {
         if (targetRelationNum == 1) {
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_COLUMN),
                     errmsg("column \"%s\" of relation \"%s\" does not exist",
                         origTarget->name,
-                        RelationGetRelationName((Relation)linitial(pstate->p_target_relation))),
+                        RelationIsValid(rel) ? RelationGetRelationName(rel) : rte->alias->aliasname),
                     parser_errposition(pstate, origTarget->location)));
         }
         ereport(ERROR,
@@ -4777,7 +4911,7 @@ static void UndefinedColumnError(ParseState* pstate, ResTarget* origTarget, int 
                     errmsg("column \"%s.%s\" of relation \"%s\" does not exist",
                         origTarget->name,
                         resname,
-                        RelationGetRelationName((Relation)linitial(pstate->p_target_relation))),
+                        RelationIsValid(rel) ? RelationGetRelationName(rel) : rte->alias->aliasname),
                     parser_errposition(pstate, origTarget->location)));
         }
         ereport(ERROR,
@@ -4827,7 +4961,9 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
     pstate->p_next_resno = 1;
     foreach_cell (cell, pstate->p_target_relation) {
         targetrel = (Relation)lfirst(cell);
-        pstate->p_next_resno += targetrel->rd_rel->relnatts;
+        if (RelationIsValid(targetrel)) {
+            pstate->p_next_resno += targetrel->rd_rel->relnatts;
+        }
     }
 
     /* Prepare non-junk columns for assignment to target table */
@@ -6242,6 +6378,33 @@ static void transformGroupConstToColumn(ParseState* pstate, Node* groupClause, L
     }
 }
 
+static void CheckAllowedTableCombinationRecurse(List* rtable, bool* hasUstore, bool* hasElse)
+{
+    if (*hasUstore && *hasElse) {
+        return;
+    }
+
+    ListCell* lc = NULL;
+    foreach (lc, rtable) {
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
+        if (rte && rte->rtekind == RTE_RELATION) {
+            if (rte->is_ustore) {
+                *hasUstore = true;
+            } else {
+                *hasElse = true;
+            }
+        } else if (rte && rte->rtekind == RTE_SUBQUERY) {
+            if (rte->subquery->rtable == NULL) {
+                *hasElse = true;
+            } else {
+                CheckAllowedTableCombinationRecurse(rte->subquery->rtable, hasUstore, hasElse);
+            }
+        } else {
+            *hasElse = true;
+        }
+    }
+}
+
 static bool checkAllowedTableCombination(ParseState* pstate)
 {
     RangeTblEntry* rte = NULL;
@@ -6251,28 +6414,12 @@ static bool checkAllowedTableCombination(ParseState* pstate)
 
     // Check range table list for the presence of
     // relations with different storages
-    foreach(lc, pstate->p_rtable) {
-        rte = (RangeTblEntry*)lfirst(lc);
-        if (rte && rte->rtekind == RTE_RELATION) {
-            if (rte->is_ustore) {
-                has_ustore = true;
-            } else {
-                has_else = true;
-            }
-        }
-    }
+    CheckAllowedTableCombinationRecurse(
+        pstate->p_rtable, &has_ustore, &has_else);
 
     // Check target table for the type of storage
-    foreach(lc, pstate->p_target_rangetblentry) {
-        rte = (RangeTblEntry*)lfirst(lc);
-        if (rte && rte->rtekind == RTE_RELATION) {
-            if (rte->is_ustore) {
-                has_ustore = true;
-            } else {
-                has_else = true;
-            }
-        }
-    }
+    CheckAllowedTableCombinationRecurse(
+        pstate->p_target_rangetblentry, &has_ustore, &has_else);
 
     Assert(has_ustore || has_else);
 
@@ -6792,4 +6939,179 @@ static Query* TryTransformInsertDirectly(ParseState* pstate, InsertStmt* stmt)
     query->hasTargetSRFs = false;
 
     return query;
+}
+
+static void CheckValidResultRelationCommon(Query* query, Relation relation, const char* cmdTypeName)
+{
+    /*
+     * Restrict DML privileges to pg_authid which stored sensitive messages like rolepassword.
+     * there are lots of system catalog and restrict permissions of all system catalog
+     * may cause too much influence. so we only restrict permissions of pg_authid temporarily
+     *
+     * Restrict DML privileges to gs_global_config which stored parameters like bucketmap
+     * length. These parameters will not be modified after initdb.
+     */
+    if (IsUnderPostmaster && !g_instance.attr.attr_common.allowSystemTableMods &&
+        !u_sess->attr.attr_common.IsInplaceUpgrade && IsSystemRelation(relation) &&
+        (strcmp(RelationGetRelationName(relation), "pg_authid") == 0 ||
+        strcmp(RelationGetRelationName(relation), "gs_global_config") == 0)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied: \"%s\" is a system catalog",
+                    RelationGetRelationName(relation))));
+    }
+
+    /* Restrict DML privileges to gs_global_chain which stored history and consistent message like hash. */
+    if (IsUnderPostmaster && !u_sess->attr.attr_common.IsInplaceUpgrade && IsSystemRelation(relation)
+        && strcmp(RelationGetRelationName(relation), "gs_global_chain") == 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied: \"%s\" is a system catalog",
+                    RelationGetRelationName(relation))));
+    }
+
+    if (IS_FOREIGNTABLE(relation)||IS_STREAM_TABLE(relation)) {
+        /*
+         * In the security mode, the useft privilege of a user must be
+         * checked before the user inserts into a foreign table.
+         */
+        if (isSecurityMode && !have_useft_privilege()) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("permission denied to insert into foreign table in security mode")));
+        }
+    }
+
+    if (query->returningList != NIL && RelationIsColStore(relation)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("column stored relation doesn't support %s returning", cmdTypeName)));
+    }
+
+    if (list_length(query->resultRelations) > 1) {
+        if (query->sortClause != NIL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("mutilple-relations modifying doesn't support %s ORDER BY", cmdTypeName)));
+        }
+        if (query->limitCount != NULL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("mutilple-relations modifying doesn't support %s LIMIT", cmdTypeName)));
+        }
+        if (query->returningList != NIL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("mutilple-relations modifying doesn't support %s returning", cmdTypeName)));
+        }
+    }
+}
+
+static void CheckValidResultRelation(Query* query, Relation relation)
+{
+    const char* cmdTypeName = query->commandType == CMD_INSERT ? "INSERT" :
+                        query->commandType == CMD_UPDATE ? "UPDATE" : "DELETE";
+    bool isMultiModify = (list_length(query->resultRelations) > 1);
+
+    CheckValidResultRelationCommon(query, relation, cmdTypeName);
+
+    if (query->commandType == CMD_DELETE) {
+        if (isMultiModify) {
+            CheckRelationSupportMultiModify(relation, true);
+        } else {
+            CheckDeleteRelation(relation);
+        }
+        if (query->returningList != NIL && RelationIsTsStore(relation)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("Timeseries stored relation doesn't support DELETE returning")));
+        }
+    } else if (query->commandType == CMD_UPDATE) {
+        if (isMultiModify) {
+            CheckRelationSupportMultiModify(relation, false);
+        } else {
+            CheckUpdateRelation(relation);
+        }
+        if (query->hasIgnore && RelationIsColumnFormat(relation)) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                             errmsg("IGNORE is not supported on UPDATE column orientated table."))));
+        }
+    } else if (query->commandType == CMD_INSERT) {
+        // CheckInsertTargetRelation
+        /*
+         * Insert into relation pg_auth_history is not allowed.
+         * We update it only when some user's password has been changed.
+         */
+        if (unlikely(RelationGetRelid(relation) == AuthHistoryRelationId)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("Not allowed to insert into relation pg_auth_history.")));
+        }
+        if (((unsigned int)RelationGetInternalMask(relation) & INTERNAL_MASK_DINSERT)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("internal relation doesn't allow INSERT")));
+        }
+        /* non-supported IGNORE cases */
+        if (unlikely(query->hasIgnore && RelationIsColumnFormat(relation))) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("IGNORE is not supported on INSERT column orientated table."))));
+        }
+        if (unlikely(!u_sess->attr.attr_sql.enable_cluster_resize &&
+            RelationInClusterResizingWriteErrorMode(relation))) {
+            ereport(ERROR, (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
+                    errmsg("%s is redistributing, please retry later.", relation->rd_rel->relname.data)));
+        }
+    }
+}
+
+static void CheckValidResultColumn(TargetEntry* tle, Relation relation)
+{
+    int attrno = attnameAttNum(relation, tle->resname, true) - 1;
+    if (attrno < 0) {
+        return;
+    }
+
+    FormData_pg_attribute* attr = relation->rd_att->attrs;
+    bool isSystemColumn = (relation->rd_isblockchain && strcmp(tle->resname, "hash") == 0);
+    if (isSystemColumn) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot assign to system column \"%s\"", tle->resname)));
+    }
+    if ((TsRelWithImplDistColumn(attr, attrno) && RelationIsTsStore(relation)) ||
+        (attr[attrno].attisdropped)) {
+        tle->resjunk = true;
+    }
+}
+
+void CheckValidResult(Query* parsetree, int resultRelation)
+{
+    ListCell* lc = NULL;
+    Query* query = (Query*)copyObject(parsetree);
+    RangeTblEntry* rt_entry = rt_fetch(resultRelation, query->rtable);
+
+    AssertEreport(rt_entry->rtekind == RTE_RELATION, MOD_OPT, "");
+
+    Relation rt_entry_relation = heap_open(rt_entry->relid, NoLock);
+    CheckValidResultRelation(query, rt_entry_relation);
+
+    if (query->commandType == CMD_INSERT || query->commandType == CMD_UPDATE) {
+        foreach(lc, query->targetList) {
+            TargetEntry* tle = (TargetEntry*)lfirst(lc);
+            if (query->commandType == CMD_UPDATE &&
+                tle->rtindex != resultRelation) {
+                continue;
+            }
+            CheckValidResultColumn(tle, rt_entry_relation);
+        }
+    }
+    heap_close(rt_entry_relation, NoLock);
+    pfree(query);
 }

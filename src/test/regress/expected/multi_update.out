@@ -6,7 +6,9 @@ Description: update rows of a table
 Syntax:
 UPDATE Single-Relation Syntax：
 [ WITH [ RECURSIVE ] with_query [, ...] ]
-UPDATE [/*+ plan_hint */] [ ONLY ] table_name [ partition_clause ] [ * ] [ [ AS ] alias ]
+UPDATE [/*+ plan_hint */] [ ONLY ]
+    { table_name [ partition_clause ] [ * ]
+    | ( sub_query [ WITH [ CASCADED | LOCAL ] CHECK OPTION ] ) } [ [ AS ] alias ]
 SET {column_name = { expression | DEFAULT } 
     |( column_name [, ...] ) = {( { expression | DEFAULT } [, ...] ) |sub_query }}[, ...]
     [ FROM from_list] [ WHERE condition ]
@@ -359,9 +361,6 @@ select * from multiblock1.t_mutil_bc_2;
 
 -- subquery
 update t_t_mutil_t1 a,(select * from t_t_mutil_t2) b set b.col1=5,a.col2=4 where a.col1=b.col1; --error
-ERROR:  column "b.col1" of relation "t_t_mutil_t1" does not exist
-LINE 1: ...t_t_mutil_t1 a,(select * from t_t_mutil_t2) b set b.col1=5,a...
-                                                             ^
 -- mateview
 CREATE MATERIALIZED VIEW mate_multiview1 as select * from t_t_mutil_t1;
 CREATE MATERIALIZED VIEW mate_multiview2 as select * from t_t_mutil_t2;

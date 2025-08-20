@@ -1046,6 +1046,9 @@ msgstr "不稳定性"
 msgid "Volatility"
 msgstr "挥发性"
 
+msgid "Result_cache"
+msgstr "函数缓存"
+
 # describe.c:186
 #: describe.cpp:386
 msgid "Language"

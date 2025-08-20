@@ -152,10 +152,12 @@ bool AggFusion::InitDynamicOidFunc(Aggref *aggref)
         pfree_ext(function_name);
         if (agg_arg_type == INT2OID) {
             m_c_global->m_aggFunc = &AggFusion::agg_int2_sum_ext;
+            m_c_global->m_aggBformatSum = true;
             return true;
         }
         if (agg_arg_type == INT4OID) {
             m_c_global->m_aggFunc = &AggFusion::agg_int4_sum_ext;
+            m_c_global->m_aggBformatSum = true;
             return true;
         }
         if (agg_arg_type == FLOAT4OID) {
@@ -166,7 +168,7 @@ bool AggFusion::InitDynamicOidFunc(Aggref *aggref)
     return false;
 }
 
-long AggFusion::agg_process_special_count(long max_rows, Datum* values, bool* isnull)
+long AggFusion::agg_process_special_count(long max_rows, Datum* values, bool* isnull, Oid *transType)
 {
     long nprocessed = 0;
     TupleTableSlot *slot = NULL;
@@ -177,7 +179,7 @@ long AggFusion::agg_process_special_count(long max_rows, Datum* values, bool* is
             AutoContextSwitch memSwitch(m_local.m_tmpContext);
             for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
                 /* inVal is not used, so we can just pass NULL, and set inIsNull as false */
-                (this->*(m_c_global->m_aggFunc))(&values[i], isnull[i], NULL, false);
+                (this->*(m_c_global->m_aggFunc))(&values[i], isnull[i], NULL, false, transType);
                 isnull[i] = false;
             }
         }
@@ -189,7 +191,7 @@ long AggFusion::agg_process_special_count(long max_rows, Datum* values, bool* is
     return nprocessed;
 }
 
-long AggFusion::agg_process_common(long max_rows, Datum* values, bool* isnull)
+long AggFusion::agg_process_common(long max_rows, Datum* values, bool* isnull, Oid *transType)
 {
     TupleTableSlot *reslot = m_local.m_reslot;
     long nprocessed = 0;
@@ -203,7 +205,7 @@ long AggFusion::agg_process_common(long max_rows, Datum* values, bool* isnull)
                 reslot->tts_values[i] = slot->tts_values[m_global->m_attrno[i] - 1];
                 reslot->tts_isnull[i] = slot->tts_isnull[m_global->m_attrno[i] - 1];
                 (this->*(m_c_global->m_aggFunc))(&values[i], isnull[i],
-                        &reslot->tts_values[i], reslot->tts_isnull[i]);
+                        &reslot->tts_values[i], reslot->tts_isnull[i], transType);
                 isnull[i] = false;
             }
         }
@@ -222,6 +224,7 @@ bool AggFusion::execute(long max_rows, char *completionTag)
     TupleTableSlot *reslot = m_local.m_reslot;
     Datum* values = m_local.m_values;
     bool * isnull = m_local.m_isnull;
+    Oid resType = INT8OID;
     for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
         isnull[i] = true;
     }
@@ -236,7 +239,7 @@ bool AggFusion::execute(long max_rows, char *completionTag)
     long nprocessed = 0;
     /* for m_aggCountNull, we can return 0 directly */
     if (likely(!m_c_global->m_aggCountNull)) {
-        nprocessed = (this->*(m_c_global->m_aggProcessFunc))(max_rows, values, isnull);
+        nprocessed = (this->*(m_c_global->m_aggProcessFunc))(max_rows, values, isnull, &resType);
     }
     /*
      * zero tuple processed, for sum agg, it should return null, so no need to handle.
@@ -246,6 +249,8 @@ bool AggFusion::execute(long max_rows, char *completionTag)
         (m_c_global->m_aggFnOid == COUNTOID || m_c_global->m_aggFnOid == ANYCOUNTOID)) {
         values[0] = Int64GetDatum(0);
         isnull[0] = false;
+    } else if (m_c_global->m_aggBformatSum && nprocessed != 0 && resType == INT8OID && !isnull[0]) {
+        values[0] = int64datum_to_numericdatum(values[0]);
     }
 
     HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, values, isnull);
@@ -273,7 +278,7 @@ bool AggFusion::execute(long max_rows, char *completionTag)
 }
 
 void
-AggFusion::agg_int2_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+AggFusion::agg_int2_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType)
 {
     int64 newval;
 
@@ -293,19 +298,44 @@ AggFusion::agg_int2_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool in
 }
 
 void
-AggFusion::agg_int2_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+AggFusion::agg_int2_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType)
 {
     if (unlikely(inIsNull)) {
         return;
     }
 
+    int64 newval;
+    if (unlikely(transIsNull)) {
+        newval = (int64)DatumGetInt16(*inVal);
+        *transVal = Int64GetDatum(newval);
+        return;
+    }
+
+    /*
+     * we try to use int64 as trans value at first, since we think int64 will suit most int2 sum case.
+     * the sum result value most likely not more than int64_max.
+     * transType indicate the current transVal's datatype, if it's INT8, than we can use simple pg_add_s64_overflow
+     * to get sum, otherwise we call agg_int8_sum to add it to a numeric var.
+     */
     int16 val = DatumGetInt16(*inVal);
+    if (likely(*transType == INT8OID)) {
+        int64 oldsum = DatumGetInt64(*transVal);
+        if (likely(!pg_add_s64_overflow(oldsum, (int64)val, &newval))) {
+            /* the result not more than int64_max, that's good, we can return now. */
+            *transVal = Int64GetDatum(newval);
+            return;
+        }
+        /* Oops, the result value overflow, we should change to numeric case now, use agg_int8_sum instead */
+        *transType = NUMERICOID;
+        *transVal = int64datum_to_numericdatum(*transVal);
+    }
+
     Datum int64Val = Int64GetDatum((int64)val);
-    AggFusion::agg_int8_sum(transVal, transIsNull, &int64Val, inIsNull);
+    AggFusion::agg_int8_sum(transVal, transIsNull, &int64Val, inIsNull, transType);
 }
 
 void
-AggFusion::agg_int4_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+AggFusion::agg_int4_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType)
 {
     int64 newval;
 
@@ -325,19 +355,44 @@ AggFusion::agg_int4_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool in
 }
 
 void
-AggFusion::agg_int4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+AggFusion::agg_int4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType)
 {
     if (unlikely(inIsNull)) {
         return;
     }
 
+    int64 newval;
+    if (unlikely(transIsNull)) {
+        newval = (int64)DatumGetInt32(*inVal);
+        *transVal = Int64GetDatum(newval);
+        return;
+    }
+
+    /*
+     * we try to use int64 as trans value at first, since we think int64 will suit most int4 sum case.
+     * the sum result value most likely not more than int64_max.
+     * transType indicate the current transVal's datatype, if it's INT8, than we can use simple pg_add_s64_overflow
+     * to get sum, otherwise we call agg_int8_sum to add it to a numeric var.
+     */
     int32 val = DatumGetInt32(*inVal);
-    Datum int32Val = Int64GetDatum((int64)val);
-    AggFusion::agg_int8_sum(transVal, transIsNull, &int32Val, inIsNull);
+    if (likely(*transType == INT8OID)) {
+        int64 oldsum = DatumGetInt64(*transVal);
+        if (likely(!pg_add_s64_overflow(oldsum, (int64)val, &newval))) {
+            /* the result not more than int64_max, that's good, we can return now. */
+            *transVal = Int64GetDatum(newval);
+            return;
+        }
+        /* Oops, the result value overflow, we should change to numeric case now, use agg_int8_sum instead */
+        *transType = NUMERICOID;
+        *transVal = int64datum_to_numericdatum(*transVal);
+    }
+
+    Datum int64Val = Int64GetDatum((int64)val);
+    AggFusion::agg_int8_sum(transVal, transIsNull, &int64Val, inIsNull, transType);
 }
 
 void
-AggFusion::agg_float4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+AggFusion::agg_float4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType)
 {
     float8 newval;
     float8 result;
@@ -363,7 +418,7 @@ AggFusion::agg_float4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, b
 }
 
 void
-AggFusion::agg_int8_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+AggFusion::agg_int8_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType)
 {
     Numeric     num1;
     Numeric     num2;
@@ -420,7 +475,7 @@ AggFusion::agg_int8_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool in
     return;
 }
 
-void AggFusion::agg_numeric_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+void AggFusion::agg_numeric_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType)
 {
     Numeric     num1;
     Numeric     num2;
@@ -463,16 +518,16 @@ void AggFusion::agg_numeric_sum(Datum *transVal, bool transIsNull, Datum *inVal,
 }
 
 /* differ for agg_star_count, agg_any_count will not count null value */
-void AggFusion::agg_any_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+void AggFusion::agg_any_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType)
 {
     if (unlikely(inIsNull)) {
         return;
     }
 
-    return AggFusion::agg_star_count(transVal, transIsNull, inVal, inIsNull);
+    return AggFusion::agg_star_count(transVal, transIsNull, inVal, inIsNull, transType);
 }
 
-void AggFusion::agg_star_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull)
+void AggFusion::agg_star_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType)
 {
     if (unlikely(transIsNull)) {
         *transVal = Int64GetDatum(1);

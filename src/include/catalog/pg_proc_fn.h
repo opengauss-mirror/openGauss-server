@@ -59,7 +59,8 @@ extern ObjectAddress ProcedureCreate(const char *procedureName,
     Oid protypeid = InvalidOid,
     char typefunckind = OBJECTTYPE_NULL_PROC,
     bool isfinal = false,
-    Oid profuncoid = InvalidOid
+    Oid profuncoid = InvalidOid,
+    bool resultCache = false
 );
 
 extern bool function_parse_error_transpose(const char *prosrc);

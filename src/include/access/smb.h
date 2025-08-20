@@ -32,9 +32,9 @@
 #include "storage/buf/buf_internals.h"
 #include "storage/rack_mem.h"
 
-/* avoid checkpoint if async redo */
-#define ENABLE_ASYNC_REDO false
 #define ENABLE_SMB_CKPT (g_instance.smb_cxt.use_smb && !RecoveryInProgress() && !g_instance.smb_cxt.shutdownSMBWriter)
+#define ENABLE_SMB_PULL_PAGE \
+    (g_instance.smb_cxt.use_smb && g_instance.smb_cxt.start_flag && !g_instance.smb_cxt.end_flag)
 #define SIZE_K(n) (uint32)((n) * 1024)
 #define SHARED_MEM_NAME "smb_shared_meta"
 #define MAX_SHM_CHUNK_NAME_LENGTH 64
@@ -50,12 +50,12 @@
 	(SMB_WRITER_ITEM_SIZE_PERMETA + SMB_WRITER_BUCKET_SIZE_PERMETA + 2 * sizeof(int) + 2 * sizeof(XLogRecPtr))
 #define SMB_WRITER_ITEM_PER_MGR (g_instance.smb_cxt.NSMBBuffers / smb_recovery::SMB_BUF_MGR_NUM)
 
-#define SMB_NEED_REDO 0
-#define SMB_REDOING 1
-#define SMB_REDO_DONE 2
 
 namespace smb_recovery {
 
+constexpr int SMB_PAGE_NEED_REDO = 0;
+constexpr int SMB_PAGE_REDOING = 1;
+constexpr int SMB_PAGE_REDO_DONE = 2;
 constexpr int SMB_BUF_MGR_NUM = 8;
 constexpr int SMB_WRITER_MAX_FILE = 10;
 
@@ -189,6 +189,7 @@ extern void SMBStartPullPages(XLogRecPtr curPtr);
 extern void SMBMarkDirty(Buffer buffer, XLogRecPtr lsn);
 extern int SMBWriterLoadThreadIndex(void);
 extern void SMBWriterAuxiliaryMain(void);
+extern void KillSMBWriterThreads(void);
 
 } // namespace smb_recovery
 

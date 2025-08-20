@@ -253,6 +253,9 @@ typedef struct BTMetaPageData {
  * a rightmost page; when splitting non-rightmost pages we try to
  * divide the data equally.
  */
+#define D_DATABASE_MIN_FILLFACTOR 1
+#define D_DATABASE_DEFAULT_FILLFACTOR 100
+#define A_DATABASE_MIN_FILLFACTOR 10
 #define BTREE_MIN_FILLFACTOR 10
 #define BTREE_DEFAULT_FILLFACTOR 90
 #define BTREE_NONLEAF_FILLFACTOR 70

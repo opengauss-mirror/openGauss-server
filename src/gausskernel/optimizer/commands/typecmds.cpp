@@ -3233,6 +3233,7 @@ static bool is_same_function(HeapTuple proctup, TupleDesc tupdesc, CreateFunctio
     bool shippable = false;
     bool package = false;
     bool isPipelined = false;
+    bool resultCache = false;
     HeapTuple langtup;
     Form_pg_proc proc = (Form_pg_proc)GETSTRUCT(proctup);
     Form_pg_language lang;
@@ -3251,7 +3252,7 @@ static bool is_same_function(HeapTuple proctup, TupleDesc tupdesc, CreateFunctio
     /* Compare option */
     compute_attributes_sql_style((const List*)method->options, &as_clause, &language, &isWindowFunc, &volatility,
         &isStrict, &security, &isLeakProof, &proconfig, &procost, &prorows,
-        &fenced, &shippable, &package, &isPipelined, &partInfo);
+        &fenced, &shippable, &package, &isPipelined, &partInfo, &resultCache);
     
     /* Validate language */
     langtup = SearchSysCache1(LANGOID, ObjectIdGetDatum(proc->prolang));

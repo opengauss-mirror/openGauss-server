@@ -1,0 +1,325 @@
+create schema test_table_filegroup;
+set current_schema to test_table_filegroup;
+create table t1(a int) on [primary22];
+create table t2(a int) on "default";
+create table t3(a int) textimage_on [primary22];
+create table t4(a int) textimage_on "default";
+create table t5(a int) on "default" textimage_on [primary22];
+create table t6(a int) on "default" textimage_on "default";
+create table t7(a int) textimage_on "default" on "default"; -- d database error
+ERROR:  syntax error at or near "on"
+LINE 1: create table t7(a int) textimage_on "default" on "default";
+                                                      ^
+create table t7(a int) textimage_on [primary22] on "default"; -- d database error
+ERROR:  syntax error at or near "on"
+LINE 1: create table t7(a int) textimage_on [primary22] on "default"...
+                                                        ^
+create table t7(a int) on commit;
+create table t8(a int) textimage_on commit;
+create table t9(a int) on commit on "default"; -- d database error
+ERROR:  syntax error at or near "on"
+LINE 1: create table t9(a int) on commit on "default";
+                                         ^
+create table t9(a int) on commit delete rows on "default" textimage_on "default"; -- d database error
+ERROR:  syntax error at or near "on"
+LINE 1: create table t9(a int) on commit delete rows on "default" te...
+                                                     ^
+create table t9(a int) on commit delete rows on "default"; -- d database error
+ERROR:  syntax error at or near "on"
+LINE 1: create table t9(a int) on commit delete rows on "default";
+                                                     ^
+create table t9(a int) on commit delete rows textimage_on "default"; -- d database error
+ERROR:  syntax error at or near "textimage_on"
+LINE 1: create table t9(a int) on commit delete rows textimage_on "d...
+                                                     ^
+create table t9(a int) on commit textimage_on [primary22];
+create table t10(a int) on commit textimage_on [primary22] on "default"; -- d database error
+ERROR:  syntax error at or near "on"
+LINE 1: ...ble t10(a int) on commit textimage_on [primary22] on "defaul...
+                                                             ^
+create table t10(a int) textimage_on [primary22] on "default" on commit ; -- d database error
+ERROR:  syntax error at or near "on"
+LINE 1: create table t10(a int) textimage_on [primary22] on "default...
+                                                         ^
+create table t10(id int) on [filegroup];
+create table t11(id int) on filegroup;
+create table t12(id int) on 'filegroup';
+create table t13(id int) on "filegroup";
+create table t14(id int) on "filegroup1";
+create table t15(id int) on 'default';
+create table t16(id int) on "default";
+create table t17(id int) on [default];
+create table t18(id int) on default; -- d database error, og ok
+create table t18(id int) on $[default]; -- d database error
+ERROR:  syntax error at or near "$"
+LINE 1: create table t18(id int) on $[default];
+                                    ^
+create table t18(id int) on [default; -- d database error
+ERROR:  syntax error at or near ";"
+LINE 1: create table t18(id int) on [default;
+                                            ^
+create table t18(id int) on default]; -- d database error
+ERROR:  syntax error at or near "]"
+LINE 1: create table t18(id int) on default];
+                                           ^
+create table t19(id int) on '123filegroup';
+create table t20(id int) on '_123filegroup';
+create table t21(id int) on table;
+create table t22(id int) on 'table';
+create table t23(id int) on "table";
+create table t24(id int) on [table];
+create table t25(id int) on 'New FileGroup';
+create table t26(id int) on [New FileGroup]; --og error
+ERROR:  syntax error at or near "FileGroup"
+LINE 1: create table t26(id int) on [New FileGroup];
+                                         ^
+create table t26(id int) on [NewFileGroup];
+create table test_with_1(a int, CONSTRAINT PK_test_with_1 PRIMARY KEY(a) WITH (PAD_INDEX = OFF) on [primary22]) on [primary22];
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_1" for table "test_with_1"
+create table test_with_2(a int, CONSTRAINT PK_test_with_2 PRIMARY KEY(a)
+WITH (PAD_INDEX = ON, FILLFACTOR = 10, IGNORE_DUP_KEY = on, STATISTICS_NORECOMPUTE = on, STATISTICS_INCREMENTAL = on,
+ALLOW_ROW_LOCKS = on, ALLOW_PAGE_LOCKS = on, OPTIMIZE_FOR_SEQUENTIAL_KEY = on, XML_COMPRESSION = on)
+    ON [primary22])
+    ON [primary22];
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  parameter "ignore_dup_key" is currently ignored.
+NOTICE:  parameter "statistics_norecompute" is currently ignored.
+NOTICE:  parameter "statistics_incremental" is currently ignored.
+NOTICE:  parameter "allow_row_locks" is currently ignored.
+NOTICE:  parameter "allow_page_locks" is currently ignored.
+NOTICE:  parameter "optimize_for_sequential_key" is currently ignored.
+NOTICE:  parameter "xml_compression" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_2" for table "test_with_2"
+\d+ test_with_2
+              Table "test_table_filegroup.test_with_2"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer | not null  | plain   |              | 
+Indexes:
+    "pk_test_with_2" PRIMARY KEY, btree (a) WITH (fillfactor=10) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+create table test_with_3(a int, CONSTRAINT PK_test_with_3 PRIMARY KEY(a)
+WITH (PAD_INDEX = OFF, FILLFACTOR = 50, IGNORE_DUP_KEY = off, STATISTICS_NORECOMPUTE = off, STATISTICS_INCREMENTAL = off,
+ALLOW_ROW_LOCKS = off, ALLOW_PAGE_LOCKS = off, OPTIMIZE_FOR_SEQUENTIAL_KEY = off, XML_COMPRESSION = off)
+    ON [primary22])
+    ON [primary22];
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  parameter "ignore_dup_key" is currently ignored.
+NOTICE:  parameter "statistics_norecompute" is currently ignored.
+NOTICE:  parameter "statistics_incremental" is currently ignored.
+NOTICE:  parameter "allow_row_locks" is currently ignored.
+NOTICE:  parameter "allow_page_locks" is currently ignored.
+NOTICE:  parameter "optimize_for_sequential_key" is currently ignored.
+NOTICE:  parameter "xml_compression" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_3" for table "test_with_3"
+create table test_with_4(a int, CONSTRAINT PK_test_with_4 PRIMARY KEY(a) with (COMPRESSION_DELAY = 0 ));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_4" for table "test_with_4"
+create table test_with_5(a int, CONSTRAINT PK_test_with_5 PRIMARY KEY(a) with (COMPRESSION_DELAY = 0 Minutes));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_5" for table "test_with_5"
+create table test_with_6(a int, CONSTRAINT PK_test_with_6 PRIMARY KEY(a) with (COMPRESSION_DELAY = 0 MINUTES));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_6" for table "test_with_6"
+create table test_with_7(a int, CONSTRAINT PK_test_with_7 PRIMARY KEY(a) with (COMPRESSION_DELAY = 0 MiNUtes));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_7" for table "test_with_7"
+create table test_with_8(a int, CONSTRAINT PK_test_with_8 PRIMARY KEY(a) with (COMPRESSION_DELAY = 5 ));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_8" for table "test_with_8"
+create table test_with_9(a int, CONSTRAINT PK_test_with_9 PRIMARY KEY(a) with (COMPRESSION_DELAY = 10 minutes));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_9" for table "test_with_9"
+create table test_with_10(a int, CONSTRAINT PK_test_with_10 PRIMARY KEY(a) with (COMPRESSION_DELAY = 20 minute));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_10" for table "test_with_10"
+create table test_with_11(a int, CONSTRAINT PK_test_with_11 PRIMARY KEY(a) with (COMPRESSION_DELAY = 30 MiNUtes));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_11" for table "test_with_11"
+create table test_with_12(a int, CONSTRAINT PK_test_with_12 PRIMARY KEY(a) with (COMPRESSION_DELAY = 10080 minute));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_12" for table "test_with_12"
+create table test_with_13(a int, CONSTRAINT PK_test_with_13 PRIMARY KEY(a) with (COMPRESSION_DELAY = 10081 MiNUtes)); --error, compression_delay [0, 10080] int in d database
+ERROR:  value 10081 out of bounds for option "compression_delay"
+DETAIL:  Valid values are between "0" and "10080".
+create table test_with_13(a int, CONSTRAINT PK_test_with_13 PRIMARY KEY(a) with (COMPRESSION_DELAY = -1 minutes)); -- d database syntax error
+ERROR:  syntax error at or near "minutes"
+LINE 1: ...th_13 PRIMARY KEY(a) with (COMPRESSION_DELAY = -1 minutes));
+                                                             ^
+create table test_with_13(a int, CONSTRAINT PK_test_with_13 PRIMARY KEY(a) with (COMPRESSION_DELAY = 5.0 MiNUtes)); --error
+ERROR:  invalid value for 64-bit integer option "compression_delay": 5.0
+create table test_with_13(a int, CONSTRAINT PK_test_with_13 PRIMARY KEY(a) with (COMPRESSION_DELAY = 30 minute, pad_index = 1));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_13" for table "test_with_13"
+create table test_with_14(a int, CONSTRAINT PK_test_with_14 PRIMARY KEY(a) with (COMPRESSION_DELAY = 30 minute, pad_index = n));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_14" for table "test_with_14"
+create table test_with_15(a int, CONSTRAINT PK_test_with_15 PRIMARY KEY(a) with (COMPRESSION_DELAY = 10080 minutes, pad_index = y));
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_15" for table "test_with_15"
+create table test_with_16(a int, CONSTRAINT PK_test_with_16 PRIMARY KEY(a) with (DATA_COMPRESSION = none));
+NOTICE:  parameter "data_compression" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_16" for table "test_with_16"
+create table test_with_17(a int, CONSTRAINT PK_test_with_17 PRIMARY KEY(a) with (DATA_COMPRESSION = 'none')); -- d database error, og ok
+NOTICE:  parameter "data_compression" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_17" for table "test_with_17"
+create table test_with_18(a int, CONSTRAINT PK_test_with_18 PRIMARY KEY(a) with (DATA_COMPRESSION = row));
+NOTICE:  parameter "data_compression" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_18" for table "test_with_18"
+create table test_with_19(a int, CONSTRAINT PK_test_with_19 PRIMARY KEY(a) with (data_compression = page));
+NOTICE:  parameter "data_compression" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_19" for table "test_with_19"
+create table test_with_20(a int, CONSTRAINT PK_test_with_20 PRIMARY KEY(a) with (data_compression = COLUMNSTORE));
+NOTICE:  parameter "data_compression" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_20" for table "test_with_20"
+create table test_with_21(a int, CONSTRAINT PK_test_with_21 PRIMARY KEY(a) with (data_compression = COLUMNSTORE_ARCHIVE));
+NOTICE:  parameter "data_compression" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_21" for table "test_with_21"
+create table test_with_22(a int, CONSTRAINT PK_test_with_22 PRIMARY KEY(a) with (data_compression = error_option)); --error
+ERROR:  Invalid string for "data_compression" option for d database
+DETAIL:  Valid string are "none", "row", "page", "columnstore", "columnstore_archive".
+create table test_with_22(a int, CONSTRAINT PK_test_with_22 PRIMARY KEY(a) with (data_compression = none, pad_index = on, pad_index = off)); --error
+ERROR:  parameter "pad_index" specified more than once
+create table test_with_22(a int, CONSTRAINT PK_test_with_22 PRIMARY KEY(a) with (pad_index = yes, COMPRESSION_DELAY = 0 MiNUtes))
+with(fillfactor = 20, storage_type = astore);
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_22" for table "test_with_22"
+create table test_with_23(a int, CONSTRAINT PK_test_with_23 PRIMARY KEY(a) with (data_compression = none, pad_index = on, COMPRESSION_DELAY = 0 MiNUtes))
+with(fillfactor = 20, storage_type = astore);
+NOTICE:  parameter "data_compression" is currently ignored.
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_23" for table "test_with_23"
+create table test_with_24(a int, CONSTRAINT PK_test_with_24 PRIMARY KEY(a) with (data_compression = row, pad_index = on, COMPRESSION_DELAY = 0))
+with(fillfactor = 20, storage_type = ustore);
+NOTICE:  parameter "data_compression" is currently ignored.
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_24" for table "test_with_24"
+create table test_with_25(a int, CONSTRAINT PK_test_with_25 PRIMARY KEY(a) with (pad_index = on, COMPRESSION_DELAY = 0, storage_type = ustore))
+with(fillfactor = 20, storage_type = ustore);
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_test_with_25" for table "test_with_25"
+create table test_with_26(a int, PRIMARY KEY(a) with (pad_index = on, COMPRESSION_DELAY = 0, storage_type = ustore))
+with(fillfactor = 20, storage_type = ustore);
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  parameter "compression_delay" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_with_26_pkey" for table "test_with_26"
+create table test_with_27(a int, PRIMARY KEY(a) with (pad_index = on, fillfactor = -1)); --error, fillfactor [1, 100] int in d database
+ERROR:  value -1 out of bounds for option "fillfactor"
+DETAIL:  Valid values are between "1" and "100".
+create table test_with_27(a int, PRIMARY KEY(a) with (pad_index = on, fillfactor = 1));
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  parameter fillfactor will be set to 10 when it is less than 10.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_with_27_pkey" for table "test_with_27"
+\d+ test_with_27
+              Table "test_table_filegroup.test_with_27"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer | not null  | plain   |              | 
+Indexes:
+    "test_with_27_pkey" PRIMARY KEY, btree (a) WITH (fillfactor=10) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+create table test_with_28(a int, PRIMARY KEY(a) with (pad_index = on, fillfactor = 50));
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_with_28_pkey" for table "test_with_28"
+create table test_with_29(a int, PRIMARY KEY(a) with (pad_index = on, fillfactor = 100));
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_with_29_pkey" for table "test_with_29"
+create table test_with_30(a int, PRIMARY KEY(a) with (pad_index = on, fillfactor = 105)); --error
+ERROR:  value 105 out of bounds for option "fillfactor"
+DETAIL:  Valid values are between "1" and "100".
+create table test_with_30(a int, PRIMARY KEY(a) with (pad_index = on, fillfactor = 50.2)); --error
+ERROR:  invalid value for integer option "fillfactor": 50.2
+create table test_with_30(a int, PRIMARY KEY(a) with (pad_index = on, fillfactor = 50) on [primary]);
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_with_30_pkey" for table "test_with_30"
+create table test_with_31(a int primary key with (pad_index = on, fillfactor = 50) on [primary]);
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_with_31_pkey" for table "test_with_31"
+create table test_with_32(a int, unique(a) with (pad_index = on, fillfactor = 50) on [primary]);
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_with_32_a_key" for table "test_with_32"
+create table test_with_33(a int unique with (pad_index = on, fillfactor = 50) on [primary]);
+NOTICE:  parameter "pad_index" is currently ignored.
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_with_33_a_key" for table "test_with_33"
+create table test_with_34(id int primary key with(fillfactor = 20), name varchar(50));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_with_34_pkey" for table "test_with_34"
+alter table test_with_34 add constraint unique_name unique(name) with (fillfactor = 50) on [primary];
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "unique_name" for table "test_with_34"
+create table test_with_35(id int, name varchar(50));
+alter table test_with_35 add constraint pk_id primary key(id) with (fillfactor = 50) on [primary];
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "pk_id" for table "test_with_35"
+drop schema test_table_filegroup cascade;
+NOTICE:  drop cascades to 61 other objects
+DETAIL:  drop cascades to table t1
+drop cascades to table t2
+drop cascades to table t3
+drop cascades to table t4
+drop cascades to table t5
+drop cascades to table t6
+drop cascades to table t7
+drop cascades to table t8
+drop cascades to table t9
+drop cascades to table t10
+drop cascades to table t11
+drop cascades to table t12
+drop cascades to table t13
+drop cascades to table t14
+drop cascades to table t15
+drop cascades to table t16
+drop cascades to table t17
+drop cascades to table t18
+drop cascades to table t19
+drop cascades to table t20
+drop cascades to table t21
+drop cascades to table t22
+drop cascades to table t23
+drop cascades to table t24
+drop cascades to table t25
+drop cascades to table t26
+drop cascades to table test_with_1
+drop cascades to table test_with_2
+drop cascades to table test_with_3
+drop cascades to table test_with_4
+drop cascades to table test_with_5
+drop cascades to table test_with_6
+drop cascades to table test_with_7
+drop cascades to table test_with_8
+drop cascades to table test_with_9
+drop cascades to table test_with_10
+drop cascades to table test_with_11
+drop cascades to table test_with_12
+drop cascades to table test_with_13
+drop cascades to table test_with_14
+drop cascades to table test_with_15
+drop cascades to table test_with_16
+drop cascades to table test_with_17
+drop cascades to table test_with_18
+drop cascades to table test_with_19
+drop cascades to table test_with_20
+drop cascades to table test_with_21
+drop cascades to table test_with_22
+drop cascades to table test_with_23
+drop cascades to table test_with_24
+drop cascades to table test_with_25
+drop cascades to table test_with_26
+drop cascades to table test_with_27
+drop cascades to table test_with_28
+drop cascades to table test_with_29
+drop cascades to table test_with_30
+drop cascades to table test_with_31
+drop cascades to table test_with_32
+drop cascades to table test_with_33
+drop cascades to table test_with_34
+drop cascades to table test_with_35

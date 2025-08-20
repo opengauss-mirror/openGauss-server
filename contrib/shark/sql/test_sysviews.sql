@@ -358,7 +358,7 @@ where s.nspname = 'sys_view_test_02' order by table_name,column_name;
 select table_schema, table_name, table_type
 from information_schema_tsql.tables t
 inner join pg_namespace s on t.table_schema = s.nspname
-where s.nspname = 'sys_view_test_02';
+where s.nspname = 'sys_view_test_02' order by table_name;
 
 select table_schema, table_name, view_definition, check_option, is_updatable
 from information_schema_tsql.views v

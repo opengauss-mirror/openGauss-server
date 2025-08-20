@@ -43,6 +43,7 @@
 #include "parser/parse_cte.h"
 #include "pgxc/pgxc.h"
 #include "rewrite/rewriteManip.h"
+#include "rewrite/rewriteHandler.h"
 #include "storage/tcap.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
@@ -345,6 +346,42 @@ int setTargetTable(ParseState* pstate, RangeVar* relRv, bool inh, bool alsoSourc
     return index;
 }
 
+static void setTargetTableForSubquery(ParseState* pstate, RangeSubselect* sub,
+    RangeTblRef* rtr, bool alsoSource, AclMode requiredPerms)
+{
+    int rti = rtr->rtindex;
+    RangeTblEntry* rte = rt_fetch(rti, pstate->p_rtable);
+
+    pstate->p_target_relation = lappend(pstate->p_target_relation, InvalidRelation);
+    if (requiredPerms & ACL_UPDATE) {
+        pstate->p_updateRangeVars = lappend(pstate->p_updateRangeVars, sub);
+    }
+    pstate->p_target_rangetblentry = lappend(pstate->p_target_rangetblentry, rte);
+
+    rte->requiredPerms = requiredPerms;
+    if (alsoSource) {
+        addRTEtoQuery(pstate, rte, true, true, true);
+    } else if (IS_SUPPORT_RIGHT_REF(pstate->rightRefState)) {
+        addRTEtoQuery(pstate, rte, false, false, true);
+    }
+
+    if (sub->withCheckOption != NO_CHECK_OPTION) {
+        Query* subquery = rte->subquery;
+        const char* viewUpdatableError = view_query_is_auto_updatable(subquery, true);
+        if (viewUpdatableError)
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("WITH CHECK OPTION is supported only on auto-updatable views"),
+                    errhint("%s", viewUpdatableError)));
+
+        WithCheckOption* wco = makeNode(WithCheckOption);
+        wco->viewname = pstrdup(sub->alias->aliasname);
+        wco->cascaded = (sub->withCheckOption == CASCADED_CHECK_OPTION);
+        wco->rtindex = rti;
+        wco->qual = subquery->jointree->quals;
+        rte->subquery->withCheckOptions = lcons(wco, rte->subquery->withCheckOptions);
+    }
+}
+
 List* setTargetTables(ParseState* pstate, List* relations, bool expandInh, bool alsoSource, AclMode requiredPerms)
 {
     List* rtindex = NULL;
@@ -368,11 +405,29 @@ List* setTargetTables(ParseState* pstate, List* relations, bool expandInh, bool 
      * but *not* release the lock.
      */
     foreach (l, relations) {
-        RangeVar* relRv = (RangeVar*)lfirst(l);
-        if (expandInh) {
-            inhOpt = interpretInhOption(relRv->inhOpt);
+        Node* n = (Node*)lfirst(l);
+        if (IsA(n, RangeVar)) {
+            RangeVar* relRv = (RangeVar*) n;
+            if (expandInh) {
+                inhOpt = interpretInhOption(relRv->inhOpt);
+            }
+            rtindex = lappend_int(rtindex,
+                setTargetTable(pstate, relRv, inhOpt, alsoSource, requiredPerms, multiModify));
+        } else if (IsA(n, RangeSubselect)) {
+            RangeSubselect* sub = (RangeSubselect*) n;
+            RangeTblEntry* top_rte = NULL;
+            List* relnamespace = NIL;
+            int rti;
+            List* savejoinlist = list_copy(pstate->p_joinlist);
+            RangeTblEntry* rte = transformRangeSubselect(pstate, sub);
+            RangeTblRef* rtr = transformItem(pstate, rte, &top_rte, &rti, &relnamespace);
+            setTargetTableForSubquery(pstate, sub, rtr, alsoSource, requiredPerms);
+            list_free(pstate->p_joinlist);
+            /* joinexprs of subqueries will be appended to the fromlist again during rewrite,
+             * remove them here to avoid duplication. */
+            pstate->p_joinlist = savejoinlist;
+            rtindex = lappend_int(rtindex, rti);
         }
-        rtindex = lappend_int(rtindex, setTargetTable(pstate, relRv, inhOpt, alsoSource, requiredPerms, multiModify));
     }
     return rtindex;
 }
@@ -1149,6 +1204,11 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
         rte = transformRangeSubselect(pstate, (RangeSubselect*)n);
         rtr = transformItem(pstate, rte, top_rte, top_rti, relnamespace);
 
+        /* If UPDATE multiple relations in sql_compatibility B, add target table here. */
+        if (addUpdateTable) {
+            setTargetTableForSubquery(pstate, (RangeSubselect*)n, rtr, false, ACL_UPDATE);
+            pstate->p_updateRelations = lappend_int(pstate->p_updateRelations, *top_rti);
+        }
         /* add startinfo if needed */
         if (pstate->p_addStartInfo) {
             AddStartWithTargetRelInfo(pstate, sw_backup, rte, rtr);

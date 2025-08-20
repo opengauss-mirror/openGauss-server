@@ -230,6 +230,7 @@ typedef struct {
     const char **pvalue;
     int numRFormats;
     int16 *rformats;
+    bool needFormat;
 } BindMessage;
 
 typedef void (*get_param_list_info_func)(BindMessage* pqBindMessage, CachedPlanSource* psrc, ParamListInfo* params,

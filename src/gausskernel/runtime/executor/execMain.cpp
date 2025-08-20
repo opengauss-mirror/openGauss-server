@@ -149,7 +149,6 @@ extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
 #ifdef USE_SPQ
 extern void build_backward_connection(PlannedStmt *planstmt);
 #endif
-extern void CheckWriteCommandWithDisableIndex(PlannedStmt *plannedstmt);
 
 /*
  * Note that GetUpdatedColumns() also exists in commands/trigger.c.  There does
@@ -625,10 +624,6 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
     }
 #endif
 
-    if (!IGNORE_UNUSED_INDEX_CHECK_ON_DML) {
-        CheckWriteCommandWithDisableIndex(queryDesc->plannedstmt);
-    }
-
     /* Allow instrumentation of Executor overall runtime */
     if (queryDesc->totaltime) {
         queryDesc->totaltime->memoryinfo.nodeContext = estate->es_query_cxt;
@@ -772,7 +767,9 @@ void standard_ExecutorFinish(QueryDesc *queryDesc)
 
     /* Execute queued AFTER triggers, unless told not to */
     if (!(estate->es_top_eflags & EXEC_FLAG_SKIP_TRIGGERS)) {
+        int64 save_row_count = BEENTRY_STMEMENET_CXT.current_row_count;
         AfterTriggerEndQuery(estate);
+        BEENTRY_STMEMENET_CXT.current_row_count = save_row_count;
     }
     if (queryDesc->totaltime) {
         InstrStopNode(queryDesc->totaltime, 0);
@@ -2658,15 +2655,13 @@ void CheckIndexDisableValid(ResultRelInfo* result_rel_info, EState *estate)
     if (!catlist)
         return;
 
-    Relation pg_constraint;
-    pg_constraint = heap_open(ConstraintRelationId, NoLock);
     for (int i = 0; i < catlist->n_members; i++) {
         tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
-        if(HeapTupleIsValid(tuple)){
+        if (likely(HeapTupleIsValid(tuple))) {
             con = (Form_pg_constraint)GETSTRUCT(tuple);
             bool isNull = true;
-            Datum datum = heap_getattr(tuple, Anum_pg_constraint_condisable, RelationGetDescr(pg_constraint), &isNull);
-            bool condisable = DatumGetBool(datum);
+            Datum datum = SysCacheGetAttr(CONSTRRELID, tuple, Anum_pg_constraint_condisable, &isNull);
+            bool condisable = !isNull && DatumGetBool(datum);
             if (con->convalidated && condisable) {
                 bool overlap = false; 
                 if (estate->es_plannedstmt->commandType == CMD_DELETE)
@@ -2695,7 +2690,6 @@ void CheckIndexDisableValid(ResultRelInfo* result_rel_info, EState *estate)
             }
         }
     }
-    heap_close(pg_constraint, NoLock);
     ReleaseSysCacheList(catlist);
 }
 

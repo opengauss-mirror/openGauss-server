@@ -4490,13 +4490,13 @@ static bool CheckPasswordComplexity(const char* roleID, char* newPasswd, char* o
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("reverse_string failed, possibility out of memory")));
     }
     if (0 == pg_strcasecmp(newPasswd, reverse_str)) {
-        free(reverse_str);
+        pfree(reverse_str);
         str_reset(newPasswd);
         str_reset(oldPasswd);
         ereport(
             ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("Password should not equal to the reverse of rolname.")));
     }
-    free(reverse_str);
+    pfree(reverse_str);
     reverse_str = NULL;
 
     /* If oldPasswd exist, newPasswd should not equal to the old ones */
@@ -4516,14 +4516,14 @@ static bool CheckPasswordComplexity(const char* roleID, char* newPasswd, char* o
                 ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("reverse_string failed, possibility out of memory")));
         }
         if (VerifyPasswdDigest(roleID, reverse_str, oldPasswd)) {
-            free(reverse_str);
+            pfree(reverse_str);
             str_reset(newPasswd);
             str_reset(oldPasswd);
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PASSWORD),
                     errmsg("New password should not equal to the reverse of old ones.")));
         }
-        free(reverse_str);
+        pfree(reverse_str);
         reverse_str = NULL;
     }
 
@@ -5794,7 +5794,7 @@ static char* reverse_string(const char* str)
     int len;
     char* new_string = NULL;
     len = strlen(str);
-    new_string = (char*)malloc(len + 1);
+    new_string = (char*)palloc(len + 1);
     if (new_string == NULL) {
         return NULL;
     }

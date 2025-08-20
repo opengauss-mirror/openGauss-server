@@ -2383,6 +2383,23 @@ Node* eval_const_expressions(PlannerInfo* root, Node* node)
     context.active_fns = NIL; /* nothing being recursively simplified */
     context.case_val = NULL;  /* no CASE being examined */
     context.estimate = false; /* safe transformations only */
+    context.change_user = false; /* now only index express need change to function user */
+    return eval_const_expressions_mutator(node, &context);
+}
+
+Node* eval_index_const_expressions(PlannerInfo* root, Node* node)
+{
+    eval_const_expressions_context context;
+
+    if (root != NULL)
+        context.boundParams = root->glob->boundParams; /* bound Params */
+    else
+        context.boundParams = NULL;
+    context.root = root;      /* for inlined-function dependencies */
+    context.active_fns = NIL; /* nothing being recursively simplified */
+    context.case_val = NULL;  /* no CASE being examined */
+    context.estimate = false; /* safe transformations only */
+    context.change_user = true; /* now only index express need change to function user */
     return eval_const_expressions_mutator(node, &context);
 }
 
@@ -2395,6 +2412,7 @@ Node* eval_const_expressions_params(PlannerInfo* root, Node* node, ParamListInfo
     context.active_fns = NIL; /* nothing being recursively simplified */
     context.case_val = NULL;  /* no CASE being examined */
     context.estimate = false; /* safe transformations only */
+    context.change_user = false; /* now only index express need change to function user */
     return eval_const_expressions_mutator(node, &context);
 }
 
@@ -2413,6 +2431,7 @@ Node *eval_const_expression_value(PlannerInfo* root, Node* node, ParamListInfo b
     context.active_fns = NIL; /* nothing being recursively simplified */
     context.case_val = NULL;  /* no CASE being examined */
     context.estimate = true; /* unsafe transformations OK */
+    context.change_user = false; /* now only index express need change to function user */
 
     return eval_const_expressions_mutator(node, &context);
 }
@@ -2544,6 +2563,7 @@ Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate)
     context.active_fns = NIL; /* nothing being recursively simplified */
     context.case_val = NULL;  /* no CASE being examined */
     context.estimate = true;  /* unsafe transformations OK */
+    context.change_user = false; /* now only index express need change to function user */
     return eval_const_expressions_mutator(node, &context);
 }
 
@@ -2566,6 +2586,7 @@ Node* simplify_select_into_expression(Node* node, ParamListInfo boundParams, int
     context.active_fns = NIL; /* nothing being recursively simplified */
     context.case_val = NULL;  /* no CASE being examined */
     context.estimate = true; /* unsafe transformations OK */
+    context.change_user = false; /* now only index express need change to function user */
 
     Query *qt = (Query *)((SubLink *)node)->subselect;
     List *fromList = qt->jointree->fromlist;
@@ -4400,6 +4421,30 @@ static bool is_safe_simplify_func(Oid funcid, List *args)
     return false;
 }
 
+static Expr *evaluate_index_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result_collation,
+    bool can_ignore, Oid pro_owner)
+{
+    int save_sec_context = 0;
+    Oid save_userid = 0;
+    Expr* result = NULL;
+    /* switch user oid to create function's user */
+    GetUserIdAndSecContext(&save_userid, &save_sec_context);
+    SetUserIdAndSecContext(pro_owner, save_sec_context | SENDER_LOCAL_USERID_CHANGE);
+
+    PG_TRY();
+    {
+        result = evaluate_expr(expr, result_type, result_typmod, result_collation, can_ignore);
+    }
+    PG_CATCH();
+    {
+        SetUserIdAndSecContext(save_userid, save_sec_context);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    SetUserIdAndSecContext(save_userid, save_sec_context);
+    return result;
+}
+
 /*
  * evaluate_function: try to pre-evaluate a function call
  *
@@ -4509,7 +4554,14 @@ static Expr* evaluate_function(Oid funcid, Oid result_type, int32 result_typmod,
     if (context != NULL && context->root != NULL && context->root->parse != NULL && context->root->parse->hasIgnore) {
         can_ignore = true;
     }
-    return evaluate_expr((Expr*)newexpr, result_type, result_typmod, result_collid, can_ignore);
+    bool need_change_user = context->change_user && u_sess->misc_cxt.CurrentUserId != funcform->proowner &&
+        funcid >= FirstNormalObjectId;
+    if (!need_change_user) {
+        return evaluate_expr((Expr*)newexpr, result_type, result_typmod, result_collid, can_ignore);
+    } else {
+        return evaluate_index_expr((Expr*)newexpr, result_type, result_typmod, result_collid, can_ignore,
+            funcform->proowner);
+    }
 }
 
 /*
@@ -5701,6 +5753,7 @@ Query *fold_constants(PlannerInfo *root, Query *q, ParamListInfo boundParams, Si
     context.active_fns = NIL;	/* nothing being recursively simplified */
     context.case_val = NULL;	/* no CASE being examined */
     context.estimate = false;	/* safe transformations only */
+    context.change_user = false; /* now only index express need change to function user */
     context.recurse_queries = true; /* recurse into query structures */
     context.recurse_sublink_testexpr = false; /* do not recurse into sublink test expressions */
 

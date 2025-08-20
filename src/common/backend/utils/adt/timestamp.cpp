@@ -125,6 +125,15 @@ typedef struct {
     int step_sign;
 } generate_series_timestamptz_fctx;
 
+typedef struct timestamp_input {
+    int32 year;
+    int32 month;
+    int32 mday;
+    int32 hour;
+    int32 min;
+    float8 sec;
+} timestamp_input;
+
 static TimeOffset time2t(const int hour, const int min, const int sec, const fsec_t fsec);
 void EncodeSpecialTimestamp(Timestamp dt, char* str);
 static Timestamp dt2local(Timestamp dt, int timezone);
@@ -153,6 +162,8 @@ static int daydiff_timestamp(const struct pg_tm* tm, const struct pg_tm* tm1, co
 
 void timestamp_FilpSign(pg_tm* tm);
 void timestamp_CalculateFields(TimestampTz* dt1, TimestampTz* dt2, fsec_t* fsec, pg_tm* tm, pg_tm* tm1, pg_tm* tm2);
+static bool float_time_overflows(int hour, int min, double sec);
+static Timestamp make_timestamp_internal(timestamp_input* input);
 
 /* common code for timestamptypmodin and timestamptztypmodin */
 static int32 anytimestamp_typmodin(bool istz, ArrayType* ta)
@@ -2242,7 +2253,6 @@ Datum timestamp_cmp(PG_FUNCTION_ARGS)
     PG_RETURN_INT32(timestamp_cmp_internal(dt1, dt2));
 }
 
-/* note: this is used for timestamptz also */
 static int timestamp_fastcmp(Datum x, Datum y, SortSupport ssup)
 {
     Timestamp a = DatumGetTimestamp(x);
@@ -2255,7 +2265,12 @@ Datum timestamp_sortsupport(PG_FUNCTION_ARGS)
 {
     SortSupport ssup = (SortSupport)PG_GETARG_POINTER(0);
 
+#ifdef HAVE_INT64_TIMESTAMP
+    ssup->comparator = ssup_datum_signed_cmp;
+#else
     ssup->comparator = timestamp_fastcmp;
+#endif
+
     PG_RETURN_VOID();
 }
 
@@ -6175,6 +6190,121 @@ Datum float8_timestamptz(PG_FUNCTION_ARGS)
                             errmsg("timestamp out of range: \"%g\"", PG_GETARG_FLOAT8(0))));
         }
     }
+
+    PG_RETURN_TIMESTAMP(result);
+}
+
+/*
+ * make_timestamp_internal
+ *		workhorse for make_timestamp
+ */
+static Timestamp make_timestamp_internal(timestamp_input* input)
+{
+    struct pg_tm tm;
+    TimeOffset date;
+    TimeOffset time;
+    int dterr;
+    bool bc = false;
+    Timestamp result;
+
+    tm.tm_year = input->year;
+    tm.tm_mon = input->month;
+    tm.tm_mday = input->mday;
+
+    /* Handle negative years as BC */
+    if (tm.tm_year < 0) {
+        bc = true;
+        tm.tm_year = -tm.tm_year;
+    }
+
+    dterr = GetValiddateDate(DTK_DATE_M, false, false, bc, &tm);
+    if (dterr != 0) {
+        ereport(ERROR, (errcode(ERRCODE_DATETIME_FIELD_OVERFLOW),
+                        errmsg("date field value out of range: %d-%02d-%02d", input->year, input->month, input->mday)));
+    }
+
+    if (!IS_VALID_JULIAN(tm.tm_year, tm.tm_mon, tm.tm_mday)) {
+        ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                        errmsg("date out of range: %d-%02d-%02d", input->year, input->month, input->mday)));
+    }
+    date = date2j(tm.tm_year, tm.tm_mon, tm.tm_mday) - POSTGRES_EPOCH_JDATE;
+
+    /* Check for time overflow */
+    if (float_time_overflows(input->hour, input->min, input->sec)) {
+        ereport(ERROR, (errcode(ERRCODE_DATETIME_FIELD_OVERFLOW),
+                        errmsg("time field value out of range: %d:%02d:%02g", input->hour, input->min, input->sec)));
+    }
+
+    /* This should match tm2time */
+    time = (((input->hour * MINS_PER_HOUR + input->min) * SECS_PER_MINUTE) * USECS_PER_SEC) +
+           (int64)rint(input->sec * USECS_PER_SEC);
+    if (unlikely(pg_mul_s64_overflow(date, USECS_PER_DAY, &result) || pg_add_s64_overflow(result, time, &result))) {
+        ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                        errmsg("timestamp out of range: %d-%02d-%02d %d:%02d:%02g", input->year, input->month,
+                               input->mday, input->hour, input->min, input->sec)));
+    }
+
+    /* final range check catches just-out-of-range timestamps */
+    if (!IS_VALID_TIMESTAMP(result)) {
+        ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                        errmsg("timestamp out of range: %d-%02d-%02d %d:%02d:%02g", input->year, input->month,
+                               input->mday, input->hour, input->min, input->sec)));
+    }
+
+    return result;
+}
+
+/* float_time_overflows()
+ * Check if time out of range
+ */
+static bool float_time_overflows(int hour, int min, double sec)
+{
+    /* Range-check the fields individually. */
+    if (hour < 0 || hour > HOURS_PER_DAY || min < 0 || min >= MINS_PER_HOUR) {
+        return true;
+    }
+
+    /*
+     * "sec", being double, requires extra care.  Cope with NaN, and round off
+     * before applying the range check to avoid unexpected errors due to
+     * imprecise input.  (We assume rint() behaves sanely with infinities.)
+     */
+    if (isnan(sec)) {
+        return true;
+    }
+    sec = rint(sec * USECS_PER_SEC);
+    if (sec < 0 || sec > SECS_PER_MINUTE * USECS_PER_SEC) {
+        return true;
+    }
+
+    /*
+     * Because we allow, eg, hour = 24 or sec = 60, we must check separately
+     * that the total time value doesn't exceed 24:00:00.  This must match the
+     * way that callers will convert the fields to a time.
+     */
+    if (((((hour * MINS_PER_HOUR + min) * SECS_PER_MINUTE) * USECS_PER_SEC) + (int64)sec) > USECS_PER_DAY) {
+        return true;
+    }
+
+    return false;
+}
+
+/*
+ * make_timestamp() - timestamp constructor
+ */
+Datum make_timestamp(PG_FUNCTION_ARGS)
+{
+    timestamp_input *input = (timestamp_input*)palloc(sizeof(timestamp_input));
+    input->year = PG_GETARG_INT32(0);
+    input->month = PG_GETARG_INT32(1);
+    input->mday = PG_GETARG_INT32(2);
+    input->hour = PG_GETARG_INT32(3);
+    input->min = PG_GETARG_INT32(4);
+    input->sec = PG_GETARG_FLOAT8(5);
+    Timestamp result;
+
+    result = make_timestamp_internal(input);
+    pfree_ext(input);
 
     PG_RETURN_TIMESTAMP(result);
 }

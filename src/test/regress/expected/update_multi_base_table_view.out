@@ -229,21 +229,8 @@ SELECT * FROM v_sidejoin_update WHERE empno=7369;
 
 ROLLBACK;
 CREATE USER testusr PASSWORD '1234@abcd';
-BEGIN;
-SELECT usename, usesuper FROM pg_user WHERE usename='testusr';
- usename | usesuper 
----------+----------
- testusr | f
-(1 row)
-
 UPDATE pg_user SET usesuper='t'::bool WHERE usename='testusr';
-SELECT usename, usesuper FROM pg_user WHERE usename='testusr';
- usename | usesuper 
----------+----------
- testusr | t
-(1 row)
-
-ROLLBACK;
+ERROR:  permission denied: "pg_authid" is a system catalog
 DROP USER testusr;
 CREATE TABLE t1 (a1 int primary key);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"

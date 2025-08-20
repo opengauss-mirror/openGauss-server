@@ -392,14 +392,17 @@ void CheckpointerMain(void)
          */
         CkptAbsorbFsyncRequests();
 
-        if (ENABLE_ASYNC_REDO) {
-            if (g_instance.smb_cxt.use_smb && g_instance.smb_cxt.start_flag && !g_instance.smb_cxt.end_flag) {
+        if (ENABLE_SMB_PULL_PAGE) {
                 pgstat_report_activity(STATE_IDLE, NULL);
                 rc = WaitLatch(&t_thrd.proc->procLatch,
                     WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
                     u_sess->attr.attr_storage.CheckPointTimeout * 1000L /* convert to ms */);
+                if (rc & WL_POSTMASTER_DEATH) {
+                    /* release compression ctx */
+                    crps_destory_ctxs();
+                    gs_thread_exit(1);
+                }
                 continue;
-            }
         }
 
         if (t_thrd.checkpoint_cxt.got_SIGHUP) {

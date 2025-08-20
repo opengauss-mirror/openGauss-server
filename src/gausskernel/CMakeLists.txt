@@ -189,6 +189,7 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_access_gist>
     $<TARGET_OBJECTS:gausskernel_storage_access_gin>
     $<TARGET_OBJECTS:gausskernel_storage_access_hbstore>
+    $<TARGET_OBJECTS:gausskernel_storage_access_bloom>
     $<TARGET_OBJECTS:gausskernel_storage_access_redo>
     $<TARGET_OBJECTS:gausskernel_storage_access_redo_standby_read>
     $<TARGET_OBJECTS:gausskernel_storage_access_table>

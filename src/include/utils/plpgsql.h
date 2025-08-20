@@ -307,6 +307,11 @@ typedef enum {
     GSDEPEND_OBJECT_TYPE_PKG_RECOMPILE
 } GsDependObjectType;
 
+typedef enum {
+    NOT_IN_TRY_CATCH_BLOCK,
+    IN_TRY_CATCH_BLOCK,
+    CATCH_ERROR_HANDLED
+} PLpgSqlTrycatchState;
 /*
 * GsDependency reference object position type
 */
@@ -796,6 +801,7 @@ typedef struct PLpgSQL_stmt_block { /* Block of statements			*/
     char* label;
     bool isAutonomous;
     bool isDeclareHandlerStmt;      /* mysql declare handler syntax */
+    bool isTryCatch;
     List* body; /* List of statements */
     int n_initvars;
     int* initvarnos;
@@ -1408,6 +1414,7 @@ typedef struct PLpgSQL_execstate { /* Runtime execution data	*/
     
     bool is_pipelined;
     bool pipelined_resistuple;
+    PLpgSqlTrycatchState trycatchState;
 
     MemoryContext proc_ctx;
 } PLpgSQL_execstate;

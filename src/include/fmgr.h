@@ -31,6 +31,8 @@
 
 #ifndef FRONTEND_PARSER
 
+typedef struct FuncCacheData *FuncCache;
+
 typedef ScalarVector* (*VectorFunction)(FunctionCallInfo fcinfo);
 typedef Datum (*GenericArgExtract)(Datum* data);
 
@@ -162,6 +164,9 @@ typedef struct FunctionCallInfoData {
     Datum* arg;                                  /* Arguments passed to function */
     bool* argnull;                               /* T if arg[i] is actually NULL */
     Oid* argTypes;                               /* Argument type */
+    uint32 arghash;                              /* Argument hash */
+    struct EState *top_estate;
+    FuncCache fncache;
     Datum prealloc_arg[FUNC_PREALLOCED_ARGS];    /* prealloced arguments.*/
     bool prealloc_argnull[FUNC_PREALLOCED_ARGS]; /* prealloced argument null flags.*/
     Oid prealloc_argTypes[FUNC_PREALLOCED_ARGS] = {InvalidOid}; /* prealloced argument type */
@@ -649,6 +654,7 @@ extern THR_LOCAL PGDLLIMPORT needs_fmgr_hook_type needs_fmgr_hook;
 extern THR_LOCAL PGDLLIMPORT fmgr_hook_type fmgr_hook;
 
 #define FmgrHookIsNeeded(fn_oid) (!needs_fmgr_hook ? false : (*needs_fmgr_hook)(fn_oid))
+#define TWO_ARGS 2
 
 // Define common stuff for vectorized expression //
 typedef enum SimpleOp {

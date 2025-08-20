@@ -1,0 +1,44 @@
+create database testd with dbcompatibility = 'd';
+\c testd
+create extension shark;
+use testd;
+NOTICE:  Already connected to database 'testd'.
+use test1;
+ERROR:  Use of non-current database 'test1' is not supported.
+use public;
+ERROR:  Use of non-current database 'public' is not supported.
+create schema test_schema;
+use test_schema;
+ERROR:  Use of non-current database 'test_schema' is not supported.
+create database test2;
+use test2;
+ERROR:  Use of non-current database 'test2' is not supported.
+create database testa;
+\c testa
+create schema test_schema;
+use test_schema;
+ERROR:  syntax error at or near "use"
+LINE 1: use test_schema;
+        ^
+use public;
+ERROR:  syntax error at or near "use"
+LINE 1: use public;
+        ^
+use test1;
+ERROR:  syntax error at or near "use"
+LINE 1: use test1;
+        ^
+use testa;
+ERROR:  syntax error at or near "use"
+LINE 1: use testa;
+        ^
+create database test4;
+use test4;
+ERROR:  syntax error at or near "use"
+LINE 1: use test4;
+        ^
+\c postgres
+drop database testd;
+drop database testa;
+drop database test2;
+drop database test4;

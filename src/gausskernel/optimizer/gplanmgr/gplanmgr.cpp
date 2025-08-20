@@ -1291,7 +1291,7 @@ GetAdaptGenericPlan(CachedPlanSource *plansource,
     if (action->selected_plan->cost > 1.1 * avg_custom_cost) {
         Assert(action->selected_plan->cost >= 0);
         if (!action->selected_plan->is_candidate) {
-            Assert(action->selected_plan->refcount == 0);
+            Assert(action->selected_plan->refcount == 0 || action->selected_plan == plansource->gplan);
 
             /*
              * guarantee that refcount equals to 1, and thus we can use
@@ -1305,8 +1305,13 @@ GetAdaptGenericPlan(CachedPlanSource *plansource,
         }
         action->selected_plan = NULL;
         *mode = true;
+        /*
+         * If we choose to plan again, we need to re-copy the query_list,
+         * since the planner probably scribbled on it.	We can force
+         * BuildCachedPlan to do that by passing NIL.
+         */
+        *qlist = NIL;
     }
-
 
     return action->selected_plan;
 }

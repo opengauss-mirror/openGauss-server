@@ -365,8 +365,7 @@ lreplace:
         }
 
         /* acquire Form_pg_attrdef ad_on_update */
-        if (result_rel_info->ri_RelationDesc->rd_att->constr &&
-            result_rel_info->ri_RelationDesc->rd_att->constr->has_on_update) {
+        if (ExecHasDefaultUpdateExpr(result_rel_info->ri_RelationDesc->rd_att)) {
             char relkind;
             bool isNull = false;
             ItemPointer tupleid = NULL;

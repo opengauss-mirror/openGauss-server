@@ -40,6 +40,9 @@
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/numeric.h"
+#include "utils/varbit.h"
+#include "utils/int8.h"
+#include "utils/int16.h"
 #include "utils/formatting.h"
 
 #define SAMESIGN(a, b) (((a) < 0) == ((b) < 0))
@@ -1925,4 +1928,741 @@ Datum text_int4(PG_FUNCTION_ARGS)
     pfree_ext(tmp);
 
     PG_RETURN_DATUM(result);
+}
+
+/***********************************************************************
+ **
+ **     Common routines for natural, naturaln, positive, positiven,
+ **     signtype and simple_integer.
+ **
+ ***********************************************************************/
+
+static inline int64 SimpleIntegerOverflow(int64 n)
+{
+    return (n < 0 ? (n & 0x00000000FFFFFFFF) :
+            n > 0 ? (-((-n) & 0x00000000FFFFFFFF)) : n);
+}
+
+static int32 simple_integer_operator(PG_FUNCTION_ARGS,
+    bool (*oprfunc)(int64, int64, int64*))
+{
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_NOT_NULL_VIOLATION),
+                errmsg("value of subtype simple_integer can not be null")));
+    }
+    int32 arg1 = PG_GETARG_INT32(0);
+    int32 arg2 = PG_GETARG_INT32(1);
+    int64 result;
+
+    oprfunc(arg1, arg2, &result);
+    if (result < PG_INT32_MAX || result > PG_INT32_MIN) {
+        return (int32)SimpleIntegerOverflow(result);
+    } else {
+        return (int32)result;
+    }
+}
+
+static void CheckNatural(int32 arg)
+{
+    if (arg < 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for natural: %d", arg),
+                errdetail("value of natural must be greater or equal to 0")));
+    }
+}
+
+static void CheckNaturaln(int32 arg, bool isNull)
+{
+    if (isNull) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for naturaln: NULL"),
+                errdetail("value of naturaln must be greater or equal to 0, and can not be NULL")));
+    } else if (arg < 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for naturaln: %d", arg),
+                errdetail("value of naturaln must be greater or equal to 0, and can not be NULL")));
+    }
+}
+
+static void CheckPositive(int32 arg)
+{
+    if (arg <= 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for positive: %d", arg),
+                errdetail("value of positive must be greater than 0")));
+    }
+}
+
+static void CheckPositiven(int32 arg, bool isNull)
+{
+    if (isNull) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for positiven: NULL"),
+                errdetail("value of positiven must be greater than 0, and can not be NULL")));
+    } else if (arg <= 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for positiven: %d", arg),
+                errdetail("value of positiven must be greater than 0, and can not be NULL")));
+    }
+}
+
+static void CheckSigntype(int32 arg)
+{
+    if (arg != 1 && arg != -1 && arg != 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for signtype: %d", arg),
+                errdetail("value of signtype can only be 1, -1 or 0")));
+    }
+}
+
+static void CheckSimpleInteger(bool isNull)
+{
+    if (isNull) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for simple_integer: NULL"),
+                errdetail("value of simple_integer can not be NULL")));
+    }
+}
+
+static void CheckConstraint(Oid typid, int32 arg, bool isNull)
+{
+    switch (typid) {
+        case NATURALOID: {
+            CheckNatural(arg);
+            break;
+        }
+        case NATURALNOID: {
+            CheckNaturaln(arg, isNull);
+            break;
+        }
+        case POSITIVEOID: {
+            CheckPositive(arg);
+            break;
+        }
+        case POSITIVENOID: {
+            CheckPositiven(arg, isNull);
+            break;
+        }
+        case SIGNTYPEOID: {
+            CheckSigntype(arg);
+            break;
+        }
+        case SIMPLE_INTEGER_OID: {
+            CheckSimpleInteger(isNull);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+static int32 ConvertWithConstraint(PGFunction func, FunctionCallInfo fcinfo, Oid typid)
+{
+    bool isNull = PG_ARGISNULL(0);
+    int32 arg = 0;
+    if (!isNull) {
+        arg = func == NULL ? PG_GETARG_INT32(0) : DirectFunctionCall1(func, PG_GETARG_DATUM(0));
+    }
+    CheckConstraint(typid, arg, isNull);
+    return arg;
+}
+
+/***********************************************************************
+ **
+ **		Routines for natural: int4 that is not negative
+ **
+ ***********************************************************************/
+
+Datum natural_in(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4in, fcinfo, NATURALOID));
+}
+
+Datum natural_out(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4out, PG_GETARG_DATUM(0)));
+}
+
+Datum natural_recv(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4recv, fcinfo, NATURALOID));
+}
+
+Datum natural_send(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4send, PG_GETARG_DATUM(0)));
+}
+
+Datum i4_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(NULL, fcinfo, NATURALOID));
+}
+
+Datum i1_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i1toi4, fcinfo, NATURALOID));
+}
+
+Datum i2_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i2toi4, fcinfo, NATURALOID));
+}
+
+Datum i8_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int84, fcinfo, NATURALOID));
+}
+
+Datum i16_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int16_4, fcinfo, NATURALOID));
+}
+
+Datum double_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(dtoi4, fcinfo, NATURALOID));
+}
+
+Datum float_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(ftoi4, fcinfo, NATURALOID));
+}
+
+Datum numeric_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(numeric_int4, fcinfo, NATURALOID));
+}
+
+Datum bit_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bittoint4, fcinfo, NATURALOID));
+}
+
+Datum bool_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bool_int4, fcinfo, NATURALOID));
+}
+
+Datum text_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(text_int4, fcinfo, NATURALOID));
+}
+
+Datum char_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(chartoi4, fcinfo, NATURALOID));
+}
+
+Datum varchar_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(varchar_int4, fcinfo, NATURALOID));
+}
+
+Datum bpchar_to_natural(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bpchar_int4, fcinfo, NATURALOID));
+}
+
+/***********************************************************************
+ **
+ **		Routines for naturaln: integer that is not negative and not null
+ **
+ ***********************************************************************/
+
+Datum naturaln_in(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4in, fcinfo, NATURALNOID));
+}
+
+Datum naturaln_out(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4out, PG_GETARG_DATUM(0)));
+}
+
+Datum naturaln_recv(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4recv, fcinfo, NATURALNOID));
+}
+
+Datum naturaln_send(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4send, PG_GETARG_DATUM(0)));
+}
+
+Datum i4_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(NULL, fcinfo, NATURALNOID));
+}
+
+Datum i1_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i1toi4, fcinfo, NATURALNOID));
+}
+
+Datum i2_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i2toi4, fcinfo, NATURALNOID));
+}
+
+Datum i8_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int84, fcinfo, NATURALNOID));
+}
+
+Datum i16_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int16_4, fcinfo, NATURALNOID));
+}
+
+Datum double_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(dtoi4, fcinfo, NATURALNOID));
+}
+
+Datum float_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(ftoi4, fcinfo, NATURALNOID));
+}
+
+Datum numeric_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(numeric_int4, fcinfo, NATURALNOID));
+}
+
+Datum bit_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bittoint4, fcinfo, NATURALNOID));
+}
+
+Datum bool_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bool_int4, fcinfo, NATURALNOID));
+}
+
+Datum text_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(text_int4, fcinfo, NATURALNOID));
+}
+
+Datum char_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(chartoi4, fcinfo, NATURALNOID));
+}
+
+Datum varchar_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(varchar_int4, fcinfo, NATURALNOID));
+}
+
+Datum bpchar_to_naturaln(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bpchar_int4, fcinfo, NATURALNOID));
+}
+
+/***********************************************************************
+ **
+ **		Routines for positive
+ **
+ ***********************************************************************/
+
+Datum positive_in(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4in, fcinfo, POSITIVEOID));
+}
+
+Datum positive_out(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4out, PG_GETARG_DATUM(0)));
+}
+
+Datum positive_recv(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4recv, fcinfo, POSITIVEOID));
+}
+
+Datum positive_send(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4send, PG_GETARG_DATUM(0)));
+}
+
+Datum i4_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(NULL, fcinfo, POSITIVEOID));
+}
+
+Datum i1_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i1toi4, fcinfo, POSITIVEOID));
+}
+
+Datum i2_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i2toi4, fcinfo, POSITIVEOID));
+}
+
+Datum i8_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int84, fcinfo, POSITIVEOID));
+}
+
+Datum i16_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int16_4, fcinfo, POSITIVEOID));
+}
+
+Datum double_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(dtoi4, fcinfo, POSITIVEOID));
+}
+
+Datum float_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(ftoi4, fcinfo, POSITIVEOID));
+}
+
+Datum numeric_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(numeric_int4, fcinfo, POSITIVEOID));
+}
+
+Datum bit_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bittoint4, fcinfo, POSITIVEOID));
+}
+
+Datum bool_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bool_int4, fcinfo, POSITIVEOID));
+}
+
+Datum text_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(text_int4, fcinfo, POSITIVEOID));
+}
+
+Datum char_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(chartoi4, fcinfo, POSITIVEOID));
+}
+
+Datum varchar_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(varchar_int4, fcinfo, POSITIVEOID));
+}
+
+Datum bpchar_to_positive(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bpchar_int4, fcinfo, POSITIVEOID));
+}
+
+/***********************************************************************
+ **
+ **		Routines for positiven: integer that is positive and not null
+ **
+ ***********************************************************************/
+
+Datum positiven_in(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4in, fcinfo, POSITIVENOID));
+}
+
+Datum positiven_out(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4out, PG_GETARG_DATUM(0)));
+}
+
+Datum positiven_recv(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4recv, fcinfo, POSITIVENOID));
+}
+
+Datum positiven_send(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4send, PG_GETARG_DATUM(0)));
+}
+
+Datum i4_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(NULL, fcinfo, POSITIVENOID));
+}
+
+Datum i1_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i1toi4, fcinfo, POSITIVENOID));
+}
+
+Datum i2_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i2toi4, fcinfo, POSITIVENOID));
+}
+
+Datum i8_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int84, fcinfo, POSITIVENOID));
+}
+
+Datum i16_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int16_4, fcinfo, POSITIVENOID));
+}
+
+Datum double_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(dtoi4, fcinfo, POSITIVENOID));
+}
+
+Datum float_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(ftoi4, fcinfo, POSITIVENOID));
+}
+
+Datum numeric_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(numeric_int4, fcinfo, POSITIVENOID));
+}
+
+Datum bit_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bittoint4, fcinfo, POSITIVENOID));
+}
+
+Datum bool_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bool_int4, fcinfo, POSITIVENOID));
+}
+
+Datum text_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(text_int4, fcinfo, POSITIVENOID));
+}
+
+Datum char_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(chartoi4, fcinfo, POSITIVENOID));
+}
+
+Datum varchar_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(varchar_int4, fcinfo, POSITIVENOID));
+}
+
+Datum bpchar_to_positiven(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bpchar_int4, fcinfo, POSITIVENOID));
+}
+
+/***********************************************************************
+ **
+ **		Routines for signtype: integer whose value can only be -1, 1 or 0
+ **
+ ***********************************************************************/
+
+Datum signtype_in(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4in, fcinfo, SIGNTYPEOID));
+}
+
+Datum signtype_out(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4out, PG_GETARG_DATUM(0)));
+}
+
+Datum signtype_recv(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4recv, fcinfo, SIGNTYPEOID));
+}
+
+Datum signtype_send(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4send, PG_GETARG_DATUM(0)));
+}
+
+Datum i4_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(NULL, fcinfo, SIGNTYPEOID));
+}
+
+Datum i1_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i1toi4, fcinfo, SIGNTYPEOID));
+}
+
+Datum i2_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i2toi4, fcinfo, SIGNTYPEOID));
+}
+
+Datum i8_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int84, fcinfo, SIGNTYPEOID));
+}
+
+Datum i16_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int16_4, fcinfo, SIGNTYPEOID));
+}
+
+Datum double_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(dtoi4, fcinfo, SIGNTYPEOID));
+}
+
+Datum float_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(ftoi4, fcinfo, SIGNTYPEOID));
+}
+
+Datum numeric_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(numeric_int4, fcinfo, SIGNTYPEOID));
+}
+
+Datum bit_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bittoint4, fcinfo, SIGNTYPEOID));
+}
+
+Datum bool_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bool_int4, fcinfo, SIGNTYPEOID));
+}
+
+Datum text_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(text_int4, fcinfo, SIGNTYPEOID));
+}
+
+Datum char_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(chartoi4, fcinfo, SIGNTYPEOID));
+}
+
+Datum varchar_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(varchar_int4, fcinfo, SIGNTYPEOID));
+}
+
+Datum bpchar_to_signtype(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bpchar_int4, fcinfo, SIGNTYPEOID));
+}
+
+/***********************************************************************
+ **
+ **		Routines for simple_integer: integer that is not null
+ **
+ ***********************************************************************/
+
+Datum simple_integer_in(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4in, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum simple_integer_out(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4out, PG_GETARG_DATUM(0)));
+}
+
+Datum simple_integer_recv(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int4recv, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum simple_integer_send(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_DATUM(DirectFunctionCall1(int4send, PG_GETARG_DATUM(0)));
+}
+
+Datum i4_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(NULL, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum i1_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i1toi4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum i2_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(i2toi4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum i8_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int84, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum i16_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(int16_4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum double_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(dtoi4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum float_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(ftoi4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum numeric_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(numeric_int4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum bit_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bittoint4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum bool_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bool_int4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum text_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(text_int4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum char_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(chartoi4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum varchar_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(varchar_int4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum bpchar_to_simple_integer(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(ConvertWithConstraint(bpchar_int4, fcinfo, SIMPLE_INTEGER_OID));
+}
+
+Datum simple_integer_plus(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(simple_integer_operator(fcinfo, pg_add_s64_overflow));
+}
+
+Datum simple_integer_sub(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(simple_integer_operator(fcinfo, pg_sub_s64_overflow));
+}
+
+Datum simple_integer_mul(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT32(simple_integer_operator(fcinfo, pg_mul_s64_overflow));
 }

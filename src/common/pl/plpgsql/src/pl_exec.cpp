@@ -102,6 +102,7 @@ static void plpgsql_exec_error_callback(void* arg);
 static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack=NULL, bool resignal_in_handler = false, int* coverage = NULL);
 static int exec_stmt_block_b_exception(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block, List* block_ptr_stack, bool resignal_in_handler = false);
 static int exec_stmts(PLpgSQL_execstate* estate, List* stmts, bool resignal_in_handler = false, int* coverage = NULL);
+static int exec_stmt_trycatch(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt);
 static int exec_stmt(
     PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resignal_in_handler = false, int* coverage = NULL);
 static int exec_stmt_assign(PLpgSQL_execstate* estate, PLpgSQL_stmt_assign* stmt);
@@ -2776,6 +2777,11 @@ static void plpgsql_exec_error_callback(void* arg)
 {
     PLpgSQL_execstate* estate = (PLpgSQL_execstate*)arg;
 
+    if (SPI_connectid() > 0)
+        ErrPlpgsqlProcedure(estate->func->fn_signature);
+    if (estate->err_stmt)
+        ErrPlpgsqlLine(estate->err_stmt->lineno);
+
     /* if we are doing RAISE, don't report its location */
     if (estate->err_text == raise_skip_msg) {
         return;
@@ -3488,7 +3494,7 @@ void free_exception_stack()
  *
  * do some cleanup before handling captured ERROR.
  */
-static void exec_exception_cleanup(PLpgSQL_execstate* estate, ExceptionContext *context)
+static void exec_exception_cleanup(PLpgSQL_execstate* estate, ExceptionContext *context, bool ignoreErrors = false)
 {
     MemoryContextSwitchTo(context->oldMemCxt);
 
@@ -3498,7 +3504,9 @@ static void exec_exception_cleanup(PLpgSQL_execstate* estate, ExceptionContext *
     /* Save error info */
     ErrorData* edata = CopyErrorData();
     t_thrd.xact_cxt.bInAbortTransaction = false;
-    FlushErrorState();
+    if (!ignoreErrors) {
+        FlushErrorState();
+    }
 
     if (edata->sqlerrcode == ERRCODE_OPERATOR_INTERVENTION ||
         edata->sqlerrcode == ERRCODE_QUERY_CANCELED ||
@@ -3512,8 +3520,9 @@ static void exec_exception_cleanup(PLpgSQL_execstate* estate, ExceptionContext *
     }
     context->cur_edata =  edata;
 
-    if (u_sess->hook_cxt.pluginMultiResExceptionHook)
+    if (u_sess->hook_cxt.pluginMultiResExceptionHook) {
         ((SpiMultiResExceptionHook)u_sess->hook_cxt.pluginMultiResExceptionHook)();
+    }
     if (context->hasReleased) {
         ereport(FATAL,
                 (errmsg("exception happens after current savepoint released error message is: %s",
@@ -3863,7 +3872,50 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
     }
 
     if (block->exceptions != NULL) {
-        if (block->isDeclareHandlerStmt == true/* mysql_style_exception */) {
+        if (block->isTryCatch) {
+            Cursor_Data* saved_cursor_data = estate->cursor_return_data;
+            int saved_cursor_numbers = estate->cursor_return_numbers;
+            PLpgSqlTrycatchState save_trycatch_state = estate->trycatchState;
+
+            estate->trycatchState = IN_TRY_CATCH_BLOCK;
+
+            PG_TRY();
+            {
+                estate->err_text = NULL;
+
+                rc = exec_stmts(estate, block->body);
+                estate->trycatchState = save_trycatch_state;
+
+#ifdef ENABLE_MOT
+                MOTCheckTransactionAborted();
+#endif
+                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+                u_sess->SPI_cxt.is_stp = savedIsSTP;
+                u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+            }
+            PG_CATCH();
+            {
+                ExceptionContext excptContext;
+                exec_exception_begin(estate, &excptContext);
+
+                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+                u_sess->SPI_cxt.is_stp = savedIsSTP;
+                u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+
+                estate->trycatchState = save_trycatch_state;
+
+                estate->cursor_return_data = saved_cursor_data;
+                estate->cursor_return_numbers = saved_cursor_numbers;
+
+                exec_exception_cleanup(estate, &excptContext);
+
+                rc = exec_exception_handler(estate, block, &excptContext);
+                stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+                u_sess->SPI_cxt.is_stp = savedIsSTP;
+                u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+            }
+            PG_END_TRY();
+        }else if (block->isDeclareHandlerStmt == true/* mysql_style_exception */) {
             if (block_ptr_stack == NIL) {
                 block_ptr_stack = list_make1(block);
             } else {
@@ -4612,7 +4664,12 @@ static int exec_stmts(PLpgSQL_execstate* estate, List* stmts, bool resignal_in_h
             coverage[index]++;
         }
 
-        int rc = exec_stmt(estate, stmt, resignal_in_handler, coverage);
+        int rc = -1;
+        if (estate->trycatchState == IN_TRY_CATCH_BLOCK) {
+            rc = exec_stmt_trycatch(estate, stmt);
+        } else {
+            rc = exec_stmt(estate, stmt, resignal_in_handler, coverage);
+        }
         stmtid++;
 
 #ifdef ENABLE_MOT
@@ -4644,6 +4701,101 @@ static int exec_stmts(PLpgSQL_execstate* estate, List* stmts, bool resignal_in_h
 normal_exit:
     estate->block_level--;
     return PLPGSQL_RC_OK;
+}
+
+static int exec_stmt_trycatch(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
+{
+    estate->err_text = gettext_noop("during statement block entry");
+
+    ExceptionContext excptContext;
+    Cursor_Data* save_cursor_data = estate->cursor_return_data;
+    int savedSurcorNumbers = estate->cursor_return_numbers;
+    bool savedisAllowCommitRollback = u_sess->SPI_cxt.is_allow_commit_rollback;
+    bool savedIsSTP = u_sess->SPI_cxt.is_stp;
+    bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
+    int rc = -1;
+
+    exec_exception_begin(estate, &excptContext);
+
+    PG_TRY();
+    {
+        plpgsql_create_econtext(estate);
+
+        estate->err_text = NULL;
+        rc = exec_stmt(estate, stmt);
+
+#ifdef ENABLE_MOT
+        MOTCheckTransactionAborted();
+#endif
+
+        estate->err_text = gettext_noop("during statement block exit");
+        
+        if (rc == PLPGSQL_RC_RETURN && !estate->retisset && !estate->retisnull && estate->rettupdesc == NULL) {
+            int16 resTypLen = 0;
+            bool resTypByVal = false;
+
+            get_typlenbyval(estate->rettype, &resTypLen, &resTypByVal);
+            estate->retval = datumCopy(estate->retval, resTypByVal, resTypLen);
+        }
+
+        exec_exception_end(estate, &excptContext);
+        stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+    }
+    PG_CATCH();
+    {
+        if (estate->trycatchState == CATCH_ERROR_HANDLED) {
+#ifdef ENABLE_MOT
+            MOTCheckTransactionAborted();
+#endif
+
+            estate->err_text = gettext_noop("during statement block exit");
+
+            if (rc == PLPGSQL_RC_RETURN && !estate->retisset && !estate->retisnull && estate->rettupdesc == NULL) {
+                int16 resTypLen = 0;
+                bool resTypByVal = false;
+
+                get_typlenbyval(estate->rettype, &resTypLen, &resTypByVal);
+                estate->retval = datumCopy(estate->retval, resTypByVal, resTypLen);
+            }
+
+            exec_exception_end(estate, &excptContext);
+            stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+            PG_RE_THROW();
+        }
+
+        stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+        u_sess->SPI_cxt.is_stp = savedIsSTP;
+        u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+
+        estate->cursor_return_data = save_cursor_data;
+        estate->cursor_return_numbers = savedSurcorNumbers;
+
+        u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
+
+        gs_signal_unblock_sigusr2();
+
+        estate->err_text = gettext_noop("during exception cleanup");
+
+        exec_exception_cleanup(estate, &excptContext, true);
+#ifndef ENABLE_MULTI_NODES
+        AutoDopControl dopControl;
+        dopControl.CloseSmp();
+#endif
+
+        estate->trycatchState = CATCH_ERROR_HANDLED;
+
+        stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+        u_sess->SPI_cxt.is_stp = savedIsSTP;
+        u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    AssertEreport(excptContext.old_edata == estate->cur_error,
+                  MOD_PLSQL,
+                  "save current error should be same error as estate current error.");
+
+    return rc;
 }
 
 /* ----------
@@ -7709,6 +7861,7 @@ void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, Ret
     estate->curr_nested_table_type = InvalidOid;
     estate->is_exception = false;
     estate->is_declare_handler = false;
+    estate->trycatchState = NOT_IN_TRY_CATCH_BLOCK;
 
     estate->is_flt_frame = (u_sess->attr.attr_common.enable_expr_fusion && u_sess->attr.attr_sql.query_dop_tmp == 1);
 

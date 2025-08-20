@@ -83,12 +83,37 @@ explain(costs off) execute offset_test(1000);
 
 deallocate offset_test;
 
+---generate adaptive gplan then choose cplan
+set enable_pbe_optimization = off;
+create table t_adapt(c1 int,c2 varchar,c3 text) ;
+insert into t_adapt values(generate_series(1, 1000),generate_series(1, 1000),generate_series(1, 100));
+create index ind_adapt on t_adapt(c2,c3);
+analyze t_adapt;
+
+prepare s_adapt as select /*+ choose_adaptive_gplan */ t1.c1,max(t2.c3) from t_adapt t1 join (select /*+ choose_adaptive_gplan */ * from t_adapt where c1=$1 and c2 = $2) t2 on t1.c1 = t2.c1 where t2.c2 in (select c2 from t_adapt t3 where t3.c2 = $1 and t1.c1 = t3.c1 ) and t1.c3 = $2 group by 1 order by 1,2;
+--execute with index 5 times
+execute s_adapt(1,1);
+execute s_adapt(1,1);
+execute s_adapt(1,1);
+execute s_adapt(1,1);
+execute s_adapt(1,1);
+
+--drop index
+drop index ind_adapt;
+
+--sixth execute, generate adaptive plan but costs higher than average cplan costs
+execute s_adapt(1,1);
+
+deallocate s_adapt;
+set enable_pbe_optimization = default;
+
 --------------------------------------------------------------------
 ---cleaning up
 drop table t0;
 drop table t1;
 drop table tt1;
 drop table tt2;
+drop table t_adapt;
 
 drop schema spm_adaptive_gplan cascade;
 reset current_schema;

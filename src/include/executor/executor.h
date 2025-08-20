@@ -172,6 +172,8 @@ ScanState* search_plan_tree(PlanState* node, Oid table_oid);
 /*
  * prototypes from functions in execGrouping.c
  */
+extern bool compareTuplesNotDistinct(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
+                                     FmgrInfo* eqfunctions, Oid* collations);
 extern bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
     FmgrInfo* eqfunctions, MemoryContext evalContext, Oid *collations);
 extern bool execTuplesUnequal(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
@@ -663,7 +665,7 @@ extern Partition ExecOpenScanParitition(
 
 extern void ExecOpenUnusedIndices(ResultRelInfo* resultRelInfo, bool speculative);
 extern void ExecCloseUnsedIndices(ResultRelInfo* resultRelInfo);
-extern void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative);
+extern void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative, bool checkDisableIndex = true);
 extern void ExecCloseIndices(ResultRelInfo* resultRelInfo);
 extern List* ExecInsertIndexTuples(
     TupleTableSlot* slot, ItemPointer tupleid, EState* estate, Relation targetPartRel,

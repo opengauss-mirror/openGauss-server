@@ -307,4 +307,12 @@ SELECT * FROM tonumber_exec ORDER BY c1;
 DROP TABLE tonumber;
 DROP TABLE tonumber_exec;
 
+select to_number('123','0000.0000');
+select to_number('123','000.0000');
+select to_number('123','00.0000');
+select to_number('123.12','000.0000');
+select to_number('123','0000');
+select to_number('0123456789','000000000.0000');
+select to_number('0123456789','00000000000.0000');
+
 drop schema if exists func_to_number cascade;

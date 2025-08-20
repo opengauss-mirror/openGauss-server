@@ -68,4 +68,9 @@ extern TargetEntry* get_tle_by_resno(List* tlist, AttrNumber resno);
  */
 extern RowMarkClause* get_parse_rowmark(Query* qry, Index rtindex);
 
+/*
+ * Given an RTE of a subquery and an attribute name, return all possible
+ * attribute numer as a List for that attribute of that RTE.
+ */
+extern List* getSubqueryRteAttnum(RangeTblEntry* rte, const char* attname);
 #endif /* PARSETREE_H */

@@ -527,6 +527,8 @@ typedef struct ErrorData {
     char* hint;            /* hint message */
     char* context;         /* context message */
     int cursorpos;         /* cursor index into query string */
+    char* plpgsqlProcedure;
+    int plpgsqlLine;      /* the line number inside the routine that caused the error */
     int internalpos;       /* cursor index into internalquery */
     char* internalquery;   /* text of internally-generated query */
     int saved_errno;       /* errno at entry */
@@ -682,6 +684,8 @@ extern void write_stderr_with_prefix(const char* fmt, ...)
 extern void getElevelAndSqlstate(int* eLevel, int* sqlState);
 extern void get_time_now(char* nowTime, int timeLen);
 void freeSecurityFuncSpace(const char* charList, ...);
+extern void ErrPlpgsqlProcedure(const char* plpgsqlProcedure);
+extern void ErrPlpgsqlLine(int plpgsqlLine);
 
 extern void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));

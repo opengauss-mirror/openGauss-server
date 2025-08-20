@@ -645,7 +645,8 @@ void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *p
                                   uint16 *pqOffsetblk, uint32 *pqOffsetSize);
 void DiskAnnFlushPQInfo(DiskAnnBuildState* buildstate);
 void FreeDiskPQParams(DiskPQParams *params);
-DiskPQParams* InitDiskPQParamsOnDisk(Relation index, FmgrInfo *procinfo, int dim, bool enablePQ);
+DiskPQParams* InitDiskPQParamsOnDisk(Relation index, FmgrInfo *procinfo, int dim, bool enablePQ,
+    bool needOrigTable = false);
 
 template <typename dataT>
 void DiskAnnFlushPQInfoInternal(Relation index, dataT* data, BlockNumber startBlkno, uint16 nblks, uint32 totalSize)

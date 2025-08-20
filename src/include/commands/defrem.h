@@ -211,7 +211,7 @@ extern Oid GetFunctionNodeGroup(CreateFunctionStmt* stmt, bool* multi_group);
 extern List* compute_attributes_sql_style(const List* options, List** as, char** language,
     bool* windowfunc_p, char* volatility_p, bool* strict_p, bool* security_definer, bool* leakproof_p,
     ArrayType** proconfig, float* procost, float4* prorows, bool* fenced,
-    bool* shippable, bool* package, bool* is_pipelined, FunctionPartitionInfo** partInfo);
+    bool* shippable, bool* package, bool* is_pipelined, FunctionPartitionInfo** partInfo, bool* resultCache);
 extern Oid GetFunctionNodeGroupByFuncid(Oid funcid);
 extern Oid GetFunctionNodeGroup(AlterFunctionStmt* stmt);
 

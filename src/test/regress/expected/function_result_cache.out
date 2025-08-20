@@ -1,0 +1,1951 @@
+create schema func_result_cache;
+set search_path to func_result_cache;
+set enable_func_cache=on;
+set datestyle='ISO, MDY';
+\set VERBOSITY terse
+-- all support datatype
+create table all_support_type(
+  id int,
+  col_bool bool,
+  col_smallint smallint,
+  col_int int,
+  col_bigint bigint,
+  col_float float,
+  col_double_precision double precision,
+  col_char char(20),
+  col_varchar varchar(20),
+  col_varchar2 varchar2(20),
+  col_time time,
+  col_timetz timetz,
+  col_date date,
+  col_timestamp timestamp,
+  col_timestamptz timestamptz,
+  col_numeric numeric,
+  col_number number,
+  col_text text
+);
+insert into all_support_type values(
+    generate_series(1,1000),
+    generate_series(1,1000) % 2,
+    generate_series(1,1000) % 5,
+    generate_series(1,1000) % 5,
+    generate_series(1,1000) % 5,
+    generate_series(1,1000) % 5,
+    generate_series(1,1000) % 5,
+    generate_series(1,1000) % 10 || '_haha',
+    generate_series(1,1000) % 10 || '_haha',
+    generate_series(1,1000) % 10 || '_haha',
+    '18:13:49.579082',
+    '18:13:49.579082',
+    '2024-11-22',
+    '2024-11-22 16:36:45',
+    '2024-11-22 16:36:45',
+    generate_series(1,1000) % 5,
+    generate_series(1,1000) % 5,
+    generate_series(1,1000) % 10 || '_haha'
+);
+insert into all_support_type values(1001,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null);
+insert into all_support_type values(1002,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null);
+-- 无参函数
+create or replace function func_no_param() returns int as $$
+begin
+  return 1;
+end;
+$$ language plpgsql stable result_cache;
+explain (costs off, analyze, timing off) select func_no_param() from all_support_type;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+create or replace function func_bool(p bool) returns bool as $$
+begin
+  raise notice 'param:%', p;
+  return p;
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_smallint(p smallint) returns smallint as $$
+begin
+  if p = 1 then
+    raise notice 'param:%', p;
+  end if;
+  return p+1;
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_int(p int) returns int as $$
+begin
+  if p = 1 then
+    raise notice 'param:%', p;
+  end if;
+  return p*2;
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_bigint(p bigint) returns bigint as $$
+begin
+  if p = 1 then
+    raise notice 'param:%', p;
+  end if;
+  return p*2+1;
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_float(p float) returns float as $$
+begin
+  if p = 1 then
+    raise notice 'param:%', p;
+  end if;
+  return p*2+1;
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_double_precision(p double precision) returns double precision as $$
+begin
+  if p = 1 then
+    raise notice 'param:%', p;
+  end if;
+  return p*2-1;
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_char(p char) returns char as $$
+begin
+  if p = '1_haha              ' then
+    raise notice 'param:%', p;
+  end if;
+  return p||'_char';
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_varchar(p varchar) returns varchar as $$
+begin
+  if p = '1_haha' then
+    raise notice 'param:%', p;
+  end if;
+  return p||'_varchar';
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_varchar2(p varchar2) returns varchar2 as $$
+begin
+  if p = '1_haha' then
+    raise notice 'param:%', p;
+  end if;
+  return p||'_varchar2';
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_time(p time) returns time as $$
+begin
+  raise notice 'param:%', p;
+  return p + interval '1 hour';
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_timetz(p timetz) returns timetz as $$
+begin
+  raise notice 'param:%', p;
+  return p + interval '1 hour';
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_date(p date) returns date as $$
+begin
+  raise notice 'param:%', p;
+  return p + interval '1 day';
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_timestamp(p timestamp) returns timestamp as $$
+begin
+  raise notice 'param:%', p;
+  return p + interval '1 day';
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_timestamptz(p timestamptz) returns timestamptz as $$
+begin
+  raise notice 'param:%', p;
+  return p + interval '1 day';
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_numeric(p numeric) returns numeric as $$
+begin
+  if p = 1 then
+    raise notice 'param:%', p;
+  end if;
+  return p - 1;
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_number(p number) returns number as $$
+begin
+  if p = 1 then
+    raise notice 'param:%', p;
+  end if;
+  return p * 4;
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_text(p text) returns text as $$
+begin
+  if p = '1_haha' then
+    raise notice 'param:%', p;
+  end if;
+  return p||'_text';
+end;
+$$ language plpgsql stable result_cache;
+-- targetlist存在单个函数
+explain (costs off, analyze, timing off) select col_bool, func_bool(col_bool) from all_support_type;
+NOTICE:  param:t
+NOTICE:  param:f
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_smallint, func_smallint(col_smallint) from all_support_type;
+NOTICE:  param:1
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_int, func_int(col_int) from all_support_type;
+NOTICE:  param:1
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_bigint, func_bigint(col_bigint) from all_support_type;
+NOTICE:  param:1
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_float, func_float(col_float) from all_support_type;
+NOTICE:  param:1
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_double_precision, func_double_precision(col_double_precision) from all_support_type;
+NOTICE:  param:1
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_char, func_char(col_char) from all_support_type;
+NOTICE:  param:1_haha              
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_varchar, func_varchar(col_varchar) from all_support_type;
+NOTICE:  param:1_haha
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_varchar2, func_varchar2(col_varchar2) from all_support_type;
+NOTICE:  param:1_haha
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_time, func_time(col_time) from all_support_type;
+NOTICE:  param:18:13:49.579082
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_timetz, func_timetz(col_timetz) from all_support_type limit 10; --not support
+--?NOTICE:  param:18:13:49.579082-.*
+--?NOTICE:  param:18:13:49.579082-.*
+--?NOTICE:  param:18:13:49.579082-.*
+--?NOTICE:  param:18:13:49.579082-.*
+--?NOTICE:  param:18:13:49.579082-.*
+--?NOTICE:  param:18:13:49.579082-.*
+--?NOTICE:  param:18:13:49.579082-.*
+--?NOTICE:  param:18:13:49.579082-.*
+--?NOTICE:  param:18:13:49.579082-.*
+--?NOTICE:  param:18:13:49.579082-.*
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Limit (actual rows=10 loops=1)
+   ->  Seq Scan on all_support_type (actual rows=10 loops=1)
+--? Total runtime: .*
+(3 rows)
+
+explain (costs off, analyze, timing off) select col_date, func_date(col_date) from all_support_type;
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_timestamp, func_timestamp(col_timestamp) from all_support_type;
+NOTICE:  param:2024-11-22 16:36:45
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_timestamptz, func_timestamptz(col_timestamptz) from all_support_type;
+NOTICE:  param:2024-11-22 16:36:45-08
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_numeric, func_numeric(col_numeric) from all_support_type;
+NOTICE:  param:1
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_number, func_number(col_number) from all_support_type;
+NOTICE:  param:1
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) select col_text, func_text(col_text) from all_support_type;
+NOTICE:  param:1_haha
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+-- targetlist存在多个函数
+-- 2个
+explain (costs off, analyze, timing off)
+select
+  col_bool, func_bool(col_bool),
+  col_smallint, func_smallint(col_smallint)
+from all_support_type;
+NOTICE:  param:t
+NOTICE:  param:1
+NOTICE:  param:f
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+-- 4个
+explain (costs off, analyze, timing off)
+select
+  col_int, func_int(col_int),
+  col_bigint, func_bigint(col_bigint),
+  col_float, func_float(col_float),
+  col_double_precision, func_double_precision(col_double_precision)
+from all_support_type;
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+-- 8个
+explain (costs off, analyze, timing off)
+select
+  col_int, func_int(col_int),
+  col_bigint, func_bigint(col_bigint),
+  col_float, func_float(col_float),
+  col_double_precision, func_double_precision(col_double_precision),
+  col_char, func_char(col_char),
+  col_varchar, func_varchar(col_varchar),
+  col_varchar2, func_varchar2(col_varchar2),
+  col_timestamp, func_timestamp(col_timestamp)
+from all_support_type;
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1_haha              
+NOTICE:  param:1_haha
+NOTICE:  param:1_haha
+NOTICE:  param:2024-11-22 16:36:45
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+-- 11个
+explain (costs off, analyze, timing off)
+select
+  col_int, func_int(col_int),
+  col_bigint, func_bigint(col_bigint),
+  col_float, func_float(col_float),
+  col_double_precision, func_double_precision(col_double_precision),
+  col_char, func_char(col_char),
+  col_varchar, func_varchar(col_varchar),
+  col_varchar2, func_varchar2(col_varchar2),
+  col_timestamp, func_timestamp(col_timestamp),
+  col_numeric, func_numeric(col_numeric),
+  col_number, func_number(col_number),
+  col_text, func_text(col_text)
+from all_support_type;
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1_haha              
+NOTICE:  param:1_haha
+NOTICE:  param:1_haha
+NOTICE:  param:2024-11-22 16:36:45
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1_haha
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+-- 15个, 限制了最多缓存14个函数的结果
+explain (costs off, analyze, timing off)
+select
+  col_bool, func_bool(col_bool),
+  col_int, func_int(col_int),
+  col_bigint, func_bigint(col_bigint),
+  col_float, func_float(col_float),
+  col_double_precision, func_double_precision(col_double_precision),
+  col_char, func_char(col_char),
+  col_varchar, func_varchar(col_varchar),
+  col_varchar2, func_varchar2(col_varchar2),
+  col_time, func_time(col_time),
+  col_timestamp, func_timestamp(col_timestamp),
+  col_timestamptz, func_timestamptz(col_timestamptz),
+  col_numeric, func_numeric(col_numeric),
+  col_number, func_number(col_number),
+  col_text, func_text(col_text),
+  col_date, func_date(col_date)
+from all_support_type limit 20;
+NOTICE:  param:t
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1_haha              
+NOTICE:  param:1_haha
+NOTICE:  param:1_haha
+NOTICE:  param:18:13:49.579082
+NOTICE:  param:2024-11-22 16:36:45
+NOTICE:  param:2024-11-22 16:36:45-08
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1_haha
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:f
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+NOTICE:  param:2024-11-22 00:00:00
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Limit (actual rows=20 loops=1)
+   ->  Seq Scan on all_support_type (actual rows=20 loops=1)
+--? Total runtime: .*
+(3 rows)
+
+-- targetlist存在多个相同的函数
+-- 2个
+explain (costs off, analyze, timing off)
+select
+  col_bool, func_bool(col_bool),
+  func_bool(col_bool)
+from all_support_type;
+NOTICE:  param:t
+NOTICE:  param:f
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+-- 4个
+explain (costs off, analyze, timing off)
+select
+  col_bool, func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool)
+from all_support_type;
+NOTICE:  param:t
+NOTICE:  param:f
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+-- 8个
+explain (costs off, analyze, timing off)
+select
+  col_bool, func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool)
+from all_support_type;
+NOTICE:  param:t
+NOTICE:  param:f
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+-- 大于8个
+explain (costs off, analyze, timing off)
+select
+  col_bool, func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool),
+  func_bool(col_bool)
+from all_support_type;
+NOTICE:  param:t
+NOTICE:  param:f
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+-- 函数有多个IN参数
+-- 2个
+create or replace function func_bool_multi(p1 bool, p2 bool) returns int as $$
+begin
+  raise notice 'param:%,%', p1, p2;
+  if (p1 is null and p2 is null) then
+    return 1;
+  elsif (p1 is null and p2 is not null) then 
+    return 2;
+  elsif (p1 is not null and p2 is null) then 
+    return 3;
+  end if;
+  return 4;
+end;
+$$ language plpgsql stable result_cache;
+explain (costs off, analyze, timing off) select col_bool,func_bool_multi(col_bool,col_bool) from all_support_type;
+NOTICE:  param:t,t
+NOTICE:  param:f,f
+NOTICE:  param:<NULL>,<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+create table multi_col(
+  id int,
+  col1 int,
+  col2 int,
+  col3 int,
+  col4 int,
+  col5 int,
+  col6 int,
+  col7 int,
+  col8 int,
+  col9 int,
+  col10 int,
+  col11 int,
+  col12 int,
+  col13 int,
+  col14 int,
+  col15 int,
+  col16 int
+);
+insert into multi_col values(
+  generate_series(1,20),
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5,
+  generate_series(1,20) % 5
+);
+insert into multi_col values(generate_series(21,22),null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null);
+-- 3个
+create or replace function func_int_multi(p1 int, p2 int, p3 int) returns int as $$
+begin
+  raise notice 'param:%,%,%', p1, p2, p3;
+  return p1+p2+p3;
+end;
+$$ language plpgsql stable result_cache;
+select col1,col2,col3,func_int_multi(col1,col2,col3) from multi_col;
+NOTICE:  param:1,1,1
+NOTICE:  param:2,2,2
+NOTICE:  param:3,3,3
+NOTICE:  param:4,4,4
+NOTICE:  param:0,0,0
+NOTICE:  param:<NULL>,<NULL>,<NULL>
+ col1 | col2 | col3 | func_int_multi 
+------+------+------+----------------
+    1 |    1 |    1 |              3
+    2 |    2 |    2 |              6
+    3 |    3 |    3 |              9
+    4 |    4 |    4 |             12
+    0 |    0 |    0 |              0
+    1 |    1 |    1 |              3
+    2 |    2 |    2 |              6
+    3 |    3 |    3 |              9
+    4 |    4 |    4 |             12
+    0 |    0 |    0 |              0
+    1 |    1 |    1 |              3
+    2 |    2 |    2 |              6
+    3 |    3 |    3 |              9
+    4 |    4 |    4 |             12
+    0 |    0 |    0 |              0
+    1 |    1 |    1 |              3
+    2 |    2 |    2 |              6
+    3 |    3 |    3 |              9
+    4 |    4 |    4 |             12
+    0 |    0 |    0 |              0
+      |      |      |               
+      |      |      |               
+(22 rows)
+
+-- 7个
+create or replace function func_int_multi1(p1 int, p2 int, p3 int, p4 int, p5 int, p6 int, p7 int) returns int as $$
+begin
+  raise notice 'param:%,%,%,%,%,%,%', p1, p2, p3, p4, p5, p6, p7;
+  return p1+p2+p3+p4+p5+p6+p7;
+end;
+$$ language plpgsql stable result_cache;
+select col1,col2,col3,col4,col5,col6,col7,func_int_multi1(col1,col2,col3,col4,col5,col6,col7) from multi_col;
+NOTICE:  param:1,1,1,1,1,1,1
+NOTICE:  param:2,2,2,2,2,2,2
+NOTICE:  param:3,3,3,3,3,3,3
+NOTICE:  param:4,4,4,4,4,4,4
+NOTICE:  param:0,0,0,0,0,0,0
+NOTICE:  param:<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>
+ col1 | col2 | col3 | col4 | col5 | col6 | col7 | func_int_multi1 
+------+------+------+------+------+------+------+-----------------
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |               7
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |              14
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |              21
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |              28
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |               7
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |              14
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |              21
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |              28
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |               7
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |              14
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |              21
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |              28
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |               7
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |              14
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |              21
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |              28
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |               0
+      |      |      |      |      |      |      |                
+      |      |      |      |      |      |      |                
+(22 rows)
+
+-- 10个
+create or replace function func_int_multi2(p1 int, p2 int, p3 int, p4 int, p5 int, p6 int, p7 int,
+  p8 int, p9 int, p10 int)
+returns int as $$
+begin
+  raise notice 'param:%,%,%,%,%,%,%,%,%,%', p1, p2, p3, p4, p5, p6, p7, p8, p9, p10;
+  return p1+p2+p3+p4+p5+p6+p7+p8+p9+p10;
+end;
+$$ language plpgsql stable result_cache;
+select col1,col2,col3,col4,col5,col6,col7,col8,col9,col10,
+  func_int_multi2(col1,col2,col3,col4,col5,col6,col7,col8,col9,col10) from multi_col;
+NOTICE:  param:1,1,1,1,1,1,1,1,1,1
+NOTICE:  param:2,2,2,2,2,2,2,2,2,2
+NOTICE:  param:3,3,3,3,3,3,3,3,3,3
+NOTICE:  param:4,4,4,4,4,4,4,4,4,4
+NOTICE:  param:0,0,0,0,0,0,0,0,0,0
+NOTICE:  param:<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>
+ col1 | col2 | col3 | col4 | col5 | col6 | col7 | col8 | col9 | col10 | func_int_multi2 
+------+------+------+------+------+------+------+------+------+-------+-----------------
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |              10
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |              20
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |              30
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |              40
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |              10
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |              20
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |              30
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |              40
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |              10
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |              20
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |              30
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |              40
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |              10
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |              20
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |              30
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |              40
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |               0
+      |      |      |      |      |      |      |      |      |       |                
+      |      |      |      |      |      |      |      |      |       |                
+(22 rows)
+
+-- 16个
+create or replace function func_int_multi3(p1 int, p2 int, p3 int, p4 int, p5 int, p6 int, p7 int,
+  p8 int, p9 int, p10 int, p11 int, p12 int, p13 int, p14 int, p15 int, p16 int)
+returns int as $$
+begin
+  raise notice 'param:%,%,%,%,%,%,%,%,%,%,%,%,%,%,%,%', p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16;
+  return p1+p2+p3+p4+p5+p6+p7+p8+p9+p10+p11+p12+p13+p14+p15+p16;
+end;
+$$ language plpgsql stable result_cache;
+select col1,col2,col3,col4,col5,col6,col7,col8,col9,col10,col11,col12,col13,col14,col15,col16,
+  func_int_multi3(col1,col2,col3,col4,col5,col6,col7,col8,col9,col10,col11,col12,col13,col14,col15,col16) from multi_col;
+NOTICE:  param:1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+NOTICE:  param:2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2
+NOTICE:  param:3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3
+NOTICE:  param:4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
+NOTICE:  param:0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+NOTICE:  param:<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>
+ col1 | col2 | col3 | col4 | col5 | col6 | col7 | col8 | col9 | col10 | col11 | col12 | col13 | col14 | col15 | col16 | func_int_multi3 
+------+------+------+------+------+------+------+------+------+-------+-------+-------+-------+-------+-------+-------+-----------------
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |     1 |     1 |     1 |     1 |     1 |     1 |              16
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |     2 |     2 |     2 |     2 |     2 |     2 |              32
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |     3 |     3 |     3 |     3 |     3 |     3 |              48
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |     4 |     4 |     4 |     4 |     4 |     4 |              64
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |     0 |     0 |     0 |     0 |     0 |     0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |     1 |     1 |     1 |     1 |     1 |     1 |              16
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |     2 |     2 |     2 |     2 |     2 |     2 |              32
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |     3 |     3 |     3 |     3 |     3 |     3 |              48
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |     4 |     4 |     4 |     4 |     4 |     4 |              64
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |     0 |     0 |     0 |     0 |     0 |     0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |     1 |     1 |     1 |     1 |     1 |     1 |              16
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |     2 |     2 |     2 |     2 |     2 |     2 |              32
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |     3 |     3 |     3 |     3 |     3 |     3 |              48
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |     4 |     4 |     4 |     4 |     4 |     4 |              64
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |     0 |     0 |     0 |     0 |     0 |     0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |     1 |     1 |     1 |     1 |     1 |     1 |              16
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |     2 |     2 |     2 |     2 |     2 |     2 |              32
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |     3 |     3 |     3 |     3 |     3 |     3 |              48
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |     4 |     4 |     4 |     4 |     4 |     4 |              64
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |     0 |     0 |     0 |     0 |     0 |     0 |               0
+      |      |      |      |      |      |      |      |      |       |       |       |       |       |       |       |                
+      |      |      |      |      |      |      |      |      |       |       |       |       |       |       |       |                
+(22 rows)
+
+-- 函数参数大于16, 不支持缓存
+create or replace function func_int_multi4(p1 int, p2 int, p3 int, p4 int, p5 int, p6 int, p7 int,
+  p8 int, p9 int, p10 int, p11 int, p12 int, p13 int, p14 int, p15 int, p16 int, p17 int)
+returns int as $$
+begin
+  raise notice 'param:%,%,%,%,%,%,%,%,%,%,%,%,%,%,%,%,%', p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17;
+  return p1+p2+p3+p4+p5+p6+p7+p8+p9+p10+p11+p12+p13+p14+p15+p16;
+end;
+$$ language plpgsql stable result_cache;
+select col1,col2,col3,col4,col5,col6,col7,col8,col9,col10,col11,col12,col13,col14,col15,col16,
+  func_int_multi4(col1,col2,col3,col4,col5,col6,col7,col8,col9,col10,col11,col12,col13,col14,col15,col16,col16) from multi_col;
+NOTICE:  param:1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+NOTICE:  param:2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2
+NOTICE:  param:3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3
+NOTICE:  param:4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
+NOTICE:  param:0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+NOTICE:  param:1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+NOTICE:  param:2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2
+NOTICE:  param:3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3
+NOTICE:  param:4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
+NOTICE:  param:0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+NOTICE:  param:1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+NOTICE:  param:2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2
+NOTICE:  param:3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3
+NOTICE:  param:4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
+NOTICE:  param:0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+NOTICE:  param:1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+NOTICE:  param:2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2
+NOTICE:  param:3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3
+NOTICE:  param:4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
+NOTICE:  param:0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+NOTICE:  param:<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>
+NOTICE:  param:<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>,<NULL>
+ col1 | col2 | col3 | col4 | col5 | col6 | col7 | col8 | col9 | col10 | col11 | col12 | col13 | col14 | col15 | col16 | func_int_multi4 
+------+------+------+------+------+------+------+------+------+-------+-------+-------+-------+-------+-------+-------+-----------------
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |     1 |     1 |     1 |     1 |     1 |     1 |              16
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |     2 |     2 |     2 |     2 |     2 |     2 |              32
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |     3 |     3 |     3 |     3 |     3 |     3 |              48
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |     4 |     4 |     4 |     4 |     4 |     4 |              64
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |     0 |     0 |     0 |     0 |     0 |     0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |     1 |     1 |     1 |     1 |     1 |     1 |              16
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |     2 |     2 |     2 |     2 |     2 |     2 |              32
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |     3 |     3 |     3 |     3 |     3 |     3 |              48
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |     4 |     4 |     4 |     4 |     4 |     4 |              64
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |     0 |     0 |     0 |     0 |     0 |     0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |     1 |     1 |     1 |     1 |     1 |     1 |              16
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |     2 |     2 |     2 |     2 |     2 |     2 |              32
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |     3 |     3 |     3 |     3 |     3 |     3 |              48
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |     4 |     4 |     4 |     4 |     4 |     4 |              64
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |     0 |     0 |     0 |     0 |     0 |     0 |               0
+    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |    1 |     1 |     1 |     1 |     1 |     1 |     1 |     1 |              16
+    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |    2 |     2 |     2 |     2 |     2 |     2 |     2 |     2 |              32
+    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |    3 |     3 |     3 |     3 |     3 |     3 |     3 |     3 |              48
+    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |    4 |     4 |     4 |     4 |     4 |     4 |     4 |     4 |              64
+    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |     0 |     0 |     0 |     0 |     0 |     0 |     0 |               0
+      |      |      |      |      |      |      |      |      |       |       |       |       |       |       |       |                
+      |      |      |      |      |      |      |      |      |       |       |       |       |       |       |       |                
+(22 rows)
+
+drop function if exists func_int_multi;
+drop function if exists func_int_multi1;
+drop function if exists func_int_multi2;
+drop function if exists func_int_multi3;
+drop function if exists func_int_multi4;
+create table testbool(col1 bool,col2 bool);
+insert into testbool values(0,0),(0,1),(1,0),(1,1),(null,0),(null,1),(0,null),(1,null),(null,null);
+insert into testbool select * from testbool;
+-- 输入是常量
+select func_bool(0) from testbool;
+NOTICE:  param:f
+ func_bool 
+-----------
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(18 rows)
+
+select func_bool(1) from testbool;
+NOTICE:  param:t
+ func_bool 
+-----------
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+(18 rows)
+
+select func_bool(null) from testbool;
+NOTICE:  param:<NULL>
+ func_bool 
+-----------
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+(18 rows)
+
+select func_bool_multi(0,0) from testbool;
+NOTICE:  param:f,f
+ func_bool_multi 
+-----------------
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+(18 rows)
+
+select func_bool_multi(0,1) from testbool;
+NOTICE:  param:f,t
+ func_bool_multi 
+-----------------
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+               4
+(18 rows)
+
+select func_bool_multi(null,0) from testbool;
+NOTICE:  param:<NULL>,f
+ func_bool_multi 
+-----------------
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+               2
+(18 rows)
+
+select func_bool_multi(1,null) from testbool;
+NOTICE:  param:t,<NULL>
+ func_bool_multi 
+-----------------
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+               3
+(18 rows)
+
+-- null 值是否缓存
+select col1,func_bool(col1) from testbool;
+NOTICE:  param:f
+NOTICE:  param:t
+NOTICE:  param:<NULL>
+ col1 | func_bool 
+------+-----------
+ f    | f
+ f    | f
+ t    | t
+ t    | t
+      | 
+      | 
+ f    | f
+ t    | t
+      | 
+ f    | f
+ f    | f
+ t    | t
+ t    | t
+      | 
+      | 
+ f    | f
+ t    | t
+      | 
+(18 rows)
+
+select col1,col2,func_bool_multi(col1,col2) from testbool;
+NOTICE:  param:f,f
+NOTICE:  param:f,t
+NOTICE:  param:t,f
+NOTICE:  param:t,t
+NOTICE:  param:<NULL>,f
+NOTICE:  param:<NULL>,t
+NOTICE:  param:f,<NULL>
+NOTICE:  param:t,<NULL>
+NOTICE:  param:<NULL>,<NULL>
+ col1 | col2 | func_bool_multi 
+------+------+-----------------
+ f    | f    |               4
+ f    | t    |               4
+ t    | f    |               4
+ t    | t    |               4
+      | f    |               2
+      | t    |               2
+ f    |      |               3
+ t    |      |               3
+      |      |               1
+ f    | f    |               4
+ f    | t    |               4
+ t    | f    |               4
+ t    | t    |               4
+      | f    |               2
+      | t    |               2
+ f    |      |               3
+ t    |      |               3
+      |      |               1
+(18 rows)
+
+drop table testbool;
+-- 函数嵌套
+create table testtab(id int);
+insert into testtab values(generate_series(1,10) % 2);
+-- 1. plsql嵌套调用result_cache函数
+create or replace function func_int_output(p int) returns int as $$
+begin
+  raise notice 'func_int_output param:%', p;
+  return p*2;
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_text_return(p int) returns text
+as $$
+begin
+  raise notice 'func_text_return param:%', p;
+  return p||'_text';
+end;
+$$ language plpgsql stable result_cache;
+create or replace function func_top(p int) returns text
+as $$
+declare
+  cursor c1 for select func_int_output(id) as id from testtab where id=p;  -- cursor中调用函数
+  r1 record;
+  ret text = 'base_';
+begin
+  for r1 in c1 loop
+    ret = ret || func_text_return(r1.id);
+  end loop;
+  return ret;
+end;
+$$ language plpgsql;
+select id,func_top(id) from testtab;
+NOTICE:  func_int_output param:1
+NOTICE:  func_text_return param:2
+NOTICE:  func_int_output param:0
+NOTICE:  func_text_return param:0
+ id |              func_top               
+----+-------------------------------------
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+(10 rows)
+
+-- DECLARE CURSOR command
+START TRANSACTION;
+DECLARE cursor1 CURSOR  FOR select id,func_top(id) from testtab;
+FETCH FORWARD 1 FROM cursor1;
+NOTICE:  func_int_output param:1
+NOTICE:  func_text_return param:2
+ id |              func_top               
+----+-------------------------------------
+  1 | base_2_text2_text2_text2_text2_text
+(1 row)
+
+FETCH FORWARD 1 FROM cursor1;
+NOTICE:  func_int_output param:0
+NOTICE:  func_text_return param:0
+ id |              func_top               
+----+-------------------------------------
+  0 | base_0_text0_text0_text0_text0_text
+(1 row)
+
+FETCH FORWARD 1 FROM cursor1;
+ id |              func_top               
+----+-------------------------------------
+  1 | base_2_text2_text2_text2_text2_text
+(1 row)
+
+FETCH FORWARD 1 FROM cursor1;
+ id |              func_top               
+----+-------------------------------------
+  0 | base_0_text0_text0_text0_text0_text
+(1 row)
+
+FETCH FORWARD 1 FROM cursor1;
+ id |              func_top               
+----+-------------------------------------
+  1 | base_2_text2_text2_text2_text2_text
+(1 row)
+
+FETCH FORWARD 1 FROM cursor1;
+ id |              func_top               
+----+-------------------------------------
+  0 | base_0_text0_text0_text0_text0_text
+(1 row)
+
+FETCH FORWARD 1 FROM cursor1;
+ id |              func_top               
+----+-------------------------------------
+  1 | base_2_text2_text2_text2_text2_text
+(1 row)
+
+FETCH FORWARD 1 FROM cursor1;
+ id |              func_top               
+----+-------------------------------------
+  0 | base_0_text0_text0_text0_text0_text
+(1 row)
+
+FETCH FORWARD 1 FROM cursor1;
+ id |              func_top               
+----+-------------------------------------
+  1 | base_2_text2_text2_text2_text2_text
+(1 row)
+
+FETCH FORWARD 1 FROM cursor1;
+ id |              func_top               
+----+-------------------------------------
+  0 | base_0_text0_text0_text0_text0_text
+(1 row)
+
+CLOSE cursor1;
+END;
+START TRANSACTION;
+DECLARE cursor1 CURSOR  FOR select id,func_top(id) from testtab;
+FETCH ALL FROM cursor1;
+NOTICE:  func_int_output param:1
+NOTICE:  func_text_return param:2
+NOTICE:  func_int_output param:0
+NOTICE:  func_text_return param:0
+ id |              func_top               
+----+-------------------------------------
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+(10 rows)
+
+CLOSE cursor1;
+END;
+-- smp/parallel 并行,不支持
+-- opfusion不支持输出列带函数的语句
+create index testtab_id_idx on testtab(id);
+set enable_seqscan=off;
+set opfusion_debug_mode='log';
+explain (costs off, analyze, timing off) select id,func_top(id) from testtab where id=1;
+NOTICE:  func_int_output param:1
+NOTICE:  func_text_return param:2
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used the target list which only contains table's column.
+ Index Only Scan using testtab_id_idx on testtab (actual rows=5 loops=1)
+   Index Cond: (id = 1)
+   Heap Fetches: 5
+--? Total runtime: .*
+(5 rows)
+
+reset opfusion_debug_mode;
+reset enable_seqscan;
+drop index testtab_id_idx;
+-- 2. result_cache函数嵌套调用result_cache函数
+create or replace function func_top(p int) returns text
+as $$
+declare
+  cursor c1 for select func_int_output(id) as id from testtab where id=p;  -- cursor中调用函数
+  r1 record;
+  ret text = 'base_';
+begin
+  raise notice 'top param:%', p;
+  for r1 in c1 loop
+    ret = ret || func_text_return(r1.id);
+  end loop;
+  return ret;
+end;
+$$ language plpgsql stable result_cache;
+select id,func_top(id) from testtab;
+NOTICE:  top param:1
+NOTICE:  func_int_output param:1
+NOTICE:  func_text_return param:2
+NOTICE:  top param:0
+NOTICE:  func_int_output param:0
+NOTICE:  func_text_return param:0
+ id |              func_top               
+----+-------------------------------------
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+  1 | base_2_text2_text2_text2_text2_text
+  0 | base_0_text0_text0_text0_text0_text
+(10 rows)
+
+drop function if exists func_top;
+drop function if exists func_int_output;
+drop function if exists func_text_return;
+-- 3. 函数自嵌套
+CREATE OR REPLACE FUNCTION fibonacci (n bigint)
+ RETURN bigint
+ STABLE
+ RESULT_CACHE
+IS
+BEGIN
+  raise notice 'param:%', n;
+  IF (n =0) OR (n =1) THEN
+    RETURN 1;
+  ELSE
+    RETURN fibonacci(n - 1) + fibonacci(n - 2);
+  END IF;
+END;
+/
+select fibonacci(10);
+NOTICE:  param:10
+NOTICE:  param:9
+NOTICE:  param:8
+NOTICE:  param:7
+NOTICE:  param:6
+NOTICE:  param:5
+NOTICE:  param:4
+NOTICE:  param:3
+NOTICE:  param:2
+NOTICE:  param:1
+NOTICE:  param:0
+ fibonacci 
+-----------
+        89
+(1 row)
+
+truncate testtab;
+insert into testtab values(10),(0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11);
+select id,fibonacci(id) from testtab;
+NOTICE:  param:10
+NOTICE:  param:9
+NOTICE:  param:8
+NOTICE:  param:7
+NOTICE:  param:6
+NOTICE:  param:5
+NOTICE:  param:4
+NOTICE:  param:3
+NOTICE:  param:2
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:11
+ id | fibonacci 
+----+-----------
+ 10 |        89
+  0 |         1
+  1 |         1
+  2 |         2
+  3 |         3
+  4 |         5
+  5 |         8
+  6 |        13
+  7 |        21
+  8 |        34
+  9 |        55
+ 10 |        89
+ 11 |       144
+(13 rows)
+
+drop function if exists fibonacci;
+-- 缓存失效: 模拟数据百分比
+-- 函数调用次数>2560时, 判断缓存命中率是否<15%, 如果小于则失效
+truncate testtab;
+insert into testtab values (generate_series(1,10000) % 5);
+explain (costs off, analyze, timing off) select func_int(id) from testtab;
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+prepare test as select func_int(id) from testtab;
+explain (costs off, analyze, timing off) execute test;
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) execute test;
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) execute test;
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+deallocate test;
+truncate testtab;
+insert into testtab values (generate_series(1,10000) % 500);
+explain (costs off, analyze, timing off) select func_int(id) from testtab;
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+prepare test as select func_int(id) from testtab;
+explain (costs off, analyze, timing off) execute test;
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) execute test;
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) execute test;
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+deallocate test;
+truncate testtab;
+insert into testtab values (generate_series(1,10000) % 1000);
+explain (costs off, analyze, timing off) select func_int(id) from testtab;
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+prepare test as select func_int(id) from testtab;
+explain (costs off, analyze, timing off) execute test;
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) execute test;
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+explain (costs off, analyze, timing off) execute test;
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+NOTICE:  param:1
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on testtab (actual rows=10000 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+deallocate test;
+drop function if exists func_no_param;
+drop function if exists func_bool;
+drop function if exists func_smallint;
+drop function if exists func_int;
+drop function if exists func_bigint;
+drop function if exists func_float;
+drop function if exists func_double_precision;
+drop function if exists func_char;
+drop function if exists func_varchar;
+drop function if exists func_varchar2;
+drop function if exists func_time;
+drop function if exists func_timetz;
+drop function if exists func_date;
+drop function if exists func_timestamp;
+drop function if exists func_timestamptz;
+drop function if exists func_numeric;
+drop function if exists func_number;
+drop function if exists func_text;
+drop function if exists func_bool_multi;
+-- 匿名块里调用函数？
+-- 数据过长时不支持缓存 (字符串长度>127, numeric/number?)
+create table testtab_with_long_value(id int, col_numeric numeric, col_number number, col_text text);
+insert into testtab_with_long_value values
+(1,1,1,lpad('abc',130,'d')),
+(2,1,1,lpad('abc',130,'d')),        -- not use cache
+(3,2,2,lpad('hahahaha',130,'d')),
+(4,2,2,lpad('hahahaha',130,'d')),   -- not use cache
+(5,3,3,lpad('shortvalue',100,'d')),
+(6,3,3,lpad('shortvalue',100,'d')); -- use cache
+create or replace function func_text_with_long_value(p text) returns text as $$
+begin
+  raise notice 'param:%', p;
+  return p||'_text';
+end;
+$$ language plpgsql stable result_cache;
+explain (costs off, analyze, timing off)
+select col_text, func_text_with_long_value(col_text) from testtab_with_long_value;
+NOTICE:  param:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddabc
+NOTICE:  param:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddabc
+NOTICE:  param:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddhahahaha
+NOTICE:  param:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddhahahaha
+NOTICE:  param:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddshortvalue
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Seq Scan on testtab_with_long_value (actual rows=6 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+drop function if exists func_text_with_long_value;
+drop table if exists testtab_with_long_value;
+truncate testtab;
+insert into testtab values(generate_series(1,10) % 2);
+-- 不支持内置过程语言: internal, c, SQL
+create or replace function func_sql(p int) returns int
+as $$
+  select p+1;
+$$ language sql stable result_cache;
+explain (costs off, analyze, timing off) select func_sql(id) from testtab;
+                  QUERY PLAN                  
+----------------------------------------------
+ Seq Scan on testtab (actual rows=10 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+drop function if exists func_sql;
+-- 不支持函数含有OUT, INOUT参数
+create or replace function func_param_with_out(p int, p1 out int) returns int
+as $$
+declare
+  p2 int;
+begin
+  raise notice 'param:%', p;
+  p1 = p + 2;
+  p2 = p1 % (p+1) + 10;
+  return p2;
+end;
+$$ language plpgsql stable result_cache;
+WARNING:  Function result cache cannot use when function has not in parameters, ignore it.
+explain (costs off, analyze, timing off) select func_param_with_out(id) from testtab;
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+                  QUERY PLAN                  
+----------------------------------------------
+ Seq Scan on testtab (actual rows=10 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+drop function if exists func_param_with_out;
+create or replace function func_param_with_inout(p int, p1 inout int) returns int
+as $$
+declare
+  p2 int;
+begin
+  raise notice 'param:%', p;
+  p1 = p + 2;
+  p2 = p1 % (p+1) + 10;
+  return p2;
+end;
+$$ language plpgsql stable result_cache;
+WARNING:  Function result cache cannot use when function has not in parameters, ignore it.
+explain (costs off, analyze, timing off) select func_param_with_inout(id, id) from testtab;
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+                  QUERY PLAN                  
+----------------------------------------------
+ Seq Scan on testtab (actual rows=10 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+drop function if exists func_param_with_inout;
+-- 不支持函数没有返回值
+create or replace function func_param_without_retval(p int, p1 inout int) returns void
+as $$
+declare
+  p2 int;
+begin
+  raise notice 'param:%', p;
+  p1 = p + 2;
+  p2 = p1 % (p+1) + 10;
+end;
+$$ language plpgsql stable result_cache;
+WARNING:  Function result cache cannot use when function has not in parameters, ignore it.
+explain (costs off, analyze, timing off) select func_param_without_retval(id, id) from testtab;
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+                  QUERY PLAN                  
+----------------------------------------------
+ Seq Scan on testtab (actual rows=10 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+drop function if exists func_param_without_retval;
+-- 不支持返回结果集的函数
+create or replace function func_setof(p int)
+returns setof text
+as $$
+declare
+  row_data record;
+  query_str text;
+begin
+  raise notice 'param:%', p;
+  query_str := 'select id from testtab where id='||p;
+  for row_data in execute(query_str) loop
+    return next row_data.id;
+  end loop;
+  return;
+end;
+$$ language 'plpgsql' stable result_cache;
+explain (costs off, analyze, timing off) select func_setof(id) from testtab;
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+                  QUERY PLAN                  
+----------------------------------------------
+ Seq Scan on testtab (actual rows=50 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+drop function if exists func_setof;
+-- 不支持VOLATILE、聚集、Window函数
+create or replace function func_int_volatile(p int) returns int as $$
+begin
+  raise notice 'param:%', p;
+  return p*2;
+end;
+$$ language plpgsql result_cache;
+WARNING:  Function result cache cannot use when function is not stable/immutable, ignore it.
+explain (costs off, analyze, timing off) select func_int_volatile(id) from testtab;
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+NOTICE:  param:1
+NOTICE:  param:0
+                  QUERY PLAN                  
+----------------------------------------------
+ Seq Scan on testtab (actual rows=10 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+drop function if exists func_int_volatile;
+-- 不支持自治事务, 子程序
+create table tab_tmp(id int,col int);
+insert into tab_tmp values(0,1111),(1,1),(2,1),(3,2),(4,2);
+-- function with autonomous transaction
+create or replace function func_autonomous(p int) 
+return int
+stable
+result_cache
+is
+sid2 number;
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+    raise notice 'param:%', p;
+    if p = 0 then
+        update tab_tmp set col=0;
+        commit;
+        return 0;
+    end if;
+
+    select id into sid2 from tab_tmp where id = 1 for update;
+    if sid2 = 1 then
+        -- no lock or self
+        update tab_tmp set col=11;
+        commit;
+        return 1;
+    end if;
+
+    rollback;
+    return -1;
+
+exception
+    when others then
+        rollback;
+        return -2;
+end;
+/
+select id,func_autonomous(id) from testtab;  -- error
+NOTICE:  param:1
+CONTEXT:  referenced column: func_autonomous
+
+ERROR:  ERROR:  commit/rollback/savepoint is not allowed in a non-volatile function
+CONTEXT:  PL/pgSQL function func_autonomous(integer) line 24 at ROLLBACK
+referenced column: func_autonomous
+
+create or replace procedure proc_autonomous(p int) 
+is
+sid2 number;
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+    if p = 0 then
+        update tab_tmp set col=0 where id=0;
+        commit;
+        return;
+    end if;
+
+    select id into sid2 from tab_tmp where id = 1 for update;
+    if sid2 = 1 then
+        -- no lock or self
+        update tab_tmp set col=11;
+        commit;
+        return;
+    end if;
+
+    return;
+exception
+    when others then
+        rollback;
+end;
+/
+create or replace function func_with_proc(p int) 
+return int
+stable
+result_cache
+is
+sid2 number;
+begin
+    raise notice 'top param:%', p;
+    proc_autonomous(p);
+    return p+1;
+end;
+/
+select id,func_with_proc(id) from testtab;
+NOTICE:  top param:1
+NOTICE:  top param:0
+ id | func_with_proc 
+----+----------------
+  1 |              2
+  0 |              1
+  1 |              2
+  0 |              1
+  1 |              2
+  0 |              1
+  1 |              2
+  0 |              1
+  1 |              2
+  0 |              1
+(10 rows)
+
+drop function if exists func_autonomous;
+drop function if exists func_with_proc;
+drop procedure if exists proc_autonomous;
+CREATE OR REPLACE FUNCTION func_add_sql(integer, integer) RETURNS integer
+    AS 'select $1 + $2;'
+    LANGUAGE SQL
+    IMMUTABLE
+        RESULT_CACHE
+    RETURNS NULL ON NULL INPUT;
+SELECT proname,result_cache FROM PG_PROC a left join pg_proc_ext b on a.oid=b.proc_oid WHERE proname = 'func_add_sql';
+   proname    | result_cache 
+--------------+--------------
+ func_add_sql | t
+(1 row)
+
+SELECT func_add_sql(1,1);
+ func_add_sql 
+--------------
+            2
+(1 row)
+
+drop function if exists func_add_sql;
+create table tmp(
+ bsm VARCHAR(100),
+ name VARCHAR(100),
+ num int
+);
+insert into tmp(bsm,name,num) VALUES('a','苹果',21);
+insert into tmp(bsm,name,num) VALUES('b','香蕉',11);
+create or replace function getsum(in talename VARCHAR)
+RETURNS int as $$
+DECLARE
+   stmt VARCHAR;
+	 count int;
+begin
+  stmt:=format('select count(1) from %s', talename);
+  raise notice '%',stmt;
+	EXECUTE stmt into count;
+	return count;
+	
+	EXCEPTION --捕获异常
+	
+	WHEN OTHERS THEN
+		RETURN 0;
+end; $$ LANGUAGE plpgsql result_cache immutable;
+select getsum('tmp');
+NOTICE:  select count(1) from tmp
+ getsum 
+--------
+      2
+(1 row)
+
+drop function if exists getsum;
+drop table if exists tmp;
+DECLARE
+  x INTEGER;
+ 
+  FUNCTION f (n INTEGER)
+  RETURN INTEGER
+  IS
+  BEGIN
+    RETURN (n*n);
+  END;
+ 
+BEGIN
+  raise notice 'f returns %. Execution returns here (1).', f(2);
+  
+  x := f(2);
+  raise notice 'Execution returns here (2).';
+END;
+/
+NOTICE:  f returns 4. Execution returns here (1).
+NOTICE:  Execution returns here (2).
+-- package
+create package pkg_test as
+  function func_bool(p bool) return bool stable result_cache;
+  procedure proc_test(p bool);
+end pkg_test;
+/
+create or replace package body pkg_test as
+  function func_bool(p bool) return bool stable result_cache is
+  begin
+    raise notice 'param:%', p;
+    return p;
+  end func_bool;
+
+  procedure proc_test(p bool) is
+    cursor cur1 for select func_bool(col_bool) from all_support_type where col_bool=p;
+    p1 bool;
+  begin
+    open cur1;
+    loop
+        fetch cur1 into p1;
+        exit when cur1%notfound;
+    end loop;
+    close cur1;
+  end proc_test;
+end pkg_test;
+/
+call pkg_test.proc_test('true');
+NOTICE:  param:t
+ proc_test 
+-----------
+ 
+(1 row)
+
+call pkg_test.proc_test('false');
+NOTICE:  param:f
+ proc_test 
+-----------
+ 
+(1 row)
+
+explain (costs off, analyze, timing off) select pkg_test.func_bool(col_bool) from all_support_type;
+NOTICE:  param:t
+NOTICE:  param:f
+NOTICE:  param:<NULL>
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on all_support_type (actual rows=1002 loops=1)
+--? Total runtime: .*
+(2 rows)
+
+drop package pkg_test;
+NOTICE:  drop cascades to 2 other objects
+drop table if exists testtab,all_support_type,multi_col,tab_tmp;
+set search_path to default;
+drop schema func_result_cache;

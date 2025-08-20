@@ -596,7 +596,7 @@ void examine_parameter_list(List* parameters, Oid languageOid, const char* query
 static bool compute_common_attribute(DefElem* defel, DefElem** volatility_item, DefElem** strict_item,
     DefElem** security_item, DefElem** leakproof_item, List** set_items, DefElem** cost_item, DefElem** rows_item,
     DefElem** fencedItem, DefElem** shippable_item, DefElem** package_item, DefElem** pipelined_item,
-    DefElem** parallel_enable_item)
+    DefElem** parallel_enable_item, DefElem** result_cache_item)
 {
     if (strcmp(defel->defname, "volatility") == 0) {
         if (*volatility_item)
@@ -655,6 +655,12 @@ static bool compute_common_attribute(DefElem* defel, DefElem** volatility_item, 
             goto duplicate_error;
 
         *parallel_enable_item = defel;
+    } else if (strcmp(defel->defname, "result_cache") == 0) {
+        if (*result_cache_item) {
+            goto duplicate_error;
+        }
+
+        *result_cache_item = defel;
     } else
         return false;
 
@@ -725,7 +731,7 @@ static bool compute_b_attribute(DefElem* defel)
 List* compute_attributes_sql_style(const List* options, List** as, char** language, bool* windowfunc_p,
     char* volatility_p, bool* strict_p, bool* security_definer, bool* leakproof_p, ArrayType** proconfig,
     float4* procost, float4* prorows, bool* fenced, bool* shippable, bool* package, bool* is_pipelined,
-    FunctionPartitionInfo** partInfo)
+    FunctionPartitionInfo** partInfo, bool* resultCache)
 {
     ListCell* option = NULL;
     DefElem* as_item = NULL;
@@ -743,6 +749,7 @@ List* compute_attributes_sql_style(const List* options, List** as, char** langua
     DefElem* package_item = NULL;
     DefElem* pipelined_item = NULL;
     DefElem* parallel_enable_item = NULL;
+    DefElem* result_cache_item = NULL;
     List* bCompatibilities = NIL;
     foreach (option, options) {
         DefElem* defel = (DefElem*)lfirst(option);
@@ -771,7 +778,8 @@ List* compute_attributes_sql_style(const List* options, List** as, char** langua
                        &shippable_item,
                        &package_item,
                        &pipelined_item,
-                       &parallel_enable_item)) {
+                       &parallel_enable_item,
+                       &result_cache_item)) {
             /* recognized common option */
             continue;
         } else if (compute_b_attribute(defel)) {
@@ -864,6 +872,10 @@ List* compute_attributes_sql_style(const List* options, List** as, char** langua
                             errmsg("only immutable can be set if parallel_enable specified")));
         }
         *partInfo = (FunctionPartitionInfo*)parallel_enable_item->arg;
+    }
+
+    if (result_cache_item != NULL) {
+        *resultCache = intVal(result_cache_item->arg);
     }
     list_free(set_items);
     return bCompatibilities;
@@ -1075,6 +1087,7 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
     bool fenced = IS_SINGLE_NODE ? false : true;
     bool shippable = false;
     bool package = false;
+    bool resultCache = false;
     FunctionPartitionInfo* partInfo = NULL;
     bool proIsProcedure = stmt->isProcedure;
     if (!OidIsValid(pkg_oid)) {
@@ -1207,7 +1220,7 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
     List *functionOptions = compute_attributes_sql_style((const List *)stmt->options, &as_clause, &language,
                                                          &isWindowFunc, &volatility, &isStrict, &security, &isLeakProof,
                                                          &proconfig, &procost, &prorows, &fenced, &shippable, &package,
-                                                         &isPipelined, &partInfo);
+                                                         &isPipelined, &partInfo, &resultCache);
 
     pipelined_function_sanity_check(stmt, isPipelined);
     
@@ -1436,7 +1449,8 @@ ObjectAddress CreateFunction(CreateFunctionStmt* stmt, const char* queryString, 
         type_oid,
         stmt->typfunckind,
         stmt->isfinal,
-        func_oid);
+        func_oid,
+        resultCache);
 
     CreateFunctionComment(address.objectId, functionOptions);
     pfree_ext(param_type_depend_ext);
@@ -1676,13 +1690,6 @@ void libraryDoPendingDeletes(bool isCommit)
         return;
     }
 
-    /*
-     * protect process variable file_list and CFuncHash, avoid they be
-     * concurrent changed of different thread.
-     */
-    AutoRWLock libraryLock(&g_dlerror_lock_rw);
-    libraryLock.WrLock();
-
     ListCell* lc = NULL;
     foreach (lc, u_sess->cmd_cxt.PendingLibraryDeletes) {
         PendingLibraryDelete* del_file = (PendingLibraryDelete*)lfirst(lc);
@@ -1698,7 +1705,6 @@ void libraryDoPendingDeletes(bool isCommit)
 
     /* Reset PendingLibraryDeletes.*/
     ResetPendingLibraryDelete();
-    libraryLock.UnLock();
 }
 
 /*
@@ -2609,6 +2615,7 @@ ObjectAddress AlterFunction(AlterFunctionStmt* stmt)
     DefElem* shippable_item = NULL;
     DefElem* package_item = NULL;
     DefElem* pipelined_item = NULL;
+    DefElem* result_cache_item = NULL;
     ObjectAddress address;
     bool isNull = false;
 
@@ -2691,7 +2698,8 @@ ObjectAddress AlterFunction(AlterFunctionStmt* stmt)
                 &shippable_item,
                 &package_item,
                 &pipelined_item,
-                NULL)) {
+                NULL,
+                &result_cache_item)) {
             continue;
         } else if (compute_b_attribute(defel)) {
             /* recognized b compatibility options */
@@ -2795,6 +2803,7 @@ ObjectAddress AlterFunction(AlterFunctionStmt* stmt)
                 elog(NOTICE, "Immutable function will be shippable anyway.");
             }
         }
+
         tup = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
     }
 
@@ -2805,8 +2814,8 @@ ObjectAddress AlterFunction(AlterFunctionStmt* stmt)
     CreateFunctionComment(funcOid, alterOptions, true);
 
     /* if non-immutable is specified, clear parallel_enable info */
-    if (procForm->provolatile != PROVOLATILE_IMMUTABLE) {
-        DeletePgProcExt(funcOid);
+    if (result_cache_item != NULL || procForm->provolatile != PROVOLATILE_IMMUTABLE) {
+        UpdatePgProcExt(funcOid, result_cache_item, (procForm->provolatile != PROVOLATILE_IMMUTABLE));
     }
 
     /* Recode time of alter funciton. */

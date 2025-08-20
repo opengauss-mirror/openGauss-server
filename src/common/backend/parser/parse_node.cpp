@@ -110,7 +110,9 @@ void free_parsestate(ParseState* pstate)
     }
     foreach_cell (l, pstate->p_target_relation) {
         Relation r = (Relation)lfirst(l);
-        heap_close(r, NoLock);
+        if (r != NULL) {
+            heap_close(r, NoLock);
+        }
     }
     pfree_ext(pstate);
 }

@@ -164,6 +164,10 @@ static inline Datum GetResultByType(char* result, Oid typOid, int typmod);
 
 THR_LOCAL PLpgSQL_execstate* plpgsql_estate = NULL;
 
+extern void EStateFuncAssignCache(ExprState *state, ExprContext *econtext, FuncExpr *fe, FunctionCallInfo fcinfo);
+extern bool EStateFuncGetRetCache(FunctionCallInfo fcinfo, Datum *retvalue, bool *retnull);
+extern bool EStateFuncPutRetCache(FunctionCallInfo fcinfo, Datum ret);
+
 /* ----------------------------------------------------------------
 *		ExecEvalExpr routines
 *
@@ -2934,12 +2938,26 @@ static Datum ExecMakeFunctionResultNoSets(
                fcinfo->arg[1] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
            }
        }
-        if (func_encoding != db_encoding) {
-            DB_ENCODING_SWITCH_TO(func_encoding);
-            result = FunctionCallInvoke(fcinfo);
-            DB_ENCODING_SWITCH_BACK(db_encoding);
-        } else {
-            result = FunctionCallInvoke(fcinfo);
+
+        /* Function result cache */
+        bool cachedresult = true;
+        bool isfuncretcache = !has_refcursor && !has_cursor_return &&
+                              ENABLE_FUNCTION_RESULT_CACHE() && fcinfo->fncache;
+        if (isfuncretcache) {
+            cachedresult = EStateFuncGetRetCache(fcinfo, &result, &fcinfo->isnull);
+        }
+        if (!isfuncretcache || !cachedresult) {
+            if (func_encoding != db_encoding) {
+                DB_ENCODING_SWITCH_TO(func_encoding);
+                result = FunctionCallInvoke(fcinfo);
+                DB_ENCODING_SWITCH_BACK(db_encoding);
+            } else {
+                result = FunctionCallInvoke(fcinfo);
+            }
+        }
+        /* The fncache may be invalidated and reclaimed. Here, we check again whether fncache is empty */
+        if (fcinfo->fncache && !cachedresult) {
+            EStateFuncPutRetCache(fcinfo, result);
         }
    }
    *isNull = fcinfo->isnull;
@@ -3657,6 +3675,10 @@ static Datum ExecEvalFunc(FuncExprState *fcache, ExprContext *econtext, bool *is
                fcache->xprstate.evalfunc = (ExprStateEvalFunc)ExecMakeFunctionResultNoSets<false, true>;
                return ExecMakeFunctionResultNoSets<false, true>(fcache, econtext, isNull, isDone);
            } else {
+                if (ENABLE_FUNCTION_RESULT_CACHE()) {
+                    EStateFuncAssignCache(NULL, econtext, func, &fcache->fcinfo_data);
+                }
+
                fcache->xprstate.evalfunc = (ExprStateEvalFunc)ExecMakeFunctionResultNoSets<false, false>;
                return ExecMakeFunctionResultNoSets<false, false>(fcache, econtext, isNull, isDone);
            }

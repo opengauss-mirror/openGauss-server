@@ -221,6 +221,101 @@ extern int ApplySortComparator(Datum datum1, bool isNull1, Datum datum2, bool is
 
 #endif /* USE_INLINE */
 
+static inline int ApplyUnsignedSortComparator(Datum datum1, bool isNull1, Datum datum2, bool isNull2, SortSupport ssup)
+{
+    int compare;
+
+    if (isNull1) {
+        if (isNull2) {
+            compare = 0; /* NULL "=" NULL */
+        } else if (ssup->ssup_nulls_first) {
+            compare = -1; /* NULL "<" NOT_NULL */
+        } else {
+            compare = 1; /* NULL ">" NOT_NULL */
+        }
+    } else if (isNull2) {
+        if (ssup->ssup_nulls_first) {
+            compare = 1; /* NOT_NULL ">" NULL */
+        } else {
+            compare = -1; /* NOT_NULL "<" NULL */
+        }
+    } else {
+        compare = datum1 < datum2 ? -1 : datum1 > datum2 ? 1 : 0;
+        if (ssup->ssup_reverse) {
+            compare = -compare;
+        }
+    }
+
+    return compare;
+}
+
+static inline int ApplySignedSortComparator(Datum datum1, bool isNull1, Datum datum2, bool isNull2, SortSupport ssup)
+{
+    int compare;
+
+    if (isNull1) {
+        if (isNull2) {
+            compare = 0; /* NULL "=" NULL */
+        } else if (ssup->ssup_nulls_first) {
+            compare = -1; /* NULL "<" NOT_NULL */
+        } else {
+            compare = 1; /* NULL ">" NOT_NULL */
+        }
+    } else if (isNull2) {
+        if (ssup->ssup_nulls_first) {
+            compare = 1; /* NOT_NULL ">" NULL */
+        } else {
+            compare = -1; /* NOT_NULL "<" NULL */
+        }
+    } else {
+        compare = DatumGetInt64(datum1) < DatumGetInt64(datum2) ? -1 :
+                    DatumGetInt64(datum1) > DatumGetInt64(datum2) ? 1 : 0;
+        if (ssup->ssup_reverse) {
+            compare = -compare;
+        }
+    }
+
+    return compare;
+}
+
+static inline int ApplyInt32SortComparator(Datum datum1, bool isNull1, Datum datum2, bool isNull2, SortSupport ssup)
+{
+    int compare;
+
+    if (isNull1) {
+        if (isNull2) {
+            compare = 0; /* NULL "=" NULL */
+        } else if (ssup->ssup_nulls_first) {
+            compare = -1; /* NULL "<" NOT_NULL */
+        } else {
+            compare = 1; /* NULL ">" NOT_NULL */
+        }
+    } else if (isNull2) {
+        if (ssup->ssup_nulls_first) {
+            compare = 1; /* NOT_NULL ">" NULL */
+        } else {
+            compare = -1; /* NOT_NULL "<" NULL */
+        }
+    } else {
+        compare = (int32)datum1 < (int32)datum2 ? -1 :
+                    (int32)datum1 > (int32)datum2 ? 1 : 0;
+        if (ssup->ssup_reverse) {
+            compare = -compare;
+        }
+    }
+
+    return compare;
+}
+
+/*
+ * Datum comparison functions that we have specialized sort routines for.
+ * Datatypes that install these as their comparator or abbreviated comparator
+ * are eligible for faster sorting.
+ */
+extern int ssup_datum_unsigned_cmp(Datum x, Datum y, SortSupport ssup);
+extern int ssup_datum_signed_cmp(Datum x, Datum y, SortSupport ssup);
+extern int ssup_datum_int32_cmp(Datum x, Datum y, SortSupport ssup);
+
 /* Other functions in utils/sort/sortsupport.c */
 extern void PrepareSortSupportComparisonShim(Oid cmpFunc, SortSupport ssup);
 extern void PrepareSortSupportFromOrderingOp(Oid orderingOp, SortSupport ssup);

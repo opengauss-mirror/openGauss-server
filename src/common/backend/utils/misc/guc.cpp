@@ -463,7 +463,8 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "max_error_count",
     "enable_expr_fusion",
     "heap_bulk_read_size",
-    "restrict_nonsystem_relation_kind"
+    "restrict_nonsystem_relation_kind",
+    "enable_func_cache"
     };
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);
@@ -524,7 +525,7 @@ static const char* show_tcp_keepalives_idle(void);
 static const char* show_tcp_keepalives_interval(void);
 static const char* show_tcp_keepalives_count(void);
 static const char* show_tcp_user_timeout(void);
-static void assign_shared_preload_libraries(const char* newval, void* extra);
+static bool check_shared_preload_libraries(char** newval, void** extra, GucSource source);
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source);
 static void assign_effective_io_concurrency(int newval, void* extra);
 static void assign_pgstat_temp_directory(const char* newval, void* extra);
@@ -581,6 +582,7 @@ static void ConfFileNameCat(char* ConfFileName, char* ConfTmpFileName,
 static void WriteAlterSystemSetGucFile(char* ConfFileName, char** opt_lines, ConfFileLock* filelock);
 static char** LockAndReadConfFile(char* ConfFileName, char* ConfTmpFileName, char* ConfLockFileName,
     ConfFileLock* filelock);
+static bool CheckUnsupportGucContext(struct config_generic* record);
 #endif
 inline void scape_space(char **pp)
 {
@@ -3705,8 +3707,8 @@ static void InitConfigureNamesString()
             GUC_LIST_INPUT | GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_common.shared_preload_libraries_string,
             "security_plugin",
+            check_shared_preload_libraries,
             NULL,
-            assign_shared_preload_libraries,
             NULL},
         {{"thread_pool_attr",
             PGC_POSTMASTER,
@@ -9126,8 +9128,7 @@ static void CheckAndGetAlterSystemSetParam(AlterSystemStmt* altersysstmt,
                 (errcode(ERRCODE_UNDEFINED_OBJECT),
                  errmsg("unrecognized configuration parameter \"%s\"", name)));
 
-    if ((record->context != PGC_POSTMASTER && record->context != PGC_SIGHUP && record->context != PGC_BACKEND) ||
-        record->flags & GUC_DISALLOW_IN_FILE)
+    if (CheckUnsupportGucContext(record))
         ereport(ERROR,
             (errcode(ERRCODE_CANT_CHANGE_RUNTIME_PARAM),
              errmsg("unsupport parameter: %s\n"
@@ -9143,6 +9144,33 @@ static void CheckAndGetAlterSystemSetParam(AlterSystemStmt* altersysstmt,
     *outer_name = name;
     *outer_value = value;
     *outer_record = record;
+}
+
+static void PrintNoticeMsg(GucContext context)
+{
+    static char* gucList[] = { "INTERNAL", "POSTMASTER", "SIGHUP", "BACKEND", "SUSET", "USERSET" };
+    static int listSize = sizeof(gucList) / sizeof(gucList[0]);
+    int index = context - PGC_INTERNAL;
+    if (index >= listSize) {
+        return;
+    }
+    ereport(NOTICE,(errmsg("%s level parameter change may cause guc config changes in other sessions", gucList[index])));
+}
+
+static bool CheckUnsupportGucContext(struct config_generic* record)
+{
+    if (DB_IS_CMPT(B_FORMAT) && record->group == CUSTOM_OPTIONS && record->context != PGC_INTERNAL &&
+        (record->flags & GUC_DISALLOW_IN_FILE) == 0) {
+        if ((record->context != PGC_SIGHUP)) {
+            PrintNoticeMsg(record->context);
+        }
+        return false;
+    }
+    if ((record->context != PGC_POSTMASTER && record->context != PGC_SIGHUP && record->context != PGC_BACKEND) ||
+        record->flags & GUC_DISALLOW_IN_FILE) {
+        return true;
+    }
+    return false;
 }
 
 /*
@@ -9362,6 +9390,9 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                 strcasecmp(stmt->name, "last_insert_id") == 0) {
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("identity and last_insert_id is not supported for setting")));
+            }
+            if (strcasecmp(stmt->name, "_d_virtual_value") == 0 && DB_IS_CMPT(D_FORMAT)) {
+                break;
             }
             (void)set_config_option(stmt->name,
                 ExtractSetVariableArgs(stmt),
@@ -12408,22 +12439,27 @@ static const char* show_tcp_user_timeout(void)
     return buf;
 }
 
-static void assign_shared_preload_libraries(const char* newval, void* extra)
+static bool check_shared_preload_libraries(char** newval, void** extra, GucSource source)
 {
-    char* new_value = NULL;
-    int rcs = 0;
-
-    if (newval == NULL || strlen(newval) == 0) {
-        new_value = pstrdup("security_plugin");
-    } else if (strstr(newval, "security_plugin") != NULL) {
-        new_value = pstrdup(newval);
-    } else {
-        size_t total_len = strlen(newval) + strlen(",security_plugin") + 1;
-        new_value = (char*)palloc(total_len);
-        rcs = snprintf_s(new_value, total_len, total_len - 1, "%s,security_plugin", newval);
-        securec_check_ss(rcs, "\0", "\0");
+    if (IsUnderPostmaster) {
+        return true;
     }
-    g_instance.attr.attr_common.shared_preload_libraries_string = new_value;
+    if (*newval == NULL || strlen(*newval) == 0) {
+        *newval = guc_strdup(FATAL, "security_plugin");
+        return true;
+    }
+    if (strstr(*newval, "security_plugin") != NULL) {
+        return true;
+    }
+    MemoryContext oldContext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+    size_t total_len = strlen(*newval) + strlen(",security_plugin") + 1;
+    char* new_value = (char*)palloc(total_len);
+    int rcs = snprintf_s(new_value, total_len, total_len - 1, "%s,security_plugin", *newval);
+    securec_check_ss(rcs, "\0", "\0");
+    pfree_ext(*newval);
+    *newval = new_value;
+    MemoryContextSwitchTo(oldContext);
+    return true;
 }
 
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source)

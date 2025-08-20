@@ -36,7 +36,5 @@ extern List* QueryRewriteRefresh(Query *parsetree);
 extern Node* QueryRewriteNonConstant(Node *node);
 extern List* QueryRewriteSelectIntoVarList(Node *node, int res_len);
 extern Const* processResToConst(char* value, Oid atttypid, Oid collid);
-extern int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rtables, int resultRelation);
-extern List* RewriteQuery(Query* parsetree, List* rewrite_events);
 
 #endif /* REWRITEHANDLER_H */

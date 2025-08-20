@@ -118,5 +118,125 @@ TsqlMakeAnonyBlockFuncStmt(int flag, const char *str)
 	return (Node*)n;
 }
 
+/* TsqlFunctionTryCast -- An implementation of the TRY_CAST function
+ *
+ * Returns NULL on some of the error cases rather than throw out the error
+ */
+Node* TsqlFunctionTryCast(Node* arg, TypeName* typname, int location)
+{
+    Node* result;
+    int32 typmod;
+    Oid type_oid;
+
+    typenameTypeIdAndMod(NULL, typname, &type_oid, &typmod);
+
+    if (type_oid == INT2OID) {
+        result = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_try_cast_floor_smallint"), list_make1(arg), location);
+    } else if (type_oid == INT4OID) {
+        result = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_try_cast_floor_int"), list_make1(arg), location);
+    } else if (type_oid == INT8OID) {
+        result = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_try_cast_floor_bigint"), list_make1(arg), location);
+    } else {
+        Node* targetType = makeTypeCast(makeNullAConst(location), typname, NULL, NULL, NULL, location);
+        List* args;
+
+        switch (arg->type) {
+            case T_A_Const:
+            case T_TypeCast:
+            case T_FuncCall:
+            case T_A_Expr:
+                args = list_make3(arg, targetType, makeIntConst(typmod, location));
+                break;
+            default:
+                args = list_make3(makeTypeCast(arg, makeTypeName("text"), NULL, NULL, NULL, location), targetType,
+                                  makeIntConst(typmod, location));
+        }
+
+        result = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_try_cast_to_any"), args, location);
+    }
+
+    return result;
+}
+
+/* TsqlFunctionConvert -- An implementation of CONVERT and TRY_CONVERT
+ *
+ * Converts an input type to another type with a possible specified style.
+ * is_try is used to decide whether this is a CONVERT or TRY_CONVERT function
+ */
+Node* TsqlFunctionConvert(TypeName* typname, Node* arg, Node* style, bool is_try, int location)
+{
+    List* args;
+    char* typename_string;
+
+    Node* try_const = makeBoolAConst(is_try, location);
+    if (style) {
+        args = list_make3(arg, try_const, style);
+    } else {
+        args = list_make2(arg, try_const);
+    }
+    return DoTypeCast(typname, is_try, arg, args, location);
+}
+
+/**
+ * A Helper function for TsqlFunctionConvert
+ */
+static Node* DoTypeCast(TypeName* typname, bool is_try, Node* arg, List* args, int location)
+{
+    Node* result;
+    char* typename_string;
+    Node* helperFuncCall = NULL;
+    int32 typmod;
+    Oid type_oid;
+    typenameTypeIdAndMod(NULL, typname, &type_oid, &typmod);
+    typename_string = TypeNameToString(typname);
+    if (type_oid == DATEOID) {
+        result = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_conv_helper_to_date"), args, location);
+    } else if (type_oid == TIMEOID) {
+        helperFuncCall = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_conv_helper_to_time"),
+                                             lcons(makeIntConst(typmod, location), args), location);
+        result = makeTypeCast(helperFuncCall, typname, NULL, NULL, NULL, location);
+    } else if (type_oid == TIMESTAMPOID) {
+        helperFuncCall = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_conv_helper_to_datetime2"),
+                                             lcons(makeIntConst(typmod, location), args), location);
+        result = makeTypeCast(helperFuncCall, typname, NULL, NULL, NULL, location);
+    } else if (type_oid == TIMESTAMPTZOID) {
+        helperFuncCall = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_conv_helper_to_datetimeoffset"),
+                                             lcons(makeIntConst(typmod, location), args), location);
+        result = makeTypeCast(helperFuncCall, typname, NULL, NULL, NULL, location);
+    } else if (type_oid == SMALLDATETIMEOID) {
+        helperFuncCall = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_conv_helper_to_smalldatetime"),
+                                             lcons(makeIntConst(typmod, location), args), location);
+        result = makeTypeCast(helperFuncCall, typname, NULL, NULL, NULL, location);
+    } else if (is_qualifed_char_type(typename_string)) {
+        typename_string = format_type_extended(VARCHAROID, typmod, FORMAT_TYPE_TYPEMOD_GIVEN);
+        args = lcons(makeStringConst(typename_string, typname->location), args);
+        helperFuncCall = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_conv_helper_to_varchar"), args, location);
+        result = makeTypeCast(helperFuncCall, typname, NULL, NULL, NULL, location);
+    } else if (strcmp(typename_string, "varbinary") == 0) {
+        if (typmod > VARHDRSZ) {
+            helperFuncCall = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_conv_helper_to_varbinary"),
+                                                 lcons(makeIntConst(typmod - VARHDRSZ, location), args), location);
+        } else {
+            helperFuncCall = (Node*)makeFuncCall(TsqlSystemFuncName2("shark_conv_helper_to_varbinary"),
+                                                 lcons(makeIntConst(typmod, location), args), location);
+        }
+        result = makeTypeCast(helperFuncCall, typname, NULL, NULL, NULL, location);
+    } else {
+        if (is_try) {
+            result = TsqlFunctionTryCast(arg, typname, location);
+        } else {
+            result = makeTypeCast(arg, typname, NULL, NULL, NULL, location);
+        }
+    }
+    return result;
+}
+
+static bool is_qualifed_char_type(char* typename_string)
+{
+    return (strcmp(typename_string, "pg_catalog.varchar") == 0) ||
+           (strcmp(typename_string, "pg_catalog.nvarchar2") == 0) ||
+           (strcmp(typename_string, "pg_catalog.bpchar") == 0);
+}
+
 #include "scan-backend.inc"
 #undef SCANINC

@@ -4479,6 +4479,7 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_HNSW_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_DISKANN_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_USTORE_INDEX_TYPE)) &&
+            (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_BLOOM_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_HASH_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_BM25_INDEX_TYPE))) {
             /* row store only support btree/ubtree/gin/gist/hash index */

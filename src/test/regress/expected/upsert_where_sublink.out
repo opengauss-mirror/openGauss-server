@@ -1794,7 +1794,7 @@ insert into tab_target values(2,3,5) on duplicate key update c4 = 'ERROR' where 
      ->  Limit (actual rows=1 loops=1)
            ->  Sort (actual rows=8 loops=1)
                  Sort Key: schema_upsert_where_sublink.tab_source.c1
-                 Sort Method: quicksort  Memory: 26kB
+--?Sort Method: quicksort  Memory.*
                  ->  Seq Scan on tab_source (actual rows=10 loops=1)
    InitPlan 2 (returns $1)
      ->  Limit (Actual time: never executed)
@@ -2004,11 +2004,11 @@ insert into tab_target values(7,4,7) on duplicate key update c4 = 'conflict7' wh
            Merge Cond: (t2.c2 = t1.c2)
            ->  Sort (actual rows=5 loops=1)
                  Sort Key: t2.c2
-                 Sort Method: quicksort  Memory: 26kB
+--?Sort Method: quicksort  Memory.*
                  ->  Seq Scan on tab_source t2 (actual rows=10 loops=1)
            ->  Sort (actual rows=1 loops=1)
                  Sort Key: t1.c2
-                 Sort Method: quicksort  Memory: 25kB
+--?Sort Method: quicksort  Memory.*
                  ->  Seq Scan on tab_source t1 (actual rows=1 loops=1)
                        Filter: (c3 = 7)
                        Rows Removed by Filter: 9

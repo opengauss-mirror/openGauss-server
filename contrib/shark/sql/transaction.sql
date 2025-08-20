@@ -448,6 +448,58 @@ END;
 
 select * from ValueTable;
 
+select pg_typeof(@@FETCH_STATUS);
+
+DO $$
+DECLARE
+ fetch_status int;
+BEGIN
+ fetch_status := @@FETCH_STATUS;
+ RAISE NOTICE 'fetch status: %', fetch_status;
+END;
+$$ LANGUAGE plpgsql;
+
+
+DO $$
+DECLARE
+ fetch_status text;
+BEGIN
+ fetch_status := @@FETCH_STATUS;
+ RAISE NOTICE 'fetch status: %', fetch_status;
+END;
+$$ LANGUAGE plpgsql;
+
+
+DO $$
+DECLARE
+ fetch_status bool;
+BEGIN
+ fetch_status := @@FETCH_STATUS;
+ RAISE NOTICE 'fetch status: %', fetch_status;
+END;
+$$ LANGUAGE plpgsql;
+
+
+DO $$
+DECLARE
+ fetch_status json;
+BEGIN
+ fetch_status := @@FETCH_STATUS;
+ RAISE NOTICE 'fetch status: %', fetch_status;
+END;
+$$ LANGUAGE plpgsql;
+
+
+DO $$
+DECLARE
+ fetch_status date;
+BEGIN
+ fetch_status := @@FETCH_STATUS;
+ RAISE NOTICE 'fetch status: %', fetch_status;
+END;
+$$ LANGUAGE plpgsql;
+
+
 drop table ValueTable;
 drop function p1();
 drop function f1();

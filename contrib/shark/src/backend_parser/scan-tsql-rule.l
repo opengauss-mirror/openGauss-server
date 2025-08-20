@@ -165,3 +165,28 @@
 						yylval->str = pstrdup(yytext);
 						return TSQL_XCONST;
 					}
+
+<tsql>{tsql_ident}  {
+						if (!ENABLE_ABS) {
+							int kwnum;
+							char *ident;
+
+							SET_YYLLOC();
+
+							/* Is it a keyword? */
+							kwnum = ScanKeywordLookup(yytext, yyextra->keywordlist);
+							if (kwnum >= 0) {
+								yylval->keyword = GetScanKeyword(kwnum, yyextra->keywordlist);
+								return yyextra->keyword_tokens[kwnum];
+							}
+
+							/* No. Convert the identifier to lower case, and truncate if necessary. */
+							ident = downcase_truncate_identifier(yytext, yyleng, true);
+							yylval->str = ident;
+							return IDENT;
+						} else {
+							yyless(1);
+							SET_YYLLOC();
+							return '@';
+						}
+					}

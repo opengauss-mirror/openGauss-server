@@ -934,6 +934,11 @@ bool IsPseudoReturnColumn(const char *colname)
  */
 Datum sys_connect_by_path(PG_FUNCTION_ARGS)
 {
+    /* For fastpath call, swinfo won't be initialized, so error it out */
+    if (fcinfo->swinfo.sw_econtext == NULL && fcinfo->swinfo.sw_exprstate == NULL) {
+        elog(ERROR, "Uninitialized swinfo when calling sys_connect_by_path");
+    }
+
     Datum resultDatum = (Datum)0;
     const char *value = NULL;
     const char *split = NULL;
@@ -1006,6 +1011,11 @@ Datum sys_connect_by_path(PG_FUNCTION_ARGS)
  **/
 Datum connect_by_root(PG_FUNCTION_ARGS)
 {
+    /* For fastpath call, swinfo won't be initialized, so error it out */
+    if (fcinfo->swinfo.sw_econtext == NULL && fcinfo->swinfo.sw_exprstate == NULL) {
+        elog(ERROR, "Uninitialized swinfo when calling connect_by_root");
+    }
+
     Datum datum = (Datum)0;
     const char *value = TextDatumGetCString(PG_GETARG_TEXT_PP(0));
     bool constArrayList = false;

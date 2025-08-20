@@ -987,13 +987,14 @@ other			.
 					 */
 					while (nchars > 1 &&
 						   (yytext[nchars-1] == '+' ||
-							yytext[nchars-1] == '-'))
+							yytext[nchars-1] == '-' ||
+							(DB_IS_CMPT(D_FORMAT) && yytext[nchars -1] == '@')))
 					{
 						int		ic;
 
 						for (ic = nchars-2; ic >= 0; ic--)
 						{
-							if (strchr("~!#^&|`?%", yytext[ic]))
+							if (strchr("~!#^&|`?%@", yytext[ic]))
 								break;
 						}
 						if (ic >= 0)

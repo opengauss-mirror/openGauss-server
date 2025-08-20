@@ -151,6 +151,7 @@ static bool IsTsqlTranStmt(const char *haystack, int haystackLen)
             if (line == twoLines && (pg_strncasecmp(temp, "transaction", strlen("transaction")) == 0 ||
                 pg_strncasecmp(temp, "tran", strlen("tran")) == 0 ||
                 pg_strncasecmp(temp, "work", strlen("work")) == 0 ||
+                pg_strncasecmp(temp, "try", strlen("try")) == 0 ||
                 pg_strncasecmp(temp, "isolation", strlen("isolation")) == 0 ||
                 pg_strncasecmp(temp, "read", strlen("read")) == 0 ||
                 pg_strncasecmp(temp, "deferrable", strlen("deferrable")) == 0 ||

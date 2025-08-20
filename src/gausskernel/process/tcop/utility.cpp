@@ -2716,11 +2716,25 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
         case T_TransactionStmt: {
             TransactionStmt* stmt = (TransactionStmt*)parse_tree;
 
+            if (IsTransactionInState(IN_TRY) && stmt->kind != TRANS_STMT_END_TRY_BEGIN_CATCH) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        (errmsg("current in a try block, only END TRY BEGIN CATCH can be entered to end the try block."))));
+            }
+
+            if (IsTransactionInState(IN_CATCH) && stmt->kind != TRANS_STMT_END_CATCH) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        (errmsg("currently in a catch block, only END CATCH can be entered to end the catch block."))));
+            }
+
             switch (stmt->kind) {
                     /*
                      * START TRANSACTION, as defined by SQL99: Identical
                      * to BEGIN.  Same code for both.
                      */
+                case TRANS_STMT_BEGIN_TRY:
+                    TransactionBeginTry();
                 case TRANS_STMT_BEGIN:
                 case TRANS_STMT_START: {
                     if (stmt->with_snapshot) {
@@ -2740,6 +2754,11 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
                     u_sess->need_report_top_xid = true;
                 } break;
 
+                case TRANS_STMT_END_TRY_BEGIN_CATCH:
+                    TransactionEndTryBeginCatch();
+                    break;
+                case TRANS_STMT_END_CATCH:
+                    TransactionEndCatch();
                 case TRANS_STMT_COMMIT:
                     /* Only generate one time when u_sess->debug_query_id = 0 in CN */
                     if ((IS_SINGLE_NODE || IS_PGXC_COORDINATOR) && u_sess->debug_query_id == 0) {
@@ -8736,6 +8755,18 @@ const char* CreateCommandTag(Node* parse_tree)
 
                 case TRANS_STMT_ROLLBACK_PREPARED:
                     tag = "ROLLBACK PREPARED";
+                    break;
+
+                case TRANS_STMT_BEGIN_TRY:
+                    tag = "BEGIN TRY";
+                    break;
+
+                case TRANS_STMT_END_TRY_BEGIN_CATCH:
+                    tag = "END TRY BEGIN CATCH";
+                    break;
+
+                case TRANS_STMT_END_CATCH:
+                    tag = "END CATCH";
                     break;
 
                 default:

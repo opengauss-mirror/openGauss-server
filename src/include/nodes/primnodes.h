@@ -467,6 +467,7 @@ typedef struct FuncExpr {
     CoercionForm funcformat; /* how to display this function call */
     Oid funccollid;          /* OID of collation of result */
     Oid inputcollid;         /* OID of collation that function should use */
+    uint32 funcflags;
     char* fmtstr;            /* fmt string */
     char* nlsfmtstr;         /* nls fmt string */
     List* args;              /* arguments to the function */  

@@ -1,0 +1,1175 @@
+create schema functions_test2;
+set search_path = 'functions_test2';
+select datediff(year, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+       -1
+(1 row)
+
+select datediff(yy, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+       -1
+(1 row)
+
+select datediff(yyyy, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+       -1
+(1 row)
+
+select datediff(quarter, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+       -4
+(1 row)
+
+select datediff(qq, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+       -4
+(1 row)
+
+select datediff(q, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+       -4
+(1 row)
+
+select datediff(month, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+      -13
+(1 row)
+
+select datediff(mm, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+      -13
+(1 row)
+
+select datediff(m, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+      -13
+(1 row)
+
+select datediff(dayofyear, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+     -367
+(1 row)
+
+select datediff(dy, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+     -367
+(1 row)
+
+select datediff(y, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+     -367
+(1 row)
+
+select datediff(day, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+     -367
+(1 row)
+
+select datediff(dd, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+     -367
+(1 row)
+
+select datediff(d, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+     -367
+(1 row)
+
+select datediff(week, CAST('2037-03-01 23:30:05.523'AS timestamp),CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+      -52
+(1 row)
+
+select datediff(wk, CAST('2037-03-01 23:30:05.523'AS timestamp),CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+      -52
+(1 row)
+
+select datediff(ww, CAST('2037-03-01 23:30:05.523'AS timestamp),CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+      -52
+(1 row)
+
+select datediff(weekday, CAST('2037-03-01 23:30:05.523'AS timestamp),CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+     -367
+(1 row)
+
+select datediff(dw, CAST('2037-03-01 23:30:05.523'AS timestamp),CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+     -367
+(1 row)
+
+select datediff(w, CAST('2037-03-01 23:30:05.523'AS timestamp),CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+     -367
+(1 row)
+
+select datediff(hour, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+    -8808
+(1 row)
+
+select datediff(hh, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+    -8808
+(1 row)
+
+select datediff(minute,CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+  -528480
+(1 row)
+
+select datediff(mi, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+  -528480
+(1 row)
+
+select datediff(n, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+  -528480
+(1 row)
+
+select datediff(second, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff  
+-----------
+ -31708800
+(1 row)
+
+select datediff(ss, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff  
+-----------
+ -31708800
+(1 row)
+
+select datediff(s, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff  
+-----------
+ -31708800
+(1 row)
+
+select datediff(millisecond, CAST('2036-02-28 01:23:45.234'AS timestamp), CAST('2036-02-28 01:23:45.123'AS timestamp));
+ datediff 
+----------
+     -111
+(1 row)
+
+select datediff(ms, CAST('2036-02-28 01:23:45.234'AS timestamp), CAST('2036-02-28 01:23:45.123'AS timestamp));
+ datediff 
+----------
+     -111
+(1 row)
+
+select datediff(microsecond, CAST('2036-02-28 01:23:45.234'AS timestamp), CAST('2036-02-28 01:23:45.123'AS timestamp));
+ datediff 
+----------
+  -111000
+(1 row)
+
+select datediff(mcs, CAST('2036-02-28 01:23:45.234'AS timestamp), CAST('2036-02-28 01:23:45.123'AS timestamp));
+ datediff 
+----------
+  -111000
+(1 row)
+
+select datediff(nanosecond, CAST('2036-02-28 01:23:45.234'AS timestamp), CAST('2036-02-28 01:23:45.123'AS timestamp));
+  datediff  
+------------
+ -111000000
+(1 row)
+
+select datediff(ns, CAST('2036-02-28 01:23:45.234'AS timestamp), CAST('2036-02-28 01:23:45.123'AS timestamp));
+  datediff  
+------------
+ -111000000
+(1 row)
+
+select datediff_big(year, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff_big 
+--------------
+           -1
+(1 row)
+
+select datediff_big(quarter, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff_big 
+--------------
+           -4
+(1 row)
+
+select datediff_big(month, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff_big 
+--------------
+          -13
+(1 row)
+
+select datediff_big(dayofyear, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff_big 
+--------------
+         -367
+(1 row)
+
+select datediff_big(day, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff_big 
+--------------
+         -367
+(1 row)
+
+select datediff_big(week,CAST('2037-03-01 23:30:05.523'AS timestamp),CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff_big 
+--------------
+          -52
+(1 row)
+
+select datediff_big(hour, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff_big 
+--------------
+        -8808
+(1 row)
+
+select datediff_big(minute,CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff_big 
+--------------
+      -528480
+(1 row)
+
+select datediff_big(second, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff_big 
+--------------
+    -31708800
+(1 row)
+
+select datediff_big(millisecond, CAST('2036-02-28 01:23:45.234'AS timestamp), CAST('2036-02-28 01:23:45.123'AS timestamp));
+ datediff_big 
+--------------
+         -111
+(1 row)
+
+select datediff_big(microsecond, CAST('2036-02-28 01:23:45.234'AS timestamp), CAST('2036-02-28 01:23:45.123'AS timestamp));
+ datediff_big 
+--------------
+      -111000
+(1 row)
+
+select datediff_big(nanosecond, CAST('2036-02-28 01:23:45.234'AS timestamp), CAST('2036-02-28 01:23:45.123'AS timestamp));
+ datediff_big 
+--------------
+   -111000000
+(1 row)
+
+select datediff(month, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff 
+----------
+      -13
+(1 row)
+
+select datediff_big(month, CAST('2037-03-01 23:30:05.523'AS timestamp), CAST('2036-02-28 23:30:05.523'AS timestamp));
+ datediff_big 
+--------------
+          -13
+(1 row)
+
+select datediff(month, CAST('2037-03-01 23:30:05.523'AS timestamptz), CAST('2036-02-28 23:30:05.523'AS timestamptz));
+ datediff 
+----------
+      -13
+(1 row)
+
+select datediff_big(month, CAST('2037-03-01 23:30:05.523'AS timestamptz), CAST('2036-02-28 23:30:05.523'AS timestamptz));
+ datediff_big 
+--------------
+          -13
+(1 row)
+
+select datediff(month, CAST('2037-03-01 23:30:05.523'AS date), CAST('2036-02-28 23:30:05.523'AS date));
+ datediff 
+----------
+      -13
+(1 row)
+
+select datediff_big(month, CAST('2037-03-01 23:30:05.523'AS date), CAST('2036-02-28 23:30:05.523'AS date));
+ datediff_big 
+--------------
+          -13
+(1 row)
+
+select datediff(month, CAST('2037-03-01 23:30:05.523'AS time), CAST('2036-02-28 23:30:05.523'AS time));
+ datediff 
+----------
+        0
+(1 row)
+
+select datediff_big(month, CAST('2037-03-01 23:30:05.523'AS time), CAST('2036-02-28 23:30:05.523'AS time));
+ datediff_big 
+--------------
+            0
+(1 row)
+
+select datediff(month, CAST('2037-03-01 23:30:05.523'AS smalldatetime), CAST('2036-02-28 23:30:05.523'AS smalldatetime));
+ datediff 
+----------
+      -13
+(1 row)
+
+select datediff_big(month, CAST('2037-03-01 23:30:05.523'AS smalldatetime), CAST('2036-02-28 23:30:05.523'AS smalldatetime));
+ datediff_big 
+--------------
+          -13
+(1 row)
+
+select datediff(seconds, CAST(make_timestamp(1, 2, 12, 0, 0, 0) AS date), CAST(make_timestamp(10000, 2, 12, 0, 0, 0) AS date));
+ERROR:  The datediff function resulted in an overflow. The number of dateparts separating two date/time instances is too large. Try to use datediff with a less precise datepart
+CONTEXT:  PL/pgSQL function datediff(text,date,date) line 3 at RETURN
+referenced column: datediff
+select datediff_big(nanoseconds, CAST(make_timestamp(1, 2, 12, 0, 0, 0) AS date), CAST(make_timestamp(10000, 2, 12, 0, 0, 0) AS date));
+ERROR:  'nanoseconds' is not a recognized datediff option
+CONTEXT:  PL/pgSQL function datediff_big(text,date,date) line 3 at RETURN
+referenced column: datediff_big
+select datediff(abc, CAST(make_timestamp(1, 2, 12, 0, 0, 0) AS date), CAST(make_timestamp(2000, 2, 12, 0, 0, 0) AS date));
+ERROR:  'abc' is not a recognized datediff option
+CONTEXT:  PL/pgSQL function datediff(text,date,date) line 3 at RETURN
+referenced column: datediff
+select datediff(years, CAST(make_timestamp(1, 2, 12, 0, 0, 0) AS date), CAST(make_timestamp(2000, 2, 12, 0, 0, 0) AS date));
+ datediff 
+----------
+     1999
+(1 row)
+
+select CHARINDEX('hello', 'hello world');
+ charindex 
+-----------
+         1
+(1 row)
+
+select CHARINDEX('hello  ', 'hello world');
+ charindex 
+-----------
+         0
+(1 row)
+
+select CHARINDEX('hello world', 'hello');
+ charindex 
+-----------
+         0
+(1 row)
+
+select CHARINDEX(NULL, NULL);
+ charindex 
+-----------
+          
+(1 row)
+
+select CHARINDEX(NULL, 'string');
+ charindex 
+-----------
+          
+(1 row)
+
+select CHARINDEX('pattern', NULL);
+ charindex 
+-----------
+          
+(1 row)
+
+select CHARINDEX('pattern', 'string', NULL);
+ charindex 
+-----------
+          
+(1 row)
+
+select CHARINDEX('hello', 'hello world', -1);
+ charindex 
+-----------
+         1
+(1 row)
+
+select CHARINDEX('hello', 'hello world', 0);
+ charindex 
+-----------
+         1
+(1 row)
+
+select CHARINDEX('hello', 'hello world', 1);
+ charindex 
+-----------
+         1
+(1 row)
+
+select CHARINDEX('hello', 'hello world', 2);
+ charindex 
+-----------
+         0
+(1 row)
+
+select CHARINDEX('world', 'hello world', 6);
+ charindex 
+-----------
+         7
+(1 row)
+
+select CHARINDEX('world', 'hello world', 7);
+ charindex 
+-----------
+         7
+(1 row)
+
+select CHARINDEX('world', 'hello world', 8);
+ charindex 
+-----------
+         0
+(1 row)
+
+select CHARINDEX('is', 'This is a string');
+ charindex 
+-----------
+         3
+(1 row)
+
+select CHARINDEX('is', 'This is a string', 4);
+ charindex 
+-----------
+         6
+(1 row)
+
+select atn2(1.23423::int1, 2.3412::int1);
+       atn2       
+------------------
+ .463647609000806
+(1 row)
+
+select atn2(1.23423::int2, 2.3412::int2);
+       atn2       
+------------------
+ .463647609000806
+(1 row)
+
+select atn2(1.23423::int4, 2.3412::int4);
+       atn2       
+------------------
+ .463647609000806
+(1 row)
+
+select atn2(1.23423::int8, 2.3412::int8);
+       atn2       
+------------------
+ .463647609000806
+(1 row)
+
+select atn2(1.23423::real, 2.3412::real);
+       atn2       
+------------------
+ .485153152627375
+(1 row)
+
+select atn2(1.23423::numeric, 2.3412::numeric);
+       atn2       
+------------------
+ .485153158718424
+(1 row)
+
+select atn2('1.23423', '2.3412');
+       atn2       
+------------------
+ .485153158718424
+(1 row)
+
+select atn2(2::int4, 1.2345::real);
+       atn2       
+------------------
+ 1.01778944809654
+(1 row)
+
+select atn2(1.2345::double precision, 1234::int4);
+        atn2        
+--------------------
+ .00100040485264725
+(1 row)
+
+select atn2('123,345', 123);
+ERROR:  invalid input syntax for type double precision: "123,345"
+LINE 1: select atn2('123,345', 123);
+                    ^
+CONTEXT:  referenced column: atn2
+CREATE VIEW atn2_1 AS (
+    SELECT
+        ATN2(CAST(2 AS INT), CAST(3 AS INT)) AS res1,
+        ATN2(CAST(2.5 AS FLOAT), CAST(3.5 AS FLOAT)) AS res2,
+        ATN2(CAST(2.5 AS REAL), CAST(3.5 AS REAL)) AS res3,
+        ATN2(CAST(2.5 AS BIGINT), CAST(3.5 AS BIGINT)) AS res4,
+        ATN2(CAST(2.5 AS SMALLINT), CAST(3.5 AS SMALLINT)) AS res5,
+        ATN2(CAST(2.5 AS TINYINT), CAST(3.5 AS TINYINT)) AS res6,
+        ATN2(CAST(2.5 AS DECIMAL), CAST(3.5 AS DECIMAL)) AS res7,
+        ATN2(CAST(2.5 AS NUMERIC), CAST(3.5 AS NUMERIC)) AS res8,
+        ATN2(CAST('2.5' AS CHAR), CAST('3.5' AS CHAR)) AS res9,
+        ATN2(CAST('2.5' AS VARCHAR), CAST('3.5' AS VARCHAR)) AS res10,
+        ATN2(CAST('2.5' AS BPCHAR), CAST('3.5' AS BPCHAR)) AS res11,
+        ATN2(CAST('2.5' AS NVARCHAR2), CAST('3.5' AS NVARCHAR2)) AS res12
+    );
+select * from atn2_1;
+       res1       |       res2       |       res3       |       res4       |       res5       |       res6       |       res7       |       res8       |       res9       |      res10       |      res11       |      res12       
+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------+------------------
+ .588002603547568 | .620249485982821 | .620249485982821 | .643501108793284 | .643501108793284 | .643501108793284 | .620249485982821 | .620249485982821 | .588002603547568 | .620249485982821 | .620249485982821 | .620249485982821
+(1 row)
+
+drop view atn2_1;
+select ISNULL(NULL, 1);
+ isnull 
+--------
+      1
+(1 row)
+
+select ISNULL(2, 1);
+ isnull 
+--------
+      2
+(1 row)
+
+select ISNULL();
+ERROR:  function isnull() does not exist
+LINE 1: select ISNULL();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: isnull
+select ISNULL();
+ERROR:  function isnull() does not exist
+LINE 1: select ISNULL();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: isnull
+select log10(10);
+ log10 
+-------
+     1
+(1 row)
+
+select log10(10::real);
+ log10 
+-------
+     1
+(1 row)
+
+select log10(10::double precision);
+ log10 
+-------
+     1
+(1 row)
+
+select log10(10::numeric);
+ log10 
+-------
+     1
+(1 row)
+
+select atn2('abc', '2.3412');
+ERROR:  invalid input syntax for type double precision: "abc"
+CONTEXT:  PL/pgSQL function atn2(character varying,character varying) line 3 at RETURN
+referenced column: atn2
+select atn2(123::varbinary, '2343'::varbinary);
+ERROR:  function atn2(varbinary, varbinary) does not exist
+LINE 1: select atn2(123::varbinary, '2343'::varbinary);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: atn2
+select log10('abc');
+ERROR:  invalid input syntax for type double precision: "abc"
+LINE 1: select log10('abc');
+                     ^
+CONTEXT:  referenced column: log10
+select log10(10::vharchar);
+ERROR:  type "vharchar" does not exist
+LINE 1: select log10(10::vharchar);
+                         ^
+CONTEXT:  referenced column: log10
+select log10(now());
+ERROR:  function log10(timestamp with time zone) does not exist
+LINE 1: select log10(now());
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: log10
+select ISNULL('abc', 123);
+ERROR:  invalid input syntax for integer: "abc"
+LINE 1: select ISNULL('abc', 123);
+                      ^
+CONTEXT:  referenced column: isnull
+SELECT CONVERT(DATE, '');
+ shark_conv_helper_to_date 
+---------------------------
+ 01-01-1900
+(1 row)
+
+SELECT CONVERT(DATE, '', 130);
+ERROR:  function sys.shark_conv_hijri_to_greg(character varying, character varying, character varying) does not exist
+LINE 1: SELECT sys.shark_conv_hijri_to_greg(v_day, v_month, v_year)-...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+QUERY:  SELECT sys.shark_conv_hijri_to_greg(v_day, v_month, v_year)- 1
+CONTEXT:  PL/pgSQL function shark_conv_string_to_datetime2(text,text,numeric) line 485 at assignment
+PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
+referenced column: shark_conv_helper_to_date
+SELECT CONVERT(DATE, '3-2-4');
+ERROR:  The style 0 is not supported for conversions from varchar to date.
+DETAIL:  Use of incorrect "style" parameter value during conversion process.
+HINT:  Change "style" parameter to the proper value and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
+referenced column: shark_conv_helper_to_date
+SELECT CONVERT(DATE, '3-12-2024');
+ shark_conv_helper_to_date 
+---------------------------
+ 03-12-2024
+(1 row)
+
+SELECT CONVERT(DATE, '11-12-2024');
+ shark_conv_helper_to_date 
+---------------------------
+ 11-12-2024
+(1 row)
+
+SELECT CONVERT(DATE, '3.2.4');
+ERROR:  The style 0 is not supported for conversions from varchar to date.
+DETAIL:  Use of incorrect "style" parameter value during conversion process.
+HINT:  Change "style" parameter to the proper value and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
+referenced column: shark_conv_helper_to_date
+SELECT CONVERT(DATE, '3.12.2024');
+ shark_conv_helper_to_date 
+---------------------------
+ 03-12-2024
+(1 row)
+
+SELECT CONVERT(DATE, '11.12.2024');
+ shark_conv_helper_to_date 
+---------------------------
+ 11-12-2024
+(1 row)
+
+SELECT CONVERT(DATE, '3/2/4');
+ERROR:  The style 0 is not supported for conversions from varchar to date.
+DETAIL:  Use of incorrect "style" parameter value during conversion process.
+HINT:  Change "style" parameter to the proper value and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
+referenced column: shark_conv_helper_to_date
+SELECT CONVERT(DATE, '3/12/2024');
+ shark_conv_helper_to_date 
+---------------------------
+ 03-12-2024
+(1 row)
+
+SELECT CONVERT(DATE, '11/12/2024');
+ shark_conv_helper_to_date 
+---------------------------
+ 11-12-2024
+(1 row)
+
+SELECT CONVERT(DATE, '9999-12-30 23:59:59.9999999');
+ shark_conv_helper_to_date 
+---------------------------
+ 12-30-9999
+(1 row)
+
+SELECT CONVERT(DATE, '9999-12-30 23:59:59.99999999');
+ shark_conv_helper_to_date 
+---------------------------
+ 12-30-9999
+(1 row)
+
+SELECT CONVERT(DATE, '9999-12-30 23:59:59.999999999');
+ shark_conv_helper_to_date 
+---------------------------
+ 12-30-9999
+(1 row)
+
+SELECT CONVERT(DATE, '9999-12-30 23:59:59.9999999999');
+ERROR:  Conversion failed when converting date and/or time from character string.
+DETAIL:  Incorrect using of pair of input parameters values during conversion process.
+HINT:  Check the input parameters values, correct them if needed, and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
+referenced column: shark_conv_helper_to_date
+SELECT CONVERT(DATE, '9999-12-31 23:59:59.9999999');
+ shark_conv_helper_to_date 
+---------------------------
+ 12-31-9999
+(1 row)
+
+SELECT CONVERT(DATE, '9999-12-31 23:59:59.99999999');
+ shark_conv_helper_to_date 
+---------------------------
+ 12-31-9999
+(1 row)
+
+SELECT CONVERT(DATE, '9999-12-31 23:59:59.999999999');
+ shark_conv_helper_to_date 
+---------------------------
+ 12-31-9999
+(1 row)
+
+SELECT CONVERT(DATE, '9999-12-31 23:59:59.9999999999');
+ERROR:  Conversion failed when converting date and/or time from character string.
+DETAIL:  Incorrect using of pair of input parameters values during conversion process.
+HINT:  Check the input parameters values, correct them if needed, and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
+referenced column: shark_conv_helper_to_date
+SELECT CONVERT(DATE,'2023-00-01');
+ERROR:  The conversion of a varchar data type to a date data type resulted in an out-of-range value.
+DETAIL:  Use of incorrect pair of input parameter values during conversion process.
+HINT:  Check input parameter values, correct them if needed, and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
+referenced column: shark_conv_helper_to_date
+SELECT CONVERT(DATE,'0000-00-00');
+ERROR:  The conversion of a varchar data type to a date data type resulted in an out-of-range value.
+DETAIL:  Use of incorrect pair of input parameter values during conversion process.
+HINT:  Check input parameter values, correct them if needed, and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
+referenced column: shark_conv_helper_to_date
+SELECT CONVERT(DATE,'1752-01-01');
+ shark_conv_helper_to_date 
+---------------------------
+ 01-01-1752
+(1 row)
+
+SELECT CONVERT(DATE,'1753-01-01');
+ shark_conv_helper_to_date 
+---------------------------
+ 01-01-1753
+(1 row)
+
+SELECT CONVERT(DATE, 'Apr 12,2000');
+ERROR:  invalid input syntax for integer: "apr"
+CONTEXT:  referenced column: array_position
+SQL statement "SELECT array_position(ARRAY(SELECT pg_catalog.lower(json_array_elements_text(p_lang_metadata_json -> 'months_shortnames'))), v_monthname)"
+PL/pgSQL function shark_get_monthnum_by_name(text,json) line 8 at assignment
+PL/pgSQL function shark_conv_string_to_datetime2(text,text,numeric) line 224 at assignment
+PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
+referenced column: shark_conv_helper_to_date
+SELECT CONVERT(TIME, '11 AM');
+ shark_conv_helper_to_time 
+---------------------------
+ 11:00:00
+(1 row)
+
+SELECT CONVERT(TIME, '11 PM');
+ shark_conv_helper_to_time 
+---------------------------
+ 23:00:00
+(1 row)
+
+SELECT CONVERT(TIME, '0 AM');
+ shark_conv_helper_to_time 
+---------------------------
+ 00:00:00
+(1 row)
+
+SELECT CONVERT(TIME, '0 PM');
+ERROR:  The conversion of a varchar data type to a time data type resulted in an out-of-range value.
+DETAIL:  Use of incorrect pair of input parameter values during conversion process.
+HINT:  Check input parameter values, correct them if needed, and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_time(integer,text,boolean,numeric) line 14 at RETURN
+referenced column: shark_conv_helper_to_time
+SELECT CONVERT(TIME, '11:22.123 AM');
+ERROR:  Conversion failed when converting date and/or time from character string.
+DETAIL:  Incorrect using of pair of input parameters values during conversion process.
+HINT:  Check the input parameters values, correct them if needed, and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_time(integer,text,boolean,numeric) line 14 at RETURN
+referenced column: shark_conv_helper_to_time
+SELECT CONVERT(TIME, '11 AM -05:12');
+ shark_conv_helper_to_time 
+---------------------------
+ 11:00:00
+(1 row)
+
+SELECT CONVERT(TIME, '13 AM +05:12');
+ERROR:  The conversion of a varchar data type to a time data type resulted in an out-of-range value.
+DETAIL:  Use of incorrect pair of input parameter values during conversion process.
+HINT:  Check input parameter values, correct them if needed, and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_time(integer,text,boolean,numeric) line 14 at RETURN
+referenced column: shark_conv_helper_to_time
+SELECT CONVERT(TIMESTAMP, '');
+ shark_conv_helper_to_datetime2 
+--------------------------------
+ Mon Jan 01 00:00:00 1900
+(1 row)
+
+SELECT CONVERT(TIMESTAMP, '3-12-2024 14:30');
+ shark_conv_helper_to_datetime2 
+--------------------------------
+ Tue Mar 12 14:30:00 2024
+(1 row)
+
+SELECT CONVERT(TIMESTAMP, '3.12.2024 14:30');
+ shark_conv_helper_to_datetime2 
+--------------------------------
+ Tue Mar 12 14:30:00 2024
+(1 row)
+
+SELECT CONVERT(TIMESTAMP, '3/12/2024 14:30');
+ shark_conv_helper_to_datetime2 
+--------------------------------
+ Tue Mar 12 14:30:00 2024
+(1 row)
+
+SELECT CONVERT(TIMESTAMP, '2022-10-30T03:00:00');
+ shark_conv_helper_to_datetime2 
+--------------------------------
+ Sun Oct 30 03:00:00 2022
+(1 row)
+
+SELECT CONVERT(TIMESTAMP, '2022-10-30T03:00:00.123');
+ shark_conv_helper_to_datetime2 
+--------------------------------
+ Sun Oct 30 03:00:00.123 2022
+(1 row)
+
+SELECT CONVERT(TIMESTAMP, '2022-10-30T03:00:00.123-12:12');
+ shark_conv_helper_to_datetime2 
+--------------------------------
+ Sun Oct 30 03:00:00.123 2022
+(1 row)
+
+SELECT CONVERT(TIMESTAMP, '2022-10-30T03:00:00.123+12:12');
+ shark_conv_helper_to_datetime2 
+--------------------------------
+ Sun Oct 30 03:00:00.123 2022
+(1 row)
+
+SELECT CONVERT(TIMESTAMP, '2022-10-30T03:00:00.12345');
+ shark_conv_helper_to_datetime2 
+--------------------------------
+ Sun Oct 30 03:00:00.12345 2022
+(1 row)
+
+SELECT CONVERT(TIMESTAMP, '2022-10-30T03:00:00:12345');
+ERROR:  Conversion failed when converting date and/or time from character string.
+DETAIL:  Incorrect using of pair of input parameters values during conversion process.
+HINT:  Check the input parameters values, correct them if needed, and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_datetime2(integer,text,boolean,numeric) line 14 at RETURN
+referenced column: shark_conv_helper_to_datetime2
+SELECT CONVERT(TIMESTAMPTZ, '');
+ shark_conv_helper_to_datetimeoffset 
+-------------------------------------
+ Sun Dec 31 16:00:00 1899 PST
+(1 row)
+
+SELECT CONVERT(TIMESTAMPTZ, '', 130);
+ERROR:  function sys.shark_conv_hijri_to_greg(character varying, character varying, character varying) does not exist
+LINE 1: SELECT sys.shark_conv_hijri_to_greg(v_day, v_month, v_year)-...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+QUERY:  SELECT sys.shark_conv_hijri_to_greg(v_day, v_month, v_year)- 1
+CONTEXT:  PL/pgSQL function shark_conv_string_to_datetime2(text,text,numeric) line 485 at assignment
+PL/pgSQL function shark_conv_string_to_datetimeoffset(text,text,numeric) line 26 at assignment
+PL/pgSQL function shark_conv_helper_to_datetimeoffset(integer,text,boolean,numeric) line 14 at RETURN
+referenced column: shark_conv_helper_to_datetimeoffset
+SELECT CONVERT(TIMESTAMPTZ, '3-12-2024 14:30 +8:00');
+ shark_conv_helper_to_datetimeoffset 
+-------------------------------------
+ Mon Mar 11 23:30:00 2024 PDT
+(1 row)
+
+select CONVERT(varchar(30), CAST('2017-08-25' AS DATE), 102);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 2017.08.25
+(1 row)
+
+select CONVERT(varchar(30), CAST('13:01:59' AS TIME), 8);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 13:01:59
+(1 row)
+
+select CONVERT(varchar(30), CAST('13:01:59' AS TIME), 22);
+ shark_conv_helper_to_varchar 
+------------------------------
+  1:01:59 PM
+(1 row)
+
+select CONVERT(varchar(30), CAST('13:01:59' AS TIME), 22);
+ shark_conv_helper_to_varchar 
+------------------------------
+  1:01:59 PM
+(1 row)
+
+select CONVERT(varchar(30), CAST('2017-08-25 13:01:59' AS TIMESTAMP), 100);
+ shark_conv_helper_to_varchar 
+------------------------------
+ Aug 25 2017  1:01PM
+(1 row)
+
+select CONVERT(varchar(30), CAST('2017-08-25 13:01:59' AS TIMESTAMP), 109);
+ shark_conv_helper_to_varchar 
+------------------------------
+ Aug 25 2017  1:01:59:000PM
+(1 row)
+
+select CONVERT(DATE, '08/25/2017', 101);
+ shark_conv_helper_to_date 
+---------------------------
+ 08-25-2017
+(1 row)
+
+select CONVERT(TIME, '12:01:59', 101);
+ shark_conv_helper_to_time 
+---------------------------
+ 12:01:59
+(1 row)
+
+select CONVERT(TIMESTAMP, '2017-08-25 01:01:59PM', 120);
+ shark_conv_helper_to_datetime2 
+--------------------------------
+ Fri Aug 25 13:01:59 2017
+(1 row)
+
+select CONVERT(varchar, current_date, 8);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 
+(1 row)
+
+select CONVERT(varchar, current_date, 1);
+ shark_conv_helper_to_varchar 
+------------------------------
+--?.*
+(1 row)
+
+select CONVERT(varchar, localtime, 1);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 
+(1 row)
+
+select CONVERT(varchar, localtime, 8);
+ shark_conv_helper_to_varchar 
+------------------------------
+--?.*
+(1 row)
+
+select CONVERT(varchar(30), CAST(11234561231231.234 AS float), 1);
+  shark_conv_helper_to_varchar  
+--------------------------------
+ 1.1234561e+13                 
+(1 row)
+
+select CONVERT(varchar(30), CAST(11234561231231.234 AS float), 2);
+  shark_conv_helper_to_varchar  
+--------------------------------
+ 1.123456123123123e+13         
+(1 row)
+
+select CONVERT(varchar(30), CAST(11234561231231.234 AS float), 3);
+  shark_conv_helper_to_varchar  
+--------------------------------
+ 1.1234561231231234e+13        
+(1 row)
+
+select CONVERT(varchar(10), CAST(4936.56 AS MONEY), 0);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 4936.56
+(1 row)
+
+select CONVERT(varchar(10), CAST(4936.56 AS MONEY), 1);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 4,936.56
+(1 row)
+
+select CONVERT(varchar(10), CAST(4936.56 AS MONEY), 2);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 4936.5600
+(1 row)
+
+select CONVERT(varchar(10), CAST(-4936.56 AS MONEY), 0);
+ shark_conv_helper_to_varchar 
+------------------------------
+ -4936.56
+(1 row)
+
+SELECT CONVERT(int, 99.9);
+ int4 
+------
+  100
+(1 row)
+
+SELECT CONVERT(smallint, 99.9);
+ int2 
+------
+  100
+(1 row)
+
+SELECT CONVERT(bigint, 99.9);
+ int8 
+------
+  100
+(1 row)
+
+SELECT CONVERT(int, -99.9);
+ int4 
+------
+ -100
+(1 row)
+
+SELECT CONVERT(int, '99');
+ int4 
+------
+   99
+(1 row)
+
+SELECT CONVERT(int, CAST(99.9 AS double precision));
+ int4 
+------
+  100
+(1 row)
+
+SELECT CONVERT(int, CAST(99.9 AS real));
+ int4 
+------
+  100
+(1 row)
+
+select TRY_CONVERT(varchar(30), CAST('2017-08-25' AS DATE), 102);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 08-25-2017
+(1 row)
+
+select TRY_CONVERT(varchar(30), CAST('13:01:59' AS TIME), 8);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 13:01:59
+(1 row)
+
+select TRY_CONVERT(varchar(30), CAST('13:01:59' AS TIME), 22);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 13:01:59
+(1 row)
+
+select TRY_CONVERT(varchar(30), CAST('2017-08-25 13:01:59' AS TIMESTAMP), 109);
+ shark_conv_helper_to_varchar 
+------------------------------
+ Fri Aug 25 13:01:59 2017
+(1 row)
+
+select TRY_CONVERT(varchar(30), CAST('11234561231231.234' AS float), 0);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 11234561231231.2
+(1 row)
+
+select TRY_CONVERT(varchar(30), CAST('11234561231231.234'AS float), 1);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 11234561231231.2
+(1 row)
+
+select TRY_CONVERT(varchar(10), CAST(4936.56 AS MONEY), 0);
+ shark_conv_helper_to_varchar 
+------------------------------
+ 4936.56
+(1 row)
+
+select TRY_CAST('08/25/2017' AS date);
+ shark_try_cast_to_any 
+-----------------------
+ 08-25-2017
+(1 row)
+
+select TRY_CAST('12:01:59' AS time);
+ shark_try_cast_to_any 
+-----------------------
+ 12:01:59
+(1 row)
+
+select TRY_CAST(123 AS float);
+ shark_try_cast_to_any 
+-----------------------
+                   123
+(1 row)
+
+select TRY_CAST('123' AS int);
+ shark_try_cast_floor_int 
+--------------------------
+                      123
+(1 row)
+
+select TRY_CAST('123' AS text);
+ shark_try_cast_to_any 
+-----------------------
+ 123
+(1 row)
+
+select TRY_CAST('123.456' AS numeric(6,3));
+ shark_try_cast_to_any 
+-----------------------
+               123.456
+(1 row)
+
+select TRY_CAST(123.456 AS numeric(6,3));
+ shark_try_cast_to_any 
+-----------------------
+               123.456
+(1 row)
+
+select TRY_CAST('123' As smallint);
+ shark_try_cast_floor_smallint 
+-------------------------------
+                           123
+(1 row)
+
+select TRY_CAST('1234567890' AS bigint);
+ shark_try_cast_floor_bigint 
+-----------------------------
+                  1234567890
+(1 row)
+
+select TRY_CAST(CAST(12.56 as numeric(4,2)) As smallint);
+ shark_try_cast_floor_smallint 
+-------------------------------
+                              
+(1 row)
+
+select TRY_CAST(CAST(1.56 as real) As smallint);
+ shark_try_cast_floor_smallint 
+-------------------------------
+                              
+(1 row)
+
+select TRY_CAST(CAST(1.56 as money) As smallint);
+ shark_try_cast_floor_smallint 
+-------------------------------
+                              
+(1 row)
+
+select TRY_CAST(4936.56 AS MONEY);
+ shark_try_cast_to_any 
+-----------------------
+             $4,936.56
+(1 row)
+
+reset search_path;
+drop schema functions_test2 cascade;

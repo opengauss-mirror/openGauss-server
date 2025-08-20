@@ -280,6 +280,7 @@ typedef struct _tableInfo {
     int numatts;                        /* number of attributes */
     char** attnames;                    /* the attribute names */
     char** column_key_names;            /* column key names */
+    char** column_key_namespaces;       /* column key namespaces */
     int* encryption_type;               /* encryption type */
     char** atttypnames;                 /* attribute type names */
     int* typid;                         /* attribute type oid */

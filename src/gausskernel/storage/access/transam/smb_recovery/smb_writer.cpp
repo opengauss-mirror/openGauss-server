@@ -55,7 +55,22 @@ void InitSMBWriter()
     if (g_instance.smb_cxt.NSMBBuffers % BLOCKS_PER_CHUNK) {
         g_instance.smb_cxt.chunkNum++;
     }
-    g_instance.smb_cxt.SMBWriterPID = initialize_util_thread(SMBWRITER);
+
+    if (g_instance.smb_cxt.SMBWriterPID == 0) {
+        g_instance.smb_cxt.SMBWriterPID = initialize_util_thread(SMBWRITER);
+    }
+}
+
+void KillSMBWriterThreads(void)
+{
+    if (g_instance.smb_cxt.SMBWriterPID != 0) {
+        signal_child(g_instance.smb_cxt.SMBWriterPID, SIGTERM, -1);
+        for (int i = 0; i < smb_recovery::SMB_BUF_MGR_NUM - 1; i++) {
+            if (g_instance.smb_cxt.SMBWriterAuxPID[i] != 0) {
+                signal_child(g_instance.smb_cxt.SMBWriterAuxPID[i], SIGTERM, -1);
+            }
+        }
+    }
 }
 
 static uint32 SMBGetHashCode(BufferTag tag)
@@ -92,21 +107,28 @@ static void SetupSignalHandlers()
     (void)gs_signal_unblock_sigusr2();
 }
 
-bool CheckPagePullDoneFromSMB(SMBAnalyseBucket *bucket, BufferTag tag, bool *getSharedLock)
+static bool IsPagePullDone(SMBAnalyseItem *item)
+{
+    if (item == NULL || item->is_verified) {
+        return true;
+    }
+    return false;
+}
+
+bool CheckPagePullDoneFromSMB(SMBAnalyseBucket *bucket, BufferTag tag, bool &getSharedLock)
 {
     if (!LWLockConditionalAcquire(&bucket->lock, LW_SHARED)) {
-        *getSharedLock = false;
+        getSharedLock = false;
         return false;
     }
-    *getSharedLock = true;
+    getSharedLock = true;
 
     SMBAnalyseItem *item = SMBAlyGetPageItem(tag);
-    if (item == NULL || item->is_verified) {
+    if (IsPagePullDone(item)) {
         LWLockRelease(&bucket->lock);
         return true;
     }
-    if (item->lsn < g_instance.smb_cxt.smb_start_lsn ||
-        item->lsn > g_instance.smb_cxt.smb_end_lsn) {
+    if (item->lsn < g_instance.smb_cxt.smb_start_lsn) {
         item->is_verified = true;
         LWLockRelease(&bucket->lock);
         return true;
@@ -115,23 +137,22 @@ bool CheckPagePullDoneFromSMB(SMBAnalyseBucket *bucket, BufferTag tag, bool *get
     return false;
 }
 
-bool TryLockBucket(SMBAnalyseBucket *bucket, BufferTag tag, bool *noNeedRedo)
+bool TryLockBucket(SMBAnalyseBucket *bucket, BufferTag tag, bool &noNeedRedo)
 {
     if (!LWLockConditionalAcquire(&bucket->lock, LW_EXCLUSIVE)) {
-        *noNeedRedo = false;
+        noNeedRedo = false;
         return false;
     }
     SMBAnalyseItem *item = SMBAlyGetPageItem(tag);
-    if (item == NULL || item->is_verified) {
+    if (IsPagePullDone(item)) {
         LWLockRelease(&bucket->lock);
-        *noNeedRedo = true;
+        noNeedRedo = true;
         return false;
     }
-    if (item->lsn < g_instance.smb_cxt.smb_start_lsn ||
-        item->lsn > g_instance.smb_cxt.smb_end_lsn) {
+    if (item->lsn < g_instance.smb_cxt.smb_start_lsn) {
         item->is_verified = true;
         LWLockRelease(&bucket->lock);
-        *noNeedRedo = true;
+        noNeedRedo = true;
         return false;
     }
     return true;
@@ -142,16 +163,37 @@ int CheckPagePullStateFromSMB(BufferTag tag)
     bool noNeedRedo = false;
     bool getSharedLock = false;
     SMBAnalyseBucket *bucket = SMBAlyGetBucket(tag);
-    if (CheckPagePullDoneFromSMB(bucket, tag, &getSharedLock)) {
-        return SMB_REDO_DONE;
+
+    /* attempting to obtain a shared lock and check page state, if page has been pulled, return REDO_DONE */
+    if (CheckPagePullDoneFromSMB(bucket, tag, getSharedLock)) {
+        ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+            errmsg("CheckPagePullStateFromSMB, block redo done: spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode,
+                tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
+        return SMB_PAGE_REDO_DONE;
+    /* get shared lock failed, means other process is pulling this page, return REDOING */
     } else if (!getSharedLock) {
-        return SMB_REDOING;
-    } else if (TryLockBucket(bucket, tag, &noNeedRedo)) {
-        return SMB_NEED_REDO;
+        return SMB_PAGE_REDOING;
+    /* if get exclusive lock and the page has not been pulled before, return NEED_REDO */
+    } else if (TryLockBucket(bucket, tag, noNeedRedo)) {
+        ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+            errmsg("CheckPagePullStateFromSMB, block need to redo and has got bucket lock: "
+                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode,
+                tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
+        return SMB_PAGE_NEED_REDO;
+    /* if page has been pulled before, return REDO_DONE */
     } else if (noNeedRedo) {
-        return SMB_REDO_DONE;
+        ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+            errmsg("CheckPagePullStateFromSMB, block no need to redo: "
+                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode,
+                tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
+        return SMB_PAGE_REDO_DONE;
     }
-    return SMB_REDOING;
+
+    /* get exclusive lock failed, means other process is pulling this page, return REDOING */
+    return SMB_PAGE_REDOING;
 }
 
 SMBBufItem *SMBWriterTagGetItem(BufferTag tag)
@@ -175,8 +217,13 @@ bool CheckPagePullDoneFromSMBAndLock(SMBAnalyseBucket *bucket, BufferTag tag)
 {
     if (LWLockHeldByMe(&bucket->lock)) {
         Assert(LWLockHeldByMeInMode(&bucket->lock, LW_EXCLUSIVE));
+        ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+            errmsg("CheckPagePullDoneFromSMBAndLock, block lock has been locked when pinbuffer: "
+                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode,
+                tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
         SMBAnalyseItem *alyItem = SMBAlyGetPageItem(tag);
-        if (alyItem == NULL || alyItem->is_verified) {
+        if (IsPagePullDone(alyItem)) {
             LWLockRelease(&bucket->lock);
             return true;
         }
@@ -184,16 +231,22 @@ bool CheckPagePullDoneFromSMBAndLock(SMBAnalyseBucket *bucket, BufferTag tag)
     }
     (void)LWLockAcquire(&bucket->lock, LW_SHARED);
     SMBAnalyseItem *alyItem = SMBAlyGetPageItem(tag);
-    if (alyItem == NULL || alyItem->is_verified) {
+    if (IsPagePullDone(alyItem)) {
         LWLockRelease(&bucket->lock);
         return true;
     }
     LWLockRelease(&bucket->lock);
     (void)LWLockAcquire(&bucket->lock, LW_EXCLUSIVE);
-    if (alyItem == NULL || alyItem->is_verified) {
+    if (IsPagePullDone(alyItem)) {
         LWLockRelease(&bucket->lock);
         return true;
     }
+
+    ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+            errmsg("CheckPagePullDoneFromSMBAndLock, block need to redo and has got bucket lock: "
+                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode,
+                tag.rnode.bucketNode, tag.forkNum, tag.blockNum)));
     return false;
 }
 
@@ -205,22 +258,30 @@ void SMBPullOnePageWithBuf(BufferDesc *bufHdr)
     int buf;
     Page page;
     Page curPage;
+    uint32 shiftSize = 32;
     XLogRecPtr expectLsn;
     errno_t rc = EOK;
     SMBBufItem *item;
     SMBBufMetaMem *mgr = g_instance.smb_cxt.SMBBufMgr;
     SMBAnalyseBucket *bucket = SMBAlyGetBucket(bufHdr->tag);
-    SMBAnalyseItem *alyItem = SMBAlyGetPageItem(bufHdr->tag);
-    if (alyItem == NULL || alyItem->is_verified) {
-        return;
-    }
 
     if (CheckPagePullDoneFromSMBAndLock(bucket, bufHdr->tag)) {
+        ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+            errmsg("SMBPullOnePageWithBuf, block redo done: "
+                "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
+                bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode, bufHdr->tag.rnode.relNode,
+                bufHdr->tag.rnode.bucketNode, bufHdr->tag.forkNum, bufHdr->tag.blockNum)));
         return;
     }
 
+    SMBAnalyseItem *alyItem = SMBAlyGetPageItem(bufHdr->tag);
     expectLsn = alyItem->lsn;
     item = SMBWriterTagGetItem(bufHdr->tag);
+    if (item == NULL) {
+        alyItem->is_verified = true;
+        LWLockRelease(&bucket->lock);
+        return;
+    }
     page = SMBWriterGetPage(item->id);
     buf = BufferDescriptorGetBuffer(bufHdr);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
@@ -235,6 +296,13 @@ void SMBPullOnePageWithBuf(BufferDesc *bufHdr)
     }
     alyItem->is_verified = true;
     LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+
+    ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+        errmsg("SMBPullOnePageWithBuf, block pull done: "
+            "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, lsn: %X/%X.",
+            bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode, bufHdr->tag.rnode.relNode,
+            bufHdr->tag.rnode.bucketNode, bufHdr->tag.forkNum, bufHdr->tag.blockNum,
+            static_cast<uint32>(PageGetLSN(curPage) >> shiftSize), static_cast<uint32>(PageGetLSN(curPage)))));
     LWLockRelease(&bucket->lock);
 }
 
@@ -256,11 +324,10 @@ static void SMBPullOnePage(BufferTag tag, int id)
     }
 
     SMBAnalyseBucket *bucket = SMBAlyGetBucket(tag);
+    LWLockAcquire(&bucket->lock, LW_EXCLUSIVE);
     SMBAnalyseItem *analyseItem = SMBAlyGetPageItem(tag);
-    if (ENABLE_ASYNC_REDO) {
-        LWLockAcquire(&bucket->lock, LW_EXCLUSIVE);
-    }
     if (analyseItem == NULL) {
+        LWLockRelease(&bucket->lock);
         ereport(ERROR, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
             errmsg("SMB can't find the item spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u.",
                 tag.rnode.spcNode, tag.rnode.dbNode, tag.rnode.relNode, tag.rnode.bucketNode,
@@ -269,6 +336,7 @@ static void SMBPullOnePage(BufferTag tag, int id)
     }
 
     if (analyseItem->is_verified) {
+        LWLockRelease(&bucket->lock);
         return;
     }
     expectLsn = analyseItem->lsn;
@@ -296,9 +364,7 @@ static void SMBPullOnePage(BufferTag tag, int id)
     }
     UnlockReleaseBuffer(buf);
     analyseItem->is_verified = true;
-    if (ENABLE_ASYNC_REDO) {
-        LWLockRelease(&bucket->lock);
-    }
+    LWLockRelease(&bucket->lock);
 }
 
 static void SMBPullPages()
@@ -700,6 +766,18 @@ static void SMBWriterResetMgr()
     }
 }
 
+static void StartAuxiliaryWriters()
+{
+    if (g_instance.smb_cxt.shutdownSMBWriter) {
+        return;
+    }
+    for (int i = 0; i < SMB_BUF_MGR_NUM - 1; i++) {
+        if (g_instance.smb_cxt.SMBWriterAuxPID[i] == 0 && g_instance.smb_cxt.SMBBufMgr != NULL) {
+            g_instance.smb_cxt.SMBWriterAuxPID[i] = initialize_util_thread(SMBWRITERAUXILIARY);
+        }
+    }
+}
+
 static bool IsSMBWriterAuxWriting()
 {
     for (int i = 0; i < SMB_BUF_MGR_NUM - 1; i++) {
@@ -710,21 +788,10 @@ static bool IsSMBWriterAuxWriting()
     return false;
 }
 
-void SMBWriterMain(void)
+static void SMBRecoveryProcess()
 {
-    ereport(LOG, (errmsg("SMB Writer Start.")));
-    pgstat_report_appname("SMB Writer");
-    pgstat_report_activity(STATE_IDLE, NULL);
-    t_thrd.role = SMBWRITER;
-    SetupSignalHandlers();
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "SMBWriterThread",
-        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
-    MemoryContext ctx = AllocSetContextCreate(g_instance.instance_context, "SMBWriter",
-        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
-    (void)MemoryContextSwitchTo(ctx);
-    SMBWriterMemCreate();
-
-    while (RecoveryInProgress()) {
+    while (!g_instance.smb_cxt.shutdownSMBWriter && RecoveryInProgress()) {
+        /* when SMB acceleration is needed during recovery, mount here. */
         if (g_instance.smb_cxt.analyze_end_flag && g_instance.smb_cxt.analyze_aux_end_flag
             && g_instance.smb_cxt.SMBBufMgr == NULL) {
             ereport(LOG, (errmsg("SMB mount during redo")));
@@ -737,29 +804,20 @@ void SMBWriterMain(void)
             g_instance.smb_cxt.analyze_end_flag = false;
             g_instance.smb_cxt.analyze_aux_end_flag = false;
             ereport(LOG, (errmsg("SMB pull page end.")));
+            RequestCheckpoint(CHECKPOINT_FORCE | CHECKPOINT_IMMEDIATE | CHECKPOINT_WAIT);
         }
         pg_usleep(10000L);
     }
+}
 
-    if (g_instance.smb_cxt.ctx != NULL) {
-        MemoryContextDelete(g_instance.smb_cxt.ctx);
-    }
-    if (g_instance.smb_cxt.SMBBufMgr == NULL) {
-        ereport(LOG, (errmsg("SMB mount after redo")));
-        SMBWriterMemMount();
-    }
-    t_thrd.xlog_cxt.InRecovery = false;
-    g_instance.smb_cxt.has_gap = true;
-
-    for (int i = 0; i < SMB_BUF_MGR_NUM - 1; i++) {
-        if (g_instance.smb_cxt.SMBWriterAuxPID[i] == 0) {
-            g_instance.smb_cxt.SMBWriterAuxPID[i] = initialize_util_thread(SMBWRITERAUXILIARY);
-        }
-    }
-
+static void SMBWriterMainThreadLoop()
+{
     for (;;) {
         instr_time start;
         INSTR_TIME_SET_CURRENT(start);
+        if (g_instance.smb_cxt.SMBBufMgr == NULL) {
+            break;
+        }
         if (g_instance.smb_cxt.shutdownSMBWriter) {
             PushSMBMem(0);
             break;
@@ -780,6 +838,39 @@ void SMBWriterMain(void)
             pg_usleep(THOUSAND_MICROSECOND - totalTime);
         }
     }
+}
+
+void SMBWriterMain(void)
+{
+    ereport(LOG, (errmsg("SMB Writer Start.")));
+    pgstat_report_appname("SMB Writer");
+    pgstat_report_activity(STATE_IDLE, NULL);
+    t_thrd.role = SMBWRITER;
+    SetupSignalHandlers();
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "SMBWriterThread",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    MemoryContext ctx = AllocSetContextCreate(g_instance.instance_context, "SMBWriter",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
+    (void)MemoryContextSwitchTo(ctx);
+    SMBWriterMemCreate();
+
+    SMBRecoveryProcess();
+
+    if (g_instance.smb_cxt.ctx != NULL) {
+        MemoryContextDelete(g_instance.smb_cxt.ctx);
+    }
+
+    /* when redo is not needed for normal startup, mount here. */
+    if (!g_instance.smb_cxt.shutdownSMBWriter && g_instance.smb_cxt.SMBBufMgr == NULL) {
+        ereport(LOG, (errmsg("SMB mount after redo")));
+        SMBWriterMemMount();
+    }
+    t_thrd.xlog_cxt.InRecovery = false;
+    g_instance.smb_cxt.has_gap = true;
+
+    StartAuxiliaryWriters();
+
+    SMBWriterMainThreadLoop();
 
     while (pg_atomic_read_u32(&g_instance.smb_cxt.curSMBWriterIndex) != 0) {
         pg_usleep(10000L);

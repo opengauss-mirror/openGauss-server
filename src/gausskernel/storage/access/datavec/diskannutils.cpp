@@ -1297,7 +1297,7 @@ void DiskAnnGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *p
     UnlockReleaseBuffer(buf);
 }
 
-DiskPQParams* InitDiskPQParamsOnDisk(Relation index, FmgrInfo *procinfo, int dim, bool enablePQ)
+DiskPQParams* InitDiskPQParamsOnDisk(Relation index, FmgrInfo *procinfo, int dim, bool enablePQ, bool needOrigTable)
 {
     if (!enablePQ) {
         return NULL;
@@ -1354,8 +1354,23 @@ DiskPQParams* InitDiskPQParamsOnDisk(Relation index, FmgrInfo *procinfo, int dim
                    pqOffsetblk, pqOffsetSize);
     }
 
+    if (needOrigTable && index->pqTable == NULL) {
+        // If the original pq table is needed (for example when update requires re-computing pqcode)
+        index->pqTable = (char *)palloc0(pqTableSize);
+        for (size_t i = 0; i < GENERIC_DEFAULT_PQ_KSUB; i++) {
+            for (size_t j = 0; j < dim; j++) {
+                ((float *)(index->pqTable))[i * dim + j] =
+                    ((float *)(index->diskPQTableTransposed))[j * GENERIC_DEFAULT_PQ_KSUB + i];
+            }
+        }
+    }
+
     if (needLoadIndex) { // once load pq is done, we switch to the original context
         (void)MemoryContextSwitchTo(oldcxt);
+    }
+
+    if (needOrigTable) {
+        params->pqTable = index->pqTable;
     }
 
     params->tablesTransposed = index->diskPQTableTransposed;

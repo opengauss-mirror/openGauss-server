@@ -676,7 +676,8 @@ Param* makeParam(ParamKind paramkind, int paramid, Oid paramtype, int32 paramtyp
  * makeIndexInfo
  *	  create an IndexInfo node
  */
-IndexInfo* makeIndexInfo(int numattrs, List* expressions, List* predicates, bool unique, bool isready, bool concurrent)
+IndexInfo* makeIndexInfo(int numattrs, List* expressions, List* expressionUsers, List* predicates, bool unique,
+    bool isready, bool concurrent)
 {
     IndexInfo* n = makeNode(IndexInfo);
 
@@ -687,6 +688,7 @@ IndexInfo* makeIndexInfo(int numattrs, List* expressions, List* predicates, bool
 
     /* expressions */
     n->ii_Expressions = expressions;
+    n->ii_ExpressionUsers = expressionUsers;
     n->ii_ExpressionsState = NIL;
 
     /* predicates  */

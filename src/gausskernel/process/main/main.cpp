@@ -588,6 +588,6 @@ static void syscall_lock_init(void)
     syscalllockInit(&env_lock);
     syscalllockInit(&kerberos_conn_lock);
     syscalllockInit(&read_cipher_lock);
+    syscalllockInit(&g_dllErrorLock);
     pthread_rwlock_init(&g_file_list_lock_rw, NULL);
-    pthread_rwlock_init(&g_dlerror_lock_rw, NULL);
 }

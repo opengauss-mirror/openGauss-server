@@ -16,6 +16,7 @@
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
+#include "utils/typcache.h"
 
 /* -----------------------------------------------------------------------------
  * array_push :
@@ -473,4 +474,127 @@ Datum array_agg_finalfn(PG_FUNCTION_ARGS)
     result = makeMdArrayResult(state, 1, dims, lbs, CurrentMemoryContext, false);
 
     PG_RETURN_DATUM(result);
+}
+
+/*-----------------------------------------------------------------------------
+ * array_position:
+ *			return the offset of a value in an array.
+ *
+ * IS NOT DISTINCT FROM semantics are used for comparisons.  Return NULL when
+ * the value is not found.
+ *-----------------------------------------------------------------------------
+ */
+Datum array_position(PG_FUNCTION_ARGS)
+{
+    return array_position_common(fcinfo);
+}
+
+/*
+ * array_position_common
+ *		Common code for array_position
+ *
+ * These are separate wrappers for the sake of opr_sanity regression test.
+ * They are not strict so we have to test for null inputs explicitly.
+ */
+Datum array_position_common(FunctionCallInfo fcinfo)
+{
+    ArrayType* array;
+    Oid collation = PG_GET_COLLATION();
+    Oid element_type;
+    Datum searched_element;
+    Datum value;
+    bool isnull;
+    int position;
+    bool found = false;
+    TypeCacheEntry* typentry = NULL;
+    ArrayMetaState* my_extra;
+    bool null_search;
+    ArrayIterator array_iterator;
+
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
+    array = PG_GETARG_ARRAYTYPE_P(0);
+    /*
+     * We refuse to search for elements in multi-dimensional arrays, since we
+     * have no good way to report the element's location in the array.
+     */
+    if (ARR_NDIM(array) > 1) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("searching for elements in multidimensional arrays is not supported")));
+    }
+    /* Searching in an empty array is well-defined, though: it always fails */
+    if (ARR_NDIM(array) < 1) {
+        PG_RETURN_NULL();
+    }
+    if (PG_ARGISNULL(1)) {
+        /* fast return when the array doesn't have nulls */
+        if (!array_contains_nulls(array)) {
+            PG_RETURN_NULL();
+        }
+        searched_element = (Datum)0;
+        null_search = true;
+    } else {
+        searched_element = PG_GETARG_DATUM(1);
+        null_search = false;
+    }
+    element_type = ARR_ELEMTYPE(array);
+    position = (ARR_LBOUND(array))[0] - 1;
+
+    /*
+     * We arrange to look up type info for array_create_iterator only once per
+     * series of calls, assuming the element type doesn't change underneath
+     * us.
+     */
+    my_extra = (ArrayMetaState*)fcinfo->flinfo->fn_extra;
+    if (my_extra == NULL) {
+        fcinfo->flinfo->fn_extra = MemoryContextAlloc(fcinfo->flinfo->fn_mcxt, sizeof(ArrayMetaState));
+        my_extra = (ArrayMetaState*)fcinfo->flinfo->fn_extra;
+        my_extra->element_type = ~element_type;
+    }
+
+    if (my_extra->element_type != element_type) {
+        get_typlenbyvalalign(element_type, &my_extra->typlen, &my_extra->typbyval, &my_extra->typalign);
+        typentry = lookup_type_cache(element_type, TYPECACHE_EQ_OPR_FINFO);
+        if (!OidIsValid(typentry->eq_opr_finfo.fn_oid))
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                     errmsg("could not identify an equality operator for type %s", format_type_be(element_type))));
+
+        my_extra->element_type = element_type;
+        fmgr_info_cxt(typentry->eq_opr_finfo.fn_oid, &my_extra->proc, fcinfo->flinfo->fn_mcxt);
+    }
+
+    /* Examine each array element until we find a match. */
+    array_iterator = array_create_iterator(array, 0, my_extra);
+    while (array_iterate(array_iterator, &value, &isnull)) {
+        position++;
+        /*
+         * Can't look at the array element's value if it's null; but if we
+         * search for null, we have a hit and are done.
+         */
+        if (isnull && null_search) {
+            found = true;
+            break;
+        }
+        if (isnull || null_search) {
+            continue;
+        }
+        /* not nulls, so run the operator */
+        if (DatumGetBool(FunctionCall2Coll(&my_extra->proc, collation, searched_element, value))) {
+            found = true;
+            break;
+        }
+    }
+
+    array_free_iterator(array_iterator);
+
+    /* Avoid leaking memory when handed toasted input */
+    PG_FREE_IF_COPY(array, 0);
+
+    if (!found) {
+        PG_RETURN_NULL();
+    }
+
+    PG_RETURN_INT32(position);
 }

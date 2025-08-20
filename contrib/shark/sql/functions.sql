@@ -647,3 +647,134 @@ reset search_path;
 drop schema test_ident_current;
 
 drop schema functions_test cascade;
+
+-- test datefuncs
+--test dateadd
+select dateadd(hh,1,timestamp'1997-12-31 23:59:59');
+select dateadd(dd,1,timestamp'1997-12-31 23:59:59');
+select dateadd(mm,1,timestamp'1997-12-31 23:59:59');
+select dateadd(yy,1,timestamp'1997-12-31 23:59:59');
+select dateadd(qq,1,timestamp'1997-12-31 23:59:59');
+select dateadd(ww,1,timestamptz'1997-12-31 23:59:59');
+select dateadd(mi,1,timestamptz'1997-12-31 23:59:59');
+select dateadd(ss,1,timestamp'1997-12-31 23:59:59');
+select dateadd(ms,1,timestamp'1997-12-31 23:59:59');
+select dateadd(mcs,1,timestamp'1997-12-31 23:59:59');
+select dateadd(mcs,999999,timestamp'1997-12-31 23:59:59.000002');
+select dateadd(mm,1,date'1998-01-30');
+select dateadd(dd,2,time'23:20:20');
+select dateadd(dd,3,timetz '23:20:20');
+select dateadd(dy,2,time'23:20:20');
+select dateadd(dw,2,time'23:20:20');
+select dateadd(yy,2,time'23:20:20');
+select dateadd(mm,2,time'23:20:20');
+
+select dateadd('',1,'2023/3/31');
+select dateadd(2022,3,'2023/3/31 11:25:35.123456789');
+
+drop table t;
+create table t(id timestamp, id1 int,id2 int);
+insert into t values(timestamp'1997-12-11',1,2);
+select dateadd(dd,t.id1,id)from t;
+select dateadd(mm,t.id1,id)from t;
+select dateadd(dd,id1+id1,id)from t;
+select dateadd(dd,id1+id1+id2,id)from t;
+select dateadd(dd,id1+id1+(id2 -id2),id)from t;
+select dateadd(dd,(id1+id1+(id2 -id2)),id)from t;
+select dateadd(dd,id1,id)from t;
+drop table t;
+
+--test datepart
+SELECT DATEPART(year,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(quarter,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(month,timestamptz'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(dayofyear,timestamptz'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(day,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(week,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(weekday,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(hour,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(minute,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(second,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(millisecond,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(microsecond,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(nanosecond,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(iso_week,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(ISOWW,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(ISOWK,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATEPART(year,date'2007-10-30');
+SELECT DATEPART(year,time'23:20:20');
+SELECT DATEPART(year,timetz'23:20:20');
+select datepart('','2023/3/31');
+select datepart(2022,'2023/3/31 11:25:35.123456789');
+
+--test getdate
+select getdate();
+select datepart(second,getdate());
+select datepart(millisecond,getdate());
+select datepart(microsecond,getdate());
+select dateadd(d,1,getdate());
+select dateadd(day,1,getdate());
+select dateadd(hours,1,getdate());
+select dateadd("YEAR",1,getdate());
+select datepart(HoUR,getdate());
+select datepart(DAY,getdate());
+select datepart("YEAR",getdate());
+
+--test datename
+SELECT DATENAME(year,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(quarter,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(mm,timestamp'2007-1-30 12:15:32.1234567');
+SELECT DATENAME(m,timestamp'2007-2-28 12:15:32.1234567');
+SELECT DATENAME(m,timestamp'2007-3-30 12:15:32.1234567');
+SELECT DATENAME(m,timestamp'2007-4-30 12:15:32.1234567');
+SELECT DATENAME(m,timestamp'2007-5-30 12:15:32.1234567');
+SELECT DATENAME(m,timestamp'2007-6-30 12:15:32.1234567');
+SELECT DATENAME(m,timestamp'2007-7-30 12:15:32.1234567');
+SELECT DATENAME(m,timestamp'2007-8-30 12:15:32.1234567');
+SELECT DATENAME(m,timestamp'2007-9-30 12:15:32.1234567');
+SELECT DATENAME(month,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(m,timestamp'2007-11-30 12:15:32.1234567');
+SELECT DATENAME(m,timestamp'2007-12-30 12:15:32.1234567');
+SELECT DATENAME(dayofyear,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(day,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(week,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(weekday,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(dw,timestamp'2007-10-29 12:15:32.1234567');
+SELECT DATENAME(w,timestamp'2007-10-28 12:15:32.1234567');
+SELECT DATENAME(w,timestamp'2007-10-27 12:15:32.1234567');
+SELECT DATENAME(w,timestamp'2007-10-26 12:15:32.1234567');
+SELECT DATENAME(w,timestamp'2007-10-25 12:15:32.1234567');
+SELECT DATENAME(w,timestamp'2007-10-24 12:15:32.1234567');
+SELECT DATENAME(hour,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(minute,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(second,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(millisecond,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(microsecond,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(nanosecond,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(TZoffset,'2007-10-30 12:15:32.1234567 -05:10');
+SELECT DATENAME(ISO_WEEK,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(ISOWW,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(ISOWK,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(TZoffset,timestamp'2007-10-30 12:15:32.1234567');
+SELECT DATENAME(year, time'12:10:30.123');
+SELECT DATENAME(month, time'12:10:30.123');
+SELECT DATENAME(day, time'12:10:30.123');
+SELECT DATENAME(dayofyear, time'12:10:30.123');
+SELECT DATENAME(weekday, time'12:10:30.123');
+SELECT DATENAME(weekday, timetz'12:10:30.123');
+SELECT DATENAME(weekday, date'2007-10-30');
+
+create view testv as select DATENAME(weekday, date'2007-10-30');
+\d+ testv;
+select * from testv;
+SELECT datename('weekday'::cstring, '10-30-2007'::date) AS datename;
+drop view testv;
+
+--test len
+SELECT LEN(N'123');
+SELECT LEN(N'123   ');
+SELECT LEN(N'   123   ');
+SELECT LEN(CAST('123' as char(25)));
+SELECT LEN('abc');
+SELECT LEN('12345678901234567890123456789012345'::varchar);
+select len('aa'::varbinary);

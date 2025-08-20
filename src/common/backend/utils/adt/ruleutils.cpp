@@ -4973,6 +4973,11 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     else if (!proIsProcedure)
         appendStringInfoString(&buf, " NOT SHIPPABLE");
 
+    bool isResultCache = GetResultCacheByOid(funcid);
+    if (isResultCache) {
+        appendStringInfoString(&buf, " RESULT_CACHE");
+    }
+
     int2 parallelCursorSeq = GetParallelCursorSeq(funcid);
     if (parallelCursorSeq != -1) {
         print_parallel_enable(&buf, proctup, parallelCursorSeq, funcid);

@@ -71,6 +71,17 @@ typedef struct ArrayIteratorData {
     int current_item; /* the item # we're at in the array */
 } ArrayIteratorData;
 
+typedef struct ArrayItem {
+    Datum elt;
+    bool isnull;
+} ArrayItem;
+
+typedef struct CmpFuncArgs {
+    FunctionCallInfoData locfcinfo;
+    FmgrInfo func;
+    Oid collation;
+} CmpFuncArgs;
+
 static bool array_isspace(char ch);
 static int ArrayCount(const char* str, int* dim, char typdelim);
 static void ReadArrayStr(char* arrayStr, const char* origStr, int nitems, int ndim, const int* dim, FmgrInfo* inputproc,
@@ -3902,20 +3913,8 @@ bool array_contains_nulls(ArrayType* array)
     return false;
 }
 
-/*
- * array_eq :
- *		  compares two arrays for equality
- * result :
- *		  returns true if the arrays are equal, false otherwise.
- *
- * Note: we do not use array_cmp here, since equality may be meaningful in
- * datatypes that don't have a total ordering (and hence no btree support).
- */
-Datum array_eq(PG_FUNCTION_ARGS)
+static bool array_eq_inner(ArrayType* array1, ArrayType* array2, Oid collation, FunctionCallInfoData* fcinfo)
 {
-    ArrayType* array1 = PG_GETARG_ARRAYTYPE_P(0);
-    ArrayType* array2 = PG_GETARG_ARRAYTYPE_P(1);
-    Oid collation = PG_GET_COLLATION();
     int ndims1 = ARR_NDIM(array1);
     int ndims2 = ARR_NDIM(array2);
     int* dims1 = ARR_DIMS(array1);
@@ -3940,9 +3939,9 @@ Datum array_eq(PG_FUNCTION_ARGS)
             ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("cannot compare arrays of different element types")));
 
     /* fast path if the arrays do not have the same dimensionality */
-    if (ndims1 != ndims2 || memcmp(dims1, dims2, 2 * ndims1 * sizeof(int)) != 0)
+    if (ndims1 != ndims2 || memcmp(dims1, dims2, 2 * ndims1 * sizeof(int)) != 0) {
         result = false;
-    else {
+    } else {
         /*
          * We arrange to look up the equality function only once per series of
          * calls, assuming the element type doesn't change underneath us.  The
@@ -3965,7 +3964,7 @@ Datum array_eq(PG_FUNCTION_ARGS)
         /*
          * apply the operator to each pair of array elements.
          */
-        InitFunctionCallInfoData(locfcinfo, &typentry->eq_opr_finfo, 2, collation, NULL, NULL);
+        InitFunctionCallInfoData(locfcinfo, &typentry->eq_opr_finfo, TWO_ARGS, collation, NULL, NULL);
 
         /* Loop over source data */
         nitems = ArrayGetNItems(ndims1, dims1);
@@ -4006,18 +4005,21 @@ Datum array_eq(PG_FUNCTION_ARGS)
             /* advance bitmap pointers if any */
             bitmask <<= 1;
             if (bitmask == 0x100) {
-                if (bitmap1 != NULL)
+                if (bitmap1 != NULL) {
                     bitmap1++;
-                if (bitmap2 != NULL)
+                }
+                if (bitmap2 != NULL) {
                     bitmap2++;
+                }
                 bitmask = 1;
             }
 
             /*
              * We consider two NULLs equal; NULL and not-NULL are unequal.
              */
-            if (isnull1 && isnull2)
+            if (isnull1 && isnull2) {
                 continue;
+            }
             if (isnull1 || isnull2) {
                 result = false;
                 break;
@@ -4042,6 +4044,212 @@ Datum array_eq(PG_FUNCTION_ARGS)
     /* Avoid leaking memory when handed toasted input. */
     PG_FREE_IF_COPY(array1, 0);
     PG_FREE_IF_COPY(array2, 1);
+    return result;
+}
+
+static int CmpArrayItem(const void* a, const void* b, void* arg)
+{
+    CmpFuncArgs* cmpFuncArgs = (CmpFuncArgs*)arg;
+    FunctionCallInfoData locfcinfo = cmpFuncArgs->locfcinfo;
+    FmgrInfo func = cmpFuncArgs->func;
+    Oid collation = cmpFuncArgs->collation;
+    ArrayItem* left = (ArrayItem*)a;
+    ArrayItem* right = (ArrayItem*)b;
+
+    InitFunctionCallInfoData(locfcinfo, &func, TWO_ARGS, collation, NULL, NULL);
+
+    locfcinfo.arg[0] = left->elt;
+    locfcinfo.arg[1] = right->elt;
+    locfcinfo.argnull[0] = false;
+    locfcinfo.argnull[1] = false;
+    locfcinfo.isnull = false;
+    return DatumGetInt32(FunctionCallInvoke(&locfcinfo));
+}
+
+static void inner_init_element(bool isnull, Datum* elt, char** ptr, ArrayItem* arr, 
+                               int typlen, bool typbyval, char typalign)
+{
+    if (isnull) {
+        *elt = (Datum)0;
+        arr->isnull = true;
+    } else {
+        *elt = fetch_att(*ptr, typbyval, typlen);
+        arr->isnull = false;
+        *ptr = att_addlength_pointer(*ptr, typlen, *ptr);
+        *ptr = (char*)att_align_nominal(*ptr, typalign);
+    }
+}
+
+/*
+ * When in compatible_od_db_array mode, use this function to compare two arrays. 
+ * If the elements in the array are the same, then regardless of their order, 
+ * they are equal
+ */
+static bool array_eq_db_a_inner(ArrayType* array1, ArrayType* array2, Oid collation, FunctionCallInfoData* fcinfo)
+{
+    int ndims1 = ARR_NDIM(array1);
+    int ndims2 = ARR_NDIM(array2);
+    int* dims1 = ARR_DIMS(array1);
+    int* dims2 = ARR_DIMS(array2);
+    Oid element_type = ARR_ELEMTYPE(array1);
+    bool result = true;
+    TypeCacheEntry* typentry = NULL;
+    int typlen = 0;
+    bool typbyval = false;
+    char typalign = 0;
+    TypeCacheEntry* typentry_sort = NULL;
+    HeapTuple opertup;
+    FunctionCallInfoData locfcinfo;
+    FunctionCallInfoData locfcinfo_sort;
+
+    if (element_type != ARR_ELEMTYPE(array2))
+        ereport(
+            ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("cannot compare arrays of different element types")));
+
+    /* fast path if the arrays do not have the same dimensionality */
+    if (ndims1 != ndims2 || memcmp(dims1, dims2, 2 * ndims1 * sizeof(int)) != 0) {
+        result = false;
+    } else {
+        /*
+         * We arrange to look up the equality function only once per series of
+         * calls, assuming the element type doesn't change underneath us.  The
+         * typcache is used so that we have no memory leakage when being used
+         * as an index support function.
+         */
+        typentry = (TypeCacheEntry*)fcinfo->flinfo->fn_extra;
+        typentry_sort = (TypeCacheEntry*)fcinfo->flinfo->fn_extra;
+        if (typentry == NULL || typentry->type_id != element_type) {
+            typentry = lookup_type_cache(element_type, TYPECACHE_EQ_OPR_FINFO);
+            if (!OidIsValid(typentry->eq_opr_finfo.fn_oid))
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmsg("could not identify a comparison operator for type %s", format_type_be(element_type))));
+            fcinfo->flinfo->fn_extra = (void*)typentry;
+        }
+        typlen = typentry->typlen;
+        typbyval = typentry->typbyval;
+        typalign = typentry->typalign;
+
+        if (typentry_sort == NULL || typentry_sort->type_id != element_type) {
+            typentry_sort = lookup_type_cache(element_type, TYPECACHE_CMP_PROC_FINFO);
+            if (!OidIsValid(typentry_sort->cmp_proc_finfo.fn_oid))
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmsg("could not identify a comparison operator for type %s", format_type_be(element_type))));
+        }
+
+        /*
+         * apply the operator to each pair of array elements.
+         */
+        InitFunctionCallInfoData(locfcinfo, &typentry->eq_opr_finfo, TWO_ARGS, collation, NULL, NULL);
+
+        /* Loop over source data */
+        int nitems = ArrayGetNItems(ndims1, dims1);
+        
+        ArrayItem* arr1 = (ArrayItem*)palloc0(nitems * sizeof(ArrayItem));
+        ArrayItem* arr2 = (ArrayItem*)palloc0(nitems * sizeof(ArrayItem));
+
+        char* ptr1 = ARR_DATA_PTR(array1);
+        char* ptr2 = ARR_DATA_PTR(array2);
+        bits8* bitmap1 = ARR_NULLBITMAP(array1);
+        bits8* bitmap2 = ARR_NULLBITMAP(array2);
+        uint32 bitmask = 1; /* use same bitmask for both arrays */
+
+        for (int i = 0; i < nitems; i++) {
+            Datum elt1;
+            Datum elt2;
+            bool isnull1 = bitmap1 && (*bitmap1 & bitmask) == 0;
+            bool isnull2 = bitmap2 && (*bitmap2 & bitmask) == 0;
+
+            /* Get elements, checking for NULL */
+            inner_init_element(isnull1, &elt1, &ptr1, &arr1[i], typlen, typbyval, typalign);
+            inner_init_element(isnull2, &elt2, &ptr2, &arr2[i], typlen, typbyval, typalign);
+            arr1[i].elt = elt1;
+            arr2[i].elt = elt2;
+
+            /* advance bitmap pointers if any */
+            bitmask <<= 1;
+            if (bitmask == 0x100) {
+                if (bitmap1 != NULL) {
+                    bitmap1++;
+                }
+                if (bitmap2 != NULL) {
+                    bitmap2++;
+                }
+                bitmask = 1;
+            }
+        }
+
+        CmpFuncArgs* cmpFuncArgs = (CmpFuncArgs*)palloc0(sizeof(CmpFuncArgs));
+        cmpFuncArgs->func = typentry_sort->cmp_proc_finfo;
+        cmpFuncArgs->locfcinfo = locfcinfo_sort;
+        cmpFuncArgs->collation = collation;
+        qsort_arg(arr1, nitems, sizeof(ArrayItem), CmpArrayItem, cmpFuncArgs);
+        qsort_arg(arr2, nitems, sizeof(ArrayItem), CmpArrayItem, cmpFuncArgs);
+        pfree(cmpFuncArgs);
+
+        for (int j = 0; j < nitems; j++) {
+            ArrayItem elt1 = arr1[j];
+            ArrayItem elt2 = arr2[j];
+            bool oprresult = false;
+
+            /*
+             * We consider two NULLs equal; NULL and not-NULL are unequal.
+             */
+            if (elt1.isnull && elt2.isnull) {
+                continue;
+            }
+            if (elt1.isnull || elt2.isnull) {
+                result = false;
+                break;
+            }
+
+            /*
+             * Apply the operator to the element pair
+             */
+            locfcinfo.arg[0] = elt1.elt;
+            locfcinfo.arg[1] = elt2.elt;
+            locfcinfo.argnull[0] = false;
+            locfcinfo.argnull[1] = false;
+            locfcinfo.isnull = false;
+            oprresult = DatumGetBool(FunctionCallInvoke(&locfcinfo));
+            if (!oprresult) {
+                result = false;
+                break;
+            }
+        }
+        pfree_ext(arr1);
+        pfree_ext(arr2);
+    }
+
+    /* Avoid leaking memory when handed toasted input. */
+    PG_FREE_IF_COPY(array1, 0);
+    PG_FREE_IF_COPY(array2, 1);
+
+    return result;
+}
+
+/*
+ * array_eq :
+ *		  compares two arrays for equality
+ * result :
+ *		  returns true if the arrays are equal, false otherwise.
+ *
+ * Note: we do not use array_cmp here, since equality may be meaningful in
+ * datatypes that don't have a total ordering (and hence no btree support).
+ */
+Datum array_eq(PG_FUNCTION_ARGS)
+{
+    ArrayType* array1 = PG_GETARG_ARRAYTYPE_P(0);
+    ArrayType* array2 = PG_GETARG_ARRAYTYPE_P(1);
+    Oid collation = PG_GET_COLLATION();
+    bool result = true;
+
+    if (DB_IS_CMPT(A_FORMAT) && COMPATIBLE_A_DB_ARRAY) {
+        result = array_eq_db_a_inner(array1, array2, collation, fcinfo);
+    } else {
+        result = array_eq_inner(array1, array2, collation, fcinfo);
+    }
 
     PG_RETURN_BOOL(result);
 }
@@ -4580,7 +4788,7 @@ Datum arraycontained(PG_FUNCTION_ARGS)
  *
  * The passed-in array must remain valid for the lifetime of the iterator.
  */
-ArrayIterator array_create_iterator(ArrayType* arr, int slice_ndim)
+ArrayIterator array_create_iterator(ArrayType* arr, int slice_ndim, ArrayMetaState* mstate)
 {
     ArrayIterator iterator = (ArrayIteratorData*)palloc0(sizeof(ArrayIteratorData));
 
@@ -4597,7 +4805,15 @@ ArrayIterator array_create_iterator(ArrayType* arr, int slice_ndim)
     iterator->arr = arr;
     iterator->nullbitmap = ARR_NULLBITMAP(arr);
     iterator->nitems = ArrayGetNItems(ARR_NDIM(arr), ARR_DIMS(arr));
-    get_typlenbyvalalign(ARR_ELEMTYPE(arr), &iterator->typlen, &iterator->typbyval, &iterator->typalign);
+    if (mstate != NULL) {
+        Assert(mstate->element_type == ARR_ELEMTYPE(arr));
+
+        iterator->typlen = mstate->typlen;
+        iterator->typbyval = mstate->typbyval;
+        iterator->typalign = mstate->typalign;
+    } else {
+        get_typlenbyvalalign(ARR_ELEMTYPE(arr), &iterator->typlen, &iterator->typbyval, &iterator->typalign);
+    }
 
     /*
      * Remember the slicing parameters.

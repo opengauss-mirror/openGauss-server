@@ -1,0 +1,1440 @@
+drop table if exists sorttest;
+NOTICE:  table "sorttest" does not exist, skipping
+create table sorttest (a int4, b pg_catalog.date, c timestamp, d int8, e numeric(8,4), f text, g char(16), h varchar(16));
+insert into sorttest values (-1, '0001-01-01', '0001-01-01 01:01:01', 9, -1111.1111, '0111111111', '0111111111', '0111111111');
+insert into sorttest values (-2, '0002-02-02', '0002-02-02 02:02:02', 8, -2222.2222, '0022222222', '0022222222', '0022222222');
+insert into sorttest values (-3, '0003-03-03', '0003-03-03 03:03:03', 7, -3333.3333, '0003333333', '0003333333', '0003333333');
+insert into sorttest values (-4, '0004-04-04', '0004-04-04 04:04:04', 6, -4444.4444, '0000444444', '0000444444', '0000444444');
+insert into sorttest values (-5, '0005-05-05', '0005-05-05 05:05:05', 5, -5555.5555, '0000055555', '0000055555', '0000055555');
+insert into sorttest values (-6, '0006-06-06', '0006-06-06 06:06:06', 4, -6666.6666, '0000006666', '0000006666', '0000006666');
+insert into sorttest values (-7, '0007-07-07', '0007-07-07 07:07:07', 3, -7777.7777, '0000000777', '0000000777', '0000000777');
+insert into sorttest values (-8, '0008-08-08', '0008-08-08 08:08:08', 2, -8888.8888, '0000000088', '0000000088', '0000000088');
+insert into sorttest values (-9, '0009-09-09', '0009-09-09 09:09:09', 1, -9999.9999, '0000000009', '0000000009', '0000000009');
+insert into sorttest values (0, '0001-01-10', '0001-01-11 00:00:00', 0, 0, '0', '0', '0');
+insert into sorttest values (1, '0001-01-11', '0001-01-11 01:01:01', -1, 1111.1111, '1111111111', '1111111111', '1111111111');
+insert into sorttest values (1, '0001-01-11', '0001-01-11 01:01:01', -1, 1111.1111, '1111111111', '1111111111', '1111111111');
+insert into sorttest values (1, '0001-01-11', '0001-01-11 01:01:01', -1, 1111.1111, '1111111111', '1111111111', '1111111111');
+insert into sorttest values (2, '0002-02-12', '0002-02-12 02:02:02', 6, 2222.2222, '2222222222', '2222222222', '2222222222');
+insert into sorttest values ('', '', '', '', '', '', '', '');
+insert into sorttest values (2147483647, '9999-12-31', '9999-12-31 23:59:59', 9223372036854775807, 0.9999, 'aaa', 'aaa', 'aaa');
+insert into sorttest values (2147483646, '9999-12-30', '9999-12-31 23:59:58', 9223372036854775806, 0.9998, 'bbb', 'bbb', 'bbb');
+insert into sorttest values (2147483645, '9999-12-29', '9999-12-31 23:59:57', 9223372036854775805, 0.9997, 'ccc', 'ccc', 'ccc');
+insert into sorttest values (1000000000, '9998-12-31', '9999-12-31 23:58:59', 1000000000000000000, 'NaN', '00', '00', '00');
+insert into sorttest values (1500000000, '9997-12-31', '9999-12-31 23:57:59', 2000000000000000000, -111.111, '11111111111', '11111111111', '11111111111');
+insert into sorttest values (2000000000, '9996-12-31', '9999-12-31 23:56:59', -9223372036854775803, -11.11, '9', '9', '9');
+insert into sorttest values (444444444, '9999-09-30', '9995-12-31 23:57:59', -9223372036854775808, 4444, 'ABCABC', 'ABCABC', 'ABCABC');
+insert into sorttest values (-555555555, '9999-08-30', '0009-12-30 23:56:59', -555555555555555, -5555, 'XYZ', 'XYZ', 'XYZ');
+insert into sorttest values (-666666666, '9999-07-30', '9999-11-30 23:55:59', -666666666666666, -6666, 'XYZX', 'XYZX', 'XYZX');
+insert into sorttest values (-777777777, '9999-06-30', '9999-10-30 23:54:59', -777777777777777, -7777, 'XYZXY', 'XYZXY', 'XYZXY');
+insert into sorttest values (-888888889, '9999-05-30', '6666-09-30 23:53:59', -888888888888888, -8888, 'XYZXYZ', 'XYZXYZ', 'XYZXYZ');
+insert into sorttest values (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+select a from sorttest order by a;
+     a      
+------------
+ -888888889
+ -777777777
+ -666666666
+ -555555555
+         -9
+         -8
+         -7
+         -6
+         -5
+         -4
+         -3
+         -2
+         -1
+          0
+          1
+          1
+          1
+          2
+  444444444
+ 1000000000
+ 1500000000
+ 2000000000
+ 2147483645
+ 2147483646
+ 2147483647
+           
+           
+(27 rows)
+
+select b from sorttest order by b;
+     b      
+------------
+ 01-01-0001
+ 01-10-0001
+ 01-11-0001
+ 01-11-0001
+ 01-11-0001
+ 02-02-0002
+ 02-12-0002
+ 03-03-0003
+ 04-04-0004
+ 05-05-0005
+ 06-06-0006
+ 07-07-0007
+ 08-08-0008
+ 09-09-0009
+ 12-31-9996
+ 12-31-9997
+ 12-31-9998
+ 05-30-9999
+ 06-30-9999
+ 07-30-9999
+ 08-30-9999
+ 09-30-9999
+ 12-29-9999
+ 12-30-9999
+ 12-31-9999
+ 
+ 
+(27 rows)
+
+select c from sorttest order by c;
+            c             
+--------------------------
+ Mon Jan 01 01:01:01 0001
+ Thu Jan 11 00:00:00 0001
+ Thu Jan 11 01:01:01 0001
+ Thu Jan 11 01:01:01 0001
+ Thu Jan 11 01:01:01 0001
+ Sat Feb 02 02:02:02 0002
+ Tue Feb 12 02:02:02 0002
+ Mon Mar 03 03:03:03 0003
+ Sun Apr 04 04:04:04 0004
+ Thu May 05 05:05:05 0005
+ Tue Jun 06 06:06:06 0006
+ Sat Jul 07 07:07:07 0007
+ Fri Aug 08 08:08:08 0008
+ Wed Sep 09 09:09:09 0009
+ Wed Dec 30 23:56:59 0009
+ Sun Sep 30 23:53:59 6666
+ Sun Dec 31 23:57:59 9995
+ Sat Oct 30 23:54:59 9999
+ Tue Nov 30 23:55:59 9999
+ Fri Dec 31 23:56:59 9999
+ Fri Dec 31 23:57:59 9999
+ Fri Dec 31 23:58:59 9999
+ Fri Dec 31 23:59:57 9999
+ Fri Dec 31 23:59:58 9999
+ Fri Dec 31 23:59:59 9999
+ 
+ 
+(27 rows)
+
+select d from sorttest order by d;
+          d           
+----------------------
+ -9223372036854775808
+ -9223372036854775803
+     -888888888888888
+     -777777777777777
+     -666666666666666
+     -555555555555555
+                   -1
+                   -1
+                   -1
+                    0
+                    1
+                    2
+                    3
+                    4
+                    5
+                    6
+                    6
+                    7
+                    8
+                    9
+  1000000000000000000
+  2000000000000000000
+  9223372036854775805
+  9223372036854775806
+  9223372036854775807
+                     
+                     
+(27 rows)
+
+select e from sorttest order by e;
+     e      
+------------
+ -9999.9999
+ -8888.8888
+ -8888.0000
+ -7777.7777
+ -7777.0000
+ -6666.6666
+ -6666.0000
+ -5555.5555
+ -5555.0000
+ -4444.4444
+ -3333.3333
+ -2222.2222
+ -1111.1111
+  -111.1110
+   -11.1100
+     0.0000
+      .9997
+      .9998
+      .9999
+  1111.1111
+  1111.1111
+  1111.1111
+  2222.2222
+  4444.0000
+        NaN
+           
+           
+(27 rows)
+
+select f from sorttest order by f;
+      f      
+-------------
+ 0
+ 00
+ 0000000009
+ 0000000088
+ 0000000777
+ 0000006666
+ 0000055555
+ 0000444444
+ 0003333333
+ 0022222222
+ 0111111111
+ 1111111111
+ 1111111111
+ 1111111111
+ 11111111111
+ 2222222222
+ 9
+ aaa
+ ABCABC
+ bbb
+ ccc
+ XYZ
+ XYZX
+ XYZXY
+ XYZXYZ
+ 
+ 
+(27 rows)
+
+select g from sorttest order by g;
+        g         
+------------------
+ 0               
+ 00              
+ 0000000009      
+ 0000000088      
+ 0000000777      
+ 0000006666      
+ 0000055555      
+ 0000444444      
+ 0003333333      
+ 0022222222      
+ 0111111111      
+ 1111111111      
+ 1111111111      
+ 1111111111      
+ 11111111111     
+ 2222222222      
+ 9               
+ aaa             
+ ABCABC          
+ bbb             
+ ccc             
+ XYZ             
+ XYZX            
+ XYZXY           
+ XYZXYZ          
+ 
+ 
+(27 rows)
+
+select h from sorttest order by h;
+      h      
+-------------
+ 0
+ 00
+ 0000000009
+ 0000000088
+ 0000000777
+ 0000006666
+ 0000055555
+ 0000444444
+ 0003333333
+ 0022222222
+ 0111111111
+ 1111111111
+ 1111111111
+ 1111111111
+ 11111111111
+ 2222222222
+ 9
+ aaa
+ ABCABC
+ bbb
+ ccc
+ XYZ
+ XYZX
+ XYZXY
+ XYZXYZ
+ 
+ 
+(27 rows)
+
+select a from sorttest order by a nulls first;
+     a      
+------------
+           
+           
+ -888888889
+ -777777777
+ -666666666
+ -555555555
+         -9
+         -8
+         -7
+         -6
+         -5
+         -4
+         -3
+         -2
+         -1
+          0
+          1
+          1
+          1
+          2
+  444444444
+ 1000000000
+ 1500000000
+ 2000000000
+ 2147483645
+ 2147483646
+ 2147483647
+(27 rows)
+
+select b from sorttest order by b nulls first;
+     b      
+------------
+ 
+ 
+ 01-01-0001
+ 01-10-0001
+ 01-11-0001
+ 01-11-0001
+ 01-11-0001
+ 02-02-0002
+ 02-12-0002
+ 03-03-0003
+ 04-04-0004
+ 05-05-0005
+ 06-06-0006
+ 07-07-0007
+ 08-08-0008
+ 09-09-0009
+ 12-31-9996
+ 12-31-9997
+ 12-31-9998
+ 05-30-9999
+ 06-30-9999
+ 07-30-9999
+ 08-30-9999
+ 09-30-9999
+ 12-29-9999
+ 12-30-9999
+ 12-31-9999
+(27 rows)
+
+select c from sorttest order by c nulls first;
+            c             
+--------------------------
+ 
+ 
+ Mon Jan 01 01:01:01 0001
+ Thu Jan 11 00:00:00 0001
+ Thu Jan 11 01:01:01 0001
+ Thu Jan 11 01:01:01 0001
+ Thu Jan 11 01:01:01 0001
+ Sat Feb 02 02:02:02 0002
+ Tue Feb 12 02:02:02 0002
+ Mon Mar 03 03:03:03 0003
+ Sun Apr 04 04:04:04 0004
+ Thu May 05 05:05:05 0005
+ Tue Jun 06 06:06:06 0006
+ Sat Jul 07 07:07:07 0007
+ Fri Aug 08 08:08:08 0008
+ Wed Sep 09 09:09:09 0009
+ Wed Dec 30 23:56:59 0009
+ Sun Sep 30 23:53:59 6666
+ Sun Dec 31 23:57:59 9995
+ Sat Oct 30 23:54:59 9999
+ Tue Nov 30 23:55:59 9999
+ Fri Dec 31 23:56:59 9999
+ Fri Dec 31 23:57:59 9999
+ Fri Dec 31 23:58:59 9999
+ Fri Dec 31 23:59:57 9999
+ Fri Dec 31 23:59:58 9999
+ Fri Dec 31 23:59:59 9999
+(27 rows)
+
+select d from sorttest order by d nulls first;
+          d           
+----------------------
+                     
+                     
+ -9223372036854775808
+ -9223372036854775803
+     -888888888888888
+     -777777777777777
+     -666666666666666
+     -555555555555555
+                   -1
+                   -1
+                   -1
+                    0
+                    1
+                    2
+                    3
+                    4
+                    5
+                    6
+                    6
+                    7
+                    8
+                    9
+  1000000000000000000
+  2000000000000000000
+  9223372036854775805
+  9223372036854775806
+  9223372036854775807
+(27 rows)
+
+select e from sorttest order by e nulls first;
+     e      
+------------
+           
+           
+ -9999.9999
+ -8888.8888
+ -8888.0000
+ -7777.7777
+ -7777.0000
+ -6666.6666
+ -6666.0000
+ -5555.5555
+ -5555.0000
+ -4444.4444
+ -3333.3333
+ -2222.2222
+ -1111.1111
+  -111.1110
+   -11.1100
+     0.0000
+      .9997
+      .9998
+      .9999
+  1111.1111
+  1111.1111
+  1111.1111
+  2222.2222
+  4444.0000
+        NaN
+(27 rows)
+
+select f from sorttest order by f nulls first;
+      f      
+-------------
+ 
+ 
+ 0
+ 00
+ 0000000009
+ 0000000088
+ 0000000777
+ 0000006666
+ 0000055555
+ 0000444444
+ 0003333333
+ 0022222222
+ 0111111111
+ 1111111111
+ 1111111111
+ 1111111111
+ 11111111111
+ 2222222222
+ 9
+ aaa
+ ABCABC
+ bbb
+ ccc
+ XYZ
+ XYZX
+ XYZXY
+ XYZXYZ
+(27 rows)
+
+select g from sorttest order by g nulls first;
+        g         
+------------------
+ 
+ 
+ 0               
+ 00              
+ 0000000009      
+ 0000000088      
+ 0000000777      
+ 0000006666      
+ 0000055555      
+ 0000444444      
+ 0003333333      
+ 0022222222      
+ 0111111111      
+ 1111111111      
+ 1111111111      
+ 1111111111      
+ 11111111111     
+ 2222222222      
+ 9               
+ aaa             
+ ABCABC          
+ bbb             
+ ccc             
+ XYZ             
+ XYZX            
+ XYZXY           
+ XYZXYZ          
+(27 rows)
+
+select h from sorttest order by h nulls first;
+      h      
+-------------
+ 
+ 
+ 0
+ 00
+ 0000000009
+ 0000000088
+ 0000000777
+ 0000006666
+ 0000055555
+ 0000444444
+ 0003333333
+ 0022222222
+ 0111111111
+ 1111111111
+ 1111111111
+ 1111111111
+ 11111111111
+ 2222222222
+ 9
+ aaa
+ ABCABC
+ bbb
+ ccc
+ XYZ
+ XYZX
+ XYZXY
+ XYZXYZ
+(27 rows)
+
+select a from sorttest order by a desc;
+     a      
+------------
+           
+           
+ 2147483647
+ 2147483646
+ 2147483645
+ 2000000000
+ 1500000000
+ 1000000000
+  444444444
+          2
+          1
+          1
+          1
+          0
+         -1
+         -2
+         -3
+         -4
+         -5
+         -6
+         -7
+         -8
+         -9
+ -555555555
+ -666666666
+ -777777777
+ -888888889
+(27 rows)
+
+select b from sorttest order by b desc;
+     b      
+------------
+ 
+ 
+ 12-31-9999
+ 12-30-9999
+ 12-29-9999
+ 09-30-9999
+ 08-30-9999
+ 07-30-9999
+ 06-30-9999
+ 05-30-9999
+ 12-31-9998
+ 12-31-9997
+ 12-31-9996
+ 09-09-0009
+ 08-08-0008
+ 07-07-0007
+ 06-06-0006
+ 05-05-0005
+ 04-04-0004
+ 03-03-0003
+ 02-12-0002
+ 02-02-0002
+ 01-11-0001
+ 01-11-0001
+ 01-11-0001
+ 01-10-0001
+ 01-01-0001
+(27 rows)
+
+select c from sorttest order by c desc;
+            c             
+--------------------------
+ 
+ 
+ Fri Dec 31 23:59:59 9999
+ Fri Dec 31 23:59:58 9999
+ Fri Dec 31 23:59:57 9999
+ Fri Dec 31 23:58:59 9999
+ Fri Dec 31 23:57:59 9999
+ Fri Dec 31 23:56:59 9999
+ Tue Nov 30 23:55:59 9999
+ Sat Oct 30 23:54:59 9999
+ Sun Dec 31 23:57:59 9995
+ Sun Sep 30 23:53:59 6666
+ Wed Dec 30 23:56:59 0009
+ Wed Sep 09 09:09:09 0009
+ Fri Aug 08 08:08:08 0008
+ Sat Jul 07 07:07:07 0007
+ Tue Jun 06 06:06:06 0006
+ Thu May 05 05:05:05 0005
+ Sun Apr 04 04:04:04 0004
+ Mon Mar 03 03:03:03 0003
+ Tue Feb 12 02:02:02 0002
+ Sat Feb 02 02:02:02 0002
+ Thu Jan 11 01:01:01 0001
+ Thu Jan 11 01:01:01 0001
+ Thu Jan 11 01:01:01 0001
+ Thu Jan 11 00:00:00 0001
+ Mon Jan 01 01:01:01 0001
+(27 rows)
+
+select d from sorttest order by d desc;
+          d           
+----------------------
+                     
+                     
+  9223372036854775807
+  9223372036854775806
+  9223372036854775805
+  2000000000000000000
+  1000000000000000000
+                    9
+                    8
+                    7
+                    6
+                    6
+                    5
+                    4
+                    3
+                    2
+                    1
+                    0
+                   -1
+                   -1
+                   -1
+     -555555555555555
+     -666666666666666
+     -777777777777777
+     -888888888888888
+ -9223372036854775803
+ -9223372036854775808
+(27 rows)
+
+select e from sorttest order by e desc;
+     e      
+------------
+           
+           
+        NaN
+  4444.0000
+  2222.2222
+  1111.1111
+  1111.1111
+  1111.1111
+      .9999
+      .9998
+      .9997
+     0.0000
+   -11.1100
+  -111.1110
+ -1111.1111
+ -2222.2222
+ -3333.3333
+ -4444.4444
+ -5555.0000
+ -5555.5555
+ -6666.0000
+ -6666.6666
+ -7777.0000
+ -7777.7777
+ -8888.0000
+ -8888.8888
+ -9999.9999
+(27 rows)
+
+select f from sorttest order by f desc;
+      f      
+-------------
+ 
+ 
+ XYZXYZ
+ XYZXY
+ XYZX
+ XYZ
+ ccc
+ bbb
+ ABCABC
+ aaa
+ 9
+ 2222222222
+ 11111111111
+ 1111111111
+ 1111111111
+ 1111111111
+ 0111111111
+ 0022222222
+ 0003333333
+ 0000444444
+ 0000055555
+ 0000006666
+ 0000000777
+ 0000000088
+ 0000000009
+ 00
+ 0
+(27 rows)
+
+select g from sorttest order by g desc;
+        g         
+------------------
+ 
+ 
+ XYZXYZ          
+ XYZXY           
+ XYZX            
+ XYZ             
+ ccc             
+ bbb             
+ ABCABC          
+ aaa             
+ 9               
+ 2222222222      
+ 11111111111     
+ 1111111111      
+ 1111111111      
+ 1111111111      
+ 0111111111      
+ 0022222222      
+ 0003333333      
+ 0000444444      
+ 0000055555      
+ 0000006666      
+ 0000000777      
+ 0000000088      
+ 0000000009      
+ 00              
+ 0               
+(27 rows)
+
+select h from sorttest order by h desc;
+      h      
+-------------
+ 
+ 
+ XYZXYZ
+ XYZXY
+ XYZX
+ XYZ
+ ccc
+ bbb
+ ABCABC
+ aaa
+ 9
+ 2222222222
+ 11111111111
+ 1111111111
+ 1111111111
+ 1111111111
+ 0111111111
+ 0022222222
+ 0003333333
+ 0000444444
+ 0000055555
+ 0000006666
+ 0000000777
+ 0000000088
+ 0000000009
+ 00
+ 0
+(27 rows)
+
+select a from sorttest order by a desc nulls last;
+     a      
+------------
+ 2147483647
+ 2147483646
+ 2147483645
+ 2000000000
+ 1500000000
+ 1000000000
+  444444444
+          2
+          1
+          1
+          1
+          0
+         -1
+         -2
+         -3
+         -4
+         -5
+         -6
+         -7
+         -8
+         -9
+ -555555555
+ -666666666
+ -777777777
+ -888888889
+           
+           
+(27 rows)
+
+select b from sorttest order by b desc nulls last;
+     b      
+------------
+ 12-31-9999
+ 12-30-9999
+ 12-29-9999
+ 09-30-9999
+ 08-30-9999
+ 07-30-9999
+ 06-30-9999
+ 05-30-9999
+ 12-31-9998
+ 12-31-9997
+ 12-31-9996
+ 09-09-0009
+ 08-08-0008
+ 07-07-0007
+ 06-06-0006
+ 05-05-0005
+ 04-04-0004
+ 03-03-0003
+ 02-12-0002
+ 02-02-0002
+ 01-11-0001
+ 01-11-0001
+ 01-11-0001
+ 01-10-0001
+ 01-01-0001
+ 
+ 
+(27 rows)
+
+select c from sorttest order by c desc nulls last;
+            c             
+--------------------------
+ Fri Dec 31 23:59:59 9999
+ Fri Dec 31 23:59:58 9999
+ Fri Dec 31 23:59:57 9999
+ Fri Dec 31 23:58:59 9999
+ Fri Dec 31 23:57:59 9999
+ Fri Dec 31 23:56:59 9999
+ Tue Nov 30 23:55:59 9999
+ Sat Oct 30 23:54:59 9999
+ Sun Dec 31 23:57:59 9995
+ Sun Sep 30 23:53:59 6666
+ Wed Dec 30 23:56:59 0009
+ Wed Sep 09 09:09:09 0009
+ Fri Aug 08 08:08:08 0008
+ Sat Jul 07 07:07:07 0007
+ Tue Jun 06 06:06:06 0006
+ Thu May 05 05:05:05 0005
+ Sun Apr 04 04:04:04 0004
+ Mon Mar 03 03:03:03 0003
+ Tue Feb 12 02:02:02 0002
+ Sat Feb 02 02:02:02 0002
+ Thu Jan 11 01:01:01 0001
+ Thu Jan 11 01:01:01 0001
+ Thu Jan 11 01:01:01 0001
+ Thu Jan 11 00:00:00 0001
+ Mon Jan 01 01:01:01 0001
+ 
+ 
+(27 rows)
+
+select d from sorttest order by d desc nulls last;
+          d           
+----------------------
+  9223372036854775807
+  9223372036854775806
+  9223372036854775805
+  2000000000000000000
+  1000000000000000000
+                    9
+                    8
+                    7
+                    6
+                    6
+                    5
+                    4
+                    3
+                    2
+                    1
+                    0
+                   -1
+                   -1
+                   -1
+     -555555555555555
+     -666666666666666
+     -777777777777777
+     -888888888888888
+ -9223372036854775803
+ -9223372036854775808
+                     
+                     
+(27 rows)
+
+select e from sorttest order by e desc nulls last;
+     e      
+------------
+        NaN
+  4444.0000
+  2222.2222
+  1111.1111
+  1111.1111
+  1111.1111
+      .9999
+      .9998
+      .9997
+     0.0000
+   -11.1100
+  -111.1110
+ -1111.1111
+ -2222.2222
+ -3333.3333
+ -4444.4444
+ -5555.0000
+ -5555.5555
+ -6666.0000
+ -6666.6666
+ -7777.0000
+ -7777.7777
+ -8888.0000
+ -8888.8888
+ -9999.9999
+           
+           
+(27 rows)
+
+select f from sorttest order by f desc nulls last;
+      f      
+-------------
+ XYZXYZ
+ XYZXY
+ XYZX
+ XYZ
+ ccc
+ bbb
+ ABCABC
+ aaa
+ 9
+ 2222222222
+ 11111111111
+ 1111111111
+ 1111111111
+ 1111111111
+ 0111111111
+ 0022222222
+ 0003333333
+ 0000444444
+ 0000055555
+ 0000006666
+ 0000000777
+ 0000000088
+ 0000000009
+ 00
+ 0
+ 
+ 
+(27 rows)
+
+select g from sorttest order by g desc nulls last;
+        g         
+------------------
+ XYZXYZ          
+ XYZXY           
+ XYZX            
+ XYZ             
+ ccc             
+ bbb             
+ ABCABC          
+ aaa             
+ 9               
+ 2222222222      
+ 11111111111     
+ 1111111111      
+ 1111111111      
+ 1111111111      
+ 0111111111      
+ 0022222222      
+ 0003333333      
+ 0000444444      
+ 0000055555      
+ 0000006666      
+ 0000000777      
+ 0000000088      
+ 0000000009      
+ 00              
+ 0               
+ 
+ 
+(27 rows)
+
+select h from sorttest order by h desc nulls last;
+      h      
+-------------
+ XYZXYZ
+ XYZXY
+ XYZX
+ XYZ
+ ccc
+ bbb
+ ABCABC
+ aaa
+ 9
+ 2222222222
+ 11111111111
+ 1111111111
+ 1111111111
+ 1111111111
+ 0111111111
+ 0022222222
+ 0003333333
+ 0000444444
+ 0000055555
+ 0000006666
+ 0000000777
+ 0000000088
+ 0000000009
+ 00
+ 0
+ 
+ 
+(27 rows)
+
+select f from sorttest order by f collate 'C';
+      f      
+-------------
+ 0
+ 00
+ 0000000009
+ 0000000088
+ 0000000777
+ 0000006666
+ 0000055555
+ 0000444444
+ 0003333333
+ 0022222222
+ 0111111111
+ 1111111111
+ 1111111111
+ 1111111111
+ 11111111111
+ 2222222222
+ 9
+ ABCABC
+ XYZ
+ XYZX
+ XYZXY
+ XYZXYZ
+ aaa
+ bbb
+ ccc
+ 
+ 
+(27 rows)
+
+select g from sorttest order by g collate 'C';
+        g         
+------------------
+ 0               
+ 00              
+ 0000000009      
+ 0000000088      
+ 0000000777      
+ 0000006666      
+ 0000055555      
+ 0000444444      
+ 0003333333      
+ 0022222222      
+ 0111111111      
+ 1111111111      
+ 1111111111      
+ 1111111111      
+ 11111111111     
+ 2222222222      
+ 9               
+ ABCABC          
+ XYZ             
+ XYZX            
+ XYZXY           
+ XYZXYZ          
+ aaa             
+ bbb             
+ ccc             
+ 
+ 
+(27 rows)
+
+select h from sorttest order by h collate 'C';
+      h      
+-------------
+ 0
+ 00
+ 0000000009
+ 0000000088
+ 0000000777
+ 0000006666
+ 0000055555
+ 0000444444
+ 0003333333
+ 0022222222
+ 0111111111
+ 1111111111
+ 1111111111
+ 1111111111
+ 11111111111
+ 2222222222
+ 9
+ ABCABC
+ XYZ
+ XYZX
+ XYZXY
+ XYZXYZ
+ aaa
+ bbb
+ ccc
+ 
+ 
+(27 rows)
+
+select a from sorttest order by a limit 10;
+     a      
+------------
+ -888888889
+ -777777777
+ -666666666
+ -555555555
+         -9
+         -8
+         -7
+         -6
+         -5
+         -4
+(10 rows)
+
+select d,a from sorttest order by a,d;
+          d           |     a      
+----------------------+------------
+     -888888888888888 | -888888889
+     -777777777777777 | -777777777
+     -666666666666666 | -666666666
+     -555555555555555 | -555555555
+                    1 |         -9
+                    2 |         -8
+                    3 |         -7
+                    4 |         -6
+                    5 |         -5
+                    6 |         -4
+                    7 |         -3
+                    8 |         -2
+                    9 |         -1
+                    0 |          0
+                   -1 |          1
+                   -1 |          1
+                   -1 |          1
+                    6 |          2
+ -9223372036854775808 |  444444444
+  1000000000000000000 | 1000000000
+  2000000000000000000 | 1500000000
+ -9223372036854775803 | 2000000000
+  9223372036854775805 | 2147483645
+  9223372036854775806 | 2147483646
+  9223372036854775807 | 2147483647
+                      |           
+                      |           
+(27 rows)
+
+select a,d from sorttest order by d,a;
+     a      |          d           
+------------+----------------------
+  444444444 | -9223372036854775808
+ 2000000000 | -9223372036854775803
+ -888888889 |     -888888888888888
+ -777777777 |     -777777777777777
+ -666666666 |     -666666666666666
+ -555555555 |     -555555555555555
+          1 |                   -1
+          1 |                   -1
+          1 |                   -1
+          0 |                    0
+         -9 |                    1
+         -8 |                    2
+         -7 |                    3
+         -6 |                    4
+         -5 |                    5
+         -4 |                    6
+          2 |                    6
+         -3 |                    7
+         -2 |                    8
+         -1 |                    9
+ 1000000000 |  1000000000000000000
+ 1500000000 |  2000000000000000000
+ 2147483645 |  9223372036854775805
+ 2147483646 |  9223372036854775806
+ 2147483647 |  9223372036854775807
+            |                     
+            |                     
+(27 rows)
+
+select a from sorttest order by f,g;
+     a      
+------------
+          0
+ 1000000000
+         -9
+         -8
+         -7
+         -6
+         -5
+         -4
+         -3
+         -2
+         -1
+          1
+          1
+          1
+ 1500000000
+          2
+ 2000000000
+ 2147483647
+  444444444
+ 2147483646
+ 2147483645
+ -555555555
+ -666666666
+ -777777777
+ -888888889
+           
+           
+(27 rows)
+
+set work_mem='64kB';
+insert into sorttest select * from sorttest;
+insert into sorttest select * from sorttest;
+insert into sorttest select * from sorttest;
+insert into sorttest select * from sorttest;
+explain analyze select * from sorttest order by a;
+--?QUERY PLAN.*
+--?.*
+--?Sort.*
+--?Sort Key.*
+--?Sort Method: external merge  Disk.*
+--?Seq Scan on sorttest.*
+--?.*
+(5 rows)
+
+explain analyze select * from sorttest order by e;
+--?QUERY PLAN.*
+--?.*
+--?Sort.*
+--?Sort Key.*
+--?Sort Method: external merge  Disk.*
+--?Seq Scan on sorttest.*
+--?.*
+(5 rows)
+
+explain analyze select * from sorttest order by h;
+--?QUERY PLAN.*
+--?.*
+--?Sort.*
+--?Sort Key.*
+--?Sort Method: external merge  Disk.*
+--?Seq Scan on sorttest.*
+--?.*
+(5 rows)
+
+insert into sorttest select * from sorttest;
+insert into sorttest select * from sorttest;
+insert into sorttest select * from sorttest;
+explain analyze select a from sorttest order by a;
+--?QUERY PLAN.*
+--?.*
+--?Sort.*
+--?Sort Key.*
+--?Sort Method: external merge  Disk.*
+--?Seq Scan on sorttest.*
+--?.*
+(5 rows)
+
+explain analyze select e from sorttest order by e;
+--?QUERY PLAN.*
+--?.*
+--?Sort.*
+--?Sort Key.*
+--?Sort Method: external merge  Disk.*
+--?Seq Scan on sorttest.*
+--?.*
+(5 rows)
+
+explain analyze select h from sorttest order by h;
+--?QUERY PLAN.*
+--?.*
+--?Sort.*
+--?Sort Key.*
+--?Sort Method: external merge  Disk.*
+--?Seq Scan on sorttest.*
+--?.*
+(5 rows)
+
+insert into sorttest select * from sorttest;
+insert into sorttest select * from sorttest;
+insert into sorttest select * from sorttest;
+explain analyze select * from sorttest order by h limit 10000;
+--?QUERY PLAN.*
+--?.*
+--?Limit.*
+--?Sort.*
+--?Sort Key.*
+--?Sort Method: external merge  Disk.*
+--?Seq Scan on sorttest.*
+--?.*
+(6 rows)
+
+create table tmp1(a varchar(20));
+create table tmp2(a int);
+insert into tmp1 values('aaa');
+insert into tmp1 values('bbb');
+insert into tmp2 values(NULL);
+set enable_material=off;
+explain analyze select /*+ leading((tt1 tt2)) */ tt1.a, tt2.a from
+(select a from tmp1 limit 2) as tt1, (select a from sorttest order by a limit (select a from tmp2 limit 1)) as tt2;
+--?QUERY PLAN.*
+--?.*
+--?Nested Loop.*
+--?Limit.*
+--?Seq Scan.*
+--?Limit.*
+--?InitPlan.*
+--?Limit.*
+--?Seq Scan.*
+--?Sort.*
+--?Sort Key.*
+--?Sort Method: external merge  Disk.*
+--?Seq Scan on sorttest.*
+--?.*
+(12 rows)
+
+set enable_hashjoin=off;
+insert into tmp2 values(1);
+insert into tmp2 values(1);
+insert into tmp2 values(2);
+explain analyze select tt1.a, tt1.b, tt2.a from sorttest as tt1 left join tmp2 as tt2 on tt1.a = tt2.a;
+--?QUERY PLAN.*
+--?.*
+--?Merge Right Join.*
+--?Merge Cond.*
+--?Sort.*
+--?Sort Key.*
+--?Sort Method: quicksort  Memory.*
+--?Seq Scan on sorttest.*
+--?Sort.*
+--?Sort Key.*
+--?Sort Method: external merge  Disk.*
+--?Seq Scan on sorttest.*
+--?.*
+(11 rows)
+
+BEGIN;
+DECLARE order_cursor CURSOR FOR SELECT h, e FROM sorttest ORDER BY a;
+MOVE LAST IN order_cursor;
+FETCH BACKWARD 2 FROM order_cursor;
+ h | e 
+---+---
+   |  
+   |  
+(2 rows)
+
+MOVE BACKWARD 3000 IN order_cursor;
+FETCH BACKWARD 3 FROM order_cursor;
+  h  |   e   
+-----+-------
+ aaa | .9999
+ aaa | .9999
+ aaa | .9999
+(3 rows)
+
+CLOSE order_cursor;
+COMMIT;
+set maintenance_work_mem ='1024kB';
+alter table sorttest set (parallel_workers=4);
+create index sort_idx on sorttest(a);
+drop index sort_idx;
+create index sort_idx on sorttest(b);
+drop index sort_idx;
+create index sort_idx on sorttest(c);
+drop index sort_idx;
+create index sort_idx on sorttest(d);
+drop index sort_idx;
+create index sort_idx on sorttest(e);
+drop index sort_idx;
+create index sort_idx on sorttest(f);
+drop index sort_idx;
+create index sort_idx on sorttest(g);
+drop index sort_idx;
+create index sort_idx on sorttest(h);
+drop index sort_idx;
+create index sort_idx on sorttest(g,h);
+drop index sort_idx;
+create index CONCURRENTLY sort_idx on sorttest(a); 
+NOTICE:  switch off parallel mode when concurrently flag is set
+drop index sort_idx;
+create index CONCURRENTLY sort_idx on sorttest(e); 
+NOTICE:  switch off parallel mode when concurrently flag is set
+drop index sort_idx;
+create index CONCURRENTLY sort_idx on sorttest(h); 
+NOTICE:  switch off parallel mode when concurrently flag is set
+drop index sort_idx;
+drop table tmp1;
+drop table tmp2;
+drop table sorttest;

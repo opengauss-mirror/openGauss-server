@@ -1330,6 +1330,59 @@ select * from ValueTable;
   3
 (2 rows)
 
+select pg_typeof(@@FETCH_STATUS);
+ pg_typeof 
+-----------
+ integer
+(1 row)
+
+DO $$
+DECLARE
+ fetch_status int;
+BEGIN
+ fetch_status := @@FETCH_STATUS;
+ RAISE NOTICE 'fetch status: %', fetch_status;
+END;
+$$ LANGUAGE plpgsql;
+NOTICE:  fetch status: 0
+DO $$
+DECLARE
+ fetch_status text;
+BEGIN
+ fetch_status := @@FETCH_STATUS;
+ RAISE NOTICE 'fetch status: %', fetch_status;
+END;
+$$ LANGUAGE plpgsql;
+NOTICE:  fetch status: 0
+DO $$
+DECLARE
+ fetch_status bool;
+BEGIN
+ fetch_status := @@FETCH_STATUS;
+ RAISE NOTICE 'fetch status: %', fetch_status;
+END;
+$$ LANGUAGE plpgsql;
+NOTICE:  fetch status: f
+DO $$
+DECLARE
+ fetch_status json;
+BEGIN
+ fetch_status := @@FETCH_STATUS;
+ RAISE NOTICE 'fetch status: %', fetch_status;
+END;
+$$ LANGUAGE plpgsql;
+NOTICE:  fetch status: 0
+DO $$
+DECLARE
+ fetch_status date;
+BEGIN
+ fetch_status := @@FETCH_STATUS;
+ RAISE NOTICE 'fetch status: %', fetch_status;
+END;
+$$ LANGUAGE plpgsql;
+ERROR:  date/time field value out of range: "0"
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
 drop table ValueTable;
 drop function p1();
 drop function f1();

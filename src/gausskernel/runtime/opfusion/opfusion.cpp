@@ -43,6 +43,7 @@
 #include "opfusion/opfusion_selectforupdate.h"
 #include "opfusion/opfusion_selectforann.h"
 #include "opfusion/opfusion_sort.h"
+#include "opfusion/opfusion_unique_sort.h"
 #include "opfusion/opfusion_update.h"
 #include "optimizer/clauses.h"
 #include "parser/parsetree.h"
@@ -61,7 +62,6 @@
 extern void opfusion_executeEnd(PlannedStmt *plannedstmt, const char *queryString, Snapshot snapshot);
 extern bool check_log_statement(List* stmt_list);
 extern int errdetail_params(ParamListInfo params);
-extern void CheckWriteCommandWithDisableIndex(PlannedStmt *plannedstmt);
 #ifndef ENABLE_MULTIPLE_NODES
 static void report_iud_time_for_opfusion(PlannedStmt *plannedstmt)
 {
@@ -335,9 +335,6 @@ void OpFusion::executeInit()
 {
     if (m_local.m_isFirst == true) {
         checkPermission();
-    }
-    if (!IGNORE_UNUSED_INDEX_CHECK_ON_DML) {
-        CheckWriteCommandWithDisableIndex(m_global->m_planstmt);
     }
     if (m_local.m_resOwner == NULL) {
         m_local.m_resOwner = t_thrd.utils_cxt.CurrentResourceOwner;
@@ -767,6 +764,9 @@ void *OpFusion::FusionFactory(FusionType ftype, MemoryContext context, CachedPla
         case SORT_INDEX_FUSION:
             opfusionObj = New(objCxt)SortFusion(context, psrc, plantree_list, params);
             break;
+        case UNIQUE_SORT_INDEX_FUSION:
+            opfusionObj = New(objCxt)UniqueSortFusion(context, psrc, plantree_list, params);
+            break;
         case SELECT_FOR_ANN_FUSION:
             opfusionObj = New(objCxt)SelectForAnnFusion(context, psrc, plantree_list, params);
             break;
@@ -793,7 +793,9 @@ void OpFusion::updatePreAllocParamter(BindMessage* pqBindMessage, CachedPlanSour
 {
     MemoryContext old_context = CurrentMemoryContext;
     get_param_func(pqBindMessage, psrc, &m_local.m_params, t_thrd.mem_cxt.msg_mem_cxt, m_local.m_tmpContext);
-    CopyFormats(pqBindMessage->rformats, pqBindMessage->numRFormats);
+    if (pqBindMessage->needFormat) {
+        CopyFormats(pqBindMessage->rformats, pqBindMessage->numRFormats);
+    }
     m_local.m_has_init_param = true;
     MemoryContextSwitchTo(old_context);
 }

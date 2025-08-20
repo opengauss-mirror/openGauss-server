@@ -243,8 +243,7 @@ extern int FetchStatistics4WLM(const char* sql, void* info, Size size, strategy_
 extern void FetchGlobalStatistics(VacuumStmt* stmt, Oid relid, RangeVar* parentRel, bool isReplication = false);
 
 extern bool IsInheritor(Oid relid);
-extern Tuplesortstate* tuplesort_begin_merge(TupleDesc tupDesc, int nkeys, AttrNumber* attNums, Oid* sortOperators,
-    Oid* sortCollations, const bool* nullsFirstFlags, void* combiner, int workMem);
+extern Tuplesortstate* TuplesortBeginMerge();
 
 extern void pgxc_node_remote_savepoint(
     const char* cmdString, RemoteQueryExecType exec_type, bool bNeedXid, bool bNeedBegin,

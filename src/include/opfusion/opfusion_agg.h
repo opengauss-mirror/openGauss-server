@@ -42,32 +42,32 @@ public:
 
 protected:
 
-    typedef void (AggFusion::*aggFun)(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    typedef void (AggFusion::*aggFun)(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType);
 
-    typedef long (AggFusion::*aggProcessFunc)(long max_rows, Datum* values, bool* isnull);
+    typedef long (AggFusion::*aggProcessFunc)(long max_rows, Datum* values, bool* isnull, Oid *transType);
 
     /* agg sum function */
-    void agg_int2_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    void agg_int2_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType);
 
-    void agg_int4_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    void agg_int4_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType);
 
-    void agg_int8_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    void agg_int8_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType);
 
-    void agg_numeric_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    void agg_numeric_sum(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType);
 
-    void agg_any_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    void agg_any_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType);
 
-    void agg_star_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    void agg_star_count(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType);
 
-    long agg_process_special_count(long max_rows, Datum* values, bool* isnull);
+    long agg_process_special_count(long max_rows, Datum* values, bool* isnull, Oid *transType);
 
-    long agg_process_common(long max_rows, Datum* values, bool* isnull);
+    long agg_process_common(long max_rows, Datum* values, bool* isnull, Oid *transType);
 
-    void agg_int2_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    void agg_int2_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType);
 
-    void agg_int4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    void agg_int4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType);
 
-    void agg_float4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull);
+    void agg_float4_sum_ext(Datum *transVal, bool transIsNull, Datum *inVal, bool inIsNull, Oid *transType);
 
     bool InitDynamicOidFunc(Aggref *aggref);
 
@@ -91,11 +91,23 @@ protected:
         dest->buf = NULL;       /* digits array is not palloc'd */
     }
 
+    inline Datum int64datum_to_numericdatum(Datum input)
+    {
+        NumericVar result;
+        int64 val = DatumGetInt64(input);
+        init_var(&result);
+        int64_to_numericvar(val, &result);
+        Numeric res = make_result(&result);
+        free_var(&result);
+        return NumericGetDatum(res);
+    }
+
     struct AggFusionGlobalVariable {
         aggFun m_aggFunc;
         aggProcessFunc m_aggProcessFunc;
         Oid m_aggFnOid;
         bool m_aggCountNull;
+        bool m_aggBformatSum;
     };
     AggFusionGlobalVariable* m_c_global;
 };

@@ -1278,6 +1278,7 @@ static void knl_u_cache_init(knl_u_cache_context* cache_cxt)
     cache_cxt->cached_privs_roles = NIL;
     cache_cxt->cached_member_role = InvalidOid;
     cache_cxt->cached_membership_roles = NIL;
+    cache_cxt->cachedSequenceOid = InvalidOid;
 
     cache_cxt->plan_getrulebyoid = NULL;
     cache_cxt->plan_getviewrule = NULL;
@@ -1293,6 +1294,7 @@ static void knl_u_cache_init(knl_u_cache_context* cache_cxt)
     cache_cxt->PartRelCacheNeedEOXActWork = false;
     cache_cxt->PartCacheNeedEOXActWork = false;
     cache_cxt->bucket_cache_need_eoxact_work = false;
+    cache_cxt->cachedSequenceOidIsAutoInc = false;
     cache_cxt->dn_hash_table = NULL;
 }
 

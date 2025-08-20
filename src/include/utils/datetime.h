@@ -307,6 +307,7 @@ extern Datum pg_timezone_abbrevs(PG_FUNCTION_ARGS);
 extern Datum pg_timezone_names(PG_FUNCTION_ARGS);
 
 extern Interval *char_to_interval(char *str, int32 typmod, bool can_ignore = false);
+extern int GetValiddateDate(unsigned int fmask, bool isjulian, bool is2digits, bool bc, struct pg_tm* tm);
 #endif // !FRONTEND_PARSER
 
 #endif /* DATETIME_H */

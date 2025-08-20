@@ -522,14 +522,7 @@ void InitStreamMergeSort(StreamState* node)
         }
     }
 
-    node->sortstate = tuplesort_begin_merge(scanslot->tts_tupleDescriptor,
-        sort->numCols,
-        sort->sortColIdx,
-        sort->sortOperators,
-        sort->sortCollations,
-        sort->nullsFirst,
-        node,
-        u_sess->attr.attr_memory.work_mem);
+    node->sortstate = TuplesortBeginMerge();
 
     node->StreamScan = StreamMergeSortGetTuple;
 }

@@ -54,6 +54,8 @@ static List* ExpandIndirectionStar(ParseState* pstate, A_Indirection* ind, bool 
 static List* ExpandSingleTable(ParseState* pstate, RangeTblEntry* rte, int location, bool targetlist);
 static List* ExpandRowReference(ParseState* pstate, Node* expr, bool targetlist);
 static int FigureColnameInternal(Node* node, char** name);
+static List* checkSubqueryInsertTargets(ParseState* pstate, List* cols, List** attrnos);
+static List* checkRelationInsertTargets(ParseState* pstate, List* cols, List** attrnos);
 
 extern void checkArrayTypeInsert(ParseState* pstate, Expr* expr);
 extern Oid pg_get_serial_sequence_internal(Oid tableOid, AttrNumber attnum, bool find_identity, char** out_seq_name);
@@ -394,22 +396,26 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind exprKi
     sv_expr_kind = pstate->p_expr_kind;
     pstate->p_expr_kind = exprKind;
 
-    AssertEreport(rd != NULL, MOD_OPT, "");
+    AssertEreport((rd != NULL || rte->rtekind == RTE_SUBQUERY), MOD_OPT, "");
     /*
      * for relation not in ledger schema, only attrno is system column,
      * for relation in ledger schema, the "hash" column is reserved for system.
      * for "hash" column of table in ledger schema, we forbid insert and update
      */
-    bool is_system_column = (attrno <= 0 || (rd->rd_isblockchain && strcmp(colname, "hash") == 0));
-    if (is_system_column) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("cannot assign to system column \"%s\"", colname),
-                parser_errposition(pstate, location)));
+    if (RelationIsValid(rd)) {
+        bool isSystemColumn = (attrno <= 0 || (rd->rd_isblockchain && strcmp(colname, "hash") == 0));
+        if (isSystemColumn) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cannot assign to system column \"%s\"", colname),
+                    parser_errposition(pstate, location)));
+        }
+        attrtype = attnumTypeId(rd, attrno);
+        attrtypmod = rd->rd_att->attrs[attrno - 1].atttypmod;
+        attrcollation = rd->rd_att->attrs[attrno - 1].attcollation;
+    } else if (rte->rtekind == RTE_SUBQUERY) {
+        get_rte_attribute_type(rte, attrno, &attrtype, &attrtypmod, &attrcollation);
     }
-    attrtype = attnumTypeId(rd, attrno);
-    attrtypmod = rd->rd_att->attrs[attrno - 1].atttypmod;
-    attrcollation = rd->rd_att->attrs[attrno - 1].attcollation;
     if (DB_IS_CMPT_BD && OidIsValid(attrcollation)) {
         attrcharset = get_valid_charset_by_collation(attrcollation);
     }
@@ -888,6 +894,18 @@ static Node* transformAssignmentSubscripts(ParseState* pstate, Node* basenode, c
  */
 List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
 {
+    RangeTblEntry* rte = (RangeTblEntry*)linitial(pstate->p_rtable);
+
+    if (rte->rtekind == RTE_RELATION &&
+        RelationIsValid((Relation)linitial(pstate->p_target_relation))) {
+        return checkRelationInsertTargets(pstate, cols, attrnos);
+    } else if (rte->rtekind == RTE_SUBQUERY) {
+        return checkSubqueryInsertTargets(pstate, cols, attrnos);
+    }
+}
+
+static List* checkRelationInsertTargets(ParseState* pstate, List* cols, List** attrnos)
+{
     *attrnos = NIL;
     bool is_blockchain_rel = false;
     Relation targetrel = (Relation)linitial(pstate->p_target_relation);
@@ -987,6 +1005,99 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
         }
     }
 
+    return cols;
+}
+
+static List* checkSubqueryInsertTargetsSpecifiedCols(
+    ParseState* pstate, RangeTblEntry* rte, List* cols, List** attrnos)
+{
+    Bitmapset* wholecols = NULL;
+    Bitmapset* partialcols = NULL;
+    ListCell* cell = NULL;
+    foreach (cell, cols) {
+        ResTarget* col = (ResTarget*)lfirst(cell);
+        char* name = col->name;
+        /* Lookup column name, ereport on failure */
+        List* attrnoList = getSubqueryRteAttnum(rte, name);
+        int attrno = linitial_int(attrnoList);
+        if (list_length(attrnoList) > 1) {
+            ereport(ERROR,
+                (errcode(ERRCODE_AMBIGUOUS_COLUMN),
+                    errmsg("column reference \"%s\" is ambiguous", name)));
+        }
+        if (attrno == InvalidAttrNumber) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_COLUMN),
+                    errmsg("column \"%s\" of \"%s\" does not exist",
+                        name,
+                        rte->alias->aliasname),
+                    parser_errposition(pstate, col->location)));
+        }
+        /*
+            * Check for duplicates, but only of whole columns --- we allow
+            * INSERT INTO foo (col.subcol1, col.subcol2)
+            */
+        if (col->indirection == NIL) {
+            /* whole column; must not have any other assignment */
+            if (bms_is_member(attrno, wholecols) || bms_is_member(attrno, partialcols)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DUPLICATE_COLUMN),
+                        errmsg("column \"%s\" specified more than once", name),
+                        parser_errposition(pstate, col->location)));
+            }
+            wholecols = bms_add_member(wholecols, attrno);
+        } else {
+            /* partial column; must not have any whole assignment */
+            if (bms_is_member(attrno, wholecols)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_DUPLICATE_COLUMN),
+                        errmsg("column \"%s\" specified more than once", name),
+                        parser_errposition(pstate, col->location)));
+            }
+            partialcols = bms_add_member(partialcols, attrno);
+        }
+        *attrnos = lappend_int(*attrnos, attrno);
+    }
+    return cols;
+}
+
+static List* checkSubqueryInsertTargetsAllCols(RangeTblEntry* rte, List* cols, List** attrnos)
+{
+    int i = 1;
+    ListCell* cell = NULL;
+    foreach (cell, rte->eref->colnames) {
+        ResTarget* col = makeNode(ResTarget);
+        Value* val = (Value*)lfirst(cell);
+        ListCell* restCell = lnext(cell);
+        while (restCell != NULL) {
+            Value* restval = (Value*)lfirst(restCell);
+            if (strcmp(strVal(val), strVal(restval)) == 0) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_AMBIGUOUS_COLUMN),
+                        errmsg("column reference \"%s\" is ambiguous", strVal(val))));
+            }
+            restCell = lnext(restCell);
+        }
+        col->name = pstrdup(strVal(val));
+        col->indirection = NIL;
+        col->val = NULL;
+        col->location = -1;
+        cols = lappend(cols, col);
+        *attrnos = lappend_int(*attrnos, i);
+        i++;
+    }
+    return cols;
+}
+
+static List* checkSubqueryInsertTargets(ParseState* pstate, List* cols, List** attrnos)
+{
+    RangeTblEntry* rte = (RangeTblEntry*)linitial(pstate->p_rtable);
+    ListCell* cell = NULL;
+    if (cols == NIL) {
+        cols = checkSubqueryInsertTargetsAllCols(rte, cols, attrnos);
+    } else {
+        cols = checkSubqueryInsertTargetsSpecifiedCols(pstate, rte, cols, attrnos);
+    }
     return cols;
 }
 

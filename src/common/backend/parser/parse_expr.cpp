@@ -296,6 +296,7 @@ static void AddDefaultExprNode(ParseState* pstate)
     context.active_fns = NIL;
     context.case_val = NULL;
     context.estimate = false;
+    context.change_user = false;
 
     for (int i = 0; i < fieldCnt; ++i) {
         FormData_pg_attribute *attTup = &rdAtt->attrs[i];

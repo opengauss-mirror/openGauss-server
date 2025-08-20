@@ -6538,8 +6538,13 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
              * actions below, must use AMOUNT_TEST if we want to read more
              * characters than that.)
              */
-            if (OVERLOAD_TEST)
-                break;
+            if (OVERLOAD_TEST) {
+                if (!CORRECT_TO_NUMBER && (DB_IS_CMPT(A_FORMAT)) &&
+                    !Np->read_dec && n->type == NODE_TYPE_ACTION && n->key->id == NUM_0)
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid data.")));
+                else
+                    break;
+            }
         }
         if (unlikely(Np->inout_p - Np->inout >= max_len)) {
             ereport(ERROR,
@@ -6578,6 +6583,11 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                             Np->inout_p++;
                             tmp_len--;
                         }
+                        if (!CORRECT_TO_NUMBER && (DB_IS_CMPT(A_FORMAT)) &&
+                            !Np->read_dec && n->key->id == NUM_0 && !(isdigit((unsigned char)*Np->inout_p))) {
+                            ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid data.")));
+                        }
+                        
                         NUM_numpart_from_char(Np, n->key->id, plen, tmp_len);
                         break; /* switch() case: */
                     }

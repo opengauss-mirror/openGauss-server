@@ -411,7 +411,7 @@ ERROR:  cannot insert into view "ro_view1"
 DETAIL:  Views containing DISTINCT are not automatically updatable.
 HINT:  To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule.
 DELETE FROM ro_view18;
-ERROR:  cannot delete from the view or subquery
+ERROR:  cannot delete from view "tmp"
 DETAIL:  Views that do not select from tables, views or subqueries are not automatically updatable.
 HINT:  To enable deleting from the view, provide an INSTEAD OF DELETE trigger or an unconditional ON DELETE DO INSTEAD rule.
 UPDATE ro_view19 SET max_value=1000;

@@ -490,6 +490,9 @@ typedef enum {
 #define FORCE_VALIDATE_PLANCACHE_RESULT \
     ((bool)g_instance.attr.attr_sql.plan_cache_type_validation)
 
+#define ENABLE_FUNCTION_RESULT_CACHE() \
+    (u_sess->attr.attr_sql.enable_func_cache && u_sess->attr.attr_sql.query_dop_tmp == 1)
+
 typedef enum {
     SUMMARY = 0, /* not collect multi column statistics info */
     DETAIL = 1,  /* collect multi column statistics info */

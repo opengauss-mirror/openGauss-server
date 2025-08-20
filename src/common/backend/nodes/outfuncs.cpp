@@ -5850,6 +5850,9 @@ static void _outRangeSubselect(StringInfo str, RangeSubselect* node)
     if (t_thrd.proc->workingVersionNum >= ROTATE_UNROTATE_VERSION_NUM) {
         WRITE_NODE_FIELD(rotate);
     }
+    if (t_thrd.proc->workingVersionNum >= INLINEVIEW_DML_VERSION_NUM) {
+        WRITE_ENUM_FIELD(withCheckOption, ViewCheckOption);
+    }
 }
 
 static void _outRangeFunction(StringInfo str, RangeFunction* node)

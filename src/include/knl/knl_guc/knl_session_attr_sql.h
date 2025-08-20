@@ -276,6 +276,7 @@ typedef struct knl_session_attr_sql {
     bool uppercase_attribute_name;
 #endif
     bool var_eq_const_selectivity;
+    bool enable_func_cache;
     int vectorEngineStrategy;
     int gms_stats_history_retention;
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))

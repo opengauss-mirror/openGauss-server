@@ -48,6 +48,7 @@ CATALOG(pg_proc_ext,3483) BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(3484) BKI_SCHEMA_MACR
     text  parallel_cursor_partkey[1];  /* specify what keys to partition for parallel cursor */
 #endif
     Oid   pro_proc_oid;
+    bool  result_cache;  /* if function can cache result  */
 } FormData_pg_proc_ext;
 
 /* ----------------
@@ -61,18 +62,23 @@ typedef FormData_pg_proc_ext *Form_pg_proc_ext;
  *     compiler constants for pg_proc_ext
  * ----------------
  */
-#define Natts_pg_proc_ext                          5
+#define Natts_pg_proc_ext                          6
 #define Anum_pg_proc_ext_proc_oid                  1
 #define Anum_pg_proc_ext_parallel_cursor_seq       2
 #define Anum_pg_proc_ext_parallel_cursor_strategy  3
 #define Anum_pg_proc_ext_parallel_cursor_partkey   4
 #define Anum_pg_proc_ext_procoid                   5
+#define Anum_pg_proc_ext_result_cache              6
 
-extern void InsertPgProcExt(Oid oid, FunctionPartitionInfo* partInfo, Oid proprocoid = InvalidOid);
+extern void InsertPgProcExt(
+    Oid oid, FunctionPartitionInfo* partInfo, Oid proprocoid = InvalidOid, bool resultCache = false);
 extern int2 GetParallelCursorSeq(Oid oid);
 extern FunctionPartitionStrategy GetParallelStrategyAndKey(Oid oid, List** partkey);
 extern void DeletePgProcExt(Oid oid);
 extern Oid GetProprocoidByOid(Oid oid);
+extern bool GetResultCacheByOid(Oid oid);
+extern void UpdatePgProcExt(Oid funcOid, DefElem* result_cache_item, bool needCleanParallelEnableInfo);
+extern void check_func_can_cache_result(CreateFunctionStmt* n, bool notsupport);
 
 #endif   /* PG_PROC_EXT_H */
 

@@ -12,7 +12,9 @@
 <synopsis>
 DELETE Single-Relation Syntax：
 [ WITH [ RECURSIVE ] with_query [, ...] ]
-DELETE [/*+ plan_hint */] [FROM] [ ONLY ] table_name [ * ] [ [ [partition_clause] [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [ partitions_clause ] ] ]
+DELETE [/*+ plan_hint */] [FROM]
+    { [ ONLY ] table_name [ * ] [ [ [partition_clause] [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [ partitions_clause ] ] ]
+    | ( subquery [ WITH [ CASCADED | LOCAL ] CHECK OPTION ] ) [ [ AS ] alias ] }
     [ USING using_list ]
     [ WHERE condition | WHERE CURRENT OF cursor_name ]
     [ ORDER BY {expression [ [ ASC | DESC | USING operator ]
@@ -22,13 +24,15 @@ DELETE [/*+ plan_hint */] [FROM] [ ONLY ] table_name [ * ] [ [ [partition_clause
 DELETE Multiple-Relation Syntax：
 [ WITH [ RECURSIVE ] with_query [, ...] ]
 DELETE [/*+ plan_hint */] [FROM]
-    {[ ONLY ] table_name [ * ] [ [ [partition_clause]  [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [partitions_clause] ] ]} [, ...]
+    { [ ONLY ] table_name [ * ] [ [ [partition_clause]  [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [partitions_clause] ] ]
+    | ( subquery [ WITH [ CASCADED | LOCAL ] CHECK OPTION ] ) [ [ AS ] alias ] } [, ...]
     [ USING using_list ]
     [ WHERE condition | WHERE CURRENT OF cursor_name ];
 or
 [ WITH [ RECURSIVE ] with_query [, ...] ]
 DELETE [/*+ plan_hint */]
-    {[ ONLY ] table_name [ * ] [ [ [partition_clause]  [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [partitions_clause] ] ]} [, ...]
+    { [ ONLY ] table_name [ * ] [ [ [partition_clause]  [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [partitions_clause] ] ]
+    | ( subquery [ WITH [ CASCADED | LOCAL ] CHECK OPTION ] ) [ [ AS ] alias ] } [, ...]
     [ FROM using_list ]
     [ WHERE condition | WHERE CURRENT OF cursor_name ];
 

@@ -1663,3 +1663,675 @@ NOTICE:  drop cascades to view v_employees
 reset search_path;
 drop schema test_ident_current;
 drop schema functions_test cascade;
+-- test datefuncs
+--test dateadd
+select dateadd(hh,1,timestamp'1997-12-31 23:59:59');
+         dateadd          
+--------------------------
+ Thu Jan 01 00:59:59 1998
+(1 row)
+
+select dateadd(dd,1,timestamp'1997-12-31 23:59:59');
+         dateadd          
+--------------------------
+ Thu Jan 01 23:59:59 1998
+(1 row)
+
+select dateadd(mm,1,timestamp'1997-12-31 23:59:59');
+         dateadd          
+--------------------------
+ Sat Jan 31 23:59:59 1998
+(1 row)
+
+select dateadd(yy,1,timestamp'1997-12-31 23:59:59');
+         dateadd          
+--------------------------
+ Thu Dec 31 23:59:59 1998
+(1 row)
+
+select dateadd(qq,1,timestamp'1997-12-31 23:59:59');
+         dateadd          
+--------------------------
+ Tue Mar 31 23:59:59 1998
+(1 row)
+
+select dateadd(ww,1,timestamptz'1997-12-31 23:59:59');
+           dateadd            
+------------------------------
+ Wed Jan 07 23:59:59 1998 PST
+(1 row)
+
+select dateadd(mi,1,timestamptz'1997-12-31 23:59:59');
+           dateadd            
+------------------------------
+ Thu Jan 01 00:00:59 1998 PST
+(1 row)
+
+select dateadd(ss,1,timestamp'1997-12-31 23:59:59');
+         dateadd          
+--------------------------
+ Thu Jan 01 00:00:00 1998
+(1 row)
+
+select dateadd(ms,1,timestamp'1997-12-31 23:59:59');
+           dateadd            
+------------------------------
+ Wed Dec 31 23:59:59.001 1997
+(1 row)
+
+select dateadd(mcs,1,timestamp'1997-12-31 23:59:59');
+             dateadd             
+---------------------------------
+ Wed Dec 31 23:59:59.000001 1997
+(1 row)
+
+select dateadd(mcs,999999,timestamp'1997-12-31 23:59:59.000002');
+             dateadd             
+---------------------------------
+ Thu Jan 01 00:00:00.000001 1998
+(1 row)
+
+select dateadd(mm,1,date'1998-01-30');
+         dateadd          
+--------------------------
+ Sat Feb 28 00:00:00 1998
+(1 row)
+
+select dateadd(dd,2,time'23:20:20');
+         dateadd          
+--------------------------
+ Wed Jan 03 23:20:20 1900
+(1 row)
+
+select dateadd(dd,3,timetz '23:20:20');
+           dateadd            
+------------------------------
+ Thu Jan 04 22:20:20 1900 PST
+(1 row)
+
+select dateadd(dy,2,time'23:20:20');
+         dateadd          
+--------------------------
+ Wed Jan 03 23:20:20 1900
+(1 row)
+
+select dateadd(dw,2,time'23:20:20');
+         dateadd          
+--------------------------
+ Wed Jan 03 23:20:20 1900
+(1 row)
+
+select dateadd(yy,2,time'23:20:20');
+         dateadd          
+--------------------------
+ Wed Jan 01 23:20:20 1902
+(1 row)
+
+select dateadd(mm,2,time'23:20:20');
+         dateadd          
+--------------------------
+ Thu Mar 01 23:20:20 1900
+(1 row)
+
+select dateadd('',1,'2023/3/31');
+ERROR:  unrecognized role option ""
+CONTEXT:  referenced column: dateadd
+select dateadd(2022,3,'2023/3/31 11:25:35.123456789');
+ERROR:  function dateadd(integer, integer, unknown) does not exist
+LINE 1: select dateadd(2022,3,'2023/3/31 11:25:35.123456789');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: dateadd
+drop table t;
+ERROR:  table "t" does not exist
+create table t(id timestamp, id1 int,id2 int);
+insert into t values(timestamp'1997-12-11',1,2);
+select dateadd(dd,t.id1,id)from t;
+         dateadd          
+--------------------------
+ Fri Dec 12 00:00:00 1997
+(1 row)
+
+select dateadd(mm,t.id1,id)from t;
+         dateadd          
+--------------------------
+ Sun Jan 11 00:00:00 1998
+(1 row)
+
+select dateadd(dd,id1+id1,id)from t;
+         dateadd          
+--------------------------
+ Sat Dec 13 00:00:00 1997
+(1 row)
+
+select dateadd(dd,id1+id1+id2,id)from t;
+         dateadd          
+--------------------------
+ Mon Dec 15 00:00:00 1997
+(1 row)
+
+select dateadd(dd,id1+id1+(id2 -id2),id)from t;
+         dateadd          
+--------------------------
+ Sat Dec 13 00:00:00 1997
+(1 row)
+
+select dateadd(dd,(id1+id1+(id2 -id2)),id)from t;
+         dateadd          
+--------------------------
+ Sat Dec 13 00:00:00 1997
+(1 row)
+
+select dateadd(dd,id1,id)from t;
+         dateadd          
+--------------------------
+ Fri Dec 12 00:00:00 1997
+(1 row)
+
+drop table t;
+--test datepart
+SELECT DATEPART(year,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+     2007
+(1 row)
+
+SELECT DATEPART(quarter,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+        4
+(1 row)
+
+SELECT DATEPART(month,timestamptz'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+       10
+(1 row)
+
+SELECT DATEPART(dayofyear,timestamptz'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+      303
+(1 row)
+
+SELECT DATEPART(day,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+       30
+(1 row)
+
+SELECT DATEPART(week,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+       44
+(1 row)
+
+SELECT DATEPART(weekday,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+        3
+(1 row)
+
+SELECT DATEPART(hour,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+       12
+(1 row)
+
+SELECT DATEPART(minute,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+       15
+(1 row)
+
+SELECT DATEPART(second,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+       32
+(1 row)
+
+SELECT DATEPART(millisecond,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+      123
+(1 row)
+
+SELECT DATEPART(microsecond,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+   123457
+(1 row)
+
+SELECT DATEPART(nanosecond,timestamp'2007-10-30 12:15:32.1234567');
+ datepart  
+-----------
+ 123457000
+(1 row)
+
+SELECT DATEPART(iso_week,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+       44
+(1 row)
+
+SELECT DATEPART(ISOWW,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+       44
+(1 row)
+
+SELECT DATEPART(ISOWK,timestamp'2007-10-30 12:15:32.1234567');
+ datepart 
+----------
+       44
+(1 row)
+
+SELECT DATEPART(year,date'2007-10-30');
+ datepart 
+----------
+     2007
+(1 row)
+
+SELECT DATEPART(year,time'23:20:20');
+ datepart 
+----------
+     1900
+(1 row)
+
+SELECT DATEPART(year,timetz'23:20:20');
+ datepart 
+----------
+     1900
+(1 row)
+
+select datepart('','2023/3/31');
+ERROR:  unrecognized role option ""
+CONTEXT:  referenced column: datepart
+select datepart(2022,'2023/3/31 11:25:35.123456789');
+ERROR:  function datepart(integer, unknown) does not exist
+LINE 1: select datepart(2022,'2023/3/31 11:25:35.123456789');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: datepart
+--test getdate
+select getdate();
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select datepart(second,getdate());
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select datepart(millisecond,getdate());
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select datepart(microsecond,getdate());
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select dateadd(d,1,getdate());
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select dateadd(day,1,getdate());
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select dateadd(hours,1,getdate());
+ERROR:  unrecognized role option "hours"
+CONTEXT:  referenced column: dateadd
+select dateadd("YEAR",1,getdate());
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select datepart(HoUR,getdate());
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select datepart(DAY,getdate());
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select datepart("YEAR",getdate());
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--test datename
+SELECT DATENAME(year,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 2007
+(1 row)
+
+SELECT DATENAME(quarter,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 4
+(1 row)
+
+SELECT DATENAME(mm,timestamp'2007-1-30 12:15:32.1234567');
+ datename 
+----------
+ January
+(1 row)
+
+SELECT DATENAME(m,timestamp'2007-2-28 12:15:32.1234567');
+ datename 
+----------
+ February
+(1 row)
+
+SELECT DATENAME(m,timestamp'2007-3-30 12:15:32.1234567');
+ datename 
+----------
+ March
+(1 row)
+
+SELECT DATENAME(m,timestamp'2007-4-30 12:15:32.1234567');
+ datename 
+----------
+ April
+(1 row)
+
+SELECT DATENAME(m,timestamp'2007-5-30 12:15:32.1234567');
+ datename 
+----------
+ May
+(1 row)
+
+SELECT DATENAME(m,timestamp'2007-6-30 12:15:32.1234567');
+ datename 
+----------
+ June
+(1 row)
+
+SELECT DATENAME(m,timestamp'2007-7-30 12:15:32.1234567');
+ datename 
+----------
+ July
+(1 row)
+
+SELECT DATENAME(m,timestamp'2007-8-30 12:15:32.1234567');
+ datename 
+----------
+ August
+(1 row)
+
+SELECT DATENAME(m,timestamp'2007-9-30 12:15:32.1234567');
+ datename  
+-----------
+ September
+(1 row)
+
+SELECT DATENAME(month,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ October
+(1 row)
+
+SELECT DATENAME(m,timestamp'2007-11-30 12:15:32.1234567');
+ datename 
+----------
+ November
+(1 row)
+
+SELECT DATENAME(m,timestamp'2007-12-30 12:15:32.1234567');
+ datename 
+----------
+ December
+(1 row)
+
+SELECT DATENAME(dayofyear,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 303
+(1 row)
+
+SELECT DATENAME(day,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 30
+(1 row)
+
+SELECT DATENAME(week,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 44
+(1 row)
+
+SELECT DATENAME(weekday,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ Tuesday
+(1 row)
+
+SELECT DATENAME(dw,timestamp'2007-10-29 12:15:32.1234567');
+ datename 
+----------
+ Monday
+(1 row)
+
+SELECT DATENAME(w,timestamp'2007-10-28 12:15:32.1234567');
+ datename 
+----------
+ Sunday
+(1 row)
+
+SELECT DATENAME(w,timestamp'2007-10-27 12:15:32.1234567');
+ datename 
+----------
+ Saturday
+(1 row)
+
+SELECT DATENAME(w,timestamp'2007-10-26 12:15:32.1234567');
+ datename 
+----------
+ Friday
+(1 row)
+
+SELECT DATENAME(w,timestamp'2007-10-25 12:15:32.1234567');
+ datename 
+----------
+ Thursday
+(1 row)
+
+SELECT DATENAME(w,timestamp'2007-10-24 12:15:32.1234567');
+ datename  
+-----------
+ Wednesday
+(1 row)
+
+SELECT DATENAME(hour,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 12
+(1 row)
+
+SELECT DATENAME(minute,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 15
+(1 row)
+
+SELECT DATENAME(second,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 32
+(1 row)
+
+SELECT DATENAME(millisecond,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 123
+(1 row)
+
+SELECT DATENAME(microsecond,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 123457
+(1 row)
+
+SELECT DATENAME(nanosecond,timestamp'2007-10-30 12:15:32.1234567');
+ datename  
+-----------
+ 123457000
+(1 row)
+
+SELECT DATENAME(TZoffset,'2007-10-30 12:15:32.1234567 -05:10');
+ datename 
+----------
+ -07:00
+(1 row)
+
+SELECT DATENAME(ISO_WEEK,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 44
+(1 row)
+
+SELECT DATENAME(ISOWW,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 44
+(1 row)
+
+SELECT DATENAME(ISOWK,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ 44
+(1 row)
+
+SELECT DATENAME(TZoffset,timestamp'2007-10-30 12:15:32.1234567');
+ datename 
+----------
+ +00;00
+(1 row)
+
+SELECT DATENAME(year, time'12:10:30.123');
+ datename 
+----------
+ 1900
+(1 row)
+
+SELECT DATENAME(month, time'12:10:30.123');
+ datename 
+----------
+ January
+(1 row)
+
+SELECT DATENAME(day, time'12:10:30.123');
+ datename 
+----------
+ 1
+(1 row)
+
+SELECT DATENAME(dayofyear, time'12:10:30.123');
+ datename 
+----------
+ 1
+(1 row)
+
+SELECT DATENAME(weekday, time'12:10:30.123');
+ datename 
+----------
+ Monday
+(1 row)
+
+SELECT DATENAME(weekday, timetz'12:10:30.123');
+ datename 
+----------
+ Monday
+(1 row)
+
+SELECT DATENAME(weekday, date'2007-10-30');
+ datename 
+----------
+ Tuesday
+(1 row)
+
+create view testv as select DATENAME(weekday, date'2007-10-30');
+\d+ testv;
+                        View "public.testv"
+  Column  |       Type        | Modifiers | Storage  | Description 
+----------+-------------------+-----------+----------+-------------
+ datename | character varying |           | extended | 
+View definition:
+ SELECT datename('weekday'::cstring, '10-30-2007'::date) AS datename;
+
+select * from testv;
+ datename 
+----------
+ Tuesday
+(1 row)
+
+SELECT datename('weekday'::cstring, '10-30-2007'::date) AS datename;
+ datename 
+----------
+ Tuesday
+(1 row)
+
+drop view testv;
+--test len
+SELECT LEN(N'123');
+ len 
+-----
+   3
+(1 row)
+
+SELECT LEN(N'123   ');
+ len 
+-----
+   3
+(1 row)
+
+SELECT LEN(N'   123   ');
+ len 
+-----
+   6
+(1 row)
+
+SELECT LEN(CAST('123' as char(25)));
+ len 
+-----
+   3
+(1 row)
+
+SELECT LEN('abc');
+ len 
+-----
+   3
+(1 row)
+
+SELECT LEN('12345678901234567890123456789012345'::varchar);
+ len 
+-----
+  35
+(1 row)
+
+select len('aa'::varbinary);
+ len 
+-----
+   2
+(1 row)
+

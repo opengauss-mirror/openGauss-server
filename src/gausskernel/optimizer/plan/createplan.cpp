@@ -310,6 +310,194 @@ void set_plan_rows_from_plan(Plan* plan, double localRows, double multiple)
     plan->plan_rows = get_global_rows(localRows, plan->multiple, ng_get_dest_num_data_nodes(plan));
 }
 
+extern void set_func_checked(FuncExpr *fexpr);
+extern void estimate_func_retcache(FuncExpr *fexpr, PlannerInfo *root);
+
+typedef struct FuncRetcacheKey
+{
+    Oid funcid;
+    Oid funccoll;
+} FuncRetcacheKey;
+
+typedef struct FuncRetcacheEntry
+{
+    FuncRetcacheKey funckey;
+    uint32 funcflags;
+} FuncRetcacheEntry;
+
+typedef struct FuncRetCacheWalkerContext
+{
+    PlannerInfo *root;
+    HTAB *hashp;
+    bool isSupportedCmd;
+} FuncRetCacheWalkerContext;
+
+static void func_retcache_expr(FuncExpr *fexpr, FuncRetCacheWalkerContext *wcxt)
+{
+    FuncRetcacheKey funckey;
+    FuncRetcacheEntry* funcentry;
+    bool found = false;
+
+    if (!wcxt->isSupportedCmd) {
+        /* 
+         * SQL that does not support function result caching, 
+         * mark the function as checked and exit directly.
+         */
+        set_func_checked(fexpr);
+        return;
+    }
+
+    funckey.funcid = fexpr->funcid;
+    funckey.funccoll = fexpr->inputcollid;
+
+    funcentry = (FuncRetcacheEntry *)hash_search(wcxt->hashp, &funckey, HASH_ENTER, &found);
+    if (found) {
+        /*
+         * If the same function appears multiple times, syscache will be called multiple times,
+         * resulting in waste. Using hash tables, when a function appears multiple times, the
+         * last hit result will be tried first to improve performance.
+         */
+        Assert(funcentry->funcflags != 0);
+        fexpr->funcflags = funcentry->funcflags;
+
+        return;
+    }
+
+    Assert(fexpr->funcflags == 0);
+    estimate_func_retcache(fexpr, wcxt->root);
+    Assert(fexpr->funcflags != 0);
+
+    Assert(funcentry);
+    funcentry->funcflags = fexpr->funcflags;
+}
+
+static bool func_retcache_walker(Node *node, FuncRetCacheWalkerContext *wcxt)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    /* Guard against stack overflow due to overly complex plans */
+    check_stack_depth();
+
+    if (IsA(node, RestrictInfo)) {
+        RestrictInfo *rinfo = (RestrictInfo *)node;
+
+        if (rinfo->clause)
+            (void)expression_tree_walker((Node *)rinfo->clause, (bool (*)())func_retcache_walker,
+                                (void *) wcxt);
+
+        if (rinfo->left_em && rinfo->left_em->em_expr)
+            (void)expression_tree_walker((Node *)rinfo->left_em->em_expr, (bool (*)())func_retcache_walker,
+                                (void *) wcxt);
+
+        if (rinfo->right_em && rinfo->right_em->em_expr)
+            (void)expression_tree_walker((Node *)rinfo->right_em->em_expr, (bool (*)())func_retcache_walker,
+                                (void *) wcxt);
+
+        return false;
+    } else if (IsA(node, FuncExpr)) {
+        FuncExpr *fexpr = (FuncExpr *)node;
+
+        func_retcache_expr(fexpr, wcxt);
+
+        if (expression_tree_walker((Node *)fexpr->args, (bool (*)())func_retcache_walker,
+                                   (void *) wcxt)) {
+            return false;
+        }
+
+        return false;
+    }
+
+    return expression_tree_walker(node, (bool (*)())func_retcache_walker,
+                                    (void *) wcxt);
+}
+
+static void scan_func_rescache_recurse(Path *path, FuncRetCacheWalkerContext *wcxt)
+{
+    /* Guard against stack overflow due to overly complex plans */
+    check_stack_depth();
+
+    switch (path->pathtype) {
+        case T_IndexScan:
+        case T_IndexOnlyScan:
+        {
+            List *scan_clauses = castNode(IndexPath, path)->indexinfo->indrestrictinfo;
+
+            expression_tree_walker((Node *)scan_clauses, (bool (*)())func_retcache_walker,
+                                   (void *) wcxt);
+
+            break;
+        }
+        case T_SeqScan:
+        case T_BitmapHeapScan:
+        case T_TidScan:
+        case T_SubqueryScan:
+        case T_FunctionScan:
+        case T_ValuesScan:
+        case T_CteScan:
+        case T_WorkTableScan:
+        case T_ForeignScan:
+        {
+            RelOptInfo *rel = path->parent;
+            List *scan_clauses = rel->baserestrictinfo;
+
+            expression_tree_walker((Node *)scan_clauses, (bool (*)())func_retcache_walker,
+                                   (void *) wcxt);
+
+            break;
+        }
+        case T_HashJoin:
+        case T_MergeJoin:
+        case T_NestLoop:
+        {
+            JoinPath *jpath = (JoinPath *) path;
+
+            scan_func_rescache_recurse(jpath->outerjoinpath, wcxt);
+            scan_func_rescache_recurse(jpath->innerjoinpath, wcxt);
+
+            expression_tree_walker((Node *)jpath->joinrestrictinfo, (bool (*)())func_retcache_walker,
+                                   (void *) wcxt);
+
+            break;
+        }
+        case T_BaseResult:
+        {
+            if (IsA(path, ProjectionPath))
+            {
+                ProjectionPath *ppath = (ProjectionPath *)path;
+                scan_func_rescache_recurse(ppath->subpath, wcxt);
+            }
+
+            break;
+        }
+        case T_Material:
+        {
+            MaterialPath *mpath = (MaterialPath *)path;
+            scan_func_rescache_recurse(mpath->subpath, wcxt);
+
+            break;
+        }
+        case T_Append:
+        {
+            AppendPath *apath = (AppendPath *)path;
+            ListCell   *subpaths;
+
+            foreach(subpaths, apath->subpaths)
+            {
+                scan_func_rescache_recurse((Path *) lfirst(subpaths), wcxt);
+            }
+            break;
+        }
+        case T_WindowAgg:
+        default:
+            break;
+    }
+
+    expression_tree_walker((Node *)wcxt->root->origin_tlist, (bool (*)())func_retcache_walker,
+                           (void *) wcxt);
+}
+
 /*
  * create_plan
  *	  Creates the access plan for a query by recursively processing the
@@ -336,6 +524,43 @@ Plan* create_plan(PlannerInfo* root, Path* best_path)
     root->curOuterRels = NULL;
     root->curOuterParams = NIL;
     u_sess->opt_cxt.is_under_append_plan = false;
+
+    /*
+     * Find all called functions from the best_path and save their properties.
+     * strictly limit it to read-only SELECT.
+     */
+    if (ENABLE_FUNCTION_RESULT_CACHE() && root->parse) {
+        FuncRetCacheWalkerContext wcxt;
+        HASHCTL wcxt_hash_ctl;
+        PlannerInfo* parent_root = root->parent_root;
+
+        wcxt.root = root;
+        wcxt.isSupportedCmd = root->parse->commandType == CMD_SELECT && !root->parse->hasForUpdate;
+        while (wcxt.isSupportedCmd && parent_root != NULL) {
+            wcxt.isSupportedCmd &= parent_root->parse->commandType == CMD_SELECT && !parent_root->parse->hasForUpdate;
+            if (parent_root->parent_root == NULL) {
+                break;
+            }
+            parent_root = parent_root->parent_root;
+        }
+
+        wcxt_hash_ctl.keysize = sizeof(FuncRetcacheKey);
+        wcxt_hash_ctl.entrysize = sizeof(FuncRetcacheEntry);
+        wcxt_hash_ctl.hash = tag_hash;
+        wcxt_hash_ctl.hcxt = AllocSetContextCreate(root->planner_cxt,
+                                    "FuncRetCacheWalkerMemoryContext",
+                                    ALLOCSET_DEFAULT_MINSIZE,
+                                    ALLOCSET_DEFAULT_INITSIZE,
+                                    ALLOCSET_DEFAULT_MAXSIZE);
+
+        wcxt.hashp = hash_create("func retcache flag hash", 32,
+                                              &wcxt_hash_ctl,
+                                              HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+
+        scan_func_rescache_recurse(best_path, &wcxt);
+
+        MemoryContextDelete(wcxt_hash_ctl.hcxt);
+    }
 
     /* Recursively process the path tree */
     plan = create_plan_recurse(root, best_path);

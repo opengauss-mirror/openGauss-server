@@ -4440,6 +4440,7 @@ static RangeSubselect* _copyRangeSubselect(const RangeSubselect* from)
     COPY_NODE_FIELD(subquery);
     COPY_NODE_FIELD(alias);
     COPY_NODE_FIELD(rotate);
+    COPY_SCALAR_FIELD(withCheckOption);
 
     return newnode;
 }

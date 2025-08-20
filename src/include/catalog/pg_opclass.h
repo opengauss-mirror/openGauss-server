@@ -418,5 +418,9 @@ DATA(insert OID = 8521 (4439  halfvec_ops PGNSP PGUID 8582 8306 t 0));
 /* bm25 index */
 DATA(insert OID = 9737 (8302  bm25_textarr_ops PGNSP PGUID 6509 1009 t 0));
 DATA(insert OID = 9738 (8302  bm25_text_ops PGNSP PGUID 6510 25 t 0));
+
+/* bloom index */
+DATA(insert OID = 8940 (8304  int4_ops PGNSP PGUID 8340 23 t 0));
+DATA(insert OID = 8941 (8304  text_ops PGNSP PGUID 8341 25 t 0));
 #endif   /* PG_OPCLASS_H */
 

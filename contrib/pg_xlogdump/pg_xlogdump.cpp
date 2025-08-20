@@ -97,12 +97,12 @@ static int open_dss_file(char* directory, const char* fname);
 static void split_path(char* path, char** dir, char** fname);
 static bool verify_directory(const char* directory);
 static void print_rmgr_list(void);
-static void fatal_error(const char* fmt, ...) __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
+void fatal_error(const char* fmt, ...) __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 
 /*
  * Big red button to push when things go horribly wrong.
  */
-static void fatal_error(const char* fmt, ...)
+void fatal_error(const char* fmt, ...)
 {
     va_list args;
 
@@ -155,13 +155,22 @@ static void split_path(char* path, char** dir, char** fname)
     /* directory path */
     if (sep != NULL) {
         *dir = strdup(path);
+        if (*dir == NULL) {
+            fatal_error("out of memory");
+        }
         (*dir)[(sep - path) + 1] = '\0'; /* no strndup */
         *fname = strdup(sep + 1);
+        if (*fname == NULL) {
+            fatal_error("out of memory");
+        }
     }
     /* local directory */
     else {
         *dir = NULL;
         *fname = strdup(path);
+        if (*fname == NULL) {
+            fatal_error("out of memory");
+        }
     }
 }
 
@@ -930,6 +939,9 @@ int main(int argc, char** argv)
                 break;
             case 'p':
                 dumpprivate.inpath = strdup(optarg);
+                if (dumpprivate.inpath == NULL) {
+                    fatal_error("out of memory");
+                }
                 break;
             case 'r': {
                 int i = 0;
@@ -1070,6 +1082,9 @@ int main(int argc, char** argv)
 
         if (strspn(fname, "0123456789ABCDEFabcdef") != strlen(fname)) {
             dumpprivate.shareStorageXlogFilePath = strdup(argv[optind]);
+            if (dumpprivate.shareStorageXlogFilePath == NULL) {
+                fatal_error("out of memory");
+            }
             goto begin_read;
         }
 

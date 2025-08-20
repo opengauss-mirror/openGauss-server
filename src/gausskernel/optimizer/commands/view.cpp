@@ -55,6 +55,8 @@ static void checkViewTupleDesc(TupleDesc newdesc, TupleDesc olddesc);
 
 InSideView query_from_view_hook = NULL;
 
+#define INITIAL_USER_ID 10
+
 /*---------------------------------------------------------------------
  * Validator for "check_option" reloption on views. The allowed values
  * are "local" and "cascaded".
@@ -457,8 +459,31 @@ static void checkViewTupleDesc(TupleDesc newdesc, TupleDesc olddesc)
      */
 }
 
+bool is_system_view_schema_oid(Oid relnamespace)
+{
+    char* schema_name = get_namespace_name(relnamespace);
+    if (schema_name == NULL) {
+        return false;
+    }
+    bool result = (strcmp(schema_name, "sys") == 0 || strcmp(schema_name, "dbe_perf") == 0 ||
+        strcmp(schema_name, "information_schema") == 0);
+    pfree_ext(schema_name);
+    return result;
+}
+
 static void DefineViewRules(Oid viewOid, Query* viewParse, bool replace)
 {
+    Relation view_relation = heap_open(viewOid, AccessShareLock);
+    if (!g_instance.attr.attr_common.allowSystemTableMods && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        (GetUserId() != INITIAL_USER_ID && is_system_view_schema_oid(RelationGetNamespace(view_relation)))) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("Not support: \"%s\" is a system catalog.", RelationGetRelationName(view_relation)),
+            errcause("Not support modify the system catalog."),
+            erraction("Avoid performing operation on the system catalog \"%s\".",
+                RelationGetRelationName(view_relation))));
+    }
+    heap_close(view_relation, NoLock);
+
     /*
      * Set up the ON SELECT rule.  Since the query has already been through
      * parse analysis, we use DefineQueryRewrite() directly.

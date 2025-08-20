@@ -10650,11 +10650,6 @@ void StartupXLOG(void)
                         record = ReadRecord(xlogreader, g_instance.smb_cxt.smb_end_lsn, LOG, false);
                     }
                     ereport(LOG, (errmsg("SMB skip to %lu.", g_instance.smb_cxt.smb_end_lsn)));
-                    if (!ENABLE_ASYNC_REDO) {
-                        while (!g_instance.smb_cxt.end_flag) {
-                            pg_usleep(10000L);
-                        }
-                    }
                 }
             } while (record != NULL);  // end of main redo apply loop
 

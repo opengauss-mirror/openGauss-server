@@ -243,7 +243,7 @@ extern Datum makeArrayResult(ArrayBuildState* astate, MemoryContext rcontext);
 extern Datum makeMdArrayResult(
     ArrayBuildState* astate, int ndims, int* dims, int* lbs, MemoryContext rcontext, bool release);
 
-extern ArrayIterator array_create_iterator(ArrayType* arr, int slice_ndim);
+extern ArrayIterator array_create_iterator(ArrayType* arr, int slice_ndim, ArrayMetaState *mstate = NULL);
 extern bool array_iterate(ArrayIterator iterator, Datum* value, bool* isnull);
 extern void array_free_iterator(ArrayIterator iterator);
 
@@ -279,5 +279,7 @@ extern Datum array_agg_finalfn(PG_FUNCTION_ARGS);
  */
 extern Datum array_typanalyze(PG_FUNCTION_ARGS);
 extern float8* check_float8_array(ArrayType* transarray, const char* caller, int n);
+extern Datum array_position(PG_FUNCTION_ARGS);
+extern Datum array_position_common(FunctionCallInfo fcinfo);
 
 #endif /* ARRAY_H */

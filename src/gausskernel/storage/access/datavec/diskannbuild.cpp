@@ -163,7 +163,6 @@ static void CreateMetaPage(Relation index, DiskAnnBuildState* buildstate, ForkNu
 {
     Buffer buf;
     Page page;
-    char* pqTable;
     DiskAnnMetaPage metap;
 
     buf = ReadBufferExtended(index, MAIN_FORKNUM, P_NEW, RBM_NORMAL, NULL);
@@ -284,7 +283,7 @@ static BlockNumber InsertVectorIntoPage(Relation index, Vector* vec, double sqrS
         page = DiskAnnInitRegisterPage(index, buf);
     } else {
         state = GenericXLogStart(index);
-        page = GenericXLogRegisterBuffer(state, buf, 0);
+        page = GenericXLogRegisterBuffer(state, buf, GENERIC_XLOG_FULL_IMAGE);
         DiskAnnInitPage(page, BufferGetPageSize(buf));
     }
 
@@ -624,6 +623,7 @@ static double AssignTuples(DiskAnnBuildState* buildstate)
     /* End parallel build */
     if (buildstate->diskannleader) {
         DiskAnnEndParallel(buildstate->diskannleader);
+        buildstate->diskannleader = NULL;
     }
 
     return buildstate->reltuples;
@@ -677,7 +677,7 @@ static void BuildVamanaIndex(DiskAnnBuildState* buildstate)
         parallelWorkers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
     }
 
-    if (parallelWorkers > 0) {
+    if (parallelWorkers > 1 && buildstate->blocksList.size() > parallelWorkers * buildstate->indexSize) {
         DiskAnnBeginParallel(buildstate, parallelWorkers, ParallelBuildFlag::LINK);
     }
 

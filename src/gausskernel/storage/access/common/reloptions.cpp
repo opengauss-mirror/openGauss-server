@@ -89,7 +89,7 @@ static void ValidateStrOptDekCipher(const char *val);
 static void ValidateStrOptCmkId(const char *val);
 static void ValidateIndexTypeOption(const char* val);
 static void ValidateStrOptIndexType(const char *val);
-
+static void ValidateDataCompressionOption(const char *val);
 
 #ifdef USE_SPQ
 static void CheckSpqBTBuildOption(const char *val);
@@ -132,6 +132,14 @@ static relopt_bool boolRelOpts[] = {
      GENERIC_DEFAULT_ENABLE_PQ},
     {{"use_mmap", "Whether to enable use mmap during hnsw search", RELOPT_KIND_HNSW }, GENERIC_DEFAULT_USE_MMAP },
     {{"by_residual", "Whether to use residual during IVFPQ", RELOPT_KIND_IVFFLAT}, IVFPQ_DEFAULT_RESIDUAL},
+    {{"pad_index", "pad_index", RELOPT_KIND_D_INDEX}, false},
+    {{"ignore_dup_key", "ignore_dup_key", RELOPT_KIND_D_INDEX}, false},
+    {{"statistics_norecompute", "statistics_norecompute", RELOPT_KIND_D_INDEX}, false},
+    {{"statistics_incremental", "statistics_incremental", RELOPT_KIND_D_INDEX}, false},
+    {{"allow_row_locks", "allow_row_locks", RELOPT_KIND_D_INDEX}, false},
+    {{"allow_page_locks", "allow_page_locks", RELOPT_KIND_D_INDEX}, false},
+    {{"optimize_for_sequential_key", "optimize_for_sequential_key", RELOPT_KIND_D_INDEX}, false},
+    {{"xml_compression", "xml_compression", RELOPT_KIND_D_INDEX}, false},
     /* list terminator */
     {{NULL}}};
 
@@ -155,6 +163,11 @@ static relopt_int intRelOpts[] = {
     {{ "fillfactor", "Packs spgist index pages only to this percentage", RELOPT_KIND_SPGIST },
      SPGIST_DEFAULT_FILLFACTOR,
      SPGIST_MIN_FILLFACTOR,
+     100 },
+    {{ "fillfactor", "Packs d database index pages only to this percentage, actually the index option of database A",
+     RELOPT_KIND_D_INDEX },
+     D_DATABASE_DEFAULT_FILLFACTOR,
+     D_DATABASE_MIN_FILLFACTOR,
      100 },
     {{ "autovacuum_vacuum_threshold", "Minimum number of tuple updates or deletes prior to vacuum",
        RELOPT_KIND_HEAP | RELOPT_KIND_TOAST },
@@ -222,8 +235,8 @@ static relopt_int intRelOpts[] = {
     /* COMPRESSLEVEL option */
     {
         { "compresslevel", "column relation's compress level",
-          /* in fact PSORT is also a heap relation */
-          RELOPT_KIND_HEAP | RELOPT_KIND_PSORT },
+        /* in fact PSORT is also a heap relation */
+        RELOPT_KIND_HEAP | RELOPT_KIND_PSORT },
         REL_MIN_COMPRESSLEVEL, /* default value of compress level */
         REL_MIN_COMPRESSLEVEL, /* min value of compress level */
         REL_MAX_COMPRESSLEVEL  /* max value of compress level */
@@ -232,8 +245,8 @@ static relopt_int intRelOpts[] = {
     /* append_mode_internal option */
     {
         { "append_mode_internal", "internal value for append_mode",
-          /* in fact PSORT is also a heap relation */
-          RELOPT_KIND_HEAP | RELOPT_KIND_PSORT },
+        /* in fact PSORT is also a heap relation */
+        RELOPT_KIND_HEAP | RELOPT_KIND_PSORT },
         REDIS_REL_NORMAL,     /* not using append mode */
         REDIS_REL_INVALID,    /* min value of append mode */
         REDIS_REL_DESTINATION /* REDIS_REL_DESTINATION is the max value of append mode that can set by users. */
@@ -311,6 +324,11 @@ static relopt_int64 int64RelOpts[] = {
      INT64CONST(0),
      INT64CONST(1),
      INT64CONST(INT64_MAX) },
+    {{ "compression_delay", "compression_delay",
+       RELOPT_KIND_D_INDEX },
+     INT64CONST(0),
+     INT64CONST(0),
+     INT64CONST(10080) },
     /* list terminator */
     {{NULL}}
 };
@@ -585,6 +603,13 @@ static relopt_string stringRelOpts[] = {
         false,
         ValidateStrOptIndexType,
         UBTREE_INDEX_TYPE_RCR,
+    },
+    {
+        {"data_compression", "none, row, page, columnstore, columnstore_archive", RELOPT_KIND_D_INDEX},
+        strlen(DATA_COMPRESSION_D_INDEX_NONE),
+        false,
+        ValidateDataCompressionOption,
+        DATA_COMPRESSION_D_INDEX_NONE,
     },
     /* list terminator */
     {{NULL}}
@@ -1243,7 +1268,7 @@ relopt_value *parseRelOptions(Datum options, bool validate, relopt_kind kind, in
                 }
             }
 
-            if (j >= numoptions && validate) {
+            if (j >= numoptions && validate && kind != RELOPT_KIND_D_INDEX) {
                 char *s = NULL;
                 char *p = NULL;
 
@@ -2306,6 +2331,25 @@ static void ValidateStrOptIndexType(const char *val)
     }
 }
 
+/*
+ * Brief        : Check the data_compression option for d database index.
+ * Input        : val, data_compression option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateDataCompressionOption(const char *val)
+{
+    if (pg_strcasecmp(val, DATA_COMPRESSION_D_INDEX_NONE) != 0 &&
+        pg_strcasecmp(val, DATA_COMPRESSION_D_INDEX_ROW) != 0 &&
+        pg_strcasecmp(val, DATA_COMPRESSION_D_INDEX_PAGE) != 0 &&
+        pg_strcasecmp(val, DATA_COMPRESSION_D_INDEX_COLUMNSTORE) != 0 &&
+        pg_strcasecmp(val, DATA_COMPRESSION_D_INDEX_COLUMNSTROE_ARCHIVE) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Invalid string for \"data_compression\" option for d database"),
+            errdetail("Valid string are \"none\", \"row\", \"page\", \"columnstore\", \"columnstore_archive\".")));
+    }
+}
 
 /*
  * Brief        : Check the TTL option Validity.

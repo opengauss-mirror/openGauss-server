@@ -34,7 +34,7 @@ explain (costs off) select * from alter_index_disable where to_char(a) = '1';
 
 -- insert data when index was disabled
 delete from alter_index_disable where a = 10001 and b = 10001;
-ERROR:  The relation has no permit to write because it has index in disable state
+ERROR:  The relation(alter_index_disable) has no permit to write because it has index(func_idx_alter_index_disable) in disable state
 select * from alter_index_disable where a = 10001 and b = 10001;
    a   |   b   
 -------+-------
@@ -51,7 +51,7 @@ explain (costs off) insert into alter_index_disable values(10002, 10002);
 (3 rows)
 
 insert into alter_index_disable values(10002, 10002);
-ERROR:  The relation has no permit to write because it has index in disable state
+ERROR:  The relation(alter_index_disable) has no permit to write because it has index(func_idx_alter_index_disable) in disable state
 select * from alter_index_disable where a = 10002 and b = 10002;
  a | b 
 ---+---
@@ -59,7 +59,7 @@ select * from alter_index_disable where a = 10002 and b = 10002;
 
 -- stored procedure
 CALL insert_data();
-ERROR:  The relation has no permit to write because it has index in disable state
+ERROR:  The relation(alter_index_disable) has no permit to write because it has index(func_idx_alter_index_disable) in disable state
 CONTEXT:  SQL statement "INSERT INTO alter_index_disable(a, b) VALUES (10003, 10003)"
 PL/pgSQL function insert_data() line 2 at SQL statement
 select * from alter_index_disable where a = 10003 and b = 10003;

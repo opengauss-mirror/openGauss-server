@@ -16,6 +16,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeSort.h"
 #include "miscadmin.h"
@@ -39,6 +40,16 @@ static TupleTableSlot* ExecSort(PlanState* state);
  *		Sorts tuples from the outer subtree of the node using tuplesort,
  *		which saves the results in a temporary file or memory. After the
  *		initial call, returns a tuple from the file with each call.
+ *
+ *      There are two distinct ways that this sort can be performed:
+ *
+ *      1) When the result is a single column we perform a Datum sort.
+ *
+ *      2) When the result contains multiple columns we perform a tuple sort.
+ *
+ *      We could do this by always performing a tuple sort, however sorting
+ *      Datums only can be significantly faster than sorting tuples,
+ *      especially when the Datums are of a pass-by-value type.
  *
  *		Conditions:
  *		  -- none.
@@ -97,17 +108,26 @@ static TupleTableSlot* ExecSort(PlanState* state)
         outer_node = outerPlanState(node);
         tup_desc = ExecGetResultType(outer_node);
 
-        tuple_sortstate = tuplesort_begin_heap(tup_desc,
-            plan_node->numCols,
-            plan_node->sortColIdx,
-            plan_node->sortOperators,
-            plan_node->collations,
-            plan_node->nullsFirst,
-            sort_mem,
-            node->randomAccess,
-            max_mem,
-            plan_node->plan.plan_node_id,
-            SET_DOP(plan_node->plan.dop));
+        if (node->datumSort) {
+            tuple_sortstate = tuplesort_begin_datum(TupleDescAttr(tup_desc, 0)->atttypid,
+                                                    plan_node->sortOperators[0],
+                                                    plan_node->collations[0],
+                                                    plan_node->nullsFirst[0],
+                                                    sort_mem,
+                                                    node->randomAccess);
+        } else {
+            tuple_sortstate = tuplesort_begin_heap(tup_desc,
+                                                   plan_node->numCols,
+                                                   plan_node->sortColIdx,
+                                                   plan_node->sortOperators,
+                                                   plan_node->collations,
+                                                   plan_node->nullsFirst,
+                                                   sort_mem,
+                                                   node->randomAccess,
+                                                   max_mem,
+                                                   plan_node->plan.plan_node_id,
+                                                   SET_DOP(plan_node->plan.dop));
+        }
 
         /*
          * Here used for start with order siblings by
@@ -127,18 +147,26 @@ static TupleTableSlot* ExecSort(PlanState* state)
         WaitState old_status = pgstat_report_waitstatus(STATE_EXEC_SORT_FETCH_TUPLE);
 
         /*
-         * Scan the subplan and feed all the tuples to tuplesort.
+         * Scan the subplan and feed all the tuples to tuplesort using the
+		 * appropriate method based on the type of sort we're doing.
          */
-        for (;;) {
-            slot = ExecProcNode(outer_node);
-            if (TupIsNull(slot))
-                break;
-#ifdef PGXC
-            if (plan_node->srt_start_merge)
-                tuplesort_puttupleslotontape(tuple_sortstate, slot);
-            else
-#endif /* PGXC */
+        if (node->datumSort) {
+            for (;;) {
+                slot = ExecProcNode(outer_node);
+                if (TupIsNull(slot)) {
+                    break;
+                }
+                tableam_tslot_getsomeattrs(slot, 1);
+                tuplesort_putdatum(tuple_sortstate, slot->tts_values[0], slot->tts_isnull[0]);
+            }
+        } else {
+            for (;;) {
+                slot = ExecProcNode(outer_node);
+                if (TupIsNull(slot)) {
+                    break;
+                }
                 tuplesort_puttupleslot(tuple_sortstate, slot);
+            }
         }
         
         pgstat_report_waitstatus(STATE_EXEC_SORT);
@@ -210,7 +238,16 @@ static TupleTableSlot* ExecSort(PlanState* state)
      * tuples.
      */
     slot = node->ss.ps.ps_ResultTupleSlot;
-    (void)tuplesort_gettupleslot(tuple_sortstate, ScanDirectionIsForward(dir), slot, NULL);
+
+    if (node->datumSort) {
+        ExecClearTuple(slot);
+        if (tuplesort_getdatum(tuple_sortstate, ScanDirectionIsForward(dir), &(slot->tts_values[0]),
+                               &(slot->tts_isnull[0])))
+            ExecStoreVirtualTuple(slot);
+    } else {
+        (void)tuplesort_gettupleslot(tuple_sortstate, ScanDirectionIsForward(dir), slot, NULL);
+    }
+
     return slot;
 }
 
@@ -225,6 +262,7 @@ SortState* ExecInitSort(Sort* node, EState* estate, int eflags)
 {
     SO1_printf("ExecInitSort: %s\n", "initializing sort node");
 
+    TupleDesc outerDesc;
     /*
      * create state structure
     */
@@ -280,6 +318,16 @@ SortState* ExecInitSort(Sort* node, EState* estate, int eflags)
     sortstate->ss.ps.ps_ProjInfo = NULL;
 
     Assert(sortstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->td_tam_ops);
+
+    outerDesc = ExecGetResultType(outerPlanState(sortstate));
+    /*
+     * We perform a Datum sort when we're sorting just a single column,
+     * otherwise we perform a tuple sort.
+     */
+    if (outerDesc->natts == 1 && TupleDescAttr(outerDesc, 0)->attbyval)
+        sortstate->datumSort = true;
+    else
+        sortstate->datumSort = false;
 
     SO1_printf("ExecInitSort: %s\n", "sort node initialized");
 

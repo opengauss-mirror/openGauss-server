@@ -381,7 +381,8 @@ static const struct format_behavior_compat_entry b_format_behavior_compat_option
 
 static const struct format_behavior_compat_entry d_format_behavior_compat_options[D_FORMAT_OPT_MAX] = {
     {"enable_sbr_identifier", D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER},
-    {"enable_table_hint_identifier", D_FORMAT_OPT_ENABLE_TABLE_HINT_IDENTIFIER}
+    {"enable_table_hint_identifier", D_FORMAT_OPT_ENABLE_TABLE_HINT_IDENTIFIER},
+    {"enable_abs", D_FORMAT_OPT_ENABLE_ABS}
 };
 
 static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
@@ -421,7 +422,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"float_as_numeric", OPT_FLOAT_AS_NUMERIC},
     {"disable_record_type_in_dml", OPT_DISABLE_RECORD_TYPE_IN_DML},
     {"accept_float_str_as_int", OPT_ACCEPT_FLOAT_STR_AS_INT},
-    {"ignore_unused_index_check_on_dml", OPT_IGNORE_UNUSED_INDEX_CHECK_ON_DML}
+    {"ignore_unused_index_check_on_dml", OPT_IGNORE_UNUSED_INDEX_CHECK_ON_DML},
+    {"compatible_a_db_array", OPT_COMPATIBLE_A_DB_ARRAY}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
@@ -1942,6 +1944,17 @@ static void InitSqlConfigureNamesBool()
             gettext_noop("Enables var const selectivity with histogram."),
             NULL},
             &u_sess->attr.attr_sql.var_eq_const_selectivity,
+            false,
+            NULL,
+            NULL,
+            NULL},
+        {{"enable_func_cache",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_OTHER,
+            gettext_noop("enable function cache."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_func_cache,
             false,
             NULL,
             NULL,

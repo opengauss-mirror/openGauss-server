@@ -46,6 +46,8 @@ const char* forkNames[] = {
     "init"  /* INIT_FORKNUM */
 };
 
+void fatal_error(const char* fmt, ...) __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
+
 /* copied from timestamp.c */
 pg_time_t timestamptz_to_time_t(TimestampTz t)
 {
@@ -157,6 +159,9 @@ char *relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
         int attid = forknum - MAX_FORKNUM;
 
         path = (char *)calloc(MAXPGPATH, sizeof(char));
+        if (path == NULL) {
+            fatal_error("out of memory");
+        }
         rc = snprintf_s(attr_name, sizeof(attr_name), sizeof(attr_name) - 1, "C%d", attid);
         securec_check_ss_c(rc, "\0", "\0");
 
@@ -183,6 +188,9 @@ char *relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
             Assert(backend == InvalidBackendId);
             pathlen = 7 + OIDCHARS + 1 + FORKNAMECHARS + 1;
             path = (char *)malloc(pathlen);
+            if (path == NULL) {
+                fatal_error("out of memory");
+            }
             if (forknum != MAIN_FORKNUM)
                 rc = snprintf_s(path, pathlen, pathlen - 1, "global/%u_%s", rnode.relNode, forkNames[forknum]);
             else
@@ -192,6 +200,9 @@ char *relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
             if (backend == InvalidBackendId) {
                 pathlen = 5 + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1;
                 path = (char *)malloc(pathlen);
+                if (path == NULL) {
+                    fatal_error("out of memory");
+                }
                 if (forknum != MAIN_FORKNUM)
                     rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u_%s", rnode.dbNode, rnode.relNode,
                         forkNames[forknum]);
@@ -201,6 +212,9 @@ char *relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
                 /* OIDCHARS will suffice for an integer, too */
                 pathlen = 5 + OIDCHARS + 2 + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1;
                 path = (char *)malloc(pathlen);
+                if (path == NULL) {
+                    fatal_error("out of memory");
+                }
                 if (forknum != MAIN_FORKNUM)
                     rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/t%d_%u_%s", rnode.dbNode, backend,
                         rnode.relNode, forkNames[forknum]);
@@ -219,6 +233,9 @@ char *relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
 #endif
                     + OIDCHARS + 1 + FORKNAMECHARS + 1;
                 path = (char *)malloc(pathlen);
+                if (path == NULL) {
+                    fatal_error("out of memory");
+                }
 #ifdef PGXC
                 if (forknum != MAIN_FORKNUM)
                     rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/%u_%s", rnode.spcNode,
@@ -242,6 +259,9 @@ char *relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
 #endif
                     + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1;
                 path = (char *)malloc(pathlen);
+                if (path == NULL) {
+                    fatal_error("out of memory");
+                }
 #ifdef PGXC
                 if (forknum != MAIN_FORKNUM)
                     rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/t%d_%u_%s", rnode.spcNode,

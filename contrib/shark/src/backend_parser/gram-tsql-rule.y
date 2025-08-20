@@ -161,6 +161,16 @@ tsql_opt_unique_clustered:
 		;
 	
 
+tsql_ident:
+            IDENT
+            {
+                if (!DB_IS_CMPT(D_FORMAT)) {
+                    ereport(ERROR, errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("This syntax is only valid in D-format database."),
+                        parser_errposition(@1)));
+                }
+            }
+        ;
 tsql_IndexStmt:
 				CREATE tsql_opt_unique_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
 				ON qualified_name access_method_clause '(' index_params ')'
@@ -351,7 +361,7 @@ tsql_IndexStmt:
 		;
 
 tsql_CreateProcedureStmt:
-			CREATE opt_or_replace definer_user PROCEDURE func_name_opt_arg proc_args
+			CREATE opt_or_replace definer_user procedure_or_proc func_name_opt_arg proc_args
 			opt_createproc_opt_list as_is {
 				u_sess->parser_cxt.eaten_declare = false;
 				u_sess->parser_cxt.eaten_begin = false;
@@ -361,7 +371,7 @@ tsql_CreateProcedureStmt:
 					set_create_plsql_type_start();
 					set_function_style_a();
 				}
-			} subprogram_body
+			} tsql_subprogram_body
 				{
                                         int rc = 0;
                                         rc = CompileWhich();
@@ -403,8 +413,221 @@ tsql_CreateProcedureStmt:
                     u_sess->parser_cxt.isCreateFuncOrProc = false;
 					$$ = (Node *)n;
 				}
+			| CREATE opt_or_replace definer_user procedure_or_proc func_name_opt_arg proc_args
+                       LANGUAGE ColId_or_Sconst AS func_as opt_createproc_opt_list
+                               {
+                                       CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
+                                       int count = get_outarg_num($6);
+                                       n->isOraStyle = false;
+                                       n->isPrivate = false;
+                                       n->replace = $2;
+                                       n->definer = $3;
+                                       if (n->replace && NULL != n->definer) {
+                                               parser_yyerror("not support DEFINER function");
+                                       }
+                                       n->funcname = $5;
+                                       n->parameters = $6;
+                                       n->returnType = NULL;
+                                       if (0 == count)
+                                       {
+                                               n->returnType = makeTypeName("void");
+                                               n->returnType->typmods = NULL;
+                                               n->returnType->arrayBounds = NULL;
+                                       }
+                                       n->options = $11;
+                                       n->options = lappend(n->options, makeDefElem("language", (Node *)makeString($8)));
+                                       n->options = lappend(n->options, makeDefElem("as", (Node *)$10));
+                                       n->withClause = NIL;
+                                       n->isProcedure = true;
+                                       $$ = (Node *)n;
+							   }
 		;
 
+procedure_or_proc:     PROCEDURE
+                       | TSQL_PROC
+				;
+tsql_subprogram_body:        {
+                                int             proc_b  = 0;
+                                int             proc_e  = 0;
+                                char    *proc_body_str  = NULL;
+                                int             proc_body_len   = 0;
+                                int             blocklevel              = 0;
+                                bool    add_declare             = true;  /* Mark if need to add a DECLARE */
+                                FunctionSources *funSrc = NULL;
+                                char *proc_header_str = NULL;
+                                int rc = 0;
+                                rc = CompileWhich();
+                                int     tok = YYEMPTY;
+                                int     pre_tok = 0;
+                                int in_procedure = 0;
+                                int max_proc_level = 0;
+                                bool in_begin = false;
+                                base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+                                int as_count = 0;
+                                int procedure_count = 0;
+
+                                yyextra->core_yy_extra.in_slash_proc_body = true;
+                                if (u_sess->parser_cxt.eaten_begin)
+                                        blocklevel = 1;
+
+                                if (yychar == YYEOF || yychar == YYEMPTY)
+                                        tok = YYLEX;
+                                else
+                                {
+                                        tok = yychar;
+                                        yychar = YYEMPTY;
+                                }
+
+                                if (u_sess->parser_cxt.eaten_declare || DECLARE == tok)
+                                        add_declare = false;
+
+                                proc_header_str = ParseFunctionArgSrc(yyscanner);
+
+                                proc_b = yylloc;
+                                if (rc != PLPGSQL_COMPILE_NULL && rc != PLPGSQL_COMPILE_PROC) {
+                                        u_sess->plsql_cxt.procedure_first_line = GetLineNumber(yyextra->core_yy_extra.scanbuf, yylloc);
+                                }
+                                while(true)
+                                {
+                                        if (tok == YYEOF) {
+                                                proc_e = yylloc;
+                                                parser_yyerror("subprogram body is not ended correctly");
+                                                break;
+                                        }
+                                        if (!in_begin && (pre_tok == ';' || pre_tok == DECLARE || pre_tok == 0 || pre_tok == COMMENTSTRING
+                                                || pre_tok == AS || pre_tok == IS) && (tok == PROCEDURE || tok == FUNCTION)) {
+                                                in_procedure++;
+                                                max_proc_level = max_proc_level > in_procedure ? max_proc_level : in_procedure;
+                                                procedure_count++;
+                                        }
+                                        if (tok == BEGIN_P) {
+                                                pre_tok = tok;
+                                                tok = YYLEX;
+                                                if (tok != TRY && tok != CATCH) {
+                                                    blocklevel++;
+                                                    in_begin = true;
+                                                } else {
+                                                    continue;
+                                                }
+                                        }
+                                        if (tok == AS || tok == IS) {
+                                                as_count++;
+                                        }
+                                        if (tok == END_P)
+                                        {
+                                                tok = YYLEX;
+
+                                                if (!(tok == ';' || (tok == 0 || tok == END_OF_PROC))
+                                                        && tok != IF_P
+                                                        && tok != CASE
+                                                        && tok != LOOP
+                                                        && tok != WHILE_P
+                                                        && tok != REPEAT
+                                                        && tok != TRY
+                                                        && tok != CATCH)
+                                                {
+                                                        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';' && as_count == 0 && procedure_count ==0)
+                                                        {
+                                                                proc_e = yylloc;
+                                                                break;
+                                                        }
+                                                        tok = END_P;
+                                                        continue;
+                                                }
+
+                                                if (blocklevel == 1
+                                                        && (pre_tok == ';' || pre_tok == BEGIN_P)
+                                                        && (tok == ';' || (tok == 0 || tok == END_OF_PROC)))
+                                                {
+                                                        proc_e = yylloc;
+
+                                                        if (tok == ';' )
+                                                        {
+                                                                if (yyextra->lookahead_len != 0) {
+                                                                        parser_yyerror("subprogram body is not ended correctly");
+                                                                        break;
+                                                                }
+                                                                else
+                                                                {
+                                                                        const YYLTYPE yyleng = pg_yyget_leng(yyscanner);
+                                                                        yyextra->lookaheads[0] = {
+                                                                                .token = tok,
+                                                                                .yylloc = yylloc,
+                                                                                .yyleng = yyleng,
+                                                                                .prev_hold_char_loc = yylloc + yyleng,
+                                                                                .prev_hold_char = yyextra->core_yy_extra.scanbuf[yylloc + yyleng],
+                                                                        };
+                                                                        yyextra->lookahead_len = 1;
+                                                                }
+                                                        }
+                                                        if(in_procedure == 0)
+                                                                break;
+                                                        else {
+                                                                blocklevel--;
+                                                                in_procedure--;
+                                                                if ((procedure_count - as_count - 1) == in_procedure) {
+                                                                        break;
+                                                                }
+                                                        }
+                                                }
+
+                                                if (blocklevel > 1
+                                                         && (pre_tok == ';' || pre_tok == BEGIN_P)
+                                                         && (tok == ';' || tok == 0))
+                                                {
+                                                        blocklevel--;
+                                                }
+                                                in_begin = false;
+                                        }
+
+                                        pre_tok = tok;
+                                        tok = YYLEX;
+
+                                }
+
+                                if (proc_e == 0) {
+                                        ereport(errstate, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("subprogram body is not ended correctly")));
+                                }
+                                if (max_proc_level > 0) {
+                                        u_sess->parser_cxt.has_subprogram = true;
+                                } else {
+                                        u_sess->parser_cxt.has_subprogram = false;
+                                }
+
+                                proc_body_len = proc_e - proc_b + 1 ;
+                                if (add_declare)
+                                {
+                                        proc_body_str = (char *)palloc0(proc_body_len + DECLARE_LEN + 1);
+                                        rc = strcpy_s(proc_body_str, proc_body_len + DECLARE_LEN + 1, DECLARE_STR);
+                                        securec_check(rc, "", "");
+                                        rc = strncpy_s(proc_body_str + DECLARE_LEN, proc_body_len + 1,
+                                                        yyextra->core_yy_extra.scanbuf + proc_b, proc_body_len - 1);
+                                        securec_check(rc, "", "");
+                                        proc_body_len = DECLARE_LEN + proc_body_len;
+                                }
+                                else
+                                {
+                                        proc_body_str = (char *)palloc0(proc_body_len + 1);
+                                        rc = strncpy_s(proc_body_str, proc_body_len + 1,
+                                                yyextra->core_yy_extra.scanbuf + proc_b, proc_body_len - 1);
+                                        securec_check(rc, "", "");
+                                }
+
+                                proc_body_str[proc_body_len] = '\0';
+
+                                yyextra->core_yy_extra.in_slash_proc_body = false;
+                                yyextra->core_yy_extra.dolqstart = NULL;
+
+                                yyextra->core_yy_extra.query_string_locationlist =
+                                        lappend_int(yyextra->core_yy_extra.query_string_locationlist, yylloc);
+
+                                funSrc = makeNode(FunctionSources);
+                                funSrc->bodySrc   = proc_body_str;
+                                funSrc->headerSrc = proc_header_str;
+
+                                $$ = funSrc;
+                        }
+                  ;
 ColConstraintElem:     IDENTITY_P identity_seed_increment
                             {
                                 Constraint *n = makeNode(Constraint);
@@ -414,7 +637,121 @@ ColConstraintElem:     IDENTITY_P identity_seed_increment
                                 n->location = @1;
                                 $$ = (Node *)n;
                             }
-                        ;
+						| opt_unique_key opt_definition OptConsTableSpaceWithEmpty InformationalConstraintElem FileGroup
+							{
+								Constraint *n = makeNode(Constraint);
+								n->contype = CONSTR_UNIQUE;
+								n->location = @1;
+								n->keys = NULL;
+								n->options = $2;
+								n->indexname = NULL;
+								n->indexspace = $3;
+								n->inforConstraint = (InformationalConstraint *) $4;
+								n->initially_valid = true;
+								$$ = (Node *)n;
+							}
+						| opt_unique_key opt_definition OptConsTableSpaceWithEmpty ENABLE_P ConstraintAttr_isValidate InformationalConstraintElem FileGroup
+							{
+								Constraint *n = makeNode(Constraint);
+								n->contype = CONSTR_UNIQUE;
+								n->location = @1;
+								n->keys = NULL;
+								n->options = $2;
+								n->indexname = NULL;
+								n->indexspace = $3;
+
+								int cas_type = 0;
+								if ($5 == CAS_NO_VALIDATE)
+									cas_type = CAS_NOT_VALID;
+								processCASbits(cas_type, @5, "UNIQUE",
+												&n->deferrable, &n->initdeferred, &n->skip_validation,
+												NULL, yyscanner);
+								n->initially_valid = !n->skip_validation;
+								n->isdisable = false;
+								n->inforConstraint = (InformationalConstraint *) $6;
+								$$ = (Node *)n;
+							}
+						| opt_unique_key opt_definition OptConsTableSpaceWithEmpty DISABLE_P ConstraintAttr_isValidate InformationalConstraintElem FileGroup
+							{
+								Constraint *n = makeNode(Constraint);
+								n->contype = CONSTR_UNIQUE;
+								n->location = @1;
+								n->keys = NULL;
+								n->options = $2;
+								n->indexname = NULL;
+								n->indexspace = $3;
+								
+								int cas_type = 0;
+								if ($5 == CAS_VALIDATE)
+									cas_type = CAS_DISABLE_VALIDATE;
+								else
+									cas_type = CAS_DISABLE_NO_VALIDATE;
+								processCASbits(cas_type, @5, "UNIQUE",
+												&n->deferrable, &n->initdeferred, &n->skip_validation,
+												NULL, yyscanner);
+								n->initially_valid = !n->skip_validation;
+								n->isdisable = true;
+								n->inforConstraint = (InformationalConstraint *) $6;
+								$$ = (Node *)n;
+							}
+						| PRIMARY KEY opt_definition OptConsTableSpaceWithEmpty InformationalConstraintElem FileGroup
+							{
+								Constraint *n = makeNode(Constraint);
+								n->contype = CONSTR_PRIMARY;
+								n->location = @1;
+								n->keys = NULL;
+								n->options = $3;
+								n->indexname = NULL;
+								n->indexspace = $4;
+								n->inforConstraint = (InformationalConstraint *) $5;
+								n->initially_valid = true;
+								$$ = (Node *)n;
+							}
+						| PRIMARY KEY opt_definition OptConsTableSpaceWithEmpty ENABLE_P ConstraintAttr_isValidate InformationalConstraintElem FileGroup
+							{
+								Constraint *n = makeNode(Constraint);
+								n->contype = CONSTR_PRIMARY;
+								n->location = @1;
+								n->keys = NULL;
+								n->options = $3;
+								n->indexname = NULL;
+								n->indexspace = $4;
+								
+								int cas_type = 0;
+								if ($6 == CAS_NO_VALIDATE)
+									cas_type = CAS_NOT_VALID;
+								processCASbits(cas_type, @6, "PRIMARY KEY",
+												&n->deferrable, &n->initdeferred, &n->skip_validation,
+												NULL, yyscanner);
+								n->initially_valid = !n->skip_validation;
+								n->isdisable = false;
+								n->inforConstraint = (InformationalConstraint *) $7;
+								$$ = (Node *)n;
+							}
+						| PRIMARY KEY opt_definition OptConsTableSpaceWithEmpty DISABLE_P ConstraintAttr_isValidate InformationalConstraintElem FileGroup
+							{
+								Constraint *n = makeNode(Constraint);
+								n->contype = CONSTR_PRIMARY;
+								n->location = @1;
+								n->keys = NULL;
+								n->options = $3;
+								n->indexname = NULL;
+								n->indexspace = $4;
+								
+								int cas_type = 0;
+								if ($6 == CAS_VALIDATE)
+									cas_type = CAS_DISABLE_VALIDATE;
+								else
+									cas_type = CAS_DISABLE_NO_VALIDATE;
+								processCASbits(cas_type, @6, "PRIMARY KEY",
+												&n->deferrable, &n->initdeferred, &n->skip_validation,
+												NULL, yyscanner);
+								n->initially_valid = !n->skip_validation;
+								n->isdisable = true;
+								n->inforConstraint = (InformationalConstraint *) $7;
+								$$ = (Node *)n;
+							}
+					;
 
 identity_seed_increment:
                        '(' NumericOnly ',' NumericOnly ')'
@@ -472,6 +809,7 @@ unreserved_keyword:
 			| NO_INFOMSGS
 			| NORESEED
 			| RESEED
+			| TSQL_COLUMNSTORE
 			| TSQL_CLUSTERED
 			| TSQL_NONCLUSTERED
 			| TSQL_PERSISTED
@@ -486,8 +824,46 @@ unreserved_keyword:
 			| TSQL_ROWLOCK
 			| TSQL_READPAST
 			| TSQL_XLOCK
-			| TSQL_NOEXPAND ;
+			| TSQL_NOEXPAND
+			| TSQL_PROC 
+			| TSQL_MINUTES_P
+			| TSQL_TEXTIMAGE_ON
+			| TSQL_D
+			| TSQL_DAYOFYEAR
+			| TSQL_DW
+			| TSQL_DY
+			| TSQL_HH
+			| TSQL_M
+			| TSQL_MCS
+			| TSQL_MI
+			| TSQL_MICROSECOND
+			| TSQL_MILLISECOND
+			| TSQL_MM
+			| TSQL_MS
+			| TSQL_N
+			| TSQL_NS
+			| TSQL_Q
+			| TSQL_QQ
+			| TSQL_QUARTER
+			| TSQL_SS
+			| TSQL_S
+			| TSQL_WEEK
+			| TSQL_WEEKDAY
+			| TSQL_WK
+			| TSQL_WW
+			| TSQL_W
+			| TSQL_Y
+			| TSQL_YYYY
+			| TSQL_YY
+			| TSQL_DD
+			| TSQL_NANOSECOND ;
 
+reserved_keyword:
+			TSQL_TRY_CAST
+			| TSQL_TRY_CONVERT
+			| TSQL_CONVERT
+			| TSQL_DATEDIFF
+			| TSQL_DATEDIFF_BIG ;
 
 DBCCCheckIdentStmt:
 		DBCC CHECKIDENT '(' ColId_or_Sconst ',' NORESEED ')' opt_with_no_infomsgs
@@ -564,11 +940,11 @@ DBCCStmt:  DBCCCheckIdentStmt
 			;
 
 TSQL_AnonyBlockStmt:
-		DECLARE { u_sess->parser_cxt.eaten_declare = true; u_sess->parser_cxt.eaten_begin = false; } subprogram_body
+		DECLARE { u_sess->parser_cxt.eaten_declare = true; u_sess->parser_cxt.eaten_begin = false; } tsql_subprogram_body
 			{
 				$$ = (Node *)TsqlMakeAnonyBlockFuncStmt(DECLARE, ((FunctionSources*)$3)->bodySrc);
 			}
-		| BEGIN_P { u_sess->parser_cxt.eaten_declare = true; u_sess->parser_cxt.eaten_begin = true; } subprogram_body
+		| BEGIN_P { u_sess->parser_cxt.eaten_declare = true; u_sess->parser_cxt.eaten_begin = true; } tsql_subprogram_body
 			{
 				$$ = (Node *)TsqlMakeAnonyBlockFuncStmt(BEGIN_P, ((FunctionSources*)$3)->bodySrc);
 			}
@@ -666,7 +1042,7 @@ TSQL_CreateFunctionStmt:
 					set_create_plsql_type_start();
 					set_function_style_a();
 				  }
-			  } subprogram_body
+			  } tsql_subprogram_body
 				{
 					int rc = 0;
 					rc = CompileWhich();
@@ -706,15 +1082,26 @@ TSQL_CreateFunctionStmt:
 TSQL_DoStmt: DO dostmt_opt_list
 				{
 					DoStmt *n = makeNode(DoStmt);
+					bool with_language = false;
 					n->args = $2;
-					n->args = lappend(n->args, makeDefElem("language", (Node *)makeString("pltsql")));
+					ListCell* arg = NULL;
+					foreach (arg, n->args) {
+						DefElem* defel = (DefElem*)lfirst(arg);
+						if (strcmp(defel->defname, "language") == 0) {
+							with_language = true;
+							break;
+						}
+					}
+					if (!with_language) {
+						n->args = lappend(n->args, makeDefElem("language", (Node *)makeString("pltsql")));
+					}
 					$$ = (Node *)n;
 				}
 		;
 
 ConstraintElem:
 			tsql_unique_clustered '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
-				ConstraintAttributeSpec InformationalConstraintElem
+				ConstraintAttributeSpec InformationalConstraintElem OptFileGroup
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_UNIQUE;
@@ -736,7 +1123,7 @@ ConstraintElem:
 					$$ = (Node *)n;
 				}
 				| tsql_primary_key_clustered '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
-				ConstraintAttributeSpec InformationalConstraintElem
+				ConstraintAttributeSpec InformationalConstraintElem OptFileGroup
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_PRIMARY;
@@ -757,7 +1144,95 @@ ConstraintElem:
 					setAccessMethod(n);
 					$$ = (Node *)n;
 				}
-		;
+				| UNIQUE '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace opt_table_index_options
+				ConstraintAttributeSpec InformationalConstraintElem FileGroup
+				{
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_UNIQUE;
+					n->location = @1;
+					n->keys = $3;
+					n->including = $5;
+					n->options = $6;
+					n->indexname = NULL;
+					n->indexspace = $7;
+					n->constraintOptions = $8;
+					processCASbits($9, @9, "UNIQUE",
+								   &n->deferrable, &n->initdeferred, &n->skip_validation,
+								   NULL, yyscanner);
+					n->inforConstraint = (InformationalConstraint *) $10; /* informational constraint info */
+					n->initially_valid = !n->skip_validation;
+					if ($9 & (CAS_DISABLE_VALIDATE | CAS_DISABLE_NO_VALIDATE))
+						n->isdisable = true;
+					setAccessMethod(n);
+					$$ = (Node *)n;
+				}
+				| UNIQUE '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
+					ConstraintAttributeSpec InformationalConstraintElem FileGroup
+					{
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_UNIQUE;
+						n->location = @1;
+						n->keys = $3;
+						n->including = $5;
+						n->options = $6;
+						n->indexname = NULL;
+						n->indexspace = NULL;
+						n->constraintOptions = $7;
+						processCASbits($8, @8, "UNIQUE",
+									&n->deferrable, &n->initdeferred, &n->skip_validation,
+									NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $9; /* informational constraint info */
+						n->initially_valid = !n->skip_validation;
+						if ($8 & (CAS_DISABLE_VALIDATE | CAS_DISABLE_NO_VALIDATE))
+							n->isdisable = true;
+						setAccessMethod(n);
+						$$ = (Node *)n;
+					}
+				| PRIMARY KEY '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace opt_table_index_options
+					ConstraintAttributeSpec InformationalConstraintElem FileGroup
+					{
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_PRIMARY;
+						n->location = @1;
+						n->keys = $4;
+						n->including = $6;
+						n->options = $7;
+						n->indexname = NULL;
+						n->indexspace = $8;
+						n->constraintOptions = $9;
+						processCASbits($10, @10, "PRIMARY KEY",
+									&n->deferrable, &n->initdeferred, &n->skip_validation,
+									NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $11; /* informational constraint info */
+						n->initially_valid = !n->skip_validation;
+						if ($10 & (CAS_DISABLE_VALIDATE | CAS_DISABLE_NO_VALIDATE))
+							n->isdisable = true;
+						setAccessMethod(n);
+						$$ = (Node *)n;
+					}
+				| PRIMARY KEY '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
+					ConstraintAttributeSpec InformationalConstraintElem FileGroup
+					{
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_PRIMARY;
+						n->location = @1;
+						n->keys = $4;
+						n->including = $6;
+						n->options = $7;
+						n->indexname = NULL;
+						n->indexspace = NULL;
+						n->constraintOptions = $8;
+						processCASbits($9, @9, "PRIMARY KEY",
+									&n->deferrable, &n->initdeferred, &n->skip_validation,
+									NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $10; /* informational constraint info */
+						n->initially_valid = !n->skip_validation;
+						if ($9 & (CAS_DISABLE_VALIDATE | CAS_DISABLE_NO_VALIDATE))
+							n->isdisable = true;
+						setAccessMethod(n);
+						$$ = (Node *)n;
+					}
+			;
 
 tsql_stmt :
 			AlterAppWorkloadGroupMappingStmt
@@ -948,6 +1423,7 @@ tsql_stmt :
 			| TruncateStmt
 			| UnlistenStmt
 			| UpdateStmt
+			| tsql_UseStmt
 			| VacuumStmt
 			| VariableResetStmt
 			| VariableSetStmt
@@ -972,6 +1448,38 @@ func_expr_common_subexpr:
 					securec_check(rc, "\0", "\0");
 
 					$$ = (Node *)makeFuncCall(TsqlSystemFuncName2(name), NIL, @1);
+				}
+			| TSQL_TRY_CAST '(' a_expr AS Typename ')'
+				{
+					$$ = TsqlFunctionTryCast($3, $5, @1);
+				}
+			| TSQL_CONVERT '(' Typename ',' a_expr ')'
+				{
+					$$ = TsqlFunctionConvert($3, $5, NULL, false, @1);
+				}
+			| TSQL_CONVERT '(' Typename ',' a_expr ',' a_expr ')'
+				{
+					$$ = TsqlFunctionConvert($3, $5, $7, false, @1);
+				}
+			| TSQL_TRY_CONVERT '(' Typename ',' a_expr ')'
+				{
+					$$ = TsqlFunctionConvert($3, $5, NULL, true, @1);
+				}
+			| TSQL_TRY_CONVERT '(' Typename ',' a_expr ',' a_expr ')'
+				{
+					$$ = TsqlFunctionConvert($3, $5, $7, true, @1);
+				}
+			| TSQL_DATEDIFF '(' datediff_arg ',' a_expr ',' a_expr ')'
+				{
+					$$ = (Node *)makeFuncCall(TsqlSystemFuncName2("datediff"),
+												list_make3(makeStringConst($3, @3), $5, $7),
+												@1);
+				}
+			| TSQL_DATEDIFF_BIG '(' datediff_arg ',' a_expr ',' a_expr ')'
+				{
+					$$ = (Node *)makeFuncCall(TsqlSystemFuncName2("datediff_big"),
+											   list_make3(makeStringConst($3, @3), $5, $7),
+											   @1);
 				}
 		;
 
@@ -1272,7 +1780,7 @@ direct_label_keyword: ABORT_P
             | CONTINUE_P
             | CONTVIEW
             | CONVERSION_P
-            | CONVERT_P
+            | TSQL_CONVERT
             | COORDINATOR
             | COORDINATORS
             | COPY
@@ -1503,6 +2011,7 @@ direct_label_keyword: ABORT_P
             | MESSAGE_TEXT
             | METHOD
             | MINEXTENTS
+			| TSQL_MINUTES_P
             | MINUTE_SECOND_P
             | MINVALUE
             | MODE
@@ -1599,6 +2108,7 @@ direct_label_keyword: ABORT_P
             | PRIVATE
             | PRIVILEGE
             | PRIVILEGES
+			| TSQL_PROC
             | PROCEDURAL
             | PROCEDURE
             | PROFILE
@@ -1750,6 +2260,7 @@ direct_label_keyword: ABORT_P
             | TEMPORARY
             | TERMINATED
             | TEXT_P
+			| TSQL_TEXTIMAGE_ON
             | THAN
             | THEN
             | TIES
@@ -1763,6 +2274,35 @@ direct_label_keyword: ABORT_P
             | TIMEZONE_MINUTE_P
             | TINYINT
             | TSQL_TOP
+			| TSQL_QUARTER
+			| TSQL_YYYY
+			| TSQL_YY
+			| TSQL_Q
+			| TSQL_QQ
+			| TSQL_MM
+			| TSQL_M
+			| TSQL_DAYOFYEAR
+			| TSQL_DY
+			| TSQL_Y
+			| TSQL_WEEK
+			| TSQL_WK
+			| TSQL_WW
+			| TSQL_WEEKDAY
+			| TSQL_DW
+			| TSQL_W
+			| TSQL_DD
+			| TSQL_D
+			| TSQL_HH
+			| TSQL_MI
+			| TSQL_N
+			| TSQL_SS
+			| TSQL_S
+			| TSQL_MILLISECOND
+			| TSQL_MS
+			| TSQL_MICROSECOND
+			| TSQL_MCS
+			| TSQL_NANOSECOND
+			| TSQL_NS
             | TRAILING
 			| TRAN
             | TRANSACTION
@@ -2028,6 +2568,27 @@ tsql_TransactionStmt:
 														(Node *)makeString($3)));
 					$$ = (Node *)n;
 				}
+                       | BEGIN_NON_ANOYBLOCK TRY
+                                {
+                                        TransactionStmt *n = makeNode(TransactionStmt);
+                                        n->kind = TRANS_STMT_BEGIN_TRY;
+                                        n->options = NIL;
+                                        $$ = (Node *)n;
+                                }
+                       | END_P TRY BEGIN_P CATCH
+                                {
+                                        TransactionStmt *n = makeNode(TransactionStmt);
+                                        n->kind = TRANS_STMT_END_TRY_BEGIN_CATCH;
+                                        n->options = NIL;
+                                        $$ = (Node *)n;
+                                }
+                       | END_P CATCH
+                                {
+                                        TransactionStmt *n = makeNode(TransactionStmt);
+                                        n->kind = TRANS_STMT_END_CATCH;
+                                        n->options = NIL;
+                                        $$ = (Node *)n;
+                                }
 		;
 
 /*
@@ -2307,7 +2868,7 @@ tsql_InsertStmt: opt_with_clause INSERT hint_string INTO insert_target tsql_opt_
 		;
 
 /* table hint for delete statement */
-delete_relation_expr_opt_alias_with_hint: delete_relation_expr_opt_alias tsql_table_hint_expr_with { $$ = $1; }
+delete_relation_expr_opt_alias_with_hint: delete_relation_expr_opt_alias tsql_table_hint_expr_with { $$ = (RangeVar*)$1; }
 			;
 
 relation_expr_opt_alias_list: 
@@ -2353,4 +2914,283 @@ table_ref:
 					n->relation = (Node *) $1;
 					$$ = (Node *) n;
 				}
+		;
+
+AlterProcedureStmt:
+			ALTER TSQL_PROC function_with_argtypes alterfunc_opt_list opt_restrict
+				{
+					AlterFunctionStmt *n = makeNode(AlterFunctionStmt);
+					n->isProcedure = true;
+					n->func = $3;
+					n->actions = $4;
+					$$ = (Node *) n;
+				}
+		;
+
+RenameStmt:
+				ALTER TSQL_PROC function_with_argtypes RENAME TO name
+				{
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_FUNCTION;
+					n->object = $3->funcname;
+					n->objarg = $3->funcargs;
+					n->newname = $6;
+					n->missing_ok = false;
+					$$ = (Node *)n;
+				}
+		;
+
+AlterObjectSchemaStmt:
+				ALTER TSQL_PROC function_with_argtypes SET SCHEMA name
+				{
+					AlterObjectSchemaStmt *n = makeNode(AlterObjectSchemaStmt);
+					n->objectType = OBJECT_FUNCTION;
+					n->object = $3->funcname;
+					n->objarg = $3->funcargs;
+					n->newschema = $6;
+					n->missing_ok = false;
+					$$ = (Node *)n;
+				}
+		;
+
+AlterOwnerStmt:
+				ALTER TSQL_PROC function_with_argtypes OWNER TO RoleId
+				{
+					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
+					n->objectType = OBJECT_FUNCTION;
+					n->object = $3->funcname;
+					n->objarg = $3->funcargs;
+					n->newowner = $6;
+					$$ = (Node *)n;
+				}
+
+CompileStmt:
+				ALTER TSQL_PROC function_with_argtypes COMPILE
+				{
+					u_sess->plsql_cxt.during_compile = true;
+					CompileStmt *n = makeNode(CompileStmt);
+					if (enable_plpgsql_gsdependency_guc()) {
+						n->objName = ((FuncWithArgs*)$3)->funcname;
+						n->funcArgs = ((FuncWithArgs*)$3)->funcargs;
+						n->compileItem = COMPILE_PROCEDURE;
+					}
+					$$ = (Node*)n;
+				}
+				| ALTER TSQL_PROC func_name_opt_arg COMPILE
+				{
+					u_sess->plsql_cxt.during_compile = true;
+					CompileStmt *n = makeNode(CompileStmt);
+					if (enable_plpgsql_gsdependency_guc()) {
+						n->objName = $3;
+						n->funcArgs = NULL;
+						n->compileItem = COMPILE_PROCEDURE;
+					}
+					$$ = (Node*)n;
+				}
+		;
+
+RemoveFuncStmt:
+            DROP TSQL_PROC func_name func_args opt_drop_behavior
+                {
+                    DropStmt *n = makeNode(DropStmt);
+                    n->removeType = OBJECT_FUNCTION;
+                    n->objects = list_make1($3);
+                    n->arguments = list_make1(extractArgTypes($4));
+                    n->behavior = $5;
+                    n->missing_ok = false;
+                    n->concurrent = false;
+                    n->isProcedure = true;
+                    $$ = (Node *)n;
+                }
+            | DROP TSQL_PROC IF_P EXISTS func_name func_args opt_drop_behavior
+                {
+                    DropStmt *n = makeNode(DropStmt);
+                    n->removeType = OBJECT_FUNCTION;
+                    n->objects = list_make1($5);
+                    n->arguments = list_make1(extractArgTypes($6));
+                    n->behavior = $7;
+                    n->missing_ok = true;
+                    n->concurrent = false;
+                    n->isProcedure = true;
+                    $$ = (Node *)n;
+                }
+			| DROP TSQL_PROC func_name_opt_arg
+				{
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_FUNCTION;
+					n->objects = list_make1($3);
+					n->arguments = NULL;
+					n->behavior = DROP_RESTRICT;
+					n->missing_ok = false;
+					n->concurrent = false;
+					n->isProcedure = true;
+					$$ = (Node *)n;
+				}
+			| DROP TSQL_PROC IF_P EXISTS func_name_opt_arg
+				{
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_FUNCTION;
+					n->objects = list_make1($5);
+					n->arguments = NULL;
+					n->behavior = DROP_RESTRICT;
+					n->missing_ok = true;
+					n->concurrent = false;
+					n->isProcedure = true;
+					$$ = (Node *)n;
+				}
+		;
+
+/*
+ * NOTE: the OptFileGroup production doesn't really belong here. We accept OptFileGroup
+ *       for TSQL compatibility, but that syntax is used to place a table on
+ *       a filegroup (analogous to a tablespace).  For now, we just accept the
+ *       filegroup specification and ignore it. This makes it impossible to
+ *       write an ON COMMIT option and an ON filegroup clause in the same
+ *       statement, but that would be illegal syntax anyway.
+ */
+OnCommitOption:
+            FileGroup                    { $$ = ONCOMMIT_NOOP; }
+			| TextFileGroup              { $$ = ONCOMMIT_NOOP; }
+			| FileGroup TextFileGroup    { $$ = ONCOMMIT_NOOP; }
+
+FileGroup:
+            ON filegroupname {}
+		;
+
+TextFileGroup:
+            TSQL_TEXTIMAGE_ON filegroupname {}
+		;
+
+filegroupname:
+            file_group_name              
+			| '[' file_group_name ']'
+			| SCONST
+		;
+
+file_group_name:	IDENT
+				{
+					$$ = IdentResolveToChar($1, yyscanner);
+				}
+			| unreserved_keyword					{ $$ = pstrdup($1); }
+			| col_name_keyword						{ $$ = pstrdup($1); }
+			| type_func_name_keyword				{ $$ = pstrdup($1); }
+			| reserved_keyword                      { $$ = pstrdup($1); }
+		;
+
+
+
+OptFileGroup: FileGroup
+              | /*EMPTY*/
+
+tsql_UseStmt:
+			USE_P ColId
+				{
+                    char *curDbName = NULL;
+                    curDbName = get_database_name(u_sess->proc_cxt.MyDatabaseId);
+                    if (pg_strcasecmp(curDbName, $2) != 0) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    			errmsg("Use of non-current database '%s' is not supported.", $2)));
+                    } else {
+                        ereport(NOTICE, (errmsg("Already connected to database '%s'.", $2)));
+
+                        // set a virtual value and nothing to do
+                        VariableSetStmt *n = makeNode(VariableSetStmt);
+                        n->kind = VAR_SET_VALUE;
+                        n->name = "_d_virtual_value";
+                        n->args = list_make1(makeStringConst("_d_virtual_value", -1));
+                        n->is_local = false;
+                        $$ = (Node *) n;
+                    }
+                }
+            ;
+
+def_elem:   ColLabel '=' ROW
+				{
+					$$ = makeDefElem($1, (Node *) makeString(pstrdup($3)));
+				}
+			| ColLabel '=' NONE
+				{
+					$$ = makeDefElem($1, (Node *) makeString(pstrdup($3)));
+				}
+			| tsql_with_compression_delay_minutes
+			    {
+                    $$ = $1;
+			    }
+		    ;
+
+tsql_with_compression_delay_minutes: ColLabel '=' tsql_UnsignedNumericOnly tsql_minutes_options
+			    {
+					if (pg_strcasecmp($1, "compression_delay") == 0) {
+						$$ = makeDefElem($1, (Node *)$3);
+					} else {
+						ereport(ERROR,
+						    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						        errmsg("The %s option with minute unit is currently not supported", $1)));
+					}
+				}
+			;
+tsql_minutes_options:   MINUTE_P
+                        | TSQL_MINUTES_P
+		            ;
+
+tsql_UnsignedNumericOnly:   Iconst								{ $$ = makeInteger($1); }
+                            | FCONST                            { $$ = makeFloat($1); }
+
+
+
+alter_table_cmd:
+	TSQL_CONVERT TO convert_charset opt_collate
+			{
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				n->subtype = AT_ConvertCharset;
+				CharsetCollateOptions *cc = makeNode(CharsetCollateOptions);
+				cc->cctype = OPT_CHARSETCOLLATE;
+				cc->charset = $3;
+				cc->collate = $4;
+				n->def = (Node *)cc;
+				$$ = (Node*)n;
+			}
+		;
+
+/* DATEDIFF() arguments
+ */
+datediff_arg:
+			IDENT									{ $$ = $1; }
+			| YEAR_P								{ $$ = "year"; }
+			| TSQL_YYYY                             { $$ = "year"; }
+			| TSQL_YY                               { $$ = "year"; }
+			| TSQL_QUARTER                          { $$ = "quarter"; }
+			| TSQL_Q                                { $$ = "quarter"; }
+			| TSQL_QQ                               { $$ = "quarter"; }
+			| MONTH_P								{ $$ = "month"; }
+			| TSQL_MM                               { $$ = "month"; }
+			| TSQL_M                                { $$ = "month"; }
+			| TSQL_DAYOFYEAR                        { $$ = "doy"; }
+			| TSQL_DY                               { $$ = "doy"; }
+			| TSQL_Y                                { $$ = "doy"; }
+			| TSQL_WEEK                             { $$ = "week"; }
+			| TSQL_WK                               { $$ = "week"; }
+			| TSQL_WW                               { $$ = "week"; }
+			| TSQL_WEEKDAY                          { $$ = "weekday"; }
+			| TSQL_DW                               { $$ = "weekday"; }
+			| TSQL_W                                { $$ = "weekday"; }
+			| DAY_P									{ $$ = "day"; }
+			| TSQL_DD								{ $$ = "day"; }
+			| TSQL_D								{ $$ = "day"; }
+			| HOUR_P								{ $$ = "hour"; }
+			| TSQL_HH                               { $$ = "hour"; }
+			| MINUTE_P								{ $$ = "minute"; }
+			| TSQL_MI                               { $$ = "minute"; }
+			| TSQL_N                                { $$ = "minute"; }
+			| SECOND_P								{ $$ = "second"; }
+			| TSQL_SS                               { $$ = "second"; }
+			| TSQL_S                                { $$ = "second"; }
+			| TSQL_MILLISECOND                      { $$ = "millisecond"; }
+			| TSQL_MS                               { $$ = "millisecond"; }
+			| TSQL_MICROSECOND                      { $$ = "microsecond"; }
+			| TSQL_MCS                              { $$ = "microsecond"; }
+			| TSQL_NANOSECOND                       { $$ = "nanosecond"; }
+			| TSQL_NS                               { $$ = "nanosecond"; }
+			| Sconst								{ $$ = $1; }
 		;

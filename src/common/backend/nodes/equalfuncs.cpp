@@ -2917,6 +2917,7 @@ static bool _equalRangeSubselect(const RangeSubselect* a, const RangeSubselect* 
     COMPARE_NODE_FIELD(subquery);
     COMPARE_NODE_FIELD(alias);
     COMPARE_NODE_FIELD(rotate);
+    COMPARE_SCALAR_FIELD(withCheckOption);
 
     return true;
 }

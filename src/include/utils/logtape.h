@@ -21,6 +21,7 @@
 /* LogicalTapeSet is an opaque type whose details are not known outside logtape.c. */
 
 typedef struct LogicalTapeSet LogicalTapeSet;
+typedef struct LogicalTape LogicalTape;
 
 /*
  * The approach tuplesort.c takes to parallel external sorts is that workers,
@@ -57,18 +58,29 @@ typedef struct TapeShare {
  */
 
 extern LogicalTapeSet *LogicalTapeSetCreate(int ntapes, TapeShare *shared, SharedFileSet *fileset, int worker);
+extern LogicalTapeSet *LogicalTapeSetCreate(SharedFileSet *fileset, int worker);
+extern void LogicalTapeClose(LogicalTape *lt);
 extern void LogicalTapeSetClose(LogicalTapeSet *lts);
+extern void LogicalTapeSetCloseOnly(LogicalTapeSet *lts);
 extern void LogicalTapeSetForgetFreeSpace(LogicalTapeSet *lts);
 extern size_t LogicalTapeRead(LogicalTapeSet *lts, int tapenum, void *ptr, size_t size);
+extern size_t LogicalTapeRead(LogicalTapeSet *lts, LogicalTape *lt, void *ptr, size_t size);
 extern void LogicalTapeWrite(LogicalTapeSet *lts, int tapenum, void *ptr, size_t size);
+extern void LogicalTapeWrite(LogicalTapeSet *lts, LogicalTape *lt, void *ptr, size_t size);
 extern void LogicalTapeRewindForRead(LogicalTapeSet *lts, int tapenum, size_t buffer_size);
+extern void LogicalTapeRewindForRead(LogicalTapeSet *lts, LogicalTape *lt, size_t buffer_size);
 extern void LogicalTapeRewindForWrite(LogicalTapeSet *lts, int tapenum);
 extern void LogicalTapeFreeze(LogicalTapeSet *lts, int tapenum, TapeShare *share = NULL);
+extern void LogicalTapeFreeze(LogicalTapeSet *lts, LogicalTape *lt, TapeShare *share = NULL);
 extern void LogicalTapeSetExtend(LogicalTapeSet *lts, int nAdditional);
 extern size_t LogicalTapeBackspace(LogicalTapeSet *lts, int tapenum, size_t size);
+extern size_t LogicalTapeBackspace(LogicalTapeSet *lts, LogicalTape *lt, size_t size);
 extern void LogicalTapeSeek(LogicalTapeSet *lts, int tapenum, long blocknum, int offset);
+extern void LogicalTapeSeek(LogicalTapeSet *lts, LogicalTape *lt, int64 blocknum, int offset);
 extern void LogicalTapeTell(LogicalTapeSet *lts, int tapenum, long *blocknum, int *offset);
+extern void LogicalTapeTell(LogicalTapeSet *lts, LogicalTape *lt, long *blocknum, int *offset);
 extern long LogicalTapeSetBlocks(LogicalTapeSet *lts);
-extern void LogicalTapeAssignReadBufferSize(LogicalTapeSet *lts, int tapenum, size_t bufsize);
+extern LogicalTape *LogicalTapeCreate(LogicalTapeSet *lts);
+extern LogicalTape *LogicalTapeImport(LogicalTapeSet *lts, int worker, TapeShare *shared);
 
 #endif /* LOGTAPE_H */

@@ -50,6 +50,7 @@ typedef struct {
     List* active_fns;
     Node* case_val;
     bool estimate;
+    bool change_user;
 #ifdef USE_SPQ
     bool recurse_queries; /* recurse into query structures */
     bool recurse_sublink_testexpr; /* recurse into sublink test expressions */
@@ -114,6 +115,8 @@ extern void CommuteRowCompareExpr(RowCompareExpr* clause);
 extern Node* strip_implicit_coercions(Node* node);
 
 extern Node* eval_const_expressions(PlannerInfo* root, Node* node);
+
+extern Node* eval_index_const_expressions(PlannerInfo* root, Node* node);
 
 extern void convert_saop_to_hashed_saop(Node *node);
 

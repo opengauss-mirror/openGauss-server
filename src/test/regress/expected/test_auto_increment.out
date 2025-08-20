@@ -5716,6 +5716,13 @@ SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 5 6 7 8
 (5 rows)
 
 drop table test_autoinc_upsert;
+create table t_auto_nextval_test(a int, b int auto_increment primary key);
+NOTICE:  CREATE TABLE will create implicit sequence "t_auto_nextval_test_b_seq" for serial column "t_auto_nextval_test.b"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_auto_nextval_test_pkey" for table "t_auto_nextval_test"
+select nextval('t_auto_nextval_test_b_seq'); -- error
+ERROR:  cannot change sequence owned by auto_increment column
+CONTEXT:  referenced column: nextval
+drop table t_auto_nextval_test;
 \c regression
 clean connection to all force for database autoinc_b_db;
 drop database if exists autoinc_b_db;

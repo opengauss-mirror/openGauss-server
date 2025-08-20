@@ -25,6 +25,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/ubtreepcr 
     ${CMAKE_CURRENT_SOURCE_DIR}/ustore
     ${CMAKE_CURRENT_SOURCE_DIR}/datavec
+    ${CMAKE_CURRENT_SOURCE_DIR}/bloom
 )
 
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
@@ -54,3 +55,4 @@ add_subdirectory(ubtree)
 add_subdirectory(ubtreepcr)
 add_subdirectory(ustore)
 add_subdirectory(datavec)
+add_subdirectory(bloom)

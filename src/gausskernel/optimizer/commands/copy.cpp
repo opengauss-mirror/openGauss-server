@@ -338,6 +338,7 @@ static bool IfCopyLineMatchWhenListPosition(CopyState cstate);
 static bool IfCopyLineMatchWhenListField(CopyState cstate);
 static void CopyGetWhenListAttFieldno(CopyState cstate, List *attnamelist);
 static int CopyGetColumnListIndex(CopyState cstate, List *attnamelist, const char* colname);
+static bool check_system_table_def(Relation rel);
 
 const char *gds_protocol_version_gaussdb = "1.0";
 /*
@@ -2328,8 +2329,12 @@ static void ProcessCopyNotAllowedOptions(CopyState cstate)
 /*
  * ProcessCopyErrorLogSetUps is used to set up necessary structures used for copy from error logging.
  */
-static bool CheckCopyErrorTableDef(int nattrs, FormData_pg_attribute* attr)
+static bool CheckCopyErrorTableDef(Relation rel)
 {
+    int nattrs = RelationGetNumberOfAttributes(rel);
+    TupleDesc tupDesc = RelationGetDescr(rel);
+    FormData_pg_attribute* attr = tupDesc->attrs;
+
     if (nattrs != COPY_ERROR_TABLE_NUM_COL) {
         return false;
     }
@@ -2338,7 +2343,7 @@ static bool CheckCopyErrorTableDef(int nattrs, FormData_pg_attribute* attr)
         if (attr[attnum].atttypid != copy_error_table_col_typid[attnum])
             return false;
     }
-    return true;
+    return check_system_table_def(rel);
 }
 
 static void ProcessCopyErrorLogSetUps(CopyState cstate)
@@ -2387,7 +2392,7 @@ static void ProcessCopyErrorLogSetUps(CopyState cstate)
     FormData_pg_attribute* attr = tupDesc->attrs;
     cstate->err_out_functions = (FmgrInfo*)palloc(natts * sizeof(FmgrInfo));
 
-    if (!CheckCopyErrorTableDef(natts, attr)) {
+    if (!CheckCopyErrorTableDef(cstate->err_table)) {
         ereport(ERROR,
             (errcode(ERRCODE_OPERATE_FAILED),
                 errmsg("The column definition of %s.%s table is not as intended.",
@@ -2409,8 +2414,12 @@ static void ProcessCopyErrorLogSetUps(CopyState cstate)
 /*
  * ProcessCopySummaryLogSetUps is used to set up necessary structures used for copy from summary logging.
  */
-static bool CheckCopySummaryTableDef(int nattrs, FormData_pg_attribute *attr)
+static bool CheckCopySummaryTableDef(Relation rel)
 {
+    int nattrs = RelationGetNumberOfAttributes(rel);
+    TupleDesc tupDesc = RelationGetDescr(rel);
+    FormData_pg_attribute* attr = tupDesc->attrs;
+
     if (nattrs != COPY_SUMMARY_TABLE_NUM_COL) {
         return false;
     }
@@ -2418,6 +2427,37 @@ static bool CheckCopySummaryTableDef(int nattrs, FormData_pg_attribute *attr)
     for (int attnum = 0; attnum < nattrs; attnum++) {
         if (attr[attnum].atttypid != copy_summary_table_col_typid[attnum])
             return false;
+    }
+    return check_system_table_def(rel);
+}
+
+static bool check_system_table_def(Relation rel)
+{
+    if (!rel || !rel->rd_rel || rel->rd_rel->relkind != RELKIND_RELATION) {
+        return false;
+    }
+    TupleDesc tupDesc = RelationGetDescr(rel);
+    ListCell* idx_cell = NULL;
+    foreach (idx_cell, rel->rd_indexlist) {
+        Oid indexrelid = lfirst_oid(idx_cell);
+        HeapTuple ht_idx = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexrelid));
+        if (!HeapTupleIsValid(ht_idx)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                 errmsg("cache lookup failed for index %u", indexrelid)));
+        }
+        if (!heap_attisnull(ht_idx, Anum_pg_index_indexprs, NULL)) {
+            ReleaseSysCache(ht_idx);
+            return false;
+        }
+        ReleaseSysCache(ht_idx);
+    }
+
+    if (rel->trigdesc != NULL || rel->rd_rules != NULL ||
+        (rel->rd_rlsdesc != NULL && rel->rd_rlsdesc->rlsPolicies != NULL) ||
+        (tupDesc->constr != NULL && (tupDesc->constr->num_check != 0 || tupDesc->constr->num_defval != 0 ||
+        tupDesc->constr->has_generated_stored || tupDesc->constr->has_on_update))) {
+        return false;
     }
     return true;
 }
@@ -2446,11 +2486,8 @@ static void ProcessCopySummaryLogSetUps(CopyState cstate)
     }
     /* RowExclusiveLock is used for insertion during spi. */
     cstate->summary_table = relation_open(summary_table_reloid, RowExclusiveLock);
-    int natts = RelationGetNumberOfAttributes(cstate->summary_table);
-    TupleDesc tupDesc = RelationGetDescr(cstate->summary_table);
-    FormData_pg_attribute *attr = tupDesc->attrs;
 
-    if (!CheckCopySummaryTableDef(natts, attr)) {
+    if (!CheckCopySummaryTableDef(cstate->summary_table)) {
         ereport(ERROR,
                 (errcode(ERRCODE_OPERATE_FAILED),
                  errmsg("The column definition of %s.%s table is not as intended.", COPY_SUMMARY_TABLE_SCHEMA,

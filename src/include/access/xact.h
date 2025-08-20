@@ -31,6 +31,20 @@
 #include "threadpool/threadpool_worker.h"
 #include "access/ustore/undo/knl_uundotype.h"
 
+typedef enum {
+    TRY_CATCH_IN_TRY,
+    TRY_CATCH_TRY_FAILED,
+    TRY_CATCH_IN_CATCH,
+    TRY_CATCH_CATCH_IGNORED
+} TransactionTryCatchStatus;
+
+typedef struct TransactionTryCatchContext
+{
+    bool hasSavepoint;
+    ErrorData* edata;
+    TransactionTryCatchStatus status;
+} TransactionTryCatchContext;
+
 /*
  * Xact isolation levels
  */
@@ -353,6 +367,7 @@ struct TransactionStateData {
     bool startedInRecovery;              /* did we start in recovery? */
     bool didLogXid;                      /* has xid been included in WAL record? */
     struct TransactionStateData* parent; /* back link to parent */
+    TransactionTryCatchContext* trycatchContext; /* NULL for not in try catch block */
 
 #ifdef ENABLE_MOT
     /* which storage engine tables are used in current transaction for D/I/U/S statements */
@@ -383,6 +398,12 @@ typedef enum SavepointStmtType
     SUB_STMT_ROLLBACK_TO
 } SavepointStmtType;
 
+typedef enum TryCatchState
+{
+    IN_TRYCATCH,
+    IN_TRY,
+    IN_CATCH
+} TryCatchState;
 /*
  * savepoint sent state structure
  * It record whether the savepoint cmd has been sent to non-execution cn.
@@ -572,4 +593,12 @@ extern void ClearTxnInfoForSSLibpqsw();
 extern bool IsTransactionInProgressState();
 extern void unlink_relfiles(_in_ ColFileNode *xnodes, _in_ int nrels, bool is_old_delay_ddl = false);
 void xact_redo_log_drop_segs(_in_ ColFileNode *xnodes, _in_ int nrels, XLogRecPtr lsn);
+void TransactionBeginTry();
+void TransactionEndTryBeginCatch();
+void TransactionEndCatch();
+void SetTryCatchInfo();
+bool IsTransactionInState(TryCatchState st);
+void PrepareTryCatchSavePoint();
+bool PrepareForSQLInTryCatch(TransactionStmtKind kind);
+void FinishSQLInTryCatch();
 #endif /* XACT_H */

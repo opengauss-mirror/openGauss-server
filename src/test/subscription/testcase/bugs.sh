@@ -255,8 +255,8 @@ partition p_default values less than (maxvalue)
     restart_guc "pub_datanode2" "recovery_max_workers = 1"
 
     # BUG8: fix publisher choose relation incorrectly if there are more than one relation in different schemas with the same name.
-    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP TABLE t1 cascade"
-    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;"
+    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP TABLE IF EXISTS t1 cascade"
+    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;DROP TABLE IF EXISTS t1 cascade"
 
     exec_sql $case_db $pub_node1_port "create table logical_tb1(id int primary key,name varchar(20));"
     exec_sql $case_db $pub_node1_port "create schema test_sche;create table test_sche.logical_tb1(id int primary key,id1 int);"
@@ -281,8 +281,8 @@ partition p_default values less than (maxvalue)
     fi
 
     # BUG9: fix subscription failed while creating index with parallel_worker
-    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP TABLE logical_tb1 cascade;DROP SCHEMA test_sche cascade;"
-    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;DROP SCHEMA test_sche cascade;"
+    exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub;DROP SCHEMA test_sche cascade;"
+    exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub;DROP TABLE logical_tb1 cascade;DROP SCHEMA test_sche cascade;"
 
     echo "create publication and subscription."
     publisher_connstr="port=$pub_node1_port host=$g_local_ip dbname=$case_db user=$username password=$passwd"

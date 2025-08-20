@@ -126,6 +126,15 @@ static void SMBSetPageBackend(BufferTag tag, XLogPhyBlock pblk, XLogRecPtr endRe
 
 static void AddToHash(XLogReaderState *record)
 {
+    SMBAnalysePageQueue *queue = g_instance.smb_cxt.SMBAlyPageQueue;
+    uint64 head = pg_atomic_read_u64(&queue->head);
+    uint64 tail = pg_atomic_barrier_read_u64(&queue->tail);
+
+    while (tail - head >= queue->size - record->max_block_id) {
+        pg_usleep(1000L);
+        head = pg_atomic_read_u64(&queue->head);
+    }
+
     for (int i = 0; i <= record->max_block_id; i++) {
         BufferTag tag;
         XLogPhyBlock pblk;
@@ -739,7 +748,11 @@ retry:
                     /*
                      * Wait for more WAL to arrive, or timeout to be reached
                      */
-                    WaitLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->SMBWakeupLatch, WL_LATCH_SET | WL_TIMEOUT, 1000L);
+                    int rc = WaitLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->SMBWakeupLatch,
+                        WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 1000L);
+                    if (rc & WL_POSTMASTER_DEATH) {
+                        gs_thread_exit(1);
+                    }
                     ResetLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->SMBWakeupLatch);
                 } else {
                     if (t_thrd.xlog_cxt.readFile >= 0) {

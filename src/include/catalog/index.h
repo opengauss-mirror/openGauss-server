@@ -32,6 +32,7 @@
 #define DEFAULT_HNSW_INDEX_TYPE "hnsw"
 #define DEFAULT_BM25_INDEX_TYPE "bm25"
 #define DEFAULT_DISKANN_INDEX_TYPE "diskann"
+#define DEFAULT_BLOOM_INDEX_TYPE "bloom"
 
 /* Typedef for callback function for IndexBuildHeapScan */
 typedef void (*IndexBuildCallback)(Relation index, HeapTuple htup, Datum *values, const bool *isnull,
@@ -275,6 +276,7 @@ void ScanBucketsInsertIndex(Relation rel, const List* idxRelList, const List* id
 extern void ScanPartitionInsertIndex(Relation partTableRel, Relation partRel, const List* indexRelList,
                               const List* indexInfoList);
 void ScanHeapInsertCBI(Relation parentRel, Relation heapRel, Relation idxRel, Oid tmpPartOid);
+List* get_user_from_index_expressions(List* indexExpressions);
 #ifdef USE_SPQ
 extern Datum spq_get_root_ctid(HeapTuple tuple, Buffer buffer, ExprContext *econtext);
 #endif

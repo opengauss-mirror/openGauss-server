@@ -133,10 +133,6 @@ extern Tuplesortstate* tuplesort_begin_index_hash(
     int workMem, bool randomAccess, int maxMem);
 extern Tuplesortstate* tuplesort_begin_datum(
     Oid datumType, Oid sortOperator, Oid sortCollation, bool nullsFirstFlag, int workMem, bool randomAccess);
-#ifdef PGXC
-extern void tuplesort_puttupleslotontape(Tuplesortstate* state, TupleTableSlot* slot);
-extern void tuplesort_remoteread_end(Tuplesortstate* state);
-#endif
 
 extern void tuplesort_set_bound(Tuplesortstate* state, int64 bound);
 extern void tuplesort_set_siblings(Tuplesortstate* state, const int numKeys, const List *internalEntryList);
@@ -189,7 +185,6 @@ extern void UpdateUniqueSQLSortStats(Tuplesortstate* state, TimestampTz* start_t
  */
 extern int64 tuplesort_get_peak_memory(Tuplesortstate* state);
 
-extern void tuplesort_workerfinish(Sharedsort *shared);
 extern void* TuplesortGetSortkeys(Tuplesortstate* state);
 extern int TuplesortGetNsortkey(Tuplesortstate* state);
 #endif /* TUPLESORT_H */

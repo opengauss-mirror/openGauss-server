@@ -2094,6 +2094,10 @@ Datum pg_stat_get_activity(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_activity_helper(PG_FUNCTION_ARGS, bool has_conninfo)
 {
+    if (fcinfo->resultinfo == NULL) {
+        ereport(ERROR, (errmsg("Uninitialized resultinfo when calling pg_stat_get_activity_helper")));
+    }
+
     const int ATT_COUNT = has_conninfo ? 22 : 21;
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
@@ -2787,6 +2791,10 @@ void insert_gs_stat_activity_timeout(Tuplestorestate* tupStore, TupleDesc tupDes
 
 Datum pg_stat_get_activity_ng(PG_FUNCTION_ARGS)
 {
+    if (fcinfo->resultinfo == NULL) {
+        ereport(ERROR, (errmsg("Uninitialized resultinfo when calling pg_stat_get_activity_ng")));
+    }
+
     const int ATT_NUM = 4;
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
@@ -3491,6 +3499,10 @@ Datum working_version_num(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_status(PG_FUNCTION_ARGS)
 {
+    if (fcinfo->resultinfo == NULL) {
+        ereport(ERROR, (errmsg("Uninitialized resultinfo when calling pg_stat_get_status")));
+    }
+
     const int ATT_NUM = 16;
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
@@ -5708,6 +5720,10 @@ void insert_pg_stat_get_session_wlmstat(Tuplestorestate *tupStore, TupleDesc tup
  */
 Datum pg_stat_get_session_respool(PG_FUNCTION_ARGS)
 {
+    if (fcinfo->resultinfo == NULL) {
+        ereport(ERROR, (errmsg("Uninitialized resultinfo when calling pg_stat_get_session_respool")));
+    }
+
     const int SESSION_WLMSTAT_RESPOOL_NUM = 7;
 
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;

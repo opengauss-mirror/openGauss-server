@@ -69,6 +69,21 @@ extern void ExecComputeStoredGenerated(ResultRelInfo *resultRelInfo, EState *est
 extern bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, TupleTableSlot *slot, Tuple tuple,
     CmdType cmdtype, ItemPointer otid, Oid oldPartitionOid, int2 bucketid);
 
+/* whether the relation has on default update constrain */
+inline bool ExecHasDefaultUpdateExpr(TupleDesc rd_att)
+{
+    TupleConstr* constr = rd_att->constr;
+    if (constr == NULL || constr->num_defval == 0 || constr->has_on_update == NULL) {
+        return false;
+    }
+    for (int i = 0; i < rd_att->natts; i++) {
+        if (constr->has_on_update[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 extern bool isSingleMode;
 extern bool isRestoreMode;
 #define ENABLE_HEAP_MULTI_INSERT_FOR_INSERT_SELECT ((!isSingleMode) && (!isRestoreMode) && (u_sess->attr.attr_storage.enable_heap_multi_insert_for_insert_select))

@@ -462,7 +462,7 @@ test: stable_function_shippable
 # ----------
 # Another group of parallel tests
 # ----------
-test: create_function_3 vacuum
+test: create_function_3 vacuum array_compatible_a_array_eq
 test: drop_if_exists drop_database test_if_not_exists test_create_index_if_not_exists test_create_sequence_if_not_exists
 #test: constraints
 

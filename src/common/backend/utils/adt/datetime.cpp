@@ -4527,3 +4527,8 @@ int ParseIudDateTime(char* str, struct pg_tm* tm, fsec_t* fsec)
     }
     return 0;
 }
+
+int GetValiddateDate(unsigned int fmask, bool isjulian, bool is2digits, bool bc, struct pg_tm* tm)
+{
+    return ValidateDate(fmask, isjulian, is2digits, bc, tm);
+}

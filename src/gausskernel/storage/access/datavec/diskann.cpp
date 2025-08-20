@@ -319,7 +319,7 @@ bool diskanninsert_internal(Relation index, Datum* values, const bool* isnull, I
     DiskAnnMetaPageData metapage;
     DiskANNGetMetaPageInfo(index, &metapage);
     FmgrInfo* procinfo = index_getprocinfo(index, 1, DISKANN_DISTANCE_PROC);
-    metapage.params = InitDiskPQParamsOnDisk(index, procinfo, metapage.dimensions, metapage.enablePQ);
+    metapage.params = InitDiskPQParamsOnDisk(index, procinfo, metapage.dimensions, metapage.enablePQ, true);
 
     BlockNumber blkno = InsertTuple(index, values, heap_tid, &metapage, false);
 

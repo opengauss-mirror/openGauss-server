@@ -27,6 +27,7 @@ CREATE [ OR REPLACE  ] [DEFINER = user] FUNCTION function_name
         | COST execution_cost  
         | ROWS result_rows
         | SET configuration_parameter { {TO | =} value | FROM CURRENT }
+        | {RESULT_CACHE | NOT RESULT_CACHE}
     ] [...]
     {
         AS 'definition'
@@ -46,6 +47,7 @@ CREATE [ OR REPLACE  ]  [DEFINER = user] FUNCTION function_name
         | COST execution_cost
         | ROWS result_rows
         | SET configuration_parameter { {TO | =} value | FROM CURRENT } 
+        | {RESULT_CACHE | NOT RESULT_CACHE}
      ][...]
      { 
         IS | AS  

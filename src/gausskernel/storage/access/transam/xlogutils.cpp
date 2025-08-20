@@ -1115,7 +1115,7 @@ Buffer XLogReadBufferExtendedForHeapDisk(const RelFileNode &rnode, ForkNumber fo
     } else {
         buffer = XLogReadBufferExceedFileRange(rnode, forknum, blkno, mode, pblk);
         if (BufferIsInvalid(buffer)) {
-            if (!g_instance.attr.attr_storage.isRepairCanInToNomralState && ENABLE_REPAIR) {
+            if (!ENABLE_REPAIR || !g_instance.attr.attr_storage.isRepairCanInToNomralState) {
                 return buffer;
             }
             xl_invalid_page hentry;

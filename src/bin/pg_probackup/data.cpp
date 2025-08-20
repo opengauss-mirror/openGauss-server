@@ -1868,7 +1868,7 @@ restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
         if (use_headers && tmp_file->n_headers > 0)
             headers = get_data_file_headers(&(backup->hdr_map), tmp_file,
                                             parse_program_version(backup->program_version),
-                                            true);
+                                            true, (backup->oss_status == OSS_STATUS_LOCAL));
 
         if (use_headers && !headers && tmp_file->n_headers > 0)
             elog(ERROR, "Failed to get page headers for file \"%s\"", from_fullpath);
@@ -3419,7 +3419,7 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
  * less fseeks, buffering, descriptor sharing, etc.
  */
 BackupPageHeader2*
-get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, bool strict)
+get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, bool strict, bool isOssLocal)
 {
     bool     success = false;
     FILE    *in = NULL;
@@ -3438,7 +3438,7 @@ get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, b
     if (file->n_headers <= 0)
         return NULL;
 
-    if (current.media_type == MEDIA_TYPE_OSS) {
+    if (current.media_type == MEDIA_TYPE_OSS && !isOssLocal) {
         pthread_lock(&(hdr_map->mutex));
         restoreConfigFile(hdr_map->path);
     }
@@ -3524,7 +3524,7 @@ get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, b
         headers = NULL;
     }
 
-    if (current.media_type == MEDIA_TYPE_OSS) {
+    if (current.media_type == MEDIA_TYPE_OSS && !isOssLocal) {
         remove(hdr_map->path);
         pthread_mutex_unlock(&(hdr_map->mutex));
     }

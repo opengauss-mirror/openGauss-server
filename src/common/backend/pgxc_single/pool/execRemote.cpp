@@ -7249,14 +7249,7 @@ void do_query_for_first_tuple(RemoteQueryState* node, bool vectorized, int regul
                     node->conn_count = regular_conn_count;
 
                     if (!vectorized)
-                        node->tuplesortstate = tuplesort_begin_merge(scanslot->tts_tupleDescriptor,
-                            sort->numCols,
-                            sort->sortColIdx,
-                            sort->sortOperators,
-                            sort->sortCollations,
-                            sort->nullsFirst,
-                            node,
-                            u_sess->attr.attr_memory.work_mem);
+                        node->tuplesortstate = TuplesortBeginMerge();
                     else
                         node->batchsortstate = batchsort_begin_merge(scanslot->tts_tupleDescriptor,
                             sort->numCols,

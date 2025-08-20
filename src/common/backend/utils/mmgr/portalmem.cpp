@@ -269,6 +269,21 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
     portal->funcUseCount = 0;
     portal->hasStreamForPlpgsql = false;
     portal->have_rollback_transaction = false;
+    if (ENABLE_FUNCTION_RESULT_CACHE()) {
+        if (is_from_spi && ActivePortal && ActivePortal->top_estate != NULL) {
+            portal->func_retcache_cxt = ActivePortal->func_retcache_cxt;
+            portal->top_estate = ActivePortal->top_estate;
+            portal->funcRetcacheSlotCount = ActivePortal->funcRetcacheSlotCount;
+        } else {
+            portal->func_retcache_cxt = AllocSetContextCreate(PortalGetHeapMemory(portal),
+                "Function Result Cache Context",
+                ALLOCSET_DEFAULT_SIZES);
+            MemoryContext oldcxt = MemoryContextSwitchTo(portal->func_retcache_cxt);
+            portal->top_estate = (EState*)palloc0(sizeof(EState));
+            MemoryContextSwitchTo(oldcxt);
+            portal->funcRetcacheSlotCount = 0;
+        }
+    }
 
 #ifndef ENABLE_MULTIPLE_NODES
     portal->streamInfo.Reset();

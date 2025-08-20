@@ -4149,9 +4149,9 @@ public:
         }
     }
 
-    bool InitConnPool(const char *connParams, const char *preExecForConn)
+    bool InitConnPool(const char *connParams, const char *preExecForConn, char **errorMsg)
     {
-        if (!connParams || size <= 0) {
+        if (!errorMsg) {
             return false;
         }
         if (connections) {
@@ -4170,6 +4170,7 @@ public:
             free(mutexes);
             connections = nullptr;
             mutexes = nullptr;
+            *errorMsg = strdup("allocate memory failed for connections and mutexes.");
             return false;
         }
         errno_t rc = memset_s(connections, sizeof(PGconn*) * size, 0, sizeof(PGconn*) * size);
@@ -4187,6 +4188,7 @@ public:
                     }
                     pthread_mutex_destroy(&mutexes[j]);
                 }
+                *errorMsg = strdup(PQerrorMessage(conn));
                 return false;
             }
 
@@ -4199,6 +4201,7 @@ public:
                         PQfinish(connections[j]);
                         pthread_mutex_destroy(&mutexes[j]);
                     }
+                    *errorMsg = strdup(PQresultErrorMessage(preRes));
                     return false;
                 }
                 PQclear(preRes);
@@ -4210,6 +4213,7 @@ public:
                     PQfinish(connections[j]);
                     pthread_mutex_destroy(&mutexes[j]);
                 }
+                *errorMsg = strdup("init mutex for connection failed.");
                 return false;
             }
             connections[i] = conn;
@@ -4455,17 +4459,22 @@ static bool CheckSingleSelectQuery(const std::string &originalSql)
     return false;
 }
 
+static PGresult* CreateErrorResult(const char* errMsg)
+{
+    PGresult* res = PQmakeEmptyPGresult(NULL, PGRES_FATAL_ERROR);
+    if (!res) {
+        return NULL;
+    }
+    pqSetResultError(res, errMsg);
+    return res;
+}
+
 PGresult **PQexecMultiSearchParams(const char *connParams, const char *queryTemplate, const QueryParams *queryParams,
     const int queryCount, const char *preExecForConn, int threadCount)
 {
-    if (queryCount <= 0 || !queryTemplate || !queryParams || threadCount <= 0 || !connParams) {
+    if (queryCount <= 0) {
         return NULL;
     }
-    std::string queryStr = TrimWhitespace(queryTemplate);
-    if (!CheckSingleSelectQuery(queryStr)) {
-        return NULL;
-    }
-    int actualConnections = (threadCount > queryCount) ? queryCount : threadCount;
     PGresult **results = static_cast<PGresult**>(malloc(queryCount * sizeof(PGresult*)));
     if (!results) {
         return NULL;
@@ -4473,24 +4482,37 @@ PGresult **PQexecMultiSearchParams(const char *connParams, const char *queryTemp
     errno_t rc = memset_s(results, queryCount * sizeof(PGresult*), 0, queryCount * sizeof(PGresult*));
     securec_check_c(rc, "\0", "\0");
 
+    if (!queryTemplate || !queryParams || threadCount <= 0 || !connParams) {
+        results[0] = CreateErrorResult("input parameters are invalid.");
+        return results;
+    }
+    std::string queryStr = TrimWhitespace(queryTemplate);
+    if (!CheckSingleSelectQuery(queryStr)) {
+        results[0] = CreateErrorResult("failed to check the query template: "
+            "only a single SELECT statement containing vector operators is supported.");
+        return results;
+    }
+
+    int actualConnections = (threadCount > queryCount) ? queryCount : threadCount;
     try {
         ConnectionPool connPool(actualConnections);
-        if (!connPool.InitConnPool(connParams, preExecForConn)) {
-            free(results);
-            return NULL;
+        char *errorMsg = nullptr;
+        if (!connPool.InitConnPool(connParams, preExecForConn, &errorMsg)) {
+            results[0] = CreateErrorResult(errorMsg);
+            return results;
         }
         TaskQueue taskQueue(queryCount);
         if (taskQueue.GetQueueCapacity() == 0) {
-            free(results);
-            return NULL;
+            results[0] = CreateErrorResult("init task queue failed.");
+            return results;
         }
         ThreadPoolContext ctx;
         ctx.connPool = &connPool;
         ctx.taskQueue = &taskQueue;
         pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * actualConnections);
         if (!threads) {
-            free(results);
-            return NULL;
+            results[0] = CreateErrorResult("allocate memory failed for threads.");
+            return results;
         }
         for (int i = 0; i < actualConnections; ++i) {
             if (pthread_create(&threads[i], NULL, WorkerThread, &ctx) != 0) {
@@ -4499,8 +4521,8 @@ PGresult **PQexecMultiSearchParams(const char *connParams, const char *queryTemp
                     pthread_join(threads[j], NULL);
                 }
                 free(threads);
-                free(results);
-                return NULL;
+                results[0] = CreateErrorResult("create threads failed.");
+                return results;
             }
         }
         for (int i = 0; i < queryCount; ++i) {

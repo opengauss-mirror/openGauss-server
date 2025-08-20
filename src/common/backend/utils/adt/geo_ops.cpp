@@ -1067,8 +1067,6 @@ Datum line_intersect(PG_FUNCTION_ARGS)
 
 Datum line_parallel(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* l1 = PG_GETARG_LINE_P(0);
     LINE* l2 = PG_GETARG_LINE_P(1);
 

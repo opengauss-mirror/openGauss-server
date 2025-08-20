@@ -3837,6 +3837,7 @@ const char* G_SET_HINT_WHITE_LIST[] = {
     (char*)"enable_bitmapscan",
     (char*)"enable_broadcast",
     (char*)"enable_fast_query_shipping",
+    (char*)"enable_func_cache",
     (char*)"enable_functional_dependency",
     (char*)"enable_hashagg",
     (char*)"enable_hashjoin",

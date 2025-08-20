@@ -48,6 +48,7 @@
 #include "catalog/pg_object.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opclass.h"
+#include "catalog/pg_proc.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
@@ -2656,6 +2657,48 @@ void index_drop(Oid indexId, bool concurrent, bool concurrent_lock_mode)
     }
 }
 
+static bool check_func_user_created_walker(Node* node, Node* cxt)
+{
+    if (node == NULL) {
+        return false;
+    }
+    if (IsA(node, FuncExpr)) {
+        FuncExpr* func = (FuncExpr*)node;
+        if (func->funcid >= FirstNormalObjectId) {
+            return true;
+        }
+    }
+
+    return expression_tree_walker(node, (bool (*)())check_func_user_created_walker, (void*)node);
+}
+
+List* get_user_from_index_expressions(List* indexExpressions)
+{
+    if (indexExpressions == NIL) {
+        return NIL;
+    }
+    ListCell* expr = NULL;
+    List* user_oid_list = NIL;
+    bool is_null = false;
+    foreach (expr, indexExpressions) {
+        if (check_func_user_created_walker((Node*)(lfirst(expr)), NULL) && IsA(lfirst(expr), FuncExpr)) {
+            Oid func_oid = ((FuncExpr*)(lfirst(expr)))->funcid;
+            HeapTuple tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
+            if (!HeapTupleIsValid(tup)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                     errmsg("cache lookup failed for index expression func oid %u", func_oid)));
+            }
+            Oid proowner = (Oid)SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_proowner, &is_null);
+            ReleaseSysCache(tup);
+            user_oid_list = lappend_oid(user_oid_list, proowner);
+            continue;
+        }
+        user_oid_list = lappend_oid(user_oid_list, InvalidOid);
+    }
+    return user_oid_list;
+}
+
 /* ----------------------------------------------------------------
  *						index_build support
  * ----------------------------------------------------------------
@@ -2684,12 +2727,15 @@ IndexInfo* BuildIndexInfo(Relation index)
             (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                 errmsg("invalid indnatts %d for index %u", numAtts, RelationGetRelid(index))));
 
+    List* indexExpressions = RelationGetIndexExpressions(index);
+    List* expressionUsers = get_user_from_index_expressions(indexExpressions);
     IndexInfo* ii = makeIndexInfo(indexStruct->indnatts,
-                       RelationGetIndexExpressions(index),
-                       RelationGetIndexPredicate(index),
-                       indexStruct->indisunique,
-                       IndexIsReady(indexStruct),
-                       false);
+                                  indexExpressions,
+                                  expressionUsers,
+                                  RelationGetIndexPredicate(index),
+                                  indexStruct->indisunique,
+                                  IndexIsReady(indexStruct),
+                                  false);
 
     ii->ii_NumIndexAttrs = numAtts;
     ii->ii_NumIndexKeyAttrs = IndexRelationGetNumberOfKeyAttributes(index);
@@ -2744,8 +2790,11 @@ IndexInfo* BuildDummyIndexInfo(Relation index)
      * Create the node, using dummy index expressions, and pretending there is
      * no predicate.
      */
+    List* indexExpressions = RelationGetDummyIndexExpressions(index);
+    List* expressionUsers = get_user_from_index_expressions(indexExpressions);
     ii = makeIndexInfo(indexStruct->indnatts,
-                       RelationGetDummyIndexExpressions(index),
+                       indexExpressions,
+                       expressionUsers,
                        NIL,
                        indexStruct->indisunique,
                        indexStruct->indisready,
@@ -2850,6 +2899,10 @@ void FormIndexDatumForRedis(const TupleTableSlot* slot, Datum* values, bool* isn
 void FormIndexDatum(IndexInfo* indexInfo, TupleTableSlot* slot, EState* estate, Datum* values, bool* isnull)
 {
     ListCell* indexpr_item = NULL;
+    ListCell* indexpr_user = NULL;
+    Oid user_oid = InvalidOid;
+    int save_sec_context = 0;
+    Oid save_userid = 0;
     int i;
 
     if (indexInfo->ii_Expressions != NIL && indexInfo->ii_ExpressionsState == NIL) {
@@ -2859,6 +2912,7 @@ void FormIndexDatum(IndexInfo* indexInfo, TupleTableSlot* slot, EState* estate, 
         Assert(GetPerTupleExprContext(estate)->ecxt_scantuple == slot);
     }
     indexpr_item = list_head(indexInfo->ii_ExpressionsState);
+    indexpr_user = list_head(indexInfo->ii_ExpressionUsers);
 
     for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++) {
         int keycol = indexInfo->ii_KeyAttrNumbers[i];
@@ -2876,12 +2930,35 @@ void FormIndexDatum(IndexInfo* indexInfo, TupleTableSlot* slot, EState* estate, 
             /*
              * Index expression --- need to evaluate it.
              */
-            if (indexpr_item == NULL)
+            if (indexpr_item == NULL || indexpr_user == NULL) {
                 ereport(ERROR,
                     (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("wrong number of index expressions")));
-            iDatum = ExecEvalExprSwitchContext(
-                (ExprState*)lfirst(indexpr_item), GetPerTupleExprContext(estate), &isNull, NULL);
+            }
+            user_oid = lfirst_oid(indexpr_user);
+            if (user_oid != InvalidOid) {
+                /* switch user oid to create function's user */
+                GetUserIdAndSecContext(&save_userid, &save_sec_context);
+                SetUserIdAndSecContext(user_oid,
+                                       save_sec_context | SENDER_LOCAL_USERID_CHANGE);
+            }
+            PG_TRY();
+            {
+                iDatum = ExecEvalExprSwitchContext(
+                    (ExprState*)lfirst(indexpr_item), GetPerTupleExprContext(estate), &isNull, NULL);
+            }
+            PG_CATCH();
+            {
+                if (user_oid != InvalidOid) {
+                    SetUserIdAndSecContext(save_userid, save_sec_context);
+                }
+                PG_RE_THROW();
+            }
+            PG_END_TRY();
+            if (user_oid != InvalidOid) {
+                SetUserIdAndSecContext(save_userid, save_sec_context);
+            }
             indexpr_item = lnext(indexpr_item);
+            indexpr_user = lnext(indexpr_user);
         }
         values[i] = iDatum;
         isnull[i] = isNull;

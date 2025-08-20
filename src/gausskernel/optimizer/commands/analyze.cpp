@@ -142,6 +142,8 @@ THR_LOCAL int default_statistics_target = 100;
 #define ESTIMATE_BLOCK_FACTOR 0.65
 #define EPSILON 1.0E-06
 
+#define MAX_SAMPLE_ROWS (int64(MaxAllocSize / sizeof(HeapTuple)))
+
 /* maximum relative error fraction of histogram */
 #define ANALYZE_RELATIVE_ERROR ((double)(0.5))
 
@@ -739,6 +741,7 @@ static void caculate_target_rows(
     }
 
     *target_rows = rtl::min(*target_rows, workmem_allow_rows);  // sample rows must be less than workmem_allow_rows
+    *target_rows = rtl::min(*target_rows, MAX_SAMPLE_ROWS);
 
     /* attstattarget's value rely on final sample rows */
     attr->attstattarget = *target_rows / DEFAULT_EST_TARGET_ROWS;

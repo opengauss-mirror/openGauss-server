@@ -6792,7 +6792,7 @@ List* RelationGetIndexExpressions(Relation relation)
      * them to similarly-processed qual clauses, and may fail to detect valid
      * matches without this.  We don't bother with canonicalize_qual, however.
      */
-    result = (List*)eval_const_expressions(NULL, (Node*)result);
+    result = (List*)eval_index_const_expressions(NULL, (Node*)result);
 
     /* May as well fix opfuncids too */
     fix_opfuncids((Node*)result);

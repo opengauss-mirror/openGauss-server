@@ -257,6 +257,9 @@ test: single_node_update
 #test: single_node_delete
 test: single_node_delete_optimize
 
+# bloom_index
+test: bloom
+
 # ----------
 # Another group of parallel tests
 # ----------
@@ -478,7 +481,7 @@ test: hw_smp
 #test: insert_update_001#
 test: delete update namespace case select_having select_implicit
 test: hw_test_operate_user multi_update update_multi_base_table_view
-test: hw_createtbl_llt multi_delete
+test: hw_createtbl_llt multi_delete inlineview
 #test: gsqlerr#
 test: sqlLLT
 #test: hw_sql_llt#
@@ -787,7 +790,7 @@ test: select_where_func
 test: arrayinterface_single
 test: plpgsql_table_opengauss  
 test: plpgsql_assign_value_to_array_attribute
-test: plpgsql_array_of_record
+test: plpgsql_array_of_record plpgsql_predefined_types
 #test: plpgsql_nest_compile
 test: arrayinterface_ted
 test: function_default_test plpgsql_inout_param record_slow_sql_in_proc

@@ -20667,3 +20667,20 @@ void numeric_aggfn_info_change(Oid aggfn_oid, Oid *transfn_oid, Oid *transtype, 
     numeric_transfn_info_change(aggfn_oid, transfn_oid, transtype);
     numeric_finalfn_info_change(aggfn_oid, finalfn_oid);
 }
+
+/*
+ * numeric_scale() -
+ *
+ *	Returns the scale, i.e. the count of decimal digits in the fractional part
+ */
+Datum
+numeric_scale(PG_FUNCTION_ARGS)
+{
+	Numeric	num = PG_GETARG_NUMERIC(0);
+
+	if (NUMERIC_IS_SPECIAL(num)){
+        PG_RETURN_NULL();
+    }
+
+	PG_RETURN_INT32(NUMERIC_DSCALE(num));
+}

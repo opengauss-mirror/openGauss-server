@@ -1,0 +1,127 @@
+create database object_d with dbcompatibility 'D';
+\c object_d
+create extension shark;
+create schema object_d_dump;
+set search_path to object_d_dump;
+create or replace function calcMulti(@param1 IN INTEGER, @param2 IN INTEGER) return integer as
+declare @result integer;
+begin
+    @result = @param1 * @param2;
+    return @result;
+end;
+/
+call calcMulti(3,5);
+ calcmulti 
+-----------
+        15
+(1 row)
+
+create or replace function calcAdd(@param1 IN INTEGER, @param2 IN INTEGER) return integer as
+declare @result integer;
+begin
+    @result = @param1+@param2;
+    return @result;
+end;
+/
+call calcAdd(3,5);
+ calcadd 
+---------
+       8
+(1 row)
+
+create or replace function calcFunc1(@param1 IN INTEGER, @param2 IN INTEGER) return integer as
+declare @result integer;
+begin
+    @result = @param1*(@param1-@param2);
+    return @result;
+end;
+/
+call calcFunc1(3,5);
+ calcfunc1 
+-----------
+        -6
+(1 row)
+
+create table obj_test(id int, @object int);
+insert into obj_test values(1,1),(2,2);
+select * from obj_test order by 1;
+ id | @object 
+----+---------
+  1 |       1
+  2 |       2
+(2 rows)
+
+create table obj_test1(id int, "@OBJ" int);
+insert into obj_test1 values (1,1), (2,2);
+create view @obj_view as select * from obj_test1;
+select * from @obj_view order by 1;
+ id | @OBJ 
+----+------
+  1 |    1
+  2 |    2
+(2 rows)
+
+set d_format_behavior_compat_options = 'enable_abs';
+create table test_abs(a int, b float);
+insert into test_abs values (1,-1.1), (0,-3.3), (-2,2.2);
+select @a, @b from test_abs order by @a;
+ ?column? | ?column? 
+----------+----------
+        0 |      3.3
+        1 |      1.1
+        2 |      2.2
+(3 rows)
+
+reset d_format_behavior_compat_options;
+\! @abs_bindir@/gs_dump object_d -p @portstring@ -f @abs_bindir@/object_d_dump.sql -n object_d_dump -w >/dev/null 2>&1; echo $?
+0
+drop schema object_d_dump cascade;
+NOTICE:  drop cascades to 7 other objects
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+\! @abs_bindir@/gsql -d object_d -p @portstring@ -f "@abs_bindir@/object_d_dump.sql" >/dev/null 2>&1; echo $?
+0
+call calcMulti(3,5);
+ calcmulti 
+-----------
+        15
+(1 row)
+
+call calcAdd(3,5);
+ calcadd 
+---------
+       8
+(1 row)
+
+call calcFunc1(3,5);
+ calcfunc1 
+-----------
+        -6
+(1 row)
+
+set d_format_behavior_compat_options = 'enable_abs';
+select @a, @b from test_abs order by @a;
+ ?column? | ?column? 
+----------+----------
+        0 |      3.3
+        1 |      1.1
+        2 |      2.2
+(3 rows)
+
+reset d_format_behavior_compat_options;
+drop schema object_d_dump cascade;
+NOTICE:  drop cascades to 7 other objects
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+\c postgres
+drop database object_d;

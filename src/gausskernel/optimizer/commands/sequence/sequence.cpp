@@ -1167,6 +1167,14 @@ ObjectAddress AlterSequenceWrapper(AlterSeqStmt* stmt)
     }
 }
 
+/* reset cachedSequenceOid if we recevice invalidate message */
+void SeqCacheRelCallback(Datum arg, Oid seqoid)
+{
+    if (seqoid == u_sess->cache_cxt.cachedSequenceOid) {
+        u_sess->cache_cxt.cachedSequenceOid = InvalidOid;
+    }
+}
+
 bool CheckSeqOwnedByAutoInc(Oid seqoid)
 {
     Oid relid;
@@ -1175,15 +1183,26 @@ bool CheckSeqOwnedByAutoInc(Oid seqoid)
     if (!DB_IS_CMPT(B_FORMAT)) {
         return false;
     }
+    AcceptInvalidationMessages();
+    if (seqoid == u_sess->cache_cxt.cachedSequenceOid) {
+        return u_sess->cache_cxt.cachedSequenceOidIsAutoInc;
+    }
+
+    bool isOwnedByAutoInc = false;
+    /*
+     * cache whether the sequence is an auto_increment column or not. set cachedSequenceOid to invalid first,
+     * in case of ereport before setting cachedSequenceOidIsAutoInc.
+     */
+    u_sess->cache_cxt.cachedSequenceOid = InvalidOid;
     if (sequenceIsOwned(seqoid, &relid, &attrnum)) {
         rel = relation_open(relid, NoLock);
-        if (seqoid == RelAutoIncSeqOid(rel)) {
-            relation_close(rel, NoLock);
-            return true;
-        }
+        isOwnedByAutoInc = seqoid == RelAutoIncSeqOid(rel);
         relation_close(rel, NoLock);
     }
-    return false;
+    CacheRegisterSessionRelcacheCallback(SeqCacheRelCallback, (Datum)0);
+    u_sess->cache_cxt.cachedSequenceOidIsAutoInc = isOwnedByAutoInc;
+    u_sess->cache_cxt.cachedSequenceOid = seqoid;
+    return isOwnedByAutoInc;
 }
 
 /*
@@ -1326,6 +1345,9 @@ static ObjectAddress AlterSequence(const AlterSeqStmt* stmt)
     if (objectType != OBJECT_TYPE_INVALID) {
         UpdatePgObjectMtime(seqrel->rd_id, objectType);
     }
+
+    /* invalidate relation(sequence) */
+    CacheInvalidateRelcache(seqrel);
 
     ObjectAddressSet(address, RelationRelationId, relid);
     relation_close(seqrel, NoLock);

@@ -1,0 +1,2419 @@
+CREATE DATABASE test_predefined_pltype;
+\c test_predefined_pltype;
+--
+-- NATURAL
+--
+CREATE TABLE NATURAL_TBL(f1 natural);
+INSERT INTO NATURAL_TBL(f1) VALUES ('   0  ');
+INSERT INTO NATURAL_TBL(f1) VALUES ('123456     ');
+INSERT INTO NATURAL_TBL(f1) VALUES ('123457 ');
+INSERT INTO NATURAL_TBL(f1) VALUES ('');
+-- largest and smallest values
+INSERT INTO NATURAL_TBL(f1) VALUES ('2147483647');
+INSERT INTO NATURAL_TBL(f1) VALUES ('0');
+-- bad input values -- should give errors
+INSERT INTO NATURAL_TBL(f1) VALUES ('34.5');
+ERROR:  invalid input syntax for integer: "34.5"
+LINE 1: INSERT INTO NATURAL_TBL(f1) VALUES ('34.5');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURAL_TBL(f1) VALUES ('1000000000000');
+ERROR:  value "1000000000000" is out of range for type integer
+LINE 1: INSERT INTO NATURAL_TBL(f1) VALUES ('1000000000000');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURAL_TBL(f1) VALUES ('     ');
+ERROR:  invalid input syntax for integer: "     "
+LINE 1: INSERT INTO NATURAL_TBL(f1) VALUES ('     ');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURAL_TBL(f1) VALUES ('   asdf   ');
+ERROR:  invalid input syntax for integer: "   asdf   "
+LINE 1: INSERT INTO NATURAL_TBL(f1) VALUES ('   asdf   ');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURAL_TBL(f1) VALUES ('- 1234');
+ERROR:  invalid input syntax for integer: "- 1234"
+LINE 1: INSERT INTO NATURAL_TBL(f1) VALUES ('- 1234');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURAL_TBL(f1) VALUES ('-1234');
+ERROR:  invalid value for natural: -1234
+LINE 1: INSERT INTO NATURAL_TBL(f1) VALUES ('-1234');
+                                            ^
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: f1
+INSERT INTO NATURAL_TBL(f1) VALUES ('123       5');
+ERROR:  invalid input syntax for integer: "123       5"
+LINE 1: INSERT INTO NATURAL_TBL(f1) VALUES ('123       5');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURAL_TBL (SELECT f1+1 FROM NATURAL_TBL);
+ERROR:  integer out of range
+CONTEXT:  referenced column: f1
+INSERT INTO NATURAL_TBL (SELECT f1-1 FROM NATURAL_TBL);
+ERROR:  invalid value for natural: -1
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: f1
+CREATE INDEX idx ON NATURAL_TBL(f1);
+ERROR:  not supported to create index on a column of type "natural".
+SELECT '' AS five, * FROM NATURAL_TBL ORDER BY f1;
+ five |     f1     
+------+------------
+      | 0
+      | 0
+      | 123456
+      | 123457
+      | 2147483647
+      | 
+(6 rows)
+
+SELECT '' AS four, i.* FROM NATURAL_TBL i WHERE i.f1 <> natural '0' ORDER BY f1;
+ four |     f1     
+------+------------
+      | 123456
+      | 123457
+      | 2147483647
+(3 rows)
+
+SELECT '' AS one, i.* FROM NATURAL_TBL i WHERE i.f1 = natural '0';
+ one | f1 
+-----+----
+     | 0
+     | 0
+(2 rows)
+
+SELECT '' AS two, i.* FROM NATURAL_TBL i WHERE i.f1 < natural '0' ORDER BY f1;
+ two | f1 
+-----+----
+(0 rows)
+
+SELECT '' AS three, i.* FROM NATURAL_TBL i WHERE i.f1 <= natural '0' ORDER BY f1;
+ three | f1 
+-------+----
+       | 0
+       | 0
+(2 rows)
+
+SELECT '' AS two, i.* FROM NATURAL_TBL i WHERE i.f1 > natural '0' ORDER BY f1;
+ two |     f1     
+-----+------------
+     | 123456
+     | 123457
+     | 2147483647
+(3 rows)
+
+SELECT '' AS three, i.* FROM NATURAL_TBL i WHERE i.f1 >= natural '0' ORDER BY f1;
+ three |     f1     
+-------+------------
+       | 0
+       | 0
+       | 123456
+       | 123457
+       | 2147483647
+(5 rows)
+
+-- positive odds
+SELECT '' AS one, i.* FROM NATURAL_TBL i WHERE (i.f1 % natural '2') = int4 '1' ORDER BY f1;
+ one |     f1     
+-----+------------
+     | 123457
+     | 2147483647
+(2 rows)
+
+-- any evens
+SELECT '' AS three, i.* FROM NATURAL_TBL i WHERE (i.f1 % natural '2') = int4 '0' ORDER BY f1;
+ three |   f1   
+-------+--------
+       | 0
+       | 0
+       | 123456
+(3 rows)
+
+SELECT '' AS five, i.f1, i.f1 * natural '2' AS x FROM NATURAL_TBL i
+WHERE abs(f1) < 1073741824 ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | 0      |      0
+      | 0      |      0
+      | 123456 | 246912
+      | 123457 | 246914
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 + natural '2' AS x FROM NATURAL_TBL i
+WHERE f1 < 2147483646 ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | 0      |      2
+      | 0      |      2
+      | 123456 | 123458
+      | 123457 | 123459
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 - natural '2' AS x FROM NATURAL_TBL i
+WHERE f1 > -2147483647 ORDER BY f1;
+ five |     f1     |     x      
+------+------------+------------
+      | 0          |         -2
+      | 0          |         -2
+      | 123456     |     123454
+      | 123457     |     123455
+      | 2147483647 | 2147483645
+(5 rows)
+
+SELECT '' AS five, i.f1, i.f1 / natural '2' AS x FROM NATURAL_TBL i ORDER BY f1;
+ five |     f1     |      x       
+------+------------+--------------
+      | 0          |            0
+      | 0          |            0
+      | 123456     |        61728
+      | 123457     |      61728.5
+      | 2147483647 | 1073741823.5
+      |            |             
+(6 rows)
+
+SELECT natural '1000' < natural '999' AS false;
+ false 
+-------
+ f
+(1 row)
+
+-- divide zero
+SELECT (0)::natural / (-2)::int2;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT (0)::natural / (-2)::int8;
+ ?column? 
+----------
+        0
+(1 row)
+
+-- corner case
+SELECT (-1::natural<<31)::text;
+    text     
+-------------
+ -2147483648
+(1 row)
+
+SELECT ((-1::natural<<31)+1)::text;
+    text     
+-------------
+ -2147483647
+(1 row)
+
+-- cast to natural
+SELECT '11'::tinyint::natural;
+ natural 
+---------
+ 11
+(1 row)
+
+SELECT '1122'::int2::natural;
+ natural 
+---------
+ 1122
+(1 row)
+
+SELECT '-1122'::int2::natural;
+ERROR:  invalid value for natural: -1122
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT '0'::integer::natural;
+ natural 
+---------
+ 0
+(1 row)
+
+SELECT '-1'::integer::natural;
+ERROR:  invalid value for natural: -1
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT '11100'::int8::natural;
+ natural 
+---------
+ 11100
+(1 row)
+
+SELECT '-11100'::int8::natural;
+ERROR:  invalid value for natural: -11100
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT '123'::int16::natural;
+ natural 
+---------
+ 123
+(1 row)
+
+SELECT '-123'::int16::natural;
+ERROR:  invalid value for natural: -123
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT '32767.4'::float4::natural;
+ natural 
+---------
+ 32767
+(1 row)
+
+SELECT '-32767.4'::float4::natural;
+ERROR:  invalid value for natural: -32767
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT '2147483647.4'::float8::natural;
+  natural   
+------------
+ 2147483647
+(1 row)
+
+SELECT '-2147483647.4'::float8::natural;
+ERROR:  invalid value for natural: -2147483647
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT '34338492.215397047'::numeric(210,10)::natural;
+ natural  
+----------
+ 34338492
+(1 row)
+
+SELECT '-34338492.215397047'::numeric(210,10)::natural;
+ERROR:  invalid value for natural: -34338492
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT B'1101100000000000'::BIT(16)::natural;
+ natural 
+---------
+ 55296
+(1 row)
+
+SELECT true::natural;
+ natural 
+---------
+ 1
+(1 row)
+
+SELECT false::natural;
+ natural 
+---------
+ 0
+(1 row)
+
+SELECT '2147483647'::text::natural;
+  natural   
+------------
+ 2147483647
+(1 row)
+
+SELECT '-2147483647'::text::natural;
+ERROR:  invalid value for natural: -2147483647
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT '7'::"char"::natural;
+ natural 
+---------
+ 55
+(1 row)
+
+SELECT '1234'::varchar(4)::natural;
+ natural 
+---------
+ 1234
+(1 row)
+
+SELECT '-234'::varchar(4)::natural;
+ERROR:  invalid value for natural: -234
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT '1234'::bpchar(4)::natural;
+ natural 
+---------
+ 1234
+(1 row)
+
+SELECT '-234'::bpchar(4)::natural;
+ERROR:  invalid value for natural: -234
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT '1234'::nvarchar2(4)::natural;
+ natural 
+---------
+ 1234
+(1 row)
+
+SELECT '-234'::nvarchar2(4)::natural;
+ERROR:  invalid value for natural: -234
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+DROP TABLE NATURAL_TBL;
+--
+-- NATURALN
+--
+CREATE TABLE NATURALN_TBL(f1 naturaln);
+INSERT INTO NATURALN_TBL(f1) VALUES ('   0  ');
+INSERT INTO NATURALN_TBL(f1) VALUES ('123456     ');
+INSERT INTO NATURALN_TBL(f1) VALUES ('123457 ');
+-- largest and smallest values
+INSERT INTO NATURALN_TBL(f1) VALUES ('2147483647');
+INSERT INTO NATURALN_TBL(f1) VALUES ('0');
+-- bad input values -- should give errors
+INSERT INTO NATURALN_TBL(f1) VALUES (NULL);
+ERROR:  invalid value for naturaln: NULL
+LINE 1: INSERT INTO NATURALN_TBL(f1) VALUES (NULL);
+                                             ^
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: f1
+INSERT INTO NATURALN_TBL(f1) VALUES ('34.5');
+ERROR:  invalid input syntax for integer: "34.5"
+LINE 1: INSERT INTO NATURALN_TBL(f1) VALUES ('34.5');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURALN_TBL(f1) VALUES ('1000000000000');
+ERROR:  value "1000000000000" is out of range for type integer
+LINE 1: INSERT INTO NATURALN_TBL(f1) VALUES ('1000000000000');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURALN_TBL(f1) VALUES ('asdf');
+ERROR:  invalid input syntax for integer: "asdf"
+LINE 1: INSERT INTO NATURALN_TBL(f1) VALUES ('asdf');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURALN_TBL(f1) VALUES ('     ');
+ERROR:  invalid input syntax for integer: "     "
+LINE 1: INSERT INTO NATURALN_TBL(f1) VALUES ('     ');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURALN_TBL(f1) VALUES ('   asdf   ');
+ERROR:  invalid input syntax for integer: "   asdf   "
+LINE 1: INSERT INTO NATURALN_TBL(f1) VALUES ('   asdf   ');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURALN_TBL(f1) VALUES ('- 1234');
+ERROR:  invalid input syntax for integer: "- 1234"
+LINE 1: INSERT INTO NATURALN_TBL(f1) VALUES ('- 1234');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURALN_TBL(f1) VALUES ('-1234');
+ERROR:  invalid value for naturaln: -1234
+LINE 1: INSERT INTO NATURALN_TBL(f1) VALUES ('-1234');
+                                             ^
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: f1
+INSERT INTO NATURALN_TBL(f1) VALUES ('123       5');
+ERROR:  invalid input syntax for integer: "123       5"
+LINE 1: INSERT INTO NATURALN_TBL(f1) VALUES ('123       5');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO NATURALN_TBL (SELECT f1+1 FROM NATURALN_TBL);
+ERROR:  integer out of range
+CONTEXT:  referenced column: f1
+INSERT INTO NATURALN_TBL (SELECT f1-1 FROM NATURALN_TBL);
+ERROR:  invalid value for naturaln: -1
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: f1
+CREATE INDEX idx ON NATURALN_TBL(f1);
+ERROR:  not supported to create index on a column of type naturaln.
+SELECT '' AS five, * FROM NATURALN_TBL ORDER BY f1;
+ five |     f1     
+------+------------
+      | 0
+      | 0
+      | 123456
+      | 123457
+      | 2147483647
+(5 rows)
+
+SELECT '' AS four, i.* FROM NATURALN_TBL i WHERE i.f1 <> naturaln '0' ORDER BY f1;
+ four |     f1     
+------+------------
+      | 123456
+      | 123457
+      | 2147483647
+(3 rows)
+
+SELECT '' AS one, i.* FROM NATURALN_TBL i WHERE i.f1 = naturaln '0';
+ one | f1 
+-----+----
+     | 0
+     | 0
+(2 rows)
+
+SELECT '' AS two, i.* FROM NATURALN_TBL i WHERE i.f1 < naturaln '0' ORDER BY f1;
+ two | f1 
+-----+----
+(0 rows)
+
+SELECT '' AS three, i.* FROM NATURALN_TBL i WHERE i.f1 <= naturaln '0' ORDER BY f1;
+ three | f1 
+-------+----
+       | 0
+       | 0
+(2 rows)
+
+SELECT '' AS two, i.* FROM NATURALN_TBL i WHERE i.f1 > naturaln '0' ORDER BY f1;
+ two |     f1     
+-----+------------
+     | 123456
+     | 123457
+     | 2147483647
+(3 rows)
+
+SELECT '' AS three, i.* FROM NATURALN_TBL i WHERE i.f1 >= naturaln '0' ORDER BY f1;
+ three |     f1     
+-------+------------
+       | 0
+       | 0
+       | 123456
+       | 123457
+       | 2147483647
+(5 rows)
+
+-- positive odds
+SELECT '' AS one, i.* FROM NATURALN_TBL i WHERE (i.f1 % naturaln '2') = int4 '1' ORDER BY f1;
+ one |     f1     
+-----+------------
+     | 123457
+     | 2147483647
+(2 rows)
+
+-- any evens
+SELECT '' AS three, i.* FROM NATURALN_TBL i WHERE (i.f1 % naturaln '2') = int4 '0' ORDER BY f1;
+ three |   f1   
+-------+--------
+       | 0
+       | 0
+       | 123456
+(3 rows)
+
+SELECT '' AS five, i.f1, i.f1 * naturaln '2' AS x FROM NATURALN_TBL i
+WHERE abs(f1) < 1073741824 ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | 0      |      0
+      | 0      |      0
+      | 123456 | 246912
+      | 123457 | 246914
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 + naturaln '2' AS x FROM NATURALN_TBL i
+WHERE f1 < 2147483646 ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | 0      |      2
+      | 0      |      2
+      | 123456 | 123458
+      | 123457 | 123459
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 - naturaln '2' AS x FROM NATURALN_TBL i
+WHERE f1 > -2147483647 ORDER BY f1;
+ five |     f1     |     x      
+------+------------+------------
+      | 0          |         -2
+      | 0          |         -2
+      | 123456     |     123454
+      | 123457     |     123455
+      | 2147483647 | 2147483645
+(5 rows)
+
+SELECT '' AS five, i.f1, i.f1 / naturaln '2' AS x FROM NATURALN_TBL i ORDER BY f1;
+ five |     f1     |      x       
+------+------------+--------------
+      | 0          |            0
+      | 0          |            0
+      | 123456     |        61728
+      | 123457     |      61728.5
+      | 2147483647 | 1073741823.5
+(5 rows)
+
+SELECT naturaln '1000' < naturaln '999' AS false;
+ false 
+-------
+ f
+(1 row)
+
+-- divide zero
+SELECT (0)::naturaln / (-2)::int2;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT (0)::naturaln / (-2)::int8;
+ ?column? 
+----------
+        0
+(1 row)
+
+-- corner case
+SELECT (-1::naturaln<<31)::text;
+    text     
+-------------
+ -2147483648
+(1 row)
+
+SELECT ((-1::naturaln<<31)+1)::text;
+    text     
+-------------
+ -2147483647
+(1 row)
+
+-- cast to naturaln
+SELECT NULL::tinyint::naturaln;
+ERROR:  invalid value for naturaln: NULL
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT '11'::tinyint::naturaln;
+ naturaln 
+----------
+ 11
+(1 row)
+
+SELECT '1122'::int2::naturaln;
+ naturaln 
+----------
+ 1122
+(1 row)
+
+SELECT '-1122'::int2::naturaln;
+ERROR:  invalid value for naturaln: -1122
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT '0'::integer::naturaln;
+ naturaln 
+----------
+ 0
+(1 row)
+
+SELECT '-1'::integer::naturaln;
+ERROR:  invalid value for naturaln: -1
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT '11100'::int8::naturaln;
+ naturaln 
+----------
+ 11100
+(1 row)
+
+SELECT '-11100'::int8::naturaln;
+ERROR:  invalid value for naturaln: -11100
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT '123'::int16::naturaln;
+ naturaln 
+----------
+ 123
+(1 row)
+
+SELECT '-123'::int16::naturaln;
+ERROR:  invalid value for naturaln: -123
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT '32767.4'::float4::naturaln;
+ naturaln 
+----------
+ 32767
+(1 row)
+
+SELECT '-32767.4'::float4::naturaln;
+ERROR:  invalid value for naturaln: -32767
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT '2147483647.4'::float8::naturaln;
+  naturaln  
+------------
+ 2147483647
+(1 row)
+
+SELECT '-2147483647.4'::float8::naturaln;
+ERROR:  invalid value for naturaln: -2147483647
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT '34338492.215397047'::numeric(210,10)::naturaln;
+ naturaln 
+----------
+ 34338492
+(1 row)
+
+SELECT '-34338492.215397047'::numeric(210,10)::naturaln;
+ERROR:  invalid value for naturaln: -34338492
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT B'1101100000000000'::BIT(16)::naturaln;
+ naturaln 
+----------
+ 55296
+(1 row)
+
+SELECT true::naturaln;
+ naturaln 
+----------
+ 1
+(1 row)
+
+SELECT false::naturaln;
+ naturaln 
+----------
+ 0
+(1 row)
+
+SELECT '2147483647'::text::naturaln;
+  naturaln  
+------------
+ 2147483647
+(1 row)
+
+SELECT '-2147483647'::text::naturaln;
+ERROR:  invalid value for naturaln: -2147483647
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT '7'::"char"::naturaln;
+ naturaln 
+----------
+ 55
+(1 row)
+
+SELECT '1234'::varchar(4)::naturaln;
+ naturaln 
+----------
+ 1234
+(1 row)
+
+SELECT '-234'::varchar(4)::naturaln;
+ERROR:  invalid value for naturaln: -234
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT '1234'::bpchar(4)::naturaln;
+ naturaln 
+----------
+ 1234
+(1 row)
+
+SELECT '-234'::bpchar(4)::naturaln;
+ERROR:  invalid value for naturaln: -234
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT '1234'::nvarchar2(4)::naturaln;
+ naturaln 
+----------
+ 1234
+(1 row)
+
+SELECT '-234'::nvarchar2(4)::naturaln;
+ERROR:  invalid value for naturaln: -234
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+DROP TABLE NATURALN_TBL;
+--
+-- POSITIVE
+--
+CREATE TABLE POSITIVE_TBL(f1 positive);
+INSERT INTO POSITIVE_TBL(f1) VALUES ('   1  ');
+INSERT INTO POSITIVE_TBL(f1) VALUES ('123456     ');
+INSERT INTO POSITIVE_TBL(f1) VALUES ('123457 ');
+INSERT INTO POSITIVE_TBL(f1) VALUES ('');
+-- largest and smallest values
+INSERT INTO POSITIVE_TBL(f1) VALUES ('2147483647');
+INSERT INTO POSITIVE_TBL(f1) VALUES ('1');
+-- bad input values -- should give errors
+INSERT INTO POSITIVE_TBL(f1) VALUES ('0');
+ERROR:  invalid value for positive: 0
+LINE 1: INSERT INTO POSITIVE_TBL(f1) VALUES ('0');
+                                             ^
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVE_TBL(f1) VALUES ('34.5');
+ERROR:  invalid input syntax for integer: "34.5"
+LINE 1: INSERT INTO POSITIVE_TBL(f1) VALUES ('34.5');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVE_TBL(f1) VALUES ('1000000000000');
+ERROR:  value "1000000000000" is out of range for type integer
+LINE 1: INSERT INTO POSITIVE_TBL(f1) VALUES ('1000000000000');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVE_TBL(f1) VALUES ('     ');
+ERROR:  invalid input syntax for integer: "     "
+LINE 1: INSERT INTO POSITIVE_TBL(f1) VALUES ('     ');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVE_TBL(f1) VALUES ('   asdf   ');
+ERROR:  invalid input syntax for integer: "   asdf   "
+LINE 1: INSERT INTO POSITIVE_TBL(f1) VALUES ('   asdf   ');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVE_TBL(f1) VALUES ('- 1234');
+ERROR:  invalid input syntax for integer: "- 1234"
+LINE 1: INSERT INTO POSITIVE_TBL(f1) VALUES ('- 1234');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVE_TBL(f1) VALUES ('-1234');
+ERROR:  invalid value for positive: -1234
+LINE 1: INSERT INTO POSITIVE_TBL(f1) VALUES ('-1234');
+                                             ^
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVE_TBL(f1) VALUES ('123       5');
+ERROR:  invalid input syntax for integer: "123       5"
+LINE 1: INSERT INTO POSITIVE_TBL(f1) VALUES ('123       5');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVE_TBL (SELECT f1+1 FROM POSITIVE_TBL);
+ERROR:  integer out of range
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVE_TBL (SELECT f1-1 FROM POSITIVE_TBL);
+ERROR:  invalid value for positive: 0
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: f1
+CREATE INDEX idx ON POSITIVE_TBL(f1);
+ERROR:  not supported to create index on a column of type positive.
+SELECT '' AS five, * FROM POSITIVE_TBL ORDER BY f1;
+ five |     f1     
+------+------------
+      | 1
+      | 1
+      | 123456
+      | 123457
+      | 2147483647
+      | 
+(6 rows)
+
+SELECT '' AS four, i.* FROM POSITIVE_TBL i WHERE i.f1 <> positive '1' ORDER BY f1;
+ four |     f1     
+------+------------
+      | 123456
+      | 123457
+      | 2147483647
+(3 rows)
+
+SELECT '' AS one, i.* FROM POSITIVE_TBL i WHERE i.f1 = positive '1';
+ one | f1 
+-----+----
+     | 1
+     | 1
+(2 rows)
+
+SELECT '' AS two, i.* FROM POSITIVE_TBL i WHERE i.f1 < positive '1' ORDER BY f1;
+ two | f1 
+-----+----
+(0 rows)
+
+SELECT '' AS three, i.* FROM POSITIVE_TBL i WHERE i.f1 <= positive '1' ORDER BY f1;
+ three | f1 
+-------+----
+       | 1
+       | 1
+(2 rows)
+
+SELECT '' AS two, i.* FROM POSITIVE_TBL i WHERE i.f1 > positive '1' ORDER BY f1;
+ two |     f1     
+-----+------------
+     | 123456
+     | 123457
+     | 2147483647
+(3 rows)
+
+SELECT '' AS three, i.* FROM POSITIVE_TBL i WHERE i.f1 >= positive '1' ORDER BY f1;
+ three |     f1     
+-------+------------
+       | 1
+       | 1
+       | 123456
+       | 123457
+       | 2147483647
+(5 rows)
+
+-- positive odds
+SELECT '' AS one, i.* FROM POSITIVE_TBL i WHERE (i.f1 % positive '2') = int4 '1' ORDER BY f1;
+ one |     f1     
+-----+------------
+     | 1
+     | 1
+     | 123457
+     | 2147483647
+(4 rows)
+
+-- any evens
+SELECT '' AS three, i.* FROM POSITIVE_TBL i WHERE (i.f1 % positive '2') = int4 '0' ORDER BY f1;
+ three |   f1   
+-------+--------
+       | 123456
+(1 row)
+
+SELECT '' AS five, i.f1, i.f1 * positive '2' AS x FROM POSITIVE_TBL i
+WHERE abs(f1) < 1073741824 ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | 1      |      2
+      | 1      |      2
+      | 123456 | 246912
+      | 123457 | 246914
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 + positive '2' AS x FROM POSITIVE_TBL i
+WHERE f1 < 2147483646 ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | 1      |      3
+      | 1      |      3
+      | 123456 | 123458
+      | 123457 | 123459
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 - positive '2' AS x FROM POSITIVE_TBL i
+WHERE f1 > -2147483647 ORDER BY f1;
+ five |     f1     |     x      
+------+------------+------------
+      | 1          |         -1
+      | 1          |         -1
+      | 123456     |     123454
+      | 123457     |     123455
+      | 2147483647 | 2147483645
+(5 rows)
+
+SELECT '' AS five, i.f1, i.f1 / positive '2' AS x FROM POSITIVE_TBL i ORDER BY f1;
+ five |     f1     |      x       
+------+------------+--------------
+      | 1          |           .5
+      | 1          |           .5
+      | 123456     |        61728
+      | 123457     |      61728.5
+      | 2147483647 | 1073741823.5
+      |            |             
+(6 rows)
+
+SELECT positive '1000' < positive '999' AS false;
+ false 
+-------
+ f
+(1 row)
+
+-- corner case
+SELECT (-1::positive<<31)::text;
+    text     
+-------------
+ -2147483648
+(1 row)
+
+SELECT ((-1::positive<<31)+1)::text;
+    text     
+-------------
+ -2147483647
+(1 row)
+
+-- cast to positive
+SELECT '11'::tinyint::positive;
+ positive 
+----------
+ 11
+(1 row)
+
+SELECT '1122'::int2::positive;
+ positive 
+----------
+ 1122
+(1 row)
+
+SELECT '-1122'::int2::positive;
+ERROR:  invalid value for positive: -1122
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT '1'::integer::positive;
+ positive 
+----------
+ 1
+(1 row)
+
+SELECT '0'::integer::positive;
+ERROR:  invalid value for positive: 0
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT '11100'::int8::positive;
+ positive 
+----------
+ 11100
+(1 row)
+
+SELECT '-11100'::int8::positive;
+ERROR:  invalid value for positive: -11100
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT '123'::int16::positive;
+ positive 
+----------
+ 123
+(1 row)
+
+SELECT '-123'::int16::positive;
+ERROR:  invalid value for positive: -123
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT '32767.4'::float4::positive;
+ positive 
+----------
+ 32767
+(1 row)
+
+SELECT '-32767.4'::float4::positive;
+ERROR:  invalid value for positive: -32767
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT '2147483647.4'::float8::positive;
+  positive  
+------------
+ 2147483647
+(1 row)
+
+SELECT '-2147483647.4'::float8::positive;
+ERROR:  invalid value for positive: -2147483647
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT '34338492.215397047'::numeric(210,10)::positive;
+ positive 
+----------
+ 34338492
+(1 row)
+
+SELECT '-34338492.215397047'::numeric(210,10)::positive;
+ERROR:  invalid value for positive: -34338492
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT B'1101100000000000'::BIT(16)::positive;
+ positive 
+----------
+ 55296
+(1 row)
+
+SELECT true::positive;
+ positive 
+----------
+ 1
+(1 row)
+
+SELECT false::positive;
+ERROR:  invalid value for positive: 0
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT '2147483647'::text::positive;
+  positive  
+------------
+ 2147483647
+(1 row)
+
+SELECT '-2147483647'::text::positive;
+ERROR:  invalid value for positive: -2147483647
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT '7'::"char"::positive;
+ positive 
+----------
+ 55
+(1 row)
+
+SELECT '1234'::varchar(4)::positive;
+ positive 
+----------
+ 1234
+(1 row)
+
+SELECT '-234'::varchar(4)::positive;
+ERROR:  invalid value for positive: -234
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT '1234'::bpchar(4)::positive;
+ positive 
+----------
+ 1234
+(1 row)
+
+SELECT '-234'::bpchar(4)::positive;
+ERROR:  invalid value for positive: -234
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT '1234'::nvarchar2(4)::positive;
+ positive 
+----------
+ 1234
+(1 row)
+
+SELECT '-234'::nvarchar2(4)::positive;
+ERROR:  invalid value for positive: -234
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+DROP TABLE POSITIVE_TBL;
+--
+-- POSITIVEN
+--
+CREATE TABLE POSITIVEN_TBL(f1 positiven);
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('   1  ');
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('123456     ');
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('123457 ');
+-- largest and smallest values
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('2147483647');
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('1');
+-- bad input values -- should give errors
+INSERT INTO POSITIVEN_TBL(f1) VALUES (NULL);
+ERROR:  invalid value for positiven: NULL
+LINE 1: INSERT INTO POSITIVEN_TBL(f1) VALUES (NULL);
+                                              ^
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('34.5');
+ERROR:  invalid input syntax for integer: "34.5"
+LINE 1: INSERT INTO POSITIVEN_TBL(f1) VALUES ('34.5');
+                                              ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('1000000000000');
+ERROR:  value "1000000000000" is out of range for type integer
+LINE 1: INSERT INTO POSITIVEN_TBL(f1) VALUES ('1000000000000');
+                                              ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('asdf');
+ERROR:  invalid input syntax for integer: "asdf"
+LINE 1: INSERT INTO POSITIVEN_TBL(f1) VALUES ('asdf');
+                                              ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('     ');
+ERROR:  invalid input syntax for integer: "     "
+LINE 1: INSERT INTO POSITIVEN_TBL(f1) VALUES ('     ');
+                                              ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('   asdf   ');
+ERROR:  invalid input syntax for integer: "   asdf   "
+LINE 1: INSERT INTO POSITIVEN_TBL(f1) VALUES ('   asdf   ');
+                                              ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('- 1234');
+ERROR:  invalid input syntax for integer: "- 1234"
+LINE 1: INSERT INTO POSITIVEN_TBL(f1) VALUES ('- 1234');
+                                              ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('-1234');
+ERROR:  invalid value for positiven: -1234
+LINE 1: INSERT INTO POSITIVEN_TBL(f1) VALUES ('-1234');
+                                              ^
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVEN_TBL(f1) VALUES ('123       5');
+ERROR:  invalid input syntax for integer: "123       5"
+LINE 1: INSERT INTO POSITIVEN_TBL(f1) VALUES ('123       5');
+                                              ^
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVEN_TBL (SELECT f1+1 FROM POSITIVEN_TBL);
+ERROR:  integer out of range
+CONTEXT:  referenced column: f1
+INSERT INTO POSITIVEN_TBL (SELECT f1-1 FROM POSITIVEN_TBL);
+ERROR:  invalid value for positiven: 0
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: f1
+CREATE INDEX idx ON POSITIVEN_TBL(f1);
+ERROR:  not supported to create index on a column of type positiven.
+SELECT '' AS five, * FROM POSITIVEN_TBL ORDER BY f1;
+ five |     f1     
+------+------------
+      | 1
+      | 1
+      | 123456
+      | 123457
+      | 2147483647
+(5 rows)
+
+SELECT '' AS four, i.* FROM POSITIVEN_TBL i WHERE i.f1 <> positiven '1' ORDER BY f1;
+ four |     f1     
+------+------------
+      | 123456
+      | 123457
+      | 2147483647
+(3 rows)
+
+SELECT '' AS one, i.* FROM POSITIVEN_TBL i WHERE i.f1 = positiven '1';
+ one | f1 
+-----+----
+     | 1
+     | 1
+(2 rows)
+
+SELECT '' AS two, i.* FROM POSITIVEN_TBL i WHERE i.f1 < positiven '1' ORDER BY f1;
+ two | f1 
+-----+----
+(0 rows)
+
+SELECT '' AS three, i.* FROM POSITIVEN_TBL i WHERE i.f1 <= positiven '1' ORDER BY f1;
+ three | f1 
+-------+----
+       | 1
+       | 1
+(2 rows)
+
+SELECT '' AS two, i.* FROM POSITIVEN_TBL i WHERE i.f1 > positiven '1' ORDER BY f1;
+ two |     f1     
+-----+------------
+     | 123456
+     | 123457
+     | 2147483647
+(3 rows)
+
+SELECT '' AS three, i.* FROM POSITIVEN_TBL i WHERE i.f1 >= positiven '1' ORDER BY f1;
+ three |     f1     
+-------+------------
+       | 1
+       | 1
+       | 123456
+       | 123457
+       | 2147483647
+(5 rows)
+
+-- positive odds
+SELECT '' AS one, i.* FROM POSITIVEN_TBL i WHERE (i.f1 % positiven '2') = int4 '1' ORDER BY f1;
+ one |     f1     
+-----+------------
+     | 1
+     | 1
+     | 123457
+     | 2147483647
+(4 rows)
+
+-- any evens
+SELECT '' AS three, i.* FROM POSITIVEN_TBL i WHERE (i.f1 % positiven '2') = int4 '0' ORDER BY f1;
+ three |   f1   
+-------+--------
+       | 123456
+(1 row)
+
+SELECT '' AS five, i.f1, i.f1 * positiven '2' AS x FROM POSITIVEN_TBL i
+WHERE abs(f1) < 1073741824 ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | 1      |      2
+      | 1      |      2
+      | 123456 | 246912
+      | 123457 | 246914
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 + positiven '2' AS x FROM POSITIVEN_TBL i
+WHERE f1 < 2147483646 ORDER BY f1;
+ five |   f1   |   x    
+------+--------+--------
+      | 1      |      3
+      | 1      |      3
+      | 123456 | 123458
+      | 123457 | 123459
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 - positiven '2' AS x FROM POSITIVEN_TBL i
+WHERE f1 > -2147483647 ORDER BY f1;
+ five |     f1     |     x      
+------+------------+------------
+      | 1          |         -1
+      | 1          |         -1
+      | 123456     |     123454
+      | 123457     |     123455
+      | 2147483647 | 2147483645
+(5 rows)
+
+SELECT '' AS five, i.f1, i.f1 / positiven '2' AS x FROM POSITIVEN_TBL i ORDER BY f1;
+ five |     f1     |      x       
+------+------------+--------------
+      | 1          |           .5
+      | 1          |           .5
+      | 123456     |        61728
+      | 123457     |      61728.5
+      | 2147483647 | 1073741823.5
+(5 rows)
+
+SELECT positiven '1000' < positiven '999' AS false;
+ false 
+-------
+ f
+(1 row)
+
+-- corner case
+SELECT (-1::positiven<<31)::text;
+    text     
+-------------
+ -2147483648
+(1 row)
+
+SELECT ((-1::positiven<<31)+1)::text;
+    text     
+-------------
+ -2147483647
+(1 row)
+
+-- cast to positiven
+SELECT NULL::tinyint::positiven;
+ERROR:  invalid value for positiven: NULL
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '11'::tinyint::positiven;
+ positiven 
+-----------
+ 11
+(1 row)
+
+SELECT '1122'::int2::positiven;
+ positiven 
+-----------
+ 1122
+(1 row)
+
+SELECT '-1122'::int2::positiven;
+ERROR:  invalid value for positiven: -1122
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '0'::integer::positiven;
+ERROR:  invalid value for positiven: 0
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '-1'::integer::positiven;
+ERROR:  invalid value for positiven: -1
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '11100'::int8::positiven;
+ positiven 
+-----------
+ 11100
+(1 row)
+
+SELECT '-11100'::int8::positiven;
+ERROR:  invalid value for positiven: -11100
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '123'::int16::positiven;
+ positiven 
+-----------
+ 123
+(1 row)
+
+SELECT '-123'::int16::positiven;
+ERROR:  invalid value for positiven: -123
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '32767.4'::float4::positiven;
+ positiven 
+-----------
+ 32767
+(1 row)
+
+SELECT '-32767.4'::float4::positiven;
+ERROR:  invalid value for positiven: -32767
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '2147483647.4'::float8::positiven;
+ positiven  
+------------
+ 2147483647
+(1 row)
+
+SELECT '-2147483647.4'::float8::positiven;
+ERROR:  invalid value for positiven: -2147483647
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '34338492.215397047'::numeric(210,10)::positiven;
+ positiven 
+-----------
+ 34338492
+(1 row)
+
+SELECT '-34338492.215397047'::numeric(210,10)::positiven;
+ERROR:  invalid value for positiven: -34338492
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT B'1101100000000000'::BIT(16)::positiven;
+ positiven 
+-----------
+ 55296
+(1 row)
+
+SELECT true::positiven;
+ positiven 
+-----------
+ 1
+(1 row)
+
+SELECT false::positiven;
+ERROR:  invalid value for positiven: 0
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '2147483647'::text::positiven;
+ positiven  
+------------
+ 2147483647
+(1 row)
+
+SELECT '-2147483647'::text::positiven;
+ERROR:  invalid value for positiven: -2147483647
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '7'::"char"::positiven;
+ positiven 
+-----------
+ 55
+(1 row)
+
+SELECT '1234'::varchar(4)::positiven;
+ positiven 
+-----------
+ 1234
+(1 row)
+
+SELECT '-234'::varchar(4)::positiven;
+ERROR:  invalid value for positiven: -234
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '1234'::bpchar(4)::positiven;
+ positiven 
+-----------
+ 1234
+(1 row)
+
+SELECT '-234'::bpchar(4)::positiven;
+ERROR:  invalid value for positiven: -234
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '1234'::nvarchar2(4)::positiven;
+ positiven 
+-----------
+ 1234
+(1 row)
+
+SELECT '-234'::nvarchar2(4)::positiven;
+ERROR:  invalid value for positiven: -234
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+DROP TABLE POSITIVEN_TBL;
+--
+-- SIGNTYPE
+--
+CREATE TABLE SIGNTYPE_TBL(f1 signtype);
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('   1  ');
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('-1     ');
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('0 ');
+INSERT INTO SIGNTYPE_TBL(f1) VALUES (NULL);
+-- largest and smallest values
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('1');
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('-1');
+-- bad input values -- should give errors
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('3');
+ERROR:  invalid value for signtype: 3
+LINE 1: INSERT INTO SIGNTYPE_TBL(f1) VALUES ('3');
+                                             ^
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: f1
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('34.5');
+ERROR:  invalid input syntax for integer: "34.5"
+LINE 1: INSERT INTO SIGNTYPE_TBL(f1) VALUES ('34.5');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('1000000000000');
+ERROR:  value "1000000000000" is out of range for type integer
+LINE 1: INSERT INTO SIGNTYPE_TBL(f1) VALUES ('1000000000000');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('asdf');
+ERROR:  invalid input syntax for integer: "asdf"
+LINE 1: INSERT INTO SIGNTYPE_TBL(f1) VALUES ('asdf');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('     ');
+ERROR:  invalid input syntax for integer: "     "
+LINE 1: INSERT INTO SIGNTYPE_TBL(f1) VALUES ('     ');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('   asdf   ');
+ERROR:  invalid input syntax for integer: "   asdf   "
+LINE 1: INSERT INTO SIGNTYPE_TBL(f1) VALUES ('   asdf   ');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('- 1234');
+ERROR:  invalid input syntax for integer: "- 1234"
+LINE 1: INSERT INTO SIGNTYPE_TBL(f1) VALUES ('- 1234');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('-1234');
+ERROR:  invalid value for signtype: -1234
+LINE 1: INSERT INTO SIGNTYPE_TBL(f1) VALUES ('-1234');
+                                             ^
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: f1
+INSERT INTO SIGNTYPE_TBL(f1) VALUES ('123       5');
+ERROR:  invalid input syntax for integer: "123       5"
+LINE 1: INSERT INTO SIGNTYPE_TBL(f1) VALUES ('123       5');
+                                             ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIGNTYPE_TBL (SELECT f1+1 FROM SIGNTYPE_TBL);
+ERROR:  invalid value for signtype: 2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: f1
+INSERT INTO SIGNTYPE_TBL (SELECT f1-1 FROM SIGNTYPE_TBL);
+ERROR:  invalid value for signtype: -2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: f1
+CREATE INDEX idx ON SIGNTYPE_TBL(f1);
+ERROR:  not supported to create index on a column of type signtype.
+SELECT '' AS five, * FROM SIGNTYPE_TBL ORDER BY f1;
+ five | f1 
+------+----
+      | -1
+      | -1
+      | 0
+      | 1
+      | 1
+      | 
+(6 rows)
+
+SELECT '' AS four, i.* FROM SIGNTYPE_TBL i WHERE i.f1 <> signtype '1' ORDER BY f1;
+ four | f1 
+------+----
+      | -1
+      | -1
+      | 0
+(3 rows)
+
+SELECT '' AS one, i.* FROM SIGNTYPE_TBL i WHERE i.f1 = signtype '1';
+ one | f1 
+-----+----
+     | 1
+     | 1
+(2 rows)
+
+SELECT '' AS two, i.* FROM SIGNTYPE_TBL i WHERE i.f1 < signtype '1' ORDER BY f1;
+ two | f1 
+-----+----
+     | -1
+     | -1
+     | 0
+(3 rows)
+
+SELECT '' AS three, i.* FROM SIGNTYPE_TBL i WHERE i.f1 <= signtype '1' ORDER BY f1;
+ three | f1 
+-------+----
+       | -1
+       | -1
+       | 0
+       | 1
+       | 1
+(5 rows)
+
+SELECT '' AS two, i.* FROM SIGNTYPE_TBL i WHERE i.f1 > signtype '1' ORDER BY f1;
+ two | f1 
+-----+----
+(0 rows)
+
+SELECT '' AS three, i.* FROM SIGNTYPE_TBL i WHERE i.f1 >= signtype '1' ORDER BY f1;
+ three | f1 
+-------+----
+       | 1
+       | 1
+(2 rows)
+
+-- positive odds
+SELECT '' AS one, i.* FROM SIGNTYPE_TBL i WHERE (i.f1 % int4 '2') = signtype '1' ORDER BY f1;
+ one | f1 
+-----+----
+     | 1
+     | 1
+(2 rows)
+
+-- any evens
+SELECT '' AS three, i.* FROM SIGNTYPE_TBL i WHERE (i.f1 % int4 '2') = signtype '0' ORDER BY f1;
+ three | f1 
+-------+----
+       | 0
+(1 row)
+
+SELECT '' AS five, i.f1, i.f1 * int4 '2' AS x FROM SIGNTYPE_TBL i
+WHERE abs(f1) < 1073741824 ORDER BY f1;
+ five | f1 | x  
+------+----+----
+      | -1 | -2
+      | -1 | -2
+      | 0  |  0
+      | 1  |  2
+      | 1  |  2
+(5 rows)
+
+SELECT '' AS five, i.f1, i.f1 + int4 '2' AS x FROM SIGNTYPE_TBL i
+WHERE f1 < 2147483646 ORDER BY f1;
+ five | f1 | x 
+------+----+---
+      | -1 | 1
+      | -1 | 1
+      | 0  | 2
+      | 1  | 3
+      | 1  | 3
+(5 rows)
+
+SELECT '' AS five, i.f1, i.f1 - int4 '2' AS x FROM SIGNTYPE_TBL i
+WHERE f1 > -2147483647 ORDER BY f1;
+ five | f1 | x  
+------+----+----
+      | -1 | -3
+      | -1 | -3
+      | 0  | -2
+      | 1  | -1
+      | 1  | -1
+(5 rows)
+
+SELECT '' AS five, i.f1, i.f1 / int4 '2' AS x FROM SIGNTYPE_TBL i ORDER BY f1;
+ five | f1 |  x  
+------+----+-----
+      | -1 | -.5
+      | -1 | -.5
+      | 0  |   0
+      | 1  |  .5
+      | 1  |  .5
+      |    |    
+(6 rows)
+
+-- divide zero
+SELECT (0)::signtype / (-2)::int2;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT (0)::signtype / (-2)::int8;
+ ?column? 
+----------
+        0
+(1 row)
+
+-- cast to signtype
+SELECT NULL::tinyint::signtype;
+ signtype 
+----------
+ 
+(1 row)
+
+SELECT '1'::tinyint::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT '2'::tinyint::signtype;
+ERROR:  invalid value for signtype: 2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT '-1'::int2::signtype;
+ signtype 
+----------
+ -1
+(1 row)
+
+SELECT '-2'::int2::signtype;
+ERROR:  invalid value for signtype: -2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT '0'::integer::signtype;
+ signtype 
+----------
+ 0
+(1 row)
+
+SELECT '2'::integer::signtype;
+ERROR:  invalid value for signtype: 2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT '1'::int8::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT '-11'::int8::signtype;
+ERROR:  invalid value for signtype: -11
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT '-1'::int16::signtype;
+ signtype 
+----------
+ -1
+(1 row)
+
+SELECT '-123'::int16::signtype;
+ERROR:  invalid value for signtype: -123
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT '0.4'::float4::signtype;
+ signtype 
+----------
+ 0
+(1 row)
+
+SELECT '-1.6'::float4::signtype;
+ERROR:  invalid value for signtype: -2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT '1.4'::float8::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT '1.6'::float8::signtype;
+ERROR:  invalid value for signtype: 2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT '0.7'::numeric(210,10)::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT '-1.7'::numeric(210,10)::signtype;
+ERROR:  invalid value for signtype: -2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT B'01'::BIT(2)::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT true::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT false::signtype;
+ signtype 
+----------
+ 0
+(1 row)
+
+SELECT '-1'::text::signtype;
+ signtype 
+----------
+ -1
+(1 row)
+
+SELECT '-2'::text::signtype;
+ERROR:  invalid value for signtype: -2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT '1'::varchar(4)::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT '-2'::varchar(4)::signtype;
+ERROR:  invalid value for signtype: -2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT '1'::bpchar(4)::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT '-2'::bpchar(4)::signtype;
+ERROR:  invalid value for signtype: -2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT '1'::nvarchar2(4)::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT '-2'::nvarchar2(4)::signtype;
+ERROR:  invalid value for signtype: -2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+DROP TABLE SIGNTYPE_TBL;
+CREATE TABLE SIMPLE_INTEGER_TBL(f1 simple_integer);
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('   0  ');
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('123456     ');
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('    -123456');
+-- largest and smallest values
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('2147483647');
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('-2147483648');
+-- bad input values -- should give errors
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('34.5');
+ERROR:  invalid input syntax for integer: "34.5"
+LINE 1: INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('34.5');
+                                                   ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('2147483648');
+ERROR:  value "2147483648" is out of range for type integer
+LINE 1: INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('2147483648');
+                                                   ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('-2147483649');
+ERROR:  value "-2147483649" is out of range for type integer
+LINE 1: INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('-2147483649');
+                                                   ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('     ');
+ERROR:  invalid input syntax for integer: "     "
+LINE 1: INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('     ');
+                                                   ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('   asdf   ');
+ERROR:  invalid input syntax for integer: "   asdf   "
+LINE 1: INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('   asdf   ');
+                                                   ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('- 1234');
+ERROR:  invalid input syntax for integer: "- 1234"
+LINE 1: INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('- 1234');
+                                                   ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('123       5');
+ERROR:  invalid input syntax for integer: "123       5"
+LINE 1: INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES ('123       5');
+                                                   ^
+CONTEXT:  referenced column: f1
+INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES (NULL);
+ERROR:  invalid value for simple_integer: NULL
+LINE 1: INSERT INTO SIMPLE_INTEGER_TBL(f1) VALUES (NULL);
+                                                   ^
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: f1
+CREATE INDEX idx ON SIMPLE_INTEGER_TBL(f1);
+ERROR:  not supported to create index on a column of type simple_integer.
+SELECT '' AS five, * FROM SIMPLE_INTEGER_TBL ORDER BY f1;
+ five |     f1      
+------+-------------
+      | -2147483648
+      | -123456
+      | 0
+      | 123456
+      | 2147483647
+(5 rows)
+
+SELECT '' AS four, i.* FROM SIMPLE_INTEGER_TBL i WHERE i.f1 <> simple_integer '0' ORDER BY f1;
+ four |     f1      
+------+-------------
+      | -2147483648
+      | -123456
+      | 123456
+      | 2147483647
+(4 rows)
+
+SELECT '' AS one, i.* FROM SIMPLE_INTEGER_TBL i WHERE i.f1 = simple_integer '0';
+ one | f1 
+-----+----
+     | 0
+(1 row)
+
+SELECT '' AS two, i.* FROM SIMPLE_INTEGER_TBL i WHERE i.f1 < simple_integer '0' ORDER BY f1;
+ two |     f1      
+-----+-------------
+     | -2147483648
+     | -123456
+(2 rows)
+
+SELECT '' AS three, i.* FROM SIMPLE_INTEGER_TBL i WHERE i.f1 <= simple_integer '0' ORDER BY f1;
+ three |     f1      
+-------+-------------
+       | -2147483648
+       | -123456
+       | 0
+(3 rows)
+
+SELECT '' AS two, i.* FROM SIMPLE_INTEGER_TBL i WHERE i.f1 > simple_integer '0' ORDER BY f1;
+ two |     f1     
+-----+------------
+     | 123456
+     | 2147483647
+(2 rows)
+
+SELECT '' AS three, i.* FROM SIMPLE_INTEGER_TBL i WHERE i.f1 >= simple_integer '0' ORDER BY f1;
+ three |     f1     
+-------+------------
+       | 0
+       | 123456
+       | 2147483647
+(3 rows)
+
+-- positive odds
+SELECT '' AS one, i.* FROM SIMPLE_INTEGER_TBL i WHERE (i.f1 % simple_integer '2') = int4 '1' ORDER BY f1;
+ one |     f1     
+-----+------------
+     | 2147483647
+(1 row)
+
+-- any evens
+SELECT '' AS three, i.* FROM SIMPLE_INTEGER_TBL i WHERE (i.f1 % simple_integer '2') = int4 '0' ORDER BY f1;
+ three |     f1      
+-------+-------------
+       | -2147483648
+       | -123456
+       | 0
+       | 123456
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 * simple_integer '2' AS x FROM SIMPLE_INTEGER_TBL i
+WHERE abs(f1) < 1073741824 ORDER BY f1;
+ five |   f1    |    x    
+------+---------+---------
+      | -123456 | -246912
+      | 0       | 0
+      | 123456  | 246912
+(3 rows)
+
+SELECT '' AS five, i.f1, i.f1 + simple_integer '2' AS x FROM SIMPLE_INTEGER_TBL i
+WHERE f1 < 2147483646 ORDER BY f1;
+ five |     f1      |      x      
+------+-------------+-------------
+      | -2147483648 | -2147483646
+      | -123456     | -123454
+      | 0           | 2
+      | 123456      | 123458
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 - simple_integer '2' AS x FROM SIMPLE_INTEGER_TBL i
+WHERE f1 > -2147483647 ORDER BY f1;
+ five |     f1     |     x      
+------+------------+------------
+      | -123456    | -123458
+      | 0          | -2
+      | 123456     | 123454
+      | 2147483647 | 2147483645
+(4 rows)
+
+SELECT '' AS five, i.f1, i.f1 / simple_integer '2' AS x FROM SIMPLE_INTEGER_TBL i ORDER BY f1;
+ five |     f1      |      x       
+------+-------------+--------------
+      | -2147483648 |  -1073741824
+      | -123456     |       -61728
+      | 0           |            0
+      | 123456      |        61728
+      | 2147483647  | 1073741823.5
+(5 rows)
+
+SELECT (-2147483647)::simple_integer * (-2)::simple_integer;
+ ?column? 
+----------
+ -2
+(1 row)
+
+SELECT (-2147483648)::simple_integer / (-1)::simple_integer;
+  ?column?  
+------------
+ 2147483648
+(1 row)
+
+SELECT (-2147483648)::simple_integer % (-1)::simple_integer;
+ ?column? 
+----------
+        0
+(1 row)
+
+DROP TABLE SIMPLE_INTEGER_TBL;
+-- cast to simple_integer
+SELECT '11'::tinyint::simple_integer;
+ simple_integer 
+----------------
+ 11
+(1 row)
+
+SELECT NULL::tinyint::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '1122'::int2::simple_integer;
+ simple_integer 
+----------------
+ 1122
+(1 row)
+
+SELECT NULL::int2::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '0'::integer::simple_integer;
+ simple_integer 
+----------------
+ 0
+(1 row)
+
+SELECT NULL::integer::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '11100'::int8::simple_integer;
+ simple_integer 
+----------------
+ 11100
+(1 row)
+
+SELECT NULL::int8::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '123'::int16::simple_integer;
+ simple_integer 
+----------------
+ 123
+(1 row)
+
+SELECT NULL::int16::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '32767.4'::float4::simple_integer;
+ simple_integer 
+----------------
+ 32767
+(1 row)
+
+SELECT NULL::float4::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '2147483647.4'::float8::simple_integer;
+ simple_integer 
+----------------
+ 2147483647
+(1 row)
+
+SELECT NULL::float8::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '34338492.215397047'::numeric(210,10)::simple_integer;
+ simple_integer 
+----------------
+ 34338492
+(1 row)
+
+SELECT NULL::numeric(210,10)::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT B'1101100000000000'::BIT(16)::simple_integer;
+ simple_integer 
+----------------
+ 55296
+(1 row)
+
+SELECT NULL::BIT(16)::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT true::simple_integer;
+ simple_integer 
+----------------
+ 1
+(1 row)
+
+SELECT false::simple_integer;
+ simple_integer 
+----------------
+ 0
+(1 row)
+
+SELECT '2147483647'::text::simple_integer;
+ simple_integer 
+----------------
+ 2147483647
+(1 row)
+
+SELECT NULL::text::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '7'::"char"::simple_integer;
+ simple_integer 
+----------------
+ 55
+(1 row)
+
+SELECT NULL::"char"::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '1234'::varchar(4)::simple_integer;
+ simple_integer 
+----------------
+ 1234
+(1 row)
+
+SELECT NULL::varchar(4)::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '1234'::bpchar(4)::simple_integer;
+ simple_integer 
+----------------
+ 1234
+(1 row)
+
+SELECT NULL::bpchar(4)::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT '1234'::nvarchar2(4)::simple_integer;
+ simple_integer 
+----------------
+ 1234
+(1 row)
+
+SELECT NULL::nvarchar2(4)::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+DROP TABLE simple_integer_TBL;
+ERROR:  table "simple_integer_tbl" does not exist
+SELECT '-1'::signtype::natural;
+ERROR:  invalid value for natural: -1
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+select null::positiven;
+ERROR:  invalid value for positiven: NULL
+LINE 1: select null::positiven;
+               ^
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT 94::natural::naturaln;
+ naturaln 
+----------
+ 94
+(1 row)
+
+SELECT NULL::natural::naturaln;
+ERROR:  invalid value for naturaln: NULL
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT 46::natural::positive;
+ positive 
+----------
+ 46
+(1 row)
+
+SELECT 0::natural::positive;
+ERROR:  invalid value for positive: 0
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT 58::natural::positiven;
+ positiven 
+-----------
+ 58
+(1 row)
+
+SELECT 0::natural::positiven;
+ERROR:  invalid value for positiven: 0
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT NULL::natural::positiven;
+ERROR:  invalid value for positiven: NULL
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT 1::natural::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT '-2'::natural::signtype;
+ERROR:  invalid value for natural: -2
+LINE 1: SELECT '-2'::natural::signtype;
+               ^
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: signtype
+SELECT 55::natural::simple_integer;
+ simple_integer 
+----------------
+ 55
+(1 row)
+
+SELECT NULL::natural::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT 2::naturaln::natural;
+ natural 
+---------
+ 2
+(1 row)
+
+SELECT 2::positive::natural;
+ natural 
+---------
+ 2
+(1 row)
+
+SELECT 3::positiven::natural;
+ natural 
+---------
+ 3
+(1 row)
+
+SELECT 0::signtype::natural;
+ natural 
+---------
+ 0
+(1 row)
+
+SELECT '-1'::signtype::natural;
+ERROR:  invalid value for natural: -1
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT 1::simple_integer::natural;
+ natural 
+---------
+ 1
+(1 row)
+
+SELECT '-2'::simple_integer::natural;
+ERROR:  invalid value for natural: -2
+DETAIL:  value of natural must be greater or equal to 0
+CONTEXT:  referenced column: natural
+SELECT 10::naturaln::positive;
+ positive 
+----------
+ 10
+(1 row)
+
+SELECT 0::naturaln::positive;
+ERROR:  invalid value for positive: 0
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT 10::naturaln::positiven;
+ positiven 
+-----------
+ 10
+(1 row)
+
+SELECT 0::naturaln::positiven;
+ERROR:  invalid value for positiven: 0
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT 1::naturaln::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT 2::naturaln::signtype;
+ERROR:  invalid value for signtype: 2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT 5::naturaln::simple_integer;
+ simple_integer 
+----------------
+ 5
+(1 row)
+
+SELECT 1::positive::naturaln;
+ naturaln 
+----------
+ 1
+(1 row)
+
+SELECT NULL::positive::naturaln;
+ERROR:  invalid value for naturaln: NULL
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT 1::positiven::naturaln;
+ naturaln 
+----------
+ 1
+(1 row)
+
+SELECT 1::signtype::naturaln;
+ naturaln 
+----------
+ 1
+(1 row)
+
+SELECT '-1'::signtype::naturaln;
+ERROR:  invalid value for naturaln: -1
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT NULL::signtype::naturaln;
+ERROR:  invalid value for naturaln: NULL
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT 1::simple_integer::naturaln;
+ naturaln 
+----------
+ 1
+(1 row)
+
+SELECT '-3'::simple_integer::naturaln;
+ERROR:  invalid value for naturaln: -3
+DETAIL:  value of naturaln must be greater or equal to 0, and can not be NULL
+CONTEXT:  referenced column: naturaln
+SELECT 6::positiven::positive;
+ positive 
+----------
+ 6
+(1 row)
+
+SELECT NULL::signtype::positive;
+ positive 
+----------
+ 
+(1 row)
+
+SELECT 0::signtype::positive;
+ERROR:  invalid value for positive: 0
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT 7::simple_integer::positive;
+ positive 
+----------
+ 7
+(1 row)
+
+SELECT '-7'::simple_integer::positive;
+ERROR:  invalid value for positive: -7
+DETAIL:  value of positive must be greater than 0
+CONTEXT:  referenced column: positive
+SELECT 65::positive::positiven;
+ positiven 
+-----------
+ 65
+(1 row)
+
+SELECT NULL::positive::positiven;
+ERROR:  invalid value for positiven: NULL
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT 1::positive::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT 10::positive::signtype;
+ERROR:  invalid value for signtype: 10
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT 25::positive::simple_integer;
+ simple_integer 
+----------------
+ 25
+(1 row)
+
+SELECT NULL::positive::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT 1::positiven::signtype;
+ signtype 
+----------
+ 1
+(1 row)
+
+SELECT 6::positiven::signtype;
+ERROR:  invalid value for signtype: 6
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+SELECT 81::positiven::simple_integer;
+ simple_integer 
+----------------
+ 81
+(1 row)
+
+SELECT 1::signtype::positiven;
+ positiven 
+-----------
+ 1
+(1 row)
+
+SELECT NULL::signtype::positiven;
+ERROR:  invalid value for positiven: NULL
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT 0::signtype::positiven;
+ERROR:  invalid value for positiven: 0
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT 5::simple_integer::positiven;
+ positiven 
+-----------
+ 5
+(1 row)
+
+SELECT '-8'::simple_integer::positiven;
+ERROR:  invalid value for positiven: -8
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: positiven
+SELECT '-1'::signtype::simple_integer;
+ simple_integer 
+----------------
+ -1
+(1 row)
+
+SELECT NULL::signtype::simple_integer;
+ERROR:  invalid value for simple_integer: NULL
+DETAIL:  value of simple_integer can not be NULL
+CONTEXT:  referenced column: simple_integer
+SELECT 0::simple_integer::signtype;
+ signtype 
+----------
+ 0
+(1 row)
+
+SELECT 2::simple_integer::signtype;
+ERROR:  invalid value for signtype: 2
+DETAIL:  value of signtype can only be 1, -1 or 0
+CONTEXT:  referenced column: signtype
+DECLARE
+    a natural := 5;
+    b naturaln := 4;
+    c positive := 3;
+    d positiven := 2;
+    e signtype := 1;
+    f simple_integer := 0;
+    g integer := 7;
+BEGIN
+    b := d + c - a;
+    c := (b + a + g) / d ;
+    d := e * g;
+    e := sign(a % f);
+    f := g - c * d;
+    g := a;
+    a := b + NULL;
+    raise info 'a: %, b: %, c: %, d: %, e: %, f: %, g: %',
+    a, b, c, d, e, f, g;
+END;
+/
+INFO:  a: <NULL>, b: 0, c: 6, d: 7, e: 1, f: -35, g: 5
+DECLARE
+    TYPE parr IS varray(5) of natural;
+    TYPE tbl IS table of signtype;
+    arr parr;
+    t tbl;
+BEGIN
+    arr(1) := 10;
+    t(1) := 1;
+    raise info 't(1): %, arr(1): %', t(1), arr(1);
+END;
+/
+INFO:  t(1): 1, arr(1): 10
+CREATE OR REPLACE FUNCTION func1(a positiven) RETURNS positiven AS 
+$$
+BEGIN
+    a := a + 1;
+    RETURN a;
+END
+$$
+LANGUAGE 'plpgsql';
+SELECT func1(3);
+ func1 
+-------
+ 4
+(1 row)
+
+SELECT func1(0);
+ERROR:  invalid value for positiven: 0
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: func1
+SELECT func1(NULL);
+ERROR:  invalid value for positiven: NULL
+LINE 1: SELECT func1(NULL);
+                     ^
+DETAIL:  value of positiven must be greater than 0, and can not be NULL
+CONTEXT:  referenced column: func1
+DROP FUNCTION func1;
+\c regression
+DROP DATABASE test_predefined_pltype;

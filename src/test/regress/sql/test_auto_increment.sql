@@ -1698,6 +1698,10 @@ INSERT INTO test_autoinc_upsert (val ) VALUES ( 5 );
 SELECT * FROM test_autoinc_upsert ORDER BY 2; -- 1 5 6 7 8
 drop table test_autoinc_upsert;
 
+create table t_auto_nextval_test(a int, b int auto_increment primary key);
+select nextval('t_auto_nextval_test_b_seq'); -- error
+drop table t_auto_nextval_test;
+
 \c regression
 clean connection to all force for database autoinc_b_db;
 drop database if exists autoinc_b_db;

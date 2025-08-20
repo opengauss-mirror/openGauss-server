@@ -112,7 +112,6 @@ static int bpcharfastcmp_c(Datum x, Datum y, SortSupport ssup);
 static int varstrfastcmp_builtin(Datum x, Datum y, SortSupport ssup);
 static int bpvarstrfastcmp_builtin(Datum x, Datum y, SortSupport ssup);
 static int varstrfastcmp_locale(Datum x, Datum y, SortSupport ssup);
-static int varstrcmp_abbrev(Datum x, Datum y, SortSupport ssup);
 static Datum varstr_abbrev_convert(Datum original, SortSupport ssup);
 static bool varstr_abbrev_abort(int memtupcount, SortSupport ssup);
 static int text_position(text* t1, text* t2);
@@ -2424,7 +2423,7 @@ void varstr_sortsupport(SortSupport ssup, Oid collid, bool bpchar)
             sss->input_count = 0;
             sss->estimating = true;
             ssup->abbrev_full_comparator = ssup->comparator;
-            ssup->comparator = varstrcmp_abbrev;
+            ssup->comparator = ssup_datum_unsigned_cmp;
             ssup->abbrev_converter = varstr_abbrev_convert;
             ssup->abbrev_abort = varstr_abbrev_abort;
         }
@@ -2670,26 +2669,6 @@ done:
 }
 
 /*
- * Abbreviated key comparison func
- */
-static int varstrcmp_abbrev(Datum x, Datum y, SortSupport ssup)
-{
-    /*
-     * When 0 is returned, the core system will call varstrfastcmp_c()
-     * (bpcharfastcmp_c() in BpChar case) or varstrfastcmp_locale().  Even a
-     * strcmp() on two non-truncated strxfrm() blobs cannot indicate *equality*
-     * authoritatively, for the same reason that there is a strcoll()
-     * tie-breaker call to strcmp() in varstr_cmp().
-     */
-    if (x > y)
-        return 1;
-    else if (x == y)
-        return 0;
-    else
-        return -1;
-}
-
-/*
  * Conversion routine for sortsupport.  Converts original to abbreviated key
  * representation.  Our encoding strategy is simple -- pack the first 8 bytes
  * of a strxfrm() blob into a Datum (on little-endian machines, the 8 bytes are
@@ -2731,7 +2710,7 @@ static Datum varstr_abbrev_convert(Datum original, SortSupport ssup)
      * strings may contain NUL bytes.  Besides, this should be faster, too.
      *
      * More generally, it's okay that bytea callers can have NUL bytes in
-     * strings because varstrcmp_abbrev() need not make a distinction between
+     * strings because abbreviated cmp need not make a distinction between
      * terminating NUL bytes, and NUL bytes representing actual NULs in the
      * authoritative representation.  Hopefully a comparison at or past one
      * abbreviated key's terminating NUL byte will resolve the comparison
@@ -2849,7 +2828,7 @@ done:
     /*
      * Byteswap on little-endian machines.
      *
-     * This is needed so that varstrcmp_abbrev() (an unsigned integer 3-way
+     * This is needed so that abbreviated cmp (an unsigned integer 3-way
      * comparator) works correctly on all platforms.  If we didn't do this,
      * the comparator would have to call memcmp() with a pair of pointers to
      * the first byte of each abbreviated key, which is slower.
@@ -7150,8 +7129,10 @@ int text_instr_4args(text* textStr, text* textStrToSearch, int32 beginIndex, int
 
     len = VARSIZE_ANY_EXHDR(textStr);
     searchLen = VARSIZE_ANY_EXHDR(textStrToSearch);
-
     if ((searchLen > len) || (GET_POSITIVE(beginIndex) > len)) {
+        return 0;
+    }
+    if ((searchLen != 0) && (occurTimes > (len / searchLen))) {
         return 0;
     }
 

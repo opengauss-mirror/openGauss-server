@@ -105,8 +105,8 @@ static bool findAttrByName(const char* attributeName, List* tableElts, int maxle
 static const char* CommonUpdateCheck(Query* viewquery);
 static bool SetNewRteIfExist(SetNewRteIfExistContext* context, bool deleteExistingTarget);
 static int GetNewResultRelation(Node* node, List* rtable);
-extern int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rtables, int resultRelation);
-extern List* RewriteQuery(Query* parsetree, List* rewrite_events);
+static int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rtables, int resultRelation);
+static List* RewriteQuery(Query* parsetree, List* rewrite_events);
 
 #ifdef PGXC
 typedef struct pull_qual_vars_context {
@@ -767,6 +767,7 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
         TargetEntry* new_tle = new_tles[attrno - 1];
         bool applyDefault = false;
         bool generateCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
+        int rtindex = new_tle == NULL ? 0 : new_tle->rtindex;
 
         att_tup = &target_relation->rd_att->attrs[attrno - 1];
 
@@ -852,8 +853,10 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
             new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
         }
 
-        if (new_tle != NULL)
+        if (new_tle != NULL) {
+            new_tle->rtindex = rtindex;
             new_tlist = lappend(new_tlist, new_tle);
+        }
     }
 
     pfree_ext(new_tles);
@@ -889,8 +892,13 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
         Assert(((TargetEntry*)lfirst(temp))->rtindex == (Index)result_relation);
 
         RangeTblEntry* rt_entry = rt_fetch(result_relation, rtable);
-        Relation target_relation = heap_open(rt_entry->relid, NoLock);
-        numattrs = RelationGetNumberOfAttributes(target_relation);
+        Relation target_relation = InvalidRelation;
+        if (rt_entry->rtekind == RTE_RELATION) {
+            target_relation = heap_open(rt_entry->relid, NoLock);
+            numattrs = RelationGetNumberOfAttributes(target_relation);
+        } else if (rt_entry->rtekind == RTE_SUBQUERY) {
+            numattrs = list_length(rt_entry->subquery->targetList);
+        }
 
         new_tles = (TargetEntry**)palloc0(numattrs * sizeof(TargetEntry*));
         
@@ -911,15 +919,15 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
                         (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("bogus resno %d in targetlist",
                                                                                attrno)));
                 }
-                att_tup = &target_relation->rd_att->attrs[attrno - 1];
 
                 /* We can (and must) ignore deleted attributes */
-                if (att_tup->attisdropped) {
+                if (get_rte_attribute_is_dropped(rt_entry, attrno)) {
                     temp = lnext(temp);
                     continue;
                 }
                 /* Merge with any prior assignment to same attribute */
-                new_tles[attrno - 1] = process_matched_tle(old_tle, new_tles[attrno - 1], NameStr(att_tup->attname));
+                new_tles[attrno - 1] = process_matched_tle(
+                    old_tle, new_tles[attrno - 1], get_rte_attribute_name(rt_entry, attrno));
             } else {
                 /*
                 * Copy all resjunk tlist entries to junk_tlist, and assign them
@@ -943,19 +951,33 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
             * We need to insert a default expression when the
             * tlist entry is a DEFAULT placeholder node.
             */
-            bool applyDefault = new_tle != NULL && new_tle->expr != NULL && IsA(new_tle->expr, SetToDefault);
-            bool generateCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
+            bool applyDefault =
+                RelationIsValid(target_relation) && new_tle != NULL &&
+                new_tle->expr != NULL && IsA(new_tle->expr, SetToDefault);
+            bool generateCol = RelationIsValid(target_relation) &&
+                 ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
 
-            att_tup = &target_relation->rd_att->attrs[attrno - 1];
+            char* attname = get_rte_attribute_name(rt_entry, attrno);
+            Oid attrtype;
+            int32 attrtypmod;
+            int16 attrlen;
+            Oid attrcollation;
+            bool attrbyval;
+            Type typ;
+            get_rte_attribute_type(rt_entry, attrno, &attrtype, &attrtypmod, &attrcollation);
+            typ = typeidType(attrtype);
+            attrbyval = typeByVal(typ);
+            attrlen = typeLen(typ);
+            ReleaseSysCache(typ);
 
             /* We can (and must) ignore deleted attributes */
-            if (att_tup->attisdropped)
+            if (get_rte_attribute_is_dropped(rt_entry, attrno))
                 continue;
 
             if (generateCol && !applyDefault && new_tle) {
                     ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("column \"%s\" can only be updated to DEFAULT", NameStr(att_tup->attname)),
-                        errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
+                        errmsg("column \"%s\" can only be updated to DEFAULT", attname),
+                        errdetail("Column \"%s\" is a generated column.", attname)));
             }
 
             if (generateCol) {
@@ -966,20 +988,20 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
             } else if (applyDefault) {
                 Node* new_expr = build_column_default(target_relation, attrno, true);
                 if (new_expr == NULL && target_relation->rd_rel->relkind != RELKIND_VIEW) {
-                    new_expr = (Node*)makeConst(att_tup->atttypid,
+                    new_expr = (Node*)makeConst(attrtype,
                         -1,
-                        att_tup->attcollation,
-                        att_tup->attlen,
+                        attrcollation,
+                        attrlen,
                         (Datum)0,
                         true, /* isnull */
-                        att_tup->attbyval);
+                        attrbyval);
                     /* this is to catch a NOT NULL domain constraint */
                     new_expr = coerce_to_domain(
-                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST,
+                        new_expr, InvalidOid, -1, attrtype, COERCE_IMPLICIT_CAST,
                         NULL, NULL, -1, false, false);
                 }
                 if (new_expr != NULL) {
-                    new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
+                    new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(attname), false);
                 }
                 new_tle->rtindex = result_relation;
             }
@@ -988,14 +1010,15 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
             * For an UPDATE on a view, provide a dummy entry whenever there is no
             * explicit assignment.
             */
-            if (new_tle == NULL && ((target_relation->rd_rel->relkind == RELKIND_VIEW
+            if (new_tle == NULL && RelationIsValid(target_relation)
+                && ((target_relation->rd_rel->relkind == RELKIND_VIEW
                 && view_has_instead_trigger(target_relation, CMD_UPDATE))
                 || target_relation->rd_rel->relkind == RELKIND_CONTQUERY)) {
                 Node* new_expr = NULL;
 
                 new_expr = (Node*)makeVar(
-                    result_relation, attrno, att_tup->atttypid, att_tup->atttypmod, att_tup->attcollation, 0);
-                new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
+                    result_relation, attrno, attrtype, attrtypmod, attrcollation, 0);
+                new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(attname), false);
                 new_tle->rtindex = result_relation;
             }
 
@@ -1003,7 +1026,9 @@ static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* r
                 new_tlist = lappend(new_tlist, new_tle);
         }
     
-        heap_close(target_relation, NoLock);
+        if (RelationIsValid(target_relation)) {
+            heap_close(target_relation, NoLock);
+        }
         pfree_ext(new_tles);
     }
 
@@ -1032,6 +1057,9 @@ static void multiUpdateSetExtraUpdatedCols(Query* parsetree)
 
     foreach (lc, parsetree->resultRelations) {
         rte = rt_fetch(lfirst_int(lc), parsetree->rtable);
+        if (rte->rtekind == RTE_SUBQUERY) {
+            continue;
+        }
         rel = heap_open(rte->relid, NoLock);
         setExtraUpdatedCols(rte, rel->rd_att);
         heap_close(rel, NoLock);
@@ -1790,7 +1818,11 @@ static void rewriteTargetListMutilUD(Query* parsetree, List* rtable, List* resul
     foreach (lc, resultRelations) {
         result_relation = lfirst_int(lc);
         rt_entry = rt_fetch(result_relation, rtable);
-        AssertEreport(rt_entry->rtekind == RTE_RELATION, MOD_OPT, "");
+        AssertEreport(
+            rt_entry->rtekind == RTE_RELATION || rt_entry->rtekind == RTE_SUBQUERY, MOD_OPT, "");
+        if (rt_entry->rtekind == RTE_SUBQUERY) {
+            continue;
+        }
         rt_entry_relation = heap_open(rt_entry->relid, NoLock);
         rewriteTargetListUD(parsetree, rt_entry, rt_entry_relation, result_relation);
         heap_close(rt_entry_relation, NoLock);
@@ -2894,6 +2926,7 @@ struct CheckQueryAutoUpdatableContext {
     List* rtable;
     bool checkCols;
     bool found;
+    bool hasValidRTE;
 };
 
 static bool check_view_query_auto_updatable_walker(Node* node, CheckQueryAutoUpdatableContext* context)
@@ -2913,6 +2946,7 @@ static bool check_view_query_auto_updatable_walker(Node* node, CheckQueryAutoUpd
              base_rte->relkind != RELKIND_FOREIGN_TABLE && base_rte->relkind != RELKIND_VIEW))) {
             return true;
         }
+        context->hasValidRTE = true;
         if (checkCols) {
             if (view_col_is_auto_updatable(rtr, tle) == NULL) {
                 context->found = true;
@@ -3084,15 +3118,12 @@ const char* view_query_is_auto_updatable(Query *viewquery, bool checkCols, bool 
             return gettext_noop(
                 "Views that do not select from a single table or view are not automatically updatable.");
 
-        RangeTblRef* rtr = NULL;
-        RangeTblEntry* base_rte = NULL;
-
-        rtr = (RangeTblRef*)linitial(viewquery->jointree->fromlist);
+        RangeTblRef* rtr = (RangeTblRef*)linitial(viewquery->jointree->fromlist);
         if (!IsA(rtr, RangeTblRef))
             return gettext_noop(
                 "Views that do not select from a single table or view are not automatically updatable.");
 
-        base_rte = rt_fetch(rtr->rtindex, viewquery->rtable);
+        RangeTblEntry* base_rte = rt_fetch(rtr->rtindex, viewquery->rtable);
         if (base_rte->rtekind != RTE_RELATION || (base_rte->relkind != RELKIND_RELATION &&
             base_rte->relkind != RELKIND_FOREIGN_TABLE && base_rte->relkind != RELKIND_VIEW))
             return gettext_noop(
@@ -3119,10 +3150,7 @@ const char* view_query_is_auto_updatable(Query *viewquery, bool checkCols, bool 
                 return gettext_noop("Views that have no updatable columns are not automatically updatable.");
         }
     } else {
-        CheckQueryAutoUpdatableContext context;
-        context.rtable = viewquery->rtable;
-        context.checkCols = checkCols;
-        context.found = false;
+        CheckQueryAutoUpdatableContext context = {NULL, viewquery->rtable, checkCols, false, false};
         ListCell* cell = NULL;
         foreach (cell, viewquery->targetList) {
             TargetEntry* tle = (TargetEntry*)lfirst(cell);
@@ -3135,6 +3163,10 @@ const char* view_query_is_auto_updatable(Query *viewquery, bool checkCols, bool 
         /* No updatable column founded, the view is not updatable */
         if (checkCols && !(context.found))
             return gettext_noop("Views that have no updatable columns are not automatically updatable.");
+        if (!context.hasValidRTE) {
+            return gettext_noop(
+                "Views that do not select from tables, views or subqueries are not automatically updatable.");
+        }
     }
     return NULL;
 }
@@ -3438,6 +3470,9 @@ static bool SetNewRteIfExist(SetNewRteIfExistContext* context, bool deleteExisti
     if (targetIsExist) {
         ListCell* l = NULL;
         foreach (l, parsetree->jointree->fromlist) {
+            if (!IsA(lfirst(l), RangeTblRef)) {
+                continue;
+            }
             RangeTblRef* rtf = (RangeTblRef*)lfirst(l);
 
             if (rtf->rtindex == resultRelation && deleteExistingTarget) {
@@ -3580,7 +3615,8 @@ static bool NewRteForRewriteTargetView_walker(Node* node, NewRteForRewriteTarget
             * the executor still performs appropriate permissions checks for the
             * query caller's use of the view.
             */
-            new_rte->checkAsUser = view->rd_rel->relowner;
+            new_rte->checkAsUser = RelationIsValid(view) ?
+                view->rd_rel->relowner : view_rte->checkAsUser;
             new_rte->requiredPerms = view_rte->requiredPerms;
 
             /*
@@ -3974,11 +4010,41 @@ static int FindBaseRteForInsertOrUpdate(List* parse_targetlist, List* view_targe
     return baseRtIndex;
 }
 
-int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rtables, int resultRelation)
+static int ComputeNewRtIndex(Query* parsetree, RangeTblEntry* base_rte, int resultRelation)
+{
+    int newRtIndex = 0;
+    int rtindex = 1;
+    ListCell* rtcell = list_head(parsetree->rtable);
+    if (base_rte->rtekind == RTE_RELATION) {
+        Oid base_relid = base_rte->relid;
+        foreach (rtcell, parsetree->rtable) {
+            RangeTblEntry* rte = (RangeTblEntry*)lfirst(rtcell);
+            if (rte->rtekind == RTE_RELATION && base_relid == rte->relid &&
+                rtindex != resultRelation) {
+                newRtIndex = rtindex;
+                break;
+            }
+            rtindex++;
+        }
+    } else if (base_rte->rtekind == RTE_SUBQUERY) {
+        char* name = base_rte->alias->aliasname;
+        foreach (rtcell, parsetree->rtable) {
+            RangeTblEntry* rte = (RangeTblEntry*)lfirst(rtcell);
+            if (rte->rtekind == RTE_SUBQUERY && strcmp(name, rte->alias->aliasname) == 0 &&
+                rtindex != resultRelation) {
+                newRtIndex = rtindex;
+                break;
+            }
+            rtindex++;
+        }
+    }
+    return newRtIndex;
+}
+
+static int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rtables, int resultRelation)
 {
     int baseRtIndex = 0;
     int newRtIndex = 0;
-    Oid base_relid;
     RangeTblEntry* base_rte = NULL;
     List* parse_targetlist = parsetree->targetList;
     List* view_targetlist = viewquery->targetList;
@@ -3998,21 +4064,8 @@ int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rtables, 
         ereport(ERROR,
             (errmsg("update/delete on a table in a view's subquery is not supported in B-format database")));
     }
-    base_relid = base_rte->relid;
 
-    ListCell* rtcell = list_head(parsetree->rtable);
-    int rtindex = 1;
-    while (rtcell) {
-        RangeTblEntry* rte = (RangeTblEntry*)lfirst(rtcell);
-
-        if (base_relid == rte->relid && rtindex != resultRelation) {
-            newRtIndex = rtindex;
-            break;
-        }
-        rtcell = lnext(rtcell);
-        rtindex++;
-    }
-
+    newRtIndex = ComputeNewRtIndex(parsetree, base_rte, resultRelation);
     if (newRtIndex == 0) {
         ereport(ERROR,
             (errmsg("cannot determine an exact row for the view to update or delete")));
@@ -4064,6 +4117,11 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
     List* view_targetlist = NIL;
     ListCell* lc = NULL;
     ListCell* rtcell = NULL;
+    char* relname = NULL;
+    const char* type = NULL;
+
+    /* Locate RTE describing the view in the outer query */
+    view_rte = rt_fetch(result_relation, parsetree->rtable);
 
     /*
      * Get the Query from the view's ON SELECT rule.  We're going to munge the
@@ -4072,7 +4130,8 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
      * copy of it (get_view_query() returns a pointer into the relcache, so we
      * have to treat it as read-only).
      */
-    viewquery = (Query*)copyObject(get_view_query(view));
+    viewquery = RelationIsValid(view) ? (Query*)copyObject(get_view_query(view)) :
+        (Query*)copyObject(view_rte->subquery);
     PlannerInfo* root = makeNode(PlannerInfo);
     root->parse = viewquery;
     foreach (rtcell, viewquery->rtable) {
@@ -4101,6 +4160,8 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
     list_free(base_targetList);
 
     auto_update_detail =  view_query_is_auto_updatable(viewquery, parsetree->commandType != CMD_DELETE, false);
+    relname = RelationIsValid(view) ? RelationGetRelationName(view) : view_rte->alias->aliasname;
+    type = RelationIsValid(view) ? "view" : "subquery";
 
     do {
         if (parsetree->commandType == CMD_INSERT) {
@@ -4132,21 +4193,21 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
         switch (parsetree->commandType) {
             case CMD_INSERT:
                 ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("cannot insert into view \"%s\"", RelationGetRelationName(view)),
+                        errmsg("cannot insert into view \"%s\"", relname),
                         errdetail_internal("%s", _(auto_update_detail)),
                         errhint("To enable inserting into the view, provide an INSTEAD OF INSERT trigger or "
                                 "an unconditional ON INSERT DO INSTEAD rule.")));
                 break;
             case CMD_UPDATE:
                 ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("cannot update view \"%s\"", RelationGetRelationName(view)),
+                        errmsg("cannot update view \"%s\"", relname),
                         errdetail_internal("%s", _(auto_update_detail)),
                         errhint("To enable updating the view, provide an INSTEAD OF UPDATE trigger or "
                                 "an unconditional ON UPDATE DO INSTEAD rule.")));
                 break;
             case CMD_DELETE:
                 ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("cannot delete from view \"%s\"", RelationGetRelationName(view)),
+                        errmsg("cannot delete from view \"%s\"", relname),
                         errdetail_internal("%s", _(auto_update_detail)),
                         errhint("To enable deleting from the view, provide an INSTEAD OF DELETE trigger or "
                                 "an unconditional ON DELETE DO INSTEAD rule.")));
@@ -4158,11 +4219,12 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
     }
 
     /* Check if the expension of non_system views are restricted */
-    if (unlikely(RESTRICT_NONSYSTEM_RELATION_KIND_VIEW && RelationGetRelid(view) >= FirstNormalObjectId)) {
+    if (RelationIsValid(view) && unlikely(RESTRICT_NONSYSTEM_RELATION_KIND_VIEW &&
+        RelationGetRelid(view) >= FirstNormalObjectId)) {
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("Access to non-system view \"%s\" is restricted.", RelationGetRelationName(view)),
-                errcause("Access to non-system view \"%s\" is restricted.", RelationGetRelationName(view)),
+                errmsg("Access to non-system view \"%s\" is restricted.", relname),
+                errcause("Access to non-system view \"%s\" is restricted.", relname),
                 erraction("Check the value of restrict_nonsystem_relation_kind.")));
     }
 
@@ -4194,15 +4256,15 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
                 case CMD_INSERT:
                     ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("cannot insert into column \"%s\" of view \"%s\"", nonUpdatableCol,
-                                    RelationGetRelationName(view)),
+                            errmsg("cannot insert into column \"%s\" of view \"%s\"",
+                                nonUpdatableCol, relname),
                             errdetail_internal("%s", _(auto_update_detail))));
                     break;
                 case CMD_UPDATE:
                     ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("cannot update column \"%s\" of view \"%s\"", nonUpdatableCol,
-                                    RelationGetRelationName(view)),
+                            errmsg("cannot update column \"%s\" of view \"%s\"",
+                                nonUpdatableCol, relname),
                             errdetail_internal("%s", _(auto_update_detail))));
                     break;
                 default:
@@ -4225,9 +4287,6 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
         rtcell = lnext(rtcell);
     }
 
-    /* Locate RTE describing the view in the outer query */
-    view_rte = rt_fetch(result_relation, parsetree->rtable);
-
     NewRteForRewriteTargetViewContext rteContext;
     rteContext.viewquery = viewquery;
     rteContext.parsetree = parsetree;
@@ -4245,8 +4304,8 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
                            (bool (*)())NewRteForRewriteTargetView_walker,
                            (void*)(&rteContext));
 
-    /* rtindex starts from 3 */
-    int i = 3;
+    /* rtindex starts from 3 when it's a view */
+    int i = RelationIsValid(view) ? 3 : 1;
     while (!bms_is_empty(rteContext.base_indexes)) {
         RecurseChangeVarNodes(parsetree, viewquery, &(rteContext.base_indexes), rteContext.newIndexes, i);
         i++;
@@ -4295,7 +4354,6 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
                                                   REPLACEVARS_REPORT_ERROR,
                                                   0,
                                                   &parsetree->hasSubLinks);
-
     /*
      * Update all other RTI references in the query that point to the view
      * (for example, parsetree->resultRelation itself) to point to the new
@@ -4334,7 +4392,7 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
     if (parsetree->commandType != CMD_INSERT) {
         Node* viewqual = (Node*)viewquery->jointree->quals;
 
-        if (RelationIsSecurityView(view) && viewqual != NULL) {
+        if (RelationIsValid(view) && RelationIsSecurityView(view) && viewqual != NULL) {
             /*
             * Note: the parsetree has been mutated, so the new_rte pointer is
             * stale and needs to be re-computed.
@@ -4358,8 +4416,12 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
      * to the query's withCheckOptions list.
      */
     if (parsetree->commandType != CMD_DELETE) {
-        bool has_wco = RelationHasCheckOption(view);
-        bool cascaded = RelationHasCascadedCheckOption(view);
+        bool hasWCO = RelationIsValid(view) ?
+            RelationHasCheckOption(view) :
+            (viewquery->withCheckOptions != NIL);
+        bool cascaded = RelationIsValid(view) ?
+            RelationHasCascadedCheckOption(view) :
+            (hasWCO && (((WithCheckOption*)linitial(viewquery->withCheckOptions))->cascaded));
 
         /*
          * If the parent view has a cascaded check option, treat this view as
@@ -4372,7 +4434,7 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
             WithCheckOption* parent_wco = (WithCheckOption*)linitial(parsetree->withCheckOptions);
 
             if (parent_wco->cascaded) {
-                has_wco = true;
+                hasWCO = true;
                 cascaded = true;
             }
         }
@@ -4386,9 +4448,9 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
          * has no quals, since there may be quals on child views.  A LOCAL
          * check can be omitted if this view has no quals.
          */
-        if (has_wco && (cascaded || viewquery->jointree->quals != NULL)) {
+        if (hasWCO && (cascaded || viewquery->jointree->quals != NULL)) {
             WithCheckOption* wco = makeNode(WithCheckOption);
-            wco->viewname = pstrdup(RelationGetRelationName(view));
+            wco->viewname = pstrdup(relname);
             wco->qual = NULL;
             wco->cascaded = cascaded;
             wco->rtindex = new_rt_index;
@@ -4413,6 +4475,47 @@ static Query* rewriteTargetView(Query *parsetree, Relation view, int result_rela
         }
     }
 
+    RangeTblEntry* new_rte = rt_fetch(new_rt_index, parsetree->rtable);
+    if (new_rte->rtekind == RTE_RELATION &&
+        (new_rte->relkind == RELKIND_RELATION || new_rte->relkind == RELKIND_FOREIGN_TABLE)) {
+            CheckValidResult(parsetree, new_rt_index);
+    }
+    return parsetree;
+}
+
+static Query* rewriteTargetSubquery(Query* parsetree, int result_relation)
+{
+    PlannerInfo* root = makeNode(PlannerInfo);
+    root->parse = parsetree;
+    root->glob = makeNode(PlannerGlobal);
+    root->query_level = 1;
+    root->parent_root = NULL;
+    root->plan_params = NIL;
+    root->planner_cxt = CurrentMemoryContext;
+    root->init_plans = NIL;
+    root->cte_plan_ids = NIL;
+    root->eq_classes = NIL;
+    root->append_rel_list = NIL;
+    root->rowMarks = NIL;
+    root->hasInheritedTarget = false;
+    root->grouping_map = NULL;
+    root->subquery_type = SUBQUERY_NORMAL;
+    root->param_upper = NULL;
+    root->hasRownumQual = false;
+
+    if (parsetree->commandType == CMD_INSERT) {
+        FromExpr* f = (FromExpr*)makeNode(FromExpr);
+        RangeTblRef* rtr = makeNode(RangeTblRef);
+        rtr->rtindex = result_relation;
+        f->fromlist = list_make1(rtr);
+        f = (FromExpr*)pull_up_subqueries(root, (Node*)f);
+        list_free_ext(f->fromlist);
+        pfree(f);
+    } else {
+        parsetree->jointree = (FromExpr*)pull_up_subqueries(root, (Node*)parsetree->jointree);
+    }
+
+    parsetree = rewriteTargetView(parsetree, InvalidRelation, result_relation);
     return parsetree;
 }
 
@@ -4550,15 +4653,13 @@ List* RewriteQuery(Query* parsetree, List* rewrite_events)
         List* rewriteRelations = NIL;
 
         result_relation = linitial2_int(parsetree->resultRelations);
-
         if (result_relation == 0)
             return rewritten;
 
         rt_entry = rt_fetch(result_relation, parsetree->rtable);
-        
         if (rt_entry->rtekind == RTE_SUBQUERY) {
-            rewritten = lappend(rewritten, parsetree);
-            return rewritten;
+            parsetree = rewriteTargetSubquery(parsetree, result_relation);
+            return RewriteQuery(parsetree, rewrite_events);
         }
 
         AssertEreport(rt_entry->rtekind == RTE_RELATION, MOD_OPT, "");
@@ -4738,11 +4839,19 @@ List* RewriteQuery(Query* parsetree, List* rewrite_events)
             foreach (resultRel, tempResultRelations) {
                 result_relation = lfirst_int(resultRel);
 
-                heap_close(rt_entry_relation, NoLock);
+                if (RelationIsValid(rt_entry_relation))
+                    heap_close(rt_entry_relation, NoLock);
 
                 rt_entry = rt_fetch(result_relation, parsetree->rtable);
+                if (rt_entry->rtekind == RTE_SUBQUERY) {
+                    parsetree = rewriteTargetSubquery(parsetree, result_relation);
+                    rt_entry_relation = InvalidRelation;
+                    instead = true;
+                    returning = true;
+                    rewriteView = true;
+                    continue;
+                }
                 rt_entry_relation = heap_open(rt_entry->relid, NoLock);
-
                 /*
                  * If there was no unqualified INSTEAD rule, and the target relation
                  * is a view without any INSTEAD OF triggers, see if the view can be
@@ -4895,7 +5004,8 @@ List* RewriteQuery(Query* parsetree, List* rewrite_events)
                 ereport_for_each_cmdtype(event, rt_entry_relation);
             }
 
-            heap_close(rt_entry_relation, NoLock);
+            if (RelationIsValid(rt_entry_relation))
+                heap_close(rt_entry_relation, NoLock);
 #ifdef PGXC
         } else {
             foreach (pt_cell, parsetree_list) {

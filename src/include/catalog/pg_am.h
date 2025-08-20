@@ -172,6 +172,10 @@ DATA(insert OID = 8303 (  diskann		0 4 f t f f f t f f f f f 0 diskanninsert dis
 DESCR("diskann index access method");
 #define DISKANN_AM_OID 8303
 
+DATA(insert OID = 8304 (  bloom		1 1 f f f f t t f f f f f 0 blinsert blbeginscan - blgetbitmap blrescan blendscan - - - blbuild blbuildempty blbulkdelete blvacuumcleanup - blcostestimate bloptions - -));
+DESCR("bloom index access method");
+#define BLOOM_AM_OID 8304
+
 #define OID_IS_BTREE(oid) ((oid) == BTREE_AM_OID || (oid) == UBTREE_AM_OID)
 
 #endif   /* PG_AM_H */

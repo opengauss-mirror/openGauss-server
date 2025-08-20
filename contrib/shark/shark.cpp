@@ -2,11 +2,14 @@
 #include "src/pltsql/pltsql.h"
 #include "src/backend_parser/scanner.h"
 #include "parser/parser.h"
+#include "parser/scansup.h"
+#include "common/int.h"
 #include "commands/extension.h"
 #include "commands/dbcommands.h"
 #include "commands/sequence.h"
 #include "utils/builtins.h"
 #include "utils/typcache.h"
+#include "utils/numeric.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_authid.h"
 #include "shark.h"
@@ -29,9 +32,41 @@ static RangeVar* pltsqlMakeRangeVarFromName(const char *ident);
 static Oid get_table_identity(Oid tableOid);
 static int128 get_last_value_from_seq(Oid seqid);
 static bool get_seed(Oid seqid, int64* start, int128* res, bool* success);
+static int days_in_date(int day, int month, int year);
+static bool int64_multiply_add(int64 val, int64 multiplier, int64 *sum);
+static bool int32_multiply_add(int32 val, int32 multiplier, int32 *sum);
+static int32 diff_cal(int val, struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2);
+static int64 diff_cal_big(int val, struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2);
+static int32 int32_year_diff(struct pg_tm* tm1, struct pg_tm* tm2);
+static int32 int32_quarter_diff(struct pg_tm* tm1, struct pg_tm* tm2);
+static int32 int32_month_diff(struct pg_tm* tm1, struct pg_tm* tm2);
+static int32 int32_week_diff(struct pg_tm* tm1, struct pg_tm* tm2);
+static int32 int32_day_diff(struct pg_tm* tm1, struct pg_tm* tm2);
+static int32 int32_hour_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow);
+static int32 int32_minute_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow);
+static int32 int32_second_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow);
+static int32 int32_millisec_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow);
+static int32 int32_microsec_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow);
+static int32 int32_nano_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow);
+
+static int64 int64_year_diff(struct pg_tm* tm1, struct pg_tm* tm2);
+static int64 int64_quarter_diff(struct pg_tm* tm1, struct pg_tm* tm2);
+static int64 int64_month_diff(struct pg_tm* tm1, struct pg_tm* tm2);
+static int64 int64_week_diff(struct pg_tm* tm1, struct pg_tm* tm2);
+static int64 int64_day_diff(struct pg_tm* tm1, struct pg_tm* tm2);
+static int64 int64_hour_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow);
+static int64 int64_minute_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow);
+static int64 int64_second_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow);
+static int64 int64_millisec_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow);
+static int64 int64_microsec_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow);
+static int64 int64_nano_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow);
+
+#define DTK_NANO 32
 
 void _PG_init(void)
-{}
+{
+    InitIntervalLookup();
+}
 
 static bool CheckIsMssqlHex(char *str)
 {
@@ -409,24 +444,19 @@ PG_FUNCTION_INFO_V1(get_scope_identity);
 Datum get_scope_identity(PG_FUNCTION_ARGS)
 {
     int128 res = 0;
-    bool success = false;
 
     PG_TRY();
     {
         res = last_scope_identity_value();
-        success = true;
     }
     PG_CATCH();
     {
         FlushErrorState();
+        PG_RETURN_NULL();
     }
     PG_END_TRY();
 
-    if (success) {
-        PG_RETURN_INT128(res);
-    }
-
-    PG_RETURN_NULL();
+    PG_RETURN_INT128(res);
 }
 
 PG_FUNCTION_INFO_V1(get_ident_current);
@@ -580,4 +610,614 @@ static int128 get_last_value_from_seq(Oid seqid)
     pfree(values);
     pfree(nulls);
     return last_value;
+}
+
+/*
+ * Returns the difference of two timestamps based on a provided unit
+ * INT64 representation for bigints
+ */
+PG_FUNCTION_INFO_V1(shark_timestamp_diff);
+Datum shark_timestamp_diff(PG_FUNCTION_ARGS)
+{
+    text* field = PG_GETARG_TEXT_PP(0);
+    Timestamp timestamp1 = PG_GETARG_TIMESTAMP(1);
+    Timestamp timestamp2 = PG_GETARG_TIMESTAMP(2);
+    int32 diff = -1;
+    int tm1Valid = 0;
+    int tm2Valid = 0;
+    struct pg_tm tt1;
+    struct pg_tm* tm1 = &tt1;
+    fsec_t fsec1 = 0;
+    struct pg_tm tt2;
+    struct pg_tm* tm2 = &tt2;
+    fsec_t fsec2 = 0;
+    int type = 0;
+    int val = 0;
+    char* lower_case_units = nullptr;
+
+    tm1Valid = timestamp2tm(timestamp1, NULL, tm1, &fsec1, NULL, NULL);
+    tm2Valid = timestamp2tm(timestamp2, NULL, tm2, &fsec2, NULL, NULL);
+    lower_case_units = downcase_truncate_identifier(VARDATA_ANY(field), VARSIZE_ANY_EXHDR(field), false);
+    type = DecodeUnits(0, lower_case_units, &val);
+
+    // Decode units does not handle doy properly
+    if (strncmp(lower_case_units, "doy", 3) == 0) {
+        type = UNITS;
+        val = DTK_DOY;
+    }
+    if (strncmp(lower_case_units, "nanosecond", 11) == 0) {
+        type = UNITS;
+        val = DTK_NANO;
+    }
+    if (strncmp(lower_case_units, "weekday", 7) == 0) {
+        type = UNITS;
+        val = DTK_DAY;
+    }
+    if (type == UNITS) {
+        if (tm1Valid == 0 && tm2Valid == 0) {
+            diff = diff_cal(val, tm1, tm2, fsec1, fsec2);
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
+        }
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("\'%s\' is not a recognized %s option", lower_case_units, "datediff")));
+    }
+
+    PG_RETURN_INT32(diff);
+}
+
+static int32 diff_cal(int val, struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2)
+{
+    int32 diff = -1;
+    bool overflow = false;
+    switch (val) {
+        case DTK_YEAR:
+            diff = int32_year_diff(tm1, tm2);
+            break;
+        case DTK_QUARTER:
+            diff = int32_quarter_diff(tm1, tm2);
+            break;
+        case DTK_MONTH:
+            diff = int32_month_diff(tm1, tm2);
+            break;
+        case DTK_WEEK:
+            diff = int32_week_diff(tm1, tm2);
+            break;
+        case DTK_DAY:
+        case DTK_DOY:
+            diff = int32_day_diff(tm1, tm2);
+            break;
+        case DTK_HOUR:
+            diff = int32_hour_diff(tm1, tm2, &overflow);
+            break;
+        case DTK_MINUTE:
+            diff = int32_minute_diff(tm1, tm2, &overflow);
+            break;
+        case DTK_SECOND:
+            diff = int32_second_diff(tm1, tm2, &overflow);
+            break;
+        case DTK_MILLISEC:
+            diff = int32_millisec_diff(tm1, tm2, fsec1, fsec2, &overflow);
+            break;
+        case DTK_MICROSEC:
+            diff = int32_microsec_diff(tm1, tm2, fsec1, fsec2, &overflow);
+            break;
+        case DTK_NANO:
+            diff = int32_nano_diff(tm1, tm2, fsec1, fsec2, &overflow);
+            break;
+        default:
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("wrong input unit name")));
+            break;
+    }
+    if (overflow) {
+        ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                        errmsg("The datediff function resulted in an overflow. The number of dateparts separating two "
+                               "date/time instances is too large. Try to use datediff with a less precise datepart")));
+    }
+    return diff;
+}
+
+/*
+ * Returns the difference of two timestamps based on a provided unit
+ * INT64 representation for bigints
+ */
+PG_FUNCTION_INFO_V1(shark_timestamp_diff_big);
+Datum shark_timestamp_diff_big(PG_FUNCTION_ARGS)
+{
+    text* field = PG_GETARG_TEXT_PP(0);
+    Timestamp timestamp1 = PG_GETARG_TIMESTAMP(1);
+    Timestamp timestamp2 = PG_GETARG_TIMESTAMP(2);
+    int64 diff = -1;
+    int tm1Valid = 0;
+    int tm2Valid = 0;
+    struct pg_tm tt1;
+    struct pg_tm* tm1 = &tt1;
+    fsec_t fsec1 = 0;
+    struct pg_tm tt2;
+    struct pg_tm* tm2 = &tt2;
+    fsec_t fsec2 = 0;
+    int type = 0;
+    int val = 0;
+    char* lower_case_units = nullptr;
+
+    tm1Valid = timestamp2tm(timestamp1, NULL, tm1, &fsec1, NULL, NULL);
+    tm2Valid = timestamp2tm(timestamp2, NULL, tm2, &fsec2, NULL, NULL);
+    lower_case_units = downcase_truncate_identifier(VARDATA_ANY(field), VARSIZE_ANY_EXHDR(field), false);
+    type = DecodeUnits(0, lower_case_units, &val);
+
+    // Decode units does not handle doy or nano properly
+    if (strncmp(lower_case_units, "doy", 3) == 0) {
+        type = UNITS;
+        val = DTK_DOY;
+    }
+    if (strncmp(lower_case_units, "nanosecond", 11) == 0) {
+        type = UNITS;
+        val = DTK_NANO;
+    }
+    if (strncmp(lower_case_units, "weekday", 7) == 0) {
+        type = UNITS;
+        val = DTK_DAY;
+    }
+
+    if (type == UNITS) {
+        if (tm1Valid == 0 && tm2Valid == 0) {
+            diff = diff_cal_big(val, tm1, tm2, fsec1, fsec2);
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
+        }
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("\'%s\' is not a recognized %s option", lower_case_units, "datediff")));
+    }
+
+    PG_RETURN_INT64(diff);
+}
+
+static int64 diff_cal_big(int val, struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2)
+{
+    int64 diff = -1;
+    bool overflow = false;
+    switch (val) {
+        case DTK_YEAR:
+            diff = int64_year_diff(tm1, tm2);
+            break;
+        case DTK_QUARTER:
+            diff = int64_quarter_diff(tm1, tm2);
+            break;
+        case DTK_MONTH:
+            diff = int64_month_diff(tm1, tm2);
+            break;
+        case DTK_WEEK:
+            diff = int64_week_diff(tm1, tm2);
+            break;
+        case DTK_DAY:
+        case DTK_DOY:
+            diff = int64_day_diff(tm1, tm2);
+            break;
+        case DTK_HOUR:
+            diff = int64_hour_diff(tm1, tm2, &overflow);
+            break;
+        case DTK_MINUTE:
+            diff = int64_minute_diff(tm1, tm2, &overflow);
+            break;
+        case DTK_SECOND:
+            diff = int64_second_diff(tm1, tm2, &overflow);
+            break;
+        case DTK_MILLISEC:
+            diff = int64_millisec_diff(tm1, tm2, fsec1, fsec2, &overflow);
+            break;
+        case DTK_MICROSEC:
+            diff = int64_microsec_diff(tm1, tm2, fsec1, fsec2, &overflow);
+            break;
+        case DTK_NANO:
+            diff = int64_nano_diff(tm1, tm2, fsec1, fsec2, &overflow);
+            break;
+        default:
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("wrong input unit name")));
+            break;
+    }
+    if (overflow) {
+        ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                        errmsg("The datediff function resulted in an overflow. The number of dateparts separating two "
+                               "date/time instances is too large. Try to use datediff with a less precise datepart")));
+    }
+    return diff;
+}
+
+static bool int64_multiply_add(int64 val, int64 multiplier, int64* sum)
+{
+    int64 product = 0;
+
+    if (pg_mul_s64_overflow(val, multiplier, &product) || pg_add_s64_overflow(*sum, product, sum)) {
+        return false;
+    }
+    return true;
+}
+
+static bool int32_multiply_add(int32 val, int32 multiplier, int32* sum)
+{
+    int32 product = 0;
+
+    if (pg_mul_s32_overflow(val, multiplier, &product) || pg_add_s32_overflow(*sum, product, sum)) {
+        return false;
+    }
+    return true;
+}
+
+static int days_in_date(int day, int month, int year)
+{
+    int days = year * 365 + day;
+    for (int i = 1; i < month; i++) {
+        if (i == 2) {
+            days += 28;
+        } else if (i == 4 || i == 6 || i == 9 || i == 11) {
+            days += 30;
+        } else {
+            days += 31;
+        }
+    }
+    if (month <= 2) {
+        year -= 1;
+    }
+    days += (year / 4 - year / 100 + year / 400);
+    return days;
+}
+
+PG_FUNCTION_INFO_V1(numeric_log10);
+Datum numeric_log10(PG_FUNCTION_ARGS)
+{
+    float8 arg1 = PG_GETARG_FLOAT8(0);
+    float8 result = 0;
+    Numeric arg1_numeric = 0;
+    Numeric arg2_numeric = 0;
+    Numeric result_numeric = 0;
+
+    arg1_numeric = DatumGetNumeric(DirectFunctionCall1(float8_numeric, Float8GetDatum(arg1)));
+    arg2_numeric = DatumGetNumeric(DirectFunctionCall1(int4_numeric, 10));
+    result_numeric =
+        DatumGetNumeric(DirectFunctionCall2(numeric_log, NumericGetDatum(arg2_numeric), NumericGetDatum(arg1_numeric)));
+    result = DatumGetFloat8(DirectFunctionCall1(numeric_float8, NumericGetDatum(result_numeric)));
+
+    PG_RETURN_FLOAT8(result);
+}
+
+static int32 int32_year_diff(struct pg_tm* tm1, struct pg_tm* tm2)
+{
+    int32 diff = -1;
+
+    diff = tm2->tm_year - tm1->tm_year;
+    return diff;
+}
+static int32 int32_quarter_diff(struct pg_tm* tm1, struct pg_tm* tm2)
+{
+    int32 diff = -1;
+    int32 yeardiff = 0;
+    int32 monthdiff = 0;
+
+    yeardiff = tm2->tm_year - tm1->tm_year;
+    monthdiff = tm2->tm_mon - tm1->tm_mon;
+    diff = (yeardiff * 12 + monthdiff) / 3;
+    return diff;
+}
+static int32 int32_month_diff(struct pg_tm* tm1, struct pg_tm* tm2)
+{
+    int32 diff = -1;
+    int32 yeardiff = 0;
+    int32 monthdiff = 0;
+    yeardiff = tm2->tm_year - tm1->tm_year;
+    monthdiff = tm2->tm_mon - tm1->tm_mon;
+    diff = yeardiff * 12 + monthdiff;
+    return diff;
+}
+static int32 int32_week_diff(struct pg_tm* tm1, struct pg_tm* tm2)
+{
+    int32 diff = -1;
+    int32 daydiff = 0;
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    diff = daydiff / 7;
+    if (daydiff % 7 >= 4) {
+        diff++;
+    }
+    return diff;
+}
+static int32 int32_day_diff(struct pg_tm* tm1, struct pg_tm* tm2)
+{
+    int32 diff = -1;
+    diff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    return diff;
+}
+static int32 int32_hour_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow)
+{
+    int32 diff = -1;
+    int32 daydiff = 0;
+    int32 hourdiff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    *overflow = (*overflow || !(int32_multiply_add(daydiff, 24, &hourdiff)));
+    diff = hourdiff;
+    return diff;
+}
+static int32 int32_minute_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow)
+{
+    int32 diff = -1;
+    int32 daydiff = 0;
+    int32 hourdiff = 0;
+    int32 minutediff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    minutediff = tm2->tm_min - tm1->tm_min;
+    *overflow = (*overflow || !(int32_multiply_add(daydiff, 24, &hourdiff)));
+    *overflow = (*overflow || !(int32_multiply_add(hourdiff, 60, &minutediff)));
+    diff = minutediff;
+    return diff;
+}
+static int32 int32_second_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow)
+{
+    int32 diff = -1;
+    int32 daydiff = 0;
+    int32 hourdiff = 0;
+    int32 minutediff = 0;
+    int32 seconddiff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    minutediff = tm2->tm_min - tm1->tm_min;
+    seconddiff = tm2->tm_sec - tm1->tm_sec;
+    *overflow = (*overflow || !(int32_multiply_add(daydiff, 24, &hourdiff)));
+    *overflow = (*overflow || !(int32_multiply_add(hourdiff, 60, &minutediff)));
+    *overflow = (*overflow || !(int32_multiply_add(minutediff, 60, &seconddiff)));
+    diff = seconddiff;
+    return diff;
+}
+static int32 int32_millisec_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow)
+{
+    int32 diff = -1;
+    int32 daydiff = 0;
+    int32 hourdiff = 0;
+    int32 minutediff = 0;
+    int32 seconddiff = 0;
+    int32 millisecdiff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    minutediff = tm2->tm_min - tm1->tm_min;
+    seconddiff = tm2->tm_sec - tm1->tm_sec;
+    millisecdiff = (fsec2 / 1000) - (fsec1 / 1000);
+    *overflow = (*overflow || !(int32_multiply_add(daydiff, 24, &hourdiff)));
+    *overflow = (*overflow || !(int32_multiply_add(hourdiff, 60, &minutediff)));
+    *overflow = (*overflow || !(int32_multiply_add(minutediff, 60, &seconddiff)));
+    *overflow = (*overflow || !(int32_multiply_add(seconddiff, 1000, &millisecdiff)));
+    diff = millisecdiff;
+    return diff;
+}
+static int32 int32_microsec_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow)
+{
+    int diff = -1;
+    int32 yeardiff = 0;
+    int32 monthdiff = 0;
+    int32 daydiff = 0;
+    int32 hourdiff = 0;
+    int32 minutediff = 0;
+    int32 seconddiff = 0;
+    int32 millisecdiff = 0;
+    int32 microsecdiff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    minutediff = tm2->tm_min - tm1->tm_min;
+    seconddiff = tm2->tm_sec - tm1->tm_sec;
+    microsecdiff = fsec2 - fsec1;
+    *overflow = (*overflow || !(int32_multiply_add(daydiff, 24, &hourdiff)));
+    *overflow = (*overflow || !(int32_multiply_add(hourdiff, 60, &minutediff)));
+    *overflow = (*overflow || !(int32_multiply_add(minutediff, 60, &seconddiff)));
+    *overflow = (*overflow || !(int32_multiply_add(seconddiff, 1000000, &microsecdiff)));
+    diff = microsecdiff;
+
+    return diff;
+}
+static int32 int32_nano_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow)
+{
+    int32 diff = -1;
+    int32 yeardiff = 0;
+    int32 monthdiff = 0;
+    int32 daydiff = 0;
+    int32 hourdiff = 0;
+    int32 minutediff = 0;
+    int32 seconddiff = 0;
+    int32 millisecdiff = 0;
+    int32 microsecdiff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    minutediff = tm2->tm_min - tm1->tm_min;
+    seconddiff = tm2->tm_sec - tm1->tm_sec;
+    microsecdiff = fsec2 - fsec1;
+    *overflow = (*overflow || !(int32_multiply_add(daydiff, 24, &hourdiff)));
+    *overflow = (*overflow || !(int32_multiply_add(hourdiff, 60, &minutediff)));
+    *overflow = (*overflow || !(int32_multiply_add(minutediff, 60, &seconddiff)));
+    *overflow = (*overflow || !(int32_multiply_add(seconddiff, 1000000, &microsecdiff)));
+    *overflow = (*overflow || (pg_mul_s32_overflow(microsecdiff, 1000, &diff)));
+    return diff;
+}
+
+static int64 int64_year_diff(struct pg_tm* tm1, struct pg_tm* tm2)
+{
+    int64 diff = -1;
+
+    diff = tm2->tm_year - tm1->tm_year;
+    return diff;
+}
+static int64 int64_quarter_diff(struct pg_tm* tm1, struct pg_tm* tm2)
+{
+    int64 diff = -1;
+    int64 yeardiff = 0;
+    int64 monthdiff = 0;
+
+    yeardiff = tm2->tm_year - tm1->tm_year;
+    monthdiff = tm2->tm_mon - tm1->tm_mon;
+    diff = (yeardiff * 12 + monthdiff) / 3;
+    return diff;
+}
+static int64 int64_month_diff(struct pg_tm* tm1, struct pg_tm* tm2)
+{
+    int64 diff = -1;
+    int64 yeardiff = 0;
+    int64 monthdiff = 0;
+    yeardiff = tm2->tm_year - tm1->tm_year;
+    monthdiff = tm2->tm_mon - tm1->tm_mon;
+    diff = yeardiff * 12 + monthdiff;
+    return diff;
+}
+static int64 int64_week_diff(struct pg_tm* tm1, struct pg_tm* tm2)
+{
+    int64 diff = -1;
+    int64 daydiff = 0;
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    diff = daydiff / 7;
+    if (daydiff % 7 >= 4) {
+        diff++;
+    }
+    return diff;
+}
+static int64 int64_day_diff(struct pg_tm* tm1, struct pg_tm* tm2)
+{
+    int64 diff = -1;
+    diff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    return diff;
+}
+static int64 int64_hour_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow)
+{
+    int64 diff = -1;
+    int64 daydiff = 0;
+    int64 hourdiff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    *overflow = (*overflow || !(int64_multiply_add(daydiff, 24, &hourdiff)));
+    diff = hourdiff;
+    return diff;
+}
+static int64 int64_minute_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow)
+{
+    int64 diff = -1;
+    int64 daydiff = 0;
+    int64 hourdiff = 0;
+    int64 minutediff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    minutediff = tm2->tm_min - tm1->tm_min;
+    *overflow = (*overflow || !(int64_multiply_add(daydiff, 24, &hourdiff)));
+    *overflow = (*overflow || !(int64_multiply_add(hourdiff, 60, &minutediff)));
+    diff = minutediff;
+    return diff;
+}
+static int64 int64_second_diff(struct pg_tm* tm1, struct pg_tm* tm2, bool *overflow)
+{
+    int64 diff = -1;
+    int64 daydiff = 0;
+    int64 hourdiff = 0;
+    int64 minutediff = 0;
+    int64 seconddiff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    minutediff = tm2->tm_min - tm1->tm_min;
+    seconddiff = tm2->tm_sec - tm1->tm_sec;
+    *overflow = (*overflow || !(int64_multiply_add(daydiff, 24, &hourdiff)));
+    *overflow = (*overflow || !(int64_multiply_add(hourdiff, 60, &minutediff)));
+    *overflow = (*overflow || !(int64_multiply_add(minutediff, 60, &seconddiff)));
+    diff = seconddiff;
+    return diff;
+}
+static int64 int64_millisec_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow)
+{
+    int64 diff = -1;
+    int64 daydiff = 0;
+    int64 hourdiff = 0;
+    int64 minutediff = 0;
+    int64 seconddiff = 0;
+    int64 millisecdiff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    minutediff = tm2->tm_min - tm1->tm_min;
+    seconddiff = tm2->tm_sec - tm1->tm_sec;
+    millisecdiff = (fsec2 / 1000) - (fsec1 / 1000);
+    *overflow = (*overflow || !(int64_multiply_add(daydiff, 24, &hourdiff)));
+    *overflow = (*overflow || !(int64_multiply_add(hourdiff, 60, &minutediff)));
+    *overflow = (*overflow || !(int64_multiply_add(minutediff, 60, &seconddiff)));
+    *overflow = (*overflow || !(int64_multiply_add(seconddiff, 1000, &millisecdiff)));
+    diff = millisecdiff;
+    return diff;
+}
+static int64 int64_microsec_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow)
+{
+    int diff = -1;
+    int64 yeardiff = 0;
+    int64 monthdiff = 0;
+    int64 daydiff = 0;
+    int64 hourdiff = 0;
+    int64 minutediff = 0;
+    int64 seconddiff = 0;
+    int64 millisecdiff = 0;
+    int64 microsecdiff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    minutediff = tm2->tm_min - tm1->tm_min;
+    seconddiff = tm2->tm_sec - tm1->tm_sec;
+    microsecdiff = fsec2 - fsec1;
+    *overflow = (*overflow || !(int64_multiply_add(daydiff, 24, &hourdiff)));
+    *overflow = (*overflow || !(int64_multiply_add(hourdiff, 60, &minutediff)));
+    *overflow = (*overflow || !(int64_multiply_add(minutediff, 60, &seconddiff)));
+    *overflow = (*overflow || !(int64_multiply_add(seconddiff, 1000000, &microsecdiff)));
+    diff = microsecdiff;
+
+    return diff;
+}
+static int64 int64_nano_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow)
+{
+    int64 diff = -1;
+    int64 yeardiff = 0;
+    int64 monthdiff = 0;
+    int64 daydiff = 0;
+    int64 hourdiff = 0;
+    int64 minutediff = 0;
+    int64 seconddiff = 0;
+    int64 millisecdiff = 0;
+    int64 microsecdiff = 0;
+
+    daydiff =
+        days_in_date(tm2->tm_mday, tm2->tm_mon, tm2->tm_year) - days_in_date(tm1->tm_mday, tm1->tm_mon, tm1->tm_year);
+    hourdiff = tm2->tm_hour - tm1->tm_hour;
+    minutediff = tm2->tm_min - tm1->tm_min;
+    seconddiff = tm2->tm_sec - tm1->tm_sec;
+    microsecdiff = fsec2 - fsec1;
+    *overflow = (*overflow || !(int64_multiply_add(daydiff, 24, &hourdiff)));
+    *overflow = (*overflow || !(int64_multiply_add(hourdiff, 60, &minutediff)));
+    *overflow = (*overflow || !(int64_multiply_add(minutediff, 60, &seconddiff)));
+    *overflow = (*overflow || !(int64_multiply_add(seconddiff, 1000000, &microsecdiff)));
+    *overflow = (*overflow || (pg_mul_s64_overflow(microsecdiff, 1000, &diff)));
+    return diff;
 }

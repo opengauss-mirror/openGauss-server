@@ -1023,6 +1023,7 @@ void index_register(Oid heap, Oid ind, IndexInfo* indexInfo)
     securec_check(rc, "\0", "\0");
     /* expressions will likely be null, but may as well copy it */
     newind->il_info->ii_Expressions = (List*)copyObject(indexInfo->ii_Expressions);
+    newind->il_info->ii_ExpressionUsers = (List*)copyObject(indexInfo->ii_ExpressionUsers);
     newind->il_info->ii_ExpressionsState = NIL;
     /* predicate will likely be null, but may as well copy it */
     newind->il_info->ii_Predicate = (List*)copyObject(indexInfo->ii_Predicate);

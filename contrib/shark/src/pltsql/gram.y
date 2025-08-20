@@ -408,10 +408,10 @@ static void HandleBlockLevel();
 %type <stmt>	stmt_commit stmt_rollback stmt_savepoint
 %type <stmt>	stmt_case stmt_foreach_a
 %type <stmt>	stmt_signal stmt_resignal
-%type <stmt>	stmt_pipe_row
+%type <stmt>	stmt_pipe_row stmt_trycatch 
 
 %type <list>	proc_exceptions declare_stmts
-%type <exception_block> exception_sect declare_sect_b
+%type <exception_block> exception_sect declare_sect_b stmt_catch
 %type <exception>	proc_exception declare_stmt 
 %type <condition>	proc_conditions proc_condition cond_list cond_element
 %type <declare_handler_type>    handler_type
@@ -503,6 +503,7 @@ static void HandleBlockLevel();
 %token <keyword>        K_CALL
 %token <keyword>	K_CASE
 %token <keyword>	K_CATALOG_NAME
+%token <keyword>	K_CATCH
 %token <keyword>	K_CLASS_ORIGIN
 %token <keyword>	K_CLOSE
 %token <keyword>	K_COLLATE
@@ -634,6 +635,7 @@ static void HandleBlockLevel();
 %token <keyword>	K_TRAN
 %token <keyword>	K_TRANSACTION
 %token <keyword>	K_TRUE
+%token <keyword>	K_TRY
 %token <keyword>	K_TYPE
 %token <keyword>	K_UNION
 %token <keyword>	K_UNTIL
@@ -3025,8 +3027,42 @@ proc_stmt		: pl_block ';'
                         { $$ = $1; }
                 | stmt_resignal
                         { $$ = $1; }
+                | stmt_trycatch
+                        { $$ = $1; }
                 ;
 
+
+stmt_trycatch    : decl_sect K_BEGIN K_TRY proc_sect stmt_catch K_END K_CATCH opt_label ';'
+                    {
+                        PLpgSQL_stmt_block *newp;
+                        newp = (PLpgSQL_stmt_block *)palloc0(sizeof(PLpgSQL_stmt_block));
+                        newp->cmd_type     = PLPGSQL_STMT_BLOCK;
+                        newp->lineno       = plpgsql_location_to_lineno(@2);
+                        newp->sqlString    = plpgsql_get_curline_query();
+                        newp->label        = $1.label;
+                        newp->isAutonomous = $1.isAutonomous;
+                        newp->n_initvars   = $1.n_initvars;
+                        newp->initvarnos  = $1.initvarnos;
+                        newp->body         = $4;
+                        newp->exceptions   = $5;
+                        newp->isTryCatch   = true;
+                        check_labels($1.label, $8, @8);
+                        plpgsql_ns_pop();
+                        $$ = (PLpgSQL_stmt *)newp;
+                        record_stmt_label($1.label, (PLpgSQL_stmt *)newp);
+                    }
+
+stmt_catch    : K_END K_TRY K_BEGIN K_CATCH proc_sect
+                    {
+                        PLpgSQL_exception *newpe = (PLpgSQL_exception *)palloc0(sizeof(PLpgSQL_exception));
+                        newpe->lineno = plpgsql_location_to_lineno(@1);
+                        newpe->action = $5;
+                        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+                        newpe->conditions = plpgsql_parse_err_condition("others");
+                        PLpgSQL_exception_block *newp = (PLpgSQL_exception_block *)palloc(sizeof(PLpgSQL_exception_block));
+                        newp->exc_list = list_make1(newpe);
+                        $$ = newp;
+                    }
 
 goto_block_label	:
                     {

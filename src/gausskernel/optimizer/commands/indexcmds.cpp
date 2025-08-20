@@ -19,6 +19,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/cstore_delta.h"
+#include "access/nbtree.h"
 #include "access/reloptions.h"
 #include "access/tableam.h"
 #include "access/xact.h"
@@ -100,6 +101,8 @@ static void prepareReindexTableConcurrently(Oid relationOid, Oid relationPartOid
 static void prepareReindexIndexConcurrently(Oid relationOid, Oid relationPartOid, List** rt_heapRelationIds,
     List** rt_heapPartitionIds, List** rt_indexIds, List** rt_indexPartIds, MemoryContext private_context);
 static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, AdaptMem* memInfo = NULL, bool dbWide = false);
+static List* check_d_database_index_options(List* defList);
+static List* remove_d_database_index_options(List *defList);
 static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, const List* indexParams);
 static bool relationHasInformationalPrimaryKey(const Relation conrel);
 static void handleErrMsgForInfoCnstrnt(const IndexStmt* stmt, const Relation rel);
@@ -116,6 +119,7 @@ static void AddIndexColumnForCbi(IndexStmt* stmt);
 static void CheckIndexParamsNumber(IndexStmt* stmt);
 static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams);
 static bool CheckWhetherForbiddenFunctionalIdx(Oid relationId, Oid namespaceId, List* indexParams);
+static void CheckColumnTypeSupportsIndex(Oid relId, List* indexParams);
 
 struct ReindexIndexCallbackState {
     bool concurrent;        /* flag from statement */
@@ -779,10 +783,11 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         concurrent = false;
     }
 
-    if (concurrent && strcmp(stmt->accessMethod, "bm25") == 0) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("concurrent index creation is not supporteded for bm25")));
+    if (concurrent && (strcmp(stmt->accessMethod, "bm25") == 0 || strcmp(stmt->accessMethod, "hnsw") == 0 ||
+                       strcmp(stmt->accessMethod, "ivfflat") == 0 || strcmp(stmt->accessMethod, "diskann") == 0 ||
+                       strcmp(stmt->accessMethod, "bloom") == 0)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("concurrent index creation is not supported for %s", stmt->accessMethod)));
     }
 
     /* Don't suppport gin/gist index on global temporary table */
@@ -808,7 +813,10 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
      */
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
-    if (RelationIsPartitioned(rel) && strcmp(stmt->accessMethod, "bm25") == 0) {
+    if (RelationIsPartitioned(rel) && (strcmp(stmt->accessMethod, "bm25") == 0 ||
+        strcmp(stmt->accessMethod, "hnsw") == 0 ||
+        strcmp(stmt->accessMethod, "ivfflat") == 0 ||
+        strcmp(stmt->accessMethod, "diskann") == 0)) {
         elog(ERROR, "%s index is not supported for partition table.", (stmt->accessMethod));
     }
 
@@ -905,6 +913,8 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  errmsg("index of ledger user talbe can not contain \"hash\" column.")));
     }
+
+    CheckColumnTypeSupportsIndex(relationId, stmt->indexParams);
 
     SetPartionIndexType(stmt, rel, is_alter_table);
 
@@ -1308,6 +1318,8 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
      */
     if (stmt->whereClause)
         CheckPredicate((Expr*)stmt->whereClause);
+
+    stmt->options = check_d_database_index_options(stmt->options);
 
     if (RelationIsUstoreFormat(rel)) {
         DefElem* def = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE_LOWER));
@@ -2149,6 +2161,65 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
 }
 
 /*
+ * check d databse index options
+ */
+static List* check_d_database_index_options(List *defList)
+{
+    if (!DB_IS_CMPT(D_FORMAT)) {
+        return defList;
+    }
+
+    Datum index_reloptions;
+    int numoptions;
+
+    index_reloptions = transformRelOptions((Datum)0, defList, NULL, NULL, false, false);
+    parseRelOptions(index_reloptions, true, RELOPT_KIND_D_INDEX, &numoptions);
+    return remove_d_database_index_options(defList);
+}
+
+/*
+ * remove d database index options, only syntax compatible, except fillfactor option
+ */
+static List* remove_d_database_index_options(List *defList)
+{
+    ListCell *cell = NULL;
+    List *to_delete = NIL;
+    int i;
+
+    foreach (cell, defList) {
+        DefElem* defElem = (DefElem*)lfirst(cell);
+        for (i = 0; t_thrd.relopt_cxt.relOpts[i]; i++) {
+            if (!(t_thrd.relopt_cxt.relOpts[i]->kinds & RELOPT_KIND_D_INDEX)) {
+                continue;
+            }
+            if (pg_strcasecmp(defElem->defname, t_thrd.relopt_cxt.relOpts[i]->name) != 0) {
+                continue;
+            }
+            if (pg_strcasecmp(defElem->defname, "fillfactor") == 0) {
+                int fillfactor = intVal(defElem->arg);
+                if (D_DATABASE_MIN_FILLFACTOR <= fillfactor && fillfactor < A_DATABASE_MIN_FILLFACTOR) {
+                    ((Value *) defElem->arg)->val.ival = A_DATABASE_MIN_FILLFACTOR;
+                    ereport(NOTICE, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("parameter fillfactor will be set to 10 when it is less than 10.")));
+                }
+            } else {
+                to_delete = lappend(to_delete, defElem);
+                ereport(NOTICE, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("parameter \"%s\" is currently ignored.", defElem->defname)));
+            }
+        }
+    }
+
+    foreach (cell, to_delete) {
+        DefElem* defElem = (DefElem*)lfirst(cell);
+        defList = list_delete(defList, defElem);
+    }
+
+    list_free(to_delete);
+    return defList;
+}
+
+/*
  * @@GaussDB@@
  * Target		: data partition
  * Brief		:
@@ -2544,6 +2615,7 @@ void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, 
 
         attn++;
     }
+    indexInfo->ii_ExpressionUsers = get_user_from_index_expressions(indexInfo->ii_Expressions);
 }
 
 /*
@@ -3690,12 +3762,15 @@ static bool checkIndexForReindexConcurrently(Relation indexRelation, bool reinde
         return false;
     }
 
-    if (strcmp(indexRelation->rd_am->amname.data, "bm25") == 0) {
-        ereport(errorType, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("cannot reindex concurrently bm25 index \" %s.%s\"%s",
-                get_namespace_name(get_rel_namespace(indexRelation->rd_id)),
-                get_rel_name(indexRelation->rd_id),
-                reindexIndex ? "" : ", skipping")));
+    if (strcmp(indexRelation->rd_am->amname.data, "bm25") == 0 ||
+        strcmp(indexRelation->rd_am->amname.data, "hnsw") == 0 ||
+        strcmp(indexRelation->rd_am->amname.data, "ivfflat") == 0 ||
+        strcmp(indexRelation->rd_am->amname.data, "diskann") == 0) {
+        ereport(errorType,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("cannot reindex concurrently %s index \" %s.%s\"%s", indexRelation->rd_am->amname.data,
+                        get_namespace_name(get_rel_namespace(indexRelation->rd_id)), get_rel_name(indexRelation->rd_id),
+                        reindexIndex ? "" : ", skipping")));
         return false;
     }
 
@@ -5565,6 +5640,40 @@ CheckWhetherForbiddenFunctionalIdx(Oid relationId, Oid namespaceId, List* indexP
     return false;
 }
 
+static void CheckColumnTypeSupportsIndex(Oid relId, List* indexParams)
+{
+    ListCell* lc = NULL;
+    foreach (lc, indexParams) {
+        IndexElem* elem = (IndexElem*)lfirst(lc);
+        if (elem->name == NULL) {
+            continue;
+        }
+        HeapTuple atttuple = SearchSysCacheAttName(relId, elem->name);
+        Form_pg_attribute attform;
+        Oid atttype;
+        if (HeapTupleIsValid(atttuple)) {
+            attform = (Form_pg_attribute)GETSTRUCT(atttuple);
+            atttype = attform->atttypid;
+            switch (atttype) {
+                case NATURALOID:
+                case NATURALNOID:
+                case POSITIVEOID:
+                case POSITIVENOID:
+                case SIGNTYPEOID:
+                case SIMPLE_INTEGER_OID: {
+                    ereport(ERROR,
+                        (errmodule(MOD_EXECUTOR),
+                            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("not supported to create index on a column of type %s.",
+                                format_type_be(atttype))));
+                }
+                default:
+                    break;
+            }
+            ReleaseSysCache(atttuple);
+        }
+    }
+}
 
 #ifdef ENABLE_MULTIPLE_NODES
 /*

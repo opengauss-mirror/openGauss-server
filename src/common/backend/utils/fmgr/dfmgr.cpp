@@ -150,11 +150,8 @@ void load_file(const char* filename, bool restricted)
     /* Unload the library if currently loaded */
     internal_unload_library(fullname);
 
-    AutoRWLock libraryLock(&g_dlerror_lock_rw);
-    libraryLock.WrLock();
     /* Load the shared library */
     (void)internal_load_library(fullname);
-    libraryLock.UnLock();
 
     pfree_ext(fullname);
 }
@@ -249,9 +246,7 @@ void* internal_load_library(const char* libname)
         /* double check after we got write lock, maybe it has been load by another thread */
         file_scanner = get_file_scanner(libname, &stat_buf);
         if (file_scanner != NULL) {
-             /* other thread has added, we can change back to read lock and break */
-            ResourceOwnerForgetIfExistPthreadRWlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
-            PthreadRWlockRdlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
+             /* other thread has added, we can break */
             goto file_scanner_not_null;
         }
         size_t tmplen = 0;
@@ -379,10 +374,6 @@ void* internal_load_library(const char* libname)
             file_tail->next = file_scanner;
 
         file_tail = file_scanner;
-
-        /* change file_list done, we can change back to read lock now */
-        ResourceOwnerForgetIfExistPthreadRWlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
-        PthreadRWlockRdlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
     }
 
 file_scanner_not_null:
@@ -541,8 +532,6 @@ static void internal_unload_library(const char* libname)
      * inode, else internal_load_library() will still think it's present.
      */
 
-    AutoRWLock dlerrorLock(&g_dlerror_lock_rw);
-    dlerrorLock.WrLock();
     AutoRWLock libraryLock(&g_file_list_lock_rw);
     libraryLock.WrLock();
 
@@ -573,10 +562,7 @@ static void internal_unload_library(const char* libname)
             prv = file_scanner;
         }
     }
-
     libraryLock.UnLock();
-    dlerrorLock.UnLock();
-
 #endif /* NOT_USED */
 }
 

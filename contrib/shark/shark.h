@@ -18,6 +18,9 @@ extern "C" Datum suser_name(PG_FUNCTION_ARGS);
 extern "C" Datum suser_id(PG_FUNCTION_ARGS);
 extern "C" Datum get_scope_identity(PG_FUNCTION_ARGS);
 extern "C" Datum get_ident_current(PG_FUNCTION_ARGS);
+extern "C" Datum numeric_log10(PG_FUNCTION_ARGS);
+extern "C" Datum shark_timestamp_diff(PG_FUNCTION_ARGS);
+extern "C" Datum shark_timestamp_diff_big(PG_FUNCTION_ARGS);
 static void fetch_cursor_end_hook(int fetch_status);
 static void rowcount_hook(int64 rowcount);
 extern void set_procid(Oid oid);
@@ -27,6 +30,7 @@ extern void PltsqlRevertLastScopeIdentity(int nestLevel);
 extern int128 last_scope_identity_value();
 extern char* GetPhysicalSchemaName(char *dbName, const char *schemaName);
 extern void AssignIdentitycmdsHook(void);
+extern void InitIntervalLookup(void);
 
 typedef struct SeqTableIdentityData {
     Oid relid;                /* pg_class OID of this sequence */

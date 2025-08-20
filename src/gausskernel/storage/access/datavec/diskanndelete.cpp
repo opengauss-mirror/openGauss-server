@@ -27,7 +27,7 @@
 #include "nodes/execnodes.h"
 #include "access/tableam.h"
 #include "executor/executor.h"
-
+#include "access/generic_xlog.h"
 #include "access/datavec/diskann.h"
 static constexpr bool IsPartitionedRelation(char parttype)
 {
@@ -119,12 +119,14 @@ void DiskAnnMarkDead(Relation rel, Datum* values, ItemPointer tid)
     IndexTuple indexTuple = index_form_tuple(RelationGetDescr(rel), value, isnull);
     indexTuple->t_tid = *tid;
 
+    GenericXLogState *state;
     Buffer buf = DiskannGetSameIndexTuple(rel, so, indexTuple);
     if (buf != InvalidBuffer) {
-        Page page = BufferGetPage(buf);
+        state = GenericXLogStart(rel);
+        Page page = GenericXLogRegisterBuffer(state, buf, 0);
         ItemId itemid = PageGetItemId(page, FirstOffsetNumber);
         ItemIdMarkDead(itemid);
-        MarkBufferDirty(buf);
+        GenericXLogFinish(state);
         UnlockReleaseBuffer(buf);
     }
 

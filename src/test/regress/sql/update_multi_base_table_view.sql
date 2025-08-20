@@ -180,11 +180,7 @@ SELECT * FROM v_sidejoin_update WHERE empno=7369;
 ROLLBACK;
 
 CREATE USER testusr PASSWORD '1234@abcd';
-BEGIN;
-SELECT usename, usesuper FROM pg_user WHERE usename='testusr';
 UPDATE pg_user SET usesuper='t'::bool WHERE usename='testusr';
-SELECT usename, usesuper FROM pg_user WHERE usename='testusr';
-ROLLBACK;
 DROP USER testusr;
 
 CREATE TABLE t1 (a1 int primary key);

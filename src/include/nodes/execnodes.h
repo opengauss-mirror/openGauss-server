@@ -90,6 +90,8 @@ typedef struct IndexInfo {
     int ii_NumIndexKeyAttrs;    /* number of key columns in index */
     AttrNumber ii_KeyAttrNumbers[INDEX_MAX_KEYS];
     List* ii_Expressions;       /* list of Expr */
+    List* ii_ExpressionUsers;   /* InvalidOid if don't have expression index or expression is system function.
+                                Save expression's creater's oid */
     List* ii_ExpressionsState;  /* list of ExprState */
     List* ii_Predicate;         /* list of Expr */
     List* ii_PredicateState;    /* list of ExprState */
@@ -612,6 +614,11 @@ typedef struct BloomFilterControl {
 
 #define InvalidBktId  (-1)    /* invalid hash-bucket id */
 
+typedef struct EStateFuncCache
+{
+    FuncCache *fncaches;
+} EStateFuncCache;
+
 /* ----------------
  *	  EState information
  *
@@ -697,6 +704,9 @@ typedef struct EState {
      * tuple.  Note that it will be created only if needed.
      */
     ExprContext* es_per_tuple_exprcontext;
+
+    struct EState* es_topstate;
+    EStateFuncCache	es_funcache;
 
     /*
      * These fields are for re-evaluating plan quals when an updated tuple is
@@ -2619,6 +2629,7 @@ typedef struct SortState {
     int64 bound;          /* if bounded, how many tuples are needed */
     bool sort_Done;       /* sort completed yet? */
     bool bounded_Done;    /* value of bounded we did the sort with */
+    bool datumSort;       /* Datum sort instead of tuple sort? */
     int64 bound_Done;     /* value of bound we did the sort with */
     void* tuplesortstate; /* private state of tuplesort.c */
     int32 local_work_mem; /* work_mem local for this sort */

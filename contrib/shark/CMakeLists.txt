@@ -104,6 +104,7 @@ set(TGT_shark_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/dbcc.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/varlena.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sqlvariant.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/datefuncs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BEPARSERDIR}/gram-backend.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BEPARSERDIR}/keywords.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BEPARSERDIR}/varbinary.cpp
@@ -114,6 +115,7 @@ set(TGT_shark_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/${PLDIR}/pl_scanner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BASECODEDIR}/tablecmds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/${BASECODEDIR}/identitycmds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/${PLDIR}/pl_funcs.cpp
 )
 set(TGT_shark_INC 
     ${PROJECT_OPENGS_DIR}/contrib/shark

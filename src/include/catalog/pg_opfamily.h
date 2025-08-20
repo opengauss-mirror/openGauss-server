@@ -238,6 +238,11 @@ DATA(insert OID = 8520 (403 halfvec_ops PGNSP PGUID));
 DATA(insert OID = 8375 (4439 vector_ops PGNSP PGUID));
 DATA(insert OID = 8376 (4439 sparsevec_ops PGNSP PGUID));
 DATA(insert OID = 8582 (4439 halfvec_ops PGNSP PGUID));
+
+/* bloom index ops */
+DATA(insert OID = 8340 (8304 int4_ops PGNSP PGUID));
+DATA(insert OID = 8341 (8304 text_ops PGNSP PGUID));
+
 /* ubtree index */
 #define BTREE_UBTREE_FAM_OID_DIFF 5000
 #define BTREE_UBTREE_FAM_OID_SPECIAL_DIFF 4000

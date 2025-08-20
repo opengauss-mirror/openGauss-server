@@ -268,6 +268,9 @@ typedef struct PortalData {
      * A specific data link list hung under the portal.
      * The special data mounted in the portal can be used during cleaning,such as utl_tcp.
      */
+    MemoryContext func_retcache_cxt;
+    EState* top_estate;
+    int funcRetcacheSlotCount;
 } PortalData;
 
 /*

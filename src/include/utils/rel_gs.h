@@ -182,6 +182,12 @@ typedef struct RelationMetaData {
 #define UBTREE_INDEX_TYPE_PCR "pcr"
 #define UBTREE_INDEX_TYPE_RCR "rcr"
 
+#define DATA_COMPRESSION_D_INDEX_NONE "none"
+#define DATA_COMPRESSION_D_INDEX_ROW "row"
+#define DATA_COMPRESSION_D_INDEX_PAGE "page"
+#define DATA_COMPRESSION_D_INDEX_COLUMNSTORE "columnstore"
+#define DATA_COMPRESSION_D_INDEX_COLUMNSTROE_ARCHIVE "columnstore_archive"
+
 /*
  * values for different table access method types.
  */

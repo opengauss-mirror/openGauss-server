@@ -52,3 +52,11 @@ DROP TABLE IF EXISTS test_row_count2;
 DROP TABLE IF EXISTS merge_tab_row_count;
 DROP PROCEDURE IF EXISTS proc_row_count;
 select row_count();
+
+create table test_row_count1 (a int primary key, b int);
+create table test_row_count2 (a int, b int, constraint test_row_count_fk foreign key (a) REFERENCES test_row_count1 (a));
+insert into test_row_count1 values (1,1);
+insert into test_row_count2 values (1,1);
+select row_count();
+DROP TABLE IF EXISTS test_row_count2;
+DROP TABLE IF EXISTS test_row_count1;

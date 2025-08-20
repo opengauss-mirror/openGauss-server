@@ -805,6 +805,33 @@ void SonicHashAgg::initHashTable()
     m_arrayExpandSize += (sizeof(uint32) * m_atomSize + sizeof(uint32) * m_atomSize);
 }
 
+void SonicHashAgg::initSimpleMatchFuncByType(const int typesize, const int index)
+{
+    switch (typesize) {
+        case sizeof(uint8):
+            m_arrayKeyMatch[index] = &SonicHashAgg::matchArray<true, uint8>;
+            m_valueKeyMatch[index] = &SonicHashAgg::matchValue<true, uint8>;
+            break;
+        case sizeof(uint16):
+            m_arrayKeyMatch[index] = &SonicHashAgg::matchArray<true, uint16>;
+            m_valueKeyMatch[index] = &SonicHashAgg::matchValue<true, uint16>;
+            break;
+        case sizeof(uint32):
+            m_arrayKeyMatch[index] = &SonicHashAgg::matchArray<true, uint32>;
+            m_valueKeyMatch[index] = &SonicHashAgg::matchValue<true, uint32>;
+            break;
+        case sizeof(uint64):
+            m_arrayKeyMatch[index] = &SonicHashAgg::matchArray<true, uint64>;
+            m_valueKeyMatch[index] = &SonicHashAgg::matchValue<true, uint64>;
+            break;
+        default: {
+            Assert(false);
+            ereport(ERROR, (errmsg("invalid datum int array size: %d", index)));
+            break;
+        }
+    }
+}
+
 /*
  * @Description	: Initialize hash match function for datum array and value.
  * @in desc		: Tuple descriptor used to describe data type info.
@@ -818,8 +845,7 @@ void SonicHashAgg::initMatchFunc(TupleDesc desc, uint16* keyIdx, uint16 keyNum)
 
     for (int i = 0; i < keyNum; i++) {
         if (integerType(m_data[m_keyIdxInSonic[i]]->m_desc.typeId)) {
-            m_arrayKeyMatch[i] = &SonicHashAgg::matchArray<true>;
-            m_valueKeyMatch[i] = &SonicHashAgg::matchValue<true>;
+            initSimpleMatchFuncByType(m_data[m_keyIdxInSonic[i]]->m_desc.typeSize, i);
         } else {
             m_arrayKeyMatch[i] = &SonicHashAgg::matchArray<false>;
             m_valueKeyMatch[i] = &SonicHashAgg::matchValue<false>;
@@ -1305,7 +1331,7 @@ void SonicHashAgg::Profile(char* stats, bool* can_wlm_warning_statistics)
  * @in cmpIdx		: The location of hash table.
  * @return		: Return true is matched.
  */
-template <bool simpleType>
+template <bool simpleType, typename cmpType = uint64>
 bool SonicHashAgg::matchValue(ScalarVector* pVector, uint16 keyIdx, int16 pVectorIdx, uint32 cmpIdx)
 {
     Datum val;
@@ -1318,7 +1344,7 @@ bool SonicHashAgg::matchValue(ScalarVector* pVector, uint16 keyIdx, int16 pVecto
     null_check = BOTH_NULL(pVector->m_flag[pVectorIdx], flag);
 
     if (simpleType) {
-        notnull_check = notnull_check && (pVector->m_vals[pVectorIdx] == val);
+        notnull_check = notnull_check && ((cmpType)pVector->m_vals[pVectorIdx] == val);
     } else {
         FunctionCallInfoData fcinfo;
         Datum args[2];
@@ -1338,7 +1364,7 @@ bool SonicHashAgg::matchValue(ScalarVector* pVector, uint16 keyIdx, int16 pVecto
  * @in keyIdx		: The serial number of the hash key.
  * @in cmpRows	: The number of rows we need to consider.
  */
-template <bool simpleType>
+template <bool simpleType, typename cmpType = uint64>
 void SonicHashAgg::matchArray(ScalarVector* pVector, uint16 keyIdx, uint16 cmpRows)
 {
     Datum val;
@@ -1358,7 +1384,7 @@ void SonicHashAgg::matchArray(ScalarVector* pVector, uint16 keyIdx, uint16 cmpRo
             null_check = BOTH_NULL(pVector->m_flag[m_suspectIdx[i]], flag);
 
             if (simpleType) {
-                notnull_check = notnull_check && (pVector->m_vals[m_suspectIdx[i]] == val);
+                notnull_check = notnull_check && ((cmpType)pVector->m_vals[m_suspectIdx[i]] == val);
                 m_match[i] = notnull_check || null_check;
             } else {
                 fcinfo.arg[0] = pVector->m_vals[m_suspectIdx[i]];

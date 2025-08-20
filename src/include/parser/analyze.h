@@ -44,6 +44,7 @@ extern bool analyze_requires_snapshot(Node* parseTree);
 extern void CheckSelectLocking(Query* qry);
 extern void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength strength, LockWaitPolicy waitPolicy, bool pushedDown,
                                int waitSec);
+extern void CheckValidResult(Query* parsetree, int resultRelation);
 #ifdef ENABLE_MOT
 extern void CheckTablesStorageEngine(Query* qry, StorageEngineType* type);
 

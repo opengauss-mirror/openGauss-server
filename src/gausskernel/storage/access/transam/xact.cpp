@@ -174,9 +174,11 @@ static THR_LOCAL TransactionStateData TopTransactionStateData = {
     false,              /* didLogXid */
 #ifdef ENABLE_MOT
     NULL,               /* link to parent state block */
+    NULL,               /* NULL stand for not in try catch block */
     SE_TYPE_UNSPECIFIED /* storage engine used in transaction */
 #else
-    NULL                /* link to parent state block */
+    NULL,               /* link to parent state block */
+    NULL                /* NULL stand for not in try catch block */
 #endif
 };
 
@@ -314,6 +316,7 @@ void InitTopTransactionState(void)
         false,
         false,
         false,
+        NULL,
         NULL
     };
 }
@@ -4522,6 +4525,8 @@ void AbortCurrentTransaction(bool STP_rollback)
 {
     TransactionState s = CurrentTransactionState;
     bool PerfectRollback = false;
+
+    SetTryCatchInfo();
     /*
      * Here, we just detect whether there are any pending undo actions so that
      * we can skip releasing the locks during abort transaction.  We don't
@@ -6785,6 +6790,7 @@ static void PushTransaction(void)
     s->txnKey.txnTimeline = InvalidTransactionTimeline;
     s->subTransactionId = t_thrd.xact_cxt.currentSubTransactionId;
     s->parent = p;
+    s->trycatchContext = p->trycatchContext;
     s->nestingLevel = p->nestingLevel + 1;
     s->gucNestLevel = NewGUCNestLevel();
     s->savepointLevel = p->savepointLevel;
@@ -8671,4 +8677,228 @@ void ClearTxnInfoForSSLibpqsw()
 {
     CurrentTransactionState->transactionId = InvalidTransactionId;
     SnapshotSetCommandId(0);
+}
+
+static void CreateNewTryCatchSavePoint(TransactionTryCatchContext* trycatchContext)
+{
+    Assert(trycatchContext->status == TRY_CATCH_IN_TRY);
+    Assert(!trycatchContext->hasSavepoint);
+    GetCurrentTransactionId();
+    DefineSavepoint("__trycatch_savepoint");
+    trycatchContext->hasSavepoint = true;
+}
+
+static void ReleaseTryCatchSavePoint(TransactionTryCatchContext* trycatchContext)
+{
+    Assert(trycatchContext->status == TRY_CATCH_IN_TRY);
+    Assert(trycatchContext->hasSavepoint);
+    RequireTransactionChain(true, "RELEASE TRYCATCH SAVEPOINT");
+    ReleaseSavepoint("__trycatch_savepoint", false);
+    trycatchContext->hasSavepoint = false;
+}
+
+static void RollbackToTryCatchSavePoint(TransactionTryCatchContext* trycatchContext)
+{
+    Assert(trycatchContext->status == TRY_CATCH_TRY_FAILED);
+    Assert(trycatchContext->hasSavepoint);
+    RequireTransactionChain(true, "ROLLBACK TO TRYCATCH SAVEPOINT");
+    RollbackToSavepoint("__trycatch_savepoint", false);
+    trycatchContext->hasSavepoint = false;
+}
+
+void TransactionBeginTry()
+{
+    TransactionState s = CurrentTransactionState;
+    TransactionTryCatchContext* trycatchContext = NULL;
+
+    if (IsTransactionBlock()) {
+        ereport(ERROR, (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+            errmsg("there is already a transaction in progress")));
+    }
+
+    MemoryContext curContext = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+    trycatchContext = (TransactionTryCatchContext*)MemoryContextAllocZero(u_sess->top_transaction_mem_cxt,
+                                                                          sizeof(TransactionTryCatchContext));
+    trycatchContext->hasSavepoint = false;
+    trycatchContext->edata = NULL;
+    trycatchContext->status = TRY_CATCH_IN_TRY;
+    MemoryContextSwitchTo(curContext);
+    s->trycatchContext = trycatchContext;
+}
+
+void TransactionEndTryBeginCatch()
+{
+    TransactionState s = CurrentTransactionState;
+    TransactionTryCatchContext* trycatchContext = s->trycatchContext;
+
+    if (!IsTransactionInState(IN_TRY)) {
+        ereport(ERROR, (errcode(ERRCODE_NO_ACTIVE_SQL_TRANSACTION),
+            errmsg("there is no try block in progress")));
+    }
+
+    switch (trycatchContext->status) {
+        case TRY_CATCH_IN_TRY:
+            ReleaseTryCatchSavePoint(trycatchContext);
+            trycatchContext->status = TRY_CATCH_CATCH_IGNORED;
+            break;
+        case TRY_CATCH_TRY_FAILED:
+            RollbackToTryCatchSavePoint(trycatchContext);
+            trycatchContext->status = TRY_CATCH_IN_CATCH;
+            break;
+        default:
+            Assert(0);
+    }
+}
+
+void TransactionEndCatch()
+{
+    TransactionState s = CurrentTransactionState;
+    TransactionTryCatchContext* trycatchContext = s->trycatchContext;
+
+    if (!IsTransactionInState(IN_CATCH)) {
+        ereport(ERROR, (errcode(ERRCODE_NO_ACTIVE_SQL_TRANSACTION),
+            errmsg("there is no catch block in progress")));
+    }
+
+    while (s != NULL) {
+        s->trycatchContext = NULL;
+        s = s->parent;
+    }
+
+    if (trycatchContext->edata) {
+        FreeErrorData(trycatchContext->edata);
+    }
+    pfree(trycatchContext);
+}
+
+void SetTryCatchInfo()
+{
+    TransactionState s = CurrentTransactionState;
+    TransactionTryCatchContext* trycatchContext = s->trycatchContext;
+
+    if (!IsTransactionInState(IN_TRY)) {
+        return;
+    }
+
+    if (trycatchContext->status == TRY_CATCH_TRY_FAILED) {
+        return;
+    }
+
+    MemoryContext curContext = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+    trycatchContext->edata = CopyErrorData();
+    (void)MemoryContextSwitchTo(curContext);
+
+    Assert(trycatchContext->status == TRY_CATCH_IN_TRY);
+    trycatchContext->status = TRY_CATCH_TRY_FAILED;
+}
+
+bool IsTransactionInState(TryCatchState st)
+{
+    TransactionState s = CurrentTransactionState;
+    TransactionTryCatchContext* trycatchContext = s->trycatchContext;
+    switch (st) {
+        case IN_TRYCATCH:
+            return trycatchContext != NULL;
+        case IN_TRY:
+            if (trycatchContext != NULL) {
+                if (trycatchContext->status == TRY_CATCH_IN_TRY ||
+                    trycatchContext->status == TRY_CATCH_TRY_FAILED) {
+                    return true;
+                }
+            }
+            break;
+        case IN_CATCH:
+            if (trycatchContext != NULL) {
+                if (trycatchContext->status == TRY_CATCH_IN_CATCH ||
+                    trycatchContext->status == TRY_CATCH_CATCH_IGNORED) {
+                    return true;
+                }
+            }
+            break;
+        default:
+            ereport(ERROR, (errcode(ERRCODE_NO_ACTIVE_SQL_TRANSACTION),
+                    errmsg("UNKNOWN TRY CATCH STATE")));
+    }
+    return false;
+}
+
+void PrepareTryCatchSavePoint()
+{
+    TransactionState s = CurrentTransactionState;
+    TransactionTryCatchContext* trycatchContext = s->trycatchContext;
+
+    if (trycatchContext == NULL) {
+        return;
+    }
+
+    if (trycatchContext->status != TRY_CATCH_IN_TRY) {
+        return;
+    }
+
+    StartTransactionCommand();
+    CreateNewTryCatchSavePoint(trycatchContext);
+    CommitTransactionCommand();
+}
+
+bool PrepareForSQLInTryCatch(TransactionStmtKind kind)
+{
+    TransactionState s = CurrentTransactionState;
+    TransactionTryCatchContext* trycatchContext = s->trycatchContext;
+    Assert(trycatchContext);
+
+    bool execSql = true;
+    switch (trycatchContext->status) {
+        case TRY_CATCH_IN_TRY:
+            if (!trycatchContext->hasSavepoint) {
+                StartTransactionCommand();
+                CreateNewTryCatchSavePoint(trycatchContext);
+                CommitTransactionCommand();
+            }
+            break;
+        case TRY_CATCH_TRY_FAILED:
+            if (kind != TRANS_STMT_END_TRY_BEGIN_CATCH) {
+                execSql = false;
+                ereport(NOTICE,
+                    (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
+                        errmsg("current try block is failed, commands ignored until end of try block")));
+            }
+            break;
+        case TRY_CATCH_IN_CATCH:
+            if (IsAbortedTransactionBlockState() && kind != TRANS_STMT_END_CATCH) {
+                execSql = false;
+                ereport(ERROR,
+                    (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
+                        errmsg("current catch block is failed, commands ignored until end of catch block")));
+            }
+            break;
+        case TRY_CATCH_CATCH_IGNORED:
+            if (kind != TRANS_STMT_END_CATCH) {
+                execSql = false;
+                ereport(NOTICE,
+                    (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
+                        errmsg("current try block is successfully, commands ignored until end of catch block")));
+            }
+            break;
+        default:
+            Assert(0);
+    }
+    return execSql;
+}
+ 
+void FinishSQLInTryCatch()
+{
+    TransactionState s = CurrentTransactionState;
+    TransactionTryCatchContext* trycatchContext = s->trycatchContext;
+
+    if (trycatchContext == NULL) {
+        return;
+    }
+
+    if (!trycatchContext->hasSavepoint) {
+        return;
+    }
+
+    StartTransactionCommand();
+    ReleaseTryCatchSavePoint(trycatchContext);
+    CommitTransactionCommand();
 }

@@ -2740,11 +2740,8 @@ found_branch:
                     ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
                 }
 
-                if (ENABLE_ASYNC_REDO) {
-                    if (g_instance.smb_cxt.use_smb && t_thrd.role != SMBWRITER &&
-                        g_instance.smb_cxt.start_flag && !g_instance.smb_cxt.end_flag) {
-                        smb_recovery::SMBPullOnePageWithBuf(bufHdr);
-                    }
+                if (t_thrd.role != SMBWRITER && ENABLE_SMB_PULL_PAGE) {
+                    smb_recovery::SMBPullOnePageWithBuf(bufHdr);
                 }
             }
             return BufferDescriptorGetBuffer(bufHdr);
@@ -2994,11 +2991,8 @@ found_branch:
     TRACE_POSTGRESQL_BUFFER_READ_DONE(forkNum, blockNum, smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
                                       smgr->smgr_rnode.node.relNode, smgr->smgr_rnode.backend, isExtend, found);
 
-    if (ENABLE_ASYNC_REDO) {
-        if (g_instance.smb_cxt.use_smb && t_thrd.role != SMBWRITER &&
-            g_instance.smb_cxt.start_flag && !g_instance.smb_cxt.end_flag) {
-            smb_recovery::SMBPullOnePageWithBuf(bufHdr);
-        }
+    if (t_thrd.role != SMBWRITER && ENABLE_SMB_PULL_PAGE) {
+        smb_recovery::SMBPullOnePageWithBuf(bufHdr);
     }
     return BufferDescriptorGetBuffer(bufHdr);
 }
@@ -3165,13 +3159,10 @@ retry:
             goto retry;
         }
 
-        if (ENABLE_ASYNC_REDO) {
-            if (g_instance.smb_cxt.use_smb && t_thrd.role != SMBWRITER &&
-                g_instance.smb_cxt.start_flag && !g_instance.smb_cxt.end_flag &&
-                smb_recovery::CheckPagePullStateFromSMB(buf->tag) == SMB_REDOING) {
-                UnpinBuffer(buf, true);
-                goto retry;
-            }
+        if (t_thrd.role != SMBWRITER && ENABLE_SMB_PULL_PAGE &&
+            smb_recovery::CheckPagePullStateFromSMB(buf->tag) == smb_recovery::SMB_PAGE_REDOING) {
+            UnpinBuffer(buf, true);
+            goto retry;
         }
 
         *found = TRUE;
@@ -3432,13 +3423,10 @@ retry_new_buffer:
 smb_retry_new_buffer:
                 valid = PinBuffer(buf, strategy);
 
-                if (ENABLE_ASYNC_REDO) {
-                    if (g_instance.smb_cxt.use_smb && t_thrd.role != SMBWRITER &&
-                        g_instance.smb_cxt.start_flag && !g_instance.smb_cxt.end_flag &&
-                        smb_recovery::CheckPagePullStateFromSMB(buf->tag) == SMB_REDOING) {
-                        UnpinBuffer(buf, true);
-                        goto smb_retry_new_buffer;
-                    }
+                if (t_thrd.role != SMBWRITER && ENABLE_SMB_PULL_PAGE &&
+                    smb_recovery::CheckPagePullStateFromSMB(buf->tag) == smb_recovery::SMB_PAGE_REDOING) {
+                    UnpinBuffer(buf, true);
+                    goto smb_retry_new_buffer;
                 }
 
                 /* Can release the mapping lock as soon as we've pinned it */

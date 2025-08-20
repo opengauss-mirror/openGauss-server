@@ -301,6 +301,7 @@ FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
          amproclefttype = amprocrighttype AND amproclefttype = opcintype
 WHERE am.amname <> 'btree' AND am.amname <> 'gist' AND am.amname <> 'gin' AND am.amname <> 'ubtree'
     AND am.amname <> 'hnsw' AND am.amname <> 'ivfflat' AND am.amname <> 'bm25' AND am.amname <> 'diskann'
+    AND am.amname <> 'bloom'
 GROUP BY amname, amsupport, opcname, amprocfamily
 HAVING count(*) != amsupport OR amprocfamily IS NULL;
 

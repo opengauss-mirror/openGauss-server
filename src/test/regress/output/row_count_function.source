@@ -141,3 +141,16 @@ select row_count();
          0
 (1 row)
 
+create table test_row_count1 (a int primary key, b int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_row_count1_pkey" for table "test_row_count1"
+create table test_row_count2 (a int, b int, constraint test_row_count_fk foreign key (a) REFERENCES test_row_count1 (a));
+insert into test_row_count1 values (1,1);
+insert into test_row_count2 values (1,1);
+select row_count();
+ row_count 
+-----------
+         1
+(1 row)
+
+DROP TABLE IF EXISTS test_row_count2;
+DROP TABLE IF EXISTS test_row_count1;

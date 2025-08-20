@@ -1063,7 +1063,8 @@ void CalcMaxBackends(void)
                                        AUXILIARY_BACKENDS +
                                        AV_LAUNCHER_PROCS +
                                        g_max_worker_processes +
-                                       thread_pool_stream_proc_num;
+                                       thread_pool_stream_proc_num +
+                                       (ENABLE_DMS ? NUM_DMS_CALLBACK_PROCS : 0);
 
 #ifndef ENABLE_LITE_MODE
     g_instance.shmem_cxt.MaxReserveBackendId = g_instance.attr.attr_sql.job_queue_processes +
@@ -1072,7 +1073,8 @@ void CalcMaxBackends(void)
                                                (thread_pool_worker_num * STREAM_RESERVE_PROC_TIMES) +
                                                AUXILIARY_BACKENDS +
                                                AV_LAUNCHER_PROCS +
-                                               g_max_worker_processes;
+                                               g_max_worker_processes +
+                                               (ENABLE_DMS ? NUM_DMS_CALLBACK_PROCS : 0);
 #else
     g_instance.shmem_cxt.MaxReserveBackendId = g_instance.attr.attr_sql.job_queue_processes +
                                                g_instance.attr.attr_storage.autovacuum_max_workers +
@@ -1080,7 +1082,8 @@ void CalcMaxBackends(void)
                                                thread_pool_worker_num +
                                                AUXILIARY_BACKENDS +
                                                AV_LAUNCHER_PROCS +
-                                               g_max_worker_processes;
+                                               g_max_worker_processes +
+                                               (ENABLE_DMS ? NUM_DMS_CALLBACK_PROCS : 0);
 #endif
     Assert(g_instance.shmem_cxt.MaxBackends <= MAX_BACKENDS);
 }
@@ -6403,6 +6406,14 @@ static void pmdie(SIGNAL_ARGS)
                 ExitPostmaster(0);
             }
 
+            smb_recovery::KillSMBWriterThreads();
+            if (g_instance.smb_cxt.SMBAlyPID != 0) {
+                signal_child(g_instance.smb_cxt.SMBAlyPID, SIGTERM);
+            }
+            if (g_instance.smb_cxt.SMBAlyAuxPID != 0) {
+                signal_child(g_instance.smb_cxt.SMBAlyAuxPID, SIGTERM);
+            }
+
             if (g_instance.pid_cxt.StartupPID != 0) {
                 ereport(LOG, (errmsg("send to startup shutdown request")));
                 signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
@@ -6644,14 +6655,6 @@ static void pmdie(SIGNAL_ARGS)
              * PostmasterStateMachine will take the next step.
              */
             PostmasterStateMachine();
-            if (g_instance.smb_cxt.SMBWriterPID != 0) {
-                signal_child(g_instance.smb_cxt.SMBWriterPID, SIGTERM);
-                for (int i = 0; i < smb_recovery::SMB_BUF_MGR_NUM - 1; i++) {
-                    if (g_instance.smb_cxt.SMBWriterAuxPID[i] != 0) {
-                        signal_child(g_instance.smb_cxt.SMBWriterAuxPID[i], SIGTERM);
-                    }
-                }
-            }
             break;
 
         case SIGQUIT:
@@ -6852,6 +6855,8 @@ static void ProcessDemoteRequest(void)
 
                 if (g_instance.pid_cxt.SqlLimitPID != 0)
                     signal_child(g_instance.pid_cxt.SqlLimitPID, SIGTERM);
+
+                smb_recovery::KillSMBWriterThreads();
 
 #ifdef ENABLE_HTAP
                 if (g_instance.pid_cxt.IMCStoreVacuumPID != 0)
@@ -7084,6 +7089,8 @@ dms_demote:
                     if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
                         signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
 
+                    smb_recovery::KillSMBWriterThreads();
+
 #ifdef ENABLE_HTAP
                     if (g_instance.pid_cxt.IMCStoreVacuumPID != 0){
                         signal_child(g_instance.pid_cxt.IMCStoreVacuumPID, SIGTERM);
@@ -7195,14 +7202,6 @@ dms_demote:
      * PostmasterStateMachine will take the next step.
      */
     PostmasterStateMachine();
-    if (g_instance.smb_cxt.SMBWriterPID != 0) {
-        signal_child(g_instance.smb_cxt.SMBWriterPID, SIGTERM);
-        for (int i = 0; i < smb_recovery::SMB_BUF_MGR_NUM - 1; i++) {
-            if (g_instance.smb_cxt.SMBWriterAuxPID[i] != 0) {
-                signal_child(g_instance.smb_cxt.SMBWriterAuxPID[i], SIGTERM);
-            }
-        }
-    }
 }
 
 /*

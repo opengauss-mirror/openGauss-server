@@ -301,6 +301,252 @@ DATA(insert (	90 2205 1079 i f _null_));
 DATA(insert ( 1043 2205 1079 i f _null_));
 DATA(insert ( 3969 2205 1079 i f _null_));
 
+/* other -> natural */
+DATA(insert (5545 5850 5854 i f _null_));
+DATA(insert (21 5850 5851 i f _null_));
+DATA(insert (23 5850 5852 i f _null_));
+DATA(insert (20 5850 5855 a f _null_));
+DATA(insert (34 5850 5856 a f _null_));
+DATA(insert (700 5850 5857 i f _null_));
+DATA(insert (701 5850 5858 i f _null_));
+DATA(insert (1700 5850 5859 i f _null_));
+DATA(insert (1560 5850 5860 e f _null_));
+DATA(insert (16 5850 5853 i f _null_));
+DATA(insert (25 5850 5861 i f _null_));
+DATA(insert (18 5850 5862 e f _null_));
+DATA(insert (1043 5850 5863 i f _null_));
+DATA(insert (1042 5850 5864 i f _null_));
+DATA(insert (5852 5850    0 i b _null_));
+DATA(insert (5854 5850    0 i b _null_));
+DATA(insert (5856 5850    0 i b _null_));
+DATA(insert (5858 5850 5852 i f _null_));
+DATA(insert (5860 5850 5852 i f _null_));
+
+/* natural -> other */
+DATA(insert (5850 5545 5526 a f _null_));
+DATA(insert (5850	 21  314 a f _null_));
+DATA(insert (5850	 23    0 i b _null_));
+DATA(insert (5850	 20  481 i f _null_));
+DATA(insert (5850	 34 6409 i f _null_));
+DATA(insert (5850	700  318 i f _null_));
+DATA(insert (5850	701  316 i f _null_));
+DATA(insert (5850 1700 1740 i f _null_));
+DATA(insert (5850 1560 1683 e f _null_));
+DATA(insert (5850	 16 2557 i f _null_));
+DATA(insert (5850	 25 4167 i f _null_));
+DATA(insert (5850	 18   78 e f _null_));
+DATA(insert (5850 1043 4181 i f _null_));
+DATA(insert (5850 1042 3192 i f _null_));
+DATA(insert (5850 5852 5871 i f _null_));
+DATA(insert (5850 5854 5890 i f _null_));
+DATA(insert (5850 5856 5909 i f _null_));
+DATA(insert (5850 5858 5928 i f _null_));
+DATA(insert (5850 5860 5945 i f _null_));
+
+DATA(insert (5850   90 4167 i f _null_));
+DATA(insert (5850  790 3811 a f _null_));
+DATA(insert (5850 1186 4225 i f _null_));
+
+/* other -> naturaln */
+DATA(insert (5545 5852 5873 i f _null_));
+DATA(insert (21 5852 5870 i f _null_));
+DATA(insert (23 5852 5871 i f _null_));
+DATA(insert (20 5852 5874 a f _null_));
+DATA(insert (34 5852 5875 a f _null_));
+DATA(insert (700 5852 5876 i f _null_));
+DATA(insert (701 5852 5877 i f _null_));
+DATA(insert (1700 5852 5878 i f _null_));
+DATA(insert (1560 5852 5879 e f _null_));
+DATA(insert (16 5852 5872 i f _null_));
+DATA(insert (25 5852 5880 i f _null_));
+DATA(insert (18 5852 5881 e f _null_));
+DATA(insert (1043 5852 5882 i f _null_));
+DATA(insert (1042 5852 5883 i f _null_));
+DATA(insert (5854 5852 5871 i f _null_));
+DATA(insert (5856 5852    0 i b _null_));
+DATA(insert (5858 5852 5871 i f _null_));
+DATA(insert (5860 5852 5871 i f _null_));
+
+/* naturaln -> other */
+DATA(insert (5852 5545 5526 a f _null_));
+DATA(insert (5852	 21  314 a f _null_));
+DATA(insert (5852	 23    0 i b _null_));
+DATA(insert (5852	 20  481 i f _null_));
+DATA(insert (5852	 34 6409 i f _null_));
+DATA(insert (5852	700  318 i f _null_));
+DATA(insert (5852	701  316 i f _null_));
+DATA(insert (5852 1700 1740 i f _null_));
+DATA(insert (5852 1560 1683 e f _null_));
+DATA(insert (5852	 16 2557 i f _null_));
+DATA(insert (5852	 25 4167 i f _null_));
+DATA(insert (5852	 18   78 e f _null_));
+DATA(insert (5852 1043 4181 i f _null_));
+DATA(insert (5852 1042 3192 i f _null_));
+DATA(insert (5852 5854 5890 i f _null_));
+DATA(insert (5852 5856 5909 i f _null_));
+DATA(insert (5852 5858 5928 i f _null_));
+DATA(insert (5852 5860    0 i b _null_));
+
+DATA(insert (5852   90 4167 i f _null_));
+DATA(insert (5852  790 3811 a f _null_));
+DATA(insert (5852 1186 4225 i f _null_));
+
+/* other -> positive */
+DATA(insert (5545 5854 5892 i f _null_));
+DATA(insert (21 5854 5889 i f _null_));
+DATA(insert (23 5854 5890 i f _null_));
+DATA(insert (20 5854 5893 a f _null_));
+DATA(insert (34 5854 5894 a f _null_));
+DATA(insert (700 5854 5895 i f _null_));
+DATA(insert (701 5854 5896 i f _null_));
+DATA(insert (1700 5854 5897 i f _null_));
+DATA(insert (1560 5854 5898 e f _null_));
+DATA(insert (16 5854 5891 i f _null_));
+DATA(insert (25 5854 5899 i f _null_));
+DATA(insert (18 5854 5900 e f _null_));
+DATA(insert (1043 5854 5901 i f _null_));
+DATA(insert (1042 5854 5902 i f _null_));
+DATA(insert (5856 5854    0 i b _null_));
+DATA(insert (5858 5854 5890 i f _null_));
+DATA(insert (5860 5854 5890 i f _null_));
+
+/* positive -> other */
+DATA(insert (5854 5545 5526 a f _null_));
+DATA(insert (5854	 21  314 a f _null_));
+DATA(insert (5854	 23    0 i b _null_));
+DATA(insert (5854	 20  481 i f _null_));
+DATA(insert (5854	 34 6409 i f _null_));
+DATA(insert (5854	700  318 i f _null_));
+DATA(insert (5854	701  316 i f _null_));
+DATA(insert (5854 1700 1740 i f _null_));
+DATA(insert (5854 1560 1683 e f _null_));
+DATA(insert (5854	 16 2557 i f _null_));
+DATA(insert (5854	 25 4167 i f _null_));
+DATA(insert (5854	 18   78 e f _null_));
+DATA(insert (5854 1043 4181 i f _null_));
+DATA(insert (5854 1042 3192 i f _null_));
+DATA(insert (5854 5856 5909 i f _null_));
+DATA(insert (5854 5858 5928 i f _null_));
+DATA(insert (5854 5860 5945 i f _null_));
+
+DATA(insert (5854   90 4167 i f _null_));
+DATA(insert (5854  790 3811 a f _null_));
+DATA(insert (5854 1186 4225 i f _null_));
+
+/* other -> positiven */
+DATA(insert (5545 5856 5911 i f _null_));
+DATA(insert (21 5856 5908 i f _null_));
+DATA(insert (23 5856 5909 i f _null_));
+DATA(insert (20 5856 5912 a f _null_));
+DATA(insert (34 5856 5913 a f _null_));
+DATA(insert (700 5856 5914 i f _null_));
+DATA(insert (701 5856 5915 i f _null_));
+DATA(insert (1700 5856 5916 i f _null_));
+DATA(insert (1560 5856 5917 e f _null_));
+DATA(insert (16 5856 5910 i f _null_));
+DATA(insert (25 5856 5918 i f _null_));
+DATA(insert (18 5856 5919 e f _null_));
+DATA(insert (1043 5856 5920 i f _null_));
+DATA(insert (1042 5856 5921 i f _null_));
+DATA(insert (5858 5856 5909 i f _null_));
+DATA(insert (5860 5856 5909 i f _null_));
+
+/* positiven -> other */
+DATA(insert (5856 5545 5526 a f _null_));
+DATA(insert (5856	 21  314 a f _null_));
+DATA(insert (5856	 23    0 i b _null_));
+DATA(insert (5856	 20  481 i f _null_));
+DATA(insert (5856	 34 6409 i f _null_));
+DATA(insert (5856	700  318 i f _null_));
+DATA(insert (5856	701  316 i f _null_));
+DATA(insert (5856 1700 1740 i f _null_));
+DATA(insert (5856 1560 1683 e f _null_));
+DATA(insert (5856	 16 2557 i f _null_));
+DATA(insert (5856	 25 4167 i f _null_));
+DATA(insert (5856	 18   78 e f _null_));
+DATA(insert (5856 1043 4181 i f _null_));
+DATA(insert (5856 1042 3192 i f _null_));
+DATA(insert (5856 5858 5928 i f _null_));
+DATA(insert (5856 5860    0 i b _null_));
+
+DATA(insert (5856   90 4167 i f _null_));
+DATA(insert (5856  790 3811 a f _null_));
+DATA(insert (5856 1186 4225 i f _null_));
+
+/* other -> signtype */
+DATA(insert (5545 5858 5930 i f _null_));
+DATA(insert (21 5858 5927 i f _null_));
+DATA(insert (23 5858 5928 i f _null_));
+DATA(insert (20 5858 5931 a f _null_));
+DATA(insert (34 5858 5932 a f _null_));
+DATA(insert (700 5858 5933 i f _null_));
+DATA(insert (701 5858 5934 i f _null_));
+DATA(insert (1700 5858 5935 i f _null_));
+DATA(insert (1560 5858 5936 e f _null_));
+DATA(insert (16 5858 5929 i f _null_));
+DATA(insert (25 5858 5937 i f _null_));
+DATA(insert (18 5858 5938 e f _null_));
+DATA(insert (1043 5858 5939 i f _null_));
+DATA(insert (1042 5858 5940 i f _null_));
+DATA(insert (5860 5858 5928 i f _null_));
+
+/* signtype -> other */
+DATA(insert (5858 5545 5526 a f _null_));
+DATA(insert (5858	 21  314 a f _null_));
+DATA(insert (5858	 23    0 i b _null_));
+DATA(insert (5858	 20  481 i f _null_));
+DATA(insert (5858	 34 6409 i f _null_));
+DATA(insert (5858	700  318 i f _null_));
+DATA(insert (5858	701  316 i f _null_));
+DATA(insert (5858 1700 1740 i f _null_));
+DATA(insert (5858 1560 1683 e f _null_));
+DATA(insert (5858	 16 2557 i f _null_));
+DATA(insert (5858	 25 4167 i f _null_));
+DATA(insert (5858	 18   78 e f _null_));
+DATA(insert (5858 1043 4181 i f _null_));
+DATA(insert (5858 1042 3192 i f _null_));
+DATA(insert (5858 5860 5945 i f _null_));
+
+DATA(insert (5858   90 4167 i f _null_));
+DATA(insert (5858  790 3811 a f _null_));
+DATA(insert (5858 1186 4225 i f _null_));
+
+/* other -> simple_integer */
+DATA(insert (5545 5860 5947 i f _null_));
+DATA(insert (21 5860 5944 i f _null_));
+DATA(insert (23 5860 5945 i f _null_));
+DATA(insert (20 5860 5948 a f _null_));
+DATA(insert (34 5860 5949 a f _null_));
+DATA(insert (700 5860 5950 i f _null_));
+DATA(insert (701 5860 5951 i f _null_));
+DATA(insert (1700 5860 5952 i f _null_));
+DATA(insert (1560 5860 5953 e f _null_));
+DATA(insert (16 5860 5946 i f _null_));
+DATA(insert (25 5860 5954 i f _null_));
+DATA(insert (18 5860 5955 e f _null_));
+DATA(insert (1043 5860 5956 i f _null_));
+DATA(insert (1042 5860 5957 i f _null_));
+
+/* simple_integer -> other */
+DATA(insert (5860 5545 5526 a f _null_));
+DATA(insert (5860	 21  314 a f _null_));
+DATA(insert (5860	 23    0 i b _null_));
+DATA(insert (5860	 20  481 i f _null_));
+DATA(insert (5860	 34 6409 i f _null_));
+DATA(insert (5860	700  318 i f _null_));
+DATA(insert (5860	701  316 i f _null_));
+DATA(insert (5860 1700 1740 i f _null_));
+DATA(insert (5860 1560 1683 e f _null_));
+DATA(insert (5860	 16 2557 i f _null_));
+DATA(insert (5860	 25 4167 i f _null_));
+DATA(insert (5860	 18   78 e f _null_));
+DATA(insert (5860 1043 4181 i f _null_));
+DATA(insert (5860 1042 3192 i f _null_));
+
+DATA(insert (5860   90 4167 i f _null_));
+DATA(insert (5860  790 3811 a f _null_));
+DATA(insert (5860 1186 4225 i f _null_));
+
 /*
  * String category
  */

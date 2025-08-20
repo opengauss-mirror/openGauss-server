@@ -38,6 +38,7 @@
 /*****************************************************************************
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
+extern const uint32 INLINEVIEW_DML_VERSION_NUM;
 extern const uint32 IDENTITY_VERSION_NUM;
 extern const uint32 COMPUTED_COLUMNS_VERSION_NUMBER;
 extern const uint32 SWCB_OPTIMIZATION_VERSION_NUM;
@@ -194,7 +195,8 @@ extern bool contain_backend_version(uint32 version_number);
 
 #define D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER 1
 #define D_FORMAT_OPT_ENABLE_TABLE_HINT_IDENTIFIER 2
-#define D_FORMAT_OPT_MAX 2
+#define D_FORMAT_OPT_ENABLE_ABS 4
+#define D_FORMAT_OPT_MAX 3
 
 
 #define ENABLE_SET_SESSION_TRANSACTION                                                                   \
@@ -220,6 +222,9 @@ extern bool contain_backend_version(uint32 version_number);
 
 #define ENABLE_TABLE_HINT_IDENTIFIER ((u_sess->utils_cxt.d_format_behavior_compat_flags & \
         D_FORMAT_OPT_ENABLE_TABLE_HINT_IDENTIFIER) && u_sess->attr.attr_sql.sql_compatibility == D_FORMAT)
+
+#define ENABLE_ABS ((u_sess->utils_cxt.d_format_behavior_compat_flags & \
+        D_FORMAT_OPT_ENABLE_ABS) && u_sess->attr.attr_sql.sql_compatibility == D_FORMAT)
 
 #define OPT_DISPLAY_LEADING_ZERO (1LL << 0)
 #define OPT_END_MONTH_CALCULATE  (1LL << 1)
@@ -258,7 +263,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_DISABLE_RECORD_TYPE_IN_DML (1LL << 34)
 #define OPT_ACCEPT_FLOAT_STR_AS_INT (1LL << 35)
 #define OPT_IGNORE_UNUSED_INDEX_CHECK_ON_DML (1LL << 36)
-#define OPT_MAX 37
+#define OPT_COMPATIBLE_A_DB_ARRAY (1LL << 37)
+#define OPT_MAX 38
 
 #define PLPSQL_OPT_FOR_LOOP 1
 #define PLPSQL_OPT_OUTPARAM 2
@@ -320,6 +326,7 @@ static const struct behavior_compat_entry restrict_nonsystem_relation_kind[OPT_R
 #define ACCEPT_FLOAT_STR_AS_INT (u_sess->utils_cxt.behavior_compat_flags & OPT_ACCEPT_FLOAT_STR_AS_INT)
 #define IGNORE_UNUSED_INDEX_CHECK_ON_DML (u_sess->utils_cxt.behavior_compat_flags \
     & OPT_IGNORE_UNUSED_INDEX_CHECK_ON_DML)
+#define COMPATIBLE_A_DB_ARRAY (u_sess->utils_cxt.behavior_compat_flags & OPT_COMPATIBLE_A_DB_ARRAY)
 
 #define RESTRICT_NONSYSTEM_RELATION_KIND_VIEW \
     (bool(u_sess->utils_cxt.restrict_nonsystem_relation_kind_flags \

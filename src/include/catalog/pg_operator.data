@@ -1294,6 +1294,13 @@ DESCR("unary plus");
 DATA(insert OID = 1921 ("+"       PGNSP PGUID l f f     0 1700 1700    0    0 numeric_uplus - -));
 DESCR("unary plus");
 
+DATA(insert OID = 2200 ("+"       PGNSP PGUID b f f  5860 5860 5860 2200 0 simple_integer_plus - -));
+DESCR("add");
+DATA(insert OID = 2201 ("-"       PGNSP PGUID b f f  5860 5860 5860    0 0 simple_integer_sub - -));
+DESCR("substract");
+DATA(insert OID = 2202 ("*"       PGNSP PGUID b f f  5860 5860 5860 2202 0 simple_integer_mul - -));
+DESCR("multiply");
+
 /* bytea operators */
 DATA(insert OID = 1955 ("="       PGNSP PGUID b t t 17 17    16 1955 1956 byteaeq eqsel eqjoinsel));
 DESCR("equal");

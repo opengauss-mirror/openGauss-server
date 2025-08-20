@@ -3437,6 +3437,28 @@ RowMarkClause* get_parse_rowmark(Query* qry, Index rtindex)
     return NULL;
 }
 
+List* getSubqueryRteAttnum(RangeTblEntry* rte, const char* attname)
+{
+    List* attrnos = NIL;
+
+    Assert(rte->rtekind == RTE_SUBQUERY);
+    int i = 0;
+    ListCell* lc = NULL;
+    List* colnameList = rte->alias && rte->alias->colnames ?
+        rte->alias->colnames : rte->eref->colnames;
+    foreach (lc, colnameList) {
+        i++;
+        Node* colname = (Node*)lfirst(lc);
+        if (strcmp(attname, strVal(colname)) == 0) {
+            attrnos = lappend_int(attrnos, i);
+        }
+    }
+    if (list_length(attrnos) == 0) {
+        attrnos = list_make1_int(InvalidAttrNumber);
+    }
+    return attrnos;
+}
+
 /*
  *	given relation and att name, return attnum of variable
  *

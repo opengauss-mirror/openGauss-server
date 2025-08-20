@@ -30,6 +30,7 @@ where action can be:
 |    ROWS result_rows
 |    SET configuration_parameter {{ TO | = } { value | DEFAULT }| FROM CURRENT}
 |    RESET {configuration_parameter| ALL}
+|    {RESULT_CACHE | NOT RESULT_CACHE}
 </synopsis>
 </refsynopsisdiv>
 </refentry>

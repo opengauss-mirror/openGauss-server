@@ -739,4 +739,7 @@ DATA(insert (8376   8307 8307 1 8464));
 DATA(insert (8582   8306 8306 1 8494));
 DATA(insert (6509   1009 1009 1 8487));
 DATA(insert (6510   25 25 1 8489));
+
+DATA(insert (8340   23 23 1 450));
+DATA(insert (8341   25 25 1 400));
 #endif   /* PG_AMPROC_H */

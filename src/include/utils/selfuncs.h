@@ -137,6 +137,14 @@ typedef struct {
     Bitmapset* es_attnums; /* number of correlated attributes */
 } GroupVarInfo;
 
+typedef struct {
+    RestrictInfo *rinfo;
+    int indexcol;
+    bool varonleft;
+    Oid clause_op;
+    Node *other_operand;
+} IndexQualInfo;
+
 /*
  * genericcostestimate is a general-purpose estimator that can be used for
  * most index types.  In some cases we use genericcostestimate as the base
@@ -323,4 +331,5 @@ extern bool contain_single_col_stat(List* stat_list);
 extern double convert_timevalue_to_scalar(Datum value, Oid typid);
 extern void genericcostestimate(PlannerInfo* root, IndexPath* path, double loop_count, double numIndexTuples,
     Cost* indexStartupCost, Cost* indexTotalCost, Selectivity* indexSelectivity, double* indexCorrelation);
+extern List *deconstruct_indexquals(IndexPath *path);
 #endif /* SELFUNCS_H */

@@ -97,23 +97,11 @@ Datum btint4cmp(PG_FUNCTION_ARGS)
         PG_RETURN_INT32(-1);
 }
 
-static int btint4fastcmp(Datum x, Datum y, SortSupport ssup)
-{
-    int32 a = DatumGetInt32(x);
-    int32 b = DatumGetInt32(y);
-    if (a > b)
-        return 1;
-    else if (a == b)
-        return 0;
-    else
-        return -1;
-}
-
 Datum btint4sortsupport(PG_FUNCTION_ARGS)
 {
     SortSupport ssup = (SortSupport)PG_GETARG_POINTER(0);
 
-    ssup->comparator = btint4fastcmp;
+    ssup->comparator = ssup_datum_int32_cmp;
     PG_RETURN_VOID();
 }
 
@@ -129,23 +117,11 @@ Datum btint8cmp(PG_FUNCTION_ARGS)
         PG_RETURN_INT32(-1);
 }
 
-static int btint8fastcmp(Datum x, Datum y, SortSupport ssup)
-{
-    int64 a = DatumGetInt64(x);
-    int64 b = DatumGetInt64(y);
-    if (a > b)
-        return 1;
-    else if (a == b)
-        return 0;
-    else
-        return -1;
-}
-
 Datum btint8sortsupport(PG_FUNCTION_ARGS)
 {
     SortSupport ssup = (SortSupport)PG_GETARG_POINTER(0);
 
-    ssup->comparator = btint8fastcmp;
+    ssup->comparator = ssup_datum_signed_cmp;
     PG_RETURN_VOID();
 }
 

@@ -336,7 +336,9 @@ Description: update rows of a table
 Syntax:
 UPDATE Single-Relation Syntax：
 [ WITH [ RECURSIVE ] with_query [, ...] ]
-UPDATE [/*+ plan_hint */] [ ONLY ] table_name [ partition_clause ] [ * ] [ [ AS ] alias ]
+UPDATE [/*+ plan_hint */] [ ONLY ]
+    { table_name [ partition_clause ] [ * ]
+    | ( sub_query [ WITH [ CASCADED | LOCAL ] CHECK OPTION ] ) } [ [ AS ] alias ]
 SET {column_name = { expression | DEFAULT } 
     |( column_name [, ...] ) = {( { expression | DEFAULT } [, ...] ) |sub_query }}[, ...]
     [ FROM from_list] [ WHERE condition ]

@@ -26,6 +26,12 @@
 #include "utils/sortsupport.h"
 #include "catalog/pg_index.h"
 
+/* Control flags for format_type_extended */
+#define FORMAT_TYPE_TYPEMOD_GIVEN	0x01	/* typemod defined by caller */
+#define FORMAT_TYPE_ALLOW_INVALID	0x02	/* allow invalid types */
+#define FORMAT_TYPE_FORCE_QUALIFY	0x04	/* force qualification of type */
+#define FORMAT_TYPE_INVALID_AS_NULL	0x08	/* NULL if undefined */
+
 /*
  *		Defined in adt/
  */
@@ -423,6 +429,123 @@ extern Datum generate_series_int4(PG_FUNCTION_ARGS);
 extern Datum generate_series_step_int4(PG_FUNCTION_ARGS);
 extern int2vector* buildint2vector(const int2* int2s, int n);
 extern int2vector* int2vectorCopy(int2vector* from);
+
+extern Datum natural_in(PG_FUNCTION_ARGS);
+extern Datum natural_out(PG_FUNCTION_ARGS);
+extern Datum natural_recv(PG_FUNCTION_ARGS);
+extern Datum natural_send(PG_FUNCTION_ARGS);
+extern Datum i4_to_natural(PG_FUNCTION_ARGS);
+extern Datum i1_to_natural(PG_FUNCTION_ARGS);
+extern Datum i2_to_natural(PG_FUNCTION_ARGS);
+extern Datum i8_to_natural(PG_FUNCTION_ARGS);
+extern Datum i16_to_natural(PG_FUNCTION_ARGS);
+extern Datum double_to_natural(PG_FUNCTION_ARGS);
+extern Datum float_to_natural(PG_FUNCTION_ARGS);
+extern Datum numeric_to_natural(PG_FUNCTION_ARGS);
+extern Datum bit_to_natural(PG_FUNCTION_ARGS);
+extern Datum bool_to_natural(PG_FUNCTION_ARGS);
+extern Datum text_to_natural(PG_FUNCTION_ARGS);
+extern Datum char_to_natural(PG_FUNCTION_ARGS);
+extern Datum varchar_to_natural(PG_FUNCTION_ARGS);
+extern Datum bpchar_to_natural(PG_FUNCTION_ARGS);
+
+extern Datum naturaln_in(PG_FUNCTION_ARGS);
+extern Datum naturaln_out(PG_FUNCTION_ARGS);
+extern Datum naturaln_recv(PG_FUNCTION_ARGS);
+extern Datum naturaln_send(PG_FUNCTION_ARGS);
+extern Datum i4_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum i1_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum i2_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum i8_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum i16_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum double_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum float_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum numeric_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum bit_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum bool_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum text_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum char_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum varchar_to_naturaln(PG_FUNCTION_ARGS);
+extern Datum bpchar_to_naturaln(PG_FUNCTION_ARGS);
+
+extern Datum positive_in(PG_FUNCTION_ARGS);
+extern Datum positive_out(PG_FUNCTION_ARGS);
+extern Datum positive_recv(PG_FUNCTION_ARGS);
+extern Datum positive_send(PG_FUNCTION_ARGS);
+extern Datum i4_to_positive(PG_FUNCTION_ARGS);
+extern Datum i1_to_positive(PG_FUNCTION_ARGS);
+extern Datum i2_to_positive(PG_FUNCTION_ARGS);
+extern Datum i8_to_positive(PG_FUNCTION_ARGS);
+extern Datum i16_to_positive(PG_FUNCTION_ARGS);
+extern Datum double_to_positive(PG_FUNCTION_ARGS);
+extern Datum float_to_positive(PG_FUNCTION_ARGS);
+extern Datum numeric_to_positive(PG_FUNCTION_ARGS);
+extern Datum bit_to_positive(PG_FUNCTION_ARGS);
+extern Datum bool_to_positive(PG_FUNCTION_ARGS);
+extern Datum text_to_positive(PG_FUNCTION_ARGS);
+extern Datum char_to_positive(PG_FUNCTION_ARGS);
+extern Datum varchar_to_positive(PG_FUNCTION_ARGS);
+extern Datum bpchar_to_positive(PG_FUNCTION_ARGS);
+
+extern Datum positiven_in(PG_FUNCTION_ARGS);
+extern Datum positiven_out(PG_FUNCTION_ARGS);
+extern Datum positiven_recv(PG_FUNCTION_ARGS);
+extern Datum positiven_send(PG_FUNCTION_ARGS);
+extern Datum i4_to_positiven(PG_FUNCTION_ARGS);
+extern Datum i1_to_positiven(PG_FUNCTION_ARGS);
+extern Datum i2_to_positiven(PG_FUNCTION_ARGS);
+extern Datum i8_to_positiven(PG_FUNCTION_ARGS);
+extern Datum i16_to_positiven(PG_FUNCTION_ARGS);
+extern Datum double_to_positiven(PG_FUNCTION_ARGS);
+extern Datum float_to_positiven(PG_FUNCTION_ARGS);
+extern Datum numeric_to_positiven(PG_FUNCTION_ARGS);
+extern Datum bit_to_positiven(PG_FUNCTION_ARGS);
+extern Datum bool_to_positiven(PG_FUNCTION_ARGS);
+extern Datum text_to_positiven(PG_FUNCTION_ARGS);
+extern Datum char_to_positiven(PG_FUNCTION_ARGS);
+extern Datum varchar_to_positiven(PG_FUNCTION_ARGS);
+extern Datum bpchar_to_positiven(PG_FUNCTION_ARGS);
+
+extern Datum signtype_in(PG_FUNCTION_ARGS);
+extern Datum signtype_out(PG_FUNCTION_ARGS);
+extern Datum signtype_recv(PG_FUNCTION_ARGS);
+extern Datum signtype_send(PG_FUNCTION_ARGS);
+extern Datum i4_to_signtype(PG_FUNCTION_ARGS);
+extern Datum i1_to_signtype(PG_FUNCTION_ARGS);
+extern Datum i2_to_signtype(PG_FUNCTION_ARGS);
+extern Datum i8_to_signtype(PG_FUNCTION_ARGS);
+extern Datum i16_to_signtype(PG_FUNCTION_ARGS);
+extern Datum double_to_signtype(PG_FUNCTION_ARGS);
+extern Datum float_to_signtype(PG_FUNCTION_ARGS);
+extern Datum numeric_to_signtype(PG_FUNCTION_ARGS);
+extern Datum bit_to_signtype(PG_FUNCTION_ARGS);
+extern Datum bool_to_signtype(PG_FUNCTION_ARGS);
+extern Datum text_to_signtype(PG_FUNCTION_ARGS);
+extern Datum char_to_signtype(PG_FUNCTION_ARGS);
+extern Datum varchar_to_signtype(PG_FUNCTION_ARGS);
+extern Datum bpchar_to_signtype(PG_FUNCTION_ARGS);
+
+extern Datum simple_integer_in(PG_FUNCTION_ARGS);
+extern Datum simple_integer_out(PG_FUNCTION_ARGS);
+extern Datum simple_integer_recv(PG_FUNCTION_ARGS);
+extern Datum simple_integer_send(PG_FUNCTION_ARGS);
+extern Datum i4_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum i1_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum i2_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum i8_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum i16_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum double_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum float_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum numeric_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum bit_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum bool_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum text_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum char_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum varchar_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum bpchar_to_simple_integer(PG_FUNCTION_ARGS);
+extern Datum simple_integer_mul(PG_FUNCTION_ARGS);
+extern Datum simple_integer_plus(PG_FUNCTION_ARGS);
+extern Datum simple_integer_sub(PG_FUNCTION_ARGS);
 /* encoding.cpp */
 extern Datum encode_plan_node(PG_FUNCTION_ARGS);
 /* ml_model.cpp */
@@ -1462,6 +1585,7 @@ extern char* format_type_with_typemod(Oid type_oid, int32 typemod);
 extern Datum oidvectortypes(PG_FUNCTION_ARGS);
 extern int32 type_maximum_size(Oid type_oid, int32 typemod);
 extern char *format_type_be_qualified(Oid type_oid);
+char *format_type_extended(Oid type_oid, int32 typemod, bits16 flags);
 
 /* quote.c */
 extern Datum quote_ident(PG_FUNCTION_ARGS);

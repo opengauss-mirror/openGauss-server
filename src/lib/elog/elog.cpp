@@ -314,8 +314,8 @@ static void remove_oldest_log(const char *prefix_name, const char *log_path, int
     struct dirent *de = NULL;
     errno_t rc = EOK;
 
-    int file_len = strlen(prefix_name) + strlen("-yyyy-mm-dd_hhmmss.log");
-    size_t info_size = sizeof(ToolLogInfo) + file_len + 1;
+    int fileLen = strlen(prefix_name) + strlen("-yyyy-mm-dd_hhmmss.log.gz");
+    size_t infoSize = sizeof(ToolLogInfo) + fileLen + 1;
     ToolLogInfo **file_list = (ToolLogInfo **)palloc(sizeof(ToolLogInfo *) * count);
     if (file_list == NULL) {
         printf(_("%s: palloc memory failed! %s\n"), prefix_name, gs_strerror(errno));
@@ -323,13 +323,13 @@ static void remove_oldest_log(const char *prefix_name, const char *log_path, int
     }
 
     for (int i = 0; i < count; i++) {
-        file_list[i] = (ToolLogInfo *)palloc(info_size);
+        file_list[i] = (ToolLogInfo *)palloc(infoSize);
         if (file_list[i] == NULL) {
             printf(_("%s: palloc memory failed! %s\n"), prefix_name, gs_strerror(errno));
             free_file_list(file_list, i);
             return;
         }
-        rc = memset_s(file_list[i], info_size, 0, info_size);
+        rc = memset_s(file_list[i], infoSize, 0, infoSize);
         securec_check_c(rc, "\0", "\0");
     }
 
@@ -355,7 +355,7 @@ static void remove_oldest_log(const char *prefix_name, const char *log_path, int
 
             file_list[slot]->mTime = fst.st_mtime;
             file_list[slot]->cTime = fst.st_ctime;
-            rc = strncpy_s(file_list[slot]->fileName, file_len + 1, de->d_name, strlen(de->d_name));
+            rc = strncpy_s(file_list[slot]->fileName, fileLen + 1, de->d_name, strlen(de->d_name));
             securec_check_c(rc, "\0", "\0");
             slot++;
         }

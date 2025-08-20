@@ -712,6 +712,8 @@ void errfinish(int dummy, ...)
         pfree(edata->hint);
     if (edata->context)
         pfree(edata->context);
+    if (edata->plpgsqlProcedure)
+        pfree(edata->plpgsqlProcedure);
     if (edata->internalquery)
         pfree(edata->internalquery);
     if (edata->backtrace_log)
@@ -816,6 +818,23 @@ void errfinish(int dummy, ...)
      * the code, including critical section which should be executed atomically. CHECK_FOR_INTERRUPTS() here have the
      * probability to break such critical section. This will result in unexpected behaviors!
      */
+}
+
+void ErrPlpgsqlProcedure(const char* plpgsqlProcedure)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+    CHECK_STACK_DEPTH();
+    if (plpgsqlProcedure != NULL && edata->plpgsqlProcedure == NULL) {
+        edata->plpgsqlProcedure = MemoryContextStrdup(ErrorContext, plpgsqlProcedure);
+    }
+}
+
+void ErrPlpgsqlLine(int plpgsqlLine)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+    CHECK_STACK_DEPTH();
+    if (edata->plpgsqlLine == 0)
+        edata->plpgsqlLine = plpgsqlLine;
 }
 
 /*
@@ -2060,6 +2079,8 @@ ErrorData* CopyErrorData(void)
         newedata->hint = pstrdup(newedata->hint);
     if (newedata->context)
         newedata->context = pstrdup(newedata->context);
+    if (newedata->plpgsqlProcedure)
+        newedata->plpgsqlProcedure = pstrdup(newedata->plpgsqlProcedure);
     if (newedata->internalquery)
         newedata->internalquery = pstrdup(newedata->internalquery);
     if (newedata->filename)
@@ -2109,6 +2130,7 @@ void UpdateErrorData(ErrorData* edata, ErrorData* newData)
     FREE_POINTER(edata->detail_log);
     FREE_POINTER(edata->hint);
     FREE_POINTER(edata->context);
+    FREE_POINTER(edata->plpgsqlProcedure);
     FREE_POINTER(edata->internalquery);
     FREE_POINTER(edata->backtrace_log);
     FREE_POINTER(edata->cause);
@@ -2137,6 +2159,8 @@ void UpdateErrorData(ErrorData* edata, ErrorData* newData)
     edata->detail_log = pstrdup(newData->detail_log);
     edata->hint = pstrdup(newData->hint);
     edata->context = pstrdup(newData->context);
+    edata->plpgsqlProcedure = pstrdup(newData->plpgsqlProcedure);
+    edata->plpgsqlLine = newData->plpgsqlLine;
     edata->cursorpos = newData->cursorpos;
     edata->internalpos = newData->internalpos;
     edata->internalquery = pstrdup(newData->internalquery);
@@ -2178,6 +2202,8 @@ void FreeErrorData(ErrorData* edata)
         pfree(edata->hint);
     if (edata->context)
         pfree(edata->context);
+    if (edata->plpgsqlProcedure)
+        pfree(edata->plpgsqlProcedure);
     if (edata->internalquery)
         pfree(edata->internalquery);
     if (edata->filename)
@@ -2321,6 +2347,8 @@ void ReThrowError(ErrorData* edata)
         newedata->hint = pstrdup(newedata->hint);
     if (newedata->context)
         newedata->context = pstrdup(newedata->context);
+    if (newedata->plpgsqlProcedure)
+        newedata->plpgsqlProcedure = pstrdup(newedata->plpgsqlProcedure);
     if (newedata->internalquery)
         newedata->internalquery = pstrdup(newedata->internalquery);
     if (newedata->filename)
