@@ -551,7 +551,7 @@ extern void XactGetRelFiles(XLogReaderState* record, ColFileNode** xnodesPtr, in
 extern bool xact_has_invalid_msg_or_delete_file(XLogReaderState *record);
 extern void send_delay_invalid_message();
 extern bool XactWillRemoveRelFiles(XLogReaderState *record);
-extern HTAB* relfilenode_hashtbl_create();
+extern HTAB* relfilenode_hashtbl_create(bool considerOpt = true);
 extern CommitSeqNo getLocalNextCSN();
 
 extern void UpdateNextMaxKnownCSN(CommitSeqNo csn);
