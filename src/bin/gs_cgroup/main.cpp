@@ -1317,7 +1317,8 @@ void cgroup_set_default_group()
     cgutil_vaddr[TOPCG_ROOT]->percent = 1000;
 
     /* set root group as default cpu set */
-    (void)sprintf_s(cgutil_vaddr[TOPCG_ROOT]->cpuset, CPUSET_LEN, "%s", cgutil_allset);
+    sret = sprintf_s(cgutil_vaddr[TOPCG_ROOT]->cpuset, CPUSET_LEN, "%s", cgutil_allset);
+    securec_check_ss_c(sret, "\0", "\0");
 
     cgutil_vaddr[TOPCG_BACKEND]->used = 1;
     cgutil_vaddr[TOPCG_BACKEND]->gid = TOPCG_BACKEND;
@@ -1330,8 +1331,10 @@ void cgroup_set_default_group()
     cgutil_vaddr[TOPCG_BACKEND]->percent = cgutil_vaddr[TOPCG_GAUSSDB]->percent * TOP_BACKEND_PERCENT / 100;
 
     /* set root group as gaussdb group cpu set */
-    if (*cgutil_vaddr[TOPCG_BACKEND]->cpuset == '\0')
-        (void)sprintf_s(cgutil_vaddr[TOPCG_BACKEND]->cpuset, CPUSET_LEN, "%s", cgutil_vaddr[TOPCG_GAUSSDB]->cpuset);
+    if (*cgutil_vaddr[TOPCG_BACKEND]->cpuset == '\0') {
+        sret = sprintf_s(cgutil_vaddr[TOPCG_BACKEND]->cpuset, CPUSET_LEN, "%s", cgutil_vaddr[TOPCG_GAUSSDB]->cpuset);
+        securec_check_ss_c(sret, "\0", "\0");
+    }
 
     cgutil_vaddr[TOPCG_CLASS]->used = 1;
     cgutil_vaddr[TOPCG_CLASS]->gid = TOPCG_CLASS;
@@ -1343,8 +1346,10 @@ void cgroup_set_default_group()
     cgutil_vaddr[TOPCG_CLASS]->ainfo.weight = IO_WEIGHT_CALC(MAX_IO_WEIGHT, TOP_CLASS_PERCENT);
     cgutil_vaddr[TOPCG_CLASS]->percent = cgutil_vaddr[TOPCG_GAUSSDB]->percent * TOP_CLASS_PERCENT / 100;
     /* set root group as gaussdb group cpu set */
-    if (*cgutil_vaddr[TOPCG_CLASS]->cpuset == '\0')
-        (void)sprintf_s(cgutil_vaddr[TOPCG_CLASS]->cpuset, CPUSET_LEN, "%s", cgutil_vaddr[TOPCG_GAUSSDB]->cpuset);
+    if (*cgutil_vaddr[TOPCG_CLASS]->cpuset == '\0') {
+        sret = sprintf_s(cgutil_vaddr[TOPCG_CLASS]->cpuset, CPUSET_LEN, "%s", cgutil_vaddr[TOPCG_GAUSSDB]->cpuset);
+        securec_check_ss_c(sret, "\0", "\0");
+    }
 
     cgutil_vaddr[BACKENDCG_START_ID]->used = 1;
     cgutil_vaddr[BACKENDCG_START_ID]->gid = BACKENDCG_START_ID;
@@ -1358,9 +1363,11 @@ void cgroup_set_default_group()
     cgutil_vaddr[BACKENDCG_START_ID]->percent = cgutil_vaddr[TOPCG_BACKEND]->percent * DEFAULT_BACKEND_PERCENT / 100;
 
     /* set root group as backend group cpu set */
-    if (*cgutil_vaddr[BACKENDCG_START_ID]->cpuset == '\0')
-        (void)sprintf_s(
-            cgutil_vaddr[BACKENDCG_START_ID]->cpuset, CPUSET_LEN, "%s", cgutil_vaddr[TOPCG_BACKEND]->cpuset);
+    if (*cgutil_vaddr[BACKENDCG_START_ID]->cpuset == '\0') {
+        sret = sprintf_s(cgutil_vaddr[BACKENDCG_START_ID]->cpuset, CPUSET_LEN, "%s",
+                            cgutil_vaddr[TOPCG_BACKEND]->cpuset);
+        securec_check_ss_c(sret, "\0", "\0");
+    }
 
     cgutil_vaddr[BACKENDCG_START_ID + 1]->used = 1;
     cgutil_vaddr[BACKENDCG_START_ID + 1]->gid = BACKENDCG_START_ID + 1;
@@ -1373,9 +1380,10 @@ void cgroup_set_default_group()
     cgutil_vaddr[BACKENDCG_START_ID + 1]->ainfo.weight = IO_WEIGHT_CALC(MAX_IO_WEIGHT, VACUUM_PERCENT);
     cgutil_vaddr[BACKENDCG_START_ID + 1]->percent = cgutil_vaddr[TOPCG_BACKEND]->percent * VACUUM_PERCENT / 100;
     /* set root group as backend group cpu set */
-    if (*cgutil_vaddr[BACKENDCG_START_ID + 1]->cpuset == '\0')
-        (void)sprintf_s(
-            cgutil_vaddr[BACKENDCG_START_ID + 1]->cpuset, CPUSET_LEN, "%s", cgutil_vaddr[TOPCG_BACKEND]->cpuset);
+    if (*cgutil_vaddr[BACKENDCG_START_ID + 1]->cpuset == '\0') {
+        sret = cgutil_vaddr[BACKENDCG_START_ID + 1]->cpuset, CPUSET_LEN, "%s", cgutil_vaddr[TOPCG_BACKEND]->cpuset);
+        securec_check_ss_c(sret, "\0", "\0");
+    }
 
     cgutil_vaddr[CLASSCG_START_ID]->used = 1;
     cgutil_vaddr[CLASSCG_START_ID]->gid = CLASSCG_START_ID;

@@ -7602,7 +7602,8 @@ static void addNewPartitionTuplesForPartition(Relation pg_partition_rel, Oid rel
 {
     int partKeyNum = list_length(partTableState->partitionKey);
     bool isTimestamptzForPartKey[partKeyNum];
-    memset_s(isTimestamptzForPartKey, sizeof(isTimestamptzForPartKey), 0, sizeof(isTimestamptzForPartKey));
+    errno_t rc = memset_s(isTimestamptzForPartKey, sizeof(isTimestamptzForPartKey), 0, sizeof(isTimestamptzForPartKey));
+    securec_check(rc, "\0", "\0");
     IsPartitionKeyContainTimestampwithzoneType(partTableState, tupledesc, isTimestamptzForPartKey, partKeyNum);
 
     bool *isTimestamptzForSubPartKey = NULL;

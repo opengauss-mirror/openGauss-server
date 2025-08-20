@@ -40,6 +40,7 @@
 #include "executor/spi.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
+#include "parser/parser.h"
 #include "miscadmin.h"
 #include "pgxc/pgxc.h"
 #include "tcop/utility.h"
@@ -876,6 +877,25 @@ static void get_interval_nextdate_by_spi(int4 job_id, bool ischeck, const char* 
         ereport(ERROR,
             (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
                 errmsg("Unable to connect to execute internal query, job_id: %d.", job_id)));
+    }
+
+    /* Resolving the SQL Injection Problem by checking parse_tree_list */
+    List* parse_tree_list = raw_parser(exec_job_interval);
+    if (list_length(parse_tree_list) != 1) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+            errmsg("Interval: %s must evaluate to a time in the future for job_id: %d.",
+            quote_literal_cstr(job_interval), job_id)));
+    }
+    if (!IsA(linitial(parse_tree_list), SelectStmt)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+            errmsg("Interval: %s must evaluate to a time in the future for job_id: %d.",
+            quote_literal_cstr(job_interval), job_id)));
+    }
+    if (list_length(((SelectStmt*)linitial(parse_tree_list))->targetList) != 1 ||
+        ((SelectStmt*)linitial(parse_tree_list))->fromClause != NIL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+            errmsg("Interval: %s must evaluate to a time in the future for job_id: %d.",
+            quote_literal_cstr(job_interval), job_id)));
     }
 
     ret = SPI_execute(exec_job_interval, true, 1);
