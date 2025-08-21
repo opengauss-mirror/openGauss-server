@@ -65,7 +65,6 @@
 #include "storage/ipc.h"
 #include "storage/pg_shmem.h"
 #include "storage/pmsignal.h"
-#include "storage/plpython_init.h"
 #include "storage/predicate.h"
 #include "storage/procsignal.h"
 #include "storage/smgr/segment.h"
@@ -334,8 +333,6 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         SSInitTxnStatusCache();
         SSInitXminInfo();
     }
-
-    PlpythonShmemInit();
 
     /*
      * Set up process table
