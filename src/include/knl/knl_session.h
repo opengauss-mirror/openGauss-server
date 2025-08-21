@@ -2387,7 +2387,9 @@ typedef struct knl_u_statement_context {
 typedef struct  statement_beentry_full_sql_context{
     /* basic information, should not be changed during one session  */
     char* db_name;          /* which database */
+    Oid db_id;
     char* user_name;        /* client's user name */
+    Oid client_userid;
     char* client_addr;      /* client's IP address */
     int client_port;        /* client's port */
     uint64 session_id;     /* session's identifier */
