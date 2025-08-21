@@ -35,7 +35,7 @@ static HeapTuple PLy_modify_tuple(PLyProcedure* proc, PyObject* pltd, TriggerDat
 static void plpython_trigger_error_callback(void* arg);
 
 static PyObject* PLy_procedure_call(PLyProcedure* proc, char* kargs, PyObject* vargs);
-static void PLy_abort_open_subtransactions(int saveSubxactLevel);
+static void PLy_abort_open_subtransactions(int save_subxact_level);
 
 /* function subhandler */
 Datum PLy_exec_function(FunctionCallInfo fcinfo, PLyProcedure* proc)
@@ -125,7 +125,7 @@ Datum PLy_exec_function(FunctionCallInfo fcinfo, PLyProcedure* proc)
                 }
 
                 fcinfo->isnull = true;
-                PG_TRY_RETURN(((Datum)NULL));
+                PG_TRY_RETURN((Datum)NULL);
             }
         }
 
@@ -177,8 +177,6 @@ Datum PLy_exec_function(FunctionCallInfo fcinfo, PLyProcedure* proc)
 
             rv = PLyObject_ToCompositeDatum(&proc->result, desc, plrv);
             fcinfo->isnull = (rv == (Datum)NULL);
-
-            ReleaseTupleDesc(desc);
         } else {
             fcinfo->isnull = false;
             rv = (proc->result.out.d.func)(&proc->result.out.d, -1, plrv);
@@ -492,7 +490,7 @@ static PyObject* PLy_trigger_build_args(FunctionCallInfo fcinfo, PLyProcedure* p
 
                 PyDict_SetItemString(pltdata, "old", Py_None);
                 pytnew = PLyDict_FromTuple(&(proc->result), tdata->tg_trigtuple, tdata->tg_relation->rd_att,
-                    !TRIGGER_FIRED_BEFORE(tdata->tg_event));
+                                           !TRIGGER_FIRED_BEFORE(tdata->tg_event));
                 PyDict_SetItemString(pltdata, "new", pytnew);
                 Py_DECREF(pytnew);
                 *rv = tdata->tg_trigtuple;
@@ -508,7 +506,7 @@ static PyObject* PLy_trigger_build_args(FunctionCallInfo fcinfo, PLyProcedure* p
                 pltevent = PyString_FromString("UPDATE");
 
                 pytnew = PLyDict_FromTuple(&(proc->result), tdata->tg_newtuple, tdata->tg_relation->rd_att,
-                    !TRIGGER_FIRED_BEFORE(tdata->tg_event));
+                                           !TRIGGER_FIRED_BEFORE(tdata->tg_event));
                 PyDict_SetItemString(pltdata, "new", pytnew);
                 Py_DECREF(pytnew);
                 pytold = PLyDict_FromTuple(&(proc->result), tdata->tg_trigtuple, tdata->tg_relation->rd_att, true);
@@ -636,12 +634,11 @@ static HeapTuple PLy_modify_tuple(PLyProcedure* proc, PyObject* pltd, TriggerDat
             if (attn == SPI_ERROR_NOATTRIBUTE) {
                 ereport(ERROR,
                     (errmsg(
-                        "key \"%s\" found in TD[\"new\"] does not exist as a column in the triggering row",
-                            plattstr)));
+                        "key \"%s\" found in TD[\"new\"] does not exist as a column in the triggering row", plattstr)));
             }
             atti = attn - 1;
 
-             if (ISGENERATEDCOL(tupdesc, atti))
+            if (ISGENERATEDCOL(tupdesc, atti))
                 ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_E_R_I_E_TRIGGER_PROTOCOL_VIOLATED),
                     errmsg("cannot set generated column \"%s\"", plattstr)));
 
@@ -724,8 +721,7 @@ static void plpython_trigger_error_callback(void* arg)
 static PyObject* PLy_procedure_call(PLyProcedure* proc, char* kargs, PyObject* vargs)
 {
     PyObject* rv = NULL;
-    int volatile saveSubxactLevel = list_length(
-            u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions);
+    int volatile save_subxact_level = list_length(g_plpy_t_context.explicit_subtransactions);
 
     PyDict_SetItemString(proc->globals, kargs, vargs);
 
@@ -742,17 +738,16 @@ static PyObject* PLy_procedure_call(PLyProcedure* proc, char* kargs, PyObject* v
          * started, you cannot *unnest* subtransactions, only *nest* them
          * without closing.
          */
-        Assert(list_length(
-            u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions) >= saveSubxactLevel);
+        Assert(list_length(g_plpy_t_context.explicit_subtransactions) >= save_subxact_level);
     }
     PG_CATCH();
     {
-        PLy_abort_open_subtransactions(saveSubxactLevel);
+        PLy_abort_open_subtransactions(save_subxact_level);
         PG_RE_THROW();
     }
     PG_END_TRY();
 
-    PLy_abort_open_subtransactions(saveSubxactLevel);
+    PLy_abort_open_subtransactions(save_subxact_level);
 
     /* If the Python code returned an error, propagate it */
     if (rv == NULL) {
@@ -766,14 +761,14 @@ static PyObject* PLy_procedure_call(PLyProcedure* proc, char* kargs, PyObject* v
  * Abort lingering subtransactions that have been explicitly started
  * by plpy.subtransaction().start() and not properly closed.
  */
-static void PLy_abort_open_subtransactions(int saveSubxactLevel)
+static void PLy_abort_open_subtransactions(int save_subxact_level)
 {
-    Assert(saveSubxactLevel >= 0);
+    Assert(save_subxact_level >= 0);
 
-    while (list_length(u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions) > saveSubxactLevel) {
+    while (list_length(g_plpy_t_context.explicit_subtransactions) > save_subxact_level) {
         PLySubtransactionData* subtransactiondata = NULL;
 
-        Assert(u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions != NIL);
+        Assert(g_plpy_t_context.explicit_subtransactions != NIL);
 
         ereport(WARNING, (errmsg("forcibly aborting a subtransaction that has not been exited")));
 
@@ -789,12 +784,11 @@ static void PLy_abort_open_subtransactions(int saveSubxactLevel)
 
         SPI_restore_connection();
 
-        subtransactiondata = (PLySubtransactionData*)linitial(
-            u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions);
-        u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions = list_delete_first(
-            u_sess->attr.attr_common.g_PlySessionCtx->explicit_subtransactions);
+        subtransactiondata = (PLySubtransactionData*)linitial(g_plpy_t_context.explicit_subtransactions);
+        g_plpy_t_context.explicit_subtransactions = list_delete_first(g_plpy_t_context.explicit_subtransactions);
 
         MemoryContextSwitchTo(subtransactiondata->oldcontext);
         t_thrd.utils_cxt.CurrentResourceOwner = subtransactiondata->oldowner;
+        PLy_free(subtransactiondata);
     }
 }

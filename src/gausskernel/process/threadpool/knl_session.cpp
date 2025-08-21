@@ -62,7 +62,6 @@
 #include "access/heapam.h"
 #include "workload/workload.h"
 #include "parser/scanner.h"
-#include "storage/plpython_init.h"
 #include "pgstat.h"
 #include "access/datavec/bitvec.h"
 #include "access/datavec/vector.h"
@@ -120,7 +119,6 @@ static void knl_u_attr_init(knl_session_attr* attr)
     attr->attr_sql.enable_upsert_to_merge = false;
     attr->attr_common.extension_session_vars_array_size = 0;
     attr->attr_common.extension_session_vars_array = NULL;
-    attr->attr_common.g_PlySessionCtx = NULL;
 }
 
 void knl_u_executor_init(knl_u_executor_context* exec_cxt)
@@ -1753,20 +1751,9 @@ void use_fake_session()
     SetThreadLocalGUC(u_sess);
 }
 
-void free_plpython_session_context(knl_session_context* session)
-{
-    if (session->plpython_ctx) {
-        if (plpython_state->release_PlySessionCtx_callback)
-            plpython_state->release_PlySessionCtx_callback((PlySessionCtx*)session->plpython_ctx);
-        session->plpython_ctx = NULL;
-    }
-}
-
 void free_session_context(knl_session_context* session)
 {
     Assert(u_sess == session);
-
-    free_plpython_session_context(session);
 
     /* free the locale cache */
     freeLocaleCache(false);
