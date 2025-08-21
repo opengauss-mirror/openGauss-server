@@ -94,17 +94,6 @@ extern void CM_initStringInfo(CM_StringInfo str);
 extern void CM_resetStringInfo(CM_StringInfo str);
 
 /*------------------------
- * appendStringInfo
- * Format text data under the control of fmt (an sprintf-style format string)
- * and append it to whatever is already in str.  More space is allocated
- * to str if necessary.  This is sort of like a combination of sprintf and
- * strcat.
- */
-extern void CM_appendStringInfo(CM_StringInfo str, const char* fmt, ...)
-    /* This extension allows gcc to check the format string */
-    __attribute__((format(printf, 2, 3)));
-
-/*------------------------
  * appendStringInfoVA
  * Attempt to format text data under the control of fmt (an sprintf-style
  * format string) and append it to whatever is already in str.	If successful
@@ -116,53 +105,10 @@ extern bool CM_appendStringInfoVA(CM_StringInfo str, const char* fmt, va_list ar
     __attribute__((format(printf, 2, 0)));
 
 /*------------------------
- * appendStringInfoString
- * Append a null-terminated string to str.
- * Like appendStringInfo(str, "%s", s) but faster.
- */
-extern void CM_appendStringInfoString(CM_StringInfo str, const char* s);
-
-/*------------------------
- * appendStringInfoChar
- * Append a single byte to str.
- * Like appendStringInfo(str, "%c", ch) but much faster.
- */
-extern void CM_appendStringInfoChar(CM_StringInfo str, char ch);
-
-/*------------------------
- * appendStringInfoCharMacro
- * As above, but a macro for even more speed where it matters.
- * Caution: str argument will be evaluated multiple times.
- */
-#define CM_appendStringInfoCharMacro(str, ch)                             \
-    (((str)->len + 1 >= (str)->maxlen) ? CM_appendStringInfoChar(str, ch) \
-                                       : (void)((str)->data[(str)->len] = (ch), (str)->data[++(str)->len] = '\0'))
-
-/*------------------------
- * appendBinaryStringInfo
- * Append arbitrary binary data to a StringInfo, allocating more space
- * if necessary.
- */
-extern void CM_appendBinaryStringInfo(CM_StringInfo str, const char* data, int datalen);
-
-/*------------------------
  * enlargeStringInfo
  * Make sure a StringInfo's buffer can hold at least 'needed' more bytes.
  */
 extern int CM_enlargeStringInfo(CM_StringInfo str, int needed);
-
-/*-----------------------
- * dupStringInfo
- * Get new StringInfo and copy the original to it.
- */
-extern CM_StringInfo CM_dupStringInfo(CM_StringInfo orig);
-
-/*------------------------
- * copyStringInfo
- * Copy StringInfo. Deep copy: Data will be copied too.
- * cursor of "to" will be initialized to zero.
- */
-extern void CM_copyStringInfo(CM_StringInfo to, CM_StringInfo from);
 
 extern int CM_is_str_all_digit(const char* name);
 extern void CM_destroyStringInfo(CM_StringInfo str);

@@ -64,39 +64,6 @@ void CM_freeStringInfo(CM_StringInfo str)
 }
 
 /*
- * dupStringInfo
- *
- * Get new StringInfo and copy the original to it.
- */
-CM_StringInfo CM_dupStringInfo(CM_StringInfo orig)
-{
-    CM_StringInfo newvar;
-
-    newvar = CM_makeStringInfo();
-    if (newvar == NULL) {
-        return (newvar);
-    }
-
-    if (orig->len > 0) {
-        CM_appendBinaryStringInfo(newvar, orig->data, orig->len);
-        newvar->cursor = orig->cursor;
-    }
-    return (newvar);
-}
-
-/*
- * copyStringInfo
- * Deep copy: Data part is copied too.   Cursor of the destination is
- * initialized to zero.
- */
-void CM_copyStringInfo(CM_StringInfo to, CM_StringInfo from)
-{
-    CM_resetStringInfo(to);
-    CM_appendBinaryStringInfo(to, from->data, from->len);
-    return;
-}
-
-/*
  * initStringInfo
  *
  * Initialize a StringInfoData struct (with previously undefined contents)
@@ -132,34 +99,6 @@ void CM_resetStringInfo(CM_StringInfo str)
     str->cursor = 0;
     str->qtype = 0;
     str->msglen = 0;
-}
-
-/*
- * appendStringInfo
- *
- * Format text data under the control of fmt (an sprintf-style format string)
- * and append it to whatever is already in str.  More space is allocated
- * to str if necessary.  This is sort of like a combination of sprintf and
- * strcat.
- */
-void CM_appendStringInfo(CM_StringInfo str, const char* fmt, ...)
-{
-    for (;;) {
-        va_list args;
-        bool success = false;
-
-        /* Try to format the data. */
-        va_start(args, fmt);
-        success = CM_appendStringInfoVA(str, fmt, args);
-        va_end(args);
-
-        if (success) {
-            break;
-        }
-
-        /* Double the buffer size and try again. */
-        (void)CM_enlargeStringInfo(str, str->maxlen);
-    }
 }
 
 /*
@@ -214,61 +153,6 @@ bool CM_appendStringInfoVA(CM_StringInfo str, const char* fmt, va_list args)
     /* Restore the trailing null so that str is unmodified. */
     str->data[str->len] = '\0';
     return false;
-}
-
-/*
- * appendStringInfoString
- *
- * Append a null-terminated string to str.
- * Like appendStringInfo(str, "%s", s) but faster.
- */
-void CM_appendStringInfoString(CM_StringInfo str, const char* s)
-{
-    CM_appendBinaryStringInfo(str, s, strlen(s));
-}
-
-/*
- * appendStringInfoChar
- *
- * Append a single byte to str.
- * Like appendStringInfo(str, "%c", ch) but much faster.
- */
-void CM_appendStringInfoChar(CM_StringInfo str, char ch)
-{
-    /* Make more room if needed */
-    if (str->len + 1 >= str->maxlen) {
-        (void)CM_enlargeStringInfo(str, 1);
-    }
-
-    /* OK, append the character */
-    str->data[str->len] = ch;
-    str->len++;
-    str->data[str->len] = '\0';
-}
-
-/*
- * appendBinaryStringInfo
- *
- * Append arbitrary binary data to a StringInfo, allocating more space
- * if necessary.
- */
-void CM_appendBinaryStringInfo(CM_StringInfo str, const char* data, int datalen)
-{
-    errno_t rc;
-
-    /* Make more room if needed */
-    (void)CM_enlargeStringInfo(str, datalen);
-
-    /* OK, append the data */
-    rc = memcpy_s(str->data + str->len, str->maxlen - str->len, data, datalen);
-    securec_check_c(rc, "\0", "\0");
-    str->len += datalen;
-
-    /*
-     * Keep a trailing null in place, even though it's probably useless for
-     * binary data...
-     */
-    str->data[str->len] = '\0';
 }
 
 /*
@@ -352,6 +236,8 @@ int CM_enlargeStringInfo(CM_StringInfo str, int needed)
         if (str->data != NULL) {
             FREE_AND_RESET(str->data);
             str->maxlen = 0;
+            write_runlog(ERROR, "enlarge string info malloc failed, out of memory.\n");
+            return -1;
         }
     }
     return 0;
