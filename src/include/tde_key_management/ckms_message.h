@@ -57,6 +57,8 @@ public:
     AgencyTokenInfo* agency_token_info;
     /* KMS info */
     KmsInfo* kms_info;
+    char *m_iamca;
+    char *m_kmsca;
 
 private:
     CKMSMessage();

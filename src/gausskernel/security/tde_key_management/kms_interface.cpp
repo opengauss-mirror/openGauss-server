@@ -144,7 +144,7 @@ AdvStrList* KMSInterface::kms_restful_token()
     http_body = TDE::CKMSMessage::get_instance().get_iam_token_json();
     const char* http_head_list[] = {content_type, NULL};
     HttpReqMsg http_req_msg = {HTTP_POST, token_url, NULL, http_body, http_head_list};
-    HttpConfig http_config = {time_out, HTTP_MSG};
+    HttpConfig http_config = {time_out, HTTP_MSG, TDE::CKMSMessage::get_instance().m_iamca};
     ret = HttpCommon::http_request(&http_req_msg, &http_config, &http_msg_list);
     /* token_url is not NULL */
     pfree_ext(token_url);
@@ -182,7 +182,7 @@ AdvStrList* KMSInterface::kms_restful_agency_token(char* token)
     http_body = TDE::CKMSMessage::get_instance().get_iam_agency_token_json();
     const char* http_head_list[] = {content_type, token, NULL};
     HttpReqMsg http_req_msg = {HTTP_POST, agency_token_url, NULL, http_body, http_head_list};
-    HttpConfig http_config = {time_out, HTTP_MSG};
+    HttpConfig http_config = {time_out, HTTP_MSG, TDE::CKMSMessage::get_instance().m_iamca};
     ret = HttpCommon::http_request(&http_req_msg, &http_config, &http_msg_list);
     /* agency_token_url is not NULL */
     pfree_ext(agency_token_url);
@@ -228,7 +228,7 @@ AdvStrList* KMSInterface::kms_restful_get_dek(const char* cmk_id, const char* de
     }
     const char* http_head_list[] = {content_type, TDE::CKMSMessage::get_instance().tde_agency_token, NULL};
     HttpReqMsg http_req_msg = {HTTP_POST, dek_url, NULL, http_body, http_head_list};
-    HttpConfig http_config = {time_out, HTTP_RESBODY};
+    HttpConfig http_config = {time_out, HTTP_RESBODY, TDE::CKMSMessage::get_instance().m_kmsca};
     ret = HttpCommon::http_request(&http_req_msg, &http_config, &http_msg_list);
     pfree_ext(dek_url);
     pfree_ext(http_body);

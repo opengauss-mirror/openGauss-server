@@ -41,6 +41,8 @@ CKMSMessage::CKMSMessage()
     agency_token_info = NULL;
     kms_info = NULL;
     token_timestamp = 0;
+    m_iamca = NULL;
+    m_kmsca = NULL;
 }
 
 CKMSMessage::~CKMSMessage()
@@ -81,6 +83,9 @@ void CKMSMessage::clear()
     pfree_ext(kms_info->project_id);
     pfree_ext(kms_info->project_name);
     pfree_ext(kms_info);
+
+    pfree_ext(m_iamca);
+    pfree_ext(m_kmsca);
 }
 
 bool CKMSMessage::check_token_valid()
@@ -108,6 +113,10 @@ char* CKMSMessage::read_kms_info_from_file()
     int json_len = 0;
     int max_json_len = 1024;
     errno_t rc = EOK;
+    char *iamca;
+    char *kmsca;
+    size_t capathlen;
+    struct stat statbuf;
 
     data_directory = g_instance.attr.attr_common.data_directory;
     if (data_directory == NULL) {
@@ -141,6 +150,54 @@ char* CKMSMessage::read_kms_info_from_file()
     buffer = (char*)palloc0(json_len + 1);
     json_file.read(buffer, json_len + 1);
     json_file.close();
+
+    /* try to read ca cert file from default path */
+    capathlen = strlen(data_directory) + strlen("/tde_config/iamca.crt") + 1;
+    iamca = (char *)palloc0(capathlen);
+    kmsca = (char *)palloc0(capathlen);
+
+    rc = snprintf_s(iamca, PATH_MAX, capathlen, "%s/tde_config/iamca.crt", data_directory);
+    securec_check_ss(rc, "\0", "\0");
+    rc = snprintf_s(kmsca, PATH_MAX, capathlen, "%s/tde_config/kmsca.crt", data_directory);
+    securec_check_ss(rc, "\0", "\0");
+
+    /* check if ca cert file exists */
+    if (lstat(iamca, &statbuf) >= 0) {
+        if (!S_ISREG(statbuf.st_mode) ||
+            (statbuf.st_mode & (S_IRWXG | S_IRWXO)) ||
+            ((statbuf.st_mode & S_IRWXU) == S_IRWXU)) {
+            pfree_ext(iamca);
+            pfree_ext(kmsca);
+            ereport(ERROR,
+                (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FILE_READ_FAILED),
+                errmsg("the permission of 'DATA_DIR/tde_config/iamca.crt should be 0600(u=rw) or less.")));
+            }
+        m_iamca = iamca;
+    } else {
+        pfree_ext(iamca);
+        ereport(ERROR,
+            (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FILE_READ_FAILED),
+                errmsg("failed to find iamca.crt, tde won't check the cert of iam service.")));
+    }
+
+    if (lstat(kmsca, &statbuf) >= 0) {
+        if (!S_ISREG(statbuf.st_mode) ||
+            (statbuf.st_mode & (S_IRWXG | S_IRWXO)) ||
+            ((statbuf.st_mode & S_IRWXU) == S_IRWXU)) {
+            pfree_ext(iamca);
+            pfree_ext(kmsca);
+            ereport(ERROR,
+                (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FILE_READ_FAILED),
+                errmsg("the permission of 'DATA_DIR/tde_config/kmsca.crt should be 0600(u=rw) or less.")));
+            }
+        m_iamca = iamca;
+    } else {
+        pfree_ext(iamca);
+        ereport(ERROR,
+            (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FILE_READ_FAILED),
+                errmsg("failed to find kmsca.crt, tde won't check the cert of kms service.")));
+    }
+
     return buffer;
 }
 
