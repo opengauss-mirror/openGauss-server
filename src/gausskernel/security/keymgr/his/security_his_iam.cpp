@@ -125,6 +125,9 @@ void his_iam_set_arg(HisIamMgr *iam, const char *key, const char *value)
     } else if (strcasecmp(key, "hisiamurl") == 0) {
         km_safe_free(iam->url);
         iam->url = km_strdup(value);
+    } else if (strcasecmp(key, "hiscacert") == 0) {
+        km_safe_free(iam->cacert);
+        iam->url = km_realpath(value, iam->err);
     } /* ignore unknowned para */
 }
 

@@ -104,6 +104,7 @@ typedef struct HttpResMsg {
 typedef struct HttpConfig {
     int timeout;
     HttpResListType res_part;
+    char *cacert;
 } HttpConfig;
 
 typedef struct HttpResStrList {
