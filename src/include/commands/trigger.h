@@ -112,6 +112,7 @@ extern ObjectAddress renametrig(RenameStmt* stmt);
 extern void EnableDisableTrigger(Relation rel, const char* tgname, char fires_when, bool skip_system);
 
 extern void RelationBuildTriggers(Relation relation);
+extern ObjectAddress AlterTriggerOwner(const RangeVar* rel, const char* triggerName, Oid newOwnerId);
 
 extern TriggerDesc* CopyTriggerDesc(TriggerDesc* trigdesc);
 
