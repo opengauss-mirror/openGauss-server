@@ -235,6 +235,7 @@ bool aclsSkip;
 bool targetV1;
 bool targetV5;
 const char* lockWaitTimeout;
+static int useSetsessauth;
 
 static char connected_node_type = 'N'; /* 'N' -- NONE
                                           'C' -- Coordinator
@@ -544,7 +545,6 @@ int main(int argc, char** argv)
 
     static int disable_triggers = 0;
     static int outputNoTablespaces = 0;
-    static int use_setsessauth = 0;
     errno_t rc = 0;
     int nRet = 0;
     int totalObjNums = 0;
@@ -597,7 +597,7 @@ int main(int argc, char** argv)
         {"role", required_argument, NULL, 3},
         {"section", required_argument, NULL, 5},
         {"serializable-deferrable", no_argument, &serializable_deferrable, 1},
-        {"use-set-session-authorization", no_argument, &use_setsessauth, 1},
+        {"use-set-session-authorization", no_argument, &useSetsessauth, 1},
         {"no-security-labels", no_argument, &no_security_labels, 1},
 #if !defined(ENABLE_MULTIPLE_NODES)
         {"no-publications", no_argument, &no_publications, 1},
@@ -1101,7 +1101,7 @@ int main(int argc, char** argv)
     ropt->noOwner = outputNoOwner;
     ropt->noTablespace = outputNoTablespaces;
     ropt->disable_triggers = disable_triggers;
-    ropt->use_setsessauth = use_setsessauth;
+    ropt->use_setsessauth = useSetsessauth;
     ropt->no_subscriptions = no_subscriptions;
     ropt->no_publications = no_publications;
 
@@ -8697,6 +8697,7 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
     int i_tgdeferrable = 0;
     int i_tginitdeferred = 0;
     int i_tgdef = 0;
+    int i_tgrolname = 0;
     int i_tgdb = 0;
     int ntups = 0;
 
@@ -8728,20 +8729,24 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
                     "SELECT tgname, tgfbody, "
                     "tgfoid::pg_catalog.regproc AS tgfname, "
                     "pg_catalog.pg_get_triggerdef(oid, false) AS tgdef, "
-                    "tgenabled, tableoid, oid "
+                    "tgenabled, tableoid, oid, "
+                    "(%s tgowner) AS tgrolname "
                     "FROM pg_catalog.pg_trigger t "
                     "WHERE tgrelid = '%u'::pg_catalog.oid "
                     "AND NOT tgisinternal",
+                    username_subquery,
                     tbinfo->dobj.catId.oid);
             } else {
                 appendPQExpBuffer(query,
                     "SELECT tgname, "
                     "tgfoid::pg_catalog.regproc AS tgfname, "
                     "pg_catalog.pg_get_triggerdef(oid, false) AS tgdef, "
-                    "tgenabled, tableoid, oid "
+                    "tgenabled, tableoid, oid, "
+                    "(%s tgowner) AS tgrolname "
                     "FROM pg_catalog.pg_trigger t "
                     "WHERE tgrelid = '%u'::pg_catalog.oid "
                     "AND NOT tgisinternal",
+                    username_subquery,
                     tbinfo->dobj.catId.oid);
             }
         } else if (fout->remoteVersion >= 80300) {
@@ -8754,10 +8759,12 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
                 "tgtype, tgnargs, tgargs, tgenabled, "
                 "tgisconstraint, tgconstrname, tgdeferrable, "
                 "tgconstrrelid, tginitdeferred, tableoid, oid, "
+                "(%s tgowner) AS tgrolname, "
                 "tgconstrrelid::pg_catalog.regclass AS tgconstrrelname "
                 "FROM pg_catalog.pg_trigger t "
                 "WHERE tgrelid = '%u'::pg_catalog.oid "
                 "AND tgconstraint = 0",
+                username_subquery,
                 tbinfo->dobj.catId.oid);
         } else if (fout->remoteVersion >= 70300) {
             /*
@@ -8771,6 +8778,7 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
                 "tgtype, tgnargs, tgargs, tgenabled, "
                 "tgisconstraint, tgconstrname, tgdeferrable, "
                 "tgconstrrelid, tginitdeferred, tableoid, oid, "
+                "(%s tgowner) AS tgrolname, "
                 "tgconstrrelid::pg_catalog.regclass AS tgconstrrelname "
                 "FROM pg_catalog.pg_trigger t "
                 "WHERE tgrelid = '%u'::pg_catalog.oid "
@@ -8779,6 +8787,7 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
                 "  (SELECT 1 FROM pg_catalog.pg_depend d "
                 "   JOIN pg_catalog.pg_constraint c ON (d.refclassid = c.tableoid AND d.refobjid = c.oid) "
                 "   WHERE d.classid = t.tableoid AND d.objid = t.oid AND d.deptype = 'i' AND c.contype = 'f'))",
+                username_subquery,
                 tbinfo->dobj.catId.oid);
         } else if (fout->remoteVersion >= 70100) {
             appendPQExpBuffer(query,
@@ -8786,10 +8795,12 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
                 "tgtype, tgnargs, tgargs, tgenabled, "
                 "tgisconstraint, tgconstrname, tgdeferrable, "
                 "tgconstrrelid, tginitdeferred, tableoid, oid, "
+                "(%s tgowner) AS tgrolname, "
                 "(SELECT relname FROM pg_class WHERE oid = tgconstrrelid) "
                 "     AS tgconstrrelname "
                 "FROM pg_trigger "
                 "WHERE tgrelid = '%u'::oid",
+                username_subquery,
                 tbinfo->dobj.catId.oid);
         } else {
             appendPQExpBuffer(query,
@@ -8797,12 +8808,14 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
                 "tgtype, tgnargs, tgargs, tgenabled, "
                 "tgisconstraint, tgconstrname, tgdeferrable, "
                 "tgconstrrelid, tginitdeferred, "
+                "(%s tgowner) AS tgrolname, "
                 "(SELECT oid FROM pg_class WHERE relname = 'pg_trigger') AS tableoid, "
                 "oid, "
                 "(SELECT relname FROM pg_class WHERE oid = tgconstrrelid) "
                 "     AS tgconstrrelname "
                 "FROM pg_trigger "
                 "WHERE tgrelid = '%u'::oid",
+                username_subquery,
                 tbinfo->dobj.catId.oid);
         }
         res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
@@ -8829,6 +8842,8 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
         i_tginitdeferred = PQfnumber(res, "tginitdeferred");
         i_tgdef = PQfnumber(res, "tgdef");
         i_tgdb = PQfnumber(res, "tgfbody");
+        i_tgrolname = PQfnumber(res, "tgrolname");
+
 
         tginfo = (TriggerInfo*)pg_malloc(ntups * sizeof(TriggerInfo));
 
@@ -8842,6 +8857,7 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
             tginfo[j].tgtable = tbinfo;
             tginfo[j].tgenabled = *(PQgetvalue(res, j, i_tgenabled));
             tginfo[j].tgfname = gs_strdup(PQgetvalue(res, j, i_tgfname));
+            tginfo[j].tgrolname = gs_strdup(PQgetvalue(res, j, i_tgrolname));
             if (!PQgetisnull(res, j, i_tgdb)) {
                 char *body =  PQgetvalue(res, j, i_tgdb);
                 tginfo[j].tgdb = true;
@@ -21748,6 +21764,7 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
     PQExpBuffer query;
     PQExpBuffer delqry;
     PQExpBuffer labelq;
+    PQExpBuffer alterqry;
     char* tgargs = NULL;
     size_t lentgargs = 0;
     int findx = 0;
@@ -21758,6 +21775,7 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
     query = createPQExpBuffer();
     delqry = createPQExpBuffer();
     labelq = createPQExpBuffer();
+    alterqry = createPQExpBuffer();
 
     /*
      * DROP must be fully qualified in case same name appears in pg_catalog
@@ -21891,6 +21909,10 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
         }
     }
 
+    appendPQExpBuffer(query, "ALTER TRIGGER %s ", fmtId(tginfo->dobj.name));
+    appendPQExpBuffer(query, "ON %s ", fmtId(tbinfo->dobj.name));
+    appendPQExpBuffer(query, "OWNER TO %s;\n", fmtId(tginfo->tgrolname));
+
     if (tginfo->tgenabled != 't' && tginfo->tgenabled != 'O') {
         appendPQExpBuffer(query, "\nALTER TABLE %s ", fmtId(tbinfo->dobj.name));
         switch (tginfo->tgenabled) {
@@ -21930,7 +21952,8 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
         NULL,
         0,
         NULL,
-        NULL);
+        NULL,
+        alterqry->data);
 
     dumpComment(fout,
         labelq->data,
@@ -21943,6 +21966,7 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
     destroyPQExpBuffer(query);
     destroyPQExpBuffer(delqry);
     destroyPQExpBuffer(labelq);
+    destroyPQExpBuffer(alterqry);
 }
 
 static bool hasExcludeGucParam(SimpleStringList *guc, const char *guc_param)
