@@ -3027,6 +3027,7 @@ typedef struct knl_u_hook_context {
     void *analyzerRoutineHook;
     void *transformStmtHook;
     void *execInitExprHook;
+    void *kernelExecInitExpr;
     void *computeHashHook;
     void *aggSmpHook;
     void *standardProcessUtilityHook;

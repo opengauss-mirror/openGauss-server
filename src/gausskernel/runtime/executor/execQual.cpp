@@ -5992,14 +5992,21 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent){
     }
     return state;
 }
+
 ExprState* ExecInitExprByRecursion(Expr* node, PlanState* parent)
 {
-   if (u_sess->hook_cxt.execInitExprHook != NULL) {
+    if (u_sess->hook_cxt.execInitExprHook != NULL) {
         ExprState* expr = ((execInitExprFunc)(u_sess->hook_cxt.execInitExprHook))(node, parent);
-        if (expr != NULL)
+        if (expr != NULL) {
             return expr;
+        }
     }
-    ExprState* state = NULL;
+    return ExecInitExprByRecursionInternal(node, parent);
+}
+
+ExprState* ExecInitExprByRecursionInternal(Expr* node, PlanState* parent)
+{
+   ExprState* state = NULL;
 
    gstrace_entry(GS_TRC_ID_ExecInitExpr);
    if (node == NULL) {

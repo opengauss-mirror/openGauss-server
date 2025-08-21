@@ -743,6 +743,7 @@ extern Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot* slot, bool
 extern Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 extern int ResourceOwnerForgetIfExistPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex, bool trace);
 extern void ResourceOwnerForgetIfExistPthreadRWlock(ResourceOwner owner, pthread_rwlock_t* pRWlock);
+extern ExprState* ExecInitExprByRecursionInternal(Expr* node, PlanState* parent);
 
 typedef bool (*replaceNullOrNotFunc)();
 

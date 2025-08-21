@@ -1518,6 +1518,12 @@ static void knl_u_bm25_init(knl_u_bm25_context* bm25_context)
     bm25_context->scoreHashTable = nullptr;
 }
 
+static void knl_u_hook_init(knl_u_hook_context* hook_context)
+{
+    /* save the kernel addr for ExecInitExprByRecursion, in case plugin want to call back to kernel's routine */
+    hook_context->kernelExecInitExpr = (void*)ExecInitExprByRecursionInternal;
+}
+
 void knl_session_init(knl_session_context* sess_cxt)
 {
     Assert (0 != strncmp(CurrentMemoryContext->name, "ErrorContext", sizeof("ErrorContext")));
@@ -1619,6 +1625,8 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_clientConnTime_init(&sess_cxt->clientConnTime_cxt);
 
     knl_u_opfusion_reuse_init(&sess_cxt->opfusion_reuse_ctx);
+
+    knl_u_hook_init(&sess_cxt->hook_cxt);
 
 #ifdef ENABLE_HTAP
     knl_u_imcstore_init(&sess_cxt->imcstore_ctx);
