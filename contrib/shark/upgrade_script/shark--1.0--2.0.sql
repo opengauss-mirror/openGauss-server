@@ -2621,6 +2621,36 @@ CREATE FUNCTION sys.isnull(timestamp with time zone,timestamp with time zone) RE
 $$
 LANGUAGE SQL STABLE;
 
+CREATE FUNCTION sys.isnull(text,smallint) RETURNS text AS $$
+  SELECT COALESCE($1,$2::text);
+$$
+LANGUAGE SQL STABLE;
+
+CREATE FUNCTION sys.isnull(text,integer) RETURNS text AS $$
+  SELECT COALESCE($1,$2::text);
+$$
+LANGUAGE SQL STABLE;
+
+CREATE FUNCTION sys.isnull(text,bigint) RETURNS text AS $$
+  SELECT COALESCE($1,$2::text);
+$$
+LANGUAGE SQL STABLE;
+
+CREATE FUNCTION sys.isnull(text,real) RETURNS text AS $$
+  SELECT COALESCE($1,$2::text);
+$$
+LANGUAGE SQL STABLE;
+
+CREATE FUNCTION sys.isnull(text,double precision) RETURNS text AS $$
+  SELECT COALESCE($1,$2::text);
+$$
+LANGUAGE SQL STABLE;
+
+CREATE FUNCTION sys.isnull(text,numeric) RETURNS text AS $$
+  SELECT COALESCE($1,$2::text);
+$$
+LANGUAGE SQL STABLE;
+
 CREATE OR REPLACE FUNCTION sys.charindex(expressionToFind PG_CATALOG.TEXT,
 										 expressionToSearch PG_CATALOG.TEXT,
 										 start_location INTEGER DEFAULT 0)

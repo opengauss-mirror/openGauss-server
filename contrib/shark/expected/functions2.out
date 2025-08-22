@@ -540,7 +540,7 @@ drop view atn2_1;
 select ISNULL(NULL, 1);
  isnull 
 --------
-      1
+ 1
 (1 row)
 
 select ISNULL(2, 1);
@@ -549,18 +549,48 @@ select ISNULL(2, 1);
       2
 (1 row)
 
-select ISNULL();
-ERROR:  function isnull() does not exist
-LINE 1: select ISNULL();
-               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: isnull
-select ISNULL();
-ERROR:  function isnull() does not exist
-LINE 1: select ISNULL();
-               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: isnull
+select ISNULL(' ', 1);
+ isnull 
+--------
+  
+(1 row)
+
+select ISNULL(' ', 1::smallint);
+ isnull 
+--------
+  
+(1 row)
+
+select ISNULL(' ', 1::bigint);
+ isnull 
+--------
+  
+(1 row)
+
+select ISNULL(' ', 1.2::real);
+ isnull 
+--------
+  
+(1 row)
+
+select ISNULL(' ', 1.2::double precision);
+ isnull 
+--------
+  
+(1 row)
+
+select ISNULL(' ', 1.2::numeric);
+ isnull 
+--------
+  
+(1 row)
+
+select ISNULL('abc', 123);
+ isnull 
+--------
+ abc
+(1 row)
+
 select log10(10);
  log10 
 -------
@@ -611,11 +641,6 @@ LINE 1: select log10(now());
                ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 CONTEXT:  referenced column: log10
-select ISNULL('abc', 123);
-ERROR:  invalid input syntax for integer: "abc"
-LINE 1: select ISNULL('abc', 123);
-                      ^
-CONTEXT:  referenced column: isnull
 SELECT CONVERT(DATE, '');
  shark_conv_helper_to_date 
 ---------------------------
