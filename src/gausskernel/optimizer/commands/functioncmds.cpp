@@ -1758,6 +1758,13 @@ void RemoveFunctionById(Oid funcOid)
     Form_pg_proc procedureStruct = (Form_pg_proc)GETSTRUCT(tup);
     isagg = procedureStruct->proisagg;
     char* funcName = pstrdup(NameStr(procedureStruct->proname));
+    if (procedureStruct->pronamespace == PG_DB4AI_NAMESPACE) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("Try to remove function \"%s\", but function removement is not supported for \"%s\" schema",
+                    funcName, get_namespace_name(procedureStruct->pronamespace))));
+    }
+
 #ifdef ENABLE_MOT
     bool isNull = false;
     Datum prokindDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_prokind, &isNull);

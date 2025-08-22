@@ -4153,7 +4153,8 @@ void RemoveObjectsonMainExecCN(DropStmt* drop, ObjectAddresses* objects, bool is
 static bool CheckClassFormPermission(Form_pg_class classform)
 {
     if (g_instance.attr.attr_common.allowSystemTableMods || u_sess->attr.attr_common.IsInplaceUpgrade ||
-        !IsSystemClass(classform)) {
+        !(IsSystemClass(classform) ||
+            (classform->relnamespace == PG_DB4AI_NAMESPACE && !strcmp(NameStr(classform->relname), "snapshot")))) {
         return true;
     }
     return false;
@@ -23885,8 +23886,10 @@ static void RangeVarCallbackForAlterRelation(
     }
 
     /* No system table modifications unless explicitly allowed or during inplace upgrade. */
+    bool isSystemClass = IsSystemClass(classform) ||
+        (classform->relnamespace == PG_DB4AI_NAMESPACE && !strcmp(NameStr(classform->relname), "snapshot"));
     if (!(g_instance.attr.attr_common.allowSystemTableMods && relid >= FirstBootstrapObjectId) &&
-        !u_sess->attr.attr_common.IsInplaceUpgrade && IsSystemClass(classform)) {
+        !u_sess->attr.attr_common.IsInplaceUpgrade && isSystemClass) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied: \"%s\" is a system catalog", rv->relname)));

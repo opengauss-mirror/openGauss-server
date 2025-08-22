@@ -5810,15 +5810,19 @@ NamespaceInfo* getNamespaces(Archive* fout, int* numNamespaces)
         selectDumpableNamespace(&nsinfo[i]);
 #ifndef ENABLE_MULTIPLE_NODES
         if (unlikely(isDB4AIschema(&nsinfo[i]) && nsinfo[i].dobj.dump)) {
-            selectSourceSchema(fout, "db4ai");
-            resetPQExpBuffer(query);
-            appendPQExpBuffer(query, "SELECT id FROM snapshot");
-            PGresult *res_ = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-            if (PQntuples(res_) != 0 and outputClean == 0) {
-                exit_horribly(NULL, "Using options -c/--clean to dump db4ai schema. Or clean this schema.\n");
+            if (isExecUserSuperRole(fout)) {
+                selectSourceSchema(fout, "db4ai");
+                resetPQExpBuffer(query);
+                appendPQExpBuffer(query, "SELECT id FROM db4ai.snapshot");
+                PGresult *res_ = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+                if (PQntuples(res_) != 0 and outputClean == 0) {
+                    exit_horribly(NULL, "Using options -c/--clean to dump db4ai schema. Or clean this schema.\n");
+                }
+                nsinfo[i].dobj.dump = (PQntuples(res_) != 0 and outputClean == 1);
+                PQclear(res_);
+            } else {
+                nsinfo[i].dobj.dump = false;
             }
-            nsinfo[i].dobj.dump = (PQntuples(res_) != 0 and outputClean == 1);
-            PQclear(res_);
         }
 #endif
     }
