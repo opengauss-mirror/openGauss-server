@@ -57,6 +57,7 @@
 #include "catalog/pg_type_fn.h"
 #include "catalog/gs_db_privilege.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_authid.h"
 #include "commands/defrem.h"
 #include "commands/proclang.h"
 #include "commands/typecmds.h"
@@ -2206,6 +2207,12 @@ ObjectAddress AlterFunctionOwner(List* name, List* argtypes, Oid newOwnerId)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("function \"%s\" is a masking function,its owner can not be changed", NameListToString(name))));
+    }
+
+    if (!initialuser() && BOOTSTRAP_SUPERUSERID == newOwnerId) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("only super user can set function owner to super user")));
     }
 
     TrForbidAccessRbObject(ProcedureRelationId, procOid);
