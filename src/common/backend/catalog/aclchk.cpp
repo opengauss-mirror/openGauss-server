@@ -22,6 +22,7 @@
 #include "access/heapam.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "access/transam.h"
 #include "access/xact.h"
 #include "access/tableam.h"
@@ -54,6 +55,7 @@
 #include "catalog/pg_subscription.h"
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_tablespace.h"
+#include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_ts_config.h"
 #include "catalog/pg_ts_dict.h"
@@ -7408,6 +7410,40 @@ bool pg_subscription_ownercheck(Oid sub_oid, Oid roleid)
     ownerId = ((Form_pg_subscription)GETSTRUCT(tuple))->subowner;
 
     ReleaseSysCache(tuple);
+
+    return has_privs_of_role(roleid, ownerId);
+}
+
+bool pg_trigger_ownercheck(Oid tgoid, Oid roleid, bool isCreateOrAlter)
+{
+    Relation tgrel = NULL;
+    ScanKeyData entry[1];
+    SysScanDesc tgscan = NULL;
+    HeapTuple tuple = NULL;
+    Oid ownerId;
+    bool isNull = false;
+
+    /* Superusers bypass all permission checking. */
+    if (superuser_arg(roleid)) {
+        return true;
+    }
+
+    tgrel = heap_open(TriggerRelationId, AccessShareLock);
+    ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tgoid));
+    tgscan = systable_beginscan(tgrel, TriggerOidIndexId, true, NULL, 1, entry);
+    tuple = systable_getnext(tgscan);
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("could not find tuple for trigger %u", tgoid),
+                errcause("Could not find trigger information."), erraction("Check if the trigger has been removed.")));
+    }
+
+    /* The value of isnull does not need to be checked because the tuple has been checked before. */
+    Datum datum = tableam_tops_tuple_getattr(tuple, Anum_pg_trigger_tgowner, RelationGetDescr(tgrel), &isNull);
+    ownerId = DatumGetObjectId(datum);
+
+    systable_endscan(tgscan);
+    heap_close(tgrel, AccessShareLock);
 
     return has_privs_of_role(roleid, ownerId);
 }

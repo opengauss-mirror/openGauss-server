@@ -20375,6 +20375,15 @@ AlterOwnerStmt: ALTER AGGREGATE func_name aggr_args OWNER TO RoleId
 					n->newowner = $6;
 					$$ = (Node *)n;
 				}
+			| ALTER TRIGGER qualified_trigger_name ON qualified_name OWNER TO RoleId
+				{
+					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
+					n->objectType = OBJECT_TRIGGER;
+					n->object = list_make1(makeString($3->relname));
+					n->relation = $5;
+					n->newowner = $8;
+					$$ = (Node*)n;
+				}
 		;
 
 /*****************************************************************************

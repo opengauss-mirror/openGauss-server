@@ -73,7 +73,7 @@ typedef z_stream* z_streamp;
 
 /* Current archive version number (the format we can output) */
 #define K_VERS_MAJOR 1
-#define K_VERS_MINOR 12
+#define K_VERS_MINOR 13
 #define K_VERS_REV 0
 
 /* Data block types */
@@ -105,8 +105,11 @@ typedef z_stream* z_streamp;
     (((1 * 256 + 12) * 256 + 0) * 256 + 0) /* add separate BLOB \
                                             * entries */
 
+#define K_VERS_1_13                                             \
+    (((1 * 256 + 13) * 256 + 0) * 256 + 0) /* add alterStmt */
+
 /* Newest format we can read */
-#define K_VERS_MAX (((1 * 256 + 12) * 256 + 255) * 256 + 0)
+#define K_VERS_MAX (((1 * 256 + 13) * 256 + 255) * 256 + 0)
 
 /* Flags to indicate disposition of offsets stored in files */
 #define K_OFFSET_POS_NOT_SET 1
@@ -333,6 +336,7 @@ typedef struct _tocEntry {
     int nRevDeps;               /* number of such dependencies */
     DumpId* lockDeps;           /* dumpIds of objects this one needs lock on */
     int nLockDeps;              /* number of such dependencies */
+    char* alterStmt;
 } TocEntry;
 
 extern void on_exit_close_archive(Archive* AHX);

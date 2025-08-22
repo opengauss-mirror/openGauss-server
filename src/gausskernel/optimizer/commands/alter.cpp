@@ -1025,7 +1025,9 @@ ObjectAddress ExecAlterOwnerStmt(AlterOwnerStmt* stmt)
         case OBJECT_SUBSCRIPTION:
             return AlterSubscriptionOwner(strVal(linitial(stmt->object)), newowner);
             break;
-
+        case OBJECT_TRIGGER:
+            return AlterTriggerOwner(stmt->relation, strVal(linitial(stmt->object)), newowner);
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
