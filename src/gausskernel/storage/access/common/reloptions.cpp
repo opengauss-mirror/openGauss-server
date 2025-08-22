@@ -976,7 +976,6 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
      */
     const char *storageType = NULL;
     const char *toastStorageType = NULL;
-    bool toastStorageTypeSet = false;
     foreach (cell, defList) {
         DefElem *def = (DefElem *)lfirst(cell);
 
@@ -1030,7 +1029,6 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
                     toastStorageType = ((def->arg != NULL) ? defGetString(def) : NULL);
                     continue;
                 }
-                toastStorageTypeSet = true; /* toast table set the storage type itself */
             } else if (def->defnamespace == NULL)
                 continue;
             else if (pg_strcasecmp(def->defnamespace, namspace) != 0)
@@ -1058,24 +1056,21 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
 
     /* we did not specify a storage type for toast, so use the same storage type as its parent */
     if (namspace != NULL && pg_strcasecmp(namspace, "toast") == 0) {
-        if (toastStorageType != NULL) {
-            const char *parentStorageType = (storageType == NULL)
+        const char *parentStorageType = (storageType == NULL)
                                           ? (u_sess->attr.attr_sql.enable_default_ustore_table ? "ustore" : "astore")
                                           : storageType;
-            if (pg_strcasecmp(parentStorageType, toastStorageType) != 0) {
-                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                                errmsg("parent storage type is %s but toast storage type is %s, toast should use the "
-                                       "same storage type as its parent",
-                                       parentStorageType, toastStorageType)));
-            }
+        if (toastStorageType != NULL && pg_strcasecmp(parentStorageType, toastStorageType) != 0) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("parent storage type is %s but toast storage type is %s, toast should use the "
+                                "same storage type as its parent", parentStorageType, toastStorageType)));
         }
 
-        if (!toastStorageTypeSet && storageType != NULL) {
-            Size len = VARHDRSZ + strlen("storage_type") + 1 + strlen(storageType);
+        if (toastStorageType != NULL || storageType != NULL) {
+            Size len = VARHDRSZ + strlen("storage_type") + 1 + strlen(parentStorageType);
             /* +1 leaves room for sprintf's trailing null */
             text *t = (text *)palloc(len + 1);
             SET_VARSIZE(t, len);
-            errno_t rc = sprintf_s(VARDATA(t), len + 1, "%s=%s", "storage_type", storageType);
+            errno_t rc = sprintf_s(VARDATA(t), len + 1, "%s=%s", "storage_type", parentStorageType);
             securec_check_ss(rc, "\0", "\0");
             astate = accumArrayResult(astate, PointerGetDatum(t), false, TEXTOID, CurrentMemoryContext);
         }
