@@ -2129,7 +2129,7 @@ reset session AUTHORIZATION;
 alter package alt_package.pck1_alter owner to alt_package_2;
 SET SESSION AUTHORIZATION alt_package password 'gauss@123';
 alter package alt_package.pck1_alter owner to alt_package;
-ERROR:  must be owner of package pck1_alter
+ERROR:  security definer package not support replace with different owner
 DETAIL:  N/A
 reset session AUTHORIZATION;
 select usename from pg_user where usesysid = (select pkgowner from gs_package where pkgname = 'pck1_alter');
