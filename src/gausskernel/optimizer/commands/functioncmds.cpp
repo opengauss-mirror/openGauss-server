@@ -2298,6 +2298,7 @@ static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwne
     Form_pg_proc procForm;
     AclResult aclresult;
     Oid procOid;
+    bool enablePrivilegesSeparate = g_instance.attr.attr_security.enablePrivilegesSeparate;
 
     Assert(RelationGetRelid(rel) == ProcedureRelationId);
     Assert(tup->t_tableOid == ProcedureRelationId);
@@ -2325,7 +2326,7 @@ static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwne
         HeapTuple newtuple;
 
         /* Superusers can always do it */
-        if (!superuser()) {
+        if ((!superuser_arg(GetUserId()) && enablePrivilegesSeparate) || (!superuser() && !enablePrivilegesSeparate)) {
             /* Otherwise, must be owner of the existing object */
             if (!pg_proc_ownercheck(procOid, GetUserId()))
                 aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PROC, NameStr(procForm->proname));
@@ -2728,8 +2729,18 @@ ObjectAddress AlterFunction(AlterFunctionStmt* stmt)
         procForm->provolatile = interpret_func_volatility(volatility_item);
     if (strict_item != NULL)
         procForm->proisstrict = intVal(strict_item->arg);
-    if (security_def_item != NULL)
+        
+    /* we can only set security definer by initialuser or user */
+    if (security_def_item != NULL && intVal(security_def_item->arg)) {
+        if (initialuser() || procForm->proowner == GetUserId()) {
+            procForm->prosecdef = intVal(security_def_item->arg);
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("only initial user can set function to security definer")));
+        }
+    } else if (security_def_item != NULL) {
         procForm->prosecdef = intVal(security_def_item->arg);
+    }
     if (leakproof_item != NULL) {
         procForm->proleakproof = intVal(leakproof_item->arg);
         if (procForm->proleakproof && !superuser())
