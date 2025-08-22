@@ -407,4 +407,5 @@ extern bool pg_subscription_ownercheck(Oid sub_oid, Oid roleid);
 extern void ExecGrant_Relation(InternalGrant* grantStmt);
 
 extern bool pg_event_trigger_ownercheck(Oid et_oid, Oid roleid);
+extern bool pg_trigger_ownercheck(Oid tgoid, Oid roleid, bool isCreateOrAlter = false);
 #endif /* ACL_H */

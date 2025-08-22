@@ -1452,7 +1452,7 @@ static void dumpAlterRolesForResourcePool(PGconn* conn)
         if (!PQgetisnull(res, i, i_rolrespool)) {
             resetPQExpBuffer(query);
             appendPQExpBuffer(query, "ALTER ROLE %s WITH", fmtId(rolename));
-            appendPQExpBuffer(query, " RESOURCE POOL \"%s\";\n", rolrespool);
+            appendPQExpBuffer(query, " RESOURCE POOL %s;\n", fmtId(rolrespool));
             dumpall_printf(OPF, "%s", query->data);
         }
     }
@@ -1465,8 +1465,8 @@ static void dumpAlterRolesForResourcePool(PGconn* conn)
             !PQgetisnull(res, i, i_rolrespool)) {
             resetPQExpBuffer(query);
             appendPQExpBuffer(query, "ALTER ROLE %s WITH", fmtId(rolename));
-            appendPQExpBuffer(query, " RESOURCE POOL \"%s\" ", rolrespool);
-            appendPQExpBuffer(query, " USER GROUP '%s';\n", rolparentname);
+            appendPQExpBuffer(query, " RESOURCE POOL %s ", fmtId(rolrespool));
+            appendPQExpBuffer(query, " USER GROUP %s;\n", fmtId(rolparentname));
             dumpall_printf(OPF, "%s", query->data);
         }
     }

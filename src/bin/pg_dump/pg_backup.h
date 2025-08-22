@@ -198,7 +198,8 @@ extern PGconn* GetConnection(Archive* AHX);
 /* Called to add a TOC entry */
 extern void ArchiveEntry(Archive* AHX, CatalogId catalogId, DumpId dumpId, const char* tag, const char* nmspace,
     const char* tablespace, const char* owner, bool withOids, const char* desc, teSection section, const char* defn,
-    const char* dropStmt, const char* copyStmt, const DumpId* deps, int nDeps, DataDumperPtr dumpFn, void* dumpArg);
+    const char* dropStmt, const char* copyStmt, const DumpId* deps, int nDeps, DataDumperPtr dumpFn, void* dumpArg,
+    const char* alterStmt = NULL);
 
 /* Called to write *data* to the archive */
 extern size_t WriteData(Archive* AH, const void* data, size_t dLen);

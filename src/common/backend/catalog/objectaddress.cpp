@@ -1157,7 +1157,7 @@ static ObjectAddress get_object_address_unqualified(ObjectType objtype, List* qu
             address.classId = SubscriptionRelationId;
             address.objectId = get_subscription_oid(name, missing_ok);
             address.objectSubId = 0;
-	    break;
+            break;
         case OBJECT_EVENT_TRIGGER:
             address.classId = EventTriggerRelationId;
             address.objectId = get_event_trigger_oid(name, missing_ok);

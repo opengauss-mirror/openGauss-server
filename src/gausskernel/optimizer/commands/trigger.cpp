@@ -686,6 +686,8 @@ ObjectAddress CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid r
     values[Anum_pg_trigger_tgconstraint - 1] = ObjectIdGetDatum(constraintOid);
     values[Anum_pg_trigger_tgdeferrable - 1] = BoolGetDatum(stmt->deferrable);
     values[Anum_pg_trigger_tginitdeferred - 1] = BoolGetDatum(stmt->initdeferred);
+    values[Anum_pg_trigger_tgqual - 1] = true;
+    values[Anum_pg_trigger_tgowner - 1] = true;
 
     if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
         struct pg_tm tm;
@@ -1393,18 +1395,19 @@ Oid get_trigger_oid_b(const char* trigname, Oid* reloid, bool missing_ok)
 /*
  * Perform permissions and integrity checks before acquiring a relation lock.
  */
-static void RangeVarCallbackForRenameTrigger(
-    const RangeVar* rv, Oid relid, Oid oldrelid, bool target_is_partition, void* arg)
+static void RangeVarCallbackForAlterTrigger(
+    const RangeVar* rv, Oid relid, Oid oldrelid, bool targetIsPartition, void* arg)
 {
     HeapTuple tuple;
     Form_pg_class form;
 
     tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(tuple))
+    if (!HeapTupleIsValid(tuple)) {
         return; /* concurrently dropped */
+    }
     form = (Form_pg_class)GETSTRUCT(tuple);
     /* only tables and views can have triggers */
-    if (form->relkind != RELKIND_RELATION && form->relkind != RELKIND_VIEW && 
+    if (form->relkind != RELKIND_RELATION && form->relkind != RELKIND_VIEW &&
         form->relkind != RELKIND_CONTQUERY)
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a table or view", rv->relname)));
 
@@ -1454,7 +1457,7 @@ ObjectAddress renametrig(RenameStmt* stmt)
      * release until end of transaction).
      */
     relid = RangeVarGetRelidExtended(
-        stmt->relation, AccessExclusiveLock, false, false, false, false, RangeVarCallbackForRenameTrigger, NULL);
+        stmt->relation, AccessExclusiveLock, false, false, false, false, RangeVarCallbackForAlterTrigger, NULL);
 
     TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
 
@@ -1633,6 +1636,110 @@ void EnableDisableTrigger(Relation rel, const char* tgname, char fires_when, boo
     if (changed)
         CacheInvalidateRelcache(rel);
 }
+
+/*
+ * alter_trigger_owner, current user must be the owner of the trigger or the system administrator
+ * and the current user must be a direct or indirect member of the new role.
+ * Also, the new user must have CREATE permission on the schema in which the trigger resides.
+ */
+ObjectAddress AlterTriggerOwner(const RangeVar* relation, const char *triggerName, Oid newOwnerId)
+{
+    if (!initialuser() && BOOTSTRAP_SUPERUSERID == newOwnerId) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("Only the initial user of the database can change the owner of trigger to the initial user.",
+                errcause("The current user is not the initial user of the database."),
+                erraction("Switch to the initial user of the database."))));
+    }
+
+    HeapTuple tuple;
+    SysScanDesc tgscan;
+    ObjectAddress address;
+    /* use table oid and trigger name to identify a unique trigger. */
+    ScanKeyData key[2];
+    const int nkeys = 2;
+
+    bool isNull = true;
+    Oid relid = RangeVarGetRelidExtended(
+        relation, AccessExclusiveLock, false, false, false, false, RangeVarCallbackForAlterTrigger, NULL);
+
+    /* Have lock already, so just need to build relcache entry. */
+    Relation rel = relation_open(relid, NoLock);
+    Relation tgrel = heap_open(TriggerRelationId, RowExclusiveLock);
+
+    ScanKeyInit(&key[0], Anum_pg_trigger_tgrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
+    ScanKeyInit(&key[1], Anum_pg_trigger_tgname, BTEqualStrategyNumber, F_NAMEEQ, PointerGetDatum(triggerName));
+    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, NULL, nkeys, key);
+    if (!HeapTupleIsValid(tuple = systable_getnext(tgscan))) {
+        systable_endscan(tgscan);
+        heap_close(tgrel, RowExclusiveLock);
+        relation_close(rel, NoLock);
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("trigger \"%s\" for table \"%s\" does not exist", triggerName, RelationGetRelationName(rel))));
+    }
+
+    /* The value of isnull does not need to be checked becase the tuple has been checked before. */
+    Datum datum = tableam_tops_tuple_getattr(tuple, Anum_pg_trigger_tgfoid, tgrel->rd_att, &isNull);
+    Oid tgowner = DatumGetObjectId(datum);
+    /*
+     * If the new owner is the same as the existing owner, consider the
+     * command to have succeeded. This is for dump restoration purpose.
+     */
+    if (tgowner == newOwnerId) {
+        systable_endscan(tgscan);
+        relation_close(rel, NoLock);
+        heap_close(tgrel, RowExclusiveLock);
+        ObjectAddressSet(address, TriggerRelationId, tgowner);
+        return address;
+    }
+
+    if (!superuser()) {
+        Form_pg_trigger trigForm = (Form_pg_trigger)GETSTRUCT(tuple);
+        /* Otherwise, must be owner of the existing object. */
+        if (!pg_trigger_ownercheck(HeapTupleGetOid(tuple), GetUserId())) {
+            aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_EVENT_TRIGGER, NameStr(trigForm->tgname));
+        }
+
+        /* Must be able to become new owner. */
+        check_is_member_of_role(GetUserId(), newOwnerId);
+
+        /* New owner must have CREATE privilege on namespace */
+        HeapTuple relTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+        if (!HeapTupleIsValid(relTuple)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("cache lookup failed for relation %u", relid), errdetail("N/A"),
+                    errcause("System error.")));
+        }
+        Form_pg_class relForm = (Form_pg_class)GETSTRUCT(relTuple);
+        AclResult aclresult = pg_namespace_aclcheck(relForm->relnamespace, newOwnerId, ACL_CREATE);
+        if (aclresult != ACLCHECK_OK) {
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(relForm->relnamespace));
+        }
+        ReleaseSysCache(relTuple);
+    }
+    Datum values[Natts_pg_trigger] = {0};
+    bool nulls[Natts_pg_trigger] = {false};
+    bool replaces[Natts_pg_trigger] = {false};
+    values[Anum_pg_trigger_tgowner - 1] = ObjectIdGetDatum(newOwnerId);
+    replaces[Anum_pg_trigger_tgowner - 1] = true;
+
+    HeapTuple newtup = heap_modify_tuple(tuple, RelationGetDescr(tgrel), values, nulls, replaces);
+    simple_heap_update(tgrel, &newtup->t_self, newtup);
+
+    /* Keep catalog indexes current */
+    CatalogUpdateIndexes(tgrel, newtup);
+    tableam_tops_free_tuple(newtup);
+
+    CacheInvalidateRelcache(rel);
+    systable_endscan(tgscan);
+    relation_close(rel, NoLock);
+    heap_close(tgrel, RowExclusiveLock);
+    ObjectAddressSet(address, TriggerRelationId, tgowner);
+    return address;
+}
+
 
 /*
  * Build trigger data to attach to the given relcache entry.

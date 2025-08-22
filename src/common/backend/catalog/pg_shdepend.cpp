@@ -85,6 +85,7 @@ static void shdepDropDependency(Relation sdepRel, Oid classId, Oid objectId, int
 static void storeObjectDescription(
     StringInfo descs, objectType type, ObjectAddress* object, SharedDependencyType deptype, int count);
 static bool isSharedObjectPinned(Oid classId, Oid objectId, Relation sdepRel);
+void AlterPkgOwnerOid(Oid pkgOid, Oid newOwnerId);
 
 extern void delete_tsfiles(List* objfiles);
 
@@ -1421,6 +1422,10 @@ void shdepReassignOwned(List* roleids, Oid newrole)
 
                 case PgDirectoryRelationId:
                     AlterPgDirectoryOwner_oid(sdepForm->objid, newrole);
+                    break;
+
+                case PackageRelationId:
+                    AlterPkgOwnerOid(sdepForm->objid, newrole);
                     break;
 
                 default:

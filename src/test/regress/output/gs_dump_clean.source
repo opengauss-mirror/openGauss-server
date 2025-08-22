@@ -59,7 +59,10 @@ SET
 CREATE TABLE
 ALTER TABLE
 ALTER TABLE
+BEGIN
 CREATE TRIGGER
+ALTER TRIGGER
+COMMIT
 --?.*
 \! @abs_bindir@/gs_dump -p @portstring@ -s -E=utf8 -n envision01 --lock-wait-timeout=300000 --force-clean aaa -f before_clean.sql;
 gs_dump: options --force-clean should be used with -c option.

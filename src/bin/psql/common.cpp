@@ -2562,55 +2562,65 @@ static int file_lock(int fd, unsigned int operation)
     return fcntl(fd, cmd, &lck);
 }
 
+static char* one_query(PGconn *conn, const char* stmt)
+{
+    PGresult* result = PQexec(conn, stmt);
+    if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+        PQclear(result);
+        return NULL;
+    }
+    if (PQntuples(result)) {
+        char* value1 = pg_strdup(PQgetvalue(result, 0, 0));
+        PQclear(result);
+        return value1;
+    }
+    PQclear(result);
+    return NULL;
+}
+
 /* Set search_path for parallel execute in temp table. */
 static void set_searchpath_for_tmptbl(PGconn* conn)
 {
-    static const char *stmt1 = "select                  \
-        case                                            \
-        when instr(s.setting, 'pg_temp_') = 1 then      \
-            s.setting                                   \
-        else                                            \
-            n.nspname||','||s.setting                   \
-        end                                             \
-        from pg_namespace n, pg_settings s              \
-        where n.oid = pg_my_temp_schema()               \
-            and s.name='search_path';";
-    char stmt2[128] = {0};
-    char* value1 = NULL;
-    PGresult* res1 = NULL;
-    bool success = true;
-    errno_t rc = EOK;
+    static const char* stmtGetTempSchema = "select pg_catalog.quote_ident(nspname) "
+        "from pg_namespace where oid = pg_catalog.pg_my_temp_schema();";
+    char* nsp = one_query(conn, stmtGetTempSchema);
+    if (nsp == NULL) {
+        return;
+    }
 
-    ExecStatusType resStatus;
+    static const char* stmtGetSearchPath = "select setting from pg_settings where name = 'search_path';";
+    char* searchPath = one_query(conn, stmtGetSearchPath);
 
-    /* Get the temp schema for parallel execute. */
-    res1 = PQexec(conn, stmt1);
-    resStatus = PQresultStatus(res1);
-    if (resStatus != PGRES_TUPLES_OK) {
+    bool alreadyInPath = (searchPath != NULL && strstr(searchPath, nsp) != NULL);
+
+    free(nsp);
+    free(searchPath);
+
+    if (alreadyInPath) {
+        return;
+    }
+
+    static const char* stmtBuildNewPath = "select "
+        "pg_catalog.concat( pg_catalog.quote_ident(n.nspname), ',', s.setting )"
+        "from pg_namespace n, pg_settings s "
+        "where n.oid = pg_catalog.pg_my_temp_schema() and s.name='search_path';";
+    char *value1 = one_query(conn, stmtBuildNewPath);
+    if (value1 == NULL) {
         psql_error("get temp schema failed. \n");
-        PQclear(res1);
         PQfinish(conn);
         exit(1);
     }
 
-    if (PQntuples(res1)) {
-        /* Get the temp schema name. */
-        value1 = PQgetvalue(res1, 0, 0);
+    char stmtSetSearchPath[128] = {0};
+    errno_t rc = sprintf_s(stmtSetSearchPath, sizeof(stmtSetSearchPath), "set search_path to %s;", value1);
+    check_sprintf_s(rc);
 
-        /* Constructe set search_path statement using temp schema name. */
-        rc = sprintf_s(stmt2, sizeof(stmt2), "set search_path to %s;", value1);
-        check_sprintf_s(rc);
-
-        /* Set the search_path for parallel execute in temp table. */
-        success = SendQuery(stmt2);
-        if (!success) {
-            psql_error("set temp schema failed. \n");
-        }
+    /* Set the search_path for parallel execute in temp table. */
+    bool success = SendQuery(stmtSetSearchPath);
+    if (!success) {
+        psql_error("set temp schema failed. \n");
     }
-
-    if (NULL != res1)
-        PQclear(res1);
-    return;
+    free(value1);
 }
 
 static int CreateMutexForParallel()
