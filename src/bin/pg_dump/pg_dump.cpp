@@ -7565,6 +7565,28 @@ static bool isExecUserSuperRole(Archive* fout)
     }
 }
 
+static bool IsExecRoleCanDumpObject(Archive* fout, const char* execRole, const char* objectOwner)
+{
+    PQExpBuffer query = createPQExpBuffer();
+    PGresult* res = NULL;
+    int ntups = 0;
+    bool canDump = false;
+
+    appendPQExpBuffer(query,
+        "SELECT CASE WHEN (r1.rolsuper = 't') OR (r1.rolsystemadmin = 't' AND r2.rolsuper = 'f') "
+        "THEN true ELSE false END "
+        "FROM pg_catalog.pg_roles r1 JOIN pg_catalog.pg_roles r2 "
+        "ON r1.rolname = '%s' AND r2.rolname = '%s'", execRole, objectOwner);
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+    ntups = PQntuples(res);
+    if (ntups == 1) {
+        canDump = (*(PQgetvalue(res, 0, 0)) == 't');
+    }
+    PQclear(res);
+    destroyPQExpBuffer(query);
+    return canDump;
+}
+
 /*
  * When the executing user or --role is not the owner of the object and it is not super/sysadmin
  * it means that there is no permission to backup the object
@@ -7584,7 +7606,7 @@ static bool isExecUserNotObjectOwner(Archive* fout, const char* objRoleName)
         /* if role is not the owner of object and it is not super/sysadmin
          * it means that there is no permission to backup the object
          */
-        if (0 != strncmp(use_role, objRoleName, maxLen1) && !isSuperRole(AH->connection, use_role)) {
+        if (0 != strncmp(use_role, objRoleName, maxLen1) && !IsExecRoleCanDumpObject(fout, use_role, objRoleName)) {
             return true;
         }
     } else {
@@ -7592,7 +7614,7 @@ static bool isExecUserNotObjectOwner(Archive* fout, const char* objRoleName)
         executeUser = PQuser(AH->connection);
         /* get len */
         maxLen2 = (strlen(executeUser) > strlen(objRoleName)) ? strlen(executeUser) : strlen(objRoleName);
-        if (0 != strncmp(executeUser, objRoleName, maxLen2) && !isSuperRole(AH->connection, executeUser)) {
+        if (0 != strncmp(executeUser, objRoleName, maxLen2) && !IsExecRoleCanDumpObject(fout, executeUser, objRoleName)) {
             return true;
         }
     }

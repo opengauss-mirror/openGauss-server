@@ -18916,6 +18916,21 @@ static void AlterTypeOwnerByTbl(Relation target_rel, Oid newOwnerId)
     }
 }
 
+static void CheckAuthForChangeTableOwner(Oid newOwnerId)
+{
+    if (GetUserId() != BOOTSTRAP_SUPERUSERID && newOwnerId == BOOTSTRAP_SUPERUSERID) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("Non-initial user is not allowed to change the table owner to initial owner.")));
+    }
+
+    if (g_instance.attr.attr_security.enablePrivilegesSeparate && superuser() &&
+        (isSecurityadmin(newOwnerId) || isAuditadmin(newOwnerId))) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("if enablePrivilegesSeparate is enabled, system admin is"
+                "not allowed to change the table owner to security admin audit admin.")));
+    }
+}
+
 /*
  * ALTER TABLE OWNER
  *
@@ -18934,6 +18949,8 @@ void ATExecChangeOwner(Oid relationOid, Oid newOwnerId, bool recursing, LOCKMODE
     Relation class_rel;
     HeapTuple tuple;
     Form_pg_class tuple_class;
+
+    CheckAuthForChangeTableOwner(newOwnerId);
 
     /*
      * Get exclusive lock till end of transaction on the target table. Use

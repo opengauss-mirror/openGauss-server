@@ -1,6 +1,3 @@
-create user u_alter_invisible password '1234@abcd';
-grant all privileges to u_alter_invisible;
-
 create database db_alter_index_invisible;
 create database db_restore;
 
@@ -11,7 +8,7 @@ alter index idx_alter_index_invisible invisible;
 
 \! @abs_bindir@/gs_dump -p @portstring@ db_alter_index_invisible -f @abs_bindir@/dump -F c -w > @abs_bindir@/gs_dump_alter_invisible.log 2>&1 ; echo $?
 
-\! @abs_bindir@/gs_restore -h 127.0.0.1 -p @portstring@ -U u_alter_invisible -W 1234@abcd -d db_restore -F c @abs_bindir@/dump > @abs_bindir@/gs_dump_alter_invisible.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_restore -p @portstring@ -d db_restore -F c @abs_bindir@/dump > @abs_bindir@/gs_dump_alter_invisible.log 2>&1 ; echo $?
 
 \c db_restore
 -- the index `idx_alter_index_invisible` is invisible
