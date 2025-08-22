@@ -73,17 +73,25 @@ HttpErrCode HttpCommon::http_request(HttpReqMsg* http_req_msg, HttpConfig *http_
 
 HttpErrCode HttpCommon::set_http_config(CURL *http_obj, HttpConfig *http_config)
 {
+    bool setca;
+
     CURLcode curl_ret = CURLE_OK;
     const int connect_timeout = 10;
+
+    setca = (http_config->cacert != NULL) ? true : false;
 
     curl_ret = curl_easy_setopt(http_obj, CURLOPT_TIMEOUT, http_config->timeout);
     check_curl_ret(curl_ret);
     curl_ret = curl_easy_setopt(http_obj, CURLOPT_CONNECTTIMEOUT, connect_timeout);
     check_curl_ret(curl_ret);
-    curl_ret = curl_easy_setopt(http_obj, CURLOPT_SSL_VERIFYPEER, false);
+    curl_ret = curl_easy_setopt(http_obj, CURLOPT_SSL_VERIFYPEER, setca);
     check_curl_ret(curl_ret);
-    curl_ret = curl_easy_setopt(http_obj, CURLOPT_SSL_VERIFYHOST, false);
+    curl_ret = curl_easy_setopt(http_obj, CURLOPT_SSL_VERIFYHOST, setca);
     check_curl_ret(curl_ret);
+
+    if (setca) {
+        curl_ret = curl_easy_setopt(http_obj, CURLOPT_CAINFO, http_config->cacert);
+    }
     return TDE_HTTP_SUCCEED;
 }
 
