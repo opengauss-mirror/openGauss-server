@@ -452,25 +452,25 @@ ExecPrepareCheck(List *qual, EState *estate)
  * See ExecPrepareExpr() for details.
  */
 List *
-ExecPrepareExprList(List *nodes, EState *estate)
+ExecPrepareExprList(List *nodes, EState *estate, bool isExprIndex)
 {
-	List	   *result = NIL;
-	MemoryContext oldcontext;
-	ListCell   *lc;
+    List	   *result = NIL;
+    MemoryContext oldcontext;
+    ListCell   *lc;
 
-	/* Ensure that the list cell nodes are in the right context too */
-	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+    /* Ensure that the list cell nodes are in the right context too */
+    oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 
-	foreach(lc, nodes)
-	{
-		Expr	   *e = (Expr *) lfirst(lc);
+    foreach(lc, nodes)
+    {
+        Expr	   *e = (Expr *) lfirst(lc);
 
-		result = lappend(result, ExecPrepareExpr(e, estate));
-	}
+        result = lappend(result, ExecPrepareExpr(e, estate, isExprIndex));
+    }
 
-	MemoryContextSwitchTo(oldcontext);
+    MemoryContextSwitchTo(oldcontext);
 
-	return result;
+    return result;
 }
 
 /*

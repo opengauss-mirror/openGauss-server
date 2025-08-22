@@ -40,6 +40,7 @@ extern void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collatio
     int16* colOptionP, List* attList, List* exclusionOpNames, Oid relId, const char* accessMethodName,
     Oid accessMethodId, bool amcanorder, bool isconstraint);
 extern List* ChooseIndexColumnNames(const List* indexElems);
+extern bool CheckMutability(Expr* expr, bool isIndexExpr = false);
 
 #ifdef ENABLE_MULTIPLE_NODES
 extern void mark_indisvalid_local(char* schname, char* idxname);

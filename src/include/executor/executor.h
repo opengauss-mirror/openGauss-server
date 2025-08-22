@@ -332,9 +332,10 @@ extern List *ExecInitExprList(List *nodes, PlanState *parent);
 extern ExprState* ExecBuildAggTrans(AggState* aggstate, struct AggStatePerPhaseData *phase, bool doSort, bool doHash);
 extern ProjectionInfo* ExecBuildProjectionInfo(List *targetList,
     ExprContext *econtext, TupleTableSlot *slot, PlanState *parent, TupleDesc inputDesc);
-extern ExprState* ExecPrepareExpr(Expr* node, EState* estate);
+extern ExprState* ExecPrepareExpr(Expr* node, EState* estate, bool isExprIndex = false);
 extern ExprState *ExecPrepareCheck(List *qual, EState *estate);
-extern List *ExecPrepareExprList(List *nodes, EState *estate);
+extern List *ExecPrepareExprList(List *nodes, EState *estate, bool isExprIndex = false);
+
 extern bool ExecCheck(ExprState *state, ExprContext *context);
 extern Oid deparseNodeForInputype(Expr *expr, NodeTag nodeTag, float8 val);
 

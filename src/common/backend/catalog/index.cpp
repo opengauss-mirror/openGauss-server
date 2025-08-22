@@ -2905,10 +2905,20 @@ void FormIndexDatum(IndexInfo* indexInfo, TupleTableSlot* slot, EState* estate, 
     int save_sec_context = 0;
     Oid save_userid = 0;
     int i;
+    ListCell* index_expritem = NULL;
 
     if (indexInfo->ii_Expressions != NIL && indexInfo->ii_ExpressionsState == NIL) {
+        foreach(index_expritem, indexInfo->ii_Expressions) {
+            if (CheckMutability((Expr *)lfirst(index_expritem), true)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                     errmsg("Functions in index expression must be marked IMMUTABLE."),
+                     errcause("Functions in index expression must be marked as IMMUTABLE function."),
+                     erraction("Do not use mutable functions in index expressions.")));
+            }
+        }
         /* First time through, set up expression evaluation state */
-        indexInfo->ii_ExpressionsState = ExecPrepareExprList(indexInfo->ii_Expressions, estate);
+        indexInfo->ii_ExpressionsState = ExecPrepareExprList(indexInfo->ii_Expressions, estate, true);
         /* Check caller has set up context correctly */
         Assert(GetPerTupleExprContext(estate)->ecxt_scantuple == slot);
     }

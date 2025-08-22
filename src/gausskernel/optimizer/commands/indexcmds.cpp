@@ -2293,7 +2293,7 @@ static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, const Li
  * CheckMutability
  *		Test whether given expression is mutable
  */
-bool CheckMutability(Expr* expr)
+bool CheckMutability(Expr* expr, bool isExprIndex)
 {
     /*
      * First run the expression through the planner.  This has a couple of
@@ -2308,7 +2308,7 @@ bool CheckMutability(Expr* expr)
      *
      * We assume here that expression_planner() won't scribble on its input.
      */
-    expr = expression_planner(expr);
+    expr = expression_planner(expr, isExprIndex);
 
     /* Now we can search for non-immutable functions */
     return contain_mutable_functions((Node*)expr);
@@ -2451,7 +2451,7 @@ void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, 
                  * same data every time, it's not clear what the index entries
                  * mean at all.
                  */
-                if (CheckMutability((Expr*)expr))
+                if (CheckMutability((Expr*)expr, true))
                     ereport(ERROR,
                         (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                             errmsg("functions in index expression must be marked IMMUTABLE")));
