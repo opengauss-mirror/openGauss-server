@@ -4757,7 +4757,7 @@ l1:
      */
     old_key_tuple = ExtractReplicaIdentity(relation, &tp, true, &old_key_copied, &identity);
 
-    if (unlikely(oldslot != NULL)) {
+    if (unlikely(oldslot != NULL && RelationImmediateDelete(relation))) {
         TupleDesc tupDesc = RelationGetDescr(relation);
         *oldslot = MakeSingleTupleTableSlot(tupDesc);
         bool *nulls = (bool*)palloc0(sizeof(bool) * tupDesc->natts);
@@ -5477,7 +5477,7 @@ l2:
         Assert(!(newtup->t_data->t_infomask & HEAP_HASOID));
     }
 
-    if (unlikely(oldslot != NULL)) {
+    if (unlikely(oldslot != NULL && RelationImmediateDelete(relation))) {
         TupleDesc tupDesc = RelationGetDescr(relation);
         *oldslot = MakeSingleTupleTableSlot(tupDesc);
         bool *nulls = (bool*)palloc0(sizeof(bool) * tupDesc->natts);

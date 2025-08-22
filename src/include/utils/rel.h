@@ -440,6 +440,7 @@ typedef struct StdRdOptions {
     int spq_bt_build_offset;
 #endif
     Oid relrewrite;
+    bool immediate_delete;
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
@@ -557,6 +558,10 @@ typedef struct StdRdOptions {
      strcmp((char *) (relation)->rd_options +                               \
             ((StdRdOptions *) (relation)->rd_options)->check_option_offset, \
             "cascaded") == 0 : false)
+
+/* check immediate delete option, used for diskann index */
+#define RelationImmediateDelete(relation) \
+    ((relation)->rd_options && ((StdRdOptions*)(relation)->rd_options)->immediate_delete)
 
 /*
  * RelationGetParallelWorkers
