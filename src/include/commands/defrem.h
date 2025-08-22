@@ -85,6 +85,7 @@ extern void RecompileFunction(CompileStmt* stmt);
 /* commands/operatorcmds.c */
 extern void CreatePackageCommand(CreatePackageStmt* parsetree, const char* queryString);
 extern void CreatePackageBodyCommand(CreatePackageBodyStmt* parsetree, const char* queryString);
+extern void HasPrivilegeAlter(Oid roleid, bool is_secdef);
 extern ObjectAddress AlterPackageOwner(List* name, Oid newOwnerId);
 extern void AlterFunctionOwnerByPkg(Oid package_oid, Oid newOwnerId);
 

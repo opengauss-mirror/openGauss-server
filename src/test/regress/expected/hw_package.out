@@ -2124,13 +2124,12 @@ ERROR:  permission denied for schema alt_package
 DETAIL:  N/A
 SET SESSION AUTHORIZATION alt_package password 'gauss@123';
 alter package alt_package.pck1_alter owner to alt_package_2;
-ERROR:  must be member of role "alt_package_2"
+ERROR:  security definer package not allow alter owner.
 reset session AUTHORIZATION;
 alter package alt_package.pck1_alter owner to alt_package_2;
 SET SESSION AUTHORIZATION alt_package password 'gauss@123';
 alter package alt_package.pck1_alter owner to alt_package;
-ERROR:  must be owner of package pck1_alter
-DETAIL:  N/A
+ERROR:  security definer package not allow alter owner.
 reset session AUTHORIZATION;
 select usename from pg_user where usesysid = (select pkgowner from gs_package where pkgname = 'pck1_alter');
     usename    

@@ -97,6 +97,8 @@
 #include "storage/mot/jit_exec.h"
 #endif
 
+#define INITIAL_USER_ID 10
+
 typedef struct PendingLibraryDelete {
     char* filename; /* library file name. */
     bool atCommit;  /* T=delete at commit; F=delete at abort */
@@ -1012,6 +1014,9 @@ static bool isForbiddenSchema (Oid namespaceId)
 
 void CheckCreateFunctionPrivilege(Oid namespaceId, Oid funcOid, const char* funcname)
 {
+    HeapTuple tuple_t = NULL;
+    Oid owner_id_t;
+
     if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade && isForbiddenSchema(namespaceId)) {
         ereport(ERROR,
             (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1041,6 +1046,24 @@ void CheckCreateFunctionPrivilege(Oid namespaceId, Oid funcOid, const char* func
                 errmsg("permission denied to create function \"%s\"", funcname),
                 errhint("not allowd to create a function in %s schema when allow_create_sysobject is off.",
                     get_namespace_name(namespaceId))));
+    }
+
+    tuple_t = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(namespaceId));
+    if (!HeapTupleIsValid(tuple_t)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_SCHEMA),
+                errmsg("schema with OID %u dows not exist", namespaceId),
+                errdetail("N/A"), errcause("System error."), erraction("Contact engineer to support.")));
+    }
+    owner_id_t = ((Form_pg_namespace)GETSTRUCT(tuple_t))->nspowner;
+    ReleaseSysCache(tuple_t);
+    if (isOperatoradmin(owner_id_t) && owner_id_t != INITIAL_USER_ID) {
+        Oid usrid = GetUserId();
+        if (usrid != INITIAL_USER_ID && usrid != owner_id_t) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("Only initial user or schema owner can create or modify objects in opradmin schema")));
+        }
     }
 }
 
@@ -2248,6 +2271,131 @@ void AlterFunctionOwner_oid(Oid procOid, Oid newOwnerId, bool byPackage)
     UpdatePgObjectMtime(procOid, OBJECT_TYPE_PROC);
 
     heap_close(rel, NoLock);
+}
+
+void AlterPkgOwnerOid(Oid pkgOid, Oid newOwnerId)
+{
+    Relation rel;
+    HeapTuple tup;
+    bool enablePrivilegesSeparate = g_instance.attr.attr_security.enablePrivilegesSeparate;
+    if (IsSystemObjOid(pkgOid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
+                errmsg("ownerId change failed for package %u, because it is a builtin package.", pkgOid)));
+    }
+
+    if (!initialuser() && BOOTSTRAP_SUPERUSERID == newOwnerId) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
+                errmsg("only super user can set package owner to super user.")));
+    }
+
+    rel = heap_open(PackageRelationId, RowExclusiveLock);
+    tup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
+    /* should not happen */
+    if (!HeapTupleIsValid(tup)) {
+        ereport(
+            ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for package %u", pkgOid)));
+    }
+
+    TrForbidAccessRbObject(PACKAGEOID, pkgOid);
+    Form_gs_package gs_package_tuple = (Form_gs_package)GETSTRUCT(tup);
+    /*
+     * If the new owner is the same as the existing owner, consider the
+     * command to have succeeded.  This is for dump restoration purposes.
+     */
+    if (gs_package_tuple->pkgowner == newOwnerId) {
+        ReleaseSysCache(tup);
+        /* Recode time of change the funciton owner. */
+        UpdatePgObjectMtime(pkgOid, OBJECT_TYPE_PKGSPEC);
+        heap_close(rel, NoLock);
+        return;
+    }
+    Datum repl_val[Natts_gs_package];
+    bool repl_null[Natts_gs_package];
+    bool repl_repl[Natts_gs_package];
+    Acl* newAcl = NULL;
+    Datum aclDatum;
+    bool isNull = false;
+    HeapTuple newtuple;
+    AclResult aclresult;
+    Datum pkgsecdefDatum;
+    bool pkgsecdef = false;
+    pkgsecdefDatum = SysCacheGetAttr(PACKAGEOID, tup, Anum_gs_package_pkgsecdef, &isNull);
+    if (!isNull) {
+        pkgsecdef = BoolGetDatum(pkgsecdefDatum);
+    }
+
+    if ((!superuser_arg(GetUserId()) && pkgsecdef && !enablePrivilegesSeparate) ||
+        (enablePrivilegesSeparate && pkgsecdef)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
+                errmsg("security definer packager not allow alter owner.")));
+        }
+
+    if (superuser_arg(GetUserId()) && isOperatoradmin(newOwnerId)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
+                errmsg("sysadmin can not alter sevurity definer package owner to peradmin.")));
+    }
+
+    HasPrivilegeAlter(newOwnerId, pkgsecdef);
+    /* Superusers can always do it */
+    if ((!superuser_arg(GetUserId()) && enablePrivilegesSeparate) ||
+            (!superuser() && !enablePrivilegesSeparate)) {
+        /* Otherwise, must be owner of the existing object */
+        if (!pg_package_ownercheck(pkgOid, GetUserId()))
+            aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PACKAGE, NameStr(gs_package_tuple->pkgname));
+
+        /* Must be able to become new owner */
+        check_is_member_of_role(GetUserId(), newOwnerId);
+
+        /* New owner must have CREATE privilege on namespace */
+        aclresult = pg_namespace_aclcheck(gs_package_tuple->pkgnamespace, newOwnerId, ACL_CREATE);
+        if (aclresult != ACLCHECK_OK)
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(gs_package_tuple->pkgnamespace));
+    }
+
+    /* alter owner of procedure in packgae */
+    AlterFunctionOwnerByPkg(pkgOid, newOwnerId);
+    /* alter packgae type onwer */
+    AlterTypeOwnerByPkg(pkgOid, newOwnerId);
+
+    errno_t errorno = EOK;
+    errorno = memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
+    securec_check(errorno, "\0", "\0");
+    errorno = memset_s(repl_repl, sizeof(repl_repl), false, sizeof(repl_repl));
+    securec_check(errorno, "\0", "\0");
+
+    repl_repl[Anum_gs_package_pkgowner - 1] = true;
+    repl_val[Anum_gs_package_pkgowner - 1] = ObjectIdGetDatum(newOwnerId);
+
+    /*
+     * Determine the modified ACL for the new owner.  This is only
+     * necessary when the ACL is non-null.
+     */
+    aclDatum = SysCacheGetAttr(PACKAGEOID, tup, Anum_gs_package_pkgacl, &isNull);
+    if (!isNull) {
+        newAcl = aclnewowner(DatumGetAclP(aclDatum), gs_package_tuple->pkgowner, newOwnerId);
+        repl_repl[Anum_gs_package_pkgacl - 1] = true;
+        repl_val[Anum_gs_package_pkgacl - 1] = PointerGetDatum(newAcl);
+    }
+
+    newtuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+
+    simple_heap_update(rel, &newtuple->t_self, newtuple);
+    CatalogUpdateIndexes(rel, newtuple);
+
+    tableam_tops_free_tuple(newtuple);
+
+    /* Update owner dependency reference */
+    changeDependencyOnOwner(PackageRelationId, pkgOid, newOwnerId);
+
+    ReleaseSysCache(tup);
+    /* Recode time of change the funciton owner. */
+    UpdatePgObjectMtime(pkgOid, OBJECT_TYPE_PKGSPEC);
+    heap_close(rel, NoLock);
+    return;
 }
 
 /*
