@@ -117,8 +117,13 @@ drop view atn2_1;
 
 select ISNULL(NULL, 1);
 select ISNULL(2, 1);
-select ISNULL();
-select ISNULL();
+select ISNULL(' ', 1);
+select ISNULL(' ', 1::smallint);
+select ISNULL(' ', 1::bigint);
+select ISNULL(' ', 1.2::real);
+select ISNULL(' ', 1.2::double precision);
+select ISNULL(' ', 1.2::numeric);
+select ISNULL('abc', 123);
 
 select log10(10);
 select log10(10::real);
@@ -131,8 +136,6 @@ select atn2(123::varbinary, '2343'::varbinary);
 select log10('abc');
 select log10(10::vharchar);
 select log10(now());
-
-select ISNULL('abc', 123);
 
 SELECT CONVERT(DATE, '');
 SELECT CONVERT(DATE, '', 130);
