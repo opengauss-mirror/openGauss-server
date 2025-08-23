@@ -272,3 +272,16 @@ drop schema syscolofforeign cascade;
 
 -- test ^=
 select 1 ^= 2;
+
+-- invalid forkname
+drop table if exists t_1033943;
+create table t_1033943(C1 int, C2 int);
+insert into t_1033943 values (1,2),(101,202);
+select * from t_1033943 order by C1;
+select pg_relation_size('t_1033943');
+select pg_relation_size('t_1033943', 'main');
+select pg_relation_size('t_1033943', 'C1_main');
+select pg_relation_size('t_1033943', 'C2_bcm');
+select pg_relation_size('t_1033943', 'GS_ROLE_COPY_FILES');
+SELECT pg_relation_size('t_1033943', '.');
+drop table t_1033943;

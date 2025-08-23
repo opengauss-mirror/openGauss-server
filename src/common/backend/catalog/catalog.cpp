@@ -101,7 +101,7 @@ static void repair_check_token(char *path, char *token)
     if (token == NULL) {
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("invalid input %s.", path)));
+                    errmsg("invalid input %s", path)));
     }
 }
 /*
