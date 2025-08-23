@@ -316,7 +316,7 @@ void PrepForRead(char* path, uint blocknum, bool is_segment, RelFileNode *relnod
                             errcause("The function is not implemented."),
                             erraction("Do not repair hashbucket."))));
         }
-        relfilenode = relpath_to_filenode(path);
+        relfilenode = relpath_to_filenode(path, true);
         relfilenode.rnode.node.bucketNode = SegmentBktId;
         if (!IsSegmentPhysicalRelNode(relfilenode.rnode.node)) {
             Oid relation_oid = RelidByRelfilenodeCache(relfilenode.rnode.node.spcNode,
@@ -378,7 +378,7 @@ void PrepForRead(char* path, uint blocknum, bool is_segment, RelFileNode *relnod
             }
         }
     } else {
-        relfilenode = relpath_to_filenode(path);
+        relfilenode = relpath_to_filenode(path, true);
         relfilenode.rnode.node.bucketNode = InvalidBktId;
     }
     if (relfilenode.forknumber != MAIN_FORKNUM) {
@@ -1784,7 +1784,7 @@ bool gsRepairFile(Oid tableOid, char* path, int timeout)
         return gsRepairCsnOrCLog(path, timeout);
     }
 
-    relFileNodeForkNum = relpath_to_filenode(path);
+    relFileNodeForkNum = relpath_to_filenode(path, true);
     isSegment = relFileNodeForkNum.rnode.node.relNode <= 5 && relFileNodeForkNum.rnode.node.relNode > 0;
     if (isSegment) {
         relFileNodeForkNum.rnode.node.bucketNode = SegmentBktId;

@@ -40,7 +40,7 @@
 #define COLFILE_SUFFIX_MAXLEN  8
 
 extern const char *forkNames[];
-extern ForkNumber forkname_to_number(char *forkName, BlockNumber *segno = NULL);
+extern ForkNumber forkname_to_number(char *forkName, BlockNumber *segno = NULL, bool isRepair = false);
 extern int	forkname_chars(const char *str, ForkNumber *);
 
 extern char *relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum);
@@ -54,7 +54,7 @@ extern char *GetDatabasePath(Oid dbNode, Oid spcNode);
 #define relpathperm(rnode, forknum) \
 		relpathbackend((rnode), InvalidBackendId, (forknum))
 
-extern RelFileNodeForkNum relpath_to_filenode(char *path);
+extern RelFileNodeForkNum relpath_to_filenode(char *path, bool isRepair = false);
 
 extern bool IsSystemRelation(Relation relation);
 extern bool IsToastRelation(Relation relation);

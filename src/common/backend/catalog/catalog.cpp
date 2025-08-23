@@ -121,11 +121,18 @@ const char *packageSchemaList[] = {"dbe_application_info",
 const char *packageSchemaListSharkExtra[] = {"sys",
                                              "information_schema_tsql"};
 
-
+static void repair_check_token(char *path, char *token)
+{
+    if (token == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("invalid input %s.", path)));
+    }
+}
 /*
  * forkname_to_number - look up fork number by name
  */
-ForkNumber forkname_to_number(char* forkName, BlockNumber* segno)
+ForkNumber forkname_to_number(char* forkName, BlockNumber* segno, bool isRepair)
 {
     ForkNumber forkNum;
     int iforkNum;
@@ -150,7 +157,10 @@ ForkNumber forkname_to_number(char* forkName, BlockNumber* segno)
     size_t parselen = strlen(parsepath);
 
     token = strtok_r(parsepath, "_", &tmptoken);
-    Assert(token != NULL);
+    Assert(token != NULL || isRepair);
+    if (isRepair) {
+        repair_check_token(parsepath, token);
+    }
 
     if (strlen(token) == parselen) {
         /* it is a column data file. C1.0 */
@@ -158,7 +168,10 @@ ForkNumber forkname_to_number(char* forkName, BlockNumber* segno)
         char* tmpsubtoken = NULL;
 
         subtoken = strtok_r(token, ".", &tmpsubtoken);
-        Assert(subtoken != NULL);
+        Assert(subtoken != NULL || isRepair);
+        if (isRepair) {
+            repair_check_token(parsepath, subtoken);
+        }
         if (atooid(subtoken)) {
             return InvalidForkNumber;
         }
@@ -189,6 +202,9 @@ ForkNumber forkname_to_number(char* forkName, BlockNumber* segno)
 
         /* bcm.1 */
         token = strtok_r(NULL, ".", &tmptoken);
+        if (isRepair) {
+            repair_check_token(parsepath, tmptoken);
+        }
 
         if (segno != NULL) {
             if (token != NULL)
@@ -523,7 +539,7 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
  *  dbNode/tbackendId_relNode
  *  dbNode/tbackendId_relNode_forkName
  */
-static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode)
+static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode, bool isRepair = false)
 {
     char* parsepath = NULL;
     char* token = NULL;
@@ -536,7 +552,11 @@ static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode)
     parsepath = path;
 
     token = strtok_r(parsepath, "/", &tmptoken);
-    Assert(token != NULL);
+    Assert(token != NULL || isRepair);
+    if (isRepair && NULL == token) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("invalid relation file path %s for relpath_parse_rnode", path)));
+    }
     filenode.rnode.node.dbNode = atooid(token);
     if (tmptoken == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -562,15 +582,21 @@ static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode)
              */
             filenode.rnode.node.relNode = atooid(token); /* relNode */
             filenode.rnode.node.bucketNode = InvalidBktId;
-            filenode.forknumber = forkname_to_number(tmptoken, &filenode.segno);
+            filenode.forknumber = forkname_to_number(tmptoken, &filenode.segno, isRepair);
         }
     } else {
         tmptoken = tmptoken + 1; /* skip 't' */
 
         token = strtok_r(NULL, "_", &tmptoken);
-        Assert(token != NULL);
+        Assert(token != NULL || isRepair);
+        if (isRepair) {
+            repair_check_token(path, token);
+        }
         filenode.rnode.backend = atoi(token);
         token = strtok_r(NULL, "_", &tmptoken);
+        if (isRepair) {
+            repair_check_token(path, token);
+        }
         if ('\0' == *tmptoken) {
             /* dbNode/tbackendId_relNode */
             filenode.forknumber = MAIN_FORKNUM;
@@ -589,7 +615,7 @@ static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode)
  * parse relation path to relfilenode
  * argument path must not be bucket dir path, because it's same with normal table file path.
  */
-RelFileNodeForkNum relpath_to_filenode(char* path)
+RelFileNodeForkNum relpath_to_filenode(char* path, bool isRepair)
 {
     RelFileNodeForkNum filenode;
     char* parsepath = NULL;
@@ -635,6 +661,9 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
         filenode.rnode.backend = InvalidBackendId;
 
         token = strtok_r(NULL, "_", &tmptoken);
+        if (isRepair) {
+            repair_check_token(path, token);
+        }
         if ('\0' == *tmptoken) {
             /* global/relNode */
             filenode.rnode.node.relNode = atooid(token);
@@ -654,7 +683,7 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
         *      base/dbNode/tbackendId_relNode_forkName
         */
         filenode.rnode.node.spcNode = DEFAULTTABLESPACE_OID;
-        relpath_parse_rnode(tmptoken, filenode);
+        relpath_parse_rnode(tmptoken, filenode, isRepair);
     } else if (0 == strncmp(token, "pg_tblspc", 10)) {
         /*
          *   Normal Table Path:
@@ -665,6 +694,9 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
          *      pg_tblspc/spcNode/version_dir/dbNode/tbackendId_relNode_forkName
          */
         token = strtok_r(NULL, "/", &tmptoken);
+        if (isRepair) {
+            repair_check_token(path, token);
+        }
         filenode.rnode.node.spcNode = atooid(token);
 
         /* check tablespace version directory */
@@ -697,7 +729,7 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
             return filenode;
         }
 
-        relpath_parse_rnode(tmptoken, filenode);
+        relpath_parse_rnode(tmptoken, filenode, isRepair);
     } else {
         pfree(parsepath);
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid relation file path %s: %s", path, TRANSLATE_ERRNO)));
