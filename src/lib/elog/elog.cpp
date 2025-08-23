@@ -554,7 +554,7 @@ void check_danger_character(const char* inputEnvValue)
     if (inputEnvValue == NULL)
         return;
 
-    const char* dangerCharacterList[] = {";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", NULL};
+    const char* dangerCharacterList[] = {";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", "$", "\n", NULL};
     int i = 0;
 
     for (i = 0; dangerCharacterList[i] != NULL; i++) {

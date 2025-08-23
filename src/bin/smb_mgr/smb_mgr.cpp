@@ -41,7 +41,7 @@ static void CheckInputForSecurity(char* inputEnvValue)
         return;
     }
 
-    const char* dangerCharacterList[] = {"|", ";", "&", "$", "<", ">", "`", "\\", "!", nullptr};
+    const char* dangerCharacterList[] = {"|", ";", "&", "$", "<", ">", "`", "\\", "!", "\n", nullptr};
 
     for (int i = 0; dangerCharacterList[i] != nullptr; i++) {
         if (strstr(static_cast<const char*>(inputEnvValue), dangerCharacterList[i]) != nullptr) {

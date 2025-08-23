@@ -195,7 +195,7 @@ void ValidateInputString(const char* inputString)
         ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("inputString \"%s\" is too long", inputString)));
     }
 
-    const char *danger_character_list[] = { ";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", "\n", NULL };
+    const char *danger_character_list[] = { ";", "$", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", "\n", NULL };
     int i = 0;
 
     for (i = 0; danger_character_list[i] != NULL; i++) {
@@ -2187,9 +2187,9 @@ ArchiveConfig* formArchiveConfigFromStr(char *content, bool encrypted)
         archive_config->media_type = ARCHIVE_OBS;
     } else {
         media_type = pstrdup((char*)list_nth(elemlist, elem_index++));
-        if (strcmp(media_type, "OBS") == 0) {
+        if (strcmp(media_type, "OBS") == 0 && param_num ==8) {
             archive_config->media_type = ARCHIVE_OBS;
-        } else if (strcmp(media_type, "NAS") == 0) {
+        } else if (strcmp(media_type, "NAS") == 0 && param_num == 4) {
             archive_config->media_type = ARCHIVE_NAS;
         } else {
             goto FAILURE;
