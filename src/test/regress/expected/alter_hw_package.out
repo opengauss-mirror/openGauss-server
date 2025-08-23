@@ -74,7 +74,7 @@ create or replace package pck1 as
   type t4 is ref cursor;
 end pck1;
 /
-ERROR:  must be owner of package pck1
+ERROR:  security definer package not support replace with different owner
 DETAIL:  N/A
 create or replace package body pck1 as
   type t5 is record(c1 t1,c2 int);

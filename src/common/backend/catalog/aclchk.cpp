@@ -6762,20 +6762,32 @@ bool pg_proc_ownercheck(Oid proc_oid, Oid roleid)
     HeapTuple tuple = NULL;
     Oid ownerId;
 
-    /* Superusers bypass all permission checking. */
-    /* Database Security:  Support separation of privilege. */
-    if (superuser_arg(roleid) || systemDBA_arg(roleid))
-        return true;
+    Datum proc_secdef_datum;
+    bool procSecdef = false;
+    bool isnull = false;
 
     tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(proc_oid));
     if (!HeapTupleIsValid(tuple))
         ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_FUNCTION),
             errmsg("function with OID %u does not exist", proc_oid), errdetail("N/A"),
                 errcause("System error."), erraction("Contact engineer to support.")));
-
+    proc_secdef_datum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prosecdef, &isnull);
+    if (!isnull) {
+        procSecdef = DatumGetBool(proc_secdef_datum);
+    }
     ownerId = ((Form_pg_proc)GETSTRUCT(tuple))->proowner;
+    if (procSecdef && ownerId != roleid) {
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_PACKAGE),
+            errmsg("security definer function not support replace with different owner"), errdetail("N/A"),
+                errcause("System error."), erraction("delete and rebuild function.")));
+    }
 
     ReleaseSysCache(tuple);
+    /* Superusers bypass all permission checking. */
+    /* Database Security:  Support separation of privilege. */
+    if (superuser_arg(roleid) || systemDBA_arg(roleid)) {
+        return true;
+    }
 
     return has_privs_of_role(roleid, ownerId);
 }
@@ -6788,11 +6800,8 @@ bool pg_package_ownercheck(Oid package_oid, Oid roleid)
     HeapTuple tuple = NULL;
     Oid ownerId;
 
-    /* Superusers bypass all permission checking. */
-    /* Database Security:  Support separation of privilege. */
-    if (superuser_arg(roleid) || systemDBA_arg(roleid))
-        return true;
-
+    bool isnull = false;
+    bool pkgSecdef = false;
     tuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(package_oid));
     if (!HeapTupleIsValid(tuple))
         ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_PACKAGE),
@@ -6800,8 +6809,22 @@ bool pg_package_ownercheck(Oid package_oid, Oid roleid)
                 errcause("System error."), erraction("Re-entering the session")));
 
     ownerId = ((Form_gs_package)GETSTRUCT(tuple))->pkgowner;
+    Datum pkg_secdef_datum = SysCacheGetAttr(PACKAGEOID, tuple, Anum_gs_package_pkgowner, &isnull);
+    if (!isnull) {
+        pkgSecdef = DatumGetBool(pkg_secdef_datum);
+    }
+    if (pkgSecdef && ownerId != roleid) {
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_PACKAGE),
+            errmsg("security definer package not support replace with different owner"), errdetail("N/A"),
+                errcause("System error."), erraction("delete and rebuild package")));
+    }
 
     ReleaseSysCache(tuple);
+    /* Superusers bypass all permission checking. */
+    /* Database Security:  Support separation of privilege. */
+    if (superuser_arg(roleid) || systemDBA_arg(roleid)) {
+        return true;
+    }
 
     return has_privs_of_role(roleid, ownerId);
 }

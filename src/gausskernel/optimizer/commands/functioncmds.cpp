@@ -3942,8 +3942,10 @@ Oid GetFunctionNodeGroup(AlterFunctionStmt* stmt)
 
 static void checkAllowAlter(HeapTuple tup) {
     Datum packageOidDatum;
+    Datum prosecdef_datum;
     Oid packageOid = InvalidOid;
     bool isnull = false;
+    bool prosecdef = false;
     packageOidDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &isnull);
     if (!isnull) {
         packageOid = DatumGetObjectId(packageOidDatum);
@@ -3955,6 +3957,16 @@ static void checkAllowAlter(HeapTuple tup) {
                 errdetail("please rebuild package"),
                 errcause("package is one object,not allow alter function in package"),
                 erraction("rebuild package")));
+    }
+    prosecdef_datum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_prosecdef, &isnull);
+    prosecdef = DatumGetBool(prosecdef_datum);
+    if (prosecdef) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("security definer function not allow alter owner"),
+                errdetail("please delete function and rebuild function"),
+                errcause("for security, not allow alter security definer function owner"),
+                erraction("delete and rebuild function")));
     }
 }
 

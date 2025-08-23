@@ -59,6 +59,7 @@
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
 #include "tcop/utility.h"
+#include "catalog/pg_authid.h"
 
 
 static void create_package_error_callback(void *arg)
@@ -362,13 +363,11 @@ ObjectAddress AlterPackageOwner(List* name, Oid newOwnerId)
             (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
                 errmsg("ownerId change failed for package %u, because it is a builtin package.", pkgOid)));
     }
-
     if (!initialuser() && BOOTSTRAP_SUPERUSERID == newOwnerId) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
                 errmsg("only super user can set package owner to super user.")));
     }
-
     rel = heap_open(PackageRelationId, RowExclusiveLock);
     tup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
     /* should not happen */
