@@ -233,7 +233,7 @@ llvm::ExecutionEngine* GsCodeGen::createNewEngine(llvm::Module* module)
 #ifdef __aarch64__
     mattrs.push_back("+crc");
 #else
-    mattrs.push_back("-avx2");
+    mattrs.push_back("+avx2");
 #endif
 
     /* Create a new execution engine */
