@@ -933,7 +933,7 @@ static void deletePlanTableDataForInactiveSession()
 
 static bool checkDangerCharacter(const char* input)
 {
-    const char* dangerCharacterList[] = {";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", NULL};
+    const char* dangerCharacterList[] = {";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", "$", "\n", NULL};
 
     for (int i = 0; dangerCharacterList[i] != NULL; i++) {
         if (strstr(input, dangerCharacterList[i]) != NULL) {

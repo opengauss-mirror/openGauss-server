@@ -432,7 +432,7 @@ static void check_input_spec_char(char* input_env_value, bool skip_dollar)
         return;
     }
 
-    const char* danger_character_list[] = {"|", ";", "&", "$", "<", ">", "`", "\\", "!", NULL};
+    const char* danger_character_list[] = {"|", ";", "&", "$", "<", ">", "`", "\\", "!", "\n", NULL};
 
     int i = 0;
 

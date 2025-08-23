@@ -9941,7 +9941,8 @@ EventInfo* getEvents(Archive *fout, int *numEvents)
             query,
             "SELECT pg_job.oid,  job_id, log_user, job_name, pg_job.nspname, pg_namespace.oid, dbname, start_date, "
             "end_date, %s, enable "
-            "FROM pg_job LEFT join pg_namespace on pg_namespace.nspname = pg_job.nspname where dbname=\'%s\'",
+            "FROM pg_catalog.pg_job "
+            "LEFT join pg_namespace on pg_namespace.nspname = pg_job.nspname where dbname=\'%s\'",
             intervalStr, database_name);
 
         res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
@@ -9981,25 +9982,27 @@ EventInfo* getEvents(Archive *fout, int *numEvents)
             Oid ev_oid = atooid(PQgetvalue(res, i, i_jobid));
             PQExpBuffer attquery = createPQExpBuffer();
             appendPQExpBuffer(attquery, "SELECT "
-            "* "
-            "FROM gs_job_attribute where job_name='%s'", evinfo[i].evname);
+            "attribute_name, attribute_value, pg_catalog.quote_literal(attribute_value) as liter "
+            "FROM pg_catalog.gs_job_attribute where job_name='%s'", evinfo[i].evname);
             attres = ExecuteSqlQuery(fout, attquery->data, PGRES_TUPLES_OK);
             attntups = PQntuples(attres);
             int i_attributename;
             int i_attributevalue;
+            int i_quote_literal;
             for (j = 0; j < attntups; j++) {
                 i_attributename = PQfnumber(attres, "attribute_name");
                 i_attributevalue = PQfnumber(attres, "attribute_value");
+                i_quote_literal = PQfnumber(attres, "liter");
                 if (strcmp(PQgetvalue(attres, j, i_attributename), "auto_drop") == 0) {
                     evinfo[i].autodrop = (PQgetvalue(attres, j, i_attributevalue)[0] == 't');
                 } else if (strcmp(PQgetvalue(attres, j, i_attributename), "comments") == 0) {
-                    evinfo[i].comment = gs_strdup(PQgetvalue(attres, j, i_attributevalue));
+                    evinfo[i].comment = gs_strdup(PQgetvalue(attres, j, i_quote_literal));
                 }
             }
             PQExpBuffer procquery = createPQExpBuffer();
             appendPQExpBuffer(procquery, "SELECT "
             "what "
-            "FROM pg_job_proc where job_id=%u", ev_oid);
+            "FROM pg_catalog.pg_job_proc where job_id=%u", ev_oid);
             procres = ExecuteSqlQuery(fout, procquery->data, PGRES_TUPLES_OK);
             i_evbody = PQfnumber(procres, "what");
             evinfo[i].evbody = gs_strdup(PQgetvalue(procres, 0, i_evbody));
@@ -23539,10 +23542,10 @@ static void dumpEvent(Archive *fout, EventInfo *einfo)
     } else {
         appendPQExpBuffer(query, "DISABLE ");
     }
-    if (einfo->comment) {
-        appendPQExpBuffer(query, "COMMENT \'%s\' ", einfo->comment);
+    if (strlen(einfo->comment)) {
+        appendPQExpBuffer(query, "COMMENT %s ", einfo->comment);
     }
-    appendPQExpBuffer(query, "DO %s;", einfo->evbody);
+    appendPQExpBuffer(query, "DO %s", einfo->evbody);
 
     ArchiveEntry(fout,
         einfo->dobj.catId,

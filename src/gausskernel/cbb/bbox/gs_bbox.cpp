@@ -414,7 +414,7 @@ int CheckFilenameValid(const char* inputEnvValue)
 {
     const int maxLen = 1024;
 
-    const char* dangerCharacterList[] = {";", "`", "\\", "'", "\"", ">", "<", "$", "&", "|", "!", "\n", NULL};
+    const char* dangerCharacterList[] = {";", "`", "\\", "'", "\"", ">", "<", "$", "&", "|", "!", "$", "\n", NULL};
     int i = 0;
 
     if (inputEnvValue == NULL || strlen(inputEnvValue) >= maxLen) {
