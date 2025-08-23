@@ -935,7 +935,7 @@ select pg_relation_size('t_1033943', 'main');
               8192
 (l row)
 
-select pg relation_size('t_1033943', 'C1_main');
+select pg_relation_size('t_1033943', 'C1_main');
  pg_relation_size
 -------------------
                  0
@@ -948,9 +948,9 @@ select pg_relation_size('t_1033943', 'C2_bcm');
 (l row)
 
 select pg_relation_size('t_1033943', 'GS_ROLE_COPY_FILES');
- pg_relation_size
--------------------
-              8192
-(l row)
-
+ERROR:  invalid fork name
+CONTEXT:  referenced column: pg_relation_size
+SELECT pg_relation_size('t_1033943', '.');
+ERROR:  invalid input .
+CONTEXT:  referenced column: pg_relation_size
 drop table t_1033943;

@@ -147,7 +147,7 @@ static bool pgfincore_file(char *filename, pgfincoreStruct *pgfncr);
 extern Datum pgfincore_drawer(PG_FUNCTION_ARGS);
 
 #define relpathpg(rel, forkName) \
-    relpathbackend((rel)->rd_node, (rel)->rd_backend, (forkname_to_number(text_to_cstring(forkName))))
+    relpathbackend((rel)->rd_node, (rel)->rd_backend, (forkname_to_number(text_to_cstring(forkName), NULL, true)))
 
 /*
  * pgsysconf

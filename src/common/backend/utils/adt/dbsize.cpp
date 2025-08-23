@@ -1400,7 +1400,7 @@ Datum pg_relation_size(PG_FUNCTION_ARGS)
     if (rel == NULL)
         PG_RETURN_NULL();
 
-    ForkNumber forknumber = forkname_to_number(text_to_cstring(forkName));
+    ForkNumber forknumber = forkname_to_number(text_to_cstring(forkName), NULL, true);
 
     size = calculate_table_size(rel, forknumber);
 
