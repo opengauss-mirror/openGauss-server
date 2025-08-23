@@ -173,26 +173,51 @@ static void write_asp_chunks(char *data, int len, bool end);
 static void write_asplog(char *data, int len, bool end);
 const char* password_mask = "********";
 
-#define MASK_OBS_PATH()                                                                                 \
-    do {                                                                                                \
-        char* childStmt = mask_funcs3_parameters(yylval.str);                                           \
-        if (childStmt != NULL) {                                                                        \
-            if (mask_string == NULL) {                                                                  \
-                mask_string = MemoryContextStrdup(                                                      \
-                    SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);                     \
-                vol_mask_string = mask_string;                                                          \
-            }                                                                                           \
-            if (unlikely(yyextra.literallen != (int)strlen(childStmt))) {                               \
-                ereport(ERROR,                                                                          \
-                    (errcode(ERRCODE_SYNTAX_ERROR),                                                     \
-                    errmsg("parse error on statement %s.", childStmt)));                                \
-            }                                                                                           \
-            rc = memcpy_s(mask_string + yylloc + 1, yyextra.literallen, childStmt, yyextra.literallen); \
-            securec_check(rc, "\0", "\0");                                                              \
-            rc = memset_s(childStmt, yyextra.literallen, 0, yyextra.literallen);                        \
-            securec_check(rc, "", "");                                                                  \
-            pfree(childStmt);                                                                           \
-        }                                                                                               \
+char* build_new_mask_string(int lex_loc, char* lex_str, int lex_str_len, int pwd_num, char* mask_string,
+                            char* childStmt)
+{
+    errno_t rc = EOK;
+
+    int len = strlen(mask_string) + (strlen(password_mask) * pwd_num) + 1;
+    char* mask_new_str = (char*)palloc(len);
+    rc = memset_s(mask_new_str, len, '\0', len);
+    securec_check(rc, "", "");
+    rc = memcpy_s(mask_new_str, len, mask_string, strlen(mask_string) - lex_str_len);
+    securec_check(rc, "", "");
+    rc = memcpy_s(mask_new_str + lex_loc + 1, len, childStmt, strlen(childStmt));
+    securec_check(rc, "", "");
+    rc = memcpy_s(mask_new_str + lex_loc + 1 + strlen(childStmt), len, mask_string + lex_loc + 1 + lex_str_len,
+                  strlen(mask_string) - lex_loc - 1 - lex_str_len);
+    securec_check(rc, "", "");
+
+    rc = memset_s(childStmt, strlen(childStmt), 0, strlen(childStmt));
+    securec_check(rc, "", "");
+    pfree(childStmt);
+
+    char* re_mask_str = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), mask_new_str);
+    rc = memset_s(mask_string, strlen(mask_string), '\0', strlen(mask_string));
+    securec_check(rc, "", "");
+
+    pfree_ext(mask_string);
+    pfree_ext(mask_new_str);
+
+    return re_mask_str;
+}
+
+#define MASK_OBS_PATH()                                                                                               \
+    do {                                                                                                              \
+        int pwd_num = 0;                                                                                              \
+        char* childStmt = mask_funcs3_parameters(yylval.str, &pwd_num);                                               \
+        if (childStmt != NULL) {                                                                                      \
+            if (mask_string == NULL) {                                                                                \
+                mask_string = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);     \
+                vol_mask_string = mask_string;                                                                        \
+            }                                                                                                         \
+            char* re_string = build_new_mask_string((int)yylloc, (char*)yylval.str, (int)yyextra.literallen, pwd_num, \
+                                                    mask_string, childStmt);                                          \
+            mask_string = re_string;                                                                                  \
+            vol_mask_string = mask_string;                                                                            \
+        }                                                                                                             \
     } while (0)
 
 /*
@@ -4813,7 +4838,7 @@ static void tolower_func(char *convert_query)
     }
 }
 
-static void apply_funcs3_mask(char *string, char** end, char replace)
+static void apply_funcs3_mask(char *string, char** end, char replace, size_t* step)
 {
     errno_t rc = EOK;
     if (*end == NULL || **end == '\0') {
@@ -4824,15 +4849,18 @@ static void apply_funcs3_mask(char *string, char** end, char replace)
     /* find '=' in param: field  ^=   123abc */
     while (**end != '=' && **end != '\0') {
         (*end)++;
+        *step = *step + 1;
     }
     if (**end != '=') {
         return;
     }
     (*end)++;
+    *step = *step + 1;
 
     /* find start of value in param: field  =   ^123abc */
     while (**end == ' ') {
         (*end)++;
+        *step = *step + 1;
     }
     if (**end == '\0') {
         return;
@@ -4851,20 +4879,60 @@ static void apply_funcs3_mask(char *string, char** end, char replace)
      *                                   ^      ^
      *                                 start   end
      */
-    rc = memset_s(start, param_len, replace, param_len);
-    securec_check_c(rc, "\0", "\0");
 }
 
-char* mask_funcs3_parameters(const char* query_string)
+char* mask_funcs3_parameters(const char* query_string, int* pwd_num)
 {
     const char* funcs3Mask[] = {"accesskey", "secretkey"};
     int funcs3MaskNum =  sizeof(funcs3Mask) / sizeof(funcs3Mask[0]);
     char* mask_string = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), query_string);
+    errno_t rc = 0;
     for (int i = 0; i < funcs3MaskNum; i++) {
         char *start = mask_string;
         while ((start = strstr(start, funcs3Mask[i])) != NULL) {
+            size_t step = 0;
+            size_t start_step = 0;
+            char *tmp_str = mask_string;
+            while (tmp_str != start) {
+                tmp_str++;
+                start_step++;
+            }
             /* take the original string and replace the key value with '*' */
-            apply_funcs3_mask(mask_string, &start, '*');
+            apply_funcs3_mask(mask_string, &start, '*', &step);
+            
+            /* 1: cal total steps */
+            step = step + start_step;
+            /* 2: init mask_str_tmp */
+            int len = strlen(mask_string) + strlen(password_mask) + 1;
+            char* mask_str_tmp = (char*)palloc(len);
+            rc = memset_s(mask_str_tmp, len, '\0', len);
+            securec_check(rc, "", "");
+            /* 3:combine mask_str_tmp */
+            rc = memcpy_s(mask_str_tmp, len, mask_string, strlen(mask_string));
+            securec_check(rc, "", "");
+            char* after_string = pg_strdup(start);
+            rc = memcpy_s(mask_str_tmp + step, len, password_mask, strlen(password_mask));
+            securec_check(rc, "", "");
+            rc = memcpy_s(mask_str_tmp + step + strlen(password_mask), len, after_string, strlen(after_string) + 1);
+            securec_check(rc, "", "");
+            /* 4:mask_str_new: dup mask_string */
+            char* mask_str_new = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), mask_str_tmp);
+
+            /* 5: free mask_string and mask_str_tmp */
+            rc = memset_s(mask_string, strlen(mask_string), '\0', strlen(mask_string));
+            securec_check(rc, "", "");
+            pfree_ext(mask_string);
+            pfree_ext(mask_str_tmp);
+
+            /* 6.reset mask_string */
+            mask_string = mask_str_new;
+            start = mask_string + (step + strlen(password_mask));
+            tmp_str = start;
+
+            /* 7.free */
+            free(after_string);
+            after_string = NULL;
+            *pwd_num = *pwd_num + 1;
         }
     }
     return mask_string;
@@ -5018,12 +5086,13 @@ static char* mask_Password_internal(const char* query_string)
                     if (prevToken[0] == IMMEDIATE)
                         eraseSingleQuotes(yylval.str);
 
+                    int pwd_num = 0;
                     char* childStmt = NULL;
                     if (curStmtType == 13) {
-                        childStmt = mask_funcs3_parameters(yylval.str);
+                        childStmt = mask_funcs3_parameters(yylval.str, &pwd_num);
                     } else
                         childStmt = mask_Password_internal(yylval.str);
-                    if (childStmt != NULL) {
+                    if (childStmt != NULL && pwd_num == 0) {
                         if (mask_string == NULL) {
                             mask_string = MemoryContextStrdup(
                                 SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
@@ -5060,6 +5129,16 @@ static char* mask_Password_internal(const char* query_string)
                         rc = memset_s(childStmt, strlen(childStmt), 0, strlen(childStmt));
                         securec_check(rc, "", "");
                         pfree(childStmt);
+                    } else if (childStmt != NULL && pwd_num > 0) {
+                        if (mask_string == NULL) {
+                            mask_string =
+                                MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
+                            vol_mask_string = mask_string;
+                        }
+                        char* re_string = build_new_mask_string((int)yylloc, (char*)yylval.str, (int)yyextra.literallen,
+                                                                pwd_num, mask_string, childStmt);
+                        mask_string = re_string;
+                        vol_mask_string = mask_string;
                     }
                     continue;
                 }
