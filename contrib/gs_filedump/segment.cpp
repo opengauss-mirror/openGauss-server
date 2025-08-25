@@ -272,7 +272,7 @@ void DumpSegmentContent(SegmentHead *segmentHead, unsigned int blockStart, unsig
             printf("Error: Could not open file <%s>.\n", segmentDataFile);
             g_exitCode = 1;
         }
-        ConvertBlockLocation(ExtentIdToLogicBlockNum(blockLocationCurrent->extentId + BLOCK_OFFSET_RESERVED_HEADER),
+        ConvertBlockLocation(ExtentIdToLogicBlockNum(++blockLocationCurrent->extentId),
             blockLocationCurrent);
     }
 }

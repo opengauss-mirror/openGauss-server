@@ -258,6 +258,18 @@ def format_table(column_info_dict, dropped_column_dict, type_info_dict, max_colu
         table_id = oid_mapping.get(str(oid), 0)
         search_files(searchpath, str(table_id), table_paths)
         
+        for base_name in table_paths:
+            index = 1
+            while True:
+                file_path = f"{base_name}.{index}"
+                if os.path.exists(file_path):
+                    table_paths.append(file_path)
+                    index += 1
+                else:
+                    break
+        
+        table_paths.sort()
+        
         ustore_on = 'type=ustore' in table_info['reloptions'].lower()
         segment_on = 'segment=on' in table_info['reloptions'].lower()
         
@@ -337,7 +349,16 @@ if __name__ == "__main__":
             sys.exit(-1)
         
         if not searchpath:
+            if 'PGDATA' not in os.environ:
+                print("'PGDATA' not in os.environ, please specify the -s parameter")
+                sys.exit(-1)
             searchpath = os.environ.get('PGDATA')
+        
+        if not os.path.isdir(searchpath):
+            print(f"The searchpath directory `{searchpath}` does not exist. Please confirm the search path.")
+            sys.exit(-1)
+        
+        print(f"The search path `{searchpath}` will be used.")
             
         print("*" * 50 + "\n*")
         print(f"* \t Namespaces: {namespaces}, Tables: {tablenames}")    
