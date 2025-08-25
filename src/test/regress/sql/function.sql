@@ -1253,4 +1253,24 @@ reset log_min_duration_statement;
 reset track_stmt_stat_level;
 alter system set instr_unique_sql_count = 100;
 
+create table test_table_030(id int, name text);
+insert into test_table_030 values(1,'a'),(2,'b');
+DECLARE
+    temp integer;
+    _id INTEGER;
+    begin for temp in 0..5 loop
+        UPDATE test_table_030 SET name = 'aaa' WHERE id=temp returning id BULK COLLECT INTO _id;
+    end loop;
+end;
+/
+DECLARE
+    temp integer;
+    _id INTEGER;
+    begin for temp in 0..5 loop
+        DELETE FROM test_table_030 WHERE id=temp returning id INTO _id;
+    end loop;
+end;
+/
+drop table test_table_030;
+
 \c regression
