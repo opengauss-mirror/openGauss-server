@@ -142,6 +142,48 @@ select object_id('contrib_regression.sys1.students');
 --?.*
 (1 row)
 
+select object_id('students', '');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('students','s');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('students','S');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('students','u');
+ object_id 
+-----------
+--?.*
+(1 row)
+
+select object_id('students',' u');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('students','v');
+ object_id 
+-----------
+          
+(1 row)
+
+select object_id('students','u ');
+ object_id 
+-----------
+--?.*
+(1 row)
+
 select objectproperty(object_id('students'), 'istable') as istable;
  istable 
 ---------
