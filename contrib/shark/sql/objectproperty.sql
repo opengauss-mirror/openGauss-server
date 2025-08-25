@@ -67,6 +67,14 @@ select object_id('trigger_update_total_grade', 'TR');
 select object_id('sys1.students');
 select object_id('contrib_regression.sys1.students');
 
+select object_id('students', '');
+select object_id('students','s');
+select object_id('students','S');
+select object_id('students','u');
+select object_id('students',' u');
+select object_id('students','v');
+select object_id('students','u ');
+
 select objectproperty(object_id('students'), 'istable') as istable;
 select objectproperty(object_id('students'), 'ownerid') as ownerid;
 select objectproperty(object_id('students'), 'isdefaultcnst') as isdefaultcnst;

@@ -82,7 +82,7 @@ Oid tsql_get_constraint_nsp_oid(Oid object_id, Oid user_id);
 extern char* GetPhysicalSchemaName(char *dbName, const char *schemaName);
 static bool is_shared_schema(const char *name);
 static char* GetCurrentPhysicalSchemaName(char* schemaName);
-static Oid search_oid_in_class(char* obj_name, Oid schema_oid);
+static Oid search_oid_in_class(char* obj_name, Oid schema_oid, char* type_name = NULL);
 static Oid search_oid_in_proc(char* obj_name, Oid schema_oid);
 static Oid search_oid_in_trigger(char* obj_name, Oid schema_oid);
 static Oid search_oid_in_cons(char* obj_name, Oid schema_oid);
@@ -186,25 +186,47 @@ static Oid search_oid_in_cons(char* obj_name, Oid schema_oid)
 	return id;
 }
 
-static Oid search_oid_in_class(char* obj_name, Oid schema_oid)
+static Oid search_oid_in_class(char* obj_name, Oid schema_oid, char* type_name)
 {
-	Oid id = InvalidOid;
-	HeapTuple tuple;
-	Form_pg_class classform;
+    Oid id = InvalidOid;
+    HeapTuple tuple;
+    Form_pg_class classform;
 
-	tuple = SearchSysCache2(RELNAMENSP, PointerGetDatum(obj_name), ObjectIdGetDatum(schema_oid));
-	if (HeapTupleIsValid(tuple))
-	{
-		classform = (Form_pg_class) GETSTRUCT(tuple);
-		if (classform->relkind == 'i' || classform->relkind == 'l') {
-			ReleaseSysCache(tuple);
-			return InvalidOid;
-		}
-		id = HeapTupleGetOid(tuple);
-		ReleaseSysCache(tuple);
-	}
+    tuple = SearchSysCache2(RELNAMENSP, PointerGetDatum(obj_name), ObjectIdGetDatum(schema_oid));
+    if (!HeapTupleIsValid(tuple)) {
+        return InvalidOid;
+    }
+    classform = (Form_pg_class) GETSTRUCT(tuple);
+    id = HeapTupleGetOid(tuple);
+    if (type_name != NULL) {
+        switch (classform->relkind) {
+            case 'r':
+                if ((strcmp(type_name, "U") != 0 && strcmp(type_name, "S") != 0) ||
+                    (strcmp(type_name, "U") == 0 && IsSystemObjOid(id)) ||
+                    (strcmp(type_name, "S") == 0 && !IsSystemObjOid(id))) {
+                    id = InvalidOid;
+                }
+                break;
+            case 'v':
+                if (strcmp(type_name, "V") != 0) {
+                    id = InvalidOid;
+                }
+                break;
+            case 'S':
+                if (strcmp(type_name, "SO") != 0) {
+                    id = InvalidOid;
+                }
+                break;
+            default:
+                id = InvalidOid;
+                break;
+        }
+    } else if (classform->relkind == 'i' || classform->relkind == 'l') {
+        id = InvalidOid;
+    }
+    ReleaseSysCache(tuple);
 
-	return id;
+    return id;
 }
 
 static Oid search_oid_in_schema(char* schema_name, char* obj_name, char *object_type)
@@ -232,26 +254,28 @@ static Oid search_oid_in_schema(char* schema_name, char* obj_name, char *object_
 	}
 
 	Oid id = InvalidOid;
-	if (object_type != NULL && strlen(object_type) > 0)
+	if (object_type != NULL)
 	{
 		char* type_name = pg_strtoupper(object_type);
-		if (strcmp(type_name, "S") == 0 || strcmp(type_name, "U") == 0 || strcmp(type_name, "V") == 0 ||
-			strcmp(type_name, "SO") == 0)
-		{
-			id = search_oid_in_class(obj_name, schema_oid);
-		} else if (strcmp(type_name, "C") == 0 || strcmp(type_name, "D") == 0 || strcmp(type_name, "F") == 0 ||
-			strcmp(type_name, "PK") == 0 || strcmp(type_name, "UQ") == 0) {
-			id = search_oid_in_cons(obj_name, schema_oid);
-		} else if (strcmp(type_name, "AF") == 0 || strcmp(type_name, "FN") == 0 ||
-			strcmp(type_name, "P") == 0 || strcmp(type_name, "PC") == 0) {
-			id = search_oid_in_proc(obj_name, schema_oid);
-		} else if (strcmp(type_name, "TR") == 0) {
-			id = search_oid_in_trigger(obj_name, schema_oid);
-		} else {
-			ereport(ERROR, 
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("Unsupported object type")));
-		}
+		/* eg. D-database support "U ", but not "U  " with two spaces */
+        if (strlen(type_name) == 2 && type_name[1] == ' ') {
+            type_name[1] = '\0';
+        }
+        if (strcmp(type_name, "S") == 0 || strcmp(type_name, "U") == 0 || strcmp(type_name, "V") == 0 ||
+            strcmp(type_name, "SO") == 0)
+        {
+            id = search_oid_in_class(obj_name, schema_oid, type_name);
+        } else if (strcmp(type_name, "C") == 0 || strcmp(type_name, "D") == 0 || strcmp(type_name, "F") == 0 ||
+            strcmp(type_name, "PK") == 0 || strcmp(type_name, "UQ") == 0) {
+            id = search_oid_in_cons(obj_name, schema_oid);
+        } else if (strcmp(type_name, "AF") == 0 || strcmp(type_name, "FN") == 0 ||
+            strcmp(type_name, "P") == 0 || strcmp(type_name, "PC") == 0) {
+            id = search_oid_in_proc(obj_name, schema_oid);
+        } else if (strcmp(type_name, "TR") == 0) {
+            id = search_oid_in_trigger(obj_name, schema_oid);
+        } else {
+            return InvalidOid;
+        }
 	} else {
 		if (id == InvalidOid) {
 			id = search_oid_in_class(obj_name, schema_oid);
@@ -510,7 +534,7 @@ object_id_internal(PG_FUNCTION_ARGS)
 		PG_RETURN_NULL();
 	}
 	char *object_name = text_to_cstring(PG_GETARG_TEXT_P(0));
-    char *object_type = text_to_cstring(PG_GETARG_TEXT_P(1));
+    char *object_type = PG_NARGS() == 1 ? NULL : text_to_cstring(PG_GETARG_TEXT_P(1));
 
 	if (strlen(object_name) < 1) {
 		PG_RETURN_NULL();

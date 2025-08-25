@@ -18,7 +18,11 @@ CREATE OR REPLACE FUNCTION sys.rand(smallint) returns double precision LANGUAGE 
 CREATE OR REPLACE FUNCTION sys.rand(tinyint) returns double precision LANGUAGE SQL volatile STRICT as 'select rand($1::int)';
 
 -- Return the object ID given the object name. Can specify optional type.
-CREATE OR REPLACE FUNCTION sys.object_id(IN object_name VARCHAR, IN object_type VARCHAR DEFAULT '')
+CREATE OR REPLACE FUNCTION sys.object_id(IN object_name VARCHAR)
+RETURNS integer AS '$libdir/shark', 'object_id_internal'
+LANGUAGE C STABLE STRICT;
+
+CREATE OR REPLACE FUNCTION sys.object_id(IN object_name VARCHAR, IN object_type VARCHAR)
 RETURNS integer AS '$libdir/shark', 'object_id_internal'
 LANGUAGE C STABLE STRICT;
 
