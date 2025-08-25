@@ -1577,7 +1577,7 @@ static void sort_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
             /* we always accept join combination if one of path is cheapest path */
             if (is_parallel_path(outerrel, innerrel)) {
                 if (!is_cheapest_path(outerrel, innerrel, outer_path, inner_path)) {
-                    if (!join_used[(i - 1) * num_inner + j - 1]) {
+                    if (join_used && !join_used[(i - 1) * num_inner + j - 1]) {
                         j++;
                         continue;
                     }
@@ -1791,14 +1791,14 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
             /* we always accept join combination if one of path is cheapest path */
             if (is_parallel_path(outerrel, innerrel)) {
                 if (!is_cheapest_path(outerrel, innerrel, outer_cheapest_total, inner_cheapest_total)) {
-                    if (!join_used[(i - 1) * num_inner + j - 1]) {
+                    if (join_used && !join_used[(i - 1) * num_inner + j - 1]) {
                         j++;
                         continue;
                     }
                 }
             } else if (outer_cheapest_total != linitial(outerrel->cheapest_total_path) &&
                 inner_cheapest_total != linitial(innerrel->cheapest_total_path)) {
-                if (!join_used[(i - 1) * num_inner + j - 1]) {
+                if (join_used && !join_used[(i - 1) * num_inner + j - 1]) {
                     j++;
                     continue;
                 }
@@ -2238,14 +2238,14 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                 /* we always accept join combination if one of path is cheapest path */
                 if (is_parallel_path(outerrel, innerrel)) {
                     if (!is_cheapest_path(outerrel, innerrel, cheapest_total_outer, cheapest_total_inner)) {
-                        if (!join_used[(i - 1) * num_inner + j - 1]) {
+                        if (join_used && !join_used[(i - 1) * num_inner + j - 1]) {
                             j++;
                             continue;
                         }
                     }
                 } else if (cheapest_total_outer != linitial(outerrel->cheapest_total_path) &&
                     cheapest_total_inner != linitial(innerrel->cheapest_total_path)) {
-                    if (!join_used[(i - 1) * num_inner + j - 1]) {
+                    if (join_used && !join_used[(i - 1) * num_inner + j - 1]) {
                         j++;
                         continue;
                     }
