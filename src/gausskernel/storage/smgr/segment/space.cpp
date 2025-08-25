@@ -584,6 +584,8 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
          *
          */
         SMgrRelation rel = smgropen(logic_rnode, InvalidBackendId, GetColumnNum(forknum));
+        SMgrOpenSpace(rel);
+        SegmentCheck(rel->seg_space != NULL);
         Buffer buf = try_get_moved_pagebuf(&logic_rnode, seg->forknum, logic_start_blocknum + i);
         if (BufferIsValid(buf)) {
             /*
