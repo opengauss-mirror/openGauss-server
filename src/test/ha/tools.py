@@ -4,7 +4,7 @@ import sys
 args = sys.argv[1:]
 tablename = args[0]
 delimiter = args[1]
-#print delimiter
+#print(delimiter)
 
 insert = "insert into %s values" % (tablename)
 
@@ -18,4 +18,4 @@ for line in sys.stdin:
     values += '%s,' % (w)
   values = values[:-1]
   values = insert + "(" + values + ");"
-  print values
+  print(values)

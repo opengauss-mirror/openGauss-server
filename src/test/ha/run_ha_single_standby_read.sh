@@ -42,7 +42,7 @@ done
 
 #stop the database
 printf "stop the database\n"
-python $scripts_dir/pgxc_psd_single.py -o > ./results/stop_database_single.log 2>&1
+./run_python.sh $scripts_dir/pgxc_psd_single.py -o > ./results/stop_database_single.log 2>&1
 
 total_endtime=`date +"%Y-%m-%d %H:%M:%S"`
 total_endvalue=`date -d  "$total_endtime" +%s`

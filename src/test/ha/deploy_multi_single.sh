@@ -4,13 +4,13 @@
 source ./standby_env.sh
 
 node_num=4
-#python $scripts_dir/pgxc_multi.py 
+#./run_python.sh $scripts_dir/pgxc_multi.py 
 #stop the database
-python $scripts_dir/pgxc_multi_single.py -o
+./run_python.sh $scripts_dir/pgxc_multi_single.py -o
 
 sleep 2
 #init the database
-python $scripts_dir/pgxc_multi_single.py -c 1 -d $node_num
+./run_python.sh $scripts_dir/pgxc_multi_single.py -c 1 -d $node_num
 
 #build the standby
 gs_ctl build -D $data_dir/datanode1_standby -Z single_node
@@ -18,7 +18,7 @@ gs_ctl build -D $data_dir/datanode4_standby -Z single_node
 
 
 #stop the database
-python $scripts_dir/pgxc_multi_single.py -o
+./run_python.sh $scripts_dir/pgxc_multi_single.py -o
 
 #set the primary postgresql.conf file
 gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = on"
@@ -60,8 +60,8 @@ do
 	gs_guc set -Z datanode -D $datanode_dir -c "light_comm = on"
 done
 
-#python $scripts_dir/pgxc_multi.py -o
+#./run_python.sh $scripts_dir/pgxc_multi.py -o
 
 sleep 2
 #start the database
-python $scripts_dir/pgxc_multi_single.py -s
+./run_python.sh $scripts_dir/pgxc_multi_single.py -s

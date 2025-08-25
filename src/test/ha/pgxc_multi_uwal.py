@@ -34,7 +34,7 @@ class Pterodb():
         self.node_data_path_arr = [0 for i in range(self.standby_node_num+1)]
 
     def __kill_all_server(self):
-        os.system("ps -ef | grep opengauss/bin/gaussdb | grep -v grep | awk '{print $2}' | xargs kill -9 ")
+        os.system("ps -ef | grep opengauss/bin/gaussdb | grep -v grep | awk '{print($2}' | xargs kill -9 "))
 
 
     def init_env(self):
@@ -321,8 +321,8 @@ def main():
     try:
         opts, args = getopt.getopt(sys.argv[1:], "hrD:c:d:il:t:sovg", ["help", "data_dir=", "regress="])
     except getopt.GetoptError as err:
-        # print help information and exit:
-        print(str(err)) # will print something like "option -a not recognized"
+        # print(help information and exit:)
+        print(str(err)) # will print(something like "option -a not recognized")
         # usage()
         sys.exit(2)
 

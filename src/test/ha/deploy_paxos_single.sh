@@ -10,14 +10,14 @@ dcf_ports=()
 function deploy_paxos()
 {
     #stop the database
-    python $scripts_dir/pgxc_paxos_single.py -o
+    ./run_python.sh $scripts_dir/pgxc_paxos_single.py -o
 
     sleep 2
     #init the database
     if [ $# -gt 0 ]; then
         dcf_port=$1
     fi
-    python $scripts_dir/pgxc_paxos_single.py -c 1 -d $node_num -p ${dcf_port}
+    ./run_python.sh $scripts_dir/pgxc_paxos_single.py -c 1 -d $node_num -p ${dcf_port}
 }
 
 function stop_datanodes()
