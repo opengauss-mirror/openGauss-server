@@ -34,7 +34,7 @@ public:
 
     ~IndexScanFusion(){};
 
-    IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamListInfo params);
+    IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamListInfo params, bool skip_junk = true);
 
     void Init(long max_rows);
 

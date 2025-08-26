@@ -29,8 +29,8 @@
 #include "opfusion/opfusion_util.h"
 #include "utils/knl_partcache.h"
 
-IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamListInfo params)
-    : IndexFusion(params, planstmt)
+IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamListInfo params, bool skip_junk)
+    : IndexFusion(params, planstmt, skip_junk)
 {
     m_isnull = NULL;
     m_values = NULL;
@@ -93,7 +93,8 @@ IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamLi
     m_direction = (ScanDirection*)palloc0(sizeof(ScanDirection));
 
     Relation rel = m_rel;
-    m_tupDesc = ExecCleanTypeFromTL(m_targetList, false, rel->rd_tam_ops);
+    m_tupDesc = m_skipjunk ? ExecCleanTypeFromTL(m_targetList, false, rel->rd_tam_ops) :
+                             ExecTypeFromTL(m_targetList, false, false);
     m_attrno = (int16*)palloc(m_tupDesc->natts * sizeof(int16));
     m_values = (Datum*)palloc(RelationGetDescr(rel)->natts * sizeof(Datum));
     m_tmpvals = (Datum*)palloc(m_tupDesc->natts * sizeof(Datum));

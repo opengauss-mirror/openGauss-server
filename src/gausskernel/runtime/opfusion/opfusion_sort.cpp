@@ -49,7 +49,7 @@ void SortFusion::InitLocals(ParamListInfo params)
     m_local.m_receiver = NULL;
     m_local.m_isInsideRec = true;
     m_local.m_scan = ScanFusion::getScanFusion((Node*)sortnode->plan.lefttree, m_global->m_planstmt,
-                                               m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
+                                               m_local.m_outParams ? m_local.m_outParams : m_local.m_params, false);
     m_c_local.m_scanDesc->td_tam_ops = m_local.m_scan->m_tupDesc->td_tam_ops;
     if (!IsGlobal())
         m_global->m_tupDesc->td_tam_ops = m_local.m_scan->m_tupDesc->td_tam_ops;

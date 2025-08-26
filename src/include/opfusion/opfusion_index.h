@@ -29,7 +29,7 @@
 
 class IndexFusion : public ScanFusion {
 public:
-    IndexFusion(ParamListInfo params, PlannedStmt* planstmt);
+    IndexFusion(ParamListInfo params, PlannedStmt* planstmt, bool skip_junk = true);
 
     IndexFusion()
     {}
@@ -90,6 +90,7 @@ public:
 
     int m_maxAttrno;
 
+    bool m_skipjunk;
 };
 
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_INDEX_H_ */

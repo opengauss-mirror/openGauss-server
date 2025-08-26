@@ -242,7 +242,7 @@ void IndexFusion::setAttrNo()
     int cur_resno = 1;
     foreach (lc, m_targetList) {
         TargetEntry *res = (TargetEntry*)lfirst(lc);
-        if (res->resjunk) {
+        if (m_skipjunk && res->resjunk) {
             continue;
         }
 

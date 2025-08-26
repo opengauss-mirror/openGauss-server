@@ -48,7 +48,7 @@ public:
 
     ScanFusion(ParamListInfo params, PlannedStmt* planstmt);
 
-    static ScanFusion* getScanFusion(Node* node, PlannedStmt* planstmt, ParamListInfo params);
+    static ScanFusion* getScanFusion(Node* node, PlannedStmt* planstmt, ParamListInfo params, bool skip_junk = true);
 
     void refreshParameter(ParamListInfo params);
 
