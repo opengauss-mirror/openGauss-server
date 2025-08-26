@@ -1997,12 +1997,24 @@ static void instr_stmt_check_need_update(bool* to_update_db_name,
 {
     PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
 
-    if (BEENTRY_STMEMENET_CXT.db_name == NULL && OidIsValid(beentry->st_databaseid)) {
+    if (BEENTRY_STMEMENET_CXT.db_name == NULL) {
+        if (OidIsValid(beentry->st_databaseid)) {
+            *to_update_db_name = true;
+            BEENTRY_STMEMENET_CXT.db_id = beentry->st_databaseid;
+        }
+    } else if (OidIsValid(beentry->st_databaseid) && beentry->st_databaseid != BEENTRY_STMEMENET_CXT.db_id) {
         *to_update_db_name = true;
+        BEENTRY_STMEMENET_CXT.db_id = beentry->st_databaseid;
     }
 
-    if (BEENTRY_STMEMENET_CXT.user_name == NULL && OidIsValid(beentry->st_userid)) {
+    if (BEENTRY_STMEMENET_CXT.user_name == NULL) {
+        if (OidIsValid(GetCurrentUserId())) {
+            *to_update_user_name = true;
+            BEENTRY_STMEMENET_CXT.client_userid = GetCurrentUserId();
+        }
+    } else if (OidIsValid(GetCurrentUserId()) && GetCurrentUserId() != BEENTRY_STMEMENET_CXT.client_userid) {
         *to_update_user_name = true;
+        BEENTRY_STMEMENET_CXT.client_userid = GetCurrentUserId();
     }
 
     if ((BEENTRY_STMEMENET_CXT.client_addr == NULL && BEENTRY_STMEMENET_CXT.client_port == INSTR_STMT_NULL_PORT) &&
@@ -2215,9 +2227,6 @@ void instr_stmt_report_stat_at_handle_init()
     /* unit: microseconds */
     CURRENT_STMT_METRIC_HANDLE->slow_query_threshold =
         (int64)u_sess->attr.attr_storage.log_min_duration_statement * 1000;
-
-    /* fill basic information */
-    instr_stmt_report_basic_info();
 
     /* fill debug_query_id */
     instr_stmt_report_debug_query_id(u_sess->debug_query_id);

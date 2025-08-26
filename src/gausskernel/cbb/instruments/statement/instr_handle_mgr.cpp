@@ -418,6 +418,7 @@ void commit_metirc_context() {
         CURRENT_STMT_METRIC_HANDLE->slow_query_threshold >= 0 &&
         (!u_sess->attr.attr_common.track_stmt_parameter ||
         (u_sess->attr.attr_common.track_stmt_parameter && CURRENT_STMT_METRIC_HANDLE->timeModel[0] > 0))))) {
+        instr_stmt_report_basic_info();
         /* need to persist, put to suspend list */
         CURRENT_STMT_METRIC_HANDLE->next = BEENTRY_STMEMENET_CXT.suspendStatementList;
         BEENTRY_STMEMENET_CXT.suspendStatementList = CURRENT_STMT_METRIC_HANDLE;

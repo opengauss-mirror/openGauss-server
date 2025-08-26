@@ -272,6 +272,7 @@ extern uint32 instr_stmt_plan_get_cause_type();
 extern bool instr_stmt_is_slowsql();
 extern bool instr_stmt_level_fullsql_open();
 extern bool instr_stmt_level_slowsql_only_open();
+extern void instr_stmt_report_basic_info();
 
 #endif
 
