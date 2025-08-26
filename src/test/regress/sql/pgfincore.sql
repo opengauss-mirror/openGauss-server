@@ -44,8 +44,12 @@ select true from pgfadvise_dontneed('test');
 select true from pgfadvise_sequential('test');
 select true from pgfadvise_random('test');
 select true from pgfadvise_normal('test');
+-- ERROR on bad input
+select true from pgfadvise('pg_class'::regclass,'.',1);
 
 --
 -- tests drawers
 --
 select true from pgfincore('test','main',true);
+-- ERROR on bad input
+select true from pgfincore('test','.',true);

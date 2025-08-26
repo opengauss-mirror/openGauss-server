@@ -111,6 +111,9 @@ select true from pgfadvise_normal('test');
  t
 (1 row)
 
+-- ERROR on bad input
+select true from pgfadvise('pg_class'::regclass,'.',1);
+ERROR:  invalid input .
 --
 -- tests drawers
 --
@@ -120,3 +123,6 @@ select true from pgfincore('test','main',true);
  t
 (1 row)
 
+-- ERROR on bad input
+select true from pgfincore('test','.',true);
+ERROR:  invalid input .
