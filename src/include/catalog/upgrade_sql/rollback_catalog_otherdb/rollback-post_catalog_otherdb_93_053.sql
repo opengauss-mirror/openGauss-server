@@ -336,7 +336,7 @@ BEGIN
     SELECT local_role INTO node_role FROM pg_stat_get_stream_replications() LIMIT 1;
     
     IF node_role = 'Primary' OR node_role = 'Normal' THEN
-        RETURN QUERY SELECT * FROM dbe_perf.statement_history where start_time >= start_time_point and is_slow_sql = 't';
+        RETURN QUERY SELECT sh.* FROM dbe_perf.statement_history sh where sh.start_time >= start_time_point and sh.is_slow_sql = 't';
     ELSIF node_role = 'Standby' OR node_role = 'Cascade Standby' OR node_role = 'Main Standby' THEN
         RETURN QUERY SELECT * FROM dbe_perf.standby_statement_history(true, finish_time_point, now());
     ELSE
