@@ -31,9 +31,9 @@
 #include "utils/knl_partcache.h"
 #include "access/multi_redo_api.h"
 
-
-IndexOnlyScanFusion::IndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* planstmt, ParamListInfo params)
-    : IndexFusion(params, planstmt)
+IndexOnlyScanFusion::IndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* planstmt, ParamListInfo params,
+                                         bool skip_junk)
+    : IndexFusion(params, planstmt, skip_junk)
 {
     m_isnull = NULL;
     m_values = NULL;
@@ -99,7 +99,7 @@ IndexOnlyScanFusion::IndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* plans
     }
     m_targetList = m_node->scan.plan.targetlist;
     m_reloid = getrelid(m_node->scan.scanrelid, planstmt->rtable);
-    m_tupDesc = ExecCleanTypeFromTL(m_targetList, false);
+    m_tupDesc = m_skipjunk ? ExecCleanTypeFromTL(m_targetList, false) : ExecTypeFromTL(m_targetList, false, false);
     m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
     m_direction = (ScanDirection*)palloc0(sizeof(ScanDirection));
     m_VMBuffer = InvalidBuffer;

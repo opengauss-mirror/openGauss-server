@@ -370,10 +370,10 @@ explain (verbose on, costs off) select c3 from t1 where c3 < 10 order by c2;
 select c3 from t1 where c3 < 10 order by c2;
  c3 
 ----
-  2
-  2
   3
   3
+  2
+  2
 (4 rows)
 
 -- nestloop fusion

@@ -45,21 +45,21 @@ ScanFusion::ScanFusion(ParamListInfo params, PlannedStmt* planstmt)
     m_partRel = NULL;
 };
 
-ScanFusion* ScanFusion::getScanFusion(Node* node, PlannedStmt* planstmt, ParamListInfo params)
+ScanFusion* ScanFusion::getScanFusion(Node* node, PlannedStmt* planstmt, ParamListInfo params, bool skip_junk)
 {
     ScanFusion* scan = NULL;
 
     switch (nodeTag(node)) {
         case T_IndexScan:
-            scan = New(CurrentMemoryContext) IndexScanFusion((IndexScan*)node, planstmt, params);
+            scan = New(CurrentMemoryContext) IndexScanFusion((IndexScan*)node, planstmt, params, skip_junk);
             break;
 
         case T_IndexOnlyScan:
-            scan = New(CurrentMemoryContext) IndexOnlyScanFusion((IndexOnlyScan*)node, planstmt, params);
+            scan = New(CurrentMemoryContext) IndexOnlyScanFusion((IndexOnlyScan*)node, planstmt, params, skip_junk);
             break;
 
         case T_AnnIndexScan:
-            scan = New(CurrentMemoryContext) IndexScanFusion((IndexScan*)node, planstmt, params);
+            scan = New(CurrentMemoryContext) IndexScanFusion((IndexScan*)node, planstmt, params, skip_junk);
             break;
         default:
             ereport(ERROR,
@@ -77,7 +77,7 @@ void ScanFusion::refreshParameter(ParamListInfo params)
     m_params = params;
 }
 /* IndexFetchPart */
-IndexFusion::IndexFusion(ParamListInfo params, PlannedStmt* planstmt) : ScanFusion(params, planstmt)
+IndexFusion::IndexFusion(ParamListInfo params, PlannedStmt* planstmt, bool skip_junk) : ScanFusion(params, planstmt)
 {
     m_direction = NULL;
     m_attrno = NULL;
@@ -99,4 +99,5 @@ IndexFusion::IndexFusion(ParamListInfo params, PlannedStmt* planstmt) : ScanFusi
     m_parentIndex = NULL;
     m_partIndex = NULL;
     m_keyInit = false;
+    m_skipjunk = skip_junk;
 }
