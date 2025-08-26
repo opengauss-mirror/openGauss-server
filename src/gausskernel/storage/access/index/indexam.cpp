@@ -214,6 +214,12 @@ void index_delete(Relation index_relation, Datum* values, const bool* isnull, It
     if (RelationIsUstoreIndex(index_relation)) {
         /* Assert(Ustore) Assert(B tree) */
         UBTreeDelete(index_relation, values, isnull, heap_t_ctid, isRollbackIndex);
+    } else if (RelationAmIsBtree(index_relation)) {
+        /*
+         * In old version, the index type of ustore toast table is nbtree index.
+         * In such case, return immediately.
+         */
+        return;
     } else {
         HeapTuple tuple;
         char* accessMethodName;
