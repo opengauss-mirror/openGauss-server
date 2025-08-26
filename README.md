@@ -1,8 +1,6 @@
-![openGauss Logo](doc/openGauss-logo.png "openGauss logo")
+![openGauss Logo](doc/openGauss-logo.png)
 
 [English](./README.en.md) | 简体中文
-
-
 
 - [什么是openGauss](#什么是openGauss)
 - [安装](#安装)
@@ -69,7 +67,6 @@ openGauss突破了多核CPU的瓶颈，实现两路鲲鹏128核150万tpmC，内�
 
 主机日志传输到备机时，备机日志落盘的同时，发送给重做恢复分发线程，分发线程根据日志类型和日志操作的数据页发给多个并行恢复线程进行日志重做，保证备机的重做速度跟上主机日志的产生速度。这样备机实时处于ready状态，从而实现瞬间故障切换。
 
-
 **MOT引擎（Beta发布）**
 
 内存优化表（MOT）存储引擎是一个专为多核大内存优化的存储引擎，具有极高的联机事务处理（OLTP）性能和资源利用率。MOT的数据和索引完全存储在内存中，通过NUMA感知执行，算法消除闩锁争用以及查询JIT本地编译，提供低时延数据访问及高效事务执行。更多请参考[MOT引擎文档](https://opengauss.org/zh/docs/2.0.0/docs/Developerguide/%E5%86%85%E5%AD%98%E8%A1%A8%E7%89%B9%E6%80%A7.html)。
@@ -94,7 +91,6 @@ openGauss支持SQL执行语句的诊断器，提前发现慢查询。
 - **参数自动调整**
 
 openGauss通过机器学习方法自动调整数据库参数，提高调参效率，降低正确调参成本。
-
 
 ## 安装
 
@@ -184,54 +180,54 @@ openGauss通过机器学习方法自动调整数据库参数，提高调参效�
 
 **操作步骤**
 
-1.以root用户登录待安装openGauss的任意主机，并按规划创建存放安装包的目录。
+1. 以root用户登录待安装openGauss的任意主机，并按规划创建存放安装包的目录。
 
-   ```
-mkdir -p /opt/software/openGauss
-chmod 755 -R /opt/software
-   ```
+    ```shell
+    mkdir -p /opt/software/openGauss
+    chmod 755 -R /opt/software
+    ```
 
    > **说明** 
    >
    > - 不建议把安装包的存放目录规划到openGauss用户的家目录或其子目录下，可能导致权限问题。
    > - openGauss用户须具有/opt/software/openGauss目录的读写权限。
 
-2.将安装包“openGauss-x.x.x-openEULER-64bit.tar.gz”和配置文件“clusterconfig.xml”都上传至上一步所创建的目录中。
+2. 将安装包“openGauss-x.x.x-openEULER-64bit.tar.gz”和配置文件“clusterconfig.xml”都上传至上一步所创建的目录中。
 
-3.在安装包所在的目录下，解压安装包openGauss-x.x.x-openEULER-64bit.tar.gz。安装包解压后，在/opt/software/openGauss目录下自动生成script目录。在script目录下生成gs_preinstall等OM工具脚本。
+3. 在安装包所在的目录下，解压安装包openGauss-x.x.x-openEULER-64bit.tar.gz。安装包解压后，在/opt/software/openGauss目录下自动生成script目录。在script目录下生成gs_preinstall等OM工具脚本。
 
-```
-cd /opt/software/openGauss
-tar -zxvf openGauss-x.x.x-openEULER-64bit.tar.gz
-```
+    ```shell
+    cd /opt/software/openGauss
+    tar -zxvf openGauss-x.x.x-openEULER-64bit.tar.gz
+    ```
 
-4.进入工具脚本目录。
+4. 进入工具脚本目录。
 
-   ```
-cd /opt/software/openGauss/script
-   ```
+    ```shell
+    cd /opt/software/openGauss/script
+    ```
 
-5.如果是openEuler的操作系统，执行如下命令打开performance.sh文件，用#注释sysctl -w vm.min_free_kbytes=112640 &> /dev/null，键入“ESC”键进入指令模式，执行 **:wq**保存并退出修改。
+5. 如果是openEuler的操作系统，执行如下命令打开performance.sh文件，用#注释sysctl -w vm.min_free_kbytes=112640 &> /dev/null，键入“ESC”键进入指令模式，执行 **:wq**保存并退出修改。
 
-```
-vi /etc/profile.d/performance.sh
-```
+    ```shell
+    vi /etc/profile.d/performance.sh
+    ```
 
-6.为确保openssl版本正确，执行预安装前请加载安装包中lib库。执行命令如下，其中 *{packagePath}* 为用户安装包放置的路径，本示例中为/opt/software/openGauss。
+6. 为确保openssl版本正确，执行预安装前请加载安装包中lib库。执行命令如下，其中 *{packagePath}* 为用户安装包放置的路径，本示例中为/opt/software/openGauss。
 
-   ```
-export LD_LIBRARY_PATH={packagePath}/script/gspylib/clib:$LD_LIBRARY_PATH
-   ```
+    ```shell
+    export LD_LIBRARY_PATH={packagePath}/script/gspylib/clib:$LD_LIBRARY_PATH
+    ```
 
+7. 为确保成功安装，检查 hostname 与 /etc/hostname 是否一致。预安装过程中，会对hostname进行检查。
 
-7.为确保成功安装，检查 hostname 与 /etc/hostname 是否一致。预安装过程中，会对hostname进行检查。
+8. 使用gs_preinstall准备好安装环境。若为共用环境需加入--sep-env-file=ENVFILE参数分离环境变量，避免与其他用户相互影响，ENVFILE为用户自行指定的环境变量分离文件的路径。
 
-8.使用gs_preinstall准备好安装环境。若为共用环境需加入--sep-env-file=ENVFILE参数分离环境变量，避免与其他用户相互影响，ENVFILE为用户自行指定的环境变量分离文件的路径。
    执行如下命令，即采用交互模式执行前置，并在执行过程中自动创建root用户互信和openGauss用户互信：
 
-   ```
-./gs_preinstall -U omm -G dbgrp -X /opt/software/openGauss/clusterconfig.xml
-   ```
+    ```shell
+    ./gs_preinstall -U omm -G dbgrp -X /opt/software/openGauss/clusterconfig.xml
+    ```
 
    omm为数据库管理员用户（即运行openGauss的操作系统用户）,dbgrp为运行openGauss的操作系统用户的组名，/opt/software/ openGauss/clusterconfig.xml为openGauss的配置文件路径。执行过程中需要根据提示选择建立互信，并输入root或openGauss用户的密码。
 
@@ -247,38 +243,38 @@ export LD_LIBRARY_PATH={packagePath}/script/gspylib/clib:$LD_LIBRARY_PATH
 
 **操作步骤**
 
-1.（可选）检查安装包和openGauss配置文件在规划路径下是否已存在，如果没有，重新执行预安装，确保预安装成功，再执行以下步骤。
+1. （可选）检查安装包和openGauss配置文件在规划路径下是否已存在，如果没有，重新执行预安装，确保预安装成功，再执行以下步骤。
 
-2.登录到openGauss的主机，并切换到omm用户。
+2. 登录到openGauss的主机，并切换到omm用户。
 
-   ```
-su - omm
-   ```
+    ```shell
+    su - omm
+    ```
 
    > **说明** 
    >
    > - omm为gs_preinstall脚本中-U参数指定的用户。
    > - 以上述omm用户执行gs_install脚本。否则会报执行错误。
 
-3.使用gs_install安装openGauss。若为环境变量分离的模式安装的集群需要source环境变量分离文件ENVFILE。
+3. 使用gs_install安装openGauss。若为环境变量分离的模式安装的集群需要source环境变量分离文件ENVFILE。
 
-   ```
-gs_install -X /opt/software/openGauss/clusterconfig.xml
-   ```
+    ```shell
+    gs_install -X /opt/software/openGauss/clusterconfig.xml
+    ```
 
- /opt/software/openGauss/script/clusterconfig.xml为openGauss配置文件的路径。在执行过程中，用户需根据提示输入数据库的密码，密码具有一定的复杂度，为保证用户正常使用该数据库，请记住输入的数据库密码。
+    /opt/software/openGauss/script/clusterconfig.xml为openGauss配置文件的路径。在执行过程中，用户需根据提示输入数据库的密码，密码具有一定的复杂度，为保证用户正常使用该数据库，请记住输入的数据库密码。
 
- 密码复杂度要求：
+    密码复杂度要求：
 
-   - 长度至少8个字符。	
-   - 不能和用户名、当前密码（ALTER）、当前密码的倒序相同。
-   - 以下至少包含三类：大写字母（A - Z）、小写字母（a - z）、数字（0 - 9）、其他字符（仅限~!@#$%^&*()-_=+\|[{}];:,<.>/?）。
+    - 长度至少8个字符。	
+    - 不能和用户名、当前密码（ALTER）、当前密码的倒序相同。
+    - 以下至少包含三类：大写字母（A - Z）、小写字母（a - z）、数字（0 - 9）、其他字符（仅限~!@#$%^&*()-_=+\|[{}];:,<.>/?）。
 
-4.安装执行成功之后，需要手动删除主机root用户的互信，即删除openGauss数据库各节点上的互信文件。
+4. 安装执行成功之后，需要手动删除主机root用户的互信，即删除openGauss数据库各节点上的互信文件。
 
-   ```
-rm -rf ~/.ssh
-   ```
+    ```shell
+    rm -rf ~/.ssh
+    ```
 
 ### 卸载openGauss
 
@@ -290,19 +286,19 @@ openGauss提供了卸载脚本，帮助用户卸载openGauss。
 
 **操作步骤**
 
-1.以操作系统用户omm登录数据库主节点。
+1. 以操作系统用户omm登录数据库主节点。
 
-2.使用gs_uninstall卸载openGauss。
+2. 使用gs_uninstall卸载openGauss。
 
-   ```
-gs_uninstall --delete-data
-   ```
+    ```shell
+    gs_uninstall --delete-data
+    ```
 
    或者在openGauss中每个节点执行本地卸载。
 
-   ```
-gs_uninstall --delete-data -L
-   ```
+    ```shell
+    gs_uninstall --delete-data -L
+    ```
 
 #### **一键式环境清理**
 
@@ -315,11 +311,11 @@ gs_uninstall --delete-data -L
 
 **操作步骤**
 
-1.以root用户登录openGauss服务器。
+1. 以root用户登录openGauss服务器。
 
-2.查看互信是否建成功，可以互相执行**ssh 主机名**。输入exit退出。
+2. 查看互信是否建成功，可以互相执行**ssh 主机名**。输入exit退出。
 
-   ```
+   ```shell
    plat1:~ # ssh plat2 
    Last login: Tue Jan  5 10:28:18 2016 from plat1 
    plat2:~ # exit 
@@ -328,30 +324,27 @@ gs_uninstall --delete-data -L
    plat1:~ #
    ```
 
-3.进入script路径下。
+3. 进入script路径下。
 
-   ```
+   ```shell
    cd /opt/software/openGauss/script
    ```
 
-4.使用gs_postuninstall进行清理。若为环境变量分离的模式安装的集群需要source环境变量分离文件ENVFILE。
+4. 使用gs_postuninstall进行清理。若为环境变量分离的模式安装的集群需要source环境变量分离文件ENVFILE。
 
-   ```
-   ./gs_postuninstall -U omm -X /opt/software/openGauss/clusterconfig.xml --delete-user --delete-group
-   ```
+    ```shell
+    ./gs_postuninstall -U omm -X /opt/software/openGauss/clusterconfig.xml --delete-user --delete-group
+    ```
 
-  或者在openGauss中每个节点执行本地后置清理。
+    或者在openGauss中每个节点执行本地后置清理。
 
-   ```
-   ./gs_postuninstall -U omm -X /opt/software/openGauss/clusterconfig.xml --delete-user --delete-group -L
-   ```
+    ```shell
+    ./gs_postuninstall -U omm -X /opt/software/openGauss/clusterconfig.xml --delete-user --delete-group -L
+    ```
 
- omm为运行openGauss的操作系统用户名，/opt/software/openGauss/clusterconfig.xml为openGauss配置文件路径。
+    omm为运行openGauss的操作系统用户名，/opt/software/openGauss/clusterconfig.xml为openGauss配置文件路径。
 
-若为环境变量分离的模式安装的集群需删除之前source的环境变量分离的env参数unset MPPDB_ENV_SEPARATE_PATH
-
-5.删除各openGauss数据库节点root用户互信。 
-
+5. 删除各openGauss数据库节点root用户互信。
 
 ## 编译
 
@@ -571,7 +564,7 @@ https://opengauss.org/zh/
 
 ### 代码编译
 
-##### 使用build.sh编译代码
+#### 使用build.sh编译代码
 
 openGauss-server中的build.sh是编译过程中的重要脚本工具。该工具集成了软件安装编译和产品安装包编译功能，可快速进行代码编译和打包。。
 
@@ -615,20 +608,18 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 
 编译日志： **make_compile.log**
 
-
-
-##### 使用命令编译代码
+#### 使用命令编译代码
 
 使用命令编译代码提供make和cmake两种编译方式，选择其中一种方式即可。
 
 **make编译方式：**
 
-1.获取对应的开源三方库二进制文件：
+1. 获取对应的开源三方库二进制文件：
 
    从3.1.0分支和3.0.3 tag开始，对于不同的环境提供不同的开源三方库二进制文件。 目前社区提供Centos_x86_64, openEuler_aarch64, openEuler_x86_64三种平台的三方库二进制。
    可以从对应地址下载 [下载openGauss](#下载opengauss)
 
-2.配置环境变量
+2. 配置环境变量
 
    ```
    export CODE_BASE=________     # openGauss-server的路径
@@ -642,7 +633,7 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 
    ```
 
-3.选择一个版本进行配置。
+3. 选择一个版本进行配置。
 
    **debug**版本：
 
@@ -684,28 +675,27 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
    > - 在**ARMv8.1**及以上平台（如鲲鹏920），需要把 **-D__ARM_LSE** 添加至**CFLAGS**中。
    > - 如果**binarylibs**被移至**openGauss-server**中，或者在**openGauss-server**中创建了到**binarylibs**的软链接，则不需要指定 **--3rd** 参数。但请注意，这样做的话，该文件很容易被`git clean`命令删除。
 
-4.执行以下命令编译openGauss：
+4. 执行以下命令编译openGauss：
 
    ```
    [user@linux openGauss-server]$ make -sj
    [user@linux openGauss-server]$ make install -sj
    ```
 
-5.显示如下信息，表示编译和安装成功。
+5. 显示如下信息，表示编译和安装成功。
 
    ```
    openGauss installation complete.
    ```
 
 - 编译后的软件安装路径为: **$GAUSSHOME**。
-
 - 编译后的二进制文件存放路径为：**$GAUSSHOME/bin**。
 
 **cmake编译方式：**
 
-1.获取对应的开源三方库二进制文件
+1. 获取对应的开源三方库二进制文件
 
-2.配置环境变量
+2. 配置环境变量
 
 
    ```
@@ -733,7 +723,7 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
     export PATH=$GAUSSHOME/bin:$PATH
 
    ```
-3.选择一个版本进行配置
+3. 选择一个版本进行配置
 
    ```
    # cmake编译版本选择由第二步中 DEBUG_TYPE 环境变量配置
@@ -743,21 +733,20 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
    cmake .. -DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_READLINE=ON -DENABLE_MOT=ON -DENABLE_OPENEULER_MAJOR=ON
    ```
 
-> **注意**
-> 
-> - openEuler22.03和openEuler24.03版本需要加 **-DENABLE_OPENEULER_MAJOR=ON**
+    > **注意**
+    > 
+    > - openEuler22.03和openEuler24.03版本需要加 **-DENABLE_OPENEULER_MAJOR=ON**
 
-4.执行以下命令编译
+4. 执行以下命令编译
 
    ```
    [user@linux cmake_build]$ make -sj && make install -sj
    ```
 
-5.编译完成
+5. 编译完成
 
-- 编译后的软件安装路径为: **$GAUSSHOME**。
-
-- 编译后的二进制文件存放路径为：**$GAUSSHOME/bin**。
+    - 编译后的软件安装路径为: **$GAUSSHOME**。
+    - 编译后的二进制文件存放路径为：**$GAUSSHOME/bin**。
 
 ### 编译安装包 
 
@@ -777,11 +766,8 @@ sh build.sh -m debug -3rd /sdc/binarylibs -pkg           # 生成debug版本的o
 ```
 
 - 生成的安装包存放目录：**./package**。
-
 - 编译日志： **make_compile.log**
-
 - 安装包打包日志： **./package/make_package.log**
-
 
 ## 快速入门
 
@@ -813,4 +799,4 @@ sh build.sh -m debug -3rd /sdc/binarylibs -pkg           # 生成debug版本的o
 
 ## 许可证
 
-[MulanPSL-2.0](http://license.coscl.org.cn/MulanPSL2/)
+[MulanPSL-2.0](http://license.coscl.org.cn/MulanPSL2)
