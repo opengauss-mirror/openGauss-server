@@ -1413,6 +1413,7 @@ void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative, bool checkD
      * the trouble to optimize for the case where it isn't.
      */
     i = 0;
+    bool immediateDelete = RelationImmediateDelete(resultRelation);
     foreach (l, indexoidlist) {
         Oid indexOid = lfirst_oid(l);
         Relation indexDesc;
@@ -1439,7 +1440,8 @@ void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative, bool checkD
             resultRelInfo->ri_ContainGPI = true;
         }
 
-        if (unlikely(!resultRelInfo->ri_hasDiskannIndex && indexDesc->rd_rel->relam == DISKANN_AM_OID)) {
+        if (unlikely(immediateDelete && !resultRelInfo->ri_hasDiskannIndex &&
+                     indexDesc->rd_rel->relam == DISKANN_AM_OID)) {
             resultRelInfo->ri_hasDiskannIndex = true;
         }
 

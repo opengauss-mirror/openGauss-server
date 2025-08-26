@@ -159,7 +159,7 @@ List *HeapamTopsExecUpdateIndexTuples(TupleTableSlot *slot, TupleTableSlot *olds
     int2 bucketid, Bitmapset *modifiedIdxAttrs)
 {
     if (unlikely(exec_index_tuples_state.estate->es_result_relation_info->ri_hasDiskannIndex)) {
-        DeleteDiskAnnIndexTuples(slot, tupleid, exec_index_tuples_state.estate, exec_index_tuples_state.p);
+        DeleteDiskAnnIndexTuples(oldslot, tupleid, exec_index_tuples_state.estate, exec_index_tuples_state.p);
     }
     List *recheckIndexes = NULL;
     /*
@@ -262,7 +262,7 @@ TM_Result HeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPoin
     bool allow_inplace_update)
 {
     TM_Result result = heap_update(relation, parentRelation, otid, (HeapTuple)newtup,
-        cid, crosscheck, wait, tmfd, lockmode, allow_update_self);
+        cid, crosscheck, wait, tmfd, lockmode, allow_update_self, oldslot);
 
     /* make update_indexes optional */
     if(update_indexes) {

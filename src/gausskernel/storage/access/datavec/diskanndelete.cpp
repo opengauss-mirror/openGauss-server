@@ -73,24 +73,86 @@ static bool CheckIndexBuilding(Relation index)
     return building;
 }
 
-Buffer DiskannGetSameIndexTuple(Relation rel, DiskAnnScanOpaque so, IndexTuple indexTuple)
+Buffer DiskannGetSameIndexTuple(Relation rel, DiskAnnScanOpaque so, IndexTuple indexTuple, DiskAnnMetaPage metapage)
 {
     if (so->curpos > 0) {
         --so->curpos;
     }
+    BlockNumber target = InvalidBlockNumber;
     for (; so->curpos < so->candidates.size(); ++so->curpos) {
         BlockNumber blkno = so->candidates[so->curpos].id;
+        if (blkno == metapage->frozenBlkno[0]) {
+            continue;
+        }
         Buffer buf = ReadBuffer(rel, blkno);
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-        Page page = BufferGetPage(buf);
+        GenericXLogState *state = GenericXLogStart(rel);
+        Page page = GenericXLogRegisterBuffer(state, buf, 0);
         IndexTuple currIndexTuple = DiskAnnPageGetIndexTuple(page);
+        DiskAnnNodePage ntup = DiskAnnPageGetNode(currIndexTuple);
         if (ItemPointerEquals(&(indexTuple->t_tid), &(currIndexTuple->t_tid)) &&
             isTupleEqual(indexTuple, currIndexTuple)) {
-            return buf;
+            target = blkno;
+
+            GenericXLogUnregister(state, buf);
+            GenericXLogAbort(state);
+            UnlockReleaseBuffer(buf);
+            continue;
+        }
+
+        uint8 count = 0;
+        for (uint8 curr = 0; curr < ntup->heaptidsLength; ++curr) {
+            if (ItemPointerEquals(&indexTuple->t_tid, &ntup->heaptids[curr])) {
+                continue;
+            }
+            ntup->heaptids[count] = ntup->heaptids[curr];
+            ++count;
+        }
+        if (ntup->heaptidsLength != count) {
+            ntup->heaptidsLength = count;
+            GenericXLogFinish(state);
+        } else {
+            GenericXLogUnregister(state, buf);
+            GenericXLogAbort(state);
         }
         UnlockReleaseBuffer(buf);
     }
+
+    if (target != InvalidBlockNumber) {
+        Buffer buf = ReadBuffer(rel, target);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        return buf;
+    }
     return InvalidBuffer;
+}
+
+void EraseEdgeFromGraph(Relation rel, BlockNumber node, BlockNumber target, DiskAnnMetaPage metaPage)
+{
+    Buffer buf;
+    Page page;
+    DiskAnnNodePage ntup;
+    DiskAnnEdgePage etup;
+
+    buf = ReadBuffer(rel, node);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+
+    GenericXLogState *state = GenericXLogStart(rel);
+    page = GenericXLogRegisterBuffer(state, buf, 0);
+    ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
+    etup = (DiskAnnEdgePage)((uint8_t*)ntup + metaPage->nodeSize);
+
+    uint16 count = 0;
+    for (uint16 curr = 0; curr < etup->count; ++curr) {
+        if (etup->nexts[curr] == target) {
+            continue;
+        }
+        etup->nexts[count] = etup->nexts[curr];
+        ++count;
+    }
+    etup->count = count;
+
+    GenericXLogFinish(state);
+    UnlockReleaseBuffer(buf);
 }
 
 void DiskAnnMarkDead(Relation rel, Datum* values, ItemPointer tid)
@@ -119,16 +181,33 @@ void DiskAnnMarkDead(Relation rel, Datum* values, ItemPointer tid)
     IndexTuple indexTuple = index_form_tuple(RelationGetDescr(rel), value, isnull);
     indexTuple->t_tid = *tid;
 
-    GenericXLogState *state;
-    Buffer buf = DiskannGetSameIndexTuple(rel, so, indexTuple);
-    if (buf != InvalidBuffer) {
-        state = GenericXLogStart(rel);
-        Page page = GenericXLogRegisterBuffer(state, buf, 0);
-        ItemId itemid = PageGetItemId(page, FirstOffsetNumber);
-        ItemIdMarkDead(itemid);
-        GenericXLogFinish(state);
-        UnlockReleaseBuffer(buf);
+    DiskAnnMetaPageData metapage;
+    DiskANNGetMetaPageInfo(rel, &metapage);
+
+    Buffer buf = DiskannGetSameIndexTuple(rel, so, indexTuple, &metapage);
+    if (buf == InvalidBuffer) {
+        diskannendscan_internal(scanDesc);
+        return;
     }
+
+    DiskAnnNodePage ntup;
+    DiskAnnEdgePage etup;
+
+    GenericXLogState *state = GenericXLogStart(rel);
+    Page page = GenericXLogRegisterBuffer(state, buf, 0);
+    ntup = DiskAnnPageGetNode(DiskAnnPageGetIndexTuple(page));
+    etup = (DiskAnnEdgePage)((uint8_t*)ntup + metapage.nodeSize);
+
+    BlockNumber deletedBlk = BufferGetBlockNumber(buf);
+    for (uint16 curr = 0; curr < etup->count; ++curr) {
+        EraseEdgeFromGraph(rel, etup->nexts[curr], deletedBlk, &metapage);
+    }
+    etup->count = 0;
+
+    ItemId itemid = PageGetItemId(page, FirstOffsetNumber);
+    ItemIdMarkDead(itemid);
+    GenericXLogFinish(state);
+    UnlockReleaseBuffer(buf);
 
     diskannendscan_internal(scanDesc);
 }

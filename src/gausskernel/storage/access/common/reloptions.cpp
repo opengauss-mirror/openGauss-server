@@ -140,6 +140,7 @@ static relopt_bool boolRelOpts[] = {
     {{"allow_page_locks", "allow_page_locks", RELOPT_KIND_D_INDEX}, false},
     {{"optimize_for_sequential_key", "optimize_for_sequential_key", RELOPT_KIND_D_INDEX}, false},
     {{"xml_compression", "xml_compression", RELOPT_KIND_D_INDEX}, false},
+    {{"immediate_delete", "Whether to do immediate delete for vector indices", RELOPT_KIND_HEAP}, false},
     /* list terminator */
     {{NULL}}};
 
@@ -2112,6 +2113,7 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 #endif
         { "deduplication", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, deduplication)},
         { "relrewrite", RELOPT_TYPE_INT, offsetof(StdRdOptions, relrewrite)},
+        { "immediate_delete", RELOPT_TYPE_STRING, offsetof(StdRdOptions, immediate_delete)},
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
