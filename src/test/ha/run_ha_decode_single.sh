@@ -41,7 +41,7 @@ done
 
 #stop the database system
 printf "stop the database system\n"
-python $scripts_dir/pgxc_multi_single.py -o > ./results/stop_decode_single.log 2>&1
+./run_python.sh $scripts_dir/pgxc_multi_single.py -o > ./results/stop_decode_single.log 2>&1
 
 total_endtime=`date +"%Y-%m-%d %H:%M:%S"`
 total_endvalue=`date -d  "$total_endtime" +%s`

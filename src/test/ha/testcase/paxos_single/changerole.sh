@@ -63,7 +63,7 @@ function test_1()
   gsql -d $db -p $primary_port -c "DROP TABLE if exists cstore_copy_t1; create table cstore_copy_t1(c1 int2, c2 int4, c3 int8, c4 char(10), c5 varchar(12),c6 numeric(10,2));"
 
   #copy data(25M) to primary
-  cat $scripts_dir'/data/cstore_copy_t1.data' | python tools.py cstore_copy_t1 '|' > $scripts_dir'/data/cstore_copy_t1.data.sql'
+  cat $scripts_dir'/data/cstore_copy_t1.data' | ./run_python.sh tools.py cstore_copy_t1 '|' > $scripts_dir'/data/cstore_copy_t1.data.sql'
   gsql -d $db -p $primary_port < $scripts_dir'/data/cstore_copy_t1.data.sql'
   echo "copy success"
 

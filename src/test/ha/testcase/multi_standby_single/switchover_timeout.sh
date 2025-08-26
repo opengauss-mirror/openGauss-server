@@ -12,7 +12,7 @@ function test_1()
   echo "drop table success"
 
   #prepare insert sql
-  cat $scripts_dir'/data/data5_head_100' | python tools.py mpp_test1 '|' > $scripts_dir'/data/data5_head_100_sql'
+  cat $scripts_dir'/data/data5_head_100' | ./run_python.sh tools.py mpp_test1 '|' > $scripts_dir'/data/data5_head_100_sql'
   gsql -d $db -p $dn1_primary_port < $scripts_dir'/data/data5_head_100_sql' &> /dev/null
 
   #test the insert results

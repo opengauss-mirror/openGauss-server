@@ -43,7 +43,7 @@ function set_run_mode_case() {
     exit 1
   fi
   #copy data(25M) to primary
-  cat $scripts_dir'/data/cstore_copy_t1.data' | python tools.py cstore_copy_t1 '|' > $scripts_dir'/data/cstore_copy_t1.data.sql'
+  cat $scripts_dir'/data/cstore_copy_t1.data' | ./run_python.sh tools.py cstore_copy_t1 '|' > $scripts_dir'/data/cstore_copy_t1.data.sql'
   gsql -d $db -p $primary_port < $scripts_dir'/data/cstore_copy_t1.data.sql'
   if [ ! $? -eq 0 ]; then
     echo "${failed_keyword}, insert data failed!"

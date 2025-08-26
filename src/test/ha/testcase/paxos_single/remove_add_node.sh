@@ -51,7 +51,7 @@ function remove_and_add_member() {
   new_node_port=`expr $standby4_port + 3`
   new_dcf_port=`expr $dcf_port + 5`
   add_member ${node_id} 127.0.0.1 ${new_dcf_port}
-  python ./pgxc_paxos_single.py -c 1 -d 5 -n ${node_id} -a -p ${dcf_port} -q ${new_dcf_port}
+  ./run_python.sh ./pgxc_paxos_single.py -c 1 -d 5 -n ${node_id} -a -p ${dcf_port} -q ${new_dcf_port}
   new_data_dir=${data_dir}"/datanode5_standby"
   gs_ctl start -D ${new_data_dir} -M standby
   sleep 5s
@@ -75,7 +75,7 @@ function remove_and_add_member() {
   fi
   gsql -d $db -p $primary_port -c "DROP TABLE if exists cstore_copy_t1; create table cstore_copy_t1(c1 int2, c2 int4, c3 int8, c4 char(10), c5 varchar(12),c6 numeric(10,2));"
   #copy data(25M) to primary
-  cat $scripts_dir'/data/cstore_copy_t1.data' | python tools.py cstore_copy_t1 '|' > $scripts_dir'/data/cstore_copy_t1.data.sql'
+  cat $scripts_dir'/data/cstore_copy_t1.data' | ./run_python.sh tools.py cstore_copy_t1 '|' > $scripts_dir'/data/cstore_copy_t1.data.sql'
   gsql -d $db -p $primary_port < $scripts_dir'/data/cstore_copy_t1.data.sql'
   echo "copy success"
   sleep 5s

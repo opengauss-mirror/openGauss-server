@@ -23,7 +23,7 @@ class Pterodb():
         self.data_node_num = data_node_num
         self.data_dir = data_dir
         self.dname_prefix = "datanode"
-        print self.data_dir
+        print(self.data_dir)
         self.ha_port_arr = [0 for i in range(data_node_num+1)]
         self.service_port_arr = [0 for i in range(data_node_num+1)]
         self.heartbeat_port_arr = [0 for i in range(data_node_num+1)]
@@ -34,7 +34,7 @@ class Pterodb():
         else:
             shutil.rmtree(self.data_dir)
             os.mkdir(self.data_dir)
-            print "rm dir ok"
+            print("rm dir ok")
 
         #generate port array
         self.__generate_port()
@@ -43,7 +43,7 @@ class Pterodb():
             if(i == 1):
                  #primary
                 datanode_cmd_init = install_path + "/bin/gs_initdb -D " + self.data_dir + "/" + self.dname_prefix + str(i) + " --nodename=" + self.dname_prefix + str(i)  + " -w " + g_passwd + " -g " + self.data_dir + "/shared_disk"
-                print datanode_cmd_init
+                print(datanode_cmd_init)
                 os.system(datanode_cmd_init)
             
                 #primary
@@ -58,7 +58,7 @@ class Pterodb():
             else:
                 #standby
                 datanode_cmd_standby = install_path + "/bin/gs_initdb -D " + self.data_dir + "/" + self.dname_prefix + str(i-1) + "_standby" + " --nodename=" + self.dname_prefix + str(1)  + " -w " + g_passwd
-                print datanode_cmd_standby
+                print(datanode_cmd_standby)
                 os.system(datanode_cmd_standby)
                  #standby
                 conf_file_standby = self.data_dir + "/" + self.dname_prefix + str(i-1) + "_standby" + "/postgresql.conf"
@@ -101,7 +101,7 @@ class Pterodb():
                 #repl
                 string = "replconninfo%d = 'localhost=%s localport=%d localheartbeatport=%d localservice=%d remotehost=%s remoteport=%d remoteheartbeatport=%d remoteservice=%d'\n" % \
                 (j, g_local_ip, self.ha_port_arr[n-1], self.heartbeat_port_arr[n-1], self.service_port_arr[n-1], g_local_ip, self.ha_port_arr[i-1], self.heartbeat_port_arr[i-1], self.service_port_arr[i-1])
-                print string
+                print(string)
                 file_handler.write(string)
                 j = j + 1
 
@@ -124,7 +124,7 @@ class Pterodb():
                 #repl
                 string = "cross_cluster_replconninfo%d = 'localhost=%s localport=%d localservice=%d remotehost=%s remoteport=%d remoteservice=%d'\n" % \
                 (j, g_local_ip, self.ha_port_arr[n-1], self.service_port_arr[n-1], g_local_ip, self.ha_port_arr[i-1], self.service_port_arr[i-1])
-                print string
+                print(string)
                 file_handler.write(string)
                 j = j + 1
 
@@ -205,7 +205,7 @@ class Pterodb():
         port = g_base_port
         for i in range(0, self.coordinator_num):
             cmd = install_path + "/bin/gsql -p " + str(port + 3 * i) + " postgres < " + create_regress_group
-            print cmd
+            print(cmd)
             os.system(cmd)
         #return create_regress_group
 
@@ -231,7 +231,7 @@ class Pterodb():
         for i in range(1,self.coordinator_num+1):
             port = g_base_port + 3* (i - 1)
             cmd = install_path + "/bin/gsql -p " + str(port) + " postgres < " + create_nodes_sql
-            print cmd
+            print(cmd)
             os.system(cmd)
 
     def __create_default_db(self):
@@ -245,11 +245,11 @@ class Pterodb():
         for i in range(1,self.data_node_num+2):
             if(i == 1):
                 rm_cmd = cmd + self.data_dir + "/" + self.dname_prefix + str(i) + "/postmaster.pid"
-                print rm_cmd
+                print(rm_cmd)
                 os.system(rm_cmd)
             else:
                 rm_cmd = cmd + self.data_dir + "/" + self.dname_prefix + str(i-1) + "_standby" +"/postmaster.pid"
-                print rm_cmd
+                print(rm_cmd)
                 os.system(rm_cmd)
 
 
@@ -283,12 +283,12 @@ class Pterodb():
             datanode_cmd = g_valgrind + install_path + "/bin/gaussdb --single_node" + " -M pending" + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1 &"
             time.sleep(2)
                         #datanode_cmd = g_valgrind + install_path + "bin/gaussdb --datanode" + " -M primary" + " -p " +str(port) + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + #" &"
-            print datanode_cmd
+            print(datanode_cmd)
             os.system(datanode_cmd)
             time.sleep(5)
             
             datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl " + "notify -M primary" + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1 &"
-            print datanode_cmd
+            print(datanode_cmd)
             os.system(datanode_cmd)
             break;
 
@@ -297,12 +297,12 @@ class Pterodb():
         #start data_node_standby1,2,3...7
         for i in range(1,self.data_node_num+1):
             datanode_cmd = g_valgrind + install_path + "/bin/gaussdb --single_node" + " -M pending "+ " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_standby"+ "/logdn" + str(i) + ".log 2>&1 &"
-            print datanode_cmd
+            print(datanode_cmd)
             os.system(datanode_cmd)
             time.sleep(5)
 
             datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl" + " notify -M standby "+ " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_standby"+ "/logdn" + str(i) + ".log 2>&1 &"
-            print datanode_cmd
+            print(datanode_cmd)
             os.system(datanode_cmd)
             time.sleep(5)
 
@@ -310,7 +310,7 @@ class Pterodb():
                 datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl" + " build "+ "-D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + " -Z single_node " + " > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_standby"+ "/logdn" + str(i) + ".log 2>&1 &"
             else:
                 datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl" + " build -b cross_cluster_full "+ "-D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + " -Z single_node " + " > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_standby"+ "/logdn" + str(i) + ".log 2>&1 &"
-            print datanode_cmd
+            print(datanode_cmd)
             os.system(datanode_cmd)
             time.sleep(5)
 
@@ -320,68 +320,68 @@ class Pterodb():
         #stop data node
         for i in range(1,self.data_node_num+1):
             datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + " -Z single_node"
-            print datanode_cmd
+            print(datanode_cmd)
             os.system(datanode_cmd)
             break
         #stop data node standby1,2,3...7
         for i in range(1,self.data_node_num+1):
             datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + "_standby" + " -Z single_node"
-            print datanode_cmd
+            print(datanode_cmd)
             os.system(datanode_cmd)
 
     def run(self, run_type):
         #self.kill_process()
         if(run_type == 0):
             self.init_env()
-            #print "init_env ok"
+            #print("init_env ok")
             self.__save_nodes_info()
-            #print "save_nodes_info ok"
+            #print("save_nodes_info ok")
             self.__read_nodes_info()
-            #print "read_nodes_info ok"
+            #print("read_nodes_info ok")
             self.__start_server()
-            #print "start_server ok"
+            #print("start_server ok")
             #self.__create_node()
-            #print "create_node ok"
+            #print("create_node ok")
             #self.__create_regress_group()
-            #print "create_regress_group ok"
+            #print("create_regress_group ok")
             self.__create_default_db()
-            #print "create_default_db ok"
-            print "start ok"
+            #print("create_default_db ok")
+            print("start ok")
         elif(run_type == 1):
             self.__read_nodes_info()
             self.__start_server()
-            print "start ok"
+            print("start ok")
         elif(run_type == 2):
             self.__read_nodes_info()
             self.__stop_server()
-            print "stop ok"
+            print("stop ok")
         elif (run_type == 3):
             self.__read_nodes_info()
             self.__switch_trace_cmpr()
-            print "compress trace changed"
+            print("compress trace changed")
         elif (run_type == 4):
             self.__read_nodes_info()
             #filepath = self.__create_regress_group()
-            print filepath
+            print(filepath)
 
 def usage():
-    print "------------------------------------------------------"
-    print "python pgxc.py\n"
-    print "    -c coor_num -d datanode_num, set and start up cn/dn"
-    print "    -t trace compression log"
-    print "    -s means start"
-    print "    -o means stop"
-    print "    -g means memcheck"
-    print "    -D data directory"
-    print "    -r create regression group sql"
-    print "------------------------------------------------------"
+    print("------------------------------------------------------")
+    print("python pgxc.py\n")
+    print("    -c coor_num -d datanode_num, set and start up cn/dn")
+    print("    -t trace compression log")
+    print("    -s means start")
+    print("    -o means stop")
+    print("    -g means memcheck")
+    print("    -D data directory")
+    print("    -r create regression group sql")
+    print("------------------------------------------------------")
 
 def main():
     try:
         opts, args = getopt.getopt(sys.argv[1:], "hrD:c:d:t:sovg", ["help", "data_dir=", "regress="])
-    except getopt.GetoptError, err:
-        # print help information and exit:
-        print str(err) # will print something like "option -a not recognized"
+    except getopt.GetoptError as err:
+        # print(help information and exit:)
+        print(str(err)) # will print something like "option -a not recognized"
         # usage()
         sys.exit(2)
 
@@ -421,7 +421,7 @@ def main():
             else:
                 g_trace_compress = False
             run_type = 3
-            print g_trace_compress
+            print(g_trace_compress)
         elif o in ("-r", "--regress"):
             run_type = 4
         else:

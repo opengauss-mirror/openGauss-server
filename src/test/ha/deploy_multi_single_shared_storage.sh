@@ -5,14 +5,14 @@ source ./standby_env.sh
 
 node_num=3
 #stop the database
-python $scripts_dir/pgxc_multi_single_shared_storage.py -o
+./run_python.sh $scripts_dir/pgxc_multi_single_shared_storage.py -o
 
 sleep 2
 #init the database
-python $scripts_dir/pgxc_multi_single_shared_storage.py -c 1 -d $node_num
+./run_python.sh $scripts_dir/pgxc_multi_single_shared_storage.py -c 1 -d $node_num
 
 #stop the database
-python $scripts_dir/pgxc_multi_single_shared_storage.py -o
+./run_python.sh $scripts_dir/pgxc_multi_single_shared_storage.py -o
 
 #set the primary postgresql.conf file
 gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = on"
@@ -56,4 +56,4 @@ done
 
 sleep 2
 #start the database
-python $scripts_dir/pgxc_multi_single_shared_storage.py -s
+./run_python.sh $scripts_dir/pgxc_multi_single_shared_storage.py -s

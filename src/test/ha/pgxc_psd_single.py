@@ -23,7 +23,7 @@ class Pterodb():
 		self.data_node_num = data_node_num
 		self.data_dir = data_dir
 		self.dname_prefix = "datanode"
-		print self.data_dir
+		print(self.data_dir)
 
 	def init_env(self):
 		if(os.path.exists(self.data_dir) == False):
@@ -31,22 +31,22 @@ class Pterodb():
 		else:
 			shutil.rmtree(self.data_dir)
 			os.mkdir(self.data_dir)
-			print "rm dir ok"
+			print("rm dir ok")
 
 		for i in range(1,self.data_node_num+1):
  			#primary       
 			datanode_cmd_init = install_path + "/bin/gs_initdb -D " + self.data_dir + "/" + self.dname_prefix + str(i) + " --nodename=" + self.dname_prefix + str(i)  + " -w " + g_passwd
-			print datanode_cmd_init
+			print(datanode_cmd_init)
 			os.system(datanode_cmd_init)
 			#standby
 			#datanode_cmd_standby = "cp -r " + self.data_dir + "/" + self.dname_prefix + str(i) + " " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby"
 			datanode_cmd_standby = install_path + "/bin/gs_initdb -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + " --nodename=" + self.dname_prefix + str(i)  + " -w " + g_passwd
-			print datanode_cmd_standby
+			print(datanode_cmd_standby)
 			os.system(datanode_cmd_standby)
 			#xlogreceiver
 			#datanode_cmd_dummystandby = "cp -r " + self.data_dir + "/" + self.dname_prefix + str(i) + " " + self.data_dir + "/" + self.dname_prefix + str(i) + "_dummystandby"
 			datanode_cmd_dummystandby = install_path + "/bin/gs_initdb -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_dummystandby" + " --nodename=" + self.dname_prefix + str(i)  + "_dummystandby" + " -w " + g_passwd
-			print datanode_cmd_dummystandby
+			print(datanode_cmd_dummystandby)
 			os.system(datanode_cmd_dummystandby)
 			
 			
@@ -72,16 +72,16 @@ class Pterodb():
             # datanode standby
 		#for i in range(1,self.data_node_num+1):
 			#datanode_cmd_init = "cp -r " + self.data_dir + "/" + self.dname_prefix + str(i) + " " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby"
-			#print datanode_cmd_init
+			#print(datanode_cmd_init)
 			#os.system(datanode_cmd_init)
 			#conf_file = self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + "/postgresql.conf"
 			#self.__modify_conf_standby(conf_file,i,0)
 
-        def __modify_remote_read_mode(self, conf_file):
-                file_handler = open(conf_file,"a")
-                string = "remote_read_mode = 'off'" + "\n"
-                file_handler.write(string)
-                file_handler.close()
+	def __modify_remote_read_mode(self, conf_file):
+			file_handler = open(conf_file,"a")
+			string = "remote_read_mode = 'off'" + "\n"
+			file_handler.write(string)
+			file_handler.close()
 
 	def __modify_conf_standby(self, conf_file, n, flag):
 		if(flag == 1):
@@ -177,7 +177,7 @@ class Pterodb():
 		port = g_base_port
 		for i in range(0, self.coordinator_num):
 			cmd = install_path + "/bin/gsql -p " + str(port + 3 * i) + " postgres < " + create_regress_group
-			print cmd
+			print(cmd)
 			os.system(cmd)
 		#return create_regress_group
 
@@ -198,7 +198,7 @@ class Pterodb():
 		for i in range(1,self.coordinator_num+1):
 			port = g_base_port + 3 * (i - 1)
 			cmd = install_path + "/bin/gsql -p " + str(port) + " postgres < " + create_nodes_sql
-			print cmd
+			print(cmd)
 			os.system(cmd)
 
 	def __create_default_db(self):
@@ -211,7 +211,7 @@ class Pterodb():
 		# dn
 		for i in range(1,self.data_node_num+1):
 			rm_cmd = cmd + self.data_dir + "/" + self.dname_prefix + str(i) + "/postmaster.pid"
-			print rm_cmd
+			print(rm_cmd)
 			os.system(rm_cmd)
 
 	#save coor_num and datanode num
@@ -241,37 +241,37 @@ class Pterodb():
 		#start data_node
 		for i in range(1,self.data_node_num+1):
 			datanode_cmd = g_valgrind + install_path + "/bin/gaussdb --single_node" + " -M pending" + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1 &"
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 			time.sleep(10)
 			
 			datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl " + "notify -M primary" + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1 &"
 			
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 		time.sleep(5)
 		#start data_node_standby
 		for i in range(1,self.data_node_num+1):
 			datanode_cmd = g_valgrind + install_path + "/bin/gaussdb --single_node" + " -M pending " + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_standby"+ "/logdn" + str(i) + ".log 2>&1 &"
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 			time.sleep(10)
 
 			datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl" + " notify -M standby "+ " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_standby"+ "/logdn" + str(i) + ".log 2>&1 &"
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 			
 			datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl" + " build "+ " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_standby" + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_standby"+ "/logdn" + str(i) + ".log 2>&1 &"
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 			time.sleep(3)
 
 			datanode_cmd = g_valgrind + install_path + "/bin/gaussdb --single_node" + " -M standby -R " + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_dummystandby" + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_dummystandby"+ "/logdn" + str(i) + ".log 2>&1 &"
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 
 			datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl" + " build " + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "_dummystandby" + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) +"_dummystandby"+ "/logdn" + str(i) + ".log 2>&1 &"
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 		time.sleep(1)
 
@@ -279,16 +279,16 @@ class Pterodb():
 		#stop data node
 		for i in range(1,self.data_node_num+1):
 			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + " -Z single_node"
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 		#stop data node standby
 		for i in range(1,self.data_node_num+1):
 			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + "_standby" + " -Z single_node"
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 			
 			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + "_dummystandby" + " -Z single_node"
-			print datanode_cmd
+			print(datanode_cmd)
 			os.system(datanode_cmd)
 
 	def run(self, run_type):
@@ -301,42 +301,42 @@ class Pterodb():
 			#self.__create_node()
 			#self.__create_regress_group()
 			self.__create_default_db()
-			print "start ok"
+			print("start ok")
 		elif(run_type == 1):
 			self.__read_nodes_info()
 			self.__start_server()
-			print "start ok"
+			print("start ok")
 		elif(run_type == 2):
 			self.__read_nodes_info()
 			self.__stop_server()
-			print "stop ok"
+			print("stop ok")
 		elif (run_type == 3):
 			self.__read_nodes_info()
 			self.__switch_trace_cmpr()
-			print "compress trace changed"
+			print("compress trace changed")
 		elif (run_type == 4):
 			self.__read_nodes_info()
 			#filepath = self.__create_regress_group()
-			print filepath
+			print(filepath)
 
 def usage():
-	print "------------------------------------------------------"
-	print "python pgxc.py\n"
-	print "	-c coor_num -d datanode_num, set and start up cn/dn"
-	print "	-t trace compression log"
-	print "	-s means start"
-	print "	-o means stop"
-	print "	-g means memcheck"
-	print "	-D data directory"
-	print "	-r create regression group sql"
-	print "------------------------------------------------------"
+	print("------------------------------------------------------")
+	print("python pgxc.py\n")
+	print("	-c coor_num -d datanode_num, set and start up cn/dn")
+	print("	-t trace compression log")
+	print("	-s means start")
+	print("	-o means stop")
+	print("	-g means memcheck")
+	print("	-D data directory")
+	print("	-r create regression group sql")
+	print("------------------------------------------------------")
 
 def main():
 	try:
 		opts, args = getopt.getopt(sys.argv[1:], "hrD:c:d:t:sovg", ["help", "data_dir=", "regress="])
-	except getopt.GetoptError, err:
-		# print help information and exit:
-		print str(err) # will print something like "option -a not recognized"
+	except getopt.GetoptError as err:
+		# print(help information and exit:)
+		print(str(err)) # will print something like "option -a not recognized"
 		# usage()
 		sys.exit(2)
 
@@ -376,7 +376,7 @@ def main():
 			else:
 				g_trace_compress = False
 			run_type = 3
-			print g_trace_compress
+			print(g_trace_compress)
 		elif o in ("-r", "--regress"):
 			run_type = 4
 		else:

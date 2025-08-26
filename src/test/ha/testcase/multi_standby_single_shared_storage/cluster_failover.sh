@@ -25,7 +25,7 @@ function test_1()
 
   start_primary_cluster
   #copy data(25M) to primary
-  cat $scripts_dir'/data/cstore_copy_t1.data' | python tools.py cstore_copy_t1 '|' > $scripts_dir'/data/cstore_copy_t1.data.sql'
+  cat $scripts_dir'/data/cstore_copy_t1.data' | ./run_python.sh tools.py cstore_copy_t1 '|' > $scripts_dir'/data/cstore_copy_t1.data.sql'
   gsql -d $db -p $dn1_primary_port < $scripts_dir'/data/cstore_copy_t1.data.sql' &> /dev/null
   sleep 20
   kill_primary_cluster
