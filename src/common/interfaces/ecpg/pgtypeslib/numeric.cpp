@@ -930,6 +930,13 @@ static int select_div_scale(numeric* var1, numeric* var2, int* rscale)
     return res_dscale;
 }
 
+static void Initial_Numeric_Local(numeric *var1)
+{
+    int idx;
+    int total = sizeof(var1->local)/sizeof(var1->local[0]);
+    for (idx = 0; idx < total; idx++) { var1->local[idx] = 0; }
+}
+
 int PGTYPESnumeric_div(numeric* var1, numeric* var2, numeric* result)
 {
     NumericDigit* res_digits = NULL;
@@ -986,9 +993,13 @@ int PGTYPESnumeric_div(numeric* var1, numeric* var2, numeric* result)
     /*
      * Initialize local variables
      */
+    Initial_Numeric_Local(&dividend);
     init_numeric(&dividend);
     for (i = 1; i < 10; i++) {
+        Initial_Numeric_Local(&divisor[i]);
         init_numeric(&divisor[i]);
+
+        divisor[i].buf = NULL;
     }
 
     /*
@@ -1383,11 +1394,59 @@ int PGTYPESnumeric_to_long(numeric* nv, long* lp)
     return 0;
 }
 
+static bool get_decimal_from_overflow_numeric(numeric* src, decimal* dst)
+{
+    bool result = false;
+    int radix = 10;
+
+    if (src->sign == NUMERIC_NAN) {
+        /* this should not happen actually */
+        src->ndigits = DECSIZE;
+    } else {
+        /* we must round up before convert the value */
+        int total = src->dscale + src->weight + 1;
+        if (total >= 0) {
+            int size = DECSIZE;
+            int carry = (src->digits[size] > 4) ? 1 : 0;
+
+            src->ndigits = DECSIZE;
+
+            while (carry) {
+                carry += src->digits[--size];
+                src->digits[size] = carry % radix;
+                carry /= radix;
+            }
+
+            if (size < 0) {
+                src->digits--;
+                src->weight++;
+            }
+        } else {
+            src->ndigits = Max(0, Min(total, DECSIZE));
+        }
+    }
+
+    if (src->ndigits == DECSIZE) {
+        dst->weight = src->weight;
+        dst->rscale = src->rscale;
+        dst->dscale = src->dscale;
+        dst->sign = src->sign;
+        dst->ndigits = src->ndigits;
+        for (int i = 0; i < src->ndigits; i++)
+            dst->digits[i] = src->digits[i];
+        result = true;
+    }
+
+    return result;
+}
+
 int PGTYPESnumeric_to_decimal(numeric* src, decimal* dst)
 {
     int i;
 
     if (src->ndigits > DECSIZE) {
+        get_decimal_from_overflow_numeric(src, dst);
+
         errno = PGTYPES_NUM_OVERFLOW;
         return -1;
     }
