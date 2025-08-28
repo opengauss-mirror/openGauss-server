@@ -35,7 +35,6 @@ static Node *make_int_const(int val, int location);
 static char* get_collation_name_for_db(Oid dbOid);
 static bool is_login(Oid id);
 static RangeVar* pltsqlMakeRangeVarFromName(const char *ident);
-static Oid get_table_identity(Oid tableOid);
 static int128 get_last_value_from_seq(Oid seqid);
 static bool get_seed(Oid seqid, int64* start, int128* res, bool* success);
 static int days_in_date(int day, int month, int year);
@@ -636,34 +635,6 @@ static RangeVar* pltsqlMakeRangeVarFromName(const char *ident)
     n = (Node*)linitial(sel_stmt->fromClause);
     Assert(IsA(n, RangeVar));
     return (RangeVar*)n;
-}
-
-/*
- * Get the table's identity sequence OID.
- */
-static Oid get_table_identity(Oid tableOid)
-{
-    Relation	rel = nullptr;
-    TupleDesc	tupdesc = nullptr;
-    AttrNumber	attnum = 0;
-    Oid			seqid = InvalidOid;
-
-    rel = RelationIdGetRelation(tableOid);
-    tupdesc = RelationGetDescr(rel);
-
-    for (attnum = 0; attnum < tupdesc->natts; attnum++) {
-        Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum);
-        if (attr->attisdropped) {
-            continue;
-        }
-        seqid = pg_get_serial_sequence_internal(tableOid, attr->attnum, true, NULL);
-        if (OidIsValid(seqid)) {
-            break;
-        }
-    }
-
-    RelationClose(rel);
-    return seqid;
 }
 
 static int128 get_last_value_from_seq(Oid seqid)

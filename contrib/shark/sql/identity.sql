@@ -283,5 +283,26 @@ END; $$;
 
 drop table t_identity_0020;
 
+create table t_identity_0013(id int identity, name varchar(10));
+insert into t_identity_0013(name) values('zhangsan');
+insert into t_identity_0013(name) values('lisi');
+insert into t_identity_0013(name) values('wangwu');
+--error
+update t_identity_0013 set id=4 where name='zhangsan';
+drop table t_identity_0013;
+
+-- ident_current after truncate table. expected: success.
+create table t_identity_0021(id int identity(100,1), name varchar(10));
+insert into t_identity_0021(name) values('zhangsan');
+insert into t_identity_0021(name) values('lisi');
+select ident_current('t_identity_0021');
+truncate table t_identity_0021;
+select ident_current('t_identity_0021');
+insert into t_identity_0021(name) values('zhangsan');
+select ident_current('t_identity_0021');
+insert into t_identity_0021(name) values('lisi');
+select ident_current('t_identity_0021');
+drop table t_identity_0021;
+
 reset current_schema;
 drop schema identity_schema;

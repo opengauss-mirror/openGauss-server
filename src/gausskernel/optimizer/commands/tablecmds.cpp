@@ -4709,21 +4709,33 @@ void ExecuteTruncateGuts(
          * we should restart sequences created by auto_increment column.
          */
         foreach (cell, rels) {
+            List *seq_oids = NIL;
+            ListCell *seqcell = NULL;
             Relation rel = (Relation)lfirst(cell);
+
+            // find sequence associated with auto_increment column in this rel.
             Oid seq_relid = RelAutoIncSeqOid(rel);
-            if (!OidIsValid(seq_relid)) {
-                continue;
+            if (OidIsValid(seq_relid)) seq_oids = lappend_oid(seq_oids, seq_relid);
+            // find sequence associated with identity column of this rel in D format.
+            if (u_sess->attr.attr_sql.sql_compatibility == D_FORMAT) {
+                Oid identity_seq = get_table_identity(RelationGetRelid(rel));
+                if (OidIsValid(identity_seq)) seq_oids = lappend_oid(seq_oids, identity_seq);
             }
-            Relation seq_rel = relation_open(seq_relid, AccessExclusiveLock);
-            /* This check must match AlterSequence! */
-            AclResult aclresult = pg_class_aclcheck(seq_relid, GetUserId(), ACL_ALTER);
-            if (aclresult != ACLCHECK_OK && !pg_class_ownercheck(seq_relid, GetUserId()) &&
-                    !(isOperatoradmin(GetUserId()) && u_sess->proc_cxt.clientIsGsroach &&
-                        u_sess->attr.attr_security.operation_mode)) {
-                aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, RelationGetRelationName(seq_rel));
+            // almost two elements.
+            foreach(seqcell, seq_oids) {
+                Oid seq_relid = lfirst_oid(seqcell);
+                Relation seq_rel = relation_open(seq_relid, AccessExclusiveLock);
+                /* This check must match AlterSequence! */
+                AclResult aclresult = pg_class_aclcheck(seq_relid, GetUserId(), ACL_ALTER);
+                if (aclresult != ACLCHECK_OK && !pg_class_ownercheck(seq_relid, GetUserId()) &&
+                        !(isOperatoradmin(GetUserId()) && u_sess->proc_cxt.clientIsGsroach &&
+                            u_sess->attr.attr_security.operation_mode)) {
+                    aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, RelationGetRelationName(seq_rel));
+                }
+
+                autoinc_seqoids = lappend_oid(autoinc_seqoids, seq_relid);
+                relation_close(seq_rel, NoLock);
             }
-            autoinc_seqoids = lappend_oid(autoinc_seqoids, seq_relid);
-            relation_close(seq_rel, NoLock);
         }
     }
 

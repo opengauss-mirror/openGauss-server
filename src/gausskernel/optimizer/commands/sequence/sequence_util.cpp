@@ -673,3 +673,18 @@ Datum large_sequence_rollback_node_tree(PG_FUNCTION_ARGS)
 
     PG_RETURN_TEXT_P(cstring_to_text(res));
 }
+
+bool StrEndWith(const char *str, const char *suffix)
+{
+    int strLen = strlen(str);
+    int suffixLen = strlen(suffix);
+    if (strLen < suffixLen) {
+        return false;
+    }
+    for (int i = 0; i < suffixLen; i++) {
+        if (str[strLen - 1 - i] != suffix[suffixLen - 1 - i]) {
+            return false;
+        }
+    }
+    return true;
+}

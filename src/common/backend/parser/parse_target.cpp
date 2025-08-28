@@ -39,7 +39,6 @@
 #include "gs_ledger/ledger_utils.h"
 #include "mb/pg_wchar.h"
 #include "parser/parse_utilcmd.h"
-#include "commands/sequence.h"
 
 static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var, int levelsup);
 static Node* transformAssignmentIndirection(ParseState* pstate, Node* basenode, const char* targetName,
