@@ -148,7 +148,5 @@ extern int argv_num;
 
 #define EXIT_USER 3
 
-/* Timeout for making connection, in seconds. */
-#define CONNECT_TIMEOUT "300"
 #endif
 

@@ -1512,7 +1512,7 @@ static bool do_connect(char* dbname, char* user, char* host, char* port)
         keywords[6] = "client_encoding";
         values[6] = (pset.notty || (tmp != NULL)) ? NULL : "auto";
         keywords[7] = "connect_timeout";
-        values[7] = CONNECT_TIMEOUT;
+        values[7] = NULL;
 #ifdef HAVE_CE
         keywords[8] = "enable_ce";
         values[8] = (pset.enable_client_encryption) ? "1" : NULL;
