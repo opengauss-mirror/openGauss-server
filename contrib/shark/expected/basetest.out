@@ -17,7 +17,7 @@ NOTICE:  The COLUMNSTORE option is currently ignored
 DO $$
 BEGIN
 create columnstore index on t1 (a);
-end $$ language pltsql;
+end $$;
 NOTICE:  The COLUMNSTORE option is currently ignored
 LINE 3: create columnstore index on t1 (a);
         ^
