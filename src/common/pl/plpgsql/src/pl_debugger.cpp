@@ -88,6 +88,7 @@ void PlDebugerCleanUp(int code, Datum arg)
 
 static void init_debug_server(PLpgSQL_function* func, int socketId, int debugStackIdx, PLpgSQL_execstate* estate)
 {
+    CheckPlpgsqlFunc(func->fn_oid);
     Assert(func->debug == NULL);
     MemoryContext debug_context = NULL;
     /* Initialize context only for outermost debug stack */
