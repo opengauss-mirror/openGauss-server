@@ -53,6 +53,10 @@
 #include "utils/numeric_gs.h"
 #include "workload/cpwlm.h"
 
+/**
+ * 记录数据库的审计信息
+ */
+
 #define AUDIT_BUFFERSIZ 512
 
 typedef void (*AuditFunc)(const char* objectname, const char* cmdtext);

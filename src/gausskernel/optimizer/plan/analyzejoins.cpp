@@ -33,6 +33,11 @@
 #include "optimizer/tlist.h"
 #include "utils/lsyscache.h"
 
+/**
+ * 查询优化处理代码
+ */
+
+
 /* local functions */
 static bool join_is_removable(PlannerInfo* root, SpecialJoinInfo* sjinfo);
 static void remove_rel_from_query(PlannerInfo* root, int relid, Relids joinrelids);

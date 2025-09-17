@@ -101,6 +101,10 @@
 #include "optimizer/gplanmgr.h"
 #include "catalog/pg_constraint.h"
 
+/**
+ * 查询执行源代码
+ */
+
 /* Hooks for plugins to get control in ExecutorStart/Run/Finish/End */
 THR_LOCAL ExecutorStart_hook_type ExecutorStart_hook = NULL;
 THR_LOCAL ExecutorRun_hook_type ExecutorRun_hook = NULL;

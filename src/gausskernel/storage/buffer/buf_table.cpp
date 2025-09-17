@@ -29,6 +29,10 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/storage_gstrace.h"
 
+/**
+ * 基础存储引擎
+ */
+
 extern uint32 hashquickany(uint32 seed, register const unsigned char *data, register int len);
 
 /*

@@ -293,6 +293,10 @@
 
 #include "utils/postinit.h"
 
+/**
+ * 处理前端启动消息 通过后台的验证后维护一个后台处理线程
+ */
+
 extern void InitGlobalSeq();
 extern void auto_explain_init(void);
 extern int S3_init();

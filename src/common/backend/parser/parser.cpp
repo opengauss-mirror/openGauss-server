@@ -31,6 +31,10 @@
 #include "miscadmin.h"
 #include "catalog/pg_namespace.h"
 
+/**
+ *  查询解析源代码
+ */
+
 extern void resetOperatorPlusFlag();
 
 static bool is_prefer_parse_cursor_parentheses_as_expr()

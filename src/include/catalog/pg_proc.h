@@ -26,6 +26,10 @@
 
 #include "catalog/genbki.h"
 
+/**
+ * 为系统函数注册一个唯一id，该id用于标识系统函数。
+ */
+
 /* ----------------
  *        pg_proc definition.  cpp turns this into
  *        typedef struct FormData_pg_proc
