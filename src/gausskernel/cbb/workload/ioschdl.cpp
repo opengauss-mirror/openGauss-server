@@ -934,7 +934,7 @@ static void WLMmonitor_MainLoop(void)
     TimestampTz instance_cleanup_last_time = GetCurrentTimestamp();
 
     while (PostmasterIsAlive()) {
-        if (t_thrd.wlm_cxt.wlm_init_done && !t_thrd.wlm_cxt.wlm_xact_start) {
+        if (!t_thrd.wlm_cxt.wlm_xact_start) {
             StartTransactionCommand();
             t_thrd.wlm_cxt.wlm_xact_start = true;
         }
