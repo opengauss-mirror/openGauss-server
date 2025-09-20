@@ -15,7 +15,6 @@
 ./bin/alarmItem.conf
 ./bin/retry_errcodes.conf
 ./bin/cluster_guc.conf
-./bin/lz4
 ./bin/gs_plan_simulator.sh
 ./bin/gs_retrieve
 ./bin/openssl
@@ -746,7 +745,6 @@
 ./lib/libcrypto.so*
 ./lib/libcgroup.so*
 ./lib/libz.so*
-./lib/liblz4.so*
 ./lib/libcjson.so*
 ./lib/libcjson_utils.so*
 ./lib/libstdc++.so.6
