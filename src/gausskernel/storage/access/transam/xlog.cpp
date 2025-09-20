@@ -17306,7 +17306,6 @@ void HandleCascadeStandbyPromote(XLogRecPtr *recptr)
     if (t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
         t_thrd.xlog_cxt.is_hadr_main_standby = true;
         SpinLockAcquire(&t_thrd.postmaster_cxt.HaShmData->mutex);
-        t_thrd.postmaster_cxt.HaShmData->is_cascade_standby = false;
         t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby = true;
         SpinLockRelease(&t_thrd.postmaster_cxt.HaShmData->mutex);
     }
@@ -18200,6 +18199,7 @@ bool CheckForFailoverTrigger(void)
 
         if (!SS_DISASTER_MAIN_STANDBY_NODE) {
             SendPostmasterSignal(PMSIGNAL_UPDATE_PROMOTING);
+            ereport(LOG, (errmsg("send promoting request to pm")));
         }  
         ret = true;
         goto exit;

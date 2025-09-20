@@ -10647,7 +10647,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
         /* promote cascade standby */
         if (IsCascadeStandby()) {
-            t_thrd.xlog_cxt.is_cascade_standby = false;
             /*
              * When the server is started in pending mode and notified as cascade standby,
              * we should set server mode to standby mode before promoting.
@@ -10657,9 +10656,18 @@ static void sigusr1_handler(SIGNAL_ARGS)
                 t_thrd.xlog_cxt.is_hadr_main_standby = true;
             }
             SetHaShmemData();
+            volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+            SpinLockAcquire(&t_thrd.postmaster_cxt.HaShmData->mutex);
+            hashmdata->is_cascade_standby = false;
+            SpinLockRelease(&t_thrd.postmaster_cxt.HaShmData->mutex);
+
             if (g_instance.pid_cxt.HeartbeatPID != 0) {
                 signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
             }
+            ereport(LOG, (errmsg("report cross Region:%d, cascade Standby:%d. main standby:%d",
+                    t_thrd.postmaster_cxt.HaShmData->is_cross_region,
+                    t_thrd.postmaster_cxt.HaShmData->is_cascade_standby,
+                    t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby)));
         }
     }
     if (CheckPostmasterSignal(PMSIGNAL_UPDATE_HAREBUILD_REASON) &&
