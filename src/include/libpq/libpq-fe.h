@@ -45,6 +45,9 @@ class ICachedRec;
 #define PG_COPYRES_EVENTS 0x04
 #define PG_COPYRES_NOTICEHOOKS 0x08
 
+/* Timeout for making connection, in seconds */
+#define CONNECT_TIMEOUT "300"
+
 #define RETURN_IF(condition, retValue)  \
     if (condition) {                        \
         return (retValue);                  \

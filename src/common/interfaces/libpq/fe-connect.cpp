@@ -182,7 +182,7 @@ static const PQconninfoOption PQconninfoOptions[] = {
     {"service", "PGSERVICE", NULL, NULL, "Database-Service", "", 20, 0},
     {"user", "PGUSER", NULL, NULL, "Database-User", "", 20, 0},
     {"password", "PGPASSWORD", NULL, NULL, "Database-Password", "*", 20, 0},
-    {"connect_timeout", "PGCONNECT_TIMEOUT", NULL, NULL, "Connect-timeout", "", 10, 0},
+    {"connect_timeout", "PGCONNECT_TIMEOUT", CONNECT_TIMEOUT, NULL, "Connect-timeout", "", 10, 0},
     {"dbname", "PGDATABASE", NULL, NULL, "Database-Name", "", 20, 0},
     {"host", "PGHOST", NULL, NULL, "Database-Host", "", 40, 0},
     {"remote_nodename", "Nodename", NULL, NULL, "Remote-Nodename", "", 40, 0},
