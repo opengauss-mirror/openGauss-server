@@ -36,7 +36,6 @@
 ./bin/kdestroy
 ./bin/kdb5_util
 ./bin/kadmin.local
-./bin/lz4
 ./bin/kadmind
 ./bin/server.key.cipher
 ./bin/server.key.rand
@@ -893,9 +892,6 @@
 ./lib/libz.so
 ./lib/libz.so.1
 ./lib/libz.so.1.2.11
-./lib/liblz4.so
-./lib/liblz4.so.1
-./lib/liblz4.so.1.9.2
 ./lib/libcjson.so
 ./lib/libcjson.so.1
 ./lib/libcjson.so.1.7.13
