@@ -413,6 +413,8 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8599;
 CREATE CAST (halfvec AS _float4)
 	WITH FUNCTION halfvec_to_float4(halfvec, int4, boolean) AS IMPLICIT;
 
+set search_path = 'pg_catalog';
+
 DROP OPERATOR IF EXISTS pg_catalog.<->(halfvec, halfvec) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_GENERAL, 8980;
 CREATE OPERATOR pg_catalog.<->(
