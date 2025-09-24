@@ -29,7 +29,7 @@ function print_help()
     -s|--symbol_mode       whether separate symbol in debug mode, the default value is on.
     -co|--cmake_opt        more cmake options
     -T|--tassl             build with tassl
-    --cmake                 build by cmake
+    --cmake                build by cmake
 "
 }
 
