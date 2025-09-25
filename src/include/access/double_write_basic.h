@@ -163,11 +163,11 @@ Datum dw_get_node_name();
 
 typedef struct st_dw_read_asst {
     int fd;
-    uint16 file_start;    /* reading start page id in file */
-    uint16 file_capacity; /* max pages of the file */
-    uint16 buf_start;     /* start page of the buf */
-    uint16 buf_end;       /* end page of the buf */
-    uint16 buf_capacity;  /* max pages the buf can hold */
+    uint32 file_start;    /* reading start page id in file */
+    uint32 file_capacity; /* max pages of the file */
+    uint32 buf_start;     /* start page of the buf */
+    uint32 buf_end;       /* end page of the buf */
+    uint32 buf_capacity;  /* max pages the buf can hold */
     char* buf;
 } dw_read_asst_t;
 
