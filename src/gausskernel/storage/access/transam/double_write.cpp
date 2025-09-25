@@ -1025,12 +1025,12 @@ static void dw_recover_partial_write_batch(dw_batch_file_context *cxt)
 {
     dw_read_asst_t read_asst;
     dw_batch_t *curr_head = NULL;
-    uint16 reading_pages;
-    uint16 remain_pages;
+    uint32 reading_pages;
+    uint32 remain_pages;
     bool dw_file_broken = false;
     bool is_new_relfilenode;
     char *data_page = NULL;
-    uint16 dw_batch_page_num = (uint16) (cxt->file_size / BLCKSZ);
+    uint32 dw_batch_page_num = (uint32) (cxt->file_size / BLCKSZ);
 
     read_asst.fd = cxt->fd;
     read_asst.file_start = cxt->file_head->start;
