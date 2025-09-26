@@ -37,6 +37,11 @@ extern float (*HalfvecInnerProduct)(int dim, half *ax, half *bx);
 extern double (*HalfvecCosineSimilarity)(int dim, half *ax, half *bx);
 extern float (*HalfvecL1Distance)(int dim, half *ax, half *bx);
 
+extern float HalfvecL2SquaredDistanceDefault(int dim, half *ax, half *bx);
+extern float HalfvecInnerProductDefault(int dim, half *ax, half *bx);
+extern double HalfvecCosineSimilarityDefault(int dim, half *ax, half *bx);
+extern float HalfvecL1DistanceDefault(int dim, half *ax, half *bx);
+
 void HalfvecInit(void);
 
 /*
