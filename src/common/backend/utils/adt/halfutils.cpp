@@ -38,26 +38,17 @@
 #define TARGET_F16C
 #endif
 
+#if defined(__x86_64__) && defined(__AVX__)
+#include <immintrin.h>
+#define TARGET_F16C
+#endif
+
 float (*HalfvecL2SquaredDistance)(int dim, half *ax, half *bx);
 float (*HalfvecInnerProduct)(int dim, half *ax, half *bx);
 double (*HalfvecCosineSimilarity)(int dim, half *ax, half *bx);
 float (*HalfvecL1Distance)(int dim, half *ax, half *bx);
 
-float HalfvecL2SquaredDistanceDefault(int dim, half *ax, half *bx)
-{
-    float distance = 0.0;
-
-    /* Auto-vectorized */
-    for (int i = 0; i < dim; i++) {
-        float diff = HalfToFloat4(ax[i]) - HalfToFloat4(bx[i]);
-
-        distance += diff * diff;
-    }
-
-    return distance;
-}
-
-#ifdef HALFVEC_DISPATCH
+#if defined(HALFVEC_DISPATCH) || (defined(__x86_64__) && defined(__AVX__))
 TARGET_F16C static float HalfvecL2SquaredDistanceF16c(int dim, half *ax, half *bx)
 {
     float distance;
@@ -90,18 +81,28 @@ TARGET_F16C static float HalfvecL2SquaredDistanceF16c(int dim, half *ax, half *b
 }
 #endif
 
-float HalfvecInnerProductDefault(int dim, half *ax, half *bx)
+#if (defined(__x86_64__) && defined(__AVX__))
+float HalfvecL2SquaredDistanceDefault(int dim, half *ax, half *bx)
+{
+    return HalfvecL2SquaredDistanceF16c(dim, ax, bx);
+}
+#else
+float HalfvecL2SquaredDistanceDefault(int dim, half *ax, half *bx)
 {
     float distance = 0.0;
 
     /* Auto-vectorized */
-    for (int i = 0; i < dim; i++)
-        distance += HalfToFloat4(ax[i]) * HalfToFloat4(bx[i]);
+    for (int i = 0; i < dim; i++) {
+        float diff = HalfToFloat4(ax[i]) - HalfToFloat4(bx[i]);
+
+        distance += diff * diff;
+    }
 
     return distance;
 }
+#endif
 
-#ifdef HALFVEC_DISPATCH
+#if defined(HALFVEC_DISPATCH) || (defined(__x86_64__) && defined(__AVX__))
 TARGET_F16C static float HalfvecInnerProductF16c(int dim, half *ax, half *bx)
 {
     float distance;
@@ -130,27 +131,25 @@ TARGET_F16C static float HalfvecInnerProductF16c(int dim, half *ax, half *bx)
 }
 #endif
 
-double HalfvecCosineSimilarityDefault(int dim, half *ax, half *bx)
+#if (defined(__x86_64__) && defined(__AVX__))
+float HalfvecInnerProductDefault(int dim, half *ax, half *bx)
 {
-    float similarity = 0.0;
-    float norma = 0.0;
-    float normb = 0.0;
+    return HalfvecInnerProductF16c(dim, ax, bx);
+}
+#else
+float HalfvecInnerProductDefault(int dim, half *ax, half *bx)
+{
+    float distance = 0.0;
 
     /* Auto-vectorized */
-    for (int i = 0; i < dim; i++) {
-        float axi = HalfToFloat4(ax[i]);
-        float bxi = HalfToFloat4(bx[i]);
+    for (int i = 0; i < dim; i++)
+        distance += HalfToFloat4(ax[i]) * HalfToFloat4(bx[i]);
 
-        similarity += axi * bxi;
-        norma += axi * axi;
-        normb += bxi * bxi;
-    }
-
-    /* Use sqrt(a * b) over sqrt(a) * sqrt(b) */
-    return static_cast<double>(similarity) / sqrt(static_cast<double>(norma) * static_cast<double>(normb));
+    return distance;
 }
+#endif
 
-#ifdef HALFVEC_DISPATCH
+#if defined(HALFVEC_DISPATCH) || (defined(__x86_64__) && defined(__AVX__))
 TARGET_F16C static double HalfvecCosineSimilarityF16c(int dim, half *ax, half *bx)
 {
     float similarity;
@@ -198,18 +197,34 @@ TARGET_F16C static double HalfvecCosineSimilarityF16c(int dim, half *ax, half *b
 }
 #endif
 
-float HalfvecL1DistanceDefault(int dim, half *ax, half *bx)
+#if (defined(__x86_64__) && defined(__AVX__))
+double HalfvecCosineSimilarityDefault(int dim, half *ax, half *bx)
 {
-    float distance = 0.0;
+    return HalfvecCosineSimilarityF16c(dim, ax, bx);
+}
+#else
+double HalfvecCosineSimilarityDefault(int dim, half *ax, half *bx)
+{
+    float similarity = 0.0;
+    float norma = 0.0;
+    float normb = 0.0;
 
     /* Auto-vectorized */
-    for (int i = 0; i < dim; i++)
-        distance += fabsf(HalfToFloat4(ax[i]) - HalfToFloat4(bx[i]));
+    for (int i = 0; i < dim; i++) {
+        float axi = HalfToFloat4(ax[i]);
+        float bxi = HalfToFloat4(bx[i]);
 
-    return distance;
+        similarity += axi * bxi;
+        norma += axi * axi;
+        normb += bxi * bxi;
+    }
+
+    /* Use sqrt(a * b) over sqrt(a) * sqrt(b) */
+    return static_cast<double>(similarity) / sqrt(static_cast<double>(norma) * static_cast<double>(normb));
 }
+#endif
 
-#ifdef HALFVEC_DISPATCH
+#if defined(HALFVEC_DISPATCH) || (defined(__x86_64__) && defined(__AVX__))
 /* Does not require FMA, but keep logic simple */
 TARGET_F16C static float HalfvecL1DistanceF16c(int dim, half *ax, half *bx)
 {
@@ -234,6 +249,24 @@ TARGET_F16C static float HalfvecL1DistanceF16c(int dim, half *ax, half *bx)
     distance = s[0] + s[1] + s[2] + s[3] + s[4] + s[5] + s[6] + s[7];
 
     for (; i < dim; i++)
+        distance += fabsf(HalfToFloat4(ax[i]) - HalfToFloat4(bx[i]));
+
+    return distance;
+}
+#endif
+
+#if (defined(__x86_64__) && defined(__AVX__))
+float HalfvecL1DistanceDefault(int dim, half *ax, half *bx)
+{
+    return HalfvecL1DistanceF16c(dim, ax, bx);
+}
+#else
+float HalfvecL1DistanceDefault(int dim, half *ax, half *bx)
+{
+    float distance = 0.0;
+
+    /* Auto-vectorized */
+    for (int i = 0; i < dim; i++)
         distance += fabsf(HalfToFloat4(ax[i]) - HalfToFloat4(bx[i]));
 
     return distance;
