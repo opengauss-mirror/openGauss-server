@@ -139,7 +139,7 @@ typedef struct FuncExprInfo {
     char *resname;
 } FuncExprInfo;
 
-const int OPFUSION_FUNCTION_ID_MAX_HASH_SIZE = 200;
+const int OPFUSION_FUNCTION_ID_MAX_HASH_SIZE = 203;
 
 /* length of function_id should not more than OPFUSION_FUNCTION_ID_MAX_HASH_SIZE */
 const Oid function_id[] = {
@@ -156,6 +156,7 @@ const Oid function_id[] = {
     407,  /* convert text to name */
     408,  /* convert name to char(n) */
     409,  /* convert char(n) to name */
+    480,  /* convert int8 to int4 */
     668,  /* adjust char() to typmod length */
     669,  /* adjust varchar() to typmod length */
     714,  /* convert int8 to int2 */
@@ -182,6 +183,7 @@ const Oid function_id[] = {
     1745, /* convert numeric to float4 */
     1746, /* convert numeric to float8 */
     1778, /* convert text to timestamp with time zone */
+    1779, /* convert numeric to bigint */
     1780, /* convert text to date */
     1961, /* adjust timestamp precision */
     1967, /* adjust timestamptz precision */
@@ -190,6 +192,7 @@ const Oid function_id[] = {
     2089, /* convert int4 number to hex */
     2090, /* convert int8 number to hex */
     2617, /* ceiling */
+    3177, /* convert int8 to boolen */
     3180, /* convert int2 to boolen */
     3192, /* convert int4 to bpchar */
     3207, /* convert text to timestamp without time zone */
