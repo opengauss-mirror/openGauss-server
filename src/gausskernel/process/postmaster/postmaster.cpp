@@ -4429,6 +4429,7 @@ static int ServerLoop(void)
         if (g_instance.pid_cxt.PgStatPID == 0 && (pmState == PM_RUN || pmState == PM_HOT_STANDBY) && !dummyStandbyMode)
             g_instance.pid_cxt.PgStatPID = pgstat_start();
 
+#ifndef ENABLE_LITE_MODE
         /* If we have lost the snapshot capturer, try to start a new one */
         if ((g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
             g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode && !ENABLE_DMS) {
@@ -4437,6 +4438,7 @@ static int ServerLoop(void)
                     g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
             }
         }
+#endif
 
 #ifndef ENABLE_FINANCE_MODE
         /* If we have lost the cfs shrinker, try to start a new one */
@@ -7303,6 +7305,7 @@ static void reaper(SIGNAL_ARGS)
             if (g_instance.pid_cxt.PgStatPID == 0 && !dummyStandbyMode)
                 g_instance.pid_cxt.PgStatPID = pgstat_start();
 
+#ifndef ENABLE_LITE_MODE
             if ((g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
                 g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode && !ENABLE_DMS) {
                 if (u_sess->attr.attr_storage.undo_retention_time != 0 ||
@@ -7310,6 +7313,7 @@ static void reaper(SIGNAL_ARGS)
                     g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
                 }
             }
+#endif
 
 #ifndef ENABLE_FINANCE_MODE
             /* If we have lost the cfs shrinker, try to start a new one */
@@ -7799,6 +7803,7 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
+#ifndef ENABLE_LITE_MODE
         if ((g_instance.role == VSINGLENODE) && pid == g_instance.pid_cxt.TxnSnapCapturerPID) {
             Assert(!dummyStandbyMode);
             g_instance.pid_cxt.TxnSnapCapturerPID = 0;
@@ -7810,6 +7815,7 @@ static void reaper(SIGNAL_ARGS)
                 g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
             continue;
         }
+#endif
 
         if (pid == g_instance.pid_cxt.CfsShrinkerPID) {
             g_instance.pid_cxt.CfsShrinkerPID = 0;

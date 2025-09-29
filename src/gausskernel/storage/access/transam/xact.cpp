@@ -1275,8 +1275,9 @@ static void AtStart_Memory(void)
      */
     if (t_thrd.xact_cxt.TransactionAbortContext == NULL)
         t_thrd.xact_cxt.TransactionAbortContext = AllocSetContextCreate(t_thrd.top_mem_cxt, "TransactionAbortContext",
-                                                                        32 * 1024, 32 * 1024, 32 * 1024);
-
+                                                                        ALLOCSET_DEFAULT_MINSIZE,
+                                                                        ALLOCSET_DEFAULT_INITSIZE,
+                                                                        ALLOCSET_NAME_MAXSIZE);
 
     /* We shouldn't have a transaction context already. */
     Assert(u_sess->top_transaction_mem_cxt == NULL);

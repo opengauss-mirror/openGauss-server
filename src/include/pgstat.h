@@ -2808,7 +2808,11 @@ extern void sessionStatShmemInit(void);
 
 #define NUM_BUFFERCACHE_PAGES_ELEM 15
 
+#ifndef ENABLE_LITE_MODE
 #define CONNECTIONINFO_LEN 8192 /* Maximum length of GUC parameter connection_info */
+#else
+#define CONNECTIONINFO_LEN 256 /* Maximum length of GUC parameter connection_info */
+#endif
 
 /*
  * Record structure holding the to-be-exposed cache data.

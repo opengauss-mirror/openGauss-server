@@ -143,12 +143,15 @@ static bool binary_upgrade_is_next_psort_array_pg_type_oid_valid();
 static Oid binary_upgrade_get_next_part_index_pg_class_rfoid();
 static Oid bupgrade_get_next_psort_pg_class_rfoid();
 
+#ifndef ENABLE_LITE_MODE
 static const int max_hashbucket_index_worker = 32;
+#else
+static const int max_hashbucket_index_worker = 10;
+#endif
 
 static inline int get_parallel_workers(Relation heap)
 {
     int parallel_workers = RelationGetParallelWorkers(heap, 0);
-
     if (parallel_workers != 0) {
         parallel_workers = Min(max_hashbucket_index_worker, parallel_workers);
     }

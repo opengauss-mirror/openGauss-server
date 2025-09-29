@@ -444,12 +444,13 @@ typedef struct PROC_HDR {
  *
  * PGXC needs another slot for the pool manager process
  */
-const int MAX_PAGE_WRITER_THREAD_NUM = 17;
 
 #ifndef ENABLE_LITE_MODE
 const int MAX_COMPACTION_THREAD_NUM = 100;
+const int MAX_PAGE_WRITER_THREAD_NUM = 17;
 #else
 const int MAX_COMPACTION_THREAD_NUM = 10;
+const int MAX_PAGE_WRITER_THREAD_NUM = 8;
 #endif
 
 /* number of multi auxiliary threads. */

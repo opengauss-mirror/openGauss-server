@@ -531,7 +531,7 @@ log_line_prefix = '%m %u %d %h %p %S '	# special values:
 #------------------------------------------------------------------------------
 # ALARM
 #------------------------------------------------------------------------------
-enable_alarm = on
+enable_alarm = off
 connection_alarm_rate = 0.9
 alarm_report_interval = 10
 alarm_component = '/opt/snas/bin/snas_cm_cmd'
