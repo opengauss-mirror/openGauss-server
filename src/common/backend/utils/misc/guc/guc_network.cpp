@@ -1173,6 +1173,7 @@ static void InitNetworkConfigureNamesEnum()
 
 static bool check_maxconnections(int* newval, void** extra, GucSource source)
 {
+#ifndef ENABLE_LITE_MODE
     const int factor = 4;
     const int min = 64;
     const int max = 1024;
@@ -1181,6 +1182,10 @@ static bool check_maxconnections(int* newval, void** extra, GucSource source)
     /* g_max_worker_processes should be a quarter of max_connections, and between 64 and 1024 */
     g_max_worker_processes = Max(bgworkers, min);
     g_max_worker_processes = Min(g_max_worker_processes, max);
+
+#else
+    g_max_worker_processes = 20;
+#endif
 
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && *newval > MAX_BACKENDS) {

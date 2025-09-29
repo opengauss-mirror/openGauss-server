@@ -179,6 +179,7 @@ extern MemoryContext opt_AllocSetContextCreate(MemoryContext parent,
 #define ALLOCSET_DEFAULT_INITSIZE (8 * 1024)
 #define ALLOCSET_DEFAULT_MAXSIZE (8 * 1024 * 1024)
 #define ALLOCSET_DEFAULT_SIZES ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE
+#define ALLOCSET_NAME_MAXSIZE (2 * 1024 * 1024)
 
 /*
  * Recommended alloc parameters for "small" contexts that are not expected

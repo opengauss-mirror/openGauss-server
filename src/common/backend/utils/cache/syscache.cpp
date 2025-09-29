@@ -187,12 +187,12 @@ const cachedesc cacheinfo[] = {
         AttributeRelidNameIndexId,
         2,
         {Anum_pg_attribute_attrelid, Anum_pg_attribute_attname, 0, 0},
-        2048},
+        ATTRIBUTE_REL_ID_NAME_INDEX_ID_NBUCKETS},
     {AttributeRelationId, /* ATTNUM */
         AttributeRelidNumIndexId,
         2,
         {Anum_pg_attribute_attrelid, Anum_pg_attribute_attnum, 0, 0},
-        2048},
+        ATTRIBUTE_REL_ID_NUM_INDEX_ID_NBUCKETS},
     {AuthMemRelationId, /* AUTHMEMMEMROLE */
         AuthMemMemRoleIndexId,
         2,
@@ -227,12 +227,12 @@ const cachedesc cacheinfo[] = {
         GsSecEncryptedColumnsOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        128},
+        CLIENT_LOGIC_CACHED_SEC_COL_OID_INDEX_ID_NBUCKETS},
     {ClientLogicCachedColumnsId, /* CERELIDCOUMNNAME */
         GsSecEncryptedColumnsRelidColumnnameIndexId,
         2,
         {Anum_gs_encrypted_columns_rel_id, Anum_gs_encrypted_columns_column_name, 0, 0},
-        128},
+        CLIENT_LOGIC_CACHED_SEC_COL_NAME_INDEX_ID_NBUCKETS},
     {OperatorClassRelationId, /* CLAAMNAMENSP */
         OpclassAmNameNspIndexId,
         3,
@@ -257,18 +257,18 @@ const cachedesc cacheinfo[] = {
         ClientLogicColumnSettingDistributedIdIndexId,
         1,
         {Anum_gs_column_keys_column_key_distributed_id, 0, 0, 0},
-        128
+        CLIENT_LOGIC_COL_SETTING_DISTRIBUTED_ID_INDEX_ID_NBUCKETS
     },
     {ClientLogicColumnSettingsId, /* COLUMNSETTINGNAME */
         ClientLogicColumnSettingsNameIndexId,
         2,
         {Anum_gs_column_keys_column_key_name, Anum_gs_column_keys_key_namespace, 0, 0},
-        128},
+        CLIENT_LOGIC_COL_SETTING_NAME_INDEX_ID_NBUCKETS},
     {ClientLogicColumnSettingsId, /* COLUMNSETTINGOID */
         ClientLogicColumnSettingsOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        128},
+        CLIENT_LOGIC_COL_SETTING_OID_INDEX_ID_NBUCKETS},
     {ConversionRelationId, /* CONDEFAULT */
         ConversionDefaultIndexId,
         4,
@@ -308,12 +308,12 @@ const cachedesc cacheinfo[] = {
         DataSourceNameIndexId,
         1,
         {Anum_pg_extension_data_source_srcname, 0, 0, 0},
-        32},
+        DATA_SOURCE_NAME_INDEX_ID_NBUCKETS},
     {DataSourceRelationId, /* DATASOURCEOID */
         DataSourceOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        32},
+        DATA_SOURCE_OID_INDEX_ID_NBUCKETS},
     {SubscriptionRelRelationId, /* SUBSCRIPTIONRELMAP */
         SubscriptionRelSrrelidSrsubidIndexId,
         2,
@@ -323,7 +323,7 @@ const cachedesc cacheinfo[] = {
         GsModelNameIndexId,
         1,
         {Anum_gs_model_model_name, 0, 0, 0},
-        256},
+        MODEL_REL_ID_GSMODEL_NAME_INDEX_ID_NBUCKETS},
     {DefaultAclRelationId, /* DEFACLROLENSPOBJ */
         DefaultAclRoleNspObjIndexId,
         3,
@@ -333,12 +333,12 @@ const cachedesc cacheinfo[] = {
         PgDirectoryDirectoriesNameIndexId,
         1,
         {Anum_pg_directory_directory_name, 0, 0, 0},
-        64},
+        PG_DERECTORY_NAME_INDEX_ID_NBUCKETS},
     {PgDirectoryRelationId, /* DIRECTORYOID */
         PgDirectoryOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        64},
+        PG_DERECTORY_OID_INDEX_ID_NBUCKETS},
     {EnumRelationId, /* ENUMOID */
         EnumOidIndexId,
         1,
@@ -353,62 +353,62 @@ const cachedesc cacheinfo[] = {
         ForeignDataWrapperNameIndexId,
         1,
         {Anum_pg_foreign_data_wrapper_fdwname, 0, 0, 0},
-        8},
+        FOREIGN_DATA_WRPPER_NAME_INDEX_ID_NBUCKETS},
     {ForeignDataWrapperRelationId, /* FOREIGNDATAWRAPPEROID */
         ForeignDataWrapperOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        8},
+        FOREIGN_DATA_WRPPER_OID_INDEX_ID_NBUCKETS},
     {ForeignServerRelationId, /* FOREIGNSERVERNAME */
         ForeignServerNameIndexId,
         1,
         {Anum_pg_foreign_server_srvname, 0, 0, 0},
-        32},
+        FOREIGN_SERVER_NAME_INDEX_ID_NBUCKETS},
     {ForeignServerRelationId, /* FOREIGNSERVEROID */
         ForeignServerOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        32},
+        FOREIGN_SERVER_OID_INDEX_ID_NBUCKETS},
     {ForeignTableRelationId, /* FOREIGNTABLEREL */
         ForeignTableRelidIndexId,
         1,
         {Anum_pg_foreign_table_ftrelid, 0, 0, 0},
-        128},
+        FOREIGN_TABLE_REL_ID_INDEX_ID_NBUCKETS},
     {ClientLogicGlobalSettingsId, /* GLOBALSETTINGNAME */
         ClientLogicGlobalSettingsNameIndexId,
         2,
         {Anum_gs_client_global_keys_global_key_name, Anum_gs_client_global_keys_key_namespace, 0, 0},
-        128},
+        CLIENT_LOGIC_GLOBAL_SETTING_NAME_INDEX_ID_NBUCKETS},
     {ClientLogicGlobalSettingsId, /* GLOBALSETTINGOID */
         ClientLogicGlobalSettingsOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        128},
+        CLIENT_LOGIC_GLOBAL_SETTING_OID_INDEX_ID_NBUCKETS},
     {ClientLogicProcId, /* GSCLPROCID */
         GsClProcFuncIdIndexId,
         1,
         {Anum_gs_encrypted_proc_func_id, 0, 0, 0},
-        128},
+        CLIENT_LOGIC_PROC_FUNC_ID_INDEX_ID_NBUCKETS},
     {ClientLogicProcId, /* GSCLPROCOID */
         GsClProcOid,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        128},
+        CLIENT_LOGIC_PROC_OID_INDEX_ID_NBUCKETS},
     {GsJobArgumentRelationId, /* JOBARGUMENTNAMEID */
         GsJobArgumentNameIndexId,
         2,
         {Anum_gs_job_argument_job_name, Anum_gs_job_argument_argument_name, 0, 0},
-        128},
+        GS_JOB_ARGUMENT_NAME_INDEX_ID_NBUCKETS},
     {GsJobArgumentRelationId, /* JOBARGUMENTNAMEID */
         GsJobArgumentPositionIndexId,
         2,
         {Anum_gs_job_argument_job_name, Anum_gs_job_argument_argument_position, 0, 0},
-        128},
+        GS_JOB_ARGUMENT_POSITION_INDEX_ID_NBUCKETS},
     {GsJobAttributeRelationId, /* JOBATTRIBUTENAMEID */
         GsJobAttributeNameIndexId,
         2,
         {Anum_gs_job_attribute_job_name, Anum_gs_job_attribute_attribute_name, 0, 0},
-        128},
+        GS_JOB_ATTRIBUTE_NAME_INDEX_ID_NBUCKETS},
     {IndexRelationId, /* INDEXRELID */
         IndexRelidIndexId,
         1,
@@ -428,7 +428,7 @@ const cachedesc cacheinfo[] = {
         GsOPTModelNameIndexId,
         1,
         {Anum_gs_opt_model_model_name, 0, 0, 0},
-        4},
+        GS_OPT_MODEL_NAME_INDEX_ID_NBUCKETS},
     {NamespaceRelationId, /* NAMESPACENAME */
         NamespaceNameIndexId,
         1,
@@ -528,12 +528,12 @@ const cachedesc cacheinfo[] = {
         ResourcePoolPoolNameIndexId,
         1,
         {Anum_pg_resource_pool_rpname, 0, 0, 0},
-        256},
+        RESOURCE_POOL_NAME_INDEX_ID_NBUCKETS},
     {ResourcePoolRelationId, /* PGXCRESOURCEPOOLOID */
         ResourcePoolOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        256},
+        RESOURCE_POOL_OID_INDEX_ID_NBUCKETS},
     {WorkloadGroupRelationId, /* PGXCWORKLOADGROUPNAME */
         WorkloadGroupGroupNameIndexId,
         1,
@@ -548,12 +548,12 @@ const cachedesc cacheinfo[] = {
         AppWorkloadGroupMappingNameIndexId,
         1,
         {Anum_pg_app_workloadgroup_mapping_appname, 0, 0, 0},
-        256},
+        APP_WORKLOAD_GROUP_MAPPING_NAME_INDEX_ID_NBUCKETS},
     {AppWorkloadGroupMappingRelationId, /* PGXCAPPWGMAPPINGOID */
         AppWorkloadGroupMappingOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        256},
+        APP_WORKLOAD_GROUP_MAPPING_OID_INDEX_ID_NBUCKETS},
     {PgxcSliceRelationId, /* PGXCSLICERELID */
         PgxcSliceIndexId,
         4,
@@ -564,13 +564,13 @@ const cachedesc cacheinfo[] = {
         SubscriptionNameIndexId,
         2,
         {Anum_pg_subscription_subdbid, Anum_pg_subscription_subname, 0, 0},
-        4
+        SUBSCRIPTION_NAME_INDEX_ID_NBUCKETS
     },
     {SubscriptionRelationId, /* SUBSCRIPTIONOID */
         SubscriptionObjectIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        4
+        SUBSCRIPTION_OID_INDEX_ID_NBUCKETS
     },
 #ifndef ENABLE_MULTIPLE_NODES
     {ProcedureRelationId, /* PROCNAMEARGSNSP */
@@ -712,18 +712,18 @@ const cachedesc cacheinfo[] = {
         PublicationRelMapIndexId,
         2,
         {Anum_pg_publication_rel_prrelid, Anum_pg_publication_rel_prpubid, 0, 0},
-        64
+        PUBLICATION_REL_MAP_INDEX_ID_NBUCKETS
     },
     {PgSynonymRelationId, /* SYNOID */
         SynonymOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        64},
+        SYNONYM_OID_INDEX_ID_NBUCKETS},
     {PgSynonymRelationId, /* SYNONYMNAMENSP */
         SynonymNameNspIndexId,
         2,
         {Anum_pg_synonym_synname, Anum_pg_synonym_synnamespace, 0, 0},
-        64},
+        SYNONYM_NAME_NSP_INDEX_ID_NBUCKETS},
     {TableSpaceRelationId, /* TABLESPACEOID */
         TablespaceOidIndexId,
         1,
@@ -738,47 +738,47 @@ const cachedesc cacheinfo[] = {
         TSConfigMapIndexId,
         3,
         {Anum_pg_ts_config_map_mapcfg, Anum_pg_ts_config_map_maptokentype, Anum_pg_ts_config_map_mapseqno, 0},
-        4},
+        TS_CONFIG_MAP_INDEX_ID_NBUCKETS},
     {TSConfigRelationId, /* TSCONFIGNAMENSP */
         TSConfigNameNspIndexId,
         2,
         {Anum_pg_ts_config_cfgname, Anum_pg_ts_config_cfgnamespace, 0, 0},
-        16},
+        TS_CONFIG_NAME_NSP_INDEX_ID_NBUCKETS},
     {TSConfigRelationId, /* TSCONFIGOID */
         TSConfigOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        16},
+        TS_CONFIG_OID_NSP_INDEX_ID_NBUCKETS},
     {TSDictionaryRelationId, /* TSDICTNAMENSP */
         TSDictionaryNameNspIndexId,
         2,
         {Anum_pg_ts_dict_dictname, Anum_pg_ts_dict_dictnamespace, 0, 0},
-        16},
+        TS_DERECTORY_NAME_NSP_INDEX_ID_NBUCKETS},
     {TSDictionaryRelationId, /* TSDICTOID */
         TSDictionaryOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        16},
+        TS_DERECTORY_OID_INDEX_ID_NBUCKETS},
     {TSParserRelationId, /* TSPARSERNAMENSP */
         TSParserNameNspIndexId,
         2,
         {Anum_pg_ts_parser_prsname, Anum_pg_ts_parser_prsnamespace, 0, 0},
-        4},
+        TS_PARSE_NAME_NSP_INDEX_ID_NBUCKETS},
     {TSParserRelationId, /* TSPARSEROID */
         TSParserOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        4},
+        TS_PARSE_OID_INDEX_ID_NBUCKETS},
     {TSTemplateRelationId, /* TSTEMPLATENAMENSP */
         TSTemplateNameNspIndexId,
         2,
         {Anum_pg_ts_template_tmplname, Anum_pg_ts_template_tmplnamespace, 0, 0},
-        16},
+        TS_TEMPLATE_NAME_NSP_INDEX_ID_NBUCKETS},
     {TSTemplateRelationId, /* TSTEMPLATEOID */
         TSTemplateOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        16},
+        TS_TEMPLATE_OID_INDEX_ID_NBUCKETS},
     {TypeRelationId, /* TYPENAMENSP */
         TypeNameNspIndexId,
         2,
@@ -834,7 +834,7 @@ const cachedesc cacheinfo[] = {
             0,
             0
         },
-        8},
+        PUBLICATION_NAME_INDEX_ID_NBUCKETS},
     {PublicationRelationId, /* PUBLICATIONOID */
         PublicationObjectIndexId,
         1,
@@ -844,27 +844,27 @@ const cachedesc cacheinfo[] = {
             0,
             0
         },
-        8},
+        PUBLICATION_OID_INDEX_ID_NBUCKETS},
     {UidRelationId, /* UIDRELID */
         UidRelidIndexId,
         1,
         {Anum_gs_uid_relid, 0, 0, 0},
-        64},
+        UID_REL_ID_INDEX_ID_NBUCKETS},
     {DbPrivilegeId, /* DBPRIVOID */
         DbPrivilegeOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        128},
+        DB_PRIVILEGE_OID_INDEX_ID_NBUCKETS},
     {DbPrivilegeId, /* DBPRIVROLE */
         DbPrivilegeRoleidIndexId,
         1,
         {Anum_gs_db_privilege_roleid, 0, 0, 0},
-        1024},
+        DB_PRIVILEGE_ROLE_ID_INDEX_ID_NBUCKETS},
     {DbPrivilegeId, /* DBPRIVROLEPRIV */
         DbPrivilegeRoleidPrivilegeTypeIndexId,
         2,
         {Anum_gs_db_privilege_roleid, Anum_gs_db_privilege_privilege_type, 0, 0},
-        128}
+        DB_PRIVILEGE_ROLE_ID_PRIVILEGE_TYPE_INDEX_ID_NBUCKETS}
 };
 
 int SysCacheSize = lengthof(cacheinfo);

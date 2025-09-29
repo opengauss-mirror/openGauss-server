@@ -32,7 +32,11 @@ extern Snapshot CopySnapshotByCurrentMcxt(Snapshot snapshot);
 extern void SetGlobalSnapshotData(
     TransactionId xmin, TransactionId xmax, uint64 csn, GTM_Timeline timeline, bool ssNeedSyncWaitAll);
 
+#ifndef ENABLE_LITE_MODE
 int g_max_worker_processes = 64;
+#else
+int g_max_worker_processes = 20;
+#endif
 /*
  * Return true if the thread is bgworker.
  */

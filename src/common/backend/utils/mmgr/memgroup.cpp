@@ -67,7 +67,7 @@ void MemoryContextGroup::Init(MemoryContext parent, bool is_shared)
                                   memory_context_group_name[i],
                                   ALLOCSET_DEFAULT_MINSIZE,
                                   ALLOCSET_DEFAULT_INITSIZE,
-                                  ALLOCSET_DEFAULT_MAXSIZE,
+                                  ALLOCSET_NAME_MAXSIZE,
                                   type);
     }
 }

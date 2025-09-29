@@ -312,7 +312,7 @@ int main(int argc, char* argv[])
 #endif
 
     t_thrd.mem_cxt.gs_signal_mem_cxt = AllocSetContextCreate(
-        t_thrd.top_mem_cxt, "gs_signal", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+        t_thrd.top_mem_cxt, "gs_signal", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_NAME_MAXSIZE);
     if (NULL == t_thrd.mem_cxt.gs_signal_mem_cxt) {
         ereport(LOG, (errmsg("could not start a new thread, because of no  enough system resource. ")));
         proc_exit(1);
