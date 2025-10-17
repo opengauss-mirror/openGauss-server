@@ -10142,7 +10142,7 @@ void StartupXLOG(void)
          * connections, so that read-only backends don't try to read whatever
          * garbage is left over from before.
          */
-        if (!RecoveryByPending && (!SS_STANDBY_FAILOVER && SSModifySharedLunAllowed())) {
+        if (!RecoveryByPending && (!SS_STANDBY_PROMOTING && SSModifySharedLunAllowed())) {
             ResetUnloggedRelations(UNLOGGED_RELATION_CLEANUP);
         }
 
