@@ -873,31 +873,82 @@ ssize_t fio_read(int fd, void* buf, size_t size)
     }
 }
 
+/* Convert fio_xstat_t to struct stat */
+static void fio_xstat_to_stat(const fio_xstat_t *xstat, struct stat *st)
+{
+    if (!st || !xstat) {
+        elog(ERROR, "Invalid params st or xstat.");
+    }
+    st->st_dev = (dev_t)xstat->fio_dev;
+    st->st_ino = (ino_t)xstat->fio_ino;
+    st->st_rdev = (dev_t)xstat->fio_rdev;
+    st->st_mode = (mode_t)xstat->fio_mode;
+    st->st_nlink = (nlink_t)xstat->fio_nlink;
+    st->st_uid = (uid_t)xstat->fio_uid;
+    st->st_gid = (gid_t)xstat->fio_gid;
+    st->st_size = (off_t)xstat->fio_size;
+    st->st_blksize = (blksize_t)xstat->fio_blksize;
+    st->st_blocks = (blkcnt_t)xstat->fio_blocks;
+    st->st_atim.tv_sec = (time_t)xstat->fio_atime_sec;
+    st->st_atim.tv_nsec = 0;
+    st->st_mtim.tv_sec = (time_t)xstat->fio_mtime_sec;
+    st->st_mtim.tv_nsec = 0;
+    st->st_ctim.tv_sec = (time_t)xstat->fio_ctime_sec;
+    st->st_ctim.tv_nsec = 0;
+}
+
+/* Convert struct stat to fio_xstat_t */
+static void stat_to_fio_xstat(const struct stat *st, fio_xstat_t *xstat)
+{
+    if (!st || !xstat) {
+        elog(ERROR, "Invalid params st or xstat.");
+    }
+    xstat->fio_dev = (uint64_t)st->st_dev;
+    xstat->fio_ino = (uint64_t)st->st_ino;
+    xstat->fio_rdev = (uint64_t)st->st_rdev;
+    xstat->fio_mode = (uint32_t)st->st_mode;
+    xstat->fio_nlink = (uint32_t)st->st_nlink;
+    xstat->fio_uid = (uint32_t)st->st_uid;
+    xstat->fio_gid = (uint32_t)st->st_gid;
+    xstat->fio_size = (int64_t)st->st_size;
+    xstat->fio_blksize = (uint64_t)st->st_blksize;
+    xstat->fio_blocks = (uint64_t)st->st_blocks;
+    xstat->fio_atime_sec = (int64_t)st->st_atim.tv_sec;
+    xstat->fio_mtime_sec = (int64_t)st->st_mtim.tv_sec;
+    xstat->fio_ctime_sec = (int64_t)st->st_ctim.tv_sec;
+}
+
 /* Get information about file */
 int fio_stat(char const* path, struct stat* st, bool follow_symlink, fio_location location)
 {
     if (fio_is_remote(location))
     {
         fio_header hdr;
+        fio_xstat_t xstat;
+        errno_t err_rc = 0;
         size_t path_len = strlen(path) + 1;
 
         hdr.cop = FIO_STAT;
         hdr.handle = -1;
         hdr.arg =(unsigned) follow_symlink;
         hdr.size = path_len;
+        err_rc = memset_s(st, sizeof(*st), 0, sizeof(*st));
+        securec_check(err_rc, "\0", "\0");
 
         IO_CHECK(fio_write_all(fio_stdout, &hdr, sizeof(hdr)), sizeof(hdr));
         IO_CHECK(fio_write_all(fio_stdout, path, path_len), path_len);
 
         IO_CHECK(fio_read_all(fio_stdin, &hdr, sizeof(hdr)), sizeof(hdr));
         Assert(hdr.cop == FIO_STAT);
-        IO_CHECK(fio_read_all(fio_stdin, st, sizeof(*st)), sizeof(*st));
+        IO_CHECK(fio_read_all(fio_stdin, &xstat, sizeof(xstat)), sizeof(xstat));
 
         if (hdr.arg != 0)
         {
             errno = hdr.arg;
             return -1;
         }
+
+        fio_xstat_to_stat(&xstat, st);
         return 0;
     }
     else
@@ -2271,6 +2322,8 @@ void fio_communicate(int in, int out)
     int rc;
     int tmp_fd;
     pg_crc32 crc;
+    fio_xstat_t xstat;
+    errno_t err_rc = 0;
 
 #ifdef WIN32
     SYS_CHECK(setmode(in, _O_BINARY));
@@ -2366,11 +2419,15 @@ void fio_communicate(int in, int out)
                 IO_CHECK(fio_write_all(out, &hdr, sizeof(hdr)), sizeof(hdr));
                 break;
             case FIO_STAT: /* Get information about file with specified path */
-                hdr.size = sizeof(st);
+                err_rc = memset_s(&xstat, sizeof(xstat), 0, sizeof(xstat));
+                securec_check(err_rc, "\0", "\0");
+                hdr.size = sizeof(xstat);
                 rc = hdr.arg ? stat(buf, &st) : lstat(buf, &st);
                 hdr.arg = rc < 0 ? errno : 0;
+
+                stat_to_fio_xstat(&st, &xstat);
                 IO_CHECK(fio_write_all(out, &hdr, sizeof(hdr)), sizeof(hdr));
-                IO_CHECK(fio_write_all(out, &st, sizeof(st)), sizeof(st));
+                IO_CHECK(fio_write_all(out, &xstat, sizeof(xstat)), sizeof(xstat));
                 break;
             case FIO_ACCESS: /* Check presence of file with specified name */
                 hdr.size = 0;
