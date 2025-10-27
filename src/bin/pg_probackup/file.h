@@ -97,6 +97,24 @@ typedef struct
     unsigned arg;
 } fio_header;
 
+#pragma pack(push, 8)
+typedef struct {
+    uint64_t fio_dev;
+    uint64_t fio_ino;
+    uint64_t fio_rdev;
+    uint32_t fio_mode;
+    uint32_t fio_nlink;
+    uint32_t fio_uid;
+    uint32_t fio_gid;
+    int64_t  fio_size;
+    uint64_t fio_blksize;
+    uint64_t fio_blocks;
+    int64_t  fio_atime_sec;
+    int64_t  fio_mtime_sec;
+    int64_t  fio_ctime_sec;
+} fio_xstat_t;
+#pragma pack(pop)
+
 extern fio_location MyLocation;
 extern __thread int fio_stdout;
 extern __thread int fio_stdin;
