@@ -38,7 +38,7 @@
  *             currently 2^15 (32768). This is determined by the 15-bit widths of the
  *                lp_off and lp_len fields in ItemIdData (see include/storage/itemid.h).
  *                   Changing BLCKSZ requires an initdb. */
-#define BLCKSZ 8192
+#define BLCKSZ 4096
 
 /* Define to the default TCP port number on which the server listens and to
  *    which clients will try to connect. This can be overridden at run-time, but
@@ -866,7 +866,7 @@
  *       XLOG_BLCKSZ must be a multiple of the alignment requirement for direct-I/O
  *          buffers, else direct I/O may fail. Changing XLOG_BLCKSZ requires an initdb.
  *             */
-#define XLOG_BLCKSZ 8192
+#define XLOG_BLCKSZ 4096
 
 /* XLOG_SEG_SIZE is the size of a single WAL file. This must be a power of 2
  *    and larger than XLOG_BLCKSZ (preferably, a great deal larger than

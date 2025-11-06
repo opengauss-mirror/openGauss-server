@@ -56,13 +56,13 @@ const int PAGES_READ_NUM = 1024 * 16;
 #define MAX_UNDO_RECORD_SIZE (1024 << 1)
 
 /* Number of blocks of BLCKSZ in an undo log segment file.  128 = 1MB. */
-#define UNDOSEG_SIZE 128
+#define UNDOSEG_SIZE 256
 
 /* Size of an undo log segment file in bytes. */
 #define UNDO_LOG_SEGMENT_SIZE ((size_t)BLCKSZ * UNDOSEG_SIZE)
 
 /* Number of blocks of BLCKSZ in an undo meta segment file. */
-#define UNDO_META_SEG_SIZE 4
+#define UNDO_META_SEG_SIZE 8
 
 /* Size of an undo meta segment file in bytes. */
 #define UNDO_META_SEGMENT_SIZE ((size_t)BLCKSZ * UNDO_META_SEG_SIZE)
