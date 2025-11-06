@@ -348,6 +348,9 @@ static void pass_down_bound(LimitState* node, PlanState* child_node)
                 sortGroup->bound = tuples_needed;
             }
         }
+    } else if (IsA(child_node, AnnIndexScanState)) {
+        AnnIndexScanState* annState = (AnnIndexScanState*)child_node;
+        annState->limitCount = tuples_needed > 0 ? tuples_needed : 0;
     }
 }
 

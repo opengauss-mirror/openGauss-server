@@ -29,7 +29,10 @@
 #include "access/datavec/bitvec.h"
 #include "access/datavec/vector.h"
 #include "access/datavec/hnsw.h"
+#include "access/tableam.h"
 #include "utils/dynahash.h"
+#include "commands/vacuum.h"
+#include "storage/procarray.h"
 
 pq_func_t g_pq_func = {0};
 uint32 g_mmapOff = 0;
@@ -533,7 +536,8 @@ void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint)
     return;
 }
 bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
-                     bool loadVec, float *maxDistance, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo)
+                     bool loadVec, float *maxDistance, bool enableRabitQ, RabitqQueryParams *rbqParams,
+                     RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo)
 {
     
     HnswElementTuple etup;
@@ -541,8 +545,8 @@ bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation in
     PQParams *params;
     Page page = (Page)GetMMapPage(index, element->blkno);
     if (page == NULL) {
-        return HnswLoadElement(element, distance, q, index, procinfo,
-                                         collation, loadVec, maxDistance, scan, enablePQ, pqinfo);
+        return HnswLoadElement(element, distance, q, index, procinfo, collation, loadVec, maxDistance,
+                               enableRabitQ, rbqParams, rbqDiskParams, scan, enablePQ, pqinfo);
     }
 
     etup = (HnswElementTuple)PageGetItem(page, PageGetItemId(page, element->offno));
@@ -573,13 +577,13 @@ bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation in
 
     /* Load element */
     if (distance == NULL || maxDistance == NULL || *distance < *maxDistance) {
-        HnswLoadElementFromTuple(element, etup, true, loadVec);
+        HnswLoadElementFromTuple(element, etup, true, loadVec, NULL); // todo wjy mmap
         if (enablePQ) {
             params = &pqinfo->params;
             Vector *vd1 = &etup->data;
             Vector *vd2 = (Vector *)DatumGetPointer(*q);
             float exactDis;
-            if (pqinfo->params.funcType == HNSW_PQ_DIS_IP) {
+            if (pqinfo->params.funcType == DIS_IP) {
                 exactDis = -VectorInnerProduct(params->dim, vd1->x, vd2->x);
             } else {
                 exactDis = VectorL2SquaredDistance(params->dim, vd1->x, vd2->x);
@@ -593,17 +597,20 @@ bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation in
 
 
 HnswCandidate *MMapEntryCandidate(char *base, HnswElement entryPoint, Datum q, Relation index, FmgrInfo *procinfo,
-                                  Oid collation, bool loadVec, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo)
+                                  Oid collation, bool loadVec, bool enableRabitQ, RabitqQueryParams *rbqParams,
+                                  RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ,
+                                  PQSearchInfo *pqinfo)
 {
     if (index == NULL || !entryPoint->fromMmap || !CanUseMmap(index)) {
-        return HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, loadVec, scan, enablePQ, pqinfo);
+        return HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, loadVec,
+                                  enableRabitQ, rbqParams, rbqDiskParams, scan, enablePQ, pqinfo);
     }
     HnswCandidate *hc = (HnswCandidate *)palloc(sizeof(HnswCandidate));
 
     HnswPtrStore(base, hc->element, entryPoint);
 
-    MmapLoadElement(entryPoint, &hc->distance, &q, index, procinfo,
-                                     collation, loadVec, NULL, scan, enablePQ, pqinfo);
+    MmapLoadElement(entryPoint, &hc->distance, &q, index, procinfo, collation, loadVec,
+                    NULL, enableRabitQ, rbqParams, rbqDiskParams, scan, enablePQ, pqinfo);
     return hc;
 }
 
@@ -643,5 +650,286 @@ void HnswLoadUnvisitedFromMmap(HnswElement element, HnswElement *unvisited, int 
             unvisited[(*unvisitedLength)++] = HnswInitElementFromBlock(ItemPointerGetBlockNumber(indextid),
                                                                        ItemPointerGetOffsetNumber(indextid));
         }
+    }
+}
+
+BlockNumber BlockSamplerGetBlock(BlockSampler bs)
+{
+    if (BlockSampler_HasMore(bs)) {
+        return BlockSampler_Next(bs);
+    }
+    return InvalidBlockNumber;
+}
+
+
+static void SampleUStoreTuples(SamplingContext* ctx)
+{
+    Relation onerel = ctx->onerel;
+
+    for (int i = 0; i < onerel->rd_att->natts; i++) {
+        if (onerel->rd_att->attrs[i].attcacheoff >= 0) {
+            onerel->rd_att->attrs[i].attcacheoff = -1;
+        }
+    }
+
+    TupleTableSlot* slot = MakeSingleTupleTableSlot(RelationGetDescr(onerel), false, onerel->rd_tam_ops);
+    OffsetNumber maxoffset = UHeapPageGetMaxOffsetNumber(ctx->targpage);
+
+    /* Inner loop over all tuples on the selected page */
+    for (OffsetNumber targoffset = FirstOffsetNumber; targoffset <= maxoffset; targoffset++) {
+        RowPtr* lp = UPageGetRowPtr(ctx->targpage, targoffset);
+        bool sampleIt = false;
+        TransactionId xid;
+        UHeapTuple targTuple;
+
+        if (RowPtrIsDeleted(lp)) {
+            ctx->deadrows += 1;
+            continue;
+        }
+        if (!RowPtrIsNormal(lp)) {
+            continue;
+        }
+        if (!RowPtrHasStorage(lp)) {
+            continue;
+        }
+
+        /* Allocate memory for target tuple */
+        targTuple = UHeapGetTuple(onerel, ctx->targbuffer, targoffset);
+
+        switch (UHeapTupleSatisfiesOldestXmin(targTuple, ctx->OldestXmin, ctx->targbuffer,
+                                              true, &targTuple, &xid, NULL, onerel)) {
+            case UHEAPTUPLE_LIVE:
+                sampleIt = true;
+                ctx->liverows += 1;
+                break;
+
+            case UHEAPTUPLE_DEAD:
+            case UHEAPTUPLE_RECENTLY_DEAD:
+                /* Count dead and recently-dead rows */
+                ctx->deadrows += 1;
+                break;
+
+            case UHEAPTUPLE_INSERT_IN_PROGRESS:
+                if (TransactionIdIsCurrentTransactionId(xid)) {
+                    sampleIt = true;
+                    ctx->liverows += 1;
+                }
+                break;
+
+            case UHEAPTUPLE_DELETE_IN_PROGRESS:
+                if (TransactionIdIsCurrentTransactionId(xid)) {
+                    ctx->deadrows += 1;
+                } else {
+                    ctx->liverows += 1;
+                }
+                break;
+
+            default:
+                elog(ERROR, "unexpected UHeapTupleSatisfiesOldestXmin result");
+                break;
+        }
+
+        /* Process tuple if it should be sampled */
+        if (sampleIt) {
+            ExecStoreTuple(targTuple, slot, InvalidBuffer, false);
+
+            if (ctx->numrows >= ctx->targrows) {
+                if (ctx->rowstoskip < 0) {
+                    ctx->rowstoskip = anl_get_next_S(ctx->samplerows, ctx->targrows, &ctx->rstate);
+                }
+                if (ctx->rowstoskip <= 0) {
+                    int64 k = (int64)(ctx->targrows * anl_random_fract());
+                    AssertEreport(k >= 0 && k < ctx->targrows, MOD_OPT,
+                                  "Index number out of range when replacing tuples.");
+                }
+                ctx->rowstoskip -= 1;
+            }
+            ctx->samplerows += 1;
+        }
+
+        /* Free memory for target tuple. */
+        if (targTuple) {
+            UHeapFreeTuple(targTuple);
+        }
+    }
+
+    /* Now release the lock and pin on the page */
+    ExecDropSingleTupleTableSlot(slot);
+
+    for (int i = 0; i < onerel->rd_att->natts; i++) {
+        if (onerel->rd_att->attrs[i].attcacheoff >= 0) {
+            onerel->rd_att->attrs[i].attcacheoff = -1;
+        }
+    }
+}
+
+static void SampleHeapTuples(SamplingContext* ctx)
+{
+    OffsetNumber maxoffset = PageGetMaxOffsetNumber(ctx->targpage);
+
+    /* Inner loop over all tuples on the selected page */
+    for (OffsetNumber targoffset = FirstOffsetNumber; targoffset <= maxoffset; targoffset++) {
+        ItemId itemid;
+        HeapTupleData targtuple;
+        bool sampleIt = false;
+
+        /* IO collector and IO scheduler for analyze statement */
+        if (ENABLE_WORKLOAD_CONTROL) {
+            IOSchedulerAndUpdate(IO_TYPE_READ, 10, IO_TYPE_ROW);
+        }
+
+        targtuple.t_tableOid = InvalidOid;
+        targtuple.t_bucketId = InvalidBktId;
+        HeapTupleCopyBaseFromPage(&targtuple, ctx->targpage);
+        itemid = PageGetItemId(ctx->targpage, targoffset);
+
+        if (!ItemIdIsNormal(itemid)) {
+            if (ItemIdIsDead(itemid)) {
+                ctx->deadrows += 1;
+            }
+            continue;
+        }
+
+        ItemPointerSet(&targtuple.t_self, ctx->targblock, targoffset);
+        targtuple.t_tableOid = RelationGetRelid(ctx->onerel);
+        targtuple.t_bucketId = RelationGetBktid(ctx->onerel);
+        targtuple.t_data = (HeapTupleHeader)PageGetItem(ctx->targpage, itemid);
+        targtuple.t_len = ItemIdGetLength(itemid);
+
+        switch (HeapTupleSatisfiesVacuum(&targtuple, ctx->OldestXmin, ctx->targbuffer, ctx->isAnalyzing)) {
+            case HEAPTUPLE_LIVE:
+                sampleIt = true;
+                ctx->liverows += 1;
+                break;
+
+            case HEAPTUPLE_DEAD:
+            case HEAPTUPLE_RECENTLY_DEAD:
+                /* Count dead and recently-dead rows */
+                ctx->deadrows += 1;
+                break;
+
+            case HEAPTUPLE_INSERT_IN_PROGRESS:
+                if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(ctx->targpage, targtuple.t_data))) {
+                    sampleIt = true;
+                    ctx->liverows += 1;
+                }
+                break;
+
+            case HEAPTUPLE_DELETE_IN_PROGRESS:
+                if (TransactionIdIsCurrentTransactionId(HeapTupleGetUpdateXid(&targtuple))) {
+                    ctx->deadrows += 1;
+                } else {
+                    sampleIt = true;
+                    ctx->liverows += 1;
+                }
+                break;
+
+            default:
+                ereport(ERROR,
+                        (errcode(ERRCODE_CASE_NOT_FOUND),
+                         errmsg("unexpected HeapTupleSatisfiesVacuum result")));
+                break;
+        }
+
+        /* Process tuple if it should be sampled */
+        if (sampleIt) {
+            if (ctx->numrows < ctx->targrows) {
+                if (ctx->estimateTableRownum) {
+                    ctx->numrows++;
+                }
+            } else {
+                /* Reservoir sampling algorithm */
+                if (ctx->rowstoskip < 0) {
+                    ctx->rowstoskip = anl_get_next_S(ctx->samplerows, ctx->targrows, &ctx->rstate);
+                }
+
+                if (ctx->rowstoskip <= 0) {
+                    int64 k = (int64)(ctx->targrows * anl_random_fract());
+                    AssertEreport(k >= 0 && k < ctx->targrows, MOD_OPT,
+                                  "Index number out of range when replacing tuples.");
+                }
+                ctx->rowstoskip -= 1;
+            }
+            ctx->samplerows += 1;
+        }
+    }
+}
+
+/* Main function to estimate number of rows */
+void EstimateRows(Relation onerel, double* totalrows)
+{
+    SamplingContext ctx = {0};
+    BlockSamplerData bs;
+    BlockNumber totalblocks;
+    BlockNumber targblock = 0;
+    BlockNumber sampleblock = 0;
+
+    ctx.onerel = onerel;
+    ctx.targrows = DEFAULT_TARGET_ROWS * abs(default_statistics_target);
+    ctx.rowstoskip = -1;
+    ctx.isAnalyzing = true;
+    ctx.estimateTableRownum = false;
+    ctx.rstate = anl_init_selection_state(ctx.targrows);
+    ctx.OldestXmin = GetOldestXmin(onerel);
+
+    totalblocks = RelationGetNumberOfBlocks(onerel);
+
+    /* Initialize block sampler */
+    BlockSampler_Init(&bs, totalblocks, ctx.targrows);
+
+    /* Sample blocks according to sampling strategy */
+    while (InvalidBlockNumber != (targblock = BlockSamplerGetBlock(&bs))) {
+        vacuum_delay_point();
+        sampleblock++;
+
+        ctx.targbuffer = ReadBufferExtended(onerel, MAIN_FORKNUM, targblock, RBM_NORMAL, NULL);
+        LockBuffer(ctx.targbuffer, BUFFER_LOCK_SHARE);
+        ctx.targpage = BufferGetPage(ctx.targbuffer);
+        ctx.targblock = targblock;
+
+        /* Sample tuples based on storage format */
+        if (RelationIsUstoreFormat(onerel)) {
+            SampleUStoreTuples(&ctx);
+        } else {
+            SampleHeapTuples(&ctx);
+        }
+
+        UnlockReleaseBuffer(ctx.targbuffer);
+    }
+
+    if (bs.m > 0) {
+        *totalrows = floor((ctx.liverows / bs.m) * totalblocks + 0.5);
+    } else {
+        *totalrows = 0.0;
+    }
+}
+
+void GetTupleFromHeap(Relation relation, ItemPointer tid, HeapTuple tuple)
+{
+    Buffer user_buf = InvalidBuffer;
+    errno_t rc = memset_s(tuple, BLCKSZ, 0, BLCKSZ);
+    securec_check(rc, "\0", "\0");
+    tuple->t_data = (HeapTupleHeader)((char *)tuple + HEAPTUPLESIZE);
+    Assert(tid != NULL);
+    tuple->t_self = *tid;
+
+    if (heap_fetch(relation, SnapshotAny, tuple, &user_buf, false, NULL)) {
+        ReleaseBuffer(user_buf);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("The tuple is not found"),
+            errdetail("Another user is getting tuple or the datum is NULL")));
+    }
+}
+
+int GetFunctionType(FmgrInfo* procinfo, FmgrInfo* normprocinfo)
+{
+    switch (procinfo->fn_oid) {
+        case L2_FUNC_OID:
+            return DIS_L2;
+        case IP_FUNC_OID:
+            return normprocinfo ? DIS_COSINE : DIS_IP;
+        default:
+            ereport(ERROR, (errmsg("current data type or distance type can't support index build.")));
+            return -1;
     }
 }

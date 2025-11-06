@@ -374,6 +374,7 @@ Software dependency requirements are as follows:
 | glibc-devel   | 2.17-111            |
 | patch         | 2.7.1-10            |
 | lsb_release   | 4.1                 |
+| openblas-devel| 0.3.3及以上          |
 
 ### Downloading openGauss
 

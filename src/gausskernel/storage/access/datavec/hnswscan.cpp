@@ -79,27 +79,29 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
         pqinfo.pqMode = pqMode;
         pqinfo.lc = entryPoint->level;
         ep = list_make1(MMapEntryCandidate(
-                        base, entryPoint, q, index, procinfo, collation, false, NULL, enablePQ, &pqinfo));
+                        base, entryPoint, q, index, procinfo, collation, false, false, NULL,
+                        NULL, NULL, enablePQ, &pqinfo));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
             pqinfo.lc = lc;
             w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL,
-                                NULL, NULL, true, NULL, true, NULL, enablePQ, &pqinfo);
+                                NULL, NULL, true, NULL, false, NULL, NULL, true, NULL, enablePQ, &pqinfo);
             ep = w;
         }
         pqinfo.lc = 0;
         w = HnswSearchLayer(base, q, ep, hnswEfSearch, 0, index, procinfo, collation, m, false, NULL, &so->v,
                             u_sess->datavec_ctx.hnsw_iterative_scan != HNSW_ITERATIVE_SCAN_OFF ? &so->discarded : NULL,
-                            true, &so->tuples, true, NULL, enablePQ, &pqinfo);
+                            true, &so->tuples, false, NULL, NULL, true, NULL, enablePQ, &pqinfo);
     } else {
-        ep = list_make1(MMapEntryCandidate(base, entryPoint, q, index, procinfo, collation, false));
+        ep = list_make1(MMapEntryCandidate(base, entryPoint, q, index, procinfo, collation, false,
+                        so->enableRabitQ, so->rbqParams, NULL));
         for (int lc = entryPoint->level; lc >= 1; lc--) {
             w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL,
-                                NULL, NULL, true, NULL, true);
+                                NULL, NULL, true, NULL, so->enableRabitQ, so->rbqParams, NULL, true);
             ep = w;
         }
         w = HnswSearchLayer(base, q, ep, hnswEfSearch, 0, index, procinfo, collation, m, false, NULL, &so->v,
                             u_sess->datavec_ctx.hnsw_iterative_scan != HNSW_ITERATIVE_SCAN_OFF ? &so->discarded : NULL,
-                            true, &so->tuples, true);
+                            true, &so->tuples, so->enableRabitQ, so->rbqParams, NULL, true);
     }
     return w;
 }
@@ -132,7 +134,8 @@ static List *ResumeScanItems(IndexScanDesc scan)
     }
 
     return HnswSearchLayer(base, so->q, ep, batchSize, 0, index, so->procinfo, so->collation,
-                           so->m, false, NULL, &so->v, &so->discarded, false, &so->tuples, true);
+                           so->m, false, NULL, &so->v, &so->discarded, false, &so->tuples,
+                           so->enableRabitQ, so->rbqParams, NULL, true);
 }
 
 /*
@@ -191,6 +194,13 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
     so->pqMode = HNSW_PQMODE_DEFAULT;
     InitPQParamsOnDisk(&params, index, so->procinfo, dim, &so->enablePQ, true);
     so->params = params;
+
+    so->rbqParams = (RabitqQueryParams *)palloc(sizeof(RabitqQueryParams));
+    so->rbqParams->dim = dim;
+    so->rbqParams->funcType = GetFunctionType(so->procinfo, so->normprocinfo);
+    so->rbqParams->rbqConfig = InitRbqConfigOnDisk(index, &so->enableRabitQ, &so->rbqParams->centroid, dim);
+    so->rbqParams->rbqConfig->rbqQueryBits = u_sess->datavec_ctx.rbq_query_bits;
+    so->rbqParams->qrbqVec = NULL;
 
     scan->opaque = so;
 
@@ -259,6 +269,38 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
 
         /* Get scan value */
         value = GetScanValue(scan);
+
+        if (so->enableRabitQ) {
+            RabitqQueryParams *rbqParams = so->rbqParams;
+            rbqParams->heap = scan->heapRelation;
+            rbqParams->normprocinfo = so->normprocinfo;
+            rbqParams->collation = so->collation;
+            if (rbqParams->rbqConfig->reType != NotRefine) {
+                rbqParams->originQueryVec = value;
+                if (scan->limitk == -1) {
+                    rbqParams->rbqConfig->kreorder = 0;
+                } else {
+                    rbqParams->rbqConfig->kreorder = (int64)ceil(u_sess->datavec_ctx.rbq_refinek * scan->limitk);
+                }
+                so->length = rbqParams->rbqConfig->kreorder > so->length ?
+                             rbqParams->rbqConfig->kreorder : so->length;
+            }
+            /* Transform scan value */
+            VectorTransform *vtrans = rbqParams->rbqConfig->vtrans;
+            Vector *transValue = InitVector(rbqParams->dim);
+            if (vtrans->type == RANDOM_ORTHOGONAL) {
+                RomTransform(vtrans, ((Vector *)DatumGetPointer(value))->x, transValue->x);
+            } else {
+                FhtTransform(vtrans, ((Vector *)DatumGetPointer(value))->x, transValue->x);
+            }
+            value = (Datum)transValue;
+
+            int qb = rbqParams->rbqConfig->rbqQueryBits;
+            /* Encode query and compute factor */
+            rbqParams->qrbqVec = (QueryRabitqVector *)palloc0(rbqQuerySize(rbqParams->dim, qb));
+            SetRBQQuery(rbqParams->dim, qb, transValue->x,  rbqParams->qrbqVec, rbqParams->centroid,
+                        rbqParams->funcType);
+        }
         so->value = value;
         /*
          * Get a shared lock. This allows vacuum to ensure no in-flight scans
@@ -268,7 +310,6 @@ bool hnswgettuple_internal(IndexScanDesc scan, ScanDirection dir)
 
         so->w = GetScanItems(scan, value);
 
-        /* Release shared lock */
         UnlockPage(scan->indexRelation, HNSW_SCAN_LOCK, ShareLock);
 
         so->first = false;
@@ -369,6 +410,18 @@ void hnswendscan_internal(IndexScanDesc scan)
 
     MemoryContextDelete(so->tmpCtx);
 
+    if (so->rbqParams) {
+        if (so->rbqParams->rbqConfig) {
+            if (so->rbqParams->rbqConfig->vtrans) {
+                pfree(so->rbqParams->rbqConfig->vtrans);
+            }
+            if (so->rbqParams->rbqConfig->sq) {
+                pfree(so->rbqParams->rbqConfig->sq);
+            }
+            pfree(so->rbqParams->rbqConfig);
+        }
+        pfree(so->rbqParams);
+    }
     pfree(so);
     scan->opaque = NULL;
 }

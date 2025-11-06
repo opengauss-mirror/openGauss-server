@@ -9,7 +9,9 @@
 # to build.
 
 # append include directory about zlib1.2.7, lz4
-override CPPFLAGS += -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(top_builddir)/contrib/jieba_tokenizer
+override CPPFLAGS += -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(top_builddir)/contrib/jieba_tokenizer -I/usr/include/openblas
+LAPACKE_LIBS = -lopenblas
+LIBS += $(LAPACKE_LIBS)
 
 ifdef PARTIAL_LINKING
 # old style: linking using SUBSYS.o

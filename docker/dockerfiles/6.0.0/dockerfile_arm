@@ -13,7 +13,7 @@ ENV LANG en_US.utf8
 #RUN yum install -y epel-release
 
 RUN set -eux; \
-    yum install -y bzip2 curl libaio shadow tar&& \
+    yum install -y bzip2 curl libaio shadow tar openblas-devel&& \
     groupadd -g 70 omm; \
     useradd -u 70 -g omm -d /home/omm omm; \
     mkdir -p /var/lib/opengauss && \

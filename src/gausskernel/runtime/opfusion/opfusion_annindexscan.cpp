@@ -180,8 +180,10 @@ void AnnIndexScanFusion::Init(long max_rows)
     }
     if (m_limit) {
         m_scandesc->count = (int64_t)max_rows;
+        m_scandesc->limitk = m_limitCount;
     } else {
         m_scandesc->count = (int64_t)m_node->annCount;
+        m_scandesc->limitk = -1;
     }
 
     m_epq_indexqual = m_node->indexqualorig;

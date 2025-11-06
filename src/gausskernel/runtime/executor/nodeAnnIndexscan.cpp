@@ -79,6 +79,7 @@ static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node)
     slot = node->ss.ss_ScanTupleSlot;
     scandesc = node->iss_ScanDesc;
     scandesc->count = (int64_t)node->annCount;
+    scandesc->limitk = (int64_t)node->limitCount;
     isUstore = RelationIsUstoreFormat(node->ss.ss_currentRelation);
     /*
      * ok, now that we have what we need, fetch the next tuple.

@@ -275,7 +275,9 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:common_interfaces_libpq>
     $<TARGET_OBJECTS:lib_gstrace_common>
 )
-set(gaussdb_LINK_OPTIONS ${BIN_LINK_OPTIONS} ${HOTPATCH_ATOMIC_LDS} -Wl,-E)
+
+find_library(OPENBLAS_LIB openblas HINTS /usr/lib64 /usr/lib)
+set(gaussdb_LINK_OPTIONS -fopenmp ${BIN_LINK_OPTIONS} ${HOTPATCH_ATOMIC_LDS} ${OPENBLAS_LIB} -Wl,-E)
 
 set(gaussdb_LINK_DIRS "")
 message("******${gaussdb_server_lib}******")
@@ -339,6 +341,7 @@ include_directories(
     ${PROJECT_SRC_DIR}/gausskernel/cbb/communication/libcomm_utils
     ${PROJECT_SRC_DIR}/include/iprange
     ${PROJECT_SRC_DIR}/gausskernel/storage/replication
+    /usr/include/openblas
 )
 
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")

@@ -32,6 +32,7 @@
 #include "access/datavec/vector.h"
 #include "access/datavec/vecindex.h"
 #include "access/datavec/utils.h"
+#include "access/datavec/rabitq.h"
 
 /* Hash tables */
 typedef struct TidHashEntry {
@@ -91,8 +92,11 @@ typedef union {
 /* Preserved page numbers */
 #define HNSW_METAPAGE_BLKNO 0
 #define HNSW_HEAD_BLKNO 1                            /* first element page */
-#define HNSW_PQTABLE_START_BLKNO 1                   /* pqtable start page */
-#define HNSW_PQTABLE_STORAGE_SIZE (uint16)(6 * 1024) /* pqtable storage size in each page */
+#define HNSW_CHUNK_START_BLKNO 1                   /* pqtable or rabit matrix start page */
+#define HNSW_PQTABLE_STORAGE_SIZE (uint16)(6 * 1024)
+#define HNSW_PQTABLE_START_BLKNO 1
+#define HNSWPQ_DEFAULT_TARGET_ROWS 300
+#define HNSWPQ_MAX_PATH_LEN 4096
 
 /* Append page slot info */
 #define HNSW_DEFAULT_NPAGES_PER_SLOT 50
@@ -335,6 +339,7 @@ struct HnswElementData {
     BlockNumber neighborPage;
     HnswDatumPtr value;
     HnswDatumPtr pqcodes;
+    HnswDatumPtr rbqcodes;
     LWLock lock;
     bool fromMmap;
 };
@@ -368,7 +373,15 @@ typedef struct HnswOptions {
     bool useMmap;
     int pqM;            /* number of subquantizer */
     int pqKsub;         /* number of centroids for each subquantizer */
+    bool enableRabitQ;
+    bool rabitqFHT;     /* use FHT Matrix or Random Orthogonal Matrix */
+    char *rabitqRT;     /* whether to rerank, and the type */
 } HnswOptions;
+
+#define HnswOptionsGetStringData(_basePtr, _memberName, _defaultVal)                    \
+    (((_basePtr) && (((HnswOptions*)(_basePtr))->_memberName))                          \
+            ? (((char*)(_basePtr) + *(int*)&(((HnswOptions*)(_basePtr))->_memberName))) \
+            : (_defaultVal))
 
 typedef struct HnswGraph {
     /* Graph state */
@@ -398,6 +411,9 @@ typedef struct HnswShared {
     char *pqTable;
     float *pqDistanceTable;
 
+    float *centroid;
+    RabitQConfig *rbqConfig;
+
     /* Mutex for mutable state */
     slock_t mutex;
 
@@ -423,6 +439,7 @@ typedef struct HnswAllocator {
 typedef struct HnswTypeInfo {
     int maxDimensions;
     bool supportPQ;
+    bool supportRabitQ;
     Size (*itemSize) (int dimensions);
     Datum (*normalize)(PG_FUNCTION_ARGS);
     void (*checkValue)(Pointer v);
@@ -478,6 +495,12 @@ typedef struct HnswBuildState {
     PQParams *params;
     int pqMode;
 
+    /* RabitQ info */
+    bool enableRabitQ;
+    bool rbqDelay;
+    float *centroid;
+    RabitQConfig *rbqConfig;
+
     VectorArray samples;
     BlockSamplerData bs;
     double rstate;
@@ -507,6 +530,18 @@ typedef struct HnswMetaPageData {
     uint16 pqTableNblk;
     uint32 pqDisTableSize; /* SDC */
     uint16 pqDisTableNblk;
+
+    /* RabitQ info */
+    bool enableRabitQ;
+    bool useFHT;
+    bool rbqDelay;
+    int64 rbqInsertRows;
+    uint16 reOffset;
+    uint16 matrixNblk;
+    uint32 matrixSize;
+    RefineType reType;
+    uint16 otherNblk;
+    uint32 otherSize; /* centroid + (min + diff) if reType == SQ8 */
 } HnswMetaPageData;
 
 typedef HnswMetaPageData *HnswMetaPage;
@@ -611,6 +646,9 @@ typedef struct HnswScanOpaqueData {
     PQParams params;
     int pqMode;
 
+    bool enableRabitQ;
+    RabitqQueryParams *rbqParams;
+
     /* used in ustore only */
     VectorScanData vs;
     int length;
@@ -668,6 +706,9 @@ bool HnswGetEnablePQ(Relation index);
 bool HnswGetEnableMMap(Relation index);
 int HnswGetPqM(Relation index);
 int HnswGetPqKsub(Relation index);
+bool HnswGetEnableRabitQ(Relation index);
+bool HnswGetUseFHT(Relation index);
+RefineType HnswGetRefineType(Relation index);
 FmgrInfo *HnswOptionalProcInfo(Relation index, uint16 procnum);
 Datum HnswNormValue(const HnswTypeInfo *typeInfo, Oid collation, Datum value);
 bool HnswCheckNorm(FmgrInfo *procinfo, Oid collation, Datum value);
@@ -675,7 +716,8 @@ Buffer HnswNewBuffer(Relation index, ForkNumber forkNum);
 void HnswInitPage(Buffer buf, Page page);
 List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation index, FmgrInfo *procinfo, Oid collation,
                       int m, bool inserting, HnswElement skipElement, VisitedHash *v, pairingheap **discarded,
-                      bool initVisited, int64 *tuples, bool tryMmap = false, IndexScanDesc scan = NULL,
+                      bool initVisited, int64 *tuples, bool enableRabitQ, RabitqQueryParams *rbqParams,
+                      RabitqInsertOnDiskParams *rbqDiskParams, bool tryMmap = false, IndexScanDesc scan = NULL,
                       bool enablePQ = false, PQSearchInfo *pqinfo = NULL);
 HnswElement HnswGetEntryPoint(Relation index);
 void HnswGetMetaPageInfo(Relation index, int *m, HnswElement *entryPoint);
@@ -684,26 +726,33 @@ HnswElement HnswInitElement(char *base, ItemPointer tid, int m, double ml, int m
 HnswElement HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno);
 void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entryPoint, Relation index,
                               FmgrInfo *procinfo, Oid collation, int m, int efConstruction, bool existing,
-                              bool enablePQ, PQParams *params);
+                              bool enablePQ, PQParams *params, bool enableRabitQ, int funcType, float *centroid,
+                              RabitqInsertOnDiskParams *rbqDiskParams);
 HnswCandidate *HnswEntryCandidate(char *base, HnswElement em, Datum q, Relation rel, FmgrInfo *procinfo, Oid collation,
-                                  bool loadVec, IndexScanDesc scan = NULL, bool enablePQ = false,
-                                  PQSearchInfo *pqinfo = NULL);
+                                  bool loadVec, bool enableRabitQ, RabitqQueryParams *rbqQueryParams,
+                                  RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan = NULL,
+                                  bool enablePQ = false, PQSearchInfo *pqinfo = NULL);
 void HnswUpdateMetaPage(Relation index, int updateEntry, HnswElement entryPoint, BlockNumber insertPage,
                         ForkNumber forkNum, bool building);
+void HnswUpdateMetaPageRbq(Relation index, ForkNumber forkNum, bool updateDelay);
 void HnswSetNeighborTuple(char *base, HnswNeighborTuple ntup, HnswElement e, int m);
 void HnswAddHeapTid(HnswElement element, ItemPointer heaptid);
 void HnswInitNeighbors(char *base, HnswElement element, int m, HnswAllocator *alloc);
-bool HnswInsertTupleOnDisk(Relation index, Datum value, Datum *values, const bool *isnull, ItemPointer heap_tid,
-                           bool building);
+bool HnswInsertTupleOnDisk(Relation index, Datum value, const bool *isnull, ItemPointer heap_tid,
+                           bool building, Relation heap);
 void HnswUpdateNeighborsOnDisk(Relation index, FmgrInfo *procinfo, Oid collation, HnswElement e, int m,
-                               bool checkExisting, bool building);
-void HnswLoadElementFromTuple(HnswElement element, HnswElementTuple etup, bool loadHeaptids, bool loadVec);
+                               bool checkExisting, bool building, bool enableRabitQ,
+                               RabitqInsertOnDiskParams *rbqDiskParams);
+void HnswLoadElementFromTuple(HnswElement element, HnswElementTuple etup, bool loadHeaptids,
+                              bool loadVec, Datum eRbqDiskVec);
 bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
-                     bool loadVec, float *maxDistance, IndexScanDesc scan = NULL, bool enablePQ = false,
+                     bool loadVec, float *maxDistance, bool enableRabitQ, RabitqQueryParams *rbqParams,
+                     RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan = NULL, bool enablePQ = false,
                      PQSearchInfo *pqinfo = NULL);
-void HnswSetElementTuple(char *base, HnswElementTuple etup, HnswElement element);
+void HnswSetElementTuple(char *base, HnswElementTuple etup, HnswElement element, Size rbqEtupSize);
 void HnswUpdateConnection(char *base, HnswElement element, HnswCandidate *hc, int lm, int lc, int *updateIdx,
-                          Relation index, FmgrInfo *procinfo, Oid collation);
+                          Relation index, FmgrInfo *procinfo, Oid collation, bool enableRabitQ,
+                          RabitqInsertOnDiskParams *rbqDiskParams);
 void HnswLoadNeighbors(HnswElement element, Relation index, int m);
 const HnswTypeInfo *HnswGetTypeInfo(Relation index);
 bool HnswDelete(Relation index, Datum *values, const bool *isnull, ItemPointer heapTCtid, bool isRollbackIndex);
@@ -722,6 +771,13 @@ int GetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams 
                   const float *pqDistanceTable, float *pqDistance);
 int getPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
 void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ, bool trymmap);
+void HnswGetRbqInfoFromMetaPage(Relation index, bool *enableRabitQ, bool *useFHT, uint16 *reOffset,
+                                RefineType *reType, uint16 *matrixNblk, uint32 *matrixSize,
+                                uint16 *otherNblk, uint32 *otherSize, bool *rbqDelay, int64 *rbqInsertRows);
+void FlushChunkInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint16 nblks, uint32 totalSize);
+RabitQConfig *InitRbqConfigOnDisk(Relation index, bool *enableRabitQ, float **centroid, int dim);
+void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, HnswBuildState *buildstate,
+                       ForkNumber forkNum);
 
 Datum hnswhandler(PG_FUNCTION_ARGS);
 Datum hnswbuild(PG_FUNCTION_ARGS);
@@ -765,11 +821,14 @@ static inline HnswNeighborArray *HnswGetNeighbors(char *base, HnswElement elemen
     return (HnswNeighborArray *)HnswPtrAccess(base, neighborList[lc]);
 }
 HnswCandidate *MMapEntryCandidate(char *base, HnswElement entryPoint, Datum q, Relation index, FmgrInfo *procinfo, Oid collation,
-                                    bool loadVec, IndexScanDesc scan = NULL, bool enablePQ = false, PQSearchInfo *pqinfo = NULL);
+                                  bool loadVec, bool enableRabitQ, RabitqQueryParams *rbqParams,
+                                  RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan = NULL,
+                                  bool enablePQ = false, PQSearchInfo *pqinfo = NULL);
 
 uint8* LoadPQcode(HnswElementTuple tuple);
 bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
-                     bool loadVec, float *maxDistance, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo);
+                     bool loadVec, float *maxDistance, bool enableRabitQ, RabitqQueryParams *rbqParams,
+                     RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo);
 void HnswLoadUnvisitedFromMmap(HnswElement element, HnswElement *unvisited, int *unvisitedLength,
                           VisitedHash *v, Relation index, int m, int lm, int lc);
 void HnswLoadUnvisitedFromDisk(HnswElement element, HnswElement *unvisited, int *unvisitedLength,

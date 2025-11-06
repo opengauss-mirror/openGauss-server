@@ -184,6 +184,7 @@ bool SelectForAnnFusion::execute(long max_rows, char* completionTag)
     if (m_local.m_position == 0) {
         m_local.m_scan->refreshParameter(params);
         long ef_search = start_row + get_rows;
+        ((AnnIndexScanFusion *)m_local.m_scan)->m_limitCount = ef_search;
         ef_search = (ef_search > u_sess->datavec_ctx.hnsw_ef_search) ? ef_search : 0;
         m_local.m_scan->Init(ef_search);
     }

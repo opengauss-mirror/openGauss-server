@@ -86,7 +86,7 @@ static void ValidateStrOptStringOptimize(const char *val);
 static void ValidateStrOptEncryptAlgo(const char *val);
 static void ValidateStrOptDekCipher(const char *val);
 static void ValidateStrOptCmkId(const char *val);
-
+static void ValidateRabitqRefineOption(const char *val);
 
 #ifdef USE_SPQ
 static void CheckSpqBTBuildOption(const char *val);
@@ -128,6 +128,10 @@ static relopt_bool boolRelOpts[] = {
     {{"enable_pq", "Whether to enable PQ", RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT }, GENERIC_DEFAULT_ENABLE_PQ },
     {{"use_mmap", "Whether to enable use mmap during hnsw search", RELOPT_KIND_HNSW }, GENERIC_DEFAULT_USE_MMAP },
     {{"by_residual", "Whether to use residual during IVFPQ", RELOPT_KIND_IVFFLAT}, IVFPQ_DEFAULT_RESIDUAL},
+    {{"enable_rabitq", "Whether to enable RabitQ", RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT},
+      GENERIC_DEFAULT_ENABLE_RABITQ},
+    {{"rabitq_fht", "Whether to use fht transform in RabitQ", RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT},
+      GENERIC_DEFAULT_USE_FHT},
     /* list terminator */
     {{NULL}}};
 
@@ -561,6 +565,13 @@ static relopt_string stringRelOpts[] = {
         true,
         validateViewSecurityOption,
         NULL
+    },
+    {
+        {"rabitq_refine_type", "sq8, fp32, none", RELOPT_KIND_HNSW | RELOPT_KIND_IVFFLAT},
+        strlen(RABITQ_REFINE_TYPE_SQ8),
+        false,
+        ValidateRabitqRefineOption,
+        RABITQ_REFINE_TYPE_SQ8,
     },
     /* list terminator */
     {{NULL}}
@@ -2257,6 +2268,24 @@ static void ValidateStrOptIndexsplit(const char *val)
         pg_strcasecmp(val, INDEXSPLIT_OPT_INSERTPT) != 0) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid string for  \"INDEXSPLIT\" option"),
             errdetail("Valid string are \"default\", \"insertpt\".")));
+    }
+}
+
+/*
+ * Brief        : Check the data_compression option for d database index.
+ * Input        : val, data_compression option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateRabitqRefineOption(const char *val)
+{
+    if (pg_strcasecmp(val, RABITQ_REFINE_TYPE_SQ8) != 0 &&
+        pg_strcasecmp(val, RABITQ_REFINE_TYPE_FP32) != 0 &&
+        pg_strcasecmp(val, RABITQ_REFINE_TYPE_NONE) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Invalid string for \"rabitq_refine_type\" option for Datavec"),
+            errdetail("Valid string are \"none\", \"sq8\", \"fp32\".")));
     }
 }
 

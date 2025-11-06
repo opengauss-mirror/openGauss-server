@@ -75,6 +75,7 @@ private:
 public:
     int m_numSimpleVars;
     int m_lastScanVar;
+    int64 m_limitCount;
     bool m_isustore;
     TupleTableSlot* m_scanslot;
 };

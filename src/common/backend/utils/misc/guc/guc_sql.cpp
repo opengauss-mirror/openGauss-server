@@ -355,7 +355,7 @@ static const struct config_enum_entry hnsw_iterative_scan_options[] = {
     {NULL, 0, false}
 };
 
-typedef struct format_behavior_compat_entry {
+typedef struct b_format_behavior_compat_entry {
     const char *name; /* name of behavior compat entry */
     int flag;         /* bit flag position */
 } b_format_behavior_compat_entry;
@@ -2636,6 +2636,33 @@ static void InitSqlConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"rbq_query_bits",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Query vector quantization bits in RabitQ."),
+            gettext_noop("Valid range is -1..INT_MAX.")},
+            &u_sess->datavec_ctx.rbq_query_bits,
+            8,
+            1,
+            8,
+            NULL,
+            NULL,
+            NULL},
+        {{"rbq_sample_rows",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("If there is no data in the table when building the RabitQ index first,"
+                "set it so that the index building can only be triggered after inserting rbq_sample_rows of data."),
+            gettext_noop("Valid range is 1000..INT_MAX.")},
+            &u_sess->datavec_ctx.rbq_sample_rows,
+            1000,
+            1000,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
         {{"ivfflat_probes",
             PGC_USERSET,
             NODE_ALL,
@@ -2825,6 +2852,19 @@ static void InitSqlConfigureNamesReal()
             0.75,
             0.0,
             1.0,
+            NULL,
+            NULL,
+            NULL},
+        {{"rbq_refinek",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_OTHER,
+            gettext_noop("Set the number of items requiring reordering to x times the topk after HNSWRBQ."),
+            NULL},
+            &u_sess->datavec_ctx.rbq_refinek,
+            5.0,
+            0,
+            DBL_MAX,
             NULL,
             NULL,
             NULL},
