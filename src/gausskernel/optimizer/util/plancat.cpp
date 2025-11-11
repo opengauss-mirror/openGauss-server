@@ -23,6 +23,7 @@
 #include "access/heapam.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
+#include "access/datavec/hnsw.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_statistic.h"
@@ -508,6 +509,17 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                 }
                 index_close(indexRelation, NoLock);
                 continue;
+            }
+
+            /* If the rabitq index built first has not been trained, ignore */
+            if (indexRelation->rd_rel->relam == HNSW_AM_OID) {
+                bool rbqDelay;
+                HnswGetRbqInfoFromMetaPage(indexRelation, NULL, NULL, NULL, NULL, NULL, NULL,
+                                           NULL, NULL, &rbqDelay, NULL);
+                if (rbqDelay) {
+                    index_close(indexRelation, NoLock);
+                    continue;
+                }
             }
 
             /*

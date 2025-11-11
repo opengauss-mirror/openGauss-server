@@ -1720,6 +1720,139 @@ void VectorInnerProductNY(size_t d, size_t ny, float *x, char *pqTable, Size sub
 }
 #endif
 
+// todo smid
+#ifdef __aarch64__
+float VectorRbqDpPopcnt(int dim, int qb, uint8 *qx, uint8 *ex)
+{
+    int dim8b = (dim + 7) / 8;
+    int dim64b = (dim8b / 8) * 8;
+    int dim128b = (dim8b / 16) * 16;
+    float distance = 0;
+    for (int i = 0; i < qb; i++) {
+        uint8 *qxi = qx + i * dim8b;
+        int count = 0;
+        for (int offset = 0; offset < dim128b; offset += 16) {
+            uint8x16_t v_qx = vld1q_u8(qxi + offset);
+            uint8x16_t v_ex = vld1q_u8(ex + offset);
+            uint8x16_t v_and = vandq_u8(v_qx, v_ex);
+            uint8x16_t cnt8 = vcntq_u8(v_and);
+            uint16x8_t cnt16 = vpaddlq_u8(cnt8);
+            count += vaddv_u16(vget_low_u16(cnt16)) + vaddv_u16(vget_high_u16(cnt16));
+        }
+        for (int offset = dim128b; offset < dim64b; offset += 8) {
+            uint64_t qxj = *(uint64_t *)(qxi + offset);
+            uint64_t exj = *(uint64_t *)(ex + offset);
+            count += __builtin_popcountll(qxj & exj);
+        }
+        for (int offset = dim64b; offset < dim8b; offset++) {
+            uint8 qxj = *(qxi + offset);
+            uint8 exj = *(ex + offset);
+            count += __builtin_popcount(qxj & exj);
+        }
+        distance += (count << i);
+    }
+    return distance;
+}
+#else
+float VectorRbqDpPopcnt(int dim, int qb, uint8 *qx, uint8 *ex)
+{
+    int dim8b = (dim + 7) / 8;
+    int dim64b = (dim8b / 8) * 8;
+    float distance = 0;
+    for (int i = 0; i < qb; i++) {
+        uint8 *qxi = qx + i * dim8b;
+        int count = 0;
+        for (int j = 0; j < dim64b; j += 8) {
+            uint64_t qxj = *(uint64_t *)(qxi + j);
+            uint64_t exj = *(uint64_t *)(ex + j);
+            count += __builtin_popcountll(qxj & exj);
+        }
+        for (int j = dim64b; j < dim8b; j++) {
+            uint8 qxj = *(qxi + j);
+            uint8 exj = *(ex + j);
+            count += __builtin_popcount(qxj & exj);
+        }
+        distance += (count << i);
+    }
+    return distance;
+}
+#endif
+
+void KacsWalk(float* data, uint64_t len)
+{
+    uint64_t base = len % 2;
+    uint64_t offset = base + (len / 2);
+    for (uint64_t i = 0; i < len / 2; i++) {
+        float add = data[i] + data[i + offset];
+        float sub = data[i] - data[i + offset];
+        data[i] = add;
+        data[i + offset] = sub;
+    }
+    if (base != 0) {
+        data[len / 2] *= sqrt(2.0f);
+    }
+}
+
+void FlipSign(const uint8_t* matfht, float* data, uint64_t dim)
+{
+    for (uint64_t i = 0; i < dim; i++) {
+        bool mask = (matfht[i / 8] & (1 << (i % 8))) != 0;
+        if (mask) {
+            data[i] = -data[i];
+        }
+    }
+}
+
+void VecRescale(float* data, uint64_t dim, float val)
+{
+    for (int i = 0; i < dim; i++) {
+        data[i] *= val;
+    }
+}
+
+void RotateOp(float* data, int idx, int dim, int step)
+{
+    for (int i = idx; i < dim; i += 2 * step) {
+        for (int j = 0; j < step; j++) {
+            float x = data[i + j];
+            float y = data[i + j + step];
+            data[i + j] = x + y;
+            data[i + j + step] = x - y;
+        }
+    }
+}
+
+void FHTRotate(float* data, uint64_t dim)
+{
+    uint64_t n = dim;
+    uint64_t step = 1;
+    while (step < n) {
+        RotateOp(data, 0, dim, step);
+        step *= 2;
+    }
+}
+
+void VectorEncodeSQ(int dim, float *vmin, float *vdiff, float *originVec, uint8 *code)
+{
+    for (int i = 0; i < dim; i++) {
+        float xi = 0;
+        if (vdiff[i] != 0) {
+            xi = ((originVec[i] - vmin[i]) / vdiff[i]) * SQ_RANGE;
+        }
+        xi = xi < 0 ? 0 : xi;
+        xi = xi > SQ_RANGE ? SQ_RANGE : xi;
+        code[i] = xi;
+    }
+}
+
+void VectorDecodeSQ(int dim, float *vmin, float *vdiff, float *decodeVec, uint8 *code)
+{
+    for (int i = 0; i < dim; i++) {
+        float xi = (code[i] + 0.5f) / SQ_RANGE;
+        decodeVec[i] = vmin[i] + xi * vdiff[i];
+    }
+}
+
 /*
  * WAL-log a range of blocks in a relation.
  *
@@ -1831,4 +1964,21 @@ int PlanCreateIndexWorkers(Relation heapRelation, IndexInfo *indexInfo)
         parallelWorkers = 0;
     }
     return parallelWorkers;
+}
+
+double VectorSquareNorm(float* x, int dim)
+{
+    return (double)VectorInnerProduct(dim, x, x);
+}
+
+double vector_square(float* x, int dim)
+{
+    double square = 0.0;
+
+    /* Auto-vectorized */
+    for (int i = 0; i < dim; i++) {
+        square += (double)x[i] * (double)x[i];
+    }
+
+    return square;
 }

@@ -157,10 +157,11 @@ bool HnswDeleteIndex(Relation index, HnswElementTuple etup)
     collation = index->rd_indcollation[0];
     q = (Datum)(&etup->data);
     HnswGetMetaPageInfo(index, &m, &entryPoint);
-    ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false, NULL));
+    ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, false, false, NULL, NULL));
 
     for (int lc = entryPoint->level; lc >= 0; lc--) {
-        w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL);
+        w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, false, NULL, NULL, NULL, true,
+                            NULL, false, NULL, NULL);
         ep = w;
     }
 

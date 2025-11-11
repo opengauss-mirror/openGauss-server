@@ -86,7 +86,7 @@ static void GetScanLists(IndexScanDesc scan, Datum value)
                 scanlist->distance = distance;
                 scanlist->key = listId;
                 listId++;
-                if (so->funcType == IVFPQ_DIS_COSINE && so->byResidual) {
+                if (so->funcType == DIS_COSINE && so->byResidual) {
                     Vector *vd = (Vector *)DatumGetPointer(value);
                     scanlist->pqDistance = VectorL2SquaredDistance(so->dimensions, list->center.x, vd->x);
                 } else {
@@ -237,7 +237,7 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
     int pqM = so->pqM;
     int pqKsub = so->pqKsub;
     int kreorder = so->kreorder;
-    bool l2CosResidual = so->funcType != IVFPQ_DIS_IP && so->byResidual;
+    bool l2CosResidual = so->funcType != DIS_IP && so->byResidual;
     pairingheap *reOrderCandidate = pairingheap_allocate(CompareFurthestCandidates, NULL);
     int canLen = 0;
 
@@ -300,7 +300,7 @@ static void GetScanItemsPQ(IndexScanDesc scan, Datum value, float *simTable)
                 if (l2CosResidual) {
                     distance = GetPQDistance(simTable2, code, dis0, pqM, pqKsub, false);
                 } else {
-                    distance = GetPQDistance(simTable, code, dis0, pqM, pqKsub, so->funcType == IVFPQ_DIS_IP);
+                    distance = GetPQDistance(simTable, code, dis0, pqM, pqKsub, so->funcType == DIS_IP);
                 }
 
                 if (kreorder == 0) {

@@ -214,7 +214,7 @@ static void RepairGraphElement(HnswVacuumState *vacuumstate, HnswElement element
 
     /* Find neighbors for element, skipping itself */
     HnswFindElementNeighbors(base, element, entryPoint, index, procinfo, collation,
-                             m, efConstruction, true, false, NULL);
+                             m, efConstruction, true, false, NULL, false, -1, NULL, NULL);
 
     /* Zero memory for each element */
     MemSet(ntup, 0, HNSW_TUPLE_ALLOC_SIZE);
@@ -237,7 +237,7 @@ static void RepairGraphElement(HnswVacuumState *vacuumstate, HnswElement element
     UnlockReleaseBuffer(buf);
 
     /* Update neighbors */
-    HnswUpdateNeighborsOnDisk(index, procinfo, collation, element, m, true, false);
+    HnswUpdateNeighborsOnDisk(index, procinfo, collation, element, m, true, false, false, NULL);
 }
 
 /*
@@ -262,7 +262,8 @@ static void RepairGraphEntryPoint(HnswVacuumState *vacuumstate)
         LockPage(index, HNSW_UPDATE_LOCK, ShareLock);
 
         /* Load element */
-        HnswLoadElement(highestPoint, NULL, NULL, index, vacuumstate->procinfo, vacuumstate->collation, true, NULL);
+        HnswLoadElement(highestPoint, NULL, NULL, index, vacuumstate->procinfo, vacuumstate->collation,
+                        true, NULL, false, NULL, NULL);
 
         /* Repair if needed */
         if (NeedsUpdated(vacuumstate, highestPoint))
@@ -295,7 +296,8 @@ static void RepairGraphEntryPoint(HnswVacuumState *vacuumstate)
              * is outdated, this can remove connections at higher levels in
              * the graph until they are repaired, but this should be fine.
              */
-            HnswLoadElement(entryPoint, NULL, NULL, index, vacuumstate->procinfo, vacuumstate->collation, true, NULL);
+            HnswLoadElement(entryPoint, NULL, NULL, index, vacuumstate->procinfo, vacuumstate->collation,
+                            true, NULL, false, NULL, NULL);
 
             if (NeedsUpdated(vacuumstate, entryPoint)) {
                 /* Reset neighbors from previous update */
@@ -367,7 +369,7 @@ static void RepairGraph(HnswVacuumState *vacuumstate)
 
             /* Create an element */
             element = HnswInitElementFromBlock(blkno, offno);
-            HnswLoadElementFromTuple(element, etup, false, true);
+            HnswLoadElementFromTuple(element, etup, false, true, NULL); // todo wjy
 
             elements = lappend(elements, element);
         }
@@ -514,6 +516,14 @@ static void MarkDeleted(HnswVacuumState *vacuumstate)
             for (int i = 0; i < ntup->count; i++)
                 ItemPointerSetInvalid(&ntup->indextids[i]);
 
+            /* Increment version */
+            /* This is used to avoid incorrect reads for iterative scans */
+            /* Reserve some bits for future use */
+            etup->version++;
+            if (etup->version > HNSW_ELEMENT_TUPLE_MAX_VERSION)
+                etup->version = HNSW_ELEMENT_TUPLE_MIN_VERSION;
+            ntup->version = etup->version;
+
             /*
              * We modified the tuples in place, no need to call
              * page_index_tuple_overwrite
@@ -571,7 +581,7 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
     /* Get m from metapage */
     HnswGetMetaPageInfo(index, &vacuumstate->m, NULL);
     HnswGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
-    vacuumstate->hnswHeadBlkno = HNSW_PQTABLE_START_BLKNO + pqTableNblk + pqDisTableNblk;
+    vacuumstate->hnswHeadBlkno = HNSW_CHUNK_START_BLKNO + pqTableNblk + pqDisTableNblk;
 
     /* Create hash table */
     vacuumstate->deleted = tidhash_create(CurrentMemoryContext, 256, NULL);

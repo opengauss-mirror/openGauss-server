@@ -395,6 +395,7 @@ openGauss支持以下操作系统：
 | patch         | 2.7.1-10        |
 | lsb_release   | 4.1             |
 | readline-devel| 7.0-13          |
+| openblas-devel| 0.3.3及以上          |
 
 ### 下载openGauss
 

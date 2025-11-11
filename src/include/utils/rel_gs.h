@@ -179,6 +179,10 @@ typedef struct RelationMetaData {
 #define COMPRESSION_SNAPPY "snappy"
 #define COMPRESSION_LZ4 "lz4"
 
+#define RABITQ_REFINE_TYPE_SQ8 "sq8"
+#define RABITQ_REFINE_TYPE_FP32 "fp32"
+#define RABITQ_REFINE_TYPE_NONE "none"
+
 /*
  * values for different table access method types.
  */

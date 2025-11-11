@@ -3012,8 +3012,13 @@ typedef struct knl_u_ndp_context {
 typedef struct knl_u_datavec_context {
     int hnsw_ef_search;
     int hnsw_earlystop_threshold;
+    int hnsw_iterative_scan;
+    int hnsw_max_scan_tuples;
+    int rbq_query_bits;
+    int rbq_sample_rows;
     int ivfflat_probes;
     int ivfpq_kreorder;
+    double rbq_refinek;
     bool hnsw_use_mmap;
 } knl_u_datavec_context;
 
