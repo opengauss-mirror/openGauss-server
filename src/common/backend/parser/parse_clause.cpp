@@ -882,6 +882,9 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
     bool isCreateView, bool isMergeInto, bool addUpdateTable)
 
 {
+    /* Guard against stack overflow due to overly deep subtree */
+    check_stack_depth();
+
     if (IsA(n, RangeVar)) {
         /* Plain relation reference, or perhaps a CTE reference */
         RangeVar* rv = (RangeVar*)n;
