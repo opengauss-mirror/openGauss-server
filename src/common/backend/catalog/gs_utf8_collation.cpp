@@ -32,6 +32,12 @@
 #include "access/hash.h"
 #include "utils/lsyscache.h"
 #include "catalog/gs_collation.h"
+#ifdef __aarch64__
+#include <arm_neon.h>
+#define NEON_LOAD_8_BYTES 8
+#define NEON_LOAD_16_BYTES 16
+#endif
+#define FAST_STR_CMP_LOAD_SIZE sizeof(uint64)
 
 typedef struct GS_UNICASE_PAGES {
     GS_UINT32 **sort_page;
@@ -505,9 +511,11 @@ static inline void sort_by_unicode(GS_UINT32 **test_sort, GS_UINT32 *wchar)
 int strnncoll_binary(const unsigned char* arg1, size_t len1,
                      const unsigned char* arg2, size_t len2)
 {
-    size_t len = len1 < len2 ? len1 : len2;
+    int real_len1 = bpchartruelen((const char*)arg1, len1);
+    int real_len2 = bpchartruelen((const char*)arg2, len2);
+    int len = real_len1 < real_len2 ? real_len1 : real_len2;
     int res = memcmp(arg1, arg2, len);
-    return res ? res : (int)(len1 - len2);
+    return res ? res : (int)(real_len1 - real_len2);
 }
 
 /*
@@ -524,6 +532,52 @@ static inline int bincmp_utf8mb4(const unsigned char *arg1, const unsigned char 
     return cmp ? cmp : arg1_len - arg2_len;
 }
 
+/* aggressive space skipping while comare two string */
+static inline void skip_space_for_two_string(const unsigned char** arg1, const unsigned char* arg1_end,
+    const unsigned char** arg2, const unsigned char* arg2_end)
+{
+#ifdef __aarch64__
+    /* use 16 bytes neon to check first, more aggressive */
+    const uint8x16_t space_ascii = vdupq_n_u8(' ');
+    while (*arg1 + NEON_LOAD_16_BYTES < arg1_end && *arg2 + NEON_LOAD_16_BYTES < arg2_end) {
+        uint8x16_t vec_sp = vld1q_u8(*arg1);
+        uint8x16_t vec_tp = vld1q_u8(*arg2);
+        uint8x16_t res_sp = vceqq_u8(vec_sp, space_ascii); // compare the str with blank, true for 1, false for 0
+        uint8x16_t res_tp = vceqq_u8(vec_tp, space_ascii);
+        /* the min value of compare result, if should be all 0xff if it's all blank */
+        if (vminvq_u8(res_sp) == 0 || vminvq_u8(res_tp) == 0) {
+            break;
+        }
+
+        *arg1 += NEON_LOAD_16_BYTES;
+        *arg2 += NEON_LOAD_16_BYTES;
+    }
+#endif
+
+    /* check 8 bytes at one time */
+    uint64 s;
+    uint64 t;
+    int rc;
+    while (*arg1 + FAST_STR_CMP_LOAD_SIZE < arg1_end && *arg2 + FAST_STR_CMP_LOAD_SIZE < arg2_end) {
+        rc = memcpy_s(&s, FAST_STR_CMP_LOAD_SIZE, *arg1, FAST_STR_CMP_LOAD_SIZE);
+        securec_check(rc, "", "");
+        rc = memcpy_s(&t, FAST_STR_CMP_LOAD_SIZE, *arg2, FAST_STR_CMP_LOAD_SIZE);
+        securec_check(rc, "", "");
+        if (s != 0x2020202020202020ULL || t != 0x2020202020202020ULL) {
+            break;
+        }
+
+        *arg1 += FAST_STR_CMP_LOAD_SIZE;
+        *arg2 += FAST_STR_CMP_LOAD_SIZE;
+    }
+
+    while (*arg1 < arg1_end && *arg2 < arg2_end && **arg1 == 0x20 && **arg2 == 0x20) {
+        ++*arg1;
+        ++*arg2;
+    }
+    return;
+}
+
 /*
 * utf8mb4_general_ci / utf8mb4_unicode_ci compare function.
 * return value is 0, arg1 = arg2
@@ -533,15 +587,64 @@ static inline int bincmp_utf8mb4(const unsigned char *arg1, const unsigned char 
 int strnncoll_utf8mb4_general_pad_space(const unsigned char* arg1, size_t len1,
                                         const unsigned char* arg2, size_t len2)
 {
+    const unsigned char* arg1_end = arg1 + len1;
+    const unsigned char* arg2_end = arg2 + len2;
+#ifdef __aarch64__
+    if (len1 >= NEON_LOAD_8_BYTES && len2 >= NEON_LOAD_8_BYTES) {
+        /*
+         * we can load 16 bytes at most, but seems 8 bytes is enough, we think most string has different value
+         * in the first 8 bytes. meanwhile it easy to translate an uint8x8_t to uint64_t.
+         */
+        const uint8x8_t diff = vdup_n_u8(' '); // space
+        const uint8x8_t vec_a = vdup_n_u8('A');
+        const uint8x8_t vec_z = vdup_n_u8('Z');
+
+        while (arg1 + NEON_LOAD_8_BYTES < arg1_end && arg2 + NEON_LOAD_8_BYTES < arg2_end) {
+            /* load 8 char values into vector uint8x8_t */
+            uint8x8_t vec_arg1 = vld1_u8((const unsigned char *)arg1);
+            uint8x8_t vec_arg2 = vld1_u8((const unsigned char *)arg2);
+            /* break if there are non-ascii char */
+            if (vmaxv_u8(vec_arg1) >= 0x80 || vmaxv_u8(vec_arg2) >= 0x80) {
+                break;
+            }
+
+            /* compute the result mask of char vector 'A' <= value <= 'Z' */
+            uint8x8_t mask1 = vcge_u8(vec_arg1, vec_a) & vcle_u8(vec_arg1, vec_z);
+            uint8x8_t mask2 = vcge_u8(vec_arg2, vec_a) & vcle_u8(vec_arg2, vec_z);
+            /*
+             * vadd_u8: add origin vec with 0x20, which will let the origin str to lower case str('A' + 0x20 = 'a')
+             * vbsl_u8: get result by mask, if mask bit is 1, choose second value otherwise choose third value
+             * after this, we get a real 'lower case str' with 8 bytes
+             */
+            vec_arg1 = vbsl_u8(mask1, vadd_u8(vec_arg1, diff), vec_arg1);
+            vec_arg2 = vbsl_u8(mask2, vadd_u8(vec_arg2, diff), vec_arg2);
+
+            /* check wether the two vec are equal */
+            uint64_t val1 = vget_lane_u64(vreinterpret_u64_u8(vec_arg1), 0);
+            uint64_t val2 = vget_lane_u64(vreinterpret_u64_u8(vec_arg2), 0);
+            if (val1 != val2) {
+                /* not equal, copare them by uint64 value directly, swap them first in little-endian machine */
+                val1 = BigEndianToNative64(val1);
+                val2 = BigEndianToNative64(val2);
+                return (val1 > val2) ? 1 : -1;
+            }
+            /* equal, continue to next 8 bytes */
+            arg1 += NEON_LOAD_8_BYTES;
+            arg2 += NEON_LOAD_8_BYTES;
+        }
+    }
+#endif
     GS_UINT32 arg1_word = 0;
     GS_UINT32 arg2_word = 0;
     int res = 0;
-
-    const unsigned char* arg1_end = arg1 + len1;
-    const unsigned char* arg2_end = arg2 + len2;
     const GS_UNICASE_INFO *uni_plane = &g_unicase_default;
 
     while (arg1 < arg1_end && arg2 < arg2_end) {
+        /* quick check for blank */
+        if (*arg1 == ' ' && *arg2 == ' ') {
+            skip_space_for_two_string(&arg1, arg1_end, &arg2, arg2_end);
+            continue;
+        }
         int arg1_bytes = get_current_char_sorted_value(arg1, arg1_end, &arg1_word, uni_plane);
         int arg2_bytes = get_current_char_sorted_value(arg2, arg2_end, &arg2_word, uni_plane);
         /* Incorrect string, compare bytewise */

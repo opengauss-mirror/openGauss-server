@@ -649,6 +649,30 @@ char* pg_lltoa_printtup(int64 value, int* len)
 }
 
 /*
+ * Convert a unsigned 32-bit integer to its string representation
+ *
+ * Caller must ensure that 'a' points to enough memory to hold the result
+ * (at least MAXINT4LEN+1 bytes, counting a trailing NUL).
+ */
+void pg_ultoa(uint32 value, char* a)
+{
+    int len = pg_ultoa_n(value, a);
+    a[len] = '\0';
+}
+
+/*
+ * Convert a unsigned 64-bit integer to its string representation
+ *
+ * Caller must ensure that 'a' points to enough memory to hold the result
+ * (at least MAXINT8LEN+1 bytes, counting a trailing NUL).
+ */
+void pg_ulltoa(uint64 value, char* a)
+{
+    int len = pg_ulltoa_n(value, a);
+    a[len] = '\0';
+}
+
+/*
  * pg_lltoa: convert a signed 128-bit integer to its string representation
  *
  * Caller must ensure that 'a' points to enough memory to hold the result

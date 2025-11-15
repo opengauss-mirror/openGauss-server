@@ -23,6 +23,7 @@
  */
 
 #include "opfusion/opfusion_select.h"
+#include "utils/builtins.h"
 
 SelectFusion::SelectFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
@@ -160,9 +161,14 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
     if (m_local.m_isCompleted) {
         m_local.m_position = 0;
     }
-    errno_t errorno =
-        snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "SELECT %lu", nprocessed);
-    securec_check_ss(errorno, "\0", "\0");
+
+    char nprocessedStr[MAXINT8LEN + 1];
+    pg_ulltoa(nprocessed, nprocessedStr);
+    int rc = strcpy_s(completionTag, COMPLETION_TAG_BUFSIZE, "SELECT ");
+    securec_check(rc, "", "");
+    rc = strcat_s(completionTag, COMPLETION_TAG_BUFSIZE, nprocessedStr);
+    securec_check(rc, "", "");
+
     MemoryContextSwitchTo(oldContext);
 
     /* instr unique sql - we assume that this is no nesting calling of Fusion::execute */

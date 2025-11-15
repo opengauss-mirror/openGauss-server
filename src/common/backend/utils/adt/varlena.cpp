@@ -2530,8 +2530,8 @@ static int bpvarstrfastcmp_builtin(Datum x, Datum y, SortSupport ssup)
     char* a1p = VARDATA_ANY(arg1);
     char* a2p = VARDATA_ANY(arg2);
 
-    len1 = bpchartruelen(a1p, VARSIZE_ANY_EXHDR(arg1));
-    len2 = bpchartruelen(a2p, VARSIZE_ANY_EXHDR(arg2));
+    len1 = VARSIZE_ANY_EXHDR(arg1);
+    len2 = VARSIZE_ANY_EXHDR(arg2);
 
     result = varstr_cmp_by_builtin_collations(a1p, len1, a2p, len2, ssup->ssup_collation);
 

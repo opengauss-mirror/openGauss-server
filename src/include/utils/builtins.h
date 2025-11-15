@@ -473,6 +473,9 @@ extern char* pg_ltoa_printtup(int32 l, int* len);
 extern void pg_ctoa(uint8 i, char* a);
 extern void pg_lltoa(int64 ll, char* a);
 extern char* pg_lltoa_printtup(int64 ll, int* len);
+extern void pg_lltoa(int64 ll, char* a, int* len);
+extern void pg_ultoa(uint32 value, char* a);
+extern void pg_ulltoa(uint64 value, char* a);
 extern void pg_i128toa(int128 value, char* a, int length);
 
 /*
