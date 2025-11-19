@@ -27,6 +27,7 @@
 #include "funcapi.h"
 #include "utils/acl.h"
 #include "utils/plpgsql.h"
+#include "utils/pl_debug.h"
 #include <sys/socket.h>
 
 /*
@@ -68,7 +69,6 @@ static void* debug_client_split_localvariables_msg(uint32 *num);
 static void* debug_client_split_backtrace_msg(uint32* num);
 static List* collect_breakable_line_oid(Oid funcOid);
 static void init_pldebug_htcl();
-static bool CheckPlpgsqlFunc(Oid funcoid, bool report_error = true);
 static List* collect_breakable_line(PLpgSQL_function* func);
 
 static Datum get_tuple_lineno_and_query(DebugClientInfo* client)
@@ -1344,7 +1344,7 @@ static void init_pldebug_htcl()
         hash_create("Debug Func Table", debugSize, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
-static bool CheckPlpgsqlFunc(Oid funcoid, bool report_error)
+bool CheckPlpgsqlFunc(Oid funcoid, bool report_error)
 {
     char* langname = get_func_langname(funcoid);
     if (strcmp(langname, "plpgsql") != 0) {

@@ -27,6 +27,7 @@
 #include "optimizer/pgxcship.h"
 #include "nodes/readfuncs.h"
 #include "utils/plpgsql.h"
+#include "utils/pl_debug.h"
 #include "utils/memutils.h" 
 #include "utils/syscache.h"
 #include "utils/builtins.h"
