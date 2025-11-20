@@ -61,7 +61,7 @@ BEGIN
             e_stack_act := pg_catalog.substr(e_stack_act, 200);
         END IF;
 
-        IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (209|575|641|748) at assignment%'
+        IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (208|574|640|747) at assignment%'
           AND e_stack_act NOT LIKE 'PL/pgSQL function db4ai.sample_snapshot(name,name,name[],numeric[],name[],text[]) line 264 at IF%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.prepare_snapshot_internal(bigint,bigint,bigint,bigint,name,name,text[],text,name,'
