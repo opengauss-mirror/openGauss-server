@@ -1634,3 +1634,4 @@ DROP TABLE arrtest_i CASCADE;
 DROP table arr_tbl CASCADE;
 DROP TABLE arraggtest CASCADE;
 DROP table arrays_t1 CASCADE;
+

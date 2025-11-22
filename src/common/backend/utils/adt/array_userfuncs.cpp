@@ -505,6 +505,7 @@ Datum array_position_common(FunctionCallInfo fcinfo)
     Datum value;
     bool isnull;
     int position;
+    int position_min;
     bool found = false;
     TypeCacheEntry* typentry = NULL;
     ArrayMetaState* my_extra;
@@ -541,6 +542,19 @@ Datum array_position_common(FunctionCallInfo fcinfo)
     element_type = ARR_ELEMTYPE(array);
     position = (ARR_LBOUND(array))[0] - 1;
 
+    /* figure out where to start */
+    if (PG_NARGS() == 3) {
+        if (PG_ARGISNULL(2)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                    errmsg("initial position must not be null")));
+        }
+
+        position_min = PG_GETARG_INT32(2);
+    } else {
+        position_min = (ARR_LBOUND(array))[0];
+    }
+
     /*
      * We arrange to look up type info for array_create_iterator only once per
      * series of calls, assuming the element type doesn't change underneath
@@ -569,6 +583,12 @@ Datum array_position_common(FunctionCallInfo fcinfo)
     array_iterator = array_create_iterator(array, 0, my_extra);
     while (array_iterate(array_iterator, &value, &isnull)) {
         position++;
+
+        /* skip initial elements if caller requested so */
+        if (position < position_min) {
+            continue;
+        }
+
         /*
          * Can't look at the array element's value if it's null; but if we
          * search for null, we have a hit and are done.

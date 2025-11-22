@@ -783,12 +783,10 @@ SELECT CONVERT(DATE,'1753-01-01');
 (1 row)
 
 SELECT CONVERT(DATE, 'Apr 12,2000');
-ERROR:  invalid input syntax for integer: "apr"
-CONTEXT:  referenced column: array_position
-SQL statement "SELECT array_position(ARRAY(SELECT pg_catalog.lower(json_array_elements_text(p_lang_metadata_json -> 'months_shortnames'))), v_monthname)"
-PL/pgSQL function shark_get_monthnum_by_name(text,json) line 8 at assignment
-PL/pgSQL function shark_conv_string_to_datetime2(text,text,numeric) line 224 at assignment
-PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
+ERROR:  The style 0 is not supported for conversions from varchar to date.
+DETAIL:  Use of incorrect "style" parameter value during conversion process.
+HINT:  Change "style" parameter to the proper value and try again.
+CONTEXT:  PL/pgSQL function shark_conv_helper_to_date(text,boolean,numeric) line 6 at RETURN
 referenced column: shark_conv_helper_to_date
 SELECT CONVERT(TIME, '11 AM');
  shark_conv_helper_to_time 

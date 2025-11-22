@@ -167,3 +167,33 @@ select substring_index('12,3,4,5,6,7,8', ',', -3, 3), array_to_string(a[2:4], ',
 
 drop table array_test;
 drop function substring_index;
+SELECT array_position(ARRAY[3,5,4], 5);
+ array_position 
+----------------
+              2
+(1 row)
+
+SELECT array_position('3 5 4'::int2vector::int2[], 5);
+ERROR:  function array_position(smallint[], integer) does not exist
+LINE 1: SELECT array_position('3 5 4'::int2vector::int2[], 5);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: array_position
+SELECT array_position('3 5 4'::int2vector::int2[], 5::int2);
+ array_position 
+----------------
+              1
+(1 row)
+
+SELECT array_position('3 5 4'::int2vector::int2[], 66::int2);
+ array_position 
+----------------
+               
+(1 row)
+
+SELECT array_position(string_to_array('3 5 4'::int2vector::TEXT, ' '), '66');
+ array_position 
+----------------
+               
+(1 row)
+

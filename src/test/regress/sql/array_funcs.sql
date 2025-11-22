@@ -53,3 +53,9 @@ select substring_index('12,3,4,5,6,7,8', ',', -3, 3), array_to_string(a[2:4], ',
 
 drop table array_test;
 drop function substring_index;
+
+SELECT array_position(ARRAY[3,5,4], 5);
+SELECT array_position('3 5 4'::int2vector::int2[], 5);
+SELECT array_position('3 5 4'::int2vector::int2[], 5::int2);
+SELECT array_position('3 5 4'::int2vector::int2[], 66::int2);
+SELECT array_position(string_to_array('3 5 4'::int2vector::TEXT, ' '), '66');
