@@ -89,6 +89,8 @@ typedef struct IndexInfo {
     int ii_NumIndexKeyAttrs;    /* number of key columns in index */
     AttrNumber ii_KeyAttrNumbers[INDEX_MAX_KEYS];
     List* ii_Expressions;       /* list of Expr */
+    List* ii_ExpressionUsers;   /* InvalidOid if don't have expression index or expression is system function.
+                                Save expression's creater's oid */
     List* ii_ExpressionsState;  /* list of ExprState */
     List* ii_Predicate;         /* list of Expr */
     List* ii_PredicateState;    /* list of ExprState */

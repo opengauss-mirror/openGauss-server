@@ -1272,6 +1272,7 @@ static void pgaudit_process_alter_owner(Node* node, const char* querystring)
         case OBJECT_PACKAGE:
         case OBJECT_PUBLICATION:
         case OBJECT_SUBSCRIPTION:
+        case OBJECT_TRIGGER:
             objectname = NameListToString(alterownerstmt->object);
             break;
         default:

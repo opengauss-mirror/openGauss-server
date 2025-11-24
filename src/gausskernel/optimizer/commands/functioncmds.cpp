@@ -1932,21 +1932,20 @@ void AlterFunctionOwner_oid(Oid procOid, Oid newOwnerId, bool byPackage)
                 errmsg("ownerId change failed for function \"%s\", because it is a masking function.",
                     get_func_name(procOid))));
     }
-
+    if (!initialuser() && BOOTSTRAP_SUPERUSERID == newOwnerId) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                        errmsg("only super user can set function owner to super user")));
+    }
     rel = heap_open(ProcedureRelationId, RowExclusiveLock);
-
     tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procOid));
-
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", procOid)));
     if (!byPackage) {
         checkAllowAlter(tup);
     }
     AlterFunctionOwner_internal(rel, tup, newOwnerId);
-
     /* Recode time of change the funciton owner. */
     UpdatePgObjectMtime(procOid, OBJECT_TYPE_PROC);
-
     heap_close(rel, NoLock);
 }
 

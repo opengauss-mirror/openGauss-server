@@ -24,6 +24,7 @@ BEGIN;
 
 -- create a user owning the test harness and all created relations
 CREATE USER _db4ai_test PASSWORD 'gauss@123';
+ALTER USER _db4ai_test sysadmin;
 -- create a separate schema with a fancy name for testing
 CREATE SCHEMA "_db4ai test";
 ALTER SCHEMA "_db4ai test" OWNER TO _db4ai_test;

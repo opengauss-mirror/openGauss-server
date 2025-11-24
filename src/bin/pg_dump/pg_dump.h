@@ -376,6 +376,7 @@ typedef struct _triggerInfo {
     char* tgdef;
     bool tgdb;
     bool tgbodybstyle;
+    char* tgrolname;
 } TriggerInfo;
 typedef struct _eventInfo {
     DumpableObject dobj;
