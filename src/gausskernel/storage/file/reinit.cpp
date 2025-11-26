@@ -24,10 +24,14 @@
 #include "storage/file/fio_device.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
+#include "ddes/dms/ss_transaction.h"
 #ifdef PGXC
     #include "pgxc/pgxc.h"
 #endif
 
+static void ProcessUnloggedCache(const char *filename,
+                                 const char *dbspacedirname,
+                                 ForkNumber fork_num);
 static void ResetUnloggedRelationsInTablespaceDir(const char* tsdirname, int op);
 static void ResetUnloggedRelationsInDbspaceDir(const char* dbspacedirname, int op);
 static bool parse_filename_for_nontemp_relation(const char* name, int* oidchars, ForkNumber* fork);
@@ -108,7 +112,7 @@ void ResetUnloggedRelations(int op)
                         sizeof(temp_path),
                         sizeof(temp_path) - 1,
                         "%s/%s/%s",
-                        TBLSPCDIR
+                        TBLSPCDIR,
                         spc_de->d_name,
                         TABLESPACE_VERSION_DIRECTORY);
 #endif
@@ -124,6 +128,63 @@ void ResetUnloggedRelations(int op)
     (void)MemoryContextSwitchTo(oldctx);
     MemoryContextDelete(tmpctx);
 }
+
+/* Process unlogged relation file */
+static void ProcessUnloggedCache(const char *filename,
+                                 const char *dbspacedirname,
+                                 ForkNumber fork_num)
+{
+    RelFileNodeBackend rnode_backend;
+    Oid relfilenode = InvalidOid;
+    Oid dbOid = InvalidOid;
+    Oid spcOid = 0;
+
+    /* extract refilenode */
+    unsigned int tmpRel;
+    if (sscanf_s(filename, "%u", &tmpRel) != 1) {
+        ereport(DEBUG2, (errmsg("ResetUnloggedRelations: cannot parse relfilenode from '%s',"
+            "skip buffer drop", filename)));
+        return;
+    }
+    relfilenode = (Oid)tmpRel;
+    /* extract dbOid and spcOid */
+    unsigned int tmpOid;
+    const char *last = strrchr(dbspacedirname, '/');
+    if (last != NULL && *(last + 1) != '\0') {
+        if (sscanf_s(last + 1, "%u", &tmpOid) == 1)
+            dbOid = (Oid)tmpOid;
+    }
+    const char *prev = NULL;
+    for (const char *q = last - 1; q >= dbspacedirname; q--) {
+        if (*q == '/') {
+            prev = q;
+            break;
+        }
+    }
+    if (prev != NULL && *(prev + 1) != '\0') {
+        if (sscanf_s(prev + 1, "%u", &tmpOid) == 1)
+            spcOid = (Oid)tmpOid;
+    }
+
+    rnode_backend.node.spcNode = spcOid;
+    rnode_backend.node.dbNode  = OidIsValid(dbOid) ? dbOid : 0;
+    rnode_backend.node.relNode = relfilenode;
+    rnode_backend.node.bucketNode = InvalidBktId;
+    rnode_backend.backend = InvalidBackendId;
+
+    DropRelFileNodeBuffers(rnode_backend, fork_num, 0);
+    ereport(DEBUG2, (errmsg(
+        "ResetUnloggedRelations: dropped local buffers for rel %u/%u/%u",
+        spcOid, dbOid, relfilenode)));
+
+#ifdef ENABLE_DMS
+    SSBCastDropRelAllBufferForUnlog(&rnode_backend.node, 1);
+    ereport(DEBUG2, (errmsg(
+        "ResetUnloggedRelations: broadcasted drop buffers for rel %u/%u/%u",
+        spcOid, dbOid, relfilenode)));
+#endif
+}
+
 
 /* Process one tablespace directory for ResetUnloggedRelations */
 static void ResetUnloggedRelationsInTablespaceDir(const char* tsdirname, int op)
@@ -286,6 +347,12 @@ static void ResetUnloggedRelationsInDbspaceDir(const char* dbspacedirname, int o
                 rc = snprintf_s(rm_path, sizeof(rm_path), sizeof(rm_path) - 1, "%s/%s", dbspacedirname, de->d_name);
 
                 securec_check_ss(rc, "\0", "\0");
+
+                /* Process the unlogged relation dms cache */
+                if (ENABLE_DMS) {
+                    ProcessUnloggedCache(de->d_name, dbspacedirname, fork_num);
+                }
+
                 /*
                  * It's tempting to actually throw an error here, but since
                  * this code gets run during database startup, that could
