@@ -656,7 +656,7 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
     pstate->p_sourcetext = queryString;
 
     param_collation = GetCollationConnection();
-    param_charset = GetCharsetConnection();
+    param_charset = GetDatabaseEncoding();
     i = 0;
     foreach (l, params) {
         Node* expr = (Node*)lfirst(l);
