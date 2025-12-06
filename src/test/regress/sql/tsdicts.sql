@@ -24,6 +24,8 @@ SELECT ts_lexize('ispell', 'footballklubber');
 SELECT ts_lexize('ispell', 'ballyklubber');
 SELECT ts_lexize('ispell', 'footballyklubber');
 
+select ts_lexize('ispell', repeat('bally', 20000));
+
 -- Test ISpell dictionary with hunspell affix file
 CREATE TEXT SEARCH DICTIONARY hunspell (
                         Template=ispell,
