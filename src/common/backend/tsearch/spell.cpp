@@ -2157,6 +2157,7 @@ static SplitVar* SplitToVariants(
     int compoundflag = 0;
     errno_t errorno = EOK;
 
+    check_stack_depth();
     notprobed = (char*)palloc(wordlen);
     errorno = memset_s(notprobed, wordlen, 1, wordlen);
     securec_check(errorno, "\0", "\0");

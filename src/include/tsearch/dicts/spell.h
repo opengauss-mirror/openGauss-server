@@ -211,5 +211,6 @@ extern void NIImportDictionary(IspellDict* Conf, const char* filename);
 extern void NISortDictionary(IspellDict* Conf);
 extern void NISortAffixes(IspellDict* Conf);
 extern void NIFinishBuild(IspellDict* Conf);
+extern void check_stack_depth();
 
 #endif

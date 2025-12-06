@@ -95,6 +95,10 @@ SELECT ts_lexize('ispell', 'footballyklubber');
  {foot,ball,klubber}
 (1 row)
 
+select ts_lexize('ispell', repeat('bally', 20000));
+ERROR:  stack depth limit exceeded
+HINT:  Increase the configuration parameter "max_stack_depth" (currently 2048kB), after ensuring the platform's stack depth limit is adequate.
+CONTEXT:  referenced column: ts_lexize
 -- Test ISpell dictionary with hunspell affix file
 CREATE TEXT SEARCH DICTIONARY hunspell (
                         Template=ispell,
