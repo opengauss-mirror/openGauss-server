@@ -50,6 +50,7 @@ typedef struct IndexVacuumInfo {
     double num_heap_tuples;        /* tuples remaining in heap */
     BufferAccessStrategy strategy; /* access strategy for reads */
     OidRBTree *invisibleParts;     /* used for Ustore GPI */
+    Relation heaprel;              /* used for DataVec HnswRabitQ */
 } IndexVacuumInfo;
 
 /*

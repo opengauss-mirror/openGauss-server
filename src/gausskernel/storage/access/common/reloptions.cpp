@@ -2280,6 +2280,12 @@ static void ValidateStrOptIndexsplit(const char *val)
  */
 static void ValidateRabitqRefineOption(const char *val)
 {
+    if (val == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("Invalid interval string for  \"rabitq_refine_type\" option"),
+                 errdetail("Valid rabitq_refine_type string.")));
+    }
     if (pg_strcasecmp(val, RABITQ_REFINE_TYPE_SQ8) != 0 &&
         pg_strcasecmp(val, RABITQ_REFINE_TYPE_FP32) != 0 &&
         pg_strcasecmp(val, RABITQ_REFINE_TYPE_NONE) != 0) {

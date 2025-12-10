@@ -77,12 +77,13 @@ bool will_shutdown = false;
  *
  ********************************************/
 
-const uint32 GRAND_VERSION_NUM = 92975;
+const uint32 GRAND_VERSION_NUM = 92976;
 
 /********************************************
  * 2.VERSION NUM FOR EACH FEATURE
  *   Please write indescending order.
  ********************************************/
+const uint32 RABITQ_VERSION_NUM = 92976;
 const uint32 HALFVEC_VERSION_NUM = 92975;
 const uint32 BM25_FULL_TEXT_INDEX = 92968;
 const uint32 FIX_HBA_CONF_BUG_VERSION_NUM = 92966;

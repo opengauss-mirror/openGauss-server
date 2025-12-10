@@ -205,7 +205,7 @@ static void MMapDelete(BufferTag *tag, uint32 hashcode)
     return;
 }
 
-static bool CanUseMmap(Relation index)
+bool CanUseMmap(Relation index)
 {
     bool result = g_instance.attr.attr_storage.enable_mmap && u_sess->datavec_ctx.hnsw_use_mmap &&
                     g_mmapOff != 0 && (g_mmap_relNode == 0 || index->rd_node.relNode == g_mmap_relNode);
@@ -577,7 +577,7 @@ bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation in
 
     /* Load element */
     if (distance == NULL || maxDistance == NULL || *distance < *maxDistance) {
-        HnswLoadElementFromTuple(element, etup, true, loadVec, NULL); // todo wjy mmap
+        HnswLoadElementFromTuple(element, etup, true, loadVec, NULL);
         if (enablePQ) {
             params = &pqinfo->params;
             Vector *vd1 = &etup->data;
@@ -914,6 +914,7 @@ void GetTupleFromHeap(Relation relation, ItemPointer tid, HeapTuple tuple)
     tuple->t_self = *tid;
 
     if (heap_fetch(relation, SnapshotAny, tuple, &user_buf, false, NULL)) {
+        tuple->tupTableType = HEAP_TUPLE;
         ReleaseBuffer(user_buf);
     } else {
         ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("The tuple is not found"),
@@ -925,8 +926,10 @@ int GetFunctionType(FmgrInfo* procinfo, FmgrInfo* normprocinfo)
 {
     switch (procinfo->fn_oid) {
         case L2_FUNC_OID:
+        case HALF_L2_FUNC_OID:
             return DIS_L2;
         case IP_FUNC_OID:
+        case HALF_IP_FUNC_OID:
             return normprocinfo ? DIS_COSINE : DIS_IP;
         default:
             ereport(ERROR, (errmsg("current data type or distance type can't support index build.")));

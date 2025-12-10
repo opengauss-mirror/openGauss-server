@@ -97,15 +97,20 @@ static void SumAndMixMaxSamples(Datum *values, HnswBuildState *buildstate)
     /* Detoast once for all calls */
     Datum value = PointerGetDatum(PG_DETOAST_DATUM(values[0]));
 
-    if (buildstate->kmeansnormprocinfo != NULL) {
-        if (!HnswCheckNorm(buildstate->kmeansnormprocinfo, buildstate->collation, value)) {
+    if (buildstate->normprocinfo != NULL) {
+        if (!HnswCheckNorm(buildstate->normprocinfo, buildstate->collation, value)) {
             return;
         }
 
         value = HnswNormValue(buildstate->typeInfo, buildstate->collation, value);
     }
 
-    Vector *vec = (Vector *)value;
+    Vector *vec;
+    if (IS_HALFVEC(buildstate->procinfo->fn_oid)) {
+        vec = Halfvec2Vector(value);
+    } else {
+        vec = (Vector *)value;
+    }
     float *centroid = buildstate->centroid;
     for (int i = 0; i < vec->dim; i++) {
         centroid[i] += vec->x[i];
@@ -198,247 +203,6 @@ static int ComputeHnswPQ(HnswBuildState *buildstate)
     return res;
 }
 
-BlockNumber BlockSamplerGetBlockPQ(BlockSampler bs)
-{
-    if (BlockSampler_HasMore(bs)) {
-        return BlockSampler_Next(bs);
-    }
-    return InvalidBlockNumber;
-}
-
-static void EstimateRowsPQ(Relation onerel, double *totalrows)
-{
-    int64 targrows = HNSWPQ_DEFAULT_TARGET_ROWS * abs(default_statistics_target);
-    int64 numrows = 0;      /* # rows now in reservoir */
-    double samplerows = 0;  /* total # rows collected */
-    double liverows = 0;    /* # live rows seen */
-    double deadrows = 0;    /* # dead rows seen */
-    double rowstoskip = -1; /* -1 means not set yet */
-    BlockNumber totalblocks;
-    TransactionId OldestXmin;
-    BlockSamplerData bs;
-    double rstate;
-    BlockNumber targblock = 0;
-    BlockNumber sampleblock = 0;
-    bool estimateTableRownum = false;
-    bool isAnalyzing = true;
-
-    totalblocks = RelationGetNumberOfBlocks(onerel);
-    OldestXmin = GetOldestXmin(onerel);
-    /* Prepare for sampling block numbers */
-    BlockSampler_Init(&bs, totalblocks, targrows);
-    /* Prepare for sampling rows */
-    rstate = anl_init_selection_state(targrows);
-
-    while (InvalidBlockNumber != (targblock = BlockSamplerGetBlockPQ(&bs))) {
-        Buffer targbuffer;
-        Page targpage;
-        OffsetNumber targoffset;
-        OffsetNumber maxoffset;
-
-        vacuum_delay_point();
-        sampleblock++;
-
-        targbuffer = ReadBufferExtended(onerel, MAIN_FORKNUM, targblock, RBM_NORMAL, NULL);
-        LockBuffer(targbuffer, BUFFER_LOCK_SHARE);
-        targpage = BufferGetPage(targbuffer);
-
-        if (RelationIsUstoreFormat(onerel)) {
-            for (int i = 0; i < onerel->rd_att->natts; i++) {
-                if (onerel->rd_att->attrs[i].attcacheoff >= 0) {
-                    onerel->rd_att->attrs[i].attcacheoff = -1;
-                }
-            }
-
-            TupleTableSlot *slot = MakeSingleTupleTableSlot(RelationGetDescr(onerel), false, onerel->rd_tam_ops);
-            maxoffset = UHeapPageGetMaxOffsetNumber(targpage);
-
-            /* Inner loop over all tuples on the selected page */
-            for (targoffset = FirstOffsetNumber; targoffset <= maxoffset; targoffset++) {
-                RowPtr *lp = UPageGetRowPtr(targpage, targoffset);
-                bool sampleIt = false;
-                TransactionId xid;
-                UHeapTuple targTuple;
-                if (RowPtrIsDeleted(lp)) {
-                    deadrows += 1;
-                    continue;
-                }
-                if (!RowPtrIsNormal(lp)) {
-                    if (RowPtrIsDeleted(lp)) {
-                        deadrows += 1;
-                    }
-                    continue;
-                }
-
-                if (!RowPtrHasStorage(lp)) {
-                    continue;
-                }
-
-                /* Allocate memory for target tuple. */
-                targTuple = UHeapGetTuple(onerel, targbuffer, targoffset);
-
-                switch (UHeapTupleSatisfiesOldestXmin(targTuple, OldestXmin,
-                    targbuffer, true, &targTuple, &xid, NULL, onerel)) {
-                    case UHEAPTUPLE_LIVE:
-                        sampleIt = true;
-                        liverows += 1;
-                        break;
-
-                    case UHEAPTUPLE_DEAD:
-                    case UHEAPTUPLE_RECENTLY_DEAD:
-                        /* Count dead and recently-dead rows */
-                        deadrows += 1;
-                        break;
-
-                    case UHEAPTUPLE_INSERT_IN_PROGRESS:
-                        if (TransactionIdIsCurrentTransactionId(xid)) {
-                            sampleIt = true;
-                            liverows += 1;
-                        }
-                        break;
-
-                    case UHEAPTUPLE_DELETE_IN_PROGRESS:
-                        if (TransactionIdIsCurrentTransactionId(xid)) {
-                            deadrows += 1;
-                        } else {
-                            liverows += 1;
-                        }
-                        break;
-
-                    default:
-                        elog(ERROR, "unexpected UHeapTupleSatisfiesOldestXmin result");
-                        break;
-                }
-
-                if (sampleIt) {
-                    ExecStoreTuple(targTuple, slot, InvalidBuffer, false);
-
-                    if (numrows >= targrows) {
-                        if (rowstoskip < 0) {
-                            rowstoskip = anl_get_next_S(samplerows, targrows, &rstate);
-                        }
-                        if (rowstoskip <= 0) {
-                            int64 k = (int64)(targrows * anl_random_fract());
-
-                            AssertEreport(k >= 0 && k < targrows, MOD_OPT,
-                                "Index number out of range when replacing tuples.");
-                        }
-                        rowstoskip -= 1;
-                    }
-                    samplerows += 1;
-                }
-
-                /* Free memory for target tuple. */
-                if (targTuple) {
-                    UHeapFreeTuple(targTuple);
-                }
-            }
-
-            /* Now release the lock and pin on the page */
-            ExecDropSingleTupleTableSlot(slot);
-
-            for (int i = 0; i < onerel->rd_att->natts; i++) {
-                if (onerel->rd_att->attrs[i].attcacheoff >= 0) {
-                    onerel->rd_att->attrs[i].attcacheoff = -1;
-                }
-            }
-
-            goto uheap_end;
-        }
-
-        maxoffset = PageGetMaxOffsetNumber(targpage);
-        /* Inner loop over all tuples on the selected page */
-        for (targoffset = FirstOffsetNumber; targoffset <= maxoffset; targoffset++) {
-            ItemId itemid;
-            HeapTupleData targtuple;
-            bool sample_it = false;
-
-            /* IO collector and IO scheduler for analyze statement */
-            if (ENABLE_WORKLOAD_CONTROL)
-                IOSchedulerAndUpdate(IO_TYPE_READ, 10, IO_TYPE_ROW);
-
-            targtuple.t_tableOid = InvalidOid;
-            targtuple.t_bucketId = InvalidBktId;
-            HeapTupleCopyBaseFromPage(&targtuple, targpage);
-            itemid = PageGetItemId(targpage, targoffset);
-            if (!ItemIdIsNormal(itemid)) {
-                if (ItemIdIsDead(itemid))
-                    deadrows += 1;
-                continue;
-            }
-
-            ItemPointerSet(&targtuple.t_self, targblock, targoffset);
-
-            targtuple.t_tableOid = RelationGetRelid(onerel);
-            targtuple.t_bucketId = RelationGetBktid(onerel);
-            targtuple.t_data = (HeapTupleHeader)PageGetItem(targpage, itemid);
-            targtuple.t_len = ItemIdGetLength(itemid);
-
-            switch (HeapTupleSatisfiesVacuum(&targtuple, OldestXmin, targbuffer, isAnalyzing)) {
-                case HEAPTUPLE_LIVE:
-                    sample_it = true;
-                    liverows += 1;
-                    break;
-
-                case HEAPTUPLE_DEAD:
-                case HEAPTUPLE_RECENTLY_DEAD:
-                    /* Count dead and recently-dead rows */
-                    deadrows += 1;
-                    break;
-
-                case HEAPTUPLE_INSERT_IN_PROGRESS:
-                    if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(targpage, targtuple.t_data))) {
-                        sample_it = true;
-                        liverows += 1;
-                    }
-                    break;
-
-                case HEAPTUPLE_DELETE_IN_PROGRESS:
-                    if (TransactionIdIsCurrentTransactionId(HeapTupleGetUpdateXid(&targtuple)))
-                        deadrows += 1;
-                    else {
-                        sample_it = true;
-                        liverows += 1;
-                    }
-                    break;
-
-                default:
-                    ereport(
-                        ERROR, (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("unexpected HeapTupleSatisfiesVacuum result")));
-                    break;
-            }
-
-            if (sample_it) {
-                if (numrows < targrows) {
-                    if (estimateTableRownum) {
-                        numrows++;
-                    }
-                } else {
-                    if (rowstoskip < 0) {
-                        rowstoskip = anl_get_next_S(samplerows, targrows, &rstate);
-                    }
-
-                    if (rowstoskip <= 0) {
-                        int64 k = (int64)(targrows * anl_random_fract());
-                        AssertEreport(
-                            k >= 0 && k < targrows, MOD_OPT, "Index number out of range when replacing tuples.");
-                    }
-                    rowstoskip -= 1;
-                }
-                samplerows += 1;
-            }
-        }
-
-uheap_end:
-        UnlockReleaseBuffer(targbuffer);
-    }
-    if (bs.m > 0) {
-        *totalrows = floor((liverows / bs.m) * totalblocks + 0.5);
-    } else {
-        *totalrows = 0.0;
-    }
-}
-
 /*
  * Build PQ table
  */
@@ -452,7 +216,7 @@ static void BuildPQtable(HnswBuildState *buildstate)
         numSamples = 1;
     } else {
         double num;
-        EstimateRowsPQ(buildstate->heap, &num);
+        EstimateRows(buildstate->heap, &num);
         numSamples = (int)num;
     }
     PG_TRY();
@@ -543,7 +307,7 @@ static void CreateMetaPage(HnswBuildState *buildstate)
 
     /* set RabitQ info */
     metap->enableRabitQ = buildstate->enableRabitQ;
-    metap->rbqDelay = buildstate->rbqDelay;
+    metap->rbqDelayState = buildstate->rbqDelayState;
     metap->rbqInsertRows = 0;
     if (buildstate->enableRabitQ) {
         metap->useFHT = buildstate->rbqConfig->FHT;
@@ -551,7 +315,8 @@ static void CreateMetaPage(HnswBuildState *buildstate)
         int dim = buildstate->dimensions;
         Size matrixSize;
         if (buildstate->rbqConfig->FHT) {
-            matrixSize = ((dim + 7) / 8) * FHT_ROUND * sizeof(uint8);
+            int outputDim = FhtOutputDim(dim);
+            matrixSize = FhtSerializeSize(outputDim);
         } else {
             matrixSize = dim * dim * sizeof(float);
         }
@@ -715,6 +480,9 @@ static void CreateRbqMatrixPages(HnswBuildState *buildstate)
     }
 
     FlushChunkInfoInternal(index, (char *)matrix, HNSW_CHUNK_START_BLKNO, matrixNblk, matrixSize);
+    if (vtrans->type == FAST_HTRANSFORM) {
+        pfree(matrix);
+    }
 }
 
 /*
@@ -751,7 +519,8 @@ static void CreateRbqOtherPages(HnswBuildState *buildstate)
         other = (void *)palloc(oneSize * 3);
         rc = memcpy_s((char*)other, oneSize, buildstate->centroid, oneSize);
         securec_check(rc, "\0", "\0");
-        rc = memcpy_s((char*)(other + oneSize), oneSize * 2, rbqConfig->sq->trained, oneSize * 2);
+        uint32 sq8Size = oneSize + oneSize;
+        rc = memcpy_s(((char*)other + oneSize), sq8Size, rbqConfig->sq->trained, sq8Size);
         securec_check(rc, "\0", "\0");
     } else {
         other = (void *)palloc(oneSize);
@@ -1142,7 +911,7 @@ static void UpdateGraphInMemory(FmgrInfo *procinfo, Oid collation, HnswElement e
 /*
  * Insert tuple in memory
  */
-static void InsertTupleInMemory(HnswBuildState *buildstate, HnswElement element)
+static void InsertTupleInMemory(HnswBuildState *buildstate, HnswElement element, Vector *transformedVec)
 {
     FmgrInfo *procinfo = buildstate->procinfo;
     Oid collation = buildstate->collation;
@@ -1153,9 +922,9 @@ static void InsertTupleInMemory(HnswBuildState *buildstate, HnswElement element)
     int efConstruction = buildstate->efConstruction;
     int m = buildstate->m;
     char *base = buildstate->hnswarea;
-    int funcType = -1;
     if (buildstate->enableRabitQ) {
-        funcType = GetFunctionType(procinfo, buildstate->normprocinfo);
+        int funcType = GetFunctionType(procinfo, buildstate->normprocinfo);
+        HnswComputeVectorRBQCode(element, transformedVec, buildstate->centroid, funcType, base);
     }
 
     /* Wait if another process needs exclusive lock on entry lock */
@@ -1181,8 +950,7 @@ static void InsertTupleInMemory(HnswBuildState *buildstate, HnswElement element)
 
     /* Find neighbors for element */
     HnswFindElementNeighbors(base, element, entryPoint, NULL, procinfo, collation, m, efConstruction, false,
-                             buildstate->enablePQ, buildstate->params, buildstate->enableRabitQ, funcType,
-                             buildstate->centroid, NULL);
+                             buildstate->enablePQ, buildstate->params, buildstate->enableRabitQ, NULL);
 
     /* Update graph in memory */
     UpdateGraphInMemory(procinfo, collation, element, m, efConstruction, entryPoint, buildstate);
@@ -1205,6 +973,7 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     Pointer valuePtr;
     Pointer codePtr = NULL;
     Pointer rbqPtr = NULL;
+    Vector *transValue = NULL;
     LWLock *flushLock = &graph->flushLock;
     char *base = buildstate->hnswarea;
 
@@ -1266,26 +1035,33 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     }
 
     if (buildstate->enableRabitQ) {
+        Datum vecVal = value;
+        if (IS_HALFVEC(buildstate->procinfo->fn_oid)) {
+            vecVal = (Datum)Halfvec2Vector(value);
+        }
         RabitQConfig *rbqConfig = buildstate->rbqConfig;
         if (rbqConfig->reType == SQ8) {
             /* Calculate origin vector's SQ8 */
             rbqPtr = (Pointer)HnswAlloc(allocator, rbqCodeSize(buildstate->dimensions, true));
             ScalarQuantizer *sq = rbqConfig->sq;
             int dim = sq->dim;
-            VectorEncodeSQ(dim, sq->trained, sq->trained + dim, ((Vector *)DatumGetPointer(value))->x,
+            VectorEncodeSQ(dim, sq->trained, sq->trained + dim, ((Vector *)DatumGetPointer(vecVal))->x,
                                 getRefineCode(rbqPtr, rbqConfig->reOffset));
         } else {
             rbqPtr = (Pointer)HnswAlloc(allocator, rbqCodeSize(buildstate->dimensions, false));
         }
         /* Transform vector in rabitq */
         VectorTransform* vtrans = rbqConfig->vtrans;
-        Vector *transValue = InitVector(buildstate->dimensions);
+        transValue = InitVector(buildstate->dimensions);
         if (vtrans->type == RANDOM_ORTHOGONAL) {
-            RomTransform(vtrans, ((Vector *)DatumGetPointer(value))->x, transValue->x);
+            RomTransform(vtrans, ((Vector *)DatumGetPointer(vecVal))->x, transValue->x);
         } else {
-            FhtTransform(vtrans, ((Vector *)DatumGetPointer(value))->x, transValue->x);
+            FhtTransform(vtrans, ((Vector *)DatumGetPointer(vecVal))->x, transValue->x);
         }
-        value = (Datum)transValue;
+
+        if (IS_HALFVEC(buildstate->procinfo->fn_oid)) {
+            pfree((Vector *)vecVal);
+        }
     }
 
     /* Get datum size */
@@ -1317,10 +1093,10 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
     LWLockInitialize(&element->lock, hnsw_lock_tranche_id);
 
     /* Insert tuple */
-    InsertTupleInMemory(buildstate, element);
+    InsertTupleInMemory(buildstate, element, transValue);
 
     if (buildstate->enableRabitQ) {
-        pfree((Vector *)value);
+        pfree(transValue);
     }
 
     /* Release flush lock */
@@ -1344,6 +1120,17 @@ static void BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values, 
     /* Skip nulls */
     if (isnull[0]) {
         return;
+    }
+
+    /* RabitQ delay build, avoid "insert into select from" sql from inserting repeatedly. */
+    if (buildstate->enableRabitQ && buildstate->rbqDelayState == RBQ_BUILD_AFTER_DELAY) {
+        buildstate->rbqDelayBuildRows++;
+        int64 insertedRows;
+        HnswGetRbqInfoFromMetaPage(index, NULL, NULL, NULL, NULL, NULL, NULL,
+                                   NULL, NULL, NULL, &insertedRows);
+        if (buildstate->rbqDelayBuildRows > insertedRows) {
+            return;
+        }
     }
 
     /* Use memory context */
@@ -1485,7 +1272,8 @@ static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation i
     buildstate->pqKsub = HnswGetPqKsub(index);
 
     buildstate->enableRabitQ = HnswGetEnableRabitQ(index);
-    buildstate->rbqDelay = false;
+    buildstate->rbqDelayBuildRows = 0;
+    buildstate->rbqDelayState = RBQ_BUILD_NORMAL;
     if (buildstate->enablePQ && buildstate->enableRabitQ) {
         ereport(ERROR, (errmsg("hnsw does not support the mixed use of the two quantization methods: PQ and RabitQ.")));
     }
@@ -1530,6 +1318,8 @@ static void InitBuildState(HnswBuildState *buildstate, Relation heap, Relation i
         rbqConfig->vtrans = vt;
         vt->dim = buildstate->dimensions;
         vt->type = rbqConfig->FHT ? FAST_HTRANSFORM : RANDOM_ORTHOGONAL;
+        vt->matrix = NULL;
+        vt->fastRotation = NULL;
     } else {
         buildstate->rbqConfig = NULL;
     }
@@ -1556,8 +1346,8 @@ static void FreeBuildState(HnswBuildState *buildstate, bool parallel)
         if (buildstate->centroid != NULL) {
             pfree(buildstate->centroid);
         }
-        pfree(buildstate->rbqConfig->vtrans);
-        if (buildstate->rbqConfig->sq != NULL) {
+        FreeTransformer(buildstate->rbqConfig->vtrans);
+        if (buildstate->rbqConfig->sq != NULL){
             FreeScalarQuantizer(buildstate->rbqConfig->sq);
         }
         pfree(buildstate->rbqConfig);
@@ -1771,8 +1561,10 @@ static void BuildGraph(HnswBuildState *buildstate, ForkNumber forkNum)
         parallel_workers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
     }
 
+    bool singleThreadBuild = (buildstate->enableRabitQ && buildstate->rbqDelayState == RBQ_BUILD_AFTER_DELAY);
+
     /* Attempt to launch parallel worker scan when required */
-    if (parallel_workers > 0) {
+    if (parallel_workers > 0 && !singleThreadBuild) {
         HnswBeginParallel(buildstate, parallel_workers);
     }
 
@@ -1813,8 +1605,10 @@ void ComputeCenterAndTrainRefine(HnswBuildState *buildstate)
     double num;
     EstimateRows(buildstate->heap, &num);
     int numSamples = (int)num;
-    if (numSamples == 0) {
-        buildstate->rbqDelay = true;
+    if (buildstate->rbqDelayState == RBQ_BUILD_AFTER_DELAY) {
+        numSamples = u_sess->datavec_ctx.rbq_sample_rows;
+    } else if (numSamples == 0) {
+        buildstate->rbqDelayState = RBQ_BUILD_DELAY;
         ereport(LOG, (errmsg("If there is no data in the table, RabitQ cannot be trained,"
             "and the index will not be built for the time being.")));
         return;
@@ -1829,7 +1623,6 @@ void ComputeCenterAndTrainRefine(HnswBuildState *buildstate)
     }
     PG_CATCH();
     {
-        ereport(ERROR, (errmsg("memory alloc failed during HNSW RabitQ sampling, suggest using hnsw without RabitQ.")));
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -1866,7 +1659,7 @@ void ComputeCenterAndTrainRefine(HnswBuildState *buildstate)
  * Build the index
  */
 void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, HnswBuildState *buildstate,
-                       ForkNumber forkNum)
+                       ForkNumber forkNum, bool insert)
 {
 #ifdef HNSW_MEMORY
     SeedRandom(42);
@@ -1892,10 +1685,15 @@ void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, HnswBuildSt
     }
 
     if (buildstate->enableRabitQ) {
-        float *centroid = (float *)palloc(sizeof(float) * buildstate->dimensions);
+        if (t_thrd.proc->workingVersionNum < RABITQ_VERSION_NUM) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Before RABITQ_VERSION_NUM VERSION NUM %u, we do not support rabitq.", RABITQ_VERSION_NUM)));
+        }
+        buildstate->rbqDelayState = insert ? RBQ_BUILD_AFTER_DELAY : RBQ_BUILD_NORMAL;
+        float *centroid = (float *)palloc0(sizeof(float) * buildstate->dimensions);
         buildstate-> centroid = centroid;
         ComputeCenterAndTrainRefine(buildstate);
-        if (buildstate->rbqDelay) {
+        if (buildstate->rbqDelayState == RBQ_BUILD_DELAY) {
             buildstate-> centroid = NULL;
         } else {
             float *transCentroid = (float *)palloc(buildstate->dimensions * sizeof(float));
@@ -1912,7 +1710,7 @@ void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, HnswBuildSt
         pfree(centroid);
     }
 
-    if (buildstate->rbqDelay) {
+    if (buildstate->rbqDelayState == RBQ_BUILD_DELAY) {
         CreateMetaPage(buildstate);
     } else {
         BuildGraph(buildstate, forkNum);
@@ -1932,7 +1730,7 @@ IndexBuildResult *hnswbuild_internal(Relation heap, Relation index, IndexInfo *i
     IndexBuildResult *result;
     HnswBuildState buildstate;
 
-    BuildIndex(heap, index, indexInfo, &buildstate, MAIN_FORKNUM);
+    BuildIndex(heap, index, indexInfo, &buildstate, MAIN_FORKNUM, false);
 
     result = (IndexBuildResult *)palloc(sizeof(IndexBuildResult));
     result->heap_tuples = buildstate.reltuples;
@@ -1949,5 +1747,5 @@ void hnswbuildempty_internal(Relation index)
     IndexInfo *indexInfo = BuildIndexInfo(index);
     HnswBuildState buildstate;
 
-    BuildIndex(NULL, index, indexInfo, &buildstate, INIT_FORKNUM);
+    BuildIndex(NULL, index, indexInfo, &buildstate, INIT_FORKNUM, false);
 }
