@@ -54,10 +54,6 @@ void VectorMadd(size_t n, const float *ax, float bf, const float *bx, float *cx)
 void VectorL2SquaredDistanceNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis);
 void VectorInnerProductNY(size_t d, size_t ny, float *x, char *pqTable, Size subSize, int offset, float *dis);
 float VectorRbqDpPopcnt(int dim, int qb, uint8 *qx, uint8 *ex);
-void KacsWalk(float* data, uint64_t len);
-void FlipSign(const uint8_t* matfht, float* data, uint64_t dim);
-void VecRescale(float* data, uint64_t dim, float val);
-void FHTRotate(float* data, uint64_t dim);
 void VectorEncodeSQ(int dim, float *vmin, float *vdiff, float *vec, uint8 *code);
 void VectorDecodeSQ(int dim, float *vmin, float *vdiff, float *decodeVec, uint8 *code);
 void LogNewpageRange(Relation rel, ForkNumber forknum, BlockNumber startblk, BlockNumber endblk, bool page_std);
@@ -65,6 +61,7 @@ int PlanCreateIndexWorkers(Relation heapRelation, IndexInfo *indexInfo);
 void PrintOutVector(char *msg, Datum arg);
 double VectorSquareNorm(float* x, int dim);
 double vector_square(float* x, int dim);
+Vector *Halfvec2Vector(Datum halfv);
 
 Datum vector_in(PG_FUNCTION_ARGS);
 Datum vector_out(PG_FUNCTION_ARGS);

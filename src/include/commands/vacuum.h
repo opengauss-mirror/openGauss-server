@@ -483,7 +483,8 @@ extern int GetOneTupleSize(VacuumStmt* stmt, Relation rel);
 extern void lazy_vacuum_index(Relation indrel,
                                   IndexBulkDeleteResult **stats,
                                   const LVRelStats *vacrelstats,
-                                  BufferAccessStrategy vacStrategy);
+                                  BufferAccessStrategy vacStrategy,
+                                  Relation heaprel = NULL);
 extern IndexBulkDeleteResult* lazy_cleanup_index(
     Relation indrel, IndexBulkDeleteResult* stats, LVRelStats* vacrelstats, BufferAccessStrategy vac_strategy);
 extern void lazy_record_dead_tuple(LVRelStats *vacrelstats,

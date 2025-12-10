@@ -72,7 +72,6 @@ typedef struct RabitqInsertOnDiskParams {
     Relation heap;
     FmgrInfo *normprocinfo;
     Oid collation;
-    Datum originInsertVec;
     int funcType;
     HeapTuple heapTuple;
     IndexInfo *indexInfo;
@@ -91,9 +90,14 @@ typedef struct RabitqQueryParams {
     QueryRabitqVector* qrbqVec;
 } RabitqQueryParams;
 
-#define rbqCodeSize(d, sq8) (MAXALIGN(sizeof(FactorData) + (d + 7) / 8 + (sq8 ? d : 0)))
-#define getRefineCode(ptr, offset) (&(((RabitqVector *)ptr)->data[offset]))
-#define rbqQuerySize(d, qb) (MAXALIGN(sizeof(QueryFactorData) + ((d + 7) / 8) * qb))
+#define rbqCodeSize(d, sq8) MAXALIGN(sizeof(FactorData) + (d + 7) / 8 + (sq8 ? d : 0))
+#define getRefineCode(ptr, offset) &(((RabitqVector *)ptr)->data[offset])
+#define rbqQuerySize(d, qb) MAXALIGN(sizeof(QueryFactorData) + ((d + 7) / 8) * qb)
+#define rbqDataSize(d, sq8) rbqCodeSize(d, sq8) - sizeof(FactorData)
+
+#define RBQ_BUILD_NORMAL 1
+#define RBQ_BUILD_DELAY 2
+#define RBQ_BUILD_AFTER_DELAY 3
 
 void ComputeVectorRBQCode(int dim, float *vec, RabitqVector *rbqVec, float *centroid, int funcType);
 void SetRBQQuery(int dim, int qb, float *vec, QueryRabitqVector *qrbqVec, float *centroid, int funcType);

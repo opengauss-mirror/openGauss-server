@@ -625,6 +625,19 @@ Datum vector_to_varchar(PG_FUNCTION_ARGS)
     PG_RETURN_POINTER(result);
 }
 
+Vector *Halfvec2Vector(Datum halfv)
+{
+    if (halfv == NULL) {
+        ereport(ERROR, (errmsg("halfvec is null.")));
+    }
+    HalfVector *vec = (HalfVector *)halfv;
+    Vector *result = InitVector(vec->dim);
+    for (int i = 0; i < vec->dim; i++) {
+        result->x[i] = HalfToFloat4(vec->x[i]);
+    }
+    return result;
+}
+
 /*
  * Convert half vector to vector
  */
@@ -633,17 +646,11 @@ Datum halfvec_to_vector(PG_FUNCTION_ARGS)
 {
     HalfVector *vec = PG_GETARG_HALFVEC_P(0);
     int32 typmod = PG_GETARG_INT32(1);
-    Vector *result;
 
     CheckDim(vec->dim);
     CheckExpectedDim(typmod, vec->dim);
 
-    result = InitVector(vec->dim);
-
-    for (int i = 0; i < vec->dim; i++) {
-        result->x[i] = HalfToFloat4(vec->x[i]);
-    }
-
+    Vector *result = Halfvec2Vector((Datum)vec);
     PG_RETURN_POINTER(result);
 }
 
@@ -1778,75 +1785,28 @@ float VectorRbqDpPopcnt(int dim, int qb, uint8 *qx, uint8 *ex)
 }
 #endif
 
-void KacsWalk(float* data, uint64_t len)
-{
-    uint64_t base = len % 2;
-    uint64_t offset = base + (len / 2);
-    for (uint64_t i = 0; i < len / 2; i++) {
-        float add = data[i] + data[i + offset];
-        float sub = data[i] - data[i + offset];
-        data[i] = add;
-        data[i + offset] = sub;
-    }
-    if (base != 0) {
-        data[len / 2] *= sqrt(2.0f);
-    }
-}
-
-void FlipSign(const uint8_t* matfht, float* data, uint64_t dim)
-{
-    for (uint64_t i = 0; i < dim; i++) {
-        bool mask = (matfht[i / 8] & (1 << (i % 8))) != 0;
-        if (mask) {
-            data[i] = -data[i];
-        }
-    }
-}
-
-void VecRescale(float* data, uint64_t dim, float val)
-{
-    for (int i = 0; i < dim; i++) {
-        data[i] *= val;
-    }
-}
-
-void RotateOp(float* data, int idx, int dim, int step)
-{
-    for (int i = idx; i < dim; i += 2 * step) {
-        for (int j = 0; j < step; j++) {
-            float x = data[i + j];
-            float y = data[i + j + step];
-            data[i + j] = x + y;
-            data[i + j + step] = x - y;
-        }
-    }
-}
-
-void FHTRotate(float* data, uint64_t dim)
-{
-    uint64_t n = dim;
-    uint64_t step = 1;
-    while (step < n) {
-        RotateOp(data, 0, dim, step);
-        step *= 2;
-    }
-}
-
 void VectorEncodeSQ(int dim, float *vmin, float *vdiff, float *originVec, uint8 *code)
 {
+    if (vmin == NULL || vdiff == NULL || originVec == NULL || code == NULL) {
+        ereport(ERROR, (errmsg("During the SQ encoding process, the input parameter variable has nullptr.")));
+    }
+    const float eps = 1e-6f;
     for (int i = 0; i < dim; i++) {
         float xi = 0;
-        if (vdiff[i] != 0) {
+        if (fabsf(vdiff[i]) > eps) {
             xi = ((originVec[i] - vmin[i]) / vdiff[i]) * SQ_RANGE;
         }
         xi = xi < 0 ? 0 : xi;
         xi = xi > SQ_RANGE ? SQ_RANGE : xi;
-        code[i] = xi;
+        code[i] = (uint8)xi;
     }
 }
 
 void VectorDecodeSQ(int dim, float *vmin, float *vdiff, float *decodeVec, uint8 *code)
 {
+    if (vmin == NULL || vdiff == NULL || decodeVec == NULL || code == NULL) {
+        ereport(ERROR, (errmsg("During the SQ decoding process, the input parameter variable has nullptr.")));
+    }
     for (int i = 0; i < dim; i++) {
         float xi = (code[i] + 0.5f) / SQ_RANGE;
         decodeVec[i] = vmin[i] + xi * vdiff[i];

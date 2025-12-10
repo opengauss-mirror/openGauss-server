@@ -46,7 +46,9 @@ ScalarQuantizer *InitScalarQuantizer(int dim)
 
 void FreeScalarQuantizer(ScalarQuantizer *sq)
 {
-    pfree(sq->trained);
+    if (sq->trained != NULL) {
+        pfree(sq->trained);
+    }
     if (sq->decodeVec != NULL) {
         pfree(sq->decodeVec);
     }

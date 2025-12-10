@@ -497,7 +497,8 @@ typedef struct HnswBuildState {
 
     /* RabitQ info */
     bool enableRabitQ;
-    bool rbqDelay;
+    int rbqDelayState;
+    int64 rbqDelayBuildRows;
     float *centroid;
     RabitQConfig *rbqConfig;
 
@@ -534,7 +535,7 @@ typedef struct HnswMetaPageData {
     /* RabitQ info */
     bool enableRabitQ;
     bool useFHT;
-    bool rbqDelay;
+    int rbqDelayState;
     int64 rbqInsertRows;
     uint16 reOffset;
     uint16 matrixNblk;
@@ -680,6 +681,11 @@ typedef struct HnswVacuumState {
     HnswNeighborTuple ntup;
     HnswElementData highestPoint;
 
+    /* RabitQ */
+    bool enableRabitQ;
+    RabitqInsertOnDiskParams *rbqDiskParams;
+    Size rbqcodesSize;
+
     /* Memory */
     MemoryContext tmpCtx;
 } HnswVacuumState;
@@ -726,7 +732,7 @@ HnswElement HnswInitElement(char *base, ItemPointer tid, int m, double ml, int m
 HnswElement HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno);
 void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entryPoint, Relation index,
                               FmgrInfo *procinfo, Oid collation, int m, int efConstruction, bool existing,
-                              bool enablePQ, PQParams *params, bool enableRabitQ, int funcType, float *centroid,
+                              bool enablePQ, PQParams *params, bool enableRabitQ,
                               RabitqInsertOnDiskParams *rbqDiskParams);
 HnswCandidate *HnswEntryCandidate(char *base, HnswElement em, Datum q, Relation rel, FmgrInfo *procinfo, Oid collation,
                                   bool loadVec, bool enableRabitQ, RabitqQueryParams *rbqQueryParams,
@@ -773,11 +779,14 @@ int getPQfunctionType(FmgrInfo *procinfo, FmgrInfo *normprocinfo);
 void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ, bool trymmap);
 void HnswGetRbqInfoFromMetaPage(Relation index, bool *enableRabitQ, bool *useFHT, uint16 *reOffset,
                                 RefineType *reType, uint16 *matrixNblk, uint32 *matrixSize,
-                                uint16 *otherNblk, uint32 *otherSize, bool *rbqDelay, int64 *rbqInsertRows);
+                                uint16 *otherNblk, uint32 *otherSize, int *rbqDelayState, int64 *rbqInsertRows);
 void FlushChunkInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint16 nblks, uint32 totalSize);
 RabitQConfig *InitRbqConfigOnDisk(Relation index, bool *enableRabitQ, float **centroid, int dim);
+Datum HnswGetDatumFromHeap(Relation heap, ItemPointer heaptids, IndexInfo *indexInfo, HeapTuple tuple, Buffer* userbuf);
+Datum HnswGetComputeValue(FmgrInfo *procinfo, FmgrInfo *normprocinfo, Oid collation, Datum origin);
+void HnswComputeVectorRBQCode(HnswElement element, Vector *transformedVec, float *centroid, int funcType, char *base);
 void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, HnswBuildState *buildstate,
-                       ForkNumber forkNum);
+                       ForkNumber forkNum, bool insert);
 
 Datum hnswhandler(PG_FUNCTION_ARGS);
 Datum hnswbuild(PG_FUNCTION_ARGS);

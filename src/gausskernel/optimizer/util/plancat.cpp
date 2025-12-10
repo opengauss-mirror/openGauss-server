@@ -513,10 +513,10 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
 
             /* If the rabitq index built first has not been trained, ignore */
             if (indexRelation->rd_rel->relam == HNSW_AM_OID) {
-                bool rbqDelay;
+                int rbqDelayState;
                 HnswGetRbqInfoFromMetaPage(indexRelation, NULL, NULL, NULL, NULL, NULL, NULL,
-                                           NULL, NULL, &rbqDelay, NULL);
-                if (rbqDelay) {
+                                           NULL, NULL, &rbqDelayState, NULL);
+                if (rbqDelayState == RBQ_BUILD_DELAY) {
                     index_close(indexRelation, NoLock);
                     continue;
                 }
