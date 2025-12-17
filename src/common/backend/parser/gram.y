@@ -15077,7 +15077,7 @@ constraint_elem: ColId con_asc_desc
 						ereport(errstate,
 								(errmodule(MOD_PARSER),
 									errcode(ERRCODE_SYNTAX_ERROR),
-									errmsg("ASC/DESC is supported only in B-format database."),
+									errmsg(message),
 									parser_errposition(@1)));
 						$$ = NULL;/* not reached */
 					}

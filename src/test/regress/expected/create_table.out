@@ -481,7 +481,7 @@ ERROR:  CONSTRAINT without constraint_name is supported only in B-format databas
 LINE 1: ... test_primary(f11 int, f12 varchar(20), f13 bool, constraint...
                                                              ^
 create table test_primary(f11 int, f12 varchar(20), f13 bool, constraint con_t_pri primary key using btree(f11 desc, f12 asc));
-ERROR:  ASC/DESC is supported only in B-format database.
+ERROR:  ASC/DESC is supported only in B-format and D-format database.
 LINE 1: ...ool, constraint con_t_pri primary key using btree(f11 desc, ...
                                                              ^
 create table test_primary(f11 int, f12 varchar(20), f13 bool, primary key ((abs(f11))));
@@ -594,7 +594,7 @@ ERROR:  CONSTRAINT without constraint_name is supported only in B-format databas
 LINE 1: ...reate table test_unique(f31 int, f32 varchar(20), constraint...
                                                              ^
 create table test_unique(f31 int, f32 varchar(20), unique (f31 desc, f32 asc));
-ERROR:  ASC/DESC is supported only in B-format database.
+ERROR:  ASC/DESC is supported only in B-format and D-format database.
 LINE 1: ...ble test_unique(f31 int, f32 varchar(20), unique (f31 desc, ...
                                                              ^
 create table test_unique(f31 int, f32 varchar(20), unique ((abs(f31)) desc, (lower(f32)) asc));
@@ -720,7 +720,7 @@ PARTITION BY RANGE(f1)
         PARTITION P3 VALUES LESS THAN(2451544),
         PARTITION P4 VALUES LESS THAN(MAXVALUE)
 );
-ERROR:  ASC/DESC is supported only in B-format database.
+ERROR:  ASC/DESC is supported only in B-format and D-format database.
 LINE 6:     constraint con_t_pri primary key(f1 desc, f2 asc, f3)
                                              ^
 CREATE TABLE test_p_primary
@@ -1048,7 +1048,7 @@ PARTITION BY RANGE(f1)
         PARTITION P3 VALUES LESS THAN(2451544),
         PARTITION P4 VALUES LESS THAN(MAXVALUE)
 );
-ERROR:  ASC/DESC is supported only in B-format database.
+ERROR:  ASC/DESC is supported only in B-format and D-format database.
 LINE 6:     unique(f1 desc, f2 asc, f3)
                    ^
 CREATE TABLE test_p_unique

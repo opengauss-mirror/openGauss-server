@@ -769,7 +769,7 @@ ERROR:  expression is supported only in B-format database.
 LINE 1: alter table test_primary add primary key((f11 * 2 + 1));
                                                  ^
 alter table test_primary add primary key(f11 desc, f12 asc);
-ERROR:  ASC/DESC is supported only in B-format database.
+ERROR:  ASC/DESC is supported only in B-format and D-format database.
 LINE 1: alter table test_primary add primary key(f11 desc, f12 asc);
                                                  ^
 -- success
@@ -980,7 +980,7 @@ ERROR:  expression is supported only in B-format database.
 LINE 1: ...traint con_t_unique unique u_t_unique using btree((f31 * 2 +...
                                                              ^
 alter table test_unique add unique using btree(f31 desc);
-ERROR:  ASC/DESC is supported only in B-format database.
+ERROR:  ASC/DESC is supported only in B-format and D-format database.
 LINE 1: alter table test_unique add unique using btree(f31 desc);
                                                        ^
 -- success
@@ -1133,15 +1133,15 @@ ERROR:  PRIMARY KEY USING access_method is supported only in B-format database.
 LINE 1: ...ter table test_p_primary add constraint con_t_pri primary ke...
                                                              ^
 alter table test_p_primary add constraint primary key using btree(f1 desc, f2 asc, f3);
-ERROR:  ASC/DESC is supported only in B-format database.
+ERROR:  ASC/DESC is supported only in B-format and D-format database.
 LINE 1: ..._p_primary add constraint primary key using btree(f1 desc, f...
                                                              ^
 alter table test_p_primary add primary key using btree(f1 desc, f2 asc, f3);
-ERROR:  ASC/DESC is supported only in B-format database.
+ERROR:  ASC/DESC is supported only in B-format and D-format database.
 LINE 1: ... table test_p_primary add primary key using btree(f1 desc, f...
                                                              ^
 alter table test_p_primary add primary key using btree(f1 desc, f2 asc, f3);
-ERROR:  ASC/DESC is supported only in B-format database.
+ERROR:  ASC/DESC is supported only in B-format and D-format database.
 LINE 1: ... table test_p_primary add primary key using btree(f1 desc, f...
                                                              ^
 alter table test_p_primary add primary key using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
@@ -1502,7 +1502,7 @@ ERROR:  UNIQUE access_method_clause is supported only in B-format database.
 LINE 1: alter table test_p_unique add unique using btree(f1);
                                       ^
 alter table test_p_unique add unique(f1 desc, f2 asc, f3);
-ERROR:  ASC/DESC is supported only in B-format database.
+ERROR:  ASC/DESC is supported only in B-format and D-format database.
 LINE 1: alter table test_p_unique add unique(f1 desc, f2 asc, f3);
                                              ^
 alter table test_p_unique add constraint con_t_unique unique ((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
