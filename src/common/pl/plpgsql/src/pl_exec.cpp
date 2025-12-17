@@ -1279,7 +1279,6 @@ static void exec_cursor_rowtype_init(PLpgSQL_execstate *estate, PLpgSQL_datum *d
         Datum value;
         bool isnull;
         Oid valtype;
-        int32 valtypmod;
         Form_pg_attribute tattr = TupleDescAttr(new_tupdesc, fnum);
         Form_pg_attribute attr = TupleDescAttr(rec->tupdesc, anum);
         Oid reqtypemod = tattr->atttypmod;
@@ -1973,7 +1972,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func,
     estate.err_text = gettext_noop("while casting return value to function's return type");
 
     fcinfo->isnull = estate.retisnull;
-    t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
+    t_thrd.postgres_cxt.cur_command_tag = T_DolphinStrictTag;
     bool pipelinedRetIsSet = estate.is_pipelined && estate.rsi != NULL;
     if (estate.retisset || pipelinedRetIsSet) {
         ReturnSetInfo* rsi = estate.rsi;
@@ -4748,7 +4747,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
             break;
 
         case PLPGSQL_STMT_ASSIGN:
-            t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
+            t_thrd.postgres_cxt.cur_command_tag = T_DolphinStrictTag;
             rc = exec_stmt_assign(estate, (PLpgSQL_stmt_assign*)stmt);
             break;
 
@@ -4867,16 +4866,16 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
         }
 
         case PLPGSQL_STMT_RETURN:
-            t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
+            t_thrd.postgres_cxt.cur_command_tag = T_DolphinStrictTag;
             rc = exec_stmt_return(estate, (PLpgSQL_stmt_return*)stmt);
             break;
 
         case PLPGSQL_STMT_RETURN_NEXT:
-            t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
+            t_thrd.postgres_cxt.cur_command_tag = T_DolphinStrictTag;
             rc = exec_stmt_return_next(estate, (PLpgSQL_stmt_return_next*)stmt);
             break;
         case PLPGSQL_STMT_PIPE_ROW:
-            t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
+            t_thrd.postgres_cxt.cur_command_tag = T_DolphinStrictTag;
             rc = exec_stmt_pipe_row(estate, (PLpgSQL_stmt_pipe_row*)stmt);
             break;
         case PLPGSQL_STMT_RETURN_QUERY: {
@@ -4993,7 +4992,7 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt, bool resigna
         }
 
         case PLPGSQL_STMT_FETCH:
-            t_thrd.postgres_cxt.cur_command_tag = T_CreateStmt;
+            t_thrd.postgres_cxt.cur_command_tag = T_DolphinStrictTag;
             rc = exec_stmt_fetch(estate, (PLpgSQL_stmt_fetch*)stmt);
             break;
 
@@ -7950,7 +7949,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
         expr->unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;
     }
 
-    t_thrd.postgres_cxt.cur_command_tag = stmt->mod_stmt ? T_CreateSetStmt : T_SelectStmt;
+    t_thrd.postgres_cxt.cur_command_tag = stmt->mod_stmt ? T_DolphinStrictTag : T_SelectStmt;
     if (ENABLE_CN_GPC && g_instance.plan_cache->CheckRecreateSPICachePlan(expr->plan)) {
             g_instance.plan_cache->RecreateSPICachePlan(expr->plan);
     }
