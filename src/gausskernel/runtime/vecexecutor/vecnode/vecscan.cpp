@@ -40,10 +40,6 @@
 static inline VectorBatch* exec_vec_scan_fetch(
     ScanState* node, ExecVecScanAccessMtd access_mtd, ExecVecScanRecheckMtd recheck_mtd)
 {
-    // We don't support reevaluate plan
-    //
-    DBG_ASSERT(node->ps.state->es_epqTuple == NULL);
-
     // Run the node-type-specific access method function to get the next tuple
     //
     return (*access_mtd)(node);

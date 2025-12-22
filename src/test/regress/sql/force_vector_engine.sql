@@ -126,3 +126,24 @@ set try_vector_engine_strategy='optimal';
 select a,b from force_vector_sysdomain;
 drop table force_vector_sysdomain;
 set try_vector_engine_strategy='off';
+
+create table force_vt_tb1 ( a int primary key, b text);
+insert into force_vt_tb1 (select generate_series(1, 10));
+
+reset current_schema;
+set try_vector_engine_strategy = force;
+\parallel on 2
+begin
+update force_vt_tb1 set b = 'VIP' where a in (select a from force_vt_tb1 order by b limit 1);
+perform pg_sleep(2);
+end;
+/
+
+begin
+perform pg_sleep(1);
+update force_vt_tb1 set b = 'VIP' where a in (select a from force_vt_tb1 order by b limit 1);
+perform pg_sleep(2);
+end;
+/
+\parallel off
+drop table force_vt_tb1;
