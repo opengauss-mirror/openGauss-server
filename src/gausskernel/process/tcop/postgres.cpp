@@ -993,12 +993,15 @@ void ExecuteFunctionIfExisted(const char *filename, char *funcname)
     if (tmpCF.user_fn != NULL) {
         ((void* (*)(void))(tmpCF.user_fn))();
     }
+    pfree_ext(tmpCF.inforec);
 }
 
 bool IsFileExisted(const char *filename)
 {
     char* fullname = expand_dynamic_library_name(filename);
-    return file_exists(fullname);
+    bool ret = file_exists(fullname);
+    pfree_ext(fullname);
+    return ret;
 }
 
 #define INIT_PLUGIN_OBJECT "init_plugin_object"
