@@ -4164,3 +4164,37 @@ static void assign_sql_ignore_strategy(const char* newval, void* extra) {
     }
     u_sess->utils_cxt.sql_ignore_strategy_val = sql_ignore_strategy[0].val;
 }
+
+char* GetCompatOptions(const char* value)
+{
+    List *elemlist = NULL;
+    ListCell *cell = NULL;
+    int start = 0;
+    int64 result = 0;
+    StringInfoData strInfo;
+    bool isFirst = true;
+    initStringInfo(&strInfo);
+    char* valueCopy = pstrdup(value);
+    (void)SplitIdentifierString((char *)valueCopy, ',', &elemlist);
+
+    foreach (cell, elemlist) {
+        for (start = 0; start < OPT_MAX; start++) {
+            const char *item = (const char*)lfirst(cell);
+
+            if (strcmp(item, behavior_compat_options[start].name) == 0
+                && (result & behavior_compat_options[start].flag) == 0) {
+                result += behavior_compat_options[start].flag;
+                if (isFirst) {
+                    isFirst = false;
+                    appendStringInfo(&strInfo, "%s", item);
+                } else {
+                    appendStringInfo(&strInfo, ",%s", item);
+                }
+            }
+        }
+    }
+
+    list_free(elemlist);
+    pfree_ext(valueCopy);
+    return strInfo.data;
+}
