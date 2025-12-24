@@ -238,7 +238,7 @@ extern Datum timestamp_mi_interval(Timestamp timestamp, const Interval* span);
 extern Datum timestamp_mi_interval(PG_FUNCTION_ARGS);
 extern Datum timestamp_age(PG_FUNCTION_ARGS);
 extern Datum timestamp_diff(PG_FUNCTION_ARGS);
-extern int64 timestamp_diff_internal(text *units, TimestampTz dt1, TimestampTz dt2, bool enable_fix = false);
+extern int64 timestamp_diff_internal(text *units, TimestampTz dt1, TimestampTz dt2, bool enable_fix = true);
 extern Datum overlaps_timestamp(PG_FUNCTION_ARGS);
 
 extern Datum timestamptz_pl_interval(PG_FUNCTION_ARGS);
