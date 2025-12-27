@@ -8062,6 +8062,17 @@ int set_config_option(const char* name, const char* value, GucContext context, G
                         pfree(schemaNameList);
                     }
                 }
+
+                if ((strcasecmp(name, "behavior_compat_options") == 0)) {
+                    char* newCompatOptions = GetCompatOptions(value);
+                    pfree_ext(newval);  /* this is guaranteed to be set or freed, we need to make room for strdup */
+                    if (newCompatOptions == NULL) {
+                        return 1;
+                    } else {
+                        newval = guc_strdup(elevel, newCompatOptions);
+                        pfree(newCompatOptions);
+                    }
+                }
             } else if (source == PGC_S_DEFAULT) {
                 /* non-NULL boot_val must always get strdup'd */
                 if (conf->boot_val != NULL) {
