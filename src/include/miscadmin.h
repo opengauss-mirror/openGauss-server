@@ -192,15 +192,21 @@ extern bool contain_backend_version(uint32 version_number);
 #define D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER 1
 #define D_FORMAT_OPT_ENABLE_TABLE_HINT_IDENTIFIER 2
 #define D_FORMAT_OPT_ENABLE_ABS 4
-#define D_FORMAT_OPT_MAX 3
+#define D_FORMAT_OPT_DEFAULT_COLLATION 8
+#define D_FORMAT_OPT_MAX 4
 
 
 #define ENABLE_SET_SESSION_TRANSACTION                                                                   \
     ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION) && \
      u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 #define ENABLE_SET_VARIABLES (u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_SET_VARIABLES)
-#define USE_DEFAULT_COLLATION (u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_DEFAULT_COLLATION && \
-    t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM && u_sess->attr.attr_common.upgrade_mode == 0)
+#define USE_DEFAULT_COLLATION \
+ ((((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_DEFAULT_COLLATION) && \
+    u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) || \
+  ((u_sess->utils_cxt.d_format_behavior_compat_flags & D_FORMAT_OPT_DEFAULT_COLLATION) && \
+    u_sess->attr.attr_sql.sql_compatibility == D_FORMAT)) && \
+  t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM && u_sess->attr.attr_common.upgrade_mode == 0)
+
 #define ENABLE_MODIFY_COLUMN \
         ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_MODIFY_COLUMN) && \
         u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)

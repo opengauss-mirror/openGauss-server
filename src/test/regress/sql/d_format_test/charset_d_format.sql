@@ -24,7 +24,7 @@ drop table test_table;
 
 create table t_charset_0 (c1 varchar(20));
 select pg_get_tabledef('t_charset_0');
-set b_format_behavior_compat_options = 'default_collation';
+set d_format_behavior_compat_options = 'default_collation';
 -- schema level charset and collate
 create schema s_charset_1  charset   utf8mb4 collate   utf8mb4_unicode_ci;
 create schema s_charset_2  charset = utf8mb4 collate = utf8mb4_unicode_ci;
@@ -226,7 +226,7 @@ insert into tem_charset_1 values('a中国a');
 select r.relname,r.reloptions,a.attcollation from pg_class r,pg_attribute a where r.oid=a.attrelid and r.relname='tem_charset_1';
 
 -- cstore not supported
-SET b_format_behavior_compat_options = 'default_collation, enable_multi_charset';
+SET d_format_behavior_compat_options = 'default_collation';
 create schema s_charset_multi  charset = gbk;
 create table s_charset_multi.cstore_charset_1(c1 varchar(20),c2 varchar(20),c3 int) with (ORIENTATION=column); -- ERROR
 DROP schema s_charset_multi;
