@@ -808,7 +808,7 @@ Datum similar_escape(PG_FUNCTION_ARGS)
      * input byte; since the input is at most 1GB this can't overflow
      */
     const int dataBuffSize = 6 + 3 * plen;
-    result = (text*)palloc(VARHDRSZ + dataBuffSize);
+    result = (text *) palloc(VARHDRSZ + 23 + 3 * (size_t) plen);
     r = VARDATA(result);
     const char* dataStartPtr = r;
 
@@ -865,9 +865,34 @@ Datum similar_escape(PG_FUNCTION_ARGS)
 
         /* fast path */
         if (afterescape) {
-            if (pchar == '"' && !incharclass) /* for SUBSTRING patterns */
-                *r++ = ((nquotes++ % 2) == 0) ? '(' : ')';
-            else {
+            if (pchar == '"' && !incharclass) {
+                /* emit appropriate part separator, per notes above */
+                if (nquotes == 0) {
+                    *r++ = ')';
+                    *r++ = '{';
+                    *r++ = '1';
+                    *r++ = ',';
+                    *r++ = '1';
+                    *r++ = '}';
+                    *r++ = '?';
+                    *r++ = '(';
+                } else if (nquotes == 1) {
+                    *r++ = ')';
+                    *r++ = '{';
+                    *r++ = '1';
+                    *r++ = ',';
+                    *r++ = '1';
+                    *r++ = '}';
+                    *r++ = '(';
+                    *r++ = '?';
+                    *r++ = ':';
+                } else {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_USE_OF_ESCAPE_CHARACTER),
+                        errmsg("SQL regular expression may not contain more than two escape-double-quote separators")));
+                }
+                nquotes++;
+            } else {
                 *r++ = '\\';
                 *r++ = pchar;
             }
