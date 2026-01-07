@@ -82,7 +82,7 @@ Datum get_raw_page_fork(PG_FUNCTION_ARGS)
     bytea* raw_page = NULL;
     ForkNumber forknum;
 
-    forknum = forkname_to_number(text_to_cstring(forkname), NULL, true);
+    forknum = forkname_to_number(text_to_cstring(forkname), NULL);
 
     raw_page = get_raw_page_internal(relname, forknum, blkno);
 
