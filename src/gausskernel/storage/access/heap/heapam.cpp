@@ -4326,9 +4326,6 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
         HeapTuple heaptup = heap_tuples[i];
         /* judge whether need to insert into mlog-table */
         if (relation != NULL && relation->rd_mlogoid != InvalidOid) {
-            if (relation->rd_tam_ops == TableAmUstore) {
-                heaptup = UHeapToHeap(relation->rd_att, (UHeapTuple)heaptup);
-            }
             insert_into_mlog_table(relation, relation->rd_mlogoid,
                                 heaptup, &heaptup->t_self,
                                 GetCurrentTransactionId(), 'I');
