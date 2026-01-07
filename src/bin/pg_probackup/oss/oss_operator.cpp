@@ -245,7 +245,7 @@ void Oss::ListObjectsWithPrefix(char* bucket_name, char* prefix, parray* objects
             break;
         }
 
-        Aws::Vector<Aws::S3::Model::Object> resp = outcome.GetResult().GetContents();
+        const Aws::Vector<Aws::S3::Model::Object> &resp = outcome.GetResult().GetContents();
         for (auto &bucket : resp) {
             char* key = pg_strdup(bucket.GetKey().c_str());
             parray_append(objects, key);
