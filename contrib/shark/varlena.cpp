@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Technologies Co.,Ltd.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2024-2026. All rights reserved.
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -16,6 +16,11 @@
  * varlena.c
  *	  Functions in common use.
  *
+ * Portions Copyright (c) 2026, Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2020, AWS
+ * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1994, Regents of the University of California
+ * 
  * IDENTIFICATION
  *        contrib/shark/varlena.c
  * 
