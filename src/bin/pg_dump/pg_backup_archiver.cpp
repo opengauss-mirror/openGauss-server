@@ -5264,18 +5264,22 @@ size_t gzread_file(void *buf, unsigned len, gzFile fp)
 }
 #endif
 
-bool findDBCompatibility(Archive* fout, const char* databasename)
+bool findDBCompatibility(Archive* fout, const char* databasename, const char* dbType)
 {
     PGresult* res = NULL;
     int ntups = 0;
     const char* datcompatibility = NULL;
     bool isHasDatcompatibility = true;
     ArchiveHandle* AH = (ArchiveHandle*)fout;
-    bool isBcompatibility = false;
-    
+    bool isTargetCompatibility = false;
+
+    if (dbType == NULL || dbType == "\0") {
+        return isTargetCompatibility;
+    }
+
     isHasDatcompatibility = is_column_exists(AH->connection, DatabaseRelationId, "datcompatibility");
     if (!isHasDatcompatibility) {
-        return isBcompatibility;
+        return isTargetCompatibility;
     }
 
     PQExpBuffer query = createPQExpBuffer();
@@ -5289,17 +5293,17 @@ bool findDBCompatibility(Archive* fout, const char* databasename)
     if (ntups == 0) {
         PQclear(res);
         destroyPQExpBuffer(query);
-        return isBcompatibility;
+        return isTargetCompatibility;
     }
 
     datcompatibility = PQgetvalue(res, 0, PQfnumber(res, "datcompatibility"));
-    if (strcasecmp(datcompatibility, "B") == 0) {
-        isBcompatibility =  true;
+    if (strcasecmp(datcompatibility, dbType) == 0) {
+        isTargetCompatibility =  true;
     }
 
     PQclear(res);
     destroyPQExpBuffer(query);
-    return isBcompatibility;
+    return isTargetCompatibility;
 }
 
 /*

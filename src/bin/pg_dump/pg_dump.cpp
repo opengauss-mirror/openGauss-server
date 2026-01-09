@@ -11691,7 +11691,7 @@ static void dumpNamespace(Archive* fout, NamespaceInfo* nspinfo)
         if (OidIsValid(nspinfo->collate)) {
             CollInfo *coll = NULL;
             coll = findCollationByOid(nspinfo->collate);
-            if (coll != NULL) {
+            if ((findDBCompatibility(fout, PQdb(GetConnection(fout)), "B") || findDBCompatibility(fout, PQdb(GetConnection(fout)), "D")) && coll != NULL) {
                 appendPQExpBuffer(q, "ALTER SCHEMA %s COLLATE = %s;\n", qnspname, fmtId(coll->dobj.name));
             }
         }
