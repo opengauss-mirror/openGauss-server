@@ -275,6 +275,8 @@ const char* unit_eight_kB_parameter_list[] = {
     "prefetch_quantity",
     "segment_size",
     "shared_buffers",
+    "clog_buffers",
+    "csnlog_buffers",
     "temp_buffers",
     "wal_buffers",
     "wal_segment_size",

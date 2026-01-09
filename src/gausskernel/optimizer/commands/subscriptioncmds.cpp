@@ -514,11 +514,7 @@ static void ValidateReplicationSlot(char *slotname, List *publications)
  */
 ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
 {
-    if (t_thrd.proc->workingVersionNum < PUBLICATION_VERSION_NUM) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Before GRAND VERSION NUM %u, we do not support subscription.", PUBLICATION_VERSION_NUM)));
-    }
-
+    CheckSubscriptionConditions();
     Relation rel;
     ObjectAddress myself;
     Oid subid;
@@ -860,11 +856,7 @@ static void AlterSubscription_refresh(Subscription *sub, bool copy_data)
  */
 ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
 {
-    if (t_thrd.proc->workingVersionNum < PUBLICATION_VERSION_NUM) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Before GRAND VERSION NUM %u, we do not support subscription.", PUBLICATION_VERSION_NUM)));
-    }
-
+    CheckSubscriptionConditions();
     Relation rel;
     ObjectAddress myself;
     bool nulls[Natts_pg_subscription];
@@ -1105,16 +1097,24 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     return myself;
 }
 
-/*
- * Drop a subscription
- */
-void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
+void CheckSubscriptionConditions()
 {
     if (t_thrd.proc->workingVersionNum < PUBLICATION_VERSION_NUM) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("Before GRAND VERSION NUM %u, we do not support subscription.", PUBLICATION_VERSION_NUM)));
     }
+    if (!g_instance.attr.attr_storage.enable_subscription) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("When enable_subscription is off, subscription is disabled.")));
+    }
+}
 
+/*
+ * Drop a subscription
+ */
+void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
+{
+    CheckSubscriptionConditions();
     Relation rel;
     ObjectAddress myself;
     HeapTuple tup;

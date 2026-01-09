@@ -107,6 +107,7 @@ class Pterodb():
 		pglog_conf = pglog_conf + "enable_data_replicate = off \n"
 		pglog_conf = pglog_conf + "replication_type = 1 \n"
 		pglog_conf = pglog_conf + "wal_level = logical \n"
+		pglog_conf = pglog_conf + "enable_subscription = on \n"
 		pglog_conf = pglog_conf + "max_wal_senders = 8 \n"
 		pglog_conf = pglog_conf + "enable_slot_log = on \n"
 		file_handler.write(pglog_conf)

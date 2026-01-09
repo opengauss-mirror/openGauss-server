@@ -162,6 +162,8 @@ typedef struct knl_instance_attr_storage {
     int WalReceiverBufSize;
     int DataQueueBufSize;
     int NBuffers;
+    int NCLOGBuffers;
+    int NCSNLOGBuffers;
     int NNvmBuffers;
     int NPcaBuffers;
     int NSegBuffers;
@@ -240,6 +242,7 @@ typedef struct knl_instance_attr_storage {
     int parallel_recovery_batch;
     bool ss_enable_dorado;
     bool ss_stream_cluster;
+    bool enable_subscription;
     
     bool enable_uwal;
     char* uwal_config;
