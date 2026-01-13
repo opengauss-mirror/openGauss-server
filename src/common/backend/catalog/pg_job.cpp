@@ -993,7 +993,6 @@ void execute_job(int4 job_id)
     Datum job_name = 0;
     char* what = NULL;
     char* job_interval = NULL;
-    char* nspname = NULL;
     HeapTuple job_tup = NULL;
     Relation job_rel = NULL;
     Datum values[Natts_pg_job];
@@ -1016,9 +1015,6 @@ void execute_job(int4 job_id)
     what = get_job_what(job_id);
     start_date = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
     base_date = values[Anum_pg_job_start_date - 1];
-    if (!nulls[Anum_pg_job_nspname - 1]) {
-        nspname = DatumGetCString(DirectFunctionCall1(nameout, NameGetDatum(values[Anum_pg_job_nspname - 1])));
-    }
 
     heap_close(job_rel, AccessShareLock);
     ReleaseSysCache(job_tup);
@@ -1049,7 +1045,6 @@ void execute_job(int4 job_id)
              */
             if (DatumGetBool(DirectFunctionCall2(timestamp_eq, new_next_date, old_next_date)) &&
                 !nulls[Anum_pg_job_last_end_date - 1]) {
-                pfree_ext(job_interval);
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_STATUS),
                         errmsg("It is invalid job interval for the reason that it is a fixed timestamp, job_id: %d, "
@@ -1067,15 +1062,17 @@ void execute_job(int4 job_id)
 
         save = t_thrd.utils_cxt.CurrentResourceOwner;
 
-        if (nspname != NULL)
-            appendStringInfo(&buf, "set current_schema=%s;", quote_identifier(nspname));
+        /* set search path to current object nspOID */
+        OverrideSearchPath* overridePath = GetOverrideSearchPath(CurrentMemoryContext);
+        PushOverrideSearchPath(overridePath);
+        pfree_ext(overridePath);
+
         if (!execute_backend_scheduler_job(job_name, &buf)) {
             appendStringInfo(&buf, "%s", what);
             execute_simple_query(buf.data);
         }
 
         pfree_ext(buf.data);
-        pfree_ext(job_interval);
         t_thrd.utils_cxt.CurrentResourceOwner = save;
     }
     PG_CATCH();
@@ -1102,8 +1099,6 @@ void execute_job(int4 job_id)
 
         (void)MemoryContextSwitchTo(ecxt);
 
-        pfree_ext(job_interval);
-        pfree_ext(what);
         pfree_ext(autoDrop);
 
         ereport(ERROR,
@@ -1112,6 +1107,8 @@ void execute_job(int4 job_id)
                 errdetail("%s", edata->message)));
     }
     PG_END_TRY();
+
+    pfree_ext(job_interval);
 
     /* Update last_suc_date and  job_status='s' */
     update_pg_job_info(job_id, Pgjob_Succ, start_date, new_next_date, NULL, is_scheduler_job);
