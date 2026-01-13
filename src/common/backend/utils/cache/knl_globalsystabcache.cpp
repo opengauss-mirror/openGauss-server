@@ -67,6 +67,9 @@ void GlobalSysTabCache::Init()
             m_global_systupcaches[cache_id] = New(m_dbEntry->GetRandomMemCxt()) GlobalSysTupCache(
                 m_dbOid, cache_id, m_isShared, m_dbEntry);
             m_global_systupcaches[cache_id]->SetStatInfoPtr(&m_tup_count, &m_tup_space);
+        } else {
+            ereport(LOG, (errmsg("m_global_systupcaches not init, "
+                "m_isShared: %d, relation oid: %u.", m_isShared, cacheinfo[cache_id].reloid)));
         }
     }
 #endif
