@@ -6551,7 +6551,7 @@ void handle_terminate_active_sess_socket()
             u_sess->sig_cxt.got_terminate_sess_socket = false;
         }
     } else if (t_thrd.role == THREADPOOL_STREAM) {
-        if (u_sess->proc_cxt.MyProcPort->is_logic_conn) {
+        if (u_sess->proc_cxt.MyProcPort != NULL && u_sess->proc_cxt.MyProcPort->is_logic_conn) {
             gs_close_gsocket(&(u_sess->proc_cxt.MyProcPort->gs_sock));
         }
     } else {
