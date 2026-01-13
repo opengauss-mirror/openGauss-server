@@ -5302,6 +5302,7 @@ static void compute_scalar_stats(
     int num_mcv = Min(stats->attrs[0]->attstattarget, MAX_ATTR_MCV_STAT_TARGET);
     int num_bins = Min(stats->attrs[0]->attstattarget, MAX_ATTR_HIST_STAT_TARGET);
     StdAnalyzeData* mystats = (StdAnalyzeData*)stats->extra_data;
+    MemoryContext oldcxt = CurrentMemoryContext;
 
     values = (ScalarItem*)palloc(samplerows * sizeof(ScalarItem));
     tupnoLink = (int*)palloc(samplerows * sizeof(int));
@@ -5379,6 +5380,7 @@ static void compute_scalar_stats(
         }
         PG_CATCH();
         {
+            MemoryContextSwitchTo(oldcxt);
             ErrorData *edata = CopyErrorData();
             if (edata->sqlerrcode == ERRCODE_UNEXPECTED_CHUNK_VALUE) {
                 ereport(LOG, (errmsg("The toast value changed for relation %s, skip this value. Errmsg is %s",
