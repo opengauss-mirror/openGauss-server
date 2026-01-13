@@ -1187,6 +1187,9 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
             nspname = strVal(field2);
             AssertEreport(IsA(field3, String), MOD_OPT, "");
             relname = strVal(field3);
+            ereport(DEBUG5, (errmodule(MOD_PARSER),
+                             errmsg("[PARSER] parsed columnref's catagory name: %s, namespace name: %s,"
+                                    "relation name: %s", catname, nspname, relname)));
 
             /*
              * We check the catalog name and then ignore it.
