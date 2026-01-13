@@ -5820,7 +5820,19 @@ ProcessUtilitySlow(Node *parse_tree,
                                 errmsg("schema not defined, it may cause duplicate data."),
                                 errdetail("schema not exists.")));
                     }
-                    if (!SKIP_GS_SOURCE && !IsInitdb && u_sess->plsql_cxt.isCreateFunction) {
+
+                    /*
+                    * When the GUC parameter SKIP_GS_SOURCE is false and is in the non-initialization state
+                    * and the creation flag bit is the creation function, the creation data should be
+                    * inserted into gs_source. However, we need to skip the ERRCODE_LOCK_WAIT_TIMEOUT error code.
+                    * Otherwise, an uncontrollable error occurs.
+                    * When a deadlock timeout error is reported, a warning log is added to facilitate
+                    * the later creation of stored procedure error log tracing.
+                    */
+    
+                    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+                    bool need_insert = !SKIP_GS_SOURCE && !IsInitdb && u_sess->plsql_cxt.isCreateFunction;
+                    if (need_insert && edata->sqlerrcode != ERRCODE_LOCK_WAIT_TIMEOUT) {
                         u_sess->plsql_cxt.isCreateFunction = false;
                         if (stmt->isProcedure) {
                             InsertGsSource(InvalidOid, nspid, funcname, "procedure", false);
@@ -5828,7 +5840,12 @@ ProcessUtilitySlow(Node *parse_tree,
                             InsertGsSource(InvalidOid, nspid, funcname, "function", false);
                         }
                     }
-                    
+                    if (need_insert && edata->sqlerrcode == ERRCODE_LOCK_WAIT_TIMEOUT) {
+                        ereport(WARNING,
+                            (errcode(ERRCODE_LOCK_WAIT_TIMEOUT),
+                                errmsg("gs_source insert fail, it can not hold lock"),
+                                errdetail("Lock wait timeout.")));
+                    }
     #endif
                     if (u_sess->plsql_cxt.debug_query_string) {
                         pfree_ext(u_sess->plsql_cxt.debug_query_string);
