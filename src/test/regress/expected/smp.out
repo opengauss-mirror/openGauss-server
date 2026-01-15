@@ -437,6 +437,35 @@ select t1.a,t2.b,t3.c from t1, t2, t3 where t1.a = t2.a and t1.b = t3.c order by
  10 | 30 | 10
 (300 rows)
 
+create table temp_tbl(a int, b int, c int);
+explain (costs off) insert into temp_tbl select t1.a,t2.b,t3.c from t1, t2, t3 where t1.a = t2.a and t1.b = t3.c order by 1,2,3;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Insert on temp_tbl
+   ->  Sort
+         Sort Key: t1.a, t2.b, t3.c
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Hash Join
+                     Hash Cond: (t3.c = t1.b)
+                     ->  Seq Scan on t3
+                     ->  Hash
+                           ->  Streaming(type: BROADCAST dop: 2/2)
+                                 ->  Hash Join
+                                       Hash Cond: (t1.a = t2.a)
+                                       ->  Seq Scan on t1
+                                       ->  Hash
+                                             ->  Streaming(type: BROADCAST dop: 2/2)
+                                                   ->  Seq Scan on t2
+(15 rows)
+
+insert into temp_tbl select t1.a,t2.b,t3.c from t1, t2, t3 where t1.a = t2.a and t1.b = t3.c order by 1,2,3;
+select count(*) from temp_tbl;
+ count 
+-------
+   300
+(1 row)
+
+drop table temp_tbl;
 set enable_nestloop=on;
 explain (costs off) select a, avg(b), sum(c) from t1 group by a order by 1,2,3;
                            QUERY PLAN                           

@@ -31,6 +31,13 @@ set enable_hashjoin=on;
 explain (costs off) select t1.a,t2.b,t3.c from t1, t2, t3 where t1.a = t2.a and t1.b = t3.c order by 1,2,3;
 select t1.a,t2.b,t3.c from t1, t2, t3 where t1.a = t2.a and t1.b = t3.c order by 1,2,3;
 
+create table temp_tbl(a int, b int, c int);
+explain (costs off) insert into temp_tbl select t1.a,t2.b,t3.c from t1, t2, t3 where t1.a = t2.a and t1.b = t3.c order by 1,2,3;
+insert into temp_tbl select t1.a,t2.b,t3.c from t1, t2, t3 where t1.a = t2.a and t1.b = t3.c order by 1,2,3;
+select count(*) from temp_tbl;
+drop table temp_tbl;
+
+
 set enable_nestloop=on;
 explain (costs off) select a, avg(b), sum(c) from t1 group by a order by 1,2,3;
 select a, avg(b), sum(c) from t1 group by a order by 1,2,3;
