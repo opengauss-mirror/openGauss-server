@@ -8883,6 +8883,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         RESUME_INTERRUPTS();
         StreamNodeGroup::syncQuit(STREAM_ERROR);
         StreamNodeGroup::destroy(STREAM_ERROR);
+        if (u_sess->stream_cxt.global_obj == NULL && u_sess->instr_cxt.global_instr != NULL) {
+            u_sess->instr_cxt.global_instr = NULL;
+            u_sess->instr_cxt.thread_instr = NULL;
+        }
 
 #ifndef ENABLE_MULTIPLE_NODES
         clean_up_debug_client(true);
@@ -9102,6 +9106,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         /* reset xmin before ReadCommand, in case blocking redo */
         if (RecoveryInProgress()) {
             
+        }
+        if (send_ready_for_query && u_sess->stream_cxt.global_obj == NULL &&
+            u_sess->instr_cxt.global_instr != NULL) {
+            u_sess->instr_cxt.global_instr = NULL;
+            u_sess->instr_cxt.thread_instr = NULL;
         }
 
         /*
