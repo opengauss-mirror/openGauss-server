@@ -797,4 +797,13 @@ show enable_expr_fusion ;
  on
 (1 row)
 
+set enable_expr_fusion = on;
+create aggregate seqcfg(anyelement)(sfunc = array_append, stype = anyarray, initcond = '{}');
+select seqcfg(2);
+ seqcfg 
+--------
+ {2}
+(1 row)
+
+drop aggregate seqcfg(anyelement);
 reset enable_expr_fusion;

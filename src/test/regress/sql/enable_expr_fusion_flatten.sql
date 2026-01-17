@@ -470,4 +470,9 @@ INSERT INTO gtest22c VALUES (1), (2), (3);
 DROP TABLE gtest22c;
 
 show enable_expr_fusion ;
+
+set enable_expr_fusion = on;
+create aggregate seqcfg(anyelement)(sfunc = array_append, stype = anyarray, initcond = '{}');
+select seqcfg(2);
+drop aggregate seqcfg(anyelement);
 reset enable_expr_fusion;
