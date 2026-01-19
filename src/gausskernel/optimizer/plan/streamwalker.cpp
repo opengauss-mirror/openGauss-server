@@ -53,7 +53,7 @@ static bool table_contain_unsupport_feature(Oid relid, Query* query);
 static bool contain_unsupport_function(Oid funcId);
 static bool rel_contain_unshippable_feature(RangeTblEntry* rte, shipping_context* context, CmdType commandType);
 static void inh_shipping_context(shipping_context *dst, shipping_context *src);
-static bool contain_unsupport_expression(Node* expr, void* context, bool need_recur = true);
+static bool contain_unsupport_expression(Node* expr, void* context);
 
 
 static uint unsupport_func[] = {
@@ -475,11 +475,10 @@ static bool vector_search_func_shippable(Oid funcid)
 static void stream_walker_func_expr(FuncExpr* func, shipping_context *cxt)
 {
     uint32 i = 0;
-    char* func_name = get_func_name(func->funcid);
     
     if (pgxc_is_shippable_func_contain_any(func->funcid)) {
         /* the args type of concat() and concat_ws() contains ANY, that may cause unshippable */
-        if (contain_unsupport_expression((Node*)func->args, (void *)cxt), false) {
+        if (contain_unsupport_expression((Node*)func->args, (void *)cxt)) {
             cxt->current_shippable = false;
         }
     }
@@ -487,7 +486,7 @@ static void stream_walker_func_expr(FuncExpr* func, shipping_context *cxt)
         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
             NOTPLANSHIPPING_LENGTH,
             "Function %s() can not be shipped",
-            func_name);
+            get_func_name(func->funcid));
         securec_check_ss_c(sprintf_rc, "\0", "\0");
         cxt->current_shippable = false;
     }
@@ -497,7 +496,7 @@ static void stream_walker_func_expr(FuncExpr* func, shipping_context *cxt)
         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
             NOTPLANSHIPPING_LENGTH,
             "Function %s() can not be shipped because return record",
-            func_name);
+            get_func_name(func->funcid));
         securec_check_ss_c(sprintf_rc, "\0", "\0");
         cxt->current_shippable = false;
     }
@@ -506,7 +505,7 @@ static void stream_walker_func_expr(FuncExpr* func, shipping_context *cxt)
             errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                 NOTPLANSHIPPING_LENGTH,
                 "Function %s() can not be shipped",
-                func_name);
+                get_func_name(func->funcid));
             securec_check_ss_c(sprintf_rc, "\0", "\0");
             cxt->current_shippable = false;
         }
@@ -521,7 +520,6 @@ static void stream_walker_func_expr(FuncExpr* func, shipping_context *cxt)
         securec_check_ss_c(sprintf_rc, "\0", "\0");
         cxt->current_shippable = false;
     }
-    pfree(func_name);
 }
 
 static void stream_walker_aggref(Aggref* aggref, shipping_context *cxt)
@@ -839,8 +837,7 @@ static bool contain_unsupport_function(Oid funcId)
     return false;
 }
 
-#define CHECK_INTER_PER_LOOP (100)
-static bool contain_unsupport_expression(Node* expr, void* context, bool need_recur)
+static bool contain_unsupport_expression(Node* expr, void* context)
 {
     if (expr == NULL) {
         return false;
@@ -848,13 +845,6 @@ static bool contain_unsupport_expression(Node* expr, void* context, bool need_re
 
     errno_t sprintf_rc = 0;
     shipping_context* cxt = (shipping_context *)context;
-
-    if (cxt) {
-        if (cxt->check_count % CHECK_INTER_PER_LOOP == 0) {
-            CHECK_FOR_INTERRUPTS();
-        }
-        cxt->check_count++;
-    }
 
     switch (nodeTag(expr)) {
         case T_RowExpr: {
@@ -888,7 +878,7 @@ static bool contain_unsupport_expression(Node* expr, void* context, bool need_re
         case T_List: {
             ListCell* temp = NULL;
             foreach (temp, (List*)expr) {
-                if (contain_unsupport_expression((Node*)lfirst(temp), context, false)) {
+                if (contain_unsupport_expression((Node*)lfirst(temp), context)) {
                     cxt->current_shippable = false;
                 }
             }
@@ -922,13 +912,13 @@ static bool contain_unsupport_expression(Node* expr, void* context, bool need_re
         } break;
         case T_OpExpr: {
             OpExpr* op = (OpExpr*)expr;
-            if (contain_unsupport_expression((Node*)op->args, context, false)) {
+            if (contain_unsupport_expression((Node*)op->args, context)) {
                 cxt->current_shippable = false;
             }
         } break;
         case T_BoolExpr: {
             BoolExpr* be = (BoolExpr*)expr;
-            if (contain_unsupport_expression((Node*)be->args, context, false)) {
+            if (contain_unsupport_expression((Node*)be->args, context)) {
                 cxt->current_shippable = false;
             }
         } break;
@@ -977,10 +967,6 @@ static bool contain_unsupport_expression(Node* expr, void* context, bool need_re
                 cxt->current_shippable = false;
             }
             break;
-    }
-
-    if (!need_recur) {
-        return false;
     }
     return expression_tree_walker(expr, (bool (*)())stream_walker, context);
 }

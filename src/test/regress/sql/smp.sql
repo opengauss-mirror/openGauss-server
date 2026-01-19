@@ -113,36 +113,6 @@ insert into col_table_002 values(21, 21,'{c,c,b}','{b,c,a}');
 select * from col_table_001 where EXISTS (select * from col_table_002 where col_table_001.name[1] =col_table_002.apple[1]) order by id;
 select * from col_table_001 where EXISTS (select * from col_table_002 where col_table_001.name[1:3] =col_table_002.apple[1:3]) order by id;
 
-create table tb_1262216(
-bill_no number(15,0) ,
-product_id number(15,0) ,
-accumulate_value number(12,0) ,
-item_code number(9,0) ,
-primal_fee number(12,0) ,
-discount_fee number(12,0) ,
-accu_measure_id number(9,0) ,
-measure_id number(9,0) ,
-billing_type number(4,0) ,
-tax_include number(4,0) ,
-tax_fee number(15,0) ,
-tax_rate number(4,0) ,
-tax_measure_id number(9,0) ,
-product_offering_id number(9,0) ,
-sp_code varchar(20) ,
-oper_code varchar(32));
-
-explain (costs off) select concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(bill_no
-,'-'),product_id),'-'),accumulate_value),
-'-'),item_code
-),'-'),primal_fee
-),'-'),discount_fee
-),'-'),accu_measure_id
-),'-'),measure_id
-),'-'),billing_type
-),'-'),tax_include
-),'-'),tax_fee
-),'-'),tax_rate
-),'-'),tax_measure_id
-),'-'),product_offering_id) from tb_1262216;
-
-drop table tb_1262216;
+reset query_dop;
+drop table col_table_001;
+drop table col_table_002;
