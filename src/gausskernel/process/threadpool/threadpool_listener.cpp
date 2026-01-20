@@ -325,7 +325,7 @@ void ThreadPoolListener::ReaperAllSession()
          * encounter FATAL and exit before close session.
          * Under such scenarios, we choose to exit directly.
          */
-        if (m_group->m_workerNum <= 0 && m_group->m_sessionCount > 0) {
+        while (m_group->m_workerNum <= 0 && m_group->m_sessionCount > 0) {
             ereport(WARNING,
                 (errmsg("No thread pool worker left while waiting for session close. "
                         "This is a very rare case when all thread pool workers happen to"
@@ -334,7 +334,8 @@ void ThreadPoolListener::ReaperAllSession()
             if (ENABLE_DMS) {
                 m_group->m_sessionCount = 0;
             } else {
-                abort();
+                /* we try to add worker at pm thread, so sleep and retry */
+                pg_usleep(100);
             }
         }
         /* m_sessionCount should be sum of the list length of m_idleSessionList and m_readySessionList

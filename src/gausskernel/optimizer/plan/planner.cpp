@@ -2781,6 +2781,9 @@ static void process_sort(Query* parse, PlannerInfo* root, PlannerTargets* planne
         if (parse->is_flt_frame && parse->hasTargetSRFs) {
             tlist = build_plan_tlist(root, plannerTargets->final_target);
             (*resultPlan)->targetlist = tlist;
+            if (IsA(*resultPlan, PartIterator) || IsA(*resultPlan, VecPartIterator)) {
+                 (*resultPlan)->lefttree->targetlist = (*resultPlan)->targetlist;
+            }
         }
 
         /*

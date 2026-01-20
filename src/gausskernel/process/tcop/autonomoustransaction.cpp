@@ -50,6 +50,7 @@ static PGresult* PQexecAutonmFinish(PGconn* conn);
 static void ProcessorNotice(void* arg, const char* message);
 
 const int MAX_CONNINFO_SIZE = 512;
+const int MAX_RETRY_NUM = 5;
 pg_atomic_uint32 AutonomousSession::m_sessioncnt = 0;
 
 /*
@@ -109,21 +110,26 @@ void AutonomousSession::AttachSession(void)
      * but this timeout interval is meaningless.
      */
     errno_t ret = snprintf_s(connInfo, sizeof(connInfo), sizeof(connInfo) - 1,
-                             "dbname=%s port=%d host='localhost' application_name='autonomoustransaction' user=%s "
-                             "connect_timeout=600",
+                             "dbname=%s port=%d application_name='autonomoustransaction' user=%s "
+                             "connect_timeout=5",
                              dbName, g_instance.attr.attr_network.PostPortNumber,
                              (char*)GetSuperUserName((char*)userName));
     securec_check_ss_c(ret, "\0", "\0");
 
-    /* do the actual create session */
-    bool old = t_thrd.int_cxt.ImmediateInterruptOK;
-    t_thrd.int_cxt.ImmediateInterruptOK = true;
     /* Allow cancel/die interrupts */
     CHECK_FOR_INTERRUPTS();
     AddSessionCount();
-    m_conn = PQconnectdb(connInfo);
-    PQsetNoticeProcessor(m_conn, ProcessorNotice, NULL);
-    t_thrd.int_cxt.ImmediateInterruptOK = old;
+    for (int i = 0; i < MAX_RETRY_NUM; i++) {
+        m_conn = PQconnectdb(connInfo);
+        PQsetNoticeProcessor(m_conn, ProcessorNotice, NULL);
+        if (PQstatus(m_conn) != CONNECTION_OK && i != (MAX_RETRY_NUM - 1)) {
+            PQfinish(m_conn);
+            m_conn = NULL;
+            CHECK_FOR_INTERRUPTS();
+        } else {
+            break;
+        }
+    }
 
     if (PQstatus(m_conn) != CONNECTION_OK) {
         ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR),

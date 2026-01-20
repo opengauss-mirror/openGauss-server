@@ -1695,7 +1695,12 @@ static bool window_gettupleslot(WindowObject winobj, int64 pos, TupleTableSlot* 
  */
 void* WinGetPartitionLocalMemory(WindowObject winobj, Size sz)
 {
-    Assert(WindowObjectIsValid(winobj));
+    if (!WindowObjectIsValid(winobj)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATA_EXCEPTION),
+                errmodule(MOD_EXECUTOR),
+                errmsg("window object is invalid.")));
+    }
     if (winobj->localmem == NULL)
         winobj->localmem = MemoryContextAllocZero(winobj->winstate->partcontext, sz);
     return winobj->localmem;
@@ -1708,7 +1713,12 @@ void* WinGetPartitionLocalMemory(WindowObject winobj, Size sz)
  */
 int64 WinGetCurrentPosition(WindowObject winobj)
 {
-    Assert(WindowObjectIsValid(winobj));
+    if (!WindowObjectIsValid(winobj)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATA_EXCEPTION),
+                errmodule(MOD_EXECUTOR),
+                errmsg("window object is invalid.")));
+    }
     return winobj->winstate->currentpos;
 }
 
@@ -1722,7 +1732,12 @@ int64 WinGetCurrentPosition(WindowObject winobj)
  */
 int64 WinGetPartitionRowCount(WindowObject winobj)
 {
-    Assert(WindowObjectIsValid(winobj));
+    if (!WindowObjectIsValid(winobj)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATA_EXCEPTION),
+                errmodule(MOD_EXECUTOR),
+                errmsg("window object is invalid.")));
+    }
     spool_tuples(winobj->winstate, -1);
     return winobj->winstate->spooled_rows;
 }
@@ -1741,7 +1756,12 @@ void WinSetMarkPosition(WindowObject winobj, int64 markpos)
 {
     WindowAggState* winstate = NULL;
 
-    Assert(WindowObjectIsValid(winobj));
+    if (!WindowObjectIsValid(winobj)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATA_EXCEPTION),
+                errmodule(MOD_EXECUTOR),
+                errmsg("window object is invalid.")));
+    }
     winstate = winobj->winstate;
 
     if (markpos < winobj->markpos)
@@ -1776,7 +1796,12 @@ bool WinRowsArePeers(WindowObject winobj, int64 pos1, int64 pos2)
     TupleTableSlot* slot2 = NULL;
     bool res = false;
 
-    Assert(WindowObjectIsValid(winobj));
+    if (!WindowObjectIsValid(winobj)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATA_EXCEPTION),
+                errmodule(MOD_EXECUTOR),
+                errmsg("window object is invalid.")));
+    }
     winstate = winobj->winstate;
     node = (WindowAgg*)winstate->ss.ps.plan;
 
@@ -1834,7 +1859,12 @@ Datum WinGetFuncArgInPartition(
     bool got_tuple = false;
     int64 abs_pos;
 
-    Assert(WindowObjectIsValid(winobj));
+    if (!WindowObjectIsValid(winobj)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATA_EXCEPTION),
+                errmodule(MOD_EXECUTOR),
+                errmsg("window object is invalid.")));
+    }
     winstate = winobj->winstate;
     econtext = winstate->ss.ps.ps_ExprContext;
     slot = winstate->temp_slot_1;
