@@ -147,9 +147,9 @@ void PrepForRead(char *path, int64 blocknum, char *relation_type, char *outputFi
     }
     RelFileNodeForkNum relfilenode;
     if (strlen(pathFirstpart) == 0) {
-        relfilenode = relpath_to_filenode(path);
+        relfilenode = relpath_to_filenode(path, true);
     } else {
-        relfilenode = relpath_to_filenode(pathFirstpart);
+        relfilenode = relpath_to_filenode(pathFirstpart, true);
     }
     if (relfilenode.rnode.node.spcNode == 0)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

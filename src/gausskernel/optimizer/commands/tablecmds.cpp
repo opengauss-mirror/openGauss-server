@@ -38,6 +38,7 @@
 #include "access/multixact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_matview.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
@@ -3477,6 +3478,22 @@ void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExec
         }
 
         delrel = try_relation_open(relOid, NoLock);
+        /*Not allow to drop mlog*/
+        if (relkind == RELKIND_RELATION && delrel != NULL && ISMLOG(delrel->rd_rel->relname.data)) {
+            /*If we can find a base table, it is mlog.*/
+            if (get_matview_mlog_baserelid(relOid)!= InvalidOid)
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Use 'Drop table' to drop mlog table %s is not allowed.",delrel->rd_rel->relname.data)));
+        }
+        /*Not allow to drop mlog index*/
+        if (relkind == RELKIND_INDEX && delrel != NULL && ISMLOG(delrel->rd_rel->relname.data)) {
+            /*If we can find a base table, it is mlog.*/
+            if (get_matview_mlog_baserelid(delrel->rd_index->indrelid) != InvalidOid)
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Use 'Drop index' to drop index %s of mlog table is not allowed.",
+                        delrel->rd_rel->relname.data)));
+        }
+
         /*
          * Open up drop table command for table being redistributed right now.
          *

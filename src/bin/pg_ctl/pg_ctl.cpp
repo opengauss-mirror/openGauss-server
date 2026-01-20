@@ -132,11 +132,6 @@ typedef enum {
     CHANGE_OPERATION
 } MemberOperation;
 
-typedef enum {
-    DEFAULT_REASON = 0,
-    CONN_PRIMARY_FAIL
-} BuildFailReason;
-
 
 #define MAX_PERCENT 100
 #define FAIL_PERCENT -1
@@ -236,6 +231,7 @@ const int g_length_stop_char = 2;
 const int g_length_suffix = 3;
 const static int INC_BUILD_RETRY_TIMES = 3;
 BuildFailReason g_inc_fail_reason = DEFAULT_REASON;
+VerifyCommitStatus verifyCommitStatus = VERIFY_COMMIT_DISABLE;
 
 bool g_is_obsmode = false;
 
@@ -4206,6 +4202,10 @@ void ResetBuildInfo()
         connstr_source = NULL;
     }
     replication_type = RT_WITH_DUMMY_STANDBY;
+
+    if (verifyCommitStatus != VERIFY_COMMIT_DISABLE) {
+        verifyCommitStatus = VERIFY_COMMIT_WORKING;
+    }
 }
 
 static bool DoIncBuild(uint32 term)
@@ -4233,6 +4233,12 @@ static bool DoAutoBuild(uint32 term)
         if (g_inc_fail_reason == CONN_PRIMARY_FAIL) {
             /* If primary can not be connected, there is no meaning to try full build. */
             pg_log(PG_WARNING, _("inc build failed due to primary connection failure, skip full build.\n"));
+            return buildSuccess;
+        }
+        if (g_inc_fail_reason == VERIFY_COMMIT_LSN_FAIL) {
+            pg_log(PG_WARNING, 
+                _("inc build failed due to we find some commited transaction different from primary, "
+                  "and you specify '--verify-commit'.\n"));
             return buildSuccess;
         }
 
@@ -6419,6 +6425,7 @@ int main(int argc, char** argv)
         {"keycn", required_argument, NULL, 'k'},
         {"slotname", required_argument, NULL, 'K'},
         {"taskid", required_argument, NULL, 'I'},
+        {"verify-commit", no_argument, NULL, 5},
         {NULL, 0, NULL, 0}};
 
     int option_index;
@@ -6865,6 +6872,10 @@ int main(int argc, char** argv)
                         pg_log(PG_WARNING, _("unexpected vote number specified\n"));
                         goto Error;
                     }
+                    break;
+                }
+                case 5: {
+                    verifyCommitStatus = VERIFY_COMMIT_WORKING;
                     break;
                 }
                 default:

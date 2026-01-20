@@ -970,6 +970,7 @@ bool WLMAjustCGroupByCNSessid(WLMNodeGroupInfo* ng, uint64 sess_id, const char* 
         char query[KBYTES];
         PgBackendStatus* beentry = NULL;
         PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
+        PgBackendStatusNode* temp = node;
         while (node != NULL) {
             PgBackendStatus* tmpBeentry = node->data;
             if ((tmpBeentry != NULL) && (tmpBeentry->st_sessionid == sess_id)) {
@@ -980,8 +981,10 @@ bool WLMAjustCGroupByCNSessid(WLMNodeGroupInfo* ng, uint64 sess_id, const char* 
         }
 
         if (beentry == NULL || beentry->st_cgname == NULL) {
+            gs_stat_free_stat_node_without_beentry(temp);
             return false;
         }
+        gs_stat_free_stat_node_without_beentry(temp, beentry);
 
         WLMStatistics* backstat = (WLMStatistics*)&beentry->st_backstat;
 
@@ -1027,7 +1030,7 @@ bool WLMAjustCGroupByCNSessid(WLMNodeGroupInfo* ng, uint64 sess_id, const char* 
             /* attach control group for each thread for the session on each data node */
             (void)FetchStatistics4WLM(query, NULL, 0, WLMStrategyFuncIgnoreResult);
         }
-        
+        gs_stat_free_stat_beentry(beentry);
     }
 
     if (IS_PGXC_DATANODE) {
@@ -1038,7 +1041,9 @@ bool WLMAjustCGroupByCNSessid(WLMNodeGroupInfo* ng, uint64 sess_id, const char* 
 
         /* No threads to update, nothing to do. */
         PgBackendStatusNode* node = gs_stat_read_current_status(&num);
+        PgBackendStatusNode* temp = node;
         if (num == 0) {
+            gs_stat_free_stat_node_without_beentry(temp);
             return true;
         }
 
@@ -1052,7 +1057,8 @@ bool WLMAjustCGroupByCNSessid(WLMNodeGroupInfo* ng, uint64 sess_id, const char* 
             }
             node = node->next;
         }
-
+        gs_stat_free_stat_node_without_beentry(temp);
+        
         /* Attach these threads batch with the new group. */
         for (i = 0; i < j; ++i) {
             gscgroup_attach_task_batch(ng, u_sess->wlm_cxt->group_keyname, threads[i], &is_changed);
