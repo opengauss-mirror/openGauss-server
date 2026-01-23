@@ -2149,6 +2149,7 @@ extern void stp_reset_stmt();
 extern void stp_reserve_subxact_resowner(ResourceOwner resowner);
 extern void stp_cleanup_subxact_resowner(int64 minStackId);
 extern void stp_cleanup_subxact_resource(int64 stackId);
+extern void stp_cleanup_subxact_exprcontext(int64 stackId);
 extern void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bool status);
 extern void examine_parameter_list(List* parameters, Oid languageOid, const char* queryString,
     oidvector** parameterTypes, TypeDependExtend** type_depend_extend, ArrayType** allParameterTypes,

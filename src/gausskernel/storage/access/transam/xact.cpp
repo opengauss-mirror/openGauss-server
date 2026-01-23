@@ -3315,6 +3315,13 @@ static void PrepareTransaction(bool STP_commit)
                           errmsg("PrepareTransaction while in %s state", TransStateAsString(s->state))));
     Assert((!StreamThreadAmI() && s->parent == NULL) || StreamThreadAmI());
 
+#ifndef ENABLE_NULTIPLE_NODES
+    if (!STP_commit) {
+        /* release reserved subxact expr context after 'stackId' */
+        stp_cleanup_subxact_exprcontext(-1);
+    }
+#endif
+
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         if (u_sess->xact_cxt.savePrepareGID) {
