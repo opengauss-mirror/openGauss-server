@@ -1441,6 +1441,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     securec_check(rc, "\0", "\0");
     storage_cxt->on_proc_exit_index = 0;
     storage_cxt->on_shmem_exit_index = 0;
+    storage_cxt->registerAbortBackupHandlerdone = false;
 
     storage_cxt->cmprMetaInfo = (CmprMetaUnion*)palloc0(sizeof(CmprMetaUnion));
     storage_cxt->DataFileIdCache = NULL;

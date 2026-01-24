@@ -134,7 +134,6 @@ void ReportFailedRollbackRequest(TransactionId xid, UndoRecPtr fromAddr, UndoRec
         HASH_ENTER, &found);
 
     /* This request better be in the hash and it's what we are expecting */
-    Assert(found == true);
     Assert(entry->endUndoPtr == toAddr);
     Assert(entry->dbid == dbid);
     Assert(entry->launched == true);

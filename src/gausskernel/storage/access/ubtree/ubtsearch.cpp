@@ -1216,7 +1216,7 @@ void UBTreeTraceTuple(IndexScanDesc scan, OffsetNumber offnum, bool isVisible, b
 
     /* part 4: partOid */
     Oid partOid = InvalidOid;
-    if (RelationIsGlobalIndex(rel)) {
+    if (RelationIsGlobalIndex(rel) && !isHikey) {
         bool isnull = false;
         AttrNumber partitionOidAttr = IndexRelationGetNumberOfAttributes(rel);
         TupleDesc tupdesc = RelationGetDescr(rel);

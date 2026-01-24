@@ -618,7 +618,6 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->sessionBackupState = SESSION_BACKUP_NONE;
     proc_cxt->LabelFile = NULL;
     proc_cxt->TblspcMapFile = NULL;
-    proc_cxt->registerAbortBackupHandlerdone = false;
     proc_cxt->gsRewindAddCount = false;
     proc_cxt->PassConnLimit = false;
     proc_cxt->clientIsGsql = false;
@@ -628,6 +627,7 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->check_auth = false;
     proc_cxt->nextQuery = false;
     proc_cxt->nextSeqid = 0;
+    proc_cxt->clientIsLogicalSender = false;
 }
 
 static void knl_u_time_init(knl_u_time_context* time_cxt)

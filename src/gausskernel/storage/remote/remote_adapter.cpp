@@ -326,10 +326,11 @@ int StandbyReadPageforPrimary(RepairBlockKey key, uint32 blocksize, uint64 lsn, 
         }
     } else {
         bool hit = false;
-
+        if (IsSegmentLogicalRelNode(relfilenode)) {
+            ereport(ERROR, (errmsg("only support repair physical relfilenode & blocknum.")));
+        }
         /* read page, if PageIsVerified failed will long jump to PG_CATCH() */
         Buffer buf = ReadBufferForRemote(relfilenode, key.forknum, key.blocknum, RBM_FOR_REMOTE, NULL, &hit, pblk);
-
         if (BufferIsInvalid(buf)) {
             ereport(ERROR, (errmodule(MOD_REMOTE), errmsg("standby page buffer is invalid!")));
             return REMOTE_READ_BLCKSZ_NOT_SAME;

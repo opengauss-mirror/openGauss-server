@@ -12911,7 +12911,7 @@ XLogRecPtr GetRestartPointInRecovery(CheckPoint *restartCheckPoint)
     if (XLogRecPtrIsInvalid(curMinRecLSN)) {
         /* The dirty page queue is empty, so the redo point can be updated to the latest position. */
         (void)LWLockAcquire(state->recovery_queue_lock, LW_EXCLUSIVE);
-        state->start = state->end > 0 ? state->end - 1 : state->end;
+        state->start = state->end != state->start ? state->end - 1 : state->end;
         (void)LWLockRelease(state->recovery_queue_lock);
 
         SpinLockAcquire(&xlogctl->info_lck);
@@ -15598,10 +15598,11 @@ static void DoAbortBackupCallback(int code, Datum arg)
  */
 void RegisterPersistentAbortBackupHandler(void)
 {
-    if (u_sess->proc_cxt.registerAbortBackupHandlerdone)
+    if (t_thrd.storage_cxt.registerAbortBackupHandlerdone) {
         return;
+    }
     on_shmem_exit(DoAbortBackupCallback, BoolGetDatum(true));
-    u_sess->proc_cxt.registerAbortBackupHandlerdone = true;
+    t_thrd.storage_cxt.registerAbortBackupHandlerdone = true;
 }
 
 /*

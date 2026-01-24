@@ -135,7 +135,9 @@ static void pg_decode_startup(LogicalDecodingContext* ctx, OutputPluginOptions* 
 static void pg_decode_shutdown(LogicalDecodingContext* ctx)
 {
     PluginTestDecodingData* data = (PluginTestDecodingData*)ctx->output_plugin_private;
-
+    if (data == NULL) {
+        return;
+    }
     /* cleanup our own resources via memory context reset */
     MemoryContextDelete(data->context);
 }
@@ -376,7 +378,7 @@ static void pg_decode_change(
     data = (PluginTestDecodingData*)ctx->output_plugin_private;
 
     /* output BEGIN if we haven't yet */
-    if (data->skip_empty_xacts && !data->xact_wrote_changes) {
+    if (data->skip_empty_xacts && !data->xact_wrote_changes && txn != nullptr) {
         pg_output_begin(ctx, data, txn, false);
     }
     data->xact_wrote_changes = true;

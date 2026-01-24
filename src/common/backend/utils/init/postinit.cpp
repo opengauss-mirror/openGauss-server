@@ -2191,6 +2191,9 @@ void PostgresInitializer::InitLoadLocalSysCache(Oid db_oid, const char *db_name)
             t_thrd.lsc_cxt.lsc->LocalSysDBCacheReSet();
         }
         AbortBufferIO();
+
+        // re-throw as FATAL : not jump to any other CATCH block, FATAL level to exit thread.
+        t_thrd.log_cxt.PG_exception_stack = NULL;
         PG_RE_THROW();
     }
     PG_END_TRY();

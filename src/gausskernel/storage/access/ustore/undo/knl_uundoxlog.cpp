@@ -23,6 +23,8 @@
 #include "knl/knl_thread.h"
 #include "storage/standby.h"
 
+#define LSN_32BIT_SHIFT (32)
+
 namespace undo {
 void XlogExtendUndoSpaceReplay(const XlogUndoExtend *xlrec, XLogRecPtr extendLsn)
 {
@@ -64,7 +66,19 @@ void XlogUndoUnlinkReplay(const XlogUndoUnlink *xlrec, XLogRecPtr unlinkLsn)
     if (usp->LSN() < unlinkLsn) {
         UndoLogOffset newHead = UNDO_PTR_GET_OFFSET(xlrec->head);
         UndoLogOffset head = usp->Head();
-        Assert(head == UNDO_PTR_GET_OFFSET(xlrec->prevhead));
+#ifdef USE_ASSERT_CHECKING
+        if (unlikely(head != UNDO_PTR_GET_OFFSET(xlrec->prevhead))) {
+            ereport(WARNING, (errmsg(
+                "Current undo space head not match unlink record prevhead. space head:%lu, target head:%lu, "
+                "record prevhead:%lu, tail:%lu, space lsn:%X/%X, unlink lsn:%X/%X, "
+                "zid:%d, discard_urec_ptr:%lu, force_discard_urec_ptr:%lu, recycle_tslot_ptr:%lu, zone lsn:%X/%X.",
+                head, newHead, UNDO_PTR_GET_OFFSET(xlrec->prevhead), usp->Tail(),
+                (uint32)(usp->LSN() >> LSN_32BIT_SHIFT), (uint32)(usp->LSN()),
+                (uint32)(unlinkLsn >> LSN_32BIT_SHIFT), (uint32)unlinkLsn,
+                zoneId, zone->GetDiscardURecPtr(), zone->GetForceDiscardURecPtr(),
+                zone->GetRecycleTSlotPtr(), (uint32)(zone->GetLSN() >> LSN_32BIT_SHIFT), (uint32)(zone->GetLSN()))));
+        }
+#endif
         zone->ForgetUndoBuffer(head, newHead, UNDO_DB_OID);
         usp->LockSpace();
         usp->MarkDirty();
@@ -115,7 +129,19 @@ void XlogSlotUnlinkReplay(const XlogUndoUnlink *xlrec, XLogRecPtr unlinkLsn)
     if (usp->LSN() < unlinkLsn) {
         UndoLogOffset newHead = UNDO_PTR_GET_OFFSET(xlrec->head);
         UndoLogOffset head = usp->Head();
-        Assert(head == UNDO_PTR_GET_OFFSET(xlrec->prevhead));
+#ifdef USE_ASSERT_CHECKING
+        if (unlikely(head != UNDO_PTR_GET_OFFSET(xlrec->prevhead))) {
+            ereport(WARNING, (errmsg(
+                "Current undo space head not match unlink record prevhead. space head:%lu, target head:%lu, "
+                "record prevhead:%lu, tail:%lu, space lsn:%X/%X, unlink lsn:%X/%X, "
+                "zid:%d, discard_urec_ptr:%lu, force_discard_urec_ptr:%lu, recycle_tslot_ptr:%lu, zone lsn:%X/%X.",
+                head, newHead, UNDO_PTR_GET_OFFSET(xlrec->prevhead), usp->Tail(),
+                (uint32)(usp->LSN() >> LSN_32BIT_SHIFT), (uint32)(usp->LSN()),
+                (uint32)(unlinkLsn >> LSN_32BIT_SHIFT), (uint32)unlinkLsn,
+                zoneId, zone->GetDiscardURecPtr(), zone->GetForceDiscardURecPtr(),
+                zone->GetRecycleTSlotPtr(), (uint32)(zone->GetLSN() >> LSN_32BIT_SHIFT), (uint32)(zone->GetLSN()))));
+        }
+#endif
         zone->ForgetUndoBuffer(head, newHead, UNDO_SLOT_DB_OID);
         usp->LockSpace();
         usp->MarkDirty();

@@ -363,8 +363,28 @@ char** pgfnames(const char* path)
             if (numnames + 1 >= fnsize) {
                 fnsize *= 2;
                 filenames = (char**)repalloc(filenames, fnsize * sizeof(char*));
+                if (filenames == NULL) {
+                    closedir(dir);
+#ifndef FRONTEND
+                    ereport(WARNING, (errmsg("alloc memory failed for \"%s\": %m", path)));
+#else
+                    fprintf(stderr, _("alloc memory failed \"%s\": %s\n"), path, gs_strerror(errno));
+#endif
+                    return NULL;
+                }
             }
-            filenames[numnames++] = pstrdup(file->d_name);
+            filenames[numnames] = pstrdup(file->d_name);
+            if (filenames[numnames] == NULL) {
+                closedir(dir);
+                pgfnames_cleanup(filenames);
+#ifndef FRONTEND
+                ereport(WARNING, (errmsg("alloc memory failed for \"%s\": %m", path)));
+#else
+                fprintf(stderr, _("alloc memory failed \"%s\": %s\n"), path, gs_strerror(errno));
+#endif
+                return NULL;
+            }
+            numnames++;
         }
         errno = 0;
     }

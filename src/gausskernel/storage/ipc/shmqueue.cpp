@@ -110,7 +110,7 @@ void SHMQueueInsertAfter(SHM_QUEUE* queue, SHM_QUEUE* elem)
 Pointer SHMQueueNext(const SHM_QUEUE* queue, const SHM_QUEUE* curElem, Size linkOffset)
 {
     SHM_QUEUE* elemPtr = curElem->next;
-    if (elemPtr == queue) { /* back to the queue head? */
+    if (elemPtr == queue || elemPtr == NULL) { /* back to the queue head? */
         return NULL;
     }
 

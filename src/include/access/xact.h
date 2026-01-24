@@ -578,7 +578,7 @@ extern TransactionState CopyTxnStateByCurrentMcxt(TransactionState state);
 
 extern void SetCurrentTransactionUndoRecPtr(UndoRecPtr urecPtr, UndoPersistence upersistence);
 extern UndoRecPtr GetCurrentTransactionUndoRecPtr(UndoPersistence upersistence);
-extern void ApplyUndoActions(void);
+extern void ApplyUndoActions(bool stpRollback = false);
 extern void SetUndoActionsInfo(void);
 extern void ResetUndoActionsInfo(void);
 extern bool CanPerformUndoActions(void);

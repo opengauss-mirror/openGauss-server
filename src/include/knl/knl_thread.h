@@ -2848,6 +2848,7 @@ typedef struct knl_t_storage_context {
     ONEXIT on_shmem_exit_list[MAX_ON_EXITS];
     int on_proc_exit_index;
     int on_shmem_exit_index;
+    bool  registerAbortBackupHandlerdone;    /* unterminated backups handler flag */
 
     union CmprMetaUnion* cmprMetaInfo;
 

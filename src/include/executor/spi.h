@@ -199,7 +199,7 @@ extern void SPI_disconnect(int connect);
 extern void SPI_savepoint_create(const char* spName);
 extern void SPI_savepoint_rollback(const char* spName);
 extern void SPI_savepoint_release(const char* spName);
-extern void SPI_savepoint_rollbackAndRelease(const char *spName, SubTransactionId subXid);
+extern void SPI_savepoint_rollbackAndRelease(const char *spName, SubTransactionId subXid, bool stpRollback = false);
 
 extern ResourceOwner AddCplanRefAgainIfNecessary(SPIPlanPtr plan,
     CachedPlanSource* plansource, CachedPlan* cplan, TransactionId oldTransactionId, ResourceOwner oldOwner);

@@ -865,6 +865,9 @@ void UndoRecycleMain()
     exrto_recycle_residual_undo_file("recycle_main");
     t_thrd.undorecycler_cxt.is_recovery_in_progress = RecoveryInProgress();
     while (true) {
+        if (pmState == PM_WAIT_BACKENDS || u_sess->attr.attr_common.upgrade_mode == 1) {
+            break;
+        }
         if (t_thrd.undorecycler_cxt.got_SIGHUP) {
             t_thrd.undorecycler_cxt.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
@@ -908,6 +911,9 @@ void UndoRecycleMain()
                 recycleMaxXIDCount = 0;
                 isAnyZoneUsed = false;
                 for (idx = 0; idx < UNDO_ZONE_COUNT && !t_thrd.undorecycler_cxt.shutdown_requested; idx++) {
+                    if (u_sess->attr.attr_common.upgrade_mode == 1) {
+                        break;
+                    }
                     UndoZone *zone = UndoZoneGroup::GetUndoZone(idx, false);
                     TransactionId frozenXid = oldestXmin;
                     if (zone == NULL) {

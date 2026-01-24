@@ -608,4 +608,5 @@ void ForgetLocalBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockN
     CLEAR_BUFFERTAG(bufHdr->tag);
     bufState = pg_atomic_read_u64(&bufHdr->state);
     bufState &= ~(BM_VALID | BM_TAG_VALID | BM_DIRTY);
+    pg_atomic_write_u64(&bufHdr->state, bufState);
 }

@@ -223,7 +223,7 @@ static void pg_decode_change(
     data = (PluginTestDecodingData*)ctx->output_plugin_private;
 
     /* output BEGIN if we haven't yet */
-    if (data->skip_empty_xacts && !data->xact_wrote_changes) {
+    if (data->skip_empty_xacts && !data->xact_wrote_changes && txn != nullptr) {
         pg_output_begin(ctx, data, txn, false);
     }
     data->xact_wrote_changes = true;

@@ -32,6 +32,7 @@
 #include "replication/replicainternal.h"
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
+#include "replication/walsender_private.h"
 #include "replication/syncrep.h"
 #include "replication/archive_walreceiver.h"
 
@@ -85,6 +86,10 @@ void log_slot_advance(const ReplicationSlotPersistentData *slotInfo, char* extra
     if ((!u_sess->attr.attr_sql.enable_slot_log && t_thrd.role != ARCH) || RecoveryInProgress()) {
         return;
     }
+    if (AM_WAL_DB_SENDER && t_thrd.walsender_cxt.MyWalSnd != NULL
+        && t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_STOPPING) {
+        return;
+    }
 
     ReplicationSlotPersistentData xlrec;
     XLogRecPtr Ptr;
@@ -112,6 +117,10 @@ void log_slot_advance(const ReplicationSlotPersistentData *slotInfo, char* extra
         } else {
             SyncRepWaitForLSN(Ptr);
         }
+    }
+    if (pmState >= PM_SHUTDOWN) {
+        ereport(LOG,
+            (errmsg("Postmaster shutdown, the slot advance xlog is written, thread role is %d.", t_thrd.role)));
     }
 #endif
 }
@@ -1190,7 +1199,7 @@ void slot_redo(XLogReaderState *record)
 
     /* Backup blocks are not used in xlog records */
     Assert(!XLogRecHasAnyBlockRefs(record));
-    if (info != XLOG_SLOT_CHECK && GET_SLOT_EXTRA_DATA_LENGTH(*xlrec) != 0) {
+    if (info != XLOG_SLOT_CHECK && info != XLOG_SLOT_DROP && GET_SLOT_EXTRA_DATA_LENGTH(*xlrec) != 0) {
         extra_content = (char*)XLogRecGetData(record) + ReplicationSlotPersistentDataConstSize;
         Assert(strlen(extra_content) == (uint32)(GET_SLOT_EXTRA_DATA_LENGTH(*xlrec)));
     }

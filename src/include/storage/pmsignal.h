@@ -81,6 +81,7 @@ extern void MarkPostmasterChildInactive(void);
 extern void MarkPostmasterChildWalSender(void);
 extern void MarkPostmasterChildDataSender(void);
 extern void MarkPostmasterChildNormal(void);
+extern bool IsPostmasterChildNormal(void);
 extern bool PostmasterIsAlive(void);
 extern void MarkPostmasterChildUnuseForStreamWorker(void);
 

@@ -91,6 +91,7 @@ void UndoSlotBuffer::PrepareTransactionSlot(UndoSlotPtr slotPtr, uint8 info)
                 ereport(DEBUG1, (errmsg(UNDOFORMAT("zone %d mark buffer %d unset meta flag by blk %u info %u."), 
                     (int)(UNDO_PTR_GET_ZONE_ID(slotPtr)), buffer_, blk_, info_)));
                 UnSetInfo(UNDOSLOTBUFFER_KEEP);
+                buffer_ = InvalidBuffer;
             }
         }
         RelFileNode rnode;

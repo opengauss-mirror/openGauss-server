@@ -837,8 +837,9 @@ void InitProcess(void)
      */
     if (IsUnderPostmaster && !IsAutoVacuumLauncherProcess() && !IsJobSchedulerProcess() &&
         !IsJobWorkerProcess() && !t_thrd.dcf_cxt.is_dcf_thread && !IsBgWorkerProcess() &&
-        !IsFencedProcessingMode() && (t_thrd.role != DMS_WORKER))
+        !IsFencedProcessingMode() && (t_thrd.role != DMS_WORKER) && !IS_THREAD_POOL_LISTENER) {
         MarkPostmasterChildActive();
+    }
 
     /*
      * Initialize all fields of t_thrd.proc, except for those previously
@@ -1542,8 +1543,9 @@ static void ProcKill(int code, Datum arg)
      * DMS worker threads does not have shmem resources to clean.
      */
     if (IsUnderPostmaster && !IsAutoVacuumLauncherProcess() && !StreamThreadAmI() && !IsJobSchedulerProcess() &&
-        !IsJobWorkerProcess() && !IsBgWorkerProcess() && !IsDMSWorkerProcess())
+        !IsJobWorkerProcess() && !IsBgWorkerProcess() && !IsDMSWorkerProcess() && !IS_THREAD_POOL_LISTENER) {
         MarkPostmasterChildInactive();
+    }
 
     /*
      * We have to release child slot while wlm worker process exiting, otherwise if

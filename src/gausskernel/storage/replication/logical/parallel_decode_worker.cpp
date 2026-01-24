@@ -249,7 +249,6 @@ ParallelDecodeWorker* StartLogicalDecodeWorker(int id, int slotId, char* dbUser,
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
             errmsg("Create parallel logical decoder thread failed"), errdetail("id = %u, slotId = %u, %m", id, slotId),
             errcause("System error."), erraction("Retry it in a few minutes.")));
-        return NULL;
     }
 
     SetDecodeWorkerThreadId(slotId, id, threadId);
@@ -340,8 +339,6 @@ ThreadId StartDecodeReadWorker(ParallelDecodeReaderWorker *worker)
     if (threadId == 0) {
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG), errmsg("Cannot create readworker thread"),
             errdetail("N/A"), errcause("System error."), erraction("Retry it in a few minutes.")));
-
-        return threadId;
     }
 
     SetDecodeReaderThreadId(slotId, threadId);
@@ -559,14 +556,15 @@ void WaitWorkerReady(int slotId)
 }
 
 /* Check if logicalReader and all logicalDecoder threads is PARALLEL_DECODE_WORKER_EXIT. */
-bool logicalWorkerCouldExit(int slotId, ThreadId* tid, int* stateptr, bool* isReader)
+bool logicalWorkerCouldExit(int slotId, ThreadId* tid, int* stateptr, bool* isReader, bool allowInitExit)
 {
     int state = -1;
     knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
     SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
     state = gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadState;
     SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-    if (state != PARALLEL_DECODE_WORKER_EXIT && state != PARALLEL_DECODE_WORKER_INVALID) {
+    if (state != PARALLEL_DECODE_WORKER_EXIT && state != PARALLEL_DECODE_WORKER_INVALID &&
+        !(allowInitExit && state == PARALLEL_DECODE_WORKER_INIT)) {
         *tid = gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadId;
         *stateptr = state;
         *isReader = true;
@@ -577,7 +575,8 @@ bool logicalWorkerCouldExit(int slotId, ThreadId* tid, int* stateptr, bool* isRe
         SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
         state = gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadState;
         SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-        if (state != PARALLEL_DECODE_WORKER_EXIT && state != PARALLEL_DECODE_WORKER_INVALID) {
+        if (state != PARALLEL_DECODE_WORKER_EXIT && state != PARALLEL_DECODE_WORKER_INVALID &&
+            !(allowInitExit && state == PARALLEL_DECODE_WORKER_INIT)) {
             *tid = gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadId;
             *stateptr = state;
             *isReader = false;
@@ -605,16 +604,18 @@ void StopParallelDecodeWorkers(int code, Datum arg)
     ThreadId tid = 0;
     int state = 0;
     bool isReader = false;
-    while (!logicalWorkerCouldExit(slotId, &tid, &state, &isReader)) {
+    bool allowInitExit = false;
+    while (!logicalWorkerCouldExit(slotId, &tid, &state, &isReader, allowInitExit)) {
         ++count;
         if ((count & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
             ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
                 errmsg("StopDecodeWorkers wait reader and decoder exit, tid = %lu, state = %d, isReader = %d",
                 tid, state, isReader)));
             if ((count & PRINT_ALL_WAIT_COUNT) == PRINT_ALL_WAIT_COUNT) {
-                ereport(PANIC, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
+                ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
                     errmsg("StopDecodeWorkers wait too long!!!"), errdetail("N/A"), errcause("System error."),
                     erraction("Retry it in a few minutes.")));
+                allowInitExit =  true;
             }
         }
         const long sleepCheckTime = 1000000L;

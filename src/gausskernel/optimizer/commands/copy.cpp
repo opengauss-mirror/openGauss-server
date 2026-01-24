@@ -1106,6 +1106,13 @@ Oid DoCopy(CopyStmt* stmt, const char* queryString, uint64 *processed)
         pgstat_set_stmt_tag(STMTTAG_WRITE);
 
         cstate = BeginCopyFrom(rel, stmt->filename, stmt->attlist, stmt->options, &stmt->memUsage, queryString);
+        if (cstate->is_load_copy && stmt->filename != NULL) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("Parameter load should not be used in server end, please check copy statement"),
+                errcause("Parameter load should not be used in server end"),
+                erraction("Retry with correct COPY parameters")));
+        }
+
         cstate->range_table = list_make1(rte);
 
         /* Assign mem usage in datanode */

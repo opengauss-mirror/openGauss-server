@@ -4357,7 +4357,8 @@ static int ServerLoop(void)
 #ifndef ENABLE_FINANCE_MODE
         if (g_instance.attr.attr_storage.enable_ustore &&
             g_instance.pid_cxt.UndoLauncherPID == 0 &&
-            pmState == PM_RUN && !dummyStandbyMode) {
+            pmState == PM_RUN && !dummyStandbyMode &&
+            u_sess->attr.attr_common.upgrade_mode != 1) {
             g_instance.pid_cxt.UndoLauncherPID = initialize_util_thread(UNDO_LAUNCHER);
         }
 
@@ -5121,6 +5122,8 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     } else if (strcmp(valptr, "subscription") == 0) {
                         u_sess->proc_cxt.clientIsSubscription = true;
                         ereport(DEBUG5, (errmsg("subscription connected")));
+                    } else if (strcmp(valptr, "logical_sender") == 0) {
+                        u_sess->proc_cxt.clientIsLogicalSender = true;
                     } else {
                         ereport(DEBUG5, (errmsg("application %s connected", valptr)));
                     }
@@ -7286,7 +7289,8 @@ static void reaper(SIGNAL_ARGS)
                 g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
             }
 
-            if (g_instance.attr.attr_storage.enable_ustore && g_instance.pid_cxt.UndoLauncherPID == 0 && !dummyStandbyMode)
+            if (g_instance.attr.attr_storage.enable_ustore && g_instance.pid_cxt.UndoLauncherPID == 0 &&
+                !dummyStandbyMode && u_sess->attr.attr_common.upgrade_mode != 1)
                 g_instance.pid_cxt.UndoLauncherPID = initialize_util_thread(UNDO_LAUNCHER);
 
             if (g_instance.attr.attr_storage.enable_ustore && g_instance.pid_cxt.GlobalStatsPID == 0 && !dummyStandbyMode)
@@ -8648,6 +8652,86 @@ static void AsssertAllChildThreadExit()
 }
 
 /*
+ * Signal all walsenders to move to stopping state.
+ *
+ * This will trigger logical walsenders to move to a state where no further WAL can be
+ * generated.
+ */
+void SigtermWalsenderToStoppingState()
+{
+    int i;
+    for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+        /* use volatile pointer to prevent code rearrangement */
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        ThreadId pid;
+ 
+        SpinLockAcquire(&walsnd->mutex);
+        pid = walsnd->pid;
+        SpinLockRelease(&walsnd->mutex);
+ 
+        if (pid == 0 || walsnd-> sendRole != SNDROLE_LOGICAL_SENDER) {
+            continue;
+        }
+        signal_child(pid, SIGTERM);
+    }
+}
+ 
+/*
+ *
+ * wait until all logical walsenders to move to a state where no further WAL can be
+ * generated.
+ */
+static void WaitUntilWalsenderReceiveSigterm()
+{
+    for (;;) {
+        int i;
+        bool isDone = true;
+        for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+            /* use volatile pointer to prevent code rearrangement */
+            volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+ 
+            SpinLockAcquire(&walsnd->mutex);
+            if (walsnd->pid == 0) {
+                SpinLockRelease(&walsnd->mutex);
+                continue;
+            }
+ 
+            if (walsnd-> sendRole == SNDROLE_LOGICAL_SENDER && walsnd->state != WALSNDSTATE_STOPPING) {
+                isDone = false;
+                SpinLockRelease(&walsnd->mutex);
+                break;
+            }
+            SpinLockRelease(&walsnd->mutex);
+        }
+        if (isDone) {
+            break;
+        }
+        pg_usleep(10000L); // sleep 10ms
+    }
+    ereport(LOG, (errmsg("wait until walsender receive sigterm ok.")));
+}
+
+static void WaitUntilPagewriterReceiveSigterm()
+{
+    bool isDone;
+    for (;;) {
+        isDone = true;
+        if (g_instance.pid_cxt.PageWriterPID != NULL) {
+            for (int i = 0; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
+                if (g_instance.pid_cxt.PageWriterPID[i] != 0) {
+                    isDone = isDone && g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[i].willShutdown;
+                }
+            }
+        }
+        if (isDone) {
+            break;
+        } else {
+            pg_usleep(10000L); // sleep 10ms
+        }
+    }
+}
+
+/*
  * Advance the postmaster's state machine and take actions as appropriate
  *
  * This is common code for pmdie(), reaper() and sigusr1_handler(), which
@@ -8746,7 +8830,11 @@ static void PostmasterStateMachine(void)
                         }
                     }
                 }
-
+                
+                WaitUntilPagewriterReceiveSigterm();
+                /* wait all logical walsenders ready to shutdown */
+                SigtermWalsenderToStoppingState();
+                WaitUntilWalsenderReceiveSigterm();
                 /* And tell it to shut down */
                 if (g_instance.pid_cxt.CheckpointerPID != 0) {
                     Assert(!dummyStandbyMode);
@@ -9959,9 +10047,8 @@ static bool CheckChangeRoleFileExist(const char *filename)
 
 static bool CheckSignalByFile(const char *filename, void *infoPtr, size_t infoSize)
 {
-    FILE* sofile = nullptr;
-    sofile = fopen(filename, "rb");
-    if (sofile == nullptr) {
+    int fd = open(filename, O_RDONLY, S_IRUSR);
+    if (fd == -1) {
         /* File doesn't exist. */
         if (errno == ENOENT) {
             return false;
@@ -9971,15 +10058,14 @@ static bool CheckSignalByFile(const char *filename, void *infoPtr, size_t infoSi
         return false;
     }
     /* Read info from filename */
-    if (fread(infoPtr, infoSize, 1, sofile) != 1) {
-        fclose(sofile);
-        sofile = nullptr;
+    size_t bytesRead = read(fd, infoPtr, infoSize);
+    if (bytesRead != infoSize) {
+        close(fd);
         (void)unlink(filename);
         ereport(WARNING, (errmsg("Read file %s failed!", filename)));
         return false;
     }
-    fclose(sofile);
-    sofile = nullptr;
+    close(fd);
     (void)unlink(filename);
     return true;
 
@@ -10411,7 +10497,8 @@ static void sigusr1_handler(SIGNAL_ARGS)
     /* should not start a worker in shutdown or demotion procedure */
     if (CheckPostmasterSignal(PMSIGNAL_START_UNDO_WORKER) &&
         g_instance.status == NoShutdown &&
-        g_instance.demotion == NoDemote) {
+        g_instance.demotion == NoDemote &&
+        u_sess->attr.attr_common.upgrade_mode != 1) {
         StartUndoWorker();
     }
 
@@ -13720,9 +13807,6 @@ static void SetAuxType()
         case PAGEREPAIR_THREAD:
             t_thrd.bootstrap_cxt.MyAuxProcType = PageRepairProcess;
             break;
-        case THREADPOOL_LISTENER:
-            t_thrd.bootstrap_cxt.MyAuxProcType = TpoolListenerProcess;
-            break;
         case THREADPOOL_SCHEDULER:
             t_thrd.bootstrap_cxt.MyAuxProcType = TpoolSchdulerProcess;
             break;
@@ -14010,11 +14094,6 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
 
         case PAGEREPAIR_THREAD:
             PageRepairMain();
-            proc_exit(1);
-            break;
-
-        case THREADPOOL_LISTENER:
-            TpoolListenerMain(t_thrd.threadpool_cxt.listener);
             proc_exit(1);
             break;
 
@@ -14315,7 +14394,6 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case TS_COMPACTION_CONSUMER:
         case TS_COMPACTION_AUXILIAY:
 #endif   /* ENABLE_MULTIPLE_NODES */
-        case THREADPOOL_LISTENER:
         case THREADPOOL_SCHEDULER:
         case DMS_AUXILIARY_THREAD:
         case UNDO_RECYCLER: {
@@ -14327,6 +14405,12 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             /* Attach process to shared data structures */
             CreateSharedMemoryAndSemaphores(false, 0);
             GaussDbAuxiliaryThreadMain<thread_role>(arg);
+            proc_exit(0);
+        } break;
+        case THREADPOOL_LISTENER: {
+            t_thrd.role = THREADPOOL_LISTENER;
+            InitProcessAndShareMemory();
+            TpoolListenerMain(t_thrd.threadpool_cxt.listener);
             proc_exit(0);
         } break;
 #ifdef USE_SPQ

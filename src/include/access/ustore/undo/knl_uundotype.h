@@ -102,6 +102,9 @@ const int PAGES_READ_NUM = 1024 * 16;
 /* Compute the offset of a given UndoRecPtr in the page that holds it. */
 #define UNDO_PTR_GET_PAGE_OFFSET(urp) (UNDO_PTR_GET_OFFSET(urp) % BLCKSZ)
 
+/* Compute the expect undospace tail of a given UndoLogOffset */
+#define UNDO_LOG_OFFSET_GET_TAIL(offset, seg_size) ((offset) + (seg_size) - ((offset) % (seg_size)))
+
 /* The number of unusable bytes in the header of each block. */
 #define UNDO_LOG_BLOCK_HEADER_SIZE SizeOfPageHeaderData
 

@@ -414,6 +414,9 @@ NON_EXEC_STATIC void AutoVacLauncherMain()
 
     /* loop until shutdown request */
     while (!t_thrd.autovacuum_cxt.got_SIGTERM) {
+        if (pmState == PM_WAIT_BACKENDS) {
+            break;
+        }
         struct timeval nap;
         TimestampTz current_time = 0;
         bool can_launch = false;

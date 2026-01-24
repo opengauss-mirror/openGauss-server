@@ -210,42 +210,50 @@ bool UHeapGetPage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_writ
     RowPtr *nextTup;
     OffsetNumber lineoff;
     RowPtr *lpp;
+    PG_TRY();
+    {
+        for (lineoff = FirstOffsetNumber, lpp = UPageGetRowPtr(dp, lineoff); lineoff <= lines; lineoff++, lpp++) {
+            if (RowPtrIsNormal(lpp) || RowPtrIsDeleted(lpp)) {
+                nextTup = lpp + 1;
+                __builtin_prefetch(dp + nextTup->offset);
+                __builtin_prefetch(dp + nextTup->offset + CACHE_LINE_SZ);
+                nextTup++;
+                __builtin_prefetch(dp + nextTup->offset);
 
-    for (lineoff = FirstOffsetNumber, lpp = UPageGetRowPtr(dp, lineoff); lineoff <= lines; lineoff++, lpp++) {
-        if (RowPtrIsNormal(lpp) || RowPtrIsDeleted(lpp)) {
-            nextTup = lpp + 1;
-            __builtin_prefetch(dp + nextTup->offset);
-            __builtin_prefetch(dp + nextTup->offset + CACHE_LINE_SZ);
-            nextTup++;
-            __builtin_prefetch(dp + nextTup->offset);
+                UHeapTuple resulttup;
+                ItemPointerData tid;
 
-            UHeapTuple resulttup;
-            ItemPointerData tid;
+                ItemPointerSet(&tid, page, lineoff);
 
-            ItemPointerSet(&tid, page, lineoff);
+                /* last five params optional, last two params are for UHeapGetTuplePartial */
+                bool valid = UHeapTupleFetch(scan->rs_base.rs_rd, buffer, lineoff, snapshot, &resulttup, NULL,
+                    false, NULL, NULL, NULL, lastVar, boolArr, has_cur_xact_write);
 
-            /* last five params optional, last two params are for UHeapGetTuplePartial */
-            bool valid = UHeapTupleFetch(scan->rs_base.rs_rd, buffer, lineoff, snapshot, &resulttup, NULL, false, NULL,
-                NULL, NULL, lastVar, boolArr, has_cur_xact_write);
+                if (resulttup != NULL)
+                    Assert(resulttup->tupTableType == UHEAP_TUPLE);
 
-            if (resulttup != NULL)
-                Assert(resulttup->tupTableType == UHEAP_TUPLE);
+                /*
+                * If any prior version is visible, we pass latest visible as
+                * true. The state of latest version of tuple is determined by the
+                * called function.
+                *
+                * Note that, it's possible that tuple is updated in-place and
+                * we're seeing some prior version of that. We handle that case in
+                * InplaceHeapTupleHasSerializableConflictOut.
+                */
+                CheckForSerializableConflictOut(valid, scan->rs_base.rs_rd, (void *)&tid, buffer, snapshot);
 
-            /*
-             * If any prior version is visible, we pass latest visible as
-             * true. The state of latest version of tuple is determined by the
-             * called function.
-             *
-             * Note that, it's possible that tuple is updated in-place and
-             * we're seeing some prior version of that. We handle that case in
-             * InplaceHeapTupleHasSerializableConflictOut.
-             */
-            CheckForSerializableConflictOut(valid, scan->rs_base.rs_rd, (void *)&tid, buffer, snapshot);
-
-            if (valid)
-                scan->rs_visutuples[ntup++] = resulttup;
+                if (valid)
+                    scan->rs_visutuples[ntup++] = resulttup;
+            }
         }
     }
+    PG_CATCH();
+    {
+        UnlockReleaseBuffer(buffer);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     UnlockReleaseBuffer(buffer);
 

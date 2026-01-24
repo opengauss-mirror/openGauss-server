@@ -2124,7 +2124,8 @@ check_tup_satisfies_update:
     if (result != TM_Ok) {
         Assert(result == TM_SelfModified || result == TM_SelfUpdated || result == TM_Updated || result == TM_Deleted ||
             result == TM_BeingModified || result == TM_SelfCreated);
-        Assert(RowPtrIsDeleted(rp) || IsUHeapTupleModified(utuple.disk_tuple->flag));
+        Assert(RowPtrIsDeleted(rp) || IsUHeapTupleModified(utuple.disk_tuple->flag) ||
+            UHEAP_XID_IS_LOCK(utuple.disk_tuple->flag));
 
         /* Fill in the tmfd that the caller could use */
         /* If item id is deleted, tuple can't be marked as moved. */
@@ -2619,7 +2620,8 @@ check_tup_satisfies_update:
         if (!RowPtrIsDeleted(lp) && oldtup.disk_tuple == NULL) {
             ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("delete tuple is NULL.")));
         }
-        Assert(RowPtrIsDeleted(lp) || IsUHeapTupleModified(oldtup.disk_tuple->flag));
+        Assert(RowPtrIsDeleted(lp) || IsUHeapTupleModified(oldtup.disk_tuple->flag) ||
+            UHEAP_XID_IS_LOCK(oldtup.disk_tuple->flag));
         /* If item id is deleted, tuple can't be marked as moved. */
         if (!RowPtrIsDeleted(lp) && UHeapTupleIsMoved(oldtup.disk_tuple->flag))
             ItemPointerSetMovedPartitions(&tmfd->ctid);

@@ -869,6 +869,10 @@ void eg_free_extent(SegExtentGroup *seg, BlockNumber blocknum)
     LockBuffer(map_buffer, BUFFER_LOCK_EXCLUSIVE);
 
     df_map_page_t *map_page = (df_map_page_t *)PageGetContents(BufferGetPage(map_buffer));
+
+    if (DF_MAP_FREE(map_page->bitmap, bit_id)) {
+        ereport(PANIC, (errmsg("Free an already freed extent, %u, %u, %u", map_page->first_page, bit_id, blocknum)));
+    }
     eg_unset_bitmap_page(map_page, bit_id);
     map_head->allocated_extents--;
 

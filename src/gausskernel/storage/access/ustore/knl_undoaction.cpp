@@ -373,6 +373,7 @@ int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionI
     Buffer buffer = ReadBuffer(relationData.relation, blkno);
     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
     Page page = BufferGetPage(buffer);
+    Assert(!PageIsNew(page));
 
     /*
      * If undo action has been already applied for this page then skip the
