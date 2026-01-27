@@ -37,6 +37,7 @@
 #endif
 
 bool canAddHist = true;
+char* g_sqlMode = NULL;
 
 static bool ExecQueryUsingCursor(const char* query, double* elapsed_msec);
 static bool command_no_begin(const char* query);
@@ -2771,4 +2772,81 @@ DBFormatType GetDatabaseType()
     res = NULL;
 
     return dbType;
+}
+
+bool SaveSqlModePipesAsConcat()
+{
+    if (!IS_CMPT(pset.dbType, B_FORMAT)) {
+        return false;
+    }
+
+    PGresult* res = NULL;
+    PQExpBufferData buf;
+    initPQExpBuffer(&buf);
+    printfPQExpBuffer(&buf, "select setting from pg_settings where name = 'dolphin.sql_mode';");
+    res = PSQLexec(buf.data, false);
+    if (res != NULL && PQntuples(res) == 1) {
+        char* dolphinSqlMode = PQgetvalue(res, 0, 0);
+        /* already enable */
+        if (strstr(dolphinSqlMode, "pipes_as_concat") != NULL) {
+            PQclear(res);
+            res = NULL;
+            return false;
+        }
+        if (g_sqlMode != NULL) {
+            free(g_sqlMode);
+        }
+        g_sqlMode = pg_strdup(dolphinSqlMode);
+        PQclear(res);
+        res = NULL;
+        return true;
+    }
+    return false;
+}
+
+void ResetSqlMode()
+{
+    if (!IS_CMPT(pset.dbType, B_FORMAT)) {
+        return;
+    }
+    if (g_sqlMode == NULL) {
+        return;
+    }
+    PGresult* res = NULL;
+    PQExpBufferData buf;
+    initPQExpBuffer(&buf);
+    printfPQExpBuffer(&buf, "set dolphin.sql_mode = '%s';", g_sqlMode);
+    res = PSQLexec(buf.data, false);
+    if (res != NULL) {
+        PQclear(res);
+        res = NULL;
+    }
+}
+
+/*
+ * Need to call the ResetSqlMode to reset dolphin.sql_mode value adter call EnableSqlModePipesAsConcat
+ */
+void EnableSqlModePipesAsConcat()
+{
+    if (!IS_CMPT(pset.dbType, B_FORMAT)) {
+        return;
+    }
+
+    if (!SaveSqlModePipesAsConcat()) {
+        return;
+    }
+
+    PGresult* res = NULL;
+    PQExpBufferData buf;
+    initPQExpBuffer(&buf);
+    if (g_sqlMode == NULL || (strlen(g_sqlMode) == 0)) {
+        printfPQExpBuffer(&buf, "set dolphin.sql_mode = 'pipes_as_concat';");
+    } else {
+        printfPQExpBuffer(&buf, "set dolphin.sql_mode = '%s,pipes_as_concat';", g_sqlMode);
+    }
+    res = PSQLexec(buf.data, false);
+    if (res != NULL) {
+        PQclear(res);
+        res = NULL;
+    }
 }

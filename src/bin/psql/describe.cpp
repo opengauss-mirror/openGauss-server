@@ -280,6 +280,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
         }
     }
 
+    EnableSqlModePipesAsConcat();
     initPQExpBuffer(&buf);
 
     printfPQExpBuffer(&buf,
@@ -484,6 +485,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
     res = PSQLexec(buf.data, false);
     termPQExpBuffer(&buf);
     if (res == NULL) {
+        ResetSqlMode();
         return false;
     }
 
@@ -498,6 +500,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
     freeTranslateColumns(translate_columns);
     myopt.translate_columns = NULL;
     PQclear(res);
+    ResetSqlMode();
     return true;
 }
 
@@ -768,6 +771,7 @@ bool permissionsList(const char* pattern)
     bool* translate_columns = NULL;
     int trues[] = {2};
 
+    EnableSqlModePipesAsConcat();
     initPQExpBuffer(&buf);
 
     /*
@@ -829,6 +833,7 @@ bool permissionsList(const char* pattern)
     res = PSQLexec(buf.data, false);
     if (res == NULL) {
         termPQExpBuffer(&buf);
+        ResetSqlMode();
         return false;
     }
 
@@ -845,6 +850,7 @@ bool permissionsList(const char* pattern)
     myopt.translate_columns = NULL;
     termPQExpBuffer(&buf);
     PQclear(res);
+    ResetSqlMode();
     return true;
 }
 
@@ -1505,6 +1511,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         PQclear(res);
         res = NULL;
     }
+
+    EnableSqlModePipesAsConcat();
 #endif
 
     /* Get general table info */
@@ -3302,6 +3310,7 @@ error_return:
         PQclear(res);
     res = NULL;
 
+    ResetSqlMode();
     return retval;
 }
 
@@ -3876,6 +3885,7 @@ bool listDomains(const char* pattern, bool verbose, bool showSystem)
     PGresult* res = NULL;
     printQueryOpt myopt = pset.popt;
 
+    EnableSqlModePipesAsConcat();
     initPQExpBuffer(&buf);
 
     printfPQExpBuffer(&buf,
@@ -3937,8 +3947,10 @@ bool listDomains(const char* pattern, bool verbose, bool showSystem)
 
     res = PSQLexec(buf.data, false);
     termPQExpBuffer(&buf);
-    if (res == NULL)
+    if (res == NULL) {
+        ResetSqlMode();
         return false;
+    }
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of domains");
@@ -3947,6 +3959,7 @@ bool listDomains(const char* pattern, bool verbose, bool showSystem)
     printQuery(res, &myopt, pset.queryFout, pset.logfile);
 
     PQclear(res);
+    ResetSqlMode();
     return true;
 }
 
@@ -4568,6 +4581,7 @@ bool listTSDictionaries(const char* pattern, bool verbose)
         return true;
     }
 
+    EnableSqlModePipesAsConcat();
     initPQExpBuffer(&buf);
 
     printfPQExpBuffer(&buf,
@@ -4609,8 +4623,10 @@ bool listTSDictionaries(const char* pattern, bool verbose)
 
     res = PSQLexec(buf.data, false);
     termPQExpBuffer(&buf);
-    if (res == NULL)
+    if (res == NULL) {
+        ResetSqlMode();
         return false;
+    }
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of text search dictionaries");
@@ -4619,6 +4635,7 @@ bool listTSDictionaries(const char* pattern, bool verbose)
     printQuery(res, &myopt, pset.queryFout, pset.logfile);
 
     PQclear(res);
+    ResetSqlMode();
     return true;
 }
 
@@ -4911,6 +4928,7 @@ bool listForeignDataWrappers(const char* pattern, bool verbose)
         return true;
     }
 
+    EnableSqlModePipesAsConcat();
     initPQExpBuffer(&buf);
     printfPQExpBuffer(&buf,
         "SELECT fdw.fdwname AS \"%s\",\n"
@@ -4952,8 +4970,10 @@ bool listForeignDataWrappers(const char* pattern, bool verbose)
 
     res = PSQLexec(buf.data, false);
     termPQExpBuffer(&buf);
-    if (res == NULL)
+    if (res == NULL) {
+        ResetSqlMode();
         return false;
+    }
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of foreign-data wrappers");
@@ -4962,6 +4982,7 @@ bool listForeignDataWrappers(const char* pattern, bool verbose)
     printQuery(res, &myopt, pset.queryFout, pset.logfile);
 
     PQclear(res);
+    ResetSqlMode();
     return true;
 }
 
@@ -4984,6 +5005,7 @@ bool listForeignServers(const char* pattern, bool verbose)
         return true;
     }
 
+    EnableSqlModePipesAsConcat();
     initPQExpBuffer(&buf);
     printfPQExpBuffer(&buf,
         "SELECT s.srvname AS \"%s\",\n"
@@ -5030,8 +5052,10 @@ bool listForeignServers(const char* pattern, bool verbose)
 
     res = PSQLexec(buf.data, false);
     termPQExpBuffer(&buf);
-    if (res == NULL)
+    if (res == NULL) {
+        ResetSqlMode();
         return false;
+    }
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of foreign servers");
@@ -5040,6 +5064,7 @@ bool listForeignServers(const char* pattern, bool verbose)
     printQuery(res, &myopt, pset.queryFout, pset.logfile);
 
     PQclear(res);
+    ResetSqlMode();
     return true;
 }
 
@@ -5062,6 +5087,7 @@ bool listUserMappings(const char* pattern, bool verbose)
         return true;
     }
 
+    EnableSqlModePipesAsConcat();
     initPQExpBuffer(&buf);
     printfPQExpBuffer(&buf,
         "SELECT um.srvname AS \"%s\",\n"
@@ -5088,8 +5114,10 @@ bool listUserMappings(const char* pattern, bool verbose)
 
     res = PSQLexec(buf.data, false);
     termPQExpBuffer(&buf);
-    if (res == NULL)
+    if (res == NULL) {
+        ResetSqlMode();
         return false;
+    }
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of user mappings");
@@ -5098,6 +5126,7 @@ bool listUserMappings(const char* pattern, bool verbose)
     printQuery(res, &myopt, pset.queryFout, pset.logfile);
 
     PQclear(res);
+    ResetSqlMode();
     return true;
 }
 
@@ -5120,6 +5149,7 @@ bool listForeignTables(const char* pattern, bool verbose)
         return true;
     }
 
+    EnableSqlModePipesAsConcat();
     initPQExpBuffer(&buf);
     printfPQExpBuffer(&buf,
         "SELECT n.nspname AS \"%s\",\n"
@@ -5164,8 +5194,10 @@ bool listForeignTables(const char* pattern, bool verbose)
 
     res = PSQLexec(buf.data, false);
     termPQExpBuffer(&buf);
-    if (res == NULL)
+    if (res == NULL) {
+        ResetSqlMode();
         return false;
+    }
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of foreign tables");
@@ -5174,6 +5206,7 @@ bool listForeignTables(const char* pattern, bool verbose)
     printQuery(res, &myopt, pset.queryFout, pset.logfile);
 
     PQclear(res);
+    ResetSqlMode();
     return true;
 }
 

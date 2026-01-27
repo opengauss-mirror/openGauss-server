@@ -3156,6 +3156,7 @@ static char *_CompleteFromQuery(int isSchemaQuery, const char *text, int state)
     static int listIndex, stringLength;
     static PGresult *result = NULL;
 
+    EnableSqlModePipesAsConcat();
     /*
      * If this is the first time for this completion, we fetch a list of our
      * "things" from the backend.
@@ -3306,15 +3307,17 @@ static char *_CompleteFromQuery(int isSchemaQuery, const char *text, int state)
         const char *item = NULL;
 
         while (listIndex < PQntuples(result) && (item = PQgetvalue(result, listIndex++, 0)))
-            if (pg_strncasecmp(text, item, stringLength) == 0)
+            if (pg_strncasecmp(text, item, stringLength) == 0) {
+                ResetSqlMode();
                 return pg_strdup(item);
+            }
     }
 
     /* If nothing matches, free the db structure and return null */
     PQclear(result);
     result = NULL;
     readline_status = WAIT_INPUT;
-
+    ResetSqlMode();
     return NULL;
 }
 
