@@ -2535,6 +2535,9 @@ void dbase_redo(XLogReaderState* record)
     } else if (info == XLOG_DBASE_DROP) {
         xl_dbase_drop_rec* xlrec = (xl_dbase_drop_rec*)XLogRecGetData(record);
         xlog_db_drop(record->EndRecPtr, xlrec->db_id, xlrec->tablespace_id);
+        ereport(LOG,
+            (errmodule(MOD_REDO),
+                errmsg("redo drop database, oid: %u, tablespace_id %u.", xlrec->db_id, xlrec->tablespace_id)));
     } else
         ereport(PANIC, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("dbase_redo: unknown op code %hhu", info)));
 

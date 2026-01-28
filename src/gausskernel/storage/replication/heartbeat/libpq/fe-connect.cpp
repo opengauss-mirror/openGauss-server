@@ -224,8 +224,8 @@ static int internalConnect(ConnParam *param)
         TimestampDifference(t_thrd.heartbeat_cxt.last_failed_timestamp, nowFailedTimestamp, &secs, &msecs);
         if (secs > 1) {
             t_thrd.heartbeat_cxt.last_failed_timestamp = nowFailedTimestamp;
-            ereport(COMMERROR, (errmsg("Connect failed, total failed times is %d.",
-                t_thrd.heartbeat_cxt.total_failed_times)));
+            ereport(COMMERROR, (errmsg("Connect failed, total failed times is %d. errono:%d",
+                t_thrd.heartbeat_cxt.total_failed_times, errno)));
         }
         close(sock);
         return -1;

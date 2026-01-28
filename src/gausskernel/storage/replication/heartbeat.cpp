@@ -74,6 +74,7 @@ static int server_loop(void)
             u_sess->attr.attr_common.ExitOnAnyError = true;
             g_instance.heartbeat_cxt.heartbeat_running = false;
             destroy_client_and_server();
+            ereport(LOG, (errmsg("heartbeat exit")));
             (void)close(epollfd);
             proc_exit(0);
         }
