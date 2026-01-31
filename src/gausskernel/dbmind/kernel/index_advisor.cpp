@@ -646,7 +646,7 @@ List *get_index_attname(Oid index_oid)
 }
 
 // Execute an SQL statement and return its result.
-StmtResult *execute_stmt(const char *query_string, bool need_result)
+StmtResult *execute_stmt(const char *query_string, bool need_result, ParamListInfo paramInfo)
 {
     int16 format = 0;
     List *parsetree_list = NULL;
@@ -674,8 +674,12 @@ StmtResult *execute_stmt(const char *query_string, bool need_result)
             PushActiveSnapshot(GetTransactionSnapshot());
             snapshot_set = true;
         }
-
-        querytree_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
+        if (paramInfo != NULL && paramInfo->parserSetup != NULL && paramInfo->parserSetupArg != NULL) {
+            querytree_list = pg_analyze_and_rewrite_params(parsetree, query_string, paramInfo->parserSetup,
+                                                           paramInfo->parserSetupArg);
+        } else {
+            querytree_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
+        }
         plantree_list = pg_plan_queries(querytree_list, 0, NULL);
 
         if (snapshot_set) {
@@ -690,7 +694,7 @@ StmtResult *execute_stmt(const char *query_string, bool need_result)
         else
             receiver = CreateDestReceiver(DestNone);
 
-        PortalStart(portal, NULL, 0, NULL);
+        PortalStart(portal, paramInfo, 0, NULL);
         PortalSetResultFormat(portal, 1, &format);
         (void)PortalRun(portal, FETCH_ALL, true, receiver, receiver, NULL);
         PortalDrop(portal, false);

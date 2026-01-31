@@ -9498,7 +9498,7 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                         (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("number of variables must equal the number of columns")));
                 }
-                List *val_list = QueryRewriteSelectIntoVarList(node, real_targetlist_len);
+                List *val_list = QueryRewriteSelectIntoVarList(node, real_targetlist_len, paramInfo);
 
                 ListCell *name_cur = NULL;
                 ListCell *val_cur = NULL;
