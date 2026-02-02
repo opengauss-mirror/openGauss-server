@@ -205,13 +205,17 @@ PartKeyExprResult ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTab
     Datum newval = 0;
     Node* partkeyexpr = NULL;
     Relation tmpRel = NULL;
+    MemoryContext exprContext = AllocSetContextCreate(CurrentMemoryContext, "Compute PartKey Context",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+
+    MemoryContext oldcontext = MemoryContextSwitchTo(exprContext);
     if (partExprKeyStr && pg_strcasecmp(partExprKeyStr, "") != 0) {
         partkeyexpr = (Node*)stringToNode_skip_extern_fields(partExprKeyStr);                      
     } else {
         ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR), errmsg("The partition expr key can't be null for table %s", NameStr(rel->rd_rel->relname))));
     }
     (void)lockNextvalWalker(partkeyexpr, NULL);
-    ExprState *exprstate = ExecPrepareExpr((Expr *)partkeyexpr, estate);
+    ExprState *exprstate = ExecPrepareExpr((Expr *)partkeyexpr, estate, false, exprContext);
     ExprContext *econtext;
     econtext = GetPerTupleExprContext(estate);
     econtext->ecxt_scantuple = slot;
@@ -231,10 +235,11 @@ PartKeyExprResult ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTab
         boundary = ((HashPartitionMap*)(tmpRel->partMap))->hashElements[0].boundary;
     else
         ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR), errmsg("Unsupported partition type : %d", tmpRel->partMap->type)));
-
+    
+    MemoryContextSwitchTo(oldcontext);
     if (!isnull)
         newval = datumCopy(newval, boundary[0]->constbyval, boundary[0]->constlen);
-
+    MemoryContextDelete(exprContext);
     return {newval, isnull};
 }
 

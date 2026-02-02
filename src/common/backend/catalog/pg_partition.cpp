@@ -2083,7 +2083,9 @@ bool PartExprKeyIsNull(Relation rel, char** partExprKeyStr)
     bool isnull = false;
     Datum val = SysCacheGetAttr(PARTPARTOID, partTuple, Anum_pg_partition_partkeyexpr, &isnull);
     if (!isnull && partExprKeyStr) {
-        *partExprKeyStr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+        char *newVal = TextDatumGetCString(val);
+        *partExprKeyStr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), newVal);
+        pfree_ext(newVal);
     }
     ReleaseSysCache(partTuple);
     return isnull;

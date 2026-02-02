@@ -327,7 +327,7 @@ extern List *ExecInitExprList(List *nodes, PlanState *parent);
 extern ExprState* ExecBuildAggTrans(AggState* aggstate, struct AggStatePerPhaseData *phase, bool doSort, bool doHash);
 extern ProjectionInfo* ExecBuildProjectionInfo(List *targetList,
     ExprContext *econtext, TupleTableSlot *slot, PlanState *parent, TupleDesc inputDesc);
-extern ExprState* ExecPrepareExpr(Expr* node, EState* estate, bool isExprIndex = false);
+extern ExprState* ExecPrepareExpr(Expr* node, EState* estate, bool isExprIndex = false, MemoryContext context = NULL);
 extern ExprState *ExecPrepareCheck(List *qual, EState *estate);
 extern List *ExecPrepareExprList(List *nodes, EState *estate, bool isExprIndex = false);
 
@@ -643,7 +643,11 @@ static inline RangeTblEntry *exec_rt_fetch(Index rti, EState *estate)
 static inline int128 datum2autoinc(ConstrAutoInc *cons_autoinc, Datum datum)
 {
     if (cons_autoinc->datum2autoinc_func != NULL) {
-        return DatumGetInt128(DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->datum2autoinc_func, datum));
+        Datum funcDatum = DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->datum2autoinc_func, datum);
+        int128 number = DatumGetInt128(funcDatum);
+        int128* point = (int128 *)DatumGetPointer(funcDatum);
+        pfree_ext(point);
+        return number;
     }
     return DatumGetInt128(datum);
 }

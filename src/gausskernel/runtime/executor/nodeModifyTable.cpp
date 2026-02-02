@@ -3959,6 +3959,8 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
 
     ResetTrigShipFlag();
 
+    pfree_ext(partExprKeyStr);
+
     return NULL;
 }
 
