@@ -71,6 +71,10 @@ bool scanint8(const char* str, bool errorOK, int64* result, bool can_ignore)
         ptr++;
     }
 
+    if (DB_IS_CMPT(D_FORMAT) && *ptr == '\0') {
+        return true;
+    }
+
     /* handle sign */
     if (*ptr == '-') {
         ptr++;
@@ -86,7 +90,7 @@ bool scanint8(const char* str, bool errorOK, int64* result, bool can_ignore)
             temp_ptr++;
         }
         if (*temp_ptr == '\0') {
-            return RES_OK;
+            return true;
         }
     }
     /* require at least one digit */

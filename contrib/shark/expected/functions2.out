@@ -1118,6 +1118,12 @@ select TRY_CONVERT(varchar(10), CAST(4936.56 AS MONEY), 0);
  4936.56
 (1 row)
 
+select TRY_CONVERT(bigint, '') AS result;
+ result 
+--------
+      0
+(1 row)
+
 select TRY_CAST('08/25/2017' AS date);
  shark_try_cast_to_any 
 -----------------------

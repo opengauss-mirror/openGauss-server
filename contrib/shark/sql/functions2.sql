@@ -233,6 +233,7 @@ select TRY_CONVERT(varchar(30), CAST('2017-08-25 13:01:59' AS TIMESTAMP), 109);
 select TRY_CONVERT(varchar(30), CAST('11234561231231.234' AS float), 0);
 select TRY_CONVERT(varchar(30), CAST('11234561231231.234'AS float), 1);
 select TRY_CONVERT(varchar(10), CAST(4936.56 AS MONEY), 0);
+select TRY_CONVERT(bigint, '') AS result;
 
 select TRY_CAST('08/25/2017' AS date);
 select TRY_CAST('12:01:59' AS time);
