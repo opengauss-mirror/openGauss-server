@@ -256,6 +256,14 @@ SELECT CAST('123' AS CHAR(30));
 SELECT CAST('123' AS CHAR);
 SELECT CONVERT(VARCHAR, '123456789012345678901234567890');
 SELECT TRY_CONVERT(VARCHAR, '1234567890123456789012345678901111');
+select 0+cast('-0.20' as char(1));
+select 0+cast('+0.20' as char(1));
+select 0+cast('*0.20' as char(1));
+select 0+cast('\0.20' as char(1));
+select 0+cast(' +      ' as bigint);
+select 0+cast(' -      ' as bigint);
+select 0+cast('       +' as bigint);
+select 0+cast('-       ' as bigint);
 
 reset search_path;
 drop schema functions_test2 cascade;

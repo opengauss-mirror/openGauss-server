@@ -57,7 +57,7 @@ bool scanint8(const char* str, bool errorOK, int64* result, bool can_ignore)
     const char* ptr = str;
     int64 tmp = 0;
     bool neg = false;
-
+    bool sign = 0;
     /*
      * Do our own scan, rather than relying on sscanf which might be broken
      * for long long.
@@ -75,9 +75,20 @@ bool scanint8(const char* str, bool errorOK, int64* result, bool can_ignore)
     if (*ptr == '-') {
         ptr++;
         neg = true;
+        sign = true;
     } else if (*ptr == '+')
         ptr++;
+        sign = true;
 
+    if (DB_IS_CMPT(D_FORMAT) && sign) {
+        const char* temp_ptr = ptr;
+        while (isspace(static_cast<unsigned char>(*temp_ptr))) {
+            temp_ptr++;
+        }
+        if (*temp_ptr == '\0') {
+            return RES_OK;
+        }
+    }
     /* require at least one digit */
     if (unlikely(!isdigit((unsigned char)*ptr))) {
         if (errorOK)

@@ -1233,5 +1233,45 @@ SELECT TRY_CONVERT(VARCHAR, '1234567890123456789012345678901111');
  123456789012345678901234567890
 (1 row)
 
+select 0+cast('-0.20' as char(1));
+ ?column? 
+----------
+        0
+(1 row)
+
+select 0+cast('+0.20' as char(1));
+ ?column? 
+----------
+        0
+(1 row)
+
+select 0+cast('*0.20' as char(1));
+ERROR:  invalid input syntax for type bigint: "*"
+select 0+cast('\0.20' as char(1));
+ERROR:  invalid input syntax for type bigint: "\"
+select 0+cast(' +      ' as bigint);
+ ?column? 
+----------
+        0
+(1 row)
+
+select 0+cast(' -      ' as bigint);
+ ?column? 
+----------
+        0
+(1 row)
+
+select 0+cast('       +' as bigint);
+ ?column? 
+----------
+        0
+(1 row)
+
+select 0+cast('-       ' as bigint);
+ ?column? 
+----------
+        0
+(1 row)
+
 reset search_path;
 drop schema functions_test2 cascade;
