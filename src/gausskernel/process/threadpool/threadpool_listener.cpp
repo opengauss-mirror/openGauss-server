@@ -317,6 +317,7 @@ void ThreadPoolListener::ReaperAllSession()
 {
     Dlelem* elem = NULL;
     knl_session_context* sess = NULL;
+    int reaper_session_entry_count = 10;
 
     while (m_group->m_sessionCount > 0) {
         /*
@@ -339,10 +340,15 @@ void ThreadPoolListener::ReaperAllSession()
         /* m_sessionCount should be sum of the list length of m_idleSessionList and m_readySessionList
            and worker's attached session */
         pg_memory_barrier();
-        if (m_idleSessionList->IsEmpty() && m_readySessionList->IsEmpty() &&
-            m_group->m_workerNum - m_group->m_idleWorkerNum == 0) {
-            ereport(WARNING, (errmsg("SessionCount should be zero when no session in this group.")));
-            m_group->m_sessionCount = 0;
+        if (m_idleSessionList->IsEmpty() && m_readySessionList->IsEmpty()) {
+            AutoMutexLock alock(&m_group->m_mutex);
+            alock.lock();
+            bool no_active_worker = m_group->m_workerNum == m_group->m_idleWorkerNum;
+            alock.unLock();
+            if (no_active_worker && (reaper_session_entry_count-- == 0)) {
+                ereport(WARNING, (errmsg("SessionCount should be zero when no session in this group.")));
+                m_group->m_sessionCount = 0;
+            }
         }
 
         elem = m_idleSessionList->RemoveHead();
