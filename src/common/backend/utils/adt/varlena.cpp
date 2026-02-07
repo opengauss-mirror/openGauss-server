@@ -44,6 +44,7 @@
 #include "openssl/evp.h"
 #include "catalog/gs_collation.h"
 #include "catalog/pg_collation_fn.h"
+#include "commands/extension.h"
 
 #define SUBSTR_WITH_LEN_OFFSET 2
 #define SUBSTR_A_CMPT_OFFSET 4
@@ -659,7 +660,8 @@ Oid binary_need_transform_typeid(Oid typeoid, Oid* collation)
 {
     Oid new_typid = typeoid;
     if (*collation == BINARY_COLLATION_OID) {
-        if (GetDatabaseEncoding() == PG_SQL_ASCII && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_common.upgrade_mode != 0) {
+        if (GetDatabaseEncoding() == PG_SQL_ASCII && DB_IS_CMPT(B_FORMAT) &&
+            (u_sess->attr.attr_common.upgrade_mode != 0 || creating_extension)) {
             *collation = DEFAULT_COLLATION_OID;
             return new_typid;
         }

@@ -2474,7 +2474,7 @@ void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, 
                         errmsg("could not determine which collation to use for index expression"),
                         errhint("Use the COLLATE clause to set the collation explicitly.")));
         } else {
-            if (OidIsValid(attcollation))
+            if (OidIsValid(attcollation) && !IsBinaryType(atttype))
                 ereport(ERROR,
                     (errcode(ERRCODE_DATATYPE_MISMATCH),
                         errmsg("collations are not supported by type %s", format_type_be(atttype))));
