@@ -2978,6 +2978,7 @@ typedef struct knl_u_hook_context {
     void *rewriteTypmodExprHook;
     void *invokeNextvalHook;
     void *getVarbinaryOidHook;
+    void *binaryTransformTypeidHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {
