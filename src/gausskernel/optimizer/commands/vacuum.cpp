@@ -42,6 +42,7 @@
 #include "catalog/pgxc_class.h"
 #include "catalog/storage.h"
 #include "catalog/storage_gtt.h"
+#include "catalog/pg_partition_fn.h"
 #include "commands/cluster.h"
 #include "commands/dbcommands.h"
 #include "commands/matview.h"
@@ -1970,15 +1971,10 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
 
     /* Get the partitioned table's oid */
     if (vacuumPartition(vacstmt->flags)) {
-        relationid = partid_get_parentid(relid);
+        relationid = partid_get_rootid(relid, &subparentid);
         if (!OidIsValid(relationid)) {
             proc_snapshot_and_transaction();
             return false;
-        }
-        Oid grandparentid = partid_get_parentid(relationid);
-        if (OidIsValid(grandparentid)) {
-            subparentid = relationid;
-            relationid = grandparentid;
         }
     }
 
