@@ -285,8 +285,8 @@ bool CheckToastTuple(ParallelReorderBufferChange *change, ParallelLogicalDecodin
          * understand, so it doesn't make sense to handle the
          * few cases we do.
          */
-         
-        if (relation->rd_rel->relkind == RELKIND_SEQUENCE) {
+
+        if (RELKIND_IS_SEQUENCE(relation->rd_rel->relkind)) {
         } else if (!IsToastRelation(relation)) { /* user-triggered change */
             return false;
         } else if (change->action == PARALLEL_REORDER_BUFFER_CHANGE_INSERT ||

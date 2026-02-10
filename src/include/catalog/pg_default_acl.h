@@ -70,6 +70,8 @@ typedef FormData_pg_default_acl *Form_pg_default_acl;
 #define DEFACLOBJ_RELATION        'r'        /* table, view */
 #define DEFACLOBJ_SEQUENCE        'S'        /* sequence */
 #define DEFACLOBJ_LARGE_SEQUENCE  'L'        /* large sequence */
+#define DEFACLOBJ_SEQUENCE_GSC    'z'        /* new version sequence */
+#define DEFACLOBJ_LARGE_SEQUENCE_GSC  'Z'        /* new version large sequence */
 #define DEFACLOBJ_FUNCTION        'f'        /* function */
 #define DEFACLOBJ_PACKAGE         'p'        /* package */
 #define DEFACLOBJ_TYPE            'T'        /* type */

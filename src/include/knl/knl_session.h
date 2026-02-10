@@ -858,6 +858,11 @@ typedef struct knl_u_commands_context {
      * sequence.
      */
     struct SeqTableData* last_used_seq;
+    /*
+     * global_currval_seq is updated by nextval() to point to the current used
+     * global sequence cache.
+     */
+    DList* global_currval_seq;
 
     /* Form of the type created during inplace upgrade */
     char TypeCreateType;

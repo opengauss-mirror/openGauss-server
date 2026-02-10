@@ -976,7 +976,7 @@ select
 from pg_class c
 inner join pg_namespace s on s.oid = c.relnamespace
 inner join pg_object o on o.object_oid = c.oid
-where relkind in ('S', 'L')
+where relkind in ('S', 'L', 'z', 'Z')
 and has_table_privilege(quote_ident(s.nspname) ||'.'||quote_ident(c.relname), 'SELECT')
 union all
 select
@@ -1128,7 +1128,7 @@ select
 from pg_class c
 inner join pg_namespace s on s.oid = c.relnamespace
 inner join pg_object o on o.object_oid = c.oid
-where relkind in ('S', 'L')
+where relkind in ('S', 'L', 'z', 'Z')
 and s.nspname not in ('information_schema', 'pg_catalog')
 and has_table_privilege(quote_ident(s.nspname) ||'.'||quote_ident(c.relname), 'SELECT')
 union all

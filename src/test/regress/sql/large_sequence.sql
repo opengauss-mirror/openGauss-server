@@ -143,7 +143,7 @@ CREATE LARGE SEQUENCE foo;
 -- rename supported
 ALTER LARGE SEQUENCE foo RENAME TO bar;
 
-SELECT * FROM foo;
+SELECT * FROM bar;
 
 -- alter maxvalue - ok
 ALTER LARGE SEQUENCE bar MAXVALUE 1000;

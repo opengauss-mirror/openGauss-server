@@ -114,6 +114,8 @@ typedef FormData_pg_object* Form_pg_object;
 #define OBJECT_TYPE_INDEX 'i'
 #define OBJECT_TYPE_SEQUENCE 's'
 #define OBJECT_TYPE_LARGE_SEQUENCE 'l'
+#define OBJECT_TYPE_SEQUENCE_GSC 'z'
+#define OBJECT_TYPE_LARGE_SEQUENCE_GSC 'Z'
 #define OBJECT_TYPE_VIEW 'v'
 #define OBJECT_TYPE_CONTQUERY 'o'
 #define OBJECT_TYPE_PROC 'P'

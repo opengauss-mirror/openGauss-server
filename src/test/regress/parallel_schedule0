@@ -1183,3 +1183,7 @@ test: dump_alter_index_invisible nls_lower
 
 # test remotetype=coordinator trust bypass security
 test: remotetype_trust_security
+
+# test global sequence cache
+test: session_sequence_cache
+test: global_sequence_cache

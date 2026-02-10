@@ -4031,7 +4031,7 @@ AlterTableStmt:
 					AlterTableStmt *n = makeNode(AlterTableStmt);
 					n->relation = $3;
 					n->cmds = $4;
-					n->relkind = OBJECT_SEQUENCE;
+					n->relkind = OBJECT_SEQUENCE_GSC;
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
@@ -4040,7 +4040,7 @@ AlterTableStmt:
 					AlterTableStmt *n = makeNode(AlterTableStmt);
 					n->relation = $4;
 					n->cmds = $5;
-					n->relkind = OBJECT_LARGE_SEQUENCE;
+					n->relkind = OBJECT_LARGE_SEQUENCE_GSC;
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
@@ -4049,7 +4049,7 @@ AlterTableStmt:
 					AlterTableStmt *n = makeNode(AlterTableStmt);
 					n->relation = $5;
 					n->cmds = $6;
-					n->relkind = OBJECT_SEQUENCE;
+					n->relkind = OBJECT_SEQUENCE_GSC;
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
@@ -4058,7 +4058,7 @@ AlterTableStmt:
 					AlterTableStmt *n = makeNode(AlterTableStmt);
 					n->relation = $6;
 					n->cmds = $7;
-					n->relkind = OBJECT_LARGE_SEQUENCE;
+					n->relkind = OBJECT_LARGE_SEQUENCE_GSC;
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
@@ -10579,6 +10579,14 @@ SeqOptElem: CACHE NumericOnly
 				{
 					$$ = makeDefElem("minvalue", NULL);
 				}
+			| GLOBAL
+				{
+					$$ = makeDefElem("is_global", (Node *)makeInteger(TRUE));
+				}
+			| SESSION
+				{
+					$$ = makeDefElem("is_global", (Node *)makeInteger(FALSE));
+				}
 		;
 
 opt_by:		BY				{}
@@ -11130,7 +11138,7 @@ AlterExtensionContentsStmt:
 					AlterExtensionContentsStmt *n = makeNode(AlterExtensionContentsStmt);
 					n->extname = $3;
 					n->action = $4;
-					n->objtype = OBJECT_SEQUENCE;
+					n->objtype = OBJECT_SEQUENCE_GSC;
 					n->objname = $6;
 					$$ = (Node *)n;
 				}
@@ -14573,8 +14581,8 @@ opt_purge:
 drop_type:	TABLE									{ $$ = OBJECT_TABLE; }
             | CONTVIEW                              { $$ = OBJECT_CONTQUERY; }
             | STREAM                                { $$ = OBJECT_STREAM; }
-			| SEQUENCE								{ $$ = OBJECT_SEQUENCE; }
-			| LARGE_P SEQUENCE						{ $$ = OBJECT_LARGE_SEQUENCE; }
+			| SEQUENCE                              { $$ = OBJECT_SEQUENCE_GSC; }
+			| LARGE_P SEQUENCE                      { $$ = OBJECT_LARGE_SEQUENCE_GSC; }
 			| VIEW									{ $$ = OBJECT_VIEW; }
 			| INDEX									{ $$ = OBJECT_INDEX; }
 			| FOREIGN TABLE							{ $$ = OBJECT_FOREIGN_TABLE; }
@@ -14838,8 +14846,8 @@ comment_type:
 			| DATABASE							{ $$ = OBJECT_DATABASE; }
 			| SCHEMA							{ $$ = OBJECT_SCHEMA; }
 			| INDEX								{ $$ = OBJECT_INDEX; }
-			| SEQUENCE							{ $$ = OBJECT_SEQUENCE; }
-			| LARGE_P SEQUENCE					{ $$ = OBJECT_LARGE_SEQUENCE; }
+			| SEQUENCE							{ $$ = OBJECT_SEQUENCE_GSC; }
+			| LARGE_P SEQUENCE                  { $$ = OBJECT_LARGE_SEQUENCE_GSC; }
 			| TABLE								{ $$ = OBJECT_TABLE; }
 			| DOMAIN_P							{ $$ = OBJECT_DOMAIN; }
 			| TYPE_P							{ $$ = OBJECT_TYPE; }
@@ -14941,7 +14949,7 @@ security_label_type:
 			| EVENT_TRIGGER                     { $$ = OBJECT_EVENT_TRIGGER; }
 			| FOREIGN TABLE						{ $$ = OBJECT_FOREIGN_TABLE; }
 			| SCHEMA							{ $$ = OBJECT_SCHEMA; }
-			| SEQUENCE							{ $$ = OBJECT_SEQUENCE; }
+			| SEQUENCE                          { $$ = OBJECT_SEQUENCE_GSC; }
 			| TABLE								{ $$ = OBJECT_TABLE; }
 			| DOMAIN_P							{ $$ = OBJECT_TYPE; }
 			| ROLE								{ $$ = OBJECT_ROLE; }
@@ -19552,7 +19560,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 			| ALTER SEQUENCE qualified_name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
-					n->renameType = OBJECT_SEQUENCE;
+					n->renameType = OBJECT_SEQUENCE_GSC;
 					n->relation = $3;
 					n->subname = NULL;
 					n->newname = $6;
@@ -19562,7 +19570,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 			| ALTER LARGE_P SEQUENCE qualified_name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
-					n->renameType = OBJECT_LARGE_SEQUENCE;
+					n->renameType = OBJECT_LARGE_SEQUENCE_GSC;
 					n->relation = $4;
 					n->subname = NULL;
 					n->newname = $7;
@@ -19572,7 +19580,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 			| ALTER SEQUENCE IF_P EXISTS qualified_name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
-					n->renameType = OBJECT_SEQUENCE;
+					n->renameType = OBJECT_SEQUENCE_GSC;
 					n->relation = $5;
 					n->subname = NULL;
 					n->newname = $8;
@@ -19582,7 +19590,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 			| ALTER LARGE_P SEQUENCE IF_P EXISTS qualified_name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
-					n->renameType = OBJECT_LARGE_SEQUENCE;
+					n->renameType = OBJECT_LARGE_SEQUENCE_GSC;
 					n->relation = $6;
 					n->subname = NULL;
 					n->newname = $9;
@@ -20231,7 +20239,7 @@ AlterObjectSchemaStmt:
 			| ALTER SEQUENCE qualified_name SET SCHEMA name
 				{
 					AlterObjectSchemaStmt *n = makeNode(AlterObjectSchemaStmt);
-					n->objectType = OBJECT_SEQUENCE;
+					n->objectType = OBJECT_SEQUENCE_GSC;
 					n->relation = $3;
 					n->newschema = $6;
 					n->missing_ok = false;
@@ -20240,7 +20248,7 @@ AlterObjectSchemaStmt:
 			| ALTER LARGE_P SEQUENCE qualified_name SET SCHEMA name
 				{
 					AlterObjectSchemaStmt *n = makeNode(AlterObjectSchemaStmt);
-					n->objectType = OBJECT_LARGE_SEQUENCE;
+					n->objectType = OBJECT_LARGE_SEQUENCE_GSC;
 					n->relation = $4;
 					n->newschema = $7;
 					n->missing_ok = false;
@@ -20249,7 +20257,7 @@ AlterObjectSchemaStmt:
 			| ALTER SEQUENCE IF_P EXISTS qualified_name SET SCHEMA name
 				{
 					AlterObjectSchemaStmt *n = makeNode(AlterObjectSchemaStmt);
-					n->objectType = OBJECT_SEQUENCE;
+					n->objectType = OBJECT_SEQUENCE_GSC;
 					n->relation = $5;
 					n->newschema = $8;
 					n->missing_ok = true;
@@ -20258,7 +20266,7 @@ AlterObjectSchemaStmt:
 			| ALTER LARGE_P SEQUENCE IF_P EXISTS qualified_name SET SCHEMA name
 				{
 					AlterObjectSchemaStmt *n = makeNode(AlterObjectSchemaStmt);
-					n->objectType = OBJECT_LARGE_SEQUENCE;
+					n->objectType = OBJECT_LARGE_SEQUENCE_GSC;
 					n->relation = $6;
 					n->newschema = $9;
 					n->missing_ok = true;

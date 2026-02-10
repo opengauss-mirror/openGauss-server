@@ -971,6 +971,18 @@ void get_relation_info(PlannerInfo* root, RangeTblEntry* rte, RelOptInfo* rel)
 
 bool is_table_vacuumed_or_analyzed(Oid relid)
 {
+    /*
+     * Safety guard: if pg_statistic_history hasn't been created yet
+     * (e.g. upgrade path skipped version 93_033, or inplace upgrade in progress),
+     * return false to avoid "could not open relation with OID 4885" errors.
+     */
+    if (u_sess->attr.attr_common.IsInplaceUpgrade)
+        return false;
+    HeapTuple reltup = SearchSysCache1(RELOID, ObjectIdGetDatum(StatisticHistoryRelationId));
+    if (!HeapTupleIsValid(reltup))
+        return false;
+    ReleaseSysCache(reltup);
+
     Relation pgstahis = NULL;
     SysScanDesc scan = NULL;
     ScanKeyData key[1];
@@ -1213,6 +1225,8 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
             break;
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             /* Sequences always have a known size */
             *pages = 1;
             *tuples = 1;

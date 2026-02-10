@@ -32,6 +32,7 @@
 #include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
 #include "commands/tablespace.h"
+#include "commands/sequence.h"
 #include "executor/instrument.h"
 #include "gssignal/gs_signal.h"
 #include "mb/pg_wchar.h"
@@ -771,6 +772,7 @@ void knl_u_commands_init(knl_u_commands_context* cmd_cxt)
 
     cmd_cxt->seqtab = NULL;
     cmd_cxt->last_used_seq = NULL;
+    cmd_cxt->global_currval_seq = NULL;
 
     cmd_cxt->TypeCreateType = '\0';
 

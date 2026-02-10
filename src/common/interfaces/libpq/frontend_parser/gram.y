@@ -5391,7 +5391,7 @@ DropStmt:	DROP drop_type IF_P EXISTS any_name_list opt_drop_behavior
             ;
 
 drop_type:	TABLE									{ $$ = OBJECT_TABLE; }
-			| SEQUENCE								{ $$ = OBJECT_SEQUENCE; }
+			| SEQUENCE                              { $$ = OBJECT_SEQUENCE; }
 			| VIEW									{ $$ = OBJECT_VIEW; }
 			| INDEX									{ $$ = OBJECT_INDEX; }
 			| FOREIGN TABLE							{ $$ = OBJECT_FOREIGN_TABLE; }

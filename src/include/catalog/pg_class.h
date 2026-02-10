@@ -179,6 +179,8 @@ DESCR("");
 #define RELKIND_GLOBAL_INDEX 'I'                /* GLOBAL partitioned index */
 #define RELKIND_SEQUENCE 'S'                    /* sequence object */
 #define RELKIND_LARGE_SEQUENCE 'L'              /* large sequence object that support 128-bit integer */
+#define RELKIND_SEQUENCE_GSC 'z'                /* new version sequence object */
+#define RELKIND_LARGE_SEQUENCE_GSC 'Z'          /* new version large sequence object that support 128-bit integer */
 #define RELKIND_TOASTVALUE 't'                  /* for out-of-line values */
 #define RELKIND_VIEW 'v'                        /* view */
 #define RELKIND_MATVIEW 'm'                     /* materialized view */
@@ -211,10 +213,12 @@ DESCR("");
     ((relkind) == RELKIND_RELATION || \
      (relkind) == RELKIND_INDEX || \
      (relkind) == RELKIND_SEQUENCE || \
+     (relkind) == RELKIND_SEQUENCE_GSC || \
      (relkind) == RELKIND_TOASTVALUE)
 
-#define RELKIND_IS_SEQUENCE(relkind) \
-    ((relkind) == RELKIND_SEQUENCE || (relkind) == RELKIND_LARGE_SEQUENCE)
+#define RELKIND_IS_SEQUENCE(relkind)                                         \
+    ((relkind) == RELKIND_SEQUENCE || (relkind) == RELKIND_LARGE_SEQUENCE || \
+    (relkind) == RELKIND_SEQUENCE_GSC || (relkind) == RELKIND_LARGE_SEQUENCE_GSC)
 
 /*
  * an explicitly chosen candidate key's columns are used as identity;

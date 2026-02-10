@@ -828,7 +828,7 @@ logicalLog* getIUDLogicalLog(ParallelReorderBufferChange* change, ParallelLogica
          * few cases we do.
          */
          
-        if (relation->rd_rel->relkind == RELKIND_SEQUENCE) {
+        if (RELKIND_IS_SEQUENCE(RelationGetRelkind(relation))) {
         } else if (!IsToastRelation(relation)) { /* user-triggered change */
             logChange = GetLogicalLog(worker);
             g_Logicaldispatcher[slotId].pOptions.decode_change(relation, change, logChange, ctx, slotId);

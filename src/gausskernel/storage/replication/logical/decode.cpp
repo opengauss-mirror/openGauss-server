@@ -1038,7 +1038,7 @@ static void AreaDecodingChange(ReorderBufferChange *change, LogicalDecodingConte
          * understand, so it doesn't make sense to handle the
          * few cases we do.
          */
-        if (relation->rd_rel->relkind != RELKIND_SEQUENCE &&
+        if (!RELKIND_IS_SEQUENCE(relation->rd_rel->relkind) &&
                    !IsToastRelation(relation)) {
             ctx->reorder->apply_change(ctx->reorder, NULL, relation, change);
         }

@@ -643,7 +643,9 @@ extern void PartitionDecrementReferenceCount(Partition part);
     (RelationAmIsBtree(relation) && RELATION_HAS_BUCKET(relation) && RELOPTIONS_CROSSBUCKET((relation)->rd_options))
 
 #define RelationIsSequnce(relation) (RELKIND_SEQUENCE == (relation)->rd_rel->relkind || \
-                                     RELKIND_LARGE_SEQUENCE == (relation)->rd_rel->relkind)
+                                     RELKIND_LARGE_SEQUENCE == (relation)->rd_rel->relkind || \
+                                     RELKIND_SEQUENCE_GSC == (relation)->rd_rel->relkind || \
+                                     RELKIND_LARGE_SEQUENCE_GSC == (relation)->rd_rel->relkind)
 
 #define RelationIsToast(relation) (RELKIND_TOASTVALUE == (relation)->rd_rel->relkind)
 

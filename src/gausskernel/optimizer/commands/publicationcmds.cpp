@@ -213,6 +213,9 @@ static void AddAllDDLReplicaEventTriggers(List *end_commands)
     end_commands = lappend(end_commands, makeString("CREATE SEQUENCE"));
     end_commands = lappend(end_commands, makeString("ALTER SEQUENCE"));
     end_commands = lappend(end_commands, makeString("DROP SEQUENCE"));
+    end_commands = lappend(end_commands, makeString("CREATE LARGE SEQUENCE"));
+    end_commands = lappend(end_commands, makeString("ALTER LARGE SEQUENCE"));
+    end_commands = lappend(end_commands, makeString("DROP LARGE SEQUENCE"));
     end_commands = lappend(end_commands, makeString("CREATE SCHEMA"));
     end_commands = lappend(end_commands, makeString("ALTER SCHEMA"));
     end_commands = lappend(end_commands, makeString("DROP SCHEMA"));

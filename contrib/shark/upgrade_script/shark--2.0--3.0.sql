@@ -236,7 +236,7 @@ select
 from pg_class c
 inner join pg_namespace s on s.oid = c.relnamespace
 left join pg_object o on o.object_oid = c.oid
-where relkind in ('S', 'L')
+where relkind in ('S', 'L', 'z', 'Z')
 and has_table_privilege(c.oid, 'SELECT')
 union all
 select
@@ -441,7 +441,7 @@ select
 from pg_class c
 inner join pg_namespace s on s.oid = c.relnamespace
 inner join pg_object o on o.object_oid = c.oid
-where relkind in ('S', 'L')
+where relkind in ('S', 'L', 'z', 'Z')
 and s.nspname not in ('information_schema', 'pg_catalog', 'sys', 'information_schema_tsql')
 and has_table_privilege(c.oid, 'SELECT')
 union all
@@ -618,7 +618,7 @@ select
 from pg_class t
 inner join pg_namespace s on s.oid = t.relnamespace
 where t.relpersistence in ('p', 'u', 't')
-and t.relkind in ('r', 'v', 'm', 'S')
+and t.relkind in ('r', 'v', 'm', 'S', 'L', 'z', 'Z')
 and has_table_privilege(t.oid, 'SELECT')
 union all
 select 
@@ -1600,6 +1600,8 @@ SELECT
     CASE relkind
       WHEN 'S' THEN 20
       WHEN 'L' THEN 34
+      WHEN 'z' THEN 20
+      WHEN 'Z' THEN 34
       ELSE -1
     END AS TINYINT
   ) AS system_type_id,
@@ -1607,6 +1609,8 @@ SELECT
     CASE relkind
       WHEN 'S' THEN 20
       WHEN 'L' THEN 34
+      WHEN 'z' THEN 20
+      WHEN 'Z' THEN 34
       ELSE -1
     END AS INT
   ) AS user_type_id,
@@ -1614,6 +1618,8 @@ SELECT
     CASE relkind
       WHEN 'S' THEN 19
       WHEN 'L' THEN 39
+      WHEN 'z' THEN 19
+      WHEN 'Z' THEN 39
       ELSE -1
     END AS TINYINT
   ) AS precision,
@@ -1642,7 +1648,7 @@ SELECT
 FROM pg_class c
 INNER JOIN pg_namespace s ON s.oid = c.relnamespace
 INNER JOIN pg_object o ON o.object_oid = c.oid
-WHERE relkind IN ('S', 'L')
+WHERE relkind IN ('S', 'L', 'z', 'Z')
 AND s.nspname NOT IN ('information_schema', 'pg_catalog', 'sys', 'information_schema_tsql')
 AND (pg_catalog.pg_has_role(c.relowner, 'USAGE') OR pg_catalog.has_sequence_privilege(c.oid, 'SELECT, UPDATE, USAGE'));
 

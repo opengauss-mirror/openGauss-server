@@ -35,6 +35,11 @@
 // extern THR_LOCAL char *PGXCNodeName;
 
 typedef int64 GTM_UUID;
+typedef bool CACHE_LEVEL;
+
+#define SESSION_LEVEL FALSE
+#define GLOBAL_LEVEL TRUE
+
 
 typedef struct FormData_pg_sequence {
     NameData sequence_name;
@@ -48,6 +53,7 @@ typedef struct FormData_pg_sequence {
     bool is_cycled;
     bool is_called;
     GTM_UUID uuid;
+    CACHE_LEVEL is_global;
 } FormData_pg_sequence;
 
 typedef FormData_pg_sequence* Form_pg_sequence;
@@ -64,6 +70,7 @@ typedef struct FormData_pg_large_sequence {
     bool is_cycled;
     bool is_called;
     GTM_UUID uuid;
+    CACHE_LEVEL is_global;
 } FormData_pg_large_sequence;
 
 typedef FormData_pg_large_sequence* Form_pg_large_sequence;
@@ -83,9 +90,10 @@ typedef FormData_pg_large_sequence* Form_pg_large_sequence;
 #define SEQ_COL_CYCLE 9
 #define SEQ_COL_CALLED 10
 #define SEQ_COL_UUID 11
+#define SEQ_COL_CACHELEVEL 12
 
 #define SEQ_COL_FIRSTCOL SEQ_COL_NAME
-#define SEQ_COL_LASTCOL SEQ_COL_UUID
+#define SEQ_COL_LASTCOL SEQ_COL_CACHELEVEL
 
 #define GS_NUM_OF_BUCKETS 1024
 
@@ -122,6 +130,9 @@ typedef struct SeqTableData {
     int128 maxval;
     int128 startval;
     int64 uuid;
+    Oid dbOid;                 /* record database oid for global sequence cache */
+    char seqkind;              /* record sequence kind */
+    bool is_global_cache;      /* sequence cache level is global */
 } SeqTableData;
 
 typedef SeqTableData* SeqTable;
@@ -151,7 +162,49 @@ typedef struct sequence_values
     char *min_value;
     char *cache_value;
     bool is_cycled;
+    bool is_global;
 } sequence_values;
+
+typedef struct GSCKey
+{
+    Oid dbOid;  /* record database oid for global sequence cache */
+    Oid relid;
+} GSCKey;
+
+typedef struct GSCVal
+{
+    SeqTableData  elm;
+} GSCVal;
+
+typedef struct GSCEntry
+{
+    GSCKey  key;
+    GSCVal  val;
+} GSCEntry;
+
+typedef struct GSCOid2LevelKey
+{
+    Oid dbOid;  /* record database oid for global sequence cache */
+    Oid relid;
+} GSCOid2LevelKey;
+
+typedef struct GSCOid2LevelVal
+{
+    bool is_global_cache;
+} GSCOid2LevelVal;
+
+typedef struct GSCOid2LevelEntry
+{
+    GSCOid2LevelKey  key;
+    GSCOid2LevelVal  val;
+} GSCOid2LevelEntry;
+
+struct GlobaleSeqHashTabl {
+    struct GlobalSeqInfoHashBucket global_seq[NUM_GS_PARTITIONS];
+    struct GSCHashCtl global_seqtab[NUM_GSC_SINGLENODE_PARTITIONS];
+};
+
+#define GSC_HTAB_SIZE (128)
 
 /*
  * We don't want to log each fetching of a value from a sequence,
@@ -177,7 +230,6 @@ typedef struct sequence_magic {
     uint32 magic;
 } sequence_magic;
 
-
 extern Datum nextval(PG_FUNCTION_ARGS);
 extern Datum nextval_oid(PG_FUNCTION_ARGS);
 extern Datum currval_oid(PG_FUNCTION_ARGS);
@@ -191,6 +243,7 @@ extern Datum pg_sequence_all_parameters(PG_FUNCTION_ARGS);
 extern Datum pg_sequence_last_value(PG_FUNCTION_ARGS);
 
 extern int128 nextval_internal(Oid relid);
+extern int128 nextval_internal_for_global_seq_cache(Oid relid);
 extern void autoinc_setval(Oid relid, int128 next, bool iscalled);
 extern int128 autoinc_get_nextval(Oid relid);
 extern bool CheckSeqOwnedByAutoInc(Oid seqoid);
@@ -270,12 +323,21 @@ extern void fill_seq_with_data(Relation rel, HeapTuple tuple);
 extern void ResetvalGlobal(Oid relid);
 extern Relation lock_and_open_seq(SeqTable seq);
 extern void init_sequence(Oid relid, SeqTable* p_elm, Relation* p_rel);
+extern void init_sequence_single_node_global_cache(Oid relid, SeqTable* elm, Relation* p_rel, GSCKey* key,
+                                                   uint32 hashCode, uint32 bucketId);
+extern void init_sequence_single_node_global_cache_for_currval(Oid relid, SeqTable* elm, Relation* rel);
+extern void global_sequence_cache_set_currval_elm(Oid relid, int128 value);
+extern void removeSequenceCacheOfRelOid(List* relOids);
 extern SeqTable GetSessSeqElm(Oid relid);
 extern char* GetGlobalSeqNameForUpdate(Relation seqrel, char** dbname, char** schemaname);
 extern uint32 RelidGetHash(Oid seq_relid);
+extern uint32 GetGSCBucket(uint32 hashvalue);
 extern SeqTable GetGlobalSeqElm(Oid relid, GlobalSeqInfoHashBucket* bucket);
 extern Oid pg_get_serial_sequence_oid(text* tablename, text* columnname, bool find_identity = false);
 extern bool StrEndWith(const char *str, const char *suffix);
 typedef void (*InvokeNextvalHookType) (Oid relid, int128 val);
+template<typename T_Type>
+extern uint32 GSCHashFunc(const void *key, Size keysize);
+extern bool is_global_level_sequence_cache(Oid relid);
 
 #endif /* SEQUENCE_H */

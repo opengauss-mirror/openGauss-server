@@ -1635,10 +1635,11 @@ CREATE VIEW sequences AS
            CAST((pg_catalog.pg_sequence_parameters(c.oid)).minimum_value AS character_data) AS minimum_value,
            CAST((pg_catalog.pg_sequence_parameters(c.oid)).maximum_value AS character_data) AS maximum_value,
            CAST((pg_catalog.pg_sequence_parameters(c.oid)).increment AS character_data) AS increment,
-           CAST(CASE WHEN (pg_catalog.pg_sequence_parameters(c.oid)).cycle_option THEN 'YES' ELSE 'NO' END AS yes_or_no) AS cycle_option
+           CAST(CASE WHEN (pg_catalog.pg_sequence_parameters(c.oid)).cycle_option THEN 'YES' ELSE 'NO' END AS yes_or_no) AS cycle_option,
+           CAST(CASE WHEN (pg_catalog.pg_sequence_parameters(c.oid)).is_global_cache THEN 'YES' ELSE 'NO' END AS yes_or_no) AS global_cache_option
     FROM pg_namespace nc, pg_class c
     WHERE c.relnamespace = nc.oid
-          AND (c.relkind = 'L' or c.relkind = 'S')
+          AND (c.relkind = 'L' or c.relkind = 'S' or c.relkind = 'z' or c.relkind = 'Z')
           AND (NOT pg_catalog.pg_is_other_temp_schema(nc.oid))
           AND (pg_catalog.pg_has_role(c.relowner, 'USAGE')
                OR pg_catalog.has_sequence_privilege(c.oid, 'SELECT, UPDATE, USAGE') );
@@ -2421,7 +2422,7 @@ CREATE VIEW usage_privileges AS
          ) AS grantee (oid, rolname)
 
     WHERE c.relnamespace = n.oid
-          AND (c.relkind = 'S' or c.relkind = 'L')
+          AND (c.relkind = 'S' or c.relkind = 'L' or c.relkind = 'z' or c.relkind = 'Z')
           AND c.grantee = grantee.oid
           AND c.grantor = u_grantor.oid
           AND c.prtype IN ('USAGE')

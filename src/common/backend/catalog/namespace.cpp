@@ -532,6 +532,8 @@ bool CheckRelationCreateAnyPrivilege(Oid userId, char relkind)
         /* sequence object */
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             if (HasSpecAnyPriv(userId, CREATE_ANY_SEQUENCE, false)) {
                 aclResult = ACLCHECK_OK;
             }

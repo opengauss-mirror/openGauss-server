@@ -1239,6 +1239,11 @@ typedef struct GlobalSeqInfoHashBucket {
     int lock_id;
 } GlobalSeqInfoHashBucket;
 
+typedef struct GSCHashCtl {
+    int lock_id;
+    HTAB* hash_tbl;
+} GSCHashCtl;
+
 typedef struct knl_g_archive_context {
     XLogRecPtr barrierLsn;
     char barrierName[MAX_BARRIER_ID_LENGTH];
@@ -1624,7 +1629,12 @@ typedef struct knl_instance_context {
 
     bool dummy_standby;
 
-    struct GlobalSeqInfoHashBucket global_seq[NUM_GS_PARTITIONS];
+    struct GlobaleSeqHashTabl *seqHtbl;
+    HTAB* relid2cachelevel;
+    LWLock *oid_map_lock;
+    LWLock *alter_sequence_lock;
+    pthread_mutex_t glable_seq_init_lock;
+    bool global_seq_inited;
 
     struct GlobalPlanCache*   plan_cache;
 

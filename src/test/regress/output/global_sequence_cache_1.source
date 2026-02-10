@@ -1,0 +1,673 @@
+-- ========================================
+-- 1. D模式下的几个函数测试
+-- ======================================== 
+CREATE DATABASE compatible_db_d DBCOMPATIBILITY 'D';
+\c compatible_db_d
+create extension shark;
+-- 1.1 普通序列
+CREATE SEQUENCE pg_seq_params_seq1
+    START 10
+    INCREMENT 2
+    MINVALUE 1
+    MAXVALUE 100
+    CACHE 5
+    NO CYCLE
+    GLOBAL;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+CREATE LARGE SEQUENCE pg_seq_params_seq2
+    START 10
+    INCREMENT 2
+    MINVALUE 1
+    MAXVALUE 100
+    CACHE 5
+    NO CYCLE
+    SESSION;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+SELECT * FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ start_value | minimum_value | maximum_value | increment | cycle_option | cache_size | last_value | is_called | log_cnt | uuid | last_used_value | is_exhausted 
+-------------+---------------+---------------+-----------+--------------+------------+------------+-----------+---------+------+-----------------+--------------
+          10 |             1 |           100 |         2 | f            |          5 |         10 | f         |       0 |    0 |                 | f
+(1 row)
+
+SELECT * FROM pg_sequence_all_parameters('pg_seq_params_seq2');
+ start_value | minimum_value | maximum_value | increment | cycle_option | cache_size | last_value | is_called | log_cnt | uuid | last_used_value | is_exhausted 
+-------------+---------------+---------------+-----------+--------------+------------+------------+-----------+---------+------+-----------------+--------------
+          10 |             1 |           100 |         2 | f            |          5 |         10 | f         |       0 |    0 |                 | f
+(1 row)
+
+-- 清理 pg_sequence_all_parameters 相关
+DROP SEQUENCE pg_seq_params_seq1;
+DROP LARGE SEQUENCE pg_seq_params_seq2;
+-- 4.2 若已加载 shark，可在 shark 测试 schema 中建表并调用（与 contrib/shark 用例一致）
+-- 这里创建本地表并尝试调用，便于在安装 shark 的环境中覆盖
+CREATE SCHEMA IF NOT EXISTS dbcc_coverage_schema;
+CREATE SEQUENCE dbcc_coverage_schema.test_seq1
+    START 10
+    INCREMENT 2
+    MINVALUE 1
+    MAXVALUE 100
+    CACHE 5
+    NO CYCLE
+    GLOBAL;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+CREATE LARGE SEQUENCE dbcc_coverage_schema.test_seq2
+    START 10
+    INCREMENT 2
+    MINVALUE 1
+    MAXVALUE 100
+    CACHE 5
+    NO CYCLE
+    GLOBAL;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+CREATE TABLE dbcc_coverage_schema.ident_tab (id bigint PRIMARY KEY DEFAULT nextval('dbcc_coverage_schema.test_seq1'), name char);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "ident_tab_pkey" for table "ident_tab"
+CREATE TABLE dbcc_coverage_schema.ident_tab1 (id bigint PRIMARY KEY DEFAULT nextval('dbcc_coverage_schema.test_seq2'), name char);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "ident_tab1_pkey" for table "ident_tab1"
+INSERT INTO dbcc_coverage_schema.ident_tab(name) VALUES ('a'), ('b'), ('c');
+INSERT INTO dbcc_coverage_schema.ident_tab1(name) VALUES ('a'), ('b'), ('c');
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p
+        JOIN pg_namespace n ON p.pronamespace = n.oid
+        WHERE n.nspname = 'sys' AND p.proname = 'dbcc_check_ident_reseed'
+    ) THEN
+        PERFORM sys.dbcc_check_ident_reseed('dbcc_coverage_schema.ident_tab', 100::bigint, true);
+        PERFORM sys.dbcc_check_ident_reseed('dbcc_coverage_schema.ident_tab', 50::bigint, false);
+        PERFORM sys.dbcc_check_ident_reseed('dbcc_coverage_schema.ident_tab1', 100::int16, true);
+        PERFORM sys.dbcc_check_ident_reseed('dbcc_coverage_schema.ident_tab1', 50::int16, false);
+    END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL;
+END;
+$$;
+NOTICE:  "Checking identity information: current identity value '100'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+SQL statement "SELECT sys.dbcc_check_ident_reseed('dbcc_coverage_schema.ident_tab', 50::bigint, false)"
+PL/pgSQL function inline_code_block line 9 at PERFORM
+NOTICE:  "Checking identity information: current identity value '100'."
+CONTEXT:  referenced column: dbcc_check_ident_reseed
+SQL statement "SELECT sys.dbcc_check_ident_reseed('dbcc_coverage_schema.ident_tab1', 50::int16, false)"
+PL/pgSQL function inline_code_block line 11 at PERFORM
+-- copy identity(start/increment) of source table in SELECT INTO clause for D format
+CREATE TABLE tbl_identity (id bigint identity(1,1), name VARCHAR(100));
+NOTICE:  CREATE TABLE will create implicit sequence "tbl_identity_id_seq_identity" for serial column "tbl_identity.id"
+select * into tbl1 from tbl_identity where id % 2 != 0;
+NOTICE:  CREATE TABLE will create implicit sequence "tbl1_id_seq_identity" for serial column "tbl1.id"
+ERROR:  Cannot insert identity column "id"
+LINE 1: select * into tbl1 from tbl_identity where id % 2 != 0;
+                                       ^
+drop table tbl_identity cascade;
+DROP SCHEMA dbcc_coverage_schema cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to sequence dbcc_coverage_schema.test_seq1
+drop cascades to large sequence dbcc_coverage_schema.test_seq2
+drop cascades to table dbcc_coverage_schema.ident_tab
+drop cascades to table dbcc_coverage_schema.ident_tab1
+\c regression
+DROP DATABASE compatible_db_d;
+-- ========================================
+-- 2. publication_deparse_table_rewrite()
+-- 仅在 table_rewrite 事件触发器内调用，对支持 DDL 复制的表进行 deparse 并记录
+-- 通过：创建 publication(with ddl) -> 建表 -> 执行触发 table_rewrite 的 ALTER
+-- ========================================
+-- 2.1 直接调用会报错（非事件触发器上下文），捕获错误以便脚本继续
+DO $$
+BEGIN
+    PERFORM publication_deparse_table_rewrite();
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'expected: not fired by event trigger manager';
+END;
+$$;
+NOTICE:  expected: not fired by event trigger manager
+-- 2.2 通过 publication + table_rewrite 触发
+CREATE SEQUENCE test_seq1
+    START 10
+    INCREMENT 2
+    MINVALUE 1
+    MAXVALUE 100
+    CACHE 5
+    NO CYCLE
+    GLOBAL;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+create large sequence test_large_seq1 global;
+CREATE TABLE rewrite_tab (a int PRIMARY KEY DEFAULT nextval('test_seq1'), b char);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "rewrite_tab_pkey" for table "rewrite_tab"
+INSERT INTO rewrite_tab(b) VALUES ('x'), ('y'), ('z');
+CREATE TABLE rewrite_tab1 (a int PRIMARY KEY DEFAULT nextval('test_large_seq1'), b char);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "rewrite_tab1_pkey" for table "rewrite_tab1"
+INSERT INTO rewrite_tab1(b) VALUES ('x'), ('y'), ('z');
+-- 创建带 DDL 的 publication，会注册 table_rewrite 等事件触发器
+CREATE PUBLICATION pub_deparse_rewrite FOR ALL TABLES WITH (ddl = 'table');
+WARNING:  wal_level is insufficient to publish logical changes
+HINT:  Set wal_level to logical before creating subscriptions.
+-- 执行会触发 table_rewrite 的 ALTER（例如改列类型导致重写）
+alter sequence test_seq1 session;
+alter sequence test_seq1 global;
+alter sequence if exists test_seq1 session;
+alter sequence if exists test_seq1 global;
+alter large sequence test_large_seq1 session;
+alter large sequence test_large_seq1 global;
+alter large sequence if exists test_large_seq1 session;
+alter large sequence if exists test_large_seq1 global;
+create sequence test_seq_1 start with 1 increment by 1 cache 20 global;
+create large sequence test_seq_2 start with 1 increment by 1 cache 20 global;
+alter extension hstore add sequence test_seq1;
+ERROR:  EXTENSION is not yet supported.
+alter extension hstore drop sequence test_seq1;
+ERROR:  EXTENSION is not yet supported.
+SECURITY LABEL ON sequence test_seq IS 'classified';
+ERROR:  SECURITY LABEL is not yet supported.
+alter sequence test_seq1 RENAME TO test_seq1_new;
+alter sequence if exists test_seq1_new RENAME TO test_seq1;
+alter large sequence test_large_seq1 RENAME TO test_large_seq1_new;
+alter large sequence if exists test_large_seq1_new RENAME TO test_large_seq1;
+create schema test_sch;
+alter sequence test_seq_1 set SCHEMA test_sch;
+ERROR:  ALTER SEQUENCE SET SCHEMA is not yet supported.
+alter sequence if exists test_seq_1 set SCHEMA test_sch;
+ERROR:  ALTER SEQUENCE SET SCHEMA is not yet supported.
+alter large sequence test_seq_2 set SCHEMA test_sch;
+ERROR:  ALTER SEQUENCE SET SCHEMA is not yet supported.
+alter large sequence if exists test_seq_2 set SCHEMA test_sch;
+ERROR:  ALTER SEQUENCE SET SCHEMA is not yet supported.
+drop schema test_sch;
+drop sequence test_seq_1;
+drop large sequence test_seq_2;
+-- 再执行一种会触发 rewrite 的变更（如设 NOT NULL + 默认值导致重写，视实现而定）
+-- ALTER TABLE rewrite_tab ALTER COLUMN b SET NOT NULL;
+-- 清理
+DROP PUBLICATION pub_deparse_rewrite;
+DROP TABLE rewrite_tab;
+DROP TABLE rewrite_tab1;
+DROP SEQUENCE test_seq1;
+DROP LARGE SEQUENCE test_large_seq1;
+-- ========================================
+-- 3. pg_sequence_all_parameters(sequence_name text)
+-- 返回序列的全部参数: start_value, minimum_value, maximum_value, increment,
+-- cycle_option, cache_size, last_value, is_called, log_cnt, uuid,
+-- last_used_value, is_exhausted
+-- ========================================
+-- 3.1 普通序列
+CREATE SEQUENCE pg_seq_params_seq1
+    START 10
+    INCREMENT 2
+    MINVALUE 1
+    MAXVALUE 100
+    CACHE 5
+    NO CYCLE;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+SELECT * FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ start_value | minimum_value | maximum_value | increment | cycle_option | cache_size | last_value | is_called | log_cnt | uuid | last_used_value | is_exhausted 
+-------------+---------------+---------------+-----------+--------------+------------+------------+-----------+---------+------+-----------------+--------------
+          10 |             1 |           100 |         2 | f            |          5 |         10 | f         |       0 |    0 |                 | f
+(1 row)
+
+-- 按列查询
+SELECT start_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ start_value 
+-------------
+          10
+(1 row)
+
+SELECT minimum_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ minimum_value 
+---------------
+             1
+(1 row)
+
+SELECT maximum_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ maximum_value 
+---------------
+           100
+(1 row)
+
+SELECT increment FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ increment 
+-----------
+         2
+(1 row)
+
+SELECT cycle_option FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ cycle_option 
+--------------
+ f
+(1 row)
+
+SELECT cache_size FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ cache_size 
+------------
+          5
+(1 row)
+
+SELECT last_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ last_value 
+------------
+         10
+(1 row)
+
+SELECT is_called FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ is_called 
+-----------
+ f
+(1 row)
+
+SELECT log_cnt FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ log_cnt 
+---------
+       0
+(1 row)
+
+SELECT uuid FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ uuid 
+------
+    0
+(1 row)
+
+SELECT last_used_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ last_used_value 
+-----------------
+                
+(1 row)
+
+SELECT is_exhausted FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ is_exhausted 
+--------------
+ f
+(1 row)
+
+-- 调用 nextval 后再查
+SELECT nextval('pg_seq_params_seq1');
+ nextval 
+---------
+      10
+(1 row)
+
+SELECT nextval('pg_seq_params_seq1');
+ nextval 
+---------
+      12
+(1 row)
+
+SELECT last_value, is_called, last_used_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ last_value | is_called | last_used_value 
+------------+-----------+-----------------
+         18 | t         |              18
+(1 row)
+
+-- 3.2 带 schema 的序列
+CREATE SCHEMA test_seq_params_schema;
+CREATE SEQUENCE test_seq_params_schema.seq2 START 1 INCREMENT 1;
+SELECT * FROM pg_sequence_all_parameters('test_seq_params_schema.seq2');
+ start_value | minimum_value |    maximum_value    | increment | cycle_option | cache_size | last_value | is_called | log_cnt | uuid | last_used_value | is_exhausted 
+-------------+---------------+---------------------+-----------+--------------+------------+------------+-----------+---------+------+-----------------+--------------
+           1 |             1 | 9223372036854775807 |         1 | f            |          1 |          1 | f         |       0 |    0 |                 | f
+(1 row)
+
+SELECT nextval('test_seq_params_schema.seq2');
+ nextval 
+---------
+       1
+(1 row)
+
+SELECT last_used_value FROM pg_sequence_all_parameters('test_seq_params_schema.seq2');
+ last_used_value 
+-----------------
+               1
+(1 row)
+
+DROP SCHEMA test_seq_params_schema cascade;
+NOTICE:  drop cascades to sequence test_seq_params_schema.seq2
+-- 3.3 CYCLE 序列
+CREATE SEQUENCE pg_seq_params_cycle
+    START 1 INCREMENT 1 MAXVALUE 3 MINVALUE 1 CYCLE;
+SELECT nextval('pg_seq_params_cycle');
+ nextval 
+---------
+       1
+(1 row)
+
+SELECT nextval('pg_seq_params_cycle');
+ nextval 
+---------
+       2
+(1 row)
+
+SELECT nextval('pg_seq_params_cycle');
+ nextval 
+---------
+       3
+(1 row)
+
+SELECT nextval('pg_seq_params_cycle');
+ nextval 
+---------
+       1
+(1 row)
+
+SELECT cycle_option, is_exhausted FROM pg_sequence_all_parameters('pg_seq_params_cycle');
+ cycle_option | is_exhausted 
+--------------+--------------
+ t            | f
+(1 row)
+
+-- 3.4 表上的 serial 对应序列
+CREATE TABLE pg_seq_params_tab (id serial PRIMARY KEY, data text);
+NOTICE:  CREATE TABLE will create implicit sequence "pg_seq_params_tab_id_seq" for serial column "pg_seq_params_tab.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pg_seq_params_tab_pkey" for table "pg_seq_params_tab"
+INSERT INTO pg_seq_params_tab(data) VALUES ('a'), ('b');
+SELECT * FROM pg_sequence_all_parameters('pg_seq_params_tab_id_seq');
+ start_value | minimum_value |    maximum_value    | increment | cycle_option | cache_size | last_value | is_called | log_cnt | uuid | last_used_value | is_exhausted 
+-------------+---------------+---------------------+-----------+--------------+------------+------------+-----------+---------+------+-----------------+--------------
+           1 |             1 | 9223372036854775807 |         1 | f            |          1 |          2 | t         |      31 |    0 |               2 | f
+(1 row)
+
+SELECT last_used_value FROM pg_sequence_all_parameters('pg_seq_params_tab_id_seq');
+ last_used_value 
+-----------------
+               2
+(1 row)
+
+-- 3.5 错误: 非序列对象（捕获错误以便脚本继续）
+DO $$
+BEGIN
+    PERFORM (SELECT pg_sequence_all_parameters('pg_seq_params_tab'));
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'expected: not a sequence';
+END;
+$$;
+NOTICE:  expected: not a sequence
+-- 3.6 错误: 不存在的序列（捕获错误以便脚本继续）
+DO $$
+BEGIN
+    PERFORM (SELECT pg_sequence_all_parameters('nonexistent_seq_xyz'));
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'expected: sequence does not exist';
+END;
+$$;
+NOTICE:  expected: sequence does not exist
+-- 清理 pg_sequence_all_parameters 相关
+DROP TABLE pg_seq_params_tab;
+DROP SEQUENCE pg_seq_params_cycle;
+DROP SEQUENCE pg_seq_params_seq1;
+-- ========================================
+-- 4. pg_sequence_all_parameters(sequence_name text)
+-- 返回序列的全部参数: start_value, minimum_value, maximum_value, increment,
+-- cycle_option, cache_size, last_value, is_called, log_cnt, uuid,
+-- last_used_value, is_exhausted
+-- ========================================
+-- 4.1 普通LARGE序列
+CREATE LARGE SEQUENCE pg_seq_params_seq1
+    START 10
+    INCREMENT 2
+    MINVALUE 1
+    MAXVALUE 100
+    CACHE 5
+    NO CYCLE;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+SELECT * FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ start_value | minimum_value | maximum_value | increment | cycle_option | cache_size | last_value | is_called | log_cnt | uuid | last_used_value | is_exhausted 
+-------------+---------------+---------------+-----------+--------------+------------+------------+-----------+---------+------+-----------------+--------------
+          10 |             1 |           100 |         2 | f            |          5 |         10 | f         |       0 |    0 |                 | f
+(1 row)
+
+-- 按列查询
+SELECT start_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ start_value 
+-------------
+          10
+(1 row)
+
+SELECT minimum_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ minimum_value 
+---------------
+             1
+(1 row)
+
+SELECT maximum_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ maximum_value 
+---------------
+           100
+(1 row)
+
+SELECT increment FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ increment 
+-----------
+         2
+(1 row)
+
+SELECT cycle_option FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ cycle_option 
+--------------
+ f
+(1 row)
+
+SELECT cache_size FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ cache_size 
+------------
+          5
+(1 row)
+
+SELECT last_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ last_value 
+------------
+         10
+(1 row)
+
+SELECT is_called FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ is_called 
+-----------
+ f
+(1 row)
+
+SELECT log_cnt FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ log_cnt 
+---------
+       0
+(1 row)
+
+SELECT uuid FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ uuid 
+------
+    0
+(1 row)
+
+SELECT last_used_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ last_used_value 
+-----------------
+                
+(1 row)
+
+SELECT is_exhausted FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ is_exhausted 
+--------------
+ f
+(1 row)
+
+-- 调用 nextval 后再查
+SELECT nextval('pg_seq_params_seq1');
+ nextval 
+---------
+      10
+(1 row)
+
+SELECT nextval('pg_seq_params_seq1');
+ nextval 
+---------
+      12
+(1 row)
+
+SELECT last_value, is_called, last_used_value FROM pg_sequence_all_parameters('pg_seq_params_seq1');
+ last_value | is_called | last_used_value 
+------------+-----------+-----------------
+         18 | t         |              18
+(1 row)
+
+-- 4.2 带 schema 的序列
+CREATE SCHEMA test_seq_params_schema;
+CREATE LARGE SEQUENCE test_seq_params_schema.seq2 START 1 INCREMENT 1;
+SELECT * FROM pg_sequence_all_parameters('test_seq_params_schema.seq2');
+ start_value | minimum_value |              maximum_value              | increment | cycle_option | cache_size | last_value | is_called | log_cnt | uuid | last_used_value | is_exhausted 
+-------------+---------------+-----------------------------------------+-----------+--------------+------------+------------+-----------+---------+------+-----------------+--------------
+           1 |             1 | 170141183460469231731687303715884105727 |         1 | f            |          1 |          1 | f         |       0 |    0 |                 | f
+(1 row)
+
+SELECT nextval('test_seq_params_schema.seq2');
+ nextval 
+---------
+       1
+(1 row)
+
+SELECT last_used_value FROM pg_sequence_all_parameters('test_seq_params_schema.seq2');
+ last_used_value 
+-----------------
+               1
+(1 row)
+
+DROP SCHEMA test_seq_params_schema cascade;
+NOTICE:  drop cascades to large sequence test_seq_params_schema.seq2
+-- 4.3 CYCLE 序列
+CREATE LARGE SEQUENCE pg_seq_params_cycle
+    START 1 INCREMENT 1 MAXVALUE 3 MINVALUE 1 CYCLE;
+SELECT nextval('pg_seq_params_cycle');
+ nextval 
+---------
+       1
+(1 row)
+
+SELECT nextval('pg_seq_params_cycle');
+ nextval 
+---------
+       2
+(1 row)
+
+SELECT nextval('pg_seq_params_cycle');
+ nextval 
+---------
+       3
+(1 row)
+
+SELECT nextval('pg_seq_params_cycle');
+ nextval 
+---------
+       1
+(1 row)
+
+SELECT cycle_option, is_exhausted FROM pg_sequence_all_parameters('pg_seq_params_cycle');
+ cycle_option | is_exhausted 
+--------------+--------------
+ t            | f
+(1 row)
+
+-- 4.4 表上的 serial 对应序列
+CREATE TABLE pg_seq_params_tab (id serial PRIMARY KEY, data text);
+NOTICE:  CREATE TABLE will create implicit sequence "pg_seq_params_tab_id_seq" for serial column "pg_seq_params_tab.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pg_seq_params_tab_pkey" for table "pg_seq_params_tab"
+INSERT INTO pg_seq_params_tab(data) VALUES ('a'), ('b');
+SELECT * FROM pg_sequence_all_parameters('pg_seq_params_tab_id_seq');
+ start_value | minimum_value |    maximum_value    | increment | cycle_option | cache_size | last_value | is_called | log_cnt | uuid | last_used_value | is_exhausted 
+-------------+---------------+---------------------+-----------+--------------+------------+------------+-----------+---------+------+-----------------+--------------
+           1 |             1 | 9223372036854775807 |         1 | f            |          1 |          2 | t         |      31 |    0 |               2 | f
+(1 row)
+
+SELECT last_used_value FROM pg_sequence_all_parameters('pg_seq_params_tab_id_seq');
+ last_used_value 
+-----------------
+               2
+(1 row)
+
+-- 4.5 错误: 非序列对象（捕获错误以便脚本继续）
+DO $$
+BEGIN
+    PERFORM (SELECT pg_sequence_all_parameters('pg_seq_params_tab'));
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'expected: not a sequence';
+END;
+$$;
+NOTICE:  expected: not a sequence
+-- 4.6 错误: 不存在的序列（捕获错误以便脚本继续）
+DO $$
+BEGIN
+    PERFORM (SELECT pg_sequence_all_parameters('nonexistent_seq_xyz'));
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'expected: sequence does not exist';
+END;
+$$;
+NOTICE:  expected: sequence does not exist
+-- 清理 pg_sequence_all_parameters 相关
+DROP TABLE pg_seq_params_tab;
+DROP LARGE SEQUENCE pg_seq_params_cycle;
+DROP LARGE SEQUENCE pg_seq_params_seq1;
+CREATE DATABASE test_db_b DBCOMPATIBILITY 'B';
+\c test_db_b
+-- test reset sequence
+CREATE TABLE truncate_a (id int auto_increment primary key, name VARCHAR(64));
+NOTICE:  CREATE TABLE will create implicit sequence "truncate_a_id_seq" for serial column "truncate_a.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "truncate_a_pkey" for table "truncate_a"
+insert into truncate_a(name) values ('a001'), ('a002'),('a003'),('a004');
+truncate TABLE truncate_a ;
+select get_auto_increment_nextval('truncate_a'::regclass::oid, false);
+ get_auto_increment_nextval 
+----------------------------
+                          1
+(1 row)
+
+select get_auto_increment_nextval('truncate_a'::regclass::oid, true);
+ get_auto_increment_nextval 
+----------------------------
+                          1
+(1 row)
+
+alter large sequence truncate_a_id_seq global;
+truncate TABLE truncate_a ;
+select get_auto_increment_nextval('truncate_a'::regclass::oid, false);
+ get_auto_increment_nextval 
+----------------------------
+                          1
+(1 row)
+
+select get_auto_increment_nextval('truncate_a'::regclass::oid, true);
+ get_auto_increment_nextval 
+----------------------------
+                          1
+(1 row)
+
+-- 模拟64-bit sequence
+update pg_class set relkind='z'  where relname='truncate_a_id_seq';
+select get_auto_increment_nextval('truncate_a'::regclass::oid, false);
+ get_auto_increment_nextval 
+----------------------------
+                          2
+(1 row)
+
+select get_auto_increment_nextval('truncate_a'::regclass::oid, true);
+ get_auto_increment_nextval 
+----------------------------
+                          2
+(1 row)
+
+update pg_class set relkind='Z'  where relname='truncate_a_id_seq';
+drop table truncate_a cascade;
+\c regression
+drop database test_db_b;
+-- add Coverage 1 
+create tablespace ts1 location '/tmp/ts1';
+create tablespace ts2 location '/tmp/ts2';
+create database test_db_ts tablespace ts1;
+\c test_db_ts
+create table tbl1(id bigserial PRIMARY KEY, data text) tablespace ts2;
+NOTICE:  CREATE TABLE will create implicit sequence "tbl1_id_seq" for serial column "tbl1.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tbl1_pkey" for table "tbl1"
+drop table tbl1 ;
+\c regression
+drop database test_db_ts;
+drop tablespace ts1;
+drop tablespace ts2;

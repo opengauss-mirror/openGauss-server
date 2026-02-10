@@ -34,6 +34,7 @@ CREATE LARGE SEQUENCE S2;
  is_cycled     | boolean | f
  is_called     | boolean | f
  uuid          | bigint  | 0
+ is_global     | boolean | f
 
 \d S2
                 Large Sequence "large_sequence.s2"
@@ -50,6 +51,7 @@ CREATE LARGE SEQUENCE S2;
  is_cycled     | boolean | f
  is_called     | boolean | f
  uuid          | bigint  | 0
+ is_global     | boolean | f
 
 COMMENT ON LARGE SEQUENCE S2 IS 'FOO';
 COMMENT ON LARGE SEQUENCE S2 IS NULL;
@@ -365,10 +367,12 @@ NOTICE:  drop cascades to default for table tab_seq column c2
 CREATE LARGE SEQUENCE foo;
 -- rename supported
 ALTER LARGE SEQUENCE foo RENAME TO bar;
-SELECT * FROM foo;
-ERROR:  relation "foo" does not exist on datanode1
-LINE 1: SELECT * FROM foo;
-                      ^
+SELECT * FROM bar;
+ sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------+-----------
+ foo           |          1 |           1 |            1 | 170141183460469231731687303715884105727 |         1 |           1 |       0 | f         | f         |    0 | f
+(1 row)
+
 -- alter maxvalue - ok
 ALTER LARGE SEQUENCE bar MAXVALUE 1000;
 -- alter owner role -ok
@@ -610,9 +614,9 @@ ERROR:  sequence "t1_f1_seq" does not exist
 DROP LARGE SEQUENCE myseq2;
 -- Information schema do not support large sequence for now
 SELECT * FROM information_schema.sequences WHERE sequence_name in ('myseq3');
- sequence_catalog | sequence_schema | sequence_name | data_type | numeric_precision | numeric_precision_radix | numeric_scale | start_value | minimum_value |              maximum_value              | increment | cycle_option 
-------------------+-----------------+---------------+-----------+-------------------+-------------------------+---------------+-------------+---------------+-----------------------------------------+-----------+--------------
- regression       | large_sequence  | myseq3        | int16     |               128 |                       2 |             0 | 1           | 1             | 170141183460469231731687303715884105727 | 1         | NO
+ sequence_catalog | sequence_schema | sequence_name | data_type | numeric_precision | numeric_precision_radix | numeric_scale | start_value | minimum_value |              maximum_value              | increment | cycle_option | global_cache_option 
+------------------+-----------------+---------------+-----------+-------------------+-------------------------+---------------+-------------+---------------+-----------------------------------------+-----------+--------------+---------------------
+ regression       | large_sequence  | myseq3        | int16     |               128 |                       2 |             0 | 1           | 1             | 170141183460469231731687303715884105727 | 1         | NO           | NO
 (1 row)
 
 -- Privilige check
@@ -622,9 +626,9 @@ GRANT SELECT ON priv_seq TO zeus;
 GRANT ALL ON SCHEMA large_sequence TO zeus;
 SET ROLE zeus PASSWORD '123qwe!@#';
 SELECT * FROM priv_seq;
- sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------
- priv_seq      |          1 |           1 |            1 | 170141183460469231731687303715884105727 |         1 |           1 |       0 | f         | f         |    0
+ sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------+-----------
+ priv_seq      |          1 |           1 |            1 | 170141183460469231731687303715884105727 |         1 |           1 |       0 | f         | f         |    0 | f
 (1 row)
 
 \d priv_seq
@@ -642,6 +646,7 @@ SELECT * FROM priv_seq;
  is_cycled     | boolean | f
  is_called     | boolean | f
  uuid          | bigint  | 0
+ is_global     | boolean | f
 
 SELECT nextval('priv_seq');
 ERROR:  permission denied for sequence priv_seq
@@ -714,9 +719,9 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA seq_priv_schema TO zeus;
 SET ROLE zeus PASSWORD '123qwe!@#';
 SET current_schema = seq_priv_schema;
 SELECT * FROM priv_seq;
- sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------
- priv_seq      |          1 |           1 |            1 | 170141183460469231731687303715884105727 |         1 |           1 |       0 | f         | f         |    0
+ sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------+-----------
+ priv_seq      |          1 |           1 |            1 | 170141183460469231731687303715884105727 |         1 |           1 |       0 | f         | f         |    0 | f
 (1 row)
 
 \d priv_seq
@@ -734,6 +739,7 @@ SELECT * FROM priv_seq;
  is_cycled     | boolean | f
  is_called     | boolean | f
  uuid          | bigint  | 0
+ is_global     | boolean | f
 
 SELECT nextval('priv_seq');
  nextval 

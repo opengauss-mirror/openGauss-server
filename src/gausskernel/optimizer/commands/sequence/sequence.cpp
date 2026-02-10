@@ -27,6 +27,7 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "access/xlogproc.h"
+#include "access/hash.h"
 #include "catalog/dependency.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_object.h"
@@ -51,6 +52,7 @@
 #include "utils/resowner.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "utils/guc.h"
 #include "commands/dbcommands.h"
 #include "replication/slot.h"
 
@@ -73,17 +75,21 @@ static T_Form read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple 
 template<typename T_FormData, typename T_Int, bool large>
 static ObjectAddress DefineSequence(CreateSeqStmt* seq);
 template<typename T_Form, typename T_Int, bool large>
-static ObjectAddress AlterSequence(const AlterSeqStmt* stmt);
+static ObjectAddress AlterSequence(const AlterSeqStmt* stmt, Oid relid);
+template<typename T_Form, typename T_Int, bool large>
+static ObjectAddress AlterSequenceForGlobalCache(const AlterSeqStmt* stmt, Oid relid);
 #ifdef PGXC
 template<typename T_Form, typename T_Int, bool large>
 static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
-    bool* is_restart, bool* needSeqRewrite, bool isIdentity);
+    bool* is_restart, bool* needSeqRewrite, bool isIdentity, SeqTable cache_elm = NULL);
 #else
 static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
-    bool* needSeqRewrite, bool isIdentity);
+    bool* needSeqRewrite, bool isIdentity, SeqTable cache_elm = NULL);
 #endif
 template<typename T_Form, typename T_Int, bool large>
 static void do_setval(Oid relid, int128 next, bool iscalled, bool skip_perm_check = false);
+template<typename T_Form, typename T_Int, bool large>
+static void do_setval_for_global_seq_cache(Oid relid, int128 next, bool iscalled);
 static void process_owned_by(const Relation seqrel, List* owned_by);
 template<typename T_Form>
 static GTM_UUID get_uuid_from_tuple(const void* seq_p, const Relation rel, const HeapTuple seqtuple);
@@ -94,6 +100,7 @@ static SeqTable InitGlobalSeqElm(Oid relid);
 static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel);
 template<typename T_Int, typename T_Form, bool large>
 static int128 GetNextvalLocal(SeqTable elm, Relation seqrel);
+static int128 GetNextvalGlobalForSingleNode(SeqTable elm);
 template<typename T_Int, bool large>
 static T_Int FetchLogLocal(T_Int* next, T_Int* result, T_Int* last, T_Int maxv, T_Int minv, T_Int fetch,
     T_Int log, T_Int incby, T_Int rescnt, bool is_cycled, T_Int cache, Relation seqrel);
@@ -105,13 +112,29 @@ static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTuple
                                     int64 result);
 static int64 GetNextvalResult(SeqTable sess_elm, Relation seqrel, Form_pg_sequence seq, HeapTupleData seqtuple,
     Buffer buf, int64* rangemax, SeqTable elm, GTM_UUID uuid);
+static void copyLastValSequenceElem(SeqTable elm, bool isReplace);
+static int initGlobalSequenceCache(void);
+static int initCacheLevelHashTab(void);
+static void LazyInitGlobalSeq(void);
+static void removeGlobalSeqCache_internal(Oid relid);
+static void removeGlobalSeqCacheForCurrval_internal(Oid relid);
+static void removeSessionSeqScache_internal(Oid relid);
+static bool is_alter_sequence_cache_level(List* options, bool* isNewVerCmd);
+static int128 findlastedSequenceValueByOid(Oid relid, bool* isvalid);
+static void changeSequenceCacheLevel(Oid relid);
+static void getSequencePropertys(Oid relid, bool* isOldVersionSequence, bool* isGlobal, char* relkind);
+bool is_global_level_sequence_cache(Oid relid);
+template<typename T_Type>
+uint32 GSCHashFunc(const void *key, Size keysize);
+uint32 GetGSCBucket(uint32 hashvalue);
 template<typename T_Int, bool large>
 static char* Int8or16Out(T_Int num);
 static TupleDesc build_sequence_tuple_desc(void);
-static void fill_normal_seq_values(Form_pg_sequence seq, Datum *values, bool *isnull);
-static void fill_large_seq_values(Form_pg_large_sequence seq, Datum *values, bool *isnull);
+static void fill_normal_seq_values(Form_pg_sequence seq, Datum *values, bool *isnull, char relkind);
+static void fill_large_seq_values(Form_pg_large_sequence seq, Datum *values, bool *isnull, char relkind);
 static bool compute_is_exhausted(int128 last_value, int128 min_val, int128 max_val, int128 inc,
     bool is_cycled, bool is_called);
+typedef ObjectAddress (*AlterSequenceFuncPtr)(const AlterSeqStmt*, Oid);
 /*
  * Sequence concurrent improvements
  *
@@ -377,11 +400,44 @@ void gen_uuid_for_CreateSchemaStmt(List* stmts, List* uuids)
     return;
 }
 
+static void LazyInitGlobalSeq(void)
+{
+    if (g_instance.global_seq_inited) {
+        return;
+    }
+
+    PthreadMutexLock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.glable_seq_init_lock, true);
+
+    if (g_instance.global_seq_inited) {
+        PthreadMutexUnlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.glable_seq_init_lock, true);
+        return;
+    }
+    /*
+     * Init the Global Sequence Cache bucket data, regardless of
+     * whether the parameter enable_global_sequence_cache is enabled
+     */
+    int ret = initGlobalSequenceCache();
+    if (ret != 0) {
+        PthreadMutexUnlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.glable_seq_init_lock, true);
+        ereport(ERROR, (ret, errmsg("no memory for init global sequence cache")));
+    }
+
+    g_instance.global_seq_inited = true;
+
+    PthreadMutexUnlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.glable_seq_init_lock, true);
+}
+
 void InitGlobalSeq()
 {
-    for (int i = 0; i < NUM_GS_PARTITIONS; i++) {
-        g_instance.global_seq[i].shb_list = NULL;
-        g_instance.global_seq[i].lock_id = FirstGlobalSeqLock + i;
+    g_instance.global_seq_inited = false;
+    pthread_mutex_init(&g_instance.glable_seq_init_lock, NULL);
+    g_instance.seqHtbl = NULL;
+    g_instance.relid2cachelevel = NULL;
+    g_instance.oid_map_lock = NULL;
+    g_instance.alter_sequence_lock = NULL;
+    int ret = initCacheLevelHashTab();
+    if (ret != 0) {
+        ereport(ERROR, (ret, errmsg("no memory for init global sequence cache level hash")));
     }
 }
 
@@ -431,12 +487,11 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
     hash = RelidGetHash(sess_elm->relid);
     /* guc */
     sesscache = u_sess->attr.attr_common.session_sequence_cache;
-    bucket = &g_instance.global_seq[hash];
+    bucket = &g_instance.seqHtbl->global_seq[hash];
 
     (void)LWLockAcquire(GetMainLWLockByIndex(bucket->lock_id), LW_EXCLUSIVE);
 
     elm = GetGlobalSeqElm(sess_elm->relid, bucket);
-
     if (elm == NULL) {
         elm = InitGlobalSeqElm(sess_elm->relid);
         /* add new seqence in bucket */
@@ -698,6 +753,23 @@ static T_Int GetLastAndIncrementValue(SeqTable elm, Relation seqrel, T_Int* incr
     return last_value;
 }
 
+static int128 GetNextvalGlobalForSingleNode(SeqTable elm)
+{
+    int128 result = 0;
+    Relation seqrel = lock_and_open_seq(elm);
+    if (!RELKIND_IS_SEQUENCE(seqrel->rd_rel->relkind)) {
+        ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("\"%s.%s\" is not a sequence", get_namespace_name(RelationGetNamespace(seqrel)),
+                               RelationGetRelationName(seqrel))));
+    } else if (seqrel->rd_rel->relkind == RELKIND_SEQUENCE ||
+               seqrel->rd_rel->relkind == RELKIND_SEQUENCE_GSC) {
+        result = GetNextvalLocal<int64, Form_pg_sequence, false>(elm, seqrel);
+    } else {
+        result = GetNextvalLocal<int128, Form_pg_large_sequence, true>(elm, seqrel);
+    }
+    relation_close(seqrel, NoLock);
+    return result;
+}
 
 template<typename T_Int>
 static bool FetchNOverMaxBound(T_Int maxv, T_Int next, T_Int incby)
@@ -848,10 +920,11 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
     ObjectAddress address;
     Oid existing_relid = InvalidOid;
     Oid namespaceId = InvalidOid;
-    char rel_kind = large ? RELKIND_LARGE_SEQUENCE : RELKIND_SEQUENCE;
+    char relkind = large ? RELKIND_LARGE_SEQUENCE_GSC : RELKIND_SEQUENCE_GSC;
+    bool isGlobal = false;
 
     if (seq->missing_ok) {
-        namespaceId = RangeVarGetAndCheckCreationNamespace(seq->sequence, NoLock, &existing_relid, rel_kind);
+        namespaceId = RangeVarGetAndCheckCreationNamespace(seq->sequence, NoLock, &existing_relid, relkind);
         if (existing_relid != InvalidOid) {
             char* namespace_of_existing_rel = get_namespace_name(namespaceId);
             ereport(NOTICE, (errmodule(MOD_COMMAND), errmsg("relation \"%s\" already exists in schema \"%s\", skipping", seq->sequence->relname, namespace_of_existing_rel)));
@@ -1020,7 +1093,14 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
                 coldef->typname = makeTypeNameFromOid(INT8OID, -1);
                 coldef->colname = "uuid";
                 value[i - 1] = Int64GetDatum(seq->uuid);
-
+                break;
+            case SEQ_COL_CACHELEVEL:
+                coldef->typname = makeTypeNameFromOid(BOOLOID, -1);
+                coldef->colname = "is_global";
+                value[i - 1] = BoolGetDatum(newm.is_global);
+                if (newm.is_global == GLOBAL_LEVEL) {
+                    isGlobal = true;
+                }
                 break;
             default:
                 ereport(ERROR,
@@ -1028,6 +1108,10 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
                         errmsg("unrecognized sequence columns: %d", i)));
         }
         stmt->tableElts = lappend(stmt->tableElts, coldef);
+    }
+
+    if (isGlobal) {
+        LazyInitGlobalSeq();
     }
 
     stmt->relation = seq->sequence;
@@ -1038,7 +1122,7 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
     stmt->tablespacename = NULL;
     stmt->if_not_exists = false;
     stmt->charset = PG_INVALID_ENCODING;
-    address = DefineRelation(stmt, rel_kind, seq->ownerId, NULL);
+    address = DefineRelation(stmt, relkind, seq->ownerId, NULL);
     seqoid = address.objectId;
     Assert(seqoid != InvalidOid);
 
@@ -1133,14 +1217,33 @@ void ResetSequence(Oid seq_relid, bool restart)
     Relation seq_rel;
     SeqTable elm = NULL;
     HeapTuple tuple;
+    uint32 hashCode;
+    GSCKey key;
+    uint32 bucket_id;
 
-    /*
-     * Read the old sequence.  This does a bit more work than really
-     * necessary, but it's simple, and we do want to double-check that it's
-     * indeed a sequence.
-     */
-    init_sequence(seq_relid, &elm, &seq_rel);
-    if (RelationGetRelkind(seq_rel) == RELKIND_SEQUENCE) {
+    bool isGlobalCache = is_global_level_sequence_cache(seq_relid);
+    if (isGlobalCache) {
+        /* lock the destination bucket to obtain the global cache */
+        key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+        key.relid = seq_relid;
+        hashCode = GSCHashFunc<GSCKey>((const void *) &key, sizeof(GSCKey));
+        bucket_id = GetGSCBucket(hashCode);
+        (void)LWLockAcquire(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id), LW_EXCLUSIVE);
+    }
+
+    if (isGlobalCache) {
+        init_sequence_single_node_global_cache(seq_relid, &elm, &seq_rel, &key, hashCode, bucket_id);
+    } else {
+        /*
+         * Read the old sequence.  This does a bit more work than really
+         * necessary, but it's simple, and we do want to double-check that it's
+         * indeed a sequence.
+         */
+        init_sequence(seq_relid, &elm, &seq_rel);
+    }
+
+    char relkind = RelationGetRelkind(seq_rel);
+    if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
         tuple = ResetSequenceTuple<Form_pg_sequence>(seq_rel, elm, restart);
     } else {
         tuple = ResetSequenceTuple<Form_pg_large_sequence>(seq_rel, elm, restart);
@@ -1165,15 +1268,128 @@ void ResetSequence(Oid seq_relid, bool restart)
     }
 
     relation_close(seq_rel, NoLock);
+
+    if (isGlobalCache) {
+        LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+    }
 }
 
 ObjectAddress AlterSequenceWrapper(AlterSeqStmt* stmt)
 {
-    if (stmt->is_large) {
-        return AlterSequence<Form_pg_large_sequence, int128, true>(stmt);
-    } else {
-        return AlterSequence<Form_pg_sequence, int64, false>(stmt);
+    ObjectAddress address;
+    bool isOldVerSequence = false;
+    bool isNewVerCmd = false;
+    bool isGlobalCache = false;
+    char relkind;
+
+    /* Open and lock sequence. */
+    Oid relid = RangeVarGetRelid(stmt->sequence, ShareRowExclusiveLock, stmt->missing_ok);
+    if (relid == InvalidOid) {
+        ereport(NOTICE, (errmsg("relation \"%s\" does not exist, skipping", stmt->sequence->relname)));
+        return InvalidObjectAddress;
     }
+    getSequencePropertys(relid, &isOldVerSequence, &isGlobalCache, &relkind);
+    if (stmt->is_large && (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC)) {
+        ereport(ERROR, (
+            errcode(ERRCODE_WRONG_OBJECT_TYPE),
+            errmsg("%s is not a large sequence, please use ALTER SEQUENCE instead.", stmt->sequence->relname)));
+    } else if (!stmt->is_large && (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC)) {
+        ereport(ERROR, (
+            errcode(ERRCODE_WRONG_OBJECT_TYPE),
+            errmsg("%s is not a sequence, please use ALTER LARGE SEQUENCE instead.", stmt->sequence->relname)));
+    }
+    bool alterValue = is_alter_sequence_cache_level(stmt->options, &isNewVerCmd);
+    if (CheckSeqOwnedByAutoInc(relid) && !isNewVerCmd) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot alter sequence owned by auto_increment column")));
+    }
+
+    /* Must be owner or have alter privilege of the sequence. */
+    AclResult aclresult = pg_class_aclcheck(relid, GetUserId(), ACL_ALTER);
+    if (aclresult != ACLCHECK_OK && !pg_class_ownercheck(relid, GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, stmt->sequence->relname);
+    }
+
+    bool isAlterCacheLevel = isNewVerCmd ? isGlobalCache != alterValue : false;
+    if (isOldVerSequence && isNewVerCmd) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot alter old version sequence, the old version sequence is no \"is_global\" property.")));
+    }
+
+    if (isNewVerCmd && isGlobalCache == alterValue) {
+        ereport(NOTICE, (errmsg("no changes needed for the cache level, \"is_global\" is already %s .",
+                                isGlobalCache ? "true" : "false")));
+        return InvalidObjectAddress;
+    }
+
+    AlterSequenceFuncPtr alterSeqFuncPtr = NULL;
+    /*
+     * When modifying a sequence using ALTER SEQUENCE, the actual function that gets called depends on the
+     * current state of the sequence (whether it's a global cache or a session-level cache) and the desired change.
+     * If the current sequence is a global cache and want to change it to a session-level cache, in this case, need to
+     * call the AlterSequence function. If the current sequence is a session cache and want to change it to a global
+     * cache, would call the AlterSequenceForGlobalCache function.
+     */
+    if (stmt->is_large) {
+        if (isGlobalCache) {
+            if (isAlterCacheLevel)
+                alterSeqFuncPtr = &AlterSequence<Form_pg_large_sequence, int128, true>;
+            else
+                alterSeqFuncPtr = &AlterSequenceForGlobalCache<Form_pg_large_sequence, int128, true>;
+        } else {
+            if (isAlterCacheLevel)
+                alterSeqFuncPtr = &AlterSequenceForGlobalCache<Form_pg_large_sequence, int128, true>;
+            else
+                alterSeqFuncPtr = &AlterSequence<Form_pg_large_sequence, int128, true>;
+        }
+    } else {
+        if (isGlobalCache) {
+            if (isAlterCacheLevel)
+                alterSeqFuncPtr = &AlterSequence<Form_pg_sequence, int64, false>;
+            else
+                alterSeqFuncPtr = &AlterSequenceForGlobalCache<Form_pg_sequence, int64, false>;
+        } else {
+            if (isAlterCacheLevel)
+                alterSeqFuncPtr = &AlterSequenceForGlobalCache<Form_pg_sequence, int64, false>;
+            else
+                alterSeqFuncPtr = &AlterSequence<Form_pg_sequence, int64, false>;
+        }
+    }
+
+    if (isAlterCacheLevel) {
+        (void)LWLockAcquire(g_instance.alter_sequence_lock, LW_EXCLUSIVE);
+    }
+
+    if (isAlterCacheLevel) {
+        if (isGlobalCache) {
+            /* reclaim unused sequence numbers */
+            bool isvalid = false;
+            int128 l_val = findlastedSequenceValueByOid(relid, &isvalid);
+            if (isvalid) {
+                Numeric last_val = convert_int128_to_numeric(l_val, 0);
+                DirectFunctionCall2(setval_oid, relid, NumericGetDatum(last_val));
+            }
+            /* remove global cache */
+            removeGlobalSeqCache_internal(relid);
+            removeGlobalSeqCacheForCurrval_internal(relid);
+        } else {
+            /* remove local cache */
+            removeSessionSeqScache_internal(relid);
+        }
+        /* switch the cache level to another strategy */
+        changeSequenceCacheLevel(relid);
+        /* undo the recording of lastval */
+        u_sess->cmd_cxt.last_used_seq = NULL;
+    }
+
+    /* invoke the function that alters the actual caching strategy for sequences */
+    address = alterSeqFuncPtr(stmt, relid);
+
+    if (isAlterCacheLevel) {
+        LWLockRelease(g_instance.alter_sequence_lock);
+    }
+
+    return address;
 }
 
 /* reset cachedSequenceOid if we recevice invalidate message */
@@ -1222,9 +1438,8 @@ bool CheckSeqOwnedByAutoInc(Oid seqoid)
  * Alter sequence maxvalue needs update info in GTM.
  */
 template<typename T_Form, typename T_Int, bool large>
-static ObjectAddress AlterSequence(const AlterSeqStmt* stmt)
+static ObjectAddress AlterSequence(const AlterSeqStmt* stmt, Oid relid)
 {
-    Oid relid;
     SeqTable elm = NULL;
     Relation seqrel;
     Buffer buf;
@@ -1240,35 +1455,9 @@ static ObjectAddress AlterSequence(const AlterSeqStmt* stmt)
     ObjectAddress address;
     bool isIdentity = false;
 
-    /* Open and lock sequence. */
-    relid = RangeVarGetRelid(stmt->sequence, ShareRowExclusiveLock, stmt->missing_ok);
-    if (relid == InvalidOid) {
-        ereport(NOTICE, (errmsg("relation \"%s\" does not exist, skipping", stmt->sequence->relname)));
-        return InvalidObjectAddress;
-    }
-
     TrForbidAccessRbObject(RelationRelationId, relid, stmt->sequence->relname);
 
     init_sequence(relid, &elm, &seqrel);
-    char relkind = RelationGetRelkind(seqrel);
-    if (large && relkind == RELKIND_SEQUENCE) {
-        ereport(ERROR, (
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg("%s is not a large sequence, please use ALTER SEQUENCE instead.", stmt->sequence->relname)));
-    } else if (!large && relkind == RELKIND_LARGE_SEQUENCE) {
-        ereport(ERROR, (
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg("%s is not a sequence, please use ALTER LARGE SEQUENCE instead.", stmt->sequence->relname)));
-    }
-    if (CheckSeqOwnedByAutoInc(relid)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("cannot alter sequence owned by auto_increment column")));
-    }
-    /* Must be owner or have alter privilege of the sequence. */
-    AclResult aclresult = pg_class_aclcheck(relid, GetUserId(), ACL_ALTER);
-    if (aclresult != ACLCHECK_OK && !pg_class_ownercheck(relid, GetUserId())) {
-        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, stmt->sequence->relname);
-    }
 
     /* temp sequence and single_node do not need gtm, they only use info on local node */
     isUseLocalSeq = RelationIsLocalTemp(seqrel) || IS_SINGLE_NODE;
@@ -1365,6 +1554,90 @@ static ObjectAddress AlterSequence(const AlterSeqStmt* stmt)
     return address;
 }
 
+/* AlterSequence for global sequence cache */
+template<typename T_Form, typename T_Int, bool large>
+static ObjectAddress AlterSequenceForGlobalCache(const AlterSeqStmt* stmt, Oid relid)
+{
+    SeqTable elm = NULL;
+    Relation seqrel;
+    Buffer buf;
+    HeapTupleData seqtuple;
+    HeapTuple tuple = NULL;
+    T_Form newm = NULL;
+    List* owned_by = NIL;
+    uint32 hashCode;
+    GSCKey key;
+    uint32 bucket_id;
+    bool isRestart = false;
+    bool needSeqRewrite = false;
+    ObjectAddress address;
+
+    TrForbidAccessRbObject(RelationRelationId, relid, stmt->sequence->relname);
+
+    LazyInitGlobalSeq();
+
+    /* lock the destination bucket to obtain the global cache */
+    key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+    key.relid = relid;
+    hashCode = GSCHashFunc<GSCKey>((const void *) &key, sizeof(GSCKey));
+    bucket_id = GetGSCBucket(hashCode);
+    (void)LWLockAcquire(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id), LW_EXCLUSIVE);
+
+    init_sequence_single_node_global_cache(relid, &elm, &seqrel, &key, hashCode, bucket_id);
+    /* lock page' buffer and read tuple into new sequence structure */
+    GTM_UUID uuid;
+    (void)read_seq_tuple<T_Form>(elm, seqrel, &buf, &seqtuple, &uuid);
+
+    /* Copy the existing sequence tuple. */
+    tuple = (HeapTuple)tableam_tops_copy_tuple(&seqtuple);
+    UnlockReleaseBuffer(buf);
+
+    newm = (T_Form)GETSTRUCT(tuple);
+
+    /* Check and set new values */
+    init_params<T_Form, T_Int, large>(stmt->options, false, true, newm, &owned_by, &isRestart, &needSeqRewrite, elm);
+    /* Clear local cache so that we don't think we have cached numbers */
+    /* Note that we do not change the currval() state */
+    AssignInt<int128, true>(&(elm->cached), (int128)elm->last);
+
+    /* If needed, rewrite the sequence relation itself */
+    if (needSeqRewrite) {
+        /*
+         * Create a new storage file for the sequence, making the state
+         * changes transactional.  We want to keep the sequence's relfrozenxid
+         * at 0, since it won't contain any unfrozen XIDs.
+         */
+        RelationSetNewRelfilenode(seqrel, InvalidTransactionId, InvalidMultiXactId);
+        /*
+         * Insert the modified tuple into the new storage file.
+         */
+        fill_seq_with_data(seqrel, tuple);
+
+        /* Recalculates the global sequence cache */
+        if (seqrel->rd_rel->relfilenode != elm->filenode) {
+            elm->filenode = seqrel->rd_rel->relfilenode;
+            errno_t rc = memcpy_s(&(elm->cached), sizeof(int128), &(elm->last), sizeof(int128));
+            securec_check(rc, "\0", "\0");
+        }
+    }
+    heap_freetuple(tuple);
+
+    /* process OWNED BY if given */
+    if (owned_by != NIL)
+        process_owned_by(seqrel, owned_by);
+    LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+
+    /* Recode the sequence alter time. */
+    PgObjectType objectType = GetPgObjectTypePgClass(seqrel->rd_rel->relkind);
+    if (objectType != OBJECT_TYPE_INVALID) {
+        UpdatePgObjectMtime(seqrel->rd_id, objectType);
+    }
+
+    ObjectAddressSet(address, RelationRelationId, relid);
+    relation_close(seqrel, NoLock);
+    return address;
+}
+
 /*
  * Note: nextval cannot rollback, but it can be used a in transaction block.
  * Thus when we alter sequence and select nextval() in the same transaction, we may
@@ -1409,7 +1682,11 @@ Datum nextval(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("cannot change sequence owned by auto_increment column")));
     }
-    PG_RETURN_INT64(nextval_internal(relid));
+    if (is_global_level_sequence_cache(relid)) {
+        PG_RETURN_INT64(nextval_internal_for_global_seq_cache(relid));
+    } else {
+        PG_RETURN_INT64(nextval_internal(relid));
+    }
 }
 
 Oid get_nextval_rettype()
@@ -1473,12 +1750,17 @@ bool shouldReturnNumeric()
 
 Datum nextval_oid(PG_FUNCTION_ARGS)
 {
+    int128 result;
     Oid relid = PG_GETARG_OID(0);
     if (CheckSeqOwnedByAutoInc(relid)) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("cannot change sequence owned by auto_increment column")));
     }
-    int128 result = nextval_internal(relid);
+    if (is_global_level_sequence_cache(relid)) {
+        result = nextval_internal_for_global_seq_cache(relid);
+    } else {
+        result = nextval_internal(relid);
+    }
 
     if (shouldReturnNumeric()) {
         PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
@@ -1550,7 +1832,7 @@ int128 nextval_internal(Oid relid)
     if (!is_use_local_seq) {
         result = GetNextvalGlobal(elm, seqrel);
     } else {
-        if (relkind == RELKIND_SEQUENCE) {
+        if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
             result = GetNextvalLocal<int64, Form_pg_sequence, false>(elm, seqrel);
         } else { /* can only be large sequence. init_sequence rules out other cases */
             result = GetNextvalLocal<int128, Form_pg_large_sequence, true>(elm, seqrel);
@@ -1577,6 +1859,92 @@ int128 nextval_internal(Oid relid)
     return result;
 }
 
+int128 nextval_internal_for_global_seq_cache(Oid relid)
+{
+    SeqTable elm = NULL;
+    uint32 hashCode;
+    GSCKey key;
+    uint32 bucket_id;
+    SeqTableData currval_seqdata;
+    char* relname = NULL;
+    int128 result = 0;
+
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+        ereport(ERROR, (errmsg("Standby do not support nextval, please do it in primary!")));
+    }
+
+    relname = get_rel_name(relid);
+    if (relname == NULL) {
+        ereport(ERROR, (errmsg("could not find relation with OID %u", relid)));
+    }
+    TrForbidAccessRbObject(RelationRelationId, relid, relname);
+
+    if (pg_class_aclcheck(relid, GetUserId(), ACL_USAGE) != ACLCHECK_OK &&
+        pg_class_aclcheck(relid, GetUserId(), ACL_UPDATE) != ACLCHECK_OK)
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied for sequence %s", relname)));
+
+    /* lock the destination bucket to obtain the global cache */
+    key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+    key.relid = relid;
+    hashCode = GSCHashFunc<GSCKey>((const void*)&key, sizeof(GSCKey));
+    bucket_id = GetGSCBucket(hashCode);
+
+    (void)LWLockAcquire(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id), LW_EXCLUSIVE);
+
+    /* Get global sequence cache. */
+    init_sequence_single_node_global_cache(relid, &elm, NULL, &key, hashCode, bucket_id);
+
+    if (elm->last != elm->cached) {
+        /* some numbers were cached */
+        int128 elm_cached = elm->cached;
+        Assert(elm->last_valid);
+        Assert(elm->increment != 0);
+        elm->last += elm->increment;
+        result = elm->last;
+        errno_t rc = memcpy_s(&currval_seqdata, sizeof(SeqTableData), elm, sizeof(SeqTableData));
+        securec_check(rc, "\0", "\0");
+
+        LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+
+        char* bufLast = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(result)));
+        char* bufCached = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(elm_cached)));
+
+        ereport(DEBUG2, (errmodule(MOD_SEQ), (errmsg("Sequence %s retrun ID %s from cache, the cached is %s, ", relname,
+                                                     bufLast, bufCached))));
+
+        pfree_ext(bufLast);
+        pfree_ext(bufCached);
+        pfree_ext(relname);
+
+        /* record the local cache for lastval currval */
+        copyLastValSequenceElem(&currval_seqdata, true);
+        global_sequence_cache_set_currval_elm(relid, result);
+
+        return result;
+    }
+
+    /* If don't have cached value, we should fetch some. */
+    result = GetNextvalGlobalForSingleNode(elm);
+
+    /* Record global sequence cache for currval function. */
+    errno_t rc = memcpy_s(&currval_seqdata, sizeof(SeqTableData), elm, sizeof(SeqTableData));
+    securec_check(rc, "\0", "\0");
+
+    LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+
+    char* buf = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(result)));
+    ereport(DEBUG2, (errmodule(MOD_SEQ), (errmsg("Sequence %s retrun ID from nextval %s, ", relname, buf))));
+
+    pfree_ext(buf);
+    pfree_ext(relname);
+
+    /* record the local cache for lastval() and currval() */
+    copyLastValSequenceElem(&currval_seqdata, true);
+    global_sequence_cache_set_currval_elm(relid, result);
+
+    return result;
+}
+
 Datum currval_oid(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
@@ -1588,7 +1956,12 @@ Datum currval_oid(PG_FUNCTION_ARGS)
     }
 
     /* open and lock sequence */
-    init_sequence(relid, &elm, &seqrel);
+    if (is_global_level_sequence_cache(relid)) {
+        /* sequence cache is global, but currval cache is local */
+        init_sequence_single_node_global_cache_for_currval(relid, &elm, &seqrel);
+    } else {
+        init_sequence(relid, &elm, &seqrel);
+    }
 
     TrForbidAccessRbObject(RelationRelationId, relid, RelationGetRelationName(seqrel));
 
@@ -1622,7 +1995,7 @@ Datum lastval(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("lastval function is not supported")));
     }
 
-    if (u_sess->cmd_cxt.last_used_seq == NULL)
+    if (u_sess->cmd_cxt.last_used_seq == NULL || !u_sess->cmd_cxt.last_used_seq->last_valid)
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("lastval is not yet defined in this session")));
 
@@ -1690,6 +2063,11 @@ void autoinc_setval(Oid relid, int128 next, bool iscalled)
     Relation seqrel;
     Buffer buf;
     HeapTupleData seqtuple;
+
+    if (is_global_level_sequence_cache(relid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("in B mode, auto_increment only supports sequence cached in session.")));
+    }
 
     init_sequence(relid, &elm, &seqrel);
     /* no need to set a small value */
@@ -1759,6 +2137,11 @@ int128 autoinc_get_nextval(Oid relid)
     Form_pg_large_sequence seq;
     int128 result;
 
+    if (is_global_level_sequence_cache(relid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("in B mode, auto_increment only supports sequence cached in session.")));
+    }
+
     init_sequence(relid, &elm, &seqrel);
     seq = read_seq_tuple<Form_pg_large_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
     if (seq->is_called) {
@@ -1823,7 +2206,6 @@ static void do_setval(Oid relid, int128 next, bool iscalled, bool skip_perm_chec
     /* lock page' buffer and read tuple */
     GTM_UUID uuid;
     seq = read_seq_tuple<T_Form>(elm, seqrel, &buf, &seqtuple, &uuid);
-
     if ((next < seq->min_value) || (next > seq->max_value)) {
         char* bufv = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(next)));
         char* bufm = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(seq->min_value)));
@@ -1920,6 +2302,113 @@ static void do_setval(Oid relid, int128 next, bool iscalled, bool skip_perm_chec
     relation_close(seqrel, NoLock);
 }
 
+template <typename T_Form, typename T_Int, bool large>
+static void do_setval_for_global_seq_cache(Oid relid, int128 next, bool iscalled)
+{
+    SeqTable elm = NULL;
+    Relation seqrel;
+    Buffer buf;
+    HeapTupleData seqtuple;
+    T_Form seq;
+    bool resultIsValid = false;
+    int128 result;
+    uint32 hashCode;
+    GSCKey key;
+    uint32 bucket_id;
+    char* relname = NULL;
+    SeqTableData currval_seqdata;
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+        ereport(ERROR, (errmsg("Standby do not support setval, please do it in primary!")));
+    }
+
+    relname = get_rel_name(relid);
+    if (relname == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation with OID %u does not exist", relid)));
+    }
+    TrForbidAccessRbObject(RelationRelationId, relid, relname);
+    if (pg_class_aclcheck(relid, GetUserId(), ACL_UPDATE) != ACLCHECK_OK)
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied for sequence %s", relname)));
+
+    /* lock the destination bucket to obtain the global cache */
+    key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+    key.relid = relid;
+    hashCode = GSCHashFunc<GSCKey>((const void*)&key, sizeof(GSCKey));
+    bucket_id = GetGSCBucket(hashCode);
+    (void)LWLockAcquire(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id), LW_EXCLUSIVE);
+
+    init_sequence_single_node_global_cache(relid, &elm, &seqrel, &key, hashCode, bucket_id);
+    /* read-only transactions may only modify temp sequences */
+    if (!RelationIsLocalTemp(seqrel)) {
+        PreventCommandIfReadOnly("setval()");
+    }
+
+    /* lock page' buffer and read tuple */
+    GTM_UUID uuid;
+    seq = read_seq_tuple<T_Form>(elm, seqrel, &buf, &seqtuple, &uuid);
+    /* Bounds come from the local sequence tuple; ALTER SEQUENCE MINVALUE/MAXVALUE
+     * must be applied for GSC to allow negative or extended setval (D compatibility).
+     */
+    if ((next < seq->min_value) || (next > seq->max_value)) {
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                        errmsg("setval: value %s is out of bounds for sequence \"%s\" (%s..%s)",
+                               DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(next))),
+                               RelationGetRelationName(seqrel),
+                               DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(seq->min_value))),
+                               DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(seq->max_value))))));
+    }
+
+    if (iscalled) {
+        AssignInt<int128, true>(&(elm->last), (int128)next); /* last returned number */
+        errno_t rc = memcpy_s(&currval_seqdata, sizeof(SeqTableData), elm, sizeof(SeqTableData));
+        securec_check(rc, "\0", "\0");
+        AssignInt<int128, true>(&(result), (int128)next);
+        resultIsValid = true;
+        elm->last_valid = true;
+    }
+
+    /* In any case, forget any future cached numbers */
+    AssignInt<int128, true>(&(elm->cached), elm->last);
+
+    /* ready to change the on-disk (or really, in-buffer) tuple */
+    START_CRIT_SECTION();
+
+    /* keep the last value */
+    AssignInt<T_Int, large>(&(seq->last_value), (T_Int)next); /* last fetched number */
+    seq->is_called = iscalled;
+    seq->log_cnt = 0;
+    MarkBufferDirty(buf);
+
+    /* XLOG stuff */
+    if (RelationNeedsWAL(seqrel)) {
+        xl_seq_rec xlrec;
+        XLogRecPtr recptr;
+        Page page = BufferGetPage(buf);
+
+        RelFileNodeRelCopy(xlrec.node, seqrel->rd_node);
+
+        XLogBeginInsert();
+        XLogRegisterBuffer(0, buf, REGBUF_WILL_INIT);
+        XLogRegisterData((char*)&xlrec, sizeof(xl_seq_rec));
+        XLogRegisterData((char*)seqtuple.t_data, seqtuple.t_len);
+
+        recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, seqrel->rd_node.bucketNode);
+
+        PageSetLSN(page, recptr);
+    }
+
+    END_CRIT_SECTION();
+    UnlockReleaseBuffer(buf);
+    LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+
+    relation_close(seqrel, NoLock);
+    pfree_ext(relname);
+
+    if (resultIsValid) {
+        copyLastValSequenceElem(&currval_seqdata, false);
+        global_sequence_cache_set_currval_elm(elm->relid, result);
+    }
+}
+
 /*
  * Implement the 2 arg setval procedure.
  * See do_setval for discussion.
@@ -1937,10 +2426,19 @@ Datum setval_oid(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("cannot change sequence owned by auto_increment column")));
     }
-    if (relkind == RELKIND_SEQUENCE) {
-        do_setval<Form_pg_sequence, int64, false>(relid, next, true);
-    } else if (relkind == RELKIND_LARGE_SEQUENCE) {
-        do_setval<Form_pg_large_sequence, int128, true>(relid, next, true);
+    bool isGlobalCache = is_global_level_sequence_cache(relid);
+    if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
+        if (isGlobalCache) {
+            do_setval_for_global_seq_cache<Form_pg_sequence, int64, false>(relid, next, true);
+        } else {
+            do_setval<Form_pg_sequence, int64, false>(relid, next, true);
+        }
+    } else if (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC) {
+        if (isGlobalCache) {
+            do_setval_for_global_seq_cache<Form_pg_large_sequence, int128, true>(relid, next, true);
+        } else {
+            do_setval<Form_pg_large_sequence, int128, true>(relid, next, true);
+        }
     }
 
     PG_RETURN_NUMERIC(nextArg);
@@ -1964,10 +2462,19 @@ Datum setval3_oid(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("cannot change sequence owned by auto_increment column")));
     }
-    if (relkind == RELKIND_SEQUENCE) {
-        do_setval<Form_pg_sequence, int64, false>(relid, next, iscalled);
-    } else if (relkind == RELKIND_LARGE_SEQUENCE) {
-        do_setval<Form_pg_large_sequence, int128, true>(relid, next, iscalled);
+    bool isGlobalCache = is_global_level_sequence_cache(relid);
+    if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
+        if (isGlobalCache) {
+            do_setval_for_global_seq_cache<Form_pg_sequence, int64, false>(relid, next, iscalled);
+        } else {
+            do_setval<Form_pg_sequence, int64, false>(relid, next, iscalled);
+        }
+    } else if (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC) {
+        if (isGlobalCache) {
+            do_setval_for_global_seq_cache<Form_pg_large_sequence, int128, true>(relid, next, iscalled);
+        } else {
+            do_setval<Form_pg_large_sequence, int128, true>(relid, next, iscalled);
+        }
     }
 
     PG_RETURN_NUMERIC(nextArg);
@@ -2048,6 +2555,7 @@ static T_Form read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple 
     ItemId lp;
     T_Form seq;
     sequence_magic* sm = NULL;
+    char relkind = RelationGetRelkind(rel);
 
     *buf = ReadBuffer(rel, 0);
     LockBuffer(*buf, BUFFER_LOCK_EXCLUSIVE);
@@ -2093,12 +2601,14 @@ static T_Form read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple 
     AssignInt<int128, true>(&(elm->startval), (int128)seq->start_value);
     elm->is_cycled = seq->is_cycled;
     elm->uuid = *uuid = get_uuid_from_tuple<T_Form>((void*)seq, rel, seqtuple);
-
+    if (relkind == RELKIND_SEQUENCE_GSC || relkind == RELKIND_LARGE_SEQUENCE_GSC) {
+        elm->is_global_cache = seq->is_global;
+    }
     return seq;
 }
 
 template<typename T_Int, bool large>
-static void CheckValueMinMax(T_Int value, T_Int minValue, T_Int maxValue, bool isStart)
+static void CheckValueMinMax(T_Int value, T_Int minValue, T_Int maxValue, bool isStart, CACHE_LEVEL is_global)
 {
     char* bufs = NULL;
     char* bufm = NULL;
@@ -2108,18 +2618,30 @@ static void CheckValueMinMax(T_Int value, T_Int minValue, T_Int maxValue, bool i
             DatumGetCString(DirectFunctionCall1(int8out, value));
         bufm = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(minValue))) :
             DatumGetCString(DirectFunctionCall1(int8out, minValue));
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("%s value (%s) cannot be less than MINVALUE (%s)", isStart? "START":"RESTART", bufs, bufm)));
+        if (is_global == GLOBAL_LEVEL) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("%s value (%s) (or current value) cannot be less than MINVALUE (%s)",
+                                   isStart ? "START" : "RESTART", bufs, bufm)));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("%s value (%s)  cannot be less than MINVALUE (%s)", isStart ? "START" : "RESTART",
+                                   bufs, bufm)));
+        }
     }
     if (value > maxValue) {
         bufs = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(value))) :
             DatumGetCString(DirectFunctionCall1(int8out, value));
         bufm = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(maxValue))) :
             DatumGetCString(DirectFunctionCall1(int8out, maxValue));
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("%s value (%s) cannot be greater than MAXVALUE (%s)", isStart? "START":"RESTART", bufs, bufm)));
+        if (is_global == GLOBAL_LEVEL) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("%s value (%s) (or current value) cannot be less than MINVALUE (%s)",
+                                   isStart ? "START" : "RESTART", bufs, bufm)));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("%s value (%s)  cannot be less than MINVALUE (%s)", isStart ? "START" : "RESTART",
+                                   bufs, bufm)));
+        }
     }
 }
 
@@ -2157,6 +2679,7 @@ enum {
     DEF_IDX_CACHE_VALUE,
     DEF_IDX_IS_CYCLED,
     DEF_IDX_TYPE_ID,
+    DEF_IDX_IS_GLOBAL,
     DEF_IDX_NUM
 };
 
@@ -2209,6 +2732,9 @@ static void PreProcessSequenceOptions(
         } else if (strcmp(defel->defname, "as") == 0) {
             CheckDuplicateDef(elms[DEF_IDX_TYPE_ID]);
             elms[DEF_IDX_TYPE_ID] = defel;
+        } else if (strcmp(defel->defname, "is_global") == 0) {
+            CheckDuplicateDef(elms[DEF_IDX_IS_GLOBAL]);
+            elms[DEF_IDX_IS_GLOBAL] = defel;
             *need_seq_rewrite = true;
         } else {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", defel->defname)));
@@ -2308,29 +2834,45 @@ static void ProcessSequenceOptMin(DefElem* elm, T_Form newm, bool isInit)
 }
 
 template<typename T_Form, typename T_Int, bool large>
-static void ProcessSequenceOptStartWith(DefElem* elm, T_Form newm, bool isInit)
+static void ProcessSequenceOptStartWith(DefElem* elm, T_Form newm, bool isInit, SeqTable cache_elm)
 {
-    if (elm != NULL)
+    if (elm != NULL) {
         AssignInt<T_Int, large>(&(newm->start_value), defGetInt<T_Int, large>(elm));
-    else if (isInit) {
+        /* When the start value is set, the last_value should be recalculated. */
+        if (newm->is_global == GLOBAL_LEVEL) {
+            AssignInt<T_Int, large>(&(newm->last_value), newm->start_value);
+            newm->is_called = false;
+            if (cache_elm != NULL) {
+                AssignInt<int128, true>(&(cache_elm->last), (int128)newm->start_value);
+                cache_elm->last_valid = false;
+            }
+        }
+    } else if (isInit) {
         AssignInt<T_Int, large>(&(newm->start_value), (newm->increment_by > 0) ? newm->min_value : newm->max_value);
     }
 }
 
-template<typename T_Form, typename T_Int, bool large>
-static void ProcessSequenceOptReStartWith(DefElem* elm, T_Form newm, bool isInit, bool* is_restart, bool isUseLocalSeq)
+template <typename T_Form, typename T_Int, bool large>
+static void ProcessSequenceOptReStartWith(DefElem* elm, T_Form newm, bool isInit, bool* isRestart, bool isUseLocalSeq,
+                                          SeqTable cache_elm)
 {
     if (elm != NULL) {
         AssignInt<T_Int, large>(&(newm->last_value),
                                 (elm->arg != NULL) ? defGetInt<T_Int, large>(elm) : newm->start_value);
 #ifdef PGXC
-        *is_restart = true;
+        *isRestart = true;
 #endif
         newm->is_called = false;
         newm->log_cnt = 0;
     } else if (isInit) {
         AssignInt<T_Int, large>(&(newm->last_value), (isUseLocalSeq) ? newm->start_value : (int128)-1);
         newm->is_called = false;
+    } else {
+        /* When using the global sequence cache, recycle the allocated sequence cache after alter sequence. */
+        if (newm->is_global == GLOBAL_LEVEL && cache_elm != NULL && cache_elm->last_valid) {
+            AssignInt<T_Int, large>(&(newm->last_value), cache_elm->last);
+            newm->is_called = true;
+        }
     }
 }
 
@@ -2355,6 +2897,18 @@ static void ProcessSequenceOptCache(DefElem* elmCache, DefElem* elmMax, DefElem*
         newm->log_cnt = 0;
     } else if (isInit) {
         AssignInt<T_Int, large>(&(newm->cache_value), (int128)1);
+    }
+}
+
+template<typename T_Form>
+static void ProcessSequenceOptCacheLevel(DefElem* elm, T_Form newm, bool isInit)
+{
+    if (elm != NULL) {
+        newm->is_global = (CACHE_LEVEL)intVal(elm->arg);
+        Assert(newm->is_global == SESSION_LEVEL || newm->is_global == GLOBAL_LEVEL);
+        newm->log_cnt = 0;
+    } else if (isInit) {
+        newm->is_global = SESSION_LEVEL;
     }
 }
 
@@ -2458,15 +3012,14 @@ static void ProcessSequenceOptMaxMin(DefElem* elm, T_Form newm, bool isInit, Oid
  * ALTER SEQUENCE OWNED BY to not rewrite the sequence, because that would
  * break pg_upgrade by causing unwanted changes in the sequence's relfilenode.
  */
-
 #ifdef PGXC
 template<typename T_Form, typename T_Int, bool large>
 static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
-    bool* is_restart, bool* needSeqRewrite, bool isIdentity)
+    bool* is_restart, bool* needSeqRewrite, bool isIdentity, SeqTable cache_elm)
 #else
 template<typename T_Form, typename T_Int, bool large>
 static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
-    bool* needSeqRewrite, bool isIdentity)
+    bool* needSeqRewrite, bool isIdentity, SeqTable cache_elm)
 #endif
 {
     T_Form newm = (T_Form)newm_p;
@@ -2494,6 +3047,7 @@ static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* ne
     ProcessSequenceOptAsType<T_Form, large>(elms[DEF_IDX_TYPE_ID], newm, isInit, isIdentity, type_id, typeMods);
     ProcessSequenceOptIncrementBy<T_Form, T_Int, large>(elms[DEF_IDX_INCREMENT_BY], newm, isInit);
     ProcessSequenceOptCycle<T_Form>(elms[DEF_IDX_IS_CYCLED], newm, isInit);
+    ProcessSequenceOptCacheLevel<T_Form>(elms[DEF_IDX_IS_GLOBAL], newm, isInit);
     if (u_sess->attr.attr_sql.sql_compatibility == D_FORMAT && isIdentity) {
         ProcessSequenceOptMaxMin<T_Form, T_Int, large>(elms[DEF_IDX_MAX_VALUE], newm, isInit, type_id, typeMods);
     } else {
@@ -2504,7 +3058,7 @@ static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* ne
     /* crosscheck min/max */
     CrossCheckMinMax<T_Int, large>(newm->min_value, newm->max_value);
 
-    ProcessSequenceOptStartWith<T_Form, T_Int, large>(elms[DEF_IDX_START_VALUE], newm, isInit);
+    ProcessSequenceOptStartWith<T_Form, T_Int, large>(elms[DEF_IDX_START_VALUE], newm, isInit, cache_elm);
 
     /* crosscheck START */
     if (u_sess->attr.attr_sql.sql_compatibility == D_FORMAT && isIdentity) {
@@ -2519,15 +3073,15 @@ static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* ne
                     errmsg("Identity column contains invalid INCREMENT.")));
         }
     } else {
-        CheckValueMinMax<T_Int, large>(newm->start_value, newm->min_value, newm->max_value, true);
+        CheckValueMinMax<T_Int, large>(newm->start_value, newm->min_value, newm->max_value, true, newm->is_global);
     }
 
     ProcessSequenceOptReStartWith<T_Form, T_Int, large>(
-        elms[DEF_IDX_RESTART_VALUE], newm, isInit, is_restart, isUseLocalSeq);
+        elms[DEF_IDX_RESTART_VALUE], newm, isInit, is_restart, isUseLocalSeq, cache_elm);
 
     if (isUseLocalSeq) {
         /* crosscheck RESTART (or current value, if changing MIN/MAX) */
-        CheckValueMinMax<T_Int, large>(newm->last_value, newm->min_value, newm->max_value, false);
+        CheckValueMinMax<T_Int, large>(newm->last_value, newm->min_value, newm->max_value, false, newm->is_global);
     }
 
     ProcessSequenceOptCache<T_Form, T_Int, large>(
@@ -2637,19 +3191,36 @@ sequence_values *get_sequence_values(Oid sequenceId)
     HeapTupleData seqtuple;
     int64 uuid;
     Buffer buf;
-
+    uint32 hashCode;
+    GSCKey key;
+    uint32 bucket_id;
     sequence_values *seqvalues = NULL;
 
-    /*
-     * Read the old sequence. This does a bit more work than really
-     * necessary, but it's simple, and we do want to double-check that it's
-     * indeed a sequence.
-     */
-    init_sequence(sequenceId, &elm, &seq_rel);
+    bool isGlobalCache = is_global_level_sequence_cache(sequenceId);
+    if (isGlobalCache) {
+        /* lock the destination bucket to obtain the global cache */
+        key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+        key.relid = sequenceId;
+        hashCode = GSCHashFunc<GSCKey>((const void *) &key, sizeof(GSCKey));
+        bucket_id = GetGSCBucket(hashCode);
+        (void)LWLockAcquire(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id), LW_EXCLUSIVE);
+    }
 
-    seqvalues = (sequence_values *)palloc(sizeof(sequence_values));
-    seqvalues->large = (RelationGetRelkind(seq_rel) == RELKIND_LARGE_SEQUENCE);
+    if (isGlobalCache) {
+        init_sequence_single_node_global_cache(sequenceId, &elm, &seq_rel, &key, hashCode, bucket_id);
+    } else {
+        /*
+         * Read the old sequence. This does a bit more work than really
+         * necessary, but it's simple, and we do want to double-check that it's
+         * indeed a sequence.
+         */
+        init_sequence(sequenceId, &elm, &seq_rel);
+    }
 
+    char relkind = RelationGetRelkind(seq_rel);
+    bool isNewVerSequence = (relkind == RELKIND_LARGE_SEQUENCE_GSC || relkind == RELKIND_SEQUENCE_GSC);
+    seqvalues = (sequence_values*)palloc(sizeof(sequence_values));
+    seqvalues->large = (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC);
     if (seqvalues->large) {
         Form_pg_large_sequence seq = read_seq_tuple<Form_pg_large_sequence>(elm, seq_rel, &buf, &seqtuple, &uuid);
         seqvalues->sequence_name = pstrdup(seq->sequence_name.data);
@@ -2660,6 +3231,9 @@ sequence_values *get_sequence_values(Oid sequenceId)
         seqvalues->max_value = Int8or16Out<int128, true>(seq->max_value);
         seqvalues->min_value = Int8or16Out<int128, true>(seq->min_value);
         seqvalues->cache_value = Int8or16Out<int128, true>(seq->cache_value);
+        if (isNewVerSequence) {
+            seqvalues->is_global = seq->is_global;
+        }
         UnlockReleaseBuffer(buf);
     } else {
         Form_pg_sequence seq = read_seq_tuple<Form_pg_sequence>(elm, seq_rel, &buf, &seqtuple, &uuid);
@@ -2671,11 +3245,17 @@ sequence_values *get_sequence_values(Oid sequenceId)
         seqvalues->max_value = Int8or16Out<int64, false>(seq->max_value);
         seqvalues->min_value = Int8or16Out<int64, false>(seq->min_value);
         seqvalues->cache_value = Int8or16Out<int64, false>(seq->cache_value);
+        if (isNewVerSequence) {
+            seqvalues->is_global = seq->is_global;
+        }
         UnlockReleaseBuffer(buf);
     }
 
     relation_close(seq_rel, NoLock);
-    
+    if (isGlobalCache) {
+        LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+    }
+
     return seqvalues;
 }
 
@@ -2756,35 +3336,58 @@ Datum pg_sequence_parameters(PG_FUNCTION_ARGS)
     Oid relid = PG_GETARG_OID(0);
     Relation rel = relation_open(relid, NoLock);
     char relkind = RelationGetRelkind(rel);
-    bool large = relkind == 'L';
+    bool large = relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC;
     relation_close(rel, NoLock);
     TupleDesc tupdesc;
-    Datum values[5];
-    bool isnull[5];
+    Datum values[6];
+    bool isnull[6];
     SeqTable elm = NULL;
     Relation seqrel;
     Buffer buf;
     HeapTupleData seqtuple;
+    uint32 hashCode;
+    GSCKey key;
+    uint32 bucket_id;
+    char* relname = NULL;
+    bool isGlobalCache = is_global_level_sequence_cache(relid);
 
-    /* open and lock sequence */
-    init_sequence(relid, &elm, &seqrel);
-
+    relname = get_rel_name(relid);
+    if (relname == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("sequence name with OID %u does not exist", relid)));
+    }
     if (pg_class_aclcheck(relid, GetUserId(), ACL_SELECT | ACL_UPDATE | ACL_USAGE) != ACLCHECK_OK)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));
+                errmsg("permission denied for sequence %s", relname)));
 
-    tupdesc = CreateTemplateTupleDesc(5, false);
+    pfree(relname);
+    tupdesc = CreateTemplateTupleDesc(6, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "start_value", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "minimum_value", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "maximum_value", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)4, "increment", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)5, "cycle_option", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "is_global_cache", BOOLOID, -1, 0);
 
     BlessTupleDesc(tupdesc);
 
     errno_t rc = memset_s(isnull, sizeof(isnull), 0, sizeof(isnull));
     securec_check(rc, "\0", "\0");
+
+    if (isGlobalCache) {
+        /* lock the destination bucket to obtain the global cache */
+        key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+        key.relid = relid;
+        hashCode = GSCHashFunc<GSCKey>((const void *) &key, sizeof(GSCKey));
+        bucket_id = GetGSCBucket(hashCode);
+        (void)LWLockAcquire(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id), LW_EXCLUSIVE);
+    }
+
+    if (isGlobalCache) {
+        init_sequence_single_node_global_cache(relid, &elm, &seqrel, &key, hashCode, bucket_id);
+    } else {
+        init_sequence(relid, &elm, &seqrel);
+    }
 
     GTM_UUID uuid;
     int i = 0;
@@ -2795,6 +3398,12 @@ Datum pg_sequence_parameters(PG_FUNCTION_ARGS)
         values[i++] = Int128GetDatum(seq->max_value);
         values[i++] = Int128GetDatum(seq->increment_by);
         values[i++] = BoolGetDatum(seq->is_cycled);
+        if (relkind == RELKIND_LARGE_SEQUENCE_GSC) {
+            values[i++] = BoolGetDatum(seq->is_global);
+        } else {
+            values[i] = BoolGetDatum(false);
+            isnull[i++] = true;
+        }
     } else {
         Form_pg_sequence seq = read_seq_tuple<Form_pg_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
         values[i++] = Int128GetDatum((int128)seq->start_value);
@@ -2802,10 +3411,19 @@ Datum pg_sequence_parameters(PG_FUNCTION_ARGS)
         values[i++] = Int128GetDatum((int128)seq->max_value);
         values[i++] = Int128GetDatum((int128)seq->increment_by);
         values[i++] = BoolGetDatum(seq->is_cycled);
+        if (relkind == RELKIND_SEQUENCE_GSC) {
+            values[i++] = BoolGetDatum(seq->is_global);
+        } else {
+            values[i] = BoolGetDatum(false);
+            isnull[i++] = true;
+        }
     }
 
     UnlockReleaseBuffer(buf);
     relation_close(seqrel, NoLock);
+    if (isGlobalCache) {
+        LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+    }
 
     return HeapTupleGetDatum(heap_form_tuple(tupdesc, values, isnull));
 }
@@ -2823,8 +3441,8 @@ Datum pg_sequence_all_parameters(PG_FUNCTION_ARGS)
     char relkind;
     SeqTable elm;
     Relation seqrel;
-    Datum values[12];
-    bool isnull[12];
+    Datum values[13];
+    bool isnull[13];
     TupleDesc tupdesc;
 
     seq_name_str = text_to_cstring(seq_name_text);
@@ -2852,12 +3470,12 @@ Datum pg_sequence_all_parameters(PG_FUNCTION_ARGS)
     Buffer buf;
     HeapTupleData seqtuple;
 
-    if (relkind == RELKIND_LARGE_SEQUENCE) {
+    if (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC) {
         Form_pg_large_sequence seq = read_seq_tuple<Form_pg_large_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
-        fill_large_seq_values(seq, values, isnull);
+        fill_large_seq_values(seq, values, isnull, relkind);
     } else {
         Form_pg_sequence seq = read_seq_tuple<Form_pg_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
-        fill_normal_seq_values(seq, values, isnull);
+        fill_normal_seq_values(seq, values, isnull, relkind);
     }
     UnlockReleaseBuffer(buf);
     relation_close(seqrel, NoLock);
@@ -2866,7 +3484,7 @@ Datum pg_sequence_all_parameters(PG_FUNCTION_ARGS)
 
 static TupleDesc build_sequence_tuple_desc(void)
 {
-    TupleDesc tupdesc = CreateTemplateTupleDesc(12, false);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(13, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "start_value", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "minimum_value", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "maximum_value", INT16OID, -1, 0);
@@ -2879,11 +3497,12 @@ static TupleDesc build_sequence_tuple_desc(void)
     TupleDescInitEntry(tupdesc, (AttrNumber)10, "uuid", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)11, "last_used_value", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)12, "is_exhausted", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)13, "is_global_cache", BOOLOID, -1, 0);
     BlessTupleDesc(tupdesc);
     return tupdesc;
 }
 
-static void fill_normal_seq_values(Form_pg_sequence seq, Datum *values, bool *isnull)
+static void fill_normal_seq_values(Form_pg_sequence seq, Datum *values, bool *isnull, char relkind)
 {
     int i = 0;
     values[i++] = Int128GetDatum((int128)seq->start_value);
@@ -2914,9 +3533,15 @@ static void fill_normal_seq_values(Form_pg_sequence seq, Datum *values, bool *is
         seq->is_called
     );
     values[i++] = BoolGetDatum(exhausted);
+    if (relkind == RELKIND_SEQUENCE_GSC) {
+        values[i++] = BoolGetDatum(seq->is_global);
+    } else {
+        values[i] = BoolGetDatum(false);
+        isnull[i++] = true;
+    }
 }
 
-static void fill_large_seq_values(Form_pg_large_sequence seq, Datum *values, bool *isnull)
+static void fill_large_seq_values(Form_pg_large_sequence seq, Datum *values, bool *isnull, char relkind)
 {
     int i = 0;
     values[i++] = Int128GetDatum(seq->start_value);
@@ -2947,6 +3572,12 @@ static void fill_large_seq_values(Form_pg_large_sequence seq, Datum *values, boo
         seq->is_called
     );
     values[i++] = BoolGetDatum(exhausted);
+    if (relkind == RELKIND_LARGE_SEQUENCE_GSC) {
+        values[i++] = BoolGetDatum(seq->is_global);
+    } else {
+        values[i] = BoolGetDatum(false);
+        isnull[i++] = true;
+    }
 }
 
 static bool compute_is_exhausted(int128 last_value, int128 min_val, int128 max_val, int128 inc, bool is_cycled, bool is_called)
@@ -2964,7 +3595,7 @@ Datum pg_sequence_last_value(PG_FUNCTION_ARGS)
     Oid relid = PG_GETARG_OID(0);
     Relation rel = relation_open(relid, NoLock);
     char relkind = RelationGetRelkind(rel);
-    bool large = relkind == 'L';
+    bool large = (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC);
     relation_close(rel, NoLock);
     TupleDesc tupdesc;
     Datum values[2];
@@ -2973,15 +3604,22 @@ Datum pg_sequence_last_value(PG_FUNCTION_ARGS)
     Relation seqrel;
     Buffer buf;
     HeapTupleData seqtuple;
+    uint32 hashCode;
+    GSCKey key;
+    uint32 bucket_id;
+    char* relname = NULL;
+    bool isGlobalCache = is_global_level_sequence_cache(relid);
 
-    /* open and lock sequence */
-    init_sequence(relid, &elm, &seqrel);
-
+    relname = get_rel_name(relid);
+    if (relname == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("sequence name with OID %u does not exist", relid)));
+    }
     if (pg_class_aclcheck(relid, GetUserId(), ACL_SELECT | ACL_UPDATE | ACL_USAGE) != ACLCHECK_OK)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));
+                errmsg("permission denied for sequence %s", relname)));
 
+    pfree(relname);
     tupdesc = CreateTemplateTupleDesc(2, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "cache_value", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "last_value", INT16OID, -1, 0);
@@ -2990,6 +3628,21 @@ Datum pg_sequence_last_value(PG_FUNCTION_ARGS)
 
     errno_t rc = memset_s(isnull, sizeof(isnull), 0, sizeof(isnull));
     securec_check(rc, "\0", "\0");
+
+    if (isGlobalCache) {
+        /* lock the destination bucket to obtain the global cache */
+        key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+        key.relid = relid;
+        hashCode = GSCHashFunc<GSCKey>((const void*)&key, sizeof(GSCKey));
+        bucket_id = GetGSCBucket(hashCode);
+        (void)LWLockAcquire(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id), LW_EXCLUSIVE);
+    }
+
+    if (isGlobalCache) {
+        init_sequence_single_node_global_cache(relid, &elm, &seqrel, &key, hashCode, bucket_id);
+    } else {
+        init_sequence(relid, &elm, &seqrel);
+    }
 
     GTM_UUID uuid;
     int i = 0;
@@ -3005,6 +3658,9 @@ Datum pg_sequence_last_value(PG_FUNCTION_ARGS)
 
     UnlockReleaseBuffer(buf);
     relation_close(seqrel, NoLock);
+    if (isGlobalCache) {
+        LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+    }
 
     return HeapTupleGetDatum(heap_form_tuple(tupdesc, values, isnull));
 }
@@ -3021,7 +3677,11 @@ void delete_global_seq(Oid relid, Relation seqrel)
     GlobalSeqInfoHashBucket* bucket = NULL;
     uint32 hash = RelidGetHash(relid);
 
-    bucket = &g_instance.global_seq[hash];
+    if (!is_global_level_sequence_cache(relid)) {
+        return;
+    }
+
+    bucket = &g_instance.seqHtbl->global_seq[hash];
 
     (void)LWLockAcquire(GetMainLWLockByIndex(bucket->lock_id), LW_EXCLUSIVE);
 
@@ -3216,6 +3876,10 @@ void  processUpdateSequenceMsg(List* nameList, int64 lastvalue)
     Buffer buf;
     SeqTable elm = NULL;
     Relation seqrel;
+    uint32 hashCode;
+    GSCKey key;
+    uint32 bucket_id;
+    bool isGlobalCache = false;
     /*
      * XXX: This is not safe in the presence of concurrent DDL, but acquiring
      * a lock here is more expensive than letting nextval_internal do it,
@@ -3231,12 +3895,31 @@ void  processUpdateSequenceMsg(List* nameList, int64 lastvalue)
             WARNING, (errcode(ERRCODE_OPERATE_FAILED), errmsg("Failed to find relation %s for sequence update", sequence->relname)));
         return;
     }
-    /* open and lock sequence */
-    init_sequence(relid, &elm, &seqrel);
+
+    isGlobalCache = is_global_level_sequence_cache(relid);
+    if (isGlobalCache) {
+        /* lock the destination bucket to obtain the global cache */
+        key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+        key.relid = relid;
+        hashCode = GSCHashFunc<GSCKey>((const void*)&key, sizeof(GSCKey));
+        bucket_id = GetGSCBucket(hashCode);
+        (void)LWLockAcquire(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id), LW_EXCLUSIVE);
+    }
+
+    if (isGlobalCache) {
+        init_sequence_single_node_global_cache(relid, &elm, &seqrel, &key, hashCode, bucket_id);
+    } else {
+        /* open and lock sequence */
+        init_sequence(relid, &elm, &seqrel);
+    }
+
     /* lock page' buffer and read tuple */
     seq = read_seq_tuple<Form_pg_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
     updateNextValForSequence(buf, seq, seqtuple, seqrel, lastvalue);
     relation_close(seqrel, NoLock);
+    if (isGlobalCache) {
+        LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+    }
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3376,7 +4059,7 @@ static int64 GetNextvalResult(SeqTable sess_elm, Relation seqrel, Form_pg_sequen
     uint32 hash;
     bool get_next_for_datanode = false;
     hash = RelidGetHash(sess_elm->relid);
-    bucket = &g_instance.global_seq[hash];
+    bucket = &g_instance.seqHtbl->global_seq[hash];
     int64 result = 0;
 
     range = seq->cache_value; /* how many values to ask from GTM? */
@@ -3647,7 +4330,7 @@ void get_last_value_and_max_value(text* txt, int128* last_value, int128* current
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
     relkind = RelationGetRelkind(seqrel);
-    if (relkind == RELKIND_SEQUENCE) {
+    if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
         *last_value = GetLastAndIncrementValue<int128, Form_pg_sequence, true>(elm, seqrel, &increasement_by,
             &is_called);
     } else {
@@ -3685,7 +4368,7 @@ int128 get_and_reset_last_value(text* txt, int128 new_value, bool need_reseed)
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
     relkind = RelationGetRelkind(seqrel);
-    if (relkind == RELKIND_SEQUENCE) {
+    if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
         last_value = GetLastAndIncrementValue<int128, Form_pg_sequence, true>(elm, seqrel, &increasement_by,
             &is_called);
     } else {
@@ -3695,11 +4378,20 @@ int128 get_and_reset_last_value(text* txt, int128 new_value, bool need_reseed)
     relation_close(seqrel, NoLock);
 
     // set new reseed
+    bool isGlobalCache = is_global_level_sequence_cache(relid);
     if (need_reseed) {
-        if (relkind == RELKIND_SEQUENCE) {
-            do_setval<Form_pg_sequence, int64, false>(relid, new_value, true, true);
+        if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
+            if (isGlobalCache) {
+                do_setval_for_global_seq_cache<Form_pg_sequence, int64, false>(relid, new_value, true);
+            } else {
+                do_setval<Form_pg_sequence, int64, false>(relid, new_value, true, true);
+            }
         } else {
-            do_setval<Form_pg_large_sequence, int128, true>(relid, new_value, true, true);
+            if (isGlobalCache) {
+                do_setval_for_global_seq_cache<Form_pg_large_sequence, int128, true>(relid, new_value, true);
+            } else {
+                do_setval<Form_pg_large_sequence, int128, true>(relid, new_value, true, true);
+            }
         }
     }
 
@@ -3786,7 +4478,7 @@ int128 get_auto_increment_nextval_internal(Oid relid, bool exclude_null_column)
     /* open and lock sequence */
     init_sequence(seqrelid, &elm, &seqrel);
     relkind = RelationGetRelkind(seqrel);
-    if (relkind == RELKIND_SEQUENCE) {
+    if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
         last_value = GetLastAndIncrementValue<int128, Form_pg_sequence, true>(elm, seqrel, &increasement_by,
             &is_called);
     } else {
@@ -3858,4 +4550,401 @@ Datum attnum_used_by_indexprs(PG_FUNCTION_ARGS)
     char* node_str = TextDatumGetCString(PG_GETARG_TEXT_P(0));
     bool result = attnum_used_by_expr(node_str, attnum);
     PG_RETURN_BOOL(result);
+}
+
+static void removeGlobalSeqCache_internal(Oid relid)
+{
+    uint32 hashCode;
+    GSCKey key;
+    uint32 bucket_id;
+    bool found = false;
+    key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+    key.relid = relid;
+    hashCode = GSCHashFunc<GSCKey>((const void*)&key, sizeof(GSCKey));
+    bucket_id = GetGSCBucket(hashCode);
+
+    (void)LWLockAcquire(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id), LW_EXCLUSIVE);
+    (void*)hash_search_with_hash_value(g_instance.seqHtbl->global_seqtab[bucket_id].hash_tbl, (const void*)&key,
+                                       hashCode, HASH_REMOVE, &found);
+
+    LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+}
+
+static void removeGlobalSeqCacheForCurrval_internal(Oid relid)
+{
+    DListCell* elem_tmp = NULL;
+    DListCell* elm_cell = NULL;
+    SeqTable currseq = NULL;
+
+    /* Look to see if we already have a seqtable entry for relation */
+    dlist_foreach_cell(elem_tmp, u_sess->cmd_cxt.global_currval_seq)
+    {
+        currseq = (SeqTable)lfirst(elem_tmp);
+        if (currseq->relid == relid && currseq->dbOid == u_sess->proc_cxt.MyDatabaseId) {
+            elm_cell = elem_tmp;
+            break;
+        }
+    }
+
+    if (elm_cell != NULL) {
+        u_sess->cmd_cxt.global_currval_seq = dlist_delete_cell(u_sess->cmd_cxt.global_currval_seq, elm_cell, true);
+    }
+}
+
+static void removeSessionSeqScache_internal(Oid relid)
+{
+    SeqTable prevelm = NULL;
+    /* Look to see if we already have a seqtable entry for relation */
+    SeqTable elm = u_sess->cmd_cxt.seqtab;
+    while (elm != NULL) {
+        if (elm->relid == relid) {
+            break;
+        }
+        prevelm = elm;
+        elm = elm->next;
+    }
+
+    if (elm != NULL) {
+        if (prevelm) {
+            prevelm->next = elm->next;
+        } else {
+            u_sess->cmd_cxt.seqtab = elm->next;
+        }
+        pfree_ext(elm);
+    }
+}
+
+void removeSequenceCacheOfRelOid(List* relOids)
+{
+    ListCell* cell = NULL;
+    uint32 hashCode;
+    GSCOid2LevelKey key;
+    foreach (cell, relOids) {
+        Oid relOid = lfirst_oid(cell);
+        if (OidIsValid(relOid)) {
+            if (is_global_level_sequence_cache(relOid)) {
+                removeGlobalSeqCache_internal(relOid);
+                removeGlobalSeqCacheForCurrval_internal(relOid);
+                /* after drop sequence, we need clean lastval record */
+            } else {
+                removeSessionSeqScache_internal(relOid);
+                /* after drop sequence, we need clean lastval record */
+            }
+            u_sess->cmd_cxt.last_used_seq = NULL;
+            if (g_instance.oid_map_lock == NULL) {
+                continue;
+            }
+            /* remove mapping of seqoid to is_global */
+            key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+            key.relid = relOid;
+            hashCode = GSCHashFunc<GSCOid2LevelKey>((const void*)&key, sizeof(GSCOid2LevelKey));
+            (void)LWLockAcquire(g_instance.oid_map_lock, LW_EXCLUSIVE);
+            (void*)hash_search_with_hash_value(g_instance.relid2cachelevel, (const void*)(&key), hashCode,
+                                               HASH_REMOVE, NULL);
+            LWLockRelease(g_instance.oid_map_lock);
+        }
+    }
+}
+
+static void copyLastValSequenceElem(SeqTable elm, bool isReplace)
+{
+    errno_t rc = EOK;
+    if (u_sess->cmd_cxt.last_used_seq == NULL) {
+        u_sess->cmd_cxt.last_used_seq =
+            (SeqTable)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(SeqTableData));
+        rc = memset_s(u_sess->cmd_cxt.last_used_seq, sizeof(SeqTableData), 0, sizeof(SeqTableData));
+        securec_check(rc, "\0", "\0");
+    }
+    if (isReplace ||
+        (u_sess->cmd_cxt.last_used_seq->relid == elm->relid && u_sess->cmd_cxt.last_used_seq->dbOid == elm->dbOid)) {
+        rc = memcpy_s(u_sess->cmd_cxt.last_used_seq, sizeof(SeqTableData), elm, sizeof(SeqTableData));
+    }
+    securec_check(rc, "\0", "\0");
+}
+
+template <typename T_Type>
+uint32 GSCHashFunc(const void* key, Size keysize)
+{
+    const T_Type* item = reinterpret_cast<const T_Type*>(key);
+    uint32 val1 = DatumGetUInt32(hash_any((const unsigned char*)(&item->dbOid), sizeof(Oid)));
+    uint32 val2 = DatumGetUInt32(hash_any((const unsigned char*)(&item->relid), sizeof(Oid)));
+    val1 ^= val2;
+
+    return val1;
+}
+
+template <typename T_Type>
+int GSCKeyMatch(const void* left, const void* right, Size keysize)
+{
+    const T_Type* leftItem = reinterpret_cast<const T_Type*>(left);
+    const T_Type* rightItem = reinterpret_cast<const T_Type*>(right);
+    Assert(NULL != leftItem);
+    Assert(NULL != rightItem);
+
+    return (leftItem->dbOid != rightItem->dbOid || leftItem->relid != rightItem->relid) ? 1 : 0;
+}
+
+uint32 GetGSCBucket(uint32 hashvalue)
+{
+    return (hashvalue % NUM_GSC_SINGLENODE_PARTITIONS);
+}
+
+static int initGlobalSequenceCache(void)
+{
+    HASHCTL ctl;
+    errno_t rc = 0;
+    int flags = HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE | HASH_EXTERN_CONTEXT | HASH_PARTITION;
+    bool found = false;
+
+    rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "\0", "\0");
+    ctl.keysize = sizeof(GSCKey);
+    ctl.entrysize = sizeof(GSCEntry);
+    ctl.hash = (HashValueFunc)GSCHashFunc<GSCKey>;
+    ctl.match = (HashCompareFunc)GSCKeyMatch<GSCKey>;
+    ctl.num_partitions = GSC_HTAB_SIZE;
+
+    g_instance.seqHtbl = (struct GlobaleSeqHashTabl*)ShmemInitStruct("GlobalSeqHashTabl",
+        sizeof(struct GlobaleSeqHashTabl), &found);
+    if (g_instance.seqHtbl == NULL) {
+        return errcode(ERRCODE_OUT_OF_MEMORY);
+    }
+
+    if (!found) {
+        for (int i = 0; i < NUM_GS_PARTITIONS; i++) {
+            g_instance.seqHtbl->global_seq[i].shb_list = NULL;
+            g_instance.seqHtbl->global_seq[i].lock_id = FirstGlobalSeqLock + i;
+        }
+
+        int errIndex = -1;
+        for (int i = 0; i < NUM_GSC_SINGLENODE_PARTITIONS; ++i) {
+            g_instance.seqHtbl->global_seqtab[i].lock_id = FirstGlobalSeqCacheLock + i;
+            ctl.hcxt = AllocSetContextCreate(g_instance.instance_context, "GSCBucketContext", ALLOCSET_DEFAULT_MINSIZE,
+                                            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
+            g_instance.seqHtbl->global_seqtab[i].hash_tbl = hash_create("GlobalSequenceCache", GSC_HTAB_SIZE, &ctl, flags);
+            if (g_instance.seqHtbl->global_seqtab[i].hash_tbl == NULL) {
+                errIndex = i;
+                break;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int initCacheLevelHashTab(void)
+{
+    if (g_instance.relid2cachelevel == NULL) {
+        HASHCTL ctl;
+        errno_t rc = 0;
+        int flags = HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE | HASH_EXTERN_CONTEXT | HASH_PARTITION;
+
+        rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+        securec_check(rc, "\0", "\0");
+        ctl.keysize = sizeof(GSCOid2LevelKey);
+        ctl.entrysize = sizeof(GSCOid2LevelEntry);
+        ctl.hash = (HashValueFunc)GSCHashFunc<GSCOid2LevelKey>;
+        ctl.match = (HashCompareFunc)GSCKeyMatch<GSCOid2LevelKey>;
+        ctl.num_partitions = GSC_HTAB_SIZE;
+        ctl.hcxt =
+            AllocSetContextCreate(g_instance.instance_context, "GSCOid2CacheLevelContext", ALLOCSET_DEFAULT_MINSIZE,
+                                  ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
+        if (ctl.hcxt == NULL) {
+            return errcode(ERRCODE_OUT_OF_MEMORY);
+        }
+
+        g_instance.relid2cachelevel = hash_create("GlobalSeqCacheLevelMapCxt", GSC_HTAB_SIZE, &ctl, flags);
+        if (g_instance.relid2cachelevel == NULL) {
+            MemoryContextReset(ctl.hcxt);
+            return errcode(ERRCODE_OUT_OF_MEMORY);
+        }
+    }
+
+    if (g_instance.oid_map_lock == NULL) {
+        g_instance.oid_map_lock = LWLockAssign(LWTRANCHE_SEQ_OID_CACHE_LEVEL_MAP);
+    }
+
+    if (g_instance.alter_sequence_lock == NULL) {
+        g_instance.alter_sequence_lock = LWLockAssign(LWTRANCHE_ALTER_SEQ_CACHE_LEVEL);
+    }
+    return 0;
+}
+
+/*
+ * Return sequence parameters
+ */
+template <typename T_SeqType>
+static void get_sequence_cache_level(Relation rel, CACHE_LEVEL* is_global)
+{
+    Buffer buf;
+    SeqTableData elm;
+    HeapTupleData seqtuple;
+    T_SeqType seq;
+    GTM_UUID uuid;
+
+    seq = read_seq_tuple<T_SeqType>(&elm, rel, &buf, &seqtuple, &uuid);
+
+    *is_global = seq->is_global;
+
+    /* Now we're done with the old page */
+    UnlockReleaseBuffer(buf);
+}
+
+CACHE_LEVEL get_cache_level_from_oid(Oid relid)
+{
+    Relation relseq = relation_open(relid, AccessShareLock);
+    if (relseq->rd_rel->relkind == RELKIND_SEQUENCE || relseq->rd_rel->relkind == RELKIND_LARGE_SEQUENCE) {
+        relation_close(relseq, AccessShareLock);
+        return false;
+    }
+
+    HeapTuple tp = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(tp)) {
+        relation_close(relseq, AccessShareLock);
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", relid)));
+    }
+    CACHE_LEVEL is_global = false;
+    char relkind = RelationGetRelkind(relseq);
+    if (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC) {
+        get_sequence_cache_level<Form_pg_large_sequence>(relseq, &is_global);
+    } else if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
+        get_sequence_cache_level<Form_pg_sequence>(relseq, &is_global);
+    } else {
+        ReleaseSysCache(tp);
+        relation_close(relseq, AccessShareLock);
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", relid)));
+    }
+
+    ReleaseSysCache(tp);
+    relation_close(relseq, AccessShareLock);
+    return is_global;
+}
+
+bool is_global_level_sequence_cache(Oid relid)
+{
+    uint32 hashCode;
+    GSCOid2LevelKey key;
+    bool found = false;
+    GSCOid2LevelEntry* entry = NULL;
+    key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+    key.relid = relid;
+    hashCode = GSCHashFunc<GSCOid2LevelKey>((const void*)&key, sizeof(GSCOid2LevelKey));
+
+    /* first attempt use read lock to retrieve the mapping result from oid to cache level */
+    (void)LWLockAcquire(g_instance.oid_map_lock, LW_SHARED);
+    entry = (GSCOid2LevelEntry*)hash_search_with_hash_value(g_instance.relid2cachelevel, (const void*)(&key), hashCode,
+                                                            HASH_FIND, &found);
+
+    if (found) {
+        LWLockRelease(g_instance.oid_map_lock);
+        return entry->val.is_global_cache;
+    }
+    LWLockRelease(g_instance.oid_map_lock);
+
+    /* the first lookup requires inserting the mapping result into the hash table */
+    (void)LWLockAcquire(g_instance.oid_map_lock, LW_EXCLUSIVE);
+    entry = (GSCOid2LevelEntry*)hash_search_with_hash_value(g_instance.relid2cachelevel, (const void*)(&key), hashCode,
+                                                            HASH_ENTER, &found);
+    /* check if any other session has already added it before acquiring the write lock */
+    if (!found && entry != NULL) {
+        entry->val.is_global_cache = get_cache_level_from_oid(relid);
+        if (entry->val.is_global_cache) {
+            LazyInitGlobalSeq();
+        }
+    }
+    LWLockRelease(g_instance.oid_map_lock);
+
+    return entry->val.is_global_cache;
+}
+
+static bool is_alter_sequence_cache_level(List* options, bool *isNewVerCmd)
+{
+    ListCell* option = NULL;
+    foreach (option, options) {
+        DefElem* defel = (DefElem*)lfirst(option);
+        if (strcmp(defel->defname, "is_global") == 0) {
+            *isNewVerCmd = true;
+            return (CACHE_LEVEL)intVal(defel->arg);
+        }
+    }
+    return false;
+}
+
+static int128 findlastedSequenceValueByOid(Oid relid, bool* isvalid)
+{
+    SeqTableData elm;
+    HeapTupleData seqtuple;
+    Buffer buf = InvalidBuffer;
+    GTM_UUID uuid;
+    int128 lastvalue;
+    Relation relseq = relation_open(relid, AccessShareLock);
+    char relkind = RelationGetRelkind(relseq);
+
+    if (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC) {
+        Form_pg_large_sequence seq = read_seq_tuple<Form_pg_large_sequence>(&elm, relseq, &buf, &seqtuple, &uuid);
+        lastvalue = seq->last_value;
+    } else if (relkind == RELKIND_SEQUENCE || relkind == RELKIND_SEQUENCE_GSC) {
+        Form_pg_sequence seq = read_seq_tuple<Form_pg_sequence>(&elm, relseq, &buf, &seqtuple, &uuid);
+        lastvalue = (int128)seq->last_value;
+    } else {
+        relation_close(relseq, AccessShareLock);
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", relid)));
+    }
+
+    relation_close(relseq, AccessShareLock);
+    if (BufferIsValid(buf)) {
+        UnlockReleaseBuffer(buf);
+        if (isvalid != NULL) {
+            *isvalid = true;
+        }
+    }
+
+    return lastvalue;
+}
+
+static void getSequencePropertys(Oid relid, bool* isOldVersionSequence, bool* isGlobal, char* relkind)
+{
+    Relation relseq = relation_open(relid, AccessShareLock);
+    Assert(relseq != NULL);
+    *relkind = RelationGetRelkind(relseq);
+    switch (*relkind) {
+        case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
+            *isOldVersionSequence = true;
+            *isGlobal = false;
+            break;
+
+        case RELKIND_SEQUENCE_GSC:
+            *isOldVersionSequence = false;
+            get_sequence_cache_level<Form_pg_sequence>(relseq, isGlobal);
+            break;
+
+        case RELKIND_LARGE_SEQUENCE_GSC:
+            *isOldVersionSequence = false;
+            get_sequence_cache_level<Form_pg_large_sequence>(relseq, isGlobal);
+            break;
+
+        default:
+            break;
+    }
+    relation_close(relseq, AccessShareLock);
+}
+
+static void changeSequenceCacheLevel(Oid relid)
+{
+    uint32 hashCode;
+    GSCOid2LevelKey key;
+    GSCOid2LevelEntry* entry = NULL;
+
+    key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+    key.relid = relid;
+    hashCode = GSCHashFunc<GSCOid2LevelKey>((const void*)&key, sizeof(GSCOid2LevelKey));
+
+    (void)LWLockAcquire(g_instance.oid_map_lock, LW_SHARED);
+    entry = (GSCOid2LevelEntry*)hash_search_with_hash_value(g_instance.relid2cachelevel, (const void*)(&key), hashCode,
+                                                            HASH_FIND, NULL);
+    if (entry != NULL) {
+        entry->val.is_global_cache = !entry->val.is_global_cache;
+    }
+    LWLockRelease(g_instance.oid_map_lock);
 }

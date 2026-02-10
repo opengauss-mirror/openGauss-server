@@ -1474,6 +1474,8 @@ static void doDeletion(const ObjectAddress* object, int flags)
             switch (relKind) {
                 case RELKIND_SEQUENCE:
                 case RELKIND_LARGE_SEQUENCE:
+                case RELKIND_SEQUENCE_GSC:
+                case RELKIND_LARGE_SEQUENCE_GSC:
                     /*
                      * Drop the sequence on GTM.
                      * Sequence is dropped on GTM by a remote Coordinator only
@@ -3574,9 +3576,11 @@ static void getRelationDescription(StringInfo buffer, Oid relid)
             appendStringInfo(buffer, _("index %s"), relname);
             break;
         case RELKIND_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
             appendStringInfo(buffer, _("sequence %s"), relname);
             break;
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             appendStringInfo(buffer, _("large sequence %s"), relname);
             break;
         case RELKIND_TOASTVALUE:

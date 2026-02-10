@@ -229,7 +229,10 @@ static const char *BuiltinTrancheNames[] = {
     "CRBufAssignLock",
     "CRBufMappingLock",
     "CRBufLruLock",
-    "ATFGlobalTaskLock"
+    "ATFGlobalTaskLock",
+    "GlobalSequenceCacheLock",
+    "SequenceOidMapCacheLevelLock",
+    "AlterSequneceCacheLevelLock"
 };
 
 static void RegisterLWLockTranches(void);
@@ -724,6 +727,11 @@ static void InitializeLWLocks(int numLocks)
         LWLockInitialize(&lock->lock, LWTRANCHE_CR_BUF_MAPPING, id);
     }
 #endif
+
+    for (id = 0; id < NUM_GSC_SINGLENODE_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_GLOBAL_SEQ_CACHE);
+    }
+
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NumFixedLWLocks);
 
     for (id = NumFixedLWLocks; id < numLocks; id++, lock++) {

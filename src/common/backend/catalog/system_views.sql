@@ -346,7 +346,7 @@ CREATE VIEW pg_catalog.pg_gtt_attached_pids WITH (security_barrier) AS
  FROM
      pg_class c
      LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
- WHERE c.relpersistence='g' AND c.relkind in('r', 'S', 'L');
+ WHERE c.relpersistence='g' AND c.relkind in('r', 'S', 'L', 'z', 'Z');
 
 CREATE VIEW pg_catalog.pg_gtt_stats WITH (security_barrier) AS
 SELECT s.nspname AS schemaname,
@@ -586,6 +586,8 @@ SELECT
 		 WHEN rel.relkind = 'm' THEN 'materialized view'::text
 		 WHEN rel.relkind = 'S' THEN 'sequence'::text
          WHEN rel.relkind = 'L' THEN 'large sequence'::text
+         WHEN rel.relkind = 'z' THEN 'sequence'::text
+         WHEN rel.relkind = 'Z' THEN 'large sequence'::text
 		 WHEN rel.relkind = 'f' THEN 'foreign table'::text END AS objtype,
 	rel.relnamespace AS objnamespace,
 	CASE WHEN pg_catalog.pg_table_is_visible(rel.oid)
@@ -928,7 +930,7 @@ CREATE VIEW pg_statio_all_sequences AS
             pg_catalog.pg_stat_get_blocks_hit(C.oid) AS blks_hit
     FROM pg_class C
             LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.relkind = 'S' or C.relkind = 'L';
+    WHERE C.relkind = 'S' or C.relkind = 'L' or C.relkind = 'z' or C.relkind = 'Z';
 
 CREATE VIEW pg_statio_sys_sequences AS
     SELECT * FROM pg_statio_all_sequences

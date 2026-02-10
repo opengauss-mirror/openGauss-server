@@ -596,6 +596,8 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
             break;
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             create_storage = true;
 
             /*
@@ -1363,6 +1365,8 @@ static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, O
             break;
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             /* Sequences always have a known size */
             new_rel_reltup->relpages = 1;
             new_rel_reltup->reltuples = 1;
@@ -2858,6 +2862,8 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
                 break;
             case RELKIND_SEQUENCE:
             case RELKIND_LARGE_SEQUENCE: // tbf
+            case RELKIND_SEQUENCE_GSC:
+            case RELKIND_LARGE_SEQUENCE_GSC:
                 relacl = get_user_default_acl(ACL_OBJECT_SEQUENCE, ownerid, relnamespace);
                 break;
             default:

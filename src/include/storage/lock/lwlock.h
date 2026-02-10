@@ -170,6 +170,9 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* Number of standby statement hsitory needed */
 #define NUM_STANDBY_STMTHIST_PARTITIONS 2
 
+/* Number of partions the global sequence cache hashtable */
+#define NUM_GSC_SINGLENODE_PARTITIONS 1024
+
 /* Number of partitions of the txnstatus mapping hashtable */
 #define NUM_TXNSTATUS_CACHE_PARTITIONS 256
 
@@ -231,13 +234,16 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* xlog track hashmap */
 #define FirstScanningXLOGTrackLock (FirstSSSnapshotXminCacheLock + NUM_SS_SNAPSHOT_XMIN_CACHE_PARTITIONS)
 
-#define FirstCRBufMappingLock (FirstScanningXLOGTrackLock + NUM_SCANNING_XLOG_TRACK_PARTITIONS)
-/* must be last: */
 #ifndef ENABLE_LITE_MODE
-#define NumFixedLWLocks (FirstCRBufMappingLock + NUM_BUFFER_PARTITIONS)
+#define FirstCRBufMappingLock (FirstScanningXLOGTrackLock + NUM_BUFFER_PARTITIONS)
 #else
-#define NumFixedLWLocks (FirstScanningXLOGTrackLock + NUM_SCANNING_XLOG_TRACK_PARTITIONS)
+#define FirstCRBufMappingLock FirstScanningXLOGTrackLock
 #endif
+/* global sequence cache */
+#define FirstGlobalSeqCacheLock (FirstCRBufMappingLock + NUM_SCANNING_XLOG_TRACK_PARTITIONS)
+
+/* must be last: */
+#define NumFixedLWLocks (FirstGlobalSeqCacheLock + NUM_GSC_SINGLENODE_PARTITIONS)
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
  *
@@ -338,6 +344,9 @@ enum BuiltinTrancheIds
     LWTRANCHE_CR_BUF_MAPPING,
     LWTRANCHE_CR_BUF_LRU,
     LWTRANCHE_ATF_GLOBAL_TASK,
+    LWTRANCHE_GLOBAL_SEQ_CACHE,
+    LWTRANCHE_SEQ_OID_CACHE_LEVEL_MAP,
+    LWTRANCHE_ALTER_SEQ_CACHE_LEVEL,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

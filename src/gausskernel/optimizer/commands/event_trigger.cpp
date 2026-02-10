@@ -1058,6 +1058,7 @@ bool EventTriggerSupportsObjectType(ObjectType obtype)
         case OBJECT_LANGUAGE:
         case OBJECT_LARGEOBJECT:
         case OBJECT_LARGE_SEQUENCE:
+        case OBJECT_LARGE_SEQUENCE_GSC:
         case OBJECT_MATVIEW:
         case OBJECT_OPCLASS:
         case OBJECT_OPERATOR:
@@ -1065,8 +1066,9 @@ bool EventTriggerSupportsObjectType(ObjectType obtype)
         case OBJECT_RULE:
         case OBJECT_SCHEMA:
         case OBJECT_SEQUENCE:
+        case OBJECT_SEQUENCE_GSC:
         case OBJECT_TABLE:
-        case OBJECT_TABCONSTRAINT:            
+        case OBJECT_TABCONSTRAINT:
         case OBJECT_TRIGGER:
         case OBJECT_TSCONFIGURATION:
         case OBJECT_TSDICTIONARY:

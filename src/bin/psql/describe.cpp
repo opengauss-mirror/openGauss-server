@@ -781,7 +781,8 @@ bool permissionsList(const char* pattern)
         "SELECT n.nspname as \"%s\",\n"
         "  c.relname as \"%s\",\n"
         "  CASE c.relkind WHEN 'r' THEN '%s' WHEN 'v' THEN '%s' WHEN 'm' THEN '%s'"
-        "  WHEN 'S' THEN '%s' WHEN 'L' THEN '%s' WHEN 'f' THEN '%s' END as \"%s\",\n"
+        "  WHEN 'S' THEN '%s' WHEN 'z' THEN '%s' WHEN 'L' THEN '%s' WHEN 'Z' THEN '%s'"
+        "  WHEN 'f' THEN '%s' END as \"%s\",\n"
         "  ",
         gettext_noop("Schema"),
         gettext_noop("Name"),
@@ -789,6 +790,8 @@ bool permissionsList(const char* pattern)
         gettext_noop("view"),
         gettext_noop("materialized view"),
         gettext_noop("sequence"),
+        gettext_noop("sequence"),
+        gettext_noop("large sequence"),
         gettext_noop("large sequence"),
         gettext_noop("foreign table"),
         gettext_noop("Type"));
@@ -807,7 +810,7 @@ bool permissionsList(const char* pattern)
     appendPQExpBuffer(&buf,
         "\nFROM pg_catalog.pg_class c\n"
         "     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace\n"
-        "WHERE c.relkind IN ('r', 'v', 'm', 'S', 'f')\n");
+        "WHERE c.relkind IN ('r', 'v', 'm', 'S', 'z', 'f')\n");
 
     /*
      * Unless a schema pattern is specified, we suppress system and temp
@@ -881,7 +884,7 @@ bool listDefaultACLs(const char* pattern)
         "SELECT pg_catalog.pg_get_userbyid(d.defaclrole) AS \"%s\",\n"
         "  n.nspname AS \"%s\",\n"
         "  CASE d.defaclobjtype WHEN '%c' THEN '%s' WHEN '%c' THEN '%s'"
-        " WHEN '%c' THEN '%s' WHEN '%c' THEN '%s' WHEN '%c' THEN '%s' END AS "
+        " WHEN '%c' THEN '%s' WHEN '%c' THEN '%s' WHEN '%c' THEN '%s' WHEN '%c' THEN '%s' WHEN '%c' THEN '%s'END AS "
         "\"%s\",\n"
         "  ",
         gettext_noop("Owner"),
@@ -891,6 +894,10 @@ bool listDefaultACLs(const char* pattern)
         DEFACLOBJ_SEQUENCE,
         gettext_noop("sequence"),
         DEFACLOBJ_LARGE_SEQUENCE,
+        gettext_noop("large sequence"),
+        DEFACLOBJ_SEQUENCE_GSC,
+        gettext_noop("sequence"),
+        DEFACLOBJ_LARGE_SEQUENCE_GSC,
         gettext_noop("large sequence"),
         DEFACLOBJ_FUNCTION,
         gettext_noop("function"),
@@ -1620,7 +1627,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
      * If it's a sequence, fetch its values and store into an array that will
      * be used later.
      */
-    if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L') {
+    if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L' || tableinfo.relkind == 'z' || tableinfo.relkind == 'Z') {
         printfPQExpBuffer(&buf, "SELECT * FROM %s", fmtId(schemaname));
         /* must be separate because fmtId isn't reentrant */
         appendPQExpBuffer(&buf, ".%s;", fmtId(relationname));
@@ -1793,9 +1800,11 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             printfPQExpBuffer(&title, _("View \"%s.%s\""), schemaname, relationname);
             break;
         case 'S':
+        case 'z':
             printfPQExpBuffer(&title, _("Sequence \"%s.%s\""), schemaname, relationname);
             break;
         case 'L':
+        case 'Z':
             printfPQExpBuffer(&title, _("Large Sequence \"%s.%s\""), schemaname, relationname);
             break;
         case 'i':
@@ -1846,7 +1855,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         modifiers = (char**)pg_malloc_zero((unsigned long)(numrows + 1) * sizeof(*modifiers));
     }
 
-    if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L')
+    if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L' || tableinfo.relkind == 'z' || tableinfo.relkind == 'Z')
         headers[cols++] = gettext_noop("Value");
 
     if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I')
@@ -2019,7 +2028,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         }
 
         /* Value: for sequences only */
-        if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L')
+        if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L' ||
+            tableinfo.relkind == 'z' || tableinfo.relkind == 'Z')
             printTableAddCell(&cont, seq_values[i], false, false);
 
         /* Expression for index column */
@@ -2210,7 +2220,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             }
             PQclear(result);
         }
-    } else if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L') {
+    } else if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L' ||
+               tableinfo.relkind == 'z' || tableinfo.relkind == 'Z') {
         /* Footer information about a sequence */
         PGresult* result = NULL;
 
@@ -2245,7 +2256,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
          * don't print anything.
          */
         PQclear(result);
-    } else if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm' || 
+    } else if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm' ||
                tableinfo.relkind == 'e') {
         /* Footer information about a table */
         PGresult* result = NULL;
@@ -3694,8 +3705,8 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
         "SELECT n.nspname as \"%s\",\n"
         "  c.relname as \"%s\",\n"
         "  CASE c.relkind WHEN 'r' THEN '%s' WHEN 'v' THEN '%s' WHEN 'i' THEN '%s' WHEN 'I' THEN '%s' "
-        "WHEN 'S' THEN '%s' WHEN 'L' THEN '%s' WHEN 'f' THEN '%s' WHEN 'm' THEN '%s'  WHEN 'e' THEN '%s' "
-        "WHEN 'o' THEN '%s' END as \"%s\",\n"
+        "WHEN 'S' THEN '%s' WHEN 'z' THEN '%s' WHEN 'L' THEN '%s' WHEN 'Z' THEN '%s' WHEN 'f' THEN '%s' "
+        "WHEN 'm' THEN '%s'  WHEN 'e' THEN '%s' WHEN 'o' THEN '%s' END as \"%s\",\n"
         "  pg_catalog.pg_get_userbyid(c.relowner) as \"%s\"",
         gettext_noop("Schema"),
         gettext_noop("Name"),
@@ -3704,6 +3715,8 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
         gettext_noop("index"),
         gettext_noop("global partition index"),
         gettext_noop("sequence"),
+        gettext_noop("sequence"),
+        gettext_noop("large sequence"),
         gettext_noop("large sequence"),
         gettext_noop("foreign table"),
         gettext_noop("materialized view"),
@@ -3755,7 +3768,7 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
     if (showIndexes)
         appendPQExpBuffer(&buf, "'i','I',");
     if (showSeq)
-        appendPQExpBuffer(&buf, "'S','L',");
+        appendPQExpBuffer(&buf, "'S','L','z','Z',");
     if (showSystem || NULL != pattern)
         appendPQExpBuffer(&buf, "'s',"); /* was RELKIND_SPECIAL in <=
                                           * 8.1 */

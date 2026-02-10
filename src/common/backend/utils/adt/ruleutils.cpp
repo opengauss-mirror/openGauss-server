@@ -13577,6 +13577,11 @@ static void deparse_sequence_options(List* options, StringInfoData& str, bool ow
 
                 appendStringInfo(&str, "%s.%s", quote_identifier(rel->relname), quote_identifier(attrname));
             }
+        } else if (strcmp(defel->defname, "is_global") == 0) {
+            if (defGetBoolean(defel))
+                appendStringInfo(&str, " GLOBAL");
+            else
+                appendStringInfo(&str, " SESSION");
         } else {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", defel->defname)));
         }

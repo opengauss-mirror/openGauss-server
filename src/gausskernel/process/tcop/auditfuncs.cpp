@@ -1195,7 +1195,9 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
                 pgaudit_ddl_textsearch(objectname, querystring);
             } break;
             case OBJECT_SEQUENCE:
-            case OBJECT_LARGE_SEQUENCE: {
+            case OBJECT_LARGE_SEQUENCE:
+            case OBJECT_SEQUENCE_GSC:
+            case OBJECT_LARGE_SEQUENCE_GSC: {
                 objectname = strVal(lfirst(list_tail(names)));
                 pgaudit_ddl_sequence(objectname, querystring);
             } break;
@@ -1459,7 +1461,7 @@ static void pgaudit_ProcessUtility(processutility_context* processutility_cxt,
         } break;
         case T_AlterTableStmt: {
             AlterTableStmt* altertablestmt = (AlterTableStmt*)(parsetree); /* Audit alter table */
-            if (OBJECT_SEQUENCE == altertablestmt->relkind || OBJECT_LARGE_SEQUENCE == altertablestmt->relkind) {
+            if (OBJECT_IS_SEQUENCE(altertablestmt->relkind)) {
                 pgaudit_ddl_sequence(altertablestmt->relation->relname, queryString);
             } else {
                 pgaudit_ddl_table(altertablestmt->relation->relname, queryString);
