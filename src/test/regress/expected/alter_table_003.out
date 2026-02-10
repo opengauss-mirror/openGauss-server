@@ -1167,7 +1167,7 @@ partition by range(f1, f2)
         partition t1_p1 values less than (20, 0),
         partition t1_p2 values less than (30, 0)
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 1 2
@@ -1191,7 +1191,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 2 4
@@ -1226,7 +1226,7 @@ insert into range_range values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(
 insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
 -- test pg_partition
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 3
@@ -1251,7 +1251,7 @@ Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 5
@@ -1379,10 +1379,10 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for tab
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t1_f3_f4_key" for table "t1"
 create unique index partial_t1_idx on t1(f5, abs(f6)) where f5 + f6 - abs(f7) > 0;
 select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1') order by 1, 2, 3;
- indkey |                                                                                                                                          indexprs                                                                                                                                          |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          indpred                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+ indkey |                                                                                                                                          indexprs                                                                                                                                          |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          indpred
 --------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- 1 2    |                                                                                                                                                                                                                                                                                            | 
- 3 4    |                                                                                                                                                                                                                                                                                            | 
+ 1 2    |                                                                                                                                                                                                                                                                                            |
+ 3 4    |                                                                                                                                                                                                                                                                                            |
  5 0    | ({FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 49}) :location 45 :refSynOid 0}) | {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 555 :opfuncid 181 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 5 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 60} {VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 65}) :location 63} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 7 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 7 :location 74}) :location 70 :refSynOid 0}) :location 68} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 80 :constvalue 4 [ 0 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 78}
 (3 rows)
 
@@ -1412,11 +1412,11 @@ Has OIDs: no
 Options: orientation=row, compression=no
 
 select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1') order by 1, 2, 3;
- indkey |                                                                                                                                          indexprs                                                                                                                                          |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          indpred                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+ indkey |                                                                                                                                          indexprs                                                                                                                                          |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          indpred
 --------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- 2 4    |                                                                                                                                                                                                                                                                                            | 
- 3      |                                                                                                                                                                                                                                                                                            | 
- 5 6    |                                                                                                                                                                                                                                                                                            | 
+ 2 4    |                                                                                                                                                                                                                                                                                            |
+ 3      |                                                                                                                                                                                                                                                                                            |
+ 5 6    |                                                                                                                                                                                                                                                                                            |
  7 0    | ({FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 8 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 8 :location 49}) :location 45 :refSynOid 0}) | {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 555 :opfuncid 181 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 7 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 7 :location 60} {VAR :varno 1 :varattno 8 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 8 :location 65}) :location 63} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 9 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 9 :location 74}) :location 70 :refSynOid 0}) :location 68} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 80 :constvalue 4 [ 0 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 78}
 (4 rows)
 
@@ -2978,7 +2978,7 @@ partition by range(f1, f2)
         partition t1_p1 values less than (20, 0),
         partition t1_p2 values less than (30, 0)
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 1 2
@@ -3002,7 +3002,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 2 4
@@ -3037,7 +3037,7 @@ insert into range_range values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(
 insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
 -- test pg_partition
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 3
@@ -3062,7 +3062,7 @@ Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 5
@@ -4159,7 +4159,7 @@ partition by range(f1, f2)
         partition t1_p1 values less than (20, 0),
         partition t1_p2 values less than (30, 0)
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 1 2
@@ -4183,7 +4183,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 2 4
@@ -4217,7 +4217,7 @@ insert into range_range values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(
 insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
 -- test pg_partition
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 3
@@ -4242,7 +4242,7 @@ Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 5
@@ -4382,10 +4382,10 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for tab
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t1_lower_abs_key" for table "t1"
 create unique index partial_t1_idx on t1(f5, abs(f6)) where f5 + f6 - abs(f7) > 0;
 select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1') order by 1, 2, 3;
- indkey |                                                                                                                                                                                                                                                                                                                                             indexprs                                                                                                                                                                                                                                                                                                                                              |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          indpred                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+ indkey |                                                                                                                                                                                                                                                                                                                                             indexprs                                                                                                                                                                                                                                                                                                                                              |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          indpred
 --------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- 0 0    | ({FUNCEXPR :funcid 870 :funcresulttype 25 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {VAR :varno 1 :varattno 3 :vartype 1043 :vartypmod 24 :varcollid 100 :varlevelsup 0 :varnoold 1 :varoattno 3 :location 141} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1}) :location 135 :refSynOid 0} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 4 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 4 :location 152}) :location 148 :refSynOid 0}) | 
- 1 2    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 
+ 0 0    | ({FUNCEXPR :funcid 870 :funcresulttype 25 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {VAR :varno 1 :varattno 3 :vartype 1043 :vartypmod 24 :varcollid 100 :varlevelsup 0 :varnoold 1 :varoattno 3 :location 141} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1}) :location 135 :refSynOid 0} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 4 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 4 :location 152}) :location 148 :refSynOid 0}) |
+ 1 2    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
  5 0    | ({FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 49}) :location 45 :refSynOid 0})                                                                                                                                                                                                                                                                                                                                                                                                        | {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 555 :opfuncid 181 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 5 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 60} {VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 65}) :location 63} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 7 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 7 :location 74}) :location 70 :refSynOid 0}) :location 68} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 80 :constvalue 4 [ 0 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 78}
 (3 rows)
 
@@ -4415,11 +4415,11 @@ Has OIDs: no
 Options: orientation=row, compression=no
 
 select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1') order by 1, 2, 3;
- indkey |                                                                                                                                                                                                                                                                                                                                             indexprs                                                                                                                                                                                                                                                                                                                                              |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          indpred                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+ indkey |                                                                                                                                                                                                                                                                                                                                             indexprs                                                                                                                                                                                                                                                                                                                                              |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          indpred
 --------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- 0 0    | ({FUNCEXPR :funcid 870 :funcresulttype 25 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {VAR :varno 1 :varattno 5 :vartype 1043 :vartypmod 24 :varcollid 100 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 141} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1}) :location 135 :refSynOid 0} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 152}) :location 148 :refSynOid 0}) | 
- 2 4    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 
- 3      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 
+ 0 0    | ({FUNCEXPR :funcid 870 :funcresulttype 25 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {VAR :varno 1 :varattno 5 :vartype 1043 :vartypmod 24 :varcollid 100 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 141} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1}) :location 135 :refSynOid 0} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 152}) :location 148 :refSynOid 0}) |
+ 2 4    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+ 3      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
  7 0    | ({FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 8 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 8 :location 49}) :location 45 :refSynOid 0})                                                                                                                                                                                                                                                                                                                                                                                                        | {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 555 :opfuncid 181 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 7 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 7 :location 60} {VAR :varno 1 :varattno 8 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 8 :location 65}) :location 63} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 9 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 9 :location 74}) :location 70 :refSynOid 0}) :location 68} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 80 :constvalue 4 [ 0 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 78}
 (4 rows)
 
@@ -5734,7 +5734,7 @@ partition by range(f1, f2)
         partition t1_p2 values less than (30, 0)
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 1 2
@@ -5744,7 +5744,7 @@ select relname, parttype, partkey from pg_partition where parentid=(select oid f
 (4 rows)
 
 alter table t1 modify f1 int after f2, modify f3 int first, modify f2 int first;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 3 1
@@ -5754,7 +5754,7 @@ select relname, parttype, partkey from pg_partition where parentid=(select oid f
 (4 rows)
 
 alter table t1 modify f1 int after f2;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 2 1
@@ -5765,7 +5765,7 @@ select relname, parttype, partkey from pg_partition where parentid=(select oid f
 
 -- modify operation before add
 alter table t1 add f4 int after f2, modify f1 int after f2;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 3 1
@@ -5799,7 +5799,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 1 2
@@ -5841,7 +5841,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 3 1
@@ -5883,7 +5883,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 2 1
@@ -5926,7 +5926,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 3 1
@@ -5975,7 +5975,7 @@ partition by range (id) subpartition by range (birthday)
         )
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 3
@@ -6000,7 +6000,7 @@ Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 1
@@ -6033,7 +6033,7 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey
 insert into range_range values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(78,'girl','2014-06-24');
 insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 3
@@ -6058,7 +6058,7 @@ Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 1
@@ -6846,7 +6846,7 @@ partition by range(f1, f2)
         partition t1_p1 values less than (20, 0),
         partition t1_p2 values less than (30, 0)
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 1 2
@@ -6856,7 +6856,7 @@ select relname, parttype, partkey from pg_partition where parentid=(select oid f
 (4 rows)
 
 alter table t1 modify f1 int after f2, modify f3 int first, modify f2 int first;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 3 1
@@ -6866,7 +6866,7 @@ select relname, parttype, partkey from pg_partition where parentid=(select oid f
 (4 rows)
 
 alter table t1 modify f1 int after f2;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 2 1
@@ -6877,7 +6877,7 @@ select relname, parttype, partkey from pg_partition where parentid=(select oid f
 
 -- modify operation before add
 alter table t1 add f4 int after f2, modify f1 int after f2;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 3 1
@@ -6908,7 +6908,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 1 2
@@ -6948,7 +6948,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 3 1
@@ -6988,7 +6988,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 2 1
@@ -7029,7 +7029,7 @@ Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
  relname | parttype | partkey 
 ---------+----------+---------
  t1      | r        | 3 1
@@ -7077,7 +7077,7 @@ partition by range (id) subpartition by range (birthday)
                 subpartition p_3_b values less than(MAXVALUE)
         )
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 3
@@ -7100,7 +7100,7 @@ Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 1
@@ -7132,7 +7132,7 @@ partition by range (id) subpartition by range (birthday)
 insert into range_range values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(78,'girl','2014-06-24');
 insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 3
@@ -7155,7 +7155,7 @@ Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
 Has OIDs: no
 Options: orientation=row, storage_type=ustore, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 1
@@ -7345,12 +7345,12 @@ Check constraints:
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1');
- indkey |                                                                                                                                                                                                                                                                                                                                             indexprs                                                                                                                                                                                                                                                                                                                                              |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          indpred                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
---------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- 5 0    | ({FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 49}) :location 45 :refSynOid 0})                                                                                                                                                                                                                                                                                                                                                                                                        | {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 555 :opfuncid 181 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 5 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 60} {VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 65}) :location 63} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 7 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 7 :location 74}) :location 70 :refSynOid 0}) :location 68} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 80 :constvalue 4 [ 0 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 78}
- 0 0    | ({FUNCEXPR :funcid 870 :funcresulttype 25 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {VAR :varno 1 :varattno 3 :vartype 1043 :vartypmod 24 :varcollid 100 :varlevelsup 0 :varnoold 1 :varoattno 3 :location 141} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1}) :location 135 :refSynOid 0} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 4 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 4 :location 152}) :location 148 :refSynOid 0}) | 
- 1 2    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 
+select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1') order by 1,2,3;
+ indkey |                                                                                                                                                                                                                                                                                                                                                                      indexprs                                                                                                                                                                                                                                                                                                                                                                       |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      indpred
+--------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 0 0    | ({FUNCEXPR :funcid 870 :funcresulttype 25 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 100 :inputcollid 100 :fmtstr <> :nlsfmtstr <> :args ({RELABELTYPE :arg {VAR :varno 1 :varattno 3 :vartype 1043 :vartypmod 24 :varcollid 100 :varlevelsup 0 :varnoold 1 :varoattno 3 :location 141} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1}) :location 135 :refSynOid 0} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :fmtstr <> :nlsfmtstr <> :args ({VAR :varno 1 :varattno 4 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 4 :location 152}) :location 148 :refSynOid 0}) |
+ 1 2    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+ 5 0    | ({FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :fmtstr <> :nlsfmtstr <> :args ({VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 49}) :location 45 :refSynOid 0})                                                                                                                                                                                                                                                                                                                                                                                                                                 | {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 555 :opfuncid 181 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 5 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 60} {VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 65}) :location 63} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :fmtstr <> :nlsfmtstr <> :args ({VAR :varno 1 :varattno 7 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 7 :location 74}) :location 70 :refSynOid 0}) :location 68} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 80 :constvalue 4 [ 0 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 78}
 (3 rows)
 
 alter table t1 modify f1 int after f2, modify f4 int after f6, modify f5 int first;
@@ -7374,12 +7374,12 @@ Check constraints:
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1');
- indkey |                                                                                                                                                                                                                                                                                                                                           indexprs                                                                                                                                                                                                                                                                                                                                            |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             indpred                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
---------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- 1 0    | ({FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 5 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 62}) :location 58 :refSynOid 0})                                                                                                                                                                                                                                                                                                                                                                                                    | {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 555 :opfuncid 181 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 98} {VAR :varno 1 :varattno 5 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 103}) :location 101} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 7 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 7 :location 113}) :location 109 :refSynOid 0}) :location 107} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 120 :constvalue 4 [ 0 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 118}
- 0 0    | ({FUNCEXPR :funcid 870 :funcresulttype 25 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 100 :inputcollid 100 :args ({RELABELTYPE :arg {VAR :varno 1 :varattno 4 :vartype 1043 :vartypmod 24 :varcollid 100 :varlevelsup 0 :varnoold 1 :varoattno 4 :location 67} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 1 :location 69}) :location 61 :refSynOid 0} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 84}) :location 80 :refSynOid 0}) | 
- 3 2    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 
+select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1') order by 1,2,3;
+ indkey |                                                                                                                                                                                                                                                                                                                                                                    indexprs                                                                                                                                                                                                                                                                                                                                                                     |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          indpred
+--------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 0 0    | ({FUNCEXPR :funcid 870 :funcresulttype 25 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 100 :inputcollid 100 :fmtstr <> :nlsfmtstr <> :args ({RELABELTYPE :arg {VAR :varno 1 :varattno 4 :vartype 1043 :vartypmod 24 :varcollid 100 :varlevelsup 0 :varnoold 1 :varoattno 4 :location 67} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 1 :location 69}) :location 61 :refSynOid 0} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :fmtstr <> :nlsfmtstr <> :args ({VAR :varno 1 :varattno 6 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 6 :location 84}) :location 80 :refSynOid 0}) |
+ 1 0    | ({FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :fmtstr <> :nlsfmtstr <> :args ({VAR :varno 1 :varattno 5 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 62}) :location 58 :refSynOid 0})                                                                                                                                                                                                                                                                                                                                                                                                                             | {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 555 :opfuncid 181 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 98} {VAR :varno 1 :varattno 5 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 5 :location 103}) :location 101} {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :fmtstr <> :nlsfmtstr <> :args ({VAR :varno 1 :varattno 7 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 7 :location 113}) :location 109 :refSynOid 0}) :location 107} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 120 :constvalue 4 [ 0 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 118}
+ 3 2    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | 
 (3 rows)
 
 -- pg_attribute test
@@ -7395,7 +7395,7 @@ create table t1(f1 int, f2 int, f3 int);
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select attname, attnum, atthasdef, attisdropped from pg_attribute where attrelid = (select oid from pg_class where relname = 't1') and attnum > 0 order by attnum;
+select attname, attnum, atthasdef, attisdropped from pg_attribute where attrelid = (select oid from pg_class where relname = 't1') and attnum > 0 order by 1,2,3;
  attname | attnum | atthasdef | attisdropped 
 ---------+--------+-----------+--------------
  f1      |      1 | f         | f
@@ -7414,12 +7414,12 @@ alter table t1 modify f3 int first, modify f1 int after f2;
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select attname, attnum, atthasdef, attisdropped from pg_attribute where attrelid = (select oid from pg_class where relname = 't1') and attnum > 0 order by attnum;
+select attname, attnum, atthasdef, attisdropped from pg_attribute where attrelid = (select oid from pg_class where relname = 't1') and attnum > 0 order by 1,2,3;
  attname | attnum | atthasdef | attisdropped 
 ---------+--------+-----------+--------------
- f3      |      1 | f         | f
- f2      |      2 | f         | f
  f1      |      3 | f         | f
+ f2      |      2 | f         | f
+ f3      |      1 | f         | f
 (3 rows)
 
 -- pg_attrdef test
@@ -7440,7 +7440,7 @@ Indexes:
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select adnum, adsrc, adgencol from pg_attrdef where adrelid = (select oid from pg_class where relname = 't1') order by adnum;
+select adnum, adsrc, adgencol from pg_attrdef where adrelid = (select oid from pg_class where relname = 't1') order by 1,2,3;
  adnum |     adsrc      | adgencol 
 -------+----------------+----------
      1 | AUTO_INCREMENT | 
@@ -7462,7 +7462,7 @@ Indexes:
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select adnum, adsrc, adgencol from pg_attrdef where adrelid = (select oid from pg_class where relname = 't1') order by adnum;
+select adnum, adsrc, adgencol from pg_attrdef where adrelid = (select oid from pg_class where relname = 't1') order by 1,2,3;
  adnum | adsrc | adgencol 
 -------+-------+----------
 (0 rows)
@@ -7564,7 +7564,7 @@ Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 3
@@ -7587,7 +7587,7 @@ Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 2
@@ -7610,7 +7610,7 @@ Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
    relname   | parttype | partkey 
 -------------+----------+---------
  p_1         | p        | 1
@@ -7797,7 +7797,7 @@ Triggers:
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select tgname, tgattr, tgqual from pg_trigger where tgrelid = (select oid from pg_class where relname='t1') order by tgname;
+select tgname, tgattr, tgqual from pg_trigger where tgrelid = (select oid from pg_class where relname='t1') order by 1,2,3;
      tgname     | tgattr |                                                                                                                                                                tgqual                                                                                                                                                                 
 ----------------+--------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  f1_trig_insert |        | {BOOLEXPR :boolop not :args ({VAR :varno 2 :varattno 1 :vartype 16 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 2 :varoattno 1 :location 80}) :location 76}
@@ -7821,7 +7821,7 @@ Triggers:
 Has OIDs: no
 Options: orientation=row, compression=no
 
-select tgname, tgattr, tgqual from pg_trigger where tgrelid = (select oid from pg_class where relname='t1') order by tgname;
+select tgname, tgattr, tgqual from pg_trigger where tgrelid = (select oid from pg_class where relname='t1') order by 1,2,3;
      tgname     | tgattr |                                                                                                                                                                tgqual                                                                                                                                                                 
 ----------------+--------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  f1_trig_insert |        | {BOOLEXPR :boolop not :args ({VAR :varno 2 :varattno 4 :vartype 16 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 2 :varoattno 4 :location 80}) :location 76}

@@ -702,11 +702,11 @@ partition by range(f1, f2)
         partition t1_p1 values less than (20, 0),
         partition t1_p2 values less than (30, 0)
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 alter table t1 add f4 int first, add f5 int after f1;
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 -- subpartition table
 drop table if exists range_range cascade;
@@ -734,10 +734,10 @@ insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14')
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
 
 -- test pg_partition
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 alter table range_range add f1 int default 1 first, add f2 text after id;
 \d+ range_range
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 select * from range_range;
 
 -- pg_constraint test
@@ -1363,11 +1363,11 @@ partition by range(f1, f2)
         partition t1_p1 values less than (20, 0),
         partition t1_p2 values less than (30, 0)
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 alter table t1 add f4 int first, add f5 int after f1;
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 -- subpartition table
 drop table if exists range_range cascade;
@@ -1395,10 +1395,10 @@ insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14')
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
 
 -- test pg_partition
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 alter table range_range add f1 int default 1 first, add f2 text after id;
 \d+ range_range
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 select * from range_range;
 
 -- USTORE table
@@ -1853,11 +1853,11 @@ partition by range(f1, f2)
         partition t1_p1 values less than (20, 0),
         partition t1_p2 values less than (30, 0)
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 alter table t1 add f4 int first, add f5 int after f1;
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 -- subpartition table
 drop table if exists range_range cascade;
@@ -1886,10 +1886,10 @@ insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12')
 
 
 -- test pg_partition
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 alter table range_range add f1 int default 1 first, add f2 text after id;
 \d+ range_range
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 select * from range_range;
 
 -- orientation = column not support
@@ -2306,17 +2306,17 @@ partition by range(f1, f2)
         partition t1_p1 values less than (20, 0),
         partition t1_p2 values less than (30, 0)
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 alter table t1 modify f1 int after f2, modify f3 int first, modify f2 int first;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 alter table t1 modify f1 int after f2;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 -- modify operation before add
 alter table t1 add f4 int after f2, modify f1 int after f2;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 drop table if exists t1 cascade;
 create table t1
@@ -2329,28 +2329,28 @@ partition by range(f1, f2)
 );
 insert into t1 values(9, -1, 1), (19, -1, 2), (29, -1, 3);
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 select * from t1 partition (t1_p0);
 select * from t1 partition (t1_p1);
 select * from t1 partition (t1_p2);
 
 alter table t1 modify f1 int after f2, modify f3 int first, modify f2 int first;
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 select * from t1 partition (t1_p0);
 select * from t1 partition (t1_p1);
 select * from t1 partition (t1_p2);
 
 alter table t1 modify f1 int after f2;
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 select * from t1 partition (t1_p0);
 select * from t1 partition (t1_p1);
 select * from t1 partition (t1_p2);
 
 alter table t1 add f4 int after f2, modify f1 int after f2;
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 select * from t1 partition (t1_p0);
 select * from t1 partition (t1_p1);
 select * from t1 partition (t1_p2);
@@ -2376,11 +2376,11 @@ partition by range (id) subpartition by range (birthday)
                 subpartition p_3_b values less than(MAXVALUE)
         )
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 alter table range_range modify birthday date first, modify id int after gender;
 \d+ range_range
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 
 drop table if exists range_range cascade;
@@ -2408,11 +2408,11 @@ insert into range_range values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(
 insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 alter table range_range modify birthday date first, modify id int after gender;
 \d+ range_range
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 select * from range_range;
 
@@ -2614,17 +2614,17 @@ partition by range(f1, f2)
         partition t1_p1 values less than (20, 0),
         partition t1_p2 values less than (30, 0)
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 alter table t1 modify f1 int after f2, modify f3 int first, modify f2 int first;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 alter table t1 modify f1 int after f2;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 -- modify operation before add
 alter table t1 add f4 int after f2, modify f1 int after f2;
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 
 drop table if exists t1 cascade;
 create table t1
@@ -2637,28 +2637,28 @@ partition by range(f1, f2)
 );
 insert into t1 values(9, -1, 1), (19, -1, 2), (29, -1, 3);
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 select * from t1 partition (t1_p0);
 select * from t1 partition (t1_p1);
 select * from t1 partition (t1_p2);
 
 alter table t1 modify f1 int after f2, modify f3 int first, modify f2 int first;
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 select * from t1 partition (t1_p0);
 select * from t1 partition (t1_p1);
 select * from t1 partition (t1_p2);
 
 alter table t1 modify f1 int after f2;
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 select * from t1 partition (t1_p0);
 select * from t1 partition (t1_p1);
 select * from t1 partition (t1_p2);
 
 alter table t1 add f4 int after f2, modify f1 int after f2;
 \d+ t1
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1');
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='t1') order by 1,2,3;
 select * from t1 partition (t1_p0);
 select * from t1 partition (t1_p1);
 select * from t1 partition (t1_p2);
@@ -2684,11 +2684,11 @@ partition by range (id) subpartition by range (birthday)
                 subpartition p_3_b values less than(MAXVALUE)
         )
 );
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 alter table range_range modify birthday date first, modify id int after gender;
 \d+ range_range
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 
 drop table if exists range_range cascade;
@@ -2716,11 +2716,11 @@ insert into range_range values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(
 insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
 
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 alter table range_range modify birthday date first, modify id int after gender;
 \d+ range_range
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 select * from range_range;
 
@@ -2776,31 +2776,31 @@ create table t1
 create unique index partial_t1_idx on t1(f5, abs(f6)) where f5 + f6 - abs(f7) > 0;
 
 \d+ t1
-select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1');
+select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1') order by 1,2,3;
 
 alter table t1 modify f1 int after f2, modify f4 int after f6, modify f5 int first;
 \d+ t1
-select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1');
+select indkey, indexprs, indpred from pg_index where indrelid = (select oid from pg_class where relname = 't1') order by 1,2,3;
 
 -- pg_attribute test
 drop table if exists t1 cascade;
 create table t1(f1 int, f2 int, f3 int);
 \d+ t1
-select attname, attnum, atthasdef, attisdropped from pg_attribute where attrelid = (select oid from pg_class where relname = 't1') and attnum > 0 order by attnum;
+select attname, attnum, atthasdef, attisdropped from pg_attribute where attrelid = (select oid from pg_class where relname = 't1') and attnum > 0 order by 1,2,3;
 
 alter table t1 modify f3 int first, modify f1 int after f2;
 \d+ t1
-select attname, attnum, atthasdef, attisdropped from pg_attribute where attrelid = (select oid from pg_class where relname = 't1') and attnum > 0 order by attnum;
+select attname, attnum, atthasdef, attisdropped from pg_attribute where attrelid = (select oid from pg_class where relname = 't1') and attnum > 0 order by 1,2,3;
 
 -- pg_attrdef test
 drop table if exists t1 cascade;
 create table t1(f1 int primary key auto_increment, f2 int, f3 int default 3, f4 int generated always as (f2 + f3) stored);
 \d+ t1
-select adnum, adsrc, adgencol from pg_attrdef where adrelid = (select oid from pg_class where relname = 't1') order by adnum;
+select adnum, adsrc, adgencol from pg_attrdef where adrelid = (select oid from pg_class where relname = 't1') order by 1,2,3;
 
 alter table t1 modify f3 int first, modify f1 int after f4, modify f4 int first;
 \d+ t1
-select adnum, adsrc, adgencol from pg_attrdef where adrelid = (select oid from pg_class where relname = 't1') order by adnum;
+select adnum, adsrc, adgencol from pg_attrdef where adrelid = (select oid from pg_class where relname = 't1') order by 1,2,3;
 
 -- pg_depend test
 drop table if exists t1 cascade;
@@ -2840,15 +2840,15 @@ insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14')
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
 
 \d+ range_range
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 alter table range_range modify gender varchar after birthday;
 \d+ range_range
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 alter table range_range modify birthday date first, modify id int after gender;
 \d+ range_range
-select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by relname;
+select relname, parttype, partkey from pg_partition where parentid=(select oid from pg_class where relname='range_range') order by 1,2,3;
 
 
 -- pg_rewrite test
@@ -2895,11 +2895,11 @@ create trigger f1_trig_insert after insert on t1 for each row
         when (not new.f1) execute procedure dummy_update_func('insert');
 
 \d+ t1
-select tgname, tgattr, tgqual from pg_trigger where tgrelid = (select oid from pg_class where relname='t1') order by tgname;
+select tgname, tgattr, tgqual from pg_trigger where tgrelid = (select oid from pg_class where relname='t1') order by 1,2,3;
 
 alter table t1 modify f3 int first, modify f1 boolean after f4;
 \d+ t1
-select tgname, tgattr, tgqual from pg_trigger where tgrelid = (select oid from pg_class where relname='t1') order by tgname;
+select tgname, tgattr, tgqual from pg_trigger where tgrelid = (select oid from pg_class where relname='t1') order by 1,2,3;
 
 -- pg_rlspolicy test
 drop table if exists t1 cascade;
