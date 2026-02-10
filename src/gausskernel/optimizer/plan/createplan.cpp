@@ -814,7 +814,7 @@ static bool ScanQualsViolateNotNullConstr(PlannerInfo* root, RelOptInfo* rel, Pa
         if (IsA(clause, RestrictInfo) && IsA(((RestrictInfo*)clause)->clause, NullTest)) {
             NullTest* expr = (NullTest*)((RestrictInfo*)clause)->clause;
             /* For attribute with NOT-NULL constraint, IS-NULL expression can be short-circuited */
-            if (expr->nulltesttype != IS_NULL || !IsA(expr->arg, Var)) {
+            if (expr->nulltesttype != IS_NULL || !IsA(expr->arg, Var) || expr->argisrow) {
                 continue;
             }
             if (check_var_nonnullable(root->parse, (Node*)expr->arg)) {
