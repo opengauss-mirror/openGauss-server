@@ -1541,6 +1541,7 @@ typedef struct UpsertState
     List            *us_excludedtlist;      /* the excluded pseudo relation's tlist */
     TupleTableSlot  *us_updateproj;         /* slot to update */
     List            *us_updateWhere;        /* state for the upsert where clause */
+    List            *us_arbiterIndexes;     /* List of ON CONFLICT arbiter index OIDs  */
 } UpsertState;
 
 /* ----------------

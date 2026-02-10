@@ -25,6 +25,7 @@
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_constraint.h"
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
 #include "nodes/makefuncs.h"
@@ -42,6 +43,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_target.h"
 #include "parser/parse_cte.h"
+#include "parser/parser.h"
 #include "parser/parse_type.h"
 #include "pgxc/pgxc.h"
 #include "rewrite/rewriteManip.h"
@@ -3748,4 +3750,164 @@ void pretransformAggWithUserSet(ParseState* pstate, List** targetList, Node* gro
     pstate->p_target_list = *targetList;
 
     return;
+}
+
+/*
+ * resolve_unique_index_expr
+ *		Infer a unique index from a list of indexElems, for ON
+ *		CONFLICT clause
+ *
+ * Perform parse analysis of expressions and columns appearing within ON
+ * CONFLICT clause.  During planning, the returned list of expressions is used
+ * to infer which unique index to use.
+ */
+static List* resolve_unique_index_expr(ParseState* pstate, InferClause* infer, Relation heapRel)
+{
+    List* result = NIL;
+    ListCell* l;
+
+    foreach (l, infer->indexElems) {
+        IndexElem* ielem = (IndexElem*)lfirst(l);
+        InferenceElem* pInfer = makeNode(InferenceElem);
+        Node* parse;
+
+        /*
+         * Raw grammar re-uses CREATE INDEX infrastructure for unique index
+         * inference clause, and so will accept opclasses by name and so on.
+         *
+         * Make no attempt to match ASC or DESC ordering or NULLS FIRST/NULLS
+         * LAST ordering, since those are not significant for inference
+         * purposes (any unique index matching the inference specification in
+         * other regards is accepted indifferently).  Actively reject this as
+         * wrong-headed.
+         */
+        if (ielem->ordering != SORTBY_DEFAULT)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("ASC/DESC is not allowed in ON CONFLICT clause"),
+                     parser_errposition(pstate, exprLocation((Node*)infer))));
+        if (ielem->nulls_ordering != SORTBY_NULLS_DEFAULT)
+            ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+                            errmsg("NULLS FIRST/LAST is not allowed in ON CONFLICT clause"),
+                            parser_errposition(pstate, exprLocation((Node*)infer))));
+
+        if (!ielem->expr) {
+            /* Simple index attribute */
+            ColumnRef* n;
+
+            /*
+             * Grammar won't have built raw expression for us in event of
+             * plain column reference.  Create one directly, and perform
+             * expression transformation.  Planner expects this, and performs
+             * its own normalization for the purposes of matching against
+             * pg_index.
+             */
+            n = makeNode(ColumnRef);
+            n->fields = list_make1(makeString(ielem->name));
+            /* Location is approximately that of inference specification */
+            n->location = infer->location;
+            parse = (Node*)n;
+        } else {
+            /* Do parse transformation of the raw expression */
+            parse = (Node*)ielem->expr;
+        }
+
+        /*
+         * transformExpr() will reject subqueries, aggregates, window
+         * functions, and SRFs, based on being passed
+         * EXPR_KIND_INDEX_EXPRESSION.  So we needn't worry about those
+         * further ... not that they would match any available index
+         * expression anyway.
+         */
+        pInfer->expr = transformExpr(pstate, parse, EXPR_KIND_INDEX_EXPRESSION);
+
+        /* Perform lookup of collation and operator class as required */
+        if (!ielem->collation) {
+            pInfer->infercollid = InvalidOid;
+        } else {
+            pInfer->infercollid = LookupCollation(pstate, ielem->collation, exprLocation(pInfer->expr));
+        }
+
+        if (!ielem->opclass) {
+            pInfer->inferopclass = InvalidOid;
+        } else {
+            pInfer->inferopclass = get_opclass_oid(BTREE_AM_OID, ielem->opclass, false);
+        }
+
+        result = lappend(result, pInfer);
+    }
+
+    return result;
+}
+
+/*
+ * transformOnConflictArbiter -
+ *		transform arbiter expressions in an ON CONFLICT clause.
+ *
+ * Transformed expressions used to infer one unique index relation to serve as
+ * an ON CONFLICT arbiter.  Partial unique indexes may be inferred using WHERE
+ * clause from inference specification clause.
+ */
+void transformOnConflictArbiter(ParseState* pstate, UpsertClause* upsertClause, List** arbiterExpr, Node** arbiterWhere,
+                                Oid* constraint)
+{
+    InferClause* infer = upsertClause->infer;
+    Relation rel = (Relation)linitial(pstate->p_target_relation);
+
+    *arbiterExpr = NIL;
+    *arbiterWhere = NULL;
+    *constraint = InvalidOid;
+
+    if (upsertClause->action == ONCONFLICT_UPDATE && !infer)
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("ON CONFLICT DO UPDATE requires inference specification or constraint name"),
+                        errhint("For example, ON CONFLICT (column_name)."),
+                        parser_errposition(pstate, exprLocation((Node*)upsertClause))));
+
+    /*
+     * To simplify certain aspects of its design, speculative insertion into
+     * system catalogs is disallowed
+     */
+    if (IsCatalogRelation(rel))
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("ON CONFLICT is not supported with system catalog tables"),
+                        parser_errposition(pstate, exprLocation((Node*)upsertClause))));
+
+    /* Same applies to table used by logical decoding as catalog table */
+    if (RelationIsUsedAsCatalogTable(rel))
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("ON CONFLICT is not supported on table \"%s\" used as a catalog table",
+                               RelationGetRelationName(rel)),
+                        parser_errposition(pstate, exprLocation((Node*)upsertClause))));
+
+    /* ON CONFLICT DO NOTHING does not require an inference clause */
+    if (infer) {
+        if (infer->indexElems)
+            *arbiterExpr = resolve_unique_index_expr(pstate, infer, rel);
+
+        /*
+         * Handling inference WHERE clause (for partial unique index
+         * inference)
+         */
+        if (infer->whereClause)
+            *arbiterWhere = transformExpr(pstate, infer->whereClause, EXPR_KIND_INDEX_PREDICATE);
+
+        /*
+         * If the arbiter is specified by constraint name, get the constraint
+         * OID and mark the constrained columns as requiring SELECT privilege,
+         * in the same way as would have happened if the arbiter had been
+         * specified by explicit reference to the constraint's index columns.
+         */
+        if (infer->conname) {
+            Oid relid = RelationGetRelid(rel);
+            RangeTblEntry* rte = (RangeTblEntry*)linitial(pstate->p_target_rangetblentry);
+            Bitmapset* conattnos;
+
+            conattnos = get_relation_constraint_attnos(relid, infer->conname, false, constraint);
+
+            /* Make sure the rel as a whole is marked for SELECT access */
+            rte->requiredPerms |= ACL_SELECT;
+            /* Mark the constrained columns as requiring SELECT access */
+            rte->selectedCols = bms_add_members(rte->selectedCols, conattnos);
+        }
+    }
 }

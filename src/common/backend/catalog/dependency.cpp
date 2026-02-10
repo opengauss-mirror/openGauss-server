@@ -2119,6 +2119,10 @@ static bool find_expr_references_walker(Node* node, find_expr_references_context
         CoerceToDomain* cd = (CoerceToDomain*)node;
 
         add_object_address(OCLASS_TYPE, cd->resulttype, 0, context->addrs);
+    } else if (IsA(node, UpsertExpr)) {
+        UpsertExpr *onconflict = (UpsertExpr*)node;
+        if (OidIsValid(onconflict->constraint))
+            add_object_address(OCLASS_CONSTRAINT, onconflict->constraint, 0, context->addrs);
     } else if (IsA(node, SortGroupClause)) {
         SortGroupClause* sgc = (SortGroupClause*)node;
 

@@ -26,6 +26,8 @@ extern List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation 
 
 extern void get_relation_info(PlannerInfo* root, RangeTblEntry* rte, RelOptInfo* rel);
 
+extern List* infer_arbiter_indexes(PlannerInfo *root);
+
 extern void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, double* tuples, double* allvisfrac,
     List** sampledPartitionIds, int* totalPartitions);
 

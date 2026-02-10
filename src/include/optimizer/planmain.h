@@ -129,7 +129,7 @@ extern Plan* make_modifytable(PlannerInfo* root, CmdType operation, bool canSetT
     bool partKeyUpdated, Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList,
     UpsertExpr* upsertClause);
 extern Plan* make_modifytables(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
-    List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated,
+                               List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated,
     Index mergeTargetRelation, List* mergeSourceTargetList, List *mergeActionList, UpsertExpr *upsertClause);
 extern Plan* make_redistribute_for_agg(PlannerInfo* root, Plan* lefttree, List* redistribute_keys, double multiple,
     Distribution* distribution = NULL, bool is_local_redistribute = false);

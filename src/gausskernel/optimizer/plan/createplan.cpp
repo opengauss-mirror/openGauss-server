@@ -10128,6 +10128,9 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
         node->exclRelTlist = upsertClause->exclRelTlist;
         node->exclRelRTIndex = upsertClause->exclRelIndex;
         node->upsertWhere = upsertClause->upsertWhere;
+        if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+            node->arbiterIndexes = infer_arbiter_indexes(root);
+        }
     } else {
         node->upsertAction = UPSERT_NONE;
         node->updateTlist = NIL;

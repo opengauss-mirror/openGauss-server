@@ -919,6 +919,26 @@ static void _outProjectSet(StringInfo str, const ProjectSet *node)
     _outPlanInfo(str, (Plan *)node);
 }
 
+static void _outArbiterIndexes(StringInfo str, ModifyTable* node)
+{
+    ListCell* lc = NULL;
+    appendStringInfo(str, " :" CppAsString(arbiterIndexes) " ");
+    appendStringInfo(str, "(");
+    foreach (lc, node->arbiterIndexes) {
+        Oid relid = lfirst_oid(lc);
+        const char* nsname = NULL;
+        const char* relname = NULL;
+
+        if (OidIsValid(relid)) {
+            nsname = isTempNamespace(get_rel_namespace(relid)) ? "pg_temp" : get_namespace_name(relid);
+            relname = get_rel_name(relid);
+        }
+        _outToken(str, nsname);
+        appendStringInfo(str, " ");
+        _outToken(str, relname);
+    }
+}
+
 static void _outModifyTable(StringInfo str, ModifyTable* node)
 {
     WRITE_NODE_TYPE("MODIFYTABLE");
@@ -969,6 +989,9 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
     if (t_thrd.proc->workingVersionNum >= MULTI_MODIFY_VERSION_NUM) {
         WRITE_NODE_FIELD(targetlists);
     }
+    if (t_thrd.proc->workingVersionNum >= MULTI_MODIFY_VERSION_NUM) {
+        _outArbiterIndexes(str, node);
+    }
 #endif		
     if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
         WRITE_NODE_FIELD(withCheckOptionLists);
@@ -980,10 +1003,24 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
 #endif
 }
 
+static void _outInferClause(StringInfo str, const InferClause* node)
+{
+    WRITE_NODE_TYPE("INFERCLAUSE");
+
+    WRITE_NODE_FIELD(indexElems);
+    WRITE_NODE_FIELD(whereClause);
+    WRITE_STRING_FIELD(conname);
+    WRITE_INT_FIELD(location);
+}
+
 static void _outUpsertClause(StringInfo str, const UpsertClause* node)
 {
     WRITE_NODE_TYPE("UPSERTCLAUSE");
 
+    if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+        WRITE_ENUM_FIELD(action, UpsertAction);
+        WRITE_NODE_FIELD(infer);
+    }
     WRITE_NODE_FIELD(targetList);
     if (t_thrd.proc->workingVersionNum >= UPSERT_ALIAS_VERSION_NUM) {
         WRITE_NODE_FIELD(aliasName);
@@ -1003,6 +1040,11 @@ static void _outUpsertExpr(StringInfo str, const UpsertExpr* node)
     WRITE_NODE_FIELD(exclRelTlist);
     WRITE_INT_FIELD(exclRelIndex);
     WRITE_NODE_FIELD(upsertWhere);
+    if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+        WRITE_NODE_FIELD(arbiterElems);
+        WRITE_NODE_FIELD(arbiterWhere);
+        WRITE_OID_FIELD(constraint);
+    }
 }
 static void _outMergeWhenClause(StringInfo str, const MergeWhenClause* node)
 {
@@ -3395,6 +3437,15 @@ static void _outFromExpr(StringInfo str, FromExpr* node)
 
     WRITE_NODE_FIELD(fromlist);
     WRITE_NODE_FIELD(quals);
+}
+
+static void _outInferenceElem(StringInfo str, const InferenceElem* node)
+{
+    WRITE_NODE_TYPE("INFERENCEELEM");
+
+    WRITE_NODE_FIELD(expr);
+    WRITE_OID_FIELD(infercollid);
+    WRITE_OID_FIELD(inferopclass);
 }
 
 static void _outMergeAction(StringInfo str, const MergeAction* node)
@@ -7182,6 +7233,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_FromExpr:
                 _outFromExpr(str, (FromExpr*)obj);
                 break;
+            case T_InferenceElem:
+                _outInferenceElem(str, (InferenceElem*)obj);
+                break;
             case T_MergeAction:
                 _outMergeAction(str, (MergeAction*)obj);
                 break;
@@ -7437,6 +7491,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_StartWithClause:
                 _outStartWithClause(str, (StartWithClause*)obj);
+                break;
+            case T_InferClause:
+                _outInferClause(str, (InferClause*)obj);
                 break;
             case T_UpsertClause:
                 _outUpsertClause(str, (UpsertClause*)obj);

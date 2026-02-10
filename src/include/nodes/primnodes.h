@@ -1570,6 +1570,20 @@ typedef struct {
     bool indexpath;
 } IndexVar;
 
+/*
+ * InferenceElem - an element of a unique index inference specification
+ *
+ * This mostly matches the structure of IndexElems, but having a dedicated
+ * primnode allows for a clean separation between the use of index parameters
+ * by utility commands, and this node.
+ */
+typedef struct InferenceElem {
+    Expr        xpr;
+    Node        *expr;          /* expression to infer from, or NULL */
+    Oid         infercollid;    /* OID of collation, or InvalidOid */
+    Oid         inferopclass;   /* OID of att opclass, or InvalidOid */
+} InferenceElem;
+
 typedef struct UpsertExpr {
     NodeTag type;
     UpsertAction upsertAction;    /* DO NOTHING or UPDATE? */
@@ -1579,6 +1593,11 @@ typedef struct UpsertExpr {
     List* exclRelTlist;       /* tlist of the 'EXCLUDED' pseudo relation */
     int exclRelIndex;         /* RT index of 'EXCLUDED' relation */
     Node* upsertWhere;        /* Qualifiers for upsert's update clause to check */
+
+    /* Arbiter for on conflict update */
+    List* arbiterElems; /* unique index arbiter list (of * InferenceElem's) */
+    Node* arbiterWhere; /* unique index arbiter WHERE clause */
+    Oid   constraint;   /* pg_constraint OID for arbiter */
 } UpsertExpr;
 
 #ifdef USE_SPQ

@@ -419,6 +419,9 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(exclRelTlist);
     COPY_SCALAR_FIELD(exclRelRTIndex);
     COPY_NODE_FIELD(upsertWhere);
+    if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+        COPY_NODE_FIELD(arbiterIndexes);
+    }
     COPY_NODE_FIELD(targetlists);
     COPY_NODE_FIELD(withCheckOptionLists);
 
@@ -3658,6 +3661,20 @@ static FromExpr* _copyFromExpr(const FromExpr* from)
     return newnode;
 }
 
+/*
+ * _copyInferenceElem
+ */
+static InferenceElem* _copyInferenceElem(const InferenceElem* from)
+{
+    InferenceElem* newnode = makeNode(InferenceElem);
+
+    COPY_NODE_FIELD(expr);
+    COPY_SCALAR_FIELD(infercollid);
+    COPY_SCALAR_FIELD(inferopclass);
+
+    return newnode;
+}
+
 static PartitionState* _copyPartitionState(const PartitionState* from)
 {
     PartitionState* newnode = makeNode(PartitionState);
@@ -3670,6 +3687,18 @@ static PartitionState* _copyPartitionState(const PartitionState* from)
     COPY_NODE_FIELD(subPartitionState);
     COPY_NODE_FIELD(partitionNameList);
     COPY_SCALAR_FIELD(partitionsNum);
+
+    return newnode;
+}
+
+static InferClause* _copyInferClause(const InferClause* from)
+{
+    InferClause* newnode = makeNode(InferClause);
+
+    COPY_NODE_FIELD(indexElems);
+    COPY_NODE_FIELD(whereClause);
+    COPY_STRING_FIELD(conname);
+    COPY_LOCATION_FIELD(location);
 
     return newnode;
 }
@@ -4177,7 +4206,10 @@ static WithClause* _copyWithClause(const WithClause* from)
 static UpsertClause* _copyUpsertClause(const UpsertClause* from)
 {
     UpsertClause* newnode = makeNode(UpsertClause);
-
+    if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+        COPY_SCALAR_FIELD(action);
+        COPY_NODE_FIELD(infer);
+    }
     COPY_NODE_FIELD(targetList);
     COPY_NODE_FIELD(aliasName);
     COPY_LOCATION_FIELD(location);
@@ -4195,6 +4227,11 @@ static UpsertExpr* _copyUpsertExpr(const UpsertExpr* from)
     COPY_NODE_FIELD(exclRelTlist);
     COPY_SCALAR_FIELD(exclRelIndex);
     COPY_NODE_FIELD(upsertWhere);
+    if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+        COPY_NODE_FIELD(arbiterElems);
+        COPY_NODE_FIELD(arbiterWhere);
+        COPY_SCALAR_FIELD(constraint);
+    }
 
     return newnode;
 }
@@ -8735,6 +8772,9 @@ void* copyObject(const void* from)
         case T_FromExpr:
             retval = _copyFromExpr((FromExpr*)from);
             break;
+        case T_InferenceElem:
+            retval = _copyInferenceElem((InferenceElem*)from);
+            break;
         case T_UpsertExpr:
             retval = _copyUpsertExpr((UpsertExpr *)from);
             break;
@@ -9449,6 +9489,9 @@ void* copyObject(const void* from)
             break;
         case T_WithClause:
             retval = _copyWithClause((WithClause*)from);
+            break;
+        case T_InferClause:
+            retval = _copyInferClause((InferClause*)from);
             break;
         case T_UpsertClause:
             retval = _copyUpsertClause((UpsertClause *)from);

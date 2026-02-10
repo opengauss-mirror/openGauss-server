@@ -474,6 +474,7 @@ typedef struct ModifyTable {
     Index exclRelRTIndex;			 /* RTI of the EXCLUDED pseudo relation */
     bool isReplace;
     Node* upsertWhere;          /* Qualifiers for upsert's update clause to check */
+    List* arbiterIndexes;       /* List of ON CONFLICT arbiter index OIDs  */
 
     OpMemInfo mem_info;    /*  Memory info for modify node */
     List* targetlists;     /* For multi-relation modifying */

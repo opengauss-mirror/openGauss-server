@@ -975,7 +975,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     Oid conflictPartOid = InvalidOid;
     int2 conflictBucketid = InvalidBktId;
     if (!ExecCheckIndexConstraints(slot, estate, targetrel, partition, &isgpi, bucketid, &conflictInfo,
-                                   &conflictPartOid, &conflictBucketid)) {
+                                   &conflictPartOid, &conflictBucketid, upsertState->us_arbiterIndexes)) {
         Partition part = NULL;
         Relation partition_relation = NULL;
         Relation bucketRel = NULL;
@@ -992,7 +992,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
             bucketid = conflictBucketid;
         }
         /* committed conflict tuple found */
-        if (upsertState->us_action == UPSERT_UPDATE) {
+        if (upsertState->us_action == UPSERT_UPDATE || upsertState->us_action == ONCONFLICT_UPDATE) {
             CheckPartitionOidForUpsertSpecifiedPartition(rte, resultRelationDesc, *targetPartOid);
             /*
              * In case of DUPLICATE KEY UPDATE, execute the UPDATE part.
@@ -1017,7 +1017,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
              * However, verify that the tuple is visible to the
              * executor's MVCC snapshot at higher isolation levels.
              */
-            Assert(upsertState->us_action == UPSERT_NOTHING);
+            Assert(upsertState->us_action == UPSERT_NOTHING || upsertState->us_action == ONCONFLICT_NOTHING);
             ExecCheckTIDVisible(targetrel, estate, targetrel, &conflictInfo.conflictTid);
             InstrCountFiltered2(&state->ps, 1);
             *updated = true;
@@ -1036,7 +1036,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     /* insert index entries for tuple */
     ItemPointerData item = TUPLE_IS_UHEAP_TUPLE(tuple) ? ((UHeapTuple)tuple)->ctid : ((HeapTuple)tuple)->t_self;
     recheckIndexes = ExecInsertIndexTuples(slot, &item, estate, heaprel,
-        partition, bucketid, &specConflict, NULL);
+        partition, bucketid, &specConflict, NULL, false, upsertState->us_arbiterIndexes);
 
     /* other transaction commit index insertion before us,
      * then abort the tuple and try to find the conflict tuple again
@@ -1360,7 +1360,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                      */
                     ExecStoreTuple((Tuple)tuple, slot, InvalidBuffer, !rel_isblockchain);
                 } else {
-                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("The tuple to be inserted into the table cannot be NULL")));
                 }
                 new_id =
@@ -3286,7 +3286,7 @@ static void fireBSTriggers(ModifyTableState* node)
     switch (node->operation) {
         case CMD_INSERT:
             ExecBSInsertTriggers(node->ps.state, resultRelInfo);
-            if (node->mt_upsert->us_action == UPSERT_UPDATE) {
+            if (node->mt_upsert->us_action == UPSERT_UPDATE || node->mt_upsert->us_action == ONCONFLICT_UPDATE) {
                 ExecBSUpdateTriggers(node->ps.state, resultRelInfo);
             }
             break;
@@ -3323,7 +3323,7 @@ static void fireASTriggers(ModifyTableState* node)
     int resultRelationNum = node->mt_ResultTupleSlots ? list_length(node->mt_ResultTupleSlots) : 1;
     switch (node->operation) {
         case CMD_INSERT:
-            if (node->mt_upsert->us_action == UPSERT_UPDATE) {
+            if (node->mt_upsert->us_action == UPSERT_UPDATE || node->mt_upsert->us_action == ONCONFLICT_UPDATE) {
                 ExecASUpdateTriggers(node->ps.state, resultRelInfo);
             }
             ExecASInsertTriggers(node->ps.state, resultRelInfo);
@@ -4195,12 +4195,13 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     mt_state->mt_nplans = nplans;
     mt_state->limitExprContext = NULL;
 
-    upsertState = (UpsertState*)palloc0(sizeof(UpsertState));
+    upsertState = (UpsertState*)makeNode(UpsertState);
     upsertState->us_action = node->upsertAction;
     upsertState->us_existing = NULL;
     upsertState->us_excludedtlist = NIL;
     upsertState->us_updateproj = NULL;
     upsertState->us_updateWhere = NIL;
+    upsertState->us_arbiterIndexes = NIL;
     mt_state->mt_upsert = upsertState;
     mt_state->isReplace = node->isReplace;
 
@@ -4462,7 +4463,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
      * If needed, Initialize target list, projection and qual for DUPLICATE KEY UPDATE
      */
     result_rel_info = mt_state->resultRelInfo;
-    if (node->upsertAction == UPSERT_UPDATE ||node->isReplace) {
+    if (node->upsertAction == UPSERT_UPDATE || node->isReplace || node->upsertAction == ONCONFLICT_UPDATE) {
         ExprContext* econtext = NULL;
         TupleDesc tupDesc;
 
@@ -4483,6 +4484,9 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         ExecSetSlotDescriptor(upsertState->us_existing, result_rel_info->ri_RelationDesc->rd_att);
 
         upsertState->us_excludedtlist = node->exclRelTlist;
+        if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+            upsertState->us_arbiterIndexes = node->arbiterIndexes;
+        }
 
         /* create target slot for UPDATE SET projection */
         tupDesc = ExecTypeFromTL((List*)node->updateTlist, result_rel_info->ri_RelationDesc->rd_rel->relhasoids);

@@ -4741,7 +4741,8 @@ List* RewriteQuery(Query* parsetree, List* rewrite_events)
             }
 
             if (parsetree->upsertClause != NULL &&
-                parsetree->upsertClause->upsertAction == UPSERT_UPDATE) {
+                (parsetree->upsertClause->upsertAction == UPSERT_UPDATE ||
+                parsetree->upsertClause->upsertAction == ONCONFLICT_UPDATE)) {
                 parsetree->upsertClause->updateTlist =
                     rewriteTargetListIU(parsetree->upsertClause->updateTlist, CMD_UPDATE,
                                         rt_entry_relation, result_relation, NULL,

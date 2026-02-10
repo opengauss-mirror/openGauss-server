@@ -2796,8 +2796,8 @@ static void ExplainNode(
             } else {
                 /* upsert cases */
                 ModifyTableState* mtstate = (ModifyTableState*)planstate;
-                if (mtstate->mt_upsert != NULL && 
-                    mtstate->mt_upsert->us_action != UPSERT_NONE && mtstate->resultRelInfo->ri_NumIndices > 0) {
+                if (mtstate->mt_upsert != NULL && mtstate->mt_upsert->us_action != UPSERT_NONE &&
+                    mtstate->resultRelInfo->ri_NumIndices > 0) {
                     show_on_duplicate_info(mtstate, es, ancestors);
                 }
                 /* non-merge cases */
@@ -8715,28 +8715,46 @@ static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es, 
     ResultRelInfo* resultRelInfo = mtstate->resultRelInfo;
     IndexInfo* indexInfo = NULL;
     List* idxNames = NIL;
+    ListCell *lst;
+    bool isOnConflict;
+    UpsertAction action = mtstate->mt_upsert->us_action;
 
     /* Gather names of ON CONFLICT Arbiter indexes */
-    for (int i = 0; i < resultRelInfo->ri_NumIndices; ++i) {
-        indexInfo = resultRelInfo->ri_IndexRelationInfo[i];
-        if (!indexInfo->ii_Unique && !indexInfo->ii_ExclusionOps) {
-            continue;
-        }
+    if (action == ONCONFLICT_UPDATE || action == ONCONFLICT_NOTHING) {
+        ModifyTable *node = (ModifyTable *)mtstate->ps.plan;
+        foreach (lst, node->arbiterIndexes) {
+            char* indexname = get_rel_name(lfirst_oid(lst));
 
-        Relation indexRelation = resultRelInfo->ri_IndexRelationDescs[i];
-        char* indexName = RelationGetRelationName(indexRelation);
-        idxNames = lappend(idxNames, indexName);
+            idxNames = lappend(idxNames, indexname);
+        }
+        isOnConflict = true;
+    } else {
+        for (int i = 0; i < resultRelInfo->ri_NumIndices; ++i) {
+            indexInfo = resultRelInfo->ri_IndexRelationInfo[i];
+            if (!indexInfo->ii_Unique && !indexInfo->ii_ExclusionOps) {
+                continue;
+            }
+
+            Relation indexRelation = resultRelInfo->ri_IndexRelationDescs[i];
+            char* indexName = RelationGetRelationName(indexRelation);
+            idxNames = lappend(idxNames, indexName);
+        }
+        isOnConflict = false;
     }
 
     ExplainPropertyText("Conflict Resolution",
-                        mtstate->mt_upsert->us_action == UPSERT_NOTHING ? "NOTHING" : "UPDATE",
-                        es);
+                        (action == UPSERT_NOTHING || action == ONCONFLICT_NOTHING) ? "NOTHING" : "UPDATE", es);
     /*
      * Don't display arbiter indexes at all when DO NOTHING variant
      * implicitly ignores all conflicts
      */
     if (idxNames != NIL) {
         ExplainPropertyList("Conflict Arbiter Indexes", idxNames, es);
+        if (isOnConflict) {
+            list_free_deep(idxNames);
+        } else {
+            list_free(idxNames);
+        }
     }
 
     /* Show ON DUPLICATE KEY UPDATE WHERE quals info if specified */
