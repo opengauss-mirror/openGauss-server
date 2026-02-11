@@ -162,7 +162,7 @@ void dw_generate_single_file()
     /* file head and first batch head will be writen */
     remain_size = (DW_SINGLE_DIRTY_PAGE_NUM + DW_SINGLE_BUFTAG_PAGE_NUM) * BLCKSZ;
     dw_prepare_file_head(file_head, 0, 0, 0);
-    dw_pwrite_file(fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME, true);
     rc = memset_s(file_head, BLCKSZ, 0, BLCKSZ);
     securec_check(rc, "\0", "\0");
     dw_extend_file(fd, file_head, DW_FILE_EXTEND_SIZE, remain_size, DW_SINGLE_FILE_SIZE, true, NULL);
@@ -465,7 +465,7 @@ void dw_force_reset_single_file(uint32 dw_version)
     }
 
     dw_prepare_file_head((char *)file_head, 0, file_head->head.dwn + 1);
-    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME, true);
     (void)pg_atomic_add_fetch_u64(&single_cxt->single_stat_info.file_reset_num, 1);
 
     ereport(LOG, (errmodule(MOD_DW),
@@ -475,7 +475,8 @@ void dw_force_reset_single_file(uint32 dw_version)
     if (dw_version == DW_SUPPORT_NEW_SINGLE_FLUSH) {
         file_head = single_cxt->second_file_head;
         dw_prepare_file_head((char *)file_head, 0, file_head->head.dwn + 1);
-        dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, (1 + DW_FIRST_DATA_PAGE_NUM) * BLCKSZ, SINGLE_DW_FILE_NAME);
+        dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, (1 + DW_FIRST_DATA_PAGE_NUM) * BLCKSZ,
+            SINGLE_DW_FILE_NAME, true);
         (void)pg_atomic_add_fetch_u64(&single_cxt->single_stat_info.second_file_reset_num, 1);
         ereport(LOG, (errmodule(MOD_DW),
             errmsg("DW single flush finish recovery [second version], reset the file head[dwn %hu, start %hu].",
@@ -557,7 +558,7 @@ void dw_single_file_truncate(bool is_first)
     dw_prepare_file_head((char *)file_head, file_head->start, file_head->head.dwn);
 
     Assert(file_head->head.dwn == file_head->tail.dwn);
-    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, head_offset, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, head_offset, SINGLE_DW_FILE_NAME, true);
     LWLockRelease(flush_lock);
 
     ereport(LOG, (errmodule(MOD_DW),
@@ -633,7 +634,7 @@ void dw_generate_new_single_file()
     /* first version page int */
     extend_size = DW_FIRST_DATA_PAGE_NUM * BLCKSZ;
     dw_prepare_file_head(file_head, 0, 0, DW_SUPPORT_NEW_SINGLE_FLUSH);
-    dw_pwrite_file(fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME, true);
 
     rc = memset_s(file_head, BLCKSZ, 0, BLCKSZ);
     securec_check(rc, "\0", "\0");
@@ -642,7 +643,7 @@ void dw_generate_new_single_file()
     /* second version page init */
     extend_size = (DW_SECOND_BUFTAG_PAGE_NUM + DW_SECOND_DATA_PAGE_NUM) * BLCKSZ;
     dw_prepare_file_head(file_head, 0, 0, DW_SUPPORT_NEW_SINGLE_FLUSH);
-    dw_pwrite_file(fd, file_head, BLCKSZ, (1 + DW_FIRST_DATA_PAGE_NUM) * BLCKSZ, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(fd, file_head, BLCKSZ, (1 + DW_FIRST_DATA_PAGE_NUM) * BLCKSZ, SINGLE_DW_FILE_NAME, true);
 
     rc = memset_s(file_head, BLCKSZ, 0, BLCKSZ);
     securec_check(rc, "\0", "\0");
@@ -710,7 +711,7 @@ uint16 first_version_dw_single_flush(BufferDesc *buf_desc)
     dw_set_pg_checksum(buf, item.buf_tag.blockNum);
     page_write_offset = (1 + actual_pos) * BLCKSZ;
     Assert(actual_pos < DW_FIRST_DATA_PAGE_NUM);
-    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, page_write_offset, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, page_write_offset, SINGLE_DW_FILE_NAME, true);
 
     (void)pg_atomic_add_fetch_u64(&dw_single_cxt->single_stat_info.total_writes, 1);
 
@@ -755,7 +756,7 @@ uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr pag
     Assert(page_write_offset < DW_NEW_SINGLE_FILE_SIZE && tag_write_offset < DW_SECOND_DATA_START_IDX * BLCKSZ);
 
     /* write the data page to dw file */
-    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, page_write_offset, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, page_write_offset, SINGLE_DW_FILE_NAME, true);
 
     item.data_page_idx = actual_pos;
     item.dwn = file_head->head.dwn;
@@ -771,7 +772,7 @@ uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr pag
     dw_pread_file(dw_single_cxt->fd, buf, BLCKSZ, tag_write_offset);
     rc = memcpy_s(buf + block_offset, BLCKSZ - block_offset, &item, sizeof(dw_single_flush_item));
     securec_check(rc, "\0", "\0");
-    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_write_offset, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_write_offset, SINGLE_DW_FILE_NAME, true);
 
     LWLockRelease(dw_single_cxt->second_buftag_lock);
     (void)pg_atomic_add_fetch_u64(&dw_single_cxt->single_stat_info.second_total_writes, 1);
@@ -849,7 +850,7 @@ void dw_single_file_recycle(bool is_first)
     securec_check(rc, "\0", "\0");
 
     dw_prepare_file_head((char *)file_head, 0, file_head->head.dwn + 1);
-    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, head_offset, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, head_offset, SINGLE_DW_FILE_NAME, true);
 
     /* The start and write_pos must be reset at the end. */
     file_head->start = 0;
@@ -965,7 +966,7 @@ static uint32 dw_recover_file_head(knl_g_dw_context *cxt, bool single, bool firs
             errmsg("DW check file size failed, expected_size %ld, actual_size %ld", DW_FILE_SIZE, offset)));
     }
 
-    dw_pwrite_file(cxt->fd, file_head, BLCKSZ, head_offset, single ? SINGLE_DW_FILE_NAME : OLD_DW_FILE_NAME);
+    dw_pwrite_file(cxt->fd, file_head, BLCKSZ, head_offset, single ? SINGLE_DW_FILE_NAME : OLD_DW_FILE_NAME, single);
     return dw_version;
 }
 
