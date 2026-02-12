@@ -372,6 +372,11 @@ void CryptoModuleParamsCheck(ArchiveHandle* AH, const char* params, const char* 
         securec_check_c(rc, "\0", "\0");
     }
 
+    rc = memset_s(fout->g_deriver_key, RANDOM_LEN, 0x0, RANDOM_LEN);
+    securec_check_c(rc, "\0", "\0");
+    rc = memset_s(fout->g_aes_vector, RANDOM_LEN, 0x0, RANDOM_LEN);
+    securec_check_c(rc, "\0", "\0");
+
     if (module_encrypt_salt == NULL || strlen(module_encrypt_salt) != 16) {
         exit_horribly(NULL, "salt is needed and must be 16 bytes\n");
     } else {

@@ -883,6 +883,24 @@ int main(int argc, char** argv)
                 rc = memcpy_s((GS_UCHAR*)fout->rand, RANDOM_LEN, encrypt_salt, RANDOM_LEN);
                 securec_check_c(rc, "\0", "\0");
             }
+
+            if (strcmp(encrypt_mode, "AES128") == 0) {
+                /* use PKCS5_deriveKey to dump the key for encryption */
+                errno_t errorno;
+                rc = PKCS5_PBKDF2_HMAC(
+                    (char*)encrypt_key, (GS_UINT32)strlen((const char*)encrypt_key), fout->rand, RANDOM_LEN, ITERATE_TIMES, (EVP_MD*)EVP_sha256(), RANDOM_LEN, fout->g_deriver_key);
+                if (!rc) {
+                    errorno = memset_s(fout->g_deriver_key, RANDOM_LEN, 0, RANDOM_LEN);
+                    securec_check_c(errorno, "", "");
+                    (void)exit_horribly(NULL, _("generate the derived key failed, errcode:%u\n"), rc);
+                }
+                
+                if (init_aes_vector_random(fout->g_aes_vector, RANDOM_LEN) == false) {
+                    errorno = memset_s(fout->g_deriver_key, RANDOM_LEN, 0, RANDOM_LEN);
+                    securec_check_c(errorno, "", "");
+                    (void)exit_horribly(NULL, _("generate the aes_vector failed, errcode:%u\n"), rc);
+                }
+            }
         }
     }
 

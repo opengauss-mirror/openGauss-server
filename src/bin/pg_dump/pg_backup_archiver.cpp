@@ -1737,7 +1737,9 @@ int ahwrite(const void* ptr, size_t size, size_t nmemb, ArchiveHandle* AH)
                     AH->publicArc.cryptoModuleCtx.key_ctx,
                     crypto_encrypt_decrypt_use,
                     AH->publicArc.cryptoModuleCtx.hmac_ctx,
-                    crypto_hmac_use);
+                    crypto_hmac_use,
+                    AH->publicArc.g_deriver_key,
+                    AH->publicArc.g_aes_vector);
                 if (!encrypt_result)
                     exit_horribly(modulename, "Encryption failed: %s\n", strerror(errno));
             } else {
@@ -3398,6 +3400,9 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
                 (void)ahprintf(AH, "BEGIN;\n");
             }
             (void)ahprintf(AH, "%s\n\n", te->defn);
+            if (AH->publicArc.encryptfile == true && strcmp(te->desc, "PROCEDURE") == 0) {
+                (void)ahprintf(AH, "/\n");
+            }
         }
     }
 

@@ -340,6 +340,8 @@ int MainLoop(FILE* source, char* querystring)
     bool is_b_format = false;
     char delimiter_name[DELIMITER_LENGTH]=";";
     char *line_temp = NULL;
+    GS_UINT32 retval = 0;
+    errno_t errorno = EOK;
 
     errno_t rc = 0;
 
@@ -369,6 +371,46 @@ int MainLoop(FILE* source, char* querystring)
     }
 
     is_b_format = IS_CMPT(pset.dbType, B_FORMAT);
+
+    /* decode for AES128 */
+    if (pset.decryptInfo.encryptInclude) {
+        int nread = 0;
+        GS_UCHAR cipherleninfo[RANDOM_LEN + 1] = {0};
+        if (!feof(source) && (false == pset.decryptInfo.isCurrLineProcess)) {
+            nread = (int)fread((void*)cipherleninfo, 1, RANDOM_LEN, source);
+            if (ferror(source)) {
+                printf("could not read from input file, errorno: %d\n", ferror(source));
+                exit(EXIT_FAILURE);
+            }
+            if (!nread) {
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (!pset.decryptInfo.randget) {
+            errorno = memcpy_s(pset.decryptInfo.rand, RANDOM_LEN + 1, cipherleninfo, RANDOM_LEN);
+            securec_check_c(errorno, "\0", "\0");
+            pset.decryptInfo.randget = true;
+        }
+        retval = PKCS5_PBKDF2_HMAC(
+            (char*)pset.decryptInfo.Key,
+            strlen((const char*)pset.decryptInfo.Key),
+            pset.decryptInfo.rand,
+            RANDOM_LEN,
+            ITERATE_TIMES,
+            (EVP_MD*)EVP_sha256(),
+            RANDOM_LEN,
+            pset.decryptInfo.g_decrypt_key);
+        if (!retval) {
+            /* clean the decrypt_key for security */
+            errorno = memset_s(pset.decryptInfo.g_decrypt_key, RANDOM_LEN, 0, RANDOM_LEN);
+            securec_check_c(errorno, "", "");
+            printf(_("generate the derived key failed.\n"));
+            exit(EXIT_FAILURE);
+        }
+    } else {
+        errorno = memset_s(pset.decryptInfo.g_decrypt_key, RANDOM_LEN, 0, RANDOM_LEN);
+        securec_check_c(errorno, "", "");
+    }
 
     /* main loop to get queries and execute them */
     while (successResult == EXIT_SUCCESS) {

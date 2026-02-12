@@ -97,6 +97,12 @@ struct Archive {
     /* Data importing/dumping support AES128 through OPENSSL */
     unsigned char rand[RANDOM_LEN + 1];
 
+    /* AES128 key */
+    unsigned char g_deriver_key[RANDOM_LEN];
+    unsigned char g_aes_vector[RANDOM_LEN];
+
+     /* crypto module params */
+
     int key_type;
     char crypto_type[CRYPTO_MODULE_ENC_TYPE_MAX_LEN];
     char crypto_module_params[CRYPTO_MODULE_PARAMS_MAX_LEN];
