@@ -69,7 +69,10 @@ public:
     {
 #if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
         uint32_t low, high;
-        __asm__ __volatile__("rdtscp" : "=a"(low), "=d"(high) : : "%rcx");
+        __asm__ __volatile__("mfence\n\t"
+                        "rdtsc"
+                        : "=a"(low), "=d"(high)
+            );
         return (((uint64_t)high << 32) | low);
 #elif defined(__aarch64__)
         unsigned long cval = 0;
