@@ -269,6 +269,48 @@ select t_p();
 drop procedure t_p(out ret varchar);
 
 set b_format_behavior_compat_options = '';
+drop function if exists f2;
+create function f2(x int) returns int set names abc AS $$
+begin
+return x;
+end;
+$$ language plpgsql;
+drop function f2;
+
+set b_format_behavior_compat_options = 'enable_multi_charset';
+create function f2(x int) returns int set names abc AS $$
+begin
+return x;
+end;
+$$ language plpgsql;
+drop function f2;
+
+set b_format_behavior_compat_options = 'enable_multi_charset';
+create function f2(x int) returns int set names GBK AS $$
+begin
+return x;
+end;
+$$ language plpgsql;
+drop function f2;
+
+set b_format_behavior_compat_options = 'enable_multi_charset';
+create function f2(x int) returns int set names UTF8 AS $$
+begin
+return x;
+end;
+$$ language plpgsql;
+drop function f2;
+
+
+set b_format_behavior_compat_options = 'default_collation';
+create function f2(x int) returns int set names abc AS $$
+begin
+return x;
+end;
+$$ language plpgsql;
+drop function f2;
+
+set b_format_behavior_compat_options = '';
 
 \c regression
 clean connection to all force for database d_charset_bak;
