@@ -1216,6 +1216,7 @@ int main(int argc, char** argv)
     else
         ropt->compression = compressLevel;
 
+    ropt->set_session = false;
     ropt->suppressDumpWarnings = true; /* We've already shown them */
 
     SetArchiveRestoreOptions(fout, ropt);

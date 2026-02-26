@@ -172,6 +172,7 @@ typedef struct _restoreOptions {
     bool disable_progress;
 #endif
     bool* idWanted; /* array showing which dump IDs to emit */
+    bool set_session; /* is start set session */
 } RestoreOptions;
 
 typedef struct {

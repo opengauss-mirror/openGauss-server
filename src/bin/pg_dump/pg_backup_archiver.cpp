@@ -149,12 +149,12 @@ static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* 
 static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt, bool isData, bool acl_pass);
 static char* replace_line_endings(const char* str);
 static void _doSetFixedOutputState(ArchiveHandle* AH);
-static void _doSetSessionAuth(ArchiveHandle* AH, const char* user);
+static void _doSetSessionAuth(ArchiveHandle* AH, const char* user, RestoreOptions *ropt);
 static void _doResetSessionAuth(ArchiveHandle* AH);
 static void _doSetWithOids(ArchiveHandle* AH, const bool withOids);
 static void _reconnectToDB(ArchiveHandle* AH, const char* dbname);
-static void _becomeUser(ArchiveHandle* AH, const char* user);
-static void _becomeOwner(ArchiveHandle* AH, TocEntry* te);
+static void _becomeUser(ArchiveHandle* AH, const char* user, RestoreOptions *ropt);
+static void _becomeOwner(ArchiveHandle* AH, TocEntry* te, RestoreOptions *ropt);
 static void _selectOutputSchema(ArchiveHandle* AH, const char* schemaName);
 static void _selectTablespace(ArchiveHandle* AH, const char* tablespace);
 static void processEncodingEntry(ArchiveHandle* AH, TocEntry* te);
@@ -645,7 +645,7 @@ void RestoreArchive(Archive* AHX)
                     ahlog(AH, 1, "dropping %s \"%s\"\n", te->desc, te->tag);
                 }
                 /* Select owner and schema as necessary */
-                _becomeOwner(AH, te);
+                _becomeOwner(AH, te, ropt);
                 _selectOutputSchema(AH, te->nmspace);
                 /* Drop it */
                 out_drop_stmt(AH, te);
@@ -719,6 +719,9 @@ void RestoreArchive(Archive* AHX)
             CommitTransaction(AH);
         else
             (void)ahprintf(AH, "COMMIT;\n\n");
+    } else if (ropt->set_session) {
+        (void)ahprintf(AH, "COMMIT;\n\n");
+        ropt->set_session = false;
     }
 
     if (AH->publicArc.verbose)
@@ -895,7 +898,7 @@ static int restore_toc_entry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ro
                     _disableTriggersIfNecessary(AH, te, ropt);
 
                     /* Select owner and schema as necessary */
-                    _becomeOwner(AH, te);
+                    _becomeOwner(AH, te, ropt);
                     _selectOutputSchema(AH, te->nmspace);
                     /* Show namespace if available */
                     if (te->nmspace) {
@@ -1001,7 +1004,7 @@ static void _disableTriggersIfNecessary(ArchiveHandle* AH, TocEntry* te, Restore
      * user identity is a superuser.  (XXX would it be better to become the
      * table owner?)
      */
-    _becomeUser(AH, ropt->superuser);
+    _becomeUser(AH, ropt->superuser, ropt);
 
     /*
      * Disable them.
@@ -1025,7 +1028,7 @@ static void _enableTriggersIfNecessary(ArchiveHandle* AH, TocEntry* te, RestoreO
      * user identity is a superuser.  (XXX would it be better to become the
      * table owner?)
      */
-    _becomeUser(AH, ropt->superuser);
+    _becomeUser(AH, ropt->superuser, ropt);
 
     /*
      * Enable them.
@@ -1255,6 +1258,11 @@ int EndBlob(Archive* AHX, Oid oid)
 void StartRestoreBlobs(ArchiveHandle* AH)
 {
     if (!AH->ropt->single_txn) {
+        /* Commit any existing SET SESSION AUTHORIZATION transaction first */
+        if (AH->ropt->set_session) {
+            (void)ahprintf(AH, "COMMIT;\n\n");
+            AH->ropt->set_session = false;
+        }
         if (NULL != (AH->connection))
             StartTransaction(AH);
         else
@@ -2863,10 +2871,21 @@ static void _doSetFixedOutputState(ArchiveHandle* AH)
  * for updating state if appropriate.  If user is NULL or an empty string,
  * the specification DEFAULT will be used.
  */
-static void _doSetSessionAuth(ArchiveHandle* AH, const char* user)
+static void _doSetSessionAuth(ArchiveHandle* AH, const char* user, RestoreOptions* ropt)
 {
     if (RestoringToDB(AH)) {
         _doResetSessionAuth(AH);
+        if (ropt->set_session && !ropt->single_txn) {
+            (void)ahprintf(AH, "COMMIT;\n\n");
+            ropt->set_session = false;
+        }
+    } else {
+        /* In script mode, also need to reset and commit if there's an existing transaction */
+        if (ropt->set_session && !ropt->single_txn) {
+            (void)ahprintf(AH, "RESET SESSION AUTHORIZATION;\n");
+            (void)ahprintf(AH, "COMMIT;\n\n");
+            ropt->set_session = false;
+        }
     }
     PQExpBuffer cmd = createPQExpBuffer();
     char* rolepassword = NULL;
@@ -2898,6 +2917,10 @@ static void _doSetSessionAuth(ArchiveHandle* AH, const char* user)
 
         PQclear(res);
     } else {
+        if (!ropt->single_txn) {
+            (void)ahprintf(AH, "BEGIN;\n\n");
+            ropt->set_session = true;
+        }
         (void)ahprintf(AH, "%s\n\n", cmd->data);
     }
 
@@ -2990,6 +3013,11 @@ static void _reconnectToDB(ArchiveHandle* AH, const char* dbname)
     AH->currTablespace = NULL;
     AH->currWithOids = (bool)-1;
 
+    /* Reset set_session flag when reconnecting to a new database */
+    if (AH->ropt != NULL) {
+        AH->ropt->set_session = false;
+    }
+
     /* re-establish fixed state */
     _doSetFixedOutputState(AH);
 }
@@ -2999,7 +3027,7 @@ static void _reconnectToDB(ArchiveHandle* AH, const char* dbname)
  *
  * NULL or empty argument is taken to mean restoring the session default
  */
-static void _becomeUser(ArchiveHandle* AH, const char* user)
+static void _becomeUser(ArchiveHandle* AH, const char* user, RestoreOptions* ropt)
 {
     if (NULL == user) {
         user = ""; /* avoid null pointers */
@@ -3008,7 +3036,7 @@ static void _becomeUser(ArchiveHandle* AH, const char* user)
     if ((AH->currUser != NULL) && strcmp(AH->currUser, user) == 0)
         return; /* no need to do anything */
 
-    _doSetSessionAuth(AH, user);
+    _doSetSessionAuth(AH, user, ropt);
 
     /*
      * NOTE: currUser keeps track of what the imaginary session user in our
@@ -3023,12 +3051,12 @@ static void _becomeUser(ArchiveHandle* AH, const char* user)
  * Become the owner of the given TOC entry object.	If
  * changes in ownership are not allowed, this doesn't do anything.
  */
-static void _becomeOwner(ArchiveHandle* AH, TocEntry* te)
+static void _becomeOwner(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt)
 {
     if ((AH->ropt != NULL) && (AH->ropt->noOwner || !AH->ropt->use_setsessauth))
         return;
 
-    _becomeUser(AH, te->owner);
+    _becomeUser(AH, te->owner, ropt);
 }
 
 /*
@@ -3282,7 +3310,7 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
     }
 
     /* Select owner, schema, and tablespace as necessary */
-    _becomeOwner(AH, te);
+    _becomeOwner(AH, te, ropt);
     _selectOutputSchema(AH, te->nmspace);
     _selectTablespace(AH, te->tablespace);
 
@@ -3396,7 +3424,7 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
         }
     } else {
         if (strlen(te->defn) > 0) {
-            if (strcmp(te->desc, "TRIGGER") == 0 && !ropt->single_txn) {
+            if (strcmp(te->desc, "TRIGGER") == 0 && !ropt->single_txn && !ropt->set_session) {
                 (void)ahprintf(AH, "BEGIN;\n");
             }
             (void)ahprintf(AH, "%s\n\n", te->defn);
@@ -3472,7 +3500,7 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
         }
     }
 
-    if (strlen(te->defn) > 0 && strcmp(te->desc, "TRIGGER") == 0 && !ropt->single_txn) {
+    if (strlen(te->defn) > 0 && strcmp(te->desc, "TRIGGER") == 0 && !ropt->single_txn && !ropt->set_session) {
         (void)ahprintf(AH, "COMMIT;\n\n");
     }
 
@@ -3875,6 +3903,11 @@ static void restore_toc_entries_parallel(ArchiveHandle* AH)
         free(AH->currTablespace);
     AH->currTablespace = NULL;
     AH->currWithOids = (bool)-1;
+
+    /* Reset set_session flag when disconnecting in parallel restore */
+    if (AH->ropt != NULL) {
+        AH->ropt->set_session = false;
+    }
 
     /*
      * Initialize the lists of pending and ready items.  After this setup, the
