@@ -42,6 +42,7 @@
 #include "gs_bbox.h"
 #endif
 #include "catalog/namespace.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"
 #include "commands/async.h"
@@ -58,6 +59,7 @@
 #include "libpq/be-fsstubs.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
+#include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "opfusion/opfusion.h"
 #include "optimizer/cost.h"
@@ -3790,6 +3792,29 @@ static void assign_b_format_behavior_compat_options(const char *newval, void *ex
     list_free(elemlist);
  
     u_sess->utils_cxt.b_format_behavior_compat_flags = result;
+
+    /*
+     * When enable_multi_charset is removed, sync reset collation_connection to
+     * avoid stale B-format collation when ENABLE_MULTI_CHARSET becomes false.
+     * See b6480cb03_root_cause_analysis.md for details.
+     */
+    if (u_sess->mb_cxt.backend_startup_complete &&
+        !(result & B_FORMAT_OPT_ENABLE_MULTI_CHARSET) &&
+        u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        u_sess->mb_cxt.collation_connection = InvalidOid;
+    }
+    /*
+     * When enable_multi_charset is added, sync assign collation_connection to
+     * default collation for database encoding when ENABLE_MULTI_CHARSET becomes
+     * true, if it was previously InvalidOid.
+     */
+    if (u_sess->mb_cxt.backend_startup_complete &&
+        (result & B_FORMAT_OPT_ENABLE_MULTI_CHARSET) &&
+        u_sess->attr.attr_sql.sql_compatibility == B_FORMAT &&
+        !OidIsValid(u_sess->mb_cxt.collation_connection)) {
+        Oid collid = get_default_collation_by_charset(GetDatabaseEncoding(), false);
+        u_sess->mb_cxt.collation_connection = collid;
+    }
 }
 /*
  * check_d_format_behavior_compat_options: GUC check_hook for behavior compat options

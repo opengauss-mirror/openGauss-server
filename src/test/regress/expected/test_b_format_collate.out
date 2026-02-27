@@ -132,11 +132,11 @@ SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%
          ->  Subquery Scan on "*SELECT* 1"
                ->  Aggregate
                      ->  Seq Scan on t_collate_index t
-                           Filter: (a ~~ 'abc%'::text COLLATE utf8mb4_general_ci)
+                           Filter: (a ~~ 'abc%'::text)
          ->  Subquery Scan on "*SELECT* 2"
                ->  Aggregate
                      ->  Index Only Scan using idx_t_collate_index on t_collate_index t
-                           Filter: (a ~~ 'abc%'::text COLLATE utf8mb4_general_ci)
+                           Filter: (a ~~ 'abc%'::text)
 (10 rows)
 
 SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%' COLLATE utf8mb4_general_ci
@@ -428,7 +428,7 @@ select 'abCdEf'::bpchar = 'abcdef'::bpchar collate "utf8mb4_general_ci";
 select 'abCdEf'::char(10) = 'abcdef'::char(10);
  ?column? 
 ----------
- f
+ t
 (1 row)
 
 select 'abCdEf'::char(10) = 'abcdef'::char(10) collate "utf8mb4_general_ci";
