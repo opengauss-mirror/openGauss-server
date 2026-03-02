@@ -2208,7 +2208,7 @@ static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, const Li
             continue;
         }
 
-        if (0 == strcmp(attname, ielem->name)) {
+        if (0 == strcmp(attname, ielem->name) || (DB_IS_CMPT(B_FORMAT) && 0 == pg_strcasecmp(attname, ielem->name))) {
             /* check the collation */
             if (NULL == ielem->collation) {
                 return true;
