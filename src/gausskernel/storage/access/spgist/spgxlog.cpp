@@ -497,7 +497,7 @@ static void spgRedoVacuumRedirect(XLogReaderState *record)
      * If any redirection tuples are being removed, make sure there are no
      * live Hot Standby transactions that might need to see them.
      */
-    if (InHotStandby && g_supportHotStandby) {
+    if (InHotStandby && g_supportHotStandby && !IS_EXRTO_READ) {
         spgxlogVacuumRedirect *xldata = (spgxlogVacuumRedirect *)ptr;
         if (TransactionIdIsValid(xldata->newestRedirectXid)) {
             RelFileNode node;

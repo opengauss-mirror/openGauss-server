@@ -536,9 +536,12 @@ XLogRecParseState *BtreeXlogInsertParseBlock(XLogReaderState *record, uint32 *bl
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, BTREE_INSERT_ORIG_BLOCK_NUM, recordstatehead);
 
-    if (info != XLOG_BTREE_INSERT_LEAF) {
+    if (info == XLOG_BTREE_INSERT_LEAF) {
+        XLogRecSetBlockDataState(record, BTREE_INSERT_ORIG_BLOCK_NUM, recordstatehead);
+    } else {
+        XLogRecSetBlockDataState(record, BTREE_INSERT_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE,
+                                     true);
         (*blocknum)++;
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
         if (blockstate == NULL) {
@@ -553,7 +556,7 @@ XLogRecParseState *BtreeXlogInsertParseBlock(XLogReaderState *record, uint32 *bl
         if (blockstate == NULL) {
             return NULL;
         }
-        XLogRecSetBlockDataState(record, BTREE_INSERT_META_BLOCK_NUM, blockstate);
+        XLogRecSetBlockDataState(record, BTREE_INSERT_META_BLOCK_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
     }
 
     return recordstatehead;
@@ -579,7 +582,7 @@ static XLogRecParseState *BtreeXlogSplitParseBlock(XLogReaderState *record, uint
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, BTREE_SPLIT_LEFT_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, BTREE_SPLIT_LEFT_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     XLogRecSetAuxiBlkNumState(&recordstatehead->blockparse.extra_rec.blockdatarec, rightsib, InvalidForkNumber);
 
     (*blocknum)++;
@@ -587,6 +590,8 @@ static XLogRecParseState *BtreeXlogSplitParseBlock(XLogReaderState *record, uint
     if (blockstate == NULL) {
         return NULL;
     }
+
+    // no need restore base page, because this is a new page
     XLogRecSetBlockDataState(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, blockstate);
     XLogRecSetAuxiBlkNumState(&blockstate->blockparse.extra_rec.blockdatarec, rnext, leftsib);
 
@@ -596,7 +601,7 @@ static XLogRecParseState *BtreeXlogSplitParseBlock(XLogReaderState *record, uint
         if (blockstate == NULL) {
             return NULL;
         }
-        XLogRecSetBlockDataState(record, BTREE_SPLIT_RIGHTNEXT_BLOCK_NUM, blockstate);
+        XLogRecSetBlockDataState(record, BTREE_SPLIT_RIGHTNEXT_BLOCK_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
         XLogRecSetAuxiBlkNumState(&blockstate->blockparse.extra_rec.blockdatarec, rightsib, InvalidForkNumber);
     }
 
@@ -606,6 +611,8 @@ static XLogRecParseState *BtreeXlogSplitParseBlock(XLogReaderState *record, uint
         if (blockstate == NULL) {
             return NULL;
         }
+
+        // just clear split flag,no need restore base page
         XLogRecSetBlockDataState(record, BTREE_SPLIT_CHILD_BLOCK_NUM, blockstate);
     }
 
@@ -622,7 +629,7 @@ static XLogRecParseState *BtreeXlogVacuumParseBlock(XLogReaderState *record, uin
         return NULL;
     }
 
-    XLogRecSetBlockDataState(record, BTREE_VACUUM_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, BTREE_VACUUM_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
     return recordstatehead;
 }
 
@@ -636,7 +643,7 @@ static XLogRecParseState *BtreeXlogDeleteParseBlock(XLogReaderState *record, uin
         return NULL;
     }
 
-    XLogRecSetBlockDataState(record, BTREE_DELETE_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, BTREE_DELETE_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     /* for hot standby, need to reslove the conflict */
     {
@@ -656,14 +663,14 @@ static XLogRecParseState *BtreeXlogMarkHalfdeadParseBlock(XLogReaderState *recor
         return NULL;
     }
 
-    XLogRecSetBlockDataState(record, BTREE_HALF_DEAD_PARENT_PAGE_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, BTREE_HALF_DEAD_PARENT_PAGE_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
     if (blockstate == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, BTREE_HALF_DEAD_LEAF_PAGE_NUM, blockstate);
+    XLogRecSetBlockDataState(record, BTREE_HALF_DEAD_LEAF_PAGE_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     return recordstatehead;
 }
@@ -681,7 +688,7 @@ static XLogRecParseState *BtreeXlogUnlinkPageParseBlock(XLogReaderState *record,
         return NULL;
     }
 
-    XLogRecSetBlockDataState(record, BTREE_UNLINK_PAGE_RIGHT_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, BTREE_UNLINK_PAGE_RIGHT_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     if (xlrec->leftsib != P_NONE) {
         (*blocknum)++;
@@ -689,7 +696,7 @@ static XLogRecParseState *BtreeXlogUnlinkPageParseBlock(XLogReaderState *record,
         if (blockstate == NULL) {
             return NULL;
         }
-        XLogRecSetBlockDataState(record, BTREE_UNLINK_PAGE_LEFT_NUM, blockstate);
+        XLogRecSetBlockDataState(record, BTREE_UNLINK_PAGE_LEFT_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
     }
 
     (*blocknum)++;
@@ -697,7 +704,7 @@ static XLogRecParseState *BtreeXlogUnlinkPageParseBlock(XLogReaderState *record,
     if (blockstate == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, BTREE_UNLINK_PAGE_CUR_PAGE_NUM, blockstate);
+    XLogRecSetBlockDataState(record, BTREE_UNLINK_PAGE_CUR_PAGE_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     if (XLogRecHasBlockRef(record, BTREE_UNLINK_PAGE_CHILD_NUM)) {
         (*blocknum)++;
@@ -705,7 +712,7 @@ static XLogRecParseState *BtreeXlogUnlinkPageParseBlock(XLogReaderState *record,
         if (blockstate == NULL) {
             return NULL;
         }
-        XLogRecSetBlockDataState(record, BTREE_UNLINK_PAGE_CHILD_NUM, blockstate);
+        XLogRecSetBlockDataState(record, BTREE_UNLINK_PAGE_CHILD_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
     }
 
     /* Update metapage if needed */
@@ -715,7 +722,7 @@ static XLogRecParseState *BtreeXlogUnlinkPageParseBlock(XLogReaderState *record,
         if (blockstate == NULL) {
             return NULL;
         }
-        XLogRecSetBlockDataState(record, BTREE_UNLINK_PAGE_META_NUM, blockstate);
+        XLogRecSetBlockDataState(record, BTREE_UNLINK_PAGE_META_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
     }
 
     return recordstatehead;
@@ -732,7 +739,7 @@ static XLogRecParseState *BtreeXlogNewrootParseBlock(XLogReaderState *record, ui
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, BTREE_NEWROOT_ORIG_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, BTREE_NEWROOT_ORIG_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     if (xlrec->level > 0) {
         (*blocknum)++;
@@ -740,7 +747,7 @@ static XLogRecParseState *BtreeXlogNewrootParseBlock(XLogReaderState *record, ui
         if (blockstate == NULL) {
             return NULL;
         }
-        XLogRecSetBlockDataState(record, BTREE_NEWROOT_LEFT_BLOCK_NUM, blockstate);
+        XLogRecSetBlockDataState(record, BTREE_NEWROOT_LEFT_BLOCK_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
     }
 
     (*blocknum)++;
@@ -748,7 +755,7 @@ static XLogRecParseState *BtreeXlogNewrootParseBlock(XLogReaderState *record, ui
     if (blockstate == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, BTREE_NEWROOT_META_BLOCK_NUM, blockstate);
+    XLogRecSetBlockDataState(record, BTREE_NEWROOT_META_BLOCK_NUM, blockstate, BLOCK_DATA_MAIN_DATA_TYPE, true);
 
     return recordstatehead;
 }
@@ -756,24 +763,16 @@ static XLogRecParseState *BtreeXlogNewrootParseBlock(XLogReaderState *record, ui
 static XLogRecParseState *BtreeXlogReusePageParseBlock(XLogReaderState *record, uint32 *blocknum)
 {
     XLogRecParseState *recordstatehead = NULL;
-    xl_btree_reuse_page *xlrec = (xl_btree_reuse_page *)XLogRecGetData(record);
 
-    *blocknum = 0;
-    if (g_supportHotStandby) {
-        (*blocknum)++;
-        XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
-        if (recordstatehead == NULL) {
-            return NULL;
-        }
+    *blocknum = 1;
 
-        RelFileNode rnode;
-        RelFileNodeCopy(rnode, xlrec->node, XLogRecGetBucketId(record));
-
-        RelFileNodeForkNum filenode =
-            RelFileNodeForkNumFill(&rnode, InvalidBackendId, InvalidForkNumber, InvalidBlockNumber);
-        XLogRecSetBlockCommonState(record, BLOCK_DATA_INVALIDMSG_TYPE, filenode, recordstatehead);
-        XLogRecSetInvalidMsgState(&recordstatehead->blockparse.extra_rec.blockinvalidmsg, xlrec->latestRemovedXid);
+    XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
     }
+
+    XLogRecSetBlockDataState(record, BTREE_REUSE_PAGE_BLOCK_NUM, recordstatehead, BLOCK_DATA_MAIN_DATA_TYPE, true);
+
     return recordstatehead;
 }
 
@@ -1046,6 +1045,11 @@ void BtreeRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
             break;
         case XLOG_BTREE_NEWROOT:
             BtreeXlogNewrootBlock(blockhead, blockdatarec, bufferinfo);
+            break;
+        case XLOG_BTREE_REUSE_PAGE:
+            if (!(IS_EXRTO_STANDBY_READ && g_instance.attr.attr_storage.enable_exrto_standby_read_opt)) {
+                ereport(PANIC, (errmsg("btree_redo_block: unknown op code %u", info)));
+            }
             break;
         default:
             ereport(PANIC, (errmsg("btree_redo_block: unknown op code %u", info)));

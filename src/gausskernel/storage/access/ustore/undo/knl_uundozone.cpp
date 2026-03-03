@@ -86,7 +86,7 @@ bool UndoZone::CheckNeedSwitch(void)
     return false;
 }
 
-bool UndoZone::CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp)
+bool UndoZone::CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp, bool isexrto)
 {
     int startZid = UNDO_PTR_GET_ZONE_ID(starturp);
     int endZid = UNDO_PTR_GET_ZONE_ID(endurp);
@@ -99,6 +99,10 @@ bool UndoZone::CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp)
         && (start < end)) {
         return true;
     }
+    ereport(WARNING, (errmodule(MOD_UNDO),
+                      errmsg(UNDOFORMAT("check_recycle: zone:%d, startZid:%d, endZid:%d, start:%lu, end:%lu, "
+                                        "forceDiscardURecPtr_:%lu, insertURecPtr_:%lu."),
+                             zid_, startZid, endZid, start, end, forceDiscardURecPtr_, insertURecPtr_)));
     return false;
 }
 

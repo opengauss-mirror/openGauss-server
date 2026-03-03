@@ -165,7 +165,8 @@ Buffer UBTreeGetRoot(Relation rel, int access)
             valid = PinBuffer(buf, NULL);
             if (valid) {
                 LockBuffer(rootbuf, BT_READ);
-                isRootCacheValid = RelFileNodeEquals(buf->tag.rnode, rel->rd_node) && (buf->tag.blockNum == rootblkno);
+                isRootCacheValid = RelFileNodeEquals(buf->tag.rnode, rel->rd_node) &&
+                                   (buf->tag.blockNum == rootblkno);
                 if (!isRootCacheValid)
                     UnlockReleaseBuffer(rootbuf);
             } else {

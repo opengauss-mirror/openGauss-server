@@ -265,6 +265,11 @@ typedef struct knl_session_attr_storage {
     int ignore_standby_lsn_window;
     int ignore_feedback_xmin_window;
     bool handle_toast_in_autovac;
+    // int subscription_conflict_resolution;
+
+    /* extreme-rto standby read */
+    int64 max_standby_base_page_size;
+    int64 max_standby_lsn_info_size;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */

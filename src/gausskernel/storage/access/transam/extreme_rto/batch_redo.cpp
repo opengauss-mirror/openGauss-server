@@ -36,33 +36,14 @@
 #include "storage/smgr/relfilenode_hash.h"
 #include "utils/relmapper.h"
 
-#include "access/extreme_rto/batch_redo.h"
 #include "access/extreme_rto/redo_item.h"
 #include "access/extreme_rto/dispatcher.h"
 #include "access/extreme_rto/page_redo.h"
+#include "access/extreme_rto/batch_redo.h"
 
 #include "access/xlogproc.h"
 
 namespace extreme_rto {
-static inline void PRXLogRecGetBlockTag(XLogRecParseState *recordBlockState, RelFileNode *rnode, BlockNumber *blknum,
-                                        ForkNumber *forknum)
-{
-    XLogBlockParse *blockparse = &(recordBlockState->blockparse);
-
-    if (rnode != NULL) {
-        rnode->dbNode = blockparse->blockhead.dbNode;
-        rnode->relNode = blockparse->blockhead.relNode;
-        rnode->spcNode = blockparse->blockhead.spcNode;
-        rnode->bucketNode = blockparse->blockhead.bucketNode;
-        rnode->opt = blockparse->blockhead.opt;
-    }
-    if (blknum != NULL) {
-        *blknum = blockparse->blockhead.blkno;
-    }
-    if (forknum != NULL) {
-        *forknum = blockparse->blockhead.forknum;
-    }
-}
 
 void PRInitRedoItemEntry(RedoItemHashEntry *redoItemHashEntry)
 {

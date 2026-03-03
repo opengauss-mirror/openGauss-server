@@ -77,7 +77,7 @@ extern void CacheInvalidateRelcacheByRelid(Oid relid);
 
 extern void CacheInvalidateSmgr(RelFileNodeBackend rnode);
 
-extern void CacheInvalidateRelmap(Oid databaseId);
+extern void CacheInvalidateRelmap(Oid databaseId, XLogRecPtr lsn);
 
 extern void CacheInvalidateHeapTupleInplace(Relation relation, HeapTuple tuple);
 
@@ -100,5 +100,6 @@ extern void CallSessionSyscacheCallbacks(int cacheid, uint32 hashvalue);
 extern void InvalidateSessionSystemCaches(void);
 extern void InvalidateThreadSystemCaches(void);
 extern void CacheInvalidateRelcacheAll(void);
+extern void reset_invalidation_cache();
 
 #endif /* INVAL_H */

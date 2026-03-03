@@ -66,7 +66,8 @@ extern void UnlockTuple(Relation relation, ItemPointer tid, LOCKMODE lockmode);
 extern void XactLockTableInsert(TransactionId xid);
 extern void XactLockTableDelete(TransactionId xid);
 extern void XactLockTableWait(TransactionId xid, bool allow_con_update = false, int waitSec = 0);
-extern bool ConditionalXactLockTableWait(TransactionId xid, bool waitparent = true, bool bCareNextxid = false);
+extern bool ConditionalXactLockTableWait(TransactionId xid, const Snapshot snapshot = NULL, bool waitparent = true,
+                                         bool bCareNextxid = false);
 
 /* Lock a SubXID */
 extern void SubXactLockTableInsert(SubTransactionId subxid);

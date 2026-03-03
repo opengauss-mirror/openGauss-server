@@ -80,7 +80,7 @@ static void XLogDumpXLogRead(const char* directory, TimeLineID timeline_id, XLog
 static int XLogDumpReadPage(XLogReaderState* state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetPtr,
     char* readBuff, TimeLineID* curFileTLI, char* xlog_path = NULL);
 static void XLogDumpCountRecord(XLogDumpConfig* config, XLogDumpStats* stats, XLogReaderState* record);
-static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* record);
+void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* record);
 static void XLogDumpStatsRow(const char* name, uint64 n, uint64 total_count, uint64 rec_len, uint64 total_rec_len,
     uint64 fpi_len, uint64 total_fpi_len, uint64 tot_len, uint64 total_len);
 static void XLogDumpDisplayStats(XLogDumpConfig* config, XLogDumpStats* stats);
@@ -509,7 +509,7 @@ static const char* XLogGetForkNames(ForkNumber forknum)
 /*
  * Print a record to stdout
  */
-static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* record)
+void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* record)
 {
     const RmgrDescData* desc = &RmgrDescTable[XLogRecGetRmid(record)];
     RelFileNode rnode;
@@ -551,12 +551,8 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
         XLogRecGetPhysicalBlock(record, block_id, &seg_fileno, &seg_blockno);
         
         // output format: ", blkref #%u: rel %u/%u/%u/%d storage %s fork %s blk %u (phy loc %u/%u) lastlsn %X/%X"
-        if (rnode.opt == 0) {
-            printf(", blkref #%u: rel %u/%u/%u", block_id, rnode.spcNode, rnode.dbNode, rnode.relNode);
-        } else {
-            printf(", blkref #%u: opt(%u) rel %u/%u/%u", block_id, rnode.opt, rnode.spcNode, rnode.dbNode,
-                   rnode.relNode);
-        }
+        printf(", blkref #%d: rel %u/%u/%u/%d/%d, forknum:%d", block_id, rnode.spcNode, rnode.dbNode, rnode.relNode,
+               rnode.bucketNode, rnode.opt, forknum);
         if (IsBucketFileNode(rnode)) {
             printf("/%d", rnode.bucketNode);
         }

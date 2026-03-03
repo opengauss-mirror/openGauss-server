@@ -86,6 +86,7 @@ XLogRecParseState *DbaseRedoParseToBlock(XLogReaderState *record, uint32 *blockn
 
     if ((info == XLOG_DBASE_CREATE) || (info == XLOG_DBASE_DROP)) {
         recordstatehead = DatabaseXlogCommonParseToBlock(record, blocknum);
+        recordstatehead->isFullSync = record->isFullSync;
     } else {
         ereport(PANIC,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("DbaseRedoParseToBlock: unknown op code %u", info)));

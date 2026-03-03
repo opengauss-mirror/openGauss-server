@@ -1027,7 +1027,7 @@ static void HashXlogAddOvflPageBlock(XLogBlockHead *blockhead, XLogBlockDataPars
 {
     XLogBlockDataParse *datadecode = blockdatarec;
     if (XLogBlockDataGetBlockId(datadecode) == XLOG_HASH_ADD_OVFL_PAGE_OVFL_NUM) {
-        Size blkdatalen;
+        Size blkdatalen = 0;
         char *blkdata = NULL;
         BlockNumber leftblk;
         blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);

@@ -1,4 +1,5 @@
 #This is the main CMAKE for build bin.
+add_subdirectory(standby_read)
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_redo_SRC)
 
 set(TGT_redo_INC 

@@ -546,7 +546,8 @@ UndoTraversalState FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRec
             return UNDO_TRAVERSAL_ABORT;
         }
 
-        if (isNeedBypass && TransactionIdPrecedes(urec->Xid(), g_instance.undo_cxt.globalFrozenXid)) {
+        if (isNeedBypass && TransactionIdPrecedes(urec->Xid(), g_instance.undo_cxt.globalFrozenXid) &&
+            !RecoveryInProgress()) {
             ereport(DEBUG1, (errmsg(UNDOFORMAT("Check visibility by globalFrozenXid"))));
             return UNDO_TRAVERSAL_STOP;
         }

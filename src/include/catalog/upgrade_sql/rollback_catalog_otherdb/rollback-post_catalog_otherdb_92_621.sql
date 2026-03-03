@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.gs_hot_standby_space_info() cascade;

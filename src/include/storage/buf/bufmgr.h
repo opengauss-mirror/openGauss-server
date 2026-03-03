@@ -30,6 +30,9 @@
 #define IsSegmentBufferID(id) ((id) >= SegmentBufferStartID)
 #define SharedBufferNumber (SegmentBufferStartID)
 
+#define ExrtoReadStartLSNBktId (-5)
+#define ExrtoReadEndLSNBktId (-6)
+
 #define USE_CKPT_THREAD_SYNC (!g_instance.attr.attr_storage.enableIncrementalCheckpoint ||  \
                                IsBootstrapProcessingMode() ||                               \
                                pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) < 1)
@@ -372,4 +375,13 @@ extern int64 RemoteReadFileSize(RemoteReadFileKey *key, int timeout);
 
 extern bool StartBufferIO(BufferDesc* buf, bool forInput);
 
+extern Buffer standby_read_buf(Relation reln, ForkNumber fork_num, BlockNumber block_num, ReadBufferMode mode,
+                        BufferAccessStrategy strategy);
+typedef struct SMgrRelationData *SMgrRelation;
+BufferDesc *BufferAlloc(const RelFileNode &rel_file_node, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
+                        BufferAccessStrategy strategy, bool *foundPtr, const XLogPhyBlock *pblk);
+Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
+    ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
+void buffer_in_progress_pop();
+void buffer_in_progress_push();
 #endif

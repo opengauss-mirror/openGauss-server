@@ -49,6 +49,7 @@ bool visibilitymap_clear_page(Page mapPage, BlockNumber heapBlk)
 void visibilitymap_clear_buffer(RedoBufferInfo *bufferInfo, BlockNumber heapBlk)
 {
     if (visibilitymap_clear_page(bufferInfo->pageinfo.page, heapBlk)) {
+        PageSetLSN(bufferInfo->pageinfo.page, bufferInfo->lsn, false);
         MakeRedoBufferDirty(bufferInfo);
     }
 }

@@ -119,7 +119,8 @@ typedef struct buftag {
     ForkNumber forkNum;
     BlockNumber blockNum; /* blknum relative to begin of reln */
 } BufferTag;
-#define IsSegmentFileNode(rnode) ((rnode).bucketNode > InvalidBktId)
+
+#define IsSegmentFileNode(rnode) ((rnode).bucketNode > InvalidBktId && (rnode).spcNode != EXRTO_BLOCK_INFO_SPACE_OID)
 #define IsHeapFileNode(rnode)  (!IsSegmentFileNode(rnode))
 #define IsSegmentPhysicalRelNode(rNode) (IsSegmentFileNode(rNode) && (rNode).relNode <= 5)
 
@@ -311,4 +312,14 @@ static inline StorageType forknum_get_storage_type(const ForkNumber& forknum)
         (colFileNode)->ownerid = (colFileNodeRel)->ownerid;                                   \
     } while (0)
 
+#define ColFileNodeFullCopy(colFileNode, colFileNode2)                                          \
+    do {                                                                                      \
+        (colFileNode)->filenode.spcNode = (colFileNode2)->filenode.spcNode;                 \
+        (colFileNode)->filenode.dbNode = (colFileNode2)->filenode.dbNode;                   \
+        (colFileNode)->filenode.relNode = (colFileNode2)->filenode.relNode;                 \
+        (colFileNode)->filenode.opt = 0;                                                      \
+        (colFileNode)->filenode.bucketNode = forknum_get_bucketid((colFileNode2)->forknum); \
+        (colFileNode)->forknum = forknum_get_forknum((colFileNode2)->forknum);              \
+        (colFileNode)->ownerid = (colFileNode2)->ownerid;                                   \
+    } while (0)
 #endif /* RELFILENODE_H */

@@ -137,3 +137,7 @@ AuditIndexFileLock 127
 GsStackLock 128
 DropArchiveSlotLock 129
 ConfigFileLock 130
+ExrtoSnapshotLock 134
+RedoTruncateLock 135
+
+ExrtoRecycleResidualUndoLock 137

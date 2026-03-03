@@ -835,6 +835,9 @@ void InitProcess(void)
     t_thrd.pgxact->xmin = InvalidTransactionId;
     t_thrd.proc->snapXmax = InvalidTransactionId;
     t_thrd.proc->snapCSN = InvalidCommitSeqNo;
+    t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_min = 0;
+    t_thrd.proc->exrto_gen_snap_time = 0;
     t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     t_thrd.pgxact->prepare_xid = InvalidTransactionId;
@@ -1099,6 +1102,10 @@ void InitAuxiliaryProcess(void)
     t_thrd.pgxact->xmin = InvalidTransactionId;
     t_thrd.proc->snapXmax = InvalidTransactionId;
     t_thrd.proc->snapCSN = InvalidCommitSeqNo;
+    t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_min = 0;
+    t_thrd.proc->exrto_gen_snap_time = 0;
+    t_thrd.proc->exrto_reload_cache = true;
     t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     t_thrd.proc->backendId = InvalidBackendId;

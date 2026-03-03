@@ -50,7 +50,7 @@ extern int GetRoleIdCount(Oid roleoid);
 extern int IncreaseUserCount(Oid roleoid);
 extern int DecreaseUserCount(Oid roleoid);
 
-extern void SyncLocalXidWait(TransactionId xid);
+extern void SyncLocalXidWait(TransactionId xid, const Snapshot snapshot = NULL);
 
 extern Size ProcArrayShmemSize(void);
 extern void CreateSharedProcArray(void);
@@ -84,6 +84,7 @@ Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot, bool forH
 #else
 extern Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot);
 #endif
+void exrto_get_snapshot_data(TransactionId &xmin, TransactionId &xmax, CommitSeqNo &snapshot_csn);
 
 extern Snapshot GetLocalSnapshotData(Snapshot snapshot);
 
@@ -114,8 +115,11 @@ extern VirtualTransactionId* GetCurrentVirtualXIDs(
 extern VirtualTransactionId *GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbOid, XLogRecPtr lsn = 0,
                                                        CommitSeqNo limitXminCSN = InvalidCommitSeqNo,
                                                        TransactionId* xminArray = NULL);
+
 extern ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalReason sigmode,
     int retry_count);
+extern bool proc_array_cancel_conflicting_proc(
+    TransactionId latest_removed_xid, XLogRecPtr truncate_redo_lsn, bool reach_max_check_times);
 
 extern bool MinimumActiveBackends(int min);
 extern int CountDBBackends(Oid database_oid);
@@ -177,7 +181,7 @@ extern void InitProcSubXidCacheContext();
 extern void ProcArrayResetXmin(PGPROC* proc);
 extern uint64 GetCommitCsn();
 extern void setCommitCsn(uint64 commit_csn);
-extern void SyncWaitXidEnd(TransactionId xid, Buffer buffer);
+extern void SyncWaitXidEnd(TransactionId xid, Buffer buffer, const Snapshot snapshot = NULL);
 extern CommitSeqNo calculate_local_csn_min();
 extern void proc_cancel_invalid_gtm_lite_conn();
 extern void forward_recent_global_xmin(void);

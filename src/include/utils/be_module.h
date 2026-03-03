@@ -144,6 +144,7 @@ enum ModuleId {
     MOD_LOGICAL_DECODE,    /* logical decode */
     MOD_GPRC, /* global package runtime cache */
     MOD_DISASTER_READ,
+    MOD_STANDBY_READ,
 
     MODE_REPSYNC, /* debug info for func SyncRepWaitForLSN */
     MOD_SQLPATCH,

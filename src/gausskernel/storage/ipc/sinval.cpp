@@ -72,16 +72,21 @@ void GlobalExecuteSharedInvalidMessages(const SharedInvalidationMessage* msgs, i
  * SendSharedInvalidMessages
  *	Add shared-cache-invalidation message(s) to the global SI message queue.
  */
-void SendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n)
+void send_shared_invalid_messages(const SharedInvalidationMessage* msgs, int n, XLogRecPtr lsn)
 {
     /* threads who not support gsc still need invalid global when commit */
     if (EnableGlobalSysCache()) {
         GlobalInvalidSharedInvalidMessages(msgs, n, true);
     }
-    SIInsertDataEntries(msgs, n);
+    SIInsertDataEntries(msgs, n, lsn);
     if (ENABLE_GPC && g_instance.plan_cache != NULL) {
         g_instance.plan_cache->InvalMsg(msgs, n);
     }
+}
+
+void SendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n)
+{
+    send_shared_invalid_messages(msgs, n, 0);
 }
 
 static bool SkipRedundantInvalMsg(SharedInvalidationMessage *msg)
@@ -165,6 +170,7 @@ void ReceiveSharedInvalidMessages(void (*invalFunction)(SharedInvalidationMessag
             ereport(DEBUG4, (errmodule(MOD_INVAL), errmsg("cache state reset")));
             inval_cxt->SIMCounter++;
             resetFunction();
+            t_thrd.proc->exrto_reload_cache = true;
             break; /* nothing more to do */
         }
 

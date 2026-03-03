@@ -45,36 +45,47 @@ void standby_desc(StringInfo buf, XLogReaderState *record)
     char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     if (info == XLOG_STANDBY_LOCK) {
-        xl_standby_locks *xlrec = (xl_standby_locks *)rec;
-        int i;
-
-        appendStringInfo(buf, "AccessExclusive locks: nlocks %d ", xlrec->nlocks);
-
-        for (i = 0; i < xlrec->nlocks; i++)
-            appendStringInfo(buf, " xid " XID_FMT " db %u rel %u", xlrec->locks[i].xid, xlrec->locks[i].dbOid,
-                             xlrec->locks[i].relOid);
+        if ((XLogRecGetInfo(record) & PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_FLAG) == 0) {
+            xl_standby_locks *xlrec = (xl_standby_locks *)rec;
+            appendStringInfo(buf, "AccessExclusive locks: nlocks %d ", xlrec->nlocks);
+            for (int i = 0; i < xlrec->nlocks; i++) {
+                appendStringInfo(buf, " xid " XID_FMT " db %u rel %u seq %u", xlrec->locks[i].xid,
+                                 xlrec->locks[i].dbOid, xlrec->locks[i].relOid, InvalidOid);
+            }
+        } else {
+            XLogStandbyLocksNew *xlrec = (XLogStandbyLocksNew *)rec;
+            appendStringInfo(buf, "AccessExclusive locks: nlocks %d ", xlrec->nlocks);
+            for (int i = 0; i < xlrec->nlocks; i++) {
+                appendStringInfo(buf, " xid " XID_FMT " db %u rel %u seq %u", xlrec->locks[i].xid,
+                                 xlrec->locks[i].dbOid, xlrec->locks[i].relOid, xlrec->locks[i].seq);
+            }
+        }
     } else if (info == XLOG_RUNNING_XACTS) {
         appendStringInfo(buf, " XLOG_RUNNING_XACTS");
     } else if (info == XLOG_STANDBY_CSN) {
         appendStringInfo(buf, " XLOG_STANDBY_CSN");
     } else if (info == XLOG_STANDBY_UNLOCK) {
-        xl_standby_locks *xlrec = (xl_standby_locks *)rec;
-        int i;
-
-        appendStringInfo(buf, "release AccessExclusive locks: nlocks %d ", xlrec->nlocks);
-
-        for (i = 0; i < xlrec->nlocks; i++) {
-            appendStringInfo(buf, " xid " XID_FMT " db %u rel %u", xlrec->locks[i].xid, xlrec->locks[i].dbOid,
-                             xlrec->locks[i].relOid);
+        if ((XLogRecGetInfo(record) & PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_FLAG) == 0) {
+            xl_standby_locks *xlrec = (xl_standby_locks *)rec;
+            appendStringInfo(buf, "AccessExclusive locks: nlocks %d ", xlrec->nlocks);
+            for (int i = 0; i < xlrec->nlocks; i++) {
+                appendStringInfo(buf, " xid " XID_FMT " db %u rel %u seq %u", xlrec->locks[i].xid,
+                                 xlrec->locks[i].dbOid, xlrec->locks[i].relOid, InvalidOid);
+            }
+        } else {
+            XLogStandbyLocksNew *xlrec = (XLogStandbyLocksNew *)rec;
+            appendStringInfo(buf, "AccessExclusive locks: nlocks %d ", xlrec->nlocks);
+            for (int i = 0; i < xlrec->nlocks; i++) {
+                appendStringInfo(buf, " xid " XID_FMT " db %u rel %u seq %u", xlrec->locks[i].xid,
+                                 xlrec->locks[i].dbOid, xlrec->locks[i].relOid, xlrec->locks[i].seq);
+            }
         }
-
     } else if (info == XLOG_STANDBY_CSN_COMMITTING) {
-        uint64* id = ((uint64 *)XLogRecGetData(record));
+        uint64 *id = ((uint64 *)XLogRecGetData(record));
         appendStringInfo(buf, " XLOG_STANDBY_CSN_COMMITTING, xid %lu, csn %lu", id[0], id[1]);
     } else if (info == XLOG_STANDBY_CSN_ABORTED) {
-        uint64* id = ((uint64 *)XLogRecGetData(record));
+        uint64 *id = ((uint64 *)XLogRecGetData(record));
         appendStringInfo(buf, " XLOG_STANDBY_CSN_ABORTED, xid %lu", id[0]);
-
     } else
         appendStringInfo(buf, "UNKNOWN");
 }

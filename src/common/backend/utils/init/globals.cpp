@@ -59,8 +59,9 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92620;
+const uint32 GRAND_VERSION_NUM = 92621;
 
+const uint32 PARTITION_ACCESS_EXCLUSIVE_LOCK_UPGRADE_VERSION = 92621;
 const uint32 PARTITION_ENHANCE_VERSION_NUM = 92620;
 const uint32 FLUSH_LSN_VERSION_NUM = 92619;
 const uint32 ADD_CLEAN_CASCADE_STANDBY_SLOT_MESSAGE_NUM = 92616;

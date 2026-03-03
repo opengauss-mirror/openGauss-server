@@ -157,6 +157,9 @@ const char *g_reserve_param[] = {
     NULL,
     NULL
 #endif
+    "enable_huge_pages",
+    "huge_page_size"
+    "exrto_standby_read_opt"
 };
 
 const int g_reserve_param_num = lengthof(g_reserve_param);
@@ -1812,7 +1815,9 @@ static void XLogWalRcvSendHSFeedback(void)
         xmin = InvalidTransactionId;
     }
     t_thrd.pgxact->xmin = InvalidTransactionId;
-
+    t_thrd.proc->exrto_read_lsn = 0;
+    t_thrd.proc->exrto_min = 0;
+    t_thrd.proc->exrto_gen_snap_time = 0;
     /*
      * Always send feedback message.
      */

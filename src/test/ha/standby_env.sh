@@ -15,28 +15,29 @@ export LD_LIBRARY_PATH=$prefix/lib:$prefix/lib/libobs:$LD_LIBRARY_PATH
 export PATH="$prefix/bin":$PATH
 export g_data_path="$install_path/hadata"
 
-eth0ip=`/sbin/ifconfig eth0|sed -n 2p|awk  '{ print $2 }'`
-eth1ip=`/sbin/ifconfig eth1|sed -n 2p|awk  '{ print $2 }'`
-ethens=`/sbin/ifconfig ens4f0|sed -n 2p |awk  '{ print $2 }'`
-enp2s0f0=`/sbin/ifconfig enp2s0f0|sed -n 2p |awk  '{ print $2 }'`
-enp2s0f1=`/sbin/ifconfig enp2s0f1|sed -n 2p |awk  '{ print $2 }'`
-enp125s0f0=`/sbin/ifconfig enp125s0f0|sed -n 2p |awk  '{ print $2 }'`
-
-if [ -n "$eth0ip" ]; then
-        export eth_local_ip=$eth0ip
-elif [ -n "$eth1ip" ];then
-        export eth_local_ip=$eth1ip
-elif [ -n "$ethens" ];then
-        export eth_local_ip=$eth1ip
-elif [ -n "$enp2s0f0" ];then
-        export eth_local_ip=$enp2s0f0
-elif [ -n "$enp2s0f1" ];then
-        export eth_local_ip=$enp2s0f1
-elif [ -n "$enp125s0f0" ];then
-        export eth_local_ip=$enp125s0f0
-else
-     echo "error eth0 and eth1 not configured,exit"
-     exit 1
+eth0ip=`/sbin/ifconfig eth0|sed -n 2p|awk  '{ print $2 }'`	 
+eth1ip=`/sbin/ifconfig eth1|sed -n 2p|awk  '{ print $2 }'` 
+ethens=`/sbin/ifconfig ens4f0|sed -n 2p |awk  '{ print $2 }'` 
+enp2s0f0=`/sbin/ifconfig enp2s0f0|sed -n 2p |awk  '{ print $2 }'` 
+enp2s0f1=`/sbin/ifconfig enp2s0f1|sed -n 2p |awk  '{ print $2 }'` 
+enp125s0f0=`/sbin/ifconfig enp125s0f0|sed -n 2p |awk  '{ print $2 }'` 
+ 
+ 
+if [ -n "$eth0ip" ]; then	 
+    export eth_local_ip=$eth0ip	 
+elif [ -n "$eth1ip" ];then 
+    export eth_local_ip=$eth1ip 
+elif [ -n "$ethens" ];then 
+    export eth_local_ip=$eth1ip 
+elif [ -n "$enp2s0f0" ];then 
+    export eth_local_ip=$enp2s0f0 
+elif [ -n "$enp2s0f1" ];then 
+    export eth_local_ip=$enp2s0f1 
+elif [ -n "$enp125s0f0" ];then 
+    export eth_local_ip=$enp125s0f0 
+else	 
+    echo "error eth0 and eth1 not configured,exit"	 
+    exit 1
 fi
 
 export g_local_ip="127.0.0.1"
