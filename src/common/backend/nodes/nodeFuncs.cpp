@@ -1640,6 +1640,7 @@ int exprLocation(const Node* expr)
             break;
         case T_PrefixKey:
             loc = exprLocation((Node*)((const PrefixKey*)expr)->arg);
+            break;
         case T_InferenceElem:
             /* just use nested expr's location */
             loc = exprLocation((Node *)((const InferenceElem*)expr)->expr);

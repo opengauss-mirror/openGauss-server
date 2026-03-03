@@ -3908,6 +3908,7 @@ void transformOnConflictArbiter(ParseState* pstate, UpsertClause* upsertClause, 
             rte->requiredPerms |= ACL_SELECT;
             /* Mark the constrained columns as requiring SELECT access */
             rte->selectedCols = bms_add_members(rte->selectedCols, conattnos);
+            pfree_ext(conattnos);
         }
     }
 }

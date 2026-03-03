@@ -922,21 +922,18 @@ static void _outProjectSet(StringInfo str, const ProjectSet *node)
 static void _outArbiterIndexes(StringInfo str, ModifyTable* node)
 {
     ListCell* lc = NULL;
-    appendStringInfo(str, " :" CppAsString(arbiterIndexes) " ");
-    appendStringInfo(str, "(");
+
+    appendStringInfo(str, " : arbiterIndexes(");
     foreach (lc, node->arbiterIndexes) {
         Oid relid = lfirst_oid(lc);
-        const char* nsname = NULL;
-        const char* relname = NULL;
-
-        if (OidIsValid(relid)) {
-            nsname = isTempNamespace(get_rel_namespace(relid)) ? "pg_temp" : get_namespace_name(relid);
-            relname = get_rel_name(relid);
-        }
+        Oid nspoid = OidIsValid(relid) ? get_rel_namespace(relid) : InvalidOid;
+        const char* nsname = OidIsValid(nspoid) && isTempNamespace(relid) ? "pg_temp" : get_namespace_name(nspoid);
+        const char* relname = OidIsValid(relid) ? get_rel_name(relid) : NULL;
         _outToken(str, nsname);
-        appendStringInfo(str, " ");
+        appendStringInfoChar(str, ' ');
         _outToken(str, relname);
     }
+    appendStringInfoChar(str, ')');
 }
 
 static void _outModifyTable(StringInfo str, ModifyTable* node)
@@ -1005,12 +1002,14 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
 
 static void _outInferClause(StringInfo str, const InferClause* node)
 {
-    WRITE_NODE_TYPE("INFERCLAUSE");
+    if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+        WRITE_NODE_TYPE("INFERCLAUSE");
 
-    WRITE_NODE_FIELD(indexElems);
-    WRITE_NODE_FIELD(whereClause);
-    WRITE_STRING_FIELD(conname);
-    WRITE_INT_FIELD(location);
+        WRITE_NODE_FIELD(indexElems);
+        WRITE_NODE_FIELD(whereClause);
+        WRITE_STRING_FIELD(conname);
+        WRITE_INT_FIELD(location);
+    }
 }
 
 static void _outUpsertClause(StringInfo str, const UpsertClause* node)
@@ -3441,11 +3440,13 @@ static void _outFromExpr(StringInfo str, FromExpr* node)
 
 static void _outInferenceElem(StringInfo str, const InferenceElem* node)
 {
-    WRITE_NODE_TYPE("INFERENCEELEM");
+    if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+        WRITE_NODE_TYPE("INFERENCEELEM");
 
-    WRITE_NODE_FIELD(expr);
-    WRITE_OID_FIELD(infercollid);
-    WRITE_OID_FIELD(inferopclass);
+        WRITE_NODE_FIELD(expr);
+        WRITE_OID_FIELD(infercollid);
+        WRITE_OID_FIELD(inferopclass);
+    }
 }
 
 static void _outMergeAction(StringInfo str, const MergeAction* node)

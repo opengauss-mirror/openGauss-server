@@ -6852,32 +6852,32 @@ static void CheckInsertTargetRelation(ParseState* pstate, InsertStmt* stmt, Rela
 #endif
 
     if (stmt->upsertClause != NULL) {
-        const char* claustypeStr = "";
+        const char* clauseTypeStr = "";
         if (stmt->upsertClause->action == UPSERT_UPDATE || stmt->upsertClause->action == UPSERT_NOTHING) {
-            claustypeStr = "ON DUPLICATE KEY";
+            clauseTypeStr = "ON DUPLICATE KEY";
         } else if (stmt->upsertClause->action == ONCONFLICT_UPDATE ||
                    stmt->upsertClause->action == ONCONFLICT_NOTHING) {
-            claustypeStr = "ON CONFLICT DO";
+            clauseTypeStr = "ON CONFLICT DO";
         }
         /* non-supported upsert cases */
         if (unlikely(!u_sess->attr.attr_sql.enable_upsert_to_merge && RelationIsColumnFormat(targetrel))) {
             ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                             errmsg("INSERT %s UPDATE is not supported on column orientated table.", claustypeStr))));
+                             errmsg("INSERT %s UPDATE is not supported on column orientated table.", clauseTypeStr))));
         }
 
         if (unlikely(RelationIsForeignTable(targetrel) || RelationIsStream(targetrel))) {
             ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                             errmsg("INSERT %s UPDATE is not supported on foreign table.", claustypeStr))));
+                             errmsg("INSERT %s UPDATE is not supported on foreign table.", clauseTypeStr))));
         }
 
         if (unlikely(RelationIsView(targetrel))) {
             ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("INSERT %s UPDATE is not supported on VIEW.", claustypeStr))));
+                            errmsg("INSERT %s UPDATE is not supported on VIEW.", clauseTypeStr))));
         }
 
         if (unlikely(RelationIsContquery(targetrel))) {
             ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("INSERT %s UPDATE is not supported on CONTQUERY.", claustypeStr))));
+                            errmsg("INSERT %s UPDATE is not supported on CONTQUERY.", clauseTypeStr))));
         }
     }
 

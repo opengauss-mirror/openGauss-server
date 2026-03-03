@@ -325,10 +325,10 @@ drop table tbl_col;
 
 -- NSERT ON CONFLICT DO UPDATE is not supported on view
 create table tbl_1(key int4, fruit text);
-create view tbll_1_view as select * from tbl_1;
+create view tbl_1_view as select * from tbl_1;
 insert into tbl_1_view as t values (1, 'aa') on conflict(key) do nothing;
 insert into tbl_1_view as t values (1, 'aa') on conflict(key) do update set id=id*10;
-drop view tbll_1_view;
+drop view tbl_1_view;
 drop table tbl_1;
 
 -- clean

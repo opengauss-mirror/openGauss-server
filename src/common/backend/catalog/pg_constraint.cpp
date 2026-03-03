@@ -751,6 +751,41 @@ Oid get_relation_constraint_oid(Oid relid, const char* conname, bool missing_ok)
     return conOid;
 }
 
+static Bitmapset* get_from_unique_indexs(Oid relid, const char* conname, Oid* constraintOid)
+{
+    Relation rel = heap_open(relid, AccessShareLock);
+    List* indexList = RelationGetIndexList(rel);
+    ListCell* lc;
+    Bitmapset* conattnos = NULL;
+
+    foreach (lc, indexList) {
+        Oid indexoid = lfirst_oid(lc);
+        Relation idxRel = index_open(indexoid, AccessShareLock);
+        /* Check if index name matches and it's unique */
+        if (strcmp(NameStr(idxRel->rd_rel->relname), conname) == 0 && idxRel->rd_index->indisunique) {
+            *constraintOid = indexoid;
+
+            /* Collect index column attributes */
+            for (int i = 0; i < idxRel->rd_index->indnatts; i++) {
+                int attno = idxRel->rd_index->indkey.values[i];
+                if (attno > 0) {
+                    conattnos = bms_add_member(conattnos, attno - FirstLowInvalidHeapAttributeNumber);
+                }
+            }
+
+            index_close(idxRel, AccessShareLock);
+            break;
+        }
+
+        index_close(idxRel, AccessShareLock);
+    }
+
+    list_free(indexList);
+    heap_close(rel, AccessShareLock);
+
+    return conattnos;
+}
+
 /*
  * get_relation_constraint_attnos
  *		Find a constraint on the specified relation with the specified name
@@ -763,70 +798,75 @@ Oid get_relation_constraint_oid(Oid relid, const char* conname, bool missing_ok)
  * *constraintOid is set to the OID of the constraint, or InvalidOid on
  * failure.
  */
-Bitmapset *get_relation_constraint_attnos(Oid relid, const char *conname, bool missing_ok, Oid *constraintOid)
+Bitmapset* get_relation_constraint_attnos(Oid relid, const char* conname, bool missing_ok, Oid* constraintOid)
 {
-    Bitmapset  *conattnos = NULL;
-    Relation	pg_constraint;
-    HeapTuple	tuple;
+    Bitmapset* conattnos = NULL;
+    Relation pg_constraint;
+    HeapTuple tuple;
     SysScanDesc scan;
     ScanKeyData skey[1];
+    Datum adatum;
+    bool isNull;
 
     /* Set *constraintOid, to avoid complaints about uninitialized vars */
     *constraintOid = InvalidOid;
 
     pg_constraint = heap_open(ConstraintRelationId, AccessShareLock);
 
-    ScanKeyInit(&skey[0],
-                Anum_pg_constraint_conrelid,
-                BTEqualStrategyNumber, F_OIDEQ,
-                ObjectIdGetDatum(relid));
+    ScanKeyInit(&skey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
 
-    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true,
-                              NULL, 1, skey);
+    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, NULL, 1, skey);
     /* There can be at most one matching row */
-    if (HeapTupleIsValid(tuple = systable_getnext(scan))) {
-        Datum adatum;
-        bool  isNull;
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
+        if (strcmp(NameStr(con->conname), conname) != 0) {
+            continue;
+        }
+        if (OidIsValid(*constraintOid)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_DUPLICATE_OBJECT),
+                     errmsg("table \"%s\" has multiple constraints named \"%s\"", get_rel_name(relid), conname)));
+        }
 
         *constraintOid = HeapTupleGetOid(tuple);
 
         /* Extract the conkey array, ie, attnums of constrained columns */
-        adatum = heap_getattr(tuple, Anum_pg_constraint_conkey,
-                              RelationGetDescr(pg_constraint), &isNull);
+        adatum = heap_getattr(tuple, Anum_pg_constraint_conkey, RelationGetDescr(pg_constraint), &isNull);
         if (!isNull) {
-            ArrayType  *arr;
-            int    numcols;
+            ArrayType* arr;
+            int numcols;
             int16* attnums;
-            int    i;
+            int i;
 
             /* ensure not toasted */
             arr = DatumGetArrayTypeP(adatum);
             numcols = ARR_DIMS(arr)[0];
-            if (ARR_NDIM(arr) != 1 ||
-                numcols < 0 ||
-                ARR_HASNULL(arr) ||
-                ARR_ELEMTYPE(arr) != INT2OID)
+            if (ARR_NDIM(arr) != 1 || numcols < 0 || ARR_HASNULL(arr) || ARR_ELEMTYPE(arr) != INT2OID)
                 elog(ERROR, "conkey is not a 1-D smallint array");
-            attnums = (int16 *) ARR_DATA_PTR(arr);
+            attnums = (int16*)ARR_DATA_PTR(arr);
 
             /* Construct the result value */
             for (i = 0; i < numcols; i++) {
-                conattnos = bms_add_member(conattnos,
-                                           attnums[i] - FirstLowInvalidHeapAttributeNumber);
+                conattnos = bms_add_member(conattnos, attnums[i] - FirstLowInvalidHeapAttributeNumber);
             }
         }
+
+        break;
     }
 
     systable_endscan(scan);
-
-    /* If no such constraint exists, complain */
-    if (!OidIsValid(*constraintOid) && !missing_ok)
-        ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_OBJECT),
-                    errmsg("constraint \"%s\" for table \"%s\" does not exist",
-                        conname, get_rel_name(relid))));
-
     heap_close(pg_constraint, AccessShareLock);
+
+    if (OidIsValid(*constraintOid)) {
+        return conattnos;
+    }
+
+    /* If no constraint found, check if it's a unique index */
+    conattnos = get_from_unique_indexs(relid, conname, constraintOid);
+    /* If not found and not missing_ok, error */
+    if (!OidIsValid(*constraintOid) && conattnos == NULL && !missing_ok)
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("constraint \"%s\" for table \"%s\" does not exist", conname, get_rel_name(relid))));
 
     return conattnos;
 }

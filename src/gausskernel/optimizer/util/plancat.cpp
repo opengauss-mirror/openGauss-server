@@ -1137,15 +1137,11 @@ static List* findMatchedIndexOid(UpsertExpr* onconflict, List* indexList,
          * Only considering conventional inference at this point (not named
          * constraints), so index under consideration can be immediately
          * skipped if it's not unique
-         */
-        if (!idxForm->indisunique)
-            goto next;
-
-        /*
+         * or
          * So-called unique constraints with WITHOUT OVERLAPS are really
          * exclusion constraints, so skip those too.
          */
-        if (idxForm->indisexclusion)
+        if (!idxForm->indisunique || idxForm->indisexclusion)
             goto next;
 
         /* Build BMS representation of plain (non expression) index attrs */
@@ -1272,8 +1268,8 @@ List* infer_arbiter_indexes(PlannerInfo *root)
      * must always provide one or the other (but parser ought to have caught
      * that already).
      */
-    if (onconflict->arbiterElems == NIL &&
-        onconflict->constraint == InvalidOid) {
+    if (onconflict == NULL || (onconflict->arbiterElems == NIL &&
+        onconflict->constraint == InvalidOid)) {
         return NIL;
     }
 
@@ -1318,7 +1314,13 @@ List* infer_arbiter_indexes(PlannerInfo *root)
      * because some additional sanity checks are required.
      */
     if (onconflict->constraint != InvalidOid) {
-        indexOidFromConstraint = get_constraint_index(onconflict->constraint);
+        /* First check if the given OID is already an index OID */
+        char relkind = get_rel_relkind(onconflict->constraint);
+        if (relkind == RELKIND_INDEX || relkind == RELKIND_GLOBAL_INDEX) {
+            indexOidFromConstraint = onconflict->constraint;
+        } else {
+            indexOidFromConstraint = get_constraint_index(onconflict->constraint);
+        }
         if (indexOidFromConstraint == InvalidOid) {
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("constraint in ON CONFLICT clause has no associated index")));

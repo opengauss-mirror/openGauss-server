@@ -964,7 +964,7 @@ static void _readArbiteriIndexesFiled(char *token, int length, ModifyTable *loca
     while (token != NULL) {
         Oid val;
         token = pg_strtok(&length);
-        if (nullptr == token) {
+        if (token == nullptr) {
             ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("unterminated List structure")));
         }
         if (token[0] == ')') {
@@ -4777,11 +4777,11 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     }
 
     IF_EXIST(exclRelTlist) {
-        if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
-            _readArbiteriIndexesFiled(token, length, local_node);
-        } else {
-            READ_NODE_FIELD(exclRelTlist);
-        }
+        READ_NODE_FIELD(exclRelTlist);
+    }
+
+    IF_EXIST(arbiterIndexes) {
+        _readArbiteriIndexesFiled(token, length, local_node);
     }
 
     IF_EXIST(exclRelRTIndex) {
