@@ -52,6 +52,7 @@ typedef struct PruningContext {
     /* used for slice pruning */
     Index varno;
     ParamListInfo boundParams;
+    Node* partkeyexpr;
 } PruningContext;
 
 typedef enum PartKeyColumnRangeMode {
