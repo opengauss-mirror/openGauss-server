@@ -114,6 +114,7 @@ static bool pgxc_query_contains_view(List* queries);
 static void check_library_path(char* absolutePath, CFunType function_type);
 
 static char* get_temp_library(bool absolute_path);
+static uint64 get_temp_library_txid(void);
 static char* get_final_library_path(const char* final_file_name);
 
 static void send_library_other_node(char* absolutePath);
@@ -245,21 +246,41 @@ static char* get_temp_library(bool absolute_path)
 {
     StringInfoData temp_file_strinfo;
     initStringInfo(&temp_file_strinfo);
-    bool isExecCN = (IS_PGXC_COORDINATOR && !IsConnFromCoord());
+    uint64 temp_xid = get_temp_library_txid();
     if (absolute_path) {
         appendStringInfo(&temp_file_strinfo,
-            "%s/pg_plugin/%ld%lu",
+            "%s/pg_plugin/%ld%lu_%d",
             t_thrd.proc_cxt.pkglib_path,
             GetCurrentTransactionStartTimestamp(),
-            (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
+            temp_xid,
+            t_thrd.proc->pid);
     } else {
         appendStringInfo(&temp_file_strinfo,
-            "$libdir/pg_plugin/%ld%lu",
+            "$libdir/pg_plugin/%ld%lu_%d",
             GetCurrentTransactionStartTimestamp(),
-            (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
+            temp_xid,
+            t_thrd.proc->pid);
     }
 
     return temp_file_strinfo.data;
+}
+
+/*
+ * Get xid component for temporary c-function library naming.
+ * Prefer current xid when available to improve uniqueness; fall back to cn_xid.
+ */
+static uint64 get_temp_library_txid(void)
+{
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        return (uint64)GetCurrentTransactionId();
+    }
+
+    TransactionId xid = GetCurrentTransactionIdIfAny();
+    if (TransactionIdIsValid(xid)) {
+        return (uint64)xid;
+    }
+
+    return (uint64)t_thrd.xact_cxt.cn_xid;
 }
 
 /*

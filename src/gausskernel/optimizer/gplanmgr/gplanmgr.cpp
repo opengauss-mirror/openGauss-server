@@ -187,8 +187,8 @@ GetDefaultGenericPlan(CachedPlanSource *plansource,
     } else {
         /* Whenever plan is rebuilt, we need to drop the old one */
         ReleaseGenericPlan(plansource);
-        /* Build a new generic plan */
-        plan = BuildCachedPlan(plansource, *qlist, NULL, false);
+        /* Build a new generic plan in transient context to avoid SPI scratch accumulation. */
+        plan = BuildCachedPlanInTransientContext(plansource, *qlist, NULL, false);
         Assert(!plan->isShared());
 
         /* Link the new generic plan into the plansource */
@@ -446,7 +446,7 @@ PMGR_ExplorePlan(CachedPlanSource *plansource,
 
     u_sess->pcache_cxt.is_plan_exploration = true;
     /* explore the query plan by planner. */
-    plan = BuildCachedPlan(plansource, *qlist, boundParams, false);
+    plan = BuildCachedPlanInTransientContext(plansource, *qlist, boundParams, false);
 
     if (boundParams) {
         boundParams->params_lazy_bind = false;
@@ -725,6 +725,13 @@ MakePlanMatchQuery(PlannerInfo *queryRoot, List *query_rel_sels, CachedPlanInfo 
 {
     int64 queryOffset = -1;
 
+    if (queryRoot == NULL || queryRoot->parse == NULL || queryRoot->glob == NULL ||
+        queryRoot->glob->boundParams == NULL || query_rel_sels == NIL || cpinfo == NULL) {
+        ereport(DEBUG2, (errmodule(MOD_OPT),
+                errmsg("skip to update planCIs due to missing query features")));
+        return false;
+    }
+
     /* check whether offset values are matched */
     queryOffset = GetLimitValue(queryRoot->parse, queryRoot->glob->boundParams);
     UpdateOffsetCI(cpinfo, queryOffset);
@@ -780,7 +787,7 @@ FindMatchedPlan(PlanManager *manager,     PMGRAction *action)
     bool usePartIdx = false;
     PlannerInfo *queryRoot = action->genericRoot;
 
-    if (queryRoot->glob->boundParams == NULL) {
+    if (queryRoot == NULL || queryRoot->glob == NULL || queryRoot->glob->boundParams == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
            errmsg("FindMatchedPlan: query params is missed.")));
     }
@@ -896,7 +903,11 @@ PMGR_InsertPlan(CachedPlanSource *plansource,
         pg_atomic_fetch_add_u32((volatile uint32 *)&cachedplan->cpi->verification_times, 1);
         
         /* Update PlanCI */
-        MakePlanMatchQuery(action->genericRoot, action->qRelSelec, cachedplan->cpi);
+        if (!MakePlanMatchQuery(action->genericRoot, action->qRelSelec, cachedplan->cpi)) {
+            ereport(DEBUG2, (errmodule(MOD_OPT),
+                    errmsg("skip to update planCIs due to missing query features; ThreadId: %d, query: \"%s\"",
+                           gettid(), plansource->query_string)));
+        }
 
         /* release new_plan after updates are completed. */
         MemoryContextDelete(new_plan->context);
@@ -1331,7 +1342,7 @@ GetCustomPlan(CachedPlanSource *plansource,
     ReleaseCustomPlan(plansource);
 
     /* Build a custom plan */
-    plan = BuildCachedPlan(plansource, *qlist, boundParams, true);
+    plan = BuildCachedPlanInTransientContext(plansource, *qlist, boundParams, true);
     /* Link the new custome plan into the plansource */
     plansource->cplan = plan;
     plan->refcount++;

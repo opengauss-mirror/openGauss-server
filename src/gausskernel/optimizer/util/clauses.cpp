@@ -4939,13 +4939,16 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
     bool resultTypByVal = false;
     bool isFusion = false;
     if (u_sess->iud_expr_reuse_ctx == NULL) {
-         u_sess->iud_expr_reuse_ctx = AllocSetContextCreate(u_sess->top_transaction_mem_cxt, "IudExprReuseContext", ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+        u_sess->iud_expr_reuse_ctx = AllocSetContextCreate(u_sess->top_transaction_mem_cxt,
+            "IudExprReuseContext",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
     }
     /*
      * To use the executor, we need an EState.
      */
-     if (u_sess->iud_expr_reuse_ctx != NULL) {
+    if (u_sess->iud_expr_reuse_ctx != NULL) {
         estate = CreateExecutorState();
         isFusion = true;
     } else {
@@ -4981,13 +4984,6 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
     }
     const_val = ExecEvalExprSwitchContext(exprstate, econtext, &const_is_null);
 
-    if (IsA(exprstate, FuncExprState)) {
-        FunctionCallInfo fcinfo = &((FuncExprState*)exprstate)->fcinfo_data;
-        if (fcinfo->context && IsA(fcinfo->context, FunctionScanState)) {
-            pfree_ext(fcinfo->context);
-        }
-    }
-
     /* Get info needed about result datatype */
     get_typlenbyval(result_type, &resultTypLen, &resultTypByVal);
 
@@ -5008,10 +5004,18 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
             const_val = datumCopy(const_val, resultTypByVal, resultTypLen);
     }
 
-    /* Release all the junk we just created */
-    if (!isFusion) {
-        FreeExecutorState(estate);
+    /*
+     * The opfusion path shares IudExprReuseContext and must not delete it
+     * through FreeExprContext. Reset and detach before releasing EState.
+     */
+    if (isFusion && estate->es_per_tuple_exprcontext != NULL) {
+        ExprContext* fusion_econtext = estate->es_per_tuple_exprcontext;
+        ReScanExprContext(fusion_econtext);
+        estate->es_exprcontexts = list_delete_ptr(estate->es_exprcontexts, fusion_econtext);
+        estate->es_per_tuple_exprcontext = NULL;
     }
+
+    FreeExecutorState(estate);
 
     /*
      * Make the constant result node.
