@@ -681,8 +681,16 @@ bool StrEndWith(const char *str, const char *suffix)
     if (strLen < suffixLen) {
         return false;
     }
+    /* skip the rear digits */
+    int len = strLen - 1;
+    while (len >= 0 && isdigit(str[len])) {
+        --len;
+    }
+    if (len < 0 || len + 1 < suffixLen) {
+        return false;
+    }
     for (int i = 0; i < suffixLen; i++) {
-        if (str[strLen - 1 - i] != suffix[suffixLen - 1 - i]) {
+        if (str[len - i] != suffix[suffixLen - 1 - i]) {
             return false;
         }
     }
