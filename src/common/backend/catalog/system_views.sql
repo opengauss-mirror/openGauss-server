@@ -1668,7 +1668,7 @@ BEGIN
   show enable_thread_pool into enable_threadpool;
 
   IF enable_threadpool THEN
-    query_str := 'with SM AS
+    query_str := 'with sm AS
                    (SELECT
                       S.sessid AS sessid,
                       T.thrdtype AS sesstype,
@@ -1685,7 +1685,7 @@ BEGIN
                       FROM gs_thread_memory_context) T
                       on S.threadid = T.tid
                    ),
-                   TM AS
+                   tm AS
                    (SELECT
                       S.sessid AS Ssessid,
                       T.thrdtype AS sesstype,
@@ -1703,15 +1703,15 @@ BEGIN
                        FROM gs_session_memory_context) S
                       ON T.tid = S.threadid
                    )
-                   SELECT * from SM
+                   SELECT * from sm
                    UNION ALL
                    SELECT 
                      Ssessid AS sessid, sesstype, contextname, level, parent, totalsize, freesize, usedsize
-                   FROM TM WHERE Ssessid IS NOT NULL
+                   FROM tm WHERE Ssessid IS NOT NULL
                    UNION ALL
                    SELECT
                      Tsessid AS sessid, sesstype, contextname, level, parent, totalsize, freesize, usedsize
-                   FROM TM WHERE Ssessid IS NULL;';
+                   FROM tm WHERE Ssessid IS NULL;';
     FOR row_data IN EXECUTE(query_str) LOOP
       sessid = row_data.sessid;
       sesstype = row_data.sesstype;
@@ -1725,15 +1725,15 @@ BEGIN
     END LOOP;
   ELSE
     query_str := 'SELECT
-                    T.threadid AS sessid,
-                    T.thrdtype AS sesstype,
-                    T.contextname AS contextname,
-                    T.level AS level,
-                    T.parent AS parent,
-                    T.totalsize AS totalsize,
-                    T.freesize AS freesize,
-                    T.usedsize AS usedsize
-                  FROM pg_catalog.pv_thread_memory_detail() T;';
+                    t.threadid AS sessid,
+                    t.thrdtype AS sesstype,
+                    t.contextname AS contextname,
+                    t.level AS level,
+                    t.parent AS parent,
+                    t.totalsize AS totalsize,
+                    t.freesize AS freesize,
+                    t.usedsize AS usedsize
+                  FROM pg_catalog.pv_thread_memory_detail() t;';
     FOR row_data IN EXECUTE(query_str) LOOP
       sessid = row_data.sessid;
       sesstype = row_data.sesstype;
@@ -2374,44 +2374,44 @@ CREATE CAST (NVARCHAR2 AS INTEGER) WITH FUNCTION pg_catalog.TO_INTEGER(NVARCHAR2
 
 CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(TIMESTAMP WITHOUT TIME ZONE)
 RETURNS NVARCHAR2
-AS $$  select CAST(pg_catalog.timestamp_out($1) AS NVARCHAR2)  $$
+AS $$  select pg_catalog.nvarchar2in(pg_catalog.timestamp_out($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 CREATE CAST (TIMESTAMP WITHOUT TIME ZONE AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(TIMESTAMP WITHOUT TIME ZONE) AS IMPLICIT;
 
 CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INTERVAL)
 RETURNS NVARCHAR2
-AS $$  select CAST(pg_catalog.interval_out($1) AS NVARCHAR2)  $$
+AS $$  select pg_catalog.nvarchar2in(pg_catalog.interval_out($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 CREATE CAST (INTERVAL AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(INTERVAL) AS IMPLICIT;
 
 CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(NUMERIC)
 RETURNS NVARCHAR2
-AS $$ SELECT CAST(pg_catalog.numeric_out($1) AS NVARCHAR2)    $$
+AS $$ SELECT pg_catalog.nvarchar2in(pg_catalog.numeric_out($1), 0::Oid, -1) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INT2)
 RETURNS NVARCHAR2
-AS $$ select CAST(pg_catalog.int2out($1) AS NVARCHAR2)  $$
+AS $$ select pg_catalog.nvarchar2in(pg_catalog.int2out($1), 0::Oid, -1) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INT4)
 RETURNS NVARCHAR2
-AS $$  select CAST(pg_catalog.int4out($1) AS NVARCHAR2)  $$
+AS $$  select pg_catalog.nvarchar2in(pg_catalog.int4out($1), 0::Oid, -1) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INT8)
 RETURNS NVARCHAR2
-AS $$ select CAST(pg_catalog.int8out($1) AS NVARCHAR2) $$
+AS $$ select pg_catalog.nvarchar2in(pg_catalog.int8out($1), 0::Oid, -1) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(FLOAT4)
 RETURNS NVARCHAR2
-AS $$ select CAST(pg_catalog.float4out($1) AS NVARCHAR2) $$
+AS $$ select pg_catalog.nvarchar2in(pg_catalog.float4out($1), 0::Oid, -1) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(FLOAT8)
 RETURNS NVARCHAR2
-AS $$ select CAST(pg_catalog.float8out($1) AS NVARCHAR2) $$
+AS $$ select pg_catalog.nvarchar2in(pg_catalog.float8out($1), 0::Oid, -1) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE CAST (INT2 AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(INT2) AS IMPLICIT;
@@ -3523,7 +3523,8 @@ CREATE unlogged table statement_history(
     srt14_after_query bigint,
     rtt_unknown bigint,
     parent_query_id bigint,
-    net_trans_time bigint
+    net_trans_time bigint,
+    trace bytea
 );
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
@@ -3630,6 +3631,27 @@ CREATE unlogged table coverage.proc_coverage(
 );
 REVOKE ALL on table coverage.proc_coverage FROM public;
 
+/* pg_matviews */
+CREATE VIEW pg_catalog.pg_matviews AS
+    SELECT
+        N.nspname AS schemaname,
+        C.relname AS matviewname,
+        /* current_user or superuser */
+        pg_catalog.pg_get_userbyid(C.relowner) AS matviewowner,
+        T.spcname AS tablespace,
+        C.relhasindex AS hasindexes,
+        M.ivm::bool AS isincremental,
+        NULL::bool AS ispopulated,
+        /* need schema privilegs */
+        pg_catalog.pg_get_viewdef(C.oid) AS definition
+    FROM pg_catalog.pg_class C
+        LEFT JOIN pg_catalog.pg_namespace N ON (N.oid = C.relnamespace) 
+        LEFT JOIN pg_catalog.pg_tablespace T ON (T.oid = C.reltablespace)
+        INNER JOIN pg_catalog.gs_matview M ON (C.oid = M.matviewid)
+    WHERE C.relkind = 'm'
+        AND (C.relowner = (SELECT oid from pg_catalog.pg_authid where rolname = current_user)
+        OR (SELECT rolsystemadmin or rolcreaterole or rolsuper from pg_catalog.pg_authid where rolname = current_user));
+
 CREATE OR REPLACE FUNCTION pg_catalog.array_integer_agg_add(int[], int[])
 RETURNS int[]
 AS $$
@@ -3711,3 +3733,1104 @@ CREATE VIEW pg_replication_origin_status AS
 REVOKE ALL ON pg_replication_origin_status FROM public;
 
 REVOKE ALL ON pg_subscription FROM public;
+
+/*
+ * Create an alias of type xmltype.
+ */
+CREATE DOMAIN pg_catalog.xmltype AS xml;
+
+/*
+ * Xmltype schema
+ */
+CREATE SCHEMA xmltype;
+GRANT USAGE ON SCHEMA xmltype TO PUBLIC;
+
+/*
+ * xmltype function
+ */
+CREATE OR REPLACE FUNCTION pg_catalog.xmltype(xmlvalue text)
+RETURNS xmltype as $$
+declare
+    dbcom text;
+begin
+    show sql_compatibility into dbcom;
+    if dbcom != 'A' THEN
+        raise exception 'Functions for type xmltype is only support in database which dbcompatibility = ''A''.';
+    end if;
+    return xml(xmlvalue)::xmltype;
+end;
+$$ LANGUAGE plpgsql;
+COMMENT ON FUNCTION pg_catalog.xmltype() IS 'pg_catalog function XMLTYPE';
+
+/*
+ * createxml function
+ */
+CREATE OR REPLACE FUNCTION xmltype.createxml(xmldata varchar2)
+RETURNS xmltype 
+AS $$ select xmltype($1); $$
+LANGUAGE SQL IMMUTABLE STRICT;
+
+/*
+ * anytype
+ */
+CREATE OR REPLACE TYPE pg_catalog.ANYTYPE as object(
+    prec int,
+    scale int,
+    len int,
+    csid int,
+    csfrm int,
+    typecode int,
+    schema_name name,
+    type_name name,
+    version varchar2,
+    numelems int,
+    elem_tc int,
+    elem_count int,
+    state int,
+
+    STATIC PROCEDURE BEGINCREATE(typecode IN int, atype OUT pg_catalog.ANYTYPE),
+    MEMBER PROCEDURE SETINFO(
+        self          IN OUT pg_catalog.ANYTYPE,
+        prec          IN int,
+        scale         IN int,
+        len           IN bigint,
+        csid          IN int,
+        csfrm         IN int,
+        atype         IN pg_catalog.ANYTYPE DEFAULT NULL,
+        elem_tc       IN int DEFAULT NULL,
+        elem_count    IN int DEFAULT 0
+    ),
+    MEMBER PROCEDURE ENDCREATE(self IN OUT pg_catalog.ANYTYPE),
+    MEMBER FUNCTION GETINFO(
+        self        IN pg_catalog.ANYTYPE,
+        prec        OUT int, 
+        scale       OUT int,
+        len         OUT int, 
+        csid        OUT int,
+        csfrm       OUT int,
+        schema_name OUT name, 
+        type_name   OUT name, 
+        version     OUT varchar2,
+        numelems    OUT int
+    ) RETURN int
+);
+
+GRANT USAGE ON TYPE pg_catalog.ANYTYPE TO PUBLIC;
+
+DO $$
+BEGIN
+  EXECUTE
+  'CREATE OR REPLACE TYPE BODY pg_catalog.ANYTYPE AS
+    STATIC PROCEDURE BEGINCREATE(typecode IN int, atype OUT pg_catalog.ANYTYPE) AS
+    begin
+        IF NOT (pg_typeof(atype) = ''anytype''::regtype) AND (atype IS NULL) THEN
+            raise exception ''expression "NULL" cannot be used as an assignment target'';
+        ELSIF typecode IN (101, 113, 96, 12, 286, 2, 287, 95, 187, 188, 1, 9) THEN
+            atype.typecode = typecode;
+        ELSE
+            raise exception ''invalid typecode'';
+        END IF; 
+        atype.state := 0;
+    end;
+
+    MEMBER PROCEDURE SETINFO(
+        self          IN OUT pg_catalog.ANYTYPE,
+        prec          IN int,
+        scale         IN int,
+        len           IN bigint,
+        csid          IN int,
+        csfrm         IN int,
+        atype         IN pg_catalog.ANYTYPE DEFAULT NULL,
+        elem_tc       IN int DEFAULT NULL,
+        elem_count    IN int DEFAULT 0
+    ) AS
+    begin
+        IF self IS NULL THEN
+            raise exception ''expression "NULL" cannot be used as an assignment target'';
+        ELSIF self.state = 2 THEN
+			raise exception ''incorrect usage of method SETINFO'';
+        ELSIF (prec < 0 OR prec > 255 OR scale < -128 OR scale >127 OR len < 0 OR len > 2147483647 OR csid < 0 OR csid > 65535 OR csfrm < 0 OR csfrm > 255) THEN
+            raise exception ''numeric overflow'';
+		ELSE
+            CASE
+                WHEN self.typecode IN (1, 9, 96) THEN
+                    self.len := len;
+                    self.csid := csid;
+                    self.csfrm := csfrm % 32;
+                WHEN self.typecode = 2 THEN
+                    self.prec = prec;
+                    self.scale := scale;
+                WHEN self.typecode = 95 THEN
+                    self.len := len;
+                ELSE
+			END CASE;
+            self.state = 1;
+		END IF; 
+    end;
+
+    MEMBER PROCEDURE ENDCREATE(self IN OUT pg_catalog.ANYTYPE) AS
+    begin
+        IF self IS NULL THEN
+            raise exception ''expression "NULL" cannot be used as an assignment target'';
+        ELSIF self.state != 1 THEN
+			raise exception ''incorrect usage of method ENDCREATE'';
+		ELSE
+			self.state := 2;
+		END IF; 
+    end;
+
+    MEMBER FUNCTION GETINFO(
+        self        IN pg_catalog.ANYTYPE,
+        prec        OUT int, 
+        scale       OUT int,
+        len         OUT int, 
+        csid        OUT int,
+        csfrm       OUT int,
+        schema_name OUT name, 
+        type_name   OUT name, 
+        version     OUT varchar2,
+        numelems    OUT int
+    ) RETURN int AS
+    declare
+        typecode int;
+    begin
+        IF self IS NULL THEN
+            raise exception ''expression "NULL" cannot be used as an assignment target'';
+        ELSIF self.state != 2 THEN
+            raise exception ''incorrect usage of method GETINFO'';
+        ELSE
+            prec := self.prec;
+            scale := self.scale;
+            len := self.len;
+            csid := self.csid;
+            csfrm := self.csfrm;
+            schema_name := self.schema_name;
+            type_name := self.type_name;
+            version := self.version;
+            numelems := self.numelems;
+            typecode := self.typecode;
+        END IF;
+        return typecode;
+    end;
+  END;';
+END $$;
+
+/*
+ * anydata
+ */
+
+CREATE OR REPLACE TYPE pg_catalog.ANYDATA as object(
+    data text,
+    type_info pg_catalog.ANYTYPE,
+    type_name name,
+    typecode int,
+
+    STATIC FUNCTION ConvertBDouble(dbl IN BINARY_DOUBLE) return pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertBlob(b IN BLOB) RETURN pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertChar(c IN CHAR) RETURN pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertDate(dat IN DATE) RETURN pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertNchar(nc IN NCHAR) return pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertNVarchar2(nc IN NVARCHAR2) return pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertNumber(num IN NUMBER) RETURN pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertRaw(r IN RAW) RETURN pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertTimestamp(ts IN TIMESTAMP) return pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertTimestampTZ(ts IN TIMESTAMP WITH TIME ZONE) return pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertVarchar(c IN VARCHAR) RETURN pg_catalog.ANYDATA,
+    STATIC FUNCTION ConvertVarchar2(c IN VARCHAR2) RETURN pg_catalog.ANYDATA,
+
+    MEMBER FUNCTION AccessBDouble(self IN pg_catalog.ANYDATA) return BINARY_DOUBLE,
+    MEMBER FUNCTION AccessBlob(self IN pg_catalog.ANYDATA) return BLOB,
+    MEMBER FUNCTION AccessChar(self IN pg_catalog.ANYDATA) return CHAR,
+    MEMBER FUNCTION AccessDate(self IN pg_catalog.ANYDATA) return DATE,
+    MEMBER FUNCTION AccessNchar(self IN pg_catalog.ANYDATA) return NCHAR,
+    MEMBER FUNCTION AccessNumber(self IN pg_catalog.ANYDATA) return NUMBER,
+    MEMBER FUNCTION AccessNVarchar2(self IN pg_catalog.ANYDATA) return NVARCHAR2,
+    MEMBER FUNCTION AccessRaw(self IN pg_catalog.ANYDATA) return RAW,
+    MEMBER FUNCTION AccessTimestamp(self IN pg_catalog.ANYDATA) return TIMESTAMP,
+    MEMBER FUNCTION AccessTimestampTZ(self IN pg_catalog.ANYDATA) return TIMESTAMP WITH TIME ZONE,
+    MEMBER FUNCTION AccessVarchar(self IN pg_catalog.ANYDATA) return VARCHAR,
+    MEMBER FUNCTION AccessVarchar2(self IN pg_catalog.ANYDATA) return VARCHAR2,
+
+    MEMBER FUNCTION GETTYPE(self IN pg_catalog.ANYDATA, typ OUT pg_catalog.ANYTYPE) RETURN INT,
+    MEMBER FUNCTION GETTYPENAME(self IN pg_catalog.ANYDATA) RETURN VARCHAR2
+);
+
+
+GRANT USAGE ON TYPE pg_catalog.ANYDATA TO PUBLIC;
+
+DO $$
+BEGIN
+  EXECUTE
+  'CREATE OR REPLACE TYPE BODY pg_catalog.ANYDATA AS
+    STATIC FUNCTION ConvertBDouble(dbl IN BINARY_DOUBLE) return pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := dbl::text;
+        v_anydata.type_name := ''BINARY_DOUBLE'';
+        v_anydata.typecode := 101;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessBDouble(self IN pg_catalog.ANYDATA) return BINARY_DOUBLE AS
+    begin
+        IF self.type_name = ''BINARY_DOUBLE'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertBlob(b IN BLOB) RETURN pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := b::raw::text;
+        v_anydata.type_name := ''Blob'';
+        v_anydata.typecode := 113;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessBlob(self IN pg_catalog.ANYDATA) return BLOB AS
+    begin
+        IF self.type_name = ''Blob'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertChar(c IN CHAR) RETURN pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := c::text;
+        v_anydata.type_name := ''Char'';
+        v_anydata.typecode := 96;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessChar(self IN pg_catalog.ANYDATA) return CHAR AS
+    begin
+        IF self.type_name = ''Char'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertDate(dat IN DATE) RETURN pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := dat::text;
+        v_anydata.type_name := ''Date'';
+        v_anydata.typecode := 12;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessDate(self IN pg_catalog.ANYDATA) return DATE AS
+    begin
+        IF self.type_name = ''Date'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertNchar(nc IN NCHAR) return pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := nc::text;
+        v_anydata.type_name := ''NChar'';
+        v_anydata.typecode := 286;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessNchar(self IN pg_catalog.ANYDATA) return NCHAR AS
+    begin
+        IF self.type_name = ''NChar'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertNVarchar2(nc IN NVARCHAR2) return pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := nc::text;
+        v_anydata.type_name := ''NVarchar2'';
+        v_anydata.typecode := 287;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessNVarchar2(self IN pg_catalog.ANYDATA) return NVARCHAR2 AS
+    begin
+        IF self.type_name = ''NVarchar2'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertNumber(num IN NUMBER) RETURN pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := num::text;
+        v_anydata.type_name := ''Number'';
+        v_anydata.typecode := 2;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessNumber(self IN pg_catalog.ANYDATA) return NUMBER AS
+    begin
+        IF self.type_name = ''Number'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertRaw(r IN RAW) RETURN pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := r::text;
+        v_anydata.type_name := ''Raw'';
+        v_anydata.typecode := 95;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessRaw(self IN pg_catalog.ANYDATA) return RAW AS
+    begin
+        IF self.type_name = ''Raw'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertTimestamp(ts IN TIMESTAMP) return pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := ts::text;
+        v_anydata.type_name := ''Timestamp'';
+        v_anydata.typecode := 187;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessTimestamp(self IN pg_catalog.ANYDATA) return TIMESTAMP AS
+    begin
+        IF self.type_name = ''Timestamp'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertTimestampTZ(ts IN TIMESTAMP WITH TIME ZONE) return pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := ts::text;
+        v_anydata.type_name := ''TimestampTZ'';
+        v_anydata.typecode := 188;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessTimestampTZ(self IN pg_catalog.ANYDATA) return TIMESTAMP WITH TIME ZONE AS
+    begin
+        IF self.type_name = ''TimestampTZ'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertVarchar(c IN VARCHAR) RETURN pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := c::text;
+        v_anydata.type_name := ''Varchar'';
+        v_anydata.typecode := 1;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessVarchar(self IN pg_catalog.ANYDATA) return VARCHAR AS
+    begin
+        IF self.type_name = ''Varchar'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    STATIC FUNCTION ConvertVarchar2(c IN VARCHAR2) RETURN pg_catalog.ANYDATA AS
+    declare
+        v_anydata pg_catalog.ANYDATA;
+    begin
+        v_anydata.data := c::text;
+        v_anydata.type_name := ''Varchar2'';
+        v_anydata.typecode := 9;
+        return v_anydata;
+    end;
+
+    MEMBER FUNCTION AccessVarchar2(self IN pg_catalog.ANYDATA) return VARCHAR2 AS
+    begin
+        IF self.type_name = ''Varchar2'' THEN
+            return textout(self.data);
+        ELSE
+            return NULL;
+        END IF;
+    end;
+
+    MEMBER FUNCTION GETTYPE(self IN pg_catalog.ANYDATA, typ OUT pg_catalog.ANYTYPE) RETURN INT AS
+    begin
+        return self.typecode;
+    end;
+
+    MEMBER FUNCTION GETTYPENAME(self IN pg_catalog.ANYDATA) RETURN VARCHAR2 AS
+    begin
+        return self.type_name;
+    end;
+  END;';
+END $$;
+
+/*
+ * anydataset
+ */
+
+CREATE OR REPLACE TYPE pg_catalog.ANYDATASET as object(
+    data text[],
+    type_info pg_catalog.ANYTYPE,
+    type_name name,
+    typecode int,
+    count int,
+    state bool,
+
+    STATIC PROCEDURE BeginCreate(
+       typecode     IN int,
+       rtype        IN pg_catalog.AnyType,
+       aset         OUT pg_catalog.ANYDATASET),
+
+    MEMBER PROCEDURE AddInstance(self IN OUT pg_catalog.ANYDATASET),
+
+    MEMBER PROCEDURE ENDCREATE(self IN OUT pg_catalog.ANYDATASET),
+
+    MEMBER PROCEDURE SETBDOUBLE(
+       self              IN OUT pg_catalog.ANYDATASET, 
+       dbl               IN BINARY_DOUBLE, 
+       last_elem         IN BOOLEAN DEFAULT FALSE),
+
+    MEMBER PROCEDURE SETBLOB(
+       self              IN OUT pg_catalog.ANYDATASET,
+       b                 IN BLOB,
+       last_elem BOOLEAN DEFAULT FALSE),
+    
+    MEMBER PROCEDURE SETCHAR(
+       self              IN OUT pg_catalog.ANYDATASET,
+       c                 IN CHAR,
+       last_elem BOOLEAN DEFAULT FALSE),
+    
+    MEMBER PROCEDURE SETDATE(
+       self              IN OUT pg_catalog.ANYDATASET,
+       dat               IN DATE,
+       last_elem BOOLEAN DEFAULT FALSE),
+    
+    MEMBER PROCEDURE SETNCHAR(
+       self              IN OUT pg_catalog.ANYDATASET,
+       nc                IN NCHAR, 
+       last_elem IN BOOLEAN DEFAULT FALSE),
+    
+    MEMBER PROCEDURE SETNUMBER(
+       self              IN OUT pg_catalog.ANYDATASET,
+       num               IN NUMBER,
+       last_elem BOOLEAN DEFAULT FALSE),
+    
+    MEMBER PROCEDURE SETNVARCHAR2(
+       self             IN OUT pg_catalog.ANYDATASET,
+       nc               IN NVarchar2, 
+       last_elem        IN BOOLEAN DEFAULT FALSE),
+    
+    MEMBER PROCEDURE SETRAW(
+       self              IN OUT pg_catalog.ANYDATASET,
+       r                 IN RAW,
+       last_elem BOOLEAN DEFAULT FALSE),
+    
+    MEMBER PROCEDURE SETTIMESTAMP(
+       self              IN OUT pg_catalog.ANYDATASET, 
+       ts                IN TIMESTAMP,
+       last_elem IN BOOLEAN DEFAULT FALSE),
+    
+    MEMBER PROCEDURE SETTIMESTAMPTZ(
+       self             IN OUT pg_catalog.ANYDATASET, 
+       ts               IN TIMESTAMP WITH TIME ZONE,
+       last_elem        IN BOOLEAN DEFAULT FALSE),
+    
+    MEMBER PROCEDURE SETVARCHAR(
+       self              IN OUT pg_catalog.ANYDATASET,
+       c                 IN VARCHAR,
+       last_elem BOOLEAN DEFAULT FALSE),
+    
+    MEMBER PROCEDURE SETVARCHAR2(
+       self              IN OUT pg_catalog.ANYDATASET,
+       c                 IN VARCHAR2,
+       last_elem BOOLEAN DEFAULT FALSE),
+
+    MEMBER FUNCTION GETBDOUBLE(
+       self        IN pg_catalog.ANYDATASET, 
+       dbl         OUT BINARY_DOUBLE,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETBLOB(
+       self        IN pg_catalog.ANYDATASET,
+       b           OUT BLOB,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETCHAR(
+       self        IN pg_catalog.ANYDATASET,
+       c           OUT CHAR,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETDATE(
+       self        IN pg_catalog.ANYDATASET,
+       dat         OUT DATE,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETNCHAR(
+       self        IN pg_catalog.ANYDATASET, 
+       nc          OUT NCHAR,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETNUMBER(
+       self        IN pg_catalog.ANYDATASET,
+       num         OUT NUMBER,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETNVARCHAR2(
+       self        IN pg_catalog.ANYDATASET, 
+       nc          OUT NVARCHAR2,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETRAW(
+       self        IN pg_catalog.ANYDATASET,
+       r           OUT RAW,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETTIMESTAMP(
+       self        IN pg_catalog.ANYDATASET, 
+       ts          OUT TIMESTAMP,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETTIMESTAMPTZ(
+       self        IN pg_catalog.ANYDATASET, 
+       ts          OUT TIMESTAMP WITH TIME ZONE, 
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETVARCHAR(
+       self        IN pg_catalog.ANYDATASET,
+       c           OUT VARCHAR,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GETVARCHAR2(
+       self        IN pg_catalog.ANYDATASET,
+       c           OUT VARCHAR2,
+       index       IN int)
+    RETURN int,
+
+    MEMBER FUNCTION GetCount(self IN pg_catalog.ANYDATASET) RETURN INT,
+
+    MEMBER FUNCTION GETTYPE(self IN pg_catalog.ANYDATASET, typ OUT pg_catalog.AnyType) RETURN INT,
+
+    MEMBER FUNCTION GETTYPENAME(self IN pg_catalog.ANYDATASET) RETURN VARCHAR2
+);
+
+GRANT USAGE ON TYPE pg_catalog.ANYDATASET TO PUBLIC;
+
+DO $$
+BEGIN
+  EXECUTE
+  'CREATE OR REPLACE PROCEDURE
+   pg_catalog.setAnydatasetExcept(v_anydataset IN OUT pg_catalog.ANYDATASET, typecode int) AS
+   BEGIN
+     IF (v_anydataset IS NULL) THEN
+       RAISE EXCEPTION ''expression "NULL" cannot be used as an assignment target'';
+     ELSIF (v_anydataset.state = 1) OR ((array_length(v_anydataset.data, 1) = 0) AND (v_anydataset.count = 0)) THEN
+       RAISE EXCEPTION ''incorrect usage of method SET'';
+     ELSIF (v_anydataset.typecode != typecode) THEN
+       RAISE EXCEPTION ''Type Mismatch while constructing or accessing OCIAnyData'';
+     END IF;
+   END;';
+END $$;
+
+DO $$
+BEGIN
+  EXECUTE
+  'CREATE OR REPLACE PROCEDURE
+   pg_catalog.getAnydatasetExcept(
+       v_anydataset IN pg_catalog.ANYDATASET, 
+       idx IN int, 
+       typecode IN int
+   ) AS 
+   BEGIN
+     IF (v_anydataset IS NULL) THEN
+       RAISE EXCEPTION ''expression "NULL" cannot be used as an assignment target'';
+     ELSIF (idx > v_anydataset.count) OR (idx < 1) THEN
+       v_anydataset.data[idx] = NULL;
+     ELSIF (v_anydataset.state = 0) THEN
+       RAISE EXCEPTION ''incorrect usage of method GET'';
+     ELSIF (v_anydataset.typecode != typecode) THEN
+       RAISE EXCEPTION ''Type Mismatch while constructing or accessing OCIAnyData'';
+     END IF;
+   END;';
+END $$;
+
+DO $$
+BEGIN
+  EXECUTE
+  'CREATE OR REPLACE TYPE BODY pg_catalog.ANYDATASET AS
+    STATIC PROCEDURE BeginCreate(
+       typecode     IN int,
+       rtype        IN pg_catalog.AnyType,
+       aset         OUT pg_catalog.ANYDATASET) AS
+    begin
+      IF NOT (pg_typeof(aset) = ''anydataset''::regtype) AND (aset IS NULL) THEN
+        raise exception ''expression "NULL" cannot be used as an assignment target'';
+      ELSIF typecode IN (101, 113, 96, 12, 286, 2, 287, 95, 187, 188, 1, 9) THEN
+        aset.typecode := typecode;
+        aset.data := ARRAY[]::text[];
+        aset.count := 0;
+        aset.state := 0;
+        aset.type_name := CASE typecode
+          WHEN 101 THEN ''BDouble''
+          WHEN 113 THEN ''Blob''
+          WHEN 96  THEN ''Char''
+          WHEN 12  THEN ''Date''
+          WHEN 286 THEN ''NChar''
+          WHEN 2   THEN ''Number''
+          WHEN 287 THEN ''NVarchar2''
+          WHEN 95  THEN ''Raw''
+          WHEN 187 THEN ''Timestamp''
+          WHEN 188 THEN ''TimestampTZ''
+          WHEN 1   THEN ''Varchar''
+          WHEN 9   THEN ''Varchar2''
+        END;
+      ELSE
+        raise exception ''invalid typecode'';
+      END IF;
+    end;
+
+    MEMBER PROCEDURE AddInstance(self IN OUT pg_catalog.ANYDATASET) AS
+    begin
+        IF (self IS NULL) THEN
+          raise exception ''expression "NULL" cannot be used as an assignment target'';
+        ELSIF (self.state != 0) THEN
+          raise exception ''incorrect usage of method AddInstance'';
+        ELSIF (array_length(self.data, 1) != self.count) THEN
+          raise exception ''The Anydataset contains elements that have not been set.'';
+        ELSE
+          self.count := self.count + 1;
+        END IF;
+    end;
+
+    MEMBER PROCEDURE ENDCREATE(self IN OUT pg_catalog.ANYDATASET) AS
+    begin
+      IF (self IS NULL) THEN
+        raise exception ''expression "NULL" cannot be used as an assignment target'';
+      ELSIF (array_length(self.data, 1) != self.count) THEN
+        raise exception ''The Anydataset contains elements that have not been set.'';
+      ELSE
+        self.state = 1;
+      END IF;
+    end;
+
+    MEMBER PROCEDURE SETBDOUBLE(
+       self              IN OUT pg_catalog.ANYDATASET, 
+       dbl               IN BINARY_DOUBLE, 
+       last_elem         IN BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 101);
+      self.data := array_append(self.data, dbl::text);
+    end;
+
+    MEMBER FUNCTION GETBDOUBLE(
+       self        IN pg_catalog.ANYDATASET, 
+       dbl         OUT BINARY_DOUBLE,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 101);
+      dbl = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETBLOB(
+       self              IN OUT pg_catalog.ANYDATASET,
+       b                 IN BLOB,
+       last_elem BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 113);
+      self.data := array_append(self.data, b::raw::text);
+    end;
+
+    MEMBER FUNCTION GETBLOB(
+       self        IN pg_catalog.ANYDATASET,
+       b           OUT BLOB,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 113);
+      b = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETCHAR(
+       self              IN OUT pg_catalog.ANYDATASET,
+       c                 IN CHAR,
+       last_elem BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 96);
+      self.data := array_append(self.data, c::text);
+    end;
+
+    MEMBER FUNCTION GETCHAR(
+       self        IN pg_catalog.ANYDATASET,
+       c           OUT CHAR,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 96);
+      c = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETDATE(
+       self              IN OUT pg_catalog.ANYDATASET,
+       dat               IN DATE,
+       last_elem BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 12);
+      self.data := array_append(self.data, dat::text);
+    end;
+
+    MEMBER FUNCTION GETDATE(
+       self        IN pg_catalog.ANYDATASET,
+       dat         OUT DATE,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 12);
+      dat = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETNCHAR(
+       self              IN OUT pg_catalog.ANYDATASET,
+       nc                IN NCHAR, 
+       last_elem IN BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 286);
+      self.data := array_append(self.data, nc::text);
+    end;
+
+    MEMBER FUNCTION GETNCHAR(
+       self        IN pg_catalog.ANYDATASET, 
+       nc          OUT NCHAR,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 286);
+      nc = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETNUMBER(
+       self              IN OUT pg_catalog.ANYDATASET,
+       num               IN NUMBER,
+       last_elem BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 2);
+      self.data := array_append(self.data, num::text);
+    end;
+
+    MEMBER FUNCTION GETNUMBER(
+       self        IN pg_catalog.ANYDATASET,
+       num         OUT NUMBER,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 2);
+      num = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETNVARCHAR2(
+       self             IN OUT pg_catalog.ANYDATASET,
+       nc               IN NVarchar2, 
+       last_elem        IN BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 287);
+      self.data := array_append(self.data, nc::text);
+    end;
+
+    MEMBER FUNCTION GETNVARCHAR2(
+       self        IN pg_catalog.ANYDATASET, 
+       nc          OUT NVARCHAR2,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 287);
+      nc = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETRAW(
+       self              IN OUT pg_catalog.ANYDATASET,
+       r                 IN RAW,
+       last_elem BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 95);
+      self.data := array_append(self.data, r::text);
+    end;
+
+    MEMBER FUNCTION GETRAW(
+       self        IN pg_catalog.ANYDATASET,
+       r           OUT RAW,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 95);
+      r = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETTIMESTAMP(
+       self              IN OUT pg_catalog.ANYDATASET, 
+       ts                IN TIMESTAMP,
+       last_elem IN BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 187);
+      self.data := array_append(self.data, ts::text);
+    end;
+
+    MEMBER FUNCTION GETTIMESTAMP(
+       self        IN pg_catalog.ANYDATASET, 
+       ts          OUT TIMESTAMP,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 187);
+      ts = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETTIMESTAMPTZ(
+       self             IN OUT pg_catalog.ANYDATASET, 
+       ts               IN TIMESTAMP WITH TIME ZONE,
+       last_elem        IN BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 188);
+      self.data := array_append(self.data, ts::text);
+    end;
+
+    MEMBER FUNCTION GETTIMESTAMPTZ(
+       self        IN pg_catalog.ANYDATASET, 
+       ts          OUT TIMESTAMP WITH TIME ZONE, 
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 188);
+      ts = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETVARCHAR(
+       self              IN OUT pg_catalog.ANYDATASET,
+       c                 IN VARCHAR,
+       last_elem BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 1);
+      self.data := array_append(self.data, c::text);
+    end;
+
+    MEMBER FUNCTION GETVARCHAR(
+       self        IN pg_catalog.ANYDATASET,
+       c           OUT VARCHAR,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 1);
+      c = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER PROCEDURE SETVARCHAR2(
+       self              IN OUT pg_catalog.ANYDATASET,
+       c                 IN VARCHAR2,
+       last_elem BOOLEAN DEFAULT FALSE) AS
+    begin
+      pg_catalog.setAnydatasetExcept(self, 9);
+      self.data := array_append(self.data, c::text);
+    end;
+
+    MEMBER FUNCTION GETVARCHAR2(
+       self        IN pg_catalog.ANYDATASET,
+       c           OUT VARCHAR2,
+       idx         IN int)
+    RETURN int AS
+    begin
+      pg_catalog.getAnydatasetExcept(self, idx, 9);
+       c = textout(self.data[idx]);
+      return 0;
+    end;
+
+    MEMBER FUNCTION GetCount(self IN pg_catalog.ANYDATASET) RETURN INT AS
+    begin
+      IF (self IS NULL) THEN
+        RAISE EXCEPTION ''expression "NULL" cannot be used as an assignment target'';
+      ELSIF (self.state = 0) THEN
+        RAISE EXCEPTION ''incorrect usage of method GetCount'';
+      END IF;
+      return self.count;
+    end;
+
+    MEMBER FUNCTION GETTYPE(self IN pg_catalog.ANYDATASET, typ OUT pg_catalog.AnyType) RETURN INT AS
+    begin
+      IF (self IS NULL) THEN
+        RAISE EXCEPTION ''expression "NULL" cannot be used as an assignment target'';
+      ELSIF (self.state = 0) THEN
+        RAISE EXCEPTION ''incorrect usage of method GETTYPE'';
+      END IF;
+      return self.typecode;
+    end;
+
+    MEMBER FUNCTION GETTYPENAME(self IN pg_catalog.ANYDATASET) RETURN VARCHAR2 AS
+    begin
+      IF (self IS NULL) THEN
+        RAISE EXCEPTION ''expression "NULL" cannot be used as an assignment target'';
+      ELSIF (self.state = 0) THEN
+        RAISE EXCEPTION ''incorrect usage of method GETTYPENAME'';
+      END IF;
+      return self.type_name;
+    end;
+  END;';
+END $$;
+
+CREATE OR REPLACE FUNCTION pg_catalog.raise_application_error(
+    IN code INTEGER,
+    IN message TEXT,
+    IN keep_errors BOOL DEFAULT FALSE
+) RETURNS void
+AS '$libdir/plpgsql', 'raise_application_error'
+LANGUAGE C VOLATILE NOT FENCED;
+
+CREATE OR REPLACE FUNCTION dbe_perf.get_statement_history(
+    IN start_time_point timestamp with time zone,
+    IN finish_time_point timestamp with time zone)
+RETURNS TABLE (
+    db_name name,
+    schema_name name,
+    origin_node integer,
+    user_name name,
+    application_name text,
+    client_addr text,
+    client_port integer,
+    unique_query_id bigint,
+    debug_query_id bigint,
+    query text,
+    start_time timestamp with time zone,
+    finish_time timestamp with time zone,
+    slow_sql_threshold bigint,
+    transaction_id bigint,
+    thread_id bigint,
+    session_id bigint,
+    n_soft_parse bigint,
+    n_hard_parse bigint,
+    query_plan text,
+    n_returned_rows bigint,
+    n_tuples_fetched bigint,
+    n_tuples_returned bigint,
+    n_tuples_inserted bigint,
+    n_tuples_updated bigint,
+    n_tuples_deleted bigint,
+    n_blocks_fetched bigint,
+    n_blocks_hit bigint,
+    db_time bigint,
+    cpu_time bigint,
+    execution_time bigint,
+    parse_time bigint,
+    plan_time bigint,
+    rewrite_time bigint,
+    pl_execution_time bigint,
+    pl_compilation_time bigint,
+    data_io_time bigint,
+    net_send_info text,
+    net_recv_info text,
+    net_stream_send_info text,
+    net_stream_recv_info text,
+    lock_count bigint,
+    lock_time bigint,
+    lock_wait_count bigint,
+    lock_wait_time bigint,
+    lock_max_count bigint,
+    lwlock_count bigint,
+    lwlock_wait_count bigint,
+    lwlock_time bigint,
+    lwlock_wait_time bigint,
+    details bytea,
+    is_slow_sql boolean,
+    trace_id text,
+    advise text,
+    net_send_time bigint,
+    srt1_q bigint,
+    srt2_simple_query bigint,
+    srt3_analyze_rewrite bigint,
+    srt4_plan_query bigint,
+    srt5_light_query bigint,
+    srt6_p bigint,
+    srt7_b bigint,
+    srt8_e bigint,
+    srt9_d bigint,
+    srt10_s bigint,
+    srt11_c bigint,
+    srt12_u bigint,
+    srt13_before_query bigint,
+    srt14_after_query bigint,
+    rtt_unknown bigint,
+    parent_query_id bigint,
+    net_trans_time bigint,
+    trace bytea
+) AS $$
+DECLARE
+    node_role text;
+BEGIN
+    SELECT local_role INTO node_role FROM pg_stat_get_stream_replications() LIMIT 1;
+    
+    IF node_role = 'Primary' OR node_role = 'Normal' THEN
+        RETURN QUERY SELECT sh.* FROM dbe_perf.statement_history sh where sh.start_time >= start_time_point and sh.is_slow_sql = 't'::boolean;
+    ELSIF node_role = 'Standby' OR node_role = 'Cascade Standby' OR node_role = 'Main Standby' THEN
+        RETURN QUERY SELECT * FROM dbe_perf.standby_statement_history(true, finish_time_point, now());
+    ELSE
+        RAISE EXCEPTION 'unknown node role: %', node_role;
+    END IF;
+    
+    RETURN;
+END;
+$$ LANGUAGE plpgsql;
