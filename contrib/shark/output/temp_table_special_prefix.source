@@ -1,0 +1,915 @@
+-- test temporary table with "#" / "##" as prefix name.
+CREATE DATABASE temp_table_prefix dbcompatibility 'D';
+CREATE DATABASE temp_table_prefix_1 dbcompatibility 'D';
+\c temp_table_prefix
+create extension shark;
+\c temp_table_prefix_1;
+create extension shark;
+\c temp_table_prefix
+CREATE SCHEMA test_temp_table_prefix;
+SET current_schema = test_temp_table_prefix;
+-- case1: create 
+CREATE TABLE #Employee (
+    ID INT,
+    Name NVARCHAR(50),
+    HireDate DATE
+);
+CREATE TABLE ##GlobalLog (
+    LogID INT,
+    Message NVARCHAR(100)
+);
+SELECT relname, relpersistence FROM pg_class WHERE relname = '#employee';
+  relname  | relpersistence 
+-----------+----------------
+ #employee | t
+(1 row)
+
+SELECT relname, relpersistence FROM pg_class WHERE relname = '##globallog';
+   relname   | relpersistence 
+-------------+----------------
+ ##globallog | g
+(1 row)
+
+-- error
+CREATE TABLE #Employee (
+    ID INT,
+    Name NVARCHAR(50),
+    HireDate DATE
+);
+--?ERROR:  relation "#employee" already exists in schema .*
+DETAIL:  creating new table with existing name in the same schema
+-- error
+CREATE TABLE ##GlobalLog (
+    LogID INT,
+    Message NVARCHAR(100)
+);
+ERROR:  relation "##globallog" already exists in schema "test_temp_table_prefix"
+DETAIL:  creating new table with existing name in the same schema
+-- error, not support partition table.
+CREATE TABLE #PartitionedTemp (
+    id INT,
+    dt DATE
+) PARTITION BY RANGE (dt) (
+    PARTITION p1 VALUES LESS THAN ('2022-01-01'),
+    PARTITION p_default VALUES LESS THAN (MAXVALUE)
+);
+ERROR:  unsupported feature with temporary/unlogged table for partitioned table
+CREATE TABLE ##PartitionedTemp (
+    id INT,
+    dt DATE
+) PARTITION BY RANGE (dt) (
+    PARTITION p1 VALUES LESS THAN ('2022-01-01'),
+    PARTITION p_default VALUES LESS THAN (MAXVALUE)
+);
+ERROR:  unsupported feature with temporary/unlogged table for partitioned table
+--Case insensitive,
+CREATE TABLE #aa (ID INT);
+-- duplicate error.
+CREATE TABLE #Aa (ID INT);
+--?ERROR:  relation "#aa" already exists in schema .*
+DETAIL:  creating new table with existing name in the same schema
+CREATE TABLE ##aa (ID INT);
+-- duplicate error.
+CREATE TABLE ##Aa (ID INT);
+ERROR:  relation "##aa" already exists in schema "test_temp_table_prefix"
+DETAIL:  creating new table with existing name in the same schema
+INSERT INTO ##Aa VALUES(1);
+SELECT * FROM ##Aa LIMIT 1;
+ id 
+----
+  1
+(1 row)
+
+-- with schema qualified.
+CREATE TABLE test_temp_table_prefix.#Employee1 (ID INT, Name NVARCHAR(50));
+CREATE TABLE test_temp_table_prefix.##GlobalLog1 (LogID INT, Message NVARCHAR(100));
+SELECT relname, relpersistence FROM pg_class WHERE relname = '#employee1';
+  relname   | relpersistence 
+------------+----------------
+ #employee1 | t
+(1 row)
+
+SELECT relname, relpersistence FROM pg_class WHERE relname = '##globallog1';
+   relname    | relpersistence 
+--------------+----------------
+ ##globallog1 | g
+(1 row)
+
+-- with catalog and schema qualified.
+CREATE TABLE temp_table_prefix.test_temp_table_prefix.#Employee2 (ID INT, Name NVARCHAR(50));
+CREATE TABLE temp_table_prefix.test_temp_table_prefix.##GlobalLog2 (LogID INT, Message NVARCHAR(100));
+SELECT relname, relpersistence FROM pg_class WHERE relname = '#employee2';
+  relname   | relpersistence 
+------------+----------------
+ #employee2 | t
+(1 row)
+
+SELECT relname, relpersistence FROM pg_class WHERE relname = '##globallog2';
+   relname    | relpersistence 
+--------------+----------------
+ ##globallog2 | g
+(1 row)
+
+-- case2: insert
+INSERT INTO #Employee VALUES (1, 'Alice', '2023-01-01');
+INSERT INTO ##GlobalLog VALUES (1, 'Test Message');
+-- case3: select
+SELECT * FROM #Employee;
+ id | name  |  hiredate  
+----+-------+------------
+  1 | Alice | 01-01-2023
+(1 row)
+
+SELECT * FROM ##GlobalLog;
+ logid |   message    
+-------+--------------
+     1 | Test Message
+(1 row)
+
+SELECT * FROM test_temp_table_prefix.#Employee;
+ id | name  |  hiredate  
+----+-------+------------
+  1 | Alice | 01-01-2023
+(1 row)
+
+SELECT * FROM test_temp_table_prefix.##GlobalLog;
+ logid |   message    
+-------+--------------
+     1 | Test Message
+(1 row)
+
+SELECT * FROM test_temp_table_prefix.#Employee;
+ id | name  |  hiredate  
+----+-------+------------
+  1 | Alice | 01-01-2023
+(1 row)
+
+SELECT * FROM test_temp_table_prefix.##GlobalLog;
+ logid |   message    
+-------+--------------
+     1 | Test Message
+(1 row)
+
+SELECT * FROM temp_table_prefix.test_temp_table_prefix.#Employee;
+ id | name  |  hiredate  
+----+-------+------------
+  1 | Alice | 01-01-2023
+(1 row)
+
+SELECT * FROM temp_table_prefix.test_temp_table_prefix.##GlobalLog;
+ logid |   message    
+-------+--------------
+     1 | Test Message
+(1 row)
+
+-- case4: update
+UPDATE #Employee SET Name = 'xxx' WHERE ID = 1;
+UPDATE ##GlobalLog SET Message = 'message' WHERE LogID = 1;
+-- case5: drop
+DROP TABLE #Employee;
+DROP TABLE ##GlobalLog;
+-- case6: select into
+CREATE TABLE test1(a int, b int);
+INSERT INTO test1 VALUES (1, 1), (2, 2);
+SELECT * INTO #test_t1 FROM test1;
+SELECT relname, relpersistence FROM pg_class WHERE relname = '#test_t1';
+ relname  | relpersistence 
+----------+----------------
+ #test_t1 | t
+(1 row)
+
+SELECT * FROM #test_t1 order by a;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+(2 rows)
+
+SELECT * INTO ##test_t2 FROM test1;
+SELECT relname, relpersistence FROM pg_class WHERE relname = '##test_t2';
+  relname  | relpersistence 
+-----------+----------------
+ ##test_t2 | g
+(1 row)
+
+SELECT * FROM ##test_t2 order by a;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+(2 rows)
+
+SELECT * INTO #test_t3 FROM ##test_t2;
+SELECT relname, relpersistence FROM pg_class WHERE relname = '#test_t3';
+ relname  | relpersistence 
+----------+----------------
+ #test_t3 | t
+(1 row)
+
+SELECT * FROM #test_t3 order by a;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+(2 rows)
+
+-- case7: create as
+CREATE TABLE cas_test (id int, name varchar);
+INSERT INTO cas_test VALUES(1, 'xxx');
+CREATE TABLE #cas_temp1 AS SELECT id, name FROM cas_test;
+SELECT relname, relpersistence FROM pg_class WHERE relname = '#cas_temp1';
+  relname   | relpersistence 
+------------+----------------
+ #cas_temp1 | t
+(1 row)
+
+SELECT * FROM #cas_temp1;
+ id | name 
+----+------
+  1 | xxx
+(1 row)
+
+CREATE TABLE ##Cas_temp1 AS SELECT id, name FROM cas_test;
+-- case8: #, ## as operator
+-- error
+CREATE TABLE # (
+    ID INT
+);
+ERROR:  syntax error at or near "#"
+LINE 1: CREATE TABLE # (
+                     ^
+-- error
+CREATE TABLE ## (
+    ID INT
+);
+ERROR:  syntax error at or near "##"
+LINE 1: CREATE TABLE ## (
+                     ^
+-- success
+CREATE TABLE ### (
+    ID INT
+);
+CREATE TABLE #111 (
+    ID INT
+);
+INSERT INTO #111 VALUES(1);
+-- create operator
+CREATE FUNCTION square(a int) 
+RETURNS int AS $$
+BEGIN
+    RETURN a * a;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OPERATOR # (
+    PROCEDURE = square,
+    RIGHTARG = int
+);
+-- should be reconginzed as operator, regardless of enable_special_operator
+SELECT 1 # 1;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT '1' # 1;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT b'0' # b'1';
+ ?column? 
+----------
+ 1
+(1 row)
+
+SELECT LINE'((0,0),(1,1))' # LINE'((0,1),(1,0))';
+ERROR:  type line is not yet supported.
+SELECT BOX'(0,0,2,2)' # BOX'(1,1,3,3)';
+  ?column?   
+-------------
+ (2,2),(1,1)
+(1 row)
+
+SELECT LSEG'((0,0),(2,2))' # LSEG'((1,1),(3,3))';
+ ?column? 
+----------
+ 
+(1 row)
+
+SELECT POINT(1,1) ## LINE'((0,0),(2,2))';
+ERROR:  type line is not yet supported.
+SELECT POINT(1,1) ## LSEG'((0,0),(2,2))';
+ ?column? 
+----------
+ (1,1)
+(1 row)
+
+SELECT POINT(1,1) ## BOX'(0,0,2,2)';
+ ?column? 
+----------
+ (1,1)
+(1 row)
+
+SELECT LSEG'((0,0),(1,1))' ## LINE'((1,1),(2,0))';
+ERROR:  type line is not yet supported.
+SELECT LSEG'((0,0),(1,1))' ## LSEG'((1,1),(2,2))';
+ ?column? 
+----------
+ (1,1)
+(1 row)
+
+SELECT LSEG'((0,0),(0,3))' ## BOX'(0,0,2,2)';
+ ?column? 
+----------
+ (0,1)
+(1 row)
+
+SELECT LINE'((0,1),(3,1))' ## BOX'(0,0,3,2)';
+ERROR:  type line is not yet supported.
+SELECT LINE'((1,1),(2,0))' ## LSEG'((0,0),(1,1))';
+ERROR:  type line is not yet supported.
+-- #### test GUC parameter
+-- default: enable_special_operator=false, reconginzed as IDNET
+SELECT 1#1;
+ #1 
+----
+  1
+(1 row)
+
+SELECT '1'#1;
+ #1 
+----
+ 1
+(1 row)
+
+SELECT 1 #abs(-1);
+ERROR:  syntax error at or near "("
+LINE 1: SELECT 1 #abs(-1);
+                     ^
+SELECT b'0'#b'1';
+ERROR:  syntax error at or near "'1'"
+LINE 1: SELECT b'0'#b'1';
+                     ^
+SELECT # 2;
+ ?column? 
+----------
+        4
+(1 row)
+
+SELECT #2;
+ERROR:  column "#2" does not exist
+LINE 1: SELECT #2;
+               ^
+CONTEXT:  referenced column: #2
+SELECT #'((0,0), (1,1))'::POLYGON;
+ ?column? 
+----------
+        2
+(1 row)
+
+SELECT #'((0,0),(1,1),(2,0))'::PATH;
+ ?column? 
+----------
+        3
+(1 row)
+
+SELECT #((0, 0), (1, 1));
+ERROR:  operator does not exist: # record
+LINE 1: SELECT #((0, 0), (1, 1));
+               ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+SELECT #POLYGON'((0, 0), (1, 1))';
+ERROR:  type "#polygon" does not exist
+LINE 1: SELECT #POLYGON'((0, 0), (1, 1))';
+               ^
+CONTEXT:  referenced column: #polygon
+SELECT LINE'((0,0),(1,1))' #LINE'((0,1),(1,0))';
+ERROR:  syntax error at or near "'((0,1),(1,0))'"
+LINE 1: SELECT LINE'((0,0),(1,1))' #LINE'((0,1),(1,0))';
+                                        ^
+SELECT BOX'(0,0,2,2)' #BOX'(1,1,3,3)';
+ERROR:  syntax error at or near "'(1,1,3,3)'"
+LINE 1: SELECT BOX'(0,0,2,2)' #BOX'(1,1,3,3)';
+                                  ^
+SELECT LSEG'((0,0),(2,2))' #LSEG'((1,1),(3,3))';
+ERROR:  syntax error at or near "'((1,1),(3,3))'"
+LINE 1: SELECT LSEG'((0,0),(2,2))' #LSEG'((1,1),(3,3))';
+                                        ^
+SELECT POINT(1,1) ##LINE'((0,0),(2,2))';
+ERROR:  syntax error at or near "'((0,0),(2,2))'"
+LINE 1: SELECT POINT(1,1) ##LINE'((0,0),(2,2))';
+                                ^
+SELECT POINT(1,1) ##LSEG'((0,0),(2,2))';
+ERROR:  syntax error at or near "'((0,0),(2,2))'"
+LINE 1: SELECT POINT(1,1) ##LSEG'((0,0),(2,2))';
+                                ^
+SELECT POINT(1,1) ##BOX'(0,0,2,2)';
+ERROR:  syntax error at or near "'(0,0,2,2)'"
+LINE 1: SELECT POINT(1,1) ##BOX'(0,0,2,2)';
+                               ^
+SELECT LSEG'((0,0),(1,1))' ##LINE'((1,1),(2,0))';
+ERROR:  syntax error at or near "'((1,1),(2,0))'"
+LINE 1: SELECT LSEG'((0,0),(1,1))' ##LINE'((1,1),(2,0))';
+                                         ^
+SELECT LSEG'((0,0),(1,1))' ##LSEG'((1,1),(2,2))';
+ERROR:  syntax error at or near "'((1,1),(2,2))'"
+LINE 1: SELECT LSEG'((0,0),(1,1))' ##LSEG'((1,1),(2,2))';
+                                         ^
+SELECT LSEG'((0,0),(0,3))' ##BOX'(0,0,2,2)';
+ERROR:  syntax error at or near "'(0,0,2,2)'"
+LINE 1: SELECT LSEG'((0,0),(0,3))' ##BOX'(0,0,2,2)';
+                                        ^
+SELECT LINE'((0,1),(3,1))' ##BOX'(0,0,3,2)';
+ERROR:  syntax error at or near "'(0,0,3,2)'"
+LINE 1: SELECT LINE'((0,1),(3,1))' ##BOX'(0,0,3,2)';
+                                        ^
+SELECT LINE'((1,1),(2,0))' ##LSEG'((0,0),(1,1))';
+ERROR:  syntax error at or near "'((0,0),(1,1))'"
+LINE 1: SELECT LINE'((1,1),(2,0))' ##LSEG'((0,0),(1,1))';
+                                         ^
+DECLARE
+    a int;
+BEGIN
+    SELECT 1 # 1 INTO a;
+    RAISE INFO 'a: %', a;
+    -- success
+    SELECT 1 ##111.ID INTO a FROM #111 WHERE ID = 1;
+    RAISE INFO 'a: %', a;
+END;
+/
+ERROR:  Invalid use of identifiers.
+LINE 6:     SELECT 1 ##111.ID INTO a FROM #111 WHERE ID = 1;
+                     ^
+DETAIL:  Syntax error found near token "##111"
+QUERY:  DECLARE a int;
+BEGIN
+    SELECT 1 # 1 INTO a;
+    RAISE INFO 'a: %', a;
+    -- success
+    SELECT 1 ##111.ID INTO a FROM #111 WHERE ID = 1;
+    RAISE INFO 'a: %', a;
+END
+SELECT 1 # #111.ID from #111 where ID = 1;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT 1 ##111.ID from #111 where ID = 1;
+ERROR:  Invalid use of identifiers.
+LINE 1: SELECT 1 ##111.ID from #111 where ID = 1;
+                 ^
+DETAIL:  Syntax error found near token "##111"
+-- enable_special_operator=true, reconginzed as Op
+set enable_special_operator = true;
+SELECT 1#1;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT '1'#1;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT 1 #abs(-1);
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT b'0'#b'1';
+ ?column? 
+----------
+ 1
+(1 row)
+
+SELECT # 2;
+ ?column? 
+----------
+        4
+(1 row)
+
+SELECT #2;
+ ?column? 
+----------
+        4
+(1 row)
+
+SELECT #'((0,0), (1,1))'::POLYGON;
+ ?column? 
+----------
+        2
+(1 row)
+
+SELECT #'((0,0),(1,1),(2,0))'::PATH;
+ ?column? 
+----------
+        3
+(1 row)
+
+SELECT #((0, 0), (1, 1));
+ERROR:  operator does not exist: # record
+LINE 1: SELECT #((0, 0), (1, 1));
+               ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+SELECT #POLYGON'((0, 0), (1, 1))';
+ ?column? 
+----------
+        2
+(1 row)
+
+SELECT LINE'((0,0),(1,1))'#LINE'((0,1),(1,0))';
+ERROR:  type line is not yet supported.
+SELECT BOX'(0,0,2,2)' #BOX'(1,1,3,3)';
+  ?column?   
+-------------
+ (2,2),(1,1)
+(1 row)
+
+SELECT LSEG'((0,0),(2,2))'#LSEG'((1,1),(3,3))';
+ ?column? 
+----------
+ 
+(1 row)
+
+SELECT POINT(1,1)##LINE'((0,0),(2,2))';
+ERROR:  type line is not yet supported.
+SELECT POINT(1,1)##LSEG'((0,0),(2,2))';
+ ?column? 
+----------
+ (1,1)
+(1 row)
+
+SELECT POINT(1,1)##BOX'(0,0,2,2)';
+ ?column? 
+----------
+ (1,1)
+(1 row)
+
+SELECT LSEG'((0,0),(1,1))'##LINE'((1,1),(2,0))';
+ERROR:  type line is not yet supported.
+SELECT LSEG'((0,0),(1,1))'##LSEG'((1,1),(2,2))';
+ ?column? 
+----------
+ (1,1)
+(1 row)
+
+SELECT LSEG'((0,0),(0,3))'##BOX'(0,0,2,2)';
+ ?column? 
+----------
+ (0,1)
+(1 row)
+
+SELECT LINE'((0,1),(3,1))'##BOX'(0,0,3,2)';
+ERROR:  type line is not yet supported.
+SELECT LINE'((1,1),(2,0))'##LSEG'((0,0),(1,1))';
+ERROR:  type line is not yet supported.
+DECLARE
+    a int;
+BEGIN
+    SELECT 1 # 1 INTO a;
+    RAISE INFO 'a: %', a;
+    -- success
+    SELECT 1 ##111.ID INTO a FROM #111 WHERE ID = 1;
+    RAISE INFO 'a: %', a;
+END;
+/
+ERROR:  syntax error at or near "#"
+LINE 6:     SELECT 1 ##111.ID INTO a FROM #111 WHERE ID = 1;
+                                          ^
+QUERY:  DECLARE a int;
+BEGIN
+    SELECT 1 # 1 INTO a;
+    RAISE INFO 'a: %', a;
+    -- success
+    SELECT 1 ##111.ID INTO a FROM #111 WHERE ID = 1;
+    RAISE INFO 'a: %', a;
+END
+SELECT 1 # #111.ID from #111 where ID = 1;
+ERROR:  syntax error at or near "#"
+LINE 1: SELECT 1 # #111.ID from #111 where ID = 1;
+                                ^
+SELECT 1 ##111.ID from #111 where ID = 1;
+ERROR:  syntax error at or near "#"
+LINE 1: SELECT 1 ##111.ID from #111 where ID = 1;
+                               ^
+reset enable_special_operator;
+-- nested GUC parameter in plsql
+DECLARE
+    a int;
+BEGIN
+    SELECT 1 # 1 INTO a;
+    RAISE INFO 'a: %', a;
+    set enable_special_operator = true;
+    -- success
+    SELECT 1 ##111.ID INTO a FROM #111 WHERE ID = 1;
+    RAISE INFO 'a: %', a;
+END;
+/
+ERROR:  Invalid use of identifiers.
+LINE 7:     SELECT 1 ##111.ID INTO a FROM #111 WHERE ID = 1;
+                     ^
+DETAIL:  Syntax error found near token "##111"
+QUERY:  DECLARE a int;
+BEGIN
+    SELECT 1 # 1 INTO a;
+    RAISE INFO 'a: %', a;
+    set enable_special_operator = true;
+    -- success
+    SELECT 1 ##111.ID INTO a FROM #111 WHERE ID = 1;
+    RAISE INFO 'a: %', a;
+END
+-- noraml IDENT case
+CREATE TEMP TABLE t1 (a int);
+CREATE TEMP TABLE IF NOT EXISTS t2 (a int);
+CREATE TABLE t3 AS SELECT * FROM t1;
+SELECT * INTO t4 FROM t1;
+CREATE TYPE typ1 AS (
+  product_id INT,
+  stock INT
+);
+CREATE TABLE t5 OF typ1;
+CREATE TABLE IF NOT EXISTS t6 OF typ1;
+-- dump/restore
+CREATE TABLE #Employee (
+    ID INT,
+    Name NVARCHAR(50),
+    HireDate DATE
+);
+CREATE TABLE ##GlobalLog (
+    LogID INT,
+    Message NVARCHAR(100)
+);
+\! @abs_bindir@/gs_dump temp_table_prefix -p @portstring@ -f @abs_bindir@/dump_temp_table_prefix.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d temp_table_prefix_1 -p @portstring@ @abs_bindir@/dump_temp_table_prefix.tar >/dev/null 2>&1; echo $?
+0
+\c temp_table_prefix_1
+-- local temporary table not dumped
+SELECT relname, relpersistence FROM pg_class WHERE relname = '#employee';
+ relname | relpersistence 
+---------+----------------
+(0 rows)
+
+SELECT relname, relpersistence FROM pg_class WHERE relname = '##globallog';
+   relname   | relpersistence 
+-------------+----------------
+ ##globallog | g
+(1 row)
+
+SELECT 1#1;
+ #1 
+----
+  1
+(1 row)
+
+SELECT 1 # 1;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT 1 # #111.ID from #111 where ID = 1;
+ERROR:  relation "#111" does not exist on datanode1
+LINE 1: SELECT 1 # #111.ID from #111 where ID = 1;
+                                ^
+set enable_special_operator = true;
+SELECT 1#1;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT 1 # 1;
+ ?column? 
+----------
+        0
+(1 row)
+
+SELECT 1 # #111.ID from #111 where ID = 1;
+ERROR:  syntax error at or near "#"
+LINE 1: SELECT 1 # #111.ID from #111 where ID = 1;
+                                ^
+reset enable_special_operator;
+-- special character in table name
+--本地临时表
+--中文、数字、字母、特殊字符@#_ --成功
+create table #测试test_temp_table( col1 int primary key );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "#测试test_temp_table_pkey" for table "#测试test_temp_table"
+create table #123test_temp_table( col1 int primary key );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "#123test_temp_table_pkey" for table "#123test_temp_table"
+create table #test_temp_table( col1 int primary key );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "#test_temp_table_pkey" for table "#test_temp_table"
+create table #@test_temp_table( col1 int primary key );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "#@test_temp_table_pkey" for table "#@test_temp_table"
+create table #_test_temp_table(
+col1 int primary key
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "#_test_temp_table_pkey" for table "#_test_temp_table"
+--本地临时表-特殊字符、空格 --报错
+create table #.test_temp_table(
+col1 int primary key
+);
+ERROR:  syntax error at or near "#"
+LINE 1: create table #.test_temp_table(
+                     ^
+create table # test_temp_table(
+col1 int primary key
+);
+ERROR:  syntax error at or near "#"
+LINE 1: create table # test_temp_table(
+                     ^
+--全局临时表--中文、数字、字母、特殊字符@#_ --成功
+create table ##测试test_temp_table( col1 int primary key );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "##测试test_temp_table_pkey" for table "##测试test_temp_table"
+create table ##123test_temp_table( col1 int primary key );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "##123test_temp_table_pkey" for table "##123test_temp_table"
+create table ##test_temp_table( col1 int primary key );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "##test_temp_table_pkey" for table "##test_temp_table"
+create table ##@test_temp_table( col1 int primary key );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "##@test_temp_table_pkey" for table "##@test_temp_table"
+create table ###test_temp_table(
+col1 int primary key
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "###test_temp_table_pkey" for table "###test_temp_table"
+create table ##_test_temp_table(
+col1 int primary key
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "##_test_temp_table_pkey" for table "##_test_temp_table"
+--全局临时表-特殊字符、空格 --报错
+create table ##.test_temp_table(
+col1 int primary key
+);
+ERROR:  syntax error at or near "##"
+LINE 1: create table ##.test_temp_table(
+                     ^
+create table ## test_temp_table(
+col1 int primary key
+);
+ERROR:  syntax error at or near "##"
+LINE 1: create table ## test_temp_table(
+                     ^
+--列存表
+create table #test_temp_table_2(
+col1 int primary key,
+col2 char(10)
+)WITH (ORIENTATION = COLUMN);
+ERROR:  Un-supported feature
+DETAIL:  Orientation type column is not supported for D-format temp table
+-- with schema pg_temp
+create table pg_temp.#test_temp_table_2(
+col1 int primary key,
+col2 char(10)
+)WITH (ORIENTATION = COLUMN);
+ERROR:  Un-supported feature
+DETAIL:  Orientation type column is not supported for D-format temp table
+--外键1-本表为临时表，被引用表为临时表
+create table #test_temp_table_3(
+col1 int,
+col2 char(10) primary key
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "#test_temp_table_3_pkey" for table "#test_temp_table_3"
+insert into #test_temp_table_3 values(1,'test');
+insert into #test_temp_table_3 values(2,'vast');
+insert into #test_temp_table_3 values(3,'coast');
+insert into #test_temp_table_3 values(4,'fast');
+create table #test_temp_foreign_table_3(
+col1 int,
+col2 char(20) references #test_temp_table_3(col2)
+);
+WARNING:  Un-supported feature
+DETAIL:  Skipping FORERIGN KEY constraint '#test_temp_foreign_table_3' definition for temporary table. FOREIGN KEY constraints are not enforced on local or global temporary tables.
+insert into #test_temp_foreign_table_3 values(6,'fast');
+insert into #test_temp_foreign_table_3 values(8,'best');
+--外键2-本表为临时表，被引用表为非临时表
+create table test_temp_table_3_1(
+col1 int,
+col2 char(10) primary key
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_temp_table_3_1_pkey" for table "test_temp_table_3_1"
+insert into test_temp_table_3_1 values(1,'test');
+insert into test_temp_table_3_1 values(2,'vast');
+insert into test_temp_table_3_1 values(3,'coast');
+insert into test_temp_table_3_1 values(4,'fast');
+create table #test_temp_foreign_table_3_1(
+col1 int,
+col2 char(20) references test_temp_table_3_1(col2)
+);
+WARNING:  Un-supported feature
+DETAIL:  Skipping FORERIGN KEY constraint '#test_temp_foreign_table_3_1' definition for temporary table. FOREIGN KEY constraints are not enforced on local or global temporary tables.
+insert into #test_temp_foreign_table_3_1 values(6,'fast');
+insert into #test_temp_foreign_table_3_1 values(8,'best');
+--外键3-本表为实体表，被引用表为临时表
+create table #test_temp_table_3_2(
+col1 int,
+col2 char(10) primary key
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "#test_temp_table_3_2_pkey" for table "#test_temp_table_3_2"
+insert into #test_temp_table_3_2 values(1,'test');
+create table test_temp_foreign_table_3_2(
+col1 int,
+col2 char(20) references #test_temp_table_3_2(col2)
+);
+ERROR:  constraints on permanent tables may reference only permanent tables
+-- alter table add constraint foreign key in D-format
+create table #test_temp_table_4(
+col1 int,
+col2 char(10) primary key
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "#test_temp_table_4_pkey" for table "#test_temp_table_4"
+insert into #test_temp_table_4 values(1,'test');
+insert into #test_temp_table_4 values(2,'vast');
+insert into #test_temp_table_4 values(3,'coast');
+insert into #test_temp_table_4 values(4,'fast');
+create table #test_temp_foreign_table_4(
+col1 int,
+col2 char(20)
+);
+alter table #test_temp_foreign_table_4 add foreign key (col2) references #test_temp_table_4(col2);
+WARNING:  Un-supported feature
+DETAIL:  Skipping FORERIGN KEY constraint '#test_temp_foreign_table_4' definition for temporary table. FOREIGN KEY constraints are not enforced on local or global temporary tables.
+insert into #test_temp_foreign_table_4 values(6,'fast');
+insert into #test_temp_foreign_table_4 values(8,'best');
+drop table if exists tab;
+NOTICE:  table "tab" does not exist, skipping
+create table tab(id int,name varchar(50));
+insert into tab values(1,'a');
+DO $$
+DECLARE
+    v_name varchar(50);
+    v_sSample varchar(20) := 'a';
+BEGIN
+    DROP TABLE IF EXISTS #test_temp_table_1;
+
+    SELECT id INTO #test_temp_table_1
+    FROM tab 
+    WHERE name = v_sSample;
+
+    GET DIAGNOSTICS v_name = ROW_COUNT;
+    RAISE NOTICE 'Success: Created temp table with % rows.', v_name;
+
+END $$;
+NOTICE:  table "#test_temp_table_1" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS #test_temp_table_1"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+NOTICE:  Success: Created temp table with 1 rows.
+SELECT * FROM #test_temp_table_1;
+ id 
+----
+  1
+(1 row)
+
+DO $$
+DECLARE
+    v_name varchar(50);
+    v_sSample varchar(20) := 'a';
+BEGIN
+    DROP TABLE IF EXISTS #test_temp_table_2;
+
+    SELECT id INTO TABLE #test_temp_table_2
+    FROM tab 
+    WHERE name = v_sSample;
+
+    GET DIAGNOSTICS v_name = ROW_COUNT;
+    RAISE NOTICE 'Success: Created temp table with % rows.', v_name;
+
+END $$;
+NOTICE:  table "#test_temp_table_2" does not exist, skipping
+CONTEXT:  SQL statement "DROP TABLE IF EXISTS #test_temp_table_2"
+PL/pgSQL function inline_code_block line 6 at SQL statement
+NOTICE:  Success: Created temp table with 1 rows.
+SELECT * FROM #test_temp_table_2;
+ id 
+----
+  1
+(1 row)
+
+drop table if exists #test_temp_table_3;
+select id into #test_temp_table_3 from tab where name='a';
+select * from #test_temp_table_3;
+ id 
+----
+  1
+(1 row)
+
+drop table if exists #test_temp_table_4;
+select id into table #test_temp_table_4 from tab where name='a';
+select * from #test_temp_table_4;
+ id 
+----
+  1
+(1 row)
+
+drop table #test_temp_table_1;
+drop table #test_temp_table_2;
+drop table #test_temp_table_3;
+drop table #test_temp_table_4;
+drop table tab;
+-- clean
+\c postgres
+DROP DATABASE temp_table_prefix;
+DROP DATABASE temp_table_prefix_1;
