@@ -37,6 +37,9 @@
 #define NEON_LOAD_8_BYTES 8
 #define NEON_LOAD_16_BYTES 16
 #endif
+#define HASH_MAGIC_VAL 3
+#define BITS_6_MASK 0x3F
+
 #define FAST_STR_CMP_LOAD_SIZE sizeof(uint64)
 
 typedef struct GS_UNICASE_PAGES {
@@ -732,7 +735,7 @@ static int mb_wc_utf8mb4(const unsigned char* s, const unsigned char* end, GS_UI
 */
 Datum hash_utf8mb4_general_pad_space(const unsigned char *key, size_t len)
 {
-    const GS_UNICASE_INFO *uni_plane = &g_unicase_default;
+    GS_UINT32 **sort_page = g_unicase_default.sort_page;
     GS_UINT32 key_word = 0;
     int key_bytes = 0;
     const unsigned char* key_end = key + len;
@@ -744,16 +747,42 @@ Datum hash_utf8mb4_general_pad_space(const unsigned char *key, size_t len)
         key_end--;
         len--;
     }
+#ifdef __aarch64__
+    unsigned char vec_dst[NEON_LOAD_16_BYTES];
+    const uint8x16_t diff = vdupq_n_u8(0x20); // distance between 'a' and 'A', 'a' - 0x20 = 'A', to upper case
+    const uint8x16_t vec_a = vdupq_n_u8('a');
+    const uint8x16_t vec_z = vdupq_n_u8('z');
+    while (key + NEON_LOAD_16_BYTES <= key_end) {
+        uint8x16_t vec_src = vld1q_u8((const unsigned char*)key);
+        /* break if there are non-ascii char */
+        if (vmaxvq_u8(vec_src) >= 0x80) {
+            break;
+        }
 
+        /* compute the result mask of char vector 'a' <= value <= 'z' */
+        uint8x16_t mask = vcgeq_u8(vec_src, vec_a) & vcleq_u8(vec_src, vec_z);
+        vec_src = vbslq_u8(mask, vsubq_u8(vec_src, diff), vec_src);
+
+        vst1q_u8(vec_dst, vec_src);
+        for (int i = 0; i < NEON_LOAD_16_BYTES; i++) {
+            nr1 ^= (((nr1 & BITS_6_MASK) + nr2) * vec_dst[i]) + (nr1 << BITS_PER_BYTE);
+            nr2 += HASH_MAGIC_VAL;
+            nr1 ^= (nr2 << BITS_PER_BYTE);
+            nr2 += HASH_MAGIC_VAL;
+        }
+
+        key += NEON_LOAD_16_BYTES;
+    }
+#endif
     while ((key_bytes = mb_wc_utf8mb4(key, key_end, &key_word)) > 0) {
-        sort_by_unicode(uni_plane->sort_page, &key_word);
+        sort_by_unicode(sort_page, &key_word);
         ch = (key_word & 0xFF);
-        nr1 ^= (((nr1 & 63) + nr2) * ch) + (nr1 << 8);
-        nr2 += 3;
+        nr1 ^= (((nr1 & BITS_6_MASK) + nr2) * ch) + (nr1 << BITS_PER_BYTE);
+        nr2 += HASH_MAGIC_VAL;
 
-        ch = (key_word >> 8)  & 0xFF;
-        nr1 ^= (((nr1 & 63) + nr2) * ch) + (nr2 << 8);
-        nr2 += 3;
+        ch = (key_word >> BITS_PER_BYTE)  & 0xFF;
+        nr1 ^= (((nr1 & BITS_6_MASK) + nr2) * ch) + (nr2 << BITS_PER_BYTE);
+        nr2 += HASH_MAGIC_VAL;
         NEXT_WORD_POS(key, key_bytes);
     }
     return UInt32GetDatum(nr1);
