@@ -134,6 +134,7 @@ typedef struct {
     const char* optname; /* option's name */
     relopt_type opttype; /* option's datatype */
     int offset;          /* offset of field in result struct */
+    int isset_offset;    /* offset to flag indicating if option was explicitly set */
 } relopt_parse_elt;
 
 struct TableCreateSupport {
@@ -290,6 +291,7 @@ extern void CheckFoldernameOrFilenamesOrCfgPtah(const char* OptStr, char* OptTyp
 extern void CheckWaitCleanGpi(const char* value);
 extern void CheckWaitCleanCbi(const char* value);
 
+extern void ForbidToSetOptionsForSegmentTbl(List *options);
 extern void ForbidToSetOptionsForPSort(List* options);
 extern void ForbidOutUsersToSetInnerOptions(List* user_options);
 extern void ForbidToSetOptionsForAttribute(List* options);

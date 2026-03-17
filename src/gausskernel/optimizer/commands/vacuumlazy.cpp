@@ -479,8 +479,19 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
          */
         possibly_freeable = vacrelstats->rel_pages - vacrelstats->nonempty_pages;
         if (possibly_freeable > 0 && (possibly_freeable >= REL_TRUNCATE_MINIMUM ||
-            possibly_freeable >= vacrelstats->rel_pages / REL_TRUNCATE_FRACTION))
-            lazy_truncate_heap(onerel, vacstmt, vacrelstats);
+            possibly_freeable >= vacrelstats->rel_pages / REL_TRUNCATE_FRACTION)) {
+            /* Check if truncate is enabled */
+            bool should_truncate = false;
+            StdRdOptions *rdopts = (StdRdOptions *)onerel->rd_options;
+            if (rdopts != NULL && rdopts->vacuum_truncate_set) {
+                should_truncate = rdopts->vacuum_truncate;
+            } else {
+                should_truncate = u_sess->attr.attr_storage.vacuum_truncate;
+            }
+            if (should_truncate) {
+                lazy_truncate_heap(onerel, vacstmt, vacrelstats);
+            }
+        }
     }
 
     /*

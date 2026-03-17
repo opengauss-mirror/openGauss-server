@@ -852,6 +852,21 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"vacuum_truncate",
+            PGC_USERSET,
+            NODE_ALL,
+            AUTOVACUUM,
+            gettext_noop("Enables vacuum to try to truncate off any empty pages at the end of the table."),
+            gettext_noop("If true, VACUUM and autovacuum do the truncation and the disk space for the truncated "
+                         "pages is returned to the operating system. Note that the truncation requires an "
+                         "ACCESS EXCLUSIVE lock on the table. The setting can also be overridden for individual "
+                         "tables by changing table storage parameters."),
+            },
+            &u_sess->attr.attr_storage.vacuum_truncate,
+            true,
+            NULL,
+            NULL,
+            NULL},
         {{"enable_adio_debug",
             PGC_SUSET,
             NODE_ALL,
