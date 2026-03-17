@@ -27663,3 +27663,4 @@ void CheckDropViewValidity(ObjectType stmtType, char relKind, const char* relnam
     }
     DropErrorMsgWrongType(relname, relKind, expectedRelKind);
 }
+

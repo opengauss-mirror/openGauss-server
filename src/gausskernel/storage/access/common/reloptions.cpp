@@ -1425,6 +1425,15 @@ void fillRelOptions(void *rdopts, Size basesize, relopt_value *options, int numo
                 char *itempos = ((char *)rdopts) + elems[j].offset;
                 char *string_val = NULL;
 
+                /*
+                 * If isset_offset is provided, store whether the reloption is
+                 * set there.
+                 */
+                if (elems[j].isset_offset > 0) {
+                    char *setpos = ((char *)rdopts) + elems[j].isset_offset;
+                    *(bool *)setpos = options[i].isset;
+                }
+
                 switch (options[i].gen->type) {
                     case RELOPT_TYPE_BOOL:
                         *(bool *)itempos = options[i].isset ? options[i].values.bool_val
@@ -1803,7 +1812,8 @@ void ForbidToSetOptionsForColTbl(List *options)
         "encrypt_algo",
         "dek_cipher",
         "cmk_id",
-        "hasuids"
+        "hasuids",
+        "vacuum_truncate"
     };
 
     ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "column relation");
@@ -1849,7 +1859,8 @@ void ForbidToSetOptionsForUstoreTbl(List *options)
         "dek_cipher",
         "cmk_id",
         "encrypt_algo",
-        "hasuids"
+        "hasuids",
+        "vacuum_truncate"
     };
 
     ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "ustore relation");
@@ -1876,7 +1887,8 @@ void forbid_to_set_options_for_timeseries_tbl(List *options)
         "deltarow_threshold",
         "partial_cluster_rows",
         "compresslevel",
-        "hasuids"
+        "hasuids",
+        "vacuum_truncate"
     };
 
     ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "timeseries relation");
@@ -1910,10 +1922,24 @@ void ForbidToSetOptionsForPSort(List *options)
         "tsdb_deltamerge_interval",
         "tsdb_deltamerge_threshold",
         "tsdb_deltainsert_threshold",
-        "hasuids"
+        "hasuids",
+        "vacuum_truncate"
     };
 
     ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "psort index");
+}
+
+/*
+ * @Description: check relation options for segment table
+ * @Param[IN] options: input user options
+ */
+void ForbidToSetOptionsForSegmentTbl(List *options)
+{
+    static const char *unsupported[] = {
+        "vacuum_truncate"
+    };
+
+    ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "segment relation");
 }
 
 /*
