@@ -1314,6 +1314,13 @@ static inline bool NeedTransientCachedPlanBuild(CachedPlanSource* plansource, Pa
            !u_sess->pcache_cxt.is_plan_exploration && u_sess->SPI_cxt._connected >= 0;
 }
 
+static inline void ResetIudExprReuseContextAfterPlanBuild(void)
+{
+    if (u_sess->iud_expr_reuse_ctx != NULL) {
+        MemoryContextReset(u_sess->iud_expr_reuse_ctx);
+    }
+}
+
 CachedPlan* BuildCachedPlanInTransientContext(CachedPlanSource* plansource, List* qlist, ParamListInfo boundParams,
     bool isBuildingCustomPlan)
 {
@@ -1334,12 +1341,14 @@ CachedPlan* BuildCachedPlanInTransientContext(CachedPlanSource* plansource, List
         MemoryContextSwitchTo(transient_plan_cxt);
         plan = BuildCachedPlan(plansource, qlist, boundParams, isBuildingCustomPlan);
         MemoryContextSwitchTo(oldcxt);
+        ResetIudExprReuseContextAfterPlanBuild();
         MemoryContextDelete(transient_plan_cxt);
         transient_plan_cxt = NULL;
     }
     PG_CATCH();
     {
         MemoryContextSwitchTo(oldcxt);
+        ResetIudExprReuseContextAfterPlanBuild();
         if (transient_plan_cxt != NULL) {
             MemoryContextDelete(transient_plan_cxt);
         }
