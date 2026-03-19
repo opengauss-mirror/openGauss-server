@@ -156,6 +156,9 @@ PLpgSQL_function* pltsql_compile(FunctionCallInfo fcinfo, bool for_validator, bo
         }
     }
 
+    if (func != NULL)
+        func->xact_abort = u_sess->attr.attr_common.enable_xact_abort;
+
 #ifndef ENABLE_MULTIPLE_NODES
     /* Locking is performed before compilation. */
     gsplsql_lock_func_pkg_dependency_all(func_oid, PLSQL_FUNCTION_OBJ);
@@ -189,6 +192,7 @@ recheck:
         }
 
     if (func != NULL) {
+        func->xact_abort = u_sess->attr.attr_common.enable_xact_abort;
         /* We have a compiled function, but is it still valid? */
         if (func->fn_xmin == HeapTupleGetRawXmin(proc_tup) &&
             ItemPointerEquals(&func->fn_tid, &proc_tup->t_self) && plpgsql_check_search_path(func, proc_tup) &&
@@ -233,6 +237,7 @@ recheck:
             }
             foreach(l, pkg->proc_compiled_list) {
                 PLpgSQL_function* func = (PLpgSQL_function*)lfirst(l);
+                func->xact_abort = u_sess->attr.attr_common.enable_xact_abort;
                 if (func->fn_oid == fcinfo->flinfo->fn_oid) {
                     ReleaseSysCache(proc_tup);
                     return func;

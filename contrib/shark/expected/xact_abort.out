@@ -242,6 +242,35 @@ select * from t1;
   1 | zhangsan
 (1 row)
 
+create table t99(id int primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t99_pkey" for table "t99"
+create procedure usp(@id int) as begin insert into t99 values(@id);end;
+/
+call usp('');
+ usp 
+-----
+ 
+(1 row)
+
+select * from t99;
+ id 
+----
+  0
+(1 row)
+
+call usp('');
+ERROR:  duplicate key value violates unique constraint "t99_pkey"
+DETAIL:  Key (id)=(0) already exists.
+CONTEXT:  SQL statement "insert into t99 values(@id)"
+PL/pgSQL function usp(integer) line 1 at SQL statement
+select * from t99;
+ id 
+----
+  0
+(1 row)
+
+drop procedure usp();
+drop table t99;
 set xact_abort off;
 truncate t1;
 insert into t1 values(2, 'lisi');

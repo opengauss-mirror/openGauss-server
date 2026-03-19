@@ -132,6 +132,17 @@ END;
 CALL d_dbproc.proc4();
 select * from t1;
 
+create table t99(id int primary key);
+create procedure usp(@id int) as begin insert into t99 values(@id);end;
+/
+
+call usp('');
+select * from t99;
+call usp('');
+select * from t99;
+drop procedure usp();
+drop table t99;
+
 set xact_abort off;
 truncate t1;
 insert into t1 values(2, 'lisi');
