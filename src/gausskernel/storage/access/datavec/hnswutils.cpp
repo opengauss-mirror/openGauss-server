@@ -124,7 +124,6 @@ static uint32 hash_offset(Size offset)
 #define SH_DEFINE
 #include "lib/simplehash.h"
 
-
 /*
  * Get the max number of connections in an upper layer for each element in the index
  */
@@ -967,12 +966,14 @@ Datum HnswGetVectorFromHeap(Relation heap, ItemPointer heaptids, IndexInfo *inde
     return origin;
 }
 
+static inline void HnswScaleDistanceByIso(float *distance, Datum lhs, Datum rhs, FmgrInfo *procinfo, bool enableLsg);
 /*
  * Load an element and optionally get its distance from q
  */
 bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
                      bool loadVec, float *maxDistance, bool enableRabitQ, RabitqQueryParams *rbqQueryParams,
-                     RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo)
+                     RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo,
+                     bool enableLsg)
 {
     Buffer buf;
     Page page;
@@ -1044,6 +1045,7 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
             } else {
                 *distance = (float)DatumGetFloat8(FunctionCall2Coll(
                             procinfo, collation, *q, PointerGetDatum(&etup->data)));
+                HnswScaleDistanceByIso(distance, *q, PointerGetDatum(&etup->data), procinfo, enableLsg);
             }
         }
     }
@@ -1082,22 +1084,44 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
 }
 
 /*
+ * Only apply LSG isoValue when the index explicitly enables it.
+ */
+static inline bool HnswUseIsoDistance(FmgrInfo *procinfo, bool enableLsg)
+{
+    return enableLsg && !IS_SPARSEVEC(procinfo->fn_oid) && !IS_BITVEC(procinfo->fn_oid);
+}
+
+static inline float HnswGetIsoWeight(Datum lhs, Datum rhs)
+{
+    float iso1 = Float16ToFloat32(((Vector *)DatumGetPointer(lhs))->isoValue);
+    float iso2 = Float16ToFloat32(((Vector *)DatumGetPointer(rhs))->isoValue);
+
+    return iso1 * iso2;
+}
+
+static inline void HnswScaleDistanceByIso(float *distance, Datum lhs, Datum rhs, FmgrInfo *procinfo, bool enableLsg)
+{
+    if (!HnswUseIsoDistance(procinfo, enableLsg)) {
+        return;
+    }
+
+    *distance *= HnswGetIsoWeight(lhs, rhs);
+}
+
+/*
  * Get the distance for a candidate
  */
 static float GetCandidateDistance(char *base, HnswElement element, Datum q, FmgrInfo *procinfo, Oid collation,
-                                  bool enableRabitQ)
+                                  bool enableRabitQ, bool enableLsg)
 {
     Datum value = HnswGetValue(base, element);
     float realDis = DatumGetFloat8(FunctionCall2Coll(procinfo, collation, q, value));
 
-    if (IS_SPARSEVEC(procinfo->fn_oid) || IS_BITVEC(procinfo->fn_oid)) {
+    if (!HnswUseIsoDistance(procinfo, enableLsg)) {
         return realDis;
     }
 
-    float iso1 = Float16ToFloat32(((Vector *)q)->isoValue);
-    float iso2 = Float16ToFloat32(((Vector *)value)->isoValue);
-    float isoWeight = iso1 * iso2;
-    return isoWeight * realDis;
+    return HnswGetIsoWeight(q, value) * realDis;
 }
 
 /*
@@ -1105,18 +1129,18 @@ static float GetCandidateDistance(char *base, HnswElement element, Datum q, Fmgr
  */
 HnswCandidate *HnswEntryCandidate(char *base, HnswElement entryPoint, Datum q, Relation index, FmgrInfo *procinfo,
                                   Oid collation, bool loadVec, bool enableRabitQ, RabitqQueryParams *rbqQueryParams,
-                                  RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ, 
-                                  PQSearchInfo *pqinfo)
+                                  RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan, bool enablePQ,
+                                  PQSearchInfo *pqinfo, bool enableLsg)
 {
     HnswCandidate *hc = (HnswCandidate *)palloc(sizeof(HnswCandidate));
 
     HnswPtrStore(base, hc->element, entryPoint);
     if (index == NULL) {
-        hc->distance = GetCandidateDistance(base, entryPoint, q, procinfo, collation, enableRabitQ);
+        hc->distance = GetCandidateDistance(base, entryPoint, q, procinfo, collation, enableRabitQ, enableLsg);
     } else {
         bool isVisible = HnswLoadElement(entryPoint, &hc->distance, &q, index, procinfo,
                                          collation, loadVec, NULL, enableRabitQ, rbqQueryParams,
-                                         rbqDiskParams, scan, enablePQ, pqinfo);
+                                         rbqDiskParams, scan, enablePQ, pqinfo, enableLsg);
         if (!isVisible) {
             elog(ERROR, "hnsw entryPoint is invisible\n");
         }
@@ -1340,7 +1364,8 @@ float HNSWRbqComputeDis(RabitqQueryParams *rbqParams, float *candidate)
 List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation index, FmgrInfo *procinfo,
                       Oid collation, int m, bool inserting, HnswElement skipElement, VisitedHash *v,
                       pairingheap **discarded, bool initVisited, int64 *tuples, bool enableRabitQ, RabitqQueryParams *rbqParams,
-                      RabitqInsertOnDiskParams *rbqDiskParams, bool tryMmap, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo)
+                      RabitqInsertOnDiskParams *rbqDiskParams, bool tryMmap, IndexScanDesc scan, bool enablePQ,
+                      PQSearchInfo *pqinfo, bool enableLsg)
 {
     List *w = NIL;
     pairingheap *C = pairingheap_allocate(CompareNearestCandidates, NULL);
@@ -1447,7 +1472,7 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                     uint8 *ePQCode = (uint8*)HnswPtrAccess(base, eElement->pqcodes);
                     GetPQDistance(ePQCode, pqinfo->qPQCode, &pqinfo->params, pqinfo->pqDistanceTable, &eDistance);
                 } else {
-                    eDistance = GetCandidateDistance(base, eElement, q, procinfo, collation, enableRabitQ);
+                    eDistance = GetCandidateDistance(base, eElement, q, procinfo, collation, enableRabitQ, enableLsg);
                 }
             } else {
                 bool vacuumVisibility;
@@ -1458,7 +1483,7 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                 } else {
                     vacuumVisibility = HnswLoadElement(eElement, &eDistance, &q, index, procinfo, collation, inserting,
                                     alwaysAdd || discarded != NULL ? NULL : &f->distance, enableRabitQ,
-                                    rbqParams, rbqDiskParams, NULL, enablePQ, pqinfo);
+                                    rbqParams, rbqDiskParams, NULL, enablePQ, pqinfo, enableLsg);
                 }
                 if (enableRabitQ && !vacuumVisibility) {
                     continue;
@@ -1673,29 +1698,24 @@ static int
  * Calculate the distance between elements
  */
 static float HnswGetDistance(char *base, HnswElement a, HnswElement b, FmgrInfo *procinfo, Oid collation,
-                             bool enableRabitQ)
+                             bool enableRabitQ, bool enableLsg)
 {
     Datum aValue = HnswGetValue(base, a);
     Datum bValue = HnswGetValue(base, b);
     float realDis = DatumGetFloat8(FunctionCall2Coll(procinfo, collation, aValue, bValue));
 
-    if (IS_SPARSEVEC(procinfo->fn_oid) || IS_BITVEC(procinfo->fn_oid)) {
+    if (!HnswUseIsoDistance(procinfo, enableLsg)) {
         return realDis;
     }
 
-    float iso1 = ((Vector*)aValue)->isoValue;
-    float iso2 = ((Vector*)bValue)->isoValue;
-
-    float isoWeight = iso1 * iso2;
-
-    return isoWeight * realDis;
+    return HnswGetIsoWeight(aValue, bValue) * realDis;
 }
 
 /*
  * Check if an element is closer to q than any element from R
  */
 static bool CheckElementCloser(char *base, HnswCandidate *e, List *r, FmgrInfo *procinfo, Oid collation,
-                               bool enableRabitQ)
+                               bool enableRabitQ, bool enableLsg)
 {
     HnswElement eElement = (HnswElement)HnswPtrAccess(base, e->element);
     ListCell *lc2;
@@ -1703,7 +1723,7 @@ static bool CheckElementCloser(char *base, HnswCandidate *e, List *r, FmgrInfo *
     foreach (lc2, r) {
         HnswCandidate *ri = (HnswCandidate *)lfirst(lc2);
         HnswElement riElement = (HnswElement)HnswPtrAccess(base, ri->element);
-        float distance = HnswGetDistance(base, eElement, riElement, procinfo, collation, enableRabitQ);
+        float distance = HnswGetDistance(base, eElement, riElement, procinfo, collation, enableRabitQ, enableLsg);
 
         if (distance <= e->distance) {
             return false;
@@ -1718,7 +1738,7 @@ static bool CheckElementCloser(char *base, HnswCandidate *e, List *r, FmgrInfo *
  */
 static List *SelectNeighbors(char *base, List *c, int lm, int lc, FmgrInfo *procinfo, Oid collation, HnswElement e2,
                              HnswCandidate *newCandidate, HnswCandidate **pruned, bool sortCandidates,
-                             bool enableRabitQ)
+                             bool enableRabitQ, bool enableLsg)
 {
     List *r = NIL;
     List *w = list_copy(c);
@@ -1753,7 +1773,7 @@ static List *SelectNeighbors(char *base, List *c, int lm, int lc, FmgrInfo *proc
 
         /* Use previous state of r and wd to skip work when possible */
         if (mustCalculate) {
-            e->closer = CheckElementCloser(base, e, r, procinfo, collation, enableRabitQ);
+            e->closer = CheckElementCloser(base, e, r, procinfo, collation, enableRabitQ, enableLsg);
         } else if (list_length(added) > 0) {
             /* Keep Valgrind happy for in-memory, parallel builds */
             if (base != NULL) {
@@ -1765,7 +1785,7 @@ static List *SelectNeighbors(char *base, List *c, int lm, int lc, FmgrInfo *proc
              * with the other candidates that we have added.
              */
             if (e->closer) {
-                e->closer = CheckElementCloser(base, e, added, procinfo, collation, enableRabitQ);
+                e->closer = CheckElementCloser(base, e, added, procinfo, collation, enableRabitQ, enableLsg);
 
                 if (!e->closer) {
                     removedAny = true;
@@ -1776,14 +1796,14 @@ static List *SelectNeighbors(char *base, List *c, int lm, int lc, FmgrInfo *proc
                  * that was not closer earlier might now be.
                  */
                 if (removedAny) {
-                    e->closer = CheckElementCloser(base, e, r, procinfo, collation, enableRabitQ);
+                    e->closer = CheckElementCloser(base, e, r, procinfo, collation, enableRabitQ, enableLsg);
                     if (e->closer) {
                         added = lappend(added, e);
                     }
                 }
             }
         } else if (e == newCandidate) {
-            e->closer = CheckElementCloser(base, e, r, procinfo, collation, enableRabitQ);
+            e->closer = CheckElementCloser(base, e, r, procinfo, collation, enableRabitQ, enableLsg);
             if (e->closer) {
                 added = lappend(added, e);
             }
@@ -1838,7 +1858,7 @@ static void AddConnections(char *base, HnswElement element, List *neighbors, int
  */
 void HnswUpdateConnection(char *base, HnswElement element, HnswCandidate *hc, int lm, int lc, int *updateIdx,
                           Relation index, FmgrInfo *procinfo, Oid collation, bool enableRabitQ,
-                          RabitqInsertOnDiskParams *rbqDiskParams)
+                          RabitqInsertOnDiskParams *rbqDiskParams, bool enableLsg)
 {
     HnswElement hce = (HnswElement)HnswPtrAccess(base, hc->element);
     HnswNeighborArray *currentNeighbors = HnswGetNeighbors(base, hce, lc);
@@ -1869,9 +1889,10 @@ void HnswUpdateConnection(char *base, HnswElement element, HnswCandidate *hc, in
 
                 if (HnswPtrIsNull(base, hc3Element->value))
                     vacuumVisibility = HnswLoadElement(hc3Element, &hc3->distance, &q, index, procinfo, collation, true,
-                                       NULL, enableRabitQ, NULL, rbqDiskParams);
+                                       NULL, enableRabitQ, NULL, rbqDiskParams, NULL, false, NULL, enableLsg);
                 else
-                    hc3->distance = GetCandidateDistance(base, hc3Element, q, procinfo, collation, enableRabitQ);
+                    hc3->distance = GetCandidateDistance(base, hc3Element, q, procinfo, collation, enableRabitQ,
+                                                         enableLsg);
 
                 /* Prune element if being deleted */
                 if (hc3Element->heaptidsLength == 0 || (enableRabitQ && !vacuumVisibility)) {
@@ -1890,7 +1911,7 @@ void HnswUpdateConnection(char *base, HnswElement element, HnswCandidate *hc, in
             }
             c = lappend(c, &hc2);
 
-            SelectNeighbors(base, c, lm, lc, procinfo, collation, hce, &hc2, &pruned, true, enableRabitQ);
+            SelectNeighbors(base, c, lm, lc, procinfo, collation, hce, &hc2, &pruned, true, enableRabitQ, enableLsg);
 
             /* Should not happen */
             if (pruned == NULL)
@@ -1947,7 +1968,7 @@ static List *RemoveElements(char *base, List *w, HnswElement skipElement)
 void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entryPoint, Relation index,
                               FmgrInfo *procinfo, Oid collation, int m, int efConstruction, bool existing,
                               bool enablePQ, PQParams *params, bool enableRabitQ,
-                              RabitqInsertOnDiskParams *rbqDiskParams)
+                              RabitqInsertOnDiskParams *rbqDiskParams, bool enableLsg)
 {
     List *ep;
     List *w;
@@ -1971,13 +1992,15 @@ void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entry
         return;
 
     /* Get entry point and level */
-    ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, true, enableRabitQ, NULL, rbqDiskParams));
+    ep = list_make1(HnswEntryCandidate(base, entryPoint, q, index, procinfo, collation, true, enableRabitQ, NULL,
+                                       rbqDiskParams, NULL, false, NULL, enableLsg));
     entryLevel = entryPoint->level;
 
     /* 1st phase: greedy search to insert level */
     for (int lc = entryLevel; lc >= level + 1; lc--) {
         w = HnswSearchLayer(base, q, ep, 1, lc, index, procinfo, collation, m, true, skipElement,
-                            NULL, NULL, true, NULL, enableRabitQ, NULL, rbqDiskParams);
+                            NULL, NULL, true, NULL, enableRabitQ, NULL, rbqDiskParams, false, NULL, false, NULL,
+                            enableLsg);
         ep = w;
     }
 
@@ -1996,7 +2019,8 @@ void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entry
         List *lw;
 
         w = HnswSearchLayer(base, q, ep, efConstruction, lc, index, procinfo, collation, m, true, skipElement,
-                            NULL, NULL, true, NULL, enableRabitQ, NULL, rbqDiskParams);
+                            NULL, NULL, true, NULL, enableRabitQ, NULL, rbqDiskParams, false, NULL, false, NULL,
+                            enableLsg);
 
         /* Elements being deleted or skipped can help with search */
         /* but should be removed before selecting neighbors */
@@ -2010,7 +2034,8 @@ void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entry
          * sortCandidates to true for in-memory builds to enable closer
          * caching, but there does not seem to be a difference in performance.
          */
-        neighbors = SelectNeighbors(base, lw, lm, lc, procinfo, collation, element, NULL, NULL, false, enableRabitQ);
+        neighbors = SelectNeighbors(base, lw, lm, lc, procinfo, collation, element, NULL, NULL, false, enableRabitQ,
+                                    enableLsg);
 
         AddConnections(base, element, neighbors, lc);
 

@@ -114,6 +114,7 @@ Vector *InitVector(int dim)
     result = (Vector *)palloc0(size);
     SET_VARSIZE(result, size);
     result->dim = dim;
+    result->isoValue = Float32ToFloat16(1.0f);
 
     return result;
 }
@@ -356,10 +357,9 @@ Datum vector_recv(PG_FUNCTION_ARGS)
     int32 typmod = PG_GETARG_INT32(2);
     Vector *result;
     int16 dim;
-    uint16 isoValue;
 
     dim = pq_getmsgint(buf, sizeof(int16));
-    isoValue = pq_getmsgint(buf, sizeof(uint16));
+    (void)pq_getmsgint(buf, sizeof(uint16));
 
     CheckDim(dim);
     CheckExpectedDim(typmod, dim);

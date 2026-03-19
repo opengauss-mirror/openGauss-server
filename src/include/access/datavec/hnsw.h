@@ -698,6 +698,7 @@ typedef struct HnswVacuumState {
     HnswElementData highestPoint;
 
     /* RabitQ */
+    bool enableLsg;
     bool enableRabitQ;
     RabitqInsertOnDiskParams *rbqDiskParams;
     Size rbqcodesSize;
@@ -743,7 +744,7 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                       int m, bool inserting, HnswElement skipElement, VisitedHash *v, pairingheap **discarded,
                       bool initVisited, int64 *tuples, bool enableRabitQ, RabitqQueryParams *rbqParams,
                       RabitqInsertOnDiskParams *rbqDiskParams, bool tryMmap = false, IndexScanDesc scan = NULL,
-                      bool enablePQ = false, PQSearchInfo *pqinfo = NULL);
+                      bool enablePQ = false, PQSearchInfo *pqinfo = NULL, bool enableLsg = false);
 HnswElement HnswGetEntryPoint(Relation index);
 void HnswGetMetaPageInfo(Relation index, int *m, HnswElement *entryPoint);
 void *HnswAlloc(HnswAllocator *allocator, Size size);
@@ -752,11 +753,11 @@ HnswElement HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno);
 void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entryPoint, Relation index,
                               FmgrInfo *procinfo, Oid collation, int m, int efConstruction, bool existing,
                               bool enablePQ, PQParams *params, bool enableRabitQ,
-                              RabitqInsertOnDiskParams *rbqDiskParams);
+                              RabitqInsertOnDiskParams *rbqDiskParams, bool enableLsg = false);
 HnswCandidate *HnswEntryCandidate(char *base, HnswElement em, Datum q, Relation rel, FmgrInfo *procinfo, Oid collation,
                                   bool loadVec, bool enableRabitQ, RabitqQueryParams *rbqQueryParams,
                                   RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan = NULL, 
-                                  bool enablePQ = false, PQSearchInfo *pqinfo = NULL);
+                                  bool enablePQ = false, PQSearchInfo *pqinfo = NULL, bool enableLsg = false);
 void HnswUpdateMetaPage(Relation index, int updateEntry, HnswElement entryPoint, BlockNumber insertPage,
                         ForkNumber forkNum, bool building);
 void HnswUpdateMetaPageRbq(Relation index, ForkNumber forkNum, bool updateDelay);
@@ -766,16 +767,17 @@ void HnswInitNeighbors(char *base, HnswElement element, int m, HnswAllocator *al
 bool HnswInsertTupleOnDisk(Relation index, Datum value, const bool *isnull, ItemPointer heap_tid,
                            bool building, Relation heap);
 void HnswUpdateNeighborsOnDisk(Relation index, FmgrInfo *procinfo, Oid collation, HnswElement e, int m,
-                               bool checkExisting, bool building, bool enableRabitQ, RabitqInsertOnDiskParams *rbqDiskParams);
+                               bool checkExisting, bool building, bool enableRabitQ,
+                               RabitqInsertOnDiskParams *rbqDiskParams, bool enableLsg = false);
 void HnswLoadElementFromTuple(HnswElement element, HnswElementTuple etup, bool loadHeaptids, bool loadVec, Datum eRbqDiskVec);
 bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
                      bool loadVec, float *maxDistance, bool enableRabitQ, RabitqQueryParams *rbqParams,
                      RabitqInsertOnDiskParams *rbqDiskParams, IndexScanDesc scan = NULL, bool enablePQ = false,
-                     PQSearchInfo *pqinfo = NULL);
+                     PQSearchInfo *pqinfo = NULL, bool enableLsg = false);
 void HnswSetElementTuple(char *base, HnswElementTuple etup, HnswElement element, Size rbqEtupSize);
 void HnswUpdateConnection(char *base, HnswElement element, HnswCandidate *hc, int lm, int lc, int *updateIdx,
                           Relation index, FmgrInfo *procinfo, Oid collation, bool enableRabitQ,
-                          RabitqInsertOnDiskParams *rbqDiskParams);
+                          RabitqInsertOnDiskParams *rbqDiskParams, bool enableLsg = false);
 void HnswLoadNeighbors(HnswElement element, Relation index, int m);
 const HnswTypeInfo *HnswGetTypeInfo(Relation index);
 bool HnswDelete(Relation index, Datum *values, const bool *isnull, ItemPointer heapTCtid, bool isRollbackIndex);

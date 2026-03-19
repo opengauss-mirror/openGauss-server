@@ -830,11 +830,16 @@ static void AddElementInMemory(char *base, HnswGraph *graph, HnswElement element
 /*
  * Update neighbors
  */
-static void UpdateNeighborsInMemory(char *base, FmgrInfo *procinfo, Oid collation, HnswElement e, int m, bool enableRabitQ)
+static void UpdateNeighborsInMemory(HnswBuildState *buildstate, HnswElement element)
 {
-    for (int lc = e->level; lc >= 0; lc--) {
+    char *base = buildstate->hnswarea;
+    FmgrInfo *procinfo = buildstate->procinfo;
+    Oid collation = buildstate->collation;
+    int m = buildstate->m;
+
+    for (int lc = element->level; lc >= 0; lc--) {
         int lm = HnswGetLayerM(m, lc);
-        HnswNeighborArray *neighbors = HnswGetNeighbors(base, e, lc);
+        HnswNeighborArray *neighbors = HnswGetNeighbors(base, element, lc);
 
         for (int i = 0; i < neighbors->length; i++) {
             HnswCandidate *hc = &neighbors->items[i];
@@ -846,7 +851,8 @@ static void UpdateNeighborsInMemory(char *base, FmgrInfo *procinfo, Oid collatio
 
             /* Use element for lock instead of hc since hc can be replaced */
             LWLockAcquire(&neighborElement->lock, LW_EXCLUSIVE);
-            HnswUpdateConnection(base, e, hc, lm, lc, NULL, NULL, procinfo, collation, enableRabitQ, NULL);
+            HnswUpdateConnection(base, element, hc, lm, lc, NULL, NULL, procinfo, collation,
+                                 buildstate->enableRabitQ, NULL, buildstate->enableLsg);
             LWLockRelease(&neighborElement->lock);
         }
     }
@@ -855,8 +861,7 @@ static void UpdateNeighborsInMemory(char *base, FmgrInfo *procinfo, Oid collatio
 /*
  * Update graph in memory
  */
-static void UpdateGraphInMemory(FmgrInfo *procinfo, Oid collation, HnswElement element, int m, int efConstruction,
-                                HnswElement entryPoint, HnswBuildState *buildstate)
+static void UpdateGraphInMemory(HnswElement element, HnswElement entryPoint, HnswBuildState *buildstate)
 {
     HnswGraph *graph = buildstate->graph;
     char *base = buildstate->hnswarea;
@@ -870,7 +875,7 @@ static void UpdateGraphInMemory(FmgrInfo *procinfo, Oid collation, HnswElement e
     AddElementInMemory(base, graph, element);
 
     /* Update neighbors */
-    UpdateNeighborsInMemory(base, procinfo, collation, element, m, buildstate->enableRabitQ);
+    UpdateNeighborsInMemory(buildstate, element);
 
     /* Update entry point if needed (already have lock) */
     if (entryPoint == NULL || element->level > entryPoint->level) {
@@ -920,10 +925,11 @@ static void InsertTupleInMemory(HnswBuildState *buildstate, HnswElement element,
 
     /* Find neighbors for element */
     HnswFindElementNeighbors(base, element, entryPoint, NULL, procinfo, collation, m, efConstruction, false,
-                             buildstate->enablePQ, buildstate->params, buildstate->enableRabitQ, NULL);
+                             buildstate->enablePQ, buildstate->params, buildstate->enableRabitQ, NULL,
+                             buildstate->enableLsg);
 
     /* Update graph in memory */
-    UpdateGraphInMemory(procinfo, collation, element, m, efConstruction, entryPoint, buildstate);
+    UpdateGraphInMemory(element, entryPoint, buildstate);
 
     /* Release entry lock */
     LWLockRelease(entryLock);
@@ -1064,7 +1070,7 @@ static bool InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
         if (buildstate->enableLsg) {
             currentVec->isoValue = CalcIsoVal((float *)currentVec->x, buildstate->LocScalingParam);
         } else {
-            currentVec->isoValue = 1.0;
+            currentVec->isoValue = Float32ToFloat16(1.0f);
         }
     }
     /* Create a lock for the element */
