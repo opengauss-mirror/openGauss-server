@@ -619,6 +619,10 @@ endif
 	cp -d $(XGBOOST_LIB_PATH)/libxgboost* '$(DESTDIR)$(libdir)/'
 	cp -d $(CJSON_LIB_PATH)/libcjson* '$(DESTDIR)$(libdir)/'
 
+ifeq ($(host_cpu), aarch64)
+	@if test -d $(KVECTURBO_LIB_PATH); then cp -d $(KVECTURBO_LIB_PATH)/libkvecturbo* '$(DESTDIR)$(libdir)/'; fi
+endif
+
 ifneq ($(with_openeuler_os), yes)
 	cp -d $(LZ4_LIB_PATH)/liblz4* '$(DESTDIR)$(libdir)/'
 ifeq ($(enable_lite_mode), no)

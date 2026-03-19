@@ -110,17 +110,29 @@ int pq_func_init()
 
     char lib_dl_path[MAX_PATH_LEN] = { 0 };
     char* raw_path = getenv(PQ_ENV_PATH);
-    if (raw_path == nullptr) {
-        ereport(ERROR, (errmsg("failed to get DATAVEC_PQ_LIB_PATH")));
-        return PQ_ERROR;
-    }
+    int ret;
 
-    int ret = pq_resolve_path(lib_dl_path, raw_path, PQ_SO_NAME);
-    if (ret != PQ_SUCCESS) {
-        ereport(ERROR, (errmsg(
-            "failed to resolve the path of libvecturbo.so, lib_dl_path %s, raw_path %s",
-            lib_dl_path, raw_path)));
-        return PQ_ERROR;
+    if (raw_path != nullptr) {
+        ret = pq_resolve_path(lib_dl_path, raw_path, PQ_SO_NAME);
+        if (ret != PQ_SUCCESS) {
+            ereport(WARNING, (errmsg(
+                "failed to resolve the path of libkvecturbo.so, lib_dl_path %s, raw_path %s",
+                lib_dl_path, raw_path)));
+            return PQ_ERROR;
+        }
+    } else {
+        char* gausshome = getenv("GAUSSHOME");
+        if (gausshome != nullptr) {
+            ret = snprintf_s(lib_dl_path, MAX_PATH_LEN, MAX_PATH_LEN - 1,
+                "%s/lib/%s", gausshome, PQ_SO_NAME);
+            if (ret < 0) {
+                ereport(WARNING, (errmsg("failed to construct kvecturbo path from GAUSSHOME")));
+                return PQ_ERROR;
+            }
+        } else {
+            ereport(WARNING, (errmsg("failed to get DATAVEC_PQ_LIB_PATH or GAUSSHOME")));
+            return PQ_ERROR;
+        }
     }
 
     ret = pq_load_symbols(lib_dl_path);
