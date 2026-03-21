@@ -533,18 +533,22 @@ from keytbl, encdata where keytbl.id=6 and encdata.id=4;
 select pgp_pub_decrypt(dearmor(data), dearmor(seckey))
 from keytbl, encdata where keytbl.id=2 and encdata.id=1;
 ERROR:  Wrong key
+CONTEXT:  referenced column: pgp_pub_decrypt
 -- sign-only key
 select pgp_pub_decrypt(dearmor(data), dearmor(seckey))
 from keytbl, encdata where keytbl.id=4 and encdata.id=1;
 ERROR:  No encryption key found
+CONTEXT:  referenced column: pgp_pub_decrypt
 -- password-protected secret key, no password
 select pgp_pub_decrypt(dearmor(data), dearmor(seckey))
 from keytbl, encdata where keytbl.id=5 and encdata.id=1;
 ERROR:  Need password for secret key
+CONTEXT:  referenced column: pgp_pub_decrypt
 -- password-protected secret key, wrong password
 select pgp_pub_decrypt(dearmor(data), dearmor(seckey), 'foo')
 from keytbl, encdata where keytbl.id=5 and encdata.id=1;
 ERROR:  Corrupt data
+CONTEXT:  referenced column: pgp_pub_decrypt
 -- password-protected secret key, right password
 select pgp_pub_decrypt(dearmor(data), dearmor(seckey), 'parool')
 from keytbl, encdata where keytbl.id=5 and encdata.id=1;

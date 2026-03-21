@@ -17,6 +17,7 @@ SELECT crypt('foox', 'NB');
 -- error since salt is too short:
 SELECT crypt('password', 'a');
 ERROR:  invalid salt
+CONTEXT:  referenced column: crypt
 CREATE TABLE ctest (data text, res text, salt text);
 INSERT INTO ctest VALUES ('password', '', '');
 UPDATE ctest SET salt = gen_salt('des');

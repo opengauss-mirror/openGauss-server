@@ -23,13 +23,16 @@ SELECT crypt('longlongpassword', '_J9..j2zz');
 -- error, salt too short
 SELECT crypt('foox', '_J9..BWH');
 ERROR:  invalid salt
+CONTEXT:  referenced column: crypt
 -- error, count specified in the second argument is 0
 SELECT crypt('password', '_........');
 ERROR:  crypt(3) returned NULL
+CONTEXT:  referenced column: crypt
 -- error, count will wind up still being 0 due to invalid encoding
 -- of the count: only chars ``./0-9A-Za-z' are valid
 SELECT crypt('password', '_..!!!!!!');
 ERROR:  crypt(3) returned NULL
+CONTEXT:  referenced column: crypt
 -- count should be non-zero here, will work
 SELECT crypt('password', '_/!!!!!!!');
         crypt         

@@ -102,3 +102,4 @@ em9va2E=
 -----END PGP MESSAGE-----
 ');
 ERROR:  Corrupt ascii-armor
+CONTEXT:  referenced column: dearmor

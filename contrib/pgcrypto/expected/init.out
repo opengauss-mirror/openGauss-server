@@ -20,9 +20,13 @@ SELECT decode('666f6f', 'hex');
 -- check error handling
 select gen_salt('foo');
 ERROR:  gen_salt: Unknown salt algorithm
+CONTEXT:  referenced column: gen_salt
 select digest('foo', 'foo');
 ERROR:  Cannot use "foo": No such hash algorithm
+CONTEXT:  referenced column: digest
 select hmac('foo', 'foo', 'foo');
 ERROR:  Cannot use "foo": No such hash algorithm
+CONTEXT:  referenced column: hmac
 select encrypt('foo', 'foo', 'foo');
 ERROR:  Cannot use "foo": No such cipher algorithm
+CONTEXT:  referenced column: encrypt

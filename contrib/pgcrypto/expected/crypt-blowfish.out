@@ -16,12 +16,15 @@ SELECT crypt('foox', '$2a$06$RQiOJ.3ELirrXwxIZY8q0O');
 -- error, salt too short:
 SELECT crypt('foox', '$2a$');
 ERROR:  invalid salt
+CONTEXT:  referenced column: crypt
 -- error, first digit of count in salt invalid
 SELECT crypt('foox', '$2a$40$RQiOJ.3ELirrXwxIZY8q0O');
 ERROR:  invalid salt
+CONTEXT:  referenced column: crypt
 -- error, count in salt too small
 SELECT crypt('foox', '$2a$00$RQiOJ.3ELirrXwxIZY8q0O');
 ERROR:  invalid salt
+CONTEXT:  referenced column: crypt
 CREATE TABLE ctest (data text, res text, salt text);
 INSERT INTO ctest VALUES ('password', '', '');
 UPDATE ctest SET salt = gen_salt('bf', 8);
