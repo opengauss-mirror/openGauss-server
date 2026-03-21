@@ -166,6 +166,12 @@ typedef struct XLogMoveExtent {
     BlockNumber old_extent;
 } XLogMoveExtent;
 
+typedef struct XLogCopyExtent {
+    BufferTag tag;
+    RelFileNode copy_logic_rnode;
+    BlockNumber copy_logic_blknum;
+} XLogCopyExtent;
+
 struct HTAB* redo_create_remain_segs_htbl();
 extern void move_extent_flush_buffer(XLogMoveExtent *xlog_data);
 

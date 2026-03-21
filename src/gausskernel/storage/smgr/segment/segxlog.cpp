@@ -839,9 +839,47 @@ void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr rea
 static void redo_new_page(XLogReaderState *record)
 {
     Assert(record != NULL);
-    BufferTag *tag = (BufferTag*)XLogRecGetData(record);
-    seg_redo_new_page_copy_and_flush(tag,
-                                     (char *)XLogRecGetData(record) + sizeof(BufferTag),
+    XLogCopyExtent *copyextent = (XLogCopyExtent*)XLogRecGetData(record);
+    BufferTag tag = copyextent->tag;
+    RelFileNode copy_logic_rnode = copyextent->copy_logic_rnode;
+    BlockNumber copy_logic_blknum = copyextent->copy_logic_blknum;
+
+    Buffer buf = try_get_moved_pagebuf(&copy_logic_rnode, tag.forkNum, copy_logic_blknum);
+    if (BufferIsValid(buf)) {
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        BufferDesc* buf_desc = BufferGetBufferDescriptor(buf);
+        uint64 buf_state = LockBufHdr(buf_desc);
+        bool needFlush = buf_state & BM_DIRTY;
+        UnlockBufHdr(buf_desc, buf_state);
+
+        if (needFlush) {
+            FlushOneBufferIncludeDW(buf_desc);
+            ereport(DEBUG1, (errmodule(MOD_SEGMENT_PAGE),
+                             errmsg("[COPY_BUFFER] buffer is dirty, need flush, blockno %u, tag blocknum %u, "
+                                    "seg_blockno %u extent_size:", copyextent->copy_logic_blknum,
+                                    buf_desc->tag.blockNum, buf_desc->extra->seg_blockno)));
+        }
+
+        LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+        UnpinBuffer(buf_desc, true);
+        buf_state = LockBufHdr(buf_desc);
+        if (BUF_STATE_GET_REFCOUNT(buf_state) > 0) {
+            UnlockBufHdr(buf_desc, buf_state);
+            ereport(WARNING, (errmodule(MOD_SEGMENT_PAGE),
+                              errmsg("[COPY_EXTENT] block %u has reference count, skip evict buffer",
+                              copyextent->copy_logic_blknum)));
+        }
+
+        if (RelFileNodeEquals(buf_desc->tag.rnode, copy_logic_rnode) && (buf_desc->tag.forkNum == tag.forkNum) &&
+            (buf_desc->tag.blockNum == copyextent->copy_logic_blknum) && (buf_state & BM_VALID)) {
+            InvalidateBuffer(buf_desc);
+        } else {
+            UnlockBufHdr(buf_desc, buf_state);
+        }
+    }
+
+    seg_redo_new_page_copy_and_flush(&tag,
+                                     (char *)XLogRecGetData(record) + sizeof(XLogCopyExtent),
                                      record->ReadRecPtr, 
                                      record->EndRecPtr);
 }

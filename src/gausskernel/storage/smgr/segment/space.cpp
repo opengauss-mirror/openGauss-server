@@ -546,10 +546,12 @@ Buffer try_get_moved_pagebuf(RelFileNode *rnode, int forknum, BlockNumber logic_
  * logic_rnode and logic_start_blocknum is used to get blocks' buffer if possible
  */
 void copy_extent(SegExtentGroup* seg, RelFileNode logic_rnode, uint32 logic_start_blocknum, BlockNumber nblocks,
-                 BlockNumber phy_from_extent, BlockNumber phy_to_extent, ForkNumber forknum)
+                 BlockNumber phy_from_extent, BlockNumber phy_to_extent, uint32 copy_logic_start_blocknum,
+                 ForkNumber forknum)
 {
     char *content = NULL;
     char *unaligned_content = NULL;
+    BlockNumber copy_logic_blknum = InvalidBlockNumber;
     bool compress = IS_SEG_COMPRESSED_RNODE(logic_rnode, forknum);
     if (ENABLE_DSS) {
         unaligned_content = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
@@ -623,6 +625,10 @@ void copy_extent(SegExtentGroup* seg, RelFileNode logic_rnode, uint32 logic_star
 
         BlockNumber to_block = phy_to_extent + i;
 
+        if (copy_logic_start_blocknum != InvalidBlockNumber) {
+            copy_logic_blknum =  copy_logic_start_blocknum + i;
+        }
+
         START_CRIT_SECTION();
         {
             BufferTag tag = {
@@ -630,9 +636,14 @@ void copy_extent(SegExtentGroup* seg, RelFileNode logic_rnode, uint32 logic_star
                 .forkNum = seg->forknum,
                 .blockNum = to_block
             };
+
+            XLogCopyExtent xlog_data;
+            xlog_data.tag = tag;
+            xlog_data.copy_logic_rnode = logic_rnode;
+            xlog_data.copy_logic_blknum = copy_logic_blknum;
             /* 1. xlog insert and set lsn */
             XLogBeginInsert();
-            XLogRegisterData((char *)&tag, sizeof(tag));
+            XLogRegisterData((char *)&xlog_data, sizeof(xlog_data));
             XLogRegisterData(pagedata, BLCKSZ);
             XLogRecPtr recptr = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_NEW_PAGE);
             PageSetLSN(pagedata, recptr);
@@ -647,6 +658,7 @@ void copy_extent(SegExtentGroup* seg, RelFileNode logic_rnode, uint32 logic_star
                 spc_write_block(rel->seg_space,
                                 EXTENT_GROUP_RNODE(seg->space, (ExtentSize)seg->extent_size,
                                                    logic_rnode.opt), forknum, pagedata, to_block);
+
                 if (flush_old_file) {
                     g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
                 } else {
@@ -879,7 +891,7 @@ void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePoin
     SegmentCheck(new_extent < extent);
 
     /* eg_alloc_extent implicate START_CRIT_SECTION; We do not worry any Error during copy_extent */
-    copy_extent(seg, logic_rnode, logic_start, owner_seghead->nblocks, extent, new_extent, forknum);
+    copy_extent(seg, logic_rnode, logic_start, owner_seghead->nblocks, extent, new_extent, InvalidBlockNumber, forknum);
 
     SEGMENTTEST(SEGMENT_COPY_EXTENT, (errmsg("error happens just after copy extent")));
 
