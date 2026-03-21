@@ -1,16 +1,31 @@
 /*
- * Copyright (c) 2024 Huawei Technologies Co.,Ltd.
+ * This file contains code from different sources, governed by different open source licenses.
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
+ * 1. Code originating from the PostgreSQL project:
+ *    - Portions Copyright (c) 1996-2023, PostgreSQL Global Development Group
+ *    - This code is licensed under the PostgreSQL License.
+ *    - Permission is granted to use, copy, modify, and distribute this software in source and binary forms,
+ *      provided that the above copyright notice, this condition list, and the following disclaimer
+ *      are retained in source distributions, and reproduced in documentation/material provided with
+ *      binary distributions.
  *
- *          http://license.coscl.org.cn/MulanPSL2
+ * 2. Modifications and new code by Huawei Technologies Co., Ltd.:
+ *    - Portions Copyright (c) 2024 Huawei Technologies Co.,Ltd.
+ *    - This code is licensed under the Mulan Permissive Software License, Version 2 (Mulan PSL v2).
+ *    - Full license text available at: http://license.coscl.org.cn/MulanPSL2
  *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
+ * 3. General Disclaimer (as required by the PostgreSQL License):
+ *    - THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS
+ *      OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ *      AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ *      CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ *      DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *      DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ *      IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ *      OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * By using this file, you acknowledge that you must comply with all applicable terms of both the
+ * PostgreSQL License and the Mulan PSL v2 for the respective code portions you utilize.
  * -------------------------------------------------------------------------
  *
  * hnswvacuum.cpp
@@ -216,7 +231,7 @@ static void RepairGraphElement(HnswVacuumState *vacuumstate, HnswElement element
     /* Find neighbors for element, skipping itself */
     HnswFindElementNeighbors(base, element, entryPoint, index, procinfo, collation,
                              m, efConstruction, true, false, NULL, vacuumstate->enableRabitQ,
-                             vacuumstate->rbqDiskParams);
+                             vacuumstate->rbqDiskParams, vacuumstate->enableLsg);
     /* Zero memory for each element */
     MemSet(ntup, 0, HNSW_TUPLE_ALLOC_SIZE);
 
@@ -239,7 +254,7 @@ static void RepairGraphElement(HnswVacuumState *vacuumstate, HnswElement element
 
     /* Update neighbors */
     HnswUpdateNeighborsOnDisk(index, procinfo, collation, element, m, true, false,
-                              vacuumstate->enableRabitQ, vacuumstate->rbqDiskParams);
+                              vacuumstate->enableRabitQ, vacuumstate->rbqDiskParams, vacuumstate->enableLsg);
 }
 
 /*
@@ -576,6 +591,34 @@ static void MarkDeleted(HnswVacuumState *vacuumstate)
 /*
  * Initialize the vacuum state
  */
+static void InitVacuumRbqState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info, RabitQConfig *rbqConfig, int dim)
+{
+    if (!vacuumstate->enableRabitQ) {
+        vacuumstate->rbqDiskParams = NULL;
+        return;
+    }
+
+    if (info->heaprel == NULL) {
+        ereport(ERROR, (errmsg("HNSW RabitQ bulkdelete need heap relation.")));
+    }
+
+    RabitqInsertOnDiskParams *params = (RabitqInsertOnDiskParams *)palloc(sizeof(RabitqInsertOnDiskParams));
+    params->heap = info->heaprel;
+    params->normprocinfo = HnswOptionalProcInfo(vacuumstate->index, HNSW_NORM_PROC);
+    params->collation = vacuumstate->collation;
+    params->funcType = GetFunctionType(vacuumstate->procinfo, params->normprocinfo);
+    params->heapTuple = (HeapTupleData *)heaptup_alloc(BLCKSZ);
+    params->indexInfo = BuildIndexInfo(vacuumstate->index);
+    params->vtrans = rbqConfig->vtrans;
+    vacuumstate->rbqDiskParams = params;
+    vacuumstate->rbqcodesSize = rbqCodeSize(dim, rbqConfig->reType == SQ8);
+
+    if (rbqConfig->sq != NULL) {
+        pfree(rbqConfig->sq);
+    }
+    pfree(rbqConfig);
+}
+
 static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
                             IndexBulkDeleteCallback callback, void *callbackState)
 {
@@ -598,6 +641,7 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
     vacuumstate->bas = GetAccessStrategy(BAS_BULKREAD);
     vacuumstate->procinfo = index_getprocinfo(index, 1, HNSW_DISTANCE_PROC);
     vacuumstate->collation = index->rd_indcollation[0];
+    vacuumstate->enableLsg = HnswGetEnableLsg(index);
     vacuumstate->ntup = (HnswNeighborTuple)palloc0(HNSW_TUPLE_ALLOC_SIZE);
     vacuumstate->tmpCtx =
         AllocSetContextCreate(CurrentMemoryContext, "Hnsw vacuum temporary context", ALLOCSET_DEFAULT_SIZES);
@@ -606,29 +650,7 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
     HnswGetMetaPageInfo(index, &vacuumstate->m, NULL);
 
     RabitQConfig *rbqConfig = InitRbqConfigOnDisk(index, &vacuumstate->enableRabitQ, &centroid, dim);
-
-    if (vacuumstate->enableRabitQ) {
-        if (info->heaprel == NULL) {
-            ereport(ERROR, (errmsg("HNSW RabitQ bulkdelete need heap relation.")));
-        }
-        RabitqInsertOnDiskParams *params = (RabitqInsertOnDiskParams *)palloc(sizeof(RabitqInsertOnDiskParams));
-        params->heap = info->heaprel;
-        params->normprocinfo = HnswOptionalProcInfo(index, HNSW_NORM_PROC);
-        params->collation = vacuumstate->collation;
-        params->funcType = GetFunctionType(vacuumstate->procinfo, params->normprocinfo);
-        params->heapTuple = (HeapTupleData *)heaptup_alloc(BLCKSZ);
-        params->indexInfo = BuildIndexInfo(index);
-        params->vtrans = rbqConfig->vtrans;
-        vacuumstate->rbqDiskParams = params;
-        bool refineSQ8 = rbqConfig->reType == SQ8;
-        vacuumstate->rbqcodesSize = rbqCodeSize(dim, refineSQ8);
-        if (rbqConfig->sq != NULL) {
-            pfree(rbqConfig->sq);
-        }
-        pfree(rbqConfig);
-    } else {
-        vacuumstate->rbqDiskParams = NULL;
-    }
+    InitVacuumRbqState(vacuumstate, info, rbqConfig, dim);
 
     HnswGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
     HnswGetRbqInfoFromMetaPage(index, NULL, NULL, NULL, NULL, &matrixNblk,

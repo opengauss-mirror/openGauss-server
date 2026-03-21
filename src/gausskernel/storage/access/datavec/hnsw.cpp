@@ -88,7 +88,7 @@ static bytea *hnswoptions_internal(Datum reloptions, bool validate)
         {"ef_construction", RELOPT_TYPE_INT, offsetof(HnswOptions, efConstruction)},
         {"enable_pq", RELOPT_TYPE_BOOL, offsetof(HnswOptions, enablePQ)},
         {"enable_lsg", RELOPT_TYPE_BOOL, offsetof(HnswOptions, enableLsg)},
-        {"lsg_alpha", RELOPT_TYPE_BOOL, offsetof(HnswOptions, lsgAlpha)},
+        {"lsg_alpha", RELOPT_TYPE_REAL, offsetof(HnswOptions, lsgAlpha)},
         {"lsg_degree", RELOPT_TYPE_INT, offsetof(HnswOptions, lsgDegree)},
         {"pq_m", RELOPT_TYPE_INT, offsetof(HnswOptions, pqM)},
         {"pq_ksub", RELOPT_TYPE_INT, offsetof(HnswOptions, pqKsub)},

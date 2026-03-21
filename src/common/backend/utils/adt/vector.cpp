@@ -114,6 +114,7 @@ Vector *InitVector(int dim)
     result = (Vector *)palloc0(size);
     SET_VARSIZE(result, size);
     result->dim = dim;
+    result->isoValue = Float32ToFloat16(1.0f);
 
     return result;
 }
@@ -356,10 +357,9 @@ Datum vector_recv(PG_FUNCTION_ARGS)
     int32 typmod = PG_GETARG_INT32(2);
     Vector *result;
     int16 dim;
-    uint16 isoValue;
 
     dim = pq_getmsgint(buf, sizeof(int16));
-    isoValue = pq_getmsgint(buf, sizeof(uint16));
+    (void)pq_getmsgint(buf, sizeof(uint16));
 
     CheckDim(dim);
     CheckExpectedDim(typmod, dim);
@@ -1031,6 +1031,25 @@ Datum vector_norm(PG_FUNCTION_ARGS)
     }
 
     PG_RETURN_FLOAT8(sqrt(norm));
+}
+
+/*
+ * Compatibility entry for unknown literals.
+ *
+ * Keep unknown inputs out of the sparsevec/halfvec implicit-cast path and
+ * raise a direct unsupported-type error instead.
+ */
+PGDLLEXPORT PG_FUNCTION_INFO_V1(l2_norm_unknown_compat);
+Datum l2_norm_unknown_compat(PG_FUNCTION_ARGS)
+{
+    (void)PG_GETARG_CSTRING(0);
+
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("This input type is not supported for l2_norm()"),
+             errhint("Use explicit casts to vector, sparsevec, or halfvec.")));
+
+    PG_RETURN_NULL();
 }
 
 /*
