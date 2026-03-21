@@ -65,6 +65,7 @@ ParseState* make_parsestate(ParseState* parentParseState)
     pstate->p_has_ignore = false;
     pstate->p_indexhintLists = NIL;
     pstate->p_is_flt_frame = false;
+    pstate->p_having_func_arg_level = 0;
 
     if (parentParseState != NULL) {
         pstate->p_sourcetext = parentParseState->p_sourcetext;
