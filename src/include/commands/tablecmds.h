@@ -105,7 +105,7 @@ typedef struct AlteredTableInfo {
     bool is_first_after;         /* modify first|after and add firs|after */
     bool is_modify_primary;      /* modify column first|after with primary key, we should pre-record AT_SetNotNull */
     List* b_compat_subcmds;       /* B format: keep original subcommand order */
-    bool b_compat_has_alter_type; /* B format: alter type/modify exists */
+    int b_compat_phase1_subcmd_count[AT_NUM_PASSES]; /* B format: written-order executed prefix length per pass */
     uint2 opt; /* opt of relation before update */
     Datum oldOptions; /* relOptions of relation before update */
     Datum newOptions;
