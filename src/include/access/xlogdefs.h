@@ -45,6 +45,13 @@ const uint32 g_InvalidTermDN = 0;
 #define XLogRecPtrIsValid(r) ((r) != InvalidXLogRecPtr)
 
 /*
+ * Handy macro for printing XLogRecPtr in conventional format, e.g.,
+ *
+ * printf("%X/%X", LSN_FORMAT_ARGS(lsn));
+ */
+#define LSN_FORMAT_ARGS(lsn) (AssertVariableIsOfTypeMacro((lsn), XLogRecPtr), (uint32) ((lsn) >> 32)), ((uint32) (lsn))
+
+/*
  * XLogSegNo - physical log file sequence number.
  */
 typedef uint64 XLogSegNo;
