@@ -165,34 +165,6 @@ void gs_stat_get_database_name(PgBackendStatusNode* list)
     heap_close(rel, AccessShareLock);
 }
 
-void gs_stat_get_timeout_beentry(int timeout_threshold, Tuplestorestate* tupStore, TupleDesc tupDesc, FuncType insert)
-{
-    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + BackendStatusArray_size - 1;
-    PgBackendStatus* localentry = NULL;
-    /*
-     * We go through BackendStatusArray from back to front, because
-     * in thread pool mode, both an active session and its thread pool worker
-     * will have the same procpid in their entry and in most cases what we want
-     * is session's entry, which will be returned first in such searching direction.
-     */
-    for (int i = 1; i <= BackendStatusArray_size; i++) {
-        localentry = gsstat_check_beentry_timeout(timeout_threshold, beentry);
-
-        /* Only valid entries get included into the local array */
-        if (localentry != NULL &&
-            (localentry->st_procpid > 0 || localentry->st_sessionid > 0)) {
-            insert(tupStore, tupDesc, localentry);
-        }
-        beentry--;
-        if (localentry != NULL) {
-            pfree(localentry->st_appname);
-            pfree(localentry->st_activity);
-            pfree_ext(localentry->row_desc_cache_stats);
-            pfree(localentry);
-        }
-    }
-}
-
 /*
  * Free PgBackendStatusNode and its underlying palloc-ed data structures, include st_appname, st_clienthostname
  * st_conninfo and st_activity. We just have palloced these four variables in function 'gs_stat_encap_status_info'.
@@ -357,14 +329,15 @@ PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls)
 }
 
 // Using TupleStore to optimize the process
-uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc, FuncType insert, bool hasTID,
-                                   ThreadId threadId)
+uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc,
+                                   FuncType insert, StatFetchInfo info)
 {
     PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + BackendStatusArray_size - 1;
-
     PgBackendStatus *localentry = (PgBackendStatus *) palloc0(sizeof(PgBackendStatus));
-
     uint32 maxCalls = 0;
+
+    Assert(info);
+
     /*
      * We go through BackendStatusArray from back to front, because
      * in thread pool mode, both an active session and its thread pool worker
@@ -380,16 +353,12 @@ uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc,
          * pointer here to ensure the compiler doesn't try to get cute.
          */
         if (gs_stat_encap_status_info(localentry, beentry)) {
-            bool flag = false;
-            if (!hasTID || localentry->st_procpid == threadId) {
-                if (insert != NULL) {
-                    insert(tupStore, tupDesc, localentry);
-                }
-                maxCalls++;
-                flag = true;
+            if (insert != NULL) {
+                insert(tupStore, tupDesc, localentry, info);
             }
-            // Find only items with the same thread ID.
-            if (hasTID && flag) {
+            // check whether to break
+            ++maxCalls;
+            if (info->fres == StatFetchRes::SF_BREAK) {
                 break;
             }
         }
@@ -468,3 +437,4 @@ void gs_stat_free_stat_beentry(PgBackendStatus* beentry)
     pfree_ext(beentry->row_desc_cache_stats);
     pfree_ext(beentry);
 }
+

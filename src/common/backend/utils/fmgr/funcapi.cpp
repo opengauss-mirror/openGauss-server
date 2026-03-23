@@ -40,6 +40,72 @@ static TypeFuncClass internal_get_result_type(Oid funcid, Node* call_expr, Retur
 static bool resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector* declared_args, Node* call_expr);
 static TypeFuncClass get_type_func_class(Oid typid);
 
+
+/*
+ * InitMaterializedSRF
+ *
+ * Helper function to build the state of a set-returning function used
+ * in the context of a single call with materialize mode.  This code
+ * includes sanity checks on ReturnSetInfo, creates the Tuplestore and
+ * the TupleDesc used with the function and stores them into the
+ * function's ReturnSetInfo.
+ *
+ * "flags" can be set to MAT_SRF_USE_EXPECTED_DESC, to use the tuple
+ * descriptor coming from expectedDesc, which is the tuple descriptor
+ * expected by the caller.  MAT_SRF_BLESS can be set to complete the
+ * information associated to the tuple descriptor, which is necessary
+ * in some cases where the tuple descriptor comes from a transient
+ * RECORD datatype.
+ */
+
+void InitMaterializedSRF(FunctionCallInfo fcinfo, bits32 flags)
+{
+    bool        randomAccess;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    Tuplestorestate *tupstore;
+    MemoryContext old_context;
+    MemoryContext per_query_ctx;
+    TupleDesc    stored_tupdesc;
+
+    /* check to see if caller supports returning a tuplestore */
+    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("set-valued function called in context that cannot accept a set")));
+    if (!(rsinfo->allowedModes & SFRM_Materialize) ||
+        ((flags & MAT_SRF_USE_EXPECTED_DESC) != 0 && rsinfo->expectedDesc == NULL))
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("materialize mode required, but it is not allowed in this context")));
+
+    /*
+     * Store the tuplestore and the tuple descriptor in ReturnSetInfo.  This
+     * must be done in the per-query memory context.
+     */
+    per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+    old_context = MemoryContextSwitchTo(per_query_ctx);
+
+    /* build a tuple descriptor for our result type */
+    if ((flags & MAT_SRF_USE_EXPECTED_DESC) != 0) {
+        stored_tupdesc = CreateTupleDescCopy(rsinfo->expectedDesc);
+    } else {
+        if (get_call_result_type(fcinfo, NULL, &stored_tupdesc) != TYPEFUNC_COMPOSITE)
+            elog(ERROR, "return type must be a row type");
+    }
+
+    /* If requested, bless the tuple descriptor */
+    if ((flags & MAT_SRF_BLESS) != 0)
+        BlessTupleDesc(stored_tupdesc);
+
+    randomAccess = (rsinfo->allowedModes & SFRM_Materialize_Random) != 0;
+
+    tupstore = tuplestore_begin_heap(randomAccess, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = stored_tupdesc;
+    MemoryContextSwitchTo(old_context);
+}
+
 /*
  * init_MultiFuncCall
  * Create an empty FuncCallContext data structure
@@ -128,7 +194,7 @@ FuncCallContext* per_MultiFuncCall(PG_FUNCTION_ARGS)
      * FuncCallContext is pointing to it), but in most usage patterns the
      * tuples stored in it will be in the function's per-tuple context. So at
      * the beginning of each call, the Slot will hold a dangling pointer to an
-     * already-recycled tuple.	We clear it out here.
+     * already-recycled tuple. We clear it out here.
      *
      * Note: use of retval->slot is obsolete as of 8.0, and we expect that it
      * will always be NULL.  This is just here for backwards compatibility in
@@ -301,16 +367,16 @@ void construct_func_param_desc(Oid funcid, TypeFuncClass* typclass, TupleDesc* t
 
 /*
  * get_call_result_type
- *		Given a function's call info record, determine the kind of datatype
- *		it is supposed to return.  If resultTypeId isn't NULL, *resultTypeId
- *		receives the actual datatype OID (this is mainly useful for scalar
- *		result types).	If resultTupleDesc isn't NULL, *resultTupleDesc
- *		receives a pointer to a TupleDesc when the result is of a composite
- *		type, or NULL when it's a scalar result.
+ *    Given a function's call info record, determine the kind of datatype
+ *    it is supposed to return. If resultTypeId isn't NULL, *resultTypeId
+ *    receives the actual datatype OID (this is mainly useful for scalar
+ *    result types). If resultTupleDesc isn't NULL, *resultTupleDesc
+ *    receives a pointer to a TupleDesc when the result is of a composite
+ *    type, or NULL when it's a scalar result.
  *
  * One hard case that this handles is resolution of actual rowtypes for
  * functions returning RECORD (from either the function's OUT parameter
- * list, or a ReturnSetInfo context node).	TYPEFUNC_RECORD is returned
+ * list, or a ReturnSetInfo context node). TYPEFUNC_RECORD is returned
  * only when we couldn't resolve the actual rowtype for lack of information.
  *
  * The other hard case that this handles is resolution of polymorphism.
@@ -332,7 +398,7 @@ TypeFuncClass get_call_result_type(FunctionCallInfo fcinfo, Oid* resultTypeId, T
 
 /*
  * get_expr_result_type
- *		As above, but work from a calling expression node tree
+ *    As above, but work from a calling expression node tree
  */
 TypeFuncClass get_expr_result_type(Node* expr, Oid* resultTypeId, TupleDesc* resultTupleDesc, int4* resultTypeId_orig)
 {
@@ -370,7 +436,7 @@ TypeFuncClass get_expr_result_type(Node* expr, Oid* resultTypeId, TupleDesc* res
 
 /*
  * get_func_result_type
- *		As above, but work from a function's OID only
+ *    As above, but work from a function's OID only
  *
  * This will not be able to resolve pure-RECORD results nor polymorphism.
  */
@@ -382,7 +448,7 @@ TypeFuncClass get_func_result_type(Oid functionId, Oid* resultTypeId, TupleDesc*
 /*
  * internal_get_result_type -- workhorse code implementing all the above
  *
- * funcid must always be supplied.	call_expr and rsinfo can be NULL if not
+ * funcid must always be supplied. call_expr and rsinfo can be NULL if not
  * available.  We will return TYPEFUNC_RECORD, and store NULL into
  * *resultTupleDesc, if we cannot deduce the complete result rowtype from
  * the available information.
@@ -607,7 +673,7 @@ static bool resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector* declared_a
     }
 
     /*
-     * Otherwise, extract actual datatype(s) from input arguments.	(We assume
+     * Otherwise, extract actual datatype(s) from input arguments. (We assume
      * the parser already validated consistency of the arguments.)
      */
     if (call_expr == NULL){

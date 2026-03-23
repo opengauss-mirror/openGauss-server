@@ -1098,6 +1098,7 @@ test: union_null_01 fulljoin_rewrite
 test: var_eq_const_selectivity
 
 test: pg_controldata
+test: pg_stat_copy
 
 test: describe_index_with_tablespace
 

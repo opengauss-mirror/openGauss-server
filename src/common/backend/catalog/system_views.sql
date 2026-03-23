@@ -3658,6 +3658,25 @@ CREATE VIEW pg_catalog.pg_matviews AS
         AND (C.relowner = (SELECT oid from pg_catalog.pg_authid where rolname = current_user)
         OR (SELECT rolsystemadmin or rolcreaterole or rolsuper from pg_catalog.pg_authid where rolname = current_user));
 
+/* pg_stat_progress_copy */
+CREATE VIEW pg_stat_progress_copy AS
+    SELECT
+        S.pid AS pid, S.datid AS datid, D.datname AS datname,
+        S.relid AS relid,
+        CASE S.param5 WHEN 1 THEN 'COPY FROM'
+                      WHEN 2 THEN 'COPY TO'
+                      END AS command,
+        CASE S.param6 WHEN 1 THEN 'FILE'
+                      WHEN 2 THEN 'PIPE'
+                      WHEN 3 THEN 'CALLBACK'
+                      END AS "type",
+        S.param1 AS bytes_processed,
+        S.param2 AS bytes_total,
+        S.param3 AS tuples_processed,
+        S.param4 AS tuples_excluded
+    FROM pg_stat_get_progress_info('COPY') AS S
+        LEFT JOIN pg_database D ON S.datid = D.oid;
+
 CREATE OR REPLACE FUNCTION pg_catalog.array_integer_agg_add(int[], int[])
 RETURNS int[]
 AS $$

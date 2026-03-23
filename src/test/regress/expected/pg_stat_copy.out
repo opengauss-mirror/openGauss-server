@@ -1,0 +1,74 @@
+create database pg_stat_copy_a dbcompatibility 'A';
+\c pg_stat_copy_a
+\d+ pg_stat_progress_copy
+            View "pg_catalog.pg_stat_progress_copy"
+      Column      |  Type  | Modifiers | Storage  | Description 
+------------------+--------+-----------+----------+-------------
+ pid              | bigint |           | plain    | 
+ datid            | oid    |           | plain    | 
+ datname          | name   |           | plain    | 
+ relid            | oid    |           | plain    | 
+ command          | text   |           | extended | 
+ type             | text   |           | extended | 
+ bytes_processed  | bigint |           | plain    | 
+ bytes_total      | bigint |           | plain    | 
+ tuples_processed | bigint |           | plain    | 
+ tuples_excluded  | bigint |           | plain    | 
+View definition:
+ SELECT s.pid, s.datid, d.datname, s.relid, 
+        CASE s.param5
+            WHEN 1 THEN 'COPY FROM'::text
+            WHEN 2 THEN 'COPY TO'::text
+            ELSE NULL::text
+        END AS command, 
+        CASE s.param6
+            WHEN 1 THEN 'FILE'::text
+            WHEN 2 THEN 'PIPE'::text
+            WHEN 3 THEN 'CALLBACK'::text
+            ELSE NULL::text
+        END AS type, 
+    s.param1 AS bytes_processed, s.param2 AS bytes_total, 
+    s.param3 AS tuples_processed, s.param4 AS tuples_excluded
+   FROM pg_stat_get_progress_info('COPY'::text) s(pid, datid, relid, param1, param2, param3, param4, param5, param6, param7, param8, param9, param10, param11, param12, param13, param14, param15, param16, param17, param18, param19, param20)
+   LEFT JOIN pg_database d ON s.datid = d.oid;
+
+create table tab_progress_reporting (
+    name text,
+    age int4,
+    location point,
+    salary int4,
+    manager name
+);
+create function notice_after_tab_progress_reporting() returns trigger AS
+$$
+declare report record;
+begin
+  with progress_data as (
+    select
+       relid::regclass::text as relname,
+       command,
+       type,
+       bytes_processed,
+       bytes_total, 
+       bytes_processed > 0 as has_bytes_processed,
+       bytes_total > 0 as has_bytes_total,
+       tuples_processed,
+       tuples_excluded
+      from pg_stat_progress_copy)
+select into report (row_to_json(r))::text as value
+from progress_data r;
+
+  raise info 'progress: %', report.value::text;
+  return new;
+end;
+$$ language plpgsql;
+create trigger check_after_tab_progress_reporting
+   after insert on tab_progress_reporting
+   for each statement
+   execute function notice_after_tab_progress_reporting();
+copy tab_progress_reporting from stdin;
+INFO:  progress: {"relname":"tab_progress_reporting","command":"COPY FROM","type":"PIPE","bytes_processed":79,"bytes_total":0,"has_bytes_processed":true,"has_bytes_total":false,"tuples_processed":3,"tuples_excluded":0}
+\copy tab_progress_reporting from stdin;
+INFO:  progress: {"relname":"tab_progress_reporting","command":"COPY FROM","type":"PIPE","bytes_processed":79,"bytes_total":0,"has_bytes_processed":true,"has_bytes_total":false,"tuples_processed":3,"tuples_excluded":0}
+\c regression
+drop database pg_stat_copy_a;
