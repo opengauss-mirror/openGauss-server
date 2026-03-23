@@ -899,8 +899,9 @@ static void* opt_AllocSetRealloc(MemoryContext context, void* pointer, Size alig
     }
 
 #ifndef ENABLE_MEMORY_CHECK
-    if (oldsize > set->allocChunkLimit) {
+    if (oldsize > set->allocChunkLimit)
 #endif
+    {
         /*
          * The chunk must have been allocated as a single-chunk block.	Find
          * the containing block and use realloc() to make it bigger with
