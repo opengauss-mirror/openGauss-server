@@ -119,6 +119,12 @@ set(ONNXRUNTIME_INCLUDE_PATH ${ONNXRUNTIME_HOME}/include)
 set(ONNXRUNTIME_LIB_PATH ${ONNXRUNTIME_HOME}/lib)
 
 #############################################################################
+# kvecturbo component (aarch64 only)
+#############################################################################
+set(KVECTURBO_HOME ${DEPENDENCY_PATH}/kvecturbo/comm)
+set(KVECTURBO_LIB_PATH ${KVECTURBO_HOME}/lib)
+
+#############################################################################
 # etcd component
 #############################################################################
 set(ETCD_INCLUDE_PATH ${ETCD_HOME}/include)

@@ -860,6 +860,7 @@
 ./lib/libcjson.so*
 ./lib/libonnx*.so*
 ./lib/libtokenizers.so*
+./lib/libkvecturbo.so*
 ./lib/libconfig.so*
 ./lib/libpgport_tool.so
 ./lib/libpgport_tool.so.1
