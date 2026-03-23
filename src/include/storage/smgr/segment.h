@@ -241,6 +241,7 @@ extern bool repair_check_physical_type(uint32 spcNode, uint32 dbNode, int32 fork
 extern RelFileNode get_segment_logic_rnode(SegSpace *spc, BlockNumber head_blocknum, int aim_fork);
 extern void SegUpdatePca(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, SegmentHead *seg_head);
 extern void copy_extent(SegExtentGroup* seg, RelFileNode logic_rnode, uint32 logic_start_blocknum, BlockNumber nblocks,
-                        BlockNumber phy_from_extent, BlockNumber phy_to_extent, ForkNumber forknum);
+                 BlockNumber phy_from_extent, BlockNumber phy_to_extent, uint32 copy_logic_start_blocknum,
+                 ForkNumber forknum);
 
 #endif

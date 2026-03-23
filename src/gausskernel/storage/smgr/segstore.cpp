@@ -2470,7 +2470,8 @@ void seg_extent_replace(Relation rel, SegSpace* spc, uint32 last_ext, ForkNumber
 
     spc_evict_extent_buffers(rel->rd_node, copy_ext_start, ext_size, main_head->nblocks, forknum);
 
-    copy_extent(seg, rel->rd_node, last_ext_start, main_head->nblocks, last_ext_blk, copy_ext_blk, forknum);
+    copy_extent(seg, rel->rd_node, last_ext_start, main_head->nblocks, last_ext_blk,
+                copy_ext_blk, copy_ext_start, forknum);
 
     spc_evict_extent_buffers(rel->rd_node, last_ext_start, ext_size, main_head->nblocks, forknum);
 
