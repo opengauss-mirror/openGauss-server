@@ -4869,57 +4869,6 @@ static void sql_inline_error_callback(void* arg)
     errcontext("SQL function \"%s\" during inlining", callback_arg->proname);
 }
 
-ExprContext* MakePerTupleExprContextForOpFusion(EState* estate)
-{
-    ExprContext* econtext = NULL;
-    MemoryContext oldcontext;
-
-    /* Create the ExprContext node within the per-query memory context */
-    oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
-
-    econtext = makeNode(ExprContext);
-
-    /* Initialize fields of ExprContext */
-    econtext->ecxt_scantuple = NULL;
-    econtext->ecxt_innertuple = NULL;
-    econtext->ecxt_outertuple = NULL;
-
-    econtext->ecxt_per_query_memory = estate->es_query_cxt;
-
-    /*
-     * Create working memory for expression evaluation in this context.
-     */
-    econtext->ecxt_per_tuple_memory = u_sess->iud_expr_reuse_ctx;
-    econtext->ecxt_param_exec_vals = estate->es_param_exec_vals;
-    econtext->ecxt_param_list_info = estate->es_param_list_info;
-
-    econtext->ecxt_aggvalues = NULL;
-    econtext->ecxt_aggnulls = NULL;
-
-    econtext->caseValue_datum = (Datum)0;
-    econtext->caseValue_isNull = true;
-
-    econtext->domainValue_datum = (Datum)0;
-    econtext->domainValue_isNull = true;
-
-    econtext->ecxt_estate = estate;
-
-    econtext->ecxt_callbacks = NULL;
-    econtext->plpgsql_estate = NULL;
-
-    /*
-     * Link the ExprContext into the EState to ensure it is shut down when the
-     * EState is freed.  Because we use lcons(), shutdowns will occur in
-     * reverse order of creation, which may not be essential but can't hurt.
-     */
-    estate->es_exprcontexts = lcons(econtext, estate->es_exprcontexts);
-
-    MemoryContextSwitchTo(oldcontext);
-    estate->es_per_tuple_exprcontext = econtext;
-
-    return econtext;
-}
-
 /*
  * evaluate_expr: pre-evaluate a constant expression
  *
@@ -4932,86 +4881,97 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
 {
     EState* estate = NULL;
     ExprState* exprstate = NULL;
+    ExprContext* econtext = NULL;
     MemoryContext oldcontext;
+    MemoryContext eval_context = NULL;
+    MemoryContext reuse_context = NULL;
     Datum const_val;
     bool const_is_null = false;
     int16 resultTypLen;
     bool resultTypByVal = false;
-    bool isFusion = false;
     if (u_sess->iud_expr_reuse_ctx == NULL) {
         u_sess->iud_expr_reuse_ctx =
             AllocSetContextCreate(u_sess->top_transaction_mem_cxt, "IudExprReuseContext", ALLOCSET_DEFAULT_MINSIZE,
                                   ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     }
+    reuse_context = u_sess->iud_expr_reuse_ctx;
+
     /*
      * To use the executor, we need an EState.
      */
-    if (u_sess->iud_expr_reuse_ctx != NULL) {
-        estate = CreateExecutorState();
-        isFusion = true;
-    } else {
-        estate = CreateExecutorState();
-    }
+    estate = CreateExecutorState();
 
     /* We can use the estate's working context to avoid memory leaks. */
     oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+    econtext = GetPerTupleExprContext(estate);
+    eval_context = econtext->ecxt_per_tuple_memory;
 
-    /* Make sure any opfuncids are filled in. */
-    fix_opfuncids((Node*)expr);
+    PG_TRY();
+    {
+        /* Make sure any opfuncids are filled in. */
+        fix_opfuncids((Node*)expr);
 
-    /*
-     * Prepare expr for execution.	(Note: we can't use ExecPrepareExpr
-     * because it'd result in recursively invoking eval_const_expressions.)
-     */
-    exprstate = ExecInitExpr(expr, NULL);
+        /*
+         * Prepare expr for execution.	(Note: we can't use ExecPrepareExpr
+         * because it'd result in recursively invoking eval_const_expressions.)
+         */
+        exprstate = ExecInitExpr(expr, NULL);
 
-    /*
-     * And evaluate it.
-     *
-     * It is OK to use a default econtext because none of the ExecEvalExpr()
-     * code used in this situation will use econtext.  That might seem
-     * fortuitous, but it's not so unreasonable --- a constant expression does
-     * not depend on context, by definition, n'est ce pas?
-     */
-    if (isFusion && estate->es_per_tuple_exprcontext == NULL) {
-        MakePerTupleExprContextForOpFusion(estate);
-    }
-    ExprContext* econtext = GetPerTupleExprContext(estate);
-    if (econtext != NULL) {
+        /*
+         * Borrow the shared reuse context only for the actual eval scratch
+         * memory; keep ExprContext itself privately owned by this EState so
+         * FreeExecutorState() can reclaim all per-call executor objects.
+         */
+        if (reuse_context != NULL) {
+            econtext->ecxt_per_tuple_memory = reuse_context;
+        }
         econtext->can_ignore = can_ignore;
-    }
-    const_val = ExecEvalExprSwitchContext(exprstate, econtext, &const_is_null);
 
-    if (IsA(exprstate, FuncExprState)) {
-        FunctionCallInfo fcinfo = &((FuncExprState*)exprstate)->fcinfo_data;
-        if (fcinfo->context && IsA(fcinfo->context, FunctionScanState)) {
-            pfree_ext(fcinfo->context);
+        /*
+         * It is OK to use a default econtext because none of the
+         * ExecEvalExpr() code used in this situation will use tuple slots.
+         */
+        const_val = ExecEvalExprSwitchContext(exprstate, econtext, &const_is_null);
+        econtext->ecxt_per_tuple_memory = eval_context;
+
+        /* Get info needed about result datatype */
+        get_typlenbyval(result_type, &resultTypLen, &resultTypByVal);
+
+        /* Get back to outer memory context */
+        (void)MemoryContextSwitchTo(oldcontext);
+
+        /*
+         * Must copy result out of sub-context used by expression eval.
+         *
+         * Also, if it's varlena, forcibly detoast it.  This protects us
+         * against storing TOAST pointers into plans that might outlive the
+         * referenced data.
+         */
+        if (!const_is_null) {
+            if (resultTypLen == -1)
+                const_val = PointerGetDatum(PG_DETOAST_DATUM_COPY(const_val));
+            else
+                const_val = datumCopy(const_val, resultTypByVal, resultTypLen);
         }
     }
-
-    /* Get info needed about result datatype */
-    get_typlenbyval(result_type, &resultTypLen, &resultTypByVal);
-
-    /* Get back to outer memory context */
-    (void)MemoryContextSwitchTo(oldcontext);
-
-    /*
-     * Must copy result out of sub-context used by expression eval.
-     *
-     * Also, if it's varlena, forcibly detoast it.  This protects us against
-     * storing TOAST pointers into plans that might outlive the referenced
-     * data.
-     */
-    if (!const_is_null) {
-        if (resultTypLen == -1)
-            const_val = PointerGetDatum(PG_DETOAST_DATUM_COPY(const_val));
-        else
-            const_val = datumCopy(const_val, resultTypByVal, resultTypLen);
-    }
-
-    /* Release all the junk we just created */
-    if (!isFusion) {
+    PG_CATCH();
+    {
+        if (econtext != NULL) {
+            econtext->ecxt_per_tuple_memory = eval_context;
+        }
+        (void)MemoryContextSwitchTo(oldcontext);
         FreeExecutorState(estate);
+        if (reuse_context != NULL) {
+            MemoryContextReset(reuse_context);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    /* Release all the junk we just created. */
+    FreeExecutorState(estate);
+    if (reuse_context != NULL) {
+        MemoryContextReset(reuse_context);
     }
 
     /*
