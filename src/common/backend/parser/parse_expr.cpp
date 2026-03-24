@@ -980,7 +980,7 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
              * so a SELECT-list alias should win over a same-named source
              * column.
              */
-            if (DB_IS_CMPT_BD && pstate->p_expr_kind == EXPR_KIND_HAVING &&
+            if (DB_IS_CMPT_BD && pstate->isAliasReplace && pstate->p_expr_kind == EXPR_KIND_HAVING &&
                 pstate->p_having_func_arg_level == 0) {
                 node = tryReplaceExprAlias(pstate, colname, cref);
                 if (node != NULL) {
