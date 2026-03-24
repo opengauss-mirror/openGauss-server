@@ -1687,6 +1687,20 @@ group by grouping sets(dt.d_year,ss_ext_sales_price),item.i_category having grou
         |               1000 | Music      |        1 |        0 |        0
 (2 rows)
 
+create table having_alias_grouping_test(a int, b int);
+insert into having_alias_grouping_test values (1, 10), (2, 20);
+select a + 1 as a, sum(b)
+from having_alias_grouping_test
+group by rollup(a)
+having grouping(a) = 0
+order by 1;
+ a | sum 
+---+-----
+ 2 |  10
+ 3 |  20
+(2 rows)
+
+drop table having_alias_grouping_test;
 -- test collate utf8mb4_unicode_ci
 -- test collation used in expr
 select 'abCdEf' = 'abcdef' collate "utf8mb4_unicode_ci";

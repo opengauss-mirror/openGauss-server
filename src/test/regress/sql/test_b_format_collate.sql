@@ -450,6 +450,14 @@ select dt.d_year, ss_ext_sales_price, item.i_category, grouping(dt.d_year), grou
 from date_dim dt, store_sales, item
 where dt.d_date_sk = store_sales.ss_sold_date_sk and store_sales.ss_item_sk = item.i_item_sk and item.i_manager_id = 1 and dt.d_moy = 11 and dt.d_year = 2000 and i_category = 'Music'
 group by grouping sets(dt.d_year,ss_ext_sales_price),item.i_category having grouping(i_category) = 0  order by 1,2,3,4,5,6;
+create table having_alias_grouping_test(a int, b int);
+insert into having_alias_grouping_test values (1, 10), (2, 20);
+select a + 1 as a, sum(b)
+from having_alias_grouping_test
+group by rollup(a)
+having grouping(a) = 0
+order by 1;
+drop table having_alias_grouping_test;
 
 -- test collate utf8mb4_unicode_ci
 -- test collation used in expr
