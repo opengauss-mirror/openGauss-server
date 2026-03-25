@@ -1034,25 +1034,6 @@ Datum vector_norm(PG_FUNCTION_ARGS)
 }
 
 /*
- * Compatibility entry for unknown literals.
- *
- * Keep unknown inputs out of the sparsevec/halfvec implicit-cast path and
- * raise a direct unsupported-type error instead.
- */
-PGDLLEXPORT PG_FUNCTION_INFO_V1(l2_norm_unknown_compat);
-Datum l2_norm_unknown_compat(PG_FUNCTION_ARGS)
-{
-    (void)PG_GETARG_CSTRING(0);
-
-    ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-             errmsg("This input type is not supported for l2_norm()"),
-             errhint("Use explicit casts to vector, sparsevec, or halfvec.")));
-
-    PG_RETURN_NULL();
-}
-
-/*
  * Normalize a vector with the L2 norm
  */
 PGDLLEXPORT PG_FUNCTION_INFO_V1(l2_normalize);
