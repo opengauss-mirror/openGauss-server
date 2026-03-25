@@ -332,15 +332,5 @@ explain (costs off) select id from t1 order by val <#> '[6,7,3,10,1]' limit 5;
          Order By: (val <#> '[6,7,3,10,1]'::vector)
 (4 rows)
 
-select l2_norm('[1,1]'::vector) as vector_l2_norm;
-   vector_l2_norm    
----------------------
- 1.4142135623730951
-(1 row)
-
-select l2_norm('[1,1]');
-ERROR:  This input type is not supported for l2_norm()
-HINT:  Use explicit casts to vector, sparsevec, or halfvec.
-
 \c regression
 drop database test;

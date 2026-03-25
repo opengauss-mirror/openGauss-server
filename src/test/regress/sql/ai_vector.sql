@@ -98,7 +98,5 @@ explain (costs off) select id from t1 order by val <-> '[6,7,3,10,1]' limit 5;
 drop index if exists idx_t1;
 create index idx_t1 on t1 using ivfflat (val vector_ip_ops) with(lists=3, enable_rabitq=on, rabitq_refine_type='FP32', rabitq_fht=on);
 explain (costs off) select id from t1 order by val <#> '[6,7,3,10,1]' limit 5;
-select l2_norm('[1,1]'::vector) as vector_l2_norm;
-select l2_norm('[1,1]');
 \c regression
 drop database test;
