@@ -48,6 +48,8 @@ typedef struct xl_invalid_page{
  */
 #ifdef ENABLE_NEON
     extern bool    (*redo_read_buffer_filter) (XLogReaderState *record, uint8 block_id);
+    /* Hook called when a buffer is allocated for the target block during WAL redo */
+    extern void    (*redo_buffer_allocated_hook) (Buffer buf);
 #endif
 
 extern bool XLogHaveInvalidPages(void);

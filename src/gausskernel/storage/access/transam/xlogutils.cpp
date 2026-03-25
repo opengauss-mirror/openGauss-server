@@ -56,6 +56,7 @@
 
 #if defined(ENABLE_NEON) && !defined(FRONTEND)
     bool    (*redo_read_buffer_filter) (XLogReaderState *record, uint8 block_id);
+    void    (*redo_buffer_allocated_hook) (Buffer buf);
 #endif
 
 /*
@@ -850,9 +851,20 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
     checkBlockFlag(mode, willinit);
 
     xloghasblockimage = XLogRecHasBlockImage(record, block_id);
+#if defined(ENABLE_NEON) && !defined(FRONTEND)
+    /*
+     * Neon: also use RBM_ZERO mode when willinit=true, so that pages
+     * not yet present on the pageserver are allocated rather than
+     * returning BLK_NOTFOUND (avoids "missing attribute" after restart).
+     */
+    if (xloghasblockimage || willinit) {
+        mode = get_cleanup_lock ? RBM_ZERO_AND_CLEANUP_LOCK : RBM_ZERO_AND_LOCK;
+    }
+#else
     if (xloghasblockimage) {
         mode = get_cleanup_lock ? RBM_ZERO_AND_CLEANUP_LOCK : RBM_ZERO_AND_LOCK;
     }
+#endif
 
     if (record->isTde) {
         tde = InsertTdeInfoToCache(blockinfo.rnode, record->blocks[block_id].tdeinfo);
@@ -863,6 +875,19 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
     if (redoaction == BLK_NOTFOUND) {
         return BLK_NOTFOUND;
     }
+
+#if defined(ENABLE_NEON) && !defined(FRONTEND)
+    /*
+     * Notify walredo process that a buffer has been allocated for the target block.
+     * This is critical for will_init cases where no base image is provided by pageserver.
+     * Without this notification, wal_redo_buffer in walredoproc.c won't be set, causing
+     * the "WALREDO_NOINIT" warning and potential data loss.
+     */
+    if (redo_buffer_allocated_hook && BufferIsValid(bufferinfo->buf)) {
+        elog(LOG, "[XLOGUTILS_HOOK] calling redo_buffer_allocated_hook for buffer %d", bufferinfo->buf);
+        redo_buffer_allocated_hook(bufferinfo->buf);
+    }
+#endif
     /* If it's a full-page image, restore it. */
     if (xloghasblockimage) {
         char *imagedata;

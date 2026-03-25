@@ -3069,6 +3069,11 @@ void standard_ProcessUtility(processutility_context* processutility_cxt,
             break;
 
         case T_CreateTableSpaceStmt:
+#ifdef ENABLE_NEON
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("CREATE TABLESPACE is not supported on Neon")));
+#endif
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
                 PreventTransactionChain(is_top_level, "CREATE TABLESPACE");
