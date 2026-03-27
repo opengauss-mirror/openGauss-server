@@ -470,9 +470,9 @@ NON_EXEC_STATIC void TxnSnapWorkerMain()
     MemoryContext workMxt = AllocSetContextCreate(
         t_thrd.top_mem_cxt,
         "TxnSnapWorker",
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+        ALLOCSET_SMALL_MINSIZE,
+        ALLOCSET_SMALL_INITSIZE,
+        ALLOCSET_SMALL_MAXSIZE);
     (void)MemoryContextSwitchTo(workMxt);
 
     /*

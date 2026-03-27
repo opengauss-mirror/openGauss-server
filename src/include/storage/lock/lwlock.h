@@ -58,11 +58,19 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 
 #define NUM_OPERATOR_HISTORY_PARTITIONS 64
 
+#ifdef ENABLE_LITE_MODE
+/* Number of partitions of the shared buffer mapping hashtable */
+#define NUM_BUFFER_PARTITIONS 1024
+
+/* change 1024 ->2048 for two cache(compress data cache and meta cache) */
+#define NUM_CACHE_BUFFER_PARTITIONS 512
+#else
 /* Number of partitions of the shared buffer mapping hashtable */
 #define NUM_BUFFER_PARTITIONS 4096
 
 /* change 1024 ->2048 for two cache(compress data cache and meta cache) */
 #define NUM_CACHE_BUFFER_PARTITIONS 2048
+#endif
 
 /* Number of partitions of the shared session-level statistics hashtable */
 #define NUM_SESSION_REALTIME_PARTITIONS 32
@@ -95,6 +103,19 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* Number of partions the shared instr user hashtable */
 #define NUM_INSTR_USER_PARTITIONS 64
 
+#ifdef ENABLE_LITE_MODE
+/* Number of partions the global plan cache hashtable */
+#define NUM_GPC_PARTITIONS 64
+
+/* Number of partions normalized query hashtable */
+#define NUM_NORMALIZED_SQL_PARTITIONS 32
+
+/* Number of partions the max page flush lsn file */
+#define NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS 512
+
+/* Number of partions the ngroup info hash table */
+#define NUM_NGROUP_INFO_PARTITIONS  128
+#else
 /* Number of partions the global plan cache hashtable */
 #define NUM_GPC_PARTITIONS 128
 
@@ -106,6 +127,7 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 
 /* Number of partions the ngroup info hash table */
 #define NUM_NGROUP_INFO_PARTITIONS  256
+#endif
 
 #ifndef ENABLE_LITE_MODE
 /* Number of partions the io state hashtable */

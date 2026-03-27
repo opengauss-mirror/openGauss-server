@@ -1306,11 +1306,8 @@ static void knl_t_walreceiver_init(knl_t_walreceiver_context* walreceiver_cxt)
     walreceiver_cxt->walRcvCtlBlock = NULL;
     walreceiver_cxt->reply_message = (StandbyReplyMessage*)palloc0(sizeof(StandbyReplyMessage));
     walreceiver_cxt->feedback_message = (StandbyHSFeedbackMessage*)palloc0(sizeof(StandbyHSFeedbackMessage));
-    ;
     walreceiver_cxt->request_message = (StandbySwitchRequestMessage*)palloc0(sizeof(StandbySwitchRequestMessage));
-    ;
     walreceiver_cxt->reply_modify_message = (ConfigModifyTimeMessage*)palloc0(sizeof(ConfigModifyTimeMessage));
-    ;
     walreceiver_cxt->WalRcvImmediateInterruptOK = false;
     walreceiver_cxt->AmWalReceiverForFailover = false;
     walreceiver_cxt->AmWalReceiverForStandby = false;
@@ -1956,18 +1953,22 @@ void knl_thread_init(knl_thread_role role)
     knl_t_streaming_init(&t_thrd.streaming_cxt);
     knl_t_poolcleaner_init(&t_thrd.poolcleaner_cxt);
     knl_t_ts_compaction_init(&t_thrd.ts_compaction_cxt);
-    KnlTUndoInit(&t_thrd.undo_cxt);
-    KnlTUndolauncherInit(&t_thrd.undolauncher_cxt);
-    KnlTUndoworkerInit(&t_thrd.undoworker_cxt);
-    KnlTUndorecyclerInit(&t_thrd.undorecycler_cxt);
-    KnlTUstoreInit(&t_thrd.ustore_cxt);
+    if (g_instance.attr.attr_storage.enable_ustore) {
+        KnlTUndoInit(&t_thrd.undo_cxt);
+        KnlTUndolauncherInit(&t_thrd.undolauncher_cxt);
+        KnlTUndoworkerInit(&t_thrd.undoworker_cxt);
+        KnlTUndorecyclerInit(&t_thrd.undorecycler_cxt);
+        KnlTUstoreInit(&t_thrd.ustore_cxt);
+    }
     KnlTRollbackRequestsInit(&t_thrd.rollback_requests_cxt);
     knl_t_security_policy_init(&t_thrd.security_policy_cxt);
     knl_t_security_ledger_init(&t_thrd.security_ledger_cxt);
     knl_t_bgworker_init(&t_thrd.bgworker_cxt);
     knl_index_advisor_init(&t_thrd.index_advisor_cxt);
     knl_t_sql_patch_init(&t_thrd.sql_patch_cxt);
+#ifndef ENABLE_LITE_MODE
     knl_t_dms_context_init(&t_thrd.dms_cxt);
+#endif
     KnlTApplyLauncherInit(&t_thrd.applylauncher_cxt);
     KnlTApplyWorkerInit(&t_thrd.applyworker_cxt);
     KnlTPublicationInit(&t_thrd.publication_cxt);

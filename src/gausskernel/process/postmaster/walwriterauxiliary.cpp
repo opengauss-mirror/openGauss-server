@@ -101,7 +101,7 @@ void WalWriterAuxiliaryMain(void)
      * t_thrd.top_mem_cxt, but resetting that would be a really bad idea.
      */
     walwriterauxiliary_context = AllocSetContextCreate(t_thrd.top_mem_cxt, "Wal Writer Auxiliary",
-        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_NAME_MAXSIZE);
     (void)MemoryContextSwitchTo(walwriterauxiliary_context);
 
     /*

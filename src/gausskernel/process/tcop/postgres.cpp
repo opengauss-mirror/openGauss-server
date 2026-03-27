@@ -8612,7 +8612,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         "RowDescriptionContext",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+        ALLOCSET_NAME_MAXSIZE);
     MemoryContext old_mc = MemoryContextSwitchTo(t_thrd.mem_cxt.row_desc_mem_cxt);
     initStringInfo(&(*t_thrd.postgres_cxt.row_description_buf));
     MemoryContextSwitchTo(old_mc);

@@ -30,7 +30,11 @@
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_common_attr.h"
 
+#ifdef ENABLE_LITE_MODE
+const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 2;
+#else
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 5;
+#endif
 
 /*
  * Data Structures:
@@ -198,6 +202,22 @@ void InitBufferPool(void)
     /* Init Vector Buffer management stuff */
     DataCacheMgr::NewSingletonInstance();
 
+#ifdef ENABLE_HTAP
+#ifdef ENABLE_NEON
+    if (!t_thrd.xlog_cxt.am_wal_redo_postgres) {
+        IMCUDataCacheMgr::NewSingletonInstance();
+        SSIMCUDataCacheMgr::NewSingletonInstance();
+    }
+#else
+    IMCUDataCacheMgr::NewSingletonInstance();
+    SSIMCUDataCacheMgr::NewSingletonInstance();
+#endif
+#endif
+
+    if (g_instance.attr.attr_storage.enable_async_ogai) {
+        /* Init onnx runtime buffers */
+        ONNXModelMgr::NewSingletonInstance();
+    }
     /* Initialize per-backend file flush context */
     WritebackContextInit(t_thrd.storage_cxt.BackendWritebackContext, &u_sess->attr.attr_common.backend_flush_after);
 
@@ -242,6 +262,16 @@ Size BufferShmemSize(void)
     /* size of dms buf ctrl and buffer align */
     if (ENABLE_DMS) {
         size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(dms_buf_ctrl_t))) + ALIGNOF_BUFFER + PG_CACHE_LINE_SIZE;
+    }
+
+    if (!ENABLE_DMS && g_instance.attr.attr_storage.enable_ustore) {
+        size = add_size(size, mul_size(CR_BUFFER_NUM, sizeof(CRBufferDescPadded)));
+        size = add_size(size, PG_CACHE_LINE_SIZE);
+        size = add_size(size, mul_size(CR_BUFFER_NUM, BLCKSZ));
+#ifdef __aarch64__
+        size = add_size(size, PG_CACHE_LINE_SIZE);
+#endif
+        size = add_size(size, hash_estimate_size(CR_BUFFER_NUM, sizeof(CRBufEntry)));
     }
 
     return size;

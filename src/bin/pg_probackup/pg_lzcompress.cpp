@@ -192,8 +192,13 @@
  * Local definitions
  * ----------
  */
+#ifdef ENABLE_LITE_MODE
+#define PGLZ_MAX_HISTORY_LISTS   1024    /* must be power of 2 */
+#define PGLZ_HISTORY_SIZE        512
+#else
 #define PGLZ_MAX_HISTORY_LISTS    8192    /* must be power of 2 */
 #define PGLZ_HISTORY_SIZE        4096
+#endif
 #define PGLZ_MAX_MATCH            273
 
 

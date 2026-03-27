@@ -337,9 +337,9 @@ static MemoryContext tokenize_file(const char* filename, FILE* file, List** line
 
     linecxt = AllocSetContextCreate(u_sess->top_mem_cxt,
         "tokenize file cxt",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+        ALLOCSET_SMALL_MINSIZE,
+        ALLOCSET_SMALL_INITSIZE,
+        ALLOCSET_SMALL_MAXSIZE);
     oldcxt = MemoryContextSwitchTo(linecxt);
 
     *lines = *line_nums = NIL;

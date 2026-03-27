@@ -392,8 +392,10 @@ int NumLWLocks(void)
         numLocks += TOTAL_BUFFER_NUM; // dms_buf_ctrl_t lock
     }
 
-    /* each zone owns undo space lock */
-    numLocks += MAX(maxConn, maxThreadNum) * numLockFactor * UNDO_ZONE_LOCK;
+    if (g_instance.attr.attr_storage.enable_ustore) {
+        /* each zone owns undo space lock */
+        numLocks += MAX(maxConn, maxThreadNum) * numLockFactor * UNDO_ZONE_LOCK;
+    }
 
     /* cucache_mgr.cpp CU Cache calculates its own requirements */
     numLocks += DataCacheMgrNumLocks();

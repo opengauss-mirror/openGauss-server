@@ -1098,7 +1098,11 @@ typedef struct knl_t_wlmthrd_context {
 } knl_t_wlmthrd_context;
 
 #define RANDOM_LEN 16
+#ifdef ENABLE_LITE_MODE
+#define NUMBER_OF_SAVED_DERIVEKEYS 36
+#else
 #define NUMBER_OF_SAVED_DERIVEKEYS 48
+#endif
 
 typedef struct knl_t_aes_context {
     /* Save several used derive_keys, random_salt and user_key in one thread. */
@@ -3591,6 +3595,8 @@ typedef struct knl_thrd_context {
     knl_t_undoworker_context undoworker_cxt;
     knl_t_undorecycler_context undorecycler_cxt;
     knl_u_ustore_context ustore_cxt;
+    knl_t_ogailauncher_context ogailauncher_cxt;
+    knl_t_ogaiworker_context ogaiworker_cxt;
     knl_t_rollback_requests_context rollback_requests_cxt;
     knl_t_ts_compaction_context ts_compaction_cxt;
     knl_t_ash_context ash_cxt;
