@@ -1452,7 +1452,9 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
 #ifndef ENABLE_MULTIPLE_NODES
     uint64 sessionId = IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
     /* add session package values to global for autonm session, to restore package values */
-    BuildSessionPackageRuntimeForAutoSession(sessionId, u_sess->autonomous_parent_sessionid, &estate, func);
+    if (!u_sess->plsql_cxt.during_compile) {
+        BuildSessionPackageRuntimeForAutoSession(sessionId, u_sess->autonomous_parent_sessionid, &estate, func);
+    }
 #endif
 
     /* Statement concatenation. If the block is an anonymous block, the entire anonymous block is returned. */
@@ -1587,7 +1589,10 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
 
 #ifndef ENABLE_MULTIPLE_NODES
     /* for restore parent session and automn session package var values */
-    List *autonmsList = processAutonmSessionPkgs(func, NULL, true);
+    List *autonmsList = NIL;
+    if (!u_sess->plsql_cxt.during_compile) {
+        autonmsList = processAutonmSessionPkgs(func, NULL, true);
+    }
     if (autonmsList != NULL) {
         reset_implicit_cursor_attr(&estate);
     }
@@ -16437,14 +16442,12 @@ static PLpgSQL_recfield* copyPLpgsqlRecfield(PLpgSQL_recfield* src)
     return dest;
 }
 
-void CheckCurrCompileDependOnPackage(Oid pkgOid)
+static void CheckCompileDependOnPackageInContext(PLpgSQL_compile_context* curr_compile, Oid pkgOid)
 {
-    /* not compile, just return */
-    if (u_sess->plsql_cxt.curr_compile_context == NULL) {
+    if (curr_compile == NULL) {
         return;
     }
 
-    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
     if (curr_compile->plpgsql_curr_compile_package != NULL) {
         /* comile thi package now, report error */
         if (pkgOid == curr_compile->plpgsql_curr_compile_package->pkg_oid) {
@@ -16484,6 +16487,22 @@ void CheckCurrCompileDependOnPackage(Oid pkgOid)
                 ReportCompileConcurrentError(curr_compile->plpgsql_curr_compile->fn_signature, false);
             }
         }
+    }
+}
+
+void CheckCurrCompileDependOnPackage(Oid pkgOid)
+{
+    /* not compile, just return */
+    if (u_sess->plsql_cxt.curr_compile_context == NULL) {
+        return;
+    }
+
+    CheckCompileDependOnPackageInContext(u_sess->plsql_cxt.curr_compile_context, pkgOid);
+
+    ListCell* lc = NULL;
+    foreach(lc, u_sess->plsql_cxt.compile_context_list) {
+        PLpgSQL_compile_context* compile_cxt = (PLpgSQL_compile_context*)lfirst(lc);
+        CheckCompileDependOnPackageInContext(compile_cxt, pkgOid);
     }
 }
 

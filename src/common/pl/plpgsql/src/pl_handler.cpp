@@ -1777,8 +1777,8 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate, bool isSpec, bool isNeedCo
         u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt != NULL) {
         temp = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     }
-    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     pushCompileContext();
+    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     curr_compile->plpgsql_curr_compile_package = pkg;
     checkCompileMemoryContext(pkg->pkg_cxt);
     MemoryContext oldcxt = MemoryContextSwitchTo(pkg->pkg_cxt);

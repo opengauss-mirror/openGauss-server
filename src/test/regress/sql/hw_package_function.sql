@@ -811,8 +811,50 @@ select nested_pkg1.nested_pkg1_fun2(1);
 drop package nested_pkg1;
 drop package nested_pkg2;
 
+-- Test for mutually dependent packages during package initialization
+set behavior_compat_options='plpgsql_dependency';
+set client_min_messages='error';
+drop package if exists pkg001;
+drop package if exists pkg002;
+
+create or replace package pkg002 is
+var25 int:=pkg001.testfun01(1);
+function testfun02(var24 int) return integer;
+end pkg002;
+/
+
+create or replace package body pkg002 is
+function testfun02(var24 int) return integer
+as
+begin
+return var24;
+end;
+end pkg002;
+/
+
+create or replace package pkg001 is
+var1 int:=pkg002.testfun02(1);
+function testfun01(var4 int) return integer;
+end pkg001;
+/
+
+create or replace package body pkg001 is
+function testfun01(var4 int) return integer
+as
+begin
+return var4;
+end;
+end pkg001;
+/
+
+select pkg002.testfun02(1);
+
+drop package pkg001;
+drop package pkg002;
+reset client_min_messages;
+set behavior_compat_options='';
+
 \c regression
 drop database db;
 drop user pkg_user1;
 drop user pkg_user2;
-

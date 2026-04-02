@@ -300,6 +300,9 @@ PLpgSQL_package* PackageInstantiation(Oid packageOid)
     }
     if (pkg != NULL) {
         u_sess->plsql_cxt.need_init = false;
+        SPI_STACK_LOG("pop cond", NULL, NULL);
+        SPI_pop_conditional(pushed);
+        return pkg;
     } else {
         u_sess->plsql_cxt.need_init = true;
     }
@@ -1642,13 +1645,17 @@ List *processAutonmSessionPkgs(PLpgSQL_function* func, PLpgSQL_execstate* estate
         }
 
         SessionPackageRuntime* sessionpkgs = g_instance.global_session_pkg->Fetch(automnSessionId);
-        RestoreAutonmSessionPkgs(sessionpkgs);
+        if (!u_sess->plsql_cxt.during_compile) {
+            RestoreAutonmSessionPkgs(sessionpkgs);
+        }
         if (sessionpkgs != NULL) {
             MemoryContext oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
-            u_sess->plsql_cxt.storedPortals = CopyPortalDatas(sessionpkgs);
-            u_sess->plsql_cxt.portalContext = CopyPortalContexts(sessionpkgs->portalContext);
-            autonmsList = CopyFuncInfoDatas(sessionpkgs);
-            u_sess->plsql_cxt.call_after_auto = true;
+            if (!u_sess->plsql_cxt.during_compile) {
+                u_sess->plsql_cxt.storedPortals = CopyPortalDatas(sessionpkgs);
+                u_sess->plsql_cxt.portalContext = CopyPortalContexts(sessionpkgs->portalContext);
+                autonmsList = CopyFuncInfoDatas(sessionpkgs);
+                u_sess->plsql_cxt.call_after_auto = true;
+            }
             MemoryContextSwitchTo(oldcontext);
             MemoryContextDelete(sessionpkgs->context);
             g_instance.global_session_pkg->Remove(automnSessionId);
@@ -1701,10 +1708,14 @@ void processAutonmSessionPkgsInException(PLpgSQL_function* func)
         }
 
         SessionPackageRuntime* sessionpkgs = g_instance.global_session_pkg->Fetch(automnSessionId);
-        RestoreAutonmSessionPkgs(sessionpkgs);
+        if (!u_sess->plsql_cxt.during_compile) {
+            RestoreAutonmSessionPkgs(sessionpkgs);
+        }
         if (sessionpkgs != NULL) {
             MemoryContext oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
-            ReleaseUnusedPortalContext(sessionpkgs->portalContext, true);
+            if (!u_sess->plsql_cxt.during_compile) {
+                ReleaseUnusedPortalContext(sessionpkgs->portalContext, true);
+            }
             MemoryContextSwitchTo(oldcontext);
             MemoryContextDelete(sessionpkgs->context);
             g_instance.global_session_pkg->Remove(automnSessionId);
