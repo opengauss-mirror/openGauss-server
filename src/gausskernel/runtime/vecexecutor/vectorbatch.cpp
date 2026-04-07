@@ -727,16 +727,16 @@ Datum ScalarVector::DatumCstringToScalar(Datum data, Size len)
 
     if ((len + VARHDRSZ_SHORT) < VARATT_SHORT_MAX) {
         var_len = len + VARHDRSZ_SHORT + 1;
-        result = (char*)palloc(var_len);
+        result = (char*)palloc0(var_len);
         SET_VARSIZE_SHORT(result, var_len);
     } else {
         var_len = len + VARHDRSZ + 1;
-        result = (char*)palloc(var_len);
+        result = (char*)palloc0(var_len);
         SET_VARSIZE(result, var_len);
     }
     if (len > 0) {
         errno_t errorno = EOK;
-        errorno = memcpy_s(VARDATA_ANY(result), len + 1, src_ptr, len + 1);
+        errorno = memcpy_s(VARDATA_ANY(result), len, src_ptr, len);
         securec_check(errorno, "\0", "\0");
     }
 
