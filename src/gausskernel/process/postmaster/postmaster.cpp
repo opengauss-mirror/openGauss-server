@@ -2422,7 +2422,6 @@ int PostmasterMain(int argc, char* argv[])
         securec_check_c(rc, "\0", "\0");
         g_alarmReportInterval = AlarmReportInterval;
         AlarmEnvInitialize(u_sess->attr.attr_common.log_hostname);
-        PrepareAlarmEnvironment();
     }
 
     /*

@@ -3595,8 +3595,6 @@ typedef struct knl_thrd_context {
     knl_t_undoworker_context undoworker_cxt;
     knl_t_undorecycler_context undorecycler_cxt;
     knl_u_ustore_context ustore_cxt;
-    knl_t_ogailauncher_context ogailauncher_cxt;
-    knl_t_ogaiworker_context ogaiworker_cxt;
     knl_t_rollback_requests_context rollback_requests_cxt;
     knl_t_ts_compaction_context ts_compaction_cxt;
     knl_t_ash_context ash_cxt;

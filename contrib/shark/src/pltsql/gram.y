@@ -7844,6 +7844,10 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
         function->cur_estate->func = function;
         
         Oid funcid = getMultiFuncInfo(func_inparas.data, expr);
+
+        if (expr->func != NULL && expr->func->fn_argvarnos != NULL) {
+            pfree_ext(expr->func->fn_argvarnos);
+        }
         if (expr->func != NULL)
             pfree_ext(expr->func);
         if (estate->datums != NULL)

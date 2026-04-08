@@ -358,6 +358,7 @@ static PLpgSQL_function* copyPLpgsqlFunc(PLpgSQL_function* srcFunc)
     destFunc->fn_retset = srcFunc->fn_retset;
     destFunc->fn_readonly = srcFunc->fn_readonly;
     destFunc->fn_nargs = srcFunc->fn_nargs;
+    destFunc->fn_argvarnos = (int*)palloc0(sizeof(int) * srcFunc->fn_nargs);
     for (int i = 0; i < srcFunc->fn_nargs; i++) {
         destFunc->fn_argvarnos[i] = srcFunc->fn_argvarnos[i];
     }

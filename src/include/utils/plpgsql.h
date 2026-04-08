@@ -1201,7 +1201,7 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
     bool fn_readonly;
 
     int fn_nargs;
-    int fn_argvarnos[FUNC_MAX_ARGS];
+    int* fn_argvarnos;
     int out_param_varno;
     int found_varno;
 
