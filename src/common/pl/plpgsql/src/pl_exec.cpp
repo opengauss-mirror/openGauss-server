@@ -11054,7 +11054,6 @@ static Datum formDatumFromArrayTarget(PLpgSQL_execstate* estate, const PLpgSQL_t
         exec_simple_cast_value(estate, value, *resultvaltype, elemtypoid,
             arraytypmod, *isNull);
 
-    arraytyplen = -1; /* need to adjust */
     if (arraytyplen > 0 && /* fixed-length array? */
         (oldarrayisnull || *isNull)) {
         *resultvaltype = parenttypoid;
