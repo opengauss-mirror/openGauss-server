@@ -1,6 +1,6 @@
 FROM openeuler/openeuler:22.03-lts
 
-ARG VERSION=6.0.3
+ARG VERSION=6.0.5
 
 COPY openGauss-Server-${VERSION}-openEuler22.03-x86_64.tar.bz2 .
 COPY gosu-amd64 /usr/local/bin/gosu
