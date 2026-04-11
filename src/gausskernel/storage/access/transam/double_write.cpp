@@ -327,8 +327,9 @@ void dw_pread_file(int fd, void *buf, int size, int64 offset)
     }
 }
 
-void dw_pwrite_file(int fd, const void *buf, int size, int64 offset, const char* fileName)
+void dw_pwrite_file(int fd, const void *buf, int size, int64 offset, const char* fileName, bool single)
 {
+    pgstat_report_waitevent(single ? WAIT_EVENT_DW_SINGLE_WRITE : WAIT_EVENT_DW_WRITE);
     int write_size = 0;
     uint32 try_times = 0;
 
@@ -349,6 +350,7 @@ void dw_pwrite_file(int fd, const void *buf, int size, int64 offset, const char*
         ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW),
             errmsg("Write file \"%s\" size mismatch: expected %d, written %d", fileName, size, write_size)));
     }
+    pgstat_report_waitevent(WAIT_EVENT_END);
 }
 
 int64 dw_seek_file(int fd, int64 offset, int32 origin)
@@ -379,7 +381,7 @@ void dw_extend_file(int fd, const void *buf, int buf_size, int64 size,
     remain_size = size;
     while (remain_size > 0) {
         size = (remain_size > buf_size) ? buf_size : remain_size;
-        dw_pwrite_file(fd, buf, size, offset, (single ? SINGLE_DW_FILE_NAME : file_name));
+        dw_pwrite_file(fd, buf, size, offset, (single ? SINGLE_DW_FILE_NAME : file_name), single);
         offset += size;
         remain_size -= size;
     }
@@ -504,7 +506,7 @@ static uint32 dw_recover_batch_file_head(dw_batch_file_context *batch_file_cxt)
             batch_file_cxt->file_size, offset)));
     }
 
-    dw_pwrite_file(fd, file_head, BLCKSZ, head_offset, file_name);
+    dw_pwrite_file(fd, file_head, BLCKSZ, head_offset, file_name, false);
     return dw_version;
 }
 
@@ -844,9 +846,7 @@ static bool dw_batch_file_recycle(dw_batch_file_context *cxt, uint16 pages_to_wr
     }
 
     Assert(file_head->head.dwn == file_head->tail.dwn);
-    pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
-    dw_pwrite_file(cxt->fd, file_head, BLCKSZ, 0, cxt->file_name);
-    pgstat_report_waitevent(WAIT_EVENT_END);
+    dw_pwrite_file(cxt->fd, file_head, BLCKSZ, 0, cxt->file_name, false);
 
     pg_atomic_add_fetch_u64(&cxt->batch_stat_info.file_trunc_num, 1);
     if (file_full) {
@@ -920,7 +920,7 @@ static void dw_recover_batch_head(dw_batch_file_context *cxt, dw_batch_t *curr_h
     securec_check(rc, "\0", "\0");
     dw_prepare_page(curr_head, 0, cxt->file_head->start, cxt->file_head->head.dwn, is_new_relfilenode);
     pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
-    dw_pwrite_file(cxt->fd, curr_head, BLCKSZ, (curr_head->head.page_id * BLCKSZ), cxt->file_name);
+    dw_pwrite_file(cxt->fd, curr_head, BLCKSZ, (curr_head->head.page_id * BLCKSZ), cxt->file_name, false);
     pgstat_report_waitevent(WAIT_EVENT_END);
 }
 
@@ -1197,7 +1197,7 @@ void dw_write_meta_file(int fd, dw_batch_meta_file *batch_meta_file)
         securec_check(rc, "\0", "\0");
     }
 
-    dw_pwrite_file(fd, buf, buf_size, 0, DW_META_FILE);
+    dw_pwrite_file(fd, buf, buf_size, 0, DW_META_FILE, false);
     pfree(unaligned_buf);
 }
 
@@ -1243,7 +1243,7 @@ static void dw_generate_batch_file(int file_id, uint64 dw_file_size)
     batch_head = (dw_batch_t *)(file_head + BLCKSZ);
     batch_head->head.page_id = DW_BATCH_FILE_START;
     dw_calc_batch_checksum(batch_head);
-    dw_pwrite_file(fd, file_head, (BLCKSZ + BLCKSZ), 0, batch_file_name);
+    dw_pwrite_file(fd, file_head, (BLCKSZ + BLCKSZ), 0, batch_file_name, false);
     dw_extend_file(fd, file_head, DW_FILE_EXTEND_SIZE, remain_size, dw_file_size, false, batch_file_name);
     ereport(LOG, (errmodule(MOD_DW), errmsg("Double write batch flush file created successfully")));
 
@@ -1663,7 +1663,7 @@ void dw_recover_batch_meta_file(int fd, dw_batch_meta_file *batch_meta_file)
     rc = memcpy_s(batch_meta_file, sizeof(dw_batch_meta_file), valid_batch_meta, sizeof(dw_batch_meta_file));
     securec_check(rc, "\0", "\0");
 
-    dw_pwrite_file(fd, buf, buf_size, 0, DW_META_FILE);
+    dw_pwrite_file(fd, buf, buf_size, 0, DW_META_FILE, false);
 
     pfree(unaligned_buf);
 }
@@ -2278,9 +2278,8 @@ static void dw_batch_flush(dw_batch_file_context *dw_cxt, XLogRecPtr latest_lsn,
 
     dw_assemble_batch(dw_cxt, offset_page, file_head->head.dwn, is_new_relfilenode);
 
-    pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
-    dw_pwrite_file(dw_cxt->fd, dw_cxt->buf, (pages_to_write * BLCKSZ), (offset_page * BLCKSZ), dw_cxt->file_name);
-    pgstat_report_waitevent(WAIT_EVENT_END);
+    dw_pwrite_file(dw_cxt->fd, dw_cxt->buf, (pages_to_write * BLCKSZ), (offset_page * BLCKSZ),
+        dw_cxt->file_name, false);
 
     dw_stat_batch_flush(&dw_cxt->batch_stat_info, pages_to_write, is_new_relfilenode);
     /* the tail of this flushed batch is the head of the next batch */

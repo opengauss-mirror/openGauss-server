@@ -30,7 +30,11 @@
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_common_attr.h"
 
+#ifdef ENABLE_LITE_MODE
+const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 2;
+#else
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 5;
+#endif
 
 /*
  * Data Structures:

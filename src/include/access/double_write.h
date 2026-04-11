@@ -253,7 +253,7 @@ int64 dw_seek_file(int fd, int64 offset, int32 origin);
 
 void dw_pread_file(int fd, void* buf, int size, int64 offset);
 
-void dw_pwrite_file(int fd, const void* buf, int size, int64 offset, const char* fileName);
+void dw_pwrite_file(int fd, const void* buf, int size, int64 offset, const char* fileName, bool single);
 
 /**
  * generate the file for the database first boot

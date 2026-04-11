@@ -815,6 +815,18 @@ select distinct (select count(t1.c1) /*filter (where t2.c2 = 6 and t2.c1 < 10)*/
 explain (verbose, costs off) select sum(c1) /*filter (where (c1 / c1) * random() <= 1)*/ from ft1 group by c2 order by 1;
 explain (verbose, costs off) select sum(c2) /*filter (where c2 in (select c2 from ft1 where c2 < 5))*/ from ft1;
 
+CREATE TYPE composite AS (a TEXT, b TEXT);
+CREATE TABLE t0 (c0 composite NOT NULL);
+INSERT INTO t0 VALUES ('(,)');
+INSERT INTO t0 VALUES ('(a,)');
+INSERT INTO t0 VALUES ('(,b)');
+SELECT COUNT(c0) FILTER (WHERE c0 IS NULL) FROM t0 WHERE c0 IS NOT NULL;
+SELECT COUNT(c0) FILTER (WHERE c0 IS NOT NULL) FROM t0;
+SELECT COUNT(c0) FROM t0 WHERE c0 IS NOT NULL;
+SELECT COUNT(c0) FROM t0 WHERE c0 IS NOT NULL MINUS SELECT COUNT(c0) FILTER (WHERE c0 IS NOT NULL) FROM t0; 
+SELECT COUNT(c0) FROM t0 WHERE c0 IS NULL;
+SELECT COUNT(c0) FILTER (WHERE c0 IS NULL) FROM t0;
+
 --nspt Ordered-sets within aggregate
 --nspt Using multiple arguments within aggregates
 

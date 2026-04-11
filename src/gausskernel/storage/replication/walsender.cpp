@@ -1314,7 +1314,9 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
     isDummyStandby = AmWalSenderToDummyStandby() ? true : false;
 
     if (cmd->kind == REPLICATION_KIND_LOGICAL) {
-        MarkPostmasterChildNormal();
+        if (!IsPostmasterChildNormal()) {
+            MarkPostmasterChildNormal();
+        }
         CheckPMstateAndRecoveryInProgress();
         CheckLogicalDecodingRequirements(u_sess->proc_cxt.MyDatabaseId);
         /*
@@ -1535,7 +1537,9 @@ bool IsLogicalSlot(const char *name)
 static void DropReplicationSlot(DropReplicationSlotCmd *cmd)
 {
     if (IsLogicalSlot(cmd->slotname)) {
-        MarkPostmasterChildNormal();
+        if (!IsPostmasterChildNormal()) {
+            MarkPostmasterChildNormal();
+        }
         CheckPMstateAndRecoveryInProgress();
         ReplicationSlotDrop(cmd->slotname, false, !cmd->wait);
         log_slot_drop(cmd->slotname);
@@ -2293,7 +2297,9 @@ static void IdentifyCommand(Node* cmd_node, ReplicationCxt* repCxt, const char *
             break;
 #endif
         case T_BaseBackupCmd:
-            MarkPostmasterChildNormal();
+            if (!IsPostmasterChildNormal()) {
+                MarkPostmasterChildNormal();
+            }
             SetWalSndPeerMode(STANDBY_MODE);
             SetWalSndPeerDbstate(BUILDING_STATE);
 
@@ -2334,10 +2340,14 @@ static void IdentifyCommand(Node* cmd_node, ReplicationCxt* repCxt, const char *
                 }
                 StartLogicalLogWorkers(u_sess->proc_cxt.MyProcPort->user_name,
                     u_sess->proc_cxt.MyProcPort->database_name, cmd->slotname, cmd->options, parallelDecodeNum);
-                MarkPostmasterChildNormal();
+                if (!IsPostmasterChildNormal()) {
+                    MarkPostmasterChildNormal();
+                }
                 StartParallelLogicalReplication(cmd);
             } else {
-                MarkPostmasterChildNormal();
+                if (!IsPostmasterChildNormal()) {
+                    MarkPostmasterChildNormal();
+                }
                 StartLogicalReplication(cmd);
             }
             break;
@@ -3950,6 +3960,10 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
         strcmp(ResourceOwnerGetName(tmpOwner), "walsender top-level resource owner") == 0);
     /* Loop forever, unless we get an error */
     for (;;) {
+        if (AM_WAL_DB_SENDER &&
+            (t_thrd.walsender_cxt.walsender_shutdown_requested || t_thrd.walsender_cxt.walsender_ready_to_stop)) {
+            WalSndSetState(WALSNDSTATE_STOPPING);
+        }
         t_thrd.utils_cxt.CurrentResourceOwner = tmpOwner;
         TimestampTz now;
 
@@ -4474,8 +4488,9 @@ static long WalSndComputeSleeptime(TimestampTz now)
 static void WalSndWriteLogicalAdvanceXLog(TimestampTz now)
 {
     TimestampTz timegap;
-    if (t_thrd.walsender_cxt.last_logical_xlog_advanced_timestamp <= 0)
+    if (t_thrd.walsender_cxt.last_logical_xlog_advanced_timestamp <= 0 || RecoveryInProgress()) {
         return;
+    }
 
     timegap = TimestampTzPlusMilliseconds(t_thrd.walsender_cxt.last_logical_xlog_advanced_timestamp,
                                           t_thrd.walsender_cxt.logical_xlog_advanced_timeout);
@@ -4603,7 +4618,10 @@ static void InitWalSnd(void)
             } else {
                 walsnd->sendRole = SNDROLE_PRIMARY_STANDBY;
             }
-
+            if (u_sess->proc_cxt.clientIsLogicalSender) {
+                t_thrd.role = WAL_DB_SENDER;
+                walsnd->sendRole = SNDROLE_LOGICAL_SENDER;
+            }
             walsnd->sendKeepalive = false;
             walsnd->replSender = false;
             walsnd->peer_role = UNKNOWN_MODE;
@@ -6170,6 +6188,8 @@ static const char *WalSndGetStateString(WalSndState state)
             return "Catchup";
         case WALSNDSTATE_STREAMING:
             return "Streaming";
+        case WALSNDSTATE_STOPPING:
+            return "STOPPING";
     }
     return "Unknown";
 }

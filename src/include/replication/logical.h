@@ -34,11 +34,19 @@
 /* The number of extra digits displayed for floating-point values in logical decoding */
 #define LOGICAL_DECODE_EXTRA_FLOAT_DIGITS 3
 
+#ifdef ENABLE_LITE_MODE
+/* Maximum number of max parallel decode threads */
+#define MAX_PARALLEL_DECODE_NUM 10
+
+/* Maximum number of max replication slots */
+#define MAX_REPLICATION_SLOT_NUM 50
+#else
 /* Maximum number of max parallel decode threads */
 #define MAX_PARALLEL_DECODE_NUM 20
 
 /* Maximum number of max replication slots */
 #define MAX_REPLICATION_SLOT_NUM 100
+#endif
 
 /* FLag and mask for TOAST in parallel decoding */
 #define TOAST_FLAG ((uint32)1 << 31)

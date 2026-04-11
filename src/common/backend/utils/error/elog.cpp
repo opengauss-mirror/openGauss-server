@@ -4080,7 +4080,7 @@ void send_message_to_frontend(ErrorData* edata)
         }
 
         /* get mpp internal errcode */
-        if (edata->elevel >= ERROR) {
+        if (edata->elevel >= ERROR && u_sess->attr.attr_common.enableInternalErrorCode) {
             if (0 == edata->internalerrcode && edata->filename && edata->lineno > 0) {
 #ifdef ENABLE_MOT
                 /*

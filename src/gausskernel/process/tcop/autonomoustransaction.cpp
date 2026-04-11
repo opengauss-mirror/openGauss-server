@@ -528,8 +528,11 @@ int PQsendQueryAutonm(PGconn* conn, const char* query)
 
     /* and remember the query text too, if possible */
     /* if insufficient memory, last_query just winds up NULL */
-    if (conn->last_query != NULL)
+    if (conn->last_query != NULL) {
         free(conn->last_query);
+        conn->last_query = NULL;
+    }
+
     conn->last_query = strdup(query);
 
     /*

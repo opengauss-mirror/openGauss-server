@@ -211,6 +211,14 @@ void StreamProducer::init(TupleDesc desc, StreamTxnContext txnCxt, ParamListInfo
      */
     m_plan->planTree = (Plan*)copyObject(m_streamNode->scan.plan.lefttree);
     m_plan->num_streams = 0;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (m_plan->resultRelations) {
+        m_plan->resultRelations = (List*)copyObject(m_plan->resultRelations);
+    }
+    if (m_plan->rtable) {
+        m_plan->rtable = (List*)copyObject(m_plan->rtable);
+    }
+#endif
     m_plan->commandType = CMD_SELECT;
     m_plan->hasReturning = false;
     m_plan->resultRelations = NIL;

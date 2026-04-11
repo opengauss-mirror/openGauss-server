@@ -1200,6 +1200,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
      * Complete the function's info
      */
     func->fn_nargs = proc_struct->pronargs;
+    func->fn_argvarnos = (int*)palloc0(sizeof(int) * func->fn_nargs);
     for (i = 0; i < func->fn_nargs; i++) {
         func->fn_argvarnos[i] = in_arg_varnos[i];
     }

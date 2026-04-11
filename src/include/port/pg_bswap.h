@@ -54,12 +54,14 @@
  */
 #ifdef WORDS_BIGENDIAN
 #define DatumBigEndianToNative(x) (x)
+#define BigEndianToNative64(x) (x)
 #else /* !WORDS_BIGENDIAN */
 #if SIZEOF_DATUM == 8
 #define DatumBigEndianToNative(x) BSWAP64(x)
 #else /* SIZEOF_DATUM != 8 */
 #define DatumBigEndianToNative(x) BSWAP32(x)
 #endif /* SIZEOF_DATUM == 8 */
+#define BigEndianToNative64(x) BSWAP64(x)
 #endif /* WORDS_BIGENDIAN */
 
 #endif /* PG_BSWAP_H */

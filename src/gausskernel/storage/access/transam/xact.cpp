@@ -3315,6 +3315,13 @@ static void PrepareTransaction(bool STP_commit)
                           errmsg("PrepareTransaction while in %s state", TransStateAsString(s->state))));
     Assert((!StreamThreadAmI() && s->parent == NULL) || StreamThreadAmI());
 
+#ifndef ENABLE_NULTIPLE_NODES
+    if (!STP_commit) {
+        /* release reserved subxact expr context after 'stackId' */
+        stp_cleanup_subxact_exprcontext(-1);
+    }
+#endif
+
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         if (u_sess->xact_cxt.savePrepareGID) {
@@ -4321,7 +4328,7 @@ void CommitTransactionCommand(bool STP_commit)
         case TBLOCK_ABORT_PENDING:
             SetUndoActionsInfo();
             AbortTransaction(true, STP_commit);
-            ApplyUndoActions();
+            ApplyUndoActions(STP_commit);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4415,7 +4422,7 @@ void CommitTransactionCommand(bool STP_commit)
         case TBLOCK_SUBABORT_PENDING:
             SetUndoActionsInfo();
             AbortSubTransaction(STP_commit);
-            ApplyUndoActions();
+            ApplyUndoActions(STP_commit);
             CleanupSubTransaction(STP_commit);
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
                 ereport(
@@ -4443,7 +4450,7 @@ void CommitTransactionCommand(bool STP_commit)
 
             SetUndoActionsInfo();
             AbortSubTransaction(STP_commit);
-            ApplyUndoActions();
+            ApplyUndoActions(STP_commit);
             CleanupSubTransaction(STP_commit);
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
                 ereport(
@@ -4554,7 +4561,7 @@ void AbortCurrentTransaction(bool STP_rollback)
              */
         case TBLOCK_STARTED:
             AbortTransaction(PerfectRollback, STP_rollback);
-            ApplyUndoActions();
+            ApplyUndoActions(STP_rollback);
             if (u_sess->attr.attr_storage.phony_autocommit || STP_rollback) {
                 CleanupTransaction();
                 s->blockState = TBLOCK_DEFAULT;
@@ -4583,7 +4590,7 @@ void AbortCurrentTransaction(bool STP_rollback)
              */
         case TBLOCK_INPROGRESS:
             AbortTransaction(PerfectRollback, STP_rollback);
-            ApplyUndoActions();
+            ApplyUndoActions(STP_rollback);
             if (STP_rollback) {
                 s->blockState = TBLOCK_DEFAULT;
                 CleanupTransaction();
@@ -4600,7 +4607,7 @@ void AbortCurrentTransaction(bool STP_rollback)
              */
         case TBLOCK_END:
             AbortTransaction(PerfectRollback, STP_rollback);
-            ApplyUndoActions();
+            ApplyUndoActions(STP_rollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4630,7 +4637,7 @@ void AbortCurrentTransaction(bool STP_rollback)
              */
         case TBLOCK_ABORT_PENDING:
             AbortTransaction(PerfectRollback, STP_rollback);
-            ApplyUndoActions();
+            ApplyUndoActions(STP_rollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4642,7 +4649,7 @@ void AbortCurrentTransaction(bool STP_rollback)
              */
         case TBLOCK_PREPARE:
             AbortTransaction(PerfectRollback, STP_rollback);
-            ApplyUndoActions();
+            ApplyUndoActions(STP_rollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4657,7 +4664,7 @@ void AbortCurrentTransaction(bool STP_rollback)
                 do {
                     SetUndoActionsInfo();
                     AbortSubTransaction(STP_rollback);
-                    ApplyUndoActions();
+                    ApplyUndoActions(STP_rollback);
                     s->blockState = TBLOCK_SUBABORT;
                     CleanupSubTransaction(STP_rollback);
                     s = CurrentTransactionState;
@@ -4667,12 +4674,12 @@ void AbortCurrentTransaction(bool STP_rollback)
                     s->state = TRANS_INPROGRESS;
                 }
                 AbortTransaction(PerfectRollback, STP_rollback);
-                ApplyUndoActions();
+                ApplyUndoActions(STP_rollback);
                 CleanupTransaction();
                 s->blockState = TBLOCK_DEFAULT;
             } else {
                 AbortSubTransaction(STP_rollback);
-                ApplyUndoActions();
+                ApplyUndoActions(STP_rollback);
                 s->blockState = TBLOCK_SUBABORT;
             }
 
@@ -4696,7 +4703,7 @@ void AbortCurrentTransaction(bool STP_rollback)
         case TBLOCK_SUBABORT_PENDING:
         case TBLOCK_SUBRESTART:
             AbortSubTransaction(STP_rollback);
-            ApplyUndoActions();
+            ApplyUndoActions(STP_rollback);
             CleanupSubTransaction(STP_rollback);
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
                 ereport(
@@ -5858,7 +5865,7 @@ void RollbackAndReleaseCurrentSubTransaction(bool inSTP)
         AbortSubTransaction(inSTP);
     }
 
-    ApplyUndoActions();
+    ApplyUndoActions(inSTP);
 
     /* And clean it up, too */
     CleanupSubTransaction(inSTP);
@@ -8328,7 +8335,7 @@ UndoRecPtr GetCurrentTransactionUndoRecPtr(UndoPersistence upersistence)
     return CurrentTransactionState->latest_urp_xact[upersistence];
 }
 
-void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel)
+void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel, bool stpRollback)
 {
     if (!u_sess->attr.attr_storage.enable_ustore_sync_rollback &&
         !(IsSubTransaction() || pLevel == UNDO_TEMP)) {
@@ -8386,11 +8393,11 @@ void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel)
          * This should take care of releasing the locks held under
          * TopTransactionResourceOwner.
          */
-        AbortTransaction();
+        AbortTransaction(false, stpRollback);
     }
 }
 
-void ApplyUndoActions()
+void ApplyUndoActions(bool stpRollback)
 {
     TransactionState s = CurrentTransactionState;
     bool needRollback = false;
@@ -8418,12 +8425,20 @@ void ApplyUndoActions()
     }
 
     if (t_thrd.xact_cxt.executeSubxactUndo) {
+        TransactionId xid = InvalidTransactionId;
+        UndoRecPtr startUndoUrp = INVALID_UNDO_REC_PTR;
+        UndoRecPtr endUndoUrp = INVALID_UNDO_REC_PTR;
+        if (slot != NULL) {
+            xid = slot->XactId();
+            startUndoUrp = slot->StartUndoPtr();
+            endUndoUrp = slot->EndUndoPtr();
+        }
         ereport(WARNING, (errmodule(MOD_USTORE),
             errmsg("[Rollback skip] xid(%ld), curxid(%lu), start(%lu), end(%lu). "
                 "Failed to execute undo for subxact, rollback of the entire transaction will be done by "
                 "asynchronous rollback or page-level rollback. Remark info, firstUrp(%lu,%lu,%lu), "
                 "lastestUrp(%lu,%lu,%lu), lastestXactUrp(%lu,%lu,%lu).",
-                slot->XactId(), GetTopTransactionIdIfAny(), slot->StartUndoPtr(), slot->EndUndoPtr(),
+                xid, GetTopTransactionIdIfAny(), startUndoUrp, endUndoUrp,
                 s->first_urp[0], s->first_urp[1], s->first_urp[UNDO_PERSISTENCE_LEVELS - 1],
                 s->latest_urp[0], s->latest_urp[1], s->latest_urp[UNDO_PERSISTENCE_LEVELS - 1],
                 s->latest_urp_xact[0], s->latest_urp_xact[1], s->latest_urp_xact[UNDO_PERSISTENCE_LEVELS - 1])));
@@ -8473,7 +8488,7 @@ void ApplyUndoActions()
         }
         if (s->latest_urp[i]) {
             WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_TRANSACTION_ROLLBACK);
-            TryExecuteUndoActions(s, (UndoPersistence)i);
+            TryExecuteUndoActions(s, (UndoPersistence)i, stpRollback);
             pgstat_report_waitstatus(oldStatus);
         } else if (!IsSubTransaction() && t_thrd.undo_cxt.slotPtr[i] != INVALID_UNDO_SLOT_PTR) {
             Assert(slot != NULL && topXid == slot->XactId());

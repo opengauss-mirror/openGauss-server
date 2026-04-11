@@ -669,8 +669,13 @@ static ObjTree* new_objtree_for_qualname(Oid nspid, char *name)
 
     if (isAnyTempNamespace(nspid))
         namespc = pstrdup("pg_temp");
-    else
+    else {
         namespc = get_namespace_name(nspid);
+        if (!namespc) {
+            ereport(ERROR, (errmsg("%s %s:%d ddl deparse : cache lookup failed for object %u.",
+                __FUNCTION__, __FILE__, __LINE__, nspid)));
+        }
+    }
 
     qualified = new_objtree_VA(NULL, 2,
                                "schemaname", ObjTypeString, namespc,

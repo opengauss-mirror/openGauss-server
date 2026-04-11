@@ -395,8 +395,9 @@ static void knl_u_wlm_init(knl_u_wlm_context* wlmctx)
     wlmctx->spill_limit_error = false;
 }
 
-static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
+static void knl_u_utils_init(knl_session_context* sess_cxt)
 {
+    knl_u_utils_context* utils_cxt = &(sess_cxt->utils_cxt);
     utils_cxt->suffix_char = 0;
     utils_cxt->suffix_collation = 0;
     utils_cxt->test_err_type = 0;
@@ -481,7 +482,9 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->varcharoutput_buffer = (char*)palloc0(256);
     utils_cxt->numericoutput_buffer = (char*)palloc0(64);
     utils_cxt->dateoutput_buffer = (char*)palloc0(MAXDATELEN + 1);
-    utils_cxt->vectoroutput_buffer =  (char*)palloc0(VECTOR_MAX_DIM * FLOAT_SHORTEST_DECIMAL_LEN + 2);
+    if (sess_cxt->attr.attr_sql.vectorEngineStrategy == OFF_VECTOR_ENGINE) {
+        utils_cxt->vectoroutput_buffer =  (char*)palloc0(VECTOR_MAX_DIM * FLOAT_SHORTEST_DECIMAL_LEN + 2);
+    }
 
     (void)syscalllockInit(&utils_cxt->deleMemContextMutex);
 
@@ -618,7 +621,6 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->sessionBackupState = SESSION_BACKUP_NONE;
     proc_cxt->LabelFile = NULL;
     proc_cxt->TblspcMapFile = NULL;
-    proc_cxt->registerAbortBackupHandlerdone = false;
     proc_cxt->gsRewindAddCount = false;
     proc_cxt->PassConnLimit = false;
     proc_cxt->clientIsGsql = false;
@@ -628,6 +630,7 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->check_auth = false;
     proc_cxt->nextQuery = false;
     proc_cxt->nextSeqid = 0;
+    proc_cxt->clientIsLogicalSender = false;
 }
 
 static void knl_u_time_init(knl_u_time_context* time_cxt)
@@ -1585,7 +1588,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_tscache_init(&sess_cxt->tscache_cxt);
     knl_u_typecache_init(&sess_cxt->tycache_cxt);
     knl_u_upgrade_init(&sess_cxt->upg_cxt);
-    knl_u_utils_init(&sess_cxt->utils_cxt);
+    knl_u_utils_init(sess_cxt);
     knl_u_security_init(&sess_cxt->sec_cxt);
     knl_u_wlm_init(sess_cxt->wlm_cxt);
     knl_u_unique_sql_init(&sess_cxt->unique_sql_cxt);

@@ -68,25 +68,29 @@ typedef struct decrypt_struct {
     void* moduleHmacCtx;
     char crypto_module_params[CRYPTO_MODULE_PARAMS_MAX_LEN];
     char crypto_type[CRYPTO_MODULE_ENC_TYPE_MAX_LEN];
+
+    /* AES128 key */
+    unsigned char g_decrypt_key[RANDOM_LEN];
 } DecryptInfo;
 
 extern void initDecryptInfo(DecryptInfo* pDecryptInfo);
 extern char* getLineFromAesEncryptFile(FILE* source, DecryptInfo* pDecryptInfo);
 extern bool writeFileAfterEncryption(
-    FILE* pf, char* inputstr, int inputstrlen, int writeBufflen, unsigned char Key[], unsigned char* rand, 
+    FILE* pf, char* inputstr, int inputstrlen, int writeBufflen, unsigned char Key[], unsigned char* rand,
     void* moduleKeyCtx = NULL, kernel_crypto_encrypt_decrypt_type encFunc = NULL,
-    void* moduleHmacCtx = NULL, kernel_crypto_hmac_type hmacFunc = NULL);
+    void* moduleHmacCtx = NULL, kernel_crypto_hmac_type hmacFunc = NULL,
+    unsigned char* g_deriver_key = NULL, unsigned char* g_aes_vector = NULL);
 extern bool check_key(const char* key, int NUM);
 extern void aesEncrypt(char* inputstr, unsigned long inputstrlen, char* outputstr, unsigned char Key[]);
 extern void aesDecrypt(char* inputstr, unsigned long inputstrlen, char* outputstr, unsigned char Key[], bool isBinary);
 extern void init_aes_vector(GS_UCHAR* aes_vector);
 extern bool init_aes_vector_random(GS_UCHAR* aes_vector, size_t vector_len);
 extern bool aes128Encrypt(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, GS_UINT32 keylen, GS_UCHAR* RandSalt,
-    GS_UCHAR* CipherText, GS_UINT32* CipherLen);
+    GS_UCHAR* CipherText, GS_UINT32* CipherLen, GS_UCHAR* g_deriver_key = NULL, GS_UCHAR* g_aes_vector = NULL);
 extern bool aes128EncryptSpeed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, GS_UCHAR* RandSalt,
     GS_UCHAR* CipherText, GS_UINT32* CipherLen);
 extern bool aes128Decrypt(GS_UCHAR* CipherText, GS_UINT32 CipherLen, GS_UCHAR* Key, GS_UINT32 keylen,
-    GS_UCHAR* RandSalt, GS_UCHAR* PlainText, GS_UINT32* PlainLen);
+    GS_UCHAR* RandSalt, GS_UCHAR* PlainText, GS_UINT32* PlainLen, GS_UCHAR* g_decrypt_key = NULL);
 extern bool aes128DecryptSpeed(GS_UCHAR* CipherText, GS_UINT32 CipherLen, GS_UCHAR* Key, GS_UCHAR* RandSalt,
     GS_UCHAR* PlainText, GS_UINT32* PlainLen);
 extern GS_UINT32 aes_ctr_enc_full_mode(const char* plainText, const size_t plainLength, char* cipherText,

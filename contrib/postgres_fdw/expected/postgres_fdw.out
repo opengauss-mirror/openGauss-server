@@ -4618,6 +4618,46 @@ explain (verbose, costs off) select sum(c2) /*filter (where c2 in (select c2 fro
  
 (13 rows)
 
+CREATE TYPE composite AS (a TEXT, b TEXT);
+CREATE TABLE t0 (c0 composite NOT NULL);
+INSERT INTO t0 VALUES ('(,)');
+INSERT INTO t0 VALUES ('(a,)');
+INSERT INTO t0 VALUES ('(,b)');
+SELECT COUNT(c0) FILTER (WHERE c0 IS NULL) FROM t0 WHERE c0 IS NOT NULL;
+ count 
+-------
+     0
+(1 row)
+
+SELECT COUNT(c0) FILTER (WHERE c0 IS NOT NULL) FROM t0;
+ count 
+-------
+     0
+(1 row)
+
+SELECT COUNT(c0) FROM t0 WHERE c0 IS NOT NULL;
+ count 
+-------
+     0
+(1 row)
+
+SELECT COUNT(c0) FROM t0 WHERE c0 IS NOT NULL MINUS SELECT COUNT(c0) FILTER (WHERE c0 IS NOT NULL) FROM t0; 
+ count 
+-------
+(0 rows)
+
+SELECT COUNT(c0) FROM t0 WHERE c0 IS NULL;
+ count 
+-------
+     1
+(1 row)
+
+SELECT COUNT(c0) FILTER (WHERE c0 IS NULL) FROM t0;
+ count 
+-------
+     1
+(1 row)
+
 --nspt Ordered-sets within aggregate
 --nspt Using multiple arguments within aggregates
 -- User defined function for user defined aggregate, VARIADIC

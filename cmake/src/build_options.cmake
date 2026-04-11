@@ -159,7 +159,7 @@ if(${ENABLE_OPENEULER_MAJOR} STREQUAL "ON")
     add_definitions(-DOPENEULER_MAJOR)
 endif()
 
-set(PROTECT_OPTIONS -fwrapv -std=c++14 -fnon-call-exceptions ${OPTIMIZE_LEVEL})
+set(PROTECT_OPTIONS -fwrapv -std=c++14 -fnon-call-exceptions ${OPTIMIZE_LEVEL} -D_FORTIFY_SOURCE=2)
 set(WARNING_OPTIONS -Wall -Wendif-labels -Wformat-security)
 set(OPTIMIZE_OPTIONS -pipe -pthread -fno-aggressive-loop-optimizations -fno-expensive-optimizations -fno-omit-frame-pointer -fno-strict-aliasing -freg-struct-return)
 set(CHECK_OPTIONS -Wmissing-format-attribute -Wno-attributes -Wno-unused-but-set-variable -Wno-write-strings -Wpointer-arith)
@@ -179,16 +179,16 @@ endif()
 # libraries need secure options during compling
 set(LIB_SECURE_OPTIONS -fPIC -fno-common -fstack-protector-strong)
 # libraries need link options during linking
-set(LIB_LINK_OPTIONS -pthread -std=c++14 -Wl,-z,noexecstack -Wl,-z,relro,-z,now)
+set(LIB_LINK_OPTIONS -pthread -std=c++14 -Wl,-z,noexecstack -Wl,-z,relro,-z,now -D_FORTIFY_SOURCE=2 ${OPTIMIZE_LEVEL})
 if(NOT "${ENABLE_UT}" STREQUAL "ON")
     # binaries need fPIE to satisfy security options during compling
     set(BIN_SECURE_OPTIONS -fPIE -fno-common -fstack-protector)
     # binaries need fPIE pie link options during linking
-    set(BIN_LINK_OPTIONS -pthread -std=c++14 -fPIE -pie -Wl,-z,noexecstack -Wl,-z,relro,-z,now)
+    set(BIN_LINK_OPTIONS -pthread -std=c++14 -fPIE -pie -Wl,-z,noexecstack -Wl,-z,relro,-z,now -D_FORTIFY_SOURCE=2 ${OPTIMIZE_LEVEL})
 else()
     # UT test need change binaries to libraries,set  satisfy security -fPIC during compling
     set(BIN_SECURE_OPTIONS -fPIC -fno-common -fstack-protector)
-    set(BIN_LINK_OPTIONS -pthread -std=c++14 -fPIC -Wl,-z,noexecstack -Wl,-z,relro,-z,now)
+    set(BIN_LINK_OPTIONS -pthread -std=c++14 -fPIC -Wl,-z,noexecstack -Wl,-z,relro,-z,now -D_FORTIFY_SOURCE=2 ${OPTIMIZE_LEVEL})
     list(REMOVE_ITEM WARNING_OPTIONS -Werror)
 endif()
 #Set optimization level

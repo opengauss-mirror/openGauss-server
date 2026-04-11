@@ -395,39 +395,48 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write
      */
     all_visible = PageIsAllVisible(dp) && !snapshot->takenDuringRecovery;
 
-    for (line_off = FirstOffsetNumber, lpp = HeapPageGetItemId(dp, line_off); line_off <= lines; line_off++, lpp++) {
-        if (ItemIdIsNormal(lpp)) {
-            HeapTupleData loctup;
-            bool valid = false;
+    PG_TRY();
+    {
+        for (line_off = FirstOffsetNumber,
+            lpp = HeapPageGetItemId(dp, line_off); line_off <= lines; line_off++, lpp++) {
+            if (ItemIdIsNormal(lpp)) {
+                HeapTupleData loctup;
+                bool valid = false;
 
-            if (likely(all_visible && (!IsSerializableXact()))) {
-                scan->rs_base.rs_vistuples[ntup++] = line_off;
-                continue;
+                if (likely(all_visible && (!IsSerializableXact()))) {
+                    scan->rs_base.rs_vistuples[ntup++] = line_off;
+                    continue;
+                }
+
+                loctup.t_tableOid = RelationGetRelid(scan->rs_base.rs_rd);
+                loctup.t_bucketId = RelationGetBktid(scan->rs_base.rs_rd);
+                loctup.t_data = (HeapTupleHeader)PageGetItem((Page)dp, lpp);
+                loctup.t_len = ItemIdGetLength(lpp);
+                HeapTupleCopyBaseFromPage(&loctup, dp);
+                ItemPointerSet(&(loctup.t_self), page, line_off);
+
+                if (all_visible)
+                    valid = true;
+                else
+                    valid = HeapTupleSatisfiesVisibility(&loctup, snapshot, buffer, has_cur_xact_write);
+
+                CheckForSerializableConflictOut(valid, scan->rs_base.rs_rd, (void*)&loctup, buffer, snapshot);
+
+                if (valid) {
+                    scan->rs_base.rs_vistuples[ntup++] = line_off;
+                }
+
+                ereport(DEBUG1, (errmsg("heapgetpage xid %lu ctid(%u,%d) valid %d",
+                    GetCurrentTransactionIdIfAny(), page, line_off, valid)));
             }
-
-            loctup.t_tableOid = RelationGetRelid(scan->rs_base.rs_rd);
-            loctup.t_bucketId = RelationGetBktid(scan->rs_base.rs_rd);
-            loctup.t_data = (HeapTupleHeader)PageGetItem((Page)dp, lpp);
-            loctup.t_len = ItemIdGetLength(lpp);
-            HeapTupleCopyBaseFromPage(&loctup, dp);
-            ItemPointerSet(&(loctup.t_self), page, line_off);
-
-            if (all_visible)
-                valid = true;
-            else
-                valid = HeapTupleSatisfiesVisibility(&loctup, snapshot, buffer, has_cur_xact_write);
-
-            CheckForSerializableConflictOut(valid, scan->rs_base.rs_rd, (void*)&loctup, buffer, snapshot);
-
-            if (valid) {
-                scan->rs_base.rs_vistuples[ntup++] = line_off;
-            }
-
-            ereport(DEBUG1, (errmsg("heapgetpage xid %lu ctid(%u,%d) valid %d", GetCurrentTransactionIdIfAny(), page,
-                line_off, valid)));
         }
     }
-
+    PG_CATCH();
+    {
+        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 
     Assert(ntup <= MaxHeapTuplesPerPage);
@@ -10319,12 +10328,13 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has
     ItemPointer tid = &scan->xs_ctup.t_self;
     bool got_heap_tuple = false;
 
+    /* Switch to correct buffer if we don't have it already */
+    Buffer prev_buf = scan->xs_cbuf;
     /* We can skip the buffer-switching logic if we're in mid-HOT chain. */
     if (!scan->xs_continue_hot) {
-        /* Switch to correct buffer if we don't have it already */
-        Buffer prev_buf = scan->xs_cbuf;
-
-        scan->xs_cbuf = ReleaseAndReadBuffer(scan->xs_cbuf, scan->heapRelation, ItemPointerGetBlockNumber(tid));
+        Buffer temp = scan->xs_cbuf;
+        scan->xs_cbuf = NULL;
+        scan->xs_cbuf = ReleaseAndReadBuffer(temp, scan->heapRelation, ItemPointerGetBlockNumber(tid));
 
         /* In single mode and hot standby, we may get a null buffer if index
          * replayed before the tid replayed. This is acceptable, so we return

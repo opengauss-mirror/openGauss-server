@@ -2108,6 +2108,9 @@ void CheckOutParamIsConst(PLpgSQL_expr* expr)
 
     (void)getMultiFuncInfo(expr->query, expr, true);
 
+    if (expr->func != NULL && expr->func->fn_argvarnos != NULL) {
+        pfree_ext(expr->func->fn_argvarnos);
+    }
     if (expr->func != NULL)
         pfree_ext(expr->func);
     if (estate->datums != NULL)

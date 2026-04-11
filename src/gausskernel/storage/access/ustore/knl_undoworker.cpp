@@ -328,8 +328,9 @@ NON_EXEC_STATIC void UndoWorkerMain()
         RESUME_INTERRUPTS();
 
         /* if in shutdown mode, no need for anything further; just go away */
-        if (t_thrd.undoworker_cxt.got_SIGTERM)
+        if (t_thrd.undoworker_cxt.got_SIGTERM || u_sess->attr.attr_common.upgrade_mode == 1) {
             goto shutdown;
+        }
 
         /*
          * Sleep at least 1 second after any error.  We don't want to be

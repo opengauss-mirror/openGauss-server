@@ -4421,8 +4421,20 @@ static void exec_lookups_agg_flattened(AggState *aggstate, Agg *node, EState *es
         if (aclresult != ACLCHECK_OK)
             aclcheck_error(aclresult, ACL_KIND_PROC, get_func_name(aggref->aggfnoid));
 
+        /*
+         * Get the the number of actual arguments and identify the actual
+         * datatypes of the aggregate inputs (saved in inputTypes). When
+         * agg accepts ANY or a polymorphic type, the actual datatype
+         * could be different from the agg's declared input types.
+         */
+        numArguments = get_aggregate_argtypes(aggref, inputTypes, FUNC_MAX_ARGS);
+
+        /*
+         * When agg accepts ANY or a polymorphic type, resolve actual
+         * type of transition state
+         */
+        aggtranstype = resolve_aggregate_transtype(aggref->aggfnoid, aggform->aggtranstype, inputTypes, numArguments);
         transfn_oid = aggform->aggtransfn;
-        aggtranstype = aggform->aggtranstype;
         peragg->finalfn_oid = aggform->aggfinalfn;
         peragg->collectfn_oid = collectfn_oid = aggform->aggcollectfn;
 
@@ -4487,19 +4499,6 @@ static void exec_lookups_agg_flattened(AggState *aggstate, Agg *node, EState *es
                                                         &initValueIsNull, same_input_transnos);
         }
 
-        /*
-         * Get the the number of actual arguments and identify the actual
-         * datatypes of the aggregate inputs (saved in inputTypes). When
-         * agg accepts ANY or a polymorphic type, the actual datatype
-         * could be different from the agg's declared input types.
-         */
-        numArguments = get_aggregate_argtypes(aggref, inputTypes, FUNC_MAX_ARGS);
-
-        /*
-         * When agg accepts ANY or a polymorphic type, resolve actual
-         * type of transition state
-         */
-        aggtranstype = resolve_aggregate_transtype(aggref->aggfnoid, aggtranstype, inputTypes, numArguments);
         if (existing_transno != -1) {
             /*
              * Existing compatible trans found, so just point the 'peragg' to

@@ -8086,9 +8086,6 @@ int WLMProcessThreadMain(void)
         }
 #endif
 
-        /* Fetch collect info from each data nodes. */
-        WLMCollectInfoScanner();
-
         if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
             if (u_sess->attr.attr_resource.use_workload_manager &&
                 u_sess->attr.attr_resource.enable_user_metric_persistent) {
@@ -8129,15 +8126,20 @@ int WLMProcessThreadMain(void)
             pg_usleep(MAX_SLEEP_TIME * USECS_PER_SEC);
         }
 
-        TimestampTz get_thread_status_current_time = GetCurrentTimestamp();
-        if (IS_PGXC_DATANODE) {
-            if (g_instance.comm_cxt.force_cal_space_info ||
-                (TimestampDifferenceExceeds(get_thread_status_last_time, get_thread_status_current_time, SEVEN_DAYS) &&
-                    g_instance.attr.attr_resource.enable_perm_space)) {
-                get_thread_status_last_time = get_thread_status_current_time;
-                g_instance.comm_cxt.force_cal_space_info = false;
-                WLMReadjustUserSpaceThroughAllDbs(ALL_USER);
+        if (pmState == PM_RUN) {
+            TimestampTz get_thread_status_current_time = GetCurrentTimestamp();
+            if (IS_PGXC_DATANODE) {
+                if (g_instance.comm_cxt.force_cal_space_info ||
+                    (TimestampDifferenceExceeds(get_thread_status_last_time, get_thread_status_current_time,
+                        SEVEN_DAYS) && g_instance.attr.attr_resource.enable_perm_space)) {
+                    get_thread_status_last_time = get_thread_status_current_time;
+                    g_instance.comm_cxt.force_cal_space_info = false;
+                    WLMReadjustUserSpaceThroughAllDbs(ALL_USER);
+                }
             }
+
+            /* Fetch collect info from each data nodes. */
+            WLMCollectInfoScanner();
         }
 
         if (t_thrd.wlm_cxt.wlm_xact_start) {

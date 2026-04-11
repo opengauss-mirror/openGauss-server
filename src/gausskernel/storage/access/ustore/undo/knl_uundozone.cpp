@@ -107,6 +107,15 @@ bool UndoZone::CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp, bool isexrto
             return true;
         }
     }
+
+    if (start > forceDiscardURecPtr_) {
+        ereport(LOG, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("In undorecycling process, undo start pointer > forceDiscardURecPtr_ is valid."
+            "zone:%d, startZid:%d, endZid:%d, start:%lu, end:%lu, forceDiscardURecPtr_:%lu, insertURecPtr_:%lu."),
+            zid_, startZid, endZid, start, end, forceDiscardURecPtr_, insertURecPtr_)));
+        return true;
+    }
+
     ereport(WARNING, (errmodule(MOD_UNDO),
                       errmsg(UNDOFORMAT("check_recycle: zone:%d, startZid:%d, endZid:%d, start:%lu, end:%lu, "
                                         "forceDiscardURecPtr_:%lu, insertURecPtr_:%lu."),

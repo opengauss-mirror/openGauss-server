@@ -891,13 +891,13 @@ static bool InitSession(knl_session_context* session)
 
     SetProcessingMode(NormalProcessing);
 
-#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-    LoadSqlPlugin();
-#endif
-
     init_session_share_memory();
 
     BeginReportingGUCOptions();
+
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    LoadSqlPlugin();
+#endif
 
     SendSessionIdxToClient();
 

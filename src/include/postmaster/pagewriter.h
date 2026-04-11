@@ -88,6 +88,8 @@ typedef struct PageWriterProc {
     DSSAioCxt aio_cxt;
     char *aio_buf;
     PgwrAioExtraData* aio_extra;
+
+    volatile bool willShutdown;
 } PageWriterProc;
 
 typedef struct PageWriterProcs {

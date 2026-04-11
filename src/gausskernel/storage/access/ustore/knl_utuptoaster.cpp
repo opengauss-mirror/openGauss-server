@@ -46,14 +46,14 @@ static Datum UHeapToastSaveDatum(Relation rel, Datum value, struct varlena *olde
 static Datum UHeapToastCompressDatum(Datum value);
 static bool UHeapToastIdValueIdExists(Oid toastrelid, Oid valueid, int2 bucketid);
 static bool UHeapToastRelValueidExists(Relation toastrel, Oid valueid);
-static Oid UHeapGetNewOidWithIndex(Relation relation, Oid indexId, AttrNumber oidcolumn);
+static Oid UHeapGetNewOidWithIndex(Relation relation, Relation indexRelation, AttrNumber oidcolumn);
 
 static Datum UHeapToastCompressDatum(Datum value)
 {
     return toast_compress_datum(value);
 }
 
-Oid UHeapGetNewOidWithIndex(Relation relation, Oid indexId, AttrNumber oidcolumn)
+Oid UHeapGetNewOidWithIndex(Relation relation, Relation indexRelation, AttrNumber oidcolumn)
 {
     Oid newOid;
     SysScanDesc scan;
@@ -74,9 +74,9 @@ Oid UHeapGetNewOidWithIndex(Relation relation, Oid indexId, AttrNumber oidcolumn
         ScanKeyInit(&key, oidcolumn, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(newOid));
 
         /* see notes above about using SnapshotAny */
-        scan = systable_beginscan(relation, indexId, true, get_toast_snapshot(), ATTR_FIRST, &key);
+        scan = systable_beginscan_ordered(relation, indexRelation, get_toast_snapshot(), ATTR_FIRST, &key);
         collides = UHeapSysIndexGetnextSlot(scan, ForwardScanDirection, slot);
-        systable_endscan(scan);
+        systable_endscan_ordered(scan);
     } while (collides);
     ExecDropSingleTupleTableSlot(slot);
     return newOid;
@@ -736,7 +736,7 @@ static Datum UHeapToastSaveDatum(Relation rel, Datum value, struct varlena *olde
      */
     if (!OidIsValid(rel->rd_toastoid)) {
         /* normal case: just choose an unused OID */
-        toastPointer.va_valueid = UHeapGetNewOidWithIndex(toastrel, RelationGetRelid(toastidx), (AttrNumber)1);
+        toastPointer.va_valueid = UHeapGetNewOidWithIndex(toastrel, toastidx, (AttrNumber)1);
     } else {
         /* rewrite case: check to see if value was in old toast table */
         toastPointer.va_valueid = InvalidOid;
@@ -781,7 +781,7 @@ static Datum UHeapToastSaveDatum(Relation rel, Datum value, struct varlena *olde
              * old or new toast table
              */
             do {
-                toastPointer.va_valueid = UHeapGetNewOidWithIndex(toastrel, RelationGetRelid(toastidx), (AttrNumber)1);
+                toastPointer.va_valueid = UHeapGetNewOidWithIndex(toastrel, toastidx, (AttrNumber)1);
             } while (UHeapToastIdValueIdExists(rel->rd_toastoid, toastPointer.va_valueid, bucketid));
         }
     }

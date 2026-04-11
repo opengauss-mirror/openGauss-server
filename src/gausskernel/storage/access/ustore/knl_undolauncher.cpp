@@ -310,6 +310,9 @@ NON_EXEC_STATIC void UndoLauncherMain()
     }
 
     while (!t_thrd.undolauncher_cxt.got_SIGTERM) {
+        if (pmState == PM_WAIT_BACKENDS) {
+            break;
+        }
         UndoWorkInfoData work;
 
         if (CanLaunchUndoWorker() && UndoLauncherGetWork(&work)) {

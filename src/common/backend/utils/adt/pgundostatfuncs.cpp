@@ -474,7 +474,11 @@ static bool ParseUndoRecord(UndoRecPtr urp, Tuplestorestate *tupstore, TupleDesc
         char buffer[BLCKSZ] = {'\0'};
         BlockNumber blockno = UNDO_PTR_GET_BLOCK_NUM(urp);
         int zoneId = UNDO_PTR_GET_ZONE_ID(urp);
-        int startingByte = ((urp) & ((UINT64CONST(1) << 44) - 1)) % BLCKSZ;
+        int startingByte = UNDO_PTR_GET_PAGE_OFFSET(urp);
+        if (startingByte < (int)UNDO_LOG_BLOCK_HEADER_SIZE || startingByte >= BLCKSZ) {
+            ereport(ERROR, (errmsg("The entered parameter is incorrect.Please check the value of undoptr.")));
+            return false;
+        }
         int fd = -1;
         int alreadyRead = 0;
         off_t seekpos;

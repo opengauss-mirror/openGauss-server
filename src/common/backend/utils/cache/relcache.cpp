@@ -5819,6 +5819,8 @@ retry_if_standby_mode:
             pg_usleep(1000000);
             goto retry_if_standby_mode;
         }
+        ereport(LOG, (errmsg("Failed to load critical system index, IsServerModeStandby(): %d, retry count: %d.",
+                             IsServerModeStandby(), curRetryCnt)));
         ereport(PANIC, (errmsg("could not open critical system index %u", indexoid)));
     } else if (0 != curRetryCnt) {
         ereport(LOG,
@@ -8982,6 +8984,9 @@ bool IsRelationReplidentKey(Relation r, int attno)
     }
 
     Relation idx_rel = RelationIdGetRelation(replidindex);
+    if (!RelationIsValid(idx_rel)) {
+        ereport(ERROR, (errmsg("logical decoding open relation with OID %u failed.", replidindex)));
+    }
 
     for (int natt = 0; natt < IndexRelationGetNumberOfKeyAttributes(idx_rel); natt++) {
         if (idx_rel->rd_index->indkey.values[natt] == attno) {

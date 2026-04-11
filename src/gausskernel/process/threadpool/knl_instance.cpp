@@ -1055,7 +1055,9 @@ void knl_instance_init()
     knl_g_bgwriter_init(&g_instance.bgwriter_cxt);
     knl_g_repair_init(&g_instance.repair_cxt);
     knl_g_startup_init(&g_instance.startup_cxt);
+#ifndef ENABLE_LITE_MODE
     knl_g_dms_init(&g_instance.dms_cxt);
+#endif
     knl_g_shmem_init(&g_instance.shmem_cxt);
     g_instance.ckpt_cxt_ctl = &g_instance.ckpt_cxt;
     g_instance.ckpt_cxt_ctl = (knl_g_ckpt_context*)TYPEALIGN(SIZE_OF_TWO_UINT64, g_instance.ckpt_cxt_ctl);

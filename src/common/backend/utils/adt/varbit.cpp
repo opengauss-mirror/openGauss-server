@@ -1532,6 +1532,11 @@ Datum bitposition(PG_FUNCTION_ARGS)
     /* Initialise the padding masks */
     end_mask = BITMASK << VARBITPAD(substr);
     str_mask = BITMASK << VARBITPAD(str);
+
+    if (VARBITBYTES(str) < VARBITBYTES(substr)) {
+        PG_RETURN_INT32(0);
+    }
+
     for (i = 0; (unsigned int)(i) < VARBITBYTES(str) - VARBITBYTES(substr) + 1; i++) {
         for (is = 0; is < BITS_PER_BYTE; is++) {
             is_match = true;

@@ -993,12 +993,15 @@ void ExecuteFunctionIfExisted(const char *filename, char *funcname)
     if (tmpCF.user_fn != NULL) {
         ((void* (*)(void))(tmpCF.user_fn))();
     }
+    pfree_ext(tmpCF.inforec);
 }
 
 bool IsFileExisted(const char *filename)
 {
     char* fullname = expand_dynamic_library_name(filename);
-    return file_exists(fullname);
+    bool ret = file_exists(fullname);
+    pfree_ext(fullname);
+    return ret;
 }
 
 #define INIT_PLUGIN_OBJECT "init_plugin_object"
@@ -8048,6 +8051,8 @@ static void start_gs_clean_load_dolphin()
  * 1. load plugin should call after process is normal, cause heap_create_with_catalog will check it.
  * 2. load plugin should call after mask_password_mem_cxt is created, cause maskPassword is called
  *      when create extension, which need mask_password_mem_cxt.
+ * 3. when thread pool mode is enabled, the plugin loading should be invoked after init_session_share_memory,
+ *       as subsequent shared memory usage relies on this order.
  */
 void LoadSqlPlugin()
 {
@@ -8607,7 +8612,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         "RowDescriptionContext",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+        ALLOCSET_NAME_MAXSIZE);
     MemoryContext old_mc = MemoryContextSwitchTo(t_thrd.mem_cxt.row_desc_mem_cxt);
     initStringInfo(&(*t_thrd.postgres_cxt.row_description_buf));
     MemoryContextSwitchTo(old_mc);

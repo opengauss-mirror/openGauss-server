@@ -6821,12 +6821,13 @@ List* ExecInitExprListByFlatten(List *nodes, PlanState *parent)
 * made the appropriate transformations on expressions, but for standalone
 * expressions this won't have happened.)
 */
-ExprState* ExecPrepareExpr(Expr* node, EState* estate, bool isExprIndex)
+ExprState* ExecPrepareExpr(Expr* node, EState* estate, bool isExprIndex, MemoryContext context)
 {
    ExprState* result = NULL;
    MemoryContext oldcontext;
+   MemoryContext exprcontext = (context == NULL) ? estate->es_query_cxt : context;
 
-   oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+   oldcontext = MemoryContextSwitchTo(exprcontext);
 
    node = expression_planner(node, isExprIndex);
 

@@ -479,7 +479,6 @@ void sess_exit_prepare(int code)
         }
     }
 
-    t_thrd.storage_cxt.on_proc_exit_index = 0;
     RESUME_INTERRUPTS();
     gs_signal_recover_mask(old_sigset);
 }

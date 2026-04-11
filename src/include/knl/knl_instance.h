@@ -84,11 +84,19 @@ const int MAX_GLOBAL_CACHEMEM_NUM = 128;
 const int MAX_GLOBAL_PRC_NUM = 32;
 const int MAX_AUDIT_NUM = 48;
 
+#ifdef ENABLE_LITE_MODE
+/* Maximum number of max parallel decode threads */
+#define MAX_PARALLEL_DECODE_NUM 10
+
+/* Maximum number of max replication slots */
+#define MAX_REPLICATION_SLOT_NUM 50
+#else
 /* Maximum number of max parallel decode threads */
 #define MAX_PARALLEL_DECODE_NUM 20
 
 /* Maximum number of max replication slots */
 #define MAX_REPLICATION_SLOT_NUM 100
+#endif
 
 #ifndef ENABLE_MULTIPLE_NODES
 const int DB_CMPT_MAX = 5;

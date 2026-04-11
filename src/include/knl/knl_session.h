@@ -516,10 +516,6 @@ typedef struct knl_u_utils_context {
 
     struct PGLZ_HistEntry* hist_entries;
 
-    struct PGLZ_HistEntry** new_hist_start;
-
-    struct PGLZ_HistEntry* new_hist_entries;
-
     char* analysis_options_configure;
 
     int* guc_new_value;
@@ -1260,10 +1256,10 @@ typedef struct knl_u_proc_context {
      */
     char* LabelFile;
     char* TblspcMapFile;
-    bool  registerAbortBackupHandlerdone;    /* unterminated backups handler flag */
     bool check_auth;
     bool nextQuery; /* if next query exists for dolphin protocal */
     uint8 nextSeqid; /* network pkg sequence for dolphin protocal */
+    bool clientIsLogicalSender;
 } knl_u_proc_context;
 
 /* maximum possible number of fields in a date string */
@@ -2982,6 +2978,7 @@ typedef struct knl_u_hook_context {
     void *rewriteTypmodExprHook;
     void *invokeNextvalHook;
     void *getVarbinaryOidHook;
+    void *binaryTransformTypeidHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {

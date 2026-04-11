@@ -42,6 +42,8 @@
 #include "utils/relcache.h"
 #include "utils/partitionkey.h"
 #include "catalog/pg_partition_fn.h"
+#include "executor/executor.h"
+#include "optimizer/planner.h"
 
 static PruningResult* partitionPruningFromBoolExpr(const BoolExpr* expr, PruningContext* context);
 static PruningResult* intersectChildPruningResult(const List* resultList, PruningContext* context);
@@ -70,6 +72,8 @@ static PruningResult* partitionPruningFromNullTest(PartitionType partType,
 static PruningResult* partitionPruningFromScalarArrayOpExpr(PartitionType partType,
     const ScalarArrayOpExpr* arrayExpr, PruningContext* pruningCtx);
 static PruningResult* partitionEqualPruningWalker(PartitionType partType, Expr* expr, PruningContext* pruningCtx);
+static bool partitionTransformDatum2ConstForPartKeyExpr(const PruningContext* context,
+ 	     AttrNumber varattno, Const* value);
 
 #define NoNeedPruning(pruningResult)                                              \
     (PruningResultIsFull(pruningResult) || PruningResultIsEmpty(pruningResult) || \
@@ -131,6 +135,7 @@ PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation 
     context.rte = NULL;
     context.estate = estate;
     context.relation = current_relation;
+    context.partkeyexpr = NULL;
 
     if (current_relation->partMap->type == PART_TYPE_LIST || current_relation->partMap->type == PART_TYPE_HASH) {
         resPartition = partitionEqualPruningWalker(current_relation->partMap->type, result->expr, &context);
@@ -541,9 +546,20 @@ PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Re
     context->rte = rte;
     context->GetPartitionMap = GetRelPartitionMap;
     context->pruningType = PruningPartition;
+    context->partkeyexpr = NULL;
+    char* subpartExprKeyStr = NULL;
 
-    bool isnull = PartExprKeyIsNull(rel);
-    if (isnull) {
+    bool isnull = PartExprKeyIsNull(rel, &subpartExprKeyStr);
+    if (DB_IS_CMPT(B_FORMAT) && rel->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION &&
+        rel->partMap->type == PART_TYPE_RANGE && subpartExprKeyStr != NULL &&
+        pg_strcasecmp(subpartExprKeyStr, "") != 0) {
+        context->partkeyexpr = (Node*)stringToNode_skip_extern_fields(subpartExprKeyStr);
+        (void)lockNextvalWalker(context->partkeyexpr, NULL);
+        if (!IsA(context->partkeyexpr, FuncExpr) && !IsA(context->partkeyexpr, OpExpr)) {
+            context->partkeyexpr = NULL;
+        }
+    }
+    if (isnull || context->partkeyexpr != NULL) {
         if (rel->partMap != NULL && (rel->partMap->type == PART_TYPE_LIST || rel->partMap->type == PART_TYPE_HASH)) {
             // for List/Hash partitioned table
             result = partitionEqualPruningWalker(rel->partMap->type, expr, context);
@@ -578,7 +594,7 @@ PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Re
         destroyPruningResult(result);
         result = getFullPruningResult(rel);
     }
-
+    pfree_ext(subpartExprKeyStr);
     if (PointerIsValid(context)) {
         pfree_ext(context);
     }
@@ -1648,7 +1664,13 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
         result->isPbeSinlePartition = false;
         return result;
     }
-
+    if (context->partkeyexpr != NULL) {
+        if (!partitionTransformDatum2ConstForPartKeyExpr(context, varArg->varattno, constArg)) {
+            result->state = PRUNING_RESULT_FULL;
+            result->isPbeSinlePartition = false;
+            return result;
+        }
+    }
     /* initialize PruningBoundary */
     result->boundary = makePruningBoundary(partKeyNum);
 
@@ -1715,7 +1737,7 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
 
 static PruningResult* RecordEqualFromOpExprPart(const PartitionType partType, const PruningContext* context, const char* opName,
                                                        Const* constMax, const Var* varArg, int attrOffset, PruningResult* result, Param* paramArg,
-                                                       OpExpr* exprPart, const Const* constArg, PruningBoundary* boundary)
+                                                       OpExpr* exprPart, Const* constArg, PruningBoundary* boundary)
 {
     int partKeyNum = 0;
 
@@ -2839,4 +2861,92 @@ static bool PartitionPruningForPartialListBoundary(ListPartitionMap* listMap, Pr
         pruningResult->boundary = NULL;
     }
     return true;
+}
+
+static Datum partitionTransformDatumForExpr(Expr* expr, AttrNumber varattno, Const* value, bool* ret)
+{
+    if (IsA(expr, Var) && ((Var*)expr)->varattno == varattno) {
+        return value->constvalue;
+    }
+    if (IsA(expr, Const)) {
+        return ((Const*)expr)->constvalue;
+    }
+    if (IsA(expr, FuncExpr)|| IsA(expr, OpExpr)) {
+        Datum result = (Datum)0;
+        FmgrInfo flinfo;
+        FunctionCallInfoData fcinfo;
+        int i = 0;
+        ListCell* arg = NULL;
+        List* args = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->args : ((OpExpr*)expr)->args;
+        Oid functionId = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->funcid : ((OpExpr*)expr)->opfuncid;
+        Oid inputcollid = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->inputcollid : ((OpExpr*)expr)->inputcollid;
+        fmgr_info(functionId, &flinfo);
+        InitFunctionCallInfoData(fcinfo, &flinfo, list_length(args), inputcollid, NULL, NULL);
+        fcinfo.can_ignore = false;
+        foreach (arg, args) {
+            Expr* tmp =  (Expr*)lfirst(arg);
+            fcinfo.arg[i] = partitionTransformDatumForExpr(tmp, varattno, value, ret);
+            fcinfo.argnull[i] = false;
+            if (*ret == false) {
+                break;
+            }
+            i++;
+        }
+        if (ret) {
+            result = FunctionCallInvoke(&fcinfo);
+            if (fcinfo.isnull) {
+                *ret = false;
+            }
+            FreeFunctionCallInfoData(fcinfo);
+            return result;
+        }
+    }
+    *ret = false;
+    return 0;
+}
+
+bool partitionTransformDatum2ConstForPartKeyExpr(const PruningContext* context, AttrNumber varattno, Const* value)
+{
+    Expr* expr = (Expr*)(context->partkeyexpr);
+    PartitionMap *partMap = context->relation->partMap;
+    ListCell* arg = NULL;
+    FmgrInfo flinfo;
+    FunctionCallInfoData fcinfo;
+    bool ret = true;
+    int i = 0;
+    PG_TRY();
+    {
+        List* args = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->args : ((OpExpr*)expr)->args;
+        Oid functionId = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->funcid : ((OpExpr*)expr)->opfuncid;
+        Oid inputcollid = IsA(expr, FuncExpr)? ((FuncExpr*)expr)->inputcollid : ((OpExpr*)expr)->inputcollid;
+        fmgr_info(functionId, &flinfo);
+        InitFunctionCallInfoData(fcinfo, &flinfo, list_length(args), inputcollid, NULL, NULL);
+        fcinfo.can_ignore = false;
+        foreach (arg, args) {
+            Expr* tmp = (Expr*)lfirst(arg);
+            fcinfo.arg[i] = partitionTransformDatumForExpr(tmp, varattno, value, &ret);
+            fcinfo.argnull[i] = false;
+            if (ret == false) {
+                break;
+            }
+            i++;
+        }
+        if (ret) {
+            PartKeyExprResult partKeyExprTuple;
+            partKeyExprTuple.value = FunctionCallInvoke(&fcinfo);
+            partKeyExprTuple.isNull = fcinfo.isnull;
+            if (fcinfo.isnull) {
+                ret = false;
+            } else {
+                transformDatum2ConstForPartKeyExpr((PartitionMap*)partMap, &partKeyExprTuple, value);
+            }
+        }
+    }
+    PG_CATCH();
+    {
+        ret = false;
+    }
+    PG_END_TRY();
+    FreeFunctionCallInfoData(fcinfo);
+    return ret;
 }

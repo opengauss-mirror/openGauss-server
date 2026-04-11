@@ -398,7 +398,7 @@ extern bool getAESLabelFile(const char* dirName, const char* labelName, const ch
 extern bool checkAndCreateDir(const char* dirName);
 extern bool CheckIfStandby(struct Archive *fout);
 extern size_t fread_file(void *buf, size_t size, size_t nmemb, FILE *fh);
-extern bool findDBCompatibility(Archive* fout, const char* databasename);
+extern bool findDBCompatibility(Archive* fout, const char* databasename, const char* dbType = "B");
 extern bool hasSpecificExtension(Archive* fout, const char* databasename);
 
 #ifdef HAVE_LIBZ

@@ -305,6 +305,18 @@ bool IsSkipInsertUndo(UndoRecPtr urp)
     if (offset > space->Head() && offset < space->Tail()) {
         return false;
     } else if (offset >= space->Tail()) {
+        if (offset == UNDO_LOG_BLOCK_HEADER_SIZE && space->Tail() == 0) {
+            UndoLogOffset newTail = UNDO_LOG_OFFSET_GET_TAIL(offset, UNDO_LOG_SEGMENT_SIZE);
+            UndoLogOffset oldTail = space->Tail();
+            space->LockSpace();
+            space->MarkDirty();
+            space->ExtendUndoLog(zid, newTail, UNDO_DB_OID);
+            space->UnlockSpace();
+            ereport(WARNING, (errmodule(MOD_UNDO),
+                errmsg(UNDOFORMAT("Space allocation in is_skip_insert_record, urp %lu, old tail %lu, new_tail=%lu."),
+                    urp, oldTail, newTail)));
+            return false;
+        }
         ereport(PANIC, (errmodule(MOD_UNDO),
             errmsg(UNDOFORMAT("Space allocation tail=%lu is faster than undo insert offset=%lu."),
                 space->Tail(), offset)));

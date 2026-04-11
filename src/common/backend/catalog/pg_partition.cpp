@@ -2083,8 +2083,42 @@ bool PartExprKeyIsNull(Relation rel, char** partExprKeyStr)
     bool isnull = false;
     Datum val = SysCacheGetAttr(PARTPARTOID, partTuple, Anum_pg_partition_partkeyexpr, &isnull);
     if (!isnull && partExprKeyStr) {
-        *partExprKeyStr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+        char *newVal = TextDatumGetCString(val);
+        *partExprKeyStr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), newVal);
+        pfree_ext(newVal);
     }
     ReleaseSysCache(partTuple);
     return isnull;
+}
+
+Oid partid_get_rootid(Oid partoid, Oid *subparentid)
+{
+    Oid parentid;
+    Oid rootid;
+ 
+    *subparentid = InvalidOid;
+    /* Search the partition's relcache entry */
+    HeapTuple partitionTup = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partoid));
+    if (!HeapTupleIsValid(partitionTup)) {
+        return InvalidOid;
+    }
+    Form_pg_partition partitionForm = (Form_pg_partition)GETSTRUCT(partitionTup);
+    parentid = partitionForm->parentid;
+    if (partitionForm->parttype != PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+        rootid = parentid;
+        ReleaseSysCache(partitionTup);
+        return rootid;
+    }
+    ReleaseSysCache(partitionTup);
+ 
+    /* subpartition branch */
+    HeapTuple parentTup = SearchSysCache1(PARTRELID, ObjectIdGetDatum(parentid));
+    if (!HeapTupleIsValid(parentTup)) {
+        return InvalidOid;
+    }
+    Form_pg_partition parentForm = (Form_pg_partition)GETSTRUCT(parentTup);
+    rootid = parentForm->parentid;
+    *subparentid = parentid;
+    ReleaseSysCache(parentTup);
+    return rootid;
 }

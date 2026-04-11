@@ -3349,7 +3349,7 @@ static void checkSequenceForReplace(Relation rel)
 
         attname = cstring_to_text(att_tup->attname.data);
         seqOid = pg_get_serial_sequence_oid(tbname, attname);
-        if (OidIsValid(seqOid)) {
+        if (OidIsValid(seqOid) && !CheckSeqOwnedByAutoInc(seqOid)) {
             elog(ERROR, "REPLACE can not work on sequence!");
         }
     }
@@ -3958,6 +3958,8 @@ static TupleTableSlot* ExecModifyTable(PlanState* state)
     node->mt_done = true;
 
     ResetTrigShipFlag();
+
+    pfree_ext(partExprKeyStr);
 
     return NULL;
 }

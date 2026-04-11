@@ -44,6 +44,7 @@
 #include "openssl/evp.h"
 #include "catalog/gs_collation.h"
 #include "catalog/pg_collation_fn.h"
+#include "commands/extension.h"
 
 #define SUBSTR_WITH_LEN_OFFSET 2
 #define SUBSTR_A_CMPT_OFFSET 4
@@ -657,9 +658,13 @@ Datum bytea_string_agg_finalfn(PG_FUNCTION_ARGS)
 
 Oid binary_need_transform_typeid(Oid typeoid, Oid* collation)
 {
+    if (u_sess->hook_cxt.binaryTransformTypeidHook) {
+        return ((Oid (*)(Oid, Oid *))u_sess->hook_cxt.binaryTransformTypeidHook)(typeoid, collation);
+    }
     Oid new_typid = typeoid;
     if (*collation == BINARY_COLLATION_OID) {
-        if (GetDatabaseEncoding() == PG_SQL_ASCII && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_common.upgrade_mode != 0) {
+        if (GetDatabaseEncoding() == PG_SQL_ASCII && DB_IS_CMPT(B_FORMAT) &&
+            (u_sess->attr.attr_common.upgrade_mode != 0 || creating_extension)) {
             *collation = DEFAULT_COLLATION_OID;
             return new_typid;
         }
@@ -2530,8 +2535,8 @@ static int bpvarstrfastcmp_builtin(Datum x, Datum y, SortSupport ssup)
     char* a1p = VARDATA_ANY(arg1);
     char* a2p = VARDATA_ANY(arg2);
 
-    len1 = bpchartruelen(a1p, VARSIZE_ANY_EXHDR(arg1));
-    len2 = bpchartruelen(a2p, VARSIZE_ANY_EXHDR(arg2));
+    len1 = VARSIZE_ANY_EXHDR(arg1);
+    len2 = VARSIZE_ANY_EXHDR(arg2);
 
     result = varstr_cmp_by_builtin_collations(a1p, len1, a2p, len2, ssup->ssup_collation);
 

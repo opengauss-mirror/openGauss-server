@@ -166,7 +166,7 @@ void WalWriterMain(void)
         "Wal Writer",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+        ALLOCSET_NAME_MAXSIZE);
     (void)MemoryContextSwitchTo(walwriter_context);
 
     /*

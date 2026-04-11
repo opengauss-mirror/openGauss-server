@@ -69,7 +69,9 @@ bool init_aes_vector_random(GS_UCHAR* aes_vector, size_t vector_len)
 
 /* inputstrlen must include the terminating '\0' character */
 bool writeFileAfterEncryption(
-    FILE* pf, char* inputstr, int inputstrlen, int writeBufflen, unsigned char Key[], unsigned char* randvalue, void* moduleKeyCtx, kernel_crypto_encrypt_decrypt_type encFunc, void* moduleHmacCtx, kernel_crypto_hmac_type hmacFunc)
+    FILE* pf, char* inputstr, int inputstrlen, int writeBufflen, unsigned char Key[], unsigned char* randvalue,
+    void* moduleKeyCtx, kernel_crypto_encrypt_decrypt_type encFunc, void* moduleHmacCtx,
+    kernel_crypto_hmac_type hmacFunc, unsigned char* g_deriver_key, unsigned char* g_aes_vector)
 {
     void* writeBuff = NULL;
     int64 writeBuffLen;
@@ -192,7 +194,9 @@ bool writeFileAfterEncryption(
             (GS_UINT32)strlen((const char*)Key),
             randvalue,
             outputstr,
-            &cipherlen);
+            &cipherlen,
+            g_deriver_key,
+            g_aes_vector);
         if (!encryptstatus) {
             free(writeBuff);
             writeBuff = NULL;
@@ -358,7 +362,8 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
                     (GS_UINT32)strlen((const char*)pDecryptInfo->Key),
                     pDecryptInfo->rand,
                     outputstr,
-                    &plainlen);
+                    &plainlen,
+                    pDecryptInfo->g_decrypt_key);
             }
         }
 
@@ -427,7 +432,7 @@ bool check_key(const char* key, int NUM)
  *				CipherLen	ciphertext length  needed to be saved for decrypt
  */
 bool aes128Encrypt(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, GS_UINT32 keylen, GS_UCHAR* RandSalt,
-    GS_UCHAR* CipherText, GS_UINT32* CipherLen)
+    GS_UCHAR* CipherText, GS_UINT32* CipherLen, GS_UCHAR* g_deriver_key, GS_UCHAR* g_aes_vector)
 {
     GS_UCHAR deriver_key[RANDOM_LEN] = {0};
     GS_UCHAR aes_vector[RANDOM_LEN] = {0};
@@ -439,27 +444,36 @@ bool aes128Encrypt(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, GS_UI
         return false;
     }
 
-    /* use PKCS5_deriveKey to dump the key for encryption */
-    retval = PKCS5_PBKDF2_HMAC(
-        (char*)Key, keylen, RandSalt, RANDOM_LEN, ITERATE_TIMES, (EVP_MD*)EVP_sha256(), RANDOM_LEN, deriver_key);
-    if (!retval) {
-        (void)fprintf(stderr, _("generate the derived key failed, errcode:%u\n"), retval);
-        errorno = memset_s(deriver_key, RANDOM_LEN, 0, RANDOM_LEN);
+    if (g_deriver_key == NULL || strlen((const char*)g_deriver_key) == 0) {
+        /* use PKCS5_deriveKey to dump the key for encryption */
+        retval = PKCS5_PBKDF2_HMAC(
+            (char*)Key, keylen, RandSalt, RANDOM_LEN, ITERATE_TIMES, (EVP_MD*)EVP_sha256(), RANDOM_LEN, deriver_key);
+        if (!retval) {
+            (void)fprintf(stderr, _("generate the derived key failed, errcode:%u\n"), retval);
+            errorno = memset_s(deriver_key, RANDOM_LEN, 0, RANDOM_LEN);
+            securec_check_c(errorno, "", "");
+            return false;
+        }
+    } else {
+        errorno = memcpy_s(deriver_key, RANDOM_LEN, g_deriver_key, RANDOM_LEN);
         securec_check_c(errorno, "", "");
-        return false;
     }
 
-    /* get random aes vector for encryption */
-    if (init_aes_vector_random(aes_vector, RANDOM_LEN) == false) {
-        errorno = memset_s(deriver_key, RANDOM_LEN, 0, RANDOM_LEN);
+    if (g_aes_vector == NULL || strlen((const char*)g_aes_vector) == 0) {
+         /* get random aes vector for encryption */
+        if (init_aes_vector_random(aes_vector, RANDOM_LEN) == false) {
+            errorno = memset_s(deriver_key, RANDOM_LEN, 0, RANDOM_LEN);
+            securec_check_c(errorno, "", "");
+            return false;
+        }
+    } else {
+        errorno = memcpy_s(aes_vector, RANDOM_LEN, g_aes_vector, RANDOM_LEN);
         securec_check_c(errorno, "", "");
-        return false;
     }
-
+   
     /* use deriverkey to encrypt the plain key that user specified */
     retval = CRYPT_encrypt(
         NID_aes_128_cbc, deriver_key, RANDOM_LEN, aes_vector, RANDOM_LEN, PlainText, PlainLen, CipherText, CipherLen);
-
     if (retval != 0) {
         errorno = memset_s(aes_vector, RANDOM_LEN, 0, RANDOM_LEN);
         securec_check_c(errorno, "", "");
@@ -494,7 +508,7 @@ bool aes128Encrypt(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, GS_UI
  *				PlainLen		plaintext length
  */
 bool aes128Decrypt(GS_UCHAR* CipherText, GS_UINT32 CipherLen, GS_UCHAR* Key, GS_UINT32 keylen, GS_UCHAR* RandSalt,
-    GS_UCHAR* PlainText, GS_UINT32* PlainLen)
+    GS_UCHAR* PlainText, GS_UINT32* PlainLen, GS_UCHAR* g_decrypt_key)
 {
     GS_UCHAR decrypt_key[RANDOM_LEN] = {0};
     GS_UCHAR aes_vector[RANDOM_LEN] = {0};
@@ -506,15 +520,20 @@ bool aes128Decrypt(GS_UCHAR* CipherText, GS_UINT32 CipherLen, GS_UCHAR* Key, GS_
         return false;
     }
 
-    /* get the decrypt_key value */
-    retval = PKCS5_PBKDF2_HMAC(
-        (char*)Key, keylen, RandSalt, RANDOM_LEN, ITERATE_TIMES, (EVP_MD*)EVP_sha256(), RANDOM_LEN, decrypt_key);
-    if (!retval) {
-        /* clean the decrypt_key for security */
-        errorno = memset_s(decrypt_key, RANDOM_LEN, 0, RANDOM_LEN);
+    if (g_decrypt_key == NULL || strlen((const char*)g_decrypt_key) == 0) {
+        /* get the decrypt_key value */
+        retval = PKCS5_PBKDF2_HMAC(
+            (char*)Key, keylen, RandSalt, RANDOM_LEN, ITERATE_TIMES, (EVP_MD*)EVP_sha256(), RANDOM_LEN, decrypt_key);
+        if (!retval) {
+            /* clean the decrypt_key for security */
+            errorno = memset_s(decrypt_key, RANDOM_LEN, 0, RANDOM_LEN);
+            securec_check_c(errorno, "", "");
+            (void)fprintf(stderr, _("generate the derived key failed, errcode:%u\n"), retval);
+            return false;
+        }
+    } else {
+        errorno = memcpy_s(decrypt_key, RANDOM_LEN, g_decrypt_key, RANDOM_LEN);
         securec_check_c(errorno, "", "");
-        (void)fprintf(stderr, _("generate the derived key failed, errcode:%u\n"), retval);
-        return false;
     }
 
     /* get the aes vector for from stored ciphertext */

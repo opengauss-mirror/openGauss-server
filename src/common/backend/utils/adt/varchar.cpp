@@ -788,19 +788,20 @@ Datum bpcharoctetlen(PG_FUNCTION_ARGS)
 Datum bpchareq(PG_FUNCTION_ARGS)
 {
     bool result = false;
+    BpChar* arg1 = PG_GETARG_BPCHAR_PP(0);
+    BpChar* arg2 = PG_GETARG_BPCHAR_PP(1);
     if (is_b_format_collation(PG_GET_COLLATION())) {
         /* use varstr_cmp to compare, return 0 means equal */
-        result = (bpcharcase(fcinfo) == 0);
+        result = (varstr_cmp_by_builtin_collations(VARDATA_ANY(arg1), VARSIZE_ANY_EXHDR(arg1),
+            VARDATA_ANY(arg2), VARSIZE_ANY_EXHDR(arg2), PG_GET_COLLATION()) == 0);
+        PG_FREE_IF_COPY(arg1, 0);
+        PG_FREE_IF_COPY(arg2, 1);
         PG_RETURN_BOOL(result);
     }
 
-    BpChar* arg1 = PG_GETARG_BPCHAR_PP(0);
-    BpChar* arg2 = PG_GETARG_BPCHAR_PP(1);
     int len1, len2;
-
     len1 = bcTruelen(arg1);
     len2 = bcTruelen(arg2);
-
     /*
      * Since we only care about equality or not-equality, we can avoid all the
      * expense of strcoll() here, and just do bitwise comparison.

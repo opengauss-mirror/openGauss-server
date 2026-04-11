@@ -452,7 +452,6 @@ const int MAX_PAGE_WRITER_THREAD_NUM = 8;
 #define NUM_MULTI_AUX_PROC \
     (MAX_PAGE_WRITER_THREAD_NUM + \
      MAX_RECOVERY_THREAD_NUM + \
-     g_instance.shmem_cxt.ThreadPoolGroupNum + \
      MAX_COMPACTION_THREAD_NUM \
     )
 

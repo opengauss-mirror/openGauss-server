@@ -1041,6 +1041,10 @@ void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
         func->invalItems = NULL;
     }
 
+    if (func->fn_argvarnos != NULL) {
+        pfree_ext(func->fn_argvarnos);
+    }
+
     /*
      * And finally, release all memory except the PLpgSQL_function struct
      * itself (which has to be kept around because there may be multiple

@@ -460,7 +460,7 @@ static bool CheckIndexIncludingParams(IndexStmt* stmt)
     if (stmt->isGlobal) {
         foreach (cell, stmt->indexIncludingParams) {
             IndexElem* param = (IndexElem*)lfirst(cell);
-            if (strcmp(param->name, "tableoid") == 0) {
+            if (param->name && strcmp(param->name, "tableoid") == 0) {
                 nparams--;
                 break;
             }
@@ -470,7 +470,7 @@ static bool CheckIndexIncludingParams(IndexStmt* stmt)
     if (stmt->crossbucket) {
         foreach (cell, stmt->indexIncludingParams) {
             IndexElem* param = (IndexElem*)lfirst(cell);
-            if (strcmp(param->name, "tablebucketid") == 0) {
+            if (param->name && strcmp(param->name, "tablebucketid") == 0) {
                 nparams--;
                 break;
             }
@@ -2208,7 +2208,7 @@ static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, const Li
             continue;
         }
 
-        if (0 == strcmp(attname, ielem->name)) {
+        if (0 == strcmp(attname, ielem->name) || (DB_IS_CMPT(B_FORMAT) && 0 == pg_strcasecmp(attname, ielem->name))) {
             /* check the collation */
             if (NULL == ielem->collation) {
                 return true;
@@ -2474,7 +2474,7 @@ void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, 
                         errmsg("could not determine which collation to use for index expression"),
                         errhint("Use the COLLATE clause to set the collation explicitly.")));
         } else {
-            if (OidIsValid(attcollation))
+            if (OidIsValid(attcollation) && !IsBinaryType(atttype))
                 ereport(ERROR,
                     (errcode(ERRCODE_DATATYPE_MISMATCH),
                         errmsg("collations are not supported by type %s", format_type_be(atttype))));
@@ -5502,7 +5502,7 @@ static void AddIndexColumnForGpi(IndexStmt* stmt)
     ListCell* cell = NULL;
     foreach (cell, stmt->indexIncludingParams) {
         IndexElem* param = (IndexElem*)lfirst(cell);
-        if (strcmp(param->name, "tableoid") == 0) {
+        if (param->name && strcmp(param->name, "tableoid") == 0) {
             return;
         }
     }
@@ -5521,7 +5521,7 @@ static void AddIndexColumnForCbi(IndexStmt* stmt)
     ListCell* cell = NULL;
     foreach (cell, stmt->indexIncludingParams) {
         IndexElem* param = (IndexElem*)lfirst(cell);
-        if (strcmp(param->name, "tablebucketid") == 0) {
+        if (param->name && strcmp(param->name, "tablebucketid") == 0) {
             return;
         }
     }

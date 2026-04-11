@@ -736,6 +736,8 @@ bool handleCopyIn(PGconn* conn, FILE* copystream, bool isbinary)
     const char* prompt = NULL;
     char buf[COPYBUFSIZ];
     PGresult* res = NULL;
+    GS_UINT32 retval = 0;
+    errno_t errorno = EOK;
 
     /*
      * Establish longjmp destination for exiting from wait-for-input. (This is
@@ -760,6 +762,27 @@ bool handleCopyIn(PGconn* conn, FILE* copystream, bool isbinary)
         prompt = NULL;
 
     OK = true;
+
+    if (pset.decryptInfo.encryptInclude) {
+        retval = PKCS5_PBKDF2_HMAC(
+            (char*)pset.decryptInfo.Key,
+            strlen((const char*)pset.decryptInfo.Key),
+            pset.decryptInfo.rand,
+            RANDOM_LEN,
+            ITERATE_TIMES,
+            (EVP_MD*)EVP_sha256(),
+            RANDOM_LEN,
+            pset.decryptInfo.g_decrypt_key);
+        if (!retval) {
+            /* clean the decrypt_key for security */
+            errorno = memset_s(pset.decryptInfo.g_decrypt_key, RANDOM_LEN, 0, RANDOM_LEN);
+            securec_check_c(errorno, "", "");
+            (void)PQputCopyEnd(conn, _("generate the derived key failed.\n"));
+        }
+    } else {
+        errorno = memset_s(pset.decryptInfo.g_decrypt_key, RANDOM_LEN, 0, RANDOM_LEN);
+        securec_check_c(errorno, "", "");
+    }
 
     if (isbinary) {
         /* interactive input probably silly, but give one prompt anyway */

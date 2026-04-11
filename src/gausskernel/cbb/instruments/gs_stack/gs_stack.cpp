@@ -269,6 +269,13 @@ bool find_symbol_entry(const char *filename, HTAB *gs_stack_hashtbl, GsStackEntr
 
     *entry = (GsStackEntry *)hash_search(gs_stack_hashtbl, (const void*)(&key_gs_stack),
         HASH_ENTER, &found);
+    if (entry == NULL) {
+        ereport(ERROR, (
+            errcode(ERRCODE_OUT_OF_MEMORY),
+            errcause("out of memory."),
+            erraction("check memmory by pv_total_memory_detail, free some memory and retry."),
+            errmsg("search hash entry from stack hash table failed.")));
+    }
     if (!found) {
         int fd = open(filename, O_RDONLY);
         if (fd != -1) {

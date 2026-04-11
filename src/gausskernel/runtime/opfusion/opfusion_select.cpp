@@ -162,7 +162,7 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
     }
     errno_t errorno =
         snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "SELECT %lu", nprocessed);
-    securec_check_ss(errorno, "\0", "\0");
+    securec_check_ss(errorno, "", "");
     MemoryContextSwitchTo(oldContext);
 
     /* instr unique sql - we assume that this is no nesting calling of Fusion::execute */

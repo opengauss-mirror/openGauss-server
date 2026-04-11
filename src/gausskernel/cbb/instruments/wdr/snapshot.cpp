@@ -1482,6 +1482,10 @@ NON_EXEC_STATIC void SnapshotMain()
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser((char*)pstrdup(DEFAULT_DATABASE), InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitSnapshotWorker();
 
+    /* Initialize sync_guc_variables and t_thrd.proc->sessMemorySessionid, using in stream plan. */
+    init_sync_guc_variables();
+    t_thrd.proc->sessMemorySessionid = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->sessionid;
+
     /* initialize funtion such as max(), min() */
     SetProcessingMode(NormalProcessing);
     /* Identify myself via ps */

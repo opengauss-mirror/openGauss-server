@@ -1087,6 +1087,8 @@ XLogRecPtr LogStandbySnapshot(void)
 
     /* GetRunningTransactionData() acquired XidGenLock, we must release it */
     LWLockRelease(XidGenLock);
+    ereport(LOG, (errmsg("Postmaster shutdown, the last standby snapshot is written,"
+                         " thread role is %d.", t_thrd.role)));
 
     return recptr;
 }

@@ -54,7 +54,7 @@ static void dw_empty_buftag_page_old(uint16 org_start, uint16 max_idx)
             set_size = (i - batch_begin) * sizeof(dw_single_flush_item);
             rc = memset_s(buf + start_offset, set_size, 0, set_size);
             securec_check(rc, "\0", "\0");
-            dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_offset, SINGLE_DW_FILE_NAME);
+            dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_offset, SINGLE_DW_FILE_NAME, true);
             batch++;
             batch_begin = i;
         }
@@ -67,7 +67,7 @@ static void dw_empty_buftag_page_old(uint16 org_start, uint16 max_idx)
             set_size = (max_idx - batch_begin) * sizeof(dw_single_flush_item);
             rc = memset_s(buf + start_offset, set_size, 0, set_size);
             securec_check(rc, "\0", "\0");
-            dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_offset, SINGLE_DW_FILE_NAME);
+            dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_offset, SINGLE_DW_FILE_NAME, true);
             break;
         }
     }
@@ -183,7 +183,7 @@ bool dw_single_file_recycle_old(bool trunc_file)
     }
 
     Assert(file_head->head.dwn == file_head->tail.dwn);
-    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME, true);
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("Reset single flush DW file: file_head[dwn %hu, start %hu], "
         "writer pos is %hu", file_head->head.dwn, file_head->start, single_cxt->write_pos)));
@@ -268,7 +268,7 @@ uint16 dw_single_flush_internal_old(BufferTag tag, Block block, XLogRecPtr page_
     COMP_CRC32C(item.crc, (char*)&item, offsetof(dw_single_flush_item, crc));
     FIN_CRC32C(item.crc);
 
-    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, page_write_offset, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, page_write_offset, SINGLE_DW_FILE_NAME, true);
     (void)pg_atomic_add_fetch_u64(&dw_single_cxt->single_stat_info.total_writes, 1);
 
     tag_write_offset = BLCKSZ + (actual_pos / SINGLE_BLOCK_TAG_NUM) * BLCKSZ;
@@ -278,7 +278,7 @@ uint16 dw_single_flush_internal_old(BufferTag tag, Block block, XLogRecPtr page_
     dw_pread_file(dw_single_cxt->fd, buf, BLCKSZ, tag_write_offset);
     rc = memcpy_s(buf + block_offset, BLCKSZ - block_offset, &item, sizeof(dw_single_flush_item));
     securec_check(rc, "\0", "\0");
-    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_write_offset, SINGLE_DW_FILE_NAME);
+    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_write_offset, SINGLE_DW_FILE_NAME, true);
     LWLockRelease(dw_single_cxt->second_flush_lock);
 
     (void)pg_atomic_add_fetch_u64(&dw_single_cxt->single_stat_info.total_writes, 1);

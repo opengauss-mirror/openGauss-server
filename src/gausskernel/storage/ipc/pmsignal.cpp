@@ -334,6 +334,18 @@ void MarkPostmasterChildNormal(void)
     t_thrd.shemem_ptr_cxt.PMSignalState->PMChildFlags[slot] = PM_CHILD_ACTIVE;
 }
 
+bool IsPostmasterChildNormal(void)
+{
+    int slot = t_thrd.proc_cxt.MyPMChildSlot;
+
+    Assert(AM_WAL_SENDER);
+
+    Assert(slot > 0 && slot <= t_thrd.shemem_ptr_cxt.PMSignalState->num_child_flags);
+    slot--;
+
+    return t_thrd.shemem_ptr_cxt.PMSignalState->PMChildFlags[slot] == PM_CHILD_ACTIVE;
+}
+
 /*
  * MarkPostmasterChildInactive - mark a postmaster child as done using
  * shared memory.  This is called in the child process.

@@ -1482,6 +1482,29 @@ static void createtbspc_abort_callback(bool isCommit, const void* arg)
 }
 #endif
 
+static void LogSubDirect(char *path, int parentLen)
+{
+    DIR* dirdesc = NULL;
+    struct dirent* de = NULL;
+    char* subfile = NULL;
+    dirdesc = AllocateDir(path);
+    errno_t rc = EOK;
+
+    while ((de = ReadDir(dirdesc, path)) != NULL) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
+            continue;
+        }
+        int len = parentLen + 1 + strlen(de->d_name) + 1;
+        subfile = (char*)palloc(len);
+        rc = sprintf_s(subfile, len, "%s/%s", path, de->d_name);
+        securec_check_ss(rc, "\0", "\0");
+        ereport(LOG, (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", subfile)));
+        pfree_ext(subfile);
+    }
+
+    FreeDir(dirdesc);
+}
+
 /*
  * destroy_tablespace_directories
  *
@@ -1612,11 +1635,15 @@ static bool destroy_tablespace_directories(Oid tablespaceoid, bool redo, bool is
         if (spc) {
             spc_lock(spc);
         }
-        if (rmdir(subfile) < 0)
-            ereport(redo ? LOG : ERROR,
-                (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", subfile)));
-        if (is_exrto_read) {
-            rmtree(subfile, true);
+        if (rmdir(subfile) < 0) {
+            if (redo) {
+                ereport(LOG, (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", subfile)));
+                if (is_exrto_read) {
+                    LogSubDirect(subfile, len);
+                }
+            } else {
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", subfile)));
+            }
         }
         if (spc) {
             spc_unlock(spc);

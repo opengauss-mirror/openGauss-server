@@ -316,6 +316,7 @@ void incre_ckpt_pagewriter_cxt_init()
         pgwr->thrd_dw_cxt.is_new_relfilenode = false;
         pgwr->dirty_list_size = dirty_list_size;
         pgwr->dirty_buf_list = (CkptSortItem *)palloc0(dirty_list_size * sizeof(CkptSortItem));
+        pgwr->willShutdown = false;
     }
 
     if (ENABLE_DMS) {
@@ -1274,6 +1275,10 @@ static void HandlePageWriterMainInterrupts()
         PageWriterSyncWithAbsorption();
         t_thrd.pagewriter_cxt.sync_retry = false;
     }
+    int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
+    if (t_thrd.pagewriter_cxt.shutdown_requested) {
+        g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id].willShutdown = true;
+    }
 }
 
 static void ckpt_pagewriter_main_thread_loop(void)
@@ -1382,6 +1387,9 @@ static void ckpt_pagewriter_sub_thread_loop()
     int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
     WritebackContextInit(&wb_context, &t_thrd.pagewriter_cxt.page_writer_after);
 
+    if (t_thrd.pagewriter_cxt.shutdown_requested) {
+        g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id].willShutdown = true;
+    }
     pg_read_barrier();
     if (g_instance.ckpt_cxt_ctl->page_writer_sub_can_exit) {
         ereport(LOG,

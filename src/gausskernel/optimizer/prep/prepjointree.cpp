@@ -2448,7 +2448,7 @@ static Node* deleteRelatedNullTest(Node* node, PlannerInfo* root)
     } else if (IsA(node, NullTest)) { /* Check this not null test can be deleted. */
         NullTest* NullExpr = (NullTest*)node;
 
-        if (IS_NOT_NULL == NullExpr->nulltesttype && IsA(NullExpr->arg, Var)) {
+        if (IS_NOT_NULL == NullExpr->nulltesttype && IsA(NullExpr->arg, Var) && !(NullExpr->argisrow)) {
             Var* var = (Var*)NullExpr->arg;
 
             /* If do not find primary key informatinal constraint, try not null constraint  */

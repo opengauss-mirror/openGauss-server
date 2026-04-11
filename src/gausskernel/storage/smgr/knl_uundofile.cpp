@@ -301,6 +301,13 @@ void ExtendUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockno, 
 
     SetUndoFileState(state, segno, fd);
     seekpos = statBuffer.st_size;
+
+    if (seekpos > (off_t)undoFileSize) {
+        CloseUndoFile(reln, forknum, InvalidBlockNumber);
+        ereport(ERROR, (errmsg(UNDOFORMAT("The undo file \"%s\" size is abnormal, size: %ld."), path, seekpos)));
+        return;
+    }
+
     char undoBuffer[BLCKSZ] = {'\0'};
 
     /* Extend file to undoFileSize. */
@@ -415,7 +422,7 @@ static UndoFileState *OpenUndoFile(SMgrRelation reln, ForkNumber forknum, BlockN
             "file blockNum=%u, we will extend undo file."), path, blockNum)));
         /* close undofile before unlink undo file */
         CloseUndoFile(reln, forknum, InvalidBlockNumber);
-        UnlinkUndoFile(reln->smgr_rnode, forknum, true, blockno);
+        UnlinkUndoFile(reln->smgr_rnode, forknum, false, blockno);
         ExtendUndoFile(reln, forknum, blockno, NULL, false);
     }
     return state;

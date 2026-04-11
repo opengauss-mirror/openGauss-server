@@ -453,7 +453,6 @@ bool RegisterBackgroundWorker(BgWorkerContext *bwc, int flag)
 
 static void BgworkerCleanupSharedContext()
 {
-    Assert(!IsBgWorkerProcess());
     /* clean up backgroud shared context */
     if (t_thrd.bgworker_cxt.bgwcontext) {
         BgWorkerContext *bwc = (BgWorkerContext*)t_thrd.bgworker_cxt.bgwcontext;

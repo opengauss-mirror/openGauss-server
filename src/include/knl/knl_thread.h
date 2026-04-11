@@ -1098,7 +1098,11 @@ typedef struct knl_t_wlmthrd_context {
 } knl_t_wlmthrd_context;
 
 #define RANDOM_LEN 16
+#ifdef ENABLE_LITE_MODE
+#define NUMBER_OF_SAVED_DERIVEKEYS 36
+#else
 #define NUMBER_OF_SAVED_DERIVEKEYS 48
+#endif
 
 typedef struct knl_t_aes_context {
     /* Save several used derive_keys, random_salt and user_key in one thread. */
@@ -2848,6 +2852,7 @@ typedef struct knl_t_storage_context {
     ONEXIT on_shmem_exit_list[MAX_ON_EXITS];
     int on_proc_exit_index;
     int on_shmem_exit_index;
+    bool  registerAbortBackupHandlerdone;    /* unterminated backups handler flag */
 
     union CmprMetaUnion* cmprMetaInfo;
 
