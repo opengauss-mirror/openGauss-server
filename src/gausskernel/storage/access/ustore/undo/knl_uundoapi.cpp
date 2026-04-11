@@ -354,6 +354,10 @@ bool IsSkipInsertSlot(UndoSlotPtr slotPtr)
  */
 void CheckPointUndoSystemMeta(XLogRecPtr checkPointRedo)
 {
+    if (!g_instance.attr.attr_storage.enable_ustore) {
+        return;
+    }
+
 #ifndef ENABLE_MULTIPLE_NODES
     if (g_instance.undo_cxt.uZoneCount == 0) {
         return;
@@ -613,6 +617,10 @@ static void InitUndoMeta(void)
 
 void RecoveryUndoSystemMeta(void)
 {
+    if (!g_instance.attr.attr_storage.enable_ustore) {
+        return;
+    }
+
     if (ENABLE_DMS) {
         ereport(LOG, (errmsg("Skip recovery undo system meta in shared storage mode.")));
         return;
@@ -732,6 +740,9 @@ void UpdateRollbackFinish(UndoSlotPtr slotPtr)
 
 void OnUndoProcExit(int code, Datum arg)
 {
+    if (!g_instance.attr.attr_storage.enable_ustore) {
+        return;
+    }
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("on undo exit, thrd: %d"), t_thrd.myLogicTid)));
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence upersistence = static_cast<UndoPersistence>(i);
@@ -826,6 +837,10 @@ void InitUndoZoneLock()
 
 void ResetUndoZoneLock()
 {
+    if (!g_instance.attr.attr_storage.enable_ustore) {
+        return;
+    }
+
     if (g_instance.undo_cxt.uZones != NULL) {
         int persistZoneCount = PERSIST_ZONE_COUNT;
         for (int persist = (int)UNDO_PERMANENT; persist <= (int)UNDO_TEMP; persist++) {

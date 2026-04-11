@@ -904,6 +904,10 @@ UndoZone *UndoZoneGroup::SwitchZone(int zid, UndoPersistence upersistence)
 
 void UndoZoneGroup::InitUndoCxtUzones()
 {
+    if (!g_instance.attr.attr_storage.enable_ustore) {
+        return;
+    }
+
     if (g_instance.undo_cxt.uZones == NULL) {
         LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
         if (g_instance.undo_cxt.uZones == NULL) {
