@@ -6760,6 +6760,15 @@ static Query* TryTransformInsertDirectly(ParseState* pstate, InsertStmt* stmt)
     const int ridx = list_length(pstate->p_rtable);
     GenerateTargetList(query, rte, ridx, targetColsAttrs);
 
+    int targetRangeTableindex = linitial_int(query->resultRelations);
+    RangeTblEntry* target_rte = rt_fetch(targetRangeTableindex, pstate->p_rtable);
+
+    foreach_cell(colCell, targetColsAttrs) {
+        FormData_pg_attribute* col = (FormData_pg_attribute*)lfirst(colCell);
+        target_rte->insertedCols = bms_add_member(target_rte->insertedCols,
+                                                   col->attnum - FirstLowInvalidHeapAttributeNumber);
+    }
+
     query->rtable = pstate->p_rtable;
     RangeTblRef* tblRef = makeNode(RangeTblRef);
     tblRef->rtindex = ridx;
