@@ -307,11 +307,7 @@ static void DropDDLReplicaEventTriggers(Oid puboid)
  */
 ObjectAddress CreatePublication(CreatePublicationStmt *stmt)
 {
-    if (t_thrd.proc->workingVersionNum < PUBLICATION_VERSION_NUM) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Before GRAND VERSION NUM %u, we do not support publication.", PUBLICATION_VERSION_NUM)));
-    }
-
+    CheckPublicationConditions();
     Relation rel;
     ObjectAddress myself;
     Oid puboid;
@@ -599,11 +595,7 @@ static void AlterPublicationTables(AlterPublicationStmt *stmt, Relation rel, Hea
  */
 void AlterPublication(AlterPublicationStmt *stmt)
 {
-    if (t_thrd.proc->workingVersionNum < PUBLICATION_VERSION_NUM) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Before GRAND VERSION NUM %u, we do not support publication.", PUBLICATION_VERSION_NUM)));
-    }
-
+    CheckPublicationConditions();
     Relation rel;
     HeapTuple tup;
 
@@ -627,11 +619,24 @@ void AlterPublication(AlterPublicationStmt *stmt)
     heap_close(rel, RowExclusiveLock);
 }
 
+void CheckPublicationConditions()
+{
+    if (t_thrd.proc->workingVersionNum < PUBLICATION_VERSION_NUM) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Before GRAND VERSION NUM %u, we do not support publication.", PUBLICATION_VERSION_NUM)));
+    }
+    if (!g_instance.attr.attr_storage.enable_subscription) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("When enable_subscription is off, publication is disabled.")));
+    }
+}
+
 /*
  * Remove the publication by mapping OID.
  */
 void RemovePublicationById(Oid pubid)
 {
+    CheckPublicationConditions();
     Relation rel;
     HeapTuple tup;
     Form_pg_publication pubform;

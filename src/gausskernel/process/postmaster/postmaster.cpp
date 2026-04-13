@@ -4378,10 +4378,11 @@ static int ServerLoop(void)
          * cause related system table may not ready.
          */
 #ifndef ENABLE_MULTIPLE_NODES
-        if ((u_sess->attr.attr_common.upgrade_mode == 0 ||
+        if (((u_sess->attr.attr_common.upgrade_mode == 0 ||
             pg_atomic_read_u32(&WorkingGrandVersionNum) >= PUBLICATION_VERSION_NUM) &&
             g_instance.pid_cxt.ApplyLauncerPID == 0 &&
-            pmState == PM_RUN && !dummyStandbyMode && !ENABLE_DMS) {
+            pmState == PM_RUN && !dummyStandbyMode && !ENABLE_DMS) &&
+            g_instance.attr.attr_storage.enable_subscription) {
             g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
         }
 #endif
@@ -7300,9 +7301,10 @@ static void reaper(SIGNAL_ARGS)
                 g_instance.pid_cxt.GlobalStatsPID = initialize_util_thread(GLOBALSTATS_THREAD);
 
 #ifndef ENABLE_MULTIPLE_NODES
-            if ((u_sess->attr.attr_common.upgrade_mode == 0 ||
+            if (((u_sess->attr.attr_common.upgrade_mode == 0 ||
                 pg_atomic_read_u32(&WorkingGrandVersionNum) >= PUBLICATION_VERSION_NUM) &&
-                g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode && !ENABLE_DMS) {
+                g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode && !ENABLE_DMS) &&
+                g_instance.attr.attr_storage.enable_subscription) {
                 g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
             }
 #endif

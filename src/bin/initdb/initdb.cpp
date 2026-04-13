@@ -1348,6 +1348,22 @@ static void set_null_conf(void)
     FREE_AND_RESET(path);
 }
 
+static char** set_buffer_param(char** conflines, const char* old_setting, const char* param_name, int value_in_kb)
+{
+    char repltok[TZ_STRLEN_MAX + 100];
+    int nRet;
+
+    if (value_in_kb % 1024 == 0) {
+        int value_in_mb = value_in_kb / 1024;
+        nRet = sprintf_s(repltok, sizeof(repltok), "%s = %dMB", param_name, value_in_mb);
+    } else {
+        nRet = sprintf_s(repltok, sizeof(repltok), "%s = %dkB", param_name, value_in_kb);
+    }
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    return replace_token(conflines, old_setting, repltok);
+}
+
 /*
  * Determine platform-specific config settings
  *
@@ -1450,17 +1466,10 @@ static void test_config_settings(void)
             break;
     }
     n_buffers = test_buffs;
-
-    if ((n_buffers * (BLCKSZ / 1024)) % 1024 == 0) {
-        printf("%dMB\n", (n_buffers * (BLCKSZ / 1024)) / 1024);
-        nRet = sprintf_s(repltok, sizeof(repltok), "shared_buffers = %dMB", (n_buffers * (BLCKSZ / 1024)) / 1024);
-    } else {
-        printf("%dkB\n", n_buffers * (BLCKSZ / 1024));
-        nRet = sprintf_s(repltok, sizeof(repltok), "shared_buffers = %dkB", n_buffers * (BLCKSZ / 1024));
-    }
-    securec_check_ss_c(nRet, "\0", "\0");
-    conflines = replace_token(conflines, "#shared_buffers = 32MB", repltok);
-
+    int buffers_kb = n_buffers * (BLCKSZ / 1024);
+    conflines = set_buffer_param(conflines, "#shared_buffers = 32MB", "shared_buffers", buffers_kb);
+    conflines = set_buffer_param(conflines, "#clog_buffers = 32MB", "clog_buffers", buffers_kb);
+    conflines = set_buffer_param(conflines, "#csnlog_buffers = 32MB", "csnlog_buffers", buffers_kb);
     writefile(path, conflines);
     (void)chmod(path, S_IRUSR | S_IWUSR);
     FREE_AND_RESET(conflines);

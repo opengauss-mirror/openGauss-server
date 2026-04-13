@@ -21,6 +21,7 @@ extern ObjectAddress CreatePublication(CreatePublicationStmt *stmt);
 extern void AlterPublication(AlterPublicationStmt *stmt);
 extern void RemovePublicationById(Oid proid);
 extern void RemovePublicationRelById(Oid proid);
+extern void CheckPublicationConditions();
 
 extern ObjectAddress AlterPublicationOwner(const char *name, Oid newOwnerId);
 extern void AlterPublicationOwner_oid(Oid pubid, Oid newOwnerId);

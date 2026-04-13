@@ -21,6 +21,7 @@
 #ifndef PARSENODES_H
 #define PARSENODES_H
 
+#include "knl/knl_thread.h"
 #include "nodes/bitmapset.h"
 #include "nodes/params.h"
 #include "nodes/primnodes.h"
@@ -2463,6 +2464,9 @@ typedef struct RangeTblFunction {
 
 extern inline NodeTag transform_node_tag(Node* raw_parse_tree)
 {
+    if (t_thrd.postgres_cxt.cur_command_tag == T_DolphinStrictTag) {
+        return T_DolphinStrictTag;
+    }
     if (!raw_parse_tree) {
         return T_Invalid;
     }
@@ -2472,7 +2476,7 @@ extern inline NodeTag transform_node_tag(Node* raw_parse_tree)
         if (stmt->intoClause == NULL || stmt->intoClause->userVarList != NIL || stmt->intoClause->filename != NULL) {
             return T_SelectStmt;
         }
-        return T_CreateStmt;
+        return T_DolphinStrictTag;
     } else if (nodeTag(raw_parse_tree) == T_ExplainStmt) {
         return transform_node_tag(((ExplainStmt*)raw_parse_tree)->query);
     }

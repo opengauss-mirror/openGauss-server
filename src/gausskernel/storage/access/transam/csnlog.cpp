@@ -546,8 +546,8 @@ static CommitSeqNo RecursiveGetCommitSeqNo(TransactionId xid)
  */
 Size CSNLOGShmemBuffers(void)
 {
-    return Min(MAX_SLRU_PARTITION_SIZE, Max(BATCH_SIZE,
-        g_instance.attr.attr_storage.NBuffers/ SLRU_PARTITION_SIZE_RATE))
+    return Min(SLRU_MAX_ALLOWED_BUFFERS / NUM_CSNLOG_PARTITIONS, Max(BATCH_SIZE,
+        g_instance.attr.attr_storage.NCSNLOGBuffers / SLRU_PARTITION_SIZE_RATE))
         / SLRU_BANK_SIZE * SLRU_BANK_SIZE;
 }
 
