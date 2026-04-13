@@ -1536,44 +1536,17 @@ void WLMReleaseStmtDetailItem(WLMStmtDetail* detail)
 {
     Assert(detail != NULL);
 
-    if (detail->query_plan != NULL) {
-        pfree_ext(detail->query_plan);
-    }
-
-    if (detail->query_plan_issue != NULL) {
-        pfree_ext(detail->query_plan_issue);
-    }
-
-    if (detail->query_band != NULL) {
-        pfree_ext(detail->query_band);
-    }
-
-    if (detail->msg != NULL) {
-        pfree_ext(detail->msg);
-    }
-
-    if (detail->statement != NULL) {
-        pfree_ext(detail->statement);
-    }
-
-    if (detail->clienthostname != NULL) {
-        pfree_ext(detail->clienthostname);
-    }
-
-    if (detail->schname != NULL) {
-        pfree_ext(detail->schname);
-    }
-
-    if (detail->username != NULL) {
-        pfree_ext(detail->username);
-    }
-
-    if (detail->clientaddr != NULL) {
-        pfree_ext(detail->clientaddr);
-    }
-
+    pfree_ext(detail->query_plan);
+    pfree_ext(detail->query_plan_issue);
+    pfree_ext(detail->query_band);
+    pfree_ext(detail->msg);
+    pfree_ext(detail->statement);
+    pfree_ext(detail->clienthostname);
+    pfree_ext(detail->schname);
+    pfree_ext(detail->clientaddr);
     pfree_ext(detail->slowQueryInfo.current_table_counter);
     pfree_ext(detail->slowQueryInfo.localTimeInfoArray);
+    pfree_ext(detail->username);
 }
 
 /*
@@ -1633,20 +1606,10 @@ void WLMRemoveExpiredRecords(void)
     for (i = 0; i < count; ++i) {
         hashCode = WLMHashCode(qids + i, sizeof(Qid));
         LockSessHistHashPartition(hashCode, LW_EXCLUSIVE);
-        
-        detail = (WLMStmtDetail*)hash_search(
-            g_instance.wlm_cxt->stat_manager.session_info_hashtbl, qids + i, HASH_FIND, NULL);
-
-        if (IS_PGXC_COORDINATOR && detail != NULL) {
-            if (detail != NULL) {
-                WLMReleaseStmtDetailItem(detail);
-            }
-        }
-
-        if (IS_PGXC_DATANODE && detail != NULL) {
-            pfree_ext(detail->slowQueryInfo.current_table_counter);
-            pfree_ext(detail->slowQueryInfo.localTimeInfoArray);
-            pfree_ext(detail->query_plan);
+        detail = (WLMStmtDetail*)hash_search(g_instance.wlm_cxt->stat_manager.session_info_hashtbl, qids + i, HASH_FIND,
+                                             NULL);
+        if (detail != NULL) {
+            WLMReleaseStmtDetailItem(detail);
         }
         hash_search(g_instance.wlm_cxt->stat_manager.session_info_hashtbl, qids + i, HASH_REMOVE, NULL);
 
@@ -4727,7 +4690,6 @@ void WLMSetSessionInfo(void)
             WLMGetTimestampDuration(t_thrd.wlm_cxt.collect_info->blockStartTime, GetCurrentTimestamp()) / MSECS_PER_SEC;
         // if execute time is smaller than resource_track_duration,not record session info to session_history table
         if (cnDuration < u_sess->attr.attr_resource.resource_track_duration) {
-            hash_search(g_instance.wlm_cxt->stat_manager.session_info_hashtbl, &g_wlm_params->qid, HASH_REMOVE, NULL);
             UnLockSessHistHashPartition(hashCode);
             UnLockSessRealTHashPartition(hashCode);
             return;
@@ -4742,17 +4704,24 @@ void WLMSetSessionInfo(void)
                     g_instance.wlm_cxt->stat_manager.max_detail_num)));
             return;
         }
-        WLMDNodeInfo* pRealDetail = (WLMDNodeInfo*)hash_search(
-            g_instance.wlm_cxt->stat_manager.collect_info_hashtbl, &u_sess->wlm_cxt->wlm_params.qid, HASH_FIND, NULL);
-        if (pRealDetail == NULL) {
-            UnLockSessHistHashPartition(hashCode);
-            UnLockSessRealTHashPartition(hashCode);
-            return;
-        }
         WLMStmtDetail* pDetail = (WLMStmtDetail*)hash_search(
             g_instance.wlm_cxt->stat_manager.session_info_hashtbl, &g_wlm_params->qid, HASH_ENTER_NULL, &hasFound);
         /* If we can find it in the hash table, we will do nothing. */
         if (pDetail == NULL || hasFound) {
+            if (hasFound && pDetail != NULL) {
+                pDetail->status = t_thrd.wlm_cxt.collect_info->status;
+            }
+            UnLockSessHistHashPartition(hashCode);
+            UnLockSessRealTHashPartition(hashCode);
+            return;
+        }
+
+        WLMDNodeInfo* pRealDetail = (WLMDNodeInfo*)hash_search(g_instance.wlm_cxt->stat_manager.collect_info_hashtbl,
+                                                               &u_sess->wlm_cxt->wlm_params.qid, HASH_FIND, NULL);
+        if (pRealDetail == NULL) {
+            if (pDetail != NULL) {
+                pDetail->valid = false;
+            }
             UnLockSessHistHashPartition(hashCode);
             UnLockSessRealTHashPartition(hashCode);
             return;
@@ -4864,7 +4833,6 @@ void WLMSetSessionInfo(void)
              t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime : GetCurrentTimestamp())) / MSECS_PER_SEC;
         if (t_thrd.wlm_cxt.dn_cpu_detail->status == WLM_STATUS_FINISHED &&
             dnDuration < u_sess->attr.attr_resource.resource_track_duration) {
-            hash_search(g_instance.wlm_cxt->stat_manager.session_info_hashtbl, &g_wlm_params->qid, HASH_REMOVE, NULL);
             UnLockSessHistHashPartition(hashCode);
             return;
         }
@@ -4899,7 +4867,7 @@ void WLMSetSessionInfo(void)
          * while the record expired, we will remove it from the hash table.
          */
         pDetail->exptime =
-            TimestampTzPlusMilliseconds(GetCurrentTimestamp(), session_info_collect_timer * 2 * MSECS_PER_SEC);
+            TimestampTzPlusMilliseconds(GetCurrentTimestamp(), session_info_collect_timer * MSECS_PER_SEC);
 
         /* get the peak memory, spill count and total cpu time */
         pDetail->estimate_memory = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_memory;
@@ -4915,10 +4883,6 @@ void WLMSetSessionInfo(void)
             WLMGetTimestampDuration(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime, endTime);
         pDetail->warning = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->warning;
         pDetail->geninfo.totalCpuTime = 0;
-        pDetail->status = t_thrd.wlm_cxt.dn_cpu_detail->status;
-        MemoryContext oldContext = MemoryContextSwitchTo(g_instance.wlm_cxt->query_resource_track_mcxt);
-        pDetail->query_plan = pstrdup(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
-        MemoryContextSwitchTo(oldContext);
         pDetail->plan_size = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size;
         pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;

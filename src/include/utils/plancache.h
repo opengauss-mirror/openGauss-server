@@ -572,6 +572,8 @@ extern double cached_plan_cost(CachedPlan* plan);
 extern void ReportReasonForPlanChoose(PlanChooseReason reason);
 extern CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamListInfo boundParams,
                                           bool isBuildingCustomPlan);
+extern CachedPlan* BuildCachedPlanInTransientContext(CachedPlanSource* plansource, List* qlist,
+    ParamListInfo boundParams, bool isBuildingCustomPlan);
 extern void ReleaseGenericPlan(CachedPlanSource* plansource);
 extern bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundParams);
 

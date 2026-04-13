@@ -664,6 +664,7 @@ bool ThreadPoolWorker::AttachSessionToThread()
 
         case KNL_SESS_CLOSERAW:
         case KNL_SESS_CLOSE: {
+            pgstat_initialize_session();
             /* unified auditing logout */
             audit_processlogout_unified();
 

@@ -4939,13 +4939,14 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
     bool resultTypByVal = false;
     bool isFusion = false;
     if (u_sess->iud_expr_reuse_ctx == NULL) {
-         u_sess->iud_expr_reuse_ctx = AllocSetContextCreate(u_sess->top_transaction_mem_cxt, "IudExprReuseContext", ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+        u_sess->iud_expr_reuse_ctx =
+            AllocSetContextCreate(u_sess->top_transaction_mem_cxt, "IudExprReuseContext", ALLOCSET_DEFAULT_MINSIZE,
+                                  ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     }
     /*
      * To use the executor, we need an EState.
      */
-     if (u_sess->iud_expr_reuse_ctx != NULL) {
+    if (u_sess->iud_expr_reuse_ctx != NULL) {
         estate = CreateExecutorState();
         isFusion = true;
     } else {

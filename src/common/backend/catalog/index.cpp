@@ -5390,13 +5390,15 @@ void reindex_indexpart_internal(Relation heapRelation, Relation iRel, IndexInfo*
 
     index_build(heapRelation, heapPart, iRel, indexpart, indexInfo, false, true, INDEX_CREATE_LOCAL_PARTITION, true);
 
+    bool indisusable = heapPart->pd_part->indisusable;
+
     /*the whole partitioned index has brokenUndoChain if any one partition has brokenUndoChain */
     partitionClose(iRel, indexpart, NoLock);
     partitionClose(heapRelation, heapPart, NoLock);
     relation_close(sys_table, RowExclusiveLock);
 
-    // step 2: reset indisusable state of index partition
-    ATExecSetIndexUsableState(PartitionRelationId, indexPartId, true);
+    // step 2: reset indisusable state of index partition: should keep consistent with heap partition.
+    ATExecSetIndexUsableState(PartitionRelationId, indexPartId, indisusable);
 }
 
 /*

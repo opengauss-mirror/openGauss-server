@@ -278,6 +278,6 @@ extern Datum end_collect_workload(PG_FUNCTION_ARGS);
 extern Datum analyze_workload(PG_FUNCTION_ARGS);
 extern bool checkSelectIntoParse(SelectStmt* stmt);
 extern PLpgSQL_datum* copypPlpgsqlDatum(PLpgSQL_datum* datum);
-extern StmtResult *execute_stmt(const char *query_string, bool need_result = false);
+extern StmtResult *execute_stmt(const char *query_string, bool need_result = false, ParamListInfo paramInfo = NULL);
 
 #endif /* SQLADVISOR_H */

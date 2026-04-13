@@ -5252,7 +5252,7 @@ Node* QueryRewriteNonConstant(Node *node)
     return res;
 }
 
-List* QueryRewriteSelectIntoVarList(Node *node, int res_len)
+List* QueryRewriteSelectIntoVarList(Node *node, int res_len, ParamListInfo paramInfo)
 {
     Query *parsetree = (Query *)((SubLink *)node)->subselect;
     List *resList = NIL;
@@ -5260,7 +5260,7 @@ List* QueryRewriteSelectIntoVarList(Node *node, int res_len)
     StringInfo select_sql = makeStringInfo();
     deparse_query(parsetree, select_sql, NIL, false, false);
 
-    StmtResult *result = execute_stmt(select_sql->data, true);
+    StmtResult *result = execute_stmt(select_sql->data, true, paramInfo);
     DestroyStringInfo(select_sql);
 
     if (result->tuples == NULL) {

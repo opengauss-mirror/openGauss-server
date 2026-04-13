@@ -1300,6 +1300,65 @@ static inline void ResetStream(bool outer_is_stream, bool outer_is_stream_suppor
     }
 }
 
+static inline bool NeedTransientCachedPlanBuild(CachedPlanSource* plansource, ParamListInfo boundParams)
+{
+    (void)boundParams;
+
+    /*
+     * When PBE optimization is off in SPI, repeated replanning may leave
+     * sizable planner/copyObject scratch memory in SPI contexts. Route all
+     * cache plan builds through a temporary context and release it right after
+     * planning, for both param and non-param builds.
+     */
+    return !plansource->is_oneshot && !u_sess->attr.attr_sql.enable_pbe_optimization &&
+           !u_sess->pcache_cxt.is_plan_exploration && u_sess->SPI_cxt._connected >= 0;
+}
+
+static inline void ResetIudExprReuseContextAfterPlanBuild(void)
+{
+    if (u_sess->iud_expr_reuse_ctx != NULL) {
+        MemoryContextReset(u_sess->iud_expr_reuse_ctx);
+    }
+}
+
+CachedPlan* BuildCachedPlanInTransientContext(CachedPlanSource* plansource, List* qlist, ParamListInfo boundParams,
+    bool isBuildingCustomPlan)
+{
+    if (!NeedTransientCachedPlanBuild(plansource, boundParams)) {
+        return BuildCachedPlan(plansource, qlist, boundParams, isBuildingCustomPlan);
+    }
+
+    CachedPlan* plan = NULL;
+    MemoryContext oldcxt = CurrentMemoryContext;
+    MemoryContext transient_plan_cxt = AllocSetContextCreate(oldcxt,
+        "CachedPlanBuild",
+        ALLOCSET_SMALL_MINSIZE,
+        ALLOCSET_SMALL_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+
+    PG_TRY();
+    {
+        MemoryContextSwitchTo(transient_plan_cxt);
+        plan = BuildCachedPlan(plansource, qlist, boundParams, isBuildingCustomPlan);
+        MemoryContextSwitchTo(oldcxt);
+        ResetIudExprReuseContextAfterPlanBuild();
+        MemoryContextDelete(transient_plan_cxt);
+        transient_plan_cxt = NULL;
+    }
+    PG_CATCH();
+    {
+        MemoryContextSwitchTo(oldcxt);
+        ResetIudExprReuseContextAfterPlanBuild();
+        if (transient_plan_cxt != NULL) {
+            MemoryContextDelete(transient_plan_cxt);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    return plan;
+}
+
 /*
  * BuildCachedPlan: construct a new CachedPlan from a CachedPlanSource.
  *
@@ -1330,7 +1389,6 @@ CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamList
     PLpgSQL_execstate *saved_estate = plpgsql_estate;
     bool        outer_is_stream = false;
     bool        outer_is_stream_support = false;
-
 
     /*
      * NOTE: GetCachedPlan should have called RevalidateCachedQuery first, so
@@ -1917,7 +1975,7 @@ CachedPlan* GetWiseCachedPlan(CachedPlanSource* plansource,
             boundParams->params_need_process == true && IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
             if (!plansource->gpc.status.InShareTable()) {
                 /* we just replace params with virtual values and do not use plan. */
-                CachedPlan *tmp_cplan = BuildCachedPlan(plansource, qlist, boundParams, false);
+                CachedPlan *tmp_cplan = BuildCachedPlanInTransientContext(plansource, qlist, boundParams, false);
                 /* Mark it no longer valid */
                 tmp_cplan->magic = 0;
                 /* One-shot plans do not own their context, so we can't free them */
@@ -1928,7 +1986,7 @@ CachedPlan* GetWiseCachedPlan(CachedPlanSource* plansource,
             } else {
                 /* for shared plan , just copy a plansource for explain with values */
                 CachedPlanSource *tmp_psrc = CopyCachedPlan(plansource, false);
-                CachedPlan *tmp_cplan = BuildCachedPlan(tmp_psrc, NIL, boundParams, false);
+                CachedPlan *tmp_cplan = BuildCachedPlanInTransientContext(tmp_psrc, NIL, boundParams, false);
                 tmp_cplan->magic = 0;
                 ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, tmp_cplan->context);
                 MemoryContextDelete(tmp_cplan->context);
@@ -2070,10 +2128,9 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
         } else {
             /* Whenever plan is rebuild, we need to drop the old one */
             ReleaseGenericPlan(plansource);
-            /* Build a new generic plan */
-            plan = BuildCachedPlan(plansource, qlist, NULL, customplan);
+            /* Build a new generic plan in transient context to avoid SPI scratch accumulation. */
+            plan = BuildCachedPlanInTransientContext(plansource, qlist, NULL, customplan);
             Assert(!plan->isShared());
-
 
             /* Link the new generic plan into the plansource */
             plansource->gplan = plan;
@@ -2152,7 +2209,7 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
         boundParams->params_need_process == true && IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         if (!plansource->gpc.status.InShareTable()) {
             /* we just replace params with virtual values and do not use plan. */
-            CachedPlan* tmp_cplan = BuildCachedPlan(plansource, qlist, boundParams, customplan);
+            CachedPlan* tmp_cplan = BuildCachedPlanInTransientContext(plansource, qlist, boundParams, customplan);
             /* Mark it no longer valid */
             tmp_cplan->magic = 0;
             /* One-shot plans do not own their context, so we can't free them */
@@ -2163,7 +2220,7 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
         } else {
             /* for shared plan , just copy a plansource for explain with values */
             CachedPlanSource* tmp_psrc = CopyCachedPlan(plansource, false);
-            CachedPlan* tmp_cplan = BuildCachedPlan(tmp_psrc, NIL, boundParams, customplan);
+            CachedPlan* tmp_cplan = BuildCachedPlanInTransientContext(tmp_psrc, NIL, boundParams, customplan);
             tmp_cplan->magic = 0;
             ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, tmp_cplan->context);
             MemoryContextDelete(tmp_cplan->context);
@@ -2178,7 +2235,7 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
         ReleaseGenericPlan(plansource);
 
         /* Build a custom plan */
-        plan = BuildCachedPlan(plansource, qlist, boundParams, customplan);
+        plan = BuildCachedPlanInTransientContext(plansource, qlist, boundParams, customplan);
         /* Link the new custome plan into the plansource */
         plansource->cplan = plan;
         plan->refcount++;
@@ -3396,4 +3453,3 @@ void ReportReasonForPlanChoose(PlanChooseReason reason)
     ereport(elevel, (errmodule(MOD_OPT_CHOICE), errmsg("[Choosing C/G Plan]: %s", msg[reason])));
     return;
 }
-
