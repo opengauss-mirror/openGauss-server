@@ -43,6 +43,7 @@
 #include "gs_policy/policy_common.h"
 #include "gs_policy/gs_policy_utils.h"
 #include "executor/executor.h"
+#include "knl/knl_thread.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "gs_policy/gs_vector.h"
@@ -59,6 +60,87 @@ struct log_item {
 };
 using access_event_logs = gs_stl::gs_vector<log_item>;
 static THR_LOCAL access_event_logs *access_logs = NULL;
+
+struct AccessAuditTempMemoryState {
+    MemoryContext old_map_context;
+    MemoryContext old_string_context;
+    MemoryContext old_set_context;
+    MemoryContext temp_map_context;
+    MemoryContext temp_string_context;
+    MemoryContext temp_set_context;
+    bool active;
+
+    AccessAuditTempMemoryState()
+        : old_map_context(NULL),
+          old_string_context(NULL),
+          old_set_context(NULL),
+          temp_map_context(NULL),
+          temp_string_context(NULL),
+          temp_set_context(NULL),
+          active(false)
+    {}
+};
+
+static void begin_access_audit_temp_memory(AccessAuditTempMemoryState *state)
+{
+    if (state == NULL || state->active) {
+        return;
+    }
+
+    state->old_map_context = t_thrd.security_policy_cxt.MapMemoryContext;
+    state->old_string_context = t_thrd.security_policy_cxt.StringMemoryContext;
+    state->old_set_context = t_thrd.security_policy_cxt.SetMemoryContext;
+
+    state->temp_map_context = AllocSetContextCreate(TopMemoryContext, "AccessAuditMapMemory",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    state->temp_string_context = AllocSetContextCreate(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY),
+        "AccessAuditStringMemory", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+    state->temp_set_context = AllocSetContextCreate(TopMemoryContext, "AccessAuditSetMemory",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+
+    t_thrd.security_policy_cxt.MapMemoryContext = state->temp_map_context;
+    t_thrd.security_policy_cxt.StringMemoryContext = state->temp_string_context;
+    t_thrd.security_policy_cxt.SetMemoryContext = state->temp_set_context;
+    state->active = true;
+}
+
+static void restore_access_audit_temp_memory(AccessAuditTempMemoryState *state)
+{
+    if (state == NULL || !state->active) {
+        return;
+    }
+
+    t_thrd.security_policy_cxt.MapMemoryContext = state->old_map_context;
+    t_thrd.security_policy_cxt.StringMemoryContext = state->old_string_context;
+    t_thrd.security_policy_cxt.SetMemoryContext = state->old_set_context;
+}
+
+static void destroy_access_audit_temp_memory(AccessAuditTempMemoryState *state)
+{
+    if (state == NULL || !state->active) {
+        return;
+    }
+
+    restore_access_audit_temp_memory(state);
+    if (state->temp_map_context != NULL) {
+        MemoryContextDelete(state->temp_map_context);
+    }
+    if (state->temp_string_context != NULL) {
+        MemoryContextDelete(state->temp_string_context);
+    }
+    if (state->temp_set_context != NULL) {
+        MemoryContextDelete(state->temp_set_context);
+    }
+
+    state->old_map_context = NULL;
+    state->old_string_context = NULL;
+    state->old_set_context = NULL;
+    state->temp_map_context = NULL;
+    state->temp_string_context = NULL;
+    state->temp_set_context = NULL;
+    state->active = false;
+}
 
 /*
  * Recoed access logs(DDL) for auditing policy. If no logs, create first.
@@ -438,14 +520,22 @@ bool handle_table_entry(RangeTblEntry *rte, int access_type, const policy_set *p
     return true;
 }
 
+static void audit_single_table_entry(RangeTblEntry *rte, CmdType cmd_type, const policy_set *policy_ids,
+    const policy_set *security_policy_ids)
+{
+    policy_result pol_result;
+    if (handle_table_entry(rte, cmd_type, policy_ids, security_policy_ids, &pol_result)) {
+        flush_policy_result(&pol_result, cmd_type);
+    }
+}
+
 /*
  * Hook ExecutorStart to get the query text and basic command type for queries
  * that do not contain a table and so can't be idenitified accurately in
  * ExecutorCheckPerms. walk through all the subqueries and check the tables in access_audit process.
  */
-void handle_subquery(RangeTblEntry *rte, int commandType, policy_result *pol_result, 
-                     _checked_tables *checked_tables, const policy_set *policy_ids,
-                     const policy_set *security_policy_ids, int *recursion_deep)
+void handle_subquery(RangeTblEntry *rte, int commandType, _checked_tables *checked_tables,
+    const policy_set *policy_ids, const policy_set *security_policy_ids, int *recursion_deep)
 {
     if (*recursion_deep >= 5) {
         return;
@@ -461,8 +551,8 @@ void handle_subquery(RangeTblEntry *rte, int commandType, policy_result *pol_res
             continue;
         } else if (sub_rte->rtekind == RTE_SUBQUERY && sub_rte->subquery) {
             /* recursive call handle_subquery till find a table object */
-            handle_subquery(sub_rte, commandType, pol_result, checked_tables, policy_ids,
-                            security_policy_ids, &(++(*recursion_deep)));
+            handle_subquery(sub_rte, commandType, checked_tables, policy_ids, security_policy_ids,
+                &(++(*recursion_deep)));
         } else if (sub_rte->relname) {
             /*
              * if the table object has not checked before, then run the handle_table_entry to deal with it
@@ -470,11 +560,7 @@ void handle_subquery(RangeTblEntry *rte, int commandType, policy_result *pol_res
             if (checked_tables->insert(sub_rte->relname).second) {
                 CmdType cmd_type = get_rte_commandtype(rte);
                 cmd_type = (cmd_type == CMD_UNKNOWN) ? (CmdType)commandType : cmd_type;
-                if (!handle_table_entry(sub_rte, cmd_type, policy_ids, security_policy_ids, pol_result)) {
-                    continue;
-                }
-
-                flush_policy_result(pol_result, cmd_type);
+                audit_single_table_entry(sub_rte, cmd_type, policy_ids, security_policy_ids);
             }
         }
     }
@@ -495,29 +581,39 @@ void access_audit_policy_run(const List* rtable, CmdType cmd_type)
     ListCell *lc = NULL;
     policy_set security_policy_ids;
     _checked_tables checked_tables;
-    foreach (lc, rtable) {
-        /* table object */
-        RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
-        policy_result pol_result;
-        if (rte == NULL || rte->rtekind == RTE_REMOTE_DUMMY) {
-            continue;
-        }
+    AccessAuditTempMemoryState temp_memory_state;
+    begin_access_audit_temp_memory(&temp_memory_state);
 
-        if (rte->rtekind == RTE_SUBQUERY && rte->subquery) { /* relation is subquery */
-            int recursion_deep = 0;
-            handle_subquery(rte, rte->subquery->commandType, &pol_result, &checked_tables, &policy_ids,
-                &security_policy_ids, &recursion_deep);
-        } else if (rte->relname != NULL &&
-            checked_tables.insert(rte->relname).second) { /* verify if table object already checked */
-            /* use query plan commandtype here but not get it from rte directly */
-            if (!handle_table_entry(rte, cmd_type, &policy_ids, &security_policy_ids, &pol_result)) {
+    PG_TRY();
+    {
+        foreach (lc, rtable) {
+            /* table object */
+            RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
+            if (rte == NULL || rte->rtekind == RTE_REMOTE_DUMMY) {
                 continue;
             }
-            flush_policy_result(&pol_result, cmd_type);
-        }
-    }
 
-    flush_access_logs(AUDIT_OK);
+            if (rte->rtekind == RTE_SUBQUERY && rte->subquery) { /* relation is subquery */
+                int recursion_deep = 0;
+                handle_subquery(rte, rte->subquery->commandType, &checked_tables, &policy_ids, &security_policy_ids,
+                    &recursion_deep);
+            } else if (rte->relname != NULL &&
+                checked_tables.insert(rte->relname).second) { /* verify if table object already checked */
+                /* use query plan commandtype here but not get it from rte directly */
+                audit_single_table_entry(rte, cmd_type, &policy_ids, &security_policy_ids);
+            }
+        }
+
+        flush_access_logs(AUDIT_OK);
+        destroy_access_audit_temp_memory(&temp_memory_state);
+    }
+    PG_CATCH();
+    {
+        flush_access_logs(AUDIT_FAILED);
+        destroy_access_audit_temp_memory(&temp_memory_state);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 }
 
 void opfusion_unified_audit_executor(const PlannedStmt *plannedstmt)
