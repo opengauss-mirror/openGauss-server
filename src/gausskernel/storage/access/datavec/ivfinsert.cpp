@@ -251,7 +251,7 @@ static void InsertTuple(Relation index, Datum *values, const bool *isnull, ItemP
             vec = resVec;
             UnlockReleaseBuffer(cbuf);
         }
-        IvfComputeVectorPQCode(vec, &params, pqcode);
+        IvfComputeVectorPQCode(vec, &params, pqcode, (size_t)pqcodeSize);
         ((PageHeader)page)->pd_upper -= MAXALIGN(pqcodeSize);
         errno_t rc = memcpy_s(
             ((char *)page) + ((PageHeader)page)->pd_upper, pqcodeSize, (char *)pqcode, pqcodeSize);
