@@ -102,6 +102,7 @@ static void substitute_multiple_relids(Node* node, int varno, Relids subrelids);
 static void fix_append_rel_relids(List* append_rel_list, int varno, Relids subrelids);
 static Node* find_jointree_node_for_rel(Node* jtnode, int relid);
 static Node* deleteRelatedNullTest(Node* node, PlannerInfo* root);
+static void make_jointree_quals_explicit(Node* jtnode);
 static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Node* jtnode);
 static Node *pull_up_sublinks_targetlist(PlannerInfo *root, Node *node,
                               Node *jtnode, Relids *relids,
@@ -3359,6 +3360,43 @@ static void reset_operations_need_done_on_parent(Query* query)
 }
 
 /*
+ * Full-join rewrite copies queries after qual preprocessing, so their jointree
+ * quals are already in implicit-AND list form. Convert them back to explicit
+ * boolean expressions before planning the synthetic subqueries again.
+ */
+static void make_jointree_quals_explicit(Node* jtnode)
+{
+    if (jtnode == NULL || IsA(jtnode, RangeTblRef)) {
+        return;
+    } else if (IsA(jtnode, FromExpr)) {
+        FromExpr* f = (FromExpr*)jtnode;
+        ListCell* lc = NULL;
+
+        foreach (lc, f->fromlist) {
+            make_jointree_quals_explicit((Node*)lfirst(lc));
+        }
+
+        if (f->quals != NULL && IsA(f->quals, List)) {
+            f->quals = (Node*)make_ands_explicit((List*)f->quals);
+        }
+    } else if (IsA(jtnode, JoinExpr)) {
+        JoinExpr* j = (JoinExpr*)jtnode;
+
+        make_jointree_quals_explicit(j->larg);
+        make_jointree_quals_explicit(j->rarg);
+
+        if (j->quals != NULL && IsA(j->quals, List)) {
+            j->quals = (Node*)make_ands_explicit((List*)j->quals);
+        }
+    } else {
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized node type: %d", (int)nodeTag(jtnode))));
+    }
+}
+
+/*
  * reduce_inequality_fulljoins
  * Entry function to implement 'full join on 1=1' rewriting. We will call
  * reduce_inequality_fulljoins_jointree_recurse recursively to implement it.
@@ -3529,6 +3567,8 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
              */
             reset_operations_need_done_on_parent(setop1);
             reset_operations_need_done_on_parent(setop2);
+            make_jointree_quals_explicit((Node*)setop1->jointree);
+            make_jointree_quals_explicit((Node*)setop2->jointree);
 
             /* Create RTEs for partial_query */
             RangeTblEntry* rte1 = addRangeTableEntryForSubquery(NULL, setop1, makeAlias("setop1", NIL), false, true);
