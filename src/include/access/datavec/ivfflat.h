@@ -363,10 +363,12 @@ void IvfFlushPQInfoInternal(Relation index, char* table, BlockNumber startBlkno,
 void IvfFlushPQInfo(IvfflatBuildState *buildstate);
 
 int IvfComputePQTable(VectorArray samples, PQParams *params);
-int IvfComputeVectorPQCode(float *vector, const PQParams *params, uint8 *pqCode);
-int IvfGetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDistanceTable);
+int IvfComputeVectorPQCode(float *vector, const PQParams *params, uint8 *pqCode, size_t pqCode_size);
+int IvfGetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDistanceTable,
+                              size_t pqDistanceTable_size);
 int IvfGetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
-                     const float *pqDistanceTable, float *pqDistance);
+                     const float *pqDistanceTable, float *pqDistance, size_t basecode_size,
+                     size_t querycode_size, size_t pqDistanceTable_size, size_t pqDistance_size);
 
 void GetPQInfoOnDisk(IvfflatScanOpaque so, Relation index);
 void IvfpqComputeQueryRelTables(IvfflatScanOpaque so, Relation index, Datum q, float *simTable);

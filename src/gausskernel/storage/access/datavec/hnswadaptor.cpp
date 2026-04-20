@@ -110,17 +110,29 @@ int pq_func_init()
 
     char lib_dl_path[MAX_PATH_LEN] = { 0 };
     char* raw_path = getenv(PQ_ENV_PATH);
-    if (raw_path == nullptr) {
-        ereport(ERROR, (errmsg("failed to get DATAVEC_PQ_LIB_PATH")));
-        return PQ_ERROR;
-    }
+    int ret;
 
-    int ret = pq_resolve_path(lib_dl_path, raw_path, PQ_SO_NAME);
-    if (ret != PQ_SUCCESS) {
-        ereport(ERROR, (errmsg(
-            "failed to resolve the path of libvecturbo.so, lib_dl_path %s, raw_path %s",
-            lib_dl_path, raw_path)));
-        return PQ_ERROR;
+    if (raw_path != nullptr) {
+        ret = pq_resolve_path(lib_dl_path, raw_path, PQ_SO_NAME);
+        if (ret != PQ_SUCCESS) {
+            ereport(WARNING, (errmsg(
+                "failed to resolve the path of libkvecturbo.so, lib_dl_path %s, raw_path %s",
+                lib_dl_path, raw_path)));
+            return PQ_ERROR;
+        }
+    } else {
+        char* gausshome = getenv("GAUSSHOME");
+        if (gausshome != nullptr) {
+            ret = snprintf_s(lib_dl_path, MAX_PATH_LEN, MAX_PATH_LEN - 1,
+                "%s/lib/%s", gausshome, PQ_SO_NAME);
+            if (ret < 0) {
+                ereport(WARNING, (errmsg("failed to construct kvecturbo path from GAUSSHOME")));
+                return PQ_ERROR;
+            }
+        } else {
+            ereport(WARNING, (errmsg("failed to get DATAVEC_PQ_LIB_PATH or GAUSSHOME")));
+            return PQ_ERROR;
+        }
     }
 
     ret = pq_load_symbols(lib_dl_path);
@@ -164,23 +176,26 @@ int ComputePQTable(VectorArray samples, PQParams *params)
     return g_pq_func.ComputePQTable(samples, params);
 }
 
-int ComputeVectorPQCode(float *vector, const PQParams *params, uint8 *pqCode)
+int ComputeVectorPQCode(float *vector, const PQParams *params, uint8 *pqCode, size_t pqCode_size)
 {
-    return g_pq_func.ComputeVectorPQCode(vector, params, pqCode);
+    return g_pq_func.ComputeVectorPQCode(vector, params, pqCode, pqCode_size);
 }
 
-int GetPQDistanceTableSdc(const PQParams *params, float *pqDistanceTable)
+int GetPQDistanceTableSdc(const PQParams *params, float *pqDistanceTable, size_t pqDistanceTable_size)
 {
-    return g_pq_func.GetPQDistanceTableSdc(params, pqDistanceTable);
+    return g_pq_func.GetPQDistanceTableSdc(params, pqDistanceTable, pqDistanceTable_size);
 }
 
-int GetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDistanceTable)
+int GetPQDistanceTableAdc(float *vector, const PQParams *params, float *pqDistanceTable,
+                           size_t pqDistanceTable_size)
 {
-    return g_pq_func.GetPQDistanceTableAdc(vector, params, pqDistanceTable);
+    return g_pq_func.GetPQDistanceTableAdc(vector, params, pqDistanceTable, pqDistanceTable_size);
 }
 
 int GetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
-                  const float *pqDistanceTable, float *pqDistance)
+                  const float *pqDistanceTable, float *pqDistance, size_t basecode_size,
+                  size_t querycode_size, size_t pqDistanceTable_size, size_t pqDistance_size)
 {
-    return g_pq_func.GetPQDistance(basecode, querycode, params, pqDistanceTable, pqDistance);
+    return g_pq_func.GetPQDistance(basecode, querycode, params, pqDistanceTable, pqDistance,
+                                   basecode_size, querycode_size, pqDistanceTable_size, pqDistance_size);
 }

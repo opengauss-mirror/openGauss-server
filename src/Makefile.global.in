@@ -560,6 +560,12 @@ CJSON_INCLUDE_PATH = $(CJSON_HOME)/include
 CJSON_LIB_PATH = $(CJSON_HOME)/lib
 
 #############################################################################
+# kvecturbo component (aarch64 only)
+#############################################################################
+KVECTURBO_HOME = $(with_3rd)/kernel/dependency/kvecturbo/comm
+KVECTURBO_LIB_PATH = $(KVECTURBO_HOME)/lib
+
+#############################################################################
 # kerberos component
 #############################################################################
 KERBEROS_BIN_PATH = $(KERBEROS_HOME)/bin

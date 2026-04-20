@@ -39,11 +39,13 @@ typedef struct st_pq_func {
     bool inited;
     void *handle;
     int (*ComputePQTable)(VectorArray samples, PQParams *params);
-    int (*ComputeVectorPQCode)(float *vector, const PQParams *params, uint8 *pqCode);
-    int (*GetPQDistanceTableSdc)(const PQParams *params, float *pqDistanceTable);
-    int (*GetPQDistanceTableAdc)(float *vector, const PQParams *params, float *pqDistanceTable);
+    int (*ComputeVectorPQCode)(float *vector, const PQParams *params, uint8 *pqCode, size_t pqCode_size);
+    int (*GetPQDistanceTableSdc)(const PQParams *params, float *pqDistanceTable, size_t pqDistanceTable_size);
+    int (*GetPQDistanceTableAdc)(float *vector, const PQParams *params, float *pqDistanceTable,
+                                 size_t pqDistanceTable_size);
     int (*GetPQDistance)(const uint8 *basecode, const uint8 *querycode, const PQParams *params,
-                         const float *pqDistanceTable, float *pqDistance);
+                         const float *pqDistanceTable, float *pqDistance, size_t basecode_size,
+                         size_t querycode_size, size_t pqDistanceTable_size, size_t pqDistance_size);
 } pq_func_t;
 extern pq_func_t g_pq_func;
 

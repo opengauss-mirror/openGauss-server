@@ -777,7 +777,12 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
             } else if (pqinfo->pqMode == HNSW_PQMODE_ADC && pqinfo->pqDistanceTable == NULL) {
                 *distance = 0;
             } else {
-                GetPQDistance(ePQCode, pqinfo->qPQCode, params, pqinfo->pqDistanceTable, distance);
+                size_t pqCodeSize = params->pqM * sizeof(uint8);
+                size_t pqDistTblSize = (pqinfo->pqMode == HNSW_PQMODE_SDC) ?
+                    (size_t)params->pqM * params->pqKsub * params->pqKsub * sizeof(float) :
+                    (size_t)params->pqM * params->pqKsub * sizeof(float);
+                GetPQDistance(ePQCode, pqinfo->qPQCode, params, pqinfo->pqDistanceTable, distance,
+                              pqCodeSize, pqCodeSize, pqDistTblSize, sizeof(float));
             }
         } else {
             if (DatumGetPointer(*q) == NULL) {
@@ -1092,7 +1097,12 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
             if (index == NULL) {
                 if (enablePQ) {
                     uint8 *ePQCode = (uint8*)HnswPtrAccess(base, eElement->pqcodes);
-                    GetPQDistance(ePQCode, pqinfo->qPQCode, &pqinfo->params, pqinfo->pqDistanceTable, &eDistance);
+                    size_t pqCodeSz = pqinfo->params.pqM * sizeof(uint8);
+                    size_t pqDistTblSz = (pqinfo->pqMode == HNSW_PQMODE_SDC) ?
+                        (size_t)pqinfo->params.pqM * pqinfo->params.pqKsub * pqinfo->params.pqKsub * sizeof(float) :
+                        (size_t)pqinfo->params.pqM * pqinfo->params.pqKsub * sizeof(float);
+                    GetPQDistance(ePQCode, pqinfo->qPQCode, &pqinfo->params, pqinfo->pqDistanceTable, &eDistance,
+                                  pqCodeSz, pqCodeSz, pqDistTblSz, sizeof(float));
                 } else {
                     eDistance = GetCandidateDistance(base, eElement, q, procinfo, collation);
                 }
@@ -1489,7 +1499,7 @@ void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entry
         /* compute pq code */
         Size codesize = params->pqM * sizeof(uint8);
         uint8 *pqcode = (uint8*)palloc(codesize);
-        ComputeVectorPQCode(DatumGetVector(q)->x, params, pqcode);
+        ComputeVectorPQCode(DatumGetVector(q)->x, params, pqcode, codesize);
         Pointer codePtr = (Pointer)HnswPtrAccess(base, element->pqcodes);
         errno_t err = memcpy_s(codePtr, codesize, pqcode, codesize);
         securec_check(err, "\0", "\0");

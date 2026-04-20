@@ -61,14 +61,16 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
 
         pqinfo.params = *params;
         if (pqMode == HNSW_PQMODE_SDC) {
-            qPQCode = (uint8 *)palloc(params->pqM * sizeof(uint8));
-            ComputeVectorPQCode(query, params, qPQCode);
+            size_t pqCodeSize = params->pqM * sizeof(uint8);
+            qPQCode = (uint8 *)palloc(pqCodeSize);
+            ComputeVectorPQCode(query, params, qPQCode, pqCodeSize);
             pqinfo.qPQCode = qPQCode;
             pqinfo.pqDistanceTable = index->pqDistanceTable;
         } else {
             pqinfo.qPQCode = NULL;
-            pqinfo.pqDistanceTable = (float*) palloc(params->pqM * params->pqKsub * sizeof(float));
-            GetPQDistanceTableAdc(query, params, pqinfo.pqDistanceTable);
+            size_t pqDistTblSize = (size_t)params->pqM * params->pqKsub * sizeof(float);
+            pqinfo.pqDistanceTable = (float*) palloc(pqDistTblSize);
+            GetPQDistanceTableAdc(query, params, pqinfo.pqDistanceTable, pqDistTblSize);
         }
 
         pqinfo.pqMode = pqMode;

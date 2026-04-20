@@ -714,6 +714,7 @@
 ./lib/liblz4.so*
 ./lib/libcjson.so*
 ./lib/libcjson_utils.so*
+./lib/libkvecturbo.so*
 ./lib/libstdc++.so.6
 ./lib/libgcc_s.so.1
 ./lib/libgomp.so*

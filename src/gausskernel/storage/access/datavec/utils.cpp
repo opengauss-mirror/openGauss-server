@@ -535,31 +535,30 @@ void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint)
 bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
                      bool loadVec, float *maxDistance, IndexScanDesc scan, bool enablePQ, PQSearchInfo *pqinfo)
 {
-    
-    HnswElementTuple etup;
-    uint8 *ePQCode;
-    PQParams *params;
     Page page = (Page)GetMMapPage(index, element->blkno);
     if (page == NULL) {
         return HnswLoadElement(element, distance, q, index, procinfo,
                                          collation, loadVec, maxDistance, scan, enablePQ, pqinfo);
     }
 
-    etup = (HnswElementTuple)PageGetItem(page, PageGetItemId(page, element->offno));
-
+    HnswElementTuple etup = (HnswElementTuple)PageGetItem(page, PageGetItemId(page, element->offno));
     Assert(HnswIsElementTuple(etup));
 
-    /* Calculate distance */
     if (distance != NULL) {
         if (enablePQ && pqinfo->lc == 0) {
-            ePQCode = LoadPQcode(etup);
-            params = &pqinfo->params;
+            uint8 *ePQCode = LoadPQcode(etup);
+            PQParams *params = &pqinfo->params;
             if (pqinfo->pqMode == HNSW_PQMODE_SDC && *pqinfo->qPQCode == NULL) {
                 *distance = 0;
             } else if (pqinfo->pqMode == HNSW_PQMODE_ADC && pqinfo->pqDistanceTable == NULL) {
                 *distance = 0;
             } else {
-                GetPQDistance(ePQCode, pqinfo->qPQCode, params, pqinfo->pqDistanceTable, distance);
+                size_t pqCodeSize = params->pqM * sizeof(uint8);
+                size_t pqDistTblSize = (pqinfo->pqMode == HNSW_PQMODE_SDC) ?
+                    (size_t)params->pqM * params->pqKsub * params->pqKsub * sizeof(float) :
+                    (size_t)params->pqM * params->pqKsub * sizeof(float);
+                GetPQDistance(ePQCode, pqinfo->qPQCode, params, pqinfo->pqDistanceTable, distance,
+                              pqCodeSize, pqCodeSize, pqDistTblSize, sizeof(float));
             }
         } else {
             if (DatumGetPointer(*q) == NULL) {
@@ -575,16 +574,11 @@ bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation in
     if (distance == NULL || maxDistance == NULL || *distance < *maxDistance) {
         HnswLoadElementFromTuple(element, etup, true, loadVec);
         if (enablePQ) {
-            params = &pqinfo->params;
             Vector *vd1 = &etup->data;
             Vector *vd2 = (Vector *)DatumGetPointer(*q);
-            float exactDis;
-            if (pqinfo->params.funcType == HNSW_PQ_DIS_IP) {
-                exactDis = -VectorInnerProduct(params->dim, vd1->x, vd2->x);
-            } else {
-                exactDis = VectorL2SquaredDistance(params->dim, vd1->x, vd2->x);
-            }
-            *distance = exactDis;
+            *distance = (pqinfo->params.funcType == HNSW_PQ_DIS_IP) ?
+                -VectorInnerProduct(pqinfo->params.dim, vd1->x, vd2->x) :
+                VectorL2SquaredDistance(pqinfo->params.dim, vd1->x, vd2->x);
         }
     }
 
