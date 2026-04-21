@@ -235,6 +235,7 @@ wal_level = hot_standby			# minimal, archive, hot_standby or logical
 enable_incremental_checkpoint = on	# enable incremental checkpoint
 incremental_checkpoint_timeout = 60s	# range 1s-1h
 #pagewriter_sleep = 100ms		# dirty page writer sleep time, 0ms - 1h
+#enable_btree_rootbuf_cache = off	# enable btree root buffer cache on shared-storage standby
 
 # - Archiving -
 
@@ -468,6 +469,7 @@ log_min_duration_statement = 1800000	# -1 is disabled, 0 logs all statements
 #debug_print_plan = off
 #debug_pretty_print = on
 #log_checkpoints = off
+#log_btree_rootbuf_cache = off
 #log_pagewriter = off
 log_connections = off			# log connection requirement from client
 log_disconnections = off		# log disconnection from client

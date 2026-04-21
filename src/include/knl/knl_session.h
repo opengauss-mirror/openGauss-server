@@ -61,8 +61,10 @@
 #include "openssl/ossl_typ.h"
 #include "portability/instr_time.h"
 #include "storage/backendid.h"
+#include "storage/buf/buf.h"
 #include "storage/lock/s_lock.h"
 #include "storage/shmem.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/palloc.h"
 #include "utils/memgroup.h"
 #include "storage/lock/lock.h"
@@ -1845,9 +1847,40 @@ typedef struct knl_u_stat_context {
 } knl_u_stat_context;
 
 #define MAX_LOCKMETHOD 2
+#define BT_META_PAGE_CACHE_SIZE 24
 
 typedef uint16 CycleCtr;
 typedef void* Block;
+typedef struct BtMetaPageCacheEntry {
+    Oid relOid;
+    Buffer buffer;
+    TimestampTz lastAccessTime;
+    uint64 insertSeq;
+    bool isPinned;
+    RelFileNode rnode;
+    ForkNumber forkNum;
+    BlockNumber rootBlkno;
+    uint32 rootLevel;
+    XLogRecPtr rootPageLsn;
+    uint64 generation;
+    int guardSlot;
+} BtMetaPageCacheEntry;
+
+typedef struct BtMetaPageCache {
+    BtMetaPageCacheEntry entries[BT_META_PAGE_CACHE_SIZE];
+    uint64 nextInsertSeq;
+    /* last hit slot in the cache, -1 if none, used to speed up the scan */
+    int lastHitSlot;
+    TimestampTz reformVer;
+} BtMetaPageCache;
+
+typedef struct BtBorrowedRootState {
+    Buffer buffer;
+    Oid relOid;
+    int guardSlot;
+    bool hasBorrow;
+} BtBorrowedRootState;
+
 typedef struct knl_u_storage_context {
     /*
      * How many buffers PrefetchBuffer callers should try to stay ahead of their
@@ -1968,6 +2001,9 @@ typedef struct knl_u_storage_context {
     /* Max value of pre-read parms, they are used for reseting buffers */
     int max_heap_bulk_read_size;
     int max_vacuum_bulk_read_size;
+    struct BtMetaPageCache* btMetaCache;
+    struct ResourceOwnerData* btMetaCacheResOwner;
+    BtBorrowedRootState btMetaBorrowedRootState;
 
     /* Whether in pre-read process */
     bool bulk_io_is_in_progress;

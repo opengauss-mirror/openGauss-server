@@ -1354,6 +1354,7 @@ extern void _bt_initmetapage(Page page, BlockNumber rootbknum, uint32 level, boo
 extern Buffer _bt_getroot(Relation rel, int access);
 extern Buffer _bt_gettrueroot(Relation rel);
 extern int _bt_getrootheight(Relation rel);
+extern void BtRootbufCacheSessionCleanup(void);
 extern void _bt_checkbuffer_valid(Relation rel, Buffer buf);
 extern void _bt_checkpage(Relation rel, Buffer buf, BlockNumber par_blkno = InvalidBlockNumber);
 extern Buffer _bt_getbuf(Relation rel, BlockNumber blkno, int access);
@@ -1368,6 +1369,8 @@ extern void _bt_delitems_vacuum(const Relation rel, Buffer buf, OffsetNumber *de
 extern int _bt_pagedel(Relation rel, Buffer buf, BTStack stack);
 extern void _bt_page_localupgrade(Page page);
 extern void btree_meta_version(Relation rel, bool *heapkeyspace, bool *allequalimage);
+extern bool BtRootbufIsBorrowed(Relation rel, Buffer buf);
+extern void BtRootbufReleaseBorrowed(Relation rel, Buffer buf);
 
 /*
  * prototypes for functions in nbtsearch.c

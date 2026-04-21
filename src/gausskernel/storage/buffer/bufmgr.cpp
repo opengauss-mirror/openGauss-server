@@ -129,6 +129,7 @@ typedef struct CkptTsStatus {
 
 static inline int32 GetPrivateRefCount(Buffer buffer);
 void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref);
+static int GetExpectedPersistentBufferPins(Buffer buffer);
 static void CheckForBufferLeaks(void);
 static int ts_ckpt_progress_comparator(Datum a, Datum b, void *arg);
 static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
@@ -4874,6 +4875,9 @@ int GetThreadBufferLeakNum(void)
         res = &t_thrd.storage_cxt.PrivateRefCountArray[i];
 
         if (res->buffer != InvalidBuffer) {
+            if (res->refcount <= GetExpectedPersistentBufferPins(res->buffer)) {
+                continue;
+            }
             PrintBufferLeakWarning(res->buffer);
             refCountErrors++;
         }
@@ -4884,6 +4888,9 @@ int GetThreadBufferLeakNum(void)
         HASH_SEQ_STATUS hstat;
         hash_seq_init(&hstat, t_thrd.storage_cxt.PrivateRefCountHash);
         while ((res = (PrivateRefCountEntry *)hash_seq_search(&hstat)) != NULL) {
+            if (res->refcount <= GetExpectedPersistentBufferPins(res->buffer)) {
+                continue;
+            }
             PrintBufferLeakWarning(res->buffer);
             refCountErrors++;
         }
@@ -4898,7 +4905,7 @@ bool CheckForBufferPin(void)
     for (int i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
         res = &t_thrd.storage_cxt.PrivateRefCountArray[i];
 
-        if (res->buffer != InvalidBuffer) {
+        if (res->buffer != InvalidBuffer && res->refcount > GetExpectedPersistentBufferPins(res->buffer)) {
             return true;
         }
     }
@@ -4907,6 +4914,9 @@ bool CheckForBufferPin(void)
         HASH_SEQ_STATUS hstat;
         hash_seq_init(&hstat, t_thrd.storage_cxt.PrivateRefCountHash);
         while ((res = (PrivateRefCountEntry *)hash_seq_search(&hstat)) != NULL) {
+            if (res->refcount <= GetExpectedPersistentBufferPins(res->buffer)) {
+                continue;
+            }
             hash_seq_term(&hstat);
             return true;
         }
@@ -4931,6 +4941,25 @@ static void CheckForBufferLeaks(void)
 #endif
 }
 
+static int GetExpectedPersistentBufferPins(Buffer buffer)
+{
+    BtMetaPageCache *cache = NULL;
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCache == NULL || !BufferIsValid(buffer) || BufferIsLocal(buffer)) {
+        return 0;
+    }
+
+    cache = u_sess->storage_cxt.btMetaCache;
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtMetaPageCacheEntry *entry = &cache->entries[i];
+        if (entry->isPinned && entry->buffer == buffer) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 /*
  * Helper routine to issue warnings when a buffer is unexpectedly pinned
  */
@@ -4950,6 +4979,10 @@ void PrintBufferLeakWarning(Buffer buffer)
     } else {
         buf = GetBufferDescriptor(buffer - 1);
         loccount = GetPrivateRefCount(buffer);
+        loccount -= GetExpectedPersistentBufferPins(buffer);
+        if (loccount < 0) {
+            loccount = 0;
+        }
         backend = InvalidBackendId;
     }
 

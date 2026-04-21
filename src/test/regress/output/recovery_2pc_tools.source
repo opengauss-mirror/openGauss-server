@@ -244,6 +244,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_bitmapscan                                | bool    |      |           | 
  enable_bloom_filter                              | bool    |      |           | 
  enable_broadcast                                 | bool    |      |           | 
+ enable_btree_rootbuf_cache                       | bool    |      |           |
  enable_cachedplan_mgr                            | bool    |      |           | 
  enable_cbm_tracking                              | bool    |      |           | 
  enable_change_hjcost                             | bool    |      |           | 
@@ -449,6 +450,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  lockwait_timeout                                 | integer | ms   | 0         | 2147483647
  lo_compat_privileges                             | bool    |      |           | 
  log_autovacuum_min_duration                      | integer | ms   | -1        | 2147483647
+ log_btree_rootbuf_cache                          | bool    |      |           |
  log_checkpoints                                  | bool    |      |           | 
  log_connections                                  | bool    |      |           | 
  log_destination                                  | string  |      |           | 

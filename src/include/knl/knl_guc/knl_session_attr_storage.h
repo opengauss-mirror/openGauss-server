@@ -116,6 +116,7 @@ typedef struct knl_session_attr_storage {
     bool enable_adio_debug;
     bool gds_debug_mod;
     bool log_pagewriter;
+    bool log_btree_rootbuf_cache;
     bool enable_incremental_catchup;
     bool auto_explain_log_verbose;
     bool enable_candidate_buf_usage_count;

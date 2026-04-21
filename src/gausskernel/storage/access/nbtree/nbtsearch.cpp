@@ -66,10 +66,12 @@ static void btree_save_posting_item(BTScanOpaque so, int itemIndex, OffsetNumber
 BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, bool needStack)
 {
     BTStack stack_in = NULL;
+    bool borrowedRoot = false;
     int page_access = BT_READ;
 
     /* Get the root page to start with */
     *bufP = _bt_getroot(rel, access);
+    borrowedRoot = BtRootbufIsBorrowed(rel, *bufP);
 
     /* If index is empty and access = BT_READ, no root page is created. */
     if (SECUREC_UNLIKELY(!BufferIsValid(*bufP)))
@@ -97,6 +99,7 @@ BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, boo
          * this is a good opportunity to finish splits of internal pages too.
          */
         *bufP = _bt_moveright(rel, key, *bufP, (access == BT_WRITE), stack_in, page_access);
+        borrowedRoot = BtRootbufIsBorrowed(rel, *bufP);
 
         /* if this is a leaf page, we're done */
         page = BufferGetPage(*bufP);
@@ -141,7 +144,13 @@ BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, boo
 			page_access = BT_WRITE;
 
         /* drop the read lock on the parent page, acquire one on the child */
-        *bufP = _bt_relandgetbuf(rel, *bufP, blkno, page_access);
+        if (borrowedRoot) {
+            BtRootbufReleaseBorrowed(rel, *bufP);
+            *bufP = _bt_getbuf(rel, blkno, page_access);
+            borrowedRoot = false;
+        } else {
+            *bufP = _bt_relandgetbuf(rel, *bufP, blkno, page_access);
+        }
 
         /* okay, all set to move down a level */
         stack_in = new_stack;
@@ -205,6 +214,7 @@ Buffer _bt_moveright(Relation rel, BTScanInsert key, Buffer buf, bool forupdate,
     Page page;
     BTPageOpaqueInternal opaque;
     int32 cmpval;
+    bool borrowedRoot = BtRootbufIsBorrowed(rel, buf);
 
     /*
      * When nextkey = false (normal case): if the scan key that brought us to
@@ -255,7 +265,13 @@ Buffer _bt_moveright(Relation rel, BTScanInsert key, Buffer buf, bool forupdate,
 
         if (P_IGNORE(opaque) || _bt_compare(rel, key, page, P_HIKEY) >= cmpval) {
             /* step right one page */
-            buf = _bt_relandgetbuf(rel, buf, opaque->btpo_next, access);
+            if (borrowedRoot) {
+                BtRootbufReleaseBorrowed(rel, buf);
+                borrowedRoot = false;
+                buf = _bt_getbuf(rel, opaque->btpo_next, access);
+            } else {
+                buf = _bt_relandgetbuf(rel, buf, opaque->btpo_next, access);
+            }
             continue;
         } else {
             break;
@@ -1576,6 +1592,7 @@ Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost)
     Buffer buf;
     Page page;
     BTPageOpaqueInternal opaque;
+    bool borrowedRoot = false;
     OffsetNumber offnum;
     BlockNumber blkno;
     IndexTuple itup;
@@ -1590,6 +1607,7 @@ Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost)
     else
         buf = _bt_gettrueroot(rel);
 
+    borrowedRoot = BtRootbufIsBorrowed(rel, buf);
     if (!BufferIsValid(buf))
         return InvalidBuffer;
 
@@ -1608,7 +1626,13 @@ Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost)
             if (blkno == P_NONE)
                 ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                                 errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
-            buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+            if (borrowedRoot) {
+                BtRootbufReleaseBorrowed(rel, buf);
+                buf = _bt_getbuf(rel, blkno, BT_READ);
+                borrowedRoot = false;
+            } else {
+                buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+            }
             page = BufferGetPage(buf);
             opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
         }
@@ -1628,7 +1652,13 @@ Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost)
 
         itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
         blkno = BTreeInnerTupleGetDownLink(itup);
-        buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+        if (borrowedRoot) {
+            BtRootbufReleaseBorrowed(rel, buf);
+            buf = _bt_getbuf(rel, blkno, BT_READ);
+            borrowedRoot = false;
+        } else {
+            buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
+        }
         page = BufferGetPage(buf);
         opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
     }
