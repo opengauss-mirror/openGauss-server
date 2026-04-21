@@ -827,7 +827,7 @@ int main(int argc, char** argv)
     if (!SetUppercaseAttributeNameToOff(((ArchiveHandle*)fout)->connection)) {
         (void)remove(filename);
         GS_FREE(filename);
-        exit_horribly(NULL, "set uppercase_attribute_name to off failed.\n", progname);
+        exit_horribly(NULL, "%s set uppercase_attribute_name to off failed.\n", progname);
     }
 #endif
 
@@ -17758,6 +17758,7 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
     int ntups;
     int i;
     int j;
+    int cnt;
 
     /* get partitioned table info */
     appendPQExpBuffer(defq,
@@ -17879,12 +17880,7 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 newStrategy, schemaOnly ? newStrategy : partStrategy);
             for (i = 1; i <= partkeynum; i++) {
                 
-                if (!partkeyexprIsNull) {
-                    if (i == partkeynum) 
-                        appendPQExpBuffer(partitionq, "p.boundaries[%d] ASC NULLS LAST", i);
-                    else
-                        appendPQExpBuffer(partitionq, "p.boundaries[%d] NULLS LAST,", i);
-                } else if (partStrategy == PART_STRATEGY_HASH) {
+                if (partStrategy == PART_STRATEGY_HASH) {
                     if (i == partkeynum) 
                         appendPQExpBuffer(partitionq, "p.boundaries[%d]::int ASC NULLS LAST", i);
                     else
