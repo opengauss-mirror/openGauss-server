@@ -497,8 +497,10 @@ static void BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values, 
         return;
     }
 
-    Vector *vec = InitVector(buildstate->dimensions);
-    buildstate->rlist = lappend(buildstate->rlist, vec);
+    if (buildstate->enablePQ) {
+        Vector *vec = InitVector(buildstate->dimensions);
+        buildstate->rlist = lappend(buildstate->rlist, vec);
+    }
 
     /* RabitQ delay build, avoid "insert into select from" sql from inserting repeatedly. */
     if (buildstate->enableRabitQ && buildstate->rbqDelayState == RBQ_BUILD_AFTER_DELAY) {
@@ -818,6 +820,11 @@ static void FreeBuildState(IvfflatBuildState *buildstate, bool parallel)
     pfree(buildstate->listSums);
     pfree(buildstate->listCounts);
 #endif
+
+    if (buildstate->rlist != NIL) {
+        list_free_deep(buildstate->rlist);
+        buildstate->rlist = NIL;
+    }
 
     if (buildstate->enableRabitQ && !parallel) {
         if (buildstate->centroid != NULL) {
@@ -1150,8 +1157,10 @@ static double ParallelHeapScan(IvfflatBuildState *buildstate)
 
     buildstate->indtuples = ivfshared->indtuples;
     reltuples = ivfshared->reltuples;
-    buildstate->rlist =list_copy(ivfshared->rlist);
-    list_free(ivfshared->rlist);
+    if (ivfshared->rlist != NIL) {
+        buildstate->rlist = list_copy(ivfshared->rlist);
+        list_free(ivfshared->rlist);
+    }
 #ifdef IVFFLAT_KMEANS_DEBUG
     buildstate->inertia = ivfshared->inertia;
 #endif
@@ -1216,17 +1225,19 @@ static void IvfflatParallelScanAndSort(IvfflatSpool *ivfspool, IvfflatShared *iv
     /* Record statistics */
     SpinLockAcquire(&ivfshared->mutex);
 
-    MemoryContext oldCtx = MemoryContextSwitchTo(ivfshared->tmpCtx);
-    ListCell *lc;
-    foreach (lc, buildstate.rlist) {
-        Vector *vec = InitVector(buildstate.dimensions);
-        int size = VECTOR_SIZE(buildstate.dimensions);
-        error_t rc = memcpy_s(vec, size, lc->data.ptr_value, size);
-        securec_check_c(rc, "\0", "\0");
-        ivfshared->rlist = lappend(ivfshared->rlist, vec);
+    if (buildstate.rlist != NIL) {
+        MemoryContext oldCtx = MemoryContextSwitchTo(ivfshared->tmpCtx);
+        ListCell *lc;
+        foreach (lc, buildstate.rlist) {
+            Vector *vec = InitVector(buildstate.dimensions);
+            int size = VECTOR_SIZE(buildstate.dimensions);
+            error_t rc = memcpy_s(vec, size, lc->data.ptr_value, size);
+            securec_check_c(rc, "\0", "\0");
+            ivfshared->rlist = lappend(ivfshared->rlist, vec);
+        }
+        MemoryContextSwitchTo(oldCtx);
+        list_free_deep(buildstate.rlist);
     }
-    MemoryContextSwitchTo(oldCtx);
-    list_free_deep(buildstate.rlist);
 
     ivfshared->nparticipantsdone++;
     ivfshared->reltuples += reltuples;
