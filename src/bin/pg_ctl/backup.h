@@ -26,6 +26,6 @@ void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
 bool CreateBuildtagFile(const char* fulltagname);
 bool StartLogStreamer(
     char* startpos, uint32 timeline, char* sysidentifier, const char* xloglocation, uint primaryTerm = 0);
-bool RenameTblspcDir(char* dataDir);
+bool RenameTblspcDir(char* dataDir, char *pgxcSrc, char *pgxcDest);
 
 #endif /* BACKUP_H */
