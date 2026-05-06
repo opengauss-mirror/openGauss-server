@@ -1664,8 +1664,15 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         /* send invalid message for for relation holding replaced function as trigger */
         InvalidRelcacheForTriggerFunction(retval, ((Form_pg_proc)GETSTRUCT(tup))->prorettype);
 
-        /* rebuild view depend on this proc */
-        RebuildDependViewForProc(retval);
+        /*
+         * CREATE OR REPLACE FUNCTION keeps the same procedure OID, and the
+         * return type cannot be changed here. Dependent views therefore stay
+         * valid and do not need an eager rebuild. Keep the historical rebuild
+         * path for procedures and package routines.
+         */
+        if (proIsProcedure || package) {
+            RebuildDependViewForProc(retval);
+        }
 
 #ifdef ENABLE_MOT
         if (proIsProcedure && !package && JitExec::IsMotSPCodegenEnabled()) {

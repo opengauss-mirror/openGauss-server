@@ -1,0 +1,60 @@
+drop schema if exists replace_function_view cascade;
+create schema replace_function_view;
+set current_schema = replace_function_view;
+
+CREATE TABLE encrypted_tab (
+    int_id numeric,
+    enc_col character varying(383)
+) WITH (orientation=row, compression=no, parallel_workers=8);
+
+create or replace function decrypt_real_deprecated(input_string text)
+RETURNS text
+LANGUAGE plpgsql
+NOT FENCED NOT SHIPPABLE
+AS $function$
+BEGIN
+IF input_string is NULL THEN
+RETURN NULL;
+ELSE
+BEGIN
+RETURN gs_decrypt(input_string, 'Asdf1234', 'sm4');
+END;
+END IF;
+END;
+$function$;
+
+CREATE VIEW dual AS SELECT 'X'::character varying AS dummy;
+
+CREATE VIEW rebuid_view AS
+SELECT "解密列", "id"
+FROM (
+    SELECT decrypt_real_deprecated(t.enc_col) AS "解密列", b.lv AS "id"
+    FROM encrypted_tab t, (
+        SELECT "level" AS lv
+        FROM dual
+        CONNECT BY level < 10
+    ) b
+);
+
+INSERT INTO encrypted_tab VALUES(1, 'ZBzOmaGA4Bb+coyucJOB8AkIShqc');
+SELECT * FROM rebuid_view;
+
+create or replace function decrypt_real_deprecated(input_string text)
+RETURNS text
+LANGUAGE plpgsql
+NOT FENCED NOT SHIPPABLE
+AS $function$
+BEGIN
+IF input_string is NULL THEN
+RETURN NULL;
+ELSE
+BEGIN
+RETURN gs_decrypt(input_string, 'Asdf1234', 'sm4');
+END;
+END IF;
+END;
+$function$;
+
+SELECT * FROM rebuid_view;
+
+drop schema replace_function_view cascade;
