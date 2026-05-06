@@ -1165,7 +1165,7 @@ static char** PsqlCompletion(const char *text, int start, int end)
     /* ALTER SEQUENCE <name> */
     else if (pg_strcasecmp(PREV3_WD, "ALTER") == 0 && pg_strcasecmp(PREV2_WD, "SEQUENCE") == 0) {
         static const char* const listAlterSequence[] = {
-            "MAXVALUE", "NO MAXVALUE", "NOMAXVALUE",  "OWNED BY", "OWNER TO", NULL
+            "MAXVALUE", "NO MAXVALUE", "NOMAXVALUE",  "OWNED BY", "OWNER TO", "RENAME TO", NULL
         };
 
         COMPLETE_WITH_LIST(listAlterSequence);
@@ -1324,8 +1324,7 @@ static char** PsqlCompletion(const char *text, int start, int end)
     /* ALTER TABLE ALTER [COLUMN] <foo> */
     else if ((pg_strcasecmp(PREV3_WD, "ALTER") == 0 && pg_strcasecmp(PREV2_WD, "COLUMN") == 0) ||
              (pg_strcasecmp(PREV4_WD, "TABLE") == 0 && pg_strcasecmp(PREV2_WD, "ALTER") == 0)) {
-        static const char* const listColumnAlter[] = {"TYPE", "SET", "RESET", "DROP", NULL};
-
+        static const char* const listColumnAlter[] = {"TYPE", "SET", "RESET", "RESTART", "ADD", "DROP", NULL};
         COMPLETE_WITH_LIST(listColumnAlter);
     }
     /* ALTER TABLE ALTER [COLUMN] <foo> SET */
@@ -1356,7 +1355,7 @@ static char** PsqlCompletion(const char *text, int start, int end)
     else if (((pg_strcasecmp(PREV4_WD, "ALTER") == 0 && pg_strcasecmp(PREV3_WD, "COLUMN") == 0) ||
              (pg_strcasecmp(PREV5_WD, "TABLE") == 0 && pg_strcasecmp(PREV3_WD, "ALTER") == 0)) &&
              pg_strcasecmp(PREV_WD, "DROP") == 0) {
-        static const char* const listColumnDrop[] = {"DEFAULT", "NOT NULL", NULL};
+        static const char* const listColumnDrop[] = {"DEFAULT", "IDENTITY", "NOT NULL", NULL};
 
         COMPLETE_WITH_LIST(listColumnDrop);
     } else if (pg_strcasecmp(PREV3_WD, "TABLE") == 0 && pg_strcasecmp(PREV_WD, "CLUSTER") == 0)

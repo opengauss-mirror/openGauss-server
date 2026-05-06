@@ -763,6 +763,14 @@ static bool _equalCurrentOfExpr(const CurrentOfExpr* a, const CurrentOfExpr* b)
     return true;
 }
 
+static bool _equalNextValueExpr(const NextValueExpr* a, const NextValueExpr* b)
+{
+    COMPARE_SCALAR_FIELD(seqid);
+    COMPARE_SCALAR_FIELD(typeId);
+
+    return true;
+}
+
 static bool _equalTargetEntry(const TargetEntry* a, const TargetEntry* b)
 {
     COMPARE_NODE_FIELD(expr);
@@ -1057,6 +1065,7 @@ static bool _equalQuery(const Query* a, const Query* b)
         COMPARE_SCALAR_FIELD(isFetch);
     }
     COMPARE_NODE_FIELD(rowMarks);
+    COMPARE_SCALAR_FIELD(override);
     COMPARE_NODE_FIELD(setOperations);
     COMPARE_NODE_FIELD(constraintDeps);
 
@@ -1111,7 +1120,8 @@ static bool _equalInsertStmt(const InsertStmt* a, const InsertStmt* b)
         COMPARE_NODE_FIELD(targetList);
         COMPARE_SCALAR_FIELD(isReplace);
     }
-    COMPARE_NODE_FIELD(upsertClause);   
+    COMPARE_NODE_FIELD(upsertClause);
+    COMPARE_SCALAR_FIELD(override);
     COMPARE_SCALAR_FIELD(hasIgnore);
     COMPARE_SCALAR_FIELD(is_dist_insertselect);
 
@@ -2093,6 +2103,7 @@ static bool _equalCreateSeqStmt(const CreateSeqStmt* a, const CreateSeqStmt* b)
     COMPARE_NODE_FIELD(sequence);
     COMPARE_NODE_FIELD(options);
     COMPARE_SCALAR_FIELD(ownerId);
+    
 #ifdef PGXC
     COMPARE_SCALAR_FIELD(is_serial);
 #endif
@@ -2101,6 +2112,7 @@ static bool _equalCreateSeqStmt(const CreateSeqStmt* a, const CreateSeqStmt* b)
     COMPARE_SCALAR_FIELD(is_large);
     COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_SCALAR_FIELD(is_autoinc);
+    COMPARE_SCALAR_FIELD(forIdentity);
 
     return true;
 }
@@ -2112,6 +2124,7 @@ static bool _equalAlterSeqStmt(const AlterSeqStmt* a, const AlterSeqStmt* b)
     COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_SCALAR_FIELD(is_large);
     COMPARE_SCALAR_FIELD(is_autoinc);
+    COMPARE_SCALAR_FIELD(forIdentity);
 
     return true;
 }
@@ -3075,6 +3088,10 @@ static bool _equalColumnDef(const ColumnDef* a, const ColumnDef* b)
     COMPARE_SCALAR_FIELD(cmprs_mode);
     COMPARE_NODE_FIELD(raw_default);
     COMPARE_NODE_FIELD(cooked_default);
+    if (t_thrd.proc->workingVersionNum >= PG_IDENTITY_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(identity);
+        COMPARE_NODE_FIELD(identitySequence);
+    }
     COMPARE_SCALAR_FIELD(generatedCol);
     COMPARE_NODE_FIELD(collClause);
     COMPARE_NODE_FIELD(clientLogicColumnRef);
@@ -4086,6 +4103,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_CurrentOfExpr:
             retval = _equalCurrentOfExpr((CurrentOfExpr*)a, (CurrentOfExpr*)b);
+            break;
+        case T_NextValueExpr:
+            retval = _equalNextValueExpr((NextValueExpr*)a, (NextValueExpr*)b);
             break;
         case T_TargetEntry:
             retval = _equalTargetEntry((TargetEntry*)a, (TargetEntry*)b);

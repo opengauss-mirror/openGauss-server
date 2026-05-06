@@ -57,7 +57,7 @@
  * Set the upper and lower bounds of sequence values.
  */
 #define SEQ_MAXVALUE INT64CONST(0x7FFFFFFFFFFFFFFF)
-#define SEQ_MINVALUE (-SEQ_MAXVALUE)
+#define SEQ_MINVALUE (-SEQ_MAXVALUE - 1)
 #define SEQ_MAXVALUE_32 0x7FFFFFFF
 #define SEQ_MINVALUE_32 (-SEQ_MAXVALUE_32 - 1)
 #define SEQ_MAXVALUE_16 0x7FFF

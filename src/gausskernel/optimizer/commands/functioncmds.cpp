@@ -3999,10 +3999,8 @@ Oid GetFunctionNodeGroup(AlterFunctionStmt* stmt)
 
 static void checkAllowAlter(HeapTuple tup) {
     Datum packageOidDatum;
-    Datum prosecdef_datum;
     Oid packageOid = InvalidOid;
     bool isnull = false;
-    bool prosecdef = false;
     packageOidDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &isnull);
     if (!isnull) {
         packageOid = DatumGetObjectId(packageOidDatum);

@@ -906,18 +906,6 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
     }
 }
 
-void checkIdentityColumn(ParseState* pstate, Relation rel, ResTarget* resTarget, int attrno, const char* op)
-{
-    /* Cannot insert identity column in D format */
-    if (DB_IS_CMPT(D_FORMAT)
-        && OidIsValid(pg_get_serial_sequence_internal(RelationGetRelid(rel), attrno, true, NULL))) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Cannot %s identity column \"%s\"", op, resTarget->name),
-                parser_errposition(pstate, resTarget->location)));
-    }
-}
-
 static List* checkRelationInsertTargets(ParseState* pstate, List* cols, List** attrnos)
 {
     *attrnos = NIL;
@@ -956,9 +944,10 @@ static List* checkRelationInsertTargets(ParseState* pstate, List* cols, List** a
             if (is_blockchain_rel && strcmp(col->name, "hash") == 0) {
                 continue;
             }
+
             /* skip the identity default value in D format */
-            if (DB_IS_CMPT(D_FORMAT) && OidIsValid(pg_get_serial_sequence_internal(RelationGetRelid(targetrel),
-                                                                                   attr[i].attnum, true, NULL))) {
+            if (DB_IS_CMPT(D_FORMAT) && OidIsValid(getIdentitySequence(RelationGetRelid(targetrel),
+                                                                       attr[i].attnum, true, true))) {
                 continue;
             }
 
@@ -991,12 +980,6 @@ static List* checkRelationInsertTargets(ParseState* pstate, List* cols, List** a
                             RelationGetRelationName(targetrel)),
                         parser_errposition(pstate, col->location)));
             }
-            /* In D format, Not allowed to insert identity column directly,
-             * except set identity_insert = on.
-             */
-            if (DB_IS_CMPT(D_FORMAT) && !u_sess->enable_identity_insert)
-                checkIdentityColumn(pstate, targetrel, col, attrno, "insert");
-
             /*
              * Check for duplicates, but only of whole columns --- we allow
              * INSERT INTO foo (col.subcol1, col.subcol2)

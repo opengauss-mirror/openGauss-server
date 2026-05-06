@@ -1552,9 +1552,11 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
     bool isNull = false;
     int ss_c = 0;
     HashBucketInfo bucketinfo;
+    Form_pg_attribute_extra attrExtra;
 
     OldHeap = heap_open(OIDOldHeap, lockMode);
     OldHeapDesc = RelationGetDescr(OldHeap);
+    attrExtra = CreatePGAttributeExtra(OldHeapDesc);
 
     /*
      * Note that the NewHeap will not receive any of the defaults or
@@ -1616,7 +1618,9 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
         AccessExclusiveLock,
         NULL,
         NIL,
-        OIDOldHeap);
+        OIDOldHeap,
+        InvalidOid,
+        attrExtra);
     Assert(OIDNewHeap != InvalidOid);
 
     ReleaseSysCache(tuple);
@@ -1691,6 +1695,8 @@ Oid makePartitionNewHeap(Relation partitionedTableRel, TupleDesc partTabHeapDesc
     bool isNull = false;
     int ss_c = 0;
     HashBucketInfo bucketinfo;
+    Form_pg_attribute_extra attrExtra;
+
     OnlineDDLRelOperators* operators = ((OnlineDDLRelOperators*)u_sess->online_ddl_operators);
     bool enableOnlineDDL = (operators != NULL && operators->getStatus() == ONLINE_DDL_STATUS_BASELINE_COPY);
     LOCKMODE lockmode  = enableOnlineDDL ? ShareUpdateExclusiveLock : AccessExclusiveLock;
@@ -1701,6 +1707,8 @@ Oid makePartitionNewHeap(Relation partitionedTableRel, TupleDesc partTabHeapDesc
     ss_c = snprintf_s(NewHeapName, sizeof(NewHeapName), sizeof(NewHeapName) - 1, "pg_temp_%u", oldPartOid);
     securec_check_ss(ss_c, "\0", "\0");
     bucketinfo.bucketOid = RelationGetBucketOid(partitionedTableRel);
+    attrExtra = CreatePGAttributeExtra(partTabHeapDesc);
+
     OIDNewHeap = heap_create_with_catalog(NewHeapName,
         RelationGetNamespace(partitionedTableRel),
         NewTableSpace,
@@ -1726,8 +1734,15 @@ Oid makePartitionNewHeap(Relation partitionedTableRel, TupleDesc partTabHeapDesc
         true,
         NULL,
         RelationGetStorageType(partitionedTableRel),
-        lockmode);
+        lockmode,
+        NULL,
+        NIL,
+        InvalidOid,
+        InvalidOid,
+        attrExtra);
     Assert(OIDNewHeap != InvalidOid);
+    pfree_ext(attrExtra);
+
     /*
      * Advance command counter so that the newly-created relation's catalog
      * tuples will be visible to heap_open.
@@ -5094,7 +5109,7 @@ void HbktTransferModifyPgAttributeTablebucketid(Oid indexOid)
     CatalogIndexState indstate;
     indstate = CatalogOpenIndexes(attrel);
 
-    InsertPgAttributeTuple(attrel, &attStruct, indstate);
+    InsertPgAttributeTuple(attrel, &attStruct, NULL, indstate);
 
     CatalogCloseIndexes(indstate);
     heap_close(attrel, RowExclusiveLock);

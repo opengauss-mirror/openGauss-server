@@ -1800,7 +1800,7 @@ Tuple ExecAutoIncrement(Relation rel, EState* estate, TupleTableSlot* slot, Tupl
                 if (is_global_level_sequence_cache(cons_autoinc->seqoid)) {
                     autoinc = nextval_internal_for_global_seq_cache(cons_autoinc->seqoid);
                 } else {
-                    autoinc = nextval_internal(cons_autoinc->seqoid);
+                    autoinc = nextval_internal(cons_autoinc->seqoid, true);
                 }
             }
         }

@@ -766,7 +766,8 @@ static bool DropObjectsInSameNodeGroup(DropStmt* stmt)
         } else if (OBJECT_IS_SEQUENCE(object_type)) {
             Oid tableId = InvalidOid;
             int32 colId;
-            if (!sequenceIsOwned(address.objectId, &tableId, &colId))
+            if (!(sequenceIsOwned(address.objectId, DEPENDENCY_AUTO, &tableId, &colId) ||
+                  sequenceIsOwned(address.objectId, DEPENDENCY_INTERNAL, &tableId, &colId)))
                 goid = ins_group_oid;
             else
                 goid = ng_get_baserel_groupoid(tableId, RELKIND_RELATION);
@@ -972,20 +973,21 @@ static ExecNodes* GetOwnedByNodes(Node* seq_stmt)
 static ExecNodes* GetSequenceNodes(RangeVar* sequence, bool missing_ok)
 {
     Oid goid;
-    Oid seq_id;
-    Oid table_id = InvalidOid;
-    int32 col_id = 0;
+    Oid seqId;
+    Oid tableId = InvalidOid;
+    int32 colId = 0;
 
-    seq_id = RangeVarGetRelid(sequence, NoLock, missing_ok);
+    seqId = RangeVarGetRelid(sequence, NoLock, missing_ok);
 
-    if (!OidIsValid(seq_id))
+    if (!OidIsValid(seqId))
         return NULL;
 
-    if (!sequenceIsOwned(seq_id, &table_id, &col_id))
+    if (!(sequenceIsOwned(seqId, DEPENDENCY_AUTO, &tableId, &colId) ||
+          sequenceIsOwned(seqId, DEPENDENCY_INTERNAL, &tableId, &colId))
         return NULL;
 
     /* Fetching group_oid for given relation */
-    goid = get_pgxc_class_groupoid(table_id);
+    goid = get_pgxc_class_groupoid(tableId);
     if (!OidIsValid(goid))
         return NULL;
 
@@ -1542,7 +1544,7 @@ static char* get_drop_seq_query_string(AlterTableStmt* stmt, Oid rel_id)
 
     if (attr_list != NIL) {
         StringInfoData str;
-        seq_list = getOwnedSequences(rel_id, attr_list);
+        seq_list = getOwnedSequencesOfAttrList(rel_id, attr_list);
         list_free(attr_list);
 
         if (seq_list != NULL) {
@@ -5394,7 +5396,7 @@ ProcessUtilitySlow(Node *parse_tree,
                     atstmt->relation->relname);
 
                 if (OidIsValid(rel_id)) {
-		    TrForbidAccessRbObject(RelationRelationId, rel_id, atstmt->relation->relname);
+                    TrForbidAccessRbObject(RelationRelationId, rel_id, atstmt->relation->relname);
                     /* Run parse analysis ... */
                     stmts = transformAlterTableStmt(rel_id, atstmt, query_string);
                     /* ... ensure we have an event trigger context ... */
@@ -5413,13 +5415,12 @@ ProcessUtilitySlow(Node *parse_tree,
                         add_remote_query_4_alter_stmt(is_first_node, atstmt, query_string, &stmts, &drop_seq_string, &exec_nodes);
                     }
 #endif
-
                     /* ... and do it */
                     foreach (l, stmts) {
                         Node* stmt = (Node*)lfirst(l);
 
                         if (IsA(stmt, AlterTableStmt)) {
-                                /* Do the table alteration proper */
+                            /* Do the table alteration proper */
                             AlterTable(rel_id, lockmode, (AlterTableStmt*)stmt);
                         } else {
                             /*

@@ -170,6 +170,8 @@ typedef struct tupleDesc {
 #define TupleDescAttr(tupdesc, i) (&(tupdesc)->attrs[(i)])
 #define ISGENERATEDCOL(tupdesc, i) \
     ((tupdesc)->constr != NULL && (tupdesc)->constr->num_defval > 0 && (tupdesc)->constr->generatedCols[(i)])
+#define IDENTITYCOL(tupdesc, i) \
+    (GET_ATTR_IDENTITY(TupleDescAttr(tupdesc, i)))
 
 extern TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, const TableAmRoutine* tam_ops = TableAmHeap);
 
@@ -179,6 +181,7 @@ extern TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute *attr
 extern TupleDesc CreateTupleDescCopy(TupleDesc tupdesc);
 extern TupleDesc CreateTupleDescCopyExtend(TupleDesc tupdesc, int moreatts);
 extern TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc);
+extern Form_pg_attribute_extra CreatePGAttributeExtra(TupleDesc tupdesc);
 
 extern void FreeTupleDesc(TupleDesc tupdesc, bool need_check = true);
 
@@ -209,13 +212,15 @@ extern void TupleDescInitEntryCollation(TupleDesc desc, AttrNumber attribute_num
 extern void VerifyAttrCompressMode(int8 mode, int attlen, const char* attname);
 
 extern TupleDesc BuildDescForRelation(List* schema, Node* oriented_from = NULL, char relkind = '\0',
-    Oid rel_coll_oid = InvalidOid);
+                                      Oid rel_coll_oid = InvalidOid, Form_pg_attribute_extra* attrExtra = NULL);
 
 extern TupleDesc BuildDescFromLists(List* names, List* types, List* typmods, List* collations);
 
 extern bool tupledesc_have_pck(TupleConstr* constr);
 
-extern void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute source);
+extern void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute source,
+                                 Form_pg_attribute_extra targetExtra,
+                                 Form_pg_attribute_extra sourceExtra);
 
 extern char GetGeneratedCol(TupleDesc tupdesc, int atti);
 

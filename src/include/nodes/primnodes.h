@@ -240,6 +240,19 @@ typedef struct Const {
     Cursor_Data cursor_data;
 } Const;
 
+/*
+ * NextValueExpr - get next value from sequence
+ *
+ * This has the same effect as calling the nextval() function, but it does not
+ * check permissions on the sequence.  This is used for identity columns,
+ * where the sequence is an implicit dependency without its own permissions.
+ */
+typedef struct NextValueExpr {
+    Expr  xpr;
+    Oid   seqid;
+    Oid   typeId;
+} NextValueExpr;
+
 /* ----------------
  * Param
  *		paramkind - specifies the kind of parameter. The possible values

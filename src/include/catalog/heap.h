@@ -143,7 +143,8 @@ extern Oid heap_create_with_catalog(const char *relname,
                          ObjectAddress *typaddress= NULL,
                          List* depend_extend = NIL,
                          Oid relrewrite = InvalidOid,
-                         Oid typbasetype = InvalidOid);
+                         Oid typbasetype = InvalidOid,
+                         Form_pg_attribute_extra attrExtra = NULL);
 
 extern void heap_create_init_fork(Relation rel);
 
@@ -190,7 +191,8 @@ extern void heap_truncate_one_rel(Relation rel);
 extern void heap_truncate_check_FKs(List *relations, bool tempTables);
 extern List *heap_truncate_find_FKs(List *relationIds);
 extern void InsertTablebucketidAttribute(Oid relOid);
-extern void InsertPgAttributeTuple(Relation pg_attribute_rel, Form_pg_attribute new_attribute, CatalogIndexState indstate);
+extern void InsertPgAttributeTuple(Relation pg_attribute_rel, Form_pg_attribute new_attribute,
+                                   Form_pg_attribute_extra attrExtra, CatalogIndexState indstate);
 
 extern void InsertPgClassTuple(Relation pg_class_desc, Relation new_rel_desc, Oid new_rel_oid, Datum relacl,
     Datum reloptions, char relkind, int2vector *bucketcol);
@@ -208,6 +210,8 @@ extern void DeleteSystemAttributeTuples(Oid relid);
 extern void RemoveAttributeById(Oid relid, AttrNumber attnum);
 extern void RemoveAttrDefault(Oid relid, AttrNumber attnum, DropBehavior behavior, bool complain, bool internal);
 extern void RemoveAttrDefaultById(Oid attrdefId);
+extern char HeapTupleGetIdentity(HeapTuple tuple, Relation attr);
+extern HeapTuple HeapTupleModifyIdentity(HeapTuple tuple, Relation attr, char identtiy);
 
 extern void CopyStatistics(Oid fromrelid, Oid torelid, char starelkind);
 
@@ -220,7 +224,8 @@ extern Form_pg_attribute SystemAttributeByName(const char *attname, bool relhaso
 extern int GetSysAttLength(bool hasBucketAttr = true);
 
 extern void CheckAttributeNamesTypes(TupleDesc tupdesc, char relkind, bool allow_system_table_mods);
-extern void CheckAttributeType(const char *attname, Oid atttypid, Oid attcollation, List *containing_rowtypes, bool allow_system_table_mods);
+extern void CheckAttributeType(const char *attname, Oid atttypid, Oid attcollation,
+                               List *containing_rowtypes, bool allow_system_table_mods);
 
 #ifdef PGXC
 /* Functions related to distribution data of relations */

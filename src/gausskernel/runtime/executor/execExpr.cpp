@@ -968,8 +968,19 @@ ExecInitExprRec(Expr *node, ExprState *state,
                     scratch.d.scalararrayop.fn_addr = finfo->fn_addr;
                     ExprEvalPushStep(state, &scratch);
                 }
-				break;
-			}
+                break;
+            }
+        case T_NextValueExpr:
+            {
+                NextValueExpr *nve = (NextValueExpr *) node;
+
+                scratch.opcode = EEOP_NEXTVALUEEXPR;
+                scratch.d.nextvalueexpr.seqid = nve->seqid;
+                scratch.d.nextvalueexpr.seqtypid = nve->typeId;
+
+                ExprEvalPushStep(state, &scratch);
+                break;
+            }
 		case T_BoolExpr:
 			{
 				BoolExpr   *boolexpr = (BoolExpr *) node;
@@ -1189,6 +1200,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				ExprEvalPushStep(state, &scratch);
 				break;
 			}
+
 		case T_RelabelType:
 			{
 				/* relabel doesn't need to do anything at runtime */

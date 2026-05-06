@@ -29,6 +29,7 @@ where column_constraint can be:
   NULL |
   CHECK ( expression ) |
   DEFAULT default_expr |
+  GENERATED [ ALWAYS | BY DEFAULT ] AS IDENTITY [ ( seq_options ) ] |
   GENERATED ALWAYS AS ( generation_expr ) [STORED] |
   AUTO_INCREMENT |
   IDENTITY [ (seed , increment) ] |
@@ -51,7 +52,7 @@ where table_constraint can be:
 where compress_mode can be:
 { DELTA | PREFIX | DICTIONARY | NUMSTR | NOCOMPRESS }
 where like_option can be:
-{ INCLUDING | EXCLUDING } { DEFAULTS | GENERATED | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | PARTITION | RELOPTIONS | DISTRIBUTION | ALL }
+{ INCLUDING | EXCLUDING } { DEFAULTS | GENERATED | IDENTITY | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | PARTITION | RELOPTIONS | DISTRIBUTION | ALL }
 where index_parameters can be:
 [ WITH ( {storage_parameter = value} [, ... ] ) ]
 [ USING INDEX TABLESPACE tablespace_name ]
@@ -68,6 +69,10 @@ where list_distribution_rules can be:
   ( SLICE name VALUES (DEFAULT) [DATANODE datanode_name] ) |
   SLICE REFERENCES table_name
 ]
+where seq_options can be:
+    { MAXVALUE | MINVALUE | START WITH | START | INCREMENT [ BY ] | CACHE | RESTART [ WITH ] } NumericOnly
+    | { NOMAXVALUE | NOMINVALUE | NO MAXVALUE | NO MINVALUE | NOCYCLE | [ NO ] CYCLE }
+    | OWNED BY name
 
 NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
 NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!

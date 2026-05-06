@@ -1318,7 +1318,7 @@ ColumnDef* makeColumnDef(const char* colname, char* coltype)
     ColumnDef* col = makeNode(ColumnDef);
     col->colname = pstrdup(colname);
     col->typname = SystemTypeName(coltype);
-    col->kvtype = 0;
+    col->kvtype = ATT_KV_UNDEFINED;
     col->generatedCol = '\0';
     col->inhcount = 0;
     col->is_local = true;

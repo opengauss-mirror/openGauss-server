@@ -13,6 +13,7 @@
 [NOTICE:REPLACE only has gained support in MySQL compatibility!]
 REPLACE [LOW_PRIORITY | DELAYED]
     [INTO] tbl_name [(col_name,...)]
+    [ OVERRIDING { SYSTEM | USER } VALUE ]
     {VALUES | VALUE ({expr},...),...},...
 OR:
 REPLACE [LOW_PRIORITY | DELAYED]

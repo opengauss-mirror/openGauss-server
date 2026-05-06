@@ -1159,6 +1159,8 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
                 List* save_varnamespace = NIL;
                 RangeTblEntry* sourceRelRTE = NULL;
 
+                action->override = mergeWhenClause->override;
+
                 /*
                  * For MERGE INTO type SQL, in the RTE list, the object with index 1 is the target table, and the
                  * object with index 2 is the source table (the index starts from 1).

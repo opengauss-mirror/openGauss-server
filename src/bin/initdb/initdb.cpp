@@ -4961,7 +4961,7 @@ int main(int argc, char* argv[])
         ss_mkdirdir(pg_data, vgdata, vglog, need_create_data);
     } else {
         /* Create required subdirectories */
-        printf(_("creating subdirectories ... in ordinary occasion"));
+        printf(_("creating subdirectories ... in ordinary occasion "));
         (void)fflush(stdout);
 
         for (i = 0; (unsigned int)(i) < lengthof(subdirs); i++) {

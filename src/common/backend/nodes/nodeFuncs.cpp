@@ -187,6 +187,9 @@ Oid exprType(const Node* expr)
         case T_CoerceViaIO:
             type = ((const CoerceViaIO*)expr)->resulttype;
             break;
+        case T_NextValueExpr:
+            type = ((const NextValueExpr *) expr)->typeId;
+            break;
         case T_ArrayCoerceExpr:
             type = ((const ArrayCoerceExpr*)expr)->resulttype;
             break;
@@ -879,6 +882,10 @@ Oid exprCollation(const Node* expr)
             break;
         case T_NullIfExpr:
             coll = ((const NullIfExpr*)expr)->opcollid;
+            break;
+        case T_NextValueExpr:
+            /* NextValueExpr's result is an integer type ... */
+            coll = InvalidOid; /* ... so it has no collation */
             break;
         case T_ScalarArrayOpExpr:
             coll = InvalidOid; /* result is always boolean */
@@ -1799,6 +1806,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_BitString:
         case T_TSQL_HexString:
         case T_Null:
+        case T_NextValueExpr:
         case T_PgFdwRemoteInfo:
         case T_Rownum:
         case T_UserVar:
@@ -2482,6 +2490,7 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
         case T_RangeTblRef:
         case T_SortGroupClause:
         case T_GroupingId:
+        case T_NextValueExpr:
             if (isCopy) {
                 return (Node*)copyObject(node);
             } else {

@@ -26,7 +26,6 @@ extern Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, ParseExprKind
 extern void updateTargetListEntry(ParseState* pstate, TargetEntry* tle, char* colname, int attrno,
     List* indirection, int location, Relation rd, RangeTblEntry* rte);
 extern List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos);
-extern void checkIdentityColumn(ParseState* pstate, Relation rel, ResTarget* resTarget, int attrno, const char* op);
 extern TupleDesc expandRecordVariable(ParseState* pstate, Var* var, int levelsup);
 extern char* FigureColname(Node* node);
 extern char* FigureIndexColname(Node* node);

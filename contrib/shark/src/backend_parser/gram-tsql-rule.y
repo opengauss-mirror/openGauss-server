@@ -646,8 +646,8 @@ tsql_subprogram_body:        {
 ColConstraintElem:     IDENTITY_P identity_seed_increment
                             {
                                 Constraint *n = makeNode(Constraint);
-                                n->contype = CONSTR_IDENTITY;
-                                n->generated_when = ATTRIBUTE_IDENTITY_ALWAYS;
+                                n->contype = CONSTR_D_IDENTITY;
+                                n->generated_when = ATTRIBUTE_IDENTITY_D;
                                 n->options = $2;
                                 n->location = @1;
                                 $$ = (Node *)n;
@@ -778,6 +778,16 @@ identity_seed_increment:
                            $$ = list_make2(makeDefElem("start", (Node *)makeInteger(1)), makeDefElem("increment", (Node *)makeInteger(1)));
                        }
                        ;
+
+identity_seq_options:
+					identity_seed_increment { $$ = $1; }
+					| '(' NumericOnly ',' NumericOnly ',' any_name ')'
+					{
+						$$ = list_make3(makeDefElem("start", (Node *)$2),
+										makeDefElem("increment", (Node *)$4),
+										makeDefElem("sequence_name", (Node *)$6));
+					}
+
 rotate_clause:
 		ROTATE '(' func_application_list rotate_for_clause rotate_in_clause ')' alias_clause %prec ROTATE
 			{
@@ -2137,6 +2147,7 @@ direct_label_keyword: ABORT_P
             | OUTER_P
             | OUTFILE
             | OVERLAY
+			| OVERRIDING
             | OWNED
             | OWNER
             | PACKAGE
@@ -2402,7 +2413,7 @@ direct_label_keyword: ABORT_P
             | UNTIL
             | UNUSABLE
             | UPDATE
-			| TSQL_UPDLOCK
+            | TSQL_UPDLOCK
             | USE_P
             | USEEOF
             | USER
@@ -3402,19 +3413,42 @@ tsql_UnsignedNumericOnly:   Iconst								{ $$ = makeInteger($1); }
                             | FCONST                            { $$ = makeFloat($1); }
 
 
-
 alter_table_cmd:
-	TSQL_CONVERT TO convert_charset opt_collate
-			{
-				AlterTableCmd *n = makeNode(AlterTableCmd);
-				n->subtype = AT_ConvertCharset;
-				CharsetCollateOptions *cc = makeNode(CharsetCollateOptions);
-				cc->cctype = OPT_CHARSETCOLLATE;
-				cc->charset = $3;
-				cc->collate = $4;
-				n->def = (Node *)cc;
-				$$ = (Node*)n;
-			}
+			TSQL_CONVERT TO convert_charset opt_collate
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_ConvertCharset;
+					CharsetCollateOptions *cc = makeNode(CharsetCollateOptions);
+					cc->cctype = OPT_CHARSETCOLLATE;
+					cc->charset = $3;
+					cc->collate = $4;
+					n->def = (Node *)cc;
+					$$ = (Node*)n;
+				}
+			/* ALTER TABLE <name> ALTER [COLUMN] <colname> ADD IDENTITY ... */
+			/* not document, only for gs_dump */
+			| ALTER opt_column ColId ADD_P IDENTITY_P identity_seq_options
+				{
+					if (t_thrd.proc->workingVersionNum < PG_IDENTITY_VERSION_NUM) {
+						$$ = NULL;
+						ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("Unsupported feature: alter column add identity during the upgrade")));
+					}
+
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					Constraint *c = makeNode(Constraint);
+
+					c->contype = CONSTR_D_IDENTITY;
+					c->generated_when = ATTRIBUTE_IDENTITY_D;
+					c->options = $6;
+					c->location = @5;
+
+					n->subtype = AT_AddIdentity;
+					n->name = $3;
+					n->def = (Node *) c;
+
+					$$ = (Node *) n;
+				}
 		;
 
 /* DATEDIFF() arguments

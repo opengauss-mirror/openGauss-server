@@ -85,6 +85,34 @@ static Oid convert_column_key_name(text *keyname);
 static AclMode convert_cmk_priv_string(text *priv_type_text);
 static AclMode convert_cek_priv_string(text *priv_type_text);
 
+
+static int g_authidNameData[] = {
+    Anum_pg_authid_rolname, Anum_pg_authid_rolrespool, Natts_pg_authid
+};
+static int g_authidBool[] = {
+    Anum_pg_authid_rolsuper, Anum_pg_authid_rolinherit, Anum_pg_authid_rolcreaterole,
+    Anum_pg_authid_rolcreatedb, Anum_pg_authid_rolcatupdate, Anum_pg_authid_rolcanlogin,
+    Anum_pg_authid_rolreplication, Anum_pg_authid_rolauditadmin, Anum_pg_authid_rolsystemadmin,
+    Anum_pg_authid_roluseft, Anum_pg_authid_rolmonitoradmin, Anum_pg_authid_roloperatoradmin,
+    Anum_pg_authid_rolpolicyadmin, Natts_pg_authid
+};
+static int g_authidText[] = {
+    Anum_pg_authid_rolpassword, Anum_pg_authid_roltempspace, Anum_pg_authid_rolspillspace,
+    Anum_pg_authid_rolspillspace, Anum_pg_authid_roltabspace, Natts_pg_authid
+};
+static int g_authidOid[] = {
+    Anum_pg_authid_rolparentid, Anum_pg_authid_rolnodegroup, Natts_pg_authid
+};
+static int g_authidInt4[] = {
+    Anum_pg_authid_rolconnlimit, Natts_pg_authid
+};
+static int g_authidTimeStamptz[] = {
+    Anum_pg_authid_rolvalidbegin, Anum_pg_authid_rolvaliduntil, Natts_pg_authid
+};
+static int g_authidChar[] = {
+    Anum_pg_authid_rolkind, Natts_pg_authid
+};
+
 const struct AclAction {
     char action; 
     AclMode read;
@@ -226,22 +254,22 @@ static bool Chargevalue(int* typeList, int index)
 
 static void GetValueAccordingToTheType(cJSON* root, int index, char* key, Datum rawData) 
 {
-    if (Chargevalue(Authid_Name_Data, index)) {
+    if (Chargevalue(g_authidNameData, index)) {
         cJSON_AddStringToObject(root, key, DatumGetName(rawData)->data);
         return;
     }
 
-    if (Chargevalue(Authid_Bool, index)) {
+    if (Chargevalue(g_authidBool, index)) {
         cJSON_AddBoolToObject(root, key, BoolGetDatum(rawData));
         return;
     }
 
-    if (Chargevalue(Authid_Text, index)) {
+    if (Chargevalue(g_authidText, index)) {
         cJSON_AddStringToObject(root, key, TextDatumGetCString(rawData));
         return;
     }
 
-    if (Chargevalue(Authid_Oid, index)) {
+    if (Chargevalue(g_authidOid, index)) {
         Oid oid = DatumGetObjectId(rawData);
         StringInfoData str;
         initStringInfo(&str);
@@ -250,18 +278,18 @@ static void GetValueAccordingToTheType(cJSON* root, int index, char* key, Datum 
         return;
     }
 
-    if (Chargevalue(Authid_Int4, index)) {
+    if (Chargevalue(g_authidInt4, index)) {
         cJSON_AddNumberToObject(root, key, DatumGetInt32(rawData));
         return;
     }
 
-    if (Chargevalue(Authid_TimeStamptz, index)) {
+    if (Chargevalue(g_authidTimeStamptz, index)) {
         char* str = pstrdup(timestamptz_to_str(DatumGetTimestampTz(rawData)));
         cJSON_AddStringToObject(root, key, str);
         return;
     }
 
-    if (Chargevalue(Authid_Char, index)) {
+    if (Chargevalue(g_authidChar, index)) {
         char c = DatumGetChar(rawData);
         char str[2] = {c, '\0'};
 	    char* ptr = str;

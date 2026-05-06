@@ -354,7 +354,11 @@ select @@fetch_status;
 fetch next from c2;	-- expect error
 ERROR:  cursor "c2" does not exist
 select @@fetch_status;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ fetch_status 
+--------------
+           -1
+(1 row)
+
 rollback transaction;
 -- multi cursors
 begin transaction;

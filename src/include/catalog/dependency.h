@@ -328,16 +328,16 @@ extern long changeDependencyFor(Oid classId,
 extern void changeDependenciesOf(Oid classId, Oid oldObjectId, Oid newObjectId);
 extern void changeDependenciesOn(Oid refClassId, Oid oldRefObjectId, Oid newRefObjectId);
 
-extern Oid	getExtensionOfObject(Oid classId, Oid objectId);
+extern Oid getExtensionOfObject(Oid classId, Oid objectId);
 
-extern bool sequenceIsOwned(Oid seqId, Oid *tableId, int32 *colId);
-
-extern void markSequenceUnowned(Oid seqId);
-
-extern List *getOwnedSequences(Oid relid, List *attrList = NULL);
+extern bool sequenceIsOwned(Oid seqId, char deptype, Oid *tableId, int32 *colId);
+extern List *getOwnedSequences(Oid relid);
+extern Oid getOwnedSequence(Oid relid, AttrNumber attnum, char** seqname);
+extern Oid getIdentitySequence(Oid relid, AttrNumber attnum, bool missing_ok, bool forIdentityOfD);
+extern Oid getIdentitySequenceForD(Oid relid, const char* attrName, char** outAttrName);
+extern List* getOwnedSequencesOfAttrList(Oid relid, List* attrList);
 
 extern Oid	get_constraint_index(Oid constraintId);
-
 extern Oid	get_index_constraint(Oid indexId);
 
 /* use for reindex concurrently */

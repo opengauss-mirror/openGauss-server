@@ -392,7 +392,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
         col->is_from_type = false;
         col->storage = 0;
         col->generatedCol = '\0';
-        col->kvtype = attribute->attkvtype;
+        col->kvtype = GET_ATTR_KVTYPE(attribute);
         col->cmprs_mode = attribute->attcmprmode;
         col->raw_default = NULL;
         col->update_default = NULL;

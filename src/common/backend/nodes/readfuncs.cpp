@@ -1661,6 +1661,9 @@ static Query* _readQuery(void)
         READ_BOOL_FIELD(isFetch);
     }
     READ_NODE_FIELD(rowMarks);
+    IF_EXIST(override) {
+        READ_ENUM_FIELD(override, OverridingKind);
+    }
     READ_NODE_FIELD(setOperations);
     READ_NODE_FIELD(constraintDeps);
 
@@ -3275,6 +3278,19 @@ static CurrentOfExpr* _readCurrentOfExpr(void)
     READ_UINT_FIELD(cvarno);
     READ_STRING_FIELD(cursor_name);
     READ_INT_FIELD(cursor_param);
+
+    READ_DONE();
+}
+
+/*
+ * _readNextValueExpr
+ */
+static NextValueExpr* _readNextValueExpr(void)
+{
+    READ_LOCALS(NextValueExpr);
+
+    READ_UINT_FIELD(seqid);
+    READ_UINT_FIELD(typeId);
 
     READ_DONE();
 }
@@ -6356,6 +6372,12 @@ static ColumnDef* _readColumnDef()
     READ_ENUM_FIELD(cmprs_mode, int8);
     READ_NODE_FIELD(raw_default);
     READ_NODE_FIELD(cooked_default);
+    IF_EXIST(identity) {
+        READ_CHAR_FIELD(identity);
+    }
+    IF_EXIST(identitySequence) {
+        READ_NODE_FIELD(identitySequence);
+    }
     READ_NODE_FIELD(collClause);
     READ_OID_FIELD(collOid);
     READ_NODE_FIELD(constraints);
@@ -6628,8 +6650,13 @@ static Constraint* _readConstraint()
         IF_EXIST(generated_kind) {
             READ_CHAR_FIELD(generated_kind);
         }
+    } else if (MATCH_TYPE("GENERATED_AS_IDENTITY")) {
+        local_node->contype = CONSTR_GENERATED_IDENTITY;
+        IF_EXIST(generated_when) {
+            READ_CHAR_FIELD(generated_when);
+        }
     } else if (MATCH_TYPE("IDENTITY")) {
-        local_node->contype = CONSTR_IDENTITY;
+        local_node->contype = CONSTR_D_IDENTITY;
         IF_EXIST(generated_when) {
             READ_CHAR_FIELD(generated_when);
         }
@@ -7208,6 +7235,8 @@ Node* parseNodeString(void)
         return_value = _readSetToDefault();
     } else if (MATCH("CURRENTOFEXPR", 13)) {
         return_value = _readCurrentOfExpr();
+    } else if (MATCH("NEXTVALUEEXPR", 13)) {
+        return_value = _readNextValueExpr();
     } else if (MATCH("TARGETENTRY", 11)) {
         return_value = _readTargetEntry();
     } else if (MATCH("PSEUDOTARGETENTRY", 17)) {

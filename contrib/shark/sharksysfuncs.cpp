@@ -1224,26 +1224,12 @@ int get_is_compute(Oid rel_oid, char* colname)
     return is_compute;
 }
 
-int get_is_identity(Oid rel_oid, char* colname)
+int get_is_identity(Oid relid, char* colname)
 {
-    bool is_identity = false;
-    char* relname = get_rel_name(rel_oid);
+    Oid seqOid = InvalidOid;
 
-    bool isRetNull = false;
-    Datum result = DirectCall2(&isRetNull, pg_get_serial_sequence, InvalidOid,
-                               CStringGetTextDatum(relname), CStringGetTextDatum(colname));
-    if (isRetNull) {
-        pfree_ext(relname);
-        return 0;
-    }
-    
-    char* seqname =  text_to_cstring(DatumGetTextPP(result));
-    if (StrEndWith(seqname, "_seq_identity")) {
-        is_identity = true;
-    }
-    pfree_ext(relname);
-    pfree_ext(seqname);
-    return is_identity;
+    seqOid = getIdentitySequenceForD(relid, colname, NULL);
+    return OidIsValid(seqOid);
 }
 
 int get_is_hidden(Oid rel_oid, char* colname)

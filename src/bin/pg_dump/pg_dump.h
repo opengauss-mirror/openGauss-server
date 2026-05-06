@@ -252,16 +252,18 @@ typedef struct _tableInfo {
     uint64 toast_frozenxid64; /* for restore toast frozen xid */
     int ncheck;               /* # of CHECK expressions */
     char* reloftype;          /* underlying type for typed table */
+
     /* these two are set only if table is a sequence owned by a column: */
-    Oid owning_tab; /* OID of table owning sequence */
-    int owning_col; /* attr # of column owning sequence */
+    Oid owning_tab;           /* OID of table owning sequence */
+    int owningCol;           /* attr # of column owning sequence */
+    bool isIdentitySequence; /* used to dump internal sequence of identity column */
     char parttype;
     bool relrowmovement;
-    bool isIncremental; /* for matview, true if is an incremental type */
+    bool isIncremental;       /* for matview, true if is an incremental type */
 
-    int			relpages;		/* table's size in pages (from pg_class) */
+    int  relpages;            /* table's size in pages (from pg_class) */
 
-    bool interesting; /* true if need to collect more data */
+    bool interesting;         /* true if need to collect more data */
     int autoinc_attnum;
     DumpId autoincconstraint;
     DumpId autoincindex;
@@ -289,6 +291,7 @@ typedef struct _tableInfo {
     char* attstorage;                   /* attribute storage scheme */
     char* typstorage;                   /* type storage scheme */
     bool* attisdropped;                 /* true if attr is dropped; don't dump it */
+    char* attidentity;                  /* identity attribute */
     bool* attisblockchainhash;          /* true if attr is "hash" column in blockchain table */
     int* attlen;                        /* attribute length, used by binary_upgrade */
     char* attalign;                     /* attribute align, used by binary_upgrade */
@@ -299,6 +302,7 @@ typedef struct _tableInfo {
     bool* notnull;                      /* NOT NULL constraints on attributes */
     bool* inhNotNull;                   /* true if NOT NULL is inherited */
     int* attkvtype;                     /* will not be 0 in timeseries table other wise 0 */
+    bool needsOverride;                /* has GENERATED ALWAYS AS IDENTITY */
     struct _attrDefInfo** attrdefs;     /* DEFAULT expressions */
     struct _constraintInfo* checkexprs; /* CHECK constraints */
 

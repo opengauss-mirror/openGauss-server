@@ -2374,18 +2374,18 @@ static void _outLimit(StringInfo str, Limit* node)
 
         if (node->numCols > 0) {
             appendStringInfo(str, " :sortColIdx");
-            for (size_t i = 0; i < node->numCols; i++) {
+            for (int i = 0; i < node->numCols; i++) {
                 appendStringInfo(str, " %d", node->sortColIdx[i]);
             }
 
             WRITE_GRPOP_FIELD(equalOperators, numCols);
 
             appendStringInfo(str, " :collations");
-            for (size_t i = 0; i < node->numCols; i++) {
+            for (int i = 0; i < node->numCols; i++) {
                 appendStringInfo(str, " %u", node->collations[i]);
             }
 
-            for (size_t i = 0; i < node->numCols; i++) {
+            for (int i = 0; i < node->numCols; i++) {
                 if (node->collations[i] >= FirstBootstrapObjectId &&
                     IsStatisfyUpdateCompatibility(node->collations[i])) {
                     appendStringInfo(str, " :collname ");
@@ -3372,6 +3372,15 @@ static void _outCurrentOfExpr(StringInfo str, CurrentOfExpr* node)
     WRITE_STRING_FIELD(cursor_name);
     WRITE_INT_FIELD(cursor_param);
 }
+
+static void _outNextValueExpr(StringInfo str, NextValueExpr* node)
+{
+    WRITE_NODE_TYPE("NEXTVALUEEXPR");
+
+    WRITE_UINT_FIELD(seqid);
+    WRITE_UINT_FIELD(typeId);
+}
+
 
 static void _outTargetEntry(StringInfo str, TargetEntry* node)
 {
@@ -4621,6 +4630,10 @@ static void _outColumnDef(StringInfo str, ColumnDef* node)
     WRITE_ENUM_FIELD(cmprs_mode, void);
     WRITE_NODE_FIELD(raw_default);
     WRITE_NODE_FIELD(cooked_default);
+    if (t_thrd.proc->workingVersionNum >=PG_IDENTITY_VERSION_NUM) {
+        WRITE_CHAR_FIELD(identity);
+        WRITE_NODE_FIELD(identitySequence);
+    }
     WRITE_NODE_FIELD(collClause);
     WRITE_OID_FIELD(collOid);
     WRITE_NODE_FIELD(constraints);
@@ -5248,6 +5261,9 @@ static void _outQuery(StringInfo str, Query* node)
         WRITE_BOOL_FIELD(isFetch);
     }
     WRITE_NODE_FIELD(rowMarks);
+    if (t_thrd.proc->workingVersionNum >= PG_IDENTITY_VERSION_NUM) {
+        WRITE_ENUM_FIELD(override, OverridingKind);
+    }
     WRITE_NODE_FIELD(setOperations);
     WRITE_NODE_FIELD(constraintDeps);
     WRITE_NODE_FIELD(hintState);
@@ -6156,7 +6172,13 @@ static void _outConstraint(StringInfo str, Constraint* node)
             }
             break;
 
-        case CONSTR_IDENTITY:
+        case CONSTR_GENERATED_IDENTITY:
+            if (t_thrd.proc->workingVersionNum >= PG_IDENTITY_VERSION_NUM) {
+                appendStringInfoString(str, "GENERATED_AS_IDENTITY");
+                WRITE_CHAR_FIELD(generated_when);
+            }
+            break;
+        case CONSTR_D_IDENTITY:
             if (IDENTITY_VERSION_NUM_MACRO) {
                 appendStringInfo(str, "IDENTITY");
                 WRITE_CHAR_FIELD(generated_when);
@@ -6398,18 +6420,18 @@ static void _outVecLimit(StringInfo str, VecLimit* node)
 
         if (node->numCols > 0) {
             appendStringInfo(str, " :sortColIdx");
-            for (size_t i = 0; i < node->numCols; i++) {
+            for (int i = 0; i < node->numCols; i++) {
                 appendStringInfo(str, " %d", node->sortColIdx[i]);
             }
 
             WRITE_GRPOP_FIELD(equalOperators, numCols);
 
             appendStringInfo(str, " :collations");
-            for (size_t i = 0; i < node->numCols; i++) {
+            for (int i = 0; i < node->numCols; i++) {
                 appendStringInfo(str, " %u", node->collations[i]);
             }
 
-            for (size_t i = 0; i < node->numCols; i++) {
+            for (int i = 0; i < node->numCols; i++) {
                 if (node->collations[i] >= FirstBootstrapObjectId
                         && IsStatisfyUpdateCompatibility(node->collations[i])) {
                     appendStringInfo(str, " :collname ");
@@ -7218,6 +7240,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_CurrentOfExpr:
                 _outCurrentOfExpr(str, (CurrentOfExpr*)obj);
+                break;
+            case T_NextValueExpr:
+                _outNextValueExpr(str, (NextValueExpr*)obj);
                 break;
             case T_TargetEntry:
                 _outTargetEntry(str, (TargetEntry*)obj);

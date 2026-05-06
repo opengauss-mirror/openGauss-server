@@ -23,8 +23,10 @@ ALTER [ LARGE ] SEQUENCE [ IF EXISTS ] <replaceable class="parameter">name</repl
     [ SESSION | GLOBAL ]
     [ OWNED BY { <replaceable class="parameter">table_name</replaceable>.<replaceable class="parameter">column_name</replaceable> | NONE } ];
 ALTER [ LARGE ] SEQUENCE [ IF EXISTS ] <replaceable class="parameter">name</replaceable> OWNER TO <replaceable class="PARAMETER">new_owner</replaceable>;
+ALTER SEQUENCE [ IF EXISTS ] <replaceable class="parameter">name</replaceable> RENAME TO <replaceable class="parameter">new_name</replaceable>
 
 NOTICE: '[ LARGE ]' is only avaliable in CENTRALIZED mode!
+
 </synopsis>
  </refsynopsisdiv>
 

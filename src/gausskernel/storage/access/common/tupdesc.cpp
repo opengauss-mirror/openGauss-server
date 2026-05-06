@@ -290,6 +290,23 @@ TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc)
     return desc;
 }
 
+Form_pg_attribute_extra CreatePGAttributeExtra(TupleDesc tupdesc)
+{
+    int i;
+    char* droppedName = NULL;
+    Form_pg_attribute_extra extra = (Form_pg_attribute_extra)palloc0(sizeof(FormData_pg_attribute_extra)
+                                                                     * tupdesc->natts);
+    for (i = 0; i < tupdesc->natts; ++i) {
+        extra[i].attkvtype = GET_ATTR_KVTYPE(&tupdesc->attrs[i]);
+        extra[i].attidentity = GET_ATTR_IDENTITY(&tupdesc->attrs[i]);
+        droppedName = GET_ATTR_DROPPEDNAME(&tupdesc->attrs[i]);
+        if (droppedName) {
+            namestrcpy(&extra[i].attdroppedname, droppedName);
+        }
+    }
+    return extra;
+}
+
 char GetGeneratedCol(TupleDesc tupdesc, int atti)
 {
     if (!tupdesc->constr)
@@ -589,9 +606,6 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
         if (attr1->attstorage != attr2->attstorage && !cl_skip) {
             return false;
         }
-        if (attr1->attkvtype != attr2->attkvtype) {
-            return false;
-        }
         if (attr1->attcmprmode != attr2->attcmprmode) {
             return false;
         }
@@ -775,9 +789,6 @@ bool opFusionReuseEqualTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
         if (attr1->attstorage != attr2->attstorage && !cl_skip) {
             return false;
         }
-        if (attr1->attkvtype != attr2->attkvtype) {
-            return false;
-        }
         if (attr1->attcmprmode != attr2->attcmprmode) {
             return false;
         }
@@ -843,8 +854,6 @@ static bool ComparePgAttribute(Form_pg_attribute attr1, Form_pg_attribute attr2)
         return false;
     if (attr1->attstorage != attr2->attstorage)
         return false;
-    if (attr1->attkvtype != attr2->attkvtype)
-        return false;
     if (attr1->attcmprmode != attr2->attcmprmode)
         return false;
     if (attr1->attalign != attr2->attalign)
@@ -862,6 +871,13 @@ static bool ComparePgAttribute(Form_pg_attribute attr1, Form_pg_attribute attr2)
         return false;
     if (attr1->attcollation != attr2->attcollation)
         return false;
+
+    if (GET_ATTR_KVTYPE(attr1) != GET_ATTR_KVTYPE(attr2)) {
+        return false;
+    }
+    if (GET_ATTR_IDENTITY(attr1) != GET_ATTR_IDENTITY(attr2)) {
+        return false;
+    }
     /* attacl, attoptions and attfdwoptions are not even present... */
 
     return true;
@@ -956,12 +972,13 @@ void TupleDescInitEntry(TupleDesc desc, AttrNumber attributeNumber, const char *
     att->attisdropped = false;
     att->attislocal = true;
     att->attinhcount = 0;
-    att->attkvtype = ATT_KV_UNDEFINED;     /* not specified */
     att->attcmprmode = ATT_CMPR_UNDEFINED; /* not specified */
+
     /* attacl, attoptions and attfdwoptions are not present in tupledescs */
     tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(oidtypeid));
-    if (!HeapTupleIsValid(tuple))
+    if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", oidtypeid)));
+    }
     typeForm = (Form_pg_type)GETSTRUCT(tuple);
 
     att->atttypid = oidtypeid;
@@ -1032,7 +1049,9 @@ void VerifyAttrCompressMode(int8 mode, int attlen, const char *attname)
                     errmsg("column \"%s\" cannot be applied %s compress mode", attname, errinfo)));
 }
 
-void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute source)
+void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute source,
+                          Form_pg_attribute_extra targetExtra,
+                          Form_pg_attribute_extra sourceExtra)
 {
     char *attributeName = NameStr(source->attname);
 
@@ -1052,10 +1071,13 @@ void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute source)
     target->atthasdef = source->atthasdef;
     target->attisdropped = source->attisdropped;
     target->attislocal = source->attislocal;
-    target->attkvtype = source->attkvtype;
     target->attcmprmode = source->attcmprmode;
     target->attinhcount = source->attinhcount;
     target->attcollation = source->attcollation;
+
+    targetExtra->attkvtype = sourceExtra->attkvtype;
+    targetExtra->attdroppedname = sourceExtra->attdroppedname;
+    targetExtra->attidentity = sourceExtra->attidentity;
 }
 
 int UpgradeAdaptAttr(Oid atttypid, ColumnDef *entry)
@@ -1103,7 +1125,8 @@ static void BlockColumnRelOption(const char *tableFormat, const Oid atttypid, co
  * TupleDesc if it wants OIDs.	Also, tdtypeid will need to be filled in
  * later on.
  */
-TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind, Oid rel_coll_oid)
+TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind,
+                               Oid rel_coll_oid, Form_pg_attribute_extra* attrExtra)
 {
     int natts;
     AttrNumber attnum = 0;
@@ -1116,16 +1139,18 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind, O
     Oid attcollation;
     int attdim;
     const char *tableFormat = "";
-
-    if (orientedFrom != NULL) {
-        tableFormat = strVal(orientedFrom);
-    }
+    Form_pg_attribute_extra extra;
 
     /*
      * allocate a new tuple descriptor
      */
     natts = list_length(schema);
     desc = CreateTemplateTupleDesc(natts, false);
+    extra = (Form_pg_attribute_extra)palloc0(sizeof(FormData_pg_attribute_extra) * natts);
+
+    if (orientedFrom != NULL) {
+        tableFormat = strVal(orientedFrom);
+    }
 
     foreach (l, schema) {
         ColumnDef *entry = (ColumnDef *)lfirst(l);
@@ -1138,8 +1163,9 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind, O
          */
         attnum++;
 
-        if (u_sess->attr.attr_sql.enable_cluster_resize && entry->dropped_attr != NULL) {
-            copyDroppedAttribute(&desc->attrs[attnum - 1], entry->dropped_attr);
+        if (u_sess->attr.attr_sql.enable_cluster_resize && entry->droppedAttr != NULL) {
+            copyDroppedAttribute(&desc->attrs[attnum - 1], entry->droppedAttr,
+                                 &extra[attnum - 1], entry->droppedAttrExtra);
             continue;
         }
         attname = entry->colname;
@@ -1212,6 +1238,8 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind, O
 
         /* Fill in additional stuff not handled by TupleDescInitEntry */
         desc->attrs[attnum - 1].attnotnull = entry->is_not_null;
+        extra[attnum - 1].attidentity = entry->identity;
+
         /*
          * PG source code: has_not_null |= entry->is_not_null;
          */
@@ -1219,10 +1247,9 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind, O
         desc->attrs[attnum - 1].attislocal = entry->is_local;
         desc->attrs[attnum - 1].attinhcount = entry->inhcount;
 
-        Form_pg_attribute thisatt = &desc->attrs[attnum - 1];
-        thisatt->attkvtype = entry->kvtype;
-        VerifyAttrCompressMode(entry->cmprs_mode, thisatt->attlen, attname);
-        thisatt->attcmprmode = entry->cmprs_mode;
+        extra[attnum - 1].attkvtype = entry->kvtype;
+        VerifyAttrCompressMode(entry->cmprs_mode, desc->attrs[attnum - 1].attlen, attname);
+        desc->attrs[attnum - 1].attcmprmode = entry->cmprs_mode;
 
         BlockRowCompressRelOption(tableFormat, entry);
     }
@@ -1240,6 +1267,12 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind, O
         desc->constr = constr;
     } else {
         desc->constr = NULL;
+    }
+
+    if (attrExtra) {
+        *attrExtra = extra;
+    } else {
+        pfree_ext(extra);
     }
 
     return desc;

@@ -1144,6 +1144,9 @@ static bool contain_specified_functions_walker(Node* node, check_function_contex
         if (func_meet_check_conditon(expr->opfuncid, context))
             return true;
         /* else fall through to check args */
+    } else if (IsA(node, NextValueExpr)) {
+        /* NextValueExpr is mutable and volatile */
+        return true;
     } else if (IsA(node, ScalarArrayOpExpr)) {
         ScalarArrayOpExpr* expr = (ScalarArrayOpExpr*)node;
 
@@ -1222,7 +1225,12 @@ static bool contain_specified_functions_walker(Node* node, check_function_contex
         hasvolatile = contain_volatile_functions((Node *) rinfo->clause);
 
         return hasvolatile;
+    } else if (IsA(node, NextValueExpr)) {
+        /* NextValueExpr is volatile */
+        return context->checktype == CONTAIN_VOLATILE_FUNTION ||
+               context->checktype == CONTAIN_MUTABLE_FUNCTION;
     }
+
     return expression_tree_walker(node, (bool (*)())contain_specified_functions_walker<isSimpleVar>, context);
 }
 
@@ -1400,6 +1408,7 @@ static bool contain_leaky_functions_walker(Node* node, void* context)
         case T_RowExpr:
         case T_NullTest:
         case T_BooleanTest:
+        case T_NextValueExpr:
         case T_List:
         case T_HashFilter:
         case T_UserVar:

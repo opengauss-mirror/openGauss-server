@@ -11,6 +11,7 @@ Syntax:
 INSERT [/*+ plan_hint */] INTO
     { table_name [partition_clause] [ AS alias ] [ ( column_name [, ...] ) ]
     | ( query [ WITH [ CASCADED | LOCAL ] CHECK OPTION ] ) [ AS ] alias [ ( column_name [, ...] ) ] }
+    [ OVERRIDING { SYSTEM | USER } VALUE ]
     { DEFAULT VALUES | VALUES {( { expression | DEFAULT } [, ...] ) }[, ...] | query }
     [ ON DUPLICATE KEY UPDATE { NOTHING | { column_name = { expression | DEFAULT } } [, ...] [ WHERE condition ] } ]
     [ ON CONFLICT [conflict_target] DO UPDATE { NOTHING | { SET column_name = { expression | DEFAULT } } [, ...] [ WHERE condition ] } ]

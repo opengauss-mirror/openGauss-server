@@ -81,16 +81,14 @@ static ObjectAddress AlterSequenceForGlobalCache(const AlterSeqStmt* stmt, Oid r
 #ifdef PGXC
 template<typename T_Form, typename T_Int, bool large>
 static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
-    bool* is_restart, bool* needSeqRewrite, bool isIdentity, SeqTable cache_elm = NULL);
+    bool* is_restart, bool* needSeqRewrite, bool isIdentity, bool isDIdentity, SeqTable cache_elm = NULL);
 #else
 static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
-    bool* needSeqRewrite, bool isIdentity, SeqTable cache_elm = NULL);
+    bool* needSeqRewrite, bool isIdentity, bool isDIdentity, SeqTable cache_elm = NULL);
 #endif
 template<typename T_Form, typename T_Int, bool large>
 static void do_setval(Oid relid, int128 next, bool iscalled, bool skip_perm_check = false);
-template<typename T_Form, typename T_Int, bool large>
-static void do_setval_for_global_seq_cache(Oid relid, int128 next, bool iscalled);
-static void process_owned_by(const Relation seqrel, List* owned_by);
+static void process_owned_by(const Relation seqrel, List* owned_by, bool forIdentity);
 template<typename T_Form>
 static GTM_UUID get_uuid_from_tuple(const void* seq_p, const Relation rel, const HeapTuple seqtuple);
 extern Oid searchSeqidFromExpr(Node* cooked_default);
@@ -927,7 +925,9 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
         namespaceId = RangeVarGetAndCheckCreationNamespace(seq->sequence, NoLock, &existing_relid, relkind);
         if (existing_relid != InvalidOid) {
             char* namespace_of_existing_rel = get_namespace_name(namespaceId);
-            ereport(NOTICE, (errmodule(MOD_COMMAND), errmsg("relation \"%s\" already exists in schema \"%s\", skipping", seq->sequence->relname, namespace_of_existing_rel)));
+            ereport(NOTICE, (errmodule(MOD_COMMAND),
+            errmsg("relation \"%s\" already exists in schema \"%s\", skipping",
+                    seq->sequence->relname, namespace_of_existing_rel)));
             return InvalidObjectAddress;
         }
     }
@@ -980,30 +980,32 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
             (errcode(ERRCODE_DATA_CORRUPTED), errmsg("Invaild UUID for CREATE SEQUENCE %s.", seq->sequence->relname)));
 #endif
 
-    bool isIdentity = StrEndWith(seq->sequence->relname, "_seq_identity");
     /* Check and set all option values */
 #ifdef PGXC
     if (large) {
         init_params<Form_pg_large_sequence, int128, true>(seq->options, true, isUseLocalSeq, &newm, &owned_by,
-            &is_restart, &need_seq_rewrite, isIdentity);
+            &is_restart, &need_seq_rewrite, seq->forIdentity, seq->forDIdentity);
     } else {
         init_params<Form_pg_sequence, int64, false>(seq->options, true, isUseLocalSeq, &newm, &owned_by,
-            &is_restart, &need_seq_rewrite, isIdentity);
+            &is_restart, &need_seq_rewrite, seq->forIdentity, seq->forDIdentity);
     }
 #else
     if (large) {
         init_params<Form_pg_large_sequence, int128, true>(seq->options, true, isUseLocalSeq, &newm, &owned_by,
-            &need_seq_rewrite, isIdentity);
+            &need_seq_rewrite, seq->forIdentity, seq->forDIdentity, NULL);
     } else {
         init_params<Form_pg_sequence, int64, false>(seq->options, true, isUseLocalSeq, &newm, &owned_by,
-            &need_seq_rewrite, isIdentity);
+            &need_seq_rewrite, seq->forIdentity, seq->forDIdentity, NULL);
     }
 #endif
+
     /*
      * Create relation (and fill value[] and null[] for the tuple)
      */
     stmt->tableElts = NIL;
-    Oid intTypeOid = large ? INT16OID : INT8OID;
+    Oid seqType = (large ? INT16OID : INT8OID);
+    int32 seqTypeMod = -1;
+
     for (i = SEQ_COL_FIRSTCOL; i <= SEQ_COL_LASTCOL; i++) {
         ColumnDef* coldef = makeNode(ColumnDef);
 
@@ -1030,12 +1032,12 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
                 value[i - 1] = NameGetDatum(&name);
                 break;
             case SEQ_COL_LASTVAL:
-                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
+                coldef->typname = makeTypeNameFromOid(seqType, seqTypeMod);
                 coldef->colname = "last_value";
                 value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.last_value);
                 break;
             case SEQ_COL_STARTVAL:
-                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
+                coldef->typname = makeTypeNameFromOid(seqType, seqTypeMod);
                 coldef->colname = "start_value";
                 value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.start_value);
 #ifdef PGXC /* PGXC_COORD */
@@ -1043,7 +1045,7 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
 #endif
                 break;
             case SEQ_COL_INCBY:
-                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
+                coldef->typname = makeTypeNameFromOid(seqType, seqTypeMod);
                 coldef->colname = "increment_by";
                 value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.increment_by);
 #ifdef PGXC /* PGXC_COORD */
@@ -1051,7 +1053,7 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
 #endif
                 break;
             case SEQ_COL_MAXVALUE:
-                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
+                coldef->typname = makeTypeNameFromOid(seqType, seqTypeMod);
                 coldef->colname = "max_value";
                 value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.max_value);
 #ifdef PGXC /* PGXC_COORD */
@@ -1059,7 +1061,7 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
 #endif
                 break;
             case SEQ_COL_MINVALUE:
-                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
+                coldef->typname = makeTypeNameFromOid(seqType, seqTypeMod);
                 coldef->colname = "min_value";
                 value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.min_value);
 #ifdef PGXC /* PGXC_COORD */
@@ -1067,7 +1069,7 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
 #endif
                 break;
             case SEQ_COL_CACHE:
-                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
+                coldef->typname = makeTypeNameFromOid(seqType, seqTypeMod);
                 coldef->colname = "cache_value";
                 value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.cache_value);
                 break;
@@ -1134,8 +1136,9 @@ static ObjectAddress DefineSequence(CreateSeqStmt* seq)
     fill_seq_with_data(rel, tuple);
 
     /* process OWNED BY if given */
-    if (owned_by != NIL)
-        process_owned_by(rel, owned_by);
+    if (owned_by != NIL) {
+        process_owned_by(rel, owned_by, seq->forIdentity);
+    }
 
     heap_close(rel, NoLock);
 
@@ -1419,7 +1422,7 @@ bool CheckSeqOwnedByAutoInc(Oid seqoid)
      * in case of ereport before setting cachedSequenceOidIsAutoInc.
      */
     u_sess->cache_cxt.cachedSequenceOid = InvalidOid;
-    if (sequenceIsOwned(seqoid, &relid, &attrnum)) {
+    if (sequenceIsOwned(seqoid, DEPENDENCY_AUTO, &relid, &attrnum)) {
         rel = relation_open(relid, NoLock);
         isOwnedByAutoInc = seqoid == RelAutoIncSeqOid(rel);
         relation_close(rel, NoLock);
@@ -1453,7 +1456,6 @@ static ObjectAddress AlterSequence(const AlterSeqStmt* stmt, Oid relid)
 #endif
     bool need_seq_rewrite = false;
     ObjectAddress address;
-    bool isIdentity = false;
 
     TrForbidAccessRbObject(RelationRelationId, relid, stmt->sequence->relname);
 
@@ -1472,15 +1474,13 @@ static ObjectAddress AlterSequence(const AlterSeqStmt* stmt, Oid relid)
 
     newm = (T_Form)GETSTRUCT(tuple);
 
-    isIdentity = StrEndWith(RelationGetRelationName(seqrel), "_seq_identity");
-
     /* Check and set new values */
 #ifdef PGXC
     init_params<T_Form, T_Int, large>(stmt->options, false, isUseLocalSeq, newm, &owned_by,
-        &is_restart, &need_seq_rewrite, isIdentity);
+        &is_restart, &need_seq_rewrite, stmt->forIdentity, stmt->forDIdentity, elm);
 #else
     init_params<T_Form, T_Int, large>(stmt->options, false, isUseLocalSeq, newm, &owned_by,
-        &need_seq_rewrite, isIdentity);
+        &need_seq_rewrite, stmt->forIdentity, stmt->forDIdentity, elm);
 #endif
 #ifdef PGXC /* PGXC_COORD */
     /*
@@ -1532,11 +1532,13 @@ static ObjectAddress AlterSequence(const AlterSeqStmt* stmt, Oid relid)
          */
         fill_seq_with_data(seqrel, tuple);
     }
+
     heap_freetuple(tuple);
 
     /* process OWNED BY if given */
-    if (owned_by != NIL)
-        process_owned_by(seqrel, owned_by);
+    if (owned_by != NIL) {
+        process_owned_by(seqrel, owned_by, stmt->forIdentity);
+    }
 
     /* Recode the sequence alter time. */
     PgObjectType objectType = GetPgObjectTypePgClass(seqrel->rd_rel->relkind);
@@ -1595,7 +1597,9 @@ static ObjectAddress AlterSequenceForGlobalCache(const AlterSeqStmt* stmt, Oid r
     newm = (T_Form)GETSTRUCT(tuple);
 
     /* Check and set new values */
-    init_params<T_Form, T_Int, large>(stmt->options, false, true, newm, &owned_by, &isRestart, &needSeqRewrite, elm);
+    init_params<T_Form, T_Int, large>(stmt->options, false, true, newm, &owned_by, &isRestart,
+                                      &needSeqRewrite, stmt->forIdentity, stmt->forDIdentity,
+                                      elm);
     /* Clear local cache so that we don't think we have cached numbers */
     /* Note that we do not change the currval() state */
     AssignInt<int128, true>(&(elm->cached), (int128)elm->last);
@@ -1624,7 +1628,7 @@ static ObjectAddress AlterSequenceForGlobalCache(const AlterSeqStmt* stmt, Oid r
 
     /* process OWNED BY if given */
     if (owned_by != NIL)
-        process_owned_by(seqrel, owned_by);
+        process_owned_by(seqrel, owned_by, stmt->forIdentity);
     LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
 
     /* Recode the sequence alter time. */
@@ -1685,7 +1689,7 @@ Datum nextval(PG_FUNCTION_ARGS)
     if (is_global_level_sequence_cache(relid)) {
         PG_RETURN_INT64(nextval_internal_for_global_seq_cache(relid));
     } else {
-        PG_RETURN_INT64(nextval_internal(relid));
+        PG_RETURN_INT64(nextval_internal(relid, true));
     }
 }
 
@@ -1759,7 +1763,7 @@ Datum nextval_oid(PG_FUNCTION_ARGS)
     if (is_global_level_sequence_cache(relid)) {
         result = nextval_internal_for_global_seq_cache(relid);
     } else {
-        result = nextval_internal(relid);
+        result = nextval_internal(relid, true);
     }
 
     if (shouldReturnNumeric()) {
@@ -1769,7 +1773,7 @@ Datum nextval_oid(PG_FUNCTION_ARGS)
     }
 }
 
-int128 nextval_internal(Oid relid)
+int128 nextval_internal(Oid relid, bool checkPermissions)
 {
     SeqTable elm = NULL;
     Relation seqrel;
@@ -1789,7 +1793,7 @@ int128 nextval_internal(Oid relid)
 
     TrForbidAccessRbObject(RelationRelationId, relid, RelationGetRelationName(seqrel));
 
-    if (pg_class_aclcheck(elm->relid, GetUserId(), ACL_USAGE | ACL_UPDATE) != ACLCHECK_OK)
+    if (checkPermissions && pg_class_aclcheck(elm->relid, GetUserId(), ACL_USAGE | ACL_UPDATE) != ACLCHECK_OK)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));
@@ -2624,7 +2628,7 @@ static void CheckValueMinMax(T_Int value, T_Int minValue, T_Int maxValue, bool i
                                    isStart ? "START" : "RESTART", bufs, bufm)));
         } else {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("%s value (%s)  cannot be less than MINVALUE (%s)", isStart ? "START" : "RESTART",
+                            errmsg("%s value (%s) cannot be less than MINVALUE (%s)", isStart ? "START" : "RESTART",
                                    bufs, bufm)));
         }
     }
@@ -2635,11 +2639,11 @@ static void CheckValueMinMax(T_Int value, T_Int minValue, T_Int maxValue, bool i
             DatumGetCString(DirectFunctionCall1(int8out, maxValue));
         if (is_global == GLOBAL_LEVEL) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("%s value (%s) (or current value) cannot be less than MINVALUE (%s)",
+                            errmsg("%s value (%s) (or current value) cannot be greater than MAXVALUE (%s)",
                                    isStart ? "START" : "RESTART", bufs, bufm)));
         } else {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("%s value (%s)  cannot be less than MINVALUE (%s)", isStart ? "START" : "RESTART",
+                            errmsg("%s value (%s) cannot be greater than MAXVALUE (%s)", isStart ? "START" : "RESTART",
                                    bufs, bufm)));
         }
     }
@@ -2671,6 +2675,7 @@ static T_Int defGetInt(DefElem* def)
 }
 
 enum {
+    DEF_IDX_AS_TYPE,
     DEF_IDX_START_VALUE,
     DEF_IDX_RESTART_VALUE,
     DEF_IDX_INCREMENT_BY,
@@ -2697,8 +2702,11 @@ static void PreProcessSequenceOptions(
 
     foreach (option, options) {
         DefElem* defel = (DefElem*)lfirst(option);
-
-        if (strcmp(defel->defname, "increment") == 0) {
+        if (strcmp(defel->defname, "as") == 0) {
+            CheckDuplicateDef(elms[DEF_IDX_TYPE_ID]);
+            elms[DEF_IDX_TYPE_ID] = defel;
+            *need_seq_rewrite = true;
+        } else if (strcmp(defel->defname, "increment") == 0) {
             CheckDuplicateDef(elms[DEF_IDX_INCREMENT_BY]);
             elms[DEF_IDX_INCREMENT_BY] = defel;
             *need_seq_rewrite = true;
@@ -2736,6 +2744,14 @@ static void PreProcessSequenceOptions(
             CheckDuplicateDef(elms[DEF_IDX_IS_GLOBAL]);
             elms[DEF_IDX_IS_GLOBAL] = defel;
             *need_seq_rewrite = true;
+        } else if (strcmp(defel->defname, "sequence_name") == 0) {
+            /*
+             * The parser allows this, but it is only for identity columns, in
+             * which case it is filtered out in parse_utilcmd.cpp.  We only get
+             * here if someone puts it into a CREATE SEQUENCE.
+             */
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                     errmsg("invalid sequence option SEQUENCE NAME")));
         } else {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", defel->defname)));
         }
@@ -2744,40 +2760,53 @@ static void PreProcessSequenceOptions(
 
 template<typename T_Form, bool large>
 static void ProcessSequenceOptAsType(DefElem* elm, T_Form newm, bool isInit,
-    bool isIdentity, Oid &type_id, int &typeMods)
+                                     bool isIdentity, Oid &typeId, int &typeMods)
 {
-    if (isIdentity) {
-        if (elm != NULL) {
-            Oid newtypid = typenameTypeId(NULL, defGetTypeName(elm));
-            type_id = newtypid;
+    Oid newtypid = InvalidOid;
 
+    if (elm != NULL) {
+        newtypid = typenameTypeId(NULL, defGetTypeName(elm));
+        if (!OidIsValid(newtypid) || ((newtypid != INT1OID) &&
+            (newtypid != INT2OID) && (newtypid != INT4OID) &&
+            (newtypid != INT8OID) && (newtypid != INT16OID) &&
+            (newtypid != NUMERICOID))) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("Invalid \"AS\" type option")));
+        }
+
+        if (isIdentity) {
+            /* check NUMERIC type */
             if (nodeTag(elm->arg) == T_TypeName) {
                 TypeName* typname = (TypeName*)elm->arg;
                 typeMods = typname->typemod;
             }
-
             if (typeMods > DMODE_MAX_PRECISION) {
                 ereport(ERROR,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                         errmsg("Specified column precision %d is greater than the maximum precision of %d.",
-                             typeMods, DMODE_MAX_PRECISION)));
+                        errmsg("Specified column precision %d is greater than the maximum precision of %d.",
+                            typeMods, DMODE_MAX_PRECISION)));
             }
+            typeId = newtypid;
+        } else {
+            typeId = newtypid;
         }
-    } else {
-        if (!large)
-            type_id = INT8OID;
-        else
-            type_id = INT16OID;
     }
 }
 
+
 template<typename T_Form, typename T_Int, bool large>
-static void ProcessSequenceOptIncrementBy(DefElem* elm, T_Form newm, bool isInit)
+static void ProcessSequenceOptIncrementBy(DefElem* elm, T_Form newm, bool isInit, bool forIdentity)
 {
     if (elm != NULL) {
         AssignInt<T_Int, large>(&(newm->increment_by), defGetInt<T_Int, large>(elm));
         if (newm->increment_by == 0) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("INCREMENT must not be zero")));
+        }
+        if (forIdentity && newm->increment_by < 0) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("Identity column contains invalid INCREMENT.")));
         }
         newm->log_cnt = 0;
     } else if (isInit) {
@@ -2798,7 +2827,8 @@ static void ProcessSequenceOptCycle(DefElem* elm, T_Form newm, bool isInit)
 }
 
 template<typename T_Form, typename T_Int, bool large>
-static void ProcessSequenceOptMax(DefElem* elm, T_Form newm, bool isInit)
+static void ProcessSequenceOptMax(DefElem* elm, T_Form newm, bool isInit, Oid typeId,
+                                  int typeMods)
 {
     if (elm != NULL && elm->arg) {
         AssignInt<T_Int, large>(&(newm->max_value), defGetInt<T_Int, large>(elm));
@@ -2806,7 +2836,24 @@ static void ProcessSequenceOptMax(DefElem* elm, T_Form newm, bool isInit)
     } else if (isInit || elm != NULL) {
         if (newm->increment_by > 0) {
             /* ascending seq */
-            AssignInt<T_Int, large>(&(newm->max_value), large ? LARGE_SEQ_MAXVALUE : SEQ_MAXVALUE);
+            if (large) {
+                if (typeId == NUMERICOID) {
+                    if (typeMods == -1) {
+                        typeMods = DMODE_DEFAULT_PRECISION;
+                    }
+                    int128 maxDecimalNum = 9;
+                    int maxSigDigit = 9;
+                    int base = 10;
+                    for (int i = 1; i < typeMods; i++) {
+                        maxDecimalNum = maxDecimalNum * base + maxSigDigit;
+                    }
+                    AssignInt<T_Int, large>(&(newm->max_value), maxDecimalNum);
+                } else {
+                    AssignInt<T_Int, large>(&(newm->max_value), LARGE_SEQ_MAXVALUE);
+                }
+            } else {
+                AssignInt<T_Int, large>(&(newm->max_value), SEQ_MAXVALUE);
+            }
         } else {
             /* descending seq */
             AssignInt<T_Int, large>(&(newm->max_value), (int128)-1);
@@ -2816,7 +2863,7 @@ static void ProcessSequenceOptMax(DefElem* elm, T_Form newm, bool isInit)
 }
 
 template<typename T_Form, typename T_Int, bool large>
-static void ProcessSequenceOptMin(DefElem* elm, T_Form newm, bool isInit)
+static void ProcessSequenceOptMin(DefElem* elm, T_Form newm, bool isInit, Oid typeId, int typeMods)
 {
     if (elm != NULL && elm->arg) {
         AssignInt<T_Int, large>(&(newm->min_value), defGetInt<T_Int, large>(elm));
@@ -2827,7 +2874,26 @@ static void ProcessSequenceOptMin(DefElem* elm, T_Form newm, bool isInit)
             AssignInt<T_Int, large>(&(newm->min_value), (int128)1);
         } else {
             /* descending seq */
-            AssignInt<T_Int, large>(&(newm->min_value), large ? LARGE_SEQ_MINVALUE : SEQ_MINVALUE);
+            if (large) {
+                if (typeId == NUMERICOID) {
+                    if (typeMods == -1) {
+                        typeMods = DMODE_DEFAULT_PRECISION;
+                    }
+                    int128 maxDecimalNum = 9;
+                    int128 minDecimalNum = -1;
+                    int maxSigDigit = 9;
+                    int base = 10;
+                    for (int i = 1; i < typeMods; i++) {
+                        maxDecimalNum = maxDecimalNum * base + maxSigDigit;
+                    }
+                    minDecimalNum = maxDecimalNum * (int128)-1 - (int128)1;
+                    AssignInt<T_Int, large>(&(newm->min_value), minDecimalNum);
+                } else {
+                    AssignInt<T_Int, large>(&(newm->min_value), LARGE_SEQ_MINVALUE);
+                }
+            } else {
+                AssignInt<T_Int, large>(&(newm->min_value), SEQ_MINVALUE);
+            }
         }
         newm->log_cnt = 0;
     }
@@ -2936,7 +3002,7 @@ static bool CheckSeedIncrementValueMinMax(T_Int value, T_Int min_value, T_Int ma
 }
 
 template<typename T_Form, typename T_Int, bool large>
-static void ProcessSequenceOptMaxMin(DefElem* elm, T_Form newm, bool isInit, Oid type_id, int typeMods)
+static void ProcessSequenceOptMaxMin(DefElem* elm, T_Form newm, bool isInit, Oid typeId, int typeMods)
 {
     if (elm != NULL && elm->arg) {
         T_Int maxValue = defGetInt<T_Int, large>(elm);
@@ -2961,31 +3027,32 @@ static void ProcessSequenceOptMaxMin(DefElem* elm, T_Form newm, bool isInit, Oid
     } else if (isInit || elm != NULL) {
         /* ascending seq */
         if (large) {
-            if (typeMods == -1)
-                typeMods = DMODE_DEFAULT_PRECISION;
-            int128 maxDecimalNum = 9;
-            int128 minDecimalNum = -1;
-            int maxSigDigit = 9;
-            int base = 10;
-            for (int i = 1; i < typeMods; i++) {
-                maxDecimalNum = maxDecimalNum * base + maxSigDigit;
-            }
-            minDecimalNum = maxDecimalNum * (int128)-1 - (int128)1;
-            if (type_id == INT8OID) {
+            if (typeId == INT16OID) {
                 AssignInt<T_Int, large>(&(newm->max_value), LARGE_SEQ_MAXVALUE);
                 AssignInt<T_Int, large>(&(newm->min_value), LARGE_SEQ_MINVALUE);
             } else {
+                if (typeMods == -1) {
+                    typeMods = DMODE_DEFAULT_PRECISION;
+                }
+                int128 maxDecimalNum = 9;
+                int128 minDecimalNum = -1;
+                int maxSigDigit = 9;
+                int base = 10;
+                for (int i = 1; i < typeMods; i++) {
+                    maxDecimalNum = maxDecimalNum * base + maxSigDigit;
+                }
+                minDecimalNum = maxDecimalNum * (int128)-1 - (int128)1;
                 AssignInt<T_Int, large>(&(newm->max_value), maxDecimalNum);
                 AssignInt<T_Int, large>(&(newm->min_value), minDecimalNum);
             }
         } else {
-            if (type_id == INT1OID) {
+            if (typeId == INT1OID) {
                 AssignInt<T_Int, large>(&(newm->max_value), SEQ_MAXVALUE_8);
                 AssignInt<T_Int, large>(&(newm->min_value), SEQ_MINVALUE_8);
-            } else if (type_id == INT2OID) {
+            } else if (typeId == INT2OID) {
                 AssignInt<T_Int, large>(&(newm->max_value), SEQ_MAXVALUE_16);
                 AssignInt<T_Int, large>(&(newm->min_value), SEQ_MINVALUE_16);
-            } else if (type_id == INT4OID) {
+            } else if (typeId == INT4OID) {
                 AssignInt<T_Int, large>(&(newm->max_value), SEQ_MAXVALUE_32);
                 AssignInt<T_Int, large>(&(newm->min_value), SEQ_MINVALUE_32);
             } else {
@@ -3015,16 +3082,16 @@ static void ProcessSequenceOptMaxMin(DefElem* elm, T_Form newm, bool isInit, Oid
 #ifdef PGXC
 template<typename T_Form, typename T_Int, bool large>
 static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
-    bool* is_restart, bool* needSeqRewrite, bool isIdentity, SeqTable cache_elm)
+    bool* is_restart, bool* needSeqRewrite, bool isIdentity, bool isDIdentity, SeqTable cache_elm)
 #else
 template<typename T_Form, typename T_Int, bool large>
 static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
-    bool* needSeqRewrite, bool isIdentity, SeqTable cache_elm)
+    bool* needSeqRewrite, bool isIdentity, bool isDIdentity, SeqTable cache_elm)
 #endif
 {
     T_Form newm = (T_Form)newm_p;
     DefElem* elms[DEF_IDX_NUM] = {0};
-    Oid type_id = InvalidOid;
+    Oid typeId = InvalidOid;
 
 #ifdef PGXC
     *is_restart = false;
@@ -3043,34 +3110,33 @@ static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* ne
     }
 
     int typeMods = -1;
-
-    ProcessSequenceOptAsType<T_Form, large>(elms[DEF_IDX_TYPE_ID], newm, isInit, isIdentity, type_id, typeMods);
-    ProcessSequenceOptIncrementBy<T_Form, T_Int, large>(elms[DEF_IDX_INCREMENT_BY], newm, isInit);
+    ProcessSequenceOptAsType<T_Form, large>(elms[DEF_IDX_TYPE_ID], newm, isInit,
+                                            (isIdentity || isDIdentity),
+                                            typeId, typeMods);
+    ProcessSequenceOptIncrementBy<T_Form, T_Int, large>(elms[DEF_IDX_INCREMENT_BY], newm, isInit, isDIdentity);
     ProcessSequenceOptCycle<T_Form>(elms[DEF_IDX_IS_CYCLED], newm, isInit);
     ProcessSequenceOptCacheLevel<T_Form>(elms[DEF_IDX_IS_GLOBAL], newm, isInit);
-    if (u_sess->attr.attr_sql.sql_compatibility == D_FORMAT && isIdentity) {
-        ProcessSequenceOptMaxMin<T_Form, T_Int, large>(elms[DEF_IDX_MAX_VALUE], newm, isInit, type_id, typeMods);
+    if (isDIdentity) {
+        ProcessSequenceOptMaxMin<T_Form, T_Int, large>(elms[DEF_IDX_MAX_VALUE], newm, isInit, typeId, typeMods);
     } else {
-        ProcessSequenceOptMax<T_Form, T_Int, large>(elms[DEF_IDX_MAX_VALUE], newm, isInit);
-        ProcessSequenceOptMin<T_Form, T_Int, large>(elms[DEF_IDX_MIN_VALUE], newm, isInit);
+        ProcessSequenceOptMax<T_Form, T_Int, large>(elms[DEF_IDX_MAX_VALUE], newm, isInit, typeId, typeMods);
+        ProcessSequenceOptMin<T_Form, T_Int, large>(elms[DEF_IDX_MIN_VALUE], newm, isInit, typeId, typeMods);
     }
-
     /* crosscheck min/max */
     CrossCheckMinMax<T_Int, large>(newm->min_value, newm->max_value);
 
     ProcessSequenceOptStartWith<T_Form, T_Int, large>(elms[DEF_IDX_START_VALUE], newm, isInit, cache_elm);
-
     /* crosscheck START */
-    if (u_sess->attr.attr_sql.sql_compatibility == D_FORMAT && isIdentity) {
+    if (isDIdentity) {
         if (!CheckSeedIncrementValueMinMax<T_Int, large>(newm->start_value, newm->min_value, newm->max_value)) {
             ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("Identity column contains invalid SEED.")));
+                     errmsg("Identity column contains invalid SEED.")));
         }
         if (!CheckSeedIncrementValueMinMax<T_Int, large>(newm->increment_by, newm->min_value, newm->max_value)) {
             ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("Identity column contains invalid INCREMENT.")));
+                     errmsg("Identity column contains invalid INCREMENT.")));
         }
     } else {
         CheckValueMinMax<T_Int, large>(newm->start_value, newm->min_value, newm->max_value, true, newm->is_global);
@@ -3096,17 +3162,19 @@ static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* ne
  * enforce that the referenced table has the same owner and namespace
  * as the sequence.
  */
-static void process_owned_by(const Relation seqrel, List* owned_by)
+static void process_owned_by(const Relation seqrel, List* ownedBy, bool forIdentity)
 {
     int nnames;
     Relation tablerel;
     AttrNumber attnum;
+    DependencyType deptype;
 
-    nnames = list_length(owned_by);
+    deptype = forIdentity ? DEPENDENCY_INTERNAL : DEPENDENCY_AUTO;
+    nnames = list_length(ownedBy);
     Assert(nnames > 0);
     if (nnames == 1) {
         /* Must be OWNED BY NONE */
-        if (strcmp(strVal(linitial(owned_by)), "none") != 0)
+        if (strcmp(strVal(linitial(ownedBy)), "none") != 0)
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("invalid OWNED BY option"),
@@ -3119,13 +3187,12 @@ static void process_owned_by(const Relation seqrel, List* owned_by)
         RangeVar* rel = NULL;
 
         /* Separate relname and attr name */
-        relname = list_truncate(list_copy(owned_by), nnames - 1);
-        attrname = strVal(lfirst(list_tail(owned_by)));
+        relname = list_truncate(list_copy(ownedBy), nnames - 1);
+        attrname = strVal(lfirst(list_tail(ownedBy)));
 
         /* Open and lock rel to ensure it won't go away meanwhile */
         rel = makeRangeVarFromNameList(relname);
         tablerel = relation_openrv(rel, AccessShareLock);
-
         /* Must be a regular table or MOT or postgres_fdw table */
         if (tablerel->rd_rel->relkind != RELKIND_RELATION &&
             !(RelationIsForeignTable(tablerel) && (
@@ -3159,10 +3226,28 @@ static void process_owned_by(const Relation seqrel, List* owned_by)
     }
 
     /*
+     * Catch user explicitly running OWNED BY on identity sequence.
+     */
+    if (deptype == DEPENDENCY_AUTO) {
+        Oid         tableId;
+        int32       colId;
+
+        if (sequenceIsOwned(RelationGetRelid(seqrel), DEPENDENCY_INTERNAL, &tableId, &colId)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("cannot change ownership of identity sequence"),
+                     errdetail("Sequence \"%s\" is linked to table \"%s\".",
+                               RelationGetRelationName(seqrel),
+                               get_rel_name(tableId))));
+        }
+    }
+
+    /*
      * OK, we are ready to update pg_depend.  First remove any existing AUTO
      * dependencies for the sequence, then optionally add a new one.
      */
-    markSequenceUnowned(RelationGetRelid(seqrel));
+    deleteDependencyRecordsForClass(RelationRelationId, RelationGetRelid(seqrel),
+                                    RelationRelationId, deptype);
 
     if (tablerel) {
         ObjectAddress refobject, depobject;
@@ -3173,7 +3258,7 @@ static void process_owned_by(const Relation seqrel, List* owned_by)
         depobject.classId = RelationRelationId;
         depobject.objectId = RelationGetRelid(seqrel);
         depobject.objectSubId = 0;
-        recordDependencyOn(&depobject, &refobject, DEPENDENCY_AUTO);
+        recordDependencyOn(&depobject, &refobject, deptype);
     }
 
     /* Done, but hold lock until commit */

@@ -893,6 +893,7 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_ParamRef:
         case T_A_Const:
         case T_A_Star:
+        case T_NextValueExpr:
         case T_Rownum:
             /* primitive node types with no subnodes */
             break;

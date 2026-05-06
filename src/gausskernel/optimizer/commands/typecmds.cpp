@@ -3346,7 +3346,7 @@ static List* MergeObjectTypeAttributes(List* schema, Oid supertypeid, int32 typm
         def->is_not_null = attribute->attnotnull;
         def->is_from_type = false;
         def->storage = attribute->attstorage;
-        def->kvtype = attribute->attkvtype;
+        def->kvtype = GET_ATTR_KVTYPE(attribute);
         def->cmprs_mode = attribute->attcmprmode;
         def->raw_default = NULL;
         def->generatedCol = '\0';

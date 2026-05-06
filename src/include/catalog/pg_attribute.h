@@ -173,11 +173,15 @@ CATALOG(pg_attribute,1249) BKI_BOOTSTRAP BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(75) BK
 	/* the value is not null only when ALTER TABLE ... ADD COLUMN call */
 	bytea		attinitdefval;
 
-#endif
 	/* the attribute type for kv storage: tag(1), field(2), time(3), hide(4) or default(0) */
 	int1		attkvtype;
-	/* name of dropped attribute */
-	NameData        attdroppedname;
+
+    /* name of dropped attribute */
+    NameData    attdroppedname;
+
+    /* One of the ATTRIBUTE_IDENTITY_* constants below, or '\0' */
+    char        attidentity;
+#endif
 } FormData_pg_attribute;
 
 /*
@@ -187,7 +191,7 @@ CATALOG(pg_attribute,1249) BKI_BOOTSTRAP BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(75) BK
  * can access fields beyond attcollation except in a real tuple!
  */
 #define ATTRIBUTE_FIXED_PART_SIZE \
-	(offsetof(FormData_pg_attribute, attdroppedname) + sizeof(Oid))
+	(offsetof(FormData_pg_attribute, attcollation) + sizeof(Oid))
 
 /* ----------------
  *		Form_pg_attribute corresponds to a pointer to a tuple with
@@ -196,11 +200,19 @@ CATALOG(pg_attribute,1249) BKI_BOOTSTRAP BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(75) BK
  */
 typedef FormData_pg_attribute *Form_pg_attribute;
 
+typedef struct formData_pg_attribute_extra {
+    int1            attkvtype;
+    char            attidentity;
+    NameData        attdroppedname;
+} FormData_pg_attribute_extra;
+
+typedef FormData_pg_attribute_extra *Form_pg_attribute_extra;
+
 /* ----------------
  *		compiler constants for pg_attribute
  * ----------------
  */
-#define Natts_pg_attribute				25
+#define Natts_pg_attribute				26
 #define Anum_pg_attribute_attrelid		1
 #define Anum_pg_attribute_attname		2
 #define Anum_pg_attribute_atttypid		3
@@ -226,6 +238,7 @@ typedef FormData_pg_attribute *Form_pg_attribute;
 #define Anum_pg_attribute_attinitdefval 23
 #define Anum_pg_attribute_attkvtype		24
 #define Anum_pg_attribute_attdroppedname 25
+#define Anum_pg_attribute_attidentity	26
 
 /* ----------------
  *		initial contents of pg_attribute
@@ -235,7 +248,9 @@ typedef FormData_pg_attribute *Form_pg_attribute;
  * ----------------
  */
 #define ATTRIBUTE_IDENTITY_ALWAYS 'a'
+#define ATTRIBUTE_IDENTITY_BY_DEFAULT 'd'
 #define ATTRIBUTE_GENERATED_STORED 's'
 #define ATTRIBUTE_GENERATED_PERSISTED 'p'
+#define ATTRIBUTE_IDENTITY_D 'm' /* identtiy column in D format */
 #endif   /* PG_ATTRIBUTE_H */
 

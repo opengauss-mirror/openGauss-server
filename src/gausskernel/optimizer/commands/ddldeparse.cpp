@@ -181,6 +181,8 @@ static char* RelationGetColumnDefault(Relation rel, AttrNumber attno,
 
 static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool composite,
                                   ColumnDef *coldef, bool is_alter, List **exprs);
+static ObjTree* deparse_ColumnIdentity(Oid seqrelid, char identity, bool alter_table);
+static ObjTree* deparse_D_ColumnIdentity(Oid seqrelid, char identity, bool alter_table);
 static ObjTree* deparse_ColumnSetOptions(AlterTableCmd *subcmd);
 
 static ObjTree* deparse_DefElem(DefElem *elem, bool is_reset);
@@ -194,6 +196,7 @@ static List* get_range_partition_maxvalues(List *boundary);
 static List* get_list_partition_maxvalues(List *boundary);
 static ObjTree* deparse_RelSetOptions(AlterTableCmd *subcmd);
 
+static inline ObjElem* deparse_Seq_SeqName(sequence_values *seqdata, bool alter_table);
 static inline ObjElem* deparse_Seq_Cache(sequence_values *seqdata, bool alter_table);
 static inline ObjElem* deparse_Seq_Cycle(sequence_values *seqdata, bool alter_table);
 static inline ObjElem* deparse_Seq_IncrementBy(sequence_values *seqdata, bool alter_table);
@@ -1699,6 +1702,7 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
     bool       saw_autoincrement;
     char*      onupdate = NULL;
     ListCell   *cell;
+    Oid        seqrelid = InvalidOid;
 
     /*
      * Inherited columns without local definitions must not be emitted.
@@ -1799,7 +1803,8 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
         if (attrForm->atthasdef &&
             coldef->generatedCol != ATTRIBUTE_GENERATED_STORED &&
             coldef->generatedCol != ATTRIBUTE_GENERATED_PERSISTED &&
-            !saw_autoincrement) {
+            !saw_autoincrement &&
+            !coldef->identity) {
             char       *defstr = NULL;
 
             /* initdefval intend that default value is a constant expr,
@@ -1880,6 +1885,24 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
             }
             append_object_object(ret, "%{collation}s", tmp_obj);
         }
+
+        /* identity column */
+        if (coldef->identity) {
+            Oid attno = get_attnum(relid, coldef->colname);
+            seqrelid = getIdentitySequence(relid, attno, false, coldef->identity == ATTRIBUTE_IDENTITY_D);
+        }
+
+        if (OidIsValid(seqrelid)) {
+            if (coldef->identity == ATTRIBUTE_IDENTITY_D) {
+                tmp_obj = deparse_D_ColumnIdentity(seqrelid, coldef->identity, is_alter);
+            } else {
+                tmp_obj = deparse_ColumnIdentity(seqrelid, coldef->identity, is_alter);
+            }
+
+            if (tmp_obj) {
+                append_object_object(ret, "%{identity_column}s", tmp_obj);
+            }
+        }
     }
 
     ReleaseSysCache(attrTup);
@@ -1887,6 +1910,98 @@ static ObjTree* deparse_ColumnDef(Relation relation, List *dpcontext, bool compo
     return ret;
 }
 
+/*
+ * deparse definition of column identity
+ * SET GENERATED %{option}s %{identity_type}s %{seq_definition: }s
+ *   OR
+ * GENERATED %{option}s AS IDENTITY %{identity_type}s ( {%seq_definition: }s )
+ */
+static ObjTree* deparse_ColumnIdentity(Oid seqrelid, char identity, bool alter_table)
+{
+    ObjTree *ret;
+    ObjTree *ident_obj;
+    List    *elems = NIL;
+    sequence_values *seqvalues;
+    char    *identfmt;
+    char    *objfmt;
+
+    if (alter_table) {
+        identfmt = "SET GENERATED";
+        objfmt = "%{option}s";
+    } else {
+        identfmt = "GENERATED";
+        objfmt = "%{option}s AS IDENTITY";
+    }
+
+    ident_obj = new_objtree(identfmt);
+
+    if (identity == ATTRIBUTE_IDENTITY_ALWAYS) {
+        append_string_object(ident_obj, objfmt, "option", "ALWAYS");
+    } else if (identity == ATTRIBUTE_IDENTITY_BY_DEFAULT) {
+        append_string_object(ident_obj, objfmt, "option", "BY DEFAULT");
+    } else {
+        append_not_present(ident_obj, NULL);
+    }
+
+    ret = new_objtree_VA("%{identity_type}s", 1,
+                         "identity_type", ObjTypeObject, ident_obj);
+
+    seqvalues = get_sequence_values(seqrelid);
+
+    if (!alter_table) {
+        ObjElem *seqname_elem = deparse_Seq_SeqName(seqvalues, false);
+        if (seqname_elem) {
+            elems = lappend(elems, seqname_elem);
+        }
+        elems = lappend(elems, deparse_Seq_Cache(seqvalues, false));
+        elems = lappend(elems, deparse_Seq_Cycle(seqvalues, false));
+        elems = lappend(elems, deparse_Seq_IncrementBy(seqvalues, false));
+        elems = lappend(elems, deparse_Seq_Minvalue(seqvalues, false));
+        elems = lappend(elems, deparse_Seq_Maxvalue(seqvalues, false));
+        elems = lappend(elems, deparse_Seq_Startwith(seqvalues, false));
+    }
+    elems = lappend(elems, deparse_Seq_Restart(seqvalues->last_value));
+    /* we purposefully do not emit OWNED BY here */
+    if (alter_table) {
+        append_array_object(ret, "%{seq_definition: }s", elems);
+    } else {
+        append_array_object(ret, "( %{seq_definition: }s )", elems);
+    }
+
+    return ret;
+}
+
+/*
+ *  Deparse the defintion of column identity(start, inc, sequence_name) for D mode.
+ *
+ * IDENTITY(%{identity_seed}s, %{identity_inc}s, %{identity_seqname}s)
+ */
+static ObjTree* deparse_D_ColumnIdentity(Oid seqrelid, char identity, bool alter_table)
+{
+    ObjTree  *ret = NULL;
+    sequence_values *seqvalues = get_sequence_values(seqrelid);
+    bool has_seqname = false;
+
+    has_seqname = (seqvalues->sequence_name == NULL || strcmp(seqvalues->sequence_name, "") == 0);
+
+    if (!alter_table) {
+        ObjTree *tmp;
+
+        if (has_seqname) {
+            tmp = new_objtree_VA("IDENTITY(%{identity_seed}s, %{identity_inc}s, %{identity_seqname}s)", 3,
+                                 "identity_seed", ObjTypeString, seqvalues->start_value,
+                                 "identity_inc", ObjTypeString, seqvalues->increment_by,
+                                 "identity_seqname", ObjTypeString, seqvalues->sequence_name);
+        } else {
+            tmp = new_objtree_VA("IDENTITY(%{identity_seed}s, %{identity_inc}s)", 2,
+                                 "identity_seed", ObjTypeString, seqvalues->start_value,
+                                 "identity_inc", ObjTypeString, seqvalues->increment_by);
+        }
+        ret = new_objtree_VA("%{seq_definition}s", 1,
+                             "seq_definition", ObjTypeObject, tmp);
+    }
+    return ret;
+}
 
 /*
  * Deparse DefElems
@@ -1953,6 +2068,26 @@ static ObjTree* deparse_OnCommitClause(OnCommitAction option)
     }
 
     return ret;
+}
+
+/*
+ * Deparse the sequence SEQUENCE_NAME option
+ */
+static inline ObjElem* deparse_Seq_SeqName(sequence_values *seqdata, bool alter_table)
+{
+    ObjTree *ret;
+    const char *fmt;
+
+    if (seqdata->sequence_name == NULL ||
+        strcmp(seqdata->sequence_name, "") == 0) {
+        return NULL;
+    }
+
+    fmt = alter_table ? "SET SEQUENCE NAME %{value}s" : "SEQUENCE NAME %{value}s";
+    ret = new_objtree_VA(fmt, 2,
+                         "clause", ObjTypeString, "sequence name",
+                         "value", ObjTypeString, seqdata->sequence_name);
+    return new_object_object(ret);
 }
 
 /*
@@ -2351,8 +2486,11 @@ static ObjTree* deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
     sequence_values *seqvalues;
     CreateSeqStmt *createSeqStmt = (CreateSeqStmt *) parsetree;
 
-    if (createSeqStmt->is_autoinc)
+    if (createSeqStmt->forIdentity ||
+        createSeqStmt->forDIdentity ||
+        createSeqStmt->is_autoinc) {
         return NULL;
+    }
 
     seqvalues = get_sequence_values(objectId);
 
@@ -2399,7 +2537,9 @@ static ObjTree* deparse_AlterSeqStmt(Oid objectId, Node *parsetree)
     sequence_values *seqvalues;
     AlterSeqStmt    *alterSeqStmt = (AlterSeqStmt *) parsetree;
 
-    if (alterSeqStmt->is_autoinc) {
+    if (alterSeqStmt->forIdentity ||
+        alterSeqStmt->forDIdentity ||
+        alterSeqStmt->is_autoinc) {
         return NULL;
     }
 
@@ -4089,7 +4229,78 @@ static ObjTree* deparse_AlterRelation(CollectedCommand *cmd, ddl_deparse_context
             case AT_ReplaceRelOptions:
                 /* Subtypes used for internal operations; nothing to do here */
                 break;
+            case AT_AddIdentity:
+                {
+                    AttrNumber attnum;
+                    Oid        seqrelid;
+                    ObjTree    *seqdef = NULL;
+                    ColumnDef  *coldef = (ColumnDef *) subcmd->def;
 
+                    tmp_obj = new_objtree_VA("ALTER COLUMN %{column}I", 2,
+                                            "type", ObjTypeString, "add identity",
+                                            "column", ObjTypeString, subcmd->name);
+                    attnum = get_attnum(RelationGetRelid(rel), subcmd->name);
+                    seqrelid = getIdentitySequence(RelationGetRelid(rel), attnum, true,
+                                                   coldef->identity == ATTRIBUTE_IDENTITY_D);
+                    if (OidIsValid(seqrelid)) {
+                        if (coldef->identity == ATTRIBUTE_IDENTITY_D) {
+                            seqdef = deparse_D_ColumnIdentity(seqrelid, coldef->identity, false);
+                        } else {
+                            seqdef = deparse_ColumnIdentity(seqrelid, coldef->identity, false);
+                        }
+
+                        if (seqdef) {
+                            append_object_object(tmp_obj, "ADD %{identity_column}s", seqdef);
+                        }
+                    }
+
+                    subcmds = lappend(subcmds, new_object_object(tmp_obj));
+                    break;
+                }
+            case AT_SetIdentity:
+                {
+                    DefElem  *defel;
+                    char     identity = '\0';
+                    ObjTree  *seqdef = NULL;
+                    AttrNumber attnum;
+                    Oid      seqrelid;
+
+                    tmp_obj = new_objtree_VA("ALTER COLUMN %{column}I", 2,
+                                             "type", ObjTypeString, "set identity",
+                                             "column", ObjTypeString, subcmd->name);
+                    ListCell *defcell;
+                    foreach(defcell, (List *)subcmd->def) {
+                        defel = (DefElem *)lfirst(defcell);
+                        if (strcmp(defel->defname, "generated") == 0) {
+                            identity = (char)defGetInt64(defel);
+                            break;
+                        }
+                    }
+
+                    attnum = get_attnum(RelationGetRelid(rel), subcmd->name);
+                    seqrelid = getIdentitySequence(RelationGetRelid(rel), attnum, true, false);
+                    if (OidIsValid(seqrelid)) {
+                        seqdef = deparse_ColumnIdentity(seqrelid, identity, true);
+                    }
+
+                    if (seqdef) {
+                        append_object_object(tmp_obj, "%{definition}s", seqdef);
+                    }
+
+                    subcmds = lappend(subcmds, new_object_object(tmp_obj));
+                    break;
+                }
+            case AT_DropIdentity:
+                {
+                    tmp_obj = new_objtree_VA("ALTER COLUMN %{column}I DROP IDENTITY", 2,
+                                             "type", ObjTypeString, "drop identity",
+                                             "column", ObjTypeString, subcmd->name);
+                    append_string_object(tmp_obj, "%{if_exists}s",
+                                         "if_exists",
+                                         subcmd->missing_ok ? "IF EXISTS" : "");
+                    subcmds = lappend(subcmds, new_object_object(tmp_obj));
+                    break;
+                }
             case AT_AddColumnToView:
                 /* CREATE OR REPLACE VIEW -- nothing to do here */
                 break;
@@ -4145,7 +4356,7 @@ static ObjTree* deparse_AlterRelation(CollectedCommand *cmd, ddl_deparse_context
                                                  "statistics", ObjTypeInteger,
                                                  intVal((Value *)subcmd->def));
                     } else {
-                        tmp_obj = new_objtree_VA("ALTER COLUMN %{column}n SET STATISTICS PERCENT %{statistics}n", 4,
+                        tmp_obj = new_objtree_VA("ALTER COLUMN %{column}n SET STATISTICS PERCENT %{statistics}n", 3,
                                                  "type", ObjTypeString, "set statistics",
                                                  "column", ObjTypeString, subcmd->name,
                                                  "statistics", ObjTypeInteger,

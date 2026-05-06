@@ -893,6 +893,12 @@ typedef struct ShutdownStmt {
             case CONSTR_GENERATED:             \
                 tname = "GENERATED COL";       \
                 break;                         \
+            case CONSTR_GENERATED_IDENTITY:    \
+                tname = "GENERATED AS IDENTITY"; \
+                break;                         \
+            case CONSTR_D_IDENTITY:            \
+                tname = "IDENTITY";            \
+                break;                         \
             case CONSTR_AUTO_INCREMENT:        \
                 tname = "AUTO_INCREMENT";  \
                 break;                         \
@@ -1219,6 +1225,8 @@ typedef struct CreateSeqStmt {
     bool is_large;
     bool missing_ok; /* skip error if a Sequence is exists */
     bool is_autoinc;
+    bool forIdentity; /* create underlying sequence for identity column */
+    bool forDIdentity; /* identity in D format */
 } CreateSeqStmt;
 
 typedef struct AlterSeqStmt {
@@ -1231,6 +1239,8 @@ typedef struct AlterSeqStmt {
 #endif
     bool is_large; /* Indicates if this is a large or normal sequence */
     bool is_autoinc;
+    bool forIdentity; /* alter underlying sequence for identity column */
+    bool forDIdentity; /* identity in D format */
 } AlterSeqStmt;
 
 /* ----------------------

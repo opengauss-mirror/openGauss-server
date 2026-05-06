@@ -473,7 +473,7 @@ static bool is_temp_table(const char relpst);
 %type <node>	alter_table_cmd alter_partition_cmd alter_type_cmd opt_collate_clause exchange_partition_cmd move_partition_cmd
 				modify_column_cmd reset_partition_cmd modify_partition_cmd
 				replica_identity add_column_first_after event_from_clause add_column_cmd
-%type <list>	alter_table_cmds alter_partition_cmds alter_table_or_partition alter_type_cmds add_column_cmds modify_column_cmds
+%type <list>	alter_table_cmds alter_partition_cmds alter_table_or_partition alter_type_cmds add_column_cmds alter_identity_column_option_list modify_column_cmds
 
 %type <dbehavior>	opt_drop_behavior
 
@@ -484,7 +484,7 @@ static bool is_temp_table(const char relpst);
 				opt_pgxcnodes fields_options_list fields_options_fin lines_options_list
 %type <defelt>	createdb_opt_item alterdb_opt_item copy_opt_item characterset_option
 				transaction_mode_item lines_option_item fields_options_item
-				create_extension_opt_item alter_extension_opt_item
+				create_extension_opt_item alter_extension_opt_item alter_identity_column_option
 				start_opt preserve_opt rename_opt status_opt comments_opt action_opt
 				end_opt definer_name_opt
 
@@ -660,7 +660,7 @@ static bool is_temp_table(const char relpst);
 %type <ival>	row_or_rows first_or_next
 %type <boolean> opt_percent only_or_ties
 
-%type <list>	OptSeqOptList SeqOptList
+%type <list>	OptSeqOptList SeqOptList OptParenthesizedSeqOptList
 %type <boolean> ignNulls fromLast
 %type <defelt>	SeqOptElem
 
@@ -802,7 +802,8 @@ static bool is_temp_table(const char relpst);
 %type <boolean>	opt_if_not_exists
 %type <chr>		OptCompress generated_column_option
 %type <ival>	KVType
-%type <ival>		ColCmprsMode
+%type <ival>	ColCmprsMode
+%type <ival>	generated_when override_kind
 %type <fun_src>		subprogram_body
 %type <keyword> as_is as_empty
 %type <node>	column_item opt_table_partitioning_clause
@@ -812,7 +813,7 @@ static bool is_temp_table(const char relpst);
 				range_start_end_item range_less_than_item list_partition_item hash_partition_item
 				subpartitioning_clause range_subpartitioning_clause hash_subpartitioning_clause
 				list_subpartitioning_clause subpartition_item opt_subpartition_index_def
-                range_subpartition_index_list range_subpartition_index_item
+				range_subpartition_index_list range_subpartition_index_item
 %type <list>	range_partition_definition_list list_partition_definition_list hash_partition_definition_list maxValueList listValueList
 			column_item_list tablespaceList opt_interval_tablespaceList opt_hash_partition_definition_list
 			split_dest_partition_define_list split_dest_listsubpartition_define_list split_dest_rangesubpartition_define_list
@@ -1003,7 +1004,7 @@ static bool is_temp_table(const char relpst);
 	NOT NOTHING NOTIFY NOTNULL NOVALIDATE NOWAIT NTH_VALUE_P NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
 
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONALLY OPTIONS OR
-	ORDER ORDINALITY OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER OUTFILE
+	ORDER ORDINALITY OUT_P OUTER_P OVER OVERLAPS OVERLAY OVERRIDING OWNED OWNER OUTFILE
 
 	PACKAGE PACKAGES PARALLEL_ENABLE PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
 	PIPELINED
@@ -4100,7 +4101,7 @@ AlterTableStmt:
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
-        |   ALTER STREAM  qualified_name alter_table_cmds
+        |   ALTER STREAM qualified_name alter_table_cmds
             {
                 AlterTableStmt *n = makeNode(AlterTableStmt);
                 n->relation = $3;
@@ -5114,6 +5115,65 @@ alter_table_cmd:
 					n->def = (Node *) makeString($6);
 					$$ = (Node *)n;
 				}
+			/* ALTER TABLE <name> ALTER [COLUMN] <colname> ADD GENERATED ... AS IDENTITY ... */
+			| ALTER opt_column ColId ADD_P GENERATED generated_when AS IDENTITY_P OptParenthesizedSeqOptList
+				{
+					if (t_thrd.proc->workingVersionNum < PG_IDENTITY_VERSION_NUM) {
+						$$ = NULL;
+						ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("Unsupported feature: alter column add identity during the upgrade")));
+					}
+
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					Constraint *c = makeNode(Constraint);
+
+					c->contype = CONSTR_GENERATED_IDENTITY;
+					c->generated_when = $6;
+					c->options = $9;
+					c->location = @5;
+
+					n->subtype = AT_AddIdentity;
+					n->name = $3;
+					n->def = (Node *) c;
+
+					$$ = (Node *) n;
+				}
+			/* ALTER TABLE <name> ALTER [COLUMN] <colname> SET <sequence options>/RESTART [ WHITE ] */
+			| ALTER opt_column ColId alter_identity_column_option_list
+				{
+					if (t_thrd.proc->workingVersionNum < PG_IDENTITY_VERSION_NUM) {
+						$$ = NULL;
+						ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("Unsupported feature: alter column set identity during the upgrade")));
+					}
+
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+
+					n->subtype = AT_SetIdentity;
+					n->name = $3;
+					n->def = (Node *) $4;
+					$$ = (Node *) n;
+				}
+			/* ALTER TABLE <name> ALTER [COLUMN] <colname> DROP IDENTITY */
+			| ALTER opt_column ColId DROP IDENTITY_P
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+
+					n->subtype = AT_DropIdentity;
+					n->name = $3;
+					n->missing_ok = false;
+					$$ = (Node *) n;
+				}
+			/* ALTER TABLE <name> ALTER [COLUMN] <colname> DROP IDENTITY IF EXISTS */
+			| ALTER opt_column ColId DROP IDENTITY_P IF_P EXISTS
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+
+					n->subtype = AT_DropIdentity;
+					n->name = $3;
+					n->missing_ok = true;
+					$$ = (Node *) n;
+				}
 			/* ALTER TABLE <name> DROP [COLUMN] IF EXISTS <colname> [RESTRICT|CASCADE] */
 			| DROP opt_column IF_P EXISTS ColId opt_drop_behavior
 				{
@@ -5668,6 +5728,37 @@ alter_column_default:
 			SET DEFAULT a_expr			{ $$ = $3; }
 			| DROP DEFAULT				{ $$ = NULL; }
 		;
+
+alter_identity_column_option_list:
+			alter_identity_column_option { $$ = list_make1($1); }
+			| alter_identity_column_option_list alter_identity_column_option{ $$ = lappend($1, $2); }
+		;
+
+alter_identity_column_option:
+			RESTART
+				{
+					$$ = makeDefElem("restart", NULL);
+				}
+			| RESTART opt_with NumericOnly
+				{
+					$$ = makeDefElem("restart", (Node *)$3);
+				}
+			| SET SeqOptElem
+				{
+					if (strcmp($2->defname, "restart") == 0 ||
+						strcmp($2->defname, "owned_by") == 0)
+						ereport(ERROR,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("sequence option \"%s\" not supported here", $2->defname),
+								parser_errposition(@2)));
+					$$ = $2;
+				}
+			| SET GENERATED generated_when
+				{
+					$$ = makeDefElem("generated", (Node *) makeInteger($3));
+				}
+			;
+
 
 opt_drop_behavior:
 			CASCADE						{ $$ = DROP_CASCADE; }
@@ -7922,8 +8013,8 @@ ColConstraint:
 			CONSTRAINT name ColConstraintElem
 				{
 					Constraint *n = (Constraint *) $3;
-            		const char* message = "check node type inconsistant";
-            		InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					const char* message = "check node type inconsistant";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 					AssertEreport(IsA(n, Constraint),
 									MOD_OPT,
 									"check node type inconsistant");
@@ -8397,21 +8488,29 @@ ColConstraintElem:
 						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 						ereport(errstate,
 								(errmodule(MOD_PARSER),
-                                                                 errcode(ERRCODE_SYNTAX_ERROR),
-                                                                 errmsg("on update syntax is supported in dbcompatibility B."),
-                                                                 parser_errposition(@1)));
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("on update syntax is supported in dbcompatibility B."),
+									parser_errposition(@1)));
 						$$ = NULL;
 					}
 #endif
 				}
-			| GENERATED ALWAYS AS '(' a_expr ')' generated_column_option
+			| GENERATED generated_when AS '(' a_expr ')' generated_column_option
 				{
 #ifdef ENABLE_MULTIPLE_NODES
-            		const char* message = "Generated column is not yet supported";
-            		InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-					ereport(errstate, (errmodule(MOD_GEN_COL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("Generated column is not yet supported.")));
+					const char* message = "Generated column is not yet supported";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					ereport(errstate,
+							(errmodule(MOD_GEN_COL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg(message)));
 #endif
+					if ($2 == ATTRIBUTE_IDENTITY_BY_DEFAULT) {
+						const char* message = "GENERATED DEFAULT column is not yet supported.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg(message)));
+					}
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_GENERATED;
 					n->generated_when = ATTRIBUTE_IDENTITY_ALWAYS;
@@ -8420,14 +8519,30 @@ ColConstraintElem:
 					n->location = @1;
 					$$ = (Node *)n;
 				}
+			| GENERATED generated_when AS IDENTITY_P OptParenthesizedSeqOptList
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+					const char* message = "Generated AS Identity is not yet supported.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					ereport(errstate,
+							(errmodule(MOD_PARSER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg(message)));
+#endif
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_GENERATED_IDENTITY;
+					n->generated_when = $2;
+					n->options = $5;
+					n->location = @1;
+					$$ = (Node *)n;
+				}
 			| REFERENCES qualified_name opt_column_list key_match key_actions
 				{
 #ifdef 			ENABLE_MULTIPLE_NODES
-            		const char* message = "REFERENCES constraint is not yet supported.";
-            		InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					const char* message = "REFERENCES constraint is not yet supported.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 					ereport(errstate,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("REFERENCES constraint is not yet supported.")));
+						errmsg(message)));
 #endif						
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_FOREIGN;
@@ -8444,11 +8559,11 @@ ColConstraintElem:
 				}
 			| REFERENCES qualified_name opt_column_list key_match key_actions ENABLE_P
 				{
-            		const char* message = "REFERENCES constraint is not yet supported.";
-            		InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					const char* message = "REFERENCES constraint is not yet supported.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 					ereport(errstate,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("REFERENCES constraint is not yet supported.")));
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("REFERENCES constraint is not yet supported.")));
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_FOREIGN;
 					n->location = @1;
@@ -8464,6 +8579,11 @@ ColConstraintElem:
 				}
 		;
  
+generated_when:
+			ALWAYS			{ $$ = ATTRIBUTE_IDENTITY_ALWAYS; }
+			| BY DEFAULT	{ $$ = ATTRIBUTE_IDENTITY_BY_DEFAULT; }
+		;
+
 opt_unique_key:
 			UNIQUE { $$ = NULL; }
 			| UNIQUE KEY
@@ -8579,6 +8699,7 @@ TableLikeOptionList:
 TableLikeIncludingOption:
 				DEFAULTS			{ $$ = CREATE_TABLE_LIKE_DEFAULTS | CREATE_TABLE_LIKE_DEFAULTS_SERIAL; }
 				| CONSTRAINTS		{ $$ = CREATE_TABLE_LIKE_CONSTRAINTS; }
+				| IDENTITY_P		{ $$ = CREATE_TABLE_LIKE_IDENTITY; }
 				| INDEXES			{ $$ = CREATE_TABLE_LIKE_INDEXES; }
 				| STORAGE			{ $$ = CREATE_TABLE_LIKE_STORAGE; }
 				| COMMENTS			{ $$ = CREATE_TABLE_LIKE_COMMENTS; }
@@ -8592,6 +8713,7 @@ TableLikeIncludingOption:
 TableLikeExcludingOption:
 				DEFAULTS			{ $$ = CREATE_TABLE_LIKE_DEFAULTS | CREATE_TABLE_LIKE_DEFAULTS_SERIAL; }
 				| CONSTRAINTS		{ $$ = CREATE_TABLE_LIKE_CONSTRAINTS; }
+				| IDENTITY_P		{ $$ = CREATE_TABLE_LIKE_IDENTITY; }
 				| INDEXES			{ $$ = CREATE_TABLE_LIKE_INDEXES; }
 				| STORAGE			{ $$ = CREATE_TABLE_LIKE_STORAGE; }
 				| COMMENTS			{ $$ = CREATE_TABLE_LIKE_COMMENTS; }
@@ -8603,8 +8725,13 @@ TableLikeExcludingOption:
 				| ALL				{ $$ = CREATE_TABLE_LIKE_ALL; }
 		;
 
+OptParenthesizedSeqOptList:
+				'(' SeqOptList ')'		{ $$ = $2; }
+				| /*EMPTY*/				{ $$ = NIL; }
+		;
+
 opt_internal_data: 
-            INTERNAL DATA_P 	internal_data_body		{$$ = $3;}
+			INTERNAL DATA_P 	internal_data_body		{$$ = $3;}
 			| /* EMPTY */      	{$$ = NULL;}
 		;
 
@@ -10551,6 +10678,11 @@ SeqOptElem: CACHE NumericOnly
 			| OWNED BY any_name
 				{
 					$$ = makeDefElem("owned_by", (Node *)$3);
+				}
+			| SEQUENCE NAME_P any_name
+				{
+					/* not documented, only used by gs_dump */
+					$$ = makeDefElem("sequence_name", (Node *)$3);
 				}
 			| START_WITH NumericOnly
 				{
@@ -18516,6 +18648,7 @@ parallel_partition_opt:
 				{
 					$$ = NULL;
 				}
+		;
 
 colid_list:
 			ColId
@@ -24608,8 +24741,19 @@ insert_rest:
 					$$->cols = NIL;
 					$$->selectStmt = $1;
 					$$->isRewritten = false;
-                    if (((SelectStmt*)$1)->valuesLists == NULL)
-                      $$->is_dist_insertselect = true;
+					if (((SelectStmt*)$1)->valuesLists == NULL) {
+						$$->is_dist_insertselect = true;
+					}
+				}
+			| OVERRIDING override_kind VALUE_P SelectStmt
+				{
+					$$ = makeNode(InsertStmt);
+					$$->cols = NIL;
+					$$->override = ($2 == OVERRIDING_USER_VALUE ? OVERRIDING_USER_VALUE : OVERRIDING_SYSTEM_VALUE);
+					$$->selectStmt = $4;
+					if (((SelectStmt*)$4)->valuesLists == NULL) {
+						$$->is_dist_insertselect = true;
+					}
 				}
 			| '(' insert_column_list ')' SelectStmt
 				{
@@ -24617,18 +24761,37 @@ insert_rest:
 					$$->cols = $2;
 					$$->selectStmt = $4;
 					$$->isRewritten = false;
-                    if (((SelectStmt*)$4)->valuesLists == NULL)
-                        $$->is_dist_insertselect = true;
+					if (((SelectStmt*)$4)->valuesLists == NULL) {
+						$$->is_dist_insertselect = true;
+					}
+				}
+			| '(' insert_column_list ')' OVERRIDING override_kind VALUE_P SelectStmt
+				{
+					$$ = makeNode(InsertStmt);
+					$$->cols = $2;
+					$$->override = ($5 == OVERRIDING_USER_VALUE ? OVERRIDING_USER_VALUE : OVERRIDING_SYSTEM_VALUE);
+					$$->isRewritten = false;
+					$$->selectStmt = $7;
+					if (((SelectStmt*)$7)->valuesLists == NULL) {
+						$$->is_dist_insertselect = true;
+					}
 				}
 			| DEFAULT VALUES
 				{
 					$$ = makeNode(InsertStmt);
 					$$->cols = NIL;
+					$$->override = OVERRIDING_NOT_SET; /* default values, not necessary overriding insert */
 					$$->selectStmt = NULL;
 					$$->isRewritten = false;
-                    $$->is_dist_insertselect = false;
+					$$->is_dist_insertselect = false;
 				}
 		;
+
+override_kind:
+			USER		{ $$ = OVERRIDING_USER_VALUE; }
+			| SYSTEM_P	{ $$ = OVERRIDING_SYSTEM_VALUE; }
+		;
+
 
 insert_column_list:
 			insert_column_item
@@ -24860,6 +25023,8 @@ opt_cancelable: CANCELABLE                                              { $$ = T
                 ;
 
 opt_wait:	WAIT Iconst						{ $$ = $2; }
+		;
+
 opt_nowait_or_skip:
 			NOWAIT							{ $$ = LockWaitError; }
 			| SKIP LOCKED					{ $$ = LockWaitSkip; }
@@ -25101,7 +25266,7 @@ merge_update:
 				{
 					MergeWhenClause *n = makeNode(MergeWhenClause);
 					n->targetList = $3;
-
+					n->override = OVERRIDING_NOT_SET;
 					$$ = n;
 				}
 			;
@@ -25111,22 +25276,39 @@ merge_insert:
 				{
 					MergeWhenClause *n = makeNode(MergeWhenClause);
 					n->cols = NIL;
+					n->override = OVERRIDING_NOT_SET;
 					n->values = $2;
-
+					$$ = n;
+				}
+			| INSERT OVERRIDING override_kind VALUE_P merge_values_clause
+				{
+					MergeWhenClause *n = makeNode(MergeWhenClause);
+					n->cols = NIL;
+					n->override = ($3 == OVERRIDING_USER_VALUE ? OVERRIDING_USER_VALUE : OVERRIDING_SYSTEM_VALUE);
+					n->values = $5;
 					$$ = n;
 				}
 			| INSERT '(' insert_column_list ')' merge_values_clause
 				{
 					MergeWhenClause *n = makeNode(MergeWhenClause);
 					n->cols = $3;
+					n->override = OVERRIDING_NOT_SET;
 					n->values = $5;
-
+					$$ = n;
+				}
+			| INSERT '(' insert_column_list ')' OVERRIDING override_kind VALUE_P merge_values_clause
+				{
+					MergeWhenClause *n = makeNode(MergeWhenClause);
+					n->cols = $3;
+					n->override = ($6 == OVERRIDING_USER_VALUE ? OVERRIDING_USER_VALUE : OVERRIDING_SYSTEM_VALUE);
+					n->values = $8;
 					$$ = n;
 				}
 			| INSERT DEFAULT VALUES
 				{
 					MergeWhenClause *n = makeNode(MergeWhenClause);
 					n->cols = NIL;
+					n->override = OVERRIDING_NOT_SET;
 					n->values = NIL;
 					$$ = n;
 				}
@@ -25283,8 +25465,7 @@ inline_view:
  *	We now support both orderings, but prefer LIMIT/OFFSET before the locking clause.
  *	2002-08-28 bjm
  */
-select_no_parens:
-			simple_select						{ $$ = $1; }
+select_no_parens:		simple_select	{ $$ = $1; }
                         | select_clause siblings_clause opt_select_limit
                                 {
                                         SelectStmt* stmt = (SelectStmt *) $1;
@@ -30037,7 +30218,7 @@ func_application:	func_name '(' func_arg_list opt_sort_clause ')'
 						ListCell* lc = list_head($3);
 						Node* n1  = (Node*)lfirst(lc);
 						if (IsA(n1, ColumnRef)) {
-							char* lobname = lobname = strVal(linitial(((ColumnRef*)n1)->fields));
+							char* lobname = strVal(linitial(((ColumnRef*)n1)->fields));
 							Node* funcname = (Node*)lfirst(list_tail($1));
 							if (strcmp(strVal(funcname), "createtemporary") == 0) {
 								if (list_length($4) == 2) {
@@ -32808,9 +32989,10 @@ unreserved_keyword:
 			| OPTION
 			| OPTIONALLY
 			| OPTIONS
+			| OUTFILE
 			| ORDINALITY
 			| OVER
-			| OUTFILE
+			| OVERRIDING
 			| OWNED
 			| OWNER
 			| PACKAGE
@@ -33288,7 +33470,7 @@ reserved_keyword:
 			| REFERENCES
 			| REJECT_P
 			| RETURNING
-                        | ROWNUM
+			| ROWNUM
 			| SHARE_MEMORY
 			| SELECT
 			| SESSION_USER

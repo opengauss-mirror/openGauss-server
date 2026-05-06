@@ -621,7 +621,7 @@ Oid get_seq_id_from_tle(Query* query, TargetEntry* tle)
             Relation rel = try_relation_open(rte->relid, AccessShareLock);
             if (rel->rd_rel->relkind == RELKIND_RELATION) {
                 relation_close(rel, AccessShareLock);
-                return pg_get_serial_sequence_internal(rte->relid, var->varattno, true, NULL);
+                return getIdentitySequence(rte->relid, var->varattno, true, true);
             } else if (rel->rd_rel->relkind == RELKIND_VIEW) {
                 sub_query = get_view_query(rel);
             } else if (rel->rd_rel->relkind == RELKIND_MATVIEW) {
@@ -643,7 +643,7 @@ static Oid get_identity_seq_id(Oid tableOid)
     Relation rel = try_relation_open(tableOid, AccessShareLock);
     if (rel->rd_rel->relkind != RELKIND_VIEW && rel->rd_rel->relkind != RELKIND_MATVIEW) {
         relation_close(rel, AccessShareLock);
-        return get_table_identity(tableOid);
+        return getIdentitySequenceForD(tableOid, NULL, NULL);
     }
 
     Query* viewquery = rel->rd_rel->relkind == RELKIND_VIEW ? get_view_query(rel) : get_matview_query(rel);

@@ -548,8 +548,12 @@ static void ATExecAddStatistics(Relation rel, Node* def, LOCKMODE lockmode);
 static void ATExecDeleteStatistics(Relation rel, Node* def, LOCKMODE lockmode);
 static ObjectAddress ATExecSetOptions(Relation rel, const char* colName, Node* options, bool isReset, LOCKMODE lockmode);
 static ObjectAddress ATExecSetStorage(Relation rel, const char* colName, Node* newValue, LOCKMODE lockmode);
+static ObjectAddress ATExecAddIdentity(Relation rel, const char *colName, Node *def, LOCKMODE lockmode);
+static ObjectAddress ATExecSetIdentity(Relation rel, const char *colName, Node *def, LOCKMODE lockmode);
+static ObjectAddress ATExecDropIdentity(Relation rel, const char *colName, bool missing_ok, LOCKMODE lockmode);
 static void ATPrepCheckDefault(Node* node);
 static bool CheckLastColumn(Relation rel, AttrNumber attrnum);
+static void CheckMultiIdentityForD(Relation rel);
 static void ATPrepDropColumn(
     List** wqueue, Relation rel, bool recurse, bool recursing, AlterTableCmd* cmd, LOCKMODE lockmode);
 static ObjectAddress ATExecDropColumn(List** wqueue, Relation rel, const char* colName, DropBehavior behavior, bool recurse,
@@ -651,8 +655,9 @@ static bool CheckHashPartitionKeyType(Oid typoid);
 static void CheckHashPartitionKeyType(FormData_pg_attribute* attrs, List* pos);
 
 static void CheckIntervalPartitionKeyType(FormData_pg_attribute* attrs, List* pos);
-static void CheckIntervalValue(
-    const FormData_pg_attribute* attrs, const List* pos, const IntervalPartitionDefState* intervalPartDef);
+static void CheckIntervalValue(const FormData_pg_attribute* attrs,
+                               const List* pos,
+                               const IntervalPartitionDefState* intervalPartDef);
 static void CheckPartitionTablespace(const char* spcname, Oid owner);
 static bool ConfirmTypeInfo(Oid* target_oid, int* target_mod, Const* src, Form_pg_attribute attrs, bool isinterval);
 
@@ -967,7 +972,7 @@ inline static bool CStoreSupportConstraint(Constraint* cons)
         case CONSTR_NULL:
         case CONSTR_NOTNULL:
         case CONSTR_DEFAULT:
-        case CONSTR_IDENTITY:
+        case CONSTR_D_IDENTITY:
         case CONSTR_CLUSTER:
             ret = true;
             break;
@@ -2032,7 +2037,8 @@ static void DetermineColumnCollationForMOTTable(Oid *collOid)
 }
 #endif
 
-static void CheckPartitionKeyForCreateTable(PartitionState *partTableState, List *schema, TupleDesc descriptor)
+static void CheckPartitionKeyForCreateTable(PartitionState *partTableState, List *schema,
+                                            TupleDesc descriptor)
 {
     List *pos = NIL;
     bool partkeyIsFunc = false;
@@ -2794,10 +2800,11 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
      * deals with column names, types, and NOT NULL constraints, but not
      * default values or CHECK constraints; we handle those below.
      */
+    Form_pg_attribute_extra attrsExtra;
     if (relkind == RELKIND_COMPOSITE_TYPE)
-        descriptor = BuildDescForRelation(schema, orientedFrom, relkind);
+        descriptor = BuildDescForRelation(schema, orientedFrom, relkind, InvalidOid, &attrsExtra);
     else
-        descriptor = BuildDescForRelation(schema, orientedFrom, '\0', rel_coll_oid);
+        descriptor = BuildDescForRelation(schema, orientedFrom, '\0', rel_coll_oid, &attrsExtra);
 
     /* Must specify at least one column when creating a table. */
     if (descriptor->natts == 0 && relkind != RELKIND_COMPOSITE_TYPE) {
@@ -2963,6 +2970,7 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
             cookedDefaults = lappend(cookedDefaults, cooked);
             descriptor->attrs[attnum - 1].atthasdef  = true;
         }
+
         if (colDef->clientLogicColumnRef != NULL) {
             CeHeapInfo *ceHeapInfo = NULL;
             ceHeapInfo = (CeHeapInfo*) palloc(sizeof(CeHeapInfo));
@@ -2970,8 +2978,16 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
             process_encrypted_columns(colDef, ceHeapInfo);
             ceLst = lappend (ceLst, ceHeapInfo);
         }
-    }
 
+        if (colDef->identity && colDef->identity != ATTRIBUTE_IDENTITY_D) {
+            if (stmt->partTableState) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("identity column currently not supported partitioned table \"%s\"",
+                        relname)));
+            }
+            attrsExtra[attnum - 1].attidentity = colDef->identity;
+        }
+    }
 
     /*Get hash partition key based on relation distribution info*/
 
@@ -3167,7 +3183,10 @@ ObjectAddress DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, Object
         typaddress,
         depend_extend,
         InvalidOid,
-        typbasetype);
+        typbasetype,
+        attrsExtra);
+    
+    pfree_ext(attrsExtra);
     if (bucketinfo != NULL) {
         pfree_ext(bucketinfo->bucketcol);
         pfree_ext(bucketinfo->bucketlist);
@@ -4846,7 +4865,7 @@ void ExecuteTruncateGuts(
             if (OidIsValid(seq_relid)) seq_oids = lappend_oid(seq_oids, seq_relid);
             // find sequence associated with identity column of this rel in D format.
             if (u_sess->attr.attr_sql.sql_compatibility == D_FORMAT) {
-                Oid identity_seq = get_table_identity(RelationGetRelid(rel));
+                Oid identity_seq = getIdentitySequenceForD(RelationGetRelid(rel), NULL, NULL);
                 if (OidIsValid(identity_seq)) seq_oids = lappend_oid(seq_oids, identity_seq);
             }
             // almost two elements.
@@ -5412,7 +5431,7 @@ static List* MergeAttributes(
         ListCell* rest = lnext(entry);
         ListCell* prev = entry;
 
-        if (u_sess->attr.attr_sql.enable_cluster_resize && coldef->dropped_attr != NULL) {
+        if (u_sess->attr.attr_sql.enable_cluster_resize && coldef->droppedAttr != NULL) {
             continue;
         }
         if (coldef->typname == NULL) {
@@ -5602,12 +5621,13 @@ static List* MergeAttributes(
                 }
 
                 def->inhcount++;
+
                 /* Merge of NOT NULL constraints = OR 'em together */
                 if (attribute->attnotnull) {
                     def->is_not_null = true;
                 }
                 if (def->kvtype == ATT_KV_UNDEFINED) {
-                    def->kvtype = attribute->attkvtype;
+                    def->kvtype = GET_ATTR_KVTYPE(attribute);
                 }
                 if (def->cmprs_mode == ATT_CMPR_UNDEFINED) {
                     def->cmprs_mode = attribute->attcmprmode;
@@ -5632,7 +5652,7 @@ static List* MergeAttributes(
                 def->is_not_null = attribute->attnotnull;
                 def->is_from_type = false;
                 def->storage = attribute->attstorage;
-                def->kvtype = attribute->attkvtype;
+                def->kvtype = GET_ATTR_KVTYPE(attribute);
                 def->cmprs_mode = attribute->attcmprmode;
                 def->raw_default = NULL;
                 def->update_default = NULL;
@@ -5646,9 +5666,14 @@ static List* MergeAttributes(
             }
 
             /*
-             * Copy default if any
+             * Identity and default expr is never inherited.
              */
-            if (attribute->atthasdef) {
+             if (GET_ATTR_IDENTITY(attribute)) {
+                  def->identity = '\0';
+             } else if (attribute->atthasdef) {
+                /*
+                 * Copy default if any
+                 */
                 Node* this_default = NULL;
                 Node* this_update_default = NULL;
                 AttrDefault* attrdef = NULL;
@@ -5691,6 +5716,7 @@ static List* MergeAttributes(
                 if (def->update_default == NULL)
                     def->update_default = this_update_default;
             }
+
         }
 
         /*
@@ -5839,6 +5865,13 @@ static List* MergeAttributes(
                 if (newdef->update_default != NULL) {
                     def->update_default = newdef->update_default;
                 }
+                /*
+                 * Identity and default expr is never inherited. 
+                 * The new column can have an identity definition,
+                 * so we always just take that one.
+                 */
+                def->identity = newdef->identity;
+
             } else {
                 /*
                  * No, attach new column to result schema
@@ -8511,6 +8544,11 @@ LOCKMODE AlterTableGetLockLevel(List* cmds)
                             }
                         }
                         break;
+                   case AT_AddIdentity:
+                   case AT_DropIdentity:
+                   case AT_SetIdentity:
+                        cmd_lockmode = AccessExclusiveLock;
+                        break;
                     default:
                         break;
                 }
@@ -8569,7 +8607,8 @@ static void ATController(AlterTableStmt *parsetree, Relation rel, List* cmds, bo
                  */
                 doRedistribute = true;
                 if (!IsConnFromCoord()) {
-                    if (list_length(tab->subcmds[AT_PASS_ADD_COL]) > 0 || list_length(tab->subcmds[AT_PASS_DROP]) > 0 ||
+                    if (list_length(tab->subcmds[AT_PASS_ADD_COL]) > 0 ||
+                        list_length(tab->subcmds[AT_PASS_DROP]) > 0 ||
                         list_length(tab->subcmds[AT_PASS_ALTER_TYPE]) > 0 ||
                         list_length(tab->subcmds[AT_PASS_OLD_CONSTR]) > 0 ||
                         list_length(tab->subcmds[AT_PASS_COL_ATTRS]) > 0 ||
@@ -8767,6 +8806,18 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
             ATSimplePermissions(rel, ATT_TABLE | ATT_MATVIEW);
             ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode);
             /* No command-specific prep needed */
+            pass = AT_PASS_MISC;
+            break;
+       case AT_AddIdentity:
+            ATSimplePermissions(rel, ATT_TABLE | ATT_VIEW | ATT_FOREIGN_TABLE);
+            pass = AT_PASS_ADD_CONSTR;
+            break;
+       case AT_DropIdentity:
+            ATSimplePermissions(rel, ATT_TABLE | ATT_VIEW | ATT_FOREIGN_TABLE);
+            pass = AT_PASS_DROP;
+            break;
+       case AT_SetIdentity:
+            ATSimplePermissions(rel, ATT_TABLE | ATT_VIEW | ATT_FOREIGN_TABLE);
             pass = AT_PASS_MISC;
             break;
         case AT_DropColumn: /* DROP COLUMN */
@@ -9143,6 +9194,9 @@ static bool ATCheckLedgerTableCmd(Relation rel, AlterTableCmd* cmd)
         case AT_DropColumn: /* DROP COLUMN */
         case AT_AlterColumnType: /* ALTER COLUMN TYPE */
         case AT_ModifyColumn: /* MODIFY/CHANGE COLUMN */
+        case AT_AddIdentity: /* ADD IDENTITY */
+        case AT_SetIdentity: /* SET IDENTITY */
+        case AT_DropIdentity: /* DROP IDENTITY */
         case AT_ExchangePartition: /* EXCHANGE PARTITION */
         case AT_DropPartition: /* DROP PARTITION */
         case AT_DropSubPartition: /* DROP PARTITION */
@@ -9614,6 +9668,15 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             break;
         case AT_SetStorage: /* ALTER COLUMN SET STORAGE */
             address = ATExecSetStorage(rel, cmd->name, cmd->def, lockmode);
+            break;
+        case AT_AddIdentity:
+            address = ATExecAddIdentity(rel, cmd->name, cmd->def, lockmode);
+            break;
+        case AT_SetIdentity:
+            address = ATExecSetIdentity(rel, cmd->name, cmd->def, lockmode);
+            break;
+        case AT_DropIdentity:
+            address = ATExecDropIdentity(rel, cmd->name, cmd->missing_ok, lockmode);
             break;
         case AT_DropColumn: /* DROP COLUMN */
             address = ATExecDropColumn(wqueue, rel, cmd->name, cmd->behavior, false, false, cmd->missing_ok, lockmode, fromReplace);
@@ -13436,6 +13499,7 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
     Relation    cedesc = NULL;
     HeapTuple reltup = NULL;
     FormData_pg_attribute attribute;
+    FormData_pg_attribute_extra attrExtra = {0};
     int newattnum = 0;
     int currattnum = 0;
     char relkind;
@@ -13560,6 +13624,17 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
     }
     relkind = ((Form_pg_class)GETSTRUCT(reltup))->relkind;
 
+    /*
+     * Cannot add identity column if table has children, because identity does
+     * not inherit.  (Adding column and identity separately will work.)
+     */
+    if (colDef->identity &&
+        recurse &&
+        find_inheritance_children(myrelid, NoLock) != NIL)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                 errmsg("cannot recursively add identity column to table that has child tables")));
+
     /* new name should not already exist, but skip if the name already exists and ifNotExists is true */
     if (!check_for_column_name_collision(rel, colDef->colname, ifNotExists)) {
         heap_close(attrdesc, RowExclusiveLock);
@@ -13569,6 +13644,14 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
         }
         tableam_tops_free_tuple(reltup);
         return InvalidObjectAddress;
+    }
+
+    /* 
+     * in D-format, one table only have one identity column
+     * before add new column, check it.
+     */
+    if (colDef->identity) {
+        CheckMultiIdentityForD(rel);
     }
 
     /* Determine the new attribute's number */
@@ -13636,7 +13719,10 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
     attribute.atthasdef = false;
     attribute.attisdropped = false;
     attribute.attislocal = colDef->is_local;
-    attribute.attkvtype = colDef->kvtype;
+
+    attrExtra.attkvtype = colDef->kvtype;
+    attrExtra.attidentity = colDef->identity;
+
     if (!isDelta) {
         VerifyAttrCompressMode(colDef->cmprs_mode, attribute.attlen, colDef->colname);
         attribute.attcmprmode = colDef->cmprs_mode;
@@ -13674,7 +13760,7 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
         query_str = CheckPgRewriteFirstAfter(rel);
     }
 
-    InsertPgAttributeTuple(attrdesc, &attribute, NULL);
+    InsertPgAttributeTuple(attrdesc, &attribute, &attrExtra, NULL);
 
     heap_close(attrdesc, RowExclusiveLock);
 
@@ -13819,10 +13905,18 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
          * inplace or online upgrade at present.
          */
         if (u_sess->attr.attr_common.IsInplaceUpgrade &&
-            (rel->rd_id == RelationRelationId || rel->rd_id == AttributeRelationId))
+            (rel->rd_id == RelationRelationId || rel->rd_id == AttributeRelationId)) {
             defval = NULL;
-        else
+        } else if (colDef->identity) {
+            NextValueExpr *nve = makeNode(NextValueExpr);
+            nve->seqid = RangeVarGetRelid(colDef->identitySequence, NoLock, false);
+            nve->typeId = typeOid;
+            defval = (Expr *) nve;
+            /* must do a rewrite for identity columns */
+            tab->rewrite |= AT_REWRITE_DEFAULT_VAL;
+        } else {
             defval = (Expr*)build_column_default(rel, attribute.attnum);
+        }
 
         if (defval == NULL && (GetDomainConstraints(typeOid) != NIL || is_addloc)) {
             Oid baseTypeId;
@@ -13852,12 +13946,12 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
                 if (colDef->is_not_null) {
                     ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, true, is_addloc);
                 }
-            } else if (contain_specified_function((Node*)defval, NEXTVALFUNCOID)
-                    && u_sess->attr.attr_sql.sql_compatibility != D_FORMAT) {
-                /* We don't support alter table add column which default with nextval expression. */
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("It's not supported to alter table add column default with nextval expression.")));
+            } else if (!IsA(defval, NextValueExpr) &&
+                       contain_specified_function((Node*)defval, NEXTVALFUNCOID)) {
+                /* We don't support alter table add column which default with nextval expression. */ 
+                ereport(ERROR, 
+                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+                         errmsg("It's not supported to alter table add column default with nextval expression.")));
             } else if (RelationIsCUFormat(rel)) {
                 ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef, false, false);
             } else if (colDef->generatedCol ) {
@@ -14059,7 +14153,7 @@ static ObjectAddress ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relat
     }
 
 
-	/* column Options */
+    /* column Options */
     ATCreateColumComments(myrelid, colDef);
 
     foreach (child, children) {
@@ -14209,6 +14303,7 @@ static ObjectAddress ATExecDropNotNull(Relation rel, const char* colName, LOCKMO
     ListCell* indexoidscan = NULL;
     ObjectAddress address;
     Oid replidindex;
+    Form_pg_attribute attTup;
 
     /*
      * lookup the attribute
@@ -14222,11 +14317,19 @@ static ObjectAddress ATExecDropNotNull(Relation rel, const char* colName, LOCKMO
             (errcode(ERRCODE_UNDEFINED_COLUMN),
                 errmsg("column \"%s\" of relation \"%s\" does not exist", colName, RelationGetRelationName(rel))));
 
-    attnum = ((Form_pg_attribute)GETSTRUCT(tuple))->attnum;
+    attTup = (Form_pg_attribute)GETSTRUCT(tuple);
+    attnum = attTup->attnum;
 
     /* Prevent them from altering a system attribute */
     if (attnum <= 0)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot alter system column \"%s\"", colName)));
+
+    if (get_attidentity(RelationGetRelid(rel), attnum)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                 errmsg("column \"%s\" of relation \"%s\" is an identity column",
+                        colName, RelationGetRelationName(rel))));
+    }
 
     /*
      * Check that the attribute is not in a primary key
@@ -14415,8 +14518,9 @@ static ObjectAddress ATExecColumnDefault(Relation rel, const char* colName, Node
     }
 
     /* Prevent them from altering a system attribute */
-    if (attnum <= 0)
+    if (attnum <= 0) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot alter system column \"%s\"", colName)));
+    }
 
     if (ISGENERATEDCOL(tupdesc, attnum - 1)) {
         ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
@@ -14424,6 +14528,12 @@ static ObjectAddress ATExecColumnDefault(Relation rel, const char* colName, Node
     } else if (attnum == RelAutoIncAttrNum(rel)) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("cannot alter auto_increment column \"%s\" default", colName)));
+    } else if (get_attidentity(RelationGetRelid(rel), attnum)) {
+        /* when drop identity column */
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                 errmsg("column \"%s\" of relation \"%s\" is an identity column",
+                        colName, RelationGetRelationName(rel)),
+                 newDefault ? 0 : errhint("Use ALTER TABLE ... ALTER COLUMN ... DROP IDENTITY instead.")));
     }
 
     bool on_update = FetchOnUpdateExpress(rel, colName);
@@ -14761,6 +14871,249 @@ static ObjectAddress ATExecSetStorage(Relation rel, const char* colName, Node* n
 }
 
 /*
+ * ALTER TABLE ALTER COLUMN ADD IDENTITY
+ *
+ * Return the address of the affected column.
+ */
+static ObjectAddress ATExecAddIdentity(Relation rel, const char *colName,
+                                       Node *def, LOCKMODE lockmode)
+{
+    Relation    attrelation;
+    HeapTuple   tuple;
+    Form_pg_attribute attTup;
+    AttrNumber  attnum;
+    ObjectAddress address;
+    ColumnDef  *cdef = castNode(ColumnDef, def);
+    TupleDesc   tupdesc = nullptr;
+    char attidentity = '\0';
+
+    if (RELATION_IS_PARTITIONED(rel) || RelationIsValuePartitioned(rel)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot add identity to partitioned table \"%s\"", RelationGetRelationName(rel))));
+    }
+
+    attrelation = heap_open(AttributeRelationId, RowExclusiveLock);
+
+    tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), colName);
+    if (!HeapTupleIsValid(tuple))
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_COLUMN),
+                 errmsg("column \"%s\" of relation \"%s\" does not exist",
+                        colName, RelationGetRelationName(rel))));
+
+    CheckMultiIdentityForD(rel);
+
+    attTup = (Form_pg_attribute) GETSTRUCT(tuple);
+    attnum = attTup->attnum;
+
+    /* Can't alter a system attribute */
+    if (attnum <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot alter system column \"%s\"", colName)));
+    }
+
+    /*
+     * Creating a column as identity implies NOT NULL, so adding the identity
+     * to an existing column that is not NOT NULL would create a state that
+     * cannot be reproduced without contortions.
+     */
+    if (!attTup->attnotnull) {
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("column \"%s\" of relation \"%s\" must be declared NOT NULL before identity can be added",
+                        colName, RelationGetRelationName(rel))));
+    }
+
+    attidentity = HeapTupleGetIdentity(tuple, attrelation);
+    if (attidentity) {
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("column \"%s\" of relation \"%s\" is already an identity column",
+                        colName, RelationGetRelationName(rel))));
+    }
+
+    if (attTup->atthasdef) {
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("column \"%s\" of relation \"%s\" already has a default value",
+                        colName, RelationGetRelationName(rel))));
+    }
+
+    tuple = HeapTupleModifyIdentity(tuple, attrelation, cdef->identity);
+
+    CatalogTupleUpdate(attrelation, &tuple->t_self, tuple);
+
+    ObjectAddressSubSet(address, RelationRelationId,
+                        RelationGetRelid(rel), attnum);
+    heap_freetuple(tuple);
+    heap_close(attrelation, RowExclusiveLock);
+
+    return address;
+}
+
+static ObjectAddress ATExecSetIdentity(Relation rel, const char *colName, Node *def, LOCKMODE lockmode)
+{
+    ListCell   *option;
+    DefElem    *generatedEl = NULL;
+    HeapTuple   tuple;
+    Form_pg_attribute attTup;
+    AttrNumber  attnum;
+    Relation    attrelation;
+    ObjectAddress address = InvalidObjectAddress;
+    char attidentity = '\0';
+
+    if (RELATION_IS_PARTITIONED(rel) || RelationIsValuePartitioned(rel)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot set identity to partitioned table \"%s\"", RelationGetRelationName(rel))));
+    }
+
+    foreach(option, castNode(List, def))
+    {
+        DefElem    *defel = castNode(DefElem, lfirst(option));
+ 
+        if (strcmp(defel->defname, "generated") == 0)
+        {
+            if (generatedEl)
+                ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                         errmsg("conflicting or redundant options")));
+            generatedEl = defel;
+        }
+        else {
+            elog(ERROR, "option \"%s\" not recognized", defel->defname);
+        }
+    }
+
+    /*
+     * Even if there is nothing to change here, we run all the checks.  There
+     * will be a subsequent ALTER SEQUENCE that relies on everything being
+     * there.
+     */
+
+    attrelation = heap_open(AttributeRelationId, RowExclusiveLock);
+    tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), colName);
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
+                 errmsg("column \"%s\" of relation \"%s\" does not exist",
+                        colName, RelationGetRelationName(rel))));
+    }
+
+    attTup = (Form_pg_attribute) GETSTRUCT(tuple);
+    attnum = attTup->attnum;
+
+    if (attnum <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("cannot alter system column \"%s\"", colName)));
+    }
+
+    attidentity = HeapTupleGetIdentity(tuple, attrelation);
+
+    if (!attidentity) {
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("column \"%s\" of relation \"%s\" is not an identity column",
+                        colName, RelationGetRelationName(rel))));
+    } else if (attidentity == ATTRIBUTE_IDENTITY_D ||
+              unlikely(getIdentitySequenceForD(RelationGetRelid(rel), colName, NULL) != InvalidOid)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("identity column \"%s\" of relation \"%s\" in D format not supported SET IDENTITY",
+                            colName, RelationGetRelationName(rel))));
+    }
+
+    if (generatedEl) {
+        tuple = HeapTupleModifyIdentity(tuple, attrelation, defGetInt32(generatedEl));
+        CatalogTupleUpdate(attrelation, &tuple->t_self, tuple);
+        ObjectAddressSubSet(address, RelationRelationId,
+                            RelationGetRelid(rel), attnum);
+    }
+
+    heap_freetuple(tuple);
+    heap_close(attrelation, RowExclusiveLock);
+
+    return address;
+}
+
+static ObjectAddress ATExecDropIdentity(Relation rel, const char *colName, bool missing_ok, LOCKMODE lockmode)
+{
+    HeapTuple   tuple;
+    Form_pg_attribute attTup;
+    AttrNumber  attnum;
+    Relation    attrelation;
+    ObjectAddress address;
+    Oid         seqid;
+    ObjectAddress seqaddress;
+    char attidentity = '\0';
+
+    if (RELATION_IS_PARTITIONED(rel) || RelationIsValuePartitioned(rel)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot drop identity of partitioned table \"%s\"", RelationGetRelationName(rel))));
+    }
+
+    attrelation = heap_open(AttributeRelationId, RowExclusiveLock);
+    tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), colName);
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
+                 errmsg("column \"%s\" of relation \"%s\" does not exist",
+                        colName, RelationGetRelationName(rel))));
+    }
+
+    attTup = (Form_pg_attribute) GETSTRUCT(tuple);
+    attnum = attTup->attnum;
+
+    if (attnum <= 0) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("cannot alter system column \"%s\"", colName)));
+    }
+
+    attidentity = HeapTupleGetIdentity(tuple, attrelation);
+
+    if (!attidentity) {
+        if (!missing_ok) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                     errmsg("column \"%s\" of relation \"%s\" is not an identity column",
+                            colName, RelationGetRelationName(rel))));
+        } else {
+            ereport(NOTICE,
+                    (errmsg("column \"%s\" of relation \"%s\" is not an identity column, skipping",
+                            colName, RelationGetRelationName(rel))));
+            heap_freetuple(tuple);
+            heap_close(attrelation, RowExclusiveLock);
+            return InvalidObjectAddress;
+        }
+    } else if (attidentity == ATTRIBUTE_IDENTITY_D ||
+               unlikely(getIdentitySequenceForD(RelationGetRelid(rel), colName, NULL) != InvalidOid)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("identity column \"%s\" of relation \"%s\" in D format not supported DROP IDENTITY",
+                            colName, RelationGetRelationName(rel))));
+    }
+
+    attTup->atthasdef = false;
+
+    tuple = HeapTupleModifyIdentity(tuple, attrelation, '\0');
+    CatalogTupleUpdate(attrelation, &tuple->t_self, tuple);
+    ObjectAddressSubSet(address, RelationRelationId,
+                        RelationGetRelid(rel), attnum);
+    heap_freetuple(tuple);
+    heap_close(attrelation, RowExclusiveLock);
+
+    /* drop the internal sequence */
+    seqid = getIdentitySequence(RelationGetRelid(rel), attnum, false, false);
+    deleteDependencyRecordsForClass(RelationRelationId, seqid,
+                                    RelationRelationId, DEPENDENCY_INTERNAL);
+    CommandCounterIncrement();
+    seqaddress.classId = RelationRelationId;
+    seqaddress.objectId = seqid;
+    seqaddress.objectSubId = 0;
+    performDeletion(&seqaddress, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
+
+    return address;
+}
+
+/*
  * ALTER TABLE DROP COLUMN
  *
  * DROP COLUMN cannot use the normal ALTER TABLE recursion mechanism,
@@ -14810,6 +15163,32 @@ static bool CheckLastColumn(Relation rel, AttrNumber attrnum)
     return true;
 }
 
+/* 
+ * in D format, check whether this relation
+ * already has one identity column
+ */
+static void CheckMultiIdentityForD(Relation rel)
+{
+    TupleDesc tupdesc;
+    AttrNumber attnum;
+    Form_pg_attribute attr;
+
+    if (!DB_IS_CMPT(D_FORMAT)) {
+        return;
+    }
+
+    /* by dependency */
+    char* colname = NULL;
+    Oid seqId = getIdentitySequenceForD(RelationGetRelid(rel), NULL, &colname);
+    if (OidIsValid(seqId)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("Multiple identity columns specified for table \"%s\". "
+                        "Only one identity column per table is allowed.",
+                        RelationGetRelationName(rel))));
+    }
+
+}
 
 #ifdef ENABLE_MULTIPLE_NODES
 /* Check if the ALTER TABLE DROP COLUMN operation is valid in timeseries table.
@@ -14824,7 +15203,7 @@ static bool CheckLastColumn(Relation rel, AttrNumber attrnum)
  */
 static void CheckTsStoreDropColumn(const Relation tsrel, const AttrNumber attnum, const char* colName)
 {
-    int1 kvtype = tsrel->rd_att->attrs[attnum - 1]->attkvtype;
+    int1 kvtype = GET_ATTR_KVTYPE(tsrel->rd_att->attrs[attnum - 1]);
     if (kvtype == ATT_KV_TIMETAG) {
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -15102,7 +15481,8 @@ static ObjectAddress  ATExecDropColumn(List** wqueue, Relation rel, const char* 
 #ifdef ENABLE_MULTIPLE_NODES
     if (unlikely(RelationIsTsStore(rel))) {
         /* drop column in tag table */
-        if (rel->rd_att->attrs[attnum - 1]->attkvtype == ATT_KV_TAG) {
+        int kvtype = GET_ATTR_KVTYPE(rel->rd_att->attrs[attnum - 1]);
+        if (kvtype == ATT_KV_TAG) {
             Oid tag_relid = get_tag_relid(RelationGetRelationName(rel), rel->rd_rel->relnamespace);
             Relation tagrel = heap_open(tag_relid, lockmode);
             CheckTableNotInUse(tagrel, "ALTER TABLE");
@@ -15110,7 +15490,7 @@ static ObjectAddress  ATExecDropColumn(List** wqueue, Relation rel, const char* 
             TagsCacheMgr::GetInstance().clear();
 
             heap_close(tagrel, NoLock);
-        } else if (rel->rd_att->attrs[attnum - 1]->attkvtype == ATT_KV_FIELD && Tsdb::RelationEnablesTsdbDelta(rel)) {
+        } else if (kvtype == ATT_KV_FIELD && Tsdb::RelationEnablesTsdbDelta(rel)) {
             /* if drop TSField columns, update delta table simultaneously */
             Relation delta_rel = Tsdb::RelationGetDeltaRelation(rel, lockmode);
             CheckTableNotInUse(delta_rel, "ALTER TABLE");
@@ -19422,13 +19802,14 @@ void ATExecChangeOwner(Oid relationOid, Oid newOwnerId, bool recursing, LOCKMODE
                 Oid tableId;
                 int32 colId;
 
-                if (sequenceIsOwned(relationOid, &tableId, &colId))
+                if (sequenceIsOwned(relationOid, DEPENDENCY_AUTO, &tableId, &colId) ||
+                    sequenceIsOwned(relationOid, DEPENDENCY_INTERNAL, &tableId, &colId)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("cannot change owner of (large) sequence \"%s\"", NameStr(tuple_class->relname)),
                             errdetail("Sequence \"%s\" is linked to table \"%s\".",
-                                NameStr(tuple_class->relname),
-                                get_rel_name(tableId))));
+                                      NameStr(tuple_class->relname), get_rel_name(tableId))));
+                    }
             }
             break;
         case RELKIND_COMPOSITE_TYPE:
@@ -23735,17 +24116,6 @@ ObjectAddress AlterTableNamespace(AlterObjectSchemaStmt* stmt, Oid *oldschema)
     if (RELKIND_IS_SEQUENCE(rel->rd_rel->relkind)) {
         ereport(
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("ALTER SEQUENCE SET SCHEMA is not yet supported.")));
-
-        Oid tableId;
-        int32 colId;
-
-        if (sequenceIsOwned(relid, &tableId, &colId))
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("cannot move an owned (large) sequence into another schema"),
-                    errdetail("Sequence \"%s\" is linked to table \"%s\".",
-                        RelationGetRelationName(rel),
-                        get_rel_name(tableId))));
     }
 
     /* Get and lock schema OID and check its permissions. */
@@ -24708,8 +25078,8 @@ static void CheckIntervalPartitionKeyType(FormData_pg_attribute* attrs, List* po
     }
 }
 
-static void CheckIntervalValue(
-    const FormData_pg_attribute* attrs, const List* pos, const IntervalPartitionDefState* intervalPartDef)
+static void CheckIntervalValue(const FormData_pg_attribute* attrs,
+                               const List* pos, const IntervalPartitionDefState* intervalPartDef)
 {
     if (pos == NULL) {
         elog(ERROR, "pos is NULL");
@@ -34502,7 +34872,7 @@ int128 EvaluateAutoIncrement(Relation rel, TupleDesc desc, AttrNumber attnum, Da
             if (is_global_level_sequence_cache(cons_autoinc->seqoid)) {
                 autoinc = nextval_internal_for_global_seq_cache(cons_autoinc->seqoid);
             } else {
-                autoinc = nextval_internal(cons_autoinc->seqoid);
+                autoinc = nextval_internal(cons_autoinc->seqoid, true);
             }
         }
         if (modify_value) {
@@ -35193,7 +35563,8 @@ static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTa
 {
     ColumnDef* def = (ColumnDef*)cmd->def;
     AttrNumber attnum;
-    HeapTuple attr_tuple;
+    const char* attname = NULL;
+    HeapTuple attrTuple;
     HeapTuple type_tuple;
     Form_pg_attribute pg_attr;
     Form_pg_type pg_type;
@@ -35203,16 +35574,18 @@ static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTa
     Oid collid = InvalidOid;
     AclResult aclresult;
     int128 autoinc = 0;
-    char* col_name = def->colname;
+    char* colName = def->colname;
     bool type_changed = false;
     bool is_first_after = cmd->is_first || cmd->after_name != NULL;
+    char attidentity = '\0';
 
     att_rel = heap_open(AttributeRelationId, RowExclusiveLock);
-    attnum = get_attnum(RelationGetRelid(rel), col_name);
+
+    attnum = get_attnum(RelationGetRelid(rel), colName);
     if (attnum == InvalidAttrNumber) {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg("column \"%s\" of relation \"%s\" does not exist", col_name, RelationGetRelationName(rel))));
+                errmsg("column \"%s\" of relation \"%s\" does not exist", colName, RelationGetRelationName(rel))));
     }
 
     /* Check and get new type and collation */
@@ -35223,8 +35596,9 @@ static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTa
     if (aclresult != ACLCHECK_OK) {
         aclcheck_error_type(aclresult, typid);
     }
+
     collid = GetColumnDefCollation(NULL, def, typid);
-    CheckAttributeType(col_name, typid, collid, list_make1_oid(rel->rd_rel->reltype), false);
+    CheckAttributeType(colName, typid, collid, list_make1_oid(rel->rd_rel->reltype), false);
 
     /* Check and save AUTO_INCREMENT */
     autoinc = getAutoIncrementValue(rel, def, attnum);
@@ -35233,13 +35607,39 @@ static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTa
     RemoveAttrDefault(RelationGetRelid(rel), attnum, DROP_RESTRICT, false, true);
 
     /* Look up the target column */
-    attr_tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), col_name);
-    if (!HeapTupleIsValid(attr_tuple)) {
+    attrTuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), colName);
+    if (!HeapTupleIsValid(attrTuple)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg("column \"%s\" of relation \"%s\" does not exist", col_name, RelationGetRelationName(rel))));
+                errmsg("column \"%s\" of relation \"%s\" does not exist", colName, RelationGetRelationName(rel))));
     }
-    pg_attr = (Form_pg_attribute)GETSTRUCT(attr_tuple);
+
+    pg_attr = (Form_pg_attribute)GETSTRUCT(attrTuple);
+    attnum = pg_attr->attnum;
+    attname = NameStr(pg_attr->attname);
     type_changed = (pg_attr->atttypid != typid || pg_attr->atttypmod != typmod || pg_attr->attcollation != collid);
+
+    /* Can't alter a system attribute */
+    if (attnum <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot modify system column \"%s\"", colName)));
+    }
+
+    attidentity = HeapTupleGetIdentity(attrTuple, att_rel);
+    /* already have identity */
+    if (attidentity) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Unsupported modify column operation"),
+                 errhint("Use ALTER TABLE ... ALTER COLUMN ... instead.")));
+    }
+
+    if (def->identity) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Unsupported modify column operation"),
+                 errhint("Use ALTER TABLE ... ALTER COLUMN ... ADD IDENTITY instead.")));
+    }
+
     /* Check column partkey */
     if (is_partition_column(rel, attnum)) {
         if (type_changed) {
@@ -35254,18 +35654,19 @@ static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTa
         }
     }
 
-    /* drop comment on column */
-    DeleteComments(RelationGetRelid(rel), RelationRelationId, attnum);
-    /* Working with objects that depend on the column being modified. */
-    ATHandleObjectsDependOnModifiedColumn(tab, rel, pg_attr, attnum, type_changed);
     /* Primary key column must be not null. */
     def->is_not_null = def->is_not_null ? def->is_not_null : ModifiedColumnIsPrimaryKey(tab, attnum);
     if (!pg_attr->attnotnull && def->is_not_null) {
         tab->new_notnull = true;
     }
 
+    /* drop comment on column */
+    DeleteComments(RelationGetRelid(rel), RelationRelationId, attnum);
+    /* Working with objects that depend on the column being modified. */
+    ATHandleObjectsDependOnModifiedColumn(tab, rel, pg_attr, attnum, type_changed);
+
     if (is_first_after || tab->is_first_after) {
-        UpdateNewvalsAttnum(tab, rel, cmd, col_name);
+        UpdateNewvalsAttnum(tab, rel, cmd, colName);
     }
 
     pg_attr->atttypid = typid;
@@ -35280,9 +35681,11 @@ static void ATExecAlterModifyColumn(AlteredTableInfo* tab, Relation rel, AlterTa
     pg_attr->attislocal = def->is_local;
     pg_attr->attinhcount = def->inhcount;
     pg_attr->atthasdef = false;
+
     ReleaseSysCache(type_tuple);
-    simple_heap_update(att_rel, &attr_tuple->t_self, attr_tuple);
-    CatalogUpdateIndexes(att_rel, attr_tuple);
+    simple_heap_update(att_rel, &attrTuple->t_self, attrTuple);
+    CatalogUpdateIndexes(att_rel, attrTuple);
+    heap_freetuple(attrTuple);
     heap_close(att_rel, RowExclusiveLock);
 
     /* Install dependencies on new datatype and collation */

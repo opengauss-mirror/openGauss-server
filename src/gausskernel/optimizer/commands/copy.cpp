@@ -1760,7 +1760,7 @@ void ProcessCopyOptions(CopyState cstate, bool is_from, List* options)
             if (cstate->fill_missing_fields)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             else
-                cstate->fill_missing_fields = defGetMixdInt(defel);
+                cstate->fill_missing_fields = defGetMixdBoolean(defel);
         } else if (strcmp(defel->defname, "noescaping") == 0) {
             if (noescapingSpecified)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
@@ -4876,6 +4876,7 @@ uint64 CopyFrom(CopyState cstate)
          */
         if (IS_PGXC_COORDINATOR && cstate->remoteCopyState && cstate->remoteCopyState->rel_loc) {
             FormData_pg_attribute* attr = tupDesc->attrs;
+            int kvtype = ATT_KV_UNDEFINED;
             Oid* att_type = NULL;
             RemoteCopyData* remoteCopyState = cstate->remoteCopyState;
             ExecNodes* exec_nodes = NULL;
@@ -4896,9 +4897,10 @@ uint64 CopyFrom(CopyState cstate)
                     TsRelWithImplDistColumn(attr, dcolNum)) {
                     pseudoTsDistcol = true;
                     for (int i = 0; i < tupDesc->natts; i++) {
+                        kvtype = GET_ATTR_KVTYPE(&attr[i]);
                         att_type[i] = attr[i].atttypid;
                         /* collect all the tag columns info to taglist */
-                        if (attr[i].attkvtype == ATT_KV_TAG) {
+                        if (kvtype == ATT_KV_TAG) {
                             taglist = lappend_int(taglist, i);
                         }
                     }
