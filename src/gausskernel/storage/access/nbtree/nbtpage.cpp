@@ -132,6 +132,12 @@ static void BtRootbufCacheWaitIfRevoking(const BtRootCacheKey *key);
 static void BtLogRootbufCacheEnter(Relation rel, const BtMetaPageCacheEntry *entry, int slot, const char *action);
 static void BtLogRootbufCacheLeave(const BtMetaPageCacheEntry *entry, int slot, const char *reason);
 static void BtRootbufCacheResetEntry(BtMetaPageCacheEntry *entry, int slot, const char *reason);
+static void BtRootbufCacheEnsureSessionInit(void);
+static void BtRootbufCacheCleanupSessionState(const char *reason);
+static void BtRootbufCacheCleanupRelation(Oid relid, const char *reason);
+static void BtRootbufCacheRelcacheCallback(Datum arg, Oid relid);
+static void BtRootbufCacheSessionCleanup(void);
+static void BtRootbufCacheRegisterRelcacheCallback(void);
 static Buffer BtRootbufGetFromCache(Relation rel, int access);
 static void BtRootbufStoreToCache(Relation rel, Buffer rootbuf, int access);
 static void BtRootbufCacheSyncReformVer(void);
@@ -740,17 +746,65 @@ static inline void BtRootbufCacheSetEntryKey(BtMetaPageCacheEntry *entry, const 
     entry->rootBlkno = key->rootBlkno;
 }
 
+static void BtRootbufCacheEnsureSessionInit(void)
+{
+    MemoryContext allocCxt = NULL;
+    MemoryContext oldCxt = NULL;
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCache != NULL ||
+        u_sess->storage_cxt.btMetaCacheResOwner != NULL) {
+        return;
+    }
+
+    /*
+     * Keep the cache worker-only.  Startup/background threads never pass the
+     * WorkerThreadAmI() gate, while ordinary backends legitimately run with
+     * session_id == 0 because they execute on the thread's fake session.
+     */
+    if (!WorkerThreadAmI()) {
+        return;
+    }
+
+    if (!(g_instance.attr.attr_storage.enable_btree_rootbuf_cache && ENABLE_DMS && SS_NORMAL_STANDBY)) {
+        return;
+    }
+
+    /*
+     * Lazy root-cache state belongs to the session cache context.  Ordinary
+     * backends reuse ThreadTopMemoryContext as session top context, and that
+     * root is sealed once startup finishes, so do not fall back to top_mem_cxt
+     * here.
+     */
+    allocCxt = u_sess->cache_mem_cxt;
+    if (allocCxt == NULL) {
+        return;
+    }
+
+    oldCxt = MemoryContextSwitchTo(allocCxt);
+    u_sess->storage_cxt.btMetaCache = (BtMetaPageCache*)MemoryContextAllocZero(
+        allocCxt, sizeof(BtMetaPageCache));
+    u_sess->storage_cxt.btMetaCache->lastHitSlot = -1;
+    u_sess->storage_cxt.btMetaCache->reformVer = g_instance.dms_cxt.SSReformInfo.reform_ver;
+    u_sess->storage_cxt.btMetaCacheResOwner =
+        ResourceOwnerCreate(NULL, "BtMetaCache", allocCxt);
+    BtRootbufCacheRegisterRelcacheCallback();
+    (void)MemoryContextSwitchTo(oldCxt);
+}
+
 /* Check whether the standby root cache fast path can be used. */
 static inline bool BtRootbufCacheEnabled(Relation rel, int access)
 {
-    if (RelationGetRelid(rel) < FirstNormalObjectId) {
+    if (RelationGetRelid(rel) < FirstNormalObjectId || access != BT_READ ||
+        u_sess == NULL || !WorkerThreadAmI()) {
         return false;
     }
 
+    BtRootbufCacheEnsureSessionInit();
+
     return g_instance.attr.attr_storage.enable_btree_rootbuf_cache &&
-        ENABLE_DMS && SS_NORMAL_STANDBY && access == BT_READ &&
+        ENABLE_DMS && SS_NORMAL_STANDBY &&
         u_sess != NULL && u_sess->storage_cxt.btMetaCache != NULL &&
-        u_sess->storage_cxt.btMetaCacheResOwner != NULL && WorkerThreadAmI();
+        u_sess->storage_cxt.btMetaCacheResOwner != NULL;
 }
 
 /* Check whether root cache debug logging is enabled. */
@@ -1558,18 +1612,151 @@ static void BtRootbufStoreToCache(Relation rel, Buffer rootbuf, int access)
 }
 
 /* Release all root cache state held by the current session. */
-void BtRootbufCacheSessionCleanup(void)
+static void BtRootbufCacheCleanupSessionState(const char *reason)
+{
+    int validEntries = 0;
+    int pinnedEntries = 0;
+    bool hasBorrow = false;
+    const char *cleanupReason = (reason != NULL) ? reason : "session_cleanup";
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCache == NULL) {
+        return;
+    }
+
+    hasBorrow = u_sess->storage_cxt.btMetaBorrowedRootState.hasBorrow;
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtMetaPageCacheEntry *entry = &u_sess->storage_cxt.btMetaCache->entries[i];
+        if (!OidIsValid(entry->relOid) || entry->buffer == InvalidBuffer) {
+            continue;
+        }
+        validEntries++;
+        if (entry->isPinned) {
+            pinnedEntries++;
+        }
+    }
+
+    if (BtRootbufCacheLogEnabled() && (validEntries > 0 || pinnedEntries > 0 || hasBorrow)) {
+        ereport(LOG,
+            (errmsg("[btree root cache] cleanup: reason=%s, valid_entries=%d, pinned_entries=%d, borrowed=%s",
+                    cleanupReason,
+                    validEntries,
+                    pinnedEntries,
+                    hasBorrow ? "true" : "false")));
+    }
+
+    BtResetBorrowedRootbuf();
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtRootbufCacheResetEntry(&u_sess->storage_cxt.btMetaCache->entries[i], i, cleanupReason);
+    }
+    u_sess->storage_cxt.btMetaCache->lastHitSlot = -1;
+    u_sess->storage_cxt.btMetaCache->nextInsertSeq = 0;
+}
+
+static void BtRootbufCacheSessionCleanup(void)
+{
+    BtRootbufCacheCleanupSessionState("session_cleanup");
+}
+
+void BtRootbufCacheSessionOwnerCleanup(const char *reason)
+{
+    ResourceOwner owner = NULL;
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCacheResOwner == NULL) {
+        return;
+    }
+
+    owner = u_sess->storage_cxt.btMetaCacheResOwner;
+    BtRootbufCacheCleanupSessionState(reason);
+    ResourceOwnerRelease(owner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
+    ResourceOwnerRelease(owner, RESOURCE_RELEASE_LOCKS, false, true);
+    ResourceOwnerRelease(owner, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
+}
+
+/* Release root cache entries for one relation when relcache invalidation arrives. */
+static void BtRootbufCacheCleanupRelation(Oid relid, const char *reason)
+{
+    int validEntries = 0;
+    int pinnedEntries = 0;
+    bool hasBorrow = false;
+    const char *cleanupReason = (reason != NULL) ? reason : "relcache_cleanup";
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCache == NULL || !OidIsValid(relid)) {
+        return;
+    }
+
+    hasBorrow = u_sess->storage_cxt.btMetaBorrowedRootState.hasBorrow &&
+        u_sess->storage_cxt.btMetaBorrowedRootState.relOid == relid;
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtMetaPageCacheEntry *entry = &u_sess->storage_cxt.btMetaCache->entries[i];
+        if (entry->relOid != relid || entry->buffer == InvalidBuffer) {
+            continue;
+        }
+        validEntries++;
+        if (entry->isPinned) {
+            pinnedEntries++;
+        }
+    }
+
+    if (validEntries == 0 && !hasBorrow) {
+        return;
+    }
+
+    if (BtRootbufCacheLogEnabled()) {
+        ereport(LOG,
+            (errmsg("[btree root cache] cleanup: reason=%s, relid=%u, valid_entries=%d, pinned_entries=%d, borrowed=%s",
+                    cleanupReason,
+                    relid,
+                    validEntries,
+                    pinnedEntries,
+                    hasBorrow ? "true" : "false")));
+    }
+
+    if (hasBorrow) {
+        BtResetBorrowedRootbuf();
+    }
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtMetaPageCacheEntry *entry = &u_sess->storage_cxt.btMetaCache->entries[i];
+        if (entry->relOid == relid && entry->buffer != InvalidBuffer) {
+            BtRootbufCacheResetEntry(entry, i, cleanupReason);
+        }
+    }
+    if (u_sess->storage_cxt.btMetaCache->lastHitSlot >= 0) {
+        BtMetaPageCacheEntry *lastHit = &u_sess->storage_cxt.btMetaCache->entries[
+            u_sess->storage_cxt.btMetaCache->lastHitSlot];
+        if (!OidIsValid(lastHit->relOid) || lastHit->buffer == InvalidBuffer) {
+            u_sess->storage_cxt.btMetaCache->lastHitSlot = -1;
+        }
+    }
+}
+
+/* Relcache invalidation callback for live backends still holding root cache pins. */
+static void BtRootbufCacheRelcacheCallback(Datum arg, Oid relid)
+{
+    (void)arg;
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCacheResOwner == NULL) {
+        return;
+    }
+
+    if (!g_instance.attr.attr_storage.enable_btree_rootbuf_cache || !ENABLE_DMS || !SS_NORMAL_STANDBY) {
+        return;
+    }
+
+    if (relid == InvalidOid) {
+        BtRootbufCacheSessionOwnerCleanup("relcache_reset");
+        return;
+    }
+
+    BtRootbufCacheCleanupRelation(relid, "relcache_inval");
+}
+
+static void BtRootbufCacheRegisterRelcacheCallback(void)
 {
     if (u_sess == NULL || u_sess->storage_cxt.btMetaCache == NULL) {
         return;
     }
 
-    BtResetBorrowedRootbuf();
-    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
-        BtRootbufCacheResetEntry(&u_sess->storage_cxt.btMetaCache->entries[i], i, "session_cleanup");
-    }
-    u_sess->storage_cxt.btMetaCache->lastHitSlot = -1;
-    u_sess->storage_cxt.btMetaCache->nextInsertSeq = 0;
+    CacheRegisterSessionRelcacheCallback(BtRootbufCacheRelcacheCallback, (Datum)0);
 }
 
 /*

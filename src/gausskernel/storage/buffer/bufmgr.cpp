@@ -86,6 +86,9 @@
 #include "tde_key_management/tde_key_storage.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_common_attr.h"
+
+extern bool BtRootbufCacheBeginRevoke(const BufferTag *tag);
+extern void BtRootbufCacheEndRevoke(const BufferTag *tag);
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_transaction.h"
 
@@ -3566,6 +3569,7 @@ void InvalidateBuffer(BufferDesc *buf)
     LWLock *old_partition_lock = NULL; /* buffer partition lock for it */
     uint64 old_flags;
     uint64 buf_state;
+    bool rootCacheRevoke = false;
 
     /* Save the original buffer tag before dropping the spinlock */
     old_tag = ((BufferDesc *)buf)->tag;
@@ -3573,6 +3577,11 @@ void InvalidateBuffer(BufferDesc *buf)
     buf_state = pg_atomic_read_u64(&buf->state);
     Assert(buf_state & BM_LOCKED);
     UnlockBufHdr(buf, buf_state);
+
+    if (ENABLE_DMS && SS_STANDBY_MODE && t_thrd.role == DMS_WORKER &&
+        old_tag.forkNum == MAIN_FORKNUM && g_instance.attr.attr_storage.enable_btree_rootbuf_cache) {
+        rootCacheRevoke = BtRootbufCacheBeginRevoke(&old_tag);
+    }
 
     /*
      * Need to compute the old tag's hashcode and partition lock ID. XXX is it
@@ -3596,6 +3605,9 @@ retry:
     if (!BUFFERTAGS_EQUAL(buf->tag, old_tag)) {
         UnlockBufHdr(buf, buf_state);
         LWLockRelease(old_partition_lock);
+        if (rootCacheRevoke) {
+            BtRootbufCacheEndRevoke(&old_tag);
+        }
         return;
     }
 
@@ -3661,6 +3673,9 @@ retry:
      * Done with mapping lock.
      */
     LWLockRelease(old_partition_lock);
+    if (rootCacheRevoke) {
+        BtRootbufCacheEndRevoke(&old_tag);
+    }
 }
 
 #ifdef USE_ASSERT_CHECKING

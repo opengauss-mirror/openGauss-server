@@ -35,6 +35,7 @@
 
 #include "threadpool/threadpool.h"
 
+#include "access/nbtree.h"
 #include "access/xact.h"
 #include "access/multi_redo_api.h"
 #include "commands/prepare.h"
@@ -562,6 +563,11 @@ void ThreadPoolWorker::DetachSessionFromThread()
         u_sess = NULL;
         return;
     }
+
+    if (m_currentSession->storage_cxt.btMetaCacheResOwner != NULL) {
+        BtRootbufCacheSessionOwnerCleanup("threadpool_detach");
+    }
+
     m_currentSession->status = KNL_SESS_DETACH;
     if (t_thrd.pgxact != NULL && m_currentSession->proc_cxt.Isredisworker) {
         LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
@@ -723,6 +729,10 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
         if (!threadexit) {
             CleanUpSessionWithLock();
             DecreaseUserCount(m_currentSession->proc_cxt.MyRoleId);
+        }
+
+        if (m_currentSession->storage_cxt.btMetaCacheResOwner != NULL) {
+            BtRootbufCacheSessionOwnerCleanup(threadexit ? "threadpool_threadexit" : "threadpool_close");
         }
 
         /* Close Session. */

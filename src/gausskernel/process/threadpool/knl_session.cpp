@@ -1030,12 +1030,6 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
     storage_cxt->max_vacuum_bulk_read_size = 0;
     storage_cxt->btMetaCache = NULL;
     storage_cxt->btMetaCacheResOwner = NULL;
-    if (g_instance.attr.attr_storage.enable_btree_rootbuf_cache && ENABLE_DMS && SS_NORMAL_STANDBY) {
-        storage_cxt->btMetaCache = (BtMetaPageCache*)palloc0(sizeof(BtMetaPageCache));
-        storage_cxt->btMetaCache->lastHitSlot = -1;
-        storage_cxt->btMetaCache->reformVer = g_instance.dms_cxt.SSReformInfo.reform_ver;
-        storage_cxt->btMetaCacheResOwner = ResourceOwnerCreate(NULL, "BtMetaCache", CurrentMemoryContext);
-    }
 }
 
 static void knl_u_libpq_init(knl_u_libpq_context* libpq_cxt)
@@ -1761,10 +1755,7 @@ void free_session_context(knl_session_context* session)
     t_thrd.xact_cxt.next_xid = InvalidTransactionId;
 
     if (session->storage_cxt.btMetaCacheResOwner != NULL) {
-        BtRootbufCacheSessionCleanup();
-        ResourceOwnerRelease(session->storage_cxt.btMetaCacheResOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
-        ResourceOwnerRelease(session->storage_cxt.btMetaCacheResOwner, RESOURCE_RELEASE_LOCKS, false, true);
-        ResourceOwnerRelease(session->storage_cxt.btMetaCacheResOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
+        BtRootbufCacheSessionOwnerCleanup("session_free");
         ResourceOwnerDelete(session->storage_cxt.btMetaCacheResOwner);
         session->storage_cxt.btMetaCacheResOwner = NULL;
     }
