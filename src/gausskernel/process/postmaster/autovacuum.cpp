@@ -2703,18 +2703,18 @@ static void do_autovacuum(void)
          * vacuum and analyze in different transactions.
          */
         if (vacuumPartition((uint32)(vacObj->flags))) {
-            Oid at_parentid = partid_get_parentid(tab->at_relid);
-            Oid at_grandparentid = partid_get_parentid(at_parentid);
-            if (OidIsValid(at_grandparentid)) {
+            Oid subparentid = InvalidOid;
+            Oid tableoid = partid_get_rootid(tab->at_relid, &subparentid);
+            if (OidIsValid(subparentid)) {
                 tab->at_subpartname = getPartitionName(tab->at_relid, false);
                 tab->at_partname = NULL;
-                tab->at_relname = get_rel_name(at_grandparentid);
-                tab->at_nspname = get_namespace_name(get_rel_namespace(at_grandparentid));
+                tab->at_relname = get_rel_name(tableoid);
+                tab->at_nspname = get_namespace_name(get_rel_namespace(tableoid));
             } else {
                 tab->at_subpartname = NULL;
                 tab->at_partname = getPartitionName(tab->at_relid, false);
-                tab->at_relname = get_rel_name(at_parentid);
-                tab->at_nspname = get_namespace_name(get_rel_namespace(at_parentid));
+                tab->at_relname = get_rel_name(tableoid);
+                tab->at_nspname = get_namespace_name(get_rel_namespace(tableoid));
             }
         } else {
             tab->at_subpartname = NULL;
@@ -2765,11 +2765,7 @@ static void do_autovacuum(void)
 
             if (vacObj->flags & VACFLG_SUB_PARTITION) {
                 // Get partitioned/subpartitioned table's oid
-                Oid table_oid = parentid;
-                Oid grandparentid = partid_get_parentid(parentid);
-                if (OidIsValid(grandparentid)) {
-                    table_oid = grandparentid;
-                }
+                Oid table_oid = partid_get_rootid(relid, &parentid);
                 // Update ap_entry->at_gpivacuumed
                 ap_entry = (at_partitioned_table*)hash_search(partitioned_tables_map, &table_oid, HASH_FIND, &found);
                 if (found && !ap_entry->at_gpivacuumed && tab->at_gpivacuumed) {

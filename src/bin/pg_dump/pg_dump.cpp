@@ -827,7 +827,7 @@ int main(int argc, char** argv)
     if (!SetUppercaseAttributeNameToOff(((ArchiveHandle*)fout)->connection)) {
         (void)remove(filename);
         GS_FREE(filename);
-        exit_horribly(NULL, "set uppercase_attribute_name to off failed.\n", progname);
+        exit_horribly(NULL, "%s set uppercase_attribute_name to off failed.\n", progname);
     }
 #endif
 
@@ -17758,6 +17758,7 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
     int ntups;
     int i;
     int j;
+    int cnt;
 
     /* get partitioned table info */
     appendPQExpBuffer(defq,
@@ -17856,32 +17857,94 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
         appendPQExpBuffer(result, "(");
 
         i_partboundary = (int*)pg_malloc(partkeynum * sizeof(int));
-        /* get table partitions info */
-        appendPQExpBuffer(partitionq,
-            "SELECT p.oid as oid, "
-            "p.relname AS partName, "
-            "pg_catalog.array_length(partkey, 1) AS subpartkeynum, "
-            "partkey AS subpartkey, ");
+        if (partStrategy != PART_STRATEGY_LIST || partkeynum == 1) {
+            /* get table partitions info */
+            appendPQExpBuffer(partitionq,
+                "SELECT p.oid as oid, "
+                "p.relname AS partname, "
+                "pg_catalog.array_length(partkey, 1) AS subpartkeynum, "
+                "partkey AS subpartkey, ");
 
-        for (i = 1; i <= partkeynum; i++)
-            appendPQExpBuffer(partitionq, "p.boundaries[%d] AS partBoundary_%d, ", i, i);
-        appendPQExpBuffer(partitionq,
-            "pg_catalog.array_to_string(p.boundaries, ',') as bound, "
-            "pg_catalog.array_to_string(p.boundaries, ''',''') as boundstr, "
-            "t.spcname AS reltblspc "
-            "FROM pg_partition p LEFT JOIN pg_tablespace t "
-            "ON p.reltablespace = t.oid "
-            "WHERE p.parentid = '%u' AND p.parttype = '%c' "
-            "AND p.partstrategy = '%c' ORDER BY ",
-            tbinfo->dobj.catId.oid,
-            PART_OBJ_TYPE_TABLE_PARTITION,
-            newStrategy);
-        for (i = 1; i <= partkeynum; i++) {
-            if (i == partkeynum)
-                appendPQExpBuffer(
-                    partitionq, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
-            else
-                appendPQExpBuffer(partitionq, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+            for (i = 1; i <= partkeynum; i++)
+                appendPQExpBuffer(partitionq, "p.boundaries[%d] AS partboundary_%d, ", i, i);
+            appendPQExpBuffer(partitionq,
+                "pg_catalog.array_to_string(p.boundaries, ',') as bound, "
+                "pg_catalog.array_to_string(p.boundaries, ''',''') as boundstr, "
+                "t.spcname AS reltblspc "
+                "FROM pg_partition p LEFT JOIN pg_tablespace t "
+                "ON p.reltablespace = t.oid "
+                "WHERE p.parentid = '%u' AND p.parttype = '%c' "
+                "AND p.partstrategy in ('%c', '%c') ORDER BY ",
+                tbinfo->dobj.catId.oid,
+                PART_OBJ_TYPE_TABLE_PARTITION,
+                newStrategy, schemaOnly ? newStrategy : partStrategy);
+            for (i = 1; i <= partkeynum; i++) {
+                
+                if (partStrategy == PART_STRATEGY_HASH) {
+                    if (i == partkeynum) 
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d]::int ASC NULLS LAST", i);
+                    else
+                        appendPQExpBuffer(partitionq, "p.boundaries[%d]::int NULLS LAST", i);
+                } else {
+                    if (i == partkeynum) 
+                        appendPQExpBuffer(
+                            partitionq, "p.boundaries[%d]::%s ASC NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                    else
+                        appendPQExpBuffer(
+                            partitionq, "p.boundaries[%d]::%s NULLS LAST", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                }
+            }
+        } else {
+            appendPQExpBuffer(partitionq,
+                "SELECT /*+ hashjoin(p t) */ p.oid AS oid, "
+                "p.relname AS partname, "
+                "pg_catalog.array_length(partkey, 1) AS subpartkeynum, "
+                "partkey AS subpartkey, ");
+            for (i = 1; i <= partkeynum; i++) {
+                appendPQExpBuffer(partitionq, "NULL AS partboundary_%d, ", i);
+            }
+            appendPQExpBuffer(partitionq,
+                "p.bound_def AS bound, "
+                "p.bound_def AS boundstr, "
+                "t.spcname AS reltblspc FROM ( "
+                "SELECT oid, relname, reltablespace, partkey, "
+                "pg_catalog.string_agg(bound,',' ORDER BY bound_id) AS bound_def FROM( "
+                "SELECT oid, relname, reltablespace, partkey, bound_id, '('||"
+                "pg_catalog.array_to_string(pg_catalog.array_agg(key_value ORDER BY key_id),',','NULL')||')' AS bound "
+                "FROM ( SELECT oid, relname, reltablespace, partkey, bound_id, key_id, ");
+            cnt = 0;
+            for (i = 0; i < partkeynum; i++) {
+                if (!isTypeString(tbinfo, partkeycols[i])) {
+                    continue;
+                }
+                if (cnt > 0) {
+                    appendPQExpBuffer(partitionq, ",");
+                } else {
+                    appendPQExpBuffer(partitionq, "CASE WHEN key_id in (");
+                }
+                appendPQExpBuffer(partitionq, "%d", i + 1);
+                cnt++;
+            }
+            if (cnt > 0) {
+                appendPQExpBuffer(partitionq, ") THEN pg_catalog.quote_literal(key_value) ELSE key_value END AS ");
+            }
+            appendPQExpBuffer(partitionq,
+                "key_value FROM ( "
+                "SELECT oid, relname, reltablespace, partkey, bound_id, "
+                "pg_catalog.generate_subscripts(keys_array, 1) AS key_id, "
+                "pg_catalog.unnest(keys_array)::text AS key_value FROM ( "
+                "SELECT oid, relname, reltablespace, partkey, bound_id,key_bounds::cstring[] AS keys_array FROM ( "
+                "SELECT oid, relname, reltablespace, partkey, pg_catalog.unnest(boundaries) AS key_bounds, "
+                "pg_catalog.generate_subscripts(boundaries, 1) AS bound_id FROM pg_partition "
+                "WHERE parentid = %u AND parttype = '%c' AND partstrategy = '%c')))) "
+                "GROUP BY oid, relname, reltablespace, partkey, bound_id) "
+                "GROUP BY oid, relname, reltablespace, partkey "
+                "UNION ALL SELECT oid, relname, reltablespace, partkey, 'DEFAULT' AS bound_def FROM pg_partition "
+                "WHERE parentid = %u AND parttype = '%c' AND partstrategy = '%c' AND boundaries[1] IS NULL) p "
+                "LEFT JOIN pg_tablespace t ON p.reltablespace = t.oid "
+                "ORDER BY p.bound_def ASC NULLS LAST",
+                tbinfo->dobj.catId.oid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST,
+                tbinfo->dobj.catId.oid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST);
         }
 
         res = ExecuteSqlQuery(fout, partitionq->data, PGRES_TUPLES_OK);

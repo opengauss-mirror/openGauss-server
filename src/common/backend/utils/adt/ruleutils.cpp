@@ -2067,13 +2067,13 @@ static void get_index_list_info(Oid tableoid, StringInfo buf, const char* relnam
                 get_table_constraint_info(conForm, tup, buf, constriantid, relname);
                 appendStringInfo(buf, ";");
             } else {
-                char* index_def = pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0);
+                char* index_def = pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0, true);
                 appendStringInfo(buf, "\n%s;", index_def);
             }
             /* Cleanup */
             ReleaseSysCache(tup);
         } else {
-            char* index_def = pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0);
+            char* index_def = pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0, true);
             appendStringInfo(buf, "\n%s;", index_def);
 
             /* If the index is clustered, we need to record that. */
