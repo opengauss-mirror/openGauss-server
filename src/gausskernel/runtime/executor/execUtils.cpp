@@ -771,7 +771,7 @@ ProjectionInfo* ExecBuildVecProjectionInfo(
      */
     exprlist = NIL;
     numSimpleVars = 0;
-    directMap = true;
+    directMap = false;
     foreach (tl, targetList) {
         GenericExprState* gstate = (GenericExprState*)lfirst(tl);
         Var* variable = (Var*)gstate->arg->expr;
