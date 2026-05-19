@@ -152,6 +152,16 @@ static const int MAX_CONTROL_REPLY = 1000;
 static const int SLEEP_MORE = 400;
 static const int SLEEP_LESS = 400;
 static const int NODENAMELEN = 1024;
+
+/*
+ * Upper bound on the size of a replication protocol message body that we are
+ * willing to read in WalSndHandshake() and ProcessStandbyMessage(). Without an
+ * explicit limit, pq_getmessage() only rejects sizes that exceed MaxAllocSize
+ * (~1GB), which lets an authenticated replication peer drive walsender to
+ * allocate huge buffers. Replication command queries and standby reply packets
+ * are well under 64KB in practice, so this matches PG_MAX_AUTH_TOKEN_LENGTH.
+ */
+static const int MAX_REPLICATION_PROTOCOL_MSG_LEN = 65535;
 static const int SHIFT_SPEED = 3;
 static const int EAGER_MODE_MULTIPLE = 20;
 static const int CALCULATE_INTERVAL_MILLISECOND = 2000;
@@ -608,7 +618,7 @@ static void WalSndHandshake(void)
              * Read the message contents. This is expected to be done without
              * blocking because we've been able to get message type code.
              */
-            if (pq_getmessage(&input_message, 0))
+            if (pq_getmessage(&input_message, MAX_REPLICATION_PROTOCOL_MSG_LEN))
                 firstchar = EOF; /* suitable message already logged */
         }
 
@@ -2528,7 +2538,7 @@ static void ProcessStandbyMessage(void)
     /*
      * Read the message contents.
      */
-    if (pq_getmessage(t_thrd.walsender_cxt.reply_message, 0)) {
+    if (pq_getmessage(t_thrd.walsender_cxt.reply_message, MAX_REPLICATION_PROTOCOL_MSG_LEN)) {
         ereport(COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected EOF on standby connection")));
         proc_exit(0);
     }
