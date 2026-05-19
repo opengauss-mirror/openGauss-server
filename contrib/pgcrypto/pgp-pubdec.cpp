@@ -213,7 +213,7 @@ int pgp_parse_pubenc_sesskey(PGP_Context* ctx, PullFilter* pkt)
     /*
      * got sesskey
      */
-    if (msglen < PGP_PUBENC_SESSKEY_OVERHEAD || msglen > PGP_MAX_KEY + PGP_PUBENC_SESSKEY_OVERHEAD) {
+    if (msglen > PGP_MAX_KEY + PGP_PUBENC_SESSKEY_OVERHEAD) {
         px_debug("public-key session key is too large");
         res = PXE_PGP_CORRUPT_DATA;
         goto out;
