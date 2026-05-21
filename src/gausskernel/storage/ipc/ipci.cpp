@@ -354,7 +354,9 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         OnlineDDLinit();
     }
 
+#ifndef ENABLE_LITE_MODE
     PlpythonShmemInit();
+#endif
 
     /*
      * Set up process table

@@ -54,6 +54,10 @@
 /* Define to build with PYTHON support. (--with-python) */
 #undef ENABLE_PYTHON2
 #undef ENABLE_PYTHON3
+#undef PYTHON_CMP_MAJOR_VERSION
+#undef PYTHON_CMP_MINOR_VERSION
+#undef PYTHON_CMP_PYMALLOC
+#undef PYTHON_LIB_NAME
 
 /* Define to 1 if you want National Language Support. (--enable-nls) */
 #undef ENABLE_NLS

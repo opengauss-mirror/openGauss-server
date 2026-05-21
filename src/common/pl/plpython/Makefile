@@ -109,16 +109,64 @@ PSQLDIR = $(bindir)
 
 include $(top_srcdir)/src/Makefile.shlib
 
-all: all-lib
+# Configuration parameters (replace with actual paths)
+TEST_CASE_FILE=$(top_srcdir)/src/test/regress/parallel_schedule0P
 
-python_bin_dir := $(shell dirname $(PYTHON))
+define resolve_path
+$(shell if [ -L $1 ]; then \
+	readlink -f $1 2>/dev/null; \
+else \
+    echo "abc"; \
+fi)
+endef
 
-# Install PYTHONHOME to PGHOME/python directory
+REAL_PYTHON=$(call resolve_path, $(PYTHON))
+
+.PHONY: generate_test_cases
+generate_test_cases:
+	@if [ -f "$(TEST_CASE_FILE)" ]; then \
+		echo "NOTICE: target file has existed: $(TEST_CASE_FILE)" >&2; \
+	else \
+		printf '\n%s\n# test cases plpython\n'  >> "$(TEST_CASE_FILE)"; \
+ 		printf 'test: plpython3u/plpython_schema\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_populate\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_test\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_populate\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_do\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_global\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_global_session\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_import\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_spi\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_newline plpython3u/plpython_void plpython3u/plpython_params plpython3u/plpython_setof plpython3u/plpython_record\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_types\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_error\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_unicode plpython3u/plpython_quote\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_composite\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_subtransaction\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plplpython3u/plpython_unicode plpython3u/plpython_quotepython_drop\n'  >> "$(TEST_CASE_FILE)"; \
+		printf 'test: plpython3u/plpython_types\n'  >> "$(TEST_CASE_FILE)"; \
+		echo "appended plpython3u support content to $(TEST_CASE_FILE)"; \
+ 	fi
+
+all: all-lib generate_test_cases
+
+python_bin_dir := $(shell dirname $(REAL_PYTHON))
+#Install PYTHONHOME to PGHOME/python directory
+#Simple install
+simple-install-python:
+	$(MKDIR_P) '$(DESTDIR)$(bindir)/../python/'
+	$(MKDIR_P) '$(DESTDIR)$(bindir)/../python/bin'
+	$(MKDIR_P) '$(DESTDIR)$(bindir)/../python/lib64'
+	cp -a  $(python_bindir)/python3* '$(DESTDIR)$(bindir)/../python/bin'
+	cp -a $(python_libdir)/libpython3.* '$(DESTDIR)$(bindir)/../python/lib64'
+	cp -r $(python_libdir)/python3.* '$(DESTDIR)$(bindir)/../python/lib64'
+
+#total install
 install-python:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)/../python/'
 	cp -r $(python_bin_dir)/../* '$(DESTDIR)$(bindir)/../python/'
 
-install: all install-lib install-data install-python
+install: all install-lib install-data simple-install-python
 
 installdirs: installdirs-lib
 	$(MKDIR_P) '$(DESTDIR)$(datadir)/extension'
@@ -181,6 +229,7 @@ submake:
 clean distclean: clean-lib
 	rm -f $(OBJS)
 	rm -rf $(pg_regress_clean_files)
+	rm -rf $(TEST_CASE_FILE)
 ifeq ($(PORTNAME), win32)
 	rm -f python${pytverstr}.def
 endif

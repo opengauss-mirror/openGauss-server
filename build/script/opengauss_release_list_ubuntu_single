@@ -166,6 +166,9 @@
 ./share/postgresql/extension/shark--2.0--2.0.1.sql
 ./share/postgresql/extension/shark--2.0.1--2.0.sql
 ./share/postgresql/extension/shark.control
+./share/postgresql/extension/plpython3u.control
+./share/postgresql/extension/plpython3u--1.0.sql
+./share/postgresql/extension/plpython3u--unpackaged--1.0.sql
 ./share/postgresql/timezone/GB-Eire
 ./share/postgresql/timezone/Turkey
 ./share/postgresql/timezone/Kwajalein
@@ -1207,6 +1210,9 @@
 ./include/postgresql/server/replication/origin.h
 ./include/postgresql/server/parser/scanner.h
 ./include/postgresql/server/parser/keywords.h
+./include/postgresql/server/storage/plpython_init.h
+./include/postgresql/server/plpython.h
+./include/postgresql/server/server/plpy_util.h
 [client]
 ./bin/gsql
 ./bin/gs_dump
@@ -1247,6 +1253,7 @@
 ./lib/postgresql/utf8_and_gbk.so
 ./lib/postgresql/utf8_and_euc2004.so
 ./lib/postgresql/utf8_and_big5.so
+./lib/postgresql/plpython3.so
 ./lib/postgresql/java/pljava.jar
 ./lib/libpljava.so
 ./lib/libpq.a

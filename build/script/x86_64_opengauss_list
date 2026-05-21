@@ -184,6 +184,9 @@
 ./share/postgresql/extension/shark--2.0--2.0.1.sql
 ./share/postgresql/extension/shark--2.0.1--2.0.sql
 ./share/postgresql/extension/shark.control
+./share/postgresql/extension/plpython3u.control
+./share/postgresql/extension/plpython3u--1.0.sql
+./share/postgresql/extension/plpython3u--unpackaged--1.0.sql
 ./share/postgresql/timezone/GB-Eire
 ./share/postgresql/timezone/Turkey
 ./share/postgresql/timezone/Kwajalein
@@ -903,6 +906,7 @@
 ./lib/postgresql/gms_assert.so
 ./lib/postgresql/shark.so
 ./lib/postgresql/spq.so*
+./lib/postgresql/plpython3.so
 ./lib/libpljava.so
 ./lib/libpq.a
 ./lib/libpq.so
@@ -1362,6 +1366,9 @@
 ./include/postgresql/server/replication/origin.h
 ./include/postgresql/server/parser/scanner.h
 ./include/postgresql/server/parser/keywords.h
+./include/postgresql/server/storage/plpython_init.h
+./include/postgresql/server/plpython.h
+./include/postgresql/server/plpy_util.h
 [client]
 ./bin/gsql
 ./bin/gs_dump

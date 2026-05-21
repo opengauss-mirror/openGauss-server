@@ -101,13 +101,8 @@ include(build_function)
 include(set_thirdparty_path)
 include(build_options)
 
-set(CJSON_INC_PATH ${3RD_PATH}/kernel/dependency/cjson/comm/include)
-set(PYHTON_INC_PATH ${3RD_PATH}/kernel/platform/python3.7/include/python3.7m)
-
 include_directories(${PROJECT_SRC_DIR}/include ${PROJECT_INCLUDE_DIR})
 include_directories(${KERBEROS_INCLUDE_PATH} ${LIBOBS_INCLUDE_PATH} ${LIBCURL_INCLUDE_PATH} ${LIBOPENSSL_INCLUDE_PATH})
-include_directories(${PYHTON_INC_PATH} ${CJSON_INC_PATH}) 
-
 add_subdirectory(${openGauss}/contrib)
 add_subdirectory(${openGauss}/src)
 

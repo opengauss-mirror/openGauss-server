@@ -70,7 +70,7 @@ function get_version_mode()
 #######################################################################
 function make_license_control()
 {
-    python_exec=$(which python 2>/dev/null)
+    python_exec=$(which python3 2>/dev/null)
 
     if [ -x "$python_exec" ]; then
         $python_exec ${binarylib_dir}/buildtools/license_control/encrypted_version_file.py >> "$LOG_FILE" 2>&1

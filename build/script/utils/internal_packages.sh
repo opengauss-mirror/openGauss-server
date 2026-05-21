@@ -56,6 +56,11 @@ function target_file_copy()
     if [ $? -ne 0 ]; then
         die "copy ${SCRIPT_DIR}/version.cfg to ${BUILD_DIR}/temp failed"
     fi
+
+    # copy python files
+    if [ -d "${BUILD_DIR}/python" ];then
+        cp -r ${BUILD_DIR}/python ${BUILD_DIR}/temp
+    fi    
         
     sed -i '/^process_cpu_affinity|/d'  $2/bin/cluster_guc.conf
 

@@ -1,11 +1,23 @@
-#This is the main CMAKE for build all components.
+# Main CMakeLists.txt for building all components.
 
-SET(CMAKE_VERBOSE_MAKEFILE ON) #显示详细的原始编译信息
-SET(CMAKE_RULE_MESSAGES OFF)   #减少一些不必要的输出
-SET(CMAKE_SKIP_RPATH TRUE)     #TRUE表示在编译及安装阶段忽略RPATH
+SET(CMAKE_VERBOSE_MAKEFILE ON) # Show detailed original compilation information
+SET(CMAKE_RULE_MESSAGES OFF)   # Reduce unnecessary build output
+SET(CMAKE_SKIP_RPATH TRUE)     # TRUE ignores RPATH during build and install phases
 
-set(CMAKE_MODULE_PATH 
-    ${PROJECT_SRC_DIR}/common/pl/plpgsql
-)
+
+# Append plpython module path only when Python3 is enabled
+if(ENABLE_PYTHON3)
+    set(CMAKE_MODULE_PATH ${PROJECT_SRC_DIR}/common/pl/plpython ${PROJECT_SRC_DIR}/common/pl/plpgsql)
+else()
+    set(CMAKE_MODULE_PATH ${PROJECT_SRC_DIR}/common/pl/plpgsql)
+endif()
 
 add_subdirectory(plpgsql)
+
+# Build plpython subdirectory only when Python3 is enabled
+if(ENABLE_PYTHON3)
+    add_subdirectory(plpython)
+endif()
+
+#set(CMAKE_MODULE_PATH ${PROJECT_SRC_DIR}/common/pl/plpgsql)
+#add_subdirectory(plpgsql)

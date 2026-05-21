@@ -549,3 +549,4 @@ test: pgstat_opt
 # test global sequence cache
 test: session_sequence_cache
 test: global_sequence_cache
+

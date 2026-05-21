@@ -135,9 +135,8 @@ static void PLyInitialize(void)
 
 void _PG_init(void)
 {
-    /* Only support Python 3.7 */
-    if (PY_MAJOR_VERSION != PYTHON_MAJOR_VERSION || PY_MINOR_VERSION != PYTHON_MINOR_VERSION) {
-        ereport(ERROR, (errmsg("Python version is not 3.7, check if PYTHONHOME is valid.")));
+    if (PY_MAJOR_VERSION < PYTHON_MAJOR_VERSION || PY_MINOR_VERSION < PYTHON_MINOR_VERSION) {
+        ereport(ERROR, (errmsg("Python version MUST be great than 3.7, check if PYTHONHOME is valid.")));
     }
 }
 

@@ -31,6 +31,8 @@
 #include "postmaster/postmaster.h"
 #include "storage/file/fio_device.h"
 
+#define PYTHON38_MAJOR_VERSION  3
+#define PYTHON38_MINOR_VERSION  8
 /* Max size of error message of dlopen   */
 #define DLERROR_MSG_MAX_LEN 512
 /* signatures for openGauss library init/fini functions */
@@ -234,7 +236,7 @@ void* internal_load_library(const char* libname)
     struct stat stat_buf;
     PG_init_t PG_init = NULL;
     char* file = last_dir_separator(libname);
-    file = (file == NULL) ? ((char*)libname) : (file + 1);
+    char pyLibName[128] = {0};
 
     /* use read lock to check file_list first */
     PthreadRWlockRdlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_file_list_lock_rw);
@@ -274,34 +276,33 @@ void* internal_load_library(const char* libname)
         file_scanner->next = NULL;
 
         /*
-         * Call pg_dlopen.
-         */
-#if ((defined ENABLE_PYTHON2) || (defined ENABLE_PYTHON3))
-#ifdef ENABLE_PYTHON2
-    #define PYTHON_LIB_NAME "libpython2.7.so"
-#endif
-
-#ifdef ENABLE_PYTHON3
-    #define PYTHON_LIB_NAME "libpython3.7m.so"
-#endif
-        /*
          * In C++, when you try to open a shared library use dlopen with flag RTLD_NOW,
          * it will search dependent shared library of main program for the undefined symbol.
          */
         if (strstr(file_scanner->filename, "plpython") != NULL) {
+        /*
+         ** Call pg_dlopen.
+         **/
+#if ((defined ENABLE_PYTHON2) || (defined ENABLE_PYTHON3))
+
+#ifdef PYTHON_LIB_NAME
+            strncpy(pyLibName, PYTHON_LIB_NAME, sizeof(pyLibName) - 1);
+#endif
+
+#endif
             /*
              * dlopen will find *.so in LD_LIBRARY_PATH, /etc/ld.so.cache, /lib, /usr/lib ..
              * And we must set the Flag to "RTLD_NOW | RTLD_GLOBAL"
              */
-            if (dlopen(PYTHON_LIB_NAME, RTLD_NOW | RTLD_GLOBAL) == NULL) {
+            if (dlopen(pyLibName, RTLD_NOW | RTLD_GLOBAL) == NULL) {
                 pfree((char*)file_scanner);
                 file_scanner = NULL;
                 ereport(ERROR,
                     (errcode_for_file_access(),
-                        errmsg("could not load library \"%s\", get error report failed", PYTHON_LIB_NAME)));
+                        errmsg("could not load python library \"%s\", get error report failed", pyLibName)));
             }
         }
-#endif
+
         file_scanner->handle = pg_dlopen(file_scanner->filename);
         if (file_scanner->handle == NULL) {
             char* load_error = NULL;
