@@ -625,10 +625,148 @@ and t3_b = (select avg(t4_a) from magic_t4 where t3_c = t4_c)
 union all 
 select max(t3_a) from magic_t3 where t3_a = t2_a and t2_a = 1
 and t3_b = (select avg(t4_a) from magic_t4 where t3_c = t4_c)) limit 10;
+
+create table magic_limit_customers (
+    customer_id int primary key,
+    customer_name varchar(50),
+    region varchar(20)
+);
+
+create table magic_limit_orders (
+    order_id int,
+    customer_id int,
+    amount decimal(10, 2)
+);
+
+insert into magic_limit_customers
+select i,
+       'Customer_' || i,
+       case when i % 4 = 0 then 'North'
+            when i % 4 = 1 then 'South'
+            when i % 4 = 2 then 'East'
+            else 'West' end
+from generate_series(1, 1000) i;
+
+insert into magic_limit_orders
+select (c.customer_id - 1) * 50 + o,
+       c.customer_id,
+       (c.customer_id * 10 + o)::decimal(10, 2)
+from magic_limit_customers c
+cross join generate_series(1, 50) o;
+
+create index idx_magic_limit_orders_cust on magic_limit_orders(customer_id);
+create index idx_magic_limit_customers_region on magic_limit_customers(region);
+
+set rewrite_rule = 'none';
+select count(*) as result_count from (
+    select c.customer_name, o.order_id, o.amount
+    from magic_limit_customers c
+    join magic_limit_orders o on c.customer_id = o.customer_id
+    where c.region = 'North'
+      and o.amount > (select avg(o2.amount) from magic_limit_orders o2 where o2.customer_id = c.customer_id limit 1)
+) t;
+
+set rewrite_rule = 'magicset';
+select count(*) as result_count from (
+    select c.customer_name, o.order_id, o.amount
+    from magic_limit_customers c
+    join magic_limit_orders o on c.customer_id = o.customer_id
+    where c.region = 'North'
+      and o.amount > (select avg(o2.amount) from magic_limit_orders o2 where o2.customer_id = c.customer_id limit 1)
+) t;
+
+set rewrite_rule = 'none';
+select count(*) as result_count from (
+    select c.customer_name, o.order_id, o.amount
+    from magic_limit_customers c
+    join magic_limit_orders o on c.customer_id = o.customer_id
+    where c.region = 'North'
+      and o.amount > (
+          select avg(o2.amount)
+          from magic_limit_orders o2
+          where o2.customer_id = c.customer_id
+          order by avg(o2.amount) asc
+          limit 1
+      )
+) t;
+
+set rewrite_rule = 'magicset';
+select count(*) as result_count from (
+    select c.customer_name, o.order_id, o.amount
+    from magic_limit_customers c
+    join magic_limit_orders o on c.customer_id = o.customer_id
+    where c.region = 'North'
+      and o.amount > (
+          select avg(o2.amount)
+          from magic_limit_orders o2
+          where o2.customer_id = c.customer_id
+          order by avg(o2.amount) asc
+          limit 1
+      )
+) t;
+
+set rewrite_rule = 'none';
+select count(*) as result_count from (
+    select c.customer_name, o.order_id, o.amount
+    from magic_limit_customers c
+    join magic_limit_orders o on c.customer_id = o.customer_id
+    where c.region = 'North'
+      and o.amount > (
+          select min(o2.amount)
+          from magic_limit_orders o2
+          where o2.customer_id = c.customer_id
+          limit 1
+      )
+) t;
+
+set rewrite_rule = 'magicset';
+select count(*) as result_count from (
+    select c.customer_name, o.order_id, o.amount
+    from magic_limit_customers c
+    join magic_limit_orders o on c.customer_id = o.customer_id
+    where c.region = 'North'
+      and o.amount > (
+          select min(o2.amount)
+          from magic_limit_orders o2
+          where o2.customer_id = c.customer_id
+          limit 1
+      )
+) t;
+
+set rewrite_rule = 'none';
+select count(*) as result_count from (
+    select c.customer_name, o.order_id, o.amount
+    from magic_limit_customers c
+    join magic_limit_orders o on c.customer_id = o.customer_id
+    where c.region = 'North'
+      and o.amount = (
+          select max(o2.amount)
+          from magic_limit_orders o2
+          where o2.customer_id = c.customer_id
+          limit 1
+      )
+) t;
+
+set rewrite_rule = 'magicset';
+select count(*) as result_count from (
+    select c.customer_name, o.order_id, o.amount
+    from magic_limit_customers c
+    join magic_limit_orders o on c.customer_id = o.customer_id
+    where c.region = 'North'
+      and o.amount = (
+          select max(o2.amount)
+          from magic_limit_orders o2
+          where o2.customer_id = c.customer_id
+          limit 1
+      )
+) t;
+
+drop table magic_limit_orders;
+drop table magic_limit_customers;
+
 drop table magic_t1;
 drop table magic_t2;
 drop table magic_t3;
 drop table magic_t4;
 
 drop schema magic_set cascade;
-

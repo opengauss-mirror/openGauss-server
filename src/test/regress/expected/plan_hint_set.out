@@ -52,12 +52,12 @@ WARNING:  LINE 1: syntax error at '='
 :EXP select (select /*+ set(enable_seqscan off) */ count(*) from t1 where t2.b = t1.b), b ,c from t2 where t2.a = (select /*+ set(enable_seqscan off) */ t3.b from t3 where t3.b = t2.c and t3.b < 10 order by 1 limit 1) and t2.c < 50 order by 1,2,3;
 WARNING:  unused hint: Set(enable_seqscan off)
 WARNING:  unused hint: Set(enable_seqscan off)
-                                                  QUERY PLAN                                                   
----------------------------------------------------------------------------------------------------------------
+--?.*
+--?.*
  Sort
-   Sort Key: ((SubPlan 1)), schema_plan_hint.t2.b, schema_plan_hint.t2.c
+   Sort Key: ((SubPlan 1)), t2.b, t2.c
    ->  Nested Loop
-         Join Filter: ((schema_plan_hint.t2.c = subquery."?column?") AND (schema_plan_hint.t2.a = subquery.b))
+         Join Filter: ((t2.c = subquery."?column?") AND (t2.a = subquery.b))
          ->  Seq Scan on t2
                Filter: (c < 50)
          ->  Subquery Scan on subquery
@@ -65,17 +65,13 @@ WARNING:  unused hint: Set(enable_seqscan off)
                ->  WindowAgg
                      ->  Sort
                            Sort Key: t3.b
-                           ->  Nested Loop Semi Join
-                                 Join Filter: (t3.b = schema_plan_hint.t2.c)
-                                 ->  Seq Scan on t3
-                                       Filter: ((b < 10) AND (b < 50))
-                                 ->  Seq Scan on t2
-                                       Filter: ((c < 50) AND (c < 10))
+                           ->  Seq Scan on t3
+                                 Filter: ((b < 10) AND (b < 50))
          SubPlan 1
            ->  Aggregate
                  ->  Seq Scan on t1
-                       Filter: (schema_plan_hint.t2.b = b)
-(21 rows)
+                       Filter: (t2.b = b)
+(17 rows)
 
 --- set hint in pull-up subquery won't work
 :EXP select * from t1 where t1.a in (select /*+ set(enable_seqscan off) */ t2.a from t2 where t2.a = 1);
