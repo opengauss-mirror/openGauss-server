@@ -1,0 +1,58 @@
+--
+-- Regression test for the security fix that guards fenced_udf_process(int4).
+--
+-- The function exposed a KILL_WORK (arg = 3) branch that ran
+-- `... | xargs kill -9` against every fenced UDF worker on the host. The fix
+-- adds an in-function superuser() check so the kill action requires system
+-- admin regardless of ACL.
+--
+-- Note: REVOKE from PUBLIC in system_views.sql was removed because updating
+-- proacl on a builtin function (OID < FirstBootstrapObjectId) triggers the
+-- hard-coded guard in heap_update() and rolls back the entire initdb
+-- transaction.  Thus new clusters retain the default PUBLIC EXECUTE; the
+-- runtime superuser() check below is the primary defense.
+--
+-- We intentionally never drive the kill itself: doing so would SIGKILL all
+-- fenced UDF workers on the test host and interfere with other tests.
+--
+SET client_min_messages TO 'warning';
+DROP ROLE IF EXISTS fenced_udf_priv_user;
+RESET client_min_messages;
+CREATE USER fenced_udf_priv_user PASSWORD 'Gauss@123';
+-- 1) The default ACL still grants EXECUTE to public (builtin default).
+SELECT has_function_privilege('fenced_udf_priv_user',
+                              'pg_catalog.fenced_udf_process(int4)',
+                              'EXECUTE');
+ has_function_privilege 
+------------------------
+ t
+(1 row)
+
+-- 2) Non-dangerous branches are accessible to a regular user.
+SET SESSION AUTHORIZATION fenced_udf_priv_user PASSWORD 'Gauss@123';
+SELECT pg_catalog.fenced_udf_process(1); -- expect: success (return 0)
+ fenced_udf_process 
+--------------------
+ 0
+(1 row)
+
+SELECT pg_catalog.fenced_udf_process(2); -- expect: success (return 0)
+ fenced_udf_process 
+--------------------
+ 0
+(1 row)
+
+-- 3) The KILL_WORK branch (arg = 3) is blocked by the in-function
+--    superuser() check, independent of ACL.
+SELECT pg_catalog.fenced_udf_process(3); -- expect: permission denied to kill ...
+ERROR:  permission denied to kill fenced UDF worker processes
+HINT:  Must be system admin to kill fenced UDF workers.
+CONTEXT:  referenced column: fenced_udf_process
+-- 4) Invalid argument must still error in the existing branch, proving the
+--    new authorization check did not break the rest of the dispatch.
+SELECT pg_catalog.fenced_udf_process(99); -- expect: Invalid parameter.
+ERROR:  Invalid parameter.
+CONTEXT:  referenced column: fenced_udf_process
+RESET SESSION AUTHORIZATION;
+-- Cleanup
+DROP USER fenced_udf_priv_user;
