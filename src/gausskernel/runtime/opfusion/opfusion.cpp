@@ -798,6 +798,9 @@ void OpFusion::updatePreAllocParamter(BindMessage* pqBindMessage, CachedPlanSour
 
 void OpFusion::describe()
 {
+    if (m_global->m_psrc == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT), errmsg("cached plansource does not exist")));
+    }
     if (m_global->m_psrc->resultDesc != NULL) {
         StringInfoData buf;
         initStringInfo(&buf);
