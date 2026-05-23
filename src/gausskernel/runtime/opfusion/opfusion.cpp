@@ -1147,6 +1147,7 @@ void OpFusion::clean()
 void OpFusion::storeFusion(const char *portalname)
 {
     if (portalname == NULL || portalname[0] == '\0') {
+        removeFusionFromHtab(m_local.m_portalName);
         pfree_ext(m_local.m_portalName);
         return;
     }
