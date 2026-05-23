@@ -20,6 +20,7 @@ test: ddl
 test: ustore_subpartition_vacuum_partition
 test: test_ustore_undo_tool
 test: privileges
+test: privileges_tablespace
 test: AMHeap_logical_scan
 test: copy
 test: hnsw_rabitq_vector
