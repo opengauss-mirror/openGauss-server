@@ -4897,11 +4897,15 @@ l1:
             bool is_null = false;
             char relreplident;
             Relation rel = heap_open(RelationRelationId, AccessShareLock);
-            Oid relid = RelationIsPartition(relation) ? relation->parentId : relation->rd_id;
-            Oid tmpRelid = partid_get_parentid(relid);
-            if (OidIsValid(tmpRelid)) {
-                relid = tmpRelid;
+            Oid relid;
+            if (OidIsValid(relation->grandparentId)) {
+                relid = relation->grandparentId;
+            } else if (OidIsValid(relation->parentId)) {
+                relid = relation->parentId;
+            } else {
+                relid = relation->rd_id;
             }
+
             HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
             if (!HeapTupleIsValid(tuple)) {
                 ereport(ERROR,
@@ -8618,11 +8622,15 @@ static HeapTuple ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool ke
 
     bool is_null = true;
     Relation rel = heap_open(RelationRelationId, AccessShareLock);
-    Oid relid = RelationIsPartition(relation) ? relation->parentId : relation->rd_id;
-    Oid tmpRelid = partid_get_parentid(relid);
-    if (OidIsValid(tmpRelid)) {
-        relid = tmpRelid;
+    Oid relid;
+    if (OidIsValid(relation->grandparentId)) {
+        relid = relation->grandparentId;
+    } else if (OidIsValid(relation->parentId)) {
+        relid = relation->parentId;
+    } else {
+        relid = relation->rd_id;
     }
+
     HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
     if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR,

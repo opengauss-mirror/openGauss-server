@@ -2884,8 +2884,7 @@ static void do_autovacuum(void)
             /* restart our transaction for the following operations */
             StartTransactionCommand();
             if (timeout_flag) {
-                Oid grandparent_oid = partid_get_parentid(vacObj->parent_oid);
-                Oid statFlag = OidIsValid(grandparent_oid) ? grandparent_oid : vacObj->parent_oid;
+                Oid statFlag = OidIsValid(vacObj->grandparent_oid) ? vacObj->grandparent_oid : vacObj->parent_oid;
                 pgstat_report_autovac_timeout(vacObj->tab_oid, statFlag, tab->at_sharedrel);
             }
 

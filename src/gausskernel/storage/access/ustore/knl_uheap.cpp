@@ -1947,10 +1947,13 @@ UHeapTuple UHeapExtractReplicaIdentity(Relation relation, UHeapTuple tp, bool* c
     }
 
     Relation rel = heap_open(RelationRelationId, AccessShareLock);
-    Oid relid = RelationIsPartition(relation) ? relation->parentId : relation->rd_id;
-    Oid tmpRelid = partid_get_parentid(relid);
-    if (OidIsValid(tmpRelid)) {
-        relid = tmpRelid;
+    Oid relid;
+    if (OidIsValid(relation->grandparentId)) {
+        relid = relation->grandparentId;
+    } else if (OidIsValid(relation->parentId)) {
+        relid = relation->parentId;
+    } else {
+        relid = relation->rd_id;
     }
     bool is_null = true;
     HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
