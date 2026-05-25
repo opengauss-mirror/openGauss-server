@@ -101,6 +101,7 @@ install(TARGETS pg_receivexlog RUNTIME DESTINATION bin)
 # pg_recvlogical bin
 set(TGT_recvlogical_SRC
     ${PROJECT_SRC_DIR}/bin/pg_basebackup/pg_recvlogical.cpp
+    ${PROJECT_SRC_DIR}/bin/pg_basebackup/logical_decode.cpp
     ${PROJECT_SRC_DIR}/bin/pg_basebackup/receivelog.cpp
     ${PROJECT_SRC_DIR}/bin/pg_basebackup/streamutil.cpp
     ${PROJECT_SRC_DIR}/bin/pg_basebackup/xlogreader.cpp

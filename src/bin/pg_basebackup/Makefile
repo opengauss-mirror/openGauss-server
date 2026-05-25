@@ -61,8 +61,8 @@ gs_basebackup: pg_basebackup.o $(OBJS) | submake-libpq submake-libpgport
 pg_receivexlog: pg_receivexlog.o $(OBJS) | submake-libpq submake-libpgport
 	$(CC) $(CXXFLAGS) pg_receivexlog.o $(OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X)
 
-pg_recvlogical: pg_recvlogical.o $(OBJS) $(top_builddir)/src/lib/pgcommon/libpgcommon.a | submake-libpq submake-libpgport
-	$(CC) $(CXXFLAGS) pg_recvlogical.o $(OBJS) $(top_builddir)/src/lib/pgcommon/libpgcommon.a $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
+pg_recvlogical: pg_recvlogical.o logical_decode.o $(OBJS) $(top_builddir)/src/lib/pgcommon/libpgcommon.a | submake-libpq submake-libpgport
+	$(CC) $(CXXFLAGS) pg_recvlogical.o logical_decode.o $(OBJS) $(top_builddir)/src/lib/pgcommon/libpgcommon.a $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
 
 xlogreader.cpp: % : $(top_srcdir)/src/gausskernel/storage/access/transam/%
 	rm -f $@ && $(LN_S) $< .
@@ -85,7 +85,7 @@ uninstall:
 
 clean distclean maintainer-clean:
 	rm -f gs_basebackup$(X) pg_receivexlog$(X) pg_recvlogical$(X) gs_tar$(X) $(OBJS) \
-		pg_basebackup.o pg_receivexlog.o pg_recvlogical.o *.depend
+		pg_basebackup.o pg_receivexlog.o pg_recvlogical.o logical_decode.o *.depend
 
 # Be sure that the necessary archives are compiled
 $(top_builddir)/src/lib/build_query/libbuildquery.a:
