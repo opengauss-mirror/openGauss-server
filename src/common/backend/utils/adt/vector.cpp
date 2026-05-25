@@ -1894,7 +1894,7 @@ void LogNewpageRange(Relation rel, ForkNumber forknum, BlockNumber startblk, Blo
 int PlanCreateIndexWorkers(Relation heapRelation, IndexInfo *indexInfo)
 {
     int parallelWorkers = RelationGetParallelWorkers(heapRelation, 0);
-    int maxHashbucketIndexWorker = 32;
+    int maxHashbucketIndexWorker = 128;
 
     if (parallelWorkers != 0) {
         parallelWorkers = Min(maxHashbucketIndexWorker, parallelWorkers);

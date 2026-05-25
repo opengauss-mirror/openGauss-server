@@ -512,28 +512,32 @@ void InitParamsMetaPage(Relation index, PQParams* params, bool* enablePQ, bool t
 
 void GetMMapMetaPageInfo(Relation index, int* m, void** entryPoint)
 {
-    if (index->rd_backend == InvalidBackendId && CanUseMmap(index)) {
-        HnswMetaPage metap = (HnswMetaPage)GetMMapMetaPage(index);
-        if (metap != NULL) {
-            if (unlikely(metap->magicNumber != HNSW_MAGIC_NUMBER))
-                elog(ERROR, "hnsw index is not valid");
-            if (m != NULL)
-                *m = metap->m;
+    HnswMetaPage metap;
 
-            if (entryPoint != NULL) {
-                if (BlockNumberIsValid(metap->entryBlkno)) {
-                    *entryPoint = (void*)HnswInitElementFromBlock(metap->entryBlkno, metap->entryOffno);
-                    HnswElement(*entryPoint)->level = metap->entryLevel;
-                    HnswElement(*entryPoint)->fromMmap = true;
-                } else {
-                    *entryPoint = NULL;
-                }
-            }
-            return;
+    if (index->rd_backend != InvalidBackendId || !CanUseMmap(index)) {
+        HnswGetMetaPageInfo(index, m, (HnswElement*)entryPoint);
+        return;
+    }
+
+    metap = (HnswMetaPage)GetMMapMetaPage(index);
+    if (metap == NULL || unlikely(metap->magicNumber != HNSW_MAGIC_NUMBER)) {
+        HnswGetMetaPageInfo(index, m, (HnswElement*)entryPoint);
+        return;
+    }
+
+    if (m != NULL) {
+        *m = metap->m;
+    }
+
+    if (entryPoint != NULL) {
+        if (BlockNumberIsValid(metap->entryBlkno)) {
+            *entryPoint = (void*)HnswInitElementFromBlock(metap->entryBlkno, metap->entryOffno);
+            HnswElement(*entryPoint)->level = metap->entryLevel;
+            HnswElement(*entryPoint)->fromMmap = true;
+        } else {
+            *entryPoint = NULL;
         }
     }
-    HnswGetMetaPageInfo(index, m, (HnswElement*)entryPoint);
-    return;
 }
 bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation index, FmgrInfo *procinfo, Oid collation,
                      bool loadVec, float *maxDistance, bool enableRabitQ, RabitqQueryParams *rbqParams,

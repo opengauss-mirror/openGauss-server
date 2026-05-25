@@ -42,6 +42,7 @@
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
+#include "catalog/pg_am.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_namespace.h"
@@ -145,7 +146,7 @@ static Oid binary_upgrade_get_next_part_index_pg_class_rfoid();
 static Oid bupgrade_get_next_psort_pg_class_rfoid();
 
 #ifndef ENABLE_LITE_MODE
-static const int max_hashbucket_index_worker = 32;
+static const int max_hashbucket_index_worker = 128;
 #else
 static const int max_hashbucket_index_worker = 10;
 #endif
@@ -5537,6 +5538,14 @@ void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks,
     if (RELATION_IS_OTHER_TEMP(iRel))
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot reindex temporary tables of other sessions")));
+
+    if (heapRelation->rd_tam_ops == TableAmUstore && RELATION_IS_PARTITIONED(heapRelation) &&
+        RelationIsPartitioned(iRel) && !RelationIsGlobalIndex(iRel) &&
+        iRel->rd_rel->relam == IVFFLAT_AM_OID) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("%s local partition index is only supported on astore tables", iRel->rd_am->amname.data)));
+    }
 
 #ifdef ENABLE_MOT
     /* Forward reindex stmt to MOT FDW. */
