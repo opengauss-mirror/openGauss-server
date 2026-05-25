@@ -596,23 +596,25 @@ static Query* TransformCompositeTypeStmt(ParseState* pstate, CompositeTypeStmt* 
     return result;
 }
 
-static void rewriteSequenceObject(DropStmt *stmt) {
+static void rewriteSequenceObject(DropStmt* stmt)
+{
     ListCell* cell = NULL;
     foreach (cell, stmt->objects) {
-        List *names = (List *)lfirst(cell);
+        List* names = (List*)lfirst(cell);
         RangeVar* relrv = makeRangeVarFromNameList(names);
 
         if (relrv == NULL) {
             continue;
         }
 
-        Oid namespaceId  = RangeVarGetCreationNamespace(relrv);
-        HeapTuple relTuple = SearchSysCache2(RELNAMENSP, PointerGetDatum(relrv->relname), ObjectIdGetDatum(namespaceId));
+        Oid namespaceId = RangeVarGetCreationNamespace(relrv);
+        HeapTuple relTuple =
+            SearchSysCache2(RELNAMENSP, PointerGetDatum(relrv->relname), ObjectIdGetDatum(namespaceId));
         if (!HeapTupleIsValid(relTuple)) {
             pfree(relrv);
             continue;
         }
-        Form_pg_class classForm = (Form_pg_class) GETSTRUCT(relTuple);
+        Form_pg_class classForm = (Form_pg_class)GETSTRUCT(relTuple);
         if (classForm->relkind == RELKIND_SEQUENCE) {
             stmt->removeType = OBJECT_SEQUENCE;
         } else if (classForm->relkind == RELKIND_LARGE_SEQUENCE) {

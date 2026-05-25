@@ -1210,10 +1210,10 @@ static ObjectAddress get_relation_by_qualified_name(
             break;
         case OBJECT_LARGE_SEQUENCE:
         case OBJECT_LARGE_SEQUENCE_GSC:
-            if (relation->rd_rel->relkind != RELKIND_LARGE_SEQUENCE_GSC && relation->rd_rel->relkind != RELKIND_LARGE_SEQUENCE)
-                ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("\"%s\" is not a large sequence", RelationGetRelationName(relation))));
+            if (relation->rd_rel->relkind != RELKIND_LARGE_SEQUENCE_GSC &&
+                relation->rd_rel->relkind != RELKIND_LARGE_SEQUENCE)
+                ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                                errmsg("\"%s\" is not a large sequence", RelationGetRelationName(relation))));
             break;
         case OBJECT_TABLE:
             if (relation->rd_rel->relkind != RELKIND_RELATION)

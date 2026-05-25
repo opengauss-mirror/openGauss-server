@@ -1360,6 +1360,9 @@ ObjectAddress AlterSequenceWrapper(AlterSeqStmt* stmt)
         (void)LWLockAcquire(g_instance.alter_sequence_lock, LW_EXCLUSIVE);
     }
 
+    /* invoke the function that alters the actual caching strategy for sequences */
+    address = alterSeqFuncPtr(stmt, relid);
+
     if (isAlterCacheLevel) {
         if (isGlobalCache) {
             /* reclaim unused sequence numbers */
@@ -1381,9 +1384,6 @@ ObjectAddress AlterSequenceWrapper(AlterSeqStmt* stmt)
         /* undo the recording of lastval */
         u_sess->cmd_cxt.last_used_seq = NULL;
     }
-
-    /* invoke the function that alters the actual caching strategy for sequences */
-    address = alterSeqFuncPtr(stmt, relid);
 
     if (isAlterCacheLevel) {
         LWLockRelease(g_instance.alter_sequence_lock);
@@ -4614,20 +4614,27 @@ static void removeSessionSeqScache_internal(Oid relid)
     }
 }
 
+static inline bool check_need_remove_cache(Oid relOid)
+{
+    return u_sess != NULL && u_sess->cmd_cxt.last_used_seq != NULL &&
+           u_sess->cmd_cxt.last_used_seq->relid == relOid &&
+           u_sess->cmd_cxt.last_used_seq->dbOid == u_sess->proc_cxt.MyDatabaseId;
+}
+
 void removeSequenceCacheOfRelOid(List* relOids)
 {
     ListCell* cell = NULL;
     uint32 hashCode;
     GSCOid2LevelKey key;
     foreach (cell, relOids) {
-        Oid relOid = lfirst_oid(cell);
-        if (OidIsValid(relOid)) {
-            if (is_global_level_sequence_cache(relOid)) {
-                removeGlobalSeqCache_internal(relOid);
-                removeGlobalSeqCacheForCurrval_internal(relOid);
+        SeqDropCacheInfo *info = (SeqDropCacheInfo*)lfirst(cell);
+        if (OidIsValid(info->relid) && check_need_remove_cache(info->relid)) {
+            if (info->is_global_cache) {
+                removeGlobalSeqCache_internal(info->relid);
+                removeGlobalSeqCacheForCurrval_internal(info->relid);
                 /* after drop sequence, we need clean lastval record */
             } else {
-                removeSessionSeqScache_internal(relOid);
+                removeSessionSeqScache_internal(info->relid);
                 /* after drop sequence, we need clean lastval record */
             }
             u_sess->cmd_cxt.last_used_seq = NULL;
@@ -4636,7 +4643,7 @@ void removeSequenceCacheOfRelOid(List* relOids)
             }
             /* remove mapping of seqoid to is_global */
             key.dbOid = u_sess->proc_cxt.MyDatabaseId;
-            key.relid = relOid;
+            key.relid = info->relid;
             hashCode = GSCHashFunc<GSCOid2LevelKey>((const void*)&key, sizeof(GSCOid2LevelKey));
             (void)LWLockAcquire(g_instance.oid_map_lock, LW_EXCLUSIVE);
             (void*)hash_search_with_hash_value(g_instance.relid2cachelevel, (const void*)(&key), hashCode,
@@ -4940,7 +4947,7 @@ static void changeSequenceCacheLevel(Oid relid)
     key.relid = relid;
     hashCode = GSCHashFunc<GSCOid2LevelKey>((const void*)&key, sizeof(GSCOid2LevelKey));
 
-    (void)LWLockAcquire(g_instance.oid_map_lock, LW_SHARED);
+    (void)LWLockAcquire(g_instance.oid_map_lock, LW_EXCLUSIVE);
     entry = (GSCOid2LevelEntry*)hash_search_with_hash_value(g_instance.relid2cachelevel, (const void*)(&key), hashCode,
                                                             HASH_FIND, NULL);
     if (entry != NULL) {

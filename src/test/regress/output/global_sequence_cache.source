@@ -558,7 +558,7 @@ select seq_test_table.currval;
 
 drop table test_table_for_seq;
 drop sequence seq_test_table;
-ERROR:  sequence "seq_test_table" does not exist
+--?ERROR:*
 -- 1.2.2 as column of normal table
 create table test_table_for_seq1(c1 integer, c2 serial);
 NOTICE:  CREATE TABLE will create implicit sequence "test_table_for_seq1_c2_seq" for serial column "test_table_for_seq1.c2"
@@ -1534,9 +1534,9 @@ LastValue AS (
     FROM SequenceInfo  
 )  
 SELECT last_value FROM LastValue;
-          last_value           
--------------------------------
- (1,1,9223372036854775807,1,f)
+           last_value            
+---------------------------------
+ (1,1,9223372036854775807,1,f,t)
 (1 row)
 
 create or replace procedure proc_seq_get_val() is

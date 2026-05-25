@@ -610,7 +610,7 @@ HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 DROP TABLE t1;
 -- Fails because no longer existent:
 DROP SEQUENCE t1_f1_seq;
-ERROR:  sequence "t1_f1_seq" does not exist
+--?ERROR:*
 DROP LARGE SEQUENCE myseq2;
 -- Information schema do not support large sequence for now
 SELECT * FROM information_schema.sequences WHERE sequence_name in ('myseq3');

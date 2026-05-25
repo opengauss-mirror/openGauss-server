@@ -3894,7 +3894,10 @@ void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExec
 
         /* record sequence reloid if drop sequence */
         if (OBJECT_IS_SEQUENCE(drop->removeType)) {
-            seqOids = lappend_oid(seqOids, relOid);
+            SeqDropCacheInfo *info = (SeqDropCacheInfo*)palloc(sizeof(SeqDropCacheInfo));
+            info->relid = relOid;
+            info->is_global_cache = is_global_level_sequence_cache(relOid);
+            seqOids = lappend(seqOids, info);
         }
 
         /*
@@ -4046,6 +4049,7 @@ void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExec
     /* drop global sequence cache after drop sequence */
     if (seqOids != NULL && OBJECT_IS_SEQUENCE(drop->removeType)) {
         removeSequenceCacheOfRelOid(seqOids);
+        list_free(seqOids);
     }
 
     free_object_addresses(objects);

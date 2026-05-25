@@ -204,6 +204,11 @@ struct GlobaleSeqHashTabl {
     struct GSCHashCtl global_seqtab[NUM_GSC_SINGLENODE_PARTITIONS];
 };
 
+typedef struct SeqDropCacheInfo {
+    Oid relid;
+    bool is_global_cache;
+} SeqDropCacheInfo;
+
 #define GSC_HTAB_SIZE (128)
 
 /*
