@@ -100,7 +100,6 @@ set auto_explain_level=log;
 set client_min_messages=log;
 
 set query_dop=1004;
-set sql_beta_feature='enable_plsql_smp';
 
 set current_schema=smp_test;
 
@@ -117,4 +116,5 @@ call p7();
 set current_schema=public;
 set enable_indexscan=off;
 set enable_bitmapscan=off;
+set enable_auto_explain=false;
 drop schema smp_test cascade;

@@ -40,6 +40,7 @@
 #include "commands/sqladvisor.h"
 #include "access/hash.h"
 #include "instruments/instr_handle_mgr.h"
+#include "distributelayer/streamMain.h"
 #ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
 #endif
@@ -1440,10 +1441,9 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
     TupleDesc tupDesc = NULL;
     PLpgSQL_execstate estate;
     FormatCallStack plcallstack;
-#ifndef ENABLE_MULTIPLE_NODES
     AutoDopControl dopControl;
     dopControl.CloseSmp();
-#endif
+
     /*
      * Setup the execution state
      */
@@ -3956,6 +3956,8 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
                 estate->cursor_return_numbers = saved_cursor_numbers;
 
                 exec_exception_cleanup(estate, &excptContext);
+                AutoDopControl dopControl;
+                dopControl.CloseSmp();
 
                 rc = exec_exception_handler(estate, block, &excptContext);
                 stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);

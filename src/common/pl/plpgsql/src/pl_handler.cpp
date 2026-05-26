@@ -960,7 +960,6 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     bool saveSetSendCommandId = IsSendCommandId();
 #else
     AutoDopControl dopControl;
-    dopControl.CloseSmp();
 #endif
     int connect = SPI_connectid();
     Oid firstLevelPkgOid = InvalidOid;
@@ -1383,7 +1382,6 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
 
 #ifndef ENABLE_MULTIPLE_NODES
     AutoDopControl dopControl;
-    dopControl.CloseSmp();
 #else
     /* Saves the status of whether to send commandId. */
     bool saveSetSendCommandId = IsSendCommandId();

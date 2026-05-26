@@ -2224,7 +2224,6 @@ CachedPlan* SPI_plan_get_cached_plan(SPIPlanPtr plan)
 
 #ifndef ENABLE_MULTIPLE_NODES
     AutoDopControl dopControl;
-    dopControl.CloseSmp();
 #endif
 
     /* Get the generic plan for the query */
@@ -2792,7 +2791,6 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
 
 #ifndef ENABLE_MULTIPLE_NODES
     AutoDopControl dopControl;
-    dopControl.CloseSmp();
 #endif
 
     foreach (lc1, plan->plancache_list) {

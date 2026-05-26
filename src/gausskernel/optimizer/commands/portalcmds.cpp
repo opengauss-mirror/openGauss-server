@@ -334,7 +334,14 @@ void PortalCleanup(Portal portal)
                  * we should wait all stream threads exit to cleanup queryDesc.
                  */
                 if (IS_STREAM_PORTAL) {
-                    StreamNodeGroup::ReleaseStreamGroup(true);
+                    /*
+                     * When we incurred the fatal,
+                     * we have finished all stream threads error exit by a way of THRDSTREAM_STREAM_ERROR
+                     * during "ipc_proc_exit_prepare". So we only need to launch all stream threads exit in normal case.
+                     */
+                    if (!t_thrd.proc_cxt.proc_exit_inprogress) {
+                        StreamNodeGroup::ReleaseStreamGroup(true);
+                    }
                     portal->streamInfo.Reset();
                 }
 #else
