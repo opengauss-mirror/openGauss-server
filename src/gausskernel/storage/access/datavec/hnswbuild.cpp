@@ -1768,7 +1768,9 @@ void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, HnswBuildSt
             int pqKsub = buildstate->pqKsub;
             size_t pqDistTblSize = (size_t)pqM * pqKsub * pqKsub * sizeof(float);
             buildstate->pqDistanceTable = (float *)palloc(pqDistTblSize);
-            GetPQDistanceTableSdc(buildstate->params, buildstate->pqDistanceTable, pqDistTblSize);
+            if (GetPQDistanceTableSdc(buildstate->params, buildstate->pqDistanceTable, pqDistTblSize) != 0) {
+                ereport(ERROR, (errmsg("failed to compute PQ SDC distance table")));
+            }
         }
     }
 
