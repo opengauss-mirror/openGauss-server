@@ -430,12 +430,13 @@ static void BuildPQtable(HnswBuildState *buildstate)
     PG_END_TRY();
     if (buildstate->heap != NULL) {
         SampleRows(buildstate);
-        if (buildstate->samples->length < buildstate->pqKsub) {
-            ereport(NOTICE,
-                    (errmsg("hnsw PQ table created with little data"),
-                            errdetail("This will cause low recall."),
-                            errhint("Drop the index until the table has more data.")));
-        }
+    }
+    if (buildstate->samples->length < buildstate->pqKsub) {
+        ereport(ERROR,
+                (errmsg("not enough samples to build HNSW PQ table"),
+                        errdetail("PQ requires at least pq_ksub samples, but got %d samples for pq_ksub=%d.",
+                                  buildstate->samples->length, buildstate->pqKsub),
+                        errhint("Insert more rows or reduce pq_ksub.")));
     }
     ereport(LOG, (errmsg("HNSWPQ start to train codebook.")));
     int success = ComputeHnswPQ(buildstate);
@@ -1556,7 +1557,9 @@ static void BuildIndex(Relation heap, Relation index, IndexInfo *indexInfo, Hnsw
             int pqKsub = buildstate->pqKsub;
             size_t pqDistTblSize = (size_t)pqM * pqKsub * pqKsub * sizeof(float);
             buildstate->pqDistanceTable = (float *)palloc(pqDistTblSize);
-            GetPQDistanceTableSdc(buildstate->params, buildstate->pqDistanceTable, pqDistTblSize);
+            if (GetPQDistanceTableSdc(buildstate->params, buildstate->pqDistanceTable, pqDistTblSize) != 0) {
+                ereport(ERROR, (errmsg("failed to compute PQ SDC distance table")));
+            }
         }
     }
 

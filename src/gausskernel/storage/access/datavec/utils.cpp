@@ -548,17 +548,16 @@ bool MmapLoadElement(HnswElement element, float *distance, Datum *q, Relation in
         if (enablePQ && pqinfo->lc == 0) {
             uint8 *ePQCode = LoadPQcode(etup);
             PQParams *params = &pqinfo->params;
-            if (pqinfo->pqMode == HNSW_PQMODE_SDC && *pqinfo->qPQCode == NULL) {
+            if (pqinfo->pqMode == HNSW_PQMODE_SDC && pqinfo->qPQCode == NULL) {
                 *distance = 0;
             } else if (pqinfo->pqMode == HNSW_PQMODE_ADC && pqinfo->pqDistanceTable == NULL) {
                 *distance = 0;
             } else {
                 size_t pqCodeSize = params->pqM * sizeof(uint8);
-                size_t pqDistTblSize = (pqinfo->pqMode == HNSW_PQMODE_SDC) ?
-                    (size_t)params->pqM * params->pqKsub * params->pqKsub * sizeof(float) :
-                    (size_t)params->pqM * params->pqKsub * sizeof(float);
-                GetPQDistance(ePQCode, pqinfo->qPQCode, params, pqinfo->pqDistanceTable, distance,
-                              pqCodeSize, pqCodeSize, pqDistTblSize, sizeof(float));
+                if (GetPQDistance(ePQCode, pqinfo->qPQCode, params, pqinfo->pqDistanceTable, distance,
+                                  pqCodeSize, pqCodeSize, pqinfo->pqDistanceTableSize, sizeof(float)) != 0) {
+                    ereport(ERROR, (errmsg("failed to compute PQ distance")));
+                }
             }
         } else {
             if (DatumGetPointer(*q) == NULL) {

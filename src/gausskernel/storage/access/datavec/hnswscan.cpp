@@ -56,21 +56,27 @@ static List *GetScanItems(IndexScanDesc scan, Datum q)
 
     if (enablePQ) {
         uint8* qPQCode;
-        PQSearchInfo pqinfo;
+        PQSearchInfo pqinfo = {};
         float *query = DatumGetVector(q)->x;
 
         pqinfo.params = *params;
         if (pqMode == HNSW_PQMODE_SDC) {
             size_t pqCodeSize = params->pqM * sizeof(uint8);
             qPQCode = (uint8 *)palloc(pqCodeSize);
-            ComputeVectorPQCode(query, params, qPQCode, pqCodeSize);
+            if (ComputeVectorPQCode(query, params, qPQCode, pqCodeSize) != 0) {
+                ereport(ERROR, (errmsg("failed to compute PQ query code")));
+            }
             pqinfo.qPQCode = qPQCode;
             pqinfo.pqDistanceTable = index->pqDistanceTable;
+            pqinfo.pqDistanceTableSize = (size_t)params->pqM * params->pqKsub * params->pqKsub * sizeof(float);
         } else {
             pqinfo.qPQCode = NULL;
-            size_t pqDistTblSize = (size_t)params->pqM * params->pqKsub * sizeof(float);
+            size_t pqDistTblSize = (size_t)params->pqM * params->pqKsub * params->pqKsub * sizeof(float);
             pqinfo.pqDistanceTable = (float*) palloc(pqDistTblSize);
-            GetPQDistanceTableAdc(query, params, pqinfo.pqDistanceTable, pqDistTblSize);
+            pqinfo.pqDistanceTableSize = pqDistTblSize;
+            if (GetPQDistanceTableAdc(query, params, pqinfo.pqDistanceTable, pqDistTblSize) != 0) {
+                ereport(ERROR, (errmsg("failed to compute PQ ADC distance table")));
+            }
         }
 
         pqinfo.pqMode = pqMode;
