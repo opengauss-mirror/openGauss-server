@@ -948,7 +948,12 @@ void AtAbort_Portals(bool STP_rollback)
          * there. But leave active portal alone. This change is from pg11
          * commit and rollback patch.
          */
+#ifdef ENABLE_MULTIPLE_NODES
         if(portal->status != PORTAL_ACTIVE) {
+#else
+        if (portal->status != PORTAL_ACTIVE ||
+            (t_thrd.proc_cxt.proc_exit_inprogress && portal->streamInfo.streamGroup != NULL)) {
+#endif
 #ifndef ENABLE_MULTIPLE_NODES
             if (!STP_rollback) {
                 GsplsqlResetContextInAbout();

@@ -187,6 +187,23 @@ execute merge_gpc(1);
 select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
 deallocate all;
 
+begin;
+insert into t1 values (2, 20);
+:EXP update /*+ set(query_dop 1008) */ t1 set c2 = 200 where c1 = 2;
+update /*+ set(query_dop 1008) */ t1 set c2 = 200 where c1 = 2;
+commit;
+
+create or replace function log_update() returns trigger as $$begin
+    return new;
+end;$$ language plpgsql;
+
+create trigger tr1 after update on t1 for each row execute function log_update();
+
+:EXP merge /*+ set(query_dop 1008) */ into t1 using t2 on t1.c1 = t2.c1
+when matched then update set c2 = t2.c2;
+merge /*+ set(query_dop 1008) */ into t1 using t2 on t1.c1 = t2.c1
+when matched then update set c2 = t2.c2;
+
 -- cleanup
 drop schema schema_hint_iud cascade;
 \c regression;

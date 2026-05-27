@@ -391,3 +391,41 @@ Datum currtid_byrelname(PG_FUNCTION_ARGS)
 
     PG_RETURN_ITEMPOINTER(result);
 }
+
+#define rot(x, k) (((x) << (k)) | ((x) >> (32 - (k))))
+
+#define final(a, b, c) \
+{ \
+    c ^= b; c -= rot(b, 14); \
+    a ^= c; a -= rot(c, 11); \
+    b ^= a; b -= rot(a, 25); \
+    c ^= b; c -= rot(b, 16); \
+    a ^= c; a -= rot(c, 4); \
+    b ^= a; b -= rot(a, 14); \
+    c ^= b; c -= rot(b, 24); \
+}
+
+Datum hash_uint32_tid(uint32 k)
+{
+    register uint32 a, b, c;
+
+    a = b = c = 0x9e3779b9 + (uint32)sizeof(uint32) + 3923095;
+    a += k;
+
+    final(a, b, c);
+
+    /* report the result */
+    return UInt32GetDatum(c);
+}
+
+Datum tid_hash_blocknum(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
+
+    ItemPointer item_ptr = PG_GETARG_ITEMPOINTER(0);
+    BlockNumber block_number = BlockIdGetBlockNumber(&(item_ptr->ip_blkid));
+    return hash_uint32_tid(block_number);
+}
+

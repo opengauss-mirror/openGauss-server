@@ -206,6 +206,10 @@ static bool check_restrict_nonsystem_relation_kind(char **newval, void **extra, 
 static void assign_restrict_nonsystem_relation_kind(const char *newval, void *extra);
 static bool check_mmap_set(bool* newval, void** extra, GucSource source);
 
+#ifndef ENABLE_MULTIPLE_NODES
+static void set_parallel_dop(bool newval, void *extra);
+#endif
+
 static void InitSqlConfigureNamesBool();
 static void InitSqlConfigureNamesInt();
 static void InitSqlConfigureNamesInt64();
@@ -2020,6 +2024,28 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_force_smp",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Force enable symmetric multi-processing for queries."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_force_smp,
+            false,
+            NULL,
+            set_parallel_dop,
+            NULL},
+        {{"enable_smp_dml",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("enable SMP DML, including INSERT/UPDATE/DELETE/MERGE."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_smp_dml,
+            true,
+            NULL,
+            NULL,
+            NULL},
 #endif
         {{"enable_vector_targetlist",
             PGC_USERSET,
@@ -3736,6 +3762,10 @@ static void InitSqlConfigureNamesEnum()
 static bool parse_query_dop(int* newval, void** extra, GucSource source)
 {
     int dop_mark = *newval;
+    bool enable_smp = false;
+#ifndef ENABLE_MULTIPLE_NODES
+    enable_smp = u_sess->attr.attr_sql.enable_force_smp;
+#endif
 
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
     if ((dop_mark > 2001) && (dop_mark <= (2000 + MAX_QUERY_DOP))) {
@@ -3747,7 +3777,7 @@ static bool parse_query_dop(int* newval, void** extra, GucSource source)
         u_sess->opt_cxt.smp_thread_cost = 0;
         u_sess->opt_cxt.parallel_debug_mode = LLT_MODE;
         u_sess->opt_cxt.max_query_dop = -1; /* turn off dynamic smp */
-    } else if ((dop_mark > 1001) && (dop_mark <= (1000 + MAX_QUERY_DOP))) {
+    } else if (((dop_mark > 1001) && (dop_mark <= (1000 + MAX_QUERY_DOP))) || enable_smp) {
         /*
          * This mode is for function test, we reduce the parallel threshold
          * to parallelize as much plan as possible, and print parallel plan
@@ -3795,6 +3825,51 @@ static bool parse_query_dop(int* newval, void** extra, GucSource source)
 
     return true;
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * @Description: parse the input of u_sess->opt_cxt.query_dop and set parallel dop
+ *
+ * @param[IN] newval: new value
+ * @param[IN] extra: N/A
+ * @param[IN] source: N/A
+ * @return: true if value is valid
+ */
+ static void set_parallel_dop(bool newval, void *extra)
+ {
+    int dop_mark = u_sess->opt_cxt.query_dop;
+
+    if (newval) {
+        if ((dop_mark >= MIN_QUERY_DOP) && (dop_mark <= MAX_QUERY_DOP)) {
+            /*
+            * This mode is for parallel seqscan and insert, , and print parallel plan
+            * so we can analyze the parallel plan
+            */
+            u_sess->opt_cxt.smp_thread_cost = 0;
+            u_sess->opt_cxt.parallel_debug_mode = DEBUG_MODE;
+            u_sess->opt_cxt.max_query_dop = -1; /* turn off dynamic smp */
+        } else {
+            /* should not reach here */
+            GUC_check_errmsg("Current degree of parallelism can not support parallel seqscan");
+            return;
+        }
+    } else {
+        if ((dop_mark >= MIN_QUERY_DOP) && (dop_mark <= MAX_QUERY_DOP)) {
+            /*
+            * This mode is for parallel seqscan and insert, , and print parallel plan
+            * so we can analyze the parallel plan
+            */
+            u_sess->opt_cxt.smp_thread_cost = DEFAULT_SMP_THREAD_COST;
+            u_sess->opt_cxt.parallel_debug_mode = DEFAULT_MODE;
+            u_sess->opt_cxt.max_query_dop = -1; /* turn off dynamic smp */
+        } else {
+            /* should not reach here */
+            GUC_check_errmsg("Current degree of parallelism can not support parallel seqscan");
+            return;
+        }
+    }
+}
+#endif
 
 /*
  * @Description: assign new value to query_dop.

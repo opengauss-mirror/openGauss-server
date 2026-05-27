@@ -637,9 +637,9 @@ void LocalSysDBCache::LocalSysDBCacheResetMyDBStat()
 }
 
 /* clear cache of mydb memcxt */
-void LocalSysDBCache::LocalSysDBCacheClearMyDB()
+void LocalSysDBCache::LocalSysDBCacheClearMyDB(bool include_shared)
 {
-    LocalSysDBCacheReleaseCritialReSource(false);
+    LocalSysDBCacheReleaseCritialReSource(include_shared);
     LocalSysDBCacheResetMyDBStat();
 
     ClearMyDBOfRelMapCxt(&relmap_cxt);
@@ -802,7 +802,7 @@ void LocalSysDBCache::ClearSysCacheIfNecessary(Oid db_id, const char *db_name)
     if (unlikely(LocalSysDBCacheNeedCleanCache())) {
         LocalSysDBCacheCleanCache();
     } else if (LocalSysDBCacheNeedClearMyDB(db_id, db_name)) {
-        LocalSysDBCacheClearMyDB();
+        LocalSysDBCacheClearMyDB(true);
     }
 
     g_instance.global_sysdbcache.Refresh();

@@ -168,6 +168,9 @@ public:
     /* Set up the write transaction status for the stream thread. */
     void setUpStreamTxnEnvironment();
 
+    /* Set up undozone data from stream thread */
+    void copy_undozone_from_main_worker(StreamUndoZoneData* undozone_data);
+
     /* Report error to consumer node. */
     void reportError();
 
@@ -295,8 +298,9 @@ public:
     void setUniqueSQLKey(uint64 unique_sql_id, Oid unique_user_id, uint32 unique_cn_id);
     void setGlobalSessionId(GlobalSessionId* globalSessionId);
     void getGlobalSessionId(GlobalSessionId* globalSessionId);
-
-    void streamSendRowsToConsumer(int rows);
+#ifndef ENABLE_MULTIPLE_NODES
+    void end_command(const char* commandTag);
+#endif
 
     /* The plan the producer thread will run. */
     PlannedStmt* m_plan;
@@ -350,6 +354,9 @@ public:
 
     StreamSyncParam m_syncParam;
 
+    StreamUndoZoneData* m_producer_undozone;
+    knl_session_context* sess_ptr;
+
 private:
     /* Set distribute Idx. */
     void setDistributeIdx();
@@ -374,6 +381,7 @@ private:
 
     template<int keyNum, int distrType>
     void redistributeTupleChannel(TupleTableSlot* tuple);
+    void redistribute_ctid_tuple_channel(TupleTableSlot* tuple);
 
     template<int distrType>
     void redistributeTupleChannelWithExpr(TupleTableSlot* tuple);

@@ -1316,6 +1316,138 @@ static inline bool contain_placeholdervar(Node *var_list)
     return result;
 }
 
+typedef struct {
+    bool need_redistribute;
+    bool upper_stream;
+} RedistributeContext;
+
+#ifndef ENABLE_MULTIPLE_NODES
+static void optplan_join_path_walker(Path* path, RelOptInfo* dml_rel, RedistributeContext* context)
+{
+    if (NULL == path || context->need_redistribute) {
+        return;
+    }
+
+    // smp indexscan or smp indexonlyscan
+    if ((T_IndexScan == path->pathtype || T_IndexOnlyScan == path->pathtype)
+        && path->parent->relid == dml_rel->relid) {
+        context->need_redistribute = true;
+        return;
+    }
+
+    switch (path->pathtype) {
+        case T_Stream: {
+            if (!IS_STREAM_TYPE(path, STREAM_GATHER)) {
+                context->upper_stream = true;
+            }
+
+            optplan_join_path_walker(((StreamPath*)path)->subpath, dml_rel, context);
+            context->upper_stream = false;
+        } break;
+
+        case T_SeqScan: {
+            if (context->upper_stream && path->parent->relid == dml_rel->relid) {
+                context->need_redistribute = true;
+                return;
+            }
+        } break;
+
+        case T_Append: {
+            ListCell* cell = NULL;
+
+            foreach(cell, ((AppendPath*)path)->subpaths) {
+                optplan_join_path_walker((Path*)lfirst(cell), dml_rel, context);
+            }
+        } break;
+
+        case T_MergeAppend: {
+            ListCell* cell = NULL;
+
+            foreach(cell, ((MergeAppendPath*)path)->subpaths) {
+                optplan_join_path_walker((Path*)lfirst(cell), dml_rel, context);
+            }
+        } break;
+
+        case T_Material: {
+            optplan_join_path_walker(((MaterialPath*)path)->subpath, dml_rel, context);
+        } break;
+
+        case T_Unique: {
+            optplan_join_path_walker(((UniquePath*)path)->subpath, dml_rel, context);
+        } break;
+
+        case T_PartIterator: {
+            optplan_join_path_walker(((PartIteratorPath*)path)->subPath, dml_rel, context);
+        } break;
+
+        case T_NestLoop:
+        case T_HashJoin:
+        case T_MergeJoin: {
+            JoinPath* jp = (JoinPath*)path;
+            optplan_join_path_walker(jp->innerjoinpath, dml_rel, context);
+            optplan_join_path_walker(jp->outerjoinpath, dml_rel, context);
+        } break;
+
+        default:
+            break;
+    }
+    return;
+}
+
+Path* optplan_add_redis_ctid_if_necessary(PlannerInfo* root, Path* path, List* targetlist)
+{
+    /* 1. must has ctid in targetlist */
+    ListCell* tlist = NULL;
+    Var* ctidvar = NULL;
+    foreach(tlist, targetlist) {
+        TargetEntry* tle = (TargetEntry*)lfirst(tlist);
+
+        if (tle->resjunk && tle->resname && (strcmp(tle->resname, "ctid") == 0)) {
+            ctidvar = (Var*)tle->expr; /* found it */
+            break;
+        }
+    }
+    if (unlikely(ctidvar == NULL)) {
+        // add dfx log
+        return NULL;
+    }
+    if ((rt_fetch(linitial_int(root->parse->resultRelations), root->parse->rtable))->relid
+        < FirstBootstrapObjectId) {
+        return NULL;
+    }
+
+    /* 2. check whether to add stream redistribute path */
+    RedistributeContext redis_ctx;
+    redis_ctx.need_redistribute = false;
+    redis_ctx.upper_stream = false;
+    Index reidx = (Index)linitial_int(root->parse->resultRelations);
+    RelOptInfo* dml_rel = root->simple_rel_array[reidx];
+    optplan_join_path_walker(path, dml_rel, &redis_ctx);
+    if (!redis_ctx.need_redistribute) {
+        return NULL;
+    }
+
+    /* 3. add stream redistribute path */
+    ParallelDesc* smp_desc = (ParallelDesc*)palloc0(sizeof(ParallelDesc));
+    smp_desc->distriType = LOCAL_DISTRIBUTE;
+    smp_desc->consumerDop = path->dop;
+    smp_desc->producerDop = path->dop;
+
+    List* distribute_key = (List *)list_make1(ctidvar);
+
+    return create_stream_path(root,
+            path->parent,
+            STREAM_REDISTRIBUTE,
+            distribute_key,
+            NULL,
+            path,
+            1,
+            NULL,
+            smp_desc,
+            NULL);
+}
+#endif
+
 static bool join_equal_walker(Node* node, void* context)
 {
     if (node == NULL) {
@@ -3522,6 +3654,17 @@ static Plan* internal_grouping_planner(PlannerInfo* root, double tuple_fraction)
                                         sorted_path == NULL || permit_gather(root)),
                                     root, cheapest_path, sorted_path);
 
+#ifndef ENABLE_MULTIPLE_NODES
+        if (u_sess->attr.attr_sql.enable_smp_dml && parse->targetList != NULL &&
+            u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP && best_path->dop > OPTPLAN_DEFAULT_DOP &&
+            (root->parse->commandType == CMD_UPDATE || root->parse->commandType == CMD_DELETE ||
+            root->parse->commandType == CMD_MERGE)) {
+            Path* new_best_path = optplan_add_redis_ctid_if_necessary(root, best_path, parse->targetList);
+            if (new_best_path != NULL) {
+                best_path = new_best_path;
+            }
+        }
+#endif
         (void)MemoryContextSwitchTo(PlanGenerateContext);
 
         /* record the param */

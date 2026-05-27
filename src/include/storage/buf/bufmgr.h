@@ -268,6 +268,7 @@ void shared_buffer_write_error_callback(void *arg);
 /*
  * prototypes for functions in bufmgr.c
  */
+extern int32 GetPrivateRefCount(Buffer buffer);
 extern void PrefetchBuffer(Relation reln, ForkNumber forkNum, BlockNumber blockNum);
 extern void PageRangePrefetch(
     Relation reln, ForkNumber forkNum, BlockNumber blockNum, int32 n, uint32 flags, uint32 col);

@@ -1742,7 +1742,8 @@ static void RedoUndoInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     undorec->SetUrp(urecptr);
     urecptr = UHeapPrepareUndoInsert(xlundohdr->relOid, xlundohdrextra->partitionOid, relNode, spcNode,
         UNDO_PERMANENT, recxid, 0, xlundohdrextra->blkprev, xlundohdrextra->prevurp,
-        blockdatarec->insertUndoParse.blkno, xlundohdr, xlundometa);
+        blockdatarec->insertUndoParse.blkno, xlundohdr, xlundometa,
+        xlundohdrextra->hasSubXact ? TopSubTransactionId : InvalidSubTransactionId);
     Assert(UNDO_PTR_GET_OFFSET(urecptr) == UNDO_PTR_GET_OFFSET(xlundohdr->urecptr));
     undorec->SetOffset(blockdatarec->insertUndoParse.offnum);
     if (!skipInsert) {
@@ -1993,11 +1994,12 @@ static void RedoUndoMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoPars
     Oid relNode = blockdatarec->multiInsertUndoParse.relNode;
     Oid spcNode = blockdatarec->multiInsertUndoParse.spcNode;
 
+    SubTransactionId subxid = xlundohdrextra->hasSubXact ? TopSubTransactionId : InvalidSubTransactionId;
     /* pass first undo record in and let UHeapPrepareUndoMultiInsert set urecptr according to xlog */
     urecptr = UHeapPrepareUndoMultiInsert(xlundohdr->relOid, xlundohdrextra->partitionOid, relNode,
         spcNode, UNDO_PERMANENT, InvalidBuffer, nranges, recxid, InvalidCommandId, xlundohdrextra->blkprev,
         xlundohdrextra->prevurp, &urecvec, NULL, urpvec, 
-        blockdatarec->multiInsertUndoParse.blkno, xlundohdr, xlundometa);
+        blockdatarec->multiInsertUndoParse.blkno, xlundohdr, xlundometa, subxid);
 
     /*
      * We can skip inserting undo records if the tuples are to be marked as
@@ -2012,6 +2014,11 @@ static void RedoUndoMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoPars
                 sizeof(OffsetNumber));
             appendBinaryStringInfo((*urecvec)[i]->Rawdata(), (char *)&(ufreeOffsetRanges)->endOffset[i],
                 sizeof(OffsetNumber));
+            if (subxid != InvalidSubTransactionId) {
+                (*urecvec)[i]->SetUinfo(UNDO_UREC_INFO_CONTAINS_SUBXACT);
+                (*urecvec)[i]->SetUinfo(UNDO_UREC_INFO_PAYLOAD);
+                appendBinaryStringInfo((*urecvec)[i]->Rawdata(), (char *)&subxid, sizeof(SubTransactionId));
+            }
         }
 
         /*

@@ -108,7 +108,7 @@ extern inline bool is_errmodule_enable(int elevel, ModuleId mod_id);
     } while (0)
 #endif
 
-#define SET_DOP(dop) ((dop) > DEFAULT_DOP ? (dop) : DEFAULT_DOP)
+#define SET_DOP(dop) ((dop) > 1 ? (dop) : 1)
 /*
  * Calculate the memory restriction in each thread.
  * And the memeory in each thread must be larger than 64K.
@@ -128,6 +128,14 @@ extern inline bool is_errmodule_enable(int elevel, ModuleId mod_id);
  */
 #define INVALID_RU_PLANNODE_ID 0
 #define EXEC_IN_RECURSIVE_MODE(x) (((Plan*)x)->recursive_union_plan_nodeid != INVALID_RU_PLANNODE_ID)
+
+#ifndef ENABLE_MULTIPLE_NODES
+    #define DO_STREAM_DML_EPQ (StreamThreadAmI() && u_sess->stream_cxt.global_obj && \
+    u_sess->stream_cxt.global_obj->is_dml())
+#else
+    #define DO_STREAM_DML_EPQ false
+#endif
+
 
 /* Hook for plugins to get control in ExecutorStart() */
 typedef void (*ExecutorStart_hook_type)(QueryDesc* queryDesc, int eflags);

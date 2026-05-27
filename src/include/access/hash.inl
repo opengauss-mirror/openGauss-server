@@ -144,6 +144,11 @@ computeHashT(Datum value)
 			return DirectFunctionCall1(hash_numeric, value);
 		case UUIDOID:
 			return DirectFunctionCall1(uuid_hash, value);
+#ifndef ENABLE_MULTIPLE_NODES
+		case TIDOID:
+			/* for dml smp, need shuffle by ctid's blocknum */
+			return DirectFunctionCall1(tid_hash_blocknum, value);
+#endif
 		default:
 			ereport(ERROR,(errcode(ERRCODE_INDETERMINATE_DATATYPE),
 					errmsg("Unhandled datatype for modulo or hash distribution\n")));

@@ -239,7 +239,7 @@ public:
 private:
     void InitDBRef();
     void CreateCatBucket();
-    void LocalSysDBCacheClearMyDB();
+    void LocalSysDBCacheClearMyDB(bool include_shared = false);
     bool LocalSysDBCacheNeedClearMyDB(Oid db_id, const char *db_name);
     bool DBNotMatch(Oid db_id, const char *db_name);
     bool DBStandbyChanged();

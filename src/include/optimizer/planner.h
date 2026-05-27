@@ -21,6 +21,7 @@
 #include "optimizer/planswcb.h"
 #include "nodes/parsenodes.h"
 #include "utils/selfuncs.h"
+#include "optimizer/streamplan.h"
 
 #define INSTALLATION_MODE "installation"
 
@@ -228,6 +229,10 @@ extern uint64 adjust_plsize(Oid relid, uint64 plan_width, uint64 pl_size, uint64
 extern bool check_stream_for_loop_fetch(Portal portal);
 extern bool IsPlanForPartitionScan(Plan* plan);
 extern bool queryIsReadOnly(Query* query);
+
+#ifndef ENABLE_MULTIPLE_NODES
+extern Path* optplan_add_redis_ctid_if_necessary(PlannerInfo* root, Path* path, List* targetlist);
+#endif
 
 typedef PlannedStmt* (*plannerFunc)(Query* parse, int cursorOptions, ParamListInfo boundParams);
 

@@ -44,9 +44,11 @@
 
 #include "access/htup.h"
 #include "access/xact.h"
+#include "executor/executor.h"
 #include "utils/combocid.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
+#include "distributelayer/streamCore.h"
 
 /* Key and entry structures for the hash table */
 typedef struct ComboCidKeyData {
@@ -71,11 +73,18 @@ typedef ComboCidEntryData* ComboCidEntry;
 /* If size is not enough, increase it */
 #define CCID_ARRAY_INCSIZE 10000
 
+#define STREAM_INIT_COMBOCID 50
+
 /* prototypes for internal functions */
 static CommandId GetComboCommandId(CommandId cmin, CommandId cmax);
 static CommandId GetRealCmin(CommandId combocid);
 static CommandId GetRealCmax(CommandId combocid);
 
+void create_combo_hashtbl_if_necessary();
+CommandId add_new_combocid_if_necessary(CommandId cmin, CommandId cmax);
+#ifndef ENABLE_MULTIPLE_NODES
+static CommandId get_combo_command_id_for_stream(CommandId cmin, CommandId cmax);
+#endif
 /**** External API ****/
 
 /*
@@ -214,8 +223,16 @@ void HeapTupleHeaderAdjustCmax(HeapTupleHeader tup, CommandId* cmax, bool* iscom
     if (!HeapTupleHeaderXminCommitted(tup) &&
         TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(BufferGetPage(buffer), tup))) {
         CommandId cmin = HeapTupleHeaderGetCmin(tup, BufferGetPage(buffer));
-
-        *cmax = GetComboCommandId(cmin, *cmax);
+#ifndef ENABLE_MULTIPLE_NODES
+        if (StreamThreadAmI()) {
+            Assert(u_sess->stream_cxt.global_obj && u_sess->stream_cxt.global_obj->is_dml());
+            *cmax = get_combo_command_id_for_stream(cmin, *cmax);
+        } else {
+#endif
+            *cmax = GetComboCommandId(cmin, *cmax);
+#ifndef ENABLE_MULTIPLE_NODES
+        }
+#endif
         *iscombo = true;
     } else {
         *iscombo = false;
@@ -241,19 +258,31 @@ void AtEOXact_ComboCid(void)
     u_sess->utils_cxt.StreamParentsizeComboCids = 0;
 }
 
-/* Internal routines */
-/*
- * Get a combo command id that maps to cmin and cmax.
- *
- * We try to reuse old combo command ids when possible.
- */
-static CommandId GetComboCommandId(CommandId cmin, CommandId cmax)
+void init_stream_combocid()
 {
-    CommandId combocid;
-    ComboCidKeyData key;
-    ComboCidEntry entry = NULL;
-    bool found = false;
+    CommandId cid = GetCurrentCommandId(true);
+    if (cid == 0) {
+        return;
+    }
+    create_combo_hashtbl_if_necessary();
+    if (cid > STREAM_INIT_COMBOCID) {
+        /* save worker thread usedComboCids */
+        u_sess->stream_cxt.global_obj->m_combcid_array[0] = &u_sess->utils_cxt.usedComboCids;
+        u_sess->stream_cxt.global_obj->m_combcid_key[0] = &u_sess->utils_cxt.comboCids;
+        u_sess->stream_cxt.global_obj->m_combosize = &u_sess->utils_cxt.sizeComboCids;
+        return;
+    }
+    for (CommandId old_cid = 0; old_cid < cid; old_cid++) {
+        add_new_combocid_if_necessary(old_cid, cid);
+    }
+    /* save worker thread usedComboCids */
+    u_sess->stream_cxt.global_obj->m_combcid_array[0] = &u_sess->utils_cxt.usedComboCids;
+    u_sess->stream_cxt.global_obj->m_combcid_key[0] = &u_sess->utils_cxt.comboCids;
+    u_sess->stream_cxt.global_obj->m_combosize = &u_sess->utils_cxt.sizeComboCids;
+}
 
+void create_combo_hashtbl_if_necessary()
+{
     /*
      * Create the hash table and array the first time we need to use combo
      * cids in the transaction.
@@ -279,11 +308,21 @@ static CommandId GetComboCommandId(CommandId cmin, CommandId cmax)
         u_sess->utils_cxt.sizeComboCids = CCID_ARRAY_SIZE;
         u_sess->utils_cxt.usedComboCids = 0;
     }
+}
 
+CommandId add_new_combocid_if_necessary(CommandId cmin, CommandId cmax)
+{
+    CommandId combocid;
+    ComboCidKeyData key;
+    ComboCidEntry entry = NULL;
+    bool found = false;
     /* Lookup or create a hash entry with the desired cmin/cmax */
     /* We assume there is no struct padding in ComboCidKeyData! */
+
     key.cmin = cmin;
     key.cmax = cmax;
+
+    /* Need enter new combo id, lock incase concurrency violation */
     entry = (ComboCidEntry)hash_search(u_sess->utils_cxt.comboHash, (void*)&key, HASH_ENTER, &found);
 
     if (found) {
@@ -302,6 +341,11 @@ static CommandId GetComboCommandId(CommandId cmin, CommandId cmax)
         u_sess->utils_cxt.comboCids =
             (ComboCidKeyData*)repalloc(u_sess->utils_cxt.comboCids, sizeof(ComboCidKeyData) * newsize);
         u_sess->utils_cxt.sizeComboCids = newsize;
+        if (StreamThreadAmI()) {
+            Assert(u_sess->stream_cxt.global_obj != NULL && u_sess->stream_cxt.global_obj->m_combosize != NULL);
+            *u_sess->stream_cxt.global_obj->m_combosize = u_sess->utils_cxt.sizeComboCids;
+            u_sess->stream_cxt.global_obj->sync_combocid_key();
+        }
     }
 
     combocid = u_sess->utils_cxt.usedComboCids;
@@ -313,6 +357,62 @@ static CommandId GetComboCommandId(CommandId cmin, CommandId cmax)
     entry->combocid = combocid;
 
     return combocid;
+}
+
+#ifndef ENABLE_MULTIPLE_NODES
+static CommandId get_combo_command_id_for_stream(CommandId cmin, CommandId cmax)
+{
+    CommandId combocid = InvalidCommandId;
+    ComboCidKeyData key;
+    ComboCidEntry entry = NULL;
+    bool found = false;
+    /* Lookup or create a hash entry with the desired cmin/cmax */
+    /* We assume there is no struct padding in ComboCidKeyData! */
+    key.cmin = cmin;
+    key.cmax = cmax;
+    if (cmax < STREAM_INIT_COMBOCID) {
+        /* already init STREAM_INIT_COMBOCID counts combocid in worker thread */
+        entry = (ComboCidEntry)hash_search(u_sess->utils_cxt.comboHash, (void*)&key, HASH_FIND, &found);
+        Assert(entry != NULL);
+        return entry->combocid;
+    }
+
+    /* get read lock */
+    ResourceOwner owner = LOCAL_SYSDB_RESOWNER;
+
+    PthreadRWlockRdlock(owner, &u_sess->stream_cxt.global_obj->combid_lock);
+    entry = (ComboCidEntry)hash_search(u_sess->utils_cxt.comboHash, (void*)&key, HASH_FIND, &found);
+    if (found) {
+        combocid = entry->combocid;
+    }
+    PthreadRWlockUnlock(owner, &u_sess->stream_cxt.global_obj->combid_lock);
+
+    if (found) {
+        return combocid;
+    }
+    /* write lock */
+    PthreadRWlockWrlock(owner, &u_sess->stream_cxt.global_obj->combid_lock);
+    u_sess->utils_cxt.usedComboCids = *u_sess->stream_cxt.global_obj->m_combcid_array[0];
+    u_sess->utils_cxt.sizeComboCids = *u_sess->stream_cxt.global_obj->m_combosize;
+    combocid = add_new_combocid_if_necessary(cmin, cmax);
+    u_sess->stream_cxt.global_obj->sync_combo_cid(u_sess->utils_cxt.usedComboCids);
+    PthreadRWlockUnlock(owner, &u_sess->stream_cxt.global_obj->combid_lock);
+
+    return combocid;
+}
+#endif
+/* Internal routines */
+/*
+ * Get a combo command id that maps to cmin and cmax.
+ *
+ * We try to reuse old combo command ids when possible.
+ */
+static CommandId GetComboCommandId(CommandId cmin, CommandId cmax)
+{
+    create_combo_hashtbl_if_necessary();
+    /* Lookup or create a hash entry with the desired cmin/cmax */
+    /* We assume there is no struct padding in ComboCidKeyData! */
+    return add_new_combocid_if_necessary(cmin, cmax);
 }
 
 static CommandId GetRealCmin(CommandId combocid)
@@ -330,7 +430,8 @@ static CommandId GetRealCmax(CommandId combocid)
 void StreamTxnContextSaveComboCid(void* stc)
 {
     /* memcpy parent stream's comboCid info, we ignore comboHash becase stream producer only do read */
-    if (u_sess->utils_cxt.comboCids && u_sess->utils_cxt.sizeComboCids != 0 && u_sess->utils_cxt.usedComboCids != 0) {
+    if (u_sess->utils_cxt.comboCids && u_sess->utils_cxt.sizeComboCids != 0 && u_sess->utils_cxt.usedComboCids != 0 &&
+        (u_sess->stream_cxt.global_obj ==NULL || !u_sess->stream_cxt.global_obj->is_dml())) {
         if (u_sess->utils_cxt.StreamParentComboCids == NULL) {
             u_sess->utils_cxt.StreamParentComboCids = (ComboCidKeyData*)MemoryContextAlloc(
                 u_sess->top_transaction_mem_cxt, sizeof(ComboCidKeyData) * u_sess->utils_cxt.sizeComboCids);
@@ -350,7 +451,11 @@ void StreamTxnContextSaveComboCid(void* stc)
         securec_check(ret, "\0", "\0");
     }
     STCSaveElem(((StreamTxnContext*)stc)->comboHash, u_sess->utils_cxt.comboHash);
-    STCSaveElem(((StreamTxnContext*)stc)->comboCids, u_sess->utils_cxt.StreamParentComboCids);
+    if (u_sess->stream_cxt.global_obj && u_sess->stream_cxt.global_obj->is_dml()) {
+        STCSaveElem(((StreamTxnContext*)stc)->comboCids, u_sess->utils_cxt.comboCids);
+    } else {
+        STCSaveElem(((StreamTxnContext*)stc)->comboCids, u_sess->utils_cxt.StreamParentComboCids);
+    }
     STCSaveElem(((StreamTxnContext*)stc)->usedComboCids, u_sess->utils_cxt.usedComboCids);
     STCSaveElem(((StreamTxnContext*)stc)->sizeComboCids, u_sess->utils_cxt.sizeComboCids);
 }

@@ -439,6 +439,7 @@ typedef struct knl_t_xact_context {
     Oid ActiveLobRelid;
     bool isSelectInto;
     bool callPrint;
+    void **m_undozone_array;
 } knl_t_xact_context;
 
 typedef struct RepairBlockKey RepairBlockKey;

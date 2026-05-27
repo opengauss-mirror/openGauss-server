@@ -80,6 +80,7 @@
 #include "catalog/pg_proc.h"
 #endif
 #include "executor/node/nodeExtensible.h"
+#include "access/ubtreepcr.h"
 
 #define EQUALJOINVARRATIO ((2.0) / (3.0))
 
@@ -10105,6 +10106,54 @@ static void deparallelize_modifytable(List* subplans)
     }
 }
 
+static bool has_pcr_idx_in_relation(Relation rel)
+{
+    List* idx_oids = RelationGetIndexList(rel);
+    ListCell* l = NULL;
+    bool ans = false;
+    foreach(l, idx_oids) {
+        Oid indexoid = lfirst_oid(l);
+        Relation idx_rel = index_open(indexoid, NoLock);
+        ans = ans || UBTreeIndexIsPCRType(idx_rel);
+        index_close(idx_rel, NoLock);
+        if (ans) {
+            break;
+        }
+    }
+    list_free_ext(idx_oids);
+    return ans;
+}
+
+#ifndef ENABLE_MULTIPLE_NODES
+static bool is_partition_autoextend_table(Relation rel)
+{
+    return rel->partMap != NULL && rel->partMap->type == PART_TYPE_INTERVAL;
+}
+
+static bool optplan_is_smp_dml_unsupport_tabletype(PlannerInfo *root, List* resultRelations)
+{
+    if (resultRelations == NULL) {
+        return false;
+    }
+    bool unsupport_tabletype = false;
+    Index reidx = (Index)linitial_int((List*)linitial(resultRelations));
+    RangeTblEntry *rte = root->simple_rte_array[reidx];
+    Relation rel = relation_open(rte->relid, NoLock);
+    if (RELATION_IS_GLOBAL_TEMP(rel) || rte->orientation == REL_COL_ORIENTED ||
+        rel->rd_id < FirstBootstrapObjectId ||
+        (is_partition_autoextend_table(rel) && !RELATION_SUPPORT_AUTONOMOUS_EXTEND_PARTITION_SMP(rel)) ||
+        /* ubtree pcr index not support smp insert */
+        (rte->is_ustore && has_pcr_idx_in_relation(rel)) ||
+        /* ustore's sub xact id for smp only supported after upgrade committed. */
+        (rte->is_ustore && t_thrd.proc->workingVersionNum < SMP_VERSION_NUM && IsSubTransaction()) ||
+        /* for ledger table, we cannot accumulate total hash from producer threads */
+        rel->rd_isblockchain) {
+        unsupport_tabletype = true;
+    }
+    relation_close(rel, NoLock);
+    return unsupport_tabletype;
+}
+#endif
 /*
  * make_modifytable
  *	  Build a ModifyTable plan node
@@ -10135,23 +10184,15 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     int width = 0;
     Oid resultRelOid = InvalidOid; /* the relOid is used to cost memory when open relations. */
 #ifdef STREAMPLAN
-    bool iudParallel = false;
-    int iudDop = DEFAULT_DOP;
-    bool isUstore = false;
     ExecNodes* exec_nodes = NULL;
+    bool is_dml_smp = false;
+    int dml_dop = OPTPLAN_DEFAULT_DOP;
 #endif
-    List* resultRelation = (List*)linitial(resultRelations);
-    Index resultidx;
-    if (resultRelation != NIL && root->simple_rte_array != NULL) {
-        resultidx = (Index)linitial_int(resultRelation);
-        RangeTblEntry* result_rte = root->simple_rte_array[resultidx];
-        isUstore = result_rte->is_ustore;
-    }
+#ifndef ENABLE_MULTIPLE_NODES
+    bool enable_smp = false;
 
-    bool supportIUDParallel =
-        (operation == CMD_DELETE || operation == CMD_UPDATE || (operation == CMD_INSERT && !upsertClause)) &&
-        returningLists == NIL && !isUstore && list_length(subplans) == 1 &&
-        (linitial_node(RangeTblEntry, root->parse->rtable)->orientation == REL_ROW_ORIENTED);
+    bool unsupport_tabletype = optplan_is_smp_dml_unsupport_tabletype(root, resultRelations);
+#endif
 
     Assert(list_length(resultRelations) == list_length(subplans));
     Assert(withCheckOptionLists == NIL || list_length(resultRelations) == list_length(withCheckOptionLists));
@@ -10167,18 +10208,34 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     init_plan_cost(plan);
     total_size = 0;
 
-    if (u_sess->opt_cxt.query_dop > DEFAULT_DOP) {
-        //In sepecific scenarios, modify table can parallel.
-        if (supportIUDParallel) {
-            Plan* subplan = (Plan*)linitial(subplans);
-            if (subplan->dop > DEFAULT_DOP) {
-                iudParallel = true;
-                iudDop = subplan->dop;
+#ifndef ENABLE_MULTIPLE_NODES
+    enable_smp = u_sess->attr.attr_sql.enable_force_smp;
+
+    /*
+     * Modify table only support parallel iud operation.
+     * If the subplan already parallelize, add local gather on modifytable node.
+
+     */
+    if (u_sess->attr.attr_sql.enable_smp_dml &&
+        (operation == CMD_INSERT || operation == CMD_UPDATE || operation == CMD_DELETE || operation == CMD_MERGE) &&
+        upsertClause == NULL && returningLists == NIL && !unsupport_tabletype) {
+        if (u_sess->opt_cxt.query_dop > OPTPLAN_DEFAULT_DOP || enable_smp) {
+            if (list_length(subplans) == 1) {
+                Plan* subplan = (Plan*)linitial(subplans);
+                if (subplan->dop > OPTPLAN_DEFAULT_DOP) {
+                    is_dml_smp = true;
+                    dml_dop = subplan->dop;
+                }
             }
-        } else {
-            deparallelize_modifytable(subplans);
         }
+    } else if (u_sess->opt_cxt.query_dop > 1) {
+        deparallelize_modifytable(subplans);
     }
+#else
+    if (u_sess->opt_cxt.query_dop > 1) {
+        deparallelize_modifytable(subplans);
+    }
+#endif
 
     foreach (subnode, subplans) {
         Plan* subplan = (Plan*)lfirst(subnode);
@@ -10208,8 +10265,8 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     else
         plan->plan_width = 0;
 
-    node->plan.parallel_enabled = iudParallel;
-    node->plan.dop = iudDop;
+    node->plan.dop = is_dml_smp ? dml_dop : OPTPLAN_DEFAULT_DOP;
+    node->plan.parallel_enabled = is_dml_smp;
     node->plan.lefttree = NULL;
     node->plan.righttree = NULL;
     node->plan.qual = NIL;
@@ -10249,6 +10306,7 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     node->plan.exec_nodes = exec_nodes;
 
     resultRelations = (List*)linitial(resultRelations);
+    Index resultidx;
     if (resultRelations != NIL && root->simple_rte_array != NULL) {
         resultidx = (Index)linitial_int(resultRelations);
         RangeTblEntry* result_rte = root->simple_rte_array[resultidx];
@@ -10355,9 +10413,11 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
                 }
             }
         }
-        if (iudParallel) {
+#ifndef ENABLE_MULTIPLE_NODES
+        if (is_dml_smp) {
             rtn = create_local_gather(rtn);
         }
+#endif
         return rtn;
     } else {
         if (operation == CMD_INSERT || operation == CMD_UPDATE || operation == CMD_DELETE) {

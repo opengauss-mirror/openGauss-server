@@ -1,0 +1,715 @@
+-- Init test environment.
+-- 1. If there are not tables for tests, create 2 tables through the 'ustore' storage,
+--    init and insert 100w data for tests.
+-- 2. If there has been tables with the same name, truncate these tables, init and insert 100w data.
+-- create schema for test
+-- set smp_ustore_insert_basic schema to current schema, and set query_dop to 4 and set enable_force_smp to on
+drop schema if exists smp_ustore_insert_basic CASCADE;
+NOTICE:  schema "smp_ustore_insert_basic" does not exist, skipping
+create schema smp_ustore_insert_basic;
+set current_schema = smp_ustore_insert_basic;
+-- create test table(t1, t2)
+-- if there are three tables, drop it.
+create or replace procedure create_table() as
+declare
+begin
+    set query_dop = 4;
+    set enable_force_smp = on;
+    drop table if exists t1;
+    drop table if exists t2;
+    drop table if exists t3;
+    create table t1
+    (
+        id int,
+        b int,
+        c int
+    )
+        with
+            (storage_type = USTORE);
+
+    create table t2
+    (
+        id int,
+        b int,
+        c int
+    )
+        with
+            (storage_type = USTORE);
+    create table t3
+    (
+        id int,
+        b int,
+        c int
+    )
+        with
+            (storage_type = USTORE);
+    -- init and insert 100w data for test
+    insert into t1 values(generate_series(1, 10), generate_series(1, 10), generate_series(1, 10));
+    insert into t2 values(generate_series(1, 10), generate_series(1, 10), generate_series(1, 10));
+    insert into t3 values(generate_series(1, 10), generate_series(1, 10), generate_series(1, 10));
+end;
+/
+-- 1. Basic function tests.
+--  1.1 Set query_dop > 1, if executing "insert into select" SQL statement,
+--      the result shows that "query plan" will go through "SMP insert"
+--      and commit the current transaction.
+--  1.2 Set query_dop > 1, if executing "insert into select" SQL statement,
+--      the result shows that "query plan" will go through "SMP insert"
+--      and succeed to roll back the current transaction.
+--  1.3 Set query_dop == 1, if executing "insert into select" SQL statement,
+--      the result shows that "query plan" will not go through "SMP insert"
+--      and commit the current transaction.
+--  1.4 Set query_dop == 1, if executing "insert into select" SQL statement,
+--      the result shows that "query plan" will not go through "SMP insert"
+--      and succeed to roll back the current transaction.
+--  1.1 Set query_dop > 1, if executing "insert into select" SQL statement,
+--      the result shows that "query plan" will go through "SMP insert"
+--      and commit the current transaction.
+call create_table();
+NOTICE:  table "t1" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists t1"
+PL/pgSQL function create_table() line 5 at SQL statement
+NOTICE:  table "t2" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists t2"
+PL/pgSQL function create_table() line 6 at SQL statement
+NOTICE:  table "t3" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists t3"
+PL/pgSQL function create_table() line 7 at SQL statement
+ create_table 
+--------------
+ 
+(1 row)
+
+set query_dop = 4;
+set enable_force_smp = on;
+analyze t1;
+analyze t2;
+analyze t3;
+select count(*) from t1;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t2;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t3;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+-- 1) execution plan
+explain (costs off) insert into t1 select * from t2;
+               QUERY PLAN               
+----------------------------------------
+ Streaming(type: LOCAL GATHER dop: 1/4)
+   ->  Insert on t1
+         ->  Seq Scan on t2
+(3 rows)
+
+insert into t1 select * from t2;
+select count(*) from t1;
+ count 
+-------
+    20
+(1 row)
+
+-- 20
+explain (costs off) insert into t3 select * from (select t1.b, t2.c from t1, t2 where t1.b = t2.b);
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming(type: LOCAL GATHER dop: 1/4)
+   ->  Insert on t3
+         ->  Hash Join
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 4/4)
+                     ->  Seq Scan on t1
+               ->  Hash
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 4/4)
+                           ->  Seq Scan on t2
+(9 rows)
+
+insert into t3 select * from (select t1.b, t2.c from t1, t2 where t1.b = t2.b);
+select count(*) from t3;
+ count 
+-------
+    30
+(1 row)
+
+-- 30
+-- within subquery
+explain (costs off) with subquery as ( select t1.b, t2.c from t1, t2 where t1.b = t2.b) insert into t3 select * from subquery;
+             QUERY PLAN             
+------------------------------------
+ Insert on t3
+   CTE subquery
+     ->  Hash Join
+           Hash Cond: (t1.b = t2.b)
+           ->  Seq Scan on t1
+           ->  Hash
+                 ->  Seq Scan on t2
+   ->  CTE Scan on subquery
+(8 rows)
+
+with subquery as ( select t1.b, t2.c from t1, t2 where t1.b = t2.b) insert into t3 select * from subquery;
+select count(*) from t3;
+ count 
+-------
+    50
+(1 row)
+
+-- 50
+-- transaction
+start transaction;
+    insert into t1 select * from t2;
+    select count(*) from t1;
+ count 
+-------
+    30
+(1 row)
+
+    -- 30
+    insert into t3 select * from (select t1.b, t2.c from t1, t2 where t1.b = t2.b);
+    select count(*) from t3;
+ count 
+-------
+    80
+(1 row)
+
+    -- 80
+    -- within subquery
+    with subquery as ( select t1.b, t2.c from t1, t2 where t1.b = t2.b) insert into t3 select * from subquery;
+    select count(*) from t3;
+ count 
+-------
+   110
+(1 row)
+
+    -- 110
+commit;
+select count(*) from t1;
+ count 
+-------
+    30
+(1 row)
+
+-- 30
+select count(*) from t2;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t3;
+ count 
+-------
+   110
+(1 row)
+
+-- 110
+-- procedure
+create or replace procedure test_dop_greater_1_multi_insert_commit() as
+declare
+    res int;
+begin
+    insert into t1 select * from t2;
+    select count(*) from t1 into res;
+    raise info 'result: %', res;
+    -- 40
+    insert into t3 select * from (select t1.b, t2.c from t1, t2 where t1.b = t2.b);
+    select count(*) from t3 into res;
+    raise info 'result: %', res;
+    -- 150
+    -- within subquery
+    with subquery as ( select t1.b, t2.c from t1, t2 where t1.b = t2.b) insert into t3 select * from subquery;
+    select count(*) from t3 into res;
+    raise info 'result: %', res;
+    -- 190
+    commit;
+end;
+/
+call test_dop_greater_1_multi_insert_commit();
+INFO:  result: 40
+INFO:  result: 150
+INFO:  result: 190
+ test_dop_greater_1_multi_insert_commit 
+----------------------------------------
+ 
+(1 row)
+
+-- 40
+-- 150
+-- 190
+select count(*) from t1;
+ count 
+-------
+    40
+(1 row)
+
+-- 40
+select count(*) from t2;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t3;
+ count 
+-------
+   190
+(1 row)
+
+-- 190
+create or replace procedure test_dop_greater_1_multi_commit() as
+declare
+    res int;
+begin
+    insert into t1 select * from t2;
+    commit;
+    select count(*) from t1 into res;
+    raise info 'result: %', res;
+    -- 50
+
+    insert into t3 select * from (select t1.b, t2.c from t1, t2 where t1.b = t2.b);
+    commit;
+    select count(*) from t3 into res;
+    raise info 'result: %', res;
+    -- 240
+
+    -- within subquery
+    with subquery as ( select t1.b, t2.c from t1, t2 where t1.b = t2.b) insert into t3 select * from subquery;
+    commit;
+    select count(*) from t3 into res;
+    raise info 'result: %', res;
+    -- 290
+end;
+/
+call test_dop_greater_1_multi_commit();
+INFO:  result: 50
+INFO:  result: 240
+INFO:  result: 290
+ test_dop_greater_1_multi_commit 
+---------------------------------
+ 
+(1 row)
+
+-- 50
+-- 240
+-- 290
+-- 3 execute immediate scenery in stored procedure
+CREATE OR REPLACE function test_exe_immediate_in_stored_procedure() return text
+AS
+    temp text;
+BEGIN
+    temp := 'insert into t1 select * from t2;';
+    EXECUTE IMMEDIATE temp;
+    commit;
+    return temp;
+    exception
+        WHEN OTHERS THEN
+        RAISE notice 'error msg';
+        rollback;
+        return null;
+    return temp;
+END;
+/
+call create_table();
+ create_table 
+--------------
+ 
+(1 row)
+
+set query_dop = 4;
+set enable_force_smp = on;
+analyze t1;
+analyze t2;
+select count(*) from t1;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t2;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t3;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+-- 1) execution result
+call test_exe_immediate_in_stored_procedure();
+ test_exe_immediate_in_stored_procedure 
+----------------------------------------
+ insert into t1 select * from t2;
+(1 row)
+
+select count(*) from t1;
+ count 
+-------
+    20
+(1 row)
+
+-- 20
+--  1.3 Set query_dop == 1, if executing "insert into select" SQL statement,
+--      the result shows that "query plan" will not go through "SMP insert"
+--      and commit the current transaction.
+create or replace procedure test_dop_equal_1_commit() as
+declare
+    res int;
+begin
+    insert into t1 select * from t2;
+    select count(*) from t1 into res;
+    raise info 'result: %', res;
+    -- 20
+    commit;
+end;
+/
+call create_table();
+ create_table 
+--------------
+ 
+(1 row)
+
+select count(*) from t1;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t2;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t3;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+set query_dop = 1;
+set enable_force_smp = on;
+analyze t1;
+analyze t2;
+-- 1) execution plan
+explain (costs off) insert into t1 select * from t2;
+      QUERY PLAN      
+----------------------
+ [Bypass]
+ Insert on t1
+   ->  Seq Scan on t2
+(3 rows)
+
+-- 2) execution result
+call test_dop_equal_1_commit();
+INFO:  result: 20
+ test_dop_equal_1_commit 
+-------------------------
+ 
+(1 row)
+
+-- 20
+select count(*) from t1;
+ count 
+-------
+    20
+(1 row)
+
+-- 20
+--  1.4 Set query_dop == 1, if executing "insert into select" SQL statement,
+--      the result shows that "query plan" will not go through "SMP insert"
+--      and succeed to roll back the current transaction.
+create or replace procedure test_dop_equal_1_rollback() as
+declare
+    res int;
+begin
+    insert into t1 select * from t2;
+    select count(*) from t1 into res;
+    raise info 'result: %', res;
+    -- 20
+    rollback;
+end;
+/
+call create_table();
+ create_table 
+--------------
+ 
+(1 row)
+
+select count(*) from t1;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t2;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t3;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+set query_dop = 1;
+set enable_force_smp = on;
+analyze t1;
+analyze t2;
+call test_dop_equal_1_rollback();
+INFO:  result: 20
+ test_dop_equal_1_rollback 
+---------------------------
+ 
+(1 row)
+
+-- 20
+select count(*) from t1;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+-- 4. multi insert, multi rows
+call create_table();
+ create_table 
+--------------
+ 
+(1 row)
+
+select count(*) from t1;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t2;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t3;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+set query_dop = 4;
+set enable_force_smp = on;
+analyze t1;
+analyze t2;
+analyze t3;
+-- 1) execution plan
+explain (costs off) insert into t1 select * from t2;
+               QUERY PLAN               
+----------------------------------------
+ Streaming(type: LOCAL GATHER dop: 1/4)
+   ->  Insert on t1
+         ->  Seq Scan on t2
+(3 rows)
+
+insert into t1 select * from t2;
+select count(*) from t1;
+ count 
+-------
+    20
+(1 row)
+
+-- 20
+explain (costs off) insert into t3 select * from (select t1.b, t2.c from t1, t2 where t1.b = t2.b);
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Streaming(type: LOCAL GATHER dop: 1/4)
+   ->  Insert on t3
+         ->  Hash Join
+               Hash Cond: (t1.b = t2.b)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 4/4)
+                     ->  Seq Scan on t1
+               ->  Hash
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 4/4)
+                           ->  Seq Scan on t2
+(9 rows)
+
+insert into t3 select * from (select t1.b, t2.c from t1, t2 where t1.b = t2.b);
+select count(*) from t3;
+ count 
+-------
+    30
+(1 row)
+
+-- 30
+-- within subquery
+explain (costs off) with subquery as ( select t1.b, t2.c from t1, t2 where t1.b = t2.b) insert into t3 select * from subquery;
+             QUERY PLAN             
+------------------------------------
+ Insert on t3
+   CTE subquery
+     ->  Hash Join
+           Hash Cond: (t1.b = t2.b)
+           ->  Seq Scan on t1
+           ->  Hash
+                 ->  Seq Scan on t2
+   ->  CTE Scan on subquery
+(8 rows)
+
+with subquery as ( select t1.b, t2.c from t1, t2 where t1.b = t2.b) insert into t3 select * from subquery;
+select count(*) from t3;
+ count 
+-------
+    50
+(1 row)
+
+-- 50
+select count(*) from t1;
+ count 
+-------
+    20
+(1 row)
+
+-- 20
+select count(*) from t2;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t3;
+ count 
+-------
+    50
+(1 row)
+
+-- 50
+-- transaction
+start transaction;
+    insert into t1 select * from t2;
+    select count(*) from t1;
+ count 
+-------
+    30
+(1 row)
+
+    -- 30
+    insert into t3 select * from (select t1.b, t2.c from t1, t2 where t1.b = t2.b);
+    select count(*) from t3;
+ count 
+-------
+    80
+(1 row)
+
+    -- 80
+    -- within subquery
+    with subquery as ( select t1.b, t2.c from t1, t2 where t1.b = t2.b) insert into t3 select * from subquery;
+    select count(*) from t3;
+ count 
+-------
+   110
+(1 row)
+
+    -- 110
+commit;
+-- procedure
+create or replace procedure test_dop_greater_1_multi_row_insert() as
+declare
+    res int;
+begin
+    insert into t1 select * from t2;
+    select count(*) from t1 into res;
+    raise info 'result: %', res;
+    -- 40
+
+    insert into t3 select * from (select t1.b, t2.c from t1, t2 where t1.b = t2.b);
+    select count(*) from t3 into res;
+    raise info 'result: %', res;
+    -- 150
+
+    -- within subquery
+    with subquery as ( select t1.b, t2.c from t1, t2 where t1.b = t2.b) insert into t3 select * from subquery;
+    select count(*) from t3 into res;
+    raise info 'result: %', res;
+    -- 190
+commit;
+end;
+/
+call test_dop_greater_1_multi_row_insert();
+INFO:  result: 40
+INFO:  result: 150
+INFO:  result: 190
+ test_dop_greater_1_multi_row_insert 
+-------------------------------------
+ 
+(1 row)
+
+-- 40
+-- 150
+-- 190
+select count(*) from t1;
+ count 
+-------
+    40
+(1 row)
+
+-- 40
+select count(*) from t2;
+ count 
+-------
+    10
+(1 row)
+
+-- 10
+select count(*) from t3;
+ count 
+-------
+   190
+(1 row)
+
+-- 190
+-- recover all the environment variables
+reset enable_force_smp;
+reset query_dop;
+set current_schema=public;
+drop schema smp_ustore_insert_basic cascade;
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to function smp_ustore_insert_basic.create_table()
+drop cascades to function smp_ustore_insert_basic.test_dop_greater_1_multi_insert_commit()
+drop cascades to function smp_ustore_insert_basic.test_dop_greater_1_multi_commit()
+drop cascades to function smp_ustore_insert_basic.test_exe_immediate_in_stored_procedure()
+drop cascades to function smp_ustore_insert_basic.test_dop_equal_1_commit()
+drop cascades to function smp_ustore_insert_basic.test_dop_equal_1_rollback()
+drop cascades to table smp_ustore_insert_basic.t1
+drop cascades to table smp_ustore_insert_basic.t2
+drop cascades to table smp_ustore_insert_basic.t3
+drop cascades to function smp_ustore_insert_basic.test_dop_greater_1_multi_row_insert()

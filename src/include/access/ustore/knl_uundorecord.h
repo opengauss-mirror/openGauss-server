@@ -183,7 +183,7 @@ public:
     {
         return wpart_.partitionoid;
     }
-    inline uint8 Utype()
+    inline uint8 Utype() const
     {
         return whdr_.utype;
     }
@@ -191,7 +191,7 @@ public:
     {
         return whdr_.uinfo;
     }
-    inline bool ContainSubXact();
+    inline bool ContainSubXact() const;
     inline UndoRecPtr Blkprev()
     {
         return wblk_.blkprev;
@@ -242,7 +242,7 @@ public:
     {
         return mem_context_;
     }
-    inline UndoRecordSize PayLoadLen()
+    inline UndoRecordSize PayLoadLen() const
     {
         return wpay_.payloadlen;
     }
@@ -329,6 +329,7 @@ public:
     {
         wpay_.payloadlen = len;
     }
+    inline SubTransactionId sub_xid() const;
 
 private:
     int index_;
@@ -348,11 +349,31 @@ private:
     bool needInsert_;
     bool isCopy_;
     MemoryContext mem_context_;
+
+    inline bool _is_invalid_sub_xid_size() const;
 }; // class UndoRecord
 
-inline bool UndoRecord::ContainSubXact()
+inline bool UndoRecord::ContainSubXact() const
 {
     if ((whdr_.uinfo & UNDO_UREC_INFO_CONTAINS_SUBXACT) != 0) {
+        return true;
+    }
+    return false;
+}
+
+inline SubTransactionId UndoRecord::sub_xid() const
+{
+    if (ContainSubXact()) {
+        char *end = (char *)(rawdata_.data) + (rawdata_.len - sizeof(SubTransactionId));
+        SubTransactionId *subxid  = (SubTransactionId *)end;
+        return *subxid;
+    }
+    return InvalidSubTransactionId;
+}
+
+inline bool UndoRecord::_is_invalid_sub_xid_size() const
+{
+    if (Utype() == UNDO_INSERT && ContainSubXact() && PayLoadLen() != sizeof(SubTransactionId)) {
         return true;
     }
     return false;

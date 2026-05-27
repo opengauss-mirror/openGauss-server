@@ -916,6 +916,7 @@ void InitProcess(void)
     t_thrd.proc->fpLocalTransactionId = InvalidLocalTransactionId;
     FAST_PATH_SET_LOCKBITS_ZERO(t_thrd.proc);
     t_thrd.proc->commitCSN = 0;
+    t_thrd.proc->global_obj = NULL;
     t_thrd.pgxact->handle = InvalidTransactionHandle;
     t_thrd.pgxact->xid = InvalidTransactionId;
     t_thrd.pgxact->next_xid = InvalidTransactionId;
@@ -938,6 +939,7 @@ void InitProcess(void)
     t_thrd.proc->backendSlot = -1;
     t_thrd.proc->databaseId = InvalidOid;
     t_thrd.proc->roleId = InvalidOid;
+    t_thrd.proc->role = t_thrd.role;
     t_thrd.proc->gtt_session_frozenxid = InvalidTransactionId; /* init session level gtt frozenxid */
     /* For backends, upgrade status is either passed down from remote backends or inherit from PM */
     t_thrd.proc->workingVersionNum = (u_sess->proc_cxt.MyProcPort ? u_sess->proc_cxt.MyProcPort->SessionVersionNum :
@@ -1200,6 +1202,7 @@ void InitAuxiliaryProcess(void)
     t_thrd.proc->backendId = InvalidBackendId;
     t_thrd.proc->databaseId = InvalidOid;
     t_thrd.proc->roleId = InvalidOid;
+    t_thrd.proc->role = t_thrd.role;
     t_thrd.proc->gtt_session_frozenxid = InvalidTransactionId; /* init session level gtt frozenxid */
     t_thrd.pgxact->delayChkpt = false;
     t_thrd.pgxact->vacuumFlags = 0;

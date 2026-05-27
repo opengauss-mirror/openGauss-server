@@ -385,6 +385,11 @@ struct TransactionStateData {
     bool  subXactLock;
 };
 
+typedef struct {
+    knl_t_undo_context undo_cxt;
+    TransactionStateData trans_mgr_ptr;
+} StreamUndoZoneData;
+
 #define STCSaveElem(dest, src) ((dest) = (src))
 #define STCRestoreElem(dest, src) ((src) = (dest))
 

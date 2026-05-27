@@ -264,6 +264,14 @@ void EndCommand(const char* commandTag, CommandDest dest)
                 }
             break;
         }
+#ifndef ENABLE_MULTIPLE_NODES
+        case DestTupleLocalRoundRobin:
+            /* send complete msg  */
+            if (u_sess->stream_cxt.producer_obj) {
+                u_sess->stream_cxt.producer_obj->end_command(commandTag);
+            }
+            break;
+#endif
         case DestNone:
         case DestDebug:
         case DestSPI:

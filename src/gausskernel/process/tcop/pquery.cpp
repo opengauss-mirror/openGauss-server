@@ -21,7 +21,6 @@
 #include "executor/tstoreReceiver.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
-#include "distributelayer/streamProducer.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #include "optimizer/pgxcplan.h"
@@ -213,16 +212,6 @@ static void ProcessMotJitQuery(PlannedStmt* plan, const char* sourceText, ParamL
 #endif
 
 /*
- * streamSendRowsToWorker
- */
-inline void streamSendRowsToWorker(QueryDesc* queryDesc)
-{
-    if (u_sess->stream_cxt.producer_obj) {
-        u_sess->stream_cxt.producer_obj->streamSendRowsToConsumer(queryDesc->estate->es_processed);
-    }
-}
-
-/*
  * ProcessQuery
  *		Execute a single plannable query within a PORTAL_MULTI_QUERY,
  *		PORTAL_ONE_RETURNING, or PORTAL_ONE_MOD_WITH portal
@@ -331,7 +320,6 @@ static void ProcessQuery(
                     ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
                     "REPLACE %u %lu", lastOid, queryDesc->estate->es_processed);
                 } else {
-                    streamSendRowsToWorker(queryDesc);
                     ret = snprintf_s(completionTag,
                         COMPLETION_TAG_BUFSIZE,
                         COMPLETION_TAG_BUFSIZE - 1,
@@ -342,7 +330,6 @@ static void ProcessQuery(
                 securec_check_ss(ret, "\0", "\0");
                 break;
             case CMD_UPDATE:
-                streamSendRowsToWorker(queryDesc);
                 ret = snprintf_s(completionTag,
                     COMPLETION_TAG_BUFSIZE,
                     COMPLETION_TAG_BUFSIZE - 1,
@@ -351,7 +338,6 @@ static void ProcessQuery(
                 securec_check_ss(ret, "\0", "\0");
                 break;
             case CMD_DELETE:
-                streamSendRowsToWorker(queryDesc);
                 ret = snprintf_s(completionTag,
                     COMPLETION_TAG_BUFSIZE,
                     COMPLETION_TAG_BUFSIZE - 1,
@@ -1930,7 +1916,7 @@ static void PortalRunMulti(
             }
 #endif
 
-            if (!StreamThreadAmI() && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE))
+            if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)
                 pstmt->instrument_option = instrument_option;
 
             if (pstmt->canSetTag) {

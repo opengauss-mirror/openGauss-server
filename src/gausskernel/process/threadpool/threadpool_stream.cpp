@@ -36,6 +36,7 @@
 #include "threadpool/threadpool.h"
 #include "utils/guc.h"
 #include "utils/postinit.h"
+#include "commands/tablespace.h"
 
 static void ResetStreamStatus();
 
@@ -121,6 +122,7 @@ void ThreadPoolStream::InitStream()
     u_sess->stat_cxt.trackedMemChunks = 0;
     u_sess = sc;
     SelfMemoryContext = u_sess->self_mem_cxt;
+    m_producer->sess_ptr = u_sess;
 
     /* Switch context to Session context. */
     AutoContextSwitch memSwitch(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
@@ -132,6 +134,9 @@ void ThreadPoolStream::InitStream()
     ExtractProduerInfo();
 
     SetProcessingMode(InitProcessing);
+
+    /* Init table space manager. */
+    TableSpaceUsageManager::Init();
 
     /* Init GUC option for this session. */
     InitializeGUCOptions();

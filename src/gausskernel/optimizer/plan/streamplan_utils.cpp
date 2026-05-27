@@ -1077,6 +1077,9 @@ Oid get_hash_type(Oid type_in)
         case INTERVALOID:
         case TIMETZOID:
         case NUMERICOID:
+#ifndef ENABLE_MULTIPLE_NODES
+        case TIDOID:
+#endif
             return type_in;
         case BPCHAROID:
 #ifdef PGXC

@@ -154,7 +154,6 @@ typedef struct CkptTsStatus {
     int index;
 } CkptTsStatus;
 
-static inline int32 GetPrivateRefCount(Buffer buffer);
 void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref);
 static int GetExpectedPersistentBufferPins(Buffer buffer);
 static void CheckForBufferLeaks(void);
@@ -430,7 +429,7 @@ PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool do_move)
  *
  * Only works for shared memory buffers!
  */
-static int32 GetPrivateRefCount(Buffer buffer)
+int32 GetPrivateRefCount(Buffer buffer)
 {
     PrivateRefCountEntry *ref = NULL;
 

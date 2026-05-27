@@ -786,7 +786,7 @@ static void AssignTransactionId(TransactionState s)
 
     /* allocate undo zone before generate a new xid. */
     if (g_instance.attr.attr_storage.enable_ustore && !isSubXact && IsUnderPostmaster && !ENABLE_DSS) {
-        undo::AllocateUndoZone();
+        undo::AllocateUndoZone(InvalidTransactionId);
         pg_memory_barrier();
     }
 
@@ -803,6 +803,16 @@ static void AssignTransactionId(TransactionState s)
 #else
     s->transactionId = GetNewTransactionId(isSubXact);
 #endif
+
+    for (int i = (int)UNDO_PERMANENT; i <= (int)UNDO_TEMP; i++) {
+        UndoPersistence upersistence = (UndoPersistence)i;
+        int zone_id = t_thrd.undo_cxt.zids[upersistence];
+        if (zone_id == INVALID_ZONE_ID) {
+            continue;
+        }
+        undo::UndoZone *uzone = undo::UndoZoneGroup::GetUndoZone(zone_id, true);
+        uzone->set_max_xid(GetTopTransactionId());
+    }
     
     if (!isSubXact) {
         ProcXactHashTableAdd(s->transactionId, t_thrd.proc->pgprocno);
@@ -1887,6 +1897,7 @@ static void AtCommit_Memory(void)
     Assert(u_sess->top_transaction_mem_cxt != NULL);
     MemoryContextDelete(u_sess->top_transaction_mem_cxt);
     u_sess->top_transaction_mem_cxt = NULL;
+    t_thrd.xact_cxt.m_undozone_array = NULL;
     t_thrd.mem_cxt.cur_transaction_mem_cxt = NULL;
     CurrentTransactionState->curTransactionContext = NULL;
     if (ENABLE_CACHEDPLAN_MGR) {
@@ -2308,6 +2319,7 @@ static void AtCleanup_Memory(void)
     if (u_sess->top_transaction_mem_cxt != NULL)
         MemoryContextDelete(u_sess->top_transaction_mem_cxt);
     u_sess->top_transaction_mem_cxt = NULL;
+    t_thrd.xact_cxt.m_undozone_array = NULL;
     t_thrd.mem_cxt.cur_transaction_mem_cxt = NULL;
 
     /* the memory is allocated from top_transaction_mem_cxt */
@@ -8365,7 +8377,8 @@ UndoRecPtr GetCurrentTransactionUndoRecPtr(UndoPersistence upersistence)
     return CurrentTransactionState->latest_urp_xact[upersistence];
 }
 
-void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel, bool stpRollback)
+void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel, bool stpRollback,
+    undo::TransactionSlot *slot, UndoSlotPtr slotPtr)
 {
     if (!u_sess->attr.attr_storage.enable_ustore_sync_rollback &&
         !(IsSubTransaction() || pLevel == UNDO_TEMP)) {
@@ -8374,15 +8387,13 @@ void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel, bool stpR
 
     uint32 saveHoldoff = t_thrd.int_cxt.InterruptHoldoffCount;
     bool error = false;
-    undo::TransactionSlot *slot = (undo::TransactionSlot *)t_thrd.undo_cxt.slots[pLevel];
     Assert(slot->XactId() != InvalidTransactionId);
     Assert(slot->DbId() == u_sess->proc_cxt.MyDatabaseId);
     MemoryContext currentContext = CurrentMemoryContext;
     PG_TRY();
     {
-        UndoSlotPtr slotPtr = t_thrd.undo_cxt.slotPtr[pLevel];
         ExecuteUndoActions(slot->XactId(), s->latest_urp[pLevel], s->first_urp[pLevel],
-            slotPtr, !IsSubTransaction(), pLevel);
+            slotPtr, !IsSubTransaction(), pLevel, false, slot);
     }
     PG_CATCH();
     {
@@ -8429,6 +8440,16 @@ void TryExecuteUndoActions(TransactionState s, UndoPersistence pLevel, bool stpR
 
 void ApplyUndoActions(bool stpRollback)
 {
+    if (StreamThreadAmI()) {
+        for (int i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
+            t_thrd.undo_cxt.transUndoSize = 0;
+            t_thrd.undo_cxt.prevXid[i] = InvalidTransactionId;
+            t_thrd.undo_cxt.slots[i] = NULL;
+            t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
+        }
+        return;
+    }
+
     TransactionState s = CurrentTransactionState;
     bool needRollback = false;
     undo::TransactionSlot *slot = NULL;
@@ -8446,6 +8467,17 @@ void ApplyUndoActions(bool stpRollback)
                 t_thrd.undo_cxt.prevXid[i] = InvalidTransactionId;
                 t_thrd.undo_cxt.slots[i] = NULL;
                 t_thrd.undo_cxt.slotPtr[i] = INVALID_UNDO_REC_PTR;
+            }
+        }
+    }
+
+    if (t_thrd.xact_cxt.m_undozone_array != NULL) {
+        for (int i = 0; i < MAX_QUERY_DOP; i++) {
+            StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array))[i];
+            for (int j = 0; j < UNDO_PERSISTENCE_LEVELS; j++) {
+                if (m_undozone->trans_mgr_ptr.latest_urp[j] || m_undozone->undo_cxt.slotPtr[j] != INVALID_UNDO_SLOT_PTR) {
+                    needRollback = true;
+                }
             }
         }
     }
@@ -8518,7 +8550,7 @@ void ApplyUndoActions(bool stpRollback)
         }
         if (s->latest_urp[i]) {
             WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_TRANSACTION_ROLLBACK);
-            TryExecuteUndoActions(s, (UndoPersistence)i, stpRollback);
+            TryExecuteUndoActions(s, (UndoPersistence)i, stpRollback, slot, t_thrd.undo_cxt.slotPtr[i]);
             pgstat_report_waitstatus(oldStatus);
         } else if (!IsSubTransaction() && t_thrd.undo_cxt.slotPtr[i] != INVALID_UNDO_SLOT_PTR) {
             Assert(slot != NULL && topXid == slot->XactId());
@@ -8532,8 +8564,38 @@ void ApplyUndoActions(bool stpRollback)
                         s->latest_urp[0], s->latest_urp[1], s->latest_urp[UNDO_PERSISTENCE_LEVELS - 1],
                         s->latest_urp_xact[0], s->latest_urp_xact[1], s->latest_urp_xact[UNDO_PERSISTENCE_LEVELS - 1])));
                 UndoRecPtr prev = undo::GetPrevUrp(slot->EndUndoPtr());
-                (void)VerifyAndDoUndoActions(slot->XactId(), prev, slot->StartUndoPtr(), true, true);
+                (void)VerifyAndDoUndoActions(slot->XactId(), prev, slot->StartUndoPtr(), true, true, false);
                 undo::UpdateRollbackFinish(t_thrd.undo_cxt.slotPtr[i]);
+            }
+        }
+    }
+
+    if (t_thrd.xact_cxt.m_undozone_array != NULL) {
+        for (int i = 0; i < MAX_QUERY_DOP; i++) {
+            StreamUndoZoneData *m_undozone = ((StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array))[i];
+            for (int j = 0; j < UNDO_PERSISTENCE_LEVELS; j++) {
+                undo::TransactionSlot *tmp_slot = (undo::TransactionSlot *)m_undozone->undo_cxt.slots[j];
+                TransactionStateData sub_s = m_undozone->trans_mgr_ptr;
+                if (sub_s.latest_urp[j]) {
+                    WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_TRANSACTION_ROLLBACK);
+                    TryExecuteUndoActions(&sub_s, (UndoPersistence)j, stpRollback, tmp_slot, m_undozone->undo_cxt.slotPtr[j]);
+                    pgstat_report_waitstatus(oldStatus);
+                } else if (!IsSubTransaction() && m_undozone->undo_cxt.slotPtr[j] != INVALID_UNDO_SLOT_PTR) {
+                    Assert(tmp_slot != NULL && topXid == tmp_slot->XactId());
+                    if (tmp_slot != NULL && topXid == tmp_slot->XactId()) {
+                        ereport(LOG, (errmodule(MOD_USTORE),
+                            errmsg("[Rollback skip] xid(%ld), curxid(%lu), start(%lu), end(%lu). "
+                                "There is no undo record in the top-level transaction. "
+                                "FirstUrp(%lu,%lu,%lu), lastestUrp(%lu,%lu,%lu), lastestXactUrp(%lu,%lu,%lu).",
+                                tmp_slot->XactId(), GetTopTransactionIdIfAny(), tmp_slot->StartUndoPtr(), tmp_slot->EndUndoPtr(),
+                                sub_s.first_urp[0], sub_s.first_urp[1], sub_s.first_urp[UNDO_PERSISTENCE_LEVELS - 1],
+                                sub_s.latest_urp[0], sub_s.latest_urp[1], sub_s.latest_urp[UNDO_PERSISTENCE_LEVELS - 1],
+                                sub_s.latest_urp_xact[0], sub_s.latest_urp_xact[1], sub_s.latest_urp_xact[UNDO_PERSISTENCE_LEVELS - 1])));
+                        UndoRecPtr prev = undo::GetPrevUrp(tmp_slot->EndUndoPtr());
+                        (void)VerifyAndDoUndoActions(tmp_slot->XactId(), prev, tmp_slot->StartUndoPtr(), true, true, false);
+                        undo::UpdateRollbackFinish(m_undozone->undo_cxt.slotPtr[j]);
+                    }
+                }
             }
         }
     }

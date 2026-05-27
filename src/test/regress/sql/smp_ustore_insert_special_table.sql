@@ -1,0 +1,209 @@
+drop schema if exists smp_ustore_insert_st CASCADE;
+create schema smp_ustore_insert_st;
+set current_schema = smp_ustore_insert_st;
+
+-- 3. Other table tests.
+--  ❌3.1 segmented paging ordinary table（不支持）
+--  ❌3.2 hashbucket table（不支持）
+--  ❌3.3 global temporary table（全局临时表不支持SMP）
+--  3.4 unlog table
+--  3.5 temporary table
+--  ❌3.6 pcr index（不支持）
+--  3.7 partition table
+
+
+--  3.4 unlog table
+drop table if exists test_u_unlog_t1;
+drop table if exists test_u_unlog_t2;
+create unlogged table test_u_unlog_t1 (c1 int, c2 int) with (storage_type = ustore);
+create unlogged table test_u_unlog_t2 (c1 int, c2 int) with (storage_type = ustore);
+
+select relpersistence from pg_class where relname = 'test_u_unlog_t1';
+-- u
+select relpersistence from pg_class where relname = 'test_u_unlog_t2';
+-- u
+
+insert into test_u_unlog_t1 values(generate_series(1, 1000), generate_series(1, 1000));
+insert into test_u_unlog_t2 values(generate_series(1, 1000), generate_series(1, 1000));
+
+select count(*) from test_u_unlog_t1;
+-- 1000
+select count(*) from test_u_unlog_t2;
+-- 1000
+
+set query_dop = 4;
+set enable_force_smp = on;
+analyze test_u_unlog_t1;
+analyze test_u_unlog_t2;
+
+-- 1) execution plan
+explain (costs off) insert into test_u_unlog_t1 select * from test_u_unlog_t2;
+-- 2） execution result
+insert into test_u_unlog_t1 select * from test_u_unlog_t2;
+select count(*) from test_u_unlog_t1;
+-- 2000
+
+--  3.5 temporary table
+drop table if exists test_u_tmp_t1;
+drop table if exists test_u_tmp_t2;
+create temp table test_u_tmp_t1 (c1 int, c2 int) with (storage_type = ustore);
+create temp table test_u_tmp_t2 (c1 int, c2 int) with (storage_type = ustore);
+
+select relpersistence from pg_class where relname = 'test_u_tmp_t1';
+-- t
+select relpersistence from pg_class where relname = 'test_u_tmp_t2';
+-- t
+
+insert into test_u_tmp_t1 values(generate_series(1, 1000), generate_series(1, 1000));
+insert into test_u_tmp_t2 values(generate_series(1, 1000), generate_series(1, 1000));
+
+select count(*) from test_u_tmp_t1;
+-- 1000
+select count(*) from test_u_tmp_t2;
+-- 1000
+
+set query_dop = 4;
+set enable_force_smp = on;
+analyze test_u_tmp_t1;
+analyze test_u_tmp_t2;
+
+-- 1) execution plan
+explain (costs off) insert into test_u_tmp_t1 select * from test_u_tmp_t2;
+-- 2） execution result
+insert into test_u_tmp_t1 select * from test_u_tmp_t2;
+select count(*) from test_u_tmp_t1;
+-- 2000
+
+-- 3.7 partition table
+--  1) range partition
+create table t1_year_range
+(y int) with (storage_type = USTORE)
+    partition by range(y)
+(
+    partition p1 values less than(2000),
+    partition p2 values less than(2030)
+    );
+create table t2_year_range
+(y int) with (storage_type = USTORE)
+    partition by range(y)
+(
+    partition p1 values less than(2000),
+    partition p2 values less than(2030)
+    );
+
+INSERT INTO t1_year_range VALUES(1997);
+INSERT INTO t1_year_range VALUES(2021);
+
+INSERT INTO t2_year_range VALUES(1997);
+INSERT INTO t2_year_range VALUES(2021);
+
+set query_dop = 4;
+set enable_force_smp = on;
+
+analyze t1_year_range;
+analyze t2_year_range;
+
+-- 1) execution plan
+explain (costs off) insert into t1_year_range select * from t2_year_range;
+insert into t1_year_range select * from t2_year_range;
+select count(*) from t1_year_range;
+-- 4
+-- todo: the other complex "insert select" test cases
+
+--  2) hash partition
+create table t1_year_hash(y int) with (storage_type = USTORE)
+    partition by hash(y)
+(
+    partition p1,
+    partition p2
+);
+create table t2_year_hash(y int) with (storage_type = USTORE)
+    partition by hash(y)
+(
+    partition p1,
+    partition p2
+);
+
+INSERT INTO t1_year_hash VALUES(1997), (2020), (2050);
+
+INSERT INTO t2_year_hash VALUES(1997), (2020), (2050);
+
+set query_dop = 4;
+set enable_force_smp = on;
+
+analyze t1_year_hash;
+analyze t2_year_hash;
+
+-- 1) execution plan
+explain (costs off) insert into t1_year_hash select * from t2_year_hash;
+insert into t1_year_hash select * from t2_year_hash;
+select count(*) from t1_year_hash;
+-- 6
+
+--  3) list partition
+create table t1_year_list(y int) with (storage_type = USTORE)
+    partition by list(y)
+(
+    partition p1 values (2000),
+    partition p2 values (2010)
+    );
+create table t2_year_list
+(y int) with (storage_type = USTORE)
+    partition by list(y)
+(
+    partition p1 values (2000),
+    partition p2 values (2010)
+    );
+
+INSERT INTO t1_year_list VALUES(2000), (2010), (2000);
+
+INSERT INTO t1_year_list VALUES(2000), (2010), (2000);
+
+set query_dop = 4;
+set enable_force_smp = on;
+
+analyze t1_year_list;
+analyze t2_year_list;
+
+-- 1) execution plan
+explain (costs off) insert into t1_year_list select * from t2_year_list;
+insert into t1_year_list select * from t2_year_list;
+select count(*) from t1_year_list;
+-- 6
+
+-- interval partition table
+create table t1_date_interval(time_id DATE) with (storage_type = USTORE)
+    partition by range(time_id) interval ('1 year')
+(
+    partition p1 values less than ('2009-01-01'),
+    partition p2 values less than ('2010-01-01')
+    );
+create table t2_date_interval(time_id DATE) with (storage_type = USTORE)
+    partition by range(time_id) interval ('1 year')
+(
+    partition p1 values less than ('2009-01-01'),
+    partition p2 values less than ('2010-01-01')
+    );
+
+INSERT INTO t1_date_interval values('2008-01-01'), ('2009-01-02'), ('2010-01-05');
+
+INSERT INTO t2_date_interval values('2008-01-01'), ('2009-01-02'), ('2010-01-05');
+
+set query_dop = 4;
+set enable_force_smp = on;
+
+analyze t1_date_interval;
+analyze t2_date_interval;
+
+-- 1) execution plan
+explain (costs off) insert into t1_date_interval select * from t2_date_interval;
+insert into t1_date_interval select * from t2_date_interval;
+select count(*) from t1_date_interval;
+-- 6
+
+-- recover all the environment variables
+reset enable_force_smp;
+reset query_dop;
+
+set current_schema=public;
+drop schema smp_ustore_insert_st cascade;

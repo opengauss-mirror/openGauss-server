@@ -56,6 +56,7 @@ UndoZone::UndoZone()
     SetFrozenXid(InvalidTransactionId);
     InitSlotBuffer();
     SetAttachPid(0);
+    set_max_xid(InvalidTransactionId);
 
     undoSpace_.MarkClean();
     undoSpace_.LockInit();
@@ -628,6 +629,7 @@ static void RecoveryZone(UndoZone *uzone,
     uzone->set_recycle_tslot_ptr_exrto(uspMetaInfo->recycleTSlotPtr);
     uzone->SetRecycleXid(uspMetaInfo->recycleXid);
     uzone->set_recycle_xid_exrto(uspMetaInfo->recycleXid);
+    uzone->set_max_xid(InvalidTransactionId);
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("recovery_zone id:%d, lsn:%lu, "
         "insert_urec_ptr:%lu, discard_urec_ptr:%lu, force_discard_urec_ptr:%lu, allocate_tslot_ptr:%lu, "
         "recycle_tslot_ptr:%lu, recycle_xid:%lu."), zoneId, uspMetaInfo->lsn, uspMetaInfo->insertURecPtr,
@@ -655,6 +657,7 @@ void InitZone(UndoZone *uzone, const int zoneId, UndoPersistence upersistence)
     uzone->set_recycle_xid_exrto(InvalidTransactionId);
     uzone->SetFrozenXid(InvalidTransactionId);
     uzone->SetAttachPid(0);
+    uzone->set_max_xid(InvalidTransactionId);
 }
 
 /* Initialize parameters in the undo space. */
@@ -865,6 +868,9 @@ void UndoZoneGroup::ReleaseZone(int zid, UndoPersistence upersistence)
             ereport(PANIC, (errmodule(MOD_UNDO),
                 errmsg(UNDOFORMAT("used zone %d detached."), zid)));
         }
+        if (StreamThreadAmI()) {
+            uzone->ReleaseSlotBuffer();
+        }
         uzone->Detach();
         uzone->NotKeepBuffer();
         uzone->InitSlotBuffer();
@@ -949,7 +955,7 @@ UndoZone* UndoZoneGroup::GetUndoZone(int zid, bool isNeedInitZone)
     return uzone;
 }
 
-void AllocateZonesBeforeXid()
+void AllocateZonesBeforeXid(TransactionId cur_xid)
 {
     const int MAX_RETRY_TIMES = 3;
     int retry_times = 0;
@@ -1017,6 +1023,12 @@ reallocate_zone:
             LogUndoZoneInfo(uzone, LOG, "Current Zone is not available, need to switch");
             goto reallocate_zone;
         }
+        if (TransactionIdIsValid(cur_xid) && TransactionIdPrecedes(cur_xid, uzone->get_max_xid())) {
+            int temp_zid = zid - (int)upersistence * PERSIST_ZONE_COUNT;
+            g_instance.undo_cxt.uZoneBitmap[upersistence] =
+                bms_add_member(g_instance.undo_cxt.uZoneBitmap[upersistence], temp_zid);
+            goto reallocate_zone;
+        }
         uzone->Attach();
         LWLockRelease(UndoZoneLock);
         uzone->InitSlotBuffer();
@@ -1046,5 +1058,18 @@ void UndoZoneVerify(UndoZone *uzone)
             uzone->GetAllocateTSlotPtr(), uzone->GetRecycleTSlotPtr(), uzone->GetUndoSpace()->Tail(),
             uzone->GetUndoSpace()->Head(),  uzone->GetSlotSpace()->Tail(), uzone->GetSlotSpace()->Head())));
     }
+}
+
+void InitUndoCxt()
+{
+    for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
+        UndoPersistence upersistence = static_cast<UndoPersistence>(i);
+        t_thrd.undo_cxt.zids[upersistence] = INVALID_ZONE_ID;
+        t_thrd.undo_cxt.prevXid[upersistence] = InvalidTransactionId;
+        t_thrd.undo_cxt.slots[upersistence] = NULL;
+        t_thrd.undo_cxt.slotPtr[upersistence] = INVALID_UNDO_REC_PTR;
+    }
+    t_thrd.undo_cxt.transUndoSize = 0;
+    t_thrd.undo_cxt.fetchRecord = false;
 }
 } // namespace undo

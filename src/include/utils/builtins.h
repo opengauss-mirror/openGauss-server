@@ -1081,6 +1081,7 @@ extern Datum bigint_tid(PG_FUNCTION_ARGS);
 extern Datum cstore_tid_out(PG_FUNCTION_ARGS);
 extern Datum currtid_byreloid(PG_FUNCTION_ARGS);
 extern Datum currtid_byrelname(PG_FUNCTION_ARGS);
+extern Datum tid_hash_blocknum(PG_FUNCTION_ARGS);
 
 /* varchar.c */
 extern Datum bpcharlenb(PG_FUNCTION_ARGS);

@@ -98,13 +98,22 @@ static UndoRecPtr PrepareAndInsertUndoRecordForInsertRedo(XLogReaderState *recor
     UndoRecPtr *blkprev;
     UndoRecPtr *prevurp;
     Oid *partitionOid;
+    bool *has_sub_xact;
     UndoRecPtr invalidUrp = INVALID_UNDO_REC_PTR;
+    bool default_has_sub_xact = false;
     Oid invalidPartitionOid = 0;
 
     bool hasCSN = XLogRecHasCSN(record);
     XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
     XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + SizeOfXLOGCSN(hasCSN));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
+        has_sub_xact = (bool *)((char *)currLogPtr);
+        currLogPtr += sizeof(bool);
+        *skipSize += sizeof(bool);
+    } else {
+        has_sub_xact = &default_has_sub_xact;
+    }
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         blkprev = (UndoRecPtr *) ((char *)currLogPtr);
         currLogPtr += sizeof(UndoRecPtr);
@@ -157,7 +166,8 @@ static UndoRecPtr PrepareAndInsertUndoRecordForInsertRedo(XLogReaderState *recor
         undorec->SetUrp(urecptr);
         urecptr = UHeapPrepareUndoInsert(xlundohdr->relOid, *partitionOid,
             targetNode.relNode, targetNode.spcNode, UNDO_PERMANENT,
-            xid, 0, *blkprev, *prevurp, blkno, xlundohdr, &undometa);
+            xid, 0, *blkprev, *prevurp, blkno, xlundohdr, &undometa,
+            *has_sub_xact ? TopSubTransactionId : InvalidSubTransactionId);
         ereport(DEBUG2, (errmodule(MOD_UNDO),
             errmsg(UNDOFORMAT("redo:undoptr=%lu, xid %lu, partoid=%u, spcoid=%u."),
                 urecptr, xid, *partitionOid, targetNode.spcNode)));
@@ -1405,7 +1415,9 @@ static UndoRecPtr PrepareAndInsertUndoRecordForMultiInsertRedo(XLogReaderState *
     UndoRecPtr *blkprev;
     UndoRecPtr *prevurp;
     Oid *partitionOid;
+    bool *has_sub_xact;
     UndoRecPtr invalidUrp = INVALID_UNDO_REC_PTR;
+    bool default_has_sub_xact = false;
     Oid invalidPartitionOid = 0;
 
     XLogRecPtr lsn = record->EndRecPtr;
@@ -1416,6 +1428,12 @@ static UndoRecPtr PrepareAndInsertUndoRecordForMultiInsertRedo(XLogReaderState *
 
     XlUndoHeader *xlundohdr = (XlUndoHeader *)XLogRecGetData(record);
     char *curxlogptr = (char *)xlundohdr + SizeOfXLUndoHeader;
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
+        has_sub_xact = (bool *)((char *)curxlogptr);
+        curxlogptr += sizeof(bool);
+    } else {
+        has_sub_xact = &default_has_sub_xact;
+    }
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         blkprev = (UndoRecPtr *) ((char *)curxlogptr);
         Assert(*blkprev != INVALID_UNDO_REC_PTR);
@@ -1480,10 +1498,11 @@ static UndoRecPtr PrepareAndInsertUndoRecordForMultiInsertRedo(XLogReaderState *
         bool res PG_USED_FOR_ASSERTS_ONLY = XLogRecGetBlockTag(record, 0, &targetNode, NULL, NULL);
         Assert(res == true);
 
+        SubTransactionId subxid = *has_sub_xact ? TopSubTransactionId : InvalidSubTransactionId;
         /* pass first undo record in and let UHeapPrepareUndoMultiInsert set urecptr according to xlog */
         urecptr = UHeapPrepareUndoMultiInsert(xlundohdr->relOid, *partitionOid, targetNode.relNode,
             targetNode.spcNode, UNDO_PERMANENT, InvalidBuffer, nranges, xid, InvalidCommandId, *blkprev,
-            *prevurp, &urecvec, NULL, urpvec, blkno, xlundohdr, &undometa);
+            *prevurp, &urecvec, NULL, urpvec, blkno, xlundohdr, &undometa, subxid);
         /*
          * We can skip inserting undo records if the tuples are to be marked as
          * frozen.
@@ -1497,6 +1516,11 @@ static UndoRecPtr PrepareAndInsertUndoRecordForMultiInsertRedo(XLogReaderState *
                     sizeof(OffsetNumber));
                 appendBinaryStringInfo((*urecvec)[i]->Rawdata(), (char *)&(*ufreeOffsetRanges)->endOffset[i],
                     sizeof(OffsetNumber));
+                if (subxid != InvalidSubTransactionId) {
+                    (*urecvec)[i]->SetUinfo(UNDO_UREC_INFO_CONTAINS_SUBXACT);
+                    (*urecvec)[i]->SetUinfo(UNDO_UREC_INFO_PAYLOAD);
+                    appendBinaryStringInfo((*urecvec)[i]->Rawdata(), (char *)&subxid, sizeof(SubTransactionId));
+                }
             }
 
             /*
@@ -2195,6 +2219,9 @@ static TransactionId UHeapXlogGetCurrentXidInsert(XLogReaderState *record, bool 
 
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
+        currLogPtr += sizeof(bool);
+    }
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         currLogPtr += sizeof(UndoRecPtr);
     }
@@ -2276,6 +2303,9 @@ static TransactionId UHeapXlogGetCurrentXidMultiInsert(XLogReaderState *record)
 
     char *curxlogptr = (char *)xlundohdr + SizeOfXLUndoHeader;
 
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
+        curxlogptr += sizeof(bool);
+    }
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         curxlogptr += sizeof(UndoRecPtr);
     }

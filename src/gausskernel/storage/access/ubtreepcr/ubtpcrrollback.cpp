@@ -550,7 +550,7 @@ static void SetTDInfo(Relation rel, Page page, int tdid, TransactionId xid, Undo
 }
 
 int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
-    BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid)
+    BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid, bool is_sync_rollback)
 {
     Assert(startIdx == endIdx);
     if (preReloid != NULL && prePartitionoid != NULL) {

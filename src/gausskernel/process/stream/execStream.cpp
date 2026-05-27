@@ -76,6 +76,7 @@ static void CheckStreamMatchInfo(
     StreamFlowCheckInfo checkInfo, int plan_node_id, List* consumerExecNode, int consumerDop, bool isLocalStream);
 static void InitStream(StreamFlowCtl* ctl, StreamTransType type);
 static void InitStreamFlow(StreamFlowCtl* ctl);
+extern void init_stream_combocid();
 
 #define NODENAMELEN 64
 
@@ -1236,7 +1237,28 @@ void SetupStreamRuntime(StreamState* node)
     RegisterStreamSnapshots();
 }
 
-static void StartupStreamThread(StreamState* node)
+void xact_allocate_undozones_memory_for_stream()
+{
+    if (IsInitdb || !(t_thrd.role == THREADPOOL_WORKER || t_thrd.role == WORKER)) {
+        return;
+    }
+
+    StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData**)(t_thrd.xact_cxt.m_undozone_array);
+    if (m_undozone_array == NULL) {
+        MemoryContext old_cxt = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+        m_undozone_array = (StreamUndoZoneData **)palloc0(sizeof(StreamUndoZoneData *) * MAX_QUERY_DOP);
+        for (int i = 0; i < MAX_QUERY_DOP; i++) {
+            m_undozone_array[i] = (StreamUndoZoneData *)palloc0(sizeof(StreamUndoZoneData));
+            for (int j = (int)UNDO_PERMANENT; j <= (int)UNDO_TEMP; j++) {
+                m_undozone_array[i]->undo_cxt.zids[j] = -1;
+            }
+        }
+        MemoryContextSwitchTo(old_cxt);
+        t_thrd.xact_cxt.m_undozone_array = (void **)m_undozone_array;
+    }
+}
+
+static void StartupStreamThread(StreamState* node, bool need_save_undo)
 {
     StreamPair* pair = NULL;
     StreamKey key;
@@ -1253,11 +1275,34 @@ static void StartupStreamThread(StreamState* node)
 
     StreamTxnContext transactionCxt;
 
+#ifndef ENABLE_MULTIPLE_NODES
+    bool is_iud = false;
+    foreach(cell, pair->producerList) {
+        StreamProducer* producer = (StreamProducer*)lfirst(cell);
+        /* smp for iud operation need new undozone to handle transaction rollback */
+        if (producer->m_plan->commandType != CMD_SELECT) {
+            is_iud = true;
+            break;
+        }
+    }
+    if (is_iud) {
+        u_sess->stream_cxt.global_obj->m_is_dml = true;
+        t_thrd.proc->global_obj = u_sess->stream_cxt.global_obj;
+    }
+#endif
     if (IS_SPQ_RUNNING || (nodeTag(node->ss.ps.plan->lefttree) != T_ModifyTable &&
         nodeTag(node->ss.ps.plan->lefttree) != T_VecModifyTable)) {
-        transactionCxt.txnId = GetCurrentTransactionIdIfAny();
+        if (need_save_undo) {
+            transactionCxt.txnId = GetTopTransactionIdIfAny();
+        } else {
+            transactionCxt.txnId = GetCurrentTransactionIdIfAny();
+        }
     } else {
-        transactionCxt.txnId = GetCurrentTransactionId();
+        if (need_save_undo) {
+            transactionCxt.txnId = GetTopTransactionId();
+        } else {
+            transactionCxt.txnId = GetCurrentTransactionId();
+        }
     }
     
     transactionCxt.snapshot = node->ss.ps.state->es_snapshot;
@@ -1270,9 +1315,41 @@ static void StartupStreamThread(StreamState* node)
                        transactionCxt,
                        node->ss.ps.state->es_param_list_info,
                        u_sess->stream_cxt.producer_obj ? u_sess->stream_cxt.producer_obj->getKey().planNodeId : 0);
+        if (need_save_undo && IsA(node->ss.ps.plan->lefttree, ModifyTable)) {
+            u_sess->stream_cxt.global_obj->set_need_copyback_undozone();
+            xact_allocate_undozones_memory_for_stream();
+            StreamUndoZoneData **m_undozone_array = (StreamUndoZoneData **)(t_thrd.xact_cxt.m_undozone_array);
+            if (m_undozone_array != NULL) {
+                uint smp_id = producer->getKey().smpIdentifier;
+                producer->copy_undozone_from_main_worker(m_undozone_array[smp_id]);
+            }
+        }
         u_sess->stream_cxt.global_obj->initStreamThread(producer, smpId, pair);
         smpId++;
     }
+}
+
+bool check_smp_dml(PlannedStmt* pstmt)
+{
+    bool is_DML = false;
+    bool is_ustore = false;
+    is_DML = ((pstmt->commandType == CMD_INSERT) || (pstmt->commandType == CMD_MERGE) ||
+                (pstmt->commandType == CMD_UPDATE) || (pstmt->commandType == CMD_DELETE));
+    if (g_instance.role == VSINGLENODE && is_DML) {
+        if (likely(pstmt->resultRelations != NULL)) {
+            Assert(list_length(pstmt->resultRelations) == 1);
+            int idx = list_nth_int((List*)linitial(pstmt->resultRelations), 0);
+            RangeTblEntry *rte = rt_fetch(idx, pstmt->rtable);
+            is_ustore = rte->is_ustore;
+        }
+#ifndef ENABLE_MULTIPLE_NODES
+        if (!is_ustore && pstmt->commandType != CMD_INSERT) {
+            init_stream_combocid();
+        }
+#endif
+    }
+    bool need_undo = is_DML && is_ustore;
+    return need_undo;
 }
 
 /* Set up Stream thread in parallel */
@@ -1287,7 +1364,21 @@ void StartUpStreamInParallel(PlannedStmt* pstmt, EState* estate)
     }
 
     Assert(u_sess->stream_cxt.global_obj != NULL);
+
+    ListCell *list_cell = NULL;
+    bool is_ustore = false;
+    bool is_insert = pstmt->commandType == CMD_INSERT;
+
+    if (g_instance.role == VSINGLENODE && is_insert) {
+        foreach(list_cell, pstmt->rtable) {
+            RangeTblEntry *rte = lfirst_node(RangeTblEntry, list_cell);
+            is_ustore = is_ustore || rte->is_ustore;
+        }
+    }
+
     const List *pairList = u_sess->stream_cxt.global_obj->getStreamPairList();
+    bool need_save_undo = check_smp_dml(pstmt);
+
     ListCell *lc = NULL;
     foreach(lc, pairList) {
         StreamPair *pair = (StreamPair*)lfirst(lc);
@@ -1312,7 +1403,7 @@ void StartUpStreamInParallel(PlannedStmt* pstmt, EState* estate)
             ExecAssignResultTypeFromTL(&stream_state->ss.ps);
         }
 
-        StartupStreamThread(stream_state);
+        StartupStreamThread(stream_state, need_save_undo);
 
         pfree(stream_state);
     }
@@ -1769,6 +1860,31 @@ void HandleStreamError(StreamState* node, char* msg_body, int len)
         MemoryContextSwitchTo(old_cxt);
     }
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+static void end_command_parse_row_count(const char* message, size_t len, uint64* rowcount)
+{
+    size_t msg_pos = 0;
+
+    *rowcount = 0;
+    while (msg_pos < len - 1) {
+        if (message[msg_pos] >= '0' && message[msg_pos] <= '9') {
+            *rowcount *= 10;
+            *rowcount += message[msg_pos] - '0';
+        } else {
+            *rowcount = 0;
+        }
+        msg_pos++;
+    }
+}
+
+void handle_end_command(StreamState* node, char* msg_body, size_t len)
+{
+    uint64 rowcount = 0;
+    end_command_parse_row_count(msg_body, len, &rowcount);
+    node->ss.ps.state->es_processed += rowcount;
+}
+#endif
 
 /*
  * Handle NoticeResponse ('N') message from Stream thread

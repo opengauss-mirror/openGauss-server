@@ -141,6 +141,7 @@ extern void gs_memory_disconnect(StreamSharedContext* sharedContext, int nthChan
 extern void gs_message_by_memory(StringInfo buf, StreamSharedContext* sharedContext, int nthChannel);
 extern void gs_memory_send_finish(StreamSharedContext* sharedContext, int connNum);
 extern void gs_memory_close_conn(StreamSharedContext* sharedContext, int connNum, int smpId);
+extern void handle_end_command(StreamState* node, char* msg_body, size_t len);
 extern void HandleStreamNotice(StreamState* node, char* msg_body, size_t len);
 extern void HandleStreamError(StreamState* node, char* msg_body, int len);
 extern const char* GetStreamType(Stream* node);

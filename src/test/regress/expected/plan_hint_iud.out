@@ -449,18 +449,20 @@ deallocate all;
 
 --- Set
 :EXP delete /*+ set(query_dop 1008) */ t1 where c2 in (select c2 from t2);
-                              QUERY PLAN                              
-----------------------------------------------------------------------
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
  Streaming(type: LOCAL GATHER dop: 1/8)
    ->  Delete on t1
-         ->  Nested Loop Semi Join
-               Join Filter: (t1.c2 = t2.c2)
+         ->  Result
                ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
-                     ->  Seq Scan on t1
-               ->  Materialize
-                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
-                           ->  Seq Scan on t2
-(9 rows)
+                     ->  Nested Loop Semi Join
+                           Join Filter: (t1.c2 = t2.c2)
+                           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
+                                 ->  Seq Scan on t1
+                           ->  Materialize
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
+                                       ->  Seq Scan on t2
+(11 rows)
 
 --- No expand
 :EXP delete t1 where c2 in (select /*+ no_expand */ c2 from t2);
@@ -574,18 +576,20 @@ deallocate all;
 
 --- Set
 :EXP merge /*+ set(query_dop 1008) */ into t1 using t2 on t1.c1 = t2.c1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
-                              QUERY PLAN                              
-----------------------------------------------------------------------
- Merge on t1
-   ->  Streaming(type: LOCAL GATHER dop: 1/8)
-         ->  Nested Loop Left Join
-               Join Filter: (t1.c1 = t2.c1)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming(type: LOCAL GATHER dop: 1/8)
+   ->  Merge on t1
+         ->  Result
                ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
-                     ->  Seq Scan on t2
-               ->  Materialize
-                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
-                           ->  Seq Scan on t1
-(9 rows)
+                     ->  Nested Loop Left Join
+                           Join Filter: (t1.c1 = t2.c1)
+                           ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
+                                 ->  Seq Scan on t2
+                           ->  Materialize
+                                 ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
+                                       ->  Seq Scan on t1
+(11 rows)
 
 --- Plancache
 prepare merge_g as merge /*+ use_gplan */ into t1 using t2 on t1.c1 = t2.c1 and t1.c1 = $1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
@@ -640,10 +644,42 @@ select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_
 (0 rows)
 
 deallocate all;
+begin;
+insert into t1 values (2, 20);
+:EXP update /*+ set(query_dop 1008) */ t1 set c2 = 200 where c1 = 2;
+               QUERY PLAN               
+----------------------------------------
+ Streaming(type: LOCAL GATHER dop: 1/8)
+   ->  Update on t1
+         ->  Seq Scan on t1
+               Filter: (c1 = 2)
+(4 rows)
+
+update /*+ set(query_dop 1008) */ t1 set c2 = 200 where c1 = 2;
+commit;
+create or replace function log_update() returns trigger as $$begin
+    return new;
+end;$$ language plpgsql;
+create trigger tr1 after update on t1 for each row execute function log_update();
+:EXP merge /*+ set(query_dop 1008) */ into t1 using t2 on t1.c1 = t2.c1
+when matched then update set c2 = t2.c2;
+             QUERY PLAN             
+------------------------------------
+ Merge on t1
+   ->  Hash Join
+         Hash Cond: (t1.c1 = t2.c1)
+         ->  Seq Scan on t1
+         ->  Hash
+               ->  Seq Scan on t2
+(6 rows)
+
+merge /*+ set(query_dop 1008) */ into t1 using t2 on t1.c1 = t2.c1
+when matched then update set c2 = t2.c2;
 -- cleanup
 drop schema schema_hint_iud cascade;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table t1
 drop cascades to table t2
+drop cascades to function log_update()
 \c regression;
 drop database IF EXISTS pl_test;

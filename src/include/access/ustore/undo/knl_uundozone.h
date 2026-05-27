@@ -160,6 +160,10 @@ public:
     {
         return lock_;
     }
+    inline TransactionId get_max_xid(void)
+    {
+        return max_xid_;
+    }
     inline bool Attached(void)
     {
         return pg_atomic_read_u32(&attached_) == UNDO_ZONE_ATTACHED;
@@ -236,6 +240,10 @@ public:
     inline void SetAttach(uint32 attach)
     {
         attached_ = attach;
+    }
+    inline void set_max_xid(TransactionId max_xid)
+    {
+        max_xid_ = max_xid;
     }
     inline void SetLock(LWLock* lock)
     {
@@ -372,6 +380,7 @@ private:
     TransactionId recycleXid_;
     TransactionId frozenXid_;
     ThreadId attachPid_;
+    TransactionId max_xid_;
 
     /* for extreme RTO read. */
     UndoSlotOffset recycle_tslot_ptr_exrto;
@@ -398,11 +407,12 @@ public:
     static bool UndoZoneInUse(int zid, UndoPersistence upersistence);
 }; // class UndoZoneGroup
 
-void AllocateZonesBeforeXid();
+void AllocateZonesBeforeXid(TransactionId cur_xid);
 void InitZone(UndoZone *uzone, const int zoneId, UndoPersistence upersistence);
 void InitUndoSpace(UndoZone *uzone, UndoSpaceType type);
 void exrto_recycle_residual_undo_file(char *FuncName);
 void UndoZoneVerify(UndoZone *uzone);
+void InitUndoCxt();
 
 } // namespace undo
 #endif // __KNL_UUNDOZONE_H__

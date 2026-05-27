@@ -570,6 +570,7 @@ Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkIn
     UndoRecPtr urecPtr = INVALID_UNDO_REC_PTR;
     undo::XlogUndoMeta xlum;
     UHeapPageHeaderData *phdr = NULL;
+    SubTransactionId subxid = InvalidSubTransactionId;
     UHeapTuple tuple;
     BlockNumber blkno = 0;
     TransactionId minXidInTDSlots = InvalidTransactionId;
@@ -584,6 +585,10 @@ Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkIn
     Assert(utuple->tupTableType == UHEAP_TUPLE);
 
     TransactionId fxid = GetTopTransactionId();
+
+    if (IsSubTransaction() && (t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM)) {
+        subxid = GetCurrentSubTransactionId();
+    }
 
     /* Prepare the tuple for insertion */
     tuple = UHeapPrepareInsert(rel, utuple, 0);
@@ -645,7 +650,7 @@ reacquire_buffer:
     Oid partitionOid = RelationIsPartition(rel) ? RelationGetRelid(rel) : InvalidOid;
     urecPtr = UHeapPrepareUndoInsert(relOid, partitionOid, RelationGetRelFileNode(rel),
         RelationGetRnodeSpace(rel), persistence, fxid, cid,
-        prevUrecptr, INVALID_UNDO_REC_PTR, BufferGetBlockNumber(buffer), NULL, &xlum);
+        prevUrecptr, INVALID_UNDO_REC_PTR, BufferGetBlockNumber(buffer), NULL, &xlum, subxid);
 
     /* transaction slot must be reserved before adding tuple to page */
     Assert(tdSlot != InvalidTDSlotId);
@@ -704,6 +709,9 @@ reacquire_buffer:
         if ((undorec->Uinfo() & UNDO_UREC_INFO_HAS_PARTOID) != 0) {
             xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_PARTITION_OID;
         }
+        if (subxid != InvalidSubTransactionId) {
+            xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_SUB_XACT;
+        }
         if (IsSubTransaction() && RelationIsLogicallyLogged(rel)) {
             xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_CURRENT_XID;
             currentXid = GetCurrentTransactionId();
@@ -724,6 +732,7 @@ reacquire_buffer:
         Assert(insWalInfo.hZone != NULL);
 
         insWalInfo.xlum = &xlum;
+        insWalInfo.hasSubXact = (subxid != InvalidSubTransactionId);
 
         /* do the actual logging */
         LogUHeapInsert(&insWalInfo, rel, isToast);
@@ -3419,6 +3428,7 @@ void UHeapMultiInsert(Relation relation, UHeapTuple *tuples, int ntuples, Comman
     UndoPersistence persistence = UndoPersistenceForRelation(relation);
     TransactionId fxid = GetTopTransactionId();
     UHeapPageHeaderData *phdr = NULL;
+    SubTransactionId subxid = InvalidSubTransactionId;
     URecVector *urecvec = NULL;
     TransactionId minXidInTDSlots = InvalidTransactionId;
 
@@ -3455,6 +3465,10 @@ void UHeapMultiInsert(Relation relation, UHeapTuple *tuples, int ntuples, Comman
     CheckForSerializableConflictIn(relation, NULL, InvalidBuffer);
 
     ndone = 0;
+
+    if (IsSubTransaction() && (t_thrd.proc->workingVersionNum >= SMP_VERSION_NUM)) {
+        subxid = GetCurrentSubTransactionId();
+    }
 
     while (ndone < ntuples) {
         undo::XlogUndoMeta xlum;
@@ -3536,7 +3550,7 @@ reacquire_buffer:
 
             urecPtr = UHeapPrepareUndoMultiInsert(relOid, partitionOid, RelationGetRelFileNode(relation),
                 RelationGetRnodeSpace(relation), persistence, buffer, ufreeOffsetRanges->nranges, fxid, cid,
-                prevUrecptr, INVALID_UNDO_REC_PTR, &urecvec, &first_urecptr, NULL, InvalidBlockNumber, NULL, &xlum);
+                prevUrecptr, INVALID_UNDO_REC_PTR, &urecvec, &first_urecptr, NULL, InvalidBlockNumber, NULL, &xlum, subxid);
         }
 
         /* No ereport(ERROR) from here till changes are logged */
@@ -3608,6 +3622,11 @@ reacquire_buffer:
                     sizeof(OffsetNumber));
                 appendBinaryStringInfo((*urecvec)[i]->Rawdata(), (char *)&ufreeOffsetRanges->endOffset[i],
                     sizeof(OffsetNumber));
+                if (subxid != InvalidSubTransactionId) {
+                    (*urecvec)[i]->SetUinfo(UNDO_UREC_INFO_CONTAINS_SUBXACT);
+                    (*urecvec)[i]->SetUinfo(UNDO_UREC_INFO_PAYLOAD);
+                    appendBinaryStringInfo((*urecvec)[i]->Rawdata(), (char *)&subxid, sizeof(SubTransactionId));
+                }
             }
 
             elog(DEBUG1, "start offset: %d, end offset: %d", ufreeOffsetRanges->startOffset[i],
@@ -3654,6 +3673,9 @@ reacquire_buffer:
             if ((urec->Uinfo() & UNDO_UREC_INFO_HAS_PARTOID) != 0) {
                 xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_PARTITION_OID;
             }
+            if (subxid != InvalidSubTransactionId) {
+                xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_SUB_XACT;
+            }
             if (IsSubTransaction() && RelationIsLogicallyLogged(relation)) {
                 xlUndoHeaderFlag |= XLOG_UNDO_HEADER_HAS_CURRENT_XID;
                 currentXid = GetCurrentTransactionId();
@@ -3670,6 +3692,7 @@ reacquire_buffer:
             genWalInfo.partitionOid = RelationGetRelid(relation);
             genWalInfo.xid = currentXid;
             genWalInfo.hZone = (undo::UndoZone *)g_instance.undo_cxt.uZones[t_thrd.undo_cxt.zids[persistence]];
+            genWalInfo.hasSubXact = (subxid != InvalidSubTransactionId);
 
             insWalInfo.genWalInfo = &genWalInfo;
             insWalInfo.relation = relation;
@@ -4530,7 +4553,8 @@ void UHeapResetPreparedUndo()
 
 UndoRecPtr UHeapPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
     UndoPersistence persistence, TransactionId xid, CommandId cid, UndoRecPtr prevurpInOneBlk,
-    UndoRecPtr prevurpInOneXact, BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa)
+    UndoRecPtr prevurpInOneXact, BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa,
+    SubTransactionId subxid)
 {
     URecVector *urecvec = t_thrd.ustore_cxt.urecvec;
     UndoRecord *urec = (*urecvec)[0];
@@ -4551,6 +4575,15 @@ UndoRecPtr UHeapPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid relfilenode,
     /* Tell Undo chain traversal this record does not have any older version */
     urec->SetOldXactId(FrozenTransactionId);
 
+    if (subxid != InvalidSubTransactionId) {
+        urec->SetUinfo(UNDO_UREC_INFO_CONTAINS_SUBXACT);
+        urec->SetUinfo(UNDO_UREC_INFO_PAYLOAD);
+        MemoryContext old_cxt = MemoryContextSwitchTo(urec->mem_context());
+        initStringInfo(urec->Rawdata());
+        MemoryContextSwitchTo(old_cxt);
+        appendBinaryStringInfo(urec->Rawdata(), (char *)&subxid, sizeof(SubTransactionId));
+    }
+
     int status = PrepareUndoRecord(urecvec, persistence, xlundohdr, xlundometa);
     /* Do not continue if there was a failure during Undo preparation */
     if (status != UNDO_RET_SUCC) {
@@ -4570,7 +4603,8 @@ UndoRecPtr UHeapPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid relfilenode,
 UndoRecPtr UHeapPrepareUndoMultiInsert(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
     UndoPersistence persistence, Buffer buffer, int nranges, TransactionId xid, CommandId cid,
     UndoRecPtr prevurpInOneBlk, UndoRecPtr prevurpInOneXact, URecVector **urecvec_ptr, UndoRecPtr *first_urecptr,
-    UndoRecPtr *urpvec, BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa)
+    UndoRecPtr *urpvec, BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa,
+    SubTransactionId subxid)
 {
     VerifyMemoryContext();
     URecVector *urecvec = New(CurrentMemoryContext)URecVector();
@@ -4608,6 +4642,9 @@ UndoRecPtr UHeapPrepareUndoMultiInsert(Oid relOid, Oid partitionOid, Oid relfile
         undoRecord->SetNeedInsert(true);
         undoRecord->SetOldXactId(FrozenTransactionId);
         undoRecord->Rawdata()->len = 2 * sizeof(OffsetNumber);
+        if (subxid != InvalidSubTransactionId) {
+            undoRecord->Rawdata()->len += sizeof(SubTransactionId);
+        }
         undoRecord->SetUrp(INVALID_UNDO_REC_PTR);
 
         if (t_thrd.xlog_cxt.InRecovery) {
@@ -4796,6 +4833,10 @@ static void LogUHeapInsert(UHeapWALInfo *walinfo, Relation rel, bool isToast)
     CommitSeqNo curCSN = InvalidCommitSeqNo;
     LogCSN(&curCSN);
     XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
+    if ((walinfo->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
+        XLogRegisterData((char *)&(walinfo->hasSubXact), sizeof(bool));
+    }
+
     if ((walinfo->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         ereport(DEBUG5, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("blkprev=%lu", walinfo->blkprev)));
         Assert(walinfo->blkprev != INVALID_UNDO_REC_PTR);
@@ -5625,6 +5666,9 @@ static void LogUHeapMultiInsert(UHeapMultiInsertWALInfo *multiWalinfo, bool skip
 
     /* copy undo related info in maindata */
     XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
+    if ((multiWalinfo->genWalInfo->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
+        XLogRegisterData((char *)&(multiWalinfo->genWalInfo->hasSubXact), sizeof(bool));
+    }
     if ((multiWalinfo->genWalInfo->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         Assert(multiWalinfo->genWalInfo->blkprev != INVALID_UNDO_REC_PTR);
         XLogRegisterData((char *)&(multiWalinfo->genWalInfo->blkprev), sizeof(UndoRecPtr));

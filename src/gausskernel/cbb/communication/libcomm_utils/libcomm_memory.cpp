@@ -111,7 +111,7 @@ void gs_memory_init_entry(StreamSharedContext* sharedContext, int consumerNum, i
 }
 
 /*
- * @Description: Send Error/Notice through memory
+ * @Description: Send Error/Notice or Complete msg through memory
  *
  * @param[IN] buf: Error/Notice string info
  * @param[IN] sharedContext: context for shared memory stream
@@ -402,12 +402,6 @@ char gs_find_memory_data(StreamState* node, int* waitnode_count)
          * If an notice occured, we can still receive data.
          */
         buf = node->sharedContext->messages[u_sess->stream_cxt.smp_id][i];
-
-        if (buf->cursor == 'R') {
-            node->ss.ps.state->es_processed += node->sharedContext->rows;
-            resetStringInfo(buf);
-        }
-
         if (buf->len > 0) {
             if (buf->cursor == 'E') {
                 HandleStreamError(node, buf->data, buf->len);
@@ -424,6 +418,12 @@ char gs_find_memory_data(StreamState* node, int* waitnode_count)
 
                 return STREAM_SCAN_WAIT;
             }
+#ifndef ENABLE_MULTIPLE_NODES
+            if (buf->cursor == 'C') {
+                handle_end_command(node, buf->data, buf->len);
+                resetStringInfo(buf);
+            }
+#endif
         }
 
         switch (dataStatus) {
