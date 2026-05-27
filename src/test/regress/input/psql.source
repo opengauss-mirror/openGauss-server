@@ -277,6 +277,43 @@ select * from dual;
 \! rm -f @abs_bindir@/gsql_multi_cf_insert.sql
 \! rm -f @abs_bindir@/gsql_multi_cf_cleanup.sql
 
+select 'hello' as var1, 10 as var2
+\gset
+\echo :var1 :var2
+
+select 'hello' as var1, 10 as var2
+\gset result_
+\echo :result_var1 :result_var2
+
+create table tbl_gset(a int,b float,c text);
+select * from tbl_gset \gset
+insert into tbl_gset values(1,2.5,'yes'),(2,3.14,'no');
+select * from tbl_gset \gset
+select * from tbl_gset limit 1 \gset
+\echo :a :b :c
+select 1 as limitn \gset
+select * from tbl_gset order by a desc limit :limitn;
+
+select 'off' as 'AUTOCOMMIT' \gset
+select 1 \gset
+select 1 as b \gset ;
+select 1 as b \gset;
+;
+\set FETCH_COUNT 3
+select 2 as  tmp \gset
+\echo :tmp
+\echo :FETCH_COUNT
+SELECT generate_series(95, 100) AS id;
+
+\set FETCH_COUNT 1
+select 1 as x, 2 as y \gset pref_
+\echo :pref_x :pref_y
+select 10 as test01, 20 as test02 from generate_series(1,3) \gset pref_
+\echo :pref_x :pref_y
+select 10 as test01, 20 as test02 from generate_series(1,0) \gset pref_
+\echo :pref_x :pref_y
+\unset FETCH_COUNT
+
 \c regression;
 drop database test_sql;
 

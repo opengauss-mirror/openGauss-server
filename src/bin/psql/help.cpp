@@ -218,7 +218,7 @@ void slashUsage(unsigned short int pager)
     if (currdb == NULL)
         currdb = "";
 
-    output = PageOutput(98, pager);
+    output = PageOutput(USAGE_ROWS, pager);
 
     /* if you add/remove a line here, change the row count above */
 
@@ -229,6 +229,7 @@ void slashUsage(unsigned short int pager)
     fprintf(output, _("  \\copyright             show openGauss usage and distribution terms\n"));
 #endif
     fprintf(output, _("  \\g [FILE] or ;         execute query (and send results to file or |pipe)\n"));
+    fprintf(output, _("  \\gset [PREFIX]         execute query and store result in gsql variables\n"));
     fprintf(output, _("  \\h(\\help) [NAME]              help on syntax of SQL commands, * for all commands\n"));
     fprintf(output, _("  \\parallel [on [num]|off] toggle status of execute (currently %s)\n"), ON(pset.parallel));
     fprintf(output, _("  \\q                     quit gsql\n"));

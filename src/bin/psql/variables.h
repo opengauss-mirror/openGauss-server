@@ -45,5 +45,5 @@ bool SetVariable(VariableSpace space, const char* name, const char* value);
 bool SetVariableAssignHook(VariableSpace space, const char* name, VariableAssignHook hook);
 bool SetVariableBool(VariableSpace space, const char* name);
 bool DeleteVariable(VariableSpace space, const char* name);
-
+bool VariableHasHook(VariableSpace space, const char *name);
 #endif /* VARIABLES_H */

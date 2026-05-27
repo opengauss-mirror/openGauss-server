@@ -8,6 +8,8 @@
 #ifndef HELP_H
 #define HELP_H
 
+#define USAGE_ROWS 99
+
 void usage(void);
 
 void slashUsage(unsigned short int pager);

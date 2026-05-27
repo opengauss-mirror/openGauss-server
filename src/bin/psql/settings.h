@@ -67,7 +67,7 @@ typedef struct _psqlSettings {
     printQueryOpt popt;
 
     char* gfname; /* one-shot file output argument for \g */
-
+    char* gsetPrefix; /* one-shot prefix argument for \gset */
     bool notty;                /* stdin or stdout is not a tty (as determined
                                 * on startup) */
     enum trivalue getPassword; /* prompt the user for a username and password */

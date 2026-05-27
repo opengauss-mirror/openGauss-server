@@ -44,6 +44,7 @@ extern bool canAddHist;
 #define MAX_RETRY_TIMES 10
 #define ERRCODE_LENGTH 5
 #define DELIMITER_LENGTH 16
+#define GSET_MAX_FETCH_COUNT 2
 
 #if defined(__LP64__) || defined(__64BIT__)
 typedef unsigned int GS_UINT32;
