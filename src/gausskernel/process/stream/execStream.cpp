@@ -843,7 +843,6 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
     }
 
     *(ctl->threadNum) += subInnerThreadNum + streamNode->smpDesc.producerDop;
-    pair->expectThreadNum = subInnerThreadNum;
 
     /* Set some args. */
     ListCell* cell = NULL;
@@ -2426,13 +2425,16 @@ void ExecEndStream(StreamState* node)
 bool executorEarlyStop()
 {
     /* Check if query already been stopped. */
-    if (u_sess->exec_cxt.executorStopFlag == true)
+    if (u_sess->exec_cxt.executorStopFlag == true) {
         return true;
-    /* Check if query already canceled due to error or cancel/die signal. */
-    else if (u_sess->stream_cxt.global_obj && u_sess->stream_cxt.global_obj->isQueryCanceled())
+    } else if (u_sess->stream_cxt.global_obj && u_sess->stream_cxt.global_obj->isQueryCanceled()) {
+        /* Check if query already canceled due to error or cancel/die signal. */
         return true;
-    else
+    } else if (u_sess->stream_cxt.producer_obj && u_sess->stream_cxt.producer_obj->is_top_execute_end()) {
+        return true;
+    } else {
         return false;
+    }
 }
 
 /*

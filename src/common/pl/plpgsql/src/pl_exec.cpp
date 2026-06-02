@@ -3955,9 +3955,13 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
                 estate->cursor_return_data = saved_cursor_data;
                 estate->cursor_return_numbers = saved_cursor_numbers;
 
-                exec_exception_cleanup(estate, &excptContext);
+                if (!StreamThreadAmI()) {
+                    StreamNodeGroup::ReleaseStreamGroup(false);
+                }
                 AutoDopControl dopControl;
                 dopControl.CloseSmp();
+
+                exec_exception_cleanup(estate, &excptContext);
 
                 rc = exec_exception_handler(estate, block, &excptContext);
                 stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
@@ -4048,14 +4052,15 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
 
                 /* push ErrorData to exception stack*/
                 push_error_data_to_exception_stack();
-                
-                exec_exception_cleanup(estate, &excptContext);
-    #ifndef ENABLE_MULTIPLE_NODES
+
                 if (!StreamThreadAmI()) {
                     StreamNodeGroup::ReleaseStreamGroup(false);
                 }
                 AutoDopControl dopControl;
                 dopControl.CloseSmp();
+
+                exec_exception_cleanup(estate, &excptContext);
+    #ifndef ENABLE_MULTIPLE_NODES
                 if (u_sess->stream_cxt.global_obj == NULL && u_sess->instr_cxt.global_instr != NULL) {
                     u_sess->instr_cxt.global_instr = NULL;
                     u_sess->instr_cxt.thread_instr = NULL;

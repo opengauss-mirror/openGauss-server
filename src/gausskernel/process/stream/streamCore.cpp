@@ -585,10 +585,8 @@ void StreamNodeGroup::SigStreamThreadClose()
                         break;
                     }
                 }
-                /*
-                 * mark before send signal,
-                 * used for signal handle to check signal whether signal is vaild.
-                 */
+                /* mark top comsumer is execute end and send signal to wakeup */
+                producer->set_top_execute_end();
                 (void)SendProcSignal(producer->getThreadId(), PROCSIG_STREAM_STOP_CHECK, InvalidBackendId);
             }
         }
@@ -624,7 +622,6 @@ void StreamNodeGroup::quitSyncPoint()
     int timeout = 30;
 
     if (StreamThreadAmI() == true) {
-        StreamPair* pair = NULL;
         AutoMutexLock streamLock(&m_mutex);
 
         /* signal the top consumer if i am the last stream thread. */
@@ -632,16 +629,10 @@ void StreamNodeGroup::quitSyncPoint()
         m_streamEnter++;
         m_streamEnterCount++;
         Assert(u_sess->stream_cxt.producer_obj != NULL);
-        pair = (u_sess->stream_cxt.producer_obj)->getPair();
 
-        /* pair->subThreadNum - pair->startSubThreadNum is the supposed fail to launch thread. */
-        if (u_sess->stream_cxt.smp_id == 0)
-            m_quitWaitCond = m_quitWaitCond - 1 - (pair->expectThreadNum - pair->createThreadNum);
-        else
-            m_quitWaitCond = m_quitWaitCond - 1; /* other smp thread. */
+        m_quitWaitCond = m_quitWaitCond - 1;
 
         Assert(m_quitWaitCond >= 0);
-        Assert(pair->expectThreadNum >= pair->createThreadNum);
 
         if (m_quitWaitCond < 0) {
             ereport(WARNING, (errmsg("Stream sub thread m_quitWaitCond invalid: %d. "
@@ -748,8 +739,6 @@ StreamPair* StreamNodeGroup::pushStreamPair(StreamKey key, List* producerList, L
     pair->key = key;
     pair->producerList = producerList;
     pair->consumerList = consumerList;
-    pair->expectThreadNum = 0;
-    pair->createThreadNum = 0;
 
     m_streamPairList = lcons(pair, m_streamPairList);
 
@@ -807,9 +796,6 @@ void StreamNodeGroup::initStreamThread(StreamProducer* producer, uint8 smpIdenti
         producer->setThreadId(producerThreadId);
         /* Set create thread num for sync quit. */
         m_createThreadNum++;
-        /* Assume all stream threads build successfully for sync quit process. */
-        StreamPair* tmpPair = producer->getPair();
-        tmpPair->createThreadNum = tmpPair->expectThreadNum;
         streamLock.unLock();
 
         Assert(m_createThreadNum <= m_size);
@@ -2019,10 +2005,5 @@ bool InitStreamObject(PlannedStmt* planStmt)
         return true;
     }
     return false;
-}
-
-void StreamMarkStop()
-{
-    u_sess->exec_cxt.executorStopFlag = true;
 }
 #endif

@@ -251,6 +251,16 @@ public:
         return m_threadInit;
     }
 
+    inline void set_top_execute_end()
+    {
+        m_top_execute_end = true;
+    }
+
+    inline bool is_top_execute_end()
+    {
+        return m_top_execute_end;
+    }
+
     void getUniqueSQLKey(uint64* unique_id, Oid* user_id, uint32* cn_id);
 
     /* All set function. */
@@ -516,6 +526,9 @@ private:
 
     /* If thread already inited*/
     bool m_threadInit;
+
+    /* will be set to true while top comsumer is execute end */
+    volatile bool m_top_execute_end;
 
     /* instrumentation: */
     uint64 m_uniqueSQLId;

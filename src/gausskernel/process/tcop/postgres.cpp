@@ -9822,6 +9822,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         ResetSessionEnv();
 #else
         t_thrd.subrole = NO_SUBROLE;
+        u_sess->stream_cxt.enter_sync_point = false;
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery = t_thrd.utils_cxt.trackedMemChunks;

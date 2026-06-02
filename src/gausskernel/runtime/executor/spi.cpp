@@ -3030,8 +3030,14 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
         }
         t_thrd.utils_cxt.CurrentResourceOwner  = tmp;
         cplan = NULL;
-        if (ENABLE_GPC && tmp_cxt)
+        if (ENABLE_GPC && tmp_cxt) {
+            if (!StreamThreadAmI()) {
+                /* we should wait all stream thread exit before memory context release */
+                StreamNodeGroup::ReleaseStreamGroup(false);
+            }
             MemoryContextDelete(tmp_cxt);
+            tmp_cxt = NULL;
+        }
 
         /*
          * If not read-only mode, advance the command counter after the last
