@@ -307,6 +307,8 @@ bool CopyGetNextLineFromOBS(CopyState cstate)
 
     /* Get real parser to do 'buffered line' read/parse */
     GDS::Parser* parser = stream->GetOBSParser();
+    int maxLineSize = (cstate->fileformat == FORMAT_TEXT || cstate->fileformat == FORMAT_CSV) ? COPY_MAX_LINE_SIZE : -1;
+    parser->line_buffers.SetMaxLineSize(maxLineSize);
     cstate->eol_type = EOL_NL;
     resetStringInfo(&(cstate->line_buf));
 
@@ -355,7 +357,7 @@ retry1:
     } else if (cstate->line_buf.data[cstate->line_buf.len - 1] != '\n' &&
                cstate->line_buf.data[cstate->line_buf.len] == '\0') {
         /* process no EOL to \n */
-        appendBinaryStringInfo(&(cstate->line_buf), "\n", 1);
+        CopyAppendLineData(cstate, "\n", 1);
     } else if (cstate->line_buf.data[cstate->line_buf.len - 1] == '\r') {
         /* process \r to \n */
         cstate->line_buf.data[cstate->line_buf.len - 1] = '\n';
