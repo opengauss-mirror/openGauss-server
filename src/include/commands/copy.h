@@ -311,6 +311,8 @@ typedef struct CopyStateData {
 #endif
     int fill_missing_fields; /* 0 off;1 Compatible with the original copy; -1 trailing nullcols */
     bool ignore_extra_data; /* ignore overflowing fields */
+    bool has_extra_data; /* current row has overflowing fields */
+    bool ignored_extra_has_data; /* ignored extra fields contain non-null data */
 
     Formatter* formatter;
     FileFormat fileformat;
@@ -384,6 +386,10 @@ typedef struct InsertCopyLogInfoData* LogInsertState;
 #define IS_CSV(cstate) ((cstate)->fileformat == FORMAT_CSV)
 #define IS_BINARY(cstate) ((cstate)->fileformat == FORMAT_BINARY)
 #define IS_FIXED(cstate) ((cstate)->fileformat == FORMAT_FIXED)
+
+#define COPY_MAX_LINE_SIZE (64 * 1024 * 1024)
+
+extern void CopyAppendLineData(CopyState cstate, const char* data, int len);
 #define IS_TEXT(cstate) ((cstate)->fileformat == FORMAT_TEXT)
 #define IS_REMOTEWRITE(cstate) ((cstate)->fileformat == FORMAT_WRITABLE)
 

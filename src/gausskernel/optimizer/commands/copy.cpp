@@ -140,6 +140,55 @@ static Oid copy_summary_table_col_typid[COPY_SUMMARY_TABLE_NUM_COL] = {
     VARCHAROID, TIMESTAMPTZOID, TIMESTAMPTZOID, INT8OID, INT8OID, INT8OID,
     INT8OID, INT8OID, INT8OID, INT8OID, INT8OID, TEXTOID};
 
+static void CopyReportLineTooLong()
+{
+    ereport(ERROR,
+        (errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
+            errmsg("COPY line is too long"),
+            errdetail("COPY line size exceeds the maximum allowed size of %d bytes.", COPY_MAX_LINE_SIZE)));
+}
+
+static bool CopyLineSizeLimitEnabled(CopyState cstate)
+{
+    return cstate->fileformat == FORMAT_TEXT || cstate->fileformat == FORMAT_CSV;
+}
+
+void CopyAppendLineData(CopyState cstate, const char* data, int len)
+{
+    if (len <= 0) {
+        return;
+    }
+
+    if (CopyLineSizeLimitEnabled(cstate) &&
+        (len > COPY_MAX_LINE_SIZE || cstate->line_buf.len > COPY_MAX_LINE_SIZE - len)) {
+        CopyReportLineTooLong();
+    }
+
+    appendBinaryStringInfo(&cstate->line_buf, data, len);
+}
+
+static void CopyCheckTranscodeLineSize(CopyState cstate)
+{
+    if (CopyLineSizeLimitEnabled(cstate) && cstate->line_buf.len > COPY_MAX_LINE_SIZE) {
+        CopyReportLineTooLong();
+    }
+}
+
+static bool CopyFieldLooksNullOrEmpty(CopyState cstate, const char* startPtr, const char* endPtr, bool sawQuote)
+{
+    int inputLen = endPtr - startPtr;
+
+    if (inputLen == 0) {
+        return true;
+    }
+
+    if (!sawQuote && inputLen == cstate->null_print_len && strncmp(startPtr, cstate->null_print, inputLen) == 0) {
+        return true;
+    }
+
+    return false;
+}
+
 /*
  * Note that similar macros also exist in executor/execMain.c.  There does not
  * appear to be any good header to put them into, given the structures that
@@ -214,8 +263,8 @@ typedef struct {
 #define REFILL_LINEBUF                                                                                            \
     if (1) {                                                                                                      \
         if (raw_buf_ptr > cstate->raw_buf_index) {                                                                \
-            appendBinaryStringInfo(                                                                               \
-                &cstate->line_buf, cstate->raw_buf + cstate->raw_buf_index, raw_buf_ptr - cstate->raw_buf_index); \
+            CopyAppendLineData(                                                                                   \
+                cstate, cstate->raw_buf + cstate->raw_buf_index, raw_buf_ptr - cstate->raw_buf_index);             \
             cstate->raw_buf_index = raw_buf_ptr;                                                                  \
         }                                                                                                         \
     } else                                                                                                        \
@@ -6480,12 +6529,15 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
                     break;
                 }
             }
+            if (all_null_flag && cstate->ignored_extra_has_data) {
+                all_null_flag = false;
+            }
             if (all_null_flag)
                 cstate->allnullrows++;
         }
 
         /* check for overflowing fields. if cstate->ignore_extra_data is true,  ignore overflowing fields */
-        if (nfields > 0 && fldct > nfields && !cstate->ignore_extra_data)
+        if (nfields > 0 && (fldct > nfields || cstate->has_extra_data) && !cstate->ignore_extra_data)
             ereport(ERROR, (errcode(ERRCODE_BAD_COPY_FILE_FORMAT), errmsg("extra data after last expected column")));
 
         /*
@@ -6965,11 +7017,12 @@ retry:
     if (cstate->fileformat != FORMAT_FIXED && cstate->need_transcoding) {
         char* cvt = NULL;
 
+        CopyCheckTranscodeLineSize(cstate);
         cvt = pg_any_to_server(cstate->line_buf.data, cstate->line_buf.len, cstate->file_encoding);
         if (cvt && cvt != cstate->line_buf.data) {
             /* transfer converted data back to line_buf */
             resetStringInfo(&cstate->line_buf);
-            appendBinaryStringInfo(&cstate->line_buf, cvt, strlen(cvt));
+            CopyAppendLineData(cstate, cvt, strlen(cvt));
             pfree_ext(cvt);
         }
 
@@ -7352,7 +7405,7 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
                      * discard the data and the \. sequence.
                      */
                     if (prev_raw_ptr > cstate->raw_buf_index)
-                        appendBinaryStringInfo(&cstate->line_buf,
+                        CopyAppendLineData(cstate,
                             cstate->raw_buf + cstate->raw_buf_index,
                             prev_raw_ptr - cstate->raw_buf_index);
                     cstate->raw_buf_index = raw_buf_ptr;
@@ -7459,7 +7512,8 @@ void cstate_fields_buffer_init(CopyState cstate)
  *   The input is in line_buf.  We use attribute_buf to hold the result
  *   strings.  cstate->raw_fields[k] is set to point to the k'th attribute
  *   string, or NULL when the input matches the null marker string.
- *   This array is expanded as necessary.
+ *   This array is sized to the expected COPY input fields and is not expanded
+ *   for extra fields.
  *
  *   (Note that the caller cannot check for nulls since the returned
  *   string would be the post-de-escaping equivalent, which may look
@@ -7489,6 +7543,9 @@ static int CopyReadAttributesTextT(CopyState cstate)
     int numattrs = list_length(cstate->attnumlist);
     int proc_col_num = 0;
     int max_filler_index = numattrs + list_length(cstate->filler_col_list);
+
+    cstate->has_extra_data = false;
+    cstate->ignored_extra_has_data = false;
 
     /*
      * We need a special case for zero-column tables: check that the input
@@ -7535,15 +7592,17 @@ static int CopyReadAttributesTextT(CopyState cstate)
         proc_col_num++;
         int byte_count = 0;
         int pos = 0;
+        bool is_filler_col = (cstate->filler != NULL && proc_col_num <= max_filler_index &&
+            cstate->filler[proc_col_num - 1] != NULL);
+        bool extra_field = (!is_filler_col && fieldno >= cstate->max_fields);
+        bool save_field = (!extra_field && fieldno < cstate->max_fields);
+        bool field_has_data = false;
 
-        /* Make sure there is enough space for the next value */
-        if (fieldno >= cstate->max_fields) {
-            cstate->max_fields *= 2;
-            cstate->raw_fields = (char**)repalloc(cstate->raw_fields, cstate->max_fields * sizeof(char*));
+        if (extra_field) {
+            cstate->has_extra_data = true;
         }
 
-        if (cstate->filler == NULL || proc_col_num > max_filler_index || cstate->filler[proc_col_num - 1] == NULL)
-        {
+        if (!is_filler_col && !extra_field) {
             if (cstate->sequence != NULL && fieldno < numattrs && cstate->sequence[fieldno] != NULL) {
                 cstate->raw_fields[fieldno] = &sequence_buf_ptr->data[sequence_buf_ptr->len];
                 appendStringInfo(sequence_buf_ptr, "%ld", cstate->sequence[fieldno]->start);
@@ -7560,7 +7619,9 @@ static int CopyReadAttributesTextT(CopyState cstate)
 
         /* Remember start of field on both input and output sides */
         start_ptr = cur_ptr;
-        cstate->raw_fields[fieldno] = output_ptr;
+        if (save_field) {
+            cstate->raw_fields[fieldno] = output_ptr;
+        }
 
         /*
          * Scan data for field.
@@ -7716,26 +7777,42 @@ static int CopyReadAttributesTextT(CopyState cstate)
                     /*
                      * Unlikely, yet we deal with it anyway.
                      */
-                    *output_ptr++ = c;
+                    if (save_field) {
+                        *output_ptr++ = c;
+                    } else if (extra_field) {
+                        field_has_data = true;
+                    }
                     break;
                 }
                 sec = *cur_ptr++;
-                *output_ptr++ = c;
-                *output_ptr++ = sec;
+                if (save_field) {
+                    *output_ptr++ = c;
+                    *output_ptr++ = sec;
+                } else if (extra_field) {
+                    field_has_data = true;
+                }
                 /*
                  * We don't mark saw_non_ascii because output here is not from de-escaping.
                  */
             } else {
                 /* Add c to output string */
-                *output_ptr++ = c;
+                if (save_field) {
+                    *output_ptr++ = c;
+                } else if (extra_field) {
+                    field_has_data = true;
+                }
             }
         }
 
         /* Check whether raw input matched null marker */
         input_len = end_ptr - start_ptr;
-        if (input_len == cstate->null_print_len && strncmp(start_ptr, cstate->null_print, input_len) == 0)
+        if (extra_field && field_has_data && !CopyFieldLooksNullOrEmpty(cstate, start_ptr, end_ptr, false)) {
+            cstate->ignored_extra_has_data = true;
+        }
+        if (save_field && input_len == cstate->null_print_len &&
+            strncmp(start_ptr, cstate->null_print, input_len) == 0) {
             cstate->raw_fields[fieldno] = NULL;
-        else {
+        } else if (save_field) {
             /*
              * At this point we know the field is supposed to contain data.
              *
@@ -7750,12 +7827,14 @@ static int CopyReadAttributesTextT(CopyState cstate)
         }
 
         /* Terminate attribute value in output area */
-        *output_ptr++ = '\0';
+        if (save_field) {
+            *output_ptr++ = '\0';
+        }
 
         /*
          * match each bulkload illegal error to each field.
          */
-        if (cstate->illegal_chars_error) {
+        if (save_field && cstate->illegal_chars_error) {
             foreach (cur, cstate->illegal_chars_error) {
                 err_info = (IllegalCharErrInfo*)lfirst(cur);
 
@@ -7779,7 +7858,7 @@ static int CopyReadAttributesTextT(CopyState cstate)
             }
         }
 
-        if (cstate->filler == NULL || proc_col_num > max_filler_index || cstate->filler[proc_col_num - 1] == NULL) {
+        if (!is_filler_col && !extra_field) {
             fieldno++;
         }
 
@@ -7803,9 +7882,13 @@ static int CopyReadAttributesTextT(CopyState cstate)
     }
 
     /* Clean up state of attribute_buf */
-    output_ptr--;
-    Assert(*output_ptr == '\0');
-    cstate->attribute_buf.len = (output_ptr - cstate->attribute_buf.data);
+    if (output_ptr > cstate->attribute_buf.data) {
+        output_ptr--;
+        Assert(*output_ptr == '\0');
+        cstate->attribute_buf.len = (output_ptr - cstate->attribute_buf.data);
+    } else {
+        cstate->attribute_buf.len = 0;
+    }
 
     return fieldno;
 }
@@ -7837,6 +7920,9 @@ static int CopyReadAttributesCSVT(CopyState cstate)
     int numattrs = list_length(cstate->attnumlist);
     int proc_col_num = 0;
     int max_filler_index = numattrs + list_length(cstate->filler_col_list);
+
+    cstate->has_extra_data = false;
+    cstate->ignored_extra_has_data = false;
 
     /*
      * We need a special case for zero-column tables: check that the input
@@ -7881,20 +7967,17 @@ static int CopyReadAttributesCSVT(CopyState cstate)
         char* end_ptr = NULL;
         int input_len;
         proc_col_num++;
+        bool is_filler_col = (cstate->filler != NULL && proc_col_num <= max_filler_index &&
+            cstate->filler[proc_col_num - 1] != NULL);
+        bool extra_field = (!is_filler_col && fieldno >= cstate->max_fields);
+        bool save_field = (!extra_field && fieldno < cstate->max_fields);
+        bool field_has_data = false;
 
-        /* Make sure there is enough space for the next value */
-        if (fieldno >= cstate->max_fields) {
-            int max_field = 2 * cstate->max_fields;
-            if ((max_field / 2) != cstate->max_fields) {
-                ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
-                            errmsg("conn cursor overflow")));
-            }
-            cstate->max_fields *= 2;
-            cstate->raw_fields = (char**)repalloc(cstate->raw_fields, cstate->max_fields * sizeof(char*));
+        if (extra_field) {
+            cstate->has_extra_data = true;
         }
 
-        if (cstate->filler == NULL || proc_col_num > max_filler_index || cstate->filler[proc_col_num - 1] == NULL)
-        {
+        if (!is_filler_col && !extra_field) {
             if (cstate->sequence != NULL && fieldno < numattrs && cstate->sequence[fieldno] != NULL) {
                 cstate->raw_fields[fieldno] = &sequence_buf_ptr->data[sequence_buf_ptr->len];
                 appendStringInfo(sequence_buf_ptr, "%ld", cstate->sequence[fieldno]->start);
@@ -7911,7 +7994,9 @@ static int CopyReadAttributesCSVT(CopyState cstate)
 
         /* Remember start of field on both input and output sides */
         start_ptr = cur_ptr;
-        cstate->raw_fields[fieldno] = output_ptr;
+        if (save_field) {
+            cstate->raw_fields[fieldno] = output_ptr;
+        }
 
         /*
          * Scan data for field,
@@ -7949,7 +8034,11 @@ static int CopyReadAttributesCSVT(CopyState cstate)
                     break;
                 }
                 /* Add c to output string */
-                *output_ptr++ = c;
+                if (save_field) {
+                    *output_ptr++ = c;
+                } else if (extra_field) {
+                    field_has_data = true;
+                }
             }
 
             /* In quote */
@@ -7970,7 +8059,11 @@ static int CopyReadAttributesCSVT(CopyState cstate)
                         char nextc = *cur_ptr;
 
                         if (nextc == escapec || nextc == quotec) {
-                            *output_ptr++ = nextc;
+                            if (save_field) {
+                                *output_ptr++ = nextc;
+                            } else if (extra_field) {
+                                field_has_data = true;
+                            }
                             cur_ptr++;
                             continue;
                         }
@@ -7987,22 +8080,32 @@ static int CopyReadAttributesCSVT(CopyState cstate)
                 }
 
                 /* Add c to output string */
-                *output_ptr++ = c;
+                if (save_field) {
+                    *output_ptr++ = c;
+                } else if (extra_field) {
+                    field_has_data = true;
+                }
             }
         }
     endfield:
 
         /* Terminate attribute value in output area */
-        *output_ptr++ = '\0';
+        if (save_field) {
+            *output_ptr++ = '\0';
+        }
 
         /* Check whether raw input matched null marker */
         input_len = end_ptr - start_ptr;
-        if (!saw_quote && input_len == cstate->null_print_len && strncmp(start_ptr, cstate->null_print, input_len) == 0)
+        if (extra_field && field_has_data && !CopyFieldLooksNullOrEmpty(cstate, start_ptr, end_ptr, saw_quote)) {
+            cstate->ignored_extra_has_data = true;
+        }
+        if (save_field && !saw_quote && input_len == cstate->null_print_len &&
+            strncmp(start_ptr, cstate->null_print, input_len) == 0)
             cstate->raw_fields[fieldno] = NULL;
         /*
          * match each bulkload illegal error to each field.
          */
-        if (cstate->illegal_chars_error) {
+        if (save_field && cstate->illegal_chars_error) {
             foreach (cur, cstate->illegal_chars_error) {
                 err_info = (IllegalCharErrInfo*)lfirst(cur);
 
@@ -8026,7 +8129,7 @@ static int CopyReadAttributesCSVT(CopyState cstate)
             }
         }
 
-        if (cstate->filler == NULL || proc_col_num > max_filler_index || cstate->filler[proc_col_num - 1] == NULL) {
+        if (!is_filler_col && !extra_field) {
             fieldno++;
         }
 
@@ -8050,9 +8153,13 @@ static int CopyReadAttributesCSVT(CopyState cstate)
     }
 
     /* Clean up state of attribute_buf */
-    output_ptr--;
-    Assert(*output_ptr == '\0');
-    cstate->attribute_buf.len = (output_ptr - cstate->attribute_buf.data);
+    if (output_ptr > cstate->attribute_buf.data) {
+        output_ptr--;
+        Assert(*output_ptr == '\0');
+        cstate->attribute_buf.len = (output_ptr - cstate->attribute_buf.data);
+    } else {
+        cstate->attribute_buf.len = 0;
+    }
 
     return fieldno;
 }
@@ -9599,15 +9706,13 @@ retry1:
                     errdetail("Illegal data exists in data files. Please cleanse data files before migration.")));
         length -= 4;
 
-        enlargeStringInfo(&(cstate->line_buf), length);
-
         /* Line Number: 4B */
         inBuffer->cursor += 4;
         cstate->cur_lineno = ntohl(*(uint32*)(inBuffer->data + inBuffer->cursor));
 
         /* Line Data */
         inBuffer->cursor += 4;
-        appendBinaryStringInfo(&(cstate->line_buf), inBuffer->data + inBuffer->cursor, length);
+        CopyAppendLineData(cstate, inBuffer->data + inBuffer->cursor, length);
         inBuffer->cursor += length;
 
         if (CMD_TYPE_DATA_SEG == retval)
@@ -9618,7 +9723,7 @@ retry1:
             if (strstr(cstate->line_buf.data, cstate->eol) == NULL &&
                 cstate->line_buf.data[cstate->line_buf.len] == '\0') {
                 /* append \n if this line doesn't end with EOL */
-                appendBinaryStringInfo(&(cstate->line_buf), cstate->eol, strlen(cstate->eol));
+                CopyAppendLineData(cstate, cstate->eol, strlen(cstate->eol));
             }
         } else if (cstate->line_buf.data[cstate->line_buf.len - 2] == '\r') {
             /* process \r\n and replace them with \n */
@@ -9631,7 +9736,7 @@ retry1:
         } else if (cstate->line_buf.data[cstate->line_buf.len - 1] != '\n' &&
                    cstate->line_buf.data[cstate->line_buf.len] == '\0') {
             /* append \n if this line doesn't end with EOL */
-            appendBinaryStringInfo(&(cstate->line_buf), "\n", 1);
+            CopyAppendLineData(cstate, "\n", 1);
         }
         return false;
     }
