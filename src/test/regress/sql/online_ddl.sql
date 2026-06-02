@@ -243,4 +243,62 @@ alter table concurrently online_ddl_test_alter_type alter column value2 type int
 \d+ online_ddl_test_alter_type
 drop table if exists online_ddl_test_alter_type;
 
+-- case 14: vacuum full concurrently for ordinary table
+set client_min_messages = warning;
+create table online_ddl_vacuum_t (id int, grp int, note text);
+create index online_ddl_vacuum_t_idx on online_ddl_vacuum_t (id);
+insert into online_ddl_vacuum_t select generate_series(1, 20), 1, 'before vacuum';
+update online_ddl_vacuum_t set note = 'updated before vacuum' where id <= 5;
+delete from online_ddl_vacuum_t where id between 6 and 10;
+vacuum full concurrently online_ddl_vacuum_t;
+select count(*) as row_count, min(id) as min_id, max(id) as max_id from online_ddl_vacuum_t;
+select count(*) as index_count from pg_indexes where schemaname = 'test_ddl' and tablename = 'online_ddl_vacuum_t';
+select count(*) from online_ddl_status();
+drop table if exists online_ddl_vacuum_t;
+
+-- case 15: cluster concurrently for ordinary table
+create table online_ddl_cluster_t (id int, note text);
+create index online_ddl_cluster_t_idx on online_ddl_cluster_t (id);
+insert into online_ddl_cluster_t select generate_series(20, 1, -1), 'before cluster';
+cluster concurrently online_ddl_cluster_t using online_ddl_cluster_t_idx;
+select count(*) as row_count, min(id) as min_id, max(id) as max_id, sum(id) as sum_id from online_ddl_cluster_t;
+select indisclustered from pg_index where indexrelid = 'online_ddl_cluster_t_idx'::regclass;
+drop table if exists online_ddl_cluster_t;
+
+-- case 16: vacuum full concurrently for partitioned table
+create table online_ddl_vacuum_part (
+    id int not null,
+    grp int,
+    note text
+) partition by range (id)
+(
+    partition p1 values less than (10),
+    partition p2 values less than (20),
+    partition p3 values less than (maxvalue)
+);
+create index online_ddl_vacuum_part_idx on online_ddl_vacuum_part (id) local;
+insert into online_ddl_vacuum_part select generate_series(1, 25), 1, 'before partition vacuum';
+delete from online_ddl_vacuum_part where id in (2, 12, 22);
+vacuum full concurrently online_ddl_vacuum_part;
+select count(*) as row_count, min(id) as min_id, max(id) as max_id from online_ddl_vacuum_part;
+drop table if exists online_ddl_vacuum_part;
+
+-- case 17: cluster concurrently for partitioned table
+create table online_ddl_cluster_part (
+    id int not null,
+    grp int,
+    note text
+) partition by range (id)
+(
+    partition p1 values less than (10),
+    partition p2 values less than (20),
+    partition p3 values less than (maxvalue)
+);
+create index online_ddl_cluster_part_idx on online_ddl_cluster_part (id) local;
+insert into online_ddl_cluster_part select generate_series(18, 1, -1), 1, 'before partition cluster';
+cluster concurrently online_ddl_cluster_part using online_ddl_cluster_part_idx;
+select count(*) as row_count, min(id) as min_id, max(id) as max_id, sum(id) as sum_id from online_ddl_cluster_part;
+drop table if exists online_ddl_cluster_part;
+set client_min_messages = notice;
+
 DROP SCHEMA IF EXISTS test_ddl CASCADE;

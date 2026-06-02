@@ -104,6 +104,8 @@ insert into online_ddl_test_valid select generate_series(1, 10), 'test', 5;
 alter table concurrently online_ddl_test_valid  alter column value2 set not null; --success
 NOTICE:  Online DDL instance init finish, start to copy baseline data.
 NOTICE:  Online DDL rewrite catalogs finish, start to copy baseline data.
+NOTICE:  Online DDL baseline data check completed, start to check incremental data.
+NOTICE:  Online DDL relation online_ddl_test_valid get AccessExclusiveLock before commit, start to append for the last time.
 NOTICE:  drop cascades to 2 other objects
 --?DETAIL:  drop cascades to table online_ddl_temp_schema_.*.online_ddl_delta_log
 --?drop cascades to table online_ddl_temp_schema_.*.ctid_map
@@ -139,6 +141,8 @@ alter table concurrently online_ddl_test_valid
 add constraint ck_online_ddl_test_valid check (value2 > 1 and value2 < 10); --success
 NOTICE:  Online DDL instance init finish, start to copy baseline data.
 NOTICE:  Online DDL rewrite catalogs finish, start to copy baseline data.
+NOTICE:  Online DDL baseline data check completed, start to check incremental data.
+NOTICE:  Online DDL relation online_ddl_test_valid get AccessExclusiveLock before commit, start to append for the last time.
 NOTICE:  drop cascades to 2 other objects
 --?DETAIL:  drop cascades to table online_ddl_temp_schema_.*.online_ddl_delta_log
 --?drop cascades to table online_ddl_temp_schema_.*.ctid_map
@@ -616,5 +620,94 @@ Has OIDs: no
 Options: orientation=row, compression=no, append_mode=online_ddl, append_mode_internal=6
 
 drop table if exists online_ddl_test_alter_type;
+-- case 14: vacuum full concurrently for ordinary table
+set client_min_messages = warning;
+create table online_ddl_vacuum_t (id int, grp int, note text);
+create index online_ddl_vacuum_t_idx on online_ddl_vacuum_t (id);
+insert into online_ddl_vacuum_t select generate_series(1, 20), 1, 'before vacuum';
+update online_ddl_vacuum_t set note = 'updated before vacuum' where id <= 5;
+delete from online_ddl_vacuum_t where id between 6 and 10;
+vacuum full concurrently online_ddl_vacuum_t;
+select count(*) as row_count, min(id) as min_id, max(id) as max_id from online_ddl_vacuum_t;
+ row_count | min_id | max_id 
+-----------+--------+--------
+        15 |      1 |     20
+(1 row)
+
+select count(*) as index_count from pg_indexes where schemaname = 'test_ddl' and tablename = 'online_ddl_vacuum_t';
+ index_count 
+-------------
+           1
+(1 row)
+
+select count(*) from online_ddl_status();
+ count 
+-------
+     3
+(1 row)
+
+drop table if exists online_ddl_vacuum_t;
+-- case 15: cluster concurrently for ordinary table
+create table online_ddl_cluster_t (id int, note text);
+create index online_ddl_cluster_t_idx on online_ddl_cluster_t (id);
+insert into online_ddl_cluster_t select generate_series(20, 1, -1), 'before cluster';
+cluster concurrently online_ddl_cluster_t using online_ddl_cluster_t_idx;
+select count(*) as row_count, min(id) as min_id, max(id) as max_id, sum(id) as sum_id from online_ddl_cluster_t;
+ row_count | min_id | max_id | sum_id 
+-----------+--------+--------+--------
+        20 |      1 |     20 |    210
+(1 row)
+
+select indisclustered from pg_index where indexrelid = 'online_ddl_cluster_t_idx'::regclass;
+ indisclustered 
+----------------
+ t
+(1 row)
+
+drop table if exists online_ddl_cluster_t;
+-- case 16: vacuum full concurrently for partitioned table
+create table online_ddl_vacuum_part (
+    id int not null,
+    grp int,
+    note text
+) partition by range (id)
+(
+    partition p1 values less than (10),
+    partition p2 values less than (20),
+    partition p3 values less than (maxvalue)
+);
+create index online_ddl_vacuum_part_idx on online_ddl_vacuum_part (id) local;
+insert into online_ddl_vacuum_part select generate_series(1, 25), 1, 'before partition vacuum';
+delete from online_ddl_vacuum_part where id in (2, 12, 22);
+vacuum full concurrently online_ddl_vacuum_part;
+select count(*) as row_count, min(id) as min_id, max(id) as max_id from online_ddl_vacuum_part;
+ row_count | min_id | max_id 
+-----------+--------+--------
+        22 |      1 |     25
+(1 row)
+
+drop table if exists online_ddl_vacuum_part;
+-- case 17: cluster concurrently for partitioned table
+create table online_ddl_cluster_part (
+    id int not null,
+    grp int,
+    note text
+) partition by range (id)
+(
+    partition p1 values less than (10),
+    partition p2 values less than (20),
+    partition p3 values less than (maxvalue)
+);
+create index online_ddl_cluster_part_idx on online_ddl_cluster_part (id) local;
+insert into online_ddl_cluster_part select generate_series(18, 1, -1), 1, 'before partition cluster';
+cluster concurrently online_ddl_cluster_part using online_ddl_cluster_part_idx;
+select count(*) as row_count, min(id) as min_id, max(id) as max_id, sum(id) as sum_id from online_ddl_cluster_part;
+ row_count | min_id | max_id | sum_id 
+-----------+--------+--------+--------
+        18 |      1 |     18 |    171
+(1 row)
+
+drop table if exists online_ddl_cluster_part;
+set client_min_messages = notice;
 DROP SCHEMA IF EXISTS test_ddl CASCADE;
 NOTICE:  drop cascades to table online_ddl_test_skip
