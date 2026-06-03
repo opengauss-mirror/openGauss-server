@@ -560,30 +560,36 @@ static List *make_copy_attnamelist(LogicalRepRelMapEntry *rel)
  * Data source callback for the COPY FROM, which reads from the remote
  * connection and passes the data back to our local COPY.
  */
-static int copy_read_data(CopyState cstate, void *outbuf, int minread, int maxread)
+static int copy_read_data_from_buf(char* outbuf, int* maxread, StringInfo copybuf)
+{
+    int avail = copybuf->len - copybuf->cursor;
+    int rc;
+
+    if (avail <= 0) {
+        return 0;
+    }
+    if (avail > *maxread) {
+        avail = *maxread;
+    }
+    rc = memcpy_s(outbuf, *maxread, &copybuf->data[copybuf->cursor], avail);
+    securec_check(rc, "\0", "\0");
+    copybuf->cursor += avail;
+    *maxread -= avail;
+    return avail;
+}
+
+static int copy_read_data(CopyState cstate, char* outbuf, int minread, int maxread)
 {
     int bytesread = 0;
-    int avail;
     int rc;
     StringInfo copybuf = t_thrd.applyworker_cxt.copybuf;
 
     /* If there are some leftover data from previous read, use them. */
-    avail = copybuf->len - copybuf->cursor;
-    if (avail) {
-        if (avail > maxread)
-            avail = maxread;
-        rc = memcpy_s(outbuf, maxread, &copybuf->data[copybuf->cursor], avail);
-        securec_check(rc, "\0", "\0");
-        copybuf->cursor += avail;
-        maxread -= avail;
-        bytesread += avail;
-    }
+    bytesread += copy_read_data_from_buf(outbuf, &maxread, copybuf);
 
     while (maxread > 0 && bytesread < minread) {
-        int rc;
         int len;
         char *buf = NULL;
-
 
         for (;;) {
             /* Try read the data. */
@@ -600,14 +606,8 @@ static int copy_read_data(CopyState cstate, void *outbuf, int minread, int maxre
                     copybuf->len = len;
                     copybuf->cursor = 0;
 
-                    avail = copybuf->len - copybuf->cursor;
-                    if (avail > maxread)
-                        avail = maxread;
-                    rc = memcpy_s(outbuf, maxread, &copybuf->data[copybuf->cursor], avail);
-                    securec_check(rc, "\0", "\0");
-                    outbuf = (void *)((char *)outbuf + avail);
-                    copybuf->cursor += avail;
-                    maxread -= avail;
+                    int avail = copy_read_data_from_buf(outbuf, &maxread, copybuf);
+                    outbuf += avail;
                     bytesread += avail;
                 }
 

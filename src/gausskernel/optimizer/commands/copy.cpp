@@ -239,7 +239,7 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
     List* options, bool is_copy = true, CopyFileType filetype = S_COPYFILE);
 static void EndCopy(CopyState cstate);
 CopyState BeginCopyTo(Relation rel, Node* query, const char* queryString,
-    const char* filename, List* attnamelist, List* options, CopyFileType filetype);
+    const char* filename, List* attnamelist, List* options, CopyFileType filetype, bool enforceNoSymlink);
 void EndCopyTo(CopyState cstate);
 uint64 DoCopyTo(CopyState cstate);
 static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast);
@@ -288,7 +288,7 @@ static void CopySendData(CopyState cstate, const void* databuf, int datasize);
 template <bool skipEol>
 void CopySendEndOfRow(CopyState cstate);
 static int CopyGetData(CopyState cstate, void* databuf, int minread, int maxread);
-static int CopyGetDataDefault(CopyState cstate, void* databuf, int minread, int maxread);
+static int CopyGetDataDefault(CopyState cstate, char* databuf, int minread, int maxread);
 static void CopySendInt32(CopyState cstate, int32 val);
 static bool CopyGetInt32(CopyState cstate, int32* val);
 static void CopySendInt16(CopyState cstate, int16 val);
@@ -597,7 +597,7 @@ static int CopyGetData(CopyState cstate, void* databuf, int minread, int maxread
      */
     int ret = 0;
     EnableDoingCommandRead();
-    ret = cstate->copyGetDataFunc(cstate, databuf, minread, maxread);
+    ret = cstate->copyGetDataFunc(cstate, (char*)databuf, minread, maxread);
     DisableDoingCommandRead();
 
     return ret;
@@ -606,7 +606,7 @@ static int CopyGetData(CopyState cstate, void* databuf, int minread, int maxread
 /* the default implement of CopyGetData
  * the cstate->copyGetDataFunc is initialized in the  BeginCopy by CopyGetDataDefault
  */
-static int CopyGetDataDefault(CopyState cstate, void* databuf, int minread, int maxread)
+static int CopyGetDataDefault(CopyState cstate, char* databuf, int minread, int maxread)
 {
     int bytesread = 0;
 
@@ -633,7 +633,7 @@ static int CopyGetDataDefault(CopyState cstate, void* databuf, int minread, int 
              * slower than the code path was originally, and we don't care
              * much anymore about the performance of old protocol.
              */
-            if (pq_getbytes((char*)databuf, minread)) {
+            if (pq_getbytes(databuf, minread)) {
                 /* Only a \. terminator is legal EOF in old protocol */
                 ereport(ERROR,
                     (errcode(ERRCODE_CONNECTION_FAILURE),
@@ -724,8 +724,8 @@ static int CopyGetDataDefault(CopyState cstate, void* databuf, int minread, int 
                 avail = cstate->fe_msgbuf->len - cstate->fe_msgbuf->cursor;
                 if (avail > maxread)
                     avail = maxread;
-                pq_copymsgbytes(cstate->fe_msgbuf, (char*)databuf, avail);
-                databuf = (void*)((char*)databuf + avail);
+                pq_copymsgbytes(cstate->fe_msgbuf, databuf, avail);
+                databuf += avail;
                 maxread -= avail;
                 bytesread += avail;
             }
@@ -940,8 +940,10 @@ bool copyCheckSecurityPath(char *filename)
 /*
  * Check permission for copy between tables and files.
  */
-static void CheckCopyFilePermission(char *filename)
+static bool CheckCopyFilePermission(char *filename)
 {
+    bool enforceNoSymlink = (u_sess->attr.attr_common.safe_data_path != NULL);
+
     if (!initialuser() && u_sess->attr.attr_storage.enable_copy_server_files) {
         if (!copyCheckSecurityPath(filename)) {
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
@@ -955,6 +957,7 @@ static void CheckCopyFilePermission(char *filename)
                 errhint("Anyone can COPY to stdout or from stdin. "
                 "gsql's \\copy command also works for anyone.")));
         }
+        return enforceNoSymlink;
     } else {
         /*
          * Disallow file copy when enable_copy_server_files is set to false.
@@ -969,6 +972,7 @@ static void CheckCopyFilePermission(char *filename)
                 "gsql's \\copy command also works for anyone.")));
         }
     }
+    return false;
 }
 
 
@@ -995,6 +999,7 @@ Oid DoCopy(CopyStmt* stmt, const char* queryString, uint64 *processed)
     CopyState cstate;
     bool is_from = stmt->is_from;
     bool pipe = (stmt->filename == NULL);
+    bool enforceNoSymlink = false;
     Relation rel;
     RangeTblEntry* rte = NULL;
     Node* query = NULL;
@@ -1013,7 +1018,7 @@ Oid DoCopy(CopyStmt* stmt, const char* queryString, uint64 *processed)
 
     /* Disallow copy to/from files except to users with appropriate permission. */
     if (!pipe) {
-        CheckCopyFilePermission(stmt->filename);
+        enforceNoSymlink = CheckCopyFilePermission(stmt->filename);
     }
 
     if (stmt->relation) {
@@ -1108,7 +1113,8 @@ Oid DoCopy(CopyStmt* stmt, const char* queryString, uint64 *processed)
         /* set write for backend status for the thread, we will use it to check default transaction readOnly */
         pgstat_set_stmt_tag(STMTTAG_WRITE);
 
-        cstate = BeginCopyFrom(rel, stmt->filename, stmt->attlist, stmt->options, &stmt->memUsage, queryString);
+        cstate = BeginCopyFrom(rel, stmt->filename, stmt->attlist, stmt->options, &stmt->memUsage, queryString, NULL,
+            enforceNoSymlink);
         if (cstate->is_load_copy && stmt->filename != NULL) {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
                 errmsg("Parameter load should not be used in server end, please check copy statement"),
@@ -1152,7 +1158,8 @@ Oid DoCopy(CopyStmt* stmt, const char* queryString, uint64 *processed)
         EndCopyFrom(cstate);
     } else {
         pgstat_set_stmt_tag(STMTTAG_READ);
-        cstate = BeginCopyTo(rel, query, queryString, stmt->filename, stmt->attlist, stmt->options, stmt->filetype);
+        cstate = BeginCopyTo(rel, query, queryString, stmt->filename, stmt->attlist, stmt->options, stmt->filetype,
+            enforceNoSymlink);
         cstate->range_table = list_make1(rte);
         *processed = DoCopyTo(cstate); /* copy from database to file */
         EndCopyTo(cstate);
@@ -2911,7 +2918,7 @@ static void CopyToCheck(Relation rel)
  * Setup CopyState to read tuples from a table or a query for COPY TO.
  */
 CopyState BeginCopyTo(Relation rel, Node* query, const char* queryString,
-    const char* filename, List* attnamelist, List* options, CopyFileType filetype)
+    const char* filename, List* attnamelist, List* options, CopyFileType filetype, bool enforceNoSymlink)
 {
     CopyState cstate;
     bool pipe = (filename == NULL);
@@ -2953,7 +2960,9 @@ CopyState BeginCopyTo(Relation rel, Node* query, const char* queryString,
         oumask = umask(S_IWGRP | S_IWOTH);
         PG_TRY();
         {
-            cstate->copy_file = AllocateFile(cstate->filename, PG_BINARY_W);
+            cstate->copy_file = enforceNoSymlink
+                ? AllocateFileNoSymlink(cstate->filename, true)
+                : AllocateFile(cstate->filename, PG_BINARY_W);
         }
         PG_CATCH();
         {
@@ -2963,9 +2972,13 @@ CopyState BeginCopyTo(Relation rel, Node* query, const char* queryString,
         PG_END_TRY();
         (void)umask(oumask);
 
-        if (cstate->copy_file == NULL)
+        if (cstate->copy_file == NULL) {
+            if (enforceNoSymlink && errno == ELOOP) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("COPY path cannot contain symbolic links")));
+            }
             ereport(ERROR,
                 (errcode_for_file_access(), errmsg("could not open file \"%s\" for writing: %m", cstate->filename)));
+        }
 
         fstat(fileno(cstate->copy_file), &st);
         if (S_ISDIR(st.st_mode))
@@ -5963,8 +5976,8 @@ static void CopyInitCstateVar(CopyState cstate)
  * Returns a CopyState, to be passed to NextCopyFrom and related functions.
  */
 CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
-                        List* options, void* mem_info, const char* queryString,
-                        CopyGetDataFunc func)
+                        List* options, AdaptMem* memInfo, const char* queryString,
+                        CopyGetDataFunc func, bool enforceNoSymlink)
 {
     CopyState cstate;
     bool pipe = (filename == NULL);
@@ -5979,7 +5992,7 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
     int* defmap = NULL;
     ExprState** defexprs = NULL;
     MemoryContext oldcontext;
-    AdaptMem* memUsage = (AdaptMem*)mem_info;
+    AdaptMem* memUsage = memInfo;
     bool volatile_defexprs = false;
     int* attr_encodings = NULL;
     FmgrInfo* in_convert_funcs = NULL;
@@ -6136,11 +6149,17 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
                 (errcode(ERRCODE_INVALID_NAME), errmsg("do not support system admin to COPY from %s", filename)));
         }
 
-        cstate->copy_file = AllocateFile(cstate->filename, PG_BINARY_R);
+        cstate->copy_file = enforceNoSymlink
+            ? AllocateFileNoSymlink(cstate->filename, false)
+            : AllocateFile(cstate->filename, PG_BINARY_R);
 
-        if (cstate->copy_file == NULL)
+        if (cstate->copy_file == NULL) {
+            if (enforceNoSymlink && errno == ELOOP) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("COPY path cannot contain symbolic links")));
+            }
             ereport(ERROR,
                 (errcode_for_file_access(), errmsg("could not open file \"%s\" for reading: %m", cstate->filename)));
+        }
 
         fstat(fileno(cstate->copy_file), &st);
         if (S_ISDIR(st.st_mode))
@@ -9554,7 +9573,7 @@ void endPrivateModeBulkLoad(CopyState cstate)
 /*
  * CopyGetData function for COPY_FILE
  */
-static int CopyGetDataFile(CopyState cstate, void* databuf, int minread, int maxread)
+static int CopyGetDataFile(CopyState cstate, char* databuf, int minread, int maxread)
 {
     PROFILING_MDIO_START();
     int bytesread = fread(databuf, 1, maxread, cstate->copy_file);
@@ -9568,7 +9587,7 @@ static int CopyGetDataFile(CopyState cstate, void* databuf, int minread, int max
 /*
  * CopyGetData function for COPY_FILE_SEGMENT
  */
-static int CopyGetDataFileSegment(CopyState cstate, void* databuf, int minread, int maxread)
+static int CopyGetDataFileSegment(CopyState cstate, char* databuf, int minread, int maxread)
 {
     Assert(cstate->curTaskPtr);
     int bytesread = 0;
