@@ -72,7 +72,7 @@ typedef struct BulkLoadFunc {
     void (*endBulkLoad)(CopyState cstate);
 } BulkLoadFunc;
 
-typedef int (*CopyGetDataFunc)(CopyState cstate, void* databuf, int minread, int maxread);
+typedef int (*CopyGetDataFunc)(CopyState cstate, char* databuf, int minread, int maxread);
 typedef bool (*CopyReadlineFunc)(CopyState cstate);
 typedef void (*CopyWriteLineFunc)(CopyState cstate);
 typedef bool (*GetNextCopyFunc)(CopyState cstate);
@@ -388,7 +388,8 @@ typedef struct InsertCopyLogInfoData* LogInsertState;
 #define IS_REMOTEWRITE(cstate) ((cstate)->fileformat == FORMAT_WRITABLE)
 
 CopyState BeginCopyTo(Relation rel, Node* query, const char* queryString,
-    const char* filename, List* attnamelist, List* options, CopyFileType filetype = S_COPYFILE);
+    const char* filename, List* attnamelist, List* options, CopyFileType filetype = S_COPYFILE,
+    bool enforceNoSymlink = false);
 void EndCopyTo(CopyState cstate);
 uint64 DoCopyTo(CopyState cstate);
 extern Oid DoCopy(CopyStmt* stmt, const char* queryString, uint64* process);
@@ -400,7 +401,8 @@ extern void ProcessFileOptions(CopyState cstate, bool is_from, List* options, bo
 extern void ProcessCopyOptions(CopyState cstate, bool is_from, List* options);
 extern bool IsTypeAcceptEmptyStr(Oid typeOid);
 extern CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, 
-    List* options, void* mem_info, const char* queryString, CopyGetDataFunc func = NULL);
+    List* options, AdaptMem* memInfo, const char* queryString, CopyGetDataFunc func = NULL,
+    bool enforceNoSymlink = false);
 extern void EndCopyFrom(CopyState cstate);
 extern bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* nulls, Oid* tupleOid);
 extern bool NextCopyFromRawFields(CopyState cstate, char*** fields, int* nfields);
