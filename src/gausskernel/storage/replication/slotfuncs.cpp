@@ -374,6 +374,10 @@ void create_logical_replication_slot(const Name name, Name plugin, bool isDummyS
 {
     LogicalDecodingContext *ctx = NULL;
     CheckLogicalDecodingRequirements(databaseId);
+    if (first_dir_separator(NameStr(*plugin)) != NULL) {
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                        errmsg("The path cannot be specified for the decoding plugin.")));
+    }
     int rc = 0;
     char *fullname = NULL;
     fullname = expand_dynamic_library_name(NameStr(*plugin));
