@@ -273,6 +273,7 @@ typedef struct knl_session_attr_common {
     bool enable_nonowner_remote_ddl;
     bool enable_sql_limit;
     bool connection_from_coordinator;
+    bool trusted_coord_conn;
     bool enableInternalErrorCode;
     bool skip_new_column_for_ruledef;
     bool enable_atf;

@@ -108,6 +108,7 @@
 
 #include "lib/dllist.h"
 #include "libpq/auth.h"
+#include "libpq/hba.h"
 #include "libpq/ip.h"
 #include "libpq/libpq.h"
 #include "libpq/pqsignal.h"
@@ -5624,19 +5625,23 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
     }
 #endif
 
+    bool trusted_coord_conn = false;
 #ifdef ENABLE_MULTIPLE_NODES
-    if (port->cmdline_options != NULL && strstr(port->cmdline_options, "remotetype=coordinator") != NULL) {
+    bool conn_from_coord = IsConnPortFromCoord(port);
+    trusted_coord_conn = conn_from_coord && is_cluster_internal_connection(port);
+    if (trusted_coord_conn) {
         u_sess->attr.attr_common.remoteConnType = REMOTE_CONN_COORD;
     } else
 #endif
     {
         u_sess->attr.attr_common.remoteConnType = REMOTE_CONN_APP;
     }
+    u_sess->attr.attr_common.trusted_coord_conn = trusted_coord_conn;
 
     /* Set connection_from_coordinator. If it's true, we skip redundant verifications. Currently, it's only
     used to skip password verifications of set role and alter role launched by coordinator to data nodes.
     Only recognize remotetype=coordinator when SPQ plugin is loaded, to prevent unauthorized trust bypass. */
-    if (port->cmdline_options != NULL && strstr(port->cmdline_options, "remotetype=coordinator") != NULL &&
+    if (trusted_coord_conn &&
         g_instance.attr.attr_common.shared_preload_libraries_string != NULL &&
         strstr(g_instance.attr.attr_common.shared_preload_libraries_string, "spq") != NULL) {
         u_sess->attr.attr_common.connection_from_coordinator = true;

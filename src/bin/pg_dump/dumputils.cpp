@@ -507,7 +507,9 @@ char* getRolePassword(PGconn* conn, const char* user)
     char* rolepassword = NULL;
 
     /* Each user name in the pg_authid is unique */
-    appendPQExpBuffer(buf, "SELECT rolpassword FROM pg_catalog.pg_authid WHERE rolname = '%s';", user);
+    appendPQExpBuffer(buf, "SELECT rolpassword FROM pg_catalog.pg_authid WHERE rolname = ");
+    appendStringLiteralConn(buf, user, conn);
+    appendPQExpBuffer(buf, ";");
     res = PQexec(conn, buf->data);
     if (PQntuples(res) != 1) {
         write_msg(NULL, "query to get role password for role \"%s\" failed: wrong number of rows returned\n", user);
@@ -700,11 +702,15 @@ bool buildACLCommands(const char* name, const char* subname, const char* type, c
                     if ((binary_upgrade_oldowner != NULL) &&
                         (0 == strncmp(grantor->data, binary_upgrade_oldowner, NAMEDATALEN))) {
                         rolepassword = getRolePassword(conn, binary_upgrade_newowner);
-                        (void)appendPQExpBuffer(secondsql, "SET SESSION AUTHORIZATION '%s' ", binary_upgrade_newowner);
+                        (void)appendPQExpBuffer(secondsql, "SET SESSION AUTHORIZATION ");
+                        (void)appendStringLiteralConn(secondsql, binary_upgrade_newowner, conn);
+                        (void)appendPQExpBuffer(secondsql, " ");
                         (void)appendPQExpBuffer(secondsql, "PASSWORD %s;\n", rolepassword);
                     } else {
                         rolepassword = getRolePassword(conn, grantor->data);
-                        (void)appendPQExpBuffer(secondsql, "SET SESSION AUTHORIZATION '%s' ", grantor->data);
+                        (void)appendPQExpBuffer(secondsql, "SET SESSION AUTHORIZATION ");
+                        (void)appendStringLiteralConn(secondsql, grantor->data, conn);
+                        (void)appendPQExpBuffer(secondsql, " ");
                         (void)appendPQExpBuffer(secondsql, "PASSWORD %s;\n", rolepassword);
                     }
                     rc = memset_s(rolepassword, strlen(rolepassword), 0, strlen(rolepassword));

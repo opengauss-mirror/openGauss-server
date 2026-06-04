@@ -376,6 +376,7 @@ void create_logical_replication_slot(const Name name, Name plugin, bool isDummyS
     CheckLogicalDecodingRequirements(databaseId);
     int rc = 0;
     char *fullname = NULL;
+    CheckLogicalAllowedPlugin(NameStr(*plugin));
     fullname = expand_dynamic_library_name(NameStr(*plugin));
 
     Assert(!t_thrd.slot_cxt.MyReplicationSlot);

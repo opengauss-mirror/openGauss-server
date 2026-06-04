@@ -355,7 +355,7 @@ int HandleFunctionRequest(StringInfo msgBuf)
      * functions can't be called this way.  Perhaps we should pass
      * DEFAULT_COLLATION_OID, instead?
      */
-    InitFunctionCallInfoData(fcinfo, &fip->flinfo, 0, InvalidOid, NULL, NULL);
+    InitFunctionCallInfoData(fcinfo, &fip->flinfo, fip->flinfo.fn_nargs, InvalidOid, NULL, NULL);
 
     if (PG_PROTOCOL_MAJOR(FrontendProtocol) >= 3)
         rformat = parse_fcall_arguments(msgBuf, fip, &fcinfo);
@@ -392,6 +392,7 @@ int HandleFunctionRequest(StringInfo msgBuf)
     CHECK_FOR_INTERRUPTS();
 
     SendFunctionResult(retval, fcinfo.isnull, fip->rettype, rformat);
+    FreeFunctionCallInfoData(fcinfo);
 
     /* We no longer need the snapshot */
     PopActiveSnapshot();
