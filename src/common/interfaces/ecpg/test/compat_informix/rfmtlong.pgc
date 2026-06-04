@@ -19,7 +19,7 @@ fmtlong(long lng, char *fmt)
 	int r;
 	char buf[30];
 
-	r = rfmtlong(lng, fmt, buf);
+	r = rfmtlong(lng, fmt, buf, sizeof(buf));
 	printf("r: %d ", r);
 	if (r == 0)
 	{
@@ -27,6 +27,16 @@ fmtlong(long lng, char *fmt)
 	}
 	else
 		check_return(r);
+}
+
+static void
+fmtlong_small(long lng, char *fmt)
+{
+	int r;
+	char buf[4];
+
+	r = rfmtlong(lng, fmt, buf, sizeof(buf));
+	printf("small r: %d\n", r);
 }
 
 int
@@ -44,6 +54,7 @@ main(void)
 	fmtlong(-8494493, "+-+################");
 	fmtlong(-8494493, "abc: ################+-+");
 	fmtlong(-8494493, "+<<<<,<<<,<<<,<<<");
+	fmtlong_small(123456, "########");
 
 	return (0);
 }

@@ -5,6 +5,8 @@
 #ifndef _ECPG_INFORMIX_H
 #define _ECPG_INFORMIX_H
 
+#include <stddef.h>
+
 #include <ecpglib.h>
 #include <pgtypes_date.h>
 #include <pgtypes_interval.h>
@@ -41,7 +43,7 @@ extern int rmdyjul(short*, date*);
 extern int rstrdate(char*, date*);
 extern int rdayofweek(date);
 
-extern int rfmtlong(long, char*, char*);
+extern int rfmtlong(long, char*, char*, size_t);
 extern int rgetmsg(int, char*, int);
 extern int risnull(int, char*);
 extern int rsetnull(int, char*);

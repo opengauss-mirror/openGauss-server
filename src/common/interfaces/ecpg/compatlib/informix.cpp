@@ -670,7 +670,7 @@ static int getRightMostDot(char* str)
 }
 
 /* And finally some misc functions */
-int rfmtlong(long lng_val, char* fmt, char* outbuf)
+int rfmtlong(long lng_val, char* fmt, char* outbuf, size_t outbuf_len)
 {
     size_t fmt_len = strlen(fmt);
     size_t temp_len;
@@ -824,11 +824,16 @@ int rfmtlong(long lng_val, char* fmt, char* outbuf)
 
     /* reverse the temp-string and put it into the outbuf */
     temp_len = strlen(temp);
-    outbuf[0] = '\0';
-    for (i = temp_len - 1; i >= 0; i--) {
-        tmp[0] = temp[i];
-        strcat(outbuf, tmp);
+    if (outbuf_len == 0 || temp_len >= outbuf_len) {
+        free(temp);
+        free(value.val_string);
+        errno = ERANGE;
+        return -1;
     }
+    for (i = temp_len - 1, j = 0; i >= 0; i--, j++) {
+        outbuf[j] = temp[i];
+    }
+
     outbuf[temp_len] = '\0';
 
     /* cleaning up */
