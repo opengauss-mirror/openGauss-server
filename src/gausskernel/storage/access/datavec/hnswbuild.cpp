@@ -36,6 +36,8 @@
 #include "tcop/tcopprot.h"
 #include "utils/datum.h"
 #include "utils/memutils.h"
+#include "utils/syscache.h"
+#include "utils/partcache.h"
 #include "commands/vacuum.h"
 
 #include "pgstat.h"
@@ -396,20 +398,17 @@ static void CreatePQPages(HnswBuildState *buildstate)
  */
 static void CreateRbqMatrixPages(HnswBuildState *buildstate)
 {
-    uint16 nblks;
     Relation index = buildstate->index;
     ForkNumber forkNum = buildstate->forkNum;
     Buffer buf;
     Page page;
-    uint16 matrixNblk;
-    uint32 matrixSize;
+    HnswRbqMetaPageInfo rbqInfo;
     void *matrix;
 
-    HnswGetRbqInfoFromMetaPage(index, NULL, NULL, NULL, NULL, &matrixNblk,
-                               &matrixSize, NULL, NULL, NULL, NULL);
+    HnswGetRbqMetaPageInfo(index, &rbqInfo);
 
     /* create matrix page */
-    for (uint16 i = 0; i < matrixNblk; i++) {
+    for (uint16 i = 0; i < rbqInfo.matrixNblk; i++) {
         buf = HnswNewBuffer(index, forkNum);
         page = BufferGetPage(buf);
         HnswInitPage(buf, page);
@@ -424,7 +423,7 @@ static void CreateRbqMatrixPages(HnswBuildState *buildstate)
         matrix = FhtGetMatrix(vtrans);
     }
 
-    FlushChunkInfoInternal(index, (char *)matrix, HNSW_CHUNK_START_BLKNO, matrixNblk, matrixSize);
+    FlushChunkInfoInternal(index, (char *)matrix, HNSW_CHUNK_START_BLKNO, rbqInfo.matrixNblk, rbqInfo.matrixSize);
     if (vtrans->type == FAST_HTRANSFORM) {
         pfree(matrix);
     }
@@ -435,24 +434,20 @@ static void CreateRbqMatrixPages(HnswBuildState *buildstate)
  */
 static void CreateRbqOtherPages(HnswBuildState *buildstate)
 {
-    uint16 nblks;
     Relation index = buildstate->index;
     ForkNumber forkNum = buildstate->forkNum;
     RabitQConfig *rbqConfig = buildstate->rbqConfig;
     Buffer buf;
     Page page;
-    uint16 matrixNblk;
-    uint16 otherNblk;
-    uint32 otherSize;
+    HnswRbqMetaPageInfo rbqInfo;
     uint32 oneSize = buildstate->dimensions * sizeof(float);
     void *other;
     errno_t rc;
 
-    HnswGetRbqInfoFromMetaPage(index, NULL, NULL, NULL, NULL, &matrixNblk, NULL,
-                               &otherNblk, &otherSize, NULL, NULL);
+    HnswGetRbqMetaPageInfo(index, &rbqInfo);
 
     /* create ohter page */
-    for (uint16 i = 0; i < otherNblk; i++) {
+    for (uint16 i = 0; i < rbqInfo.otherNblk; i++) {
         buf = HnswNewBuffer(index, forkNum);
         page = BufferGetPage(buf);
         HnswInitPage(buf, page);
@@ -473,7 +468,8 @@ static void CreateRbqOtherPages(HnswBuildState *buildstate)
         securec_check(rc, "\0", "\0");
     }
 
-    FlushChunkInfoInternal(index, (char *)other, HNSW_CHUNK_START_BLKNO + matrixNblk, otherNblk, otherSize);
+    FlushChunkInfoInternal(index, (char *)other, HNSW_CHUNK_START_BLKNO + rbqInfo.matrixNblk,
+        rbqInfo.otherNblk, rbqInfo.otherSize);
 }
 
 /*
@@ -1109,10 +1105,9 @@ static void BuildCallback(Relation index, CALLBACK_ITEM_POINTER, Datum *values, 
     /* RabitQ delay build, avoid "insert into select from" sql from inserting repeatedly. */
     if (buildstate->enableRabitQ && buildstate->rbqDelayState == RBQ_BUILD_AFTER_DELAY) {
         buildstate->rbqDelayBuildRows++;
-        int64 insertedRows;
-        HnswGetRbqInfoFromMetaPage(index, NULL, NULL, NULL, NULL, NULL, NULL,
-                                   NULL, NULL, NULL, &insertedRows);
-        if (buildstate->rbqDelayBuildRows > insertedRows) {
+        HnswRbqMetaPageInfo rbqInfo;
+        HnswGetRbqMetaPageInfo(index, &rbqInfo);
+        if (buildstate->rbqDelayBuildRows > rbqInfo.rbqInsertRows) {
             return;
         }
     }
@@ -1423,6 +1418,82 @@ static void HnswParallelScanAndInsert(Relation heapRel, Relation indexRel, HnswS
 }
 
 /*
+ * Open the heap relation in a parallel worker.  LOCAL partition builds may use a
+ * dummy heap Relation; open the parent heap and partition in that case.
+ */
+static Relation HnswWorkerOpenHeapRel(HnswShared *hnswshared, Relation *outHeapParent)
+{
+    Relation heapRel;
+    Relation heapParent;
+
+    if (outHeapParent != NULL) {
+        *outHeapParent = NULL;
+    }
+
+    if (OidIsValid(hnswshared->heap_parent_relid)) {
+        Assert(outHeapParent != NULL);
+        heapParent = heap_open(hnswshared->heap_parent_relid, NoLock);
+        Partition heapPart = partitionOpen(heapParent, hnswshared->heaprelid, NoLock);
+        heapRel = partitionGetRelation(heapParent, heapPart);
+        partitionClose(heapParent, heapPart, NoLock);
+        *outHeapParent = heapParent;
+    } else {
+        heapRel = heap_open(hnswshared->heaprelid, NoLock);
+    }
+
+    return heapRel;
+}
+
+/*
+ * Open the index relation in a parallel worker.  LOCAL partition index builds may
+ * use a dummy index Relation whose OID is stored in pg_partition.
+ */
+static Relation HnswWorkerOpenIndexRel(HnswShared *hnswshared, Relation *outIndexParent)
+{
+    Relation indexRel;
+    Relation indexParent;
+
+    if (outIndexParent != NULL) {
+        *outIndexParent = NULL;
+    }
+
+    if (OidIsValid(hnswshared->index_parent_relid)) {
+        Assert(outIndexParent != NULL);
+        indexParent = index_open(hnswshared->index_parent_relid, NoLock);
+        Partition indexPart = partitionOpen(indexParent, hnswshared->indexrelid, NoLock);
+        indexRel = partitionGetRelation(indexParent, indexPart);
+        partitionClose(indexParent, indexPart, NoLock);
+        *outIndexParent = indexParent;
+    } else {
+        indexRel = index_open(hnswshared->indexrelid, NoLock);
+    }
+
+    return indexRel;
+}
+
+static void HnswWorkerCloseHeapRel(HnswShared *hnswshared, Relation heapRel, Relation heapParent)
+{
+    if (OidIsValid(hnswshared->heap_parent_relid)) {
+        Assert(heapParent != NULL);
+        releaseDummyRelation(&heapRel);
+        heap_close(heapParent, NoLock);
+    } else {
+        heap_close(heapRel, NoLock);
+    }
+}
+
+static void HnswWorkerCloseIndexRel(HnswShared *hnswshared, Relation indexRel, Relation indexParent)
+{
+    if (OidIsValid(hnswshared->index_parent_relid)) {
+        Assert(indexParent != NULL);
+        releaseDummyRelation(&indexRel);
+        index_close(indexParent, NoLock);
+    } else {
+        index_close(indexRel, NoLock);
+    }
+}
+
+/*
  * Perform work within a launched parallel process
  */
 void HnswParallelBuildMain(const BgWorkerContext *bwc)
@@ -1431,13 +1502,15 @@ void HnswParallelBuildMain(const BgWorkerContext *bwc)
     char *hnswarea;
     Relation heapRel;
     Relation indexRel;
+    Relation heapParent;
+    Relation indexParent;
 
     /* Look up shared state */
     hnswshared = (HnswShared *)bwc->bgshared;
 
     /* Open relations within worker */
-    heapRel = heap_open(hnswshared->heaprelid, NoLock);
-    indexRel = index_open(hnswshared->indexrelid, NoLock);
+    heapRel = HnswWorkerOpenHeapRel(hnswshared, &heapParent);
+    indexRel = HnswWorkerOpenIndexRel(hnswshared, &indexParent);
 
     hnswarea = hnswshared->hnswarea;
 
@@ -1445,8 +1518,8 @@ void HnswParallelBuildMain(const BgWorkerContext *bwc)
     HnswParallelScanAndInsert(heapRel, indexRel, hnswshared, hnswarea);
 
     /* Close relations within worker */
-    index_close(indexRel, NoLock);
-    heap_close(heapRel, NoLock);
+    HnswWorkerCloseIndexRel(hnswshared, indexRel, indexParent);
+    HnswWorkerCloseHeapRel(hnswshared, heapRel, heapParent);
 }
 
 /*
@@ -1489,6 +1562,16 @@ static HnswShared *HnswParallelInitshared(HnswBuildState *buildstate)
     /* Initialize immutable state */
     hnswshared->heaprelid = RelationGetRelid(buildstate->heap);
     hnswshared->indexrelid = RelationGetRelid(buildstate->index);
+    if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(hnswshared->heaprelid))) {
+        hnswshared->heap_parent_relid = buildstate->heap->parentId;
+    } else {
+        hnswshared->heap_parent_relid = InvalidOid;
+    }
+    if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(hnswshared->indexrelid))) {
+        hnswshared->index_parent_relid = buildstate->index->parentId;
+    } else {
+        hnswshared->index_parent_relid = InvalidOid;
+    }
     hnswshared->pqDistanceTable = NULL;
     if (buildstate->enablePQ) {
         pqTable = (char *) MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
@@ -1584,6 +1667,11 @@ static void BuildGraph(HnswBuildState *buildstate, ForkNumber forkNum)
     /* Calculate parallel workers */
     if (buildstate->heap != NULL) {
         parallel_workers = PlanCreateIndexWorkers(buildstate->heap, buildstate->indexInfo);
+    }
+
+    if ((buildstate->heap != NULL && OidIsValid(buildstate->heap->grandparentId)) ||
+        (buildstate->index != NULL && OidIsValid(buildstate->index->grandparentId))) {
+        parallel_workers = 0;
     }
 
     bool singleThreadBuild = (buildstate->enableRabitQ && buildstate->rbqDelayState == RBQ_BUILD_AFTER_DELAY);

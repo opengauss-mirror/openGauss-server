@@ -804,7 +804,6 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
     if (RelationIsPartitioned(rel) && (strcmp(stmt->accessMethod, "bm25") == 0 ||
-        strcmp(stmt->accessMethod, "hnsw") == 0 ||
         strcmp(stmt->accessMethod, "ivfflat") == 0 ||
         strcmp(stmt->accessMethod, "diskann") == 0)) {
         elog(ERROR, "%s index is not supported for partition table.", (stmt->accessMethod));
@@ -841,14 +840,10 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
         root_save_sec_context | SECURITY_RESTRICTED_OPERATION);
     const bool isVectorIndex = (pg_strcasecmp(stmt->accessMethod, DEFAULT_HNSW_INDEX_TYPE) == 0) ||
         (pg_strcasecmp(stmt->accessMethod, DEFAULT_IVFFLAT_INDEX_TYPE) == 0);
+    const bool isHnswIndex = (pg_strcasecmp(stmt->accessMethod, DEFAULT_HNSW_INDEX_TYPE) == 0);
 
     /* Forbidden to create gin index on ustore table. */
     if (rel->rd_tam_ops == TableAmUstore) {
-        if (RELATION_IS_PARTITIONED(rel) && stmt->isPartitioned && isVectorIndex) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("%s local partition index is only supported on astore tables", stmt->accessMethod)));
-        }
         if (strcmp(stmt->accessMethod, "btree") == 0) {
             elog(ERROR, "btree index is not supported for ustore, please use ubtree instead");
         }
@@ -915,6 +910,13 @@ ObjectAddress DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, 
     CheckColumnTypeSupportsIndex(relationId, stmt->indexParams);
 
     SetPartionIndexType(stmt, rel, is_alter_table);
+
+    if (rel->rd_tam_ops == TableAmUstore && RELATION_IS_PARTITIONED(rel) && stmt->isPartitioned &&
+        !stmt->isGlobal && isVectorIndex && !isHnswIndex) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("%s local partition index is only supported on astore tables", stmt->accessMethod)));
+    }
 
     if (stmt->isGlobal && DISABLE_MULTI_NODES_GPI) {
         ereport(ERROR,

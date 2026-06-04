@@ -408,6 +408,8 @@ typedef struct HnswShared {
     /* Immutable state */
     Oid heaprelid;
     Oid indexrelid;
+    Oid heap_parent_relid;   /* pg_class parent heap when heaprelid is a partition dummy OID */
+    Oid index_parent_relid;  /* pg_class parent index when indexrelid is a partition dummy OID */
     char *pqTable;
     float *pqDistanceTable;
 
@@ -562,6 +564,19 @@ typedef struct HnswMetaPageData {
 } HnswMetaPageData;
 
 typedef HnswMetaPageData *HnswMetaPage;
+
+typedef struct HnswRbqMetaPageInfo {
+    bool enableRabitQ;
+    bool useFHT;
+    uint16 reOffset;
+    RefineType reType;
+    uint16 matrixNblk;
+    uint32 matrixSize;
+    uint16 otherNblk;
+    uint32 otherSize;
+    int rbqDelayState;
+    int64 rbqInsertRows;
+} HnswRbqMetaPageInfo;
 
 typedef struct HnswAppendMetaPageData {
     uint32 magicNumber;
@@ -800,9 +815,8 @@ int GetPQDistance(const uint8 *basecode, const uint8 *querycode, const PQParams 
                   size_t querycode_size, size_t pqDistanceTable_size, size_t pqDistance_size);
 void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, int dim, bool *enablePQ, bool trymmap);
 void InitLsgSamplesOnDisk(Relation index, FmgrInfo *procinfo, LsgCalculator** LocScalingParam, bool *enableLsg);
-void HnswGetRbqInfoFromMetaPage(Relation index, bool *enableRabitQ, bool *useFHT, uint16 *reOffset,
-                                RefineType *reType, uint16 *matrixNblk, uint32 *matrixSize,
-                                uint16 *otherNblk, uint32 *otherSize, int *rbqDelayState, int64 *rbqInsertRows);
+void HnswInitDefaultRbqMetaPageInfo(HnswRbqMetaPageInfo *info);
+void HnswGetRbqMetaPageInfo(Relation index, HnswRbqMetaPageInfo *info);
 void FlushChunkInfoInternal(Relation index, char* table, BlockNumber startBlkno, uint16 nblks, uint32 totalSize);
 RabitQConfig *InitRbqConfigOnDisk(Relation index, bool *enableRabitQ, float **centroid, int dim);
 Datum HnswGetVectorFromHeap(Relation heap, ItemPointer heaptids, IndexInfo *indexInfo, HeapTuple tuple,

@@ -18,11 +18,11 @@ create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE);
 alter table test1 set (parallel_workers=1);
 alter table test1 set (parallel_workers=0);
 ERROR:  value 0 out of bounds for option "parallel_workers"
-DETAIL:  Valid values are between "1" and "32".
-alter table test1 set (parallel_workers=33);
-ERROR:  value 33 out of bounds for option "parallel_workers"
-DETAIL:  Valid values are between "1" and "32".
-alter table test1 set (parallel_workers=32);
+DETAIL:  Valid values are between "1" and "128".
+alter table test1 set (parallel_workers=129);
+ERROR:  value 129 out of bounds for option "parallel_workers"
+DETAIL:  Valid values are between "1" and "128".
+alter table test1 set (parallel_workers=128);
 alter table test1 set (parallel_workers=3);
 insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
 create index test1_idx1 on test1(c1, c2, c3);

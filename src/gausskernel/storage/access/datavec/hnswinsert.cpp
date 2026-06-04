@@ -834,21 +834,17 @@ bool hnswinsert_internal(Relation index, Datum *values, bool *isnull, ItemPointe
      * and then build the index with HNSW RabitQ; when the threshold is exceeded,
      * insert data into the built index.
      */
-    int rbqDelayState;
-    int64 insertedRows;
-    HnswGetRbqInfoFromMetaPage(index, NULL, NULL, NULL, NULL, NULL, NULL,
-                               NULL, NULL, &rbqDelayState, &insertedRows);
-    if (rbqDelayState == RBQ_BUILD_DELAY) {
+    HnswRbqMetaPageInfo rbqInfo;
+    HnswGetRbqMetaPageInfo(index, &rbqInfo);
+    if (rbqInfo.rbqDelayState == RBQ_BUILD_DELAY) {
         LockPage(index, HNSW_UPDATE_LOCK, ExclusiveLock);
-        int rbqDelayStateCheck;
-        int64 insertedRowsCheck;
-        HnswGetRbqInfoFromMetaPage(index, NULL, NULL, NULL, NULL, NULL, NULL,
-                               NULL, NULL, &rbqDelayStateCheck, &insertedRowsCheck);
-        if (rbqDelayStateCheck == RBQ_BUILD_DELAY) {
+        HnswRbqMetaPageInfo rbqInfoCheck;
+        HnswGetRbqMetaPageInfo(index, &rbqInfoCheck);
+        if (rbqInfoCheck.rbqDelayState == RBQ_BUILD_DELAY) {
             int64 sampleRows = u_sess->datavec_ctx.rbq_sample_rows;
-            if (insertedRowsCheck + 1 < sampleRows) {
+            if (rbqInfoCheck.rbqInsertRows + 1 < sampleRows) {
                 HnswUpdateMetaPageRbq(index, MAIN_FORKNUM, false);
-            } else if (insertedRowsCheck + 1 == sampleRows) {
+            } else if (rbqInfoCheck.rbqInsertRows + 1 == sampleRows) {
                 HnswUpdateMetaPageRbq(index, MAIN_FORKNUM, true);
                 HnswBuildState buildstate;
                 IndexInfo *indexInfo = BuildIndexInfo(index);

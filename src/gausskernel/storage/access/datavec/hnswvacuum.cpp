@@ -625,8 +625,6 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
     Relation index = info->index;
     uint16 pqTableNblk;
     uint16 pqDisTableNblk;
-    uint16 matrixNblk;
-    uint16 otherNblk;
     float *centroid;
     int dim = TupleDescAttr(index->rd_att, 0)->atttypmod;
 
@@ -653,10 +651,12 @@ static void InitVacuumState(HnswVacuumState *vacuumstate, IndexVacuumInfo *info,
     InitVacuumRbqState(vacuumstate, info, rbqConfig, dim);
 
     HnswGetPQInfoFromMetaPage(index, &pqTableNblk, NULL, &pqDisTableNblk, NULL);
-    HnswGetRbqInfoFromMetaPage(index, NULL, NULL, NULL, NULL, &matrixNblk,
-                               NULL, &otherNblk, NULL, NULL, NULL);
-    vacuumstate->hnswHeadBlkno = HNSW_CHUNK_START_BLKNO + pqTableNblk + pqDisTableNblk +
-                                 matrixNblk + otherNblk;
+    {
+        HnswRbqMetaPageInfo rbqInfo;
+        HnswGetRbqMetaPageInfo(index, &rbqInfo);
+        vacuumstate->hnswHeadBlkno = HNSW_CHUNK_START_BLKNO + pqTableNblk + pqDisTableNblk +
+                                     rbqInfo.matrixNblk + rbqInfo.otherNblk;
+    }
 
     /* Create hash table */
     vacuumstate->deleted = tidhash_create(CurrentMemoryContext, 256, NULL);

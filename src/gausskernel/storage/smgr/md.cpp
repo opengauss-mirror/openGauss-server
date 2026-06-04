@@ -122,7 +122,6 @@ static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum, const MdfdV
 static void register_dirty_segment(SMgrRelation reln, ForkNumber forknum, const MdfdVec *seg);
 static void register_unlink_segment(RelFileNodeBackend rnode, ForkNumber forknum, BlockNumber segno);
 
-
 bool check_unlink_rel_hashtbl(RelFileNode rnode, ForkNumber forknum)
 {
     HTAB* relfilenode_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;

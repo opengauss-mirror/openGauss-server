@@ -35,7 +35,10 @@
 #include "access/datavec/sparsevec.h"
 #include "access/datavec/utils.h"
 #include "storage/buf/bufmgr.h"
+#include "catalog/pg_partition.h"
+#include "catalog/pg_partition_fn.h"
 #include "utils/datum.h"
+#include "utils/partcache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 
@@ -427,6 +430,18 @@ HnswElement HnswInitElementFromBlock(BlockNumber blkno, OffsetNumber offno)
 }
 
 /*
+ * True only for the parent local partitioned index catalog entry in pg_class,
+ * which has no on-disk HNSW metapage.  Index partition dummy Relations from
+ * partitionGetRelation() map rd_node to part->pd_node and must read metapage.
+ */
+static bool HnswIndexRelationSkipsPhysicalMetapage(Relation index)
+{
+    return RelationIsIndex(index) &&
+           RelationIsPartitioned(index) &&
+           !RelationIsGlobalIndex(index);
+}
+
+/*
  * Get the metapage info
  */
 void HnswGetMetaPageInfo(Relation index, int *m, HnswElement *entryPoint)
@@ -435,12 +450,23 @@ void HnswGetMetaPageInfo(Relation index, int *m, HnswElement *entryPoint)
     Page page;
     HnswMetaPage metap;
 
+    if (HnswIndexRelationSkipsPhysicalMetapage(index)) {
+        if (m != NULL) {
+            *m = HNSW_DEFAULT_M;
+        }
+        if (entryPoint != NULL) {
+            *entryPoint = NULL;
+        }
+        return;
+    }
+
     buf = ReadBuffer(index, HNSW_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
     metap = HnswPageGetMeta(page);
-    if (unlikely(metap->magicNumber != HNSW_MAGIC_NUMBER))
+    if (unlikely(metap->magicNumber != HNSW_MAGIC_NUMBER)) {
         elog(ERROR, "hnsw index is not valid");
+    }
 
     if (m != NULL)
         *m = metap->m;
@@ -2102,6 +2128,22 @@ void HnswGetPQInfoFromMetaPage(Relation index, uint16 *pqTableNblk, uint32 *pqTa
     Buffer buf;
     Page page;
 
+    if (HnswIndexRelationSkipsPhysicalMetapage(index)) {
+        if (pqTableNblk != NULL) {
+            *pqTableNblk = 0;
+        }
+        if (pqTableSize != NULL) {
+            *pqTableSize = 0;
+        }
+        if (pqDisTableNblk != NULL) {
+            *pqDisTableNblk = 0;
+        }
+        if (pqDisTableSize != NULL) {
+            *pqDisTableSize = 0;
+        }
+        return;
+    }
+
     buf = ReadBuffer(index, HNSW_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
@@ -2140,6 +2182,25 @@ void HnswGetLsgInfoFromMetaPage(Relation index, uint32* lsgCodeBookSize, uint16*
 {
     Buffer buf;
     Page page;
+
+    if (HnswIndexRelationSkipsPhysicalMetapage(index)) {
+        if (lsgCodeBookSize != NULL) {
+            *lsgCodeBookSize = 0;
+        }
+        if (nBlks != NULL) {
+            *nBlks = 0;
+        }
+        if (lsgDim != NULL) {
+            *lsgDim = 0;
+        }
+        if (lsgSampleSize != NULL) {
+            *lsgSampleSize = 0;
+        }
+        if (enableLsg != NULL) {
+            *enableLsg = false;
+        }
+        return;
+    }
     buf = ReadBuffer(index, HNSW_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
@@ -2198,58 +2259,123 @@ void InitPQParamsOnDisk(PQParams *params, Relation index, FmgrInfo *procinfo, in
 
 }
 
-/*
-* Get the info related to RabitQ in metapage
-*/
-void HnswGetRbqInfoFromMetaPage(Relation index, bool *enableRabitQ, bool *useFHT, uint16 *reOffset,
-                                RefineType *reType, uint16 *matrixNblk, uint32 *matrixSize,
-                                uint16 *otherNblk, uint32 *otherSize, int *rbqDelayState, int64 *rbqInsertRows)
+void HnswInitDefaultRbqMetaPageInfo(HnswRbqMetaPageInfo *info)
+{
+    info->enableRabitQ = false;
+    info->useFHT = false;
+    info->reOffset = 0;
+    info->reType = SQ8;
+    info->matrixNblk = 0;
+    info->matrixSize = 0;
+    info->otherNblk = 0;
+    info->otherSize = 0;
+    info->rbqDelayState = RBQ_BUILD_NORMAL;
+    info->rbqInsertRows = 0;
+}
+
+static void HnswLoadRbqMetaPageInfoFromPage(HnswMetaPage metap, HnswRbqMetaPageInfo *info)
+{
+    info->enableRabitQ = metap->enableRabitQ;
+    info->useFHT = metap->useFHT;
+    info->reOffset = metap->reOffset;
+    info->reType = metap->reType;
+    info->matrixNblk = metap->matrixNblk;
+    info->matrixSize = metap->matrixSize;
+    info->otherNblk = metap->otherNblk;
+    info->otherSize = metap->otherSize;
+    info->rbqDelayState = metap->rbqDelayState;
+    info->rbqInsertRows = metap->rbqInsertRows;
+}
+
+static void HnswReadRbqMetaPageInfoFromRelation(Relation index, HnswRbqMetaPageInfo *info)
 {
     Buffer buf;
     Page page;
+    HnswMetaPage metap;
+
+    HnswInitDefaultRbqMetaPageInfo(info);
 
     buf = ReadBuffer(index, HNSW_METAPAGE_BLKNO);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     page = BufferGetPage(buf);
-
-    HnswMetaPage metap = HnswPageGetMeta(page);
+    metap = HnswPageGetMeta(page);
     if (unlikely(metap->magicNumber != HNSW_MAGIC_NUMBER)) {
         UnlockReleaseBuffer(buf);
         elog(ERROR, "hnsw index is not valid");
     }
-
-    if (enableRabitQ != NULL) {
-        *enableRabitQ = metap->enableRabitQ;
-    }
-    if (useFHT != NULL) {
-        *useFHT = metap->useFHT;
-    }
-    if (reOffset != NULL) {
-        *reOffset = metap->reOffset;
-    }
-    if (matrixNblk != NULL) {
-        *matrixNblk = metap->matrixNblk;
-    }
-    if (matrixSize != NULL) {
-        *matrixSize = metap->matrixSize;
-    }
-    if (reType != NULL) {
-        *reType = metap->reType;
-    }
-    if (otherNblk != NULL) {
-        *otherNblk = metap->otherNblk;
-    }
-    if (otherSize != NULL) {
-        *otherSize = metap->otherSize;
-    }
-    if (rbqDelayState != NULL) {
-        *rbqDelayState = metap->rbqDelayState;
-    }
-    if (rbqInsertRows != NULL) {
-        *rbqInsertRows = metap->rbqInsertRows;
-    }
-
+    HnswLoadRbqMetaPageInfoFromPage(metap, info);
     UnlockReleaseBuffer(buf);
+}
+
+static bool HnswPartitionIndexRbqDelayStateIsDelay(Relation indexRel)
+{
+    HnswRbqMetaPageInfo info;
+
+    HnswReadRbqMetaPageInfoFromRelation(indexRel, &info);
+    return info.rbqDelayState == RBQ_BUILD_DELAY;
+}
+
+static int HnswAggregateLocalIndexRbqDelayState(Relation parentIndex)
+{
+    List *partOids = indexGetPartitionOidList(parentIndex);
+    ListCell *cell = NULL;
+
+    foreach (cell, partOids) {
+        Oid partOid = lfirst_oid(cell);
+        Partition part = partitionOpen(parentIndex, partOid, AccessShareLock);
+
+        if (PartitionHasSubpartition(part)) {
+            Relation level1IndexRel = partitionGetRelation(parentIndex, part);
+            List *subPartTuples = searchPgPartitionByParentId(PART_OBJ_TYPE_INDEX_PARTITION, partOid);
+            ListCell *subCell = NULL;
+
+            foreach (subCell, subPartTuples) {
+                Oid subPartOid = HeapTupleGetOid((HeapTuple)lfirst(subCell));
+                Partition subPart = partitionOpen(level1IndexRel, subPartOid, AccessShareLock);
+                Relation subIndexRel = partitionGetRelation(level1IndexRel, subPart);
+
+                if (HnswPartitionIndexRbqDelayStateIsDelay(subIndexRel)) {
+                    releaseDummyRelation(&subIndexRel);
+                    partitionClose(level1IndexRel, subPart, AccessShareLock);
+                    freePartList(subPartTuples);
+                    releaseDummyRelation(&level1IndexRel);
+                    partitionClose(parentIndex, part, AccessShareLock);
+                    list_free(partOids);
+                    return RBQ_BUILD_DELAY;
+                }
+                releaseDummyRelation(&subIndexRel);
+                partitionClose(level1IndexRel, subPart, AccessShareLock);
+            }
+            freePartList(subPartTuples);
+            releaseDummyRelation(&level1IndexRel);
+        } else {
+            Relation partIndexRel = partitionGetRelation(parentIndex, part);
+
+            if (HnswPartitionIndexRbqDelayStateIsDelay(partIndexRel)) {
+                releaseDummyRelation(&partIndexRel);
+                partitionClose(parentIndex, part, AccessShareLock);
+                list_free(partOids);
+                return RBQ_BUILD_DELAY;
+            }
+            releaseDummyRelation(&partIndexRel);
+        }
+        partitionClose(parentIndex, part, AccessShareLock);
+    }
+
+    list_free(partOids);
+    return RBQ_BUILD_NORMAL;
+}
+
+void HnswGetRbqMetaPageInfo(Relation index, HnswRbqMetaPageInfo *info)
+{
+    HnswInitDefaultRbqMetaPageInfo(info);
+
+    if (HnswIndexRelationSkipsPhysicalMetapage(index)) {
+        info->rbqDelayState = HnswAggregateLocalIndexRbqDelayState(index);
+        return;
+    }
+
+    HnswReadRbqMetaPageInfoFromRelation(index, info);
 }
 
 void* LoadRbq(Relation index, uint16 startBlkNo, uint16 nblk, uint32 size)
@@ -2274,24 +2400,20 @@ void* LoadRbq(Relation index, uint16 startBlkNo, uint16 nblk, uint32 size)
 
 RabitQConfig *InitRbqConfigOnDisk(Relation index, bool *enableRabitQ, float **centroid, int dim)
 {
-    uint16 matrixNblk;
-    uint32 matrixSize;
-    uint16 otherNblk;
-    uint32 otherSize;
-    bool useFHT;
-    uint16 reOffset;
-    RefineType reType;
+    HnswRbqMetaPageInfo rbqInfo;
 
-    HnswGetRbqInfoFromMetaPage(index, enableRabitQ, &useFHT, &reOffset, &reType, &matrixNblk,
-                               &matrixSize, &otherNblk, &otherSize, NULL, NULL);
+    HnswGetRbqMetaPageInfo(index, &rbqInfo);
+    if (enableRabitQ != NULL) {
+        *enableRabitQ = rbqInfo.enableRabitQ;
+    }
 
-    if (!enableRabitQ) {
+    if (!rbqInfo.enableRabitQ) {
         return NULL;
     }
     if (index->rbqMatrix == NULL) {
         MemoryContext oldcxt = MemoryContextSwitchTo(index->rd_indexcxt);
-        void *rbq = LoadRbq(index, HNSW_CHUNK_START_BLKNO, matrixNblk, matrixSize);
-        if (useFHT) {
+        void *rbq = LoadRbq(index, HNSW_CHUNK_START_BLKNO, rbqInfo.matrixNblk, rbqInfo.matrixSize);
+        if (rbqInfo.useFHT) {
             FastRotation *fr = FhtDeserialize(rbq);
             index->rbqMatrix = (void *)fr;
             pfree(rbq);
@@ -2302,16 +2424,16 @@ RabitQConfig *InitRbqConfigOnDisk(Relation index, bool *enableRabitQ, float **ce
     }
     if (index->rbqOther == NULL) {
         MemoryContext oldcxt = MemoryContextSwitchTo(index->rd_indexcxt);
-        index->rbqOther = (float *)LoadRbq(index, HNSW_CHUNK_START_BLKNO + matrixNblk,
-                          otherNblk, otherSize);
+        index->rbqOther = (float *)LoadRbq(index, HNSW_CHUNK_START_BLKNO + rbqInfo.matrixNblk,
+                          rbqInfo.otherNblk, rbqInfo.otherSize);
         (void)MemoryContextSwitchTo(oldcxt);
     }
  
     RabitQConfig *rbqConfig = (RabitQConfig *)palloc(sizeof(RabitQConfig));
-    rbqConfig->FHT = useFHT;
-    rbqConfig->reOffset = reOffset;
-    rbqConfig->reType = reType;
-    if (reType == SQ8) {
+    rbqConfig->FHT = rbqInfo.useFHT;
+    rbqConfig->reOffset = rbqInfo.reOffset;
+    rbqConfig->reType = rbqInfo.reType;
+    if (rbqInfo.reType == SQ8) {
         rbqConfig->sq = (ScalarQuantizer *)palloc(sizeof(ScalarQuantizer));
         rbqConfig->sq->dim = dim;
         rbqConfig->sq->trained = index->rbqOther + dim;
@@ -2322,7 +2444,7 @@ RabitQConfig *InitRbqConfigOnDisk(Relation index, bool *enableRabitQ, float **ce
     VectorTransform *vtrans = (VectorTransform *)palloc(sizeof(VectorTransform));
     rbqConfig->vtrans = vtrans;
     vtrans->dim = dim;
-    if (useFHT) {
+    if (rbqInfo.useFHT) {
         vtrans->type = FAST_HTRANSFORM;
         vtrans->fastRotation = (FastRotation *)index->rbqMatrix;
     } else {

@@ -345,6 +345,13 @@ static void acquireSamplesForPartitionedRelation(
     }
 }
 
+static inline bool PartitionIndexUsesCatalogPages(Relation indexRelation)
+{
+    Oid am = indexRelation->rd_rel->relam;
+
+    return am == HNSW_AM_OID || am == IVFFLAT_AM_OID || am == DISKANN_AM_OID;
+}
+
 /*
 * Estimate the index pages of a single index partition
 * relation: is the partitioned table
@@ -364,7 +371,11 @@ static RelPageType EstimatePartitionIndexPages(Relation relation, Relation index
         if (OidIsValid(partIndexOid)
             && ConditionalLockPartition(indexRelation->rd_id, partIndexOid, AccessShareLock, PARTITION_LOCK)) {
             Partition partIndex = partitionOpen(indexRelation, partIndexOid, NoLock);
-            indexPages = PartitionGetNumberOfBlocks(indexRelation, partIndex);
+            if (PartitionIndexUsesCatalogPages(indexRelation)) {
+                indexPages = partIndex->pd_part->relpages;
+            } else {
+                indexPages = PartitionGetNumberOfBlocks(indexRelation, partIndex);
+            }
             partitionClose(indexRelation, partIndex, AccessShareLock);
         } else {
             indexPages = indexRelation->rd_rel->relpages;
@@ -391,7 +402,11 @@ static RelPageType EstimatePartitionIndexPages(Relation relation, Relation index
         }
         samplePartitions++;
         Partition partIndex = partitionOpen(indexRelation, partIndexOid, NoLock);
-        partIndexPages += PartitionGetNumberOfBlocks(indexRelation, partIndex);
+        if (PartitionIndexUsesCatalogPages(indexRelation)) {
+            partIndexPages += partIndex->pd_part->relpages;
+        } else {
+            partIndexPages += PartitionGetNumberOfBlocks(indexRelation, partIndex);
+        }
         indexrelPartPages += partIndex->pd_part->relpages;
         partitionClose(indexRelation, partIndex, AccessShareLock);
     }
@@ -676,10 +691,9 @@ void get_relation_info(PlannerInfo* root, RangeTblEntry* rte, RelOptInfo* rel)
 
             /* If the rabitq index built first has not been trained, ignore */
             if (indexRelation->rd_rel->relam == HNSW_AM_OID) {
-                int rbqDelayState;
-                HnswGetRbqInfoFromMetaPage(indexRelation, NULL, NULL, NULL, NULL, NULL, NULL,
-                                           NULL, NULL, &rbqDelayState, NULL);
-                if (rbqDelayState == RBQ_BUILD_DELAY) {
+                HnswRbqMetaPageInfo rbqInfo;
+                HnswGetRbqMetaPageInfo(indexRelation, &rbqInfo);
+                if (rbqInfo.rbqDelayState == RBQ_BUILD_DELAY) {
                     index_close(indexRelation, NoLock);
                     continue;
                 }

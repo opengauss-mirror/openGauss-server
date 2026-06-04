@@ -198,7 +198,9 @@ IndexScanDesc hnswbeginscan_internal(Relation index, int nkeys, int norderbys)
     so->rbqParams = (RabitqQueryParams *)palloc0(sizeof(RabitqQueryParams));
     so->rbqParams->dim = dim;
     so->rbqParams->rbqConfig = InitRbqConfigOnDisk(index, &so->enableRabitQ, &so->rbqParams->centroid, dim);
-    so->rbqParams->rbqConfig->rbqQueryBits = u_sess->datavec_ctx.rbq_query_bits;
+    if (so->rbqParams->rbqConfig != NULL) {
+        so->rbqParams->rbqConfig->rbqQueryBits = u_sess->datavec_ctx.rbq_query_bits;
+    }
     so->rbqParams->funcType = so->enableRabitQ ? GetFunctionType(so->procinfo, so->normprocinfo) : 0;
     so->rbqParams->qrbqVec = NULL;
 
