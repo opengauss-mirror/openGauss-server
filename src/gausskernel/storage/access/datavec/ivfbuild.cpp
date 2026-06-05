@@ -645,8 +645,9 @@ static void InsertTuples(Relation index, IvfflatBuildState *buildstate, ForkNumb
                 Size codesize = buildstate->params->pqM * sizeof(uint8);
                 uint8 *pqcode = (uint8 *)palloc(codesize);
                 Datum datum = buildstate->byResidual ? heap_slot_getattr(slot, 4, &isnull) : index_getattr(itup, 1, tupdesc, &isnull);
-
-                IvfComputeVectorPQCode(DatumGetVector(datum)->x, buildstate->params, pqcode, codesize);
+                if (IvfComputeVectorPQCode(DatumGetVector(datum)->x, buildstate->params, pqcode, codesize) != 0) {
+                    ereport(ERROR, (errmsg("failed to compute IVFPQ vector code")));
+                }
                 ((PageHeader)page)->pd_upper -= MAXALIGN(pqcodesSize);
                 errno_t rc = memcpy_s(
                     ((char *)page) + ((PageHeader)page)->pd_upper, pqcodesSize, (char *)pqcode, pqcodesSize);

@@ -728,6 +728,7 @@ typedef struct PQSearchInfo {
     int pqMode;
     uint8 *qPQCode;
     float *pqDistanceTable;
+    size_t pqDistanceTableSize;
 } PQSearchInfo;
 
 typedef struct Candidate {

@@ -1069,17 +1069,16 @@ bool HnswLoadElement(HnswElement element, float *distance, Datum *q, Relation in
         if (enablePQ && pqinfo->lc == 0) {
             ePQCode = LoadPQcode(etup);
             params = &pqinfo->params;
-            if (pqinfo->pqMode == HNSW_PQMODE_SDC && *pqinfo->qPQCode == NULL) {
+            if (pqinfo->pqMode == HNSW_PQMODE_SDC && pqinfo->qPQCode == NULL) {
                 *distance = 0;
             } else if (pqinfo->pqMode == HNSW_PQMODE_ADC && pqinfo->pqDistanceTable == NULL) {
                 *distance = 0;
             } else {
                 size_t pqCodeSize = params->pqM * sizeof(uint8);
-                size_t pqDistTblSize = (pqinfo->pqMode == HNSW_PQMODE_SDC) ?
-                    (size_t)params->pqM * params->pqKsub * params->pqKsub * sizeof(float) :
-                    (size_t)params->pqM * params->pqKsub * sizeof(float);
-                GetPQDistance(ePQCode, pqinfo->qPQCode, params, pqinfo->pqDistanceTable, distance,
-                              pqCodeSize, pqCodeSize, pqDistTblSize, sizeof(float));
+                if (GetPQDistance(ePQCode, pqinfo->qPQCode, params, pqinfo->pqDistanceTable, distance,
+                                  pqCodeSize, pqCodeSize, pqinfo->pqDistanceTableSize, sizeof(float)) != 0) {
+                    ereport(ERROR, (errmsg("failed to compute PQ distance")));
+                }
             }
         } else if (enableRabitQ) {
             /* 
@@ -1542,11 +1541,10 @@ List *HnswSearchLayer(char *base, Datum q, List *ep, int ef, int lc, Relation in
                 if (enablePQ) {
                     uint8 *ePQCode = (uint8*)HnswPtrAccess(base, eElement->pqcodes);
                     size_t pqCodeSz = pqinfo->params.pqM * sizeof(uint8);
-                    size_t pqDistTblSz = (pqinfo->pqMode == HNSW_PQMODE_SDC) ?
-                        (size_t)pqinfo->params.pqM * pqinfo->params.pqKsub * pqinfo->params.pqKsub * sizeof(float) :
-                        (size_t)pqinfo->params.pqM * pqinfo->params.pqKsub * sizeof(float);
-                    GetPQDistance(ePQCode, pqinfo->qPQCode, &pqinfo->params, pqinfo->pqDistanceTable, &eDistance,
-                                  pqCodeSz, pqCodeSz, pqDistTblSz, sizeof(float));
+                    if (GetPQDistance(ePQCode, pqinfo->qPQCode, &pqinfo->params, pqinfo->pqDistanceTable, &eDistance,
+                                      pqCodeSz, pqCodeSz, pqinfo->pqDistanceTableSize, sizeof(float)) != 0) {
+                        ereport(ERROR, (errmsg("failed to compute PQ distance")));
+                    }
                 } else {
                     eDistance = GetCandidateDistance(base, eElement, q, procinfo, collation, enableRabitQ, enableLsg);
                 }
@@ -2057,7 +2055,9 @@ void HnswFindElementNeighbors(char *base, HnswElement element, HnswElement entry
         /* compute pq code */
         Size codesize = params->pqM * sizeof(uint8);
         uint8 *pqcode = (uint8*)palloc(codesize);
-        ComputeVectorPQCode(DatumGetVector(q)->x, params, pqcode, codesize);
+        if (ComputeVectorPQCode(DatumGetVector(q)->x, params, pqcode, codesize) != 0) {
+            ereport(ERROR, (errmsg("failed to compute PQ vector code")));
+        }
         Pointer codePtr = (Pointer)HnswPtrAccess(base, element->pqcodes);
         errno_t err = memcpy_s(codePtr, codesize, pqcode, codesize);
         securec_check(err, "\0", "\0");
