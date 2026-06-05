@@ -107,7 +107,7 @@ private:  // adaptor for BaseZeroObject::new
 
     void *annotate_allocate_internal(size_t size, const char *file, int line)
     {
-        return palloc(m_cxt, size, file, line);
+        return palloc(size);
     }
 
 private:
