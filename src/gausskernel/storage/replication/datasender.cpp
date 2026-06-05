@@ -570,6 +570,14 @@ static void ProcessStandbySearchMessage(void)
     char *fileList = NULL;
     int msgLength = 0;
 
+    if (!AmDataSenderToDummyStandby()) {
+        ereport(COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                            errmsg("unexpected dummy standby file list message from non-dummy data sender")));
+        proc_exit(0);
+    }
+
+    ereport(LOG, (errmsg("receive file list message from dummy_standby")));
+
     if (catchupState != CATCHUP_SEARCHING) {
         dummySearching = false;
         return;
@@ -618,7 +626,6 @@ static void ProcessStandbyMessage(void)
             ProcessStandbyReplyMessage();
             break;
         case 'x':
-            ereport(LOG, (errmsg("receive file list message from dummy_standby")));
             ProcessStandbySearchMessage();
             break;
         default:
