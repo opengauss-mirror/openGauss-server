@@ -392,7 +392,6 @@ int HandleFunctionRequest(StringInfo msgBuf)
     CHECK_FOR_INTERRUPTS();
 
     SendFunctionResult(retval, fcinfo.isnull, fip->rettype, rformat);
-    FreeFunctionCallInfoData(fcinfo);
 
     /* We no longer need the snapshot */
     PopActiveSnapshot();
