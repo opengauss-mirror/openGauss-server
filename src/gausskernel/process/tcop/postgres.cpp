@@ -10134,7 +10134,7 @@ static void ProcessCommandUpperO(StringInfo input_message, volatile bool& send_r
     MemoryContext oldcontext;
 
     /* Only pooler stateless reuse mode in the cluster uses 'O' packets. Other paths are invalid. */
-    if(!IsConnFromCoord()) {
+    if (!IsConnFromCoord() || !u_sess->attr.attr_common.trusted_coord_conn) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Invalid packet path, remoteConnType[%d], remote_host[%s], remote_port[%s].",
@@ -10232,7 +10232,7 @@ static void ProcessCommandUpperO(StringInfo input_message, volatile bool& send_r
 static void ProcessCommandLowerO(StringInfo input_message, volatile bool& send_ready_for_query, bool& query_started)
 {
     // switch role
-    if (unlikely(!IsConnFromCoord())) {
+    if (unlikely(!IsConnFromCoord() || !u_sess->attr.attr_common.trusted_coord_conn)) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Unsupport receive role msg from remote type[%d], remote host[%s], remote port[%s].",

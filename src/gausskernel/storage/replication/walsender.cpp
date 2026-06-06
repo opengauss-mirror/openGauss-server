@@ -1407,6 +1407,7 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
                 ereport(ERROR, (errmsg("CREATE_REPLICATION_SLOT ... USE_SNAPSHOT "
                                        "must not be called in a subtransaction")));
         }
+        CheckLogicalAllowedPlugin(cmd->plugin);
         fullname = expand_dynamic_library_name(cmd->plugin);
 
         /* Load the shared library, unless we already did */

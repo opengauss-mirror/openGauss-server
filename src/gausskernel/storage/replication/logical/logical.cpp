@@ -692,7 +692,7 @@ void OutputPluginWrite(struct LogicalDecodingContext *ctx, bool last_write)
     ctx->prepared_write = false;
 }
 
-static void CheckLogicalAllowedPlugin(const char *plugin)
+void CheckLogicalAllowedPlugin(const char *plugin)
 {
     bool have_slash = (first_dir_separator(plugin) != NULL);
     if (have_slash) {

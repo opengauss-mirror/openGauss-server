@@ -54,6 +54,7 @@
 #ifdef ENABLE_NEON
 extern void        (*Custom_XLogReaderRoutines)(XLogReaderRoutine *xlr);
 #endif
+extern void CheckLogicalAllowedPlugin(const char *plugin);
 typedef void (*LogicalOutputPluginWriterWrite)(
     struct LogicalDecodingContext* lr, XLogRecPtr Ptr, TransactionId xid, bool last_write);
 typedef LogicalOutputPluginWriterWrite LogicalOutputPluginWriterPrepareWrite;
