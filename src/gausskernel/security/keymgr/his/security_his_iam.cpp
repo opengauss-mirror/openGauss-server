@@ -127,7 +127,7 @@ void his_iam_set_arg(HisIamMgr *iam, const char *key, const char *value)
         iam->url = km_strdup(value);
     } else if (strcasecmp(key, "hiscacert") == 0) {
         km_safe_free(iam->cacert);
-        iam->url = km_realpath(value, iam->err);
+        iam->cacert = km_realpath(value, iam->err);
     } /* ignore unknowned para */
 }
 
@@ -147,6 +147,10 @@ static void his_iam_has_set_auth_info(HisIamMgr *iam)
     }
     if (iam->enterprise == NULL) {
         km_err_msg(iam->err, "failed to access his iam service, plase set parameter 'hisEnterprise'");
+        return;
+    }
+    if (iam->cacert == NULL) {
+        km_err_msg(iam->err, "failed to access his iam service, plase set parameter 'hisCaCert'");
         return;
     }
 }

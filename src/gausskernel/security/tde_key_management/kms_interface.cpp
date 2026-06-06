@@ -226,6 +226,13 @@ AdvStrList* KMSInterface::kms_restful_get_dek(const char* cmk_id, const char* de
         securec_check_ss(rc, "\0", "\0");
         http_body = TDE::CKMSMessage::get_instance().get_decrypt_dek_json(cmk_id, dek_cipher);
     }
+    if (TDE::CKMSMessage::get_instance().m_kmsca == NULL) {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            errmsg("KMS CA certificate path is not configured"),
+            errdetail("m_kmsca is NULL after TDE initialization"),
+            errcause("kmsca.crt was not loaded correctly"),
+            erraction("check DATA_DIR/tde_config/kmsca.crt and restart")));
+    }
     const char* http_head_list[] = {content_type, TDE::CKMSMessage::get_instance().tde_agency_token, NULL};
     HttpReqMsg http_req_msg = {HTTP_POST, dek_url, NULL, http_body, http_head_list};
     HttpConfig http_config = {time_out, HTTP_RESBODY, TDE::CKMSMessage::get_instance().m_kmsca};
