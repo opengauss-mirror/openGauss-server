@@ -33,6 +33,7 @@
 #include <vector>
 #include <string>
 #include "curl/curl.h"
+#include "knl/knl_instance.h"
 #include "gs_policy/curl_utils.h"
 #include "utils/elog.h"
 
@@ -83,11 +84,14 @@ bool CurlUtils::http_post_file_request(const std::string url, const std::string 
         (void)curl_easy_setopt(m_curlForPost, CURLOPT_HTTPHEADER, slist1);
         (void)curl_easy_setopt(m_curlForPost, CURLOPT_MAXREDIRS, 50L);
 
-        /* 
-         * as cert from server maybe certificated by self we ignore the verification
-         */
-        (void)curl_easy_setopt(m_curlForPost, CURLOPT_SSL_VERIFYPEER, 0L);
-        (void)curl_easy_setopt(m_curlForPost, CURLOPT_SSL_VERIFYHOST, 0L);
+        /* Verify the Elasticsearch endpoint; use configured CA bundle when present. */
+        (void)curl_easy_setopt(m_curlForPost, CURLOPT_SSL_VERIFYPEER, 1L);
+        (void)curl_easy_setopt(m_curlForPost, CURLOPT_SSL_VERIFYHOST, 2L);
+        if (g_instance.attr.attr_security.ssl_ca_file != NULL &&
+            g_instance.attr.attr_security.ssl_ca_file[0] != '\0') {
+            (void)curl_easy_setopt(m_curlForPost, CURLOPT_CAINFO,
+                g_instance.attr.attr_security.ssl_ca_file);
+        }
         (void)curl_easy_setopt(m_curlForPost, CURLOPT_CUSTOMREQUEST, "POST");
         (void)curl_easy_setopt(m_curlForPost, CURLOPT_TCP_KEEPALIVE, 1L);
 

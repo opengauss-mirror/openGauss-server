@@ -115,8 +115,6 @@ void httpmgr_free(HttpMgr *http)
 
 void httpmgr_set_req_line(HttpMgr *http, const char *url, CURLoption method, const char *cacert)
 {
-    bool setca;
-    
     if (km_err_catch(http->err)) {
         return;
     }
@@ -141,13 +139,19 @@ void httpmgr_set_req_line(HttpMgr *http, const char *url, CURLoption method, con
     ret = curl_easy_setopt(http->client, CURLOPT_URL, http->url);
     CHK_CURL(http, ret);
 
-    setca = (cacert != NULL) ? true : false;
-    (void)curl_easy_setopt(http->client, CURLOPT_SSL_VERIFYPEER, (long)setca);
-    (void)curl_easy_setopt(http->client, CURLOPT_SSL_VERIFYHOST, (long)setca);
-
-    if (setca) {
-        (void)curl_easy_setopt(http->client, CURLOPT_CAINFO, cacert);
+    if (km_str_start_with(http->url, "https://") != 0) {
+        km_err_msg(http->err, "HTTPS is required for IAM/KMS request: %s", http->url);
+        return;
     }
+    if (cacert == NULL || cacert[0] == '\0') {
+        km_err_msg(http->err,
+            "CA certificate is required for HTTPS requests to IAM/KMS, "
+            "please set iamCaCert/kmsCaCert or hisCaCert");
+        return;
+    }
+    (void)curl_easy_setopt(http->client, CURLOPT_SSL_VERIFYPEER, 1L);
+    (void)curl_easy_setopt(http->client, CURLOPT_SSL_VERIFYHOST, 2L);
+    (void)curl_easy_setopt(http->client, CURLOPT_CAINFO, cacert);
 
 #ifdef ENABLE_KM_DEBUG
     resscan_output(http->resscan, "@request\n");
