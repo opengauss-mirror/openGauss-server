@@ -162,7 +162,7 @@ LIBS += -lcjson
 ##########################################################################
 # append onnx for AI model inference
 ############################################################################
-LIBS += -lonnx_wrapper -lonnxruntime -ltokenizers
+LIBS += -lonnxruntime -ltokenizers
 
 ##########################################################################
 # append xgboost for xgboost algorithm : libxgboost.so attached by dlopen

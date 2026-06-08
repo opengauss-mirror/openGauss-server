@@ -296,7 +296,7 @@ Datum load_onnx_model(PG_FUNCTION_ARGS)
     PG_TRY();
     {
         modelDesc = ONNX_MODEL_MGR->LoadONNXModelByKey(modelKey, ownerName, modelPath);
-        if (modelDesc == NULL || modelDesc->handle == NULL) {
+        if (modelDesc == NULL) {
             ereport(ERROR,
                     (errcode(ERRCODE_EXTERNAL_ROUTINE_EXCEPTION),
                          errmsg("failed to load ONNX model: %s", modelKey)));
