@@ -274,7 +274,8 @@ void ExtractProduerInfo()
     u_sess->stream_cxt.producer_obj->getUniqueSQLKey(&u_sess->unique_sql_cxt.unique_sql_id,
         &u_sess->unique_sql_cxt.unique_sql_user_id, &u_sess->unique_sql_cxt.unique_sql_cn_id);
     u_sess->stream_cxt.producer_obj->getGlobalSessionId(&u_sess->globalSessionId);
-
+    u_sess->stream_cxt.enter_sync_point = false;
+    
     WLMGeneralParam *g_wlm_params =  &u_sess->wlm_cxt->wlm_params;
     errno_t ret = sprintf_s(u_sess->wlm_cxt->control_group, 
                             sizeof(u_sess->wlm_cxt->control_group), "%s", g_wlm_params->cgroup); 

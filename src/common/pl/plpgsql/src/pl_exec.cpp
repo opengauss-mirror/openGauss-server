@@ -40,6 +40,7 @@
 #include "commands/sqladvisor.h"
 #include "access/hash.h"
 #include "instruments/instr_handle_mgr.h"
+#include "distributelayer/streamMain.h"
 #ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
 #endif
@@ -1440,10 +1441,9 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
     TupleDesc tupDesc = NULL;
     PLpgSQL_execstate estate;
     FormatCallStack plcallstack;
-#ifndef ENABLE_MULTIPLE_NODES
     AutoDopControl dopControl;
     dopControl.CloseSmp();
-#endif
+
     /*
      * Setup the execution state
      */
@@ -3955,6 +3955,12 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
                 estate->cursor_return_data = saved_cursor_data;
                 estate->cursor_return_numbers = saved_cursor_numbers;
 
+                if (!StreamThreadAmI()) {
+                    StreamNodeGroup::ReleaseStreamGroup(false);
+                }
+                AutoDopControl dopControl;
+                dopControl.CloseSmp();
+
                 exec_exception_cleanup(estate, &excptContext);
 
                 rc = exec_exception_handler(estate, block, &excptContext);
@@ -4046,14 +4052,15 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
 
                 /* push ErrorData to exception stack*/
                 push_error_data_to_exception_stack();
-                
-                exec_exception_cleanup(estate, &excptContext);
-    #ifndef ENABLE_MULTIPLE_NODES
+
                 if (!StreamThreadAmI()) {
                     StreamNodeGroup::ReleaseStreamGroup(false);
                 }
                 AutoDopControl dopControl;
                 dopControl.CloseSmp();
+
+                exec_exception_cleanup(estate, &excptContext);
+    #ifndef ENABLE_MULTIPLE_NODES
                 if (u_sess->stream_cxt.global_obj == NULL && u_sess->instr_cxt.global_instr != NULL) {
                     u_sess->instr_cxt.global_instr = NULL;
                     u_sess->instr_cxt.thread_instr = NULL;

@@ -140,6 +140,7 @@ StreamProducer::StreamProducer(
     m_dest = DestNone;
     m_channelCalVecFun = NULL;
     m_channelCalFun = NULL;
+    m_top_execute_end = false;
     m_hasExprKey = false;
     m_exprkeystate = NULL;
     m_econtext = NULL;

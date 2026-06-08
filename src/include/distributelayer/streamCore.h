@@ -541,7 +541,5 @@ private:
 
 extern bool IsThreadProcessStreamRecursive();
 extern bool InitStreamObject(PlannedStmt* planStmt);
-#ifndef ENABLE_MULTIPLE_NODES
-extern void StreamMarkStop();
-#endif
+
 #endif /* SRC_INCLUDE_DISTRIBUTELAYER_STREAMCORE_H_ */

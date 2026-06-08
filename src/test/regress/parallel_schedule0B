@@ -467,3 +467,4 @@ test: create_function
 test: pg_compatibility test_index_include
 
 test: alter_trigger
+test: procedure_smp procedure_smp2

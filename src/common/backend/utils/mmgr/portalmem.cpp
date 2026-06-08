@@ -105,16 +105,11 @@ typedef struct portalhashent {
 
 inline void ReleaseStreamGroup(Portal portal)
 {
-#ifndef ENABLE_MULTIPLE_NODES
     if (!IS_SPQ_RUNNING && IS_STREAM_PORTAL) {
         portal->streamInfo.AttachToSession();
         StreamNodeGroup::ReleaseStreamGroup(true);
         portal->streamInfo.Reset();
     }
-#else
-    /* multinode do nothing */
-    return;
-#endif
 }
 
 /* -------------------portal_mem_cxt---------------------------------
