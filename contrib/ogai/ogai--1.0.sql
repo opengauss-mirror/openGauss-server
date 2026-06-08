@@ -225,6 +225,16 @@ ELSE
         DECLARE
             v_task_id BIGINT;
         BEGIN
+            IF p_operation = 'DELETE' THEN
+                IF p_table_method = 'join' THEN
+                    EXECUTE format(
+                        'DELETE FROM %I.%I WHERE %I = $1',
+                        p_src_schema, p_src_table || '_vector', p_primary_key
+                    ) USING p_pk_value;
+                END IF;
+                RETURN;
+            END IF;
+
             -- Get task ID
             SELECT task_id INTO v_task_id
             FROM ogai.vectorize_tasks
@@ -440,7 +450,7 @@ ELSE  -- join mode: create independent vector table (in user schema)
                         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                         PRIMARY KEY (%I, chunk_id),
-                        FOREIGN KEY (%I) REFERENCES %I.%I(%I)
+                        FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE CASCADE
                     )',
                     p_src_schema,
                     p_src_table || '_vector',
@@ -470,7 +480,7 @@ ELSE
                 -- Table structure without chunking
                 EXECUTE format(
                     'CREATE TABLE %I.%I (
-                        %I %s PRIMARY KEY REFERENCES %I.%I(%I),
+                        %I %s PRIMARY KEY REFERENCES %I.%I(%I) ON DELETE CASCADE,
                         ogai_embedding VECTOR(%s) NOT NULL,
                         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -904,7 +914,7 @@ DECLARE
     v_trigger_name TEXT;
     v_vector_table TEXT;
     v_vector_view TEXT;
-    v_error TEXT := '';
+    v_error TEXT := NULL;
     v_steps_completed TEXT[] := '{}';
 BEGIN
     -- 1. Find task
@@ -930,7 +940,7 @@ BEGIN
 
         v_steps_completed := array_append(v_steps_completed, 'Dropped trigger: ' || v_trigger_name);
     EXCEPTION WHEN OTHERS THEN
-        v_error := v_error || format('Failed to drop trigger: %s; ', SQLERRM);
+        v_error := COALESCE(v_error, '') || format('Failed to drop trigger: %s; ', SQLERRM);
     END;
 
     -- 3. Drop indexes
@@ -968,7 +978,7 @@ BEGIN
         END IF;
         v_steps_completed := array_append(v_steps_completed, 'Dropped indexes');
     EXCEPTION WHEN OTHERS THEN
-        v_error := v_error || format('Failed to drop indexes: %s; ', SQLERRM);
+        v_error := COALESCE(v_error, '') || format('Failed to drop indexes: %s; ', SQLERRM);
     END;
 
     -- 4. Clean up resources based on method
@@ -982,7 +992,7 @@ BEGIN
             );
             v_steps_completed := array_append(v_steps_completed, 'Dropped column: ogai_embedding');
         EXCEPTION WHEN OTHERS THEN
-            v_error := v_error || format('Failed to drop column: %s; ', SQLERRM);
+            v_error := COALESCE(v_error, '') || format('Failed to drop column: %s; ', SQLERRM);
         END;
     ELSE
         -- join mode: drop vector table and view (in user schema)
@@ -994,7 +1004,7 @@ BEGIN
             EXECUTE format('DROP VIEW IF EXISTS %I.%I CASCADE', v_task_record.src_schema, v_vector_view);
             v_steps_completed := array_append(v_steps_completed, 'Dropped view: ' || v_task_record.src_schema || '.' || v_vector_view);
         EXCEPTION WHEN OTHERS THEN
-            v_error := v_error || format('Failed to drop view: %s; ', SQLERRM);
+            v_error := COALESCE(v_error, '') || format('Failed to drop view: %s; ', SQLERRM);
         END;
 
         -- Drop vector table
@@ -1002,7 +1012,7 @@ BEGIN
             EXECUTE format('DROP TABLE IF EXISTS %I.%I CASCADE', v_task_record.src_schema, v_vector_table);
             v_steps_completed := array_append(v_steps_completed, 'Dropped table: ' || v_task_record.src_schema || '.' || v_vector_table);
         EXCEPTION WHEN OTHERS THEN
-            v_error := v_error || format('Failed to drop table: %s; ', SQLERRM);
+            v_error := COALESCE(v_error, '') || format('Failed to drop table: %s; ', SQLERRM);
         END;
     END IF;
 
@@ -1013,7 +1023,7 @@ BEGIN
 
         v_steps_completed := array_append(v_steps_completed, 'Cleaned queue messages');
     EXCEPTION WHEN OTHERS THEN
-        v_error := v_error || format('Failed to clean queue: %s; ', SQLERRM);
+        v_error := COALESCE(v_error, '') || format('Failed to clean queue: %s; ', SQLERRM);
     END;
 
     -- 6. Delete task record
@@ -1023,11 +1033,11 @@ BEGIN
 
         v_steps_completed := array_append(v_steps_completed, 'Deleted task record');
     EXCEPTION WHEN OTHERS THEN
-        v_error := v_error || format('Failed to delete task: %s; ', SQLERRM);
+        v_error := COALESCE(v_error, '') || format('Failed to delete task: %s; ', SQLERRM);
     END;
 
     -- 7. Return result
-    IF v_error = '' THEN
+    IF v_error IS NULL THEN
         RETURN QUERY SELECT
             true,
             'Successfully unvectorized task: ' || p_task_name || E'\n' ||

@@ -23,6 +23,8 @@
  */
 
 #include "postgres.h"
+#include "cjson/cJSON.h"
+#include "storage/smgr/fd.h"
 #include "access/datavec/ogai_onnx_runtime.h"
 
 /*
@@ -48,21 +50,19 @@
 #include "tokenizers_ffi.h"
 #include "onnxruntime_cxx_api.h"
 
-#include <algorithm>
 #include <climits>
 #include <cstdarg>
 #include <cmath>
-#include <cstdlib>
-#include <fstream>
 #include <limits>
-#include <memory>
-#include <regex>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
 #include <vector>
 namespace {
+/*
+ * Keep STL usage local to this ONNX Runtime C++ adapter. Callers see only the
+ * C-style handles declared in ogai_onnx_runtime.h.
+ */
 static const int OGAI_ONNX_DEFAULT_MAX_LEN = 256;
 enum TensorShapeMeta { BATCH_AXIS, SEQUENCE_AXIS, HIDDEN_AXIS, RANK_TWO = HIDDEN_AXIS, RANK_THREE };
 enum class Pooling {
@@ -83,10 +83,9 @@ struct RuntimeConfig {
     bool normalize = true;
     Pooling pooling = Pooling::MEAN;
     std::string outputName;
-    std::string inputType;
 };
 struct InputBuffer {
-    TensorSpec spec;
+    const TensorSpec* spec = nullptr;
     std::vector<int64_t> shape;
     std::vector<int64_t> i64;
     std::vector<int32_t> i32;
@@ -182,16 +181,19 @@ private:
 };
 
 struct OgaiOnnxModel {
-    std::unique_ptr<Ort::Session> session;
-    std::unique_ptr<TokenizerWrapper> tokenizer;
+    Ort::Session* session = nullptr;
+    TokenizerWrapper* tokenizer = nullptr;
     std::vector<TensorSpec> inputs;
     std::vector<TensorSpec> outputs;
     RuntimeConfig config;
     int selectedOutputIndex = -1;
     int embeddingDim = 0;
-    std::string modelPath;
-    std::string configRoot;
-    std::string tokenizerPath;
+
+    ~OgaiOnnxModel()
+    {
+        delete tokenizer;
+        delete session;
+    }
 };
 static void SetError(char* errbuf, size_t errbufLen, const char* fmt, ...)
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));
@@ -249,37 +251,57 @@ static std::string ReadFileIfExists(const std::string& path)
     if (!FileExists(path)) {
         return "";
     }
-    std::ifstream in(path.c_str(), std::ios::in | std::ios::binary);
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
+
+    FILE* file = AllocateFile(path.c_str(), PG_BINARY_R);
+    if (file == nullptr) {
+        return "";
+    }
+
+    if (fseek(file, 0, SEEK_END) != 0) {
+        FreeFile(file);
+        return "";
+    }
+
+    long len = ftell(file);
+    if (len <= 0) {
+        FreeFile(file);
+        return "";
+    }
+    rewind(file);
+
+    std::string content;
+    content.resize(static_cast<size_t>(len));
+    size_t readLen = fread(&content[0], 1, static_cast<size_t>(len), file);
+    FreeFile(file);
+
+    if (readLen < static_cast<size_t>(len)) {
+        content.resize(readLen);
+    }
+    return content;
 }
-static bool ExtractString(const std::string& json, const std::string& key, std::string* out)
+static bool ExtractString(cJSON* root, const char* key, std::string* out)
 {
-    std::regex re("\"" + key + "\"\\s*:\\s*\"([^\"]+)\"");
-    std::smatch match;
-    if (std::regex_search(json, match, re)) {
-        *out = match[1].str();
+    cJSON* item = cJSON_GetObjectItem(root, key);
+    if (item != nullptr && cJSON_IsString(item) && item->valuestring != nullptr) {
+        *out = item->valuestring;
         return true;
     }
     return false;
 }
-static bool ExtractInt(const std::string& json, const std::string& key, int* out)
+static bool ExtractInt(cJSON* root, const char* key, int* out)
 {
-    std::regex re("\"" + key + "\"\\s*:\\s*([0-9]+)");
-    std::smatch match;
-    if (std::regex_search(json, match, re)) {
-        *out = std::atoi(match[1].str().c_str());
+    cJSON* item = cJSON_GetObjectItem(root, key);
+    if (item != nullptr && cJSON_IsNumber(item)) {
+        *out = item->valueint;
         return true;
     }
     return false;
 }
-static bool ExtractBool(const std::string& json, const std::string& key, bool* out)
+static bool ExtractBool(cJSON* root, const char* key, bool* out)
 {
-    std::regex re("\"" + key + "\"\\s*:\\s*(true|false)");
-    std::smatch match;
-    if (std::regex_search(json, match, re)) {
-        *out = (match[1].str() == "true");
+    cJSON* item = cJSON_GetObjectItem(root, key);
+    if (item != nullptr && cJSON_IsBool(item)) {
+        *out = cJSON_IsTrue(item);
         return true;
     }
     return false;
@@ -341,61 +363,122 @@ static std::string ResolveTokenizerPath(const std::string& configRoot, const std
     throw std::runtime_error("cannot find tokenizer.json near model");
 }
 
+static void LoadMetadataConfig(const std::string& configRoot, RuntimeConfig* cfg)
+{
+    std::string metadata = ReadFileIfExists(JoinPath(configRoot, "metadata.json"));
+    if (metadata.empty()) {
+        return;
+    }
+
+    cJSON* root = cJSON_Parse(metadata.c_str());
+    if (root == nullptr) {
+        return;
+    }
+
+    ExtractString(root, "output", &cfg->outputName);
+    ExtractInt(root, "dimension", &cfg->dimension);
+    ExtractInt(root, "max_length", &cfg->maxLen);
+
+    std::string poolingType;
+    if (ExtractString(root, "type", &poolingType)) {
+        cfg->pooling = ParsePooling(poolingType);
+    }
+
+    bool enabled = true;
+    if (ExtractBool(root, "enabled", &enabled)) {
+        cfg->normalize = enabled;
+    }
+    cJSON_Delete(root);
+}
+
+static void LoadSentenceBertConfig(const std::string& configRoot, RuntimeConfig* cfg)
+{
+    std::string stCfg = ReadFileIfExists(JoinPath(configRoot, "sentence_bert_config.json"));
+    if (stCfg.empty()) {
+        return;
+    }
+
+    cJSON* root = cJSON_Parse(stCfg.c_str());
+    if (root == nullptr) {
+        return;
+    }
+    ExtractInt(root, "max_seq_length", &cfg->maxLen);
+    cJSON_Delete(root);
+}
+
+static void LoadPoolingConfig(const std::string& configRoot, RuntimeConfig* cfg)
+{
+    std::string poolCfg = ReadFileIfExists(JoinPath(JoinPath(configRoot, "1_Pooling"), "config.json"));
+    if (poolCfg.empty()) {
+        return;
+    }
+
+    cJSON* root = cJSON_Parse(poolCfg.c_str());
+    if (root == nullptr) {
+        return;
+    }
+
+    bool enabled = false;
+    if (ExtractBool(root, "pooling_mode_cls_token", &enabled) && enabled) {
+        cfg->pooling = Pooling::CLS;
+    } else if (ExtractBool(root, "pooling_mode_max_tokens", &enabled) && enabled) {
+        cfg->pooling = Pooling::MAX;
+    } else if (ExtractBool(root, "pooling_mode_lasttoken", &enabled) && enabled) {
+        cfg->pooling = Pooling::LAST_TOKEN;
+    } else if (ExtractBool(root, "pooling_mode_mean_tokens", &enabled) && enabled) {
+        cfg->pooling = Pooling::MEAN;
+    }
+    ExtractInt(root, "word_embedding_dimension", &cfg->dimension);
+    cJSON_Delete(root);
+}
+
+static void LoadHuggingFaceConfig(const std::string& configRoot, RuntimeConfig* cfg)
+{
+    std::string hfCfg = ReadFileIfExists(JoinPath(configRoot, "config.json"));
+    if (hfCfg.empty()) {
+        return;
+    }
+
+    cJSON* root = cJSON_Parse(hfCfg.c_str());
+    if (root == nullptr) {
+        return;
+    }
+    if (cfg->dimension == 0) {
+        ExtractInt(root, "hidden_size", &cfg->dimension);
+    }
+    ExtractInt(root, "pad_token_id", &cfg->padTokenId);
+    cJSON_Delete(root);
+}
+
+static void LoadTokenizerConfig(const std::string& configRoot, RuntimeConfig* cfg)
+{
+    std::string tokCfg = ReadFileIfExists(JoinPath(configRoot, "tokenizer.json"));
+    if (tokCfg.empty()) {
+        return;
+    }
+
+    cJSON* root = cJSON_Parse(tokCfg.c_str());
+    if (root == nullptr) {
+        return;
+    }
+    if (!ExtractInt(root, "pad_id", &cfg->padTokenId)) {
+        cJSON* padding = cJSON_GetObjectItem(root, "padding");
+        if (padding != nullptr) {
+            ExtractInt(padding, "pad_id", &cfg->padTokenId);
+        }
+    }
+    cJSON_Delete(root);
+}
+
 static RuntimeConfig LoadConfig(const std::string& configRoot)
 {
     RuntimeConfig cfg;
 
-    std::string metadata = ReadFileIfExists(JoinPath(configRoot, "metadata.json"));
-    if (!metadata.empty()) {
-        ExtractString(metadata, "input_type", &cfg.inputType);
-        ExtractString(metadata, "output", &cfg.outputName);
-        ExtractInt(metadata, "dimension", &cfg.dimension);
-        ExtractInt(metadata, "max_length", &cfg.maxLen);
-
-        std::string poolingType;
-        if (ExtractString(metadata, "type", &poolingType)) {
-            cfg.pooling = ParsePooling(poolingType);
-        }
-
-        bool enabled = true;
-        if (ExtractBool(metadata, "enabled", &enabled)) {
-            cfg.normalize = enabled;
-        }
-    }
-
-    std::string stCfg = ReadFileIfExists(JoinPath(configRoot, "sentence_bert_config.json"));
-    if (!stCfg.empty()) {
-        ExtractInt(stCfg, "max_seq_length", &cfg.maxLen);
-    }
-
-    std::string poolCfg = ReadFileIfExists(JoinPath(JoinPath(configRoot, "1_Pooling"), "config.json"));
-    if (!poolCfg.empty()) {
-        bool enabled = false;
-        if (ExtractBool(poolCfg, "pooling_mode_cls_token", &enabled) && enabled) {
-            cfg.pooling = Pooling::CLS;
-        } else if (ExtractBool(poolCfg, "pooling_mode_max_tokens", &enabled) && enabled) {
-            cfg.pooling = Pooling::MAX;
-        } else if (ExtractBool(poolCfg, "pooling_mode_lasttoken", &enabled) && enabled) {
-            cfg.pooling = Pooling::LAST_TOKEN;
-        } else if (ExtractBool(poolCfg, "pooling_mode_mean_tokens", &enabled) && enabled) {
-            cfg.pooling = Pooling::MEAN;
-        }
-        ExtractInt(poolCfg, "word_embedding_dimension", &cfg.dimension);
-    }
-
-    std::string hfCfg = ReadFileIfExists(JoinPath(configRoot, "config.json"));
-    if (!hfCfg.empty() && cfg.dimension == 0) {
-        ExtractInt(hfCfg, "hidden_size", &cfg.dimension);
-    }
-    if (!hfCfg.empty()) {
-        ExtractInt(hfCfg, "pad_token_id", &cfg.padTokenId);
-    }
-
-    std::string tokCfg = ReadFileIfExists(JoinPath(configRoot, "tokenizer.json"));
-    if (!tokCfg.empty()) {
-        ExtractInt(tokCfg, "pad_id", &cfg.padTokenId);
-    }
-
+    LoadMetadataConfig(configRoot, &cfg);
+    LoadSentenceBertConfig(configRoot, &cfg);
+    LoadPoolingConfig(configRoot, &cfg);
+    LoadHuggingFaceConfig(configRoot, &cfg);
+    LoadTokenizerConfig(configRoot, &cfg);
     return cfg;
 }
 
@@ -452,9 +535,10 @@ static int SelectOutputIndex(const std::vector<TensorSpec>& outputs, const Runti
         }
     }
 
-    for (const char* preferred : {"sentence_embedding", "embedding"}) {
+    static const char* preferredOutputs[] = {"sentence_embedding", "embedding"};
+    for (size_t p = 0; p < sizeof(preferredOutputs) / sizeof(preferredOutputs[0]); ++p) {
         for (size_t i = 0; i < outputs.size(); ++i) {
-            if (outputs[i].name == preferred) {
+            if (outputs[i].name == preferredOutputs[p]) {
                 return static_cast<int>(i);
             }
         }
@@ -484,41 +568,66 @@ static int ResolveEmbeddingDim(const TensorSpec& output, const RuntimeConfig& cf
     return (dim > 0 && dim <= INT_MAX) ? static_cast<int>(dim) : cfg.dimension;
 }
 
-static void FillInputBuffer(const TensorSpec& spec, const TokenBatch& tokenBatch, InputBuffer* buf)
+template <typename T>
+static void FillInputValues(const TensorSpec& spec, const TokenBatch& tokenBatch, T* values)
 {
-    buf->spec = spec;
-    buf->shape = {static_cast<int64_t>(tokenBatch.textNum), static_cast<int64_t>(tokenBatch.seqLen)};
+    size_t valueNum = tokenBatch.textNum * tokenBatch.seqLen;
+    for (size_t i = 0; i < valueNum; ++i) {
+        values[i] = 0;
+    }
 
-    std::vector<int64_t> values(tokenBatch.textNum * tokenBatch.seqLen, 0);
     if (NameContains(spec.name, "input_ids")) {
         for (size_t b = 0; b < tokenBatch.textNum; ++b) {
             for (size_t s = 0; s < tokenBatch.seqLen; ++s) {
-                values[b * tokenBatch.seqLen + s] = tokenBatch.ids[b][s];
+                values[b * tokenBatch.seqLen + s] = static_cast<T>(tokenBatch.ids[b][s]);
             }
         }
     } else if (NameContains(spec.name, "attention_mask")) {
-        values = tokenBatch.attentionMask;
+        for (size_t i = 0; i < valueNum; ++i) {
+            values[i] = static_cast<T>(tokenBatch.attentionMask[i]);
+        }
     } else if (NameContains(spec.name, "token_type_ids") || NameContains(spec.name, "segment_ids")) {
-        std::fill(values.begin(), values.end(), 0);
+        return;
     } else if (NameContains(spec.name, "position_ids")) {
         for (size_t b = 0; b < tokenBatch.textNum; ++b) {
             for (size_t s = 0; s < tokenBatch.seqLen; ++s) {
-                values[b * tokenBatch.seqLen + s] = static_cast<int64_t>(s);
+                values[b * tokenBatch.seqLen + s] = static_cast<T>(s);
             }
         }
     } else {
         throw std::runtime_error("unsupported required ONNX input: " + spec.name);
     }
+}
+
+static void FillInputBuffer(const TensorSpec& spec, const TokenBatch& tokenBatch, InputBuffer* buf)
+{
+    buf->spec = &spec;
+    buf->shape.clear();
+    buf->shape.push_back(static_cast<int64_t>(tokenBatch.textNum));
+    buf->shape.push_back(static_cast<int64_t>(tokenBatch.seqLen));
 
     if (spec.elemType == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) {
-        buf->i64 = values;
+        buf->i64.resize(tokenBatch.textNum * tokenBatch.seqLen);
+        FillInputValues(spec, tokenBatch, buf->i64.data());
     } else if (spec.elemType == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32) {
-        buf->i32.resize(values.size());
-        for (size_t i = 0; i < values.size(); ++i) {
-            buf->i32[i] = static_cast<int32_t>(values[i]);
-        }
+        buf->i32.resize(tokenBatch.textNum * tokenBatch.seqLen);
+        FillInputValues(spec, tokenBatch, buf->i32.data());
     } else {
         throw std::runtime_error("unsupported input type for " + spec.name);
+    }
+}
+
+static void CopyFloatArray(const float* src, float* dst, int dim)
+{
+    for (int i = 0; i < dim; ++i) {
+        dst[i] = src[i];
+    }
+}
+
+static void FillFloatArray(float* dst, int dim, float value)
+{
+    for (int i = 0; i < dim; ++i) {
+        dst[i] = value;
     }
 }
 
@@ -544,7 +653,7 @@ static void CopyRank2Embedding(const float* data, int hidden, const EmbeddingOut
 
     for (size_t b = 0; b < output.batch; ++b) {
         const float* src = data + b * hidden;
-        std::copy(src, src + hidden, output.embeddings[b]);
+        CopyFloatArray(src, output.embeddings[b], hidden);
         if (output.normalize) {
             Normalize(output.embeddings[b], output.dim);
         }
@@ -554,7 +663,7 @@ static void CopyRank2Embedding(const float* data, int hidden, const EmbeddingOut
 static void PoolMaskedRank3Embedding(const PoolInput& input, bool useMax, float* dst)
 {
     size_t used = 0;
-    std::fill(dst, dst + input.hidden, useMax ? -std::numeric_limits<float>::infinity() : 0.0f);
+    FillFloatArray(dst, input.hidden, useMax ? -std::numeric_limits<float>::infinity() : 0.0f);
     for (size_t s = 0; s < input.outSeq && s < input.maskSeq; ++s) {
         if (input.attentionMask[s] == 0) {
             continue;
@@ -562,7 +671,7 @@ static void PoolMaskedRank3Embedding(const PoolInput& input, bool useMax, float*
         const float* row = input.data + s * input.hidden;
         for (int h = 0; h < input.hidden; ++h) {
             if (useMax) {
-                dst[h] = std::max(dst[h], row[h]);
+                dst[h] = (row[h] > dst[h]) ? row[h] : dst[h];
             } else {
                 dst[h] += row[h];
             }
@@ -571,7 +680,7 @@ static void PoolMaskedRank3Embedding(const PoolInput& input, bool useMax, float*
     }
     if (useMax) {
         if (used == 0) {
-            std::fill(dst, dst + input.hidden, 0.0f);
+            FillFloatArray(dst, input.hidden, 0.0f);
         }
         return;
     }
@@ -584,7 +693,7 @@ static void PoolMaskedRank3Embedding(const PoolInput& input, bool useMax, float*
 static void PoolOneRank3Embedding(const PoolInput& input, Pooling pooling, float* dst)
 {
     if (pooling == Pooling::CLS) {
-        std::copy(input.data, input.data + input.hidden, dst);
+        CopyFloatArray(input.data, dst, input.hidden);
     } else if (pooling == Pooling::LAST_TOKEN) {
         size_t last = 0;
         for (size_t s = 0; s < input.outSeq && s < input.maskSeq; ++s) {
@@ -592,7 +701,8 @@ static void PoolOneRank3Embedding(const PoolInput& input, Pooling pooling, float
                 last = s;
             }
         }
-        std::copy(input.data + last * input.hidden, input.data + last * input.hidden + input.hidden, dst);
+        const float* row = input.data + last * input.hidden;
+        CopyFloatArray(row, dst, input.hidden);
     } else {
         PoolMaskedRank3Embedding(input, pooling == Pooling::MAX, dst);
     }
@@ -653,7 +763,9 @@ static void TokenizeBatch(const OgaiOnnxModel& model, const OgaiOnnxEmbeddingReq
         TokenizedInput encoded = model.tokenizer->Encode(request.texts[i], model.config.maxLen);
         tokenBatch->ids[i].swap(encoded.ids);
         maskBatch[i].swap(encoded.attentionMask);
-        tokenBatch->seqLen = std::max(tokenBatch->seqLen, tokenBatch->ids[i].size());
+        if (tokenBatch->ids[i].size() > tokenBatch->seqLen) {
+            tokenBatch->seqLen = tokenBatch->ids[i].size();
+        }
     }
     if (tokenBatch->seqLen == 0) {
         throw std::runtime_error("tokenizer returned empty input");
@@ -662,8 +774,9 @@ static void TokenizeBatch(const OgaiOnnxModel& model, const OgaiOnnxEmbeddingReq
     for (size_t b = 0; b < request.textNum; ++b) {
         tokenBatch->ids[b].resize(tokenBatch->seqLen, model.config.padTokenId);
         maskBatch[b].resize(tokenBatch->seqLen, 0);
-        std::copy(maskBatch[b].begin(), maskBatch[b].end(),
-            tokenBatch->attentionMask.begin() + b * tokenBatch->seqLen);
+        for (size_t s = 0; s < tokenBatch->seqLen; ++s) {
+            tokenBatch->attentionMask[b * tokenBatch->seqLen + s] = maskBatch[b][s];
+        }
     }
 }
 
@@ -679,11 +792,11 @@ static void BuildInputTensors(const std::vector<TensorSpec>& inputs, const Token
         buffers.emplace_back();
         InputBuffer& buf = buffers.back();
         FillInputBuffer(spec, tokenBatch, &buf);
-        inputNames.push_back(buf.spec.name.c_str());
-        if (buf.spec.elemType == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) {
+        inputNames.push_back(buf.spec->name.c_str());
+        if (buf.spec->elemType == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) {
             inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memory, buf.i64.data(),
                 buf.i64.size(), buf.shape.data(), buf.shape.size()));
-        } else if (buf.spec.elemType == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32) {
+        } else if (buf.spec->elemType == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32) {
             inputTensors.push_back(Ort::Value::CreateTensor<int32_t>(memory, buf.i32.data(),
                 buf.i32.size(), buf.shape.data(), buf.shape.size()));
         }
@@ -720,16 +833,18 @@ OgaiOnnxModelHandle OgaiOnnxLoadModel(OgaiOnnxEnvHandle envHandle, const char* m
         return nullptr;
     }
 
+    OgaiOnnxModel* model = nullptr;
+
     try {
         OgaiOnnxEnv* env = static_cast<OgaiOnnxEnv*>(envHandle);
-        std::unique_ptr<OgaiOnnxModel> model(new OgaiOnnxModel());
+        model = new OgaiOnnxModel();
+        std::string resolvedModelPath = ResolveModelPath(modelPath);
+        std::string configRoot = ResolveConfigRoot(resolvedModelPath);
+        std::string tokenizerPath = ResolveTokenizerPath(configRoot, resolvedModelPath);
 
-        model->modelPath = ResolveModelPath(modelPath);
-        model->configRoot = ResolveConfigRoot(model->modelPath);
-        model->tokenizerPath = ResolveTokenizerPath(model->configRoot, model->modelPath);
-        model->config = LoadConfig(model->configRoot);
+        model->config = LoadConfig(configRoot);
 
-        model->session.reset(new Ort::Session(env->env, model->modelPath.c_str(), env->sessionOptions));
+        model->session = new Ort::Session(env->env, resolvedModelPath.c_str(), env->sessionOptions);
         model->inputs = GetInputs(*model->session);
         model->outputs = GetOutputs(*model->session);
         model->selectedOutputIndex = SelectOutputIndex(model->outputs, model->config);
@@ -743,15 +858,17 @@ OgaiOnnxModelHandle OgaiOnnxLoadModel(OgaiOnnxEnvHandle envHandle, const char* m
             throw std::runtime_error("cannot determine embedding dimension");
         }
 
-        model->tokenizer.reset(new TokenizerWrapper());
-        model->tokenizer->Load(model->tokenizerPath);
+        model->tokenizer = new TokenizerWrapper();
+        model->tokenizer->Load(tokenizerPath);
 
         *dim = model->embeddingDim;
-        return model.release();
+        return model;
     } catch (const std::exception& e) {
+        delete model;
         SetError(errbuf, errbufLen, "failed to load ONNX model '%s': %s", modelPath, e.what());
         return nullptr;
     } catch (...) {
+        delete model;
         SetError(errbuf, errbufLen, "failed to load ONNX model '%s': unknown error", modelPath);
         return nullptr;
     }

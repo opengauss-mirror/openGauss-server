@@ -45,6 +45,15 @@ static inline void InitONNXModelTag(ONNXModelTag* tag, const char* modelKey, con
     securec_check(rc, "\0", "\0");
 }
 
+static inline void DecONNXModelRefCount(ONNXModelDesc* modelDesc)
+{
+    uint32 oldRefCount = pg_atomic_fetch_sub_u32(&modelDesc->refCount, 1);
+    if (oldRefCount == 0) {
+        (void)pg_atomic_fetch_add_u32(&modelDesc->refCount, 1);
+        ereport(WARNING, (errmsg("onnx model mgr: release called with zero refcount")));
+    }
+}
+
 /*
  * @Description: get Singleton Instance of onnx model mgr.
  * @Return: onnx model mgr.
@@ -144,9 +153,11 @@ ONNXModelDesc* ONNXModelMgr::AcquireONNXModelDescByKey(const char* modelKey, con
     }
 
     ONNXModelDesc* modelDesc = entry->modelDesc;
+    (void)pg_atomic_fetch_add_u32(&modelDesc->refCount, 1);
     int ret = pthread_rwlock_rdlock(&modelDesc->mutex);
     pthread_rwlock_unlock(&mutex);
     if (ret != 0) {
+        DecONNXModelRefCount(modelDesc);
         ereport(ERROR, (errmsg("onnx model mgr: pthread_rwlock_rdlock failed")));
     }
     return modelDesc;
@@ -158,6 +169,7 @@ void ONNXModelMgr::ReleaseONNXModelDesc(ONNXModelDesc* modelDesc)
         return;
     }
     pthread_rwlock_unlock(&modelDesc->mutex);
+    DecONNXModelRefCount(modelDesc);
 }
 
 ONNXModelDesc* ONNXModelMgr::LoadONNXModelByKey(const char* modelKey, const char* ownerName,
@@ -187,6 +199,7 @@ ONNXModelDesc* ONNXModelMgr::LoadONNXModelByKey(const char* modelKey, const char
         pthread_rwlock_unlock(&mutex);
         ereport(ERROR, (errmsg("onnx model mgr: pthread_rwlock_init failed")));
     }
+    pg_atomic_init_u32(&entry->modelDesc->refCount, 0);
     
     char errbuf[OGAI_ONNX_ERRMSG_LEN] = {0};
     entry->modelDesc->handle = OgaiOnnxLoadModel(
@@ -217,6 +230,17 @@ void ONNXModelMgr::UnloadONNXModelByKey(const char* modelKey, const char* ownerN
         pthread_rwlock_unlock(&mutex);
         ereport(ERROR, (errmsg("onnx model mgr: can not find model: model_key=%s, owner=%s",
                                modelKey, ownerName)));
+        return;
+    }
+
+    uint32 refCount = pg_atomic_read_u32(&entry->modelDesc->refCount);
+    if (refCount > 0) {
+        pthread_rwlock_unlock(&mutex);
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_IN_USE),
+                 errmsg("cannot unload ONNX model \"%s\" because it has %u active reference(s)",
+                        modelKey, refCount),
+                 errhint("Wait for active ONNX embedding calls to finish, then retry.")));
         return;
     }
     

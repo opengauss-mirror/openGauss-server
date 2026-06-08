@@ -67,6 +67,7 @@ typedef struct OgaiTaskConfigResult {
     char srcTable[64];
     char primaryKey[64];
     char tableMethod[32];
+    bool useChunking;
 } OgaiTaskConfigResult;
 
 /*

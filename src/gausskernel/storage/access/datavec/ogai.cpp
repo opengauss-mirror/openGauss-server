@@ -22,6 +22,9 @@
  */
 
 #include "postgres.h"
+#include "executor/spi.h"
+#include "access/htup.h"
+#include "access/hash.h"
 #include "funcapi.h"
 #include "utils/memutils.h"
 #include "utils/elog.h"
@@ -36,6 +39,49 @@
 #include "access/datavec/ogai_worker.h"
 #include "access/datavec/ogai.h"
 
+static const char* OGAI_ONNX_USAGE_LOCK_NAMESPACE = "ogai_onnx_model_usage";
+static const int ONNX_MODEL_REF_PARAM_NUM = 2;
+
+static int32 HashCStringToInt32(const char* value)
+{
+    text* valueText = cstring_to_text(value);
+    int32 hashValue = DatumGetInt32(DirectFunctionCall1(hashtext, PointerGetDatum(valueText)));
+    pfree(valueText);
+    return hashValue;
+}
+
+static int32 GetONNXUsageLockKey(const char* modelKey, const char* ownerName)
+{
+    size_t keyLen = strlen(ownerName) + strlen(modelKey) + 2;
+    char* key = (char*)palloc0(keyLen);
+    errno_t rc = snprintf_s(key, keyLen, keyLen - 1, "%s:%s", ownerName, modelKey);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    int32 hashValue = HashCStringToInt32(key);
+    pfree(key);
+    return hashValue;
+}
+
+static void AcquireONNXModelUsageShareLock(const char* modelKey, const char* ownerName)
+{
+    int32 namespaceKey = HashCStringToInt32(OGAI_ONNX_USAGE_LOCK_NAMESPACE);
+    int32 modelKeyHash = GetONNXUsageLockKey(modelKey, ownerName);
+
+    (void)DirectFunctionCall2(pg_advisory_xact_lock_shared_int4,
+                              Int32GetDatum(namespaceKey),
+                              Int32GetDatum(modelKeyHash));
+}
+
+static bool TryAcquireONNXModelUsageExclusiveLock(const char* modelKey, const char* ownerName)
+{
+    int32 namespaceKey = HashCStringToInt32(OGAI_ONNX_USAGE_LOCK_NAMESPACE);
+    int32 modelKeyHash = GetONNXUsageLockKey(modelKey, ownerName);
+
+    return DatumGetBool(DirectFunctionCall2(pg_try_advisory_xact_lock_int4,
+                                            Int32GetDatum(namespaceKey),
+                                            Int32GetDatum(modelKeyHash)));
+}
+
 Datum ogai_embedding(PG_FUNCTION_ARGS)
 {
     char* text = text_to_cstring(DatumGetVarCharPP(PG_GETARG_DATUM(0)));
@@ -46,6 +92,9 @@ Datum ogai_embedding(PG_FUNCTION_ARGS)
     config.dimension = dim;
     config.maxBatch = 1;
     GenerateModelConfig(&config, model);
+    if (config.provider == PROVIDER_ONNX) {
+        AcquireONNXModelUsageShareLock(config.modelKey, config.ownerName);
+    }
     EmbeddingClient* client = CreateEmbeddingClient(&config);
     Vector** vectors = client->BatchEmbed(&text, 1, &dim);
     PG_RETURN_POINTER(vectors[0]);
@@ -243,15 +292,38 @@ Datum ogai_chunk(PG_FUNCTION_ARGS)
 
 Datum ogai_notify(PG_FUNCTION_ARGS)
 {
-/* Wake up the Undo Launcher */
     Oid dboid = u_sess->proc_cxt.MyDatabaseId;
     int actualOgaiWorkers = MAX_OGAI_WORKERS;
+    int targetSlot = 0;
+    bool hasTargetSlot = false;
+
+    if (!g_instance.attr.attr_storage.enable_async_ogai ||
+        t_thrd.ogailauncher_cxt.ogaiWorkerShmem == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("async OGAI is not enabled"),
+                 errhint("Set enable_async_ogai=on and restart the database before using async vectorize tasks.")));
+    }
+
     for (int i = 0; i < actualOgaiWorkers; i++) {
-        if (!OidIsValid(t_thrd.ogailauncher_cxt.ogaiWorkerShmem->target_dbs[i])) {
-            t_thrd.ogailauncher_cxt.ogaiWorkerShmem->target_dbs[i] = dboid;
+        if (t_thrd.ogailauncher_cxt.ogaiWorkerShmem->target_dbs[i] == dboid) {
+            targetSlot = i;
+            hasTargetSlot = true;
             break;
         }
+        if (!hasTargetSlot && !OidIsValid(t_thrd.ogailauncher_cxt.ogaiWorkerShmem->target_dbs[i])) {
+            targetSlot = i;
+            hasTargetSlot = true;
+        }
     }
+
+    if (!hasTargetSlot) {
+        ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg("too many pending OGAI async target databases")));
+    }
+
+    t_thrd.ogailauncher_cxt.ogaiWorkerShmem->target_dbs[targetSlot] = dboid;
     SetLatch(&t_thrd.ogailauncher_cxt.ogaiWorkerShmem->latch);
     PG_RETURN_VOID();
 }
@@ -311,6 +383,56 @@ Datum load_onnx_model(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(true);
 }
 
+static void CheckONNXModelUnloadAllowed(const char* modelKey, const char* ownerName)
+{
+    const char* query =
+        "SELECT task_name FROM ogai.vectorize_tasks "
+        "WHERE model_key = $1 AND owner_name::text = $2 LIMIT 1";
+    Datum params[ONNX_MODEL_REF_PARAM_NUM];
+    Oid paramTypes[ONNX_MODEL_REF_PARAM_NUM] = {TEXTOID, TEXTOID};
+    int ret;
+    MemoryContext originCtx = CurrentMemoryContext;
+
+    if (SPI_connect() != SPI_OK_CONNECT) {
+        elog(ERROR, "Failed to connect to SPI");
+    }
+
+    params[0] = CStringGetTextDatum(modelKey);
+    params[1] = CStringGetTextDatum(ownerName);
+
+    ret = SPI_execute_with_args(query,
+                                ONNX_MODEL_REF_PARAM_NUM,
+                                paramTypes,
+                                params,
+                                NULL,
+                                true,
+                                1,
+                                NULL,
+                                NULL);
+    if (ret != SPI_OK_SELECT) {
+        SPI_finish();
+        elog(ERROR, "SPI_exec failed: %d", ret);
+    }
+
+    if (SPI_processed > 0) {
+        HeapTuple tuple = SPI_tuptable->vals[0];
+        char* taskName = SPI_getvalue(tuple, SPI_tuptable->tupdesc, 1);
+        MemoryContext oldcontext = MemoryContextSwitchTo(originCtx);
+        char* taskNameCopy = pstrdup(taskName ? taskName : "");
+        MemoryContextSwitchTo(oldcontext);
+        SPI_finish();
+
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_IN_USE),
+                 errmsg("cannot unload ONNX model \"%s\" because vectorize task \"%s\" references it",
+                        modelKey, taskNameCopy),
+                 errhint("Run ogai.ai_unvectorize('%s') or remove the vectorize task before unloading the model.",
+                         taskNameCopy)));
+    }
+
+    SPI_finish();
+}
+
 /*
  * unload_onnx_model - Unload ONNX model from cache
  *
@@ -337,6 +459,14 @@ Datum unload_onnx_model(PG_FUNCTION_ARGS)
                      errmsg("model_key '%s' is not an ONNX model", modelKey)));
     }
     const char* ownerName = config.ownerName;
+    if (!TryAcquireONNXModelUsageExclusiveLock(modelKey, ownerName)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_IN_USE),
+                 errmsg("cannot unload ONNX model \"%s\" because it is being used by another transaction",
+                        modelKey),
+                 errhint("Wait for the active embedding or vectorize transaction to finish, then retry.")));
+    }
+    CheckONNXModelUnloadAllowed(modelKey, ownerName);
     elog(DEBUG1, "unload_onnx_model: unloading model '%s'", modelKey);
     PG_TRY();
     {

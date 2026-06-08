@@ -26,6 +26,7 @@
 
 #include "access/datavec/ogai_onnx_runtime.h"
 #include "storage/lock/lwlock.h"
+#include "utils/atomic.h"
 
 #define NAMEDATALEN 64
 #define MAXPATH 1024
@@ -35,6 +36,7 @@
 typedef struct ONNXModelDesc {
     OgaiOnnxModelHandle handle;
     int dim;
+    pg_atomic_uint32 refCount;
     pthread_rwlock_t mutex;
 } ONNXModelDesc;
 

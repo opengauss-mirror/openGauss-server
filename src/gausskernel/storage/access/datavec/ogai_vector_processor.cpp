@@ -24,6 +24,7 @@
 #include "postgres.h"
 #include "executor/spi.h"
 #include "commands/trigger.h"
+#include "libpq/libpq-be.h"
 #include "access/xact.h"
 #include "utils/jsonb.h"
 #include "utils/builtins.h"
@@ -35,7 +36,10 @@
 #include "fmgr.h"
 #include "utils/snapmgr.h"
 #include "utils/datum.h"
+#include "utils/lsyscache.h"
 #include "catalog/pg_type.h"
+#include "catalog/namespace.h"
+#include "commands/dbcommands.h"
 #include "postmaster/bgworker.h"
 #include "commands/user.h"
 #include "access/datavec/ogai_model_manager.h"
@@ -52,6 +56,27 @@
 #define DEFAULT_VECTOR_DIM         1536    /* Default embedding vector dimension */
 #define DEFAULT_MAX_CHUNK_SIZE     1000    /* Default text chunk size for join mode */
 #define DEFAULT_MAX_CHUNK_OVERLAP  200     /* Default chunk overlap size for join mode */
+
+static void EnsureOgaiSqlExecutionContexts()
+{
+    if (t_thrd.mem_cxt.msg_mem_cxt == NULL) {
+        t_thrd.mem_cxt.msg_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
+            "MessageContext",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+    }
+
+    if (t_thrd.mem_cxt.mask_password_mem_cxt == NULL) {
+        t_thrd.mem_cxt.mask_password_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
+            "MaskPasswordCtx",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+    }
+
+    InitVecFuncMap();
+}
 
 /* Ogai task config */
 typedef struct {
@@ -580,6 +605,14 @@ static bool IsRetryable(OgaiFailType failType)
     }
 }
 
+static const char *GetFailureQueueStatus(int nextRetryCount, OgaiFailType failType)
+{
+    if (!IsRetryable(failType) || nextRetryCount >= VECTOR_PROCESSOR_MAX_RETRY_COUNT) {
+        return "failed";
+    }
+    return "ready";
+}
+
 /*
  * Query the vectorize_queue and build a shared context for parallel processing.
  * Returns NULL if no tasks are found.
@@ -696,6 +729,11 @@ static void WorkerGenerateJoinEmbeddings(OgaiVectorizeTask *task,
                                          EmbeddingClient *client, const char *content,
                                          const OgaiTaskConfig *taskConfig)
 {
+    if (taskConfig->maxChunkSize <= 0) {
+        WorkerGenerateAppendEmbedding(task, client, content, taskConfig->dim);
+        return;
+    }
+
     TextSplitConfig split_config = BuildDefaultTextSplitConfig(taskConfig->maxChunkSize,
                                                                taskConfig->maxChunkOverlap);
 
@@ -766,6 +804,7 @@ static void SaveTaskConfigForLeader(OgaiVectorizeTask *task, const OgaiTaskConfi
     nRet = strncpy_s(task->config.tableMethod, sizeof(task->config.tableMethod),
                      taskConfig->tableMethod, sizeof(task->config.tableMethod) - 1);
     securec_check(nRet, "", "");
+    task->config.useChunking = taskConfig->maxChunkSize > 0;
 }
 
 /* Set task failure result with the given fail type and reason. */
@@ -787,6 +826,52 @@ static void ResetWorkerEmbeddingCache(WorkerEmbeddingCache *cache)
     }
     cache->client = NULL;
     cache->modelKey[0] = '\0';
+}
+
+static void EnsureWorkerProcPortUser(void)
+{
+    if (u_sess->proc_cxt.MyProcPort != NULL &&
+        u_sess->proc_cxt.MyProcPort->user_name != NULL &&
+        u_sess->proc_cxt.MyProcPort->user_name[0] != '\0') {
+        return;
+    }
+
+    MemoryContext oldMemCtx = MemoryContextSwitchTo(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
+
+    if (u_sess->proc_cxt.MyProcPort == NULL) {
+        u_sess->proc_cxt.MyProcPort = (Port *)palloc0(sizeof(Port));
+        u_sess->proc_cxt.MyProcPort->sock = -1;
+    }
+
+    if (u_sess->proc_cxt.MyProcPort->database_name == NULL &&
+        OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
+        char *databaseName = get_database_name(u_sess->proc_cxt.MyDatabaseId);
+        if (databaseName != NULL) {
+            u_sess->proc_cxt.MyProcPort->database_name = pstrdup(databaseName);
+        }
+    }
+
+    if (u_sess->proc_cxt.MyProcPort->user_name == NULL ||
+        u_sess->proc_cxt.MyProcPort->user_name[0] == '\0') {
+        char superuserBuf[NAMEDATALEN] = {0};
+        char *superuserName = GetSuperUserName(superuserBuf);
+        if (superuserName != NULL && superuserName[0] != '\0') {
+            u_sess->proc_cxt.MyProcPort->user_name = pstrdup(superuserName);
+        }
+    }
+
+    MemoryContextSwitchTo(oldMemCtx);
+}
+
+static bool OgaiCatalogRelationExists(const char *schemaName, const char *relationName)
+{
+    Oid namespaceId = get_namespace_oid(schemaName, true);
+    if (!OidIsValid(namespaceId)) {
+        return false;
+    }
+
+    return OidIsValid(get_relname_relid(relationName, namespaceId));
 }
 
 static EmbeddingClient *WorkerEnsureEmbeddingClient(const OgaiTaskConfig *taskConfig,
@@ -854,6 +939,8 @@ static void WorkerCallEmbeddingModel(OgaiVectorizeTask *task,
                                 "OgaiWorkerEmbeddingCtx", ALLOCSET_DEFAULT_SIZES);
     MemoryContext oldCtx = MemoryContextSwitchTo(tmpCtx);
     ModelConfig modelConfig;
+    errno_t rc = memset_s(&modelConfig, sizeof(modelConfig), 0, sizeof(modelConfig));
+    securec_check(rc, "", "");
 
     PG_TRY();
     {
@@ -863,6 +950,8 @@ static void WorkerCallEmbeddingModel(OgaiVectorizeTask *task,
     PG_CATCH();
     {
         MemoryContextSwitchTo(oldCtx);
+        ErrorData *edata = CopyErrorData();
+        const char *errMsg = (edata != NULL && edata->message != NULL) ? edata->message : "unknown error";
         MemoryContextDelete(tmpCtx);
         FlushErrorState();
         ResetWorkerEmbeddingCache(cache);
@@ -870,9 +959,10 @@ static void WorkerCallEmbeddingModel(OgaiVectorizeTask *task,
         task->failType = (int)FAIL_TYPE_UNKNOWN;
         errno_t nRet = snprintf_s(task->failReason, sizeof(task->failReason),
                                   sizeof(task->failReason) - 1,
-                                  "Exception in embedding model call for task_id=%d, pk_value=%d",
-                                  task->taskId, task->pkValue);
+                                  "Exception in embedding model call for task_id=%d, pk_value=%d: %s",
+                                  task->taskId, task->pkValue, errMsg);
         securec_check_ss_c(nRet, "", "");
+        FreeErrorData(edata);
         return;
     }
     PG_END_TRY();
@@ -968,38 +1058,39 @@ static bool LeaderWriteAppendResult(OgaiVectorizeTask *task)
     return (spiRc == SPI_OK_UPDATE && SPI_processed > 0);
 }
 
-/* Join mode: INSERT each chunk with embedding into the vector table. Returns true on success. */
-static bool LeaderWriteJoinResults(OgaiVectorizeTask *task)
+static bool LeaderWriteJoinResultWithoutChunking(OgaiVectorizeTask *task, const char *joinTable)
 {
-    char joinTable[128];
-    char sql[SQL_BUF_SIZE];
-    errno_t nRet = snprintf_s(joinTable, sizeof(joinTable), sizeof(joinTable) - 1,
-                              "%s_vector", task->config.srcTable);
-    securec_check_ss_c(nRet, "", "");
+    if (task->vectorData == NULL) {
+        return true;
+    }
 
-    /* Delete existing chunks to ensure idempotent retries */
-    nRet = snprintf_s(sql, sizeof(sql), sizeof(sql) - 1,
-        "DELETE FROM %s.%s WHERE %s = $1",
+    char sql[SQL_BUF_SIZE];
+    errno_t nRet = snprintf_s(sql, sizeof(sql), sizeof(sql) - 1,
+        "INSERT INTO %s.%s (%s, ogai_embedding) VALUES ($1, $2)",
         task->config.srcSchema, joinTable, task->config.primaryKey);
     securec_check_ss_c(nRet, "", "");
-    Oid delTypes[1] = {INT4OID};
-    SPIPlanPtr delPlan = SPI_prepare(sql, 1, delTypes);
-    if (delPlan == NULL) {
-        return false;
-    }
-    Datum delParams[1] = {Int32GetDatum(task->pkValue)};
-    char delNulls[1] = {' '};
-    int delRc = SPI_execute_plan(delPlan, delParams, delNulls, false, 0);
-    SPI_freeplan(delPlan);
-    if (delRc != SPI_OK_DELETE) {
+
+    Oid paramTypes[2] = {INT4OID, VECTOROID};
+    SPIPlanPtr plan = SPI_prepare(sql, 2, paramTypes);
+    if (plan == NULL) {
         return false;
     }
 
+    Datum params[2] = {Int32GetDatum(task->pkValue), PointerGetDatum(task->vectorData)};
+    char paramNulls[2] = {' ', ' '};
+    int spiRc = SPI_execute_plan(plan, params, paramNulls, false, 0);
+    SPI_freeplan(plan);
+    return spiRc == SPI_OK_INSERT;
+}
+
+static bool LeaderWriteJoinChunkResults(OgaiVectorizeTask *task, const char *joinTable)
+{
     if (task->chunkCount == 0 || task->chunks == NULL) {
         return true;
     }
 
-    nRet = snprintf_s(sql, sizeof(sql), sizeof(sql) - 1,
+    char sql[SQL_BUF_SIZE];
+    errno_t nRet = snprintf_s(sql, sizeof(sql), sizeof(sql) - 1,
         "INSERT INTO %s.%s (%s, chunk_id, chunk_text, ogai_embedding) VALUES ($1, $2, $3, $4)",
         task->config.srcSchema, joinTable, task->config.primaryKey);
     securec_check_ss_c(nRet, "", "");
@@ -1026,12 +1117,45 @@ static bool LeaderWriteJoinResults(OgaiVectorizeTask *task)
     return true;
 }
 
+/* Join mode: replace the row's vectors in the vector table. Returns true on success. */
+static bool LeaderWriteJoinResults(OgaiVectorizeTask *task)
+{
+    char joinTable[128];
+    char sql[SQL_BUF_SIZE];
+    errno_t nRet = snprintf_s(joinTable, sizeof(joinTable), sizeof(joinTable) - 1,
+                              "%s_vector", task->config.srcTable);
+    securec_check_ss_c(nRet, "", "");
+
+    /* Delete existing chunks to ensure idempotent retries */
+    nRet = snprintf_s(sql, sizeof(sql), sizeof(sql) - 1,
+        "DELETE FROM %s.%s WHERE %s = $1",
+        task->config.srcSchema, joinTable, task->config.primaryKey);
+    securec_check_ss_c(nRet, "", "");
+    Oid delTypes[1] = {INT4OID};
+    SPIPlanPtr delPlan = SPI_prepare(sql, 1, delTypes);
+    if (delPlan == NULL) {
+        return false;
+    }
+    Datum delParams[1] = {Int32GetDatum(task->pkValue)};
+    char delNulls[1] = {' '};
+    int delRc = SPI_execute_plan(delPlan, delParams, delNulls, false, 0);
+    SPI_freeplan(delPlan);
+    if (delRc != SPI_OK_DELETE) {
+        return false;
+    }
+
+    if (task->config.useChunking) {
+        return LeaderWriteJoinChunkResults(task, joinTable);
+    }
+    return LeaderWriteJoinResultWithoutChunking(task, joinTable);
+}
+
 static bool LeaderWriteTaskResult(OgaiVectorizeTask *task)
 {
     if (strcmp(task->config.tableMethod, "append") == 0 && task->vectorData != NULL) {
         return LeaderWriteAppendResult(task);
     }
-    if (strcmp(task->config.tableMethod, "join") == 0 && task->chunks != NULL) {
+    if (strcmp(task->config.tableMethod, "join") == 0) {
         return LeaderWriteJoinResults(task);
     }
     return false;
@@ -1045,7 +1169,10 @@ static void LeaderHandleWriteException(OgaiVectorizeTask *task)
 
     PG_TRY();
     {
-        UpdateQueueStatus(task->msgId, "ready", task->retryCount + 1,
+        int nextRetryCount = task->retryCount + 1;
+        UpdateQueueStatus(task->msgId,
+                          GetFailureQueueStatus(nextRetryCount, FAIL_TYPE_SQL_EXEC_FAILED),
+                          nextRetryCount,
                           "Leader exception during DML write");
     }
     PG_CATCH();
@@ -1071,7 +1198,10 @@ static void LeaderHandleSuccessTask(OgaiVectorizeTask *task)
         } else {
             RollbackAndReleaseCurrentSubTransaction();
             ereport(WARNING, (errmsg("Leader: failed to write embedding for msg_id=%ld", task->msgId)));
-            UpdateQueueStatus(task->msgId, "ready", task->retryCount + 1,
+            int nextRetryCount = task->retryCount + 1;
+            UpdateQueueStatus(task->msgId,
+                              GetFailureQueueStatus(nextRetryCount, FAIL_TYPE_SQL_EXEC_FAILED),
+                              nextRetryCount,
                               "Leader failed to write embedding to target table");
         }
     }
@@ -1085,16 +1215,17 @@ static void LeaderHandleSuccessTask(OgaiVectorizeTask *task)
 static void LeaderHandleFailedTask(OgaiVectorizeTask *task)
 {
     OgaiFailType ft = (OgaiFailType)task->failType;
+    int nextRetryCount = task->retryCount + 1;
     ereport(WARNING, (errmsg("Worker failed for msg_id=%ld: %s", task->msgId, task->failReason)));
-    UpdateQueueStatus(task->msgId, IsRetryable(ft) ? "ready" : "failed",
-                      task->retryCount + 1, task->failReason);
+    UpdateQueueStatus(task->msgId, GetFailureQueueStatus(nextRetryCount, ft),
+                      nextRetryCount, task->failReason);
 }
 
 static void LeaderHandlePendingTask(OgaiVectorizeTask *task)
 {
     ereport(WARNING, (errmsg("Task not processed by worker for msg_id=%ld, resetting to ready",
                              task->msgId)));
-    UpdateQueueStatus(task->msgId, "ready", task->retryCount,
+    UpdateQueueStatus(task->msgId, GetFailureQueueStatus(task->retryCount, FAIL_TYPE_UNKNOWN), task->retryCount,
                       "Worker did not process this task");
 }
 
@@ -1225,15 +1356,18 @@ static bool WorkerProcessOneTask(OgaiVectorizeSharedContext *shared,
     }
     PG_CATCH();
     {
+        ErrorData *edata = CopyErrorData();
+        const char *errMsg = (edata != NULL && edata->message != NULL) ? edata->message : "unknown error";
         FlushErrorState();
         shared->tasks[idx].resultStatus = TASK_RESULT_FAIL;
         shared->tasks[idx].failType = (int)FAIL_TYPE_UNKNOWN;
         errno_t nRet = snprintf_s(shared->tasks[idx].failReason,
                                   sizeof(shared->tasks[idx].failReason),
                                   sizeof(shared->tasks[idx].failReason) - 1,
-                                  "Unhandled exception in worker for task_id=%d, pk_value=%d",
-                                  shared->tasks[idx].taskId, shared->tasks[idx].pkValue);
+                                  "Unhandled exception in worker for task_id=%d, pk_value=%d: %s",
+                                  shared->tasks[idx].taskId, shared->tasks[idx].pkValue, errMsg);
         securec_check_ss_c(nRet, "", "");
+        FreeErrorData(edata);
         ResetWorkerEmbeddingCache(embCache);
         return true;
     }
@@ -1278,53 +1412,19 @@ bool OgaiVectorProcessorInit()
     }
     PushActiveSnapshot(GetTransactionSnapshot(false));
 
-    int spiRc = SPI_connect();
-    if (spiRc != SPI_OK_CONNECT) {
-        PopActiveSnapshot();
-        CommitTransactionCommand();
-        ereport(ERROR, (errmsg(
-                "Vector processor initialization failed: SPI connection failed (return code=%d)", spiRc)));
-        return false;
-    }
+    EnsureWorkerProcPortUser();
 
-    StringInfoData checkSql;
-    initStringInfo(&checkSql);
-
-    appendStringInfo(&checkSql,
-        "SELECT 1 FROM pg_tables WHERE schemaname = 'ogai' AND tablename = 'vectorize_tasks';");
-    
-    spiRc = SPI_execute(checkSql.data, true, 0);
-    if (spiRc != SPI_OK_SELECT || SPI_processed == 0) {
+    if (!OgaiCatalogRelationExists("ogai", "vectorize_tasks")) {
         ereport(ERROR, (errmsg(
             "Vector processor initialization failed: dependent table ogai.vectorize_tasks does not exist")));
     }
 
-    resetStringInfo(&checkSql);
-    appendStringInfo(&checkSql,
-        "SELECT 1 FROM pg_tables WHERE schemaname = 'ogai' AND tablename = 'vectorize_queue';");
-    
-    spiRc = SPI_execute(checkSql.data, true, 0);
-    if (spiRc != SPI_OK_SELECT || SPI_processed == 0) {
+    if (!OgaiCatalogRelationExists("ogai", "vectorize_queue")) {
         ereport(ERROR, (errmsg(
             "Vector processor initialization failed: dependent table ogai.vectorize_queue does not exist")));
     }
 
-    /* Set MyProcPort->user_name for bgworker authentication. */
-    if (u_sess->proc_cxt.MyProcPort->user_name == NULL ||
-        u_sess->proc_cxt.MyProcPort->user_name[0] == '\0') {
-        MemoryContext oldMemCtx = MemoryContextSwitchTo(
-            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
-        char superuserBuf[NAMEDATALEN] = {0};
-        char *superuserName = GetSuperUserName(superuserBuf);
-        if (superuserName != NULL && superuserName[0] != '\0') {
-            u_sess->proc_cxt.MyProcPort->user_name = pstrdup(superuserName);
-        }
-        MemoryContextSwitchTo(oldMemCtx);
-    }
-
     ereport(LOG, (errmsg("Vector processor initialized successfully")));
-    pfree(checkSql.data);
-    SPI_finish();
     PopActiveSnapshot();
     CommitTransactionCommand();
     return true;
@@ -1334,6 +1434,9 @@ bool OgaiVectorProcessorInit()
 void OgaiVectorizeWorkerMain(const BgWorkerContext *bwc)
 {
     OgaiVectorizeSharedContext *shared = (OgaiVectorizeSharedContext *)bwc->bgshared;
+
+    EnsureOgaiSqlExecutionContexts();
+    (void)MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
 
     /* Push active snapshot for SPI_prepare catalog access (read-only) */
     PushActiveSnapshot(GetTransactionSnapshot(false));
