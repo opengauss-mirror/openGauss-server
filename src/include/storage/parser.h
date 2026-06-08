@@ -77,6 +77,7 @@ public:
         m_read_pos = 0;
         m_overload_buf = NULL;
         m_overload_buf_completed = false;
+        m_max_line_size = -1;
 #endif
     }
 
@@ -92,6 +93,8 @@ public:
 
     /* Get (via copy) next line reffered by m_read_pos */
     bool GetNextLine(StringInfo output_line);
+
+    void SetMaxLineSize(int max_line_size);
 
     /* force mark the last line completed */
     void MarkLastLineCompleted();
@@ -205,13 +208,16 @@ private:
      * all members about overload buffer
      */
     struct evbuffer* m_output;
+    void CompleteCurrentLineHeader();
 #ifdef OBS_SERVER
     StringInfo m_overload_buf;
     int m_read_pos;
     bool m_overload_buf_completed;
+    int m_max_line_size;
 
     /* save overload buffer to stringinfo for obs */
     void SaveOverloadBuf(StringInfo dest, const char* buf, int buf_len, bool isComplete);
+    void CheckAppendLineSize(int append_len);
 #endif
 };
 

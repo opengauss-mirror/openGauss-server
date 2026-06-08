@@ -1249,6 +1249,7 @@ void GDS::LineBuffer::Init()
     m_overload_buf = makeStringInfo();
     MemoryContextSwitchTo(oldcontext);
     m_overload_buf_completed = false;
+    m_max_line_size = -1;
 #endif
 }
 
@@ -1282,6 +1283,10 @@ int GDS::LineBuffer::AppendLine(const char* buf, int buf_len, bool isComplete)
     // buf_len = 0, isComplete = true means to set line complete
 
     ASSERT(buf_len > 0);
+
+#ifdef OBS_SERVER
+    CheckAppendLineSize(buf_len);
+#endif
 
     if (HasEnoughSpace(buf_len) < 0) {
         /*
@@ -1339,12 +1344,7 @@ int GDS::LineBuffer::AppendLine(const char* buf, int buf_len, bool isComplete)
     // update line header if line is completed
     if (isComplete) {
         ++m_row_num;
-        char row_header[ROW_HEADER_SIZE];
-        *(uint32_t*)&row_header[0] = htonl((uint32_t)(m_cur_line_len + 4));  // add size of row_num
-        *(uint32_t*)&row_header[4] = htonl(m_row_num);
-        ASSERT(m_used_len >= ROW_HEADER_SIZE);
-        rc = memcpy_s(m_cur_line, m_buf_len - (m_cur_line - m_buf), row_header, ROW_HEADER_SIZE);
-        parser_securec_check(rc);
+        CompleteCurrentLineHeader();
     }
 
     // copy data
@@ -1355,6 +1355,18 @@ int GDS::LineBuffer::AppendLine(const char* buf, int buf_len, bool isComplete)
     m_used_len += buf_len;
 
     return buf_len;
+}
+
+void GDS::LineBuffer::CompleteCurrentLineHeader()
+{
+    char row_header[ROW_HEADER_SIZE];
+    const int row_num_offset = sizeof(uint32_t);
+
+    *(uint32_t*)&row_header[0] = htonl((uint32_t)(m_cur_line_len + row_num_offset));
+    *(uint32_t*)&row_header[row_num_offset] = htonl(m_row_num);
+    ASSERT(m_used_len >= ROW_HEADER_SIZE);
+    errno_t rc = memcpy_s(m_cur_line, m_buf_len - (m_cur_line - m_buf), row_header, ROW_HEADER_SIZE);
+    parser_securec_check(rc);
 }
 
 #ifdef GDS_SERVER
@@ -1556,6 +1568,11 @@ bool GDS::LineBuffer::GetNextLine(StringInfo output_line)
 
     /* check overload stringinfo, get line data from overload stringinfo first*/
     if (m_overload_buf->len != 0) {
+        if (m_max_line_size >= 0 &&
+            (m_overload_buf->len > m_max_line_size || output_line->len > m_max_line_size - m_overload_buf->len)) {
+            parser_log(LEVEL_ERROR, "COPY line is too long");
+        }
+
         /* copy overload buffer */
         enlargeStringInfo(output_line, m_overload_buf->len);
         appendBinaryStringInfo(output_line, m_overload_buf->data, m_overload_buf->len);
@@ -1597,6 +1614,10 @@ bool GDS::LineBuffer::GetNextLine(StringInfo output_line)
     /* Minus the tuple id in current line buffer to the actual tuplelen */
     tuplen -= 4;
 
+    if (m_max_line_size >= 0 && (tuplen > m_max_line_size || output_line->len > m_max_line_size - tuplen)) {
+        parser_log(LEVEL_ERROR, "COPY line is too long");
+    }
+
     /* Allocate space and put tuple content to line buffer */
     enlargeStringInfo(output_line, tuplen);
     appendBinaryStringInfo(output_line, buf + ROW_HEADER_SIZE, tuplen);
@@ -1628,12 +1649,8 @@ void GDS::LineBuffer::MarkLastLineCompleted()
         if (!m_cur_line_completed) {
             /* just like PackData (dest, TRUE) ,  fill the ROW HEADER of the last uncompleted row, and mark it completed
              */
-            char row_header[ROW_HEADER_SIZE];
-            *(uint32_t*)&row_header[0] = htonl((uint32_t)(m_cur_line_len + 4));  // add size of row_num
-            *(uint32_t*)&row_header[4] = htonl(++m_row_num);
-            errno_t rc = memcpy_s(m_cur_line, m_buf_len - (m_cur_line - m_buf), row_header, ROW_HEADER_SIZE);
-            parser_securec_check(rc);
-
+            ++m_row_num;
+            CompleteCurrentLineHeader();
             m_cur_line_completed = true;
         }
     } else {
@@ -1691,4 +1708,25 @@ void GDS::LineBuffer::SaveOverloadBuf(StringInfo dest, const char* buf, int buf_
     MemoryContextSwitchTo(oldcontext);
 }
 #endif
+
+void GDS::LineBuffer::SetMaxLineSize(int max_line_size)
+{
+    m_max_line_size = max_line_size;
+}
+
+void GDS::LineBuffer::CheckAppendLineSize(int append_len)
+{
+    if (m_max_line_size < 0 || append_len <= 0) {
+        return;
+    }
+
+    int64 cur_len = m_cur_line_completed ? 0 : m_cur_line_len;
+    if (m_overload_buf != NULL && m_overload_buf->len != 0) {
+        cur_len += m_overload_buf->len;
+    }
+
+    if (append_len > m_max_line_size || cur_len > m_max_line_size - append_len) {
+        parser_log(LEVEL_ERROR, "COPY line is too long");
+    }
+}
 #endif
