@@ -303,12 +303,24 @@ static int his_kms_handle_err(HisKmsMgr *kms)
     return 0;
 }
 
+static void his_kms_has_set_cacert(HisKmsMgr *kms)
+{
+    if (kms->cacert == NULL) {
+        km_err_msg(kms->err, "failed to access his kms service, plase set parameter 'hisCaCert'");
+    }
+}
+
 char *his_kms_mk_select(HisKmsMgr *kms, const char *keypath)
 {
     HttpMgr *http;
     char *resbody;
     char *keystate;
     int ret;
+
+    his_kms_has_set_cacert(kms);
+    if (km_err_catch(kms->err)) {
+        return NULL;
+    }
 
     HisKmsKeyPath kpath = his_kms_parser_key_path(kms, keypath);
     if (km_err_catch(kms->err)) {
@@ -366,6 +378,11 @@ KmUnStr his_kms_mk_encrypt(HisKmsMgr *kms, const char *keypath, KmUnStr plain)
     char *len;
 
     if (plain.val == NULL) {
+        return cipher;
+    }
+
+    his_kms_has_set_cacert(kms);
+    if (km_err_catch(kms->err)) {
         return cipher;
     }
 
@@ -437,6 +454,11 @@ KmUnStr his_kms_mk_decrypt(HisKmsMgr *kms, const char *keypath, KmUnStr cipher)
     char *len;
 
     if (cipher.val == NULL) {
+        return plain;
+    }
+
+    his_kms_has_set_cacert(kms);
+    if (km_err_catch(kms->err)) {
         return plain;
     }
 

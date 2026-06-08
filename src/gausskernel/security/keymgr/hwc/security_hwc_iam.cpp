@@ -126,6 +126,10 @@ static void hwc_iam_has_set_auth_info(HwcIamMgr *iam)
         km_err_msg(iam->err, "failed to access huawei cloud iam service, plase set parameter 'kmsProject'");
         return;
     }
+    if (iam->cacert == NULL) {
+        km_err_msg(iam->err, "failed to access huawei cloud iam service, plase set parameter 'iamCaCert'");
+        return;
+    }
 }
 
 static char *hwc_iam_get_url(HwcIamMgr *iam)

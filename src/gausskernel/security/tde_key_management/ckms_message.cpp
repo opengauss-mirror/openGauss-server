@@ -184,15 +184,14 @@ char* CKMSMessage::read_kms_info_from_file()
         if (!S_ISREG(statbuf.st_mode) ||
             (statbuf.st_mode & (S_IRWXG | S_IRWXO)) ||
             ((statbuf.st_mode & S_IRWXU) == S_IRWXU)) {
-            pfree_ext(iamca);
             pfree_ext(kmsca);
             ereport(ERROR,
                 (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FILE_READ_FAILED),
                 errmsg("the permission of 'DATA_DIR/tde_config/kmsca.crt should be 0600(u=rw) or less.")));
             }
-        m_iamca = iamca;
+        m_kmsca = kmsca;
     } else {
-        pfree_ext(iamca);
+        pfree_ext(kmsca);
         ereport(ERROR,
             (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FILE_READ_FAILED),
                 errmsg("failed to find kmsca.crt, tde won't check the cert of kms service.")));

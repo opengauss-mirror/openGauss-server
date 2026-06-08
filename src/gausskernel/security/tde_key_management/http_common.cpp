@@ -73,25 +73,28 @@ HttpErrCode HttpCommon::http_request(HttpReqMsg* http_req_msg, HttpConfig *http_
 
 HttpErrCode HttpCommon::set_http_config(CURL *http_obj, HttpConfig *http_config)
 {
-    bool setca;
-
     CURLcode curl_ret = CURLE_OK;
     const int connect_timeout = 10;
 
-    setca = (http_config->cacert != NULL) ? true : false;
+    if (http_config->cacert == NULL || http_config->cacert[0] == '\0') {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            errmsg("CA certificate path is not configured for HTTPS request"),
+            errdetail("cacert is NULL or empty"),
+            errcause("missing or invalid CA certificate configuration"),
+            erraction("check DATA_DIR/tde_config/iamca.crt and kmsca.crt")));
+        return TDE_HTTP_UNKNOWN_ERR;
+    }
 
     curl_ret = curl_easy_setopt(http_obj, CURLOPT_TIMEOUT, http_config->timeout);
     check_curl_ret(curl_ret);
     curl_ret = curl_easy_setopt(http_obj, CURLOPT_CONNECTTIMEOUT, connect_timeout);
     check_curl_ret(curl_ret);
-    curl_ret = curl_easy_setopt(http_obj, CURLOPT_SSL_VERIFYPEER, setca);
+    curl_ret = curl_easy_setopt(http_obj, CURLOPT_SSL_VERIFYPEER, 1L);
     check_curl_ret(curl_ret);
-    curl_ret = curl_easy_setopt(http_obj, CURLOPT_SSL_VERIFYHOST, setca);
+    curl_ret = curl_easy_setopt(http_obj, CURLOPT_SSL_VERIFYHOST, 2L);
     check_curl_ret(curl_ret);
-
-    if (setca) {
-        curl_ret = curl_easy_setopt(http_obj, CURLOPT_CAINFO, http_config->cacert);
-    }
+    curl_ret = curl_easy_setopt(http_obj, CURLOPT_CAINFO, http_config->cacert);
+    check_curl_ret(curl_ret);
     return TDE_HTTP_SUCCEED;
 }
 
