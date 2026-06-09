@@ -345,7 +345,8 @@ void IndexOnlyScanFusion::End(bool isCompleted)
             }
             index_close(m_parentIndex, NoLock);
         } else {
-            index_close(m_index, AccessShareLock);
+            LOCKMODE indexLock = m_hasRelationLock ? NoLock : AccessShareLock;
+            index_close(m_index, indexLock);
         }
         m_index = NULL;
     }
@@ -359,7 +360,8 @@ void IndexOnlyScanFusion::End(bool isCompleted)
             }
             heap_close(m_parentRel, NoLock);
         } else {
-            heap_close(m_rel, AccessShareLock);
+            LOCKMODE relLock = m_hasRelationLock ? NoLock : AccessShareLock;
+            heap_close(m_rel, relLock);
         }
         m_rel = NULL;
     }
