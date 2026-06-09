@@ -127,6 +127,128 @@ typedef struct ValPrefetch {
     bool init; /* whether the prefetch list inited done or not */
 } ValPrefetch;
 
+#ifdef ENABLE_NEON
+typedef struct LazyVacuumNeonPrefetchState {
+    TidStoreIter* iter;
+    TidStoreIterResult* iter_result;
+    bool enabled;
+} LazyVacuumNeonPrefetchState;
+
+typedef struct LazyVacuumNeonTruncatePrefetchState {
+    BlockNumber prefetched_until;
+    int maximum;
+    bool enabled;
+} LazyVacuumNeonTruncatePrefetchState;
+
+static inline int LazyVacuum_Neon_Prefetch_TargetPages()
+{
+    return Max(u_sess->storage_cxt.target_prefetch_pages, 0);
+}
+
+static inline bool LazyVacuum_Neon_Prefetch_Enabled()
+{
+    return !g_instance.attr.attr_storage.enable_adio_function && LazyVacuum_Neon_Prefetch_TargetPages() > 0;
+}
+
+static bool LazyVacuum_Neon_PrefetchTidStoreResult(Relation onerel, TidStoreIterResult* iter_result)
+{
+    if (iter_result == NULL) {
+        return false;
+    }
+    if (iter_result->bktId != InvalidBktId && iter_result->bktId != RelationGetBktid(onerel)) {
+        return false;
+    }
+
+    PrefetchBuffer(onerel, MAIN_FORKNUM, iter_result->blkno);
+    return true;
+}
+
+static inline bool LazyVacuum_Neon_TidStoreResultMatches(TidStoreIterResult* left, TidStoreIterResult* right)
+{
+    return left != NULL && right != NULL && left->bktId == right->bktId && left->blkno == right->blkno;
+}
+
+static void LazyVacuum_Neon_PrefetchNext(Relation onerel, LazyVacuumNeonPrefetchState* state)
+{
+    if (!state->enabled) {
+        return;
+    }
+
+    state->iter_result = TidStoreIterateNext(state->iter);
+    if (!LazyVacuum_Neon_PrefetchTidStoreResult(onerel, state->iter_result)) {
+        state->enabled = false;
+    }
+}
+
+static void LazyVacuum_Neon_PrefetchInit(Relation onerel, LVRelStats* vacrelstats,
+                                         TidStoreIterResult* iter_result,
+                                         LazyVacuumNeonPrefetchState* state)
+{
+    int prefetch_maximum;
+
+    state->iter = NULL;
+    state->iter_result = NULL;
+    state->enabled = LazyVacuum_Neon_Prefetch_Enabled();
+    if (!state->enabled) {
+        return;
+    }
+
+    prefetch_maximum = LazyVacuum_Neon_Prefetch_TargetPages();
+    state->iter = TidStoreBeginIterate(vacrelstats->dead_items_info.dead_items);
+    while ((state->iter_result = TidStoreIterateNext(state->iter)) != NULL) {
+        if (LazyVacuum_Neon_TidStoreResultMatches(state->iter_result, iter_result)) {
+            break;
+        }
+    }
+    for (int i = 0; i < prefetch_maximum; i++) {
+        if (i > 0) {
+            state->iter_result = TidStoreIterateNext(state->iter);
+        }
+        if (!LazyVacuum_Neon_PrefetchTidStoreResult(onerel, state->iter_result)) {
+            state->enabled = false;
+            break;
+        }
+    }
+}
+
+static void LazyVacuum_Neon_PrefetchEnd(LazyVacuumNeonPrefetchState* state)
+{
+    if (state->iter != NULL) {
+        TidStoreEndIterate(state->iter);
+    }
+}
+
+static LazyVacuumNeonTruncatePrefetchState LazyVacuum_Neon_TruncatePrefetchStateInit(BlockNumber blkno)
+{
+    bool enabled = LazyVacuum_Neon_Prefetch_Enabled();
+
+    return (LazyVacuumNeonTruncatePrefetchState) {
+        blkno,
+        enabled ? LazyVacuum_Neon_Prefetch_TargetPages() : 0,
+        enabled
+    };
+}
+
+static void LazyVacuum_Neon_TruncatePrefetch(Relation onerel, LVRelStats* vacrelstats, BlockNumber blkno,
+                                             LazyVacuumNeonTruncatePrefetchState* state)
+{
+    if (state->enabled && state->prefetched_until > blkno) {
+        BlockNumber prefetch_start =
+            (blkno >= (BlockNumber)state->maximum) ? blkno - (BlockNumber)state->maximum + 1 : 0;
+
+        if (prefetch_start < vacrelstats->nonempty_pages) {
+            prefetch_start = vacrelstats->nonempty_pages;
+        }
+
+        for (BlockNumber pblkno = prefetch_start; pblkno <= blkno; pblkno++) {
+            PrefetchBuffer(onerel, MAIN_FORKNUM, pblkno);
+            CHECK_FOR_INTERRUPTS();
+        }
+        state->prefetched_until = prefetch_start;
+    }
+}
+#endif
+
 /* A few variables that don't seem worth passing around as parameters */
 static THR_LOCAL int elevel = -1;
 
@@ -1016,6 +1138,11 @@ static IndexBulkDeleteResult** lazy_scan_heap(
     ValPrefetch valprefetch;
     TdeInfo tde_info = {0};
     VacDeadItemsInfo &dead_items_info = vacrelstats->dead_items_info;
+#ifdef ENABLE_NEON
+    BlockNumber next_prefetch_block = 0;
+    int prefetch_maximum = 0;
+    bool use_neon_vacuum_prefetch = false;
+#endif
 
     gstrace_entry(GS_TRC_ID_lazy_scan_heap);
 
@@ -1095,6 +1222,13 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                     valprefetch.fetchlist1.quantity)));
     }
     ADIO_END();
+
+#ifdef ENABLE_NEON
+    use_neon_vacuum_prefetch = LazyVacuum_Neon_Prefetch_Enabled();
+    if (use_neon_vacuum_prefetch) {
+        prefetch_maximum = LazyVacuum_Neon_Prefetch_TargetPages();
+    }
+#endif
 
     for (blkno = 0; blkno < nblocks; blkno++) {
         Buffer buf;
@@ -1201,12 +1335,42 @@ static IndexBulkDeleteResult** lazy_scan_heap(
          */
         visibilitymap_pin(onerel, blkno, &vmbuffer);
 
+#ifdef ENABLE_NEON
+        if (use_neon_vacuum_prefetch) {
+            uint32 prefetch_budget = (uint32)prefetch_maximum;
+
+            if (next_prefetch_block < blkno) {
+                next_prefetch_block = blkno;
+            }
+            if (prefetch_budget > nblocks - next_prefetch_block) {
+                prefetch_budget = nblocks - next_prefetch_block;
+            }
+            if (next_prefetch_block >= blkno + (BlockNumber)prefetch_maximum) {
+                prefetch_budget = 0;
+            } else if (next_prefetch_block + prefetch_budget > blkno + (BlockNumber)prefetch_maximum) {
+                prefetch_budget = blkno + (BlockNumber)prefetch_maximum - next_prefetch_block;
+            }
+            if (skipping_all_visible_blocks && !scan_all) {
+                prefetch_budget = 0;
+            }
+
+            for (; prefetch_budget-- > 0; next_prefetch_block++) {
+                PrefetchBuffer(onerel, MAIN_FORKNUM, next_prefetch_block);
+            }
+        }
+#endif
+
         /*
          * We do pre-read for lazy-vacuum when we cant skip the visible blocks.
          * If we do it directly, we will read many blocks what we dont neet to
          * check, it is useless and meaningless.
          */
+#ifdef ENABLE_NEON
+        if (!use_neon_vacuum_prefetch && u_sess->attr.attr_storage.vacuum_bulk_read_size > 0 &&
+            !skipping_all_visible_blocks) {
+#else
         if (u_sess->attr.attr_storage.vacuum_bulk_read_size > 0 && !skipping_all_visible_blocks) {
+#endif
             int maxBLockCount = nblocks - blkno;
             buf = MultiReadBufferExtend(onerel, MAIN_FORKNUM, blkno, RBM_NORMAL, vac_strategy, maxBLockCount, true);
         } else {
@@ -1857,7 +2021,9 @@ static void lazy_vacuum_heap(Relation onerel, LVRelStats* vacrelstats,
     int npages;
     int remove_num = 0;
     PGRUsage ru0;
-
+#ifdef ENABLE_NEON
+    LazyVacuumNeonPrefetchState neon_prefetch = {NULL, NULL, false};
+#endif
     gstrace_entry(GS_TRC_ID_lazy_vacuum_heap);
 
     pg_rusage_init(&ru0);
@@ -1865,7 +2031,9 @@ static void lazy_vacuum_heap(Relation onerel, LVRelStats* vacrelstats,
 
     Assert(iter != NULL);
     Assert(iter_result != NULL);
-
+#ifdef ENABLE_NEON
+    LazyVacuum_Neon_PrefetchInit(onerel, vacrelstats, iter_result, &neon_prefetch);
+#endif
     do {
         int2 bktId = iter_result->bktId;
         BlockNumber tblk = iter_result->blkno;
@@ -1877,6 +2045,9 @@ static void lazy_vacuum_heap(Relation onerel, LVRelStats* vacrelstats,
         if (bktId != InvalidBktId && bktId != RelationGetBktid(onerel)) {
             break;
         }
+#ifdef ENABLE_NEON
+        LazyVacuum_Neon_PrefetchNext(onerel, &neon_prefetch);
+#endif
         buf = ReadBufferExtended(onerel, MAIN_FORKNUM, tblk, RBM_NORMAL, vac_strategy);
         if (!ConditionalLockBufferForCleanup(buf)) {
             ReleaseBuffer(buf);
@@ -1895,6 +2066,10 @@ static void lazy_vacuum_heap(Relation onerel, LVRelStats* vacrelstats,
         RecordPageWithFreeSpace(onerel, tblk, freespace);
         npages++;
     } while ((iter_result = TidStoreIterateNext(iter)) != NULL);
+
+#ifdef ENABLE_NEON
+    LazyVacuum_Neon_PrefetchEnd(&neon_prefetch);
+#endif
 
     ereport(elevel,
         (errmsg("vacuum %u/%u/%u, \"%s\": removed %d row versions in %d pages",
@@ -2232,6 +2407,10 @@ count_nondeletable_pages(Relation onerel, LVRelStats *vacrelstats)
     instr_time	starttime;
     instr_time	currenttime;
     instr_time	elapsed;
+#ifdef ENABLE_NEON
+    LazyVacuumNeonTruncatePrefetchState neon_prefetch =
+        LazyVacuum_Neon_TruncatePrefetchStateInit(vacrelstats->rel_pages);
+#endif
 
     /* Initialize the starttime if we check for conflicting lock requests */
     INSTR_TIME_SET_CURRENT(starttime);
@@ -2287,6 +2466,10 @@ count_nondeletable_pages(Relation onerel, LVRelStats *vacrelstats)
         CHECK_FOR_INTERRUPTS();
 
         blkno--;
+
+#ifdef ENABLE_NEON
+        LazyVacuum_Neon_TruncatePrefetch(onerel, vacrelstats, blkno, &neon_prefetch);
+#endif
 
         buf = ReadBufferExtended(onerel, MAIN_FORKNUM, blkno, RBM_NORMAL, vac_strategy);
 
@@ -2371,8 +2554,6 @@ extern void dead_items_reset(LVRelStats* vacrelstats)
  *      inputparam partOid is valid only when index is global partition index
  *      inputparam bktId is valid only when index is crossbucket index
  */
-
-
 static bool cbi_lazy_tid_reaped(ItemPointer itemptr, void* state, Oid partOid, int2 bktId)
 {
     LVRelStats* vacrelstats = (LVRelStats*)state;

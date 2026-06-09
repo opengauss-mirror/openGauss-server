@@ -308,6 +308,94 @@ static void initscan(HeapScanDesc scan, ScanKey key, bool is_rescan)
     }
 }
 
+#ifdef ENABLE_NEON
+static bool Heap_Neon_SeqScan_Prefetch_Enabled(HeapScanDesc scan)
+{
+    return !g_instance.attr.attr_storage.enable_adio_function &&
+           u_sess->attr.attr_sql.enable_seqscan_prefetch &&
+           scan->rs_base.rs_ss_accessor != NULL &&
+           scan->rs_base.rs_ss_accessor->sa_prefetch_quantity > 1 &&
+           scan->rs_base.rs_nblocks > 1 &&
+           ScanDirectionIsForward(scan->bulk_scan_direction) &&
+           (scan->rs_base.rs_flags & (SO_TYPE_BITMAPSCAN | SO_TYPE_SAMPLESCAN)) == 0;
+}
+
+static void heap_neon_prefetch(HeapScanDesc scan, BlockNumber page)
+{
+    SeqScanAccessor* accessor = scan->rs_base.rs_ss_accessor;
+    uint32 prefetch_target;
+    int64 nblocks;
+    int64 rel_scan_start;
+    int64 rel_scan_end;
+    int64 scan_pageoff;
+    int64 prefetch_start;
+    int64 prefetch_end;
+    bool range_scan;
+
+    if (!Heap_Neon_SeqScan_Prefetch_Enabled(scan)) {
+        return;
+    }
+
+    nblocks = scan->rs_base.rs_nblocks;
+    rel_scan_start = scan->rs_base.rs_startblock;
+    rel_scan_end = rel_scan_start + nblocks;
+    range_scan = scan->rs_base.rs_rangeScanInRedis.isRangeScanInRedis;
+
+    if (range_scan) {
+        if (page < (BlockNumber)rel_scan_start || page >= (BlockNumber)rel_scan_end) {
+            return;
+        }
+        scan_pageoff = page;
+    } else if ((int64)page < rel_scan_start) {
+        scan_pageoff = (int64)page + nblocks;
+    } else {
+        scan_pageoff = page;
+    }
+
+    if (scan_pageoff < rel_scan_start || scan_pageoff > rel_scan_end) {
+        return;
+    }
+
+    prefetch_target = accessor->sa_prefetch_trigger;
+    if (prefetch_target == 0) {
+        return;
+    }
+
+    if (accessor->sa_last_prefbf == InvalidBlockNumber) {
+        prefetch_start = scan_pageoff;
+        prefetch_end = rel_scan_end;
+    } else {
+        prefetch_start = scan_pageoff + (int64)prefetch_target - 1;
+        prefetch_end = prefetch_start + 1;
+    }
+
+    if (prefetch_start > rel_scan_end) {
+        prefetch_end = 0;
+    }
+    if (prefetch_end > prefetch_start + prefetch_target) {
+        prefetch_end = prefetch_start + prefetch_target;
+    }
+    if (prefetch_end > rel_scan_end) {
+        prefetch_end = rel_scan_end;
+    }
+
+    RelationOpenSmgr(scan->rs_base.rs_rd);
+    while (prefetch_start < prefetch_end) {
+        BlockNumber block = range_scan ? (BlockNumber)prefetch_start : (BlockNumber)(prefetch_start % nblocks);
+
+        PrefetchBuffer(scan->rs_base.rs_rd, MAIN_FORKNUM, block);
+        accessor->sa_last_prefbf = block;
+        prefetch_start++;
+    }
+
+    if (accessor->sa_prefetch_trigger < accessor->sa_prefetch_quantity / 2) {
+        accessor->sa_prefetch_trigger *= 2;
+    } else if (accessor->sa_prefetch_trigger < accessor->sa_prefetch_quantity) {
+        accessor->sa_prefetch_trigger = accessor->sa_prefetch_quantity;
+    }
+}
+#endif
+
 /*
  * heapgetpage - subroutine for heapgettup()
  *
@@ -325,6 +413,9 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write
     OffsetNumber line_off;
     ItemId lpp;
     bool all_visible = false;
+#ifdef ENABLE_NEON
+    bool use_neon_seqscan_prefetch = false;
+#endif
 
     HeapScanDesc scan = (HeapScanDesc) sscan;
 #ifdef USE_ASSERT_CHECKING
@@ -348,8 +439,19 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write
      */
     CHECK_FOR_INTERRUPTS();
 
+#ifdef ENABLE_NEON
+    use_neon_seqscan_prefetch = Heap_Neon_SeqScan_Prefetch_Enabled(scan);
+    if (use_neon_seqscan_prefetch) {
+        heap_neon_prefetch(scan, page);
+    }
+#endif
+
     /* read page using selected strategy */
-    if (u_sess->attr.attr_storage.heap_bulk_read_size > 0 
+    if (
+#ifdef ENABLE_NEON
+        !use_neon_seqscan_prefetch &&
+#endif
+        u_sess->attr.attr_storage.heap_bulk_read_size > 0
         && ScanDirectionIsForward(scan->bulk_scan_direction) 
         && page != scan->rs_base.rs_startblock
         && !(IsDefaultExtremeRtoMode() && RecoveryInProgress() && IsExtremeRtoRunning() && is_exrto_standby_read_worker())) {
@@ -467,6 +569,11 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write
  */
 void heap_prefetch(HeapScanDesc scan, ScanDirection dir)
 {
+#ifdef ENABLE_NEON
+    if (Heap_Neon_SeqScan_Prefetch_Enabled(scan)) {
+        return;
+    }
+#endif
     ADIO_RUN()
     {
         /* if tuples in page are all deleted, need prefetch also for performance */

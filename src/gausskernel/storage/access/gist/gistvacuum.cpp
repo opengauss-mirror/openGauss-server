@@ -19,8 +19,37 @@
 #include "access/gist_private.h"
 #include "commands/vacuum.h"
 #include "miscadmin.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/indexfsm.h"
 #include "storage/lmgr.h"
+
+#ifdef ENABLE_NEON
+typedef struct GistVacuumPrefetchState {
+    BlockNumber next_block;
+    int maximum;
+} GistVacuumPrefetchState;
+
+static inline int gistvacuum_prefetch_target_pages(void)
+{
+    return Max(u_sess->storage_cxt.target_prefetch_pages, 0);
+}
+
+static void gistvacuum_prefetch_window(Relation rel, GistVacuumPrefetchState *prefetch_state,
+                                       BlockNumber blkno, BlockNumber npages)
+{
+    if (prefetch_state->maximum <= 0) {
+        return;
+    }
+    if (prefetch_state->next_block < blkno) {
+        prefetch_state->next_block = blkno;
+    }
+    for (; prefetch_state->next_block < npages &&
+           prefetch_state->next_block < blkno + prefetch_state->maximum;
+         prefetch_state->next_block++) {
+        PrefetchBuffer(rel, MAIN_FORKNUM, prefetch_state->next_block);
+    }
+}
+#endif
 
 /*
  * VACUUM cleanup: update FSM
@@ -33,6 +62,9 @@ Datum gistvacuumcleanup(PG_FUNCTION_ARGS)
     BlockNumber npages, blkno;
     BlockNumber totFreePages;
     bool needLock = false;
+#ifdef ENABLE_NEON
+    GistVacuumPrefetchState prefetch_state = {GIST_ROOT_BLKNO + 1, gistvacuum_prefetch_target_pages()};
+#endif
 
     /* No-op in ANALYZE ONLY mode */
     if (info->analyze_only)
@@ -68,6 +100,10 @@ Datum gistvacuumcleanup(PG_FUNCTION_ARGS)
         Page page;
 
         vacuum_delay_point();
+
+#ifdef ENABLE_NEON
+        gistvacuum_prefetch_window(rel, &prefetch_state, blkno, npages);
+#endif
 
         buffer = ReadBufferExtended(rel, MAIN_FORKNUM, blkno, RBM_NORMAL, info->strategy);
         LockBuffer(buffer, GIST_SHARE);

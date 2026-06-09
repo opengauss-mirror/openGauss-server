@@ -69,6 +69,15 @@ void prefetch_pages(TableScanDesc scan, BlockNumber start_block, BlockNumber off
     return;
 }
 
+#ifdef ENABLE_NEON
+static bool SeqScan_Neon_Prefetch_Enabled()
+{
+    return !g_instance.attr.attr_storage.enable_adio_function &&
+           u_sess->attr.attr_sql.enable_seqscan_prefetch &&
+           u_sess->storage_cxt.target_prefetch_pages > 1;
+}
+#endif
+
 /* ----------------------------------------------------------------
  *		Start_Prefetch
  *
@@ -413,6 +422,13 @@ static TupleTableSlot* ExecSeqScan(PlanState* state)
  */
 void SeqScan_Pref_Quantity(TableScanDesc scan, SeqScanAccessor* p_accessor, Relation relation)
 {
+#ifdef ENABLE_NEON
+    if (SeqScan_Neon_Prefetch_Enabled()) {
+        p_accessor->sa_prefetch_quantity = (uint32)u_sess->storage_cxt.target_prefetch_pages;
+        p_accessor->sa_prefetch_trigger = 1;
+        return;
+    }
+#endif
     int threshold = (g_instance.attr.attr_storage.NBuffers / 4);
     int prefetchTrigger = u_sess->attr.attr_storage.adioPrefetchQuantity;
 
@@ -1076,6 +1092,13 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
 
     InitScanRelation(scanstate, estate, eflags);
 
+#ifdef ENABLE_NEON
+    if (SeqScan_Neon_Prefetch_Enabled()) {
+        /* add prefetch related information */
+        scanstate->ss_scanaccessor = (SeqScanAccessor*)palloc(sizeof(SeqScanAccessor));
+        SeqScan_Init(scanstate->ss_currentScanDesc, scanstate->ss_scanaccessor, scanstate->ss_currentRelation);
+    } else
+#endif
     ADIO_RUN()
     {
         /* add prefetch related information */
@@ -1279,12 +1302,9 @@ void ExecEndSeqScan(SeqScanState* node)
         }
     }
 
-    ADIO_RUN()
-    {
-        /* add prefetch related information */
+    if (node->ss_scanaccessor != NULL) {
         pfree_ext(node->ss_scanaccessor);
     }
-    ADIO_END();
 
     /*
      * close the heap relation.
@@ -1332,6 +1352,11 @@ void ExecReScanSeqScan(SeqScanState* node)
         scan->boolArr = NULL;
     }
     scan_handler_tbl_init_parallel_seqscan(scan, node->ps.plan->dop, node->partScanDirection);
+#ifdef ENABLE_NEON
+    if (SeqScan_Neon_Prefetch_Enabled() && node->ss_scanaccessor != NULL) {
+        SeqScan_Init(scan, node->ss_scanaccessor, node->ss_currentRelation);
+    }
+#endif
     ExecScanReScan((ScanState*)node);
 }
 
@@ -1416,6 +1441,13 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node)
 
         /* update partition scan-related fileds in SeqScanState  */
         node->ss_currentScanDesc = InitBeginScan(node, currentSubPartitionRel);
+#ifdef ENABLE_NEON
+        if (SeqScan_Neon_Prefetch_Enabled()) {
+            if (node->ss_scanaccessor != NULL) {
+                SeqScan_Init(node->ss_currentScanDesc, node->ss_scanaccessor, currentSubPartitionRel);
+            }
+        } else
+#endif
         ADIO_RUN()
         {
             SeqScan_Init(node->ss_currentScanDesc, node->ss_scanaccessor, currentSubPartitionRel);
@@ -1427,6 +1459,13 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node)
 
         /* update partition scan-related fileds in SeqScanState  */
         node->ss_currentScanDesc = InitBeginScan(node, currentpartitionrel);
+#ifdef ENABLE_NEON
+        if (SeqScan_Neon_Prefetch_Enabled()) {
+            if (node->ss_scanaccessor != NULL) {
+                SeqScan_Init(node->ss_currentScanDesc, node->ss_scanaccessor, currentpartitionrel);
+            }
+        } else
+#endif
         ADIO_RUN()
         {
             SeqScan_Init(node->ss_currentScanDesc, node->ss_scanaccessor, currentpartitionrel);

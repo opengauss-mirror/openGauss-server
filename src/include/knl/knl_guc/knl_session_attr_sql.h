@@ -62,6 +62,11 @@ typedef struct knl_session_attr_sql {
     bool enable_seqscan_dopcost;
     bool enable_indexscan;
     bool enable_indexonlyscan;
+#ifdef ENABLE_NEON
+    bool enable_seqscan_prefetch;
+    bool enable_indexscan_prefetch;
+    bool enable_indexonlyscan_prefetch;
+#endif
     bool enable_bitmapscan;
     bool force_bitmapand;
     #ifdef ENABLE_HTAP
@@ -293,5 +298,4 @@ typedef struct knl_session_attr_sql {
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */
-
 
