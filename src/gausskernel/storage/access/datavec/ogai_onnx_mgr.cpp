@@ -26,7 +26,6 @@
 #include "utils/memutils.h"
 #include "miscadmin.h"
 #include "utils/timestamp.h"
-#include "access/datavec/ogai_onnx_wrapper.h"
 #include "access/datavec/ogai_onnx_mgr.h"
 
 #define OGAI_NUM_PARTITIONS 2
@@ -52,8 +51,7 @@ static inline void InitONNXModelTag(ONNXModelTag* tag, const char* modelKey, con
  */
 ONNXModelMgr* ONNXModelMgr::GetInstance(void)
 {
-    Assert(onnxModelMgr != NULL);
-    if (!onnxModelMgr->IsInit()) {
+    if (onnxModelMgr == NULL || !onnxModelMgr->IsInit()) {
         ereport(ERROR, (errmsg("onnx model mgr: onnx model mgr is not init")));
     }
     return onnxModelMgr;
@@ -61,31 +59,36 @@ ONNXModelMgr* ONNXModelMgr::GetInstance(void)
 
 void ONNXModelMgr::NewSingletonInstance(void)
 {
-    if (IsUnderPostmaster)
+    if (onnxModelMgr != NULL || IsUnderPostmaster) {
         return;
-    onnxModelMgr = New(CurrentMemoryContext) ONNXModelMgr;
+    }
 
-    onnxModelMgr->onnxModelMgrCtx = AllocSetContextCreate(
+    MemoryContext onnxModelMgrCtx = AllocSetContextCreate(
                                     g_instance.instance_context,
                                     "onnx model context",
                                     ALLOCSET_SMALL_MINSIZE,
                                     ALLOCSET_SMALL_INITSIZE,
                                     ALLOCSET_DEFAULT_MAXSIZE,
                                     SHARED_CONTEXT);
-    onnxModelMgr->onnxEnvHandle = ONNXEnvCreate();
+    onnxModelMgr = New(onnxModelMgrCtx) ONNXModelMgr;
+    onnxModelMgr->onnxModelMgrCtx = onnxModelMgrCtx;
+
+    char errbuf[OGAI_ONNX_ERRMSG_LEN] = {0};
+    onnxModelMgr->onnxEnvHandle = OgaiOnnxEnvCreate(errbuf, sizeof(errbuf));
     if (onnxModelMgr->onnxEnvHandle == NULL) {
-        onnxModelMgr->isInit = false;
-        MemoryContextDelete(onnxModelMgr->onnxModelMgrCtx);
-        ereport(WARNING, (errmsg("onnx model mgr: onnx env create failed")));
+        MemoryContextDelete(onnxModelMgrCtx);
+        onnxModelMgr = NULL;
+        ereport(WARNING, (errmsg("onnx model mgr: onnx env create failed: %s", errbuf)));
         return;
     }
 
     MemoryContext oldcontext = MemoryContextSwitchTo(onnxModelMgr->onnxModelMgrCtx);
     int ret = pthread_rwlock_init(&onnxModelMgr->mutex, nullptr);
     if (ret != 0) {
-        onnxModelMgr->isInit = false;
         MemoryContextSwitchTo(oldcontext);
-        MemoryContextDelete(onnxModelMgr->onnxModelMgrCtx);
+        OgaiOnnxEnvRelease(onnxModelMgr->onnxEnvHandle);
+        MemoryContextDelete(onnxModelMgrCtx);
+        onnxModelMgr = NULL;
         ereport(WARNING, (errmsg("onnx model mgr pthread_rwlock_init failed")));
         return;
     }
@@ -114,15 +117,47 @@ bool ONNXModelMgr::IsInit()
 
 ONNXModelDesc* ONNXModelMgr::GetONNXModelDescByKey(const char* modelKey, const char* ownerName)
 {
-    RWLockGuard guard(mutex, LW_SHARED);
-    
     ONNXModelTag tag;
     InitONNXModelTag(&tag, modelKey, ownerName);
+
+    pthread_rwlock_rdlock(&mutex);
     ONNXModelHashEntry* entry = (ONNXModelHashEntry*)hash_search(onnxModelHash, &tag, HASH_FIND, NULL);
     if (entry == NULL || entry->modelDesc == NULL) {
+        pthread_rwlock_unlock(&mutex);
         return NULL;
     }
-    return entry->modelDesc;
+    ONNXModelDesc* modelDesc = entry->modelDesc;
+    pthread_rwlock_unlock(&mutex);
+    return modelDesc;
+}
+
+ONNXModelDesc* ONNXModelMgr::AcquireONNXModelDescByKey(const char* modelKey, const char* ownerName)
+{
+    ONNXModelTag tag;
+    InitONNXModelTag(&tag, modelKey, ownerName);
+
+    pthread_rwlock_rdlock(&mutex);
+    ONNXModelHashEntry* entry = (ONNXModelHashEntry*)hash_search(onnxModelHash, &tag, HASH_FIND, NULL);
+    if (entry == NULL || entry->modelDesc == NULL || entry->modelDesc->handle == NULL) {
+        pthread_rwlock_unlock(&mutex);
+        return NULL;
+    }
+
+    ONNXModelDesc* modelDesc = entry->modelDesc;
+    int ret = pthread_rwlock_rdlock(&modelDesc->mutex);
+    pthread_rwlock_unlock(&mutex);
+    if (ret != 0) {
+        ereport(ERROR, (errmsg("onnx model mgr: pthread_rwlock_rdlock failed")));
+    }
+    return modelDesc;
+}
+
+void ONNXModelMgr::ReleaseONNXModelDesc(ONNXModelDesc* modelDesc)
+{
+    if (modelDesc == NULL) {
+        return;
+    }
+    pthread_rwlock_unlock(&modelDesc->mutex);
 }
 
 ONNXModelDesc* ONNXModelMgr::LoadONNXModelByKey(const char* modelKey, const char* ownerName,
@@ -131,12 +166,14 @@ ONNXModelDesc* ONNXModelMgr::LoadONNXModelByKey(const char* modelKey, const char
     ONNXModelTag tag;
     bool found = false;
 
-    RWLockGuard guard(mutex, LW_EXCLUSIVE);
     InitONNXModelTag(&tag, modelKey, ownerName);
+    pthread_rwlock_wrlock(&mutex);
     ONNXModelHashEntry* entry = (ONNXModelHashEntry*)hash_search(onnxModelHash, &tag, HASH_ENTER, &found);
     if (found && entry->modelDesc && entry->modelDesc->handle) {
         elog(WARNING, "[LOAD] Model already loaded");
-        return entry->modelDesc;
+        ONNXModelDesc* modelDesc = entry->modelDesc;
+        pthread_rwlock_unlock(&mutex);
+        return modelDesc;
     }
 
     MemoryContext oldcontext = MemoryContextSwitchTo(onnxModelMgrCtx);
@@ -147,39 +184,54 @@ ONNXModelDesc* ONNXModelMgr::LoadONNXModelByKey(const char* modelKey, const char
     if (ret != 0) {
         pfree(entry->modelDesc);
         hash_search(onnxModelHash, &tag, HASH_REMOVE, NULL);
+        pthread_rwlock_unlock(&mutex);
         ereport(ERROR, (errmsg("onnx model mgr: pthread_rwlock_init failed")));
     }
     
-    entry->modelDesc->handle = ONNXLoadModel(onnxEnvHandle, modelPath, NULL, &entry->modelDesc->dim);
+    char errbuf[OGAI_ONNX_ERRMSG_LEN] = {0};
+    entry->modelDesc->handle = OgaiOnnxLoadModel(
+        onnxEnvHandle, modelPath, &entry->modelDesc->dim, errbuf, sizeof(errbuf));
     if (!entry->modelDesc->handle) {
         pthread_rwlock_destroy(&entry->modelDesc->mutex);
         pfree(entry->modelDesc);
         hash_search(onnxModelHash, &tag, HASH_REMOVE, NULL);
-        ereport(ERROR, (errmsg("onnx model mgr: failed to load ONNX model: model_key=%s, path=%s",
-            modelKey, modelPath)));
+        pthread_rwlock_unlock(&mutex);
+        ereport(ERROR, (errmsg("onnx model mgr: failed to load ONNX model: model_key=%s, path=%s, reason=%s",
+            modelKey, modelPath, errbuf)));
     }
     elog(DEBUG1, "Loaded ONNX model: model_key=%s, owner=%s, dim=%d, path=%s",
          modelKey, ownerName, entry->modelDesc->dim, modelPath);
-    return entry->modelDesc;
+    ONNXModelDesc* modelDesc = entry->modelDesc;
+    pthread_rwlock_unlock(&mutex);
+    return modelDesc;
 }
 
 void ONNXModelMgr::UnloadONNXModelByKey(const char* modelKey, const char* ownerName)
 {
     ONNXModelTag tag;
 
-    RWLockGuard guard(mutex, LW_EXCLUSIVE);
     InitONNXModelTag(&tag, modelKey, ownerName);
+    pthread_rwlock_wrlock(&mutex);
     ONNXModelHashEntry* entry = (ONNXModelHashEntry*)hash_search(onnxModelHash, &tag, HASH_FIND, NULL);
     if (entry == NULL || entry->modelDesc == NULL) {
+        pthread_rwlock_unlock(&mutex);
         ereport(ERROR, (errmsg("onnx model mgr: can not find model: model_key=%s, owner=%s",
                                modelKey, ownerName)));
         return;
     }
     
+    int ret = pthread_rwlock_wrlock(&entry->modelDesc->mutex);
+    if (ret != 0) {
+        pthread_rwlock_unlock(&mutex);
+        ereport(ERROR, (errmsg("onnx model mgr: pthread_rwlock_wrlock failed")));
+        return;
+    }
+
     if (entry->modelDesc->handle) {
-        ONNXUnloadModel(entry->modelDesc->handle);
+        OgaiOnnxUnloadModel(entry->modelDesc->handle);
     }
     
+    pthread_rwlock_unlock(&entry->modelDesc->mutex);
     pthread_rwlock_destroy(&entry->modelDesc->mutex);
     pfree(entry->modelDesc);
     entry->modelDesc = NULL;
@@ -187,4 +239,5 @@ void ONNXModelMgr::UnloadONNXModelByKey(const char* modelKey, const char* ownerN
     hash_search(onnxModelHash, &tag, HASH_REMOVE, NULL);
     
     elog(LOG, "[UNLOAD] Successfully unloaded: model_key=%s, owner=%s", modelKey, ownerName);
+    pthread_rwlock_unlock(&mutex);
 }

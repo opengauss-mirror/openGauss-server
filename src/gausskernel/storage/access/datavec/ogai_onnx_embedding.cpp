@@ -41,31 +41,45 @@ Vector** ONNXEmbeddingClient::BatchEmbed(OGAIString* texts, size_t textNum, int*
     ONNXModelDesc* modelDesc = NULL;
 
     if (config->modelKey && config->ownerName) {
-        modelDesc = ONNX_MODEL_MGR->GetONNXModelDescByKey(config->modelKey, config->ownerName);
-        if (!modelDesc || !modelDesc->handle) {
-            modelDesc = ONNX_MODEL_MGR->LoadONNXModelByKey(config->modelKey, config->ownerName, config->baseUrl);
+        modelDesc = ONNX_MODEL_MGR->AcquireONNXModelDescByKey(config->modelKey, config->ownerName);
+        if (modelDesc == NULL) {
+            (void)ONNX_MODEL_MGR->LoadONNXModelByKey(config->modelKey, config->ownerName, config->baseUrl);
+            modelDesc = ONNX_MODEL_MGR->AcquireONNXModelDescByKey(config->modelKey, config->ownerName);
         }
     }
 
     if (!modelDesc || !modelDesc->handle) {
         elog(ERROR, "Failed to get or load ONNX model");
     }
-
-    RWLockGuard guard(modelDesc->mutex, LW_SHARED);
-    float** embeddings = (float**)palloc0(textNum * sizeof(float*));
-    for (size_t i = 0; i < textNum; i++) {
-        embeddings[i] = (float*)palloc0(modelDesc->dim * sizeof(float));
+    int actualDim = modelDesc->dim;
+    if (config->dimension > 0 && config->dimension != actualDim) {
+        ONNX_MODEL_MGR->ReleaseONNXModelDesc(modelDesc);
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("ONNX embedding dimension mismatch: model_key=%s, requested_dim=%d, actual_dim=%d",
+                        config->modelKey, config->dimension, actualDim)));
+    }
+    if (dim != NULL) {
+        *dim = actualDim;
     }
 
-    int ret = ONNXEmbeddingInferBatch(modelDesc->handle, texts, textNum, embeddings, modelDesc->dim);
-    if (ret != 0) {
-        elog(ERROR, "ONNXEmbeddingInferBatch failed");
+    float** embeddings = (float**)palloc0(textNum * sizeof(float*));
+    for (size_t i = 0; i < textNum; i++) {
+        embeddings[i] = (float*)palloc0(actualDim * sizeof(float));
+    }
+
+    char errbuf[OGAI_ONNX_ERRMSG_LEN] = {0};
+    OgaiOnnxEmbeddingRequest request = {texts, textNum, embeddings, actualDim, errbuf, sizeof(errbuf)};
+    OgaiOnnxStatus ret = OgaiOnnxEmbeddingInferBatch(modelDesc->handle, &request);
+    ONNX_MODEL_MGR->ReleaseONNXModelDesc(modelDesc);
+    if (ret != OGAI_ONNX_OK) {
+        ereport(ERROR, (errmsg("ONNX embedding inference failed: %s", errbuf)));
     }
 
     Vector** results = (Vector**)palloc0(textNum * sizeof(Vector*));
     for (size_t i = 0; i < textNum; i++) {
-        Vector* vec = InitVector(modelDesc->dim);
-        errno_t rc = memcpy_s(vec->x, modelDesc->dim * sizeof(float), embeddings[i], modelDesc->dim * sizeof(float));
+        Vector* vec = InitVector(actualDim);
+        errno_t rc = memcpy_s(vec->x, actualDim * sizeof(float), embeddings[i], actualDim * sizeof(float));
         securec_check_c(rc, "\0", "\0");
         results[i] = vec;
     }

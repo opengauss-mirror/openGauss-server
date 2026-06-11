@@ -221,10 +221,8 @@ void InitBufferPool(void)
 #endif
 #endif
 
-    if (g_instance.attr.attr_storage.enable_async_ogai) {
-        /* Init onnx runtime buffers */
-        ONNXModelMgr::NewSingletonInstance();
-    }
+    /* Init onnx runtime buffers */
+    ONNXModelMgr::NewSingletonInstance();
     /* Initialize per-backend file flush context */
     WritebackContextInit(t_thrd.storage_cxt.BackendWritebackContext, &u_sess->attr.attr_common.backend_flush_after);
 
@@ -289,4 +287,3 @@ Size BufferShmemSize(void)
 
     return size;
 }
-

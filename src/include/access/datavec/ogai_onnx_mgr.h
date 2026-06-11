@@ -24,7 +24,7 @@
 #ifndef OGAI_ONNX_MGR_H
 #define OGAI_ONNX_MGR_H
 
-#include "access/datavec/ogai_onnx_wrapper.h"
+#include "access/datavec/ogai_onnx_runtime.h"
 #include "storage/lock/lwlock.h"
 
 #define NAMEDATALEN 64
@@ -33,7 +33,7 @@
 #define ONNX_MODEL_MGR (ONNXModelMgr::GetInstance())
 
 typedef struct ONNXModelDesc {
-    ONNXModelHandle handle;
+    OgaiOnnxModelHandle handle;
     int dim;
     pthread_rwlock_t mutex;
 } ONNXModelDesc;
@@ -83,9 +83,15 @@ public:
     ONNXModelDesc* LoadONNXModelByKey(const char* modelKey, const char* ownerName,
                                        const char* modelPath);
     ONNXModelDesc* GetONNXModelDescByKey(const char* modelKey, const char* ownerName);
+    ONNXModelDesc* AcquireONNXModelDescByKey(const char* modelKey, const char* ownerName);
+    void ReleaseONNXModelDesc(ONNXModelDesc* modelDesc);
     void UnloadONNXModelByKey(const char* modelKey, const char* ownerName);
 private:
     ONNXModelMgr()
+        : onnxModelMgrCtx(NULL),
+          onnxModelHash(NULL),
+          onnxEnvHandle(NULL),
+          isInit(false)
     {}
     ~ONNXModelMgr()
     {}
@@ -93,7 +99,7 @@ private:
     MemoryContext onnxModelMgrCtx;
     HTAB* onnxModelHash;
     pthread_rwlock_t mutex;
-    ONNXEnvHandle onnxEnvHandle;
+    OgaiOnnxEnvHandle onnxEnvHandle;
     bool isInit;
 
     static ONNXModelMgr* onnxModelMgr;
