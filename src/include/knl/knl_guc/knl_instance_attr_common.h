@@ -50,6 +50,7 @@ typedef struct knl_instance_attr_common {
     bool allowSystemTableMods;
     bool allow_create_sysobject;
     bool enable_thread_pool;
+    bool enable_thread_pool_numa_locality;
     bool enable_ffic_log;
     bool enable_global_plancache;
     bool enable_cachedplan_mgr;

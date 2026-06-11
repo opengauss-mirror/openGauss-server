@@ -907,6 +907,14 @@ int ThreadPoolControler::DispatchSession(Port* port)
         int numa_id = -1;
         if (g_instance.attr.attr_network.enable_gazelle_performance_mode) {
             numa_id = getsockopt(port->sock, 0, SO_NUMA_ID, NULL, NULL);
+        } else if (g_instance.attr.attr_common.enable_thread_pool_numa_locality) {
+#ifdef __USE_NUMA
+            int cpuid = -1;
+            socklen_t optlen = sizeof(cpuid);
+            if (getsockopt(port->sock, SOL_SOCKET, SO_INCOMING_CPU, (void*)&cpuid, &optlen) == 0 && cpuid >= 0) {
+                numa_id = numa_node_of_cpu(cpuid);
+            }
+#endif
         }
         if (numa_id >= 0) {
             for (int i = 0; i < m_groupNum; i++) {
@@ -915,7 +923,9 @@ int ThreadPoolControler::DispatchSession(Port* port)
                     break;
                 }
             }
-        } else {
+        }
+        /* If no matched NUMA group is found, fall back to the group with the least sessions. */
+        if (grp == NULL) {
             grp = FindThreadGroupWithLeastSession();
         }
     }
@@ -966,4 +976,3 @@ void ThreadPoolControler::BindThreadToAllAvailCpu(ThreadId thread) const
     if (ret != 0)
         ereport(WARNING, (errmsg("BindThreadToAllAvailCpu fail to bind thread %lu, errno: %d", thread, ret)));
 }
-
