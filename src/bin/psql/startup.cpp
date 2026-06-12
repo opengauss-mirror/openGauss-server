@@ -75,6 +75,17 @@ extern const char* libpqVersionString;
  */
 enum _actions { ACT_NOTHING = 0, ACT_SINGLE_SLASH, ACT_LIST_DB, ACT_SINGLE_QUERY, ACT_FILE };
 
+typedef struct SimpleActionListCell {
+    struct SimpleActionListCell *next;
+    enum _actions action;
+    char       *val;
+} SimpleActionListCell;
+
+typedef struct SimpleActionList {
+    SimpleActionListCell *head;
+    SimpleActionListCell *tail;
+} SimpleActionList;
+
 struct adhoc_opts {
     char* dbname;
     char* host;
@@ -83,7 +94,7 @@ struct adhoc_opts {
     char* passwd;
     char* logfilename;
     enum _actions action;
-    char* action_string;
+    SimpleActionList actionList;
     bool no_readline;
     bool no_psqlrc;
     bool single_txn;
@@ -100,12 +111,27 @@ static void process_psqlrc_file(char* filename);
 static void showVersion(void);
 static void EstablishVariableSpace(void);
 static void get_password_pipeline(struct adhoc_opts* options);
+static int SimpleActionListAppend(SimpleActionList *list, enum _actions action, const char *val);
+static void SimpleActionListFree(SimpleActionList* list);
+static bool SimpleActionListHasAction(SimpleActionList* list, enum _actions action);
+static int ProcessSimpleActionList(
+    struct adhoc_opts options, bool isparseonly, const char* argv0);
+static int ProcessActionFile(
+    struct adhoc_opts options, bool isparseonly, char* val);
+static int ProcessActionSingleSlash(struct adhoc_opts options, char* val);
+static int ProcessActionSingleQuery(struct adhoc_opts options, char* val);
 
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
 bool check_parseonly_parameter(adhoc_opts options)
 {
+    SimpleActionListCell* cell = NULL;
     if (pset.parseonly) {
-        if (options.action != ACT_FILE) {
+        for (cell = options.actionList.head; cell; cell = cell->next) {
+            if (cell->action == ACT_FILE) {
+                break;
+            }
+        }
+        if (!cell) {
             fprintf(stderr, "%s: %s", pset.progname, "-f and -g argument must be set together\n");
             exit(EXIT_USER);
         } else {
@@ -403,11 +429,6 @@ int main(int argc, char* argv[])
     bool isparseonly = false;
     bool has_action = false;
 
-    /* Database Security: Data importing/dumping support AES128. */
-    struct timeval aes_start_time;
-    struct timeval aes_end_time;
-    pg_time_t total_time = 0;
-
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gsql"));
 
     if (strcmp(libpqVersionString, DEF_GS_VERSION) != 0) {
@@ -514,7 +535,6 @@ int main(int argc, char* argv[])
     }
 
     /* init options.action_string */
-    options.action_string = NULL;
     parse_psql_options(argc, argv, &options);
 
     if (is_pipeline) {
@@ -718,6 +738,7 @@ int main(int argc, char* argv[])
         if (!options.no_psqlrc) {
             process_psqlrc(argv[0]);
         }
+        SimpleActionListFree(&options.actionList);
         success = listAllDbs((int)false);
         PQfinish(pset.db);
         exit(success ? EXIT_SUCCESS : EXIT_FAILURE);
@@ -767,49 +788,9 @@ int main(int argc, char* argv[])
         }
     }
      /* Now find something to do */
-     /* process file given by -f */
-    if (options.action == ACT_FILE) {
-        if (!options.no_psqlrc) {
-            process_psqlrc(argv[0]);
-        }
-        /* Database Security: Data importing/dumping support AES128. */
-        gettimeofday(&aes_start_time, NULL);
-        successResult = process_file(options.action_string, options.single_txn, false);
-        gettimeofday(&aes_end_time, NULL);
-        total_time = 1000 * (aes_end_time.tv_sec - aes_start_time.tv_sec) +
-                     (aes_end_time.tv_usec - aes_start_time.tv_usec) / 1000;
-        if (!isparseonly)
-            fprintf(stdout, "total time: %lld  ms\n", (long long int)total_time);
+    if (options.actionList.head) {
+        successResult = ProcessSimpleActionList(options, isparseonly, argv[0]);
     }
-
-    /*
-     * process slash command if one was given to -c
-     */
-    else if (options.action == ACT_SINGLE_SLASH) {
-        PsqlScanState scan_state = NULL;
-
-        if (pset.echo == PSQL_ECHO_ALL)
-            puts(options.action_string);
-
-        scan_state = psql_scan_create();
-        psql_scan_setup(scan_state, options.action_string, (int)strlen(options.action_string));
-
-        successResult = HandleSlashCmds(scan_state, NULL) != PSQL_CMD_ERROR ? EXIT_SUCCESS : EXIT_FAILURE;
-
-        psql_scan_destroy(scan_state);
-    }
-
-    /*
-     * If the query given to -c was a normal one, send it
-     */
-    else if (options.action == ACT_SINGLE_QUERY) {
-        successResult = MainLoop(NULL, options.action_string);
-        rc = memset_s(options.action_string, strlen(options.action_string), 0, strlen(options.action_string));
-        securec_check_c(rc, "\0", "\0");
-        free(options.action_string);
-        options.action_string = NULL;
-    }
-
     /*
      * or otherwise enter interactive main loop
      */
@@ -867,12 +848,7 @@ int main(int argc, char* argv[])
         free(pset.guc_stmt);
 
     pset.guc_stmt = NULL;
-    /* Free options.action_string, because it alloced memory when options.action is ACT_FILE*/
-    has_action = (options.action == ACT_FILE) && (options.action_string != NULL);
-    if (has_action) {
-        free(options.action_string);
-        options.action_string = NULL;
-    }
+    SimpleActionListFree(&options.actionList);
 
     /* Clean up variables for query retry. */
     pset.max_retry_times = 0;
@@ -1071,7 +1047,6 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     extern char* optarg;
     extern int optind;
     int c;
-    bool action_string_need_free = false;
     /* Database Security: Data importing/dumping support AES128. */
     char* dencrypt_key = NULL;
     char* decrypt_salt = NULL;
@@ -1099,30 +1074,28 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
             case 'A':
                 pset.popt.topt.format = PRINT_UNALIGNED;
                 break;
-            case 'c':
+            case 'c': {
+                int successResult;
                 if (optarg == NULL) {
                     break;
                 }
-                if (action_string_need_free) {
-                    free(options->action_string);
-                    action_string_need_free = false;
-                }
                 is_interactive = false;
-                options->action_string = optarg;
+                options->action = ACT_NOTHING;
                 if (optarg[0] == '\\') {
-                    options->action = ACT_SINGLE_SLASH;
-                    options->action_string++;
+                    successResult = SimpleActionListAppend(&options->actionList, ACT_SINGLE_SLASH, optarg + 1);
                 } else {
-                    options->action = ACT_SINGLE_QUERY;
-                    options->action_string = pg_strdup(optarg); /* need to free in main() */
-                    action_string_need_free = true;
+                    successResult = SimpleActionListAppend(&options->actionList, ACT_SINGLE_QUERY, optarg);
                     /* clear action string after -c command when it inludes sensitive info */
                     if (SensitiveStrCheck(optarg)) {
                         rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
                         check_memset_s(rc);
                     }
                 }
+                if (successResult != EXIT_SUCCESS) {
+                    exit(EXIT_FAILURE);
+                }
                 break;
+            }
             case 'd':
                 dbname = optarg;
                 break;
@@ -1139,13 +1112,8 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                     break;
                 }
                 is_interactive = false;
-                if (action_string_need_free) {
-                    free(options->action_string);
-                    action_string_need_free = false;
-                }
-                options->action_string = pg_strdup(optarg);
-                options->action = ACT_FILE;
-                action_string_need_free = true;
+                options->action = ACT_NOTHING;
+                SimpleActionListAppend(&options->actionList, ACT_FILE, optarg);
                 break;
             case 'F':
                 if (pset.popt.topt.fieldSep.separator != NULL)
@@ -1818,4 +1786,171 @@ static void set_aes_key(const char* dencrypt_key)
             MAX_KEY_LEN);
         exit(EXIT_FAILURE);
     }
+}
+
+static int SimpleActionListAppend(SimpleActionList *list, enum _actions action, const char *val)
+{
+    SimpleActionListCell* cell;
+
+    cell = (SimpleActionListCell*)pg_malloc(sizeof(SimpleActionListCell));
+    if (cell == NULL) {
+        return EXIT_FAILURE;
+    }
+
+    cell->next = NULL;
+    cell->action = action;
+    if (val) {
+        cell->val = pg_strdup(val);
+    } else {
+        cell->val = NULL;
+    }
+
+    if (list->tail) {
+        list->tail->next = cell;
+    } else {
+        list->head = cell;
+    }
+    list->tail = cell;
+
+    return EXIT_SUCCESS;
+}
+
+static void SimpleActionListFree(SimpleActionList* list)
+{
+    SimpleActionListCell* cell = list->head;
+    SimpleActionListCell* next;
+    while (cell) {
+        next = cell->next;
+        free(cell->val);
+        free(cell);
+        cell = next;
+    }
+    list->head = NULL;
+    list->tail = NULL;
+}
+
+static bool SimpleActionListHasAction(SimpleActionList* list, enum _actions action)
+{
+    SimpleActionListCell* cell = NULL;
+    for (cell = list->head; cell; cell = cell->next) {
+        if (cell->action == action) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int ProcessActionFile(struct adhoc_opts options,
+    bool isparseonly, char* val)
+{
+    /* Database Security: Data importing/dumping support AES128. */
+    struct timeval aesStartTime;
+    struct timeval aesEndTime;
+    pg_time_t total_time = 0;
+    int successResult;
+
+    /* Database Security: Data importing/dumping support AES128. */
+    int scale = 1000;
+    gettimeofday(&aesStartTime, NULL);
+    successResult = process_file(val, false, false);
+    gettimeofday(&aesEndTime, NULL);
+    total_time = scale * (aesEndTime.tv_sec - aesStartTime.tv_sec) +
+                (aesEndTime.tv_usec - aesStartTime.tv_usec) / scale;
+    if (!isparseonly)
+        fprintf(stdout, "total time: %lld  ms\n", (long long int)total_time);
+
+    return successResult;
+}
+
+static int ProcessActionSingleSlash(struct adhoc_opts options, char* val)
+{
+    /*
+     * process slash command if one was given to -c
+     */
+    PsqlScanState scanState = NULL;
+    int successResult;
+
+    if (pset.echo == PSQL_ECHO_ALL) {
+        puts(val);
+    }
+
+    scanState = psql_scan_create();
+    psql_scan_setup(scanState, val, (int)strlen(val));
+    successResult = HandleSlashCmds(scanState, NULL) != PSQL_CMD_ERROR ? EXIT_SUCCESS : EXIT_FAILURE;
+
+    psql_scan_destroy(scanState);
+    return successResult;
+}
+
+static int ProcessActionSingleQuery(struct adhoc_opts options, char* val)
+{
+    /*
+     * If the query given to -c was a normal one, send it
+     */
+    int successResult = MainLoop(NULL, val);
+    error_t rc = memset_s(val, strlen(val), 0, strlen(val));
+    securec_check_c(rc, "\0", "\0");
+    return successResult;
+}
+
+static int ProcessSimpleActionList(
+    struct adhoc_opts options, bool isparseonly, const char* argv0)
+{
+    SimpleActionListCell* cell = NULL;
+    int successResult;
+    PGresult *res;
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+    bool saveIsParseOnly = pset.parseonly;
+#endif
+
+    if (!options.no_psqlrc &&
+        SimpleActionListHasAction(&options.actionList, ACT_FILE)) {
+        process_psqlrc(argv0);
+    }
+
+    if (options.single_txn) {
+        if ((res = PSQLexec("BEGIN", false)) == NULL) {
+            successResult = pset.on_error_stop ? EXIT_USER : EXIT_FAILURE;
+            return successResult;
+        } else {
+            PQclear(res);
+        }
+    }
+
+    for (cell = options.actionList.head; cell; cell = cell->next) {
+        /* process file given by -f */
+        if (cell->action == ACT_FILE) {
+            successResult = ProcessActionFile(options, isparseonly, cell->val);
+        } else if (cell->action == ACT_SINGLE_SLASH) {
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+            pset.parseonly = false;
+#endif
+            successResult = ProcessActionSingleSlash(options, cell->val);
+        } else if (cell->action == ACT_SINGLE_QUERY) {
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+            pset.parseonly = false;
+#endif
+            successResult = ProcessActionSingleQuery(options, cell->val);
+        } else {
+            /* should never come here */
+            Assert(false);
+        }
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+        pset.parseonly = saveIsParseOnly;
+#endif
+        if (successResult != EXIT_SUCCESS && pset.on_error_stop) {
+            break;
+        }
+    }
+
+    if (options.single_txn) {
+        res = PSQLexec((successResult != EXIT_SUCCESS && pset.on_error_stop) ? "ROLLBACK" : "COMMIT", false);
+        if (res == NULL) {
+            successResult = pset.on_error_stop ? EXIT_USER : EXIT_FAILURE;
+        } else {
+            PQclear(res);
+        }
+    }
+
+    return successResult;
 }
