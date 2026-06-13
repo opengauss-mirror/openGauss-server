@@ -2327,6 +2327,75 @@ BlockNumber BlockSampler_Next(BlockSampler bs)
     return bs->t++;
 }
 
+#ifdef ENABLE_NEON
+#define ANALYZE_NEON_RANDOM_BOUNDARY_OFFSET 2.0
+
+static inline int Analyze_Neon_Prefetch_TargetPages()
+{
+    return Max(u_sess->storage_cxt.target_prefetch_pages, 0);
+}
+
+static inline bool Analyze_Neon_Prefetch_Enabled(bool estimate_table_rownum)
+{
+    return !estimate_table_rownum && !g_instance.attr.attr_storage.enable_adio_function &&
+           Analyze_Neon_Prefetch_TargetPages() > 0;
+}
+
+static inline double Analyze_Neon_RandomFract(unsigned short rand_state[3])
+{
+    return ((double)pg_lrand48(rand_state) + 1) / ((double)MAX_RANDOM_VALUE + ANALYZE_NEON_RANDOM_BOUNDARY_OFFSET);
+}
+
+/*
+ * openGauss' BlockSampler_Next() consumes the session rand48 state through
+ * anl_random_fract().  Keep ANALYZE's original sampling stream untouched by
+ * driving the prefetch sampler with a private rand48 state.
+ */
+static BlockNumber BlockSampler_NextWithRandState(BlockSampler bs, unsigned short rand_state[3])
+{
+    BlockNumber K = bs->N - bs->t;
+    int k = bs->n - bs->m;
+    double p;
+    double V;
+
+    AssertEreport(BlockSampler_HasMore(bs), MOD_OPT, "");
+
+    if ((BlockNumber)k >= K) {
+        bs->m++;
+        return bs->t++;
+    }
+
+    V = Analyze_Neon_RandomFract(rand_state);
+    p = 1.0 - (double)k / (double)K;
+    while (V < p) {
+        bs->t++;
+        K--;
+        p *= 1.0 - (double)k / (double)K;
+    }
+
+    bs->m++;
+    return bs->t++;
+}
+
+static inline void Analyze_Neon_SaveRandState(unsigned short rand_state[3])
+{
+    unsigned short* current_rand_state = pg_get_srand48();
+
+    rand_state[0] = current_rand_state[0];
+    rand_state[1] = current_rand_state[1];
+    rand_state[2] = current_rand_state[2];
+}
+
+static inline BlockNumber Analyze_Neon_NextPrefetchBlock(BlockSampler bs, unsigned short rand_state[3])
+{
+    if (!BlockSampler_HasMore(bs)) {
+        return InvalidBlockNumber;
+    }
+
+    return BlockSampler_NextWithRandState(bs, rand_state);
+}
+#endif
+
 /*
  * get list  block number for acquire sample rows when uses ADIO
  */
@@ -2530,6 +2599,12 @@ static int64 acquire_sample_rows(
     TransactionId OldestXmin;
     BlockSamplerData bs;
     double rstate;
+#ifdef ENABLE_NEON
+    BlockSamplerData prefetch_bs;
+    unsigned short prefetch_rand_state[3] = {0, 0, 0};
+    int prefetch_maximum = 0;
+    bool use_neon_analyze_prefetch = false;
+#endif
     BlockNumber targblock = 0;
     BlockNumber sampleblock = 0;
     BlockNumber retrycount = 1;
@@ -2597,12 +2672,36 @@ retry:
     }
     ADIO_END();
 
+#ifdef ENABLE_NEON
+    use_neon_analyze_prefetch = Analyze_Neon_Prefetch_Enabled(estimate_table_rownum);
+    if (use_neon_analyze_prefetch) {
+        prefetch_maximum = Analyze_Neon_Prefetch_TargetPages();
+        prefetch_bs = bs;
+        Analyze_Neon_SaveRandState(prefetch_rand_state);
+        for (int i = 0; i < prefetch_maximum; i++) {
+            BlockNumber prefetch_block = Analyze_Neon_NextPrefetchBlock(&prefetch_bs, prefetch_rand_state);
+            if (prefetch_block == InvalidBlockNumber) {
+                break;
+            }
+            PrefetchBuffer(onerel, MAIN_FORKNUM, prefetch_block);
+        }
+    }
+#endif
+
     while (InvalidBlockNumber !=
            (targblock = BlockSampler_GetBlock<false>(onerel, &bs, &anlprefetch, 0, NULL, estimate_table_rownum))) {
         Buffer targbuffer;
         Page targpage;
         OffsetNumber targoffset, maxoffset;
+#ifdef ENABLE_NEON
+        BlockNumber prefetch_targblock = InvalidBlockNumber;
+#endif
 
+#ifdef ENABLE_NEON
+        if (use_neon_analyze_prefetch) {
+            prefetch_targblock = Analyze_Neon_NextPrefetchBlock(&prefetch_bs, prefetch_rand_state);
+        }
+#endif
         vacuum_delay_point();
         sampleblock++;
 
@@ -2616,6 +2715,11 @@ retry:
          * lock traffic is probably better avoided.
          */
         targbuffer = ReadBufferExtended(onerel, MAIN_FORKNUM, targblock, RBM_NORMAL, u_sess->analyze_cxt.vac_strategy);
+#ifdef ENABLE_NEON
+        if (use_neon_analyze_prefetch && prefetch_targblock != InvalidBlockNumber) {
+            PrefetchBuffer(onerel, MAIN_FORKNUM, prefetch_targblock);
+        }
+#endif
         LockBuffer(targbuffer, BUFFER_LOCK_SHARE);
         targpage = BufferGetPage(targbuffer);
 

@@ -26,6 +26,7 @@
 #include "catalog/index.h"
 #include "commands/vacuum.h"
 #include "pgstat.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/indexfsm.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
@@ -49,6 +50,47 @@ typedef struct {
     BlockNumber totFreePages;      /* true total # of free pages */
     MemoryContext pagedelcontext;
 } BTVacState;
+
+#ifdef ENABLE_NEON
+typedef struct BTVacuumPrefetchState {
+    BlockNumber next_block;
+    int maximum;
+} BTVacuumPrefetchState;
+
+static inline int btvacuum_prefetch_target_pages(void)
+{
+    return Max(u_sess->storage_cxt.target_prefetch_pages, 0);
+}
+
+static inline void btvacuum_prefetch_init(BTVacuumPrefetchState *prefetch_state, BlockNumber blkno)
+{
+    prefetch_state->next_block = blkno;
+    prefetch_state->maximum = btvacuum_prefetch_target_pages();
+}
+
+static void btvacuum_prefetch_window(Relation rel, BTVacuumPrefetchState *prefetch_state,
+                                     BlockNumber blkno, BlockNumber num_pages)
+{
+    if (prefetch_state->maximum <= 0) {
+        return;
+    }
+    if (prefetch_state->next_block < blkno) {
+        prefetch_state->next_block = blkno;
+    }
+    for (; prefetch_state->next_block < num_pages &&
+           prefetch_state->next_block < blkno + prefetch_state->maximum;
+         prefetch_state->next_block++) {
+        PrefetchBuffer(rel, MAIN_FORKNUM, prefetch_state->next_block);
+    }
+}
+
+static inline void btvacuum_prefetch_next(Relation rel, BTVacuumPrefetchState *prefetch_state, BlockNumber num_pages)
+{
+    if (prefetch_state->maximum > 0 && prefetch_state->next_block < num_pages) {
+        PrefetchBuffer(rel, MAIN_FORKNUM, prefetch_state->next_block++);
+    }
+}
+#endif
 
 /*
  * BTPARALLEL_NOT_INITIALIZED indicates that the scan has not started.
@@ -1036,6 +1078,9 @@ static void btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, In
     BlockNumber num_pages;
     BlockNumber blkno;
     bool needLock = false;
+#ifdef ENABLE_NEON
+    BTVacuumPrefetchState prefetch_state;
+#endif
 
     /*
      * Reset counts that will be incremented during the scan; needed in case
@@ -1083,6 +1128,9 @@ static void btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, In
     needLock = !RELATION_IS_LOCAL(rel);
 
     blkno = BTREE_METAPAGE + 1;
+#ifdef ENABLE_NEON
+    btvacuum_prefetch_init(&prefetch_state, blkno);
+#endif
     for (;;) {
         /* Get the current relation length */
         if (needLock) {
@@ -1097,8 +1145,16 @@ static void btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, In
         if (blkno >= num_pages) {
             break;
         }
+
+#ifdef ENABLE_NEON
+        btvacuum_prefetch_window(rel, &prefetch_state, blkno, num_pages);
+#endif
+
         /* Iterate over pages, then loop back to recheck length */
         for (; blkno < num_pages; blkno++) {
+#ifdef ENABLE_NEON
+            btvacuum_prefetch_next(rel, &prefetch_state, num_pages);
+#endif
             btvacuumpage(&vstate, blkno, blkno);
         }
     }

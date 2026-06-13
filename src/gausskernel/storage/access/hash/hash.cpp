@@ -42,6 +42,13 @@ typedef struct {
 static void hashbuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
                               void *state);
 
+#ifdef ENABLE_NEON
+static inline int hashvacuum_prefetch_target_pages(void)
+{
+    return Max(u_sess->storage_cxt.target_prefetch_pages, 0);
+}
+#endif
+
 /*
  *	hashbuild() -- build a new hash index.
  */
@@ -514,6 +521,10 @@ Datum hashbulkdelete(PG_FUNCTION_ARGS)
     Bucket orig_maxbucket;
     Bucket cur_maxbucket;
     Bucket cur_bucket;
+#ifdef ENABLE_NEON
+    Bucket prf_bucket;
+    int prefetch_maximum;
+#endif
     Buffer metabuf = InvalidBuffer;
     HashMetaPage metap;
     HashMetaPage cachedmetap;
@@ -536,8 +547,19 @@ Datum hashbulkdelete(PG_FUNCTION_ARGS)
     /* Scan the buckets that we know exist */
     cur_bucket = 0;
     cur_maxbucket = orig_maxbucket;
+#ifdef ENABLE_NEON
+    prf_bucket = cur_bucket;
+    prefetch_maximum = hashvacuum_prefetch_target_pages();
+#endif
 
 loop_top:
+#ifdef ENABLE_NEON
+    if (prefetch_maximum > 0) {
+        for (; prf_bucket <= cur_maxbucket && prf_bucket < cur_bucket + prefetch_maximum; prf_bucket++) {
+            PrefetchBuffer(rel, MAIN_FORKNUM, BUCKET_TO_BLKNO(cachedmetap, prf_bucket));
+        }
+    }
+#endif
     while (cur_bucket <= cur_maxbucket) {
         BlockNumber bucket_blkno;
         BlockNumber blkno;
@@ -546,6 +568,13 @@ loop_top:
         HashPageOpaque bucket_opaque;
         Page page;
         bool split_cleanup = false;
+
+#ifdef ENABLE_NEON
+        if (prefetch_maximum > 0 && prf_bucket <= cur_maxbucket) {
+            PrefetchBuffer(rel, MAIN_FORKNUM, BUCKET_TO_BLKNO(cachedmetap, prf_bucket));
+            prf_bucket++;
+        }
+#endif
 
         /* Get address of bucket's start page */
         bucket_blkno = BUCKET_TO_BLKNO(cachedmetap, cur_bucket);
@@ -615,6 +644,11 @@ loop_top:
         cachedmetap = _hash_getcachedmetap(rel, &metabuf, true);
         Assert(cachedmetap != NULL);
         cur_maxbucket = cachedmetap->hashm_maxbucket;
+#ifdef ENABLE_NEON
+        if (prf_bucket < cur_bucket) {
+            prf_bucket = cur_bucket;
+        }
+#endif
         goto loop_top;
     }
 

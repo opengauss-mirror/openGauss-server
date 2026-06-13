@@ -1027,6 +1027,17 @@ typedef struct BTScanOpaqueData {
 
     bool isPageInfoLogged;
 
+#ifdef ENABLE_NEON
+    /* Neon prefetch state */
+    int prefetch_maximum;
+    int current_prefetch_distance;
+    int n_prefetch_requests;
+    int n_prefetch_blocks;
+    int last_prefetch_index;
+    BlockNumber next_parent;
+    BlockNumber prefetch_blocks[MAX_TIDS_PER_BTREE_PAGE + 1];
+#endif
+
     /*
      * If the marked position is on the same page as current position, we
      * don't use markPos, but just keep the marked itemIndex in markItemIndex
