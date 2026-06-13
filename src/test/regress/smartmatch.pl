@@ -578,6 +578,10 @@ while( 1 )
 
 close $EXPECTED;
 close $RESULT;
+if (!$bFirstLine)
+{
+	print $NEW_EXPECTED "\n";
+}
 close $NEW_EXPECTED;
 
 exit( $rc + $smartmatch );
