@@ -4260,7 +4260,7 @@ static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* pref
      * this approach is only implemented for B format collations,
      * but we will consider opening it up to all collations in the future.
     */
-    if (is_b_format_collation(collation)) {
+    if (is_b_format_collation(collation) && collation != BINARY_COLLATION_OID) {
         int padLen = get_pad_length(leftop, prefixkey_len);
         if (padLen > 0) {
             PadContent content = get_pad_content(collation);
