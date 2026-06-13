@@ -1755,9 +1755,9 @@ SELECT @a, avg(a) as xx FROM tt_bug1 GROUP BY @a:= 11;
 
 set enable_set_variable_b_format = 0;
 select @var_t_1 := 2;
-ERROR:  @var_name := expr is supported only in the SET syntax of B-format database, and enable_set_variable_b_format = on.
+ERROR:  syntax error at or near ":="
 LINE 1: select @var_t_1 := 2;
-               ^
+                        ^
 set b_format_behavior_compat_options=enable_set_variables;
 CREATE TABLE tb_1101383 (
 depname varchar,
