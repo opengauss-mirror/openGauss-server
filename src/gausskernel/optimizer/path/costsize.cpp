@@ -69,6 +69,7 @@
 #include "knl/knl_variable.h"
 
 #include <math.h>
+#include "catalog/pg_am.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_proc.h"
 #include "executor/executor.h"
@@ -1100,8 +1101,16 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     int64 limitValue = 0;
     Cost annIndexCost = 0;
     List* where_conditions = extract_where_conditions(root);
+    double annRelTuples = RELOPTINFO_LOCAL_FIELD(root, baserel, tuples);
     path->annCount = 0;
     if (isAnnIndex && index->relam ==HNSW_AM_OID) {
+        if (annRelTuples <= 0 && baserel->rows > 0) {
+            annRelTuples = RELOPTINFO_LOCAL_FIELD(root, baserel, rows);
+        }
+        if (annRelTuples <= 0) {
+            annRelTuples = 1.0;
+        }
+
         foreach(lc, where_conditions) {
             Node* clause = (Node*)lfirst(lc);
             Selectivity sel = clause_selectivity(root, clause, 0, JOIN_INNER, NULL);
@@ -1125,7 +1134,7 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
         if (total_sel > 0) {
             path->annCount = limitValue / total_sel;
         }
-        if (path->annCount > baserel->tuples) {
+        if (path->annCount > annRelTuples) {
             annIndexCost = g_instance.cost_cxt.disable_cost;
         }
     }

@@ -37,6 +37,20 @@ INSERT INTO ai_vec_part_hnsw VALUES
 
 ANALYZE ai_vec_part_hnsw;
 SET enable_seqscan = off;
+\pset tuples_only on
+EXPLAIN (COSTS OFF)
+SELECT id, part_key
+FROM ai_vec_part_hnsw
+ORDER BY embedding <-> '[0.35,0.36,0.37]'::vector
+LIMIT 2;
+
+EXPLAIN (COSTS OFF)
+SELECT id, part_key
+FROM ai_vec_part_hnsw
+ORDER BY embedding <-> '[0.35,0.36,0.37]'::vector
+LIMIT (floor(random() * 2) + 1)::int;
+\pset tuples_only off
+
 EXPLAIN
 SELECT id, part_key
 FROM ai_vec_part_hnsw

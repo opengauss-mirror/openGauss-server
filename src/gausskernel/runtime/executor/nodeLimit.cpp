@@ -459,6 +459,9 @@ static void pass_down_bound(LimitState* node, PlanState* child_node)
                 sortGroup->bound = tuples_needed;
             }
         }
+    } else if (IsA(child_node, PartIteratorState) || IsA(child_node, VecPartIteratorState)) {
+        if (outerPlanState(child_node) != NULL)
+            pass_down_bound(node, outerPlanState(child_node));
     } else if (IsA(child_node, AnnIndexScanState)) {
         AnnIndexScanState* annState = (AnnIndexScanState*)child_node;
         annState->limitCount = tuples_needed > 0 ? tuples_needed : 0;

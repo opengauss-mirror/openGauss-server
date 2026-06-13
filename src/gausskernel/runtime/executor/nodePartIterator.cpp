@@ -34,6 +34,7 @@
 #include "vecexecutor/vecnodes.h"
 
 static TupleTableSlot* ExecPartIterator(PlanState* state);
+static PlanState* GetPartIteratorScanState(PlanState* node);
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -61,6 +62,15 @@ PartIteratorState* ExecInitPartIterator(PartIterator* node, EState* estate, int 
     state->subPartCurrentItr = -1;
 
     return state;
+}
+
+static PlanState* GetPartIteratorScanState(PlanState* node)
+{
+    while (node != NULL && IsA(node, LimitState)) {
+        node = ((LimitState*)node)->ps.lefttree;
+    }
+
+    return node;
 }
 
 static int GetScanPartitionNum(PartIteratorState* node, PlanState* noden)
@@ -118,6 +128,7 @@ static void InitScanPartition(PartIteratorState* node, int partitionScan, PlanSt
     PartIterator* pi_node = (PartIterator*)node->ps.plan;
     ParamExecData* param = NULL;
     List *subPartLengthList = NIL;
+    noden = GetPartIteratorScanState(noden);
     if (IsA(noden, VecToRowState)) {
         subPartLengthList = ((VecToRowState *)noden)->subPartLengthList;
     } else if (IsA(noden, ScanState) || IsA(noden, SeqScanState) || IsA(noden, IndexOnlyScanState) ||
@@ -162,10 +173,7 @@ static TupleTableSlot* ExecPartIterator(PlanState* planState)
     node->ps.lefttree->do_not_reset_rownum = true;
     bool orig_early_free = state->es_skip_early_free;
 
-    PlanState* noden = (PlanState*)node->ps.lefttree;
-    if (IsA(noden, LimitState)) {
-        noden = ((LimitState*)noden)->ps.lefttree;
-    }
+    PlanState* noden = GetPartIteratorScanState((PlanState*)node->ps.lefttree);
     int partitionScan = GetScanPartitionNum(node, noden);
     if (partitionScan == 0) {
         /* return NULL if no partition is selected */
@@ -257,10 +265,7 @@ void ExecReScanPartIterator(PartIteratorState* node)
     ParamExecData* subPartParam = NULL;
 
     /* do nothing if there is no partition to scan */
-    PlanState* noden = (PlanState*)node->ps.lefttree;
-    if (IsA(noden, LimitState)) {
-        noden = ((LimitState*)noden)->ps.lefttree;
-    }
+    PlanState* noden = GetPartIteratorScanState((PlanState*)node->ps.lefttree);
     int partitionScan = GetScanPartitionNum(node, noden);
     if (partitionScan == 0) {
         /* return NULL if no partition is selected */
