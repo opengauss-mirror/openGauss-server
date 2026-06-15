@@ -1749,6 +1749,8 @@ bool PostgresInitializer::InitOgaiWorker()
 
     LoadSysCache();
 
+    InitDatabase();
+
     InitPGXCPort();
 
     InitSettings();

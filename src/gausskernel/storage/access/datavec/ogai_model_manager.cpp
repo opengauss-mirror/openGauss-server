@@ -257,6 +257,8 @@ static void AsyncSetModelConfigFromDB(
 	
     config->apiKey = DecryptApiKey(apiKey);
     config->baseUrl = pstrdup(url);
+    config->modelKey = pstrdup(modelKey);
+    config->ownerName = pstrdup(ownerName);
     MemoryContextSwitchTo(spiCtx);
 }
 

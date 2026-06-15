@@ -192,6 +192,22 @@ NON_EXEC_STATIC void OgaiWorkerMain()
     InitProcess();
 #endif
 
+    t_thrd.mem_cxt.msg_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
+        "MessageContext",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+
+    t_thrd.mem_cxt.mask_password_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
+        "MaskPasswordCtx",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+
+    InitVecFuncMap();
+
+    (void)MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
+
     /* Unblock signals (they were blocked when the postmaster forked us) */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
