@@ -677,7 +677,7 @@ static void XLogReportCopyLocation(const int32 current_lrc, const uint64 end_byt
             XLogSelfFlush();
         }
     }
-    XLogRecPtr lsn = XLogBytePosToRecPtr(end_byte_pos);
+    XLogRecPtr lsn = XLogBytePosToEndRecPtr(end_byte_pos);
     if (need_flush) {
         lsn |= WAL_COMMIT_BIT;
     }
