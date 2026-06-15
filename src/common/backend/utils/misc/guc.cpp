@@ -1857,6 +1857,18 @@ static void InitConfigureNamesBool()
             NULL,
             NULL},
 
+        {{"enable_thread_pool_numa_locality",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("Enables thread pool session NUMA locality based on SO_INCOMING_CPU for kernel sockets."),
+            NULL},
+            &g_instance.attr.attr_common.enable_thread_pool_numa_locality,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
         {{"enable_global_plancache",
             PGC_POSTMASTER,
             NODE_ALL,

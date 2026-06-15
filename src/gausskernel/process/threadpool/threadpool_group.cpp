@@ -121,6 +121,7 @@ void ThreadPoolGroup::Init(bool enableNumaDistribute)
         for (int i = 0; i < m_groupCpuNum; i++) {
             CPU_SET(m_groupCpuArr[i], &m_CpuNumaSet);
         }
+        AttachThreadToCpuNuma(m_listener->GetThreadId());
     }
 
     InitWorkerSentry();
