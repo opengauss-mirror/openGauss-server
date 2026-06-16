@@ -193,6 +193,7 @@ static void CopyResidaulFromList(IvfflatBuildState *buildstate)
         buildstate->residuals->length++;
     }
     list_free_deep(buildstate->rlist);
+    buildstate->rlist = NIL;
 }
 
 /*
@@ -1237,6 +1238,7 @@ static void IvfflatParallelScanAndSort(IvfflatSpool *ivfspool, IvfflatShared *iv
         }
         MemoryContextSwitchTo(oldCtx);
         list_free_deep(buildstate.rlist);
+        buildstate.rlist = NIL;
     }
 
     ivfshared->nparticipantsdone++;
