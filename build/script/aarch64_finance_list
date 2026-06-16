@@ -90,8 +90,10 @@
 ./share/postgresql/extension/dolphin--4.2--4.1.sql
 ./share/postgresql/extension/dolphin--4.2--4.3.sql
 ./share/postgresql/extension/dolphin--4.3--4.2.sql
-./share/postgresql/extension/dolphin--4.3--5.0.sql
-./share/postgresql/extension/dolphin--5.0--4.3.sql
+./share/postgresql/extension/dolphin--4.3--4.4.sql
+./share/postgresql/extension/dolphin--4.4--4.3.sql
+./share/postgresql/extension/dolphin--4.4--5.0.sql
+./share/postgresql/extension/dolphin--5.0--4.4.sql
 ./share/postgresql/extension/dolphin--5.0--5.1.sql
 ./share/postgresql/extension/dolphin--5.1--5.0.sql
 ./share/postgresql/extension/dolphin--5.1--5.2.sql
