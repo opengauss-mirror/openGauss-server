@@ -160,6 +160,48 @@ void UnlockSegmentHeadPartition(Oid spcNode, Oid dbNode, BlockNumber head)
     ReadBufferFast((spc), EXTENT_GROUP_RNODE((spc), LEVEL0_PAGE_EXTENT_SIZE, 0), MAIN_FORKNUM, (blockno), RBM_ZERO)
 
 /*
+ * Only enable failover rollback for the analyzed normal segment head paths.
+ * Bucket, level0 and maintenance paths keep their original error/retry behavior.
+ */
+static inline bool SSSegMetaPageReadCancelPending()
+{
+    return SSPageReadCancelPending(SS_PAGE_READ_CANCEL_SEG_META);
+}
+
+static inline bool SSNeedHandleInvalidSegMetaPageRead(Buffer buffer)
+{
+    return BufferIsInvalid(buffer) &&
+        (SSSegMetaPageReadCancelPending() || SSNeedRetryPageReadInPrimaryRestart());
+}
+
+static inline bool SSEnableSegMetaPageReadCancel()
+{
+    bool old = t_thrd.dms_cxt.enable_page_read_cancel;
+    if (SSPageReadCancelAllowed()) {
+        t_thrd.dms_cxt.enable_page_read_cancel = true;
+    }
+    return old;
+}
+
+static inline void SSRestoreSegMetaPageReadCancel(bool old)
+{
+    t_thrd.dms_cxt.enable_page_read_cancel = old;
+}
+
+static void SSReportSegPageReadCancel(const char *funcName, const RelFileNode &rnode, ForkNumber forknum)
+{
+    SSPageReadCancelPoint cancelPoint = t_thrd.dms_cxt.page_read_cancel_point;
+    SSClearPageReadCancel();
+    ereport(ERROR,
+        (errmodule(MOD_DMS),
+            errmsg("[SS failover] backend thread exits during failover while reading segment metadata page, "
+                "blocking point: %s",
+                SSPageReadCancelPointName(cancelPoint)),
+            errdetail("function: %s, rnode: <%u/%u/%u/%d>, forknum: %d", funcName,
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, forknum)));
+}
+
+/*
  * Calculate extent id & offset according to logic page id
  * input: logic_id
  * output: extent_id, offset, extent_size
@@ -550,6 +592,8 @@ static bool normal_open_segment(SMgrRelation reln, int forknum, bool create)
     BlockNumber fork_head_blocknum = InvalidBlockNumber;
     Buffer main_buffer;
     SegmentHead *main_head;
+    bool enableCancel = !IsBucketSMgrRelation(reln) && ENABLE_DMS;
+    bool old = false;
 
     if (forknum == MAIN_FORKNUM) {
         /* For the main fork, the variable relfilenode is the segment head block number */
@@ -559,7 +603,20 @@ static bool normal_open_segment(SMgrRelation reln, int forknum, bool create)
 
     /* Ensure the main fork is opened */
     open_segment(reln, MAIN_FORKNUM, false);
+    if (enableCancel) {
+        old = SSEnableSegMetaPageReadCancel();
+    }
     main_buffer = ReadSegmentBuffer(reln->seg_space, reln->seg_desc[MAIN_FORKNUM]->head_blocknum);
+    if (enableCancel) {
+        SSRestoreSegMetaPageReadCancel(old);
+    }
+    if (BufferIsInvalid(main_buffer)) {
+        /* Main-fork head read failed; return false so the caller rolls back its own state. */
+        if (SSSegMetaPageReadCancelPending()) {
+            return false;
+        }
+        SegmentCheck(BufferIsValid(main_buffer));
+    }
     main_head = (SegmentHead *)PageGetContents(BufferGetBlock(main_buffer));
     if (unlikely(!IsNormalSegmentHead(main_head))) {
         ereport(PANIC, (errmodule(MOD_SEGMENT_PAGE), errmsg("Segment head magic value 0x%lx is invalid,"
@@ -570,7 +627,18 @@ static bool normal_open_segment(SMgrRelation reln, int forknum, bool create)
     }
 
     if (ENABLE_DMS) {
+        if (enableCancel) {
+            old = SSEnableSegMetaPageReadCancel();
+        }
         LockBuffer(main_buffer, BUFFER_LOCK_SHARE);
+        if (enableCancel) {
+            SSRestoreSegMetaPageReadCancel(old);
+        }
+        if (SSSegMetaPageReadCancelPending()) {
+            /* Main-fork head lock failed; release this head buffer and return to open_segment. */
+            SegReleaseBuffer(main_buffer);
+            return false;
+        }
     }
     /*
      * For non-main fork, the segment head is stored in the main fork segment head.
@@ -1199,11 +1267,28 @@ SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum,
 
     reln = smgropen(rnode, InvalidBackendId);
     Buffer buffer = read_head_buffer(reln, forknum, false);
+    if (!IsBucketSMgrRelation(reln) && BufferIsInvalid(buffer) && SSSegMetaPageReadCancelPending()) {
+        /* Head read failed at this stack bottom; no head buffer is held, so report ERROR here. */
+        SSReportSegPageReadCancel("seg_get_physical_location", rnode, forknum);
+    }
     SegmentCheck(BufferIsValid(buffer));
     volatile BufferDesc *buf = GetBufferDescriptor(buffer - 1);
     bool locked = LWLockHeldByMe(buf->content_lock);
     if (!(ENABLE_DMS && locked)) {
+        bool enableCancel = !IsBucketSMgrRelation(reln);
+        bool old = false;
+        if (enableCancel) {
+            old = SSEnableSegMetaPageReadCancel();
+        }
         LockBuffer(buffer, BUFFER_LOCK_SHARE);
+        if (enableCancel) {
+            SSRestoreSegMetaPageReadCancel(old);
+        }
+        if (!IsBucketSMgrRelation(reln) && SSSegMetaPageReadCancelPending()) {
+            /* Head lock failed; release the head buffer before reporting at this stack bottom. */
+            SegReleaseBuffer(buffer);
+            SSReportSegPageReadCancel("seg_get_physical_location", rnode, forknum);
+        }
     }
     SegmentHead *head = (SegmentHead *)PageGetContents(BufferGetBlock(buffer));
 
@@ -1296,9 +1381,18 @@ static Buffer read_head_buffer(SMgrRelation reln, ForkNumber forknum, bool creat
         return InvalidBuffer;
     }
     SegmentCheck(reln->seg_desc[forknum] != NULL);
+    bool enableCancel = !IsBucketSMgrRelation(reln);
+    bool old = false;
+    if (enableCancel) {
+        old = SSEnableSegMetaPageReadCancel();
+    }
     Buffer buffer = ReadSegmentBuffer(reln->seg_space, reln->seg_desc[forknum]->head_blocknum);
+    if (enableCancel) {
+        SSRestoreSegMetaPageReadCancel(old);
+    }
 
-    if (BufferIsInvalid(buffer) && SS_AM_BACKENDS_WORKERS && SS_STANDBY_IN_PRIMARY_RESTART) {
+    if (SSNeedHandleInvalidSegMetaPageRead(buffer)) {
+        /* Propagate metadata read cancel to the caller that owns the segment-head context. */
         return buffer;
     }
 
@@ -1612,12 +1706,23 @@ SMGR_READ_STATUS seg_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blo
 
     Buffer seg_buffer = read_head_buffer(reln, forknum, false);
     if (ENABLE_DMS) {
-        if (BufferIsInvalid(seg_buffer) &&SS_STANDBY_IN_PRIMARY_RESTART) {
+        if (SSNeedHandleInvalidSegMetaPageRead(seg_buffer)) {
+            /* Head read failed before locking; return retry to ReadBuffer_common. */
             return SMGR_RD_RETRY;
         }
+        bool enableCancel = !IsBucketSMgrRelation(reln);
+        bool old = false;
+        if (enableCancel) {
+            old = SSEnableSegMetaPageReadCancel();
+        }
         LockBuffer(seg_buffer, BUFFER_LOCK_SHARE);
+        if (enableCancel) {
+            SSRestoreSegMetaPageReadCancel(old);
+        }
         if (t_thrd.dms_cxt.page_need_retry) {
+            /* Head lock/read requested retry; release this head buffer before returning upward. */
             t_thrd.dms_cxt.page_need_retry = false;
+            SegReleaseBuffer(seg_buffer);
             return SMGR_RD_RETRY;
         }
     }
@@ -1768,18 +1873,39 @@ BlockNumber seg_nblocks(SMgrRelation reln, ForkNumber forknum)
     LOG_SMGR_API(reln->smgr_rnode, forknum, InvalidBlockNumber, "seg_nblocks");
 
     ASSERT_NORMAL_FORK(forknum);
+    bool enableCancel = !IsBucketSMgrRelation(reln);
 
     bool seg_exist = open_segment(reln, forknum, false);
     if (!seg_exist) {
+        if (enableCancel && SSSegMetaPageReadCancelPending()) {
+            /* open_segment unwound a head read; seg_nblocks is the safe ERROR boundary. */
+            SSReportSegPageReadCancel("seg_nblocks", reln->smgr_rnode.node, forknum);
+        }
         return 0;
     }
 
     Buffer seg_buffer = read_head_buffer(reln, forknum, false);
+    if (enableCancel && BufferIsInvalid(seg_buffer) && SSSegMetaPageReadCancelPending()) {
+        /* Head read failed at this stack bottom; no head buffer is held, so report ERROR here. */
+        SSReportSegPageReadCancel("seg_nblocks", reln->smgr_rnode.node, forknum);
+    }
     SegmentCheck(BufferIsValid(seg_buffer));
     SegmentHead *seg_head = (SegmentHead *)PageGetContents(BufferGetBlock(seg_buffer));
     SegmentCheck(IsNormalSegmentHead(seg_head));
 
+    bool old = false;
+    if (enableCancel) {
+        old = SSEnableSegMetaPageReadCancel();
+    }
     LockBuffer(seg_buffer, BUFFER_LOCK_SHARE);
+    if (enableCancel) {
+        SSRestoreSegMetaPageReadCancel(old);
+    }
+    if (enableCancel && SSSegMetaPageReadCancelPending()) {
+        /* Head lock failed; release the head buffer before reporting at this stack bottom. */
+        SegReleaseBuffer(seg_buffer);
+        SSReportSegPageReadCancel("seg_nblocks", reln->smgr_rnode.node, forknum);
+    }
     BlockNumber nblocks = seg_head->nblocks;
     SegUnlockReleaseBuffer(seg_buffer);
 

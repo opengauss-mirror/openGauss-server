@@ -1086,6 +1086,48 @@ void DmsReleaseBuffer(int buffer, bool is_seg)
     }
 }
 
+const char *SSPageReadCancelCauseName(SSPageReadCancelCause cause)
+{
+    switch (cause) {
+        case SS_PAGE_READ_CANCEL_SEG_META:
+            return "segment metadata page";
+        case SS_PAGE_READ_CANCEL_DATA_PAGE:
+            return "data page";
+        default:
+            return "unknown page";
+    }
+}
+
+const char *SSPageReadCancelPointName(SSPageReadCancelPoint point)
+{
+    switch (point) {
+        case SS_PAGE_READ_CANCEL_POINT_DMS_READ_REPAIR:
+            return "DMS read repair";
+        case SS_PAGE_READ_CANCEL_POINT_BUFFER_ALLOC_DMS_RELEASE:
+            return "BufferAlloc DmsReleaseOwner";
+        case SS_PAGE_READ_CANCEL_POINT_SMGRNBLOCKS_CHECK:
+            return "ReadBuffer_common smgrnblocks check";
+        case SS_PAGE_READ_CANCEL_POINT_BEFORE_BUFFER_ALLOC:
+            return "ReadBuffer_common before BufferAlloc";
+        case SS_PAGE_READ_CANCEL_POINT_DMS_ACCESS_CHECK:
+            return "DmsCheckBufAccessible";
+        case SS_PAGE_READ_CANCEL_POINT_ONDEMAND_REDO_REQUEST:
+            return "SSOndemandRequestPrimaryRedo";
+        case SS_PAGE_READ_CANCEL_POINT_START_READ_PAGE:
+            return "StartReadPage";
+        case SS_PAGE_READ_CANCEL_POINT_LOCKBUFFER_BEFORE_DMS_READ:
+            return "LockBuffer before DMS read";
+        case SS_PAGE_READ_CANCEL_POINT_LOCKBUFFER_DMS_READ:
+            return "LockBuffer DmsReadPage/DmsReadSegPage";
+        case SS_PAGE_READ_CANCEL_POINT_SEG_FAST_IO_GUARD:
+            return "ReadBufferFastNormal after SegStartBufferIO";
+        case SS_PAGE_READ_CANCEL_POINT_SEG_BUFFER_ALLOC_DMS_RELEASE:
+            return "SegBufferAlloc DmsReleaseOwner";
+        default:
+            return "unknown";
+    }
+}
+
 bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl)
 {
     if (AmDmsReformProcProcess() && dms_reform_failed()) {
@@ -1104,13 +1146,13 @@ bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl)
     return false;
 }
 
-bool SSNeedTerminateRequestPageInPrimaryRestart(BufferDesc *buf_desc)
+bool SSNeedTerminateRequestMetaPageInReform(BufferDesc *buf_desc)
 {
-    if (!SS_AM_BACKENDS_WORKERS || !SS_STANDBY_IN_PRIMARY_RESTART ||
-        !IsSegmentPhysicalRelNode(buf_desc->tag.rnode) || DmsCheckBufAccessible()) {
+    if (!SSPageReadCancelAllowed() || !IsSegmentPhysicalRelNode(buf_desc->tag.rnode) || DmsCheckBufAccessible()) {
         return false;
     }
 
+    /* Data-page IO may be waiting on a segment metadata page; caller rolls back to ReadBuffer_common. */
     for (int i = 0; i < t_thrd.storage_cxt.num_held_lwlocks; i++) {
         if (t_thrd.storage_cxt.held_lwlocks[i].lock != NULL &&
             t_thrd.storage_cxt.held_lwlocks[i].lock->tranche == LWTRANCHE_BUFFER_IO_IN_PROGRESS &&
@@ -1120,8 +1162,8 @@ bool SSNeedTerminateRequestPageInPrimaryRestart(BufferDesc *buf_desc)
             if (IsSegmentFileNode(tmpDesc->tag.rnode) &&
                 !IsSegmentPhysicalRelNode(tmpDesc->tag.rnode)) {
                 ereport(LOG, (errmodule(MOD_DMS),
-                    (errmsg("[SS][%u/%u/%u/%d %d-%u] Backend need to terminate request page during primary node"
-                            " restart, buf_id:%d.",
+                    (errmsg("[SS failover] [SS][%u/%u/%u/%d %d-%u] Backend need to terminate segment metadata "
+                            "page read during reform, buf_id:%d.",
                             buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
                             buf_desc->tag.rnode.relNode, buf_desc->tag.rnode.bucketNode,
                             buf_desc->tag.forkNum, buf_desc->tag.blockNum, buf_desc->buf_id))));
@@ -1224,4 +1266,3 @@ void ForgetBufferNeedCheckPin(Buffer buf_id)
     }
     t_thrd.dms_cxt.need_check_pincount = false;
 }
-

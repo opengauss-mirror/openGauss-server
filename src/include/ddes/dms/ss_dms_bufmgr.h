@@ -83,8 +83,71 @@ void buftag_get_buf_info(BufferTag tag, stat_buf_info_t *buf_info);
 Buffer SSReadBuffer(BufferTag *tag, ReadBufferMode mode);
 void DmsReleaseBuffer(int buffer, bool is_seg);
 bool SSNeedTerminateRequestPageInReform(dms_buf_ctrl_t *buf_ctrl);
-bool SSNeedTerminateRequestPageInPrimaryRestart(BufferDesc *buf_desc);
+bool SSNeedTerminateRequestMetaPageInReform(BufferDesc *buf_desc);
+const char *SSPageReadCancelCauseName(SSPageReadCancelCause cause);
+const char *SSPageReadCancelPointName(SSPageReadCancelPoint point);
 void ForgetBufferNeedCheckPin(Buffer buf_id);
+
+/* Whether this thread should handle failover page-read cancel. */
+static inline bool SSPageReadCancelRoleAllowed()
+{
+    return t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER || t_thrd.role == TRACK_STMT_CLEANER ||
+        t_thrd.role == TRACK_STMT_WORKER || t_thrd.role == AUTOVACUUM_WORKER || t_thrd.role == JOB_WORKER ||
+        t_thrd.role == JOB_SCHEDULER || t_thrd.role == RBWORKER || t_thrd.role == TXNSNAP_WORKER ||
+        t_thrd.role == APPLY_WORKER || t_thrd.role == UNDO_WORKER || t_thrd.role == OGAI_WORKER ||
+        t_thrd.role == COMM_POOLER_CLEAN || t_thrd.role == CATCHUP;
+}
+
+/* Whether this thread should exit page read during failover. */
+static inline bool SSNeedExitPageReadInFailover()
+{
+    return ENABLE_DMS && SSPageReadCancelRoleAllowed() &&
+        (g_instance.dms_cxt.SSRecoveryInfo.in_failover || SS_PERFORMING_FAILOVER);
+}
+
+/* Whether this thread should retry page read during primary restart. */
+static inline bool SSNeedRetryPageReadInPrimaryRestart()
+{
+    return ENABLE_DMS && SSPageReadCancelRoleAllowed() && SS_STANDBY_IN_PRIMARY_RESTART;
+}
+
+/* Whether page-read cancel is allowed now. */
+static inline bool SSPageReadCancelAllowed()
+{
+    return SSNeedExitPageReadInFailover() || SSNeedRetryPageReadInPrimaryRestart();
+}
+
+/* Whether the current stack has enabled page-read cancel. */
+static inline bool SSPageReadCancelEnabled()
+{
+    return t_thrd.dms_cxt.enable_page_read_cancel && SSPageReadCancelAllowed();
+}
+
+/* Whether a page-read cancel reason has been recorded. */
+static inline bool SSPageReadCancelCauseSet()
+{
+    return t_thrd.dms_cxt.page_read_cancel_cause != SS_PAGE_READ_CANCEL_NONE;
+}
+
+/* Whether the recorded cancel reason matches the expected page type. */
+static inline bool SSPageReadCancelPending(SSPageReadCancelCause cause)
+{
+    return ENABLE_DMS && t_thrd.dms_cxt.page_need_retry && t_thrd.dms_cxt.page_read_cancel_cause == cause;
+}
+
+/* Whether the pending page-read cancel should be reported as ERROR. */
+static inline bool SSNeedExitByPageReadCancel()
+{
+    return SSPageReadCancelCauseSet() && SSNeedExitPageReadInFailover();
+}
+
+/* Clear page-read cancel state in this thread. */
+static inline void SSClearPageReadCancel()
+{
+    t_thrd.dms_cxt.page_need_retry = false;
+    t_thrd.dms_cxt.page_read_cancel_cause = SS_PAGE_READ_CANCEL_NONE;
+    t_thrd.dms_cxt.page_read_cancel_point = SS_PAGE_READ_CANCEL_POINT_UNKNOWN;
+}
 
 #ifdef USE_ASSERT_CHECKING
 inline dms_buf_ctrl_t* GetDmsBufCtrl(int id)
