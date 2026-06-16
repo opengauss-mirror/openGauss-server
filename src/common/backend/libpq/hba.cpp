@@ -1504,6 +1504,86 @@ static bool IsSpqPluginLoaded(void)
     return libs != NULL && strstr(libs, "spq") != NULL;
 }
 
+static bool IsReplConnInfoHostMatched(
+    const char* configuredHost, const char* remoteHost, const char* portRemoteHost, const char* resolvedName)
+{
+    if (configuredHost == NULL || configuredHost[0] == '\0') {
+        return false;
+    }
+
+    if (remoteHost != NULL && remoteHost[0] != '\0' && pg_strcasecmp(configuredHost, remoteHost) == 0) {
+        return true;
+    }
+
+    if (portRemoteHost != NULL && portRemoteHost[0] != '\0' &&
+        pg_strcasecmp(configuredHost, portRemoteHost) == 0) {
+        return true;
+    }
+
+    if (resolvedName != NULL && resolvedName[0] != '\0' && pg_strcasecmp(configuredHost, resolvedName) == 0) {
+        return true;
+    }
+
+    return false;
+}
+
+static bool IsRemoteHostInReplConnInfo(Port* port)
+{
+    const SockAddr remoteAddr = port->raddr;
+    char remoteHost[NI_MAXHOST] = {0};
+    char resolvedName[NI_MAXHOST] = {0};
+    int ret;
+
+    (void)pg_getnameinfo_all(&remoteAddr.addr, remoteAddr.salen, remoteHost, sizeof(remoteHost), NULL, 0,
+                             NI_NUMERICHOST | NI_NUMERICSERV);
+    if (remoteHost[0] == '\0') {
+        return false;
+    }
+
+    struct sockaddr* raddr = (struct sockaddr*)&(port->raddr.addr);
+    ret = resolveHostIp2Name(raddr->sa_family, remoteHost, resolvedName);
+    if (ret != 0) {
+        resolvedName[0] = '\0';
+    }
+
+    for (int i = 1; i < DOUBLE_MAX_REPLNODE_NUM; i++) {
+        ReplConnInfo* replConnInfo = NULL;
+        if (i >= MAX_REPLNODE_NUM) {
+            replConnInfo = t_thrd.postmaster_cxt.CrossClusterReplConnArray[i - MAX_REPLNODE_NUM];
+        } else {
+            replConnInfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        }
+
+        if (replConnInfo != NULL &&
+            IsReplConnInfoHostMatched(replConnInfo->remotehost, remoteHost, port->remote_host, resolvedName)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool IsTrustedCoordinatorConnection(Port* port)
+{
+    if (!IsConnPortFromCoord(port)) {
+        return false;
+    }
+
+    if (IsSpqPluginLoaded()) {
+        return true;
+    }
+
+#ifdef ENABLE_MULTIPLE_NODES
+    return false;
+#else
+    if (!IsHAPort(port) || IsLoopBackAddr(port)) {
+        return false;
+    }
+
+    return IsRemoteHostInReplConnInfo(port);
+#endif
+}
+
 /* Mask the user be a NULL user if the uid is zero */
 #define USER_NULL_MASK 0xFFFFFFFF
 /* Max size of username operator system can return */
@@ -1719,8 +1799,8 @@ static void check_hba(hbaPort* port)
 #ifdef ENABLE_NEON
                 /* NEON: allow trust method for all remote connections */
 #else
-                if ((IsConnPortFromCoord(port) && IsSpqPluginLoaded()) || u_sess->proc_cxt.IsInnerMaintenanceTools) {
-                    /* exception 1, allow trust for CN connections only when SPQ plugin is loaded */
+                if (IsTrustedCoordinatorConnection(port) || u_sess->proc_cxt.IsInnerMaintenanceTools) {
+                    /* exception 1, allow trust for verified CN or inner maintenance tool connections */
                 } else if (IsLoopBackAddr(port)) {
                     /* exception 2, for local loop back connections, hba->remote_trust should be false */
                     hba->auth_method = get_default_auth_method(port->user_name);
@@ -1745,9 +1825,8 @@ static void check_hba(hbaPort* port)
 #endif
             }
 
-            /* Remote connection launched by coordinator should use trust method, skip rules with other method.
-             * Only applies when SPQ plugin is loaded. */
-            if (IsConnPortFromCoord(port) && IsSpqPluginLoaded() && hba->auth_method != uaTrust) {
+            /* Remote connection launched by a verified coordinator should use trust method, skip other rules. */
+            if (IsTrustedCoordinatorConnection(port) && hba->auth_method != uaTrust) {
                 continue;
             }
         }
