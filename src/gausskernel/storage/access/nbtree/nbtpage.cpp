@@ -746,6 +746,11 @@ static inline void BtRootbufCacheSetEntryKey(BtMetaPageCacheEntry *entry, const 
     entry->rootBlkno = key->rootBlkno;
 }
 
+static inline bool BtRootbufCacheThreadAllowed(void)
+{
+    return t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER;
+}
+
 static void BtRootbufCacheEnsureSessionInit(void)
 {
     MemoryContext allocCxt = NULL;
@@ -758,10 +763,10 @@ static void BtRootbufCacheEnsureSessionInit(void)
 
     /*
      * Keep the cache worker-only.  Startup/background threads never pass the
-     * WorkerThreadAmI() gate, while ordinary backends legitimately run with
-     * session_id == 0 because they execute on the thread's fake session.
+     * worker-role gate, while ordinary backends legitimately run with session_id
+     * == 0 because they execute on the thread's fake session.
      */
-    if (!WorkerThreadAmI()) {
+    if (!BtRootbufCacheThreadAllowed()) {
         return;
     }
 
@@ -795,7 +800,7 @@ static void BtRootbufCacheEnsureSessionInit(void)
 static inline bool BtRootbufCacheEnabled(Relation rel, int access)
 {
     if (RelationGetRelid(rel) < FirstNormalObjectId || access != BT_READ ||
-        u_sess == NULL || !WorkerThreadAmI()) {
+        u_sess == NULL || !BtRootbufCacheThreadAllowed()) {
         return false;
     }
 
