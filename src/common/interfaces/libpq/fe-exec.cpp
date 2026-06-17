@@ -2924,6 +2924,26 @@ int PQendcopy(PGconn* conn)
  * ----------------
  */
 
+/*
+ * Internal version of PQfn with a result buffer size check.
+ * This is used by libpq itself to avoid buffer overruns from a malicious server.
+ */
+PGresult* PQfnWithResultSize(PGconn* conn, int fnid, int* result_buf, int* actual_result_len,
+    int result_is_int, const PQArgBlock* args, int nargs, int result_buf_size)
+{
+    PGresult* res = PQfn(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK &&
+        *actual_result_len != -1 && *actual_result_len > result_buf_size) {
+        printfPQExpBuffer(&conn->errorMessage,
+            libpq_gettext("function call returned too much data: %d bytes, buffer size %d\n"),
+            *actual_result_len, result_buf_size);
+        PQclear(res);
+        pqSaveErrorResult(conn);
+        return conn->result;
+    }
+    return res;
+}
+
 PGresult* PQfn(PGconn* conn, int fnid, int* result_buf, int* actual_result_len, int result_is_int,
     const PQArgBlock* args, int nargs)
 {

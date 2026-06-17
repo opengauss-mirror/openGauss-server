@@ -474,6 +474,10 @@ extern int PQflush(PGconn* conn);
 extern PGresult* PQfn(
     PGconn* conn, int fnid, int* result_buf, int* result_len, int result_is_int, const PQArgBlock* args, int nargs);
 
+/* Internal libpq use only: PQfn with result buffer size check */
+extern PGresult* PQfnWithResultSize(PGconn* conn, int fnid, int* result_buf, int* result_len,
+    int result_is_int, const PQArgBlock* args, int nargs, int result_buf_size);
+
 /* Accessor functions for PGresult objects */
 extern ExecStatusType PQresultStatus(const PGresult* res);
 extern char* PQresStatus(ExecStatusType status);

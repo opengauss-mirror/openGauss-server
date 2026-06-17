@@ -290,6 +290,12 @@ static ltxtquery* queryin(char* buf)
     if (!state.num)
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("syntax error"), errdetail("Empty query.")));
 
+    /* CVE-2026-6473: prevent int2 overflow in ITEM.left */
+    if (state.num > SHRT_MAX)
+        ereport(ERROR,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmsg("number of query items (%d) exceeds the maximum allowed (%d)", state.num, SHRT_MAX)));
+
     if (LTXTQUERY_TOO_BIG(state.num, state.sumlen))
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("ltxtquery is too large")));
 

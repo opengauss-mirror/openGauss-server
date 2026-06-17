@@ -425,7 +425,7 @@ Datum check_foreign_key(PG_FUNCTION_ARGS)
              */
             if (action == 'r')
 
-                snprintf(sql, sizeof(sql), "select 1 from %s where ", relname);
+                snprintf(sql, sizeof(sql), "select 1 from %s where ", quote_identifier(relname));
 
             /*---------
              * For 'C'ascade action we construct DELETE query
@@ -449,14 +449,20 @@ Datum check_foreign_key(PG_FUNCTION_ARGS)
                     char* nv = NULL;
                     int k;
 
-                    snprintf(sql, sizeof(sql), "update %s set ", relname);
+                    snprintf(sql, sizeof(sql), "update %s set ", quote_identifier(relname));
                     for (k = 1; k <= nkeys; k++) {
                         int is_char_type = 0;
                         char* type = NULL;
+                        char* quotedNv = NULL;
 
                         fn = SPI_fnumber(tupdesc, args_temp[k - 1]);
                         nv = SPI_getvalue(newtuple, tupdesc, fn);
                         type = SPI_gettype(tupdesc, fn);
+
+                        if (nv == NULL)
+                            ereport(ERROR,
+                                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                                    errmsg("foreign key value cannot be null")));
 
                         if ((strcmp(type, "text") && strcmp(type, "varchar") && strcmp(type, "char") &&
                                 strcmp(type, "bpchar") && strcmp(type, "date") && strcmp(type, "timestamp")) == 0)
@@ -468,22 +474,20 @@ Datum check_foreign_key(PG_FUNCTION_ARGS)
                         /*
                          * is_char_type =1 i set ' ' for define a new value
                          */
+                        quotedNv = quote_literal_cstr(nv);
                         snprintf(sql + strlen(sql),
                             sizeof(sql) - strlen(sql),
-                            " %s = %s%s%s %s ",
-                            args2[k],
-                            (is_char_type > 0) ? "'" : "",
-                            nv,
-                            (is_char_type > 0) ? "'" : "",
+                            " %s = %s %s ",
+                            quote_identifier(args2[k]),
+                            quotedNv,
                             (k < nkeys) ? ", " : "");
+                        pfree(quotedNv);
                         is_char_type = 0;
                     }
-                    strcat(sql, " where ");
-
+                    snprintf(sql + strlen(sql), sizeof(sql) - strlen(sql), " where ");
                 } else
                     /* DELETE */
-                    snprintf(sql, sizeof(sql), "delete from %s where ", relname);
-
+                    snprintf(sql, sizeof(sql), "delete from %s where ", quote_identifier(relname));
             }
 
             /*
@@ -493,12 +497,15 @@ Datum check_foreign_key(PG_FUNCTION_ARGS)
              * all referencing tuples to NULL.
              */
             else if (action == 's') {
-                snprintf(sql, sizeof(sql), "update %s set ", relname);
+                snprintf(sql, sizeof(sql), "update %s set ", quote_identifier(relname));
                 for (i = 1; i <= nkeys; i++) {
-                    snprintf(
-                        sql + strlen(sql), sizeof(sql) - strlen(sql), "%s = null%s", args2[i], (i < nkeys) ? ", " : "");
+                    snprintf(sql + strlen(sql),
+                        sizeof(sql) - strlen(sql),
+                        "%s = null%s",
+                        quote_identifier(args2[i]),
+                        (i < nkeys) ? ", " : "");
                 }
-                strcat(sql, " where ");
+                snprintf(sql + strlen(sql), sizeof(sql) - strlen(sql), " where ");
             }
 
             /* Construct WHERE qual */
@@ -506,7 +513,7 @@ Datum check_foreign_key(PG_FUNCTION_ARGS)
                 snprintf(sql + strlen(sql),
                     sizeof(sql) - strlen(sql),
                     "%s = $%d %s",
-                    args2[i],
+                    quote_identifier(args2[i]),
                     i,
                     (i < nkeys) ? "and " : "");
             }

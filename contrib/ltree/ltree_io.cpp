@@ -203,6 +203,12 @@ Datum lquery_in(PG_FUNCTION_ARGS)
 
     num++;
 
+    /* CVE-2026-6473: prevent uint16 overflow in lquery->numlevel */
+    if (num > USHRT_MAX)
+        ereport(ERROR,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmsg("number of levels (%d) exceeds the maximum allowed (%d)", num, USHRT_MAX)));
+
     if (num > MaxAllocSize / ITEMSIZE)
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
@@ -217,11 +223,23 @@ Datum lquery_in(PG_FUNCTION_ARGS)
             if (ISALNUM(ptr)) {
                 GETVAR(curqlevel) = lptr = (nodeitem*)palloc0(sizeof(nodeitem) * (numOR + 1));
                 lptr->start = ptr;
+                /* CVE-2026-6473: prevent uint16 overflow in lquery_level->numvar */
+                if (curqlevel->numvar >= USHRT_MAX)
+                    ereport(ERROR,
+                        (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                            errmsg("number of variants (%d) exceeds the maximum allowed (%d)",
+                                curqlevel->numvar, USHRT_MAX)));
                 state = LQPRS_WAITDELIM;
                 curqlevel->numvar = 1;
             } else if (charlen == 1 && t_iseq(ptr, '!')) {
                 GETVAR(curqlevel) = lptr = (nodeitem*)palloc0(sizeof(nodeitem) * (numOR + 1));
                 lptr->start = ptr + 1;
+                /* CVE-2026-6473: prevent uint16 overflow in lquery_level->numvar */
+                if (curqlevel->numvar >= USHRT_MAX)
+                    ereport(ERROR,
+                        (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                            errmsg("number of variants (%d) exceeds the maximum allowed (%d)",
+                                curqlevel->numvar, USHRT_MAX)));
                 state = LQPRS_WAITDELIM;
                 curqlevel->numvar = 1;
                 curqlevel->flag |= LQL_NOT;
@@ -234,6 +252,12 @@ Datum lquery_in(PG_FUNCTION_ARGS)
             if (ISALNUM(ptr)) {
                 lptr++;
                 lptr->start = ptr;
+                /* CVE-2026-6473: prevent uint16 overflow in lquery_level->numvar */
+                if (curqlevel->numvar >= USHRT_MAX)
+                    ereport(ERROR,
+                        (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                            errmsg("number of variants (%d) exceeds the maximum allowed (%d)",
+                                curqlevel->numvar, USHRT_MAX)));
                 state = LQPRS_WAITDELIM;
                 curqlevel->numvar++;
             } else

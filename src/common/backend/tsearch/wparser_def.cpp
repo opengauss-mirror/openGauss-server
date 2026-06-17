@@ -2295,10 +2295,22 @@ Datum prsd_headline(PG_FUNCTION_ARGS)
         } else if (pg_strcasecmp(defel->defname, "MaxFragments") == 0) {
             max_fragments = pg_strtoint32(val);
         } else if (pg_strcasecmp(defel->defname, "StartSel") == 0) {
+            if (strlen(val) > SHRT_MAX)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("StartSel string is too long")));
             prs->startsel = pstrdup(val);
         } else if (pg_strcasecmp(defel->defname, "StopSel") == 0) {
+            if (strlen(val) > SHRT_MAX)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("StopSel string is too long")));
             prs->stopsel = pstrdup(val);
         } else if (pg_strcasecmp(defel->defname, "FragmentDelimiter") == 0) {
+            if (strlen(val) > SHRT_MAX)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("FragmentDelimiter string is too long")));
             prs->fragdelim = pstrdup(val);
         } else if (pg_strcasecmp(defel->defname, "HighlightAll") == 0) {
             highlight =
