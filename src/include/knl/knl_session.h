@@ -432,6 +432,18 @@ typedef struct knl_u_parser_context {
 
     bool has_placeholder;
 
+    /*
+     * EXPLAIN (GENERIC_PLAN) lexes '?' as a parameter placeholder.  The
+     * grammar switches qmark_param_mode on while the EXPLAIN option list
+     * is reduced (only when GENERIC_PLAN is enabled) and off when the
+     * ExplainStmt completes; scan.l consults it while scanning operator
+     * runs.  qmark_param_idx numbers the placeholders in text order and
+     * is reset for every parse (see getDynaParamSeq init).
+     */
+    bool qmark_param_mode;
+
+    int qmark_param_idx;
+
     bool stmt_contains_operator_plus;
 
     bool is_in_package_body;

@@ -51,6 +51,7 @@
 #include "catalog/pg_type.h"
 #include "catalog/pg_extension.h"
 #include "commands/async.h"
+#include "commands/defrem.h"
 #include "commands/extension.h"
 #include "commands/matview.h"
 #include "commands/prepare.h"
@@ -69,6 +70,7 @@
 #include "miscadmin.h"
 #include "nodes/print.h"
 #include "optimizer/planner.h"
+#include "optimizer/clauses.h"
 #include "optimizer/bucketpruning.h"
 #include "pgstat.h"
 #include "pg_trace.h"
@@ -1288,6 +1290,50 @@ void InitDolpinProtoIfNeeded()
  * we've seen a COMMIT or ABORT command; when we are in abort state, other
  * commands are not processed any further than the raw parse stage.
  */
+/*
+ * Check whether a raw parsetree is an EXPLAIN statement whose GENERIC_PLAN
+ * option is effectively enabled.  Mirrors ExplainQuery()'s option loop:
+ * duplicate options are allowed and the last value wins.
+ */
+static bool IsGenericPlanExplain(const Node* parsetree)
+{
+    if (parsetree == NULL || !IsA(parsetree, ExplainStmt)) {
+        return false;
+    }
+    bool enabled = false;
+    ListCell* lc = NULL;
+    foreach (lc, ((ExplainStmt*)parsetree)->options) {
+        DefElem* opt = (DefElem*)lfirst(lc);
+        if (strcmp(opt->defname, "generic_plan") == 0) {
+            enabled = defGetBoolean(opt);
+        }
+    }
+    return enabled;
+}
+
+/*
+ * g_containExplainParamRefWalker - does a raw EXPLAIN tree contain a
+ * ParamRef?  Used to reject EXPLAIN (GENERIC_PLAN) placeholders for
+ * callers without variable-parameter analysis (see pg_analyze_and_rewrite).
+ *
+ * The walker needs no context, so — like the other context-less walkers in
+ * the tree (e.g. recursive_reference_recursive_walker) — it takes only the
+ * node and is passed to raw_expression_tree_walker with a NULL context.
+ */
+static bool g_containExplainParamRefWalker(Node* node)
+{
+    if (node == NULL) {
+        return false;
+    }
+    if (IsA(node, ParamRef)) {
+        return true;
+    }
+    if (IsA(node, ExplainStmt)) {
+        return g_containExplainParamRefWalker(((ExplainStmt*)node)->query);
+    }
+    return raw_expression_tree_walker(node, (bool (*)())g_containExplainParamRefWalker, NULL);
+}
+
 List* pg_parse_query(const char* query_string, List** query_string_locationlist,
                      List* (*parser_hook)(const char*, List**))
 {
@@ -1310,6 +1356,7 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
         }
 #endif
     }
+
     raw_parsetree_list = parser_hook(query_string, query_string_locationlist);
     if (u_sess->parser_cxt.hasPartitionComment) {
         ereport(WARNING, (errmsg("comment is not allowed in partition/subpartition.")));
@@ -1346,7 +1393,8 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
  *
  * NOTE: for reasons mentioned above, this must be separate from raw parsing.
  */
-List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* paramTypes, int numParams, ParseState* parent_pstate)
+List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* paramTypes, int numParams,
+    ParseState* parent_pstate, bool genericPlanVarParams)
 {
     OgRecordAutoController _local_opt(SRT3_ANALYZE_REWRITE);
     Query* query = NULL;
@@ -1370,7 +1418,43 @@ List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* par
     }
 #endif
 
-    query = parse_analyze(parsetree, query_string, paramTypes, numParams, true, false, parent_pstate);
+    if (genericPlanVarParams && IsGenericPlanExplain(parsetree)) {
+        /*
+         * EXPLAIN (GENERIC_PLAN) with '?' placeholders lexed as parameters:
+         * deduce parameter types from context so the value never passes
+         * through the target type's input function.  The caller (simple
+         * query protocol) opted in; every other caller keeps the fixed
+         * '0'-constant behavior via parse_analyze().
+         */
+        Oid* varParamTypes = NULL;
+        int varNumParams = 0;
+        query = parse_analyze_explain_varparams(parsetree, query_string, &varParamTypes, &varNumParams);
+
+        /* Check all parameter types got determined (same contract as exec_parse_message). */
+        for (int i = 0; i < varNumParams; i++) {
+            Oid ptype = varParamTypes[i];
+
+            if (ptype == InvalidOid || ptype == UNKNOWNOID)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INDETERMINATE_DATATYPE),
+                        errmsg("could not determine data type of parameter $%d", i + 1)));
+        }
+    } else if (IsGenericPlanExplain(parsetree) &&
+               g_containExplainParamRefWalker(parsetree)) {
+        /*
+         * The '?' placeholders were lexed as PARAM tokens, but this caller
+         * (SPI, PL/pgSQL, SQL-language functions, ...) has no
+         * variable-parameter analysis: parse_analyze() would reject them
+         * with a confusing "there is no parameter $N".  Fail up front with
+         * the actual limitation.
+         */
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("EXPLAIN (GENERIC_PLAN) with \"?\" placeholders is not supported in this context"),
+                errhint("Placeholders are only accepted by the simple-query and extended-query protocols.")));
+    } else {
+        query = parse_analyze(parsetree, query_string, paramTypes, numParams, true, false, parent_pstate);
+    }
 
     if (u_sess->attr.attr_common.log_parser_stats)
         ShowUsage("PARSE ANALYSIS STATISTICS");
@@ -3117,7 +3201,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
          * If we received a hybridmessage, we use sql_query_string to analyze and rewrite.
          */
         if (HYBRID_MESSAGE != messageType)
-            querytree_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
+            querytree_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0, NULL, true);
         else
             querytree_list = pg_analyze_and_rewrite(parsetree, sql_query_string, NULL, 0);
 
@@ -3305,10 +3389,21 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         if (HYBRID_MESSAGE != messageType) {
             if (is_multistmt && (IsConnFromApp() || IsConnFromInternalTool())) {
                 PortalDefineQuery(portal, NULL, query_string_single[stmt_num - 1], commandTag, plantree_list, NULL);
-            } else
+                /*
+                 * The portal's source text is the per-statement snippet,
+                 * while parse locations are relative to the whole message.
+                 * Record the snippet's base offset so EXPLAIN (NORMALIZED)
+                 * can map constant locations onto this text.
+                 */
+                t_thrd.explain_cxt.multi_sql_offset =
+                    (stmt_num > 1) ? list_nth_int(query_string_locationlist, stmt_num - 2) + 1 : 0;
+            } else {
                 PortalDefineQuery(portal, NULL, query_string, commandTag, plantree_list, NULL);
+                t_thrd.explain_cxt.multi_sql_offset = 0;
+            }
         } else {
             PortalDefineQuery(portal, NULL, sql_query_string, commandTag, plantree_list, NULL);
+            t_thrd.explain_cxt.multi_sql_offset = 0;
         }
 
         /* PortalRun will reset this flag */
@@ -4090,8 +4185,13 @@ void exec_parse_message(const char* query_string, /* string to execute */
     /*
      * Do basic parsing of the query or queries (this should be safe even if
      * we are in aborted transaction state!)
+     *
+     * GENERIC_PLAN parameter mode is enabled so '?' placeholders become $N
+     * ParamRefs whose types parse_analyze_varparams() below can deduce from
+     * context, instead of running each type's input function on a stand-in
+     * constant.
      */
-    parsetree_list = pg_parse_query(query_string);
+    parsetree_list = pg_parse_query(query_string, NULL, NULL);
 
     /*
      * We only allow a single user statement in a prepared statement. This is

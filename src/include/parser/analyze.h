@@ -30,6 +30,9 @@ extern Query* parse_analyze(Node* parseTree, const char* sourceText, Oid* paramT
 
 extern Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams);
 
+extern Query* parse_analyze_explain_varparams(
+    Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams);
+
 
 extern Query* parse_sub_analyze(Node* parseTree, ParseState* parentParseState, CommonTableExpr* parentCTE,
     bool locked_from_parent, bool resolve_unknowns);

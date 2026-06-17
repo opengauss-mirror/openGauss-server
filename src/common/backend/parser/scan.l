@@ -89,6 +89,8 @@ const uint16 ScanKeywordTokens[] = {
 
 long getDynaParamSeq(const char *string, bool initflag, bool placeholder, core_yyscan_t yyscanner);
 
+static long GetQmarkParamId(void);
+
 /*
  * Each call to yylex must set yylloc to the location of the found token
  * (expressed as a byte offset from the start of the input text).
@@ -976,6 +978,44 @@ other			.
 						slashstar = dashdash;
 					if (slashstar)
 						nchars = slashstar - yytext;
+
+					/*
+					 * EXPLAIN (GENERIC_PLAN) lexes every '?' as a parameter
+					 * placeholder (qmark_param_mode is switched by the grammar
+					 * while the EXPLAIN option list is reduced).  Split the
+					 * operator run at the first '?': a prefix before it stays
+					 * an operator (nchars shortens and the generic code below
+					 * returns it), and the '?' itself is returned as PARAM on
+					 * the next scan.  A run that starts with '?' therefore
+					 * yields PARAM first.  This mirrors the B-compatibility
+					 * placeholder lexing: inside EXPLAIN (GENERIC_PLAN) the
+					 * '?'-named operators (?, ?|, ?&, ??, ?~, ...) are not
+					 * usable, exactly as in B mode.
+					 */
+					if (u_sess->parser_cxt.qmark_param_mode)
+					{
+						/*
+						 * Search only the prefix already trimmed by the
+						 * embedded-comment check above: a '?' that sits
+						 * after an in-run '/*' or '--' belongs to the
+						 * comment, not to the operator, and must not
+						 * extend the token past the comment start.
+						 */
+						char *qMark = (char *)memchr(yytext, '?', (size_t)nchars);
+
+						if (qMark != NULL)
+						{
+							if (qMark == yytext)
+							{
+								yyless(1);
+								SET_YYLLOC();
+								yylval->ival = GetQmarkParamId();
+								yyextra->is_hint_str = false;
+								return PARAM;
+							}
+							nchars = qMark - yytext;
+						}
+					}
 
 					/*
 					 * For SQL compatibility, '+' and '-' cannot be the
@@ -2001,6 +2041,24 @@ core_yyfree(void *ptr, core_yyscan_t yyscanner)
 
 
 /*
+ * GetQmarkParamId - number a '?' parameter placeholder in text order.
+ *
+ * Only reachable while u_sess->parser_cxt.qmark_param_mode is on, i.e.
+ * inside an EXPLAIN (GENERIC_PLAN) statement.  Mixing '?' with explicit
+ * $N parameters is rejected in both directions: a '?' cannot reserve a
+ * number below an explicit $N that follows it, and an explicit $N after
+ * a '?' would alias the placeholder's number.
+ */
+static long GetQmarkParamId(void)
+{
+	if (u_sess->parser_cxt.has_dollar)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("It is forbidden to use question mark and dollar quoting together.")));
+	return ++u_sess->parser_cxt.qmark_param_idx;
+}
+
+/*
  * @Description:  get the parameter sequence of dynamic SQL
  * @in string: parameter name
  * @in initflag:  mark the operation is init or not
@@ -2008,7 +2066,7 @@ core_yyfree(void *ptr, core_yyscan_t yyscanner)
  * @in yyscanner: for yyextra
  * @return - the sequence number of the parameter
  */
-long 
+long
 getDynaParamSeq(const char *string, bool initflag, bool placeholder, core_yyscan_t yyscanner)
 {
 	int result = 0;
@@ -2016,20 +2074,26 @@ getDynaParamSeq(const char *string, bool initflag, bool placeholder, core_yyscan
 	const ListCell *cell;
 
 	if (initflag)
-	{ 
+	{
 		u_sess->parser_cxt.is_load_copy = false;
 		u_sess->parser_cxt.col_list = NULL;
 		u_sess->parser_cxt.has_dollar = false;
 		u_sess->parser_cxt.has_placeholder = false;
+		u_sess->parser_cxt.qmark_param_mode = false;
+		u_sess->parser_cxt.qmark_param_idx = 0;
 		return 0;
 	}
 
 	if (placeholder == false)
 	{
 		if (u_sess->parser_cxt.has_placeholder)
-			ereport(ERROR, 
-					(errcode(ERRCODE_SYNTAX_ERROR), 
+			ereport(ERROR,
+					(errcode(ERRCODE_SYNTAX_ERROR),
 					errmsg("It is forbidden to use placeholder and dollar quoting together.")));
+		if (u_sess->parser_cxt.qmark_param_idx > 0)
+			ereport(ERROR,
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("It is forbidden to use question mark and dollar quoting together.")));
 		u_sess->parser_cxt.has_dollar = true;
 		return atol(string);
 	}

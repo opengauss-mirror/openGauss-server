@@ -277,6 +277,64 @@ Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** pa
 }
 
 /*
+ * parse_analyze_explain_varparams
+ *
+ * parse_analyze() variant for EXPLAIN (GENERIC_PLAN) statements whose '?'
+ * placeholders are lexed directly as PARAM tokens by scan.l.  Parameter
+ * types are deduced from context (variable parameters) so a placeholder
+ * value never passes through the target type's input function (which would
+ * reject a made-up stand-in constant, e.g. uuid_in('0')).
+ *
+ * Keeps the wrapper semantics of parse_analyze() (format-string state,
+ * unique-SQL guard, post-parse hook) and additionally checks the explained
+ * inner query: check_variable_parameters() does not descend through the
+ * utility statement into ExplainStmt->query on its own.
+ */
+Query* parse_analyze_explain_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams)
+{
+    ParseState* pstate = make_parsestate(NULL);
+    Query* query = NULL;
+    if (u_sess) { // make sure to initial status.
+        u_sess->parser_cxt.fmt_str = NULL;
+        u_sess->parser_cxt.nls_fmt_str = NULL;
+    }
+
+    /* required as of 8.4 */
+    AssertEreport(sourceText != NULL, MOD_OPT, "para cannot be NULL");
+
+    pstate->p_sourcetext = sourceText;
+
+    parse_variable_parameters(pstate, paramTypes, numParams);
+
+    PUSH_SKIP_UNIQUE_SQL_HOOK();
+    query = transformTopLevelStmt(pstate, parseTree, true, false);
+    POP_SKIP_UNIQUE_SQL_HOOK();
+
+    /* make sure all is well with parameter types */
+    check_variable_parameters(pstate, query);
+    if (query->utilityStmt != NULL && IsA(query->utilityStmt, ExplainStmt)) {
+        Node* explained = ((ExplainStmt*)query->utilityStmt)->query;
+        if (explained != NULL && IsA(explained, Query)) {
+            check_variable_parameters(pstate, (Query*)explained);
+        }
+    }
+
+    /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
+    if (post_parse_analyze_hook && !(g_instance.status > NoShutdown)) {
+        (*post_parse_analyze_hook)(pstate, query);
+    }
+
+    pfree_ext(pstate->p_ref_hook_state);
+    free_parsestate(pstate);
+
+    Assert(PointerIsValid(query));
+    query->fixed_paramTypes = *paramTypes;
+    query->fixed_numParams = *numParams;
+
+    return query;
+}
+
+/*
  * parse_sub_analyze
  *		Entry point for recursively analyzing a sub-statement.
  */

@@ -19,6 +19,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/transam.h"
+#include "access/xact.h"
 #include "auditfuncs.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_language.h"
@@ -5857,3 +5858,27 @@ Expr *transform_array_Const_to_ArrayExpr(Const *c)
     return (Expr *)aexpr;
 }
 #endif
+
+/*
+ * BuildParamFromConst - create a PARAM_EXTERN Param node from a Const node.
+ *
+ * This is a shared helper used by both EXPLAIN (GENERIC_PLAN) in explain.cpp
+ * and the generic-plan preparation logic in prepare.cpp.  Both perform the
+ * identical Const→Param conversion; centralising it here avoids the risk of
+ * the two copies drifting apart.
+ *
+ * Caller is responsible for choosing a unique paramid that does not conflict
+ * with any existing PARAM_EXTERN Param nodes in the query tree.
+ */
+Param* BuildParamFromConst(Const* con, int paramid)
+{
+    Param* param = makeNode(Param);
+    param->paramkind = PARAM_EXTERN;
+    param->paramid = paramid;
+    param->paramtype = con->consttype;
+    param->paramtypmod = con->consttypmod;
+    param->paramcollid = con->constcollid;
+    param->location = con->location;
+    param->is_bind_param = true;
+    return param;
+}

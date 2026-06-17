@@ -88,7 +88,8 @@ void JumbleRangeTable(pgssJumbleState* jstate, List* rtable);
 void JumbleExpr(pgssJumbleState* jstate, Node* node);
 void RecordConstLocation(pgssJumbleState* jstate, int location);
 uint32 pgss_hash_string(const char* str);
-char* generate_normalized_query(pgssJumbleState* jstate, const char* query, int* query_len_p, int encoding);
+char* GenerateNormalizedQuery(pgssJumbleState* jstate, const char* query, int* queryLenP, int encoding,
+    int** qmarkPosOut = NULL, int* qmarkCountOut = NULL);
 void fill_in_constant_lengths(pgssJumbleState* jstate, const char* query);
 int comp_location(const void* a, const void* b);
 void generate_jstate(pgssJumbleState* jstate, Query* query);
@@ -187,72 +188,124 @@ static void update_multi_sql_location(pgssJumbleState* jstate, int32 multi_sql_o
 }
 
 /*
- * The caller must apply for a space no smaller than strlen(query_string),
+ * The caller must apply for a space no smaller than strlen(queryString),
  * and return true if the function is called successfully.
  * input:
  * query        query tree
- * query-string     the query text
- * unique_buf       returned unique query text
- * len          The size of the unique_buf's
+ * queryString    the query text
+ * uniqueBuf      returned unique query text
+ * bufLen         The size of the uniqueBuf's
+ * qmarkPosOut / qmarkCountOut
+ *               when not NULL, receive a palloc'd array holding the output
+ *               offsets of every '?' placeholder emitted into uniqueBuf,
+ *               in increasing order, and the number of entries.  Consumers
+ *               that rewrite the placeholders (e.g. EXPLAIN (NORMALIZED)
+ *               turning '?' into $N) use these exact positions instead of
+ *               re-scanning the text, which keeps the result correct even
+ *               when the original SQL contains '?' operator characters
+ *               (jsonb ?/?|/?&, user-defined ??, ?~, ...) adjacent to
+ *               constants (e.g. "1|2" normalizes to "?|?").
  */
-bool normalized_unique_querystring(Query* query, const char* query_string, char* unique_buf, int buf_len,
-    uint32 multi_sql_offset)
+
+/*
+ * Copy the produced query text (the normalized result, the builtin text or
+ * the masked original) into uniqueBuf.
+ */
+static void CopyUniqueResult(Query* query, const char* queryString, char* normQuery, int queryLen, char* uniqueBuf,
+    int bufLen, int encoding)
 {
-    if (query == NULL || query_string == NULL || unique_buf == NULL) {
+    errno_t rc;
+    if (normQuery != NULL) {
+        rc = memcpy_s(uniqueBuf, bufLen, normQuery, queryLen);
+        securec_check(rc, "\0", "\0");
+        pfree(normQuery);
+        return;
+    }
+
+    const BuiltinUniqueSQL* builtinUniqueSql = find_builtin_unqiue_sql(query);
+    if (builtinUniqueSql != NULL) {
+        queryString = builtinUniqueSql->unique_sql;
+        queryLen = builtinUniqueSql->unique_sql_len;
+    }
+
+    if (queryLen > bufLen) {
+        queryLen = pg_encoding_mbcliplen(encoding, queryString, queryLen,
+            g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
+    }
+
+    rc = memcpy_s(uniqueBuf, bufLen, queryString, queryLen);
+    if (rc != EOK) {
+        ereport(ERROR, (errmsg("CopyUniqueResult: memcpy_s failed, error code: %d", rc)));
+    }
+}
+
+static bool normalized_unique_querystring_internal(Query* query, const char* queryString, char* uniqueBuf,
+    int bufLen, uint32 multiSqlOffset, int** qmarkPosOut, int* qmarkCountOut)
+{
+    if (query == NULL || queryString == NULL || uniqueBuf == NULL) {
         return false;
     }
 
+    if (qmarkPosOut != NULL) {
+        *qmarkPosOut = NULL;
+        *qmarkCountOut = 0;
+    }
+
     bool result = true;
-    char *norm_query = NULL, *mask_str = NULL;
+    char* normQuery = NULL;
+    char* maskStr = NULL;
     int encoding = GetDatabaseEncoding();
-    int query_len;
+    int queryLen;
     pgssJumbleState jstate;
     errno_t rc = memset_s(&jstate, sizeof(jstate), 0, sizeof(jstate));
-    securec_check(rc, "\0", "\0");
+    if (rc != EOK) {
+        return false;
+    }
 
-    query_len = strlen(query_string);
+    queryLen = strlen(queryString);
     if (query->utilityStmt == NULL) {
         UniqueSql::generate_jstate(&jstate, query);
         if (jstate.clocations_count > 0) {
-            update_multi_sql_location(&jstate, multi_sql_offset);
-            norm_query = UniqueSql::generate_normalized_query(&jstate, query_string, &query_len, encoding);
-            if (norm_query == NULL) {
+            update_multi_sql_location(&jstate, multiSqlOffset);
+            normQuery = UniqueSql::GenerateNormalizedQuery(&jstate, queryString, &queryLen, encoding,
+                qmarkPosOut, qmarkCountOut);
+            if (normQuery == NULL) {
                 result = false;
             }
         }
     } else {
-        mask_str = maskPassword(query_string);
-        if (mask_str != NULL) {
-            query_string = mask_str;
-            query_len = strlen(mask_str);
+        maskStr = maskPassword(queryString);
+        if (maskStr != NULL) {
+            queryString = maskStr;
+            queryLen = strlen(maskStr);
         }
     }
 
     if (result) {
-        if (norm_query != NULL) {
-            rc = memcpy_s(unique_buf, buf_len, norm_query, query_len);
-            securec_check(rc, "\0", "\0");
-
-            pfree(norm_query);
-        } else {
-            const BuiltinUniqueSQL *builtin_unique_sql = find_builtin_unqiue_sql(query);
-            if (builtin_unique_sql != NULL) {
-                query_string = builtin_unique_sql->unique_sql;
-                query_len = builtin_unique_sql->unique_sql_len;
-            }
-
-            if (query_len > buf_len) {
-                query_len = pg_encoding_mbcliplen(encoding, query_string, query_len,
-                    g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
-            }
-
-            rc = memcpy_s(unique_buf, buf_len, query_string, query_len);
-            securec_check(rc, "\0", "\0");
-        }
+        CopyUniqueResult(query, queryString, normQuery, queryLen, uniqueBuf, bufLen, encoding);
     }
 
-    pfree_ext(mask_str);
+    pfree_ext(maskStr);
     return result;
+}
+
+bool normalized_unique_querystring(Query* query, const char* queryString, char* uniqueBuf, int bufLen,
+    uint32 multiSqlOffset)
+{
+    return normalized_unique_querystring_internal(query, queryString, uniqueBuf, bufLen, multiSqlOffset,
+        NULL, NULL);
+}
+
+/*
+ * normalized_unique_querystring_ex — variant of normalized_unique_querystring
+ * that additionally reports the exact output offsets of the emitted '?'
+ * placeholders (see the comment above).
+ */
+bool normalized_unique_querystring_ex(Query* query, const char* queryString, char* uniqueBuf, int bufLen,
+    uint32 multiSqlOffset, int** qmarkPosOut, int* qmarkCountOut)
+{
+    return normalized_unique_querystring_internal(query, queryString, uniqueBuf, bufLen, multiSqlOffset,
+        qmarkPosOut, qmarkCountOut);
 }
 /*
  * The function generate_jstate() is used to generate jumble for query
@@ -834,21 +887,130 @@ void UniqueSql::RecordConstLocation(pgssJumbleState* jstate, int location)
  * just which "equivalent" query is used to create the hashtable entry.
  * We assume this is OK.
  *
- * *query_len_p contains the input string length, and is updated with
+ * *queryLenP contains the input string length, and is updated with
  * the result string length (which cannot be longer) on exit.
  *
  * Returns a palloc'd string, which is not necessarily null-terminated.
  */
-char* UniqueSql::generate_normalized_query(pgssJumbleState* jstate, const char* query, int* query_len_p, int encoding)
+
+/*
+ * Copy the text between constants into normQuery, emitting one '?'
+ * placeholder per constant and recording its output offset when qmarkPos is
+ * not NULL.  Returns the current output offset; *querLocP receives the
+ * source offset right after the last processed constant.
+ */
+static int EmitNormalizedChunks(pgssJumbleState* jstate, const char* query, char* normQuery, int maxOutputLen,
+    int* qmarkPos, int* qmarkCount, int* querLocP)
 {
-    char* norm_query = NULL;
-    int query_len = *query_len_p;
-    int max_output_len, i, rc;
-    int len_to_wrt;       /* Length (in bytes) to write */
-    int quer_loc = 0;     /* Source query byte location */
-    int n_quer_loc = 0;   /* Normalized query byte location */
-    int last_off = 0;     /* Offset from start for previous tok */
-    int last_tok_len = 0; /* Length (in bytes) of that tok */
+    errno_t rc;
+    int i;
+    int nQuerLoc = 0;     /* Normalized query byte location */
+    int querLoc = 0;      /* Source query byte location */
+    int lastOff = 0;      /* Offset from start for previous tok */
+    int lastTokLen = 0;   /* Length (in bytes) of that tok */
+    int lenToWrt;         /* Length (in bytes) to write */
+
+    for (i = 0; i < jstate->clocations_count; i++) {
+        /*
+         * off: Offset from start for cur tok
+         * tokLen: Length (in bytes) of that tok
+         */
+        int off = jstate->clocations[i].location;
+        int tokLen = jstate->clocations[i].length;
+
+        if (tokLen < 0) {
+            continue; /* ignore any duplicates */
+        }
+        /* Copy next chunk, or as much as will fit */
+        lenToWrt = off - lastOff;
+        lenToWrt -= lastTokLen;
+        lenToWrt = Min(lenToWrt, maxOutputLen - nQuerLoc);
+        /* Should not happen, but for below SQL, Query struct and
+         * query string can't be matched(location in Query is bigger
+         * than query string)
+         *  - delete from plan_table where statement_id='test statement_id',
+         *    for sql 'delete plan_table', transformDeleteStmt method will
+         *    modify Query member.
+         */
+        if (lenToWrt <= 0) {
+            break;
+        }
+
+        rc = memcpy_s(normQuery + nQuerLoc, maxOutputLen - nQuerLoc, query + querLoc, lenToWrt);
+        if (rc != EOK) {
+            ereport(ERROR, (errmsg("EmitNormalizedChunks: memcpy_s failed, error code: %d", rc)));
+        }
+        nQuerLoc += lenToWrt;
+
+        if (nQuerLoc < maxOutputLen) {
+            if (qmarkPos != NULL) {
+                qmarkPos[(*qmarkCount)++] = nQuerLoc;
+            }
+            normQuery[nQuerLoc++] = '?';
+        }
+
+        querLoc = off + tokLen;
+        lastOff = off;
+        lastTokLen = tokLen;
+
+        /* If we run out of space, might as well stop iterating */
+        if (nQuerLoc >= maxOutputLen) {
+            break;
+        }
+    }
+
+    *querLocP = querLoc;
+    return nQuerLoc;
+}
+
+/*
+ * Copy the remainder of the original query after the last constant and
+ * compute the final output length, applying an encoding-aware truncation
+ * when the output buffer ran out of space.
+ */
+static int FinishNormalizedQuery(const char* query, int queryLen, int querLoc, char* normQuery, int nQuerLoc,
+    int maxOutputLen, int encoding)
+{
+    /*
+     * We've copied up until the last ignorable constant.  Copy over the
+     * remaining bytes of the original query string, or at least as much as
+     * will fit.
+     */
+    int lenToWrt = queryLen - querLoc;
+    errno_t rc;
+    lenToWrt = Min(lenToWrt, maxOutputLen - nQuerLoc);
+    if (lenToWrt > 0) {
+        rc = memcpy_s(normQuery + nQuerLoc, maxOutputLen - nQuerLoc, query + querLoc, lenToWrt);
+        securec_check(rc, "\0", "\0");
+        nQuerLoc += lenToWrt;
+    }
+
+    /*
+     * If we ran out of space, we need to do an encoding-aware truncation,
+     * just to make sure we don't have an incomplete character at the end.
+     */
+    if (nQuerLoc >= maxOutputLen) {
+        return pg_encoding_mbcliplen(
+            encoding, normQuery, nQuerLoc, g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
+    }
+    return nQuerLoc;
+}
+
+char* UniqueSql::GenerateNormalizedQuery(pgssJumbleState* jstate, const char* query, int* queryLenP,
+    int encoding, int** qmarkPosOut, int* qmarkCountOut)
+{
+    int queryLen = *queryLenP;
+    int* qmarkPos = NULL; /* Output positions of emitted '?' placeholders */
+    int qmarkCount = 0;
+    int querLoc = 0;    /* Source query byte location */
+    int nQuerLoc;       /* Normalized query byte location */
+
+    if (qmarkPosOut != NULL) {
+        *qmarkPosOut = NULL;
+        *qmarkCountOut = 0;
+        /* clocations_count is the upper bound of emitted '?' placeholders */
+        qmarkPos = (int*)palloc(jstate->clocations_count * sizeof(int));
+    }
 
     /*
      * Get constants' lengths (core system only gives us locations).  Note
@@ -857,80 +1019,18 @@ char* UniqueSql::generate_normalized_query(pgssJumbleState* jstate, const char* 
     UniqueSql::fill_in_constant_lengths(jstate, query);
 
     /* Allocate result buffer, ensuring we limit result to allowed size */
-    max_output_len = Min(query_len, g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
-    norm_query = (char*)palloc(max_output_len);
+    int maxOutputLen = Min(queryLen, g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
+    char* normQuery = (char*)palloc(maxOutputLen);
 
-    for (i = 0; i < jstate->clocations_count; i++) {
-        /*
-         * off: Offset from start for cur tok
-         * tok_len: Length (in bytes) of that tok
-         */
-        int off, tok_len;
-        off = jstate->clocations[i].location;
-        tok_len = jstate->clocations[i].length;
+    nQuerLoc = EmitNormalizedChunks(jstate, query, normQuery, maxOutputLen, qmarkPos, &qmarkCount, &querLoc);
+    queryLen = FinishNormalizedQuery(query, queryLen, querLoc, normQuery, nQuerLoc, maxOutputLen, encoding);
 
-        if (tok_len < 0) {
-            continue; /* ignore any duplicates */
-        }
-        /* Copy next chunk, or as much as will fit */
-        len_to_wrt = off - last_off;
-        len_to_wrt -= last_tok_len;
-        len_to_wrt = Min(len_to_wrt, max_output_len - n_quer_loc);
-        /* Should not happen, but for below SQL, Query struct and
-         * query string can't be matched(location in Query is bigger
-         * than query string)
-         *  - delete from plan_table where statement_id='test statement_id',
-         *    for sql 'delete plan_table', transformDeleteStmt method will
-         *    modify Query member.
-         */
-        if (len_to_wrt <= 0) {
-            break;
-        }
-
-        rc = memcpy_s(norm_query + n_quer_loc, max_output_len - n_quer_loc, query + quer_loc, len_to_wrt);
-        securec_check(rc, "\0", "\0");
-        n_quer_loc += len_to_wrt;
-
-        if (n_quer_loc < max_output_len) {
-            norm_query[n_quer_loc++] = '?';
-        }
-
-        quer_loc = off + tok_len;
-        last_off = off;
-        last_tok_len = tok_len;
-
-        /* If we run out of space, might as well stop iterating */
-        if (n_quer_loc >= max_output_len) {
-            break;
-        }
+    *queryLenP = queryLen;
+    if (qmarkPosOut != NULL) {
+        *qmarkPosOut = qmarkPos;
+        *qmarkCountOut = qmarkCount;
     }
-
-    /*
-     * We've copied up until the last ignorable constant.  Copy over the
-     * remaining bytes of the original query string, or at least as much as
-     * will fit.
-     */
-    len_to_wrt = query_len - quer_loc;
-    len_to_wrt = Min(len_to_wrt, max_output_len - n_quer_loc);
-    if (len_to_wrt > 0) {
-        rc = memcpy_s(norm_query + n_quer_loc, max_output_len - n_quer_loc, query + quer_loc, len_to_wrt);
-        securec_check(rc, "\0", "\0");
-        n_quer_loc += len_to_wrt;
-    }
-
-    /*
-     * If we ran out of space, we need to do an encoding-aware truncation,
-     * just to make sure we don't have an incomplete character at the end.
-     */
-    if (n_quer_loc >= max_output_len) {
-        query_len = pg_encoding_mbcliplen(
-            encoding, norm_query, n_quer_loc, g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
-    } else {
-        query_len = n_quer_loc;
-    }
-
-    *query_len_p = query_len;
-    return norm_query;
+    return normQuery;
 }
 
 /*

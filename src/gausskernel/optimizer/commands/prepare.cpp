@@ -27,6 +27,7 @@
 #include "nodes/nodeFuncs.h"
 #include "opfusion/opfusion.h"
 #include "optimizer/bucketpruning.h"
+#include "optimizer/clauses.h"
 #include "parser/analyze.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
@@ -2242,14 +2243,7 @@ static Node* substitute_const_with_parameters_mutator(Node* node, substitute_con
     }
     if (IsA(node, Const)) {
         Const* con = (Const*)node;
-        Param* param = makeNode(Param);
-        param->paramkind = PARAM_EXTERN;
-        param->paramid = *context->nargs + 1;
-        param->paramtype = con->consttype;
-        param->paramtypmod = con->consttypmod;
-        param->paramcollid = con->constcollid;
-        param->location = con->location;
-        param->is_bind_param = true;
+        Param* param = BuildParamFromConst(con, *context->nargs + 1);
         if (*context->args) {
             *context->args = (Oid*)repalloc(*context->args, param->paramid * sizeof(Oid));
         } else {
