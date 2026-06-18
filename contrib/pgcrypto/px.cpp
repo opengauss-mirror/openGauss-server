@@ -89,6 +89,7 @@ static const struct error_desc px_err_list[] = {
 
     /* fake this as PXE_PGP_CORRUPT_DATA */
     {PXE_MBUF_SHORT_READ, "Corrupt data"},
+    {PXE_MBUF_TOO_BIG, "Decrypted data exceeds maximum allowed size"},
 
     {0, NULL},
 };

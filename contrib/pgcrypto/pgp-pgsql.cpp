@@ -491,6 +491,17 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
     mbuf_append(dst, tmp, VARHDRSZ);
 
     /*
+     * limit total decrypted output to avoid unbounded MBuf growth
+     */
+    if (ctx->max_decompressed_size > 0) {
+        int limit = ctx->max_decompressed_size;
+
+        if (limit > PG_INT32_MAX - (int)VARHDRSZ)
+            limit = PG_INT32_MAX - (int)VARHDRSZ;
+        mbuf_set_max_size(dst, limit + VARHDRSZ);
+    }
+
+    /*
      * set key
      */
     if (is_pubenc) {

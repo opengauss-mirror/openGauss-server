@@ -831,8 +831,10 @@ Applies to: pgp_sym_encrypt, pgp_pub_encrypt
 &common;
    <para>
     Maximum number of bytes allowed to be produced while decompressing
-    a PGP compressed-data packet.  This limits the damage from
-    decompression bombs (zip bombs).  A value of 0 disables the limit.
+    a PGP compressed-data packet, and also the maximum total size of
+    the decrypted output for any PGP message.  This limits the damage
+    from decompression bombs (zip bombs) and unbounded MBuf growth
+    during decryption.  A value of 0 disables the limit.
    </para>
 <literallayout>
 Values: 0 or positive integer (bytes)

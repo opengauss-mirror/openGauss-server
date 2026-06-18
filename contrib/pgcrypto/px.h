@@ -82,6 +82,8 @@ void px_free(void* p);
 
 #define PXE_MBUF_SHORT_READ -50
 
+#define PXE_MBUF_TOO_BIG -51
+
 #define PXE_PGP_CORRUPT_DATA -100
 #define PXE_PGP_CORRUPT_ARMOR -101
 #define PXE_PGP_UNSUPPORTED_COMPR -102

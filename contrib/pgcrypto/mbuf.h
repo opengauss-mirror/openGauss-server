@@ -80,6 +80,7 @@ int mbuf_size(MBuf* mbuf);
 int mbuf_grab(MBuf* mbuf, int len, uint8** data_p);
 int mbuf_steal_data(MBuf* mbuf, uint8** data_p);
 int mbuf_append(MBuf* dst, const uint8* buf, int cnt);
+int mbuf_set_max_size(MBuf* mbuf, int max_size);
 int mbuf_rewind(MBuf* mbuf);
 int mbuf_free(MBuf* mbuf);
 

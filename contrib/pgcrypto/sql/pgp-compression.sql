@@ -38,3 +38,12 @@ select pgp_sym_decrypt(
 select pgp_sym_decrypt(
 	pgp_sym_encrypt('Secret message', 'key', 'compress-algo=1'),
 	'key', 'max-decompressed-size=1');
+
+-- max-decompressed-size also limits total decrypted output for non-compressed data
+select pgp_sym_decrypt_bytea(
+	pgp_sym_encrypt_bytea(repeat('x', 100000), 'key'),
+	'key', 'max-decompressed-size=65536');
+
+select length(pgp_sym_decrypt_bytea(
+	pgp_sym_encrypt_bytea(repeat('x', 100000), 'key'),
+	'key', 'max-decompressed-size=0'));
