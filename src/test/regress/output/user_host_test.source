@@ -48,6 +48,14 @@ LINE 1: create user 'test_user_host%' password 'test123@';
 create user 'test_user_host'@'127.0.0.1' password 'test123@';
 ERROR:  user@host is only supported in b database when the b_compatibility_user_host_auth is on
 set b_compatibility_user_host_auth = on;
+set b_format_behavior_compat_options = '';
+set enable_set_variable_b_format = off;
+select @1::int;
+ ?column? 
+----------
+        1
+(1 row)
+
 CREATE USER 'sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc'@'%' PASSWORD 'test123@';
 ERROR:  String sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc@% is too long for user name (should be no longer than 64)
 CREATE USER 'sssssssssssssskkdcjhshfedrfbberfheurfhefhhdfjdfhkdfjshdfk vjhsdkfuhc' PASSWORD 'test123@';
