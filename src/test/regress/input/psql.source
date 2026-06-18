@@ -250,6 +250,33 @@ select * from dual;
 \o
 \copyright
 
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c "drop table if exists t1 cascade" -c "create table t1(id int, name varchar(10));" -c "insert into t1 values (1, 'a1')" -c "select * from t1"
+
+\! echo "set client_min_messages to 'error';"        >> @abs_bindir@/gsql_multi_cf_create.sql
+\! echo "drop table if exists t2 cascade;"           >> @abs_bindir@/gsql_multi_cf_create.sql
+\! echo "create table t2(id int, name varchar(10));" >> @abs_bindir@/gsql_multi_cf_create.sql
+\! echo "insert into t2 values (1, 'b1');"           >> @abs_bindir@/gsql_multi_cf_insert.sql
+\! echo "insert into t2 values (2, 'b2');"           >> @abs_bindir@/gsql_multi_cf_insert.sql
+\! echo "drop table t1 cascade;"                     >> @abs_bindir@/gsql_multi_cf_cleanup.sql
+\! echo "drop table t2 cascade;"                     >> @abs_bindir@/gsql_multi_cf_cleanup.sql
+
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c "\dt t2" -f @abs_bindir@/gsql_multi_cf_create.sql -c "insert into t2 values (3, 'b3')" -c "select * from t2 order by id" -f @abs_bindir@/gsql_multi_cf_insert.sql -c "select * from t2 order by id"
+
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -g -c "\dt t*" -c "select * from t1"
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -g -c "select * from t2 order by id" -f @abs_bindir@/gsql_multi_cf_cleanup.sql -f @abs_bindir@/gsql_multi_cf_create.sql -c "select * from t1"
+
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -1 -c "insert into t2 values (4, 'b4')" -c "insert into t3 values (1, 'c1')"
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -1 -c "insert into t2 values (4, 'b4')" -c "insert into t3 values (1, 'c1')" -c "select * from t2" --set=ON_ERROR_STOP=true
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c "insert into t2 values (4, 'b4')" -c "insert into t3 values (1, 'c1')" -c "select * from t2" --set=ON_ERROR_STOP=true
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -1 -c "select * from t2 order by id"
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -1 -c "delete from t2 where id > 2;insert into t2 values (5, 'b5')" -c "insert into t1 values (2, 'a2'); insert into t1 values (3, 'a3'); insert into t1 values (4, 'a4');"
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -1 -c "select * from t1 order by id" -c "select * from t2 order by id"
+
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_multi_cf_cleanup.sql
+\! rm -f @abs_bindir@/gsql_multi_cf_create.sql
+\! rm -f @abs_bindir@/gsql_multi_cf_insert.sql
+\! rm -f @abs_bindir@/gsql_multi_cf_cleanup.sql
+
 \c regression;
 drop database test_sql;
 

@@ -692,6 +692,123 @@ select * from dual;
 GaussDB Kernel Database Management System
 Copyright (c) Huawei Technologies Co., Ltd. 2018. All rights reserved.
 
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c "drop table if exists t1 cascade" -c "create table t1(id int, name varchar(10));" -c "insert into t1 values (1, 'a1')" -c "select * from t1"
+NOTICE:  table "t1" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+INSERT 0 1
+ id | name 
+----+------
+  1 | a1
+(1 row)
+
+\! echo "set client_min_messages to 'error';"        >> @abs_bindir@/gsql_multi_cf_create.sql
+\! echo "drop table if exists t2 cascade;"           >> @abs_bindir@/gsql_multi_cf_create.sql
+\! echo "create table t2(id int, name varchar(10));" >> @abs_bindir@/gsql_multi_cf_create.sql
+\! echo "insert into t2 values (1, 'b1');"           >> @abs_bindir@/gsql_multi_cf_insert.sql
+\! echo "insert into t2 values (2, 'b2');"           >> @abs_bindir@/gsql_multi_cf_insert.sql
+\! echo "drop table t1 cascade;"                     >> @abs_bindir@/gsql_multi_cf_cleanup.sql
+\! echo "drop table t2 cascade;"                     >> @abs_bindir@/gsql_multi_cf_cleanup.sql
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c "\dt t2" -f @abs_bindir@/gsql_multi_cf_create.sql -c "insert into t2 values (3, 'b3')" -c "select * from t2 order by id" -f @abs_bindir@/gsql_multi_cf_insert.sql -c "select * from t2 order by id"
+No matching relations found.
+SET
+DROP TABLE
+CREATE TABLE
+--?total time: .* ms
+INSERT 0 1
+ id | name 
+----+------
+  3 | b3
+(1 row)
+
+INSERT 0 1
+INSERT 0 1
+--?total time: .* ms
+ id | name 
+----+------
+  1 | b1
+  2 | b2
+  3 | b3
+(3 rows)
+
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -g -c "\dt t*" -c "select * from t1"
+gsql: -f and -g argument must be set together
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -g -c "select * from t2 order by id" -f @abs_bindir@/gsql_multi_cf_cleanup.sql -f @abs_bindir@/gsql_multi_cf_create.sql -c "select * from t1"
+ id | name 
+----+------
+  1 | b1
+  2 | b2
+  3 | b3
+(3 rows)
+
+drop table t1 cascade;
+----Formatter End----
+drop table t2 cascade;
+----Formatter End----
+set client_min_messages to 'error';
+----Formatter End----
+drop table if exists t2 cascade;
+----Formatter End----
+create table t2(id int, name varchar(10));
+----Formatter End----
+ id | name 
+----+------
+  1 | a1
+(1 row)
+
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -1 -c "insert into t2 values (4, 'b4')" -c "insert into t3 values (1, 'c1')"
+INSERT 0 1
+ERROR:  relation "t3" does not exist on datanode1
+LINE 1: insert into t3 values (1, 'c1')
+                    ^
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -1 -c "insert into t2 values (4, 'b4')" -c "insert into t3 values (1, 'c1')" -c "select * from t2" --set=ON_ERROR_STOP=true
+INSERT 0 1
+ERROR:  relation "t3" does not exist on datanode1
+LINE 1: insert into t3 values (1, 'c1')
+                    ^
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -c "insert into t2 values (4, 'b4')" -c "insert into t3 values (1, 'c1')" -c "select * from t2" --set=ON_ERROR_STOP=true
+INSERT 0 1
+ERROR:  relation "t3" does not exist on datanode1
+LINE 1: insert into t3 values (1, 'c1')
+                    ^
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -1 -c "select * from t2 order by id"
+ id | name 
+----+------
+  1 | b1
+  2 | b2
+  3 | b3
+  4 | b4
+(4 rows)
+
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -1 -c "delete from t2 where id > 2;insert into t2 values (5, 'b5')" -c "insert into t1 values (2, 'a2'); insert into t1 values (3, 'a3'); insert into t1 values (4, 'a4');"
+DELETE 2
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -1 -c "select * from t1 order by id" -c "select * from t2 order by id"
+ id | name 
+----+------
+  1 | a1
+  2 | a2
+  3 | a3
+  4 | a4
+(4 rows)
+
+ id | name 
+----+------
+  1 | b1
+  2 | b2
+  5 | b5
+(3 rows)
+
+\! @abs_bindir@/gsql -d test_sql -p @portstring@ -f @abs_bindir@/gsql_multi_cf_cleanup.sql
+DROP TABLE
+DROP TABLE
+--?total time: .* ms
+\! rm -f @abs_bindir@/gsql_multi_cf_create.sql
+\! rm -f @abs_bindir@/gsql_multi_cf_insert.sql
+\! rm -f @abs_bindir@/gsql_multi_cf_cleanup.sql
 \c regression;
 drop database test_sql;
 \! rm -f @abs_bindir@/gsql_ut.sql
