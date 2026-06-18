@@ -28,3 +28,13 @@ select pgp_sym_decrypt(
 	pgp_sym_encrypt('Secret message', 'key',
 			'compress-algo=2, compress-level=0'),
 	'key', 'expect-compress-algo=0');
+
+-- max-decompressed-size option is accepted and limits decompression output
+select pgp_sym_decrypt(
+	pgp_sym_encrypt('Secret message', 'key', 'compress-algo=1'),
+	'key', 'max-decompressed-size=1048576');
+
+-- too small limit should fail
+select pgp_sym_decrypt(
+	pgp_sym_encrypt('Secret message', 'key', 'compress-algo=1'),
+	'key', 'max-decompressed-size=1');

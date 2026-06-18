@@ -824,6 +824,22 @@ Default: 0
 Applies to: pgp_sym_encrypt, pgp_pub_encrypt
 </literallayout>
   </sect4>
+
+  <sect4>
+   <title>max-decompressed-size</title>
+
+&common;
+   <para>
+    Maximum number of bytes allowed to be produced while decompressing
+    a PGP compressed-data packet.  This limits the damage from
+    decompression bombs (zip bombs).  A value of 0 disables the limit.
+   </para>
+<literallayout>
+Values: 0 or positive integer (bytes)
+Default: 67108864 (64 MB)
+Applies to: pgp_sym_decrypt, pgp_pub_decrypt
+</literallayout>
+  </sect4>
   </sect3>
 
  <sect3>

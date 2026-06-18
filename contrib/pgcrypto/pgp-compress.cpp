@@ -179,6 +179,8 @@ struct DecomprData {
     uint8* pos;
     z_stream stream;
     int eof;
+    unsigned total_out;
+    int max_size;
     uint8 buf[ZIP_OUT_BUF];
 };
 
@@ -194,6 +196,7 @@ static int decompress_init(void** priv_p, void* arg, PullFilter* src)
     dec = (DecomprData*)px_alloc(sizeof(*dec));
     memset(dec, 0, sizeof(*dec));
     dec->buf_len = ZIP_OUT_BUF;
+    dec->max_size = ctx->max_decompressed_size;
     *priv_p = dec;
 
     dec->stream.zalloc = z_alloc;
@@ -258,6 +261,11 @@ restart:
     }
 
     dec->buf_data = dec->buf_len - dec->stream.avail_out;
+    dec->total_out += dec->buf_data;
+    if (dec->max_size > 0 && dec->total_out > (unsigned)dec->max_size) {
+        px_debug("decompress_read: decompressed data exceeds max size");
+        return PXE_PGP_DECOMPRESSED_TOO_BIG;
+    }
     if (res == Z_STREAM_END)
         dec->eof = 1;
     goto restart;

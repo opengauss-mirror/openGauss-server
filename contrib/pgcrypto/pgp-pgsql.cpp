@@ -247,6 +247,8 @@ static int set_arg(PGP_Context* ctx, char* key, char* val, struct debug_expect* 
         res = pgp_set_convert_crlf(ctx, atoi(val));
     else if (strcmp(key, "unicode-mode") == 0)
         res = pgp_set_unicode_mode(ctx, atoi(val));
+    else if (strcmp(key, "max-decompressed-size") == 0)
+        res = pgp_set_max_decompressed_size(ctx, atoi(val));
     /* decrypt debug */
     else if (ex != NULL && strcmp(key, "debug") == 0)
         ex->debug = atoi(val);

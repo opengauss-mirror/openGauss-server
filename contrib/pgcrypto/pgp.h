@@ -98,6 +98,7 @@ enum PGP_DIGEST_TYPE {
 #define PGP_MAX_BLOCK (256 / 8)
 #define PGP_MAX_DIGEST (512 / 8)
 #define PGP_S2K_SALT 8
+#define PGP_DEFAULT_MAX_DECOMPRESSED_SIZE (64 * 1024 * 1024)
 
 typedef struct PGP_MPI PGP_MPI;
 typedef struct PGP_PubKey PGP_PubKey;
@@ -130,6 +131,7 @@ struct PGP_Context {
     int text_mode;
     int convert_crlf;
     int unicode_mode;
+    int max_decompressed_size;
 
     /*
      * internal variables
@@ -222,6 +224,7 @@ int pgp_set_compress_algo(PGP_Context* ctx, int algo);
 int pgp_set_compress_level(PGP_Context* ctx, int level);
 int pgp_set_text_mode(PGP_Context* ctx, int mode);
 int pgp_set_unicode_mode(PGP_Context* ctx, int mode);
+int pgp_set_max_decompressed_size(PGP_Context* ctx, int max_size);
 int pgp_get_unicode_mode(PGP_Context* ctx);
 
 int pgp_set_symkey(PGP_Context* ctx, const uint8* key, int klen);
