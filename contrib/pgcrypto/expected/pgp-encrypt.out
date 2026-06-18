@@ -33,11 +33,17 @@ select pgp_sym_decrypt(pgp_sym_encrypt('Secret.', 'key'),
 		expect-compress-algo=1
 		');
 NOTICE:  pgp_decrypt: unexpected cipher_algo: expected 4 got 7
+CONTEXT:  referenced column: pgp_sym_decrypt
 NOTICE:  pgp_decrypt: unexpected s2k_mode: expected 0 got 3
+CONTEXT:  referenced column: pgp_sym_decrypt
 NOTICE:  pgp_decrypt: unexpected s2k_digest_algo: expected 1 got 2
+CONTEXT:  referenced column: pgp_sym_decrypt
 NOTICE:  pgp_decrypt: unexpected use_sess_key: expected 1 got 0
+CONTEXT:  referenced column: pgp_sym_decrypt
 NOTICE:  pgp_decrypt: unexpected disable_mdc: expected 1 got 0
+CONTEXT:  referenced column: pgp_sym_decrypt
 NOTICE:  pgp_decrypt: unexpected compress_algo: expected 1 got 0
+CONTEXT:  referenced column: pgp_sym_decrypt
  pgp_sym_decrypt 
 -----------------
  Secret.
@@ -46,6 +52,7 @@ NOTICE:  pgp_decrypt: unexpected compress_algo: expected 1 got 0
 -- bytea as text
 select pgp_sym_decrypt(pgp_sym_encrypt_bytea('Binary', 'baz'), 'baz');
 ERROR:  Not text data
+CONTEXT:  referenced column: pgp_sym_decrypt
 -- text as bytea
 select pgp_sym_decrypt_bytea(pgp_sym_encrypt('Text', 'baz'), 'baz');
  pgp_sym_decrypt_bytea 

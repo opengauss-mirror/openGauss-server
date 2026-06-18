@@ -35,6 +35,9 @@
 #include "mbuf.h"
 #include "pgp.h"
 
+/* 1 byte cipher algorithm + 2 byte checksum */
+static const int PGP_PUBENC_SESSKEY_OVERHEAD = 3;
+
 /*
  * padded msg = 02 || PS || 00 || M
  * PS - pad bytes
@@ -75,8 +78,9 @@ static int control_cksum(uint8* msg, int msglen)
     int i;
     unsigned my_cksum, got_cksum;
 
-    if (msglen < 3)
+    if (msglen < PGP_PUBENC_SESSKEY_OVERHEAD) {
         return PXE_PGP_WRONG_KEY;
+    }
 
     my_cksum = 0;
     for (i = 1; i < msglen - 2; i++)
@@ -209,8 +213,14 @@ int pgp_parse_pubenc_sesskey(PGP_Context* ctx, PullFilter* pkt)
     /*
      * got sesskey
      */
+    if (msglen > PGP_MAX_KEY + PGP_PUBENC_SESSKEY_OVERHEAD) {
+        px_debug("public-key session key is too large");
+        res = PXE_PGP_CORRUPT_DATA;
+        goto out;
+    }
+
     ctx->cipher_algo = *msg;
-    ctx->sess_key_len = msglen - 3;
+    ctx->sess_key_len = msglen - PGP_PUBENC_SESSKEY_OVERHEAD;
     memcpy(ctx->sess_key, msg + 1, ctx->sess_key_len);
 
 out:

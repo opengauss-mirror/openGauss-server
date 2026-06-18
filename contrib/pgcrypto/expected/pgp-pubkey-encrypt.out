@@ -46,12 +46,14 @@ select pgp_pub_decrypt(
 		dearmor(seckey))
 from keytbl where keytbl.id=4;
 ERROR:  No encryption key found
+CONTEXT:  referenced column: pgp_pub_decrypt
 -- try with secret key
 select pgp_pub_decrypt(
 		pgp_pub_encrypt('Secret msg', dearmor(seckey)),
 		dearmor(seckey))
 from keytbl where keytbl.id=1;
 ERROR:  Refusing to encrypt with secret key
+CONTEXT:  referenced column: pgp_pub_decrypt
 -- does text-to-bytea works
 select pgp_pub_decrypt_bytea(
 		pgp_pub_encrypt('Secret msg', dearmor(pubkey)),
@@ -68,3 +70,4 @@ select pgp_pub_decrypt(
 		dearmor(seckey))
 from keytbl where keytbl.id=1;
 ERROR:  Not text data
+CONTEXT:  referenced column: pgp_pub_decrypt

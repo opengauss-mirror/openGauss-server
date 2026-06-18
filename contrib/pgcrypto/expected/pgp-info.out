@@ -22,6 +22,7 @@ select pgp_key_id(dearmor(pubkey)) from keytbl where id=3;
 
 select pgp_key_id(dearmor(pubkey)) from keytbl where id=4; -- should fail
 ERROR:  No encryption key found
+CONTEXT:  referenced column: pgp_key_id
 select pgp_key_id(dearmor(pubkey)) from keytbl where id=5;
     pgp_key_id    
 ------------------
@@ -54,6 +55,7 @@ select pgp_key_id(dearmor(seckey)) from keytbl where id=3;
 
 select pgp_key_id(dearmor(seckey)) from keytbl where id=4; -- should fail
 ERROR:  No encryption key found
+CONTEXT:  referenced column: pgp_key_id
 select pgp_key_id(dearmor(seckey)) from keytbl where id=5;
     pgp_key_id    
 ------------------
