@@ -786,6 +786,7 @@ test: temp__3
 #security_plugin
 test: sp_set_policy_plugin_enable
 test: sp_masking_udf
+test: sp_masking_policy_reload
 test: sp_set_policy_plugin_disable
 
 # ----------

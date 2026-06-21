@@ -605,11 +605,13 @@ void access_audit_policy_run(const List* rtable, CmdType cmd_type)
         }
 
         flush_access_logs(AUDIT_OK);
+        checked_tables.clear();
         destroy_access_audit_temp_memory(&temp_memory_state);
     }
     PG_CATCH();
     {
         flush_access_logs(AUDIT_FAILED);
+        checked_tables.clear();
         destroy_access_audit_temp_memory(&temp_memory_state);
         PG_RE_THROW();
     }

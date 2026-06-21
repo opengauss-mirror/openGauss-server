@@ -1,0 +1,112 @@
+-- check masking policy reload across cached sessions without reconnect
+do $$
+begin
+    if current_setting('enable_security_policy') <> 'on' then
+        raise exception 'enable_security_policy is not on';
+    end if;
+end;
+$$;
+\pset format unaligned
+\pset tuples_only on
+create user reload_data_user password 'udftest@123';
+create user reload_pol1 poladmin password 'udftest@123';
+create user reload_pol2 poladmin password 'udftest@123';
+set role reload_data_user password 'udftest@123';
+create table reload_users (pid int, card_udf text, card_regexp text);
+insert into reload_users values (1, '6211-4554-0000-1324', '6211-4554-0000-1324');
+create table reload_sync (key text primary key, value text);
+reset role;
+set role reload_pol1 password 'udftest@123';
+create or replace function msk_creditcard(col int) returns text as $$
+begin
+    return 'p1_masked';
+end;
+$$ language plpgsql;
+set role reload_pol2 password 'udftest@123';
+create or replace function msk_creditcard(col text) returns int as $$
+begin
+    return 11;
+end;
+$$ language plpgsql;
+CREATE RESOURCE LABEL reload_udf_card ADD COLUMN(reload_data_user.reload_users.card_udf);
+CREATE RESOURCE LABEL reload_regexp_card ADD COLUMN(reload_data_user.reload_users.card_regexp);
+CREATE MASKING POLICY reload_udf_pol msk_creditcard ON LABEL(reload_udf_card);
+set role reload_data_user password 'udftest@123';
+select card_udf from reload_users;
+set role reload_pol1 password 'udftest@123';
+drop masking policy reload_udf_pol;
+CREATE MASKING POLICY reload_udf_pol reload_pol1.msk_creditcard ON LABEL(reload_udf_card);
+set role reload_data_user password 'udftest@123';
+select card_udf from reload_users;
+set role reload_pol2 password 'udftest@123';
+drop masking policy reload_udf_pol;
+CREATE MASKING POLICY reload_udf_pol reload_pol2.msk_creditcard ON LABEL(reload_udf_card);
+set role reload_data_user password 'udftest@123';
+select card_udf from reload_users;
+set role reload_pol2 password 'udftest@123';
+\! sh -c 'mkdir -p @abs_srcdir@/tmp_check; rm -f @abs_srcdir@/tmp_check/sp_masking_policy_reload_helper.pid @abs_srcdir@/tmp_check/sp_masking_policy_reload_helper.log; @abs_srcdir@/script/sp_masking_policy_reload_helper.sh @abs_bindir@ @portstring@ @login_user@ regression > @abs_srcdir@/tmp_check/sp_masking_policy_reload_helper.log 2>&1 & echo $! > @abs_srcdir@/tmp_check/sp_masking_policy_reload_helper.pid'
+reset role;
+do $$
+begin
+    for i in 1..100 loop
+        if exists (select 1 from reload_data_user.reload_sync where key = 'helper_ready') then
+            return;
+        end if;
+        perform pg_sleep(0.1);
+    end loop;
+    raise exception 'timeout waiting for helper session';
+end;
+$$;
+select value from reload_data_user.reload_sync where key = 'helper_ready';
+set role reload_pol2 password 'udftest@123';
+begin;
+CREATE MASKING POLICY reload_regexp_pol regexpmasking('[0-9]','*',2, 10) ON LABEL(reload_regexp_card);
+commit;
+set role reload_data_user password 'udftest@123';
+insert into reload_sync values ('policy1_committed', '');
+do $$
+begin
+    for i in 1..100 loop
+        if exists (select 1 from reload_sync where key = 'after_policy1') then
+            return;
+        end if;
+        perform pg_sleep(0.1);
+    end loop;
+    raise exception 'timeout waiting for first policy reload';
+end;
+$$;
+select value from reload_sync where key = 'after_policy1';
+set role reload_pol2 password 'udftest@123';
+begin;
+drop masking policy reload_regexp_pol;
+CREATE MASKING POLICY reload_regexp_pol regexpmasking('[0-9]','*',2.1, 10) ON LABEL(reload_regexp_card);
+commit;
+set role reload_data_user password 'udftest@123';
+insert into reload_sync values ('policy2_committed', '');
+do $$
+begin
+    for i in 1..100 loop
+        if exists (select 1 from reload_sync where key = 'after_policy2') then
+            return;
+        end if;
+        perform pg_sleep(0.1);
+    end loop;
+    raise exception 'timeout waiting for second policy reload';
+end;
+$$;
+select value from reload_sync where key = 'after_policy2';
+\! sh -c 'pid=$(cat @abs_srcdir@/tmp_check/sp_masking_policy_reload_helper.pid); for i in $(seq 1 100); do if ! kill -0 "$pid" 2>/dev/null; then exit 0; fi; sleep 0.1; done; cat @abs_srcdir@/tmp_check/sp_masking_policy_reload_helper.log; exit 1'
+reset role;
+drop masking policy reload_udf_pol;
+drop masking policy reload_regexp_pol;
+drop resource label reload_udf_card;
+drop resource label reload_regexp_card;
+drop function reload_pol1.msk_creditcard;
+drop function reload_pol2.msk_creditcard;
+drop table reload_data_user.reload_sync;
+drop table reload_data_user.reload_users;
+drop user reload_pol1;
+drop user reload_pol2;
+drop user reload_data_user;
+\pset tuples_only off
+\pset format aligned

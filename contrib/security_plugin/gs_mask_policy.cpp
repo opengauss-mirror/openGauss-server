@@ -286,7 +286,9 @@ bool load_masking_policies(bool reload)
     if (!reload) {
         pg_atomic_add_fetch_u64(&mask_global_version, 1);
     }
-    if (pg_atomic_compare_exchange_u64(&mask_global_version, (uint64*)&mask_local_version, mask_global_version)) {
+    uint64 current_global_version = pg_atomic_read_u64(&mask_global_version);
+    uint64 current_local_version = pg_atomic_read_u64(&mask_local_version);
+    if (current_local_version == current_global_version) {
         /* Latest masking policy, changes nothing */
         return false;
     }
@@ -325,6 +327,7 @@ bool load_masking_policies(bool reload)
         loaded_policies = tmp_policies;
     }
     set_reload_for_all_stmts();
+    pg_atomic_write_u64(&mask_local_version, reload ? current_global_version : 0);
 
     return true;
 }
@@ -374,7 +377,9 @@ bool load_masking_actions(bool reload)
     if (!reload) {
         pg_atomic_add_fetch_u64(&action_global_version, 1);
     }
-    if (pg_atomic_compare_exchange_u64(&action_global_version, (uint64*)&action_local_version, action_global_version)) {
+    uint64 current_global_version = pg_atomic_read_u64(&action_global_version);
+    uint64 current_local_version = pg_atomic_read_u64(&action_local_version);
+    if (current_local_version == current_global_version) {
         /* Latest masking action, changes nothing */
         return false;
     }
@@ -417,6 +422,7 @@ bool load_masking_actions(bool reload)
     }
     masking_policy_reloaded = true;
     set_reload_for_all_stmts();
+    pg_atomic_write_u64(&action_local_version, reload ? current_global_version : 0);
 
     return true;
 }
@@ -450,8 +456,9 @@ bool load_masking_policy_filters(bool reload)
     if (!reload) {
         pg_atomic_add_fetch_u64(&mask_filter_global_version, 1);
     }
-    if (pg_atomic_compare_exchange_u64(&mask_filter_global_version, (uint64*)&filter_local_version,
-                                       mask_filter_global_version)) {
+    uint64 current_global_version = pg_atomic_read_u64(&mask_filter_global_version);
+    uint64 current_local_version = pg_atomic_read_u64(&filter_local_version);
+    if (current_local_version == current_global_version) {
         /* Latest masking filter, changes nothing */
         return false;
     }
@@ -512,6 +519,7 @@ bool load_masking_policy_filters(bool reload)
         masking_roles_in_use = masking_roles_in_use_tmp;
     }
     set_reload_for_all_stmts();
+    pg_atomic_write_u64(&filter_local_version, reload ? current_global_version : 0);
 
     return true;
 }
@@ -532,11 +540,12 @@ bool reload_masking_policy()
     load_masking_policies(true);
     /* load filters must be last */
     load_masking_policy_filters(true);
-    if (masking_policy_reloaded) {
+    bool need_reload = masking_policy_reloaded;
+    if (need_reload) {
         set_reload_for_all_stmts();
         masking_policy_reloaded = false;
     }
-    return masking_policy_reloaded;
+    return need_reload;
 }
 
 bool check_masking_policy_filter(const FilterData *arg, policy_set *policy_ids)
