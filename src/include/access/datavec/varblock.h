@@ -72,6 +72,21 @@ static inline Size VarBlockSize(uint8 level)
 }
 
 /*
+ * Placeholder chunk: a minimal-size chunk used to preserve offset numbers
+ * when freeing a VarBlock chain.  Instead of physically deleting the item
+ * (which would change other items' offset numbers on the same page), we
+ * replace it with a placeholder of this size.  The placeholder is identified
+ * by VAR_BLOCK_LEVEL_PLACEHOLDER in the level field.
+ */
+#define VAR_BLOCK_PLACEHOLDER_SIZE  MAXALIGN(sizeof(VarBlockChunkHeader))
+#define VAR_BLOCK_LEVEL_PLACEHOLDER  0xFF
+
+static inline bool VarBlockIsPlaceholder(const VarBlockChunkHeader *hdr)
+{
+    return hdr->level == VAR_BLOCK_LEVEL_PLACEHOLDER;
+}
+
+/*
  * Callback while walking a chunk chain.
  *
  * hdr    : current chunk header
@@ -105,8 +120,9 @@ typedef void (*VarBlockReadCallback)(const VarBlockChunkHeader *hdr, const char 
  *     must match allocation).
  *
  * - VarBlockFreeChain
- *     Collect the full chain from the head, physically delete items in page-safe order;
- *     on MAIN fork, update FSM (forkNum must match allocation).
+ *     Collect the full chain from the head, replace each chunk with a placeholder
+ *     (PageIndexTupleDelete + PageAddItem) to preserve offset numbers of other
+ *     items on the same page; on MAIN fork, update FSM (forkNum must match allocation).
  *     building: true during CREATE INDEX build / reorder - skip WAL (MarkBufferDirty only).
  */
 extern ItemPointerData VarBlockAllocFirstChunk(Relation rel, ForkNumber forkNum, int level_hint, bool building);
@@ -120,5 +136,7 @@ extern void VarBlockReadChain(Relation rel, ForkNumber forkNum, const ItemPointe
                               VarBlockReadCallback cb, VarBlockReadContext *cbArg);
 
 extern void VarBlockFreeChain(Relation rel, ForkNumber forkNum, const ItemPointerData *head_ctid, bool building);
+
+extern void VarBlockVacuumCleanup(Relation rel);
 
 #endif /* VARBLOCK_H */
