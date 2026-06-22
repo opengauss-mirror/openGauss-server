@@ -3431,6 +3431,9 @@ typedef struct knl_t_dms_context {
     bool in_ondemand_redo;
     int* reform_check_status;
     bool page_need_retry;
+    bool enable_page_read_cancel;
+    SSPageReadCancelCause page_read_cancel_cause;
+    SSPageReadCancelPoint page_read_cancel_point;
 } knl_t_dms_context;
 
 typedef struct knl_t_dms_auxiliary_context {

@@ -72,6 +72,35 @@ long long lastDynLogTime = 0;
 
 static void ReleaseResource();
 
+static inline void SSPrintAliveAuxiliaryThread(const char *threadName, ThreadId threadId)
+{
+    if (threadId != 0 && threadId != InvalidTid) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS reform][SS failover] auxiliary thread is still alive, thread name:%s, thread id:%lu",
+                threadName, threadId)));
+    }
+}
+
+static void SSPrintFailoverCleanBackendsTimeoutDiagnostics(int backendNum, long waitTime)
+{
+    ereport(WARNING, (errmodule(MOD_DMS),
+        errmsg("[SS reform][SS failover] failover clean backends timeout, "
+            "backend_num:%d, wait_time:%lds. Start dumping backend and auxiliary thread diagnostics.",
+            backendNum, waitTime / FAILOVER_TIME_CONVERT)));
+
+    /* Print backend-list children that still block no_backend_left. */
+    SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+    /* Statement thread and checkpoint state are not covered by backend-list count. */
+    SSPrintAliveAuxiliaryThread("statement", g_instance.pid_cxt.StatementPID);
+    if (CheckpointInProgress()) {
+        SSPrintAliveAuxiliaryThread("checkpointer", g_instance.pid_cxt.CheckpointerPID);
+    }
+
+    print_all_stack();
+    DumpLWLockInfoToServerLog();
+}
+
 static inline void IniRedoInfo()
 {
     g_instance.dms_cxt.SSReformInfo.redo_start_time = 0;
@@ -2068,14 +2097,12 @@ static void FailoverCleanBackends()
         if (wait_time > maxWaitTime) {
             ereport(WARNING, (errmodule(MOD_DMS),
                 errmsg("[SS reform] [SS failover] failover failed, backends can not exit")));
-            /* check and print some thread which no exit. */
-            SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+            SSPrintFailoverCleanBackendsTimeoutDiagnostics(backendNum, wait_time);
 #ifdef DEBUG
             ereport(PANIC, (errmodule(MOD_DMS),
                 errmsg("[SS reform][SS failover] failover fail, need core in debug mode!")));
 #endif
-            print_all_stack();
-            _exit(0);
+            SSProcessForceExit();
         }
 
         pg_usleep(FAILOVER_PERIOD * REFORM_WAIT_TIME);
