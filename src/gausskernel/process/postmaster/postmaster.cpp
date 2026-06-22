@@ -5501,6 +5501,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
 
     if (AM_WAL_SENDER) {
         int channel_adapt = 0, i = 0;
+        t_thrd.postmaster_cxt.haConnectionInChannelList = false;
 
         if (!IS_PGXC_COORDINATOR) {
 #ifdef ENABLE_MULTIPLE_NODES
@@ -5524,6 +5525,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     channel_adapt++;
                 }
             }
+            t_thrd.postmaster_cxt.haConnectionInChannelList = (channel_adapt > 0);
 
             if (0 == channel_adapt) {
                 int elevel = comm_client_bind ? FATAL : WARNING;

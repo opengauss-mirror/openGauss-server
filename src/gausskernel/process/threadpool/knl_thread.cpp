@@ -1721,6 +1721,7 @@ static void knl_t_postmaster_init(knl_t_postmaster_context* postmaster_cxt)
     postmaster_cxt->audit_standby_switchover = false;
     postmaster_cxt->senderToDummyStandby = false;
     postmaster_cxt->senderToBuildStandby = false;
+    postmaster_cxt->haConnectionInChannelList = false;
     postmaster_cxt->ReachedNormalRunning = false;
     postmaster_cxt->redirection_done = false;
     postmaster_cxt->start_autovac_launcher = false;
