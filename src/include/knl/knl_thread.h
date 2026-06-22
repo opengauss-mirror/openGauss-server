@@ -2947,6 +2947,7 @@ typedef struct knl_t_postmaster_context {
     bool audit_standby_switchover;
     bool senderToDummyStandby;
     bool senderToBuildStandby;
+    bool haConnectionInChannelList;
     bool ReachedNormalRunning; /* T if we've reached PM_RUN */
     bool redirection_done;     /* stderr redirected for syslogger? */
 

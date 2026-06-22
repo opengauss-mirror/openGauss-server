@@ -385,6 +385,12 @@ static void StartDataReplication(StartDataReplicationCmd *cmd)
 {
     StringInfoData buf;
 
+    if (!dummyStandbyMode && !t_thrd.postmaster_cxt.haConnectionInChannelList) {
+        ereport(COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                            errmsg("reject data replication from connection outside HA channel list")));
+        proc_exit(0);
+    }
+
     /*
      * When we first start replication the standby will be behind the primary.
      * For some applications, for example, synchronous replication, it is
