@@ -36,6 +36,7 @@
 #include "common/config/cm_config.h"
 #include <limits.h>
 #include <fcntl.h>
+#include <sys/sysinfo.h>
 
 const int CLUSTER_CONFIG_SUCCESS = 0;
 const int CLUSTER_CONFIG_ERROR = 1;
@@ -195,6 +196,10 @@ const int MB_PER_GB = 1024;
 #define MAX_VALUE_LEN 1024
 #define MAX_UNIT_LEN 8
 #define MAX_INSTANCENAME_LEN 128
+#define MIN_QUOTED_VALUE_LEN 2
+#define DECIMAL_BASE 10
+#define DMS_SHM_UB_CPU_BIND_EXPAND_CAP 256
+#define DMS_SHM_UB_CPU_BIND_INNER_MAX 512
 #define GUC_OPT_CONF_FILE "cluster_guc.conf"
 
 bool is_disable_log_directory = false;
@@ -4591,6 +4596,211 @@ static bool check_datestyle_gs_guc(const char* paraname, const char* value)
     return hasConflict ? false : true;
 }
 
+static bool CheckSsInterconnectTypeGsGuc(const char* paraname, const char* value)
+{
+    char rawstring[MAX_VALUE_LEN] = {0};
+    int rc = 0;
+    size_t len = 0;
+
+    if (paraname == NULL || value == NULL || pg_strcasecmp(paraname, "ss_interconnect_type") != 0) {
+        return true;
+    }
+
+    rc = snprintf_s(rawstring, MAX_VALUE_LEN, MAX_VALUE_LEN - 1, "%s", value);
+    securec_check_ss_c(rc, "\0", "\0");
+    len = strlen(rawstring);
+    if (len >= MIN_QUOTED_VALUE_LEN && (rawstring[0] == '\'' || rawstring[0] == '"') &&
+        rawstring[0] == rawstring[len - 1]) {
+        rawstring[len - 1] = '\0';
+        value = rawstring + 1;
+    } else {
+        value = rawstring;
+    }
+
+    if (strcmp(value, "TCP") == 0 || strcmp(value, "RDMA") == 0 || strcmp(value, "UBC") == 0 ||
+        strcmp(value, "SHM") == 0) {
+        return true;
+    }
+
+    write_stderr("ERROR: The value \"%s\" is invalid for parameter ss_interconnect_type. "
+                 "Valid values are \"TCP\", \"RDMA\", \"UBC\" and \"SHM\".\n",
+        value);
+    return false;
+}
+
+static const char* SkipShmUbCpuBindSpace(const char* p)
+{
+    while (p != NULL && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) {
+        p++;
+    }
+    return p;
+}
+
+static bool ParseShmUbCpuBindInt(const char* tok, long* out)
+{
+    const char* p = SkipShmUbCpuBindSpace(tok);
+    char* end = NULL;
+    long v = 0;
+
+    errno = 0;
+    v = strtol(p, &end, DECIMAL_BASE);
+    if (end == p || errno == ERANGE || v < INT_MIN || v > INT_MAX) {
+        return false;
+    }
+    end = (char*)SkipShmUbCpuBindSpace(end);
+    if (*end != '\0') {
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
+static bool AppendShmUbCpuBindRange(long lo, long hi, int* count)
+{
+    int ncpus = get_nprocs_conf();
+
+    if (lo > hi) {
+        return false;
+    }
+    for (long id = lo; id <= hi; id++) {
+        if (id < 0 || id >= (long)ncpus || *count >= DMS_SHM_UB_CPU_BIND_EXPAND_CAP) {
+            return false;
+        }
+        (*count)++;
+    }
+    return true;
+}
+
+static bool ParseShmUbCpuBindToken(char* tok, int* count)
+{
+    char* tilde = strchr(tok, '~');
+    long lo = 0;
+    long hi = 0;
+    long v = 0;
+    int ncpus = get_nprocs_conf();
+
+    if (tilde == NULL) {
+        if (!ParseShmUbCpuBindInt(tok, &v)) {
+            return false;
+        }
+        if (v != -1L && (v < 0 || v >= (long)ncpus)) {
+            return false;
+        }
+        if (*count >= DMS_SHM_UB_CPU_BIND_EXPAND_CAP) {
+            return false;
+        }
+        (*count)++;
+        return true;
+    }
+
+    if (strchr(tilde + 1, '~') != NULL) {
+        return false;
+    }
+    *tilde = '\0';
+    if (!ParseShmUbCpuBindInt(tok, &lo) || !ParseShmUbCpuBindInt(tilde + 1, &hi)) {
+        return false;
+    }
+    return AppendShmUbCpuBindRange(lo, hi, count);
+}
+
+static bool HasShmUbCpuBindEmptyToken(const char* start, const char* end)
+{
+    const char* tokenStart = start;
+
+    if (start == end) {
+        return false;
+    }
+    while (tokenStart <= end) {
+        const char* tokenEnd = (const char*)memchr(tokenStart, ',', (size_t)(end - tokenStart));
+        if (tokenEnd == NULL) {
+            tokenEnd = end;
+        }
+        const char* left = SkipShmUbCpuBindSpace(tokenStart);
+        const char* right = tokenEnd;
+        while (right > left && (*(right - 1) == ' ' || *(right - 1) == '\t' ||
+            *(right - 1) == '\n' || *(right - 1) == '\r')) {
+            right--;
+        }
+        if (left == right) {
+            return true;
+        }
+        if (tokenEnd == end) {
+            break;
+        }
+        tokenStart = tokenEnd + 1;
+    }
+    return false;
+}
+
+static bool ParseShmUbCpuBindValue(const char* raw)
+{
+    char buf[DMS_SHM_UB_CPU_BIND_INNER_MAX] = {0};
+    const char* p = SkipShmUbCpuBindSpace(raw);
+    const char* rb = NULL;
+    char* saveptr = NULL;
+    int count = 0;
+    errno_t rc = 0;
+
+    if (raw == NULL || raw[0] == '\0') {
+        return true;
+    }
+    if (*p != '[') {
+        return false;
+    }
+    p++;
+    rb = strchr(p, ']');
+    if (rb == NULL || (size_t)(rb - p) >= DMS_SHM_UB_CPU_BIND_INNER_MAX) {
+        return false;
+    }
+    if (HasShmUbCpuBindEmptyToken(p, rb)) {
+        return false;
+    }
+    rc = memcpy_s(buf, sizeof(buf), p, (size_t)(rb - p));
+    securec_check_c(rc, "\0", "\0");
+
+    rb = SkipShmUbCpuBindSpace(rb + 1);
+    if (*rb != '\0') {
+        return false;
+    }
+    for (char* tok = strtok_r(buf, ",", &saveptr); tok != NULL; tok = strtok_r(NULL, ",", &saveptr)) {
+        if (!ParseShmUbCpuBindToken(tok, &count)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool CheckSsShmUbCommCpuBindGsGuc(const char* paraname, const char* value)
+{
+    char rawstring[MAX_VALUE_LEN] = {0};
+    int rc = 0;
+    size_t len = 0;
+
+    if (paraname == NULL || value == NULL || pg_strcasecmp(paraname, "ss_shm_ub_comm_cpu_bind") != 0) {
+        return true;
+    }
+
+    rc = snprintf_s(rawstring, MAX_VALUE_LEN, MAX_VALUE_LEN - 1, "%s", value);
+    securec_check_ss_c(rc, "\0", "\0");
+    len = strlen(rawstring);
+    if (len >= MIN_QUOTED_VALUE_LEN && (rawstring[0] == '\'' || rawstring[0] == '"') &&
+        rawstring[0] == rawstring[len - 1]) {
+        rawstring[len - 1] = '\0';
+        value = rawstring + 1;
+    } else {
+        value = rawstring;
+    }
+
+    if (ParseShmUbCpuBindValue(value)) {
+        return true;
+    }
+
+    write_stderr("ERROR: The value \"%s\" is invalid for parameter ss_shm_ub_comm_cpu_bind. "
+                 "Valid format is \"[id,id,...]\" or \"[lo~hi]\".\n",
+        value);
+    return false;
+}
+
 /*************************************************************************************
  Function: IsShellCommandParam
  Desc    : check whether the parameter is a shell-command type that legitimately
@@ -4664,8 +4874,14 @@ int check_string_type_value(const char* paraname, const char* value)
         return FAILURE;
     }
 
+    /*
+     * For now, we only check value for datestyle, ss_interconnect_type and ss_shm_ub_comm_cpu_bind.
+     * If we want to check more value, it is better to use hooks.
+     */
     if (result && paraname != NULL) {
         result = check_datestyle_gs_guc(paraname, value);
+        result = result && CheckSsInterconnectTypeGsGuc(paraname, value);
+        result = result && CheckSsShmUbCommCpuBindGsGuc(paraname, value);
     }
     return result ? SUCCESS : FAILURE;
 }
