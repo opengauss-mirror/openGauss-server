@@ -768,6 +768,19 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
         status = PSQL_CMD_SEND;
     }
 
+    /* \gset [prefix] -- send query and store result into variables */
+    else if (strcmp(cmd, "gset") == 0) {
+        char* prefix = psql_scan_slash_option(scan_state, OT_NORMAL, NULL, false);
+        if (NULL != prefix) {
+            pset.gsetPrefix = prefix;
+        } else {
+            /* we must set a non-NULL prefix to trigger storing */
+            pset.gsetPrefix = pg_strdup("");
+        }
+        /* gsetPrefix is freed later */
+        status = PSQL_CMD_SEND;
+    }
+
     /* help */
     else if (strcmp(cmd, "h") == 0 || strcmp(cmd, "help") == 0) {
         char* opt = psql_scan_slash_option(scan_state, OT_WHOLE_LINE, NULL, false);

@@ -656,7 +656,7 @@ static char** PsqlCompletion(const char *text, int start, int end)
         "\\dp", "\\drds", "\\ds", "\\dt", "\\dT", "\\dv", "\\du", "\\dx",
         "\\e", "\\echo", "\\ef", "\\encoding",
         "\\f",
-        "\\g",
+        "\\g", "\\gset",
         "\\h", "\\help", "\\H",
         "\\i", "\\i+", "\\ir", "\\ir+",
         "\\l", "\\lo_import", "\\lo_export", "\\lo_list", "\\lo_unlink",

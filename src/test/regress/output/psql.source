@@ -18,6 +18,7 @@ commands) from within gsql, or consult the gsql section in the openGauss documen
 General
   \copyright             show openGauss usage and distribution terms
   \g [FILE] or ;         execute query (and send results to file or |pipe)
+  \gset [PREFIX]         execute query and store result in gsql variables
   \h(\help) [NAME]              help on syntax of SQL commands, * for all commands
   \parallel [on [num]|off] toggle status of execute (currently off)
   \q                     quit gsql
@@ -809,6 +810,74 @@ DROP TABLE
 \! rm -f @abs_bindir@/gsql_multi_cf_create.sql
 \! rm -f @abs_bindir@/gsql_multi_cf_insert.sql
 \! rm -f @abs_bindir@/gsql_multi_cf_cleanup.sql
+select 'hello' as var1, 10 as var2
+\gset
+\echo :var1 :var2
+hello 10
+select 'hello' as var1, 10 as var2
+\gset result_
+\echo :result_var1 :result_var2
+hello 10
+create table tbl_gset(a int,b float,c text);
+select * from tbl_gset \gset
+no rows returned for \gset.
+insert into tbl_gset values(1,2.5,'yes'),(2,3.14,'no');
+select * from tbl_gset \gset
+more than one row returned for \gset.
+select * from tbl_gset limit 1 \gset
+\echo :a :b :c
+1 2.5 yes
+select 1 as limitn \gset
+select * from tbl_gset order by a desc limit :limitn;
+ a |  b   | c  
+---+------+----
+ 2 | 3.14 | no
+(1 row)
+
+select 'off' as 'AUTOCOMMIT' \gset
+attempt to \gset into specially treated variable "AUTOCOMMIT" ignored.
+select 1 \gset
+attempt to \gset set variable "?column?" to 1 failed.
+select 1 as b \gset ;
+attempt to \gset set variable ";b" to 1 failed.
+select 1 as b \gset;
+invalid command \gset;
+;
+ b 
+---
+ 1
+(1 row)
+
+\set FETCH_COUNT 3
+select 2 as  tmp \gset
+\echo :tmp
+2
+\echo :FETCH_COUNT
+3
+SELECT generate_series(95, 100) AS id;
+ id 
+----
+ 95
+ 96
+ 97
+  98
+  99
+ 100
+(6 rows)
+
+\set FETCH_COUNT 1
+select 1 as x, 2 as y \gset pref_
+\echo :pref_x :pref_y
+1 2
+select 10 as test01, 20 as test02 from generate_series(1,3) \gset pref_
+more than one row returned for \gset.
+\echo :pref_x :pref_y
+1 2
+select 10 as test01, 20 as test02 from generate_series(1,0) \gset pref_
+no rows returned for \gset.
+\echo :pref_x :pref_y
+1 2
+\unset FETCH_COUNT
 \c regression;
 drop database test_sql;
 \! rm -f @abs_bindir@/gsql_ut.sql

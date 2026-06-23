@@ -877,7 +877,59 @@ static void PrintQueryStatus(PGresult* results)
 }
 
 /*
- * PrintQueryResults: print out query results as required
+ * StoreQueryTuple: assuming query result is OK, save data into variables
+ *
+ * Returns true if successful, false otherwise.
+ */
+static bool StoreQueryTuple(const PGresult* result)
+{
+    bool success = true;
+    if (PQntuples(result) < 1) {
+        psql_error("no rows returned for \\gset.\n");
+        success = false;
+    } else if (PQntuples(result) > 1) {
+        psql_error("more than one row returned for \\gset.\n");
+        success = false;
+    } else {
+        int i;
+        for (i = 0; i < PQnfields(result); i++) {
+            char* colname = PQfname(result, i);
+            char* varname = NULL;
+            char* value = NULL;
+            /* concatenate prefix and column name */
+            size_t len = strlen(pset.gsetPrefix) + strlen(colname) + 1;
+            varname = (char*)pg_malloc(len);
+            if (!varname) {
+                psql_error("out of memory!\n");
+                return false;
+            }
+            errno_t rc = snprintf_s(varname, len, len - 1, "%s%s", pset.gsetPrefix, colname);
+            securec_check_ss_c(rc, "\0", "\0");
+            if (VariableHasHook(pset.vars, varname)) {
+                psql_error("attempt to \\gset into specially treated variable \"%s\" ignored.\n", varname);
+                free(varname);
+                continue;
+            }
+            if (!PQgetisnull(result, 0, i)) {
+                value = PQgetvalue(result, 0, i);
+            } else {
+                /* for NULL value, unset rather than set the variable */
+                value = NULL;
+            }
+            if (!SetVariable(pset.vars, varname, value)) {
+                psql_error("attempt to \\gset set variable \"%s\" to %s failed.\n", varname, value);
+                free(varname);
+                success = false;
+                break;
+            }
+            free(varname);
+        }
+    }
+    return success;
+}
+
+/*
+ * PrintQueryResults: print out (or store) query results as required
  *
  * Note: Utility function for use by SendQuery() only.
  *
@@ -907,8 +959,12 @@ static bool PrintQueryResults(PGresult* results)
 
     switch (PQresultStatus(results)) {
         case PGRES_TUPLES_OK:
-            /* print the data ... */
-            success = PrintQueryTuples(results);
+            if (pset.gsetPrefix != NULL) {
+                success = StoreQueryTuple(results);
+            } else {
+                /* print the data ... */
+                success = PrintQueryTuples(results);
+            }
             /* if it's INSERT/UPDATE/DELETE RETURNING, also print status */
             cmdstatus = PQcmdStatus(results);
             if (strncmp(cmdstatus, "INSERT", 6) == 0 || strncmp(cmdstatus, "UPDATE", 6) == 0 ||
@@ -1125,6 +1181,16 @@ bool GetPrintResult(PGresult** results, bool is_explain, bool is_print, const ch
     return OK && return_value;
 }
 
+static void SendqueryCleanup()
+{
+    ResetCancelConn();
+    /* reset \gset trigger */
+    if (pset.gsetPrefix) {
+        free(pset.gsetPrefix);
+        pset.gsetPrefix = NULL;
+    }
+}
+
 /*
  * SendQuery: send the query string to the backend
  * (and print out results)
@@ -1155,6 +1221,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
 #endif
     if (NULL == pset.db) {
         psql_error("You are currently not connected to a database.\n");
+        SendqueryCleanup();
         return false;
     }
 
@@ -1168,6 +1235,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
         fflush(stdout);
         if (fgets(buf, sizeof(buf), stdin) != NULL)
             if (buf[0] == 'x') {
+                SendqueryCleanup();
                 return false;
             }
     } else if (pset.echo == PSQL_ECHO_QUERIES) {
@@ -1193,7 +1261,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
         if (PQresultStatus(results) != PGRES_COMMAND_OK) {
             psql_error("%s", PQerrorMessage(pset.db));
             PQclear(results);
-            ResetCancelConn();
+            SendqueryCleanup();
             return false;
         }
         PQclear(results);
@@ -1213,7 +1281,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
             if (PQresultStatus(results) != PGRES_COMMAND_OK) {
                 psql_error("%s", PQerrorMessage(pset.db));
                 PQclear(results);
-                ResetCancelConn();
+                SendqueryCleanup();
                 return false;
             }
             PQclear(results);
@@ -1337,7 +1405,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
                 PQclear(svptres);
 
                 PQclear(results);
-                ResetCancelConn();
+                SendqueryCleanup();
                 return false;
             }
             PQclear(svptres);
@@ -1361,7 +1429,7 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
     }
 
     PrintNotifications();
-
+    SendqueryCleanup();
     return OK;
 }
 
@@ -1680,6 +1748,7 @@ static bool ExecQueryUsingCursor(const char* query, double* elapsed_msec)
     bool started_txn = false;
     bool did_pager = false;
     int ntuples;
+    int fetchCount;
     char fetch_cmd[64];
     instr_time before, after;
     int flush_error;
@@ -1723,7 +1792,17 @@ static bool ExecQueryUsingCursor(const char* query, double* elapsed_msec)
         *elapsed_msec += INSTR_TIME_GET_MILLISEC(after);
     }
 
-    rc = sprintf_s(fetch_cmd, sizeof(fetch_cmd), "FETCH FORWARD %d FROM _psql_cursor", pset.fetch_count);
+    /*
+     * In \gset mode, we force the fetch count to be 2, so that we will throw
+     * the appropriate error if the query returns more than one row.
+     */
+    if (pset.gsetPrefix) {
+        fetchCount = GSET_MAX_FETCH_COUNT;
+    } else {
+        fetchCount = pset.fetch_count;
+    }
+
+    rc = sprintf_s(fetch_cmd, sizeof(fetch_cmd), "FETCH FORWARD %d FROM _psql_cursor", fetchCount);
     check_sprintf_s(rc);
 
     /* prepare to write output to \g argument, if any */
@@ -1747,7 +1826,7 @@ static bool ExecQueryUsingCursor(const char* query, double* elapsed_msec)
         if (pset.timing)
             INSTR_TIME_SET_CURRENT(before);
 
-        /* get FETCH_COUNT tuples at a time */
+        /* get fetch_count tuples at a time */
         results = PQexec(pset.db, fetch_cmd);
 
         if (pset.timing) {
@@ -1771,9 +1850,14 @@ static bool ExecQueryUsingCursor(const char* query, double* elapsed_msec)
             break;
         }
 
+        if (pset.gsetPrefix) {
+            /* StoreQueryTuple will complain if not exactly one row */
+            OK = StoreQueryTuple(results);
+            PQclear(results);
+            break;
+        }
         ntuples = PQntuples(results);
-
-        if (ntuples < pset.fetch_count) {
+        if (ntuples < fetchCount) {
             /* this is the last result set, so allow footer decoration */
             my_popt.topt.stop_table = true;
         } else if (pset.queryFout == stdout && !did_pager) {
@@ -1808,8 +1892,9 @@ static bool ExecQueryUsingCursor(const char* query, double* elapsed_msec)
          * writing things to the stream, we presume $PAGER has disappeared and
          * stop bothering to pull down more data.
          */
-        if (ntuples < pset.fetch_count || cancel_pressed || flush_error || ferror(pset.queryFout))
+        if (ntuples < fetchCount || cancel_pressed || flush_error || ferror(pset.queryFout)) {
             break;
+        }
     }
 
     /* close \g argument file/pipe, restore old setting */

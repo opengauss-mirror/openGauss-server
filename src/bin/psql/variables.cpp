@@ -229,6 +229,23 @@ bool SetVariableAssignHook(VariableSpace space, const char* name, VariableAssign
     return true;
 }
 
+/*
+ * Return true iff the named variable has substitute and/or assign hook
+ * functions.
+ */
+bool VariableHasHook(VariableSpace space, const char* name)
+{
+    struct _variable* current;
+    Assert(space);
+    Assert(name);
+    for (current = space->next; current; current = current->next) {
+        if (strcmp(current->name, name) == 0) {
+            return current->assign_hook != NULL;
+        }
+    }
+    return false;
+}
+
 bool SetVariableBool(VariableSpace space, const char* name)
 {
     return SetVariable(space, name, "on");
