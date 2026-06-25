@@ -1156,6 +1156,12 @@ bool plpgsql_is_token_keyword(int token)
 
 PLpgSQL_package* GetCompileListPkg(Oid pkgOid)
 {
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid == pkgOid) {
+        return u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+    }
+
     List* compPkgList = u_sess->plsql_cxt.compile_context_list;
     ListCell *item = NULL;
     foreach(item, compPkgList) {

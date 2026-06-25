@@ -665,6 +665,7 @@ void gsplsql_remove_depend_obj_by_specified_oid(Oid ref_obj_oid, Oid curr_compil
     if (!HeapTupleIsValid(tuple)) {
         systable_endscan(scan);
         heap_close(relation, RowExclusiveLock);
+        return;
     }
     Datum values[Natts_gs_dependencies_obj];
     bool nulls[Natts_gs_dependencies_obj] = {false};

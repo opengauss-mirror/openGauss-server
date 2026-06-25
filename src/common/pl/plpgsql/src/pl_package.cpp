@@ -851,8 +851,8 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
         checkCompileMemoryContext(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
         temp = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     }
-    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     pushCompileContext();
+    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     plpgsql_scanner_init(pkg_source);
     curr_compile->plpgsql_error_pkgname = pstrdup(NameStr(pkg_struct->pkgname));
 
