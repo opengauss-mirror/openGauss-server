@@ -42,6 +42,8 @@ extern List* transformWindowDefinitions(ParseState* pstate, List* windowdefs, Li
 extern List* transformDistinctClause(ParseState* pstate, List** targetlist, List* sortClause, bool is_agg);
 extern List* transformDistinctOnClause(ParseState* pstate, List* distinctlist, List** targetlist, List* sortClause);
 
+extern void transformOnConflictArbiter(ParseState* pstate, UpsertClause *upsertClause,
+    List **arbiterExpr, Node **arbiterWhere, Oid *constraint);
 extern Index assignSortGroupRef(TargetEntry* tle, List* tlist);
 extern bool targetIsInSortList(TargetEntry* tle, Oid sortop, List* sortList);
 

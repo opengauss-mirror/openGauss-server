@@ -673,10 +673,12 @@ extern void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative, bool
 extern void ExecCloseIndices(ResultRelInfo* resultRelInfo);
 extern List* ExecInsertIndexTuples(
     TupleTableSlot* slot, ItemPointer tupleid, EState* estate, Relation targetPartRel,
-    Partition p, int2 bucketId, bool* conflict, Bitmapset *modifiedIdxAttrs, bool inplaceUpdated = false);
+    Partition p, int2 bucketId, bool* conflict, Bitmapset *modifiedIdxAttrs, bool inplaceUpdated = false,
+    List *arbiterIndexes = NULL);
 extern bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation targetRel, Partition p,
                                       bool *isgpi, int2 bucketId, ConflictInfoData *conflictInfo,
-                                      Oid *conflictPartOid = NULL, int2 *conflictBucketId = NULL);
+                                      Oid *conflictPartOid = NULL, int2 *conflictBucketId = NULL,
+                                      List *arbiterIndexes = NULL);
 
 extern void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* estate,
     Relation targetPartRel, Partition p, const Bitmapset *modifiedIdxAttrs,

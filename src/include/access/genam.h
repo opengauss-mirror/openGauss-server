@@ -113,7 +113,8 @@ typedef enum IndexUniqueCheck {
     UNIQUE_CHECK_NO,      /* Don't do any uniqueness checking */
     UNIQUE_CHECK_YES,     /* Enforce uniqueness at insertion time */
     UNIQUE_CHECK_PARTIAL, /* Test uniqueness, but no error */
-    UNIQUE_CHECK_EXISTING /* Check if existing tuple is unique */
+    UNIQUE_CHECK_EXISTING, /* Check if existing tuple is unique */
+    UNIQUE_CHECK_UPSERT    /* Test uniqueness, but no error and no insertion when a conflict is found */
 } IndexUniqueCheck;
 
 /*

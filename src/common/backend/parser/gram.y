@@ -387,6 +387,7 @@ static bool is_temp_table(const char relpst);
 	RotateClause         *rotateinfo;
 	UnrotateClause       *unrotateinfo;
 	FunctionPartitionInfo *funcPartInfo;
+	InferClause 		*infer;
 }
 
 %type <node>	stmt schema_stmt
@@ -672,6 +673,7 @@ static bool is_temp_table(const char relpst);
 %type <boolean> include_exclude_null_clause
 %type <node>    filter_clause
 %type <node>	upsert_clause
+%type <infer>	opt_conf_expr
 
 %type <mergewhen>	merge_insert merge_update
 
@@ -955,7 +957,7 @@ static bool is_temp_table(const char relpst);
 	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CATALOG_NAME CHAIN CHANGE CHAR_P
 	CHARACTER CHARACTERISTICS CHARACTERSET CHARSET CHECK CHECKPOINT CLASS CLASS_ORIGIN CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
 	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COLUMN_NAME COLUMNS COMMENT COMMENTS COMMIT
-	COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPILE COMPLETE COMPLETION COMPRESS CONCURRENTLY CONDITION CONFIGURATION CONNECTION CONSISTENT CONSTANT CONSTRAINT CONSTRAINT_CATALOG CONSTRAINT_NAME CONSTRAINT_SCHEMA CONSTRAINTS
+	COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPILE COMPLETE COMPLETION COMPRESS CONCURRENTLY CONDITION CONFIGURATION CONFLICT CONNECTION CONSISTENT CONSTANT CONSTRAINT CONSTRAINT_CATALOG CONSTRAINT_NAME CONSTRAINT_SCHEMA CONSTRAINTS
 	CONTENT_P CONTINUE_P CONTVIEW CONVERSION_P CONVERT_P CONNECT COORDINATOR COORDINATORS COPY COST CREATE
 	CROSS CSN CSV CUBE CURRENT_P
 	CURRENT_CATALOG CURRENT_DATE CURRENT_ROLE CURRENT_SCHEMA
@@ -24665,6 +24667,10 @@ upsert_clause:
 #endif
 
 						UpsertClause *uc = makeNode(UpsertClause);
+						if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+							uc->action = UPSERT_UPDATE;
+							uc->infer = NULL;
+						}
 						uc->targetList = $5;
 						uc->location = @1;
 						uc->whereClause = $6;
@@ -24678,10 +24684,57 @@ upsert_clause:
 						$$ = NULL;
 					} else {
 						UpsertClause *uc = makeNode(UpsertClause);
+						if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+							uc->action = UPSERT_NOTHING;
+							uc->infer = NULL;
+						}
 						uc->targetList = NIL;
 						uc->location = @1;
 						$$ = (Node *) uc;
 					}
+				}
+			| ON CONFLICT opt_conf_expr DO UPDATE SET set_clause_list where_clause
+				{
+					UpsertClause *uc = makeNode(UpsertClause);
+					uc->action = ONCONFLICT_UPDATE;
+					uc->infer = $3;
+					uc->targetList = $7;
+					uc->whereClause = $8;
+					uc->location = @1;
+					$$ = (Node *) uc;
+				}
+			| ON CONFLICT opt_conf_expr DO NOTHING
+				{
+					UpsertClause *uc = makeNode(UpsertClause);
+					uc->action = ONCONFLICT_NOTHING;
+					uc->infer = $3;
+					uc->targetList = NIL;
+					uc->whereClause = NULL;
+					uc->location = @1;
+					$$ = (Node *) uc;
+				}
+		;
+
+opt_conf_expr:
+			'(' index_params ')' where_clause
+				{
+					$$ = makeNode(InferClause);
+					$$->indexElems = $2;
+					$$->whereClause = $4;
+					$$->conname = NULL;
+					$$->location = @1;
+				}
+			| ON CONSTRAINT name
+				{
+					$$ = makeNode(InferClause);
+					$$->indexElems = NIL;
+					$$->whereClause = NULL;
+					$$->conname = $3;
+					$$->location = @1;
+				}
+			| /*EMPTY*/
+				{
+					$$ = NULL;
 				}
 		;
 
@@ -32502,6 +32555,7 @@ unreserved_keyword:
 			| CONDITION
 			| CONFIGURATION
 			| CONNECT
+			| CONFLICT
 			| CONNECTION
 			| CONSISTENT
 			| CONSTANT

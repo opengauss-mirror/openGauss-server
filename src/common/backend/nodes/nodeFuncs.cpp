@@ -272,6 +272,10 @@ Oid exprType(const Node* expr)
                 type = tc->typname->typeOid;
                 break;
             }
+        case T_InferenceElem: {
+            const InferenceElem* n = (const InferenceElem*)expr;
+            type = exprType((Node*)n->expr);
+        } break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -999,6 +1003,9 @@ Oid exprCollation(const Node* expr)
         case T_CurrentOfExpr:
             coll = InvalidOid; /* result is always boolean */
             break;
+        case T_InferenceElem:
+            coll = exprCollation((Node *)((const InferenceElem*)expr)->expr);
+            break;
         case T_PlaceHolderVar:
             coll = exprCollation((Node*)((const PlaceHolderVar*)expr)->phexpr);
             break;
@@ -1611,6 +1618,9 @@ int exprLocation(const Node* expr)
         case T_WithClause:
             loc = ((const WithClause*)expr)->location;
             break;
+        case T_InferClause:
+            loc = ((const InferClause*)expr)->location;
+            break;
         case T_UpsertClause:
             loc = ((const UpsertClause*)expr)->location;
             break;
@@ -1630,6 +1640,10 @@ int exprLocation(const Node* expr)
             break;
         case T_PrefixKey:
             loc = exprLocation((Node*)((const PrefixKey*)expr)->arg);
+            break;
+        case T_InferenceElem:
+            /* just use nested expr's location */
+            loc = exprLocation((Node *)((const InferenceElem*)expr)->expr);
             break;
         default:
             /* for any other node type it's just unknown... */
@@ -2050,12 +2064,20 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
         } break;
+        case T_InferenceElem:
+            return p2walker(((InferenceElem*)node)->expr, context);
         case T_UpsertExpr: {
             UpsertExpr* upsertClause = (UpsertExpr*)node;
             if (p2walker(upsertClause->updateTlist, context))
                 return true;
             if (p2walker(upsertClause->upsertWhere, context))
                 return true;
+            if (p2walker(upsertClause->arbiterElems, context)) {
+                return true;
+            }
+            if (p2walker(upsertClause->arbiterWhere, context)) {
+                return true;
+            }
         } break;
         case T_JoinExpr: {
             JoinExpr* join = (JoinExpr*)node;
@@ -2220,7 +2242,7 @@ bool query_tree_walker(Query* query, bool (*walker)(), void* context, int flags)
         return true;
     }
     if (p2walker((Node*)query->upsertClause, context)) {
-    return true;
+        return true;
     }
     if (p2walker((Node*)query->returningList, context)) {
         return true;
@@ -2877,6 +2899,15 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             }
             return (Node*)resultlist;
         } break;
+        case T_InferenceElem: {
+            InferenceElem* elem = (InferenceElem*)node;
+            InferenceElem* newnode = NULL;
+
+            FLATCOPY(newnode, elem, InferenceElem, isCopy);
+            MUTATE(newnode->expr, elem->expr, Node*);
+
+            return (Node*)newnode;
+        } break;
         case T_UpsertExpr: {
             UpsertExpr* upsertClause = (UpsertExpr*)node;
             UpsertExpr* newnode = NULL;
@@ -2884,6 +2915,9 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             FLATCOPY(newnode, upsertClause, UpsertExpr, isCopy);
             MUTATE(newnode->updateTlist, upsertClause->updateTlist, List*);
             MUTATE(newnode->upsertWhere, upsertClause->upsertWhere, Node*);
+            MUTATE(newnode->arbiterElems, upsertClause->arbiterElems, List*);
+            MUTATE(newnode->arbiterWhere, upsertClause->arbiterWhere, Node*);
+
             return (Node*)newnode;
         } break;
         case T_FromExpr: {
@@ -3356,6 +3390,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(stmt->withClause, context)) {
                 return true;
             }
+            if (p2walker(stmt->upsertClause, context)) {
+                return true;
+            }
         } break;
         case T_DeleteStmt: {
             DeleteStmt* stmt = (DeleteStmt*)node;
@@ -3748,8 +3785,26 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(kp->keep_order, context))
                 return true;
         } break;
-        case T_UpsertClause:
-            return p2walker(((UpsertClause*)node)->targetList, context);
+        case T_InferClause: {
+            InferClause* stmt = (InferClause*)node;
+
+            if (p2walker(stmt->indexElems, context))
+                return true;
+            if (p2walker(stmt->whereClause, context))
+                return true;
+        } break;
+        case T_UpsertClause: {
+            UpsertClause* stmt = (UpsertClause*)node;
+
+            if (p2walker(stmt->infer, context))
+                return true;
+            if (p2walker(stmt->targetList, context))
+                return true;
+            if (p2walker(stmt->whereClause, context))
+                return true;
+            if (p2walker(stmt->infer, context))
+                return true;
+        } break;
         case T_CommonTableExpr:
             return p2walker(((CommonTableExpr*)node)->ctequery, context);
         case T_AutoIncrement:

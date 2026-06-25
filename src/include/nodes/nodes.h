@@ -951,7 +951,10 @@ typedef enum NodeTag {
     T_TidRangePath,
     T_TidRangeScanState,
 
-    T_DolphinStrictTag
+    T_DolphinStrictTag,
+    /* Tags for insert on conflict clause */
+    T_InferClause,
+    T_InferenceElem
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */
@@ -1204,6 +1207,8 @@ typedef enum UpsertAction
     UPSERT_NONE,            /* No "DUPLICATE KEY UPDATE" clause */
     UPSERT_NOTHING,         /* DUPLICATE KEY UPDATE NOTHING */
     UPSERT_UPDATE,          /* DUPLICATE KEY UPDATE ... */
+    ONCONFLICT_NOTHING,	    /* ON CONFLICT ... DO NOTHING */
+    ONCONFLICT_UPDATE       /* ON CONFLICT ... DO UPDATE */
 }UpsertAction;
 
 struct CentroidPoint {

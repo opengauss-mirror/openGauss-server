@@ -954,6 +954,40 @@ extern bool StreamTopConsumerAmI();
 static void read_mem_info(OpMemInfo *local_node);
 static void _readCursorData(Cursor_Data *local_node);
 
+static void _readArbiteriIndexesFiled(char *token, int length, ModifyTable *local_node)
+{
+    token = pg_strtok(&length); /* skip:fldname */
+    token = pg_strtok(&length);
+    if (token[0] != '(') {
+        return;
+    }
+    while (token != NULL) {
+        Oid val;
+        token = pg_strtok(&length);
+        if (token == nullptr) {
+            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("unterminated List structure")));
+        }
+        if (token[0] == ')') {
+            break;
+        }
+        char *nspname; /* namespace name */
+        char *relname; /* relation name */
+        nspname = nullable_string(token, length);
+        token = pg_strtok(&length); /* get relname */
+        relname = nullable_string(token, length);
+        if (relname) {
+            Oid nspOid = LookupNamespaceNoError(nspname);
+            val = get_relname_relid(relname, nspOid);
+            if (!OidIsValid(val)) {
+                elog(WARNING, "could not find OID for relation %s.%s", nspname, relname);
+            }
+        } else {
+            val = InvalidOid;
+        }
+        local_node->arbiterIndexes = lappend_oid(local_node->arbiterIndexes, val);
+    }
+}
+
 /*
  * _readBitmapset
  */
@@ -3329,6 +3363,18 @@ static FromExpr* _readFromExpr(void)
 
     READ_DONE();
 }
+/*
+ * _readInferenceElem
+ */
+static InferenceElem* _readInferenceElem(void)
+{
+    READ_LOCALS(InferenceElem);
+
+    READ_NODE_FIELD(expr);
+    READ_OID_FIELD(infercollid);
+    READ_OID_FIELD(inferopclass);
+    READ_DONE();
+}
 
 /*
  * _readMergeAction
@@ -4734,6 +4780,10 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
         READ_NODE_FIELD(exclRelTlist);
     }
 
+    IF_EXIST(arbiterIndexes) {
+        _readArbiteriIndexesFiled(token, length, local_node);
+    }
+
     IF_EXIST(exclRelRTIndex) {
         READ_INT_FIELD(exclRelRTIndex);
     }
@@ -4766,6 +4816,26 @@ static UpsertExpr* _readUpsertExpr(void)
     IF_EXIST(upsertWhere) {
         READ_NODE_FIELD(upsertWhere);
     }
+    IF_EXIST(arbiterElems) {
+        READ_NODE_FIELD(arbiterElems);
+    }
+    IF_EXIST(arbiterWhere) {
+        READ_NODE_FIELD(arbiterWhere);
+    }
+    IF_EXIST(constraint) {
+        READ_OID_FIELD(constraint);
+    }
+    READ_DONE();
+}
+
+static InferClause* _readInferClause(void)
+{
+    READ_LOCALS(InferClause);
+
+    READ_NODE_FIELD(indexElems);
+    READ_NODE_FIELD(whereClause);
+    READ_STRING_FIELD(conname);
+    READ_INT_FIELD(location);
 
     READ_DONE();
 }
@@ -4774,6 +4844,12 @@ static UpsertClause* _readUpsertClause(void)
 {
     READ_LOCALS(UpsertClause);
 
+    IF_EXIST(action) {
+        READ_ENUM_FIELD(action, UpsertAction);
+    }
+    IF_EXIST(infer) {
+        READ_NODE_FIELD(infer);
+    }
     READ_NODE_FIELD(targetList);
     IF_EXIST(aliasName) {
         READ_NODE_FIELD(aliasName);
@@ -7141,6 +7217,8 @@ Node* parseNodeString(void)
         return_value = _readJoinExpr();
     } else if (MATCH("FROMEXPR", 8)) {
         return_value = _readFromExpr();
+    } else if (MATCH("INFERENCEELEM", 13)) {
+        return_value = _readInferenceElem();
     } else if (MATCH("MERGEACTION", 11)) {
         return_value = _readMergeAction();
     } else if (MATCH("MERGEINTO", 9)) {
@@ -7479,6 +7557,8 @@ Node* parseNodeString(void)
         return_value = _readColumnSetting();
     } else if (MATCH("UPSERTEXPR", 10)) {
         return_value = _readUpsertExpr();
+    } else if (MATCH("INFERCLAUSE", 11)) {
+        return_value = _readInferClause();
     } else if (MATCH("UPSERTCLAUSE", 12)) {
         return_value = _readUpsertClause();
     } else if (MATCH("PREDPUSHHINT", 12)) {

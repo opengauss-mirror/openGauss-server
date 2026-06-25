@@ -533,6 +533,7 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
                         parser_errposition(context->pstate, loccontext.location2)));
             }
             break;
+        case T_InferenceElem:
         case T_RangeTblRef:
         case T_JoinExpr:
         case T_FromExpr:

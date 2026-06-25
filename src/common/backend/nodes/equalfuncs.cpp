@@ -818,6 +818,15 @@ static bool _equalFromExpr(const FromExpr* a, const FromExpr* b)
     return true;
 }
 
+static bool _equalInferenceElem(const InferenceElem* a, const InferenceElem* b)
+{
+    COMPARE_NODE_FIELD(expr);
+    COMPARE_SCALAR_FIELD(infercollid);
+    COMPARE_SCALAR_FIELD(inferopclass);
+
+    return true;
+}
+
 static bool _equalMergeAction(const MergeAction* a, const MergeAction* b)
 {
     COMPARE_SCALAR_FIELD(matched);
@@ -836,6 +845,11 @@ static bool _equalUpsertExpr(const UpsertExpr* a, const UpsertExpr* b)
     COMPARE_NODE_FIELD(exclRelTlist);
     COMPARE_SCALAR_FIELD(exclRelIndex);
     COMPARE_NODE_FIELD(upsertWhere);
+    if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+        COMPARE_NODE_FIELD(arbiterElems);
+        COMPARE_NODE_FIELD(arbiterWhere);
+        COMPARE_SCALAR_FIELD(constraint);
+    }
 
     return true;
 }
@@ -1082,7 +1096,7 @@ static bool _equalQuery(const Query* a, const Query* b)
     if (t_thrd.proc->workingVersionNum >= SELECT_STMT_HAS_ROTATE) {
         COMPARE_SCALAR_FIELD(has_rotate);
     }
-    
+
     return true;
 }
 
@@ -3331,14 +3345,28 @@ static bool _equalStartWithClause(const StartWithClause * a, const StartWithClau
     return true;
 }
 
+static bool _equalInferClause(const InferClause* a, const InferClause* b)
+{
+    COMPARE_NODE_FIELD(indexElems);
+    COMPARE_NODE_FIELD(whereClause);
+    COMPARE_STRING_FIELD(conname);
+    COMPARE_LOCATION_FIELD(location);
+
+    return true;
+}
+
 static bool _equalUpsertClause(const UpsertClause* a, const UpsertClause* b)
 {
-   COMPARE_NODE_FIELD(targetList);
-   COMPARE_NODE_FIELD(aliasName);
-   COMPARE_LOCATION_FIELD(location);
-   COMPARE_NODE_FIELD(whereClause);
+    if (t_thrd.proc->workingVersionNum >= INSERT_ON_CONFLICT_VERSION_NUMBER) {
+        COMPARE_SCALAR_FIELD(action);
+        COMPARE_NODE_FIELD(infer);
+    }
+    COMPARE_NODE_FIELD(targetList);
+    COMPARE_NODE_FIELD(aliasName);
+    COMPARE_LOCATION_FIELD(location);
+    COMPARE_NODE_FIELD(whereClause);
 
-   return true;
+    return true;
 }
 
 static bool _equalStartWithTargetRelInfo(const StartWithTargetRelInfo *a,
@@ -4070,6 +4098,9 @@ bool equal(const void* a, const void* b)
         case T_FromExpr:
             retval = _equalFromExpr((FromExpr*)a, (FromExpr*)b);
             break;
+        case T_InferenceElem:
+            retval = _equalInferenceElem((InferenceElem*)a, (InferenceElem*)b);
+            break;
         case T_UpsertExpr:
             retval = _equalUpsertExpr((UpsertExpr*)a, (UpsertExpr*)b);
             break;
@@ -4763,6 +4794,8 @@ bool equal(const void* a, const void* b)
             break;
         case T_KeepClause:
             retval = _equalKeepClause((KeepClause*)a, (KeepClause*)b);
+        case T_InferClause:
+            retval = _equalInferClause((InferClause*)a, (InferClause*)b);
             break;
         case T_UpsertClause:
             retval = _equalUpsertClause((UpsertClause*)a, (UpsertClause*)b);

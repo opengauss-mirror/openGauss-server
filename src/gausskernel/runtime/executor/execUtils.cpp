@@ -1936,7 +1936,7 @@ static inline void SetInfoForUpsertGPI(bool isgpi, Relation *actualHeap, Relatio
  */
 bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation targetRel, Partition p, bool *isgpiResult,
                                int2 bucketId, ConflictInfoData *conflictInfo, Oid *conflictPartOid,
-                               int2 *conflictBucketid)
+                               int2 *conflictBucketid, List *arbiterIndexes)
 {
     ResultRelInfo* resultRelInfo = NULL;
     RelationPtr relationDescs = NULL;
@@ -1955,6 +1955,7 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
     Oid partoid;
     int2 bktid;
     errno_t rc;
+    bool checkedIndex = false;
 
     ItemPointerSetInvalid(&conflictInfo->conflictTid);
     ItemPointerSetInvalid(&invalidItemPtr);
@@ -2020,10 +2021,15 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
         if (!indexInfo->ii_ReadyForInserts)
             continue;
 
+        /* When specific arbiter indexex requested, only examine them */
+        if (arbiterIndexes != NIL && !list_member_oid(arbiterIndexes, indexRelation->rd_index->indexrelid)) {
+            continue;
+        }
         if (!indexRelation->rd_index->indimmediate)
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                             errmsg("INSERT ON DUPLICATE KEY UPDATE does not support deferrable"
-                                    " unique constraints/exclusion constraints.")));
+                            errmsg("INSERT ON DUPLICATE KEY UPDATE does not support deferrable"
+                                   " unique constraints/exclusion constraints.")));
+        checkedIndex = true;
         /*
          * We consider a partitioned table with a global index as a normal table,
          * because conflicts can be between multiple partitions.
@@ -2082,6 +2088,10 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
         }
     }
 
+    if (arbiterIndexes != NIL && !checkedIndex)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("INSERT ON CONFLICT DO UPDATE unexpected failure to find arbiter index")));
+
     return true;
 }
 
@@ -2107,7 +2117,7 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
  */
 List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* estate,
     Relation targetPartRel, Partition p, int2 bucketId, bool* conflict,
-    Bitmapset *modifiedIdxAttrs, bool inplaceUpdated)
+    Bitmapset *modifiedIdxAttrs, bool inplaceUpdated, List *arbiterIndexes)
 {
     List* result = NIL;
     ResultRelInfo* resultRelInfo = NULL;
@@ -2127,6 +2137,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
     bool containGPI;
     List* partitionIndexOidList = NIL;
     int totalIndices;
+    bool inArbiterIndexes = false;
 
     /*
      * Get information from the result relation info structure.
@@ -2283,6 +2294,8 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
          */
         FormIndexDatum(indexInfo, slot, estate, values, isnull);
 
+        inArbiterIndexes = arbiterIndexes == NULL ||
+                        list_member_oid(arbiterIndexes, indexRelation->rd_index->indexrelid);
         /*
          * The index AM does the actual insertion, plus uniqueness checking.
          *
@@ -2306,7 +2319,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
             } else {
                 checkUnique = UNIQUE_CHECK_YES;
             }
-        } else if (conflict != NULL) {
+        } else if (conflict != NULL && inArbiterIndexes) {
             checkUnique = UNIQUE_CHECK_PARTIAL;
         } else if (indexRelation->rd_index->indimmediate) {
             checkUnique = UNIQUE_CHECK_YES;
