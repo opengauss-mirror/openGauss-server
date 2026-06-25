@@ -647,12 +647,12 @@ analyze test_prefix_table;
 --single table index scan
 EXPLAIN (costs false)
 SELECT ftext FROM test_prefix_table where ftext like 'YYYY%' ORDER BY 1;
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
  Sort
    Sort Key: ftext COLLATE utf8mb4_bin
    ->  Index Scan using prefix_index_ftext on test_prefix_table
-         Index Cond: ((ftext >= 'YYYY'::text) AND (ftext <= 'YYYY￿'::text))
+         Index Cond: ((ftext >= 'YYYY'::text) AND (ftext < 'YYYZ'::text))
          Filter: (ftext ~~ 'YYYY%'::text)
 (5 rows)
 
@@ -1780,14 +1780,14 @@ SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM te
 
 EXPLAIN (costs false)
 SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYY%' ORDER BY 1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
  Sort
    Sort Key: ftext COLLATE utf8mb4_bin
    ->  Bitmap Heap Scan on test_prefix_table
          Filter: (ftext ~~ 'YYYY%'::text)
          ->  Bitmap Index Scan on prefix_index_ftext
-               Index Cond: ((ftext >= 'YYYY'::text) AND (ftext <= 'YYYY￿'::text))
+               Index Cond: ((ftext >= 'YYYY'::text) AND (ftext < 'YYYZ'::text))
 (6 rows)
 
 SELECT /*+ set(enable_bitmapscan on)  set(enable_indexscan off) */ ftext FROM test_prefix_table where ftext like 'YYYY%' ORDER BY 1;
@@ -2243,12 +2243,12 @@ SELECT t1.ftext,t2.fchar FROM test_prefix_table t1 join test_prefix_table t2 on 
 
 EXPLAIN (costs false)
 SELECT count(1) FROM test_prefix_table t1 join test_prefix_table t2 on (t2.fvchar LIKE 'X%' AND t1.ftext > t2.fvchar);
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
  Aggregate
    ->  Nested Loop
          ->  Index Scan using prefix_index_fvchar on test_prefix_table t2
-               Index Cond: (((fvchar)::text >= 'X'::text) AND ((fvchar)::text <= 'X￿￿￿￿'::text))
+               Index Cond: (((fvchar)::text >= 'X'::text) AND ((fvchar)::text < 'Y'::text))
                Filter: ((fvchar)::text ~~ 'X%'::text)
          ->  Index Scan using prefix_index_ftext on test_prefix_table t1
                Index Cond: (ftext >= (t2.fvchar)::text(5))

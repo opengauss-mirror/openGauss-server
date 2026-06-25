@@ -184,8 +184,8 @@ EXPLAIN (costs off)
 SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%'
 INTERSECT
 SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%';
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  HashSetOp Intersect
    ->  Append
          ->  Subquery Scan on "*SELECT* 1"
@@ -195,7 +195,7 @@ SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%
          ->  Subquery Scan on "*SELECT* 2"
                ->  Aggregate
                      ->  Index Only Scan using idx_t_collate_index on t_collate_index t
-                           Index Cond: ((a >= 'abc'::text) AND (a <= 'abc￿￿￿￿￿￿￿￿￿￿￿￿￿'::text))
+                           Index Cond: ((a >= 'abc'::text) AND (a < 'abd'::text))
                            Filter: ((a)::text ~~ 'abc%'::text)
 (11 rows)
 
@@ -235,8 +235,8 @@ EXPLAIN (costs off)
 SELECT /*+ tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%'
 INTERSECT
 SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%';
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  HashSetOp Intersect
    ->  Append
          ->  Subquery Scan on "*SELECT* 1"
@@ -246,7 +246,7 @@ SELECT /*+ no tablescan(t) */ count(1) FROM t_collate_index t WHERE a like 'abc%
          ->  Subquery Scan on "*SELECT* 2"
                ->  Aggregate
                      ->  Index Only Scan using idx_t_collate_index on t_collate_index t
-                           Index Cond: ((a >= 'abc'::bpchar) AND (a <= 'abc￿￿￿￿￿￿￿￿￿￿￿￿￿'::bpchar))
+                           Index Cond: ((a >= 'abc'::bpchar) AND (a < 'abd'::bpchar))
                            Filter: (a ~~ 'abc%'::text)
 (11 rows)
 
