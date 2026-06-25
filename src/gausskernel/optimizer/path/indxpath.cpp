@@ -173,6 +173,7 @@ static RestrictInfo* rewrite_opclause_for_prefixkey(
     RestrictInfo *rinfo, IndexOptInfo* index, Oid opfamily, int prefix_len);
 static Const *pad_string_in_like(PadContent content, const Const *strConst, int length, bool isPadMax);
 static int get_pad_length(Node *leftop, int prefixLen);
+static Const* make_ascii_prefix_successor(const Const* strConst, Oid datatype);
 static PadContent get_pad_content(Oid collation);
 static bool scalar_array_can_match_prefixkey(Node *saop_rexpr);
 RestrictInfo *expand_indexqual_scalar_array_op_expr(IndexOptInfo *index, RestrictInfo *rinfo,
@@ -4085,6 +4086,63 @@ static int get_pad_length(Node* leftop, int prefixLen)
     }
 }
 
+static Const* make_ascii_prefix_successor(const Const* strConst, Oid datatype)
+{
+    const unsigned char asciiMin = 0x20;
+    const unsigned char asciiMax = 0x7E; /* '~', max printable ASCII */
+
+    if (strConst == NULL || strConst->constisnull) {
+        return NULL;
+    }
+
+    /*
+     * Restrict the readable upper bound to text-like values. Binary values and
+     * non-text opfamilies should continue to use the existing fallback.
+     */
+    if (datatype != TEXTOID && datatype != BPCHAROID && datatype != VARCHAROID) {
+        return NULL;
+    }
+
+    char* prefix = TextDatumGetCString(strConst->constvalue);
+    int len = strlen(prefix);
+    if (len <= 0) {
+        pfree(prefix);
+        return NULL;
+    }
+
+    for (int i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)prefix[i];
+        if (ch < asciiMin || ch > asciiMax) {
+            pfree(prefix);
+            return NULL;
+        }
+    }
+
+    int pos = -1;
+    for (int i = len - 1; i >= 0; i--) {
+        if ((unsigned char)prefix[i] < asciiMax) {
+            pos = i;
+            break;
+        }
+    }
+
+    if (pos < 0) {
+        pfree(prefix);
+        return NULL;
+    }
+
+    char* nextPrefix = (char*)palloc(pos + 2);
+    errno_t rc = memcpy_s(nextPrefix, pos + 2, prefix, pos + 1);
+    securec_check(rc, "\0", "\0");
+    nextPrefix[pos] = (char)((unsigned char)nextPrefix[pos] + 1);
+    nextPrefix[pos + 1] = '\0';
+
+    Const* result = string_to_const(nextPrefix, datatype);
+    pfree(prefix);
+    pfree(nextPrefix);
+    return result;
+}
+
 static Const* pad_string_in_like(PadContent content, const Const* strConst, int length, bool isPadMax)
 {
     if (length <= 0) {
@@ -4260,37 +4318,38 @@ static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* pref
      * this approach is only implemented for B format collations,
      * but we will consider opening it up to all collations in the future.
     */
-    if (is_b_format_collation(collation) && collation != BINARY_COLLATION_OID) {
+    if (is_b_format_collation(collation) && collation != BINARY_COLLATION_OID && datatype != BYTEAOID) {
         int padLen = get_pad_length(leftop, prefixkey_len);
         if (padLen > 0) {
             PadContent content = get_pad_content(collation);
             Const *minstr = NULL;
             oproid = get_opfamily_member(opfamily, datatype, datatype, BTGreaterEqualStrategyNumber);
             if (oproid == InvalidOid)
-                ereport(ERROR,
-                    (errmodule(MOD_OPT),
-                        errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                        (errmsg(
-                            "no >= operator for opfamily %u when generate indexqual condition by prefix quals",
-                            opfamily))));
+                ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                        (errmsg("no >= operator for opfamily %u when generate indexqual condition by prefix quals", opfamily))));
             minstr = pad_string_in_like(content, prefix_const, padLen, false);
             if (minstr != NULL) {
                 expr = make_opclause(oproid, BOOLOID, false, (Expr*)leftop, (Expr*)minstr, InvalidOid, collation);
                 result = lappend(result, make_simple_restrictinfo(expr));
             }
-            
-            oproid = get_opfamily_member(opfamily, datatype, datatype, BTLessEqualStrategyNumber);
-            if (oproid == InvalidOid)
-                ereport(ERROR,
-                    (errmodule(MOD_OPT),
-                        errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                        (errmsg(
-                            "no <= operator for opfamily %u when generate indexqual condition by prefix quals",
-                            opfamily))));
-            greaterstr = pad_string_in_like(content, prefix_const, padLen, true);
+            greaterstr = make_ascii_prefix_successor(prefix_const, datatype);
             if (greaterstr != NULL) {
+                oproid = get_opfamily_member(opfamily, datatype, datatype, BTLessStrategyNumber);
+                if (oproid == InvalidOid)
+                    ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                            (errmsg("no < operator for opfamily %u when generate indexqual condition by prefix quals", opfamily))));
                 expr = make_opclause(oproid, BOOLOID, false, (Expr*)leftop, (Expr*)greaterstr, InvalidOid, collation);
                 result = lappend(result, make_simple_restrictinfo(expr));
+            } else {
+                oproid = get_opfamily_member(opfamily, datatype, datatype, BTLessEqualStrategyNumber);
+                if (oproid == InvalidOid)
+                    ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                            (errmsg("no <= operator for opfamily %u when generate indexqual condition by prefix quals", opfamily))));
+                greaterstr = pad_string_in_like(content, prefix_const, padLen, true);
+                if (greaterstr != NULL) {
+                    expr = make_opclause(oproid, BOOLOID, false, (Expr*)leftop, (Expr*)greaterstr, InvalidOid, collation);
+                    result = lappend(result, make_simple_restrictinfo(expr));
+                }
             }
         }
     } else {
