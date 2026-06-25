@@ -201,6 +201,7 @@ static inline ObjElem* deparse_Seq_Minvalue(sequence_values *seqdata, bool alter
 static inline ObjElem* deparse_Seq_Maxvalue(sequence_values *seqdata, bool alter_table);
 static inline ObjElem* deparse_Seq_Restart(char *last_value);
 static inline ObjElem* deparse_Seq_Startwith(sequence_values *seqdata, bool alter_table);
+static inline ObjElem* deparse_Seq_Global(sequence_values *seqdata, bool alter_table);
 static ObjElem* deparse_Seq_OwnedBy(Oid sequenceId);
 static inline ObjElem* deparse_Seq_Order(DefElem *elem);
 static inline ObjElem* deparse_Seq_As(DefElem *elem);
@@ -948,8 +949,10 @@ const char* string_objtype(ObjectType objtype, bool isgrant)
         case OBJECT_SCHEMA:
             return "SCHEMA";
         case OBJECT_SEQUENCE:
+        case OBJECT_SEQUENCE_GSC:
             return "SEQUENCE";
         case OBJECT_LARGE_SEQUENCE:
+        case OBJECT_LARGE_SEQUENCE_GSC:
             return "LARGE SEQUENCE";
         case OBJECT_TABLE:
             return "TABLE";
@@ -1998,6 +2001,29 @@ static inline ObjElem* deparse_Seq_Cycle(sequence_values *seqdata, bool alter_ta
 }
 
 /*
+ * Deparse the sequence GLOBAL option.
+ *
+ * Verbose syntax
+ * SET %{no}s GLOBAL
+ * OR
+ * %{no}s GLOBAL
+ */
+static inline ObjElem* deparse_Seq_Global(sequence_values *seqdata, bool alter_table)
+{
+    ObjTree     *ret;
+    const char  *fmt;
+
+    fmt = alter_table ? "SET %{no}s GLOBAL" : "%{no}s GLOBAL";
+
+    ret = new_objtree_VA(fmt, 2,
+                         "clause", ObjTypeString, "cycle",
+                         "no", ObjTypeString,
+                         seqdata->is_global ? "" : "NO");
+
+    return new_object_object(ret);
+}
+
+/*
  * Deparse the sequence INCREMENT BY option.
  *
  * Verbose syntax
@@ -2338,6 +2364,7 @@ static ObjTree* deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
     elems = lappend(elems, deparse_Seq_Maxvalue(seqvalues, false));
     elems = lappend(elems, deparse_Seq_Startwith(seqvalues, false));
     elems = lappend(elems, deparse_Seq_Restart(seqvalues->last_value));
+    elems = lappend(elems, deparse_Seq_Global(seqvalues, false));
 
     /* We purposefully do not emit OWNED BY here */
 
@@ -2406,6 +2433,8 @@ static ObjTree* deparse_AlterSeqStmt(Oid objectId, Node *parsetree)
             newelm = deparse_Seq_As(elem);
         else if (strcmp(elem->defname, "order") == 0)
             newelm = deparse_Seq_Order(elem);
+        else if (strcmp(elem->defname, "is_global") == 0)
+            newelm = deparse_Seq_Global(seqvalues, false);
         else
             elog(WARNING, "unsupport sequence option %s for replication", elem->defname);
 
@@ -2532,6 +2561,8 @@ static ObjTree* deparse_RenameStmt(ObjectAddress address, Node *parsetree)
         case OBJECT_INDEX:
         case OBJECT_SEQUENCE:
         case OBJECT_LARGE_SEQUENCE:
+        case OBJECT_SEQUENCE_GSC:
+        case OBJECT_LARGE_SEQUENCE_GSC:
         case OBJECT_VIEW:
         case OBJECT_MATVIEW:
             relation = relation_open(address.objectId, AccessShareLock);
@@ -3904,9 +3935,11 @@ static ObjTree* deparse_AlterRelation(CollectedCommand *cmd, ddl_deparse_context
             break;
 
         case RELKIND_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
             reltype = "SEQUENCE";
             break;
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             reltype = "LARGE SEQUENCE";
             break;
         default:

@@ -1,0 +1,2153 @@
+drop schema if exists session_sequence_cache_schema cascade;
+NOTICE:  schema "session_sequence_cache_schema" does not exist, skipping
+create schema session_sequence_cache_schema;
+set current_schema = session_sequence_cache_schema;
+-- 1.1.1 get sequence value by nextval、currval
+create sequence seq_test1 increment by 2 cache 5;
+select seq_test1.currval;
+ERROR:  currval of sequence "seq_test1" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select seq_test1.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+select seq_test1.currval;
+ currval 
+---------
+       5
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+       7
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+       9
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+      11
+(1 row)
+
+select seq_test1.currval;
+ currval 
+---------
+      11
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+      13
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+      15
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+      17
+(1 row)
+
+select seq_test1.currval;
+ currval 
+---------
+      17
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+      19
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+      21
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+      23
+(1 row)
+
+select seq_test1.currval;
+ currval 
+---------
+      23
+(1 row)
+
+-- 1.1.2 get sequence value by nextval、currval after setval
+select setval('seq_test1', 100);
+ setval 
+--------
+    100
+(1 row)
+
+select seq_test1.currval;
+ currval 
+---------
+     100
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+     102
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+     104
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+     106
+(1 row)
+
+select seq_test1.currval;
+ currval 
+---------
+     106
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+     108
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+     110
+(1 row)
+
+select seq_test1.nextval;
+ nextval 
+---------
+     112
+(1 row)
+
+select seq_test1.currval;
+ currval 
+---------
+     112
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+     114
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+     116
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+     118
+(1 row)
+
+select seq_test1.currval;
+ currval 
+---------
+     118
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+     120
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+     122
+(1 row)
+
+select nextval('seq_test1');
+ nextval 
+---------
+     124
+(1 row)
+
+select seq_test1.currval;
+ currval 
+---------
+     124
+(1 row)
+
+drop sequence seq_test1;
+-- 1.2.1 as column of partition table
+create table test_table_for_seq(id integer, name text) 
+partition by range(id)
+(
+    partition p1_test_seq values less than (10),
+    partition p2_test_seq values less than (20),
+    partition p3_test_seq values less than (30)
+);
+create sequence seq_test_table 
+increment by 1 
+minvalue 1 maxvalue 30
+start 1
+cycle
+cache 5
+owned by test_table_for_seq.id;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select seq_test_table.currval;
+ERROR:  currval of sequence "seq_test_table" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select seq_test_table.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+select seq_test_table.currval;
+ currval 
+---------
+       3
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       4
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       6
+(1 row)
+
+select seq_test_table.currval;
+ currval 
+---------
+       6
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+       7
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+       8
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+       9
+(1 row)
+
+select seq_test_table.currval;
+ currval 
+---------
+       9
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+      10
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+      11
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+      12
+(1 row)
+
+select setval('seq_test_table', 1);
+ setval 
+--------
+      1
+(1 row)
+
+select seq_test_table.currval;
+ currval 
+---------
+       1
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       4
+(1 row)
+
+select seq_test_table.currval;
+ currval 
+---------
+       4
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       6
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       7
+(1 row)
+
+select seq_test_table.currval;
+ currval 
+---------
+       7
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+       8
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+       9
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+      10
+(1 row)
+
+select seq_test_table.currval;
+ currval 
+---------
+      10
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+      11
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+      12
+(1 row)
+
+select nextval('seq_test_table');
+ nextval 
+---------
+      13
+(1 row)
+
+select setval('seq_test_table', 1);
+ setval 
+--------
+      1
+(1 row)
+
+select seq_test_table.currval;
+ currval 
+---------
+       1
+(1 row)
+
+insert into test_table_for_seq values 
+    (currval('seq_test_table'), 'values1'),
+    (nextval('seq_test_table'), 'values2'),
+    (nextval('seq_test_table'), 'values3'),
+    (nextval('seq_test_table'), 'values4'),
+    (nextval('seq_test_table'), 'values5'),
+    (nextval('seq_test_table'), 'values6'),
+    (nextval('seq_test_table'), 'values7'),
+    (nextval('seq_test_table'), 'values8'),
+    (nextval('seq_test_table'), 'values9'),
+    (nextval('seq_test_table'), 'values10'),
+    (nextval('seq_test_table'), 'values11'),
+    (nextval('seq_test_table'), 'values12'),
+    (nextval('seq_test_table'), 'values13'),
+    (nextval('seq_test_table'), 'values14'),
+    (nextval('seq_test_table'), 'values15'),
+    (nextval('seq_test_table'), 'values16'),
+    (nextval('seq_test_table'), 'values17'),
+    (nextval('seq_test_table'), 'values18'),
+    (nextval('seq_test_table'), 'values19'),
+    (nextval('seq_test_table'), 'values20'),
+    (nextval('seq_test_table'), 'values21'),
+    (nextval('seq_test_table'), 'values22'),
+    (nextval('seq_test_table'), 'values23'),
+    (nextval('seq_test_table'), 'values24'),
+    (nextval('seq_test_table'), 'values25'),
+    (nextval('seq_test_table'), 'values26'),
+    (nextval('seq_test_table'), 'values27'),
+    (nextval('seq_test_table'), 'values28'),
+    (nextval('seq_test_table'), 'values29');
+select * from test_table_for_seq;
+ id |   name   
+----+----------
+  1 | values1
+  2 | values2
+  3 | values3
+  4 | values4
+  5 | values5
+  6 | values6
+  7 | values7
+  8 | values8
+  9 | values9
+ 10 | values10
+ 11 | values11
+ 12 | values12
+ 13 | values13
+ 14 | values14
+ 15 | values15
+ 16 | values16
+ 17 | values17
+ 18 | values18
+ 19 | values19
+ 20 | values20
+ 21 | values21
+ 22 | values22
+ 23 | values23
+ 24 | values24
+ 25 | values25
+ 26 | values26
+ 27 | values27
+ 28 | values28
+ 29 | values29
+(29 rows)
+
+select seq_test_table.currval;
+ currval 
+---------
+      29
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+      30
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+select seq_test_table.currval;
+ currval 
+---------
+       2
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       4
+(1 row)
+
+select seq_test_table.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+select seq_test_table.currval;
+ currval 
+---------
+       5
+(1 row)
+
+drop table test_table_for_seq;
+drop sequence seq_test_table;
+--?ERROR:  *
+-- 1.2.2 as column of normal table
+create table test_table_for_seq1(c1 integer, c2 serial);
+NOTICE:  CREATE TABLE will create implicit sequence "test_table_for_seq1_c2_seq" for serial column "test_table_for_seq1.c2"
+create table test_table_for_seq2(c1 integer, c2 largeserial);
+NOTICE:  CREATE TABLE will create implicit sequence "test_table_for_seq2_c2_seq" for serial column "test_table_for_seq2.c2"
+insert into test_table_for_seq1 values
+    (1), (2), (3), (4), (5), (6), (7), (8), (9), (10),
+    (11), (12), (13), (14), (15), (16), (17), (18), (19), (20);
+insert into test_table_for_seq2 values
+    (1), (2), (3), (4), (5), (6), (7), (8), (9), (10),
+    (11), (12), (13), (14), (15), (16), (17), (18), (19), (20);
+select * from test_table_for_seq1;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
+ 11 | 11
+ 12 | 12
+ 13 | 13
+ 14 | 14
+ 15 | 15
+ 16 | 16
+ 17 | 17
+ 18 | 18
+ 19 | 19
+ 20 | 20
+(20 rows)
+
+select * from test_table_for_seq2;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
+ 11 | 11
+ 12 | 12
+ 13 | 13
+ 14 | 14
+ 15 | 15
+ 16 | 16
+ 17 | 17
+ 18 | 18
+ 19 | 19
+ 20 | 20
+(20 rows)
+
+drop table test_table_for_seq1;
+drop table test_table_for_seq2;
+-- 1.3.1 normal sequence
+create sequence normal_seq
+increment by 1 
+minvalue 1 maxvalue 10
+start 1
+cycle
+cache 5;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select normal_seq.currval;
+ERROR:  currval of sequence "normal_seq" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select normal_seq.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select normal_seq.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+select normal_seq.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+select normal_seq.nextval;
+ nextval 
+---------
+       4
+(1 row)
+
+select normal_seq.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+select normal_seq.nextval;
+ nextval 
+---------
+       6
+(1 row)
+
+select nextval('normal_seq');
+ nextval 
+---------
+       7
+(1 row)
+
+select nextval('normal_seq');
+ nextval 
+---------
+       8
+(1 row)
+
+select nextval('normal_seq');
+ nextval 
+---------
+       9
+(1 row)
+
+select nextval('normal_seq');
+ nextval 
+---------
+      10
+(1 row)
+
+select nextval('normal_seq');
+ nextval 
+---------
+       1
+(1 row)
+
+select nextval('normal_seq');
+ nextval 
+---------
+       2
+(1 row)
+
+drop sequence normal_seq;
+-- 1.3.2 large sequence
+create large sequence nornaml_large_seq
+increment by 1 
+minvalue 1 maxvalue 10
+start 1
+cycle
+cache 5;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select nornaml_large_seq.currval;
+ERROR:  currval of sequence "nornaml_large_seq" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select nornaml_large_seq.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select nornaml_large_seq.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+select nornaml_large_seq.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+select nornaml_large_seq.nextval;
+ nextval 
+---------
+       4
+(1 row)
+
+select nornaml_large_seq.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+select nornaml_large_seq.nextval;
+ nextval 
+---------
+       6
+(1 row)
+
+select nextval('nornaml_large_seq');
+ nextval 
+---------
+       7
+(1 row)
+
+select nextval('nornaml_large_seq');
+ nextval 
+---------
+       8
+(1 row)
+
+select nextval('nornaml_large_seq');
+ nextval 
+---------
+       9
+(1 row)
+
+select nextval('nornaml_large_seq');
+ nextval 
+---------
+      10
+(1 row)
+
+select nextval('nornaml_large_seq');
+ nextval 
+---------
+       1
+(1 row)
+
+select nextval('nornaml_large_seq');
+ nextval 
+---------
+       2
+(1 row)
+
+drop large sequence nornaml_large_seq;
+-- 1.4.1 get sequence value
+create sequence alter_seq_test;
+select alter_seq_test.currval;
+ERROR:  currval of sequence "alter_seq_test" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select alter_seq_test.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+select nextval('alter_seq_test');
+ nextval 
+---------
+       3
+(1 row)
+
+select nextval('alter_seq_test');
+ nextval 
+---------
+       4
+(1 row)
+
+-- no cache
+alter sequence alter_seq_test
+increment by 2
+minvalue 1 maxvalue 20
+start 10
+cycle;
+select alter_seq_test.currval;
+ currval 
+---------
+       4
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+       6
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+       8
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+      10
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+      12
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+      14
+(1 row)
+
+-- cache
+alter sequence alter_seq_test
+increment by 2
+minvalue 1 maxvalue 20
+start 10
+cycle
+cache 5;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select alter_seq_test.currval;
+ currval 
+---------
+      14
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+      16
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+      18
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+      20
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select alter_seq_test.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+drop sequence alter_seq_test;
+-- 2.1.1 test boundary value: min、max
+create sequence seq_test_minmax
+increment by 1
+minvalue 1 maxvalue 10000000
+cycle;
+select setval('seq_test_minmax', 9999998);
+ setval  
+---------
+ 9999998
+(1 row)
+
+select seq_test_minmax.currval;
+ currval 
+---------
+ 9999998
+(1 row)
+
+select seq_test_minmax.nextval;
+ nextval 
+---------
+ 9999999
+(1 row)
+
+select seq_test_minmax.nextval;
+ nextval  
+----------
+ 10000000
+(1 row)
+
+select seq_test_minmax.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select seq_test_minmax.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+drop sequence seq_test_minmax;
+-- 2.1.2 test boundary value: min、max
+create sequence seq_test_minmax1
+increment by 2
+minvalue 1 maxvalue 10000000
+cycle
+cache 4;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select setval('seq_test_minmax1', 9999997);
+ setval  
+---------
+ 9999997
+(1 row)
+
+select seq_test_minmax1.currval;
+ currval 
+---------
+ 9999997
+(1 row)
+
+select seq_test_minmax1.nextval;
+ nextval 
+---------
+ 9999999
+(1 row)
+
+select seq_test_minmax1.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select seq_test_minmax1.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+select seq_test_minmax1.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+drop sequence seq_test_minmax1;
+-- 2.2.1 test boundary value: cycle、no cycle
+create sequence seq_test_cycle
+increment by 2
+minvalue 1 maxvalue 8
+cycle
+cache 3;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select seq_test_cycle.currval;
+ERROR:  currval of sequence "seq_test_cycle" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select seq_test_cycle.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select seq_test_cycle.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+select seq_test_cycle.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+select seq_test_cycle.nextval;
+ nextval 
+---------
+       7
+(1 row)
+
+select seq_test_cycle.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+drop sequence seq_test_cycle;
+-- 2.2.2 test boundary value: cycle、no cycle
+create sequence seq_test_nocycle
+increment by 2
+minvalue 1 maxvalue 8
+no cycle
+cache 3;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select seq_test_nocycle.currval;
+ERROR:  currval of sequence "seq_test_nocycle" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select seq_test_nocycle.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select seq_test_nocycle.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+select seq_test_nocycle.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+select seq_test_nocycle.nextval;
+ nextval 
+---------
+       7
+(1 row)
+
+select seq_test_nocycle.nextval;
+ERROR:  nextval: reached maximum value of sequence "seq_test_nocycle" (8)
+CONTEXT:  referenced column: nextval
+drop sequence seq_test_nocycle;
+-- 2.3.1 test boundary value: last cache and maxval
+create sequence seq_test_lastcache
+increment by 2
+minvalue 1 maxvalue 10
+no cycle
+cache 5;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select seq_test_lastcache.currval;
+ERROR:  currval of sequence "seq_test_lastcache" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select seq_test_lastcache.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select seq_test_lastcache.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+select seq_test_lastcache.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+select seq_test_lastcache.nextval;
+ nextval 
+---------
+       7
+(1 row)
+
+select seq_test_lastcache.nextval;
+ nextval 
+---------
+       9
+(1 row)
+
+select seq_test_lastcache.nextval;
+ERROR:  nextval: reached maximum value of sequence "seq_test_lastcache" (10)
+CONTEXT:  referenced column: nextval
+drop sequence seq_test_lastcache;
+create sequence seq_test_lastcache1
+increment by 2
+minvalue 2 maxvalue 10
+no cycle
+cache 5;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select seq_test_lastcache1.currval;
+ERROR:  currval of sequence "seq_test_lastcache1" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select seq_test_lastcache1.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+select seq_test_lastcache1.nextval;
+ nextval 
+---------
+       4
+(1 row)
+
+select seq_test_lastcache1.nextval;
+ nextval 
+---------
+       6
+(1 row)
+
+select seq_test_lastcache1.nextval;
+ nextval 
+---------
+       8
+(1 row)
+
+select seq_test_lastcache1.nextval;
+ nextval 
+---------
+      10
+(1 row)
+
+select seq_test_lastcache1.nextval;
+ERROR:  nextval: reached maximum value of sequence "seq_test_lastcache1" (10)
+CONTEXT:  referenced column: nextval
+drop sequence seq_test_lastcache1;
+create sequence seq_test_lastcache2
+increment by 2
+minvalue -10 maxvalue 10
+cycle
+cache 5;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select seq_test_lastcache2.currval;
+ERROR:  currval of sequence "seq_test_lastcache2" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select seq_test_lastcache2.nextval;
+ nextval 
+---------
+     -10
+(1 row)
+
+select seq_test_lastcache2.nextval;
+ nextval 
+---------
+      -8
+(1 row)
+
+select seq_test_lastcache2.nextval;
+ nextval 
+---------
+      -6
+(1 row)
+
+select seq_test_lastcache2.nextval;
+ nextval 
+---------
+      -4
+(1 row)
+
+select seq_test_lastcache2.nextval;
+ nextval 
+---------
+      -2
+(1 row)
+
+select seq_test_lastcache2.nextval;
+ nextval 
+---------
+       0
+(1 row)
+
+select seq_test_lastcache2.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+drop sequence seq_test_lastcache2;
+-- 2.4.1 test last_insert_id
+create database dolphindb_seq dbcompatibility 'B';
+\! @abs_bindir@/gsql -d dolphindb_seq -p @portstring@ -c "create table tab_test_autoincrement ( id integer primary key auto_increment, name varchar(25) not null );" -a 2>&1
+create table tab_test_autoincrement ( id integer primary key auto_increment, name varchar(25) not null );
+NOTICE:  CREATE TABLE will create implicit sequence "tab_test_autoincrement_id_seq" for serial column "tab_test_autoincrement.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tab_test_autoincrement_pkey" for table "tab_test_autoincrement"
+CREATE TABLE
+\! @abs_bindir@/gsql -d dolphindb_seq -p @portstring@ -c "select last_insert_id();insert into tab_test_autoincrement(name) values ('aaa'), ('bbb');select last_insert_id();insert into tab_test_autoincrement(name) values ('ccc'), ('ddd'), ('eee');select last_insert_id();" -a 2>&1
+select last_insert_id();insert into tab_test_autoincrement(name) values ('aaa'), ('bbb');select last_insert_id();insert into tab_test_autoincrement(name) values ('ccc'), ('ddd'), ('eee');select last_insert_id();
+ last_insert_id 
+----------------
+              0
+(1 row)
+
+INSERT 0 2
+ last_insert_id 
+----------------
+              1
+(1 row)
+
+INSERT 0 3
+ last_insert_id 
+----------------
+              3
+(1 row)
+
+\! @abs_bindir@/gsql -d dolphindb_seq -p @portstring@ -c "drop table tab_test_autoincrement;" -a 2>&1
+drop table tab_test_autoincrement;
+DROP TABLE
+-- 2.5.1 test drop sequence cache
+create sequence drop_seq_cache_test cache 10;
+select drop_seq_cache_test.currval;
+ERROR:  currval of sequence "drop_seq_cache_test" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select drop_seq_cache_test.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select drop_seq_cache_test.currval;
+ currval 
+---------
+       1
+(1 row)
+
+select drop_seq_cache_test.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+select drop_seq_cache_test.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+-- drop and recreate sequence with the same name
+drop sequence drop_seq_cache_test;
+create sequence drop_seq_cache_test cache 10;
+select drop_seq_cache_test.currval;
+ERROR:  currval of sequence "drop_seq_cache_test" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select drop_seq_cache_test.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select drop_seq_cache_test.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+select drop_seq_cache_test.nextval;
+ nextval 
+---------
+       3
+(1 row)
+
+drop sequence drop_seq_cache_test; 
+-- 2.6.1 verify whether the gsql -c execution sql has a skip number problem
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "create sequence seq_test_skip_val cache 10;" -a 2>&1
+create sequence seq_test_skip_val cache 10;
+CREATE SEQUENCE
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select seq_test_skip_val.nextval; select seq_test_skip_val.nextval;" -a 2>&1
+select seq_test_skip_val.nextval; select seq_test_skip_val.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+ nextval 
+---------
+       2
+(1 row)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select seq_test_skip_val.nextval; select seq_test_skip_val.nextval;" -a 2>&1
+select seq_test_skip_val.nextval; select seq_test_skip_val.nextval;
+ nextval 
+---------
+      11
+(1 row)
+
+ nextval 
+---------
+      12
+(1 row)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select seq_test_skip_val.nextval; select seq_test_skip_val.nextval;" -a 2>&1
+select seq_test_skip_val.nextval; select seq_test_skip_val.nextval;
+ nextval 
+---------
+      21
+(1 row)
+
+ nextval 
+---------
+      22
+(1 row)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "drop sequence seq_test_skip_val;" -a 2>&1
+drop sequence seq_test_skip_val;
+DROP SEQUENCE
+-- 2.7.1 test currval and lastval setval and setval of false 
+create sequence seq_test_setval
+increment by 1 
+start 1
+no cycle
+cache 10;
+create sequence seq_test_setval1
+increment by 1 
+start 1
+no cycle
+cache 10;
+create sequence seq_test_setval2
+increment by 1 
+start 1
+no cycle
+cache 10;
+select setval('seq_test_setval', 4);
+ setval 
+--------
+      4
+(1 row)
+
+select seq_test_setval.currval;
+ currval 
+---------
+       4
+(1 row)
+
+select lastval();
+ERROR:  lastval is not yet defined in this session
+CONTEXT:  referenced column: lastval
+select seq_test_setval.nextval;
+ nextval 
+---------
+       5
+(1 row)
+
+select setval('seq_test_setval', 14);
+ setval 
+--------
+     14
+(1 row)
+
+select seq_test_setval.currval;
+ currval 
+---------
+      14
+(1 row)
+
+select lastval();
+ lastval 
+---------
+      14
+(1 row)
+
+select setval('seq_test_setval1', 5, true);
+ setval 
+--------
+      5
+(1 row)
+
+select seq_test_setval1.currval;
+ currval 
+---------
+       5
+(1 row)
+
+select lastval();
+ lastval 
+---------
+      14
+(1 row)
+
+select seq_test_setval1.nextval;
+ nextval 
+---------
+       6
+(1 row)
+
+select setval('seq_test_setval1', 15, true);
+ setval 
+--------
+     15
+(1 row)
+
+select seq_test_setval1.currval;
+ currval 
+---------
+      15
+(1 row)
+
+select lastval();
+ lastval 
+---------
+      15
+(1 row)
+
+select setval('seq_test_setval2', 6, false);
+ setval 
+--------
+      6
+(1 row)
+
+select seq_test_setval2.currval;
+ERROR:  currval of sequence "seq_test_setval2" is not yet defined in this session
+CONTEXT:  referenced column: currval
+select lastval();
+ lastval 
+---------
+      15
+(1 row)
+
+select seq_test_setval2.nextval;
+ nextval 
+---------
+       6
+(1 row)
+
+select setval('seq_test_setval2', 16, false);
+ setval 
+--------
+     16
+(1 row)
+
+select seq_test_setval2.currval;
+ currval 
+---------
+       6
+(1 row)
+
+select lastval();
+ lastval 
+---------
+       6
+(1 row)
+
+drop sequence seq_test_setval;
+drop sequence seq_test_setval1;
+drop sequence seq_test_setval2;
+-- 2.8.1 test pg_sequence_last_value and pg_sequence_parameters
+create sequence seq_get_last_param_by_relid
+increment by 1 
+start 1
+no cycle
+cache 10;
+create or replace procedure proc_seq_get_val() is
+    relid int;
+    cache_value numeric;
+    last_value numeric;
+    next_val numeric;
+    start_value numeric;
+    minimum_value numeric;
+    maximum_value numeric;
+    increment numeric;
+    cycle_option numeric;
+begin
+    select oid into relid from pg_class where relname = 'seq_get_last_param_by_relid';
+    select * into cache_value, last_value from pg_sequence_last_value(relid);
+    raise info 'cache_value : %, last_value : %', cache_value, last_value;
+    select * into start_value, minimum_value, maximum_value, increment, cycle_option from pg_sequence_parameters(relid);
+    raise info 'start_value : %, minimum_value : %, maximum_value : %, increment : %, cycle_option : %', start_value, minimum_value, maximum_value, increment, cycle_option;
+    next_val := nextval('seq_get_last_param_by_relid');
+    raise info 'next_val : %', next_val;
+    select * into cache_value, last_value from pg_sequence_last_value(relid);
+    raise info 'cache_value : %, last_value : %', cache_value, last_value;
+    select * into start_value, minimum_value, maximum_value, increment, cycle_option from pg_sequence_parameters(relid);
+    raise info 'start_value : %, minimum_value : %, maximum_value : %, increment : %, cycle_option : %', start_value, minimum_value, maximum_value, increment, cycle_option;
+    PERFORM setval('seq_get_last_param_by_relid', 10);
+    select * into cache_value, last_value from pg_sequence_last_value(relid);
+    raise info 'cache_value : %, last_value : %', cache_value, last_value;
+    select * into start_value, minimum_value, maximum_value, increment, cycle_option from pg_sequence_parameters(relid);
+    raise info 'start_value : %, minimum_value : %, maximum_value : %, increment : %, cycle_option : %', start_value, minimum_value, maximum_value, increment, cycle_option;
+end;
+/
+call proc_seq_get_val();
+INFO:  cache_value : 10, last_value : 1
+INFO:  start_value : 1, minimum_value : 1, maximum_value : 9223372036854775807, increment : 1, cycle_option : 0
+INFO:  next_val : 1
+INFO:  cache_value : 10, last_value : 10
+INFO:  start_value : 1, minimum_value : 1, maximum_value : 9223372036854775807, increment : 1, cycle_option : 0
+INFO:  cache_value : 10, last_value : 10
+INFO:  start_value : 1, minimum_value : 1, maximum_value : 9223372036854775807, increment : 1, cycle_option : 0
+ proc_seq_get_val 
+------------------
+ 
+(1 row)
+
+drop sequence seq_get_last_param_by_relid;
+drop procedure proc_seq_get_val;
+-- 3.1 test of concurrent: continuity of sequence values
+create table test_seqcache_for_parall(c1 integer, c2 integer);
+create sequence seq_test_table increment by 1 start 1 no cycle cache 10 owned by test_seqcache_for_parall.c2;
+-- insert data in parallel
+create or replace procedure proc_for_para_seq() is 
+begin 
+    for i in 1 .. 10000 loop 
+        insert into test_seqcache_for_parall values (i, nextval('seq_test_table')); 
+    end loop; 
+end;
+/
+\! touch @abs_bindir@/session_sequence_cache_output.txt
+\o @abs_bindir@/session_sequence_cache_output.txt
+\parallel on
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+call proc_for_para_seq();
+\parallel off
+\o
+select count(distinct c1) from test_seqcache_for_parall;
+ count 
+-------
+ 10000
+(1 row)
+
+select count(distinct c2) from test_seqcache_for_parall;
+  count  
+---------
+ 1000000
+(1 row)
+
+select count(c2) from test_seqcache_for_parall;
+  count  
+---------
+ 1000000
+(1 row)
+
+select * from test_seqcache_for_parall where c2 > 1000000;
+ c1 | c2 
+----+----
+(0 rows)
+
+select c2 from test_seqcache_for_parall group by c2 having count(*) > 1;
+ c2 
+----
+(0 rows)
+
+drop sequence seq_test_table;
+-- 3.2 test of concurrent: boundary of sequence values
+create table test_seqcache_for_parall_boundary(c1 integer, c2 integer);
+create sequence seq_test_table_boundary increment by 1 minvalue 1 maxvalue 100 cycle cache 20 owned by test_seqcache_for_parall_boundary.c2;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+-- insert data in parallel
+create or replace procedure proc_for_para_seq_boundary() is 
+begin 
+    for i in 1 .. 100 loop 
+        insert into test_seqcache_for_parall_boundary values (i, nextval('seq_test_table_boundary')); 
+    end loop; 
+end;
+/
+\o @abs_bindir@/session_sequence_cache_output.txt
+\parallel on
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+call proc_for_para_seq_boundary();
+\parallel off
+\o
+\! test -f @abs_bindir@/session_sequence_cache_output.txt && rm -f @abs_bindir@/session_sequence_cache_output.txt
+select count(*) from test_seqcache_for_parall_boundary;
+ count 
+-------
+ 10000
+(1 row)
+
+declare 
+    ret integer := 0; 
+begin 
+    for i in 1 .. 100 loop 
+        select count(*) into ret from test_seqcache_for_parall_boundary where c2 = i; 
+        if ret != 100 then 
+            raise info 'there are % entries in sequence value %', ret, i; 
+        end if; 
+        ret := 0; 
+    end loop; 
+end;
+/
+drop sequence seq_test_table_boundary;
+-- 3.3 test of concurrent: currval of sequence values
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "create sequence seq_test_parral_currval increment by 1 minvalue 1 maxvalue 100 cycle cache 20;" -a 2>&1
+create sequence seq_test_parral_currval increment by 1 minvalue 1 maxvalue 100 cycle cache 20;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+CREATE SEQUENCE
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "create table tab_record_parall_result (col1 integer, col2 varchar(10));" -a 2>&1
+create table tab_record_parall_result (col1 integer, col2 varchar(10));
+CREATE TABLE
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "insert into tab_record_parall_result (select seq_test_parral_currval.nextval, 'sess1'); insert into tab_record_parall_result (select seq_test_parral_currval.nextval, 'sess1'); insert into tab_record_parall_result (select seq_test_parral_currval.currval, 'sess1'); select pg_sleep(1); insert into tab_record_parall_result (select seq_test_parral_currval.currval, 'sess1');" >/dev/null -a 2>&1 &
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select pg_sleep(0.5); insert into tab_record_parall_result (select seq_test_parral_currval.nextval, 'sess2'); insert into tab_record_parall_result (select seq_test_parral_currval.nextval, 'sess2'); insert into tab_record_parall_result (select seq_test_parral_currval.currval, 'sess2');" >/dev/null -a 2>&1 &
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select pg_sleep(1.5);" -a 2>&1
+select pg_sleep(1.5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select * from tab_record_parall_result;" -a 2>&1
+select * from tab_record_parall_result;
+ col1 | col2  
+------+-------
+    1 | sess1
+    2 | sess1
+    2 | sess1
+   21 | sess2
+   22 | sess2
+   22 | sess2
+    2 | sess1
+(7 rows)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "drop sequence seq_test_parral_currval;" -a 2>&1
+drop sequence seq_test_parral_currval;
+DROP SEQUENCE
+-- 3.4 test of concurrent: currval of sequence values after setval
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "create sequence seq_test_parral_currval1 increment by 1 minvalue 1 maxvalue 100 cycle cache 20;" -a 2>&1
+create sequence seq_test_parral_currval1 increment by 1 minvalue 1 maxvalue 100 cycle cache 20;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+CREATE SEQUENCE
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "delete from tab_record_parall_result;" -a 2>&1
+delete from tab_record_parall_result;
+DELETE 7
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "insert into tab_record_parall_result (select setval('seq_test_parral_currval1', 10), 'sess1'); insert into tab_record_parall_result (select seq_test_parral_currval1.currval, 'sess1'); select pg_sleep(1); insert into tab_record_parall_result (select seq_test_parral_currval1.currval, 'sess1');" >/dev/null -a 2>&1 &
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select pg_sleep(0.5); insert into tab_record_parall_result (select setval('seq_test_parral_currval1', 20), 'sess2'); insert into tab_record_parall_result (select seq_test_parral_currval1.currval, 'sess2');" >/dev/null -a 2>&1 &
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select pg_sleep(1.5);" -a 2>&1
+select pg_sleep(1.5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select * from tab_record_parall_result;" -a 2>&1
+select * from tab_record_parall_result;
+ col1 | col2  
+------+-------
+   10 | sess1
+   10 | sess1
+   20 | sess2
+   20 | sess2
+   10 | sess1
+(5 rows)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "drop sequence seq_test_parral_currval1;" -a 2>&1
+drop sequence seq_test_parral_currval1;
+DROP SEQUENCE
+-- 3.5 test of concurrent: lastval of sequence values
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "create sequence seq_test_parral_lastval increment by 1 minvalue 1 maxvalue 100 cycle cache 20;" -a 2>&1
+create sequence seq_test_parral_lastval increment by 1 minvalue 1 maxvalue 100 cycle cache 20;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+CREATE SEQUENCE
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "delete from tab_record_parall_result;" -a 2>&1
+delete from tab_record_parall_result;
+DELETE 5
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "insert into tab_record_parall_result (select seq_test_parral_lastval.nextval, 'sess1'); insert into tab_record_parall_result (select seq_test_parral_lastval.nextval, 'sess1'); insert into tab_record_parall_result (select lastval(), 'sess1'); select pg_sleep(1); insert into tab_record_parall_result (select lastval(), 'sess1');" >/dev/null -a 2>&1 &
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select pg_sleep(0.5); insert into tab_record_parall_result (select seq_test_parral_lastval.nextval, 'sess2'); insert into tab_record_parall_result (select seq_test_parral_lastval.nextval, 'sess2'); insert into tab_record_parall_result (select lastval(), 'sess2');" >/dev/null -a 2>&1 &
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select pg_sleep(1.5);" -a 2>&1
+select pg_sleep(1.5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "select * from tab_record_parall_result;" -a 2>&1
+select * from tab_record_parall_result;
+ col1 | col2  
+------+-------
+    1 | sess1
+    2 | sess1
+    2 | sess1
+   21 | sess2
+   22 | sess2
+   22 | sess2
+    2 | sess1
+(7 rows)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "drop sequence seq_test_parral_lastval;" -a 2>&1
+drop sequence seq_test_parral_lastval;
+DROP SEQUENCE
+\! @abs_bindir@/gsql -d regression -p @portstring@ -c "drop table tab_record_parall_result;" -a 2>&1
+drop table tab_record_parall_result;
+DROP TABLE
+-- 4.0 test alter sequence cache level
+drop sequence alter_seq_cache_level;
+ERROR:  sequence "alter_seq_cache_level" does not exist
+create sequence alter_seq_cache_level
+increment by 1 
+start 1
+no cycle
+cache 10;
+select alter_seq_cache_level.nextval; -- 1
+ nextval 
+---------
+       1
+(1 row)
+
+select alter_seq_cache_level.nextval; -- 2
+ nextval 
+---------
+       2
+(1 row)
+
+\d alter_seq_cache_level
+Sequence "session_sequence_cache_schema.alter_seq_cache_level"
+    Column     |  Type   |         Value         
+---------------+---------+-----------------------
+ sequence_name | name    | alter_seq_cache_level
+ last_value    | bigint  | 10
+ start_value   | bigint  | 1
+ increment_by  | bigint  | 1
+ max_value     | bigint  | 9223372036854775807
+ min_value     | bigint  | 1
+ cache_value   | bigint  | 10
+ log_cnt       | bigint  | 32
+ is_cycled     | boolean | f
+ is_called     | boolean | t
+ uuid          | bigint  | 0
+ is_global     | boolean | f
+
+alter sequence alter_seq_cache_level global;
+\d alter_seq_cache_level
+Sequence "session_sequence_cache_schema.alter_seq_cache_level"
+    Column     |  Type   |         Value         
+---------------+---------+-----------------------
+ sequence_name | name    | alter_seq_cache_level
+ last_value    | bigint  | 10
+ start_value   | bigint  | 1
+ increment_by  | bigint  | 1
+ max_value     | bigint  | 9223372036854775807
+ min_value     | bigint  | 1
+ cache_value   | bigint  | 10
+ log_cnt       | bigint  | 0
+ is_cycled     | boolean | f
+ is_called     | boolean | t
+ uuid          | bigint  | 0
+ is_global     | boolean | t
+
+select alter_seq_cache_level.nextval; -- 11
+ nextval 
+---------
+      11
+(1 row)
+
+select alter_seq_cache_level.nextval; -- 12
+ nextval 
+---------
+      12
+(1 row)
+
+alter sequence alter_seq_cache_level global;
+NOTICE:  no changes needed for the cache level, "is_global" is already true .
+select alter_seq_cache_level.nextval; -- 13
+ nextval 
+---------
+      13
+(1 row)
+
+alter sequence alter_seq_cache_level session;
+\d alter_seq_cache_level
+Sequence "session_sequence_cache_schema.alter_seq_cache_level"
+    Column     |  Type   |         Value         
+---------------+---------+-----------------------
+ sequence_name | name    | alter_seq_cache_level
+ last_value    | bigint  | 20
+ start_value   | bigint  | 1
+ increment_by  | bigint  | 1
+ max_value     | bigint  | 9223372036854775807
+ min_value     | bigint  | 1
+ cache_value   | bigint  | 10
+ log_cnt       | bigint  | 0
+ is_cycled     | boolean | f
+ is_called     | boolean | t
+ uuid          | bigint  | 0
+ is_global     | boolean | f
+
+select alter_seq_cache_level.nextval; -- 21
+ nextval 
+---------
+      21
+(1 row)
+
+select alter_seq_cache_level.nextval; -- 22
+ nextval 
+---------
+      22
+(1 row)
+
+alter sequence alter_seq_cache_level session;
+NOTICE:  no changes needed for the cache level, "is_global" is already false .
+select alter_seq_cache_level.nextval; -- 23
+ nextval 
+---------
+      23
+(1 row)
+
+drop sequence alter_seq_cache_level;
+-- 4.1 test alter sequence cache level
+create large sequence alter_seq_cache_level
+increment by 1 
+start 1
+no cycle
+cache 10;
+select alter_seq_cache_level.nextval; -- 1
+ nextval 
+---------
+       1
+(1 row)
+
+select alter_seq_cache_level.nextval; -- 2
+ nextval 
+---------
+       2
+(1 row)
+
+\d alter_seq_cache_level
+Large Sequence "session_sequence_cache_schema.alter_seq_cache_level"
+    Column     |  Type   |                  Value                  
+---------------+---------+-----------------------------------------
+ sequence_name | name    | alter_seq_cache_level
+ last_value    | int16   | 10
+ start_value   | int16   | 1
+ increment_by  | int16   | 1
+ max_value     | int16   | 170141183460469231731687303715884105727
+ min_value     | int16   | 1
+ cache_value   | int16   | 10
+ log_cnt       | bigint  | 32
+ is_cycled     | boolean | f
+ is_called     | boolean | t
+ uuid          | bigint  | 0
+ is_global     | boolean | f
+
+alter large sequence alter_seq_cache_level global;
+\d alter_seq_cache_level
+Large Sequence "session_sequence_cache_schema.alter_seq_cache_level"
+    Column     |  Type   |                  Value                  
+---------------+---------+-----------------------------------------
+ sequence_name | name    | alter_seq_cache_level
+ last_value    | int16   | 10
+ start_value   | int16   | 1
+ increment_by  | int16   | 1
+ max_value     | int16   | 170141183460469231731687303715884105727
+ min_value     | int16   | 1
+ cache_value   | int16   | 10
+ log_cnt       | bigint  | 0
+ is_cycled     | boolean | f
+ is_called     | boolean | t
+ uuid          | bigint  | 0
+ is_global     | boolean | t
+
+select alter_seq_cache_level.nextval; -- 11
+ nextval 
+---------
+      11
+(1 row)
+
+select alter_seq_cache_level.nextval; -- 12
+ nextval 
+---------
+      12
+(1 row)
+
+alter large sequence alter_seq_cache_level global;
+NOTICE:  no changes needed for the cache level, "is_global" is already true .
+select alter_seq_cache_level.nextval; -- 13
+ nextval 
+---------
+      13
+(1 row)
+
+alter large sequence alter_seq_cache_level session;
+\d alter_seq_cache_level
+Large Sequence "session_sequence_cache_schema.alter_seq_cache_level"
+    Column     |  Type   |                  Value                  
+---------------+---------+-----------------------------------------
+ sequence_name | name    | alter_seq_cache_level
+ last_value    | int16   | 20
+ start_value   | int16   | 1
+ increment_by  | int16   | 1
+ max_value     | int16   | 170141183460469231731687303715884105727
+ min_value     | int16   | 1
+ cache_value   | int16   | 10
+ log_cnt       | bigint  | 0
+ is_cycled     | boolean | f
+ is_called     | boolean | t
+ uuid          | bigint  | 0
+ is_global     | boolean | f
+
+select alter_seq_cache_level.nextval; -- 21
+ nextval 
+---------
+      21
+(1 row)
+
+select alter_seq_cache_level.nextval; -- 22
+ nextval 
+---------
+      22
+(1 row)
+
+alter large sequence alter_seq_cache_level session;
+NOTICE:  no changes needed for the cache level, "is_global" is already false .
+select alter_seq_cache_level.nextval; -- 23
+ nextval 
+---------
+      23
+(1 row)
+
+drop large sequence alter_seq_cache_level;
+drop schema if exists session_sequence_cache_schema cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table test_seqcache_for_parall
+drop cascades to function proc_for_para_seq()
+drop cascades to table test_seqcache_for_parall_boundary
+drop cascades to function proc_for_para_seq_boundary()
+drop database if exists dolphindb_seq;

@@ -85,6 +85,7 @@ DECLARE
 BEGIN
 select case when count(*)=1 then true else false end from (select nspname from pg_catalog.pg_namespace where nspname='coverage' limit 1) into ans;
     if ans = true THEN
+        --UPDATE pg_catalog.pg_class set relkind = 'z' where relname = 'proc_coverage_coverage_id_seq' AND relkind = 'S';
         DROP table IF EXISTS coverage.proc_coverage;
         DROP SEQUENCE IF EXISTS coverage.proc_coverage_coverage_id_seq;
         DROP SCHEMA IF EXISTS coverage cascade;

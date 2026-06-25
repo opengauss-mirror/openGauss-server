@@ -245,7 +245,7 @@ static const SchemaQuery Query_for_list_of_sequences = {
     /* catname */
     "pg_catalog.pg_class c",
     /* selcondition */
-    "c.relkind IN ('S')",
+    "c.relkind IN ('S', 'z')",
     /* viscondition */
     "pg_catalog.pg_table_is_visible(c.oid)",
     /* namespace */
@@ -356,7 +356,7 @@ static const SchemaQuery Query_for_list_of_tsvmf = {
     /* catname */
     "pg_catalog.pg_class c",
     /* selcondition */
-    "c.relkind IN ('r', 'S', 'v', 'm', 'f')",
+    "c.relkind IN ('r', 'S', 'z', 'v', 'm', 'f')",
     /* viscondition */
     "pg_catalog.pg_table_is_visible(c.oid)",
     /* namespace */

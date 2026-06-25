@@ -1017,7 +1017,11 @@ static List* objectsInSchemaToOids(GrantObjectType objtype, List* nspnames)
             case ACL_OBJECT_SEQUENCE:
                 objs = getRelationsInNamespace(namespaceId, RELKIND_SEQUENCE);
                 objects = list_concat(objects, objs);
+                objs = getRelationsInNamespace(namespaceId, RELKIND_SEQUENCE_GSC);
+                objects = list_concat(objects, objs);
                 objs = getRelationsInNamespace(namespaceId, RELKIND_LARGE_SEQUENCE);
+                objects = list_concat(objects, objs);
+                objs = getRelationsInNamespace(namespaceId, RELKIND_LARGE_SEQUENCE_GSC);
                 objects = list_concat(objects, objs);
                 break;
             case ACL_OBJECT_FUNCTION: {
@@ -2220,6 +2224,8 @@ void ExecGrant_Relation(InternalGrant* istmt)
             switch (pg_class_tuple->relkind) {
                 case RELKIND_SEQUENCE:
                 case RELKIND_LARGE_SEQUENCE:
+                case RELKIND_SEQUENCE_GSC:
+                case RELKIND_LARGE_SEQUENCE_GSC:
                     old_acl = acldefault(ACL_OBJECT_SEQUENCE, ownerId);
                     break;
                 default:
@@ -2269,6 +2275,8 @@ void ExecGrant_Relation(InternalGrant* istmt)
             switch (pg_class_tuple->relkind) {
                 case RELKIND_SEQUENCE:
                 case RELKIND_LARGE_SEQUENCE:
+                case RELKIND_SEQUENCE_GSC:
+                case RELKIND_LARGE_SEQUENCE_GSC:
                     aclkind = ACL_KIND_SEQUENCE;
                     break;
                 default:
@@ -5042,6 +5050,8 @@ static AclMode check_dml_privilege(Form_pg_class classForm, AclMode mask, Oid ro
             break;
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             if (HasSpecAnyPriv(roleid, SELECT_ANY_SEQUENCE, false)) {
                 result |= ACL_USAGE | ACL_SELECT | ACL_UPDATE;
             }
@@ -5084,6 +5094,8 @@ static AclMode check_ddl_privilege(char relkind, AclMode mask, Oid roleid, AclMo
             break;
         case RELKIND_LARGE_SEQUENCE:
         case RELKIND_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             if ((mask & ACL_ALTER) && !(result & ACL_ALTER)) {
                 if (HasSpecAnyPriv(roleid, ALTER_ANY_SEQUENCE, false)) {
                     result |= ACL_ALTER;
@@ -5253,6 +5265,8 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
         switch (classForm->relkind) {
             case RELKIND_SEQUENCE:
             case RELKIND_LARGE_SEQUENCE:
+            case RELKIND_SEQUENCE_GSC:
+            case RELKIND_LARGE_SEQUENCE_GSC:
                 acl = acldefault(ACL_OBJECT_SEQUENCE, ownerId);
                 break;
             default:

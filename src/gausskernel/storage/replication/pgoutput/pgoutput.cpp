@@ -557,6 +557,7 @@ static bool is_object_published_ddl(LogicalDecodingContext *ctx, Oid objid)
             break;
 
         case RELKIND_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
             /* Send sequences */
             return NeedPublicationDDL(data, false);
         default:

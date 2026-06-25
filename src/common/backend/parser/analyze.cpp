@@ -596,6 +596,35 @@ static Query* TransformCompositeTypeStmt(ParseState* pstate, CompositeTypeStmt* 
     return result;
 }
 
+static void rewriteSequenceObject(DropStmt* stmt)
+{
+    ListCell* cell = NULL;
+    foreach (cell, stmt->objects) {
+        List* names = (List*)lfirst(cell);
+        RangeVar* relrv = makeRangeVarFromNameList(names);
+
+        if (relrv == NULL) {
+            continue;
+        }
+
+        Oid namespaceId = RangeVarGetCreationNamespace(relrv);
+        HeapTuple relTuple =
+            SearchSysCache2(RELNAMENSP, PointerGetDatum(relrv->relname), ObjectIdGetDatum(namespaceId));
+        if (!HeapTupleIsValid(relTuple)) {
+            pfree(relrv);
+            continue;
+        }
+        Form_pg_class classForm = (Form_pg_class)GETSTRUCT(relTuple);
+        if (classForm->relkind == RELKIND_SEQUENCE) {
+            stmt->removeType = OBJECT_SEQUENCE;
+        } else if (classForm->relkind == RELKIND_LARGE_SEQUENCE) {
+            stmt->removeType = OBJECT_LARGE_SEQUENCE;
+        }
+        ReleaseSysCache(relTuple);
+        pfree(relrv);
+    }
+}
+
 /*
  * transformStmt -
  *	  recursively transform a Parse tree into a Query tree.
@@ -716,7 +745,12 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
             result = transformCallStmt(pstate, (DolphinCallStmt*) parseTree);
             break;
         default:
-
+            if (nodeTag(parseTree) == T_DropStmt) {
+                DropStmt *stmt = (DropStmt*)parseTree;
+                if (stmt->removeType == OBJECT_SEQUENCE_GSC || stmt->removeType == OBJECT_LARGE_SEQUENCE_GSC) {
+                    rewriteSequenceObject(stmt);
+                }
+            }
             /*
              * other statements don't require any transformation; just return
              * the original parsetree with a Query node plastered on top.

@@ -111,11 +111,14 @@ typedef enum ObjectType {
     OBJECT_PUBLICATION_NAMESPACE,
     OBJECT_PUBLICATION_REL,
     OBJECT_SUBSCRIPTION,
-    OBJECT_EVENT
+    OBJECT_EVENT,
+    OBJECT_SEQUENCE_GSC,
+    OBJECT_LARGE_SEQUENCE_GSC
 } ObjectType;
 
-#define OBJECT_IS_SEQUENCE(obj) \
-    ((obj) == OBJECT_LARGE_SEQUENCE || (obj) == OBJECT_SEQUENCE)
+#define OBJECT_IS_SEQUENCE(obj)                                                                    \
+    ((obj) == OBJECT_LARGE_SEQUENCE || (obj) == OBJECT_SEQUENCE || (obj) == OBJECT_SEQUENCE_GSC || \
+     (obj) == OBJECT_LARGE_SEQUENCE_GSC)
 
 typedef enum DropBehavior {
     DROP_RESTRICT, /* drop fails if any dependent objects */

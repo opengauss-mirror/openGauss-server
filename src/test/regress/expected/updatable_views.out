@@ -258,6 +258,7 @@ SELECT table_name, column_name, is_updatable
  ro_view19  | is_cycled     | NO
  ro_view19  | is_called     | NO
  ro_view19  | uuid          | NO
+ ro_view19  | is_global     | NO
  ro_view2   | a             | NO
  ro_view2   | b             | NO
  ro_view20  | a             | NO
@@ -283,7 +284,7 @@ SELECT table_name, column_name, is_updatable
  rw_view16  | a             | YES
  rw_view16  | b             | YES
  rw_view16  | aa            | YES
-(47 rows)
+(48 rows)
 
 -- Read-only views
 DELETE FROM ro_view1;

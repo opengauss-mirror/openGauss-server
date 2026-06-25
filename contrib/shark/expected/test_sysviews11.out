@@ -100,9 +100,9 @@ select count(*) from sys.sequences obj inner join pg_class pc on pc.oid = obj.ob
 (1 row)
 
 select * from seq1;
- sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
- seq1          |          1 |           1 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | f         |    0
+ sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq1          |          1 |           1 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -115,9 +115,9 @@ select start_value, increment, minimum_value, maximum_value, is_cycling, is_cach
 
 create sequence seq2 increment by 2 minvalue 10 maxvalue 30 cycle;
 select * from seq2;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq2          |         10 |          10 |            2 |        30 |        10 |           1 |       0 | t         | f         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq2          |         10 |          10 |            2 |        30 |        10 |           1 |       0 | t         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -130,9 +130,9 @@ select start_value, increment, minimum_value, maximum_value, is_cycling, is_cach
 
 create sequence seq3 increment by 2 cache 5;
 select * from seq3;
- sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
- seq3          |          1 |           1 |            2 | 9223372036854775807 |         1 |           5 |       0 | f         | f         |    0
+ sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq3          |          1 |           1 |            2 | 9223372036854775807 |         1 |           5 |       0 | f         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -145,9 +145,9 @@ select start_value, increment, minimum_value, maximum_value, is_cycling, is_cach
 
 create sequence seq4 increment by 2 start with 15 minvalue 10 maxvalue 30 cycle;
 select * from seq4;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq4          |         15 |          15 |            2 |        30 |        10 |           1 |       0 | t         | f         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq4          |         15 |          15 |            2 |        30 |        10 |           1 |       0 | t         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -160,9 +160,9 @@ select start_value, increment, minimum_value, maximum_value, is_cycling, is_cach
 
 create large sequence seq11;
 select * from seq11;
- sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------
- seq11         |          1 |           1 |            1 | 170141183460469231731687303715884105727 |         1 |           1 |       0 | f         | f         |    0
+ sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq11         |          1 |           1 |            1 | 170141183460469231731687303715884105727 |         1 |           1 |       0 | f         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -175,9 +175,9 @@ select start_value, increment, minimum_value, maximum_value, is_cycling, is_cach
 
 create large sequence seq22 increment by 2 minvalue 10 maxvalue 30 cycle;
 select * from seq22;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq22         |         10 |          10 |            2 |        30 |        10 |           1 |       0 | t         | f         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq22         |         10 |          10 |            2 |        30 |        10 |           1 |       0 | t         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -190,9 +190,9 @@ select start_value, increment, minimum_value, maximum_value, is_cycling, is_cach
 
 create large sequence seq33 increment by 2 cache 5;
 select * from seq33;
- sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------
- seq33         |          1 |           1 |            2 | 170141183460469231731687303715884105727 |         1 |           5 |       0 | f         | f         |    0
+ sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq33         |          1 |           1 |            2 | 170141183460469231731687303715884105727 |         1 |           5 |       0 | f         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -205,9 +205,9 @@ select start_value, increment, minimum_value, maximum_value, is_cycling, is_cach
 
 create large sequence seq44 increment by 2 start with 15 minvalue 10 maxvalue 30 cycle;
 select * from seq44;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq44         |         15 |          15 |            2 |        30 |        10 |           1 |       0 | t         | f         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq44         |         15 |          15 |            2 |        30 |        10 |           1 |       0 | t         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -223,9 +223,9 @@ start with 12345678901234567890
 minvalue 12345678901234567890
 maxvalue 170141183460469231731687303715884105700 cycle;
 select * from seq55;
- sequence_name |      last_value      |     start_value      |     increment_by     |                max_value                |      min_value       | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+----------------------+----------------------+----------------------+-----------------------------------------+----------------------+-------------+---------+-----------+-----------+------
- seq55         | 12345678901234567890 | 12345678901234567890 | 12345678901234567890 | 170141183460469231731687303715884105700 | 12345678901234567890 |           1 |       0 | t         | f         |    0
+ sequence_name |      last_value      |     start_value      |     increment_by     |                max_value                |      min_value       | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+----------------------+----------------------+----------------------+-----------------------------------------+----------------------+-------------+---------+-----------+-----------+------+-----------
+ seq55         | 12345678901234567890 | 12345678901234567890 | 12345678901234567890 | 170141183460469231731687303715884105700 | 12345678901234567890 |           1 |       0 | t         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -239,9 +239,9 @@ select start_value, increment, minimum_value, maximum_value, is_cycling, is_cach
 drop sequence if exists seq4;
 create sequence seq4 increment by 5 minvalue 10 maxvalue 20;
 select * from seq4;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq4          |         10 |          10 |            5 |        20 |        10 |           1 |       0 | f         | f         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq4          |         10 |          10 |            5 |        20 |        10 |           1 |       0 | f         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -262,9 +262,9 @@ select nextval('seq4');
 (1 row)
 
 select * from seq4;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq4          |         10 |          10 |            5 |        20 |        10 |           1 |       2 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq4          |         10 |          10 |            5 |        20 |        10 |           1 |       2 | f         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq4';
@@ -286,9 +286,9 @@ select nextval('seq4');
 (1 row)
 
 select * from seq4;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq4          |         15 |          10 |            5 |        20 |        10 |           1 |       1 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq4          |         15 |          10 |            5 |        20 |        10 |           1 |       1 | f         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq4';
@@ -310,9 +310,9 @@ select nextval('seq4');
 (1 row)
 
 select * from seq4;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq4          |         20 |          10 |            5 |        20 |        10 |           1 |       0 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq4          |         20 |          10 |            5 |        20 |        10 |           1 |       0 | f         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq4';
@@ -340,9 +340,9 @@ drop sequence if exists seq5;
 NOTICE:  sequence "seq5" does not exist, skipping
 create sequence seq5 increment by 5 minvalue 10 maxvalue 20 cycle;
 select * from seq5;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq5          |         10 |          10 |            5 |        20 |        10 |           1 |       0 | t         | f         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq5          |         10 |          10 |            5 |        20 |        10 |           1 |       0 | t         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -363,9 +363,9 @@ select nextval('seq5');
 (1 row)
 
 select * from seq5;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq5          |         10 |          10 |            5 |        20 |        10 |           1 |       2 | t         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq5          |         10 |          10 |            5 |        20 |        10 |           1 |       2 | t         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq5';
@@ -387,9 +387,9 @@ select nextval('seq5');
 (1 row)
 
 select * from seq5;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq5          |         15 |          10 |            5 |        20 |        10 |           1 |       1 | t         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq5          |         15 |          10 |            5 |        20 |        10 |           1 |       1 | t         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq5';
@@ -411,9 +411,9 @@ select nextval('seq5');
 (1 row)
 
 select * from seq5;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq5          |         20 |          10 |            5 |        20 |        10 |           1 |       0 | t         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq5          |         20 |          10 |            5 |        20 |        10 |           1 |       0 | t         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq5';
@@ -435,9 +435,9 @@ select nextval('seq5');
 (1 row)
 
 select * from seq5;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq5          |         10 |          10 |            5 |        20 |        10 |           1 |       2 | t         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq5          |         10 |          10 |            5 |        20 |        10 |           1 |       2 | t         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq5';
@@ -460,9 +460,9 @@ select nextval('seq5');
 
 create sequence seq6 increment by 5 minvalue 4 maxvalue 5;
 select * from seq6;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq6          |          4 |           4 |            5 |         5 |         4 |           1 |       0 | f         | f         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq6          |          4 |           4 |            5 |         5 |         4 |           1 |       0 | f         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -483,9 +483,9 @@ select nextval('seq6');
 (1 row)
 
 select * from seq6;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq6          |          4 |           4 |            5 |         5 |         4 |           1 |       0 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq6          |          4 |           4 |            5 |         5 |         4 |           1 |       0 | f         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq6';
@@ -504,9 +504,9 @@ select nextval('seq6'); -- error, exhausted
 ERROR:  nextval: reached maximum value of sequence "seq6" (5)
 CONTEXT:  referenced column: nextval
 select * from seq6;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq6          |          4 |           4 |            5 |         5 |         4 |           1 |       0 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq6          |          4 |           4 |            5 |         5 |         4 |           1 |       0 | f         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq6';
@@ -517,9 +517,9 @@ select current_value, is_exhausted, last_used_value from sys.sequences where nam
 
 create sequence seq7 increment by -2 minvalue -2 maxvalue 2;
 select * from seq7;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq7          |          2 |           2 |           -2 |         2 |        -2 |           1 |       0 | f         | f         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq7          |          2 |           2 |           -2 |         2 |        -2 |           1 |       0 | f         | f         |    0 | f
 (1 row)
 
 select start_value, increment, minimum_value, maximum_value, is_cycling, is_cached, cache_size,
@@ -540,9 +540,9 @@ select nextval('seq7');
 (1 row)
 
 select * from seq7;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq7          |          2 |           2 |           -2 |         2 |        -2 |           1 |       2 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq7          |          2 |           2 |           -2 |         2 |        -2 |           1 |       2 | f         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq7';
@@ -564,9 +564,9 @@ select nextval('seq7');
 (1 row)
 
 select * from seq7;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq7          |          0 |           2 |           -2 |         2 |        -2 |           1 |       1 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq7          |          0 |           2 |           -2 |         2 |        -2 |           1 |       1 | f         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq7';
@@ -588,9 +588,9 @@ select nextval('seq7');
 (1 row)
 
 select * from seq7;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq7          |         -2 |           2 |           -2 |         2 |        -2 |           1 |       0 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq7          |         -2 |           2 |           -2 |         2 |        -2 |           1 |       0 | f         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq7';
@@ -609,9 +609,9 @@ select nextval('seq7'); -- error, exhausted
 ERROR:  nextval: reached minimum value of sequence "seq7" (-2)
 CONTEXT:  referenced column: nextval
 select * from seq7;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
- seq7          |         -2 |           2 |           -2 |         2 |        -2 |           1 |       0 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------+-----------
+ seq7          |         -2 |           2 |           -2 |         2 |        -2 |           1 |       0 | f         | t         |    0 | f
 (1 row)
 
 select current_value, is_exhausted, last_used_value from sys.sequences where name = 'seq7';

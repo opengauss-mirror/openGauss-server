@@ -571,6 +571,8 @@ char* CheckReferencedObject(Oid relOid, RangeVar* objVar, const char* synName)
             break;
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             appendStringInfo(&detail,
                 _("Maybe you want to use synonym to reference a (large) sequence object, "
                   "but it is not yet supported."));

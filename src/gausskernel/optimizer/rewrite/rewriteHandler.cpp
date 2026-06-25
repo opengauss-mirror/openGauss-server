@@ -5542,7 +5542,8 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
                         bool cycle = false;
 
                         Relation relseq = relation_open(seqId, AccessShareLock);
-                        bool large = (get_rel_relkind(seqId) == RELKIND_LARGE_SEQUENCE);
+                        char relkind = get_rel_relkind(seqId);
+                        bool large = (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC);
                         get_sequence_params(relseq, &uuid, &start, &increment,
                                             &maxvalue, &minvalue, &cachevalue, &cycle, large);
                         relation_close(relseq, AccessShareLock);

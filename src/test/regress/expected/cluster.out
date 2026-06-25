@@ -259,7 +259,7 @@ FROM pg_class c WHERE relname LIKE 'clstr_tst%' ORDER BY relname;
        relname        | relkind | hastoast 
 ----------------------+---------+----------
  clstr_tst            | r       | t
- clstr_tst_a_seq      | S       | f
+ clstr_tst_a_seq      | z       | f
  clstr_tst_b          | i       | f
  clstr_tst_b_c        | i       | f
  clstr_tst_c          | i       | f
@@ -267,7 +267,7 @@ FROM pg_class c WHERE relname LIKE 'clstr_tst%' ORDER BY relname;
  clstr_tst_pkey       | i       | f
  clstr_tst_s          | r       | f
  clstr_tst_s_pkey     | i       | f
- clstr_tst_s_rf_a_seq | S       | f
+ clstr_tst_s_rf_a_seq | z       | f
 (10 rows)
 
 -- Verify that indisclustered is correctly set

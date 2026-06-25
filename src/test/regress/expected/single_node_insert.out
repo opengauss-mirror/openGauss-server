@@ -90,9 +90,9 @@ select setval('ss1_TESTTABLE', 10);
 (1 row)
 
 select * from ss1_TESTTABLE;
- sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
- ss1_testtable |         10 |           1 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------+-----------
+ ss1_testtable |         10 |           1 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | t         |    0 | f
 (1 row)
 
 alter table s1_TESTTABLE alter column id set default nextval('ss1_TESTTABLE');
@@ -106,9 +106,9 @@ select * from s1_TESTTABLE order by id;
 (2 rows)
 
 select * from ss1_TESTTABLE;
- sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
----------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
- ss1_testtable |         12 |           1 |            1 | 9223372036854775807 |         1 |           1 |      31 | f         | t         |    0
+ sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid | is_global 
+---------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------+-----------
+ ss1_testtable |         12 |           1 |            1 | 9223372036854775807 |         1 |           1 |      31 | f         | t         |    0 | f
 (1 row)
 
 drop table s1_TESTTABLE;

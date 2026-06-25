@@ -779,6 +779,8 @@ TrObjType TrGetObjType(Oid nspId, char relKind)
             break;
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             type = RB_OBJ_SEQUENCE;
             break;
         case RELKIND_TOASTVALUE:

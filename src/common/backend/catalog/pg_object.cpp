@@ -462,8 +462,14 @@ PgObjectType GetPgObjectTypePgClass(char relkind)
         case RELKIND_SEQUENCE:
             objectType = OBJECT_TYPE_SEQUENCE;
             break;
+        case RELKIND_SEQUENCE_GSC:
+            objectType = OBJECT_TYPE_SEQUENCE_GSC;
+            break;
         case RELKIND_LARGE_SEQUENCE:
             objectType = OBJECT_TYPE_LARGE_SEQUENCE;
+            break;
+        case RELKIND_LARGE_SEQUENCE_GSC:
+            objectType = OBJECT_TYPE_LARGE_SEQUENCE_GSC;
             break;
         case RELKIND_INDEX:
         case RELKIND_GLOBAL_INDEX:
@@ -510,6 +516,8 @@ void recordCommentObjectTime(ObjectAddress addr, Relation rel, ObjectType objTyp
         case OBJECT_INDEX:
         case OBJECT_SEQUENCE:
         case OBJECT_LARGE_SEQUENCE:
+        case OBJECT_SEQUENCE_GSC:
+        case OBJECT_LARGE_SEQUENCE_GSC:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
         case OBJECT_CONTQUERY:

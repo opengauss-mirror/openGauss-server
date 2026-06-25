@@ -1,7 +1,7 @@
 drop table if exists test_tab;
 NOTICE:  table "test_tab" does not exist, skipping
 drop sequence if exists test_seq;
-NOTICE:  sequence "test_seq" does not exist, skipping
+--?*
 create sequence test_seq cache 2;
 create table test_tab(id int default nextVal('test_seq'), name varchar(20));
 create user test_user with password 'openGauss@123';

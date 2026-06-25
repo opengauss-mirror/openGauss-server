@@ -187,10 +187,10 @@ SELECT * FROM information_schema.sequences WHERE sequence_name IN
   ('sequence_test2_flt', 'sequence_test3', 'serialtest2_f3_seq',
    'serialtest2_f4_seq', 'serialtest2_f5_seq', 'serialtest2_f6_seq')
   ORDER BY sequence_name ASC;
- sequence_catalog | sequence_schema |   sequence_name    | data_type | numeric_precision | numeric_precision_radix | numeric_scale | start_value | minimum_value |    maximum_value    | increment | cycle_option 
-------------------+-----------------+--------------------+-----------+-------------------+-------------------------+---------------+-------------+---------------+---------------------+-----------+--------------
- regression       | public          | sequence_test2_flt | int16     |               128 |                       2 |             0 | 32          | 1             | 9223372036854775807 | 1         | NO
- regression       | public          | sequence_test3     | int16     |               128 |                       2 |             0 | 1           | 1             | 30                  | 1         | NO
+ sequence_catalog | sequence_schema |   sequence_name    | data_type | numeric_precision | numeric_precision_radix | numeric_scale | start_value | minimum_value |    maximum_value    | increment | cycle_option | global_cache_option 
+------------------+-----------------+--------------------+-----------+-------------------+-------------------------+---------------+-------------+---------------+---------------------+-----------+--------------+---------------------
+ regression       | public          | sequence_test2_flt | int16     |               128 |                       2 |             0 | 32          | 1             | 9223372036854775807 | 1         | NO           | NO
+ regression       | public          | sequence_test3     | int16     |               128 |                       2 |             0 | 1           | 1             | 30                  | 1         | NO           | NO
 (2 rows)
 
 CREATE TYPE compfoo AS (f1 int, f2 text);

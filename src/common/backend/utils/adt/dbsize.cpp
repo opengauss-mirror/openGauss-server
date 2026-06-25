@@ -2003,6 +2003,8 @@ Datum pg_relation_filenode(PG_FUNCTION_ARGS)
         case RELKIND_GLOBAL_INDEX:
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
         case RELKIND_TOASTVALUE:
             /* okay, these have storage */
             if (relform->relfilenode)
@@ -2181,6 +2183,8 @@ Datum pg_relation_filepath(PG_FUNCTION_ARGS)
         case RELKIND_GLOBAL_INDEX:
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
         case RELKIND_TOASTVALUE:
             /* okay, these have storage */
 

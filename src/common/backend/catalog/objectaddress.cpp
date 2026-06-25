@@ -754,6 +754,8 @@ ObjectAddress get_object_address(
             case OBJECT_INDEX:
             case OBJECT_SEQUENCE:
             case OBJECT_LARGE_SEQUENCE:
+            case OBJECT_SEQUENCE_GSC:
+            case OBJECT_LARGE_SEQUENCE_GSC:
             case OBJECT_TABLE:
             case OBJECT_VIEW:
             case OBJECT_CONTQUERY:
@@ -1200,16 +1202,18 @@ static ObjectAddress get_relation_by_qualified_name(
                         errmsg("\"%s\" is not an index", RelationGetRelationName(relation))));
             break;
         case OBJECT_SEQUENCE:
-            if (relation->rd_rel->relkind != RELKIND_SEQUENCE)
+        case OBJECT_SEQUENCE_GSC:
+            if (relation->rd_rel->relkind != RELKIND_SEQUENCE_GSC && relation->rd_rel->relkind != RELKIND_SEQUENCE)
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("\"%s\" is not a sequence", RelationGetRelationName(relation))));
             break;
         case OBJECT_LARGE_SEQUENCE:
-            if (relation->rd_rel->relkind != RELKIND_LARGE_SEQUENCE)
-                ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("\"%s\" is not a large sequence", RelationGetRelationName(relation))));
+        case OBJECT_LARGE_SEQUENCE_GSC:
+            if (relation->rd_rel->relkind != RELKIND_LARGE_SEQUENCE_GSC &&
+                relation->rd_rel->relkind != RELKIND_LARGE_SEQUENCE)
+                ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                                errmsg("\"%s\" is not a large sequence", RelationGetRelationName(relation))));
             break;
         case OBJECT_TABLE:
             if (relation->rd_rel->relkind != RELKIND_RELATION)
@@ -1695,6 +1699,8 @@ void check_object_ownership(
         case OBJECT_INDEX:
         case OBJECT_SEQUENCE:
         case OBJECT_LARGE_SEQUENCE:
+        case OBJECT_SEQUENCE_GSC:
+        case OBJECT_LARGE_SEQUENCE_GSC:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
         case OBJECT_CONTQUERY:
@@ -2239,7 +2245,12 @@ static void getRelationTypeDescription(StringInfo buffer, Oid relid, int32 objec
                        appendStringInfoString(buffer, "index");
                        break;
                case RELKIND_SEQUENCE:
+               case RELKIND_SEQUENCE_GSC:
                        appendStringInfoString(buffer, "sequence");
+                       break;
+                case RELKIND_LARGE_SEQUENCE:
+                case RELKIND_LARGE_SEQUENCE_GSC:
+                       appendStringInfoString(buffer, "large sequence");
                        break;
                case RELKIND_TOASTVALUE:
                        appendStringInfoString(buffer, "toast table");
@@ -2278,6 +2289,8 @@ get_relkind_objtype(char relkind)
             return OBJECT_INDEX;
         case RELKIND_SEQUENCE:
             return OBJECT_SEQUENCE;
+        case RELKIND_SEQUENCE_GSC:
+            return OBJECT_SEQUENCE_GSC;
         case RELKIND_VIEW:
             return OBJECT_VIEW;
         case RELKIND_MATVIEW:

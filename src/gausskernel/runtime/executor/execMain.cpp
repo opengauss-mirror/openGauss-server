@@ -1682,6 +1682,8 @@ void CheckValidResultRel(Relation resultRel, CmdType operation)
             break;
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("cannot change (large) sequence \"%s\"", RelationGetRelationName(resultRel))));
             break;
@@ -1797,6 +1799,8 @@ static void CheckValidRowMarkRel(Relation rel, RowMarkType markType)
             break;
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE_GSC:
+        case RELKIND_LARGE_SEQUENCE_GSC:
             /* Must disallow this because we don't vacuum sequences */
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("cannot lock rows in (large) sequence \"%s\"", RelationGetRelationName(rel))));

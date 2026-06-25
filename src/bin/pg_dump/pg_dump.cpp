@@ -2469,10 +2469,12 @@ static void expand_table_name_patterns(
             "SELECT c.oid"
             "\nFROM pg_catalog.pg_class c"
             "\n     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace"
-            "\nWHERE c.relkind in ('%c', '%c', '%c', '%c', '%c','%c', '%c', '%c')\n",
+            "\nWHERE c.relkind in ('%c', '%c', '%c', '%c', '%c','%c', '%c', '%c', '%c', '%c')\n",
             RELKIND_RELATION,
             RELKIND_SEQUENCE,
             RELKIND_LARGE_SEQUENCE,
+            RELKIND_SEQUENCE_GSC,
+            RELKIND_LARGE_SEQUENCE_GSC,
             RELKIND_VIEW,
             RELKIND_MATVIEW,
             RELKIND_CONTQUERY,
@@ -3711,8 +3713,8 @@ static void guessConstraintInheritance(TableInfo* tblinfo, int numTables)
         TableInfo* parent = NULL;
 
         /* Sequences and views never have parents */
-        if (tbinfo->relkind == RELKIND_SEQUENCE || tbinfo->relkind == RELKIND_VIEW || 
-            tbinfo->relkind == RELKIND_CONTQUERY || tbinfo->relkind == RELKIND_LARGE_SEQUENCE)
+        if (RELKIND_IS_SEQUENCE(tbinfo->relkind) || tbinfo->relkind == RELKIND_VIEW || 
+            tbinfo->relkind == RELKIND_CONTQUERY)
             continue;
 
         /* Don't bother computing anything for non-target tables, either */
@@ -7514,6 +7516,8 @@ static SimpleOidList getDependObjectOid(Archive* fout, SimpleOidList* inputList)
 
             case RELKIND_SEQUENCE:
             case RELKIND_LARGE_SEQUENCE:
+            case RELKIND_SEQUENCE_GSC:
+            case RELKIND_LARGE_SEQUENCE_GSC:
                 /*
                 1. sequence -> table/partition table
                 2. sequence -> foreign table(default values on foreign tables are not supported)
@@ -7923,7 +7927,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "FROM pg_catalog.unnest(tc.reloptions) x), ', ') AS toast_reloptions "
                 "FROM pg_class c "
                 "LEFT JOIN pg_depend d ON "
-                "(c.relkind in ('%c','%c') AND "
+                "(c.relkind in ('%c','%c', '%c', '%c') AND "
                 "d.classid = c.tableoid AND d.objid = c.oid AND "
                 "d.objsubid = 0 AND "
                 "d.refclassid = c.tableoid AND d.deptype = 'a') "
@@ -7931,7 +7935,9 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "WHERE c.oid = %u "
                 "ORDER BY c.oid",
                 RELKIND_SEQUENCE,
+                RELKIND_SEQUENCE_GSC,
                 RELKIND_LARGE_SEQUENCE,
+                RELKIND_LARGE_SEQUENCE_GSC,
                 table_include_oids.head->val);
         } else {
             appendPQExpBuffer(query,
@@ -7980,18 +7986,22 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "FROM pg_catalog.unnest(tc.reloptions) x), ', ') AS toast_reloptions "
                 "FROM pg_class c "
                 "LEFT JOIN pg_depend d ON "
-                "(c.relkind in ('%c', '%c') AND "
+                "(c.relkind in ('%c', '%c', '%c', '%c') AND "
                 "d.classid = c.tableoid AND d.objid = c.oid AND "
                 "d.objsubid = 0 AND "
                 "d.refclassid = c.tableoid AND d.deptype = 'a') "
                 "LEFT JOIN pg_class tc ON (c.reltoastrelid = tc.oid) "
-                "WHERE c.relkind in ('%c', '%c', '%c', '%c', '%c', '%c', '%c', '%c', '%c') AND c.relnamespace != %d "
+                "WHERE c.relkind in ('%c', '%c', '%c', '%c', '%c', '%c', '%c', '%c', '%c', '%c', '%c') AND c.relnamespace != %d "
                 "ORDER BY c.oid",
                 RELKIND_SEQUENCE,
                 RELKIND_LARGE_SEQUENCE,
+                RELKIND_SEQUENCE_GSC,
+                RELKIND_LARGE_SEQUENCE_GSC,
                 RELKIND_RELATION,
                 RELKIND_SEQUENCE,
                 RELKIND_LARGE_SEQUENCE,
+                RELKIND_SEQUENCE_GSC,
+                RELKIND_LARGE_SEQUENCE_GSC,
                 RELKIND_VIEW,
                 RELKIND_MATVIEW,
                 RELKIND_CONTQUERY,
@@ -8271,13 +8281,15 @@ TableInfo* getTables(Archive* fout, int* numTables)
             "NULL AS reloptions, "
             "NULL AS toast_reloptions "
             "FROM pg_class c "
-            "WHERE relkind IN ('%c', '%c', '%c') "
+            "WHERE relkind IN ('%c', '%c', '%c', '%c', '%c') "
             "ORDER BY oid",
             RELKIND_VIEW,
             username_subquery,
             RELKIND_RELATION,
             RELKIND_SEQUENCE,
-            RELKIND_LARGE_SEQUENCE);
+            RELKIND_LARGE_SEQUENCE,
+            RELKIND_SEQUENCE_GSC,
+            RELKIND_LARGE_SEQUENCE_GSC);
     }
 
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
@@ -12171,10 +12183,13 @@ static void dumpDumpableObject(Archive* fout, DumpableObject* dobj)
                 }
             }
 
-            if (RELKIND_IS_SEQUENCE(tbinfo->relkind))
-                dumpSequenceData(fout, (TableDataInfo*)dobj, tbinfo->relkind == RELKIND_LARGE_SEQUENCE);
-            else
+            if (RELKIND_IS_SEQUENCE(tbinfo->relkind)) {
+                bool isLarge =
+                    tbinfo->relkind == RELKIND_LARGE_SEQUENCE || tbinfo->relkind == RELKIND_LARGE_SEQUENCE_GSC;
+                dumpSequenceData(fout, (TableDataInfo*)dobj, isLarge);
+            } else {
                 dumpTableData(fout, (TableDataInfo*)dobj);
+            }
             break;
         }
         case DO_TSPARSER:
@@ -17754,9 +17769,11 @@ static void dumpDefaultACL(Archive* fout, DefaultACLInfo* daclinfo)
             type = "TABLES";
             break;
         case DEFACLOBJ_SEQUENCE:
+        case DEFACLOBJ_SEQUENCE_GSC:
             type = "SEQUENCES";
             break;
         case DEFACLOBJ_LARGE_SEQUENCE:
+        case DEFACLOBJ_LARGE_SEQUENCE_GSC:
             type = "LARGE SEQUENCES";
             break;
         case DEFACLOBJ_FUNCTION:
@@ -18254,16 +18271,18 @@ static void dumpTable(Archive* fout, TableInfo* tbinfo)
     if (tbinfo->dobj.dump && !dataOnly) {
         char* namecopy = NULL;
 
-        if (RELKIND_IS_SEQUENCE(tbinfo->relkind))
-            dumpSequence(fout, tbinfo, tbinfo->relkind == RELKIND_LARGE_SEQUENCE);
-        else
+        if (RELKIND_IS_SEQUENCE(tbinfo->relkind)) {
+            bool isLarge = tbinfo->relkind == RELKIND_LARGE_SEQUENCE || tbinfo->relkind == RELKIND_LARGE_SEQUENCE_GSC;
+            dumpSequence(fout, tbinfo, isLarge);
+        } else {
             dumpTableSchema(fout, tbinfo);
-
+        }
         /* Handle the ACL here */
         namecopy = gs_strdup(fmtId(tbinfo->dobj.name));
-        const char* kind = RELKIND_IS_SEQUENCE(tbinfo->relkind) ?
-            (tbinfo->relkind == RELKIND_SEQUENCE ? "SEQUENCE" : "LARGE SEQUENCE") :
-            "TABLE";
+        const char* kind =
+            RELKIND_IS_SEQUENCE(tbinfo->relkind) ?
+                ((tbinfo->relkind == RELKIND_SEQUENCE || tbinfo->relkind == RELKIND_SEQUENCE_GSC) ?
+                "SEQUENCE" : "LARGE SEQUENCE") : "TABLE";
         dumpACL(fout,
             tbinfo->dobj.catId,
             tbinfo->dobj.dumpId,
@@ -22885,8 +22904,11 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
     char bufm[100] = {0};
     char bufx[100] = {0};
     bool cycled = false;
+    bool isGlobal = false, isNewVer = false;
     int nRet = 0;
     const char* optLarge = large ? "LARGE" : "";
+    char *isGlobalStr = " ";
+
     PQExpBuffer query = createPQExpBuffer();
     PQExpBuffer delqry = createPQExpBuffer();
     PQExpBuffer labelq = createPQExpBuffer();
@@ -22903,7 +22925,10 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
     securec_check_ss_c(nRet, "\0", "\0");
     nRet = snprintf_s(bufx, sizeof(bufx) / sizeof(char), sizeof(bufx) / sizeof(char) - 1, INT64_FORMAT, SEQ_MAXVALUE);
     securec_check_ss_c(nRet, "\0", "\0");
-
+    if (tbinfo->relkind == RELKIND_SEQUENCE_GSC || tbinfo->relkind == RELKIND_LARGE_SEQUENCE_GSC) {
+        isGlobalStr = ", is_global";
+        isNewVer = true;
+    }
     if (fout->remoteVersion >= 80400) {
         appendPQExpBuffer(query,
             "SELECT sequence_name, "
@@ -22916,9 +22941,10 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
             "     WHEN increment_by < 0 AND min_value = %s THEN NULL "
             "     ELSE min_value "
             "END AS min_value, "
-            "cache_value, is_cycled FROM %s",
+            "cache_value, is_cycled%s FROM %s",
             bufx,
             bufm,
+            isGlobalStr,
             fmtId(tbinfo->dobj.name));
     } else {
         appendPQExpBuffer(query,
@@ -22932,9 +22958,10 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
             "     WHEN increment_by < 0 AND min_value = %s THEN NULL "
             "     ELSE min_value "
             "END AS min_value, "
-            "cache_value, is_cycled FROM %s",
+            "cache_value, is_cycled%s FROM %s",
             bufx,
             bufm,
+            isGlobalStr,
             fmtId(tbinfo->dobj.name));
     }
 
@@ -22977,6 +23004,9 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
         minv = PQgetvalue(res, 0, 4);
     cache = PQgetvalue(res, 0, 5);
     cycled = (strcmp(PQgetvalue(res, 0, 6), "t") == 0);
+    if (isNewVer) {
+        isGlobal = (strcmp(PQgetvalue(res, 0, 7), "t") == 0);
+    }
 
     /*
      * DROP must be fully qualified in case same name appears in pg_catalog
@@ -23018,6 +23048,9 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
         appendPQExpBuffer(query, "    NO MAXVALUE\n");
 
     appendPQExpBuffer(query, "    CACHE %s%s", cache, (cycled ? "\n    CYCLE" : ""));
+    if (isNewVer) {
+        appendPQExpBuffer(query, "\n    %s", isGlobal ? "GLOBAL" : "SESSION");
+    }
 
     appendPQExpBuffer(query, ";\n");
 
@@ -25129,9 +25162,9 @@ static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo*
                              "pg_class c left join pg_namespace n on c.relnamespace = n.oid "
                              "left join  pg_depend d on c.oid = d.objid "
                              "where classid = %u and deptype = '%c' and refobjid = %u and refobjsubid = %u "
-                             "and c.relkind in ('%c', '%c')"
+                             "and c.relkind in ('%c', '%c', '%c', '%c')"
                       ,RelationRelationId, DEPENDENCY_AUTO, tbinfo->dobj.catId.oid, tbinfo->autoinc_attnum
-                      ,RELKIND_SEQUENCE, RELKIND_LARGE_SEQUENCE);
+                      ,RELKIND_SEQUENCE, RELKIND_LARGE_SEQUENCE, RELKIND_SEQUENCE_GSC, RELKIND_LARGE_SEQUENCE_GSC);
 
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
     if (PQntuples(res) != 1) {

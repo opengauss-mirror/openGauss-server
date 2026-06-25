@@ -657,7 +657,8 @@ static bool get_seed(Oid seqid, int128* start, int128* res, bool* success)
         int128 minvalue = 0;
         int128 cachevalue = 0;
         bool cycle = false;
-        bool large = (get_rel_relkind(seqid) == RELKIND_LARGE_SEQUENCE);
+        char relkind = get_rel_relkind(seqid);
+        bool large = (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC);
 
         Relation relseq = relation_open(seqid, AccessShareLock);
         get_sequence_params(relseq, &uuid, start, &increment, &maxvalue,

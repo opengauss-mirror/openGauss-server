@@ -1223,7 +1223,7 @@ CREATE VIEW dbe_perf.statio_all_sequences AS
     pg_catalog.pg_stat_get_blocks_hit(C.oid) AS blks_hit
   FROM pg_class C
        LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.relkind = 'S' or C.relkind = 'L';
+    WHERE C.relkind = 'S' or C.relkind = 'L' or C.relkind = 'z' or C.relkind = 'Z';
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_statio_all_sequences
   (OUT node_name name, OUT relid oid, OUT schemaname name, 

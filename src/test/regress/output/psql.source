@@ -156,6 +156,7 @@ create sequence seq_test start 1 increment 2 owned by tbl_seq.col1;
  is_cycled     | boolean | f
  is_called     | boolean | f
 --? uuid          | bigint  | .*
+ is_global     | boolean | f
 Owned by: public.tbl_seq.col1
 
 \! echo -n 'JJ	123'	\.| @abs_bindir@/gsql -X -d test_sql -p @portstring@ -c "create table gsql_c_copy(name varchar2(10),age integer);copy gsql_c_copy from STDIN;"

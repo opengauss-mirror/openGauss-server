@@ -137,7 +137,10 @@ void ResetvalGlobal(Oid relid)
     GlobalSeqInfoHashBucket* bucket = NULL;
     uint32 hash = RelidGetHash(relid);
 
-    bucket = &g_instance.global_seq[hash];
+    if (g_instance.seqHtbl == NULL || !g_instance.global_seq_inited) {
+        return;
+    }
+    bucket = &g_instance.seqHtbl->global_seq[hash];
 
     (void)LWLockAcquire(GetMainLWLockByIndex(bucket->lock_id), LW_EXCLUSIVE);
 
@@ -232,6 +235,163 @@ void init_sequence(Oid relid, SeqTable* p_elm, Relation* p_rel)
     /* Return results */
     *p_elm = elm;
     *p_rel = seqrel;
+}
+
+SeqTable searchGlobalSequenceCacheFromHashTab(GSCKey* key, uint32 hashCode, uint32 bucket_id)
+{
+    GSCEntry *entry = NULL;
+    Assert (bucket_id >= 0 && bucket_id < NUM_GSC_SINGLENODE_PARTITIONS);
+    bool found = false;
+    entry = (GSCEntry *)hash_search_with_hash_value(g_instance.seqHtbl->global_seqtab[bucket_id].hash_tbl,
+                                                              (const void*)key, hashCode, HASH_ENTER, &found);
+    if (entry == NULL) {
+        ereport(ERROR,
+              (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+               errmsg("store global sequence cache failed due to memory allocation failed")));
+    }
+
+    if (found == false) {
+        errno_t rc = EOK;
+        rc = memset_s(entry, sizeof(GSCEntry), 0, sizeof(GSCEntry));
+        securec_check(rc, "\0", "\0");
+        entry->key.dbOid = key->dbOid;
+        entry->key.relid = key->relid;
+        entry->val.elm.relid = key->relid;
+        entry->val.elm.dbOid = key->dbOid;
+        entry->val.elm.is_global_cache = true;
+
+        /*
+        * Open the sequence relation.
+        */
+        Relation seqrel = lock_and_open_seq(&(entry->val.elm));
+        if (!RELKIND_IS_SEQUENCE(seqrel->rd_rel->relkind)) {
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("\"%s.%s\" is not a sequence", get_namespace_name(RelationGetNamespace(seqrel)),
+                                   RelationGetRelationName(seqrel))));
+        } else {
+            entry->val.elm.seqkind = seqrel->rd_rel->relkind;
+        }
+        relation_close(seqrel, NoLock);
+    }
+    return &(entry->val.elm);
+}
+
+/*
+ * Given a relation OID, open and lock the sequence.  p_elm and p_rel are
+ * output parameters, and p_elm is global sequence cache elm.
+ */
+void init_sequence_single_node_global_cache(Oid relid, SeqTable* elm, Relation* rel, GSCKey* key, uint32 hashCode,
+                                            uint32 bucketId)
+{
+    SeqTable tbl = NULL;
+    Relation seqrel;
+
+    tbl = searchGlobalSequenceCacheFromHashTab(key, hashCode, bucketId);
+    if (rel != NULL) {
+        /*
+         * Open the sequence relation.
+         */
+        seqrel = lock_and_open_seq(tbl);
+        if (!RELKIND_IS_SEQUENCE(seqrel->rd_rel->relkind)) {
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("\"%s.%s\" is not a sequence", get_namespace_name(RelationGetNamespace(seqrel)),
+                                   RelationGetRelationName(seqrel))));
+        }
+        *rel = seqrel;
+    }
+
+    *elm = tbl;
+}
+
+/*
+ * Given a relation OID, open and lock the sequence.  p_elm and p_rel are
+ * output parameters, and p_elm is global sequence cache elm for currval.
+ */
+void init_sequence_single_node_global_cache_for_currval(Oid relid, SeqTable* elm, Relation* rel)
+{
+    SeqTable tbl = NULL;
+    Relation seqrel;
+    DListCell* elem_tmp = NULL;
+    SeqTable currseq = NULL;
+
+    dlist_foreach_cell(elem_tmp, u_sess->cmd_cxt.global_currval_seq)
+    {
+        currseq = (SeqTable)lfirst(elem_tmp);
+        if (currseq->relid == relid && currseq->dbOid == u_sess->proc_cxt.MyDatabaseId) {
+            tbl = currseq;
+            break;
+        }
+    }
+
+    /*
+    * Allocate new seqtable entry if we didn't find one.
+    *
+    * NOTE: seqtable entries remain in the list for the life of a backend. If
+    * the sequence itself is deleted then the entry becomes wasted memory,
+    * but it's small enough that this should not matter.
+    */
+    if (tbl == NULL) {
+        /*
+        * Time to make a new seqtable entry.  These entries live as long as
+        * the backend does, so we use plain malloc for them.
+        */
+        tbl = (SeqTable)MemoryContextAlloc(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(SeqTableData));
+        errno_t rc = EOK;
+        rc = memset_s(tbl, sizeof(SeqTableData), 0, sizeof(SeqTableData));
+        securec_check(rc, "\0", "\0");
+        tbl->relid = relid;
+        tbl->dbOid = u_sess->proc_cxt.MyDatabaseId;
+
+        MemoryContext oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+        u_sess->cmd_cxt.global_currval_seq = dlappend(u_sess->cmd_cxt.global_currval_seq, tbl);
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    /*
+     * Open the sequence relation.
+     */
+    seqrel = lock_and_open_seq(tbl);
+    if (!RELKIND_IS_SEQUENCE(seqrel->rd_rel->relkind)) {
+        if (seqrel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("\"%s.%s\" is not a sequence", get_namespace_name(RelationGetNamespace(seqrel)),
+                                   RelationGetRelationName(seqrel)),
+                            errdetail("Please make sure using the correct schema")));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("\"%s.%s\" is not a sequence", get_namespace_name(RelationGetNamespace(seqrel)),
+                                   RelationGetRelationName(seqrel))));
+        }
+    }
+    /*
+     * If the sequence has been transactionally replaced since we last saw it,
+     * discard any cached-but-unissued values.	We do not touch the currval()
+     * state, however.
+     */
+    if (seqrel->rd_rel->relfilenode != tbl->filenode) {
+        tbl->filenode = seqrel->rd_rel->relfilenode;
+        errno_t rc = memcpy_s(&(tbl->cached), sizeof(int128), &(tbl->last), sizeof(int128));
+        securec_check(rc, "\0", "\0");
+    }
+
+    /* Return results */
+    *elm = tbl;
+    *rel = seqrel;
+}
+
+/* for global sequence cache record currval elm */
+void global_sequence_cache_set_currval_elm(Oid relid, int128 value)
+{
+    SeqTable elm = NULL;
+    Relation seqrel;
+
+    /* open and lock sequence */
+    init_sequence_single_node_global_cache_for_currval(relid, &elm, &seqrel);
+
+    elm->last = value;
+    elm->last_valid = true;
+    relation_close(seqrel, NoLock);
 }
 
 SeqTable GetSessSeqElm(Oid relid)
@@ -357,12 +517,43 @@ bool IsTempSequence(Oid relid)
     Relation seqrel;
     bool res = false;
     SeqTable elm = NULL;
+    uint32 hashCode;
+    GSCKey key;
+    uint32 bucket_id;
 
-    /* open and lock sequence */
-    init_sequence(relid, &elm, &seqrel);
+    bool isGlobalCache = is_global_level_sequence_cache(relid);
+    if (isGlobalCache) {
+        /* lock the destination bucket to obtain the global cache */
+        key.dbOid = u_sess->proc_cxt.MyDatabaseId;
+        key.relid = relid;
+        hashCode = GSCHashFunc<GSCKey>((const void *) &key, sizeof(GSCKey));
+        bucket_id = GetGSCBucket(hashCode);
+        (void)LWLockAcquire(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id), LW_EXCLUSIVE);
+    }
 
-    res = RelationIsLocalTemp(seqrel);
-    relation_close(seqrel, NoLock);
+    PG_TRY();
+    {
+        if (isGlobalCache) {
+            init_sequence_single_node_global_cache(relid, &elm, &seqrel, &key, hashCode, bucket_id);
+        } else {
+            init_sequence(relid, &elm, &seqrel);
+        }
+
+        res = RelationIsLocalTemp(seqrel);
+        relation_close(seqrel, NoLock);
+
+        if (isGlobalCache) {
+            LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+        }
+    }
+    PG_CATCH();
+    {
+        if (isGlobalCache) {
+            LWLockRelease(GetMainLWLockByIndex(g_instance.seqHtbl->global_seqtab[bucket_id].lock_id));
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
     return res;
 }
 #endif

@@ -5250,7 +5250,7 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, Multi
             classform->relfilenode = newrelfilenode;
 
             /* relpages etc. never change for sequences */
-            if (relation->rd_rel->relkind != RELKIND_SEQUENCE) {
+            if (!RELKIND_IS_SEQUENCE(relation->rd_rel->relkind)) {
                 classform->relpages = 0;  /* it's empty until further notice */
                 classform->reltuples = 0;
                 classform->relallvisible = 0;

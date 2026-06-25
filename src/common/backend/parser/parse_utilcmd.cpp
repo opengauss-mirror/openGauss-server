@@ -2318,7 +2318,8 @@ static void transformTableLikeClause(
                         if (seqs != NULL && list_member_oid(seqs, DatumGetObjectId(seqId))) {
                             /* is serial type */
                             def->is_serial = true;
-                            bool large = (get_rel_relkind(seqId) == RELKIND_LARGE_SEQUENCE);
+                            char relkind = get_rel_relkind(seqId);
+                            bool large = (relkind == RELKIND_LARGE_SEQUENCE || relkind == RELKIND_LARGE_SEQUENCE_GSC);
                             /* Special actions for SERIAL pseudo-types, treat serial and identity differently */
                             bool isForIdentity = DB_IS_CMPT(D_FORMAT) &&
                                                  StrEndWith(get_rel_name(seqId), "_seq_identity");
@@ -8735,14 +8736,13 @@ static void DropModifyColumnAutoIncrement(CreateStmtContext* cxt, Relation rel, 
         return;
     }
     DropStmt *drop = makeNode(DropStmt);
-    drop->removeType = OBJECT_LARGE_SEQUENCE;
+    drop->removeType = OBJECT_LARGE_SEQUENCE_GSC;
     drop->missing_ok = true;
     drop->objects = list_make1(list_make1(makeString(seqname)));
     drop->arguments = NIL;
     drop->behavior = DROP_RESTRICT;
     drop->concurrent = false;
     drop->purge = false;
- 
     cxt->alist = lappend(cxt->alist, drop);
 }
  

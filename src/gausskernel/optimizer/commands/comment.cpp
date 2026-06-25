@@ -58,6 +58,8 @@ static AclResult CheckObjectCommentPrivilege(const CommentStmt* stmt, Oid object
     switch (stmt->objtype) {
         case OBJECT_SEQUENCE:
         case OBJECT_LARGE_SEQUENCE:
+        case OBJECT_SEQUENCE_GSC:
+        case OBJECT_LARGE_SEQUENCE_GSC:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
         case OBJECT_MATVIEW:
