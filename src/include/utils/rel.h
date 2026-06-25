@@ -365,6 +365,8 @@ typedef struct StdRdOptions {
     bool enable_rowsecurity; /* enable row level security or not */
     bool force_rowsecurity;  /* force row level security or not */
     bool enable_tsdb_delta; /* enable delta table for timeseries relations */
+    bool vacuum_truncate;    /* Whether to truncate empty tail pages during VACUUM */
+    bool vacuum_truncate_set; /* Whether vacuum_truncate was explicitly set */
 
     int tsdb_deltamerge_interval;   /* interval for tsdb delta merge job */
     int tsdb_deltamerge_threshold;   /* data threshold for tsdb delta merge job */
