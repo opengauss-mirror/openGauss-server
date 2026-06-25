@@ -2743,9 +2743,6 @@ Oid GetDefaultOpClass(Oid type_id, Oid am_id)
     int nexact = 0;
     int ncompatible = 0;
     int ncompatiblepreferred = 0;
-    Relation rel;
-    ScanKeyData skey[1];
-    SysScanDesc scan;
     HeapTuple tup;
     TYPCATEGORY tcategory;
 
@@ -2766,15 +2763,10 @@ Oid GetDefaultOpClass(Oid type_id, Oid am_id)
      * we need a tiebreaker.)  If we find more than one exact match, then
      * someone put bogus entries in pg_opclass.
      */
-    rel = heap_open(OperatorClassRelationId, AccessShareLock);
-
-    ScanKeyInit(&skey[0], Anum_pg_opclass_opcmethod, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(am_id));
-
-    scan = systable_beginscan(rel, OpclassAmNameNspIndexId, true, NULL, 1, skey);
-
-    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+    CatCList* catlist = SearchSysCacheList1(CLAAMNAMENSP, ObjectIdGetDatum(am_id));
+    for (int i = 0; i < catlist->n_members; i++) {
+        tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_opclass opclass = (Form_pg_opclass)GETSTRUCT(tup);
-
         /* ignore altogether if not a default opclass */
         if (!opclass->opcdefault)
             continue;
@@ -2791,11 +2783,7 @@ Oid GetDefaultOpClass(Oid type_id, Oid am_id)
             }
         }
     }
-
-    systable_endscan(scan);
-
-    heap_close(rel, AccessShareLock);
-
+    ReleaseSysCacheList(catlist);
     /* raise error if pg_opclass contains inconsistent data */
     if (nexact > 1)
         ereport(ERROR,
