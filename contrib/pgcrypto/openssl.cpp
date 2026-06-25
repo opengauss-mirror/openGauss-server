@@ -147,6 +147,31 @@ static int EVP_DigestFinal_ex(EVP_MD_CTX* ctx, unsigned char* res, unsigned int*
 #endif /* old OpenSSL */
 
 /*
+ * OpenSSL >= 1.1.0 made EVP_MD_CTX opaque. Provide dynamic allocation helpers
+ * for older versions so the rest of the file can always use a pointer.
+ */
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+
+static EVP_MD_CTX* EVP_MD_CTX_new(void)
+{
+    EVP_MD_CTX* ctx = (EVP_MD_CTX*)px_alloc(sizeof(EVP_MD_CTX));
+
+    if (ctx != NULL)
+        EVP_MD_CTX_init(ctx);
+    return ctx;
+}
+
+static void EVP_MD_CTX_free(EVP_MD_CTX* ctx)
+{
+    if (ctx == NULL)
+        return;
+    EVP_MD_CTX_cleanup(ctx);
+    px_free(ctx);
+}
+
+#endif /* OpenSSL < 1.1.0 */
+
+/*
  * Provide SHA2 for older OpenSSL < 0.9.8
  */
 #if OPENSSL_VERSION_NUMBER < 0x00908000L
@@ -185,49 +210,49 @@ static int compat_find_digest(const char* name, PX_MD** res)
 
 typedef struct OSSLDigest {
     const EVP_MD* algo;
-    EVP_MD_CTX ctx;
+    EVP_MD_CTX* ctx;
 } OSSLDigest;
 
 static unsigned digest_result_size(PX_MD* h)
 {
     OSSLDigest* digest = (OSSLDigest*)h->p.ptr;
 
-    return EVP_MD_CTX_size(&digest->ctx);
+    return EVP_MD_CTX_size(digest->ctx);
 }
 
 static unsigned digest_block_size(PX_MD* h)
 {
     OSSLDigest* digest = (OSSLDigest*)h->p.ptr;
 
-    return EVP_MD_CTX_block_size(&digest->ctx);
+    return EVP_MD_CTX_block_size(digest->ctx);
 }
 
 static void digest_reset(PX_MD* h)
 {
     OSSLDigest* digest = (OSSLDigest*)h->p.ptr;
 
-    EVP_DigestInit_ex(&digest->ctx, digest->algo, NULL);
+    EVP_DigestInit_ex(digest->ctx, digest->algo, NULL);
 }
 
 static void digest_update(PX_MD* h, const uint8* data, unsigned dlen)
 {
     OSSLDigest* digest = (OSSLDigest*)h->p.ptr;
 
-    EVP_DigestUpdate(&digest->ctx, data, dlen);
+    EVP_DigestUpdate(digest->ctx, data, dlen);
 }
 
 static void digest_finish(PX_MD* h, uint8* dst)
 {
     OSSLDigest* digest = (OSSLDigest*)h->p.ptr;
 
-    EVP_DigestFinal_ex(&digest->ctx, dst, NULL);
+    EVP_DigestFinal_ex(digest->ctx, dst, NULL);
 }
 
 static void digest_free(PX_MD* h)
 {
     OSSLDigest* digest = (OSSLDigest*)h->p.ptr;
 
-    EVP_MD_CTX_cleanup(&digest->ctx);
+    EVP_MD_CTX_free(digest->ctx);
 
     px_free(digest);
     px_free(h);
@@ -255,9 +280,16 @@ int px_find_digest(const char* name, PX_MD** res)
     digest = (OSSLDigest*)px_alloc(sizeof(*digest));
     digest->algo = md;
 
-    EVP_MD_CTX_init(&digest->ctx);
-    if (EVP_DigestInit_ex(&digest->ctx, digest->algo, NULL) == 0)
+    digest->ctx = EVP_MD_CTX_new();
+    if (digest->ctx == NULL) {
+        px_free(digest);
         return -1;
+    }
+    if (EVP_DigestInit_ex(digest->ctx, digest->algo, NULL) == 0) {
+        EVP_MD_CTX_free(digest->ctx);
+        px_free(digest);
+        return -1;
+    }
 
     h = (PX_MD*)px_alloc(sizeof(*h));
     h->result_size = digest_result_size;
@@ -915,8 +947,10 @@ static int openssl_random_init = 0;
  */
 static void init_openssl_rand(void)
 {
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     if (RAND_get_rand_method() == NULL)
         RAND_set_rand_method(RAND_SSLeay());
+#endif
     openssl_random_init = 1;
 }
 
@@ -941,8 +975,8 @@ int px_get_pseudo_random_bytes(uint8* dst, unsigned count)
     if (!openssl_random_init)
         init_openssl_rand();
 
-    res = RAND_pseudo_bytes(dst, count);
-    if (res == 0 || res == 1)
+    res = RAND_bytes(dst, count);
+    if (res == 1)
         return count;
 
     return PXE_OSSL_RAND_ERROR;
