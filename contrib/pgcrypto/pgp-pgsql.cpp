@@ -498,7 +498,7 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
     struct debug_expect ex;
     int got_unicode = 0;
     uint8* psw = NULL;
-    int psw_len = 0;
+    int pswLen = 0;
 
     init_work(&ctx, need_text, args, &ex);
 
@@ -529,10 +529,10 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
 
         if (keypsw) {
             psw = (uint8*)VARDATA(keypsw);
-            psw_len = VARSIZE(keypsw) - VARHDRSZ;
+            pswLen = VARSIZE(keypsw) - VARHDRSZ;
         }
         kbuf = create_mbuf_from_vardata(key);
-        err = pgp_set_pubkey(ctx, kbuf, psw, psw_len, 1);
+        err = pgp_set_pubkey(ctx, kbuf, psw, pswLen, 1);
         mbuf_free(kbuf);
     } else
         err = pgp_set_symkey(ctx, (uint8*)VARDATA(key), VARSIZE(key) - VARHDRSZ);
@@ -556,8 +556,10 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
     got_unicode = pgp_get_unicode_mode(ctx);
 
 out:
-    (void)memset_s(&psw, sizeof(psw), 0, sizeof(psw));
-    (void)memset_s(&psw_len, sizeof(psw_len), 0, sizeof(psw_len));
+    if (psw != NULL && pswLen > 0) {
+        (void)memset_s(psw, pswLen, 0, pswLen);
+    }
+    (void)memset_s(&pswLen, sizeof(pswLen), 0, sizeof(pswLen));
 
     if (src)
         mbuf_free(src);
@@ -740,11 +742,14 @@ Datum pgp_pub_decrypt_bytea(PG_FUNCTION_ARGS)
 
     PG_FREE_IF_COPY(data, 0);
     PG_FREE_IF_COPY(key, 1);
-    if (PG_NARGS() > 2)
+    if (PG_NARGS() > 2) {
+        if (psw != NULL) {
+            (void)memset_s(VARDATA(psw), VARSIZE(psw) - VARHDRSZ, 0, VARSIZE(psw) - VARHDRSZ);
+        }
         PG_FREE_IF_COPY(psw, 2);
+    }
     if (PG_NARGS() > 3)
         PG_FREE_IF_COPY(arg, 3);
-    (void)memset_s(&psw, sizeof(psw), 0, sizeof(psw));
     PG_RETURN_TEXT_P(res);
 }
 
@@ -765,11 +770,14 @@ Datum pgp_pub_decrypt_text(PG_FUNCTION_ARGS)
 
     PG_FREE_IF_COPY(data, 0);
     PG_FREE_IF_COPY(key, 1);
-    if (PG_NARGS() > 2)
+    if (PG_NARGS() > 2) {
+        if (psw != NULL) {
+            (void)memset_s(VARDATA(psw), VARSIZE(psw) - VARHDRSZ, 0, VARSIZE(psw) - VARHDRSZ);
+        }
         PG_FREE_IF_COPY(psw, 2);
+    }
     if (PG_NARGS() > 3)
         PG_FREE_IF_COPY(arg, 3);
-    (void)memset_s(&psw, sizeof(psw), 0, sizeof(psw));
     PG_RETURN_TEXT_P(res);
 }
 
