@@ -398,7 +398,7 @@ static void findoprnd(ITEM* ptr, int4* pos)
     }
 }
 
-static void debug_print_query(QUERYTYPE* query, ITEM* ptr)
+static void DebugPrintQuery(QUERYTYPE* query, ITEM* ptr)
 {
 #ifdef BS_DEBUG
     StringInfoData pbuf;
@@ -469,7 +469,7 @@ Datum bqarr_in(PG_FUNCTION_ARGS)
 
     pos = query->size - 1;
     findoprnd(ptr, &pos);
-    debug_print_query(query, ptr);
+    DebugPrintQuery(query, ptr);
 
     PG_RETURN_POINTER(query);
 }

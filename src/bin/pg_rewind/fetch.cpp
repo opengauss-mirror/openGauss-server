@@ -57,7 +57,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file);
 static BuildErrorCode execute_pagemap(file_entry_t* entry, FILE* file);
 static char* run_simple_query(const char* sql);
 static BuildErrorCode recurse_dir(const char* datadir, const char* path, process_file_callback_t callback);
-static bool is_valid_rewind_path(const char* path);
+static bool IsValidRewindPath(const char* path);
 static void get_slot_name_by_app_name(void);
 static BuildErrorCode CheckResultSet(PGresult* pgResult);
 static void get_log_directory_guc(void);
@@ -460,7 +460,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
         filename[filenamelen] = '\0';
 
         /* CVE-2026-6475: reject malicious paths from the source server */
-        if (!is_valid_rewind_path(filename)) {
+        if (!IsValidRewindPath(filename)) {
             pg_fatal("invalid file path received from source server: \"%s\"\n", filename);
             pg_free(filename);
             filename = NULL;
@@ -534,14 +534,17 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
  * CVE-2026-6475: reject absolute paths and paths containing parent-directory
  * references, preventing a malicious source server from writing outside pg_data.
  */
-static bool is_valid_rewind_path(const char* path)
+static bool IsValidRewindPath(const char* path)
 {
-    if (path == NULL || path[0] == '\0')
+    if (path == NULL || path[0] == '\0') {
         return false;
-    if (is_absolute_path(path))
+    }
+    if (is_absolute_path(path)) {
         return false;
-    if (strstr(path, "..") != NULL)
+    }
+    if (strstr(path, "..") != NULL) {
         return false;
+    }
     return true;
 }
 
@@ -676,7 +679,7 @@ static void fetch_file_range(const char* path, unsigned int begin, unsigned int 
     int ss_c = 0;
 
     /* CVE-2026-6475: validate path before sending to the source server */
-    if (!is_valid_rewind_path(path)) {
+    if (!IsValidRewindPath(path)) {
         pg_fatal("invalid file path sent to source server: \"%s\"\n", path);
         return;
     }
