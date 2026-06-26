@@ -7098,6 +7098,17 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname, char* newschema
      */
     targetrelation = relation_open(myrelid, AccessExclusiveLock);
 
+    if (DB_IS_CMPT(A_FORMAT) && targetrelation->rd_rel->relkind == RELKIND_VIEW && 
+        targetrelation->rd_rules != NULL) {
+        for (int i = 0; i < targetrelation->rd_rules->numLocks; i++) {
+            if (targetrelation->rd_rules->rules[i]->enabled == RULE_INVALID_FORCE_VIEW) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        (errmsg("Invalid force created view is not supported rename now."))));
+            }
+        }
+    }
+
     if (newschema != NULL) {
         if (targetrelation->rd_mlogoid != InvalidOid) {
             ereport(ERROR,

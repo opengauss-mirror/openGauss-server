@@ -1,0 +1,265 @@
+CREATE DATABASE "force_view_dump" dbcompatibility = 'A';
+CREATE DATABASE "force_view_restore" dbcompatibility = 'A';
+CREATE USER test_force_view PASSWORD 'gauss;123' SYSADMIN;
+\c force_view_dump
+SET SESSION AUTHORIZATION test_force_view PASSWORD 'gauss;123';
+CREATE VIEW v1_error AS select * from t1; 
+ERROR:  relation "t1" does not exist on datanode1
+LINE 1: CREATE VIEW v1_error AS select * from t1;
+                                              ^
+CREATE VIEW v2_error AS select * from t2; 
+ERROR:  relation "t2" does not exist on datanode1
+LINE 1: CREATE VIEW v2_error AS select * from t2;
+                                              ^
+CREATE FORCE VIEW v1 AS select * from v2;
+CREATE FORCE VIEW v2 AS select * from v1;
+SELECT * FROM v1;
+ERROR:  The view "v1" is invalid.
+DROP VIEW v1;
+DROP VIEW v2;
+CREATE FORCE VIEW v1 AS select * from t1;
+\d+ v1
+                       View "public.v1"
+     Column      |  Type   | Modifiers | Storage | Description 
+-----------------+---------+-----------+---------+-------------
+ dummy_force_col | integer |           | plain   | 
+View definition:
+CREATE FORCE VIEW v1 AS select * from t1;
+
+ALTER VIEW v1 RENAME TO v2;
+ERROR:  Invalid force created view is not supported rename now.
+SELECT rulename, ev_enabled, is_instead, ev_qual FROM pg_rewrite WHERE ev_class = (SELECT oid from pg_class where relname = 'v1');
+ rulename | ev_enabled | is_instead |                       ev_qual                       
+----------+------------+------------+-----------------------------------------------------
+ _RETURN  | F          | t          | "CREATE\ FORCE\ VIEW\ v1\ AS\ select\ *\ from\ t1;"
+(1 row)
+
+DROP VIEW v1;
+SELECT rulename, ev_enabled, is_instead, ev_qual FROM pg_rewrite WHERE ev_class = (SELECT oid from pg_class where relname = 'v1');
+ rulename | ev_enabled | is_instead | ev_qual 
+----------+------------+------------+---------
+(0 rows)
+
+CREATE FORCE VIEW v1 AS select * from t1;
+SELECT rulename, ev_enabled, is_instead, ev_qual FROM pg_rewrite WHERE ev_class = (SELECT oid from pg_class where relname = 'v1');
+ rulename | ev_enabled | is_instead |                       ev_qual                       
+----------+------------+------------+-----------------------------------------------------
+ _RETURN  | F          | t          | "CREATE\ FORCE\ VIEW\ v1\ AS\ select\ *\ from\ t1;"
+(1 row)
+
+CREATE FORCE VIEW v2(test_a, test_c) AS select a, c from t2; 
+\d+ v2
+                       View "public.v2"
+     Column      |  Type   | Modifiers | Storage | Description 
+-----------------+---------+-----------+---------+-------------
+ dummy_force_col | integer |           | plain   | 
+View definition:
+CREATE FORCE VIEW v2(test_a, test_c) AS select a, c from t2;
+
+CREATE TABLE t1 (a TEXT, b INT, c VARCHAR(20));
+INSERT INTO t1 VALUES ('ZhangSan', 1, 'Tianjin');
+INSERT INTO t1 VALUES ('Lisi', 2, 'Nanjing');
+SELECT * FROM v1;
+    a     | b |    c    
+----------+---+---------
+ ZhangSan | 1 | Tianjin
+ Lisi     | 2 | Nanjing
+(2 rows)
+
+\d+ v1
+                          View "public.v1"
+ Column |         Type          | Modifiers | Storage  | Description 
+--------+-----------------------+-----------+----------+-------------
+ a      | text                  |           | extended | 
+ b      | integer               |           | plain    | 
+ c      | character varying(20) |           | extended | 
+View definition:
+ SELECT  *
+   FROM t1;
+
+SELECT rulename, ev_enabled, is_instead, ev_qual FROM pg_rewrite WHERE ev_class = (SELECT oid from pg_class where relname = 'v1');
+ rulename | ev_enabled | is_instead | ev_qual 
+----------+------------+------------+---------
+ _RETURN  | O          | t          | <>
+(1 row)
+
+CREATE TABLE t2 (a TEXT, b INT, c VARCHAR(20));
+INSERT INTO t2 VALUES ('WangWu', 3, 'Beijing');
+INSERT INTO t2 VALUES ('ZhaoLiu', 4, 'Shanghai');
+SELECT * FROM v2;
+ test_a  |  test_c  
+---------+----------
+ WangWu  | Beijing
+ ZhaoLiu | Shanghai
+(2 rows)
+
+\d+ v2
+                          View "public.v2"
+ Column |         Type          | Modifiers | Storage  | Description 
+--------+-----------------------+-----------+----------+-------------
+ test_a | text                  |           | extended | 
+ test_c | character varying(20) |           | extended | 
+View definition:
+ SELECT t2.a AS test_a, t2.c AS test_c
+   FROM t2;
+
+CREATE OR REPLACE FORCE VIEW v2(test_a, test_b) AS select a, b from t2;
+ERROR:  cannot change name of view column "test_c" to "test_b"
+CREATE OR REPLACE FORCE VIEW v2(test_a, test_b) AS select a, b from t3;
+ERROR:  Force replace a valid view is not supported.
+DROP VIEW IF EXISTS v1;
+DROP VIEW IF EXISTS v2;
+DROP TABLE IF EXISTS t1;
+DROP TABLE IF EXISTS t2;
+CREATE OR REPLACE FORCE VIEW v3(name, place) AS select a, b from t3;
+CREATE VIEW v4 AS select * from v3;
+ERROR:  relation "t3" does not exist on datanode1
+CREATE OR REPLACE FORCE VIEW v3(name, place) AS select a, c from t3;
+CREATE SCHEMA force_view;
+SET search_path TO force_view;
+CREATE TABLE t3 (a TEXT, b INT, c VARCHAR(20));
+SELECT * FROM public.v3;
+ERROR:  relation "t3" does not exist on datanode1
+DROP TABLE t3;
+CREATE TABLE public.t3 (a TEXT, b INT, c VARCHAR(20));
+INSERT INTO public.t3 VALUES ('Anon', 5, 'Tokyo');
+INSERT INTO public.t3 VALUES ('Bob', 6, 'New York');
+SELECT * FROM public.v3;
+ name |  place   
+------+----------
+ Anon | Tokyo
+ Bob  | New York
+(2 rows)
+
+DROP TABLE public.t3;
+DROP VIEW public.v3;
+CREATE FORCE VIEW v5 AS select * from t5; 
+CREATE FORCE VIEW v6 AS select * from t6;
+CREATE FORCE VIEW v7(test_a, test_c) AS select a, c from t7;
+CREATE TABLE t5 (a TEXT, b INT, c VARCHAR(20));
+INSERT INTO t5 VALUES ('ZhangSan', 1, 'Tianjin');
+INSERT INTO t5 VALUES ('Lisi', 2, 'Nanjing');
+select * from v5;
+    a     | b |    c    
+----------+---+---------
+ ZhangSan | 1 | Tianjin
+ Lisi     | 2 | Nanjing
+(2 rows)
+
+RESET search_path;
+CREATE FORCE VIEW v8 AS select * from t8; 
+CREATE FORCE VIEW v9 AS select * from t9;
+CREATE FORCE VIEW v10(test_a, test_c) AS select a, c from t10;
+CREATE TABLE t8 (a TEXT, b INT, c VARCHAR(20));
+INSERT INTO t8 VALUES ('ZhangSan', 1, 'Tianjin');
+INSERT INTO t8 VALUES ('Lisi', 2, 'Nanjing');
+select * from v8;
+    a     | b |    c    
+----------+---+---------
+ ZhangSan | 1 | Tianjin
+ Lisi     | 2 | Nanjing
+(2 rows)
+
+\! @abs_bindir@/gs_dump force_view_dump -p @portstring@ -f @abs_bindir@/dump_force_view.tar -F t >/dev/null 2>&1; echo $?
+0
+DROP VIEW IF EXISTS force_view.v5;
+DROP TABLE IF EXISTS force_view.t5;
+DROP VIEW IF EXISTS force_view.v6;
+DROP VIEW IF EXISTS force_view.v7;
+DROP VIEW IF EXISTS v8;
+DROP TABLE IF EXISTS t8;
+DROP VIEW IF EXISTS v9;
+DROP VIEW IF EXISTS v10;
+\c regression
+DROP DATABASE "force_view_dump";
+\! @abs_bindir@/gs_restore -d force_view_restore -p @portstring@ @abs_bindir@/dump_force_view.tar >/dev/null 2>&1; echo $?
+0
+\c force_view_restore
+SET SESSION AUTHORIZATION test_force_view PASSWORD 'gauss;123';
+\d+ force_view.v5
+                        View "force_view.v5"
+ Column |         Type          | Modifiers | Storage  | Description 
+--------+-----------------------+-----------+----------+-------------
+ a      | text                  |           | extended | 
+ b      | integer               |           | plain    | 
+ c      | character varying(20) |           | extended | 
+View definition:
+ SELECT  *
+   FROM force_view.t5;
+
+\d+ force_view.v6
+                     View "force_view.v6"
+     Column      |  Type   | Modifiers | Storage | Description 
+-----------------+---------+-----------+---------+-------------
+ dummy_force_col | integer |           | plain   | 
+View definition:
+CREATE FORCE VIEW v6 AS select * from t6;
+
+\d+ force_view.v7
+                     View "force_view.v7"
+     Column      |  Type   | Modifiers | Storage | Description 
+-----------------+---------+-----------+---------+-------------
+ dummy_force_col | integer |           | plain   | 
+View definition:
+CREATE FORCE VIEW v7(test_a, test_c) AS select a, c from t7;
+
+\d+ v8
+                          View "public.v8"
+ Column |         Type          | Modifiers | Storage  | Description 
+--------+-----------------------+-----------+----------+-------------
+ a      | text                  |           | extended | 
+ b      | integer               |           | plain    | 
+ c      | character varying(20) |           | extended | 
+View definition:
+ SELECT  *
+   FROM t8;
+
+\d+ v9
+                       View "public.v9"
+     Column      |  Type   | Modifiers | Storage | Description 
+-----------------+---------+-----------+---------+-------------
+ dummy_force_col | integer |           | plain   | 
+View definition:
+CREATE FORCE VIEW v9 AS select * from t9;
+
+\d+ v10
+                       View "public.v10"
+     Column      |  Type   | Modifiers | Storage | Description 
+-----------------+---------+-----------+---------+-------------
+ dummy_force_col | integer |           | plain   | 
+View definition:
+CREATE FORCE VIEW v10(test_a, test_c) AS select a, c from t10;
+
+CREATE TABLE public.t10 (a TEXT, b INT, c VARCHAR(20));
+INSERT INTO public.t10 VALUES ('Anon', 5, 'Tokyo');
+INSERT INTO public.t10 VALUES ('Bob', 6, 'New York');
+select * from t10;
+  a   | b |    c     
+------+---+----------
+ Anon | 5 | Tokyo
+ Bob  | 6 | New York
+(2 rows)
+
+CREATE TABLE force_view.t7 (a TEXT, b INT, c VARCHAR(20));
+INSERT INTO force_view.t7 VALUES ('Anon', 5, 'Tokyo');
+INSERT INTO force_view.t7 VALUES ('Bob', 6, 'New York');
+select * from force_view.v7;
+ test_a |  test_c  
+--------+----------
+ Anon   | Tokyo
+ Bob    | New York
+(2 rows)
+
+DROP VIEW IF EXISTS force_view.v5;
+DROP TABLE IF EXISTS force_view.t5;
+DROP VIEW IF EXISTS force_view.v6;
+DROP VIEW IF EXISTS force_view.v7;
+DROP TABLE IF EXISTS force_view.t7;
+DROP VIEW IF EXISTS v8;
+DROP TABLE IF EXISTS t8;
+DROP VIEW IF EXISTS v9;
+DROP VIEW IF EXISTS v10;
+DROP TABLE IF EXISTS t10;
+\c regression
+DROP DATABASE "force_view_restore";
+DROP USER test_force_view CASCADE;

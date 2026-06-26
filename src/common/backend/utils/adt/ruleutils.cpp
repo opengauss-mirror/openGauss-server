@@ -90,6 +90,7 @@
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteSupport.h"
+#include "rewrite/rewriteDefine.h"
 #include "utils/int16.h"
 #include "utils/acl.h"
 #include "utils/array.h"
@@ -6086,6 +6087,7 @@ static void make_viewdef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc, i
     Oid ev_class;
     int2 ev_attr;
     bool is_instead = false;
+    char ev_enabled;
     char* ev_qual = NULL;
     char* ev_action = NULL;
     List* actions = NIL;
@@ -6108,6 +6110,9 @@ static void make_viewdef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc, i
     fno = SPI_fnumber(rulettc, "is_instead");
     is_instead = (bool)SPI_getbinval(ruletup, rulettc, fno, &isnull);
 
+    fno = SPI_fnumber(rulettc, "ev_enabled");
+    ev_enabled = (char)SPI_getbinval(ruletup, rulettc, fno, &isnull);
+
     fno = SPI_fnumber(rulettc, "ev_qual");
     ev_qual = SPI_getvalue(ruletup, rulettc, fno);
 
@@ -6115,6 +6120,17 @@ static void make_viewdef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc, i
     ev_action = SPI_getvalue(ruletup, rulettc, fno);
     if (ev_action != NULL)
         actions = (List*)stringToNode(ev_action);
+
+    if (ev_qual && (strcmp(ev_qual, "<>") != 0) && (ev_enabled == RULE_INVALID_FORCE_VIEW)) {
+        Node* node = (Node*)stringToNode(ev_qual);
+        if (IsA(node, String)) {
+            char* rawSql = strVal(node);
+            appendStringInfo(buf, "%s", rawSql);
+        } else {
+            appendStringInfo(buf, "Invalid view definition.");
+        }
+        return;
+    }
 
     if (list_length(actions) != 1) {
         appendStringInfo(buf, "Not a view");

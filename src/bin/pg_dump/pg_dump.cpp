@@ -20158,10 +20158,18 @@ static void dumpViewSchema(
     char* schemainfo = NULL;
     PGresult* defres = NULL;
     PGresult* schemares = NULL;
+    bool isInvalidForceView = false;
 
-    /* Beginning in 7.3, viewname is not unique; rely on OID */
+    /* 
+     * Beginning in 7.3, viewname is not unique; rely on OID.
+     * Query the view definition and check pg_rewrite to see if it is 
+     * an invalid force view with 'F' status. 
+     */
     appendPQExpBuffer(
-        query, "SELECT pg_catalog.pg_get_viewdef('%u'::pg_catalog.oid) AS viewdef", tbinfo->dobj.catId.oid);
+        query, "SELECT pg_catalog.pg_get_viewdef('%u'::pg_catalog.oid) AS viewdef, "
+        "(SELECT ev_enabled FROM pg_catalog.pg_rewrite WHERE ev_class = '%u' AND rulename = '_RETURN') AS ev_enabled", 
+        tbinfo->dobj.catId.oid, tbinfo->dobj.catId.oid);
+
     defres = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
     if (PQntuples(defres) != 1) {
@@ -20173,26 +20181,38 @@ static void dumpViewSchema(
                 fmtId(tbinfo->dobj.name));
     }
 
+    /* Extract the status flag and evaluate, mark 'F' */
+    if (!PQgetisnull(defres, 0, 1)) {
+        char* ev_enabled_str = PQgetvalue(defres, 0, 1);
+        if (ev_enabled_str[0] == 'F') {
+            isInvalidForceView = true;
+        }
+    }
+
     viewdef = PQgetvalue(defres, 0, 0);
 
     if (strlen(viewdef) == 0) {
         exit_horribly(NULL, "definition of view %s appears to be empty (length zero)\n", fmtId(tbinfo->dobj.name));
     }
 
-    /* Fetch views'schema info */
-    resetPQExpBuffer(query);
-    appendPQExpBuffer(query,
-        "SELECT pg_catalog.string_agg(attname, ',') as schema FROM("
-        "SELECT pg_catalog.quote_ident(attname) as attname FROM pg_catalog.pg_attribute "
-        "WHERE attrelid = '%u' AND attnum > 0 AND NOT attisdropped ORDER BY attnum)",
-        tbinfo->dobj.catId.oid);
-    schemares = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-    if (PQntuples(schemares) < 1)
-        exit_horribly(NULL, "query to obtain schema info of view %s returned no data\n", fmtId(tbinfo->dobj.name));
-    else {
-        schemainfo = PQgetvalue(schemares, 0, 0);
-        if (strlen(schemainfo) == 0)
-            exit_horribly(NULL, "schema info of view %s appears to be empty (length zero)\n", fmtId(tbinfo->dobj.name));
+    /* Invalid force view's attr(dummy_force_col) should not be fetched */
+    if (!isInvalidForceView) {
+        /* Fetch views'schema info */
+        resetPQExpBuffer(query);
+        appendPQExpBuffer(query,
+            "SELECT pg_catalog.string_agg(attname, ',') as schema FROM("
+            "SELECT pg_catalog.quote_ident(attname) as attname FROM pg_catalog.pg_attribute "
+            "WHERE attrelid = '%u' AND attnum > 0 AND NOT attisdropped ORDER BY attnum)",
+            tbinfo->dobj.catId.oid);
+        schemares = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+        if (PQntuples(schemares) < 1) {
+            exit_horribly(NULL, "query to obtain schema info of view %s returned no data\n", fmtId(tbinfo->dobj.name));
+        } else {
+            schemainfo = PQgetvalue(schemares, 0, 0);
+            if (strlen(schemainfo) == 0) {
+                exit_horribly(NULL, "schema info of view %s appears to be empty (length zero)\n", fmtId(tbinfo->dobj.name));
+            }    
+        }
     }
 
     /*
@@ -20214,26 +20234,36 @@ static void dumpViewSchema(
         appendPQExpBuffer(q, "%s CASCADE;\n", fmtId(tbinfo->dobj.name));
     }
 
-    appendPQExpBuffer(q, "CREATE ");
-    if (tbinfo->viewsecurity != NULL)
-        appendPQExpBuffer(q, "\n  SQL SECURITY %s \n   ", tbinfo->viewsecurity);
-        
-    appendPQExpBuffer(q, "VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
-    if ((tbinfo->reloptions != NULL) && strlen(tbinfo->reloptions) > 0)
-        appendPQExpBuffer(q, " WITH (%s)", tbinfo->reloptions);
-    appendPQExpBuffer(q, " AS\n    ");
+    if (isInvalidForceView) {
+        appendPQExpBuffer(q, "%s", viewdef);
+        if (viewdef[strlen(viewdef) - 1] != ';') {
+            appendPQExpBuffer(q, ";\n");
+        } else {
+            appendPQExpBuffer(q, "\n");
+        }
+    } else {
+        appendPQExpBuffer(q, "CREATE ");
+        if (tbinfo->viewsecurity != NULL)
+            appendPQExpBuffer(q, "\n  SQL SECURITY %s \n   ", tbinfo->viewsecurity);
+            
+        appendPQExpBuffer(q, "VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
+        if ((tbinfo->reloptions != NULL) && strlen(tbinfo->reloptions) > 0)
+            appendPQExpBuffer(q, " WITH (%s)", tbinfo->reloptions);
+        appendPQExpBuffer(q, " AS\n    ");
 
-    Assert(viewdef[strlen(viewdef) - 1] == ';');
-    appendBinaryPQExpBuffer(q, viewdef, strlen(viewdef) - 1);
+        Assert(viewdef[strlen(viewdef) - 1] == ';');
+        appendBinaryPQExpBuffer(q, viewdef, strlen(viewdef) - 1);
 
-    if (tbinfo->checkoption != NULL)
-        appendPQExpBuffer(q, "\n  WITH %s CHECK OPTION", tbinfo->checkoption);
-    appendPQExpBuffer(q, ";\n");
+        if (tbinfo->checkoption != NULL)
+            appendPQExpBuffer(q, "\n  WITH %s CHECK OPTION", tbinfo->checkoption);
+        appendPQExpBuffer(q, ";\n");
+    }
 
     appendPQExpBuffer(labelq, "VIEW %s", fmtId(tbinfo->dobj.name));
 
     PQclear(defres);
-    PQclear(schemares);
+    if (schemares != NULL)
+        PQclear(schemares);
 }
 
 bool isColumnStoreTable(const TableInfo *tbinfo)

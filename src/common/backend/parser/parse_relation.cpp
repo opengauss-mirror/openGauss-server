@@ -68,6 +68,8 @@
 #include "storage/mot/jit_def.h"
 #endif
 #include "rewrite/rewriteManip.h"
+#include "rewrite/rewriteDefine.h"
+#include "commands/view.h"
 
 #define MAXSTRLEN ((1 << 11) - 1)
 
@@ -1651,6 +1653,28 @@ bool ValidateDependViewDetectRecursion(Oid viewOid, char objType, bool force, Li
 }
 
 /*
+ * GetForceViewSqlText
+ *      If the relation is an invalid force view, extract its original SQL definition.
+ */
+static char* GetForceViewSqlText(Relation rel)
+{
+    if (rel->rd_rules == NULL) {
+        return NULL;
+    }
+
+    for (int i = 0; i < rel->rd_rules->numLocks; i++) {
+        RewriteRule* rule = rel->rd_rules->rules[i];
+        if (rule->enabled == RULE_INVALID_FORCE_VIEW) {
+            if (rule->qual != NULL) {
+                return pstrdup_ext(strVal(rule->qual));
+            }
+            break;
+        }
+    }
+    return NULL;
+}
+
+/*
  * Open a table during parse analysis
  *
  * This is essentially just the same as heap_openrv(), except that it caters
@@ -1805,7 +1829,35 @@ Relation parserOpenTable(ParseState *pstate, const RangeVar *relation, int lockm
                 errmsg("relation \"%s\" has data only in database \"postgres\"", relation->relname),
                 errhint("please use database \"postgres\"")));
     }
-    
+
+    if (RelationGetRelkind(rel) == RELKIND_VIEW && rel->rd_rules != NULL) {
+        char* sqlText = GetForceViewSqlText(rel);
+        
+        if (sqlText != NULL) {
+            Oid relid = RelationGetRelid(rel);
+            /* Save the view name before closing, since rel will be invalid afterwards. */
+            char* viewName = pstrdup_ext(RelationGetRelationName(rel));
+            /* close dummy table */
+            relation_close(rel, lockmode);
+
+            bool success = AutoRecompileForceView(relid, sqlText);
+            pfree_ext(sqlText);
+
+            if (!success) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("The view \"%s\" is invalid.",
+                            viewName)));
+            }
+
+            pfree_ext(viewName);
+
+            /* Reopen the true valid view. */
+            AcceptInvalidationMessages();
+            rel = relation_open(relid, lockmode);
+        }
+    }
+
     if (RelationGetRelkind(rel) == RELKIND_VIEW &&
         RelationGetRelid(rel) >= FirstNormalObjectId) {
         if (!ValidateDependView(RelationGetRelid(rel), OBJECT_TYPE_VIEW)) {

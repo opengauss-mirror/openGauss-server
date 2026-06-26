@@ -2316,6 +2316,7 @@ typedef struct ViewStmt {
     struct PGXCSubCluster* subcluster; /* subcluster of table */
 #endif
     ViewCheckOption	withCheckOption; /* WITH CHECK OPTION */
+    bool is_force;          /* force to create view */
 } ViewStmt;
 
 /* ----------------------

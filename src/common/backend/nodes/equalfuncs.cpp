@@ -1908,6 +1908,7 @@ static bool _equalViewStmt(const ViewStmt* a, const ViewStmt* b)
     COMPARE_SCALAR_FIELD(is_alter);
     COMPARE_SCALAR_FIELD(viewSecurityOption);
     COMPARE_SCALAR_FIELD(withCheckOption);
+    COMPARE_SCALAR_FIELD(is_force);
 
     return true;
 }

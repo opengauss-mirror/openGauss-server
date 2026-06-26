@@ -1184,3 +1184,5 @@ test: dump_alter_index_invisible nls_lower
 # test remotetype=coordinator trust bypass security
 test: remotetype_trust_security
 
+# test create force view
+test: create_force_view

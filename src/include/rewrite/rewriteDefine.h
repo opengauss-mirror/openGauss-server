@@ -22,6 +22,7 @@
 #define RULE_FIRES_ALWAYS 'A'
 #define RULE_FIRES_ON_REPLICA 'R'
 #define RULE_DISABLED 'D'
+#define RULE_INVALID_FORCE_VIEW 'F'
 
 extern ObjectAddress DefineRule(RuleStmt* stmt, const char* queryString);
 

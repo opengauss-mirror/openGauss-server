@@ -23,6 +23,12 @@
 #include "catalog/namespace.h"
 #include "catalog/gs_column_keys.h"
 #include "catalog/gs_encrypted_columns.h"
+#include "catalog/pg_rewrite.h"
+#include "catalog/pg_depend.h"
+#include "catalog/pg_collation.h"
+#include "catalog/dependency.h"
+#include "catalog/indexing.h"
+#include "catalog/catalog.h"
 #include "client_logic/cache.h"
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
@@ -32,6 +38,7 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/analyze.h"
+#include "parser/parser.h"
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteDefine.h"
@@ -41,6 +48,7 @@
 #include "optimizer/nodegroups.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -113,6 +121,171 @@ static void setEncryptedColumnRef(ColumnDef *def, TargetEntry *tle)
  * for the view.
  * ---------------------------------------------------------------------
  */
+/*
+ * UpdateForceViewColumnDependency
+ *
+ * When an invalid force view becomes valid, its placeholder first column
+ * (dummy_force_col) is rewritten in pg_attribute to the real first column.
+ * We must keep pg_depend consistent: drop the old column's datatype/collation
+ * dependency records and record the dependency on the new datatype/collation.
+ * Otherwise dropping a user-defined type used by the new column would not be
+ * blocked, leaving a dangling reference.
+ */
+static void UpdateForceViewColumnDependency(Oid viewOid, AttrNumber attnum, Oid oldTypid,
+                                            Oid oldCollid, Form_pg_attribute newAttr)
+{
+    Oid newTypid = newAttr->atttypid;
+    Oid newCollid = newAttr->attcollation;
+    Relation depRel = heap_open(DependRelationId, RowExclusiveLock);
+    ScanKeyData key[3];
+    SysScanDesc scan;
+    HeapTuple depTup;
+
+    ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(RelationRelationId));
+    ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(viewOid));
+    ScanKeyInit(&key[2], Anum_pg_depend_objsubid, BTEqualStrategyNumber, F_INT4EQ,
+                Int32GetDatum((int32)attnum));
+
+    scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, 3, key);
+    while (HeapTupleIsValid(depTup = systable_getnext(scan))) {
+        Form_pg_depend foundDep = (Form_pg_depend)GETSTRUCT(depTup);
+        /* Only remove the old datatype/collation dependency of this column. */
+        if ((foundDep->refclassid == TypeRelationId && foundDep->refobjid == oldTypid) ||
+            (foundDep->refclassid == CollationRelationId && foundDep->refobjid == oldCollid)) {
+            simple_heap_delete(depRel, &depTup->t_self);
+        }
+    }
+    systable_endscan(scan);
+    heap_close(depRel, RowExclusiveLock);
+
+    /* Record dependency on the new datatype. */
+    ObjectAddress myself;
+    ObjectAddress referenced;
+    myself.classId = RelationRelationId;
+    myself.objectId = viewOid;
+    myself.objectSubId = attnum;
+    referenced.classId = TypeRelationId;
+    referenced.objectId = newTypid;
+    referenced.objectSubId = 0;
+    recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+
+    /* Record dependency on the new collation (default collation is pinned). */
+    if (OidIsValid(newCollid) && newCollid != DEFAULT_COLLATION_OID) {
+        referenced.classId = CollationRelationId;
+        referenced.objectId = newCollid;
+        referenced.objectSubId = 0;
+        recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+    }
+}
+
+/*
+ * IsForceViewInvalid
+ *      Check if the given view relation is currently an invalid force view.
+ */
+static inline bool IsForceViewInvalid(Relation rel)
+{
+    if (rel == NULL || rel->rd_rules == NULL) {
+        return false;
+    }
+
+    for (int i = 0; i < rel->rd_rules->numLocks; i++) {
+        if (rel->rd_rules->rules[i]->enabled == RULE_INVALID_FORCE_VIEW) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+ * CheckViewDefinerPermissions
+ *      Verify that the definer role has CREATE permissions on the namespace.
+ */
+static void CheckViewDefinerPermissions(RangeVar* relation, ObjectType relkind, const char* definer, bool is_alter)
+{
+    if (definer == NULL) {
+        return;
+    }
+
+    /* Get owner to check the permissions. */
+    Oid ownerOid = get_role_oid(definer, false);
+    bool isOwnerChange = false;
+    if (!OidIsValid(ownerOid)) {
+        ownerOid = GetUserId();
+    } else if (ownerOid != GetUserId()) {
+        isOwnerChange = true;
+    }
+    
+    if (isOwnerChange && !is_alter) {
+        /* Check namespace permissions. */
+        AclResult aclresult;
+        Oid namespaceId = RangeVarGetAndCheckCreationNamespace(relation, NoLock, NULL, relkind);
+        aclresult = pg_namespace_aclcheck(namespaceId, ownerOid, ACL_CREATE);
+        bool anyResult = false;
+        if (aclresult != ACLCHECK_OK && !IsSysSchema(namespaceId)) {
+            anyResult = CheckRelationCreateAnyPrivilege(ownerOid, relkind);
+        }
+        if (aclresult != ACLCHECK_OK && !anyResult) {
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+        }
+    }
+}
+
+/*
+ * BuildViewColumnAlterCmds
+ *      Build AlterTableCmd list to add or drop columns for the view during replacement.
+ */
+static List* BuildViewColumnAlterCmds(Relation rel, List* attrList, bool oldViewForceInvalid, bool flag)
+{
+    List* atcmds = NIL;
+    AlterTableCmd* atcmd = NULL;
+
+    if (oldViewForceInvalid) {
+        ListCell* lc = NULL;
+        int skip = 1;
+
+        foreach (lc, attrList) {
+            if (skip > 0) {
+                skip--;
+                continue;
+            }
+            atcmd = makeNode(AlterTableCmd);
+            atcmd->subtype = AT_AddColumnToView;
+            atcmd->def = (Node*)lfirst(lc);
+            atcmds = lappend(atcmds, atcmd);
+        }
+    } else {
+        if (list_length(attrList) > rel->rd_att->natts) {
+            ListCell* c = NULL;
+            int skip = rel->rd_att->natts;
+
+            foreach (c, attrList) {
+                if (skip > 0) {
+                    skip--;
+                    continue;
+                }
+                atcmd = makeNode(AlterTableCmd);
+                atcmd->subtype = AT_AddColumnToView;
+                atcmd->def = (Node*)lfirst(c);
+                atcmds = lappend(atcmds, atcmd);
+            }
+        } else if (flag) {
+            for (int dropcolno = rel->rd_att->natts - 1; dropcolno >= list_length(attrList); dropcolno--) {
+                atcmd = makeNode(AlterTableCmd);
+                atcmd->subtype = AT_DropColumn;
+                atcmd->name = rel->rd_att->attrs[dropcolno].attname.data;
+                atcmd->behavior = DROP_RESTRICT;
+                atcmd->missing_ok = true;
+                atcmds = lappend(atcmds, atcmd);
+            }
+        }
+    }
+
+    return atcmds;
+}
+
 static ObjectAddress DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, List* options, ObjectType relkind,
                                     ViewStmt* stmt, Query* viewParse)
 {
@@ -225,91 +398,81 @@ static ObjectAddress DefineVirtualRelation(RangeVar* relation, List* tlist, bool
          * column list.
          */
         descriptor = BuildDescForRelation(attrList, (Node*)makeString(ORIENTATION_ROW));
+        bool oldViewForceInvalid = IsForceViewInvalid(rel);
+        if (oldViewForceInvalid) {
+            Relation attrRel = heap_open(AttributeRelationId, RowExclusiveLock);
+            HeapTuple oldTup = SearchSysCache2(ATTNUM, ObjectIdGetDatum(viewOid), Int16GetDatum(1));
+            if (HeapTupleIsValid(oldTup)) {
+                HeapTuple newTup = heap_copytuple(oldTup);
+                Form_pg_attribute attStruct = (Form_pg_attribute)GETSTRUCT(newTup);
+                /* Get first attr for new view. */
+                Form_pg_attribute newStruct = &descriptor->attrs[0];
 
-        /*
-         * During inplace or online upgrade, we may need to drop newly-added
-         * view columns to perform rollback. Since these columns should have
-         * not been visible to users, we just skip the safety check.
-         */
-        if (!u_sess->attr.attr_common.IsInplaceUpgrade) {
-            PG_TRY();
-            {
-                checkViewTupleDesc(descriptor, rel->rd_att);
-            }
-            PG_CATCH();
-            {
-                relation_close(rel, NoLock);
-                PG_RE_THROW();
-            }
-            PG_END_TRY();
-        }
+                /* Remember the placeholder column's old type/collation for pg_depend cleanup. */
+                Oid oldTypid = attStruct->atttypid;
+                Oid oldCollid = attStruct->attcollation;
+                namestrcpy(&(attStruct->attname), NameStr(newStruct->attname));
+                attStruct->atttypid = newStruct->atttypid;
+                attStruct->atttypmod = newStruct->atttypmod;
+                attStruct->attcollation = newStruct->attcollation;
+                attStruct->attlen = newStruct->attlen;
+                attStruct->attbyval = newStruct->attbyval;
+                attStruct->attalign = newStruct->attalign;
+                attStruct->attstorage = newStruct->attstorage;
+                attStruct->attndims = newStruct->attndims;
+                simple_heap_update(attrRel, &newTup->t_self, newTup);
+                CatalogUpdateIndexes(attrRel, newTup);
 
-        /* 
-         * set definer by AlterTameCmd
-         */
-        if (definer != NULL) {
-            /* Get owner to check the permissions. */
-            Oid ownerOid = get_role_oid(definer, false);
-            bool isOwnerChange = false;
-            if (!OidIsValid(ownerOid)) {
-                ownerOid = GetUserId();
-            } else if (ownerOid != GetUserId()) {
-                isOwnerChange = true;
+                /* Keep pg_depend consistent for the rewritten first column. */
+                UpdateForceViewColumnDependency(viewOid, 1, oldTypid, oldCollid, newStruct);
+                heap_freetuple(newTup);
+                ReleaseSysCache(oldTup);
             }
-            
-            if (isOwnerChange && !is_alter) {
-                /* Check namespace permissions. */
-                AclResult aclresult;
-                Oid namespaceId = RangeVarGetAndCheckCreationNamespace(relation, NoLock, NULL, relkind);
-                aclresult = pg_namespace_aclcheck(namespaceId, ownerOid, ACL_CREATE);
-                bool anyResult = false;
-                if (aclresult != ACLCHECK_OK && !IsSysSchema(namespaceId)) {
-                    anyResult = CheckRelationCreateAnyPrivilege(ownerOid, relkind);
+            heap_close(attrRel, RowExclusiveLock);
+            CommandCounterIncrement();
+            RelationCacheInvalidateEntry(viewOid);
+        } else {
+            /*
+             * During inplace or online upgrade, we may need to drop newly-added
+             * view columns to perform rollback. Since these columns should have
+             * not been visible to users, we just skip the safety check.
+             */
+            if (!u_sess->attr.attr_common.IsInplaceUpgrade) {
+                PG_TRY();
+                {
+                    checkViewTupleDesc(descriptor, rel->rd_att);
                 }
-                if (aclresult != ACLCHECK_OK && !anyResult) {
-                    aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+                PG_CATCH();
+                {
+                    relation_close(rel, NoLock);
+                    PG_RE_THROW();
                 }
+                PG_END_TRY();
             }
-            atcmd = makeNode(AlterTableCmd);
-            atcmd->subtype = AT_ChangeOwner;
-            atcmd->name = definer;
-            atcmds = lappend(atcmds, atcmd);
-        }
 
-        /*
-         * If new attributes have been added, we must add pg_attribute entries
-         * for them.  It is convenient (although overkill) to use the ALTER
-         * TABLE ADD COLUMN infrastructure for this.
-         *
-         * When we roll back upgrade by dropping view columns, we use the
-         * ALTER TABLE DROP COLUMN infrastructure.
-         */
-        flag = (list_length(attrList) < rel->rd_att->natts) && u_sess->attr.attr_common.IsInplaceUpgrade;
-        if (list_length(attrList) > rel->rd_att->natts) {
-            ListCell* c = NULL;
-            int skip = rel->rd_att->natts;
-
-            foreach (c, attrList) {
-                if (skip > 0) {
-                    skip--;
-                    continue;
-                }
+            /*
+             * set definer by AlterTameCmd
+             */
+            if (definer != NULL) {
+                CheckViewDefinerPermissions(relation, relkind, definer, is_alter);
                 atcmd = makeNode(AlterTableCmd);
-                atcmd->subtype = AT_AddColumnToView;
-                atcmd->def = (Node*)lfirst(c);
+                atcmd->subtype = AT_ChangeOwner;
+                atcmd->name = definer;
                 atcmds = lappend(atcmds, atcmd);
             }
-        } else if (flag) {
-            for (int dropcolno = rel->rd_att->natts - 1; dropcolno >= list_length(attrList); dropcolno--) {
-                atcmd = makeNode(AlterTableCmd);
-                atcmd->subtype = AT_DropColumn;
-                atcmd->name = rel->rd_att->attrs[dropcolno].attname.data;
-                atcmd->behavior = DROP_RESTRICT;
-                atcmd->missing_ok = true;
-                atcmds = lappend(atcmds, atcmd);
-            }
-        }
 
+            /*
+            * If new attributes have been added, we must add pg_attribute entries
+            * for them.  It is convenient (although overkill) to use the ALTER
+            * TABLE ADD COLUMN infrastructure for this.
+            *
+            * When we roll back upgrade by dropping view columns, we use the
+            * ALTER TABLE DROP COLUMN infrastructure.
+            */
+            flag = (list_length(attrList) < rel->rd_att->natts) && u_sess->attr.attr_common.IsInplaceUpgrade;
+        }
+        List* colCmds = BuildViewColumnAlterCmds(rel, attrList, oldViewForceInvalid, flag);
+        atcmds = list_concat(atcmds, colCmds);
         if (atcmds) {
             AlterTableInternal(viewOid, atcmds, true);
 
@@ -412,6 +575,275 @@ static ObjectAddress DefineVirtualRelation(RangeVar* relation, List* tlist, bool
 
         return address;
     }
+}
+
+static void StoreInvalidForceViewQuery(Oid viewOid, const char* queryString)
+{
+    Relation rewriteDesc;
+    HeapTuple tup;
+    HeapTuple oldtup;
+    Datum values[Natts_pg_rewrite];
+    bool nulls[Natts_pg_rewrite];
+    bool replaces[Natts_pg_rewrite];
+    NameData ruleName;
+
+    errno_t rc = memset_s(values, sizeof(values), 0, sizeof (values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof (nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof (replaces));
+    securec_check(rc, "\0", "\0");
+    namestrcpy(&ruleName, ViewSelectRuleName);
+
+    Node* sqlNode = (Node*)makeString(pstrdup(queryString));
+    char* qualStr = nodeToString(sqlNode);
+    char* actionStr = nodeToString(NIL);
+    
+    values[Anum_pg_rewrite_rulename - 1] = NameGetDatum(&ruleName);
+    values[Anum_pg_rewrite_ev_class - 1] = ObjectIdGetDatum(viewOid);
+    values[Anum_pg_rewrite_ev_attr - 1] = Int16GetDatum(-1);
+    values[Anum_pg_rewrite_ev_type - 1] = CharGetDatum(CMD_SELECT + '0');
+    values[Anum_pg_rewrite_ev_enabled - 1] = CharGetDatum(RULE_INVALID_FORCE_VIEW);
+    values[Anum_pg_rewrite_is_instead - 1] = BoolGetDatum(true);
+    values[Anum_pg_rewrite_ev_qual - 1] = CStringGetTextDatum(qualStr);
+    values[Anum_pg_rewrite_ev_action - 1] = CStringGetTextDatum(actionStr);
+
+    rewriteDesc = heap_open(RewriteRelationId, RowExclusiveLock);
+    oldtup = SearchSysCache2(RULERELNAME,
+                             ObjectIdGetDatum(viewOid),
+                             PointerGetDatum(ViewSelectRuleName));
+    if (HeapTupleIsValid(oldtup)) {
+        for (int i = 0; i < Natts_pg_rewrite; i++) {
+            replaces[i] = true;
+        }
+        tup = heap_modify_tuple(oldtup, RelationGetDescr(rewriteDesc), values, nulls, replaces);
+        simple_heap_update(rewriteDesc, &tup->t_self, tup);
+        CatalogUpdateIndexes(rewriteDesc, tup);
+        ReleaseSysCache(oldtup);
+    } else {
+        tup = heap_form_tuple(RelationGetDescr(rewriteDesc), values, nulls);
+        Oid ruleOid = GetNewOid(rewriteDesc);
+        HeapTupleSetOid(tup, ruleOid);
+        (void)simple_heap_insert(rewriteDesc, tup);
+        CatalogUpdateIndexes(rewriteDesc, tup);
+
+        ObjectAddress myself;
+        ObjectAddress referenced;
+        myself.classId = RewriteRelationId;
+        myself.objectId = ruleOid;
+        myself.objectSubId = 0;
+
+        referenced.classId = RelationRelationId;
+        referenced.objectId = viewOid;
+        referenced.objectSubId = 0;
+        recordDependencyOn(&myself, &referenced, DEPENDENCY_AUTO);
+    }
+
+    if (tup != NULL) {
+        heap_freetuple(tup);
+    }
+    heap_close(rewriteDesc, RowExclusiveLock);
+    pfree_ext(qualStr);
+    pfree_ext(actionStr);
+    if (sqlNode) {
+        pfree_ext(((Value*)sqlNode)->val.str);
+        pfree_ext(sqlNode);
+    }
+    SetRelationRuleStatus(viewOid, true, false);
+}
+
+/* ---------------------------------------------------------------------
+ * DefineVirtualForceRelation
+ *
+ * Create a view relation and set the sql text
+ * for the view.
+ * ---------------------------------------------------------------------
+ */
+static ObjectAddress DefineVirtualForceRelation(RangeVar* relation, bool replace, List* options,
+                                    ObjectType relkind, ViewStmt* stmt, const char* queryString)
+{
+    Oid viewOid;
+    LOCKMODE lockmode;
+    ObjectAddress address;
+    char* definer = stmt->definer;
+    bool is_alter = stmt->is_alter;
+
+    lockmode = replace ? AccessExclusiveLock : NoLock;
+    (void)RangeVarGetAndCheckCreationNamespace(relation, lockmode, &viewOid, RELKIND_VIEW);
+
+    if (OidIsValid(viewOid) && replace) {
+        Relation rel;
+        bool isExistInvalid = false;
+        if (u_sess->attr.attr_common.IsInplaceUpgrade)
+            RelationCacheInvalidateEntry(viewOid);
+        rel = relation_open(viewOid, NoLock);
+        if (rel->rd_rel->relkind != RELKIND_VIEW && rel->rd_rel->relkind != RELKIND_CONTQUERY) {
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("\"%s\" is not a view.", RelationGetRelationName(rel))));
+        }
+
+        CheckTableNotInUse(rel, "CREATE OR REPLACE VIEW");
+        isExistInvalid = IsForceViewInvalid(rel);
+        if (!isExistInvalid) {
+            relation_close(rel, NoLock);
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Force replace a valid view is not supported.")));
+        }
+
+        StoreInvalidForceViewQuery(viewOid, queryString);
+        CommandCounterIncrement();
+        relation_close(rel, NoLock);
+        ObjectAddressSet(address, RelationRelationId, viewOid);
+        return address;
+    } else {
+        CreateStmt* createStmt = makeNode(CreateStmt);
+        List* attrList = NIL;
+        ColumnDef* def = makeNode(ColumnDef);
+
+        def->colname = pstrdup("dummy_force_col");
+        def->typname = makeTypeName("int4");
+        def->inhcount = 0;
+        def->is_local = true;
+        def->is_not_null = false;
+        def->storage = 0;
+        def->cmprs_mode = ATT_CMPR_NOCOMPRESS;
+        def->raw_default = NULL;
+        def->update_default = NULL;
+        def->cooked_default = NULL;
+        def->collClause = NULL;
+        def->collOid = InvalidOid;
+        def->constraints = NIL;
+
+        attrList = list_make1(def);
+
+        createStmt->relation = relation;
+        createStmt->tableElts = attrList;
+        createStmt->inhRelations = NIL;
+        createStmt->constraints = NIL;
+        createStmt->options = lappend(options, defWithOids(false));
+        createStmt->oncommit = ONCOMMIT_NOOP;
+        createStmt->tablespacename = NULL;
+        createStmt->if_not_exists = false;
+        createStmt->charset = PG_INVALID_ENCODING;
+
+        Oid ownerOid = InvalidOid;
+
+        if (relkind == OBJECT_CONTQUERY) {
+            address = DefineRelation(createStmt, RELKIND_CONTQUERY, ownerOid, NULL);
+        } else {
+            address = DefineRelation(createStmt, RELKIND_VIEW, ownerOid, NULL);
+        }
+
+        CommandCounterIncrement();
+
+        StoreInvalidForceViewQuery(address.objectId, queryString);
+
+        return address;
+    }
+}
+
+/*
+ * ResetForceViewRuleStatus
+ *      Change the view's select rule status from RULE_INVALID_FORCE_VIEW to RULE_FIRES_ON_ORIGIN.
+ */
+static void ResetForceViewRuleStatus(Oid viewOid)
+{
+    Relation rewriteDesc = heap_open(RewriteRelationId, RowExclusiveLock);
+    HeapTuple oldTup = SearchSysCache2(RULERELNAME,
+                                       ObjectIdGetDatum(viewOid),
+                                       PointerGetDatum(ViewSelectRuleName));
+    if (HeapTupleIsValid(oldTup)) {
+        Form_pg_rewrite rewriteForm = (Form_pg_rewrite)GETSTRUCT(oldTup);
+        if (rewriteForm->ev_enabled == RULE_INVALID_FORCE_VIEW) {
+            HeapTuple newTup = heap_copytuple(oldTup);
+            ((Form_pg_rewrite)GETSTRUCT(newTup))->ev_enabled = RULE_FIRES_ON_ORIGIN;
+
+            simple_heap_update(rewriteDesc, &newTup->t_self, newTup);
+            CatalogUpdateIndexes(rewriteDesc, newTup);
+            heap_freetuple(newTup);
+        }
+        ReleaseSysCache(oldTup);
+    }
+    heap_close(rewriteDesc, RowExclusiveLock);
+}
+
+/*
+ * AutoRecompileForceView
+ *
+ * reparse the sql and add replace delete force
+ * retry the create view.
+ */
+bool AutoRecompileForceView(Oid viewOid, const char* queryString)
+{
+    bool success = false;
+    int save_nestlevel = 0;
+    bool guc_changed = false;
+
+    if (list_member_oid(u_sess->utils_cxt.force_view_recompile_oids, viewOid)) {
+        return false;
+    }
+    u_sess->utils_cxt.force_view_recompile_oids = lappend_oid(u_sess->utils_cxt.force_view_recompile_oids, viewOid);
+
+    PG_TRY();
+    {
+        List* raw_parsetree_list = raw_parser(queryString, NULL);
+
+        if (raw_parsetree_list != NIL) {
+            Node* stmt = (Node*)linitial(raw_parsetree_list);
+            if (IsA(stmt, ViewStmt)) {
+                ViewStmt* vstmt = (ViewStmt*)stmt;
+                vstmt->replace = true;
+                vstmt->is_force = false;
+                Oid nspOid = get_rel_namespace(viewOid);
+                char* schemaName = get_namespace_name(nspOid);
+
+                if (vstmt->view != NULL && vstmt->view->schemaname == NULL) {
+                    vstmt->view->schemaname = pstrdup_ext(schemaName);
+                }
+
+                save_nestlevel = NewGUCNestLevel();
+                (void)set_config_option("search_path", schemaName,
+                    PGC_USERSET, PGC_S_SESSION, GUC_ACTION_SAVE, true, 0, false);
+                guc_changed = true;
+                processutility_context proutility_cxt;
+                proutility_cxt.parse_tree = stmt;
+                proutility_cxt.query_string = queryString;
+                proutility_cxt.readOnlyTree = false;
+                proutility_cxt.params = NULL;
+                proutility_cxt.is_top_level = false;
+
+                ProcessUtility(&proutility_cxt,
+                               None_Receiver,
+                               true,
+                               NULL,
+                               PROCESS_UTILITY_SUBCOMMAND,
+                               false);
+
+                AtEOXact_GUC(false, save_nestlevel);
+                guc_changed = false;
+                pfree_ext(schemaName);
+                ResetForceViewRuleStatus(viewOid);
+                CommandCounterIncrement();
+                success = true;
+            }
+        }
+        u_sess->utils_cxt.force_view_recompile_oids =
+            list_delete_oid(u_sess->utils_cxt.force_view_recompile_oids, viewOid);
+    }
+    PG_CATCH();
+    {
+        if (guc_changed) {
+            AtEOXact_GUC(false, save_nestlevel);
+        }
+        u_sess->utils_cxt.force_view_recompile_oids =
+            list_delete_oid(u_sess->utils_cxt.force_view_recompile_oids, viewOid);
+        success = false;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    return success;
 }
 
 /*
@@ -653,15 +1085,58 @@ ObjectAddress DefineView(ViewStmt* stmt, const char* queryString, bool send_remo
     ListCell* cell = NULL;
     bool check_option;
     ObjectAddress address;
+    bool isInvalidForce = false;
+    MemoryContext oldcontext = CurrentMemoryContext;
+    ResourceOwner oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
+    bool useSubxact = stmt->is_force && !u_sess->attr.attr_common.IsInplaceUpgrade;
 
     /*
      * Run parse analysis to convert the raw parse tree to a Query.  Note this
      * also acquires sufficient locks on the source table(s).
+     *
+     * For a FORCE view, parse analysis may fail (e.g. base table/column does
+     * not exist).  We wrap it in an internal subtransaction so that any
+     * relcache references and locks acquired before the failure are released
+     * properly on rollback; otherwise FlushErrorState alone would leak them.
      */
-    if (!IsA(stmt->query, Query)) {
-        viewParse = parse_analyze(stmt->query, queryString, NULL, 0);
-    } else {
-        viewParse = (Query *)stmt->query;
+    if (useSubxact) {
+        BeginInternalSubTransaction(NULL);
+        MemoryContextSwitchTo(oldcontext);
+    }
+    PG_TRY();
+    {
+        if (!IsA(stmt->query, Query)) {
+            viewParse = parse_analyze(stmt->query, queryString, NULL, 0);
+        } else {
+            viewParse = (Query *)stmt->query;
+        }
+        if (useSubxact) {
+            ReleaseCurrentSubTransaction();
+            MemoryContextSwitchTo(oldcontext);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+        }
+    }
+    PG_CATCH();
+    {
+        if (stmt->is_force) {
+            if (useSubxact) {
+                /* Roll back the subtransaction to release relcache refs/locks. */
+                RollbackAndReleaseCurrentSubTransaction();
+                MemoryContextSwitchTo(oldcontext);
+                t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+            }
+            FlushErrorState();
+            isInvalidForce = true;
+        } else {
+            PG_RE_THROW();
+        }
+    }
+    PG_END_TRY();
+
+    if (isInvalidForce) {
+        address = DefineVirtualForceRelation(stmt->view, stmt->replace, stmt->options,
+                            stmt->relkind, stmt, queryString);
+        return address;
     }
     if (viewParse->has_uservar && IsA(stmt->query, SelectStmt)) {
         ereport(ERROR,
