@@ -323,6 +323,60 @@ void check_object_type_matched(Datum object_name, const char *object_type)
 }
 
 /*
+ * @brief check_credential_usage_privilege
+ *  Check if current user can bind or use the credential.
+ * @param credential_name
+ */
+void check_credential_usage_privilege(Datum credential_name)
+{
+    if (credential_name == Datum(0)) {
+        return;
+    }
+
+    char *objectType = get_attribute_value_str(credential_name, "object_type", AccessShareLock, false, false);
+    if (pg_strcasecmp(objectType, "credential") != 0) {
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_DATATYPE_MISMATCH),
+                        errmsg("Object %s has type %s.", TextDatumGetCString(credential_name), objectType),
+                        errdetail("Object type does not match."), errcause("N/A"),
+                        erraction("Please check credential name")));
+    }
+    pfree_ext(objectType);
+
+    char *credentialNameStr = TextDatumGetCString(credential_name);
+    bool isDefault = (pg_strcasecmp(credentialNameStr, DEFAULT_CREDENTIAL_NAME) == 0);
+    if (isDefault) {
+        pfree_ext(credentialNameStr);
+        return;
+    }
+
+    char *owner = get_attribute_value_str(credential_name, "owner", AccessShareLock, true, true);
+    if (owner == NULL) {
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("Credential %s has no owner.", credentialNameStr),
+                        errdetail("Corrupted credential attribute."),
+                        errcause("Credential owner is missing."),
+                        erraction("Please recreate credential.")));
+    }
+    if (superuser()) {
+        pfree_ext(credentialNameStr);
+        pfree_ext(owner);
+        return;
+    }
+
+    char *curUser = get_role_name_str();
+    if (pg_strcasecmp(owner, curUser) != 0) {
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("Credential %s is not valid for current user.", credentialNameStr),
+                        errdetail("Insufficient privilege to use credential."),
+                        errcause("Credential is owned by another user."),
+                        erraction("Please use a credential owned by current user.")));
+    }
+    pfree_ext(curUser);
+    pfree_ext(owner);
+    pfree_ext(credentialNameStr);
+}
+
+/*
  * @brief check_job_class_valid
  *  Check if job class is valid.
  * @param job_class
@@ -1144,6 +1198,7 @@ void create_job_raw(PG_FUNCTION_ARGS)
         check_job_creation_privilege(job_type);
     }
     check_job_class_valid(job_class);
+    check_credential_usage_privilege(credential_name);
 
     /* gs_job_attribute */
     const char *object_type = "job";
@@ -1852,6 +1907,12 @@ void set_job_attribute(const Datum job_name, const Datum attribute_name, const D
         Assert(attribute_value != 0);
         Datum enabled = TextToBool(attribute_value);
         update_pg_job(job_name, Anum_pg_job_enable, enabled);
+        return;
+    }
+    if (pg_strcasecmp(attribute_name_str, "credential_name") == 0) {
+        check_credential_usage_privilege(attribute_value);
+        pfree_ext(attribute_name_str);
+        update_attribute(job_name, attribute_name, attribute_value);
         return;
     }
     pfree_ext(attribute_name_str);

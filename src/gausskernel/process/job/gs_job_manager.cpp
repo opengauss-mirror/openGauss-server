@@ -26,6 +26,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include <limits.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "catalog/indexing.h"
@@ -730,6 +732,7 @@ char *lookup_credential_username(Datum job_name)
                         erraction("Please check credential name.")));
     }
     pfree_ext(attribute_value_str);
+    check_credential_usage_privilege(credential_name);
     char *username = get_attribute_value_str(credential_name, "username", AccessShareLock, false, false);
     return username;
 }
@@ -903,34 +906,33 @@ void check_program_type_argument(Datum program_type, int number_of_arguments)
     }
 }
 
+static const int SSH_EXEC_FAILED_EXIT_CODE = 127;
+static const int SSH_SUCCESS_EXIT_CODE = 0;
+static const int SSH_OUTPUT_BUFFER_LEN = 1024;
+static const char SSH_BATCH_MODE_OPTION[] = "BatchMode=yes";
+static const char SSH_CONNECT_TIMEOUT_OPTION[] = "ConnectTimeout=5";
+static const char SSH_SERVER_ALIVE_INTERVAL_OPTION[] = "ServerAliveInterval=5";
+static const char SSH_SERVER_ALIVE_COUNT_MAX_OPTION[] = "ServerAliveCountMax=1";
+
 /*
- * @brief check_str_valid
- *  Check if a user input string contains danger characters.
- * @param str
+ * @brief Quote a shell argument with single quotes.
+ * @param str  Argument string.
+ * @return char*
  */
-static char *replace_all_danger_character(const char *str)
+static char *QuoteShellArgument(const char *str)
 {
-    if (strstr(str, "\\\"") != NULL) {
-        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_NAME),
-                        errmsg("Fail to parse script parameter."),
-                        errdetail("Parameter contains escaped double quotes '\\\"'."), errcause("Command is invalid"),
-                        erraction("Please enter a valid command")));
-    }
     StringInfoData buffer;
     initStringInfo(&buffer);
-    appendStringInfoString(&buffer, "\\\"");    /* \" for start of param */
+    appendStringInfoChar(&buffer, '\'');
     int len = strlen(str);
     for (int i = 0; i < len; i++) {
-        if (str[i] == '"') {
-            appendStringInfoString(&buffer, "\\\\\\\""); /* \\\" for escaping the escaped double quote */
-        } else if (str[i] == '\\' || str[i] == '|') {
-            appendStringInfoString(&buffer, "\\");    /* \ for escaping other dangerous str[i] character */
-            appendStringInfoChar(&buffer, str[i]);
+        if (str[i] == '\'') {
+            appendStringInfoString(&buffer, "'\\''");
         } else {
             appendStringInfoChar(&buffer, str[i]);
         }
     }
-    appendStringInfoString(&buffer, "\\\"");    /* \" */
+    appendStringInfoChar(&buffer, '\'');
     return buffer.data;
 }
 
@@ -1024,9 +1026,6 @@ static void check_external_job_ready(JobTarget *job_target)
     check_sql_job_ready(job_target);
     check_real_path_valid(PointerGetDatum(job_target->job_proc_value->action));
 
-    for (int i = 0; i < job_target->job_attribute_value->number_of_arguments; i++) {
-        job_target->arguments[i].argument_value = replace_all_danger_character(job_target->arguments[i].argument_value);
-    }
     if (job_target->job_attribute_value->username == NULL) {
         ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_UNDEFINED_OBJECT),
                         errmsg("job %s's credential username is undefined.",
@@ -1172,6 +1171,94 @@ static bool run_procedure_job(Datum job_name, StringInfoData *buf)
 }
 
 /*
+ * @brief Start ssh child process.
+ * @param sshPipe  Pipe used to collect stdout and stderr.
+ * @param host     Remote host.
+ * @param action   Program action.
+ * @return pid_t   Ssh child process pid.
+ */
+static pid_t StartSshProcess(int sshPipe[2], char *host, const char *action)
+{
+    char *const sshArgv[] = {
+        const_cast<char *>("ssh"),
+        const_cast<char *>("-o"),
+        const_cast<char *>(SSH_BATCH_MODE_OPTION),
+        const_cast<char *>("-o"),
+        const_cast<char *>(SSH_CONNECT_TIMEOUT_OPTION),
+        const_cast<char *>("-o"),
+        const_cast<char *>(SSH_SERVER_ALIVE_INTERVAL_OPTION),
+        const_cast<char *>("-o"),
+        const_cast<char *>(SSH_SERVER_ALIVE_COUNT_MAX_OPTION),
+        host,
+        const_cast<char *>(action),
+        NULL
+    };
+
+    pid_t sshPid = fork();
+    if (sshPid == 0) {
+        close(sshPipe[0]);
+        if (dup2(sshPipe[1], STDOUT_FILENO) < 0 || dup2(sshPipe[1], STDERR_FILENO) < 0) {
+            _exit(SSH_EXEC_FAILED_EXIT_CODE);
+        }
+        close(sshPipe[1]);
+        execvp("ssh", sshArgv);
+        _exit(SSH_EXEC_FAILED_EXIT_CODE);
+    }
+    return sshPid;
+}
+
+/*
+ * @brief Collect ssh output and process status.
+ * @param sshPid      Ssh child process pid.
+ * @param readFd      Pipe read file descriptor, closed by this function.
+ * @param resBuf      Output buffer.
+ */
+static void WaitSshProcess(pid_t sshPid, int readFd, StringInfoData *resBuf)
+{
+    char buffer[SSH_OUTPUT_BUFFER_LEN];
+    ssize_t readLen = 0;
+    bool readSuccess = true;
+    int waitStatus = SSH_SUCCESS_EXIT_CODE;
+
+    while ((readLen = read(readFd, buffer, sizeof(buffer))) != 0) {
+        if (readLen < 0) {
+            if (errno != EINTR) {
+                readSuccess = false;
+                break;
+            }
+            continue;
+        }
+        appendBinaryStringInfo(resBuf, buffer, readLen);
+    }
+
+    pid_t waitRet = 0;
+    do {
+        waitRet = waitpid(sshPid, &waitStatus, 0);
+    } while (waitRet < 0 && errno == EINTR);
+
+    close(readFd);
+    const char *detail = NULL;
+    if (!readSuccess || waitRet != sshPid) {
+        detail = "cannot read ssh output or wait ssh process";
+    } else if (!WIFEXITED(waitStatus) || WEXITSTATUS(waitStatus) != SSH_SUCCESS_EXIT_CODE) {
+        detail = "ssh process exited with failure";
+    }
+    if (detail != NULL) {
+        if (resBuf->data[0] != '\0') {
+            ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_OPERATE_FAILED),
+                            errmsg("ssh to username failed"), errdetail("%s, ssh output: %s", detail, resBuf->data),
+                            errcause("N/A"),
+                            erraction("Please append ~/.ssh/id_rsa.pub to username's homepath/.ssh/authorized_keys")));
+        } else {
+            ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_OPERATE_FAILED),
+                            errmsg("ssh to username failed"), errdetail("%s", detail),
+                            errcause("N/A"),
+                            erraction("Please append ~/.ssh/id_rsa.pub to username's homepath/.ssh/authorized_keys")));
+        }
+    }
+}
+
+/*
  * @brief ssh_run_external_program
  *  Create a SSH connection string for execute a program
  * @param username
@@ -1180,33 +1267,35 @@ static bool run_procedure_job(Datum job_name, StringInfoData *buf)
  */
 static char *ssh_run_external_program(const char *username, const char *action)
 {
-    StringInfoData ssh_buf;
-    initStringInfo(&ssh_buf);
-    appendStringInfoString(&ssh_buf, "ssh ");
-    appendStringInfoString(&ssh_buf, username);
-    appendStringInfoString(&ssh_buf, "@localhost \"");
-    appendStringInfoString(&ssh_buf, action);
-    appendStringInfoString(&ssh_buf, "\"");
-    appendStringInfoString(&ssh_buf, " 2>&1");
+    StringInfoData hostBuf;
+    initStringInfo(&hostBuf);
+    appendStringInfo(&hostBuf, "%s@localhost", username);
 
-    FILE *ssh_stream = popen(ssh_buf.data, "r");
-    if (ssh_stream == NULL) {
+    int sshPipe[2] = {-1, -1};
+    if (pipe(sshPipe) != 0) {
+        pfree(hostBuf.data);
         ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_OPERATE_FAILED),
-                        errmsg("ssh to username failed"), errdetail("cannot ssh to username, popen fail"),
+                        errmsg("ssh to username failed"), errdetail("cannot create pipe for ssh"),
                         errcause("N/A"),
                         erraction("Please append ~/.ssh/id_rsa.pub to username's homepath/.ssh/authorized_keys")));
     }
-    StringInfoData res_buf;
-    initStringInfo(&res_buf);
-    const int bufferLen = 1024;
-    char buffer[bufferLen];
-    while (fgets(buffer, sizeof(buffer), ssh_stream) != NULL) {
-        buffer[bufferLen - 1] = '\0';
-        appendStringInfoString(&res_buf, buffer);
+    pid_t sshPid = StartSshProcess(sshPipe, hostBuf.data, action);
+    if (sshPid < 0) {
+        close(sshPipe[0]);
+        close(sshPipe[1]);
+        pfree(hostBuf.data);
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_OPERATE_FAILED),
+                        errmsg("ssh to username failed"), errdetail("cannot fork ssh process"),
+                        errcause("N/A"),
+                        erraction("Please append ~/.ssh/id_rsa.pub to username's homepath/.ssh/authorized_keys")));
     }
-    pclose(ssh_stream);
-    pfree(ssh_buf.data);
-    return res_buf.data;
+    close(sshPipe[1]);
+    pfree(hostBuf.data);
+
+    StringInfoData resBuf;
+    initStringInfo(&resBuf);
+    WaitSshProcess(sshPid, sshPipe[0], &resBuf);
+    return resBuf.data;
 }
 
 /*
@@ -1225,10 +1314,14 @@ static char *run_external_job(Datum job_name)
     }
     StringInfoData action_buf;
     initStringInfo(&action_buf);
-    appendStringInfoString(&action_buf, job_target->job_proc_value->action_str);
+    char *quotedAction = QuoteShellArgument(job_target->job_proc_value->action_str);
+    appendStringInfoString(&action_buf, quotedAction);
+    pfree_ext(quotedAction);
     for (int i = 0; i < job_target->job_attribute_value->number_of_arguments; i++) {
+        char *quotedArg = QuoteShellArgument(job_target->arguments[i].argument_value);
         appendStringInfoString(&action_buf, " ");
-        appendStringInfoString(&action_buf, job_target->arguments[i].argument_value);
+        appendStringInfoString(&action_buf, quotedArg);
+        pfree_ext(quotedArg);
     }
     char *res = ssh_run_external_program(job_target->job_attribute_value->username, action_buf.data);
     if (t_thrd.role == JOB_WORKER) {
