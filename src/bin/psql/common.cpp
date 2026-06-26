@@ -2780,6 +2780,7 @@ bool SaveSqlModePipesAsConcat()
         return false;
     }
 
+    bool needResetSqlMode = false;
     PGresult* res = NULL;
     PQExpBufferData buf;
     initPQExpBuffer(&buf);
@@ -2789,19 +2790,23 @@ bool SaveSqlModePipesAsConcat()
         char* dolphinSqlMode = PQgetvalue(res, 0, 0);
         /* already enable */
         if (strstr(dolphinSqlMode, "pipes_as_concat") != NULL) {
-            PQclear(res);
-            res = NULL;
-            return false;
+            needResetSqlMode = false;
+        } else {
+            if (g_sqlMode != NULL) {
+                free(g_sqlMode);
+            }
+            g_sqlMode = pg_strdup(dolphinSqlMode);
+            needResetSqlMode = true;
         }
-        if (g_sqlMode != NULL) {
-            free(g_sqlMode);
-        }
-        g_sqlMode = pg_strdup(dolphinSqlMode);
+    }
+
+    if (res != NULL) {
         PQclear(res);
         res = NULL;
-        return true;
     }
-    return false;
+    termPQExpBuffer(&buf);
+
+    return needResetSqlMode;
 }
 
 void ResetSqlMode()
@@ -2821,6 +2826,7 @@ void ResetSqlMode()
         PQclear(res);
         res = NULL;
     }
+    termPQExpBuffer(&buf);
 }
 
 /*
@@ -2849,4 +2855,5 @@ void EnableSqlModePipesAsConcat()
         PQclear(res);
         res = NULL;
     }
+    termPQExpBuffer(&buf);
 }
