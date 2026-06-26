@@ -214,7 +214,8 @@ extern process_interrupts_callback_t ProcessInterruptsCallback;
 #define D_FORMAT_OPT_ENABLE_TABLE_HINT_IDENTIFIER 2
 #define D_FORMAT_OPT_ENABLE_ABS 4
 #define D_FORMAT_OPT_DEFAULT_COLLATION 8
-#define D_FORMAT_OPT_MAX 4
+#define D_FORMAT_OPT_DISABLE_TARGET_ALIAS 16
+#define D_FORMAT_OPT_MAX 5
 
 
 #define ENABLE_SET_SESSION_TRANSACTION                                                                   \
@@ -251,6 +252,9 @@ extern process_interrupts_callback_t ProcessInterruptsCallback;
 
 #define DISABLE_ABS (!(u_sess->utils_cxt.d_format_behavior_compat_flags & \
         D_FORMAT_OPT_ENABLE_ABS) && u_sess->attr.attr_sql.sql_compatibility == D_FORMAT)
+
+#define DISABLE_TARGET_ALIAS ((u_sess->utils_cxt.d_format_behavior_compat_flags & \
+        D_FORMAT_OPT_DISABLE_TARGET_ALIAS) && u_sess->attr.attr_sql.sql_compatibility == D_FORMAT)
 
 #define OPT_DISPLAY_LEADING_ZERO (1LL << 0)
 #define OPT_END_MONTH_CALCULATE  (1LL << 1)

@@ -21066,7 +21066,10 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
          */
         if ((tbinfo->reloftype != NULL) && !binary_upgrade) {
             Oid typeOid = atooid(tbinfo->reloftype);
-            appendPQExpBuffer(q, " OF %s", getFormattedTypeName(fout, typeOid, zeroAsNone));
+            char *typeName = getFormattedTypeName(fout, typeOid, zeroAsNone);
+            appendPQExpBuffer(q, " OF %s", typeName);
+            free(typeName);
+            typeName = NULL;
         }
         /*
          * No matter row table or colunm table, We can make suere that attrNums >= 1.

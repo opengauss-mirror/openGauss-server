@@ -124,6 +124,78 @@ static Oid getVarbinaryOid()
     return cxt->varbinaryOid;
 }
 
+static bool IsEqualsOp(List *name)
+{
+    if (list_length(name) != 1) {
+        return false;
+    }
+
+    Node *n = (Node *)linitial(name);
+    if (!IsA(n, String)) {
+        return false;
+    }
+
+    return (strcmp(strVal(n), "=") == 0);
+}
+
+static bool tryTsqlTargetAlias(ResTarget *res, ParseState* pstate, int exprKind)
+{
+    A_Expr     *aexpr;
+    ColumnRef  *cref;
+    A_Const    *aconst;
+    char       *alias;
+    Node       *field;
+
+    if (DISABLE_TARGET_ALIAS) {
+        return false;
+    }
+
+    /* we are not normal sqls */
+    if (pstate->p_ref_hook_state) {
+        return false;
+    }
+
+    if (EXPR_KIND_SELECT_TARGET != (enum ParseExprKind)exprKind) {
+        return false;
+    }
+
+    if (res == NULL || res->name != NULL) {
+        return false;
+    }
+
+    if (!IsA(res->val, A_Expr)) {
+        return false;
+    }
+
+    aexpr = (A_Expr *) res->val;
+    if (aexpr->kind != AEXPR_OP) {
+        return false;
+    }
+
+    if (!IsEqualsOp(aexpr->name)) {
+        return false;
+    }
+
+    if (!IsA(aexpr->lexpr, ColumnRef)) {
+        return false;
+    }
+
+    cref = (ColumnRef *) aexpr->lexpr;
+    if (list_length(cref->fields) != 1) {
+        return false;
+    }
+
+    field = (Node *)linitial(cref->fields);
+    if (!IsA(field, String)) {
+        return false;
+    }
+
+    alias = strVal(field);
+    res->name = pstrdup(alias);
+    res->val = aexpr->rexpr;
+    return true;
+}
+
 static List *RewriteTypmodExpr(List *expr_list)
 {
     /*
@@ -175,6 +247,7 @@ void init_session_vars(void)
     u_sess->hook_cxt.checkIsMssqlHexHook = (void*)CheckIsMssqlHex;
     u_sess->hook_cxt.rewriteTypmodExprHook = (void*)RewriteTypmodExpr;
     u_sess->hook_cxt.getVarbinaryOidHook = (void*)getVarbinaryOid;
+    u_sess->hook_cxt.preTransformTargetHook = (void*)tryTsqlTargetAlias;
 
     RepallocSessionVarsArrayIfNecessary();
     SharkContext *cxt = (SharkContext*) MemoryContextAlloc(u_sess->self_mem_cxt, sizeof(sharkContext));

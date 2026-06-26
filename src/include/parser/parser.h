@@ -50,6 +50,7 @@ extern Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr, boo
 typedef List* (*RewriteTypmodExprHookType) (List *exprList);
 typedef bool (*CheckIsMssqlHexHookType) (char *str);
 typedef Oid (*GetVarbinaryOidHookType) ();
+typedef bool (*preTransformTargetHookType) (ResTarget *res, ParseState* pstate, int exprKind);
 
 
 /* define for varbinary */

@@ -3162,6 +3162,7 @@ typedef struct knl_u_hook_context {
     void *varcharLaunchHook;
     void *coerceTypeHook;
     void *binaryTransformTypeidHook;
+    void *preTransformTargetHook;
 } knl_u_hook_context;
 
 typedef struct knl_u_libsw_context {
