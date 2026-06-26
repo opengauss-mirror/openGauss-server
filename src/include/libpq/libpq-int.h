@@ -665,6 +665,19 @@ extern int pqEndcopy3(PGconn* conn);
 extern PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_result_len, int result_is_int,
     const PQArgBlock* args, int nargs);
 
+/* Internal libpq use only: PQfn with result buffer size check */
+typedef struct {
+    int fnid;
+    int* resultBuf;
+    int* resultLen;
+    int resultIsInt;
+    const PQArgBlock* args;
+    int nargs;
+    int resultBufSize;
+} PQfnWithResultSizeArgs;
+
+extern PGresult* PQfnWithResultSize(PGconn* conn, const PQfnWithResultSizeArgs* args);
+
 /* === in fe-misc.c === */
 
 /*
