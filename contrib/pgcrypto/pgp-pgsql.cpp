@@ -730,26 +730,31 @@ Datum pgp_pub_decrypt_bytea(PG_FUNCTION_ARGS)
     bytea *data, *key;
     text *psw = NULL, *arg = NULL;
     text* res = NULL;
+    const int data_arg = 0;
+    const int key_arg = 1;
+    const int psw_arg = 2;
+    const int arg_arg = 3;
 
-    data = PG_GETARG_BYTEA_P(0);
-    key = PG_GETARG_BYTEA_P(1);
-    if (PG_NARGS() > 2)
-        psw = PG_GETARG_BYTEA_P(2);
-    if (PG_NARGS() > 3)
-        arg = PG_GETARG_BYTEA_P(3);
+    data = PG_GETARG_BYTEA_P(data_arg);
+    key = PG_GETARG_BYTEA_P(key_arg);
+    if (PG_NARGS() > psw_arg)
+        psw = PG_GETARG_BYTEA_P(psw_arg);
+    if (PG_NARGS() > arg_arg)
+        arg = PG_GETARG_BYTEA_P(arg_arg);
 
     res = decrypt_internal(1, 0, data, key, psw, arg);
 
-    PG_FREE_IF_COPY(data, 0);
-    PG_FREE_IF_COPY(key, 1);
-    if (PG_NARGS() > 2) {
+    PG_FREE_IF_COPY(data, data_arg);
+    PG_FREE_IF_COPY(key, key_arg);
+    if (PG_NARGS() > psw_arg) {
         if (psw != NULL) {
-            (void)memset_s(VARDATA(psw), VARSIZE(psw) - VARHDRSZ, 0, VARSIZE(psw) - VARHDRSZ);
+            int pswLen = VARSIZE(psw);
+            (void)memset_s(psw, pswLen, 0, pswLen);
         }
-        PG_FREE_IF_COPY(psw, 2);
+        PG_FREE_IF_COPY(psw, psw_arg);
     }
-    if (PG_NARGS() > 3)
-        PG_FREE_IF_COPY(arg, 3);
+    if (PG_NARGS() > arg_arg)
+        PG_FREE_IF_COPY(arg, arg_arg);
     PG_RETURN_TEXT_P(res);
 }
 
@@ -758,26 +763,31 @@ Datum pgp_pub_decrypt_text(PG_FUNCTION_ARGS)
     bytea *data, *key;
     text *psw = NULL, *arg = NULL;
     text* res = NULL;
+    const int data_arg = 0;
+    const int key_arg = 1;
+    const int psw_arg = 2;
+    const int arg_arg = 3;
 
-    data = PG_GETARG_BYTEA_P(0);
-    key = PG_GETARG_BYTEA_P(1);
-    if (PG_NARGS() > 2)
-        psw = PG_GETARG_BYTEA_P(2);
-    if (PG_NARGS() > 3)
-        arg = PG_GETARG_BYTEA_P(3);
+    data = PG_GETARG_BYTEA_P(data_arg);
+    key = PG_GETARG_BYTEA_P(key_arg);
+    if (PG_NARGS() > psw_arg)
+        psw = PG_GETARG_BYTEA_P(psw_arg);
+    if (PG_NARGS() > arg_arg)
+        arg = PG_GETARG_BYTEA_P(arg_arg);
 
     res = decrypt_internal(1, 1, data, key, psw, arg);
 
-    PG_FREE_IF_COPY(data, 0);
-    PG_FREE_IF_COPY(key, 1);
-    if (PG_NARGS() > 2) {
+    PG_FREE_IF_COPY(data, data_arg);
+    PG_FREE_IF_COPY(key, key_arg);
+    if (PG_NARGS() > psw_arg) {
         if (psw != NULL) {
-            (void)memset_s(VARDATA(psw), VARSIZE(psw) - VARHDRSZ, 0, VARSIZE(psw) - VARHDRSZ);
+            int pswLen = VARSIZE(psw);
+            (void)memset_s(psw, pswLen, 0, pswLen);
         }
-        PG_FREE_IF_COPY(psw, 2);
+        PG_FREE_IF_COPY(psw, psw_arg);
     }
-    if (PG_NARGS() > 3)
-        PG_FREE_IF_COPY(arg, 3);
+    if (PG_NARGS() > arg_arg)
+        PG_FREE_IF_COPY(arg, arg_arg);
     PG_RETURN_TEXT_P(res);
 }
 
