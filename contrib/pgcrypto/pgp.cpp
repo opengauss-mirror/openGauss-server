@@ -200,7 +200,7 @@ int pgp_init(PGP_Context** ctx_p)
     ctx->unicode_mode = def_unicode_mode;
     ctx->convert_crlf = def_convert_crlf;
     ctx->text_mode = def_text_mode;
-    ctx->max_decompressed_size = PGP_DEFAULT_MAX_DECOMPRESSED_SIZE;
+    ctx->maxDecompressedSize = PGP_DEFAULT_MAX_DECOMPRESSED_SIZE;
 
     *ctx_p = ctx;
     return 0;
@@ -319,11 +319,12 @@ int pgp_set_unicode_mode(PGP_Context* ctx, int mode)
     return 0;
 }
 
-int pgp_set_max_decompressed_size(PGP_Context* ctx, int max_size)
+int PgpSetMaxDecompressedSize(PGP_Context* ctx, int maxSize)
 {
-    if (max_size < 0)
+    if (maxSize < 0) {
         return PXE_ARGUMENT_ERROR;
-    ctx->max_decompressed_size = max_size;
+    }
+    ctx->maxDecompressedSize = maxSize;
     return 0;
 }
 

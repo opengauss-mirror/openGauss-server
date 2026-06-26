@@ -972,12 +972,14 @@ int px_get_pseudo_random_bytes(uint8* dst, unsigned count)
 {
     int res;
 
-    if (!openssl_random_init)
+    if (!openssl_random_init) {
         init_openssl_rand();
+    }
 
     res = RAND_bytes(dst, count);
-    if (res == 1)
+    if (res == 1) {
         return count;
+    }
 
     return PXE_OSSL_RAND_ERROR;
 }

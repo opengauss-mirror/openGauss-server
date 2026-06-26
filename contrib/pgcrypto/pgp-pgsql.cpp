@@ -223,61 +223,79 @@ static void show_debug(const char* msg)
     ereport(NOTICE, (errmsg("dbg: %s", msg)));
 }
 
+static int SetDebugExpect(struct debug_expect* ex, char* key, char* val)
+{
+    if (strcmp(key, "expect-cipher-algo") == 0) {
+        ex->expect = 1;
+        ex->cipher_algo = pgp_get_cipher_code(val);
+    } else if (strcmp(key, "expect-disable-mdc") == 0) {
+        ex->expect = 1;
+        ex->disable_mdc = atoi(val);
+    } else if (strcmp(key, "expect-sess-key") == 0) {
+        ex->expect = 1;
+        ex->use_sess_key = atoi(val);
+    } else if (strcmp(key, "expect-s2k-mode") == 0) {
+        ex->expect = 1;
+        ex->s2k_mode = atoi(val);
+    } else if (strcmp(key, "expect-s2k-digest-algo") == 0) {
+        ex->expect = 1;
+        ex->s2k_digest_algo = pgp_get_digest_code(val);
+    } else if (strcmp(key, "expect-s2k-cipher-algo") == 0) {
+        ex->expect = 1;
+        ex->s2k_cipher_algo = pgp_get_cipher_code(val);
+    } else if (strcmp(key, "expect-compress-algo") == 0) {
+        ex->expect = 1;
+        ex->compress_algo = atoi(val);
+    } else if (strcmp(key, "expect-unicode-mode") == 0) {
+        ex->expect = 1;
+        ex->unicode_mode = atoi(val);
+    } else {
+        return PXE_ARGUMENT_ERROR;
+    }
+
+    return 0;
+}
+
+static int SetDebugArg(struct debug_expect* ex, char* key, char* val)
+{
+    if (strcmp(key, "debug") == 0) {
+        ex->debug = atoi(val);
+        return 0;
+    }
+    return SetDebugExpect(ex, key, val);
+}
+
 static int set_arg(PGP_Context* ctx, char* key, char* val, struct debug_expect* ex)
 {
     int res = 0;
 
-    if (strcmp(key, "cipher-algo") == 0)
+    if (strcmp(key, "cipher-algo") == 0) {
         res = pgp_set_cipher_algo(ctx, val);
-    else if (strcmp(key, "disable-mdc") == 0)
+    } else if (strcmp(key, "disable-mdc") == 0) {
         res = pgp_disable_mdc(ctx, atoi(val));
-    else if (strcmp(key, "sess-key") == 0)
+    } else if (strcmp(key, "sess-key") == 0) {
         res = pgp_set_sess_key(ctx, atoi(val));
-    else if (strcmp(key, "s2k-mode") == 0)
+    } else if (strcmp(key, "s2k-mode") == 0) {
         res = pgp_set_s2k_mode(ctx, atoi(val));
-    else if (strcmp(key, "s2k-digest-algo") == 0)
+    } else if (strcmp(key, "s2k-digest-algo") == 0) {
         res = pgp_set_s2k_digest_algo(ctx, val);
-    else if (strcmp(key, "s2k-cipher-algo") == 0)
+    } else if (strcmp(key, "s2k-cipher-algo") == 0) {
         res = pgp_set_s2k_cipher_algo(ctx, val);
-    else if (strcmp(key, "compress-algo") == 0)
+    } else if (strcmp(key, "compress-algo") == 0) {
         res = pgp_set_compress_algo(ctx, atoi(val));
-    else if (strcmp(key, "compress-level") == 0)
+    } else if (strcmp(key, "compress-level") == 0) {
         res = pgp_set_compress_level(ctx, atoi(val));
-    else if (strcmp(key, "convert-crlf") == 0)
+    } else if (strcmp(key, "convert-crlf") == 0) {
         res = pgp_set_convert_crlf(ctx, atoi(val));
-    else if (strcmp(key, "unicode-mode") == 0)
+    } else if (strcmp(key, "unicode-mode") == 0) {
         res = pgp_set_unicode_mode(ctx, atoi(val));
-    else if (strcmp(key, "max-decompressed-size") == 0)
-        res = pgp_set_max_decompressed_size(ctx, atoi(val));
-    /* decrypt debug */
-    else if (ex != NULL && strcmp(key, "debug") == 0)
-        ex->debug = atoi(val);
-    else if (ex != NULL && strcmp(key, "expect-cipher-algo") == 0) {
-        ex->expect = 1;
-        ex->cipher_algo = pgp_get_cipher_code(val);
-    } else if (ex != NULL && strcmp(key, "expect-disable-mdc") == 0) {
-        ex->expect = 1;
-        ex->disable_mdc = atoi(val);
-    } else if (ex != NULL && strcmp(key, "expect-sess-key") == 0) {
-        ex->expect = 1;
-        ex->use_sess_key = atoi(val);
-    } else if (ex != NULL && strcmp(key, "expect-s2k-mode") == 0) {
-        ex->expect = 1;
-        ex->s2k_mode = atoi(val);
-    } else if (ex != NULL && strcmp(key, "expect-s2k-digest-algo") == 0) {
-        ex->expect = 1;
-        ex->s2k_digest_algo = pgp_get_digest_code(val);
-    } else if (ex != NULL && strcmp(key, "expect-s2k-cipher-algo") == 0) {
-        ex->expect = 1;
-        ex->s2k_cipher_algo = pgp_get_cipher_code(val);
-    } else if (ex != NULL && strcmp(key, "expect-compress-algo") == 0) {
-        ex->expect = 1;
-        ex->compress_algo = atoi(val);
-    } else if (ex != NULL && strcmp(key, "expect-unicode-mode") == 0) {
-        ex->expect = 1;
-        ex->unicode_mode = atoi(val);
-    } else
+    } else if (strcmp(key, "max-decompressed-size") == 0) {
+        res = PgpSetMaxDecompressedSize(ctx, atoi(val));
+    } else if (ex != NULL) {
+        res = SetDebugArg(ex, key, val);
+    } else {
         res = PXE_ARGUMENT_ERROR;
+    }
 
     return res;
 }
@@ -479,6 +497,8 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
     PGP_Context* ctx = NULL;
     struct debug_expect ex;
     int got_unicode = 0;
+    uint8* psw = NULL;
+    int psw_len = 0;
 
     init_work(&ctx, need_text, args, &ex);
 
@@ -493,20 +513,18 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
     /*
      * limit total decrypted output to avoid unbounded MBuf growth
      */
-    if (ctx->max_decompressed_size > 0) {
-        int limit = ctx->max_decompressed_size;
+    if (ctx->maxDecompressedSize > 0) {
+        int limit = ctx->maxDecompressedSize;
 
         if (limit > PG_INT32_MAX - (int)VARHDRSZ)
             limit = PG_INT32_MAX - (int)VARHDRSZ;
-        mbuf_set_max_size(dst, limit + VARHDRSZ);
+        MbufSetMaxSize(dst, limit + VARHDRSZ);
     }
 
     /*
      * set key
      */
     if (is_pubenc) {
-        uint8* psw = NULL;
-        int psw_len = 0;
         MBuf* kbuf = NULL;
 
         if (keypsw) {
@@ -538,6 +556,9 @@ static bytea* decrypt_internal(int is_pubenc, int need_text, text* data, text* k
     got_unicode = pgp_get_unicode_mode(ctx);
 
 out:
+    (void)memset_s(&psw, sizeof(psw), 0, sizeof(psw));
+    (void)memset_s(&psw_len, sizeof(psw_len), 0, sizeof(psw_len));
+
     if (src)
         mbuf_free(src);
     if (ctx)
@@ -723,6 +744,7 @@ Datum pgp_pub_decrypt_bytea(PG_FUNCTION_ARGS)
         PG_FREE_IF_COPY(psw, 2);
     if (PG_NARGS() > 3)
         PG_FREE_IF_COPY(arg, 3);
+    (void)memset_s(&psw, sizeof(psw), 0, sizeof(psw));
     PG_RETURN_TEXT_P(res);
 }
 
@@ -747,6 +769,7 @@ Datum pgp_pub_decrypt_text(PG_FUNCTION_ARGS)
         PG_FREE_IF_COPY(psw, 2);
     if (PG_NARGS() > 3)
         PG_FREE_IF_COPY(arg, 3);
+    (void)memset_s(&psw, sizeof(psw), 0, sizeof(psw));
     PG_RETURN_TEXT_P(res);
 }
 
