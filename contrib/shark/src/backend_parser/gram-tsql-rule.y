@@ -1,30 +1,5 @@
 /*
- * Copyright (c) Huawei Technologies Co., Ltd. 2024-2026. All rights reserved.
- *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * --------------------------------------------------------------------------------------
- *
- * gram-tsql-rule.y
- *    The target production for the whole parse.
- *
- * Portions Copyright (c) 2026, Huawei Technologies Co.,Ltd.
- * Portions Copyright (c) 2020, AWS
- * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
- * Portions Copyright (c) 1994, Regents of the University of California
- *
- * IDENTIFICATION
- *    contrib/shark/src/backend_parser/gram-tsql-rule.y
- *
- *-------------------------------------------------------------------------
+ *	The target production for the whole parse.
  */
 stmtblock:	DIALECT_TSQL tsql_stmtmulti
 			{
@@ -185,6 +160,16 @@ tsql_opt_unique_clustered:
 			| UNIQUE					{ $$ = TRUE; }
 		;
 
+tsql_ident:
+            IDENT
+            {
+                if (!DB_IS_CMPT(D_FORMAT)) {
+                    ereport(ERROR, errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("This syntax is only valid in D-format database."),
+                        parser_errposition(@1)));
+                }
+            }
+        ;
 tsql_IndexStmt:
 				CREATE tsql_opt_unique_clustered tsql_opt_columnstore INDEX opt_concurrently opt_index_name
 				ON qualified_name access_method_clause '(' index_params ')'
@@ -473,12 +458,7 @@ tsql_subprogram_body:        {
                                 rc = CompileWhich();
                                 int     tok = YYEMPTY;
                                 int     pre_tok = 0;
-                                int in_procedure = 0;
-                                int max_proc_level = 0;
-                                bool in_begin = false;
                                 base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
-                                int as_count = 0;
-                                int procedure_count = 0;
 
                                 yyextra->core_yy_extra.in_slash_proc_body = true;
                                 if (u_sess->parser_cxt.eaten_begin)
@@ -508,24 +488,14 @@ tsql_subprogram_body:        {
                                                 parser_yyerror("subprogram body is not ended correctly");
                                                 break;
                                         }
-                                        if (!in_begin && (pre_tok == ';' || pre_tok == DECLARE || pre_tok == 0 || pre_tok == COMMENTSTRING
-                                                || pre_tok == AS || pre_tok == IS) && (tok == PROCEDURE || tok == FUNCTION)) {
-                                                in_procedure++;
-                                                max_proc_level = max_proc_level > in_procedure ? max_proc_level : in_procedure;
-                                                procedure_count++;
-                                        }
                                         if (tok == BEGIN_P) {
                                                 pre_tok = tok;
                                                 tok = YYLEX;
                                                 if (tok != TRY && tok != CATCH) {
                                                     blocklevel++;
-                                                    in_begin = true;
                                                 } else {
                                                     continue;
                                                 }
-                                        }
-                                        if (tok == AS || tok == IS) {
-                                                as_count++;
                                         }
                                         if (tok == END_P)
                                         {
@@ -540,7 +510,7 @@ tsql_subprogram_body:        {
                                                         && tok != TRY
                                                         && tok != CATCH)
                                                 {
-                                                        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';' && as_count == 0 && procedure_count ==0)
+                                                        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && blocklevel == 1 && pre_tok == ';')
                                                         {
                                                                 proc_e = yylloc;
                                                                 break;
@@ -574,15 +544,7 @@ tsql_subprogram_body:        {
                                                                         yyextra->lookahead_len = 1;
                                                                 }
                                                         }
-                                                        if(in_procedure == 0)
-                                                                break;
-                                                        else {
-                                                                blocklevel--;
-                                                                in_procedure--;
-                                                                if ((procedure_count - as_count - 1) == in_procedure) {
-                                                                        break;
-                                                                }
-                                                        }
+                                                        break;
                                                 }
 
                                                 if (blocklevel > 1
@@ -591,21 +553,14 @@ tsql_subprogram_body:        {
                                                 {
                                                         blocklevel--;
                                                 }
-                                                in_begin = false;
                                         }
 
                                         pre_tok = tok;
                                         tok = YYLEX;
-
                                 }
 
                                 if (proc_e == 0) {
                                         ereport(errstate, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("subprogram body is not ended correctly")));
-                                }
-                                if (max_proc_level > 0) {
-                                        u_sess->parser_cxt.has_subprogram = true;
-                                } else {
-                                        u_sess->parser_cxt.has_subprogram = false;
                                 }
 
                                 proc_body_len = proc_e - proc_b + 1 ;
@@ -631,7 +586,6 @@ tsql_subprogram_body:        {
 
                                 yyextra->core_yy_extra.in_slash_proc_body = false;
                                 yyextra->core_yy_extra.dolqstart = NULL;
-                                yyextra->core_yy_extra.is_createstmt = false;
 
                                 yyextra->core_yy_extra.query_string_locationlist =
                                         lappend_int(yyextra->core_yy_extra.query_string_locationlist, yylloc);
@@ -818,17 +772,6 @@ VariableSetStmt:
 				}
 		;
 
-generic_set:
-			XACT_ABORT var_list
-				{
-					VariableSetStmt *n = makeNode(VariableSetStmt);
-					n->kind = VAR_SET_VALUE;
-					n->name = "xact_abort";
-					n->args = $2;
-					$$ = n;
-				}
-		;
-
 unreserved_keyword:
 			CHECKIDENT
 			| DBCC
@@ -837,9 +780,7 @@ unreserved_keyword:
 			| RESEED
 			| TSQL_COLUMNSTORE
 			| TSQL_CLUSTERED
-			| TSQL_EXEC
 			| TSQL_NONCLUSTERED
-			| TSQL_PERSISTED
 			| TSQL_NOLOCK
 			| TSQL_READUNCOMMITTED
 			| TSQL_UPDLOCK
@@ -861,7 +802,6 @@ unreserved_keyword:
 			| TSQL_DY
 			| TSQL_HH
 			| TSQL_M
-			| TSQL_MAX
 			| TSQL_MCS
 			| TSQL_MI
 			| TSQL_MICROSECOND
@@ -870,7 +810,6 @@ unreserved_keyword:
 			| TSQL_MS
 			| TSQL_N
 			| TSQL_NS
-			| TSQL_OUTPUT
 			| TSQL_Q
 			| TSQL_QQ
 			| TSQL_QUARTER
@@ -885,7 +824,6 @@ unreserved_keyword:
 			| TSQL_YYYY
 			| TSQL_YY
 			| TSQL_DD
-			| XACT_ABORT
 			| TSQL_NANOSECOND ;
 
 reserved_keyword:
@@ -1344,8 +1282,6 @@ tsql_stmt :
 			| CreatePackageBodyStmt
 			| CreateGroupStmt
 			| CreateMatViewStmt
-			| CreateMatViewLogStmt
-			| DropMatViewLogStmt
 			| CreateModelStmt  // DB4AI
 			| CreateNodeGroupStmt
 			| CreateNodeStmt
@@ -1455,7 +1391,6 @@ tsql_stmt :
 			| UnlistenStmt
 			| UpdateStmt
 			| tsql_UseStmt
-			| tsql_ExecStmt
 			| VacuumStmt
 			| VariableResetStmt
 			| VariableSetStmt
@@ -1521,933 +1456,8 @@ func_expr_common_subexpr:
 			| TSQL_CAST '(' a_expr AS Typename ')'
 				{
 					add_default_typmod($5);
-					$$ = makeTypeCast($3, $5, NULL, NULL, NULL, @1);
+					$$ = makeTypeCast($3, $5, @1);
 				}
-			| TSQL_CAST '(' a_expr AS Typename opt_default_fmt_clause')'
-				{
-					add_default_typmod($5);
-					$$ = makeTypeCast($3, $5, $6, NULL, NULL, @1);
-				}
-			| TSQL_CAST '(' a_expr AS Typename opt_default_fmt_clause opt_default_nls_clause ')'
-				{
-					add_default_typmod($5);
-					$$ = makeTypeCast($3, $5, $6, $7, NULL, @1);
-				}
-			| TSQL_CAST '(' a_expr AS Typename default_on_err_expr opt_default_fmt_clause ')'
-				{
-					add_default_typmod($5);
-					$$ = makeTypeCast($3, $5, $7, NULL, $6, @1);
-				}
-			| TSQL_CAST '(' a_expr AS Typename default_on_err_expr opt_default_fmt_clause opt_default_nls_clause ')'
-				{
-					add_default_typmod($5);
-					$$ = makeTypeCast($3, $5, $7, $8, $6, @1);
-				}
-			| TSQL_CAST '(' a_expr AS Typename default_on_err_expr ')'
-				{
-					add_default_typmod($5);
-					$$ = makeTypeCast($3, $5, NULL, NULL, $6, @1);
-				}
-		;
-
-columnDef:
-			ColId TSQL_computed_column ColQualList
-				{
-					ColumnDef *n = makeNode(ColumnDef);
-					n->colname = $1;
-					/*
-					 * For computed columns, user doesn't provide a datatype.
-					 * But, PG expects a datatype.  Hence, we just assign a
-					 * valid datatype temporarily.  Later, we'll evaluate
-					 * expression to detect the actual datatype.
-					 */
-					n->typname = makeTypeName("varchar");
-					n->inhcount = 0;
-					n->is_local = true;
-					n->is_not_null = false;
-					n->is_from_type = false;
-					n->storage = 0;
-					n->raw_default = NULL;
-					n->cooked_default = NULL;
-					n->collOid = InvalidOid;
-					n->fdwoptions = NULL;
-
-					$3 = lappend($3, $2);
-					SplitColQualList($3, &n->constraints, &n->collClause,  &n->clientLogicColumnRef, yyscanner);
-
-					$$ = (Node *)n;
-				}
-		;
-
-/*
- * Computed columns uses b_expr not a_expr to avoid conflict with general NOT
- * (used in constraints).  Besides, it seems TSQL doesn't allow AND, NOT, IS
- * IN clauses in the computed column expression.  So, there shouldn't be
- * any issues.
- */
-TSQL_computed_column:
-				AS b_expr
-				{
-					if (t_thrd.proc->workingVersionNum < COMPUTED_COLUMNS_VERSION_NUMBER) {
-						ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("Working Version Num less than %u does not support computed columns.",
-									   COMPUTED_COLUMNS_VERSION_NUMBER)));
-					}
-
-					ereport(NOTICE,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("The virtual computed columns (non-persisted) are currently ignored and behave the same as persisted columns.")));
-					
-					Constraint *n = makeNode(Constraint);
-
-					n->contype = CONSTR_GENERATED;
-					n->generated_when = ATTRIBUTE_GENERATED_PERSISTED;
-					n->raw_expr = $2;
-					n->cooked_expr = NULL;
-					n->location = @1;
-
-					$$ = (Node *)n;
-				}
-				| AS b_expr TSQL_PERSISTED
-				{
-					if (t_thrd.proc->workingVersionNum < COMPUTED_COLUMNS_VERSION_NUMBER) {
-						ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("Working Version Num less than %u does not support computed columns.",
-									   COMPUTED_COLUMNS_VERSION_NUMBER)));
-					}
-					Constraint *n = makeNode(Constraint);
-
-					n->contype = CONSTR_GENERATED;
-					n->generated_when = ATTRIBUTE_GENERATED_PERSISTED;
-					n->raw_expr = $2;
-					n->cooked_expr = NULL;
-					n->location = @1;
-
-					$$ = (Node *)n;
-				}
-		;
-
-tsql_select_top_value:
-            SignedIconst                        { $$ = makeIntConst($1, @1); }
-            | FCONST                             { $$ = makeFloatConst($1, @1); }
-            | '(' a_expr ')'                    { $$ = $2; }
-            | select_with_parens
-                {
-                    /*
-                     * We need a speical grammar for scalar subquery here
-                     * because c_expr (in a_expr) has a rule select_with_parens but we defined the first rule as '(' a_expr ')'.
-                     * In other words, the first rule will be hit only when double parenthesis is used like `SELECT TOP ((select 1)) ...`
-                     */
-                    SubLink *n = makeNode(SubLink);
-                    n->subLinkType = EXPR_SUBLINK;
-                    n->testexpr = NULL;
-                    n->operName = NIL;
-                    n->subselect = $1;
-                    n->location = @1;
-                    $$ = (Node *)n;
-                }
-            ;
-
-tsql_opt_ties:
-            WITH TIES                            { $$ = true; }
-            | /*EMPTY*/                            { $$ = false; }
-        ;
-
-tsql_opt_percent:
-            TSQL_PERCENT                        { $$ = true; }
-            | /*EMPTY*/                            { $$ = false; }
-        ;
-
-tsql_top_clause:
-            TSQL_TOP tsql_select_top_value tsql_opt_percent tsql_opt_ties
-                {
-                    FetchLimit *result = (FetchLimit *)palloc0(sizeof(FetchLimit));
-                    result->limitOffset = NULL;
-                    result->limitCount = $2;
-                    result->isPercent = $3;
-                    result->isWithTies = $4;
-                    result->isFetch = true;
-                    $$ = (Node *)result;
-                }
-            ;
-
-simple_select:
-            SELECT hint_string opt_distinct tsql_top_clause target_list
-            opt_into_clause from_clause where_clause
-            group_clause having_clause window_clause
-                {
-                    SelectStmt *n = makeNode(SelectStmt);
-                    n->distinctClause = $3;
-
-                    FetchLimit* topClause = (FetchLimit*)$4;
-                    if (n->limitCount) {
-                        const char* message = "multiple OFFSET clauses not allowed";
-                        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-                        ereport(ERROR,
-                                (errcode(ERRCODE_SYNTAX_ERROR),
-                                errmsg("multiple LIMIT clauses not allowed"),
-                                parser_errposition(exprLocation(topClause->limitCount))));
-                    }
-                    n->limitCount = topClause->limitCount;
-                    n->isFetch = topClause->isFetch;
-                    n->limitIsPercent = topClause->isPercent;
-                    n->limitWithTies = topClause->isWithTies;
-
-                    n->targetList = $5;
-                    n->intoClause = $6;
-                    n->fromClause = $7;
-                    n->whereClause = $8;
-                    n->groupClause = $9;
-                    n->havingClause = $10;
-                    n->windowClause = $11;
-                    n->hintState = create_hintstate($2);
-                    n->hasPlus = getOperatorPlusFlag();
-                    $$ = (Node *)n;
-                }
-            ;
-
-/* Direct column label --- names that can be column labels without writing "AS".
- * This classification is orthogonal to the other keyword categories.
- */
-DirectColLabel:	IDENT								{ $$ = $1; }
-			| direct_label_keyword					{ $$ = pstrdup($1); }
-		;
-
-/*
- * While all keywords can be used as column labels when preceded by AS,
- * not all of them can be used as a "direct" column label without AS.
- * Those that can be used as a direct label must be listed here,
- * in addition to appearing in one of the category lists above.
- *
- * Always add a new keyword to this list if possible.  Mark it DIRECT_LABEL
- * in kwlist.h if it is included here, or AS_LABEL if it is not.
- */
-direct_label_keyword: ABORT_P
-            | ABSOLUTE_P
-            | ACCESS
-            | ACCOUNT
-            | ACTION
-            | ADD_P
-            | ADMIN
-            | AFTER
-            | AGGREGATE
-            | ALGORITHM
-            | ALL
-            | ALSO
-            | ALTER
-            | ALWAYS
-            | ANALYSE
-            | ANALYZE
-            | AND
-            | ANY
-            | APP
-            | APPEND
-            | APPLY
-            | ARCHIVE
-            | ASC
-            | ASOF_P
-            | ASSERTION
-            | ASSIGNMENT
-            | ASYMMETRIC
-            | AT
-            | ATTRIBUTE
-            | AUDIT
-            | AUTHID
-            | AUTHORIZATION
-            | AUTO_INCREMENT
-            | AUTOEXTEND
-            | AUTOMAPPED
-            | BACKWARD
-            | BARRIER
-            | BEFORE
-            | BEGIN_P
-            | BEGIN_NON_ANOYBLOCK
-            | BIGINT
-            | BINARY
-            | BINARY_DOUBLE
-            | BINARY_DOUBLE_INF
-            | BINARY_DOUBLE_NAN
-            | BINARY_INTEGER
-            | BIT
-            | BLANKS
-            | BLOB_P
-            | BLOCKCHAIN
-            | BODY_P
-            | BOOLEAN_P
-            | BOTH
-            | BUCKETCNT
-            | BUCKETS
-            | BUILD
-            | BYTE_P
-            | BYTEAWITHOUTORDER
-            | BYTEAWITHOUTORDERWITHEQUAL
-            | CACHE
-            | CALL
-            | CALLED
-            | CANCELABLE
-            | CASCADE
-            | CASCADED
-            | CASE
-            | CATALOG_P
-            | CATALOG_NAME
-            | CHAIN
-            | CHANGE
-            | CHARACTERISTICS
-            | CHARACTERSET
-            | CHARSET
-            | CHECK
-            | CHECKIDENT
-            | CHECKPOINT
-            | CLASS
-            | CLASS_ORIGIN
-            | CLEAN
-            | CLIENT
-            | CLIENT_MASTER_KEY
-            | CLIENT_MASTER_KEYS
-            | CLOB
-            | CLOSE
-            | CLUSTER
-            | TSQL_CLUSTERED
-            | COALESCE
-            | COLLATE
-            | COLLATION
-            | COLUMN
-            | COLUMN_ENCRYPTION_KEY
-            | COLUMN_ENCRYPTION_KEYS
-            | COLUMN_NAME
-            | COLUMNS
-            | TSQL_COLUMNSTORE
-            | COMMENT
-            | COMMENTS
-            | COMMIT
-            | COMMITTED
-            | COMPACT
-            | COMPATIBLE_ILLEGAL_CHARS
-            | COMPILE
-            | COMPLETE
-            | COMPLETION
-            | COMPRESS
-            | CONCURRENTLY
-            | CONDITION
-            | CONFIGURATION
-            | CONNECT
-            | CONNECTION
-            | CONSISTENT
-            | CONSTANT
-            | CONSTRAINT
-            | CONSTRAINT_CATALOG
-            | CONSTRAINT_NAME
-            | CONSTRAINT_SCHEMA
-            | CONSTRAINTS
-            | CONSTRUCTOR
-            | CONTENT_P
-            | CONTINUE_P
-            | CONTVIEW
-            | CONVERSION_P
-			| TSQL_CAST
-            | TSQL_CONVERT
-            | COORDINATOR
-            | COORDINATORS
-            | COPY
-            | COST
-            | CROSS
-            | CSN
-            | CSV
-            | CUBE
-            | CURRENT_P
-            | CURRENT_CATALOG
-            | CURRENT_DATE
-            | CURRENT_ROLE
-            | CURRENT_SCHEMA
-            | CURRENT_TIME
-            | CURRENT_TIMESTAMP
-            | CURRENT_USER
-            | CURSOR
-            | CURSOR_NAME
-            | CYCLE
-            | DATA_P
-            | DATABASE
-            | DATAFILE
-            | DATANODE
-            | DATANODES
-            | DATATYPE_CL
-            | DATE_P
-            | DATE_FORMAT_P
-            | DAY_HOUR_P
-            | DAY_MINUTE_P
-            | DAY_SECOND_P
-            | DBCC
-            | DBCOMPATIBILITY_P
-            | DEALLOCATE
-            | DEC
-            | DECIMAL_P
-            | DECLARE
-            | DECODE
-            | DEFAULT
-            | DEFAULTS
-            | DEFERRABLE
-            | DEFERRED
-            | DEFINER
-            | DELETE_P
-            | DELIMITER
-            | DELIMITERS
-            | DELTA
-            | DELTAMERGE
-            | DENSE_RANK
-            | DESC
-            | DETERMINISTIC
-            | DIAGNOSTICS
-            | DICTIONARY
-            | DIRECT
-            | DIRECTORY
-            | DISABLE_P
-            | DISCARD
-            | DISCONNECT
-            | DISTINCT
-            | DISTRIBUTE
-            | DISTRIBUTION
-            | DO
-            | DOCUMENT_P
-            | DOMAIN_P
-            | DOUBLE_P
-            | DROP
-            | DUMPFILE
-            | DUPLICATE
-            | EACH
-            | ELASTIC
-            | ELSE
-            | ENABLE_P
-            | ENCLOSED
-            | ENCODING
-            | ENCRYPTED
-            | ENCRYPTED_VALUE
-            | ENCRYPTION
-            | ENCRYPTION_TYPE
-            | END_P
-            | ENDS
-            | ENFORCED
-            | ENUM_P
-            | EOL
-            | ERROR_P
-            | ERRORS
-            | ESCAPE
-            | ESCAPED
-            | ESCAPING
-            | EVENT
-            | EVENTS
-            | EVERY
-            | EXCHANGE
-            | EXCLUDE
-            | EXCLUDED
-            | EXCLUDING
-            | EXCLUSIVE
-            | EXECUTE
-            | EXISTS
-            | EXPIRED_P
-            | EXPLAIN
-            | EXTENSION
-            | EXTERNAL
-            | EXTRACT
-            | FALSE_P
-            | FAMILY
-            | FAST
-            | FEATURES
-            | FENCED
-            | FIELDS
-            | FILEHEADER_P
-            | FILL_MISSING_FIELDS
-            | FILLER
-            | FINAL
-            | FIRST_P
-            | FIXED_P
-            | FLOAT_P
-            | FOLLOWING
-            | FOLLOWS_P
-            | FORCE
-            | FOREIGN
-            | FORMATTER
-            | FORWARD
-            | FREEZE
-            | FULL
-            | FUNCTION
-            | FUNCTIONS
-            | GENERATED
-            | GET
-            | GLOBAL
-            | GRANTED
-            | GREATEST
-            | GROUPING_P
-            | GROUPPARENT
-            | HANDLER
-            | HDFSDIRECTORY
-            | HEADER_P
-            | HOLD
-            | HOUR_MINUTE_P
-            | HOUR_SECOND_P
-            | IDENTIFIED
-            | IDENTITY_P
-            | IF_P
-            | IGNORE
-            | IGNORE_EXTRA_DATA
-            | ILIKE
-            | IMCSTORED
-            | IMMEDIATE
-            | IMMUTABLE
-            | IMPLICIT_P
-            | IN_P
-            | INCLUDE
-            | INCLUDING
-            | INCREMENT
-            | INCREMENTAL
-            | INDEX
-            | INDEXES
-            | INFILE
-            | INFINITE_P
-            | INHERIT
-            | INHERITS
-            | INITIAL_P
-            | INITIALLY
-            | INITRANS
-            | INLINE_P
-            | INNER_P
-            | INOUT
-            | INPUT_P
-            | INSENSITIVE
-            | INSERT
-            | INSTEAD
-            | INT_P
-            | INTEGER
-            | INTERNAL
-            | INTERVAL
-            | INVISIBLE
-            | INVOKER
-            | IP
-            | ISOLATION
-            | JOIN
-            | JSON_EXISTS
-            | KEY
-            | KEY_PATH
-            | KEY_STORE
-            | KILL
-            | LABEL
-            | LANGUAGE
-            | LARGE_P
-            | LAST_P
-            | LATERAL_P
-            | LC_COLLATE_P
-            | LC_CTYPE_P
-            | LEADING
-            | LEAKPROOF
-            | LEAST
-            | LEFT
-            | LESS
-            | LEVEL
-            | LIKE
-            | LINES
-            | LIST
-            | LISTEN
-            | LOAD
-            | LOCAL
-            | LOCALTIME
-            | LOCALTIMESTAMP
-            | LOCATION
-            | LOCK_P
-            | LOCKED
-            | LOG_P
-            | LOGGING
-            | LOGIN_ANY
-            | LOGIN_FAILURE
-            | LOGIN_SUCCESS
-            | LOGOUT
-            | LOOP
-            | MAP
-            | MAPPING
-            | MASKING
-            | MASTER
-            | MATCH
-            | MATCHED
-            | MATERIALIZED
-			| TSQL_MAX
-            | MAXEXTENTS
-            | MAXSIZE
-            | MAXTRANS
-            | MAXVALUE
-            | MEMBER
-            | MERGE
-            | MESSAGE_TEXT
-            | METHOD
-            | MINEXTENTS
-			| TSQL_MINUTES_P
-            | MINUTE_SECOND_P
-            | MINVALUE
-            | MODE
-            | MODEL
-            | MODIFY_P
-            | MOVE
-            | MOVEMENT
-            | MYSQL_ERRNO
-            | NAMES
-            | NAN_P
-            | NATIONAL
-            | NATURAL
-            | NCHAR
-            | NEXT
-            | NO
-            | NO_INFOMSGS
-            | NOCOMPRESS
-            | NOCYCLE
-            | NODE
-			| TSQL_NOEXPAND
-			| TSQL_NOLOCK
-            | NOLOGGING
-            | NOMAXVALUE
-            | NOMINVALUE
-            | TSQL_NONCLUSTERED
-            | NONE
-            | NORESEED
-            | NOTHING
-            | NOTIFY
-            | NOVALIDATE
-            | NOWAIT
-            | NTH_VALUE_P
-            | NULL_P
-            | NULLCOLS
-            | NULLIF
-            | NULLS_P
-            | NUMBER_P
-            | NUMERIC
-            | NUMSTR
-            | NVARCHAR
-            | NVARCHAR2
-            | NVL
-            | OBJECT_P
-            | OF
-            | OFF
-            | OIDS
-            | ONLY
-            | OPERATOR
-            | OPTIMIZATION
-            | OPTION
-            | OPTIONALLY
-            | OPTIONS
-            | OR
-            | OUT_P
-            | OUTER_P
-            | OUTFILE
-            | OVERLAY
-            | OWNED
-            | OWNER
-            | PACKAGE
-            | PACKAGES
-			| TSQL_PAGLOCK
-            | PARALLEL_ENABLE
-            | PARSER
-            | PARTIAL
-            | PARTITION
-            | PARTITIONS
-            | PASSING
-            | PASSWORD
-            | PCTFREE
-            | PER_P
-            | TSQL_PERCENT
-            | PERFORMANCE
-            | PERM
-            | TSQL_PERSISTED
-            | PIPELINED
-            | PLACING
-            | PLAN
-            | PLANS
-            | POLICY
-            | POOL
-            | POSITION
-            | PRECEDES_P
-            | PRECEDING
-            | PREDICT
-            | PREFERRED
-            | PREFIX
-            | PREPARE
-            | PREPARED
-            | PRESERVE
-            | PRIMARY
-            | PRIOR
-            | PRIORER
-            | PRIVATE
-            | PRIVILEGE
-            | PRIVILEGES
-			| TSQL_PROC
-            | PROCEDURAL
-            | PROCEDURE
-            | PROFILE
-            | PUBLICATION
-            | PUBLISH
-            | PURGE
-            | QUERY
-            | QUOTE
-            | RANDOMIZED
-            | RANGE
-            | RATIO
-            | RAW
-            | READ
-			| TSQL_READCOMMITTED
-			| TSQL_READPAST
-			| TSQL_READUNCOMMITTED
-            | REAL
-            | REASSIGN
-            | REBUILD
-            | RECHECK
-            | RECURSIVE
-            | RECYCLEBIN
-            | REDISANYVALUE
-            | REF
-            | REFERENCES
-            | REFRESH
-            | REINDEX
-            | REJECT_P
-            | RELATIVE_P
-            | RELEASE
-            | RELOPTIONS
-            | REMOTE_P
-            | REMOVE
-            | RENAME
-            | REPEAT
-            | REPEATABLE
-			| TSQL_REPEATABLEREAD
-            | REPLACE
-            | REPLICA
-            | RESEED
-            | RESET
-            | RESIZE
-            | RESOURCE
-            | RESPECT_P
-            | RESTART
-            | RESTRICT
-            | RESULT
-            | RETURN
-            | RETURNED_SQLSTATE
-            | RETURNS
-            | REUSE
-            | REVOKE
-            | RIGHT
-            | ROLE
-            | ROLES
-            | ROLLBACK
-            | ROLLUP
-            | ROTATE
-            | ROTATION
-            | ROW
-            | ROW_COUNT
-			| TSQL_ROWLOCK
-            | ROWNUM
-            | ROWS
-            | ROWTYPE_P
-            | RULE
-            | SAMPLE
-			| SAVE
-            | SAVEPOINT
-            | SCHEDULE
-            | SCHEMA
-            | SCHEMA_NAME
-            | SCROLL
-            | SEARCH
-            | SECURITY
-            | SELF
-            | SEPARATOR_P
-            | SEQUENCE
-            | SEQUENCES
-            | SERIALIZABLE
-            | SERVER
-            | SESSION
-            | SESSION_USER
-            | SET
-            | SETOF
-            | SETS
-            | SHARE
-            | SHIPPABLE
-            | SHOW
-            | SHRINK
-            | SHUTDOWN
-            | SIBLINGS
-            | SIMILAR
-            | SIMPLE
-            | SIZE
-            | SKIP
-            | SLAVE
-            | SLICE
-            | SMALLDATETIME
-            | SMALLDATETIME_FORMAT_P
-            | SMALLINT
-            | SNAPSHOT
-            | SOME
-            | SOURCE_P
-            | SPACE
-            | SPECIFICATION
-            | SPILL
-            | SPLIT
-            | SQL_P
-            | STABLE
-            | STACKED_P
-            | STANDALONE_P
-            | START
-            | STARTING
-            | STARTS
-            | STATEMENT
-            | STATEMENT_ID
-            | STATIC_P
-            | STATISTICS
-            | STDIN
-            | STDOUT
-            | STORAGE
-            | STORE_P
-            | STORED
-            | STRATIFY
-            | STREAM
-            | STRICT_P
-            | STRIP_P
-            | SUBCLASS_ORIGIN
-            | SUBPARTITION
-            | SUBPARTITIONS
-            | SUBSCRIPTION
-            | SUBSTRING
-            | SYMMETRIC
-            | SYNONYM
-            | SYS_REFCURSOR
-            | SYSDATE
-            | SYSID
-            | SYSTEM_P
-            | TABLE
-            | TABLE_NAME
-            | TABLES
-            | TABLESAMPLE
-            | TABLESPACE
-			| TSQL_TABLOCK
-			| TSQL_TABLOCKX
-            | TEMP
-            | TEMPLATE
-            | TEMPORARY
-            | TERMINATED
-            | TEXT_P
-			| TSQL_TEXTIMAGE_ON
-            | THAN
-            | THEN
-            | TIES
-            | TIME
-            | TIME_FORMAT_P
-            | TIMECAPSULE
-            | TIMESTAMP
-            | TIMESTAMP_FORMAT_P
-            | TIMESTAMPDIFF
-            | TIMEZONE_HOUR_P
-            | TIMEZONE_MINUTE_P
-            | TINYINT
-            | TSQL_TOP
-			| TSQL_QUARTER
-			| TSQL_YYYY
-			| TSQL_YY
-			| TSQL_Q
-			| TSQL_QQ
-			| TSQL_MM
-			| TSQL_M
-			| TSQL_DAYOFYEAR
-			| TSQL_DY
-			| TSQL_Y
-			| TSQL_WEEK
-			| TSQL_WK
-			| TSQL_WW
-			| TSQL_WEEKDAY
-			| TSQL_DW
-			| TSQL_W
-			| TSQL_DD
-			| XACT_ABORT
-			| TSQL_D
-			| TSQL_HH
-			| TSQL_MI
-			| TSQL_N
-			| TSQL_SS
-			| TSQL_S
-			| TSQL_MILLISECOND
-			| TSQL_MS
-			| TSQL_MICROSECOND
-			| TSQL_MCS
-			| TSQL_NANOSECOND
-			| TSQL_NS
-			| TSQL_EXEC
-			| TSQL_OUTPUT
-            | TRAILING
-			| TRAN
-            | TRANSACTION
-            | TRANSFORM
-            | TREAT
-            | TRIGGER
-            | TRIM
-            | TRUE_P
-            | TRUNCATE
-            | TRUSTED
-            | TSFIELD
-            | TSTAG
-            | TSTIME
-            | TYPES_P
-            | UNBOUNDED
-            | UNCOMMITTED
-            | UNDER
-            | UNENCRYPTED
-            | UNIMCSTORED
-            | UNIQUE
-            | UNKNOWN
-            | UNLIMITED
-            | UNLISTEN
-            | UNLOCK
-            | UNLOGGED
-            | UNTIL
-            | UNUSABLE
-            | UPDATE
-			| TSQL_UPDLOCK
-            | USE_P
-            | USEEOF
-            | USER
-            | USING
-            | VACUUM
-            | VALID
-            | VALIDATE
-            | VALIDATION
-            | VALIDATOR
-            | VALUES
-            | VARCHAR
-            | VARCHAR2
-            | VARIABLES
-            | VARIADIC
-            | VARRAY
-            | VCGROUP
-            | VERBOSE
-            | VERIFY
-            | VERSION_P
-            | VIEW
-            | VISIBLE
-            | VOLATILE
-            | WAIT
-            | WARNINGS
-            | WEAK
-            | WHEN
-            | WHILE_P
-            | WHITESPACE_P
-            | WORK
-            | WORKLOAD
-            | WRAPPER
-            | WRITE
-			| TSQL_XLOCK
-            | XMLATTRIBUTES
-            | XMLCONCAT
-            | XMLELEMENT
-            | XMLEXISTS
-            | XMLFOREST
-            | XMLPARSE
-            | XMLPI
-            | XMLROOT
-            | XMLSERIALIZE
-            | YEAR_MONTH_P
-            | YES_P
-            | ZONE
 		;
 
 tsql_opt_transaction_name:
@@ -2939,7 +1949,7 @@ tsql_InsertStmt: opt_with_clause INSERT hint_string INTO insert_target tsql_opt_
 		;
 
 /* table hint for delete statement */
-delete_relation_expr_opt_alias_with_hint: delete_relation_expr_opt_alias tsql_table_hint_expr_with { $$ = (RangeVar*)$1; }
+delete_relation_expr_opt_alias_with_hint: delete_relation_expr_opt_alias tsql_table_hint_expr_with { $$ = $1; }
 			;
 
 relation_expr_opt_alias_list: 
@@ -3109,127 +2119,6 @@ RemoveFuncStmt:
 					n->isProcedure = true;
 					$$ = (Node *)n;
 				}
-		;
-
-tsql_ExecStmt:
-			TSQL_EXEC tsql_opt_return tsql_func_name tsql_actual_args
-				{
-					List *name = $3;
-					List *args = $4;
-					DolphinCallStmt *n;
-					ListCell *lc;
-
-					foreach(lc, args)
-					{
-						Node *node = (Node *)lfirst(lc);
-						if (node->type == T_RowExpr)
-						{
-							RowExpr *row_expr = (RowExpr *) node;
-							ereport(ERROR,
-									(errcode(ERRCODE_SYNTAX_ERROR),
-									 errmsg("Row Expression argument not supported"),
-									 parser_errposition(row_expr->location)));
-						}
-					}
-
-					n = makeNode(DolphinCallStmt);
-					n->funccall = makeFuncCall(name, args, @1);
-
-					$$ = (Node *) n;
-				}
-			| TSQL_EXEC '(' Sconst ')'
-				{
-					DoStmt *n = makeNode(DoStmt);
-					StringInfoData str_body;
-					initStringInfo(&str_body);
-					appendStringInfo(&str_body, "BEGIN %s END;", $3);
-					n->args = list_make1(makeDefElem("as", (Node *)makeString(str_body.data)));
-					$$ = (Node *) n;
-				}
-		;
-
-tsql_opt_return:
-			PARAM '='
-			| /* EMPTY */
-		;
-
-tsql_func_name:
-			type_func_name_keyword
-				{
-					$$ = list_make1(makeString(pstrdup($1)));
-				}
-			| ColId
-				{
-					$$ = list_make1(makeString($1));
-				}
-			| ColId indirection
-				{
-					$$ = check_func_name(lcons(makeString($1), $2), yyscanner);
-				}
-			| tsql_qualified_func_name
-				{
-					$$ = check_func_name($1, yyscanner);
-				}
-		;
-
-tsql_actual_args: 
-			tsql_actual_arg
-				{
-					$$ = list_make1($1);
-				}
-			| tsql_actual_args ',' tsql_actual_arg
-				{
-					$$ = lappend($1, $3);
-				}
-			| /* EMPTY */
-				{
-					$$ = NIL;
-				}
-		;
-
-tsql_actual_arg: 
-			ColId '=' a_expr tsql_opt_output
-				{
-					NamedArgExpr *na = makeNode(NamedArgExpr);
-					na->name = $1;   /* FIXME: record $4 somewhere - probably need a new Node type */
-					na->arg = (Expr *) $3;
-					na->argnumber = -1;		/* until determined */
-					na->location = @1;
-					$$ = (Node *) na;
-				}
-			| a_expr tsql_opt_output
-				{
-					$$ = $1; /* FIXME: record $2 somewhere - probably need a new Node type */
-				}
-		;
-
-tsql_qualified_func_name:
-			ColId DOT_DOT attr_name
-				{
-				$$ = list_make3(makeString($1), makeString("dbo"), (Node *)makeString($3));
-				}
-			| DOT_DOT attr_name
-				{
-					// We should assemble a list of all procedures that should default to sys schema if more are needed
-					if (strcmp($2, "sp_tablecollations_100") == 0)
-					{
-						$$ = list_make2(makeString("sys"), (Node *)makeString($2));
-					}
-					else
-					{
-						$$ = list_make3(makeString("master"), makeString("dbo"), (Node *)makeString($2));
-					}
-				}
-			| '.' attr_name '.' attr_name
-				{
-					$$ = list_make3(makeString("master"), makeString($2), (Node *)makeString($4));
-				}
-		;
-
-tsql_opt_output:
-			TSQL_OUTPUT		{ $$ = true; }
-			| OUT_P			{ $$ = true; }
-			| /* EMPTY */	{ $$ = false; }
 		;
 
 AlterExtensionContentsStmt:
@@ -3464,49 +2353,4 @@ extract_arg:
 			TSQL_QUARTER							{ $$ = "quarter"; }
 			| TSQL_Q								{ $$ = "quarter"; }
 			| TSQL_QQ								{ $$ = "quarter"; }
-		;
-
-CharacterWithLength:
-                        character_national '(' TSQL_MAX ')'
-                        {
-                            if (strcmp($1, "nvarchar2") == 0) {
-                                $$ = SystemTypeName($1);
-                                $$->typmods = NIL;
-                                $$->location = @1;
-                            } else {
-                                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                    errmsg("max is only supported in nvarchar2 or varbinary type")));
-                            }
-                        }
-                ;
-
-alter_table_cmd:
-			/* ALTER TABLE <name> ADD [CONSTRAINT <conname>] DEFAULT <expr> FOR <colname> */
-			ADD_P tsql_opt_constraint_name DEFAULT a_expr FOR ColId
-				{
-					AlterTableCmd *n = makeNode(AlterTableCmd);
-					ereport(NOTICE,
-							(errmsg("DEFAULT added. The added DEFAULT can not be dropped by name")));
-
-					n->subtype = AT_ColumnDefault;
-					n->name = $6;
-					n->def = $4;
-					$$ = (Node *)n;
-				}
-
-tsql_opt_constraint_name:
-			CONSTRAINT name
-			| /* EMPTY */
-		;
-
-Numeric: TSQL_DOUBLE_PRECISION
-				{
-					$$ = SystemTypeName("float8");
-					$$->location = @1;
-				}
-		| TSQL_BIGINT
-				{
-					$$ = SystemTypeName("int8");
-					$$->location = @1;
-				}
 		;
