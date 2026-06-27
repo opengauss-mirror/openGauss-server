@@ -294,7 +294,6 @@ struct ParseState {
     List* cursor_expression_para_var;
     int p_expr_transform_level;   /* indicast the expr transform level in the target list */
     int p_having_func_arg_level;  /* suppress B/D HAVING alias lookup inside function args */
-    bool has_rotate;
 };
 
 /* An element of p_relnamespace or p_varnamespace */
