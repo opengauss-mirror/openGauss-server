@@ -1,0 +1,203 @@
+set enable_expr_fusion=on;
+DROP SCHEMA IF EXISTS index_ustore_smp CASCADE;
+NOTICE:  schema "index_ustore_smp" does not exist, skipping
+CREATE SCHEMA index_ustore_smp;
+SET CURRENT_SCHEMA TO index_ustore_smp;
+ 
+DROP TABLE IF EXISTS t1;
+NOTICE:  table "t1" does not exist, skipping
+CREATE TABLE t1 (a INT, b INT, c INT) WITH (STORAGE_TYPE = USTORE);
+CREATE INDEX i_t1 on t1(b);
+--forward scan
+SET QUERY_DOP = 1004;
+TRUNCATE t1;
+INSERT INTO t1 VALUES(GENERATE_SERIES(1,600), GENERATE_SERIES(1,600), GENERATE_SERIES(1,600));
+ANALYZE t1;
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1;
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/4)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+(4 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1;
+ count 
+--?.*
+   600
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b < 200;
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/4)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: (b < 200)
+(5 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b < 200;
+ count 
+--?.*
+   199
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexscan(t1 i_t1)*/ COUNT(a) FROM t1 WHERE b < 200;
+--?.*                   
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/4)
+         ->  Aggregate
+               ->  Index Scan using i_t1 on t1
+                     Index Cond: (b < 200)
+(5 rows)
+
+SELECT /*+indexscan(t1 i_t1)*/ COUNT(a) FROM t1 WHERE b < 200;
+ count 
+--?.*
+   199
+(1 row)
+
+-- backward scan
+SET QUERY_DOP = 1004;
+TRUNCATE t1;
+INSERT INTO t1 VALUES(GENERATE_SERIES(1,600), GENERATE_SERIES(1,600), GENERATE_SERIES(1,600));
+ANALYZE t1;
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b DESC);
+--?.*                          
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/4)
+               ->  Index Only Scan Backward using i_t1 on t1
+(5 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b DESC);
+ count 
+--?.*
+   600
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 200 ORDER BY b DESC);
+--?.*                          
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/4)
+               ->  Index Only Scan Backward using i_t1 on t1
+                     Index Cond: (b < 200)
+(6 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 200 ORDER BY b DESC);
+ count 
+--?.*
+   199
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 200 ORDER BY b DESC);
+--?.*                       
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/4)
+               ->  Index Scan Backward using i_t1 on t1
+                     Index Cond: (b < 200)
+(6 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 200 ORDER BY b DESC);
+ count 
+--?.*
+   199
+(1 row)
+
+--partiton table
+SET QUERY_DOP = 1002;
+DROP TABLE IF EXISTS t1;
+CREATE TABLE t1 (a INT, b INT, c INT) 
+WITH (STORAGE_TYPE = USTORE)
+partition by range (b)
+(
+partition p1 values less than(150),
+partition p2 values less than(300),
+partition p3 values less than(450),
+partition p4 values less than (maxvalue)
+);
+CREATE INDEX i_t1 on t1(b) local;
+INSERT INTO t1 VALUES(GENERATE_SERIES(1,600), GENERATE_SERIES(1,600), GENERATE_SERIES(1,600));
+ANALYZE t1;
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b DESC);
+--?.*                                   
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator Scan Backward
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan Backward using i_t1 on t1
+                           Selected Partitions:  1..4
+(8 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b DESC);
+ count 
+--?.*
+   600
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b ASC);
+--?.*                              
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using i_t1 on t1
+                           Selected Partitions:  1..4
+(8 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b ASC);
+ count 
+--?.*
+   600
+(1 row)
+
+-- multi plan node 
+TRUNCATE t1;
+INSERT INTO t1 VALUES(GENERATE_SERIES(1,200), GENERATE_SERIES(1,200), GENERATE_SERIES(1,200));
+EXPLAIN (COSTS OFF) SELECT count(*) FROM t1 AS t00, t1 AS t01 where t00.b < 200 AND t00.b > 100 AND t01.b < 190;
+--?.*                                
+--?.*
+ Aggregate
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 2
+               ->  Partitioned Seq Scan on t1 t01
+                     Filter: (b < 190)
+                     Selected Partitions:  1..2
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 2
+                     ->  Partitioned Index Only Scan using i_t1 on t1 t00
+                           Index Cond: ((b < 200) AND (b > 100))
+                           Selected Partitions:  1..2
+(13 rows)
+
+SELECT count(*) FROM t1 AS t00, t1 AS t01 where t00.b < 200 AND t00.b > 100 AND t01.b < 190;
+ count 
+--?.*
+ 18711
+(1 row)
+
+RESET ENABLE_SEQSCAN;
+RESET QUERY_DOP;
+DROP TABLE index_ustore_smp.t1;
+SET CURRENT_SCHEMA=PUBLIC;
+DROP SCHEMA index_ustore_smp CASCADE;
+set enable_expr_fusion=off;

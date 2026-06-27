@@ -1,0 +1,122 @@
+--
+-- indexsmp_othercases
+-- test cases for parallel index(only)scan,
+-- most for optimizer's special cases
+--
+-- partial index scan for partition table, index scan should be paralleled
+\c regression
+set enable_expr_fusion=on;
+DROP SCHEMA IF EXISTS index_smp_othercase CASCADE;
+NOTICE:  schema "index_smp_othercase" does not exist, skipping
+CREATE SCHEMA index_smp_othercase;
+SET CURRENT_SCHEMA = index_smp_othercase;
+DROP DATABASE IF EXISTS indexsmp_b;
+NOTICE:  database "indexsmp_b" does not exist, skipping
+SET QUERY_DOP = 1004;
+DROP TABLE IF EXISTS partition_scan_stu_info1;
+NOTICE:  table "partition_scan_stu_info1" does not exist, skipping
+CREATE TABLE partition_scan_stu_info1(SN INT, NAME NAME)
+PARTITION BY RANGE (SN)
+(
+PARTITION P1_partition_scan_stu_info1 VALUES LESS THAN(10),
+PARTITION P2_partition_scan_stu_info1 VALUES LESS THAN(20),
+PARTITION P3_partition_scan_stu_info1 VALUES LESS THAN(30),
+PARTITION P4_partition_scan_stu_info1 VALUES LESS THAN(40)
+);
+DROP TABLE IF EXISTS partition_scan_stu_info2;
+NOTICE:  table "partition_scan_stu_info2" does not exist, skipping
+CREATE TABLE partition_scan_stu_info2(SN INT, PHONE NAME)
+PARTITION BY RANGE (SN)
+(
+PARTITION P1_partition_scan_stu_info2 VALUES LESS THAN(10),
+PARTITION P2_partition_scan_stu_info2 VALUES LESS THAN(20),
+PARTITION P3_partition_scan_stu_info2 VALUES LESS THAN(30),
+PARTITION P4_partition_scan_stu_info2 VALUES LESS THAN(40)
+);
+CREATE UNIQUE INDEX index_on_partition_scan_stu_info1 ON partition_scan_stu_info1 (SN) LOCAL;
+CREATE UNIQUE INDEX index_on_partition_scan_stu_info2 ON partition_scan_stu_info2 (SN) LOCAL;
+INSERT INTO partition_scan_stu_info1 VALUES (1,'DFM');
+INSERT INTO partition_scan_stu_info1 VALUES (11,'CHAO');
+INSERT INTO partition_scan_stu_info1 VALUES (21,'ZJR');
+INSERT INTO partition_scan_stu_info1 VALUES (31,'JYH');
+INSERT INTO partition_scan_stu_info2 VALUES (1,'15478523126');
+INSERT INTO partition_scan_stu_info2 VALUES (11,'15236997586');
+INSERT INTO partition_scan_stu_info2 VALUES (21,'15936985364');
+INSERT INTO partition_scan_stu_info2 VALUES (31,'15873285556');
+--Results
+SELECT * FROM partition_scan_stu_info1 WHERE SN <40 order by SN;
+ sn | name 
+--?.*
+  1 | DFM
+ 11 | CHAO
+ 21 | ZJR
+ 31 | JYH
+(4 rows)
+
+SET enable_seqscan = OFF;
+SET enable_indexscan = ON;
+SET enable_indexonlyscan = ON;
+SET enable_bitmapscan = ON;
+SET enable_tidscan = ON;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_hashjoin = ON;
+--FULL INDEX
+EXPLAIN (COSTS OFF) SELECT * FROM partition_scan_stu_info1 WHERE SN <40;
+--?.*                                   
+--?.*
+ Partition Iterator
+   Iterations: 4
+   ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info1
+         Recheck Cond: (sn < 40)
+         Selected Partitions:  1..4
+         ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info1
+               Index Cond: (sn < 40)
+               Selected Partitions:  1..4
+(8 rows)
+
+SELECT * FROM partition_scan_stu_info1 WHERE SN <40 order by SN;
+ sn | name 
+--?.*
+  1 | DFM
+ 11 | CHAO
+ 21 | ZJR
+ 31 | JYH
+(4 rows)
+
+--PARTIAL INDEX
+ALTER INDEX index_on_partition_scan_stu_info1 MODIFY PARTITION p4_partition_scan_stu_info1_sn_idx UNUSABLE;
+EXPLAIN SELECT * FROM partition_scan_stu_info1 WHERE SN <40 ;
+--?.*                                                                        
+--?.*
+ Result  (cost=0.00..69.81 rows=556 width=68)
+   ->  Append  (cost=0.00..69.81 rows=556 width=68)
+         ->  Streaming(type: LOCAL GATHER dop: 1/4)  (cost=0.00..36.78 rows=278 width=68)
+               ->  Partition Iterator  (cost=0.00..33.03 rows=278 width=68)
+                     Iterations: 3
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info1 on partition_scan_stu_info1  (cost=0.00..33.03 rows=278 width=68)
+                           Index Cond: (sn < 40)
+                           Selected Partitions:  1..3
+         ->  Partition Iterator  (cost=0.00..33.03 rows=278 width=68)
+               Iterations: 1
+               ->  Partitioned Seq Scan on partition_scan_stu_info1  (cost=10000000000.00..1000000002041.25 rows=278 width=68)
+                     Filter: (sn < 40)
+                     Selected Partitions:  4
+(13 rows)
+
+SELECT * FROM partition_scan_stu_info1 WHERE SN <40 order by SN;
+ sn | name 
+--?.*
+  1 | DFM
+ 11 | CHAO
+ 21 | ZJR
+ 31 | JYH
+(4 rows)
+
+SET QUERY_DOP = 2002;
+DROP TABLE IF EXISTS partition_scan_stu_info1;
+DROP TABLE IF EXISTS partition_scan_stu_info2;
+RESET CURRENT_SCHEMA;
+DROP SCHEMA IF EXISTS index_smp_othercase CASCADE;
+set enable_expr_fusion=off;

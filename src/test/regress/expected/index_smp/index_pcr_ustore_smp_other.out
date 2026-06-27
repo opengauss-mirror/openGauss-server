@@ -1,0 +1,724 @@
+DROP SCHEMA IF EXISTS index_pcr_ustore_smp_other CASCADE;
+NOTICE:  schema "index_pcr_ustore_smp_other" does not exist, skipping
+CREATE SCHEMA index_pcr_ustore_smp_other;
+SET CURRENT_SCHEMA TO index_pcr_ustore_smp_other;
+set enable_mergejoin = false;
+--partiton table
+SET QUERY_DOP = 1002;
+DROP TABLE IF EXISTS t1;
+NOTICE:  table "t1" does not exist, skipping
+CREATE TABLE t1 (a INT, b INT, c INT) 
+WITH (STORAGE_TYPE = USTORE)
+partition by range (b)
+(
+partition p1 values less than(150),
+partition p2 values less than(300),
+partition p3 values less than(450),
+partition p4 values less than (maxvalue)
+);
+CREATE INDEX i_t1 on t1(b) local with (index_type=pcr);
+-- (1) some partition tables are empty.
+INSERT INTO t1 VALUES(GENERATE_SERIES(1,600), GENERATE_SERIES(1,600), GENERATE_SERIES(1,600));
+ANALYZE t1;
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b DESC);
+--?.*                                   
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator Scan Backward
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan Backward using i_t1 on t1
+                           Selected Partitions:  1..4
+(8 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b DESC);
+ count 
+--?.*
+   600
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b ASC);
+--?.*                              
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using i_t1 on t1
+                           Selected Partitions:  1..4
+(8 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b ASC);
+ count 
+--?.*
+   600
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 200 ORDER BY b DESC);
+--?.*                                   
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator Scan Backward
+                     Iterations: 2
+                     ->  Partitioned Index Only Scan Backward using i_t1 on t1
+                           Index Cond: (b < 200)
+                           Selected Partitions:  1..2
+(9 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 200 ORDER BY b DESC);
+ count 
+--?.*
+   199
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 200 ORDER BY b ASC);
+--?.*                              
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator
+                     Iterations: 2
+                     ->  Partitioned Index Only Scan using i_t1 on t1
+                           Index Cond: (b < 200)
+                           Selected Partitions:  1..2
+(9 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 200 ORDER BY b ASC);
+ count 
+--?.*
+   199
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 200 ORDER BY b DESC);
+--?.*                                
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator Scan Backward
+                     Iterations: 2
+                     ->  Partitioned Index Scan Backward using i_t1 on t1
+                           Index Cond: (b < 200)
+                           Selected Partitions:  1..2
+(9 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 200 ORDER BY b DESC);
+ count 
+--?.*
+   199
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 200 ORDER BY b ASC);
+--?.*                            
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator
+                     Iterations: 2
+                     ->  Partitioned Index Scan using i_t1 on t1
+                           Index Cond: (b < 200)
+                           Selected Partitions:  1..2
+(9 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 200 ORDER BY b ASC);
+ count 
+--?.*
+   199
+(1 row)
+
+-- (2) all partition tables are not empty.
+TRUNCATE t1;
+INSERT INTO t1 VALUES(GENERATE_SERIES(1,1200), GENERATE_SERIES(1,1200), GENERATE_SERIES(1,1200));
+ANALYZE t1;
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b DESC);
+--?.*                                   
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator Scan Backward
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan Backward using i_t1 on t1
+                           Selected Partitions:  1..4
+(8 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b DESC);
+ count 
+--?.*
+  1200
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b ASC);
+--?.*                              
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using i_t1 on t1
+                           Selected Partitions:  1..4
+(8 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b ASC);
+ count 
+--?.*
+  1200
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 400 ORDER BY b DESC);
+--?.*                                   
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator Scan Backward
+                     Iterations: 3
+                     ->  Partitioned Index Only Scan Backward using i_t1 on t1
+                           Index Cond: (b < 400)
+                           Selected Partitions:  1..3
+(9 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 400 ORDER BY b DESC);
+ count 
+--?.*
+   399
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 400 ORDER BY b ASC);
+--?.*                              
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator
+                     Iterations: 3
+                     ->  Partitioned Index Only Scan using i_t1 on t1
+                           Index Cond: (b < 400)
+                           Selected Partitions:  1..3
+(9 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 400 ORDER BY b ASC);
+ count 
+--?.*
+   399
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 400 ORDER BY b DESC);
+--?.*                                
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator Scan Backward
+                     Iterations: 3
+                     ->  Partitioned Index Scan Backward using i_t1 on t1
+                           Index Cond: (b < 400)
+                           Selected Partitions:  1..3
+(9 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 400 ORDER BY b DESC);
+ count 
+--?.*
+   399
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 400 ORDER BY b ASC);
+--?.*                            
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Partition Iterator
+                     Iterations: 3
+                     ->  Partitioned Index Scan using i_t1 on t1
+                           Index Cond: (b < 400)
+                           Selected Partitions:  1..3
+(9 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 400 ORDER BY b ASC);
+ count 
+--?.*
+   399
+(1 row)
+
+DROP INDEX i_t1;
+CREATE INDEX i_t1 on t1(b) global with (index_type=pcr);
+ANALYZE t1;
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b DESC);
+--?.*                          
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Index Only Scan Backward using i_t1 on t1
+(5 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b DESC);
+ count 
+--?.*
+  1200
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b ASC);
+--?.*                     
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Index Only Scan using i_t1 on t1
+(5 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 ORDER BY b ASC);
+ count 
+--?.*
+  1200
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 400 ORDER BY b DESC);
+--?.*                          
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Index Only Scan Backward using i_t1 on t1
+                     Index Cond: (b < 400)
+(6 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 400 ORDER BY b DESC);
+ count 
+--?.*
+   399
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 400 ORDER BY b ASC);
+--?.*                     
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: (b < 400)
+(6 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 400 ORDER BY b ASC);
+ count 
+--?.*
+   399
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 400 ORDER BY b DESC);
+--?.*                       
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Index Scan Backward using i_t1 on t1
+                     Index Cond: (b < 400)
+(6 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 400 ORDER BY b DESC);
+ count 
+--?.*
+   399
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 400 ORDER BY b ASC);
+--?.*                     
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Index Scan using i_t1 on t1
+                     Index Cond: (b < 400)
+(6 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b < 400 ORDER BY b ASC);
+ count 
+--?.*
+   399
+(1 row)
+
+-- another query
+SET QUERY_DOP = 1002;
+DROP TABLE IF EXISTS t1;
+CREATE TABLE t1 (a INT, b INT, c INT) WITH (STORAGE_TYPE = USTORE);
+CREATE INDEX i_t1 on t1(b) with (index_type=pcr);
+INSERT INTO t1 SELECT x,x,x FROM GENERATE_SERIES(1, 700) x;
+INSERT INTO t1 SELECT 1001, 1002, x FROM GENERATE_SERIES(1, 300) x;
+ANALYZE t1;
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b = 1002;
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: (b = 1002)
+(5 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b = 1002;
+ count 
+--?.*
+   300
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexscan(t1 i_t1)*/ COUNT(a) FROM t1 WHERE b = 1002;
+--?.*                   
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Scan using i_t1 on t1
+                     Index Cond: (b = 1002)
+(5 rows)
+
+SELECT /*+indexscan(t1 i_t1)*/ COUNT(a) FROM t1 WHERE b = 1002;
+ count 
+--?.*
+   300
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b = 1002 ORDER BY b DESC);
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: (b = 1002)
+(5 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b = 1002 ORDER BY b DESC);
+ count 
+--?.*
+   300
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b = 1002 ORDER BY b DESC);
+--?.*                   
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Scan using i_t1 on t1
+                     Index Cond: (b = 1002)
+(5 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexscan(t1 i_t1)*/ a FROM t1 WHERE b = 1002 ORDER BY b DESC);
+ count 
+--?.*
+   300
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b BETWEEN 200 AND 500 AND b != 400;
+--?.*                          
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: ((b >= 200) AND (b <= 500))
+                     Filter: (b <> 400)
+(6 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b BETWEEN 200 AND 500 AND b != 400;
+ count 
+--?.*
+   300
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexscan(t1 i_t1)*/ COUNT(a) FROM t1 WHERE b BETWEEN 200 AND 500 AND b != 400;
+--?.*                          
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Scan using i_t1 on t1
+                     Index Cond: ((b >= 200) AND (b <= 500))
+                     Filter: (b <> 400)
+(6 rows)
+
+SELECT /*+indexscan(t1 i_t1)*/ COUNT(a) FROM t1 WHERE b BETWEEN 200 AND 500 AND b != 400;
+ count 
+--?.*
+   300
+(1 row)
+
+-- IS NOT NULL
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b IS NOT NULL;
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: (b IS NOT NULL)
+(5 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b IS NOT NULL;
+ count 
+--?.*
+  1000
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexscan(t1 i_t1)*/ COUNT(a) FROM t1 WHERE b IS NOT NULL;
+--?.*                    
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Scan using i_t1 on t1
+                     Index Cond: (b IS NOT NULL)
+(5 rows)
+
+SELECT /*+indexscan(t1 i_t1)*/ COUNT(a) FROM t1 WHERE b IS NOT NULL;
+ count 
+--?.*
+  1000
+(1 row)
+
+-- JOIN
+TRUNCATE t1;
+INSERT INTO t1 VALUES(GENERATE_SERIES(1,600), GENERATE_SERIES(1,600), GENERATE_SERIES(1,600));
+DROP TABLE IF EXISTS t2;
+NOTICE:  table "t2" does not exist, skipping
+CREATE TABLE t2 (a INT, b INT, c INT) WITH (STORAGE_TYPE = USTORE);
+CREATE INDEX i_t2 ON t2(b) with (index_type=pcr);
+INSERT INTO t2 VALUES(GENERATE_SERIES(300,600), GENERATE_SERIES(300,600), GENERATE_SERIES(300,600));
+ANALYZE t1;
+ANALYZE t2;
+SET ENABLE_SEQSCAN=false;
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1) indexonlyscan(t2 i_t2) leading((t1 t2))*/ COUNT(*)
+FROM t1,t2 WHERE t1.b=t2.b;
+--?.*                  
+--?.*
+ Aggregate
+   ->  Hash Join
+         Hash Cond: (t1.b = t2.b)
+         ->  Index Only Scan using i_t1 on t1
+         ->  Hash
+               ->  Index Only Scan using i_t2 on t2
+(6 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1) indexonlyscan(t2 i_t2) leading((t1 t2))*/ COUNT(*) FROM t1,t2 WHERE t1.b=t2.b;
+ count 
+--?.*
+   301
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexscan(t1 i_t1) indexscan(t2 i_t2) leading((t1 t2))*/ COUNT(t1.a)+COUNT(t2.a) 
+FROM t1,t2 WHERE t1.b=t2.b;
+--?.*                
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: (t1.b = t2.b)
+                     ->  Index Scan using i_t1 on t1
+                     ->  Hash
+                           ->  Streaming(type: BROADCAST dop: 2/2)
+                                 ->  Index Scan using i_t2 on t2
+(9 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1) indexonlyscan(t2 i_t2) leading((t1 t2))*/ COUNT(*) FROM t1,t2 WHERE t1.b=t2.b;
+ count 
+--?.*
+   301
+(1 row)
+
+-- >, >=, <, <=, =, !=, is null
+TRUNCATE t1;
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b > 50;
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: (b > 50)
+(5 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b > 50;
+ count 
+--?.*
+     0
+(1 row)
+
+INSERT INTO t1 VALUES(GENERATE_SERIES(1,2000), GENERATE_SERIES(1,2000), GENERATE_SERIES(1,2000));
+SET QUERY_DOP=1064;
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b > 50 AND b < 1200;
+--?.*                         
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/64)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: ((b > 50) AND (b < 1200))
+(5 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b >= 50 AND b < 1200;
+ count 
+--?.*
+  1150
+(1 row)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b > 50 AND b <= 1200;
+ count 
+--?.*
+  1150
+(1 row)
+
+SET QUERY_DOP=1002;
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b != 100;
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Filter: (b <> 100)
+(5 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b != 100;
+ count 
+--?.*
+  1999
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b > 100;
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: (b > 100)
+(5 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b > 100;
+ count 
+--?.*
+  1900
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b < 1999;
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: (b < 1999)
+(5 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b < 1999;
+ count 
+--?.*
+  1998
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b IS NULL;
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+                     Index Cond: (b IS NULL)
+(5 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1 WHERE b IS NULL;
+ count 
+--?.*
+     0
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1;
+--?.*                     
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Index Only Scan using i_t1 on t1
+(4 rows)
+
+SELECT /*+indexonlyscan(t1 i_t1)*/ COUNT(*) FROM t1;
+ count 
+--?.*
+  2000
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 2000 ORDER BY b DESC);
+--?.*                          
+--?.*
+ Aggregate
+   ->  Sort
+         Sort Key: t1.b DESC
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Index Only Scan Backward using i_t1 on t1
+                     Index Cond: (b < 2000)
+(6 rows)
+
+SELECT COUNT(*) FROM (SELECT /*+indexonlyscan(t1 i_t1)*/ b FROM t1 WHERE b < 2000 ORDER BY b DESC);
+ count 
+--?.*
+  1999
+(1 row)
+
+-- multi plan node 
+TRUNCATE t1;
+INSERT INTO t1 VALUES(GENERATE_SERIES(1,200), GENERATE_SERIES(1,200), GENERATE_SERIES(1,200));
+EXPLAIN (COSTS OFF) SELECT count(*) FROM t1 AS t00, t1 AS t01 where t00.b < 200 AND t00.b > 100 AND t01.b < 190;
+--?.*                               
+--?.*
+ Aggregate
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Aggregate
+               ->  Nested Loop
+                     ->  Streaming(type: BROADCAST dop: 2/2)
+                           ->  Index Only Scan using i_t1 on t1 t00
+                                 Index Cond: ((b < 200) AND (b > 100))
+                     ->  Materialize
+                           ->  Index Only Scan using i_t1 on t1 t01
+                                 Index Cond: (b < 190)
+(10 rows)
+
+SELECT count(*) FROM t1 AS t00, t1 AS t01 where t00.b < 200 AND t00.b > 100 AND t01.b < 190;
+ count 
+--?.*
+ 18711
+(1 row)
+
+RESET ENABLE_SEQSCAN;
+RESET QUERY_DOP;
+RESET enable_mergejoin;
+drop table t1;
+drop table t2;
+SET CURRENT_SCHEMA=PUBLIC;
+DROP SCHEMA index_pcr_ustore_smp_other CASCADE;
