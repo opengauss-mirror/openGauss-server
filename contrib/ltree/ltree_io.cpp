@@ -172,7 +172,7 @@ Datum ltree_out(PG_FUNCTION_ARGS)
 #define ITEMSIZE MAXALIGN(LQL_HDRSIZE + sizeof(nodeitem*))
 #define NEXTLEV(x) ((lquery_level*)(((char*)(x)) + ITEMSIZE))
 
-/* CVE-2026-6473: prevent uint16 overflow in lquery_level->numvar */
+/* prevent uint16 overflow in lquery_level->numvar */
 static void CheckLqueryNumvarOverflow(lquery_level* curqlevel)
 {
     if (curqlevel->numvar >= USHRT_MAX) {
@@ -214,7 +214,7 @@ Datum lquery_in(PG_FUNCTION_ARGS)
 
     num++;
 
-    /* CVE-2026-6473: prevent uint16 overflow in lquery->numlevel */
+    /* prevent uint16 overflow in lquery->numlevel */
     if (num > USHRT_MAX)
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),

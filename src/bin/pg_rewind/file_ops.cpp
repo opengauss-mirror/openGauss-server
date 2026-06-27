@@ -64,7 +64,7 @@ void open_target_file(const char* path, bool trunc)
     if (dry_run)
         return;
 
-    /* CVE-2026-6475: defense-in-depth path validation */
+    /* defense-in-depth path validation */
     if (path == NULL || path[0] == '\0' || is_absolute_path(path) || strstr(path, "..") != NULL) {
         pg_fatal("invalid target file path: \"%s\"\n", path ? path : "(null)");
     }

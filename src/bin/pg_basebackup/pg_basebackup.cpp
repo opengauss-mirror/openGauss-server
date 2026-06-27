@@ -909,7 +909,7 @@ static PGresult* backup_get_result(PGconn* conn)
 
 static bool check_input_path_relative_path(const char* input_path_value)
 {
-    /* CVE-2026-6475: reject parent-directory references */
+    /* reject parent-directory references */
     if (strstr(input_path_value, "..") != NULL) {
         return true;
     }

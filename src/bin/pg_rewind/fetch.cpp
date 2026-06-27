@@ -459,7 +459,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
         securec_check_c(errorno, "\0", "\0");
         filename[filenamelen] = '\0';
 
-        /* CVE-2026-6475: reject malicious paths from the source server */
+        /* reject malicious paths from the source server */
         if (!IsValidRewindPath(filename)) {
             pg_fatal("invalid file path received from source server: \"%s\"\n", filename);
             pg_free(filename);
@@ -531,7 +531,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
 }
 
 /*
- * CVE-2026-6475: reject absolute paths and paths containing parent-directory
+ * reject absolute paths and paths containing parent-directory
  * references, preventing a malicious source server from writing outside pg_data.
  */
 static bool IsValidRewindPath(const char* path)
@@ -678,7 +678,7 @@ static void fetch_file_range(const char* path, unsigned int begin, unsigned int 
     char linebuf[MAXPGPATH + 47];
     int ss_c = 0;
 
-    /* CVE-2026-6475: validate path before sending to the source server */
+    /* validate path before sending to the source server */
     if (!IsValidRewindPath(path)) {
         pg_fatal("invalid file path sent to source server: \"%s\"\n", path);
         return;

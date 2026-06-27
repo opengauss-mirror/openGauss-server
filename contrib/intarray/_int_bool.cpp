@@ -447,7 +447,7 @@ Datum bqarr_in(PG_FUNCTION_ARGS)
                 errmsg(
                     "number of query items (%d) exceeds the maximum allowed (%d)", state.num, (int)QUERYTYPEMAXITEMS)));
 
-    /* CVE-2026-6473: prevent int2 overflow in ITEM.left */
+    /* prevent int2 overflow in ITEM.left */
     if (state.num > SHRT_MAX)
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
