@@ -177,7 +177,6 @@ bool load_policy_labels(bool reload)
     }
     all_labels = new loaded_labels;
     scan_policy_labels(all_labels);
-    load_query_anomaly_labels(true);
     pg_atomic_write_u64(&label_local_version, reload ? current_global_version : 0);
     return true;
 }
