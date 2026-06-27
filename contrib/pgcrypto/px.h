@@ -82,6 +82,8 @@ void px_free(void* p);
 
 #define PXE_MBUF_SHORT_READ -50
 
+#define PXE_MBUF_TOO_BIG (-51)
+
 #define PXE_PGP_CORRUPT_DATA -100
 #define PXE_PGP_CORRUPT_ARMOR -101
 #define PXE_PGP_UNSUPPORTED_COMPR -102
@@ -106,6 +108,7 @@ void px_free(void* p);
 #define PXE_PGP_BAD_S2K_MODE -121
 #define PXE_PGP_UNSUPPORTED_PUBALGO -122
 #define PXE_PGP_MULTIPLE_SUBKEYS -123
+#define PXE_PGP_DECOMPRESSED_TOO_BIG (-124)
 
 typedef struct px_digest PX_MD;
 typedef struct px_alias PX_Alias;

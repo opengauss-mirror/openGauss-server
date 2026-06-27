@@ -44,6 +44,7 @@ struct MBuf {
     uint8* buf_end;
     bool no_write;
     bool own_data;
+    int maxSize; /* max total data size, 0 = unlimited */
 };
 
 int mbuf_avail(MBuf* mbuf)
@@ -93,9 +94,19 @@ static void prepare_room(MBuf* mbuf, int block_len)
 
 int mbuf_append(MBuf* dst, const uint8* buf, int len)
 {
+    int curSize;
+
     if (dst->no_write) {
         px_debug("mbuf_append: no_write");
         return PXE_BUG;
+    }
+
+    if (dst->maxSize > 0) {
+        curSize = mbuf_size(dst);
+        if (len > dst->maxSize - curSize) {
+            px_debug("mbuf_append: exceeds max size");
+            return PXE_MBUF_TOO_BIG;
+        }
     }
 
     prepare_room(dst, len);
@@ -121,6 +132,7 @@ MBuf* mbuf_create(int len)
 
     mbuf->no_write = false;
     mbuf->own_data = true;
+    mbuf->maxSize = 0;
 
     return mbuf;
 }
@@ -137,8 +149,15 @@ MBuf* mbuf_create_from_data(uint8* data, int len)
 
     mbuf->no_write = true;
     mbuf->own_data = false;
+    mbuf->maxSize = 0;
 
     return mbuf;
+}
+
+int MbufSetMaxSize(MBuf* mbuf, int maxSize)
+{
+    mbuf->maxSize = maxSize;
+    return 0;
 }
 
 int mbuf_grab(MBuf* mbuf, int len, uint8** data_p)

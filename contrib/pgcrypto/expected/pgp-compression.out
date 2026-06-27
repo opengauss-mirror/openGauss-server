@@ -48,3 +48,32 @@ select pgp_sym_decrypt(
  Secret message
 (1 row)
 
+-- max-decompressed-size option is accepted and limits decompression output
+select pgp_sym_decrypt(
+	pgp_sym_encrypt('Secret message', 'key', 'compress-algo=1'),
+	'key', 'max-decompressed-size=1048576');
+ pgp_sym_decrypt 
+-----------------
+ Secret message
+(1 row)
+
+-- too small limit should fail
+select pgp_sym_decrypt(
+	pgp_sym_encrypt('Secret message', 'key', 'compress-algo=1'),
+	'key', 'max-decompressed-size=1');
+ERROR:  Decompressed data exceeds maximum allowed size
+
+-- max-decompressed-size also limits total decrypted output for non-compressed data
+select pgp_sym_decrypt_bytea(
+	pgp_sym_encrypt_bytea(repeat('x', 100000), 'key'),
+	'key', 'max-decompressed-size=65536');
+ERROR:  Decrypted data exceeds maximum allowed size
+
+select length(pgp_sym_decrypt_bytea(
+	pgp_sym_encrypt_bytea(repeat('x', 100000), 'key'),
+	'key', 'max-decompressed-size=0'));
+ length
+--------
+ 100000
+(1 row)
+
