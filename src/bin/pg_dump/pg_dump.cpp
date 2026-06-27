@@ -3448,12 +3448,10 @@ static void dumpTableData(Archive* fout, TableDataInfo* tdinfo)
                     securec_check_ss_c(nRet, "\0", "\0");
                 }
                 tdsinfo->splitcond = splitcond;
-                if (part > 1) {
-                    AssignDumpId(&tdinfo->dobj);
-                }
+                DumpId dumpId = (part == 1) ? tdinfo->dobj.dumpId : createDumpId();
                 ArchiveEntry(fout,
                     tdinfo->dobj.catId,
-                    tdinfo->dobj.dumpId,
+                    dumpId,
                     tbinfo->dobj.name,
                     tbinfo->dobj.nmspace->dobj.name,
                     NULL,
@@ -3493,7 +3491,7 @@ static void dumpTableData(Archive* fout, TableDataInfo* tdinfo)
 
             ntups = PQntuples(res);
             for (int i = 0; i < ntups; i++) {
-                char* pname = gs_strdup(PQgetvalue(res, i, i_partname));
+                const char* pname = PQgetvalue(res, i, i_partname);
                 TableDataSplitInfo* tdsinfo = (TableDataSplitInfo*) pg_malloc(sizeof(TableDataSplitInfo));
                 tdsinfo->tdinfo = tdinfo;
                 char* splitcond = (char *)pg_malloc(256 * sizeof(char));
@@ -3502,12 +3500,10 @@ static void dumpTableData(Archive* fout, TableDataInfo* tdinfo)
                 securec_check_ss_c(nRet, "\0", "\0");
 
                 tdsinfo->splitcond = splitcond;
-                if (i > 0) {
-                    AssignDumpId(&tdinfo->dobj);
-                }
+                DumpId dumpId = (i == 0) ? tdinfo->dobj.dumpId : createDumpId();
                 ArchiveEntry(fout,
                     tdinfo->dobj.catId,
-                    tdinfo->dobj.dumpId,
+                    dumpId,
                     tbinfo->dobj.name,
                     tbinfo->dobj.nmspace->dobj.name,
                     NULL,
