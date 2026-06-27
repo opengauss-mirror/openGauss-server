@@ -179,6 +179,64 @@ const char* fmtId(const char* rawid)
 }
 
 /*
+ * Format a B-format role name for emission as an owner / DEFINER.
+ *
+ * When the dump is from a B-format database (gdatcompatibility == B_FORMAT)
+ * and `name` has the MySQL-style "user@host" shape (exactly one '@', not at
+ * either end), emit it as `user`@`host` with each part backtick-quoted and
+ * any embedded backtick doubled. Otherwise fall through to fmtId().
+ *
+ * Same reuse semantics as fmtId(): the returned pointer is valid until the
+ * next call to this function.
+ *
+ * Should never try to pass a NULL char* to this function
+ */
+const char* fmtBUserHostId(const char* name)
+{
+    static PQExpBuffer s_buf = NULL;
+    const char* at = NULL;
+    const char* second_at = NULL;
+    const char* cp = NULL;
+
+    if (gdatcompatibility == NULL || strcmp(gdatcompatibility, B_FORMAT) != 0) {
+        return fmtId(name);
+    }
+
+    at = strchr(name, '@');
+    if (at == NULL || at == name || *(at + 1) == '\0') {
+        return fmtId(name);
+    }
+    second_at = strchr(at + 1, '@');
+    if (second_at != NULL) {
+        return fmtId(name);
+    }
+
+    if (s_buf == NULL) {
+        s_buf = createPQExpBuffer();
+    } else {
+        (void)resetPQExpBuffer(s_buf);
+    }
+
+    (void)appendPQExpBufferChar(s_buf, '`');
+    for (cp = name; cp < at; cp++) {
+        if (*cp == '`') {
+            (void)appendPQExpBufferChar(s_buf, '`');
+        }
+        (void)appendPQExpBufferChar(s_buf, *cp);
+    }
+    (void)appendPQExpBufferStr(s_buf, "`@`");
+    for (cp = at + 1; *cp != '\0'; cp++) {
+        if (*cp == '`') {
+            (void)appendPQExpBufferChar(s_buf, '`');
+        }
+        (void)appendPQExpBufferChar(s_buf, *cp);
+    }
+    (void)appendPQExpBufferChar(s_buf, '`');
+
+    return s_buf->data;
+}
+
+/*
  * Convert a string value to an SQL string literal and append it to
  * the given buffer.  We assume the specified client_encoding and
  * standard_conforming_strings settings.
