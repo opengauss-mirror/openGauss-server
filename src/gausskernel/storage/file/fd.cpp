@@ -270,7 +270,6 @@ void ReportAlarmInsuffDataInstFileDesc()
     // report the alarm
     AlarmReporter(alarmItem, ALM_AT_Fault, &tempAdditionalParam);
 }
-
 void ReportResumeInsuffDataInstFileDesc()
 {
     Alarm alarmItem[1];
@@ -4156,4 +4155,165 @@ void FileAllocateDirectly(int fd, char* path, uint32 offset, uint32 size)
     if (fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, size) < 0) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("fallocate failed on relation: \"%s\"", path)));
     }
+}
+
+static bool GetNoSymlinkComponent(char** component, char** end, char** next, char* saved, bool* lastComponent)
+{
+    while (**component == '/') {
+        (*component)++;
+    }
+    if (**component == '\0') {
+        errno = EISDIR;
+        return false;
+    }
+
+    *end = *component;
+    while (**end != '\0' && **end != '/') {
+        (*end)++;
+    }
+
+    *saved = **end;
+    **end = '\0';
+    *next = *end;
+    if (*saved != '\0') {
+        do {
+            (*next)++;
+        } while (**next == '/');
+    }
+    *lastComponent = (*saved == '\0');
+    return true;
+}
+
+static void CleanupOpenFileNoSymlink(char* path, int dirfd, bool closeDirfd)
+{
+    if (closeDirfd) {
+        (void)close(dirfd);
+    }
+    pfree(path);
+}
+
+static int FailOpenFileNoSymlink(char* path, int dirfd, bool closeDirfd, int saveErrno)
+{
+    CleanupOpenFileNoSymlink(path, dirfd, closeDirfd);
+    errno = saveErrno;
+    return -1;
+}
+
+static bool CheckNoSymlinkDirFd(int fd)
+{
+    struct stat st;
+
+    if (fstat(fd, &st) != 0) {
+        return false;
+    }
+    if (S_ISLNK(st.st_mode)) {
+        errno = ELOOP;
+        return false;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        errno = ENOTDIR;
+        return false;
+    }
+    return true;
+}
+
+static int OpenFileNoSymlink(const char* name, int fileFlags, int fileMode)
+{
+    char* path = pstrdup(name);
+    char* component = path;
+    int dirfd = AT_FDCWD;
+    bool closeDirfd = false;
+
+    if (path[0] == '/') {
+        dirfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
+        if (dirfd < 0) {
+            return FailOpenFileNoSymlink(path, dirfd, false, errno);
+        }
+        closeDirfd = true;
+        component++;
+    }
+    while (*component != '\0') {
+        char* end = NULL;
+        char* next = NULL;
+        char saved = '\0';
+        bool lastComponent = false;
+        if (!GetNoSymlinkComponent(&component, &end, &next, &saved, &lastComponent)) {
+            return FailOpenFileNoSymlink(path, dirfd, closeDirfd, errno);
+        }
+        int openFlags = lastComponent ? (fileFlags | O_NOFOLLOW | O_CLOEXEC)
+                                      : (O_PATH | O_NOFOLLOW | O_CLOEXEC);
+        int fd = openat(dirfd, component, openFlags, fileMode);
+        int saveErrno = errno;
+        *end = saved;
+        if (fd < 0) {
+            return FailOpenFileNoSymlink(path, dirfd, closeDirfd, saveErrno);
+        }
+        if (lastComponent) {
+            CleanupOpenFileNoSymlink(path, dirfd, closeDirfd);
+            return fd;
+        }
+        if (!CheckNoSymlinkDirFd(fd)) {
+            saveErrno = errno;
+            (void)close(fd);
+            return FailOpenFileNoSymlink(path, dirfd, closeDirfd, saveErrno);
+        }
+        if (closeDirfd) {
+            (void)close(dirfd);
+        }
+        dirfd = fd;
+        closeDirfd = true;
+        component = next;
+    }
+    return FailOpenFileNoSymlink(path, dirfd, closeDirfd, EISDIR);
+}
+
+FILE* AllocateFileNoSymlink(const char* name, bool isWrite)
+{
+    int fileFlags = isWrite ? (O_WRONLY | O_CREAT | O_TRUNC) : O_RDONLY;
+    int fileMode = isWrite ? (S_IRUSR | S_IWUSR) : 0;
+    const char* mode = isWrite ? PG_BINARY_W : PG_BINARY_R;
+    if (is_dss_file(name))
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("COPY safe_data_path no-symlink open does not support DSS path \"%s\"", name)));
+    DO_DB(ereport(LOG,
+        (errmsg("AllocateFileNoSymlink: Allocated %d (%s)", u_sess->storage_cxt.numAllocatedDescs, name))));
+
+    if (!ReserveAllocatedDesc())
+        ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                 errmsg("exceeded maxAllocatedDescs (%d) while trying to open file \"%s\"",
+                        u_sess->storage_cxt.maxAllocatedDescs,
+                        name)));
+    ReleaseLruFiles();
+    bool needRetry = true;
+    while (needRetry) {
+        needRetry = false;
+        int fd = OpenFileNoSymlink(name, fileFlags, fileMode);
+        if (fd >= 0) {
+            FILE* file = fdopen(fd, mode);
+            if (file != NULL) {
+                AllocateDesc* desc = &u_sess->storage_cxt.allocatedDescs[u_sess->storage_cxt.numAllocatedDescs];
+                desc->kind = AllocateDescFile;
+                desc->desc.file = file;
+                desc->create_subid = GetCurrentSubTransactionId();
+                u_sess->storage_cxt.numAllocatedDescs++;
+                return desc->desc.file;
+            }
+            int saveErrno = errno;
+            (void)close(fd);
+            errno = saveErrno;
+        }
+        if (errno != EMFILE && errno != ENFILE) {
+            return NULL;
+        }
+        int saveErrno = errno;
+        errno = 0;
+        if (ReleaseLruFile()) {
+            needRetry = true;
+        } else {
+            errno = saveErrno;
+        }
+    }
+    return NULL;
 }

@@ -164,7 +164,9 @@ bool load_policy_labels(bool reload)
     if (!reload) {
         pg_atomic_add_fetch_u64(&label_global_version, 1);
     }
-    if (pg_atomic_compare_exchange_u64(&label_global_version, (uint64*)&label_local_version, label_global_version)) {
+    uint64 current_global_version = pg_atomic_read_u64(&label_global_version);
+    uint64 current_local_version = pg_atomic_read_u64(&label_local_version);
+    if (current_local_version == current_global_version) {
         /* Latest label, changes nothing */
         return false;
     }
@@ -175,7 +177,7 @@ bool load_policy_labels(bool reload)
     }
     all_labels = new loaded_labels;
     scan_policy_labels(all_labels);
-
+    pg_atomic_write_u64(&label_local_version, reload ? current_global_version : 0);
     return true;
 }
 

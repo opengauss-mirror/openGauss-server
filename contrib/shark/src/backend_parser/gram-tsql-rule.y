@@ -159,7 +159,6 @@ tsql_opt_unique_clustered:
 			| tsql_opt_clustered		{ $$ = FALSE; }
 			| UNIQUE					{ $$ = TRUE; }
 		;
-	
 
 tsql_ident:
             IDENT
@@ -2347,4 +2346,11 @@ datediff_arg:
 			| TSQL_NANOSECOND                       { $$ = "nanosecond"; }
 			| TSQL_NS                               { $$ = "nanosecond"; }
 			| Sconst								{ $$ = $1; }
+		;
+
+/* Support EXTRACT(quarter/q/qq FROM ...) in shark grammar. */
+extract_arg:
+			TSQL_QUARTER							{ $$ = "quarter"; }
+			| TSQL_Q								{ $$ = "quarter"; }
+			| TSQL_QQ								{ $$ = "quarter"; }
 		;

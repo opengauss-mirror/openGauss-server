@@ -118,6 +118,7 @@ extern void TempTablespacePath(char *path, Oid tablespace);
 
 /* Operations that allow use of regular stdio --- USE WITH CAUTION */
 extern FILE* AllocateFile(const char* name, const char* mode);
+extern FILE* AllocateFileNoSymlink(const char* name, bool isWrite);
 extern int FreeFile(FILE* file);
 extern void GlobalStatsCleanupFiles();
 

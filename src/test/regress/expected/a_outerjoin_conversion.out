@@ -1425,8 +1425,7 @@ create view plus_v as select t11.c1, t12.c2 from t11, t12 where t11.c1 = t12.c2(
 View definition:
  SELECT t11.c1, t12.c2
    FROM t12
-   RIGHT JOIN t11 ON t11.c1 = t12.c2 AND (t12.c2 = ANY (ARRAY[1, 2, 3]))
-  WHERE 1 = 1 AND 1 = 1;
+   RIGHT JOIN t11 ON t11.c1 = t12.c2 AND (t12.c2 = ANY (ARRAY[1, 2, 3]));
 
 -------used with is (not) null --------
 select t11.c1, t12.c2 from t11, t12 where t11.c2 = t12.c3(+) and t12.c2 is not null order by 1,2;

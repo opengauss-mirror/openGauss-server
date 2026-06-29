@@ -79,7 +79,7 @@ bool getNextRoach(CopyState cstate)
     return true;
 }
 
-int copyGetRoachData(CopyState cstate, void *databuf, int minread, int maxread)
+int copyGetRoachData(CopyState cstate, char* databuf, int minread, int maxread)
 {
     Assert(cstate->roach_routine);
     Assert(IsA(cstate->roach_routine, RoachRoutine));
