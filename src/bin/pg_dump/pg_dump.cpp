@@ -25390,6 +25390,7 @@ static void bSetSqlModeQuote(Archive* fout, char** bSqlMode)
     }
     if (*bSqlMode != NULL) {
         free(*bSqlMode);
+        *bSqlMode = NULL;
     }
     PGresult* res = NULL;
     PQExpBufferData buf;
@@ -25398,26 +25399,24 @@ static void bSetSqlModeQuote(Archive* fout, char** bSqlMode)
     res = PQexec(GetConnection(fout), buf.data);
     if (res != NULL && PQntuples(res) == 1) {
         char* sql_modes = PQgetvalue(res, 0, 0);
-        if (strstr(sql_modes, "ansi_quotes") != NULL) {
+        if (strstr(sql_modes, "ansi_quotes") == NULL) {
+            *bSqlMode = gs_strdup(sql_modes);
+            if (strlen(*bSqlMode) != 0) {
+                printfPQExpBuffer(&buf, "set dolphin.sql_mode = '%s,ansi_quotes';", *bSqlMode);
+            } else {
+                printfPQExpBuffer(&buf, "set dolphin.sql_mode = 'ansi_quotes';");
+            }
+
             PQclear(res);
             res = NULL;
-            return;
+            res = PQexec(GetConnection(fout), buf.data);
         }
-        *bSqlMode = gs_strdup(sql_modes);
-        if (strlen(*bSqlMode) != 0) {
-            printfPQExpBuffer(&buf, "set dolphin.sql_mode = '%s,ansi_quotes';", *bSqlMode);
-        } else {
-            printfPQExpBuffer(&buf, "set dolphin.sql_mode = 'ansi_quotes';");
-        }
-        
-        res = PQexec(GetConnection(fout), buf.data);
+    }
+    if (res != NULL) {
         PQclear(res);
         res = NULL;
-        return;
     }
-    PQclear(res);
-    res = NULL;
-    return;
+    termPQExpBuffer(&buf);
 }
 
 static void bResetSqlModeQuote(Archive* fout, char** bSqlMode)
@@ -25437,6 +25436,7 @@ static void bResetSqlModeQuote(Archive* fout, char** bSqlMode)
         PQclear(res);
         res = NULL;
     }
+    termPQExpBuffer(&buf);
     free(*bSqlMode);
-    return;
+    *bSqlMode = NULL;
 }
