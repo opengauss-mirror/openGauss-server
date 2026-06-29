@@ -33,6 +33,7 @@
 #include "access/ustore/knl_whitebox_test.h"
 #include "gssignal/gs_signal.h"
 #include "knl/knl_thread.h"
+#include "postmaster/postmaster.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
@@ -658,9 +659,15 @@ void UndoRecycleMain()
     ereport(LOG, (errmodule(MOD_UNDO),
         errmsg(UNDOFORMAT("sleep 10s, ensure  the snapcapturer can give the undorecyclemain a valid recycleXmin."))));
     while (true) {
+        if (pmState == PM_WAIT_BACKENDS) {
+            break;
+        }
         if (t_thrd.undorecycler_cxt.got_SIGHUP) {
             t_thrd.undorecycler_cxt.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
+        }
+        if (t_thrd.undorecycler_cxt.shutdown_requested) {
+            ShutDownRecycle(recycleMaxXIDs);
         }
         if (!RecoveryInProgress()) {
             TransactionId recycleXmin = InvalidTransactionId;
