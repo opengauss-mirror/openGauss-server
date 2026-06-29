@@ -12498,10 +12498,10 @@ static void SetAuxType()
         case EXRTO_RECYCLER:
             t_thrd.bootstrap_cxt.MyAuxProcType = ExrtoRecyclerProcess;
             break;
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
             t_thrd.bootstrap_cxt.MyAuxProcType = BarrierPreParseBackendProcess;
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
             t_thrd.bootstrap_cxt.MyAuxProcType = TsCompactionProcess;
             break;
@@ -12792,11 +12792,11 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             extreme_rto::exrto_recycle_main();
             proc_exit(1);
             break;
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
             BarrierPreParseMain();
             proc_exit(1);
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
             CompactionProcess::compaction_main();
             proc_exit(1);
@@ -13035,8 +13035,8 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case HEARTBEAT:
         case SHARE_STORAGE_XLOG_COPYER:
         case EXRTO_RECYCLER:
-#ifdef ENABLE_MULTIPLE_NODES
         case BARRIER_PREPARSE:
+#ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
         case TS_COMPACTION_CONSUMER:
         case TS_COMPACTION_AUXILIAY:
@@ -13573,10 +13573,10 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<APPLY_WORKER>, APPLY_WORKER, "applyworker", "apply worker" },
     { GaussDbThreadMain<STACK_PERF_WORKER>, STACK_PERF_WORKER, "stack_perf", "stack perf worker" },
     { GaussDbThreadMain<EXRTO_RECYCLER>, EXRTO_RECYCLER, "exrtorecycler", "exrto recycler" },
+    { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
 
     /* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES
-    { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
     { GaussDbThreadMain<TS_COMPACTION>, TS_COMPACTION, "TScompaction",
       "timeseries compaction" },
     { GaussDbThreadMain<TS_COMPACTION_CONSUMER>, TS_COMPACTION_CONSUMER, "TScompconsumer",
