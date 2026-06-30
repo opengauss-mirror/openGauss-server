@@ -1502,6 +1502,37 @@ void encryptKeyString(char* keyStr, char destplainStr[], uint32 destplainLength)
     }
 }
 
+static void encryptOBSOption(List** options, const char* optionName)
+{
+    char* keyStr = NULL;
+    char encryptStr[DEST_CIPHER_LENGTH] = {'\0'};
+    ListCell* lc = NULL;
+    ListCell* prev = NULL;
+    errno_t rc = EOK;
+
+    foreach (lc, *options) {
+        DefElem* def = (DefElem*)lfirst(lc);
+        if (0 == pg_strcasecmp(def->defname, optionName)) {
+            keyStr = defGetString(def);
+            encryptKeyString(keyStr, encryptStr, DEST_CIPHER_LENGTH);
+            *options = list_delete_cell(*options, lc, prev);
+            *options = lappend(*options, makeDefElem(pstrdup(optionName), (Node*)makeString(pstrdup(encryptStr))));
+            break;
+        }
+        prev = lc;
+    }
+
+    if (keyStr != NULL) {
+        size_t keyStrLen = strlen(keyStr);
+        rc = memset_s(keyStr, keyStrLen, '\0', keyStrLen);
+        securec_check(rc, "", "");
+        pfree_ext(keyStr);
+    }
+
+    rc = memset_s(encryptStr, DEST_CIPHER_LENGTH, '\0', DEST_CIPHER_LENGTH);
+    securec_check(rc, "", "");
+}
+
 /*
  * @Description: Encrpyt access key and security access key in options before insert
  * tuple into pg_foreign_table when creating foreign tables in obs protocol.
@@ -1509,63 +1540,9 @@ void encryptKeyString(char* keyStr, char destplainStr[], uint32 destplainLength)
  */
 void encryptOBSForeignTableOption(List** options)
 {
-    char* keyStr = NULL;
-
-    /* The maximum string length of the encrypt access key or encrypt access key is 1024*/
-    char encryptSecretAccessKeyStr[DEST_CIPHER_LENGTH] = {'\0'};
-    char encryptPasswordStr[DEST_CIPHER_LENGTH] = {'\0'};
-
-    bool haveSecretAccessKey = false;
-    bool havePassWord = false;
-
-    ListCell* lc = NULL;
-    ListCell* prev = NULL;
-    errno_t rc = EOK;
-    foreach (lc, *options) {
-        DefElem* def = (DefElem*)lfirst(lc);
-        if (0 == pg_strcasecmp(def->defname, optSecretAccessKey)) {
-            haveSecretAccessKey = true;
-
-            keyStr = defGetString(def);
-            encryptKeyString(keyStr, encryptSecretAccessKeyStr, DEST_CIPHER_LENGTH);
-
-            *options = list_delete_cell(*options, lc, prev);
-            break;
-        }
-        if (0 == pg_strcasecmp(def->defname, OPTION_NAME_PASSWD)) {
-            havePassWord = true;
-            keyStr = defGetString(def);
-            encryptKeyString(keyStr, encryptPasswordStr, DEST_CIPHER_LENGTH);
-
-            *options = list_delete_cell(*options, lc, prev);
-            break;
-        }
-        prev = lc;
-    }
-
-    if (haveSecretAccessKey) {
-        *options = lappend(
-            *options, makeDefElem(pstrdup(optSecretAccessKey), (Node*)makeString(pstrdup(encryptSecretAccessKeyStr))));
-    }
-
-    if (havePassWord) {
-        *options =
-            lappend(*options, makeDefElem(pstrdup(OPTION_NAME_PASSWD), (Node*)makeString(pstrdup(encryptPasswordStr))));
-    }
-
-    if (keyStr != NULL) {
-        /* safty concern, empty keyStr manaully. */
-        size_t keyStrLen = strlen(keyStr);
-        rc = memset_s(keyStr, keyStrLen, '\0', keyStrLen);
-        securec_check(rc, "", "");
-        pfree_ext(keyStr);
-    }
-
-    /* safty concern, empty encryptAccessKeyStr & encryptSecretAccessKeyStr */
-    rc = memset_s(encryptSecretAccessKeyStr, DEST_CIPHER_LENGTH, '\0', DEST_CIPHER_LENGTH);
-    securec_check(rc, "", "");
-    rc = memset_s(encryptPasswordStr, DEST_CIPHER_LENGTH, '\0', DEST_CIPHER_LENGTH);
-    securec_check(rc, "", "");
+    encryptOBSOption(options, optAccessKey);
+    encryptOBSOption(options, optSecretAccessKey);
+    encryptOBSOption(options, OPTION_NAME_PASSWD);
 }
 
 void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)

@@ -1056,6 +1056,38 @@ void decryptKeyString(const char *keyStr, char destplainStr[], uint32 destplainL
     decryptOBS(keyStr, destplainStr, destplainLength, obskey);
 }
 
+static void decryptOBSOption(List **options, const char *optionName)
+{
+    char *keyStr = NULL;
+    GS_UINT32 keyStrLen = 0;
+    char decryptStr[DEST_CIPHER_LENGTH] = "\0";
+    ListCell *lc = NULL;
+    ListCell *prev = NULL;
+    errno_t rc = EOK;
+
+    foreach (lc, *options) {
+        DefElem *def = (DefElem *)lfirst(lc);
+        if (pg_strcasecmp(def->defname, optionName) == 0) {
+            keyStr = defGetString(def);
+            decryptKeyString(keyStr, decryptStr, DEST_CIPHER_LENGTH, NULL);
+            *options = list_delete_cell(*options, lc, prev);
+            *options = lappend(*options, makeDefElem(pstrdup(optionName), (Node *)makeString(pstrdup(decryptStr))));
+            break;
+        }
+        prev = lc;
+    }
+
+    if (keyStr != NULL) {
+        keyStrLen = strlen(keyStr);
+        rc = memset_s(keyStr, keyStrLen, 0, keyStrLen);
+        securec_check(rc, "", "");
+        pfree(keyStr);
+    }
+
+    rc = memset_s(decryptStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
+    securec_check(rc, "", "");
+}
+
 /*
  * @Description: Encrpyt access key and security access key in options before insert
  * tuple into pg_foreign_table when creating foreign tables in obs protocol.
@@ -1063,49 +1095,8 @@ void decryptKeyString(const char *keyStr, char destplainStr[], uint32 destplainL
  */
 void decryptOBSForeignTableOption(List **options)
 {
-    char *keyStr = NULL;
-    GS_UINT32 keyStrLen = 0;
-
-    /* The maximum string length of the encrypt access key or encrypt access key is 1024 */
-    char decryptSecretAccessKeyStr[DEST_CIPHER_LENGTH] = "\0";
-    char decryptpassWordStr[DEST_CIPHER_LENGTH] = "\0";
-    bool haveSecretAccessKey = false;
-    errno_t rc = EOK;
-
-    ListCell *lc = NULL;
-    ListCell *prev = NULL;
-    foreach (lc, *options) {
-        DefElem *def = (DefElem *)lfirst(lc);
-        if (pg_strcasecmp(def->defname, optSecretAccessKey) == 0) {
-            haveSecretAccessKey = true;
-
-            keyStr = defGetString(def);
-            decryptKeyString(keyStr, decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH, NULL);
-
-            *options = list_delete_cell(*options, lc, prev);
-            break;
-        }
-        prev = lc;
-    }
-
-    if (haveSecretAccessKey) {
-        *options = lappend(*options, makeDefElem(pstrdup(optSecretAccessKey),
-                                                 (Node *)makeString(pstrdup(decryptSecretAccessKeyStr))));
-    }
-
-    if (keyStr != NULL) {
-        /* safty concern, empty keyStr manually. */
-        keyStrLen = strlen(keyStr);
-        rc = memset_s(keyStr, keyStrLen, 0, keyStrLen);
-        securec_check(rc, "", "");
-        pfree(keyStr);
-    }
-
-    /* safty concern, empty decryptAccessKeyStr & decryptSecretAccessKeyStr manually. */
-    rc = memset_s(decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
-    securec_check(rc, "", "");
-    rc = memset_s(decryptpassWordStr, DEST_CIPHER_LENGTH, '\0', DEST_CIPHER_LENGTH);
-    securec_check(rc, "", "");
+    decryptOBSOption(options, optAccessKey);
+    decryptOBSOption(options, optSecretAccessKey);
 }
 
 void GetDistImportOptions(Oid relOid, DistImportPlanState *planstate, ForeignOptions *fOptions = NULL)
@@ -1649,4 +1640,3 @@ void distReImport(ForeignScanState *node)
 {
     // not implement yet
 }
-

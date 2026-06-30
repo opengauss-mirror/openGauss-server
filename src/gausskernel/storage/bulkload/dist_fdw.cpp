@@ -475,6 +475,11 @@ List *CNSchedulingForDistOBSFt(Oid foreignTableId)
     assignOBSFileToDataNode(obsFileList, &totalTask, dnNames);
 
     pfree(rlc);
+    if (ak != NULL) {
+        rc = memset_s(ak, strlen(ak), 0, strlen(ak));
+        securec_check(rc, "\0", "\0");
+        pfree(ak);
+    }
     if (sak != NULL) {
         rc = memset_s(sak, strlen(sak), 0, strlen(sak));
         securec_check(rc, "\0", "\0");
