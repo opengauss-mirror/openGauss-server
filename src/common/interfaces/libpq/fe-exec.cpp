@@ -2945,27 +2945,16 @@ static bool PQfnCheckConnectionState(PGconn* conn)
 }
 
 /*
- * Internal implementation of PQfn with an optional result buffer size check.
- * resultBufSize < 0 means no size check (used by the public PQfn API).
+ * Dispatch a validated PQfn call to the appropriate protocol handler.
  */
-static PGresult* PQfnInternal(PGconn* conn, int fnid, int* result_buf, int* actual_result_len, int result_is_int,
-    const PQArgBlock* args, int nargs, int resultBufSize)
+static PGresult* PQfnDispatch(PGconn* conn, const PQfnWithResultSizeArgs* args)
 {
-    PGresult* result = NULL;
-
-    *actual_result_len = 0;
-
-    if (PQfnCheckConnectionState(conn)) {
-        if (PG_PROTOCOL_MAJOR(conn->pversion) >= PG_PROTOCOL_MAJOR(PG_PROTOCOL_LATEST)) {
-            result = pqFunctionCall3(conn, fnid, result_buf, actual_result_len,
-                result_is_int, args, nargs, resultBufSize);
-        } else {
-            result = pqFunctionCall2(conn, fnid, result_buf, actual_result_len,
-                result_is_int, args, nargs, resultBufSize);
-        }
+    if (PG_PROTOCOL_MAJOR(conn->pversion) >= PG_PROTOCOL_MAJOR(PG_PROTOCOL_LATEST)) {
+        return pqFunctionCall3(conn, args->fnid, args->resultBuf, args->resultLen,
+            args->resultIsInt, args->args, args->nargs, args->resultBufSize);
     }
-
-    return result;
+    return pqFunctionCall2(conn, args->fnid, args->resultBuf, args->resultLen,
+        args->resultIsInt, args->args, args->nargs, args->resultBufSize);
 }
 
 /*
@@ -2974,14 +2963,22 @@ static PGresult* PQfnInternal(PGconn* conn, int fnid, int* result_buf, int* actu
  */
 PGresult* PQfnWithResultSize(PGconn* conn, const PQfnWithResultSizeArgs* args)
 {
-    return PQfnInternal(conn, args->fnid, args->resultBuf, args->resultLen,
-        args->resultIsInt, args->args, args->nargs, args->resultBufSize);
+    *args->resultLen = 0;
+
+    if (!PQfnCheckConnectionState(conn)) {
+        return NULL;
+    }
+
+    return PQfnDispatch(conn, args);
 }
 
 PGresult* PQfn(PGconn* conn, int fnid, int* result_buf, int* actual_result_len, int result_is_int,
     const PQArgBlock* args, int nargs)
 {
-    return PQfnInternal(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs, -1);
+    PQfnWithResultSizeArgs args2 = {fnid, result_buf, actual_result_len,
+        result_is_int, args, nargs, -1};
+
+    return PQfnWithResultSize(conn, &args2);
 }
 
 /* ====== accessor funcs for PGresult ======== */
