@@ -1272,7 +1272,7 @@ int pqEndcopy2(PGconn* conn)
  * See fe-exec.c for documentation.
  */
 PGresult* pqFunctionCall2(PGconn* conn, Oid fnid, int* result_buf, int* actual_result_len, int result_is_int,
-    const PQArgBlock* args, int nargs)
+    const PQArgBlock* args, int nargs, int result_buf_size)
 {
     bool needInput = false;
     ExecStatusType status = PGRES_FATAL_ERROR;
@@ -1340,9 +1340,32 @@ PGresult* pqFunctionCall2(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
                 if (pqGetc(&id, conn))
                     continue;
                 if (id == 'G') {
+                    int copy_len;
+
                     /* function returned nonempty value */
                     if (pqGetInt(actual_result_len, 4, conn))
                         continue;
+                    if (*actual_result_len < 0) {
+                        printfPQExpBuffer(&conn->errorMessage,
+                            libpq_gettext("protocol error: invalid function result length %d\n"),
+                            *actual_result_len);
+                        pqSaveErrorResult(conn);
+                        conn->inStart = conn->inCursor;
+                        return pqPrepareAsyncResult(conn);
+                    }
+                    copy_len = result_is_int ? 4 : *actual_result_len;
+                    if (result_buf_size >= 0 && copy_len > result_buf_size) {
+                        if (copy_len > 0 && pqSkipnchar((size_t)copy_len, conn))
+                            continue;
+                        if (pqGetc(&id, conn)) /* skip the trailing '0' */
+                            continue;
+                        printfPQExpBuffer(&conn->errorMessage,
+                            libpq_gettext("function call returned too much data: %d bytes, buffer size %d\n"),
+                            copy_len, result_buf_size);
+                        pqSaveErrorResult(conn);
+                        conn->inStart = conn->inCursor;
+                        return pqPrepareAsyncResult(conn);
+                    }
                     if (result_is_int) {
                         if (pqGetInt(result_buf, 4, conn))
                             continue;

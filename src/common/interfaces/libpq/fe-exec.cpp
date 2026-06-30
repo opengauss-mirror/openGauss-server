@@ -2925,35 +2925,11 @@ int PQendcopy(PGconn* conn)
  */
 
 /*
- * Internal version of PQfn with a result buffer size check.
- * This is used by libpq itself to avoid buffer overruns from a malicious server.
+ * Internal implementation of PQfn with an optional result buffer size check.
+ * result_buf_size < 0 means no size check (used by the public PQfn API).
  */
-PGresult* PQfnWithResultSize(PGconn* conn, const PQfnWithResultSizeArgs* args)
-{
-    PGresult* res = PQfn(conn, args->fnid, args->resultBuf, args->resultLen,
-        args->resultIsInt, args->args, args->nargs);
-    if (res == NULL) {
-        return res;
-    }
-    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        return res;
-    }
-    if (*args->resultLen == -1) {
-        return res;
-    }
-    if (*args->resultLen <= args->resultBufSize) {
-        return res;
-    }
-    printfPQExpBuffer(&conn->errorMessage,
-        libpq_gettext("function call returned too much data: %d bytes, buffer size %d\n"),
-        *args->resultLen, args->resultBufSize);
-    PQclear(res);
-    pqSaveErrorResult(conn);
-    return conn->result;
-}
-
-PGresult* PQfn(PGconn* conn, int fnid, int* result_buf, int* actual_result_len, int result_is_int,
-    const PQArgBlock* args, int nargs)
+static PGresult* PQfnInternal(PGconn* conn, int fnid, int* result_buf, int* actual_result_len, int result_is_int,
+    const PQArgBlock* args, int nargs, int result_buf_size)
 {
     *actual_result_len = 0;
 
@@ -2969,9 +2945,25 @@ PGresult* PQfn(PGconn* conn, int fnid, int* result_buf, int* actual_result_len, 
     }
 
     if (PG_PROTOCOL_MAJOR(conn->pversion) >= 3)
-        return pqFunctionCall3(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs);
+        return pqFunctionCall3(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs, result_buf_size);
     else
-        return pqFunctionCall2(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs);
+        return pqFunctionCall2(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs, result_buf_size);
+}
+
+/*
+ * Internal version of PQfn with a result buffer size check.
+ * This is used by libpq itself to avoid buffer overruns from a malicious server.
+ */
+PGresult* PQfnWithResultSize(PGconn* conn, const PQfnWithResultSizeArgs* args)
+{
+    return PQfnInternal(conn, args->fnid, args->resultBuf, args->resultLen,
+        args->resultIsInt, args->args, args->nargs, args->resultBufSize);
+}
+
+PGresult* PQfn(PGconn* conn, int fnid, int* result_buf, int* actual_result_len, int result_is_int,
+    const PQArgBlock* args, int nargs)
+{
+    return PQfnInternal(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs, -1);
 }
 
 /* ====== accessor funcs for PGresult ======== */

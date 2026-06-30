@@ -1764,7 +1764,7 @@ int pqEndcopy3(PGconn* conn)
  * See fe-exec.c for documentation.
  */
 PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_result_len, int result_is_int,
-    const PQArgBlock* args, int nargs)
+    const PQArgBlock* args, int nargs, int result_buf_size)
 {
     bool needInput = false;
     ExecStatusType status = PGRES_FATAL_ERROR;
@@ -1882,6 +1882,32 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
                 if (pqGetInt(actual_result_len, 4, conn))
                     continue;
                 if (*actual_result_len != -1) {
+                    if (*actual_result_len < 0) {
+                        printfPQExpBuffer(&conn->errorMessage,
+                            libpq_gettext("protocol error: invalid function result length %d\n"),
+                            *actual_result_len);
+                        pqSaveErrorResult(conn);
+                        conn->inStart += 5 + msgLength;
+                        return pqPrepareAsyncResult(conn);
+                    }
+                    if (*actual_result_len > msgLength - 4) {
+                        printfPQExpBuffer(&conn->errorMessage,
+                            libpq_gettext("protocol error: function result length %d exceeds message size\n"),
+                            *actual_result_len);
+                        pqSaveErrorResult(conn);
+                        conn->inStart += 5 + msgLength;
+                        return pqPrepareAsyncResult(conn);
+                    }
+                    if (result_buf_size >= 0 && *actual_result_len > result_buf_size) {
+                        if (pqSkipnchar((size_t)(*actual_result_len), conn))
+                            continue;
+                        printfPQExpBuffer(&conn->errorMessage,
+                            libpq_gettext("function call returned too much data: %d bytes, buffer size %d\n"),
+                            *actual_result_len, result_buf_size);
+                        pqSaveErrorResult(conn);
+                        conn->inStart += 5 + msgLength;
+                        return pqPrepareAsyncResult(conn);
+                    }
                     if (result_is_int) {
                         if (pqGetInt(result_buf, *actual_result_len, conn))
                             continue;
