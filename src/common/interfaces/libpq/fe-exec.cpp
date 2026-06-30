@@ -2925,29 +2925,43 @@ int PQendcopy(PGconn* conn)
  */
 
 /*
- * Internal implementation of PQfn with an optional result buffer size check.
- * result_buf_size < 0 means no size check (used by the public PQfn API).
+ * Validate that the connection is in an idle state and reset the error buffer.
  */
-static PGresult* PQfnInternal(PGconn* conn, int fnid, int* result_buf, int* actual_result_len, int result_is_int,
-    const PQArgBlock* args, int nargs, int result_buf_size)
+static bool PQfnCheckConnectionState(PGconn* conn)
 {
-    *actual_result_len = 0;
-
-    if (conn == NULL)
-        return NULL;
+    if (conn == NULL) {
+        return false;
+    }
 
     /* clear the error string */
     resetPQExpBuffer(&conn->errorMessage);
 
     if (conn->sock < 0 || conn->asyncStatus != PGASYNC_IDLE || conn->result != NULL) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("connection in wrong state\n"));
+        return false;
+    }
+
+    return true;
+}
+
+/*
+ * Internal implementation of PQfn with an optional result buffer size check.
+ * resultBufSize < 0 means no size check (used by the public PQfn API).
+ */
+static PGresult* PQfnInternal(PGconn* conn, int fnid, int* result_buf, int* actual_result_len, int result_is_int,
+    const PQArgBlock* args, int nargs, int resultBufSize)
+{
+    *actual_result_len = 0;
+
+    if (!PQfnCheckConnectionState(conn)) {
         return NULL;
     }
 
-    if (PG_PROTOCOL_MAJOR(conn->pversion) >= 3)
-        return pqFunctionCall3(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs, result_buf_size);
-    else
-        return pqFunctionCall2(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs, result_buf_size);
+    if (PG_PROTOCOL_MAJOR(conn->pversion) >= PG_PROTOCOL_MAJOR(PG_PROTOCOL_LATEST)) {
+        return pqFunctionCall3(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs, resultBufSize);
+    } else {
+        return pqFunctionCall2(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs, resultBufSize);
+    }
 }
 
 /*

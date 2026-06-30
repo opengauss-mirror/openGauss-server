@@ -1267,12 +1267,64 @@ int pqEndcopy2(PGconn* conn)
 }
 
 /*
+ * Skip a function result value that is larger than the supplied buffer.
+ * Returns 0 on success, 1 if more input is needed, or -1 if an error was saved.
+ */
+static int pqSkipFunctionResult2(PGconn* conn, int copyLen, int resultBufSize)
+{
+    char id;
+
+    if (resultBufSize < 0 || copyLen <= resultBufSize) {
+        return 0;
+    }
+
+    if (copyLen > 0 && pqSkipnchar((size_t)copyLen, conn)) {
+        return 1;
+    }
+    if (pqGetc(&id, conn)) { /* skip the trailing '0' */
+        return 1;
+    }
+
+    printfPQExpBuffer(&conn->errorMessage,
+        libpq_gettext("function call returned too much data: %d bytes, buffer size %d\n"),
+        copyLen, resultBufSize);
+    pqSaveErrorResult(conn);
+    conn->inStart = conn->inCursor;
+    return -1;
+}
+
+/*
+ * Copy a function result value into the supplied buffer.
+ * Returns 0 on success, or 1 if more input is needed.
+ */
+static int pqCopyFunctionResultData2(PGconn* conn, int* result_buf, int actualResultLen, int result_is_int)
+{
+    char id;
+
+    if (result_is_int) {
+        if (pqGetInt(result_buf, 4, conn)) {
+            return 1;
+        }
+    } else {
+        if (pqGetnchar((char*)result_buf, actualResultLen, conn)) {
+            return 1;
+        }
+    }
+
+    if (pqGetc(&id, conn)) { /* get the last '0' */
+        return 1;
+    }
+
+    return 0;
+}
+
+/*
  * PQfn - Send a function call to the openGauss backend.
  *
  * See fe-exec.c for documentation.
  */
 PGresult* pqFunctionCall2(PGconn* conn, Oid fnid, int* result_buf, int* actual_result_len, int result_is_int,
-    const PQArgBlock* args, int nargs, int result_buf_size)
+    const PQArgBlock* args, int nargs, int resultBufSize)
 {
     bool needInput = false;
     ExecStatusType status = PGRES_FATAL_ERROR;
@@ -1337,49 +1389,15 @@ PGresult* pqFunctionCall2(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
          */
         switch (id) {
             case 'V': /* function result */
-                if (pqGetc(&id, conn))
+                if (pqGetc(&id, conn)) {
                     continue;
-                if (id == 'G') {
-                    int copy_len;
-
-                    /* function returned nonempty value */
-                    if (pqGetInt(actual_result_len, 4, conn))
-                        continue;
-                    if (*actual_result_len < 0) {
-                        printfPQExpBuffer(&conn->errorMessage,
-                            libpq_gettext("protocol error: invalid function result length %d\n"),
-                            *actual_result_len);
-                        pqSaveErrorResult(conn);
-                        conn->inStart = conn->inCursor;
-                        return pqPrepareAsyncResult(conn);
-                    }
-                    copy_len = result_is_int ? 4 : *actual_result_len;
-                    if (result_buf_size >= 0 && copy_len > result_buf_size) {
-                        if (copy_len > 0 && pqSkipnchar((size_t)copy_len, conn))
-                            continue;
-                        if (pqGetc(&id, conn)) /* skip the trailing '0' */
-                            continue;
-                        printfPQExpBuffer(&conn->errorMessage,
-                            libpq_gettext("function call returned too much data: %d bytes, buffer size %d\n"),
-                            copy_len, result_buf_size);
-                        pqSaveErrorResult(conn);
-                        conn->inStart = conn->inCursor;
-                        return pqPrepareAsyncResult(conn);
-                    }
-                    if (result_is_int) {
-                        if (pqGetInt(result_buf, 4, conn))
-                            continue;
-                    } else {
-                        if (pqGetnchar((char*)result_buf, *actual_result_len, conn))
-                            continue;
-                    }
-                    if (pqGetc(&id, conn)) /* get the last '0' */
-                        continue;
                 }
                 if (id == '0') {
                     /* correctly finished function result message */
                     status = PGRES_COMMAND_OK;
-                } else {
+                    break;
+                }
+                if (id != 'G') {
                     /* The backend violates the protocol. */
                     printfPQExpBuffer(&conn->errorMessage,
                         libpq_gettext("protocol error: id=0x%x, remote datanode %s, errno: %s\n"),
@@ -1388,6 +1406,42 @@ PGresult* pqFunctionCall2(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
                     conn->inStart = conn->inCursor;
                     return pqPrepareAsyncResult(conn);
                 }
+
+                /* function returned nonempty value */
+                if (pqGetInt(actual_result_len, sizeof(int32), conn)) {
+                    continue;
+                }
+                if (*actual_result_len < 0) {
+                    printfPQExpBuffer(&conn->errorMessage,
+                        libpq_gettext("protocol error: invalid function result length %d\n"),
+                        *actual_result_len);
+                    pqSaveErrorResult(conn);
+                    conn->inStart = conn->inCursor;
+                    return pqPrepareAsyncResult(conn);
+                }
+
+                {
+                    int copyLen = result_is_int ? sizeof(int32) : *actual_result_len;
+                    int ret = pqSkipFunctionResult2(conn, copyLen, resultBufSize);
+
+                    if (ret == 1) {
+                        continue;
+                    }
+                    if (ret == -1) {
+                        return pqPrepareAsyncResult(conn);
+                    }
+                }
+
+                {
+                    int ret = pqCopyFunctionResultData2(conn, result_buf, *actual_result_len, result_is_int);
+
+                    if (ret == 1) {
+                        continue;
+                    }
+                }
+
+                /* correctly finished function result message */
+                status = PGRES_COMMAND_OK;
                 break;
             case 'E': /* error return */
                 if (pqGetErrorNotice2(conn, true))
