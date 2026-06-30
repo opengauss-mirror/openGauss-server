@@ -212,7 +212,7 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
     {DispatchMotRecord, NULL, RM_MOT_ID, 0, 0},
 #endif
     { DispatchUHeapRecord, RmgrRecordInfoValid, RM_UHEAP_ID, XLOG_UHEAP_INSERT, XLOG_UHEAP_NEW_PAGE },
-    { DispatchUHeap2Record, RmgrRecordInfoValid, RM_UHEAP2_ID, XLOG_UHEAP2_BASE_SHIFT, XLOG_UHEAP2_EXTEND_TD_SLOTS },
+    { DispatchUHeap2Record, RmgrRecordInfoValid, RM_UHEAP2_ID, XLOG_UHEAP2_BASE_SHIFT, XLOG_UHEAP2_LOCK },
     { DispatchUHeapUndoRecord, RmgrRecordInfoValid, RM_UNDOLOG_ID, XLOG_UNDO_EXTEND, XLOG_UNDO_DISCARD },
     { DispatchUndoActionRecord, RmgrRecordInfoValid, RM_UHEAPUNDO_ID, 
         XLOG_UHEAPUNDO_PAGE, XLOG_UHEAPUNDO_ABORT_SPECINSERT },
