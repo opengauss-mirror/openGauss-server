@@ -50,6 +50,21 @@ static long int lo_ntoh64(long int net64);
 static constexpr int HOSTLONG = 32;
 static constexpr int INT_LENGTH = 4;
 static constexpr int NON_INT_LENGTH = 8;
+static constexpr int LO_LSEEK_WHENCE_ARG = 2;
+
+static inline void lo_set_int_arg(PQArgBlock* arg, int value)
+{
+    arg->isint = 1;
+    arg->len = INT_LENGTH;
+    arg->u.integer = value;
+}
+
+static inline void lo_set_ptr_arg(PQArgBlock* arg, int len, const int* ptr)
+{
+    arg->isint = 0;
+    arg->len = len;
+    arg->u.ptr = (int*)ptr;
+}
 
 /*
  * lo_open
@@ -64,28 +79,25 @@ int lo_open(PGconn* conn, Oid lobjId, int mode)
     int resultLen;
     PQArgBlock argv[2];
     PGresult* res = NULL;
+    int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
             return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = lobjId;
+    lo_set_int_arg(&argv[0], lobjId);
 
-    argv[1].isint = 1;
-    argv[1].len = INT_LENGTH;
-    argv[1].u.integer = mode;
+    lo_set_int_arg(&argv[1], mode);
 
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_open, &fd, &resultLen, 1, argv, GET_LENGTH(argv, PQArgBlock));
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_open, &fd, &resultLen, 1,
+        argv, GET_LENGTH(argv, PQArgBlock), INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return fd;
-    } else {
-        PQclear(res);
-        return -1;
+        result = fd;
     }
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -101,23 +113,22 @@ int lo_close(PGconn* conn, int fd)
     PGresult* res = NULL;
     int retval;
     int resultLen;
+    int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
             return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = fd;
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_close, &retval, &resultLen, 1, argv, GET_LENGTH(argv, PQArgBlock));
+    lo_set_int_arg(&argv[0], fd);
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_close, &retval, &resultLen, 1,
+        argv, GET_LENGTH(argv, PQArgBlock), INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return retval;
-    } else {
-        PQclear(res);
-        return -1;
+        result = retval;
     }
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -133,6 +144,7 @@ int lo_truncate(PGconn* conn, int fd, size_t len)
     PGresult* res = NULL;
     int retval;
     int resultLen;
+    int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
@@ -160,23 +172,17 @@ int lo_truncate(PGconn* conn, int fd, size_t len)
         return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = fd;
+    lo_set_int_arg(&argv[0], fd);
+    lo_set_int_arg(&argv[1], (int) len);
 
-    argv[1].isint = 1;
-    argv[1].len = INT_LENGTH;
-    argv[1].u.integer = (int) len;
-
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_truncate, &retval, &resultLen, 1, argv, GET_LENGTH(argv, PQArgBlock));
-
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_truncate, &retval, &resultLen, 1,
+        argv, GET_LENGTH(argv, PQArgBlock), INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return retval;
-    } else {
-        PQclear(res);
-        return -1;
+        result = retval;
     }
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -192,6 +198,7 @@ int lo_truncate64(PGconn *conn, int fd, long int len)
     PGresult *res;
     int retval;
     int resultLen;
+    int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
@@ -204,24 +211,19 @@ int lo_truncate64(PGconn *conn, int fd, long int len)
         return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = fd;
+    lo_set_int_arg(&argv[0], fd);
 
     len = lo_hton64(len);
-    argv[1].isint = 0;
-    argv[1].len = NON_INT_LENGTH;
-    argv[1].u.ptr = (int *) &len;
+    lo_set_ptr_arg(&argv[1], NON_INT_LENGTH, (const int*)&len);
 
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_truncate64,
-               &retval, &resultLen, 1, argv, GET_LENGTH(argv, PQArgBlock));
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_truncate64, &retval, &resultLen, 1,
+        argv, GET_LENGTH(argv, PQArgBlock), INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return retval;
-    } else {
-        PQclear(res);
-        return -1;
+        result = retval;
     }
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -236,6 +238,7 @@ int lo_read(PGconn* conn, int fd, char* buf, size_t len)
     PQArgBlock argv[2];
     PGresult* res = NULL;
     int resultLen;
+    int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
@@ -254,22 +257,17 @@ int lo_read(PGconn* conn, int fd, char* buf, size_t len)
         return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = fd;
+    lo_set_int_arg(&argv[0], fd);
+    lo_set_int_arg(&argv[1], (int) len);
 
-    argv[1].isint = 1;
-    argv[1].len = INT_LENGTH;
-    argv[1].u.integer = (int) len;
-
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_read, (int*)buf, &resultLen, 0, argv, GET_LENGTH(argv, PQArgBlock));
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_read, (int*)buf, &resultLen, 0,
+        argv, GET_LENGTH(argv, PQArgBlock), (int)len};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return resultLen;
-    } else {
-        PQclear(res);
-        return -1;
+        result = resultLen;
     }
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -284,6 +282,7 @@ int lo_write(PGconn* conn, int fd, const char* buf, size_t len)
     PGresult* res = NULL;
     int resultLen;
     int retval;
+    int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
@@ -305,22 +304,17 @@ int lo_write(PGconn* conn, int fd, const char* buf, size_t len)
         return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = fd;
+    lo_set_int_arg(&argv[0], fd);
+    lo_set_ptr_arg(&argv[1], (int) len, (const int*)buf);
 
-    argv[1].isint = 0;
-    argv[1].len = (int) len;
-    argv[1].u.ptr = (int*)buf;
-
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_write, &retval, &resultLen, 1, argv, GET_LENGTH(argv, PQArgBlock));
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_write, &retval, &resultLen, 1,
+        argv, GET_LENGTH(argv, PQArgBlock), INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return retval;
-    } else {
-        PQclear(res);
-        return -1;
+        result = retval;
     }
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -335,32 +329,25 @@ int lo_lseek(PGconn* conn, int fd, int offset, int whence)
     PGresult* res = NULL;
     int retval;
     int resultLen;
+    int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
             return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = fd;
+    lo_set_int_arg(&argv[0], fd);
+    lo_set_int_arg(&argv[1], offset);
+    lo_set_int_arg(&argv[LO_LSEEK_WHENCE_ARG], whence);
 
-    argv[1].isint = 1;
-    argv[1].len = INT_LENGTH;
-    argv[1].u.integer = offset;
-
-    argv[2].isint = 1;
-    argv[2].len = INT_LENGTH;
-    argv[2].u.integer = whence;
-
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_lseek, &retval, &resultLen, 1, argv, GET_LENGTH(argv, PQArgBlock));
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_lseek, &retval, &resultLen, 1,
+        argv, GET_LENGTH(argv, PQArgBlock), INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return retval;
-    } else {
-        PQclear(res);
-        return -1;
+        result = retval;
     }
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -373,6 +360,7 @@ long int lo_lseek64(PGconn *conn, int fd, long int offset, int whence)
     PGresult *res;
     long int retval;
     int resultLen;
+    long int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0) {
@@ -386,28 +374,21 @@ long int lo_lseek64(PGconn *conn, int fd, long int offset, int whence)
         return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = fd;
+    lo_set_int_arg(&argv[0], fd);
 
     offset = lo_hton64(offset);
-    argv[1].isint = 0;
-    argv[1].len = NON_INT_LENGTH;
-    argv[1].u.ptr = (int *) &offset;
+    lo_set_ptr_arg(&argv[1], NON_INT_LENGTH, (const int*)&offset);
 
-    argv[2].isint = 1;
-    argv[2].len = INT_LENGTH;
-    argv[2].u.integer = whence;
+    lo_set_int_arg(&argv[LO_LSEEK_WHENCE_ARG], whence);
 
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_lseek64,
-              (int *)&retval, &resultLen, 0, argv, GET_LENGTH(argv, PQArgBlock));
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_lseek64, (int *)&retval, &resultLen, 0,
+        argv, GET_LENGTH(argv, PQArgBlock), NON_INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK && resultLen == NON_INT_LENGTH) {
-        PQclear(res);
-        return lo_ntoh64(retval);
-    } else {
-        PQclear(res);
-        return -1;
+        result = lo_ntoh64(retval);
     }
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -424,23 +405,21 @@ Oid lo_creat(PGconn* conn, int mode)
     PGresult* res = NULL;
     int retval;
     int resultLen;
+    Oid result = InvalidOid;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
             return InvalidOid;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = mode;
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_creat, &retval, &resultLen, 1, argv, GET_LENGTH(argv, PQArgBlock));
-    if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return (Oid)retval;
-    } else {
-        PQclear(res);
-        return InvalidOid;
-    }
+    lo_set_int_arg(&argv[0], mode);
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_creat, &retval, &resultLen, 1,
+        argv, GET_LENGTH(argv, PQArgBlock), INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
+    if (PQresultStatus(res) == PGRES_COMMAND_OK)
+        result = (Oid)retval;
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -457,6 +436,7 @@ Oid lo_create(PGconn* conn, Oid lobjId)
     PGresult* res = NULL;
     int retval;
     int resultLen;
+    Oid result = InvalidOid;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
@@ -469,17 +449,14 @@ Oid lo_create(PGconn* conn, Oid lobjId)
         return InvalidOid;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = lobjId;
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_create, &retval, &resultLen, 1, argv, GET_LENGTH(argv, PQArgBlock));
-    if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return (Oid)retval;
-    } else {
-        PQclear(res);
-        return InvalidOid;
-    }
+    lo_set_int_arg(&argv[0], lobjId);
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_create, &retval, &resultLen, 1,
+        argv, GET_LENGTH(argv, PQArgBlock), INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
+    if (PQresultStatus(res) == PGRES_COMMAND_OK)
+        result = (Oid)retval;
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -493,24 +470,23 @@ int lo_tell(PGconn* conn, int fd)
     PQArgBlock argv[1];
     PGresult* res = NULL;
     int resultLen;
+    int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
             return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = fd;
+    lo_set_int_arg(&argv[0], fd);
 
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_tell, &retval, &resultLen, 1, argv, GET_LENGTH(argv, PQArgBlock));
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_tell, &retval, &resultLen, 1,
+        argv, GET_LENGTH(argv, PQArgBlock), INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return retval;
-    } else {
-        PQclear(res);
-        return -1;
+        result = retval;
     }
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -523,6 +499,7 @@ long int lo_tell64(PGconn *conn, int fd)
     PQArgBlock argv[1];
     PGresult *res;
     int resultLen;
+    long int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0) {
@@ -536,19 +513,16 @@ long int lo_tell64(PGconn *conn, int fd)
         return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = fd;
+    lo_set_int_arg(&argv[0], fd);
 
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_tell64,
-               (int *)&retval, &resultLen, 0, argv, GET_LENGTH(argv, PQArgBlock));
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_tell64, (int*)&retval, &resultLen, 0,
+        argv, GET_LENGTH(argv, PQArgBlock), NON_INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK && resultLen == NON_INT_LENGTH) {
-        PQclear(res);
-        return lo_ntoh64(retval);
-    } else {
-        PQclear(res);
-        return -1;
+        result = lo_ntoh64(retval);
     }
+    PQclear(res);
+    return result;
 }
 
 /*
@@ -562,24 +536,23 @@ int lo_unlink(PGconn* conn, Oid lobjId)
     PGresult* res = NULL;
     int resultLen;
     int retval;
+    int result = -1;
 
     if (conn == NULL || conn->lobjfuncs == NULL) {
         if (lo_initialize(conn) < 0)
             return -1;
     }
 
-    argv[0].isint = 1;
-    argv[0].len = INT_LENGTH;
-    argv[0].u.integer = lobjId;
+    lo_set_int_arg(&argv[0], lobjId);
 
-    res = PQfn(conn, conn->lobjfuncs->fn_lo_unlink, &retval, &resultLen, 1, argv, GET_LENGTH(argv, PQArgBlock));
+    PQfnWithResultSizeArgs fnArgs = {conn->lobjfuncs->fn_lo_unlink, &retval, &resultLen, 1,
+        argv, GET_LENGTH(argv, PQArgBlock), INT_LENGTH};
+    res = PQfnWithResultSize(conn, &fnArgs);
     if (PQresultStatus(res) == PGRES_COMMAND_OK) {
-        PQclear(res);
-        return retval;
-    } else {
-        PQclear(res);
-        return -1;
+        result = retval;
     }
+    PQclear(res);
+    return result;
 }
 
 /*

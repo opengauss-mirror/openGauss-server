@@ -172,6 +172,17 @@ Datum ltree_out(PG_FUNCTION_ARGS)
 #define ITEMSIZE MAXALIGN(LQL_HDRSIZE + sizeof(nodeitem*))
 #define NEXTLEV(x) ((lquery_level*)(((char*)(x)) + ITEMSIZE))
 
+/* prevent uint16 overflow in lquery_level->numvar */
+static void CheckLqueryNumvarOverflow(lquery_level* curqlevel)
+{
+    if (curqlevel->numvar >= USHRT_MAX) {
+        ereport(ERROR,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmsg("number of variants (%d) exceeds the maximum allowed (%d)",
+                    curqlevel->numvar, USHRT_MAX)));
+    }
+}
+
 Datum lquery_in(PG_FUNCTION_ARGS)
 {
     char* buf = (char*)PG_GETARG_POINTER(0);
@@ -203,6 +214,12 @@ Datum lquery_in(PG_FUNCTION_ARGS)
 
     num++;
 
+    /* prevent uint16 overflow in lquery->numlevel */
+    if (num > USHRT_MAX)
+        ereport(ERROR,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmsg("number of levels (%d) exceeds the maximum allowed (%d)", num, USHRT_MAX)));
+
     if (num > MaxAllocSize / ITEMSIZE)
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
@@ -217,11 +234,13 @@ Datum lquery_in(PG_FUNCTION_ARGS)
             if (ISALNUM(ptr)) {
                 GETVAR(curqlevel) = lptr = (nodeitem*)palloc0(sizeof(nodeitem) * (numOR + 1));
                 lptr->start = ptr;
+                CheckLqueryNumvarOverflow(curqlevel);
                 state = LQPRS_WAITDELIM;
                 curqlevel->numvar = 1;
             } else if (charlen == 1 && t_iseq(ptr, '!')) {
                 GETVAR(curqlevel) = lptr = (nodeitem*)palloc0(sizeof(nodeitem) * (numOR + 1));
                 lptr->start = ptr + 1;
+                CheckLqueryNumvarOverflow(curqlevel);
                 state = LQPRS_WAITDELIM;
                 curqlevel->numvar = 1;
                 curqlevel->flag |= LQL_NOT;
@@ -234,6 +253,7 @@ Datum lquery_in(PG_FUNCTION_ARGS)
             if (ISALNUM(ptr)) {
                 lptr++;
                 lptr->start = ptr;
+                CheckLqueryNumvarOverflow(curqlevel);
                 state = LQPRS_WAITDELIM;
                 curqlevel->numvar++;
             } else

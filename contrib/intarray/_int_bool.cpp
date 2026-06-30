@@ -398,6 +398,24 @@ static void findoprnd(ITEM* ptr, int4* pos)
     }
 }
 
+static void DebugPrintQuery(QUERYTYPE* query, ITEM* ptr)
+{
+#ifdef BS_DEBUG
+    StringInfoData pbuf;
+    int4 i;
+
+    initStringInfo(&pbuf);
+    for (i = 0; i < query->size; i++) {
+        if (ptr[i].type == OPR)
+            appendStringInfo(&pbuf, "%c(%d) ", ptr[i].val, ptr[i].left);
+        else
+            appendStringInfo(&pbuf, "%d ", ptr[i].val);
+    }
+    elog(DEBUG3, "POR: %s", pbuf.data);
+    pfree(pbuf.data);
+#endif
+}
+
 /*
  * input
  */
@@ -411,10 +429,6 @@ Datum bqarr_in(PG_FUNCTION_ARGS)
     ITEM* ptr = NULL;
     NODE* tmp = NULL;
     int4 pos = 0;
-
-#ifdef BS_DEBUG
-    StringInfoData pbuf;
-#endif
 
     state.buf = buf;
     state.state = WAITOPERAND;
@@ -433,6 +447,12 @@ Datum bqarr_in(PG_FUNCTION_ARGS)
                 errmsg(
                     "number of query items (%d) exceeds the maximum allowed (%d)", state.num, (int)QUERYTYPEMAXITEMS)));
 
+    /* prevent int2 overflow in ITEM.left */
+    if (state.num > SHRT_MAX)
+        ereport(ERROR,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmsg("number of query items (%d) exceeds the maximum allowed (%d)", state.num, SHRT_MAX)));
+
     commonlen = COMPUTESIZE(state.num);
     query = (QUERYTYPE*)palloc(commonlen);
     SET_VARSIZE(query, commonlen);
@@ -449,17 +469,7 @@ Datum bqarr_in(PG_FUNCTION_ARGS)
 
     pos = query->size - 1;
     findoprnd(ptr, &pos);
-#ifdef BS_DEBUG
-    initStringInfo(&pbuf);
-    for (i = 0; i < query->size; i++) {
-        if (ptr[i].type == OPR)
-            appendStringInfo(&pbuf, "%c(%d) ", ptr[i].val, ptr[i].left);
-        else
-            appendStringInfo(&pbuf, "%d ", ptr[i].val);
-    }
-    elog(DEBUG3, "POR: %s", pbuf.data);
-    pfree(pbuf.data);
-#endif
+    DebugPrintQuery(query, ptr);
 
     PG_RETURN_POINTER(query);
 }

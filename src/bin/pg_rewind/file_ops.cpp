@@ -64,6 +64,11 @@ void open_target_file(const char* path, bool trunc)
     if (dry_run)
         return;
 
+    /* defense-in-depth path validation */
+    if (path == NULL || path[0] == '\0' || is_absolute_path(path) || strstr(path, "..") != NULL) {
+        pg_fatal("invalid target file path: \"%s\"\n", path ? path : "(null)");
+    }
+
     if (dstfd != -1 && !trunc && strcmp(path, &dstpath[strlen(pg_data) + 1]) == 0)
         return; /* already open */
 

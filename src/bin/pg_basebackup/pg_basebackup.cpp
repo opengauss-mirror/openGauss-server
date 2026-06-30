@@ -909,6 +909,7 @@ static PGresult* backup_get_result(PGconn* conn)
 
 static bool check_input_path_relative_path(const char* input_path_value)
 {
+    /* reject parent-directory references */
     if (strstr(input_path_value, "..") != NULL) {
         return true;
     }
@@ -1042,11 +1043,12 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
             /*
              * First part of header is zero terminated filename
              */
-            if (check_input_path_relative_path(copybuf) || check_input_path_relative_path(current_path)) {
+            if (check_input_path_relative_path(copybuf) || check_input_path_relative_path(current_path) ||
+                is_absolute_path(copybuf)) {
                 pg_log(stderr,
-                       _("%s: the copybuf/current_path file path including .. is unallowed: %s\n"),
+                       _("%s: the copybuf/current_path file path is unallowed: %s\n"),
                        progname,
-                       strerror(errno));
+                       copybuf);
                 disconnect_and_exit(1);
             }
             errorno = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, copybuf);

@@ -1759,12 +1759,54 @@ int pqEndcopy3(PGconn* conn)
 }
 
 /*
+ * Skip a function result value that is larger than the supplied buffer.
+ * Returns 0 on success, 1 if more input is needed, or -1 if an error was saved.
+ */
+static int pqSkipFunctionResult3(PGconn* conn, int actualResultLen, int resultBufSize,
+    int messageHeaderSize, int msgLength)
+{
+    if (resultBufSize < 0 || actualResultLen <= resultBufSize) {
+        return 0;
+    }
+
+    if (pqSkipnchar((size_t)actualResultLen, conn)) {
+        return 1;
+    }
+
+    printfPQExpBuffer(&conn->errorMessage,
+        libpq_gettext("function call returned too much data: %d bytes, buffer size %d\n"),
+        actualResultLen, resultBufSize);
+    pqSaveErrorResult(conn);
+    conn->inStart += messageHeaderSize + msgLength;
+    return -1;
+}
+
+/*
+ * Copy a function result value into the supplied buffer.
+ * Returns 0 on success, or 1 if more input is needed.
+ */
+static int pqCopyFunctionResultData3(PGconn* conn, int* resultBuf, int actualResultLen, int resultIsInt)
+{
+    if (resultIsInt) {
+        if (pqGetInt(resultBuf, actualResultLen, conn)) {
+            return 1;
+        }
+    } else {
+        if (pqGetnchar((char*)resultBuf, actualResultLen, conn)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/*
  * PQfn - Send a function call to the openGauss backend.
  *
  * See fe-exec.c for documentation.
  */
 PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_result_len, int result_is_int,
-    const PQArgBlock* args, int nargs)
+    const PQArgBlock* args, int nargs, int resultBufSize)
 {
     bool needInput = false;
     ExecStatusType status = PGRES_FATAL_ERROR;
@@ -1772,6 +1814,7 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
     int msgLength;
     int avail;
     int i;
+    const int messageHeaderSize = sizeof(char) + sizeof(int32);
 
     /* PQfn already validated connection state */
 
@@ -1830,17 +1873,19 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
         needInput = true;
 
         conn->inCursor = conn->inStart;
-        if (pqGetc(&id, conn))
+        if (pqGetc(&id, conn)) {
             continue;
-        if (pqGetInt(&msgLength, 4, conn))
+        }
+        if (pqGetInt(&msgLength, sizeof(int32), conn)) {
             continue;
+        }
 
         /*
-         * Try to validate message type/length here.  A length less than 4 is
+         * Try to validate message type/length here.  A length less than sizeof(int32) is
          * definitely broken.  Large lengths should only be believed for a few
          * message types.
          */
-        if (msgLength < 4) {
+        if (msgLength < sizeof(int32)) {
             handleSyncLoss(conn, id, msgLength);
             break;
         }
@@ -1852,7 +1897,7 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
         /*
          * Can't process if message body isn't all here yet.
          */
-        msgLength -= 4;
+        msgLength -= sizeof(int32);
         avail = conn->inEnd - conn->inCursor;
         if (avail < msgLength) {
             /*
@@ -1879,17 +1924,52 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
          */
         switch (id) {
             case 'V': /* function result */
-                if (pqGetInt(actual_result_len, 4, conn))
+                if (pqGetInt(actual_result_len, sizeof(int32), conn)) {
                     continue;
-                if (*actual_result_len != -1) {
-                    if (result_is_int) {
-                        if (pqGetInt(result_buf, *actual_result_len, conn))
-                            continue;
-                    } else {
-                        if (pqGetnchar((char*)result_buf, *actual_result_len, conn))
-                            continue;
+                }
+
+                if (*actual_result_len == -1) {
+                    /* correctly finished function result message */
+                    status = PGRES_COMMAND_OK;
+                    break;
+                }
+
+                if (*actual_result_len < 0) {
+                    printfPQExpBuffer(&conn->errorMessage,
+                        libpq_gettext("protocol error: invalid function result length %d\n"),
+                        *actual_result_len);
+                    pqSaveErrorResult(conn);
+                    conn->inStart += messageHeaderSize + msgLength;
+                    return pqPrepareAsyncResult(conn);
+                }
+
+                if (*actual_result_len > msgLength - sizeof(int32)) {
+                    printfPQExpBuffer(&conn->errorMessage,
+                        libpq_gettext("protocol error: function result length %d exceeds message size\n"),
+                        *actual_result_len);
+                    pqSaveErrorResult(conn);
+                    conn->inStart += messageHeaderSize + msgLength;
+                    return pqPrepareAsyncResult(conn);
+                }
+
+                {
+                    int ret = pqSkipFunctionResult3(conn, *actual_result_len, resultBufSize,
+                        messageHeaderSize, msgLength);
+                    if (ret == 1) {
+                        continue;
+                    }
+                    if (ret == -1) {
+                        return pqPrepareAsyncResult(conn);
                     }
                 }
+
+                {
+                    int ret = pqCopyFunctionResultData3(conn, result_buf, *actual_result_len, result_is_int);
+                    if (ret == 1) {
+                        continue;
+                    }
+                }
+
                 /* correctly finished function result message */
                 status = PGRES_COMMAND_OK;
                 break;
@@ -1912,7 +1992,7 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
                 if (getReadyForQuery(conn))
                     continue;
                 /* consume the message and exit */
-                conn->inStart += 5 + msgLength;
+                conn->inStart += messageHeaderSize + msgLength;
                 /* if we saved a result object (probably an error), use it */
                 if (conn->result != NULL)
                     return pqPrepareAsyncResult(conn);
@@ -1928,12 +2008,12 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
                     id, conn->remote_nodename, strerror(errno));
                 pqSaveErrorResult(conn);
                 /* trust the specified message length as what to skip */
-                conn->inStart += 5 + msgLength;
+                conn->inStart += messageHeaderSize + msgLength;
                 return pqPrepareAsyncResult(conn);
         }
         /* Completed this message, keep going */
         /* trust the specified message length as what to skip */
-        conn->inStart += 5 + msgLength;
+        conn->inStart += messageHeaderSize + msgLength;
         needInput = false;
     }
 

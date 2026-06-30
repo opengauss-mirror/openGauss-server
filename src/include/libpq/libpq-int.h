@@ -651,7 +651,7 @@ extern int pqGetline2(PGconn* conn, char* s, int maxlen);
 extern int pqGetlineAsync2(PGconn* conn, char* buffer, int bufsize);
 extern int pqEndcopy2(PGconn* conn);
 extern PGresult* pqFunctionCall2(PGconn* conn, Oid fnid, int* result_buf, int* actual_result_len, int result_is_int,
-    const PQArgBlock* args, int nargs);
+    const PQArgBlock* args, int nargs, int resultBufSize);
 
 /* === in fe-protocol3.c === */
 
@@ -663,7 +663,20 @@ extern int pqGetline3(PGconn* conn, char* s, int maxlen);
 extern int pqGetlineAsync3(PGconn* conn, char* buffer, int bufsize);
 extern int pqEndcopy3(PGconn* conn);
 extern PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_result_len, int result_is_int,
-    const PQArgBlock* args, int nargs);
+    const PQArgBlock* args, int nargs, int resultBufSize);
+
+/* Internal libpq use only: PQfn with result buffer size check */
+typedef struct {
+    int fnid;
+    int* resultBuf;
+    int* resultLen;
+    int resultIsInt;
+    const PQArgBlock* args;
+    int nargs;
+    int resultBufSize;
+} PQfnWithResultSizeArgs;
+
+extern PGresult* PQfnWithResultSize(PGconn* conn, const PQfnWithResultSizeArgs* args);
 
 /* === in fe-misc.c === */
 

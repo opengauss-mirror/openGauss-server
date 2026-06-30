@@ -57,6 +57,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file);
 static BuildErrorCode execute_pagemap(file_entry_t* entry, FILE* file);
 static char* run_simple_query(const char* sql);
 static BuildErrorCode recurse_dir(const char* datadir, const char* path, process_file_callback_t callback);
+static bool IsValidRewindPath(const char* path);
 static void get_slot_name_by_app_name(void);
 static BuildErrorCode CheckResultSet(PGresult* pgResult);
 static void get_log_directory_guc(void);
@@ -458,6 +459,14 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
         securec_check_c(errorno, "\0", "\0");
         filename[filenamelen] = '\0';
 
+        /* reject malicious paths from the source server */
+        if (!IsValidRewindPath(filename)) {
+            pg_fatal("invalid file path received from source server: \"%s\"\n", filename);
+            pg_free(filename);
+            filename = NULL;
+            PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
+        }
+
         chunk = PQgetvalue(res, 0, 2);
         errorno = memcpy_s(&chunkspace, sizeof(int32), PQgetvalue(res, 0, 3), sizeof(int32));
         securec_check_c(errorno, "\0", "\0");
@@ -519,6 +528,24 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
     fprintf(stdout, "Finish fetching files \n");
 
     return BUILD_SUCCESS;
+}
+
+/*
+ * reject absolute paths and paths containing parent-directory
+ * references, preventing a malicious source server from writing outside pg_data.
+ */
+static bool IsValidRewindPath(const char* path)
+{
+    if (path == NULL || path[0] == '\0') {
+        return false;
+    }
+    if (is_absolute_path(path)) {
+        return false;
+    }
+    if (strstr(path, "..") != NULL) {
+        return false;
+    }
+    return true;
 }
 
 /**
@@ -650,6 +677,12 @@ static void fetch_file_range(const char* path, unsigned int begin, unsigned int 
 {
     char linebuf[MAXPGPATH + 47];
     int ss_c = 0;
+
+    /* validate path before sending to the source server */
+    if (!IsValidRewindPath(path)) {
+        pg_fatal("invalid file path sent to source server: \"%s\"\n", path);
+        return;
+    }
 
     /* Split the range into CHUNKSIZE chunks */
     while (end - begin > 0) {
