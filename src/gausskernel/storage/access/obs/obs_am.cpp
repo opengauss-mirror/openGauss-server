@@ -1613,7 +1613,9 @@ void checkOBSServerValidity(char *hostName, char *ak, char *sk, bool encrypt)
 #define ENCRYPT_STR_PREFIX "encryptstr"
 #define DEST_CIPHER_LENGTH 1024
 
+    char decryptAccessKeyStr[DEST_CIPHER_LENGTH] = {0};
     char decryptSecretAccessKeyStr[DEST_CIPHER_LENGTH] = {0};
+    errno_t rc = EOK;
 
     int retriesG = MAX_RETRIES;
 
@@ -1623,6 +1625,11 @@ void checkOBSServerValidity(char *hostName, char *ak, char *sk, bool encrypt)
     ListServiceData data;
     (void)memset_s(&data, sizeof(ListServiceData), 0, sizeof(ListServiceData));
     data.allDetails = 1;
+
+    if (0 == strncmp(ak, ENCRYPT_STR_PREFIX, strlen(ENCRYPT_STR_PREFIX))) {
+        decryptKeyString(ak, decryptAccessKeyStr, DEST_CIPHER_LENGTH, NULL);
+        ak = decryptAccessKeyStr;
+    }
 
     if (0 == strncmp(sk, ENCRYPT_STR_PREFIX, strlen(ENCRYPT_STR_PREFIX))) {
         decryptKeyString(sk, decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH, NULL);
@@ -1647,6 +1654,11 @@ void checkOBSServerValidity(char *hostName, char *ak, char *sk, bool encrypt)
 
         list_bucket_obs(&option, &listServiceHandle, &data);
     } while (obs_status_is_retryable(statusG) && should_retry(retriesG));
+
+    rc = memset_s(decryptAccessKeyStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
+    securec_check(rc, "\0", "\0");
 
     if (statusG != OBS_STATUS_OK) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
@@ -1688,6 +1700,10 @@ void freeObsOptions(ObsOptions *obsOptions, bool useSimpleFree)
 {
     if (obsOptions != NULL) {
         if (obsOptions->access_key) {
+            errno_t rc = EOK;
+            rc = memset_s(obsOptions->access_key, strlen(obsOptions->access_key),
+                0, strlen(obsOptions->access_key));
+            securec_check(rc, "\0", "\0");
             pfree_ext(obsOptions->access_key);
         }
         if (obsOptions->address) {

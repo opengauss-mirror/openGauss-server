@@ -2555,6 +2555,11 @@ static void pglog_rescan_fs(ForeignScanState* node)
  */
 static void log_begin_foreign_scan(ForeignScanState* node, int eflags)
 {
+    if (!isRelSuperuser()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("Must be superuser to read log foreign table")));
+    }
+
     logFdwPlanState* festate = (logFdwPlanState*)palloc0(sizeof(logFdwPlanState));
 
     MemoryContext memcnxt = AllocSetContextCreate(CurrentMemoryContext,
