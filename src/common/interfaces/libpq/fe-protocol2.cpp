@@ -1297,16 +1297,16 @@ static int pqSkipFunctionResult2(PGconn* conn, int copyLen, int resultBufSize)
  * Copy a function result value into the supplied buffer.
  * Returns 0 on success, or 1 if more input is needed.
  */
-static int pqCopyFunctionResultData2(PGconn* conn, int* result_buf, int actualResultLen, int result_is_int)
+static int pqCopyFunctionResultData2(PGconn* conn, int* resultBuf, int actualResultLen, int resultIsInt)
 {
     char id;
 
-    if (result_is_int) {
-        if (pqGetInt(result_buf, 4, conn)) {
+    if (resultIsInt) {
+        if (pqGetInt(resultBuf, sizeof(int32), conn)) {
             return 1;
         }
     } else {
-        if (pqGetnchar((char*)result_buf, actualResultLen, conn)) {
+        if (pqGetnchar((char*)resultBuf, actualResultLen, conn)) {
             return 1;
         }
     }
@@ -1423,7 +1423,6 @@ PGresult* pqFunctionCall2(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
                 {
                     int copyLen = result_is_int ? sizeof(int32) : *actual_result_len;
                     int ret = pqSkipFunctionResult2(conn, copyLen, resultBufSize);
-
                     if (ret == 1) {
                         continue;
                     }
@@ -1434,7 +1433,6 @@ PGresult* pqFunctionCall2(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
 
                 {
                     int ret = pqCopyFunctionResultData2(conn, result_buf, *actual_result_len, result_is_int);
-
                     if (ret == 1) {
                         continue;
                     }

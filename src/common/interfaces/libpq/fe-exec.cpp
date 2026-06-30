@@ -2951,17 +2951,21 @@ static bool PQfnCheckConnectionState(PGconn* conn)
 static PGresult* PQfnInternal(PGconn* conn, int fnid, int* result_buf, int* actual_result_len, int result_is_int,
     const PQArgBlock* args, int nargs, int resultBufSize)
 {
+    PGresult* result = NULL;
+
     *actual_result_len = 0;
 
-    if (!PQfnCheckConnectionState(conn)) {
-        return NULL;
+    if (PQfnCheckConnectionState(conn)) {
+        if (PG_PROTOCOL_MAJOR(conn->pversion) >= PG_PROTOCOL_MAJOR(PG_PROTOCOL_LATEST)) {
+            result = pqFunctionCall3(conn, fnid, result_buf, actual_result_len,
+                result_is_int, args, nargs, resultBufSize);
+        } else {
+            result = pqFunctionCall2(conn, fnid, result_buf, actual_result_len,
+                result_is_int, args, nargs, resultBufSize);
+        }
     }
 
-    if (PG_PROTOCOL_MAJOR(conn->pversion) >= PG_PROTOCOL_MAJOR(PG_PROTOCOL_LATEST)) {
-        return pqFunctionCall3(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs, resultBufSize);
-    } else {
-        return pqFunctionCall2(conn, fnid, result_buf, actual_result_len, result_is_int, args, nargs, resultBufSize);
-    }
+    return result;
 }
 
 /*

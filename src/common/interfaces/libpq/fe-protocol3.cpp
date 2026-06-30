@@ -1762,7 +1762,8 @@ int pqEndcopy3(PGconn* conn)
  * Skip a function result value that is larger than the supplied buffer.
  * Returns 0 on success, 1 if more input is needed, or -1 if an error was saved.
  */
-static int pqSkipFunctionResult3(PGconn* conn, int actualResultLen, int resultBufSize, int messageHeaderSize, int msgLength)
+static int pqSkipFunctionResult3(PGconn* conn, int actualResultLen, int resultBufSize,
+    int messageHeaderSize, int msgLength)
 {
     if (resultBufSize < 0 || actualResultLen <= resultBufSize) {
         return 0;
@@ -1784,14 +1785,14 @@ static int pqSkipFunctionResult3(PGconn* conn, int actualResultLen, int resultBu
  * Copy a function result value into the supplied buffer.
  * Returns 0 on success, or 1 if more input is needed.
  */
-static int pqCopyFunctionResultData3(PGconn* conn, int* result_buf, int actualResultLen, int result_is_int)
+static int pqCopyFunctionResultData3(PGconn* conn, int* resultBuf, int actualResultLen, int resultIsInt)
 {
-    if (result_is_int) {
-        if (pqGetInt(result_buf, actualResultLen, conn)) {
+    if (resultIsInt) {
+        if (pqGetInt(resultBuf, actualResultLen, conn)) {
             return 1;
         }
     } else {
-        if (pqGetnchar((char*)result_buf, actualResultLen, conn)) {
+        if (pqGetnchar((char*)resultBuf, actualResultLen, conn)) {
             return 1;
         }
     }
@@ -1872,10 +1873,12 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
         needInput = true;
 
         conn->inCursor = conn->inStart;
-        if (pqGetc(&id, conn))
+        if (pqGetc(&id, conn)) {
             continue;
-        if (pqGetInt(&msgLength, sizeof(int32), conn))
+        }
+        if (pqGetInt(&msgLength, sizeof(int32), conn)) {
             continue;
+        }
 
         /*
          * Try to validate message type/length here.  A length less than sizeof(int32) is
@@ -1950,8 +1953,8 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
                 }
 
                 {
-                    int ret = pqSkipFunctionResult3(conn, *actual_result_len, resultBufSize, messageHeaderSize, msgLength);
-
+                    int ret = pqSkipFunctionResult3(conn, *actual_result_len, resultBufSize,
+                        messageHeaderSize, msgLength);
                     if (ret == 1) {
                         continue;
                     }
@@ -1962,7 +1965,6 @@ PGresult* pqFunctionCall3(PGconn* conn, Oid fnid, int* result_buf, int* actual_r
 
                 {
                     int ret = pqCopyFunctionResultData3(conn, result_buf, *actual_result_len, result_is_int);
-
                     if (ret == 1) {
                         continue;
                     }
