@@ -98,6 +98,7 @@ extern char* binary_upgrade_newowner;
 
 extern void init_parallel_dump_utils(void);
 extern const char* fmtId(const char* identifier);
+extern const char* fmtBUserHostId(const char* name);
 extern void appendStringLiteral(PQExpBuffer buf, const char* str, int encoding, bool std_strings);
 extern void appendStringLiteralConn(PQExpBuffer buf, const char* str, PGconn* conn);
 extern void appendStringLiteralDQ(PQExpBuffer buf, const char* str, const char* dqprefix);

@@ -3473,10 +3473,24 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
             (void)appendPQExpBuffer(temp, "ALTER ");
             _getObjectDescription(temp, te, AH);
 
+            /*
+             * Owner changes for object types parsed via alter_table_cmds in
+             * the dolphin grammar (TABLE / VIEW / MATERIALIZED VIEW / SEQUENCE /
+             * LARGE SEQUENCE / FOREIGN TABLE) reach the UserId production, which
+             * rejects a "user@host" identifier via IsValidIdentUsername. Emit
+             * the backtick form `user`@`host` for those so they parse on
+             * restore; other object types use the standard fmtId() path.
+             */
+            bool useBUserHostId = (strcmp(te->desc, "TABLE") == 0 || strcmp(te->desc, "VIEW") == 0 ||
+                                   strcmp(te->desc, "MATERIALIZED VIEW") == 0 || strcmp(te->desc, "SEQUENCE") == 0 ||
+                                   strcmp(te->desc, "LARGE SEQUENCE") == 0 || strcmp(te->desc, "FOREIGN TABLE") == 0);
+
             if ((binary_upgrade_oldowner != NULL) && (0 == strncmp(te->owner, binary_upgrade_oldowner, NAMEDATALEN))) {
-                (void)appendPQExpBuffer(temp, " OWNER TO %s;", fmtId(binary_upgrade_newowner));
+                (void)appendPQExpBuffer(temp, " OWNER TO %s;",
+                    useBUserHostId ? fmtBUserHostId(binary_upgrade_newowner) : fmtId(binary_upgrade_newowner));
             } else {
-                (void)appendPQExpBuffer(temp, " OWNER TO %s;", fmtId(te->owner));
+                (void)appendPQExpBuffer(temp, " OWNER TO %s;",
+                    useBUserHostId ? fmtBUserHostId(te->owner) : fmtId(te->owner));
             }
 
             (void)ahprintf(AH, "%s\n\n", temp->data);
