@@ -20319,9 +20319,23 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
 
                 if (has_default) {
                     char *default_value = tbinfo->attrdefs[j]->adef_expr;
+                    char *stripped_default = NULL;
                     char *onUpdate_value = NULL;
                     ArchiveHandle* AH = (ArchiveHandle*)fout;
                     bool hasOnUpdateFeature = is_column_exists(AH->connection, AttrDefaultRelationId, "adbin_on_update");
+
+                    /* If column-level COLLATE was already emitted, strip trailing COLLATE from default expr */
+                    if (OidIsValid(tbinfo->attcollation[j]) && findCollationByOid(tbinfo->attcollation[j]) != NULL) {
+                        char *collate_pos = strstr(default_value, " COLLATE ");
+                        if (collate_pos != NULL) {
+                            size_t prefix_len = (size_t)(collate_pos - default_value);
+                            stripped_default = (char *)pg_malloc(prefix_len + 1);
+                            errno_t rc = strncpy_s(stripped_default, prefix_len + 1, default_value, prefix_len);
+                            securec_check_c(rc, "\0", "\0");
+                            stripped_default[prefix_len] = '\0';
+                            default_value = stripped_default;
+                        }
+                    }
                     if (hasOnUpdateFeature) {
                         onUpdate_value = tbinfo->attrdefs[j]->adupd_expr;
                     }
@@ -20391,6 +20405,10 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                         libpq_free(default_value);
                     }
 #endif
+                    if (stripped_default != NULL) {
+                        free(stripped_default);
+                        stripped_default = NULL;
+                    }
                 }
                 if (has_notnull)
                     appendPQExpBuffer(q, " NOT NULL");
