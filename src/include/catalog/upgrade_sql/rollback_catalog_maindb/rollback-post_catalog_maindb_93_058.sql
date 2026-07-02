@@ -1,3 +1,7 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92987 then
+
 DECLARE
 cnt int;
 BEGIN
@@ -27,3 +31,6 @@ DROP FUNCTION IF EXISTS pg_catalog.diskannrescan(internal, internal, internal, i
 DROP FUNCTION IF EXISTS pg_catalog.diskanngettuple(internal, internal) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.diskannendscan(internal) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.diskannhandler(internal) CASCADE;
+
+END IF;
+END $upgrade$;

@@ -1,3 +1,7 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92987 then
+
 DROP FUNCTION IF EXISTS pg_catalog.diskannbuild(internal, internal, internal) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8538;
 CREATE FUNCTION pg_catalog.diskannbuild(internal, internal, internal)
@@ -157,3 +161,6 @@ CREATE OPERATOR CLASS pg_catalog.vector_cosine_ops
 	FUNCTION 1 pg_catalog.vector_negative_inner_product(vector, vector),
 	FUNCTION 2 pg_catalog.vector_norm(vector),
 	FUNCTION 4 pg_catalog.vector_norm(vector);
+
+END IF;
+END $upgrade$;

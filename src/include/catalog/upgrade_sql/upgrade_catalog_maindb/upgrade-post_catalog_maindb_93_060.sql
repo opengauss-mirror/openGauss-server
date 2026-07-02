@@ -1,3 +1,7 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92988 then
+
 DROP TYPE IF EXISTS pg_catalog.halfvec CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_TYPE, 8306, 8309, b;
 CREATE TYPE pg_catalog.halfvec;
@@ -644,3 +648,6 @@ CREATE OPERATOR CLASS pg_catalog.halfvec_cosine_ops
 	FUNCTION 1 pg_catalog.halfvec_negative_inner_product(halfvec, halfvec),
 	FUNCTION 2 pg_catalog.l2_norm(halfvec),
 	FUNCTION 3 pg_catalog.ivfflat_halfvec_support(internal, internal);
+
+END IF;
+END $upgrade$;
