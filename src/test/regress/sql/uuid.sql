@@ -76,5 +76,14 @@ INSERT INTO guid2(guid_field) VALUES('3f3e3c3b3a3039383736353433a2313e');
 SELECT COUNT(*) FROM guid1 g1 INNER JOIN guid2 g2 ON g1.guid_field = g2.guid_field;
 SELECT COUNT(*) FROM guid1 g1 LEFT JOIN guid2 g2 ON g1.guid_field = g2.guid_field WHERE g2.guid_field IS NULL;
 
+-- generate uuid test
+TRUNCATE guid1;
+BEGIN
+  FOR i IN 1..100 LOOP
+    EXECUTE 'insert into guid1(guid_field) values (gen_random_uuid())';
+  END LOOP;
+END;
+/
+
 -- clean up
 DROP TABLE guid1, guid2 CASCADE;
