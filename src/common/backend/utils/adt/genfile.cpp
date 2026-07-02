@@ -1125,6 +1125,10 @@ void item_state_free(CompressAddressItemState *itemState)
 
 Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
 {
+    if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("must be initial account to read files"))));
+    }
     int32 startBlockNum = PG_GETARG_INT32(1);
     int32 blockCount = PG_GETARG_INT32(2);
 
