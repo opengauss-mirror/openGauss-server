@@ -3161,6 +3161,7 @@ static Node* transformCharsetClause(ParseState* pstate, CharsetClause* c)
 {
     Node *result = NULL;
     Const *con = NULL;
+    Oid collid = InvalidOid;
 
     Assert(DB_IS_CMPT_BD);
     result = transformExprRecurse(pstate, c->arg);
@@ -3186,7 +3187,14 @@ static Node* transformCharsetClause(ParseState* pstate, CharsetClause* c)
         }
     }
 
-    exprSetCollation(result, get_default_collation_by_charset(c->charset));
+    if (unlikely(DB_IS_CMPT(B_FORMAT))) {
+        collid = get_default_collation_by_charset(c->charset, false);
+        if (OidIsValid(collid)) {
+            exprSetCollation(result, collid);
+        }
+    } else {
+        exprSetCollation(result, get_default_collation_by_charset(c->charset));
+    }
     return result;
 }
 
