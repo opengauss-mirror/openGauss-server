@@ -248,6 +248,14 @@ select * from t_compression_test_1 order by COLUMNONE limit 10;
 select blocknum, len, algorithm, chunk_size from pg_read_binary_file_blocks(compress_func_findpath('t_compression_test_1') || '_compress', 1, 6);
 select blocknum, len, algorithm, chunk_size from pg_read_binary_file_blocks(compress_func_findpath('t_compression_test_1') || '_compress', 1, 5);
 select blocknum, len, algorithm, chunk_size from pg_read_binary_file_blocks(compress_func_findpath('t_compression_test_1') || '_compress', 3, 2);
+
+-- pg_read_binary_file_blocks must reject non-initial users
+create user compress_attacker password 'Test@1234';
+set session authorization compress_attacker password 'Test@1234';
+select blocknum, len, algorithm, chunk_size from pg_read_binary_file_blocks(compress_func_findpath('t_compression_test_1') || '_compress', 1, 1);
+reset session authorization;
+drop user compress_attacker;
+
 drop table if exists t_compression_test_1 cascade;
 
 drop FUNCTION compress_func_findpath(character varying);
