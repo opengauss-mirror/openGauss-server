@@ -38,8 +38,8 @@
  * - MAIN fork: prefer FSM (GetPageWithFreeSpace / RecordAndGetPageWithFreeSpace);
  *   on failure use last page / new page; call RecordPageWithFreeSpace after changing free space.
  * - Non-MAIN forks: still use last page / new page; do not touch FSM.
- * - VarBlockFreeChain: delete chunk items in safe order (ascending block, descending offset on page);
- *   PageIndexTupleDelete + FSM on MAIN where applicable.
+ * - VarBlockFreeChain: replace freed chunks with placeholders (PageIndexTupleDelete + PageAddItem)
+ *   to preserve offset numbers of other items on the same page; update FSM on MAIN fork.
  */
 
 /* Bound chain walks to avoid infinite loops on corruption; normal posting chains are far shorter */
@@ -107,6 +107,12 @@ static bool VarBlockTryGetChunk(Page page, OffsetNumber offnum, VarBlockChunkHea
     }
 
     *hdr = (VarBlockChunkHeader *)PageGetItem(page, id);
+
+    /* Reject placeholder chunks (left behind by VarBlockFreeChain). */
+    if (VarBlockIsPlaceholder(*hdr)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -115,6 +121,13 @@ static inline void VarBlockInitHeader(VarBlockChunkHeader *hdr, int level)
     ItemPointerSetInvalid(&hdr->next_ctid);
     hdr->payload_len = 0;
     hdr->level = (uint8)level;
+}
+
+static inline void VarBlockMakePlaceholder(VarBlockChunkHeader *hdr)
+{
+    ItemPointerSetInvalid(&hdr->next_ctid);
+    hdr->payload_len = 0;
+    hdr->level = VAR_BLOCK_LEVEL_PLACEHOLDER;
 }
 
 /*
@@ -139,7 +152,8 @@ static bool VarBlockPageCompatible(Page page)
             return false;
         }
         uint16 len = ItemIdGetLength(iid);
-        if (len != VAR_BLOCK_LEVEL0_SIZE && len != VAR_BLOCK_LEVEL1_SIZE &&
+        if (len != VAR_BLOCK_PLACEHOLDER_SIZE &&
+            len != VAR_BLOCK_LEVEL0_SIZE && len != VAR_BLOCK_LEVEL1_SIZE &&
             len != VAR_BLOCK_LEVEL2_SIZE && len != VAR_BLOCK_LEVEL3_SIZE &&
             len != VAR_BLOCK_LEVEL4_SIZE) {
             return false;
@@ -178,33 +192,6 @@ static OffsetNumber VarBlockAllocOnPage(Buffer buf, Page page, int level, Generi
     VarBlockChunkHeader *hdr = VarBlockGetChunk(page, offnum);
     VarBlockInitHeader(hdr, level);
     return offnum;
-}
-
-/*
- * Delete order: ascending block number, descending OffsetNumber within a block,
- * so after PageIndexTupleDelete compacts line pointers, later offsets on the same page stay valid.
- */
-static int VarBlockDeleteOrderCompare(const void *a, const void *b)
-{
-    const ItemPointerData *pa = (const ItemPointerData *)a;
-    const ItemPointerData *pb = (const ItemPointerData *)b;
-    BlockNumber ba = ItemPointerGetBlockNumber(pa);
-    BlockNumber bb = ItemPointerGetBlockNumber(pb);
-    if (ba < bb) {
-        return -1;
-    }
-    if (ba > bb) {
-        return 1;
-    }
-    OffsetNumber oa = ItemPointerGetOffsetNumber(pa);
-    OffsetNumber ob = ItemPointerGetOffsetNumber(pb);
-    if (oa > ob) {
-        return -1;
-    }
-    if (oa < ob) {
-        return 1;
-    }
-    return 0;
 }
 
 /* First pass: walk chain and count links (same stop conditions as fill pass). */
@@ -568,7 +555,13 @@ void VarBlockFreeChain(Relation rel, ForkNumber forkNum, const ItemPointerData *
         return;
     }
 
-    qsort(ctids, (size_t)n, sizeof(ItemPointerData), VarBlockDeleteOrderCompare);
+    /*
+     * Build the placeholder chunk once.  We replace each freed chunk with
+     * this minimal-size placeholder to preserve offset numbers for other
+     * token chains on the same page.
+     */
+    VarBlockChunkHeader placeholder;
+    VarBlockMakePlaceholder(&placeholder);
 
     for (int i = 0; i < n; i++) {
         if (i > 0 && ItemPointerEquals(&ctids[i], &ctids[i - 1])) {
@@ -594,17 +587,34 @@ void VarBlockFreeChain(Relation rel, ForkNumber forkNum, const ItemPointerData *
         }
 
         /*
-         * Physically remove the line pointer so space can be reused (PageGetFreeSpace / FSM).
-         * ctids[] is sorted (ascending block, descending offset on a page) so each deletion
-         * does not invalidate offsets of chunks we still need to delete on the same page.
+         * Replace the chunk with a placeholder to preserve offset numbers.
+         *
+         * PageIndexTupleDelete physically removes the item and compacts line
+         * pointers, changing offset numbers of subsequent items.  PageAddItem
+         * then inserts the placeholder at the same offset, restoring the
+         * original offset numbers for other items on the page.
+         *
+         * Net effect: other token chains' ctids remain valid, and the freed
+         * data space is reclaimed (large chunk -> small placeholder).
          */
         if (building) {
             PageIndexTupleDelete(page, offno);
+            OffsetNumber newOff = PageAddItem(page, (Item)&placeholder,
+                VAR_BLOCK_PLACEHOLDER_SIZE, offno, false, false);
+            if (newOff != offno) {
+                ereport(ERROR, (errmsg("VarBlockFreeChain: PageAddItem returned %u, expected %u", newOff, offno)));
+            }
             MarkBufferDirty(buf);
         } else {
             GenericXLogState *state = GenericXLogStart(rel);
             Page walPage = GenericXLogRegisterBuffer(state, buf, GENERIC_XLOG_FULL_IMAGE);
             PageIndexTupleDelete(walPage, offno);
+            OffsetNumber newOff = PageAddItem(walPage, (Item)&placeholder,
+                VAR_BLOCK_PLACEHOLDER_SIZE, offno, false, false);
+            if (newOff != offno) {
+                GenericXLogAbort(state);
+                ereport(ERROR, (errmsg("VarBlockFreeChain: PageAddItem returned %u, expected %u", newOff, offno)));
+            }
             GenericXLogFinish(state);
         }
         VarBlockFsmUpdateIfMain(rel, forkNum, buf, building);
@@ -613,4 +623,76 @@ void VarBlockFreeChain(Relation rel, ForkNumber forkNum, const ItemPointerData *
     }
 
     pfree(ctids);
+}
+
+/*
+ * Vacuum cleanup: physically remove trailing placeholder chunks from VarBlock pages.
+ *
+ * Placeholder chunks are left behind by VarBlockFreeChain to preserve offset
+ * numbers of other items on the same page.  Over time, placeholders accumulate
+ * and waste line-pointer slots.  This function safely removes only those
+ * placeholders at the end of a page, because deleting trailing items does not
+ * change the offset numbers of preceding items.
+ *
+ * Reference: SP-GiST vacuumRedirectAndPlaceholder (spgvacuum.cpp).
+ */
+void VarBlockVacuumCleanup(Relation rel)
+{
+    BlockNumber numBlks = RelationGetNumberOfBlocks(rel);
+
+    for (BlockNumber blkno = 0; blkno < numBlks; blkno++) {
+        Buffer buf = ReadBufferExtended(rel, MAIN_FORKNUM, blkno, RBM_NORMAL, NULL);
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+        Page page = BufferGetPage(buf);
+        OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
+
+        /*
+         * Scan backwards to find trailing placeholder chunks.
+         * Only placeholders at the very end of the page can be safely removed,
+         * because PageIndexMultiDelete compacts line pointers and would change
+         * offset numbers of non-placeholder items that follow the deleted ones.
+         */
+        OffsetNumber firstTrailingPlaceholder = InvalidOffsetNumber;
+
+        for (OffsetNumber off = maxoff; off >= FirstOffsetNumber; off = OffsetNumberPrev(off)) {
+            ItemId iid = PageGetItemId(page, off);
+            if (!ItemIdIsUsed(iid) || !ItemIdIsNormal(iid)) {
+                break;
+            }
+            uint16 len = ItemIdGetLength(iid);
+            if (len != VAR_BLOCK_PLACEHOLDER_SIZE) {
+                break;
+            }
+            VarBlockChunkHeader *hdr = (VarBlockChunkHeader *)PageGetItem(page, iid);
+            if (!VarBlockIsPlaceholder(hdr)) {
+                break;
+            }
+            firstTrailingPlaceholder = off;
+        }
+
+        if (firstTrailingPlaceholder == InvalidOffsetNumber) {
+            UnlockReleaseBuffer(buf);
+            continue;
+        }
+
+        /* Collect trailing placeholder offset numbers. */
+        int nDead = maxoff - firstTrailingPlaceholder + 1;
+        OffsetNumber *itemnos = (OffsetNumber *)palloc(sizeof(OffsetNumber) * nDead);
+        for (int i = 0; i < nDead; i++) {
+            itemnos[i] = firstTrailingPlaceholder + i;
+        }
+
+        /* Physically delete trailing placeholders (safe: no non-placeholder follows). */
+        GenericXLogState *state = GenericXLogStart(rel);
+        Page walPage = GenericXLogRegisterBuffer(state, buf, GENERIC_XLOG_FULL_IMAGE);
+        PageIndexMultiDelete(walPage, itemnos, nDead);
+        GenericXLogFinish(state);
+
+        pfree(itemnos);
+
+        /* Update FSM so the reclaimed space is visible for future allocations. */
+        VarBlockFsmUpdateIfMain(rel, MAIN_FORKNUM, buf, false);
+
+        UnlockReleaseBuffer(buf);
+    }
 }
