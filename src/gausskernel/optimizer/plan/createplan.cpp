@@ -161,6 +161,8 @@ static Plan* setPartitionParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
 static Plan* setBucketInfoParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
 #endif
 Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIterpath);
+static bool is_ann_partiterator_local_limit_safe(Node* limitCount);
+static bool need_ann_partiterator_local_limit(PlannerInfo* root, PartIteratorPath* pIterpath);
 
 static IndexScan* make_indexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
     List* indexqualorig, List* indexorderby, List* indexorderbyorig, Oid* indexorderbyops,
@@ -1348,6 +1350,7 @@ void disuse_physical_tlist(PlannerInfo *root, Plan* plan, Path* path)
             path = wipe_dummy_path(plan, path);
             PartIteratorPath* piPath = (PartIteratorPath*)path;
             Plan* subPlan = plan->lefttree;
+            Plan* scanPlan = IsA(subPlan, Limit) ? subPlan->lefttree : subPlan;
             switch (piPath->subPath->pathtype) {
                 case T_SeqScan:
                 case T_IndexScan:
@@ -1359,6 +1362,8 @@ void disuse_physical_tlist(PlannerInfo *root, Plan* plan, Path* path)
                     List* sub_parList = build_path_tlist(root, path);
                     if (sub_parList != NULL) {
                         subPlan->targetlist = sub_parList;
+                        if (scanPlan != subPlan)
+                            scanPlan->targetlist = sub_parList;
                         plan->targetlist = sub_parList;
                     }
                     break;
@@ -6905,6 +6910,61 @@ Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIter
     return plan;
 }
 
+static bool is_ann_partiterator_local_limit_safe(Node* limitCount)
+{
+    if (limitCount == NULL) {
+        return false;
+    }
+
+    if (IsA(limitCount, Const)) {
+        return true;
+    }
+
+    if (IsA(limitCount, Param)) {
+        Param* param = (Param*)limitCount;
+        return param->paramkind == PARAM_EXTERN || param->paramkind == PARAM_EXEC;
+    }
+
+    return false;
+}
+
+static bool need_ann_partiterator_local_limit(PlannerInfo* root, PartIteratorPath* pIterpath)
+{
+    Query* parse = NULL;
+
+    if (root == NULL || root->parse == NULL || pIterpath == NULL || pIterpath->subPath == NULL) {
+        return false;
+    }
+
+    parse = root->parse;
+    if (parse->limitCount == NULL || parse->limitOffset != NULL || parse->limitIsPercent || parse->limitWithTies) {
+        return false;
+    }
+
+    /*
+     * A copied non-Param expression would be evaluated independently by the
+     * global and per-partition Limit nodes.  Only copy values that are already
+     * fixed as a Const or read from a shared runtime Param slot.
+     */
+    if (!is_ann_partiterator_local_limit_safe(parse->limitCount)) {
+        return false;
+    }
+
+    if (parse->sortClause == NIL || pIterpath->subPath->pathkeys == NIL) {
+        return false;
+    }
+
+    if (pIterpath->subPath->pathtype != T_AnnIndexScan) {
+        return false;
+    }
+
+    /*
+     * A multi-partition iterator cannot preserve global ANN order. Keep the
+     * outer Sort/Limit, but cap each partition to local top-k candidates.
+     */
+    return pIterpath->itrs > 1;
+}
+
 static PartIterator* create_partIterator_plan(
     PlannerInfo* root, PartIteratorPath* pIterpath, GlobalPartIterator* gpIter)
 {
@@ -6918,6 +6978,7 @@ static PartIterator* create_partIterator_plan(
     }
     /* Construct PartIterator plan node */
     PartIterator* partItr = makeNode(PartIterator);
+    PartIterator* localLimitPartItr = partItr;
     partItr->direction = pIterpath->direction;
     partItr->itrs = pIterpath->itrs;
     partItr->partType = pIterpath->partType;
@@ -6970,11 +7031,24 @@ static PartIterator* create_partIterator_plan(
         Plan* plan = partItr->plan.lefttree;
         if (is_dummy_plan(plan)) {
             plan->lefttree = NULL;
+            localLimitPartItr = NULL;
         } else {
             partItr->plan.lefttree = partItr->plan.lefttree->lefttree;
             plan->lefttree = (Plan*)partItr;
+            localLimitPartItr = partItr;
         }
         partItr = (PartIterator*)plan;
+    }
+
+    if (need_ann_partiterator_local_limit(root, pIterpath) && localLimitPartItr != NULL) {
+        int64 offset_est = 0;
+        int64 count_est = 0;
+
+        estimate_limit_offset_count(root, &offset_est, &count_est);
+        localLimitPartItr->plan.lefttree =
+            (Plan*)make_limit(root, localLimitPartItr->plan.lefttree, NULL, (Node*)copyObject(root->parse->limitCount),
+                0, count_est, false);
+        localLimitPartItr->plan.targetlist = localLimitPartItr->plan.lefttree->targetlist;
     }
 
     return partItr;
