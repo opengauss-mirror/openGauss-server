@@ -170,7 +170,8 @@ else
     else
         declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON ${extra_cmake_opt}"
     fi
-    if [[ -e "/etc/openEuler-release" && "$(cat /etc/openEuler-release | awk '{print $3}')" == "22.03" ]]; then
+	os_version=$(cat /etc/os-release | grep 'VERSION_ID=' | cut -d'=' -f2 | tr -d '"')
+    if [[ -e "/etc/openEuler-release" && ("$os_version" == "22.03" || "$os_version" == "24.03") ]]; then
         CMAKE_OPT="$CMAKE_OPT -DENABLE_OPENEULER_MAJOR=ON"
     fi
 

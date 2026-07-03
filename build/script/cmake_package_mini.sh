@@ -484,7 +484,7 @@ function install_gaussdb()
     	export DEBUG_TYPE=debug
     fi
 
-    if [[ -e "/etc/openEuler-release" && "$(cat /etc/openEuler-release | awk '{print $3}')" == "22.03" ]]; then
+    if [[ -e "/etc/openEuler-release" && ("$os_version" == "22.03" || "$os_version" == "24.03") ]]; then
         CMAKE_OPT="$CMAKE_OPT -DENABLE_OPENEULER_MAJOR=ON"
     fi
 

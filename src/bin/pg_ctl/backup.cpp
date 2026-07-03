@@ -2758,7 +2758,7 @@ static int DeleteUnusedFile(const char* path, unsigned int SegNo, unsigned int f
     return 0;
 }
 
-bool RenameTblspcDir(char *dataDir)
+bool RenameTblspcDir(char *dataDir, char *pgxcSrc, char *pgxcDest)
 {
     char tblspcParentPath[MAXPGPATH] = {0};
     char tblspcCurPath[MAXPGPATH] = {0};
@@ -2770,9 +2770,10 @@ bool RenameTblspcDir(char *dataDir)
     errno_t rc = EOK;
     int ret = 0;
 
-    if (strcmp(remotenodename, pgxcnodename) == 0) {
+    if (strcmp(pgxcSrc, pgxcDest) == 0) {
         return true;
     }
+    pg_log(PG_WARNING, _("rename table space of pgxcnodename from %s to %s.\n"), pgxcSrc, pgxcDest);
     
     if (ss_instance_config.dss.enable_dss) {
         char *dssdir = ss_instance_config.dss.vgname;
@@ -2791,10 +2792,10 @@ bool RenameTblspcDir(char *dataDir)
         rc = snprintf_s(tblspcCurPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", tblspcParentPath, dirEnt->d_name);
         securec_check_ss_c(rc, "\0", "\0");
         rc = snprintf_s(tblspcSourceDir, MAXPGPATH, MAXPGPATH - 1, "%s/%s_%s",
-                        tblspcCurPath, TABLESPACE_VERSION_DIRECTORY, remotenodename);
+                        tblspcCurPath, TABLESPACE_VERSION_DIRECTORY, pgxcSrc);
         securec_check_ss_c(rc, "\0", "\0");
         rc = snprintf_s(tblspcTargetDir, MAXPGPATH, MAXPGPATH - 1, "%s/%s_%s",
-                        tblspcCurPath, TABLESPACE_VERSION_DIRECTORY, pgxcnodename);
+                        tblspcCurPath, TABLESPACE_VERSION_DIRECTORY, pgxcDest);
         securec_check_ss_c(rc, "\0", "\0");
 
         if (stat(tblspcSourceDir, &tblspcSourceStat) != 0) {
