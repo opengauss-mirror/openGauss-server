@@ -1,10 +1,14 @@
+DO $upgrade$
+BEGIN
+IF working_version_num() < 92987 then
+
 DECLARE
 cnt int;
 BEGIN
 select count(*) into cnt FROM pg_catalog.pg_am where amname = 'diskann';
 if cnt = 1 then
         DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_l2_ops USING diskann CASCADE;
-        DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_l2_ops USING diskann CASCADE; 
+        DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_l2_ops USING diskann CASCADE;
         DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_ip_ops USING diskann CASCADE;
         DROP OPERATOR CLASS IF EXISTS pg_catalog.vector_ip_ops USING diskann CASCADE;
         DROP OPERATOR FAMILY IF EXISTS pg_catalog.vector_cosine_ops USING diskann CASCADE;
@@ -27,3 +31,6 @@ DROP FUNCTION IF EXISTS pg_catalog.diskannrescan(internal, internal, internal, i
 DROP FUNCTION IF EXISTS pg_catalog.diskanngettuple(internal, internal) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.diskannendscan(internal) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.diskannhandler(internal) CASCADE;
+
+END IF;
+END $upgrade$;
