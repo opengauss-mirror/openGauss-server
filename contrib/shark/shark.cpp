@@ -191,7 +191,7 @@ static bool tryTsqlTargetAlias(ResTarget *res, ParseState* pstate, int exprKind)
     }
 
     alias = strVal(field);
-    res->name = pstrdup(alias);
+    res->name = alias;
     res->val = aexpr->rexpr;
     return true;
 }
