@@ -53,6 +53,7 @@ SELECT * FROM test_table_2;
 (1 row)
 
 drop table if exists test_table_3;
+NOTICE:  table "test_table_3" does not exist, skipping
 select id into test_table_3 from tab where name='a';
 select * from test_table_3;
  id 
@@ -61,6 +62,7 @@ select * from test_table_3;
 (1 row)
 
 drop table if exists test_table_4;
+NOTICE:  table "test_table_4" does not exist, skipping
 select id into table test_table_4 from tab where name='a';
 select * from test_table_4;
  id 
