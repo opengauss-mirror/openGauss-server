@@ -821,13 +821,15 @@ void InitUndoZoneLock()
                 if (uzone == NULL) {
                     continue;
                 }
-                if (!(uzone->GetLock())) {
+                if (!(uzone->GetLock()) || uzone->GetLock()->tranche != LWTRANCHE_UNDO_ZONE) {
                     uzone->InitLock();
                 }
-                if (!(uzone->GetUndoSpace()->GetLock())) {
+                if (!(uzone->GetUndoSpace()->GetLock()) ||
+                    uzone->GetUndoSpace()->GetLock()->tranche != LWTRANCHE_UNDO_SPACE) {
                     uzone->GetUndoSpace()->LockInit();
                 }
-                if (!(uzone->GetSlotSpace()->GetLock())) {
+                if (!(uzone->GetSlotSpace()->GetLock()) ||
+                    uzone->GetSlotSpace()->GetLock()->tranche != LWTRANCHE_UNDO_SPACE) {
                     uzone->GetSlotSpace()->LockInit();
                 }
             }

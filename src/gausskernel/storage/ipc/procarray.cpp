@@ -535,7 +535,8 @@ void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommi
          * anyone else's calculation of a snapshot.  We might change their
          * estimate of global xmin, but that's OK.
          */
-        Assert(!TransactionIdIsValid(pgxact->xid));
+        Assert(!TransactionIdIsValid(pgxact->xid) ||
+            (g_instance.attr.attr_storage.dcf_attr.enable_dcf && g_instance.demotion > NoDemote));
 
         pgxact->handle = InvalidTransactionHandle;
         proc->lxid = InvalidLocalTransactionId;
@@ -556,7 +557,8 @@ void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommi
         proc->commitCSN = 0;
         pgxact->needToSyncXid = 0;
 
-        Assert(pgxact->nxids == 0);
+        Assert(pgxact->nxids == 0 ||
+            (g_instance.attr.attr_storage.dcf_attr.enable_dcf && g_instance.demotion > NoDemote));
     }
 
     /*
