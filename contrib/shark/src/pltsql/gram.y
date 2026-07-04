@@ -11749,6 +11749,9 @@ read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, int firstto
         *strict = true;
 #endif
     tok = yylex();
+    if (tok == K_TABLE && firsttoken == K_SELECT) {
+        tok = yylex();
+    }
     if (tok == T_WORD) {
         return true;
     }

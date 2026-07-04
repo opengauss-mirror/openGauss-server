@@ -2176,8 +2176,19 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
          * possible non-uniqueness, and we add the index OID to the result
          * list if further checking is needed.
          */
-        if (!u_sess->attr.attr_common.unique_checks || !indexRelation->rd_index->indisunique) {
+        if (!indexRelation->rd_index->indisunique) {
             checkUnique = UNIQUE_CHECK_NO;
+        } else if (!u_sess->attr.attr_common.unique_checks) {
+            /*
+             * unique_checks is disabled. Only allow skipping uniqueness check
+             * if the current user is the table owner or a superuser. This prevents
+             * ordinary users from bypassing integrity constraints on tables they don't own.
+             */
+            if (pg_class_ownercheck(RelationGetRelid(heapRelation), GetUserId()) || superuser()) {
+                checkUnique = UNIQUE_CHECK_NO;
+            } else {
+                checkUnique = UNIQUE_CHECK_YES;
+            }
         } else if (conflict != NULL) {
             checkUnique = UNIQUE_CHECK_PARTIAL;
         } else if (indexRelation->rd_index->indimmediate) {

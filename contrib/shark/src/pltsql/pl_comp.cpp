@@ -513,8 +513,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
         checkCompileMemoryContext(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
         temp = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     }
-    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     pushCompileContext();
+    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     pltsql_scanner_init(proc_source);
     curr_compile->plpgsql_curr_compile = func;
     curr_compile->plpgsql_error_funcname = pstrdup(NameStr(proc_struct->proname));
@@ -1305,8 +1305,8 @@ PLpgSQL_function* pltsql_compile_inline(char* proc_source)
     if (u_sess->plsql_cxt.curr_compile_context != NULL) {
         temp = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     }
-    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     pushCompileContext();
+    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     /*
      * Setup the scanner input and error info.	We assume that this function
      * cannot be invoked recursively, so there's no need to save and restore

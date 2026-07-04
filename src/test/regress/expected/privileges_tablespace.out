@@ -1,0 +1,36 @@
+drop user if exists joe CASCADE;
+NOTICE:  role "joe" does not exist, skipping
+drop TABLESPACE if exists tpcds_tbspc;
+NOTICE:  Tablespace "tpcds_tbspc" does not exist, skipping.
+CREATE TABLESPACE tpcds_tbspc RELATIVE LOCATION 'tablespace/tablespace_1';
+CREATE USER joe password 'Test@123';
+GRANT CREATE ON TABLESPACE tpcds_tbspc TO joe;
+SELECT has_tablespace_privilege('joe','tpcds_tbspc', 'CREATE');
+ has_tablespace_privilege 
+--------------------------
+ t
+(1 row)
+
+REVOKE ALL PRIVILEGES ON TABLESPACE tpcds_tbspc FROM joe;
+SELECT has_tablespace_privilege('joe','tpcds_tbspc', 'CREATE');
+ has_tablespace_privilege 
+--------------------------
+ f
+(1 row)
+
+GRANT ALL PRIVILEGES ON TABLESPACE tpcds_tbspc TO joe;
+SELECT has_tablespace_privilege('joe','tpcds_tbspc', 'CREATE');
+ has_tablespace_privilege 
+--------------------------
+ t
+(1 row)
+
+REVOKE ALL PRIVILEGES ON TABLESPACE tpcds_tbspc FROM joe;
+SELECT has_tablespace_privilege('joe','tpcds_tbspc', 'CREATE');
+ has_tablespace_privilege 
+--------------------------
+ f
+(1 row)
+
+drop user if exists joe CASCADE;
+drop TABLESPACE if exists tpcds_tbspc;

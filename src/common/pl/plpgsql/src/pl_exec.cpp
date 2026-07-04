@@ -3914,6 +3914,10 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block,
     #ifndef ENABLE_MULTIPLE_NODES
                 AutoDopControl dopControl;
                 dopControl.CloseSmp();
+                if (u_sess->stream_cxt.global_obj == NULL && u_sess->instr_cxt.global_instr != NULL) {
+                    u_sess->instr_cxt.global_instr = NULL;
+                    u_sess->instr_cxt.thread_instr = NULL;
+                }
     #endif
                 rc = exec_exception_handler(estate, block, &excptContext, coverage);
 
@@ -11050,7 +11054,6 @@ static Datum formDatumFromArrayTarget(PLpgSQL_execstate* estate, const PLpgSQL_t
         exec_simple_cast_value(estate, value, *resultvaltype, elemtypoid,
             arraytypmod, *isNull);
 
-    arraytyplen = -1; /* need to adjust */
     if (arraytyplen > 0 && /* fixed-length array? */
         (oldarrayisnull || *isNull)) {
         *resultvaltype = parenttypoid;

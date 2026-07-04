@@ -586,6 +586,7 @@ tsql_subprogram_body:        {
 
                                 yyextra->core_yy_extra.in_slash_proc_body = false;
                                 yyextra->core_yy_extra.dolqstart = NULL;
+                                yyextra->core_yy_extra.is_createstmt = false;
 
                                 yyextra->core_yy_extra.query_string_locationlist =
                                         lappend_int(yyextra->core_yy_extra.query_string_locationlist, yylloc);

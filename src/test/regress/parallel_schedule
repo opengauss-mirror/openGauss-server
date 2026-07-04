@@ -483,6 +483,7 @@ test: select_into select_distinct select_distinct_on select_implicit select_havi
 test: privileges_oid_inherit privileges_sysadmin collate tablesample tablesample_1 tablesample_2 
 test: misc 
 test: privileges_opt
+test: privileges_tablespace
 
 # ----------
 # Another group of parallel tests
