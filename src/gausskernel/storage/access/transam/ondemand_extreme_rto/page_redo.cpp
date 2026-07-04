@@ -1844,6 +1844,29 @@ static void TrxnManagerPruneAndDistributeIfRealtimeBuildFailover()
     }
 }
 
+static bool TrxnManagerHandoffSyncRecordOnFailover(RedoItem *item)
+{
+    if (!SS_ONDEMAND_REALTIME_BUILD_FAILOVER || !g_redoWorker->inRealtimeBuild) {
+        return false;
+    }
+
+    XLogRecPtr ckptRedoPtr = pg_atomic_read_u64(&g_dispatcher->ckptRedoPtr);
+    if (!XLByteLT(ckptRedoPtr, item->record.EndRecPtr)) {
+        return false;
+    }
+
+    ereport(LOG,
+            (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+             errmsg("[SS][On-demand][Failover] hand off current sync xact xid %lu to transaction redo worker, "
+                    "checkpoint redo %X/%X is behind record end %X/%X",
+                    XLogRecGetXid(&item->record), LSN_FORMAT_ARGS(ckptRedoPtr),
+                    LSN_FORMAT_ARGS(item->record.EndRecPtr))));
+
+    TrxnManagerPruneAndDistributeIfRealtimeBuildFailover();
+    AddPageRedoItem(g_dispatcher->trxnLine.redoThd, item);
+    return true;
+}
+
 static void TrxnManagerPruneIfQueueFullInRealtimeBuild()
 {
     /*
@@ -1863,6 +1886,9 @@ static void TrxnManagerAddTrxnRecord(RedoItem *item, bool syncRecord)
             if (XactHasSegpageRelFiles(&item->record)) {
                 uint32 expected = 1;
                 pg_atomic_compare_exchange_u32((volatile uint32 *)&(g_dispatcher->segpageXactDoneFlag), &expected, 0);
+            }
+            if (TrxnManagerHandoffSyncRecordOnFailover(item)) {
+                return;
             }
             TrxnManagerProcHashMapPrune();
             DereferenceRedoItem(item);

@@ -853,6 +853,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                     buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
                     buf_ctrl->seg_fileno = EXTENT_INVALID;
                     buf_ctrl->seg_blockno = InvalidBlockNumber;
+                    buf_ctrl->lsn_on_disk = InvalidXLogRecPtr;
                     ret = DMS_SUCCESS;
                     break;
                 }
@@ -870,6 +871,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                     buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
                     buf_ctrl->seg_fileno = EXTENT_INVALID;
                     buf_ctrl->seg_blockno = InvalidBlockNumber;
+                    buf_ctrl->lsn_on_disk = InvalidXLogRecPtr;
                 }
 
                 UnlockBufHdr(buf_desc, buf_state);
@@ -908,6 +910,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                 buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
                 buf_ctrl->seg_fileno = EXTENT_INVALID;
                 buf_ctrl->seg_blockno = InvalidBlockNumber;
+                buf_ctrl->lsn_on_disk = InvalidXLogRecPtr;
                 ret = DMS_SUCCESS;
                 break;
             }
@@ -923,6 +926,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                 buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
                 buf_ctrl->seg_fileno = EXTENT_INVALID;
                 buf_ctrl->seg_blockno = InvalidBlockNumber;
+                buf_ctrl->lsn_on_disk = InvalidXLogRecPtr;
                 LWLockRelease(buf_desc->content_lock);
             }
 
