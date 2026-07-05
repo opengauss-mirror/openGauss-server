@@ -29,9 +29,8 @@ extern MemoryContext AdioSharedContext;
 #define adio_share_alloc(buf_size) MemoryContextAlloc(AdioSharedContext, (buf_size))
 #define adio_share_free(ptr) pfree((ptr))
 
-// /sys/block/sda/queue/logical_block_size
 #define SYS_LOGICAL_BLOCK_SIZE (512)
-#define adio_align_alloc(size) mem_align_alloc(SYS_LOGICAL_BLOCK_SIZE, size)
+#define adio_align_alloc(size) mem_align_alloc(g_instance.attr.attr_storage.adioBufferAlignSize, size)
 #define adio_align_free(ptr) mem_align_free(ptr)
 
 #endif /* _AIOMEM_H */

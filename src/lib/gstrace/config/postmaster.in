@@ -14,7 +14,7 @@
 <func> write_syslogger_file
 <func> AioCompltrMain
 <func> AioCompltrStop
-<func> AioCompltrStart
+<func> AioCmpltrStart
 <func> AioCompltrIsReady
 <func> CompltrContext
 <func> CompltrPriority

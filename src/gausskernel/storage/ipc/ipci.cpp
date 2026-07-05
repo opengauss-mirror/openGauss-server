@@ -493,6 +493,12 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         (void)MemoryContextSwitchTo(oldcontext);
     }
 
+    if (g_instance.pid_cxt.AioCompleterPID == NULL) {
+        MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
+        g_instance.pid_cxt.AioCompleterPID = (ThreadId*)palloc0(sizeof(ThreadId) * MAX_AIO_COMPLETER_THREAD_NUM);
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
     if (g_instance.pid_cxt.PgAuditPID == NULL) {
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.audit_cxt.global_audit_context);
         int thread_num = g_instance.attr.attr_security.audit_thread_num;

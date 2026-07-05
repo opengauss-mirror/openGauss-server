@@ -4191,20 +4191,8 @@ static int ServerLoop(void)
         ADIO_RUN()
         {
             if (!g_instance.pid_cxt.AioCompleterStarted && !dummyStandbyMode) {
-                int aioStartErr = 0;
-                if ((aioStartErr = AioCompltrStart()) == 0) {
-                    g_instance.pid_cxt.AioCompleterStarted = 1;
-                } else {
-                    ereport(LOG, (errmsg_internal("Cannot start AIO completer threads error=%d", aioStartErr)));
-                    /*
-                     * If we failed to fork a aio process, just shut down.
-                     * Any required cleanup will happen at next restart. We
-                     * set g_instance.fatal_error so that an "abnormal shutdown" message
-                     * gets logged when we exit.
-                     */
-                    g_instance.fatal_error = true;
-                    HandleChildCrash(g_instance.pid_cxt.AioCompleterStarted, 1, "AIO process");
-                }
+                AioCmpltrStart();
+                g_instance.pid_cxt.AioCompleterStarted = 1;
             }
         }
         ADIO_END();
@@ -13852,6 +13840,11 @@ static void SetAuxType()
         case BARRIER_PREPARSE:
             t_thrd.bootstrap_cxt.MyAuxProcType = BarrierPreParseBackendProcess;
             break;
+#ifndef ENABLE_LITE_MODE
+        case AIO_COMPLETER_THREAD:
+            t_thrd.bootstrap_cxt.MyAuxProcType = AsyncIOCompleterProcess;
+            break;
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
             t_thrd.bootstrap_cxt.MyAuxProcType = TsCompactionProcess;
@@ -14013,6 +14006,11 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
              * g_instance.shmem_cxt.MaxBackends + 1 as the base index of the slot for an
              * auxiliary process.
              */
+#ifndef ENABLE_LITE_MODE
+            if (thread_role == AIO_COMPLETER_THREAD) {
+                t_thrd.aio_cxt.compltrIdx = (int)(uintptr_t)arg->payload;
+            }
+#endif
             int index = GetAuxProcEntryIndex(g_instance.shmem_cxt.MaxBackends + 1);
 
             ProcSignalInit(index);
@@ -14151,6 +14149,12 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             BarrierPreParseMain();
             proc_exit(1);
             break;
+#ifndef ENABLE_LITE_MODE
+        case AIO_COMPLETER_THREAD:
+            AioCompltrMain((int)(uintptr_t)arg->payload);
+            proc_exit(1);
+            break;
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
             CompactionProcess::compaction_main();
@@ -14416,6 +14420,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case SHARE_STORAGE_XLOG_COPYER:
         case EXRTO_RECYCLER:
         case BARRIER_PREPARSE:
+#ifndef ENABLE_LITE_MODE
+        case AIO_COMPLETER_THREAD:
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
         case TS_COMPACTION:
         case TS_COMPACTION_CONSUMER:
@@ -14983,6 +14990,9 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<DMS_AUXILIARY_THREAD>, DMS_AUXILIARY_THREAD, "dms_auxiliary", "maintenance xmin in dms" },
     { GaussDbThreadMain<EXRTO_RECYCLER>, EXRTO_RECYCLER, "exrtorecycler", "exrto recycler" },
     { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
+#ifndef ENABLE_LITE_MODE
+    { GaussDbThreadMain<AIO_COMPLETER_THREAD>, AIO_COMPLETER_THREAD, "aio_completer", "aio completer" },
+#endif
     /* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES
     { GaussDbThreadMain<TS_COMPACTION>, TS_COMPACTION, "TScompaction",

@@ -321,7 +321,15 @@ static void _bt_segment_blwritepage(BTWriteState *wstate, Page page, BlockNumber
     PageSetLSN(BufferGetPage(buf), xlog_ptr);
     MarkBufferDirty(buf);
     UnlockReleaseBuffer(buf);
-    pfree(page);
+    ADIO_RUN()
+    {
+        adio_align_free(page);
+    }
+    ADIO_ELSE()
+    {
+        pfree(page);
+    }
+    ADIO_END();
     page = NULL;
 }
 

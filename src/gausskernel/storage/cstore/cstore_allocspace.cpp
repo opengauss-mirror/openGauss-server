@@ -149,24 +149,6 @@ uint32 CStoreAllocator::AcquireFileSpace(const CFileNode& cnode, uint64 extend_o
     uint32 extend_size = 0;
     CUStorage* cuStorage = New(CurrentMemoryContext) CUStorage(cnode);
 
-    ADIO_RUN()
-    {
-        if (u_sess->attr.attr_sql.enable_fast_allocate) {
-            extend_size = CStoreAllocator::CalcExtendSize(cu_offset, (uint32)cu_size, extend_offset);
-            if (extend_size != 0) {
-                cuStorage->FastExtendFile(extend_offset, extend_size, true);
-            }
-            cuStorage->FastExtendFile(cu_offset, cu_size, false);
-        } else {
-            char* buffer = (char*)adio_align_alloc(cu_size);
-            errno_t rc = memset_s(buffer, cu_size, 0, cu_size);
-            securec_check(rc, "\0", "\0");
-            cuStorage->SaveCU(buffer, cu_offset, cu_size, true);
-            adio_align_free(buffer);
-            extend_size = cu_size;
-        }
-    }
-    ADIO_ELSE()
     {
         char* buffer = (char*)palloc0(cu_size);
         cuStorage->SaveCU(buffer, cu_offset, cu_size, false, true);
@@ -174,7 +156,6 @@ uint32 CStoreAllocator::AcquireFileSpace(const CFileNode& cnode, uint64 extend_o
         buffer = NULL;
         extend_size = cu_size;
     }
-    ADIO_END();
 
     DELETE_EX(cuStorage);
 

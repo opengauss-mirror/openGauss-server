@@ -1646,20 +1646,33 @@ PLpgSQL_package* plpgsql_package_validator(Oid packageOid, bool isSpec, bool isC
     PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
     int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
     int save_compile_status = u_sess->plsql_cxt.compile_status;
+
+    MemoryContext oldcxt = CurrentMemoryContext;
     /* Postpone body checks if !u_sess->attr.attr_sql.check_function_bodies */
     PG_TRY();
     {
         pkg = plpgsql_pkg_compile(packageOid, true, isSpec, isCreate);
         u_sess->misc_cxt.Pseudo_CurrentUserId = savedPseudoCurrentUserId;
+        MemoryContextSwitchTo(oldcxt);
     }
     PG_CATCH();
     {
+        MemoryContextSwitchTo(oldcxt);
 #ifndef ENABLE_MULTIPLE_NODES
         if (isCreate) {
             SPI_STACK_LOG("finish", NULL, NULL);
             SPI_finish();
+            MemoryContextSwitchTo(oldcxt);
+            ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
             if (!IsInitdb) {
-                PkgInsertGsSource(packageOid, isSpec, false);
+                if (edata->sqlerrcode != ERRCODE_LOCK_WAIT_TIMEOUT) {
+                    PkgInsertGsSource(packageOid, isSpec, false);
+                } else {
+                    ereport(WARNING,
+                        (errcode(ERRCODE_LOCK_WAIT_TIMEOUT),
+                            errmsg("gs_source insert fail, it can not hold lock"),
+                            errdetail("Lock wait timeout.")));
+                }
             }
         }
 #endif
@@ -1676,6 +1689,7 @@ PLpgSQL_package* plpgsql_package_validator(Oid packageOid, bool isSpec, bool isC
         u_sess->plsql_cxt.package_as_line = 0;   
         u_sess->parser_cxt.in_package_function_compile = false;
         u_sess->misc_cxt.Pseudo_CurrentUserId = savedPseudoCurrentUserId;
+        MemoryContextSwitchTo(oldcxt);
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -1684,6 +1698,7 @@ PLpgSQL_package* plpgsql_package_validator(Oid packageOid, bool isSpec, bool isC
         PkgInsertGsSource(packageOid, isSpec, true);
     }
 #endif
+    MemoryContextSwitchTo(oldcxt);
     u_sess->plsql_cxt.errorList = NULL;
     u_sess->plsql_cxt.procedure_first_line = 0;
     u_sess->plsql_cxt.procedure_start_line = 0;
@@ -1777,8 +1792,8 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate, bool isSpec, bool isNeedCo
         u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt != NULL) {
         temp = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     }
-    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     pushCompileContext();
+    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     curr_compile->plpgsql_curr_compile_package = pkg;
     checkCompileMemoryContext(pkg->pkg_cxt);
     MemoryContext oldcxt = MemoryContextSwitchTo(pkg->pkg_cxt);

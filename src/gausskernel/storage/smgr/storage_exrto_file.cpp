@@ -159,11 +159,6 @@ static ExRTOFileState *exrto_open_file(SMgrRelation reln, ForkNumber forknum, Bl
     if (behavior == EXTENSION_CREATE) {
         flags |= O_CREAT;
     }
-    ADIO_RUN() {
-        flags |= O_DIRECT;
-    }
-    ADIO_END();
-
     exrto_get_file_path(reln->smgr_rnode.node, forknum, segno, file_path);
     filenode = exrto_file_relfilenode_forknum_fill(reln->smgr_rnode, forknum, segno);
     fd = DataFileIdOpenFile(file_path, filenode, (int)flags, S_IRUSR | S_IWUSR);

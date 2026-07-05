@@ -1,0 +1,14 @@
+drop user if exists joe CASCADE;
+drop TABLESPACE if exists tpcds_tbspc;
+CREATE TABLESPACE tpcds_tbspc RELATIVE LOCATION 'tablespace/tablespace_1';
+CREATE USER joe password 'Test@123';
+GRANT CREATE ON TABLESPACE tpcds_tbspc TO joe;
+SELECT has_tablespace_privilege('joe','tpcds_tbspc', 'CREATE');
+REVOKE ALL PRIVILEGES ON TABLESPACE tpcds_tbspc FROM joe;
+SELECT has_tablespace_privilege('joe','tpcds_tbspc', 'CREATE');
+GRANT ALL PRIVILEGES ON TABLESPACE tpcds_tbspc TO joe;
+SELECT has_tablespace_privilege('joe','tpcds_tbspc', 'CREATE');
+REVOKE ALL PRIVILEGES ON TABLESPACE tpcds_tbspc FROM joe;
+SELECT has_tablespace_privilege('joe','tpcds_tbspc', 'CREATE');
+drop user if exists joe CASCADE;
+drop TABLESPACE if exists tpcds_tbspc;

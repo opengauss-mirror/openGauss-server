@@ -160,22 +160,12 @@ CStoreInsert::CStoreInsert(_in_ Relation relation, _in_ const InsertArg& args, _
                                               ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE,
                                               STANDARD_CONTEXT, m_cstorInsertMem->MemInsert * 1024L);
 
-    ADIO_RUN()
-    {
-        m_aio_memcnxt = AllocSetContextCreate(CurrentMemoryContext, "ADIO CU CACHE CNXT", ALLOCSET_DEFAULT_MINSIZE,
-                                              ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-        /* the other ADIO vars will be initialized later */
-    }
-    ADIO_ELSE()
-    {
-        m_aio_memcnxt = NULL;
-        m_aio_cu_PPtr = NULL;
-        m_aio_dispath_cudesc = NULL;
-        m_aio_dispath_idx = NULL;
-        m_aio_cache_write_threshold = NULL;
-        m_vfdList = NULL;
-    }
-    ADIO_END();
+    m_aio_memcnxt = NULL;
+    m_aio_cu_PPtr = NULL;
+    m_aio_dispath_cudesc = NULL;
+    m_aio_dispath_idx = NULL;
+    m_aio_cache_write_threshold = NULL;
+    m_vfdList = NULL;
 
     AutoContextSwitch autoMemContext(m_batchInsertCnxt);
 
@@ -376,13 +366,6 @@ void CStoreInsert::Destroy()
     }
 #endif
 
-    ADIO_RUN()
-    {
-        FreeMemAllocateByAdio();
-        MemoryContextDelete(m_aio_memcnxt);
-    }
-    ADIO_END();
-
     /* Step 3: Destroy memory context */
     MemoryContextDelete(m_tmpMemCnxt);
     MemoryContextDelete(m_batchInsertCnxt);
@@ -564,27 +547,6 @@ void CStoreInsert::BeginBatchInsert(const InsertArg& args)
      * So insert acquire relfilenode lock to block catchup.
      */
     LockRelFileNode(m_relation->rd_node, RowExclusiveLock);
-
-    ADIO_RUN()
-    {
-        m_aio_dispath_idx = (int*)palloc0(sizeof(int) * m_relation->rd_att->natts);
-        m_aio_dispath_cudesc =
-            (AioDispatchCUDesc_t***)palloc(sizeof(AioDispatchCUDesc_t**) * m_relation->rd_att->natts);
-        m_aio_cu_PPtr = (CU***)palloc(sizeof(CU**) * m_relation->rd_att->natts);
-        m_aio_cache_write_threshold = (int32*)palloc0(sizeof(int32) * m_relation->rd_att->natts);
-
-        m_vfdList = (File**)palloc(sizeof(File*) * m_relation->rd_att->natts);
-
-        for (int col = 0; col < m_relation->rd_att->natts; ++col) {
-            m_aio_cu_PPtr[col] = (CU**)palloc(sizeof(CU*) * MAX_CU_WRITE_REQSIZ);
-            m_aio_dispath_cudesc[col] =
-                (AioDispatchCUDesc_t**)palloc(sizeof(AioDispatchCUDesc_t*) * MAX_CU_WRITE_REQSIZ);
-            m_vfdList[col] = (File*)palloc(sizeof(File) * MAX_CU_WRITE_REQSIZ);
-            errno_t rc = memset_s((char*)m_vfdList[col], sizeof(File) * MAX_CU_WRITE_REQSIZ, 0xFF, sizeof(File) * MAX_CU_WRITE_REQSIZ);
-            securec_check(rc, "\0", "\0");
-        }
-    }
-    ADIO_END();
 }
 
 void CStoreInsert::InitDeltaInfo()
@@ -728,16 +690,8 @@ void CStoreInsert::EndBatchInsert()
 {
     int attNo = m_relation->rd_att->natts;
 
-    ADIO_RUN()
-    {
-        CUListFlushAll(attNo);
-    }
-    ADIO_ELSE()
-    {
-        for (int i = 0; i < attNo && m_cuStorage[i] != NULL; ++i)
-            m_cuStorage[i]->FlushDataFile();
-    }
-    ADIO_END();
+    for (int i = 0; i < attNo && m_cuStorage[i] != NULL; ++i)
+        m_cuStorage[i]->FlushDataFile();
 }
 
 void CStoreInsert::DoBatchInsert(int options)
@@ -1083,6 +1037,7 @@ void CStoreInsert::CUListFlushAll(int attno)
  */
 void CStoreInsert::CUWrite(int attno, int col)
 {
+    return;
 #ifndef ENABLE_LITE_MODE
     CU* cu = m_cuPPtr[col];
     CUDesc* cuDesc = m_cuDescPPtr[col];
@@ -1163,7 +1118,7 @@ void CStoreInsert::CUWrite(int attno, int col)
     aioDescp->cuDesc.slotId = cuDesc->cu_id;
     aioDescp->cuDesc.cu_pointer = cuDesc->cu_pointer;
     aioDescp->cuDesc.io_finish = false;
-    aioDescp->cuDesc.reqType = CUListWriteType;
+    aioDescp->cuDesc.reqType = CU_LIST_WRITE_TYPE;
     aioDescp->aiocb.aio_reqprio = CompltrPriority(aioDescp->cuDesc.reqType);
 
     dList[count] = aioDescp;
@@ -1367,12 +1322,16 @@ void CStoreInsert::SaveAll(int options, _in_ const char* delBitmap)
     /* step 4: unlock extension locker */
     UnlockRelationForExtension(m_relation, ExclusiveLock);
 
-    /* Step 5: Write CU into storage */
-    ADIO_RUN()
-    {
-        CUListWrite();
-    }
-    ADIO_ELSE()
+    /*
+     * Step 5: Write CU into storage.
+     * The asynchronous CU write path (CUListWrite -> CUWrite) was stubbed to a
+     * no-op in this ADIO backport ("return;" at the top of CUWrite). Taking it
+     * when enable_adio_function=on therefore left column-store CUs entirely
+     * unwritten, producing "CU verification failed ... calculated checksum X
+     * but expected 0" data corruption on read. Always use the synchronous
+     * write path below so CUs (and their checksums) are persisted regardless of
+     * enable_adio_function.
+     */
     {
         for (col = 0; col < attno; ++col) {
             if (m_relation->rd_att->attrs[col].attisdropped) {
@@ -1407,7 +1366,6 @@ void CStoreInsert::SaveAll(int options, _in_ const char* delBitmap)
                 DELETE_EX(m_cuPPtr[col]);
         }
     }
-    ADIO_END();
 
     /* step 6: Insert CUDesc of virtual column */
     CStore::SaveVCCUDesc(m_relation->rd_rel->relcudescrelid, m_cuDescPPtr[firstColIdx]->cu_id,
@@ -1433,16 +1391,7 @@ CU* CStoreInsert::FormCU(int col, bulkload_rows* batchRowPtr, CUDesc* cuDescPtr)
     int attlen = attrs[col].attlen;
     CU* cuPtr = NULL;
 
-    ADIO_RUN()
-    {
-        /* cuPtr need keep untill async write finish */
-        cuPtr = New(m_aio_memcnxt) CU(attlen, attrs[col].atttypmod, attrs[col].atttypid);
-    }
-    ADIO_ELSE()
-    {
-        cuPtr = New(CurrentMemoryContext) CU(attlen, attrs[col].atttypmod, attrs[col].atttypid);
-    }
-    ADIO_END();
+    cuPtr = New(CurrentMemoryContext) CU(attlen, attrs[col].atttypmod, attrs[col].atttypid);
 
     cuDescPtr->Reset();
 
@@ -2762,15 +2711,7 @@ PartitionValueCache::PartitionValueCache(Relation rel)
     m_fd = OpenTemporaryFile(false);
     m_rel = rel;
 
-    ADIO_RUN()
-    {
-        m_buffer = (char*)CStoreMemAlloc::Palloc(PartitionValueCache::MAX_BUFFER_SIZE);
-    }
-    ADIO_ELSE()
-    {
-        m_buffer = (char*)palloc(PartitionValueCache::MAX_BUFFER_SIZE);
-    }
-    ADIO_END();
+    m_buffer = (char*)palloc(PartitionValueCache::MAX_BUFFER_SIZE);
 
     Reset();
     Assert(m_fd > 0);
@@ -2787,17 +2728,8 @@ void PartitionValueCache::Destroy()
     if (m_fd > 0)
         FileClose(m_fd);
 
-    ADIO_RUN()
-    {
-        CStoreMemAlloc::Pfree(m_buffer);
-        m_buffer = NULL;
-    }
-    ADIO_ELSE()
-    {
-        pfree(m_buffer);
-        m_buffer = NULL;
-    }
-    ADIO_END();
+    pfree(m_buffer);
+    m_buffer = NULL;
 }
 
 Size PartitionValueCache::WriteRow(Datum* values, const bool* nulls)

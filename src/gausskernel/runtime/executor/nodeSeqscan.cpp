@@ -414,9 +414,9 @@ static TupleTableSlot* ExecSeqScan(PlanState* state)
 void SeqScan_Pref_Quantity(TableScanDesc scan, SeqScanAccessor* p_accessor, Relation relation)
 {
     int threshold = (g_instance.attr.attr_storage.NBuffers / 4);
-    int prefetch_trigger = u_sess->attr.attr_storage.prefetch_quantity;
+    int prefetchTrigger = u_sess->attr.attr_storage.adioPrefetchQuantity;
 
-    p_accessor->sa_prefetch_quantity = (uint32)rtl::min(threshold, prefetch_trigger);
+    p_accessor->sa_prefetch_quantity = (uint32)rtl::min(threshold, prefetchTrigger);
     p_accessor->sa_prefetch_trigger = p_accessor->sa_prefetch_quantity;
 
     if (scan == NULL) {

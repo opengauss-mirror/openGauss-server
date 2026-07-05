@@ -173,6 +173,26 @@ static void check_proc_args_type_match(FunctionCallInfo fcinfo, HeapTuple proc_t
     }
 }
 
+static PLpgSQL_compile_context* GetCompileContextByPkgOid(Oid pkgOid)
+{
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid == pkgOid) {
+        return u_sess->plsql_cxt.curr_compile_context;
+    }
+
+    ListCell* lc = NULL;
+    foreach (lc, u_sess->plsql_cxt.compile_context_list) {
+        PLpgSQL_compile_context* compile_cxt = (PLpgSQL_compile_context*)lfirst(lc);
+        if (compile_cxt->plpgsql_curr_compile_package != NULL &&
+            compile_cxt->plpgsql_curr_compile_package->pkg_oid == pkgOid) {
+            return compile_cxt;
+        }
+    }
+
+    return NULL;
+}
+
 PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator, bool isRecompile)
 {
     Oid func_oid = fcinfo->flinfo->fn_oid;
@@ -291,8 +311,10 @@ recheck:
         }
     } else {
         if (OidIsValid(packageOid) && (u_sess->plsql_cxt.curr_compile_context == NULL ||
-            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL)) {
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL ||
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid != packageOid)) {
             PLpgSQL_package* pkg = PackageInstantiation(packageOid);
+            PLpgSQL_compile_context* package_compile_context = GetCompileContextByPkgOid(packageOid);
             ListCell* l = NULL;
             if (pkg == NULL) {
                 ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), 
@@ -304,6 +326,34 @@ recheck:
                     ReleaseSysCache(proc_tup);
                     return func;
                 }
+            }
+            if (package_compile_context != NULL) {
+                PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
+                int save_compile_status = getCompileStatus();
+                PG_TRY();
+                {
+                    if (!hashkey_valid) {
+                        compute_function_hashkey(proc_tup, fcinfo, proc_struct, &hashkey, for_validator);
+                        hashkey_valid = true;
+                    }
+                    u_sess->plsql_cxt.curr_compile_context = package_compile_context;
+                    (void)CompileStatusSwtichTo(COMPILIE_PKG_FUNC);
+                    func = do_compile(fcinfo, proc_tup, func, &hashkey, for_validator);
+                    u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+                    (void)CompileStatusSwtichTo(save_compile_status);
+                    ReleaseSysCache(proc_tup);
+                    fcinfo->flinfo->fn_extra = (void*)func;
+                    restoreCallFromPkgOid(old_value);
+                    return func;
+                }
+                PG_CATCH();
+                {
+                    popToOldCompileContext(package_compile_context);
+                    u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+                    (void)CompileStatusSwtichTo(save_compile_status);
+                    PG_RE_THROW();
+                }
+                PG_END_TRY();
             }
             ereport(NOTICE, (errcode(ERRCODE_UNDEFINED_FUNCTION), 
                 errmsg("not found function %u in package", fcinfo->flinfo->fn_oid)));
@@ -606,24 +656,21 @@ void pushCompileContext()
 PLpgSQL_compile_context* popCompileContext()
 {
     if (u_sess->plsql_cxt.compile_context_list != NIL) {
+        PLpgSQL_compile_context* previous = (PLpgSQL_compile_context*)linitial(u_sess->plsql_cxt.compile_context_list);
         u_sess->plsql_cxt.compile_context_list = list_delete_first(u_sess->plsql_cxt.compile_context_list);
-        if (list_length(u_sess->plsql_cxt.compile_context_list) == 0) {
-            u_sess->plsql_cxt.compile_context_list = NIL;
-            return NULL;
-        }
-        return (PLpgSQL_compile_context*)linitial(u_sess->plsql_cxt.compile_context_list);
+        return previous;
     }
     return NULL;
 }
 
 void popToOldCompileContext(PLpgSQL_compile_context* save)
 {
-    while (u_sess->plsql_cxt.compile_context_list != NIL) {
-        PLpgSQL_compile_context* curr = (PLpgSQL_compile_context*)linitial(u_sess->plsql_cxt.compile_context_list);
-        if (save == curr) {
+    while (u_sess->plsql_cxt.curr_compile_context != save) {
+        PLpgSQL_compile_context* previous = popCompileContext();
+        if (previous == NULL) {
             break;
         }
-        popCompileContext();
+        u_sess->plsql_cxt.curr_compile_context = previous;
     }
     u_sess->plsql_cxt.curr_compile_context = save;
 }
@@ -841,8 +888,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
         checkCompileMemoryContext(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
         temp = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     }
-    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     pushCompileContext();
+    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     plpgsql_scanner_init(proc_source);
     curr_compile->plpgsql_curr_compile = func;
     curr_compile->plpgsql_error_funcname = pstrdup(NameStr(proc_struct->proname));
@@ -1633,8 +1680,8 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
     if (u_sess->plsql_cxt.curr_compile_context != NULL) {
         temp = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     }
-    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     pushCompileContext();
+    u_sess->plsql_cxt.curr_compile_context = curr_compile;
     /*
      * Setup the scanner input and error info.	We assume that this function
      * cannot be invoked recursively, so there's no need to save and restore

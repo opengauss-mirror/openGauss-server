@@ -68,3 +68,52 @@ ANALYZE vaccluster(i,i);
 
 DROP TABLE vaccluster;
 DROP TABLE vactst;
+
+CREATE TABLE vacuum_truncate_test(i INT NOT NULL, j text)
+    WITH (vacuum_truncate=false,
+    toast.vacuum_truncate=false,
+    autovacuum_enabled=false);
+SELECT reloptions FROM pg_class WHERE oid = 'vacuum_truncate_test'::regclass;
+INSERT INTO vacuum_truncate_test VALUES (1, NULL), (NULL, NULL);
+VACUUM (FREEZE) vacuum_truncate_test;
+SELECT pg_relation_size('vacuum_truncate_test') > 0;
+
+SELECT reloptions FROM pg_class WHERE oid =
+    (SELECT reltoastrelid FROM pg_class
+    WHERE oid = 'vacuum_truncate_test'::regclass);
+
+ALTER TABLE vacuum_truncate_test RESET (vacuum_truncate);
+SELECT reloptions FROM pg_class WHERE oid = 'vacuum_truncate_test'::regclass;
+INSERT INTO vacuum_truncate_test VALUES (1, NULL), (NULL, NULL);
+VACUUM (FREEZE) vacuum_truncate_test;
+SELECT pg_relation_size('vacuum_truncate_test') = 0;
+
+INSERT INTO vacuum_truncate_test VALUES (1, NULL), (NULL, NULL);
+SET vacuum_truncate = false;
+VACUUM (FREEZE) vacuum_truncate_test;
+SELECT pg_relation_size('vacuum_truncate_test') > 0;
+RESET vacuum_truncate;
+VACUUM (FREEZE) vacuum_truncate_test;
+SELECT pg_relation_size('vacuum_truncate_test') = 0;
+
+ALTER TABLE vacuum_truncate_test SET (vacuum_truncate=true);
+INSERT INTO vacuum_truncate_test VALUES (1, NULL), (NULL, NULL);
+SET vacuum_truncate = false;
+VACUUM (FREEZE) vacuum_truncate_test;
+SELECT pg_relation_size('vacuum_truncate_test') = 0;
+
+CREATE TABLE vacuum_truncate_not_support_type(a int) WITH (vacuum_truncate=true, orientation=column);
+CREATE TABLE vacuum_truncate_not_support_type(a int) WITH (vacuum_truncate=true, storage_type=ustore);
+CREATE TABLE vacuum_truncate_not_support_type(a int) WITH (vacuum_truncate=true, segment=on);
+
+CREATE TABLE vacuum_truncate_col(a int) WITH (orientation=column);
+CREATE TABLE vacuum_truncate_ustore(a int) WITH (storage_type=ustore);
+CREATE TABLE vacuum_truncate_seg(a int) WITH (segment=on);
+ALTER TABLE vacuum_truncate_col SET (vacuum_truncate=true);
+ALTER TABLE vacuum_truncate_ustore SET (vacuum_truncate=true);
+ALTER TABLE vacuum_truncate_seg SET (vacuum_truncate=true);
+
+drop table vacuum_truncate_col;
+drop table vacuum_truncate_ustore;
+drop table vacuum_truncate_seg;
+drop table vacuum_truncate_test;

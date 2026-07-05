@@ -14017,7 +14017,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         }
 
         if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
-            appendPQExpBuffer(headWithoutDefault, "CREATE DEFINER = \"%s\" %s %s ", definer, funcKind, funcsig);
+            appendPQExpBuffer(headWithoutDefault, "CREATE DEFINER = %s %s %s ", fmtBUserHostId(definer), funcKind, funcsig);
         } else {
             appendPQExpBuffer(headWithoutDefault, "CREATE %s %s ", funcKind, funcsig);
         }
@@ -14029,7 +14029,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
 
     if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
         if (isNullSelfloop)
-            appendPQExpBuffer(headWithDefault, "CREATE DEFINER = \"%s\" %s %s ", definer, funcKind, funcfullsig);
+            appendPQExpBuffer(headWithDefault, "CREATE DEFINER = %s %s %s ", fmtBUserHostId(definer), funcKind, funcfullsig);
         else
             appendPQExpBuffer(headWithDefault, "CREATE OR REPLACE %s %s ", funcKind, funcfullsig);
         PQclear(defres);
@@ -20319,9 +20319,23 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
 
                 if (has_default) {
                     char *default_value = tbinfo->attrdefs[j]->adef_expr;
+                    char *stripped_default = NULL;
                     char *onUpdate_value = NULL;
                     ArchiveHandle* AH = (ArchiveHandle*)fout;
                     bool hasOnUpdateFeature = is_column_exists(AH->connection, AttrDefaultRelationId, "adbin_on_update");
+
+                    /* If column-level COLLATE was already emitted, strip trailing COLLATE from default expr */
+                    if (OidIsValid(tbinfo->attcollation[j]) && findCollationByOid(tbinfo->attcollation[j]) != NULL) {
+                        char *collate_pos = strstr(default_value, " COLLATE ");
+                        if (collate_pos != NULL) {
+                            size_t prefix_len = (size_t)(collate_pos - default_value);
+                            stripped_default = (char *)pg_malloc(prefix_len + 1);
+                            errno_t rc = strncpy_s(stripped_default, prefix_len + 1, default_value, prefix_len);
+                            securec_check_c(rc, "\0", "\0");
+                            stripped_default[prefix_len] = '\0';
+                            default_value = stripped_default;
+                        }
+                    }
                     if (hasOnUpdateFeature) {
                         onUpdate_value = tbinfo->attrdefs[j]->adupd_expr;
                     }
@@ -20391,6 +20405,10 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                         libpq_free(default_value);
                     }
 #endif
+                    if (stripped_default != NULL) {
+                        free(stripped_default);
+                        stripped_default = NULL;
+                    }
                 }
                 if (has_notnull)
                     appendPQExpBuffer(q, " NOT NULL");
@@ -22376,6 +22394,47 @@ static void dumpSequenceData(Archive* fout, TableDataInfo* tdinfo, bool large)
     destroyPQExpBuffer(query);
 }
 
+static void appendBTriggerDef(PQExpBuffer query, const char* tgdef)
+{
+    const char* prefix = "CREATE DEFINER = ";
+    size_t prefixLen = strlen(prefix);
+    const char* nameStart = NULL;
+    const char* nameEnd = NULL;
+    const char* at = NULL;
+    PQExpBuffer name = NULL;
+    const char* quoted = NULL;
+
+    if (gdatcompatibility == NULL || strcmp(gdatcompatibility, B_FORMAT) != 0 ||
+        tgdef == NULL || strncmp(tgdef, prefix, prefixLen) != 0) {
+        appendPQExpBufferStr(query, tgdef);
+        return;
+    }
+
+    nameStart = tgdef + prefixLen;
+    nameEnd = strchr(nameStart, ' ');
+    if (nameEnd == NULL || nameEnd == nameStart) {
+        appendPQExpBufferStr(query, tgdef);
+        return;
+    }
+
+    at = (const char*)memchr(nameStart, '@', nameEnd - nameStart);
+    if (at == NULL || at == nameStart || at == nameEnd - 1 ||
+        memchr(at + 1, '@', nameEnd - (at + 1)) != NULL) {
+        appendPQExpBufferStr(query, tgdef);
+        return;
+    }
+
+    name = createPQExpBuffer();
+    appendBinaryPQExpBuffer(name, nameStart, nameEnd - nameStart);
+    quoted = fmtBUserHostId(name->data);
+
+    appendBinaryPQExpBuffer(query, tgdef, nameStart - tgdef);
+    appendPQExpBufferStr(query, quoted);
+    appendPQExpBufferStr(query, nameEnd);
+
+    destroyPQExpBuffer(name);
+}
+
 static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
 {
     TableInfo* tbinfo = tginfo->tgtable;
@@ -22407,7 +22466,7 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
             appendPQExpBuffer(query, "DROP FUNCTION %s ;\n", tginfo->tgfname);
             if (tginfo->tgbodybstyle && IsPlainFormat())
                 appendPQExpBuffer(query, "delimiter //\n");
-            appendPQExpBuffer(query, "%s", tginfo->tgdef);
+            appendBTriggerDef(query, tginfo->tgdef);
             if (IsPlainFormat()) {
                 if (tginfo->tgbodybstyle)
                     appendPQExpBuffer(query, "\n//\n");
@@ -22417,7 +22476,8 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
                 appendPQExpBuffer(query, ";\n");
             }
         } else {
-            appendPQExpBuffer(query, "%s;\n", tginfo->tgdef);
+            appendBTriggerDef(query, tginfo->tgdef);
+            appendPQExpBufferStr(query, ";\n");
         }
         if (tginfo->tgbodybstyle && IsPlainFormat())
             appendPQExpBuffer(query, "delimiter ;\n");

@@ -1240,17 +1240,11 @@ void BitmapHeapPrefetchNextAsync(BitmapHeapScanState* node, TableScanDesc scan, 
 {
     BlockNumber* blockList = NULL;
     BlockNumber* blockListPtr = NULL;
-    PrefetchNode* prefetchNode = NULL;
-    PrefetchNode* prefetchNodePtr = NULL;
     int prefetchNow = 0;
     int prefetchWindow = node->prefetch_target - node->prefetch_pages;
 
     /* We expect to prefetch at most prefetchWindow pages */
     if (prefetchWindow > 0) {
-        if (tbm_is_global(tbm) || tbm_is_crossbucket(tbm)) {
-            prefetchNode = (PrefetchNode*)malloc(sizeof(PrefetchNode) * prefetchWindow);
-            prefetchNodePtr = prefetchNode;
-        }
         blockList = (BlockNumber*)palloc(sizeof(BlockNumber) * prefetchWindow);
         blockListPtr = blockList;
     }
@@ -1264,13 +1258,6 @@ void BitmapHeapPrefetchNextAsync(BitmapHeapScanState* node, TableScanDesc scan, 
             break;
         }
         node->prefetch_pages++;
-        /* we use PrefetchNode here to store relations between blockno and partition Oid */
-        if ((tbm_is_global(tbm) || tbm_is_crossbucket(tbm)) && prefetchNodePtr != NULL) {
-            prefetchNodePtr->blockNum = tbmpre->blockno;
-            prefetchNodePtr->partOid = tbmpre->partitionOid;
-            prefetchNodePtr->bktId = tbmpre->bucketid;
-            prefetchNodePtr++;
-        }
         /* For Async Direct I/O we accumulate a list and send it */
         if (blockListPtr != NULL) {
             *blockListPtr++ = tbmpre->blockno;
@@ -1280,17 +1267,10 @@ void BitmapHeapPrefetchNextAsync(BitmapHeapScanState* node, TableScanDesc scan, 
 
     /* Send the list we generated and free it */
     if (prefetchNow && blockList != NULL) {
-        if (tbm_is_global(tbm) || tbm_is_crossbucket(tbm)) {
-            BitmapHeapPrefetchWithCrossLevelIndex(node, prefetchNow, prefetchNode, blockList);
-        } else {
-            PageListPrefetch(scan->rs_rd, MAIN_FORKNUM, blockList, prefetchNow, 0, 0);
-        }
+        PageListPrefetch(scan->rs_rd, MAIN_FORKNUM, blockList, prefetchNow, 0, 0);
     }
     if (prefetchWindow > 0) {
         pfree_ext(blockList);
-        if (tbm_is_global(tbm) || tbm_is_crossbucket(tbm)) {
-            pfree_ext(prefetchNode);
-        }
     }
 }
 
@@ -1310,14 +1290,10 @@ void BitmapHeapPrefetchNext(
 
     Assert(node->tbm == tbm);
 
-    ADIO_RUN()
+    /* ADIO: skip async prefetch for bitmap heap scan to avoid
+     * cross-partition issues; use sync PrefetchBuffer path instead */
+
     {
-        /* prefetch next asynchronously */
-        BitmapHeapPrefetchNextAsync(node, scan, tbm, prefetch_iterator);
-    }
-    ADIO_ELSE()
-    {
-        /* prefetch next synchronously */
         if (unlikely(tbm_is_crossbucket(tbm) || tbm_is_global(tbm))) {
             HBktTblScanDesc hpscan = NULL;
             Oid oldOid = GPIGetCurrPartOid(node->gpi_scan);
@@ -1380,5 +1356,4 @@ void BitmapHeapPrefetchNext(
             }
         }
     }
-    ADIO_END();
 }

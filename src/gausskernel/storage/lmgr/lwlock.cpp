@@ -1931,6 +1931,52 @@ void LWLockRelease(LWLock *lock)
     RESUME_INTERRUPTS();
 }
 
+void AdioLWLockRelease(LWLock *lock, uint64 lockThreadIdMask)
+{
+    LWLockMode mode = LW_EXCLUSIVE;
+    uint64 oldstate;
+    bool checkWaiters = false;
+    int i;
+
+    for (i = t_thrd.storage_cxt.num_held_lwlocks; --i >= 0;) {
+        if (lock == t_thrd.storage_cxt.held_lwlocks[i].lock) {
+            mode = t_thrd.storage_cxt.held_lwlocks[i].mode;
+            break;
+        }
+    }
+    if (i < 0) {
+        ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
+    }
+
+    t_thrd.storage_cxt.num_held_lwlocks--;
+    for (; i < t_thrd.storage_cxt.num_held_lwlocks; i++) {
+        t_thrd.storage_cxt.held_lwlocks[i] = t_thrd.storage_cxt.held_lwlocks[i + 1];
+        t_thrd.storage_cxt.lwlock_held_times[i] = t_thrd.storage_cxt.lwlock_held_times[i + 1];
+    }
+
+    PRINT_LWDEBUG("LWLockRelease", lock, mode);
+
+    if (mode == LW_EXCLUSIVE) {
+        TsAnnotateRWLockReleased(&lock->rwlock, 1);
+        oldstate = pg_atomic_sub_fetch_u64(&lock->state, LW_VAL_EXCLUSIVE);
+    } else {
+        TsAnnotateRWLockReleased(&lock->rwlock, 0);
+        oldstate = __sync_sub_and_fetch(&lock->state, lockThreadIdMask);
+    }
+
+    Assert(!(oldstate & LW_VAL_EXCLUSIVE));
+
+    checkWaiters =
+        ((oldstate & (LW_FLAG_HAS_WAITERS | LW_FLAG_RELEASE_OK)) == (LW_FLAG_HAS_WAITERS | LW_FLAG_RELEASE_OK))
+        && ((oldstate & LW_LOCK_MASK) == 0);
+
+    if (checkWaiters) {
+        LWLockWakeup(lock);
+    }
+
+    RESUME_INTERRUPTS();
+}
+
 /*
  * LWLockReleaseClearVar - release a previously acquired lock, reset variable
  */
@@ -2048,6 +2094,8 @@ void LWLockOwn(LWLock *lock)
     }
 
     t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].lock = lock;
+    t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks].mode =
+        (expected_state & LW_VAL_EXCLUSIVE) != 0 ? LW_EXCLUSIVE : LW_SHARED;
     t_thrd.storage_cxt.lwlock_held_times[t_thrd.storage_cxt.num_held_lwlocks] = 
         (u_sess->attr.attr_common.pgstat_track_activities ? GetCurrentTimestamp() : (TimestampTz)0);
     t_thrd.storage_cxt.num_held_lwlocks++;

@@ -262,6 +262,9 @@ typedef struct knl_instance_attr_storage {
     int parallel_recovery_dispatch_algorithm;
     int num_slru_buffers[SLRU_BUFFER_KIND];
     char* num_slru_buffers_str;
+    int adioBufferAlignSize;
+    int adioReaderThreadNum;
+    int adioWriterThreadNum;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

@@ -51,6 +51,7 @@ const uint64 MAX_FILE_SIZE = 0xFFFFFFFF;
 #define MAX_PARAM_LEN 1024
 #define FH_CUSTOM_VALUE_FOUR 4
 #define FH_CUSTOM_VALUE_FIVE 5
+#define MAX_FILE_SIZE_LIMIT ((0x80000000 - 512))
 
 static BuildErrorCode receiveFileChunks(const char* sql, FILE* file);
 static BuildErrorCode execute_pagemap(file_entry_t* entry, FILE* file);
@@ -303,6 +304,10 @@ BuildErrorCode fetchSourceFileList()
     for (i = 0; i < PQntuples(res); i++) {
         char* path = PQgetvalue(res, i, 0);
         int64 filesize = _atoi64(PQgetvalue(res, i, 1));
+        if (filesize > MAX_FILE_SIZE_LIMIT) {
+            pg_log(PG_WARNING, "archive member \"%s\" (%ld) too large \n", path, filesize);
+            continue;
+        }
         bool isdir = (strcmp(PQgetvalue(res, i, 2), "t") == 0);
         char* link_target = PQgetvalue(res, i, 3);
         file_type_t type;

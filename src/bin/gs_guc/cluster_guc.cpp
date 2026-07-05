@@ -272,7 +272,7 @@ const char* unit_eight_kB_parameter_list[] = {
     "backwrite_quantity",
     "effective_cache_size",
     "pca_shared_buffers",
-    "prefetch_quantity",
+    "adio_prefetch_quantity",
     "segment_size",
     "shared_buffers",
     "clog_buffers",

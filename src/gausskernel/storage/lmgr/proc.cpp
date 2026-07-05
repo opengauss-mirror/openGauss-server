@@ -1221,6 +1221,14 @@ int GetAuxProcEntryIndex(int baseIdx)
                      g_instance.shmem_cxt.ThreadPoolGroupNum;
         }
 #endif /* ENABLE_MULTIPLE_NODES */
+#ifndef ENABLE_LITE_MODE
+        else if (t_thrd.bootstrap_cxt.MyAuxProcType == AsyncIOCompleterProcess) {
+            index += t_thrd.aio_cxt.compltrIdx +
+                     MAX_PAGE_WRITER_THREAD_NUM +
+                     MAX_RECOVERY_THREAD_NUM +
+                     MAX_COMPACTION_THREAD_NUM;
+        }
+#endif
     }
 
     return index;

@@ -89,6 +89,9 @@
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_transaction.h"
 
+#define LOCK_THREADID_MASK ((((uintptr_t)&t_thrd) >> 20) % 6)
+#define LOCK_REFCOUNT_ONE_BY_THREADID (1LU << (8 * LOCK_THREADID_MASK))
+
 const int ONE_MILLISECOND = 1;
 const int TEN_MICROSECOND = 10;
 const int MILLISECOND_TO_MICROSECOND = 1000;
@@ -378,6 +381,7 @@ extern void PageRangeBackWrite(
     uint32 bufferIdx, int32 n, uint32 flags, SMgrRelation reln, int32* bufs_written, int32* bufs_reusable);
 extern void PageListBackWrite(
     uint32* bufList, int32 n, uint32 flags, SMgrRelation reln, int32* bufs_written, int32* bufs_reusable);
+void AdioFlushBuffer(BufferDesc *buf, SMgrRelation reln = NULL, ReadBufferMethod flushmethod = WITH_NORMAL_CACHE);
 #ifndef ENABLE_LITE_MODE
 static volatile BufferDesc* PageListBufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
                                                 BlockNumber blockNum, BufferAccessStrategy strategy, bool* foundPtr);
@@ -873,6 +877,15 @@ void PageListPrefetch(Relation reln, ForkNumber fork_num, BlockNumber *block_lis
     RelationOpenSmgr(reln);
 
     /*
+     * Segment-page storage has no async read implementation (seg_async_read
+     * is a no-op). Skip to avoid allocating buffers from the normal pool
+     * that would be left pinned with IO_IN_PROGRESS and never completed.
+     */
+    if (IsSegmentFileNode(reln->rd_node)) {
+        return;
+    }
+
+    /*
      * Sorry, no prefetch on local bufs now.
      */
     is_local_buf = SmgrIsTemp(reln->rd_smgr);
@@ -980,7 +993,7 @@ void PageListPrefetch(Relation reln, ForkNumber fork_num, BlockNumber *block_lis
         aio_desc->blockDesc.blockNum = buf_desc->tag.blockNum;
         aio_desc->blockDesc.buffer = buf_block;
         aio_desc->blockDesc.blockSize = BLCKSZ;
-        aio_desc->blockDesc.reqType = PageListPrefetchType;
+        aio_desc->blockDesc.reqType = PAGE_LIST_PREFETCH_TYPE;
         aio_desc->blockDesc.bufHdr = (BufferDesc *)buf_desc;
         aio_desc->blockDesc.descType = AioRead;
 
@@ -1423,7 +1436,7 @@ void PageListBackWrite(uint32 *buf_list, int32 nbufs, uint32 flags = 0, SMgrRela
             aioDescp->blockDesc.blockNum = bufHdr->tag.blockNum;
             aioDescp->blockDesc.buffer = (char *)BufHdrGetBlock(bufHdr);
             aioDescp->blockDesc.blockSize = BLCKSZ;
-            aioDescp->blockDesc.reqType = PageListBackWriteType;
+            aioDescp->blockDesc.reqType = PAGE_LIST_BACK_WRITE_TYPE;
             aioDescp->blockDesc.bufHdr = bufHdr;
             aioDescp->blockDesc.descType = AioWrite;
 
@@ -4644,18 +4657,30 @@ bool SyncFlushOneBuffer(int buf_id, bool get_condition_lock)
         return false;
     }
 
+    bool isCompressedMain = (buf_desc->tag.rnode.opt != 0 && buf_desc->tag.forkNum == MAIN_FORKNUM);
+    /* Only heap store requests launched by pagewriter should use adio. */
+    bool useAdio = g_instance.attr.attr_storage.enable_adio_function &&
+        t_thrd.role == PAGEWRITER_THREAD && !IsSegmentFileNode(buf_desc->tag.rnode) &&
+        !IS_UNDO_RELFILENODE(buf_desc->tag.rnode) && !isCompressedMain;
+
     if (IsSegmentBufferID(buf_id)) {
         Assert(IsSegmentPhysicalRelNode(buf_desc->tag.rnode));
         SegFlushBuffer(buf_desc, NULL);
     } else {
-        FlushBuffer(buf_desc, NULL);
+        if (useAdio) {
+            AdioFlushBuffer(buf_desc);
+        } else {
+            FlushBuffer(buf_desc, NULL);
+        }
     }
 
     if (SS_REFORM_REFORMER) {
         ClearReadHint(buf_desc->buf_id);
     }
 
-    LWLockRelease(buf_desc->content_lock);
+    if (!useAdio) {
+        LWLockRelease(buf_desc->content_lock);
+    }
     return true;
 }
 
@@ -4712,18 +4737,25 @@ uint32 SyncOneBuffer(int buf_id, bool skip_recently_used, WritebackContext* wb_c
         return (result | BUF_SKIPPED);
     }
 
-    tag = buf_desc->tag;
-    if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
-        SegmentCheck(XLOG_NEED_PHYSICAL_LOCATION(buf_desc->tag.rnode));
-        SegmentCheck(buf_desc->extra->seg_blockno != InvalidBlockNumber);
-        SegmentCheck(ExtentTypeIsValid(buf_desc->extra->seg_fileno));
-        tag.rnode.relNode = buf_desc->extra->seg_fileno;
-        tag.blockNum = buf_desc->extra->seg_blockno;
+    bool isCompressedMain2 = (buf_desc->tag.rnode.opt != 0 && buf_desc->tag.forkNum == MAIN_FORKNUM);
+    /* Only heap store requests launched by pagewriter should use adio. */
+    bool useAdio = g_instance.attr.attr_storage.enable_adio_function &&
+        t_thrd.role == PAGEWRITER_THREAD && !IsSegmentFileNode(buf_desc->tag.rnode) &&
+        !IS_UNDO_RELFILENODE(buf_desc->tag.rnode) && !isCompressedMain2;
+    if (!useAdio) {
+        tag = buf_desc->tag;
+        if (buf_desc->extra->seg_fileno != EXTENT_INVALID) {
+            SegmentCheck(XLOG_NEED_PHYSICAL_LOCATION(buf_desc->tag.rnode));
+            SegmentCheck(buf_desc->extra->seg_blockno != InvalidBlockNumber);
+            SegmentCheck(ExtentTypeIsValid(buf_desc->extra->seg_fileno));
+            tag.rnode.relNode = buf_desc->extra->seg_fileno;
+            tag.blockNum = buf_desc->extra->seg_blockno;
+        }
+
+        UnpinBuffer(buf_desc, true);
+
+        ScheduleBufferTagForWriteback(wb_context, &tag);
     }
-
-    UnpinBuffer(buf_desc, true);
-
-    ScheduleBufferTagForWriteback(wb_context, &tag);
 
     return (result | BUF_WRITTEN);
 }
@@ -5230,8 +5262,14 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
     INSTR_TIME_SET_CURRENT(io_start);
 
     if (bufdesc->extra->seg_fileno != EXTENT_INVALID) {
-        /* FlushBuffer only used for data buffer, matedata buffer is flushed by SegFlushBuffer */
-        SegmentCheck(!PageIsSegmentVersion(bufBlock) || PageIsNew(bufBlock));
+        if (PageIsSegmentVersion(bufBlock) && !PageIsNew(bufBlock)) {
+            ereport(DEBUG1, (errmsg("FlushBuffer: segment-version page in normal buffer pool, "
+                "rel %u/%u/%u fork %d blk %u seg_fileno %u seg_blockno %u",
+                bufdesc->tag.rnode.spcNode, bufdesc->tag.rnode.dbNode,
+                bufdesc->tag.rnode.relNode, bufferinfo.blockinfo.forknum,
+                bufferinfo.blockinfo.blkno, bufdesc->extra->seg_fileno,
+                bufdesc->extra->seg_blockno)));
+        }
         SegmentCheck(XLOG_NEED_PHYSICAL_LOCATION(bufdesc->tag.rnode));
         SegmentCheck(bufdesc->extra->seg_blockno != InvalidBlockNumber);
         SegmentCheck(ExtentTypeIsValid(bufdesc->extra->seg_fileno));
@@ -5323,6 +5361,85 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
     if (t_thrd.role != PAGEWRITER_THREAD && t_thrd.role != BGWRITER) {
         t_thrd.log_cxt.error_context_stack = errcontext.previous;
     }
+}
+
+static void AdioDispatchBufferWrite(SMgrRelation reln, RedoBufferInfo *bufferinfo,
+    char *bufToWrite, BufferDesc *bufdesc)
+{
+    AioDispatchDesc_t *aioDescp = (AioDispatchDesc_t *)adio_share_alloc(sizeof(AioDispatchDesc_t));
+    int ret = memset_s(&(aioDescp->aiocb), sizeof(aioDescp->aiocb), 0, sizeof(aioDescp->aiocb));
+    securec_check(ret, "\0", "\0");
+
+    aioDescp->blockDesc.smgrReln = reln;
+    aioDescp->blockDesc.forkNum = bufferinfo->blockinfo.forknum;
+    aioDescp->blockDesc.blockNum = bufferinfo->blockinfo.blkno;
+    aioDescp->blockDesc.buffer = bufToWrite;
+    aioDescp->blockDesc.blockSize = BLCKSZ;
+    aioDescp->blockDesc.reqType = PAGE_LIST_BACK_WRITE_TYPE;
+    aioDescp->blockDesc.bufHdr = bufdesc;
+    aioDescp->blockDesc.descType = AioWrite;
+    aioDescp->blockDesc.lockThreadMask = LOCK_REFCOUNT_ONE_BY_THREADID;
+
+    auto list = t_thrd.storage_cxt.InProgressAioDispatch;
+    int idx = t_thrd.storage_cxt.InProgressAioDispatchCount;
+    list[idx] = aioDescp;
+    t_thrd.storage_cxt.inProgressAioDescs[idx] = bufdesc;
+
+    smgrasyncwrite(reln, bufferinfo->blockinfo.forknum, list + idx, 1);
+
+    if (list[idx] == NULL) {
+        t_thrd.storage_cxt.inProgressAioDescs[idx] = NULL;
+    }
+    t_thrd.storage_cxt.InProgressAioDispatchCount++;
+}
+
+void AdioFlushBuffer(BufferDesc *buf, SMgrRelation reln, ReadBufferMethod flushmethod)
+{
+    Block bufBlock;
+    char *bufToWrite = NULL;
+    uint64 buf_state;
+    RedoBufferInfo bufferinfo;
+    errno_t rc = memset_s(&bufferinfo, sizeof(RedoBufferInfo), 0, sizeof(RedoBufferInfo));
+    securec_check(rc, "\0", "\0");
+
+    t_thrd.dms_cxt.buf_in_aio = false;
+
+    if (flushmethod == WITH_NORMAL_CACHE) {
+        if (!StartBufferIO(buf, false)) {
+            LWLockRelease((buf)->content_lock);
+            UnpinBuffer((buf), true);
+            t_thrd.storage_cxt.InProgressBuf = NULL;
+            return;
+        }
+    }
+
+    if (t_thrd.role != PAGEWRITER_THREAD && t_thrd.role != BGWRITER) {
+        return;
+    }
+
+    GetFlushBufferInfo(buf, &bufferinfo, &buf_state, flushmethod);
+
+    if (reln == NULL || (IsValidColForkNum(bufferinfo.blockinfo.forknum)))
+        reln = smgropen(bufferinfo.blockinfo.rnode, InvalidBackendId, GetColumnNum(bufferinfo.blockinfo.forknum));
+
+    if (FORCE_FINISH_ENABLED) {
+        update_max_page_flush_lsn(bufferinfo.lsn, t_thrd.proc_cxt.MyProcPid, false);
+    }
+    XLogWaitFlush(bufferinfo.lsn);
+
+    bufBlock = (Block)bufferinfo.pageinfo.page;
+
+    BufferDesc *bufdesc = GetBufferDescriptor(bufferinfo.buf - 1);
+    bufToWrite = PageDataEncryptForBuffer((Page)bufBlock, bufdesc);
+
+    Assert(!IsSegmentFileNode(bufdesc->tag.rnode));
+
+    bufToWrite = AdioPageSetChecksumCopy((Page)bufToWrite, bufferinfo.blockinfo.blkno);
+
+    Assert(!IsSegmentFileNode(bufdesc->tag.rnode));
+    AdioDispatchBufferWrite(reln, &bufferinfo, bufToWrite, bufdesc);
+
+    t_thrd.storage_cxt.InProgressBuf = NULL;
 }
 
 /*
@@ -6870,17 +6987,16 @@ void WaitIO(BufferDesc *buf)
  * @Param[IN] buf: buffer desc
  * @See also:
  */
+/* poll interval (microseconds) while waiting for in-flight AIO to finish */
+#define ADIO_AIO_WAIT_INTERVAL_US (1000L)
+
 void CheckIOState(volatile void *buf_desc)
 {
     BufferDesc *buf = (BufferDesc *)buf_desc;
+    long wait_us = 0;
     for (;;) {
         uint64 buf_state;
 
-        /*
-         * It may not be necessary to acquire the spinlock to check the flag
-         * here, but since this test is essential for correctness, we'd better
-         * play it safe.
-         */
         buf_state = LockBufHdr(buf);
         UnlockBufHdr(buf, buf_state);
         if (buf_state & BM_IO_ERROR) {
@@ -6891,7 +7007,16 @@ void CheckIOState(volatile void *buf_desc)
         if (!(buf_state & BM_IO_IN_PROGRESS)) {
             break;
         }
-        pg_usleep(1000L);
+        pg_usleep(ADIO_AIO_WAIT_INTERVAL_US);
+        wait_us += ADIO_AIO_WAIT_INTERVAL_US;
+        if (wait_us > 0 && (wait_us % 10000000L) == 0) {
+            ereport(WARNING,
+                (errmsg("CheckIOState: buffer %d still IO_IN_PROGRESS after %lds, "
+                        "rel %u/%u/%u fork %d blk %u",
+                        buf->buf_id, wait_us / 1000000L,
+                        buf->tag.rnode.spcNode, buf->tag.rnode.dbNode,
+                        buf->tag.rnode.relNode, buf->tag.forkNum, buf->tag.blockNum)));
+        }
     }
 }
 
@@ -7040,12 +7165,10 @@ void TerminateBufferIO(volatile BufferDesc *buf, bool clear_dirty, uint64 set_fl
  * The routine acquires the buf header spinlock, and changes the buf->flags.
  * it leaves the buffer without the io_in_progress_lock held.
  */
-void AsyncTerminateBufferIO(void *buffer, bool clear_dirty, uint64 set_flag_bits)
+void AsyncTerminateBufferIO(BufferDesc *buffer, bool clearDirty, uint64 set_flag_bits, void *desc)
 {
-    BufferDesc *buf = (BufferDesc *)buffer;
-
-    TerminateBufferIO_common(buf, clear_dirty, set_flag_bits);
-    LWLockRelease(buf->io_in_progress_lock);
+    TerminateBufferIO_common(buffer, clearDirty, set_flag_bits);
+    AdioLWLockRelease(buffer->io_in_progress_lock, ((AioDispatchDesc_t *)desc)->blockDesc.lockThreadMask);
 }
 
 /*
@@ -7063,7 +7186,7 @@ static void TerminateBufferIO_common(BufferDesc *buf, bool clear_dirty, uint64 s
     buf_state &= ~(BM_IO_IN_PROGRESS | BM_IO_ERROR);
 
     if (clear_dirty) {
-        if (ENABLE_INCRE_CKPT) {
+        if (ENABLE_INCRE_CKPT && buf->extra != NULL) {
             if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->extra->rec_lsn))) {
                 remove_dirty_page_from_queue(buf);
             } else {
@@ -7162,22 +7285,15 @@ bulk_read_loop:
  * buf->flags and unlocks the io_in_progress_lock.
  * It reports repeated failures.
  */
-extern void AsyncAbortBufferIO(void *buffer, bool isForInput)
+extern void AsyncAbortBufferIO(BufferDesc *buffer, bool isForInput, void *desc)
 {
-    BufferDesc *buf = (BufferDesc *)buffer;
-    AbortBufferIO_common(buf, isForInput);
-    AsyncTerminateBufferIO(buf, false, BM_IO_ERROR);
+    AbortBufferIO_common(buffer, isForInput);
+    AsyncTerminateBufferIO(buffer, false, BM_IO_ERROR, desc);
 }
 
-/*
- * @Description: clear and set flag, request by vacuum full in adio mode
- * @Param[IN] buffer: buffer desc
- * @See also:
- */
-extern void AsyncTerminateBufferIOByVacuum(void *buffer)
+extern void AsyncTerminateBufferIOByVacuum(BufferDesc *buffer)
 {
-    BufferDesc *buf = (BufferDesc *)buffer;
-    TerminateBufferIO_common(buf, true, 0);
+    TerminateBufferIO_common(buffer, false, 0);
 }
 
 /*
@@ -7185,10 +7301,9 @@ extern void AsyncTerminateBufferIOByVacuum(void *buffer)
  * @Param[IN] buffer: buffer desc
  * @See also:
  */
-extern void AsyncAbortBufferIOByVacuum(void *buffer)
+extern void AsyncAbortBufferIOByVacuum(BufferDesc *buffer)
 {
-    BufferDesc *buf = (BufferDesc *)buffer;
-    TerminateBufferIO_common(buf, true, BM_IO_ERROR);
+    TerminateBufferIO_common(buffer, true, BM_IO_ERROR);
 }
 
 /*

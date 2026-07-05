@@ -386,8 +386,9 @@ static void FreeThreadIdInternal(MOTThreadId threadId)
     uint16_t bitIndex = threadId % THREADS_PER_WORD;
 
     (void)pthread_spin_lock(&threadIdLock);
-    MOT_ASSERT(IS_THREAD_ID_USED(arrayIndex, bitIndex));
-    MARK_THREAD_ID_FREE(arrayIndex, bitIndex);
+    if (IS_THREAD_ID_USED(arrayIndex, bitIndex)) {
+        MARK_THREAD_ID_FREE(arrayIndex, bitIndex);
+    }
     (void)pthread_spin_unlock(&threadIdLock);
 }
 

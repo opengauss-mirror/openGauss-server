@@ -801,7 +801,7 @@ audit_enabled = on
 
 
 #enable_fast_allocate = off
-#prefetch_quantity = 32MB
+#adio_prefetch_quantity = 32MB
 #backwrite_quantity = 8MB
 #cstore_prefetch_quantity = 32768		#unit kb
 #cstore_backwrite_quantity = 8192		#unit kb

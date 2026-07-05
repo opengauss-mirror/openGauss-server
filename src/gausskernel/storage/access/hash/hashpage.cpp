@@ -954,12 +954,32 @@ fail:
  * Returns TRUE if successful, or FALSE if allocation failed due to
  * BlockNumber overflow.
  */
+static void _hash_init_zero_overflow_page(Page page)
+{
+    HashPageOpaque ovflopaque;
+
+    /*
+     * Initialize the page.  Just zeroing the page won't work; see
+     * _hash_freeovflpage for similar usage.  We take care to make the special
+     * space valid for the benefit of tools such as pageinspect.
+     */
+    _hash_pageinit(page, BLCKSZ);
+
+    ovflopaque = (HashPageOpaque)PageGetSpecialPointer(page);
+
+    ovflopaque->hasho_prevblkno = InvalidBlockNumber;
+    ovflopaque->hasho_nextblkno = InvalidBlockNumber;
+    ovflopaque->hasho_bucket = -1;
+    ovflopaque->hasho_flag = LH_UNUSED_PAGE;
+    ovflopaque->hasho_page_id = HASHO_PAGE_ID;
+}
+
 static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks)
 {
     BlockNumber lastblock;
-    char zerobuf[BLCKSZ];
+    char zerobuf_stack[BLCKSZ];
+    char *zerobuf = NULL;
     Page page;
-    HashPageOpaque ovflopaque;
 
     lastblock = firstblock + nblocks - 1;
     /*
@@ -969,22 +989,17 @@ static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nbl
     if (lastblock < firstblock || lastblock == InvalidBlockNumber)
         return false;
 
-    /* change segment table insert hash table */
+    ADIO_RUN()
+    {
+        zerobuf = (char *)adio_align_alloc(BLCKSZ);
+    }
+    ADIO_ELSE()
+    {
+        zerobuf = zerobuf_stack;
+    }
+    ADIO_END();
     page = (Page)zerobuf;
-    /*
-    * Initialize the page.  Just zeroing the page won't work; see
-    * _hash_freeovflpage for similar usage.  We take care to make the special
-    * space valid for the benefit of tools such as pageinspect.
-    */
-    _hash_pageinit(page, BLCKSZ);
-
-    ovflopaque = (HashPageOpaque) PageGetSpecialPointer(page);
-
-    ovflopaque->hasho_prevblkno = InvalidBlockNumber;
-    ovflopaque->hasho_nextblkno = InvalidBlockNumber;
-    ovflopaque->hasho_bucket = -1;
-    ovflopaque->hasho_flag = LH_UNUSED_PAGE;
-    ovflopaque->hasho_page_id = HASHO_PAGE_ID;
+    _hash_init_zero_overflow_page(page);
 
     if (RelationNeedsWAL(rel))
             log_newpage(&rel->rd_node,
@@ -1011,6 +1026,12 @@ static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nbl
         RelationOpenSmgr(rel);
         smgrextend(rel->rd_smgr, MAIN_FORKNUM, lastblock, zerobuf, false);
     }
+
+    ADIO_RUN()
+    {
+        adio_align_free(zerobuf);
+    }
+    ADIO_END();
 
     return true;
 }

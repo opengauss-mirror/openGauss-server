@@ -523,6 +523,7 @@ extern bool PageFreeDict(Page page);
 extern char* PageDataEncryptIfNeed(Page page, TdeInfo* tdeinfo = NULL, bool need_copy = true, bool is_segbuf = false);
 extern void PageDataDecryptIfNeed(Page page);
 extern char* PageSetChecksumCopy(Page page, BlockNumber blkno, bool is_segbuf = false);
+extern char* AdioPageSetChecksumCopy(Page page, BlockNumber blkno, bool isSegbuf = false);
 extern void PageSetChecksumInplace(Page page, BlockNumber blkno);
 
 extern void DumpPageInfo(Page page, XLogRecPtr newLsn);

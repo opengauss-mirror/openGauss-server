@@ -1619,6 +1619,7 @@ typedef struct knl_t_aiocompleter_context {
     /* Flags set by interrupt handlers for later service in the main loop. */
     volatile sig_atomic_t shutdown_requested;
     volatile sig_atomic_t config_requested;
+    int compltrIdx;
 } knl_t_aiocompleter_context;
 
 typedef struct knl_t_twophasecleaner_context {
@@ -2640,6 +2641,9 @@ typedef struct knl_t_storage_context {
     /* local state for aio clean up resource  */
     struct AioDispatchDesc** InProgressAioDispatch;
     int InProgressAioDispatchCount;
+    char *inProgressAioPageCopys;
+    struct BufferDesc **inProgressAioDescs;
+    int aioPageCopyMaxCount;
     struct BufferDesc* InProgressAioBuf;
     int InProgressAioType;
     /*

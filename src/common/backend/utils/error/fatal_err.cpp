@@ -418,6 +418,10 @@ static void print_os_info(int fd)
 
 static void print_guc_bool(int fd, const struct config_bool *conf)
 {
+    if (conf == NULL || conf->variable == NULL) {
+        output(fd, "%s\n", "NULL");
+        return;
+    }
     if (conf->show_hook) {
         output(fd, "%s\n", "result in show_hook");
     } else {
@@ -480,6 +484,10 @@ static void print_guc_int64(int fd, const struct config_int64 *conf)
 
 static void print_guc_real(int fd, const struct config_real *conf)
 {
+    if (conf == NULL || conf->variable == NULL) {
+        output(fd, "%s\n", "NULL");
+        return;
+    }
     if (conf->show_hook) {
         output(fd, "%s\n", "result in show_hook");
     } else {

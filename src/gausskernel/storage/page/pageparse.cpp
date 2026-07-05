@@ -637,7 +637,10 @@ char *ParsePage(char *path, int64 blocknum, char *relation_type, bool read_memor
         char *strOutput = (char *)palloc(MAXOUTPUTLEN * sizeof(char));
         rc = memset_s(strOutput, MAXOUTPUTLEN, 0, MAXOUTPUTLEN);
         securec_check(rc, "\0", "\0");
-        char *buffer = (char *)palloc0(BLCKSZ);
+        /* O_DIRECT under ADIO requires the read buffer aligned to adioBufferAlignSize */
+        int adioAlign = g_instance.attr.attr_storage.adioBufferAlignSize;
+        char *bufferOri = (char *)palloc0(BLCKSZ + adioAlign);
+        char *buffer = (char *)TYPEALIGN(adioAlign, bufferOri);
         SMGR_READ_STATUS rdStatus = smgrread(smgr, forkNum, blockNum, buffer);
         const PageHeader page = (const PageHeader)buffer;
         char *strOutput1 = (char *)palloc(MAXOUTPUTLEN * sizeof(char));
@@ -655,7 +658,7 @@ char *ParsePage(char *path, int64 blocknum, char *relation_type, bool read_memor
 
         CheckWriteFile(outputfile, outputFilename, strOutput);
         pfree_ext(strOutput);
-        pfree_ext(buffer);
+        pfree_ext(bufferOri);
         blockNum++;
     }
     CheckCloseFile(outputfile, outputFilename, true);

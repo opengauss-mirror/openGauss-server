@@ -1045,7 +1045,7 @@ static void dw_recover_partial_write_batch(dw_batch_file_context *cxt)
     read_asst.buf = cxt->buf;
     reading_pages = Min(DW_BATCH_MAX_FOR_NOHBK, (dw_batch_page_num - cxt->file_head->start));
 
-    data_page = (char *)palloc0(BLCKSZ);
+    data_page = (char *)mem_align_alloc(BLCKSZ, BLCKSZ);
 
     for (;;) {
         dw_read_pages(&read_asst, reading_pages);
@@ -1109,7 +1109,7 @@ static void dw_recover_partial_write_batch(dw_batch_file_context *cxt)
         dw_recover_batch_head(cxt, curr_head, is_new_relfilenode);
     }
     dw_log_recover_state(cxt, LOG, "Finish", curr_head);
-    pfree(data_page);
+    mem_align_free(data_page);
 }
 
 void dw_check_file_num()

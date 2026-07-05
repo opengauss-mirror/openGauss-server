@@ -5689,8 +5689,14 @@ convert_expr_sublink_with_limit_clause(PlannerInfo *root,
     if (get_pullUp_equal_expr((Node*)subQuery->jointree, &pullUpEqualQuals) &&
         pullUpEqualQuals)
     {
-        /* Guc rewrite_rule need set to magicset.*/
-        if (((u_sess->attr.attr_sql.rewrite_rule & MAGIC_SET) && permit_from_rewrite_hint(root, MAGIC_SET)) && !contain_subplans((Node*)subQuery->jointree))
+        /*
+         * LIMIT/OFFSET on an aggregate expr-sublink must stay above the full
+         * aggregation result. Pushing outer quals into the subquery can change
+         * which aggregated row LIMIT picks and lead to inconsistent results.
+         */
+        if (((u_sess->attr.attr_sql.rewrite_rule & MAGIC_SET) && permit_from_rewrite_hint(root, MAGIC_SET)) &&
+            subQuery->limitCount == NULL && subQuery->limitOffset == NULL &&
+            !contain_subplans((Node*)subQuery->jointree))
         {
             /* Get can push down to subquery's quals. */
             push_quals = push_down_qual(root, all_quals, pullUpEqualQuals);

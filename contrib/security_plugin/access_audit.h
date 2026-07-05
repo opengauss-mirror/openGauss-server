@@ -49,8 +49,8 @@ void save_access_logs(int type, const char *event);
 void init_logs();
 void destroy_logs();
 void open_relation(List *list, Var *col_att, PolicyLabelItem *full_column, bool *is_found);
-void handle_subquery(RangeTblEntry *rte, int commandType, policy_result *pol_result, _checked_tables *checked_tables,
-    const policy_set *policy_ids, const policy_set *security_policy_ids, int *recursion_deep);
+void handle_subquery(RangeTblEntry *rte, int commandType, _checked_tables *checked_tables, const policy_set *policy_ids,
+    const policy_set *security_policy_ids, int *recursion_deep);
 void audit_open_relation(List *list, Var *col_att, PolicyLabelItem *full_column, bool *is_found);
 void access_audit_policy_run(const List* rtable, CmdType cmd_type);
 void opfusion_unified_audit_executor(const PlannedStmt *plannedstmt);

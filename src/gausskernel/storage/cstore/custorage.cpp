@@ -133,14 +133,6 @@ File CUStorage::WSOpenFile(char* file_name, int fileId, bool direct_flag)
         fileFlags = O_RDWR | O_CREAT | PG_BINARY;
     }
 
-    ADIO_RUN()
-    {
-        if (direct_flag) {
-            fileFlags |= O_DIRECT;
-        }
-    }
-    ADIO_END();
-
     RelFileNodeForkNum filenode;
     filenode.rnode.node = m_cnode.m_rnode;
     filenode.rnode.backend = InvalidBackendId;
@@ -1020,15 +1012,7 @@ CUFile::CUFile(const RelFileNode& fileNode, int col)
     CFileNode cFileNode(fileNode, col, MAIN_FORKNUM);
     m_colStorage = New(CurrentMemoryContext) CUStorage(cFileNode);
 
-    ADIO_RUN()
-    {
-        m_buffer = (char*)adio_align_alloc(CUFILE_MAX_BUF_SIZE);
-    }
-    ADIO_ELSE()
-    {
-        m_buffer = (char*)palloc(CUFILE_MAX_BUF_SIZE);
-    }
-    ADIO_END();
+    m_buffer = (char*)palloc(CUFILE_MAX_BUF_SIZE);
 
     m_maxpos = 0;
     m_maxFileSize = 0;
@@ -1046,16 +1030,8 @@ void CUFile::Destroy()
 {
     DELETE_EX(m_colStorage);
 
-    ADIO_RUN()
-    {
-        adio_align_free(m_buffer);
-    }
-    ADIO_ELSE()
-    {
-        pfree(m_buffer);
-        m_buffer = NULL;
-    }
-    ADIO_END();
+    pfree(m_buffer);
+    m_buffer = NULL;
 }
 
 char* CUFile::Read(uint64 offset, int wantSize, int* realSize, int align_size)

@@ -798,6 +798,9 @@ void OpFusion::updatePreAllocParamter(BindMessage* pqBindMessage, CachedPlanSour
 
 void OpFusion::describe()
 {
+    if (m_global->m_psrc == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT), errmsg("cached plansource does not exist")));
+    }
     if (m_global->m_psrc->resultDesc != NULL) {
         StringInfoData buf;
         initStringInfo(&buf);
@@ -1144,6 +1147,7 @@ void OpFusion::clean()
 void OpFusion::storeFusion(const char *portalname)
 {
     if (portalname == NULL || portalname[0] == '\0') {
+        removeFusionFromHtab(m_local.m_portalName);
         pfree_ext(m_local.m_portalName);
         return;
     }

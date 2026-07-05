@@ -432,6 +432,7 @@ extern bool LWLockAcquire(LWLock* lock, LWLockMode mode, bool need_update_lockid
 extern bool LWLockConditionalAcquire(LWLock* lock, LWLockMode mode);
 extern bool LWLockAcquireOrWait(LWLock* lock, LWLockMode mode);
 extern void LWLockRelease(LWLock* lock);
+extern void AdioLWLockRelease(LWLock *lock, uint64 lockThreadIdMask);
 extern void LWLockReleaseClearVar(LWLock* lock, uint64* valptr, uint64 val);
 extern void LWLockReleaseAll(void);
 extern bool LWLockHeldByMe(LWLock* lock);

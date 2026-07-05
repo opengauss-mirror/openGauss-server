@@ -159,7 +159,6 @@ tsql_opt_unique_clustered:
 			| tsql_opt_clustered		{ $$ = FALSE; }
 			| UNIQUE					{ $$ = TRUE; }
 		;
-	
 
 tsql_ident:
             IDENT
@@ -587,6 +586,7 @@ tsql_subprogram_body:        {
 
                                 yyextra->core_yy_extra.in_slash_proc_body = false;
                                 yyextra->core_yy_extra.dolqstart = NULL;
+                                yyextra->core_yy_extra.is_createstmt = false;
 
                                 yyextra->core_yy_extra.query_string_locationlist =
                                         lappend_int(yyextra->core_yy_extra.query_string_locationlist, yylloc);
@@ -2347,4 +2347,11 @@ datediff_arg:
 			| TSQL_NANOSECOND                       { $$ = "nanosecond"; }
 			| TSQL_NS                               { $$ = "nanosecond"; }
 			| Sconst								{ $$ = $1; }
+		;
+
+/* Support EXTRACT(quarter/q/qq FROM ...) in shark grammar. */
+extract_arg:
+			TSQL_QUARTER							{ $$ = "quarter"; }
+			| TSQL_Q								{ $$ = "quarter"; }
+			| TSQL_QQ								{ $$ = "quarter"; }
 		;

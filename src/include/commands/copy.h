@@ -72,7 +72,7 @@ typedef struct BulkLoadFunc {
     void (*endBulkLoad)(CopyState cstate);
 } BulkLoadFunc;
 
-typedef int (*CopyGetDataFunc)(CopyState cstate, void* databuf, int minread, int maxread);
+typedef int (*CopyGetDataFunc)(CopyState cstate, char* databuf, int minread, int maxread);
 typedef bool (*CopyReadlineFunc)(CopyState cstate);
 typedef void (*CopyWriteLineFunc)(CopyState cstate);
 typedef bool (*GetNextCopyFunc)(CopyState cstate);
@@ -311,6 +311,8 @@ typedef struct CopyStateData {
 #endif
     int fill_missing_fields; /* 0 off;1 Compatible with the original copy; -1 trailing nullcols */
     bool ignore_extra_data; /* ignore overflowing fields */
+    bool has_extra_data; /* current row has overflowing fields */
+    bool ignored_extra_has_data; /* ignored extra fields contain non-null data */
 
     Formatter* formatter;
     FileFormat fileformat;
@@ -384,11 +386,16 @@ typedef struct InsertCopyLogInfoData* LogInsertState;
 #define IS_CSV(cstate) ((cstate)->fileformat == FORMAT_CSV)
 #define IS_BINARY(cstate) ((cstate)->fileformat == FORMAT_BINARY)
 #define IS_FIXED(cstate) ((cstate)->fileformat == FORMAT_FIXED)
+
+#define COPY_MAX_LINE_SIZE (64 * 1024 * 1024)
+
+extern void CopyAppendLineData(CopyState cstate, const char* data, int len);
 #define IS_TEXT(cstate) ((cstate)->fileformat == FORMAT_TEXT)
 #define IS_REMOTEWRITE(cstate) ((cstate)->fileformat == FORMAT_WRITABLE)
 
 CopyState BeginCopyTo(Relation rel, Node* query, const char* queryString,
-    const char* filename, List* attnamelist, List* options, CopyFileType filetype = S_COPYFILE);
+    const char* filename, List* attnamelist, List* options, CopyFileType filetype = S_COPYFILE,
+    bool enforceNoSymlink = false);
 void EndCopyTo(CopyState cstate);
 uint64 DoCopyTo(CopyState cstate);
 extern Oid DoCopy(CopyStmt* stmt, const char* queryString, uint64* process);
@@ -400,7 +407,8 @@ extern void ProcessFileOptions(CopyState cstate, bool is_from, List* options, bo
 extern void ProcessCopyOptions(CopyState cstate, bool is_from, List* options);
 extern bool IsTypeAcceptEmptyStr(Oid typeOid);
 extern CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, 
-    List* options, void* mem_info, const char* queryString, CopyGetDataFunc func = NULL);
+    List* options, AdaptMem* memInfo, const char* queryString, CopyGetDataFunc func = NULL,
+    bool enforceNoSymlink = false);
 extern void EndCopyFrom(CopyState cstate);
 extern bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* nulls, Oid* tupleOid);
 extern bool NextCopyFromRawFields(CopyState cstate, char*** fields, int* nfields);

@@ -811,6 +811,20 @@ static Node* replaceExprAliasIfNecessary(ParseState* pstate, char* colname, Colu
     return (Node*)copyObject(matchExpr);
 }
 
+static Node* tryReplaceExprAlias(ParseState* pstate, char* colname, ColumnRef* cref)
+{
+    Node* node = replaceExprAliasIfNecessary(pstate, colname, cref);
+
+    if (!pstate->isAliasReplace && contain_subplans(node)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Alias \"%s\" contains subplan, which is not supported to use in grouping() function",
+                    colname)));
+    }
+
+    return node;
+}
+
 static Node* ParseColumnRef(ParseState* pstate, RangeTblEntry* rte, char* colname, ColumnRef* cref)
 {
     Node* node = NULL;
@@ -950,6 +964,19 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
             }
 
             /*
+             * In B/D compatibility, HAVING follows MySQL-style alias lookup,
+             * so a SELECT-list alias should win over a same-named source
+             * column.
+             */
+            if (DB_IS_CMPT_BD && pstate->isAliasReplace && pstate->p_expr_kind == EXPR_KIND_HAVING &&
+                pstate->p_having_func_arg_level == 0) {
+                node = tryReplaceExprAlias(pstate, colname, cref);
+                if (node != NULL) {
+                    break;
+                }
+            }
+
+            /*
              * Try to identify as an unqualified column
              *
              * if hasplus, only consider current pstate level
@@ -1010,15 +1037,7 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
                 }
 
                 /*expr of target_list replace of node*/
-                node = replaceExprAliasIfNecessary(pstate, colname, cref);
-
-                if (!pstate->isAliasReplace && contain_subplans(node)) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg(
-                                "Alias \"%s\" contains subplan, which is not supported to use in grouping() function",
-                                colname)));
-                }
+                node = tryReplaceExprAlias(pstate, colname, cref);
                 /* 
                  * Now give the p_bind_variable_columnref_hook, check column index. only DBE_SQL can get here.
                  */
@@ -1168,6 +1187,9 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
             nspname = strVal(field2);
             AssertEreport(IsA(field3, String), MOD_OPT, "");
             relname = strVal(field3);
+            ereport(DEBUG5, (errmodule(MOD_PARSER),
+                             errmsg("[PARSER] parsed columnref's catagory name: %s, namespace name: %s,"
+                                    "relation name: %s", catname, nspname, relname)));
 
             /*
              * We check the catalog name and then ignore it.
@@ -1899,7 +1921,9 @@ static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
     foreach (args, fn->args) {
         Node* arg = (Node*)lfirst(args);
         if (!IsA(arg, CursorExpression)) {
+            pstate->p_having_func_arg_level++;
             targs = lappend(targs, transformExprRecurse(pstate, arg));
+            pstate->p_having_func_arg_level--;
         } else {
             targs = lappend(targs, arg);
         }
@@ -1910,7 +1934,9 @@ static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
         foreach (args, fn->agg_order) {
             SortBy* arg = (SortBy*)lfirst(args);
 
+            pstate->p_having_func_arg_level++;
             targs = lappend(targs, transformExprRecurse(pstate, arg->node));
+            pstate->p_having_func_arg_level--;
         }
     }
 
@@ -3138,6 +3164,7 @@ static Node* transformCharsetClause(ParseState* pstate, CharsetClause* c)
 {
     Node *result = NULL;
     Const *con = NULL;
+    Oid collid = InvalidOid;
 
     Assert(DB_IS_CMPT_BD);
     result = transformExprRecurse(pstate, c->arg);
@@ -3163,7 +3190,14 @@ static Node* transformCharsetClause(ParseState* pstate, CharsetClause* c)
         }
     }
 
-    exprSetCollation(result, get_default_collation_by_charset(c->charset));
+    if (unlikely(DB_IS_CMPT(B_FORMAT))) {
+        collid = get_default_collation_by_charset(c->charset, false);
+        if (OidIsValid(collid)) {
+            exprSetCollation(result, collid);
+        }
+    } else {
+        exprSetCollation(result, get_default_collation_by_charset(c->charset));
+    }
     return result;
 }
 

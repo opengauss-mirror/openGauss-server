@@ -142,6 +142,25 @@ bool check_unlink_rel_hashtbl(RelFileNode rnode, ForkNumber forknum)
     return found;
 }
 
+static void MdFinishLocalAsyncWrite(AioDispatchDesc_t *desc, bool clearDirty)
+{
+    Assert(desc != NULL);
+    Assert(desc->blockDesc.bufHdr != NULL);
+
+    START_CRIT_SECTION();
+    if (desc->blockDesc.descType == AioWrite) {
+        AsyncTerminateBufferIO(desc->blockDesc.bufHdr, clearDirty, 0, desc);
+        AdioLWLockRelease(desc->blockDesc.bufHdr->content_lock, desc->blockDesc.lockThreadMask);
+        AsyncUnpinBuffer((volatile void *)desc->blockDesc.bufHdr, true);
+    } else {
+        Assert(desc->blockDesc.descType == AioVacummFull);
+        AsyncTerminateBufferIOByVacuum(desc->blockDesc.bufHdr);
+    }
+    END_CRIT_SECTION();
+
+    adio_share_free(desc);
+}
+
 /*
  * register_dirty_segment() -- Mark a relation segment as needing fsync
  *
@@ -263,9 +282,13 @@ static int RetryDataFileIdOpenFile(bool isRedo, char* path, const RelFileNodeFor
      */
     if (isRedo || IsBootstrapProcessingMode() ||
         (u_sess->attr.attr_common.IsInplaceUpgrade && filenode.rnode.node.relNode < FirstNormalObjectId)) {
+        bool compressedNode = (filenode.rnode.node.opt != 0 && filenode.forknumber == MAIN_FORKNUM);
         ADIO_RUN()
         {
-            flags = O_RDWR | PG_BINARY | O_DIRECT | (u_sess->attr.attr_common.IsInplaceUpgrade ? O_TRUNC : 0);
+            flags = O_RDWR | PG_BINARY | (u_sess->attr.attr_common.IsInplaceUpgrade ? O_TRUNC : 0);
+            if (!compressedNode) {
+                flags |= O_DIRECT;
+            }
         }
         ADIO_ELSE()
         {
@@ -305,15 +328,18 @@ void mdcreate(SMgrRelation reln, ForkNumber forkNum, bool isRedo)
 
     filenode = RelFileNodeForkNumFill(reln->smgr_rnode, forkNum, 0);
 
+    bool isCompressed = IS_COMPRESSED_MAINFORK(reln, forkNum);
     ADIO_RUN()
     {
-        flags |= O_DIRECT;
+        if (!isCompressed) {
+            flags |= O_DIRECT;
+        }
     }
     ADIO_END();
 
     char* openFilePath = path;
     char dst[MAXPGPATH];
-    if (IS_COMPRESSED_MAINFORK(reln, forkNum)) {
+    if (isCompressed) {
         CopyCompressedPath(dst, path);
         openFilePath = dst;
     }
@@ -345,7 +371,10 @@ void mdcreate(SMgrRelation reln, ForkNumber forkNum, bool isRedo)
         if (isRedo || IsBootstrapProcessingMode() ||
             (u_sess->attr.attr_common.IsInplaceUpgrade && filenode.rnode.node.relNode < FirstNormalObjectId)) {
             ADIO_RUN() {
-                flags = O_RDWR | PG_BINARY | O_DIRECT | (u_sess->attr.attr_common.IsInplaceUpgrade ? O_TRUNC : 0);
+                flags = O_RDWR | PG_BINARY | (u_sess->attr.attr_common.IsInplaceUpgrade ? O_TRUNC : 0);
+                if (!isCompressed) {
+                    flags |= O_DIRECT;
+                }
             }
             ADIO_ELSE() {
                 flags = O_RDWR | PG_BINARY | (u_sess->attr.attr_common.IsInplaceUpgrade ? O_TRUNC : 0);
@@ -717,7 +746,9 @@ static File mdopenagain(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior
 
     ADIO_RUN()
     {
-        flags |= O_DIRECT;
+        if (!IS_COMPRESSED_MAINFORK(reln, forknum)) {
+            flags |= O_DIRECT;
+        }
     }
     ADIO_END();
 
@@ -785,7 +816,9 @@ static MdfdVec *mdopen(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior 
 
     ADIO_RUN()
     {
-        flags |= O_DIRECT;
+        if (!IS_COMPRESSED_MAINFORK(reln, forknum)) {
+            flags |= O_DIRECT;
+        }
     }
     ADIO_END();
 
@@ -1017,10 +1050,10 @@ int CompltrReadReq(void *aioDesc, long res)
         /* io error */
         Assert(0);
         /* If there was an error handle the i/o accordingly */
-        AsyncAbortBufferIO((void *)desc->blockDesc.bufHdr, true);
+        AsyncAbortBufferIO(desc->blockDesc.bufHdr, true, desc);
     } else {
         /* Make the buffer available again */
-        AsyncTerminateBufferIO((void *)desc->blockDesc.bufHdr, false, BM_VALID);
+        AsyncTerminateBufferIO(desc->blockDesc.bufHdr, false, BM_VALID, desc);
     }
 
     /* Unpin the buffer on behalf of the ADIO Completer */
@@ -1052,6 +1085,12 @@ void mdasyncwrite(SMgrRelation reln, ForkNumber forkNumber, AioDispatchDesc_t **
 {
 #ifndef ENABLE_LITE_MODE
     if (IS_COMPRESSED_MAINFORK(reln, forkNumber)) {
+        for (int i = 0; i < dn; i++) {
+            if (dList[i] != NULL) {
+                MdFinishLocalAsyncWrite(dList[i], true);
+                dList[i] = NULL;
+            }
+        }
         return;
     }
 
@@ -1059,6 +1098,7 @@ void mdasyncwrite(SMgrRelation reln, ForkNumber forkNumber, AioDispatchDesc_t **
         return;
     }
 
+    int submitCount = 0;
     for (int i = 0; i < dn; i++) {
         off_t offset;
         MdfdVec *v = NULL;
@@ -1079,16 +1119,35 @@ void mdasyncwrite(SMgrRelation reln, ForkNumber forkNumber, AioDispatchDesc_t **
          */
         v = _mdfd_getseg(smgr_rel, fork_num, block_num, false, EXTENSION_FAIL);
         if (v == NULL) {
-            return;
+            MdFinishLocalAsyncWrite(dList[i], true);
+            dList[i] = NULL;
+            continue;
         }
 
         offset = (off_t)BLCKSZ * (block_num % ((BlockNumber)RELSEG_SIZE));
 
         off_t offset_true = FileSeek(v->mdfd_vfd, 0L, SEEK_END);
         if (offset > offset_true) {
-            /* debug error */
-            ereport(PANIC, (errmsg("md async write error,write offset(%ld), file size(%ld)", (int64)offset,
-                                   (int64)offset_true)));
+            if (check_unlink_rel_hashtbl(smgr_rel->smgr_rnode.node, fork_num)) {
+                ereport(WARNING,
+                    (errmsg("md async write skipped for unlinked relation, "
+                            "write offset(%ld), file size(%ld), rel %u/%u/%u fork %d blk %u",
+                            (int64)offset, (int64)offset_true,
+                            smgr_rel->smgr_rnode.node.spcNode,
+                            smgr_rel->smgr_rnode.node.dbNode,
+                            smgr_rel->smgr_rnode.node.relNode,
+                            fork_num, block_num)));
+                MdFinishLocalAsyncWrite(dList[i], true);
+                dList[i] = NULL;
+                continue;
+            }
+            ereport(PANIC, (errmsg("md async write error, write offset(%ld), "
+                                   "file size(%ld), rel %u/%u/%u fork %d blk %u",
+                                   (int64)offset, (int64)offset_true,
+                                   smgr_rel->smgr_rnode.node.spcNode,
+                                   smgr_rel->smgr_rnode.node.dbNode,
+                                   smgr_rel->smgr_rnode.node.relNode,
+                                   fork_num, block_num)));
         }
 
         if (dList[i]->blockDesc.descType == AioWrite) {
@@ -1153,27 +1212,24 @@ int CompltrWriteReq(void *aioDesc, long res)
         if (res != desc->blockDesc.blockSize) {
             ereport(PANIC, (errmsg("async write failed, write_count(%ld), require_count(%d)", res,
                                    desc->blockDesc.blockSize)));
-            /* If there was an error handle the i/o accordingly */
-            AsyncAbortBufferIO((void *)desc->blockDesc.bufHdr, false);
+            AsyncAbortBufferIO(desc->blockDesc.bufHdr, false, aioDesc);
         } else {
-            /* Make the buffer available again */
-            AsyncTerminateBufferIO((void *)desc->blockDesc.bufHdr, true, 0);
+            desc->blockDesc.bufHdr->extra->lsn_on_disk = BufferGetLSN(desc->blockDesc.bufHdr);
+            AsyncTerminateBufferIO(desc->blockDesc.bufHdr, true, 0, aioDesc);
         }
 
-        /* Release the content lock */
-        LWLockRelease(desc->blockDesc.bufHdr->content_lock);
+        AdioLWLockRelease(desc->blockDesc.bufHdr->content_lock, desc->blockDesc.lockThreadMask);
 
-        /* Unpin the buffer and wake waiters, on behalf of the ADIO Completer */
         AsyncCompltrUnpinBuffer((volatile void *)desc->blockDesc.bufHdr);
     } else {
         Assert(desc->blockDesc.descType == AioVacummFull);
 
         if (res != desc->blockDesc.blockSize) {
-            AsyncAbortBufferIOByVacuum((void *)desc->blockDesc.bufHdr);
             ereport(WARNING, (errmsg("vacuum full async write failed, write_count(%ld), require_count(%d)", res,
                                      desc->blockDesc.blockSize)));
+            AsyncAbortBufferIOByVacuum(desc->blockDesc.bufHdr);
         } else {
-            AsyncTerminateBufferIOByVacuum((void *)desc->blockDesc.bufHdr);
+            AsyncTerminateBufferIOByVacuum(desc->blockDesc.bufHdr);
         }
     }
     END_CRIT_SECTION();
@@ -1853,7 +1909,9 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
 
     ADIO_RUN()
     {
-        oflags |= O_DIRECT;
+        if (!IS_COMPRESSED_MAINFORK(reln, forknum)) {
+            oflags |= O_DIRECT;
+        }
     }
     ADIO_END();
     char* openFilePath = fullpath;

@@ -852,6 +852,21 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"vacuum_truncate",
+            PGC_USERSET,
+            NODE_ALL,
+            AUTOVACUUM,
+            gettext_noop("Enables vacuum to try to truncate off any empty pages at the end of the table."),
+            gettext_noop("If true, VACUUM and autovacuum do the truncation and the disk space for the truncated "
+                         "pages is returned to the operating system. Note that the truncation requires an "
+                         "ACCESS EXCLUSIVE lock on the table. The setting can also be overridden for individual "
+                         "tables by changing table storage parameters."),
+            },
+            &u_sess->attr.attr_storage.vacuum_truncate,
+            true,
+            NULL,
+            NULL,
+            NULL},
         {{"enable_adio_debug",
             PGC_SUSET,
             NODE_ALL,
@@ -865,7 +880,11 @@ static void InitStorageConfigureNamesBool()
             NULL},
 
         {{"enable_adio_function",
+#ifdef ENABLE_LITE_MODE
             PGC_INTERNAL,
+#else
+            PGC_POSTMASTER,
+#endif
             NODE_ALL,
             DEVELOPER_OPTIONS,
             gettext_noop("Enable adio function."),
@@ -3275,14 +3294,14 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-        {{"prefetch_quantity",
+        {{"adio_prefetch_quantity",
             PGC_USERSET,
             NODE_ALL,
             RESOURCES_MEM,
             gettext_noop("Sets the IO quantity of prefetch buffers used by async dirct IO interface."),
             NULL,
             GUC_UNIT_BLOCKS},
-            &u_sess->attr.attr_storage.prefetch_quantity,
+            &u_sess->attr.attr_storage.adioPrefetchQuantity,
             4096,
             128,
             131072,
@@ -4214,6 +4233,47 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+#ifndef ENABLE_LITE_MODE
+        {{"adio_buffer_align_size",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Buffer aligned size for adio, should set to the page size of file system."),
+            NULL},
+            &g_instance.attr.attr_storage.adioBufferAlignSize,
+            BLCKSZ,
+            512,
+            BLCKSZ,
+            NULL,
+            NULL,
+            NULL},
+        {{"adio_reader_thread_num",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Number of reader threads for async direct IO."),
+            NULL},
+            &g_instance.attr.attr_storage.adioReaderThreadNum,
+            2,
+            1,
+            10,
+            NULL,
+            NULL,
+            NULL},
+        {{"adio_writer_thread_num",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Number of writer threads for async direct IO."),
+            NULL},
+            &g_instance.attr.attr_storage.adioWriterThreadNum,
+            2,
+            1,
+            10,
+            NULL,
+            NULL,
+            NULL},
+#endif
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -5677,10 +5737,12 @@ static bool check_adio_debug_guc(bool* newval, void** extra, GucSource source)
 
 static bool check_adio_function_guc(bool* newval, void** extra, GucSource source)
 {
+#ifdef ENABLE_LITE_MODE
     /* This value is always false no matter how the user sets it.  */
     if (*newval == true) {
         *newval = false;
     }
+#endif
 
     return true;
 }

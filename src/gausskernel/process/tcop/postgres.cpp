@@ -6551,7 +6551,7 @@ void handle_terminate_active_sess_socket()
             u_sess->sig_cxt.got_terminate_sess_socket = false;
         }
     } else if (t_thrd.role == THREADPOOL_STREAM) {
-        if (u_sess->proc_cxt.MyProcPort->is_logic_conn) {
+        if (u_sess->proc_cxt.MyProcPort != NULL && u_sess->proc_cxt.MyProcPort->is_logic_conn) {
             gs_close_gsocket(&(u_sess->proc_cxt.MyProcPort->gs_sock));
         }
     } else {
@@ -8883,6 +8883,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         RESUME_INTERRUPTS();
         StreamNodeGroup::syncQuit(STREAM_ERROR);
         StreamNodeGroup::destroy(STREAM_ERROR);
+        if (u_sess->stream_cxt.global_obj == NULL && u_sess->instr_cxt.global_instr != NULL) {
+            u_sess->instr_cxt.global_instr = NULL;
+            u_sess->instr_cxt.thread_instr = NULL;
+        }
 
 #ifndef ENABLE_MULTIPLE_NODES
         clean_up_debug_client(true);
@@ -9102,6 +9106,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         /* reset xmin before ReadCommand, in case blocking redo */
         if (RecoveryInProgress()) {
             
+        }
+        if (send_ready_for_query && u_sess->stream_cxt.global_obj == NULL &&
+            u_sess->instr_cxt.global_instr != NULL) {
+            u_sess->instr_cxt.global_instr = NULL;
+            u_sess->instr_cxt.thread_instr = NULL;
         }
 
         /*

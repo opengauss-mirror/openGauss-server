@@ -247,6 +247,7 @@ extern void check_authorization_valid(Datum privilege);
 extern void check_program_type_argument(Datum program_type, int number_of_arguments);
 extern void check_program_action(Datum action);
 extern void check_if_arguments_defined(Datum program_name, int number_of_arguments);
+extern void check_credential_usage_privilege(Datum credential_name);
 extern void check_privilege(char *username, const char *authorization);
 extern bool is_private_scheduler_object(Relation rel, Datum object_name, const char *user_str);
 extern bool is_internal_scheduler_object(Relation rel, Datum object_name);

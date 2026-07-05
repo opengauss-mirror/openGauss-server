@@ -5211,7 +5211,7 @@ static bool do_actual_build(uint32 term)
     bool buildSuccess = backup_main(pg_data, term, is_from_standby);
 
     if (buildSuccess && IS_CROSS_CLUSTER_BUILD) {
-        buildSuccess = RenameTblspcDir(pg_data);
+        buildSuccess = RenameTblspcDir(pg_data, remotenodename, pgxcnodename);
     }
 
     if (!buildSuccess) {

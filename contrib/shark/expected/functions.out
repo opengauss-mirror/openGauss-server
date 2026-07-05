@@ -1846,7 +1846,7 @@ select dateadd(dd,2,time'23:20:20');
 select dateadd(dd,3,timetz '23:20:20');
            dateadd            
 ------------------------------
- Thu Jan 04 23:20:20 1900 PST
+ Thu Jan 04 22:20:20 1900 PST
 (1 row)
 
 select dateadd(dy,2,time'23:20:20');

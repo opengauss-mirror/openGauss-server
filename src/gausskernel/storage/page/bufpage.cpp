@@ -274,7 +274,22 @@ static inline void AllocPageCopyMem()
     if (t_thrd.storage_cxt.pageCopy == NULL) {
         ADIO_RUN()
         {
-            t_thrd.storage_cxt.pageCopy = (char*)adio_align_alloc(BLCKSZ);
+            /*
+             * These page-copy buffers must live for the whole lifetime of the
+             * thread (see the comment on PageDataEncryptIfNeed). Do NOT allocate
+             * them from AlignMemoryContext (the adio_align_alloc default): that
+             * context is reset on every transaction abort in PostgresMain, which
+             * would free the buffer while t_thrd.storage_cxt.pageCopy still points
+             * at it. A later page copy through that dangling pointer overwrites a
+             * heap block that the allocator has since handed to another context
+             * (observed: "corrupt header in block" in Combo CIDs /
+             * TopTransactionContext). Allocate from the thread-lifetime storage
+             * context instead and align manually for direct IO.
+             */
+            int adioAlign = g_instance.attr.attr_storage.adioBufferAlignSize;
+            t_thrd.storage_cxt.pageCopy_ori = (char*)MemoryContextAlloc(
+                THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), (BLCKSZ + (Size)adioAlign));
+            t_thrd.storage_cxt.pageCopy = (char*)TYPEALIGN(adioAlign, t_thrd.storage_cxt.pageCopy_ori);
         }
         ADIO_ELSE()
         {
@@ -292,7 +307,11 @@ static inline void AllocPageCopyMem()
     if (t_thrd.storage_cxt.segPageCopy == NULL) {
         ADIO_RUN()
         {
-            t_thrd.storage_cxt.segPageCopy = (char*)adio_align_alloc(BLCKSZ);
+            /* Thread-lifetime allocation; see the explanation for pageCopy above. */
+            int adioAlign = g_instance.attr.attr_storage.adioBufferAlignSize;
+            t_thrd.storage_cxt.segPageCopyOri = (char*)MemoryContextAlloc(
+                THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), (BLCKSZ + (Size)adioAlign));
+            t_thrd.storage_cxt.segPageCopy = (char*)TYPEALIGN(adioAlign, t_thrd.storage_cxt.segPageCopyOri);
         }
         ADIO_ELSE()
         {
@@ -419,6 +438,26 @@ char* PageSetChecksumCopy(Page page, BlockNumber blkno, bool is_segbuf)
     AllocPageCopyMem();
 
     char *dst = is_segbuf ? t_thrd.storage_cxt.segPageCopy : t_thrd.storage_cxt.pageCopy;
+
+    errno_t rc = memcpy_s(dst, BLCKSZ, (char*)page, BLCKSZ);
+    securec_check(rc, "", "");
+
+    /* set page->pd_flags mark using FNV1A for checksum */
+    PageSetChecksumByFNV1A(dst);
+
+    ((PageHeader)dst)->pd_checksum = pg_checksum_page(dst, blkno);
+
+    return dst;
+}
+
+char* AdioPageSetChecksumCopy(Page page, BlockNumber blkno, bool isSegbuf)
+{
+    /* If we don't need a checksum, just return the passed-in data */
+    if (!CheckPageZeroCases((PageHeader)page)) {
+        return (char*)page;
+    }
+
+    char *dst = t_thrd.storage_cxt.inProgressAioPageCopys + t_thrd.storage_cxt.InProgressAioDispatchCount * BLCKSZ;
 
     errno_t rc = memcpy_s(dst, BLCKSZ, (char*)page, BLCKSZ);
     securec_check(rc, "", "");

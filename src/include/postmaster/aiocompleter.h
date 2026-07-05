@@ -35,14 +35,15 @@
 /*
  * requests/completers types
  */
-typedef enum {
-    // PageRangePrefetchType=0,
-    PageListPrefetchType = 0,
-    // PageRangeBackWriteType,
-    PageListBackWriteType,
-    CUListPrefetchType,
-    CUListWriteType,
-    NUM_AIOCOMPLTR_TYPES /* Number of types, must be last */
+typedef enum : uint8_t {
+    PREFETCH_TYPE = 0,
+    FLUSH_TYPE,
+    NUM_AIOCOMPLTR_TYPES,
+    /* backward compat aliases for cstore code */
+    PAGE_LIST_PREFETCH_TYPE = PREFETCH_TYPE,
+    PAGE_LIST_BACK_WRITE_TYPE = FLUSH_TYPE,
+    CU_LIST_PREFETCH_TYPE = PREFETCH_TYPE,
+    CU_LIST_WRITE_TYPE = FLUSH_TYPE,
 } AioCompltrType;
 
 /*
@@ -64,6 +65,7 @@ typedef struct BlockDesc {
     BufferDesc* bufHdr;
     AioCompltrType reqType;
     AioDescType descType;
+    uint64 lockThreadMask;
 } BlockDesc_t;
 
 typedef struct AioCUDesc {
@@ -93,12 +95,11 @@ typedef struct AioDispatchCUDesc {
 } AioDispatchCUDesc_t;
 
 /* GUC options */
-extern int AioCompltrSets;
 extern int AioCompltrEvents;
 
-extern void AioCompltrMain(int ac, char** av);
+extern void AioCompltrMain(int compltrIdx);
 extern void AioCompltrStop(int signal);
-extern int AioCompltrStart(void);
+extern void AioCmpltrStart(void);
 extern bool AioCompltrIsReady(void);
 extern io_context_t CompltrContext(AioCompltrType reqType, int h);
 extern short CompltrPriority(AioCompltrType reqType);
@@ -117,5 +118,34 @@ extern void mdasyncread(SMgrRelation reln, ForkNumber forkNum, AioDispatchDesc_t
 extern void mdasyncwrite(SMgrRelation reln, ForkNumber forkNumber, AioDispatchDesc_t** dList, int32 dn);
 
 extern void AioResourceInitialize(void);
+
+/* Completer callback to handle the AIO event */
+using AioCallback = int (*)(void*, long);
+
+/*
+ * Completer Thread definitions
+ */
+typedef struct AioCompltrDescT {
+    AioCompltrType reqtype;
+    int threadNum;
+    int threadStartIdx;
+    AioCallback callback;
+    int maxEvents;
+
+    int minNr;
+    int maxNr;
+    int timeout;
+
+    AioPriority reqPrio;
+} AioCompltrDescT;
+
+typedef struct {
+    io_context_t context;
+    struct io_event* eventsp;
+    ThreadId tid;
+    AioCompltrDescT* compltrDescp;
+} AioCompltrThreadT;
+
+extern bool volatile g_aioCompltrReady;
 
 #endif /* _AIOCOMPLETER_H */

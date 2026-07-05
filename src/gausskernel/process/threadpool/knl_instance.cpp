@@ -667,6 +667,7 @@ static void knl_g_pid_init(knl_g_pid_context* pid_cxt)
     pid_cxt->PageWriterPID = NULL;
     pid_cxt->CommReceiverPIDS = NULL;
     pid_cxt->PgAuditPID = NULL;
+    pid_cxt->AioCompleterPID = NULL;
     securec_check(rc, "\0", "\0");
 }
 

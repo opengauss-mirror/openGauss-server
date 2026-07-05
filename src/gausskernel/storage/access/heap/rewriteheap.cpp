@@ -271,6 +271,7 @@ RewriteState begin_heap_rewrite(Relation old_heap, Relation new_heap, Transactio
 
         for (int i = 0; i < REWRITE_BUFFERS_QUEUE_COUNT * 2; i++) {
             pg_atomic_init_u64(&(state->rs_buffers_handler[i].state), 0);
+            state->rs_buffers_handler[i].extra = NULL;
         }
     }
     ADIO_ELSE()
@@ -1063,7 +1064,7 @@ void rewrite_page_list_write(RewriteState state)
         aioDescp->blockDesc.blockNum = start + i;
         aioDescp->blockDesc.buffer = (char *)(buf_list + i * BLCKSZ);
         aioDescp->blockDesc.blockSize = BLCKSZ;
-        aioDescp->blockDesc.reqType = PageListBackWriteType;
+        aioDescp->blockDesc.reqType = PAGE_LIST_BACK_WRITE_TYPE;
         aioDescp->blockDesc.bufHdr = bufHdr;
         aioDescp->blockDesc.descType = AioVacummFull;
 

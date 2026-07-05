@@ -27,6 +27,7 @@
 #include "access/double_write.h"
 #include "storage/smgr/segment.h"
 #include "utils/builtins.h"
+#include "utils/aiomem.h"
 
 const uint16 RESULT_LEN = 256;
 Datum dw_get_single_flush_dwn()
@@ -225,7 +226,7 @@ static void dw_recovery_first_version_page()
     SMgrRelation reln = NULL;
     char *unaligned_buf = (char *)palloc0(BLCKSZ + BLCKSZ); /* one more BLCKSZ for alignment */
     char *dw_block = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
-    char *data_block = (char *)palloc0(BLCKSZ);
+    char *dataBlock = (char *)mem_align_alloc(BLCKSZ, BLCKSZ);
     dw_first_flush_item flush_item;
     bool needPcaCheck = false;
     bool isFisrt = true;
@@ -258,12 +259,12 @@ static void dw_recovery_first_version_page()
 
         reln = smgropen(flush_item.buf_tag.rnode, InvalidBackendId, GetColumnNum(flush_item.buf_tag.forkNum));
         /* read data page */
-        if (!dw_read_data_page(flush_item.buf_tag, reln, data_block)) {
+        if (!dw_read_data_page(flush_item.buf_tag, reln, dataBlock)) {
             continue;
         }
-        dw_log_page_header((PageHeader)data_block);
-        if (!dw_verify_pg_checksum((PageHeader)data_block, flush_item.buf_tag.blockNum, false) ||
-            XLByteLT(PageGetLSN(data_block), PageGetLSN(dw_block))) {
+        dw_log_page_header((PageHeader)dataBlock);
+        if (!dw_verify_pg_checksum((PageHeader)dataBlock, flush_item.buf_tag.blockNum, false) ||
+            XLByteLT(PageGetLSN(dataBlock), PageGetLSN(dw_block))) {
             memset_s(dw_block + pghr->pd_lower, sizeof(dw_first_flush_item), 0, sizeof(dw_first_flush_item));
             securec_check(rc, "\0", "\0");
             dw_set_pg_checksum(dw_block, flush_item.buf_tag.blockNum);
@@ -279,12 +280,12 @@ static void dw_recovery_first_version_page()
                     (const char *)dw_block, false);
             }
             dw_log_recovery_page(LOG, "Date page recovered", flush_item.buf_tag);
-            dw_log_page_header((PageHeader)data_block);
+            dw_log_page_header((PageHeader)dataBlock);
         }
     }
 
     pfree(unaligned_buf);
-    pfree(data_block);
+    mem_align_free(dataBlock);
 }
 
 static bool dw_verify_item(const dw_single_flush_item* item, uint16 dwn)
@@ -325,7 +326,7 @@ static void dw_recovery_single_page(const dw_single_flush_item *item, uint16 ite
     knl_g_dw_context* single_cxt = &g_instance.dw_single_cxt;
     char *unaligned_buf = (char *)palloc0(BLCKSZ + BLCKSZ); /* one more BLCKSZ for alignment */
     char *dw_block = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
-    char *data_block = (char *)palloc0(BLCKSZ);
+    char *dataBlock = (char *)mem_align_alloc(BLCKSZ, BLCKSZ);
     uint64 base_offset = 0;
     bool needPcaCheck = false;
     bool isFisrt = true;
@@ -353,12 +354,12 @@ static void dw_recovery_single_page(const dw_single_flush_item *item, uint16 ite
 
         reln = smgropen(buf_tag.rnode, InvalidBackendId, GetColumnNum(buf_tag.forkNum));
         /* read data page */
-        if (!dw_read_data_page(buf_tag, reln, data_block)) {
+        if (!dw_read_data_page(buf_tag, reln, dataBlock)) {
             continue;
         }
-        dw_log_page_header((PageHeader)data_block);
-        if (!dw_verify_pg_checksum((PageHeader)data_block, buf_tag.blockNum, false) ||
-            XLByteLT(PageGetLSN(data_block), PageGetLSN(dw_block))) {
+        dw_log_page_header((PageHeader)dataBlock);
+        if (!dw_verify_pg_checksum((PageHeader)dataBlock, buf_tag.blockNum, false) ||
+            XLByteLT(PageGetLSN(dataBlock), PageGetLSN(dw_block))) {
             needPcaCheck = dw_is_pca_need_recover_single(&preBufferTag, &buf_tag, reln, &isFisrt);
             if (IsSegmentPhysicalRelNode(buf_tag.rnode)) {
                 // seg_space must be initialized before.
@@ -369,12 +370,12 @@ static void dw_recovery_single_page(const dw_single_flush_item *item, uint16 ite
                 smgrwrite(reln, buf_tag.forkNum, buf_tag.blockNum, (const char *)dw_block, false);
             }
             dw_log_recovery_page(LOG, "Date page recovered", buf_tag);
-            dw_log_page_header((PageHeader)data_block);
+            dw_log_page_header((PageHeader)dataBlock);
         }
     }
 
     pfree(unaligned_buf);
-    pfree(data_block);
+    mem_align_free(dataBlock);
     return;
 }
 

@@ -376,10 +376,10 @@ extern void AsyncCompltrPinBuffer(volatile void* bufHdr);
 extern void AsyncCompltrUnpinBuffer(volatile void* bufHdr);
 extern void TerminateBufferIO(volatile BufferDesc* buf, bool clear_dirty, uint64 set_flag_bits);
 
-extern void AsyncTerminateBufferIO(void* bufHdr, bool clear_dirty, uint64 set_flag_bits);
-extern void AsyncAbortBufferIO(void* buf, bool isForInput);
-extern void AsyncTerminateBufferIOByVacuum(void* buffer);
-extern void AsyncAbortBufferIOByVacuum(void* buffer);
+extern void AsyncTerminateBufferIO(BufferDesc* bufHdr, bool clear_dirty, uint64 set_flag_bits, void *desc);
+extern void AsyncAbortBufferIO(BufferDesc* buf, bool isForInput, void *desc);
+extern void AsyncTerminateBufferIOByVacuum(BufferDesc* buffer);
+extern void AsyncAbortBufferIOByVacuum(BufferDesc* buffer);
 extern void AbortBufferIO(void);
 extern void AbortBufferIO_common(BufferDesc* buf, bool isForInput);
 extern void AbortAsyncListIO(void);

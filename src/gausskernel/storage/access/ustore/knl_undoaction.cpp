@@ -28,6 +28,7 @@
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "access/ustore/knl_uverify.h"
 #include "access/ustore/knl_whitebox_test.h"
+#include "utils/aiomem.h"
 #include "access/xlog_internal.h"
 #include "catalog/pg_partition_fn.h"
 #include "miscadmin.h"
@@ -1187,7 +1188,13 @@ bool ExecuteUndoActionsForPartition(Relation src, SMgrRelation dest, ForkNumber 
         }
     }
 
-    bufToWrite = (char *) palloc0(BLCKSZ);
+    ADIO_RUN() {
+        bufToWrite = (char *)adio_align_alloc(BLCKSZ);
+    }
+    ADIO_ELSE() {
+        bufToWrite = (char *)palloc0(BLCKSZ);
+    }
+    ADIO_END();
     rc = memcpy_s(bufToWrite, BLCKSZ, page, BLCKSZ);
     securec_check(rc, "\0", "\0");
     if (XLogIsNeeded() && RelationNeedsWAL(src)) {
@@ -1204,6 +1211,12 @@ bool ExecuteUndoActionsForPartition(Relation src, SMgrRelation dest, ForkNumber 
     pfree_ext(urecptr);
     pfree_ext(fxid);
     pfree_ext(page);
-    pfree_ext(bufToWrite);
+    ADIO_RUN() {
+        adio_align_free(bufToWrite);
+    }
+    ADIO_ELSE() {
+        pfree_ext(bufToWrite);
+    }
+    ADIO_END();
     return rollBacked;
 }

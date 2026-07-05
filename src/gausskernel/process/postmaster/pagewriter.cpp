@@ -39,6 +39,7 @@
 #include "access/double_write.h"
 #include "access/xlog.h"
 #include "utils/aiomem.h"
+#include "postmaster/aiocompleter.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
@@ -2100,6 +2101,117 @@ static void ckpt_try_skip_invalid_elem_in_queue_head()
     return;
 }
 
+/* poll interval (microseconds) while waiting for in-flight AIO to finish */
+#define ADIO_AIO_WAIT_INTERVAL_US (1000L)
+
+static void WaitAdioFinish()
+{
+    for (int i = 0; i < t_thrd.storage_cxt.InProgressAioDispatchCount; i++) {
+        BufferDesc *buf = t_thrd.storage_cxt.inProgressAioDescs[i];
+        if (buf == NULL) {
+            continue;
+        }
+
+        long wait_us = 0;
+        BufferTag orig_tag = buf->tag;
+
+        bool ioInProgress = true;
+        while (ioInProgress) {
+            uint64 buf_state = LockBufHdr(buf);
+            UnlockBufHdr(buf, buf_state);
+
+            if (buf_state & BM_IO_ERROR) {
+                ioInProgress = false;
+                continue;
+            }
+            if (!(buf_state & BM_IO_IN_PROGRESS)) {
+                ioInProgress = false;
+                continue;
+            }
+
+            /*
+             * ABA detection: if the buffer tag has changed, the buffer was recycled
+             * and the original AIO must have completed before recycling could happen.
+             * Compare all five tag fields for maximum safety.
+             */
+            if (buf->tag.rnode.spcNode != orig_tag.rnode.spcNode ||
+                buf->tag.rnode.dbNode  != orig_tag.rnode.dbNode  ||
+                buf->tag.rnode.relNode != orig_tag.rnode.relNode ||
+                buf->tag.blockNum      != orig_tag.blockNum      ||
+                buf->tag.forkNum       != orig_tag.forkNum) {
+                ereport(DEBUG1,
+                    (errmsg("WaitAdioFinish: buffer %d recycled "
+                            "(orig %u/%u/%u fork %d blk %u -> new %u/%u/%u fork %d blk %u), skip",
+                        buf->buf_id,
+                        orig_tag.rnode.spcNode, orig_tag.rnode.dbNode, orig_tag.rnode.relNode,
+                        orig_tag.forkNum, orig_tag.blockNum,
+                        buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode,
+                        buf->tag.forkNum, buf->tag.blockNum)));
+                ioInProgress = false;
+                continue;
+            }
+
+            pg_usleep(ADIO_AIO_WAIT_INTERVAL_US);
+            wait_us += ADIO_AIO_WAIT_INTERVAL_US;
+            if (wait_us > 0 && (wait_us % 10000000L) == 0) {
+                ereport(WARNING,
+                    (errmsg("WaitAdioFinish: buffer %d still IO_IN_PROGRESS after %lds, "
+                            "rel %u/%u/%u fork %d blk %u",
+                            buf->buf_id, wait_us / 1000000L,
+                            buf->tag.rnode.spcNode, buf->tag.rnode.dbNode,
+                            buf->tag.rnode.relNode, buf->tag.forkNum, buf->tag.blockNum)));
+            }
+        }
+    }
+}
+
+static void DrainInProgressAioDescs()
+{
+    if (t_thrd.storage_cxt.InProgressAioDispatchCount <= 0) {
+        return;
+    }
+    for (int i = 0; i < t_thrd.storage_cxt.InProgressAioDispatchCount; i++) {
+        if (t_thrd.storage_cxt.inProgressAioDescs[i] != NULL) {
+            CheckIOState(t_thrd.storage_cxt.inProgressAioDescs[i]);
+        }
+    }
+    t_thrd.storage_cxt.InProgressAioDispatchCount = 0;
+}
+
+void AdioEnlargeBuffers(int maxbuffers)
+{
+    if (maxbuffers <= 0) {
+        return;
+    }
+
+    if (t_thrd.storage_cxt.inProgressAioPageCopys == NULL ||
+               t_thrd.storage_cxt.inProgressAioDescs == NULL ||
+               t_thrd.storage_cxt.InProgressAioDispatch == NULL ||
+               t_thrd.storage_cxt.aioPageCopyMaxCount < maxbuffers) {
+        DrainInProgressAioDescs();
+
+        if (t_thrd.storage_cxt.inProgressAioPageCopys != NULL) {
+            adio_align_free(t_thrd.storage_cxt.inProgressAioPageCopys);
+        }
+        if (t_thrd.storage_cxt.inProgressAioDescs != NULL) {
+            adio_align_free(t_thrd.storage_cxt.inProgressAioDescs);
+        }
+        if (t_thrd.storage_cxt.InProgressAioDispatch != NULL) {
+            pfree(t_thrd.storage_cxt.InProgressAioDispatch);
+        }
+
+        t_thrd.storage_cxt.inProgressAioPageCopys =
+            (char *)adio_align_alloc(maxbuffers * BLCKSZ);
+        t_thrd.storage_cxt.inProgressAioDescs =
+            (struct BufferDesc **)adio_align_alloc(maxbuffers * sizeof(struct BufferDesc *));
+        t_thrd.storage_cxt.InProgressAioDispatch =
+            (AioDispatchDesc_t **)palloc(sizeof(AioDispatchDesc_t *) * maxbuffers);
+    }
+
+    t_thrd.storage_cxt.aioPageCopyMaxCount = maxbuffers;
+    t_thrd.storage_cxt.InProgressAioDispatchCount = 0;
+}
+
 static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext *wb_context,
     const CkptSortItem *dirty_buf_list, int start, int batch_num)
 {
@@ -2111,6 +2223,11 @@ static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext *wb_context,
     int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
     PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
     DSSAioCxt *aio_cxt = &pgwr->aio_cxt;
+
+    ADIO_RUN() {
+        AdioEnlargeBuffers(batch_num);
+    }
+    ADIO_END()
 
     for (int i = start; i < start + batch_num; i++) {
         buf_id = dirty_buf_list[i].buf_id;
@@ -2138,6 +2255,11 @@ static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext *wb_context,
     if (ENABLE_DMS) {
         DSSAioFlush(aio_cxt);
     }
+
+    ADIO_RUN() {
+        WaitAdioFinish();
+    }
+    ADIO_END()
 
     return num_actual_flush;
 }

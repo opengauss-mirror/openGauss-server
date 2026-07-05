@@ -290,6 +290,7 @@ static void CheckPartitionExpr(Node* expr, int* colCount);
 static char* transformIndexOptions(List* list);
 static void setAccessMethod(Constraint *n);
 static char* GetValidUserHostId(char* userName, char* hostId);
+static char* GetUserHostIdFromVconst(char* hostId, bool appendDot);
 static void CheckHostId(char* hostId);
 static void CheckUserHostIsValid();
 
@@ -707,7 +708,7 @@ static void Funcname_Judge(List *names, List *args);
 
 %type <ival>	Iconst SignedIconst opt_partitions_num opt_subpartitions_num
 %type <str>		Sconst comment_text notify_payload
-%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst definer_user definer_expression UserId
+%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst definer_user definer_expression UserId UserHostPart
 %type <list>	var_list guc_value_extension_list
 %type <str>		ColId ColLabel ColLabel_with_rownum var_name type_function_name param_name charset_collate_name
 %type <node>	var_value zone_value
@@ -1742,13 +1743,9 @@ CreateOptRoleElem:
  *****************************************************************************/
 
 UserId:
-			SCONST SET_USER_IDENT
+			SCONST UserHostPart
 					{
 						$$ = GetValidUserHostId($1, $2);
-					}
-			| SCONST '@' SCONST
-					{
-						$$ = GetValidUserHostId($1, $3);
 					}
 			| SCONST
 					{
@@ -1761,7 +1758,7 @@ UserId:
 						}
 						$$ = $1;
 					}
-			| RoleId SET_USER_IDENT
+			| RoleId UserHostPart
 					{
 						$$ = GetValidUserHostId($1, $2);
 					}
@@ -1769,6 +1766,39 @@ UserId:
 					{
 						IsValidIdentUsername($1);
 						$$ = $1;
+					}
+		;
+
+UserHostPart:
+			SET_USER_IDENT
+					{
+						$$ = $1;
+					}
+			| '@' SCONST
+					{
+						$$ = $2;
+					}
+			| '@' ColId
+					{
+						$$ = $2;
+					}
+			| '@' Iconst
+					{
+						char buf[64];
+						snprintf(buf, sizeof(buf), "%d", $2);
+						$$ = pstrdup(buf);
+					}
+			| '@' FCONST
+					{
+						$$ = $2;
+					}
+			| '@' VCONST
+					{
+						$$ = GetUserHostIdFromVconst($2, false);
+					}
+			| '@' VCONST '.'
+					{
+						$$ = GetUserHostIdFromVconst($2, true);
 					}
 		;
 
@@ -15845,6 +15875,7 @@ ev_body:    {
 				/* Reset the flag which mark whether we are in slash proc. */
 				yyextra->core_yy_extra.in_slash_proc_body = false;
 				yyextra->core_yy_extra.dolqstart = NULL;
+				yyextra->core_yy_extra.is_createstmt = false;
 				$$ = ev_body_str;
 		}
 	;
@@ -16234,6 +16265,7 @@ ev_where_body:	{
 				/* Reset the flag which mark whether we are in slash proc. */
 				yyextra->core_yy_extra.in_slash_proc_body = false;
 				yyextra->core_yy_extra.dolqstart = NULL;
+				yyextra->core_yy_extra.is_createstmt = false;
 				$$ = ev_body_str;
 			}
 		;
@@ -16425,6 +16457,7 @@ CreatePackageStmt:
                     /* Reset the flag which mark whether we are in slash proc. */
                     yyextra->core_yy_extra.in_slash_proc_body = false;
                     yyextra->core_yy_extra.dolqstart = NULL;
+                    yyextra->core_yy_extra.is_createstmt = false;
                     /*
                      * Add the end location of slash proc to the locationlist for the multi-query 
                      * processed.
@@ -16716,6 +16749,7 @@ pkg_body_subprogram: {
                 /* Reset the flag which mark whether we are in slash proc. */
                 yyextra->core_yy_extra.in_slash_proc_body = false;
                 yyextra->core_yy_extra.dolqstart = NULL;
+                yyextra->core_yy_extra.is_createstmt = false;
                 /*
                 * Add the end location of slash proc to the locationlist for the multi-query 
                 * processed.
@@ -17391,6 +17425,7 @@ subprogram_body: 	{
 				/* Reset the flag which mark whether we are in slash proc. */
 				yyextra->core_yy_extra.in_slash_proc_body = false;
 				yyextra->core_yy_extra.dolqstart = NULL;
+				yyextra->core_yy_extra.is_createstmt = false;
 
 				/*
 				 * Add the end location of slash proc to the locationlist for the multi-query 
@@ -33238,6 +33273,19 @@ static char* GetValidUserHostId(char* userName, char* hostId)
 		ereport(ERROR,(errcode(ERRCODE_INVALID_NAME),errmsg("String %s is too long for user name (should be no longer than 64)", buf.data)));
 	}
 	return buf.data;
+}
+
+static char* GetUserHostIdFromVconst(char* hostId, bool appendDot)
+{
+	Size len = strlen(hostId);
+	char* userHostId = (char*)palloc0(len + (appendDot ? 2 : 1));
+	for (Size i = 0; i < len; i++) {
+		userHostId[i] = (hostId[i] == DB4AI_SNAPSHOT_VERSION_SEPARATOR) ? '.' : hostId[i];
+	}
+	if (appendDot) {
+		userHostId[len] = '.';
+	}
+	return userHostId;
 }
 
 static void CheckHostId(char* hostId)

@@ -1261,7 +1261,10 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
         return true;
     }
 
-    char* buf = (char*)palloc(BLCKSZ);
+    /* O_DIRECT under ADIO requires the read buffer aligned to adioBufferAlignSize */
+    int adioAlign = g_instance.attr.attr_storage.adioBufferAlignSize;
+    char* bufOri = (char*)palloc(BLCKSZ + adioAlign);
+    char* buf = (char*)TYPEALIGN(adioAlign, bufOri);
     BlockNumber nblocks;
     BlockNumber blkno;
     ForkNumber forkNum = MAIN_FORKNUM;
@@ -1331,7 +1334,7 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
         }
     }
 
-    pfree_ext(buf);
+    pfree_ext(bufOri);
     return isValidRelationPage;
 }
 
@@ -1376,8 +1379,10 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
     isValidRelationPageFast = VerifyRowRelFast(rel, checkCudesc);
 
     if (RelationIsUstoreIndex(rel) || RelationIsUstoreFormat(rel)) {
-        /* check all tuples of ustore relation. */
-        buf = (char*)palloc(BLCKSZ);
+        /* check all tuples of ustore relation. O_DIRECT under ADIO needs an aligned buffer. */
+        int adioAlign = g_instance.attr.attr_storage.adioBufferAlignSize;
+        char* bufOri = (char*)palloc(BLCKSZ + adioAlign);
+        buf = (char*)TYPEALIGN(adioAlign, bufOri);
         RelationOpenSmgr(rel);
         smgrRel = rel->rd_smgr;
         nblocks = smgrnblocks(smgrRel, forkNum);
@@ -1389,7 +1394,7 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
                 VerifyUstorePage(rel, page, blkno, USTORE_VERIFY_COMPLETE);
             }
         }
-        pfree_ext(buf);
+        pfree_ext(bufOri);
     }
     
     if (rel->rd_rel->relkind == RELKIND_RELATION || rel->rd_rel->relkind == RELKIND_TOASTVALUE) {

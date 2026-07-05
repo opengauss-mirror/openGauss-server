@@ -479,8 +479,19 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
          */
         possibly_freeable = vacrelstats->rel_pages - vacrelstats->nonempty_pages;
         if (possibly_freeable > 0 && (possibly_freeable >= REL_TRUNCATE_MINIMUM ||
-            possibly_freeable >= vacrelstats->rel_pages / REL_TRUNCATE_FRACTION))
-            lazy_truncate_heap(onerel, vacstmt, vacrelstats);
+            possibly_freeable >= vacrelstats->rel_pages / REL_TRUNCATE_FRACTION)) {
+            /* Check if truncate is enabled */
+            bool should_truncate = false;
+            StdRdOptions *rdopts = (StdRdOptions *)onerel->rd_options;
+            if (rdopts != NULL && rdopts->vacuum_truncate_set) {
+                should_truncate = rdopts->vacuum_truncate;
+            } else {
+                should_truncate = u_sess->attr.attr_storage.vacuum_truncate;
+            }
+            if (should_truncate) {
+                lazy_truncate_heap(onerel, vacstmt, vacrelstats);
+            }
+        }
     }
 
     /*
@@ -1046,7 +1057,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
 
     ADIO_RUN()
     {
-        uint32 quantity = (uint32)u_sess->attr.attr_storage.prefetch_quantity;
+        uint32 quantity = (uint32)u_sess->attr.attr_storage.adioPrefetchQuantity;
         valprefetch.fetchlist1.quantity = (uint32)((quantity > (nblocks / 2 + 1)) ? (nblocks / 2 + 1) : quantity);
         valprefetch.fetchlist1.block_guard = 0;
         valprefetch.fetchlist1.count = 0;

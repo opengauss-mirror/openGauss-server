@@ -577,7 +577,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  port                                             | integer |      | 1         | 65535
  post_auth_delay                                  | integer | s    | 0         | 2147
  pre_auth_delay                                   | integer | s    | 0         | 60
- prefetch_quantity                                | integer | 8kB  | 128       | 131072
+ adio_prefetch_quantity                           | integer | 8kB  | 128       | 131072
  primary_slotname                                 | string  |      |           | 
  psort_work_mem                                   | integer | kB   | 64        | 2147483647
  qrw_inlist2join_optmode                          | string  |      |           | 

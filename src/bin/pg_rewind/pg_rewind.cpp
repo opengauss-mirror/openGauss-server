@@ -276,7 +276,18 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
 
     /*
      * Build the filemap, by comparing the source and target data directories.
+     *
+     * For cross cluster(hadr) incremental build, we need to rename the tablespace directory same as main
+     * cluster before building filemap, and rename it back after build complete. Because the pgxc_node_name
+     * of two cluster is different. It will compare with the main cluster and then mark the files under
+     * tablespace as REMOVED.
      */
+    if (is_cross_region_build && (build_mode == CROSS_CLUSTER_INC_BUILD || build_mode == AUTO_BUILD)
+        && !RenameTblspcDir(datadir_target, pgxcnodename, remotenodename)) {
+        pg_fatal("failed to rename tablespace dir for cross cluster build.\n");
+        return BUILD_FATAL;
+    }
+
     filemapInit();
     rv = targetFileStatThread();
     PG_CHECKRETURN_AND_RETURN(rv);
@@ -494,7 +505,7 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
         PG_CHECKBUILD_AND_RETURN();
     }
 
-    if (IS_CROSS_CLUSTER_BUILD && !RenameTblspcDir(datadir_target)) {
+    if (IS_CROSS_CLUSTER_BUILD && !RenameTblspcDir(datadir_target, remotenodename, pgxcnodename)) {
         pg_fatal("failed to rename tablespace dir for cross cluster build.\n");
         return BUILD_FATAL;
     }

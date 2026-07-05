@@ -990,6 +990,52 @@ drop package nested_pkg2;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function pkg_user2.nested_pkg2_fun1(numeric)
 drop cascades to function pkg_user2.nested_pkg2_fun2(numeric)
+-- Test for mutually dependent packages during package initialization
+set behavior_compat_options='plpgsql_dependency';
+set client_min_messages='error';
+drop package if exists pkg001;
+drop package if exists pkg002;
+create or replace package pkg002 is
+var25 int:=pkg001.testfun01(1);
+function testfun02(var24 int) return integer;
+end pkg002;
+/
+create or replace package body pkg002 is
+function testfun02(var24 int) return integer
+as
+begin
+return var24;
+end;
+end pkg002;
+/
+create or replace package pkg001 is
+var1 int:=pkg002.testfun02(1);
+function testfun01(var4 int) return integer;
+end pkg001;
+/
+create or replace package body pkg001 is
+function testfun01(var4 int) return integer
+as
+begin
+return var4;
+end;
+end pkg001;
+/
+select pkg002.testfun02(1);
+WARNING:  trying to insert a package that already exists
+CONTEXT:  compilation of PL/pgSQL package near line 1
+SQL statement "alter package pkg_user2.pkg002 compile"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+
+ testfun02 
+-----------
+         1
+(1 row)
+
+drop package pkg001;
+drop package pkg002;
+reset client_min_messages;
+set behavior_compat_options='';
 \c regression
 drop database db;
 drop user pkg_user1;

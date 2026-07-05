@@ -13,6 +13,7 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "utils/aiomem.h"
 #include "access/tableam.h"
 #include "access/multixact.h"
 #include "access/relscan.h"
@@ -328,7 +329,15 @@ void SetRelationIsScannable(Relation relation)
         unaligned_buffer = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
         page = (Page)BUFFERALIGN(unaligned_buffer);
     } else {
-        page = (Page)palloc(BLCKSZ);
+        ADIO_RUN()
+        {
+            page = (Page)adio_align_alloc(BLCKSZ);
+        }
+        ADIO_ELSE()
+        {
+            page = (Page)palloc(BLCKSZ);
+        }
+        ADIO_END();
     }
 
     PageInit(page, BLCKSZ, 0, true);
@@ -338,7 +347,15 @@ void SetRelationIsScannable(Relation relation)
     if (ENABLE_DSS) {
         pfree(unaligned_buffer);
     } else {
-        pfree(page);
+        ADIO_RUN()
+        {
+            adio_align_free(page);
+        }
+        ADIO_ELSE()
+        {
+            pfree(page);
+        }
+        ADIO_END();
     }
 
     smgrimmedsync(relation->rd_smgr, MAIN_FORKNUM);

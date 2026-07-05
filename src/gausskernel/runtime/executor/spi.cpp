@@ -2382,7 +2382,6 @@ static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlan
             && u_sess->SPI_cxt._current->visit_id != (uint32)-1) {
             enable_spi_gpc = SPIParseEnableGPC(parsetree);
         }
-        enable_spi_gpc = false;
         if (enable_spi_gpc) {
             Assert(src_parsetree == NIL);
             Assert(plan->oneshot == false);

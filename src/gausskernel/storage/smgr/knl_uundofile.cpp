@@ -24,6 +24,7 @@
 #include "storage/vfd.h"
 #include "storage/smgr/smgr.h"
 #include "utils/memutils.h"
+#include "utils/aiomem.h"
 
 #define UNDODEBUGINFO , __FUNCTION__, __LINE__
 #define UNDODEBUGSTR "[%s:%d]"
@@ -270,11 +271,6 @@ void ExtendUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockno, 
 
     WHITEBOX_TEST_STUB(UNDO_EXTEND_FILE_FAILED, WhiteboxDefaultErrorEmit);
 
-    ADIO_RUN() {
-        flags |= O_DIRECT;
-    }
-    ADIO_END();
-
     segno = (int)(blockno / undoFileBlocks);
     GetUndoFilePath(reln->smgr_rnode.node.relNode, reln->smgr_rnode.node.dbNode,
         segno, path, UNDO_FILE_PATH_LEN);
@@ -308,17 +304,13 @@ void ExtendUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockno, 
         return;
     }
 
-    char undoBuffer[BLCKSZ] = {'\0'};
+    char *undoBuffer = (char *)palloc0(BLCKSZ);
 
     /* Extend file to undoFileSize. */
     while (seekpos < (off_t)undoFileSize) {
-        off_t diffSize = (off_t)undoFileSize - seekpos;
-        if (diffSize < BLCKSZ) {
-            nbytes = FilePWrite(fd, (char *)undoBuffer, (int)diffSize, seekpos, (uint32)WAIT_EVENT_UNDO_FILE_EXTEND);
-        } else {
-            nbytes = FilePWrite(fd, (char *)undoBuffer, BLCKSZ, seekpos, (uint32)WAIT_EVENT_UNDO_FILE_EXTEND);
-        }
+        nbytes = FilePWrite(fd, undoBuffer, BLCKSZ, seekpos, (uint32)WAIT_EVENT_UNDO_FILE_EXTEND);
         if (nbytes < 0) {
+            pfree(undoBuffer);
             CloseUndoFile(reln, forknum, InvalidBlockNumber);
             if (unlink(path) != 0) {
                 ereport(ERROR, (errmsg(UNDOFORMAT("could not delete undo file during initialization \"%s\": %m."), path)));
@@ -327,6 +319,7 @@ void ExtendUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockno, 
         }
         seekpos += (off_t)nbytes;
     }
+    pfree(undoBuffer);
 
     if (!skipFsync && !SmgrIsTemp(reln)) {
         RegisterDirtyUndoSegment(reln, state);
@@ -373,11 +366,6 @@ static UndoFileState *OpenUndoFile(SMgrRelation reln, ForkNumber forknum, BlockN
         reln->fileState = state;
     }
     SetUndoFileState(state, -1, -1);
-
-    ADIO_RUN() {
-        flags |= O_DIRECT;
-    }
-    ADIO_END();
 
     GetUndoFilePath(reln->smgr_rnode.node.relNode, reln->smgr_rnode.node.dbNode,
         segno, path, UNDO_FILE_PATH_LEN);

@@ -147,6 +147,9 @@ void gs_message_by_memory(StringInfo buf, StreamSharedContext* sharedContext, in
 void gs_memory_disconnect(StreamSharedContext* sharedContext, int nthChannel)
 {
     struct hash_entry* entry = NULL;
+#ifdef __aarch64__
+    pg_memory_barrier();
+#endif
     sharedContext->dataStatus[nthChannel][u_sess->stream_cxt.smp_id] = CONN_ERR;
     entry = sharedContext->poll_entrys[nthChannel];
     entry->_signal();
@@ -406,7 +409,9 @@ char gs_find_memory_data(StreamState* node, int* waitnode_count)
             } else if (buf->cursor == 'N') {
                 HandleStreamNotice(node, buf->data, buf->len);
                 resetStringInfo(buf);
-
+#ifdef __aarch64__
+    pg_memory_barrier();
+#endif
                 /* After one notice message has handled, send signal and wake up the dest producer. */
                 entry = node->sharedContext->quota_entrys[u_sess->stream_cxt.smp_id][i];
                 entry->_signal();
@@ -529,6 +534,9 @@ void gs_memory_send_finish(StreamSharedContext* sharedContext, int connNum)
     struct hash_entry* entry = NULL;
 
     for (int i = 0; i < connNum; i++) {
+#ifdef __aarch64__
+    pg_memory_barrier();
+#endif
         /* Set flags. */
         sharedContext->is_connect_end[i][u_sess->stream_cxt.smp_id] = true;
 
@@ -553,6 +561,9 @@ void gs_memory_close_conn(StreamSharedContext* sharedContext, int connNum, int c
         /* Set flags. */
         sharedContext->is_connect_end[consumerId][i] = true;
 
+#ifdef __aarch64__
+    pg_memory_barrier();
+#endif
         /*
          * Send signal to the producers which may be still waiting quota,
          * in a query like "limit XXX", when consumer don't need data anymore,

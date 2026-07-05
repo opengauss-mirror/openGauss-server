@@ -250,6 +250,15 @@ NON_EXEC_STATIC void JobScheduleMain()
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
+        /*
+         * Prevents ERRORDATA_STACK_SIZE PANIC, the stack depth from being too large due to
+         * continuous errors reported by the jobscheduler thread. The current thread exits
+         * early when the current thread has reported errors for three times.
+         */
+        if (t_thrd.log_cxt.errordata_stack_depth >= 3) {
+            proc_exit(0);
+        }
+
         gstrace_tryblock_exit(true, oldTryCounter);
 
         /* Save error info */

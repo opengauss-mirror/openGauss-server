@@ -112,6 +112,7 @@ typedef struct knl_session_attr_storage {
     bool guc_most_available_sync;
     bool enable_show_any_tuples;
     bool enable_debug_vacuum;
+    bool vacuum_truncate;
     bool enable_adio_debug;
     bool gds_debug_mod;
     bool log_pagewriter;
@@ -181,7 +182,7 @@ typedef struct knl_session_attr_storage {
     int autoanalyze_timeout;
     int autovacuum_vac_thresh;
     int autovacuum_anl_thresh;
-    int prefetch_quantity;
+    int adioPrefetchQuantity;
     int backwrite_quantity;
     int cstore_prefetch_quantity;
     int cstore_backwrite_max_threshold;

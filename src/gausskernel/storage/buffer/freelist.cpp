@@ -677,19 +677,19 @@ bool StrategyRejectBuffer(BufferAccessStrategy strategy, BufferDesc *buf)
 void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, int *quantity, int *trigger)
 {
     int threshold;
-    int prefetch_trigger = u_sess->attr.attr_storage.prefetch_quantity;
+    int prefetchTrigger = u_sess->attr.attr_storage.adioPrefetchQuantity;
 
     if (strategy == NULL || strategy->btype != BAS_BULKREAD) {
         return;
     }
     threshold = strategy->ring_size / 4;
     if (quantity != NULL) {
-        *quantity = (threshold > u_sess->attr.attr_storage.prefetch_quantity)
-                        ? u_sess->attr.attr_storage.prefetch_quantity
+        *quantity = (threshold > u_sess->attr.attr_storage.adioPrefetchQuantity)
+                        ? u_sess->attr.attr_storage.adioPrefetchQuantity
                         : threshold;
     }
     if (trigger != NULL) {
-        *trigger = (threshold > prefetch_trigger) ? prefetch_trigger : threshold;
+        *trigger = (threshold > prefetchTrigger) ? prefetchTrigger : threshold;
     }
 }
 

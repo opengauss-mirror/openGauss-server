@@ -203,6 +203,7 @@ typedef struct knl_g_pid_context {
     ThreadId AlarmCheckerPID;
     ThreadId CBMWriterPID;
     ThreadId AioCompleterStarted;
+    ThreadId *AioCompleterPID;
     ThreadId HeartbeatPID;
     ThreadId CsnminSyncPID;
     ThreadId BarrierCreatorPID;

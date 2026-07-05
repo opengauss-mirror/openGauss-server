@@ -33,21 +33,7 @@ THR_LOCAL PointerList CStoreMemAlloc::m_tab[MaxPointersArryLen];
 
 static inline void* InnerMalloc(Size size)
 {
-    void* ptr = NULL;
-    ADIO_RUN()
-    {
-        int ret = posix_memalign((void**)&(ptr), SYS_LOGICAL_BLOCK_SIZE, (size_t)(size));
-        if (ret != 0) {
-            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
-                            errmsg("posix_memalign fails, The alignment argument was not a power of two, or was not a multiple "
-                                   "of sizeof(void *)")));
-        }
-    }
-    ADIO_ELSE()
-    {
-        ptr = malloc(size);
-    }
-    ADIO_END();
+    void* ptr = malloc(size);
     return ptr;
 }
 
