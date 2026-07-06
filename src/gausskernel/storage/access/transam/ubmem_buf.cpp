@@ -112,6 +112,23 @@ static void UBForgetLocalMappingByAddr(void *addr)
     }
 }
 
+static bool UBUnmapLocalMapping(char *addr, size_t size, const char *desc)
+{
+    if (addr == nullptr || size == 0) {
+        return true;
+    }
+
+    int ret = ubsmem_shmem_unmap(addr, size);
+    if (ret != UBSM_OK) {
+        ereport(WARNING, (errmsg("Failed to unmap %s UB shared memory: %d, addr=%p, size=%lu",
+                                 desc, ret, addr, (unsigned long)size)));
+        return false;
+    }
+
+    UBForgetLocalMappingByAddr(addr);
+    return true;
+}
+
 /* Reuse a still-valid remembered mapping when the SDK rejects a duplicate map. */
 static bool UBTryReuseRememberedMapping(int32 instance_id, size_t expected_size, char **reuse_addr)
 {
@@ -131,14 +148,15 @@ static bool UBTryReuseRememberedMapping(int32 instance_id, size_t expected_size,
         ereport(WARNING, (errmsg("Remembered UB shared memory size mismatch: inst=%d, addr=%p, "
                                  "saved_size=%lu, expected_size=%lu",
                                  instance_id, addr, (unsigned long)saved_size, (unsigned long)expected_size)));
-        UBForgetLocalMappingByAddr(addr);
+        (void)UBUnmapLocalMapping(addr, (size_t)saved_size, "mismatched remembered");
         return false;
     }
 
     if (!UBSMemVerification(addr)) {
         ereport(WARNING, (errmsg("Remembered UB shared memory verification failed: inst=%d, addr=%p",
                                  instance_id, addr)));
-        UBForgetLocalMappingByAddr(addr);
+        size_t mapSize = (saved_size != 0) ? (size_t)saved_size : expected_size;
+        (void)UBUnmapLocalMapping(addr, mapSize, "invalid remembered");
         return false;
     }
 
@@ -387,12 +405,7 @@ bool UBSMemLogBufferCreate()
 
     InitUBSMemBuffer(ctrl, (char *)local_addr);
 
-    ret = ubsmem_shmem_unmap(local_addr, sz.total_size);
-    if (ret != UBSM_OK) {
-        ereport(WARNING, (errmsg("Failed to unmap local UB shared memory: %d", ret)));
-    } else {
-        UBForgetLocalMappingByAddr(local_addr);
-    }
+    (void)UBUnmapLocalMapping((char *)local_addr, sz.total_size, "local");
 
     void *addr = nullptr;
     ret = ubsmem_shmem_map(nullptr, sz.total_size, PROT_READ | PROT_WRITE,
@@ -416,13 +429,21 @@ bool UBSMemFinalize()
     if (addr != nullptr) {
         UBShmControlBlock *ctrl = (UBShmControlBlock *)addr;
         size_t length = (size_t)ctrl->total_size.load(std::memory_order_acquire);
-        int ret = ubsmem_shmem_unmap((void*)addr, length);
-        if (ret != UBSM_OK) {
-            ereport(WARNING, (errmsg("Failed to unmap UB shared memory: %d", ret)));
-        } else {
-            UBForgetLocalMappingByAddr(addr);
-        }
+        (void)UBUnmapLocalMapping(addr, length, "current");
         UBClearTxnCachePointers();
+    }
+
+    UBLocalMapRecord *records = UBGetLocalMapRecords();
+    if (records != nullptr) {
+        for (int32 i = 0; i < DMS_MAX_INSTANCE; ++i) {
+            uintptr_t saved_addr = records[i].addr.load(std::memory_order_acquire);
+            uint64 saved_size = records[i].size.load(std::memory_order_acquire);
+            if (saved_addr == 0 || saved_size == 0) {
+                continue;
+            }
+
+            (void)UBUnmapLocalMapping((char *)saved_addr, (size_t)saved_size, "remembered");
+        }
     }
 
     int ret = ubsmem_finalize();
@@ -545,12 +566,7 @@ bool UBTxnCacheAttachPrimary(void)
     UBRememberLocalMapping(SS_PRIMARY_ID, new_addr, new_map_size);
 
     if (!UBSMemVerification((char *)new_addr)) {
-        int unmap_ret = ubsmem_shmem_unmap(new_addr, new_map_size);
-        if (unmap_ret != UBSM_OK) {
-            ereport(WARNING, (errmsg("Failed to unmap invalid current primary UB shared memory: %d", unmap_ret)));
-        } else {
-            UBForgetLocalMappingByAddr(new_addr);
-        }
+        (void)UBUnmapLocalMapping((char *)new_addr, new_map_size, "invalid current primary");
         ereport(ERROR, (errmsg("Current primary UB shared memory verification failed, shm_name=%s",
                                primary_shm_name)));
         return false;
@@ -563,12 +579,7 @@ bool UBTxnCacheAttachPrimary(void)
     g_instance.shmem_cxt.UBTxnCachePtr = (char *)new_addr;
     UBRefreshTxnCachePointers();
     if (old_addr != nullptr && old_addr != new_addr) {
-        ret = ubsmem_shmem_unmap(old_addr, old_map_size);
-        if (ret != UBSM_OK) {
-            ereport(WARNING, (errmsg("Failed to unmap old primary UB shared memory after remap: %d", ret)));
-        } else {
-            UBForgetLocalMappingByAddr(old_addr);
-        }
+        (void)UBUnmapLocalMapping((char *)old_addr, old_map_size, "old primary after remap");
     }
     return true;
 }
@@ -716,12 +727,7 @@ bool UBSMemSyncFromOldPrimary(int32 old_primary_id, int32 new_primary_id)
     g_instance.shmem_cxt.UBTxnCachePtr = new_primary_addr;
     UBRefreshTxnCachePointers();
     if (old_primary_addr != new_primary_addr) {
-        map_ret = ubsmem_shmem_unmap((void*)old_primary_addr, total_size);
-        if (map_ret != UBSM_OK) {
-            ereport(WARNING, (errmsg("Failed to unmap old primary UB memory: %d", map_ret)));
-        } else {
-            UBForgetLocalMappingByAddr(old_primary_addr);
-        }
+        (void)UBUnmapLocalMapping(old_primary_addr, total_size, "old primary");
     }
     ereport(LOG, (errmsg("UB shared memory sync from old primary finished: old=%d, new=%d, copied=%lu bytes",
                          old_primary_id, new_primary_id, (unsigned long)copied_bytes)));
