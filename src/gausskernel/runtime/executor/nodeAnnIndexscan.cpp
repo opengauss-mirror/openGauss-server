@@ -78,7 +78,11 @@ static TupleTableSlot* AnnIndexNext(AnnIndexScanState* node)
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
     scandesc = node->iss_ScanDesc;
-    scandesc->count = (int64_t)node->annCount;
+    /*
+     * annCount is a planner-side costing estimate. Do not push it down as the
+     * initial HNSW search size; iterative scan expands candidates on demand.
+     */
+    scandesc->count = 0;
     scandesc->limitk = (int64_t)node->limitCount;
     isUstore = RelationIsUstoreFormat(node->ss.ss_currentRelation);
     /*
