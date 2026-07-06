@@ -35,6 +35,11 @@ SELECT * from pg_delete_audit(current_date,current_date + interval '24 hours');
 \! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "SELECT pg_switch_xlog();" > /dev/null 2>&1
 
 SELECT pg_cbm_get_merged_file('0/0', '0/0');
+CREATE USER regress_cbm_recycle_user PASSWORD 'Gauss@123';
+SET ROLE regress_cbm_recycle_user PASSWORD 'Gauss@123';
+SELECT pg_cbm_recycle_file('0/0');
+RESET ROLE;
+DROP USER regress_cbm_recycle_user;
 \! @abs_bindir@/gsql -r -p @portstring@ -d db_audit_system_func -C -c "SELECT gs_roach_switch_xlog();" > /dev/null 2>&1
 
 SELECT type, object_name, detail_info from pg_query_audit(current_date, current_date + interval '24 hours') where type='system_function_exec' and object_name like '%pg_create_restore_point%';
