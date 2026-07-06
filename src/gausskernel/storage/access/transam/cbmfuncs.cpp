@@ -360,6 +360,10 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
 Datum pg_cbm_recycle_file(PG_FUNCTION_ARGS)
 {
     text *target_lsn_arg = PG_GETARG_TEXT_P(0);
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        (errmsg("Must be system admin or operator admin in operation mode to recycle cbm file."))));
+
     char *target_lsn_str = text_to_cstring(target_lsn_arg);
     XLogRecPtr target_lsn, end_lsn;
     char end_lsn_str[MAXFNAMELEN];
