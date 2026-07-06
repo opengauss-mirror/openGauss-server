@@ -1950,11 +1950,19 @@ void PostgresInitializer::InitWAL()
 
     CheckAuthentication();
 
-    /* Don't set superuser when connection is from gs_basebackup or subscription */
-    if (u_sess->proc_cxt.clientIsGsBasebackup || u_sess->proc_cxt.clientIsSubscription) {
-        InitUser();
-    } else {
-        SetSuperUserStandalone();
+    /*
+     * Always initialize WAL sender identity as the authenticated user first.
+     * Replication-specific privileges are then checked explicitly instead of
+     * relying on standalone superuser bootstrap semantics.
+     */
+    InitUser();
+    if (!superuser() && !has_rolreplication(GetUserId()) &&
+        !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode) &&
+        !is_member_of_role(GetUserId(), DEFAULT_ROLE_REPLICATION)) {
+        ereport(
+            FATAL,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied for replication connection"),
+             errdetail("Only system admin or users with replication privileges may connect as replication clients.")));
     }
 
     CheckConnPermission();

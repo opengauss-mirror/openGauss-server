@@ -480,10 +480,11 @@ test: select_into select_distinct select_distinct_on select_implicit select_havi
 # ----------
 # Another group of parallel tests
 # ----------
-test: privileges_oid_inherit privileges_sysadmin collate tablesample tablesample_1 tablesample_2 
-test: misc 
+test: privileges_oid_inherit privileges_sysadmin collate tablesample tablesample_1 tablesample_2
+test: misc
 test: privileges_opt
 test: privileges_tablespace
+test: fenced_udf_process_privilege
 
 # ----------
 # Another group of parallel tests

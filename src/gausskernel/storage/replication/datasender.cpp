@@ -85,6 +85,16 @@ volatile uint32 send_dummy_count = 0;
 
 #define NAPTIME_PER_CYCLE 100 /* max sleep time between cycles (100ms) */
 
+/*
+ * Upper bound on the size of a replication protocol message body that we are
+ * willing to read in DataSndHandshake() and ProcessStandbyMessage(). Without an
+ * explicit limit, pq_getmessage() only rejects sizes that exceed MaxAllocSize
+ * (~1GB), which lets an authenticated replication peer drive datasender to
+ * allocate huge buffers. Replication command queries and standby reply packets
+ * are well under 64KB in practice, so this matches PG_MAX_AUTH_TOKEN_LENGTH.
+ */
+static const int MAX_REPLICATION_PROTOCOL_MSG_LEN = 65535;
+
 /* Signal handlers */
 static void DataSndSigHupHandler(SIGNAL_ARGS);
 static void DataSndShutdownHandler(SIGNAL_ARGS);
@@ -273,7 +283,7 @@ static void DataSndHandshake(void)
              * Read the message contents. This is expected to be done without
              * blocking because we've been able to get message type code.
              */
-            if (pq_getmessage(&input_message, 0)) {
+            if (pq_getmessage(&input_message, MAX_REPLICATION_PROTOCOL_MSG_LEN)) {
                 first_char = EOF; /* suitable message already logged */
             }
         }
@@ -593,7 +603,7 @@ static void ProcessStandbyMessage(void)
     /*
      * Read the message contents.
      */
-    if (pq_getmessage(t_thrd.datasender_cxt.reply_message, 0)) {
+    if (pq_getmessage(t_thrd.datasender_cxt.reply_message, MAX_REPLICATION_PROTOCOL_MSG_LEN)) {
         ereport(COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected EOF on standby connection")));
         proc_exit(0);
     }

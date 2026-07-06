@@ -22,6 +22,7 @@
 
 /* local includes */
 #include "streamutil.h"
+#include "logical_decode.h"
 
 #include "access/xlog_internal.h"
 #include "common/fe_memutils.h"
@@ -34,8 +35,6 @@
 #include "bin/elog.h"
 /* Time to sleep between reconnection attempts */
 #define RECONNECT_SLEEP_TIME 5
-
-static const uint64 upperPart = 32;
 
 /* Global Options */
 static char* outfile = NULL;
@@ -282,217 +281,6 @@ static int sendStartReplicationCmd()
     PQclear(res);
     destroyPQExpBuffer(query);
     return ret;
-}
-
-/*
- * append comma as seperator
- */
-static inline void AppendSeperator(PQExpBuffer res, uint16 attr, uint16 maxAttr)
-{
-    if (attr < maxAttr - 1) {
-        appendPQExpBufferStr(res, ", ");
-    }
-}
-
-/*
- * decode binary style tuple to text
- */
-static void ResolveTuple(const char* stream, uint32* curpos, PQExpBuffer res, bool newTup)
-{
-    uint16 attrnum = ntohs(*(uint16 *)(stream + *curpos));
-    *curpos += sizeof(attrnum);
-    if (newTup) {
-        appendPQExpBufferStr(res, "new_tuple: {");
-    } else {
-        appendPQExpBufferStr(res, "old_value: {");
-    }
-    for (uint16 i = 0; i < attrnum; i++) {
-        uint16 colLen = ntohs(*(uint16 *)(stream + *curpos));
-        *curpos += sizeof(colLen);
-        assert(colLen != 0);
-        appendBinaryPQExpBuffer(res, stream + *curpos, colLen);
-        *curpos += colLen;
-        Oid typid = ntohl(*(Oid *)(stream + *curpos));
-        *curpos += sizeof(Oid);
-        appendPQExpBuffer(res, "[typid = %u]: ", typid);
-
-        uint32 dataLen = ntohl(*(uint32 *)(stream + *curpos));
-        *curpos += sizeof(dataLen);
-        const uint32 nullTag = 0XFFFFFFFF;
-        if (dataLen == nullTag) {
-            appendPQExpBufferStr(res, "\"NULL\"");
-        } else if (dataLen == 0) {
-            appendPQExpBufferStr(res, "\"\"");
-        } else {
-            appendPQExpBufferChar(res, '\"');
-            appendBinaryPQExpBuffer(res, stream + *curpos, dataLen);
-            appendPQExpBufferChar(res, '\"');
-            *curpos += dataLen;
-        }
-        AppendSeperator(res, i, attrnum);
-    }
-    appendPQExpBufferChar(res, '}');
-}
-
-/*
- * decode binary style DML to text
- */
-static void DMLToText(const char* stream, uint32 *curPos, PQExpBuffer res)
-{
-    char dtype = stream[*curPos];
-    if (dtype == 'I') {
-        appendPQExpBufferStr(res, "INSERT INTO ");
-    } else if (dtype == 'U') {
-        appendPQExpBufferStr(res, "UPDATE ");
-    } else {
-        appendPQExpBufferStr(res, "DELETE FROM ");
-    }
-    *curPos += 1;
-    uint16 schemaLen = ntohs(*(uint16 *)(stream + *curPos));
-    *curPos += sizeof(schemaLen);
-    appendBinaryPQExpBuffer(res, stream + *curPos, schemaLen);
-    *curPos += schemaLen;
-    appendPQExpBufferChar(res, '.');
-    uint16 tableLen = ntohs(*(uint16 *)(stream + *curPos));
-    *curPos += sizeof(tableLen);
-    appendBinaryPQExpBuffer(res, stream + *curPos, tableLen);
-    *curPos += tableLen;
-
-    if (stream[*curPos] == 'N') {
-        *curPos += 1;
-        appendPQExpBufferChar(res, ' ');
-        ResolveTuple(stream, curPos, res, true);
-    }
-    if (stream[*curPos] == 'O') {
-        *curPos += 1;
-        appendPQExpBufferChar(res, ' ');
-        ResolveTuple(stream, curPos, res, false);
-    }
-}
-
-/*
- * decode binary style begin message to text
- */
-static void BeginToText(const char* stream, uint32 *curPos, PQExpBuffer res)
-{
-    appendPQExpBufferStr(res, "BEGIN ");
-    *curPos += 1;
-    uint32 CSNupper = ntohl(*(uint32 *)(&stream[*curPos]));
-    *curPos += sizeof(CSNupper);
-    uint32 CSNlower = ntohl(*(uint32 *)(&stream[*curPos]));
-    uint64 CSN = ((uint64)(CSNupper) << upperPart) + CSNlower;
-    *curPos += sizeof(CSNlower);
-    appendPQExpBuffer(res, "CSN: %lu ", CSN);
-
-    uint32 LSNupper = ntohl(*(uint32 *)(&stream[*curPos]));
-    *curPos += sizeof(LSNupper);
-    uint32 LSNlower = ntohl(*(uint32 *)(&stream[*curPos]));
-    *curPos += sizeof(LSNlower);
-    appendPQExpBuffer(res, "first_lsn: %X/%X", LSNupper, LSNlower);
-
-    if (stream[*curPos] == 'X') {
-        *curPos += 1;
-        uint32 xidupper = ntohl(*(uint32 *)(&stream[*curPos]));
-        *curPos += sizeof(xidupper);
-        uint32 xidlower = ntohl(*(uint32 *)(&stream[*curPos]));
-        *curPos += sizeof(xidlower);
-        uint64 xid = ((uint64)(xidupper) << upperPart) + xidlower;
-        appendPQExpBuffer(res, " xid: %lu", xid);
-    }
-
-    if (stream[*curPos] == 'T') {
-        *curPos += 1;
-        uint32 timeLen = ntohl(*(uint32 *)(&stream[*curPos]));
-        *curPos += sizeof(uint32);
-        appendPQExpBufferStr(res, " commit_time: ");
-        appendBinaryPQExpBuffer(res, &stream[*curPos], timeLen);
-        *curPos += timeLen;
-    }
-    if (stream[*curPos] == 'O') {
-        *curPos += 1;
-        uint32 originid = ntohl(*(uint32 *)(&stream[*curPos]));
-        *curPos += sizeof(uint32);
-        appendPQExpBuffer(res, " origin_id: %d", originid);
-    }
-}
-
-/*
- * decode binary style commit message to text
- */
-static void CommitToText(const char* stream, uint32 *curPos, PQExpBuffer res)
-{
-    appendPQExpBufferStr(res, "COMMIT ");
-    *curPos += 1;
-    if (stream[*curPos] == 'X') {
-        *curPos += 1;
-        uint32 xidupper = ntohl(*(uint32 *)(&stream[*curPos]));
-        *curPos += sizeof(xidupper);
-        uint32 xidlower = ntohl(*(uint32 *)(&stream[*curPos]));
-        *curPos += sizeof(xidlower);
-        uint64 xid = ((uint64)(xidupper) << upperPart) + xidlower;
-        appendPQExpBuffer(res, "xid: %lu", xid);
-    }
-    if (stream[*curPos] == 'T') {
-        *curPos += 1;
-        uint32 timeLen = ntohl(*(uint32 *)(&stream[*curPos]));
-        *curPos += sizeof(uint32);
-        appendPQExpBufferStr(res, " commit_time: ");
-        appendBinaryPQExpBuffer(res, &stream[*curPos], timeLen);
-        *curPos += timeLen;
-    }
-}
-
-/*
- * decode binary style log stream to text
- */
-static void StreamToText(const char* stream, PQExpBuffer res)
-{
-    uint32 pos = 0;
-    uint32 dmlLen = ntohl(*(uint32 *)(&stream[pos]));
-    /* if this is the end of stream, return */
-    if (dmlLen == 0) {
-        return;
-    }
-
-    pos += sizeof(dmlLen);
-    uint32 LSNupper = ntohl(*(uint32 *)(&stream[pos]));
-    pos += sizeof(LSNupper);
-    uint32 LSNlower = ntohl(*(uint32 *)(&stream[pos]));
-    pos += sizeof(LSNlower);
-    appendPQExpBuffer(res, "current_lsn: %X/%X ", LSNupper, LSNlower);
-    if (stream[pos] == 'B') {
-        BeginToText(stream, &pos, res);
-    } else if (stream[pos] == 'C') {
-        CommitToText(stream, &pos, res);
-    } else if (stream[pos] != 'P' && stream[pos] != 'F') {
-        DMLToText(stream, &pos, res);
-    }
-    if (stream[pos] == 'P') {
-        pos++;
-        appendPQExpBufferChar(res, '\n');
-        StreamToText(stream + pos, res);
-    } else if (stream[pos] == 'F') {
-        appendPQExpBufferChar(res, '\n');
-    }
-}
-
-/*
- * decode batch sending result stream to text.
- */
-static void BatchStreamToText(const char* stream, PQExpBuffer res)
-{
-    uint32 pos = 0;
-    uint32 changeLen = ntohl(*(uint32 *)(&stream[pos]));
-    /* if this is the end of stream, return */
-    if (changeLen == 0) {
-        return;
-    }
-    pos += sizeof(changeLen);
-    pos += sizeof(XLogRecPtr);
-    appendBinaryPQExpBuffer(res, stream + pos, changeLen - sizeof(XLogRecPtr));
-    appendPQExpBufferChar(res, '\n');
-
-    BatchStreamToText(stream + sizeof(changeLen) + changeLen, res);
 }
 
 /*
@@ -743,12 +531,23 @@ static void StreamLogicalLog(void)
 
         PQExpBuffer res = createPQExpBuffer();
         char *resultStream = copybuf + hdr_len;
+        size_t payload_len = (size_t)(r - hdr_len);
         if (g_parallel_decode && !g_raw && g_decode_style == 'b') {
-            StreamToText(copybuf +  hdr_len, res);
+            if (!StreamToText(copybuf + hdr_len, payload_len, res)) {
+                fprintf(stderr,
+                    _("%s: malformed logical decode stream payload (size %zu); aborting\n"),
+                    progname, payload_len);
+                goto error;
+            }
             bytes_left = res->len;
             resultStream = res->data;
         } else if (g_parallel_decode && g_batch_sending && !g_raw) {
-            BatchStreamToText(copybuf +  hdr_len, res);
+            if (!BatchStreamToText(copybuf + hdr_len, payload_len, res)) {
+                fprintf(stderr,
+                    _("%s: malformed batch logical decode stream payload (size %zu); aborting\n"),
+                    progname, payload_len);
+                goto error;
+            }
             bytes_left = res->len;
             resultStream = res->data;
         }

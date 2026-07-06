@@ -5463,6 +5463,20 @@ static void processCancelRequest(Port* port, void* pkt)
         int backend_slot = 0;
         // get thread id from logic thread id
         backend_slot = (int)ntohl(canc->backendPID);
+
+        /* Security Fix: Validate backend_slot to prevent out-of-bounds access */
+        if (backend_slot < 0 || backend_slot >= (int)g_instance.proc_base->allProcCount) {
+            ereport(LOG, (errmsg("Invalid backend slot in cancel request: %d, valid range: [0, %u)", backend_slot,
+                                 g_instance.proc_base->allProcCount)));
+            return;
+        }
+
+        /* Additional safety: verify array element is not NULL */
+        if (g_instance.proc_base_all_procs[backend_slot] == NULL) {
+            ereport(LOG, (errmsg("NULL proc entry for backend slot: %d", backend_slot)));
+            return;
+        }
+
         Backend* bn = GetBackend(g_instance.proc_base_all_procs[backend_slot]->backendSlot);
 
         if (bn == NULL || bn->pid == 0 || bn->pid == InvalidTid) {

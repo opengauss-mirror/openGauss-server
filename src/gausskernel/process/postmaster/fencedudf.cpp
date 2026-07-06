@@ -1891,6 +1891,13 @@ Datum fenced_udf_process(PG_FUNCTION_ARGS)
         /* UDF work process */
         appendStringInfo(&strinfo, "ps ux | grep 'gaussdb fenced UDF worker process' | grep -v grep |  wc -l");
     } else if (KILL_WORK == arg) {
+        if (!superuser()) {
+            ereport(ERROR,
+                (errmodule(MOD_UDF),
+                    errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("permission denied to kill fenced UDF worker processes"),
+                    errhint("Must be system admin to kill fenced UDF workers.")));
+        }
         /* kill UDF work process */
         appendStringInfo(&strinfo,
             "ps ux | grep 'gaussdb fenced UDF worker process' | grep -v grep | awk '{print $2}' | xargs kill -9");
