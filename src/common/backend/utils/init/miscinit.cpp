@@ -1224,7 +1224,6 @@ static void UnlinkLockFile(int status, Datum filename)
 static void UnLockPidLockFile(int status, Datum fileDes)
 {
     int fd = DatumGetInt32(fileDes);
-
     /* Guard against double-close: fd may already be closed by fork cleanup. */
     if (fd != -1 && fd == g_pidLockFd) {
         close(fd);
