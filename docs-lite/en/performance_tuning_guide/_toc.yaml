@@ -1,0 +1,153 @@
+label: Performance Tuning Guide
+isManual: true
+sections:
+  - label: Overview
+    href: ./performance_tuning_overview.md
+  - label: Determining the Scope of Performance Tuning
+    sections:
+      - label: Overview
+        href: ./determining_the_scope_of_performance_tuning.md
+      - label: Performance Logs
+        href: ./performance_logs.md
+      - label: Analyzing Hardware Bottlenecks
+        sections:
+          - label: CPU
+            href: ./cpu.md
+          - label: Memory
+            href: ./memory.md
+          - label: I/O
+            href: ./i_o.md
+          - label: Network
+            href: ./network.md
+      - label: Querying SQL Statements That Affect Performance Most
+        href: ./querying_sql_statements_that_affect_performance_most.md
+      - label: Checking Blocked Statements
+        href: ./checking_blocked_statements.md
+  - label: System Optimization
+    sections:
+      - label: Optimizing OS Parameters
+        href: ./optimizing_os_parameters.md
+      - label: Optimizing Database Parameters
+        href: ./optimizing_database_parameters.md
+      - label: Configuring Vectorization
+        href: ./configuring_vectorization.md
+      - label: Configuring SMP
+        sections:
+          - label: Overview
+            href: ./configuring_smp.md
+          - label: SMP Application Scenarios and Restrictions
+            href: ./smp_application_scenarios_and_restrictions.md
+          - label: Resource Impact on SMP Performance
+            href: ./resource_impact_on_smp_performance.md
+          - label: Other Factors Affecting SMP Performance
+            href: ./other_factors_affecting_smp_performance.md
+          - label: Suggestions for Using SMP
+            href: ./suggestions_for_using_smp.md
+      - label: Resource Load Management
+        sections:
+          - label: Overview
+            href: ./resource_load_management_overview.md
+          - label: Resource Management Preparation
+            href: ./resource_management_preparation.md
+  - label: SQL Optimization
+    sections:
+      - label: Overview
+        href: ./sql_optimization.md
+      - label: Query Execution Process
+        href: ./query_execution_process.md
+      - label: Introduction to the SQL Execution Plan
+        href: ./sql_execution_plan_introduction.md
+      - label: Tuning Process
+        href: ./tuning_process.md
+      - label: Updating Statistics
+        href: ./update_statistics.md
+      - label: Reviewing and Modifying a Table Definition
+        href: ./reviewing_and_modifying_a_table_definition.md
+      - label: Typical SQL Optimization Methods
+        sections: 
+          - label: Overview
+            href: ./typical_sql_optimization_methods.md
+          - label: Optimizing SQL Self-Diagnosis
+            href: ./optimizing_sql_self_diagnosis.md
+          - label: Optimizing Subqueries
+            href: ./optimizing_subqueries.md
+          - label: Optimizing Statistics
+            href: ./optimizing_statistics.md
+          - label: Optimizing Operators
+            href: ./optimizing_operators.md
+      - label: Experience in Rewriting SQL Statements
+        href: ./experience_in_rewriting_sql_statements.md
+      - label: Resetting Key Parameters During SQL Tuning
+        href: ./resetting_key_parameters_during_sql_tuning.md
+      - label: Hint-based Tuning
+        sections: 
+          - label: Plan Hint Optimization
+            href: ./plan_hint_optimization_overview.md
+          - label: Join Order Hints
+            href: ./join_order_hints.md
+          - label: Join Operation Hints
+            href: ./join_operation_hints.md
+          - label: Rows Hints
+            href: ./rows_hints.md
+          - label: Scan Operation Hints
+            href: ./scan_operation_hints.md
+          - label: Sublink Name Hints
+            href: ./sublink_name_hints.md
+          - label: Hint Errors, Conflicts, and Other Warnings
+            href: ./hint_errors_conflicts_and_other_warnings.md
+          - label: Optimizer GUC Parameter Hints
+            href: ./optimizer_guc_parameter_hints.md
+          - label: Hint for Selecting the Custom Plan or Generic Plan
+            href: ./hint_for_selecting_the_custom_plan_or_generic_plan.md
+          - label: Hint Specifying Not to Expand Subqueries
+            href: ./hint_specifying_not_to_expand_subqueries.md
+          - label: Hint Specifying Not to Use Global Plan Cache
+            href: ./hint_specifying_not_to_use_global_plan_cache.md
+          - label: Hint of Parameterized Paths at the Same Level
+            href: ./hint_of_parameterized_paths_at_the_same_level.md
+          - label: Hint for Degrading Some Errors to Warnings
+            href: ./hint_for_degrading_some_errors_to_warnings.md
+  - label: TPC-C Performance Tunning Test Guide
+    sections: 
+      - label: Overview
+        href: ./tpc_c_performance_tunning_test_guide_overview.md
+      - label: Setting up a Performance Test Environment
+        sections: 
+          - label: Hardware Requirements
+            href: ./hardware_requirements.md
+          - label: Software Requirements
+            href: ./software_requirements.md
+          - label: Software Installation
+            href: ./pre_software_installation.md
+          - label: BIOS Configuration
+            href: ./bios_configuration.md
+          - label: OS Configuration
+            href: ./os_configuration.md
+          - label: File System Configuration
+            href: ./file_system_configuration.md
+          - label: Network Configuration
+            href: ./network_configuration.md
+          - label: Binding CPU Cores for the Database Server and Client
+            href: ./binding_cpu_cores_for_the_database_server_and_client.md
+      - label: Testing MOT-TPCC Performance
+        href: ./testing_mot_tpc_c_performance.md
+      - label: Testing TPC-C Performance
+        href: ./testing_tpc_c_performance.md
+  - label: Optimization Cases
+    sections:
+      - label: "Case: Adding NOT NULL for JOIN Columns"
+        href: ./case_adding_not_null_for_join_columns.md
+      - label: "Case: Adjusting I/O Parameters to Reduce the Log Bloat Rate"
+        href: ./case_adjusting_i_o_parameters_to_reduce_the_log_bloat_rate.md
+      - label: "Case: Creating an Appropriate Index"
+        href: ./case_creating_an_appropriate_index.md
+      - label: "Case: Modifying the GUC Parameter rewrite_rule"
+        href: ./case_modifying_the_guc_parameter_rewrite_rule.md
+      - label: "Case: Reconstructing Partitioned Tables"
+        href: ./case_reconstructing_partitioned_tables.md
+      - label: "Case: Rewriting SQL and Deleting Subqueries (1)"
+        href: ./case_rewriting_sql_and_deleting_subqueries_1.md
+      - label: "Case: Rewriting SQL and Deleting Subqueries (2)"
+        href: ./case_rewriting_sql_and_deleting_subqueries_2.md
+      - label: "Case: Rewriting SQL Statements and Deleting in-clause"
+        href: ./case_rewriting_sql_statements_and_deleting_in_clause.md

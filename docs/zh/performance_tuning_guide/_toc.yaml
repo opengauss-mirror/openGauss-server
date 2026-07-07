@@ -1,0 +1,185 @@
+label: 性能调优指南
+isManual: true
+sections:
+      - label: 总体调优思路
+        href: ./performance_tuning_overview.md
+      - label: 确定性能调优范围
+        sections:
+          - label: 概述
+            href: ./determining_the_scope_of_performance_tuning.md
+          - label: 性能日志
+            href: ./performance_logs.md
+          - label: 硬件瓶颈点分析
+            sections:
+              - label: CPU
+                href: ./cpu.md
+              - label: 内存
+                href: ./memory.md
+              - label: I/O
+                href: ./i_o.md
+              - label: 网络
+                href: ./network.md
+          - label: 查询最耗性能的SQL
+            href: ./querying_sql_statements_that_affect_performance_most.md
+          - label: 分析作业是否被阻塞
+            href: ./checking_blocked_statements.md
+      - label: 系统调优指南
+        sections:
+          - label: 操作系统参数调优
+            href: ./optimizing_os_parameters.md
+          - label: 数据库系统参数调优
+            href: ./optimizing_database_parameters.md
+          - label: 向量化执行引擎
+            sections:
+              - label: 向量化执行引擎
+                href: ./vectorized_engine.md
+              - label: 行存转向量化
+                href: ./transition_quantitative_analysis.md
+              - label: 配置向量化执行引擎
+                href: ./configuring_vectorization.md
+          - label: 配置LLVM
+            sections:
+              - label: 概述
+                href: ./configuring_llvm.md
+              - label: LLVM适用场景与限制
+                href: ./llvm_application_scenarios_and_restrictions.md
+              - label: 其他因素对LLVM性能的影响
+                href: ./other_factors_affecting_llvm_performance.md
+              - label: LLVM使用建议
+                href: ./recommended_suggestions_for_llvm.md
+          - label: 配置并行查询功能
+            href: ./configuring_the_parallel_query_function.md
+          - label: UDF结果缓存
+            href: ./udf_result_cache.md            
+          - label: 资源负载管理
+            sections:
+              - label: 资源负载管理概述
+                href: ./resource_load_management_overview.md
+              - label: 资源管理准备
+                href: ./resource_management_preparation.md
+          - label: 配置算子内存借用
+            href: ./configuring_operator_memory_borrowing.md
+          - label: 配置DPA哈希聚合加速
+            href: ./dpa_hash_aggregation_acceleration.md                       
+          - label: 资源池化调优
+            sections:    
+              - label: 资源池化性能优化
+                href: ./resource_pooling_performance_optimization.md
+              - label: 备机事务内透明写转发
+                href: ./transparent_forwarding_within_backup_machine_affairs.md
+              - label: MES worker线程池化
+                href: ./mes_worker_thread_pooling.md
+      - label: SQL调优指南
+        sections:  
+          - label: 概述
+            href: ./sql_optimization.md
+          - label: Query执行流程
+            href: ./query_execution_process.md
+          - label: SQL执行计划介绍
+            href: ./sql_execution_plan_introduction.md
+          - label: 调优流程
+            href: ./tuning_process.md
+          - label: 更新统计信息
+            href: ./update_statistics.md
+          - label: 审视和修改表定义
+            href: ./reviewing_and_modifying_a_table_definition.md
+          - label: 典型SQL调优点
+            sections: 
+              - label: 概述
+                href: ./typical_sql_optimization_methods.md
+              - label: SQL自诊断
+                href: ./optimizing_sql_self_diagnosis.md
+              - label: 子查询调优
+                href: ./optimizing_subqueries.md
+              - label: 统计信息调优
+                href: ./optimizing_statistics.md
+              - label: 算子级调优
+                href: ./optimizing_operators.md
+          - label: 经验总结：SQL语句改写规则
+            href: ./experience_in_rewriting_sql_statements.md
+          - label: SQL调优关键参数调整
+            href: ./resetting_key_parameters_during_sql_tuning.md
+          - label: 使用Plan Hint进行调优
+            sections:
+              - label: Plan Hint调优概述
+                href: ./plan_hint_optimization_overview.md
+              - label: Join顺序的Hint
+                href: ./join_order_hints.md
+              - label: Join方式的Hint
+                href: ./join_operation_hints.md
+              - label: 行数的Hint
+                href: ./rows_hints.md
+              - label: Scan方式的Hint
+                href: ./scan_operation_hints.md
+              - label: INDEX HINTS
+                href: ./index_hints.md
+              - label: 子链接块名的hint
+                href: ./sublink_name_hints.md
+              - label: Hint的错误、冲突及告警
+                href: ./hint_errors_conflicts_and_other_warnings.md
+              - label: 优化器GUC参数的Hint
+                href: ./optimizer_guc_parameter_hints.md
+              - label: Custom Plan和Generic Plan选择的Hint
+                href: ./hint_for_selecting_the_custom_plan_or_generic_plan.md
+              - label: 指定子查询不展开的Hint
+                href: ./hint_specifying_not_to_expand_subqueries.md
+              - label: 指定不使用全局计划缓存的Hint
+                href: ./hint_specifying_not_to_use_global_plan_cache.md
+              - label: 同层参数化路径的Hint
+                href: ./hint_of_parameterized_paths_at_the_same_level.md
+              - label: 将部分Error降级为Warning的Hint
+                href: ./hint_for_degrading_some_errors_to_warnings.md
+          - label: 堆表支持预读
+            href: ./heap_tables_support_prefetching.md
+      - label: TPCC性能调优测试指导
+        sections:
+          - label: 概述
+            href: ./tpc_c_performance_tunning_test_guide_overview.md
+          - label: 搭建性能测试环境
+            sections:
+              - label: 硬件要求
+                href: ./hardware_requirements.md
+              - label: 软件要求
+                href: ./software_requirements.md
+              - label: 前置软件安装
+                href: ./pre_software_installation.md
+              - label: BIOS配置
+                href: ./bios_configuration.md
+              - label: 操作系统配置
+                href: ./os_configuration.md
+              - label: 文件系统配置
+                href: ./file_system_configuration.md
+              - label: 网络配置
+                href: ./network_configuration.md
+              - label: 数据库服务端及客户端绑核
+                href: ./binding_cpu_cores_for_the_database_server_and_client.md
+          - label: 测试TPCC性能
+            href: ./testing_tpc_c_performance.md
+          - label: 测试MOT-TPCC性能
+            href: ./testing_mot_tpc_c_performance.md
+      - label: 实际调优案例
+        sections:
+          - label: 案例：调整查询重写GUC参数rewrite_rule
+            href: ./case_modifying_the_guc_parameter_rewrite_rule.md       
+          - label: 案例：调整I/O相关参数降低日志膨胀率
+            href: ./case_adjusting_i_o_parameters_to_reduce_the_log_bloat_rate.md 
+          - label: 案例：建立合适的索引
+            href: ./case_creating_an_appropriate_index.md                        
+          - label: 案例：增加JOIN列非空条件
+            href: ./case_adding_not_null_for_join_columns.md
+          - label: 案例：改建分区表
+            href: ./case_reconstructing_partitioned_tables.md
+          - label: 案例：改写SQL消除子查询（案例1）
+            href: ./case_rewriting_sql_and_deleting_subqueries_1.md
+          - label: 案例：改写SQL消除子查询（案例2）
+            href: ./case_rewriting_sql_and_deleting_subqueries_2.md
+          - label: 案例：改写SQL消除子查询与使用并行查询
+            href: ./case_rewrite_sql_to_eliminate_subqueries_and_utilize_parallel_query_execution.md
+          - label: 案例：改写SQL消除in-clause
+            href: ./case_rewriting_sql_statements_and_deleting_in_clause.md            
+          - label: 案例：修改启动参数解决TPCC大幅度波动
+            href: ./case_modify_startup_parameters_to_resolve_significant_fluctuation_in_tpcc.md
+          - label: 案例：子事务TPCC性能调优
+            href: ./case_sub_transaction_tpcc_performance_tuning.md
+      - label: 基于内存池共享内存降低RTO时间
+        href: ./shared_memory_based_on_memory_pools_reduces_the_rto_time.md
