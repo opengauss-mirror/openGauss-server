@@ -152,6 +152,9 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo);
 static void UDFCreateHashTab();
 void SetUDFUnixSocketPath(struct sockaddr_un* unAddrPtr);
 
+/* from miscinit.cpp */
+extern int g_pidLockFd;
+
 /* RPC Client Declaration */
 template <bool batchMode>
 static void SendUDFInformation(FunctionCallInfo fcinfo);
@@ -183,6 +186,31 @@ pid_t StartUDFMaster()
             break;
         }
         case 0: {
+            /*
+             * Discard inherited exit callbacks to prevent proc_exit from
+             * unlinking the live postmaster's pid file.
+             */
+            on_exit_reset();
+
+            /*
+             * Close inherited pid.lock fd: flock is shared across fork.
+             * Without this, postmaster exit won't release the lock.
+             */
+            if (g_pidLockFd >= 0) {
+                close(g_pidLockFd);
+                g_pidLockFd = -1;
+            }
+
+            /*
+             * Close the inherited TCP listening socket to prevent orphan
+             * processes from occupying port 38000.
+             */
+            for (int i = 0; i < MAXLISTEN; i++) {
+                if (g_instance.listen_cxt.ListenSocket[i] != PGINVALID_SOCKET) {
+                    close(g_instance.listen_cxt.ListenSocket[i]);
+                    g_instance.listen_cxt.ListenSocket[i] = PGINVALID_SOCKET;
+                }
+            }
 
             FencedUDFMasterMain(0, NULL);
             exit(0);
