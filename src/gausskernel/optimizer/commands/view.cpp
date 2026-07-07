@@ -241,16 +241,11 @@ static List* BuildViewColumnAlterCmds(Relation rel, List* attrList, bool oldView
 {
     List* atcmds = NIL;
     AlterTableCmd* atcmd = NULL;
+    ListCell* lc = NULL;
 
     if (oldViewForceInvalid) {
-        ListCell* lc = NULL;
-        int skip = 1;
-
-        foreach (lc, attrList) {
-            if (skip > 0) {
-                skip--;
-                continue;
-            }
+        lc = list_nth_cell(attrList, 1);
+        for_each_cell(lc, lc) {
             atcmd = makeNode(AlterTableCmd);
             atcmd->subtype = AT_AddColumnToView;
             atcmd->def = (Node*)lfirst(lc);
@@ -258,17 +253,11 @@ static List* BuildViewColumnAlterCmds(Relation rel, List* attrList, bool oldView
         }
     } else {
         if (list_length(attrList) > rel->rd_att->natts) {
-            ListCell* c = NULL;
-            int skip = rel->rd_att->natts;
-
-            foreach (c, attrList) {
-                if (skip > 0) {
-                    skip--;
-                    continue;
-                }
+            lc = list_nth_cell(attrList, rel->rd_att->natts);
+            for_each_cell(lc, lc) {
                 atcmd = makeNode(AlterTableCmd);
                 atcmd->subtype = AT_AddColumnToView;
-                atcmd->def = (Node*)lfirst(c);
+                atcmd->def = (Node*)lfirst(lc);
                 atcmds = lappend(atcmds, atcmd);
             }
         } else if (flag) {
