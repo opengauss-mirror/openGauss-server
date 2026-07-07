@@ -1,0 +1,39 @@
+# 软件要求<a name="ZH-CN_TOPIC_0289900685"></a>
+
+## 操作系统<a name="ZH-CN_TOPIC_0289900708"></a>
+
+操作系统要求：openEuler-20.03-LTS \(aarch64 架构\)
+
+## 软件依赖<a name="ZH-CN_TOPIC_0289899962"></a>
+
+**表 1**  软件依赖要求
+
+<a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_table58001354"></a>
+<table><thead align="left"><tr id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_row65505804"><th class="cellrowborder" valign="top" width="50%" id="mcps1.2.3.1.1"><p id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p4369932"><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p4369932"></a><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p4369932"></a>所需软件</p>
+</th>
+<th class="cellrowborder" valign="top" width="50%" id="mcps1.2.3.1.2"><p id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p18420229"><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p18420229"></a><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p18420229"></a>建议版本</p>
+</th>
+</tr>
+</thead>
+<tbody><tr id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_row15643550"><td class="cellrowborder" valign="top" width="50%" headers="mcps1.2.3.1.1 "><p id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p59167999"><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p59167999"></a><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p59167999"></a>numactl</p>
+</td>
+<td class="cellrowborder" valign="top" width="50%" headers="mcps1.2.3.1.2 "><p id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p27878609"><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p27878609"></a><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p27878609"></a>--</p>
+</td>
+</tr>
+<tr id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_row49580891"><td class="cellrowborder" valign="top" width="50%" headers="mcps1.2.3.1.1 "><p id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p56629273"><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p56629273"></a><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p56629273"></a>jdk</p>
+</td>
+<td class="cellrowborder" valign="top" width="50%" headers="mcps1.2.3.1.2 "><p id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p23568411"><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p23568411"></a><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p23568411"></a>1.8.0-242</p>
+</td>
+</tr>
+<tr id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_row10789114"><td class="cellrowborder" valign="top" width="50%" headers="mcps1.2.3.1.1 "><p id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p1503005"><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p1503005"></a><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p1503005"></a>ant</p>
+</td>
+<td class="cellrowborder" valign="top" width="50%" headers="mcps1.2.3.1.2 "><p id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p54634618"><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p54634618"></a><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p54634618"></a>1.10.5</p>
+</td>
+</tr>
+<tr id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_row21949517"><td class="cellrowborder" valign="top" width="50%" headers="mcps1.2.3.1.1 "><p id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p33080433"><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p33080433"></a><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p33080433"></a>htop</p>
+</td>
+<td class="cellrowborder" valign="top" width="50%" headers="mcps1.2.3.1.2 "><p id="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p62269410"><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p62269410"></a><a name="zh-cn_topic_0283136660_zh-cn_topic_0263913280_p62269410"></a>--</p>
+</td>
+</tr>
+</tbody>
+</table>
