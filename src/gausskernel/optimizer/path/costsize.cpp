@@ -1424,6 +1424,17 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     path->path.total_cost = startup_cost + run_cost;
     path->path.stream_cost = 0;
 
+    /*
+     * BM25's <&> score is produced from state built by the BM25 index scan.
+     * A seqscan + sort path can be cheaper for tiny tables after index rebuild
+     * statistics are refreshed, but that path cannot evaluate <&> correctly.
+     */
+    if (!disable_path && index->relam == BM25_AM_OID && path->indexorderbys != NIL) {
+        path->path.startup_cost = 0;
+        path->path.total_cost = Max(u_sess->attr.attr_sql.cpu_operator_cost,
+            u_sess->attr.attr_sql.cpu_tuple_cost * Max(path->path.rows, 1.0));
+    }
+
     if (disable_path)
         path->path.total_cost *=
             (g_instance.cost_cxt.disable_cost_enlarge_factor * g_instance.cost_cxt.disable_cost_enlarge_factor);
