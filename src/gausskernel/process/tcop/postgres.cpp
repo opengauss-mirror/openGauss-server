@@ -242,6 +242,11 @@ pthread_mutex_t nodeDefCopyLock;
 Id64Gen gt_queryId = {0, 0, false};
 IdGen gt_tempId = {0, 0, false};
 
+inline bool IsSupportEmptyStrType(Oid ptype)
+{
+    return ((ptype == VARCHAROID) || (ptype == TEXTOID) || (ptype == UNKNOWNOID));
+}
+
 /*
  * On IA64 we also have to remember the register stack base.
  */
@@ -548,7 +553,7 @@ int SocketBackend(StringInfo inBuf)
             u_sess->tri_cxt.exec_row_trigger_on_datanode = false;
             return qtype;
         } else if (qtype == 'a') { /* on DN only */
-#ifdef ENABLE_MULTIPLE_NODES      
+#ifdef ENABLE_MULTIPLE_NODES
             if (aCount > MSG_A_REPEAT_NUM_MAX) {
                 ereport(DEBUG1, (errmsg("the character is repeat : %c", qtype)));
                 break;
@@ -1126,7 +1131,7 @@ List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* par
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
-                IsA(parsetree, SelectStmt) && 
+                IsA(parsetree, SelectStmt) &&
                 !is_streaming_thread() &&
                 !streaming_context_is_ddl() &&
                 is_contquery_with_dict((Node *)((SelectStmt *) parsetree)->fromClause)) {
@@ -1261,7 +1266,7 @@ static List* pg_rewrite_query(Query* query)
                     }
                 }
             }
-             
+
             if (stmt->relkind == OBJECT_MATVIEW && IS_PGXC_DATANODE) {
                 querytree_list = list_make1(query);
             } else {
@@ -1567,7 +1572,7 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
                 PG_RE_THROW();
             }
             PG_END_TRY();
-        
+
             recover_set_hint(nest_level);
 #ifdef ENABLE_MULTIPLE_NODES
             /* When insert multiple values query is a generate plan,
@@ -2832,8 +2837,8 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
          */
         oldcontext = MemoryContextSwitchTo(OptimizerContext);
 
-        /* 
-         * sqladvisor check if it can be collected 
+        /*
+         * sqladvisor check if it can be collected
          * select into... only can be checked in parsetree, it will transfrom to insert into after rewrite.
          */
         bool isCollect = checkAdivsorState() && checkParsetreeTag(parsetree);
@@ -2882,7 +2887,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
                     errmsg("Explicit prepare transaction is not supported for memory table")));
         }
 #endif
-        
+
         /* Try using light proxy to execute query */
         if (runLightProxyCheck &&
             exec_query_through_light_proxy(querytree_list, parsetree, snapshot_set, msg, OptimizerContext)) {
@@ -3853,7 +3858,7 @@ void exec_parse_message(const char* query_string, /* string to execute */
             if (!IsAbortedTransactionBlockState() && GetAccountPasswordExpired(current_user) == EXPIRED_STATUS) {
                 ForceModifyExpiredPwd((const char*)query_string, parsetree_list);
             }
-        } 
+        }
 
             /*
              * Create the CachedPlanSource before we do parse analysis, since it
@@ -4204,8 +4209,9 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
             plength = pq_getmsgint(input_message, 4);
             isNull = (plength == -1);
             /* add null value process for date type */
-            if (((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype ||
-                    TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
+            if (((IsSupportEmptyStrType(ptype)  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype ||
+                    TIMESTAMPTZOID == ptype || TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype ||
+                    SMALLDATETIMEOID == ptype) &&
                 0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
                 isNull = true;
 
@@ -4675,8 +4681,9 @@ void get_param_list_info(BindMessage* pqBindMessage, CachedPlanSource* psrc, Par
         isNull = (plength == -1);
         /* add null value process for date type */
         if (0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
-            ((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype ||
-                TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype)) {
+            ((IsSupportEmptyStrType(ptype)  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype ||
+                TIMESTAMPTZOID == ptype || TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype ||
+                SMALLDATETIMEOID == ptype)) {
             isNull = true;
         }
 
@@ -6826,7 +6833,7 @@ void ProcessInterrupts(void)
             }
             ereport(FATAL,
                 (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating connection due to administrator command")));
-        }   
+        }
     }
     if (t_thrd.int_cxt.ClientConnectionLost && !u_sess->stream_cxt.in_waiting_quit) {
         t_thrd.int_cxt.QueryCancelPending = false;   /* lost connection trumps QueryCancel */
@@ -8652,7 +8659,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     t_thrd.postmaster_cxt.xc_lockForBackupKey1 = Int32GetDatum(XC_LOCK_FOR_BACKUP_KEY_1);
     t_thrd.postmaster_cxt.xc_lockForBackupKey2 = Int32GetDatum(XC_LOCK_FOR_BACKUP_KEY_2);
 
-#ifdef ENABLE_MULTIPLE_NODES 
+#ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_DATANODE) {
         /* If we exit, first try and clean connection to GTM */
         on_proc_exit(DataNodeShutdown, 0);
@@ -8849,7 +8856,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         StreamNodeGroup::MarkRecursiveVfdInvalid();
 
         BgworkerListSyncQuit();
-        
+
         /* clean autonomous session */
         DestoryAutonomousSession(true);
         /*
@@ -9105,7 +9112,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         lc_replan_nodegroup = InvalidOid;
         /* reset xmin before ReadCommand, in case blocking redo */
         if (RecoveryInProgress()) {
-            
+
         }
         if (send_ready_for_query && u_sess->stream_cxt.global_obj == NULL &&
             u_sess->instr_cxt.global_instr != NULL) {
@@ -9338,13 +9345,13 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         firstchar = ReadCommand(&input_message);
 #ifdef USE_SPQ
-        t_thrd.spq_ctx.spq_role = ROLE_UTILITY; 
+        t_thrd.spq_ctx.spq_role = ROLE_UTILITY;
 #endif
         if (!query_started) {
             query_started = true;
-            u_sess->statement_cxt.nettime_trace_is_working = nettime_trace_is_working();        
+            u_sess->statement_cxt.nettime_trace_is_working = nettime_trace_is_working();
         }
-        
+
         /* update our elapsed time statistics. */
         timeInfoRecordStart();
         _local_tmp_opt1.enter();
@@ -9547,7 +9554,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'u': /* Autonomous transaction */
             {
-                u_sess->is_autonomous_session = true; 
+                u_sess->is_autonomous_session = true;
                 Oid currentUserId = pq_getmsgint(&input_message, 4);
                 u_sess->autonomous_parent_sessionid = pq_getmsgint64(&input_message);
                 if (currentUserId != GetCurrentUserId()) {
@@ -9556,14 +9563,14 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
                     /* we use session memory context to remember all node info in this cluster. */
                     MemoryContext old = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
-                    
+
                     ResourceOwner tmpOwner =
                             ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "CheckUserOid",
                                 THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY));
                     t_thrd.utils_cxt.CurrentResourceOwner = tmpOwner;
 
                     SetSessionAuthorization(currentUserId, superuser_arg(currentUserId));
-                    
+
                     if (u_sess->proc_cxt.MyProcPort->user_name)
                         pfree(u_sess->proc_cxt.MyProcPort->user_name);
 
@@ -9595,7 +9602,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     if (session_options_ptr != NULL)
                         pfree(session_options_ptr);
                     MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
-#endif                    
+#endif
                     ResourceOwnerRelease(tmpOwner, RESOURCE_RELEASE_BEFORE_LOCKS, true, true);
                     ResourceOwnerRelease(tmpOwner, RESOURCE_RELEASE_LOCKS, true, true);
                     ResourceOwnerRelease(tmpOwner, RESOURCE_RELEASE_AFTER_LOCKS, true, true);
@@ -9871,7 +9878,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     case 'C': {
                         /* set create command schema */
                         u_sess->catalog_cxt.setCurCreateSchema = true;
-                        u_sess->catalog_cxt.curCreateSchema = MemoryContextStrdup(u_sess->top_transaction_mem_cxt, 
+                        u_sess->catalog_cxt.curCreateSchema = MemoryContextStrdup(u_sess->top_transaction_mem_cxt,
                             schema_name);
                     } break;
                     case 'F': {
@@ -10143,7 +10150,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         rc = memcpy_s(&origin_global_session_id, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)),
                                 sizeof(uint64));
                         securec_check(rc,"","");
-                        
+
                         rc = memcpy_s(&u_sess->sess_ident.cn_timeline, sizeof(uint32), pq_getmsgbytes(&input_message, sizeof(uint32)),
                                 sizeof(uint32));
                         securec_check(rc,"","");
@@ -10350,7 +10357,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             case 'X':
                 deal_fronted_lost();
                 break;
-                
+
                 /* EOF means unexpected loss of frontend connection. Either way,
                  * perform normal shutdown.
                  */
@@ -10910,9 +10917,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             {
                 if (!IS_PGXC_DATANODE)
                     ereport(
-                        ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+                        ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("Only cn can receive the sequence update")));
-                
+
                 int num = pq_getmsgint(&input_message, 4);
                 for (int i = 0; i < num; i++) {
                     int64 result;
@@ -11141,7 +11148,7 @@ void log_disconnections(int code, Datum arg)
     secs %= SECS_PER_HOUR;
     minutes = secs / SECS_PER_MINUTE;
     seconds = secs % SECS_PER_MINUTE;
-    if (port->user_name != NULL && port->database_name != NULL && port->remote_host != NULL && 
+    if (port->user_name != NULL && port->database_name != NULL && port->remote_host != NULL &&
         port->remote_port != NULL) {
         ereport(LOG,
                 (errmsg("disconnection: session time: %d:%02d:%02d.%03d "
@@ -11159,7 +11166,7 @@ void log_disconnections(int code, Datum arg)
         ereport(LOG,
                 (errmsg("disconnection: session time: %d:%02d:%02d.%03d ", hours, minutes, seconds, msecs)));
     }
-    
+
 }
 
 void cleanGPCPlanProcExit(int code, Datum arg)
@@ -11218,7 +11225,7 @@ static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list
     if (current_user != BOOTSTRAP_SUPERUSERID || parsetree_list == NIL) {
         return;
     }
-    
+
     char* current_user_name = GetUserNameFromId(current_user);
     password_info pass_info = {NULL, 0, 0, false, false};
     /* return when the initial user's password is not empty */
@@ -11263,7 +11270,7 @@ static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list
 }
 
 /*
- * Require user to modify password since password is expired, 
+ * Require user to modify password since password is expired,
  * all the commands from APP should be forbidden except the
  * "ALTER USER ***".
  */
@@ -11276,12 +11283,12 @@ static void ForceModifyExpiredPwd(const char* queryString, const List* parsetree
     if (!IsUnderPostmaster || !IsConnFromApp()) {
         return;
     }
-    
-    /* check if gsql use -U -W */ 
+
+    /* check if gsql use -U -W */
     if (strcmp(queryString, "SELECT pg_catalog.intervaltonum(pg_catalog.gs_password_deadline())") == 0 ||
         strcmp(queryString, "SELECT pg_catalog.gs_password_notifytime()") == 0 ||
         strcmp(queryString, "SELECT VERSION()") == 0) {
-        return;    
+        return;
     }
 
     /* Check if the role in "AlterRoleStmt" matches the current_user. */
@@ -11295,17 +11302,17 @@ static void ForceModifyExpiredPwd(const char* queryString, const List* parsetree
             DefElem* defel = (DefElem*)lfirst(option);
             DefElem* dpassword = NULL;
 
-            if ((strcmp(defel->defname, "encryptedPassword") == 0 || 
+            if ((strcmp(defel->defname, "encryptedPassword") == 0 ||
                 strcmp(defel->defname, "unencryptedPassword") == 0 ||
-                strcmp(defel->defname, "password") == 0) && 
+                strcmp(defel->defname, "password") == 0) &&
                 strcasecmp(current_user_name, alter_name) == 0) {
                 dpassword = defel;
             }
 
             if (dpassword != NULL && dpassword->arg != NULL) {
                 return;
-            }            
-        }   
+            }
+        }
     }
 
     ereport(ERROR,
@@ -12196,7 +12203,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
                 plength = pq_getmsgint(input_message, 4);
                 isNull = (plength == -1);
                 /* add null value process for date type */
-                if (((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype ||
+                if (((IsSupportEmptyStrType(ptype)  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype ||
                         TIMESTAMPTZOID == ptype || TIMEOID == ptype || TIMETZOID == ptype ||
                         INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
                     0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
@@ -12607,10 +12614,10 @@ static void exec_batch_bind_execute(StringInfo input_message)
     }
     /* end batch, reset gpc batch flag */
     u_sess->pcache_cxt.gpc_in_batch = false;
-    
+
     /* Reset hint flag */
     u_sess->parser_cxt.has_hintwarning = false;
-    
+
     /* Done with the snapshot used */
     if (snapshot_set)
         PopActiveSnapshot();
@@ -12733,7 +12740,7 @@ OM_ONLINE_STATE get_om_online_state()
 
 }
 
-/* 
+/*
  * check whether sql_compatibility is valid
  */
 bool checkCompArgs(const char *compFormat)
@@ -12845,8 +12852,9 @@ void exec_get_bind_message(StringInfo input_message, BindMessage *pqBindMessage,
             if (DB_IS_CMPT(A_FORMAT)) {
                 Oid ptype = (*psrc)->param_types[paramno];
                 /* add null value process for date type */
-                if (0 == plength[paramno] && ((VARCHAROID == ptype  && !ACCEPT_EMPTY_STR) || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype ||
-                        TIMEOID == ptype || TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype)) {
+                if (0 == plength[paramno] && ((IsSupportEmptyStrType(ptype)  && !ACCEPT_EMPTY_STR) ||
+                        TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype || TIMETZOID == ptype ||
+                        INTERVALOID == ptype || SMALLDATETIMEOID == ptype)) {
                     isNull = true;
                 }
             }

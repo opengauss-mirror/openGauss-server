@@ -11969,7 +11969,7 @@ static VariableSetStmt* process_set_global_trans_args(ListCell* lcell)
     return vss;
 }
 
-static void process_set_names_collate(VariableSetStmt* setstmt, GucAction action)
+void extract_charset_collid_from_setstmt(VariableSetStmt* setstmt, char** charsetOut, char** collationOut)
 {
     ListCell* stmtarg = list_head(setstmt->args);
     A_Const* item = (A_Const*)lfirst(stmtarg);
@@ -11990,6 +11990,15 @@ static void process_set_names_collate(VariableSetStmt* setstmt, GucAction action
         Oid collid = get_default_collation_by_charset(encoding);
         collation = get_collation_name(collid);
     }
+    *charsetOut = pstrdup(charset);
+    *collationOut = pstrdup(collation);
+}
+
+static void process_set_names_collate(VariableSetStmt* setstmt, GucAction action)
+{
+    char* charset;
+    char* collation;
+    extract_charset_collid_from_setstmt(setstmt, &charset, &collation);
     GucContext context = (superuser() || (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) ?
         PGC_SUSET : PGC_USERSET;
     (void)set_config_option("client_encoding", charset, context, PGC_S_SESSION, action, true, 0);

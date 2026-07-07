@@ -1040,6 +1040,92 @@ select pg_get_tabledef('a_charset_2');
 (1 row)
 
 set b_format_behavior_compat_options = '';
+create OR REPLACE procedure t_p(out ret varchar) as
+begin
+select '{"a":"b"}'::json into ret;
+end;
+/
+select t_p();
+    t_p    
+-----------
+ {"a":"b"}
+(1 row)
+
+set b_format_behavior_compat_options = 'enable_modify_column';
+create OR REPLACE procedure t_p(out ret varchar) as
+begin
+select '{"a":"b"}'::json into ret;
+end;
+/
+select t_p();
+    t_p    
+-----------
+ {"a":"b"}
+(1 row)
+
+set b_format_behavior_compat_options = 'default_collation';
+create OR REPLACE procedure t_p(out ret varchar) as
+begin
+select '{"a":"b"}'::json into ret;
+end;
+/
+select t_p();
+    t_p    
+-----------
+ {"a":"b"}
+(1 row)
+
+set b_format_behavior_compat_options = 'enable_multi_charset';
+create OR REPLACE procedure t_p(out ret varchar) as
+begin
+select '{"a":"b"}'::json into ret;
+end;
+/
+select t_p();
+ERROR:  multi character set for datatype 'json' is not supported
+CONTEXT:  PL/pgSQL function t_p() line 2 at SQL statement
+referenced column: t_p
+drop procedure t_p(out ret varchar);
+set b_format_behavior_compat_options = '';
+drop function if exists f2;
+NOTICE:  function f2() does not exist, skipping
+create function f2(x int) returns int set names abc AS $$
+begin
+return x;
+end;
+$$ language plpgsql;
+drop function f2;
+set b_format_behavior_compat_options = 'enable_multi_charset';
+create function f2(x int) returns int set names abc AS $$
+begin
+return x;
+end;
+$$ language plpgsql;
+ERROR:  default collation for encoding "WIN1258" does not exist
+drop function f2;
+ERROR:  function f2 does not exist
+set b_format_behavior_compat_options = 'enable_multi_charset';
+create function f2(x int) returns int set names GBK AS $$
+begin
+return x;
+end;
+$$ language plpgsql;
+drop function f2;
+set b_format_behavior_compat_options = 'enable_multi_charset';
+create function f2(x int) returns int set names UTF8 AS $$
+begin
+return x;
+end;
+$$ language plpgsql;
+drop function f2;
+set b_format_behavior_compat_options = 'default_collation';
+create function f2(x int) returns int set names abc AS $$
+begin
+return x;
+end;
+$$ language plpgsql;
+drop function f2;
+set b_format_behavior_compat_options = '';
 \c regression
 clean connection to all force for database d_charset_bak;
 drop database if exists d_charset_bak;

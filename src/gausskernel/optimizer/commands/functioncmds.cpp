@@ -112,6 +112,8 @@ static void CheckInternalParamsReturnType(Oid declaredRetOid, Oid languageOid,
     List* asClause, oidvector* parameterTypes, bool* isStrict);
 static bool IsTypeMatch(Oid oid1, Oid oid2);
 static void pipelined_function_sanity_check(const CreateFunctionStmt *stmt, bool isPipelined);
+extern void extract_charset_collid_from_setstmt(VariableSetStmt* setstmt, char** charsetOut, char** collationOut);
+
 static void CreateFunctionComment(Oid funcOid, List* options, bool lock = false)
 {
     ListCell *cell = NULL;
@@ -698,9 +700,23 @@ static ArrayType* update_proconfig_value(ArrayType* a, const List* set_items)
         VariableSetStmt* sstmt = (VariableSetStmt*)lfirst(l);
 
         Assert(IsA(sstmt, VariableSetStmt));
-        if (sstmt->kind == VAR_RESET_ALL)
+        if (sstmt->kind == VAR_RESET_ALL) {
             a = NULL;
-        else {
+        } else if (ENABLE_MULTI_CHARSET && strcmp(sstmt->name, "set_names") == 0) {
+            char* valuestr = ExtractSetVariableArgs(sstmt);
+            if (valuestr != NULL) {
+                char* charset;
+                char* collation;
+                extract_charset_collid_from_setstmt(sstmt, &charset, &collation);
+                a = GUCArrayAdd(a, "client_encoding", charset);
+                a = GUCArrayAdd(a, "character_set_connection", charset);
+                a = GUCArrayAdd(a, "collation_connection", collation);
+            } else {
+                a = GUCArrayDelete(a, "client_encoding");
+                a = GUCArrayDelete(a, "character_set_connection");
+                a = GUCArrayDelete(a, "collation_connection");
+            }
+        } else {
             char* valuestr = ExtractSetVariableArgs(sstmt);
 
             if (valuestr != NULL)

@@ -16631,7 +16631,7 @@ static bool plsql_convert_value_charset_internal(PLpgSQL_execstate* estate, Datu
 static bool plsql_convert_value_charset(PLpgSQL_execstate* estate, Datum *val, bool isnull, Oid val_type,
     Oid val_collation,  PLpgSQL_datum* target)
 {
-    if (!ENABLE_MODIFY_COLUMN || isnull || target->dtype != PLPGSQL_DTYPE_VAR) {
+    if (!ENABLE_MULTI_CHARSET || isnull || target->dtype != PLPGSQL_DTYPE_VAR) {
         return false;
     }
 
@@ -16647,7 +16647,7 @@ static bool plsql_convert_value_charset(PLpgSQL_execstate* estate, Datum *val, b
 static bool plsql_convert_expr_value_charset(PLpgSQL_execstate* estate, Datum *val, bool isnull, Oid val_type,
     PLpgSQL_expr* val_expr, PLpgSQL_datum* target)
 {
-    if (!ENABLE_MODIFY_COLUMN || isnull || target->dtype != PLPGSQL_DTYPE_VAR ||
+    if (!ENABLE_MULTI_CHARSET || isnull || target->dtype != PLPGSQL_DTYPE_VAR ||
         val_expr == NULL || val_expr->expr_simple_expr == NULL) {
         return false;
     }

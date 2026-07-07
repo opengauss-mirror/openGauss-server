@@ -24073,15 +24073,17 @@ static void CheckIntervalValue(
     ListCell* cell = list_head(pos);
     int location = lfirst_int(cell);
     Oid typoid = attrs[location].atttypid;
-    if (typoid != DATEOID) {
-        return;
-    }
 
     int32 typmod = -1;
     Interval* interval = NULL;
     A_Const* node = reinterpret_cast<A_Const*>(intervalPartDef->partInterval);
     interval = char_to_interval(node->val.val.str, typmod);
-    if (interval->time != 0) {
+    if (INTERVAL_TO_USEC(interval) <= 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Interval value cannot noe be less than or equal to 0.")));
+    }
+    if (typoid == DATEOID && interval->time != 0) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("the interval of DATE type must be an integer multiple of days")));

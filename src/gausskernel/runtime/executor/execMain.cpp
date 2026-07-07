@@ -638,6 +638,8 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
 
     send_tuples = (operation == CMD_SELECT || queryDesc->plannedstmt->hasReturning);
 
+    send_tuples = send_tuples || (StreamThreadAmI() && !StreamTopConsumerAmI());
+
     /*
      * In order to ensure the integrity of the message(T-C-Z), regardless of the value of
      * u_sess->exec_cxt.executor_stop_flag, the 'T' message should be sent.

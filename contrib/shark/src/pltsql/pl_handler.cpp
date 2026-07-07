@@ -1005,7 +1005,7 @@ Datum pltsql_validator(PG_FUNCTION_ARGS)
     ReleaseSysCache(tuple);
     bool save_curr_status = GetCurrCompilePgObjStatus();
     /* Postpone body checks if !u_sess->attr.attr_sql.check_function_bodies */
-    if (u_sess->attr.attr_sql.check_function_bodies) {
+    if (u_sess->attr.attr_sql.check_function_bodies || !u_sess->plsql_cxt.isCreateFunction) {
         FunctionCallInfoData fake_fcinfo;
         FmgrInfo flinfo;
         TriggerData dml_trigdata;

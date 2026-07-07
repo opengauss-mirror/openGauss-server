@@ -2016,7 +2016,7 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         bool oldisCreateFunction = u_sess->plsql_cxt.isCreateFunction;
                         u_sess->plsql_cxt.procedure_start_line = GetLineNumber(u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf, @1);
                         u_sess->plsql_cxt.plpgsql_yylloc = @1;
-                        u_sess->plsql_cxt.isCreateFunction = true;
+                        u_sess->plsql_cxt.isCreateFunction = u_sess->plsql_cxt.isCreatePkg;
                         set_is_create_pkg_function(true);
                         raw_parse_package_function(def->defname, def->location, def->begin_location);
                         set_is_create_pkg_function(false);
@@ -2030,7 +2030,7 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                         bool oldisCreateFunction = u_sess->plsql_cxt.isCreateFunction;
                         u_sess->plsql_cxt.procedure_start_line = GetLineNumber(u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf, @1);
                         u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
-                        u_sess->plsql_cxt.isCreateFunction = true;
+                        u_sess->plsql_cxt.isCreateFunction = u_sess->plsql_cxt.isCreatePkg;
                         set_is_create_pkg_function(true);
                         raw_parse_package_function(def->defname, def->location, def->begin_location);
                         set_is_create_pkg_function(false);
