@@ -4592,6 +4592,65 @@ static bool check_datestyle_gs_guc(const char* paraname, const char* value)
 }
 
 /*************************************************************************************
+ Function: IsShellCommandParam
+ Desc    : check whether the parameter is a shell-command type that legitimately
+           contains metacharacters (e.g. archive_command, restore_command).
+ Return  : true  - is a shell command param (skip security check)
+           false - normal string param (apply security check)
+ *************************************************************************************/
+static bool IsShellCommandParam(const char* paraname)
+{
+    if (paraname == NULL) {
+        return false;
+    }
+
+    const char* shellCommandParams[] = {
+        "archive_command",
+        "restore_command",
+        "archive_cleanup_command",
+        "recovery_end_command",
+        NULL
+    };
+
+    for (int i = 0; shellCommandParams[i] != NULL; i++) {
+        if (strcmp(paraname, shellCommandParams[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*************************************************************************************
+ Function: CheckStringValueForSecurity
+ Desc    : reject shell metacharacters that could lead to command injection
+           when the value is later interpolated into a popen() command line.
+ Return  : true  - safe
+           false - contains dangerous character
+ *************************************************************************************/
+static bool CheckStringValueForSecurity(const char* value)
+{
+    typedef struct {
+        const char* token;
+        const char* display;
+    } DangerChar;
+
+    const DangerChar dangerCharacters[] = {
+        {"`", "`"}, {";", ";"}, {"|", "|"}, {"&", "&"},
+        {"<", "<"}, {">", ">"}, {"\n", "\\n"}, {NULL, NULL}
+    };
+
+    for (int i = 0; dangerCharacters[i].token != NULL; i++) {
+        if (strstr(value, dangerCharacters[i].token) != NULL) {
+            write_stderr("ERROR: Invalid character '%s' found in parameter value. "
+                         "Shell metacharacters are not allowed.\n",
+                         dangerCharacters[i].display);
+            return false;
+        }
+    }
+    return true;
+}
+
+/*************************************************************************************
  Function: check_string_type_value
  Desc    : check the paraname value of string type.
            GUC_PARA_STRING  -     length(str) > 0
@@ -4601,10 +4660,10 @@ static bool check_datestyle_gs_guc(const char* paraname, const char* value)
 int check_string_type_value(const char* paraname, const char* value)
 {
     bool result = ((int)strlen(value) > 0) ? true : false;
-    /*
-     * For now, we only check value for datestyle.
-     * If we want to check more value, it is better to use hooks.
-     */
+    if (result && !IsShellCommandParam(paraname) && !CheckStringValueForSecurity(value)) {
+        return FAILURE;
+    }
+
     if (result && paraname != NULL) {
         result = check_datestyle_gs_guc(paraname, value);
     }
