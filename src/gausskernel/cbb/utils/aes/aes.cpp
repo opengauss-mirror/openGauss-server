@@ -247,6 +247,9 @@ void initDecryptInfo(DecryptInfo* pDecryptInfo)
 {
     errno_t errorno = EOK;
     pDecryptInfo->decryptBuff = NULL;
+    pDecryptInfo->decryptChunk = NULL;
+    pDecryptInfo->decryptChunkLen = 0;
+    pDecryptInfo->decryptChunkPos = 0;
     errorno = memset_s(pDecryptInfo->currLine, MAX_DECRYPT_BUFF_LEN, '\0', MAX_DECRYPT_BUFF_LEN);
     securec_check_c(errorno, "\0", "\0");
     errorno = memset_s(pDecryptInfo->Key, KEY_MAX_LEN, '\0', KEY_MAX_LEN);
@@ -384,7 +387,14 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
         errorno = memset_s(pDecryptInfo->currLine, MAX_DECRYPT_BUFF_LEN, '\0', MAX_DECRYPT_BUFF_LEN);
         securec_check_c(errorno, "\0", "\0");
 
-        pDecryptInfo->decryptBuff = outputstr;
+        /*
+         * One on-disk chunk may span many text lines. Stash the whole
+         * plaintext in decryptChunk; getLineFromAesEncryptFile() will
+         * hand out one \n-terminated line per call.
+         */
+        pDecryptInfo->decryptChunk = outputstr;
+        pDecryptInfo->decryptChunkLen = plainlen;
+        pDecryptInfo->decryptChunkPos = 0;
         pDecryptInfo->isCurrLineProcess = true;
         errorno = memset_s(ciphertext, cipherlen, '\0', cipherlen);
         securec_check_c(errorno, "", "");
@@ -397,14 +407,65 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
     return true;
 }
 
+/*
+ * Return the next \n-terminated line of plaintext (or trailing partial line
+ * at EOF), fgets-style. Ownership: caller must free() the returned pointer.
+ * pDecryptInfo->decryptBuff always holds the last returned pointer as well,
+ * so existing call sites that free decryptBuff after use continue to work.
+ */
 char* getLineFromAesEncryptFile(FILE* source, DecryptInfo* pDecryptInfo)
 {
-    if (false == decryptFromFile(source, pDecryptInfo)) {
-        return NULL;
+    errno_t errorno = EOK;
+
+    /* If the previously decrypted chunk is exhausted, pull the next one. */
+    if (pDecryptInfo->decryptChunk == NULL ||
+        pDecryptInfo->decryptChunkPos >= pDecryptInfo->decryptChunkLen) {
+        if (pDecryptInfo->decryptChunk != NULL) {
+            errorno = memset_s(pDecryptInfo->decryptChunk,
+                pDecryptInfo->decryptChunkLen, 0, pDecryptInfo->decryptChunkLen);
+            securec_check_c(errorno, "", "");
+            free(pDecryptInfo->decryptChunk);
+            pDecryptInfo->decryptChunk = NULL;
+            pDecryptInfo->decryptChunkLen = 0;
+            pDecryptInfo->decryptChunkPos = 0;
+        }
+        /* decryptFromFile only reads a chunk when isCurrLineProcess is false */
+        pDecryptInfo->isCurrLineProcess = false;
+        if (false == decryptFromFile(source, pDecryptInfo)) {
+            return NULL;
+        }
+        if (pDecryptInfo->decryptChunk == NULL || pDecryptInfo->decryptChunkLen == 0) {
+            return NULL;
+        }
     }
 
+    /* Scan for next newline in the pending chunk. */
+    unsigned int start = pDecryptInfo->decryptChunkPos;
+    unsigned int end = start;
+    while (end < pDecryptInfo->decryptChunkLen &&
+           pDecryptInfo->decryptChunk[end] != '\n') {
+        end++;
+    }
+
+    /* Slice length: include the '\n' if we found one. */
+    unsigned int sliceLen = (end < pDecryptInfo->decryptChunkLen) ? (end - start + 1)
+                                                                    : (end - start);
+    unsigned char* line = (unsigned char*)malloc((size_t)sliceLen + 1);
+    if (line == NULL) {
+        printf("memory alloc failed in getLineFromAesEncryptFile!\n");
+        return NULL;
+    }
+    if (sliceLen > 0) {
+        errorno = memcpy_s(line, sliceLen + 1,
+            pDecryptInfo->decryptChunk + start, sliceLen);
+        securec_check_c(errorno, "\0", "\0");
+    }
+    line[sliceLen] = '\0';
+    pDecryptInfo->decryptChunkPos = start + sliceLen;
+
+    pDecryptInfo->decryptBuff = line;
     pDecryptInfo->isCurrLineProcess = false;
-    return (char*)pDecryptInfo->decryptBuff;
+    return (char*)line;
 }
 
 /* make sure the key is must be letters or numbers */

@@ -3580,9 +3580,6 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
                 (void)ahprintf(AH, "BEGIN;\n");
             }
             (void)ahprintf(AH, "%s\n\n", te->defn);
-            if (AH->publicArc.encryptfile == true && strcmp(te->desc, "PROCEDURE") == 0) {
-                (void)ahprintf(AH, "/\n");
-            }
         }
     }
 

@@ -51,6 +51,17 @@ typedef int (*kernel_crypto_hmac_type)(void *ctx, unsigned char * data, size_t d
 typedef struct decrypt_struct {
     unsigned char* decryptBuff;
 
+    /*
+     * Line-buffering state for getLineFromAesEncryptFile(): the whole
+     * decrypted plaintext of the current on-disk chunk lives in decryptChunk;
+     * decryptChunkPos advances one text line at a time so a caller that
+     * expects fgets-style semantics gets one line per call, not one whole
+     * chunk (which may span many text lines).
+     */
+    unsigned char* decryptChunk;
+    unsigned int decryptChunkLen;
+    unsigned int decryptChunkPos;
+
     char currLine[MAX_DECRYPT_BUFF_LEN];
     unsigned char Key[KEY_MAX_LEN];
     int keyLen;
