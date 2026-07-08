@@ -961,7 +961,7 @@ StmtResult *SearchEventInfo(ShowEventStmt *stmt)
                      "enable,"
                      "failure_msg ",
                      intervalColName);
-    appendStringInfo(&buf, "FROM PG_JOB ");
+    appendStringInfo(&buf, "FROM pg_job ");
 
     /* Concatenate where clause */
     appendStringInfo(&buf, "WHERE dbname=%s AND ",
