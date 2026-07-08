@@ -468,6 +468,7 @@ typedef struct xl_ubtree3_extend_td_slots {
 #define UBT_PIVOT_HEAP_TID_ATTR		0x1000
 
 const uint16 InvalidOffset = ((uint16)0) - 1;
+const uint16 INVALID_TUPLE_OFFSET = (uint16)0xa5a5;
 
 /*
  * Note: UBTreeTupleIsPivot() can have false negatives (but not false
@@ -656,9 +657,10 @@ extern BTPageState* UBTreePageState(BTWriteState* wstate, uint32 level);
 /*
  * prototypes for functions in ubtsearch.cpp
  */
-extern BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, bool needStack = true);
+extern BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer* bufP, int access, bool needStack = true,
+                            BlockNumber parallel_end = InvalidBlockNumber);
 extern Buffer UBTreeMoveRight(Relation rel, BTScanInsert itup_key, Buffer buf, bool forupdate, BTStack stack,
-    int access);
+    int access, BlockNumber parallel_end = InvalidBlockNumber);
 extern OffsetNumber UBTreeBinarySearch(Relation rel, BTScanInsert key, Buffer buf, bool fixActiveCount);
 extern int32 UBTreeCompare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum, Buffer buf);
 extern bool UBTreeFirst(IndexScanDesc scan, ScanDirection dir);
@@ -842,4 +844,8 @@ extern void UBTreeVerify(Relation rel, Page page, BlockNumber blkno, OffsetNumbe
     bool fromInsert = false);
 
 extern void UBTreeRecordGetNewPageCost(UBTreeGetNewPageStats* stats, NewPageCostType type, TimestampTz start);
+
+extern bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum);
+extern bool UBTreeParallelNext(IndexScanDesc ubt_scan, ScanDirection dir);
+extern bool UBTreeParallelFirst(IndexScanDesc ubt_scan, ScanDirection dir);
 #endif /* UBTREE_H */

@@ -1113,7 +1113,11 @@ static void knl_t_utils_init(knl_t_utils_context* utils_cxt)
     int rc = memset_s(
         utils_cxt->valueItemArr, MAX_PARTKEY_NUMS * sizeof(Const*), 0, MAX_PARTKEY_NUMS * sizeof(Const*));
     securec_check(rc, "\0", "\0");
-    utils_cxt->CurrentResourceOwner = NULL;
+    utils_cxt->ThreadRootResourceOwner = NULL;
+    utils_cxt->ThreadRootResourceOwner =
+        ResourceOwnerCreate(NULL, "ThreadRootResourceOwner", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+    utils_cxt->CurrentResourceOwner = utils_cxt->ThreadRootResourceOwner;
+    utils_cxt->OutOfTransResourceOwner = utils_cxt->ThreadRootResourceOwner;
     utils_cxt->STPSavedResourceOwner = NULL;
     utils_cxt->CurTransactionResourceOwner = NULL;
     utils_cxt->TopTransactionResourceOwner = NULL;

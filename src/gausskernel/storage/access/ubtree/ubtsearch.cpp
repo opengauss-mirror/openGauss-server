@@ -31,14 +31,10 @@
 #include "gstrace/access_gstrace.h"
 #include "catalog/pg_proc.h"
 
-static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum);
+static bool UBTreeEndPoint(IndexScanDesc scan, ScanDirection dir);
 static void UBTreeSaveItem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, const IndexTuple itup,
     Oid partOid, bool wantItup, bool needRecheck);
 static bool UBTreeStepPage(IndexScanDesc scan, ScanDirection dir);
-static bool UBTreeEndPoint(IndexScanDesc scan, ScanDirection dir);
-
-const uint16 INVALID_TUPLE_OFFSET = (uint16)0xa5a5;
-
 /*
  *	UBTreeSearch() -- Search the tree for a particular scankey,
  *		or more precisely for the first leaf page it could be on.
@@ -60,7 +56,8 @@ const uint16 INVALID_TUPLE_OFFSET = (uint16)0xa5a5;
  * InvalidBuffer.  Also, in BT_WRITE mode, any incomplete splits encountered
  * during the search will be finished
  */
-BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, bool needStack)
+BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, bool needStack,
+    BlockNumber parallel_end)
 {
     BTStack stack_in = NULL;
     int pageAccess = BT_READ;
@@ -94,7 +91,7 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
          * if the leaf page is split and we insert to the parent page).  But
          * this is a good opportunity to finish splits of internal pages too.
          */
-        *bufP = UBTreeMoveRight(rel, key, *bufP, (access == BT_WRITE), stack_in, pageAccess);
+        *bufP = UBTreeMoveRight(rel, key, *bufP, (access == BT_WRITE), stack_in, pageAccess, parallel_end);
 
         /* if this is a leaf page, we're done */
         page = BufferGetPage(*bufP);
@@ -202,7 +199,8 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
  * 'access'.  If we move right, we release the buffer and lock and acquire
  * the same on the right sibling.  Return value is the buffer we stop at.
  */
-Buffer UBTreeMoveRight(Relation rel, BTScanInsert itup_key, Buffer buf, bool forupdate, BTStack stack, int access)
+Buffer UBTreeMoveRight(Relation rel, BTScanInsert itup_key, Buffer buf, bool forupdate, BTStack stack, int access,
+                       BlockNumber parallel_end)
 {
     Page page;
     UBTPageOpaqueInternal opaque;
@@ -256,10 +254,12 @@ Buffer UBTreeMoveRight(Relation rel, BTScanInsert itup_key, Buffer buf, bool for
             buf = _bt_getbuf(rel, blkno, access);
             continue;
         }
-
         if (P_IGNORE(opaque) || UBTreeCompare(rel, itup_key, page, P_HIKEY, InvalidBuffer) >= cmpval) {
             /* step right one page */
             buf = _bt_relandgetbuf(rel, buf, opaque->btpo_next, access);
+            if (parallel_end != InvalidBlockNumber && opaque->btpo_next == parallel_end) {
+                return buf;
+            }
             continue;
         } else {
             break;
@@ -634,6 +634,9 @@ bool UBTreeFirst(IndexScanDesc scan, ScanDirection dir)
      */
     if (!so->qual_ok)
         return false;
+    if (scan->dop > 1) {
+        return UBTreeParallelFirst(scan, dir);
+    }
 
     /* ----------
      * Examine the scan keys to discover where we need to start the scan.
@@ -1289,7 +1292,7 @@ static void UBTreeTraceTupleInRange(IndexScanDesc scan, ScanDirection dir, Offse
  *
  * Returns true if any matching items found on the page, false if none.
  */
-static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
+bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 {
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
     Page page;
@@ -1828,7 +1831,11 @@ bool UBTreeGetTupleInternal(IndexScanDesc scan, ScanDirection dir)
             /*
              * Now continue the scan.
              */
-            res = UBTreeNext(scan, dir);
+            if (scan->dop > 1) {
+                res = UBTreeParallelNext(scan, dir);
+            } else {
+                res = UBTreeNext(scan, dir);
+            }
         }
 
         /* If we have a tuple, return it ... */

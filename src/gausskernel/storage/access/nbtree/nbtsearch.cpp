@@ -32,7 +32,6 @@
 #include "catalog/pg_proc.h"
 
 static int32 btree_compare_heap_tid(Relation rel, BTScanInsert itup_key, IndexTuple itup, int num_tuple_attrs);
-static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum);
 static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup, Oid partOid,
     int2 bucketid);
 static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir);
@@ -286,7 +285,7 @@ static void _bt_prefetch_local_heap_pages(IndexScanDesc scan, ScanDirection dir)
  * to be created and returned.	When access = BT_READ, an empty index
  * will result in *bufP being set to InvalidBuffer.
  */
-BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, bool needStack)
+BTStack _bt_search(Relation rel, BTScanInsert key, Buffer* bufP, int access, bool needStack, BlockNumber parallel_end)
 {
     BTStack stack_in = NULL;
     bool borrowedRoot = false;
@@ -321,7 +320,7 @@ BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, boo
          * if the leaf page is split and we insert to the parent page).  But
          * this is a good opportunity to finish splits of internal pages too.
          */
-        *bufP = _bt_moveright(rel, key, *bufP, (access == BT_WRITE), stack_in, page_access);
+        *bufP = _bt_moveright(rel, key, *bufP, (access == BT_WRITE), stack_in, page_access, parallel_end);
         borrowedRoot = BtRootbufIsBorrowed(rel, *bufP);
 
         /* if this is a leaf page, we're done */
@@ -395,7 +394,7 @@ BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, boo
 		 * but before we acquired a write lock.  If it has, we may need to
 		 * move right to its new sibling.  Do that.
 		 */
-		*bufP = _bt_moveright(rel, key, *bufP, true, stack_in, BT_WRITE);
+		*bufP = _bt_moveright(rel, key, *bufP, true, stack_in, BT_WRITE, parallel_end);
 	}
 
     return stack_in;
@@ -432,7 +431,7 @@ BTStack _bt_search(Relation rel, BTScanInsert key, Buffer *bufP, int access, boo
  * the same on the right sibling.  Return value is the buffer we stop at.
  */
 Buffer _bt_moveright(Relation rel, BTScanInsert key, Buffer buf, bool forupdate, BTStack stack,
-                     int access)
+                     int access, BlockNumber parallel_end)
 {
     Page page;
     BTPageOpaqueInternal opaque;
@@ -466,8 +465,9 @@ Buffer _bt_moveright(Relation rel, BTScanInsert key, Buffer buf, bool forupdate,
         /*
          * Finish any incomplete splits we encounter along the way.
          */
+        BlockNumber blkno = InvalidBlockNumber;
         if (forupdate && P_INCOMPLETE_SPLIT(opaque)) {
-            BlockNumber blkno = BufferGetBlockNumber(buf);
+            blkno = BufferGetBlockNumber(buf);
 
             /* upgrade our lock if necessary */
             if (access == BT_READ) {
@@ -487,6 +487,10 @@ Buffer _bt_moveright(Relation rel, BTScanInsert key, Buffer buf, bool forupdate,
         }
 
         if (P_IGNORE(opaque) || _bt_compare(rel, key, page, P_HIKEY) >= cmpval) {
+            blkno = opaque->btpo_next;
+            if (parallel_end != InvalidBlockNumber && blkno == parallel_end) {
+                return buf;
+            }
             /* step right one page */
             if (borrowedRoot) {
                 BtRootbufReleaseBorrowed(rel, buf);
@@ -879,29 +883,8 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
     if (!so->qual_ok)
         return false;
 
-#ifdef ENABLE_NEON
-    _bt_init_prefetch_state(so, scan);
-#endif
-
-    /*
-     * For parallel scans, get the starting page from shared state. If the
-     * scan has not started, proceed to find out first leaf page in the usual
-     * way while keeping other participating processes waiting.  If the scan
-     * has already begun, use the page number from the shared structure.
-     */
-    if (scan->parallelScan != NULL) {
-        status = _bt_parallel_seize(scan, &blkno);
-        if (!status) {
-            return false;
-        } else if (blkno == P_NONE) {
-            _bt_parallel_done(scan);
-            return false;
-        } else if (blkno != InvalidBlockNumber) {
-            if (!_bt_parallel_readpage(scan, blkno, dir)) {
-                return false;
-            }
-            goto readcomplete;
-        }
+    if (scan->dop > 1) {
+        return _bt_parallel_first(scan, dir);
     }
 
     /* ----------
@@ -1372,8 +1355,6 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
     /* Drop the lock, but not pin, on the current page */
     LockBuffer(so->currPos.buf, BUFFER_LOCK_UNLOCK);
     }
-
-readcomplete:
     /* OK, itemIndex says what to return */
     currItem = &so->currPos.items[so->currPos.itemIndex];
     scan->xs_ctup.t_self = currItem->heapTid;
@@ -1475,7 +1456,7 @@ bool _bt_next(IndexScanDesc scan, ScanDirection dir)
  *
  * Returns true if any matching items found on the page, false if none.
  */
-static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
+bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
 {
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
     Page page;
@@ -1747,39 +1728,13 @@ static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir)
     if (ScanDirectionIsForward(dir)) {
         so->currPos.buf = InvalidBuffer;
 
-        /* Walk right to the next page with data */
-        if (scan->parallelScan != NULL) {
-            /*
-             * Seize the scan to get the next block number; if the scan has
-             * ended already, bail out.
-             */
-            status = _bt_parallel_seize(scan, &blkno);
-            if (!status) {
-                return false;
-            }
-        } else {
-            /* Not parallel, so use the previously-saved nextPage link. */
-            blkno = so->currPos.nextPage;
-        }
+        blkno = so->currPos.nextPage;
         /* Remember we left a page with data */
         so->currPos.moreLeft = true;
     } else {
         /* Remember we left a page with data */
         so->currPos.moreRight = true;
-        if (scan->parallelScan != NULL) {
-            /*
-             * Seize the scan to get the current block number; if the scan has
-             * ended already, bail out.
-             */
-            status = _bt_parallel_seize(scan, &blkno);
-            if (!status) {
-                so->currPos.buf = InvalidBuffer;
-                return false;
-            }
-        } else {
-            /* Not parallel, so just use our own notion of the current page */
-            blkno = so->currPos.currPage;
-        }
+        blkno = so->currPos.currPage;
     }
 
     return _bt_readnextpage(scan, blkno, dir);
@@ -1830,9 +1785,6 @@ static bool _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno,
                 if (_bt_readpage(scan, dir, P_FIRSTDATAKEY(opaque))) {
                     break;
                 }
-            } else if (scan->parallelScan != NULL) {
-                /* allow next page be processed by parallel worker */
-                _bt_parallel_release(scan, opaque->btpo_next);
             }
 
             /* release the previous buffer */
@@ -1840,14 +1792,7 @@ static bool _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno,
             so->currPos.buf = InvalidBuffer;
 
             /* nope, keep going */
-            if (scan->parallelScan != NULL) {
-                status = _bt_parallel_seize(scan, &blkno);
-                if (!status) {
-                    return false;
-                }
-            } else {
-                blkno = opaque->btpo_next;
-            }
+            blkno = opaque->btpo_next;
         }
     } else {
         /*
@@ -1915,25 +1860,6 @@ static bool _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno,
                 if (_bt_readpage(scan, dir, PageGetMaxOffsetNumber(page))) {
                     break;
                 }
-            } else if (scan->parallelScan != NULL) {
-                /* allow next page be processed by parallel worker */
-                _bt_parallel_release(scan, BufferGetBlockNumber(so->currPos.buf));
-            }
-
-            /*
-             * For parallel scans, get the last page scanned as it is quite
-             * possible that by the time we try to seize the scan, some other
-             * worker has already advanced the scan to a different page.  We
-             * must continue based on the latest page scanned by any worker.
-             */
-            if (scan->parallelScan != NULL) {
-                _bt_relbuf(rel, so->currPos.buf);
-                status = _bt_parallel_seize(scan, &blkno);
-                if (!status) {
-                    so->currPos.buf = InvalidBuffer;
-                    return false;
-                }
-                so->currPos.buf = _bt_getbuf(rel, blkno, BT_READ);
             }
         }
     }
@@ -1976,7 +1902,7 @@ static bool _bt_parallel_readpage(IndexScanDesc scan, BlockNumber blkno, ScanDir
  * to be half-dead; the caller should check that condition and step left
  * again if it's important.
  */
-Buffer _bt_walk_left(Relation rel, Buffer buf)
+Buffer _bt_walk_left(Relation rel, Buffer buf, BlockNumber parallel_end)
 {
     Page page;
     BTPageOpaqueInternal opaque;
@@ -1997,6 +1923,14 @@ Buffer _bt_walk_left(Relation rel, Buffer buf)
         }
         /* remember original page we are stepping left from */
         obknum = BufferGetBlockNumber(buf);
+        /*
+         * Before set to next block, we should check whether need to stop here,
+         * since the scan interval of all threads except the first thread is (start, end].
+         */
+        if (parallel_end != InvalidBlockNumber && obknum == parallel_end) {
+            _bt_relbuf(rel, buf);
+            return InvalidBuffer;
+        }
         /* step left */
         blkno = lblkno = opaque->btpo_prev;
         _bt_relbuf(rel, buf);
@@ -2083,7 +2017,7 @@ Buffer _bt_walk_left(Relation rel, Buffer buf)
  *
  * The returned buffer is pinned and read-locked.
  */
-Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost)
+Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost, BlockNumber parallel_end)
 {
     Buffer buf;
     Page page;
@@ -2119,6 +2053,10 @@ Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost)
          */
         while (P_IGNORE(opaque) || (rightmost && !P_RIGHTMOST(opaque))) {
             blkno = opaque->btpo_next;
+            if (parallel_end != InvalidBlockNumber && blkno == parallel_end) {
+                _bt_relbuf(rel, buf);
+                return InvalidBuffer;
+            }
             if (blkno == P_NONE)
                 ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                                 errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
@@ -2148,6 +2086,10 @@ Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost)
 
         itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
         blkno = BTreeInnerTupleGetDownLink(itup);
+        if (parallel_end != InvalidBlockNumber && blkno == parallel_end) {
+            _bt_relbuf(rel, buf);
+            return InvalidBuffer;
+        }
         if (borrowedRoot) {
             BtRootbufReleaseBorrowed(rel, buf);
             buf = _bt_getbuf(rel, blkno, BT_READ);
@@ -2310,7 +2252,11 @@ bool _bt_gettuple_internal(IndexScanDesc scan, ScanDirection dir)
             /*
              * Now continue the scan.
              */
-            res = _bt_next(scan, dir);
+            if (scan->dop > 1) {
+                res = _bt_parallel_next(scan, dir);
+            } else {
+                res = _bt_next(scan, dir);
+            }
         }
 
         /* If we have a tuple, return it ... */

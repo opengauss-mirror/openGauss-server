@@ -224,4 +224,5 @@ extern void ResourceOwnerReleaseGlobalIsExclusive(ResourceOwner owner, bool isCo
 extern bool CurrentResourceOwnerIsEmpty(ResourceOwner owner);
 extern void ReleaseResownerOutOfTransaction();
 extern Buffer ResourceOwnerGetBuffer(ResourceOwner owner);
+extern void ReleaseResownerForStreamError();
 #endif /* RESOWNER_H */

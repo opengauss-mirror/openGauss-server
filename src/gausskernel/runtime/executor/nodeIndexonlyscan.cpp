@@ -428,7 +428,7 @@ void ExecReScanIndexOnlyScan(IndexOnlyScanState* node)
         node->ioss_ScanKeys,
         node->ioss_NumScanKeys,
         node->ioss_OrderByKeys,
-        node->ioss_NumOrderByKeys);
+        node->ioss_NumOrderByKeys, node->m_dop, node->m_plan_node_id);
 
     ExecScanReScan(&node->ss);
 }
@@ -577,7 +577,9 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
      * create expression context for node
      */
     ExecAssignExprContext(estate, &indexstate->ss.ps);
-
+    int dop = node->scan.plan.dop;
+    indexstate->m_dop = dop > 1 ? dop : 1;
+    indexstate->m_plan_node_id = indexstate->ss.ps.plan->plan_node_id;
     indexstate->ss.ps.ps_vec_TupFromTlist = false;
 
     /*
@@ -770,7 +772,7 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
                     scanSnap,
                     indexstate->ioss_NumScanKeys,
                     indexstate->ioss_NumOrderByKeys,
-                    (ScanState*)indexstate);
+                    (ScanState*)indexstate, NULL, dop, indexstate->ss.ps.plan->plan_node_id);
             }
         }
     } else {
@@ -813,7 +815,7 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
             indexstate->ioss_NumScanKeys,
             indexstate->ioss_NumOrderByKeys,
             (ScanState*)indexstate,
-            paralleDesc);
+            paralleDesc, dop, indexstate->ss.ps.plan->plan_node_id);
     }
 
     /*
@@ -833,7 +835,7 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
                 indexstate->ioss_ScanKeys,
                 indexstate->ioss_NumScanKeys,
                 indexstate->ioss_OrderByKeys,
-                indexstate->ioss_NumOrderByKeys);
+                indexstate->ioss_NumOrderByKeys, dop, indexstate->ss.ps.plan->plan_node_id);
     } else {
         indexstate->ss.ps.stubType = PST_Scan;
     }
@@ -889,7 +891,7 @@ static void ExecInitNextIndexPartitionForIndexScanOnly(IndexOnlyScanState* node)
     node->ss.currentSlot = (int)param->value;
     subPartParamno = plan->scan.plan.subparamno;
     subPartParam = &(node->ss.ps.state->es_param_exec_vals[subPartParamno]);
-
+    int dop = plan->scan.plan.dop > 1 ? plan->scan.plan.dop : 1;
     /* construct a dummy table relation with the next table partition*/
     currentpartition = (Partition)list_nth(node->ss.partitions, node->ss.currentSlot);
     currentpartitionrel = partitionGetRelation(node->ss.ss_currentRelation, currentpartition);
@@ -924,20 +926,14 @@ static void ExecInitNextIndexPartitionForIndexScanOnly(IndexOnlyScanState* node)
     node->ioss_CurrentIndexPartition = currentindexpartitionrel;
 
     /* Initialize scan descriptor. */
-    node->ioss_ScanDesc = scan_handler_idx_beginscan(node->ss.ss_currentPartition,
-        node->ioss_CurrentIndexPartition,
-        scanSnap,
-        node->ioss_NumScanKeys,
-        node->ioss_NumOrderByKeys,
-        (ScanState*)node);
+    node->ioss_ScanDesc = scan_handler_idx_beginscan(node->ss.ss_currentPartition, node->ioss_CurrentIndexPartition,
+                                                     scanSnap, node->ioss_NumScanKeys, node->ioss_NumOrderByKeys,
+                                                     (ScanState*)node, NULL, dop, node->ss.ps.plan->plan_node_id);
     GetIndexScanDesc(node->ioss_ScanDesc)->xs_want_itup = true;
-    scan_handler_idx_rescan_local(node->ioss_ScanDesc,
-        node->ioss_ScanKeys,
-        node->ioss_NumScanKeys,
-        node->ioss_OrderByKeys,
-        node->ioss_NumOrderByKeys);
+    scan_handler_idx_rescan_local(node->ioss_ScanDesc, node->ioss_ScanKeys, node->ioss_NumScanKeys,
+                                  node->ioss_OrderByKeys, node->ioss_NumOrderByKeys, dop,
+                                  node->ss.ps.plan->plan_node_id);
     heap_close(heapRelation, AccessShareLock);
-
 }
 
 /*

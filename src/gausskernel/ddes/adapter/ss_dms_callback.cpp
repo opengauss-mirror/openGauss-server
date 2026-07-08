@@ -2508,7 +2508,6 @@ void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
     }
     CreateLocalSysDBCache();
     InitShmemForDmsCallBack();
-    Assert(t_thrd.utils_cxt.CurrentResourceOwner == NULL);
     t_thrd.utils_cxt.CurrentResourceOwner =
         ResourceOwnerCreate(NULL, "dms worker", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 

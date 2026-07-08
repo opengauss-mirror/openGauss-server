@@ -1316,9 +1316,9 @@ static void AtStart_ResourceOwner(void)
 
     /* We shouldn't have a transaction resource owner already. */
     Assert(t_thrd.utils_cxt.TopTransactionResourceOwner == NULL);
-    Assert(CurrentResourceOwnerIsEmpty(t_thrd.utils_cxt.CurrentResourceOwner));
+    Assert(t_thrd.utils_cxt.CurTransactionResourceOwner == t_thrd.utils_cxt.ThreadRootResourceOwner ||
+           CurrentResourceOwnerIsEmpty(t_thrd.utils_cxt.CurrentResourceOwner));
     Assert(!EnableLocalSysCache() || CurrentResourceOwnerIsEmpty(t_thrd.lsc_cxt.local_sysdb_resowner));
-
     /* Create a toplevel resource owner for the transaction. */
     s->curTransactionOwner = ResourceOwnerCreate(NULL, "TopTransaction",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
@@ -3141,6 +3141,7 @@ static void CommitTransaction(bool STP_commit)
     t_thrd.utils_cxt.CurTransactionResourceOwner = NULL;
     t_thrd.utils_cxt.TopTransactionResourceOwner = NULL;
     IsolatedResourceOwner = NULL;
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.OutOfTransResourceOwner;
     AtCommit_RelationSync();
 
     AtCommit_Memory();
@@ -3613,7 +3614,7 @@ static void PrepareTransaction(bool STP_commit)
     AtEOXact_Snapshot(true);
     pgstat_report_xact_timestamp(0);
 
-    t_thrd.utils_cxt.CurrentResourceOwner = NULL;
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.OutOfTransResourceOwner;
     ResourceOwnerDelete(t_thrd.utils_cxt.TopTransactionResourceOwner);
     s->curTransactionOwner = NULL;
     t_thrd.utils_cxt.CurTransactionResourceOwner = NULL;
@@ -4118,7 +4119,7 @@ static void CleanupTransaction(void)
     u_sess->xact_cxt.sendSeqSchmaName = NULL;
     u_sess->xact_cxt.sendSeqName = NULL;
     u_sess->xact_cxt.send_result = NULL;
-    t_thrd.utils_cxt.CurrentResourceOwner = NULL; /* and resource owner */
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.OutOfTransResourceOwner; /* and resource owner */
     if (t_thrd.utils_cxt.TopTransactionResourceOwner)
         ResourceOwnerDelete(t_thrd.utils_cxt.TopTransactionResourceOwner);
     s->curTransactionOwner = NULL;

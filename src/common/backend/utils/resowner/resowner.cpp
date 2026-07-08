@@ -213,6 +213,13 @@ static void PrintFileLeakWarning(File file);
  */
 ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name, MemoryContext memCxt)
 {
+    if (parent == NULL && strcmp(name, "TopTransaction") != 0 && strcmp(name, "InitLocalSysCache") != 0 &&
+        strcmp(name, "ThreadRootResourceOwner") != 0) {
+        Assert(t_thrd.utils_cxt.ThreadRootResourceOwner == t_thrd.utils_cxt.CurrentResourceOwner);
+        Assert(strcmp(t_thrd.utils_cxt.ThreadRootResourceOwner->name, "ThreadRootResourceOwner") == 0);
+        t_thrd.utils_cxt.ThreadRootResourceOwner->name = name;
+        return t_thrd.utils_cxt.ThreadRootResourceOwner;
+    }
     ResourceOwner owner;
 
     MemoryContext context = AllocSetContextCreate(memCxt,
@@ -530,6 +537,11 @@ void ResourceOwnerDelete(ResourceOwner owner)
     if (IsolatedResourceOwner == owner)
         IsolatedResourceOwner = NULL;
     Assert(t_thrd.lsc_cxt.local_sysdb_resowner != owner);
+
+    Assert(t_thrd.utils_cxt.ThreadRootResourceOwner != owner);
+    if (t_thrd.utils_cxt.ThreadRootResourceOwner == owner) {
+        return;
+    }
 
     while (owner->firstchild != NULL)
         ResourceOwnerDelete(owner->firstchild);
@@ -2715,6 +2727,7 @@ void ResourceOwnerReleaseAllPlanCacheRefs(ResourceOwner owner)
     ResourceOwnerDecrementNPlanRefs(owner, true);
     t_thrd.utils_cxt.CurrentResourceOwner = save;
 }
+
 void ReleaseResownerOutOfTransaction()
 {
     if (likely(t_thrd.utils_cxt.CurrentResourceOwner == NULL)) {
@@ -2735,10 +2748,43 @@ void ReleaseResownerOutOfTransaction()
     if (unlikely(strcmp(root->name, "TopTransaction") == 0)) {
         return;
     }
-
+    Assert(root == t_thrd.utils_cxt.ThreadRootResourceOwner);
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.ThreadRootResourceOwner;
     ResourceOwnerRelease(root, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
     ResourceOwnerRelease(root, RESOURCE_RELEASE_LOCKS, false, true);
     ResourceOwnerRelease(root, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
+    while (t_thrd.utils_cxt.ThreadRootResourceOwner->firstchild != NULL) {
+        ResourceOwnerDelete(t_thrd.utils_cxt.ThreadRootResourceOwner->firstchild);
+    }
+}
+
+bool ResourceOwnerExists(ResourceOwner owner, ResourceOwner root)
+{
+    /* resouceowner exists is a check before release, root onwer's release shouldn't call ResourceOwnerExists */
+    if (owner == NULL || owner->parent == NULL || root == NULL) {
+        return false;
+    }
+    return root == owner || (root->firstchild != NULL && ResourceOwnerExists(owner, root->firstchild)) ||
+           (root->nextchild != NULL && ResourceOwnerExists(owner, root->nextchild));
+}
+
+void ReleaseResownerForStreamError()
+{
+    ResourceOwner toSetCurrentResourceOwner = NULL;
+    if (t_thrd.utils_cxt.CurrentResourceOwner != NULL && t_thrd.utils_cxt.CurrentResourceOwner->parent != NULL &&
+        ResourceOwnerExists(t_thrd.utils_cxt.CurrentResourceOwner, t_thrd.utils_cxt.ThreadRootResourceOwner)) {
+        toSetCurrentResourceOwner = t_thrd.utils_cxt.ThreadRootResourceOwner;
+    } else {
+        toSetCurrentResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    }
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.ThreadRootResourceOwner;
+    ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
+    ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_LOCKS, false, true);
+    ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
+    while (t_thrd.utils_cxt.ThreadRootResourceOwner->firstchild != NULL) {
+        ResourceOwnerDelete(t_thrd.utils_cxt.ThreadRootResourceOwner->firstchild);
+    }
+    t_thrd.utils_cxt.CurrentResourceOwner = toSetCurrentResourceOwner;
 }
 
 FORCE_INLINE

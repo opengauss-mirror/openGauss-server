@@ -387,7 +387,10 @@ extern bool UBTreePCRGetTupleInternal(IndexScanDesc scan, ScanDirection dir);
 extern void ReportSnapshotTooOld(IndexScanDesc scan, Page page, OffsetNumber offnum,
     UndoRecPtr urecptr, const char* when);
 void LogInsertOrDelete(UBTree3WalInfo *walInfo, uint8 opt);
-
+extern bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, BTScanInsert inskey = nullptr,
+                              bool need_to_go_back = false);
+extern IndexTuple UBTreePCRCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum, ScanDirection dir,
+                                     bool* continuescan);
 
 /*
  * prototypes for functions in ubtpcrinsert.cpp
@@ -484,5 +487,21 @@ extern int UBTreePCRRollback(URecVector *urecvec, int startIdx, int endIdx, Tran
     Oid partitionoid, BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid);
 extern bool UBTreePCRIsKeyEqual(Relation idxrel, IndexTuple itup, BTScanInsert itupKey);
 
+/* parallel index scan funcs */
+extern bool UBTreePCRParallelFirst(IndexScanDesc pcr_scan, ScanDirection dir);
+extern bool UBTreePCRParallelNext(IndexScanDesc pcr_scan, ScanDirection dir);
+extern bool UBTreePCRParallelSteppage(IndexScanDesc pcr_scan, ScanDirection dir);
+extern int UBTreePCRParallelGetScanTotalBlocks(IndexScanDesc pcr_scan, ScanDirection dir, BlockNumber start_block);
+extern Buffer UBTreePCRGetBeginParallelScanBuf(IndexScanDesc pcr_scan, ScanDirection dir, BTScanInsertData inskey,
+                                               bool* need_to_go_back);
+extern bool UBTreePCRParallelFirstThread0Proc(IndexScanDesc pcr_scan, ScanDirection dir, Buffer begin_buf,
+                                              int curr_off_start, int index, BlockNumber& bt_start_blk,
+                                              StreamNodeGroup* stream_nodegroup);
+extern Buffer UBTreePCRParallelFirstGetFirstBuffer(IndexScanDesc pcr_scan, ScanDirection dir, BTScanInsertData* inskey,
+                                            bool* need_to_bo_back, BlockNumber pcr_start_blk);
+extern bool UBTreePCRParallelFirstExecScan(IndexScanDesc pcr_scan, ScanDirection dir, BTScanInsertData* inskey,
+                                           bool* need_to_go_back, BlockNumber start_block);
+extern bool UBTreePCRParallelStepPageForward(IndexScanDesc pcr_scan, ScanDirection dir);
+extern bool UBTreePCRParallelStepPageBackforward(IndexScanDesc pcr_scan, ScanDirection dir);
 
 #endif /* UBTREE_PCR_H */

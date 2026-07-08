@@ -349,6 +349,11 @@ StreamNodeGroup::StreamNodeGroup()
     pthread_mutex_init(&m_mutex, NULL);
     pthread_mutex_init(&m_recursiveMutex, NULL);
     pthread_cond_init(&m_cond, NULL);
+    pthread_mutex_init(&m_index_smp_mutex, NULL);
+    pthread_condattr_t attr;
+    pthread_condattr_init(&attr);
+    pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+    pthread_cond_init(&m_index_smp_cond, &attr);
     m_pid = gs_thread_self();
     m_streamPairList = NULL;
     m_streamConsumerList = NULL;
@@ -363,6 +368,8 @@ StreamNodeGroup::StreamNodeGroup()
     m_portal = NULL;
 #endif
     m_spiLevel = u_sess->SPI_cxt._connected;
+    parallel_indexscan_map = NULL;
+    parallel_indexscan_size = 0;
 }
 
 StreamNodeGroup::~StreamNodeGroup()
@@ -1145,7 +1152,15 @@ void StreamNodeGroup::deInit(StreamObjStatus status)
     }
 
     m_streamRuntimeContext = NULL;
-
+    for (int i = 0; i < parallel_indexscan_size; i++) {
+        if (parallel_indexscan_map != NULL && parallel_indexscan_map[i] != nullptr) {
+            pfree_ext(parallel_indexscan_map[i]);
+        }
+    }
+    if (parallel_indexscan_map != NULL) {
+        pfree_ext(parallel_indexscan_map);
+    }
+    parallel_indexscan_size = 0;
     /*
      * 1. If length of m_streamPairList is not the same as m_size(number of stream exists in plan tree),
      * it means that stream connection and stream thread initialization may not finish yet due to
@@ -1166,8 +1181,10 @@ void StreamNodeGroup::deInit(StreamObjStatus status)
     streamLock2.unLock();
 #endif
     pthread_cond_destroy(&m_cond);
+    pthread_cond_destroy(&m_index_smp_cond);
     pthread_mutex_destroy(&m_mutex);
     pthread_mutex_destroy(&m_recursiveMutex);
+    pthread_mutex_destroy(&m_index_smp_mutex);
 }
 
 /*

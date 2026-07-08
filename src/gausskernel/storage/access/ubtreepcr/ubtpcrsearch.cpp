@@ -45,14 +45,11 @@
 #include "storage/buf/crbuf.h"
 #include "storage/checksum_impl.h"
 
-static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum);
 static void UBTreePCRSaveItem(IndexScanDesc scan, int itemIndex, Page page, OffsetNumber offnum,
     const IndexTuple itup, Oid partOid);
 static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir);
 static bool UBTreePCREndPoint(IndexScanDesc scan, ScanDirection dir);
 static void BuildCRPage(IndexScanDesc scan, Page crPage, Buffer baseBuffer, CommandId *page_cid);
-
-const uint16 INVALID_TUPLE_OFFSET = (uint16)0xa5a5;
 
 /* thrshold switch scan mode from pbrcr to pcr */
 const int SCAN_MODE_SWITCH_THRESHOLD = 10;
@@ -583,7 +580,6 @@ bool UBTreePCRFirst(IndexScanDesc scan, ScanDirection dir)
     Relation rel = scan->indexRelation;
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
     Buffer buf;
-    OffsetNumber offnum;
     StrategyNumber strat;
     bool nextkey = false;
     bool goback = false;
@@ -609,7 +605,9 @@ bool UBTreePCRFirst(IndexScanDesc scan, ScanDirection dir)
      */
     if (!so->qual_ok)
         return false;
-
+    if (scan->dop > 1) {
+        return UBTreePCRParallelFirst(scan, dir);
+    }
     /* ----------
      * Examine the scan keys to discover where we need to start the scan.
      *
@@ -1023,34 +1021,10 @@ bool UBTreePCRFirst(IndexScanDesc scan, ScanDirection dir)
     so->numKilled = 0;      /* just paranoia */
     so->markItemIndex = -1; /* ditto */
 
-    /* position to the precise item on the page */
-    offnum = UBTreePCRBinarySearch(rel, &inskey, BufferGetPage(buf));
-
-    /*
-     * If nextkey = false, we are positioned at the first item >= scan key, or
-     * possibly at the end of a page on which all the existing items are less
-     * than the scan key and we know that everything on later pages is greater
-     * than or equal to scan key.
-     *
-     * If nextkey = true, we are positioned at the first item > scan key, or
-     * possibly at the end of a page on which all the existing items are less
-     * than or equal to the scan key and we know that everything on later
-     * pages is greater than scan key.
-     *
-     * The actually desired starting point is either this item or the prior
-     * one, or in the end-of-page case it's the first item on the next page or
-     * the last item on this page.	Adjust the starting offset if needed. (If
-     * this results in an offset before the first item or after the last one,
-     * _bt_readpage will report no items found, and then we'll step to the
-     * next page as needed.)
-     */
-    if (goback)
-        offnum = OffsetNumberPrev(offnum);
-
     /*
      * Now load data from the first page of the scan.
      */
-    if (!UBTreePCRReadPage(scan, dir, offnum)) {
+    if (!UBTreePCRReadPage(scan, dir, &inskey, goback)) {
         /*
          * There's no actually-matching data on this page.  Try to advance to
          * the next page.  Return false if there's no matching data at all.
@@ -1646,7 +1620,7 @@ static bool IsPCRScanModeSupported(Snapshot snapshot)
  *
  * Returns true if any matching items found on the page, false if none.
  */
-static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum)
+bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, BTScanInsert inskey, bool need_to_go_back)
 {
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
     Page page;
@@ -1701,6 +1675,37 @@ static bool UBTreePCRReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumbe
 
     Page localPage = NULL;
     uint32 checkNum = 0;
+    OffsetNumber offnum = 0;
+    if (inskey == NULL) {
+        if (ScanDirectionIsForward(dir)) {
+            offnum = P_FIRSTDATAKEY(opaque);
+        } else {
+            offnum = UBTreePCRPageGetMaxOffsetNumber(page);
+        }
+    } else {
+        offnum = UBTreePCRBinarySearch(scan->indexRelation, inskey, page);
+        /*
+        * If nextkey = false, we are positioned at the first item >= scan key, or
+        * possibly at the end of a page on which all the existing items are less
+        * than the scan key and we know that everything on later pages is greater
+        * than or equal to scan key.
+        *
+        * If nextkey = true, we are positioned at the first item > scan key, or
+        * possibly at the end of a page on which all the existing items are less
+        * than or equal to the scan key and we know that everything on later
+        * pages is greater than scan key.
+        *
+        * The actually desired starting point is either this item or the prior
+        * one, or in the end-of-page case it's the first item on the next page or
+        * the last item on this page.	Adjust the starting offset if needed. (If
+        * this results in an offset before the first item or after the last one,
+        * _bt_readpage will report no items found, and then we'll step to the
+        * next page as needed.)
+        */
+        if (need_to_go_back) {
+            offnum = OffsetNumberPrev(offnum);
+        }
+    }
     OffsetNumber checkVisibleOffs[MaxIndexTuplesPerPage] = {0};
     OffsetNumber originOffnum = offnum;
     BlockNumber blockNum = BufferGetBlockNumber(so->currPos.buf);
@@ -2200,8 +2205,9 @@ static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir)
                 PredicateLockPage(rel, blkno, scan->xs_snapshot);
                 /* see if there are any matches on this page */
                 /* note that this will clear moreRight if we can stop */
-                if (UBTreePCRReadPage(scan, dir, P_FIRSTDATAKEY(opaque)))
+                if (UBTreePCRReadPage(scan, dir)) {
                     break;
+                }
             }
             /* nope, keep going */
             blkno = opaque->btpo_next;
@@ -2244,8 +2250,9 @@ static bool UBTreePCRStepPage(IndexScanDesc scan, ScanDirection dir)
                 PredicateLockPage(rel, BufferGetBlockNumber(so->currPos.buf), scan->xs_snapshot);
                 /* see if there are any matches on this page */
                 /* note that this will clear moreLeft if we can stop */
-                if (UBTreePCRReadPage(scan, dir, UBTreePCRPageGetMaxOffsetNumber(page)))
+                if (UBTreePCRReadPage(scan, dir)) {
                     break;
+                }
             }
         }
     }
@@ -2344,7 +2351,6 @@ static bool UBTreePCREndPoint(IndexScanDesc scan, ScanDirection dir)
     Buffer buf;
     Page page;
     UBTPCRPageOpaque opaque;
-    OffsetNumber start;
     BTScanPosItem *currItem = NULL;
 
     /*
@@ -2368,18 +2374,6 @@ static bool UBTreePCREndPoint(IndexScanDesc scan, ScanDirection dir)
     opaque = (UBTPCRPageOpaque)PageGetSpecialPointer(page);
     Assert(P_ISLEAF(opaque));
 
-    if (ScanDirectionIsForward(dir)) {
-        /* There could be dead pages to the left, so not this: */
-        start = P_FIRSTDATAKEY(opaque);
-    } else if (ScanDirectionIsBackward(dir)) {
-        Assert(P_RIGHTMOST(opaque));
-
-        start = UBTreePCRPageGetMaxOffsetNumber(page);
-    } else {
-        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("invalid scan direction: %d", (int)dir)));
-        start = 0; /* keep compiler quiet */
-    }
-
     /* remember which buffer we have pinned */
     so->currPos.buf = buf;
 
@@ -2397,7 +2391,7 @@ static bool UBTreePCREndPoint(IndexScanDesc scan, ScanDirection dir)
     /*
      * Now load data from the first page of the scan.
      */
-    if (!UBTreePCRReadPage(scan, dir, start)) {
+    if (!UBTreePCRReadPage(scan, dir)) {
         /*
          * There's no actually-matching data on this page.  Try to advance to
          * the next page.  Return false if there's no matching data at all.
@@ -2483,7 +2477,11 @@ bool UBTreePCRGetTupleInternal(IndexScanDesc scan, ScanDirection dir)
             /*
              * Now continue the scan.
              */
-            res = UBTreePCRNext(scan, dir);
+            if (scan->dop > 1) {
+                res = UBTreePCRParallelNext(scan, dir);
+            } else {
+                res = UBTreePCRNext(scan, dir);
+            }
         }
 
         /* If we have a tuple, return it ... */

@@ -907,11 +907,11 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
     bool found_clause = false;
     bool found_lower_saop_clause = false;
     bool pathkeys_possibly_useful = false;
+    bool with_array_keys = false;
     bool index_is_ordered = false;
     bool index_only_scan = false;
     int indexcol;
-    bool can_parallel = IS_STREAM_PLAN && (u_sess->opt_cxt.query_dop > 1) && (ST_BITMAPSCAN != scantype) &&
-                        (!rel->isPartitionedTable) && !index->rel->is_ustore;
+    bool can_parallel = IS_STREAM_PLAN && (u_sess->opt_cxt.query_dop > 1) && (ST_BITMAPSCAN != scantype);
 
     if (index->isAnnIndex && IsExtremeRedo()) {
         if (ST_BITMAPSCAN != scantype) {
@@ -976,6 +976,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
             RestrictInfo* rinfo = (RestrictInfo*)lfirst(lc);
 
             if (IsA(rinfo->clause, ScalarArrayOpExpr)) {
+                with_array_keys = true;
                 /* Ignore if not supported by index */
                 if (saop_control == SAOP_PER_AM && !index->amsearcharray)
                     continue;
@@ -1002,7 +1003,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
         if (index_clauses == NIL && !index->amoptionalkey)
             return NIL;
     }
-
+    can_parallel = can_parallel && !with_array_keys;
     /* We do not want the index's rel itself listed in outer_relids */
     outer_relids = bms_del_member(outer_relids, rel->relid);
     /* Enforce convention that outer_relids is exactly NULL if empty */

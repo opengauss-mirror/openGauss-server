@@ -792,7 +792,10 @@ bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack)
 
     page = BufferGetPage(leafbuf);
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
-
+    if (P_PARALLEL_SCAN_END(opaque) &&
+        !(TransactionIdPrecedes(((UBTPageOpaque)opaque)->xact, u_sess->utils_cxt.RecentGlobalXmin))) {
+        return false;
+    }
     Assert(!P_RIGHTMOST(opaque) && !P_ISROOT(opaque) && !P_ISDELETED(opaque) && !P_ISHALFDEAD(opaque) &&
            P_ISLEAF(opaque) && P_FIRSTDATAKEY(opaque) > PageGetMaxOffsetNumber(page));
 

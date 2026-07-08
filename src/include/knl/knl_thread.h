@@ -1871,7 +1871,8 @@ typedef struct knl_t_utils_context {
     struct ResourceOwnerData* STPSavedResourceOwner;
     struct ResourceOwnerData* CurTransactionResourceOwner;
     struct ResourceOwnerData* TopTransactionResourceOwner;
-
+    struct ResourceOwnerData* ThreadRootResourceOwner;
+    struct ResourceOwnerData* OutOfTransResourceOwner;
     /* flag to indicate g_instance.baselock is help by current thread */
     bool holdProcBaseLock;
     bool SortColumnOptimize;
