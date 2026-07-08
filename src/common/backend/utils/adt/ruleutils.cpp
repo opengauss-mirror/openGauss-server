@@ -4630,6 +4630,34 @@ Oid pg_get_serial_sequence_internal(Oid tableOid, AttrNumber attnum, bool find_i
 }
 
 /*
+ * Get the table's identity sequence OID.
+ */
+Oid get_table_identity(Oid tableOid)
+{
+    Relation	rel = nullptr;
+    TupleDesc	tupdesc = nullptr;
+    AttrNumber	attnum = 0;
+    Oid			seqid = InvalidOid;
+
+    rel = RelationIdGetRelation(tableOid);
+    tupdesc = RelationGetDescr(rel);
+
+    for (attnum = 0; attnum < tupdesc->natts; attnum++) {
+        Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum);
+        if (attr->attisdropped) {
+            continue;
+        }
+        seqid = pg_get_serial_sequence_internal(tableOid, attr->attnum, true, NULL);
+        if (OidIsValid(seqid)) {
+            break;
+        }
+    }
+
+    RelationClose(rel);
+    return seqid;
+}
+
+/*
  * pg_get_serial_sequence
  *		Get the name of the sequence used by a serial column,
  *		formatted suitably for passing to setval, nextval or currval.

@@ -1112,7 +1112,10 @@ static HeapTuple ResetSequenceTuple(Relation seq_rel, SeqTable elm, bool restart
      * action in AlterSequence)
      */
     seq = (T_Form)GETSTRUCT(result);
-    seq->last_value = restart ? seq->min_value : -1; /* if restart, set a valid last_value */
+    bool isdentityForD = DB_IS_CMPT(D_FORMAT) &&
+                         StrEndWith(RelationGetRelationName(seq_rel), "_seq_identity");
+    /* if restart, set a valid last_value */
+    seq->last_value = restart ? (isdentityForD ? seq->start_value : seq->min_value) : -1;
     seq->is_called = false;
     seq->log_cnt = 0;
 
@@ -3503,17 +3506,3 @@ int128 get_and_reset_last_value(text* txt, int128 new_value, bool need_reseed)
     return last_value;
 }
 
-bool StrEndWith(const char *str, const char *suffix)
-{
-    int strLen = strlen(str);
-    int suffixLen = strlen(suffix);
-    if (strLen < suffixLen) {
-        return false;
-    }
-    for (int i = 0; i < suffixLen; i++) {
-        if (str[strLen - 1 - i] != suffix[suffixLen - 1 - i]) {
-            return false;
-        }
-    }
-    return true;
-}
