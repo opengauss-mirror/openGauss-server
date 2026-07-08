@@ -112,4 +112,9 @@ extern char* GetEnvStr(const char* env);
 extern bool CheckDBCompatibility(PGconn* connection, char *dbCompatibility);
 extern bool CheckSpecificExtension(PGconn* connection, char *extension);
 
+bool SaveSqlModePipesAsConcat();
+void ResetSqlMode();
+void EnableSqlModePipesAsConcat();
+
+
 #endif /* COMMON_H */
