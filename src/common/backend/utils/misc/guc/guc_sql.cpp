@@ -382,7 +382,8 @@ static const struct format_behavior_compat_entry d_format_behavior_compat_option
     {"enable_sbr_identifier", D_FORMAT_OPT_ENABLE_SBR_IDENTIFIER},
     {"enable_table_hint_identifier", D_FORMAT_OPT_ENABLE_TABLE_HINT_IDENTIFIER},
     {"enable_abs", D_FORMAT_OPT_ENABLE_ABS},
-    {"default_collation", D_FORMAT_OPT_DEFAULT_COLLATION}
+    {"default_collation", D_FORMAT_OPT_DEFAULT_COLLATION},
+    {"disable_target_alias", D_FORMAT_OPT_DISABLE_TARGET_ALIAS}
 };
 
 static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {

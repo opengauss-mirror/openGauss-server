@@ -19,9 +19,9 @@ select * from test_table;
 (1 row)
 
 select a = b from test_table;
- ?column? 
-----------
- t
+  a  
+-----
+ ABC
 (1 row)
 
 drop table test_table;

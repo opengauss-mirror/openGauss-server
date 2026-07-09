@@ -39,6 +39,7 @@
 #include "gs_ledger/ledger_utils.h"
 #include "mb/pg_wchar.h"
 #include "parser/parse_utilcmd.h"
+#include "parser/parser.h"
 
 static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var, int levelsup);
 static Node* transformAssignmentIndirection(ParseState* pstate, Node* basenode, const char* targetName,
@@ -160,6 +161,8 @@ List* transformTargetList(ParseState* pstate, List* targetlist, ParseExprKind ex
             }
         }
 
+        if (u_sess->hook_cxt.preTransformTargetHook)
+            ((preTransformTargetHookType)(u_sess->hook_cxt.preTransformTargetHook))(res, pstate, (int)exprKind);
         /*
          * Not "something.*", so transform as a single expression
          */
