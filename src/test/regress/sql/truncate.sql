@@ -74,3 +74,62 @@ DROP FUNCTION trunctrigger();
 
 
 DROP TABLE truncate_a;
+
+CREATE SEQUENCE seq_not_own;
+CREATE SEQUENCE seq_own;
+CREATE TABLE truncate_a(
+  id1 serial,
+  id2 int default nextval('seq_own'),
+  id3 int default nextval('seq_not_own')
+);
+ALTER SEQUENCE seq_own OWNED BY truncate_a.id2;
+
+INSERT INTO truncate_a DEFAULT VALUES;
+INSERT INTO truncate_a DEFAULT VALUES;
+SELECT * FROM truncate_a;
+TRUNCATE truncate_a;
+
+INSERT INTO truncate_a DEFAULT VALUES;
+INSERT INTO truncate_a DEFAULT VALUES;
+SELECT * FROM truncate_a;
+TRUNCATE truncate_a RESTART IDENTITY;
+
+INSERT INTO truncate_a DEFAULT VALUES;
+INSERT INTO truncate_a DEFAULT VALUES;
+SELECT * FROM truncate_a;
+
+BEGIN;
+TRUNCATE truncate_a RESTART IDENTITY;
+INSERT INTO truncate_a DEFAULT VALUES;
+INSERT INTO truncate_a DEFAULT VALUES;
+ROLLBACK;
+INSERT INTO truncate_a DEFAULT VALUES;
+SELECT * FROM truncate_a;
+
+DROP TABLE truncate_a cascade;
+DROP SEQUENCE IF EXISTS seq_not_own;
+DROP SEQUENCE IF EXISTS seq_own;
+
+CREATE DATABASE b_test_truncate DBCOMPATIBILITY='B';
+\c b_test_truncate
+
+CREATE TABLE truncate_a(
+  id1 serial,
+  id2 int primary key auto_increment
+);
+INSERT INTO truncate_a DEFAULT VALUES;
+INSERT INTO truncate_a DEFAULT VALUES;
+SELECT * FROM truncate_a;
+TRUNCATE truncate_a;
+
+INSERT INTO truncate_a DEFAULT VALUES;
+INSERT INTO truncate_a DEFAULT VALUES;
+SELECT * FROM truncate_a;
+TRUNCATE truncate_a RESTART IDENTITY;
+
+INSERT INTO truncate_a DEFAULT VALUES;
+INSERT INTO truncate_a DEFAULT VALUES;
+SELECT * FROM truncate_a;
+
+\c regression
+DROP DATABASE b_test_truncate;
