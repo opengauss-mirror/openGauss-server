@@ -82,7 +82,7 @@ static bool pgxc_advisory_lock(int64 key64, int32 key1, int32 key2, bool iskeybi
     LockLevel locklevel, TryType locktry, Name databaseName = NULL);
 #endif
 /* Number of columns in pg_locks output */
-#define NUM_LOCK_STATUS_COLUMNS 19
+#define NUM_LOCK_STATUS_COLUMNS 20
 
 /*
  * VXIDGetDatum - Construct a text representation of a VXID
@@ -199,6 +199,7 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)17, "fastpath", BOOLOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)18, "locktag", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)19, "global_sessionid", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)20, "waitstart", TIMESTAMPTZOID, -1, 0);
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
@@ -440,6 +441,12 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
         char* gId = GetGlobalSessionStr(instance->globalSessionId);
         values[18] = CStringGetTextDatum(gId);
         pfree(gId);
+        if (!granted && instance->waitStart != 0) {
+            values[19] = TimestampTzGetDatum(instance->waitStart);
+        } else {
+            nulls[19] = true;
+        }
+
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
         SRF_RETURN_NEXT(funcctx, result);
@@ -515,6 +522,7 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
         values[NUM_LOCKTAG_ID] = CStringGetTextDatum(blocklocktag);
         pfree_ext(blocklocktag);
         nulls[18] = true;
+        nulls[19] = true;
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
         SRF_RETURN_NEXT(funcctx, result);

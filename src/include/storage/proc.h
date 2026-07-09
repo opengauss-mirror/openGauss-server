@@ -186,6 +186,7 @@ struct PGPROC {
     LOCKMODE waitLockMode;  /* type of lock we're waiting for */
     LOCKMASK heldLocks;     /* bitmask for lock types already held on this
                              * lock object by this backend */
+    pg_atomic_uint64 waitStart; /* time at which wait for lock acquisition */
 
     /*
      * Info to allow us to wait for synchronous replication, if needed.

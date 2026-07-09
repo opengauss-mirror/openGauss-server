@@ -15,6 +15,7 @@
 #define LOCK_H_
 
 #include "storage/backendid.h"
+#include "datatype/timestamp.h"
 #include "storage/lock/lwlock.h"
 #include "storage/lock/waitpolicy.h"
 #include "storage/shmem.h"
@@ -538,6 +539,8 @@ typedef struct LockInstanceData {
     LOCKMODE waitLockMode;   /* lock awaited by this PGPROC, if any */
     BackendId backend;       /* backend ID of this PGPROC */
     LocalTransactionId lxid; /* local transaction ID of this PGPROC */
+    TimestampTz waitStart;   /* time at which this PGPROC started waiting
+	                            for lock */
     ThreadId pid;            /* pid of this PGPROC */
     uint64 sessionid;        /* session id of this PGPROC */
     GlobalSessionId globalSessionId; /* global session id of this PGPROC */

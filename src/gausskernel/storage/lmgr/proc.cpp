@@ -925,6 +925,7 @@ void InitProcess(void)
     t_thrd.proc->exrto_read_lsn = 0;
     t_thrd.proc->exrto_min = 0;
     t_thrd.proc->exrto_gen_snap_time = 0;
+    pg_atomic_init_u64(&t_thrd.proc->waitStart, 0);
     t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     t_thrd.pgxact->prepare_xid = InvalidTransactionId;
@@ -2322,6 +2323,10 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
 	                    : u_sess->attr.attr_storage.LockWaitTimeout;
     bool allow_autovacuum_cancel = true;
 
+    TimestampTz now = GetCurrentTimestamp();
+
+    pg_atomic_write_u64(&t_thrd.proc->waitStart, now);
+
     /* wait smaller timeout first. */
     if (lockWaitTimeout == 0) {
         int myWaitStatus = ProcSleepForDeadLockTimeout(
@@ -2330,7 +2335,7 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
 
     } else if (lockWaitTimeout <= deadLockTimeout) {
         // sleep for lockwait, the result may be obtained or timeout error, so no need to check deadlock.
-        t_thrd.storage_cxt.timeout_start_time = GetCurrentTimestamp();
+        t_thrd.storage_cxt.timeout_start_time = now;
         ProcSleepForLockwaitTimeout(
             locallock, STATUS_WAITING, lockWaitTimeout, waitSec, &allow_autovacuum_cancel);
 
@@ -2405,6 +2410,7 @@ PGPROC* ProcWakeup(PGPROC* proc, int waitStatus)
     proc->waitLock = NULL;
     proc->waitProcLock = NULL;
     proc->waitStatus = waitStatus;
+    pg_atomic_write_u64(&proc->waitStart, 0);
 
     /* And awaken it */
     PGSemaphoreUnlock(&proc->sem);
