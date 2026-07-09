@@ -1643,7 +1643,8 @@ static void ProcKill(int code, Datum arg)
      * DMS worker threads does not have shmem resources to clean.
      */
     if (IsUnderPostmaster && !IsAutoVacuumLauncherProcess() && !StreamThreadAmI() && !IsJobSchedulerProcess() &&
-        !IsJobWorkerProcess() && !IsBgWorkerProcess() && !IsDMSWorkerProcess() && !IS_THREAD_POOL_LISTENER) {
+        !IsJobWorkerProcess() && !IsBgWorkerProcess() && !IsDMSWorkerProcess() && !IS_THREAD_POOL_LISTENER &&
+        !IsFencedProcessingMode()) {
         MarkPostmasterChildInactive();
     }
 

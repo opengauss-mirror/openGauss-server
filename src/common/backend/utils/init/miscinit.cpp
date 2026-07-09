@@ -81,6 +81,8 @@ BackendType MyBackendType;
 
 #define InvalidPid ((pid_t)(-1))
 
+int g_pidLockFd = -1;
+
 const char* DSS_WAL_SEGMENT_SIZE_STR = "131072";
 
 Alarm alarmItemTooManyDbUserConn[1] = {ALM_AI_Unknown, ALM_AS_Normal, 0, 0, 0, 0, {0}, {0}, NULL};
@@ -1222,9 +1224,10 @@ static void UnlinkLockFile(int status, Datum filename)
 static void UnLockPidLockFile(int status, Datum fileDes)
 {
     int fd = DatumGetInt32(fileDes);
-
-    if (fd != -1) {
+    /* Guard against double-close: fd may already be closed by fork cleanup. */
+    if (fd != -1 && fd == g_pidLockFd) {
         close(fd);
+        g_pidLockFd = -1;
     }
 }
 
@@ -1243,6 +1246,9 @@ static void CreatePidLockFile(const char* filename)
         close(fd);
         ereport(FATAL, (errcode_for_file_access(), errmsg("could not lock file \"%s\": %m", pid_lock_file)));
     }
+
+    /* Record for child processes spawned by fork() to close. */
+    g_pidLockFd = fd;
 
     on_proc_exit(UnLockPidLockFile, Int32GetDatum(fd));
 }
