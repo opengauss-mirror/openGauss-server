@@ -420,6 +420,7 @@ SET ROLE ledger_normal_user PASSWORD 'Gauss@1234';
 SELECT * FROM pg_catalog.gs_global_chain LIMIT 1;
 RESET ROLE;
 DROP USER ledger_normal_user;
+SET ROLE bc_admin PASSWORD 'Gauss_234';
 
 ----------------------------------------------------------------------
 -- TEST CASE 010. test TRUNCATE.                                    --

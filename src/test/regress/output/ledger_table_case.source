@@ -917,6 +917,8 @@ SELECT * FROM pg_catalog.gs_global_chain LIMIT 1;
 ERROR:  permission denied for relation gs_global_chain
 DETAIL:  N/A
 RESET ROLE;
+DROP USER ledger_normal_user;
+SET ROLE bc_admin PASSWORD 'Gauss_234';
 ----------------------------------------------------------------------
 -- TEST CASE 010. test TRUNCATE.                                    --
 ----------------------------------------------------------------------
