@@ -25,9 +25,11 @@
 #include "access/multi_redo_api.h"
 #include "access/reloptions.h"
 #include "miscadmin.h"
+#include "storage/smgr/fd.h"
 #include "utils/rel.h"
 #include "access/datavec/bm25.h"
 
+#include <ctype.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <limits.h>
@@ -35,15 +37,52 @@
 #define PATH_MAX 4096
 #endif
 
-/* Jieba dictionary file names (relative to dict_path directory) */
-static const char* const BM25_DICT_FILES[] = {
-    "jieba.dict.utf8",
-    "hmm_model.utf8",
-    "user.dict.utf8",
-    "idf.utf8",
-    "stop_words.utf8"
+/* Jieba dictionary files relative to dict_path. The user dictionary may be empty. */
+struct Bm25DictFileSpec {
+    const char* name;
+    bool requireNonEmpty;
+};
+
+static const Bm25DictFileSpec BM25_DICT_FILES[] = {
+    {"jieba.dict.utf8", true},
+    {"hmm_model.utf8", true},
+    {"user.dict.utf8", false},
+    {"idf.utf8", true},
+    {"stop_words.utf8", true}
 };
 #define BM25_DICT_FILE_COUNT (sizeof(BM25_DICT_FILES) / sizeof(BM25_DICT_FILES[0]))
+
+static bool Bm25DictFileHasContent(const char* filepath, const char* fileName)
+{
+    unsigned char buffer[8192];
+    FILE* file = AllocateFile(filepath, PG_BINARY_R);
+    if (file == NULL) {
+        ereport(ERROR,
+            (errcode_for_file_access(), errmsg("cannot open dict file \"%s\": %m", fileName)));
+    }
+
+    size_t bytesRead;
+    bool hasContent = false;
+    while ((bytesRead = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        for (size_t i = 0; i < bytesRead; i++) {
+            if (!isspace(buffer[i])) {
+                hasContent = true;
+                break;
+            }
+        }
+        if (hasContent) {
+            break;
+        }
+    }
+
+    bool readFailed = ferror(file) != 0;
+    int closeResult = FreeFile(file);
+    if (readFailed || closeResult != 0) {
+        ereport(ERROR,
+            (errcode_for_file_access(), errmsg("cannot read dict file \"%s\": %m", fileName)));
+    }
+    return hasContent;
+}
 
 /* Validate dict_path input (non-empty, length, absolute, no danger chars, no symlink). On error, ereport. */
 static void Bm25ValidateDictPathInput(const char* dictPath)
@@ -98,9 +137,10 @@ static size_t Bm25GetGausshomePrefixLen(const char* resolved)
  * Validate dictionary file under resolved dict_path:
  *  - path can be lstat'ed and is not a symlink
  *  - file is readable
+ *  - file is regular and non-empty when required
  *  - realpath still stays under resolved dict_path
  */
-static void Bm25ValidateDictFile(const char* resolvedDir, const char* fileName)
+static void Bm25ValidateDictFile(const char* resolvedDir, const char* fileName, bool requireNonEmpty)
 {
     char filepath[MAXPGPATH];
     char fileResolved[PATH_MAX + 1];
@@ -124,6 +164,14 @@ static void Bm25ValidateDictFile(const char* resolvedDir, const char* fileName)
     if (access(filepath, R_OK) != 0) {
         ereport(ERROR,
             (errcode_for_file_access(), errmsg("dict file \"%s\" is not readable", fileName)));
+    }
+    if (!S_ISREG(st.st_mode)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("dict file \"%s\" is not a regular file", fileName)));
+    }
+    if (requireNonEmpty && !Bm25DictFileHasContent(filepath, fileName)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("dict file \"%s\" is empty or contains only whitespace", fileName)));
     }
     if (realpath(filepath, fileResolved) == NULL) {
         ereport(ERROR, (errcode_for_file_access(),
@@ -154,7 +202,7 @@ char* Bm25ValidateDictPath(const char* dictPath)
     (void)Bm25GetGausshomePrefixLen(resolved);
 
     for (i = 0; i < BM25_DICT_FILE_COUNT; i++) {
-        Bm25ValidateDictFile(resolved, BM25_DICT_FILES[i]);
+        Bm25ValidateDictFile(resolved, BM25_DICT_FILES[i].name, BM25_DICT_FILES[i].requireNonEmpty);
     }
     return pstrdup(resolved);
 }
