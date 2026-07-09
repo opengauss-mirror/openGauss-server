@@ -413,6 +413,15 @@ INSERT INTO gs_global_chain(txcommand) VALUES('112233445566');
 UPDATE gs_global_chain SET txcommand = '112233445566' WHERE relnsp = 'ledgernsp';
 DELETE gs_global_chain;
 
+-- Test normal user cannot read gs_global_chain.
+SELECT * FROM pg_catalog.gs_global_chain LIMIT 1;
+DROP USER IF EXISTS ledger_normal_user;
+CREATE USER ledger_normal_user PASSWORD 'Gauss@1234';
+SET ROLE ledger_normal_user PASSWORD 'Gauss@1234';
+SELECT * FROM pg_catalog.gs_global_chain LIMIT 1;
+RESET ROLE;
+DROP USER ledger_normal_user;
+
 ----------------------------------------------------------------------
 -- TEST CASE 010. test TRUNCATE.                                    --
 ----------------------------------------------------------------------

@@ -80,4 +80,4 @@ CREATE TABLE pg_catalog.gs_global_chain
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 5511;
 CREATE INDEX gs_global_chain_relid_index ON pg_catalog.gs_global_chain USING BTREE(relid oid_ops);
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-GRANT SELECT ON pg_catalog.gs_global_chain TO PUBLIC;
+REVOKE SELECT ON pg_catalog.gs_global_chain FROM PUBLIC;
