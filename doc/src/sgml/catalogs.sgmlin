@@ -7570,6 +7570,15 @@
       <entry>True if lock was taken via fast path, false if taken via main
        lock table</entry>
      </row>
+     <row>
+      <entry><structfield>waitstart</structfield></entry>
+      <entry><type>timestamptz</type></entry>
+      <entry></entry>
+      <entry>Time when the server process started waiting for this lock,
+      or null if the lock is held. Note that this can be null for a very
+      short period of time after the wait started even though
+      <structfield>granted</structfield> is <literal>false</literal>.</entry>
+     </row>
     </tbody>
    </tgroup>
   </table>

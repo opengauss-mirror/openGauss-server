@@ -464,6 +464,9 @@ static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid)
      * justifies the means.
      */
     waitStart = GetCurrentTimestamp();
+    /* here store waitstart for myproc */
+    pg_atomic_compare_exchange_u64(&t_thrd.proc->waitStart, 0, waitStart);
+
     retry_count = 0;
     while (!lock_acquired) {
         if (++num_attempts < 3)

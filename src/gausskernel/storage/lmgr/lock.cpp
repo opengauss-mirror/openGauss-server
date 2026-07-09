@@ -3391,6 +3391,7 @@ LockData *GetLockStatusData(void)
             instance->globalSessionId = proc->globalSessionId;
             instance->sessionid = proc->sessionid;
             instance->fastpath = true;
+            instance->waitStart = 0;
 
             el++;
         }
@@ -3417,6 +3418,7 @@ LockData *GetLockStatusData(void)
             instance->sessionid = proc->sessionid;
             instance->globalSessionId = proc->globalSessionId;
             instance->fastpath = true;
+            instance->waitStart = 0;
 
             el++;
         }
@@ -3469,6 +3471,7 @@ LockData *GetLockStatusData(void)
         instance->sessionid = proc->sessionid;
         instance->globalSessionId = proc->globalSessionId;
         instance->fastpath = false;
+        instance->waitStart = pg_atomic_read_u64(&proc->waitStart);
 
         el++;
     }
