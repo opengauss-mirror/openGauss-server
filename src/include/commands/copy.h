@@ -369,6 +369,7 @@ typedef struct CopyStateData {
     char* o_enclosed;
     char* enclosed;
     char* line_start;
+    uint64  bytes_processed;    /* number of bytes processed so far */
 } CopyStateData;
 
 typedef struct InsertCopyLogInfoData {

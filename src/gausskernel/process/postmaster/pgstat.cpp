@@ -2869,6 +2869,10 @@ Size BackendStatusShmemSize(void)
 
     /* PgBackendStatus array */
     size = mul_size(sizeof(PgBackendStatus), BackendStatusArray_size);
+    /* PgBackendStatus subsidiary objects: PgStatProgressInfo */
+    if (u_sess->attr.attr_common.pgstat_track_activities) {
+        size = add_size(size, mul_size(sizeof(PgStatProgressInfo), BackendStatusArray_size));
+    }
     /* application name array */
     size = add_size(size, mul_size(NAMEDATALEN, BackendStatusArray_size));
     /* conninfo array */
@@ -3317,7 +3321,7 @@ void pgstat_bestart(void)
     beentry->st_cgname = u_sess->wlm_cxt->control_group;
     beentry->st_stmtmem = 0;
     beentry->st_block_sessionid = 0;
-
+    beentry->pg_stat_progress_info = NULL;
     beentry->st_connect_info = u_sess->pgxc_cxt.PoolerConnectionInfo;
     /*
      * st_gtmhost and st_gtmtimeline fields are not initialized here,
@@ -3479,6 +3483,8 @@ static void clear_backend_entry(volatile PgBackendStatus* beentry)
     ResetRowDescCacheStats(beentry->row_desc_cache_stats);
     beentry->my_prepared_queries = NULL;
     beentry->my_pstmt_htbl_lock = NULL;
+    beentry->pg_stat_progress_info = NULL;
+
     /*
      * make sure st_changecount is an even before release it.
      *
@@ -10116,4 +10122,126 @@ TableDistributionInfo* GetRemoteGsLWLockStatus(TupleDesc tuple_desc)
     distribuion_info->slot = MakeSingleTupleTableSlot(tuple_desc);
 
     return distribuion_info;
+}
+
+/*-----------
+ * PgstatProgressStartCommand() -
+ *
+ * Set stProgressCommand (and stProgressCommandTarget) in own backend
+ * entry.  Also, zero-initialize stProgressParam array.
+ *-----------
+ */
+void PgstatProgressStartCommand(ProgressCommandType cmdtype, Oid relid)
+{
+    bool found = false;
+    PgStatProgressInfo* info = NULL;
+    errno_t ret;
+
+    volatile PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
+    if (!beentry || !u_sess->attr.attr_common.pgstat_track_activities) {
+        return;
+    }
+
+    info = beentry->pg_stat_progress_info = (PgStatProgressInfo*)ShmemInitStruct("PgStatProgressInfo", sizeof(PgStatProgressInfo), &found);
+
+    if (!info) {
+        ereport(WARNING,
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                 errmsg("not enough shared memory for data structure"
+                        " \"%s\" (%lu bytes requested)",
+                        "PgStatProgressInfo",
+                        (unsigned long)sizeof(PgStatProgressInfo))));
+        return;
+    }
+
+    pgstat_increment_changecount_before(beentry);
+    info->stProgressCommand = cmdtype;
+    info->stProgressCommandTarget = relid;
+    ret = memset_s(&info->stProgressParam, sizeof(info->stProgressParam), 0, sizeof(info->stProgressParam));
+    securec_check(ret, "\0", "\0");
+    pgstat_increment_changecount_after(beentry);
+}
+
+/*-----------
+ * PgStatProgressUpdateParam() -
+ *
+ * Update index'th member in stProgressParam[] of own backend entry.
+ *-----------
+ */
+void PgStatProgressUpdateParam(int index, int64 val)
+{
+    PgStatProgressInfo* info = NULL;
+
+    volatile PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
+    Assert(index >= 0 && index < PGSTAT_NUM_PROGRESS_PARAM);
+
+    if (!beentry || !u_sess->attr.attr_common.pgstat_track_activities ||
+        !beentry->pg_stat_progress_info) {
+        return;
+    }
+
+    info = beentry->pg_stat_progress_info;
+
+    pgstat_increment_changecount_before(beentry);
+    info->stProgressParam[index] = val;
+    pgstat_increment_changecount_after(beentry);
+}
+
+/*-----------
+ * PgStatProgressUpdateMultiParam() -
+ *
+ * Update multiple members in stProgressParam[] of own backend entry.
+ * This is atomic; readers won't see intermediate states.
+ *-----------
+ */
+void PgStatProgressUpdateMultiParam(int nparam, const int *index,
+                                   const int64 *val)
+{
+    PgStatProgressInfo* info = NULL;
+    volatile PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    int            i;
+
+    if (!beentry || !u_sess->attr.attr_common.pgstat_track_activities ||
+        !beentry->pg_stat_progress_info || nparam == 0) {
+        return;
+    }
+
+    info = beentry->pg_stat_progress_info;
+
+    pgstat_increment_changecount_before(beentry);
+
+    for (i = 0; i < nparam; ++i)
+    {
+        Assert(index[i] >= 0 && index[i] < PGSTAT_NUM_PROGRESS_PARAM);
+
+        info->stProgressParam[index[i]] = val[i];
+    }
+
+    pgstat_increment_changecount_after(beentry);
+}
+
+/*-----------
+ * PgstatProgressEndCommand() -
+ *
+ * Reset stProgressCommand (and stProgressCommandTarget) in own backend
+ * entry.  This signals the end of the command.
+ *-----------
+ */
+void PgstatProgressEndCommand(void)
+{
+    volatile PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
+    if (!beentry || !u_sess->attr.attr_common.pgstat_track_activities) {
+        return;
+    }
+
+    if (!beentry->pg_stat_progress_info) {
+        return;
+    }
+
+    pgstat_increment_changecount_before(beentry);
+    beentry->pg_stat_progress_info = NULL;
+    pgstat_increment_changecount_after(beentry);
 }

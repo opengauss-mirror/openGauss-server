@@ -1610,6 +1610,29 @@ extern void pgstat_report_dms_waitevent(const uint32 waitevent, const DMSWaiteve
 extern void decode_dms_waitevent_target(const uint32 waitevent, const DMSWaiteventTarget target, 
     _out_ char** object, _out_ char** mode);
 
+/* command process info type */
+typedef enum ProgressCommandType
+{
+    PROGRESS_COMMAND_INVALID = 0,
+    PROGRESS_COMMAND_COPY
+} ProgressCommandType;
+
+#define PGSTAT_NUM_PROGRESS_PARAM  20
+typedef struct PgStatProgressInfo {
+    /*
+     * Command progress reporting.  Any command which wishes can advertise
+     * that it is running by setting stProgressCommand,
+     * stProgressCommandTarget, and stProgressParam[].
+     * stProgressCommandTarget should be the OID of the relation which the
+     * command targets (we assume there's just one, as this is meant for
+     * utility commands), but the meaning of each element in the
+     * stProgressParam array is command-specific.
+     */
+    ProgressCommandType stProgressCommand;
+    Oid         stProgressCommandTarget;
+    int64       stProgressParam[PGSTAT_NUM_PROGRESS_PARAM];
+} PgStatProgressInfo;
+
 
 /* ----------
  * PgBackendStatus
@@ -1734,10 +1757,10 @@ typedef struct PgBackendStatus {
     syscalllock statement_cxt_lock;     /* mutex for statement context(between session and statement flush thread) */
     statement_beentry_full_sql_context statement_cxt;                /* statement context of full sql */
     knl_u_trace_context trace_cxt;      /* request trace id */
-
     HTAB* my_prepared_queries;
     pthread_mutex_t* my_pstmt_htbl_lock;
     RowDescriptionCacheStat* row_desc_cache_stats;
+    PgStatProgressInfo* pg_stat_progress_info;
 } PgBackendStatus;
 
 typedef struct PgBackendStatusNode {
@@ -1802,6 +1825,12 @@ extern char* getThreadWaitStatusDesc(PgBackendStatus* beentry);
 extern const char* pgstat_get_waitstatusdesc(uint32 wait_event_info);
 extern const char* pgstat_get_waitstatusname(uint32 wait_event_info);
 extern const char* PgstatGetWaitstatephasename(uint32 waitPhaseInfo);
+extern void PgstatProgressStartCommand(ProgressCommandType cmdtype,
+                                          Oid relid);
+extern void PgStatProgressUpdateParam(int index, int64 val);
+extern void PgStatProgressUpdateMultiParam(int nparam, const int *index,
+                                           const int64 *val);
+extern void PgstatProgressEndCommand(void);
 
 /*
  * Working state needed to accumulate per-function-call timing statistics.
@@ -2995,10 +3024,27 @@ extern TableDistributionInfo* GetRemoteGsLWLockStatus(TupleDesc tuple_desc);
 #define SessionMemoryArraySize (BackendStatusArray_size)
 
 /* Code Area for LWLock deadlock monitor */
-
 #define CHANGECOUNT_IS_EVEN(_x) (((_x)&1) == 0)
 
-typedef void (*FuncType)(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry);
+typedef enum {
+    SF_INVALID = 0,
+    SF_SKIP,
+    SF_BREAK,
+    SF_CONTINUE
+} StatFetchRes;
+
+typedef struct StatFetchInfoData {
+    bool hasTid;
+    ThreadId threadId;
+    int timeoutThreshold;
+    /* process info */
+    ProgressCommandType cmdType;
+    StatFetchRes    fres;
+} StatFetchInfoData;
+typedef StatFetchInfoData *StatFetchInfo;
+
+typedef void (*FuncType)(Tuplestorestate *tupStore, TupleDesc tupDesc,
+                                 const PgBackendStatus *beentry, StatFetchInfo filter);
 
 typedef struct {
     ThreadId thread_id;
@@ -3081,8 +3127,8 @@ extern bool CheckUserExist(Oid userId, bool removeCount);
 
 extern void FreeBackendStatusNodeMemory(PgBackendStatusNode* node);
 extern PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls);
-extern uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc, FuncType insert,
-                                          bool hasTID = false, ThreadId threadId = 0);
+extern uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc,
+                                          FuncType insert, StatFetchInfo f);
 extern void pgstat_setup_memcxt(void);
 extern void pgstat_clean_memcxt(void);
 extern PgBackendStatus* gs_stat_fetch_stat_beentry(int32 beid);
