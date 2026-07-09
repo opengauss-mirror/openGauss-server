@@ -32,6 +32,10 @@ void* stringToNode(char* str)
     char* save_strtok = NULL;
     void* retval = NULL;
 
+    if (str == NULL) {
+        return NULL;
+    }
+
     /*
      * We save and restore the pre-existing state of pg_strtok. This makes the
      * world safe for re-entrant invocation of stringToNode, without incurring

@@ -318,6 +318,7 @@ static inline void CheckStrNotNull(const char *token, char *errMsg)
     do {                                                  \
         token = pg_strtok(&length); /* skip :fldname */   \
         token = pg_strtok(&length); /* get field value */ \
+        CheckStrNotNull(token, "insufficient tokens for field."); \
         local_node->fldname = (enumtype)(expr);               \
     } while (0);
 
@@ -958,6 +959,10 @@ static void _readArbiteriIndexesFiled(char *token, int length, ModifyTable *loca
 {
     token = pg_strtok(&length); /* skip:fldname */
     token = pg_strtok(&length);
+    if (token == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            errmsg("insufficient tokens for arbiterIndexes field.")));
+    }
     if (token[0] != '(') {
         return;
     }
@@ -1577,7 +1582,7 @@ static RightRefState* _readRightRefStateWrap(Query* query)
                 (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("did not find '{' at end of RightRefState node")));
     }
     token = pg_strtok(&length); /* read node name */
-    if (length != 13 && memcmp(token, "RIGHTREFSTATE", 13) != 0) {
+    if (token == NULL || length != 13 || memcmp(token, "RIGHTREFSTATE", 13) != 0) {
         ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("_readRightRefStateWrap(): badly formatted node string \"%s\"...", token)));
     }
@@ -2372,7 +2377,7 @@ static Aggref* _readAggref(void)
 
         token = pg_strtok(&length); /* skip name: pronargs */
         token = pg_strtok(&length); /* get pronargs value */
-        nargs = atoi(token);
+        nargs = (token == NULL ? 0 : atoi(token));
 
         argtypes = (Oid*)palloc(nargs * sizeof(Oid));
         token = pg_strtok(&length); /* skip name: proargs */
@@ -3427,7 +3432,7 @@ static RangeTblEntry* _readRangeTblEntry(void)
             READ_CHAR_FIELD(relkind);
             READ_BOOL_FIELD(isResultRel);
             token = pg_strtok(&length, false);
-            if (token != NULL && (0 == memcmp(token, ":tablesample", strlen(":tablesample")))) {
+            if (token != NULL && (memcmp(token, ":tablesample", strlen(":tablesample")) == 0)) {
                 READ_NODE_FIELD(tablesample);
             }
 
@@ -4037,7 +4042,7 @@ static Scan* _readScan(Scan* local_node)
     READ_BOOL_FIELD(predicate_pushdown_optimized);
 
     token = pg_strtok(&length, false);
-    if (0 == memcmp(token, ":tablesample", strlen(":tablesample"))) {
+    if (token != NULL && (memcmp(token, ":tablesample", strlen(":tablesample")) == 0)) {
         READ_NODE_FIELD(tablesample);
     }
     read_mem_info(&local_node->mem_info);
@@ -5252,8 +5257,8 @@ static PlanRowMark* _readPlanRowMark(void)
     }
     /* convert noWait (true/false) to LockWaitPolicy (LockWaitError/LockWaitBlock) */
     IF_EXIST(noWait) {
-        CheckStrNotNull(token, "insufficient tokens for field.");
-        READ_ENUM_EXPR(waitPolicy, LockWaitPolicy, (strtobool(token) ? LockWaitError : LockWaitBlock));
+        READ_ENUM_EXPR(waitPolicy, LockWaitPolicy, (token == NULL ? LockWaitBlock :
+            (strtobool(token) ? LockWaitError : LockWaitBlock)));
     }
     READ_BOOL_FIELD(isParent);
     READ_INT_FIELD(numAttrs);
