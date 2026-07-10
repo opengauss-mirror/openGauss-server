@@ -80,6 +80,7 @@ ParamListInfo _SPI_convert_params(int nargs, Oid *argtypes, Datum *Values, const
     Cursor_Data *cursor_data);
 
 static int _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, long tcount, bool from_lock = false);
+static void SPI_cleanup_executor(QueryDesc *queryDesc, bool executorStarted);
 
 void _SPI_error_callback(void *arg);
 
@@ -3265,6 +3266,7 @@ static int _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, long tcount, bo
     int operation = queryDesc->operation;
     int eflags;
     int res;
+    volatile bool executorStarted = false;
 
     switch (operation) {
         case CMD_SELECT:
@@ -3323,97 +3325,112 @@ static int _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, long tcount, bo
      */
     ResourceOwner oldOwner = t_thrd.utils_cxt.CurrentResourceOwner;
 
-    ExecutorStart(queryDesc, eflags);
+    PG_TRY();
+    {
+        ExecutorStart(queryDesc, eflags);
+        executorStarted = true;
 
-    bool forced_control = !from_lock && IS_PGXC_COORDINATOR &&
-        (t_thrd.wlm_cxt.parctl_state.simple == 1 || u_sess->wlm_cxt->is_active_statements_reset) &&
-        ENABLE_WORKLOAD_CONTROL;
-    Qid stroedproc_qid = { 0, 0, 0 };
-    unsigned char stroedproc_parctl_state_except = 0;
-    WLMStatusTag stroedproc_g_collectInfo_status = WLM_STATUS_RESERVE;
-    bool stroedproc_is_active_statements_reset = false;
-    if (forced_control) {
-        if (!u_sess->wlm_cxt->is_active_statements_reset && !u_sess->attr.attr_resource.enable_transaction_parctl) {
-            u_sess->wlm_cxt->stroedproc_rp_reserve = t_thrd.wlm_cxt.parctl_state.rp_reserve;
-            u_sess->wlm_cxt->stroedproc_rp_release = t_thrd.wlm_cxt.parctl_state.rp_release;
-            u_sess->wlm_cxt->stroedproc_release = t_thrd.wlm_cxt.parctl_state.release;
+        bool forced_control = !from_lock && IS_PGXC_COORDINATOR &&
+            (t_thrd.wlm_cxt.parctl_state.simple == 1 || u_sess->wlm_cxt->is_active_statements_reset) &&
+            ENABLE_WORKLOAD_CONTROL;
+        Qid stroedproc_qid = { 0, 0, 0 };
+        unsigned char stroedproc_parctl_state_except = 0;
+        WLMStatusTag stroedproc_g_collectInfo_status = WLM_STATUS_RESERVE;
+        bool stroedproc_is_active_statements_reset = false;
+        if (forced_control) {
+            if (!u_sess->wlm_cxt->is_active_statements_reset && !u_sess->attr.attr_resource.enable_transaction_parctl) {
+                u_sess->wlm_cxt->stroedproc_rp_reserve = t_thrd.wlm_cxt.parctl_state.rp_reserve;
+                u_sess->wlm_cxt->stroedproc_rp_release = t_thrd.wlm_cxt.parctl_state.rp_release;
+                u_sess->wlm_cxt->stroedproc_release = t_thrd.wlm_cxt.parctl_state.release;
+            }
+
+            /* Retain the parameters of the main statement */
+            if (!IsQidInvalid(&u_sess->wlm_cxt->wlm_params.qid)) {
+                error_t rc = memcpy_s(&stroedproc_qid, sizeof(Qid), &u_sess->wlm_cxt->wlm_params.qid, sizeof(Qid));
+                securec_check(rc, "\0", "\0");
+            }
+            stroedproc_parctl_state_except = t_thrd.wlm_cxt.parctl_state.except;
+            stroedproc_g_collectInfo_status = t_thrd.wlm_cxt.collect_info->status;
+            stroedproc_is_active_statements_reset = u_sess->wlm_cxt->is_active_statements_reset;
+
+            t_thrd.wlm_cxt.parctl_state.subquery = 1;
+            WLMInitQueryPlan(queryDesc);
+            dywlm_client_manager(queryDesc);
         }
 
-        /* Retain the parameters of the main statement */
-        if (!IsQidInvalid(&u_sess->wlm_cxt->wlm_params.qid)) {
-            error_t rc = memcpy_s(&stroedproc_qid, sizeof(Qid), &u_sess->wlm_cxt->wlm_params.qid, sizeof(Qid));
-            securec_check(rc, "\0", "\0");
-        }
-        stroedproc_parctl_state_except = t_thrd.wlm_cxt.parctl_state.except;
-        stroedproc_g_collectInfo_status = t_thrd.wlm_cxt.collect_info->status;
-        stroedproc_is_active_statements_reset = u_sess->wlm_cxt->is_active_statements_reset;
+        ExecutorRun(queryDesc, ForwardScanDirection, tcount);
 
-        t_thrd.wlm_cxt.parctl_state.subquery = 1;
-        WLMInitQueryPlan(queryDesc);
-        dywlm_client_manager(queryDesc);
-    }
+        if (forced_control) {
+            t_thrd.wlm_cxt.parctl_state.except = 0;
+            if (g_instance.wlm_cxt->dynamic_workload_inited && (t_thrd.wlm_cxt.parctl_state.simple == 0)) {
+                dywlm_client_release(&t_thrd.wlm_cxt.parctl_state);
+            } else {
+                // only release resource pool count
+                if (IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
+                    (u_sess->wlm_cxt->parctl_state_exit || IsQueuedSubquery())) {
+                    WLMReleaseGroupActiveStatement();
+                }
+            }
 
-    ExecutorRun(queryDesc, ForwardScanDirection, tcount);
+            WLMSetCollectInfoStatus(WLM_STATUS_FINISHED);
+            t_thrd.wlm_cxt.parctl_state.subquery = 0;
+            t_thrd.wlm_cxt.parctl_state.except = stroedproc_parctl_state_except;
+            t_thrd.wlm_cxt.collect_info->status = stroedproc_g_collectInfo_status;
+            u_sess->wlm_cxt->is_active_statements_reset = stroedproc_is_active_statements_reset;
+            if (!IsQidInvalid(&stroedproc_qid)) {
+                error_t rc = memcpy_s(&u_sess->wlm_cxt->wlm_params.qid, sizeof(Qid), &stroedproc_qid, sizeof(Qid));
+                securec_check(rc, "\0", "\0");
+            }
 
-    if (forced_control) {
-        t_thrd.wlm_cxt.parctl_state.except = 0;
-        if (g_instance.wlm_cxt->dynamic_workload_inited && (t_thrd.wlm_cxt.parctl_state.simple == 0)) {
-            dywlm_client_release(&t_thrd.wlm_cxt.parctl_state);
-        } else {
-            // only release resource pool count
-            if (IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
-                (u_sess->wlm_cxt->parctl_state_exit || IsQueuedSubquery())) {
-                WLMReleaseGroupActiveStatement();
+            /* restore state condition if guc para is off since it contains unreleased count */
+            if (!u_sess->attr.attr_resource.enable_transaction_parctl &&
+                (u_sess->wlm_cxt->reserved_in_active_statements ||
+                    u_sess->wlm_cxt->reserved_in_group_statements ||
+                    u_sess->wlm_cxt->reserved_in_group_statements_simple)) {
+                t_thrd.wlm_cxt.parctl_state.rp_reserve = u_sess->wlm_cxt->stroedproc_rp_reserve;
+                t_thrd.wlm_cxt.parctl_state.rp_release = u_sess->wlm_cxt->stroedproc_rp_release;
+                t_thrd.wlm_cxt.parctl_state.release = u_sess->wlm_cxt->stroedproc_release;
             }
         }
 
-        WLMSetCollectInfoStatus(WLM_STATUS_FINISHED);
-        t_thrd.wlm_cxt.parctl_state.subquery = 0;
-        t_thrd.wlm_cxt.parctl_state.except = stroedproc_parctl_state_except;
-        t_thrd.wlm_cxt.collect_info->status = stroedproc_g_collectInfo_status;
-        u_sess->wlm_cxt->is_active_statements_reset = stroedproc_is_active_statements_reset;
-        if (!IsQidInvalid(&stroedproc_qid)) {
-            error_t rc = memcpy_s(&u_sess->wlm_cxt->wlm_params.qid, sizeof(Qid), &stroedproc_qid, sizeof(Qid));
-            securec_check(rc, "\0", "\0");
+        u_sess->SPI_cxt._current->processed = queryDesc->estate->es_processed;
+        u_sess->SPI_cxt._current->lastoid = queryDesc->estate->es_lastoid;
+
+        if ((res == SPI_OK_SELECT || queryDesc->plannedstmt->hasReturning) && queryDesc->dest->mydest == DestSPI) {
+            if (_SPI_checktuples()) {
+                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("consistency check on SPI tuple count failed when execute plan, %s",
+                        (u_sess->SPI_cxt._current->tuptable == NULL) ?
+                            "tupletable is NULL." : "processed tuples is not matched.")));
+            }
         }
 
-        /* restore state condition if guc para is off since it contains unreleased count */
-        if (!u_sess->attr.attr_resource.enable_transaction_parctl && (u_sess->wlm_cxt->reserved_in_active_statements ||
-            u_sess->wlm_cxt->reserved_in_group_statements || u_sess->wlm_cxt->reserved_in_group_statements_simple)) {
-            t_thrd.wlm_cxt.parctl_state.rp_reserve = u_sess->wlm_cxt->stroedproc_rp_reserve;
-            t_thrd.wlm_cxt.parctl_state.rp_release = u_sess->wlm_cxt->stroedproc_rp_release;
-            t_thrd.wlm_cxt.parctl_state.release = u_sess->wlm_cxt->stroedproc_release;
+        ExecutorFinish(queryDesc);
+        /*
+         * If there are commit/rollback within stored procedure, snapshot has already
+         * been freed during commit/rollback process.
+         * Therefore, need to set queryDesc snapshots to NULL. Otherwise the reference will be stale pointers.
+         */
+        ResourceOwner tmp = t_thrd.utils_cxt.CurrentResourceOwner;
+        if (oldTransactionId != SPI_get_top_transaction_id() || !ResourceOwnerIsValid(oldOwner)) {
+            queryDesc->snapshot = NULL;
+            queryDesc->crosscheck_snapshot = NULL;
+            queryDesc->estate->es_snapshot = NULL;
+            queryDesc->estate->es_crosscheck_snapshot = NULL;
+        } else {
+            t_thrd.utils_cxt.CurrentResourceOwner = oldOwner;
         }
+
+        executorStarted = false;
+        ExecutorEnd(queryDesc);
+        t_thrd.utils_cxt.CurrentResourceOwner = tmp;
     }
-
-    u_sess->SPI_cxt._current->processed = queryDesc->estate->es_processed;
-    u_sess->SPI_cxt._current->lastoid = queryDesc->estate->es_lastoid;
-
-    if ((res == SPI_OK_SELECT || queryDesc->plannedstmt->hasReturning) && queryDesc->dest->mydest == DestSPI) {
-        if (_SPI_checktuples()) {
-            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("consistency check on SPI tuple count failed when execute plan, %s",
-                (u_sess->SPI_cxt._current->tuptable == NULL) ? "tupletable is NULL." : "processed tuples is not matched.")));
-        }
+    PG_CATCH();
+    {
+        SPI_cleanup_executor(queryDesc, executorStarted);
+        PG_RE_THROW();
     }
-
-    ExecutorFinish(queryDesc);
-    /*
-     * If there are commit/rollback within stored procedure. Snapshot has already free during commit/rollback process
-     * Therefore, need to set queryDesc snapshots to NULL. Otherwise the reference will be stale pointers.
-     */
-    ResourceOwner tmp = t_thrd.utils_cxt.CurrentResourceOwner;
-    if (oldTransactionId != SPI_get_top_transaction_id() || !ResourceOwnerIsValid(oldOwner)) {
-        queryDesc->snapshot = NULL;
-        queryDesc->crosscheck_snapshot = NULL;
-        queryDesc->estate->es_snapshot = NULL;
-        queryDesc->estate->es_crosscheck_snapshot = NULL;
-    } else {
-        t_thrd.utils_cxt.CurrentResourceOwner = oldOwner;
-    }
-
-    ExecutorEnd(queryDesc);
-    t_thrd.utils_cxt.CurrentResourceOwner = tmp;
+    PG_END_TRY();
 
     /* FreeQueryDesc is done by the caller */
 #ifdef SPI_EXECUTOR_STATS
@@ -3422,6 +3439,16 @@ static int _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, long tcount, bo
 #endif
 
     return res;
+}
+
+static void SPI_cleanup_executor(QueryDesc *queryDesc, bool executorStarted)
+{
+    if (!executorStarted || queryDesc == NULL || queryDesc->estate == NULL) {
+        return;
+    }
+
+    queryDesc->estate->es_finished = true;
+    ExecutorEnd(queryDesc);
 }
 
 /*

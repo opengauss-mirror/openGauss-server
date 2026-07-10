@@ -64,6 +64,8 @@ typedef struct {
 static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinfo);
 static void intorel_receive(TupleTableSlot* slot, DestReceiver* self);
 static void intorel_shutdown(DestReceiver* self);
+static void intorel_cleanup(DestReceiver* self, bool isCommit);
+static void cleanup_querydesc(QueryDesc** queryDesc, bool executorStarted);
 static void intorel_destroy(DestReceiver* self);
 
 /*
@@ -129,7 +131,9 @@ ObjectAddress ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString
     PlannedStmt* plan = NULL;
     QueryDesc* queryDesc = NULL;
     ScanDirection dir;
-    ObjectAddress address;
+    ObjectAddress address = InvalidObjectAddress;
+    volatile bool snapshotPushed = false;
+    volatile bool executorStarted = false;
     
     if (stmt->into->ivm) {
         return ExecCreateMatViewInc(stmt, queryString, params);
@@ -148,7 +152,16 @@ ObjectAddress ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString
     if (query->commandType == CMD_UTILITY && IsA(query->utilityStmt, ExecuteStmt)) {
         ExecuteStmt* estmt = (ExecuteStmt*)query->utilityStmt;
 
-        ExecuteQuery(estmt, into, queryString, params, dest, completionTag);
+        PG_TRY();
+        {
+            ExecuteQuery(estmt, into, queryString, params, dest, completionTag);
+        }
+        PG_CATCH();
+        {
+            intorel_cleanup(dest, false);
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
 
         /* get object address that intorel_startup saved for us */
         address = ((DR_intorel *) dest)->reladdr;
@@ -180,71 +193,89 @@ ObjectAddress ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString
      * database contents, but let's do it anyway to be parallel to the EXPLAIN
      * code path.)
      */
-    PushCopiedSnapshot(GetActiveSnapshot());
-    UpdateActiveSnapshotCommandId();
+    PG_TRY();
+    {
+        PushCopiedSnapshot(GetActiveSnapshot());
+        snapshotPushed = true;
+        UpdateActiveSnapshotCommandId();
 
-    /* Create a QueryDesc, redirecting output to our tuple receiver */
-    queryDesc = CreateQueryDesc(plan, queryString, GetActiveSnapshot(), InvalidSnapshot, dest, params, 0);
+        /* Create a QueryDesc, redirecting output to our tuple receiver */
+        queryDesc = CreateQueryDesc(plan, queryString, GetActiveSnapshot(), InvalidSnapshot, dest, params, 0);
 
-    if (ENABLE_WORKLOAD_CONTROL && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)) {
-        /* Check if need track resource */
-        u_sess->exec_cxt.need_track_resource = WLMNeedTrackResource(queryDesc);
-    }
+        if (ENABLE_WORKLOAD_CONTROL && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)) {
+            /* Check if need track resource */
+            u_sess->exec_cxt.need_track_resource = WLMNeedTrackResource(queryDesc);
+        }
 
-    /* call ExecutorStart to prepare the plan for execution */
-    ExecutorStart(queryDesc, GetIntoRelEFlags(into));
+        /* call ExecutorStart to prepare the plan for execution */
+        ExecutorStart(queryDesc, GetIntoRelEFlags(into));
+        executorStarted = true;
 
-    /* workload client manager */
-    if (ENABLE_WORKLOAD_CONTROL) {
-        WLMInitQueryPlan(queryDesc);
-        dywlm_client_manager(queryDesc);
-    }
+        /* workload client manager */
+        if (ENABLE_WORKLOAD_CONTROL) {
+            WLMInitQueryPlan(queryDesc);
+            dywlm_client_manager(queryDesc);
+        }
 
-    /*
-     * Normally, we run the plan to completion; but if skipData is specified,
-     * just do tuple receiver startup and shutdown.
-     *
-     * On DNs, normal materialized view creation will reach here. We only create the mv here.
-     * Data population will be handled by a separate SelectInto.
-     */
-    if (into->skipData
+        /*
+         * Normally, we run the plan to completion; but if skipData is specified,
+         * just do tuple receiver startup and shutdown.
+         *
+         * On DNs, normal materialized view creation will reach here. We only create the mv here.
+         * Data population will be handled by a separate SelectInto.
+         */
+        if (into->skipData
 #ifdef ENABLE_MULTIPLE_NODES
-            || (IS_PGXC_DATANODE && stmt->relkind == OBJECT_MATVIEW))
+                || (IS_PGXC_DATANODE && stmt->relkind == OBJECT_MATVIEW))
 #else
-            )
+                )
 #endif
-        dir = NoMovementScanDirection;
-    else
-        dir = ForwardScanDirection;
+            dir = NoMovementScanDirection;
+        else
+            dir = ForwardScanDirection;
 
-    /* run the plan */
-    ExecutorRun(queryDesc, dir, 0L);
+        /* run the plan */
+        ExecutorRun(queryDesc, dir, 0L);
 
-    /* save the rowcount if we're given a completionTag to fill */
-    if (completionTag != NULL
+        /* save the rowcount if we're given a completionTag to fill */
+        if (completionTag != NULL
 #ifndef ENABLE_MULTIPLE_NODES
-        && stmt->relkind != OBJECT_MATVIEW
+            && stmt->relkind != OBJECT_MATVIEW
 #endif
-       ) {
-        errno_t rc;
-        rc = snprintf_s(completionTag,
-            COMPLETION_TAG_BUFSIZE,
-            COMPLETION_TAG_BUFSIZE - 1,
-            "SELECT %lu",
-            queryDesc->estate->es_processed);
-        securec_check_ss(rc, "\0", "\0");
+           ) {
+            errno_t rc;
+            rc = snprintf_s(completionTag,
+                COMPLETION_TAG_BUFSIZE,
+                COMPLETION_TAG_BUFSIZE - 1,
+                "SELECT %lu",
+                queryDesc->estate->es_processed);
+            securec_check_ss(rc, "\0", "\0");
+        }
+
+        /* get object address that intorel_startup saved for us */
+        address = ((DR_intorel *) dest)->reladdr;
+
+        /* and clean up */
+        ExecutorFinish(queryDesc);
+        executorStarted = false;
+        ExecutorEnd(queryDesc);
+
+        FreeQueryDesc(queryDesc);
+        queryDesc = NULL;
+
+        PopActiveSnapshot();
+        snapshotPushed = false;
     }
-
-    /* get object address that intorel_startup saved for us */
-    address = ((DR_intorel *) dest)->reladdr;
-
-    /* and clean up */
-    ExecutorFinish(queryDesc);
-    ExecutorEnd(queryDesc);
-
-    FreeQueryDesc(queryDesc);
-
-    PopActiveSnapshot();
+    PG_CATCH();
+    {
+        intorel_cleanup(dest, false);
+        cleanup_querydesc(&queryDesc, executorStarted);
+        if (snapshotPushed) {
+            PopActiveSnapshot();
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
     return address;
 }
 
@@ -450,6 +481,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
      * Finally we can open the target table
      */
     intoRelationDesc = heap_open(intoRelationId, AccessExclusiveLock);
+    myState->rel = intoRelationDesc;
 
     if (into->relkind == RELKIND_MATVIEW && !into->skipData) {
         /* Make sure the heap looks good even if no rows are written. */
@@ -490,7 +522,6 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
     /*
      * Fill private fields of myState for use by later routines
      */
-    myState->rel = intoRelationDesc;
     myState->output_cid = GetCurrentCommandId(true);
     myState->reladdr = intoRelationAddr;
     /*
@@ -534,18 +565,49 @@ static void intorel_receive(TupleTableSlot* slot, DestReceiver* self)
  */
 static void intorel_shutdown(DestReceiver* self)
 {
+    intorel_cleanup(self, true);
+}
+
+static void intorel_cleanup(DestReceiver* self, bool isCommit)
+{
     DR_intorel* myState = (DR_intorel*)self;
 
-    FreeBulkInsertState(myState->bistate);
+    if (myState->bistate != NULL) {
+        FreeBulkInsertState(myState->bistate);
+        myState->bistate = NULL;
+    }
 
     /* If we skipped using WAL, must heap_sync before commit */
-    if (((myState->hi_options & TABLE_INSERT_SKIP_WAL) || enable_heap_bcm_data_replication())
-        && !RelationIsSegmentTable(myState->rel))
+    if (isCommit && myState->rel != NULL &&
+        ((myState->hi_options & TABLE_INSERT_SKIP_WAL) || enable_heap_bcm_data_replication()) &&
+        !RelationIsSegmentTable(myState->rel)) {
         heap_sync(myState->rel);
+    }
 
     /* close rel, but keep lock until commit */
-    heap_close(myState->rel, NoLock);
-    myState->rel = NULL;
+    if (myState->rel != NULL) {
+        heap_close(myState->rel, NoLock);
+        myState->rel = NULL;
+    }
+}
+
+static void cleanup_querydesc(QueryDesc** queryDesc, bool executorStarted)
+{
+    QueryDesc* desc = *queryDesc;
+
+    if (desc == NULL) {
+        return;
+    }
+
+    if (executorStarted && desc->estate != NULL) {
+        desc->estate->es_finished = true;
+        ExecutorEnd(desc);
+    }
+
+    if (desc->estate == NULL) {
+        FreeQueryDesc(desc);
+        *queryDesc = NULL;
+    }
 }
 
 /*
