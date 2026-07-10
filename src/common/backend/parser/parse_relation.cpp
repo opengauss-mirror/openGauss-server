@@ -1837,8 +1837,11 @@ Relation parserOpenTable(ParseState *pstate, const RangeVar *relation, int lockm
             Oid relid = RelationGetRelid(rel);
             /* Save the view name before closing, since rel will be invalid afterwards. */
             char* viewName = pstrdup_ext(RelationGetRelationName(rel));
-            /* close dummy table */
-            relation_close(rel, lockmode);
+            /* 
+             * Close dummy table but KEEP the lock to prevent concurrent DDLs from 
+             * dropping/replacing the view during the recompilation window.
+             */
+            relation_close(rel, NoLock);
 
             bool success = AutoRecompileForceView(relid, sqlText);
             pfree_ext(sqlText);
