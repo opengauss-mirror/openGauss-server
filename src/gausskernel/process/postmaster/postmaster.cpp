@@ -10297,6 +10297,9 @@ extern void HLLT_Coverage_SaveCoverageData();
 void ExitPostmaster(int status)
 {
     /* should cleanup shared memory and kill all backends */
+    if (ENABLE_UB) {
+        (void)UBSMemFinalize();
+    }
 
     /*
      * Not sure of the semantics here.	When the Postmaster dies, should the
