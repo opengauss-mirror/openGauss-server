@@ -908,6 +908,17 @@ UPDATE gs_global_chain SET txcommand = '112233445566' WHERE relnsp = 'ledgernsp'
 ERROR:  permission denied: "gs_global_chain" is a system catalog
 DELETE gs_global_chain;
 ERROR:  permission denied: "gs_global_chain" is a system catalog
+-- Test normal user cannot read gs_global_chain.
+DROP USER IF EXISTS ledger_normal_user;
+NOTICE:  role "ledger_normal_user" does not exist, skipping
+CREATE USER ledger_normal_user PASSWORD 'Gauss@1234';
+SET ROLE ledger_normal_user PASSWORD 'Gauss@1234';
+SELECT * FROM pg_catalog.gs_global_chain LIMIT 1;
+ERROR:  permission denied for relation gs_global_chain
+DETAIL:  N/A
+RESET ROLE;
+DROP USER ledger_normal_user;
+SET ROLE bc_admin PASSWORD 'Gauss_234';
 ----------------------------------------------------------------------
 -- TEST CASE 010. test TRUNCATE.                                    --
 ----------------------------------------------------------------------
