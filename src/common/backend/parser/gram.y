@@ -21154,33 +21154,43 @@ CreateContQueryStmt: CREATE CONTVIEW qualified_name opt_reloptions AS SelectStmt
  *
  *****************************************************************************/
 
-ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
+ViewStmt: CREATE OptTemp opt_force VIEW qualified_name opt_column_list opt_reloptions
 				AS SelectStmt opt_check_option
 				{
+					if (!DB_IS_CMPT(A_FORMAT) && ($3)) {
+						ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+										errmsg("Create force view is only supported in A compatibility database.")));
+					}
 					ViewStmt *n = makeNode(ViewStmt);
-					n->view = $4;
+					n->view = $5;
 					n->view->relpersistence = $2;
-					n->aliases = $5;
-					n->query = $8;
+					n->is_force = $3;
+					n->aliases = $6;
+					n->query = $9;
 					n->replace = false;
-					n->options = $6;
+					n->options = $7;
 					n->sql_statement = NULL;
-					n->withCheckOption = (ViewCheckOption)$9;
+					n->withCheckOption = (ViewCheckOption)$10;
 					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
 					$$ = (Node *) n;
 				}
-		| CREATE OR REPLACE OptTemp VIEW qualified_name opt_column_list opt_reloptions
+		| CREATE OR REPLACE OptTemp opt_force VIEW qualified_name opt_column_list opt_reloptions
 				AS SelectStmt opt_check_option
 				{
+					if (!DB_IS_CMPT(A_FORMAT) && ($5)) {
+						ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+										errmsg("Create force view is only supported in A compatibility database.")));
+					}
 					ViewStmt *n = makeNode(ViewStmt);
-					n->view = $6;
+					n->view = $7;
 					n->view->relpersistence = $4;
-					n->aliases = $7;
-					n->query = $10;
+					n->is_force = $5;
+					n->aliases = $8;
+					n->query = $11;
 					n->replace = true;
-					n->options = $8;
+					n->options = $9;
 					n->sql_statement = NULL;
-					n->withCheckOption = (ViewCheckOption)$11;
+					n->withCheckOption = (ViewCheckOption)$12;
 					n->viewSecurityOption = VIEW_SQL_SECURITY_NONE;
 					$$ = (Node *) n;
 				}

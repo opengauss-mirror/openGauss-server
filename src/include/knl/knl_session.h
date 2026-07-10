@@ -721,6 +721,8 @@ typedef struct knl_u_utils_context {
     /* var in tsrank.cpp */
     float tsrankWs[TSRANK_WEIGHTS_LEN];
     List* ignore_keyword_list;
+
+    List* force_view_recompile_oids;
 } knl_u_utils_context;
 
 extern knl_u_utils_guc_cold_context* knl_u_utils_guc_cold_ensure(knl_u_utils_context* utils_cxt);

@@ -25,4 +25,6 @@ extern Query* UpdateRangeTableOfViewParse(Oid viewOid, Query* viewParse);
 extern void StoreViewQuery(Oid viewOid, Query *viewParse, bool replace);
 extern bool CheckMySQLFdwForWCO(Query* viewquery);
 
+extern bool AutoRecompileForceView(Oid viewOid, const char* queryString);
+
 #endif /* VIEW_H */

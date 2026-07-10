@@ -6239,6 +6239,7 @@ static ViewStmt* _copyViewStmt(const ViewStmt* from)
     COPY_SCALAR_FIELD(is_alter);
     COPY_SCALAR_FIELD(viewSecurityOption);
     COPY_SCALAR_FIELD(withCheckOption);
+    COPY_SCALAR_FIELD(is_force);
 
     return newnode;
 }

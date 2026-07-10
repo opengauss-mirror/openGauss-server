@@ -592,6 +592,7 @@ static void knl_u_utils_init(knl_session_context* sess_cxt)
     guc_cold->spi_printtupDR = (DestReceiver*)palloc0(sizeof(DestReceiver));
     InitSpiPrinttupDR(guc_cold->spi_printtupDR);
     utils_cxt->ignore_keyword_list = NIL;
+    utils_cxt->force_view_recompile_oids = NIL;
 }
 
 static void knl_u_security_init(knl_u_security_context* sec_cxt) {
