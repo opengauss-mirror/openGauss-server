@@ -96,6 +96,8 @@ static int64 int64_millisec_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fs
 static int64 int64_microsec_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow);
 static int64 int64_nano_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1, fsec_t fsec2, bool *overflow);
 
+Oid shark_binary_need_transform_typeid(Oid typeoid, Oid* collation);
+
 #define DTK_NANO 32
 
 void _PG_init(void)
@@ -248,6 +250,7 @@ void init_session_vars(void)
     u_sess->hook_cxt.rewriteTypmodExprHook = (void*)RewriteTypmodExpr;
     u_sess->hook_cxt.getVarbinaryOidHook = (void*)getVarbinaryOid;
     u_sess->hook_cxt.preTransformTargetHook = (void*)tryTsqlTargetAlias;
+    u_sess->hook_cxt.binaryTransformTypeidHook = (void*)shark_binary_need_transform_typeid;
 
     RepallocSessionVarsArrayIfNecessary();
     SharkContext *cxt = (SharkContext*) MemoryContextAlloc(u_sess->self_mem_cxt, sizeof(sharkContext));
@@ -1386,4 +1389,29 @@ static int64 int64_nano_diff(struct pg_tm* tm1, struct pg_tm* tm2, fsec_t fsec1,
     *overflow = (*overflow || !(int64_multiply_add(seconddiff, 1000000, &microsecdiff)));
     *overflow = (*overflow || (pg_mul_s64_overflow(microsecdiff, 1000, &diff)));
     return diff;
+}
+
+Oid shark_binary_need_transform_typeid(Oid typeoid, Oid* collation)
+{
+    Oid new_typid = typeoid;
+    if (*collation == BINARY_COLLATION_OID) {
+        if (GetDatabaseEncoding() == PG_SQL_ASCII && DB_IS_CMPT(D_FORMAT) &&
+            (u_sess->attr.attr_common.upgrade_mode != 0 || creating_extension)) {
+            *collation = DEFAULT_COLLATION_OID;
+            return new_typid;
+        }
+        Oid varbinaryoid = TSQL_HAS_VARBINARY ? TSQL_VARBINARY_OID : InvalidOid;
+        /* string type need to transform to binary type */
+        if (typeoid == TEXTOID) {
+            new_typid = BLOBOID;
+        } else if (typeoid == BPCHAROID || typeoid == VARCHAROID) {
+            new_typid = varbinaryoid;
+        } else if (typeoid == BLOBOID || typeoid == BYTEAOID || typeoid == varbinaryoid) {
+            /* binary string type no need to transform */
+        } else {
+            ereport(WARNING, (errmsg("this type can't set to binary collation. default value set")));
+            *collation = DEFAULT_COLLATION_OID;
+        }
+    }
+    return new_typid;
 }

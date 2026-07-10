@@ -152,17 +152,15 @@ create table t_charset_5 (c1 varchar(20)) charset = utf8;
 create table t_charset_6 (c1 varchar(20)) charset = gbk;
 ERROR:  difference between the charset and the database encoding has not supported
 create table t_charset_7 (c1 varchar(20)) default charset = utf8mb4 default collate = utf8mb4_unicode_ci;
-create table t_charset_8 (c1 varchar(20)) charset = binary; -- error
-ERROR:  Un-support feature
-DETAIL:  type varchar cannot be set to binary collation currently
-create table t_charset_8 (c1 text) charset = binary;
-select pg_get_tabledef('t_charset_8');
-                    pg_get_tabledef                    
--------------------------------------------------------
- SET search_path = public;                            +
- CREATE TABLE t_charset_8 (                           +
-     c1 blob                                          +
- )                                                    +
+create table t_charset_8 (c1 varchar(20)) charset = binary;
+create table t_charset_28 (c1 text) charset = binary;
+select pg_get_tabledef('t_charset_28');
+                    pg_get_tabledef                     
+--------------------------------------------------------
+ SET search_path = public;                             +
+ CREATE TABLE t_charset_28 (                           +
+     c1 blob CHARACTER SET "SQL_ASCII" COLLATE "binary"+
+ )                                                     +
  WITH (orientation=row, compression=no, collate=1026);
 (1 row)
 
@@ -170,12 +168,8 @@ create table t_charset_9 (c1 varchar(20)) character set = utf8mb4;
 create table t_charset_10(c1 varchar(20)) collate = utf8mb4_general_ci;
 create table t_charset_11(c1 varchar(20)) collate = utf8mb4_bin;
 create table t_charset_12(c1 varchar(20)) collate = binary;
-ERROR:  Un-support feature
-DETAIL:  type varchar cannot be set to binary collation currently
-create table t_charset_12(c1 varchar(20)) default charset utf8mb4 default collate utf8mb4_unicode_ci;
+create table t_charset_29(c1 varchar(20)) default charset utf8mb4 default collate utf8mb4_unicode_ci;
 create table t_charset_13(c1 varchar(20)) collate = "binary";
-ERROR:  Un-support feature
-DETAIL:  type varchar cannot be set to binary collation currently
 create table t_charset_16(c1 varchar(20)) charset = gbk collate = utf8mb4_general_ci; -- error
 ERROR:  collation "utf8mb4_general_ci" for encoding "GBK" does not exist
 create table t_charset_17(c1 varchar(20)) CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
@@ -198,12 +192,8 @@ select r.relname,r.reloptions,a.attcollation from pg_class r,pg_attribute a wher
  t_charset_23 | {orientation=row,compression=no,collate=1537} |         1537
 (8 rows)
 
-create table t_charset_24(c1 varchar(20) character set binary); -- error
-ERROR:  Un-support feature
-DETAIL:  type varchar cannot be set to binary collation currently
-create table t_charset_24(c1 varchar(20) character set "binary"); -- error
-ERROR:  Un-support feature
-DETAIL:  type varchar cannot be set to binary collation currently
+create table t_charset_24(c1 varchar(20) character set binary);
+create table t_charset_30(c1 varchar(20) character set "binary");
 create table t_charset_25(c1 varchar(20)) with(collate = 7);
 ERROR:  this collation only cannot be specified here
 create table t_charset_26(c1 varchar(20)) charset utf8mb4 collate "aa_DJ.utf8"; -- error
@@ -218,7 +208,8 @@ select relname, reloptions from pg_class where relname like 't_charset_%' order 
  t_charset_1  | {orientation=row,compression=no,collate=1538}
  t_charset_10 | {orientation=row,compression=no,collate=1537}
  t_charset_11 | {orientation=row,compression=no,collate=1539}
- t_charset_12 | {orientation=row,compression=no,collate=1538}
+ t_charset_12 | {orientation=row,compression=no,collate=1026}
+ t_charset_13 | {orientation=row,compression=no,collate=1026}
  t_charset_17 | {orientation=row,compression=no,collate=1538}
  t_charset_18 | {orientation=row,compression=no,collate=1538}
  t_charset_19 | {orientation=row,compression=no,collate=1537}
@@ -227,18 +218,21 @@ select relname, reloptions from pg_class where relname like 't_charset_%' order 
  t_charset_21 | {orientation=row,compression=no,collate=1537}
  t_charset_22 | {orientation=row,compression=no,collate=1537}
  t_charset_23 | {orientation=row,compression=no,collate=1537}
+ t_charset_24 | {orientation=row,compression=no,collate=1537}
  t_charset_27 | {orientation=row,compression=no,collate=1538}
+ t_charset_28 | {orientation=row,compression=no,collate=1026}
+ t_charset_29 | {orientation=row,compression=no,collate=1538}
  t_charset_3  | {orientation=row,compression=no,collate=1537}
+ t_charset_30 | {orientation=row,compression=no,collate=1537}
  t_charset_4  | {orientation=row,compression=no,collate=1537}
  t_charset_5  | {orientation=row,compression=no,collate=1537}
  t_charset_7  | {orientation=row,compression=no,collate=1538}
  t_charset_8  | {orientation=row,compression=no,collate=1026}
  t_charset_9  | {orientation=row,compression=no,collate=1537}
-(20 rows)
+(25 rows)
 
 alter table t_charset_1 convert to charset binary; -- error
-ERROR:  Un-support feature
-DETAIL:  type varchar cannot be set to binary collation currently
+ERROR:  column "c1" cannot be cast automatically to type varbinary
 alter table t_charset_1 convert to charset utf8mb4;
 alter table t_charset_1 convert to character set utf8mb4;
 alter table t_charset_1 convert to character set utf8mb4 collate utf8mb4_general_ci;
@@ -359,8 +353,8 @@ select pg_get_tabledef('a_charset_2');
      a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
      a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
      a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,        +
-     a8 blob,                                                                 +
-     a9 blob                                                                  +
+     a8 blob CHARACTER SET "SQL_ASCII" COLLATE "binary",                      +
+     a9 blob CHARACTER SET "SQL_ASCII" COLLATE "binary"                       +
  )                                                                            +
  WITH (orientation=row, compression=no, collate=1026);
 (1 row)
@@ -372,8 +366,6 @@ ERROR:  column "a9" of relation "a_charset_2" already exists
 alter table a_charset_2 add a10 varchar(20) character set utf8mb4 collate utf8mb4_unicode_ci;
 alter table a_charset_2 add a11 varchar(20) collate utf8mb4_bin;
 alter table a_charset_2 add a12 varchar(20);
-ERROR:  Un-support feature
-DETAIL:  type varchar cannot be set to binary collation currently
 alter table a_charset_2 add a13 int;
 alter table a_charset_2 add a14 varchar(20) charset utf8mb4 collate "aa_DJ.utf8";
 alter table a_charset_2 add a15 varchar(20) collate "aa_DJ.utf8";
@@ -405,10 +397,11 @@ select pg_get_tabledef('a_charset_2');
      a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
      a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
      a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
-     a8 blob,                                                                  +
-     a9 blob,                                                                  +
+     a8 blob CHARACTER SET "SQL_ASCII" COLLATE "binary",                       +
+     a9 blob CHARACTER SET "SQL_ASCII" COLLATE "binary",                       +
      a10 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
      a11 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_bin,       +
+     a12 varbinary(20) CHARACTER SET "SQL_ASCII" COLLATE "binary",             +
      a13 integer,                                                              +
      a14 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
      a15 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
@@ -426,15 +419,14 @@ alter table a_charset_2 modify a1 int;
 alter table a_charset_2 modify a9 varchar(20) character set gbk;
 ERROR:  difference between the charset and the database encoding has not supported
 alter table a_charset_2 modify a10 varchar(20);
-ERROR:  Un-support feature
-DETAIL:  type varchar cannot be set to binary collation currently
+ERROR:  column "a10" cannot be cast automatically to type varbinary
+HINT:  Specify a USING expression to perform the conversion.
 alter table a_charset_2 modify a11 varchar(20) collate utf8mb4_unicode_ci;
 ERROR:  Un-support feature
 LINE 1: alter table a_charset_2 modify a11 varchar(20) collate utf8m...
                                            ^
 DETAIL:  this modify syntax is supported only in B compatibility
 alter table a_charset_2 modify a12 varchar(20) charset utf8mb4;
-ERROR:  column "a12" of relation "a_charset_2" does not exist
 select pg_get_tabledef('a_charset_2');
                                 pg_get_tabledef                                 
 --------------------------------------------------------------------------------
@@ -447,10 +439,11 @@ select pg_get_tabledef('a_charset_2');
      a5 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
      a6 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci, +
      a7 nvarchar2(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,         +
-     a8 blob,                                                                  +
-     a9 blob,                                                                  +
+     a8 blob CHARACTER SET "SQL_ASCII" COLLATE "binary",                       +
+     a9 blob CHARACTER SET "SQL_ASCII" COLLATE "binary",                       +
      a10 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_unicode_ci,+
      a11 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_bin,       +
+     a12 character varying(20) CHARACTER SET "UTF8" COLLATE utf8mb4_general_ci,+
      a13 integer,                                                              +
      a14 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
      a15 character varying(20) CHARACTER SET "UTF8" COLLATE "aa_DJ.utf8",      +
@@ -1015,3 +1008,36 @@ DETAIL:  ALTER TABLE MODIFY COLUMN syntax is supported only in B compatibility
 drop table cstore_charset_1;
 \c postgres
 drop database test_charset;
+create database testdd dbcompatibility = 'd' encoding = 'SQL_ASCII';
+\c testdd
+create extension shark;
+set d_format_behavior_compat_options = 'default_collation';
+create table test(id character(5));
+\d test
+                      Table "public.test"
+ Column |     Type     |               Modifiers                
+--------+--------------+----------------------------------------
+ id     | varbinary(5) | character set SQL_ASCII collate binary
+
+set d_format_behavior_compat_options = '';
+create table test1(id character(5));
+\d test1
+       Table "public.test1"
+ Column |     Type     | Modifiers 
+--------+--------------+-----------
+ id     | character(5) | 
+
+\c postgres
+drop database testdd;
+create database testdd dbcompatibility = 'd' encoding = 'SQL_ASCII';
+\c testdd
+set d_format_behavior_compat_options = 'default_collation';
+create extension shark;
+\c postgres
+drop database testdd;
+create database testdd dbcompatibility = 'd' encoding = 'SQL_ASCII';
+\c testdd
+set d_format_behavior_compat_options = '';
+create extension shark;
+\c postgres
+drop database testdd;
