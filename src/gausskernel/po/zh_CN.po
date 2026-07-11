@@ -7599,7 +7599,7 @@ msgstr "存储过程 %s 的头信息为空。"
 
 #: ../common/backend/catalog/pg_proc.cpp:1928
 #, c-format
-msgid "%s created with compilation erors."
+msgid "%s created with compilation errors."
 msgstr "%s 创建时有编译错误。"
 
 #: ../common/backend/catalog/pg_proc.cpp:1971
