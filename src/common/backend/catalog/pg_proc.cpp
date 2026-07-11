@@ -2056,7 +2056,7 @@ ObjectAddress ProcedureCreate(const char* procedureName, Oid procNamespace, Oid 
         }
         if (!GetCurrCompilePgObjStatus()) {
             ereport(WARNING, (errmodule(MOD_PLSQL),
-                errmsg("%s created with compilation erors.",
+                errmsg("%s created with compilation errors.",
                     proIsProcedure ? "Procedure" : "Function")));
         }
     }

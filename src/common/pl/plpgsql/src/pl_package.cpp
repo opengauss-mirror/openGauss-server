@@ -1926,10 +1926,10 @@ static void gsplsql_pkg_set_status(PLpgSQL_package* pkg, bool isSpec, bool isCre
     }
     if (isCreate) {
         ereport(WARNING, (errmodule(MOD_PLSQL),
-                        errmsg("Package %screated with compilation erors.", isSpec ? "" : "Body ")));
+                        errmsg("Package %screated with compilation errors.", isSpec ? "" : "Body ")));
     } else if (isRecompile) {
         ereport(WARNING, (errmodule(MOD_PLSQL),
-                        errmsg("Package %s %srecompile with compilation erors.",
+                        errmsg("Package %s %srecompile with compilation errors.",
                                pkg->pkg_signature, isSpec ? "" : "Body ")));
     }
     return;

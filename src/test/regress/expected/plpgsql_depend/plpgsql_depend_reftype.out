@@ -139,7 +139,7 @@ WARNING:  relation does not exist when parse word.
 CONTEXT:  compilation of PL/pgSQL package near line 1
 WARNING:  Type r1 depends on an undefined type.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
        schemaname       | packagename | type |                name                |                                                                                                             objnode                                                                                                             
 ------------------------+-------------+------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -191,7 +191,7 @@ DETAIL:   relation "regression.plpgsql_depend_reftype.undefstu" referenced by %R
 WARNING:  Type proc12(pg_catalog.undefined) depends on an undefined type.
 WARNING:  The header information of function proc12 is not defined.
 CONTEXT:  compilation of PL/pgSQL function "proc12" near line 1
-WARNING:  Procedure created with compilation erors.
+WARNING:  Procedure created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
        schemaname       | packagename | type |             name             |                                                                                                                 objnode                                                                                                                  
 ------------------------+-------------+------+------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -307,7 +307,7 @@ WARNING:  relation does not exist when parse word.
 CONTEXT:  compilation of PL/pgSQL package near line 1
 WARNING:  Type r1 depends on an undefined type.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
        schemaname       | packagename | type |                name                |                                                                                                  objnode                                                                                                  
 ------------------------+-------------+------+------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -334,7 +334,7 @@ WARNING:  relation does not exist when parse word.
 DETAIL:   relation "plpgsql_depend_reftype.undefstu" referenced by %ROWTYPE does not exist.
 WARNING:  The header information of function proc12 is not defined.
 CONTEXT:  compilation of PL/pgSQL function "proc12" near line 1
-WARNING:  Procedure created with compilation erors.
+WARNING:  Procedure created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
        schemaname       | packagename | type |             name             |                                                                                                      objnode                                                                                                       
 ------------------------+-------------+------+------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -404,7 +404,7 @@ WARNING:  relation "undefstu" does not exist when parse word.
 CONTEXT:  compilation of PL/pgSQL package near line 1
 WARNING:  Type r1 depends on an undefined type.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
        schemaname       | packagename | type |                name                |                                                                                           objnode                                                                                           
 ------------------------+-------------+------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -431,7 +431,7 @@ WARNING:  relation does not exist when parse word.
 DETAIL:   relation "undefstu" referenced by %ROWTYPE does not exist.
 WARNING:  The header information of function proc12 is not defined.
 CONTEXT:  compilation of PL/pgSQL function "proc12" near line 1
-WARNING:  Procedure created with compilation erors.
+WARNING:  Procedure created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
        schemaname       | packagename | type |             name             |                                                                               objnode                                                                                
 ------------------------+-------------+------+------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -460,7 +460,7 @@ QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c regression.plpgsql_depend_
     procedure proc1();
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
        schemaname       | packagename | type |             name             |                                                                               objnode                                                                                
 ------------------------+-------------+------+------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -509,7 +509,7 @@ QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c regression.plpgsql_depend_
     procedure proc1();
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
        schemaname       | packagename | type |          name           |                                                                                           objnode                                                                                           
 ------------------------+-------------+------+-------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -530,7 +530,7 @@ begin
     NULL;
 end;
 /
-WARNING:  Procedure created with compilation erors.
+WARNING:  Procedure created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
  schemaname | packagename | type | name | objnode 
 ------------+-------------+------+------+---------
@@ -580,7 +580,7 @@ QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c regression.plpgsql_depend_
     procedure proc1();
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
  schemaname | packagename | type | name | objnode 
 ------------+-------------+------+------+---------
@@ -605,7 +605,7 @@ QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c undefdb.plpgsql_depend_ref
     procedure proc1();
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
  schemaname | packagename | type | name | objnode 
 ------------+-------------+------+------+---------
@@ -667,7 +667,7 @@ QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c regression.plpgsql_depend_
     procedure proc1();
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
  schemaname | packagename | type | name | objnode 
 ------------+-------------+------+------+---------
@@ -692,7 +692,7 @@ QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c undefdb.plpgsql_depend_ref
     procedure proc1();
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
  schemaname | packagename | type | name | objnode 
 ------------+-------------+------+------+---------
@@ -923,7 +923,7 @@ end pkg;
 /
 WARNING:  Type r1 depends on an undefined type.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
        schemaname       | packagename | type |          name           |                                                                           objnode                                                                            
 ------------------------+-------------+------+-------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -948,7 +948,7 @@ end;
 /
 WARNING:  The header information of function proc12 is not defined.
 CONTEXT:  compilation of PL/pgSQL function "proc12" near line 1
-WARNING:  Procedure created with compilation erors.
+WARNING:  Procedure created with compilation errors.
 select * from gs_dependencies_obj where schemaname='plpgsql_depend_reftype' order by schemaname, packagename, name, type;
        schemaname       | packagename | type |             name             |                                                                             objnode                                                                              
 ------------------------+-------------+------+------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------
