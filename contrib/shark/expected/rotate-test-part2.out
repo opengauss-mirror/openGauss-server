@@ -296,6 +296,39 @@ not rotate(
  2022 | C       | 250.00 |     5 | sale4 |        5
 (20 rows)
 
+SELECT year, product, sale_period, sale_value
+FROM (
+SELECT year, product, sale1, sale2, sale3, sale4, sale5
+FROM sales2
+WHERE year IN (2020, 2021)
+) AS filtered_data
+not rotate (
+sale_value FOR sale_period IN (sale1, sale2, sale3, sale4, sale5)
+) AS unpivot_table;
+ year | product | sale_period | sale_value 
+------+---------+-------------+------------
+ 2020 | A       | sale1       |          1
+ 2020 | B       | sale1       |          2
+ 2021 | A       | sale1       |          3
+ 2021 | B       | sale1       |          4
+ 2020 | A       | sale2       |          1
+ 2020 | B       | sale2       |          2
+ 2021 | A       | sale2       |          3
+ 2021 | B       | sale2       |          4
+ 2020 | A       | sale3       |          1
+ 2020 | B       | sale3       |          2
+ 2021 | A       | sale3       |          3
+ 2021 | B       | sale3       |          4
+ 2020 | A       | sale4       |          1
+ 2020 | B       | sale4       |          2
+ 2021 | A       | sale4       |          3
+ 2021 | B       | sale4       |          4
+ 2020 | A       | sale5       |          1
+ 2020 | B       | sale5       |          2
+ 2021 | A       | sale5       |          3
+ 2021 | B       | sale5       |          4
+(20 rows)
+
 INSERT INTO sales2 (year, product, amount, sale1, sale2, sale3, sale4, sale5) VALUES (2021, 'A', 150, NULL, NULL, NULL, NULL, NULL), (2021, 'B', 250, NULL, NULL, NULL, NULL, NULL), (2022, 'C', 250, NULL, NULL, NULL, NULL, NULL);
 SELECT * FROM sales2  not rotate( sale_all For sale IN (sale1, sale2, sale3, sale4)) as unpvt;
  year | product | amount | sale5 | sale  | sale_all 
