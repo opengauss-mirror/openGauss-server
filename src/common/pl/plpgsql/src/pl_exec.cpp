@@ -2804,11 +2804,6 @@ static void plpgsql_exec_error_callback(void* arg)
     if (estate->err_stmt)
         ErrPlpgsqlLine(estate->err_stmt->lineno);
 
-    /* if we are doing RAISE, don't report its location */
-    if (estate->err_text == raise_skip_msg) {
-        return;
-    }
-
     if (AUDIT_EXEC_ENABLED) {
         int elevel;
         int sqlState;
@@ -2826,6 +2821,11 @@ static void plpgsql_exec_error_callback(void* arg)
             securec_check_ss(ret, (char*)"", (char*)"");
             audit_report(AUDIT_FUNCTION_EXEC, AUDIT_FAILED, estate->func->fn_signature, details);
         }
+    }
+
+    /* if we are doing RAISE, don't report its location */
+    if (estate->err_text == raise_skip_msg) {
+        return;
     }
 
     if (estate->err_text != NULL) {
@@ -3691,6 +3691,29 @@ static int exec_exception_handler(PLpgSQL_execstate* estate, PLpgSQL_stmt_block*
     int rc = -1;
 
     estate->is_exception = true;
+
+    /*
+     * Audit the caught exception in DO...EXCEPTION blocks in case it
+     * swallow internal errors, leaving only AUDIT_OK. Anonymous
+     * blocks (fn_oid == OID_MAX) are audited too; the FirstNormalObjectId
+     * guard used by plpgsql_exec_error_callback still applies to skip
+     * internal system functions.
+     */
+    if (AUDIT_EXEC_ENABLED && edata != NULL &&
+        estate->func != NULL && estate->func->fn_oid >= FirstNormalObjectId) {
+        errno_t ret = EOK;
+        char details[PGAUDIT_MAXLENGTH] = {0};
+        ret = snprintf_s(details,
+            sizeof(details),
+            sizeof(details) - 1,
+            "PL/pgSQL exception caught in %s: SQLSTATE %s, %s",
+            estate->func->fn_signature,
+            plpgsql_get_sqlstate(edata->sqlerrcode),
+            edata->message ? edata->message : "");
+        securec_check_ss(ret, (char*)"", (char*)"");
+        audit_report(AUDIT_FUNCTION_EXEC, AUDIT_FAILED, estate->func->fn_signature, details);
+    }
+
     /* no error can be ignored once connection was destoryed */
     if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
         estate->cur_error = context->old_edata;
