@@ -798,7 +798,7 @@ static void process_startup_options(Port* port, bool am_superuser)
     }
 
     /* sanity check for ha maintenance port -- only super users are allowed to connect with client applications. */
-    if (IsConnFromApp() && IsHAPort(port) && !(am_superuser || isOperatoradmin(GetUserId()))) {
+    if (IsConnFromApp() && IsHAPort(port) && !(am_superuser || isOperatoradmin(GetUserId()) || AM_WAL_HADR_SENDER)) {
         ConnAuthMethodCorrect = false;
         ereport(FATAL,
             (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
