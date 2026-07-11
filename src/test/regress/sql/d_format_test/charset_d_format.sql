@@ -70,14 +70,14 @@ create table t_charset_4 (c1 varchar(20)) charset = utf8mb4;
 create table t_charset_5 (c1 varchar(20)) charset = utf8;
 create table t_charset_6 (c1 varchar(20)) charset = gbk;
 create table t_charset_7 (c1 varchar(20)) default charset = utf8mb4 default collate = utf8mb4_unicode_ci;
-create table t_charset_8 (c1 varchar(20)) charset = binary; -- error
-create table t_charset_8 (c1 text) charset = binary;
-select pg_get_tabledef('t_charset_8');
+create table t_charset_8 (c1 varchar(20)) charset = binary;
+create table t_charset_28 (c1 text) charset = binary;
+select pg_get_tabledef('t_charset_28');
 create table t_charset_9 (c1 varchar(20)) character set = utf8mb4;
 create table t_charset_10(c1 varchar(20)) collate = utf8mb4_general_ci;
 create table t_charset_11(c1 varchar(20)) collate = utf8mb4_bin;
 create table t_charset_12(c1 varchar(20)) collate = binary;
-create table t_charset_12(c1 varchar(20)) default charset utf8mb4 default collate utf8mb4_unicode_ci;
+create table t_charset_29(c1 varchar(20)) default charset utf8mb4 default collate utf8mb4_unicode_ci;
 create table t_charset_13(c1 varchar(20)) collate = "binary";
 create table t_charset_16(c1 varchar(20)) charset = gbk collate = utf8mb4_general_ci; -- error
 create table t_charset_17(c1 varchar(20)) CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
@@ -88,8 +88,8 @@ create table t_charset_21(c1 varchar(20)) collate = utf8mb4_unicode_ci charset =
 create table t_charset_22(c1 varchar(20)) collate = "zh_CN.gbk" charset = utf8mb4 collate = utf8mb4_general_ci;
 create table t_charset_23(like t_charset_22);
 select r.relname,r.reloptions,a.attcollation from pg_class r,pg_attribute a where r.oid=a.attrelid and r.relname='t_charset_23';
-create table t_charset_24(c1 varchar(20) character set binary); -- error
-create table t_charset_24(c1 varchar(20) character set "binary"); -- error
+create table t_charset_24(c1 varchar(20) character set binary);
+create table t_charset_30(c1 varchar(20) character set "binary");
 create table t_charset_25(c1 varchar(20)) with(collate = 7);
 create table t_charset_26(c1 varchar(20)) charset utf8mb4 collate "aa_DJ.utf8"; -- error
 create table t_charset_26(c1 varchar(20)) collate "aa_DJ"; -- error
@@ -240,3 +240,32 @@ drop table cstore_charset_1;
 
 \c postgres
 drop database test_charset;
+
+create database testdd dbcompatibility = 'd' encoding = 'SQL_ASCII';
+\c testdd
+create extension shark;
+set d_format_behavior_compat_options = 'default_collation';
+create table test(id character(5));
+\d test
+set d_format_behavior_compat_options = '';
+create table test1(id character(5));
+\d test1
+
+\c postgres
+drop database testdd;
+
+create database testdd dbcompatibility = 'd' encoding = 'SQL_ASCII';
+\c testdd
+set d_format_behavior_compat_options = 'default_collation';
+create extension shark;
+
+\c postgres
+drop database testdd;
+
+create database testdd dbcompatibility = 'd' encoding = 'SQL_ASCII';
+\c testdd
+set d_format_behavior_compat_options = '';
+create extension shark;
+
+\c postgres
+drop database testdd;
