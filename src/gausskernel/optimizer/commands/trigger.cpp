@@ -3208,6 +3208,11 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
                 &buffer, estate->es_output_cid, LockTupleExclusive, LockWaitBlock, &tmfd, false, false, false,
                 estate->es_snapshot, tid, false);
 
+            if (tmresultp)
+                *tmresultp = inplacetest;
+            if (tmfdp)
+                *tmfdp = tmfd;
+
             switch (inplacetest) {
                 case TM_SelfUpdated:
                 case TM_SelfModified:
@@ -3242,6 +3247,12 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
                     if (IsolationUsesXactSnapshot())
                         ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                             errmsg("could not serialize access due to concurrent update")));
+
+                    if (tmresultp && estate->es_plannedstmt->commandType == CMD_MERGE) {
+                        ReleaseBuffer(buffer);
+                        result = NULL;
+                        break;
+                    }
                     elog(ERROR, "unexpected table_tuple_lock status: %u", inplacetest);
                     break;
 
