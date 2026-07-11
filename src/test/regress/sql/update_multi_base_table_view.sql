@@ -329,5 +329,49 @@ BEGIN;
 DELETE FROM tv12, tv123 WHERE tv12.b=tv123.b;
 ROLLBACK;
 
+DROP VIEW IF EXISTS multv1;
+DROP VIEW IF EXISTS multv2;
+DROP VIEW IF EXISTS multv3;
+DROP TABLE IF EXISTS emp;
+DROP TABLE IF EXISTS dept;
+
+CREATE TABLE dept(deptno INT NOT NULL, dname VARCHAR(14), loc VARCHAR(13), CONSTRAINT pk_dept PRIMARY KEY(deptno));
+INSERT INTO dept VALUES (10,'ACCOUNTING','NEW YORK'); 
+CREATE TABLE emp (empno int NOT NULL PRIMARY KEY, ename VARCHAR(10), job VARCHAR(9), deptno int, CONSTRAINT fk_deptno FOREIGN KEY(deptno) REFERENCES dept(deptno));
+INSERT INTO emp VALUES (7782,'CLARK','MANAGER',10);
+INSERT INTO emp VALUES (7934,'MILLER','CLERK',10);
+SELECT * FROM dept;
+SELECT * FROM emp;
+
+CREATE VIEW multv1 AS SELECT emp.empno, emp.ename, emp.job, dept.* FROM dept, emp WHERE dept.deptno = emp.deptno;
+SELECT * FROM multv1;
+INSERT INTO multv1 VALUES (9999, 'Mike', 'Engineer', 10, 'ACCOUNTING', 'NEW YORK');
+SELECT * FROM multv1;
+UPDATE multv1 SET ENAME='ABCD', JOB='SALESMAN' WHERE EMPNO=7934;
+SELECT * FROM multv1;
+DELETE FROM multv1 WHERE EMPNO=7934;
+SELECT * FROM multv1;
+
+SELECT * FROM dept;
+SELECT * FROM emp;
+
+CREATE VIEW multv2 AS SELECT * FROM emp JOIN UPPER('foo') AS f ON true;
+SELECT * FROM multv2;
+INSERT INTO multv2 VALUES(7783, 'ABC', 'MANAGER', 10, 'FOO');
+SELECT * FROM multv2;
+UPDATE multv2 SET f = 'a'; --error
+SELECT * FROM multv2;
+DELETE FROM multv2; --error
+SELECT * FROM multv2;
+
+CREATE VIEW multv3 AS SELECT emp.empno, emp.ename, emp.job, dept.* FROM dept CROSS JOIN emp;
+SELECT * FROM multv3;
+INSERT INTO multv3 VALUES (9999, 'Mike', 'Engineer', 10, 'ACCOUNTING', 'NEW YORK');
+SELECT * FROM multv3;
+UPDATE multv3 SET ENAME='ABCD', JOB='SALESMAN' WHERE EMPNO=7782;
+SELECT * FROM multv3;
+DELETE FROM multv3; --error
+SELECT * FROM multv3;
+
 \c postgres
 DROP DATABASE multi_tblv_bdat;
