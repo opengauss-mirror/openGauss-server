@@ -13867,7 +13867,13 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         definer =  PQgetvalue(defres, 0, PQfnumber(defres, "rolname"));
     }
 
-    /* get is defined using delimiter with mysql format */
+    /*
+     * If the server tagged the body with BEGIN_B_PROC (B-compat marker),
+     * splice in "    BEGIN     " so the emitted CREATE statement is valid
+     * SQL. Bodies flagged this way (functions or procedures) are emitted
+     * verbatim, so the CREATE must be wrapped in a delimiter // block to
+     * shield embedded semicolons from gsql's top-level scanner.
+     */
     if (pg_strncasecmp(prosrc, BEGIN_P_STR, BEGIN_P_LEN) == 0 ) {
         addDelimiter = true;
         errno_t rc = memcpy_s((char*)prosrc, strlen(prosrc), BEGIN_N_STR, BEGIN_P_LEN);
@@ -13894,6 +13900,25 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         if (proKind != NULL) {
             isProcedure = proKind[0] == PROKIND_PROCEDURE;
         }
+    }
+
+    /*
+     * B-compat procedures are dumped with their body inlined (not as a
+     * string literal), so embedded semicolons would otherwise be treated
+     * as top-level terminators by gsql. Wrap the CREATE in a delimiter //
+     * block. Functions still use string-literal bodies and don't need
+     * this — the old BEGIN_P_STR path is enough for them.
+     *
+     * Gated on encryptfile because plaintext dumps historically used the
+     * A-style trailing "/" terminator that gsql's B-compat parser
+     * accepts (and regression tests baseline on). The delimiter-block
+     * shape is only needed for encrypted dumps, where the reader stack
+     * cannot rely on per-line "delimiter //" recognition.
+     */
+    if (fout->encryptfile == true && isProcedure &&
+        (gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0 &&
+        hasSpecificExtension(fout, "dolphin")) {
+        addDelimiter = true;
     }
 
     isNullProargsrc = (proargsrc == NULL || proargsrc[0] == '\0');
@@ -13929,8 +13954,25 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         }
     } else {
         if (strcmp(prosrc, "-") != 0) {
-            if (!addDelimiter)
+            /*
+             * When we're wrapping in a delimiter // block for B-compat,
+             * skip AS only if the body starts with BEGIN — that shape
+             * (both CREATE PROCEDURE … BEGIN and CREATE FUNCTION … BEGIN)
+             * is what openGauss's B-compat grammar accepts unqualified.
+             * For any other prefix (DECLARE, IF, plpgsql code, etc.),
+             * AS is mandatory. Non-delimiter path keeps original behavior
+             * of always emitting AS.
+             */
+            const char* body = prosrc;
+            while (*body == ' ' || *body == '\t' || *body == '\n' || *body == '\r') {
+                body++;
+            }
+            bool bodyStartsWithBegin = pg_strncasecmp(body, "BEGIN", 5) == 0 &&
+                (body[5] == '\0' || body[5] == ' ' || body[5] == '\t' ||
+                 body[5] == '\n' || body[5] == '\r');
+            if (!addDelimiter || !bodyStartsWithBegin) {
                 appendPQExpBuffer(asPart, "AS ");
+            }
 
             /* procedure follows Oracle style, without any quoting */
             if (isProcedure || !isNullProargsrc) {
@@ -14167,6 +14209,18 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     } else {
          if (addDelimiter && IsPlainFormat()) {
             appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, "//\n");
+        } else if (fout->encryptfile && IsPlainFormat()) {
+            /*
+             * Encrypted plain-text dumps need the A-style "/"
+             * terminator so the CREATE has a proper block end -- matches
+             * the non-encrypted plain branch above and replaces the
+             * old post-hoc "/\n" that pg_backup_archiver.cpp used to
+             * inject for encrypted PROCEDURE entries. Custom/directory/
+             * tar archive formats keep the bare newline: gs_restore
+             * dispatches each statement to the server directly, where a
+             * lone "/" line is a syntax error.
+             */
+            appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, (isProcedure || (!isNullProargsrc)) ? "/\n" : "");
         } else {
             appendPQExpBuffer(q, "\n %s;\n%s", asPart->data, (isProcedure || (!isNullProargsrc)) ? "\n" : "");
         }
@@ -22464,6 +22518,12 @@ static void dumpTrigger(Archive* fout, TriggerInfo* tginfo)
     if (NULL != tginfo->tgdef) {
         if (tginfo->tgdb) {
             appendPQExpBuffer(query, "DROP FUNCTION %s ;\n", tginfo->tgfname);
+            /*
+             * B-compat trigger bodies contain embedded semicolons. Wrap in a
+             * delimiter // block only for BEGIN-style bodies; DECLARE…END
+             * bodies use an A-style trailing "/" terminator, since the
+             * B-compat grammar rejects "//" for those.
+             */
             if (tginfo->tgbodybstyle && IsPlainFormat())
                 appendPQExpBuffer(query, "delimiter //\n");
             appendBTriggerDef(query, tginfo->tgdef);
