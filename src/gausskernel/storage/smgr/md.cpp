@@ -1040,6 +1040,8 @@ void mdasyncread(SMgrRelation reln, ForkNumber forkNum, AioDispatchDesc_t **dLis
 int CompltrReadReq(void *aioDesc, long res)
 {
     AioDispatchDesc_t *desc = (AioDispatchDesc_t *)aioDesc;
+    ADIO_LOG_DB(ereport(LOG,
+        (errmsg("One async read post process type (AioRead) started"))));
 
     START_CRIT_SECTION();
     Assert(desc->blockDesc.descType == AioRead);
@@ -1060,6 +1062,8 @@ int CompltrReadReq(void *aioDesc, long res)
     AsyncCompltrUnpinBuffer((volatile void *)desc->blockDesc.bufHdr);
 
     END_CRIT_SECTION();
+    ADIO_LOG_DB(ereport(LOG,
+        (errmsg("One async read post process type (AioRead) done"))));
 
     /* Deallocate the AIO control block and I/O descriptor */
     adio_share_free(desc);
@@ -1202,6 +1206,9 @@ void mdasyncwrite(SMgrRelation reln, ForkNumber forkNumber, AioDispatchDesc_t **
 int CompltrWriteReq(void *aioDesc, long res)
 {
     AioDispatchDesc_t *desc = (AioDispatchDesc_t *)aioDesc;
+    ADIO_LOG_DB(ereport(LOG,
+        (errmsg("One async write post process type (%s) started",
+                desc->blockDesc.descType == AioWrite ? "AioWrite" : "AioVacummFull"))));
 
     START_CRIT_SECTION();
     if (desc->blockDesc.descType == AioWrite) {
@@ -1233,6 +1240,9 @@ int CompltrWriteReq(void *aioDesc, long res)
         }
     }
     END_CRIT_SECTION();
+    ADIO_LOG_DB(ereport(LOG,
+        (errmsg("One async write post process type (%s) done",
+                desc->blockDesc.descType == AioWrite ? "AioWrite" : "AioVacummFull"))));
 
     /* Deallocate the AIO control block and I/O descriptor */
     adio_share_free(desc);
