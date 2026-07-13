@@ -2860,6 +2860,8 @@ typedef struct AggState {
     AggStatePerGroup all_pergroups; /* array of first ->pergroups, than * ->hash_pergroup */
 
     TupleTableSlot* ndp_slot; /* slot for load ndp data */
+    int64 agg_input_rownum; /* per-input ordinal for ROWNUM-in-agg-arg */
+    bool   has_rownum_arg;   /* true if targetlist/qual references ROWNUM */
 } AggState;
 
 /* ----------------

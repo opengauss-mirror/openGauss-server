@@ -180,6 +180,7 @@ test: array_compatible_a
 test: single_node_insert xc_rownum
 test: single_node_temple
 test: single_node_create_function_1
+test: rownum_agg_test
 #test: single_node_create_type
 #test: single_node_create_table
 #test: single_node_create_function_2
@@ -549,4 +550,3 @@ test: pgstat_opt
 # test global sequence cache
 test: session_sequence_cache
 test: global_sequence_cache
-

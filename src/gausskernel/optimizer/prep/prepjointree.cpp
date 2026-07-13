@@ -1760,6 +1760,24 @@ static bool is_simple_subquery(Query* subquery, RangeTblEntry *rte, JoinExpr *lo
     if (ContainRownumQual(subquery)) {
         return false;
     }
+
+    /*
+     * Don't pull up a subquery whose targetList references ROWNUM.
+     * Pull-up would merge the Rownum expression into the parent query's
+     * targetlist, rebinding it to the parent's projecting node and
+     * re-evaluating it in the parent's row order.
+     * Keeping the subquery level intact lets ROWNUM be computed in
+     * the subquery's own input order and carried upward as a plain column
+     * this makes the Oracle-compatible idiom
+     *     select q.rn, ... from (select rownum as rn, t.* from t) q order by
+     * yield the subquery (scan) order rownum instead of the parent's (e.g.
+     * post-sort) order. Strictly conservative: it only skips an optimization,
+     * it can never change a query's results.
+     */
+    if (expression_contains_rownum((Node*)subquery->targetList)) {
+        return false;
+    }
+
     if (subquery->hasAggs || subquery->hasWindowFuncs || subquery->groupClause || subquery->groupingSets ||
         subquery->havingQual || subquery->sortClause || subquery->distinctClause || subquery->limitOffset ||
         subquery->limitCount || subquery->hasForUpdate || subquery->cteList)
