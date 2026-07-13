@@ -1,0 +1,291 @@
+label: 资源池化
+isManual: true
+sections:
+  - label: 资源池化特性说明
+    sections:
+      - label: 资源池化概述
+        href: ./resource_pooling_overview.md
+      - label: 资源池化安装与使用
+        href: ./resource_pooling_installation_and_usage.md
+  - label: DSS功能增强
+    href: ./feature_enhancement.md
+  - label: DSS线程池
+    href: ./dss_thread_pool.md
+  - label: MES灵衢内存语义通信优化
+    href: ./mes_ub_shared_memory_communication_optimization.md
+  - label: 事务快照UB访问加速特性简介
+    href: ./ub_transaction_snapshot_acceleration_introduction.md
+  - label: 资源池化高可用系统配置
+    href: ./resource_pooling_ha_system_configuration.md    
+  - label: 资源池化主备双集群容灾
+    sections:
+      - label: 概述
+        href: ./resource_pooling_active_standby_dual_cluster_dr.md
+      - label: 极致RTO按需回放
+        href: ./ultimate_rto_on_demand_playback.md
+      - label: 资源池化可维护性增强
+        sections:
+          - label: gs_collector适配资源池化
+            href: ./gs_collector_adaptation_resource_pooling.md
+          - label: DMS资源统计函数
+            href: ./dms_resource_statistics_function.md
+          - label: gs_probackup适配资源池化
+            href: ./gs_probackup_adaptation_resource_pooling.md
+          - label: cm支持双集群备集群switchover
+            href: ./cm_supports_dual_cluster_backup_clusters_switchover.md
+          - label: 资源池化支持主备参数同步
+            href: ./resource_pooling_support_for_primary_and_backup_parameter_synchronization.md
+          - label: 资源池化XLOG支持归档
+            href: ./resource_pooling_xlog_support_archive.md
+          - label: CM SysSentry故障检测
+            href: ./cm_syssentry_fault_detection.md
+      - label: 在线reform
+        href: ./online_reform.md
+      - label: 在线failover
+        href: ./online_ddl_adapt_failover.md
+  - label: 常见故障定位指南
+    sections:
+      - label: 常见故障定位手段
+        href: ./common_fault_locating_methods.md
+      - label: 常见故障定位案例
+        sections:
+          - label: core问题定位
+            href: ./core_fault_locating.md
+          - label: TPCC运行时，注入磁盘满故障，TPCC卡住的问题
+            href: ./when_the_tpc_c_is_running_and_a_disk_to_be_injected_is_full_the_tpc_c_stops_responding.md
+          - label: 备机处于need repair(WAL)状态问题
+            href: ./standby_node_in_the_need_repair_wal_state.md
+          - label: 内存不足问题
+            href: ./insufficient_memory.md
+          - label: 服务启动失败
+            href: ./service_startup_failure.md
+          - label: 出现“Error:No space left on device”提示
+            href: ./error_no_space_left_on_device_is_displayed.md
+          - label: 在XFS文件系统中，使用du命令查询数据文件大小大于文件实际大小
+            href: ./after_you_run_the_du_command_to_query_data_file_size_in_the_xfs_file_system_the_query_result_is_grea.md
+          - label: 在XFS文件系统中，出现文件损坏
+            href: ./file_is_damaged_in_the_xfs_file_system.md
+          - label: switchover操作时，主机降备卡住
+            href: ./primary_node_is_hung_in_demoting_during_a_switchover.md
+          - label: 磁盘空间达到阈值，数据库只读
+            href: ./disk_space_usage_reaches_the_threshold_and_the_database_becomes_read_only.md
+          - label: 分析查询语句运行状态
+            href: ./analyzing_the_status_of_a_query_statement.md
+          - label: 分析查询语句长时间运行的问题
+            href: ./slow_response_to_a_query_statement.md
+          - label: 强制结束指定的问题会话
+            href: ./forcibly_terminating_a_session.md
+          - label: 分析查询语句是否被阻塞
+            href: ./analyzing_whether_a_query_statement_is_blocked.md            
+          - label: 分析查询效率异常降低的问题
+            href: ./low_query_efficiency.md
+          - label: 执行 SQL 语句时，提示 Lock wait timeout
+            href: ./lock_wait_timeout_is_displayed_when_a_user_executes_an_sql_statement.md
+          - label: VACUUM FULL一张表后，表文件大小无变化
+            href: ./table_size_does_not_change_after_vacuum_full_is_executed_on_the_table.md
+          - label: 执行修改表分区操作时报错
+            href: ./an_error_is_reported_when_the_table_partition_is_modified.md
+          - label: 不同用户查询同表显示数据不同
+            href: ./different_data_is_displayed_for_the_same_table_queried_by_multiple_users.md
+          - label: 修改索引时只调用索引名提示索引不存在
+            href: ./when_a_user_specifies_only_an_index_name_to_modify_the_index_a_message_indicating_that_the_index_doe.md
+          - label: 重建索引失败
+            href: ./reindexing_fails.md
+          - label: 业务运行时整数转换错
+            href: ./an_error_occurs_during_integer_conversion.md
+          - label: 高并发报错“too many clients already”或无法创建线程
+            href: ./too_many_clients_already_is_reported_or_threads_failed_to_be_created_in_high_concurrency_scenarios.md
+          - label: btree 索引故障情况下应对策略
+            href: ./b_tree_index_faults.md
+          - label: TPCC高并发长稳运行因脏页刷盘效率导致性能下降
+            href: ./performance_deterioration_caused_by_dirty_page_flushing_efficiency_during_tpc_c_high_concurrency_long_term_stable_running.md
+          - label: 共享内存泄露问题
+            href: ./shared_memory_leakage.md
+          - label: 谓词下推引起的查询报错
+            href: ./a_query_error_is_reported_due_to_predicate_pushdown.md
+  - label: 常见故障案例（资源池化）
+    sections:
+      - label: 资源池化企业版安装阶段问题
+        sections:
+          - label: 因CheckOs检测项不通过导致预安装失败问题
+            href: ./pre_installation_failure_due_to_checkos_check_not_passing.md
+          - label: 因OpenSSL异常工作导致安装失败问题
+            href: ./installation_failure_due to_openssl_malfunction.md
+          - label: 因xml参数缺失或写入错误导致的预安装失败问题
+            href: ./pre_installation_failure_caused_by_missing_or_incorrectly_written_xml_parameters.md
+          - label: 因安装目录已存在导致的安装已存在问题
+            href: ./installation_already_exists_due_to_the_installation_directory_already_being_present.md
+          - label: 因环境变量GAUSS_ENV=2导致的安装已存在问题
+            href: ./installation_already_exists_due_to_environment_variable_gauss_env_2.md
+          - label: 因缺少glibc等软件依赖导致预安装或安装失败问题
+            href: ./pre_installation_or_installation_failure_due_to_missing_software_dependencies_such_as_glibc.md
+          - label: 因python缺少--enable-shared编译参数导致安装失败的问题
+            href: ./installation_failure_due_to_python_missing_the_enable_shared_compilation_parameter.md
+          - label: 因自动化建立互信失败导致的预安装失败问题
+            href: ./pre_installation_failure_due_to_automated_mutual_trust_establishment_failure.md
+          - label: 因节点间互信未建立导致安装失败问题
+            href: ./installation_failure_due_to_unestablished_mutual_trust_between_nodes.md
+          - label: 因预安装使用默认参数导致安装失败问题
+            href: ./installation_failure_due_to_using_default_parameters_during_pre_installation.md
+          - label: 因三节点盘未解注册被两节点使用导致安装失败的问题
+            href: ./installation_failure_caused_by_a_three_node_disk_being_used_by_two_nodes_without_being_deregistered.md
+          - label: 因DSS启动加载共享盘失败导致数据库安装失败的问题
+            href: ./database_installation_failure_due_to_dss_failing_to_load_the_shared_disk_during_startup.md
+          - label: 因磁盘权限过高导致鉴权失败CM不可用的问题
+            href: ./cm_unavailability_due_to_authentication_failure_caused_by_excessive_disk_permissions.md            
+          - label: 因磁盘属主异常导致安装失败的问题
+            href: ./installation_failure_due_to_abnormal_disk_ownership.md
+          - label: 因磁盘满导致安装失败的问题
+            href: ./installation_failure_due_to_insufficient_disk_space.md
+          - label: 因端口冲突导致安装失败的问题
+            href: ./installation_failure_due_to_port_conflicts.md
+          - label: 因磁阵写入权限异常导致资源池化存储双集群安装失败的问题
+            href: ./resource_pool_storage_dual_cluster_installation_failure_due_to_abnormal_disk_array_write_permissions.md
+          - label: 因CM盘符不一致导致安装启动失败的问题
+            href: ./installation_startup_failure_due_to_inconsistent_cm_drive_letters.md
+      - label: 资源池化企业版使用阶段问题
+        sections:
+          - label: 因hostname文件权限异常导致设置参数失败的问题
+            href: ./failure_to_set_parameters_due_to_abnormal_hostname_file_permissions.md
+          - label: 因 pg_hba.confg 中参数配置问题导致启动或重启集群失败的问题
+            href: ./cluster_startup_failure_due_to_incorrect_parameters_in_pg_hba_conf.md
+          - label: 因postgres.conf中参数不符合标准导致启动或重启集群失败的问题
+            href: ./cluster_startup_failure_due_to_incorrect_parameters_in_postgres_conf.md
+          - label: 因随机端口冲突导致集群启动失败的问题
+            href: ./cluster_startup_failure_due_to_random_port_conflicts.md
+          - label: 因信号量不足问题导致启动或重启集群失败的问题
+            href: ./cluster_startup_failure_due_to_insufficient_semaphores.md
+          - label: 因共享内存不足导致集群启动失败的问题
+            href: ./cluster_startup_failure_due_to_insufficient_shared_memory.md
+          - label: 因内存不足问题导致启动或重启集群失败的问题
+            href: ./cluster_startup_failure_due_to_insufficient_memory.md
+          - label: 因控制文件异常导致集群启动失败的问题
+            href: ./cluster_startup_failure_due_to_abnormal_control_file.md
+          - label: 因文件、目录不存在导致集群启动失败的问题
+            href: ./cluster_startup_failure_due_to_missing_files_or_directories.md
+          - label: 因文件权限异常导致集群启动失败的问题
+            href: ./cluster_startup_failure_due_to_abnormal_file_permissions.md
+          - label: 因目录权限异常导致集群启动失败的问题
+            href: ./cluster_startup_failure_due_to_abnormal_directory_permissions.md
+          - label: 因磁阵权限异常导致集群启动失败的问题
+            href: ./cluster_startup_failure_due_to_abnormal_disk_array_permissions.md
+          - label: 因磁阵断连导致集群启动失败的问题
+            href: ./cluster_startup_failure_due_to_disk_array_disconnection.md
+          - label: 因端口冲突导致集群启动失败的问题
+            href: ./cluster_startup_failure_due_to_port_conflicts.md
+          - label: 因DSS套接字文件丢失导致连接失败的问题
+            href: ./connection_failure_due_to_missing_dss_socket_file.md
+          - label: 因DSS套接字文件权限异常导致连接失败的问题
+            href: ./connection_failure_due_to_abnormal_dss_socket_file_permissions.md
+          - label: 因共享盘权限异常导致连接失败的问题
+            href: ./connection_failure_due_to_abnormal_shared_disk_permissions.md
+          - label: 因数据库套接字文件丢失导致连接失败的问题
+            href: ./connection_failure_due_to_missing_database_socket_file.md
+          - label: 因数据库套接字文件异常导致连接失败的问题
+            href: ./connection_failure_due_to_abnormal_database_socket_file.md
+          - label: 因数据库最大连接数超限导致连接失败的问题
+            href: ./connection_failure_due_to_database_maximum_connections_exceeded.md
+          - label: 因磁阵IO慢导致性能异常的问题
+            href: ./performance_anomaly_due_to_slow_disk_array_io.md
+          - label: 因磁阵hang住导致集群业务卡住的问题
+            href: ./cluster_service_hang_due_to_disk_array_being_stuck.md
+          - label: 因账号密码错误导致连接失败的问题
+            href: ./connection_failure_due_to_incorrect_account_password.md
+          - label: 因连接认证配置错误导致连接失败的问题
+            href: ./connection_failure_due_to_incorrect_connection_authentication_configuration.md
+          - label: 因报告超时导致节点被踢出的问题
+            href: ./node_being_kicked_out_due_to_report_timeout.md
+          - label: 因网络原因导致集群无法启动的问题
+            href: ./cluster_unable_to_start_due_to_network_issues.md
+          - label: 因本地盘空间不足导致节点进入ReadOnly状态的问题
+            href: ./node_entering_readonly_state_due_to_insufficient_local_disk_space.md
+          - label: 因共享盘空间不足导致集群进入ReadOnly状态的问题
+            href: ./cluster_entering_readonly_state_due_to_insufficient_shared_disk_space.md
+          - label: 因心跳超时导致节点被踢出的问题
+            href: ./node_being_kicked_out_due_to_heartbeat_timeout.md
+          - label: 因端口冲突导致DMS初始化失败的问题
+            href: ./dms_initialization_failure_due_to_port_conflic.md
+          - label: 因本地磁盘空间不足导致业务执行失败的问题
+            href: ./business_execution_failure_due_to_insufficient_local_disk_space.md
+          - label: 因按需回放阶段发生故障导致回放模式变更为极致RTO的问题
+            href: ./issue_of_replay_mode_changing_to_extreme_rto_due_to_failure_during_on_demand_replay_phase.md
+          - label: 因网络断连导致资源池化环境运行失败的问题
+            href: ./resource_pool_environment_operation_failure_due_to_network_disconnection.md                       
+          - label: 因按需回放redo阶段执行部分DDL报错的问题
+            href: ./error_when_executing_certain_ddl_statements_during_on_demand_redo_replay_phase.md
+          - label: 因共享内存被清理导致资源池化环境运行失败的问题
+            href: ./resource_pool_environment_operation_failure_due_to_shared_memory_being_cleared.md
+          - label: 因内存不足导致资源池化环境运行失败的问题
+            href: ./resource_pool_environment_operation_failure_due_to_insufficient_memory.md
+          - label: openGauss无法拉起的常见原因及分析手段
+            href: ./common_causes_and_analysis_methods_for_opengauss_failing_to_start.md
+          - label: 停库或倒换过程中做checkpoint慢的问题定位和分析
+            href: ./troubleshooting_and_analysis_of_slow_checkpoint_during_database_shutdown_or_switchover.md
+          - label: 因数据库启动首轮Reform失败导致节点退出的问题
+            href: ./node_exit_due_to_failure_of_the_first_round_of_reform_during_database_startup.md
+          - label: 因switchover转移锁后，升主节点升主失败，导致原主自动退出的问题
+            href: ./automatic_exit_of_the_original_primary_due_to_the_new_primary_failing_to_take_over_after_lock_transfer_during_switchover.md
+          - label: 因其他报错导致事务回滚的问题
+            href: ./transaction_rollback_due_to_other_errors.md
+          - label: 因死锁导致事务回滚的问题
+            href: ./transaction_rollback_due_to_deadlock.md
+          - label: 因磁阵网卡down导致节点被踢出的问题
+            href: ./node_being_kicked_out_due_to_disk_array_network_card_being_down.md
+          - label: 因锁超时导致事务回滚的问题
+            href: ./transaction_rollback_due_to_lock_timeout.md
+          - label: 因环境中存在逻辑复制槽残留导致远程增量备份失败问题
+            href: ./remote_incremental_backup_failure_due_to_residual_logical_replication_slots_in_the_environment.md
+          - label: 因系统资源不足导致gs_probackup中全量备份core的问题
+            href: ./core_dump_during_full_backup_in_gs_probackup_due_to_insufficient_system_resources.md
+          - label: 因重建集群备机失败导致备份恢复失败的问题
+            href: ./backup_and_recovery_failure_due_to_failure_in_rebuilding_the_standby_node_of_the_cluster.md
+          - label: 因后台线程退出失败导致集群Failover流程卡住的问题
+            href: ./cluster_failover_process_hang_due_to_background_thread_failing_to_exit.md
+          - label: 因Voting盘无权限导致集群无法启动的问题
+            href: ./cluster_unable_to_start_due_to_lack_of_permissions_for_the_voting_disk.md
+          - label: 因limit配置过小导致安装失败的问题
+            href: ./installation_failure_due_to_limit_configuration_being_too_small.md
+          - label: 因om_monitor定时任务被清理导致节点Down的问题
+            href: ./node_down_due_to_the_om_monitor_scheduled_task_being_cleared.md
+          - label: 因不满足多数派原则导致集群无法启动的问题
+            href: ./cluster_unable_to_start_due_to_not_meeting_the_majority_principle.md
+          - label: 因互信文件丢失导致集群启停失败的问题
+            href: ./cluster_startup_shutdown_failure_due_to_missing_mutual_trust_files.md
+          - label: 因处于回放状态导致停库时间过长的问题
+            href: ./prolonged_database_shutdown_time_due_to_being_in_replay_state.md
+          - label: 因执行pause导致仲裁不响应的问题
+            href: ./arbitration_unresponsive_due_to_executing_pause.md
+          - label: 因拓容DSS导致集群重启的问题
+            href: ./cluster_restart_due_to_dss_expansion.md
+          - label: 因数据库僵死导致节点处于Starting的原因
+            href: ./reasons_for_node_being_in_starting_state_due_to_database_hang.md
+          - label: 因资源实例状态异常导致节点被clean重启的问题
+            href: ./node_being_cleaned_and_restarted_due_to_abnormal_resource_instance_state.md
+          - label: 因集群重启导致主节点变更的问题
+            href: ./primary_node_change_due_to_cluster_restart.md
+          - label: 因实例状态检查周期性导致启动成功回显过慢的问题
+            href: ./slow_startup_success_feedback_due_to_periodic_instance_status_checks.md
+          - label: 因资源池化本地文件系统故障导致数据库报错的问题
+            href: ./database_error_due_to_local_file_system_failure_in_resource_pool_environment.md
+          - label: 因DSS组件perctrl无权限导致数据库启动失败的问题
+            href: ./database_startup_failure_due_to_lack_of_permissions_for_dss_component_perctrl.md
+          - label: 因磁阵繁忙不可访问导致集群启动失败的问题
+            href: ./cluster_startup_failure_due_to_disk_array_being_busy_and_inaccessible.md
+          - label: 因端口冲突导致dssserver启动失败的问题
+            href: ./dssserver_startup_failure_due_to_port_conflict.md
+          - label: 因redo日志过多导致的failover恢复时间过长问题
+            href: ./prolonged_failover_recovery_time_due_to_excessive_redo_logs.md
+          - label: 因redo日志过多强制停机导致集群重启超时问题
+            href: ./cluster_restart_timeout_due_to_forced_shutdown_with_excessive_redo_logs.md
+          - label: 因delayarbitratemaxclustertimeout参数设置为0导致集群仲裁失效问题
+            href: ./cluster_arbitration_failure_due_to_delay_arbitrate_max_cluster_timeout_parameter_being_set_to_0.md
+          - label: 因CM不满足多数派原则导致集群无法使用的问题
+            href: ./cluster_unusable_due_to_cm_not_meeting_the_majority_principle.md
+          - label: 一主两备集群停掉两个节点数据库异常
+            href: ./database_anomaly_in_a_one_primary_two_standby_cluster_after_shutting_down_two_nodes.md            
+      - label: 资源池化卸载阶段问题
+        sections:
+          - label: 因部分目录无权限导致卸载失败问题
+            href: ./uninstallation_failure_due_to_lack_of_permissions_for_some_directories.md
+          - label: 因部分节点卸载失败导致卸载失败问题
+            href: ./uninstallation_failure_due_to_failure_on_some_nodes.md
