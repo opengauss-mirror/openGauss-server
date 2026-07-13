@@ -1118,6 +1118,12 @@ select TRY_CONVERT(varchar(10), CAST(4936.56 AS MONEY), 0);
  4936.56
 (1 row)
 
+select TRY_CONVERT(bigint, '') AS result;
+ result 
+--------
+      0
+(1 row)
+
 select TRY_CAST('08/25/2017' AS date);
  shark_try_cast_to_any 
 -----------------------
@@ -1231,6 +1237,46 @@ SELECT TRY_CONVERT(VARCHAR, '1234567890123456789012345678901111');
   shark_conv_helper_to_varchar  
 --------------------------------
  123456789012345678901234567890
+(1 row)
+
+select 0+cast('-0.20' as char(1));
+ ?column? 
+----------
+        0
+(1 row)
+
+select 0+cast('+0.20' as char(1));
+ ?column? 
+----------
+        0
+(1 row)
+
+select 0+cast('*0.20' as char(1));
+ERROR:  invalid input syntax for type bigint: "*"
+select 0+cast('\0.20' as char(1));
+ERROR:  invalid input syntax for type bigint: "\"
+select 0+cast(' +      ' as bigint);
+ ?column? 
+----------
+        0
+(1 row)
+
+select 0+cast(' -      ' as bigint);
+ ?column? 
+----------
+        0
+(1 row)
+
+select 0+cast('       +' as bigint);
+ ?column? 
+----------
+        0
+(1 row)
+
+select 0+cast('-       ' as bigint);
+ ?column? 
+----------
+        0
 (1 row)
 
 reset search_path;
