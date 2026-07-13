@@ -303,7 +303,7 @@ end pac_PLArray_Case0021;
 WARNING:  Type typ_plarray_3 does not exist.
 WARNING:  The header information of function p_plarray_2 is not defined.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 create or replace package body pac_PLArray_Case0021 is
 procedure p_PLArray_1() is
 begin
@@ -326,7 +326,7 @@ CONTEXT:  compilation of PL/pgSQL package near line 1
 WARNING:  syntax error at or near "(" when compile function p_plarray_2(undefined)
 DETAIL:  N/A
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package Body created with compilation erors.
+WARNING:  Package Body created with compilation errors.
 declare
     type typ_PLArray_1 is varray(3) of varchar(50);
     type typ_PLArray_2 is varray(3) of typ_PLArray_1;

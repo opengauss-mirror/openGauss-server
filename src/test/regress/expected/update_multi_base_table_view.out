@@ -540,5 +540,146 @@ BEGIN;
 DELETE FROM tv12, tv123 WHERE tv12.b=tv123.b;
 ERROR:  update/delete on a table in a view's subquery is not supported in B-format database
 ROLLBACK;
+DROP VIEW IF EXISTS multv1;
+NOTICE:  view "multv1" does not exist, skipping
+DROP VIEW IF EXISTS multv2;
+NOTICE:  view "multv2" does not exist, skipping
+DROP VIEW IF EXISTS multv3;
+NOTICE:  view "multv3" does not exist, skipping
+DROP TABLE IF EXISTS emp;
+NOTICE:  table "emp" does not exist, skipping
+DROP TABLE IF EXISTS dept;
+NOTICE:  table "dept" does not exist, skipping
+CREATE TABLE dept(deptno INT NOT NULL, dname VARCHAR(14), loc VARCHAR(13), CONSTRAINT pk_dept PRIMARY KEY(deptno));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_dept" for table "dept"
+INSERT INTO dept VALUES (10,'ACCOUNTING','NEW YORK'); 
+CREATE TABLE emp (empno int NOT NULL PRIMARY KEY, ename VARCHAR(10), job VARCHAR(9), deptno int, CONSTRAINT fk_deptno FOREIGN KEY(deptno) REFERENCES dept(deptno));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "emp_pkey" for table "emp"
+INSERT INTO emp VALUES (7782,'CLARK','MANAGER',10);
+INSERT INTO emp VALUES (7934,'MILLER','CLERK',10);
+SELECT * FROM dept;
+ deptno |   dname    |   loc    
+--------+------------+----------
+     10 | ACCOUNTING | NEW YORK
+(1 row)
+
+SELECT * FROM emp;
+ empno | ename  |   job   | deptno 
+-------+--------+---------+--------
+  7782 | CLARK  | MANAGER |     10
+  7934 | MILLER | CLERK   |     10
+(2 rows)
+
+CREATE VIEW multv1 AS SELECT emp.empno, emp.ename, emp.job, dept.* FROM dept, emp WHERE dept.deptno = emp.deptno;
+SELECT * FROM multv1;
+ empno | ename  |   job   | deptno |   dname    |   loc    
+-------+--------+---------+--------+------------+----------
+  7782 | CLARK  | MANAGER |     10 | ACCOUNTING | NEW YORK
+  7934 | MILLER | CLERK   |     10 | ACCOUNTING | NEW YORK
+(2 rows)
+
+INSERT INTO multv1 VALUES (9999, 'Mike', 'Engineer', 10, 'ACCOUNTING', 'NEW YORK');
+ERROR:  cannot insert into view "multv1"
+DETAIL:  Views that do not select from a single table or view are not automatically updatable.
+HINT:  To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule.
+SELECT * FROM multv1;
+ empno | ename  |   job   | deptno |   dname    |   loc    
+-------+--------+---------+--------+------------+----------
+  7782 | CLARK  | MANAGER |     10 | ACCOUNTING | NEW YORK
+  7934 | MILLER | CLERK   |     10 | ACCOUNTING | NEW YORK
+(2 rows)
+
+UPDATE multv1 SET ENAME='ABCD', JOB='SALESMAN' WHERE EMPNO=7934;
+SELECT * FROM multv1;
+ empno | ename |   job    | deptno |   dname    |   loc    
+-------+-------+----------+--------+------------+----------
+  7782 | CLARK | MANAGER  |     10 | ACCOUNTING | NEW YORK
+  7934 | ABCD  | SALESMAN |     10 | ACCOUNTING | NEW YORK
+(2 rows)
+
+DELETE FROM multv1 WHERE EMPNO=7934;
+SELECT * FROM multv1;
+ empno | ename |   job   | deptno |   dname    |   loc    
+-------+-------+---------+--------+------------+----------
+  7782 | CLARK | MANAGER |     10 | ACCOUNTING | NEW YORK
+(1 row)
+
+SELECT * FROM dept;
+ deptno |   dname    |   loc    
+--------+------------+----------
+     10 | ACCOUNTING | NEW YORK
+(1 row)
+
+SELECT * FROM emp;
+ empno | ename |   job   | deptno 
+-------+-------+---------+--------
+  7782 | CLARK | MANAGER |     10
+(1 row)
+
+CREATE VIEW multv2 AS SELECT * FROM emp JOIN UPPER('foo') AS f ON true;
+SELECT * FROM multv2;
+ empno | ename |   job   | deptno |  f  
+-------+-------+---------+--------+-----
+  7782 | CLARK | MANAGER |     10 | FOO
+(1 row)
+
+INSERT INTO multv2 VALUES(7783, 'ABC', 'MANAGER', 10, 'FOO');
+ERROR:  cannot insert into view "multv2"
+DETAIL:  Views that do not select from a single table or view are not automatically updatable.
+HINT:  To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule.
+SELECT * FROM multv2;
+ empno | ename |   job   | deptno |  f  
+-------+-------+---------+--------+-----
+  7782 | CLARK | MANAGER |     10 | FOO
+(1 row)
+
+UPDATE multv2 SET f = 'a'; --error
+ERROR:  cannot determine an exact row for the view to update or delete
+SELECT * FROM multv2;
+ empno | ename |   job   | deptno |  f  
+-------+-------+---------+--------+-----
+  7782 | CLARK | MANAGER |     10 | FOO
+(1 row)
+
+DELETE FROM multv2; --error
+ERROR:  cannot determine an exact row for the view to update or delete
+SELECT * FROM multv2;
+ empno | ename |   job   | deptno |  f  
+-------+-------+---------+--------+-----
+  7782 | CLARK | MANAGER |     10 | FOO
+(1 row)
+
+CREATE VIEW multv3 AS SELECT emp.empno, emp.ename, emp.job, dept.* FROM dept CROSS JOIN emp;
+SELECT * FROM multv3;
+ empno | ename |   job   | deptno |   dname    |   loc    
+-------+-------+---------+--------+------------+----------
+  7782 | CLARK | MANAGER |     10 | ACCOUNTING | NEW YORK
+(1 row)
+
+INSERT INTO multv3 VALUES (9999, 'Mike', 'Engineer', 10, 'ACCOUNTING', 'NEW YORK');
+ERROR:  cannot insert into view "multv3"
+DETAIL:  Views that do not select from a single table or view are not automatically updatable.
+HINT:  To enable inserting into the view, provide an INSTEAD OF INSERT trigger or an unconditional ON INSERT DO INSTEAD rule.
+SELECT * FROM multv3;
+ empno | ename |   job   | deptno |   dname    |   loc    
+-------+-------+---------+--------+------------+----------
+  7782 | CLARK | MANAGER |     10 | ACCOUNTING | NEW YORK
+(1 row)
+
+UPDATE multv3 SET ENAME='ABCD', JOB='SALESMAN' WHERE EMPNO=7782;
+SELECT * FROM multv3;
+ empno | ename |   job    | deptno |   dname    |   loc    
+-------+-------+----------+--------+------------+----------
+  7782 | ABCD  | SALESMAN |     10 | ACCOUNTING | NEW YORK
+(1 row)
+
+DELETE FROM multv3; --error
+ERROR:  cannot determine an exact row for the view to update or delete
+SELECT * FROM multv3;
+ empno | ename |   job    | deptno |   dname    |   loc    
+-------+-------+----------+--------+------------+----------
+  7782 | ABCD  | SALESMAN |     10 | ACCOUNTING | NEW YORK
+(1 row)
+
 \c postgres
 DROP DATABASE multi_tblv_bdat;

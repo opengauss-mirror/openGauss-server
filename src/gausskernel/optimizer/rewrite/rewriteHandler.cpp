@@ -4079,12 +4079,13 @@ static int ReplaceResultTargetEntry(Query* parsetree, Query* viewquery, List* rt
 
     if (parsetree->commandType == CMD_DELETE) {
         baseRtIndex = GetNewResultRelation((Node*)(viewquery->jointree), rtables);
-        if (baseRtIndex < 1) {
-            ereport(ERROR,
-                (errmsg("cannot determine an exact row for the view to update or delete")));
-        }
     } else if (parsetree->commandType == CMD_UPDATE || parsetree->commandType == CMD_INSERT) {
         baseRtIndex = FindBaseRteForInsertOrUpdate(parse_targetlist, view_targetlist, resultRelation);
+    }
+
+    if ((parsetree->commandType == CMD_DELETE || parsetree->commandType == CMD_UPDATE) && baseRtIndex < 1) {
+        ereport(ERROR,
+            (errmsg("cannot determine an exact row for the view to update or delete")));
     }
 
     base_rte = rt_fetch(baseRtIndex, rtables);

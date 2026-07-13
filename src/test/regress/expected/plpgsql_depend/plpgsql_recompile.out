@@ -476,14 +476,14 @@ end pkg1;
 WARNING:  Type tqqq does not exist.
 WARNING:  The header information of function p1 is not defined.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 create or replace package pkg2 is
 type tqqq is record (col1 int, col2 text, col3 varchar);
 procedure p1(param pkg1.tttt);
 end pkg2;
 /
 --?.*
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 create or replace package body pkg2 is
 procedure p1(param pkg1.tttt) is
 begin
@@ -492,7 +492,7 @@ end;
 end pkg2;
 /
 --?.*
-WARNING:  Package Body created with compilation erors.
+WARNING:  Package Body created with compilation errors.
 call pkg2.p1((1,'a'));
 INFO:  call param: (1,a)
  p1 

@@ -48,7 +48,7 @@ QUERY:   PACKAGE  DECLARE  type r1 is record(a int, b sr);
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='S' and object_oid in (
     select Oid from gs_package where pkgname='pkg' and pkgnamespace = (
@@ -112,7 +112,7 @@ QUERY:   PACKAGE  DECLARE  type r2 is record(a int, b sr);
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 create or replace package pkg
 is
     type r1 is record(a int, b pkg2.r2);
@@ -121,7 +121,7 @@ end pkg;
 /
 --?.*
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='S' and object_oid in (select Oid from gs_package where pkgname='pkg' and pkgnamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -236,7 +236,7 @@ QUERY:   PACKAGE  DECLARE  type tf1 is table of undefsr index by binary_integer;
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='S' and object_oid in (select Oid from gs_package where pkgname='pkg' and pkgnamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -352,7 +352,7 @@ QUERY:   PACKAGE  DECLARE  type varr1 is varray(1024) of undefsr;
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='S' and object_oid in (select Oid from gs_package where pkgname='pkg' and pkgnamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -468,7 +468,7 @@ QUERY:   PACKAGE  DECLARE  type tf1 is table of pkg2.r1 index by binary_integer;
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='S' and object_oid in (select Oid from gs_package where pkgname='pkg' and pkgnamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -578,7 +578,7 @@ QUERY:   PACKAGE  DECLARE  type t_arr_sr is varray(999) of pkg2.r1;
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='S' and object_oid in (select Oid from gs_package where pkgname='pkg' and pkgnamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -683,7 +683,7 @@ WARNING:  relation "undefstu" does not exist when parse word.
 CONTEXT:  compilation of PL/pgSQL package near line 1
 WARNING:  Type r1 depends on an undefined type.
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='S' and object_oid in (select Oid from gs_package where pkgname='pkg' and pkgnamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -868,7 +868,7 @@ QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c undefStu.undefname%Type);
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 -- valid is true
 select valid from pg_object where object_type='S' and object_oid in (select Oid from gs_package where pkgname='pkg' and pkgnamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -916,7 +916,7 @@ QUERY:   PACKAGE  DECLARE  type r1 is record(a int, c stu.undefname%Type);
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='S' and object_oid in (select Oid from gs_package where pkgname='pkg' and pkgnamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -1394,7 +1394,7 @@ QUERY:   PACKAGE  DECLARE  type t_arr_sr is varray(999) of undefsr;
     end;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package Body created with compilation erors.
+WARNING:  Package Body created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='S' and object_oid in (select Oid from gs_package where pkgname='pkg' and pkgnamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -1449,7 +1449,7 @@ QUERY:   PACKAGE  DECLARE  v_1 pkg2.r1;
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 -- valid is true
 select valid from pg_object where object_type='S' and object_oid in (select Oid from gs_package where pkgname='pkg' and pkgnamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -2359,7 +2359,7 @@ WARNING:  Type sr does not exist.
 WARNING:  Type proc1(pg_catalog.undefined) depends on an undefined type.
 WARNING:  The header information of function proc1 is not defined.
 CONTEXT:  compilation of PL/pgSQL function "proc1" near line 1
-WARNING:  Procedure created with compilation erors.
+WARNING:  Procedure created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='proc1' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -2473,7 +2473,7 @@ WARNING:  type "sr" does not exist
 WARNING:  Type proc1() depends on an undefined type.
 WARNING:  The header information of function proc1 is not defined.
 CONTEXT:  compilation of PL/pgSQL function "proc1" near line 1
-WARNING:  Function created with compilation erors.
+WARNING:  Function created with compilation errors.
 -- valid is false
 select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='proc1' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -2814,7 +2814,7 @@ WARNING:  Type arr1 does not exist.
 WARNING:  Type proc1(pg_catalog.undefined) depends on an undefined type.
 WARNING:  The header information of function proc1 is not defined.
 CONTEXT:  compilation of PL/pgSQL function "proc1" near line 1
-WARNING:  Procedure created with compilation erors.
+WARNING:  Procedure created with compilation errors.
 -- valid is true
 select valid from pg_object where object_type='P' and object_oid in (select Oid from pg_proc where propackageid = 0 and proname='proc1' and pronamespace = (select Oid from pg_namespace where nspname = 'plpgsql_depend_type'));
  valid 
@@ -2848,7 +2848,7 @@ QUERY:   PACKAGE  DECLARE  type tf1 is table of sr index by binary_integer;
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select pr.proname, po.valid, pr.proargtypes, pr.proargsrc from pg_proc as pr inner join pg_object as po on po.object_type='P' and po.object_oid = pr.Oid where pr.propackageid=0 and pr.proname='proc1' and pr.pronamespace = (select Oid from pg_namespace where nspname='plpgsql_depend_type');
  proname | valid | proargtypes |  proargsrc   
 ---------+-------+-------------+--------------
@@ -2889,7 +2889,7 @@ QUERY:   PACKAGE  DECLARE  type arr1 is varray(888) of sr;
     procedure proc1;
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 1
-WARNING:  Package created with compilation erors.
+WARNING:  Package created with compilation errors.
 select pr.proname, po.valid, pr.proargtypes, pr.proargsrc from pg_proc as pr inner join pg_object as po on po.object_type='P' and po.object_oid = pr.Oid where pr.propackageid=0 and pr.proname='proc1' and pr.pronamespace = (select Oid from pg_namespace where nspname='plpgsql_depend_type');
  proname | valid | proargtypes |  proargsrc   
 ---------+-------+-------------+--------------
