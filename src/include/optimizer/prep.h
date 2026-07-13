@@ -64,6 +64,7 @@ extern void pull_up_subquery_hint(PlannerInfo* root, Query* parse, HintState* hi
 extern Node *remove_useless_results_recurse(PlannerInfo *root, Node *jtnode);
 #ifndef ENABLE_MULTIPLE_NODES
 extern void preprocess_rownum(PlannerInfo *root, Query *parse);
+extern void preprocess_rownum_carrythrough(PlannerInfo *root, Query *parse);
 #endif
 
 /*
