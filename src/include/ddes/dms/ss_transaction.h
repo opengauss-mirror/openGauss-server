@@ -119,6 +119,7 @@ int SSGetOldestXminAck(SSBroadcastXminAck *ack_data);
 void SSIsPageHitDms(RelFileNode& node, BlockNumber page, int pagesNum, uint64 *pageMap, int *bitCount);
 void SSSendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n);
 void SSBCastDropRelAllBuffer(RelFileNode *rnodes, int rnode_len);
+void SSBCastDropRelAllBufferForUnlog(RelFileNode *rnodes, int rnode_len);
 void SSBCastDropRelRangeBuffer(RelFileNode node, ForkNumber forkNum, BlockNumber firstDelBlock);
 void SSBCastDropDBAllBuffer(Oid dbid);
 void SSBCastDropSegSpace(Oid spcNode, Oid dbNode);

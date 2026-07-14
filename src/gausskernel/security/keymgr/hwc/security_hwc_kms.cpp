@@ -327,6 +327,13 @@ static int hwc_kms_handle_err(HwcKmsMgr *kms)
     return 0;
 }
 
+static void hwc_kms_has_set_cacert(HwcKmsMgr *kms)
+{
+    if (kms->cacert == NULL) {
+        km_err_msg(kms->err, "failed to access huawei cloud kms service, plase set parameter 'kmsCaCert'");
+    }
+}
+
 static char *hwc_kms_key_state(char *keystate)
 {
     if (keystate == NULL) {
@@ -357,6 +364,42 @@ static char *hwc_kms_key_state(char *keystate)
     }
 }
 
+static bool hwc_kms_mk_begin(HwcKmsMgr *kms, const char *keypath, HwcKmsKeyPath *kpath)
+{
+    hwc_kms_has_set_cacert(kms);
+    if (km_err_catch(kms->err)) {
+        return false;
+    }
+
+    *kpath = hwc_kms_parser_key_path(kms, keypath);
+    if (km_err_catch(kms->err)) {
+        return false;
+    }
+    return true;
+}
+
+static int hwc_kms_post_mk_request(HwcKmsMgr *kms, HwcKmsKeyPath *kpath, UrlType type, char *reqbody)
+{
+    HttpMgr *http = kms->httpmgr;
+#ifdef ENABLE_KM_DEBUG
+    httpmgr_set_output(http, "./kms.out");
+#endif
+    httpmgr_set_req_line(http, hwc_kms_get_url(kms, kpath->kmsurl, type), CURLOPT_HTTPPOST, kms->cacert);
+    httpmgr_set_req_header(http, httpmgr_get_req_body_len(http, reqbody));
+    httpmgr_set_req_header(http, "Content-Type:application/json");
+    kms->aksk ? httpmgr_set_req_header(http, kms->projid) : httpmgr_set_req_header(http, hwc_iam_get_token(kms->iam));
+    httpmgr_set_req_body(http, reqbody);
+    char remain[3] = {0, 0, 1};
+    httpmgr_set_response(http, remain, NULL);
+    httpmgr_receive(http);
+    km_safe_free(kpath->kmsurl);
+    km_safe_free(kpath->keyid);
+    if (km_err_catch(kms->err)) {
+        return 0;
+    }
+    return hwc_kms_handle_err(kms);
+}
+
 char *hwc_kms_mk_select(HwcKmsMgr *kms, const char *keypath)
 {
     HttpMgr *http;
@@ -365,6 +408,11 @@ char *hwc_kms_mk_select(HwcKmsMgr *kms, const char *keypath)
     char *keystate;
     char *state;
     int ret;
+
+    hwc_kms_has_set_cacert(kms);
+    if (km_err_catch(kms->err)) {
+        return NULL;
+    }
 
     HwcKmsKeyPath kpath = hwc_kms_parser_key_path(kms, keypath);
     if (km_err_catch(kms->err)) {
@@ -419,53 +467,30 @@ char *hwc_kms_mk_select(HwcKmsMgr *kms, const char *keypath)
 
 KmUnStr hwc_kms_mk_encrypt(HwcKmsMgr *kms, const char *keypath, KmUnStr plain)
 {
-    HttpMgr *http;
     char *reqbody;
     char *resbody;
     KmStr sha = {0};
     KmUnStr cipher = {0};
+    HwcKmsKeyPath kpath;
     int ret;
 
     if (plain.val == NULL) {
         return cipher;
     }
-
-    HwcKmsKeyPath kpath = hwc_kms_parser_key_path(kms, keypath);
-    if (km_err_catch(kms->err)) {
+    if (!hwc_kms_mk_begin(kms, keypath, &kpath)) {
         return cipher;
     }
 
-    http = kms->httpmgr;
-#ifdef ENABLE_KM_DEBUG
-    httpmgr_set_output(http, "./kms.out");
-#endif
-    httpmgr_set_req_line(http, hwc_kms_get_url(kms, kpath.kmsurl, ENC_KEY), CURLOPT_HTTPPOST, kms->cacert);
     reqbody = hwc_kms_mk_enc_reqbody(kms, kpath.keyid, plain);
-    httpmgr_set_req_header(http, httpmgr_get_req_body_len(http, reqbody));
-    httpmgr_set_req_header(http, "Content-Type:application/json");
-    kms->aksk ? httpmgr_set_req_header(http, kms->projid) : httpmgr_set_req_header(http, hwc_iam_get_token(kms->iam));
-    httpmgr_set_req_body(http, reqbody);
-
-    char remain[3] = {0, 0, 1};
-    httpmgr_set_response(http, remain, NULL);
-
-    httpmgr_receive(http);
-    km_safe_free(kpath.kmsurl);
-    km_safe_free(kpath.keyid);
-    /* check client error */
-    if (km_err_catch(kms->err)) {
-        return cipher;
-    }
-
-    /* check server error */
-    ret = hwc_kms_handle_err(kms);
+    ret = hwc_kms_post_mk_request(kms, &kpath, ENC_KEY, reqbody);
     if (ret == -1) {
         return hwc_kms_mk_encrypt(kms, keypath, plain);
-    } else if (ret == 0) {
+    }
+    if (ret != 1) {
         return cipher;
     }
 
-    resbody = httpmgr_get_res_body(http);
+    resbody = httpmgr_get_res_body(kms->httpmgr);
     sha.val = json_find(resbody, "cipher_text");
     if (sha.val == NULL) {
         km_err_msg(kms->err, "failed to find 'cipher_text' filed from http response body of '%s'.", kms->url);
@@ -483,53 +508,30 @@ KmUnStr hwc_kms_mk_encrypt(HwcKmsMgr *kms, const char *keypath, KmUnStr plain)
 
 KmUnStr hwc_kms_mk_decrypt(HwcKmsMgr *kms, const char *keypath, KmUnStr cipher)
 {
-    HttpMgr *http;
     char *reqbody;
     char *resbody;
     KmStr sha;
     KmUnStr plain = {0};
+    HwcKmsKeyPath kpath;
     int ret;
 
     if (cipher.val == NULL) {
         return plain;
     }
-
-    HwcKmsKeyPath kpath = hwc_kms_parser_key_path(kms, keypath);
-    if (km_err_catch(kms->err)) {
+    if (!hwc_kms_mk_begin(kms, keypath, &kpath)) {
         return plain;
     }
 
-    http = kms->httpmgr;
-#ifdef ENABLE_KM_DEBUG
-    httpmgr_set_output(http, "./kms.out");
-#endif
-    httpmgr_set_req_line(http, hwc_kms_get_url(kms, kpath.kmsurl, DEC_KEY), CURLOPT_HTTPPOST, kms->cacert);
     reqbody = hwc_kms_mk_dec_reqbody(kms, kpath.keyid, cipher);
-    httpmgr_set_req_header(http, httpmgr_get_req_body_len(http, reqbody));
-    httpmgr_set_req_header(http, "Content-Type:application/json");
-    kms->aksk ? httpmgr_set_req_header(http, kms->projid) : httpmgr_set_req_header(http, hwc_iam_get_token(kms->iam));
-    httpmgr_set_req_body(http, reqbody);
-
-    char remain[3] = {0, 0, 1};
-    httpmgr_set_response(http, remain, NULL);
-
-    httpmgr_receive(http);
-    km_safe_free(kpath.kmsurl);
-    km_safe_free(kpath.keyid);
-    /* check client error */
-    if (km_err_catch(kms->err)) {
-        return plain;
-    }
-
-    /* check server error */
-    ret = hwc_kms_handle_err(kms);
+    ret = hwc_kms_post_mk_request(kms, &kpath, DEC_KEY, reqbody);
     if (ret == -1) {
         return hwc_kms_mk_decrypt(kms, keypath, cipher);
-    } else if (ret == 0) {
+    }
+    if (ret != 1) {
         return plain;
     }
 
-    resbody = httpmgr_get_res_body(http);
+    resbody = httpmgr_get_res_body(kms->httpmgr);
     sha.val = json_find(resbody, "data_key");
     if (sha.val == NULL) {
         km_err_msg(kms->err, "failed to find 'data_key' filed from http resonpse of '%s'.", kms->url);
@@ -556,6 +558,11 @@ KmUnStr hwc_kms_dk_create(HwcKmsMgr *kms, const char *keypath, KmUnStr *cipher)
     KmStr sha;
     KmUnStr _cipher;
     int ret;
+
+    hwc_kms_has_set_cacert(kms);
+    if (km_err_catch(kms->err)) {
+        return plain;
+    }
 
     HwcKmsKeyPath kpath = hwc_kms_parser_key_path(kms, keypath);
     if (km_err_catch(kms->err)) {

@@ -679,6 +679,62 @@ void SSBCastDropRelAllBuffer(RelFileNode *rnodes, int rnode_len)
     t_thrd.postgres_cxt.whereToSendOutput = output_backup;
 }
 
+void SSBCastDropRelAllBufferForUnlog(RelFileNode *rnodes, int rnode_len)
+{
+    if (rnode_len <= 0 || rnode_len > DROP_BUFFER_USING_HASH_DEL_REL_NUM_THRESHOLD) {
+        return;
+    }
+
+    size_t size = sizeof(SSBroadcastDropRelAllBuffer) + sizeof(RelFileNode) * rnode_len;
+    SSBroadcastDropRelAllBuffer *msg =
+        (SSBroadcastDropRelAllBuffer *)palloc(size);
+    msg->type = BCAST_DROP_REL_ALL_BUFFER;
+    msg->size = rnode_len;
+    errno_t rc = memcpy_s(msg->rnodes,
+                          sizeof(RelFileNode) * rnode_len,
+                          rnodes,
+                          sizeof(RelFileNode) * rnode_len);
+    securec_check_c(rc, "", "");
+
+    dms_broadcast_info_t dms_broad_info = {
+        .data = (char *)msg,
+        .len = size,
+        .output = NULL,
+        .output_len = NULL,
+        .scope = DMS_BROADCAST_ONLINE_LIST,     // broadcast all online nodes
+        .inst_map = 0,                           // all nodes
+        .timeout = SS_BROADCAST_WAIT_FIVE_SECONDS,
+        .handle_recv_msg = (unsigned char)true,  // need to handle recv msg
+        .check_session_kill = (unsigned char)true
+    };
+
+    dms_context_t dms_ctx;
+    InitDmsContext(&dms_ctx);
+
+    int ret;
+    int retry = 0;
+    int maxRetry = 10;
+
+    elog(DEBUG2, "SSBCastDropRelAllBufferForUnlog: rnode_len=%d, start broadcast...", rnode_len);
+    do {
+        ret = dms_broadcast_msg(&dms_ctx, &dms_broad_info);
+        if (ret == DMS_SUCCESS) {
+            elog(DEBUG2, "SSBCastDropRelAllBufferForUnlog: broadcast success");
+            break;
+        }
+        ereport(DEBUG2,
+                (errmsg("SSBCastDropRelAllBufferForUnlog: broadcast failed, retry=%d", retry)));
+        pg_usleep(USECS_PER_MSEC * 10);   // 10ms
+        retry++;
+    } while (retry < maxRetry);
+
+    if (ret != DMS_SUCCESS) {
+        ereport(WARNING,
+                (errmsg("SSBCastDropRelAllBufferForUnlog: broadcast failed after %d retries",
+                        maxRetry)));
+    }
+}
+
 void SSBCastDropRelRangeBuffer(RelFileNode node, ForkNumber forkNum, BlockNumber firstDelBlock)
 {
     dms_context_t dms_ctx;
