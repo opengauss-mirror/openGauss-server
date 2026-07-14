@@ -872,10 +872,11 @@ Datum dblink_connect(PG_FUNCTION_ARGS)
         if (connstr == NULL) {
             connstr = conname_or_str;
         }
-        PQLinker* plinker = New(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION)) PQLinker(connstr);
 
         /* check password in connection string if not superuser */
         dblink_connstr_check(connstr);
+
+        PQLinker* plinker = New(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION)) PQLinker(connstr);
 
         if (conname) {
             rconn->linker = plinker;
