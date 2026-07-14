@@ -25,9 +25,9 @@
 #include <stdlib.h>
 #include "pg_config.h"
 
-#define FILE_NAME_MAX_LEN (32)
-#define ERR_LOCATION_MAX_NUM (128)
-#define ERRMSG_MAX_LEN (512)
+#define FILE_NAME_MAX_LEN (64)
+#define ERR_LOCATION_MAX_NUM (256)
+#define ERRMSG_MAX_LEN (768)
 #define SQLSTATE_MAX_LEN (6)
 
 /* Identify the location info of errmsg. */

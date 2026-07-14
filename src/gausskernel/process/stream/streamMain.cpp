@@ -388,7 +388,8 @@ static void HandleStreamSigjmp()
     AtEOXact_SysDBCache(false);
 
     LWLockReleaseAll();
-
+    ReleaseResownerOutOfTransaction();
+    ReleaseResownerForStreamError();
     if (u_sess->stream_cxt.producer_obj != NULL) {
         u_sess->stream_cxt.producer_obj->reportError();
     }

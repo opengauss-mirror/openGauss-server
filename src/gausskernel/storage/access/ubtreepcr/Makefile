@@ -9,6 +9,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
      endif
   endif
 endif
-OBJS = ubtpcrinsert.o ubtpcrpage.o ubtpcrrecycle.o ubtpcrsearch.o ubtpcrsort.o ubtpcrsplitloc.o ubtpcrundo.o ubtpcrtd.o ubtpcrrollback.o
+OBJS = ubtpcrinsert.o ubtpcrpage.o ubtpcrrecycle.o ubtpcrsearch.o ubtpcrsort.o ubtpcrsplitloc.o ubtpcrundo.o ubtpcrtd.o ubtpcrrollback.o \
+       ubtpcrsearchparallel.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

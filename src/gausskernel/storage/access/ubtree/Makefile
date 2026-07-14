@@ -9,7 +9,8 @@ ifneq "$(MAKECMDGOALS)" "clean"
      endif
   endif
 endif
-OBJS = ubtree.o ubtinsert.o ubtpage.o ubtsort.o ubtutils.o ubtsearch.o \
+OBJS = ubtree.o ubtinsert.o ubtpage.o ubtsort.o ubtutils.o ubtsearch.o ubtsearchparallel.o \
        ubtsplitloc.o ubtsplitloc_insertpt.o ubtxlog.o ubtdump.o ubtrecycle.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
+   

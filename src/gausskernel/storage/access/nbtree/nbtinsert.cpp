@@ -1330,7 +1330,9 @@ static Buffer _bt_split(Relation rel, BTScanInsert itup_key, Buffer buf, Buffer 
     /* Since we already have write-lock on both pages, ok to read cycleid */
     lopaque->btpo_cycleid = _bt_vacuum_cycleid(rel);
     ropaque->btpo_cycleid = lopaque->btpo_cycleid;
-
+    if (P_PARALLEL_SCAN_END(oopaque)) {
+        ((BTPageOpaque)lopaque)->xact = ((BTPageOpaque)oopaque)->xact;
+    }
     /*
      * If the page we're splitting is not the rightmost page at its level in
      * the tree, then the first entry on the page is the high key for the

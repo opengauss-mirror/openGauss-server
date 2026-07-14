@@ -546,12 +546,13 @@ static HeapTuple cross_level_index_getnext(IndexScanDesc scan, ScanDirection dir
  */
 
 IndexScanDesc scan_handler_idx_beginscan(Relation heap_relation, Relation index_relation, Snapshot snapshot,
-    int nkeys, int norderbys, ScanState* scan_state, ParallelIndexScanDesc pscan)
+    int nkeys, int norderbys, ScanState* scan_state, ParallelIndexScanDesc pscan, int dop, int nodeid)
 {
     if (unlikely(RELATION_OWN_BUCKET(heap_relation))) {
         return hbkt_idx_beginscan(heap_relation, index_relation, snapshot, nkeys, norderbys, scan_state);
     } else {
-        return index_beginscan(heap_relation, index_relation, snapshot, nkeys, norderbys, scan_state, pscan);
+        return index_beginscan(heap_relation, index_relation, snapshot, nkeys, norderbys, scan_state, pscan, dop,
+                               nodeid);
     }
 }
 
@@ -570,14 +571,15 @@ IndexScanDesc scan_handler_idx_beginscan_bitmap(Relation indexRelation, Snapshot
     }
 }
 
-void scan_handler_idx_rescan(IndexScanDesc scan, ScanKey key, int nkeys, ScanKey orderbys, int norderbys)
+void scan_handler_idx_rescan(IndexScanDesc scan, ScanKey key, int nkeys, ScanKey orderbys, int norderbys, int dop,
+                             int plan_nodeid)
 {
     Assert(scan != NULL);
 
     if (unlikely(RELATION_OWN_BUCKET(scan->indexRelation))) {
         hbkt_idx_rescan(scan, key, nkeys, orderbys, norderbys);
     } else {
-        index_rescan(scan, key, nkeys, orderbys, norderbys);
+        index_rescan(scan, key, nkeys, orderbys, norderbys, dop, plan_nodeid);
     }
 }
 
@@ -587,14 +589,15 @@ void scan_handler_idx_rescan_parallel(IndexScanDesc scan)
     IndexRescanParallel(scan);
 }
 
-void scan_handler_idx_rescan_local(IndexScanDesc scan, ScanKey key, int nkeys, ScanKey orderbys, int norderbys)
+void scan_handler_idx_rescan_local(IndexScanDesc scan, ScanKey key, int nkeys, ScanKey orderbys, int norderbys, int dop,
+                                   int plan_nodeid)
 {
     Assert(scan != NULL);
 
     if (unlikely(RELATION_OWN_BUCKET(scan->indexRelation))) {
         index_rescan(((HBktIdxScanDesc)scan)->currBktIdxScan, key, nkeys, orderbys, norderbys);
     } else {
-        index_rescan(scan, key, nkeys, orderbys, norderbys);
+        index_rescan(scan, key, nkeys, orderbys, norderbys, dop, plan_nodeid);
     }
 }
 

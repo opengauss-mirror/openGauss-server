@@ -177,5 +177,7 @@ DESCR("bloom index access method");
 #define BLOOM_AM_OID 8304
 
 #define OID_IS_BTREE(oid) ((oid) == BTREE_AM_OID || (oid) == UBTREE_AM_OID)
+#define INDEX_TYPE_CAN_PARALLEL(am) ((am) == UBTREE_AM_OID || (am) == BTREE_AM_OID || \
+									 (am) == CBTREE_AM_OID)
 
 #endif   /* PG_AM_H */

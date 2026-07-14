@@ -265,7 +265,7 @@ static void InitInstrWorkloadTransactionUser(void)
 
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     ResourceOwner tmpOwner;
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForWorkloadTransaction",
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(currentOwner, "ForWorkloadTransaction",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
 
     Relation relation = heap_open(AuthIdRelationId, AccessShareLock);

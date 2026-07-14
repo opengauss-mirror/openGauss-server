@@ -397,7 +397,8 @@ public:
 
     /* Save the first error data of producer thread */
     ErrorData* m_producerEdata;
-
+    volatile uint32** parallel_indexscan_map;
+    volatile int parallel_indexscan_size;
     /* MPP with-recursive support */
     static void SyncConsumerNextPlanStep(int controller_plannodeid, int step);
     static void SyncProducerNextPlanStep(int controller_plannodeid, int producer_plannodeid, int step, int tuple_count,
@@ -437,6 +438,21 @@ public:
     inline bool GetRecursiveVfdInvalid()
     {
         return m_recursiveVfdInvalid;
+    }
+
+    inline pthread_mutex_t* GetIndexSmpMutex()
+    {
+        return &m_index_smp_mutex;
+    }
+
+    inline pthread_cond_t* GetIndexSmpCond()
+    {
+        return &m_index_smp_cond;
+    }
+
+    inline StreamNode* GetSteamArray()
+    {
+        return m_streamArray;
     }
 #ifndef ENABLE_MULTIPLE_NODES
     inline void MarkStreamQuitStatus(StreamObjStatus status)
@@ -495,8 +511,9 @@ private:
 
     /* Mutex and condition waiting for all thread in the node group is complete. */
     pthread_mutex_t m_mutex;
-
     pthread_cond_t m_cond;
+    pthread_mutex_t m_index_smp_mutex;
+    pthread_cond_t m_index_smp_cond;
 
     /* Mark if query already canceled. */
     bool m_canceled;

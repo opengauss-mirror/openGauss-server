@@ -323,7 +323,7 @@ bool index_insert(Relation index_relation, Datum *values, const bool *isnull, It
  */
 IndexScanDesc index_beginscan(
     Relation heap_relation, Relation index_relation, Snapshot snapshot, int nkeys, int norderbys, ScanState* scan_state,
-    ParallelIndexScanDesc pscan)
+    ParallelIndexScanDesc pscan, int dop, int nodeid)
 {
     IndexScanDesc scan;
 
@@ -339,8 +339,14 @@ IndexScanDesc index_beginscan(
     if (scan->xs_want_ext_oid) {
         scan->xs_gpi_scan->parentRelation = heap_relation;
     }
-	
-	/* prepare to fetch index matches from table */
+    if (dop > 1 && INDEX_TYPE_CAN_PARALLEL(index_relation->rd_rel->relam)) {
+        scan->dop = dop;
+        scan->btps_end_block = InvalidBlockNumber;
+        if (nodeid != -1) {
+            scan->plan_nodeid = static_cast<uint32>(nodeid);
+        }
+    }
+    /* prepare to fetch index matches from table */
     scan->xs_heapfetch = tableam_scan_index_fetch_begin(heap_relation);
 
     return scan;
@@ -430,7 +436,8 @@ static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys
  * scan->numberOfKeys is zero.)
  * ----------------
  */
-void index_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys)
+void index_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys, int norderbys, int dop,
+                  int plan_nodeid)
 {
     FmgrInfo *procedure = NULL;
 
@@ -452,7 +459,8 @@ void index_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderbys,
     scan->xs_continue_hot = false;
 
     scan->kill_prior_tuple = false; /* for safety */
-
+    scan->dop = dop;
+    scan->plan_nodeid = plan_nodeid;
     if (scan->indexRelation->rd_rel->relam == BTREE_AM_OID) {
         btrescan_internal(scan, keys, nkeys, orderbys, norderbys);
     } else if (use_index_am_routine(scan->indexRelation)) {

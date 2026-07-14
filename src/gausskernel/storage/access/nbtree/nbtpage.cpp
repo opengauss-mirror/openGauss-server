@@ -789,7 +789,7 @@ static void BtRootbufCacheEnsureSessionInit(void)
     u_sess->storage_cxt.btMetaCache->lastHitSlot = -1;
     u_sess->storage_cxt.btMetaCache->reformVer = g_instance.dms_cxt.SSReformInfo.reform_ver;
     u_sess->storage_cxt.btMetaCacheResOwner =
-        ResourceOwnerCreate(NULL, "BtMetaCache", allocCxt);
+        ResourceOwnerCreate(t_thrd.utils_cxt.ThreadRootResourceOwner, "BtMetaCache", allocCxt);
     BtRootbufCacheRegisterRelcacheCallback();
     (void)MemoryContextSwitchTo(oldCxt);
 }
@@ -3171,7 +3171,10 @@ static bool _bt_mark_page_halfdead(Relation rel, Buffer leafbuf, BTStack stack)
 
     page = BufferGetPage(leafbuf);
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
-
+    if (P_PARALLEL_SCAN_END(opaque) &&
+        !(TransactionIdPrecedes(((BTPageOpaque)opaque)->xact, u_sess->utils_cxt.RecentGlobalXmin))) {
+        return false;
+    }
     Assert(!P_RIGHTMOST(opaque) && !P_ISROOT(opaque) && !P_ISDELETED(opaque) && !P_ISHALFDEAD(opaque) &&
            P_ISLEAF(opaque) && P_FIRSTDATAKEY(opaque) > PageGetMaxOffsetNumber(page));
 

@@ -569,8 +569,8 @@ void ExecReScanIndexScan(IndexScanState* node)
     }
 
     /* reset index scan */
-    scan_handler_idx_rescan(
-        node->iss_ScanDesc, node->iss_ScanKeys, node->iss_NumScanKeys, node->iss_OrderByKeys, node->iss_NumOrderByKeys);
+    scan_handler_idx_rescan(node->iss_ScanDesc, node->iss_ScanKeys, node->iss_NumScanKeys, node->iss_OrderByKeys,
+                            node->iss_NumOrderByKeys, node->m_dop, node->m_plan_node_id);
 
     scan_handler_idx_rescan_parallel(node->iss_ScanDesc);
 
@@ -861,7 +861,7 @@ void ExecInitIndexRelation(IndexScanState* node, EState* estate, int eflags)
     Snapshot scanSnap;
     Relation current_relation = index_state->ss.ss_currentRelation;
     IndexScan *index_scan = (IndexScan *)node->ss.ps.plan;
-
+    int dop = index_scan->scan.plan.dop;
     /*
      * Choose user-specified snapshot if TimeCapsule clause exists, otherwise 
      * estate->es_snapshot instead.
@@ -925,7 +925,7 @@ void ExecInitIndexRelation(IndexScanState* node, EState* estate, int eflags)
                     scanSnap,
                     index_state->iss_NumScanKeys,
                     index_state->iss_NumOrderByKeys,
-                    (ScanState*)index_state);
+                    (ScanState*)index_state, NULL, dop, node->ss.ps.plan->plan_node_id);
             }
         }
     } else {
@@ -968,7 +968,7 @@ void ExecInitIndexRelation(IndexScanState* node, EState* estate, int eflags)
             index_state->iss_NumScanKeys,
             index_state->iss_NumOrderByKeys,
             (ScanState*)index_state,
-            paralleDesc);
+            paralleDesc, dop, node->ss.ps.plan->plan_node_id);
     }
 
     return;
@@ -1176,7 +1176,8 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
 
     /* deal with partition info */
     ExecInitIndexRelation(index_state, estate, eflags);
-
+    index_state->m_dop = index_state->ss.ps.plan->dop > 1 ? index_state->ss.ps.plan->dop : 1;
+    index_state->m_plan_node_id = index_state->ss.ps.plan->plan_node_id;
     /*
      * If no run-time keys to calculate, go ahead and pass the scankeys to the
      * index AM.
@@ -1188,7 +1189,7 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
             index_state->iss_ScanKeys,
             index_state->iss_NumScanKeys,
             index_state->iss_OrderByKeys,
-            index_state->iss_NumOrderByKeys);
+            index_state->iss_NumOrderByKeys, node->scan.plan.dop, node->scan.plan.plan_node_id);
     }
 
     /*
@@ -1768,19 +1769,21 @@ static void ExecInitNextPartitionForIndexScan(IndexScanState* node)
     /* update scan-related partition */
     releaseDummyRelation(&(node->ss.ss_currentPartition));
     node->ss.ss_currentPartition = current_partition_rel;
-
+    int dop = plan->scan.plan.dop > 1 ? plan->scan.plan.dop : 1;
+    node->m_dop = dop;
+    node->m_plan_node_id = node->ss.ps.plan->plan_node_id;
     /* Initialize scan descriptor. */
     node->iss_ScanDesc = scan_handler_idx_beginscan(node->ss.ss_currentPartition,
         node->iss_CurrentIndexPartition,
         scanSnap,
         node->iss_NumScanKeys,
         node->iss_NumOrderByKeys,
-        (ScanState*)node);
+        (ScanState*)node, NULL, dop, node->ss.ps.plan->plan_node_id);
 
     if (node->iss_ScanDesc != NULL) {
         scan_handler_idx_rescan_local(
             node->iss_ScanDesc, node->iss_ScanKeys, node->iss_NumScanKeys,
-            node->iss_OrderByKeys, node->iss_NumOrderByKeys);
+            node->iss_OrderByKeys, node->iss_NumOrderByKeys, dop, node->ss.ps.plan->plan_node_id);
     }
 
     heap_close(heapRelation, AccessShareLock);

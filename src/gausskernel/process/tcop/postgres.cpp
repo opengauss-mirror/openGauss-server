@@ -9267,7 +9267,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 AbortCurrentTransaction();
             }
         }
-
+        if (t_thrd.utils_cxt.CurrentResourceOwner == NULL) {
+            t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.ThreadRootResourceOwner;
+        }
         ReleaseResownerOutOfTransaction();
 
         /* release resource held by lsc */
@@ -9697,7 +9699,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             /* we use t_thrd.top_mem_cxt to remember all node info in this cluster. */
             MemoryContext old = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
 
-            t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForPGXCNodes",
+            t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(currentOwner, "ForPGXCNodes",
                 THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
 
             /* Update node table in the shared memory */

@@ -83,7 +83,7 @@
 
 #define EQUALJOINVARRATIO ((2.0) / (3.0))
 
-static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path);
+static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path, bool *may_change = NULL);
 static List* build_path_tlist(PlannerInfo* root, Path* path);
 static Plan* create_scan_plan(PlannerInfo* root, Path* best_path);
 static List* build_relation_tlist(RelOptInfo* rel);
@@ -160,7 +160,7 @@ static Plan* setPartitionParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
 #ifdef ENABLE_MULTIPLE_NODES
 static Plan* setBucketInfoParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
 #endif
-Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIterpath);
+Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIterpath, bool* may_change = NULL);
 static bool is_ann_partiterator_local_limit_safe(Node* limitCount);
 static bool need_ann_partiterator_local_limit(PlannerInfo* root, PartIteratorPath* pIterpath);
 
@@ -601,10 +601,10 @@ Plan* create_plan(PlannerInfo* root, Path* best_path)
  * create_plan_recurse
  *	  Recursive guts of create_plan().
  */
-static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
+static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path, bool *may_change)
 {
     Plan* plan = NULL;
-
+    bool change = false;
     /* Guard against stack overflow due to overly complex plans */
     check_stack_depth();
 
@@ -674,7 +674,13 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
             plan = create_unique_plan(root, (UniquePath*)best_path);
             break;
         case T_PartIterator:
-            plan = (Plan*)create_globalpartInterator_plan(root, (PartIteratorPath*)best_path);
+            if (may_change == NULL) {
+                plan = (Plan*)create_globalpartInterator_plan(root, (PartIteratorPath*)best_path, &change);
+            } else {
+                plan = (Plan*)create_globalpartInterator_plan(root, (PartIteratorPath*)best_path, may_change);
+                change = *may_change;
+            }
+            
             break;
 #ifdef PGXC
         case T_RemoteQuery:
@@ -708,8 +714,11 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
     /*
      * Set smp info for Plan.
      * If the plan is on CN, we should not parallelize.
+     * For append path, we have manage it before, do not bother here.
      */
-    plan->dop = is_execute_on_datanodes(plan) ? SET_DOP(best_path->dop) : 1;
+    if (!change) {
+        plan->dop = is_execute_on_datanodes(plan) ? SET_DOP(best_path->dop) : 1;
+    }
 
     return plan;
 }
@@ -727,8 +736,8 @@ Plan* create_stream_plan(PlannerInfo* root, StreamPath* best_path)
     Stream* stream = NULL;
     Plan* subplan = NULL;
     Plan* plan = NULL;
-
-    subplan = create_plan_recurse(root, best_path->subpath);
+    bool may_change = false;
+    subplan = create_plan_recurse(root, best_path->subpath, &may_change);
 
     if (is_execute_on_coordinator(subplan)) {
         return subplan;
@@ -800,7 +809,9 @@ Plan* create_stream_plan(PlannerInfo* root, StreamPath* best_path)
     /* Copy the smpDesc from path */
     if (best_path->smpDesc) {
         stream->smpDesc.consumerDop = best_path->smpDesc->consumerDop > 1 ? best_path->smpDesc->consumerDop : 1;
-        stream->smpDesc.producerDop = best_path->smpDesc->producerDop > 1 ? best_path->smpDesc->producerDop : 1;
+        if (may_change == false) {
+            stream->smpDesc.producerDop = best_path->smpDesc->producerDop > 1 ? best_path->smpDesc->producerDop : 1;
+        }
         plan->dop = stream->smpDesc.consumerDop;
         stream->smpDesc.distriType = best_path->smpDesc->distriType;
 
@@ -6799,7 +6810,7 @@ SubqueryScan* make_subqueryscan(List* qptlist, List* qpqual, Index scanrelid, Pl
  * Hypothetical index does not support partition index unusable.
  *
  */
-Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIterpath)
+Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIterpath, bool* may_change)
 {
     Plan* plan = NULL;
 
@@ -6835,6 +6846,9 @@ Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIter
 
         switch (usable_type) {
             case INDEXES_FULL_USABLE: {
+                if (may_change != NULL) {
+                    *may_change = false;
+                }
                 /* Create partition iterator with index scan plan. */
                 GlobalPartIterator* gpIter = (GlobalPartIterator*)palloc(sizeof(GlobalPartIterator));
                 gpIter->curItrs = pIterpath->subPath->parent->partItrs;
@@ -6842,6 +6856,9 @@ Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIter
                 plan = (Plan*)create_partIterator_plan(root, pIterpath, gpIter);
             } break;
             case INDEXES_NONE_USABLE: {
+                if (may_change != NULL) {
+                    *may_change = true;
+                }
                 /* Create partition iterator with seq scan plan. */
                 GlobalPartIterator* gpIter = (GlobalPartIterator*)palloc(sizeof(GlobalPartIterator));
                 gpIter->curItrs = pIterpath->subPath->parent->partItrs_for_index_unusable;
@@ -6850,6 +6867,9 @@ Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIter
                 plan = (Plan*)create_partIterator_plan(root, pIterpath, gpIter);
             } break;
             case INDEXES_PARTIAL_USABLE: {
+                if (may_change != NULL) {
+                    *may_change = true;
+                }
                 /* Create partition iterator with partial index and partial seq scan plan. */
                 Append* appendPlan = NULL;
                 List* subplans = NIL;
@@ -6881,10 +6901,19 @@ Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIter
                 plan = (Plan*)appendPlan;
 
 #ifdef STREAMPLAN
+                int record_dop = plan->dop;
                 inherit_plan_locator_info(plan, piterIndexPlan);
+                /*
+                 * For append path, it could be paralleized only if all the paths are parallelized, 
+                 * we have managed it in optplan_make_append(), do not bother here.
+                 */
+                plan->dop = record_dop;
 #endif
             } break;
             default:
+                if (may_change != NULL) {
+                    *may_change = false;
+                }
                 break;
         }
     } else if (is_pwj_path((Path*)pIterpath)) {
@@ -9447,6 +9476,10 @@ static Plan* parallel_limit_sort(
      * to make sure the data we send to CN is sorted.
      */
     if (root->sort_pathkeys && (IsA(lefttree, Sort) || IsA(lefttree, VecSort))) {
+        plan = (Plan*)make_limit(root, lefttree, limitOffset, limitCount, offset_est, count_est, false);
+        plan = create_local_gather(plan);
+        plan = (Plan*)make_sort_from_pathkeys(root, plan, root->sort_pathkeys, -1.0);
+    } else if (root->sort_pathkeys && (IsA(lefttree, IndexOnlyScan) || IsA(lefttree, IndexScan))) {
         plan = (Plan*)make_limit(root, lefttree, limitOffset, limitCount, offset_est, count_est, false);
         plan = create_local_gather(plan);
         plan = (Plan*)make_sort_from_pathkeys(root, plan, root->sort_pathkeys, -1.0);

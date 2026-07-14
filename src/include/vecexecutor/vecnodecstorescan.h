@@ -54,9 +54,9 @@ extern VectorBatch* ApplyProjectionAndFilter(
 
 extern TupleDesc BuildTupleDescByTargetList(List* tlist);
 extern void BuildCBtreeIndexScan(CBTreeScanState* btreeIndexScan, ScanState* scanstate, Scan* node, EState* estate,
-    Relation indexRel, List* indexqual, List* indexorderby);
+    Relation indexRel, List* indexqual, List* indexorderby, int dop = 1);
 extern void BuildCBtreeIndexOnlyScan(CBTreeOnlyScanState* btreeIndexOnlyScan, ScanState* scanstate, Scan* node,
-    EState* estate, Relation indexRel, List* indexqual, List* indexorderby);
+    EState* estate, Relation indexRel, List* indexqual, List* indexorderby, int dop = 1);
 extern Batchsortstate* InitTidSortState(TupleDesc sortTupDesc, int tidAttNo, int sortMem = 0, int maxMem = 0);
 extern void PutBatchToSorter(IndexSortState* sort, VectorBatch* batch);
 extern bool IsSorterEmpty(IndexSortState* sort);

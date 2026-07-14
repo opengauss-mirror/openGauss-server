@@ -187,6 +187,9 @@ typedef struct IndexScanDescData {
      */
     int64 count;
     int64 limitk;
+    int dop;
+    BlockNumber btps_end_block;
+    uint32 plan_nodeid;
     HeapTupleHeaderData xs_ctbuf_hdr;
     /* DO NOT add any other members here. xs_ctbuf_hdr must be the last one. */
 } IndexScanDescData;
@@ -237,5 +240,7 @@ typedef struct SysScanDescData {
     HeapScanDesc scan;   /* only valid in heap-scan case */
     IndexScanDesc iscan; /* only valid in index-scan case */
 } SysScanDescData;
+
+#define InvalidNodeId ((uint32)0xFFFFFFFF)
 
 #endif /* RELSCAN_H */

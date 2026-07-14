@@ -2047,6 +2047,8 @@ typedef struct IndexScanState {
     SortSupport iss_SortSupport;
     bool* iss_OrderByTypByVals;
     int16* iss_OrderByTypLens;
+    int m_dop;
+    int m_plan_node_id;
 } IndexScanState;
 
 /* ----------------
@@ -2085,6 +2087,8 @@ typedef struct IndexOnlyScanState {
     List* ioss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation ioss_CurrentIndexPartition;
+    int m_dop;
+    int m_plan_node_id;
 } IndexOnlyScanState;
 
 /* ----------------

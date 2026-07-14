@@ -185,6 +185,7 @@ typedef BTVacuumPostingData *BTVacuumPosting;
 #define BTP_HAS_GARBAGE (1 << 6) /* page has LP_DEAD tuples */
 #define BTP_INCOMPLETE_SPLIT (1 << 7)	/* right sibling's downlink is missing */
 #define BTP_VACUUM_DELETING (1 << 8)    /* vacuum worker is deleting this page */
+#define BTP_PARALLEL_SCAN_END (1 << 9)
 
 /*
  * The max allowed value of a cycle ID is a bit less than 64K.	This is
@@ -309,7 +310,7 @@ typedef struct BTMetaPageData {
 #define P_HAS_GARBAGE(opaque) ((opaque)->btpo_flags & BTP_HAS_GARBAGE)
 #define P_INCOMPLETE_SPLIT(opaque) ((opaque)->btpo_flags & BTP_INCOMPLETE_SPLIT)
 #define P_VACUUM_DELETING(opaque) ((opaque)->btpo_flags & BTP_VACUUM_DELETING)
-
+#define P_PARALLEL_SCAN_END(opaque) ((opaque)->btpo_flags & BTP_PARALLEL_SCAN_END)
 /*
  *	Lehman and Yao's algorithm requires a ``high key'' on every non-rightmost
  *	page.  The high key is not a data key, but gives info about what range of
@@ -1436,15 +1437,18 @@ extern void BtRootbufReleaseBorrowed(Relation rel, Buffer buf);
 /*
  * prototypes for functions in nbtsearch.c
  */
-extern BTStack _bt_search(
-    Relation rel, BTScanInsert key, Buffer* bufP, int access, bool needStack = true);
-extern Buffer _bt_moveright(Relation rel, BTScanInsert key, Buffer buf, bool forupdate, BTStack stack, int access);
+extern BTStack _bt_search(Relation rel, BTScanInsert key, Buffer* bufP, int access, bool needStack = true,
+                          BlockNumber parallel_end = InvalidBlockNumber);
+extern Buffer _bt_moveright(Relation rel, BTScanInsert key, Buffer buf, bool forupdate, BTStack stack, int access,
+                            BlockNumber parallel_end);
 extern OffsetNumber _bt_binsrch(Relation rel, BTScanInsert key, Buffer buf, int *posting_off);
 extern int32 _bt_compare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum);
 extern bool _bt_first(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_next(IndexScanDesc scan, ScanDirection dir);
-extern Buffer _bt_walk_left(Relation rel, Buffer buf);
-extern Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost);
+extern Buffer _bt_walk_left(Relation rel, Buffer buf, BlockNumber parallel_end = InvalidBlockNumber);
+extern bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum);
+extern Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost,
+                               BlockNumber parallel_end = InvalidBlockNumber);
 extern bool _bt_gettuple_internal(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_check_natts(const Relation index, bool heapkeyspace, Page page, OffsetNumber offnum);
 extern int _bt_getrootheight(Relation rel);
@@ -1527,5 +1531,20 @@ extern bool btree_dedup_merge(BTDedupState state, IndexTuple itup);
 extern Size btree_dedup_end(Page newpage, BTDedupState state);
 extern void btree_dedup_update_posting(BTVacuumPosting vac_posting);
 extern IndexTuple btree_dedup_swap_posting(IndexTuple newitem, IndexTuple orignal_posting, int posting_off);
+
+extern bool _bt_parallel_steppage(IndexScanDesc bt_scan, ScanDirection dir);
+extern Buffer _bt_get_begin_parallel_scan_buf(IndexScanDesc bt_scan, ScanDirection dir, OffsetNumber* offnum,
+                                              BTScanInsertData& inskey, bool* has_init_inskey = nullptr);
+extern bool _bt_parallel_first(IndexScanDesc bt_scan, ScanDirection dir);
+extern bool _bt_parallel_next(IndexScanDesc bt_scan, ScanDirection dir);
+
+#define OFFSET_START_BASE 1
+#define OFFSET_END_BASE 2
+#define INDEX_OID 0
+#define TOTAL_NODEID 1
+#define FIRST_NODE_OFFSET 2
+#define PLAN_NODEID_MASK (uint32)0xFFFF0000
+#define HASHBUCKETID_MASK (uint32)0xFFFF
+#define PLANNODEID_MASK_OFFSET 16
 
 #endif /* NBTREE_H */

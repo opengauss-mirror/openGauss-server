@@ -258,7 +258,7 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
     CStoreScan* indexScan = NULL;
     CStoreScanState* scanstate = NULL;
     errno_t rc = EOK;
-
+    int dop = node->scan.plan.dop;
     // Sanity checks
     //
     if (node->indexorderby != NULL || node->indexorderbyorig != NULL) {
@@ -383,13 +383,8 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
             /* cbtree index scan */
             CBTreeScanState* btreeIndexScan = makeNode(CBTreeScanState);
             btreeIndexScan->m_indexScanTList = indexScanTList;
-            BuildCBtreeIndexScan(btreeIndexScan,
-                (ScanState*)scanstate,
-                (Scan*)node,
-                estate,
-                indexRel,
-                node->indexqual,
-                node->indexorderby);
+            BuildCBtreeIndexScan(btreeIndexScan, (ScanState*)scanstate, (Scan*)node, estate, indexRel, node->indexqual,
+                                 node->indexorderby, dop);
             indexstate->m_btreeIndexScan = btreeIndexScan;
             indexstate->part_id = indexstate->m_btreeIndexScan->ss.part_id;
             indexstate->m_btreeIndexOnlyScan = NULL;
@@ -398,13 +393,8 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
             /* cbtree index only scan */
             CBTreeOnlyScanState* btreeIndexOnlyScan = makeNode(CBTreeOnlyScanState);
             btreeIndexOnlyScan->m_indexScanTList = indexScanTList;
-            BuildCBtreeIndexOnlyScan(btreeIndexOnlyScan,
-                (ScanState*)scanstate,
-                (Scan*)node,
-                estate,
-                indexRel,
-                node->indexqual,
-                node->indexorderby);
+            BuildCBtreeIndexOnlyScan(btreeIndexOnlyScan, (ScanState*)scanstate, (Scan*)node, estate, indexRel,
+                                     node->indexqual, node->indexorderby, dop);
             indexstate->m_btreeIndexOnlyScan = btreeIndexOnlyScan;
             indexstate->part_id = indexstate->m_btreeIndexOnlyScan->ss.part_id;
             indexstate->m_btreeIndexScan = NULL;
@@ -624,7 +614,7 @@ static List* FixIndexScanTargetList(CStoreIndexScan* node, CStoreIndexScanState*
  * @IN param indexorderby: the ordered qual on the index columns
  */
 void BuildCBtreeIndexScan(CBTreeScanState* btreeIndexScan, ScanState* scanstate, Scan* node, EState* estate,
-    Relation indexRel, List* indexqual, List* indexorderby)
+    Relation indexRel, List* indexqual, List* indexorderby, int dop)
 {
     int sortMem = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
     int maxMem = (node->plan.operatorMaxMem > 0) ? (node->plan.operatorMaxMem / SET_DOP(node->plan.dop)) : 0;
@@ -735,19 +725,17 @@ void BuildCBtreeIndexScan(CBTreeScanState* btreeIndexScan, ScanState* scanstate,
                 partitionGetRelation(btreeIndexScan->iss_RelationDesc, currentindex);
 
             /* Initialize scan descriptor for partitioned table */
-            btreeIndexScan->iss_ScanDesc = index_beginscan(btreeIndexScan->ss.ss_currentPartition,
-                btreeIndexScan->iss_CurrentIndexPartition,
-                estate->es_snapshot,
-                btreeIndexScan->iss_NumScanKeys,
-                btreeIndexScan->iss_NumOrderByKeys);
+            btreeIndexScan->iss_ScanDesc =
+                index_beginscan(btreeIndexScan->ss.ss_currentPartition, btreeIndexScan->iss_CurrentIndexPartition,
+                                estate->es_snapshot, btreeIndexScan->iss_NumScanKeys,
+                                btreeIndexScan->iss_NumOrderByKeys, NULL, NULL, dop, node->plan.plan_node_id);
             Assert(PointerIsValid(btreeIndexScan->iss_ScanDesc));
         }
     } else {
-        btreeIndexScan->iss_ScanDesc = index_beginscan(btreeIndexScan->ss.ss_currentPartition,
-            btreeIndexScan->iss_RelationDesc,
-            estate->es_snapshot,
-            btreeIndexScan->iss_NumScanKeys,
-            btreeIndexScan->iss_NumOrderByKeys);
+        btreeIndexScan->iss_ScanDesc =
+            index_beginscan(btreeIndexScan->ss.ss_currentPartition, btreeIndexScan->iss_RelationDesc,
+                            estate->es_snapshot, btreeIndexScan->iss_NumScanKeys, btreeIndexScan->iss_NumOrderByKeys,
+                            NULL, NULL, dop, node->plan.plan_node_id);
     }
 
     GetIndexScanDesc(btreeIndexScan->iss_ScanDesc)->xs_want_itup = false;
@@ -757,11 +745,9 @@ void BuildCBtreeIndexScan(CBTreeScanState* btreeIndexScan, ScanState* scanstate,
      * index AM.
      */
     if (btreeIndexScan->iss_NumRuntimeKeys == 0 && PointerIsValid(btreeIndexScan->iss_ScanDesc))
-        scan_handler_idx_rescan(btreeIndexScan->iss_ScanDesc,
-            btreeIndexScan->iss_ScanKeys,
-            btreeIndexScan->iss_NumScanKeys,
-            btreeIndexScan->iss_OrderByKeys,
-            btreeIndexScan->iss_NumOrderByKeys);
+        scan_handler_idx_rescan(btreeIndexScan->iss_ScanDesc, btreeIndexScan->iss_ScanKeys,
+                                btreeIndexScan->iss_NumScanKeys, btreeIndexScan->iss_OrderByKeys,
+                                btreeIndexScan->iss_NumOrderByKeys, dop, node->plan.plan_node_id);
 }
 
 /*
@@ -775,7 +761,7 @@ void BuildCBtreeIndexScan(CBTreeScanState* btreeIndexScan, ScanState* scanstate,
  * @IN param indexorderby: the ordered qual on the index columns
  */
 void BuildCBtreeIndexOnlyScan(CBTreeOnlyScanState* btreeIndexOnlyScan, ScanState* scanstate, Scan* node, EState* estate,
-    Relation indexRel, List* indexqual, List* indexorderby)
+    Relation indexRel, List* indexqual, List* indexorderby, int dop)
 {
     int sortMem = u_sess->attr.attr_memory.work_mem;
     int maxMem = 0;
@@ -894,20 +880,17 @@ void BuildCBtreeIndexOnlyScan(CBTreeOnlyScanState* btreeIndexOnlyScan, ScanState
                 partitionGetRelation(btreeIndexOnlyScan->ioss_RelationDesc, currentindex);
 
             /* Initialize scan descriptor for partitioned table */
-            btreeIndexOnlyScan->ioss_ScanDesc =
-                index_beginscan(btreeIndexOnlyScan->ss.ss_currentPartition,
-                    btreeIndexOnlyScan->ioss_CurrentIndexPartition,
-                    estate->es_snapshot,
-                    btreeIndexOnlyScan->ioss_NumScanKeys,
-                    btreeIndexOnlyScan->ioss_NumOrderByKeys);
+            btreeIndexOnlyScan->ioss_ScanDesc = index_beginscan(
+                btreeIndexOnlyScan->ss.ss_currentPartition, btreeIndexOnlyScan->ioss_CurrentIndexPartition,
+                estate->es_snapshot, btreeIndexOnlyScan->ioss_NumScanKeys, btreeIndexOnlyScan->ioss_NumOrderByKeys,
+                NULL, NULL, dop, node->plan.plan_node_id);
             Assert(PointerIsValid(btreeIndexOnlyScan->ioss_ScanDesc));
         }
     } else {
-        btreeIndexOnlyScan->ioss_ScanDesc = index_beginscan(btreeIndexOnlyScan->ss.ss_currentPartition,
-            btreeIndexOnlyScan->ioss_RelationDesc,
-            estate->es_snapshot,
-            btreeIndexOnlyScan->ioss_NumScanKeys,
-            btreeIndexOnlyScan->ioss_NumOrderByKeys);
+        btreeIndexOnlyScan->ioss_ScanDesc =
+            index_beginscan(btreeIndexOnlyScan->ss.ss_currentPartition, btreeIndexOnlyScan->ioss_RelationDesc,
+                            estate->es_snapshot, btreeIndexOnlyScan->ioss_NumScanKeys,
+                            btreeIndexOnlyScan->ioss_NumOrderByKeys, NULL, NULL, dop, node->plan.plan_node_id);
     }
 
     /*
@@ -923,11 +906,9 @@ void BuildCBtreeIndexOnlyScan(CBTreeOnlyScanState* btreeIndexOnlyScan, ScanState
          * index AM.
          */
         if (btreeIndexOnlyScan->ioss_NumRuntimeKeys == 0)
-            scan_handler_idx_rescan(btreeIndexOnlyScan->ioss_ScanDesc,
-                btreeIndexOnlyScan->ioss_ScanKeys,
-                btreeIndexOnlyScan->ioss_NumScanKeys,
-                btreeIndexOnlyScan->ioss_OrderByKeys,
-                btreeIndexOnlyScan->ioss_NumOrderByKeys);
+            scan_handler_idx_rescan(btreeIndexOnlyScan->ioss_ScanDesc, btreeIndexOnlyScan->ioss_ScanKeys,
+                                    btreeIndexOnlyScan->ioss_NumScanKeys, btreeIndexOnlyScan->ioss_OrderByKeys,
+                                    btreeIndexOnlyScan->ioss_NumOrderByKeys, dop, node->plan.plan_node_id);
     }
 }
 
