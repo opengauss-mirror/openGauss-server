@@ -5727,10 +5727,12 @@ static bool check_enable_data_replicate(bool* newval, void** extra, GucSource so
 
 static bool check_adio_debug_guc(bool* newval, void** extra, GucSource source)
 {
+#ifdef ENABLE_LITE_MODE
     /* This value is always false no matter how the user sets it.  */
     if (*newval == true) {
         *newval = false;
     }
+#endif
 
     return true;
 }
