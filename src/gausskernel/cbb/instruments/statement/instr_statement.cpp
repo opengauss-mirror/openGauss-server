@@ -913,7 +913,7 @@ static void StatementFlush()
     int count = 0;
     bool is_readonly_log_needed = false;
 
-    while (!t_thrd.statement_cxt.need_exit && ENABLE_STATEMENT_TRACK) {
+    while (!t_thrd.statement_cxt.need_exit && ENABLE_STATEMENT_TRACK && !SS_IN_FAILOVER) {
         ReloadInfo();
         if (u_sess->attr.attr_storage.DefaultXactReadOnly) {
             if (!is_readonly_log_needed) {
