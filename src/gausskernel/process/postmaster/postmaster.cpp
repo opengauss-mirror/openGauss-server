@@ -4467,7 +4467,7 @@ static int ServerLoop(void)
 
         /* If we have lost the full sql flush thread, try to start a new one */
         if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0 && (pmState == PM_RUN || pmState == PM_HOT_STANDBY)
-            && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
+            && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
             g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
 
         if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && u_sess->attr.attr_common.enable_instr_rt_percentile &&
@@ -8290,6 +8290,26 @@ static const char* GetProcName(ThreadId pid)
     }
 }
 
+
+/*
+ * clear child in backend list who is already dead in some case like switchover.
+ */
+static void CheckChildExistOrClean(List* backendList)
+{
+    ListCell* cell = NULL;
+
+    foreach (cell, backendList) {
+        Backend* bp = (Backend*)lfirst(cell);
+
+        if (pthread_kill(bp->pid, 0) == ESRCH) {
+            CleanupBackend(bp->pid, 0);
+        } else {
+            ereport(WARNING, (errmsg("Cannot clear backend(%ld) still alive in backend_list.", bp->pid)));
+        }
+    }
+}
+
+
 /*
  * CleanupBackend -- cleanup after terminated backend.
  *
@@ -8906,7 +8926,7 @@ static void PostmasterStateMachine(void)
     }
 
     if (SS_IN_FAILOVER && !g_instance.dms_cxt.SSRecoveryInfo.no_backend_left) {
-        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
+        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0 && g_instance.pid_cxt.StatementPID == 0) {
             g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
         }
     }
@@ -9094,7 +9114,7 @@ static void PostmasterStateMachine(void)
     }
 }
 
-void signalBackend(Backend* bn, int signal, int be_mode)
+bool signalBackend(Backend* bn, int signal, int be_mode)
 {
     if ((uint32)bn->flag & THRD_EXIT)
         ereport(LOG, (errmsg("Thread pid(%lu), flag(%d) may be exited repeatedly", bn->pid, bn->flag)));
@@ -9116,7 +9136,10 @@ void signalBackend(Backend* bn, int signal, int be_mode)
                 g_instance.demotion,
                 Shutdown,
                 be_mode)));
+
+        return false;
     }
+    return true;
 }
 
 /*
@@ -9163,6 +9186,7 @@ void signal_child(ThreadId pid, int signal, int be_mode)
 static bool SignalSpecialChildren(int signal, int target, ThreadId pid) {
     Dlelem* curr = NULL;
     bool signaled = false;
+    List* failedList = NIL;
 
     for (curr = DLGetHead(g_instance.backend_list); curr; curr = DLGetSucc(curr)) {
         Backend* bp = (Backend*)DLE_VAL(curr);
@@ -9203,8 +9227,16 @@ static bool SignalSpecialChildren(int signal, int target, ThreadId pid) {
 
         ereport(DEBUG4, (errmsg_internal("sending signal %d to process %lu", signal, bp->pid)));
 
-        signalBackend(bp, signal, child);
+        bool res = signalBackend(bp, signal, child);
         signaled = true;
+        if (!res && signal == SIGTERM && pmState == PM_WAIT_BACKENDS) {
+            failedList = lappend(failedList, bp);
+        }
+    }
+
+    if (failedList != NIL) {
+        CheckChildExistOrClean(failedList);
+        list_free(failedList);
     }
 
     return signaled;
@@ -10832,9 +10864,14 @@ static void sigusr1_handler(SIGNAL_ARGS)
         }
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+        
+        /* statement flush thread alse involves reading page */
+        if (g_instance.pid_cxt.StatementPID != 0)
+            signal_child(g_instance.pid_cxt.StatementPID, SIGTERM);
 
         //active check once
-        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0) {
+        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0 &&
+            g_instance.pid_cxt.StatementPID == 0) {
             g_instance.dms_cxt.SSRecoveryInfo.no_backend_left = true;
         }
 

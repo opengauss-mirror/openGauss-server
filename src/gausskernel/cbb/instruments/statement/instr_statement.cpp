@@ -147,7 +147,10 @@ static void CleanStbyStmtHistory();
 /* in standby, We record slow-sql and other queries separately, this is different from the primary. */
 static void StartStbyStmtHistory()
 {
-    if (pmState != PM_HOT_STANDBY || STBYSTMTHIST_IS_READY) {
+    if (STBYSTMTHIST_IS_READY) {
+        return;
+    }
+    if (pmState != PM_HOT_STANDBY && !SS_STANDBY_MODE) {
         return;
     }
 
@@ -192,7 +195,10 @@ static void ShutdownStbyStmtHistory()
 
 static void AssignStbyStmtHistoryConf()
 {
-    if (pmState != PM_HOT_STANDBY || !STBYSTMTHIST_IS_READY) {
+    if (!STBYSTMTHIST_IS_READY) {
+        return;
+    }
+    if (pmState != PM_HOT_STANDBY && !SS_STANDBY_MODE) {
         return;
     }
 
@@ -210,7 +216,7 @@ static void AssignStbyStmtHistoryConf()
 
 static void CleanStbyStmtHistory()
 {
-    if (pmState != PM_HOT_STANDBY && STBYSTMTHIST_IS_READY) {
+    if (STBYSTMTHIST_IS_READY && pmState != PM_HOT_STANDBY && !SS_STANDBY_MODE) {
         ShutdownStbyStmtHistory();
         return;
     }
@@ -752,6 +758,7 @@ static void StartCleanWorker(int* count)
 
     *count = 0;
 }
+
 /*
  * The statement_history table should be cleaned up twice
  * In the first time, all records less than minStatementTimestamp are cleared,
@@ -815,8 +822,13 @@ static void FlushStatementToTableOrMFChain(StatementStatContext* suspendList, co
         bool isSlow = false;
         MemFileChain* target = NULL;
         while (flushItem != NULL) {
+            if (SS_IN_REFORM) {
+                ereport(WARNING, (errmsg("Can not flush statement while ss in reform.")));
+                break;
+            }
+
             tuple = GetStatementTuple(rel, flushItem, statementCxt, &isSlow);
-            if (pmState == PM_HOT_STANDBY) {
+            if (pmState == PM_HOT_STANDBY || SS_STANDBY_MODE) {
                 /*
                  * mefchain-insert action does not means this is a write transaction, it must be a read only trans,
                  * also it's result not controled by transaction, but we still set it in, to release some lock and mem
@@ -2936,7 +2948,7 @@ static void sstmthist_scanner_end(SStmtHistScanner* scanner)
 
 static void check_sstmthist_permissions()
 {
-    if (pmState != PM_HOT_STANDBY) {
+    if (pmState != PM_HOT_STANDBY && !SS_STANDBY_MODE) {
         ereport(ERROR, 
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  errmsg("Functions series of standby statement history only supported in standby mode.")));
