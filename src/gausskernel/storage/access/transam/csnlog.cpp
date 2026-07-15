@@ -919,6 +919,83 @@ void UBCSNLogBufferSetSlot(UBCSNLogBuffer *buf, TransactionId xid, uint64 csn)
     }
 }
 
+static inline CommitSeqNo UBCSNLogGetCommitSeqNoFromPage(const char *page, TransactionId xid)
+{
+    int entryno = TransactionIdToCSNPgIndex(xid);
+    CommitSeqNo csn;
+    errno_t rc = memcpy_s(&csn, sizeof(csn), page + entryno * sizeof(CommitSeqNo), sizeof(csn));
+    securec_check(rc, "", "");
+    return csn;
+}
+
+static void UBCSNLogBufferSetPage(UBCSNLogBuffer *buf, const char *page, TransactionId firstXid, uint32 rowCount)
+{
+    int ub_fault_rc = sigsetjmp(jump_env, 1);
+    if (ub_fault_rc == 0) {
+        ub_sigbus_jump_active = 1;
+        for (uint32 i = 0; i < rowCount; i++) {
+            TransactionId xid = firstXid + i;
+            CommitSeqNo csn = UBCSNLogGetCommitSeqNoFromPage(page, xid);
+            if (csn == 0 || !UBCSNLogIsValidXid(xid)) {
+                continue;
+            }
+            uint32 slot_idx = (uint32)UBCSNLogCalSlotIndex(xid);
+            uint64 timeline = UBCSNLogExpectedTimeline(xid);
+            buf->slots[slot_idx].store(UBCSNLogPackSlot(timeline, csn), std::memory_order_release);
+        }
+        /* One persistence barrier per SLRU page instead of one per xid. */
+        UB_ESB_BARRIER();
+        ub_sigbus_jump_active = 0;
+    } else {
+        ub_sigbus_jump_active = 0;
+        g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        ereport(ERROR, (errmsg("[SIGBUS] fault captured in UBCSNLogBufferSetPage, first_xid=%lu, rows=%u",
+                                (unsigned long)firstXid, rowCount)));
+    }
+}
+
+bool UBCSNLogBufferWarmupRange(TransactionId startXid, TransactionId endXid, UBTxnCacheWarmupStats *stats)
+{
+    TransactionId xid = startXid;
+    char page[BLCKSZ];
+
+    if (stats == nullptr) {
+        ereport(ERROR, (errmsg("UB CSNLOG warmup statistics pointer is null")));
+    }
+
+    while (TransactionIdPrecedes(xid, endXid)) {
+        if (!ENABLE_UB) {
+            return false;
+        }
+
+        int64 pageno = TransactionIdToCSNPage(xid);
+        uint32 pageOffset = TransactionIdToCSNPgIndex(xid);
+        uint64 rowsLeft = (uint64)(endXid - xid);
+        uint32 rowCount = (uint32)Min((uint64)(CSNLOG_XACTS_PER_PAGE - pageOffset), rowsLeft);
+        Assert(rowCount > 0);
+
+        CSN_LWLOCK_ACQUIRE(pageno, LW_SHARED);
+        int slotno = SimpleLruReadPage_ReadOnly_Locked(CsnlogCtl(pageno), pageno, xid);
+        errno_t rc = memcpy_s(page, BLCKSZ, CsnlogCtl(pageno)->shared->page_buffer[slotno], BLCKSZ);
+        securec_check(rc, "", "");
+        CSN_LWLOCK_RELEASE(pageno);
+
+        if (!ENABLE_UB) {
+            return false;
+        }
+        UBCSNLogBuffer *buf = (UBCSNLogBuffer *)g_instance.shmem_cxt.UBCSNLogBufPtr;
+        if (buf == nullptr || !ENABLE_UB) {
+            return false;
+        }
+        UBCSNLogBufferSetPage(buf, page, xid, rowCount);
+        stats->pages++;
+        stats->rows += rowCount;
+        xid += rowCount;
+    }
+
+    return true;
+}
+
 size_t UBCSNLogBufferSize(void)
 {
     return sizeof(UBCSNLogBuffer);
