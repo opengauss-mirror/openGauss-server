@@ -3137,14 +3137,14 @@ retry:
         return buf;
     }
 
-    if (ENABLE_DMS && AmDmsProcess() && !dms_drc_accessible((uint8)DRC_RES_PAGE_TYPE) &&
-        t_thrd.dms_cxt.in_ondemand_redo) {
-        return buf;
-    }
-
     new_partition_lock = BufMappingPartitionLock(new_hash);
     /* Loop here in case we have to try another victim buffer */
     for (;;) {
+        if (ENABLE_DMS && AmDmsProcess() && !dms_drc_accessible((uint8)DRC_RES_PAGE_TYPE) &&
+            t_thrd.dms_cxt.in_ondemand_redo) {
+            return NULL;
+        }
+
         bool needGetLock = false;
         /*
          * Ensure, while the spinlock's not yet held, that there's a free refcount
@@ -6574,7 +6574,8 @@ retry:
              * and the timeout time of the primary and standby servers is modified to open the unlocking
              * time window.
              */
-            if (!dms_standby_retry_read && SS_STANDBY_MODE) {
+            if (!dms_standby_retry_read && SS_STANDBY_MODE &&
+                !g_instance.attr.attr_storage.dms_attr.enable_bcast_snapshot) {
                 dms_standby_retry_read = true;
                 mode = BUFFER_LOCK_EXCLUSIVE;
             }
