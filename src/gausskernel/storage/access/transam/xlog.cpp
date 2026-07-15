@@ -417,8 +417,6 @@ static int get_sync_bit(int method);
 static void ResetSlotLSNEndRecovery(StringInfo slotname);
 static void ShutdownReadFileFacility(void);
 static void SetDummyStandbyEndRecPtr(XLogReaderState *xlogreader);
-static void UBWarmupSetClog(TransactionId xid, CLogXidStatus status);
-static void UBWarmupSetCsnlog(TransactionId xid, CommitSeqNo csn);
 static uint64 TimestampDifferenceToMicroseconds(TimestampTz startTime, TimestampTz stopTime);
 static bool ShouldWarmupClogCsnlogInStartupXLOG(void);
 static void UBWarmupClogCsnlogSlru(void);
@@ -9196,36 +9194,6 @@ static inline void set_hot_standby_recycle_xid()
     closedir(dir);
 }
 
-static void UBWarmupSetClog(TransactionId xid, CLogXidStatus status)
-{
-    /* USE_UB_TXN_CACHE_WARMUP: populate UB txn cache from startup warmup results. */
-    if (!(ENABLE_UB)) {
-        return;
-    }
-
-    UBCLogBuffer *ubCLogBuf = (UBCLogBuffer *)g_instance.shmem_cxt.UBClogBufPtr;
-    if (ubCLogBuf == nullptr) {
-        return;
-    }
-
-    UBCLogBufferSetSlot(ubCLogBuf, xid, status);
-}
-
-static void UBWarmupSetCsnlog(TransactionId xid, CommitSeqNo csn)
-{
-    /* USE_UB_TXN_CACHE_WARMUP: populate UB txn cache from startup warmup results. */
-    if (!(ENABLE_UB)) {
-        return;
-    }
-
-    UBCSNLogBuffer *ubCsnlogBuf = (UBCSNLogBuffer *)g_instance.shmem_cxt.UBCSNLogBufPtr;
-    if (ubCsnlogBuf == nullptr) {
-        return;
-    }
-
-    UBCSNLogBufferSetSlot(ubCsnlogBuf, xid, (uint64)csn);
-}
-
 static uint64 TimestampDifferenceToMicroseconds(TimestampTz startTime, TimestampTz stopTime)
 {
     long secs = 0;
@@ -9233,6 +9201,13 @@ static uint64 TimestampDifferenceToMicroseconds(TimestampTz startTime, Timestamp
 
     TimestampDifference(startTime, stopTime, &secs, &usecs);
     return (uint64)secs * USECS_PER_SEC + (uint64)usecs;
+}
+
+static double UBWarmupBytesToMiB(uint64 bytes)
+{
+    static const uint64 bytesPerMiB = 1024 * 1024;
+
+    return (double)bytes / (double)bytesPerMiB;
 }
 
 static bool ShouldWarmupClogCsnlogInStartupXLOG(void)
@@ -9244,19 +9219,21 @@ static bool ShouldWarmupClogCsnlogInStartupXLOG(void)
 
 /*
  * Warm up clog/csnlog contents through the normal SLRU interfaces during
- * startup reform. SLRU may satisfy the read from shared memory or fall back
- * to disk, so the read range should follow each log's own retention rule
- * instead of only what is currently on disk.
+ * startup reform. CSNLOG files older than recent xmin may already have been
+ * truncated, so leave those UB CSNLOG slots at their initialized default value
+ * instead of deriving them from CLOG.
  */
 static void UBWarmupClogCsnlogSlru(void)
 {
     /*
      * XID roles in this warmup scan:
      * oldestXid: CLOG retention lower bound derived from datfrozenxid cleanup.
-     * recentLocalXmin/recentGlobalXmin: CSNLOG retention lower bound derived
+     * recentLocalXmin/recentGlobalXmin: CSNLOG file-read lower bound derived
      * from recovery snapshot visibility.
-     * clogReadStartXid/csnlogReadStartXid: effective warmup start XID for
-     * each log after applying the corresponding retention rule.
+     * clogReadStartXid: effective CLOG start after applying retention and
+     * ss_init_clog_size.
+     * csnlogReadStartXid: effective CSNLOG cache start after applying the CLOG
+     * limit and the circular UB CSNLOG cache capacity.
      * nextXid: exclusive upper bound of the warmup scan.
      */
     TransactionId oldestXid;
@@ -9264,9 +9241,10 @@ static void UBWarmupClogCsnlogSlru(void)
     TransactionId recentGlobalXmin;
     TransactionId clogReadStartXid;
     TransactionId csnlogReadStartXid;
+    TransactionId csnlogFileReadStartXid;
     TransactionId nextXid;
-    uint64 clogReadXids = 0;
-    uint64 csnlogReadXids = 0;
+    UBTxnCacheWarmupStats clogStats = {0};
+    UBTxnCacheWarmupStats csnlogStats = {0};
     ErrorData *edata = NULL;
 
     if (!ShouldWarmupClogCsnlogInStartupXLOG()) {
@@ -9282,45 +9260,49 @@ static void UBWarmupClogCsnlogSlru(void)
     {
         bool skipClogRead = false;
         bool skipCsnlogRead = false;
-        bool clogRangeLimited = false;
-        bool csnlogRangeLimited = false;
+        bool clogWarmupCompleted = false;
+        bool csnlogWarmupCompleted = false;
         uint64 maxWarmupClogBytes;
         uint64 maxWarmupXids;
+        uint64 clogLogicalBytes;
+        uint64 csnlogLogicalBytes;
+        TimestampTz warmupStartTime;
+        TimestampTz warmupEndTime;
         TimestampTz clogReadStartTime;
         TimestampTz clogReadEndTime;
         TimestampTz csnlogReadStartTime;
         TimestampTz csnlogReadEndTime;
-        uint64 clogElapsedUs;
-        uint64 csnlogElapsedUs;
+        uint64 clogElapsedUs = 0;
+        uint64 csnlogElapsedUs = 0;
+        uint64 warmupElapsedUs;
+        TransactionId csnlogSlruReadStartXid;
 
         /* CLOG is truncated by frozen-xid progress, so warm up from oldestXid. */
         oldestXid = t_thrd.xact_cxt.ShmemVariableCache->oldestXid;
         if (!TransactionIdIsNormal(oldestXid)) {
             oldestXid = FirstNormalTransactionId;
         }
-        /* CSNLOG is truncated by snapshot visibility, so use recent *xmin. */
+        /*
+         * CSNLOG file reads are safe from recent *xmin. Older UB CSNLOG slots
+         * keep their initialized default value when the SLRU data is absent.
+         */
         recentLocalXmin = t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin;
         recentGlobalXmin = t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin;
         clogReadStartXid = oldestXid;
-        csnlogReadStartXid = TransactionIdIsNormal(recentGlobalXmin) ? recentGlobalXmin : recentLocalXmin;
-        if (!TransactionIdIsNormal(csnlogReadStartXid)) {
-            csnlogReadStartXid = oldestXid;
+        csnlogReadStartXid = oldestXid;
+        csnlogFileReadStartXid = TransactionIdIsNormal(recentGlobalXmin) ? recentGlobalXmin : recentLocalXmin;
+        if (!TransactionIdIsNormal(csnlogFileReadStartXid)) {
+            csnlogFileReadStartXid = oldestXid;
         }
 
         maxWarmupClogBytes = (uint64)g_instance.attr.attr_storage.dms_attr.init_clog_size * 1024;
         maxWarmupXids = maxWarmupClogBytes * (uint64)CLOG_XACTS_PER_BYTE;
 
-        if (TransactionIdPrecedes(nextXid, clogReadStartXid)) {
+        if (!TransactionIdPrecedes(clogReadStartXid, nextXid)) {
             ereport(LOG, (errmsg("skip recovery CLOG warmup because oldestXid " XID_FMT
-                                 " is newer than nextXid " XID_FMT,
+                                 " is not older than nextXid " XID_FMT,
                                  clogReadStartXid, nextXid)));
             skipClogRead = true;
-        }
-
-        if (TransactionIdPrecedes(nextXid, csnlogReadStartXid)) {
-            ereport(LOG, (errmsg("skip recovery CSNLOG warmup because csnlogReadStartXid " XID_FMT
-                                 " is newer than nextXid " XID_FMT,
-                                 csnlogReadStartXid, nextXid)));
             skipCsnlogRead = true;
         }
 
@@ -9341,97 +9323,94 @@ static void UBWarmupClogCsnlogSlru(void)
                 minWarmupStartXid = FirstNormalTransactionId;
             }
 
-            /* If the natural CLOG left boundary is too old, move it right. */
+            /* If the natural left boundary is too old, move it right. */
             if (!skipClogRead && TransactionIdPrecedes(clogReadStartXid, minWarmupStartXid)) {
-                ereport(LOG, (errmsg("limit recovery CLOG warmup start xid from " XID_FMT " to " XID_FMT
-                                     " because ss_init_clog_size is %dKB",
-                                     clogReadStartXid, minWarmupStartXid,
-                                     g_instance.attr.attr_storage.dms_attr.init_clog_size)));
                 clogReadStartXid = minWarmupStartXid;
-                clogRangeLimited = true;
-            }
-
-            /* Apply the same left-boundary cap to the CSNLOG warmup range. */
-            if (!skipCsnlogRead && TransactionIdPrecedes(csnlogReadStartXid, minWarmupStartXid)) {
-                ereport(LOG, (errmsg("limit recovery CSNLOG warmup start xid from " XID_FMT " to " XID_FMT
-                                     " because ss_init_clog_size is %dKB",
-                                     csnlogReadStartXid, minWarmupStartXid,
-                                     g_instance.attr.attr_storage.dms_attr.init_clog_size)));
                 csnlogReadStartXid = minWarmupStartXid;
-                csnlogRangeLimited = true;
             }
+        }
+
+        /*
+         * CSNLOG uses a circular UB cache with 2^27 slots. Warming more than
+         * that many xids only overwrites older slots before reform completes,
+         * so retain exactly the newest window that can still be addressed.
+         */
+        if (!skipCsnlogRead && (uint64)(nextXid - FirstNormalTransactionId) > UB_CSNLOG_BUFFER_SLOTS) {
+            TransactionId minCsnlogCacheStartXid = nextXid - (TransactionId)UB_CSNLOG_BUFFER_SLOTS;
+            if (TransactionIdPrecedes(csnlogReadStartXid, minCsnlogCacheStartXid)) {
+                csnlogReadStartXid = minCsnlogCacheStartXid;
+            }
+        }
+
+        csnlogSlruReadStartXid = csnlogReadStartXid;
+        if (TransactionIdPrecedes(csnlogSlruReadStartXid, csnlogFileReadStartXid)) {
+            csnlogSlruReadStartXid = csnlogFileReadStartXid;
         }
 
         if (!skipClogRead || !skipCsnlogRead) {
-            ereport(LOG, (errmsg("recovery clog/csnlog warmup is enabled during host startup, "
-                                 "oldestXid " XID_FMT ", recentLocalXmin " XID_FMT ", recentGlobalXmin " XID_FMT
-                                 ", clogReadStartXid " XID_FMT ", csnlogReadStartXid " XID_FMT
-                                 ", nextXid " XID_FMT ", ss_init_clog_size %dKB",
-                                 oldestXid, recentLocalXmin, recentGlobalXmin, clogReadStartXid,
-                                 csnlogReadStartXid, nextXid,
-                                 g_instance.attr.attr_storage.dms_attr.init_clog_size)));
+            uint64 clogWarmupXids = (uint64)(nextXid - clogReadStartXid);
+            uint64 csnlogWarmupXids = (uint64)(nextXid - csnlogSlruReadStartXid);
+            clogLogicalBytes = (clogWarmupXids + CLOG_XACTS_PER_BYTE - 1) / CLOG_XACTS_PER_BYTE;
+            csnlogLogicalBytes = csnlogWarmupXids * sizeof(CommitSeqNo);
 
+            ereport(LOG,
+                    (errmsg("recovery CLOG/CSNLOG warmup plan: oldestXid " XID_FMT ", nextXid " XID_FMT
+                            ", ss_init_clog_size %dKB; CLOG xid range [" XID_FMT ", " XID_FMT
+                            "), logical size %.3f MB; CSNLOG xid range [" XID_FMT ", " XID_FMT
+                            "), logical size %.3f MB",
+                            oldestXid, nextXid, g_instance.attr.attr_storage.dms_attr.init_clog_size,
+                            clogReadStartXid, nextXid, UBWarmupBytesToMiB(clogLogicalBytes),
+                            csnlogSlruReadStartXid, nextXid, UBWarmupBytesToMiB(csnlogLogicalBytes))));
+            warmupStartTime = GetCurrentTimestamp();
         }
+
+        clogWarmupCompleted = skipClogRead;
+        csnlogWarmupCompleted = skipCsnlogRead;
 
         if (!skipClogRead) {
             clogReadStartTime = GetCurrentTimestamp();
-            ereport(LOG, (errmsg("recovery CLOG warmup start time: %s",
-                                 timestamptz_to_str(clogReadStartTime))));
 
-            for (TransactionId xid = clogReadStartXid; TransactionIdPrecedes(xid, nextXid);) {
-                XLogRecPtr clogLsn = InvalidXLogRecPtr;
-                CLogXidStatus clogStatus;
-
-                clogStatus = CLogGetStatus(xid, &clogLsn);
-                UBWarmupSetClog(xid, clogStatus);
-
-                clogReadXids++;
-                TransactionIdAdvance(xid);
-            }
+            clogWarmupCompleted = UBCLogBufferWarmupRange(clogReadStartXid, nextXid, &clogStats);
 
             clogReadEndTime = GetCurrentTimestamp();
             clogElapsedUs = TimestampDifferenceToMicroseconds(clogReadStartTime, clogReadEndTime);
-            ereport(LOG, (errmsg("recovery CLOG warmup end time: %s",
-                                 timestamptz_to_str(clogReadEndTime))));
-            ereport(LOG, (errmsg("recovery CLOG warmup finished, xid range [" XID_FMT ", " XID_FMT
-                                 "), rows " UINT64_FORMAT ", elapsed " UINT64_FORMAT " us, elapsed %.6f s",
-                                 clogReadStartXid, nextXid, clogReadXids, clogElapsedUs,
-                                 (double)clogElapsedUs / (double)USECS_PER_SEC)));
         }
 
         if (!skipCsnlogRead) {
-            csnlogReadStartTime = GetCurrentTimestamp();
-            ereport(LOG, (errmsg("recovery CSNLOG warmup start time: %s",
-                                 timestamptz_to_str(csnlogReadStartTime))));
+            if (clogWarmupCompleted) {
+                csnlogReadStartTime = GetCurrentTimestamp();
 
-            for (TransactionId xid = csnlogReadStartXid; TransactionIdPrecedes(xid, nextXid);) {
-                CommitSeqNo csn;
+                csnlogWarmupCompleted =
+                    UBCSNLogBufferWarmupRange(csnlogSlruReadStartXid, nextXid, &csnlogStats);
 
-                csn = CSNLogGetCommitSeqNo(xid);
-                UBWarmupSetCsnlog(xid, csn);
-
-                csnlogReadXids++;
-                TransactionIdAdvance(xid);
+                csnlogReadEndTime = GetCurrentTimestamp();
+                csnlogElapsedUs = TimestampDifferenceToMicroseconds(csnlogReadStartTime, csnlogReadEndTime);
+            } else {
+                csnlogWarmupCompleted = false;
             }
-
-            csnlogReadEndTime = GetCurrentTimestamp();
-            csnlogElapsedUs = TimestampDifferenceToMicroseconds(csnlogReadStartTime, csnlogReadEndTime);
-            ereport(LOG, (errmsg("recovery CSNLOG warmup end time: %s",
-                                 timestamptz_to_str(csnlogReadEndTime))));
-            ereport(LOG, (errmsg("recovery CSNLOG warmup finished, xid range [" XID_FMT ", " XID_FMT
-                                 "), rows " UINT64_FORMAT ", elapsed " UINT64_FORMAT " us, elapsed %.6f s",
-                                 csnlogReadStartXid, nextXid, csnlogReadXids, csnlogElapsedUs,
-                                 (double)csnlogElapsedUs / (double)USECS_PER_SEC)));
         }
 
         if (!skipClogRead || !skipCsnlogRead) {
-            ereport(LOG,
-                    (errmsg("recovery clog/csnlog warmup finished, "
-                            "CLOG xid range [" XID_FMT ", " XID_FMT "), limited %s, rows " UINT64_FORMAT
-                            "; CSNLOG xid range [" XID_FMT ", " XID_FMT "), limited %s, rows " UINT64_FORMAT,
-                            clogReadStartXid, nextXid, clogRangeLimited ? "true" : "false", clogReadXids,
-                            csnlogReadStartXid, nextXid, csnlogRangeLimited ? "true" : "false", csnlogReadXids)));
-
+            warmupEndTime = GetCurrentTimestamp();
+            warmupElapsedUs = TimestampDifferenceToMicroseconds(warmupStartTime, warmupEndTime);
+            if (clogWarmupCompleted && csnlogWarmupCompleted) {
+                ereport(LOG,
+                        (errmsg("recovery CLOG/CSNLOG warmup finished: CLOG pages " UINT64_FORMAT
+                                ", rows " UINT64_FORMAT ", elapsed " UINT64_FORMAT
+                                " us; CSNLOG file pages " UINT64_FORMAT ", file rows " UINT64_FORMAT
+                                ", elapsed " UINT64_FORMAT " us; total elapsed " UINT64_FORMAT " us",
+                                clogStats.pages, clogStats.rows, clogElapsedUs, csnlogStats.pages, csnlogStats.rows,
+                                csnlogElapsedUs, warmupElapsedUs)));
+            } else {
+                ereport(WARNING,
+                        (errmsg("recovery CLOG/CSNLOG warmup stopped before completion because UB access is "
+                                "disabled or its buffer is unavailable: CLOG pages " UINT64_FORMAT
+                                ", rows " UINT64_FORMAT ", elapsed " UINT64_FORMAT
+                                " us; CSNLOG file pages " UINT64_FORMAT ", file rows " UINT64_FORMAT
+                                ", elapsed " UINT64_FORMAT " us; total elapsed " UINT64_FORMAT " us",
+                                clogStats.pages, clogStats.rows, clogElapsedUs, csnlogStats.pages, csnlogStats.rows,
+                                csnlogElapsedUs, warmupElapsedUs)));
+            }
         }
     }
     PG_CATCH();
