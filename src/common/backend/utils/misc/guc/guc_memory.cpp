@@ -392,7 +392,7 @@ static void InitMemoryConfigureNamesInt()
             256 * 1024,
             1 * 1024,
             512 * 1024,
-            NULL,
+            check_syscache_threshold_gpc,
             NULL,
             NULL},
         {{"global_syscache_threshold",
