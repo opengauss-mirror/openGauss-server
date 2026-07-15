@@ -3490,6 +3490,7 @@ static void exec_exception_cleanup(PLpgSQL_execstate* estate, ExceptionContext *
     estate->cur_tuptable_stack = context->old_tuptable_stack;
     u_sess->SPI_cxt._current->tuptable_cxt = context->old_tuptable_cxt;
     estate->eval_tuptable = NULL;
+    u_sess->SPI_cxt._current->tuptable = NULL;
 
     /*
      * SPI_disconnect may make CurrentMemoryContext point to a context

@@ -1197,6 +1197,7 @@ static void dumptuples(Tuplestorestate* state)
     int i;
 
     for (i = state->memtupdeleted;; i++) {
+        state->memtupdeleted = i;
         TSReadPointer* readptr = state->readptrs;
         int j;
 

@@ -21,6 +21,8 @@
  * ---------------------------------------------------------------------------------------
  */
 
+#include <sys/types.h>
+#include <sys/socket.h>
 #include "bbox.h"
 #include "bbox_types.h"
 
@@ -58,6 +60,18 @@ BlacklistItem g_blacklist_items[] = {
     {DATA_WRITER_QUEUE, "DATA_WRITER_QUEUE", false}
 };
 
+void bbox_close_all_sockets(void)
+{
+    int type;
+    socklen_t optlen = sizeof(type);
+    int socket_fd;
+    for (socket_fd = getdtablesize(); socket_fd >= 0; --socket_fd) {
+        if (getsockopt(socket_fd, SOL_SOCKET, SO_TYPE, &type, &optlen) == 0) {
+            shutdown(socket_fd, SHUT_RDWR);
+        }
+    }
+}
+
 /*
  * do FFIC and return whether is or not the first crash.
  */
@@ -65,11 +79,11 @@ static bool do_ffic(int sig, siginfo_t *si, void *uc)
 {
     static volatile int64 first_tid = INVALID_TID;
     int64 cur_tid = (int64)pthread_self();
-
     if (first_tid == INVALID_TID &&
             __sync_bool_compare_and_swap(&first_tid, INVALID_TID, cur_tid)) {
         /* Only first fatal error will set db state and generate fatal error log */
         (void)SetDBStateFileState(COREDUMP_STATE, false);
+        bbox_close_all_sockets();
         if (g_instance.attr.attr_common.enable_ffic_log) {
             (void)gen_err_msg(sig, si, (ucontext_t *)uc);
         }
@@ -102,16 +116,18 @@ static void coredump_handler(int sig, siginfo_t *si, void *uc)
  */
 static void bbox_handler(int sig, siginfo_t *si, void *uc)
 {
+#ifndef ENABLE_MEMORY_CHECK
+    sigset_t intMask;
+    sigset_t oldMask;
+
+    sigfillset(&intMask);
+    pthread_sigmask(SIG_SETMASK, &intMask, &oldMask);
     if (ENABLE_DMS) {
         dms_fsync_logfile();
     }
+#endif
     if (do_ffic(sig, si, uc)) {
 #ifndef ENABLE_MEMORY_CHECK
-        sigset_t intMask;
-        sigset_t oldMask;
-
-        sigfillset(&intMask);
-        pthread_sigmask(SIG_SETMASK, &intMask, &oldMask);
 
         (void)BBOX_CreateCoredump(NULL);
 #else

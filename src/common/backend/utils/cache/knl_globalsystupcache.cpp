@@ -814,6 +814,10 @@ GlobalCatCTup *GlobalSysTupCache::SearchTupleMiss(InsertCatTupInfo *tup_info)
             ct = InsertHeapTupleIntoCatCacheInSingle(tup_info);
         }
     } else {
+        if (scandesc->irel == NULL && scandesc->scan == NULL) {
+            ereport(ERROR, (errmsg("The scandesc->scan is NULL."),
+            errcause("Scan should not be NULL."), erraction("Please Contact Huawei engineers.")));
+        }
         while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
             tup_info->ntp = ntp;
             if (!tup_info->has_concurrent_lock) {

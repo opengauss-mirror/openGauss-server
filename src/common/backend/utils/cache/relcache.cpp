@@ -2302,7 +2302,14 @@ static Relation RelationBuildDescExtended(Oid targetRelId, bool insertIt, bool b
      */
     relid = HeapTupleGetOid(pg_class_tuple);
     relp = (Form_pg_class)GETSTRUCT(pg_class_tuple);
-    Assert(relid == targetRelId);
+    if (relid != targetRelId) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Relation %u open error, tuple oid is %u, tuple reltablespace[%u], relfilenode[%u]",
+            targetRelId, relid, relp->reltablespace, relp->relfilenode),
+            errcause("The error message may be accessed later."),
+            erraction("Rel oid is match with target rel oid.")));
+        return NULL;
+    }
     CatalogRelationBuildParam catalogParam = GetCatalogParam(targetRelId);
     if (catalogParam.oid != 0) {
         int natts = 0;

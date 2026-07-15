@@ -4889,6 +4889,13 @@ void exec_bind_message(BindMessage* pqBindMessage, PreparedStatement *pstmt, Cac
             (errmsg("bind %s to %s", *portal_name ? portal_name : "<unnamed>", *stmt_name ? stmt_name : "<unnamed>")));
     }
 
+    /*
+     * Start up a transaction command so we can call functions etc. (Note that
+     * this will normally change current memory context.) Nothing happens if
+     * we are already in one.
+     */
+    start_xact_command();
+
     /* Find prepared statement */
     if (psrc == NULL) {
         get_prepared_statement(stmt_name, &pstmt, &psrc);
@@ -4907,13 +4914,6 @@ void exec_bind_message(BindMessage* pqBindMessage, PreparedStatement *pstmt, Cac
 
     if (save_log_statement_stats)
         ResetUsage();
-
-    /*
-     * Start up a transaction command so we can call functions etc. (Note that
-     * this will normally change current memory context.) Nothing happens if
-     * we are already in one.
-     */
-    start_xact_command();
 
 #ifdef ENABLE_MOT
     /* set transaction storage engine and check for cross transaction violation */

@@ -2706,7 +2706,7 @@ bool FindUniqueSQL(UniqueSQLKey key, char* unique_sql)
     /* step 2. find the unique query from UniqueSQLHashtbl, then insert into ASHUniqueSQLHashtbl */
     UniqueSQL *entry = (UniqueSQL*)hash_search(g_instance.stat_cxt.UniqueSQLHashtbl, &key, HASH_FIND, NULL);
 
-    if (entry == NULL) {
+    if (entry == NULL || entry->unique_sql == NULL) {
         if (unique_sql != NULL) {
             rc = strcpy_s(unique_sql, UNIQUE_SQL_MAX_LEN, "");
             securec_check(rc, "\0", "\0");
