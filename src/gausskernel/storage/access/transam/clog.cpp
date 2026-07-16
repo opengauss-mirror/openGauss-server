@@ -55,6 +55,7 @@
 /* USE_UB_TXN_CACHE - BEGIN */
 #include "access/ubmem_buf.h"
 #include "access/ub_sigbus_handler.h"
+#include "ddes/dms/ss_common_attr.h"
 /* USE_UB_TXN_CACHE - END */
 #ifdef USE_ASSERT_CHECKING
 #include "utils/builtins.h"
@@ -1533,6 +1534,7 @@ bool UBGetTxnStatusFromPrimary(TransactionId xid, CLogXidStatus *status)
 
     uint64 slot_idx = UBCLogCalSlotIndex(xid);
     uint16 expected_timeline = (uint16)UBCLogExpectedTimeline(xid);
+    uint64 start_time = SSGetTransactionSyncStartTime();
     uint16 slot_val = 0;
     int ub_fault_rc = sigsetjmp(jump_env, 1);
     if (ub_fault_rc == 0) {
@@ -1543,10 +1545,12 @@ bool UBGetTxnStatusFromPrimary(TransactionId xid, CLogXidStatus *status)
     } else {
         ub_sigbus_jump_active = 0;
         g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+        SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_CLOG_UB, start_time);
         ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBGetTxnStatusFromPrimary, xid=%lu, slot_idx=%lu",
                                   (unsigned long)xid, (unsigned long)slot_idx)));
         return false;
     }
+    SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_CLOG_UB, start_time);
 
     if (slot_val == 0xFFFF) {
         return false;

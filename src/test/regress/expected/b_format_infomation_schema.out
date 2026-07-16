@@ -84,7 +84,7 @@ PARTITION BY RANGE (c1) SUBPARTITION BY RANGE (c2)
 select CONSTRAINT_CATALOG,CONSTRAINT_SCHEMA,CONSTRAINT_NAME,TABLE_SCHEMA,TABLE_NAME,CONSTRAINT_TYPE,ENFORCED from information_schema.table_constraints order by 1,2,3,4 limit 1;
  constraint_catalog | constraint_schema |    constraint_name    | table_schema |  table_name   | constraint_type | enforced 
 --------------------+-------------------+-----------------------+--------------+---------------+-----------------+----------
- test_b1            | coverage          | 4994_13141_1_not_null | coverage     | proc_coverage | CHECK           | YES
+--? test_b1\s+\| coverage\s+\| 4994_[0-9]+_1_not_null \| coverage\s+\| proc_coverage \| CHECK\s+\| YES
 (1 row)
 
 select CHARACTER_SET_NAME,DEFAULT_COLLATE_NAME,DESCRIPTION,MAXLEN from INFORMATION_SCHEMA.CHARACTER_SETS order by 1,2,3,4 limit 1;
@@ -96,7 +96,7 @@ select CHARACTER_SET_NAME,DEFAULT_COLLATE_NAME,DESCRIPTION,MAXLEN from INFORMATI
 select CONSTRAINT_CATALOG,CONSTRAINT_SCHEMA,CONSTRAINT_NAME,CHECK_CLAUSE FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS order by 1,2,3,4 limit 1;
  constraint_catalog | constraint_schema |    constraint_name    |      check_clause       
 --------------------+-------------------+-----------------------+-------------------------
- test_b1            | coverage          | 4994_13141_1_not_null | coverage_id IS NOT NULL
+--? test_b1\s+\| coverage\s+\| 4994_[0-9]+_1_not_null \| coverage_id IS NOT NULL
 (1 row)
 
 select COLLATION_NAME,CHARACTER_SET_NAME,IS_DEFAULT,IS_COMPILED,SORTLEN,PAD_ATTRIBUTE from INFORMATION_SCHEMA.COLLATIONS order by 1,2,3,4 limit 1;

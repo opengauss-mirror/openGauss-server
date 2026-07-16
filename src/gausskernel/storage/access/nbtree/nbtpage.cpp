@@ -788,8 +788,17 @@ static void BtRootbufCacheEnsureSessionInit(void)
         allocCxt, sizeof(BtMetaPageCache));
     u_sess->storage_cxt.btMetaCache->lastHitSlot = -1;
     u_sess->storage_cxt.btMetaCache->reformVer = g_instance.dms_cxt.SSReformInfo.reform_ver;
+    /*
+     * Keep this owner outside ThreadRootResourceOwner.  Standalone backend
+     * shutdown releases the thread-root tree before the root-buffer cache is
+     * cleaned explicitly; leaving this owner as a child would release its
+     * pins there and make the later cache cleanup unpin them a second time.
+     * ResourceOwnerCreate() requires a parent for non-root owners, so create
+     * it as a child first and detach it immediately.
+     */
     u_sess->storage_cxt.btMetaCacheResOwner =
         ResourceOwnerCreate(t_thrd.utils_cxt.ThreadRootResourceOwner, "BtMetaCache", allocCxt);
+    ResourceOwnerNewParent(u_sess->storage_cxt.btMetaCacheResOwner, NULL);
     BtRootbufCacheRegisterRelcacheCallback();
     (void)MemoryContextSwitchTo(oldCxt);
 }

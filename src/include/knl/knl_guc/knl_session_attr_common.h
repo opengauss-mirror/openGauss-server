@@ -239,6 +239,7 @@ typedef struct knl_session_attr_common {
     int dn_heartbeat_interval;
     bool enable_full_encryption;
     bool enable_proc_coverage;
+    bool enable_ub_sync_record;
 
     char* router_att;
     bool enable_router;

@@ -22,6 +22,8 @@
  *
  * ---------------------------------------------------------------------------------------
  */
+#include <time.h>
+
 #include "utils/snapshot.h"
 #include "utils/postinit.h"
 #include "utils/knl_globalsysdbcache.h"
@@ -31,6 +33,7 @@
 #include "access/multi_redo_api.h"
 #include "access/ubmem_buf.h"
 #include "access/ub_sigbus_handler.h"
+#include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_transaction.h"
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
@@ -64,11 +67,96 @@ static inline void txnstatusHashStats(uint64 timeDiff);
 
 void SSStandbyGlobalInvalidSharedInvalidMessages(const SharedInvalidationMessage* msg, Oid tsid);
 
+static const uint64 SS_NANOSECONDS_PER_SECOND = UINT64CONST(1000000000);
+
+static uint64 SSGetCurrentTimeNs(void)
+{
+#ifndef WIN32
+    struct timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return 0;
+    }
+    return (uint64)ts.tv_sec * SS_NANOSECONDS_PER_SECOND + (uint64)ts.tv_nsec;
+#else
+    instr_time now;
+
+    INSTR_TIME_SET_CURRENT(now);
+    return (uint64)(INSTR_TIME_GET_DOUBLE(now) * (double)SS_NANOSECONDS_PER_SECOND);
+#endif
+}
+
+/* only used if enable_ub_sync_record = true */
+uint64 SSGetTransactionSyncStartTime(void)
+{
+    if (u_sess == NULL || !u_sess->attr.attr_common.enable_ub_sync_record) {
+        return 0;
+    }
+    return SSGetCurrentTimeNs();
+}
+
+void SSResetTransactionSyncStatus(void)
+{
+    errno_t rc = memset_s(g_instance.dms_cxt.SSDFxStats.txn_sync_status,
+        sizeof(g_instance.dms_cxt.SSDFxStats.txn_sync_status), 0,
+        sizeof(g_instance.dms_cxt.SSDFxStats.txn_sync_status));
+    securec_check_c(rc, "\0", "\0");
+}
+
+static void SSRecordTransactionSyncStatus(SsTxnSyncStatusTypeT type, uint64 cost)
+{
+    if (u_sess == NULL || !u_sess->attr.attr_common.enable_ub_sync_record ||
+        type < 0 || type >= SS_TXN_SYNC_STATUS_TYPE_COUNT) {
+        return;
+    }
+
+    SsTxnSyncStatusT *status = &g_instance.dms_cxt.SSDFxStats.txn_sync_status[type];
+    if (cost > (uint64)PG_INT64_MAX) {
+        status->times = 0;
+        status->total_cost = 0;
+        return;
+    }
+    if (status->times >= (uint64)PG_INT64_MAX || status->total_cost > (uint64)PG_INT64_MAX - cost) {
+        status->times = 0;
+        status->total_cost = 0;
+    }
+
+    status->times++;
+    status->total_cost += cost;
+}
+
+void SSRecordTransactionSyncStatusByStart(SsTxnSyncStatusTypeT type, uint64 start_time)
+{
+    if (start_time == 0 || u_sess == NULL ||
+        !u_sess->attr.attr_common.enable_ub_sync_record) {
+        return;
+    }
+
+    uint64 end_time = SSGetCurrentTimeNs();
+    if (end_time < start_time) {
+        return;
+    }
+    SSRecordTransactionSyncStatus(type, end_time - start_time);
+}
+
+void SSGetTransactionSyncStatus(SsTxnSyncStatusT *status, uint32 count)
+{
+    if (status == NULL || count < SS_TXN_SYNC_STATUS_TYPE_COUNT) {
+        return;
+    }
+
+    errno_t rc = memcpy_s(status, sizeof(SsTxnSyncStatusT) * count,
+        g_instance.dms_cxt.SSDFxStats.txn_sync_status,
+        sizeof(g_instance.dms_cxt.SSDFxStats.txn_sync_status));
+    securec_check_c(rc, "\0", "\0");
+}
+
 static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
 {
     dms_opengauss_txn_snapshot_t dms_snapshot;
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
+    uint64 start_time = SSGetTransactionSyncStartTime();
 
     do {
         dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_PRIMARY_ID;
@@ -77,18 +165,22 @@ static Snapshot SSGetSnapshotDataFromMaster(Snapshot snapshot)
         }
 
         if (AM_WAL_SENDER && SS_IN_REFORM) {
+            SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_TOTAL_DMS, start_time);
             return NULL;
         }
 
         if (SSBackendNeedExitScenario() && SS_AM_WORKER) {
+            SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_TOTAL_DMS, start_time);
             return NULL;
         }
         if (SS_IN_FAILOVER && t_thrd.role == TRACK_STMT_WORKER) {
+            SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_TOTAL_DMS, start_time);
             return NULL;
         }
         pg_usleep(USECS_PER_SEC);
-
     } while (true);
+
+    SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_TOTAL_DMS, start_time);
 
     snapshot->xmin = dms_snapshot.xmin;
     snapshot->xmax = dms_snapshot.xmax;
@@ -1832,34 +1924,42 @@ bool UBGetSnapshotFromPrimary(TransactionId *xmin,
                                TransactionId *xmax,
                                CommitSeqNo *csn)
 {
+    uint64 start_time = SSGetTransactionSyncStartTime();
+
     if (SS_IN_REFORM) {
+        SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_TOTAL_UB, start_time);
         return false;
     }
 
     UBSnapshotBuffer *buf = (UBSnapshotBuffer *)g_instance.shmem_cxt.UBSnapshotBufPtr;
     if (buf == nullptr) {
+        SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_TOTAL_UB, start_time);
         return false;
     }
 
     for (int retry = 0; retry < SNAPSHOT_RETRY_COUNT; retry++) {
+        uint64 one_start_time = SSGetTransactionSyncStartTime();
         int ub_fault_rc = sigsetjmp(jump_env, 1);
         if (ub_fault_rc == 0) {
             ub_sigbus_jump_active = 1;
-            if (UBSnapshotSlotGet(&buf->slots[0], xmin, xmax, csn)) {
-                UB_ESB_BARRIER();
-                ub_sigbus_jump_active = 0;
-                return true;
-            }
+            bool success = UBSnapshotSlotGet(&buf->slots[0], xmin, xmax, csn);
             UB_ESB_BARRIER();
             ub_sigbus_jump_active = 0;
+            SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_ONE_UB, one_start_time);
+            if (success) {
+                SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_TOTAL_UB, start_time);
+                return true;
+            }
         } else {
             ub_sigbus_jump_active = 0;
             g_instance.shmem_cxt.UBMemAccessEnabled.store(false, std::memory_order_release);
+            SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_ONE_UB, one_start_time);
             ereport(WARNING, (errmsg("[SIGBUS] fault captured in UBGetSnapshotFromPrimary, retry=%d", retry)));
             break;
         }
     }
 
+    SSRecordTransactionSyncStatusByStart(SS_TXN_SYNC_SNAPSHOT_TOTAL_UB, start_time);
     return false;
 }
 
