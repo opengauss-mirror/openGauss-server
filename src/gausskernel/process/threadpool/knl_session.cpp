@@ -26,6 +26,7 @@
 #include <locale.h>
 
 #include "access/reloptions.h"
+#include "access/nbtree.h"
 #include "access/xlogdefs.h"
 #include "access/ustore/knl_uundovec.h"
 #include "commands/tablespace.h"
@@ -56,6 +57,7 @@
 #include "utils/plog.h"
 #include "utils/portal.h"
 #include "utils/relmapper.h"
+#include "utils/resowner.h"
 #include "access/heapam.h"
 #include "workload/workload.h"
 #include "parser/scanner.h"
@@ -1026,6 +1028,8 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
     storage_cxt->bulk_buf_vacuum = NULL;
     storage_cxt->max_heap_bulk_read_size = 0;
     storage_cxt->max_vacuum_bulk_read_size = 0;
+    storage_cxt->btMetaCache = NULL;
+    storage_cxt->btMetaCacheResOwner = NULL;
 }
 
 static void knl_u_libpq_init(knl_u_libpq_context* libpq_cxt)
@@ -1749,6 +1753,12 @@ void free_session_context(knl_session_context* session)
     t_thrd.libpq_cxt.DoingCopyOut = false;
 
     t_thrd.xact_cxt.next_xid = InvalidTransactionId;
+
+    if (session->storage_cxt.btMetaCacheResOwner != NULL) {
+        BtRootbufCacheSessionOwnerCleanup("session_free");
+        ResourceOwnerDelete(session->storage_cxt.btMetaCacheResOwner);
+        session->storage_cxt.btMetaCacheResOwner = NULL;
+    }
 
     /* Release session related memory. */
     SelfMemoryContext = NULL;

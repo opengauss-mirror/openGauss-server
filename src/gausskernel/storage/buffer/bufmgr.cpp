@@ -86,6 +86,9 @@
 #include "tde_key_management/tde_key_storage.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "ddes/dms/ss_common_attr.h"
+
+extern bool BtRootbufCacheBeginRevoke(const BufferTag *tag);
+extern void BtRootbufCacheEndRevoke(const BufferTag *tag);
 #include "ddes/dms/ss_reform_common.h"
 #include "ddes/dms/ss_transaction.h"
 
@@ -129,12 +132,93 @@ typedef struct CkptTsStatus {
 
 static inline int32 GetPrivateRefCount(Buffer buffer);
 void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref);
+static int GetExpectedPersistentBufferPins(Buffer buffer);
 static void CheckForBufferLeaks(void);
 static int ts_ckpt_progress_comparator(Datum a, Datum b, void *arg);
 static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
     BlockNumber blockNum, ReadBufferMode mode, bool isExtend, Block bufBlock, const XLogPhyBlock *pblk,
     bool *need_repair);
 
+/*
+ * DMS read repair failed and the caller should return InvalidBuffer instead of
+ * continuing the retry loop. Failover uses cancel cause to exit; primary restart
+ * keeps page_need_retry semantics and waits/retries in the upper layer.
+ */
+static inline bool SSNeedReturnInvalidBufferForDmsReadRepair()
+{
+    return SSPageReadCancelAllowed() || SSPageReadCancelCauseSet();
+}
+
+/*
+ * Mark DMS read repair as needing retry. In failover, also record DATA_PAGE so
+ * ReadBuffer_common can clean its data-page resources and ERROR at a safe point.
+ */
+static inline void SSMarkDmsReadRepairRetry(SSPageReadCancelPoint point)
+{
+    t_thrd.dms_cxt.page_need_retry = true;
+    if (SSNeedExitPageReadInFailover() && !SSPageReadCancelCauseSet()) {
+        t_thrd.dms_cxt.page_read_cancel_cause = SS_PAGE_READ_CANCEL_DATA_PAGE;
+        t_thrd.dms_cxt.page_read_cancel_point = point;
+    }
+}
+
+/* Report failover page-read exit for paths that already cleaned their own resources. */
+static inline void SSErrorPageReadCancel(SSPageReadCancelCause cause, SSPageReadCancelPoint point)
+{
+    SSClearPageReadCancel();
+    ereport(ERROR,
+        (errmodule(MOD_DMS),
+            errmsg("[SS failover] backend thread exits during failover while reading %s, blocking point: %s",
+                SSPageReadCancelCauseName(cause), SSPageReadCancelPointName(point))));
+}
+
+/*
+ * Convert a pending page-read cancel into ERROR after the current layer has
+ * already cleaned its resources. Primary restart retry has no cancel cause and
+ * will not be reported here.
+ */
+static inline void SSErrorIfPageReadCancelPending()
+{
+    if (SSNeedExitByPageReadCancel()) {
+        SSErrorPageReadCancel(t_thrd.dms_cxt.page_read_cancel_cause, t_thrd.dms_cxt.page_read_cancel_point);
+    }
+}
+
+/*
+ * LockBuffer is currently reading a segment metadata buffer and the caller has
+ * explicitly enabled metadata rollback for an analyzed segment-head path.
+ */
+static inline bool SSCanCancelSegMetaPageReadInLockBuffer(volatile BufferDesc *buf)
+{
+    return SSPageReadCancelEnabled() && IsSegmentBufferID(buf->buf_id);
+}
+
+/*
+ * Mark segment metadata read/lock rollback. Failover records SEG_META so upper
+ * layers exit after cleanup; primary restart only keeps page_need_retry.
+ */
+static inline void SSMarkSegMetaPageReadCancel(SSPageReadCancelPoint point)
+{
+    t_thrd.dms_cxt.page_need_retry = true;
+    if (SSNeedExitPageReadInFailover()) {
+        t_thrd.dms_cxt.page_read_cancel_cause = SS_PAGE_READ_CANCEL_SEG_META;
+        t_thrd.dms_cxt.page_read_cancel_point = point;
+    }
+}
+
+/* Clean resources owned by ReadBuffer_common before failover exits the data-page read path. */
+static inline void SSCleanupReadBufferCommonForPageReadExit(BufferDesc *bufHdr, ForkNumber forkNum,
+    BlockNumber blockNum)
+{
+    if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
+        TerminateBufferIO(bufHdr, false, 0);
+    }
+    ClearReadHint(bufHdr->buf_id);
+    SSUnPinBuffer(bufHdr);
+    if (t_thrd.role != PAGEREDO && SS_PRIMARY_ONDEMAND_RECOVERY) {
+        ondemand_extreme_rto::ReleaseHashMapLockIfAny(bufHdr, forkNum, blockNum);
+    }
+}
 
 char* BufferTagToString(const BufferTag* buftag, char* resBuffer, int len)
 {
@@ -2297,8 +2381,12 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
             blockNum, readmode, isExtend, bufBlock, NULL, &need_repair);
     }
     if (need_repair) {
-        if (SS_AM_BACKENDS_WORKERS && SS_STANDBY_IN_PRIMARY_RESTART) {
-            t_thrd.dms_cxt.page_need_retry = true;
+        /* Roll back DMS read repair to ReadBuffer_common; the caller handles the data-page boundary. */
+        if (SSNeedReturnInvalidBufferForDmsReadRepair()) {
+            SSMarkDmsReadRepairRetry(SS_PAGE_READ_CANCEL_POINT_DMS_READ_REPAIR);
+#ifdef USE_ASSERT_CHECKING
+            pfree_ext(past_image);
+#endif
             return InvalidBuffer;
         }
         LWLockRelease(buf_desc->io_in_progress_lock);
@@ -2414,6 +2502,12 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
          * not currently in memory.
          */
         bufHdr = BufferAlloc(smgr->smgr_rnode.node, relpersistence, forkNum, firstBlockNum, strategy, &found, pblk);
+        if (bufHdr == NULL) {
+            /* BufferAlloc returns NULL for failover page-read cancel. */
+            SSErrorIfPageReadCancelPending();
+            ereport(ERROR, (errcode(ERRCODE_INVALID_BUFFER),
+                errmsg("failed to allocate buffer for relation %s", relpath(smgr->smgr_rnode, forkNum))));
+        }
         if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
             bufHdr->extra->encrypt = smgr->encrypt ? true : false; 
         }
@@ -2468,6 +2562,12 @@ Buffer MultiBulkReadBufferCommon(SMgrRelation smgr, char relpersistence, ForkNum
             bufHdr = LocalBufferAlloc(smgr, forkNum, blockNum, &found);
         } else {
             bufHdr = BufferAlloc(smgr->smgr_rnode.node, relpersistence, forkNum, blockNum, strategy, &found, pblk);
+            if (bufHdr == NULL) {
+                /* BufferAlloc returns NULL for failover page-read cancel. */
+                SSErrorIfPageReadCancelPending();
+                ereport(ERROR, (errcode(ERRCODE_INVALID_BUFFER),
+                    errmsg("failed to allocate buffer for relation %s", relpath(smgr->smgr_rnode, forkNum))));
+            }
             if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
                 bufHdr->extra->encrypt = smgr->encrypt ? true : false; /* set tde flag */
             }
@@ -2608,10 +2708,18 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
      * head may be re-used, i.e., the relfilenode may be reused. Thus the
      * smgrnblocks interface can not be used on standby. Just skip this check.
      */
-    } else if (RecoveryInProgress() && 
+    } else if (RecoveryInProgress() && !t_thrd.xlog_cxt.InRecovery &&
         !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
         BlockNumber totalBlkNum = smgrnblocks_cached(smgr, forkNum);
-
+        if (pg_atomic_read_u32(&g_instance.conn_cxt.CurCMAProcCount) >= NUM_CMAGENT_WARN_COUNT &&
+            u_sess->proc_cxt.clientIsCMAgent) {
+            ereport(ERROR, (errmsg("worker thread which connect with cm_agent are exiting")));
+        }
+        /* No page resource is held before block-count lookup; exit at ReadBuffer_common directly. */
+        if (SSNeedExitPageReadInFailover()) {
+            SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                SS_PAGE_READ_CANCEL_POINT_SMGRNBLOCKS_CHECK);
+        }
         /* Update cached blocks */
         if (totalBlkNum == InvalidBlockNumber || blockNum >= totalBlkNum) {
             totalBlkNum = smgrnblocks(smgr, forkNum);
@@ -2631,11 +2739,29 @@ Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber fork
             pgstatCountLocalBlocksRead4SessionLevel();
         }
     } else {
+        if (pg_atomic_read_u32(&g_instance.conn_cxt.CurCMAProcCount) >= NUM_CMAGENT_WARN_COUNT &&
+            u_sess->proc_cxt.clientIsCMAgent) {
+            ereport(ERROR, (errmsg("worker thread which connect with cm_agent are exiting")));
+        }
+        /* No buffer has been allocated yet; failover exits at the ReadBuffer_common entry boundary. */
+        if (SSNeedExitPageReadInFailover()) {
+            SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                SS_PAGE_READ_CANCEL_POINT_BEFORE_BUFFER_ALLOC);
+        }
         /*
          * lookup the buffer.  IO_IN_PROGRESS is set if the requested block is
          * not currently in memory.
          */
         bufHdr = BufferAlloc(smgr->smgr_rnode.node, relpersistence, forkNum, blockNum, strategy, &found, pblk);
+        if (bufHdr == NULL) {
+            SSErrorIfPageReadCancelPending();
+            if (ENABLE_DMS && AmDmsProcess() && !dms_drc_accessible((uint8)DRC_RES_PAGE_TYPE) &&
+                t_thrd.dms_cxt.in_ondemand_redo) {
+                return InvalidBuffer;
+            }
+            ereport(ERROR, (errcode(ERRCODE_INVALID_BUFFER),
+                errmsg("failed to allocate buffer for relation %s", relpath(smgr->smgr_rnode, forkNum))));
+        }
 
         if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
             bufHdr->extra->encrypt = smgr->encrypt ? true : false; /* set tde flag */
@@ -2774,6 +2900,12 @@ found_branch:
 
             do {
                 if (!DmsCheckBufAccessible()) {
+                    /* DMS access retry would loop here; clean data-page state and exit ReadBuffer_common. */
+                    if (SSNeedExitPageReadInFailover()) {
+                        SSCleanupReadBufferCommonForPageReadExit(bufHdr, forkNum, blockNum);
+                        SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                            SS_PAGE_READ_CANCEL_POINT_DMS_ACCESS_CHECK);
+                    }
                     if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                         TerminateBufferIO(bufHdr, false, 0);
                     }
@@ -2790,6 +2922,12 @@ found_branch:
 
                 // standby node must notify primary node for prepare lastest page in ondemand recovery
                 if (SS_STANDBY_ONDEMAND_NOT_NORMAL && !SSOndemandRequestPrimaryRedo(bufHdr->tag)) {
+                    /* On-demand redo request failed; clean data-page state and exit ReadBuffer_common. */
+                    if (SSNeedExitPageReadInFailover()) {
+                        SSCleanupReadBufferCommonForPageReadExit(bufHdr, forkNum, blockNum);
+                        SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                            SS_PAGE_READ_CANCEL_POINT_ONDEMAND_REDO_REQUEST);
+                    }
                     if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
                         TerminateBufferIO(bufHdr, false, 0);
                     }
@@ -2822,6 +2960,17 @@ found_branch:
                             }
                             return InvalidBuffer;
                         }
+                        /* StartReadPage failed and would sleep/retry; clean data-page state before ERROR. */
+                        if (SSNeedExitPageReadInFailover()) {
+                            SSCleanupReadBufferCommonForPageReadExit(bufHdr, forkNum, blockNum);
+                            SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                                SS_PAGE_READ_CANCEL_POINT_START_READ_PAGE);
+                        }
+                        if (pg_atomic_read_u32(&g_instance.conn_cxt.CurCMAProcCount) >= NUM_CMAGENT_WARN_COUNT &&
+                            u_sess->proc_cxt.clientIsCMAgent) {
+                            SSUnPinBuffer(bufHdr);
+                            ereport(ERROR, (errmsg("worker thread which connect with cm_agent are exiting")));
+                        }
                         pg_usleep(5000L);
                         continue;
                     }
@@ -2839,7 +2988,12 @@ found_branch:
                  * and mes proc for standby node during primary restarting.
                  */
                 if (BufferIsInvalid(tmpBuffer) && t_thrd.dms_cxt.page_need_retry) {
-                    t_thrd.dms_cxt.page_need_retry = false;
+                    if (SSNeedExitByPageReadCancel()) {
+                        /* Lower layer requested cancel; release data-page state and ERROR here. */
+                        SSCleanupReadBufferCommonForPageReadExit(bufHdr, forkNum, blockNum);
+                        SSErrorIfPageReadCancelPending();
+                    }
+                    SSClearPageReadCancel();
                     ereport(DEBUG1, (errmodule(MOD_DMS),
                         (errmsg("[SS][%u/%u/%u/%d %d-%u] ReadBuffer_common need reload in reform, buf_id:%d",
                                 bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode,
@@ -3408,6 +3562,7 @@ retry_new_buffer:
 
         if (BUF_STATE_GET_REFCOUNT(buf_state) == 1 && !(old_flags & BM_DIRTY) 
             && !(old_flags & BM_IS_META)) {
+            bool dmsReleaseFailed = false;
             if (ENABLE_DMS && (old_flags & BM_TAG_VALID)) {
                 /*
                 * notify DMS to release drc owner. if failed, can't recycle this buffer.
@@ -3418,13 +3573,28 @@ retry_new_buffer:
                     ClearReadHint(buf->buf_id, true);
                     break;
                 }
-                /* when in failover,  woker thread should return InvalidBuffer and exit */
-                if (SS_IN_FAILOVER && ((t_thrd.role == WORKER) || (t_thrd.role == THREADPOOL_WORKER))) {
-                    ClearReadHint(buf->buf_id, true);
-                    break;
-                }
+                dmsReleaseFailed = true;
             } else {
                 break;
+            }
+
+            if (dmsReleaseFailed) {
+                BufTableDelete(&new_tag, new_hash);
+                if ((old_flags & BM_TAG_VALID) && old_partition_lock != new_partition_lock) {
+                    LWLockRelease(old_partition_lock);
+                }
+
+                UnlockBufHdr(buf, buf_state);
+                LWLockRelease(new_partition_lock);
+                UnpinBuffer(buf, true);
+                if (SSNeedExitPageReadInFailover()) {
+                    /* DmsReleaseOwner failed after victim cleanup; roll back to ReadBuffer_common. */
+                    t_thrd.dms_cxt.page_need_retry = true;
+                    t_thrd.dms_cxt.page_read_cancel_cause = SS_PAGE_READ_CANCEL_DATA_PAGE;
+                    t_thrd.dms_cxt.page_read_cancel_point = SS_PAGE_READ_CANCEL_POINT_BUFFER_ALLOC_DMS_RELEASE;
+                    return NULL;
+                }
+                continue;
             }
         }
 
@@ -3565,6 +3735,7 @@ void InvalidateBuffer(BufferDesc *buf)
     LWLock *old_partition_lock = NULL; /* buffer partition lock for it */
     uint64 old_flags;
     uint64 buf_state;
+    bool rootCacheRevoke = false;
 
     /* Save the original buffer tag before dropping the spinlock */
     old_tag = ((BufferDesc *)buf)->tag;
@@ -3572,6 +3743,11 @@ void InvalidateBuffer(BufferDesc *buf)
     buf_state = pg_atomic_read_u64(&buf->state);
     Assert(buf_state & BM_LOCKED);
     UnlockBufHdr(buf, buf_state);
+
+    if (ENABLE_DMS && SS_STANDBY_MODE && t_thrd.role == DMS_WORKER &&
+        old_tag.forkNum == MAIN_FORKNUM && g_instance.attr.attr_storage.enable_btree_rootbuf_cache) {
+        rootCacheRevoke = BtRootbufCacheBeginRevoke(&old_tag);
+    }
 
     /*
      * Need to compute the old tag's hashcode and partition lock ID. XXX is it
@@ -3595,6 +3771,9 @@ retry:
     if (!BUFFERTAGS_EQUAL(buf->tag, old_tag)) {
         UnlockBufHdr(buf, buf_state);
         LWLockRelease(old_partition_lock);
+        if (rootCacheRevoke) {
+            BtRootbufCacheEndRevoke(&old_tag);
+        }
         return;
     }
 
@@ -3660,6 +3839,9 @@ retry:
      * Done with mapping lock.
      */
     LWLockRelease(old_partition_lock);
+    if (rootCacheRevoke) {
+        BtRootbufCacheEndRevoke(&old_tag);
+    }
 }
 
 #ifdef USE_ASSERT_CHECKING
@@ -4874,6 +5056,9 @@ int GetThreadBufferLeakNum(void)
         res = &t_thrd.storage_cxt.PrivateRefCountArray[i];
 
         if (res->buffer != InvalidBuffer) {
+            if (res->refcount <= GetExpectedPersistentBufferPins(res->buffer)) {
+                continue;
+            }
             PrintBufferLeakWarning(res->buffer);
             refCountErrors++;
         }
@@ -4884,6 +5069,9 @@ int GetThreadBufferLeakNum(void)
         HASH_SEQ_STATUS hstat;
         hash_seq_init(&hstat, t_thrd.storage_cxt.PrivateRefCountHash);
         while ((res = (PrivateRefCountEntry *)hash_seq_search(&hstat)) != NULL) {
+            if (res->refcount <= GetExpectedPersistentBufferPins(res->buffer)) {
+                continue;
+            }
             PrintBufferLeakWarning(res->buffer);
             refCountErrors++;
         }
@@ -4898,7 +5086,7 @@ bool CheckForBufferPin(void)
     for (int i = 0; i < REFCOUNT_ARRAY_ENTRIES; i++) {
         res = &t_thrd.storage_cxt.PrivateRefCountArray[i];
 
-        if (res->buffer != InvalidBuffer) {
+        if (res->buffer != InvalidBuffer && res->refcount > GetExpectedPersistentBufferPins(res->buffer)) {
             return true;
         }
     }
@@ -4907,6 +5095,9 @@ bool CheckForBufferPin(void)
         HASH_SEQ_STATUS hstat;
         hash_seq_init(&hstat, t_thrd.storage_cxt.PrivateRefCountHash);
         while ((res = (PrivateRefCountEntry *)hash_seq_search(&hstat)) != NULL) {
+            if (res->refcount <= GetExpectedPersistentBufferPins(res->buffer)) {
+                continue;
+            }
             hash_seq_term(&hstat);
             return true;
         }
@@ -4931,6 +5122,25 @@ static void CheckForBufferLeaks(void)
 #endif
 }
 
+static int GetExpectedPersistentBufferPins(Buffer buffer)
+{
+    BtMetaPageCache *cache = NULL;
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCache == NULL || !BufferIsValid(buffer) || BufferIsLocal(buffer)) {
+        return 0;
+    }
+
+    cache = u_sess->storage_cxt.btMetaCache;
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtMetaPageCacheEntry *entry = &cache->entries[i];
+        if (entry->isPinned && entry->buffer == buffer) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 /*
  * Helper routine to issue warnings when a buffer is unexpectedly pinned
  */
@@ -4950,6 +5160,10 @@ void PrintBufferLeakWarning(Buffer buffer)
     } else {
         buf = GetBufferDescriptor(buffer - 1);
         loccount = GetPrivateRefCount(buffer);
+        loccount -= GetExpectedPersistentBufferPins(buffer);
+        if (loccount < 0) {
+            loccount = 0;
+        }
         backend = InvalidBackendId;
     }
 
@@ -6514,6 +6728,17 @@ retry:
      * need to transfer newest page version by DMS.
      */
     if (ENABLE_DMS && mode != BUFFER_LOCK_UNLOCK) {
+        if (SSNeedExitPageReadInFailover()) {
+            /* LockBuffer owns content_lock here; release it before page-read failover exit. */
+            LWLockRelease(buf->content_lock);
+            if (SSCanCancelSegMetaPageReadInLockBuffer(buf)) {
+                SSMarkSegMetaPageReadCancel(SS_PAGE_READ_CANCEL_POINT_LOCKBUFFER_BEFORE_DMS_READ);
+                return;
+            }
+            SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                SS_PAGE_READ_CANCEL_POINT_LOCKBUFFER_BEFORE_DMS_READ);
+        }
+
         LWLockMode lock_mode = (origin_mode == BUFFER_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
         Buffer tmp_buffer;
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
@@ -6542,9 +6767,23 @@ retry:
 
             LWLockRelease(buf->content_lock);
 
-            if (SSNeedTerminateRequestPageInPrimaryRestart(GetBufferDescriptor(buffer - 1))) {
-                t_thrd.dms_cxt.page_need_retry = true;
+            if (pg_atomic_read_u32(&g_instance.conn_cxt.CurCMAProcCount) >= NUM_CMAGENT_WARN_COUNT &&
+                u_sess->proc_cxt.clientIsCMAgent) {
+                ereport(ERROR, (errmsg("worker thread which connect with cm_agent are exiting")));
+            }
+            /*
+             * Roll back covered metadata paths: either this buffer is segment metadata,
+             * or data-page IO is waiting on another segment metadata page.
+             */
+            if (SSCanCancelSegMetaPageReadInLockBuffer(buf) ||
+                SSNeedTerminateRequestMetaPageInReform(GetBufferDescriptor(buffer - 1))) {
+                SSMarkSegMetaPageReadCancel(SS_PAGE_READ_CANCEL_POINT_LOCKBUFFER_DMS_READ);
                 return;
+            }
+            /* Uncovered failover data-page read failure exits here after LockBuffer releases its lock. */
+            if (SSNeedExitPageReadInFailover()) {
+                SSErrorPageReadCancel(SS_PAGE_READ_CANCEL_DATA_PAGE,
+                    SS_PAGE_READ_CANCEL_POINT_LOCKBUFFER_DMS_READ);
             }
 
             if (AmDmsReformProcProcess() && dms_reform_failed()) {

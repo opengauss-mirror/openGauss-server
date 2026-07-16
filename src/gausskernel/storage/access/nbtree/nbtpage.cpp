@@ -33,11 +33,15 @@
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "miscadmin.h"
+#include "storage/buf/buf_internals.h"
 #include "storage/indexfsm.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/proc.h"
 #include "utils/inval.h"
+#include "utils/lsyscache.h"
+#include "utils/atomic.h"
+#include "utils/resowner.h"
 #include "utils/snapmgr.h"
 
 static BTMetaPageData *btree_get_meta(Relation rel, Buffer metabuf);
@@ -46,6 +50,97 @@ static bool _bt_unlink_halfdead_page(Relation rel, Buffer leafbuf, bool *rightsi
 static bool _bt_lock_branch_parent(Relation rel, BlockNumber child, BTStack stack, Buffer *topparent,
                                    OffsetNumber *topoff, BlockNumber *target, BlockNumber *rightsib);
 static void _bt_log_reuse_page(Relation rel, BlockNumber blkno, TransactionId latestRemovedXid);
+typedef struct BtRootCacheKey {
+    RelFileNode rnode;
+    ForkNumber forkNum;
+    BlockNumber rootBlkno;
+} BtRootCacheKey;
+
+#define BT_ROOTBUF_GLOBAL_GUARD_SIZE 64
+#define BT_ROOTBUF_BORROWER_STRIPES 64
+#define BT_ROOTBUF_BORROWER_HASH_SHIFT 16
+#define BT_ROOTBUF_BORROWER_SECOND_HASH_SHIFT (BT_ROOTBUF_BORROWER_HASH_SHIFT + BT_ROOTBUF_BORROWER_HASH_SHIFT)
+#define BT_ROOTBUF_CACHE_EXPIRE_MS 60000
+#define BT_ROOTBUF_INVALID_GUARD_SLOT (-1)
+
+/*
+ * Borrow counters are striped so normal cache hits do not update the same
+ * cache line.  DMS revoke is rare and can afford to sum all stripes.
+ */
+#ifdef WIN32
+typedef struct BtRootBorrowerStripe
+#else
+typedef struct __attribute__((aligned(PG_CACHE_LINE_SIZE))) BtRootBorrowerStripe
+#endif
+{
+    pg_atomic_uint32 count;
+} BtRootBorrowerStripe;
+
+/* a slot for guarding bt root cache of an btree index */
+typedef struct BtRootGlobalGuard {
+    /* Whether this guard slot is in use. */
+    bool valid;
+    /* Physical root page identified by this guard. */
+    BtRootCacheKey key;
+    /* Bumped before DMS revokes cached root users. */
+    pg_atomic_uint64 generation;
+    /* Set while DMS invalidation is blocking new borrows. */
+    pg_atomic_uint32 revoking;
+    /* Striped borrowers currently using this root on the hit/borrow path. */
+    BtRootBorrowerStripe activeBorrowers[BT_ROOTBUF_BORROWER_STRIPES];
+    /* Session cache entries persistently pinning this root in cache. */
+    uint32 cachedPins;
+    /* Guard creation sequence, used for fixed-array victim choice. */
+    uint64 insertSeq;
+    /* How many revoke flows are still handling this root. */
+    uint32 revokeHolders;
+} BtRootGlobalGuard;
+
+/* Protect root guard state updates. */
+static pthread_mutex_t g_bt_rootbuf_guard_mutex = PTHREAD_MUTEX_INITIALIZER;
+/* Wake waiters when revoke/borrow state changes. */
+static pthread_cond_t g_bt_rootbuf_guard_cond = PTHREAD_COND_INITIALIZER;
+/* Global guard table for cached root pages. */
+static BtRootGlobalGuard g_btRootbufGuards[BT_ROOTBUF_GLOBAL_GUARD_SIZE];
+static uint64 g_bt_rootbuf_guard_insert_seq = 0;
+static inline bool BtRootbufBufferMatchesRelation(Relation rel, volatile BufferDesc *buf_desc);
+static inline bool BtRootbufCacheKeyEquals(const BtRootCacheKey *left, const BtRootCacheKey *right);
+static inline BtRootCacheKey BtRootbufCacheKeyFromRelation(Relation rel, BlockNumber rootblkno);
+static inline BtRootCacheKey BtRootbufCacheKeyFromEntry(const BtMetaPageCacheEntry *entry);
+static inline BtRootCacheKey BtRootbufCacheKeyFromTag(const BufferTag *tag);
+static inline void BtRootbufCacheSetEntryKey(BtMetaPageCacheEntry *entry, const BtRootCacheKey *key);
+static inline bool BtRootbufCacheEnabled(Relation rel, int access);
+static inline bool BtRootbufCacheLogEnabled(void);
+static inline bool BtRootbufCachedRootPageIsValid(Page page);
+static inline BtBorrowedRootState *BtRootbufGetBorrowedState(void);
+static void BtResetBorrowedRootbuf(void);
+static inline void BtRootbufMarkBorrowed(Relation rel, Buffer rootbuf, int guardSlot);
+static bool BtRootbufCachePin(Buffer rootbuf);
+static void BtRootbufCacheUnpin(Buffer rootbuf);
+static inline uint32 BtRootbufBorrowerStripeId(void);
+static uint32 BtRootbufActiveBorrowers(BtRootGlobalGuard *guard);
+static int BtRootbufFindGuardSlotLocked(const BtRootCacheKey *key);
+static BtRootGlobalGuard *BtRootbufFindGuardLocked(const BtRootCacheKey *key);
+static BtRootGlobalGuard *BtRootbufGetGuardBySlot(int guardSlot);
+static BtRootGlobalGuard *BtRootbufGetOrCreateGuardLocked(const BtRootCacheKey *key, int *guardSlot);
+static bool BtRootbufCachePrepareStore(const BtRootCacheKey *key, uint64 *generation, int *guardSlot);
+static bool BtRootbufCacheRegisterSessionPin(const BtRootCacheKey *key, uint64 generation);
+static bool BtRootbufCacheBeginBorrow(const BtRootCacheKey *key, int guardSlot, uint64 generation,
+                                           const char **reason);
+static void BtRootbufCacheFinishBorrow(int guardSlot);
+static void BtRootbufCacheWaitIfRevoking(const BtRootCacheKey *key);
+static void BtLogRootbufCacheEnter(Relation rel, const BtMetaPageCacheEntry *entry, int slot, const char *action);
+static void BtLogRootbufCacheLeave(const BtMetaPageCacheEntry *entry, int slot, const char *reason);
+static void BtRootbufCacheResetEntry(BtMetaPageCacheEntry *entry, int slot, const char *reason);
+static void BtRootbufCacheEnsureSessionInit(void);
+static void BtRootbufCacheCleanupSessionState(const char *reason);
+static void BtRootbufCacheCleanupRelation(Oid relid, const char *reason);
+static void BtRootbufCacheRelcacheCallback(Datum arg, Oid relid);
+static void BtRootbufCacheSessionCleanup(void);
+static void BtRootbufCacheRegisterRelcacheCallback(void);
+static Buffer BtRootbufGetFromCache(Relation rel, int access);
+static void BtRootbufStoreToCache(Relation rel, Buffer rootbuf, int access);
+static void BtRootbufCacheSyncReformVer(void);
 
 /*
  *	_bt_initmetapage() -- Fill a page buffer with a correct metapage image
@@ -72,7 +167,7 @@ void _bt_initmetapage(Page page, BlockNumber rootbknum, uint32 level, bool alleq
         metad->btm_allequalimage = false;
     } else {
         metad->btm_allequalimage = allequalimage;
-    }   
+    }
 
     metaopaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
     metaopaque->btpo_flags = BTP_META;
@@ -155,6 +250,13 @@ Buffer _bt_getroot(Relation rel, int access)
     uint32 rootlevel;
     BTMetaPageData *metad = NULL;
 
+    BtRootbufCacheSyncReformVer();
+    BtResetBorrowedRootbuf();
+    rootbuf = BtRootbufGetFromCache(rel, access);
+    if (BufferIsValid(rootbuf)) {
+        return rootbuf;
+    }
+
     /*
      * Try to use previously-cached metapage data to find the root.  This
      * normally saves one buffer access per index search, which is a very
@@ -172,6 +274,8 @@ Buffer _bt_getroot(Relation rel, int access)
         Assert(rootblkno != P_NONE);
         rootlevel = metad->btm_fastlevel;
 
+        BtRootCacheKey rootkey = BtRootbufCacheKeyFromRelation(rel, rootblkno);
+        BtRootbufCacheWaitIfRevoking(&rootkey);
         rootbuf = _bt_getbuf(rel, rootblkno, BT_READ);
         rootpage = BufferGetPage(rootbuf);
         rootopaque = (BTPageOpaqueInternal)PageGetSpecialPointer(rootpage);
@@ -185,6 +289,7 @@ Buffer _bt_getroot(Relation rel, int access)
         if (!P_IGNORE(rootopaque) && rootopaque->btpo.level == rootlevel && P_LEFTMOST(rootopaque) &&
             P_RIGHTMOST(rootopaque)) {
             /* OK, accept cached page as the root */
+            BtRootbufStoreToCache(rel, rootbuf, access);
             return rootbuf;
         }
         _bt_relbuf(rel, rootbuf);
@@ -335,6 +440,8 @@ Buffer _bt_getroot(Relation rel, int access)
         rootbuf = metabuf;
 
         for (;;) {
+            BtRootCacheKey rootkey = BtRootbufCacheKeyFromRelation(rel, rootblkno);
+            BtRootbufCacheWaitIfRevoking(&rootkey);
             rootbuf = _bt_relandgetbuf(rel, rootbuf, rootblkno, BT_READ);
             rootpage = BufferGetPage(rootbuf);
             rootopaque = (BTPageOpaqueInternal)PageGetSpecialPointer(rootpage);
@@ -359,6 +466,7 @@ Buffer _bt_getroot(Relation rel, int access)
      * By here, we have a pin and read lock on the root page, and no lock set
      * on the metadata page.  Return the root page's buffer.
      */
+    BtRootbufStoreToCache(rel, rootbuf, access);
     return rootbuf;
 }
 
@@ -584,6 +692,1078 @@ static void _bt_log_reuse_page(const Relation rel, BlockNumber blkno, Transactio
     (void)XLogInsert(RM_BTREE_ID, XLOG_BTREE_REUSE_PAGE, rel->rd_node.bucketNode);
 }
 
+/* Check whether the cached buffer still belongs to the target relation. */
+static inline bool BtRootbufBufferMatchesRelation(Relation rel, volatile BufferDesc *buf_desc)
+{
+    return (buf_desc->tag.forkNum == MAIN_FORKNUM) && RelFileNodeEquals(buf_desc->tag.rnode, rel->rd_node);
+}
+
+/* Compare two physical root-page cache keys. */
+static inline bool BtRootbufCacheKeyEquals(const BtRootCacheKey *left, const BtRootCacheKey *right)
+{
+    return RelFileNodeEquals(left->rnode, right->rnode) && left->forkNum == right->forkNum &&
+        left->rootBlkno == right->rootBlkno;
+}
+
+/* Build a root cache key from relation and root block. */
+static inline BtRootCacheKey BtRootbufCacheKeyFromRelation(Relation rel, BlockNumber rootblkno)
+{
+    BtRootCacheKey key;
+
+    key.rnode = rel->rd_node;
+    key.forkNum = MAIN_FORKNUM;
+    key.rootBlkno = rootblkno;
+    return key;
+}
+
+/* Build a root cache key from a cache entry. */
+static inline BtRootCacheKey BtRootbufCacheKeyFromEntry(const BtMetaPageCacheEntry *entry)
+{
+    BtRootCacheKey key;
+
+    key.rnode = entry->rnode;
+    key.forkNum = entry->forkNum;
+    key.rootBlkno = entry->rootBlkno;
+    return key;
+}
+
+/* Build a root cache key from a buffer tag. */
+static inline BtRootCacheKey BtRootbufCacheKeyFromTag(const BufferTag *tag)
+{
+    BtRootCacheKey key;
+
+    key.rnode = tag->rnode;
+    key.forkNum = tag->forkNum;
+    key.rootBlkno = tag->blockNum;
+    return key;
+}
+
+/* Copy the physical root-page key into a cache entry. */
+static inline void BtRootbufCacheSetEntryKey(BtMetaPageCacheEntry *entry, const BtRootCacheKey *key)
+{
+    entry->rnode = key->rnode;
+    entry->forkNum = key->forkNum;
+    entry->rootBlkno = key->rootBlkno;
+}
+
+static inline bool BtRootbufCacheThreadAllowed(void)
+{
+    return t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER;
+}
+
+static void BtRootbufCacheEnsureSessionInit(void)
+{
+    MemoryContext allocCxt = NULL;
+    MemoryContext oldCxt = NULL;
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCache != NULL ||
+        u_sess->storage_cxt.btMetaCacheResOwner != NULL) {
+        return;
+    }
+
+    /*
+     * Keep the cache worker-only.  Startup/background threads never pass the
+     * worker-role gate, while ordinary backends legitimately run with session_id
+     * == 0 because they execute on the thread's fake session.
+     */
+    if (!BtRootbufCacheThreadAllowed()) {
+        return;
+    }
+
+    if (!(g_instance.attr.attr_storage.enable_btree_rootbuf_cache && ENABLE_DMS && SS_NORMAL_STANDBY)) {
+        return;
+    }
+
+    /*
+     * Lazy root-cache state belongs to the session cache context.  Ordinary
+     * backends reuse ThreadTopMemoryContext as session top context, and that
+     * root is sealed once startup finishes, so do not fall back to top_mem_cxt
+     * here.
+     */
+    allocCxt = u_sess->cache_mem_cxt;
+    if (allocCxt == NULL) {
+        return;
+    }
+
+    oldCxt = MemoryContextSwitchTo(allocCxt);
+    u_sess->storage_cxt.btMetaCache = (BtMetaPageCache*)MemoryContextAllocZero(
+        allocCxt, sizeof(BtMetaPageCache));
+    u_sess->storage_cxt.btMetaCache->lastHitSlot = -1;
+    u_sess->storage_cxt.btMetaCache->reformVer = g_instance.dms_cxt.SSReformInfo.reform_ver;
+    u_sess->storage_cxt.btMetaCacheResOwner =
+        ResourceOwnerCreate(NULL, "BtMetaCache", allocCxt);
+    BtRootbufCacheRegisterRelcacheCallback();
+    (void)MemoryContextSwitchTo(oldCxt);
+}
+
+/* Check whether the standby root cache fast path can be used. */
+static inline bool BtRootbufCacheEnabled(Relation rel, int access)
+{
+    if (RelationGetRelid(rel) < FirstNormalObjectId || access != BT_READ ||
+        u_sess == NULL || !BtRootbufCacheThreadAllowed()) {
+        return false;
+    }
+
+    BtRootbufCacheEnsureSessionInit();
+
+    return g_instance.attr.attr_storage.enable_btree_rootbuf_cache &&
+        ENABLE_DMS && SS_NORMAL_STANDBY &&
+        u_sess != NULL && u_sess->storage_cxt.btMetaCache != NULL &&
+        u_sess->storage_cxt.btMetaCacheResOwner != NULL;
+}
+
+/* Check whether root cache debug logging is enabled. */
+static inline bool BtRootbufCacheLogEnabled(void)
+{
+    return u_sess != NULL && u_sess->attr.attr_storage.log_btree_rootbuf_cache;
+}
+
+/* Check whether the cached page still looks like a usable root page. */
+static inline bool BtRootbufCachedRootPageIsValid(Page page)
+{
+    BTPageOpaqueInternal rootopaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+
+    return !P_ISMETA(rootopaque) && !P_IGNORE(rootopaque) && P_LEFTMOST(rootopaque) && P_RIGHTMOST(rootopaque);
+}
+
+/* Fetch the session-local borrowed-root tracking state. */
+static inline BtBorrowedRootState *BtRootbufGetBorrowedState(void)
+{
+    if (u_sess == NULL) {
+        return NULL;
+    }
+
+    return &u_sess->storage_cxt.btMetaBorrowedRootState;
+}
+
+/* Drop the session-local borrowed-root marker and borrow ref. */
+static void BtResetBorrowedRootbuf(void)
+{
+    BtBorrowedRootState *state = BtRootbufGetBorrowedState();
+
+    if (state == NULL) {
+        return;
+    }
+
+    if (state->hasBorrow) {
+        BtRootbufCacheFinishBorrow(state->guardSlot);
+    }
+
+    state->buffer = InvalidBuffer;
+    state->relOid = InvalidOid;
+    state->hasBorrow = false;
+    state->guardSlot = BT_ROOTBUF_INVALID_GUARD_SLOT;
+}
+
+/* Remember the current borrowed root in session state. */
+static inline void BtRootbufMarkBorrowed(Relation rel, Buffer rootbuf, int guardSlot)
+{
+    BtBorrowedRootState *state = BtRootbufGetBorrowedState();
+
+    if (state == NULL) {
+        return;
+    }
+
+    state->buffer = rootbuf;
+    state->relOid = RelationGetRelid(rel);
+    state->hasBorrow = true;
+    state->guardSlot = guardSlot;
+}
+
+/* Take an extra session-level pin for a cached root buffer. */
+static bool BtRootbufCachePin(Buffer rootbuf)
+{
+    ResourceOwner cacheOwner = NULL;
+    ResourceOwner saveOwner = NULL;
+
+    if (u_sess == NULL || !BufferIsValid(rootbuf) || BufferIsLocal(rootbuf)) {
+        return false;
+    }
+
+    cacheOwner = u_sess->storage_cxt.btMetaCacheResOwner;
+    if (cacheOwner == NULL) {
+        return false;
+    }
+
+    saveOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    t_thrd.utils_cxt.CurrentResourceOwner = cacheOwner;
+    /* Remember the extra session-level buffer pin in btMetaCacheResOwner. */
+    ResourceOwnerEnlargeBuffers(cacheOwner);
+    IncrBufferRefCount(rootbuf);
+    t_thrd.utils_cxt.CurrentResourceOwner = saveOwner;
+    return true;
+}
+
+/* Release the extra session-level pin for a cached root buffer. */
+static void BtRootbufCacheUnpin(Buffer rootbuf)
+{
+    ResourceOwner cacheOwner = NULL;
+    ResourceOwner saveOwner = NULL;
+
+    if (u_sess == NULL || !BufferIsValid(rootbuf) || BufferIsLocal(rootbuf)) {
+        return;
+    }
+
+    cacheOwner = u_sess->storage_cxt.btMetaCacheResOwner;
+    if (cacheOwner == NULL) {
+        return;
+    }
+
+    saveOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    t_thrd.utils_cxt.CurrentResourceOwner = cacheOwner;
+    UnpinBuffer(GetBufferDescriptor(rootbuf - 1), true);
+    t_thrd.utils_cxt.CurrentResourceOwner = saveOwner;
+}
+
+/* Choose the borrower counter stripe for the current thread. */
+static inline uint32 BtRootbufBorrowerStripeId(void)
+{
+    uint64 threadId = (uint64)t_thrd.proc_cxt.MyProcPid;
+
+    return (uint32)((threadId ^ (threadId >> BT_ROOTBUF_BORROWER_HASH_SHIFT) ^
+        (threadId >> BT_ROOTBUF_BORROWER_SECOND_HASH_SHIFT)) & (BT_ROOTBUF_BORROWER_STRIPES - 1));
+}
+
+/* Sum all borrower stripes for this root guard. */
+static uint32 BtRootbufActiveBorrowers(BtRootGlobalGuard *guard)
+{
+    uint32 total = 0;
+
+    for (int i = 0; i < BT_ROOTBUF_BORROWER_STRIPES; i++) {
+        total += pg_atomic_read_u32(&guard->activeBorrowers[i].count);
+    }
+
+    return total;
+}
+
+/* Find the guard slot for the physical root page. */
+static int BtRootbufFindGuardSlotLocked(const BtRootCacheKey *key)
+{
+    for (int i = 0; i < BT_ROOTBUF_GLOBAL_GUARD_SIZE; i++) {
+        BtRootGlobalGuard *guard = &g_btRootbufGuards[i];
+
+        if (guard->valid && BtRootbufCacheKeyEquals(&guard->key, key)) {
+            return i;
+        }
+    }
+
+    return BT_ROOTBUF_INVALID_GUARD_SLOT;
+}
+
+/* Look up the guard object for the physical root page. */
+static BtRootGlobalGuard *BtRootbufFindGuardLocked(const BtRootCacheKey *key)
+{
+    int slot = BtRootbufFindGuardSlotLocked(key);
+    if (slot >= 0) {
+        return &g_btRootbufGuards[slot];
+    }
+
+    return NULL;
+}
+
+/* Get a valid guard by slot number. */
+static BtRootGlobalGuard *BtRootbufGetGuardBySlot(int guardSlot)
+{
+    BtRootGlobalGuard *guard = NULL;
+
+    if (guardSlot < 0 || guardSlot >= BT_ROOTBUF_GLOBAL_GUARD_SIZE) {
+        return NULL;
+    }
+
+    guard = &g_btRootbufGuards[guardSlot];
+    if (guard->valid) {
+        return guard;
+    }
+
+    return NULL;
+}
+
+/* Find or allocate a guard slot for this physical root page. */
+static BtRootGlobalGuard *BtRootbufGetOrCreateGuardLocked(const BtRootCacheKey *key, int *guardSlot)
+{
+    /* check target root page if has created a guard slot */
+    int slot = BtRootbufFindGuardSlotLocked(key);
+    BtRootGlobalGuard *guard = NULL;
+    int target = -1;
+    int victim = -1;
+    uint64 oldestSeq = 0;
+
+    /* if has created, return it */
+    if (slot >= 0) {
+        *guardSlot = slot;
+        return &g_btRootbufGuards[slot];
+    }
+
+    /* if not, scan the guard slots to find an unused slot. */
+    for (int i = 0; i < BT_ROOTBUF_GLOBAL_GUARD_SIZE; i++) {
+        guard = &g_btRootbufGuards[i];
+        if (!guard->valid) {
+            target = i;
+            break;
+        }
+
+        /* find a victim which has no active borrower and no cached pin. */
+        if (pg_atomic_read_u32(&guard->revoking) == 0 &&
+            BtRootbufActiveBorrowers(guard) == 0 && guard->cachedPins == 0 &&
+            (victim < 0 || guard->insertSeq < oldestSeq)) {
+            victim = i;
+            oldestSeq = guard->insertSeq;
+        }
+    }
+
+    if (target < 0) {
+        target = victim;
+    }
+    if (target < 0) {
+        return NULL;
+    }
+
+    /* initialize the guard slot */
+    guard = &g_btRootbufGuards[target];
+    errno_t rc = memset_s(guard, sizeof(BtRootGlobalGuard), 0, sizeof(BtRootGlobalGuard));
+    securec_check(rc, "", "");
+    guard->valid = true;
+    guard->key = *key;
+    pg_atomic_write_u64(&guard->generation, 1);
+    pg_atomic_write_u32(&guard->revoking, 0);
+    for (int i = 0; i < BT_ROOTBUF_BORROWER_STRIPES; i++) {
+        pg_atomic_write_u32(&guard->activeBorrowers[i].count, 0);
+    }
+    guard->insertSeq = ++g_bt_rootbuf_guard_insert_seq;
+    *guardSlot = target;
+    return guard;
+}
+
+/* Prepare guard state before storing a root page into cache. */
+static bool BtRootbufCachePrepareStore(const BtRootCacheKey *key, uint64 *generation, int *guardSlot)
+{
+    bool result = false;
+
+    if (!g_instance.attr.attr_storage.enable_btree_rootbuf_cache || !ENABLE_DMS || !SS_NORMAL_STANDBY) {
+        return false;
+    }
+
+    (void)pthread_mutex_lock(&g_bt_rootbuf_guard_mutex);
+    BtRootGlobalGuard *guard = BtRootbufGetOrCreateGuardLocked(key, guardSlot);
+    if (guard != NULL && pg_atomic_read_u32(&guard->revoking) == 0) {
+        *generation = pg_atomic_read_u64(&guard->generation);
+        result = true;
+    }
+    (void)pthread_mutex_unlock(&g_bt_rootbuf_guard_mutex);
+
+    return result;
+}
+
+/* Register one persistent cache pin on the guard. */
+static bool BtRootbufCacheRegisterSessionPin(const BtRootCacheKey *key, uint64 generation)
+{
+    bool result = false;
+
+    (void)pthread_mutex_lock(&g_bt_rootbuf_guard_mutex);
+    BtRootGlobalGuard *guard = BtRootbufFindGuardLocked(key);
+    if (guard != NULL && pg_atomic_read_u32(&guard->revoking) == 0 &&
+        pg_atomic_read_u64(&guard->generation) == generation) {
+        guard->cachedPins++;
+        result = true;
+    }
+    (void)pthread_mutex_unlock(&g_bt_rootbuf_guard_mutex);
+
+    return result;
+}
+
+/* Try to enter the borrowed-root fast path for one cache hit. */
+static bool BtRootbufCacheBeginBorrow(const BtRootCacheKey *key, int guardSlot, uint64 generation,
+                                           const char **reason)
+{
+    BtRootGlobalGuard *guard = BtRootbufGetGuardBySlot(guardSlot);
+    uint64 guardGeneration;
+    uint32 stripeId = BtRootbufBorrowerStripeId();
+
+    *reason = "no_guard";
+    if (guard == NULL) {
+        return false;
+    }
+
+    Assert(BtRootbufCacheKeyEquals(&guard->key, key));
+
+    guardGeneration = pg_atomic_read_u64(&guard->generation);
+    if (guardGeneration != generation) {
+        *reason = "stale_generation";
+        return false;
+    }
+
+    if (pg_atomic_read_u32(&guard->revoking) != 0) {
+        *reason = "revoking";
+        return false;
+    }
+
+    (void)pg_atomic_fetch_add_u32(&guard->activeBorrowers[stripeId].count, 1);
+
+    guardGeneration = pg_atomic_read_u64(&guard->generation);
+    if (guardGeneration != generation || pg_atomic_read_u32(&guard->revoking) != 0) {
+        *reason = (guardGeneration != generation) ? "stale_generation" : "revoking";
+        BtRootbufCacheFinishBorrow(guardSlot);
+        return false;
+    }
+
+    return true;
+}
+
+/* Finish one borrowed-root use and wake revokers if needed. */
+static void BtRootbufCacheFinishBorrow(int guardSlot)
+{
+    BtRootGlobalGuard *guard = BtRootbufGetGuardBySlot(guardSlot);
+    uint32 oldBorrowers;
+    uint32 stripeId = BtRootbufBorrowerStripeId();
+
+    if (guard == NULL) {
+        return;
+    }
+
+    oldBorrowers = pg_atomic_fetch_sub_u32(&guard->activeBorrowers[stripeId].count, 1);
+    Assert(oldBorrowers > 0);
+
+    /* wake up the mes thread if the last borrower finishes */
+    if (oldBorrowers == 1 && pg_atomic_read_u32(&guard->revoking) != 0) {
+        (void)pthread_mutex_lock(&g_bt_rootbuf_guard_mutex);
+        if (BtRootbufActiveBorrowers(guard) == 0) {
+            pthread_cond_broadcast(&g_bt_rootbuf_guard_cond);
+        }
+        (void)pthread_mutex_unlock(&g_bt_rootbuf_guard_mutex);
+    }
+}
+
+/* Wait until an in-flight revoke on this root finishes. */
+static void BtRootbufCacheWaitIfRevoking(const BtRootCacheKey *key)
+{
+    bool needWait = true;
+
+    if (!g_instance.attr.attr_storage.enable_btree_rootbuf_cache || !ENABLE_DMS || !SS_NORMAL_STANDBY) {
+        return;
+    }
+
+    (void)pthread_mutex_lock(&g_bt_rootbuf_guard_mutex);
+    while (needWait) {
+        BtRootGlobalGuard *guard = BtRootbufFindGuardLocked(key);
+
+        needWait = (guard != NULL && pg_atomic_read_u32(&guard->revoking) != 0);
+        if (needWait) {
+            (void)pthread_cond_wait(&g_bt_rootbuf_guard_cond, &g_bt_rootbuf_guard_mutex);
+        }
+    }
+    (void)pthread_mutex_unlock(&g_bt_rootbuf_guard_mutex);
+}
+
+/* Block new borrows for this root and wait for current borrowers. */
+bool BtRootbufCacheBeginRevoke(const BufferTag *tag)
+{
+    if (tag == NULL || tag->forkNum != MAIN_FORKNUM ||
+        !g_instance.attr.attr_storage.enable_btree_rootbuf_cache || !ENABLE_DMS || !SS_STANDBY_MODE) {
+        return false;
+    }
+
+    BtRootCacheKey key = BtRootbufCacheKeyFromTag(tag);
+    bool found = false;
+
+    (void)pthread_mutex_lock(&g_bt_rootbuf_guard_mutex);
+    BtRootGlobalGuard *guard = BtRootbufFindGuardLocked(&key);
+    if (guard != NULL) {
+        found = true;
+        if (pg_atomic_read_u32(&guard->revoking) == 0) {
+            pg_atomic_write_u32(&guard->revoking, 1);
+            (void)pg_atomic_fetch_add_u64(&guard->generation, 1);
+        }
+        guard->revokeHolders++;
+        while (BtRootbufActiveBorrowers(guard) > 0) {
+            (void)pthread_cond_wait(&g_bt_rootbuf_guard_cond, &g_bt_rootbuf_guard_mutex);
+        }
+    }
+    (void)pthread_mutex_unlock(&g_bt_rootbuf_guard_mutex);
+
+    return found;
+}
+
+/* Release the revoke state after invalidate finishes. */
+void BtRootbufCacheEndRevoke(const BufferTag *tag)
+{
+    if (tag == NULL || tag->forkNum != MAIN_FORKNUM ||
+        !g_instance.attr.attr_storage.enable_btree_rootbuf_cache || !ENABLE_DMS || !SS_STANDBY_MODE) {
+        return;
+    }
+
+    BtRootCacheKey key = BtRootbufCacheKeyFromTag(tag);
+
+    (void)pthread_mutex_lock(&g_bt_rootbuf_guard_mutex);
+    BtRootGlobalGuard *guard = BtRootbufFindGuardLocked(&key);
+    if (guard != NULL) {
+        if (guard->revokeHolders > 0) {
+            guard->revokeHolders--;
+        }
+        if (guard->revokeHolders == 0) {
+            pg_atomic_write_u32(&guard->revoking, 0);
+            pthread_cond_broadcast(&g_bt_rootbuf_guard_cond);
+        }
+    }
+    (void)pthread_mutex_unlock(&g_bt_rootbuf_guard_mutex);
+}
+
+/* Check whether this buffer is being used through borrowed-root. */
+bool BtRootbufIsBorrowed(Relation rel, Buffer buf)
+{
+    BtBorrowedRootState *state = BtRootbufGetBorrowedState();
+
+    return state != NULL && state->hasBorrow && BufferIsValid(buf) && state->buffer == buf &&
+        state->relOid == RelationGetRelid(rel);
+}
+
+/* Release the borrowed-root marker for this buffer. */
+void BtRootbufReleaseBorrowed(Relation rel, Buffer buf)
+{
+    if (BtRootbufIsBorrowed(rel, buf)) {
+        BtResetBorrowedRootbuf();
+    }
+}
+
+/* Log a root cache insert, replace, or repin event. */
+static void BtLogRootbufCacheEnter(Relation rel, const BtMetaPageCacheEntry *entry, int slot, const char *action)
+{
+    Buffer rootbuf;
+
+    if (!BtRootbufCacheLogEnabled() || rel == NULL || entry == NULL) {
+        return;
+    }
+
+    rootbuf = entry->buffer;
+    if (!BufferIsValid(rootbuf)) {
+        return;
+    }
+
+    ereport(LOG,
+        (errmsg("[btree root cache] enter: action=%s, slot=%d, relid=%u, relname=%s, relfilenode=%u, "
+                "rootbuf=%d, rootblkno=%u, generation=" UINT64_FORMAT ", insert_seq=" UINT64_FORMAT,
+                action,
+                slot,
+                RelationGetRelid(rel),
+                RelationGetRelationName(rel),
+                rel->rd_node.relNode,
+                rootbuf,
+                BufferGetBlockNumber(rootbuf),
+                entry->generation,
+                entry->insertSeq)));
+}
+
+/* Log why a root cache entry is being dropped. */
+static void BtLogRootbufCacheLeave(const BtMetaPageCacheEntry *entry, int slot, const char *reason)
+{
+    char *relName = NULL;
+    const char *safeRelName = "<unknown>";
+
+    if (!BtRootbufCacheLogEnabled() || entry == NULL) {
+        return;
+    }
+
+    if (!OidIsValid(entry->relOid) && entry->buffer == InvalidBuffer) {
+        return;
+    }
+
+    if (OidIsValid(entry->relOid)) {
+        relName = get_rel_name(entry->relOid);
+    }
+
+    if (relName != NULL) {
+        safeRelName = relName;
+    }
+
+    ereport(LOG,
+        (errmsg("[btree root cache] leave: slot=%d, relid=%u, relname=%s, rootbuf=%d, pinned=%s, "
+                "rootblkno=%u, rootlevel=%u, rootlsn=" UINT64_FORMAT ", generation=" UINT64_FORMAT
+                ", insert_seq=" UINT64_FORMAT ", reason=%s",
+                slot,
+                entry->relOid,
+                safeRelName,
+                entry->buffer,
+                entry->isPinned ? "true" : "false",
+                entry->rootBlkno,
+                entry->rootLevel,
+                entry->rootPageLsn,
+                entry->generation,
+                entry->insertSeq,
+                reason)));
+
+    if (relName != NULL) {
+        pfree(relName);
+    }
+}
+
+/* Drop one cache entry and release its extra pin state. */
+static void BtRootbufCacheResetEntry(BtMetaPageCacheEntry *entry, int slot, const char *reason)
+{
+    BtMetaPageCacheEntry oldEntry = *entry;
+
+    if (entry->isPinned && BufferIsValid(entry->buffer)) {
+        BtRootCacheKey key = BtRootbufCacheKeyFromEntry(entry);
+        /* release the cached pin from guard slot */
+        (void)pthread_mutex_lock(&g_bt_rootbuf_guard_mutex);
+        BtRootGlobalGuard *guard = BtRootbufFindGuardLocked(&key);
+        if (guard != NULL && guard->cachedPins > 0) {
+            guard->cachedPins--;
+            pthread_cond_broadcast(&g_bt_rootbuf_guard_cond);
+        }
+        (void)pthread_mutex_unlock(&g_bt_rootbuf_guard_mutex);
+        /* release the session pin */
+        BtRootbufCacheUnpin(entry->buffer);
+    }
+
+    BtLogRootbufCacheLeave(&oldEntry, slot, reason);
+
+    entry->relOid = InvalidOid;
+    entry->buffer = InvalidBuffer;
+    entry->lastAccessTime = 0;
+    entry->insertSeq = 0;
+    entry->isPinned = false;
+    entry->rnode.spcNode = InvalidOid;
+    entry->rnode.dbNode = InvalidOid;
+    entry->rnode.relNode = InvalidOid;
+    entry->rnode.bucketNode = InvalidBktId;
+    entry->rnode.opt = 0;
+    entry->forkNum = InvalidForkNumber;
+    entry->rootBlkno = InvalidBlockNumber;
+    entry->rootLevel = 0;
+    entry->rootPageLsn = 0;
+    entry->generation = 0;
+    entry->guardSlot = BT_ROOTBUF_INVALID_GUARD_SLOT;
+}
+
+/* Drop stale session cache state after reform. */
+static void BtRootbufCacheSyncReformVer(void)
+{
+    TimestampTz reformVer;
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCache == NULL) {
+        return;
+    }
+
+    reformVer = g_instance.dms_cxt.SSReformInfo.reform_ver;
+    if (u_sess->storage_cxt.btMetaCache->reformVer == reformVer) {
+        return;
+    }
+
+    BtRootbufCacheSessionCleanup();
+    u_sess->storage_cxt.btMetaCache->lastHitSlot = -1;
+    u_sess->storage_cxt.btMetaCache->nextInsertSeq = 0;
+    u_sess->storage_cxt.btMetaCache->reformVer = reformVer;
+}
+
+/* Try to reuse a cached root buffer through the borrowed-root path. */
+static Buffer BtRootbufGetFromCache(Relation rel, int access)
+{
+    BtMetaPageCache *cache = NULL;
+    int startSlot;
+
+    if (!BtRootbufCacheEnabled(rel, access) || t_thrd.utils_cxt.CurrentResourceOwner == NULL) {
+        return InvalidBuffer;
+    }
+
+    cache = u_sess->storage_cxt.btMetaCache;
+    /* Scan the cache from the last hit slot. */
+    startSlot = cache->lastHitSlot;
+    for (int scan = 0; scan < BT_META_PAGE_CACHE_SIZE; scan++) {
+        int i = scan;
+        BtMetaPageCacheEntry *entry = &cache->entries[i];
+        Buffer rootbuf;
+        volatile BufferDesc *buf_desc = NULL;
+        Page rootpage;
+        BTPageOpaqueInternal rootopaque;
+        BtRootCacheKey key;
+        const char *guardReason = NULL;
+
+        /* Scan startslot first, the scan from 0 slot and skip the startslot. */
+        if (startSlot >= 0 && startSlot < BT_META_PAGE_CACHE_SIZE) {
+            if (scan == 0) {
+                i = startSlot;
+            } else {
+                i = scan - 1;
+                if (i >= startSlot) {
+                    i++;
+                }
+            }
+            entry = &cache->entries[i];
+        }
+
+        if (!OidIsValid(entry->relOid) || entry->buffer == InvalidBuffer) {
+            continue;
+        }
+
+        if (entry->relOid != RelationGetRelid(rel)) {
+            continue;
+        }
+
+        key = BtRootbufCacheKeyFromEntry(entry);
+        if (!RelFileNodeEquals(key.rnode, rel->rd_node) || key.forkNum != MAIN_FORKNUM) {
+            BtRootbufCacheResetEntry(entry, i, "relation_mismatch");
+            return InvalidBuffer;
+        }
+
+        if (!BtRootbufCacheBeginBorrow(&key, entry->guardSlot, entry->generation, &guardReason)) {
+            BtRootbufCacheResetEntry(entry, i, guardReason);
+            return InvalidBuffer;
+        }
+
+        rootbuf = (Buffer)entry->buffer;
+        if (!BufferIsValid(rootbuf) || BufferIsLocal(rootbuf)) {
+            BtRootbufCacheFinishBorrow(entry->guardSlot);
+            BtRootbufCacheResetEntry(entry, i, "invalid_buffer");
+            return InvalidBuffer;
+        }
+
+        buf_desc = GetBufferDescriptor(rootbuf - 1);
+        if (!BtRootbufBufferMatchesRelation(rel, buf_desc)) {
+            BtRootbufCacheFinishBorrow(entry->guardSlot);
+            BtRootbufCacheResetEntry(entry, i, "relation_mismatch");
+            return InvalidBuffer;
+        }
+
+        rootpage = BufferGetPage(rootbuf);
+        if (!BtRootbufCachedRootPageIsValid(rootpage)) {
+            BtRootbufCacheFinishBorrow(entry->guardSlot);
+            BtRootbufCacheResetEntry(entry, i, "invalid_root_page");
+            return InvalidBuffer;
+        }
+
+        rootopaque = (BTPageOpaqueInternal)PageGetSpecialPointer(rootpage);
+        if (BufferGetBlockNumber(rootbuf) != entry->rootBlkno) {
+            BtRootbufCacheFinishBorrow(entry->guardSlot);
+            BtRootbufCacheResetEntry(entry, i, "root_block_changed");
+            return InvalidBuffer;
+        }
+
+        if (rootopaque->btpo.level != entry->rootLevel) {
+            BtRootbufCacheFinishBorrow(entry->guardSlot);
+            BtRootbufCacheResetEntry(entry, i, "root_level_changed");
+            return InvalidBuffer;
+        }
+
+        if (PageGetLSN(rootpage) != entry->rootPageLsn) {
+            BtRootbufCacheFinishBorrow(entry->guardSlot);
+            BtRootbufCacheResetEntry(entry, i, "root_lsn_changed");
+            return InvalidBuffer;
+        }
+
+        /*
+         * Only internal root pages use the borrowed-root fast path.  When the
+         * root is also a leaf, keep the original caller-owned pin+lock flow and
+         * drop the cache entry so later lookups fall back to the old path too.
+         */
+        if (P_ISLEAF(rootopaque)) {
+            BtRootbufCacheFinishBorrow(entry->guardSlot);
+            BtRootbufCacheResetEntry(entry, i, "leaf_root");
+            return InvalidBuffer;
+        }
+
+        cache->lastHitSlot = i;
+        BtRootbufMarkBorrowed(rel, rootbuf, entry->guardSlot);
+        return rootbuf;
+    }
+
+    return InvalidBuffer;
+}
+
+/* Store a validated internal root buffer into the session cache. */
+static void BtRootbufStoreToCache(Relation rel, Buffer rootbuf, int access)
+{
+    TimestampTz now;
+    BtMetaPageCache *cache = NULL;
+    int target = -1;
+    int victim = -1;
+    uint64 oldestSeq = 0;
+    Page rootpage;
+    BTPageOpaqueInternal rootopaque = NULL;
+    BlockNumber rootblkno;
+    uint32 rootlevel;
+    uint64 rootPageLsn;
+    uint64 generation;
+    BtRootCacheKey key;
+    int guardSlot = BT_ROOTBUF_INVALID_GUARD_SLOT;
+
+    if (!BtRootbufCacheEnabled(rel, access) || !BufferIsValid(rootbuf) || BufferIsLocal(rootbuf)) {
+        return;
+    }
+
+    cache = u_sess->storage_cxt.btMetaCache;
+    rootpage = BufferGetPage(rootbuf);
+    if (!BtRootbufCachedRootPageIsValid(rootpage)) {
+        return;
+    }
+    rootopaque = (BTPageOpaqueInternal)PageGetSpecialPointer(rootpage);
+    if (P_ISLEAF(rootopaque)) {
+        return;
+    }
+    rootblkno = BufferGetBlockNumber(rootbuf);
+    rootlevel = rootopaque->btpo.level;
+    rootPageLsn = PageGetLSN(rootpage);
+    key = BtRootbufCacheKeyFromRelation(rel, rootblkno);
+    /* get or allocate the guard slot */
+    if (!BtRootbufCachePrepareStore(&key, &generation, &guardSlot)) {
+        return;
+    }
+
+    now = GetCurrentTimestamp();
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtMetaPageCacheEntry *entry = &cache->entries[i];
+
+        /* if the cache entry is unused, use it. */
+        if (!OidIsValid(entry->relOid) || entry->buffer == InvalidBuffer) {
+            if (target < 0) {
+                target = i;
+            }
+            continue;
+        }
+
+        /* if the cache entry is expired, reset and use it. */
+        if (TimestampDifferenceExceeds(entry->lastAccessTime, now, BT_ROOTBUF_CACHE_EXPIRE_MS)) {
+            BtRootbufCacheResetEntry(entry, i, "expired");
+            if (target < 0) {
+                target = i;
+            }
+            continue;
+        }
+
+        /* if hit the cache entry, check if it is valid. */
+        if (entry->relOid == RelationGetRelid(rel)) {
+            const char *cacheAction = NULL;
+            bool needPin = false;
+            bool sameKey = false;
+            BtRootCacheKey oldKey = BtRootbufCacheKeyFromEntry(entry);
+            uint64 nextSeq = entry->insertSeq;
+
+            sameKey = BtRootbufCacheKeyEquals(&oldKey, &key);
+            if (!sameKey || entry->buffer != rootbuf) {
+                uint64 oldSeq = entry->insertSeq;
+                BtRootbufCacheResetEntry(entry, i, "replace_existing_entry");
+                nextSeq = (oldSeq != 0) ? oldSeq : ++cache->nextInsertSeq;
+                needPin = true;
+                cacheAction = "replace";
+            } else if (!entry->isPinned) {
+                needPin = true;
+                cacheAction = "repin";
+            }
+
+            if (needPin) {
+                if (!BtRootbufCachePin(rootbuf)) {
+                    return;
+                }
+                if (!BtRootbufCacheRegisterSessionPin(&key, generation)) {
+                    BtRootbufCacheUnpin(rootbuf);
+                    return;
+                }
+            }
+
+            entry->relOid = RelationGetRelid(rel);
+            if (entry->insertSeq == 0) {
+                entry->insertSeq = (nextSeq != 0) ? nextSeq : ++cache->nextInsertSeq;
+            }
+            entry->lastAccessTime = now;
+            entry->buffer = rootbuf;
+            entry->isPinned = true;
+            BtRootbufCacheSetEntryKey(entry, &key);
+            entry->rootLevel = rootlevel;
+            entry->rootPageLsn = rootPageLsn;
+            entry->generation = generation;
+            entry->guardSlot = guardSlot;
+            cache->lastHitSlot = i;
+
+            if (cacheAction != NULL) {
+                BtLogRootbufCacheEnter(rel, entry, i, cacheAction);
+            }
+
+            return;
+        }
+
+        if (victim < 0 || entry->insertSeq < oldestSeq) {
+            victim = i;
+            oldestSeq = entry->insertSeq;
+        }
+    }
+
+    if (target < 0) {
+        target = victim;
+    }
+    if (target < 0) {
+        return;
+    }
+
+    /* cache miss, allocate a new entry. */
+    BtRootbufCacheResetEntry(&cache->entries[target], target, "evict_victim");
+    if (!BtRootbufCachePin(rootbuf)) {
+        return;
+    }
+    if (!BtRootbufCacheRegisterSessionPin(&key, generation)) {
+        BtRootbufCacheUnpin(rootbuf);
+        return;
+    }
+
+    cache->entries[target].relOid = RelationGetRelid(rel);
+    cache->entries[target].buffer = rootbuf;
+    cache->entries[target].lastAccessTime = now;
+    cache->entries[target].insertSeq = ++cache->nextInsertSeq;
+    cache->entries[target].isPinned = true;
+    BtRootbufCacheSetEntryKey(&cache->entries[target], &key);
+    cache->entries[target].rootLevel = rootlevel;
+    cache->entries[target].rootPageLsn = rootPageLsn;
+    cache->entries[target].generation = generation;
+    cache->entries[target].guardSlot = guardSlot;
+    cache->lastHitSlot = target;
+    BtLogRootbufCacheEnter(rel, &cache->entries[target], target, "insert");
+}
+
+/* Release all root cache state held by the current session. */
+static void BtRootbufCacheCleanupSessionState(const char *reason)
+{
+    int validEntries = 0;
+    int pinnedEntries = 0;
+    bool hasBorrow = false;
+    const char *cleanupReason = (reason != NULL) ? reason : "session_cleanup";
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCache == NULL) {
+        return;
+    }
+
+    hasBorrow = u_sess->storage_cxt.btMetaBorrowedRootState.hasBorrow;
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtMetaPageCacheEntry *entry = &u_sess->storage_cxt.btMetaCache->entries[i];
+        if (!OidIsValid(entry->relOid) || entry->buffer == InvalidBuffer) {
+            continue;
+        }
+        validEntries++;
+        if (entry->isPinned) {
+            pinnedEntries++;
+        }
+    }
+
+    if (BtRootbufCacheLogEnabled() && (validEntries > 0 || pinnedEntries > 0 || hasBorrow)) {
+        ereport(LOG,
+            (errmsg("[btree root cache] cleanup: reason=%s, valid_entries=%d, pinned_entries=%d, borrowed=%s",
+                    cleanupReason,
+                    validEntries,
+                    pinnedEntries,
+                    hasBorrow ? "true" : "false")));
+    }
+
+    BtResetBorrowedRootbuf();
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtRootbufCacheResetEntry(&u_sess->storage_cxt.btMetaCache->entries[i], i, cleanupReason);
+    }
+    u_sess->storage_cxt.btMetaCache->lastHitSlot = -1;
+    u_sess->storage_cxt.btMetaCache->nextInsertSeq = 0;
+}
+
+static void BtRootbufCacheSessionCleanup(void)
+{
+    BtRootbufCacheCleanupSessionState("session_cleanup");
+}
+
+void BtRootbufCacheSessionOwnerCleanup(const char *reason)
+{
+    ResourceOwner owner = NULL;
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCacheResOwner == NULL) {
+        return;
+    }
+
+    owner = u_sess->storage_cxt.btMetaCacheResOwner;
+    BtRootbufCacheCleanupSessionState(reason);
+    ResourceOwnerRelease(owner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
+    ResourceOwnerRelease(owner, RESOURCE_RELEASE_LOCKS, false, true);
+    ResourceOwnerRelease(owner, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
+}
+
+/* Release root cache entries for one relation when relcache invalidation arrives. */
+static void BtRootbufCacheCleanupRelation(Oid relid, const char *reason)
+{
+    int validEntries = 0;
+    int pinnedEntries = 0;
+    bool hasBorrow = false;
+    const char *cleanupReason = (reason != NULL) ? reason : "relcache_cleanup";
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCache == NULL || !OidIsValid(relid)) {
+        return;
+    }
+
+    hasBorrow = u_sess->storage_cxt.btMetaBorrowedRootState.hasBorrow &&
+        u_sess->storage_cxt.btMetaBorrowedRootState.relOid == relid;
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtMetaPageCacheEntry *entry = &u_sess->storage_cxt.btMetaCache->entries[i];
+        if (entry->relOid != relid || entry->buffer == InvalidBuffer) {
+            continue;
+        }
+        validEntries++;
+        if (entry->isPinned) {
+            pinnedEntries++;
+        }
+    }
+
+    if (validEntries == 0 && !hasBorrow) {
+        return;
+    }
+
+    if (BtRootbufCacheLogEnabled()) {
+        ereport(LOG,
+            (errmsg("[btree root cache] cleanup: reason=%s, relid=%u, valid_entries=%d, pinned_entries=%d, borrowed=%s",
+                    cleanupReason,
+                    relid,
+                    validEntries,
+                    pinnedEntries,
+                    hasBorrow ? "true" : "false")));
+    }
+
+    if (hasBorrow) {
+        BtResetBorrowedRootbuf();
+    }
+    for (int i = 0; i < BT_META_PAGE_CACHE_SIZE; i++) {
+        BtMetaPageCacheEntry *entry = &u_sess->storage_cxt.btMetaCache->entries[i];
+        if (entry->relOid == relid && entry->buffer != InvalidBuffer) {
+            BtRootbufCacheResetEntry(entry, i, cleanupReason);
+        }
+    }
+    if (u_sess->storage_cxt.btMetaCache->lastHitSlot >= 0) {
+        BtMetaPageCacheEntry *lastHit = &u_sess->storage_cxt.btMetaCache->entries[
+            u_sess->storage_cxt.btMetaCache->lastHitSlot];
+        if (!OidIsValid(lastHit->relOid) || lastHit->buffer == InvalidBuffer) {
+            u_sess->storage_cxt.btMetaCache->lastHitSlot = -1;
+        }
+    }
+}
+
+/* Relcache invalidation callback for live backends still holding root cache pins. */
+static void BtRootbufCacheRelcacheCallback(Datum arg, Oid relid)
+{
+    (void)arg;
+
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCacheResOwner == NULL) {
+        return;
+    }
+
+    if (!g_instance.attr.attr_storage.enable_btree_rootbuf_cache || !ENABLE_DMS || !SS_NORMAL_STANDBY) {
+        return;
+    }
+
+    if (relid == InvalidOid) {
+        BtRootbufCacheSessionOwnerCleanup("relcache_reset");
+        return;
+    }
+
+    BtRootbufCacheCleanupRelation(relid, "relcache_inval");
+}
+
+static void BtRootbufCacheRegisterRelcacheCallback(void)
+{
+    if (u_sess == NULL || u_sess->storage_cxt.btMetaCache == NULL) {
+        return;
+    }
+
+    CacheRegisterSessionRelcacheCallback(BtRootbufCacheRelcacheCallback, (Datum)0);
+}
+
 /*
  *	_bt_getbuf() -- Get a buffer by block number for read or write.
  *
@@ -736,8 +1916,10 @@ Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access
     Buffer buf;
 
     Assert(blkno != P_NEW);
-    if (BufferIsValid(obuf))
+    if (BufferIsValid(obuf)) {
+        BtRootbufReleaseBorrowed(rel, obuf);
         LockBuffer(obuf, BUFFER_LOCK_UNLOCK);
+    }
     buf = ReleaseAndReadBuffer(obuf, rel, blkno);
     _bt_checkbuffer_valid(rel, buf);
     LockBuffer(buf, access);
@@ -753,6 +1935,7 @@ Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access
 FORCE_INLINE
 void _bt_relbuf(Relation rel, Buffer buf)
 {
+    BtRootbufReleaseBorrowed(rel, buf);
     UnlockReleaseBuffer(buf);
 }
 

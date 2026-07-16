@@ -20,6 +20,7 @@
 #include <fcntl.h>
 
 #include "access/heapam.h"
+#include "access/nbtree.h"
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "access/xlog.h"
@@ -970,6 +971,16 @@ void ShutdownPostgres(int code, Datum arg)
     /* Make sure we've killed any active transaction */
     AbortOutOfAnyTransaction();
     ReleaseResownerOutOfTransaction();
+
+    /*
+     * The standby btree root cache keeps its extra pin in a dedicated
+     * session-level ResourceOwner.  Regular backend shutdown does not pass
+     * through thread-pool cleanup hooks, so release that owner here before
+     * shared-buffer invalidation starts waiting on orphaned pins.
+     */
+    if (u_sess != NULL && u_sess->storage_cxt.btMetaCacheResOwner != NULL) {
+        BtRootbufCacheSessionOwnerCleanup("backend_shutdown");
+    }
 
     if (u_sess->gtt_ctx.gtt_cleaner_exit_registered) {
         u_sess->gtt_ctx.gtt_cleaner_exit_registered = false;

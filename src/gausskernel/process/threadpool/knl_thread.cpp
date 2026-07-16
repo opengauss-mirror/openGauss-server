@@ -1745,8 +1745,11 @@ static void knl_t_dms_context_init(knl_t_dms_context *dms_cxt)
     dms_cxt->latest_snapshot_csn = 0;
     dms_cxt->pincount_array = (PinnedBufferItem *)palloc0(sizeof(PinnedBufferItem) * REFCOUNT_ARRAY_ENTRIES);
     dms_cxt->need_check_pincount = false;
-    dms_cxt->in_ondemand_redo = false;    
+    dms_cxt->in_ondemand_redo = false;
     dms_cxt->page_need_retry = false;
+    dms_cxt->enable_page_read_cancel = false;
+    dms_cxt->page_read_cancel_cause = SS_PAGE_READ_CANCEL_NONE;
+    dms_cxt->page_read_cancel_point = SS_PAGE_READ_CANCEL_POINT_UNKNOWN;
 }
 
 static void knl_t_rc_init(knl_t_rc_context* rc_cxt)

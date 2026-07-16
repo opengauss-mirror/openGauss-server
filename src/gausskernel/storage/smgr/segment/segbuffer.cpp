@@ -51,6 +51,25 @@ static const int TEN_MICROSECOND = 10;
 static BufferDesc *SegStrategyGetBuffer(uint64 *buf_state);
 static bool SegStartBufferIO(BufferDesc *buf, bool forInput);
 
+static inline void SSMarkSegPageReadCancel(SSPageReadCancelPoint point)
+{
+    t_thrd.dms_cxt.page_need_retry = true;
+    if (SSNeedExitPageReadInFailover()) {
+        t_thrd.dms_cxt.page_read_cancel_cause = SS_PAGE_READ_CANCEL_SEG_META;
+        t_thrd.dms_cxt.page_read_cancel_point = point;
+    }
+}
+
+static inline void SSErrorSegPageReadCancel(SSPageReadCancelPoint point)
+{
+    SSClearPageReadCancel();
+    ereport(ERROR,
+        (errmodule(MOD_DMS),
+            errmsg("[SS failover] backend thread exits during failover while reading %s, blocking point: %s",
+                SSPageReadCancelCauseName(SS_PAGE_READ_CANCEL_SEG_META),
+                SSPageReadCancelPointName(point))));
+}
+
 extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool do_move);
 extern void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref);
 
@@ -154,6 +173,28 @@ void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint64 set_flag_bit
 
     InProgressBuf = NULL;
     LWLockRelease(buf->io_in_progress_lock);
+}
+
+static inline void SSCancelSegPageReadWithIO(BufferDesc *buf, SSPageReadCancelPoint point)
+{
+    SegTerminateBufferIO(buf, false, 0);
+    SSUnPinBuffer(buf);
+    SSMarkSegPageReadCancel(point);
+}
+
+static bool SSTryCancelSegPageReadWithIO(BufferDesc *buf)
+{
+    if (!SSNeedExitPageReadInFailover()) {
+        return false;
+    }
+    if (SSPageReadCancelEnabled()) {
+        SSCancelSegPageReadWithIO(buf, SS_PAGE_READ_CANCEL_POINT_SEG_FAST_IO_GUARD);
+        return true;
+    }
+    SegTerminateBufferIO(buf, false, 0);
+    SSUnPinBuffer(buf);
+    SSErrorSegPageReadCancel(SS_PAGE_READ_CANCEL_POINT_SEG_FAST_IO_GUARD);
+    return true;
 }
 
 bool SegPinBuffer(BufferDesc *buf)
@@ -585,6 +626,10 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
     BufferDesc *bufHdr = SegBufferAlloc(spc, rnode, forkNum, blockNum, &found);
+    if (bufHdr == NULL) {
+        /* SegBufferAlloc has cleaned victim state; roll back metadata read to segstore. */
+        return InvalidBuffer;
+    }
 
     if (!found) {
         SegmentCheck(!(pg_atomic_read_u64(&bufHdr->state) & BM_VALID));
@@ -607,7 +652,14 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                     found = true;
                     goto found_branch;
                 }
-
+                /* Failover is detected after metadata IO starts; clean IO/pin and roll back upward. */
+                if (SSTryCancelSegPageReadWithIO(bufHdr)) {
+                    return InvalidBuffer;
+                }
+                if (pg_atomic_read_u32(&g_instance.conn_cxt.CurCMAProcCount) >= NUM_CMAGENT_WARN_COUNT &&
+                    u_sess->proc_cxt.clientIsCMAgent) {
+                    ereport(ERROR, (errmsg("worker1 thread which connect with cm_agent are exiting")));
+                }
                 dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
                 LWLockMode lockmode = LW_SHARED;
                 if (!LockModeCompatible(buf_ctrl, lockmode)) {
@@ -615,10 +667,17 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                         SegTerminateBufferIO((BufferDesc *)bufHdr, false, 0);
                         // when reform fail, should return InvalidBuffer to reform proc thread
                         if (SSNeedTerminateRequestPageInReform(buf_ctrl)) {
+                            if (SSPageReadCancelEnabled()) {
+                                SSMarkSegPageReadCancel(SS_PAGE_READ_CANCEL_POINT_START_READ_PAGE);
+                            }
                             SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
-                        if (SSNeedTerminateRequestPageInPrimaryRestart(bufHdr)) {
+                        if (SSNeedTerminateRequestMetaPageInReform(bufHdr)) {
+                            /* Data-page IO waits on this metadata page; return to segstore for cleanup. */
+                            if (SSPageReadCancelEnabled()) {
+                                SSMarkSegPageReadCancel(SS_PAGE_READ_CANCEL_POINT_START_READ_PAGE);
+                            }
                             SSUnPinBuffer(bufHdr);
                             return InvalidBuffer;
                         }
@@ -711,6 +770,7 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
     LWLock *new_partition_lock;
     LWLock *old_partition_lock;
     bool old_flag_valid;
+    bool dmsReleaseFailed = false;
 
     INIT_BUFFERTAG(new_tag, rnode, forkNum, blockNum);
 
@@ -814,6 +874,7 @@ retry:
                     ClearReadHint(buf->buf_id, true);
                     break;
                 }
+                dmsReleaseFailed = true;
             } else {
                 break;
             }
@@ -825,6 +886,16 @@ retry:
         UnlockBufHdr(buf, buf_state);
         LWLockRelease(new_partition_lock);
         SegUnpinBuffer(buf);
+        if (dmsReleaseFailed && SSNeedExitPageReadInFailover()) {
+            /* DmsReleaseOwner failed after victim cleanup; roll back metadata read to caller. */
+            if (SSPageReadCancelEnabled()) {
+                SSMarkSegPageReadCancel(SS_PAGE_READ_CANCEL_POINT_SEG_BUFFER_ALLOC_DMS_RELEASE);
+                *foundPtr = false;
+                return NULL;
+            }
+            SSErrorSegPageReadCancel(SS_PAGE_READ_CANCEL_POINT_SEG_BUFFER_ALLOC_DMS_RELEASE);
+        }
+        dmsReleaseFailed = false;
     }
 
     buf->tag = new_tag;

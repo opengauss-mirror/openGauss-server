@@ -36,6 +36,7 @@
 #include "access/xact.h"
 #include "access/transam.h"
 #include "access/csnlog.h"
+#include "access/nbtree.h"
 #include "access/xlog.h"
 #include "access/multi_redo_api.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
@@ -56,8 +57,48 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "utils/elog.h"
+#ifdef ENABLE_HTAP
+#include "access/htap/imcstore_am.h"
+#include "access/htap/imcucache_mgr.h"
+#include "access/htap/imcs_hash_table.h"
+#endif
+
+extern bool BtRootbufCacheBeginRevoke(const BufferTag *tag);
+extern void BtRootbufCacheEndRevoke(const BufferTag *tag);
+
+XLogRecPtr lastLsn = InvalidXLogRecPtr;
+long long lastDynLogTime = 0;
 
 static void ReleaseResource();
+
+static inline void SSPrintAliveAuxiliaryThread(const char *threadName, ThreadId threadId)
+{
+    if (threadId != 0 && threadId != InvalidTid) {
+        ereport(WARNING, (errmodule(MOD_DMS),
+            errmsg("[SS reform][SS failover] auxiliary thread is still alive, thread name:%s, thread id:%lu",
+                threadName, threadId)));
+    }
+}
+
+static void SSPrintFailoverCleanBackendsTimeoutDiagnostics(int backendNum, long waitTime)
+{
+    ereport(WARNING, (errmodule(MOD_DMS),
+        errmsg("[SS reform][SS failover] failover clean backends timeout, "
+            "backend_num:%d, wait_time:%lds. Start dumping backend and auxiliary thread diagnostics.",
+            backendNum, waitTime / FAILOVER_TIME_CONVERT)));
+
+    /* Print backend-list children that still block no_backend_left. */
+    SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+    /* Statement thread and checkpoint state are not covered by backend-list count. */
+    SSPrintAliveAuxiliaryThread("statement", g_instance.pid_cxt.StatementPID);
+    if (CheckpointInProgress()) {
+        SSPrintAliveAuxiliaryThread("checkpointer", g_instance.pid_cxt.CheckpointerPID);
+    }
+
+    print_all_stack();
+    DumpLWLockInfoToServerLog();
+}
 
 static inline void IniRedoInfo()
 {
@@ -812,11 +853,13 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
 {
     int buf_id = -1;
     BufferTag* tag = (BufferTag *)pageid;
+    BufferTag root_cache_tag = *tag;
     uint32 hash;
     uint64 buf_state;
     int ret = DMS_SUCCESS;
     bool get_lock;
     bool buftag_equal = true;
+    bool rootCacheRevoke = false;
     hash = BufTableHashCode(tag);
     buf_id = BufTableLookup(tag, hash);
     if (buf_id < 0) {
@@ -915,6 +958,7 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
                 break;
             }
 
+            rootCacheRevoke = BtRootbufCacheBeginRevoke(&root_cache_tag);
             get_lock = SSLWLockAcquireTimeout(buf_desc->content_lock, LW_EXCLUSIVE);
             if (!get_lock) {
                 ereport(WARNING, (errmodule(MOD_DMS), errmodule(MOD_DMS), (errmsg("[SS lwlock][%u/%u/%u/%d %d-%u] "
@@ -935,11 +979,15 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
             } else {
                 ReleaseBuffer(buf_id + 1);
             }
-        } while(0);
+        } while (0);
     }
     PG_CATCH();
     {
         t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+        if (rootCacheRevoke) {
+            BtRootbufCacheEndRevoke(&root_cache_tag);
+            rootCacheRevoke = false;
+        }
         /* Save error info */
         ErrorData* edata = CopyErrorData();
         FlushErrorState();
@@ -951,6 +999,10 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
         ret = DMS_ERROR;
     }
     PG_END_TRY();
+
+    if (rootCacheRevoke) {
+        BtRootbufCacheEndRevoke(&root_cache_tag);
+    }
 
     if (ret == DMS_SUCCESS && buftag_equal) {
         Assert(buf_ctrl->lock_mode == DMS_LOCK_NULL);
@@ -1972,14 +2024,12 @@ static void FailoverCleanBackends()
         if (wait_time > maxWaitTime) {
             ereport(WARNING, (errmodule(MOD_DMS),
                 errmsg("[SS reform] [SS failover] failover failed, backends can not exit")));
-            /* check and print some thread which no exit. */
-            SSCountAndPrintChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+            SSPrintFailoverCleanBackendsTimeoutDiagnostics(backendNum, wait_time);
 #ifdef DEBUG
             ereport(PANIC, (errmodule(MOD_DMS),
                 errmsg("[SS reform][SS switchover] primary demote fail, need core in debug mode!")));
 #endif
-            print_all_stack();
-            _exit(0);
+            SSProcessForceExit();
         }
 
         pg_usleep(FAILOVER_PERIOD * REFORM_WAIT_TIME);

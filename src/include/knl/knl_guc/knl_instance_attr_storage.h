@@ -152,6 +152,7 @@ typedef struct knl_instance_attr_storage {
     bool enable_adio_function;
     bool enableIncrementalCheckpoint;
     bool enable_double_write;
+    bool enable_btree_rootbuf_cache;
     bool enable_delta_store;
     bool enableWalLsnCheck;
     bool gucMostAvailableSync;
