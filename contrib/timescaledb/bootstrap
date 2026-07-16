@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+# This bootstrap scripts set up the build environment for TimescaleDB
+# Any flags will be passed on to CMake, e.g.,
+# ./bootstrap -DCMAKE_BUILD_TYPE="Debug"
+
+## Check to make cmake is installed
+if ! command -v cmake >/dev/null 2>&1; then
+	echo "cmake is required to build TimescaleDB. Please install via your system's preferred method."
+	exit 1
+fi
+
+default_build_dir="./build"
+BUILD_DIR="$default_build_dir"
+
+other_args=()
+
+# parse --prefix
+for arg in "$@"; do
+  case $arg in
+    --prefix=*)
+      prefix="${arg#*=}"
+      prefix=$(echo "$prefix" | sed 's:/*$::')
+      BUILD_DIR="${prefix}/build"
+      ;;
+    *)
+      # CMAKE params
+      other_args+=("$arg")
+      ;;
+  esac
+done
+
+BUILD_FORCE_REMOVE=${BUILD_FORCE_REMOVE:-false}
+SRC_DIR=$(dirname $0)
+if [[ ! ${SRC_DIR} == /* ]]; then
+    SRC_DIR=$(pwd)/${SRC_DIR}
+fi
+
+rm -fr ${BUILD_DIR}
+
+set -e
+set -u
+
+mkdir -p ${BUILD_DIR} && \
+    cd ${BUILD_DIR} && \
+    cmake ${SRC_DIR} "${other_args[@]}"
+
+echo "TimescaleDB build system initialized in ${BUILD_DIR}. To compile, do:"
+echo -e "\033[1mcd ${BUILD_DIR} && make\033[0m"

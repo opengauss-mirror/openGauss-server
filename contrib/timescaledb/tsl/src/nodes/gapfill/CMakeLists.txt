@@ -1,0 +1,8 @@
+set(SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/gapfill.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/planner.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/exec.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/locf.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/interpolate.cpp
+)
+target_sources(${TSL_LIBRARY_NAME} PRIVATE ${SOURCES})

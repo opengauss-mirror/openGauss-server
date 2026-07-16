@@ -1,0 +1,1 @@
+./contrib/timescaledb/bootstrap -DUSE_OPENSSL=0 -DREGRESS_CHECKS=OFF -DENABLE_BBOX=ON -DENABLE_MOT=ON -DENABLE_HTAP=ON --prefix=contrib/timescaledb

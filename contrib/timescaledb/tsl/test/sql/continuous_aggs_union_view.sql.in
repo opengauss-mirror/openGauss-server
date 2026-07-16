@@ -1,0 +1,287 @@
+-- This file and its contents are licensed under the Apache License 2.0.
+-- Please see the included NOTICE for copyright information and
+-- LICENSE-APACHE for a copy of the license.
+
+-- disable background workers to make results reproducible
+\c :TEST_DBNAME :ROLE_SUPERUSER
+SELECT _timescaledb_internal.stop_background_workers();
+\c :TEST_DBNAME :ROLE_DEFAULT_PERM_USER
+
+-- look at postgres version to decide whether we run with analyze or without
+SELECT
+  CASE WHEN current_setting('server_version_num')::int >= 100000
+    THEN 'EXPLAIN (analyze, costs off, timing off, summary off)'
+    ELSE 'EXPLAIN (costs off)'
+  END AS "PREFIX"
+\gset
+
+
+CREATE TABLE metrics(f1 int, f2 int, time timestamptz NOT NULL, device_id int, value float);
+SELECT create_hypertable('metrics','time');
+ALTER TABLE metrics DROP COLUMN f1;
+
+INSERT INTO metrics(time, device_id, value) SELECT '2000-01-01'::timestamptz, device_id, 0.5 FROM generate_series(1,3) g(device_id);
+
+--
+-- test switching continuous agg view between different modes
+--
+
+-- check default view for new continuous aggregate
+CREATE VIEW metrics_summary
+  WITH (timescaledb.continuous)
+AS
+  SELECT time_bucket('1d',time), avg(value) FROM metrics GROUP BY 1;
+
+ALTER TABLE metrics DROP COLUMN f2;
+
+-- this should be union view
+SELECT user_view_name, materialized_only FROM _timescaledb_catalog.continuous_agg WHERE user_view_name='metrics_summary';
+SELECT pg_get_viewdef('metrics_summary',true);
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- downgrade view to non-union view
+ALTER VIEW metrics_summary SET (timescaledb.materialized_only=true);
+-- this should be view without union
+SELECT user_view_name, materialized_only FROM _timescaledb_catalog.continuous_agg WHERE user_view_name='metrics_summary';
+SELECT pg_get_viewdef('metrics_summary',true);
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- upgrade view to union view again
+ALTER VIEW metrics_summary SET (timescaledb.materialized_only=false);
+-- this should be union view
+SELECT user_view_name, materialized_only FROM _timescaledb_catalog.continuous_agg WHERE user_view_name='metrics_summary';
+SELECT pg_get_viewdef('metrics_summary',true);
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- try upgrade view to union view that is already union view
+ALTER VIEW metrics_summary SET (timescaledb.materialized_only=false);
+-- this should be union view
+SELECT user_view_name, materialized_only FROM _timescaledb_catalog.continuous_agg WHERE user_view_name='metrics_summary';
+SELECT pg_get_viewdef('metrics_summary',true);
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- refresh
+REFRESH MATERIALIZED VIEW metrics_summary;
+-- result should not change after refresh for union view
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- downgrade view to non-union view
+ALTER VIEW metrics_summary SET (timescaledb.materialized_only=true);
+-- this should be view without union
+SELECT user_view_name, materialized_only FROM _timescaledb_catalog.continuous_agg WHERE user_view_name='metrics_summary';
+SELECT pg_get_viewdef('metrics_summary',true);
+-- view should have results now after refresh
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+DROP VIEW metrics_summary CASCADE;
+
+-- check default view for new continuous aggregate with materialized_only to true
+CREATE VIEW metrics_summary
+  WITH (timescaledb.continuous, timescaledb.materialized_only=true)
+AS
+  SELECT time_bucket('1d',time), avg(value) FROM metrics GROUP BY 1;
+
+-- this should be view without union
+SELECT user_view_name, materialized_only FROM _timescaledb_catalog.continuous_agg WHERE user_view_name='metrics_summary';
+SELECT pg_get_viewdef('metrics_summary',true);
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- upgrade view to union view
+ALTER VIEW metrics_summary SET (timescaledb.materialized_only=false);
+-- this should be union view
+SELECT user_view_name, materialized_only FROM _timescaledb_catalog.continuous_agg WHERE user_view_name='metrics_summary';
+SELECT pg_get_viewdef('metrics_summary',true);
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- downgrade view to non-union view
+ALTER VIEW metrics_summary SET (timescaledb.materialized_only=true);
+-- this should be view without union
+SELECT user_view_name, materialized_only FROM _timescaledb_catalog.continuous_agg WHERE user_view_name='metrics_summary';
+SELECT pg_get_viewdef('metrics_summary',true);
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+DROP VIEW metrics_summary CASCADE;
+
+--
+-- test queries on union view
+--
+
+CREATE VIEW metrics_summary
+  WITH (timescaledb.continuous, timescaledb.materialized_only=true)
+AS
+  SELECT time_bucket('1d',time), avg(value) FROM metrics GROUP BY 1;
+
+-- should be marked as materialized_only in catalog
+SELECT user_view_name, materialized_only FROM _timescaledb_catalog.continuous_agg WHERE user_view_name='metrics_summary';
+
+-- query should not have results since cagg is materialized only and no refresh has happened yet
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+ALTER VIEW metrics_summary SET (timescaledb.materialized_only=false);
+
+-- after switch to union view all results should be returned
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+REFRESH MATERIALIZED VIEW metrics_summary;
+ALTER VIEW metrics_summary SET (timescaledb.materialized_only=true);
+
+-- materialized only view should return data now too because refresh has happened
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- add some more data
+INSERT INTO metrics(time, device_id, value) SELECT '2000-02-01'::timestamptz, device_id, device_id/10.0 FROM generate_series(1,3) g(device_id);
+
+-- materialized only view should not have new data yet
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- but union view should
+ALTER VIEW metrics_summary SET (timescaledb.materialized_only=false);
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- and after refresh non union view should have new data too
+REFRESH MATERIALIZED VIEW metrics_summary;
+ALTER VIEW metrics_summary SET (timescaledb.materialized_only=true);
+SELECT time_bucket,avg FROM metrics_summary ORDER BY 1;
+
+-- hardcoding now to 50 will lead to 30 watermark
+CREATE OR REPLACE FUNCTION boundary_test_int_now()
+  RETURNS INT LANGUAGE SQL STABLE AS
+$BODY$
+  SELECT 50;
+$BODY$;
+
+-- test watermark interaction with just in time aggregates
+CREATE TABLE boundary_test(time int, value float);
+SELECT create_hypertable('boundary_test','time',chunk_time_interval:=10);
+
+SELECT set_integer_now_func('boundary_test','boundary_test_int_now');
+
+CREATE VIEW boundary_view
+  WITH (timescaledb.continuous)
+AS
+  SELECT time_bucket(10,time), avg(value) FROM boundary_test GROUP BY 1;
+
+INSERT INTO boundary_test SELECT i, i*10 FROM generate_series(10,40,10) AS g(i);
+
+-- watermark should be NULL
+SELECT _timescaledb_internal.cagg_watermark(6);
+
+-- first UNION child should have no rows because no materialization has happened yet and 2nd child should have 4 rows
+:PREFIX SELECT * FROM boundary_view;
+
+-- result should have 4 rows
+SELECT * FROM boundary_view ORDER BY time_bucket;
+
+REFRESH MATERIALIZED VIEW boundary_view;
+
+-- watermark should be 30
+SELECT _timescaledb_internal.cagg_watermark(6);
+
+-- both sides of the UNION should return 2 rows
+:PREFIX SELECT * FROM boundary_view;
+
+-- result should have 4 rows
+SELECT * FROM boundary_view ORDER BY time_bucket;
+
+---- TEST union view with WHERE, GROUP BY and HAVING clause ----
+create table ht_intdata (a integer, b integer, c integer);
+select table_name FROM create_hypertable('ht_intdata', 'a', chunk_time_interval=> 10);
+
+INSERT into ht_intdata values( 3 , 16 , 20);
+INSERT into ht_intdata values( 1 , 10 , 20);
+INSERT into ht_intdata values( 1 , 11 , 20);
+INSERT into ht_intdata values( 1 , 12 , 20);
+INSERT into ht_intdata values( 1 , 13 , 20);
+INSERT into ht_intdata values( 1 , 14 , 20);
+INSERT into ht_intdata values( 2 , 14 , 20);
+INSERT into ht_intdata values( 2 , 15 , 20);
+INSERT into ht_intdata values( 2 , 16 , 20);
+INSERT into ht_intdata values( 20 , 16 , 20);
+INSERT into ht_intdata values( 20 , 26 , 20);
+INSERT into ht_intdata values( 20 , 16 , 20);
+INSERT into ht_intdata values( 21 , 15 , 30);
+INSERT into ht_intdata values( 21 , 15 , 30);
+INSERT into ht_intdata values( 21 , 15 , 30);
+
+CREATE OR REPLACE FUNCTION integer_now_ht_intdata() returns int LANGUAGE SQL STABLE as $$ SELECT coalesce(max(a), 0) FROM ht_intdata $$;
+SELECT set_integer_now_func('ht_intdata', 'integer_now_ht_intdata');
+
+
+CREATE OR REPLACE VIEW mat_m1( a, countb, sumbc, spreadcb, avgc )
+WITH (timescaledb.continuous, timescaledb.refresh_lag = 10)
+AS
+SELECT time_bucket(1, a), count(*), sum(b+c), max(c)-min(b), avg(c)::int
+FROM ht_intdata
+WHERE b < 16
+GROUP BY time_bucket(1, a)
+HAVING sum(c) > 50;
+
+REFRESH MATERIALIZED VIEW mat_m1;
+SELECT view_name, completed_threshold from timescaledb_information.continuous_aggregate_stats
+WHERE view_name::text like 'mat_m1';
+
+--results from real time cont.agg and direct query should match
+SELECT time_bucket(1, a), count(*), sum(b+c), max(c)-min(b), avg(c)::int
+FROM ht_intdata
+WHERE b < 16
+GROUP BY time_bucket(1, a)
+HAVING sum(c) > 50
+ORDER BY 1;
+
+SELECT * FROM mat_m1 ORDER BY 1;
+
+--verify that materialized only doesn't have rows with a> 20
+ALTER VIEW mat_m1 SET(timescaledb.materialized_only = true);
+SELECT * FROM mat_m1 ORDER BY 1;
+
+--again revert the view to include real time aggregates
+ALTER VIEW mat_m1 SET(timescaledb.materialized_only = false);
+INSERT into ht_intdata values( 31 , 15 , 30);
+INSERT into ht_intdata values( 31 , 14 , 70);
+--cagg was not refreshed, should include all rows
+SELECT * FROM mat_m1 ORDER BY 1;
+REFRESH MATERIALIZED VIEW mat_m1;
+SELECT view_name, completed_threshold from timescaledb_information.continuous_aggregate_stats
+WHERE view_name::text like 'mat_m1';
+SELECT * FROM mat_m1 ORDER BY 1;
+--the selects against mat_m1 before and after refresh should match this query
+SELECT time_bucket(1, a), count(*), sum(b+c), max(c)-min(b), avg(c)::int
+FROM ht_intdata
+WHERE b < 16
+GROUP BY time_bucket(1, a)
+HAVING sum(c) > 50
+ORDER BY 1;
+
+DROP VIEW mat_m1 cascade;
+
+--- TEST union view with multiple WHERE and HAVING clauses
+CREATE VIEW mat_m1
+WITH (timescaledb.continuous, timescaledb.refresh_lag = 10,
+      timescaledb.max_interval_per_job = 100)
+AS
+SELECT time_bucket(5, a), sum(b+c)
+FROM ht_intdata
+WHERE b < 16 and c > 20
+GROUP BY time_bucket(5, a)
+HAVING sum(c) > 50 and avg(b)::int > 12 ;
+
+INSERT into ht_intdata values( 42 , 15 , 80);
+INSERT into ht_intdata values( 42 , 15 , 18);
+INSERT into ht_intdata values( 41 , 18 , 21);
+
+REFRESH MATERIALIZED VIEW mat_m1;
+
+SELECT view_name, completed_threshold from timescaledb_information.continuous_aggregate_stats
+WHERE view_name::text like 'mat_m1';
+
+--view and direct query should return same results
+SELECT * from mat_m1 ORDER BY 1;
+SELECT time_bucket(5, a), sum(b+c)
+FROM ht_intdata
+WHERE b < 16 and c > 20
+GROUP BY time_bucket(5, a)
+HAVING sum(c) > 50 and avg(b)::int > 12
+ORDER by 1; 
+
+-- plan output
+:PREFIX SELECT * FROM mat_m1 ORDER BY 1;

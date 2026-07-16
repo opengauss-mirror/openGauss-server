@@ -1,0 +1,19 @@
+/*
+ * This file and its contents are licensed under the Apache License 2.0.
+ * Please see the included NOTICE for copyright information and
+ * LICENSE-APACHE for a copy of the license.
+ */
+#ifndef TIMESCALEDB_CONSTRAINT_AWARE_APPEND_H
+#define TIMESCALEDB_CONSTRAINT_AWARE_APPEND_H
+
+#include <postgres.h>
+
+
+typedef struct Hypertable Hypertable;
+
+extern bool ts_constraint_aware_append_possible(Path *path);
+extern Path *ts_constraint_aware_append_path_create(PlannerInfo *root, Hypertable *ht,
+													Path *subpath);
+extern void _constraint_aware_append_init(void);
+
+#endif /* TIMESCALEDB_CONSTRAINT_AWARE_APPEND_H */
