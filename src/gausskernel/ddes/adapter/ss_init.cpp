@@ -37,6 +37,7 @@
 #include "securec.h"
 #include "nodes/pg_list.h"
 #include "storage/buf/bufmgr.h"
+#include "ddes/dms/ss_common_attr.h"
 #include "ddes/dms/ss_init.h"
 #include "ddes/dms/ss_dms_callback.h"
 #include "ddes/dms/ss_dms.h"
@@ -617,6 +618,7 @@ static inline void DMSDfxStatReset(){
     g_instance.dms_cxt.SSDFxStats.txnstatus_total_niogets_time = 0;
     g_instance.dms_cxt.SSDFxStats.txnstatus_total_evictions = 0;
     g_instance.dms_cxt.SSDFxStats.txnstatus_total_eviction_refcnt = 0;
+    SSResetTransactionSyncStatus();
 }
 
 void DMSInit()
@@ -820,4 +822,3 @@ void StartupWaitReform()
         pg_usleep(5000L);
     }
 }
-
