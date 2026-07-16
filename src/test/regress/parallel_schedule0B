@@ -469,3 +469,18 @@ test: pg_compatibility test_index_include
 
 test: alter_trigger
 test: procedure_smp procedure_smp2
+test: index_smp/index_astore_smp_back
+test: index_smp/index_astore_smp_other
+test: index_smp/index_astore_smp
+test: index_smp/index_other_smp
+test: index_smp/index_pcr_ustore_smp_back
+test: index_smp/index_pcr_ustore_smp_other
+test: index_smp/index_pcr_ustore_smp
+test: index_smp/index_ustore_smp_back
+test: index_smp/index_ustore_smp_ext
+test: index_smp/index_ustore_smp_other
+test: index_smp/index_ustore_smp
+test: index_smp/index_vec_smp_back
+test: index_smp/index_vec_smp_other
+test: index_smp/indexonly_astore_smp
+test: index_smp/indexonly_ustore_smp
