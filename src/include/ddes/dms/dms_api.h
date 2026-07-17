@@ -36,7 +36,7 @@ extern "C" {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           178
+#define DMS_LOCAL_VERSION           179
 
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
@@ -110,6 +110,7 @@ typedef enum en_dms_dr_type {
     DMS_DR_TYPE_SS_LINK = 29,
     DMS_DR_TYPE_TX_ALCK = 30,
     DMS_DR_TYPE_SE_ALCK = 31,
+	DMS_DR_TYPE_ROWGROUP = 32,
     DMS_DR_TYPE_MAX,
 } dms_dr_type_t;
 
@@ -534,6 +535,7 @@ typedef enum en_dms_lock_mode {
 typedef enum en_dms_conn_mode {
     DMS_CONN_MODE_TCP = 0,
     DMS_CONN_MODE_RDMA = 1,
+    DMS_CONN_MODE_UBC = 2,
 } dms_conn_mode_t;
 
 typedef enum en_dms_txn_wait_status {
@@ -622,6 +624,8 @@ typedef enum en_dms_wait_event {
     DMS_EVT_PROC_GENERIC_REQ,
     DMS_EVT_PROC_REFORM_REQ,
     DMS_EVT_DCS_TRANSTER_PAGE_LSNDWAIT,
+    DMS_EVT_DCS_INVALID_DRC_LSNDWAIT,
+    DMS_EVT_REQ_IMCSTORE_DELTA,
 
 // add new enum at tail, or make adaptations to openGauss
     DMS_EVT_COUNT,
@@ -787,7 +791,7 @@ typedef struct st_dms_broadcast_info {
     unsigned long long inst_map; /* when scope is DMS_BROADCAST_SPECIFY_LIST, inst_map is used */
     unsigned int timeout;
     unsigned char handle_recv_msg;
-    unsigned char check_session_kill; 
+    unsigned char check_session_kill;
 } dms_broadcast_info_t;
 
 typedef enum en_dms_stat_cmd {
@@ -817,7 +821,7 @@ typedef int(*dms_get_dms_status)(void *db_handle);
 typedef void(*dms_set_dms_status)(void *db_handle, int status);
 typedef int(*dms_confirm_converting)(void *db_handle, char *pageid, unsigned char smon_chk,
     unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn);
-typedef int(*dms_flush_copy)(void *db_handle, char *pageid);
+typedef int(*dms_flush_copy)(void *db_handle, char *pageid, unsigned char thread_index);
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_recovery)(void *db_handle, void *recovery_list, int reform_type, int is_reformer);
 typedef int(*dms_recovery_analyse)(void *db_handle, void *recovery_list, int is_reformer);
@@ -842,15 +846,17 @@ typedef int(*dms_set_buf_load_status)(dms_buf_ctrl_t *dms_ctrl, dms_buf_load_sta
 typedef void(*dms_stats_buf)(void *db_handle, dms_buf_ctrl_t *dms_ctrl, dms_buf_stats_type_e stats_type);
 typedef void(*dms_update_global_lsn)(void *db_handle, unsigned long long lamport_lsn);
 typedef void(*dms_update_global_scn)(void *db_handle, unsigned long long lamport_scn);
-typedef void(*dms_update_node_lfn)(void *db_handle, unsigned char node_id, unsigned long long node_lfn,
-    unsigned long long *node_data, unsigned int len);
+typedef void(*dms_update_node_lfn)(void *db_handle, unsigned char node_id, unsigned long long node_lfn);
+typedef void(*dms_update_node_lfns)(void *db_handle, unsigned long long *node_data, unsigned int len);
+typedef void(*dms_get_node_lfns)(void *db_handle, unsigned long long *node_lfn, unsigned int len);
+typedef void(*dms_update_replay_lfns)(void *db_handle, unsigned long long *node_data, unsigned int len);
+typedef void(*dms_get_replay_lfns)(void *db_handle, unsigned long long *node_data, unsigned int len);
 typedef void(*dms_update_page_lfn)(dms_buf_ctrl_t *dms_ctrl, unsigned long long lastest_lfn);
 typedef unsigned long long (*dms_get_page_lfn)(dms_buf_ctrl_t *dms_ctrl);
 typedef unsigned long long(*dms_get_global_lfn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_scn)(void *db_handle);
 typedef unsigned long long(*dms_get_global_lsn)(void *db_handle);
-typedef void(*dms_get_global_flushed_lfn)(void *db_handle, unsigned char *node_id, unsigned long long *node_lfn,
-    unsigned long long *node_data, unsigned int len);
+typedef void(*dms_get_global_flushed_lfn)(void *db_handle, unsigned char *node_id, unsigned long long *node_lfn);
 typedef int(*dms_read_local_page4transfer)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
     dms_lock_mode_t mode, dms_buf_ctrl_t **dms_ctrl, unsigned long long seq);
 typedef int(*dms_try_read_local_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE],
@@ -860,7 +866,7 @@ typedef void(*dms_leave_local_page)(void *db_handle, dms_buf_ctrl_t *dms_ctrl);
 typedef void(*dms_get_pageid)(dms_buf_ctrl_t *dms_ctrl, char **pageid, unsigned int *size);
 typedef char *(*dms_get_page)(dms_buf_ctrl_t *dms_ctrl);
 typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned char invld_owner,
-    unsigned long long seq);
+    unsigned long long seq, unsigned long long *page_lfn);
 typedef void *(*dms_get_db_handle)(unsigned int *db_handle_index, dms_session_type_e session_type);
 typedef void (*dms_release_db_handle)(void *db_handle);
 typedef char *(*dms_get_wxid_from_cr_cursor)(void *cr_cursor);
@@ -931,7 +937,8 @@ typedef void (*dms_thread_deinit_t)(void);
 typedef int (*dms_get_db_primary_id)(void *db_handle, unsigned int *primary_id);
 typedef int (*dms_opengauss_ondemand_redo_buffer)(void *block_key, int *redo_status);
 typedef int (*dms_opengauss_do_ckpt_immediate)(unsigned long long *ckpt_loc);
-
+typedef void (*dms_reform_check_opengauss)(void *db_handle, unsigned int current_step, unsigned int current_role,
+    long long dyn_log_time);
 // for ssl
 typedef int(*dms_decrypt_pwd_t)(const char *cipher, unsigned int len, char *plain, unsigned int size);
 
@@ -989,14 +996,18 @@ typedef int (*dms_standby_stop_server)(void *db_handle);
 typedef int (*dms_standby_resume_server)(void *db_handle);
 typedef int (*dms_start_lrpl)(void *db_handle, int is_reformer);
 typedef int (*dms_stop_lrpl)(void *db_handle, int is_reformer);
+typedef int (*dms_calibrate_log_file)(void *db_handle);
 typedef int (*dms_az_switchover_demote_phase1)(void *db_handle);
+typedef int (*dms_az_switchover_demote_stop_ckpt)(void *db_handle);
 typedef int (*dms_az_switchover_demote_update_node_ctrl)(void *db_handle, unsigned long long online_list);
 typedef int (*dms_az_switchover_demote_change_role)(void *db_handle);
 typedef int (*dms_az_switchover_demote_approve)(void *db_handle);
 typedef int (*dms_az_switchover_demote_phase2)(void *db_handle);
+typedef int (*dms_az_switchover_promote_prepare)(void *db_handle);
 typedef int (*dms_az_switchover_promote_phase1)(void *db_handle);
 typedef int (*dms_az_switchover_promote_switch_log)(void *db_handle);
 typedef int (*dms_az_switchover_promote_phase2)(void *db_handle);
+typedef int (*dms_az_promote_success)(void *db_handle);
 typedef void (*dms_dyn_log)(void *db_handle, long long dyn_log_time);
 
 typedef int (*dms_invld_alock_ownership)(void *db_handle, char *resid, unsigned char req_mode, unsigned char is_try);
@@ -1008,11 +1019,13 @@ typedef int (*dms_az_failover_promote_resetlog)(void *db_handle);
 typedef int (*dms_az_failover_promote_phase2)(void *db_handle);
 typedef int (*dms_check_shutdown_consistency)(void *db_handle, instance_list_t *old_remove);
 typedef int (*dms_check_db_readwrite)(void *db_handle);
-typedef unsigned int (*dms_check_is_maintain)();
+typedef unsigned int (*dms_check_is_maintain)(void);
 
 typedef dms_session_e(*dms_get_session_type)(unsigned int sid);
 typedef unsigned char(*dms_get_intercept_type)(unsigned int sid);
 typedef unsigned char(*dms_db_in_rollback)(void *db_handle);
+typedef char* (*dms_get_imcstore_delta)(unsigned int tableid, unsigned int rowgroupid,
+    unsigned char *bitmap, unsigned long long *maxSize);
 
 typedef struct st_dms_callback {
     // used in reform
@@ -1108,6 +1121,7 @@ typedef struct st_dms_callback {
     dms_get_opengauss_txn_status get_opengauss_txn_status;
     dms_opengauss_lock_buffer opengauss_lock_buffer;
     dms_opengauss_do_ckpt_immediate opengauss_do_ckpt_immediate;
+    dms_reform_check_opengauss reform_check_opengauss;
     dms_get_txn_snapshot get_txn_snapshot;
     dms_get_opengauss_txn_snapshot get_opengauss_txn_snapshot;
     dms_get_opengauss_txn_of_master get_opengauss_txn_of_master;
@@ -1176,6 +1190,10 @@ typedef struct st_dms_callback {
     dms_get_tlock_mode get_tlock_mode;
     dms_set_current_point set_current_point;
     dms_update_node_lfn update_node_lfn;
+    dms_update_node_lfns update_node_lfns;
+    dms_get_node_lfns get_node_lfns;
+    dms_update_replay_lfns update_replay_lfns;
+    dms_get_replay_lfns get_replay_lfns;
 
     dms_get_db_role get_db_role;
     dms_sync_node_lfn sync_node_lfn;
@@ -1188,16 +1206,20 @@ typedef struct st_dms_callback {
     dms_standby_resume_server standby_resume_server;
     dms_start_lrpl start_lrpl;
     dms_stop_lrpl stop_lrpl;
+    dms_calibrate_log_file calibrate_log_file;
 
     // for az switchover and az failover
     dms_az_switchover_demote_phase1 az_switchover_demote_phase1;
+    dms_az_switchover_demote_stop_ckpt az_switchover_demote_stop_ckpt;
     dms_az_switchover_demote_update_node_ctrl az_switchover_demote_update_node_ctrl;
     dms_az_switchover_demote_change_role az_switchover_demote_change_role;
     dms_az_switchover_demote_approve az_switchover_demote_approve;
     dms_az_switchover_demote_phase2 az_switchover_demote_phase2;
+    dms_az_switchover_promote_prepare az_switchover_promote_prepare;
     dms_az_switchover_promote_phase1 az_switchover_promote_phase1;
     dms_az_switchover_promote_switch_log az_switchover_promote_switch_log;
     dms_az_switchover_promote_phase2 az_switchover_promote_phase2;
+    dms_az_promote_success az_promote_success;
     dms_az_failover_promote_phase1 az_failover_promote_phase1;
     dms_az_failover_promote_resetlog az_failover_promote_resetlog;
     dms_az_failover_promote_phase2 az_failover_promote_phase2;
@@ -1210,6 +1232,7 @@ typedef struct st_dms_callback {
     dms_get_session_type get_session_type;
     dms_get_intercept_type get_intercept_type;
     dms_db_in_rollback db_in_rollback;
+    dms_get_imcstore_delta get_imcstore_delta;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -1332,6 +1355,10 @@ typedef enum en_reform_callback_stat {
     REFORM_CALLBACK_STAT_GET_DATAFILE_SIZE,
     REFORM_CALLBACK_STAT_OPEN_CTRLFILE,
     REFORM_CALLBACK_STAT_GET_CTRLFILE_SIZE,
+    REFORM_CALLBACK_STAT_OPEN_DW_FILE,
+    REFORM_CALLBACK_STAT_READ_DW_FILE,
+    REFORM_CALLBACK_STAT_CHECK_REDO,
+    REFORM_CALLBACK_STAT_SPC_DW_FLUSH,
     REFORM_CALLBACK_STAT_COUNT
 } reform_callback_stat_e;
 

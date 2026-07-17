@@ -3453,6 +3453,7 @@ typedef struct knl_t_dms_context {
     bool enable_page_read_cancel;
     SSPageReadCancelCause page_read_cancel_cause;
     SSPageReadCancelPoint page_read_cancel_point;
+    int* reform_check_status;
 } knl_t_dms_context;
 
 typedef struct knl_t_dms_auxiliary_context {
