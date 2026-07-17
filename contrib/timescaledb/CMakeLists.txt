@@ -115,7 +115,7 @@ if(WIN32)
     DOC "The path to a PostgreSQL installation")
 elseif(UNIX)
   find_path(PG_PATH
-    guassdb
+    gaussdb
     PATHS $ENV{GAUSSHOME}
     PATH_SUFFIXES bin 
     DOC "The path to a PostgreSQL installation")
