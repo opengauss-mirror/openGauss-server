@@ -145,7 +145,7 @@ static Oid binary_upgrade_get_next_part_index_pg_class_rfoid();
 static Oid bupgrade_get_next_psort_pg_class_rfoid();
 
 #ifndef ENABLE_LITE_MODE
-static const int max_hashbucket_index_worker = 32;
+static const int max_hashbucket_index_worker = 128;
 #else
 static const int max_hashbucket_index_worker = 10;
 #endif
