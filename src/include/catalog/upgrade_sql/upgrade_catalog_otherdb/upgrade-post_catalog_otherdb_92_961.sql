@@ -8,6 +8,7 @@ begin
 end;
 /
 
+COMMENT ON TYPE pg_catalog.undefined IS 'undefined objects at PLSQL compilation time';
 COMMENT ON FUNCTION PG_CATALOG.undefinedin() IS 'I/O';
 COMMENT ON FUNCTION PG_CATALOG.undefinedout() IS 'I/O';
 COMMENT ON FUNCTION PG_CATALOG.undefinedrecv() IS 'I/O';
