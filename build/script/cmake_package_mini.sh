@@ -507,6 +507,11 @@ function install_gaussdb()
     [ -d "${BUILD_DIR}" ] && rm -rf ${BUILD_DIR}
     mkdir -p ${CMAKE_BUILD_DIR}
     cd ${CMAKE_BUILD_DIR}
+    # openEuler 24.03+: system cmake needs newer libstdc++ than binarylibs gcc10.3.
+    if [ -d /usr/lib64 ] && ! cmake --version >/dev/null 2>&1; then
+        export LD_LIBRARY_PATH="/usr/lib64:${LD_LIBRARY_PATH}"
+        echo "Prepended /usr/lib64 to LD_LIBRARY_PATH for system cmake" >> "$LOG_FILE" 2>&1
+    fi
     cmake .. ${CMAKE_OPT}
     echo "Begin make and install gaussdb server" >> "$LOG_FILE" 2>&1
     make VERBOSE=1 -sj ${cpus_num}

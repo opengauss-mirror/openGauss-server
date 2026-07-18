@@ -107,6 +107,12 @@ function make_gaussdb_kernel()
     export GAUSSHOME=${BUILD_DIR}
     export LD_LIBRARY_PATH=${BUILD_DIR}/lib:${BUILD_DIR}/lib/postgresql:${LD_LIBRARY_PATH}
 
+    # openEuler 24.03+: system cmake needs newer libstdc++ than binarylibs gcc10.3.
+    if [ -d /usr/lib64 ] && ! cmake --version >/dev/null 2>&1; then
+        export LD_LIBRARY_PATH="/usr/lib64:${LD_LIBRARY_PATH}"
+        echo "Prepended /usr/lib64 to LD_LIBRARY_PATH for system cmake" >> "$LOG_FILE" 2>&1
+    fi
+
     [ -d "${CMAKE_BUILD_DIR}" ] && rm -rf ${CMAKE_BUILD_DIR}
     [ -d "${BUILD_DIR}" ] && rm -rf ${BUILD_DIR}
     mkdir -p ${CMAKE_BUILD_DIR}
@@ -126,6 +132,15 @@ function make_gaussdb_kernel()
     fi
 
     echo "End make install gaussdb server" >> "$LOG_FILE" 2>&1
+
+    LIBOG_QUERY_DIR=$ROOT_DIR/src/bin/libog_query
+    if [ -d $LIBOG_QUERY_DIR ]; then
+        cd $LIBOG_QUERY_DIR
+        sh build.sh >> "$LOG_FILE" 2>&1 || die "build libog_query failed."
+        [ -f libog_query.so ] || die "libog_query.so was not generated."
+        cp libog_query.so ${BUILD_DIR}/lib/postgresql/libog_query.so || die "install libog_query.so failed."
+        echo "End make install libog_query" >> "$LOG_FILE" 2>&1
+    fi
 }
 
 #######################################################################
