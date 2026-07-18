@@ -62,6 +62,10 @@
 /* Define to build with PYTHON support. (--with-python) */
 #cmakedefine ENABLE_PYTHON2
 #cmakedefine ENABLE_PYTHON3
+#define PYTHON_CMP_MAJOR_VERSION @PYTHON_CMP_MAJOR_VERSION@
+#define PYTHON_CMP_MINOR_VERSION @PYTHON_CMP_MINOR_VERSION@
+#define PYTHON_CMP_PYMALLOC 0 
+#define PYTHON_LIB_NAME @PYTHON_LIB_NAME@
 
 /* Define to 1 if you want National Language Support. (--enable-nls) */
 #cmakedefine ENABLE_NLS 1

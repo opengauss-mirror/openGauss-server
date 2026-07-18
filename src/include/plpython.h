@@ -161,7 +161,9 @@ extern PlyGlobalsCtx* g_ply_ctx;     /* save instance level objects */
 extern const bool ENABLE_PLPY;
 
 #include <compile.h>
+#if PY_VERSION_HEX < 0x03080000
 #include <eval.h>
+#endif
 
 /* put back our snprintf and vsnprintf */
 #ifdef USE_REPL_SNPRINTF

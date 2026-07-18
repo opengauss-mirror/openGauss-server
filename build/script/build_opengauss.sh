@@ -182,7 +182,6 @@ else
     if [ "$block_size" == "4096" ]; then
         CMAKE_OPT="$CMAKE_OPT -DENABLE_BLCKSZ_4K=ON"
     fi
-
     echo "CMAKE_OPT----> $CMAKE_OPT"
     echo "[cmake options] cmake options is:${CMAKE_OPT}" >> "$LOG_FILE" 2>&1
     source $SCRIPT_DIR/utils/cmake_compile.sh || exit 1

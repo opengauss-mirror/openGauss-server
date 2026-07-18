@@ -199,6 +199,7 @@ enable_htap  = @enable_htap@
 
 python_includespec	= @python_includespec@
 python_libdir		= @python_libdir@
+python_bindir       = @python_bindir@
 python_libspec		= @python_libspec@
 python_additional_libs	= @python_additional_libs@
 python_configdir	= @python_configdir@
@@ -747,7 +748,8 @@ else # not PGXS
   endif  
 endif
 
-override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(ZSTD_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -I$(AWSSDK_INCLUDE_PATH) -I$(DCF_INCLUDE_PATH) $(python_includespec)
+override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(ZSTD_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -I$(AWSSDK_INCLUDE_PATH) -I$(DCF_INCLUDE_PATH) 
+#$(python_includespec)
 
 # GDS links to libevent
 ifeq ($(enable_multiple_nodes), yes)
@@ -964,8 +966,9 @@ else
   ETCD_HOME = $(with_3rd)/$(BINARYPATH)/etcd/comm
 endif
 
-LDFLAGS += -L$(python_libdir)
-
+ifneq ($(strip $(python_libdir)),)
+  LDFLAGS += -L$(python_libdir)
+endif
 #############################################################################
 # libtinfo component
 #############################################################################
