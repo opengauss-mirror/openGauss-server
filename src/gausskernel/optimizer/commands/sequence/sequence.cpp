@@ -4837,6 +4837,10 @@ bool is_global_level_sequence_cache(Oid relid)
     key.relid = relid;
     hashCode = GSCHashFunc<GSCOid2LevelKey>((const void*)&key, sizeof(GSCOid2LevelKey));
 
+    if (!OidIsValid(relid)) {
+        return false;
+    }
+
     /* first attempt use read lock to retrieve the mapping result from oid to cache level */
     (void)LWLockAcquire(g_instance.oid_map_lock, LW_SHARED);
     entry = (GSCOid2LevelEntry*)hash_search_with_hash_value(g_instance.relid2cachelevel, (const void*)(&key), hashCode,
