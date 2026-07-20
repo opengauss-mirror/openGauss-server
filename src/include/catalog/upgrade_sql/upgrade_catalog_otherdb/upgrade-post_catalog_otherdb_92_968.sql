@@ -91,7 +91,7 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8487;
 CREATE OR REPLACE FUNCTION pg_catalog.bm25_scores_textarr(_text, _text)
  RETURNS double precision
  LANGUAGE internal
- IMMUTABLE STRICT NOT FENCED NOT SHIPPABLE
+ IMMUTABLE NOT FENCED NOT SHIPPABLE
 AS 'bm25_scores_textarr';
 
 DROP FUNCTION if EXISTS pg_catalog.bm25_scores_text(text, text) CASCADE;
@@ -99,7 +99,7 @@ SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 8489;
 CREATE OR REPLACE FUNCTION pg_catalog.bm25_scores_text(text, text)
  RETURNS double precision
  LANGUAGE internal
- IMMUTABLE STRICT NOT FENCED NOT SHIPPABLE
+ IMMUTABLE NOT FENCED NOT SHIPPABLE
 AS 'bm25_scores_text';
 
 COMMENT ON FUNCTION pg_catalog.bm25build(internal, internal, internal) IS 'NULL';
