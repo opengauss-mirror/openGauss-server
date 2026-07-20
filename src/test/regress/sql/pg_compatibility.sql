@@ -1,6 +1,12 @@
 -- pg compatibility case
 drop database if exists pg_type_databse;
+drop database if exists a_mod_zero_database;
+drop database if exists b_mod_zero_database;
+drop database if exists c_mod_zero_database;
 create database pg_type_databse dbcompatibility 'PG';
+create database a_mod_zero_database dbcompatibility 'A';
+create database b_mod_zero_database dbcompatibility 'B';
+create database c_mod_zero_database dbcompatibility 'C';
 
 \c pg_type_databse
 create table d_format_test(a varchar(10) not null);
@@ -46,3 +52,33 @@ select int4mod(3, 0);
 select int8mod(3, 0);
 select numeric_mod(1234.5678,0.0);
 select '10'::interval;
+
+\c a_mod_zero_database
+select 5 % 0;
+select int1mod(3, 0);
+select int2mod(3, 0);
+select int4mod(3, 0);
+select int8mod(3, 0);
+select numeric_mod(1234.5678,0.0);
+
+\c b_mod_zero_database
+select 5 % 0;
+select int1mod(3, 0);
+select int2mod(3, 0);
+select int4mod(3, 0);
+select int8mod(3, 0);
+select numeric_mod(1234.5678,0.0);
+
+\c c_mod_zero_database
+select 5 % 0;
+select int1mod(3, 0);
+select int2mod(3, 0);
+select int4mod(3, 0);
+select int8mod(3, 0);
+select numeric_mod(1234.5678,0.0);
+
+\c regression
+drop database pg_type_databse;
+drop database a_mod_zero_database;
+drop database b_mod_zero_database;
+drop database c_mod_zero_database;
