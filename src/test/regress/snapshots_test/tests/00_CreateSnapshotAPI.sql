@@ -119,6 +119,9 @@ BEGIN
         'direct call to db4ai.create_snapshot_internal(bigint,name,name,text[],text,name) is not allowed',
         'call public interface db4ai.create_snapshot instead');
 
+    -- quotes in comments must remain data and must not alter the dynamic COMMENT statement
+    PERFORM db4ai.create_snapshot(null, 'comment_quote', '{Select 1 a, FROM dual}', NULL, 'owner''s comment');
+
     SET db4ai_snapshot_mode = 8;
     PERFORM _db4ai_test.assert_exception('db4ai.create_snapshot(null, ''test'', ''{Select 1 a, FROM dual}'')',
         'invalid snapshot mode: ''8''');

@@ -519,6 +519,7 @@ BEGIN
     IF ans = true THEN
         DROP SEQUENCE IF EXISTS db4ai.snapshot_sequence;
         CREATE SEQUENCE IF NOT EXISTS db4ai.snapshot_sequence;
-        GRANT UPDATE ON db4ai.snapshot_sequence TO PUBLIC;
+        REVOKE UPDATE ON SEQUENCE db4ai.snapshot_sequence FROM PUBLIC;
+        GRANT USAGE ON SEQUENCE db4ai.snapshot_sequence TO PUBLIC;
     END IF;
 END$$;

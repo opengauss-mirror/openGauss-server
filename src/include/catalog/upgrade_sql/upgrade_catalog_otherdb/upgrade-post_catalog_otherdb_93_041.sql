@@ -29,7 +29,7 @@ BEGIN
         IF CURRENT_SCHEMA = 'db4ai' THEN
             e_stack_act := pg_catalog.replace(e_stack_act, 'ion cre', 'ion db4ai.cre');
         END IF;
-        
+
         IF e_stack_act NOT LIKE E'referenced column: create_snapshot_internal\n'
             'SQL statement "SELECT db4ai.create_snapshot_internal(s_id, i_schema, i_name, i_commands, i_comment, CURRENT_USER)"\n'
             'PL/pgSQL function db4ai.create_snapshot(name,name,text[],name,text) line 302 at PERFORM%'
@@ -147,8 +147,10 @@ BEGIN
     EXECUTE 'COMMENT ON TABLE db4ai.t' || s_id::TEXT || ' IS ''snapshot backing table, root is ' || pg_catalog.quote_ident(i_schema)
         || '.' || pg_catalog.quote_ident(i_name) || '''';
     EXECUTE 'CREATE VIEW db4ai.v' || s_id::TEXT || ' WITH(security_barrier) AS SELECT ' || i_commands[5] || ', xc_node_id, ctid FROM db4ai.t' || s_id::TEXT;
-    EXECUTE 'COMMENT ON VIEW db4ai.v' || s_id::TEXT || ' IS ''snapshot ' || pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name)
-        || ' backed by db4ai.t' || s_id::TEXT || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END || '''';
+    EXECUTE 'COMMENT ON VIEW db4ai.v' || s_id::TEXT || ' IS ' || pg_catalog.quote_literal(
+        'snapshot ' || pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name)
+        || ' backed by db4ai.t' || s_id::TEXT
+        || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END);
     EXECUTE 'GRANT SELECT ON db4ai.v' || s_id::TEXT || ' TO "' || i_owner || '" WITH GRANT OPTION';
     EXECUTE 'SELECT COUNT(*) FROM db4ai.v' || s_id::TEXT INTO STRICT row_count;
 
@@ -167,7 +169,7 @@ CREATE OR REPLACE FUNCTION db4ai.create_snapshot(
     IN i_vers NAME DEFAULT NULL,    -- override version postfix
     IN i_comment TEXT DEFAULT NULL  -- snapshot description
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
     s_id BIGINT;                    -- snapshot id
@@ -476,8 +478,9 @@ BEGIN
 
     -- create custom view, owned by current user
     EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT ' || proj_cmd || ' FROM db4ai.v' || s_id::TEXT;
-    EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id::TEXT
-        || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END || '''';
+    EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ' || pg_catalog.quote_literal(
+        'snapshot view backed by db4ai.v' || s_id::TEXT
+        || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END);
     EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER::TEXT || '"';
 
     -- return final snapshot name
@@ -528,8 +531,8 @@ BEGIN
             e_stack_act := pg_catalog.substr(e_stack_act, 200);
         END IF;
 
-        IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (209|575|641|748) at assignment%'
-          AND e_stack_act NOT LIKE 'PL/pgSQL function db4ai.sample_snapshot(name,name,name[],numeric[],name[],text[]) line 264 at IF%'
+        IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (221|587|653|760) at assignment%'
+          AND e_stack_act NOT LIKE 'PL/pgSQL function db4ai.sample_snapshot(name,name,name[],numeric[],name[],text[]) line 276 at IF%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.prepare_snapshot_internal(bigint,bigint,bigint,bigint,name,name,text[],text,name,'
                             'int,text[],name[]) is not allowed'
@@ -622,15 +625,16 @@ BEGIN
     EXECUTE 'DROP RULE IF EXISTS _INSERT ON db4ai.v' || s_id::TEXT;
     EXECUTE 'DROP RULE IF EXISTS _UPDATE ON db4ai.v' || s_id::TEXT;
     EXECUTE 'DROP RULE IF EXISTS _DELETE ON db4ai.v' || s_id::TEXT;
-    EXECUTE 'COMMENT ON VIEW db4ai.v' || s_id::TEXT || ' IS ''snapshot ' || pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name)
-        || ' backed by db4ai.t' || coalesce(m_id, s_id)::TEXT || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment
-        || '"' ELSE '' END || '''';
+    EXECUTE 'COMMENT ON VIEW db4ai.v' || s_id::TEXT || ' IS ' || pg_catalog.quote_literal(
+        'snapshot ' || pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name)
+        || ' backed by db4ai.t' || coalesce(m_id, s_id)::TEXT
+        || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END);
     EXECUTE 'REVOKE ALL PRIVILEGES ON db4ai.v' || s_id::TEXT || ' FROM "' || i_owner || '"';
     EXECUTE 'GRANT SELECT ON db4ai.v' || s_id::TEXT || ' TO "' || i_owner || '" WITH GRANT OPTION';
     EXECUTE 'SELECT COUNT(*) FROM db4ai.v' || s_id::TEXT INTO STRICT row_count;
 
     INSERT INTO db4ai.snapshot (id, parent_id, matrix_id, root_id, schema, name, owner, commands, comment, row_count)
-        VALUES (s_id, p_id, m_id, r_id, i_schema, i_name, '"' || i_owner || '"', i_commands, i_comment, row_count);
+        VALUES (s_id, p_id, m_id, r_id, i_schema, i_name, i_owner, i_commands, i_comment, row_count);
 
 END;
 $$;
@@ -642,7 +646,7 @@ CREATE OR REPLACE FUNCTION db4ai.prepare_snapshot(
     IN i_vers NAME DEFAULT NULL,   -- override version postfix
     IN i_comment TEXT DEFAULT NULL -- description of this unit of data curation
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
     s_id BIGINT;                                                -- snapshot id
@@ -668,6 +672,7 @@ DECLARE
     DELETE_OP INT := 3;                                         -- DELETE operation class
     UPDATE_OP INT := 4;                                         -- UPDATE operation class
     adminuser BOOLEAN;                                          -- current user privileges
+    effective_user NAME;                                        -- current effective role, evaluated per call
     vers_arr INT[];                                             -- split version digits
     exec_cmds TEXT[];                                           -- commands for execution
     qual_name TEXT;                                             -- qualified snapshot name
@@ -686,6 +691,8 @@ DECLARE
     newmap BOOLEAN := FALSE;                                    -- mapping has changed
     res db4ai.snapshot_name;                                    -- composite result
 BEGIN
+
+    EXECUTE 'SELECT CURRENT_USER::NAME' INTO STRICT effective_user;
 
     -- obtain active message level
     BEGIN
@@ -770,6 +777,15 @@ BEGIN
     EXCEPTION WHEN NO_DATA_FOUND THEN
         RAISE EXCEPTION 'parent snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
     END;
+
+    IF NOT pg_catalog.has_table_privilege(
+        effective_user,
+        pg_catalog.quote_ident(i_schema)::TEXT || '.' || pg_catalog.quote_ident(i_parent)::TEXT,
+        'SELECT')
+    THEN
+        RAISE EXCEPTION 'permission denied for parent snapshot %.%',
+            pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
+    END IF;
 
     --SELECT nextval('db4ai.snapshot_sequence') ==> -1 at first time fetch
     SELECT nextval('db4ai.snapshot_sequence') + 1 INTO STRICT s_id;
@@ -1401,8 +1417,9 @@ ELSE
     END LOOP;
     -- create custom view, owned by current user
     EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT '|| pg_catalog.rtrim(s_uv_proj, ',') || ' FROM db4ai.v' || s_id::TEXT;
-    EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id::TEXT
-        || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END || '''';
+    EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ' || pg_catalog.quote_literal(
+        'snapshot view backed by db4ai.v' || s_id::TEXT
+        || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END);
     EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER || '"';
 
     -- return final snapshot name
@@ -1418,7 +1435,7 @@ CREATE OR REPLACE FUNCTION db4ai.manage_snapshot_internal(
     IN i_name NAME,     -- snapshot name
     IN publish BOOLEAN  -- publish or archive
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
     s_mode VARCHAR(3);                  -- current snapshot mode
@@ -1440,7 +1457,7 @@ BEGIN
             e_stack_act := pg_catalog.replace(e_stack_act, ' publish_snapshot(', ' db4ai.publish_snapshot(');
         END IF;
 
-        IF e_stack_act NOT SIMILAR TO '%PL/pgSQL function db4ai.(archive|publish)_snapshot\(name,name\) line 27 at assignment%'
+        IF e_stack_act NOT SIMILAR TO '%PL/pgSQL function db4ai.(archive|publish)_snapshot\(name,name\) line 39 at assignment%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.manage_snapshot_internal(name,name,boolean) is not allowed'
             USING HINT = 'call public interface db4ai.(publish|archive)_snapshot instead';
@@ -1512,12 +1529,15 @@ CREATE OR REPLACE FUNCTION db4ai.archive_snapshot(
     IN i_schema NAME,           -- snapshot namespace, default is CURRENT_USER
     IN i_name NAME              -- snapshot name
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
     adminuser BOOLEAN;          -- current user privileges
+    effective_user NAME;        -- current effective role, evaluated per call
     res db4ai.snapshot_name;    -- composite result
 BEGIN
+
+    EXECUTE 'SELECT CURRENT_USER::NAME' INTO STRICT effective_user;
 
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
@@ -1537,6 +1557,15 @@ BEGIN
             RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
         END IF;
     END;
+
+    IF EXISTS (SELECT 1 FROM db4ai.snapshot WHERE schema = i_schema AND name = i_name)
+       AND NOT EXISTS (SELECT 1 FROM db4ai.snapshot
+                       WHERE schema = i_schema AND name = i_name
+                         AND owner::TEXT IN (effective_user::TEXT, '"' || effective_user::TEXT || '"'))
+    THEN
+        RAISE EXCEPTION 'permission denied for snapshot %.%',
+            pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
+    END IF;
 
     -- return archived snapshot name
     res := db4ai.manage_snapshot_internal(i_schema, i_name, FALSE);
@@ -1550,12 +1579,15 @@ CREATE OR REPLACE FUNCTION db4ai.publish_snapshot(
     IN i_schema NAME,           -- snapshot namespace, default is CURRENT_USER or PUBLIC
     IN i_name NAME              -- snapshot name
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
     adminuser BOOLEAN;          -- current user privileges
+    effective_user NAME;        -- current effective role, evaluated per call
     res db4ai.snapshot_name;    -- composite result
 BEGIN
+
+    EXECUTE 'SELECT CURRENT_USER::NAME' INTO STRICT effective_user;
 
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
@@ -1575,6 +1607,15 @@ BEGIN
             RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
         END IF;
     END;
+
+    IF EXISTS (SELECT 1 FROM db4ai.snapshot WHERE schema = i_schema AND name = i_name)
+       AND NOT EXISTS (SELECT 1 FROM db4ai.snapshot
+                       WHERE schema = i_schema AND name = i_name
+                         AND owner::TEXT IN (effective_user::TEXT, '"' || effective_user::TEXT || '"'))
+    THEN
+        RAISE EXCEPTION 'permission denied for snapshot %.%',
+            pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
+    END IF;
 
     -- return published snapshot name
     res := db4ai.manage_snapshot_internal(i_schema, i_name, TRUE);
@@ -1612,7 +1653,7 @@ BEGIN
 
         IF e_stack_act NOT LIKE 'referenced column: purge_snapshot_internal
 SQL statement "SELECT db4ai.purge_snapshot_internal(i_schema, i_name)"
-PL/pgSQL function db4ai.purge_snapshot(name,name) line 87 at PERFORM%'
+PL/pgSQL function db4ai.purge_snapshot(name,name) line 99 at PERFORM%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.purge_snapshot_internal(name,name) is not allowed'
             USING HINT = 'call public interface db4ai.purge_snapshot instead';
@@ -1682,10 +1723,11 @@ CREATE OR REPLACE FUNCTION db4ai.purge_snapshot(
     IN i_schema NAME,    -- snapshot namespace, default is CURRENT_USER or PUBLIC
     IN i_name NAME       -- snapshot name
 )
-RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
+RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
     adminuser BOOLEAN;              -- current user privileges
+    effective_user NAME;            -- current effective role, evaluated per call
     s_mode VARCHAR(3);              -- current snapshot mode
     s_vers_del CHAR;                -- snapshot version delimiter, default '@'
     s_vers_sep CHAR;                -- snapshot version separator, default '.'
@@ -1694,6 +1736,8 @@ DECLARE
     none_represent INT;             -- 0 or NULL
     res db4ai.snapshot_name;        -- composite result
 BEGIN
+
+    EXECUTE 'SELECT CURRENT_USER::NAME' INTO STRICT effective_user;
 
     -- obtain active message level
     BEGIN
@@ -1764,6 +1808,15 @@ BEGIN
         END IF;
     END IF;
 
+    IF EXISTS (SELECT 1 FROM db4ai.snapshot WHERE schema = i_schema AND name = i_name)
+       AND NOT EXISTS (SELECT 1 FROM db4ai.snapshot
+                       WHERE schema = i_schema AND name = i_name
+                         AND owner::TEXT IN (effective_user::TEXT, '"' || effective_user::TEXT || '"'))
+    THEN
+        RAISE EXCEPTION 'permission denied for snapshot %.%',
+            pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
+    END IF;
+
     BEGIN
         EXECUTE 'DROP VIEW ' || pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name);
     EXCEPTION WHEN OTHERS THEN
@@ -1786,7 +1839,7 @@ CREATE OR REPLACE FUNCTION db4ai.sample_snapshot(
     IN i_stratify NAME[] DEFAULT NULL,       -- stratification fields
     IN i_sample_comments TEXT[] DEFAULT NULL -- sample snapshot descriptions
 )
-RETURNS SETOF db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER
+RETURNS SETOF db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
     s_id BIGINT;                    -- snapshot id
@@ -1794,6 +1847,7 @@ DECLARE
     m_id BIGINT;                    -- matrix id
     r_id BIGINT;                    -- root id
     adminuser BOOLEAN;              -- current user privilieges
+    effective_user NAME;            -- current effective role, evaluated per call
     s_mode VARCHAR(3);              -- current snapshot mode
     s_vers_del CHAR;                -- snapshot version delimiter, default '@'
     s_vers_sep CHAR;                -- snapshot version separator, default '.'
@@ -1811,6 +1865,8 @@ DECLARE
     none_represent INT;             -- 0 or NULL
     s_name db4ai.snapshot_name;     -- snapshot sample name
 BEGIN
+
+    EXECUTE 'SELECT CURRENT_USER::NAME' INTO STRICT effective_user;
 
     -- obtain active message level
     BEGIN
@@ -1911,6 +1967,15 @@ BEGIN
     EXCEPTION WHEN NO_DATA_FOUND THEN
         RAISE EXCEPTION 'parent snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
     END;
+
+    IF NOT pg_catalog.has_table_privilege(
+        effective_user,
+        pg_catalog.quote_ident(i_schema)::TEXT || '.' || pg_catalog.quote_ident(i_parent)::TEXT,
+        'SELECT')
+    THEN
+        RAISE EXCEPTION 'permission denied for parent snapshot %.%',
+            pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
+    END IF;
 
     IF i_sample_infixes IS NULL OR pg_catalog.array_length(i_sample_infixes, 1) = none_represent OR pg_catalog.array_length(i_sample_infixes, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_sample_infixes array malformed'
@@ -2060,8 +2125,9 @@ BEGIN
 
         -- create custom view, owned by current user
         EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT ' || pg_catalog.rtrim(s_uv_proj, ',') || ' FROM db4ai.v' || s_id::TEXT;
-        EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id::TEXT
-            || CASE WHEN pg_catalog.length(i_sample_comments[i]) > 0 THEN ' comment is "' || i_sample_comments[i] || '"' ELSE '' END || '''';
+        EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ' || pg_catalog.quote_literal(
+            'snapshot view backed by db4ai.v' || s_id::TEXT
+            || CASE WHEN pg_catalog.length(i_sample_comments[i]) > 0 THEN ' comment is "' || i_sample_comments[i] || '"' ELSE '' END);
         EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER || '"';
 
         exec_cmds := NULL;
@@ -2073,4 +2139,5 @@ END;
 $$;
 
 REVOKE ALL PRIVILEGES ON db4ai.snapshot FROM PUBLIC;
-GRANT SELECT ON db4ai.snapshot TO PUBLIC;
+REVOKE UPDATE ON SEQUENCE db4ai.snapshot_sequence FROM PUBLIC;
+GRANT USAGE ON SEQUENCE db4ai.snapshot_sequence TO PUBLIC;

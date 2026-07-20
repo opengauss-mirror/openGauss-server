@@ -49,7 +49,7 @@ BEGIN
             e_stack_act := pg_catalog.replace(e_stack_act, ' publish_snapshot(', ' db4ai.publish_snapshot(');
         END IF;
 
-        IF e_stack_act NOT SIMILAR TO '%PL/pgSQL function db4ai.(archive|publish)_snapshot\(name,name\) line 27 at assignment%'
+        IF e_stack_act NOT SIMILAR TO '%PL/pgSQL function db4ai.(archive|publish)_snapshot\(name,name\) line 39 at assignment%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.manage_snapshot_internal(name,name,boolean) is not allowed'
             USING HINT = 'call public interface db4ai.(publish|archive)_snapshot instead';
@@ -125,8 +125,11 @@ RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_mes
 AS $$
 DECLARE
     adminuser BOOLEAN;          -- current user privileges
+    effective_user NAME;        -- current effective role, evaluated per call
     res db4ai.snapshot_name;    -- composite result
 BEGIN
+
+    EXECUTE 'SELECT CURRENT_USER::NAME' INTO STRICT effective_user;
 
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
@@ -141,11 +144,20 @@ BEGIN
     END IF;
 
     BEGIN
-        EXECUTE 'SELECT rolsystemadmin FROM pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
+        EXECUTE 'SELECT rolsystemadmin FROM pg_catalog.pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
         IF adminuser IS FALSE THEN
             RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
         END IF;
     END;
+
+    IF EXISTS (SELECT 1 FROM db4ai.snapshot WHERE schema = i_schema AND name = i_name)
+       AND NOT EXISTS (SELECT 1 FROM db4ai.snapshot
+                       WHERE schema = i_schema AND name = i_name
+                         AND owner::TEXT IN (effective_user::TEXT, '"' || effective_user::TEXT || '"'))
+    THEN
+        RAISE EXCEPTION 'permission denied for snapshot %.%',
+            pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
+    END IF;
 
     -- return archived snapshot name
     res := db4ai.manage_snapshot_internal(i_schema, i_name, FALSE);
@@ -163,8 +175,11 @@ RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_mes
 AS $$
 DECLARE
     adminuser BOOLEAN;          -- current user privileges
+    effective_user NAME;        -- current effective role, evaluated per call
     res db4ai.snapshot_name;    -- composite result
 BEGIN
+
+    EXECUTE 'SELECT CURRENT_USER::NAME' INTO STRICT effective_user;
 
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
@@ -179,11 +194,20 @@ BEGIN
     END IF;
 
     BEGIN
-        EXECUTE 'SELECT rolsystemadmin FROM pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
+        EXECUTE 'SELECT rolsystemadmin FROM pg_catalog.pg_roles WHERE rolname=CURRENT_USER' INTO STRICT adminuser;
         IF adminuser IS FALSE THEN
             RAISE EXCEPTION 'In the current version, the DB4AI.SNAPSHOT feature is available only to administrators.';
         END IF;
     END;
+
+    IF EXISTS (SELECT 1 FROM db4ai.snapshot WHERE schema = i_schema AND name = i_name)
+       AND NOT EXISTS (SELECT 1 FROM db4ai.snapshot
+                       WHERE schema = i_schema AND name = i_name
+                         AND owner::TEXT IN (effective_user::TEXT, '"' || effective_user::TEXT || '"'))
+    THEN
+        RAISE EXCEPTION 'permission denied for snapshot %.%',
+            pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
+    END IF;
 
     -- return published snapshot name
     res := db4ai.manage_snapshot_internal(i_schema, i_name, TRUE);
